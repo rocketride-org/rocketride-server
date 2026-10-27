@@ -28,10 +28,15 @@
  * tries to close itself on success (no redirect), and explains a failure.
  */
 
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import * as fs from 'fs';
 import * as path from 'path';
-import { CALLBACK_PALETTES, renderCallbackPage, webAppUrlFor } from '../src/cli/commands/auth';
+import { authorizeViaLoopback, CALLBACK_PALETTES, renderCallbackPage, webAppUrlFor } from '../src/cli/commands/auth';
+import { Output } from '../src/cli/output';
+
+afterEach(() => {
+	jest.restoreAllMocks();
+});
 
 /** The inline script's body ('' when the page has none). */
 const scriptOf = (page: string): string => /<script>([\s\S]*)<\/script>/.exec(page)?.[1] ?? '';
@@ -77,17 +82,76 @@ describe('renderCallbackPage', () => {
 		expect(page).toContain('<span>RocketRide</span>');
 		expect(page).not.toContain('<script>');
 	});
+
+	it('waitlisted: the access-queue notice, the web app link, no close attempt', () => {
+		const page = renderCallbackPage({ ok: true, webUrl: 'https://rocketride.ai/', waitlisted: true });
+
+		expect(page).toContain("<h1>You're on the list</h1>");
+		expect(page).not.toContain("You're signed in");
+		expect(page).toContain('<a class="btn" href="https://rocketride.ai/">Open RocketRide</a>');
+		expect(page).not.toContain('<script>');
+	});
+});
+
+describe('authorizeViaLoopback', () => {
+	/** Starts a loopback sign-in whose "browser" follows the redirect with the given query. */
+	const follow = async (query: string) => {
+		jest.spyOn(console, 'log').mockImplementation(() => undefined);
+		let page: Promise<string> = Promise.resolve('');
+		const grant = authorizeViaLoopback('https://idp.test', 'client', 'challenge', new Output(undefined), (authorizeUrl) => {
+			const redirectUri = new URL(authorizeUrl).searchParams.get('redirect_uri') as string;
+			page = fetch(`${redirectUri}?${query}`).then((res) => res.text());
+		});
+		return { grant, page: () => page };
+	};
+
+	it('holds the browser on the code until the outcome is known, then shows it', async () => {
+		const { grant, page } = await follow('code=abc');
+		const { code, finish } = await grant;
+		let settled = false;
+		void page().then(() => (settled = true));
+		await new Promise((resolve) => setTimeout(resolve, 200));
+
+		expect(code).toBe('abc');
+		expect(settled).toBe(false);
+
+		finish({ ok: false, error: 'Token exchange rejected by test server' });
+		const html = await page();
+
+		expect(html).toContain('<h1>Sign-in failed</h1>');
+		expect(html).toContain('Token exchange rejected by test server');
+		expect(html).not.toContain("You're signed in");
+		expect(html).not.toContain('window.close()');
+	});
+
+	it('shows success only once the caller reports it', async () => {
+		const { grant, page } = await follow('code=abc');
+		(await grant).finish({ ok: true, webUrl: 'https://rocketride.ai/' });
+
+		const html = await page();
+		expect(html).toContain("<h1>You're signed in</h1>");
+		expect(html).toContain('window.close()');
+	});
+
+	it('answers a provider error at once and rejects', async () => {
+		const { grant, page } = await follow('error=access_denied&error_description=nope');
+
+		await expect(grant).rejects.toThrow(/Sign-in was rejected: nope/);
+		expect(await page()).toContain('<h1>Sign-in failed</h1>');
+	});
 });
 
 describe('webAppUrlFor', () => {
 	it('sends the RocketRide cloud API to the cloud web app at rocketride.ai', () => {
 		expect(webAppUrlFor('https://api.rocketride.ai')).toBe('https://rocketride.ai/');
 		expect(webAppUrlFor('https://API.rocketride.ai/')).toBe('https://rocketride.ai/');
+		expect(webAppUrlFor('https://api.rocketride.ai:443')).toBe('https://rocketride.ai/');
 	});
 
 	it('keeps any other server on its own origin', () => {
 		expect(webAppUrlFor('http://localhost:5565')).toBe('http://localhost:5565/');
 		expect(webAppUrlFor('https://rr.example.com/')).toBe('https://rr.example.com/');
+		expect(webAppUrlFor('https://api.rocketride.ai:8443')).toBe('https://api.rocketride.ai:8443/');
 	});
 });
 

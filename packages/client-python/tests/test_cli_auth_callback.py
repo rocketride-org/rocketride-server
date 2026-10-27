@@ -25,11 +25,20 @@
 
 import json
 import re
+import threading
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import pytest
 
-from rocketride.cli.commands.auth import CALLBACK_PALETTES, _render_callback_page, web_app_url_for
+from rocketride.cli.commands.auth import (
+    CALLBACK_PALETTES,
+    _authorize_via_loopback,
+    _render_callback_page,
+    web_app_url_for,
+)
+from rocketride.cli.utils.output import Output
 
 THEMES = Path(__file__).resolve().parents[2] / 'shell' / 'public' / 'themes'
 
@@ -51,7 +60,7 @@ def test_success_is_branded_themed_and_never_redirects():
     assert '<a class="btn" href="https://api.rocketride.ai/">Open RocketRide</a>' in page
 
 
-@pytest.mark.parametrize('web_url', ['javascript:alert(1)', 'file:///etc/passwd', 'not a url', None])
+@pytest.mark.parametrize('web_url', ['javascript:alert(1)', 'file:///etc/passwd', 'not a url', 'http:example', None])
 def test_no_button_without_a_usable_web_url(web_url):
     page = _render_callback_page(True, web_url=web_url)
 
@@ -91,9 +100,65 @@ def test_palettes_match_the_web_app_themes(mode, theme_id):
     [
         ('https://api.rocketride.ai', 'https://rocketride.ai/'),
         ('https://API.rocketride.ai/', 'https://rocketride.ai/'),
+        ('https://api.rocketride.ai:443', 'https://rocketride.ai/'),
+        ('https://api.rocketride.ai:8443', 'https://api.rocketride.ai:8443/'),
         ('http://localhost:5565', 'http://localhost:5565/'),
         ('https://rr.example.com/', 'https://rr.example.com/'),
     ],
 )
 def test_web_app_url_for(server_base, expected):
     assert web_app_url_for(server_base) == expected
+
+
+def test_waitlisted_page_shows_the_queue_notice_without_closing():
+    page = _render_callback_page(True, web_url='https://rocketride.ai/', waitlisted=True)
+
+    assert "<h1>You're on the list</h1>" in page
+    assert "You're signed in" not in page
+    assert '<a class="btn" href="https://rocketride.ai/">Open RocketRide</a>' in page
+    assert '<script>' not in page
+
+
+def _follow(query):
+    """Start a loopback sign-in whose "browser" follows the redirect with ``query``; returns (grant/error, page box)."""
+    box = {}
+
+    def browser(authorize_url):
+        redirect_uri = urllib.parse.parse_qs(urllib.parse.urlparse(authorize_url).query)['redirect_uri'][0]
+
+        def fetch():
+            with urllib.request.urlopen(f'{redirect_uri}?{query}', timeout=10) as res:  # noqa: S310 (loopback)
+                box['page'] = res.read().decode('utf-8')
+
+        box['thread'] = threading.Thread(target=fetch, daemon=True)
+        box['thread'].start()
+
+    return box, lambda: _authorize_via_loopback(
+        'https://idp.test', 'client', 'challenge', Output(None), open_browser=browser
+    )
+
+
+def test_loopback_holds_the_browser_until_the_outcome_is_known():
+    box, run = _follow('code=abc')
+    grant, finish = run()
+    box['thread'].join(0.3)
+
+    assert grant['code'] == 'abc'
+    assert 'page' not in box
+
+    finish(_render_callback_page(False, error='Token exchange rejected by test server'))
+    box['thread'].join(5)
+
+    assert '<h1>Sign-in failed</h1>' in box['page']
+    assert 'Token exchange rejected by test server' in box['page']
+    assert "You're signed in" not in box['page']
+    assert 'window.close()' not in box['page']
+
+
+def test_loopback_answers_a_provider_error_at_once():
+    box, run = _follow('error=access_denied&error_description=nope')
+
+    with pytest.raises(RuntimeError, match='Sign-in was rejected: nope'):
+        run()
+    box['thread'].join(5)
+    assert '<h1>Sign-in failed</h1>' in box['page']

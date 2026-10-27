@@ -168,7 +168,16 @@ const CLOUD_WEB_APP_URL = 'https://rocketride.ai/';
  */
 export function webAppUrlFor(serverBase: string): string {
 	const origin = serverBase.replace(/\/+$/, '');
-	return origin.toLowerCase() === CONST_DEFAULT_WEB_CLOUD.toLowerCase() ? CLOUD_WEB_APP_URL : `${origin}/`;
+	// URL.origin lowercases the host and drops a default port, so
+	// https://api.rocketride.ai:443 still reads as the cloud API
+	const canonical = (value: string): string => {
+		try {
+			return new URL(value).origin;
+		} catch {
+			return value.toLowerCase();
+		}
+	};
+	return canonical(origin) === canonical(CONST_DEFAULT_WEB_CLOUD) ? CLOUD_WEB_APP_URL : `${origin}/`;
 }
 
 /**
@@ -181,6 +190,9 @@ function escapeHtml(text: string): string {
 	return text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 }
 
+/** The sign-in outcome the callback page shows. */
+export type CallbackResult = { ok: true; webUrl?: string; waitlisted?: boolean } | { ok: false; error: string };
+
 /**
  * Renders the page the browser lands on after the sign-in redirect,
  * branded like the RocketRide landing page and themed with the web app's
@@ -189,12 +201,13 @@ function escapeHtml(text: string): string {
  * Success tries to close the tab. Chromium allows that for this tab;
  * Firefox only lets scripts close windows scripts opened, so there the page
  * stays as a finished state — never a dead end, with a link to the web app.
- * A failure shows the reason and makes no close attempt.
+ * A waitlisted account stays open with its access-queue notice. A failure
+ * shows the reason and makes no close attempt.
  *
  * @param result - The sign-in outcome; `webUrl` is the server's web app.
  * @returns The HTML document.
  */
-export function renderCallbackPage(result: { ok: true; webUrl?: string } | { ok: false; error: string }): string {
+export function renderCallbackPage(result: CallbackResult): string {
 	const vars = (p: (typeof CALLBACK_PALETTES)['dark' | 'light']): string => `--bg:${p.bg};--paper:${p.paper};--text:${p.text};--muted:${p.muted};--border:${p.border};--btn-bg:${p.buttonBg};--btn-fg:${p.buttonFg};--ok:${p.success};--err:${p.error}`;
 	const style = [
 		`:root{${vars(CALLBACK_PALETTES.light)}}`,
@@ -221,17 +234,20 @@ export function renderCallbackPage(result: { ok: true; webUrl?: string } | { ok:
 		return `${head}<div class="card">${badge}<h1>Sign-in failed</h1><p class="reason">${escapeHtml(result.error)}</p><p class="hint">Return to your terminal and run <strong>rocketride login</strong> again.</p></div></main></body></html>`;
 	}
 
-	// step: the web app link — http(s) only
+	// step: the web app link — absolute http(s) with a host only
 	let webUrl = '';
 	try {
 		const parsed = new URL(result.webUrl ?? '');
-		if (parsed.protocol === 'http:' || parsed.protocol === 'https:') webUrl = parsed.toString();
+		if ((parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.hostname) webUrl = parsed.toString();
 	} catch {
 		webUrl = '';
 	}
 
 	const badge = '<div class="badge" style="--state:var(--ok)"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>';
 	const button = webUrl ? `<a class="btn" href="${escapeHtml(webUrl)}">Open RocketRide</a>` : '';
+	if (result.waitlisted) {
+		return `${head}<div class="card">${badge}<h1>You're on the list</h1><p>Your account is in the access queue; you will be emailed when it is activated.</p>${button}</div></main></body></html>`;
+	}
 	return `${head}<div class="card">${badge}<h1>You're signed in</h1><p>Return to your terminal; the RocketRide CLI is ready.</p>${button}<p class="hint">You can close this tab.</p></div></main><script>window.close();</script></body></html>`;
 }
 
@@ -240,16 +256,20 @@ export function renderCallbackPage(result: { ok: true; webUrl?: string } | { ok:
  *
  * Starts a listener on a random 127.0.0.1 port, sends the browser to the
  * Zitadel authorize URL, and resolves with the `code` query parameter
- * from the redirect.
+ * from the redirect. A code is not a sign-in yet (the exchange and the key
+ * mint can still fail), so the browser's request is held open until the
+ * caller reports the real outcome through `finish`. A provider error or a
+ * code-less redirect is answered at once.
  *
  * @param zitadelUrl - Base URL of the Zitadel instance.
  * @param clientId - OAuth public client id.
  * @param challenge - The S256 code challenge.
- * @param webUrl - The RocketRide web app the browser continues to after sign-in.
  * @param out - Output channel for progress lines.
- * @returns The authorization code and the exact redirect URI used.
+ * @param open - Opens the authorize URL (the system browser by default).
+ * @returns The authorization code, the exact redirect URI used, and
+ *   `finish`, which answers the held browser request and closes the listener.
  */
-function authorizeViaLoopback(zitadelUrl: string, clientId: string, challenge: string, webUrl: string, out: Output): Promise<{ code: string; redirectUri: string }> {
+export function authorizeViaLoopback(zitadelUrl: string, clientId: string, challenge: string, out: Output, open: (url: string) => void = openBrowser): Promise<{ code: string; redirectUri: string; finish: (result: CallbackResult) => void }> {
 	return new Promise((resolve, reject) => {
 		const server = http.createServer();
 		const timer = setTimeout(() => {
@@ -265,23 +285,26 @@ function authorizeViaLoopback(zitadelUrl: string, clientId: string, challenge: s
 			}
 			const error = url.searchParams.get('error');
 			const code = url.searchParams.get('code') || '';
-			const page = error
-				? renderCallbackPage({ ok: false, error: url.searchParams.get('error_description') || error })
-				: code
-					? renderCallbackPage({ ok: true, webUrl })
-					: renderCallbackPage({ ok: false, error: 'The sign-in redirect carried no authorization code.' });
-			res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
-			res.end(page);
+			let answered = false;
+			const answer = (result: CallbackResult): void => {
+				if (answered) return;
+				answered = true;
+				res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+				res.end(renderCallbackPage(result));
+				server.close();
+			};
 			clearTimeout(timer);
 			const address = server.address();
 			const port = typeof address === 'object' && address ? address.port : 0;
-			server.close();
 			if (error) {
-				reject(new Error(`Sign-in was rejected: ${url.searchParams.get('error_description') || error}`));
+				const reason = url.searchParams.get('error_description') || error;
+				answer({ ok: false, error: reason });
+				reject(new Error(`Sign-in was rejected: ${reason}`));
 			} else if (!code) {
+				answer({ ok: false, error: 'The sign-in redirect carried no authorization code.' });
 				reject(new Error('Sign-in redirect carried no authorization code'));
 			} else {
-				resolve({ code, redirectUri: `http://127.0.0.1:${port}/auth/callback` });
+				resolve({ code, redirectUri: `http://127.0.0.1:${port}/auth/callback`, finish: answer });
 			}
 		});
 
@@ -292,7 +315,7 @@ function authorizeViaLoopback(zitadelUrl: string, clientId: string, challenge: s
 			const authorizeUrl = buildAuthorizeUrl(zitadelUrl, clientId, redirectUri, challenge);
 			out.line('Opening your browser to sign in...');
 			out.line(`If it did not open, visit: ${authorizeUrl}`);
-			openBrowser(authorizeUrl);
+			open(authorizeUrl);
 		});
 	});
 }
@@ -314,9 +337,11 @@ async function signInSaas(uri: string, out: Output): Promise<string> {
 	// step: PKCE verifier + S256 challenge (shared helper)
 	const { verifier, challenge } = generatePkce();
 
-	// step: browser authorization via the loopback redirect
-	// The browser continues to this server's web app once signed in
-	const { code, redirectUri } = await authorizeViaLoopback(DEFAULT_ZITADEL_URL, DEFAULT_CLI_CLIENT_ID, challenge, webAppUrlFor(toHttpBase(uri)), out);
+	// step: browser authorization via the loopback redirect; the browser
+	// waits on its callback page until this sign-in finishes
+	const { code, redirectUri, finish } = await authorizeViaLoopback(DEFAULT_ZITADEL_URL, DEFAULT_CLI_CLIENT_ID, challenge, out);
+	const webUrl = webAppUrlFor(toHttpBase(uri));
+	let outcome: CallbackResult = { ok: false, error: 'Sign-in did not complete; see your terminal.' };
 
 	// step: exchange the code over a temporary DAP connection — the server
 	// consumes the Zitadel tokens and returns an rr_* session key
@@ -326,6 +351,7 @@ async function signInSaas(uri: string, out: Output): Promise<string> {
 		if (result?.waitlisted) {
 			const name = result.displayName || '';
 			out.line(`Thanks for signing up${name ? `, ${name}` : ''}! Your account is in the access queue — you will be emailed when it is activated.`);
+			outcome = { ok: true, webUrl, waitlisted: true };
 			return '';
 		}
 		if (!result?.userToken) {
@@ -338,8 +364,13 @@ async function signInSaas(uri: string, out: Output): Promise<string> {
 		const keyName = `CLI on ${os.hostname()}`;
 		const minted = await tempClient.account.createKey({ name: keyName, permissions: [] });
 		out.line(`Signed in${result.displayName ? ` as ${result.displayName}` : ''}; minted API key '${keyName}'.`);
+		outcome = { ok: true, webUrl };
 		return minted.key;
+	} catch (err) {
+		outcome = { ok: false, error: err instanceof Error ? err.message : String(err) };
+		throw err;
 	} finally {
+		finish(outcome);
 		await tempClient.disconnect().catch(() => {});
 	}
 }
