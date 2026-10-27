@@ -8,7 +8,7 @@ Masky is the third-party AI avatar platform this node invokes over its REST API 
 
 ## What it does
 
-The node has two roles. Bound to an agent, it exposes 29 Masky functions under the `masky` namespace (26 by default, because the three delete tools need `allowDelete`). Placed in a pipeline, it runs one configured action on each text record: it renders, waits, downloads the finished file and streams it downstream, so the output outlives Masky's signed URL. Choose it over `cloud_tts` when the voice should belong to an avatar or come with a face, and over `video_composer` when the clip itself must be generated rather than stitched from existing frames.
+The node has two roles. Bound to an agent, it exposes 29 Masky functions under the `masky` namespace (26 by default, because the three delete tools need `allowDelete`). Placed in a pipeline, it runs one configured action on each non-empty text record (empty or whitespace-only records do nothing). For talking head, scene video and image it renders, waits, downloads the finished file and streams it downstream, so the output outlives Masky's signed URL. For live it sends the record as turns of a live conversation and writes only a receipt. Choose it over `cloud_tts` when the voice should belong to an avatar or come with a face, and over `video_composer` when the clip itself must be generated rather than stitched from existing frames.
 
 Every paid call is estimated first and refused before any request when the estimate exceeds **Max Credits per Call**. The node is marked experimental.
 
