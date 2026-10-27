@@ -50,12 +50,12 @@ describe('QueryView on the shared runner', () => {
 		assert.match(view, /useStatementRunner<StatementRun, \{ sql: string \}, SqlExecuteResult, FailureNotice>\(\{/);
 		assert.match(view, /refuse: \(list\) => \(list\.some\(\(run\) => run\.kind === 'tx'\) \? TRANSACTION_REFUSAL_TEXT : null\)/);
 		assert.match(view, /prepare: \(run\) => \{\s*const prepared = applyRowLimit\(run\.sql, limit, dialect\);/);
-		assert.match(view, /record: \(run\) => env\.history\.record\(endpoint, toHistoryEntry\(run\)\)/);
+		assert.match(view, /record: \(run\) => \{[\s\S]*?env\.history\.record\(endpoint, toHistoryEntry\(run\)\);\s*\},/);
 	});
 
 	it('sends each statement on the session SqlEnv gives the document (the remote proxy in a frame), repeatable only for a read', () => {
 		assert.match(view, /execute: \(run, send(?:, ticket)?\) => env\.getSession\(endpoint\)\.execute\(send\.sql, \{ idempotent: run\.kind === 'read'/);
-		assert.match(view, /canRun: \(\) => env\.ready/);
+		assert.match(view, /canRun: \(\) => \{[\s\S]*?return env\.ready;\s*\},/);
 	});
 
 	it('keeps no run loop of its own', () => {
@@ -64,9 +64,9 @@ describe('QueryView on the shared runner', () => {
 		}
 	});
 
-	it('shows failures and confirmations with the shared banner and dialog', () => {
+	it('shows failures with the shared banner, and confirmations with SQL\'s own dialog (no "stop asking")', () => {
 		assert.match(view, /<FailureBanner\s+failure=\{failure\}/);
-		assert.match(view, /<PatternConfirmDialog\s+kind=\{patternPrompt\.finding\.kind\}/);
+		assert.match(view, /<WriteConfirmDialog\s+key=\{patternPrompt\.run\.index\}\s+confirmation=\{toWriteConfirmation\(patternPrompt\.finding\)\}/);
 	});
 
 	it('binds the strip and the inspector to the shared components, and the wording to the shared format', () => {

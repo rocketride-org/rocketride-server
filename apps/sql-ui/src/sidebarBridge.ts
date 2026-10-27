@@ -31,6 +31,7 @@
 // =============================================================================
 
 import type { SavedSqlConnection } from './connect';
+import type { ConnectionStatusSource } from './connectionStatus';
 
 /** The sidebar's frame-facing actions plus the frame's state feeds. */
 export interface SqlSidebarBridge {
@@ -44,4 +45,11 @@ export interface SqlSidebarBridge {
 	subscribeActive(cb: (key: string | null) => void): () => void;
 	/** Subscribe to open failures (direct resolves can fail). Returns unsubscribe. */
 	subscribeError(cb: (message: string) => void): () => void;
+	/**
+	 * Subscribe to what each row's status word is made from (replays the
+	 * current one). Read in the realm that holds the engine core, which is
+	 * where the sidebar is in both mounts: nothing is published for it.
+	 * Returns unsubscribe.
+	 */
+	subscribeStatus(cb: (source: ConnectionStatusSource) => void): () => void;
 }

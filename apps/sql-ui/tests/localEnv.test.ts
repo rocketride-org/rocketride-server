@@ -62,7 +62,9 @@ describe('T12 — the full app path runs on the LOCAL env over its own engine co
 			await env.saveConnection({ ...PIPELINE, id: 'c-two', name: 'Two', projectId: 'p2' });
 			assert.ok(engine.requests.some((q) => q.op === 'client.fsWriteJson' && (q.params as { path: string }).path === SAVED_PATH));
 			assert.equal(env.serviceTitle('db_postgres'), 'PostgreSQL');
-			assert.equal(env.prefs, prefs, 'the full app keeps its workspace preferences');
+			env.prefs.setPref('sql.probe', 1);
+			assert.equal(values.get('sql.probe'), 1, 'the full app keeps its workspace preferences (for the account signed in)');
+			assert.equal(env.prefs.getPref('sql.probe'), 1);
 			assert.equal(env.history, LOCAL_HISTORY, 'and its module history store');
 			assert.deepEqual(engine.requests.filter((q) => typeof q.timeoutMs !== 'number').map((q) => q.op), []);
 		} finally {

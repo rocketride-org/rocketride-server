@@ -32,6 +32,7 @@
 // =============================================================================
 
 import { createContext, useContext } from 'react';
+import type { FilterChip } from './sql/filters';
 
 /** A query-page seed (all optional — a bare seed is a fresh empty query). */
 export interface SqlQuerySeed {
@@ -47,8 +48,8 @@ export interface SqlQuerySeed {
 export interface SqlPageNav {
 	/** Shows the QUERY page, seeded (replaces the page's current query). */
 	openQuery(seed: SqlQuerySeed): void;
-	/** Shows the DATA page for one table. */
-	openTableData(table: string): void;
+	/** Shows the DATA page for one table, optionally with filter chips already set. */
+	openTableData(table: string, chips?: FilterChip[]): void;
 	/** Shows the DESIGN page for one table (null = create-table draft). */
 	openDesign(table: string | null): void;
 }

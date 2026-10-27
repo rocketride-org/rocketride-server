@@ -42,8 +42,8 @@
 // =============================================================================
 
 import { DEFAULT_RETRY_WINDOW_MS } from 'shared/explorer/connect/session';
-import { GET_TASKS_TIMEOUT_MS, frameOpTimeoutMs, toolCallBudgetMs } from 'shared/explorer/devtool/timeouts';
-import { DIALECT_WAIT_MS, GET_SCHEMA_WAIT_MS, REFRESH_SCHEMA_WAIT_MS } from './connect/tools';
+import { FRAME_OP_MARGIN_MS, GET_TASKS_TIMEOUT_MS, MAX_TIMER_MS, frameOpTimeoutMs, toolCallBudgetMs } from 'shared/explorer/devtool/timeouts';
+import { APPLY_STATEMENT_WAIT_MS, BEGIN_WAIT_MS, DIALECT_WAIT_MS, END_TX_WAIT_MS, GET_SCHEMA_WAIT_MS, MAX_APPLY_STATEMENTS, REFRESH_SCHEMA_WAIT_MS, GET_SQL_WAIT_MS } from './connect/tools';
 
 // =============================================================================
 // CONTROLLER (engine requests)
@@ -90,9 +90,42 @@ export const VALIDATE_TIMEOUT_MS = 30_000;
 /** Bus timeout of `client.getEnvironmentKeys`. */
 export const ENV_KEYS_TIMEOUT_MS = 15_000;
 
+/**
+ * How long a saved-queries op waits for the account's saved-queries file to
+ * be read: the dev-tool library's whole load (shared/explorer/devtool/prefs:
+ * three attempts of a stat and a read, each FS_TIMEOUT_MS, with 1 s and then
+ * 3 s between them). Spelled out because frames import this module and must
+ * not import that one (it reaches the bus client); a test pins the numbers.
+ */
+export const SAVED_QUERIES_LOAD_WAIT_MS = 3 * 2 * FS_TIMEOUT_MS + 1_000 + 3_000;
+
 // =============================================================================
 // FRAME (op timeouts)
 // =============================================================================
+
+/**
+ * The frame's timeout for an apply of `count` statements. Never repeated (T10).
+ *
+ * In one transaction: resolve, the gate's one bounded `dialect` call,
+ * `begin`, each statement's own wait (APPLY_STATEMENT_WAIT_MS at most: the
+ * node's 300 s idle-transaction time, never the statement's 24 h cap), then
+ * `commit`, and a `rollback` after a failure (a failed commit is followed by
+ * one too).
+ *
+ * Statement by statement: resolve, the `dialect` call, and each statement's
+ * own wait, which is any statement's (the 24 h cap on the bus): there is no
+ * transaction to outlast, and no begin, commit or rollback. A long list is
+ * held to the longest timer there is.
+ *
+ * @param count - How many statements the apply carries.
+ * @param atomic - Whether it asks for one transaction.
+ * @returns The frame's timeout (ms).
+ */
+export function applyBatchTimeoutMs(count: number, atomic: boolean): number {
+	const statements = Math.max(1, Math.min(Math.trunc(count), MAX_APPLY_STATEMENTS));
+	if (!atomic) return frameOpTimeoutMs(Math.min(RESOLVE_BUDGET_MS + toolCallBudgetMs(DIALECT_WAIT_MS) + statements * toolCallBudgetMs(null), MAX_TIMER_MS - FRAME_OP_MARGIN_MS));
+	return frameOpTimeoutMs(RESOLVE_BUDGET_MS + toolCallBudgetMs(DIALECT_WAIT_MS) + toolCallBudgetMs(BEGIN_WAIT_MS) + statements * toolCallBudgetMs(APPLY_STATEMENT_WAIT_MS) + 2 * toolCallBudgetMs(END_TX_WAIT_MS));
+}
 
 /** The frame's timeout per op (ms). */
 export const SQL_OP_TIMEOUT_MS = {
@@ -108,16 +141,29 @@ export const SQL_OP_TIMEOUT_MS = {
 	// refresh_schema, then (on any failure) get_schema.
 	'sql.refreshSchema': frameOpTimeoutMs(RESOLVE_BUDGET_MS + toolCallBudgetMs(REFRESH_SCHEMA_WAIT_MS) + toolCallBudgetMs(GET_SCHEMA_WAIT_MS)),
 	'sql.dialect': frameOpTimeoutMs(RESOLVE_BUDGET_MS + toolCallBudgetMs(DIALECT_WAIT_MS)),
+	// The longest apply: MAX_APPLY_STATEMENTS statements, whichever way they
+	// are sent (see applyBatchTimeoutMs; a frame passes the timeout for its
+	// own count and mode).
+	'sql.applyBatch': Math.max(applyBatchTimeoutMs(MAX_APPLY_STATEMENTS, true), applyBatchTimeoutMs(MAX_APPLY_STATEMENTS, false)),
 	'sql.getService': frameOpTimeoutMs(SERVICE_TIMEOUT_MS),
 	'sql.validate': frameOpTimeoutMs(VALIDATE_TIMEOUT_MS),
 	'sql.envKeys': frameOpTimeoutMs(ENV_KEYS_TIMEOUT_MS),
 	// Once the saved list is read, a lookup in memory.
 	'sql.connection': frameOpTimeoutMs(LIST_WAIT_MS),
 	'sql.saveConnection': frameOpTimeoutMs(LIST_WAIT_MS + FS_TIMEOUT_MS),
+	'sql.setConnectionSafety': frameOpTimeoutMs(LIST_WAIT_MS + FS_TIMEOUT_MS),
 	'sql.deleteConnection': frameOpTimeoutMs(LIST_WAIT_MS + 2 * RELEASE_STEP_TIMEOUT_MS + FS_TIMEOUT_MS),
 	// History ops only touch the controller's memory (the file is written
 	// later, debounced) once the saved list is read.
 	'sql.history': frameOpTimeoutMs(LIST_WAIT_MS),
 	'sql.historyRecord': frameOpTimeoutMs(LIST_WAIT_MS),
 	'sql.historyEdit': frameOpTimeoutMs(LIST_WAIT_MS),
+	// Saved-query ops wait for the saved list (the connection's key), then for
+	// the account's saved-queries file to be read; a change is written later,
+	// debounced.
+	'sql.savedQueries': frameOpTimeoutMs(LIST_WAIT_MS + SAVED_QUERIES_LOAD_WAIT_MS),
+	'sql.savedQueryEdit': frameOpTimeoutMs(LIST_WAIT_MS + SAVED_QUERIES_LOAD_WAIT_MS),
+	// Resolve, then one get_sql (its one retry after a TASK_STOPPED refusal
+	// stays inside the same wait).
+	'sql.getSql': frameOpTimeoutMs(RESOLVE_BUDGET_MS + toolCallBudgetMs(GET_SQL_WAIT_MS)),
 } as const;

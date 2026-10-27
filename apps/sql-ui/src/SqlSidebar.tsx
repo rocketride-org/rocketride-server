@@ -43,6 +43,8 @@ import { SidebarMenu, BxPlus, BxCheck, BxEditAlt, BxTrash } from 'shell';
 import type { DevToolProps, ViewMenu } from 'shell';
 import { useSavedConnections, useSavedConnectionsStatus, endpointKeyForConnection } from './connect';
 import type { SavedSqlConnection } from './connect';
+import { connectionStatus } from './connectionStatus';
+import type { ConnectionStatusKind, ConnectionStatusSource } from './connectionStatus';
 import type { SqlSidebarBridge } from './sidebarBridge';
 import { SQL_TOOL_PROTOCOL } from './sqlBridge';
 import { attachSqlController } from './sqlController';
@@ -131,6 +133,16 @@ const styles = {
 		padding: 0,
 	} as CSSProperties,
 
+	/** The row's status word (its colour is a second cue; the word is the status). */
+	status: (kind: ConnectionStatusKind): CSSProperties => ({
+		flexShrink: 0,
+		fontSize: 11,
+		lineHeight: '16px',
+		color: kind === 'running' || kind === 'open'
+			? 'var(--rr-color-success)'
+			: kind === 'unreachable' ? 'var(--rr-color-error)' : kind === 'noaccess' ? 'var(--rr-color-warning)' : 'var(--rr-text-secondary)',
+	}),
+
 	/** Muted empty-list line. */
 	empty: {
 		padding: '2px 8px 4px 18px',
@@ -202,6 +214,11 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge, hostActiveDoc }) => {
 		setOpeningId(null);
 	}), [bridge]);
 
+	// Each row's status word: discovery and open failures, read from the core
+	// in this realm (no publish; it follows task events through discovery).
+	const [statusSource, setStatusSource] = useState<ConnectionStatusSource>({ discovered: null, openErrors: {} });
+	useEffect(() => bridge.subscribeStatus(setStatusSource), [bridge]);
+
 	// The selection this sidebar follows. The host's signal wins when it has
 	// one: a saved connection's docKey maps to its endpoint key; anything
 	// else fronted (an editor doc, another tool, a text file) clears the
@@ -259,6 +276,7 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge, hostActiveDoc }) => {
 					const isHovered = hoveredId === conn.id;
 					const isOpening = openingId === conn.id;
 					const isConfirming = confirmDeleteId === conn.id;
+					const status = connectionStatus(conn, statusSource.discovered, statusSource.openErrors);
 					return (
 						<div
 							key={conn.id}
@@ -304,6 +322,7 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge, hostActiveDoc }) => {
 							) : (
 								<>
 									<span style={styles.rowLabel}>{isOpening ? `${conn.name}…` : conn.name}</span>
+									{status.label && <span style={styles.status(status.kind)} title={status.detail}>{status.label}</span>}
 									{/* Hover actions: modify / delete. */}
 									{isHovered && !isOpening && (
 										<>

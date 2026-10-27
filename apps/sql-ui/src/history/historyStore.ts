@@ -39,16 +39,27 @@
 // makes its own with createSqlHistoryStore() and attaches it to a file in the
 // user's store instead (sqlController.ts); dev-tool frames import neither and
 // reach history through ops.
+//
+// The full app's store is attached through the page's workspace pin
+// (workspacePin.ts): the shell's preferences still hold the first account's
+// bag after another account signs in without a reload, so for that account
+// the store is attached to a throwaway accessor instead. It then forgets the
+// first account's entries (another owner) and reads and writes nothing of
+// the shell's.
 // =============================================================================
 
+import { useSyncExternalStore } from 'react';
 import { createHistoryStore } from 'shared/explorer/history/store';
 import type { IHistoryStore } from 'shared/explorer/history/store';
 import { createRunEvents } from 'shared/explorer/history/runEvents';
 import { createHistoryPrefsBridge } from 'shared/explorer/react';
+import type { IPrefsAttachable } from 'shared/explorer/react';
 import type { IPrefsAccessor } from 'shared/explorer/history/types';
 import type { HistoryEntry } from './types';
 import { DEFAULT_HISTORY_LIMITS } from './trim';
 import { sqlRunEvents } from './runEvents';
+import { APP_WORKSPACE_PIN } from './workspacePin';
+import type { WorkspaceAccess, WorkspacePin } from './workspacePin';
 
 // =============================================================================
 // CONSTANTS
@@ -89,7 +100,6 @@ export function createSqlHistoryStore(runs = createRunEvents<'sql'>()): SqlHisto
 	});
 }
 
-/** The full app's store (module-level), on the app's run bus. */
 /**
  * A throwaway accessor kept in memory: nothing is read from or written to
  * anywhere else. Attaching a store to one under a new owner (and detaching it
@@ -105,17 +115,69 @@ export function memoryPrefs(): IPrefsAccessor {
 	};
 }
 
-const store = createSqlHistoryStore(sqlRunEvents);
+/** A history store's attach, through a workspace pin. */
+export interface PinnedHistory extends IPrefsAttachable {
+	/** Where the account the store was last attached for stands (outside React). */
+	access(): WorkspaceAccess;
+	/** The same, as a hook. */
+	useAccess(): WorkspaceAccess;
+}
 
 /**
- * Attach the shell's preference accessor and hydrate from it.
+ * Attach a store to the shell's preferences only for the pinned account: any
+ * other account (or nobody) gets a throwaway accessor, under its own owner,
+ * so the store forgets what it held and reads and writes nothing of the
+ * shell's. An attach without an owner is not checked.
+ *
+ * @param store - The history store.
+ * @param pin - Whose preferences these are.
+ * @returns The attach, and where the last attached account stands.
+ */
+export function pinHistory(store: SqlHistoryStore, pin: WorkspacePin): PinnedHistory {
+	let access: WorkspaceAccess = 'nobody';
+	const listeners = new Set<() => void>();
+	const subscribe = (listener: () => void): (() => void) => {
+		listeners.add(listener);
+		return () => { listeners.delete(listener); };
+	};
+	const snapshot = (): WorkspaceAccess => access;
+	return {
+		attachPrefs(api, owner) {
+			if (owner === undefined) return store.attachPrefs(api);
+			const next = pin.access(owner);
+			if (next !== access) {
+				access = next;
+				listeners.forEach((listener) => listener());
+			}
+			return store.attachPrefs(next === 'owner' ? api : memoryPrefs(), owner);
+		},
+		access: snapshot,
+		useAccess: () => useSyncExternalStore(subscribe, snapshot, snapshot),
+	};
+}
+
+/** The full app's store (module-level), on the app's run bus. */
+const store = createSqlHistoryStore(sqlRunEvents);
+
+/** The full app's store, attached through the page's workspace pin. */
+const pinned = pinHistory(store, APP_WORKSPACE_PIN);
+
+/**
+ * Attach the shell's preference accessor and hydrate from it (through the
+ * page's workspace pin, when an owner is given).
  *
  * Exported because it is the store's real seam onto the shell:
  * {@link HistoryPrefsBridge} is a null-rendering wrapper around this call, and
  * the persistence rules worth testing (what a hydrate trusts, what a detach
  * drops) live in the store rather than in React.
  */
-export const attachPrefs = store.attachPrefs;
+export const attachPrefs = pinned.attachPrefs;
+
+/** Where the account the full app's history was last attached for stands (outside React). */
+export const historyAccess = pinned.access;
+
+/** Where the account the full app's history was last attached for stands (a hook). */
+export const useHistoryAccess = pinned.useAccess;
 
 /** Forget one entry. */
 export const removeEntry = store.removeEntry;
@@ -159,6 +221,7 @@ export const useRecording = store.useRecording;
  * Renders nothing. Mount it wherever SQL Explorer is on screen and history
  * should be kept — the connection workbench does, and the History drawer
  * mounts its own so the drawer works even from a query document whose
- * workbench tab was closed. Multiple mounts are safe.
+ * workbench tab was closed. Multiple mounts are safe. It attaches through
+ * the page's workspace pin.
  */
-export const HistoryPrefsBridge = createHistoryPrefsBridge(store);
+export const HistoryPrefsBridge = createHistoryPrefsBridge(pinned);

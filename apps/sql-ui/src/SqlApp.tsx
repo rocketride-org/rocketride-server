@@ -296,7 +296,7 @@ const SqlAppReady: React.FC<{ docs: Documents; bridge: SqlSidebarBridge }> = ({ 
 										<EmptyState
 											icon={<DatabaseIcon />}
 											title="SQL Explorer"
-											description="Open a connection from the sidebar, or add one with New Connection."
+											description="Open a connection from the sidebar, or add a database with + New Connection: pick a database node from a pipeline you are running, or enter the connection details directly."
 										/>
 									</div>
 								) : (

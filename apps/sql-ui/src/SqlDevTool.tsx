@@ -54,6 +54,8 @@ import type { IControllerSummon, SummonState } from 'shared/explorer/devtool/sum
 import type { SqlFrameMount } from './sqlFrame';
 import { createRemoteHistory } from './history/remoteHistory';
 import type { RemoteHistory } from './history/remoteHistory';
+import { createRemoteSavedQueries } from './history/remoteSavedQueries';
+import type { RemoteSavedQueries } from './history/remoteSavedQueries';
 import { SqlEnvProvider, createRemoteSqlEnv, useSqlEnv } from './sqlEnv';
 import ConnectionView from './views/ConnectionView';
 import ConnectionOverlays from './components/ConnectionOverlays';
@@ -266,9 +268,10 @@ export const SqlDevTool: React.FC<DevToolProps> = ({ peer, channel, docKey, docu
 	// must not remount the frame wiring (which drops pending calls).
 	const documentsRef = useRef(documents);
 	useEffect(() => { documentsRef.current = documents; }, [documents]);
-	const [mount, setMount] = useState<{ frame: SqlFrameMount; history: RemoteHistory } | null>(null);
+	const [mount, setMount] = useState<{ frame: SqlFrameMount; history: RemoteHistory; saved: RemoteSavedQueries } | null>(null);
 	useEffect(() => {
 		let history: RemoteHistory | null = null;
+		let saved: RemoteSavedQueries | null = null;
 		const frame = attachSqlFrame({
 			peer,
 			channel: toolChannel,
@@ -279,12 +282,18 @@ export const SqlDevTool: React.FC<DevToolProps> = ({ peer, channel, docKey, docu
 			},
 			protocol: SQL_TOOL_PROTOCOL,
 			// Identity changed, unknown, or the host connection dropped: the
-			// frame wiring clears the realm's schemas; the history view is ours.
-			onReset: () => history?.reset(),
+			// frame wiring clears the realm's schemas; the history and
+			// saved-queries views are ours.
+			onReset: () => {
+				history?.reset();
+				saved?.reset();
+			},
 		});
 		history = createRemoteHistory({ caller: frame.caller, channel: sqlChannel(frame.channel), owner: frame.owner });
-		setMount({ frame, history });
+		saved = createRemoteSavedQueries({ caller: frame.caller, channel: sqlChannel(frame.channel), owner: frame.owner });
+		setMount({ frame, history, saved });
 		return () => {
+			saved?.dispose();
 			history?.dispose();
 			frame.dispose();
 		};
@@ -308,7 +317,7 @@ export const SqlDevTool: React.FC<DevToolProps> = ({ peer, channel, docKey, docu
 	// The account (F12): 'nobody' says "waiting for sign-in", never "not connected".
 	const signIn = useSignIn(toolChannel);
 	const gates = frameGates({ host: hostConnection, controllerReady, summon, signIn });
-	const env = useMemo(() => (mount ? createRemoteSqlEnv(mount.frame.caller, gates.ready, mount.frame.owner, mount.history) : null), [mount, gates.ready]);
+	const env = useMemo(() => (mount ? createRemoteSqlEnv(mount.frame.caller, gates.ready, mount.frame.owner, mount.history, mount.saved) : null), [mount, gates.ready]);
 	const onOpenError = useCallback((message: string) => sqlChannel(toolChannel).sendEvent('openError', message), [toolChannel]);
 
 	if (!env) return null;
@@ -331,7 +340,7 @@ export const SqlDevTool: React.FC<DevToolProps> = ({ peer, channel, docKey, docu
 		body = (
 			<div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
 				<div style={styles.welcome}>
-					<EmptyState icon={<DatabaseIcon />} title="SQL Explorer" description="Open a connection from the sidebar, or add one with New Connection." />
+					<EmptyState icon={<DatabaseIcon />} title="SQL Explorer" description="Open a connection from the sidebar, or add a database with + New Connection: pick a database node from a pipeline you are running, or enter the connection details directly." />
 				</div>
 				<OverlayHost />
 			</div>

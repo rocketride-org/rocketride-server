@@ -44,6 +44,9 @@
 //                           connection a frame has read (the 128 read most
 //                           recently), a revision and the recording switch.
 //                           Entries travel as op results.
+//   STATE  'savedQueries'  { storage, rev }: where saved queries are kept and
+//                           one revision that moves on every change. The
+//                           queries travel as op results.
 //
 //   Each topic stays within 64 KiB and all of them within 128 KiB (the whole
 //   map is republished on every publish): shrinkSqlState replaces an
@@ -57,6 +60,10 @@
 //   - a statement is classified again with the node's dialect
 //     (sql/gate.ts): transaction control is refused, and only a read is ever
 //     repeated (T10);
+//   - an apply's list is checked again as a whole (sql/gate.ts
+//     gateApplyStatements, inside the core): one statement per entry, no
+//     transaction control, and no transaction without the dialect; its
+//     transaction runs here, and nothing in it is ever repeated;
 //   - a saved-connection record must be a usable record naming a database
 //     node (sqlCore.ts checkSavedConnection);
 //   - a mutation (save, delete, a history record or edit) is refused unless
@@ -76,6 +83,14 @@
 // gets a new accessor and the store forgets what it held at once. An unmount
 // writes the batch still in the debounce first. Last writer wins across
 // windows (a known limitation the privacy line states).
+//
+// SAVED QUERIES. Kept the same way in a SECOND file of the user's store,
+// `@/User/.workspace/rocketride.sql.queries.json` (history/savedQueriesFile.ts:
+// read before anything is served, one bag per identity, the previous
+// account's accessor dropped or parked exactly as history's is), so they
+// never fill the history file's cap. Their caps refuse a save rather than
+// trim (history/savedQueries.ts). Last writer wins across windows, as for
+// history, and the privacy line says so.
 //
 // LIFETIME (R6, R7). `attachSqlController` runs inside the sidebar's
 // `useEffect` and its `dispose` is the cleanup: exactly one op server per
@@ -102,6 +117,7 @@ import type { DevToolPeer } from 'shared/explorer/devtool/realm';
 import type { IFocusTarget } from 'shared/explorer/devtool/watch';
 import { SQL_APP_ID } from './appId';
 import { getSavedConnections, getSavedConnectionsStatus, subscribeSavedConnections } from './connect';
+import { MAX_APPLY_STATEMENTS } from './connect/tools';
 import { connectionEditorDocKey } from './docs';
 import type { ConnectionsState, HistoryState, SqlOps } from './ops';
 import { checkHistoryEdit, checkHistoryEntry } from './history/api';
@@ -109,12 +125,17 @@ import type { HistoryEdit, HistoryStorage } from './history/api';
 import type { HistoryEntry } from './history/types';
 import { createSqlHistoryStore, memoryPrefs } from './history/historyStore';
 import type { SqlHistoryStore } from './history/historyStore';
+import { checkSavedQueryEdit, editSavedQueriesIn, savedQueriesIn } from './history/savedQueries';
+import { createSavedQueriesFile } from './history/savedQueriesFile';
+import type { SavedQueriesFile } from './history/savedQueriesFile';
 import type { SqlSidebarBridge } from './sidebarBridge';
 import { gateStatement } from './sql/gate';
 import { createSqlCore } from './sqlCore';
 import type { SqlCore, SqlCoreBus } from './sqlCore';
 import { sqlChannel } from './sqlFrame';
 import type { SqlToolProtocol } from './sqlFrame';
+import { SAVED_QUERIES_LOAD_WAIT_MS } from './sqlTimeouts';
+import { MAX_QUESTION_CHARS } from './connect/tools';
 
 /** What {@link attachSqlController} needs (DevToolProps plus the injected realm and factories). */
 export interface SqlControllerOptions {
@@ -148,6 +169,8 @@ export interface SqlControllerMount {
 	readonly core: SqlCore;
 	/** The controller's history store (persisted in the user's history file). */
 	readonly history: SqlHistoryStore;
+	/** The controller's saved queries (persisted in the user's saved-queries file). */
+	readonly savedQueries: SavedQueriesFile;
 	/** The channel the controller serves on. */
 	readonly channel: ToolChannel;
 	/** Feed every new activeDocKey prop value (activation, R7). */
@@ -211,6 +234,28 @@ export function checkExecuteInput(input: { sql: unknown; params?: unknown; idemp
 }
 
 /**
+ * Check `sql.applyBatch`'s input.
+ *
+ * @param input - The op params.
+ * @param input.statements - The statements.
+ * @param input.atomic - Whether they are to run as one transaction.
+ * @throws ExplorerToolError `invalid` naming what is wrong.
+ */
+export function checkApplyInput(input: { statements: unknown; atomic: unknown }): void {
+	if (typeof input.atomic !== 'boolean') throw invalidInput('apply', 'atomic must be true or false.');
+	if (!Array.isArray(input.statements) || input.statements.length === 0) throw invalidInput('apply', 'The statements must be a list with at least one statement.');
+	if (input.statements.length > MAX_APPLY_STATEMENTS) throw invalidInput('apply', `An apply may carry at most ${MAX_APPLY_STATEMENTS} statements.`);
+	input.statements.forEach((statement: unknown, index) => {
+		const which = `Statement ${index + 1}`;
+		if (statement === null || typeof statement !== 'object' || Array.isArray(statement)) throw invalidInput('apply', `${which} must be an object.`);
+		const { sql, params, expect } = statement as { sql?: unknown; params?: unknown; expect?: unknown };
+		if (typeof sql !== 'string') throw invalidInput('apply', `${which}'s text must be text.`);
+		if (params !== undefined && (!Array.isArray(params) || !params.every((value) => isJsonValue(value)))) throw invalidInput('apply', `${which}'s parameters must be a list of JSON values.`);
+		if (expect !== undefined && !(typeof expect === 'number' && Number.isSafeInteger(expect) && expect >= 0)) throw invalidInput('apply', `${which}'s expected row count must be a whole number.`);
+	});
+}
+
+/**
  * Check `sql.getSchema`'s input.
  *
  * @param input - The op params.
@@ -219,6 +264,18 @@ export function checkExecuteInput(input: { sql: unknown; params?: unknown; idemp
  */
 export function checkSchemaInput(input: { table?: unknown }): void {
 	if (input.table !== undefined && typeof input.table !== 'string') throw invalidInput('get_schema', 'The table name must be text.');
+}
+
+/**
+ * Check `sql.getSql`'s input.
+ *
+ * @param input - The op params.
+ * @param input.question - The question.
+ * @throws ExplorerToolError `invalid` naming what is wrong.
+ */
+export function checkQuestionInput(input: { question: unknown }): void {
+	if (typeof input.question !== 'string' || input.question.trim() === '') throw invalidInput('get_sql', 'Write a question to ask.');
+	if (input.question.length > MAX_QUESTION_CHARS) throw invalidInput('get_sql', `A question holds at most ${MAX_QUESTION_CHARS.toLocaleString('en-US')} characters.`);
 }
 
 /**
@@ -324,7 +381,7 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 	 */
 	const requireOwner = (owner: string | null | undefined, tool: string): void => {
 		const now = core.identity.get().fingerprint;
-		const outcome = tool === 'history' ? 'this history was not read' : 'nothing was changed';
+		const outcome = tool === 'history' ? 'this history was not read' : tool === 'savedQueries' ? 'no saved query was read' : 'nothing was changed';
 		if (now === null) throw new ExplorerToolError({ kind: 'unavailable', tool, message: `Not signed in to a RocketRide server, so ${outcome}.` });
 		if (owner !== now) throw new ExplorerToolError({ kind: 'stale', tool, message: `The signed-in account changed since this document opened, so ${outcome}.` });
 	};
@@ -445,6 +502,17 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 		detachHistory = attachWhenLoaded(accessor, (api, fingerprint) => history.attachPrefs(api, fingerprint));
 	};
 
+	// ── Saved queries, persisted in their own file, per identity ────────────
+
+	let publishSaved: () => void = () => undefined;
+	const saved = createSavedQueriesFile({
+		cm: opts.cm,
+		identity: core.identity,
+		activation: core.activation,
+		loadWaitMs: SAVED_QUERIES_LOAD_WAIT_MS,
+		onChange: () => publishSaved(),
+	});
+
 	const handlers: RequiredControllerHandlers<SqlOps> = {
 		'sql.resolveEndpoint': ({ connId }) => core.resolve(connId),
 		'sql.releaseEndpoint': async ({ connId, key }) => {
@@ -468,6 +536,15 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 		},
 		'sql.refreshSchema': ({ connId }) => core.withSession(connId, (session) => session.refreshSchema(), 'refresh_schema'),
 		'sql.dialect': ({ connId }) => core.withSession(connId, (session) => session.dialect(), 'dialect'),
+		'sql.applyBatch': ({ connId, statements, atomic, owner }) => {
+			requireOwner(owner, 'apply');
+			checkApplyInput({ statements, atomic });
+			// The core gates the list with the node's dialect and keeps the
+			// session id: the frame gets the outcome only. Never repeated (T10).
+			// The account is checked again once the connection is resolved,
+			// right before anything is sent.
+			return core.applyBatch(connId, statements, atomic, () => requireOwner(owner, 'apply'));
+		},
 		'sql.getService': async ({ provider }) => {
 			if (typeof provider !== 'string' || provider === '') throw invalidInput('get_service', 'The provider must be a name.');
 			return (await core.getService(provider)) as JsonValue;
@@ -483,6 +560,10 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 			// Checked again where the list changes: the account may change while
 			// the list is still being read.
 			await core.saveConnection(connection, () => requireOwner(owner, 'saveConnection'));
+		},
+		'sql.setConnectionSafety': async ({ connId, safety, owner }) => {
+			requireOwner(owner, 'setConnectionSafety');
+			await core.setConnectionSafety(connId, safety, () => requireOwner(owner, 'setConnectionSafety'));
 		},
 		'sql.deleteConnection': async ({ connId, owner }) => {
 			requireOwner(owner, 'deleteConnection');
@@ -521,6 +602,32 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 			const key = await core.keyOf(connId);
 			requireOwner(owner, 'historyEdit');
 			applyHistoryEdit(history, key, checkHistoryEdit(edit));
+		},
+		'sql.savedQueries': async ({ connId, owner }) => {
+			// Only the frame's own account's, checked again after every wait: a
+			// frame bound to A is never served B's queries.
+			requireOwner(owner, 'savedQueries');
+			const key = await core.keyOf(connId);
+			requireOwner(owner, 'savedQueries');
+			const prefs = await saved.accessor('savedQueries');
+			requireOwner(owner, 'savedQueries');
+			return { storage: saved.storage(), queries: savedQueriesIn(prefs, key) };
+		},
+		'sql.savedQueryEdit': async ({ connId, edit, owner }) => {
+			requireOwner(owner, 'savedQueryEdit');
+			const change = checkSavedQueryEdit(edit);
+			const key = await core.keyOf(connId);
+			requireOwner(owner, 'savedQueryEdit');
+			const prefs = await saved.accessor('savedQueryEdit');
+			// Again after the file's read: the change lands in its own account's file only.
+			requireOwner(owner, 'savedQueryEdit');
+			editSavedQueriesIn(prefs, key, change);
+			saved.changed();
+		},
+		'sql.getSql': ({ connId, question }) => {
+			// The node writes SQL and returns it; nothing is executed here or there.
+			checkQuestionInput({ question });
+			return core.withSession(connId, (session) => session.getSql(question), 'get_sql');
 		},
 	};
 
@@ -572,6 +679,10 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 	followHistoryOwner(core.identity.get());
 	const offHistoryOwner = core.identity.subscribe(followHistoryOwner);
 
+	// Saved-query revision: frames read a connection's list again when it moves.
+	publishSaved = (): void => state.publishState('savedQueries', { storage: saved.storage(), rev: saved.rev() });
+	publishSaved();
+
 	// ── Frame -> sidebar feeds (idempotent hints) ───────────────────────────
 
 	const activeSubs = new Set<(key: string | null) => void>();
@@ -613,12 +724,15 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 			errorSubs.add(cb);
 			return () => { errorSubs.delete(cb); };
 		},
+		// The sidebar is in this realm: status is read from the core, never published.
+		subscribeStatus: (cb) => core.subscribeStatus(cb),
 	};
 
 	return {
 		bridge,
 		core,
 		history,
+		savedQueries: saved,
 		channel: attached.channel,
 		noteActiveDocKey: (key) => core.activation.noteActiveDocKey(key),
 		dispose() {
@@ -640,6 +754,7 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 			void prefs?.close();
 			void parked?.close();
 			parked = null;
+			saved.close();
 			offActive();
 			offError();
 			activeSubs.clear();

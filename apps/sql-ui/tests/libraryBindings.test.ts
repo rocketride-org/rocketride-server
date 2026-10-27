@@ -54,7 +54,8 @@ function source(rel: string): string {
 describe('library bindings: each module is an instance of the shared factory', () => {
 	const bindings: [string, RegExp][] = [
 		['history/historyStore.ts', /createHistoryStore<'sql'>\(\{/],
-		['history/historyStore.ts', /createHistoryPrefsBridge\(store\)/],
+		['history/historyStore.ts', /const pinned = pinHistory\(store, APP_WORKSPACE_PIN\);/],
+		['history/historyStore.ts', /createHistoryPrefsBridge\(pinned\)/],
 		['history/runEvents.ts', /createRunEvents<'sql'>\(\)/],
 		['history/trim.ts', /from 'shared\/explorer\/history\/trim'/],
 		['history/types.ts', /from 'shared\/explorer\/history\/types'/],

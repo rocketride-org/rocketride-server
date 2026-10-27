@@ -34,7 +34,10 @@
 //   the rule is conservative all the same: anything that is not clearly
 //   read-only is not a read. `EXPLAIN ANALYZE` really executes its inner
 //   statement, so it is classified by that statement, not as a read — and
-//   `patternCheck` peels the same prefix for the same reason.
+//   `patternCheck` peels the same prefix for the same reason. So do its
+//   other spellings: PostgreSQL's `ANALYSE` and option list (`EXPLAIN
+//   (ANALYZE true, BUFFERS)`), and MySQL's synonyms `DESCRIBE ANALYZE` and
+//   `DESC ANALYZE`.
 //
 //   `patternCheck` — whether the statement matches one of the shapes the
 //   confirmation dialog asks about. This is a TEXT CHECK, not a database
@@ -120,11 +123,15 @@ const TX_POSTGRES_END = /^end(?:\s+(?:work|transaction))?$/i;
  */
 const TX_MYSQL = /^(?:xa\s+(?:start|begin|end|prepare|commit|rollback|recover)\b|set\s+@@(?:(?:session|global|local)\.)?autocommit\b)/i;
 
+/** `EXPLAIN`, and MySQL's synonyms for it, which also take ANALYZE. */
+const EXPLAIN_LEADER = /^(?:explain|describe|desc)\b/i;
+
 /**
- * The `EXPLAIN` prefix: the keyword, an optional parenthesised option list, and
- * any bare option words before the statement being explained.
+ * The `EXPLAIN` prefix: the keyword (or `DESCRIBE` / `DESC`), an optional
+ * parenthesised option list, and any bare option words before the statement
+ * being explained. `ANALYZE` and `ANALYSE` are both PostgreSQL spellings.
  */
-const EXPLAIN_PREFIX = /^explain\s*(?:\([^)]*\)\s*)?(?:(?:analyz[se]|verbose|extended|partitions|costs|buffers|settings|summary|timing|wal|format\s*=?\s*\w+)\s+)*/i;
+const EXPLAIN_PREFIX = /^(?:explain|describe|desc)\s*(?:\([^)]*\)\s*)?(?:(?:analy[sz]e|verbose|extended|partitions|costs|buffers|settings|summary|timing|wal|format\s*=?\s*\w+)\s+)*/i;
 
 /**
  * Data-modifying keywords that can appear inside a CTE chain.
@@ -249,6 +256,40 @@ function namesCte(masked: string, site: KeywordSite): boolean {
 }
 
 // =============================================================================
+// EXPLAIN
+// =============================================================================
+
+/**
+ * Read an `EXPLAIN` form: whether it ANALYZEs, which RUNS the statement it
+ * describes, and that statement. A `DESCRIBE` or `DESC` without ANALYZE
+ * describes a table and is not one (the read leaders cover it).
+ *
+ * @param head - The normalized statement.
+ * @returns The form, or null when the statement is not one.
+ */
+function explainForm(head: string): { analyze: boolean; inner: string } | null {
+	if (!EXPLAIN_LEADER.test(head)) return null;
+	const prefix = EXPLAIN_PREFIX.exec(head)?.[0] ?? '';
+	const analyze = /\banaly[sz]e\b/i.test(prefix);
+	if (!analyze && !/^explain\b/i.test(head)) return null;
+	return { analyze, inner: head.slice(prefix.length).trim() };
+}
+
+/**
+ * The statement an `EXPLAIN ANALYZE` form would run, or null when the text
+ * runs nothing: a plain EXPLAIN plans only, and an ANALYZE with nothing (or
+ * another EXPLAIN) behind it is not a statement this reads further.
+ *
+ * @param head - The normalized statement.
+ * @returns The statement it runs, or null.
+ */
+function analyzedStatement(head: string): string | null {
+	const form = explainForm(head);
+	if (form === null || !form.analyze || !form.inner || EXPLAIN_LEADER.test(form.inner)) return null;
+	return form.inner;
+}
+
+// =============================================================================
 // CLASSIFICATION
 // =============================================================================
 
@@ -281,12 +322,9 @@ export function classifyStatement(sql: string, dialect: SqlDialect = 'unknown'):
 	if (!head) return 'other';
 
 	// EXPLAIN: read, UNLESS it is an ANALYZE form, which runs the statement.
-	if (/^explain\b/i.test(head)) {
-		const prefix = EXPLAIN_PREFIX.exec(head)?.[0] ?? 'explain';
-		const inner = head.slice(prefix.length).trim();
-		if (!/\banaly[sz]e\b/i.test(prefix)) return 'read';
-		if (!inner || /^explain\b/i.test(inner)) return 'read';
-		return classifyStatement(inner, dialect);
+	if (explainForm(head) !== null) {
+		const runs = analyzedStatement(head);
+		return runs === null ? 'read' : classifyStatement(runs, dialect);
 	}
 
 	if (TX_SET.test(head)) return 'tx';
@@ -309,12 +347,14 @@ export function classifyStatement(sql: string, dialect: SqlDialect = 'unknown'):
 /**
  * Look for the statement shapes the confirmation dialog asks about: UPDATE or
  * DELETE with no top-level WHERE, an UPDATE or DELETE inside a WITH clause,
- * TRUNCATE, DROP, ALTER.
+ * TRUNCATE, DROP, ALTER, and an `EXPLAIN ANALYZE` of anything but a read.
  *
  * `EXPLAIN ANALYZE` is checked as the statement it would run, because it runs
  * it: the prefix is peeled here the same way {@link classifyStatement} peels
  * it, which is what keeps the two judgements from disagreeing about a form
- * that empties a table. A plain `EXPLAIN` runs nothing and is never a finding.
+ * that empties a table. When that statement has no finding of its own and is
+ * not a read, the finding is `EXPLAIN ANALYZE` itself. A plain `EXPLAIN` runs
+ * nothing and is never a finding.
  *
  * A `WITH` chain is read group by group, because PostgreSQL lets the statement
  * and any CTE body carry a write. Each parenthesised group has a VERB — its
@@ -364,13 +404,15 @@ export function patternCheck(sql: string, dialect: SqlDialect = 'unknown'): Patt
 	// EXPLAIN ANALYZE RUNS the statement it describes, and every call here
 	// commits on its own, so the prefix is peeled exactly as
 	// `classifyStatement` peels it and the check is made on what would really
-	// run. A plain EXPLAIN runs nothing and is never a finding.
-	if (/^explain\b/i.test(head)) {
-		const prefix = EXPLAIN_PREFIX.exec(head)?.[0] ?? 'explain';
-		if (!/\banaly[sz]e\b/i.test(prefix)) return null;
-		const inner = head.slice(prefix.length).trim();
-		if (!inner || /^explain\b/i.test(inner)) return null;
-		return patternCheck(inner, dialect);
+	// run. That statement's own finding is the more specific one. Without
+	// one, anything but a read is still a finding: an EXPLAIN reads as a
+	// plan, so a bounded DELETE behind ANALYZE would otherwise run unasked
+	// where its reader expected nothing to change. A plain EXPLAIN runs
+	// nothing and is never a finding.
+	if (explainForm(head) !== null) {
+		const runs = analyzedStatement(head);
+		if (runs === null) return null;
+		return patternCheck(runs, dialect) ?? (classifyStatement(runs, dialect) === 'read' ? null : { kind: 'EXPLAIN ANALYZE' });
 	}
 
 	if (/^truncate\b/i.test(head)) return { kind: 'TRUNCATE' };

@@ -70,12 +70,83 @@ export interface SavedConnectionsFs {
 // TYPES
 // =============================================================================
 
+/**
+ * How much a connection asks before a statement that changes something runs:
+ *
+ * - `off` — never asks.
+ * - `risky` — asks before the shapes the pattern check flags (UPDATE or
+ *   DELETE without WHERE or inside a WITH clause, TRUNCATE, DROP, ALTER).
+ * - `every` — asks before every statement that is not a read (SELECT,
+ *   EXPLAIN, SHOW, DESCRIBE, a read-only WITH chain).
+ *
+ * At `risky` and `every`, DROP and TRUNCATE also ask for the target's name to
+ * be typed (sql/safety.ts). It is a check on the statement text that only adds
+ * questions; the node's `allow_execute` switch is the real gate.
+ */
+export type SafetyLevel = 'off' | 'risky' | 'every';
+
+/** Every level, in the order the connection editor offers them. */
+export const SAFETY_LEVELS: readonly SafetyLevel[] = ['off', 'risky', 'every'];
+
+/** The level of a record that names none (new records, and older ones). */
+export const DEFAULT_SAFETY_LEVEL: SafetyLevel = 'risky';
+
+/**
+ * Whether a value is a safety level.
+ *
+ * @param value - The value.
+ * @returns True for `off`, `risky` and `every`.
+ */
+export function isSafetyLevel(value: unknown): value is SafetyLevel {
+	return typeof value === 'string' && (SAFETY_LEVELS as readonly string[]).includes(value);
+}
+
+/**
+ * A connection's safety level. A record with none, or with a value that is
+ * not a level, reads as the default: never as `off`.
+ *
+ * @param record - The saved connection, or null when it is not known.
+ * @returns The level.
+ */
+export function safetyLevelOf(record: SavedSqlConnection | null | undefined): SafetyLevel {
+	return isSafetyLevel(record?.safety) ? record.safety : DEFAULT_SAFETY_LEVEL;
+}
+
+/** The owner's answer about a level, and the copy of the record it was asked against. */
+export interface AskedSafety {
+	/** The level the owner holds. */
+	level: SafetyLevel;
+	/** This realm's copy of the record when the answer arrived. */
+	against: SavedSqlConnection | null;
+}
+
+/**
+ * The level in force for a document: the owner's answer while this realm's
+ * copy of the record is the one it was asked against, the copy's own level
+ * otherwise. Any newer copy (a new record object), even one holding the same
+ * value, retires the answer: a second writer may have changed the level back
+ * while the copy lagged.
+ *
+ * @param record - This realm's copy of the record, or null.
+ * @param asked - The owner's answer, or null.
+ * @returns The level.
+ */
+export function enforcedSafety(record: SavedSqlConnection | null, asked: AskedSafety | null): SafetyLevel {
+	return asked !== null && asked.against === record ? asked.level : safetyLevelOf(record);
+}
+
 /** Fields shared by both connection modes. */
 interface SavedConnectionBase {
 	/** Stable id (list identity, temp-pipeline naming). */
 	id: string;
 	/** User-visible name (sidebar row, workbench tab). */
 	name: string;
+	/**
+	 * How much this connection asks before a write ({@link SafetyLevel}).
+	 * Optional: records saved before it existed, or by an older build, have
+	 * none and read as {@link DEFAULT_SAFETY_LEVEL}.
+	 */
+	safety?: SafetyLevel;
 }
 
 /** A connection bound to a database node inside a user pipeline. */

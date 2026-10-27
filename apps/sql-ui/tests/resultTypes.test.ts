@@ -34,7 +34,24 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { SqlSchemaResponse, SqlDialect } from '../src/connect';
 import type { RrType } from '../src/sql/resultTypes';
-import { inferColumnTypes, rrTypeFromSqlType, rrTypeFromValues } from '../src/sql/resultTypes';
+import { inferColumnTypes, isBinarySqlType, rrTypeFromSqlType, rrTypeFromValues } from '../src/sql/resultTypes';
+
+// The node sends bytes as text (`bytes.decode('utf-8', errors='replace')`;
+// PostgreSQL bytea arrives as '<memory at 0x…>'), so a value of these types
+// is not the value stored, and must never be matched against it (DA-R2 I1).
+describe('isBinarySqlType', () => {
+	it('knows the binary types of PostgreSQL and MySQL, by whole token', () => {
+		for (const type of ['BINARY(16)', 'binary', 'VARBINARY(255)', 'BLOB', 'TINYBLOB', 'MEDIUMBLOB', 'LONGBLOB', 'BYTEA', 'bytea', 'BIT(1)', 'BIT(64)', 'BIT VARYING(8)', 'VARBIT', 'CHAR(16) CHARACTER SET binary']) {
+			assert.equal(isBinarySqlType(type), true, type);
+		}
+	});
+
+	it('does not take a word that merely contains one for it', () => {
+		for (const type of ['VARCHAR(20)', 'TEXT', 'VARCHAR(20) COLLATE utf8mb4_bin', 'ORBIT', 'BITMAP', 'HABIT', "ENUM('binary','bit')", 'BIGINT', 'INTEGER', '']) {
+			assert.equal(isBinarySqlType(type), false, type);
+		}
+	});
+});
 
 // =============================================================================
 // SQL TYPE NAMES

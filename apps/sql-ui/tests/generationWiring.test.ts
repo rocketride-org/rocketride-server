@@ -67,8 +67,12 @@ describe('generation tickets reach the session', () => {
 	it('the data browser takes a ticket per page request (a newer one expires it) and expires it on unmount', () => {
 		const source = read('views', 'TableDataView.tsx');
 		assert.match(source, /const ticket = generation\.next\(\);/);
-		assert.match(source, /session\.execute\(select, \{ params, idempotent: true, generation: ticket \}\)/);
-		assert.match(source, /session\.execute\(count, \{ params, idempotent: true, generation: ticket \}\)/);
+		// Every statement of a page request (probe, SELECT, COUNT) goes through
+		// one helper that carries the ticket.
+		assert.match(source, /const exec = \(sql: string, params: unknown\[\]\) => session\.execute\(sql, \{ params, idempotent: true, generation: ticket \}\);/);
+		assert.match(source, /exec\(stmts\.select, stmts\.params\)/);
+		assert.match(source, /exec\(stmts\.count, stmts\.params\)/);
+		assert.match(source, /exec\(probe\.sql, probe\.params\)/);
 		assert.match(source, /useEffect\(\(\) => \(\) => generation\.invalidate\(\), \[generation\]\);/);
 	});
 

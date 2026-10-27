@@ -50,6 +50,12 @@ export interface SqlHistoryApi {
 	useRecording(endpoint: SqlEndpoint): boolean;
 	/** Where history is kept, in one sentence: the drawer's privacy line (a hook). */
 	usePrivacyNotice(): string;
+	/**
+	 * Why history can be neither shown nor changed now, in one sentence, or
+	 * null when it can (a hook). The full app refuses while another account
+	 * is signed in than the one its preferences were read for.
+	 */
+	useRefusal(): string | null;
 	/** Record one finished statement (unless recording is off for the connection). */
 	record(endpoint: SqlEndpoint, entry: HistoryEntry): void;
 	/** Forget one entry. */

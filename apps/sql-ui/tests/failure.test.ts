@@ -63,6 +63,24 @@ describe('describeFailure', () => {
 		assert.equal(describeFailure('deadlock found when trying to get lock').allowExecuteOff, false);
 	});
 
+	// DA-R1 M1: the refusal turns the whole connection schema only, so only
+	// the node's own sentence may set it. A database error can carry the
+	// user's own text, and `allow_execute` is a legal value and column name.
+	it('does not claim allow_execute for a database error that merely mentions it', () => {
+		for (const message of [
+			// A filter chip `qty > allow_execute`, as PostgreSQL answered it (live).
+			'SQL execution failed: invalid input syntax for type integer: "allow_execute"',
+			// A typo in the editor.
+			'SQL execution failed: column "allow_execute" does not exist',
+			// A value that quotes the refusal itself: still the database talking.
+			'SQL execution failed: invalid input syntax for type integer: "execute tool is disabled for this node"',
+			'column "allow_execute" does not exist',
+			'allow_execute must be a boolean',
+		]) {
+			assert.equal(describeFailure(message).allowExecuteOff, false, message);
+		}
+	});
+
 	it('reads the node row cap out of an overflow', () => {
 		assert.equal(describeFailure('EXECUTE query exceeded max_execute_rows=1000').maxExecuteRows, 1000);
 	});
@@ -132,10 +150,10 @@ describe('describeFailure — the node execute prefix', () => {
 		assert.equal(notice.verbatim, 'SQL execution failed:');
 	});
 
-	it('keeps reading the node flags through the prefix', () => {
+	it('keeps reading the row cap through the prefix, but never the refusal, which the node raises before any database is asked', () => {
 		assert.equal(
 			describeFailure('SQL execution failed: execute tool is disabled for this node (set allow_execute=true)').allowExecuteOff,
-			true,
+			false,
 		);
 		assert.equal(
 			describeFailure('SQL execution failed: EXECUTE query exceeded max_execute_rows=1000').maxExecuteRows,

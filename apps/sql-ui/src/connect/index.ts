@@ -29,6 +29,9 @@
 // =============================================================================
 
 export type {
+	SqlApplyFailure,
+	SqlApplyResult,
+	SqlApplyStatement,
 	SqlDialect,
 	SqlEndpoint,
 	SqlExecuteResult,
@@ -37,11 +40,12 @@ export type {
 	SqlSchemaTable,
 	SqlSchemaResponse,
 	SqlSession,
+	SqlGetSqlResult,
 } from './types';
 export { DATABASE_PROVIDERS } from './discovery';
 export { createSqlEndpoints } from './endpoints';
 export { createSqlSession, toDialect } from './session';
-export { SQL_TOOLS, DIALECT_WAIT_MS, GET_SCHEMA_WAIT_MS, REFRESH_SCHEMA_WAIT_MS, statementWaitMs } from './tools';
+export { SQL_TOOLS, DIALECT_WAIT_MS, GET_SCHEMA_WAIT_MS, REFRESH_SCHEMA_WAIT_MS, TRANSACTIONS_UNAVAILABLE_CODE, isTransactionsUnavailable, statementWaitMs, GET_SQL_WAIT_MS, MAX_QUESTION_CHARS } from './tools';
 export { refreshEndpoints, useSqlEndpoints } from './endpointStore';
 export type { EndpointStatus, EndpointState } from './endpointStore';
 export {

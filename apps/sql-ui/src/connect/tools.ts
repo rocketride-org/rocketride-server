@@ -40,6 +40,20 @@
 //                    app offers "Stop waiting" instead. On the bus that is
 //                    carried as the dev-tool library's 24 h cap
 //                    (UNBOUNDED_TOOL_TIMEOUT_MS), never as the 120 s default.
+//   begin            40 s     (a connection out of the node's pool: SQLAlchemy's
+//                             30 s pool timeout, plus the 10 s pad)
+//   commit/rollback  60 s     (each first waits for the session's lock, behind
+//                             a statement still running in it)
+//   an Apply's       inside a transaction, 300 s EACH at most (the node's
+//   statements       idle-transaction timeout: a stalled statement is not
+//                    waited on longer than the node would keep an abandoned
+//                    transaction, and a long plan is not cut off as a
+//                    whole); committed one by one, as `execute` above (no
+//                    transaction to outlast, so a long ALTER is not cut off)
+//   get_sql          120 s    (Ask: the node's LLM writes a query and the node
+//                             checks it with EXPLAIN, up to five drafts; it
+//                             executes nothing, so a TASK_STOPPED refusal may
+//                             be sent again)
 //
 // The waits for the shared tools come from the library's documented table
 // (shared/explorer/connect/session DEFAULT_TOOL_TIMEOUTS), so SQL and the
@@ -50,6 +64,7 @@
 // =============================================================================
 
 import { checkObject, isPlainObject } from 'shared/explorer/checks';
+import { ExplorerToolError } from 'shared/explorer/errors';
 import { DEFAULT_TIMEOUT_PAD_MS, DEFAULT_TOOL_TIMEOUTS } from 'shared/explorer/connect/session';
 import type { IToolSessionOptions } from 'shared/explorer/connect/session';
 
@@ -62,8 +77,64 @@ export const GET_SCHEMA_WAIT_MS = DEFAULT_TOOL_TIMEOUTS.get_schema as number;
 /** Client wait of the `refresh_schema` tool (ms). */
 export const REFRESH_SCHEMA_WAIT_MS = DEFAULT_TOOL_TIMEOUTS.refresh_schema as number;
 
+/**
+ * Client wait of the `get_sql` tool (ms): an LLM round trip per draft plus an
+ * EXPLAIN of each, the budget the shared library documents for `get_data`
+ * (which is `get_sql` and then the query).
+ */
+export const GET_SQL_WAIT_MS = 120_000;
+
+/** The longest question Ask sends (characters). */
+export const MAX_QUESTION_CHARS = 2_000;
+
 /** Added to a node's published statement deadline, so the node's own error arrives first. */
 export const STATEMENT_WAIT_PAD_MS = DEFAULT_TIMEOUT_PAD_MS;
+
+/**
+ * How long the node keeps an idle transaction session before it rolls it
+ * back (`tx_idle_timeout`, 300 s by default; packages/ai/.../tx_registry.py).
+ */
+export const NODE_TX_IDLE_MS = 300_000;
+
+/**
+ * The longest one statement of an Apply's transaction is waited for (less
+ * when the node publishes a shorter statement deadline); a statement that
+ * commits on its own waits as `execute` does. The node's reaper skips a session
+ * while a statement runs in it, so only the gap BETWEEN calls has to stay
+ * under its idle timeout, which the app's back-to-back calls do: each
+ * statement gets its own wait, and a long plan is not cut off as a whole. A
+ * statement still running when its wait ends stops the apply: the
+ * transaction is rolled back (it is never committed), and the reaper is the
+ * backstop for a rollback that cannot get through.
+ */
+export const APPLY_STATEMENT_WAIT_MS = NODE_TX_IDLE_MS;
+
+/** The most statements one apply may carry (a longer list is refused before anything is sent). */
+export const MAX_APPLY_STATEMENTS = 1000;
+
+/**
+ * The code of the refusal an atomic apply gets where there is no transaction
+ * to have (a ClickHouse node, or a node without the `begin` tool). Nothing
+ * was sent; the caller asks the user before sending the statements again,
+ * one by one (`atomic: false`).
+ */
+export const TRANSACTIONS_UNAVAILABLE_CODE = 'transactions-unavailable';
+
+/**
+ * Whether an apply was refused because the engine has no transactions.
+ *
+ * @param error - What the apply threw.
+ * @returns True for {@link TRANSACTIONS_UNAVAILABLE_CODE}.
+ */
+export function isTransactionsUnavailable(error: unknown): boolean {
+	return error instanceof ExplorerToolError && error.code === TRANSACTIONS_UNAVAILABLE_CODE;
+}
+
+/** Client wait of the `begin` tool: a connection out of the node's pool (SQLAlchemy's 30 s pool timeout) plus the pad. */
+export const BEGIN_WAIT_MS = 30_000 + DEFAULT_TIMEOUT_PAD_MS;
+
+/** Client wait of the `commit` and `rollback` tools: the session's lock (a statement still running in it), then the end of the transaction. */
+export const END_TX_WAIT_MS = 60_000;
 
 /** Per-tool specs for the SQL node tools. */
 export const SQL_TOOLS: IToolSessionOptions['tools'] = {
@@ -73,6 +144,15 @@ export const SQL_TOOLS: IToolSessionOptions['tools'] = {
 	get_schema: { idempotent: true, timeoutMs: GET_SCHEMA_WAIT_MS, check: checkObject },
 	refresh_schema: { idempotent: true, timeoutMs: REFRESH_SCHEMA_WAIT_MS, check: checkObject },
 	dialect: { idempotent: true, timeoutMs: DIALECT_WAIT_MS, check: checkObject },
+	// The transaction tools an Apply runs (connect/session.ts). Never
+	// repeated: a second `begin` would open a second transaction, and a
+	// session does not outlive the task restart a retry would follow.
+	begin: { idempotent: false, timeoutMs: BEGIN_WAIT_MS, check: checkObject },
+	commit: { idempotent: false, timeoutMs: END_TX_WAIT_MS, check: checkObject },
+	rollback: { idempotent: false, timeoutMs: END_TX_WAIT_MS, check: checkObject },
+	// Writes SQL without running it; every `valid: false` shape is the
+	// node's answer (data), so only the object floor applies.
+	get_sql: { idempotent: true, timeoutMs: GET_SQL_WAIT_MS, check: checkObject },
 };
 
 /**

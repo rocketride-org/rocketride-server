@@ -217,6 +217,9 @@ export function createRemoteHistory(opts: RemoteHistoryOptions): RemoteHistory {
 		usePrivacyNotice() {
 			return useSyncExternalStore(subscribe, () => devToolPrivacyNotice(state?.storage ?? 'none'));
 		},
+		// The controller keeps one section per account and refuses another
+		// account's writes itself; a frame has nothing to refuse.
+		useRefusal: () => null,
 		record: (endpoint, entry) => write(endpoint, (connId) => caller.callReply('sql.historyRecord', { connId, entry: jsonEntry(entry), owner: owner() }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.historyRecord'] })),
 		removeEntry: (endpoint, id) => edit(endpoint, { action: 'remove', id }),
 		togglePin: (endpoint, id) => edit(endpoint, { action: 'pin', id }),

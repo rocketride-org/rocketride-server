@@ -28,16 +28,28 @@
 // nothing touches the database until Apply, and the DDL page always shows
 // exactly what Apply will run. Create mode (table = null) builds a CREATE
 // TABLE from the drafted column list instead.
+//
+// Apply sends the whole plan in one call (SqlSession.applyBatch). On
+// PostgreSQL, whose DDL is transactional, it asks for one transaction: a
+// failure rolls the whole plan back and the plan stays as it was. MySQL
+// commits each DDL statement implicitly and ClickHouse has no transactions,
+// so there the statements run one by one and what committed leaves the plan.
+// The outcome says "one transaction" only when the reply does.
 // =============================================================================
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Banner, Button, Card, ConfirmDialog, ContentHeader, EmptyState, InputField, Section, StatusBadge, TabControl, TabPanel } from 'shell';
 import type { ViewMenu } from 'shell';
 import { commonStyles } from 'shell';
+import { isTransactionsUnavailable } from '../connect';
 import type { SqlEndpoint, SqlSchemaColumn, SqlSchemaResponse, SqlDialect } from '../connect';
+import { knownNoTransactions, noteNoTransactions, perStatementConfirmText, thrownApplyMayHaveRun } from '../sql/applyMode';
+import { applyHistoryEntries } from '../sql/applyHistory';
 import { buildRelationGraph, inboundReferences } from '../schema/relations';
-import { refreshSchema, useSchema } from '../schema/schemaStore';
+import { refreshSchema, useExecuteState, useSchema } from '../schema/schemaStore';
+import { executeGateReason } from '../executeGate';
+import GatedButton from '../components/GatedButton';
 import { useSqlEnv } from '../sqlEnv';
 import type { AlterOp, ColumnSpec } from '../sql/ddl';
 import { FK_ACTIONS, describeOp, generateAlterStatements, generateCreateTable } from '../sql/ddl';
@@ -56,6 +68,11 @@ export interface TableDesignViewProps {
 	endpoint: SqlEndpoint;
 	/** The table being altered, or null for create-table mode. */
 	table: string | null;
+	/**
+	 * Told after an Apply that may have changed the database (it ran, or may
+	 * have), so the workbench's other pages stop trusting what they counted.
+	 */
+	onWrite?: () => void;
 }
 
 /** The banner shown after an Apply, composed once the snapshot has landed. */
@@ -71,21 +88,41 @@ interface ApplyOutcome {
 	verbatim: string | null;
 }
 
+/** Why an Apply stopped, as the outcome banner needs it. */
+export interface DesignApplyFailure {
+	/**
+	 * What failed: a statement, its row count, the commit, or the apply call
+	 * as a whole (refused before anything was sent, or no answer at all).
+	 */
+	stage: 'statement' | 'expect' | 'commit' | 'apply';
+	/** The failing statement's index (the statement count for the commit). */
+	failedAt: number;
+	/** How many statements are saved for certain (0 after a rollback). */
+	committed: number;
+	/** How many statements the batch held. */
+	total: number;
+	/** How many statements the plan still holds (null in create mode). */
+	remaining: number | null;
+	/** The database's message, verbatim. */
+	message: string;
+	/** Whether the plan ran as one transaction (the reply says so). */
+	transactional: boolean;
+	/** Whether the failing step's outcome is unknown, so it may have taken effect. */
+	unknown: boolean;
+	/** False when the transaction's rollback was not confirmed (its locks may stay up to 5 minutes). */
+	rollbackConfirmed: boolean;
+	/** The table the plan is for (named when its locks may stay). */
+	table: string;
+}
+
 /** An Apply whose outcome is waiting to be described against the snapshot. */
 interface PendingApply {
 	/** Wall-clock ms the statements finished at. */
 	at: number;
+	/** Whether the plan ran as one transaction (the reply says so). */
+	transactional: boolean;
 	/** Failure detail, or null when every statement ran. */
-	failure: {
-		/** How many statements committed before the failure. */
-		committed: number;
-		/** How many statements the batch held. */
-		total: number;
-		/** How many statements the plan still holds (null in create mode). */
-		remaining: number | null;
-		/** The database's message, verbatim. */
-		message: string;
-	} | null;
+	failure: DesignApplyFailure | null;
 }
 
 /** One display row of the columns page (snapshot + staged ops applied). */
@@ -251,16 +288,79 @@ const styles = {
 const STALE_SNAPSHOT_SENTENCE =
 	'The node reflected its schema at task start; the tree and diagram will not show this change until the pipeline restarts.';
 
+/** What the outcome says only when the reply confirms the plan ran as one transaction. */
+const ONE_TRANSACTION_SENTENCE = 'The plan runs as one transaction: a failure rolls back the whole plan';
+
 /**
- * How each engine treats a multi-statement DDL plan. None of them can undo a
- * committed statement from here, so the note says what actually happens
- * instead of offering a rollback that does not exist.
+ * Said when a transaction's rollback was not confirmed (review P4 I-2).
+ *
+ * @param table - The table.
+ * @returns The sentence.
  */
-const DIALECT_COMMIT_NOTE: Partial<Record<SqlDialect, string>> = {
-	mysql: 'MySQL: each DDL statement commits implicitly. A failure mid-plan leaves earlier statements applied. Nothing here can be rolled back.',
-	postgres: 'PostgreSQL: each statement runs in its own autocommit transaction. A failure mid-plan leaves earlier statements applied.',
-	clickhouse: 'ClickHouse: some ALTER forms run as asynchronous mutations and may finish after this dialog closes.',
-};
+function locksMayStay(table: string): string {
+	return `The rollback was not confirmed; the database may hold locks on ${table} for up to 5 minutes.`;
+}
+
+/** How the designer applies a plan on one engine, and what the confirmation says about it. */
+export interface DesignApplyMode {
+	/** Ask for one transaction (PostgreSQL: its DDL is transactional). */
+	atomic: boolean;
+	/** The confirmation's note on what happens when the plan stops half-way, or null. */
+	note: string | null;
+}
+
+/**
+ * How each engine treats a multi-statement DDL plan. PostgreSQL runs it as
+ * one transaction, so a failure leaves the table as it was; a node without
+ * the transaction tools gets nothing until the user agrees to go statement
+ * by statement (and once it is known, the note says so up front). MySQL and
+ * ClickHouse cannot undo a committed DDL statement, so their notes say what
+ * actually happens instead of offering a rollback that does not exist.
+ *
+ * @param dialect - The connection's dialect.
+ * @param noTransactions - The node answered that it has no transaction tools (sql/applyMode.ts).
+ * @returns The mode.
+ */
+export function designApplyMode(dialect: SqlDialect, noTransactions = false): DesignApplyMode {
+	switch (dialect) {
+		case 'postgres': return noTransactions
+			? { atomic: false, note: 'PostgreSQL: this node has no transaction tools, so each statement commits on its own. A failure mid-plan leaves earlier statements applied.' }
+			: { atomic: true, note: 'PostgreSQL: Apply asks for one transaction, so a failure rolls back the whole plan. If the node has none, nothing is sent and you are asked again.' };
+		case 'mysql': return { atomic: false, note: 'MySQL: each DDL statement commits implicitly. A failure mid-plan leaves earlier statements applied. Nothing here can be rolled back.' };
+		case 'clickhouse': return { atomic: false, note: 'ClickHouse: some ALTER forms run as asynchronous mutations and may finish after this dialog closes.' };
+		default: return { atomic: false, note: null };
+	}
+}
+
+/**
+ * How many statements of a failed Apply leave the plan: none after one
+ * transaction (rolled back, or a lost commit answer the banner flags) or an
+ * apply that got no answer at all; statement by statement, the committed
+ * ones, and the failed one too when its outcome is unknown, so it is never
+ * run again without the user seeing it (review P4 I-1).
+ *
+ * @param failure - What the apply reported.
+ * @returns The count to drop from the front of the plan.
+ */
+function settledStatements(failure: DesignApplyFailure): number {
+	if (failure.transactional || failure.stage === 'apply') return 0;
+	return failure.committed + (failure.unknown ? 1 : 0);
+}
+
+/**
+ * The plan left after a failed Apply: everything, unless statements were
+ * committed one by one before the failure (or may have been), which then
+ * leave it. After a rolled-back transaction nothing committed, so no
+ * prefix is dropped.
+ *
+ * @param ops - The plan as it stands.
+ * @param failure - What the apply reported.
+ * @returns The plan to keep.
+ */
+export function planAfterFailure(ops: AlterOp[], failure: DesignApplyFailure): AlterOp[] {
+	const settled = settledStatements(failure);
+	return settled > 0 ? ops.slice(settled) : ops;
+}
 
 /**
  * Format a wall-clock time as HH:MM for the "Applied HH:MM" lines.
@@ -348,31 +448,74 @@ export function inboundImpact(schema: SqlSchemaResponse | null, table: string, o
 }
 
 /**
- * Describe a batch that stopped part-way: what committed, which statement
- * failed and why, what never ran, and what the plan still holds.
+ * The plan's size, for "The plan still holds …".
+ *
+ * @param n - How many statements.
+ * @returns The sentence.
+ */
+function stillHolds(n: number): string {
+	return n === 1 ? 'The plan still holds its statement.' : `The plan still holds all ${n} statements.`;
+}
+
+/**
+ * Describe an Apply that stopped: in one transaction, that nothing was
+ * applied and the whole plan stays (or, when the commit's answer never
+ * arrived, that the outcome is unknown); statement by statement, what
+ * committed, which statement failed and why, what never ran, and what the
+ * plan still holds.
  *
  * @param failure - The failure detail recorded by Apply.
- * @returns The banner text.
+ * @returns The banner text, and the verbatim driver text (null when there is none worth showing).
  */
-function describeApplyFailure(failure: NonNullable<PendingApply['failure']>): { text: string; verbatim: string | null } {
-	const { committed, total, remaining, message } = failure;
-	const failedAt = committed + 1;
+export function describeApplyFailure(failure: DesignApplyFailure): { text: string; verbatim: string | null } {
+	const { stage, committed, total, remaining, message, transactional, unknown, rollbackConfirmed, table } = failure;
+	const failedAt = failure.failedAt + 1;
 	const parts: string[] = [];
-
-	if (committed === 0) {
-		parts.push(`Statement 1 of ${total} failed.`);
-	} else if (committed === 1) {
-		parts.push(`Statement 1 of ${total} ran and is committed; statement ${failedAt} failed.`);
-	} else {
-		parts.push(`Statements 1–${committed} of ${total} ran and are committed; statement ${failedAt} failed.`);
-	}
 
 	// A node that predates the error-text fix returns its own placeholder. Say
 	// the message is missing rather than quoting the placeholder as if the
 	// database had said it.
 	const notice = describeFailure(message);
-	parts.push(notice.generic ? GENERIC_ERROR_TEXT : notice.headline);
-	if (notice.allowExecuteOff) parts.push(ALLOW_EXECUTE_OFF_TEXT);
+	const said = (): void => {
+		parts.push(notice.generic ? GENERIC_ERROR_TEXT : notice.headline);
+		if (notice.allowExecuteOff) parts.push(ALLOW_EXECUTE_OFF_TEXT);
+	};
+	const verbatim = notice.generic ? null : notice.verbatim || null;
+
+	if (unknown && (stage === 'apply' || (transactional && stage === 'commit'))) {
+		parts.push(stage === 'commit'
+			? "The commit's answer did not arrive, so the plan may or may not have been saved."
+			: "The apply's answer did not arrive, so the plan may or may not have been saved.");
+		said();
+		parts.push('Check the table before you apply again.');
+		if (!rollbackConfirmed) parts.push(locksMayStay(table));
+		return { text: parts.join(' '), verbatim };
+	}
+
+	if (stage === 'apply') {
+		parts.push('Nothing was applied.');
+		said();
+		return { text: parts.join(' '), verbatim };
+	}
+
+	if (transactional) {
+		parts.push(stage === 'commit' ? 'The commit was refused.' : `Statement ${failedAt} of ${total} failed.`);
+		said();
+		parts.push(`${ONE_TRANSACTION_SENTENCE}, so nothing was applied.`);
+		if (remaining !== null && remaining > 0) parts.push(stillHolds(remaining));
+		if (!rollbackConfirmed) parts.push(locksMayStay(table));
+		return { text: parts.join(' '), verbatim };
+	}
+
+	if (committed === 0) {
+		parts.push(`Statement ${failedAt} of ${total} failed.`);
+	} else if (committed === 1) {
+		parts.push(`Statement 1 of ${total} ran and is committed; statement ${failedAt} failed.`);
+	} else {
+		parts.push(`Statements 1–${committed} of ${total} ran and are committed; statement ${failedAt} failed.`);
+	}
+	said();
+	if (unknown) parts.push(`Statement ${failedAt} may have run: its answer did not arrive. It was taken out of the plan; check the table before you stage it again.`);
 
 	const notRun = total - failedAt;
 	if (notRun === 1) parts.push(`Statement ${total} was not run.`);
@@ -382,7 +525,23 @@ function describeApplyFailure(failure: NonNullable<PendingApply['failure']>): { 
 		parts.push(`The plan now holds the remaining ${remaining} statement${remaining === 1 ? '' : 's'}.`);
 	}
 
-	return { text: parts.join(' '), verbatim: notice.generic ? null : notice.verbatim || null };
+	return { text: parts.join(' '), verbatim };
+}
+
+/**
+ * Describe an Apply that ran every statement, against the snapshot the
+ * refresh produced.
+ *
+ * @param outcome - What happened.
+ * @param outcome.at - When it finished (Unix ms).
+ * @param outcome.transactional - Whether the reply says it ran as one transaction.
+ * @param outcome.reReadWorked - Whether a fresh reflection came back.
+ * @returns The banner.
+ */
+export function describeApplySuccess(outcome: { at: number; transactional: boolean; reReadWorked: boolean }): { variant: 'info' | 'warning'; text: string } {
+	const applied = `Applied ${clockTime(outcome.at)}${outcome.transactional ? ' as one transaction' : ''}`;
+	if (outcome.reReadWorked) return { variant: 'info', text: `${applied} · schema re-read from the database.` };
+	return { variant: 'warning', text: `${applied}. ${STALE_SNAPSHOT_SENTENCE}` };
 }
 
 // =============================================================================
@@ -439,10 +598,14 @@ function effectiveColumns(base: SqlSchemaColumn[], pk: string[], ops: AlterOp[])
  * column and FK operations against the schema snapshot; create mode drafts a
  * column list for a new table. The DDL page previews exactly what Apply runs.
  */
-export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, table }) => {
+export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, table, onWrite }) => {
 	const env = useSqlEnv();
 	const snapshot = useSchema(endpoint.key);
 	const createMode = table === null;
+	// A schema-only node runs nothing: Apply is off, with the reason, and
+	// sends nothing (`unknown`, a probe in flight, leaves it on).
+	const applyGate = executeGateReason(useExecuteState(endpoint.key));
+	const applyGateId = useId();
 
 	// ── Designer state ───────────────────────────────────────────────────────
 
@@ -469,6 +632,9 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 	const [applying, setApplying] = useState(false);
 	const [pendingApply, setPendingApply] = useState<PendingApply | null>(null);
 	const [applyOutcome, setApplyOutcome] = useState<ApplyOutcome | null>(null);
+	// Set when an atomic apply was refused for want of transactions: nothing
+	// was applied, and the user is asked before going statement by statement.
+	const [noTransactionReason, setNoTransactionReason] = useState<string | null>(null);
 	// The verbatim driver text starts collapsed on every new outcome.
 	const [showVerbatim, setShowVerbatim] = useState(false);
 
@@ -493,8 +659,10 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 	}, [createMode, createName, createColumns, snapshot.dialect, table, ops]);
 
 	const pendingCount = createMode ? (statements.length > 0 ? 1 : 0) : ops.length;
-	// What this engine does with a plan that stops half-way (verbatim per dialect).
-	const dialectNote = DIALECT_COMMIT_NOTE[snapshot.dialect] ?? null;
+	// One transaction or statement by statement, and what the confirmation
+	// says happens to a plan that stops half-way (per dialect).
+	const mode = designApplyMode(snapshot.dialect, knownNoTransactions(endpoint.key, snapshot.refreshedAt));
+	const dialectNote = mode.note;
 	// Confirmation impact, read from the snapshot's DECLARED foreign keys only.
 	const snapshotTime = snapshot.refreshedAt > 0 ? clockTime(snapshot.refreshedAt) : '--:--';
 	const impact = useMemo<string[]>(
@@ -529,6 +697,8 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 	 * Stage the add-column form (alter mode) or append to the draft (create).
 	 */
 	const addColumn = useCallback((): void => {
+		// Nothing changes the plan while it is being applied (review P4 R2-I4).
+		if (applying) return;
 		if (!draft.name.trim() || !draft.type.trim()) return;
 		const spec = { ...draft, name: draft.name.trim(), type: draft.type.trim() };
 		if (createMode) {
@@ -537,7 +707,7 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 			setOps((prev) => [...prev, { kind: 'addColumn', spec }]);
 		}
 		setDraft(blankSpec());
-	}, [draft, createMode]);
+	}, [draft, createMode, applying]);
 
 	/**
 	 * Open the column editor for one row (alter mode, not dropped rows).
@@ -545,16 +715,18 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 	 * @param col - The row the user activated.
 	 */
 	const selectColumn = useCallback((col: EffectiveColumn): void => {
+		if (applying) return;
 		if (createMode || col.pending === 'dropped') return;
 		setSelected(col.name);
 		setEditName(col.name);
 		setEditType(col.type);
-	}, [createMode]);
+	}, [createMode, applying]);
 
 	/**
 	 * Stage rename/retype for the selected column (alter mode).
 	 */
 	const applyEdit = useCallback((): void => {
+		if (applying) return;
 		if (!selected) return;
 		const next: AlterOp[] = [];
 		// Ops execute sequentially against the mutated table — address the
@@ -569,64 +741,92 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 		}
 		if (next.length > 0) setOps((prev) => [...prev, ...next]);
 		setSelected(null);
-	}, [selected, editName, editType, columns]);
+	}, [selected, editName, editType, columns, applying]);
 
 	/**
-	 * Execute the staged statements in order, then ask the node to re-reflect.
+	 * Send the plan in one call (one transaction on PostgreSQL), then ask the
+	 * node to re-reflect whatever may have changed.
 	 *
 	 * The outcome banner is NOT written here: what it may claim depends on the
 	 * snapshot that comes back, which this closure cannot see. Apply records
 	 * what happened in `pendingApply`; the effect below describes it against
-	 * the snapshot the refresh produced.
+	 * the snapshot the refresh produced. A refusal for want of transactions
+	 * applied nothing: it asks the user again instead (review P4 C-1).
+	 *
+	 * @param atomic - Ask for one transaction (false only after the user agreed to go without).
 	 */
-	const apply = useCallback(async (): Promise<void> => {
-		if (!env.ready || statements.length === 0) return;
+	const apply = useCallback(async (atomic: boolean): Promise<void> => {
+		if (applyGate !== null || !env.ready || statements.length === 0) return;
 		const total = statements.length;
+		// The plan this apply sends: what it settled is dropped from THIS list.
+		const sent = ops;
+		const tableName = createMode ? createName.trim() : table;
 		setApplying(true);
 		setApplyOutcome(null);
 		setShowVerbatim(false);
-		// No transaction: MySQL/ClickHouse DDL auto-commits statement by
-		// statement, so a failed batch leaves a committed prefix behind.
-		let done = 0;
+		let failure: DesignApplyFailure | null = null;
+		let transactional = false;
+		const startedAt = Date.now();
+		const sentStatements = statements.map((sql) => ({ sql }));
 		try {
-			const session = env.getSession(endpoint);
-			// Statements run in op order; the first failure stops the batch and
-			// `done` counts what committed so the plan can drop it.
-			for (const sql of statements) {
-				await session.execute(sql);
-				done++;
+			try {
+				// Every statement that ran goes into History, as the grid's Apply
+				// records its own: same helper, same outcomes. A thrown apply
+				// records nothing, as there.
+				const result = await env.getSession(endpoint).applyBatch(sentStatements, { atomic });
+				for (const entry of applyHistoryEntries(sentStatements, result, { dialect: snapshot.dialect, at: startedAt, ms: Date.now() - startedAt, wording: atomic ? 'transaction' : 'each' })) env.history.record(endpoint, entry);
+				transactional = result.transactional;
+				if (result.failure !== null) {
+					const { index, stage, message, committed, unknown, rollbackConfirmed } = result.failure;
+					const settled = transactional ? 0 : committed + (unknown ? 1 : 0);
+					failure = { stage, failedAt: index, committed, total, remaining: createMode ? null : total - settled, message, transactional, unknown, rollbackConfirmed, table: tableName };
+				}
+			} catch (err) {
+				if (isTransactionsUnavailable(err)) {
+					// Nothing was sent. Remember the node, and ask before going
+					// statement by statement.
+					noteNoTransactions(endpoint.key, snapshot.refreshedAt);
+					setNoTransactionReason(err instanceof Error ? err.message : String(err));
+					return;
+				}
+				// Refused before anything was sent (the list, the connection,
+				// `begin`), unless the answer itself never arrived.
+				const message = err instanceof Error ? err.message : String(err);
+				const unknown = thrownApplyMayHaveRun(err);
+				failure = { stage: 'apply', failedAt: 0, committed: 0, total, remaining: createMode ? null : total, message, transactional: false, unknown, rollbackConfirmed: true, table: tableName };
 			}
-			// Success: clear the plan, then make the node re-read the database
-			// rather than serve its task-start reflection again.
-			setOps([]);
-			setCreateColumns([]);
-			setFkNames(null);
-			await refreshSchema(env.getSession(endpoint), { fresh: true });
-			setPendingApply({ at: Date.now(), failure: null });
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			if (done > 0) {
-				// Drop the committed prefix so the remaining plan matches what
-				// is actually left to run, then re-reflect the mutated schema.
-				setOps((prev) => prev.slice(done));
+			if (failure === null) {
+				// Success: clear the plan, then make the node re-read the database
+				// rather than serve its task-start reflection again.
+				setOps([]);
+				setCreateColumns([]);
 				setFkNames(null);
 				await refreshSchema(env.getSession(endpoint), { fresh: true }).catch(() => undefined);
+			} else {
+				// A rolled-back transaction committed nothing: the whole plan
+				// stays. Statements committed one by one (or that may have been)
+				// leave it, so it matches what is left to run; then re-reflect
+				// what may have changed.
+				const stopped = failure;
+				setOps((prev) => [...planAfterFailure(sent, stopped), ...prev.slice(sent.length)]);
+				if (stopped.committed > 0 || stopped.unknown) {
+					setFkNames(null);
+					await refreshSchema(env.getSession(endpoint), { fresh: true }).catch(() => undefined);
+				}
 			}
-			setPendingApply({
-				at: Date.now(),
-				failure: { committed: done, total, remaining: createMode ? null : total - done, message },
-			});
+			// Anything that ran, or may have, changed the table.
+			if (failure === null || failure.committed > 0 || failure.unknown) onWrite?.();
+			setPendingApply({ at: Date.now(), transactional, failure });
 		} finally {
 			setApplying(false);
 			setConfirmOpen(false);
 		}
-	}, [env, statements, endpoint, createMode]);
+	}, [env, statements, endpoint, createMode, createName, table, ops, snapshot.refreshedAt, snapshot.dialect, applyGate, onWrite]);
 
 	// ── Outcome banner (composed against the post-refresh snapshot) ──────────
 
 	useEffect(() => {
 		if (!pendingApply) return;
-		const time = clockTime(pendingApply.at);
 		// A snapshot is trustworthy only when a fresh reflection actually came
 		// back. A fallback (`stale`) or a failed re-read both mean the tree and
 		// diagram still show the pre-DDL structure — say so, do not imply the
@@ -634,17 +834,17 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 		const reReadWorked = snapshot.status === 'ready' && !snapshot.stale;
 		if (pendingApply.failure) {
 			const detail = describeApplyFailure(pendingApply.failure);
-			// Nothing committed means nothing to be out of date about.
-			const needsSnapshotNote = pendingApply.failure.committed > 0 && !reReadWorked;
+			// Nothing committed (a rolled-back transaction above all) means
+			// nothing to be out of date about; an unknown outcome might.
+			const needsSnapshotNote = (pendingApply.failure.committed > 0 || pendingApply.failure.unknown) && !reReadWorked;
 			setApplyOutcome({
 				variant: 'error',
 				text: needsSnapshotNote ? `${detail.text} ${STALE_SNAPSHOT_SENTENCE}` : detail.text,
 				verbatim: detail.verbatim,
 			});
-		} else if (reReadWorked) {
-			setApplyOutcome({ variant: 'info', text: `Applied ${time} · schema re-read from the database.`, verbatim: null });
 		} else {
-			setApplyOutcome({ variant: 'warning', text: `Applied ${time}. ${STALE_SNAPSHOT_SENTENCE}`, verbatim: null });
+			const success = describeApplySuccess({ at: pendingApply.at, transactional: pendingApply.transactional, reReadWorked });
+			setApplyOutcome({ ...success, verbatim: null });
 		}
 		setPendingApply(null);
 	}, [pendingApply, snapshot.status, snapshot.stale]);
@@ -703,18 +903,23 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 						>
 							Discard
 						</Button>
-						<Button
+						<GatedButton
 							variant="primary"
 							onClick={() => setConfirmOpen(true)}
 							disabled={pendingCount === 0 || applying || !env.ready}
+							gateReason={applyGate}
+							reasonId={applyGateId}
 						>
 							{applying ? 'Applying...' : 'Apply'}
-						</Button>
+						</GatedButton>
 					</>
 				}
 			/>
 
 			<div style={styles.body}>
+				{applyGate !== null && (
+					<div id={applyGateId} style={styles.cardGap}>{`Schema only: ${applyGate} Changes stay staged; Apply is off.`}</div>
+				)}
 				{applyOutcome && (
 					<div style={styles.cardGap}>
 						<Banner variant={applyOutcome.variant}>
@@ -792,7 +997,9 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 															<Button
 																variant="danger"
 																small
+																disabled={applying}
 																onClick={() => {
+																	if (applying) return;
 																	if (createMode) {
 																		// Drafts map 1:1 to rows — drop by index so
 																		// duplicate names cannot remove each other.
@@ -827,7 +1034,7 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 												<span style={styles.fieldLabel}>Datatype</span>
 												<InputField value={editType} onChange={(e) => setEditType(e.target.value)} />
 											</div>
-											<Button variant="primary" small onClick={applyEdit}>Stage Change</Button>
+											<Button variant="primary" small onClick={applyEdit} disabled={applying}>Stage Change</Button>
 											{' '}
 											<Button variant="ghost" small onClick={() => setSelected(null)}>Cancel</Button>
 										</Card>
@@ -861,7 +1068,7 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 													Primary key
 												</label>
 											)}
-											<Button variant="primary" small onClick={addColumn} disabled={!draft.name.trim() || !draft.type.trim()}>
+											<Button variant="primary" small onClick={addColumn} disabled={applying || !draft.name.trim() || !draft.type.trim()}>
 												{createMode ? 'Add to Table' : 'Stage Add Column'}
 											</Button>
 										</Card>
@@ -898,7 +1105,7 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 																	{dropped ? (
 																		<StatusBadge variant="error">dropped</StatusBadge>
 																	) : (
-																		<Button variant="danger" small onClick={() => setOps((prev) => [...prev, { kind: 'dropForeignKey', name: fk.name }])}>Drop</Button>
+																		<Button variant="danger" small disabled={applying} onClick={() => { if (!applying) setOps((prev) => [...prev, { kind: 'dropForeignKey', name: fk.name }]); }}>Drop</Button>
 																	)}
 																</td>
 															</tr>
@@ -966,8 +1173,9 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 												<Button
 													variant="primary"
 													small
-													disabled={!fkDraft.name.trim() || !fkDraft.column || !fkDraft.refTable || !fkDraft.refColumn}
+													disabled={applying || !fkDraft.name.trim() || !fkDraft.column || !fkDraft.refTable || !fkDraft.refColumn}
 													onClick={() => {
+														if (applying) return;
 														setOps((prev) => [...prev, {
 															kind: 'addForeignKey',
 															name: fkDraft.name.trim(),
@@ -1056,10 +1264,26 @@ export const TableDesignView: React.FC<TableDesignViewProps> = ({ endpoint, tabl
 					confirmLabel={applying ? 'Applying...' : 'Apply'}
 					destructive
 					confirmDisabled={applying}
-					onConfirm={() => { void apply(); }}
+					onConfirm={() => { void apply(mode.atomic); }}
 					onCancel={() => setConfirmOpen(false)}
 				/>
 			)}
+
+			{/* No transactions after all (review P4 C-1): nothing was applied; go statement by statement only if the user agrees. */}
+			{noTransactionReason !== null && (() => {
+				const ask = perStatementConfirmText(noTransactionReason);
+				return (
+					<ConfirmDialog
+						title={ask.title}
+						message={<div>{ask.text}</div>}
+						confirmLabel={applying ? 'Applying...' : ask.confirmLabel}
+						destructive
+						confirmDisabled={applying}
+						onConfirm={() => { setNoTransactionReason(null); void apply(false); }}
+						onCancel={() => setNoTransactionReason(null)}
+					/>
+				);
+			})()}
 		</div>
 	);
 };

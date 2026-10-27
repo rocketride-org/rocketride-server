@@ -32,11 +32,16 @@
 // integers beyond 2^53 cannot survive JSON either — so a displayed number is
 // not always the number the database holds.
 //
+// The fields are the statement's COLUMNS as captured when it settled, never
+// `Object.keys` of the row: the grid writes keys into the rows it renders, so
+// a row the grid has seen can carry another statement's columns.
+//
 // Port of 4c584a214.
 // =============================================================================
 
 import React from 'react';
 import { RowInspector } from 'shared/explorer/components/RowInspector';
+import type { IInspectorField } from 'shared/explorer/components/RowInspector';
 import { announce } from '../a11y/announce';
 
 /** Props for the {@link CellInspector} component. */
@@ -45,6 +50,8 @@ export interface CellInspectorProps {
 	open: boolean;
 	/** The row to inspect (null renders nothing). */
 	row: Record<string, unknown> | null;
+	/** The statement's columns as captured when it settled, in order. */
+	columns: readonly string[];
 	/** One-based position of this row in the displayed result. */
 	rowNumber: number;
 	/** Total rows in the displayed result. */
@@ -59,21 +66,36 @@ export interface CellInspectorProps {
 const NOTE = 'Values as received: decimals arrive as floating point; integers above 2^53 may be rounded.';
 
 /**
+ * The drawer's fields and its "Copy row as JSON" text for one row, in the
+ * statement's column order. A column the row lacks reads as null.
+ *
+ * @param row - The row.
+ * @param columns - The statement's captured columns.
+ * @returns The fields and the JSON text.
+ */
+export function inspectorFields(row: Record<string, unknown>, columns: readonly string[]): { fields: IInspectorField[]; json: string } {
+	const fields = columns.map((column) => ({ label: column, value: row[column] ?? null }));
+	const ordered = Object.fromEntries(fields.map((field) => [field.label, field.value]));
+	return { fields, json: JSON.stringify(ordered, null, '\t') };
+}
+
+/**
  * The row inspector drawer.
  *
  * @param props - {@link CellInspectorProps}.
  * @returns The drawer element, or null when there is no row.
  */
-export const CellInspector: React.FC<CellInspectorProps> = ({ open, row, rowNumber, rowCount, subtitle, onClose }) => {
+export const CellInspector: React.FC<CellInspectorProps> = ({ open, row, columns, rowNumber, rowCount, subtitle, onClose }) => {
 	if (!row) return null;
+	const { fields, json } = inspectorFields(row, columns);
 	return (
 		<RowInspector
 			open={open}
 			onClose={onClose}
 			title={`Row ${rowNumber} of ${rowCount.toLocaleString()}`}
 			subtitle={subtitle}
-			fields={Object.keys(row).map((column) => ({ label: column, value: row[column] }))}
-			json={JSON.stringify(row, null, '\t')}
+			fields={fields}
+			json={json}
 			note={NOTE}
 			announce={announce}
 		/>

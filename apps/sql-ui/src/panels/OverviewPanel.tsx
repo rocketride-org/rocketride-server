@@ -26,18 +26,19 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Banner, Button, Card, CardDataGrid, EmptyState, MiniCard, MiniContainer, monoEl, mutedEl } from 'shell';
+import { Banner, Button, Card, CardDataGrid, EmptyState, MiniCard, MiniContainer, createActionsColumn, monoEl, mutedEl } from 'shell';
 import type { GridCellComponent } from 'shell';
 import type { GridColumnDefinition } from 'shell';
 import type { SqlEndpoint, SqlSchemaTable } from '../connect';
 import type { SchemaState } from '../schema/schemaStore';
-import { refreshSchema } from '../schema/schemaStore';
+import { refreshSchema, useExecuteState } from '../schema/schemaStore';
+import { SCHEMA_ONLY_NOTE_ID, executeGateReason } from '../executeGate';
 import { useSqlEnv } from '../sqlEnv';
+import { guardLayouts, layoutRulesFor } from '../sql/gridLayout';
 import { useTableRecordRequest } from '../navigation';
-import { designUri, getDocs, nextQueryDoc, tableDataUri } from '../docs';
-import type { QueryDocPayload } from '../docs';
 import { useSqlPageNav } from '../pageNav';
 import TableRecordPanel from '../components/TableRecordPanel';
+import GatedButton from '../components/GatedButton';
 import { buildRelationGraph } from '../schema/relations';
 import { DatabaseIcon } from '../icons';
 
@@ -98,12 +99,15 @@ const styles = {
 
 /**
  * The connection workbench's Overview page: schema metrics as MiniCards and
- * the tables list as a LOCAL CardDataGrid. A row click (or a sidebar tree
- * click routed through the table-record request store) opens the table's
- * record drawer.
+ * the tables list as a LOCAL CardDataGrid. A row click opens the table's
+ * Data page (its drawer, when the node is schema only); the Details button,
+ * or a sidebar tree click routed through the table-record request store,
+ * opens the record drawer.
  */
 export const OverviewPanel: React.FC<OverviewPanelProps> = ({ endpoint, snapshot }) => {
 	const env = useSqlEnv();
+	// Null while statements may run; the reason once the node is schema only.
+	const gateReason = executeGateReason(useExecuteState(endpoint.key));
 	// In-workbench page navigation.
 	const pageNav = useSqlPageNav();
 
@@ -152,6 +156,8 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({ endpoint, snapshot
 					rrDefault: true,
 					rrDefaultSort: 'asc',
 					rrDescription: 'Table name as reflected from the database.',
+					// Fills what the sized columns leave, never so narrow a name is cut to a stub.
+					minWidth: 160,
 					headerSort: true,
 					formatter: (cell: GridCellComponent) => monoEl(String(cell.getValue() ?? '')),
 				},
@@ -190,9 +196,23 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({ endpoint, snapshot
 					headerSort: true,
 					sorter: 'number',
 				},
+				// A row click opens the table's data; this opens its details. Part of
+				// the default view: the shell hides a column without rrDefault once
+				// any column declares it, and this one has no header menu to show it.
+				{
+					...createActionsColumn<TableRow>({
+						actions: [{ key: 'details', label: 'Details' }],
+						onAction: (_key, row) => setStack([row.name]),
+						width: 110,
+					}),
+					rrDefault: true,
+				},
 			] satisfies GridColumnDefinition[],
 		[],
 	);
+	// Saved layouts keep no width for a flexible column (sql/gridLayout.ts), so a
+	// grid built while hidden can never freeze one at 40 px.
+	const gridLayouts = useMemo(() => guardLayouts(env.gridPersistence, layoutRulesFor(columns)), [env.gridPersistence, columns]);
 
 	// ── Loading / error framing ──────────────────────────────────────────────
 
@@ -242,26 +262,30 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({ endpoint, snapshot
 			<div style={styles.gridFill}>
 				<Card noBodyPadding fill>
 					<CardDataGrid<TableRow>
-						title="Tables"
+						title="Tables in the connection's default schema"
 						actions={
-							<Button
+							// A new table needs a statement, so a schema-only node
+							// turns this off with the workbench's stated reason.
+							<GatedButton
 								variant="ghost"
 								small
 								onClick={() => {
 									// Fresh create-table draft — the DESIGN page.
 									pageNav.openDesign(null);
 								}}
+								gateReason={gateReason}
+								reasonId={SCHEMA_ONLY_NOTE_ID}
 							>
 								+ Create Table
-							</Button>
+							</GatedButton>
 						}
 						columns={columns}
 						data={rows}
 						tableId="sql-overview-tables"
-						persistence={env.gridPersistence}
+						persistence={gridLayouts}
 						paginate={false}
 						height="100%"
-						onRowClick={(row) => setStack([row.name])}
+						onRowClick={(row) => (gateReason ? setStack([row.name]) : pageNav.openTableData(row.name))}
 						emptyTitle="No tables"
 						emptyDescription="The attached database reports no tables."
 					/>
@@ -289,7 +313,8 @@ export const OverviewPanel: React.FC<OverviewPanelProps> = ({ endpoint, snapshot
 						pageNav.openQuery({ sql, label, origin: 'generated' });
 						setStack([]);
 					}}
-					onBrowseData={() => {
+					gateReason={gateReason}
+					onOpenData={() => {
 						// The table's data browser — the DATA page.
 						pageNav.openTableData(name);
 						setStack([]);

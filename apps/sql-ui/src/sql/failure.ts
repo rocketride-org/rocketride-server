@@ -49,9 +49,14 @@
 // against whatever node a workspace happens to run, so the older placeholder
 // and the newer prefixed message both have to read correctly.
 //
-// Matching is on a SUBSTRING of the machine-stable part of each message
-// (`allow_execute`, `max_execute_rows`), never on the whole sentence, so a
-// reworded backend message keeps working.
+// The row cap is matched on a SUBSTRING of its machine-stable part
+// (`max_execute_rows`), so a reworded message keeps working; it only adds a
+// hint. The `allow_execute` refusal is matched on the node's own sentence,
+// `execute tool is disabled for this node`, and never in a message the
+// database reported (the `SQL execution failed:` prefix): it turns the whole
+// connection schema only, the node raises it before any statement reaches
+// the database, and a database error can quote the user's own text, where
+// `allow_execute` is a legal value or column name.
 // =============================================================================
 
 // =============================================================================
@@ -109,6 +114,12 @@ const GENERIC_FAILURE = /SQL execution failed \(check server logs for details\)/
  */
 const NODE_EXECUTE_PREFIX = /^SQL execution failed:\s*/i;
 
+/**
+ * The node's refusal while `allow_execute` is off (db_instance_base.py:
+ * `execute`, `begin`, `commit` and `rollback` raise it first thing).
+ */
+const EXECUTE_DISABLED = 'execute tool is disabled for this node';
+
 /** The node's row-cap overflow, carrying the cap. */
 const MAX_ROWS = /max_execute_rows[=:\s]+(\d+)/i;
 
@@ -147,7 +158,8 @@ export function describeFailure(message: string): FailureNotice {
 		// instead of rendering the headline "Database reported:" with nothing
 		// after it. A wrapper with nothing behind it is that same situation.
 		generic: said === '' || GENERIC_FAILURE.test(verbatim),
-		allowExecuteOff: verbatim.includes('allow_execute'),
+		// The node's own sentence, and not a database quoting it back.
+		allowExecuteOff: !NODE_EXECUTE_PREFIX.test(firstLine) && firstLine.includes(EXECUTE_DISABLED),
 		maxExecuteRows: maxRows ? Number(maxRows[1]) : null,
 	};
 }

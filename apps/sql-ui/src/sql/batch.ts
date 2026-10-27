@@ -36,7 +36,7 @@
 // not the database's execution time and must never be labelled as such.
 // =============================================================================
 
-import type { SqlDialect } from '../connect';
+import type { SqlDialect, SqlExecuteResult } from '../connect';
 import type { StatementKind } from './classify';
 import { CTE_WRITE_WORDS, selectsInto } from './classify';
 import { codeOnly, codeWithOperands, keywordSites, stripSqlComments } from './split';
@@ -67,8 +67,29 @@ export interface StatementRun extends IStatementRunBase {
 	kind: StatementKind;
 	/** Returned rows, when the outcome is `rows`. */
 	rows?: Record<string, unknown>[];
+	/**
+	 * The result's column names, captured when the statement settled. The grid
+	 * writes keys into the row objects it renders (see {@link gridCopies}), so
+	 * a list read back off a row later can be another statement's.
+	 */
+	columns?: string[];
 	/** How the row limit came about — decides which meta wording applies. */
 	limitState?: LimitState;
+}
+
+/**
+ * Whether a finished statement may have changed rows, so another page's
+ * cached row count may be out of date: anything but a read (a schema change
+ * or a CALL can change rows too) that ran, returned rows (`RETURNING`), or
+ * was not waited for (the node may still commit it). A failed statement
+ * committed nothing on its own.
+ *
+ * @param run - The finished statement.
+ * @returns True when it may have changed rows.
+ */
+export function mayHaveChangedRows(run: Pick<StatementRun, 'kind' | 'outcome'>): boolean {
+	if (run.kind === 'read' || run.kind === 'tx') return false;
+	return run.outcome === 'affected' || run.outcome === 'rows' || run.outcome === 'abandoned';
 }
 
 // =============================================================================
@@ -88,6 +109,24 @@ export function leadingVerb(sql: string, dialect: SqlDialect = 'unknown'): strin
 }
 
 /**
+ * The one line a history row shows for a statement: its first line of CODE.
+ *
+ * Generated previews start with a comment (`-- Generated preview: review,
+ * then Run.`) that is part of what runs and is stored, so the first line of
+ * text would name every one of them the same. Comments are removed with the
+ * connection's own rules (`#` is a comment on MySQL and ClickHouse only), and
+ * text that is nothing but comments falls back to its raw first line.
+ *
+ * @param sql - The statement as stored.
+ * @param dialect - The engine dialect (comment syntax).
+ * @returns The title line.
+ */
+export function historyTitle(sql: string, dialect: SqlDialect = 'unknown'): string {
+	const firstLine = (text: string): string | undefined => text.split('\n').map((part) => part.trim()).find(Boolean);
+	return firstLine(stripSqlComments(sql, dialect)) ?? firstLine(sql) ?? sql.trim();
+}
+
+/**
  * The status strip's label for one statement, e.g.
  * `2 UPDATE · 3 affected · round trip 0.012 s`.
  *
@@ -99,6 +138,91 @@ export function leadingVerb(sql: string, dialect: SqlDialect = 'unknown'): strin
  */
 export function formatRunLabel(run: StatementRun): string {
 	return formatSharedRunLabel({ ...run, rowCount: run.rows?.length ?? run.rowCount });
+}
+
+/** What a declined confirmation announces when nothing was sent. */
+export const CANCELLED_NOTHING_SENT = 'Cancelled; nothing was sent.';
+
+/**
+ * The sentence a finished batch announces, or null for none.
+ *
+ * Only outcomes with no live region of their own are announced: a failure's
+ * error banner is an assertive alert already. A CANCELLED batch (the user
+ * declined a confirmation, the typed-name one included) is announced too:
+ * the live region keeps its last sentence, so saying nothing left the previous
+ * run's "Statement returned 10 rows" standing. A batch is cancelled when it
+ * ended without a failure and some statement was not run, which only a
+ * declined confirmation does.
+ *
+ * @param info - The finished batch, as the runner reports it.
+ * @param info.runs - Its statements, in order.
+ * @param info.shown - The statement whose result is shown, if any.
+ * @param info.failedAt - The index that failed, or -1.
+ * @returns The sentence, or null.
+ */
+export function runSummary({ runs, shown, failedAt }: { runs: StatementRun[]; shown: StatementRun | null; failedAt: number }): string | null {
+	const cancelledAt = failedAt < 0 ? runs.findIndex((run) => run.outcome === 'skipped') : -1;
+	if (cancelledAt === 0) return CANCELLED_NOTHING_SENT;
+	if (cancelledAt > 0) return `Cancelled at statement ${cancelledAt + 1}. ${formatBatchOutcome(runs)}`;
+	if (runs.length > 1) return `${runs.length} statements: ${formatBatchOutcome(runs)}`;
+	if (failedAt < 0 && shown?.outcome === 'rows') return `Statement returned ${(shown.rows?.length ?? 0).toLocaleString()} rows`;
+	if (failedAt < 0 && shown?.outcome === 'affected') return `Statement affected ${(shown.affected ?? 0).toLocaleString()} rows`;
+	return null;
+}
+
+// =============================================================================
+// RESULTS
+// =============================================================================
+
+/**
+ * The column names of a result, in first-seen order. Every row is read, so a
+ * key missing from the first row still counts.
+ *
+ * Call it only on rows no grid has rendered yet (as {@link settleStatement}
+ * does): Tabulator adds a key for every column it has to each row it renders.
+ *
+ * @param rows - The result rows, as the node returned them.
+ * @returns The column names.
+ */
+export function resultColumns(rows: readonly Record<string, unknown>[]): string[] {
+	const seen = new Set<string>();
+	for (const row of rows) {
+		for (const key of Object.keys(row)) seen.add(key);
+	}
+	return [...seen];
+}
+
+/**
+ * The fields a statement's answer settles: the outcome, the rows and the
+ * columns they carry, and the affected count.
+ *
+ * The columns are captured HERE, before any grid has seen the rows, which is
+ * what keeps the inspector and the grid on this statement's own columns.
+ *
+ * @param run - The statement.
+ * @param response - The node's answer.
+ * @returns The fields to merge into the run.
+ */
+export function settleStatement(run: StatementRun, response: SqlExecuteResult): Partial<StatementRun> {
+	const rows = response.rows ?? [];
+	const affected = response.affected_rows ?? 0;
+	const outcome: StatementRun['outcome'] = rows.length > 0 || run.kind === 'read' ? 'rows' : 'affected';
+	return { outcome, rows, rowCount: rows.length, affected, columns: resultColumns(rows) };
+}
+
+/**
+ * Shallow copies of a result's rows, for the grid.
+ *
+ * Tabulator writes into the objects it is given: every column the grid has
+ * when a row renders adds a key, even an `undefined` one. The grid applies new
+ * data before new columns, so a statement's rows can render under the previous
+ * statement's columns. Handing it copies keeps the statement's own rows clean.
+ *
+ * @param rows - The statement's rows.
+ * @returns One copy per row, in order.
+ */
+export function gridCopies(rows: readonly Record<string, unknown>[]): Record<string, unknown>[] {
+	return rows.map((row) => ({ ...row }));
 }
 
 // =============================================================================
@@ -351,6 +475,13 @@ function inStatementLimitAt(sql: string, dialect: SqlDialect): number {
 	}
 	return -1;
 }
+
+/**
+ * What the header's All option costs, said when it is chosen. The node
+ * refuses a result over its `max_execute_rows` cap (25,000 by default,
+ * db_global_base) rather than truncating it.
+ */
+export const ALL_ROWS_WARNING = 'All asks for every row. The node refuses results over its cap (25,000 unless the pipeline sets max_execute_rows) and may be slow.';
 
 /**
  * How a result's row limit came about.

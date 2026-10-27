@@ -55,10 +55,13 @@ import { createSessionGridPersistence } from 'shared/explorer/devtool/gridPersis
 import type { JsonValue } from 'shared/explorer/devtool/reply';
 import type { IDataGridPersistence } from 'shell';
 import type { SqlOps } from './ops';
-import type { SqlEndpoint, SqlExecuteResult, SqlSchemaResponse, SqlSession, SavedSqlConnection, SqlDialect } from './connect';
-import { SQL_OP_TIMEOUT_MS } from './sqlTimeouts';
+import type { SqlApplyResult, SqlApplyStatement, SqlEndpoint, SqlExecuteResult, SqlSchemaResponse, SqlSession, SavedSqlConnection, SqlDialect, SqlGetSqlResult } from './connect';
+import type { SafetyLevel } from './connect/savedConnections';
+import { SQL_OP_TIMEOUT_MS, applyBatchTimeoutMs } from './sqlTimeouts';
 import type { IPrefsAccessor } from 'shared/explorer/history/types';
 import type { SqlHistoryApi } from './history/api';
+import type { SqlSavedQueriesApi } from './history/savedQueries';
+import { createRemoteSavedQueries } from './history/remoteSavedQueries';
 
 // =============================================================================
 // THE SEAM
@@ -90,6 +93,11 @@ export interface SqlEnv {
 	getEnvironmentKeys(): Promise<string[]>;
 	/** Insert or replace a saved connection (it is committed where the list is owned). */
 	saveConnection(conn: SavedSqlConnection): Promise<void>;
+	/**
+	 * Set one saved connection's safety level where the list is owned, sending
+	 * only the id and the level (the stored config is kept, never resent).
+	 */
+	setConnectionSafety(connId: string, safety: SafetyLevel): Promise<void>;
 	/** Delete a saved connection (a direct one's temp pipeline is stopped first, best effort). */
 	deleteConnection(conn: SavedSqlConnection): Promise<void>;
 	/**
@@ -101,7 +109,7 @@ export interface SqlEnv {
 	serviceTitle(provider: string): string | undefined;
 	/** Statement history: read, record and edit (where it lives depends on the mount). */
 	history: SqlHistoryApi;
-	/** Small per-user switches (`sql.patternChecks`): workspace preferences in the full app, this session only in a dev-tool frame. */
+	/** Small per-user switches: workspace preferences in the full app, this session only in a dev-tool frame. */
 	prefs: IPrefsAccessor;
 	/**
 	 * Grid layouts (sort, columns, page), always as plain-JSON copies
@@ -112,6 +120,11 @@ export interface SqlEnv {
 	 * prefs.
 	 */
 	gridPersistence: IDataGridPersistence;
+	/**
+	 * Saved queries: read and edit. The full app keeps them in its workspace
+	 * preferences; a dev-tool frame reaches the controller's file through ops.
+	 */
+	savedQueries: SqlSavedQueriesApi;
 }
 
 /** A realm's session-only preferences (dev-tool frames): kept in memory, never written anywhere. */
@@ -195,14 +208,15 @@ async function underTicket<T>(ticket: IGenerationTicket | undefined, tool: strin
 }
 
 /**
- * An SqlSession whose four tools are controller ops. Stateless — the token
+ * An SqlSession whose tools are controller ops. Stateless — the token
  * vault, the retry rule and the waits live in the CONTROLLER's session.
  *
  * @param caller - The frame's caller.
  * @param endpoint - The endpoint to bind (carrying its connId).
+ * @param owner - The identity fingerprint the frame belongs to (sent with an apply, which writes).
  * @returns The proxy session.
  */
-function remoteSession(caller: IFrameCaller<SqlOps>, endpoint: SqlEndpoint): SqlSession {
+function remoteSession(caller: IFrameCaller<SqlOps>, endpoint: SqlEndpoint, owner: () => string | null): SqlSession {
 	const connId = connIdOf(endpoint);
 	return {
 		endpoint,
@@ -217,6 +231,19 @@ function remoteSession(caller: IFrameCaller<SqlOps>, endpoint: SqlEndpoint): Sql
 			caller.callReply('sql.getSchema', { connId, ...(table ? { table } : {}) }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.getSchema'] }),
 		refreshSchema: (): Promise<SqlSchemaResponse> => caller.callReply('sql.refreshSchema', { connId }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.refreshSchema'] }),
 		dialect: (): Promise<SqlDialect> => caller.callReply('sql.dialect', { connId }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.dialect'] }),
+		// The whole apply runs in the controller: the frame sends the list and
+		// gets the outcome, never a session id.
+		applyBatch: (statements: SqlApplyStatement[], opts: { atomic: boolean }): Promise<SqlApplyResult> => caller.callReply('sql.applyBatch', {
+			connId,
+			owner: owner(),
+			statements: statements.map((statement) => ({
+				sql: statement.sql,
+				...(statement.params ? { params: statement.params as JsonValue[] } : {}),
+				...(statement.expect !== undefined ? { expect: statement.expect } : {}),
+			})),
+			atomic: opts.atomic,
+		}, { timeoutMs: applyBatchTimeoutMs(statements.length, opts.atomic) }),
+		getSql: (question: string): Promise<SqlGetSqlResult> => caller.callReply('sql.getSql', { connId, question }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.getSql'] }),
 	};
 }
 
@@ -229,15 +256,18 @@ function remoteSession(caller: IFrameCaller<SqlOps>, endpoint: SqlEndpoint): Sql
  * @param ready - The controller realm's server reachability (`host:connection`).
  * @param owner - The identity fingerprint the frame belongs to (sent with mutations).
  * @param history - The frame's view of the controller's history (history/remoteHistory.ts).
+ * @param savedQueries - The frame's view of the controller's saved queries
+ *   (history/remoteSavedQueries.ts, following the frame's channel); default:
+ *   one over the caller alone, which reads again after its own changes only.
  * @returns The environment (rebuild when `ready` changes).
  */
-export function createRemoteSqlEnv(caller: IFrameCaller<SqlOps>, ready: boolean, owner: () => string | null, history: SqlHistoryApi): SqlEnv {
+export function createRemoteSqlEnv(caller: IFrameCaller<SqlOps>, ready: boolean, owner: () => string | null, history: SqlHistoryApi, savedQueries: SqlSavedQueriesApi = createRemoteSavedQueries({ caller, owner })): SqlEnv {
 	return {
 		history,
 		prefs: SESSION_PREFS,
 		gridPersistence: SESSION_GRIDS,
 		ready,
-		getSession: (endpoint) => remoteSession(caller, endpoint),
+		getSession: (endpoint) => remoteSession(caller, endpoint, owner),
 		resolveEndpoint: (conn) => caller.callReply('sql.resolveEndpoint', { connId: conn.id }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.resolveEndpoint'] }),
 		releaseEndpoint: (connId, key) => {
 			// Fire-and-forget: a late or lost reply is fine — the TTL reaps.
@@ -250,11 +280,15 @@ export function createRemoteSqlEnv(caller: IFrameCaller<SqlOps>, ready: boolean,
 		saveConnection: async (conn) => {
 			await caller.callReply('sql.saveConnection', { connection: conn, owner: owner() }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.saveConnection'] });
 		},
+		setConnectionSafety: async (connId, safety) => {
+			await caller.callReply('sql.setConnectionSafety', { connId, safety, owner: owner() }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.setConnectionSafety'] });
+		},
 		deleteConnection: async (conn) => {
 			await caller.callReply('sql.deleteConnection', { connId: conn.id, owner: owner() }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.deleteConnection'] });
 		},
 		getConnection: (connId) => caller.callReply('sql.connection', { connId }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.connection'] }),
 		// A frame has no service cache of its own; the dialog falls back to its titles.
 		serviceTitle: () => undefined,
+		savedQueries,
 	};
 }

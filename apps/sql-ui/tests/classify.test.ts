@@ -104,6 +104,21 @@ const KIND_CASES: IKindCase[] = [
 	{ sql: 'SELECT id INTO @last FROM orders', kind: 'write', dialect: 'mysql' },
 	{ sql: "SELECT * FROM events INTO OUTFILE 'e.csv'", kind: 'write', dialect: 'clickhouse' },
 	{ sql: 'EXPLAIN ANALYZE SELECT * INTO t FROM a', kind: 'write', dialect: 'postgres' },
+	// ANALYZE runs the statement, in every spelling (DA-R1 M4): PostgreSQL's
+	// option list (with a value, among other options, British spelling) and
+	// MySQL's documented synonyms DESCRIBE ANALYZE and DESC ANALYZE.
+	{ sql: 'EXPLAIN (ANALYZE) DELETE FROM t WHERE id = 1', kind: 'write', dialect: 'postgres' },
+	{ sql: 'EXPLAIN (ANALYZE true, BUFFERS) UPDATE t SET x = 1 WHERE id = 1', kind: 'write', dialect: 'postgres' },
+	{ sql: 'EXPLAIN (FORMAT JSON, ANALYZE) INSERT INTO t VALUES (1)', kind: 'write', dialect: 'postgres' },
+	{ sql: 'EXPLAIN ANALYSE DELETE FROM t WHERE id = 1', kind: 'write', dialect: 'postgres' },
+	{ sql: 'DESCRIBE ANALYZE DELETE t FROM t JOIN u ON t.id = u.id', kind: 'write', dialect: 'mysql' },
+	{ sql: 'DESC ANALYZE UPDATE t JOIN u ON t.id = u.id SET t.x = 0', kind: 'write', dialect: 'mysql' },
+	{ sql: 'desc analyze delete from t where id = 1', kind: 'write', dialect: 'mysql' },
+	{ sql: 'DESC ANALYZE DELETE FROM t WHERE id = 1', kind: 'write' },
+	{ sql: 'EXPLAIN ANALYZE FORMAT=TREE DELETE FROM t WHERE id = 1', kind: 'write', dialect: 'mysql' },
+	{ sql: 'DESC ANALYZE SELECT * FROM t', kind: 'read', dialect: 'mysql' },
+	{ sql: 'DESC orders', kind: 'read', dialect: 'mysql' },
+	{ sql: 'DESCRIBE analyze', kind: 'read', dialect: 'mysql' },
 	// Plain EXPLAIN only plans it; INTO in a literal, quoted name or longer word is no INTO.
 	{ sql: 'EXPLAIN SELECT * INTO t FROM a', kind: 'read', dialect: 'postgres' },
 	{ sql: "SELECT 'into' AS w", kind: 'read' },
@@ -324,8 +339,27 @@ describe('patternCheck — EXPLAIN', () => {
 		);
 	});
 
-	it('passes when the statement it would run is bounded', () => {
-		assert.equal(patternCheck('EXPLAIN ANALYZE DELETE FROM orders WHERE id = 1'), null);
+	it('flags it even when the statement it would run is bounded: EXPLAIN reads as a read, and this one writes (DA-R1 M4)', () => {
+		for (const [sql, dialect] of [
+			['EXPLAIN ANALYZE DELETE FROM orders WHERE id = 1', 'postgres'],
+			['EXPLAIN (ANALYZE) DELETE FROM orders WHERE id = 1', 'postgres'],
+			['EXPLAIN (ANALYZE true, BUFFERS) UPDATE orders SET x = 1 WHERE id = 1', 'postgres'],
+			['EXPLAIN ANALYZE INSERT INTO orders VALUES (1)', 'postgres'],
+			['DESCRIBE ANALYZE UPDATE t JOIN u ON t.id = u.id SET t.x = 0 WHERE u.y = 1', 'mysql'],
+			['DESC ANALYZE DELETE FROM orders WHERE id = 1', 'mysql'],
+			['DESC ANALYZE DELETE FROM orders WHERE id = 1', 'unknown'],
+		] as Array<[string, SqlDialect]>) {
+			assert.deepEqual(patternCheck(sql, dialect), { kind: 'EXPLAIN ANALYZE' }, `${dialect}: ${sql}`);
+		}
+	});
+
+	it('names the unbounded statement behind DESC ANALYZE, as behind EXPLAIN ANALYZE', () => {
+		assert.deepEqual(patternCheck('DESC ANALYZE DELETE t FROM t JOIN u ON t.id = u.id', 'mysql'), { kind: 'DELETE without WHERE' });
+	});
+
+	it('passes a plain DESCRIBE, and DESC ANALYZE of a read', () => {
+		assert.equal(patternCheck('DESCRIBE orders', 'mysql'), null);
+		assert.equal(patternCheck('DESC ANALYZE SELECT * FROM orders', 'mysql'), null);
 	});
 
 	it('passes a plain EXPLAIN, which runs nothing', () => {

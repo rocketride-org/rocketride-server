@@ -1,6 +1,6 @@
 {
 	"name": "@rocketride/sql-ui",
-	"version": "1.2.0",
+	"version": "1.3.0",
 	"private": true,
 	"description": "SQL database workbench over pipeline database tool nodes",
 	"license": "MIT",

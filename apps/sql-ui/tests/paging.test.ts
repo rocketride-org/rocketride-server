@@ -34,7 +34,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { IDataGridPageRequest } from 'shell';
 import type { SqlSchemaTable } from '../src/connect';
-import { buildPageStatements, quoteIdent } from '../src/sql/paging';
+import { buildPageStatements, countKey, quoteIdent } from '../src/sql/paging';
 
 // =============================================================================
 // FIXTURES
@@ -82,7 +82,70 @@ describe('quoteIdent', () => {
 		assert.equal(quoteIdent('mysql', 'we`ird'), '`we``ird`');
 		assert.equal(quoteIdent('postgres', 'we"ird'), '"we""ird"');
 	});
+
+	// DA-R1 M6: ClickHouse's lexer honours backslash escapes inside a backtick
+	// identifier, so a name ending in `\` escaped the closing backtick and the
+	// rest of the statement became part of the name. MySQL and PostgreSQL
+	// read a backslash in an identifier as itself.
+	it('escapes a backslash for ClickHouse, and only for ClickHouse', () => {
+		assert.equal(quoteIdent('clickhouse', 'a\\'), '`a\\\\`');
+		assert.equal(quoteIdent('clickhouse', 'a\\`b'), '`a\\\\``b`');
+		assert.equal(quoteIdent('mysql', 'a\\'), '`a\\`');
+		assert.equal(quoteIdent('postgres', 'a\\'), '"a\\"');
+	});
+
+	it('a ClickHouse identifier always ends at its own closing backtick and reads back as the name', () => {
+		for (const name of ['orders', 'a\\', '\\', '\\\\', 'we`ird', 'a\\`', '`\\', 'x\\` OR 1=1 --', 'tab\\tname']) {
+			const quoted = quoteIdent('clickhouse', name);
+			const read = readClickHouseBacktick(quoted);
+			assert.equal(read.end, quoted.length, `${JSON.stringify(name)}: the identifier ends where the quoting does`);
+			assert.equal(read.name, name, `${JSON.stringify(name)}: and is the same name`);
+		}
+	});
+
+	it('every statement the data browser builds quotes ClickHouse names this way', () => {
+		const hostile: SqlSchemaTable = { columns: [{ column: 'c\\', type: 'String' }], primary_key: ['c\\'] };
+		const statements = buildPageStatements('clickhouse', 't\\', hostile, req({ filters: { 'c\\': 'x' } }), { chips: [{ column: 'c\\', op: 'eq', value: 'y' }] });
+		assert.ok(statements.select.startsWith('SELECT * FROM `t\\\\` WHERE '), statements.select);
+		assert.ok(!/[^\\]\\`/.test(statements.select.replace(/\\\\/g, '')), `no backtick left escaped: ${statements.select}`);
+		assert.match(statements.select, /ORDER BY `c\\\\` ASC/);
+		assert.match(statements.count, /^SELECT COUNT\(\*\) AS total FROM `t\\\\`/);
+	});
 });
+
+/**
+ * Read one backtick-quoted identifier the way ClickHouse's lexer does
+ * (src/Parsers/Lexer.cpp `quotedString`, readBackQuotedStringWithSQLStyle):
+ * a backslash escapes the next character, a doubled backtick is a backtick,
+ * and a single backtick ends it.
+ *
+ * @param text - Text starting with the opening backtick.
+ * @returns The decoded name and the index just past the closing backtick.
+ */
+function readClickHouseBacktick(text: string): { name: string; end: number } {
+	assert.equal(text[0], '`');
+	let name = '';
+	let at = 1;
+	while (at < text.length) {
+		const ch = text[at] as string;
+		if (ch === '\\') {
+			const next = text[at + 1] as string;
+			name += next === 't' ? '\t' : next;
+			at += 2;
+		} else if (ch === '`') {
+			if (text[at + 1] === '`') {
+				name += '`';
+				at += 2;
+			} else {
+				return { name, end: at + 1 };
+			}
+		} else {
+			name += ch;
+			at += 1;
+		}
+	}
+	return { name, end: -1 };
+}
 
 // =============================================================================
 // PAGING — ORDER BY AND OFFSET
@@ -117,7 +180,7 @@ describe('buildPageStatements order and offset', () => {
 describe('buildPageStatements binds every user value', () => {
 	it('binds the free-text search term across the text columns', () => {
 		const { select, params } = buildPageStatements('postgres', 'orders', TABLE_NO_PK, req({ search: "o'brien" }));
-		assert.equal(select, 'SELECT * FROM "orders" WHERE ("code" LIKE $1 OR "note" LIKE $1) LIMIT 50 OFFSET 0');
+		assert.equal(select, 'SELECT * FROM "orders" WHERE ("code"::text ILIKE $1 OR "note"::text ILIKE $1) LIMIT 50 OFFSET 0');
 		assert.deepEqual(params, ["%o'brien%"]);
 	});
 
@@ -152,7 +215,7 @@ describe('buildPageStatements binds every user value', () => {
 		// `$n` textually, so a pattern built around an inlined value would put
 		// the placeholder inside a string literal.
 		const { select, params } = buildPageStatements('mysql', 'orders', TABLE_NO_PK, req({ filters: { code: '7' } }));
-		assert.equal(select, 'SELECT * FROM `orders` WHERE `code` LIKE $1 LIMIT 50 OFFSET 0');
+		assert.equal(select, 'SELECT * FROM `orders` WHERE LOWER(`code`) LIKE LOWER($1) LIMIT 50 OFFSET 0');
 		assert.deepEqual(params, ['%7%']);
 	});
 
@@ -163,7 +226,7 @@ describe('buildPageStatements binds every user value', () => {
 		}));
 		assert.equal(
 			select,
-			'SELECT * FROM "orders" WHERE ("code" LIKE $1 OR "note" LIKE $1) AND "code" IN ($2, $3) AND "note" LIKE $4 LIMIT 50 OFFSET 0',
+			'SELECT * FROM "orders" WHERE ("code"::text ILIKE $1 OR "note"::text ILIKE $1) AND "code" IN ($2, $3) AND "note"::text ILIKE $4 LIMIT 50 OFFSET 0',
 		);
 		assert.deepEqual(params, ['%ab%', 'x', 'y', '%z%']);
 	});
@@ -183,12 +246,136 @@ describe('buildPageStatements binds every user value', () => {
 describe('buildPageStatements count', () => {
 	it('counts over the same WHERE and reuses the same bound parameters', () => {
 		const { count, params } = buildPageStatements('postgres', 'orders', TABLE_NO_PK, req({ filters: { code: 'x' } }));
-		assert.equal(count, 'SELECT COUNT(*) AS total FROM "orders" WHERE "code" LIKE $1');
+		assert.equal(count, 'SELECT COUNT(*) AS total FROM "orders" WHERE "code"::text ILIKE $1');
 		assert.deepEqual(params, ['%x%']);
 	});
 
 	it('carries no ORDER BY, LIMIT, or OFFSET', () => {
 		const { count } = buildPageStatements('postgres', 'orders', TABLE, req({ page: 4, sort: [{ field: 'id', dir: 'asc' }] }));
 		assert.equal(count, 'SELECT COUNT(*) AS total FROM "orders"');
+	});
+});
+
+// =============================================================================
+// PAGING — CASE-INSENSITIVE SEARCH PER DIALECT
+// =============================================================================
+
+describe('buildPageStatements search per dialect', () => {
+	it('searches with LOWER() LIKE LOWER() on MySQL', () => {
+		const { select } = buildPageStatements('mysql', 'orders', TABLE_NO_PK, req({ search: 'ab' }));
+		assert.equal(select, 'SELECT * FROM `orders` WHERE (LOWER(`code`) LIKE LOWER($1) OR LOWER(`note`) LIKE LOWER($1)) LIMIT 50 OFFSET 0');
+	});
+
+	it('searches with toString() ILIKE on ClickHouse', () => {
+		const { select } = buildPageStatements('clickhouse', 'orders', TABLE_NO_PK, req({ search: 'ab' }));
+		assert.equal(select, 'SELECT * FROM `orders` WHERE (toString(`code`) ILIKE $1 OR toString(`note`) ILIKE $1) LIMIT 50 OFFSET 0');
+	});
+
+	it('keeps a plain LIKE on an unknown dialect', () => {
+		const { select } = buildPageStatements('unknown', 'orders', TABLE_NO_PK, req({ search: 'ab' }));
+		assert.equal(select, 'SELECT * FROM "orders" WHERE ("code" LIKE $1 OR "note" LIKE $1) LIMIT 50 OFFSET 0');
+	});
+
+	it('escapes %, _ and backslash inside the bound search value on every dialect', () => {
+		for (const dialect of ['postgres', 'mysql', 'clickhouse', 'unknown'] as const) {
+			const { select, params } = buildPageStatements(dialect, 'orders', TABLE_NO_PK, req({ search: '50%_a\\b' }));
+			assert.deepEqual(params, ['%50\\%\\_a\\\\b%']);
+			assert.ok(!select.includes('\\'), 'the statement text carries no backslash');
+		}
+	});
+
+	it('escapes a header contains filter the same way', () => {
+		const { params } = buildPageStatements('postgres', 'orders', TABLE_NO_PK, req({ filters: { code: '100%' } }));
+		assert.deepEqual(params, ['%100\\%%']);
+	});
+});
+
+// =============================================================================
+// PAGING — FILTER CHIPS
+// =============================================================================
+
+describe('buildPageStatements chips', () => {
+	it('renders a chip after search and header filters, all ANDed, with sequential binds', () => {
+		const { select, params, where } = buildPageStatements('postgres', 'orders', TABLE_NO_PK, req({
+			search: 'ab',
+			filters: { code: 'x' },
+		}), {
+			chips: [
+				{ column: 'id', op: 'gte', value: '10' },
+				{ column: 'note', op: 'isNull' },
+				{ column: 'note', op: 'startsWith', value: 'q' },
+			],
+		});
+		assert.equal(
+			where,
+			' WHERE ("code"::text ILIKE $1 OR "note"::text ILIKE $1) AND "code"::text ILIKE $2 AND "id" >= $3 AND "note" IS NULL AND "note"::text ILIKE $4',
+		);
+		assert.ok(select.startsWith(`SELECT * FROM "orders"${where}`));
+		assert.deepEqual(params, ['%ab%', '%x%', 10, 'q%']);
+	});
+
+	it('quotes the chip column per dialect', () => {
+		const chips = [{ column: 'we`ird', op: 'eq' as const, value: '1' }];
+		assert.equal(buildPageStatements('mysql', 't', TABLE_NO_PK, req(), { chips }).where, ' WHERE `we``ird` = $1');
+		assert.equal(buildPageStatements('postgres', 't', TABLE_NO_PK, req(), { chips: [{ column: 'a"b', op: 'ne', value: '1' }] }).where, ' WHERE "a""b" <> $1');
+	});
+
+	it('skips an incomplete chip', () => {
+		const { where, params } = buildPageStatements('postgres', 't', TABLE_NO_PK, req(), { chips: [{ column: 'id', op: 'eq' }] });
+		assert.equal(where, '');
+		assert.deepEqual(params, []);
+	});
+
+	it('applies the chips to the COUNT as well', () => {
+		const { count, params } = buildPageStatements('postgres', 't', TABLE_NO_PK, req(), { chips: [{ column: 'id', op: 'lt', value: '3' }] });
+		assert.equal(count, 'SELECT COUNT(*) AS total FROM "t" WHERE "id" < $1');
+		assert.deepEqual(params, [3]);
+	});
+});
+
+// =============================================================================
+// PAGING — ONE ROW PAST THE PAGE, AND THE COUNT KEY
+// =============================================================================
+
+describe('buildPageStatements overfetch', () => {
+	it('asks for size + 1 rows so the caller can tell more rows exist', () => {
+		const { select } = buildPageStatements('postgres', 'orders', TABLE, req({ page: 2, size: 25 }), { overfetch: true });
+		assert.match(select, /LIMIT 26 OFFSET 25$/);
+	});
+
+	it('keeps OFFSET paging', () => {
+		const { select } = buildPageStatements('mysql', 'orders', TABLE, req({ page: 3, size: 10 }));
+		assert.match(select, /LIMIT 10 OFFSET 20$/);
+	});
+});
+
+describe('countKey', () => {
+	it('is the same for another page of the same filter, sort and size', () => {
+		const a = buildPageStatements('postgres', 'orders', TABLE, req({ page: 1, search: 'x' }));
+		const b = buildPageStatements('postgres', 'orders', TABLE, req({ page: 2, size: 10, search: 'x', sort: [{ field: 'code', dir: 'desc' }] }));
+		assert.equal(countKey('orders', a), countKey('orders', b));
+	});
+
+	it('differs when a bound value, a chip or the table differs', () => {
+		const a = buildPageStatements('postgres', 'orders', TABLE, req({ search: 'x' }));
+		const b = buildPageStatements('postgres', 'orders', TABLE, req({ search: 'y' }));
+		const c = buildPageStatements('postgres', 'orders', TABLE, req({ search: 'x' }), { chips: [{ column: 'id', op: 'isNull' }] });
+		assert.notEqual(countKey('orders', a), countKey('orders', b));
+		assert.notEqual(countKey('orders', a), countKey('orders', c));
+		assert.notEqual(countKey('orders', a), countKey('items', a));
+	});
+});
+
+describe('buildPageStatements chip values follow the column type', () => {
+	it('binds a number for an equals chip on the BIGINT column', () => {
+		const { params } = buildPageStatements('postgres', 'orders', TABLE, req(), { chips: [{ column: 'id', op: 'eq', value: '7' }] });
+		assert.deepEqual(params, [7]);
+	});
+
+	it('keeps a string for a text column and for a column the schema does not list', () => {
+		const { params } = buildPageStatements('postgres', 'orders', TABLE, req(), {
+			chips: [{ column: 'code', op: 'eq', value: '7' }, { column: 'ghost', op: 'eq', value: '7' }],
+		});
+		assert.deepEqual(params, ['7', '7']);
 	});
 });

@@ -32,6 +32,8 @@ import {
 	buildRelationGraph,
 	describeHop,
 	findJoinPaths,
+	fkMarker,
+	fkTargetFor,
 	generateJoinSql,
 	inboundReferences,
 	orientation,
@@ -351,5 +353,63 @@ describe('describeHop', () => {
 			describeHop(path!.hops[0]!),
 			'shipments.tenant_id, shipments.order_no -> orders.tenant_id, orders.no',
 		);
+	});
+});
+
+// =============================================================================
+// fkTargetFor / fkMarker
+// =============================================================================
+
+describe('fkTargetFor', () => {
+	it('finds the key a column belongs to', () => {
+		const graph = buildRelationGraph(SHOP);
+		const edges = fkTargetFor(graph, 'orders', 'customer_id');
+		assert.equal(edges.length, 1);
+		assert.equal(edges[0]!.refTable, 'customers');
+	});
+
+	it('returns nothing for a plain column or a table without keys', () => {
+		const graph = buildRelationGraph(SHOP);
+		assert.deepEqual(fkTargetFor(graph, 'orders', 'id'), []);
+		assert.deepEqual(fkTargetFor(graph, 'audit_log', 'id'), []);
+	});
+
+	it('returns the one composite key for each of its columns', () => {
+		const graph = buildRelationGraph(COMPOSITE);
+		assert.equal(fkTargetFor(graph, 'shipments', 'tenant_id')[0], fkTargetFor(graph, 'shipments', 'order_no')[0]);
+	});
+
+	it('returns every key a column takes part in', () => {
+		const graph = buildRelationGraph({
+			tables: {
+				a: { columns: [{ column: 'x', type: 'INT' }], primary_key: ['x'] },
+				b: { columns: [{ column: 'x', type: 'INT' }], primary_key: ['x'] },
+				c: {
+					columns: [{ column: 'x', type: 'INT' }],
+					foreign_keys: [
+						{ columns: ['x'], referred_table: 'a', referred_columns: ['x'] },
+						{ columns: ['x'], referred_table: 'b', referred_columns: ['x'] },
+					],
+				},
+			},
+		});
+		assert.equal(fkTargetFor(graph, 'c', 'x').length, 2);
+	});
+});
+
+describe('fkMarker', () => {
+	it('names the referenced column for a single key', () => {
+		assert.equal(fkMarker(buildRelationGraph(SHOP), 'orders', 'customer_id'), '\u2192 customers.id');
+	});
+
+	it('pairs the column with its own referenced column in a composite key', () => {
+		const graph = buildRelationGraph(COMPOSITE);
+		assert.equal(fkMarker(graph, 'shipments', 'order_no'), '\u2192 orders.no');
+		assert.equal(fkMarker(graph, 'shipments', 'tenant_id'), '\u2192 orders.tenant_id');
+	});
+
+	it('lists every target, and is null for a column that is no key', () => {
+		assert.equal(fkMarker(buildRelationGraph(SHOP), 'orders', 'id'), null);
+		assert.equal(fkMarker(buildRelationGraph(PARALLEL), 'messages', 'sender_id'), '\u2192 people.id');
 	});
 });

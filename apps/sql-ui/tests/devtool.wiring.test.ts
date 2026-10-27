@@ -54,20 +54,22 @@ import { SQL_APP_ID } from '../src/appId';
 import { applyReplicaConnections, deleteSavedConnection, endpointForConnection, endpointKeyForConnection, getSavedConnections, getSavedConnectionsPartial, getSavedConnectionsStatus, ownSavedConnections, resetSavedConnections } from '../src/connect';
 import type { PipelineBoundConnection, SavedSqlConnection } from '../src/connect';
 import { lookupConnection } from '../src/connectionRecord';
-import { MAX_WATCHED_HISTORY_KEYS, attachSqlController, checkExecuteInput, checkSchemaInput } from '../src/sqlController';
-import type { ConnectionsState, HistoryState, SqlOps } from '../src/ops';
+import { MAX_WATCHED_HISTORY_KEYS, attachSqlController, checkApplyInput, checkExecuteInput, checkSchemaInput } from '../src/sqlController';
+import type { ConnectionsState, HistoryState, SqlOps, SavedQueriesState } from '../src/ops';
 import { attachSqlFrame, connectionDocState, directReleaseKey, frameGates, routeDocKey, sqlChannel } from '../src/sqlFrame';
 import { SESSION_GRIDS, createRemoteSqlEnv } from '../src/sqlEnv';
 import { setActiveConnection } from '../src/navigation';
 import { SUMMON_EVENT, SUMMON_SETTLE_MS } from 'shared/explorer/devtool/summon';
 import { createFrameCaller } from 'shared/explorer/devtool/frame';
-import { RESOLVE_BUDGET_MS, SQL_OP_TIMEOUT_MS } from '../src/sqlTimeouts';
-import { DIALECT_WAIT_MS, GET_SCHEMA_WAIT_MS, REFRESH_SCHEMA_WAIT_MS } from '../src/connect/tools';
+import { RESOLVE_BUDGET_MS, SQL_OP_TIMEOUT_MS, applyBatchTimeoutMs, LIST_WAIT_MS, SAVED_QUERIES_LOAD_WAIT_MS } from '../src/sqlTimeouts';
+import { APPLY_STATEMENT_WAIT_MS, BEGIN_WAIT_MS, DIALECT_WAIT_MS, END_TX_WAIT_MS, GET_SCHEMA_WAIT_MS, MAX_APPLY_STATEMENTS, NODE_TX_IDLE_MS, REFRESH_SCHEMA_WAIT_MS, GET_SQL_WAIT_MS } from '../src/connect/tools';
 import { SAVED_PATH, USER, engineScript, scriptedClientRealm, until } from './realm';
 import { taskRow } from './support';
 import { DIRECT, PIPELINE, manualTimers, postgres, rig, toolRequests } from './devtoolRig';
 import { createLocalSqlEnv } from '../src/localEnv';
 import type { SqlCore } from '../src/sqlCore';
+import { PREFS_FS_TIMEOUT_MS } from 'shared/explorer/devtool/prefs';
+import { SAVED_QUERIES_PATH } from '../src/history/savedQueries';
 
 const SRC = path.resolve(__dirname, '..', 'src');
 
@@ -209,6 +211,7 @@ describe('T3 — every op round-trips JSON-safe; failures come back as equal Exp
 				getSchema: await session.getSchema(),
 				refreshSchema: await session.refreshSchema(),
 				dialect: await session.dialect(),
+				apply: await session.applyBatch([{ sql: 'UPDATE "orders" SET "name" = $1 WHERE "id" = $2', params: ['b', 2] }, { sql: 'DELETE FROM "orders" WHERE "id" = $1', params: [1] }], { atomic: true }),
 				discover: await r.env.discoverEndpoints(),
 				service: await r.env.getService('db_mysql'),
 				validate: await r.env.validate({ version: 1, component: { id: 'db_mysql_1', provider: 'db_mysql', config: {} } }),
@@ -225,6 +228,8 @@ describe('T3 — every op round-trips JSON-safe; failures come back as equal Exp
 			results.history = await r.frame.caller.callReply('sql.history', { connId: 'c-pipe', owner: r.frame.owner() }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.history'] });
 			assert.deepEqual(results.history, [{ ...entry, pinned: true }]);
 			await r.env.saveConnection({ ...PIPELINE, id: 'c-new', name: 'New' });
+			await r.env.setConnectionSafety('c-new', 'every');
+			assert.equal(getSavedConnections().find((c) => c.id === 'c-new')?.safety, 'every');
 			await r.env.deleteConnection({ ...PIPELINE, id: 'c-new', name: 'New' });
 			// The direct document's release carries the key it opened, and the
 			// controller sees it.
@@ -240,8 +245,21 @@ describe('T3 — every op round-trips JSON-safe; failures come back as equal Exp
 			assert.deepEqual(released, [['c-direct', directKey]]);
 			assert.deepEqual(results.execute, { rows: [{ id: 1, name: 'a' }, { id: 2, name: null }], affected_rows: 0 });
 			assert.equal(results.dialect, 'postgres');
+			assert.deepEqual(results.apply, { transactional: true, results: [{ affected_rows: 0 }, { affected_rows: 0 }], failure: null });
+			assert.deepEqual(toolRequests(r.engine, 'begin').length, 1, 'the apply ran its transaction in the controller');
+			assert.deepEqual(toolRequests(r.engine, 'commit').length, 1);
 			assert.deepEqual(results.discover, [{ key: 'p1:s1:db_1', projectId: 'p1', pipelineName: 'Pipeline A', source: 's1', nodeId: 'db_1', nodeName: 'Orders DB', provider: 'db_postgres', running: true }]);
 			assert.deepEqual(results.envKeys, ['ROCKETRIDE_DB_PASSWORD']);
+			// Saved queries: an owned save, then the owned read (the list is an op result).
+			const query = { id: 'sq1', name: 'Orders', sql: 'SELECT * FROM orders', at: 1 };
+			await r.frame.caller.callReply('sql.savedQueryEdit', { connId: 'c-pipe', edit: { action: 'add', query }, owner }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.savedQueryEdit'] });
+			results.savedQueries = await r.frame.caller.callReply('sql.savedQueries', { connId: 'c-pipe', owner }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.savedQueries'] });
+			assert.deepEqual(results.savedQueries, { storage: 'file', queries: [query] });
+			// Ask: the node writes SQL and it comes back as data, nothing executed.
+			const executes = toolRequests(r.engine, 'execute').length;
+			results.getSql = await session.getSql('orders from the last 7 days');
+			assert.deepEqual(results.getSql, { sql: 'SELECT * FROM orders', valid: true });
+			assert.equal(toolRequests(r.engine, 'execute').length, executes);
 			for (const [name, value] of Object.entries(results)) assertJsonSafe(value, name);
 			const ops = new Set(r.frameCalls.map((call) => call.op));
 			for (const op of Object.keys(SQL_OP_TIMEOUT_MS)) assert.ok(ops.has(op), `${op} was called`);
@@ -251,6 +269,9 @@ describe('T3 — every op round-trips JSON-safe; failures come back as equal Exp
 			const wire = JSON.stringify(r.h.wire);
 			assert.equal(wire.includes('tk_sentinel'), false);
 			assert.equal(wire.includes('k1|'), false);
+			// Nor a transaction session id: the apply's transaction lives in the controller.
+			assert.equal(wire.includes('tx_sentinel'), false);
+			assert.equal(wire.includes('session_id'), false);
 		} finally {
 			r.dispose();
 		}
@@ -283,7 +304,7 @@ describe('T3 — every op round-trips JSON-safe; failures come back as equal Exp
 		try {
 			await assert.rejects(r.env.resolveEndpoint(PIPELINE), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'unavailable' && /not running/.test(error.message));
 			// A resolution failure inside an op names that op's tool (reviewer F6).
-			const fails = (op: 'sql.execute' | 'sql.getSchema' | 'sql.refreshSchema' | 'sql.dialect', tool: string, params: Record<string, unknown> = {}) => assert.rejects(
+			const fails = (op: 'sql.execute' | 'sql.getSchema' | 'sql.refreshSchema' | 'sql.dialect' | 'sql.applyBatch', tool: string, params: Record<string, unknown> = {}) => assert.rejects(
 				r.frame.caller.callReply(op, { connId: 'c-pipe', ...params } as never, { timeoutMs: SQL_OP_TIMEOUT_MS[op] }),
 				(error: unknown) => error instanceof ExplorerToolError && error.kind === 'unavailable' && error.tool === tool,
 			);
@@ -291,6 +312,7 @@ describe('T3 — every op round-trips JSON-safe; failures come back as equal Exp
 			await fails('sql.getSchema', 'get_schema');
 			await fails('sql.refreshSchema', 'refresh_schema');
 			await fails('sql.dialect', 'dialect');
+			await fails('sql.applyBatch', 'apply', { owner: r.frame.owner(), statements: [{ sql: 'DELETE FROM "orders" WHERE "id" = $1', params: [1], expect: 1 }], atomic: true });
 		} finally {
 			r.dispose();
 		}
@@ -309,12 +331,29 @@ describe('T4 — the frame\'s timeouts and the controller\'s bus timeouts match 
 			await session.dialect();
 			await session.getSchema();
 			await session.refreshSchema();
+			// A row count that does not match, so the apply's rollback is sent too.
+			await session.applyBatch([{ sql: 'DELETE FROM "orders" WHERE "id" = $1', params: [1], expect: 1 }], { atomic: true });
+			await session.applyBatch([{ sql: 'DELETE FROM "orders" WHERE "id" = $1', params: [1] }], { atomic: true });
+			await session.applyBatch([{ sql: 'DELETE FROM "orders" WHERE "id" = $2', params: [2] }], { atomic: false });
 			await session.execute('SELECT 1');
 			const bus = (tool: string): number | undefined => toolRequests(r.engine, tool).at(-1)?.timeoutMs;
 			assert.equal(bus('dialect'), DIALECT_WAIT_MS + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS);
 			assert.equal(bus('get_schema'), GET_SCHEMA_WAIT_MS + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS);
 			assert.equal(bus('refresh_schema'), REFRESH_SCHEMA_WAIT_MS + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS);
 			assert.equal(bus('execute'), UNBOUNDED_TOOL_TIMEOUT_MS);
+			// The apply's transaction tools, and its statements bounded by the node's idle-transaction timeout, never the 24 h cap.
+			assert.equal(bus('begin'), BEGIN_WAIT_MS + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS);
+			assert.equal(bus('commit'), END_TX_WAIT_MS + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS);
+			assert.equal(bus('rollback'), END_TX_WAIT_MS + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS);
+			const applied = toolRequests(r.engine, 'execute').filter((request) => (request.params as { input: { session_id?: string } }).input.session_id !== undefined);
+			assert.equal(applied.length, 2);
+			for (const request of applied) assert.equal(request.timeoutMs, APPLY_STATEMENT_WAIT_MS + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS, 'each statement of an apply waits the node\'s idle-transaction time');
+			// A statement committed on its own holds no transaction: it waits as
+			// any statement does, the 24 h cap on the bus (DA-R2 I2).
+			const own = toolRequests(r.engine, 'execute').filter((request) => (request.params as { input: { sql: string; session_id?: string } }).input.sql.endsWith('$2'));
+			assert.equal(own.length, 1);
+			assert.equal((own[0]!.params as { input: { session_id?: string } }).input.session_id, undefined);
+			assert.equal(own[0]!.timeoutMs, UNBOUNDED_TOOL_TIMEOUT_MS);
 			assert.equal(DIALECT_WAIT_MS, 15_000);
 			assert.equal(GET_SCHEMA_WAIT_MS, 60_000);
 			assert.equal(REFRESH_SCHEMA_WAIT_MS, 135_000);
@@ -335,7 +374,12 @@ describe('T4 — the frame\'s timeouts and the controller\'s bus timeouts match 
 			await session.getSchema();
 			await session.refreshSchema();
 			await session.execute('SELECT 1');
-			for (const call of r.frameCalls) {
+			await session.applyBatch([{ sql: 'DELETE FROM "orders" WHERE "id" = $1', params: [1] }], { atomic: true });
+			await session.applyBatch([{ sql: 'DELETE FROM "orders" WHERE "id" = $1', params: [1] }], { atomic: false });
+			// An apply's frame waits for its own statements (one wait each, by
+			// whether they ride a transaction); the named entry is the longest one.
+			assert.deepEqual(r.frameCalls.filter((call) => call.op === 'sql.applyBatch').map((call) => call.timeoutMs), [applyBatchTimeoutMs(1, true), applyBatchTimeoutMs(1, false)]);
+			for (const call of r.frameCalls.filter((c) => c.op !== 'sql.applyBatch')) {
 				assert.equal(call.timeoutMs, SQL_OP_TIMEOUT_MS[call.op as keyof typeof SQL_OP_TIMEOUT_MS], `${call.op} frame timeout`);
 			}
 			const at = (op: keyof typeof SQL_OP_TIMEOUT_MS): number => SQL_OP_TIMEOUT_MS[op];
@@ -355,7 +399,61 @@ describe('T4 — the frame\'s timeouts and the controller\'s bus timeouts match 
 			assert.ok(at('sql.execute') > controllerLongest, `frame ${at('sql.execute')} > controller ${controllerLongest}`);
 			assert.equal(at('sql.execute'), controllerLongest + FRAME_OP_MARGIN_MS);
 			assert.ok(at('sql.execute') <= MAX_TIMER_MS);
+			// An apply: resolve; the gate's dialect call; begin; one wait per
+			// statement, each at most the node's 300 s idle-transaction time (never
+			// the 24 h cap); commit; and a rollback after a failure. The frame
+			// passes the timeout for its own count; the named entry is the longest.
+			const applyOf = (n: number): number => RESOLVE_BUDGET_MS + busOf(DIALECT_WAIT_MS) + busOf(BEGIN_WAIT_MS) + n * busOf(APPLY_STATEMENT_WAIT_MS) + 2 * busOf(END_TX_WAIT_MS) + FRAME_OP_MARGIN_MS;
+			assert.equal(applyBatchTimeoutMs(3, true), applyOf(3));
+			assert.equal(APPLY_STATEMENT_WAIT_MS, NODE_TX_IDLE_MS);
+			assert.ok(applyBatchTimeoutMs(1, true) < 15 * 60_000, `${applyBatchTimeoutMs(1, true)} ms for one statement`);
+			// Statement by statement there is no transaction to outlast: each
+			// statement waits as any statement does (the 24 h cap on the bus),
+			// and no begin, commit or rollback is sent (DA-R2 I2). A long list is
+			// held to the longest real timer.
+			const eachOf = (n: number): number => Math.min(RESOLVE_BUDGET_MS + busOf(DIALECT_WAIT_MS) + n * UNBOUNDED_TOOL_TIMEOUT_MS, MAX_TIMER_MS - FRAME_OP_MARGIN_MS) + FRAME_OP_MARGIN_MS;
+			assert.equal(applyBatchTimeoutMs(1, false), eachOf(1));
+			assert.ok(applyBatchTimeoutMs(1, false) > UNBOUNDED_TOOL_TIMEOUT_MS);
+			assert.equal(applyBatchTimeoutMs(MAX_APPLY_STATEMENTS, false), MAX_TIMER_MS);
+			assert.equal(at('sql.applyBatch'), Math.max(applyOf(MAX_APPLY_STATEMENTS), eachOf(MAX_APPLY_STATEMENTS)));
+			assert.ok(at('sql.applyBatch') <= MAX_TIMER_MS);
 			for (const op of Object.keys(SQL_OP_TIMEOUT_MS) as Array<keyof typeof SQL_OP_TIMEOUT_MS>) assert.notEqual(at(op), 120_000, op);
+		} finally {
+			r.dispose();
+		}
+	});
+
+	it('saved-query ops wait for the saved list and the account\'s whole file read, and every request for that file names its timeout', async () => {
+		const clock = manualNow(Date.now());
+		const r = await rig({ now: clock.now });
+		try {
+			const endpoint = await r.env.resolveEndpoint(PIPELINE);
+			await r.env.savedQueries.save(endpoint, { id: 'sq1', name: 'Orders', sql: 'SELECT 1', at: 1 });
+			await r.frame.caller.callReply('sql.savedQueries', { connId: 'c-pipe', owner: r.frame.owner() }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.savedQueries'] });
+			const saved = r.frameCalls.filter((call) => call.op === 'sql.savedQueries' || call.op === 'sql.savedQueryEdit');
+			assert.deepEqual([...new Set(saved.map((call) => call.op))].sort(), ['sql.savedQueries', 'sql.savedQueryEdit']);
+			for (const call of saved) assert.equal(call.timeoutMs, SQL_OP_TIMEOUT_MS[call.op as keyof typeof SQL_OP_TIMEOUT_MS], `${call.op} frame timeout`);
+			assert.equal(SQL_OP_TIMEOUT_MS['sql.savedQueries'], LIST_WAIT_MS + SAVED_QUERIES_LOAD_WAIT_MS + FRAME_OP_MARGIN_MS);
+			assert.equal(SQL_OP_TIMEOUT_MS['sql.savedQueryEdit'], LIST_WAIT_MS + SAVED_QUERIES_LOAD_WAIT_MS + FRAME_OP_MARGIN_MS);
+			const fileRequests = r.engine.requests.filter((q) => (q.params as { path?: string } | null)?.path === SAVED_QUERIES_PATH);
+			// No file yet: the stat says so and nothing is read.
+			assert.equal(fileRequests[0]?.op, 'client.fsStat');
+			for (const q of fileRequests) assert.equal(q.timeoutMs, PREFS_FS_TIMEOUT_MS, q.op);
+		} finally {
+			r.dispose();
+		}
+	});
+
+	it('Ask\'s get_sql waits 120 s (+ SDK slack + bus margin) on the bus, and the frame waits for a resolve and that one call', async () => {
+		const clock = manualNow(Date.now());
+		const r = await rig({ now: clock.now });
+		try {
+			await r.env.getSession(await r.env.resolveEndpoint(PIPELINE)).getSql('orders this week');
+			assert.equal(GET_SQL_WAIT_MS, 120_000);
+			assert.equal(toolRequests(r.engine, 'get_sql').at(-1)?.timeoutMs, GET_SQL_WAIT_MS + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS);
+			const call = r.frameCalls.find((c) => c.op === 'sql.getSql');
+			assert.equal(call?.timeoutMs, SQL_OP_TIMEOUT_MS['sql.getSql']);
+			assert.equal(SQL_OP_TIMEOUT_MS['sql.getSql'], RESOLVE_BUDGET_MS + GET_SQL_WAIT_MS + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS + FRAME_OP_MARGIN_MS);
 		} finally {
 			r.dispose();
 		}
@@ -484,6 +582,25 @@ describe('T6 — the sidebar mount posts nothing but retained state and opens no
 			assert.equal(r.mount.core.activation.reason(), 'lazyMount');
 			r.mount.bridge.openConnectionEditor(null);
 			assert.deepEqual(r.docs.opened[1], ['edit:*new*', 'New Connection']);
+		} finally {
+			r.dispose();
+		}
+	});
+
+	it('the rows\' status words are read in the sidebar\'s own realm: following them posts nothing, and no topic carries them', async () => {
+		const r = await rig({ docKey: '', activate: false });
+		try {
+			const before = r.spy.posts.length;
+			const sources: unknown[] = [];
+			const off = r.mount.bridge.subscribeStatus((source) => { sources.push(source); });
+			await until(() => r.engine.ops().includes('client.getTasks'), 'the first discovery');
+			await until(() => (sources.at(-1) as { discovered: unknown[] | null }).discovered !== null, 'status from that discovery');
+			off();
+			const after = r.spy.posts.slice(before) as Array<{ __rrtool?: string; topic?: string }>;
+			assert.deepEqual(after.filter((post) => post.__rrtool !== 'state'), [], 'no event, call or reply');
+			const topics = new Set(r.spy.posts.filter((post) => (post as { __rrtool?: string }).__rrtool === 'state').map((post) => (post as { topic: string }).topic));
+			assert.deepEqual([...topics].sort(), ['connections', CONTROLLER_STATE_TOPIC, 'history', 'identity', 'savedQueries'].sort());
+			assert.deepEqual(r.docs.opened, []);
 		} finally {
 			r.dispose();
 		}
@@ -698,7 +815,9 @@ describe('grid layouts are copies everywhere: a frame keeps them in the session,
 		assert.ok(persisted.length >= 4, persisted.join(', '));
 		for (const rel of persisted) {
 			const text = source(rel);
-			assert.equal((text.match(/persistence=\{env\.gridPersistence\}/g) ?? []).length, (text.match(/tableId=/g) ?? []).length, `${rel}: every persisted grid`);
+			// Through the layout guard (sql/gridLayout.ts), over the env's persistence.
+			assert.equal((text.match(/persistence=\{gridLayouts\}/g) ?? []).length, (text.match(/tableId=/g) ?? []).length, `${rel}: every persisted grid`);
+			assert.match(text, /guardLayouts\(env\.gridPersistence, layoutRulesFor\(columns\)\)/, rel);
 		}
 		assert.match(source('sqlEnv.ts'), /gridPersistence: SESSION_GRIDS,/);
 	});
@@ -713,7 +832,11 @@ describe('grid layouts are copies everywhere: a frame keeps them in the session,
 			assert.throws(() => JSON.stringify(host.prefs), /circular/i, '#2625\'s channel hands out the host\'s object');
 			delete host.prefs.tableLayouts['probe'];
 
-			const env = createLocalSqlEnv({} as SqlCore, true, () => undefined, { getPref: () => undefined, setPref: () => undefined });
+			// The layouts ride the page's workspace pin (history/workspacePin.ts):
+			// read and written for the account the preferences were read for.
+			let fingerprint = 'u1|org-1|team-1';
+			const core = { identity: { get: () => ({ known: true, fingerprint }) } } as unknown as SqlCore;
+			const env = createLocalSqlEnv(core, true, () => undefined, { getPref: () => undefined, setPref: () => undefined });
 			const grids = env.gridPersistence;
 			assert.notEqual(grids, SESSION_GRIDS, 'the full app\'s layouts are not a frame\'s session ones');
 			host.prefs.tableLayouts['sql-overview-tables'] = { sort: [{ column: 'name', dir: 'asc' }] };
@@ -727,6 +850,12 @@ describe('grid layouts are copies everywhere: a frame keeps them in the session,
 			grids.write('sql-overview-tables', 'sort', blob);
 			tabulatorSetSort(blob);
 			assert.deepEqual(host.prefs.tableLayouts['sql-overview-tables'], { sort: [{ column: 'name', dir: 'desc' }] }, 'a write reaches the prefs as a plain copy');
+
+			// Another account without a reload: the shell still holds the first one's layouts.
+			fingerprint = 'u2|org-1|team-1';
+			assert.equal(grids.read('sql-overview-tables', 'sort'), false, 'another account reads none of them');
+			grids.write('sql-overview-tables', 'sort', [{ column: 'name', dir: 'asc' }]);
+			assert.deepEqual(host.prefs.tableLayouts['sql-overview-tables'], { sort: [{ column: 'name', dir: 'desc' }] }, 'and writes none');
 		} finally {
 			host.uninstall();
 		}
@@ -837,6 +966,40 @@ describe('T10 — write gates hold in the controller even when a frame calls the
 		}
 	});
 
+	it('an apply\'s list is checked in the controller: transaction text in it is refused before anything is sent, and nothing in an apply is ever repeated', async () => {
+		let attempt = 0;
+		const r = await rig({ tool: (params) => {
+			if (params.tool === 'execute') {
+				attempt += 1;
+				// The one code a marked read is retried on: an apply's statement never is.
+				if (attempt === 1) throw Object.assign(new Error('Task was stopped'), { code: 'TASK_STOPPED' });
+				return { rows: [], affected_rows: 1 };
+			}
+			return postgres(params);
+		} });
+		try {
+			await r.env.resolveEndpoint(PIPELINE);
+			const apply = (sqls: string[], atomic = true) => r.frame.caller.callReply('sql.applyBatch', { connId: 'c-pipe', owner: r.frame.owner(), statements: sqls.map((sql) => ({ sql, expect: 1 })), atomic }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.applyBatch'] });
+			const EDIT = 'UPDATE "orders" SET "name" = \'x\' WHERE "id" = 1';
+			for (const list of [[EDIT, 'COMMIT'], ['BEGIN', EDIT], [EDIT, 'SAVEPOINT s1'], [`${EDIT}; ROLLBACK`]]) {
+				for (const atomic of [true, false]) {
+					await assert.rejects(apply(list, atomic), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'invalid' && /nothing was applied/.test(error.message), JSON.stringify(list));
+				}
+			}
+			assert.deepEqual(['begin', 'execute', 'commit', 'rollback'].map((tool) => toolRequests(r.engine, tool).length), [0, 0, 0, 0], 'nothing reached the node');
+			// Users' typed transaction text stays refused by `sql.execute` too.
+			await assert.rejects(r.frame.caller.callReply('sql.execute', { connId: 'c-pipe', sql: 'BEGIN' }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.execute'] }), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'invalid');
+			// A statement refused TASK_STOPPED inside the transaction is sent once, then rolled back.
+			const result = await apply([EDIT, EDIT]);
+			assert.equal(toolRequests(r.engine, 'execute').length, 1, 'never sent again');
+			assert.equal(toolRequests(r.engine, 'rollback').length, 1);
+			assert.equal(toolRequests(r.engine, 'commit').length, 0);
+			assert.deepEqual(result, { transactional: true, results: [], failure: { index: 0, stage: 'statement', message: 'Task was stopped', code: 'TASK_STOPPED', committed: 0, unknown: false, rollbackConfirmed: true } });
+		} finally {
+			r.dispose();
+		}
+	});
+
 	it('the gate asks the node for its dialect when no probe has it: a MySQL-only batch the first probe missed is sent once', async () => {
 		// DA CE-2: the first probe fails (the node is restarting), so the store
 		// has no dialect; the text is two statements on MySQL (`--1` is
@@ -897,8 +1060,8 @@ describe('T10 — write gates hold in the controller even when a frame calls the
 		try {
 			await r.env.resolveEndpoint(PIPELINE);
 			const before = r.engine.requests.length;
-			type Checked = 'sql.execute' | 'sql.getSchema' | 'sql.getService' | 'sql.validate' | 'sql.releaseEndpoint';
-			const call = (op: Checked, params: Record<string, unknown>) => r.frame.caller.callReply(op, { connId: 'c-pipe', ...params } as never, { timeoutMs: SQL_OP_TIMEOUT_MS[op] });
+			type Checked = 'sql.execute' | 'sql.getSchema' | 'sql.getService' | 'sql.validate' | 'sql.releaseEndpoint' | 'sql.applyBatch';
+			const call = (op: Checked, params: Record<string, unknown>) => r.frame.caller.callReply(op, { connId: 'c-pipe', ...(op === 'sql.applyBatch' ? { owner: r.frame.owner() } : {}), ...params } as never, { timeoutMs: SQL_OP_TIMEOUT_MS[op] });
 			const bad: Array<[Checked, Record<string, unknown>]> = [
 				['sql.releaseEndpoint', { key: 42 }],
 				['sql.getService', { provider: 42 }],
@@ -913,6 +1076,16 @@ describe('T10 — write gates hold in the controller even when a frame calls the
 				['sql.execute', { sql: 'SELECT ?', params: { 0: 1 } }],
 				['sql.execute', { sql: 'SELECT 1', idempotent: 'yes' }],
 				['sql.getSchema', { table: 7 }],
+				['sql.applyBatch', { statements: [{ sql: 'SELECT 1' }] }],
+				['sql.applyBatch', { statements: [{ sql: 'SELECT 1' }], atomic: 'yes' }],
+				['sql.applyBatch', { statements: [], atomic: true }],
+				['sql.applyBatch', { statements: 'SELECT 1', atomic: true }],
+				['sql.applyBatch', { statements: [null], atomic: true }],
+				['sql.applyBatch', { statements: [{ sql: 42 }], atomic: true }],
+				['sql.applyBatch', { statements: [{ sql: 'SELECT ?', params: 'x' }], atomic: true }],
+				['sql.applyBatch', { statements: [{ sql: 'DELETE FROM t', expect: 1.5 }], atomic: true }],
+				['sql.applyBatch', { statements: [{ sql: 'DELETE FROM t', expect: -1 }], atomic: true }],
+				['sql.applyBatch', { statements: Array.from({ length: MAX_APPLY_STATEMENTS + 1 }, () => ({ sql: 'SELECT 1' })), atomic: false }],
 			];
 			for (const [op, params] of bad) {
 				await assert.rejects(call(op, params), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'invalid', JSON.stringify(params));
@@ -924,6 +1097,9 @@ describe('T10 — write gates hold in the controller even when a frame calls the
 				assert.throws(() => checkExecuteInput({ sql: 'SELECT ?', params }), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'invalid');
 			}
 			assert.throws(() => checkSchemaInput({ table: ['t'] }), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'invalid');
+			for (const params of [[Number.NaN], [() => 1], [new Date(0)]]) {
+				assert.throws(() => checkApplyInput({ statements: [{ sql: 'SELECT $1', params }], atomic: true }), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'invalid');
+			}
 		} finally {
 			r.dispose();
 		}
@@ -991,7 +1167,7 @@ describe('T11 — no bulk result is retained state; each topic stays within 64 K
 		try {
 			await r.env.getSession(await r.env.resolveEndpoint(PIPELINE)).execute('SELECT * FROM orders');
 			const states = r.spy.posts.filter((post) => (post as { __rrtool?: string }).__rrtool === 'state').map((post) => (post as { topic: string }).topic);
-			assert.deepEqual([...new Set(states)].sort(), ['connections', CONTROLLER_STATE_TOPIC, 'history', 'identity'].sort());
+			assert.deepEqual([...new Set(states)].sort(), ['connections', CONTROLLER_STATE_TOPIC, 'history', 'identity', 'savedQueries'].sort());
 			assert.deepEqual([...new Set(states)].filter((topic) => topic.startsWith(RESERVED_STATE_PREFIX) && topic !== CONTROLLER_STATE_TOPIC), []);
 			assert.equal(JSON.stringify(r.spy.posts.filter((post) => (post as { __rrtool?: string }).__rrtool === 'state')).includes('"rows"'), false);
 			assert.doesNotMatch(source('sqlController.ts'), /publishState\(\s*['`"]devtool:/);
@@ -1117,6 +1293,26 @@ describe('T11 — no bulk result is retained state; each topic stays within 64 K
 		assert.match(controller, /shrink: shrinkSqlState,/);
 		assert.match(controller, /const handlers: RequiredControllerHandlers<SqlOps> = \{/);
 		assert.match(controller, /publishIdentityState\(guarded, core\.identity\)/, 'identity counts toward the total budget');
+	});
+
+	it('the saved-queries topic is a revision and a word, never the queries: a full bag leaves it a few bytes and the map within budget', async () => {
+		const r = await rig();
+		try {
+			const endpoint = await r.env.resolveEndpoint(PIPELINE);
+			for (let i = 0; i < 50; i += 1) await r.env.savedQueries.save(endpoint, { id: `sq${i}`, name: `Query ${i}`, sql: `SELECT ${i} AS marker_${i}, '${'x'.repeat(4_000)}'`, at: i });
+			await settle();
+			const last = retained(r.spy.posts);
+			const topic = last.get('savedQueries') as SavedQueriesState;
+			assert.equal(topic.storage, 'file');
+			assert.ok(topic.rev >= 50, 'the revision moved with every save');
+			assert.ok(jsonByteLength(topic) < 64, `${jsonByteLength(topic)} bytes`);
+			assert.equal(JSON.stringify(r.spy.posts.filter((post) => (post as { __rrtool?: string }).__rrtool === 'state')).includes('marker_'), false, 'no query text is retained state');
+			let total = 0;
+			for (const snapshot of last.values()) total += jsonByteLength(snapshot);
+			assert.ok(total <= MAX_RETAINED_TOTAL_BYTES, `the whole map: ${total} bytes`);
+		} finally {
+			r.dispose();
+		}
 	});
 });
 

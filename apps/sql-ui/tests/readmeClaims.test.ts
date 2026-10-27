@@ -118,6 +118,22 @@ describe('README claims', () => {
 		assert.match(core, /if \(!running\(found\)\) \{\s*if \(record\.mode === 'direct'\) \{/);
 	});
 
+	it('keeps no line the redesign made stale (DA-R1 I4)', () => {
+		// Schema only is found by the probe on open, not by a first refusal.
+		assert.doesNotMatch(prose, /The first refused statement raises a banner/);
+		assert.match(prose, /The app finds out once when a connection opens/);
+		// The sidebar lists connections; tables are on the Overview page.
+		assert.doesNotMatch(prose, /fills the sidebar with that database's tables/);
+		assert.match(prose, /whose Overview page lists that database's tables; the sidebar lists connections only\./);
+		// Don't ask still sends the row limit.
+		assert.doesNotMatch(prose, /every statement runs as typed/);
+		assert.match(prose, /\*\*Don't ask\*\*: a statement you run from the editor is sent without asking\. \(History's rerun of a write still asks, and Apply always confirms\.\) The row limit still applies/);
+		// Only the plan drawer lacks EXPLAIN ANALYZE; a typed one runs and is checked.
+		assert.doesNotMatch(prose, /\*\*No `EXPLAIN ANALYZE`\.\*\*/);
+		assert.doesNotMatch(prose, /There is no `EXPLAIN ANALYZE`/);
+		assert.match(prose, /\*\*The plan drawer never runs `EXPLAIN ANALYZE`\.\*\*/);
+	});
+
 	it('links only to sections that exist', () => {
 		const anchors = new Set([...README.matchAll(/^#{2,3} (.+)$/gm)].map((m) => (m[1] as string).toLowerCase().replace(/[^a-z0-9 -]/g, '').trim().replace(/ /g, '-')));
 		for (const match of README.matchAll(/\]\(#([a-z0-9-]+)\)/g)) assert.ok(anchors.has(match[1] as string), `#${match[1]} is not a section`);

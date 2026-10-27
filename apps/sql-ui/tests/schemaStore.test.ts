@@ -38,7 +38,7 @@ import assert from 'node:assert/strict';
 import type { IExplorerClient, IExplorerEndpoint } from 'shared/explorer/types';
 import type { SqlSession } from '../src/connect';
 import { createSqlSession } from '../src/connect/session';
-import { refreshSchema } from '../src/schema/schemaStore';
+import { clearSchemas, executeStateFromFailure, schemaGeneration, noteExecuteFailure, noteExecuteSuccess, probeExecute, refreshSchema, schemaSnapshot } from '../src/schema/schemaStore';
 import { currentRows, describeEndpoint, registerEndpoint, resetEndpoints, sqlEndpoints } from './support';
 
 // =============================================================================
@@ -224,5 +224,108 @@ describe('refreshSchema — concurrency', () => {
 		release();
 		await Promise.all([first, second]);
 		assert.equal(countOf(tools, 'get_schema'), 1);
+	});
+});
+
+// =============================================================================
+// THE EXECUTE STATE
+// =============================================================================
+
+const EXECUTE_OFF_MESSAGE = 'execute tool is disabled for this node (set allow_execute=true)';
+
+describe('executeStateFromFailure', () => {
+	it("maps the node's exact refusal to off", () => {
+		assert.equal(executeStateFromFailure(EXECUTE_OFF_MESSAGE, 'unknown'), 'off');
+		assert.equal(executeStateFromFailure(EXECUTE_OFF_MESSAGE, 'on'), 'off');
+	});
+
+	it('leaves every other failure as it was, including one that only mentions allow_execute (DA-R1 M1)', () => {
+		assert.equal(executeStateFromFailure('SQL execution failed: invalid input syntax for type integer: "allow_execute"', 'on'), 'on');
+		assert.equal(executeStateFromFailure('SQL execution failed: column "allow_execute" does not exist', 'on'), 'on');
+		assert.equal(executeStateFromFailure('SQL execution failed: column "allow_execute" does not exist', 'unknown'), 'unknown');
+		assert.equal(executeStateFromFailure('syntax error at or near "SELEC"', 'unknown'), 'unknown');
+		assert.equal(executeStateFromFailure('connection refused', 'on'), 'on');
+		assert.equal(executeStateFromFailure('', 'off'), 'off');
+	});
+});
+
+describe('the execute state of a connection', () => {
+	it('is unknown by default and after clearSchemas', async () => {
+		const endpoint = await endpointFor('execute:default');
+		assert.equal(schemaSnapshot(describeEndpoint(endpoint).key).executeState, 'unknown');
+		noteExecuteSuccess(describeEndpoint(endpoint).key);
+		assert.equal(schemaSnapshot(describeEndpoint(endpoint).key).executeState, 'on');
+		clearSchemas();
+		assert.equal(schemaSnapshot(describeEndpoint(endpoint).key).executeState, 'unknown');
+	});
+
+	it('learns off from a refusal and on from a statement that ran', async () => {
+		const endpoint = await endpointFor('execute:learn');
+		noteExecuteFailure(describeEndpoint(endpoint).key, EXECUTE_OFF_MESSAGE);
+		assert.equal(schemaSnapshot(describeEndpoint(endpoint).key).executeState, 'off');
+		noteExecuteFailure(describeEndpoint(endpoint).key, 'syntax error');
+		assert.equal(schemaSnapshot(describeEndpoint(endpoint).key).executeState, 'off');
+		noteExecuteSuccess(describeEndpoint(endpoint).key);
+		assert.equal(schemaSnapshot(describeEndpoint(endpoint).key).executeState, 'on');
+	});
+
+	it('survives a schema refresh', async () => {
+		const endpoint = await endpointFor('execute:refresh');
+		const { client } = fakeClient((tool) => (tool === 'dialect' ? { dialect: 'postgres' } : { database: 'shop', tables: {} }));
+		noteExecuteFailure(describeEndpoint(endpoint).key, EXECUTE_OFF_MESSAGE);
+		await refreshSchema(sessionFor(client, endpoint));
+		assert.equal(schemaSnapshot(describeEndpoint(endpoint).key).executeState, 'off');
+	});
+});
+
+describe('schemaGeneration', () => {
+	it('moves on when the store is cleared, so a view can probe again', () => {
+		const before = schemaGeneration();
+		clearSchemas();
+		assert.equal(schemaGeneration(), before + 1);
+	});
+});
+
+describe('probeExecute', () => {
+	it('sends SELECT 1 as an idempotent execute and records on', async () => {
+		const endpoint = await endpointFor('probe:on');
+		const calls: Array<{ tool: string; input: unknown }> = [];
+		const client: IExplorerClient = {
+			getTasks: async () => currentRows() as unknown as Array<Record<string, unknown>>,
+			getTaskPipeline: async () => undefined,
+			tool: async <T,>({ tool, input }: { tool: string; input?: unknown }): Promise<T> => {
+				calls.push({ tool, input });
+				return { rows: [{ '?column?': 1 }] } as T;
+			},
+		};
+		await probeExecute(sessionFor(client, endpoint));
+		assert.equal(calls.length, 1);
+		assert.equal(calls[0]!.tool, 'execute');
+		assert.match(JSON.stringify(calls[0]!.input), /SELECT 1/);
+		assert.equal(schemaSnapshot(describeEndpoint(endpoint).key).executeState, 'on');
+	});
+
+	it('records off when the node refuses, and stays unknown on any other failure', async () => {
+		const refused = await endpointFor('probe:off');
+		const refusing = fakeClient(() => { throw new Error(EXECUTE_OFF_MESSAGE); });
+		await probeExecute(sessionFor(refusing.client, refused));
+		assert.equal(schemaSnapshot(describeEndpoint(refused).key).executeState, 'off');
+
+		const down = await endpointFor('probe:down');
+		const failing = fakeClient(() => { throw new Error('connection refused'); });
+		await probeExecute(sessionFor(failing.client, down));
+		assert.equal(schemaSnapshot(describeEndpoint(down).key).executeState, 'unknown');
+	});
+
+	it('drops its answer when the store was cleared while it ran', async () => {
+		const endpoint = await endpointFor('probe:cleared');
+		let release = (): void => {};
+		const held = new Promise<void>((resolve) => { release = resolve; });
+		const { client } = fakeClient(async () => { await held; return { rows: [] }; });
+		const probe = probeExecute(sessionFor(client, endpoint));
+		clearSchemas();
+		release();
+		await probe;
+		assert.equal(schemaSnapshot(describeEndpoint(endpoint).key).executeState, 'unknown');
 	});
 });
