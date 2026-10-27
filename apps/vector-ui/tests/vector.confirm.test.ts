@@ -291,3 +291,22 @@ test('a typed confirmation trims both sides: a file name that starts or ends wit
 	assert.equal(confirmReady({ expected: 'notes.md', prompt: '' }, 'notes'), false);
 	assert.equal(confirmReady(null, ''), true);
 });
+
+test("the first focus (P2-11): Confirm for a move to the trash, Cancel for a bulk one (over 100 documents or one store batch), the typed field for a permanent write", () => {
+	const { BULK_TRASH_FOCUS_CANCEL, confirmFirstFocus } = require('../src/vector/confirm') as typeof import('../src/vector/confirm');
+	assert.equal(BULK_TRASH_FOCUS_CANCEL, 100);
+	assert.equal(confirmFirstFocus('trash', 1, 100), 'confirm');
+	assert.equal(confirmFirstFocus('trash', 100, 100), 'confirm', 'one full batch: still Confirm');
+	assert.equal(confirmFirstFocus('trash', 101, 100), 'cancel', 'over 100: Cancel');
+	assert.equal(confirmFirstFocus('trash', 5_000, 100), 'cancel', '"Stage all shown (5,000)" then Apply: Enter does not move them');
+	assert.equal(confirmFirstFocus('trash', 30, 25), 'cancel', 'over the store\'s smaller batch');
+	assert.equal(confirmFirstFocus('trash', 25, 25), 'confirm');
+	assert.equal(confirmFirstFocus('trash', 150, 500), 'cancel', 'the smaller of 100 and the batch');
+	assert.equal(confirmFirstFocus('delete', 1, 100), 'typed');
+	assert.equal(confirmFirstFocus('empty', 3, 100), 'typed');
+	const { multiTrashConfirmation } = require('../src/vector/confirm') as typeof import('../src/vector/confirm');
+	const many = Array.from({ length: 150 }, (_, i) => ({ objectId: `d${i}`, path: `a/${i}.md`, chunks: 1 }));
+	const content = multiTrashConfirmation(many, { storeName: 'Store', collection: 'docs', backend: 'pgvector', provider: 'postgres' });
+	assert.match(content.title, /^Move 150 documents/, 'the count leads the title');
+	assert.equal(content.typed, null, 'nothing to type: Restore undoes it');
+});

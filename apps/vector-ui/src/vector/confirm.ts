@@ -472,3 +472,26 @@ export function auditLines(audits: readonly IWriteAudit[]): string[] {
 		return `${prefix}${audit.action ?? 'write'}, ${rows}, called by ${audit.caller ?? 'an unnamed caller'}`;
 	});
 }
+
+/** A move to the trash of more documents than this opens with Cancel focused (the store's batch can be smaller). */
+export const BULK_TRASH_FOCUS_CANCEL = 100;
+
+/** Where a confirmation's first focus goes: Confirm, the typed field (Cancel when there is none), or Cancel. */
+export type ConfirmFirstFocus = 'confirm' | 'typed' | 'cancel';
+
+/**
+ * Where a confirmation's first focus goes (the lead's rule): a move to the trash can be undone, so Confirm, unless it
+ * moves more than BULK_TRASH_FOCUS_CANCEL documents or more than one batch of the store (`write_ids_max`), whichever
+ * is smaller; then Cancel, so a stray Enter does not move them all (nothing is typed: Restore undoes it). A permanent
+ * write: its typed field, else Cancel. Never the destructive button.
+ *
+ * @param kind - What Confirm sends: 'trash', 'delete' or 'empty'.
+ * @param count - How many documents it covers.
+ * @param writeIdsMax - The store's `limits.write_ids_max`.
+ * @returns Where the focus goes.
+ */
+export function confirmFirstFocus(kind: 'trash' | 'delete' | 'empty', count: number, writeIdsMax: number): ConfirmFirstFocus {
+	if (kind !== 'trash') return 'typed';
+	const bulk = Math.min(BULK_TRASH_FOCUS_CANCEL, Math.max(1, Math.floor(writeIdsMax)));
+	return count > bulk ? 'cancel' : 'confirm';
+}

@@ -30,9 +30,11 @@
 // is confirmed by this panel inside its own document, in both mounts (D10),
 // with the words and the typed rule of vector/confirm.ts, no overlay, no
 // focus trap and no document or window listener. When it opens the focus
-// goes by the write's weight: Confirm for one that can be undone (Move to
-// trash); for one that cannot (Delete permanently, Empty trash) the typed
-// field, else Cancel, never the destructive button. Escape cancels while the
+// goes by the write's weight (vector/confirm.ts confirmFirstFocus): Confirm
+// for one that can be undone (Move to trash), but Cancel for a bulk move
+// (over 100 documents, or over one store batch), so a stray Enter does not
+// move them all; for one that cannot (Delete permanently, Empty trash) the
+// typed field, else Cancel, never the destructive button. Escape cancels while the
 // focus is inside it (unless an inner handler already acted), and Confirm
 // stays unavailable (aria-disabled, so it keeps the focus) until the typed
 // rule is met.
@@ -57,8 +59,8 @@ import type { CSSProperties } from 'react';
 import { Button, commonStyles } from 'shell';
 import type { IProbeResult } from 'shared/explorer';
 import type { IConnectionEntry } from '../adapters/connections';
-import { CONSOLE_ORIGIN, confirmElsewhereText, confirmReady, confirmationFor, removeContextFor } from '../vector/confirm';
-import type { ConfirmOrigin, ConfirmationView } from '../vector/confirm';
+import { CONSOLE_ORIGIN, confirmElsewhereText, confirmFirstFocus, confirmReady, confirmationFor, removeContextFor } from '../vector/confirm';
+import type { ConfirmFirstFocus, ConfirmOrigin, ConfirmationView } from '../vector/confirm';
 import { firstFocusable, focusLost } from '../vector/focus';
 import { formatCount } from '../vector/stats';
 import { FOCUS_RING, styles as appStyles } from '../styles';
@@ -133,11 +135,12 @@ export function InlineRemoveConfirm({ entry, probe, origin = CONSOLE_ORIGIN, ret
 	}
 	const view = confirmationFor(pending, removeContextFor(entry.ctx.endpoint, probe));
 	const dialogKey = `${pending.action}:${pending.targets.length}:${pending.targets[0]?.objectId ?? ''}`;
-	return <ConfirmPanel key={dialogKey} view={view} onConfirm={() => void entry.controller.confirmRemove()} onCancel={() => entry.controller.cancelRemove()} returnFocus={returnFocus} onClosed={onClosed} />;
+	const first = confirmFirstFocus(pending.action, pending.targets.length, entry.ctx.limits.write_ids_max);
+	return <ConfirmPanel key={dialogKey} view={view} first={first} onConfirm={() => void entry.controller.confirmRemove()} onCancel={() => entry.controller.cancelRemove()} returnFocus={returnFocus} onClosed={onClosed} />;
 }
 
 /** One confirmation, keyed on what it confirms (a new one starts with an empty typed field and its own first focus). */
-const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCancel(): void; returnFocus?: () => HTMLElement | null; onClosed?: (how: ConfirmClose) => void }> = ({ view, onConfirm: sendWrite, onCancel: dropWrite, returnFocus, onClosed }) => {
+const ConfirmPanel: React.FC<{ view: ConfirmationView; first: ConfirmFirstFocus; onConfirm(): void; onCancel(): void; returnFocus?: () => HTMLElement | null; onClosed?: (how: ConfirmClose) => void }> = ({ view, first, onConfirm: sendWrite, onCancel: dropWrite, returnFocus, onClosed }) => {
 	const region = useRef<HTMLElement>(null);
 	const actions = useRef<HTMLDivElement>(null);
 	const confirmButton = useRef<HTMLButtonElement>(null);
@@ -155,10 +158,10 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 	const how = useRef<ConfirmClose>('cancel');
 	const closing = useRef({ returnFocus, onClosed });
 	closing.current = { returnFocus, onClosed };
-	// Opened: the first focus by the write's weight (Confirm for one that can be undone; never the destructive button).
+	// Opened: the first focus by the write's weight (vector/confirm.ts confirmFirstFocus; never the destructive button).
 	useEffect(() => {
-		if (!content.destructive) confirmButton.current?.focus();
-		else if (content.typed) input.current?.focus();
+		if (first === 'confirm') confirmButton.current?.focus();
+		else if (first === 'typed' && content.typed) input.current?.focus();
 		else Array.from(actions.current?.querySelectorAll('button') ?? []).find((button) => button.textContent?.trim() === content.cancelLabel)?.focus();
 		// Once, when the confirmation opens (it is keyed on what it confirms).
 		// eslint-disable-next-line react-hooks/exhaustive-deps
