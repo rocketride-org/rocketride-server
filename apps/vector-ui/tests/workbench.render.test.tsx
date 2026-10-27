@@ -35,6 +35,7 @@ import type { IExplorerEndpoint } from 'shared/explorer';
 import type { IVectorEnv } from '../src/env';
 import type { WorkbenchTab } from '../src/vector/workbench';
 import { NO_STAGED, stage } from '../src/vector/staged';
+import { documentOrigin } from '../src/vector/confirm';
 import { pgvectorNode, vectorWorld } from './support/vectorWorld';
 
 // The shell's building blocks exist only inside a running shell: a stand-in for each that renders its text.
@@ -188,5 +189,39 @@ test('R2-I1: every finished write line offers Write details with its whole sente
 		assert.ok(sentenceIn(line, state.message), 'Write details, with the whole sentence first');
 		entry.controller.dispose();
 	}
+});
+
+test("B10: a document tab's cancel or write (sharing this controller in the full app) is not the console's line", async () => {
+	const { env, endpoint } = await discovered();
+	const probe = env.endpoints.get().probes[endpoint.key];
+	const entry = env.connection(endpoint, (probe?.ok ? readDialect(probe.info)?.limits : null) ?? DEFAULT_LIMITS);
+	entry.controller.setWritesEnabled(true);
+	entry.controller.requestRemove([{ objectId: 'doc-x', path: 'x.md', chunks: 1 }], documentOrigin('doc-x'));
+	entry.controller.cancelRemove();
+	assert.equal(entry.controller.getState().removal.message, 'Cancelled. Nothing was sent.', 'the premise: a cancel in the document tab');
+	assert.match(render(env, endpoint, 'documents'), /data-bottom-slot=""><\/div>/, 'the console shows nothing of it');
+	entry.controller.requestRemove([{ objectId: 'doc-x', path: 'x.md', chunks: 1 }]);
+	entry.controller.cancelRemove();
+	assert.match(render(env, endpoint, 'documents'), /data-write-line=""[^>]*><div role="status"[^>]*>Cancelled\. Nothing was sent\.</, "the console's own cancel shows");
+	entry.controller.dispose();
+});
+
+test("B10: a document surface says what its own write did, under its confirmation; nothing of another surface's", () => {
+	const { DocumentWriteLine } = require('../src/components/DocumentWriteLine') as typeof import('../src/components/DocumentWriteLine');
+	const { CONSOLE_ORIGIN } = require('../src/vector/confirm') as typeof import('../src/vector/confirm');
+	const over = (removal: Record<string, unknown>) => ({ controller: { subscribe: () => () => undefined, getState: () => ({ removal }) } }) as unknown as Parameters<typeof DocumentWriteLine>[0]['entry'];
+	const doc = documentOrigin('doc-x');
+	const failed = renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'error', message: 'Stopped after 0 of 1 batches: the store is busy.', audit: [], origin: doc })} origin={doc} />);
+	assert.match(failed, /<div role="alert"[^>]*>Stopped after 0 of 1 batches: the store is busy\.<\/div>/, 'a failure of its Move to trash, as an alert');
+	assert.match(failed, /<summary[^>]*>Write details<\/summary>[\s\S]*<p[^>]*>Stopped after 0 of 1 batches/, 'with Write details');
+	const partial = renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'done', message: 'x.md was already gone; nothing was moved to the trash', audit: [], partial: true, origin: doc })} origin={doc} />);
+	assert.match(partial, /<div role="status"[^>]*>x\.md was already gone/);
+	assert.match(renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'running', message: null, origin: doc })} origin={doc} />), /<div role="status"[^>]*>Removing/);
+	// The console's write, or another document's: not this tab's line (the full app shares one controller).
+	assert.equal(renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'done', message: 'Moved 3 documents to the trash.' })} origin={doc} />), '');
+	assert.equal(renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'done', message: 'Moved y.md to the trash.', origin: documentOrigin('doc-y') })} origin={doc} />), '');
+	// A dev-tool document frame has its own controller: its writes carry no origin, and show.
+	assert.match(renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'done', message: 'Moved x.md to the trash (2 chunks).', audit: [] })} origin={CONSOLE_ORIGIN} />), /role="status"[^>]*>Moved x\.md to the trash/);
+	assert.equal(renderToStaticMarkup(<DocumentWriteLine entry={over({ status: 'idle', message: null })} origin={CONSOLE_ORIGIN} />), '', 'nothing to say: nothing');
 });
 

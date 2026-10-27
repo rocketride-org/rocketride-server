@@ -141,6 +141,12 @@ export interface IFailureText {
 }
 
 /**
+ * A call refused before it was sent because the store's last probe did not answer (it failed, or none has run): the
+ * store may be down, and the node is not out of date. Retry and Refresh probe it again first.
+ */
+export const NOT_PROBED_TEXT = 'The store did not answer when it was last checked. Retry or Refresh checks it again.';
+
+/**
  * What a failed call says on screen.
  *
  * @param error - Whatever the call rejected with.
@@ -165,6 +171,7 @@ export function failureText(error: unknown, ctx: { write?: boolean } = {}): IFai
 			case 'timeout':
 				return ctx.write ? { headline: WRITE_TIMEOUT_TEXT } : { headline: error.headline, ...(error.detail ? { detail: error.detail } : {}) };
 			case 'upgrade':
+				// Only for a node whose probe answered without the capability (adapters/actions.ts probeAware maps the others).
 				return { headline: `This store node cannot run ${error.tool}. Update the pipeline's store node to a version that supports Vector Explorer.` };
 			case 'raised':
 				if (error.code !== undefined && NOT_RUNNING_CODES.has(error.code)) {

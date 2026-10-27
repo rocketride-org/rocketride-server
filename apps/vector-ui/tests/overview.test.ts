@@ -30,8 +30,8 @@ import type { IDocumentItem } from '../src/contract/types';
 import { healthSummary } from '../src/vector/health';
 import { TOP_FOLDERS, insights, insightsLabel, overLine, overviewCards, percentShares, topFolders } from '../src/vector/overview';
 import { readDialect, readStats } from '../src/vector/results';
-import { NO_FAILURES, bottomSlot, focusStranded, panelOf, reprobeFor, statsFailures, tabKeyTarget, unreachableShown, workbenchNonce, writeTouches } from '../src/vector/workbench';
-import { documentFocus } from '../src/vector/focus';
+import { NO_FAILURES, bottomSlot, focusStranded, takesFocusOnShow, panelOf, reprobeFor, statsFailures, tabKeyTarget, unreachableShown, workbenchNonce, writeTouches } from '../src/vector/workbench';
+import { documentFocus, focusAdrift } from '../src/vector/focus';
 import { fixture } from './support/fixtures';
 
 /** A document row. */
@@ -191,5 +191,31 @@ test("the bottom slot's one line: the pending bar while staged, else the write's
 	assert.equal(at({ write: 'result', fresh: false, showing: 'write' }), 'pending', 'only a success goes after a few seconds');
 	assert.equal(at({ write: null, showing: 'write' }), 'pending', 'Show pending: the bar');
 	assert.equal(at({ write: null, staged: 0, showing: 'write' }), 'empty', 'nothing to show, nothing staged: an empty line');
+});
+
+test('B5: a console or document takes the focus as it shows only when a press left it nowhere', () => {
+	const at = (over: Partial<Parameters<typeof takesFocusOnShow>[0]>) => takesFocusOnShow({ mounting: false, arrival: false, active: true, pageFocused: true, adrift: true, ...over });
+	// A connection's Browse documents or Open map opens the console: the press's page is hidden.
+	assert.equal(at({ mounting: true, arrival: true }), true);
+	// A document's Show on map brings the console forward (it was open behind).
+	assert.equal(at({}), true);
+	// A click on the shell's tab brings it forward with the focus on that tab: it stays there.
+	assert.equal(at({ adrift: false }), false);
+	// Restored, or opened behind: the focus is left alone.
+	assert.equal(at({ mounting: true, arrival: false }), false);
+	assert.equal(at({ active: false }), false);
+	// A dev-tool frame brought forward by a click in the host: the host keeps the focus.
+	assert.equal(at({ pageFocused: false }), false);
+});
+
+test('B5: the focus is adrift on nothing, the page, or an element removed, hidden or disabled', () => {
+	const body = { isConnected: true, offsetParent: null, focus: () => undefined };
+	const el = (over: Partial<{ isConnected: boolean; offsetParent: unknown; disabled: boolean }> = {}) => ({ isConnected: true, offsetParent: {}, focus: () => undefined, ...over });
+	assert.equal(focusAdrift(null, body), true);
+	assert.equal(focusAdrift(body, body), true);
+	assert.equal(focusAdrift(el({ offsetParent: null }), body), true, "a button in the Query panel the Map tab hid");
+	assert.equal(focusAdrift(el({ isConnected: false }), body), true);
+	assert.equal(focusAdrift(el({ disabled: true }), body), true);
+	assert.equal(focusAdrift(el(), body), false, 'a shown control keeps it');
 });
 

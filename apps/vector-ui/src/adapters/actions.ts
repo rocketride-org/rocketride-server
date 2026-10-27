@@ -33,17 +33,65 @@
 // =============================================================================
 
 import { ExplorerToolError } from 'shared/explorer';
-import type { IExplorerClient, IExplorerEndpoint, IEndpointStore, IInvokeOptions } from 'shared/explorer';
+import type { IExplorerClient, IExplorerEndpoint, IEndpointStore, IInvokeOptions, IRoleChannel } from 'shared/explorer';
 import type { IDocumentsFilter, IEmbedResult, INeighborsResult, INeighborsScopeResult, VectorChannels, VectorKey } from '../contract/types';
 import { heatScores } from '../vector/heat';
 import type { IHeatScore } from '../vector/heat';
 import { readChunksPage, readDeleteResult, readDocumentsPage, readStats, readTrashResult, unwrapEnvelope } from '../vector/results';
 import type { IChunksPageView, IDocumentsPageView, IRemoveView, IStatsView, ITrashView } from '../vector/results';
+import { NOT_PROBED_TEXT } from '../vector/wording';
 import { TOOL } from './explorer';
 
 /** What can call a tool: a session (the anchor token) or a role channel. */
 export interface IVectorCaller {
 	invoke<T = unknown>(tool: string, input?: Record<string, unknown>, opts?: IInvokeOptions): Promise<T>;
+}
+
+/** Each caller's probe-aware stand-in, made once: a caller is read on every render, and its identity is a dependency. */
+const awareCallers = new WeakMap<object, IVectorCaller>();
+
+/**
+ * A caller whose refusals say what they are while the store has no probe that answered. The session refuses every
+ * call that needs a capability when the probe failed or none ran ("upgrade": the node does not advertise it), and
+ * that would tell the user to update a node that is only unreachable; such a refusal becomes "not checked".
+ *
+ * @param caller - The session or channel.
+ * @param probed - Whether the store answered its last probe (read when a call is refused).
+ * @returns The caller (the same one for the same caller).
+ */
+export function probeAware(caller: IVectorCaller, probed: () => boolean): IVectorCaller {
+	let aware = awareCallers.get(caller);
+	if (!aware) {
+		aware = {
+			invoke: <T = unknown>(tool: string, input?: Record<string, unknown>, opts?: IInvokeOptions): Promise<T> =>
+				caller.invoke<T>(tool, input, opts).catch((error: unknown) => {
+					if (error instanceof ExplorerToolError && error.kind === 'upgrade' && !probed()) throw new ExplorerToolError({ kind: 'unavailable', tool, message: NOT_PROBED_TEXT });
+					throw error;
+				}),
+		};
+		awareCallers.set(caller, aware);
+	}
+	return aware;
+}
+
+/** Each channel's probe-aware stand-in, made once. */
+const awareChannels = new WeakMap<IRoleChannel, IRoleChannel>();
+
+/**
+ * {@link probeAware} for a role channel: the same channel (its role, binding, uploads and questions), its tool calls
+ * probe-aware.
+ *
+ * @param channel - The channel.
+ * @param probed - Whether the store answered its last probe.
+ * @returns The channel (the same one for the same channel).
+ */
+export function probeAwareChannel(channel: IRoleChannel, probed: () => boolean): IRoleChannel {
+	let aware = awareChannels.get(channel);
+	if (!aware) {
+		aware = Object.create(channel, { invoke: { value: probeAware(channel, probed).invoke } }) as IRoleChannel;
+		awareChannels.set(channel, aware);
+	}
+	return aware;
 }
 
 /**

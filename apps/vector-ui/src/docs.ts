@@ -76,6 +76,29 @@ export interface IDocumentDocPayload {
 	chunkId?: number;
 }
 
+/** The tabs a press just opened or brought forward, each waiting to take the focus once it mounts. */
+const arriving = new Set<string>();
+
+/**
+ * Note that a press opened (or brought forward) a tab: its own page is hidden then, so the tab takes the focus when it
+ * mounts (consoles and documents opened another way, or restored, leave the focus alone).
+ *
+ * @param uri - The tab's document URI.
+ */
+export function markArrival(uri: string): void {
+	arriving.add(uri);
+}
+
+/**
+ * Whether a press opened this tab (taken once, by the tab as it mounts).
+ *
+ * @param uri - The tab's document URI.
+ * @returns True once after {@link markArrival}.
+ */
+export function takeArrival(uri: string): boolean {
+	return arriving.delete(uri);
+}
+
 /**
  * Open one stored document's tab (the full app's documents).
  *
@@ -85,5 +108,6 @@ export interface IDocumentDocPayload {
  * @param chunkId - A chunk to scroll to.
  */
 export function openDocumentTab(endpoint: IExplorerEndpoint, objectId: string, path: string | null, chunkId?: number): void {
+	markArrival(documentUri(endpoint.key, objectId));
 	getDocs()?.openStaticDocument(documentUri(endpoint.key, objectId), documentTitle(objectId, path), { endpoint, objectId, path, ...(chunkId === undefined ? {} : { chunkId }) });
 }

@@ -33,6 +33,9 @@ export const DIRECTORY_LOAD_MORE = 5_000;
 /** A quick `stats` refresh at most this often while the console is visible. */
 export const QUICK_STATS_INTERVAL_MS = 15_000;
 
+/** Refresh or Retry waits at most this long for the store's probe before it reads anyway (a probe that never answers). */
+export const REPROBE_WAIT_MS = 20_000;
+
 /** Chunks listed per page (the node's `chunks_page` caps it). */
 export const CHUNKS_PAGE = 100;
 

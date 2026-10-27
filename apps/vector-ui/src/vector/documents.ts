@@ -181,6 +181,13 @@ export interface IPagerState {
 	filterApplied: FilterApplied | null;
 	/** The keys of `filter` the store did not apply (filtered here). */
 	filterIgnored: string[];
+	/**
+	 * The rows of the listing this one started over from (a refresh, a retry), with the same filter: kept until the
+	 * first page lands, so a first page that fails shows them again instead of nothing.
+	 */
+	held?: IDocumentItem[];
+	/** The rows are the last known ones (held): reading them again failed before its first page. */
+	stale?: boolean;
 }
 
 /**
@@ -201,7 +208,9 @@ export function pagerInit(cap: number = DIRECTORY_AUTO_ROWS): IPagerState {
  * @returns A loading state with nothing loaded.
  */
 export function pagerBegin(state: IPagerState, filter: IDocumentsFilter | null = state.filter): IPagerState {
-	return { ...pagerInit(state.cap), status: 'loading', filter };
+	// The same listing again keeps what it showed (or what it still held); another filter is another listing.
+	const held = filter === state.filter ? (state.rows.length > 0 ? state.rows : (state.held ?? [])) : [];
+	return { ...pagerInit(state.cap), status: 'loading', filter, ...(held.length > 0 ? { held } : {}) };
 }
 
 /** The keys a filter sets (null and absent keys are not filtered by). */
@@ -245,7 +254,9 @@ export function pagerApplyPage(state: IPagerState, page: IDocumentsPageView): IP
 		filterApplied = page.filterApplied ?? 'none';
 		filterIgnored = page.filterApplied === undefined ? setKeys(state.filter) : [...(page.filterIgnored ?? [])];
 	}
-	const base = { ...state, cursor: page.nextCursor, total: page.total ?? state.total, storeSorted: page.sorted, caveats: page.caveats, error: null, pages: state.pages + 1, filterApplied, filterIgnored };
+	// The first page replaces what the listing held from before.
+	const { held: _held, stale: _stale, ...rest } = state;
+	const base = { ...rest, cursor: page.nextCursor, total: page.total ?? state.total, storeSorted: page.sorted, caveats: page.caveats, error: null, pages: state.pages + 1, filterApplied, filterIgnored };
 	let status: PagerStatus = 'loading';
 	if (page.pagingUnsupported) status = 'unsupported';
 	else if (page.nextCursor === null || page.items.length === 0) status = 'done';
@@ -266,6 +277,8 @@ export function pagerApplyPage(state: IPagerState, page: IDocumentsPageView): IP
  * @returns An error state.
  */
 export function pagerFail(state: IPagerState, error: IFailureText): IPagerState {
+	// Started over and failed before its first page: the last known rows show again, marked as such.
+	if (state.pages === 0 && state.held !== undefined && state.held.length > 0) return { ...state, rows: sortDocuments(state.held), status: 'error', error, stale: true };
 	return { ...state, rows: sortDocuments(state.rows), status: 'error', error };
 }
 
@@ -353,6 +366,7 @@ export function pagerFooter(state: IPagerState): IPagerFooter | null {
 		case 'stalled':
 			return { text: `Loading stopped at ${loaded} documents; ${MORE_MAY_EXIST}`, loadMore: false, caveat: DOCUMENTS_REPEATED_TEXT, retry: false };
 		case 'error':
+			if (state.stale) return { text: `Showing the last known ${loaded} documents; reading them again failed: ${state.error?.headline ?? 'the store did not answer.'}`, loadMore: false, caveat: null, retry: true };
 			return { text: `Loading stopped at ${loaded} documents: ${state.error?.headline ?? 'the store did not answer.'}`, loadMore: false, caveat: null, retry: true };
 		case 'paused':
 			return { text: `Loading paused at ${loaded} documents`, loadMore: false, caveat: null, retry: false };
@@ -374,6 +388,7 @@ export function directoryHeading(state: IPagerState): string {
 	const totalShown = state.filter === null || state.filterApplied === 'server';
 	if (state.total !== null && totalShown) return `${formatCount(state.total)} ${state.total === 1 ? 'document' : 'documents'}`;
 	const n = state.rows.length;
+	if (state.stale) return `${formatCount(n)} last known`;
 	if (listingComplete(state)) return `${formatCount(n)} ${n === 1 ? 'document' : 'documents'}`;
 	return `${formatCount(n)} loaded`;
 }

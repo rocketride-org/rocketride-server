@@ -67,7 +67,7 @@ import { NO_STAGED, unstage } from '../vector/staged';
 import type { IStagedSet } from '../vector/staged';
 import { DEFAULT_TAB } from '../vector/workbench';
 import type { IOpenDocumentRequest, IQueryPrefill, QueryMode, WorkbenchTab } from '../vector/workbench';
-import { deleteBatch, fetchChunks, fetchDocumentsPage, fetchStats, restoreBatch, trashBatch } from './actions';
+import { deleteBatch, fetchChunks, fetchDocumentsPage, fetchStats, probeAware, restoreBatch, trashBatch } from './actions';
 import type { IVectorCaller } from './actions';
 import { announcer, connectionCaches, vectorEndpoints } from './explorer';
 
@@ -110,8 +110,10 @@ export type ConsoleTab = WorkbenchTab;
 export interface IConnectionLink {
 	/** The connection's anchor session, or what stands in for it in a dev-tool frame. */
 	session(endpoint: IExplorerEndpoint): IVectorCaller;
-	/** Probe the store again (its `dialect`), fire and forget. */
-	reprobe(endpointKey: string): void;
+	/** Probe the store again (its `dialect`); settles when the answer is in, and never rejects. */
+	reprobe(endpointKey: string): void | Promise<void>;
+	/** Whether the store answered its last probe (false: it failed, or none ran). Absent: always. */
+	probed?(endpointKey: string): boolean;
 }
 
 /** What the controller reads at call time. */
@@ -166,9 +168,10 @@ const REAL_CLOCK: IConsoleClock = {
  */
 function makeController(entry: Pick<IConnectionEntry, 'ctx' | 'selection' | 'writes' | 'staged'>, clock: IConsoleClock): IConsoleStore {
 	const { ctx } = entry;
+	const probed = (): boolean => ctx.link?.probed?.(ctx.endpoint.key) ?? true;
 	const session = (tool: string): IVectorCaller => {
 		if (ctx.link === null) throw new ExplorerToolError({ kind: 'unavailable', tool, message: 'Not connected to the server. Reconnect, then refresh.' });
-		return ctx.link.session(ctx.endpoint);
+		return probeAware(ctx.link.session(ctx.endpoint), probed);
 	};
 	return createConsoleStore(
 		{
@@ -184,6 +187,7 @@ function makeController(entry: Pick<IConnectionEntry, 'ctx' | 'selection' | 'wri
 				entry.staged.set(unstage(entry.staged.get(), ids));
 			},
 			reprobe: () => ctx.link?.reprobe(ctx.endpoint.key),
+			probed,
 			onWritten: () => entry.writes.set(entry.writes.get() + 1),
 			clock,
 		},
@@ -288,9 +292,11 @@ export const appConnections: IConnectionRegistry = createConnectionRegistry();
 export function appLink(client: IExplorerClient): IConnectionLink {
 	return {
 		session: (endpoint) => vectorEndpoints.session(client, endpoint),
-		reprobe: (endpointKey) => {
-			void vectorEndpoints.probe(client, endpointKey);
-		},
+		reprobe: (endpointKey) => vectorEndpoints.probe(client, endpointKey).then(
+			() => undefined,
+			() => undefined
+		),
+		probed: (endpointKey) => vectorEndpoints.getState().probes[endpointKey]?.ok === true,
 	};
 }
 

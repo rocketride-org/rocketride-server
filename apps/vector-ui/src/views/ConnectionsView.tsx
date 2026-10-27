@@ -36,7 +36,7 @@ import ConnectionDrawerDetails from '../components/ConnectionDrawerDetails';
 import VectorConnectionCard from '../components/VectorConnectionCard';
 import { useSampleChunks } from '../components/useSampleChunks';
 import { useEndpointsState, useVectorEnv } from '../envContext';
-import { getDocs } from '../docs';
+import { getDocs, markArrival } from '../docs';
 import { consoleUri } from '../vector/addresses';
 import { TONE_EDGE } from '../vector/colors';
 import { DEFAULT_LIMITS, readDialect } from '../vector/results';
@@ -52,6 +52,7 @@ import { styles } from '../styles';
  * @param endpoint - The connection.
  */
 export function openConsole(endpoint: IExplorerEndpoint): void {
+	markArrival(consoleUri(endpoint.key));
 	getDocs()?.openStaticDocument(consoleUri(endpoint.key), endpoint.nodeName || 'Vector store', { endpoint });
 }
 
