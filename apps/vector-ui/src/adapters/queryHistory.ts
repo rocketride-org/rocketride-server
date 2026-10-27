@@ -39,7 +39,9 @@
 //              document (`forget` empties it on a change of identity).
 //
 // An entry this app did not write (another kind or outcome) is left stored
-// and not shown.
+// and not shown. A Compare's question B (`compareWith`) is never handed to
+// the shared store, whose saved entries would carry it to the workspace
+// file: it is held beside it, in memory, for the page's life.
 // =============================================================================
 
 import { createHistoryStore } from 'shared/explorer';
@@ -122,9 +124,15 @@ interface IStoreHolder {
  * @param info - Whether it is persisted, and the sentence that says where it is kept.
  * @returns The source.
  */
-function sourceOver(holder: IStoreHolder, info: { persisted: boolean; note: string }): IQueryHistorySource {
+function sourceOver(holder: IStoreHolder, info: { persisted: boolean; note: string }): IQueryHistorySource & { forgetCompared(): void } {
 	// Each stored list maps to one list of entries, so a snapshot stays the same object until its list changes.
-	const mapped = new WeakMap<IHistoryEntry<'question'>[], readonly IQueryHistoryEntry[]>();
+	let mapped = new WeakMap<IHistoryEntry<'question'>[], readonly IQueryHistoryEntry[]>();
+	// Compare's question B by entry id, in memory only.
+	const compared = new Map<string, string>();
+	const withCompared = (entry: IQueryHistoryEntry | null): IQueryHistoryEntry | null => {
+		const b = entry === null ? undefined : compared.get(entry.id);
+		return entry === null || b === undefined ? entry : { ...entry, compareWith: b };
+	};
 	const entryReadables = new Map<string, IReadable<readonly IQueryHistoryEntry[]>>();
 	const recordingReadables = new Map<string, IReadable<boolean>>();
 	return {
@@ -138,7 +146,7 @@ function sourceOver(holder: IStoreHolder, info: { persisted: boolean; note: stri
 						const stored = holder.current().getHistory(key);
 						let list = mapped.get(stored);
 						if (!list) {
-							list = stored.map(queryEntryOf).filter((entry): entry is IQueryHistoryEntry => entry !== null);
+							list = stored.map((entry) => withCompared(queryEntryOf(entry))).filter((entry): entry is IQueryHistoryEntry => entry !== null);
 							mapped.set(stored, list);
 						}
 						return list;
@@ -149,11 +157,22 @@ function sourceOver(holder: IStoreHolder, info: { persisted: boolean; note: stri
 			}
 			return readable;
 		},
-		record: (key, entry) => holder.current().runs.emitRun(key, storedEntryOf(newId(entry.at), entry)),
+		record(key, entry) {
+			const id = newId(entry.at);
+			// Known before the store tells its listeners, so the first snapshot already carries it.
+			if (entry.compareWith !== undefined) compared.set(id, entry.compareWith);
+			holder.current().runs.emitRun(key, storedEntryOf(id, entry));
+		},
 		togglePin: (key, id) => holder.current().togglePin(key, id),
 		setNote: (key, id, note) => holder.current().setNote(key, id, note),
-		remove: (key, id) => holder.current().removeEntry(key, id),
-		clear: (key) => holder.current().clearForKey(key),
+		remove(key, id) {
+			compared.delete(id);
+			holder.current().removeEntry(key, id);
+		},
+		clear(key) {
+			for (const entry of holder.current().getHistory(key)) compared.delete(entry.id);
+			holder.current().clearForKey(key);
+		},
 		recording(key) {
 			let readable = recordingReadables.get(key);
 			if (!readable) {
@@ -163,6 +182,10 @@ function sourceOver(holder: IStoreHolder, info: { persisted: boolean; note: stri
 			return readable;
 		},
 		setRecording: (key, on) => holder.current().setRecording(key, on),
+		forgetCompared() {
+			compared.clear();
+			mapped = new WeakMap();
+		},
 	};
 }
 
@@ -174,7 +197,8 @@ function sourceOver(holder: IStoreHolder, info: { persisted: boolean; note: stri
  * @returns The source.
  */
 export function persistedQueryHistory(store: IHistoryStore<'question'>, note: string): IQueryHistorySource {
-	return sourceOver({ current: () => store, subscribe: store.subscribe }, { persisted: true, note });
+	const { forgetCompared: _forgetCompared, ...source } = sourceOver({ current: () => store, subscribe: store.subscribe }, { persisted: true, note });
+	return source;
 }
 
 /** A Query history kept in memory only, which a mount empties on a change of identity. */
@@ -217,11 +241,13 @@ export function sessionQueryHistory(note: string): ISessionQueryHistory {
 			};
 		},
 	};
+	const { forgetCompared, ...source } = sourceOver(holder, { persisted: false, note });
 	return {
-		...sourceOver(holder, { persisted: false, note }),
+		...source,
 		forget() {
 			unsubscribe();
 			store = memoryStore();
+			forgetCompared();
 			unsubscribe = store.subscribe(notify);
 			notify();
 		},

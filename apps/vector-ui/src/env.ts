@@ -84,6 +84,11 @@ export interface IQueryHistoryEntry {
 	error?: string;
 	pinned?: boolean;
 	note?: string;
+	/**
+	 * A Compare's question B. Held in memory only, in both mounts: the full app's saved entry keeps question A alone,
+	 * so after a reload a Compare entry has none.
+	 */
+	compareWith?: string;
 }
 
 /**

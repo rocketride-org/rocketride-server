@@ -29,7 +29,8 @@
 // connection's `entry.tab` (adapters/connections.ts), so the map's and the
 // chat's actions can switch it from anywhere (adapters/consoleActions.ts).
 // The Query tab's mode and the question handed to it live beside it in the
-// entry (`queryMode`, `queryPrefill`).
+// entry (`queryMode`, `queryPrefill`), as does a request for the Documents
+// tab to show one document (`openDocument`).
 // =============================================================================
 
 import type { VectorKey } from '../contract/types';
@@ -66,6 +67,15 @@ export interface IQueryPrefill {
 	mode?: QueryMode;
 	/** The chunks it is about (a chat answer's sources, a chunk used as the query). */
 	keys?: VectorKey[];
+}
+
+/**
+ * Another tab asks the Documents tab to show one document (Overview's Insights, a query result, the pending bar's
+ * Review): Documents opens its drawer on it, then clears the request. Taken once, by its nonce.
+ */
+export interface IOpenDocumentRequest {
+	nonce: string;
+	objectId: string;
 }
 
 /**

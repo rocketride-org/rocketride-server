@@ -35,75 +35,60 @@ function code(file: string): string {
 		.replace(/^\s*\/\/.*$/gm, '');
 }
 
-/** Every file of the console's own lane (the map's and the chat/ingest components belong to their lanes). */
-const LANE_FILES = [
-	'VectorApp.tsx',
-	'VectorSidebar.tsx',
-	'AppDescriptor.ts',
-	'docs.ts',
-	'styles.ts',
-	'icons.tsx',
-	'adapters/explorer.ts',
-	'adapters/actions.ts',
-	'adapters/connections.ts',
-	'adapters/consoleActions.ts',
-	'adapters/react.ts',
-	'env.ts',
-	'envContext.tsx',
-	'localEnv.ts',
-	// The dev-tool mounts follow the same rules (no token, no configuration, no page key listeners, no browser storage).
-	'VectorDevTool.tsx',
-	'VectorDevToolSidebar.tsx',
-	'realmRegion.ts',
-	'devtool/protocol.ts',
-	'devtool/controller.ts',
-	'devtool/frame.ts',
-	'devtool/frameText.ts',
-	'devtool/wiring.ts',
-	'components/DevToolConnectionList.tsx',
-	'components/InlineRemoveConfirm.tsx',
-	'components/ConnectionDetailsPanel.tsx',
-	'components/RealmLiveRegion.tsx',
-	'components/StatsStrip.tsx',
-	'components/StatsCharts.tsx',
-	'components/ScopeBar.tsx',
-	'components/HealthPanel.tsx',
-	'components/DocumentDirectory.tsx',
-	'components/DocumentRow.tsx',
-	'components/ChunkList.tsx',
-	'components/RemoveConfirmDialog.tsx',
-	'components/MultiRemoveConfirmDialog.tsx',
-	'components/RemoveDialogHost.tsx',
-	'components/ConnectionDrawerDetails.tsx',
-	'components/SupportBadge.tsx',
-	// The workbench's tab row, its panels and the props it hands them.
-	'components/workbenchProps.ts',
-	'components/WorkbenchTabs.tsx',
-	'components/OverviewPanel.tsx',
-	'components/DocumentsTab.tsx',
-	'components/TrashTab.tsx',
-	'components/PendingBar.tsx',
-	'components/QueryTab.tsx',
-	'components/CollectionPanel.tsx',
-	'components/AddDocumentsAside.tsx',
-	'adapters/queryHistory.ts',
-	'views/ConnectionsView.tsx',
-	'views/ConsoleView.tsx',
-	'views/DocumentView.tsx',
-	...fs
-		.readdirSync(path.join(SRC, 'vector'))
-		.filter((f) => /^(addresses|budgets|chartTokens|charts|colors|confirm|connections|consoleModel|consoleStore|documents|fields|fileType|filters|health|identityChange|layout|results|savedFilters|staged|stats|support|wording|workbench)\.ts$/.test(f))
-		.map((f) => `vector/${f}`),
-];
+/**
+ * Every source file under src, relative to it.
+ *
+ * @param dir - Where to start.
+ * @returns The files, sorted.
+ */
+function sources(dir: string = SRC): string[] {
+	const out: string[] = [];
+	for (const name of fs.readdirSync(dir)) {
+		const full = path.join(dir, name);
+		if (fs.statSync(full).isDirectory()) out.push(...sources(full));
+		else if (/\.(ts|tsx)$/.test(name)) out.push(path.relative(SRC, full).split(path.sep).join('/'));
+	}
+	return out.sort();
+}
+
+/** Every source file of the app. */
+const ALL_FILES = sources();
+
+/**
+ * The files the lane rules below do not cover yet, each with why. Every other source file is checked, so a file
+ * added later is covered without being listed here.
+ */
+const LANE_EXEMPT: Readonly<Record<string, string>> = {
+	'components/ExportMenu.tsx': "the map's export menu stops its own key events (P5 reworks the menus, N9)",
+	'components/SavedViewsMenu.tsx': "the map's saved views menu stops its own key events (P5 reworks the menus, N9)",
+};
+
+/** The files the lane rules cover: no token, no configuration, no stopped events, no page key listeners, no browser storage. */
+const LANE_FILES = ALL_FILES.filter((f) => !(f in LANE_EXEMPT));
+
+/** The modules that hold no shell value and no React, and why the two exceptions in their folders do. */
+const PURE_EXEMPT: Readonly<Record<string, string>> = {
+	'adapters/react.ts': "the one file that binds the shared library's React hooks to the shell",
+	'devtool/wiring.ts': "the shell's protocol factories, handed to the pure frame and controller",
+};
+
+/** The pure modules: vector/, adapters/ and devtool/ (but the two above), and the env seam. */
+const PURE_FILES = ALL_FILES.filter((f) => (/^(vector|adapters|devtool)\/[^/]+\.ts$/.test(f) || ['env.ts', 'localEnv.ts', 'realmRegion.ts'].includes(f)) && !(f in PURE_EXEMPT));
 
 /** An endpoint for the registry tests. */
 function endpoint(key: string): IExplorerEndpoint {
 	return { key, legacyKey: null, projectId: 'vp', pipelineName: 'Vector docs', runKind: 'dev', ownerKind: 'user', ownerId: 'u1', teamId: 't1', roles: { tools: { source: 'tools_1' }, chat: null, ingest: null }, missingRoles: ['chat', 'ingest'], source: 'tools_1', nodeId: 'store_1', nodeName: 'Store', provider: 'qdrant', state: 'ready', running: true, components: [], anchorRole: 'tools', readOnly: false };
 }
 
-test('every lane file exists (the premise of the checks below)', () => {
-	assert.ok(LANE_FILES.length >= 35, String(LANE_FILES.length));
-	for (const file of LANE_FILES) assert.ok(fs.existsSync(path.join(SRC, file)), file);
+test('every source file is under the lane rules or exempt with its reason, so a new file is checked without being listed', () => {
+	assert.ok(ALL_FILES.length >= 150, String(ALL_FILES.length));
+	for (const [file, why] of [...Object.entries(LANE_EXEMPT), ...Object.entries(PURE_EXEMPT)]) {
+		assert.ok(ALL_FILES.includes(file), `${file} is exempt but does not exist`);
+		assert.ok(why.length > 20, `${file} says why it is exempt`);
+	}
+	assert.equal(LANE_FILES.length + Object.keys(LANE_EXEMPT).length, ALL_FILES.length);
+	for (const file of ['views/ConsoleView.tsx', 'components/WorkbenchTabs.tsx', 'components/PendingBar.tsx', 'vector/workbench.ts', 'vector/staged.ts', 'vector/focus.ts', 'adapters/queryHistory.ts', 'map/overlay.ts', 'chat/chatSession.ts']) assert.ok(LANE_FILES.includes(file), file);
+	for (const file of ['vector/workbench.ts', 'vector/staged.ts', 'vector/fields.ts', 'vector/focus.ts', 'adapters/queryHistory.ts', 'adapters/consoleActions.ts', 'devtool/frame.ts', 'env.ts']) assert.ok(PURE_FILES.includes(file), file);
 });
 
 test("a document tab and the console both front the connection's console tab for map and chat actions", () => {
@@ -155,7 +140,8 @@ test('the Map is a tab of the workbench: every panel mounts the first time its t
 	assert.equal(tabLabel('trash', { trash: null }), 'Trash', 'no count where the store cannot count');
 	assert.equal(tabLabel('map', { trash: 3 }), 'Map');
 	// The header, then the tab row on a row of its own, then what shows on every tab, then the panels.
-	const order = ['<ContentHeader', '<WorkbenchTabs', '<InlineRemoveConfirm', '<ConnectionDetailsPanel', '<PendingBar', "{mounted.has('overview')"].map((part) => view.indexOf(part));
+	// The pending bar sits under the panels, so staging never moves a row above it (DA-R0 I14).
+	const order = ['<ContentHeader', '<WorkbenchTabs', '<InlineRemoveConfirm', '<ConnectionDetailsPanel', "{mounted.has('overview')", "{mounted.has('trash')", '<PendingBar', '<AddDocumentsAside'].map((part) => view.indexOf(part));
 	assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), order.join(' < '));
 });
 
@@ -233,8 +219,9 @@ test("a document's health: the tab compares with the console's loaded documents 
 test('every removal is confirmed inline in the document that shows it, in both mounts (no app-level dialog); the dialogs keep Cancel focused by their own mount effect', () => {
 	const app = code('VectorApp.tsx');
 	assert.doesNotMatch(app, /RemoveDialogHost/, 'the full app mounts no modal confirmation');
-	assert.match(code('views/ConsoleView.tsx'), /<InlineRemoveConfirm entry=\{entry\} probe=\{probe\} \/>/, 'the workbench confirms inline, on every tab');
-	assert.match(app, /<DocumentView [^>]*beforeBody=\{<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} \/>\}/, "and so does the full app's document tab");
+	assert.match(code('views/ConsoleView.tsx'), /<InlineRemoveConfirm entry=\{entry\} probe=\{probe\} origin=\{CONSOLE_ORIGIN\} returnFocus=\{currentTab\} \/>/, "the workbench confirms its own requests inline, on every tab; a lost focus goes to the current tab");
+	assert.match(app, /<DocumentView [^>]*beforeBody=\{<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} origin=\{documentOrigin\(payload\.objectId\)\} \/>\}/, "and the full app's document tab its own (it shares the console's controller)");
+	assert.match(app, /origin: documentOrigin\(payload\.objectId\),/, "the tab's actions ask under its origin");
 	for (const file of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx']) {
 		const source = code(file);
 		assert.match(source, /useEffect\(\(\) => \{\s*focusCancelIn\(anchor\.current, REMOVE_CANCEL_LABEL\);\s*\}, \[\]\);/, file);
@@ -305,8 +292,7 @@ test("no lane file reads a token or a component's configuration, or stops events
 });
 
 test('pure modules stay pure: vector/ and the pure adapters import no shell value and no React', () => {
-	const pure = LANE_FILES.filter((f) => f.startsWith('vector/') || ['adapters/explorer.ts', 'adapters/actions.ts', 'adapters/connections.ts', 'adapters/consoleActions.ts', 'adapters/queryHistory.ts', 'env.ts', 'localEnv.ts', 'realmRegion.ts', 'devtool/protocol.ts', 'devtool/controller.ts', 'devtool/frame.ts', 'devtool/frameText.ts'].includes(f));
-	for (const file of pure) {
+	for (const file of PURE_FILES) {
 		const source = code(file);
 		assert.doesNotMatch(source, /^import (?!type )[^;]*from 'shell';/m, `${file} imports a shell value`);
 		assert.doesNotMatch(source, /from 'react'/, `${file} imports React`);

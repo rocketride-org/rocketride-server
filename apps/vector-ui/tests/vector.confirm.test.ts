@@ -60,7 +60,7 @@ test('move to trash: the same lines, nothing to type, and where it can be restor
 	assert.equal(several.sentence, 'Moves these 23 documents and their 46 chunks to the trash of vx_demo_docs, in batches of at most 100; the first error stops the rest. Restore them from the Trash.');
 });
 
-test('delete permanently, one document: path, short objectId, chunk count, where, and what cannot be undone', () => {
+test('delete permanently, one document: path, short objectId, chunk count, where, what cannot be undone, and its file name typed', () => {
 	const c = removeConfirmation(KESTREL, PG);
 	assert.equal(c.title, 'Delete this document permanently?');
 	assert.deepEqual(c.lines, [
@@ -69,13 +69,14 @@ test('delete permanently, one document: path, short objectId, chunk count, where
 		{ label: 'Chunks', value: '12' },
 		{ label: 'Store', value: 'PostgreSQL (pgvector) · vx_demo_docs · pgvector' },
 	]);
-	assert.equal(c.sentence, 'Deletes this document and its 12 chunks from vx_demo_docs. This cannot be undone; add the file again to restore it.');
+	assert.equal(c.sentence, 'Deletes this document and its 12 chunks from vx_demo_docs. If it still has chunks outside the trash, it is kept whole. This cannot be undone; add the file again to restore it.');
 	assert.equal(c.confirmLabel, 'Delete permanently');
 	assert.equal(c.destructive, true);
 	assert.equal(c.cancelLabel, REMOVE_CANCEL_LABEL);
 	assert.equal(REMOVE_CANCEL_LABEL, 'Cancel');
-	assert.equal(c.typed, null, 'a store of its own needs no typed confirmation');
-	assert.equal(removeConfirmation({ ...KESTREL, chunks: null }, PG).sentence, 'Deletes this document and all its chunks from vx_demo_docs. This cannot be undone; add the file again to restore it.', 'no invented count');
+	assert.deepEqual(c.typed, { expected: 'kestrel_field_guide.md', prompt: "Type the file name 'kestrel_field_guide.md' to confirm." }, 'a permanent delete of one document types its file name (DA-R0 C1)');
+	assert.equal(removeConfirmation({ ...KESTREL, path: '' }, PG).typed?.expected, KESTREL.objectId, 'no path: its objectId');
+	assert.equal(removeConfirmation({ ...KESTREL, chunks: null }, PG).sentence, 'Deletes this document and all its chunks from vx_demo_docs. If it still has chunks outside the trash, it is kept whole. This cannot be undone; add the file again to restore it.', 'no invented count');
 	assert.equal(removeConfirmation({ ...KESTREL, chunks: 1 }, PG).sentence.includes('its 1 chunk from'), true);
 });
 
@@ -97,7 +98,7 @@ test('delete permanently, several documents: type the count, at most 20 paths li
 	assert.equal(c.more, 3);
 	assert.deepEqual(c.typed, { expected: '23', prompt: 'Type 23 to confirm.' });
 	assert.equal(c.confirmLabel, 'Delete 23 documents permanently');
-	assert.equal(c.sentence, 'Deletes these 23 documents and their 46 chunks from vx_demo_docs, in batches of at most 100; the first error stops the rest. This cannot be undone.');
+	assert.equal(c.sentence, 'Deletes these 23 documents and their 46 chunks from vx_demo_docs, in batches of at most 100; the first error stops the rest. A document that still has chunks outside the trash is kept whole. This cannot be undone.');
 	const shared = multiRemoveConfirmation(targets.slice(0, 2), RRV);
 	assert.equal(shared.typed?.expected, 'vector_explorer_docs', 'on a shared table the table name is typed, not the count');
 	assert.equal(multiRemoveConfirmation([...targets.slice(0, 1), { objectId: 'x', path: 'x', chunks: null }], PG).sentence.includes('and all their chunks'), true);
@@ -194,7 +195,8 @@ test('the announcement after a write names the document and the rows it moved or
 	assert.equal(removalSummary(many, [], 'delete'), 'Deleted 2 documents permanently (3 chunks). 1 was not stored any more.');
 	assert.equal(removalSummary(many, [], 'restore'), 'Restored 2 documents (3 chunks). 1 was not stored any more.');
 	const emptied = { ...many, notFound: [], keptLive: ['p', 'q'] };
-	assert.equal(removalSummary(emptied, [], 'empty'), 'Emptied the trash: deleted 2 documents permanently (3 chunks). 2 were kept: they still have chunks outside the trash.');
+	assert.equal(removalSummary(emptied, [], 'empty'), 'Emptied the trash: deleted 2 documents permanently (3 chunks). 2 were kept whole, because they still have chunks outside the trash: p, q.', 'named by objectId where no path is known');
+	assert.equal(removalSummary(emptied, [{ objectId: 'p', path: 'docs/p.md' }], 'empty'), 'Emptied the trash: deleted 2 documents permanently (3 chunks). 2 were kept whole, because they still have chunks outside the trash: docs/p.md, q.', 'by path where it is');
 	assert.equal(removalSummary({ ...emptied, keptLive: [] }, [{ objectId: 'a', path: 'a.md' }], 'empty'), 'Emptied the trash: deleted 2 documents permanently (3 chunks).', 'Empty trash always counts, even for one document');
 	const timeout = { removed: [], notFound: [], keptLive: [], removedChunks: null, batchesRun: 0, batchesTotal: 1, error: { headline: 'The request may still complete on the server. Refresh to check.' } };
 	assert.equal(removalSummary(timeout, [{ objectId: 'k', path: 'x.md' }], 'trash'), 'The request may still complete on the server. Refresh to check.');

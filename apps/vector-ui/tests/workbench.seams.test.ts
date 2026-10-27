@@ -22,7 +22,8 @@
 
 // =============================================================================
 // THE WORKBENCH'S SEAMS: the connection entry's new state, staging, the fields,
-// the Query history in both mounts, the console actions and fetchNeighbors
+// the Query history in both mounts, the console actions, confirmations that
+// belong to the surface that asked, focus after a close, and fetchNeighbors
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -31,7 +32,7 @@ import { ExplorerToolError } from 'shared/explorer';
 import type { IExplorerEndpoint, IHistoryEntry } from 'shared/explorer';
 import { manualClock } from 'shared/explorer/connect/testing';
 import { fetchNeighbors } from '../src/adapters/actions';
-import { makeConsoleActions } from '../src/adapters/consoleActions';
+import { makeConsoleActions, stageTargets } from '../src/adapters/consoleActions';
 import { createConnectionRegistry } from '../src/adapters/connections';
 import type { IConnectionLink } from '../src/adapters/connections';
 import { makeVectorHistory, vectorQueryHistory } from '../src/adapters/explorer';
@@ -39,7 +40,10 @@ import { persistedQueryHistory, queryEntryOf, sessionQueryHistory, storedEntryOf
 import type { IDocumentItem } from '../src/contract/types';
 import { APP_HISTORY_NOTE, DEVTOOL_HISTORY_NOTE } from '../src/env';
 import type { IQueryHistoryEntry } from '../src/env';
+import { CONSOLE_ORIGIN, confirmElsewhereText, documentOrigin, removalSummary, removeConfirmation, runRemoval } from '../src/vector/confirm';
 import type { IRemoveTarget } from '../src/vector/confirm';
+import { firstFocusable, focusLost } from '../src/vector/focus';
+import { readDeleteResult, readTrashResult } from '../src/vector/results';
 import { FIELD_EXAMPLE_MAX, chunkFields, documentFields } from '../src/vector/fields';
 import { DEFAULT_LIMITS } from '../src/vector/results';
 import { NO_STAGED, dropGone, stage, stagedSummary, unstage } from '../src/vector/staged';
@@ -57,11 +61,12 @@ const C: IRemoveTarget = { objectId: 'c', path: 'c.md', chunks: 2 };
 /** A run as the Query tab records it. */
 const RUN: Omit<IQueryHistoryEntry, 'id'> = { question: 'where is the water?', kind: 'semantic', at: 1_000, ms: 40, topK: 10, results: 7, outcome: 'rows' };
 
-test('a connection opens on the Overview, in Search, with nothing handed to the Query tab, nothing staged and no fields read', () => {
+test('a connection opens on the Overview, in Search, with nothing handed to the Query or Documents tab, nothing staged and no fields read', () => {
 	const entry = createConnectionRegistry().entry(endpoint('k-defaults'), null);
 	assert.equal(entry.tab.get(), 'overview');
 	assert.equal(entry.queryMode.get(), 'search');
 	assert.equal(entry.queryPrefill.get(), null);
+	assert.equal(entry.openDocument.get(), null);
 	assert.equal(entry.staged.get().size, 0);
 	assert.equal(entry.fields.get(), null);
 	entry.controller.dispose();
@@ -113,24 +118,113 @@ test('a write that moved documents takes them out of the staged set', async () =
 	entry.controller.dispose();
 });
 
-test('console actions: stage (nothing confirmed or sent), show a tab, and "Ask about these" lands on Query in Ask', () => {
+test('console actions: stage what the caller knows (nothing confirmed or sent), show a tab, "Use as query" and "Ask about these" land on Query', () => {
 	const entry = createConnectionRegistry().entry(endpoint('k-actions'), null);
 	const fronted: string[] = [];
 	const actions = makeConsoleActions(entry, { openDocument: () => undefined, showConsole: () => fronted.push(entry.tab.get()), announce: () => undefined });
-	actions.stageRemove?.(['doc-1', 'doc-2']);
+	actions.stageRemove?.([{ objectId: 'doc-1', path: 'docs/one.md', chunks: 3 }, { objectId: 'doc-2' }]);
 	assert.deepEqual([...entry.staged.get().values()], [
-		{ objectId: 'doc-1', path: 'doc-1', chunks: null },
+		{ objectId: 'doc-1', path: 'docs/one.md', chunks: 3 },
 		{ objectId: 'doc-2', path: 'doc-2', chunks: null },
-	]);
+	], "the map's paths are kept; a document it knows nothing of reads as its id, its count unknown");
+	entry.selection.selectDocument({ objectId: 'doc-3', path: 'docs/three.md' });
+	assert.deepEqual(stageTargets(entry, [{ objectId: 'doc-3' }, { objectId: 'doc-1', path: 'other.md' }]), [
+		{ objectId: 'doc-3', path: 'docs/three.md', chunks: null },
+		{ objectId: 'doc-1', path: 'other.md', chunks: null },
+	], 'what the app knows fills what the caller left out; what the caller gave wins');
 	assert.equal(entry.controller.getState().confirm, null, 'staging opens no confirmation');
 	assert.deepEqual(fronted, [], 'and does not front the console');
 	actions.openTab?.('collection');
 	assert.equal(entry.tab.get(), 'collection');
 	assert.deepEqual(fronted, ['collection'], 'showing a tab fronts the console, on that tab');
+	entry.queryMode.set('compare');
+	actions.useAsQuery?.('falcon station water');
+	assert.equal(entry.tab.get(), 'query');
+	assert.equal(entry.queryMode.get(), 'search');
+	const prefill = entry.queryPrefill.get();
+	assert.deepEqual({ question: prefill?.question, mode: prefill?.mode }, { question: 'falcon station water', mode: 'search' });
+	actions.useAsQuery?.('falcon station water');
+	assert.notEqual(entry.queryPrefill.get()?.nonce, prefill?.nonce, 'the same text again is a new request');
+	assert.deepEqual(fronted, ['collection', 'query', 'query']);
 	actions.askAbout(['doc-1']);
 	assert.equal(entry.tab.get(), 'query');
 	assert.equal(entry.queryMode.get(), 'ask');
 	entry.controller.dispose();
+});
+
+test('a confirmation belongs to the surface that asked: another surface asking meanwhile opens nothing and is told where it is', () => {
+	const entry = createConnectionRegistry().entry(endpoint('k-origin'), null);
+	const said: string[] = [];
+	const console = makeConsoleActions(entry, { openDocument: () => undefined, showConsole: () => undefined, announce: () => undefined });
+	entry.controller.setWritesEnabled(true);
+	const tab = makeConsoleActions(entry, { openDocument: () => undefined, showConsole: () => undefined, announce: (t) => said.push(t), origin: documentOrigin('doc-9') });
+	console.requestRemove(['doc-1']);
+	assert.equal(entry.controller.getState().confirm?.origin, CONSOLE_ORIGIN);
+	tab.requestRemove(['doc-9']);
+	assert.deepEqual(entry.controller.getState().confirm?.targets.map((t) => t.objectId), ['doc-1'], 'the open one is never replaced');
+	assert.equal(entry.controller.getState().elsewhere, documentOrigin('doc-9'), 'the document tab is told');
+	assert.equal(confirmElsewhereText(CONSOLE_ORIGIN), "Another confirmation is open in this connection's console; finish or cancel it first.");
+	console.requestRemove(['doc-2']);
+	assert.deepEqual(entry.controller.getState().confirm?.targets.map((t) => t.objectId), ['doc-2'], 'the surface that holds it may ask again');
+	entry.controller.cancelRemove();
+	assert.equal(entry.controller.getState().elsewhere, null, 'closed: nothing to tell any more');
+	tab.requestRemove(['doc-9']);
+	assert.equal(entry.controller.getState().confirm?.origin, documentOrigin('doc-9'), 'then the document tab asks for its own');
+	entry.controller.dispose();
+});
+
+test('Delete permanently is a Trash action: one document is typed by its file name, and a document kept whole is named', async () => {
+	const PG = { storeName: 'Store', collection: 'vx_demo_docs', backend: 'pgvector', provider: 'postgres' };
+	const one = removeConfirmation({ objectId: 'k', path: 'C:/demo/field/kestrel.md', chunks: 2 }, PG);
+	assert.deepEqual(one.typed, { expected: 'kestrel.md', prompt: "Type the file name 'kestrel.md' to confirm." });
+	assert.match(one.sentence, /If it still has chunks outside the trash, it is kept whole\./);
+	assert.equal(removeConfirmation({ objectId: 'k', path: 'C:/demo/x.md', chunks: 2 }, { ...PG, provider: 'rocketride_vector' }).typed?.expected, 'vx_demo_docs', 'a shared table keeps its table name');
+	const targets = [{ objectId: 'a', path: 'docs/a.md', chunks: 2 }, { objectId: 'b', path: 'docs/b.md', chunks: 1 }];
+	const outcome = await runRemoval(['a', 'b'], async (batch) => readDeleteResult({ success: true, kept_live: ['b'], not_found: [], removed_chunks: 2, audit: { action: 'vector.delete', rows: 2, caller: { auth: 'account' } } }, batch), 100);
+	assert.equal(removalSummary(outcome, targets, 'delete'), 'Deleted 1 document permanently (2 chunks). 1 was kept whole, because it still has chunks outside the trash: docs/b.md.');
+	assert.equal(removalSummary({ ...outcome, removed: [], removedChunks: 0, keptLive: ['a'] }, targets.slice(0, 1), 'delete'), 'docs/a.md was kept whole, because it still has chunks outside the trash; nothing was deleted.');
+	assert.deepEqual(outcome.audits, [{ action: 'vector.delete', rows: 2, caller: 'account' }], "each batch's audit block is kept");
+	assert.deepEqual(readTrashResult({ success: true, object_ids: ['a'], matched_chunks: 2 }).audit, null, 'none: null');
+});
+
+test('the controller sends every permanent delete with deleted_only, and keeps the write\'s audit with its result', async () => {
+	const clock = manualClock();
+	const sent: Array<[string, Record<string, unknown>]> = [];
+	const link: IConnectionLink = {
+		session: () => ({
+			invoke: async <T>(tool: string, input: Record<string, unknown> = {}): Promise<T> => {
+				sent.push([tool, input]);
+				if (tool === 'delete') return fixture('delete_ok') as T;
+				if (tool === 'stats') return fixture('stats_pgvector') as T;
+				return fixture('list_documents_page1') as T;
+			},
+		}),
+		reprobe: () => undefined,
+	};
+	const entry = createConnectionRegistry().entry(endpoint('k-delete'), link, DEFAULT_LIMITS, clock);
+	entry.controller.setWritesEnabled(true);
+	entry.controller.requestDelete([{ objectId: '91ae15d4-3f6e-589f-bb81-72301f2ca1b6', path: 'a.md', chunks: 12 }]);
+	await entry.controller.confirmRemove();
+	await clock.settle();
+	assert.deepEqual(sent.filter(([tool]) => tool === 'delete').map(([, input]) => input.deleted_only), [true]);
+	assert.deepEqual(entry.controller.getState().removal.audit, [{ action: 'vector.delete', rows: 12, caller: 'account' }]);
+	entry.controller.dispose();
+});
+
+test('focus after a close: only when it was lost (nothing, the body, or inside what closed), to the first candidate on the page and shown', () => {
+	const body = {};
+	const region = { contains: (node: unknown) => node === inside };
+	const inside = {};
+	assert.equal(focusLost(null, body, region), true);
+	assert.equal(focusLost(body, body, region), true);
+	assert.equal(focusLost(inside, body, region), true);
+	assert.equal(focusLost({}, body, region), false, 'focus elsewhere stays where it is');
+	const el = (shown: boolean, connected = true) => ({ isConnected: connected, offsetParent: shown ? {} : null, focus: () => undefined });
+	const hidden = el(false);
+	const gone = el(true, false);
+	const tab = el(true);
+	assert.equal(firstFocusable([null, hidden, gone, tab]), tab, 'a hidden panel\'s element and a removed one are passed over');
+	assert.equal(firstFocusable([hidden]), null);
 });
 
 test('document fields: exact over the rows given, each with its coverage, one example, and what each filter takes', () => {
@@ -156,6 +250,25 @@ test('document fields: exact over the rows given, each with its coverage, one ex
 	assert.deepEqual(fields.filter((f) => f.listFilter).map((f) => f.name), ['path', 'ingestedAt', 'chunks', 'tables']);
 	assert.deepEqual(documentFields([]), [], 'no rows: nothing was read');
 	assert.deepEqual(chunkFields([]), []);
+});
+
+test('a Compare entry keeps question B in memory only: never handed to the shared store, so a reload (or a reset) has none', () => {
+	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+	history.record('k', { ...RUN, kind: 'compare', compareWith: 'question b' });
+	const [entry] = history.entries('k').get();
+	assert.equal(entry.compareWith, 'question b');
+	assert.ok(!('compareWith' in storedEntryOf('x', { ...RUN, compareWith: 'question b' })), 'the stored entry has no question B');
+	const store = makeVectorHistory(0);
+	const persisted = persistedQueryHistory(store, APP_HISTORY_NOTE);
+	const prefs: Record<string, unknown> = {};
+	store.attachPrefs({ getPref: (key) => prefs[key], setPref: (key, value) => (prefs[key] = value) });
+	persisted.record('k', { ...RUN, kind: 'compare', compareWith: 'question b' });
+	assert.equal(persisted.entries('k').get()[0].compareWith, 'question b', 'shown for the page\'s life');
+	store.flush();
+	assert.doesNotMatch(JSON.stringify(prefs), /question b/, 'never written to the workspace file');
+	history.forget();
+	history.record('k', { ...RUN, kind: 'compare' });
+	assert.equal(history.entries('k').get()[0].compareWith, undefined);
 });
 
 test('Query history entries map onto the shared store: mode as kind, top-k as limit, results as rows; another kind is not shown', () => {
@@ -224,6 +337,29 @@ test("the full app's Query history is the shared store in the workspace preferen
 	detach();
 });
 
+test('fetchNeighbors: one read at a time per caller, only the newest waiting (an older one drops as stale), and BUSY asked again', async () => {
+	const asked: unknown[] = [];
+	const answers: Array<(value: unknown) => void> = [];
+	const caller = { invoke: <T>(_tool: string, input?: Record<string, unknown>): Promise<T> => new Promise<T>((resolve) => { asked.push(input?.key); answers.push(resolve as (value: unknown) => void); }) };
+	const first = fetchNeighbors(caller, 'store_1', ['d', 1], 12);
+	const second = fetchNeighbors(caller, 'store_1', ['d', 2], 12);
+	const third = fetchNeighbors(caller, 'store_1', ['d', 3], 12);
+	await assert.rejects(second, (error: unknown) => error instanceof ExplorerToolError && error.kind === 'stale', 'replaced while waiting');
+	assert.deepEqual(asked, [['d', 1]], 'one at a time');
+	answers[0]({ success: true, items: [] });
+	await first;
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(asked, [['d', 1], ['d', 3]], 'then the newest');
+	answers[1]({ success: true, items: [] });
+	assert.deepEqual((await third).items, []);
+	let calls = 0;
+	const waits: number[] = [];
+	const busy = { invoke: async <T>(): Promise<T> => (++calls < 3 ? { success: false, code: 'BUSY', error: 'busy' } : { success: true, items: [] }) as T };
+	await fetchNeighbors(busy, 'store_1', ['d', 1], 12, { wait: async (ms) => void waits.push(ms) });
+	assert.equal(calls, 3);
+	assert.equal(waits.length, 2, 'asked again after a short wait');
+});
+
 test('fetchNeighbors asks for a chunk\'s neighbours (itself left out) and unwraps the answer; a failure envelope rejects with its code', async () => {
 	const sent: Array<[string, Record<string, unknown> | undefined, string | undefined]> = [];
 	const caller = {
@@ -237,5 +373,6 @@ test('fetchNeighbors asks for a chunk\'s neighbours (itself left out) and unwrap
 	assert.equal(answer.items.length, 1);
 	const noItems = await fetchNeighbors({ invoke: async <T>() => ({ success: true, metric: 'cosine' }) as T }, 'store_1', ['doc', 3], 12);
 	assert.deepEqual(noItems.items, [], 'items always an array');
-	await assert.rejects(fetchNeighbors({ invoke: async <T>() => ({ success: false, code: 'BUSY', error: 'busy' }) as T }, 'store_1', ['doc', 3], 12), (error: unknown) => error instanceof ExplorerToolError && error.code === 'BUSY');
+	await assert.rejects(fetchNeighbors({ invoke: async <T>() => ({ success: false, code: 'NOT_FOUND', error: 'gone' }) as T }, 'store_1', ['doc', 3], 12), (error: unknown) => error instanceof ExplorerToolError && error.code === 'NOT_FOUND');
+	await assert.rejects(fetchNeighbors({ invoke: async <T>() => ({ success: false, code: 'BUSY', error: 'busy' }) as T }, 'store_1', ['doc', 3], 12, { wait: async () => undefined }), (error: unknown) => error instanceof ExplorerToolError && error.code === 'BUSY', 'still busy after the retries: said');
 });

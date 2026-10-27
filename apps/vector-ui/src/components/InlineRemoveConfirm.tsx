@@ -34,8 +34,15 @@
 // takes the focus when it opens, Escape cancels while the focus is inside it,
 // and Confirm stays unavailable until the typed rule is met.
 //
-// It shows the pending confirmation of THIS frame's connection controller,
-// which alone sends anything.
+// It shows the pending confirmation of its connection's controller, which
+// alone sends anything, on the surface that asked for it (its origin: the
+// console, or one document tab of the full app, which shares the console's
+// controller). Elsewhere it shows nothing, except to a surface that asked
+// meanwhile: one line saying where the open one is.
+//
+// When it closes with the focus inside it, the focus goes to `onClosed`'s
+// choice, else to `returnFocus` (the surface's fallback), and never stays on
+// `<body>`.
 // =============================================================================
 
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -43,8 +50,9 @@ import type { CSSProperties } from 'react';
 import { Button, commonStyles } from 'shell';
 import type { IProbeResult } from 'shared/explorer';
 import type { IConnectionEntry } from '../adapters/connections';
-import { confirmReady, confirmationFor, removeContextFor } from '../vector/confirm';
-import type { ConfirmationView } from '../vector/confirm';
+import { CONSOLE_ORIGIN, confirmElsewhereText, confirmReady, confirmationFor, removeContextFor } from '../vector/confirm';
+import type { ConfirmOrigin, ConfirmationView } from '../vector/confirm';
+import { firstFocusable, focusLost } from '../vector/focus';
 import { formatCount } from '../vector/stats';
 import { styles as appStyles } from '../styles';
 
@@ -71,40 +79,63 @@ const styles = {
 	list: { margin: '8px 0', paddingLeft: 20, maxHeight: 180, overflowY: 'auto', fontSize: 13 } as CSSProperties,
 	item: { overflowWrap: 'anywhere' } as CSSProperties,
 	sentence: { margin: '8px 0', fontSize: 13 } as CSSProperties,
+	elsewhere: { flexShrink: 0, margin: '8px 24px 0', fontSize: 13 } as CSSProperties,
 	typed: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8, fontSize: 13 } as CSSProperties,
 	actions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 } as CSSProperties,
 	/** Confirm: destructive for a permanent write; unavailable (aria-disabled, it keeps the focus) until the typed rule is met. */
 	confirm: (destructive: boolean, ready: boolean): CSSProperties => ({ ...(destructive ? commonStyles.buttonDanger : commonStyles.buttonPrimary), ...(ready ? null : commonStyles.buttonDisabled) }),
 };
 
+/** How a confirmation closed: Confirm sent the write, or it was cancelled (Cancel, Escape, writes switched off). */
+export type ConfirmClose = 'confirm' | 'cancel';
+
 /** Props. */
 export interface IInlineRemoveConfirmProps {
-	/** The frame's connection objects (their controller holds the pending write). */
+	/** The connection's objects (their controller holds the pending write). */
 	entry: IConnectionEntry;
 	/** The connection's probe (where the documents are removed from). */
 	probe: IProbeResult | undefined;
+	/** The surface this renders on: it shows only the confirmations asked for here (default the console). */
+	origin?: ConfirmOrigin;
+	/** Where the focus goes when the panel closes with the focus inside it, if `onClosed` did not move it. */
+	returnFocus?: () => HTMLElement | null;
+	/** Told when the panel closes, before the focus falls back to `returnFocus`. */
+	onClosed?: (how: ConfirmClose) => void;
 }
 
 /**
- * The pending confirmation of a frame's connection, inline.
+ * The pending confirmation of a connection, inline, on the surface that asked for it.
  *
  * @param props - See {@link IInlineRemoveConfirmProps}.
- * @returns The panel, or nothing while nothing is pending.
+ * @returns The panel; the "open elsewhere" line for a surface that asked meanwhile; or nothing.
  */
-export function InlineRemoveConfirm({ entry, probe }: IInlineRemoveConfirmProps): React.ReactElement | null {
+export function InlineRemoveConfirm({ entry, probe, origin = CONSOLE_ORIGIN, returnFocus, onClosed }: IInlineRemoveConfirmProps): React.ReactElement | null {
 	const pending = useSyncExternalStore(entry.controller.subscribe, () => entry.controller.getState().confirm, () => null);
+	const elsewhere = useSyncExternalStore(entry.controller.subscribe, () => entry.controller.getState().elsewhere, () => null);
 	if (pending === null) return null;
+	if (pending.origin !== origin) {
+		return elsewhere === origin ? (
+			<p role="status" data-confirm-elsewhere="" style={styles.elsewhere}>
+				{confirmElsewhereText(pending.origin)}
+			</p>
+		) : null;
+	}
 	const view = confirmationFor(pending, removeContextFor(entry.ctx.endpoint, probe));
 	const dialogKey = `${pending.action}:${pending.targets.length}:${pending.targets[0]?.objectId ?? ''}`;
-	return <ConfirmPanel key={dialogKey} view={view} onConfirm={() => void entry.controller.confirmRemove()} onCancel={() => entry.controller.cancelRemove()} />;
+	return <ConfirmPanel key={dialogKey} view={view} onConfirm={() => void entry.controller.confirmRemove()} onCancel={() => entry.controller.cancelRemove()} returnFocus={returnFocus} onClosed={onClosed} />;
 }
 
 /** One confirmation, keyed on what it confirms (a new one starts with an empty typed field and the focus on Cancel). */
-const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCancel(): void }> = ({ view, onConfirm, onCancel }) => {
+const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCancel(): void; returnFocus?: () => HTMLElement | null; onClosed?: (how: ConfirmClose) => void }> = ({ view, onConfirm: sendWrite, onCancel: dropWrite, returnFocus, onClosed }) => {
+	const region = useRef<HTMLElement>(null);
 	const actions = useRef<HTMLDivElement>(null);
 	const [typed, setTyped] = useState('');
 	const content = view.content;
 	const ready = confirmReady(content.typed, typed);
+	// The latest close handlers, for the unmount below.
+	const how = useRef<ConfirmClose>('cancel');
+	const closing = useRef({ returnFocus, onClosed });
+	closing.current = { returnFocus, onClosed };
 	// Opened: Cancel has the focus, so a stray Enter cancels (the dialogs' own rule).
 	useEffect(() => {
 		const cancel = Array.from(actions.current?.querySelectorAll('button') ?? []).find((button) => button.textContent?.trim() === content.cancelLabel);
@@ -112,8 +143,26 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 		// Once, when the confirmation opens (it is keyed on what it confirms).
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
+	// Closed: the surface hears how; a focus left inside (or on the body) goes to the surface's fallback.
+	useEffect(() => {
+		const node = region.current;
+		return () => {
+			closing.current.onClosed?.(how.current);
+			if (typeof document === 'undefined' || !focusLost(document.activeElement, document.body, node)) return;
+			firstFocusable([closing.current.returnFocus?.()])?.focus();
+		};
+	}, []);
+	const onConfirm = (): void => {
+		how.current = 'confirm';
+		sendWrite();
+	};
+	const onCancel = (): void => {
+		how.current = 'cancel';
+		dropWrite();
+	};
 	return (
 		<section
+			ref={region}
 			role="group"
 			aria-label={content.title}
 			data-inline-confirm=""

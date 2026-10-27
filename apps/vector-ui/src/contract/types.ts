@@ -1192,6 +1192,13 @@ export interface SelectionStore {
 	forgetDocument(objectId: string): void;
 }
 
+/** A document to stage for the trash: its path and chunk count where the caller knows them (the map's sample does). */
+export interface IStageTarget {
+	objectId: string;
+	path?: string | null;
+	chunks?: number | null;
+}
+
 /** What the map, document tab and panels ask the console to do (they never write on their own). */
 export interface ConsoleActions {
 	/** Open a document tab, optionally at a chunk. */
@@ -1201,12 +1208,18 @@ export interface ConsoleActions {
 	/** Ask to move documents to the trash: the console confirms (Cancel focused, nothing to type) and runs the gated soft_delete. */
 	requestRemove(objectIds: readonly string[]): void;
 	/**
-	 * Stage documents to move to the trash; the console's pending bar applies them through requestRemove. Absent where
-	 * nothing can be staged (a dev-tool document frame): call requestRemove instead.
+	 * Stage documents to move to the trash; the console's pending bar applies them through requestRemove. A path or
+	 * count the caller does not give is taken from the loaded rows. Absent where nothing can be staged (a dev-tool
+	 * document frame): call requestRemove instead.
 	 */
-	stageRemove?(objectIds: readonly string[]): void;
+	stageRemove?(targets: readonly IStageTarget[]): void;
 	/** Show one of the console's tabs (and bring the console to the front). Absent where the console is another frame's. */
 	openTab?(tab: WorkbenchTab): void;
+	/**
+	 * "Use as query": hand this text to the Query tab's Search and show it. Absent where the console is another
+	 * frame's (a dev-tool document frame, D9b).
+	 */
+	useAsQuery?(text: string): void;
 	/** "Ask about these only": scope the next chat question to these documents, on the Query tab's Ask mode. */
 	askAbout(objectIds: readonly string[]): void;
 	/** After an upload completed or a document changed: refresh stats and the directory. */

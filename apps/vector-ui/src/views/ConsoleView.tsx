@@ -29,13 +29,15 @@
 // Query, Map, Collection and Trash (vector/workbench.ts; the tab is the
 // connection's `entry.tab`, so the map's and the chat's actions can switch
 // it). Under the tab row, on every tab: the blocked banner, the inline write
-// confirmation and the connection's Details (both inline in both mounts:
-// rocket-ui keeps hidden documents mounted, so nothing here is a window-wide
-// overlay), the pending bar and the write status line. Each tab's panel is
-// mounted the first time it shows, then stays mounted and hidden, so it
-// keeps its state (the map gets `visible` so its canvas sleeps while
-// hidden). Add documents is an aside beside the panels, kept mounted once
-// opened.
+// confirmation of the console's own requests and the connection's Details
+// (both inline in both mounts: rocket-ui keeps hidden documents mounted, so
+// nothing here is a window-wide overlay) and the write status line. Each
+// tab's panel is mounted the first time it shows, then stays mounted and
+// hidden, so it keeps its state (the map gets `visible` so its canvas sleeps
+// while hidden). Under the panels, the pending bar, so staging never moves a
+// row above it. Add documents is an aside beside the panels, kept mounted
+// once opened. A confirmation that closes with the focus inside it gives the
+// focus to the tab row's current tab when nothing nearer takes it.
 //
 // The console's calls and their pacing live in its controller
 // (vector/consoleStore.ts); this view renders the controller's snapshot and
@@ -55,7 +57,7 @@
 // once, when they are known.
 // =============================================================================
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Availability, IDocumentsFilter, IScopeState } from '../contract/types';
 import { Banner, Button, ContentHeader } from 'shell';
@@ -75,6 +77,7 @@ import QueryTab from '../components/QueryTab';
 import TrashTab from '../components/TrashTab';
 import WorkbenchTabs from '../components/WorkbenchTabs';
 import type { IWorkbenchPanelProps } from '../components/workbenchProps';
+import { CONSOLE_ORIGIN } from '../vector/confirm';
 import { consoleScope, mapScopeFor } from '../vector/consoleModel';
 import { CONDITION_KINDS, checkScope, conditionAvailability, listingFilter, resolveScope, scopeStripText, scopeView, scopeWith } from '../vector/filters';
 import type { ConditionKind } from '../vector/filters';
@@ -234,13 +237,16 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 	const [adding, setAdding] = useState(false);
 	const [addingMounted, setAddingMounted] = useState(false);
 	const panel = (id: WorkbenchTab): IWorkbenchPanelProps => ({ entry, model, channels, actions, console: state, selection, visible: active && tab === id });
+	// Where the focus goes when nothing nearer takes it: the tab row's current tab.
+	const root = useRef<HTMLDivElement>(null);
+	const currentTab = (): HTMLElement | null => root.current?.querySelector<HTMLElement>('[data-workbench-tabs] button[aria-pressed="true"]') ?? null;
 
 	const title = `${providerTitle(endpoint.provider)}${model.collection ? ` · ${model.collection}` : ''}`;
 	const subtitle = `"${endpoint.pipelineName}" · ${endpoint.nodeName || endpoint.nodeId} · ${roleLine(endpoint)}`;
 	const refreshing = state.stats.status === 'loading';
 
 	return (
-		<div style={styles.root} data-console={endpoint.nodeId}>
+		<div ref={root} style={styles.root} data-console={endpoint.nodeId}>
 			<ContentHeader
 				title={title}
 				subtitle={subtitle}
@@ -271,11 +277,10 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 					<Banner variant={endpoint.state === 'ready' ? 'warning' : 'info'}>{card.blocked}</Banner>
 				</div>
 			)}
-			<InlineRemoveConfirm entry={entry} probe={probe} />
+			<InlineRemoveConfirm entry={entry} probe={probe} origin={CONSOLE_ORIGIN} returnFocus={currentTab} />
 			{details && <ConnectionDetailsPanel key={endpoint.key} endpoint={endpoint} probe={probe} stats={state.stats.view} onTest={(target) => env.probe(target.key)} onClose={() => setDetails(false)} />}
-			<PendingBar {...panel(tab)} />
 			{(state.removal.status === 'running' || state.removal.message) && (
-				<div role="status" style={layout.status}>
+				<div role={state.removal.status === 'error' ? 'alert' : 'status'} style={layout.status}>
 					{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
 				</div>
 			)}
@@ -311,6 +316,7 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 							<TrashTab {...panel('trash')} />
 						</div>
 					)}
+					<PendingBar {...panel(tab)} />
 				</div>
 				{addingMounted && <AddDocumentsAside model={model} channels={channels} actions={actions} endpoint={endpoint} open={adding} onClose={() => setAdding(false)} />}
 			</div>

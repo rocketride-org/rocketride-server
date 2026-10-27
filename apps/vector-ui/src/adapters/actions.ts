@@ -105,20 +105,69 @@ export async function fetchChunks(caller: IVectorCaller, nodeId: string, page: {
 	return readChunksPage(await callVector(caller, nodeId, TOOL.chunks, { object_id: page.objectId, after_chunk: page.afterChunk, limit: page.limit, deleted: page.deleted ?? 'active' }, opts));
 }
 
+/** One caller's `neighbors` reads: the one running, and the one waiting for it (the newest asked). */
+interface INeighbourQueue {
+	running: boolean;
+	waiting: { run(): void; drop(): void } | null;
+}
+
+/** The queues, by caller (a connection's session or tools channel), so they go with it. */
+const neighbourQueues = new WeakMap<object, INeighbourQueue>();
+
 /**
  * A chunk's nearest neighbours in the whole collection (`neighbors` by key, itself left out). Trashed chunks are
  * skipped by the store.
+ *
+ * The store runs one neighbour search at a time and answers BUSY to another (the map may be asking at the same
+ * moment). So one caller's reads go one at a time, and only the newest waits: an older one still waiting is dropped
+ * (it rejects as `stale`, which says nothing). A BUSY answer is asked again after a short wait, a few times.
  *
  * @param caller - A session or channel.
  * @param nodeId - The store node.
  * @param key - The chunk.
  * @param k - How many (at most `limits.neighbors_k_max`; the store clamps).
- * @param opts - Per-call options.
+ * @param opts - Per-call options; `wait` replaces the timer (tests).
  * @returns The answer, its `items` always an array.
  */
-export async function fetchNeighbors(caller: IVectorCaller, nodeId: string, key: VectorKey, k: number, opts: IInvokeOptions = {}): Promise<INeighborsResult> {
-	const answer = await callVector<INeighborsResult>(caller, nodeId, TOOL.neighbors, { key: [key[0], key[1]], k, exclude_self: true }, opts);
-	return { ...answer, items: Array.isArray(answer.items) ? answer.items : [] };
+export function fetchNeighbors(caller: IVectorCaller, nodeId: string, key: VectorKey, k: number, opts: IInvokeOptions & { wait?: (ms: number) => Promise<void> } = {}): Promise<INeighborsResult> {
+	const { wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)), ...invokeOpts } = opts;
+	let queue = neighbourQueues.get(caller);
+	if (!queue) {
+		queue = { running: false, waiting: null };
+		neighbourQueues.set(caller, queue);
+	}
+	const line = queue;
+	const read = async (): Promise<INeighborsResult> => {
+		for (let attempt = 0; ; attempt += 1) {
+			try {
+				const answer = await callVector<INeighborsResult>(caller, nodeId, TOOL.neighbors, { key: [key[0], key[1]], k, exclude_self: true }, invokeOpts);
+				return { ...answer, items: Array.isArray(answer.items) ? answer.items : [] };
+			} catch (error) {
+				const delay = BUSY_RETRY_MS[attempt];
+				if (!(error instanceof ExplorerToolError && error.code === 'BUSY') || delay === undefined) throw error;
+				await wait(delay);
+			}
+		}
+	};
+	return new Promise<INeighborsResult>((resolve, reject) => {
+		const run = (): void => {
+			line.running = true;
+			read()
+				.then(resolve, reject)
+				.finally(() => {
+					line.running = false;
+					const next = line.waiting;
+					line.waiting = null;
+					next?.run();
+				});
+		};
+		if (!line.running) {
+			run();
+			return;
+		}
+		line.waiting?.drop();
+		line.waiting = { run, drop: () => reject(new ExplorerToolError({ kind: 'stale', tool: TOOL.neighbors, message: 'A newer neighbours request replaced this one.' })) };
+	});
 }
 
 /**

@@ -39,8 +39,30 @@ function ratio(tokens: Record<string, string>, token: string, surface: string): 
 	return ratioOver(tokens, token, parseColor(tokens[surface]) as Rgb);
 }
 
-/** The files the console's own lane draws (the map's and the chat/ingest components are measured by their lanes). */
-const CONSOLE_FILES = ['components/StatsStrip.tsx', 'components/DocumentDirectory.tsx', 'components/DocumentRow.tsx', 'components/ChunkList.tsx', 'components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/ConnectionDrawerDetails.tsx', 'components/SupportBadge.tsx', 'components/WorkbenchTabs.tsx', 'components/OverviewPanel.tsx', 'components/DocumentsTab.tsx', 'components/TrashTab.tsx', 'components/PendingBar.tsx', 'components/QueryTab.tsx', 'components/CollectionPanel.tsx', 'components/AddDocumentsAside.tsx', 'views/ConnectionsView.tsx', 'views/ConsoleView.tsx', 'views/DocumentView.tsx', 'styles.ts'];
+/**
+ * The files that write text which are not under the console's text rule yet, each with why. Every other component,
+ * view and mount file is, so a file added later is checked without being listed here.
+ */
+const TEXT_EXEMPT: Readonly<Record<string, string>> = {
+	'components/ChatPanel.tsx': 'the chat lane writes secondary and status-coloured text (P3 reworks it as Query, N5)',
+	'components/QueryCompare.tsx': 'the search lane writes secondary text (P3 reworks it as Query, N5)',
+	'components/RetrievalDebugger.tsx': 'the chat lane writes secondary and status-coloured text (P3, N5)',
+	'components/ScoreHistogram.tsx': 'the search lane writes secondary text (P3, N5)',
+	'components/SearchPanel.tsx': 'the search lane writes secondary and status-coloured text (P3, N5)',
+	'components/SourcesPanel.tsx': 'the chat lane writes secondary text (P3, N5)',
+	'components/IngestDropZone.tsx': 'the upload lane writes secondary text (P1 rehomes it in Add documents, W11)',
+	'components/IngestPanel.tsx': 'the upload lane writes secondary and status-coloured text (P1, W11)',
+	'components/UploadList.tsx': 'the upload lane writes secondary text (P1, W11)',
+	'components/ClustersPanel.tsx': "the map lane's clusters panel writes secondary text (P5)",
+	'components/ConnectionDetailsPanel.tsx': 'the Details panel writes its subtitle in secondary text (P4 reworks it, N6)',
+	'components/DevToolConnectionList.tsx': "the dev-tool sidebar's list writes secondary and status-coloured text (P4)",
+};
+
+/** The files the console's text rule covers: every mount, component and view file but the exempt ones, and the styles. */
+const CONSOLE_FILES = ['', 'components/', 'views/']
+	.flatMap((dir) => fs.readdirSync(path.resolve(__dirname, '..', 'src', dir)).map((name) => `${dir}${name}`))
+	.filter((f) => (f.endsWith('.tsx') || f === 'styles.ts') && !(f in TEXT_EXEMPT))
+	.sort();
 
 test('there are six shipped themes and each defines every token measured here', () => {
 	assert.equal(themes.length, 6, themes.map((t) => t.name).join(', '));
@@ -98,6 +120,8 @@ test('the selected row: text stays at least 4.5:1 on its tinted background, and 
 test('the secondary and disabled text tokens fail in some theme, which is why the console never writes text in them', () => {
 	const dark = themes.find((t) => t.name === 'rocketride')!;
 	assert.ok(Math.min(...CONSOLE_SURFACES.map((s) => ratio(dark.tokens, '--rr-text-secondary', s))) < MIN_TEXT_CONTRAST, 'the premise');
+	for (const file of ['views/ConsoleView.tsx', 'components/WorkbenchTabs.tsx', 'components/InlineRemoveConfirm.tsx', 'components/DocumentsTab.tsx', 'VectorApp.tsx', 'styles.ts']) assert.ok(CONSOLE_FILES.includes(file), `the premise: ${file} is covered`);
+	for (const file of Object.keys(TEXT_EXEMPT)) assert.ok(fs.existsSync(path.resolve(__dirname, '..', 'src', file)), `${file} is exempt but does not exist`);
 	for (const file of CONSOLE_FILES) {
 		const full = path.resolve(__dirname, '..', 'src', file);
 		assert.ok(fs.existsSync(full), `${file} exists`);

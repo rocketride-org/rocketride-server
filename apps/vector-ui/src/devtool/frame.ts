@@ -55,10 +55,13 @@
 //             A console sends its query and median as hints, again to a
 //             controller that remounted without them.
 //   IDENTITY  The frame remembers the first fingerprint; a different one closes
-//             its document (documents.close), clears its own objects and
-//             forgets its connection in the realm's caches. `host:connection`
-//             turning false, or an unknown identity, clears its own objects
-//             only (R9).
+//             its document (documents.close), clears its own objects (its
+//             staged documents and its Query history with them) and forgets
+//             its connection in the realm's caches. `host:connection` turning
+//             false, or an unknown identity, clears its own objects only
+//             (R9), and keeps what the user staged and the Query history: the
+//             new objects of the same connection take the staged documents
+//             back.
 //   SUMMON    While no controller is ready the frame asks its host to mount
 //             one with the base's reserved non-op event (F11), and re-announces
 //             `active` once per readiness nonce.
@@ -87,6 +90,7 @@ import { consoleUri, documentTitle, documentUri } from '../vector/addresses';
 import { consoleNodes } from '../vector/consoleModel';
 import { medianChunks } from '../vector/health';
 import { unstage } from '../vector/staged';
+import type { IStagedSet } from '../vector/staged';
 import { controllerNotReadyError, isNotSent } from './frameText';
 import { EVENT, NO_ENDPOINTS, OP, STATE, TOOL_OP, WRITE_OPS, field, frameTimeoutFor, routeDocKey, toWire } from './protocol';
 import type { DocRoute, IActiveEvent, IConsoleSummary, IDocVersion, IFocusRequest, IMapRequest, IQueryHint, VectorOps } from './protocol';
@@ -308,8 +312,10 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 	const channel = opts.channel ?? channelFor(opts.peer, opts.createToolChannel);
 	const caller = createFrameCaller<VectorOps>({ peer: opts.peer, channel, createToolController: opts.createToolController, createToolChannel: opts.createToolChannel, ...(opts.now ? { now: opts.now } : {}) });
 	const registry = createConnectionRegistry();
-	// The Query tab's history: memory only, emptied with the frame's other objects on every reset.
+	// The Query tab's history: memory only, emptied on a change of identity.
 	const queryHistory = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+	// What the user staged, held across a reset that keeps the identity, until the connection's new objects take it.
+	const carried = new Map<string, IStagedSet>();
 	const offs: Array<() => void> = [];
 	let disposed = false;
 	let resetWhy: FrameResetReason | null = null;
@@ -495,8 +501,13 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 			// whose objects and caches are theirs: the full app keeps a connection's saved views and filters, chat
 			// and uploads across a reconnect. Only another identity forgets the frame's connection in the realm's
 			// per-connection caches (the full app then clears everything anyway).
+			if (reason === 'identity') {
+				carried.clear();
+				queryHistory.forget();
+			} else {
+				for (const entry of registry.entries()) if (entry.staged.get().size > 0) carried.set(entry.key, entry.staged.get());
+			}
 			registry.clear();
-			queryHistory.forget();
 			if (reason === 'identity' && frameKey !== null) connectionCaches.forgetKey(frameKey);
 			myQuery = null;
 			mySummary = null;
@@ -575,7 +586,15 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 				probe,
 				session: (endpoint) => (ready ? channelOf(endpoint) : null),
 				channels: (endpoint) => (ready ? { tools: channelOf(endpoint), chat: null, ingest: null } : NO_CHANNELS),
-				connection: (endpoint, limits) => registry.entry(endpoint, ready ? link : null, limits),
+				connection: (endpoint, limits) => {
+					const made = registry.entry(endpoint, ready ? link : null, limits);
+					const staged = carried.get(endpoint.key);
+					if (staged !== undefined) {
+						carried.delete(endpoint.key);
+						if (made.staged.get().size === 0) made.staged.set(staged);
+					}
+					return made;
+				},
 				existingConnection: (key) => registry.existing(key),
 				consoleModel: devToolConsoleModel,
 				openConsole,
@@ -669,8 +688,8 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 		documentActions(entry, announce = (text) => announcer.announce(text)) {
 			const endpoint = (): IExplorerEndpoint => entry.ctx.endpoint;
 			// The console is another frame with its own objects: a document frame neither stages (its Move to trash confirms
-			// here, D9) nor switches the console's tabs, so those two actions are left out.
-			const { stageRemove: _stageRemove, openTab: _openTab, ...base } = makeConsoleActions(entry, {
+			// here, D9), nor switches the console's tabs, nor hands it a query (D9b), so those actions are left out.
+			const { stageRemove: _stageRemove, openTab: _openTab, useAsQuery: _useAsQuery, ...base } = makeConsoleActions(entry, {
 				openDocument: (id, chunkId) => openDocument(endpoint(), id, null, chunkId),
 				showConsole: () => openConsole(endpoint()),
 				announce,
@@ -694,6 +713,7 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 			for (const off of offs.splice(0)) off();
 			guard.dispose();
 			registry.clear();
+			carried.clear();
 			caller.dispose();
 		},
 	};

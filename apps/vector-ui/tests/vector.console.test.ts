@@ -515,7 +515,7 @@ test('restore runs at once (it can be undone), refreshes everything a write does
 	store.dispose();
 });
 
-test('delete permanently: a confirmation first, then one delete without deleted_only; the document is forgotten', async () => {
+test('delete permanently (a Trash action): a confirmation first, then one delete with deleted_only, so a partly trashed document is kept; the document is forgotten', async () => {
 	const { store, clock, calls, announced, removedIds } = harness();
 	store.setWritesEnabled(true);
 	store.open();
@@ -529,7 +529,7 @@ test('delete permanently: a confirmation first, then one delete without deleted_
 	await clock.settle();
 	assert.deepEqual(
 		calls.filter((c) => c.tool === 'delete').map((c) => c.args),
-		[[['gull']]]
+		[[['gull'], 'deleted_only']]
 	);
 	assert.deepEqual(announced, ['Deleted C:/demo/field/gull.md permanently (12 chunks)']);
 	assert.deepEqual(removedIds, [['gull']]);
@@ -572,7 +572,7 @@ test('empty trash: every page of the trash is listed first, then a confirmation;
 		],
 		'batches of write_ids_max, every one with deleted_only'
 	);
-	assert.equal(announced.at(-1), 'Emptied the trash: deleted 149 documents permanently (298 chunks). 1 was kept: it still has chunks outside the trash.');
+	assert.equal(announced.at(-1), 'Emptied the trash: deleted 149 documents permanently (298 chunks). 1 was kept whole, because it still has chunks outside the trash: C:/demo/trash/t7.md.');
 	assert.ok(!removedIds.flat().includes('t-7'), 'a kept document is not forgotten');
 	assert.equal(removedIds.flat().length, 149);
 	assert.equal(written(), 1);

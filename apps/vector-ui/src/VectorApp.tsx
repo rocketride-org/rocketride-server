@@ -52,6 +52,7 @@ import type { IConsoleDocPayload, IDocumentDocPayload } from './docs';
 import { VectorEnvProvider, useConnection, useEndpointsState, useLiveEndpoint } from './envContext';
 import { createLocalVectorEnv } from './localEnv';
 import { CONNECTIONS_URI, endpointKeyFromUri, isConsoleUri, isDocumentUri } from './vector/addresses';
+import { documentOrigin } from './vector/confirm';
 import { forgetConnections } from './vector/identityChange';
 import VectorSidebar from './VectorSidebar';
 import { VectorIcon } from './icons';
@@ -197,6 +198,8 @@ const DocumentTab: React.FC<{ payload: IDocumentDocPayload; active: boolean }> =
 				// "Show chunk path on map", a chunk's "map" and "Ask about" land on the console, in front of this tab.
 				showConsole: () => openConsole(entry.ctx.endpoint),
 				announce: (text) => announcer.announce(text),
+				// Its confirmations show in this tab, not in the console that shares its controller.
+				origin: documentOrigin(payload.objectId),
 			}),
 		[entry, payload.objectId, payload.path]
 	);
@@ -204,8 +207,8 @@ const DocumentTab: React.FC<{ payload: IDocumentDocPayload; active: boolean }> =
 	useEffect(() => {
 		entry.controller.setWritesEnabled(model.writes.enabled);
 	}, [model.writes.enabled, entry]);
-	// Its Move to trash is confirmed in the tab itself, inline (the console of the connection shows the same one).
-	return <DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} beforeBody={<InlineRemoveConfirm entry={entry} probe={probes[endpoint.key]} />} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />;
+	// Its Move to trash is confirmed in the tab itself, inline.
+	return <DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} beforeBody={<InlineRemoveConfirm entry={entry} probe={probes[endpoint.key]} origin={documentOrigin(payload.objectId)} />} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />;
 };
 
 /**

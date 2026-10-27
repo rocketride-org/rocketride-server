@@ -317,6 +317,7 @@ describe('the document frame: its focus, the console\'s query and median, and wr
 		const actions = doc.frame.documentActions(docEntry);
 		assert.equal(actions.stageRemove, undefined, 'its Move to trash confirms in the document (D9)');
 		assert.equal(actions.openTab, undefined, "the console's tabs are another frame's");
+		assert.equal(actions.useAsQuery, undefined, 'and so is its Query tab (D9b)');
 		await doc.frame.caller.callReply(OP.trash, { key: run.key, input: { object_ids: [ID] }, origin: doc.frame.origin }, { timeoutMs: 30_000 });
 		await until(() => !entry.staged.get().has(ID), 'the moved document to leave the staged set');
 		assert.deepEqual([...entry.staged.get().keys()], ['kept']);
@@ -538,17 +539,19 @@ describe('a frame\'s reset clears its own objects; only an identity reset forget
 		const history = run.frame.env(true).queryHistory;
 		assert.equal(history.persisted, false, 'a frame stores no history');
 		history.record(key, { question: 'q', kind: 'semantic', at: 1, ms: 1, topK: 10, results: 1, outcome: 'rows' });
-		assert.equal(history.entries(key).get().length, 1, 'the premise');
+		assert.equal(history.entries(key).get().length, 1, 'recorded at once, in memory');
+		entry.staged.set(stage(NO_STAGED, [{ objectId: 'doc-staged', path: 'a.md', chunks: 1 }]));
 		run.h.setHostConnection(false);
 		await until(() => run.frame.lastReset() === 'disconnected', 'the frame\'s host-drop reset');
 		assert.equal(run.frame.connections.count(), 0, 'the frame\'s own objects are gone');
-		assert.equal(history.entries(key).get().length, 0, 'and its Query history');
+		assert.equal(history.entries(key).get().length, 1, 'a host drop keeps the Query history');
 		assert.equal(entry.selection.getState().connectionKey, null, 'and reset');
 		assert.deepEqual(appState(), ALL_KEPT, 'a host drop leaves the full app\'s state for the same connection alone');
 
 		run.h.setHostConnection(true);
 		await until(() => run.frame.connected.get() === true, 'the host back');
 		entry = frameObjects();
+		assert.deepEqual([...entry.staged.get().keys()], ['doc-staged'], "and the connection's new objects take back what was staged");
 		run.engine.realm.root.disconnect();
 		await until(() => run.frame.lastReset() === 'unknown', 'the frame\'s unknown reset');
 		assert.equal(run.frame.connections.count(), 0, 'the frame\'s own objects are gone');
@@ -558,9 +561,12 @@ describe('a frame\'s reset clears its own objects; only an identity reset forget
 		run.engine.realm.root.connect(account('u1'));
 		await settle();
 		entry = frameObjects();
+		entry.staged.set(stage(NO_STAGED, [{ objectId: 'doc-staged', path: 'a.md', chunks: 1 }]));
 		run.engine.realm.root.connect(account('u2'));
 		await until(() => run.frame.lastReset() === 'identity', 'the frame\'s identity reset');
 		assert.equal(run.frame.connections.count(), 0, 'the frame\'s own objects are gone');
+		assert.equal(history.entries(key).get().length, 0, 'another identity: the Query history goes');
+		assert.equal(entryOf(run).staged.get().size, 0, 'and so does what was staged');
 		assert.deepEqual(appState(), { ...ALL_KEPT, filters: false, views: false, reviewed: false, examples: false },
 			'an identity reset forgets the frame\'s connection in the per-connection caches; the app\'s registry, chat and uploads are the app\'s to clear, another connection is untouched');
 		assert.ok(!connectionCaches.forgetKey('k1|nothing').includes(CHAT_AND_INGEST_CACHE), 'chat and uploads have no per-connection forget');

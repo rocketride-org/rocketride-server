@@ -25,13 +25,14 @@
 // =============================================================================
 //
 // What one open connection keeps while its console and document tabs come
-// and go: the console controller (stats, directory, trash, chunks, writes), the
-// shared selection (vector/bridge), the console's inner tab (vector/workbench.ts)
-// and the Query tab's mode and handed-in question, the chat's scope ("Ask
-// about these only"), the directory's scope (conditions shared with the map,
-// search and chat), the documents staged for the trash (vector/staged.ts), the
-// metadata fields read so far (vector/fields.ts), and the loaded rows as a
-// source for the map. Every one is built from the endpoint KEY plus refs: the controller
+// and go: the console controller (stats, directory, trash, chunks, writes),
+// the shared selection (vector/bridge), the console's inner tab
+// (vector/workbench.ts) with the Query tab's mode and handed-in question and
+// the document asked of the Documents tab, the chat's scope ("Ask about these
+// only"), the directory's scope (conditions shared with the map, search and
+// chat), the documents staged for the trash (vector/staged.ts), the metadata
+// fields read so far (vector/fields.ts), and the loaded rows as a source for
+// the map. Every one is built from the endpoint KEY plus refs: the controller
 // reads the client and the live endpoint from `ctx` at call time, so a
 // restarted pipeline (same key, new token) is called correctly without
 // rebuilding anything.
@@ -65,7 +66,7 @@ import { DEFAULT_LIMITS } from '../vector/results';
 import { NO_STAGED, unstage } from '../vector/staged';
 import type { IStagedSet } from '../vector/staged';
 import { DEFAULT_TAB } from '../vector/workbench';
-import type { IQueryPrefill, QueryMode, WorkbenchTab } from '../vector/workbench';
+import type { IOpenDocumentRequest, IQueryPrefill, QueryMode, WorkbenchTab } from '../vector/workbench';
 import { deleteBatch, fetchChunks, fetchDocumentsPage, fetchStats, restoreBatch, trashBatch } from './actions';
 import type { IVectorCaller } from './actions';
 import { announcer, connectionCaches, vectorEndpoints } from './explorer';
@@ -132,6 +133,8 @@ export interface IConnectionEntry {
 	queryMode: IValueStore<QueryMode>;
 	/** A question handed to the Query tab (Ask about these, Use as query, a history entry), or null. */
 	queryPrefill: IValueStore<IQueryPrefill | null>;
+	/** A document another tab asks the Documents tab to show in its drawer (read once, then set back to null). */
+	openDocument: IValueStore<IOpenDocumentRequest | null>;
 	chatScope: IValueStore<readonly string[] | null>;
 	/** The directory's scope (ConsoleModel.scope), or null with no condition. */
 	scope: IValueStore<IScopeState | null>;
@@ -242,6 +245,7 @@ export function createConnectionRegistry(): IConnectionRegistry {
 					tab: createValueStore<ConsoleTab>(DEFAULT_TAB),
 					queryMode: createValueStore<QueryMode>('search'),
 					queryPrefill: createValueStore<IQueryPrefill | null>(null),
+					openDocument: createValueStore<IOpenDocumentRequest | null>(null),
 					chatScope: createValueStore<readonly string[] | null>(null),
 					scope: createValueStore<IScopeState | null>(null),
 					documents: undefined as unknown as IDocumentRowsSource,
