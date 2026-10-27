@@ -493,7 +493,12 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 		[OP.trash]: write(OP.trash),
 		[OP.restore]: write(OP.restore),
 		[OP.deletePermanently]: write(OP.deletePermanently),
-		[OP.requestFocus]: (params) => {
+		// A call the peer held while no controller was mounted is handed over SYNCHRONOUSLY inside attachController
+		// (below), before `attached`, the retained-state channel, `publish` and `shownKeys` exist. These two relays reach all
+		// of them, so they answer from the next microtask, when the controller is whole. Every other handler reaches only
+		// what is declared above attachController before its first await (`refresh`: the store and discovery).
+		[OP.requestFocus]: async (params) => {
+			await Promise.resolve();
 			const key = keyOf(params, OP.requestFocus);
 			const docKey = field(params, 'docKey');
 			const chunkId = field(params, 'chunkId');
@@ -507,7 +512,8 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 			expire(focus, key, nonce, publishFocus);
 			return replyOk(null);
 		},
-		[OP.showOnMap]: (params) => {
+		[OP.showOnMap]: async (params) => {
+			await Promise.resolve();
 			const key = keyOf(params, OP.showOnMap);
 			const keys = field(params, 'keys');
 			const source = field(params, 'source');

@@ -24,7 +24,10 @@ import type { IFocusRequest, IMapRequest, IQueryHint, VectorOps } from '../src/d
 import { consoleUri, documentUri } from '../src/vector/addresses';
 import { connectionRow, rowStatusText, sidebarListLine } from '../src/vector/connections';
 import { fixture } from './support/fixtures';
-import { account, disposeAll, latestStateMap, manualTimers, mountController, nonStatePosts, publishedStates, rocketRealm, settle, shellProtocol, signInVsCode, until, vscodeRealm } from './support/devtool';
+import { account, disposeAll, latestStateMap, manualTimers, mountController, nonStatePosts, publishedStates, recordingDocuments, rocketRealm, settle, shellProtocol, signInVsCode, track, until, vscodeRealm } from './support/devtool';
+import { createVectorController } from '../src/devtool/controller';
+import { makeVectorEndpointStore } from '../src/adapters/explorer';
+import { createDevToolHarness } from 'shared/explorer/devtool/testing';
 
 afterEach(disposeAll);
 
@@ -227,6 +230,43 @@ describe('the relays: a document focus and a map request cross as ops, are retai
 		await assert.rejects(frame.caller.callReply(OP.showOnMap, { key, keys: [['doc-1', 0]], source: 'anywhere' } as never, { timeoutMs: 10_000 }), (e: unknown) => e instanceof ExplorerToolError && e.kind === 'invalid');
 		frame.caller.dispose();
 		mounted.controller.dispose();
+	});
+});
+
+describe('calls held for the sidebar controller before it mounts', () => {
+	it('a held requestFocus and a held showOnMap are answered ok once it mounts, and both requests are published', async () => {
+		const engine = vscodeRealm();
+		signInVsCode(engine.realm);
+		const h = createDevToolHarness(VECTOR_APP_ID);
+		// A frame that calls without waiting for readiness: with no subscriber on the sidebar peer, the peer holds the
+		// calls and hands them over synchronously when the controller subscribes, inside attachController, before
+		// createVectorController has its result, its channel or its publisher.
+		const caller = createFrameCaller<VectorOps>({ peer: h.newFramePeer(), createToolController: shellProtocol.createToolController, createToolChannel: shellProtocol.createToolChannel, waitForController: false });
+		await settle();
+		const key = 'k1|held';
+		const docKey = documentUri(key, 'doc-1');
+		const focus = caller.callReply(OP.requestFocus, { key, docKey, chunkId: 3 }, { timeoutMs: 10_000 });
+		const map = caller.callReply(OP.showOnMap, { key, keys: [['doc-1', 0]], source: 'document' }, { timeoutMs: 10_000 });
+		await settle();
+		// No host channel: the fallback channel catches the held burst and attachController releases it at its end.
+		const errors: unknown[] = [];
+		const controller = track(createVectorController({
+			cm: engine.cm,
+			peer: h.sidebarPeer,
+			documents: recordingDocuments().documents,
+			createToolChannel: shellProtocol.createToolChannel,
+			createToolOpServer: shellProtocol.createToolOpServer,
+			focusTarget: null,
+			store: makeVectorEndpointStore({ debounceMs: 0 }),
+			onError: (error) => errors.push(error),
+		}));
+		assert.equal(await focus, null, 'the held focus is answered ok');
+		assert.equal(await map, null, 'the held map request is answered ok');
+		await until(() => stateOf<Record<string, IFocusRequest>>(h, STATE.focusRequests)?.[key]?.chunkId === 3, 'the focus request published');
+		await until(() => stateOf<Record<string, IMapRequest>>(h, STATE.mapRequests)?.[key]?.keys?.[0]?.[0] === 'doc-1', 'the map request published');
+		assert.deepEqual(errors, []);
+		caller.dispose();
+		controller.dispose();
 	});
 });
 
