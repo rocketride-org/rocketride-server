@@ -150,7 +150,14 @@ test('the workbench header and tab row never move: Refresh keeps its width and s
 	assert.match(view, /const refreshBusy = state\.stats\.status === 'loading' \|\| state\.checking === true;[\s\S]*const refreshing = refreshAsked && refreshBusy;/, 'the 15 s quick tick changes nothing in the header; probing the store again first is refreshing too (B4)');
 	// B4: Refresh stays for a store whose probe did not answer (it probes it again first); B9: one width (above).
 	assert.match(view, /const reprobable = card\.blocked === null && endpoint\.state === 'ready' && probe\?\.ok !== true;/);
-	assert.match(view, /<Button variant="ghost" disabled=\{!entry\.opened \|\| !\(card\.openable \|\| reprobable\)\} onClick=\{refresh\}>/);
+	// R2-B1: never \`disabled\` (a focused button that is disabled for a moment drops the focus): aria-disabled, a guarded press.
+	assert.match(view, /const refreshOff = !\(card\.openable \|\| reprobable\);/);
+	assert.match(view, /<HeaderButton unavailable=\{refreshOff \? \(card\.blocked \?\? REFRESH_OFF_TEXT\) : null\} onClick=\{refresh\}>/);
+	assert.match(view, /if \(refreshing \|\| refreshOff\) return;/);
+	assert.match(view, /if \(off\) button\.setAttribute\('aria-disabled', 'true'\);\s*else button\.removeAttribute\('aria-disabled'\);/);
+	assert.match(view, /<Button variant="ghost" title=\{unavailable \?\? undefined\} onClick=\{\(\) => \(off \? undefined : onClick\(\)\)\}>/);
+	const header = view.slice(view.indexOf('<ContentHeader'), view.indexOf('<WorkbenchTabs'));
+	assert.doesNotMatch(header, /\bdisabled=/, 'no header button is ever disabled');
 	// The tab row is its own row, under the header and above every banner and panel.
 	// The banners of a lasting state at the top; what comes and goes after a write (its line, the pending bar) under the panels (R1-I6).
 	const order = ['<ContentHeader', '<WorkbenchTabs', '{card.blocked &&', '{!card.blocked && unreachable && statsError !== null &&', "{!card.blocked && dialect?.health.control_record === false &&", '{!card.blocked && dialect?.health.model_mismatch === true &&', '{!card.blocked && entry.opened && !model.writes.enabled', '{!card.blocked && !unreachable && emptyCollection &&', '<InlineRemoveConfirm', "{mounted.has('overview')", "{mounted.has('trash')", '<PendingBar', 'data-write-line=""'].map((part) => view.indexOf(part));
@@ -198,7 +205,7 @@ test('B1(b): fresh stats that say the collection exists, against a probe that sa
 	const view = code('views/ConsoleView.tsx');
 	assert.match(view, /const disagree = state\.stats\.view !== null && state\.stats\.view\.collectionExists && dialect\?\.health\.collection_exists === false;/);
 	assert.match(view, /const next = reprobeFor\(reprobed\.current, disagree, endpoint\.key\);\s*reprobed\.current = next\.tried;\s*if \(next\.probe\) void env\.probe\(endpoint\.key\);\s*\}, \[disagree, env, endpoint\.key\]\);/, 'not on every quick tick: the stats time is not a dependency');
-	assert.match(view, /if \(refreshing\) return;/, 'a refresh already running is not asked again');
+	assert.match(view, /if \(refreshing \|\| refreshOff\) return;/, 'a refresh already running is not asked again');
 });
 
 test('the console renders the strip, the directory, the chunks, adding documents and the chat (each in its tab), and paces itself through its controller', () => {
@@ -556,5 +563,14 @@ test("live B10: a document's write slot is the hub's: one height, the same style
 	assert.equal(slot.match(/<div\s+ref=\{slotRef\}\s+style=\{styles\.slot\}\s+data-document-write-slot=""/g)?.length, 1, 'one style in every state');
 	assert.match(slot, /const slot = documentSlot\(\{ write, fresh, held: inSlot\.focus \|\| inSlot\.pointer, showing: showing\.current \}\);/);
 	assert.match(slot, /\(removal\.status === 'done' \|\| removal\.status === 'error'\) && <WriteAuditDetails message=\{removal\.message\} audit=\{removal\.audit\} \/>/, 'Write details, opening above the line');
+});
+
+test("live B5 (dev tool): a document's Show on map is the console frame's arrival; R2-B7: the banner says the store's words", () => {
+	assert.match(code('VectorDevTool.tsx'), /useEffect\(\(\) => frame\.bindConsole\(entry, \{ arrived: \(\) => setArrivals\(\(n\) => n \+ 1\) \}\), \[frame, entry\]\);\s*return <ConsoleView opened=\{endpoint\} active=\{visible\} arrivals=\{arrivals\} \/>;/);
+	const view = code('views/ConsoleView.tsx');
+	assert.match(view, /if \(arrivals === 0 \|\| typeof document === 'undefined'\) return undefined;\s*const settle = \(\): void => \{\s*if \(focusAdrift\(document\.activeElement as HTMLElement \| null, document\.body\)\) currentTab\(\)\?\.focus\(\);/);
+	assert.match(code('devtool/frame.ts'), /entry\.tab\.set\('map'\);[\s\S]{0,200}on\?\.arrived\?\.\(\);/);
+	assert.match(view, /\{withoutExceptionName\(statsError\.headline\)\}/);
+	assert.match(view, /<span title=\{statsError\.detail \? `\$\{statsError\.headline\}\\n\$\{statsError\.detail\}` : statsError\.headline\}>/, 'the raw text in the title');
 });
 

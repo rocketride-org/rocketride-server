@@ -216,8 +216,10 @@ const ConsoleFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint 
 	const live = useLiveEndpoint(endpoint);
 	const { entry } = useConnection(live);
 	const visible = useReadable(frame.visible);
-	useEffect(() => frame.bindConsole(entry), [frame, entry]);
-	return <ConsoleView opened={endpoint} active={visible} />;
+	// A document's Show on map (its map request, taken once and short-lived) is a press's arrival: counted for the view.
+	const [arrivals, setArrivals] = useState(0);
+	useEffect(() => frame.bindConsole(entry, { arrived: () => setArrivals((n) => n + 1) }), [frame, entry]);
+	return <ConsoleView opened={endpoint} active={visible} arrivals={arrivals} />;
 };
 
 /**

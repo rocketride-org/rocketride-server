@@ -104,7 +104,7 @@ import { savedFiltersFor } from '../vector/savedFilters';
 import { roleLine, vectorCardView } from '../vector/connections';
 import { providerTitle } from '../vector/support';
 import { REPAIR_NEEDED_TEXT, collectionMissing, formatCount } from '../vector/stats';
-import { BUSY, CAVEAT_SENTENCES, EMPTY } from '../vector/wording';
+import { BUSY, CAVEAT_SENTENCES, EMPTY, withoutExceptionName } from '../vector/wording';
 import { NO_FAILURES, RESULT_FIRST_MS, bottomSlot, focusStranded, reprobeFor, statsFailures, takesFocusOnShow, unreachableShown } from '../vector/workbench';
 import type { BottomSlot, SlotWrite, WorkbenchTab } from '../vector/workbench';
 import { styles } from '../styles';
@@ -162,6 +162,11 @@ export interface IConsoleViewProps {
 	 * mounts: it then takes the focus if nothing shown has it. Absent: never on mount (restored, or opened elsewhere).
 	 */
 	arrival?: () => boolean;
+	/**
+	 * Counts the presses elsewhere that brought this console forward while it is open (a dev-tool document's Show on
+	 * map, whose request carries the press): each new count takes the focus to the current tab if nothing shown has it.
+	 */
+	arrivals?: number;
 }
 
 /**
@@ -170,7 +175,38 @@ export interface IConsoleViewProps {
  * @param props - {@link IConsoleViewProps}.
  * @returns The view.
  */
-export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active, arrival }) => {
+/** Why the header's Refresh does nothing while the store cannot be opened and says no reason of its own. */
+const REFRESH_OFF_TEXT = 'Nothing to refresh until this connection can be opened.';
+
+const useBrowserLayoutEffect = typeof document !== 'undefined' ? useLayoutEffect : useEffect;
+
+/**
+ * A header button that stays focusable while unavailable (aria-disabled, its click does nothing) instead of `disabled`:
+ * a focused button that becomes disabled, even for a moment during a refresh, drops the focus to the page (live R2-B1).
+ * The shell's Button forwards no aria-disabled, so the wrapper sets it on the button it renders, and dims it.
+ *
+ * @param props - Why it is unavailable (null: available), the press, the label.
+ * @returns The button.
+ */
+const HeaderButton: React.FC<{ unavailable: string | null; onClick(): void; children: React.ReactNode }> = ({ unavailable, onClick, children }) => {
+	const wrap = useRef<HTMLSpanElement>(null);
+	const off = unavailable !== null;
+	useBrowserLayoutEffect(() => {
+		const button = wrap.current?.querySelector('button');
+		if (!button) return;
+		if (off) button.setAttribute('aria-disabled', 'true');
+		else button.removeAttribute('aria-disabled');
+	}, [off]);
+	return (
+		<span ref={wrap} style={{ display: 'inline-flex', opacity: off ? 0.55 : 1, cursor: off ? 'not-allowed' : undefined }} data-header-button="">
+			<Button variant="ghost" title={unavailable ?? undefined} onClick={() => (off ? undefined : onClick())}>
+				{children}
+			</Button>
+		</span>
+	);
+};
+
+export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active, arrival, arrivals = 0 }) => {
 	const env = useVectorEnv();
 	const endpoint = useLiveEndpoint(opened);
 	const { probes } = useEndpointsState();
@@ -380,6 +416,20 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active, arriv
 		// The arrival is read on mount only.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [active]);
+	// A press in another dev-tool frame (a document's Show on map) brought this frame forward: its request is the press's
+	// signal, so the page's own focus is not asked for (a frame just brought forward does not have it yet).
+	useLayoutEffect(() => {
+		if (arrivals === 0 || typeof document === 'undefined') return undefined;
+		const settle = (): void => {
+			if (focusAdrift(document.activeElement as HTMLElement | null, document.body)) currentTab()?.focus();
+		};
+		settle();
+		const later = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(settle) : null;
+		return () => {
+			if (later !== null) cancelAnimationFrame(later);
+		};
+		// Each new press only.
+	}, [arrivals]);
 
 	// Refreshing… only for a refresh someone asked for; the quick tick every 15 s changes nothing in the header.
 	// The store probed again first (its last probe did not answer) counts as refreshing too.
@@ -389,11 +439,16 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active, arriv
 		if (!refreshBusy && refreshAsked) setRefreshAsked(false);
 	}, [refreshBusy, refreshAsked]);
 	const refreshing = refreshAsked && refreshBusy;
+	// Nothing to refresh: the store cannot be opened (blocked, its pipeline not running). A store whose probe did not
+	// answer can be (reprobable): Refresh probes it again.
+	const refreshOff = !(card.openable || reprobable);
 	const refresh = (): void => {
-		// A refresh already running is not asked again.
-		if (refreshing) return;
+		// A refresh already running is not asked again; an unavailable one does nothing (its button keeps the focus).
+		if (refreshing || refreshOff) return;
 		setRefreshAsked(true);
-		entry.controller.refresh();
+		// A console that never opened (its store had not answered) opens itself once the probe answers.
+		if (entry.opened) entry.controller.refresh();
+		else void env.probe(endpoint.key);
 	};
 
 	// B1(b): fresh stats say the collection exists while the probe read at discovery says it does not: probe again,
@@ -426,12 +481,12 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active, arriv
 				subtitle={subtitle}
 				actions={
 					<>
-						<Button variant="ghost" disabled={!entry.opened || !(card.openable || reprobable)} onClick={refresh}>
+						<HeaderButton unavailable={refreshOff ? (card.blocked ?? REFRESH_OFF_TEXT) : null} onClick={refresh}>
 							<span style={layout.held}>
 								<span style={layout.heldLabel(!refreshing)}>Refresh</span>
 								<span style={layout.heldLabel(refreshing)}>{BUSY.refreshing}</span>
 							</span>
-						</Button>
+						</HeaderButton>
 						<Button variant="ghost" pressed={details} onClick={() => setDetails((open) => !open)}>
 							Details
 						</Button>
@@ -452,8 +507,11 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active, arriv
 			{!card.blocked && unreachable && statsError !== null && (
 				<div style={layout.banner}>
 					<Banner variant="error">
-						{statsError.headline}
-						{statsError.detail ? ` ${statsError.detail}` : ''}
+						{/* The store's words without a leading exception name (live R2-B7); the raw text in the title. */}
+						<span title={statsError.detail ? `${statsError.headline}\n${statsError.detail}` : statsError.headline}>
+							{withoutExceptionName(statsError.headline)}
+							{statsError.detail ? ` ${withoutExceptionName(statsError.detail)}` : ''}
+						</span>
 						{state.stats.view !== null ? ' The Overview keeps the last figures read.' : ''}
 						<span style={layout.bannerAction}>
 							<Button small variant="secondary" onClick={refresh}>

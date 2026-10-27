@@ -141,6 +141,18 @@ export interface IFailureText {
 }
 
 /**
+ * A store's error text without a leading exception or class name ("ResponseHandlingException: The store could not be
+ * reached" reads "The store could not be reached"): the words a person reads. The raw text stays where the details are.
+ *
+ * @param text - The text.
+ * @returns It, without the name (the text as it was when nothing else is left).
+ */
+export function withoutExceptionName(text: string): string {
+	const stripped = text.replace(/^\s*(?:[A-Za-z_$][\w$]*\.)*[A-Z][\w$]*(?:Exception|Error|Fault)\s*:\s*/, '');
+	return stripped.trim() === '' ? text : stripped;
+}
+
+/**
  * A call refused before it was sent because the store's last probe did not answer (it failed, or none has run): the
  * store may be down, and the node is not out of date. Retry and Refresh probe it again first.
  */
@@ -210,7 +222,7 @@ export const EMPTY = {
 	noDocuments: 'No documents yet.',
 	trash: 'The trash is empty.',
 	noMatch: (filter: string): string => `No documents match '${filter}'`,
-	unreachable: (detail: string): string => `Store unreachable: ${detail}`,
+	unreachable: (detail: string): string => `Store unreachable: ${withoutExceptionName(detail)}`,
 	noIngest: 'This pipeline has no running Ingest source. Start its dropper source to add documents.',
 	noChat: 'This pipeline has no running Chat source.',
 	readOnly: 'No Tools source: documents cannot be added or removed from here',
