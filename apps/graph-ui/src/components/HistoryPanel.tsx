@@ -42,6 +42,7 @@ import { Button, ConfirmDialog, EmptyState, InputField, StatusBadge } from 'shel
 import { clock, readErrorMessage } from 'shared/explorer';
 import type { IHistoryEntry } from 'shared/explorer';
 import { APP_HISTORY_PRIVACY_NOTE, useGraphEnv, useHistoryView } from '../env';
+import { changesText } from '../graph/wording';
 import { GraphIcon } from '../icons';
 
 /** The full app's privacy note, word for word the same as SQL Explorer's (each mount says its own: env.historyPrivacyNote). */
@@ -71,7 +72,7 @@ export function entrySummary(entry: IHistoryEntry<'cypher'>): string {
 		case 'rows':
 			return `${(entry.rows ?? 0).toLocaleString('en-US')} ${entry.rows === 1 ? 'row' : 'rows'}${entry.limit !== undefined ? ` (limit ${entry.limit.toLocaleString('en-US')})` : ''}`;
 		case 'affected':
-			return entry.affected === undefined ? 'affected count not reported' : `${entry.affected.toLocaleString('en-US')} affected`;
+			return entry.affected === undefined ? 'affected count not reported' : changesText(entry.affected);
 		case 'abandoned':
 			return 'stopped waiting; the database may have finished it';
 		default:

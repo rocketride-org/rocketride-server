@@ -14,7 +14,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { DEFAULT_SPLIT, EDITOR_DEFAULT, EDITOR_MIN, EDITOR_STEP, RESULTS_MIN, clampEditorHeight, editorMax, splitAfterDrag, splitAfterKey, splitAria, splitToggled, storedEditorHeight } from '../src/graph/splitPane';
+import { DEFAULT_SPLIT, EDITOR_DEFAULT, EDITOR_MIN, EDITOR_STEP, RESULTS_MIN, clampEditorHeight, editorMax, restoredHeight, splitAfterDrag, splitAfterKey, splitAria, splitToggled, storedEditorHeight } from '../src/graph/splitPane';
 
 test('the editor is clamped between one line and the space that leaves the results their minimum', () => {
 	assert.equal(editorMax(800), 800 - RESULTS_MIN);
@@ -72,4 +72,16 @@ test('a stored height is used only when it is a sensible number', () => {
 	assert.equal(storedEditorHeight(-4), EDITOR_DEFAULT);
 	assert.equal(storedEditorHeight(5), EDITOR_MIN);
 	assert.equal(storedEditorHeight(undefined), EDITOR_DEFAULT);
+});
+
+// Live bug 3: hiding an editor kept at one line and showing it again gave back one line (40 px), not a usable editor.
+test('a hidden editor whose height was one line comes back at the default; any other height comes back as it was', () => {
+	const fromMin = { height: EDITOR_MIN, collapsed: true };
+	assert.deepEqual(splitToggled(fromMin), { height: EDITOR_DEFAULT, collapsed: false }, 'Show editor, or a double click');
+	assert.deepEqual(splitAfterKey(fromMin, 'End', 800), { height: EDITOR_DEFAULT, collapsed: false }, 'End');
+	assert.deepEqual(splitAfterKey(fromMin, 'ArrowDown', 800), { height: EDITOR_DEFAULT, collapsed: false }, 'ArrowDown');
+	assert.deepEqual(splitToggled({ height: 260, collapsed: true }), { height: 260, collapsed: false });
+	assert.deepEqual(splitToggled({ height: EDITOR_MIN, collapsed: false }), { height: EDITOR_MIN, collapsed: true }, 'hiding keeps the height it had');
+	assert.equal(restoredHeight(EDITOR_MIN), EDITOR_DEFAULT);
+	assert.equal(restoredHeight(EDITOR_MIN + 1), EDITOR_MIN + 1);
 });

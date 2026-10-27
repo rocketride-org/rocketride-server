@@ -30,7 +30,8 @@
 //              RESULTS_MIN pixels of the space the two share;
 //   keys       ArrowUp/ArrowDown step by EDITOR_STEP; Home hides the editor
 //              (the run bar stays, with the statement's first line); End shows
-//              it again at the height it had;
+//              it again at the height it had, or at the default when that was
+//              one line (a one-line editor shown again is not usable);
 //   drag       moves the divider by the pointer's travel, applied once on
 //              release, so the canvas below resizes (and refits) once;
 //   stored     the height is kept in the prefs (graph.editorHeight); a value
@@ -88,6 +89,16 @@ export function clampEditorHeight(height: number, available: number | null): num
 }
 
 /**
+ * The height a hidden editor comes back at: the one it had, unless that was one line, then the default.
+ *
+ * @param height - The height it had.
+ * @returns The height to show it at.
+ */
+export function restoredHeight(height: number): number {
+	return height <= EDITOR_MIN ? EDITOR_DEFAULT : height;
+}
+
+/**
  * What a key does to the divider.
  *
  * @param split - Where it is.
@@ -100,11 +111,11 @@ export function splitAfterKey(split: IEditorSplit, key: string, available: numbe
 		case 'ArrowUp':
 			return split.collapsed ? split : { height: clampEditorHeight(split.height - EDITOR_STEP, available), collapsed: false };
 		case 'ArrowDown':
-			return split.collapsed ? { height: clampEditorHeight(split.height, available), collapsed: false } : { height: clampEditorHeight(split.height + EDITOR_STEP, available), collapsed: false };
+			return split.collapsed ? { height: clampEditorHeight(restoredHeight(split.height), available), collapsed: false } : { height: clampEditorHeight(split.height + EDITOR_STEP, available), collapsed: false };
 		case 'Home':
 			return { height: split.height, collapsed: true };
 		case 'End':
-			return { height: clampEditorHeight(split.height, available), collapsed: false };
+			return { height: clampEditorHeight(split.collapsed ? restoredHeight(split.height) : split.height, available), collapsed: false };
 		default:
 			return null;
 	}
@@ -117,7 +128,7 @@ export function splitAfterKey(split: IEditorSplit, key: string, available: numbe
  * @returns The other state, at the same height.
  */
 export function splitToggled(split: IEditorSplit): IEditorSplit {
-	return { height: split.height, collapsed: !split.collapsed };
+	return split.collapsed ? { height: restoredHeight(split.height), collapsed: false } : { height: split.height, collapsed: true };
 }
 
 /**

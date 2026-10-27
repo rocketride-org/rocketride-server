@@ -198,11 +198,13 @@ edited that tab's text, Explore opens a new one and runs the sample there.
   for one workbench.
 - **Room for the results.** The divider under the editor sets its height: drag
   it, or reach it with Tab and use ArrowUp and ArrowDown (24 px at a time) or
-  Home to hide the editor; a double click hides it too, and so does **Hide
-  editor** in the run bar. A hidden editor leaves the run bar, with the
-  statement's first line: click it, or **Show editor**, to bring the editor
-  back. While you drag, only the divider's line moves; the editor and the
-  results change size when you let go. The height is kept in your preferences
+  Home to hide the editor and End to show it again; a double click hides or
+  shows it too, and so do **Hide editor** and **Show editor** in the run bar.
+  A hidden editor leaves the run bar, with the statement's first line (click
+  it to bring the editor back), and the divider. The editor comes back at the
+  height it had, or at four lines when it had been made one line high. While
+  you drag, only the divider's line moves; the editor and the results change
+  size when you let go. The height is kept in your preferences
   (`graph.editorHeight`).
 - **Full screen.** The graph's **Full screen** button fills the document with
   the graph, and the inspector stays. Everything else in the document (the
@@ -807,11 +809,15 @@ and it always says what it is:
   not flag is sent when you press Execute, without a dialog.
 - Statements go through `execute` with the graph result shape, so what a
   statement returned is drawn like any other result. The result line, the strip
-  and History show the count the node reports as affected. Apache AGE's node
-  reports the number of rows the statement returned there instead (0 for a
-  write with no `RETURN`), so on Apache AGE the result line says **Affected
-  count not reported by Apache AGE**, and the strip and History show the rows
-  returned. There is no row-limit choice here: `execute` returns at most the
+  and History show the count the node reports, as **changes**: Neo4j's and
+  FalkorDB's nodes add up their change counters (nodes and relationships
+  created or deleted, labels added or removed, properties set or removed, and
+  on FalkorDB indexes created), so a `CREATE` of one node with a label and one
+  property reads "3 changes", not three nodes, and the result line says what
+  the count adds up. Apache AGE's node reports the number of rows the statement
+  returned there instead (0 for a write with no `RETURN`), so on Apache AGE the
+  result line says **Affected count not reported by Apache AGE**, and the strip
+  and History show the rows returned. There is no row-limit choice here: `execute` returns at most the
   node's own maximum.
 - History opens beside the editor here too. **Load into editor** and **Run
   again** only put the statement in the editor; nothing is sent until you press
