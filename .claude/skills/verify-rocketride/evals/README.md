@@ -6,13 +6,15 @@ These evals measure whether the verification skill helps an agent find real defe
 
 `cases.json` holds every case. There are three kinds.
 
-- **Planted** (`P1` to `P7`): a small, realistic bug applied from `seeds/*.patch`, such as a dropped `else` branch or an off-by-one. `P6` and `P7` are in the chat page and the dropper page.
-- **Replay** (`R1`, `R3` to `R8`): a real bug that shipped. The case reverts the code of the PR that fixed it on top of the current branch. `R8` is in the Pipeline Builder canvas.
+- **Planted** (`P1` to `P9`): a small, realistic bug applied from `seeds/*.patch`, such as a dropped `else` branch or an off-by-one. `P6` and `P7` are in the chat page and the dropper page, and `P8` and `P9` are in the VS Code extension.
+- **Replay** (`R1`, `R3` to `R9`): a real bug that shipped. The case reverts the code of the PR that fixed it on top of the current branch. `R8` is in the Pipeline Builder canvas, and `R9` is in the VS Code extension.
 - **Clean** (`C-*`): no change, with the same area prompt as a bug case. Any defect reported here is a false alarm, except the case's `known_issues`.
 
 Every bug case was reproduced by hand against the same check on clean code before it was added. `cases.json` records which cases were dropped and why.
 
 The browser cases (areas `canvas`, `chat-ui`, `dropper-ui`, and `docs-site`) need the UIs built in the eval checkout. `prepare` runs `./builder ui:build shell:bundle shell:copy` for every case; the builder skips a UI whose source has not changed, so this takes seconds unless a case changed one. It runs `./builder docs:build` only when a case changes the docs, when the last build was from changed docs, or when a `docs-site` case finds no build, because the docs build takes minutes.
+
+The VS Code cases (areas starting `vscode`) need the extension built and a VS Code download. `prepare` runs `./builder vscode:build` for those cases and for any case that changes `apps/vscode` or `apps/shared`, so a clean case never runs an extension an earlier case changed. The first `rr-verify vscode launch` in a checkout downloads VS Code and its libraries into `.verify/vscode-cache`, about 1 GB. Give the eval checkout the cache of your own checkout instead: `ln -s "$PWD/.verify/vscode-cache" ../verify-eval/.verify/vscode-cache`. `run` closes any VS Code an agent left open, with the processes it started.
 
 ## Running
 

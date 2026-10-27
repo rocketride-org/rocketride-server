@@ -77,6 +77,15 @@ stop_engines() {
 	done
 }
 
+stop_vscode() {
+	# Close every VS Code an agent left running in this eval checkout, with the processes it started.
+	local dir
+	for dir in "$WORKTREE"/.verify/*/vscode-profile; do
+		[ -f "$dir/vscode.env" ] || continue
+		RR_VERIFY_DIR=$(dirname "$dir") node "$EVALS/../bin/vscode.mjs" close --quiet || true
+	done
+}
+
 started=$(date +%s)
 code=0
 if [ "$AGENT" = claude ]; then
@@ -89,6 +98,7 @@ else
 		"$(cat "$OUT/prompt.txt")" >"$OUT/agent.jsonl" 2>"$OUT/agent.stderr" || code=$?
 fi
 ended=$(date +%s)
+stop_vscode
 stop_engines
 
 python3 -I "$EVALS/collect.py" "$OUT" "$CASE" "$AGENT" "$MODEL" "$NO_SKILL" "$RUN_ID" "$code" "$((ended - started))"

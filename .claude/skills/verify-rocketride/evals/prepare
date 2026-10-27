@@ -68,6 +68,11 @@ grep -qE '^(docs/|nodes/src/nodes/.*README\.md$)' <<<"$changed" && docs_changed=
 if [ "$docs_changed" = 1 ] || [ -f "$docs_marker" ] || { [ "$(field area)" = docs-site ] && [ ! -f "$WORKTREE/dist/docs/index.html" ]; }; then
 	steps+=(docs:build)
 fi
+# The VS Code extension is rebuilt for every VS Code case, so a clean case never runs an extension
+# an earlier case planted a bug in. The builder skips the work when the source has not changed.
+if grep -qE '^apps/(vscode|shared)/' <<<"$changed" || [[ "$(field area)" == vscode* ]]; then
+	steps+=(vscode:build)
+fi
 if [ "${#steps[@]}" -gt 0 ]; then
 	echo "prepare: ./builder ${steps[*]}"
 	mkdir -p "$WORKTREE/.verify"
