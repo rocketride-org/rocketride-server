@@ -578,6 +578,8 @@ test('an open menu is closed when the toolbar or the canvas changes size, throug
 	assert.match(observer, /setMenu\(null\);\s*setToolMenu\(null\);/);
 	assert.match(observer, /closest\('\[data-menu-trigger\]'\)\?\.querySelector\('button'\);\s*if \(trigger\) trigger\.focus\(\);\s*else restoreFocusRef\.current\(\)/, 'focus goes back to the trigger, or to the node for a context menu');
 	assert.match(observer, /observer\.observe\(canvasBox\.current\)/);
+	assert.match(observer, /observer\.observe\(document\.documentElement\)/, 'a resize of the window is seen whichever box moved');
+	assert.match(view.slice(view.indexOf('return () => observer.disconnect()')), /^return \(\) => observer\.disconnect\(\);[\s\S]{0,200}\}, \[drawn\]\);/, 'the observer is set up again once the toolbar exists (a view mounted before its result arrives has none)');
 	assert.doesNotMatch(view, /addEventListener/);
 });
 
