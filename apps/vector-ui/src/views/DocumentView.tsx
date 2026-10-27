@@ -358,7 +358,7 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 						<Button variant="ghost" disabled={keys.length === 0} onClick={() => actions.showOnMap(keys, 'document')}>
 							Show chunk path on map
 						</Button>
-						{inTrash ? (
+						{inTrash && !actions.restore ? null : inTrash ? (
 							<button ref={restoreButton} type="button" style={{ ...styles.iconButton, width: 'auto', padding: '0 10px', opacity: model.writes.enabled ? 1 : 0.55, cursor: model.writes.enabled ? 'pointer' : 'not-allowed' }} aria-disabled={!model.writes.enabled || restoring} title={model.writes.enabled ? 'Move this document out of the trash' : (model.writes.reason ?? undefined)} onClick={() => void restore()} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')}>
 								{restoring ? 'Restoring…' : 'Restore'}
 							</button>

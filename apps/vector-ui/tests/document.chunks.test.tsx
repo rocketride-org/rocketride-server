@@ -126,8 +126,9 @@ test('a document tab names itself in its confirmations and offers Restore while 
 	assert.match(view, /actions\.requestRemove\(\[objectId\], known\)/, 'the header button hands the confirmation this document\'s path and chunk count');
 	assert.match(view, /requestRemove: \(ids: readonly string\[\]\) => actions\.requestRemove\(ids, known\)/, 'and so does the chunk drawer');
 	assert.match(view, /setInTrash\(\(error as \{ code\?: string \} \| null\)\?\.code === 'IN_TRASH'\)/);
-	assert.match(view, /\{inTrash \? \(\s*<button ref=\{restoreButton\}/, 'Restore while trashed, the trash button otherwise');
+	assert.match(view, /inTrash \? \(\s*<button ref=\{restoreButton\}/, 'Restore while trashed, the trash button otherwise');
 	assert.match(view, /await actions\.restore\(\[objectId\], known\)/);
+	assert.match(view, /\{inTrash && !actions\.restore \? null : inTrash \? \(/, 'no Restore button where the actions carry no restore, and no trash button while trashed');
 	const actions = code('adapters/consoleActions.ts');
 	assert.match(actions, /restore: \(objectIds: readonly string\[\], known\?: readonly IStageTarget\[\]\) => entry\.controller\.restore\(/);
 });
