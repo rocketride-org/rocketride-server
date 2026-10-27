@@ -52,6 +52,7 @@
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { savedViews } from '../adapters/connections';
+import { connectionCaches } from '../adapters/explorer';
 import type { ISavedView, IVectorLimits, SavedViewsMenuProps } from '../contract/types';
 import { MAP_STYLES } from '../map/styles';
 import { POPOVER_PANEL, usePopover } from './AdvancedPopover';
@@ -101,9 +102,14 @@ export interface SavedViewsPanelProps {
 
 /**
  * A view name typed and not saved yet, per connection, in memory only: it survives the menu closing and the map
- * toolbar moving the menu between its row and More (which mounts it again).
+ * toolbar moving the menu between its row and More (which mounts it again). Emptied on a change of identity, and
+ * forgotten with its connection, like the saved views.
  */
-const draftNames = new Map<string, string>();
+export const draftNames = new Map<string, string>();
+
+connectionCaches.register('saved view drafts', () => draftNames.clear(), (key) => {
+	draftNames.delete(key);
+});
 
 const S = {
 	root: { position: 'relative', display: 'inline-flex', alignItems: 'center' } as React.CSSProperties,

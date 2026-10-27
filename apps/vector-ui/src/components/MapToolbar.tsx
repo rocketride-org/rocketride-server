@@ -317,8 +317,9 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 		const el = row.current;
 		if (!el) return;
 		// Frozen while a panel is open or an export runs (a move would remount Export and Views); the observer below
-		// fits again when they close.
-		if (el.querySelector('[aria-expanded="true"], [data-export-busy]') !== null) return;
+		// fits again when they close. A menu left open inside a closed More is hidden and does not hold it.
+		const shown = (node: Element): boolean => node.closest('[hidden]') === null;
+		if (Array.from(el.querySelectorAll('[aria-expanded="true"]')).some(shown) || el.querySelector('[data-export-busy]') !== null) return;
 		// The items on the row now (the view's menus are its untagged children); what is in More keeps its last width.
 		let extras = 0;
 		let extrasCount = 0;

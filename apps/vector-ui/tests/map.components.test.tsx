@@ -701,7 +701,8 @@ test('a move never loses the focus or a menu\'s state: into a closed More the fo
 	const toolbar = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'MapToolbar.tsx'), 'utf8');
 	// m2: frozen while a toolbar panel is open (an expanded button: More, Export, Views, Advanced) or an export runs;
 	// fitted again when they close.
-	assert.match(toolbar, /if \(el\.querySelector\('\[aria-expanded="true"\], \[data-export-busy\]'\) !== null\) return;/);
+	assert.match(toolbar, /if \(Array\.from\(el\.querySelectorAll\('\[aria-expanded="true"\]'\)\)\.some\(shown\) \|\| el\.querySelector\('\[data-export-busy\]'\) !== null\) return;/);
+	assert.match(toolbar, /const shown = \(node: Element\): boolean => node\.closest\('\[hidden\]'\) === null;/, 'a menu left open inside a closed More does not hold it');
 	assert.match(toolbar, /new MutationObserver\(\(\) => fitRef\.current\(\)\)[\s\S]*?attributeFilter: \['aria-expanded', 'data-export-busy'\]/);
 	assert.match(toolbar, /component="MoreControls" item="more" menus keepMounted/);
 	// The status line's Cancel hands the focus to Layout only on the row (a Layout in a closed More is hidden).
