@@ -15,8 +15,9 @@ limits) is `docs/development/nodes/vector-tool-contract.md`.
   of the app renders for another. A change to it is a decision for all three.
 - `src/vector/` is plain TypeScript with no browser or shell dependency, so it
   runs under `node:test`: reading answers (`results.ts`), wording (one
-  sentence per code and caveat), the statistics strip, the directory and its
-  auto-pager, removal confirmations, connection cards, the console model and
+  sentence per code and caveat), the statistics cards and chips, the document
+  listing and its auto-pager, the folder tree and grid logic, staged removals
+  and their confirmations, connection cards, the console model and
   the console controller (`consoleStore.ts`, which owns the console's calls
   and their pacing with an injected clock).
 - `src/adapters/explorer.ts` is the one place the app takes from the shared
@@ -26,10 +27,12 @@ limits) is `docs/development/nodes/vector-tool-contract.md`.
   `adapters/react.ts` is the only file that imports the library's shell-bound
   React bindings.
 - The views (`src/views`) and components render what the pure modules decide.
-  The console is the first view of every connection; the Map is a tab of the
-  same document; a stored document opens in its own tab. In the full app
-  removal is confirmed by one dialog host at the app root; a dev-tool document
-  confirms inline (below).
+  The console is the first view of every connection: a header, a tab row
+  (Overview, Documents, Query, Map, Collection, Trash), the banners and one
+  panel per tab, built the first time its tab shows. A stored document opens in
+  its own tab. Removals are confirmed inline in both mounts
+  (`components/InlineRemoveConfirm.tsx`); the only dialog left is the upload's
+  replace question (`ingest/ReplaceConfirmDialog.tsx`).
 - The app imports the shared library as `shared/*` (tsconfig paths), so its
   manifest declares `"include": ["apps/shared"]`.
 - The pipeline templates in `templates/` are not part of the build: users get
@@ -104,17 +107,18 @@ limits) is `docs/development/nodes/vector-tool-contract.md`.
   React mount only routes the docKey and calls these in effects. What a
   document shows before it can open is `connectionDocState` in
   `src/devtool/frameText.ts` (F13 order).
-- No window-wide overlay in a frame: confirmations are
-  `components/InlineRemoveConfirm.tsx` (the same `vector/confirm.ts` content as
-  the dialogs, through `confirmationFor`) and the connection details
+- No window-wide overlay in either mount: confirmations are
+  `components/InlineRemoveConfirm.tsx` (the `vector/confirm.ts` content,
+  through `confirmationFor`) and the connection details
   `components/ConnectionDetailsPanel.tsx`; neither has an overlay or a
   document or window listener. The sidebar list is
   `components/DevToolConnectionList.tsx` (wording in `vector/connections.ts`:
   `connectionRow`, `rowStatusText`, `sidebarListLine`); the full app keeps
   `VectorSidebar` and `ConnectionsView`.
 - Degraded in a dev-tool mount (R11): the REMOTE env serves the console model
-  with chat and uploads off and their notes (`devToolConsoleModel`); the console
-  still renders the chat panel there, so Search stays reachable. A refused
+  with chat and uploads off and their notes (`devToolConsoleModel`); the Query
+  tab's Ask says so and offers Use Search, so Search and Compare stay reachable,
+  and Add documents opens with the reason. A refused
   download keeps its text (`ExportOutcome.copy`) for **Copy as**; refused
   copies are announced. One live region serves each realm
   (`components/RealmLiveRegion.tsx`), the full app's included.
@@ -128,7 +132,7 @@ limits) is `docs/development/nodes/vector-tool-contract.md`.
   (`scripts/tasks.js`) is missing. Test files not in that list run as well.
 - No React renderer runs under `node:test`. Logic lives in pure modules with
   unit tests; the React-side rules (the console is the first view, the map a
-  tab, Cancel focused, no token or node configuration rendered, the identity
+  tab, the focus rules of a confirmation, no token or node configuration rendered, the identity
   reset wired) are pinned by reading the source in `tests/vector.wiring.test.ts`.
 - `tests/fixtures/provisional/` holds hand-written tool answers shaped by the
   contract; `tests/fixtures/defaults.json` is generated from the node's
