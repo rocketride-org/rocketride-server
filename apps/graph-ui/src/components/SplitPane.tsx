@@ -27,7 +27,8 @@
 // A WAI-ARIA window splitter: role="separator", horizontal, focusable, with the
 // editor's height as its value (graph/splitPane.ts). Tab reaches it; ArrowUp and
 // ArrowDown move it 24 px; Home hides the editor and End shows it again; a
-// double click hides or shows the editor.
+// double click hides or shows the editor. The surface keeps it mounted while the
+// editor is hidden, so the focus stays on it after Home.
 //
 // A pointer drag captures the pointer (setPointerCapture) and moves only the
 // divider's line while the button is down. The editor's new height is applied

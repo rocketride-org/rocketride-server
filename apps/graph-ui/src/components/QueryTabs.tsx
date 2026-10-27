@@ -31,6 +31,11 @@
 // its key), and "New query" opens a tab at the end. The strip is the left part
 // of the workbench's tab row; the shown tab's run bar takes the rest.
 //
+// The strip's size in that row is its content (every tab and New query), never
+// less: when the tabs and the run bar do not fit side by side, the run bar wraps
+// to a line of its own instead of squeezing the tabs out of sight. Only tabs
+// that do not fit the whole row scroll, and the shown tab is scrolled into view.
+//
 // Keys are the tab list's own onKeyDown: no document or window listener.
 // =============================================================================
 
@@ -83,7 +88,9 @@ export function panelElementId(prefix: string, id: string): string {
 }
 
 const styles = {
-	strip: { flex: '1 1 220px', minWidth: 160, display: 'flex', alignItems: 'flex-end', gap: 8, alignSelf: 'stretch' } as CSSProperties,
+	// Basis auto (its content): the row breaks before the run bar rather than shrink the tabs; minWidth 0 lets the tab
+	// list scroll only when the tabs alone are wider than the row.
+	strip: { flex: '1 1 auto', minWidth: 0, display: 'flex', alignItems: 'flex-end', gap: 8, alignSelf: 'stretch' } as CSSProperties,
 	list: { display: 'flex', alignItems: 'flex-end', gap: 2, minWidth: 0, overflowX: 'auto' } as CSSProperties,
 	tab: (selected: boolean): CSSProperties => ({
 		display: 'flex',
@@ -126,6 +133,10 @@ export const QueryTabs: React.FC<IQueryTabsProps> = ({ tabs, active, idPrefix, o
 		follow.current = false;
 		buttons.current.get(active)?.focus();
 	}, [active, tabs]);
+	// A tab opened or shown at the far end of a list that scrolls is brought into view.
+	useEffect(() => {
+		buttons.current.get(active)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+	}, [active, tabs.length]);
 	// A close confirmed in a dialog: the focus would fall to the page when the dialog goes, so the shown tab takes it.
 	useEffect(() => {
 		if (focusRequest > 0) buttons.current.get(active)?.focus();

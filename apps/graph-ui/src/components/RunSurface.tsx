@@ -72,7 +72,7 @@ import React, { useCallback, useEffect, useId, useMemo, useRef, useState, useSyn
 import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { Banner, Button, EmptyState, StatusBadge, ToggleGroup, isInVSCode } from 'shell';
-import { ExplorerToolError, clock, createGeneration, formatBatchOutcome, formatPriorStatements, formatRunLabel, useStatementRunner } from 'shared/explorer';
+import { ExplorerToolError, clock, createGeneration, formatBatchOutcome, formatPriorStatements, useStatementRunner } from 'shared/explorer';
 import type { IExplorerEndpoint, IRunTarget, IStatementRunBase } from 'shared/explorer';
 import StatementStrip from 'shared/explorer/components/StatementStrip';
 import { DRAFTS_PREF_KEY, TOOL, announcer } from '../adapters/explorer';
@@ -99,7 +99,7 @@ import { inspectorTextOfRow } from '../graph/rowInspect';
 import { EDITOR_HEIGHT_PREF_KEY, clampEditorHeight, splitToggled, storedEditorHeight } from '../graph/splitPane';
 import type { IEditorSplit } from '../graph/splitPane';
 import type { ReadQueryResult } from '../graph/types';
-import { AGE_AFFECTED_NOT_REPORTED, FULL_SCREEN_TEXT, NOTICE_HEADLINE_MAX, STOP_WAITING_NOTE, num, resultAnnouncement, resultMeta, resultNotes, splitNotice, truncationText } from '../graph/wording';
+import { AGE_AFFECTED_NOT_REPORTED, CHANGES_NOTE, FULL_SCREEN_TEXT, NOTICE_HEADLINE_MAX, STOP_WAITING_NOTE, changesText, graphRunLabel, num, resultAnnouncement, resultMeta, resultNotes, splitNotice, truncationText } from '../graph/wording';
 import type { IResultNote } from '../graph/wording';
 import { GraphFailureBanner } from './GraphFailureBanner';
 import { GraphView } from './GraphView';
@@ -457,7 +457,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 		summarize: ({ shown, runs }) => {
 			if (shown?.result) {
 				const s = summarizeResult(shown.result);
-				const affected = shown.outcome === 'affected' ? `${num(shown.affected ?? 0)} affected. ` : notReported ? `${AGE_AFFECTED_NOT_REPORTED}. ` : '';
+				const affected = shown.outcome === 'affected' ? `${changesText(shown.affected ?? 0)} (${CHANGES_NOTE}). ` : notReported ? `${AGE_AFFECTED_NOT_REPORTED}. ` : '';
 				const said = `${affected}${resultAnnouncement(shown.result.rows.length, s.nodeCount, s.relationshipCount, truncationText(shown.result))}`;
 				return runs.length > 1 ? `${formatBatchOutcome(runs, GRAPH_BATCH_WORDS)}. ${said}` : said;
 			}
@@ -762,7 +762,8 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 				</div>
 				{barHost === undefined && runBar}
 			</div>
-			{!split.collapsed && <SplitDivider split={{ height: editorHeight, collapsed: false }} available={available} onChange={changeSplit} label="Editor and results" controls={editorId} />}
+			{/* Mounted while the editor is hidden too, so Home keeps the focus here and End shows the editor again. */}
+			<SplitDivider split={{ height: editorHeight, collapsed: split.collapsed }} available={available} onChange={changeSplit} label="Editor and results" controls={editorId} />
 
 			{showNotices && (
 				<div style={styles.notices}>
@@ -771,7 +772,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 					{runner.refusal && <NoticeBanner key={runner.refusal} variant="warning" text={runner.refusal} />}
 					{runner.failure && <GraphFailureBanner failure={runner.failure} genericText="The node's message was not returned. The pipeline node's log has it." extra={runner.failure.notice.hint ? <div style={{ marginTop: 4 }}>{runner.failure.notice.hint}</div> : null} total={runner.runs.length} position={location ? { line: location.line, column: location.column } : null} onRunFrom={mode === 'read' ? runFrom : undefined} />}
 					{runner.abandonNotice && <NoticeBanner key={runner.abandonNotice} variant="warning" text={runner.abandonNotice} />}
-					{strip && <StatementStrip runs={runner.runs} selected={runner.selectedRun} onSelect={(i) => runner.setSelectedRun(i)} labelOf={(r) => formatRunLabel(r)} ariaLabel="Statements in the last run" />}
+					{strip && <StatementStrip runs={runner.runs} selected={runner.selectedRun} onSelect={(i) => runner.setSelectedRun(i)} labelOf={(r) => graphRunLabel(r)} ariaLabel="Statements in the last run" />}
 					{strip && !runner.running && <div style={styles.willRun}>{formatBatchOutcome(runner.runs, GRAPH_BATCH_WORDS)}</div>}
 				</div>
 			)}

@@ -16,7 +16,7 @@ import { GATE_BUSY_TEXT } from '../src/graph/requestGate';
 import { STILL_RUNNING_TEXT, affectedNotReported, historySummaryOf, limitPatch, runRefusal, settleRun, toHistoryEntry } from '../src/graph/runConfig';
 import type { IResultSummary } from '../src/graph/results';
 import type { GraphValue, ReadQueryResult } from '../src/graph/types';
-import { AGE_AFFECTED_NOT_REPORTED, FULL_SCREEN_TEXT, NOTICE_HEADLINE_MAX, resultMeta, resultNotes, splitNotice } from '../src/graph/wording';
+import { AGE_AFFECTED_NOT_REPORTED, CHANGES_NOTE, FULL_SCREEN_TEXT, NOTICE_HEADLINE_MAX, changesText, graphRunLabel, resultMeta, resultNotes, splitNotice } from '../src/graph/wording';
 import { node } from './support/builders';
 
 // A request left for the editor is taken from the host's slot once. De-duplicating it with a ref that starts at 0 on
@@ -79,7 +79,7 @@ test('the write console records no row limit: execute takes none, so none was se
 test('history keeps a write\'s affected count without a limit, and a read\'s rows with its limit', () => {
 	const write = historySummaryOf({ cypher: 'CREATE (:X)', verb: 'CREATE', outcome: 'affected', affected: 1, ms: 12.4, limitApplied: null }, 1_000);
 	assert.deepEqual(write, { cypher: 'CREATE (:X)', at: 988, ms: 12, outcome: 'affected', affected: 1, kind: 'CREATE' });
-	assert.equal(entrySummary(toHistoryEntry(write, 'w')), '1 affected');
+	assert.equal(entrySummary(toHistoryEntry(write, 'w')), '1 change');
 	const read = historySummaryOf({ cypher: 'MATCH (n) RETURN n', verb: 'MATCH', outcome: 'rows', result: answer([[1], [2]]), ms: 5, limitApplied: 1000 }, 1_000);
 	assert.deepEqual(read, { cypher: 'MATCH (n) RETURN n', at: 995, ms: 5, outcome: 'rows', rows: 2, limit: 1000, kind: 'MATCH' });
 	assert.equal(entrySummary(toHistoryEntry(read, 'r')), '2 rows (limit 1,000)');
@@ -91,8 +91,14 @@ test('history keeps a write\'s affected count without a limit, and a read\'s row
 	assert.equal(entrySummary(toHistoryEntry(unreported, 'u')), 'affected count not reported');
 });
 
-test('the result line of a write leads with the affected count', () => {
-	assert.equal(resultMeta({ outcome: 'affected', affected: 3, ms: 400 }, answer([])), '3 affected · 0 rows returned (limit 25,000) · 0.4 s round trip');
+// Live bug 7: Neo4j and FalkorDB report their change counters added up (a CREATE of one node with a label and one
+// property is 3), so "3 affected" read as 3 nodes. The count is said as changes, with what it adds up.
+test('the result line of a write leads with the changes the node counted, and says what they add up', () => {
+	assert.equal(resultMeta({ outcome: 'affected', affected: 3, ms: 400 }, answer([])), '3 changes (nodes, relationships, labels and properties counted together) · 0 rows returned (limit 25,000) · 0.4 s round trip');
+	assert.equal(CHANGES_NOTE, 'nodes, relationships, labels and properties counted together');
+	assert.equal(changesText(1), '1 change');
+	assert.equal(changesText(1200), '1,200 changes');
+	assert.doesNotMatch(resultMeta({ outcome: 'affected', affected: 3, ms: 400 }, answer([])), /affected/);
 	assert.equal(resultMeta({ outcome: 'rows', ms: 400 }, answer([[1]], { row_limit: 1000 })), '1 row returned (limit 1,000) · 0.4 s round trip');
 });
 
@@ -168,4 +174,13 @@ test('the full-screen announcement says when Escape leaves it, and that the insp
 	assert.equal(FULL_SCREEN_TEXT, 'Full screen; the inspector stays open. Escape leaves it once no menu or search is open and nothing is selected.');
 	assert.doesNotMatch(FULL_SCREEN_TEXT, /Esc to exit/);
 	assert.ok(FULL_SCREEN_TEXT.length <= NOTICE_HEADLINE_MAX);
+});
+
+// The statement strip's label: the shared one says "N affected"; the write console's says changes, the rest is shared.
+test('the statement strip labels a write\'s count as changes, and every other run as the shared label does', () => {
+	const base = { index: 1, verb: 'CREATE', kind: 'write' as const, ms: 12 };
+	assert.equal(graphRunLabel({ ...base, outcome: 'affected', affected: 3 }), '2 CREATE · 3 changes · round trip 0.012 s');
+	assert.equal(graphRunLabel({ ...base, outcome: 'affected', affected: 1, ms: undefined }), '2 CREATE · 1 change');
+	assert.equal(graphRunLabel({ ...base, outcome: 'rows', rowCount: 4 }), '2 CREATE · 4 rows · round trip 0.012 s');
+	assert.equal(graphRunLabel({ ...base, outcome: 'error' }), '2 CREATE · error · round trip 0.012 s');
 });

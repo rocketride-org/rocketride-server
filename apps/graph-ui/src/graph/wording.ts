@@ -41,6 +41,8 @@
 // exist"); "Stop waiting" says exactly what it does.
 // =============================================================================
 
+import { formatElapsed, formatRunLabel } from 'shared/explorer';
+import type { IStatementRunBase } from 'shared/explorer';
 import { INITIAL_NODES, MAX_NODES, MAX_RELATIONSHIPS } from './budgets';
 import type { IGraphModel } from './model';
 import type { IResultSummary } from './results';
@@ -98,17 +100,45 @@ export const FULL_SCREEN_TEXT = 'Full screen; the inspector stays open. Escape l
 export const AGE_AFFECTED_NOT_REPORTED = 'Affected count not reported by Apache AGE';
 
 /**
- * The line under a result: the affected count first when the write console reported one, then {@link rowsMeta}.
+ * What the write console's count adds up. Neo4j's and FalkorDB's nodes report their change counters summed (a CREATE
+ * of one node with a label and one property is 3), so the count is said as changes, never as nodes.
+ */
+export const CHANGES_NOTE = 'nodes, relationships, labels and properties counted together';
+
+/**
+ * A count of changes, in words.
  *
- * @param run - The run shown (its outcome, affected count and round trip).
+ * @param n - The node's count.
+ * @returns `1 change` or `3 changes`.
+ */
+export function changesText(n: number): string {
+	return `${num(n)} ${n === 1 ? 'change' : 'changes'}`;
+}
+
+/**
+ * The line under a result: the changes the write console's node counted first, when it reported them, then
+ * {@link rowsMeta}.
+ *
+ * @param run - The run shown (its outcome, count and round trip).
  * @param result - Its answer.
  * @param affectedNotReported - True for a write on Apache AGE (runConfig affectedNotReported): the line says so first.
- * @returns Text such as `3 affected · 0 rows returned (limit 25,000) · 0.4 s round trip`.
+ * @returns Text such as `3 changes (nodes, relationships, labels and properties counted together) · 0 rows returned (limit 25,000) · 0.4 s round trip`.
  */
 export function resultMeta(run: { outcome: string; affected?: number; ms?: number } | null, result: Pick<ReadQueryResult, 'rows' | 'row_limit' | 'truncated'>, affectedNotReported = false): string {
 	const rows = rowsMeta(result, run?.ms);
 	if (affectedNotReported) return `${AGE_AFFECTED_NOT_REPORTED} · ${rows}`;
-	return run?.outcome === 'affected' ? `${num(run.affected ?? 0)} affected · ${rows}` : rows;
+	return run?.outcome === 'affected' ? `${changesText(run.affected ?? 0)} (${CHANGES_NOTE}) · ${rows}` : rows;
+}
+
+/**
+ * A statement's label in the strip: the shared one, except that a write's count is said as changes.
+ *
+ * @param run - The run.
+ * @returns Text such as `2 CREATE · 3 changes · round trip 0.012 s`.
+ */
+export function graphRunLabel(run: IStatementRunBase): string {
+	if (run.outcome !== 'affected') return formatRunLabel(run);
+	return `${run.index + 1} ${run.verb} · ${changesText(run.affected ?? 0)}${run.ms === undefined ? '' : ` · ${formatElapsed(run.ms)}`}`;
 }
 
 // =============================================================================

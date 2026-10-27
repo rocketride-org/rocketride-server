@@ -178,6 +178,27 @@ test('a gate refusal is a warning with no pipeline hint and no History entry, an
 	assert.ok(/waiting \? 'Waiting for an earlier request to finish…'/.test(surface) && /title=\{waiting \? gateWaitingTitle\(mode === 'read' \? 'Run' : 'Execute'\) :/.test(surface) && /title=\{waiting \? gateWaitingTitle\(mode === 'read' \? 'Run all' : 'Execute all'\) :/.test(surface), 'Run says it is waiting, and why, naming its own button (Execute in the write console)');
 });
 
+// Live bug 1: with the strip's basis fixed at 220 px, a run bar that just fitted beside it squeezed the tabs, and the
+// tab list scrolled the new tab out of sight. The rule now: the strip is as wide as its tabs; when the tabs and the run
+// bar do not fit side by side, the run bar wraps to its own line; only tabs wider than the whole row scroll, and the
+// shown tab is scrolled into view.
+test('the tab row wraps the run bar before it hides a tab, and the shown tab is always in view', () => {
+	const tabs = code(read('components', 'QueryTabs.tsx'));
+	assert.ok(/strip: \{ flex: '1 1 auto', minWidth: 0,/.test(tabs), 'the strip\'s basis is its content: the row breaks before squeezing it');
+	assert.ok(/list: \{[^}]*overflowX: 'auto'/.test(tabs), 'tabs wider than the row scroll');
+	assert.ok(/buttons\.current\.get\(active\)\?\.scrollIntoView\?\.\(\{ block: 'nearest', inline: 'nearest' \}\);\s*\}, \[active, tabs\.length\]\);/.test(tabs), 'the shown tab is scrolled into view');
+	const workbench = code(read('views', 'WorkbenchView.tsx'));
+	assert.ok(/tabRow: \{[^}]*flexWrap: 'wrap'/.test(workbench), 'the row wraps');
+	assert.ok(/barHost: \{ flex: '0 1 auto', minWidth: 0, marginLeft: 'auto'/.test(workbench), 'the run bar takes its own line, right-aligned, when it wraps');
+});
+
+// Live bug 3: Home hid the editor and unmounted the divider, so the focus fell to the page and End did nothing.
+test('the divider stays mounted while the editor is hidden, so Home keeps the focus and End shows the editor again', () => {
+	const surface = code(read('components', 'RunSurface.tsx'));
+	assert.ok(/<SplitDivider split=\{\{ height: editorHeight, collapsed: split\.collapsed \}\}/.test(surface), 'it always renders, with the hidden state');
+	assert.doesNotMatch(surface, /!split\.collapsed && <SplitDivider/, 'never removed while hidden');
+});
+
 // DA-R2 N-1: full screen covers the document, so what it covers must not stay reachable by the keyboard or a screen
 // reader: the host hides its root (visibility keeps the layout) and the graph's area makes itself visible again.
 test('in full screen the covered document is hidden from the keyboard and screen readers, and its editor runs nothing', () => {
