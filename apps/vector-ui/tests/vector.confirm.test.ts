@@ -178,8 +178,8 @@ test('the announcement after a write names the document and the rows it moved or
 	assert.equal(removalSummary(one, kestrel, 'trash'), 'Moved C:/demo/field/kestrel_field_guide.md to the trash (12 chunks)');
 	assert.equal(removalSummary(one, kestrel, 'restore'), 'Restored C:/demo/field/kestrel_field_guide.md (12 chunks)');
 	const gone = { removed: [], notFound: ['k'], keptLive: [], removedChunks: 0, batchesRun: 1, batchesTotal: 1, error: null };
-	assert.equal(removalSummary(gone, [{ objectId: 'k', path: 'x.md' }], 'delete'), 'x.md was not stored any more; nothing was deleted');
-	assert.equal(removalSummary(gone, [{ objectId: 'k', path: 'x.md' }], 'trash'), 'x.md was not stored any more; nothing was moved to the trash');
+	assert.equal(removalSummary(gone, [{ objectId: 'k', path: 'x.md' }], 'delete'), 'x.md was already gone; nothing was deleted');
+	assert.equal(removalSummary(gone, [{ objectId: 'k', path: 'x.md' }], 'trash'), 'x.md was already gone; nothing was moved to the trash');
 	const many = {
 		removed: [
 			{ objectId: 'a', chunks: 1 },
@@ -192,8 +192,8 @@ test('the announcement after a write names the document and the rows it moved or
 		batchesTotal: 1,
 		error: null,
 	};
-	assert.equal(removalSummary(many, [], 'delete'), 'Deleted 2 documents permanently (3 chunks). 1 was not stored any more.');
-	assert.equal(removalSummary(many, [], 'restore'), 'Restored 2 documents (3 chunks). 1 was not stored any more.');
+	assert.equal(removalSummary(many, [], 'delete'), 'Deleted 2 documents permanently (3 chunks). 1 was already gone.');
+	assert.equal(removalSummary(many, [], 'restore'), 'Restored 2 documents (3 chunks). 1 was already gone.');
 	const emptied = { ...many, notFound: [], keptLive: ['p', 'q'] };
 	assert.equal(removalSummary(emptied, [], 'empty'), 'Emptied the trash: deleted 2 documents permanently (3 chunks). 2 were kept whole, because they still have chunks outside the trash: p, q.', 'named by objectId where no path is known');
 	assert.equal(removalSummary(emptied, [{ objectId: 'p', path: 'docs/p.md' }], 'empty'), 'Emptied the trash: deleted 2 documents permanently (3 chunks). 2 were kept whole, because they still have chunks outside the trash: docs/p.md, q.', 'by path where it is');

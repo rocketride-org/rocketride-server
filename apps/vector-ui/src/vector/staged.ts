@@ -35,6 +35,7 @@
 // =============================================================================
 
 import type { IRemoveTarget } from './confirm';
+import { formatCount } from './stats';
 
 /** The staged documents, by objectId, in the order they were staged. */
 export type IStagedSet = ReadonlyMap<string, IRemoveTarget>;
@@ -114,4 +115,30 @@ export function stagedSummary(set: IStagedSet): IStagedSummary {
 		else chunks += target.chunks;
 	}
 	return { documents: set.size, chunks: set.size > 0 && unknown === set.size ? null : chunks, unknown };
+}
+
+/**
+ * The staged documents' chunks in words, by the confirmation's rule: a sum only when every count is known (never an
+ * estimate), "at least" when some are missing.
+ *
+ * @param summary - The staged set's summary.
+ * @returns e.g. '14 chunks', 'at least 14 chunks; 2 documents not counted', 'chunk counts not reported'.
+ */
+export function stagedChunksWords(summary: IStagedSummary): string {
+	const chunks = summary.chunks;
+	if (chunks === null) return 'chunk counts not reported';
+	if (summary.unknown === 0) return `${formatCount(chunks)} ${chunks === 1 ? 'chunk' : 'chunks'}`;
+	return `at least ${formatCount(chunks)} ${chunks === 1 ? 'chunk' : 'chunks'}; ${formatCount(summary.unknown)} ${summary.unknown === 1 ? 'document' : 'documents'} not counted`;
+}
+
+/**
+ * The pending bar's sentence.
+ *
+ * @param summary - The staged set's summary.
+ * @returns e.g. '3 documents staged to move to the trash (14 chunks).', or '' with nothing staged.
+ */
+export function pendingText(summary: IStagedSummary): string {
+	const n = summary.documents;
+	if (n === 0) return '';
+	return `${formatCount(n)} ${n === 1 ? 'document' : 'documents'} staged to move to the trash (${stagedChunksWords(summary)}).`;
 }

@@ -106,11 +106,11 @@ test('the workbench renders its header and tab row, and on each tab only that ta
 	assert.ok(endpoint, 'the premise: a connection');
 	const parts: Record<WorkbenchTab, RegExp> = {
 		overview: /<section aria-label="Database summary"/,
-		documents: /aria-label="Documents or trash"[^]*?aria-pressed="true"[^>]*>Documents</,
+		documents: /role="tree" aria-label="Folders of the loaded documents"[^]*?role="grid" aria-label="Stored documents"/,
 		query: /aria-label="Chat" role="region"[^]*?data-component="SearchPanel"/,
 		map: /class="vector-map"/,
 		collection: /hnsw \(m 16, ef_construction 64\)/,
-		trash: /aria-label="Documents or trash"[^]*?aria-pressed="true"[^>]*>Trash/,
+		trash: /role="grid" aria-label="Documents in the trash"/,
 	};
 	for (const tab of Object.keys(parts) as WorkbenchTab[]) {
 		const html = render(env, endpoint, tab);

@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { IDocumentItem } from '../src/contract/types';
-import { buildGroups } from '../src/vector/documents';
+import { healthCell } from '../src/vector/documents';
 import { HEALTH_NOT_REPORTED, OVERSIZE_FACTOR, deletedFromTotals, documentHealth, healthSummary, medianChunks } from '../src/vector/health';
 import { readDocumentsPage, readStats } from '../src/vector/results';
 import { statsChips } from '../src/vector/stats';
@@ -116,37 +116,22 @@ test('medianChunks over the loaded rows (documents without a count left out); de
 	assert.equal(deletedFromTotals(10, 11), null, 'a store whose totals disagree is not trusted');
 });
 
-test('the directory lists a document with a defect under "Needs attention" (sorted by path); an oversize one keeps its folder, with the badge', () => {
+test('the Documents grid\'s Health column: a defect needs attention; an oversize document gets a note only once the median is settled', () => {
 	const rows = [doc('a', 'C:/demo/a.md'), doc('b', 'C:/demo/b.md', { deleted_chunks: 1, max_chunk_id: 4 }), doc('c', 'C:/demo/c.md', { has_first_chunk: false, max_chunk_id: 4 }), doc('m', 'C:/demo/big.pdf', { chunks: 96, max_chunk_id: 95 }), doc('d', 'C:/demo/d.md', { chunks: 2, max_chunk_id: 1 })];
-	const settled = buildGroups(rows, { medianChunks: 4 });
 	assert.deepEqual(
-		settled.map((g) => [g.kind, g.label, g.rows.map((r) => r.item.objectId)]),
+		rows.map((row) => [row.objectId, healthCell(row, 4).text, healthCell(row, 4).attention]),
 		[
-			['folder', 'C:/demo/', ['a', 'm', 'd']],
-			['attention', 'Needs attention (2)', ['b', 'c']],
+			['a', '', false],
+			['b', '1 deleted chunk', true],
+			['c', 'no first chunk', true],
+			['m', 'oversize', false],
+			['d', '', false],
 		]
 	);
 	assert.deepEqual(
-		settled.flatMap((g) => g.rows).map((r) => [r.name, r.flags, r.attention]),
-		[
-			['a.md', [], false],
-			['big.pdf', ['oversize'], false],
-			['d.md', [], false],
-			['C:/demo/b.md', ['1 deleted chunk'], true],
-			['C:/demo/c.md', ['no first chunk'], true],
-		]
-	);
-	const loading = buildGroups(rows, { medianChunks: null });
-	assert.deepEqual(
-		loading.map((g) => [g.kind, g.rows.map((r) => r.item.objectId)]),
-		settled.map((g) => [g.kind, g.rows.map((r) => r.item.objectId)]),
-		'with or without the median, no row moves: only the oversize badge waits for it'
-	);
-	assert.deepEqual(loading[0]?.rows[1]?.flags, []);
-	assert.deepEqual(
-		buildGroups(rows).map((g) => g.label),
-		['C:/demo/', 'Needs attention (2)'],
-		'without a median: the documents flagged by their own fields'
+		rows.map((row) => healthCell(row, null).text),
+		['', '1 deleted chunk', 'no first chunk', '', ''],
+		'without the median (still loading): the documents flagged by their own fields only'
 	);
 });
 

@@ -414,9 +414,9 @@ export function removalSummary(outcome: IRemovalOutcome, targets: ReadonlyArray<
 	if (action !== 'empty' && targets.length === 1 && outcome.removed.length <= 1 && !outcome.error) {
 		const path = targets[0].path || targets[0].objectId;
 		if (outcome.keptLive.length === 1) return `${path} was kept whole, because it still has chunks outside the trash; nothing was ${words.none}.`;
-		return outcome.removed.length === 1 ? `${words.done} ${path}${words.tail}${rows}` : `${path} was not stored any more; nothing was ${words.none}`;
+		return outcome.removed.length === 1 ? `${words.done} ${path}${words.tail}${rows}` : `${path} was already gone; nothing was ${words.none}`;
 	}
-	const gone = outcome.notFound.length === 0 ? '' : ` ${formatCount(outcome.notFound.length)} ${outcome.notFound.length === 1 ? 'was' : 'were'} not stored any more.`;
+	const gone = outcome.notFound.length === 0 ? '' : ` ${formatCount(outcome.notFound.length)} ${outcome.notFound.length === 1 ? 'was' : 'were'} already gone.`;
 	const removedRows = outcome.error && outcome.removedChunks === null ? '' : rows;
 	const what = `${words.done} ${formatCount(outcome.removed.length)} ${outcome.removed.length === 1 ? 'document' : 'documents'}${words.tail}${removedRows}.`;
 	return `${action === 'empty' ? `Emptied the trash: ${what}` : what}${gone}${kept}${stopped}`;
@@ -455,4 +455,19 @@ export function confirmationFor(pending: { action: 'trash' | 'delete' | 'empty';
 	if (pending.action === 'empty') return { kind: 'multi', content: emptyTrashConfirmation(pending.targets, ctx) };
 	if (pending.kind === 'single') return { kind: 'single', content: pending.action === 'trash' ? trashConfirmation(pending.targets[0], ctx) : removeConfirmation(pending.targets[0], ctx) };
 	return { kind: 'multi', content: pending.action === 'trash' ? multiTrashConfirmation(pending.targets, ctx) : multiRemoveConfirmation(pending.targets, ctx) };
+}
+
+/**
+ * A finished write's audit blocks in words, one line per batch (what the store recorded: the tool, the rows, who
+ * called; never content).
+ *
+ * @param audits - The batches' audit blocks.
+ * @returns The lines.
+ */
+export function auditLines(audits: readonly IWriteAudit[]): string[] {
+	return audits.map((audit, i) => {
+		const rows = audit.rows === null ? 'rows not counted' : `${formatCount(audit.rows)} ${audit.rows === 1 ? 'row' : 'rows'}`;
+		const prefix = audits.length > 1 ? `Batch ${i + 1}: ` : '';
+		return `${prefix}${audit.action ?? 'write'}, ${rows}, called by ${audit.caller ?? 'an unnamed caller'}`;
+	});
 }

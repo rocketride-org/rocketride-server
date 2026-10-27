@@ -218,7 +218,7 @@ describe('F14 - no window-wide overlay in a frame: confirmations and details are
 	it('no module a frame loads renders a Modal, a ConfirmDialog or a DetailPanel (rocket-ui keeps hidden documents mounted)', () => {
 		const files = reachable('VectorDevTool.tsx');
 		assert.ok(files.includes('components/InlineRemoveConfirm.tsx') && files.includes('components/ConnectionDetailsPanel.tsx'), 'the premise: the inline panels');
-		for (const forbidden of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/RemoveDialogHost.tsx']) assert.ok(!files.includes(forbidden), `a frame loads ${forbidden}`);
+		for (const forbidden of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/RemoveDialogHost.tsx']) assert.ok(!files.includes(forbidden) && !fs.existsSync(path.join(SRC, forbidden)), `${forbidden}: no modal confirmation is left`);
 		// The upload panel's replace confirmation is the one overlay a frame loads: the panel renders only while uploads
 		// are on, and the frame env switches them off for every connection (R11, devToolConsoleModel).
 		const uploads = 'ingest/ReplaceConfirmDialog.tsx';
@@ -228,16 +228,17 @@ describe('F14 - no window-wide overlay in a frame: confirmations and details are
 		assert.match(code(read('components/AddDocumentsAside.tsx')), /\{model\.ingest\.enabled \? <IngestPanel /, 'and the console renders that panel only while uploads are on');
 	});
 
-	it('the inline confirmation: the same words and typed rule, Cancel focused when it opens, Escape on its own keydown, Confirm unavailable (aria-disabled) until ready', () => {
+	it('the inline confirmation: the same words and typed rule, the first focus by the write\'s weight, Escape on its own keydown, Confirm unavailable (aria-disabled) until ready', () => {
 		const panel = code(read('components/InlineRemoveConfirm.tsx'));
 		assert.match(panel, /confirmationFor\(pending, removeContextFor\(entry\.ctx\.endpoint, probe\)\)/);
 		assert.match(panel, /const ready = confirmReady\(content\.typed, typed\);/);
 		assert.match(panel, /button\.textContent\?\.trim\(\) === content\.cancelLabel/);
-		assert.match(panel, /onKeyDown=\{\(event\) => \{\s*if \(event\.key === 'Escape'\) \{\s*event\.preventDefault\(\);\s*onCancel\(\);/);
-		assert.match(panel, /aria-disabled=\{!ready\} onClick=\{\(\) => \{ if \(ready\) onConfirm\(\); \}\}/);
+		assert.match(panel, /onKeyDown=\{\(event\) => \{\s*if \(event\.defaultPrevented\) return;\s*if \(event\.key === 'Escape'\) \{\s*event\.preventDefault\(\);\s*onCancel\(\);/, 'Escape: the innermost handler acts');
+		assert.match(panel, /aria-disabled=\{!ready\} onClick=\{onConfirm\}/);
+		assert.match(panel, /const onConfirm = \(\): void => \{\s*if \(!ready\) return;/, 'Confirm does nothing until the typed rule is met');
 		assert.match(panel, /entry\.controller\.confirmRemove\(\)/);
 		assert.match(panel, /entry\.controller\.cancelRemove\(\)/);
-		for (const file of ['components/InlineRemoveConfirm.tsx', 'components/ConnectionDetailsPanel.tsx']) {
+		for (const file of ['components/InlineRemoveConfirm.tsx', 'components/ConnectionDetailsPanel.tsx', 'components/PendingBar.tsx', 'components/DocumentDrawer.tsx', 'components/focusTargets.ts']) {
 			const text = code(read(file));
 			assert.doesNotMatch(text, /(window|document)\.addEventListener/, `${file} listens on the page`);
 			assert.doesNotMatch(text, /style=\{\{/, `${file} keeps its styles in \`styles\``);

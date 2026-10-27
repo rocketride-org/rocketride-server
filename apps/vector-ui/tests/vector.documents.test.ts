@@ -11,9 +11,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { IDocumentItem } from '../src/contract/types';
 import { DIRECTORY_AUTO_ROWS, DIRECTORY_LOAD_MORE } from '../src/vector/budgets';
-import { buildGroups, directoryHeading, filterItems, filterSummary, pagerApplyPage, pagerBegin, pagerFail, pagerFooter, pagerInit, pagerLoadMore, pagerPause, pagerProgressText, pagerResume, pagerWantsPage, splitPath } from '../src/vector/documents';
+import { DOCUMENTS_LAYOUT, chunkPreview, directoryHeading, documentTooltip, documentsLayout, healthCell, listCountText, noDocumentsText, similarDocuments, similarFailureText, similarK, sortNote, stagedRows, filterItems, filterSummary, pagerApplyPage, pagerBegin, pagerFail, pagerFooter, pagerInit, pagerLoadMore, pagerPause, pagerProgressText, pagerResume, pagerWantsPage, splitPath } from '../src/vector/documents';
 import { readDocumentsPage } from '../src/vector/results';
 import type { IDocumentsPageView } from '../src/vector/results';
+import { HEALTH_NOT_REPORTED } from '../src/vector/health';
 import { CAVEAT_SENTENCES, DOCUMENTS_REPEATED_TEXT } from '../src/vector/wording';
 import { fixture } from './support/fixtures';
 
@@ -27,9 +28,9 @@ function page(items: IDocumentItem[], over: Partial<IDocumentsPageView> = {}): I
 	return { items, nextCursor: 'next', total: null, countsExact: true, distinct: true, sorted: false, caveats: [], warnings: [], pagingUnsupported: false, ...over };
 }
 
-/** Rows in display order: every group's rows, groups in order. */
+/** Rows in the order the Documents grid lists them without a column sort: the listing's own. */
 function displayed(rows: IDocumentItem[]): string[] {
-	return buildGroups(rows).flatMap((g) => g.rows.map((r) => r.item.objectId));
+	return rows.map((r) => r.objectId);
 }
 
 test('paths: forward and back slashes, drive letters, network shares, POSIX roots; a bare name is Uploaded', () => {
@@ -43,64 +44,35 @@ test('paths: forward and back slashes, drive letters, network shares, POSIX root
 	assert.deepEqual(splitPath(''), { folder: 'Uploaded', name: '(no path)', uploaded: true });
 });
 
-test('groups: one per folder, then Uploaded, then Needs attention; duplicate paths kept with a short objectId', () => {
+test('the listing\'s order: folders, then bare names, then documents without a first chunk; two documents with one path stay two rows', () => {
 	const items = readDocumentsPage(fixture('list_documents_windows_and_posix_paths')).items;
 	items.push(doc('orphan-1', 'ops/old_memo.txt', { has_first_chunk: false }));
 	const state = pagerApplyPage(pagerBegin(pagerInit()), page(items, { nextCursor: null, total: items.length }));
-	const groups = buildGroups(state.rows);
 	assert.deepEqual(
-		groups.map((g) => [g.kind, g.label, g.rows.length]),
-		[
-			['folder', '/home/demo/notes/', 1],
-			['folder', '\\\\fileserver\\share\\policies\\', 1],
-			['folder', 'C:/demo/handbooks/', 1],
-			['folder', 'C:\\Users\\demo\\Documents\\', 1],
-			['folder', 'D:/archive/2024/', 1],
-			['folder', 'Uploaded/', 1],
-			['uploaded', 'Uploaded', 2],
-			['attention', 'Needs attention (1)', 1],
-		]
+		state.rows.map((r) => splitPath(r.path).folder),
+		['/home/demo/notes/', '\\\\fileserver\\share\\policies\\', 'C:/demo/handbooks/', 'C:\\Users\\demo\\Documents\\', 'D:/archive/2024/', 'Uploaded/', 'Uploaded', 'Uploaded', 'ops/']
 	);
-	const reports = groups.find((g) => g.kind === 'uploaded')!.rows;
-	assert.deepEqual(
-		reports.map((r) => [r.name, r.duplicate]),
-		[
-			['report.pdf', true],
-			['report.pdf', true],
-		]
-	);
-	assert.notEqual(reports[0].shortId, reports[1].shortId, 'two documents with one path stay two rows, told apart by their objectId');
-	assert.equal(reports[0].shortId.length, 8);
-	const orphan = groups.find((g) => g.kind === 'attention')!.rows[0];
-	assert.equal(orphan.name, 'ops/old_memo.txt', 'an orphan shows its whole path');
-	assert.deepEqual(orphan.flags, ['no first chunk'], 'and says why it needs attention');
-	assert.deepEqual(reports[0].flags, [], 'a healthy document has no badge');
+	const reports = state.rows.filter((r) => r.path === 'report.pdf');
+	assert.equal(reports.length, 2, 'two documents with one path stay two rows (the grid adds a short objectId to each name)');
+	assert.notEqual(reports[0]!.objectId.slice(0, 8), reports[1]!.objectId.slice(0, 8));
+	const orphan = state.rows[state.rows.length - 1]!;
+	assert.deepEqual(healthCell(orphan, null), { text: 'no first chunk', title: 'Chunk 0 is not stored: the document was partly removed or partly ingested.', attention: true }, 'its Health cell says why it needs attention');
+	assert.equal(healthCell(reports[0]!, null).attention, false);
 });
 
-test('"oversize" is a badge in its folder, never a reason to leave it: a folder of manuals among one-chunk memos stays listed', () => {
+test('the Health cell: a defect needs attention; "oversize" is a note that waits for the median; "—" where the store reports nothing to check', () => {
 	// 400 one-chunk memos and 20 manuals of 20 chunks: the median is 1, so every manual is more than 10 times it.
-	const rows: IDocumentItem[] = [];
-	for (let i = 0; i < 400; i += 1) rows.push(doc(`m${i}`, `C:/corp/memos/memo_${i}.txt`, { chunks: 1, max_chunk_id: 0, deleted_chunks: 0 }));
-	for (let i = 0; i < 20; i += 1) rows.push(doc(`h${i}`, `C:/corp/handbooks/manual_${i}.pdf`, { chunks: 20, max_chunk_id: 19, deleted_chunks: 0 }));
-	const groups = buildGroups(rows, { medianChunks: 1 });
-	assert.deepEqual(
-		groups.map((g) => [g.kind, g.label, g.rows.length]),
-		[
-			['folder', 'C:/corp/memos/', 400],
-			['folder', 'C:/corp/handbooks/', 20],
-		]
-	);
-	const manual = groups[1]?.rows[0];
-	assert.equal(manual?.name, 'manual_0.pdf', 'listed by its name in its folder');
-	assert.deepEqual(manual?.flags, ['oversize'], 'with the badge');
-	assert.equal(manual?.attention, false);
-	// A defect still moves the document, with every badge it has.
-	const broken = buildGroups([...rows, doc('x', 'C:/corp/handbooks/broken.pdf', { chunks: 19, max_chunk_id: 19, has_first_chunk: false, deleted_chunks: 0 })], { medianChunks: 1 });
-	const attention = broken.find((g) => g.kind === 'attention');
-	assert.deepEqual(
-		attention?.rows.map((r) => [r.name, r.flags, r.attention]),
-		[['C:/corp/handbooks/broken.pdf', ['no first chunk', 'oversize'], true]]
-	);
+	const memo = doc('m0', 'C:/corp/memos/memo_0.txt', { chunks: 1, max_chunk_id: 0, deleted_chunks: 0 });
+	const manual = doc('h0', 'C:/corp/handbooks/manual_0.pdf', { chunks: 20, max_chunk_id: 19, deleted_chunks: 0 });
+	assert.deepEqual(healthCell(memo, 1), { text: '', title: 'No problem found in what this store reports.', attention: false });
+	assert.deepEqual(healthCell(manual, 1), { text: 'oversize', title: '20 chunks: more than 10 times the median of 1 per document loaded.', attention: false }, 'oversize alone is a note');
+	assert.equal(healthCell(manual, null).text, '', 'no median yet: oversize is not checked, nothing else is wrong');
+	const broken = doc('x', 'C:/corp/handbooks/broken.pdf', { chunks: 19, max_chunk_id: 19, has_first_chunk: false, deleted_chunks: 0 });
+	assert.deepEqual([healthCell(broken, 1).text, healthCell(broken, 1).attention], ['no first chunk, oversize', true]);
+	const legacy = doc('q', 'C:/q.md');
+	assert.deepEqual(healthCell(legacy, 3), { text: '—', title: HEALTH_NOT_REPORTED, attention: false }, 'a store that reports no chunk ids or deleted chunks: not checked, never "no problem"');
+	assert.equal(documentTooltip(broken, healthCell(broken, 1)), 'C:/corp/handbooks/broken.pdf · PDF · needs attention: no first chunk, oversize · objectId x');
+	assert.equal(documentTooltip(manual, healthCell(manual, 1)), 'C:/corp/handbooks/manual_0.pdf · PDF · oversize · objectId h0');
 });
 
 test('the filter is client-side over what is loaded, case-insensitive, and says how much is loaded while loading', () => {
@@ -253,17 +225,19 @@ test('auto-pager: a repeated page ends the listing instead of asking for it agai
 	assert.equal(asks, 2);
 });
 
-test('a store that cannot page ends the listing with its caveat; one that lists in storage order is sorted here', () => {
+test('a store that cannot page ends the listing with its caveat; one that lists in storage order is sorted here, and the footer says nothing once all is loaded', () => {
 	const stuck = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage(fixture('list_documents_paging_unsupported')));
 	assert.equal(stuck.status, 'unsupported');
 	assert.equal(pagerWantsPage(stuck), false);
 	assert.deepEqual(pagerFooter(stuck), { text: 'Limit reached at 5 documents; more may exist', loadMore: false, caveat: CAVEAT_SENTENCES.documents_paging_unsupported, retry: false });
 	const unsorted = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage(fixture('list_documents_unsorted')));
 	assert.equal(unsorted.status, 'done');
-	assert.deepEqual(pagerFooter(unsorted), { text: 'sorted here; this store lists documents in storage order', loadMore: false, caveat: null, retry: false });
+	assert.equal(pagerFooter(unsorted), null, 'complete: the grid sorts everything, so there is nothing to say');
+	assert.equal(sortNote(unsorted, true), null, 'and no "sorted within" line');
 	assert.deepEqual(
-		buildGroups(unsorted.rows).map((g) => g.label),
-		['C:/demo/field/', 'C:/demo/handbooks/', 'Uploaded', 'Needs attention (1)']
+		unsorted.rows.map((r) => r.path),
+		['C:/demo/field/kestrel_field_guide.md', 'C:/demo/handbooks/falcon_handbook.md', 'report.pdf', 'ops/old_memo.txt'],
+		'sorted here: folders, a bare name, then the document without its first chunk'
 	);
 });
 
@@ -280,22 +254,68 @@ test("the directory's export: the documents columns, each row the directory's ow
 	assert.equal(documentExportRows([doc('a', 'a.md')]).rows[0]?.deleted_chunks, null, 'not reported: empty, not 0');
 });
 
-test('the Trash view groups its documents by folder: their deleted chunks are why they are listed, not a defect', () => {
-	const trashed = (objectId: string, path: string): IDocumentItem => ({ objectId, path, chunks: 3, has_first_chunk: true, tables: 0, deleted: true, nodeId: null, size: null, modifyTime: null, ingestedAt: null, pointId: null, deleted_chunks: 3 });
-	const rows = [trashed('a', 'C:/demo/field/gull.md'), trashed('b', 'C:/demo/field/heron.md'), { ...trashed('c', 'C:/demo/notes.md'), has_first_chunk: false }];
-	const active = buildGroups(rows);
-	assert.ok(
-		active.some((g) => g.kind === 'attention' && g.rows.length === 3),
-		'in the Documents view, deleted chunks need attention'
-	);
-	const bin = buildGroups(rows, { medianChunks: null, trash: true });
-	assert.deepEqual(
-		bin.map((g) => [g.kind, g.rows.map((r) => r.item.objectId)]),
-		[
-			['folder', ['a', 'b']],
-			['attention', ['c']],
-		],
-		'only a real defect (no first chunk) still needs attention'
-	);
-	assert.deepEqual(bin[0]!.rows[0]!.flags, [], 'and no row carries the deleted-chunks badge');
+
+test('the "sorted within" line: only while the listing is incomplete and the rows are not in the store\'s own path order', () => {
+	const rows = [doc('a', 'C:/a.md'), doc('b', 'C:/b.md')];
+	const loading = { status: 'loading' as const, storeSorted: true, rows };
+	assert.equal(sortNote(loading, false), null, 'a sorting store (pgvector) listing in its path order');
+	assert.equal(sortNote(loading, true), 'Sorted within the 2 loaded documents; more may exist.', 'a column sort over part of the documents');
+	assert.equal(sortNote({ ...loading, storeSorted: false }, false), 'Sorted within the 2 loaded documents; more may exist.', 'a store that lists in storage order (Qdrant)');
+	for (const status of ['capped', 'paused', 'stalled', 'unsupported', 'error'] as const) assert.ok(sortNote({ ...loading, status }, true), status);
+	assert.equal(sortNote({ ...loading, status: 'done' }, true), null, 'complete: the sort covers everything');
+	assert.equal(sortNote({ ...loading, rows: [] }, true), null);
+});
+
+test('the counts say what is loaded and never a total the store did not give', () => {
+	const rows = [doc('a', 'a'), doc('b', 'b'), doc('c', 'c')];
+	assert.equal(listCountText(3, { status: 'done', rows }), '3 documents');
+	assert.equal(listCountText(1, { status: 'done', rows }), '1 of 3 documents');
+	assert.equal(listCountText(3, { status: 'loading', rows }), '3 loaded');
+	assert.equal(listCountText(2, { status: 'capped', rows }), '2 of 3 loaded');
+	assert.equal(noDocumentsText(true), 'No documents yet. Add documents, in the header, adds the first one.');
+	assert.equal(noDocumentsText(false), 'No documents yet.', 'a mount that cannot add says nothing it cannot do');
+});
+
+test('the layout keeps the grid at least 600 px inside its chrome: the rail goes first when the drawer opens, then the drawer narrows, then it moves under the grid', () => {
+	const { rail, railGap, drawer, drawerMin, drawerGap, gridMin, chrome } = DOCUMENTS_LAYOUT;
+	const withRail = rail + railGap;
+	const grid = gridMin + chrome;
+	assert.deepEqual(documentsLayout(1400, { drawer: false, forceRail: false }), { rail: true, railHidden: false, drawer: 0, stacked: false });
+	assert.deepEqual(documentsLayout(withRail + drawer + drawerGap + grid, { drawer: true, forceRail: false }), { rail: true, railHidden: false, drawer, stacked: false });
+	assert.deepEqual(documentsLayout(1100, { drawer: true, forceRail: false }), { rail: false, railHidden: true, drawer, stacked: false }, 'VS Code at 1440 with its sidebar open');
+	assert.deepEqual(documentsLayout(grid + drawerMin + drawerGap + 20, { drawer: true, forceRail: false }), { rail: false, railHidden: true, drawer: drawerMin + 20, stacked: false });
+	assert.deepEqual(documentsLayout(700, { drawer: true, forceRail: false }), { rail: false, railHidden: true, drawer: 0, stacked: true });
+	assert.deepEqual(documentsLayout(1200, { drawer: true, forceRail: true }), { rail: true, railHidden: false, drawer: 1200 - withRail - grid - drawerGap, stacked: false }, 'the rail asked back: the drawer narrows');
+	assert.deepEqual(documentsLayout(1100, { drawer: true, forceRail: true }), { rail: true, railHidden: false, drawer: 0, stacked: true }, 'too narrow for both beside the grid: the drawer goes under it');
+	for (const width of [700, 900, 1000, 1100, 1180, 1300, 1440]) {
+		const layout = documentsLayout(width, { drawer: true, forceRail: false });
+		const left = width - (layout.rail ? withRail : 0) - (layout.drawer > 0 ? layout.drawer + drawerGap : 0) - chrome;
+		assert.ok(layout.stacked || left >= gridMin, `${width}: the grid keeps ${gridMin} px (${left})`);
+	}
+	assert.deepEqual(documentsLayout(700, { drawer: false, forceRail: false }), { rail: false, railHidden: true, drawer: 0, stacked: false });
+});
+
+test('Find similar: k covers the document\'s own chunks within the node\'s limit; its own chunks are left out; the nearest document first; BUSY says so', async () => {
+	assert.equal(similarK(50, 5, 3), 17);
+	assert.equal(similarK(50, null, 8), 20, 'no count from the store: the chunks read');
+	assert.equal(similarK(50, 400, 100), 50, 'never above neighbors_k_max');
+	const item = (id: string, chunk: number, sim: number, path = `${id}.md`): import('../src/contract/types').INeighborItem => ({ key: [id, chunk], sim, score: sim, below_floor: false, path, chunkId: chunk, preview: '' });
+	assert.deepEqual(similarDocuments([item('self', 1, 0.99), item('b', 0, 0.8), item('c', 2, 0.9), item('b', 4, 0.85), item('self', 2, 0.95)], 'self'), [
+		{ objectId: 'c', path: 'c.md', best: 0.9, chunks: 1 },
+		{ objectId: 'b', path: 'b.md', best: 0.85, chunks: 2 },
+	]);
+	assert.deepEqual(similarDocuments([item('self', 1, 0.99)], 'self'), [], 'only its own chunks: no other document');
+	const { ExplorerToolError } = await import('shared/explorer');
+	assert.equal(similarFailureText(new ExplorerToolError({ kind: 'store', tool: 'neighbors', code: 'BUSY', message: 'busy' })), 'The store is answering another neighbours or recommend request; try again in a moment.');
+	assert.equal(similarFailureText(new ExplorerToolError({ kind: 'stale', tool: 'neighbors', message: 'stale' })), null, 'an answer no longer wanted says nothing');
+});
+
+test('the review lists every staged document: its loaded row, else what staging kept', () => {
+	const loaded = new Map([['a', doc('a', 'C:/a.md', { chunks: 7 })]]);
+	const { rows, unloaded } = stagedRows([{ objectId: 'a', path: 'C:/a.md', chunks: 7 }, { objectId: 'm', path: 'C:/map/m.md', chunks: null }], loaded);
+	assert.equal(rows[0], loaded.get('a'), 'the loaded row itself');
+	assert.deepEqual([rows[1]?.objectId, rows[1]?.path, rows[1]?.chunks, rows[1]?.size], ['m', 'C:/map/m.md', null, null], 'a document staged on the map: its path, nothing invented');
+	assert.deepEqual([...unloaded], ['m']);
+	assert.equal(chunkPreview('  a\n b  '), 'a b');
+	assert.ok(chunkPreview('word '.repeat(100)).endsWith('…'));
 });

@@ -45,7 +45,10 @@
 // before it, else the grid itself: never to the page. A listing that starts
 // over (after a write or a Refresh) has no row until its first page: with
 // `hold` the grid keeps its last rows until then, so it neither flashes
-// empty nor drops the focus.
+// empty nor drops the focus. While a confirmation is about to take rows
+// away (`leaving`), the row after them is rendered and marked
+// `data-return-focus`: the workbench puts the focus there when the
+// confirmation closes after Confirm (views/ConsoleView.tsx returnFocus).
 //
 // Every rule (the sort, the keys, the window, where the focus goes) is in
 // vector/grid.ts. The grid reads the rows it is given and never writes to
@@ -56,7 +59,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ForwardedRef, ReactElement, ReactNode, Ref } from 'react';
 import { ACCENT_TOKEN, selectedRowBackground } from '../vector/colors';
-import { gridKey, gridTemplate, gridWindow, nextFocusAfterRemoval, nextSort, scrollToShow, sortRows } from '../vector/grid';
+import { gridKey, gridTemplate, gridWindow, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../vector/grid';
 import type { IGridSort, IGridSortable } from '../vector/grid';
 import { FOCUS_RING } from '../styles';
 
@@ -129,6 +132,12 @@ export interface IVectorGridProps<R> {
 	 * focused row stays where it is until the new rows arrive.
 	 */
 	hold?: boolean;
+	/**
+	 * The rows a write is about to take away (an open, or just confirmed, confirmation): the row after them (else
+	 * before them) is rendered and marked `data-return-focus`, where the workbench puts the focus when the
+	 * confirmation closes.
+	 */
+	leaving?: ReadonlySet<string> | null;
 }
 
 /** What a parent can ask of the grid. */
@@ -137,6 +146,10 @@ export interface IVectorGridHandle {
 	focusRow(id: string): boolean;
 	/** Focus the grid itself (no row listed, or nothing better). */
 	focusGrid(): void;
+	/** Focus the row in the tab order, else the grid itself. */
+	focusStop(): void;
+	/** Bring a row into view and make it the one in the tab order, without moving the focus; false when not listed. */
+	showRow(id: string): boolean;
 	/** The ids in the order they are shown. */
 	shownIds(): readonly string[];
 }
@@ -195,7 +208,7 @@ function minimumWidth(columns: ReadonlyArray<{ width: number | 'flex'; minWidth?
  * @returns The grid element.
  */
 function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVectorGridHandle>): ReactElement {
-	const { label, rowId, columns, sort, onSort, selectedId, onActivate, onToggle, activateOnClick = false, rowHeight = GRID_ROW_HEIGHT, empty, rowTitle, surface = 'var(--rr-bg-paper)', hold = false } = props;
+	const { label, rowId, columns, sort, onSort, selectedId, onActivate, onToggle, activateOnClick = false, rowHeight = GRID_ROW_HEIGHT, empty, rowTitle, surface = 'var(--rr-bg-paper)', hold = false, leaving = null } = props;
 	// While held, the rows of the last render that was not.
 	const lastRows = useRef(props.rows);
 	if (!hold) lastRows.current = props.rows;
@@ -224,6 +237,9 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 	const stop = activeIndex >= 0 ? activeIndex : count > 0 ? 0 : -1;
 	const bodyHeight = Math.max(rowHeight, viewHeight - GRID_HEADER_HEIGHT);
 	const view = gridWindow({ scrollTop, height: bodyHeight, rowHeight, count, overscan: OVERSCAN, focused: stop });
+	// The row the focus goes to when a confirmation for `leaving` closes (rendered wherever the list is scrolled).
+	const returnId = useMemo(() => (leaving === null || leaving.size === 0 ? null : nextRowAfter(ids, leaving)), [leaving, ids]);
+	const returnIndex = returnId === null ? -1 : (indexOf.get(returnId) ?? -1);
 
 	// The rows' viewport (never a 0x0 box: a hidden tab keeps the last size).
 	useEffect(() => {
@@ -290,15 +306,45 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 			focusGrid(): void {
 				grid.current?.focus({ preventScroll: true });
 			},
+			focusStop(): void {
+				const id = stop >= 0 ? ids[stop] : undefined;
+				if (id === undefined) {
+					grid.current?.focus({ preventScroll: true });
+					return;
+				}
+				show(stop);
+				setActiveId(id);
+				pending.current = id;
+				setTick((n) => n + 1);
+			},
+			showRow(id: string): boolean {
+				const index = indexOf.get(id);
+				if (index === undefined) return false;
+				show(index);
+				setActiveId(id);
+				return true;
+			},
 			shownIds: () => ids,
 		}),
-		[indexOf, ids, show]
+		[indexOf, ids, show, stop]
 	);
 
 	const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
 		if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
 		const row = rowOf(event.target, grid.current);
-		if (row === null) return;
+		// The grid itself has the focus (no row was left to take it): a move key enters at the row in the tab order.
+		if (row === null) {
+			if (event.target !== grid.current || stop < 0) return;
+			const entered = gridKey(event.key, { index: stop, count, page: Math.floor(bodyHeight / rowHeight) });
+			if (entered === null || entered.kind !== 'move') return;
+			event.preventDefault();
+			const to = event.key === 'Home' || event.key === 'End' ? entered.index : stop;
+			show(to);
+			setActiveId(ids[to] as string);
+			pending.current = ids[to] as string;
+			setTick((n) => n + 1);
+			return;
+		}
 		const id = row.dataset.rowId ?? '';
 		const index = indexOf.get(id);
 		if (index === undefined) return;
@@ -327,6 +373,7 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 	const indices: number[] = [];
 	for (let i = view.first; i < view.last; i++) indices.push(i);
 	if (view.extra !== null) indices.push(view.extra);
+	if (returnIndex >= 0 && !indices.includes(returnIndex)) indices.push(returnIndex);
 	for (const index of indices) {
 		const item = shown[index] as R;
 		const id = ids[index] as string;
@@ -338,6 +385,7 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 				data-grid-row=""
 				data-row-id={id}
 				aria-rowindex={index + 2}
+				data-return-focus={returnId === id ? '' : undefined}
 				aria-selected={selectedId === undefined ? undefined : selectedId === id}
 				tabIndex={inTabOrder ? 0 : -1}
 				title={rowTitle?.(item)}

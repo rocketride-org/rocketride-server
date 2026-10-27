@@ -186,8 +186,8 @@ describe('R11 inputs - what a dev-tool mount cannot serve is switched off in the
 });
 
 describe('R14 - every view reaches the engine through the env', () => {
-	it('the console, the landing and the remove dialog host read useVectorEnv(), never the shell connection, the store singleton or the app\'s documents', () => {
-		for (const file of ['views/ConsoleView.tsx', 'views/ConnectionsView.tsx', 'components/RemoveDialogHost.tsx']) {
+	it('the console and the landing read useVectorEnv(), never the shell connection, the store singleton or the app\'s documents', () => {
+		for (const file of ['views/ConsoleView.tsx', 'views/ConnectionsView.tsx']) {
 			const text = code(file);
 			assert.doesNotMatch(text, /useShellConnection|vectorEndpoints|useActiveConnection\(/, `${file} still reaches past the env`);
 			assert.match(text, /useVectorEnv\(\)/, `${file} reads the env`);

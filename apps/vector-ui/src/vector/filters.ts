@@ -27,7 +27,7 @@
 // The ScopeBar's conditions (folder is under, file type is, ingested after or
 // before, chunks between, has tables, missing first chunk) plus its path box.
 // With at least one condition they make the console's SCOPE: the documents
-// the directory lists and, when their toggles are on, the only documents the
+// the Documents tab lists and, when their toggles are on, the only documents the
 // map samples, search searches and the chat asks about.
 //
 // THE STORE AND HERE. The listing asks the store for the conditions and the
@@ -42,7 +42,7 @@
 // about what it applies and nothing is counted: the scope is loading
 // (`'pending'`). A count matched here over a listing that stopped short
 // (capped, stalled) is only of the rows loaded, and the words say that too
-// ("N of M loaded match", "at least"). The directory's "Documents in scope"
+// ("N of M loaded match", "at least"). The Documents tab's "Documents in scope"
 // export holds the scope's own loaded documents, whether or not the list is
 // filtered by it (`directoryExportItems`).
 // Without a condition the path box is not a scope and is never sent: it
@@ -929,7 +929,7 @@ export const NO_MATCH_SCOPE = 'No document matches these conditions, so the map,
 export const SCOPE_WAITING_TEXT = "Waiting for the scope's documents; the map, search and chat are not scoped yet.";
 
 /** Why they are not scoped after the scope's first page failed. */
-export const SCOPE_FAILED_TEXT = "The scope's documents did not load; Retry the directory. The map, search and chat are not scoped.";
+export const SCOPE_FAILED_TEXT = "The scope's documents did not load; Retry under the Documents list. The map, search and chat are not scoped.";
 
 /** How far a listing is, in words: '500 of 600 loaded', '500 loaded'. */
 function loadedWords(loaded: number, total: number | null): string {
@@ -978,7 +978,7 @@ export function scopePartialText(status: IPagerState['status'], loaded: number, 
 		case 'stalled':
 			return `Loading stopped at ${n} documents, ${NOT_ALL_KNOWN}`;
 		case 'error':
-			return `Loading stopped at ${n} documents, ${NOT_ALL_KNOWN} Retry the directory to include them.`;
+			return `Loading stopped at ${n} documents, ${NOT_ALL_KNOWN} Retry under the Documents list to include them.`;
 		default:
 			return `Only ${n} documents are loaded, ${NOT_ALL_KNOWN}`;
 	}

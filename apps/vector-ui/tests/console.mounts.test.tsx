@@ -60,7 +60,7 @@ const exportMenuPath = require.resolve('../src/components/ExportMenu');
 require.cache[exportMenuPath] = { id: exportMenuPath, filename: exportMenuPath, loaded: true, exports: { __esModule: true, default: ExportMenuStandIn, ExportMenu: ExportMenuStandIn } } as never;
 
 const { createSelectionStore } = require('../src/contract/bridge') as typeof import('../src/contract/bridge');
-const { DocumentDirectory } = require('../src/components/DocumentDirectory') as typeof import('../src/components/DocumentDirectory');
+const { renderDocumentsTab } = require('./support/panels') as typeof import('./support/panels');
 const { StatsAsOf, StatsStrip } = require('../src/components/StatsStrip') as typeof import('../src/components/StatsStrip');
 const { StatsCharts } = require('../src/components/StatsCharts') as typeof import('../src/components/StatsCharts');
 const { HealthPanel } = require('../src/components/HealthPanel') as typeof import('../src/components/HealthPanel');
@@ -88,9 +88,9 @@ function mounted(html: string, name: string): number {
 	return at;
 }
 
-test('the directory: the ScopeBar is its filter row, with the path box first, and nothing else between the title and the list', () => {
+test('the Documents tab: the ScopeBar is its filter row, with the path box first, above the grid', () => {
 	const pager = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage(fixture('list_documents_page1')));
-	const html = renderToStaticMarkup(<DocumentDirectory pager={pager} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} />);
+	const html = renderDocumentsTab({ directory: pager });
 	const at = mounted(html, 'ScopeBar');
 	const bar = html.slice(at, html.indexOf('</div>', at));
 	assert.match(bar, /^<div[^>]*>(<div[^>]*>)?<input type="search" placeholder="Filter paths…" aria-label="Filter documents by path"/, 'the path box is its first field');
@@ -249,27 +249,26 @@ test('the health panel: checking, the problems with their numbers, what this sto
 	assert.match(renderToStaticMarkup(<HealthPanel item={qdrant} canProbe probe={{ status: 'running' }} />), /disabled=""[^>]*>Counting…<\/button>/);
 });
 
-test('the directory lists flagged documents under "Needs attention" with their badges; the strip says how many', () => {
+test('the Documents grid says a flagged document needs attention in its Health column and tooltip; the strip says how many', () => {
 	const rows: IDocumentItem[] = [...readDocumentsPage(fixture('list_documents_page1')).items.map((r) => ({ ...r, max_chunk_id: (r.chunks ?? 1) - 1, deleted_chunks: 0 })), { ...(readDocumentsPage(fixture('list_documents_filter_partial')).items[0] as IDocumentItem), objectId: 'legacy-falcon' }];
 	const pager = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage({ success: true, items: rows, next_cursor: null, total: rows.length, counts_exact: true, distinct: true, sorted: true, caveats: [] }));
-	const html = renderToStaticMarkup(<DocumentDirectory pager={pager} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} />);
-	assert.match(html, /aria-label="Folder Needs attention \(1\)"/);
-	assert.match(html, /<span style="[^"]*" data-flag="">1 deleted chunk<\/span>/);
+	const html = renderDocumentsTab({ directory: pager });
+	assert.match(html, /data-row-id="legacy-falcon"[^]*?role="gridcell"[^>]*><span title="1 soft-deleted chunk of this document is still stored\.">1 deleted chunk<\/span>/);
 	assert.match(html, /title="[^"]*needs attention: 1 deleted chunk · objectId legacy-falcon"/);
 	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
 	const strip = renderToStaticMarkup(<StatsStrip stats={stats} dialect={dialect} readOnly={false} health={healthSummary(rows, { medianChunks: 9, complete: true })} />);
 	assert.match(strip, /data-chip="attention">1 needs attention</);
 });
 
-test('an oversize document stays in its folder with a muted "oversize" badge; its tooltip does not say it needs attention', () => {
+test('an oversize document keeps its folder and says "oversize" in its Health column; its tooltip does not say it needs attention', () => {
 	const memo = (i: number): IDocumentItem => ({ objectId: `m${i}`, path: `C:/corp/memos/memo_${i}.txt`, chunks: 1, has_first_chunk: true, tables: 0, deleted: false, nodeId: null, size: null, modifyTime: null, ingestedAt: null, pointId: null, max_chunk_id: 0, deleted_chunks: 0 });
 	const manual: IDocumentItem = { ...memo(0), objectId: 'manual-1', path: 'C:/corp/handbooks/manual.pdf', chunks: 40, max_chunk_id: 39 };
 	const rows = [...Array.from({ length: 20 }, (_, i) => memo(i)), manual];
 	const pager = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage({ success: true, items: rows, next_cursor: null, total: rows.length, counts_exact: true, distinct: true, sorted: true, caveats: [] }));
-	const html = renderToStaticMarkup(<DocumentDirectory pager={pager} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} />);
-	assert.match(html, /aria-label="Folder C:\/corp\/handbooks\/"/);
-	assert.doesNotMatch(html, /Needs attention/);
-	assert.match(html, /<span style="[^"]*var\(--rr-border-input\)[^"]*" data-flag="">oversize<\/span>/);
+	const html = renderDocumentsTab({ directory: pager });
+	assert.match(html, /data-row-id="manual-1"[^]*?C:\/corp\/handbooks\/<\/div>/, 'listed in its folder');
+	assert.doesNotMatch(html, /needs attention/);
+	assert.match(html, /data-row-id="manual-1"[^]*?<span title="40 chunks: more than 10 times the median of 1 per document loaded\.">oversize<\/span>/);
 	assert.match(html, /title="C:\/corp\/handbooks\/manual\.pdf · [^"]*· oversize · objectId manual-1"/);
 });
 
@@ -280,21 +279,22 @@ function scopeOf(filter: IScopeState['filter'], documents = true): IScopeState {
 
 test("a scope's listing before the store answers: the status line says it is loading, never what the store cannot filter; a failed first page leaves the error and Retry to the footer", () => {
 	const filter = { path_prefix: 'C:/demo/greenhouse/', path_contains: 'orc' };
-	const directory = (pager: ReturnType<typeof pagerInit>): string => renderToStaticMarkup(<DocumentDirectory pager={pager} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} scope={scopeOf(filter)} onScope={noop} />);
+	const directory = (pager: ReturnType<typeof pagerInit>): string => renderDocumentsTab({ directory: pager, scope: scopeOf(filter) });
 	const loading = pagerBegin(pagerInit(), filter);
 	const html = directory(loading);
-	assert.match(html, /role="status">Loading the documents in scope…<\/div>/);
+	assert.match(html, /role="status"[^>]*>Loading the documents in scope…<\/div>/);
 	assert.doesNotMatch(html, /cannot filter|0 of 0 loaded/);
 	const failed = directory(pagerFail(loading, { headline: 'The store did not answer in time.' }));
 	assert.doesNotMatch(failed, /role="status">[^<]*(match|cannot filter|Loading)/, 'no status line about the scope');
 	assert.match(failed, /<span>Loading stopped at 0 documents: The store did not answer in time\.<\/span><button[^>]*>Retry<\/button>/);
+	assert.match(failed, /Store unreachable: The store did not answer in time\./, 'the grid says why it is empty');
 });
 
-test("the directory's export with the Documents toggle off: 'Documents in scope' holds only the scope's documents, its count in the label", () => {
+test("the Documents tab's export with the Documents toggle off: 'Documents in scope' holds only the scope's documents, its count in the label", () => {
 	const pager = pagerApplyPage(pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage(fixture('list_documents_page1'))), readDocumentsPage(fixture('list_documents_page2_last')));
 	const prefix = 'C:/demo/greenhouse/';
-	const html = renderToStaticMarkup(<DocumentDirectory pager={pager} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} scope={scopeOf({ path_prefix: prefix }, false)} onScope={noop} />);
-	assert.match(html, /role="status">Not applied to this list\. Scope: 2 of 7 loaded match \(filtered here\)<\/div>/);
+	const html = renderDocumentsTab({ directory: pager, scope: scopeOf({ path_prefix: prefix }, false) });
+	assert.match(html, /role="status"[^>]*>Not applied to this list\. Scope: 2 of 7 loaded match \(filtered here\)<\/div>/);
 	assert.equal(exportItems.find((i) => i.id === 'directory-loaded')?.label, 'Loaded documents (7)', 'the list on screen');
 	const scoped = exportItems.find((i) => i.id === 'directory-scope');
 	assert.ok(scoped);
@@ -307,29 +307,3 @@ test("the directory's export with the Documents toggle off: 'Documents in scope'
 	);
 });
 
-test('the directory: Documents and Trash (n); a document moves to the trash, a trashed one restores or deletes permanently, and the trash empties', () => {
-	const off = { enabled: false, reason: 'Removing documents is turned off on this store node (allow_writes).' };
-	const active = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage(fixture('list_documents_page1')));
-	const listed = readDocumentsPage(fixture('list_documents_page1'));
-	const trash = pagerApplyPage(pagerBegin(pagerInit()), { ...listed, items: listed.items.map((item) => ({ ...item, deleted: true })) });
-	const first = listed.items[0]!.path;
-	const html = renderToStaticMarkup(<DocumentDirectory pager={active} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} view="active" onView={noop} trashCount={3} onRestore={noop} onDelete={noop} onEmptyTrash={noop} />);
-	assert.match(html, /<button[^>]*aria-pressed="true"[^>]*>Documents<\/button>/);
-	assert.match(html, /<button[^>]*aria-pressed="false"[^>]*>Trash \(3\)<\/button>/, 'the Trash badge is the store count');
-	assert.ok(html.includes(`aria-label="Move ${first} to the trash"`), 'a document moves to the trash');
-	assert.doesNotMatch(html, /Delete permanently|Empty trash|aria-label="Restore /, 'nothing permanent in the Documents view');
-	const bin = renderToStaticMarkup(<DocumentDirectory pager={trash} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} view="trash" onView={noop} trashCount={null} onRestore={noop} onDelete={noop} onEmptyTrash={noop} />);
-	assert.match(bin, /<button[^>]*aria-pressed="true"[^>]*>Trash<\/button>/, 'no count where the store cannot count');
-	assert.ok(bin.includes(`aria-label="Restore ${first}"`));
-	assert.ok(bin.includes(`aria-label="Delete ${first} permanently"`));
-	assert.doesNotMatch(bin, /to the trash"/, 'a trashed document is not moved again');
-	assert.match(bin, /<button[^>]*>Empty trash<\/button>/);
-	const empty = renderToStaticMarkup(<DocumentDirectory pager={pagerApplyPage(pagerBegin(pagerInit()), { ...listed, items: [], nextCursor: null, total: 0 })} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} view="trash" onView={noop} trashCount={0} onRestore={noop} onDelete={noop} onEmptyTrash={noop} />);
-	assert.match(empty, /The trash is empty\./);
-	assert.match(empty, /<button[^>]*disabled=""[^>]*>Empty trash<\/button>/, 'nothing to empty');
-	const readOnly = renderToStaticMarkup(<DocumentDirectory pager={trash} selectedId={null} writes={off} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} view="trash" onView={noop} trashCount={7} onRestore={noop} onDelete={noop} onEmptyTrash={noop} />);
-	assert.match(readOnly, /<button[^>]*disabled=""[^>]*>Empty trash<\/button>/);
-	assert.match(readOnly, new RegExp(`aria-label="Restore ${first.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}"[^>]*disabled=""|disabled=""[^>]*aria-label="Restore ${first.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}"`), 'writes off: Restore is disabled with the reason');
-	const plain = renderToStaticMarkup(<DocumentDirectory pager={active} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} />);
-	assert.doesNotMatch(plain, />Trash/, 'a host without the trash shows no switch');
-});
