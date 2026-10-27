@@ -137,9 +137,11 @@ Rules the tests pin:
   and the drawer's sample chunks are per-connection state registered with the
   connection caches (or held by the connection's entry) and cleared with them.
 - **The bottom line is one fixed height.** The workbench ends in one line of the
-  pending bar's height (`PENDING_BAR_HEIGHT`): the pending bar, or a write's
-  result with its audit behind "Write details", or nothing (`bottomSlot` in
-  `vector/workbench.ts`). What appears after a press never moves a row above it.
+  pending bar's height (`PENDING_BAR_HEIGHT`, 32 px): the pending bar, or a write's
+  result with its sentence and audit behind "Write details", or nothing
+  (`bottomSlot` in `vector/workbench.ts`: a success holds the line for
+  `RESULT_FIRST_MS` while documents are staged, a failure or partial result until
+  the staged set changes or Show pending). What appears after a press never moves a row above it.
 - **The grids are hand-windowed.** `VectorGrid` (with `vector/grid.ts`) is a
   keyboard grid with its own sorting, windowing and focus rules, not the shell's
   `DataGrid`, so column resize and reorder do not exist; the Documents, Trash

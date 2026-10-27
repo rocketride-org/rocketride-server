@@ -135,9 +135,14 @@ tabs, and one panel per tab.
 - **Bottom line.** Under the panels, one line of a fixed height holds what comes
   and goes after a press, so nothing above it moves: the pending bar while
   documents are staged, otherwise the result of the last write (announced as a
-  status, as an alert when it failed) with **Write details**, a disclosure of the
-  store's audit of each batch. A result that lands while documents are staged
-  shows first, for a few seconds, before the bar returns.
+  status, as an alert when it failed), or nothing. A finished write's line is cut
+  to one line and has **Write details** beside it, a popup that opens above the
+  line and stays inside the window, with the whole result sentence and then the
+  store's audit of each batch; Escape, a press outside it or a resize closes it.
+  A result that lands while documents are staged shows first: a success for 6
+  seconds, a failure or a write that did not do all it was asked (documents kept
+  whole, or already gone) until the staged set changes or you press **Show
+  pending**. It is never swapped out while the focus or the pointer is in it.
 - **Removals are confirmed inline.** Applying staged documents, deleting them
   permanently and emptying the trash ask in a panel under the banners, in the
   app and in the dev tool alike; no window opens over the page for them. See

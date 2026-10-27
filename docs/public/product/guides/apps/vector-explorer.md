@@ -232,9 +232,14 @@ values".
 Under the panels, one line of a fixed height holds what comes and goes after a
 press, so nothing above it moves. While documents are staged it is the pending
 bar; otherwise it is the result of the last write, announced as a status (as an
-alert when the write failed), with **Write details**, a disclosure of the store's
-audit of each batch. A result that lands while documents are staged shows first,
-for a few seconds, before the bar returns.
+alert when the write failed), or nothing. A finished write's line is cut to one
+line and has **Write details** beside it, a popup that opens above the line and
+stays inside the window, with the whole result sentence and then the store's
+audit of each batch; Escape, a press outside it or a resize closes it. A result
+that lands while documents are staged shows first: a success for 6 seconds, a
+failure or a write that did not do all it was asked (documents kept whole, or
+already gone) until the staged set changes or you press **Show pending**. It is
+never swapped out while the focus or the pointer is in it.
 
 Every removal is confirmed in a panel inside the console or the document that
 asked, under the banners, in the app and in the dev tool alike; no window opens
