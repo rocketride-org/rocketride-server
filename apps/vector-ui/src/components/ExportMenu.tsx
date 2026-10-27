@@ -424,7 +424,7 @@ export function ExportMenu(props: ExportMenuProps): React.ReactElement {
 	);
 
 	return (
-		<span ref={root} role="group" aria-label={label} data-component="ExportMenu" style={S.root}>
+		<span ref={root} role="group" aria-label={label} data-component="ExportMenu" data-export-busy={busy ? '' : undefined} style={S.root}>
 			<button
 				ref={button}
 				type="button"

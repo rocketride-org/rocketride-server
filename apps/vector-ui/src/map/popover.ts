@@ -235,3 +235,19 @@ export function toolbarOverflow(input: { available: number; widths: ReadonlyArra
 	for (let moved = 0; moved < input.movable.length; moved += 1) if (rowWidth(moved) <= input.available) return moved;
 	return input.movable.length;
 }
+
+/**
+ * Where the focus goes when the toolbar's items move (a change of `toolbarOverflow`'s count). An item moving into a
+ * closed More while it has the focus leaves it on More's button; an item coming back to the row, which had the
+ * focus in More (More's button holds it while More closes), takes it there again. Otherwise the toolbar's focus
+ * hold applies (focusHold).
+ *
+ * @param input - The count before and after, the movable keys, the row item that has the focus (or null), whether
+ *   More's button has it, and the item that last had it inside More.
+ * @returns 'more', 'item' (the item from More, now on the row) or 'none'.
+ */
+export function focusAfterMove(input: { from: number; to: number; movable: readonly string[]; focused: string | null; onMore: boolean; lastInMore: string | null }): 'more' | 'item' | 'none' {
+	if (input.to > input.from) return input.focused !== null && input.movable.slice(input.from, input.to).includes(input.focused) ? 'more' : 'none';
+	if (input.to < input.from) return input.onMore && input.lastInMore !== null && input.movable.slice(input.to, input.from).includes(input.lastInMore) ? 'item' : 'none';
+	return 'none';
+}
