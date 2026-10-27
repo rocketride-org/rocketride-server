@@ -56,18 +56,17 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn } from 'child_process';
 import AdmZip from 'adm-zip';
 import ignore from 'ignore';
 import type { Ignore } from 'ignore';
 import { registerAppPack } from '../client/app-pack-registry.js';
 import { renderTemplate, TEMPLATE_NAMES } from '../app-scaffold/index.js';
 import type { TemplateName } from '../app-scaffold/index.js';
-import { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, saveAppListing } from './marker.js';
+import { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, readProjectId, saveAppListing } from './marker.js';
 import { appIconDataUri, MAX_ICON_BYTES, MAX_README_IMAGE_BYTES, probeAppFolder, scanAppMarkers } from './scan.js';
 import { ensureDependencyWiring, ensureWorkspaceFile, ensureWorkspaceGitignore, extractInstallCause, isTransientLockError, runRootInstall, vendorPlatformPackages } from './vendor.js';
 
-export { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, saveAppListing } from './marker.js';
+export { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, readProjectId, saveAppListing } from './marker.js';
 export type { AppListing } from './marker.js';
 export { appIconDataUri, MAX_ICON_BYTES, MAX_README_IMAGE_BYTES, probeAppFolder, scanAppMarkers } from './scan.js';
 export type { ScannedApp } from './scan.js';
@@ -925,30 +924,17 @@ export async function createAppWorkspace(workspaceRoot: string, slug: string, op
 	let installed = false;
 	if (options.install !== false) {
 		progress('pnpm install --prefer-offline');
-		installed = await new Promise<boolean>((resolve) => {
-			// Single command string when a shell is involved: passing an args
-			// array with shell:true concatenates unescaped (Node DEP0190).
-			// stdio:'ignore' because nobody reads these pipes — a full pipe
-			// buffer would block pnpm forever and the timer below would kill
-			// an install that was in fact succeeding.
-			const proc = process.platform === 'win32'
-				? spawn('pnpm install --prefer-offline', { cwd: wsAbs, shell: true, stdio: 'ignore', env: { ...process.env, NO_COLOR: '1' } })
-				: spawn('pnpm', ['install', '--prefer-offline'], { cwd: wsAbs, stdio: 'ignore', env: { ...process.env, NO_COLOR: '1' } });
-			const timer = setTimeout(() => {
-				proc.kill();
-				resolve(false);
-			}, 300_000);
-			proc.on('error', () => {
-				clearTimeout(timer);
-				progress('pnpm not found — install pnpm (npm install -g pnpm) and run pnpm install at the workspace root');
-				resolve(false);
-			});
-			proc.on('close', (code) => {
-				clearTimeout(timer);
-				if (code !== 0) progress(`pnpm install exited ${code} — run it manually at the workspace root`);
-				resolve(code === 0);
-			});
-		});
+		// The shared root install: its timeout fells the whole process tree
+		// (taskkill /T on Windows, where killing the shell wrapper alone
+		// leaves pnpm running and holding locks)
+		try {
+			await runRootInstall(wsAbs);
+			installed = true;
+		} catch (err) {
+			progress((err as NodeJS.ErrnoException).code === 'ENOENT'
+				? 'pnpm not found — install pnpm (npm install -g pnpm) and run pnpm install at the workspace root'
+				: `${err instanceof Error ? err.message : String(err)} — run pnpm install manually at the workspace root`);
+		}
 	}
 
 	progress(`created ${appId} at ${folderRel} (${files.length} files)`);
@@ -979,18 +965,20 @@ function resolveAppRoot(workspaceRoot: string, appRoot: string): { wsAbs: string
 }
 
 /**
- * Ensures the working-copy projectId of the app at `appRoot` — the
- * workspace-relative entry point `deploy.addApp()` uses so every deploy,
- * from any host, carries `metadata.projectId` provenance.
+ * Reads the working-copy projectId of the app at `appRoot` without writing
+ * — the workspace-relative entry point `deploy.addApp()` uses to forward
+ * `metadata.projectId` provenance. Deploys never stamp: the id is written
+ * at creation (`createAppWorkspace`) and by the editor, so a CI checkout
+ * or a read-only tree deploys as-is.
  *
  * @param workspaceRoot - The workspace the app folder is resolved against.
  * @param appRoot - The app folder: absolute, or relative to workspaceRoot.
- * @returns The projectId now recorded in the appManifest.
+ * @returns The projectId, or null when the working copy has none.
  * @throws Error when the folder is missing, outside the workspace, or not
  *   an app (no appManifest.id).
  */
-export function ensureProjectIdAt(workspaceRoot: string, appRoot: string): string {
-	return ensureProjectId(resolveAppRoot(workspaceRoot, appRoot).appAbs);
+export function readProjectIdAt(workspaceRoot: string, appRoot: string): string | null {
+	return readProjectId(resolveAppRoot(workspaceRoot, appRoot).appAbs);
 }
 
 // Arm the client's registry so bundled hosts (which cannot dynamically
@@ -1012,7 +1000,8 @@ registerAppPack({
 	markerPathOf,
 	ensureAppTrigger,
 	ensureProjectId,
-	ensureProjectIdAt,
+	readProjectId,
+	readProjectIdAt,
 	readAppListing,
 	saveAppListing,
 	probeAppFolder,

@@ -34,7 +34,7 @@ import os
 
 from rocketride_common.provision import to_http_base
 
-from ..utils.common import connect_client, run_cli_command
+from ..utils.common import connect_client, disconnect_all, run_cli_command
 from ..utils.env import NO_DEPLOY_TARGET_MESSAGE
 from ..utils.output import Output
 
@@ -69,12 +69,17 @@ async def resolve_create_developer_id(args, out: Output) -> str:
     if not args.apikey:
         return fallback('no account credentials (ROCKETRIDE_APIKEY) to read a developer id from')
 
-    # step: the developer id rides the login result — one connect, no extra call
+    # step: the developer id rides the login result — one connect, no extra
+    # call, closed before the scaffold: create_app_workspace is sync, so an
+    # open socket would starve through the install and die before exit
     try:
         client = await connect_client(args.uri, args.apikey)
+        account_info = client.get_account_info() or {}
     except Exception as err:  # noqa: BLE001 — any connect failure falls back
         return fallback(f'could not read the developer id from {args.uri} ({err})')
-    organization = (client.get_account_info() or {}).get('organization') or {}
+    finally:
+        await disconnect_all()
+    organization = account_info.get('organization') or {}
     developer_id = organization.get('developerId')
     if not developer_id:
         return fallback('the connected account has no registered developer id')

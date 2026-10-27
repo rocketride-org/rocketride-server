@@ -33,7 +33,7 @@
  */
 
 import { Command } from 'commander';
-import { addConnectionOptions, addDeployConnectionOptions, connectClient, runCliCommand } from '../common';
+import { addConnectionOptions, addDeployConnectionOptions, connectClient, disconnectAll, runCliCommand } from '../common';
 import type { ConnectionOptions } from '../common';
 import { NO_DEPLOY_TARGET_MESSAGE } from '../env';
 import type { Output } from '../output';
@@ -75,12 +75,15 @@ async function resolveCreateDeveloperId(options: AppCreateOptions, out: Output):
 	// step: no key = no account to ask
 	if (!options.apikey) return fallback('no account credentials (ROCKETRIDE_APIKEY) to read a developer id from');
 
-	// step: the developer id rides the auth response — one connect, no extra call
+	// step: the developer id rides the auth response — one connect, no extra
+	// call, closed before the scaffold so no idle socket outlives the read
 	let developerId: string | null;
 	try {
 		developerId = resolveDeveloperId(await connectClient(options));
 	} catch (err) {
 		return fallback(`could not read the developer id from ${options.uri} (${err instanceof Error ? err.message : String(err)})`);
+	} finally {
+		await disconnectAll();
 	}
 	if (!developerId) return fallback('the connected account has no registered developer id');
 	return developerId;

@@ -359,7 +359,7 @@ by hand.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | `string` | required | Stable unique identity, `<developerId>.<name>` (e.g. `acme.brandy`). The prefix must be your org's claimed namespace to deploy or publish. Renaming the id makes it a different app. |
-| `projectId` | `string` | auto | Working-copy GUID the App Builder manages — tells one checkout apart from another; rides deploys only as provenance. Leave it alone. |
+| `projectId` | `string` | auto | Working-copy GUID stamped when the app is created (New App wizard, `rocketride app create`, `createApp`/`create_app`) or first opened in the App Builder — tells one checkout apart from another. Deploys forward it as provenance and never write it. Leave it alone. |
 | `publisher` | `string` | — | Publisher display name in the app store. |
 | `name` | `string` | required | Display name (app switcher, store tile). |
 | `description` | `string` | — | Short description for the store listing. |

@@ -22,6 +22,7 @@
 
 """Regression tests for the scaffolded rsbuild config (#2455)."""
 
+import json
 import os
 import re
 import tempfile
@@ -66,3 +67,12 @@ class TestCreateAppWorkspaceFolder(unittest.TestCase):
             self.assertEqual(created['appId'], 'local.clock')
             self.assertTrue(os.path.isfile(os.path.join(ws, 'apps', 'clock-ui', 'clock.rrapp')))
             self.assertFalse(os.path.exists(os.path.join(ws, 'apps', 'clock')))
+
+    def test_stamps_a_working_copy_project_id_at_creation(self) -> None:
+        """Like the TypeScript scaffold, the appManifest carries a projectId from creation."""
+        with tempfile.TemporaryDirectory() as ws:
+            create_app_workspace(ws, 'clock', install=False)
+
+            with open(os.path.join(ws, 'apps', 'clock-ui', 'package.json'), encoding='utf-8') as f:
+                pkg = json.load(f)
+            self.assertRegex(pkg['appManifest']['projectId'], r'^[0-9a-f-]{36}$')
