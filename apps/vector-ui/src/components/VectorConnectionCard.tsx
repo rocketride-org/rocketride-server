@@ -84,7 +84,7 @@ export function VectorConnectionCard({ endpoint, probe, onOpen }: IVectorConnect
 	);
 	const view = vectorCardView(endpoint, probe, stats);
 	const sources = sourcesSentence(view);
-	const describedBy = `card-sources-${endpoint.nodeId}`;
+	const describedBy = `card-sources-${endpoint.key}`;
 	return (
 		<button type="button" data-card={endpoint.nodeId} style={local.card} title={`${view.title}\n${view.description}\n${sources}`} aria-describedby={describedBy} onClick={() => onOpen(endpoint)} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')}>
 			<span style={local.top}>

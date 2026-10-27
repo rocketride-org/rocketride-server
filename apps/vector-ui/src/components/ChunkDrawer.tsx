@@ -184,6 +184,12 @@ export function ChunkDrawer({ objectId, path, chunk, caller, store, documentChun
 							<dd style={{ margin: 0 }}>{chunk.chunkId}</dd>
 							<dt style={{ fontWeight: 600 }}>Chars</dt>
 							<dd style={{ margin: 0 }}>{formatCount(chunk.length)}</dd>
+							{chunk.isTable && (
+								<>
+									<dt style={{ fontWeight: 600 }}>tableId</dt>
+									<dd style={{ margin: 0 }}>{chunk.tableId}</dd>
+								</>
+							)}
 							{chunk.pointId !== null && (
 								<>
 									<dt style={{ fontWeight: 600 }}>pointId</dt>

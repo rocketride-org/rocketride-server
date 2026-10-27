@@ -87,7 +87,19 @@ interface ICached {
 }
 
 const cache = new Map<string, ICached>();
-connectionCaches.register('sample chunks', () => cache.clear(), (key) => cache.delete(key));
+/** Bumped whenever the cache is cleared: a read that began before cannot put its answer back. */
+let generation = 0;
+connectionCaches.register(
+	'sample chunks',
+	() => {
+		generation += 1;
+		cache.clear();
+	},
+	(key) => {
+		generation += 1;
+		cache.delete(key);
+	}
+);
 
 /**
  * The kept sample of a connection, when no write has happened since it was read.
@@ -116,6 +128,7 @@ export function cachedSample(key: string, writes: number): ISampleChunks | null 
  * @returns The sample, or null when the store lists no document.
  */
 export async function loadSampleChunks(caller: IVectorCaller, nodeId: string, key: string, writes: number): Promise<ISampleChunks | null> {
+	const started = generation;
 	const page = await fetchDocumentsPage(caller, nodeId, { cursor: null, limit: 1 });
 	const first = page.items[0];
 	let sample: ISampleChunks | null = null;
@@ -123,6 +136,7 @@ export async function loadSampleChunks(caller: IVectorCaller, nodeId: string, ke
 		const chunks = await fetchChunks(caller, nodeId, { objectId: first.objectId, afterChunk: -1, limit: SAMPLE_CHUNKS, deleted: 'active' });
 		sample = { path: first.path, objectId: first.objectId, chunks: chunks.items.slice(0, SAMPLE_CHUNKS).map((c) => ({ chunkId: c.chunkId, snippet: snippetOf(c.content) })) };
 	}
-	cache.set(key, { writes, sample });
+	// A reset while the two reads ran (a new identity): the answer is for the old one and is not kept.
+	if (started === generation) cache.set(key, { writes, sample });
 	return sample;
 }

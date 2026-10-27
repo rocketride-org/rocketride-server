@@ -49,15 +49,16 @@ export const CHUNKS_PER_DOCUMENT = 20;
  * @param caller - The channel to the store.
  * @param nodeId - The store node.
  * @param rows - The loaded documents.
+ * @param writes - The connection's write count now (kept with the estimate).
  * @returns The estimate (document fields over `rows`, chunk fields over the chunks read).
  * @throws The first failed read's error: nothing is kept from a sample that did not finish.
  */
-export async function readFieldsSample(caller: IVectorCaller, nodeId: string, rows: readonly IDocumentItem[]): Promise<IFieldsEstimate> {
+export async function readFieldsSample(caller: IVectorCaller, nodeId: string, rows: readonly IDocumentItem[], writes = 0): Promise<IFieldsEstimate> {
 	const picked = sampleDocuments(rows, SAMPLE_DOCUMENTS);
 	const chunks: IChunkItem[] = [];
 	for (const row of picked) {
 		const page = await fetchChunks(caller, nodeId, { objectId: row.objectId, afterChunk: -1, limit: CHUNKS_PER_DOCUMENT, deleted: 'active' });
 		chunks.push(...page.items);
 	}
-	return { rows: mergeFields(documentFields(rows), chunkFields(chunks)), chunksRead: chunks.length, documentsRead: picked.length, at: Date.now() };
+	return { rows: mergeFields(documentFields(rows), chunkFields(chunks)), chunksRead: chunks.length, documentsRead: picked.length, at: Date.now(), writes };
 }

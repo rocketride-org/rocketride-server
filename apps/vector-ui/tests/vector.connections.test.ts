@@ -16,7 +16,8 @@ import { makeVectorEndpointStore } from '../src/adapters/explorer';
 import { NOT_GROUPED_NOTE, collectionView, drawerKeyAfter, drawerView, landingView, roleLine, testResultText, vectorCardView } from '../src/vector/connections';
 import { buildConsoleModel, consoleNodes, writesDuringRemoval } from '../src/vector/consoleModel';
 import { providerTitle } from '../src/vector/support';
-import { readStats } from '../src/vector/results';
+import { readDialect, readStats } from '../src/vector/results';
+import { collectionMissing } from '../src/vector/stats';
 import { BUSY, CODE_SENTENCES, EMPTY } from '../src/vector/wording';
 import { fixture } from './support/fixtures';
 
@@ -274,6 +275,19 @@ test('the card: fresh stats override a dialect that still says the collection is
 	assert.deepEqual(labels(readStats({ ...fixture('stats_pgvector'), documents: 0, chunks: 0 })), [], "the strip's rule: stats that say the collection exists win, even with nothing in it");
 	assert.deepEqual(labels(readStats({ ...fixture('stats_pgvector'), collection_exists: false, documents: null, chunks: null })), ['Empty collection']);
 	assert.deepEqual(labels(readStats({ ...fixture('stats_pgvector'), documents: 4, chunks: 12 })), []);
+});
+
+test('the card and the strip share one rule: stats say missing while the dialect says it exists, and the reverse', async () => {
+	const [exists] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_pgvector')));
+	const [missing] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_collection_missing')));
+	const gone = readStats({ ...fixture('stats_pgvector'), collection_exists: false, documents: null, chunks: null });
+	const zero = readStats({ ...fixture('stats_pgvector'), documents: 0, chunks: 0 });
+	const labels = (f: typeof exists, stats: ReturnType<typeof readStats> | null) => vectorCardView(f.endpoint, f.probe, stats).flags.map((x) => x.label);
+	assert.deepEqual(labels(exists, gone), ['Empty collection'], 'stats win: the store lost its collection');
+	assert.deepEqual(labels(missing, zero), [], 'stats win: it exists now, with nothing in it');
+	assert.equal(collectionMissing(readDialect(exists.probe?.ok ? exists.probe.info : null), gone), true);
+	assert.equal(collectionMissing(readDialect(missing.probe?.ok ? missing.probe.info : null), zero), false);
+	assert.equal(collectionMissing(readDialect(missing.probe?.ok ? missing.probe.info : null), null), true, 'without stats the dialect decides');
 });
 
 test('the card description: the address, then the document count once the console has it', async () => {

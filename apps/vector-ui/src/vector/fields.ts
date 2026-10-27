@@ -72,6 +72,8 @@ export interface IFieldsEstimate {
 	documentsRead: number;
 	/** When it was read (ms since the epoch). */
 	at: number;
+	/** The connection's write count when it was read: a later count means the documents may have changed. */
+	writes?: number;
 }
 
 /** The longest example shown. */
@@ -150,8 +152,17 @@ const LIST_FILTER_KEYS: Readonly<Record<string, string>> = {
  */
 export function filterPhrase(field: Pick<IFieldRow, 'name' | 'searchFilter' | 'listFilter'>): string {
 	const parts: string[] = [];
-	if (field.searchFilter) parts.push(`Search filter: ${SEARCH_FILTER_KEYS[field.name] ?? field.name}`);
-	if (field.listFilter) parts.push(`Listing filter: ${LIST_FILTER_KEYS[field.name] ?? field.name} (applied by the store on pgvector; elsewhere matched over loaded rows)`);
+	if (field.searchFilter) {
+		const keys = Object.hasOwn(SEARCH_FILTER_KEYS, field.name) ? SEARCH_FILTER_KEYS[field.name] : field.name;
+		// objectId reaches the node through the scope's objectIds; isTable is the Query tab's own choice; the rest it never sends.
+		const offered = field.name === 'objectId' ? ' (the scope sends objectIds)' : field.name === 'isTable' ? '' : '; the Query tab does not offer it';
+		parts.push(`The node's search accepts ${keys}${offered}`);
+	}
+	if (field.listFilter) {
+		const keys = Object.hasOwn(LIST_FILTER_KEYS, field.name) ? LIST_FILTER_KEYS[field.name] : field.name;
+		const meta = field.name === 'ingestedAt' ? ', and only when the table has a meta column' : '';
+		parts.push(`Listing filter: ${keys} (applied by the store on pgvector only${meta}; Chroma applies none of these; elsewhere matched over loaded rows)`);
+	}
 	return parts.length > 0 ? parts.join('; ') : 'Not filterable';
 }
 
@@ -214,7 +225,7 @@ export function chunkFields(chunks: readonly IChunkItem[]): IFieldRow[] {
 		coverage: entry.coverage,
 		of: chunks.length,
 		example: entry.example,
-		searchFilter: name in SEARCH_FILTER_KEYS,
+		searchFilter: Object.hasOwn(SEARCH_FILTER_KEYS, name),
 		listFilter: false,
 		source: 'chunks',
 	}));

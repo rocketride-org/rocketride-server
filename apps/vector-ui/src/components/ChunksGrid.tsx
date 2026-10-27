@@ -42,7 +42,7 @@ export function chunkColumns(withScore: boolean): Array<IGridColumn<IChunkRow>> 
 		{ id: 'chunk', label: '#', width: 64, align: 'right', sortValue: (r) => r.chunkId, cell: (r) => String(r.chunkId) },
 		{ id: 'text', label: 'Text', width: 'flex', minWidth: 220, sortValue: (r) => r.text, cell: (r) => r.text || '(no text)' },
 		{ id: 'chars', label: 'Chars', width: 80, align: 'right', sortValue: (r) => r.chars, cell: (r) => r.chars.toLocaleString('en-US') },
-		{ id: 'table', label: 'Table', width: 70, sortValue: (r) => (r.isTable ? 1 : 0), cell: (r) => (r.isTable ? 'Table' : '') },
+		{ id: 'table', label: 'Table', width: 70, sortValue: (r) => (r.isTable ? 1 : 0), cell: (r) => (r.isTable ? `Table ${r.tableId}` : '') },
 		{ id: 'deleted', label: 'Deleted', width: 80, sortValue: (r) => (r.isDeleted ? 1 : 0), cell: (r) => (r.isDeleted ? 'Deleted' : '') },
 	];
 	if (withScore) columns.push({ id: 'score', label: 'Score', width: 80, align: 'right', title: "Similarity to the active query, recomputed by the store's metric", sortValue: (r) => r.score, cell: (r) => (r.score === null ? '—' : r.score.toFixed(3)) });

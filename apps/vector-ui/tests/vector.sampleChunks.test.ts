@@ -26,8 +26,10 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { connectionCaches } from '../src/adapters/explorer';
 import { sourcesSentence } from '../src/components/VectorConnectionCard';
 import type { IDialectResult } from '../src/contract/types';
+import { fieldsCaption } from '../src/components/CollectionPanel';
 import { fieldsSummary } from '../src/vector/fields';
 import { readStats } from '../src/vector/results';
 import { SAMPLE_CHUNKS, SNIPPET_CHARS, cachedSample, loadSampleChunks, skipReason, snippetOf } from '../src/vector/sampleChunks';
@@ -53,6 +55,8 @@ test('the store is asked only when it can be read and may hold documents (the ru
 	assert.equal(skipReason(true, present, null), null);
 	assert.equal(skipReason(true, present, full), null);
 	assert.equal(skipReason(true, missing, full), null, 'fresh stats win over a dialect that still says no collection');
+	const gone = readStats({ ...fixture('stats_pgvector'), collection_exists: false, documents: null, chunks: null });
+	assert.match(skipReason(true, present, gone) ?? '', /no documents yet/, 'stats say missing while the dialect says it exists: the same rule as the card')
 });
 
 test('two reads: the first document and its first chunks; the answer is kept until a write', async () => {
@@ -77,6 +81,27 @@ test('two reads: the first document and its first chunks; the answer is kept unt
 	assert.equal(cachedSample('k1', 1), undefined);
 });
 
+test('a read that began before a reset does not put its answer back (a new identity must not see the old sample)', async () => {
+	let release: () => void = () => undefined;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const caller = {
+		async invoke(tool: string) {
+			await gate;
+			if (tool === 'list_documents') return { success: true, items: [{ objectId: 'o1', path: 'docs/a.md', chunks: 1, has_first_chunk: true, tables: 0, deleted: false }], next_cursor: null, total: 1, sorted: true };
+			return { success: true, items: [{ chunkId: 0, content: 'old', length: 3, isTable: false, tableId: 0, isDeleted: false, pointId: null, metadata: {} }], has_more: false, next_after: -1, total: 1 };
+		},
+	};
+	const reading = loadSampleChunks(caller as never, 'store_1', 'k3', 0);
+	connectionCaches.clearAll();
+	release();
+	assert.equal((await reading)?.path, 'docs/a.md', 'the caller still gets its answer');
+	assert.equal(cachedSample('k3', 0), undefined, 'but it is not kept');
+	await loadSampleChunks({ invoke: caller.invoke } as never, 'store_1', 'k3', 0);
+	assert.ok(cachedSample('k3', 0), 'a read after the reset is kept');
+});
+
 test('a store that lists nothing is kept as no sample, without a second call', async () => {
 	let n = 0;
 	const caller = {
@@ -95,6 +120,12 @@ test('the fields line says what was read, and the card says which sources run', 
 	assert.equal(fieldsSummary({ rows: [{ name: 'path', type: 'text', coverage: 1, of: 1, example: null, searchFilter: false, listFilter: true, source: 'listing' }], chunksRead: 0, documentsRead: 0, at: 0 }), 'path (document fields only).');
 	assert.match(fieldsSummary({ rows: Array.from({ length: 10 }, (_, i) => ({ name: `f${i}`, type: 'text' as const, coverage: 1, of: 1, example: null, searchFilter: false, listFilter: false, source: 'chunks' as const })), chunksRead: 1, documentsRead: 1, at: 0 }), /, and 2 more \(chunk fields estimated from 1 chunk\)\.$/);
 	assert.equal(sourcesSentence({ roleLine: 'ingest ✓ · chat – · tools ✓' }), 'Sources: ingest running, chat not running, tools running');
+});
+
+test('the fields caption says when documents were written since the sample', () => {
+	const read = { rows: [], chunksRead: 3, documentsRead: 1, at: 0, writes: 0 };
+	assert.match(fieldsCaption(4, false, true, null, true)[1], /^Documents were written since the chunk fields were read/);
+	assert.match(fieldsCaption(4, false, true, read, false)[1], /^Chunk fields are estimated/);
 });
 
 test('wiring: the landing drawer is the only DetailPanel; the card and the details panel use the shared content', () => {

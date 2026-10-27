@@ -408,7 +408,7 @@ export interface ICollectionSection {
 /**
  * The Collection tab's facts, read-only: what the store node reports about the embedding, the index, the storage and
  * the writes. A fact the node does not report reads "—"; the console's last stats fill what the dialect lacks, as in
- * the drawer. Nothing here is estimated.
+ * the drawer. Every value is a figure the node or the console reported; none is guessed.
  *
  * @param probe - The connection's probe, when one exists.
  * @param stats - The connection's last stats answer, when its console has one.

@@ -67,13 +67,21 @@ test('chunk fields: which keys search.filter takes; a chunk key never claims a l
 test('filter phrases name the keys and claim the store applies a listing filter only on pgvector', () => {
 	const by = new Map([...documentFields([doc('o', 'docs/a.md', { nodeId: 'n', ingestedAt: '2026-10-01T00:00:00Z' })]), ...chunkFields([chunk(0, { chunkId: 0, parent: '/p', signature: 's' })])].map((f) => [f.name, f]));
 	assert.match(filterPhrase(by.get('path')!), /Listing filter: path_prefix/);
-	assert.match(filterPhrase(by.get('path')!), /applied by the store on pgvector; elsewhere matched over loaded rows/);
-	assert.doesNotMatch(filterPhrase(by.get('path')!), /Search filter/);
-	assert.equal(filterPhrase(by.get('nodeId')!), 'Search filter: nodeId');
-	assert.equal(filterPhrase(by.get('chunkId')!), 'Search filter: minChunkId, maxChunkId');
-	assert.equal(filterPhrase(by.get('parent')!), 'Search filter: parent (an exact path)');
+	assert.match(filterPhrase(by.get('path')!), /applied by the store on pgvector only; Chroma applies none of these; elsewhere matched over loaded rows/);
+	assert.doesNotMatch(filterPhrase(by.get('path')!), /search accepts/);
+	assert.match(filterPhrase(by.get('ingestedAt')!), /ingested_after, ingested_before.*only when the table has a meta column/);
+	assert.doesNotMatch(filterPhrase(by.get('path')!), /meta column/);
+	assert.equal(filterPhrase(by.get('nodeId')!), "The node's search accepts nodeId; the Query tab does not offer it");
+	assert.equal(filterPhrase(by.get('chunkId')!), "The node's search accepts minChunkId, maxChunkId; the Query tab does not offer it");
+	assert.equal(filterPhrase(by.get('parent')!), "The node's search accepts parent (an exact path); the Query tab does not offer it");
 	assert.equal(filterPhrase(by.get('size')!), 'Not filterable');
 	assert.equal(filterPhrase(by.get('signature')!), 'Not filterable');
+});
+
+test('a metadata key named like an object property is not a search filter', () => {
+	const fields = chunkFields([chunk(0, { constructor: 'x', toString: 'y', hasOwnProperty: 'z', nodeId: 'n' })]);
+	assert.deepEqual(fields.filter((f) => f.searchFilter).map((f) => f.name), ['nodeId']);
+	assert.equal(filterPhrase(fields.find((f) => f.name === 'constructor')!), 'Not filterable');
 });
 
 test('the sampler: spread over folders in name order, one per folder in turn, skipping trashed and empty documents', () => {

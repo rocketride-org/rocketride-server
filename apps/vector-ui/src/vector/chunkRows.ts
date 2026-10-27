@@ -48,6 +48,8 @@ export interface IChunkRow {
 	text: string;
 	chars: number;
 	isTable: boolean;
+	/** The table the chunk belongs to (meaningful when `isTable`). */
+	tableId: number;
 	isDeleted: boolean;
 	/** The chunk's similarity to the active query, or null (no query, or the store scored none). */
 	score: number | null;
@@ -73,7 +75,7 @@ export function cellText(content: string): string {
  */
 export function chunkRows(items: readonly IChunkItem[], heat: readonly IHeatScore[] | null): IChunkRow[] {
 	const scores = new Map<number, number>((heat ?? []).map((s) => [s.chunkId, s.sim]));
-	return items.map((chunk) => ({ id: String(chunk.chunkId), chunkId: chunk.chunkId, text: cellText(chunk.content), chars: chunk.length, isTable: chunk.isTable, isDeleted: chunk.isDeleted, score: scores.get(chunk.chunkId) ?? null }));
+	return items.map((chunk) => ({ id: String(chunk.chunkId), chunkId: chunk.chunkId, text: cellText(chunk.content), chars: chunk.length, isTable: chunk.isTable, tableId: chunk.tableId, isDeleted: chunk.isDeleted, score: scores.get(chunk.chunkId) ?? null }));
 }
 
 /**

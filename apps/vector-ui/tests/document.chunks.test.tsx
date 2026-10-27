@@ -52,7 +52,8 @@ test('the Chunks columns: #, Text, Chars, Table, Deleted, and Score only when th
 	const rows = chunkRows([chunk(2, { isTable: true }), chunk(1, { isDeleted: true })], [{ chunkId: 1, sim: 0.5 }]);
 	const by = new Map(chunkColumns(true).map((c) => [c.id, c]));
 	assert.deepEqual(rows.map((r) => by.get('score')?.sortValue?.(r)), [null, 0.5]);
-	assert.equal(by.get('table')?.cell(rows[0], { tabIndex: -1 }), 'Table');
+	assert.equal(by.get('table')?.cell(rows[0], { tabIndex: -1 }), 'Table 0');
+	assert.equal(chunkColumns(false).find((c) => c.id === 'table')?.cell(chunkRows([chunk(5, { isTable: true, tableId: 3 })], null)[0], { tabIndex: -1 }), 'Table 3');
 	assert.equal(by.get('deleted')?.cell(rows[1], { tabIndex: -1 }), 'Deleted');
 	assert.equal(by.get('score')?.cell(rows[1], { tabIndex: -1 }), '0.500');
 	assert.equal(by.get('score')?.cell(rows[0], { tabIndex: -1 }), '—');

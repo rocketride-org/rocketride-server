@@ -62,15 +62,18 @@ export const FIELDS_READING = 'Reading chunks…';
  * @param loaded - How many documents are loaded.
  * @param scoped - Whether the listing is under a scope (it then holds only the documents that match).
  * @param complete - Whether the listing has no more pages.
- * @param estimate - The chunk sample, when one was read.
+ * @param estimate - The chunk sample, when one was read and still current.
+ * @param stale - A sample was read but documents were written since.
  * @returns The caption lines.
  */
-export function fieldsCaption(loaded: number, scoped: boolean, complete: boolean, estimate: IFieldsEstimate | null): string[] {
+export function fieldsCaption(loaded: number, scoped: boolean, complete: boolean, estimate: IFieldsEstimate | null, stale = false): string[] {
 	const lines = [`Document fields are exact over the ${formatCount(loaded)} ${loaded === 1 ? 'document' : 'documents'} loaded${scoped ? ' under the current scope' : ''}${complete ? '' : '; more are not loaded yet'}.`];
 	if (estimate && estimate.chunksRead > 0) {
 		lines.push(`Chunk fields are estimated: ${formatCount(estimate.chunksRead)} ${estimate.chunksRead === 1 ? 'chunk' : 'chunks'} read from ${formatCount(estimate.documentsRead)} ${estimate.documentsRead === 1 ? 'document' : 'documents'} at ${new Date(estimate.at).toLocaleTimeString()}. Types are guessed from those values and coverage is of those chunks, not of the collection.`);
 	} else if (estimate) {
 		lines.push(`No chunks came back from the ${formatCount(estimate.documentsRead)} ${estimate.documentsRead === 1 ? 'document' : 'documents'} read, so there are no chunk fields.`);
+	} else if (stale) {
+		lines.push('Documents were written since the chunk fields were read, so they are not shown. Read them again.');
 	} else {
 		lines.push('Chunk fields are not read yet. No store lists them, so they are read from a sample on request.');
 	}
@@ -95,7 +98,11 @@ export function coverageText(field: Pick<IFieldRow, 'coverage' | 'of'>): string 
  */
 export function CollectionPanel({ entry, model, channels, actions, probe, console: state }: ICollectionPanelProps): React.ReactElement {
 	const sections = collectionView(probe, state.stats.view);
-	const estimate = useSyncExternalStore(entry.fields.subscribe, entry.fields.get, entry.fields.get);
+	const writes = useSyncExternalStore(entry.writes.subscribe, entry.writes.get, entry.writes.get);
+	const kept = useSyncExternalStore(entry.fields.subscribe, entry.fields.get, entry.fields.get);
+	// A write since the sample was read: its chunk fields describe documents that may have changed, so they are not shown.
+	const stale = kept !== null && (kept.writes ?? 0) !== writes;
+	const estimate = stale ? null : kept;
 	const [reading, setReading] = useState(false);
 	const [failed, setFailed] = useState<IFailureText | null>(null);
 	const run = useRef(0);
@@ -111,7 +118,7 @@ export function CollectionPanel({ entry, model, channels, actions, probe, consol
 		setFailed(null);
 		actions.announce(FIELDS_READING);
 		try {
-			const next = await readFieldsSample(caller, model.nodes.store, rows);
+			const next = await readFieldsSample(caller, model.nodes.store, rows, entry.writes.get());
 			if (mine !== run.current) return;
 			entry.fields.set(next);
 			actions.announce(`Read ${next.chunksRead} chunks from ${next.documentsRead} documents.`);
@@ -167,7 +174,7 @@ export function CollectionPanel({ entry, model, channels, actions, probe, consol
 					{blocked !== null && <span style={styles.small}>{blocked}</span>}
 				</div>
 				{failed && <Banner variant="error">{failed.headline}</Banner>}
-				{fieldsCaption(rows.length, state.directory.filter !== null, state.directory.cursor === null, estimate).map((line) => (
+				{fieldsCaption(rows.length, state.directory.filter !== null, state.directory.cursor === null, estimate, stale).map((line) => (
 					<p key={line} style={{ ...styles.small, margin: '4px 0' }}>{line}</p>
 				))}
 			</Section>
