@@ -125,6 +125,8 @@ export const ConnectionDetailsPanel: React.FC<IConnectionDetailsPanelProps> = ({
 	}, []);
 
 	const openTab = (tab: WorkbenchTab): void => {
+		// Search means Search: an earlier "Ask about these" left the Query tab in Ask.
+		if (tab === 'query') entry?.queryMode.set('search');
 		entry?.tab.set(tab);
 		onClose();
 	};

@@ -88,6 +88,21 @@ test('the document tab: Reader and Chunks; the grid has no persisted layout; cop
 	}
 });
 
+test('the Collection fields count what the scope keeps, and "complete" needs a finished listing', () => {
+	const panel = code('components/CollectionPanel.tsx');
+	assert.match(panel, /directoryView\(state\.directory, scope, '', model\.limits\.scope_keys_max\)\.scopeRows/);
+	assert.match(panel, /listingComplete\(state\.directory\)/);
+	assert.doesNotMatch(panel, /cursor === null/, 'a listing before its first page has no cursor either');
+});
+
+test('the document tab refreshes in place; its confirmation sits below the sub-tab row; the drawer\'s Move button keeps the focus', () => {
+	const view = code('views/DocumentView.tsx');
+	assert.match(view, /refreshKey = 0/);
+	assert.match(view, /\}, \[load, refreshKey\]\);/, 'the chunks reload in place');
+	assert.ok(view.indexOf('data-document-tabs') < view.indexOf('{beforeBody}'), 'the tab row does not move when a confirmation opens');
+	assert.match(code('components/ChunkDrawer.tsx'), /aria-disabled=\{!writes\.enabled\}/);
+});
+
 test('the chunk drawer: neighbours on open (12, none for a trashed chunk), Escape that skips a handled event, focus back on the row', () => {
 	const drawer = code('components/ChunkDrawer.tsx');
 	assert.match(drawer, /fetchNeighbors\(caller, store, key, asked\)/);

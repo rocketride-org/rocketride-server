@@ -126,14 +126,29 @@ test('reading a sample sends at most five chunks calls, one after the other, and
 	assert.equal(estimate.rows.find((f) => f.name === 'path')?.of, 12, 'document fields stay exact over all the loaded rows');
 	const failing = { invoke: async () => Promise.reject(new Error('boom')) };
 	await assert.rejects(readFieldsSample(failing as never, 'store_1', rows), /boom/);
+	// A document trashed since the listing is skipped; the others still count.
+	let n = 0;
+	const trashed = {
+		async invoke(_tool: string, input: Record<string, unknown> = {}) {
+			n += 1;
+			if (n === 2) throw Object.assign(new Error('in trash'), { code: 'IN_TRASH' });
+			return { success: true, items: [{ chunkId: 0, content: 'x', length: 1, isTable: false, tableId: 0, isDeleted: false, pointId: null, metadata: { objectId: input.object_id } }], has_more: false, next_after: -1, total: 1 };
+		},
+	};
+	const partial = await readFieldsSample(trashed as never, 'store_1', rows, 2, 12);
+	assert.equal(partial.documentsRead, 4);
+	assert.equal(partial.chunksRead, 4);
+	assert.equal(partial.documents, 12, 'the store\'s count is kept, so a later upload marks the sample stale');
 });
 
 test('the fields caption says what each part was read over, and that the chunk part is an estimate', () => {
-	assert.deepEqual(fieldsCaption(1, false, true, null), ['Document fields are exact over the 1 document loaded.', 'Chunk fields are not read yet. No store lists them, so they are read from a sample on request.']);
-	assert.match(fieldsCaption(40, true, false, null)[0], /40 documents loaded under the current scope; more are not loaded yet\./);
-	const read = fieldsCaption(40, false, true, { rows: [], chunksRead: 90, documentsRead: 5, at: 0 })[1];
+	assert.deepEqual(fieldsCaption(1, 1, false, true, null), ['Document fields are exact over the 1 document loaded.', 'Chunk fields are not read yet. No store lists them, so they are read from a sample on request.']);
+	assert.equal(fieldsCaption(12, 40, true, true, null)[0], 'Document fields are exact over the 12 documents the current scope keeps, of 40 loaded.', 'a scope names what it kept, whether the store or this page matched it');
+	assert.equal(fieldsCaption(40, 40, false, true, null)[0], 'Document fields are exact over the 40 documents loaded.', 'no scope: no scope is claimed');
+	assert.match(fieldsCaption(40, 40, false, false, null)[0], /loaded; more are not loaded yet\.$/);
+	const read = fieldsCaption(40, 40, false, true, { rows: [], chunksRead: 90, documentsRead: 5, at: 0 })[1];
 	assert.match(read, /^Chunk fields are estimated: 90 chunks read from 5 documents at /);
 	assert.match(read, /coverage is of those chunks, not of the collection\.$/);
-	assert.match(fieldsCaption(40, false, true, { rows: [], chunksRead: 0, documentsRead: 5, at: 0 })[1], /No chunks came back/);
+	assert.match(fieldsCaption(40, 40, false, true, { rows: [], chunksRead: 0, documentsRead: 5, at: 0 })[1], /No chunks came back/);
 	assert.equal(coverageText({ coverage: 12, of: 2000 }), '12 of 2,000');
 });

@@ -56,7 +56,7 @@ test('neighbours: the document\'s own chunks are left out, the rest keep the sto
 	const list = neighbourRows([item('a', 3, 0.9), item('b', 0, 0.8), item('a', 4, 0.7), item('c', 1, 0.6)], 'a');
 	assert.deepEqual(list.rows.map((r) => r.id), ['b#0', 'c#1']);
 	assert.equal(list.leftOut, 2);
-	assert.equal(neighboursCaption(list, 16), 'The 2 nearest chunks from other documents, out of the 16 nearest in the collection. 2 chunks of this document were left out.');
+	assert.equal(neighboursCaption(list, 16), 'The 2 nearest chunks from other documents, out of the 16 nearest the store returned. 2 chunks of this document were left out.');
 	const none = neighbourRows([item('a', 3, 0.9)], 'a');
 	assert.equal(neighboursCaption(none, 12), 'None of the 12 nearest chunks the store returned is from another document. 1 chunk of this document was left out.');
 	const many = neighbourRows(Array.from({ length: 30 }, (_, i) => item('b', i, 1 - i / 100)), 'a');

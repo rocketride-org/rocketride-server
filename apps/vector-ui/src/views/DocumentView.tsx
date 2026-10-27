@@ -78,6 +78,11 @@ export interface DocumentViewProps extends ContractDocumentViewProps {
 	onDocument?: (row: IDocumentItem | null) => void;
 	/** Shown under the header (the inline write confirmation, in both mounts). */
 	beforeBody?: React.ReactNode;
+	/**
+	 * Change it to re-read the document's row and chunks in place (a write named this document): the sub-tab, the sort,
+	 * the open chunk and the focus stay. The mount bumps it; the first value is the one the view starts with.
+	 */
+	refreshKey?: number;
 }
 
 /** The chunks of the document, loaded a page at a time. */
@@ -143,7 +148,7 @@ type HeatState = { query: string; chunks: number; scores: IHeatScore[] } | { que
  * @param props - The frozen DocumentViewProps.
  * @returns The view.
  */
-export function DocumentView({ model, channels, selection, actions, objectId, path, chunkId, active = true, consoleMedian, onDocument, beforeBody }: DocumentViewProps): React.ReactElement {
+export function DocumentView({ model, channels, selection, actions, objectId, path, chunkId, active = true, consoleMedian, onDocument, beforeBody, refreshKey = 0 }: DocumentViewProps): React.ReactElement {
 	const caller: IVectorCaller | null = channels.tools ?? channels.chat ?? channels.ingest;
 	const embedCaller: IVectorCaller | null = channels.tools ?? channels.chat;
 	const store = model.nodes.store;
@@ -187,7 +192,8 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 	useEffect(() => {
 		run.current += 1;
 		void load(-1);
-	}, [load]);
+		// A refresh (a write named this document) reloads the chunks from the start, in place.
+	}, [load, refreshKey]);
 
 	useEffect(() => {
 		if (caller === null) return undefined;
@@ -205,7 +211,7 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 		return () => {
 			live = false;
 		};
-	}, [caller, store, objectId]);
+	}, [caller, store, objectId, refreshKey]);
 
 	// Scroll to the chunk the tab was opened at, once it is listed.
 	const listRef = useRef<HTMLOListElement>(null);
@@ -326,10 +332,10 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 					</>
 				}
 			/>
-			{beforeBody}
 			<div style={layout.subTabs} data-document-tabs="">
 				<ToggleGroup options={SUB_TABS.map((tab) => ({ id: tab.id, label: tab.label }))} value={view} onChange={showView} />
 			</div>
+			{beforeBody}
 			<div style={{ ...styles.content, display: view === 'reader' ? undefined : 'none' }} data-document-panel="reader">
 				{caller === null && <Banner variant="warning">No source of this pipeline is running, so the document cannot be read.</Banner>}
 				{infoError && <Banner variant="error">{infoError.headline}</Banner>}
