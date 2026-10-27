@@ -54,7 +54,7 @@ node scripts/build.js docs:check                     # export drift gate (CI-enf
 
 - **Commits**: conventional commits (`feat(scope):`, `fix(scope):`, `chore(scope):`).
 - **Branches**: `feat/RR-<ticket>-short-description`, `fix/RR-<ticket>-...`; PR base is `develop`.
-- **Pull requests**: fill in the template's Verification section with what you ran and what you saw. UI changes need screenshots, and interaction changes need a recording. See "Show that it works" in `CONTRIBUTING.md`.
+- **Pull requests**: fill in the template's Verification section with what you ran and what you saw. UI changes need screenshots, and flow changes need a recording or GIF. See "Show that it works" in `CONTRIBUTING.md`.
 - **Python**: 3.10+, single quotes, ruff for lint/format.
 - **TypeScript**: tabs, single quotes, semicolons.
 - **Store apps**: pipelines bundled in an app for the public store use

@@ -126,7 +126,7 @@ Every PR shows what you ran and what you saw. Reviewers read this before the cod
 
 - **Every change.** In the Verification section of the PR template, list the steps you ran and what happened. "Tests pass" alone is not enough. Name the tests, or say what you checked by hand.
 - **UI changes.** If the PR changes what users see in `packages/shell`, `apps/*-ui`, `apps/shared`, `apps/vscode`, `packages/chat-widget`, or the docs site, add screenshots. When you change something that already exists, show it before and after.
-- **Interaction changes.** If the change is about clicks, drag and drop, a multi-step flow, timing, or animation, add a short recording or GIF.
+- **Flow changes.** If the PR adds or changes a flow the user moves through, such as drag and drop, several steps, animation, or timing, add a short recording or GIF. A button or link that only opens or runs something does not need one.
 - **Engine, SDK, CLI, MCP, and node changes.** Paste the command you ran and its output, or name the test that covers the change and show it passing.
 
 Drag screenshots and recordings into the PR description. Do not commit them.

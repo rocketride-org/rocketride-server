@@ -80,7 +80,7 @@ Read `checks.verification.text`. The section can be headed Verification, or Test
 `checks.ui_evidence.ui_files` lists the changed files under the paths in the CodeRabbit "UI evidence" check.
 
 1. Decide whether any of them change what users see. Read the diff. Tests, lockfiles, build configuration, and type-only or comment-only edits do not count, and neither does a refactor that leaves the screen the same. If none count, the status is `n/a`. Say why.
-2. If some do, look at `checks.ui_evidence.attachments`. They come from the description and from comments by the author or anyone who pushed commits to the PR. Pass only if at least one image or video shows the changed UI. If the PR adds or changes a flow the user moves through (drag and drop, moving between steps, animation, transitions, or timing), it also needs a video, a GIF, or a series of screenshots. A button or link that only opens or runs something does not need a recording.
+2. If some do, look at `checks.ui_evidence.attachments`. They come from the description and from comments by the author or anyone who pushed commits to the PR. Pass only if at least one image or video shows the changed UI. If the PR adds or changes a flow the user moves through (drag and drop, moving between steps, animation, transitions, or timing), it also needs a video or a GIF. A button or link that only opens or runs something does not need one.
 3. Download the attachments and look at them:
 
    ```bash
