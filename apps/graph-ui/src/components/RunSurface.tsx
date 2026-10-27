@@ -182,7 +182,19 @@ const styles = {
 	runSlot: { display: 'contents' } as CSSProperties,
 	// The run bar's state text ("Will run…", "Running…", "Waiting…"): a fixed basis, so line breaking sees one width
 	// whatever it says, and the bar does not wrap and unwrap around each run. It can hold the focus (see the run slot).
-	runState: { flex: '0 1 220px', minWidth: 0, fontSize: 12, color: 'var(--rr-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', outline: 'none' } as CSSProperties,
+	runState: (focused: boolean): CSSProperties => ({
+		flex: '0 1 220px',
+		minWidth: 0,
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+		overflow: 'hidden',
+		textOverflow: 'ellipsis',
+		whiteSpace: 'nowrap',
+		// Holding the focus (parked from the run slot), it shows the focus ring like a control.
+		outline: focused ? '2px solid var(--rr-border-focus)' : 'none',
+		outlineOffset: 2,
+		borderRadius: 3,
+	}),
 	willRun: { flex: '0 1 auto', maxWidth: 260, fontSize: 12, color: 'var(--rr-text-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
 	notices: { padding: '6px 24px 0', display: 'flex', flexDirection: 'column', gap: 6 } as CSSProperties,
 	resultsRow: { flex: 1, minHeight: 0, display: 'flex' } as CSSProperties,
@@ -725,6 +737,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 	// lost focus, so another tab's request freeing the gate never takes the focus from the page.
 	const runState = useRef<HTMLSpanElement | null>(null);
 	const parkedFromSlot = useRef(false);
+	const [runStateFocused, setRunStateFocused] = useState(false);
 	const lastRun = useRef({ canStop: runner.canStop, running: runner.running });
 	useLayoutEffect(() => {
 		const runChanged = lastRun.current.canStop !== runner.canStop || lastRun.current.running !== runner.running;
@@ -743,6 +756,8 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 			runState.current.focus();
 		}
 	}, [runner.canStop, runner.running, gateBusy]);
+	// What the state text says; also its title, since 220 px can cut it.
+	const runStateText = runner.running ? 'Running…' : waiting ? 'Waiting for an earlier request to finish…' : willRun;
 	const runBar = (
 		<div style={barHost === undefined ? styles.runBar : styles.runBarInRow}>
 			{split.collapsed && (
@@ -796,12 +811,15 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 			<span
 				ref={runState}
 				tabIndex={-1}
-				style={styles.runState}
+				style={styles.runState(runStateFocused)}
+				title={runStateText}
+				onFocus={() => setRunStateFocused(true)}
 				onBlur={() => {
 					parkedFromSlot.current = false;
+					setRunStateFocused(false);
 				}}
 			>
-				{runner.running ? 'Running…' : waiting ? 'Waiting for an earlier request to finish…' : willRun}
+				{runStateText}
 			</span>
 			<span role="group" aria-label="Show the result as">
 				<ToggleGroup options={views} value={tab} onChange={(id) => setTab(id)} />
