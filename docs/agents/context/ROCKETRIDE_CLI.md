@@ -50,7 +50,13 @@ loop is a command.
 - `rocketride login [--deploy] [--apikey <key>]` — (re)authenticate and
   save credentials to `.env` (and make `.env` git-ignored in the same
   step). OSS servers take an API key; saas servers open the browser to
-  sign in and mint a durable personal API key. Run it whenever a command
+  sign in and mint a durable personal API key. The browser tab waits
+  until the key is minted, then closes itself where the browser allows it (Chrome, Edge); elsewhere
+  (Firefox only lets scripts close windows scripts opened) it shows a
+  RocketRide-branded "You're signed in" page, in your light/dark setting,
+  with a link to the web app. A waitlisted account sees its access-queue
+  notice there, and a failed sign-in (including a failed key exchange)
+  shows the reason there and in the terminal. Run it whenever a command
   reports rejected credentials. `--deploy` targets the
   `ROCKETRIDE_DEPLOY_*` pair.
 
