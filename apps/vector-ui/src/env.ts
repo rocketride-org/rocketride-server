@@ -128,7 +128,7 @@ export interface IQueryHistorySource {
  * The full app's History note: what the workspace preferences keep of a run, and what they do not. It names
  * every field saved (tests/queryHistory.test.ts fails on a saved field it does not name).
  */
-export const APP_HISTORY_NOTE = "Saved in your workspace file: whether recording is on, and while it is, the first 200 characters of each question, tagged with its kind (a Search and its mode, a Compare or an Ask), its top-k, when it ran, how long it took, its result count or error, and its pin and note. Never the answers or results, the threshold, the scope, the table filter or a Compare's question B.";
+export const APP_HISTORY_NOTE = "Saved in your workspace file, for each connection: whether recording is on, and while it is, the first 200 characters of each question, tagged with its kind (a Search and its mode, a Compare or an Ask), its top-k, when it ran, how long it took, its result count or error, and its pin and note. Never the answers or results, the threshold, the scope, the table filter or a Compare's question B.";
 
 /** A dev-tool mount's History note. */
 export const DEVTOOL_HISTORY_NOTE = 'Kept only while this document is open; nothing is saved.';

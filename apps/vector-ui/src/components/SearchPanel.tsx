@@ -99,6 +99,7 @@ const S = {
 	root: { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--rr-text-primary)' } as CSSProperties,
 	head: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } as CSSProperties,
 	note: { margin: 0, fontSize: 12, color: 'var(--rr-text-primary)' } as CSSProperties,
+	statusLine: { margin: 0, fontSize: 12, color: 'var(--rr-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
 	form: { display: 'flex', flexDirection: 'column', gap: 6 } as CSSProperties,
 	row: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } as CSSProperties,
 	input: { flex: '1 1 200px', minWidth: 0, fontSize: 13, padding: '5px 8px', borderRadius: 4, border: '1px solid var(--rr-border-input)', background: 'var(--rr-bg-input)', color: 'var(--rr-text-primary)', fontFamily: 'inherit' } as CSSProperties,
@@ -118,7 +119,7 @@ const S = {
 	link: { background: 'none', border: 'none', padding: 0, margin: 0, font: 'inherit', color: 'inherit', textAlign: 'left', textDecoration: 'underline', cursor: 'pointer', display: 'block', maxWidth: '100%' } as CSSProperties,
 	path: { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
 	text: { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
-	actions: { display: 'flex', gap: 4, flexWrap: 'nowrap' } as CSSProperties,
+	actions: { display: 'flex', gap: 4, flexWrap: 'wrap' } as CSSProperties,
 	barTrack: { display: 'inline-block', width: 48, height: 6, marginLeft: 6, verticalAlign: 'middle' } as CSSProperties,
 	bar: { display: 'block', height: '100%', minWidth: 2, background: `var(${DATA_BAR_TOKEN})`, boxShadow: 'inset 0 0 0 1px var(--rr-text-primary)' } as CSSProperties,
 	threshold: { display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' } as CSSProperties,
@@ -246,7 +247,8 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 	const scaleId = useId();
 	// The score's scale and why a row has no bar, said once above the table (the column heading stays one line).
 	const scaleLine = [heading.scale !== null ? `Score: ${heading.scale}.` : null, heading.noBars].filter((part): part is string => part !== null).join(' ');
-	// What each short status means, once above the table (the Status heading points at it).
+	// What each short status means, once above the table (the Status heading points at it). Every row has a
+	// status it names, so the line is there whenever the table is, and it is one line: the table never moves for it.
 	const legend = statusLegend(run.rows, score);
 	const legendId = useId();
 	// Hybrid lists where each row came from (its semantic and keyword ranks) in a column of its own.
@@ -286,11 +288,9 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 							{scaleLine}
 						</p>
 					)}
-					{legend !== null && (
-						<p style={S.note} id={legendId} data-status-legend="">
-							{legend}
-						</p>
-					)}
+					<p style={S.statusLine} id={legendId} data-status-legend="" title={legend ?? undefined}>
+						{legend}
+					</p>
 					<div style={S.scroll}>
 						<table style={S.table}>
 							<caption style={S.caption}>{runCaption(run)}</caption>
@@ -303,8 +303,10 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 								<col style={{ width: 96 }} />
 								{fused && <col style={{ width: 144 }} />}
 								<col />
-								{/* open, map and ask (125 px in Figtree) with room for a focus ring and a wider fallback font. */}
-								<col style={{ width: 144 }} />
+								{/* open, map and ask: 125 px at the table's 12 px in Figtree, with room for a focus ring and a wider
+								    fallback font. In em, so it grows with text-only zoom; where it cannot (Chrome's minimum font
+								    size does not scale em), the buttons wrap in the cell rather than being cut. */}
+								<col style={{ width: '12em' }} />
 							</colgroup>
 							<thead>
 								<tr>
@@ -320,7 +322,7 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 									<th scope="col" style={S.th} aria-describedby={scaleLine !== '' ? scaleId : undefined}>
 										Score
 									</th>
-									<th scope="col" style={S.th} aria-describedby={legend !== null ? legendId : undefined}>
+									<th scope="col" style={S.th} aria-describedby={legendId}>
 										Status
 									</th>
 									{fused && (

@@ -326,7 +326,8 @@ test('statusLegend: what each short status a run can take means, above the table
 	assert.equal(statusLegend(rows.slice(0, 5), dialect.score), 'near miss: below the threshold', 'no row under the floor');
 	assert.equal(statusLegend(rowsFromSearch(keywordFallback, false, []), dialect.score), 'keyword match: no similarity');
 	assert.equal(statusLegend([...rows, ...rowsFromSearch(keywordFallback, false, [])], dialect.score), `${legend} · keyword match: no similarity`);
-	assert.equal(statusLegend([], dialect.score), null);
+	assert.equal(statusLegend([], dialect.score), null, 'only with no rows, so the line is there whenever a table is');
+	for (const one of [...rows, ...rowsFromSearch(keywordFallback, false, [])]) assert.notEqual(statusLegend([one], dialect.score), null, 'every row has a status the legend names');
 	// A lower-is-better score: the near miss is past the line the other way.
 	const score: IScoreInfo = { formula: 'l2 distance', higher_is_better: false, floor: 2, threshold: 1 };
 	const result: ISearchResult = { results: [0.5, 1.5, 3].map((value, i) => ({ content: String(i), score: value, metadata: { objectId: `o${i}`, chunkId: 0 } })), total: 3 };

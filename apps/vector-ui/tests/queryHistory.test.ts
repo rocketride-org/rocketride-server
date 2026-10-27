@@ -222,6 +222,7 @@ test('the workspace file holds each question with its kind\'s four-character tag
 test('APP_HISTORY_NOTE names everything the workspace file holds (DA-CLAIMS C-2): a preference or entry field saved but not named in the note fails', () => {
 	// What each saved preference and entry field is, and the words of the note that name it.
 	const NAMED: Readonly<Record<string, RegExp>> = {
+		'(connection)': /^Saved in your workspace file, for each connection: /,
 		'vector.historyRecording': /whether recording is on/,
 		'vector.history': /while it is, /,
 		question: /the first 200 characters of each question/,
@@ -244,7 +245,7 @@ test('APP_HISTORY_NOTE names everything the workspace file holds (DA-CLAIMS C-2)
 	const history = persistedQueryHistory(store, APP_HISTORY_NOTE);
 	// Every kind of entry, and every optional field set at least once.
 	history.record('k', searchRecord({ question: 'x'.repeat(300), mode: 'semantic', topK: 10, results: 4 }, 1, 2));
-	history.record('k', searchRecord({ question: 'water', mode: 'hybrid', topK: 25, results: null, error: 'The store refused the search: x' }, 3, 4));
+	history.record('other', searchRecord({ question: 'water', mode: 'hybrid', topK: 25, results: null, error: 'The store refused the search: x' }, 3, 4));
 	history.record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 5, 6));
 	history.record('k', askRecord(turn({ question: 'why?', askedAt: 7, answeredAt: 8, answer: { sources: [{}] } as never })) as never);
 	const [newest] = history.entries('k').get();
@@ -257,10 +258,13 @@ test('APP_HISTORY_NOTE names everything the workspace file holds (DA-CLAIMS C-2)
 	const fields = new Set<string>();
 	for (const [key, value] of writes) {
 		fields.add(key);
+		// Both preferences are kept per connection (keyed by it).
+		assert.ok(Object.keys(value as object).every((connection) => ['k', 'other'].includes(connection)), key);
+		fields.add('(connection)');
 		if (key !== 'vector.history') continue;
 		for (const entries of Object.values(value as Record<string, Array<Record<string, unknown>>>)) for (const entry of entries) for (const field of Object.keys(entry)) fields.add(field);
 	}
-	for (const field of ['vector.historyRecording', 'vector.history', 'question', 'truncated', 'kind', 'limit', 'at', 'ms', 'outcome', 'rows', 'error', 'pinned', 'note']) assert.ok(fields.has(field), `the run saves ${field} (the test covers it)`);
+	for (const field of ['(connection)', 'vector.historyRecording', 'vector.history', 'question', 'truncated', 'kind', 'limit', 'at', 'ms', 'outcome', 'rows', 'error', 'pinned', 'note']) assert.ok(fields.has(field), `the run saves ${field} (the test covers it)`);
 	for (const field of fields) {
 		if (UNNAMED.has(field)) continue;
 		assert.ok(NAMED[field] !== undefined, `${field} is saved but the note does not name it`);

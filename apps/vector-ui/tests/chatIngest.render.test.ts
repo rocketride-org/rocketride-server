@@ -740,7 +740,12 @@ test("SearchResults: the slider over the store's range, its count beside the nod
 	assert.match(html, /Set this on the store node in the pipeline editor; Vector Explorer cannot change node settings\./);
 	// The Score column's scale comes from dialect.score (pgvector cosine: -1 to 1, higher is closer); every rated row has a bar.
 	assert.match(html, /<p[^>]*id="([^"]+)"[^>]*data-score-scale=""[^>]*>Score: 1 - cosine_distance · −1 to 1 · higher is closer\.<\/p>/, 'the scale, once above the table');
-	assert.match(html, /<th scope="col"[^>]*aria-describedby="[^"]+"[^>]*>Score<\/th>/, 'the heading stays one line and points at the scale');
+	const scale = /<p[^>]*id="([^"]+)"[^>]*data-score-scale=""/.exec(html);
+	assert.ok(scale);
+	assert.match(html, new RegExp(`<th scope="col"[^>]*aria-describedby="${scale[1]}"[^>]*>Score</th>`), 'the heading stays one line and points at the scale');
+	// The Actions column is in em: it grows with text-only zoom. Where a minimum font size outgrows it, the buttons wrap, never cut.
+	assert.match(html, /<col style="width:12em"\/><\/colgroup>/);
+	assert.match(html, /<span style="display:flex;gap:4px;flex-wrap:wrap"><button/);
 	// Live B12: one line per row however narrow the panel: set column widths, cells cut with an ellipsis, short statuses.
 	assert.match(html, /<table[^>]*style="[^"]*table-layout:fixed/);
 	assert.match(html, /<td[^>]*title="near miss: below the threshold"[^>]*>near miss<\/td>/, 'a short status, whole in its title');
@@ -749,6 +754,7 @@ test("SearchResults: the slider over the store's range, its count beside the nod
 	assert.ok(legend, 'the status legend');
 	assert.match(html, new RegExp(`<th scope="col"[^>]*aria-describedby="${legend[1]}"[^>]*>Status</th>`));
 	assert.equal(/data-status-legend=""[^>]*>([^<]*)</.exec(render(h(SearchResults, { run, view: classifyAt(run.rows, -1, dialect.score), score: dialect.score, range, ...resultHandlers })))?.[1], 'near miss: below the threshold · below floor: the store drops it', 'the same line with no near miss at this threshold');
+	assert.match(html, /<p style="[^"]*white-space:nowrap;overflow:hidden;text-overflow:ellipsis"[^>]*data-status-legend=""[^>]*title="near miss: below the threshold · below floor: the store drops it"/, 'one line, whole in its title');
 	assert.doesNotMatch(html, />Found by</, 'the ranks column is Hybrid\'s only');
 	assert.equal((html.match(/>ask<\/button>/g) ?? []).length, 20, 'compact action labels; their accessible names stay whole');
 	assert.equal((html.match(/data-bar="/g) ?? []).length, 20);
@@ -796,10 +802,12 @@ test('SearchResults: keyword rows have no slider or bars; hybrid says it was fus
 	assert.match(kw, /keyword match \(no similarity\)/);
 	assert.match(kw, /<caption[^>]*>Keyword search: 3 results/);
 	assert.doesNotMatch(kw, /data-bar=/, 'keyword results carry no similarity: no bars');
+	assert.match(kw, /data-status-legend=""[^>]*>keyword match: no similarity<\/p>/, 'the legend line is there for every run with results');
 	assert.match(kw, /<p[^>]*id="[^"]+"[^>]*>Keyword results carry no similarity, so they have no score or bar\.<\/p>/);
 	const hybrid = await finishedRun('water', 'hybrid', [fixture<ISearchResult>('search_vector.json'), fixture<ISearchResult>('search_keyword_fallback_warning.json')]);
 	const hy = render(h(SearchResults, { run: hybrid, view: classifyAt(hybrid.rows, 0.3, dialect.score), score: dialect.score, range: sliderRange(dialect.score), ...resultHandlers }));
 	assert.match(hy, /<caption[^>]*>Hybrid search: 8 results, fused in the browser by reciprocal rank fusion \(k = 60\)/);
+	assert.match(hy, /data-status-legend=""[^>]*>near miss: below the threshold<\/p>/, 'every row here was found by the semantic search too: no "keyword match"');
 	assert.match(hy, /<th scope="col"[^>]*>Found by<\/th>/, 'Hybrid lists each row\'s ranks in a column of its own (one line per row)');
 	assert.match(hy, /<td[^>]*title="semantic #1 · keyword #1"[^>]*>semantic #1 · keyword #1<\/td>/);
 	assert.match(hy, /#67 · cited/);
