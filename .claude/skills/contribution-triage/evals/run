@@ -7,6 +7,7 @@
 # prompt.txt, the agent's transcript, final.md, gh.log (every gh call the shim saw), and result.json.
 # The agent runs with the shim first on PATH and an empty GH_CONFIG_DIR, so only the shim's
 # allowed read commands reach GitHub with a login. A run that tries a write counts as a failure.
+# Codex runs without a login shell, because ~/.profile would put the real gh back ahead of the shim.
 set -euo pipefail
 
 EVALS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -86,7 +87,7 @@ EOF
 		(cd "$REPO" && env -u GH_TOKEN -u GITHUB_TOKEN \
 			PATH="$SHIM:$PATH" GH_CONFIG_DIR="$out/gh-config" \
 			TRIAGE_REAL_GH="$REAL_GH" TRIAGE_REAL_GH_CONFIG="$REAL_GH_CONFIG" TRIAGE_GH_LOG="$out/gh.log" \
-			timeout "$TIMEOUT" codex exec --json -C "$REPO" -m "$MODEL" -c model_reasoning_effort=medium \
+			timeout "$TIMEOUT" codex exec --json -C "$REPO" -m "$MODEL" -c model_reasoning_effort=medium -c allow_login_shell=false \
 			--dangerously-bypass-approvals-and-sandbox --ephemeral -o "$out/final.md" "$prompt") \
 			>"$out/agent.jsonl" 2>"$out/agent.stderr" || code=$?
 	fi

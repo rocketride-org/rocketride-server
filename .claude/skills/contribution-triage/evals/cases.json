@@ -837,9 +837,10 @@
 					"source": "hand label"
 				},
 				"ui_evidence": {
-					"status": "fail",
-					"reason": "Wires the Free tier button in the plan picker to open the docs, with no screenshot or recording.",
-					"source": "hand label"
+					"status": "n/a",
+					"reason": "The diff only adds an unused defaultActionClick helper to PlanPicker.tsx; no JSX changes, so the screen is the same.",
+					"source": "hand label",
+					"corrected": "Was fail, labeled from the description. Corrected after the first run, from the diff."
 				},
 				"one_problem": {
 					"status": "pass",
