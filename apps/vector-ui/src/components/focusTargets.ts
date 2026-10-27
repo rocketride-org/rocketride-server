@@ -96,3 +96,13 @@ export function focusWorkbench(workbench: HTMLElement | null): boolean {
 export function focusFell(): boolean {
 	return typeof document !== 'undefined' && focusLost(document.activeElement, document.body, null);
 }
+
+/**
+ * The workbench's current tab (in the tab row), for a focus chain.
+ *
+ * @param el - An element of the workbench.
+ * @returns The tab's button, or null.
+ */
+export function currentTabOf(el: Element | null): HTMLElement | null {
+	return workbenchOf(el)?.querySelector<HTMLElement>('[data-workbench-tabs] [aria-selected="true"], [data-workbench-tabs] [aria-pressed="true"]') ?? null;
+}

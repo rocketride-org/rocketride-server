@@ -312,6 +312,20 @@ export function pagerProgressText(state: IPagerState): string | null {
 	return state.total === null ? `Loading documents… ${loaded} loaded` : `Loading documents… ${loaded} of ${formatCount(state.total)}`;
 }
 
+/**
+ * Whether the listing holds every document: the one test the sort line, the counts, the heading and the rail share,
+ * so none of them claims a total, or more documents, that another does not.
+ *
+ * @param state - The listing.
+ * @returns True once the store said it has no more.
+ */
+export function listingComplete(state: Pick<IPagerState, 'status'>): boolean {
+	return state.status === 'done';
+}
+
+/** What every line says of a listing that is not complete. */
+export const MORE_MAY_EXIST = 'more may exist';
+
 /** The listing's footer. */
 export interface IPagerFooter {
 	text: string;
@@ -333,11 +347,11 @@ export function pagerFooter(state: IPagerState): IPagerFooter | null {
 	const loaded = formatCount(state.rows.length);
 	switch (state.status) {
 		case 'capped':
-			return { text: `Limit reached at ${loaded} documents; more may exist`, loadMore: true, caveat: null, retry: false };
+			return { text: `Limit reached at ${loaded} documents; ${MORE_MAY_EXIST}`, loadMore: true, caveat: null, retry: false };
 		case 'unsupported':
-			return { text: `Limit reached at ${loaded} documents; more may exist`, loadMore: false, caveat: CAVEAT_SENTENCES.documents_paging_unsupported, retry: false };
+			return { text: `Limit reached at ${loaded} documents; ${MORE_MAY_EXIST}`, loadMore: false, caveat: CAVEAT_SENTENCES.documents_paging_unsupported, retry: false };
 		case 'stalled':
-			return { text: `Loading stopped at ${loaded} documents; more may exist`, loadMore: false, caveat: DOCUMENTS_REPEATED_TEXT, retry: false };
+			return { text: `Loading stopped at ${loaded} documents; ${MORE_MAY_EXIST}`, loadMore: false, caveat: DOCUMENTS_REPEATED_TEXT, retry: false };
 		case 'error':
 			return { text: `Loading stopped at ${loaded} documents: ${state.error?.headline ?? 'the store did not answer.'}`, loadMore: false, caveat: null, retry: true };
 		case 'paused':
@@ -356,7 +370,7 @@ export function pagerFooter(state: IPagerState): IPagerFooter | null {
 export function directoryHeading(state: IPagerState): string {
 	if (state.total !== null) return `${formatCount(state.total)} ${state.total === 1 ? 'document' : 'documents'}`;
 	const n = state.rows.length;
-	if (state.status === 'done') return `${formatCount(n)} ${n === 1 ? 'document' : 'documents'}`;
+	if (listingComplete(state)) return `${formatCount(n)} ${n === 1 ? 'document' : 'documents'}`;
 	return `${formatCount(n)} loaded`;
 }
 
@@ -413,10 +427,10 @@ export function documentExportRows(items: readonly IDocumentItem[]): IExportRows
  * @returns The line, or null.
  */
 export function sortNote(state: Pick<IPagerState, 'status' | 'storeSorted' | 'rows'>, columnSorted: boolean): string | null {
-	if (state.status === 'done' || state.status === 'idle' || state.rows.length === 0) return null;
+	if (listingComplete(state) || state.status === 'idle' || state.rows.length === 0) return null;
 	if (!columnSorted && state.storeSorted) return null;
 	const n = state.rows.length;
-	return `Sorted within the ${formatCount(n)} loaded ${n === 1 ? 'document' : 'documents'}; more may exist.`;
+	return `Sorted within the ${formatCount(n)} loaded ${n === 1 ? 'document' : 'documents'}; ${MORE_MAY_EXIST}.`;
 }
 
 /**
@@ -428,7 +442,7 @@ export function sortNote(state: Pick<IPagerState, 'status' | 'storeSorted' | 'ro
  */
 export function listCountText(shown: number, state: Pick<IPagerState, 'status' | 'rows'>): string {
 	const loaded = state.rows.length;
-	if (state.status === 'done') return shown === loaded ? `${formatCount(loaded)} ${loaded === 1 ? 'document' : 'documents'}` : `${formatCount(shown)} of ${formatCount(loaded)} documents`;
+	if (listingComplete(state)) return shown === loaded ? `${formatCount(loaded)} ${loaded === 1 ? 'document' : 'documents'}` : `${formatCount(shown)} of ${formatCount(loaded)} documents`;
 	return shown === loaded ? `${formatCount(loaded)} loaded` : `${formatCount(shown)} of ${formatCount(loaded)} loaded`;
 }
 

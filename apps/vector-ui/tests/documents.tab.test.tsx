@@ -326,12 +326,14 @@ test("controls that go away when they act hand the focus to the grid's row, neve
 	const read = (file: string): string => fs.readFileSync(path.join(__dirname, '..', 'src', 'components', file), 'utf8');
 	const documents = read('DocumentsTab.tsx');
 	for (const control of ['thenGrid(() => setFolder(null))', 'thenGrid(() => scopeToFolder(folder.prefix))', 'thenGrid(() => reviewStore.set(false))', 'thenGrid(() => entry.controller.loadMoreDocuments())', 'thenGrid(() => entry.controller.retryDocuments())', 'thenGrid(() => setForceRail(!forceRail))']) assert.ok(documents.includes(control), control);
-	assert.match(documents, /if \(focusFell\(\)\) grid\.current\?\.focusStop\(\);/);
+	assert.match(documents, /if \(focusFell\(\)\) afterToolGone\(focusChain\(\)\)\?\.focus\(\);/, 'through the pure chain (vector/grid.ts afterToolGone)');
+	assert.match(documents, /if \(focusFell\(\)\) afterDrawerClosed\(grid\.current\?\.rowElement\(was\) \?\? null, focusChain\(\)\)\?\.focus\(\);/, "the drawer's row, else the chain");
 	assert.equal(documents.match(/>\s*Folders\s*</g)?.length, 1, 'one Folders toggle, pressed or not');
-	assert.match(documents, /if \(!grid\.current\?\.focusRow\(objectId\)\) setFocusNonce\(\(n\) => n \+ 1\);/, "a neighbour the grid does not list: the drawer's heading");
+	assert.match(documents, /afterNeighbourChosen\(grid\.current\?\.rowElement\(id\) \?\? null, heading\)\?\.focus\(\);/, "a neighbour: its row when listed, else the drawer's heading");
 	assert.match(read('DocumentDrawer.tsx'), /\{allChunks && \(\s*<GatedButton unavailable=\{mine\?\.hasMore \?/, 'More chunks stays, unavailable once every chunk is read');
 	const trash = read('TrashTab.tsx');
 	for (const control of ['thenGrid(() => entry.controller.loadMoreDocuments())', 'thenGrid(() => entry.controller.retryDocuments())']) assert.ok(trash.includes(control), control);
+	assert.match(trash, /if \(focusFell\(\)\) afterToolGone\(focusChain\(\)\)\?\.focus\(\);/);
 	const grid = read('VectorGrid.tsx');
 	assert.match(grid, /if \(event\.target !== grid\.current \|\| stop < 0\) return;/, 'the grid itself focused: a move key enters at the row in the tab order');
 	assert.match(read('ScopeBar.tsx'), /if \(event\.defaultPrevented \|\| event\.key !== 'Escape' \|\| \(menu === null && editor === null && !saving\)\) return;\s*event\.preventDefault\(\);/);
