@@ -94,7 +94,7 @@ const DOCUMENT_MODES: ReadonlySet<MapColourBy> = new Set(['ingest-date', 'file-s
 export const TABLE_UNSUPPORTED = 'This store node does not mark table chunks; update the node.';
 
 /** None of the sample's documents is among the listed documents (the Documents tab's listing) yet. */
-export const DOCUMENT_ROWS_NONE = "None of this sample's documents is in the document list yet, so there are no details to colour by. The Documents tab lists them.";
+export const DOCUMENT_ROWS_NONE = "None of this sample's documents is among the documents listed so far, so there are no details to colour by.";
 
 /** Why a document-detail mode has nothing to show. */
 const DOCUMENT_FIELD_MISSING: Record<'ingest-date' | 'file-size' | 'ingest-node', string> = {

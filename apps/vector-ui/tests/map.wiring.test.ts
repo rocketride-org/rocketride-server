@@ -78,7 +78,7 @@ test('every removal on the map goes to the console uncut: staged where it stages
 	const view = read('views/MapView.tsx');
 	assert.match(view, /<SelectionTab[\s\S]*?onRemove=\{\(ids\) => removeDocuments\(ids\)\}/);
 	const remove = callbackBody(view, 'removeDocuments');
-	assert.match(remove, /if \(actions\.stageRemove && sample\) actions\.stageRemove\(removeTargetsOf\(sample, objectIds\)\);\s*else actions\.requestRemove\(objectIds\);/, 'staged with the sample\'s paths, else confirmed');
+	assert.match(remove, /if \(actions\.stageRemove && sample\) \{\s*const targets = removeTargetsOf\(sample, objectIds\);\s*actions\.stageRemove\(targets\);\s*actions\.announce\(stagedAnnouncement\(targets\.length\)\);\s*\} else actions\.requestRemove\(objectIds\);/, 'staged with the sample\'s paths and announced, else confirmed');
 	assert.equal((view.match(/actions\.requestRemove\(/g) ?? []).length, 1, 'removeDocuments is the one way out');
 	assert.doesNotMatch(view, /requestRemove\([^)]*\.slice\(|\.slice\(0, limits\.write_ids_max\)/, 'the map never truncates a removal to write_ids_max');
 });
@@ -230,7 +230,8 @@ test('the slow-frame rule drops to 3 edges per point only while edgesAutoDegrade
 	assert.match(body, /if \(!edgesAutoDegrade \|\| edges !== 'neighbours' \|\| edgesPerPoint <= 3\) return;/);
 	assert.match(view, /const edgesAutoDegrade = props\.edgesAutoDegrade !== false;/);
 	const canvas = read('components/PointCanvas.tsx');
-	assert.match(canvas, /if \(edgesDrawn && ended - started > SLOW_FRAME_MS\)/, 'only frames that drew edges count');
+	assert.match(canvas, /if \(countsAsSlowEdges\(\{ drewEdges: edgesDrawn, dimRebuild: cache\.dimRebuild, ms: ended - started \}, SLOW_FRAME_MS\)\)/, 'only frames that drew edges count, and never one rebuilt only for a new dimming');
+	assert.match(canvas, /cache\.dimRebuild = cache\.edges === edges && cache\.positions === positions && camera\.mode === '2d' && cache\.dimVersion !== dim\.version;/);
 	assert.match(canvas, /cache\.slow >= 2 && !cache\.fired/, 'twice, then once per edge set');
 });
 
@@ -353,4 +354,14 @@ test('every overlay mark the view hands the canvas reaches the frame: the shown 
 	assert.ok(model, 'the overlay model');
 	assert.match(model[1] as string, /duplicateRings: o\.duplicateRings \?\? \[\]/);
 	assert.match(model[1] as string, /faded: dim\.mask/);
+});
+
+test('an open popover closes when its container changes width without the window (a split pane), focus back on its button; hovering a label fades like hovering a point', () => {
+	const hook = read('components/AdvancedPopover.tsx');
+	assert.match(hook, /new ResizeObserver\(\(entries\) => \{[\s\S]*?if \(width === null\) width = next;\s*else if \(next !== width\) closeRef\.current\(true\);/);
+	assert.match(hook, /observer\?\.disconnect\(\);/);
+	const canvas = read('components/PointCanvas.tsx');
+	assert.match(canvas, /hoverUnderRef\.current = index !== null \? \(clusterOf\?\.\[index\] \?\? -1\) : cluster;\s*holdHover\(\);/, 'a point\'s cluster, else the hovered label\'s');
+	assert.match(canvas, /const cluster = !p\.dimmed && p\.dimOnHover && clusterOf !== null \? \(hoverHoldRef\.current\.cluster \?\? -1\) : -1;/, 'the held cluster fades the rest');
+	assert.match(canvas, /if \(action === null \|\| \(action === 'clear' && props\.canClear === false\)\) return;/, 'Escape with nothing to clear is not the map\'s');
 });

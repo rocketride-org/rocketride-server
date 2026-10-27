@@ -387,5 +387,28 @@ test('the export offers what the list shows when a folder or the review narrows 
 	assert.ok(!exportItems.some((i) => i.id === 'directory-shown'), 'nothing narrows the list: no such item');
 	const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'DocumentsTab.tsx'), 'utf8');
 	assert.match(source, /if \(event\.defaultPrevented \|\| event\.key !== 'Escape' \|\| drawerId === null\) return;\s*event\.preventDefault\(\);\s*setDrawerOpen\(false\);/);
-	assert.match(source, /sortVersion=\{sort\?\.column === 'status' \? staged : sort\?\.column === 'health' \? healthOf : null\}/, 'Status and Health sort again when their values change');
+	assert.match(source, /sortVersion=\{sort\?\.column === 'status' \? statusSort\.current\.version : sort\?\.column === 'health' \? healthOf : null\}/, 'Status and Health sort again when their values change elsewhere');
+	assert.match(source, /ownTick\.current = next;\s*entry\.staged\.set\(next\);/, "a row's own tick is remembered");
+});
+
+test("a sort by Status follows staging from elsewhere but not a row's own tick, which would move it under the pointer", () => {
+	const { NO_STAGED, statusSortVersion } = require('../src/vector/staged') as typeof import('../src/vector/staged');
+	let state = { version: 0, seen: NO_STAGED };
+	const ticked = stage(NO_STAGED, [{ objectId: 'a', path: 'a.md', chunks: 1 }]);
+	state = statusSortVersion(state, ticked, ticked);
+	assert.equal(state.version, 0, "the grid's own tick: no re-sort");
+	const applied = stage(ticked, [{ objectId: 'b', path: 'b.md', chunks: 1 }]);
+	state = statusSortVersion(state, applied, ticked);
+	assert.equal(state.version, 1, 'Stage all shown, the drawer, the map, Apply or Discard: sorted again');
+	assert.equal(statusSortVersion(state, applied, ticked), state, 'nothing changed: the same state');
+});
+
+test('the folder scope action on a scope already on the list keeps it there, and says so', () => {
+	const entry = panelEntry('k-f11');
+	documentsFolder(entry).set({ kind: 'folder', prefix: 'C:/demo/handbooks/' });
+	const onList = { filter: { file_types: ['md'] }, label: 'file type is md', objectIds: null, overflow: null, applyTo: { documents: true, map: false, search: true, chat: true } };
+	const html = renderDocumentsTab({ entry, directory: listing(ROWS), scope: onList });
+	assert.match(html, /title="The scope gets this folder; the list stays scoped and is listed again with it"[^>]*>Scope the list, search and Ask to this folder<\/button>/);
+	const off = renderDocumentsTab({ entry, directory: listing(ROWS), scope: { ...onList, applyTo: { ...onList.applyTo, documents: false } } });
+	assert.match(off, />Scope search and Ask to this folder<\/button>/);
 });

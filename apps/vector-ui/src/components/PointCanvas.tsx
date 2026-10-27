@@ -36,9 +36,12 @@
 //   - hover shows a tooltip; the overlay draws rings, links, the star and rays;
 //   - dimming: the view's `dimmed` points (a selection, a highlighted set) are
 //     faded toward the surface and drawn under the rest; without one, hovering
-//     a point of a cluster fades the other clusters (when `dimOnHover`). An
+//     a point or a label of a cluster fades the other clusters (when
+//     `dimOnHover`), held through the gaps between points and released 150 ms
+//     after the pointer is over no point (map/interaction.ts hoverHold). An
 //     edge with both ends faded is faded too, and a cluster label whose medoid
-//     is faded is not drawn.
+//     is faded is not drawn. A frame that rebuilt the edges only for a new
+//     dimming does not count toward dropping edges.
 //
 // Canvas rules: the size is observed (ResizeObserver), the backing store is
 // never 0x0 and follows devicePixelRatio, the map redraws when revealed, a lost
@@ -85,7 +88,8 @@ import { recallCamera, rememberCamera } from '../map/cameraMemory';
 import { opaqueOver, parseColor } from '../map/contrast';
 import { incidentEdges } from '../map/graph';
 import type { IEdgeSet } from '../map/graph';
-import { createFrameStats, createGesture, keyAction, wheelZoomFactor } from '../map/interaction';
+import { NO_HOVER, countsAsSlowEdges, createFrameStats, createGesture, hoverHold, keyAction, wheelZoomFactor } from '../map/interaction';
+import type { IHoverHold } from '../map/interaction';
 import type { KeyAction } from '../map/interaction';
 import { lassoSelect, simplifyPath } from '../map/lasso';
 import { buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, extrasDataset, fadedEdgeColours, overlayDataset, strokeEdgePaths } from '../map/overlay';
@@ -135,6 +139,8 @@ export interface PointCanvasProps extends ContractPointCanvasProps {
 	onFocusMove?(index: number): void;
 	/** Enter, Escape or L on the map. */
 	onKeyAction?(action: KeyAction): void;
+	/** False when Escape has nothing to clear: the key is then left to whatever is around the map (not prevented). */
+	canClear?: boolean;
 	/** Which renderer runs. */
 	onRendererInfo?(kind: 'webgl' | 'canvas2d' | 'none'): void;
 	/** The layout shown (data-layout; 'pca' when not given). */
@@ -189,6 +195,8 @@ interface IEdgeCache {
 	fadedSegments: number;
 	/** The dimming the paths were split by (IDimApplied.version). */
 	dimVersion: number;
+	/** The last redraw rebuilt the paths only because the dimming changed (it does not count as a slow edge frame). */
+	dimRebuild: boolean;
 	/** camera|size|dpr|colours|dimming of the last redraw ('' forces one). */
 	drawnKey: string;
 	/** Frames over SLOW_FRAME_MS that drew edges, and whether onSlowEdges was called for this set. */
@@ -247,7 +255,7 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const edgeRef = useRef<HTMLCanvasElement>(null);
 	const overlayRef = useRef<HTMLCanvasElement>(null);
-	const edgeCacheRef = useRef<IEdgeCache>({ edges: null, positions: null, dims: 2, paths: [], fadedPaths: [], segments: 0, fadedSegments: 0, dimVersion: -1, drawnKey: '', slow: 0, fired: false });
+	const edgeCacheRef = useRef<IEdgeCache>({ edges: null, positions: null, dims: 2, paths: [], fadedPaths: [], segments: 0, fadedSegments: 0, dimVersion: -1, dimRebuild: false, drawnKey: '', slow: 0, fired: false });
 	const fitScaleRef = useRef<number | null>(null);
 	const labelBoxesRef = useRef<IExtrasDrawn['boxes']>([]);
 	const hoveredClusterRef = useRef<number | null>(null);
@@ -258,6 +266,10 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 	const gestureRef = useRef(createGesture());
 	const lassoRef = useRef<number[]>([]);
 	const hoveredRef = useRef<number | null>(null);
+	// The hovered cluster the map keeps lit, held through the gaps between its points, and its release timer.
+	const hoverHoldRef = useRef<IHoverHold>(NO_HOVER);
+	const hoverUnderRef = useRef<number | null>(null);
+	const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	// What the renderer was last told to fade: the view's mask, or the hovered cluster's number, and the surface.
 	const dimRef = useRef<IDimApplied>(NOT_DIMMED);
 	const frameRef = useRef(0);
@@ -344,7 +356,10 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 		}
 		const rebuild = cache.edges !== edges || cache.positions !== positions || cache.dimVersion !== dim.version || camera.mode === '3d';
 		const key = `${cameraSignature(camera)}|${size.width}x${size.height}@${size.dpr}|${colour.join(' ')}|${dim.version}`;
+		cache.dimRebuild = false;
 		if (!rebuild && key === cache.drawnKey) return false;
+		// Rebuilt only for a new dimming (a hover, a selection): not a frame the edge count made slow.
+		cache.dimRebuild = cache.edges === edges && cache.positions === positions && camera.mode === '2d' && cache.dimVersion !== dim.version;
 		ctx.setTransform(1, 0, 0, 1, 0, 0);
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 		cache.drawnKey = key;
@@ -407,8 +422,8 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 		const points = dataRef.current;
 		const surface = coloursRef.current.overlay.surface;
 		const clusterOf = p.clusterOf ?? null;
-		const hovered = hoveredRef.current;
-		const cluster = !p.dimmed && p.dimOnHover && clusterOf !== null && hovered !== null ? (clusterOf[hovered] ?? -1) : -1;
+		// The held hovered cluster (a point's, or a label's): it holds through the gaps between points (hoverHold).
+		const cluster = !p.dimmed && p.dimOnHover && clusterOf !== null ? (hoverHoldRef.current.cluster ?? -1) : -1;
 		const source = p.dimmed ?? (cluster >= 0 ? cluster : null);
 		const now = dimRef.current;
 		if (now.source === source && now.surface === surface && now.data === points) return now;
@@ -504,7 +519,7 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 		statsRef.current.record(ended - started);
 		drawCountRef.current += 1;
 		const cache = edgeCacheRef.current;
-		if (edgesDrawn && ended - started > SLOW_FRAME_MS) {
+		if (countsAsSlowEdges({ drewEdges: edgesDrawn, dimRebuild: cache.dimRebuild, ms: ended - started }, SLOW_FRAME_MS)) {
 			cache.slow += 1;
 			if (cache.slow >= 2 && !cache.fired) {
 				cache.fired = true;
@@ -690,6 +705,31 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 		requestDraw();
 	}, [props.centreOn, requestDraw]);
 
+	/**
+	 * Move the held hovered cluster on (map/interaction.ts hoverHold) to what is under the pointer now, and look
+	 * again when a pending release is due; draw when the cluster changed.
+	 */
+	const holdHover = useCallback((): void => {
+		if (hoverTimerRef.current !== null) {
+			clearTimeout(hoverTimerRef.current);
+			hoverTimerRef.current = null;
+		}
+		const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+		const { hold, recheckIn } = hoverHold(hoverHoldRef.current, hoverUnderRef.current, now);
+		const changed = hold.cluster !== hoverHoldRef.current.cluster;
+		hoverHoldRef.current = hold;
+		if (changed) requestDraw();
+		if (recheckIn !== null) hoverTimerRef.current = setTimeout(holdHover, recheckIn);
+	}, [requestDraw]);
+
+	// The release timer goes with the canvas.
+	useEffect(
+		() => () => {
+			if (hoverTimerRef.current !== null) clearTimeout(hoverTimerRef.current);
+		},
+		[],
+	);
+
 	/** The point under a screen position. */
 	const pick = useCallback((x: number, y: number): number | null => {
 		const screen = screenRef.current;
@@ -756,6 +796,10 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 				hoveredClusterRef.current = cluster;
 				requestDraw();
 			}
+			// The cluster the map keeps lit: the point's, else the label's (held through the gaps between points).
+			const clusterOf = propsRef.current.clusterOf ?? null;
+			hoverUnderRef.current = index !== null ? (clusterOf?.[index] ?? -1) : cluster;
+			holdHover();
 		};
 		const onUp = (event: PointerEvent): void => {
 			const [x, y] = local(event);
@@ -773,6 +817,9 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 			gesture.cancel();
 			lassoRef.current = [];
 			hoveredClusterRef.current = null;
+			// Left the canvas: the held cluster goes after the hold.
+			hoverUnderRef.current = null;
+			holdHover();
 			if (hoveredRef.current !== null) {
 				hoveredRef.current = null;
 				propsRef.current.onHover(null);
@@ -803,12 +850,12 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 			el.removeEventListener('wheel', onWheel);
 		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [pick, requestDraw]);
+	}, [pick, requestDraw, holdHover]);
 
 	/** Keys on the focused map (the container's own handler; nothing is stopped). */
 	const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
 		const action = keyAction(event.key, event);
-		if (action === null) return;
+		if (action === null || (action === 'clear' && props.canClear === false)) return;
 		event.preventDefault();
 		const camera = cameraRef.current;
 		const vp = viewport();

@@ -778,9 +778,11 @@ export function scopeWith(scope: IScopeState | null | undefined, text: string, c
 }
 
 /**
- * The surfaces a folder scope set from the Documents tab applies to: the scope's own (else every one) but never the
- * documents list, which keeps its folder view of what is loaded (C2: the list is not listed again, the rail keeps the
- * folder's siblings). With none of search, map and chat on, all three.
+ * The surfaces a folder scope set from the Documents tab applies to: the scope's own (else every one; with none of
+ * search, map and chat on, all three). The documents list stays as it was: a scope already on the list keeps it there
+ * (the user chose that, and the list is listed again with the folder added, on the server where the store filters),
+ * and a fresh scope, or one off the list, leaves the list on its folder view of what is loaded (C2: no new listing,
+ * the rail keeps the folder's siblings).
  *
  * @param prev - The scope before, or null.
  * @returns The targets.
@@ -788,12 +790,12 @@ export function scopeWith(scope: IScopeState | null | undefined, text: string, c
 export function folderScopeTargets(prev: Pick<IScopeState, 'applyTo'> | null | undefined): IScopeTargets {
 	const base = prev?.applyTo ?? ALL_TARGETS;
 	const some = base.map || base.search || base.chat;
-	return { ...(some ? base : ALL_TARGETS), documents: false };
+	return { ...(some ? base : ALL_TARGETS), documents: prev?.applyTo.documents === true };
 }
 
 /**
  * The scope "to this folder" from the Documents tab: the folder condition joins the scope's others (and the path box),
- * for search, the map and Ask only ({@link folderScopeTargets}).
+ * on the surfaces of {@link folderScopeTargets}.
  *
  * @param scope - The scope before, or null.
  * @param text - The path box.
@@ -806,13 +808,13 @@ export function folderScope(scope: IScopeState | null | undefined, text: string,
 }
 
 /**
- * The words of the folder scope action, naming exactly the surfaces it scopes.
+ * The words of the folder scope action, naming exactly the surfaces it scopes (the list first when it is one).
  *
  * @param targets - Its targets ({@link folderScopeTargets}).
- * @returns e.g. 'Scope search, map and Ask to this folder'.
+ * @returns e.g. 'Scope search, map and Ask to this folder', 'Scope the list, search and Ask to this folder'.
  */
 export function folderScopeLabel(targets: IScopeTargets): string {
-	const names = [targets.search ? 'search' : null, targets.map ? 'map' : null, targets.chat ? 'Ask' : null].filter((n): n is string => n !== null);
+	const names = [targets.documents ? 'the list' : null, targets.search ? 'search' : null, targets.map ? 'map' : null, targets.chat ? 'Ask' : null].filter((n): n is string => n !== null);
 	const list = names.length <= 1 ? (names[0] ?? 'search, map and Ask') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 	return `Scope ${list} to this folder`;
 }

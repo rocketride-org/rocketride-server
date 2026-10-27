@@ -29,7 +29,8 @@
 // it is never behind a popover), then Advanced and the view's menus
 // (`extras`: Export, Views). Under it, a status line of its own, always there
 // at the same height: the busy words (a live region) and Cancel while a
-// layout runs, empty when idle. Nothing moves when a run starts or ends, and
+// layout runs, and Clear (lasso selection, highlight, selection: what Escape
+// on the map clears next) while something is lit, empty when idle. Nothing moves when a run starts or ends, and
 // nothing floats over the map or the rows under the toolbar.
 // The row is kept compact (a 120 px query box, 6 px gaps) so it is one row in
 // a dev-tool frame at 1440 too (measured: its controls span 1,061 px).
@@ -101,6 +102,8 @@ export interface MapToolbarProps extends Omit<ContractMapToolbarProps, 'colourBy
 	extras?: ReactNode;
 	/** Open Advanced at first (only its starting state; the tests render it open). */
 	initialAdvanced?: boolean;
+	/** What the map can clear next (a lasso, a highlight, the selection), shown on the status line; null for nothing. */
+	clear?: { label: string; onClear(): void } | null;
 }
 
 /** The edge modes. */
@@ -406,6 +409,11 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 					{props.busy ?? ''}
 				</span>
 				{props.busy && props.canCancel ? <CancelButton onCancel={props.onCancel} root={root} /> : null}
+				{props.clear ? (
+					<button type="button" style={S.cancel} onClick={props.clear.onClear} data-map-clear="">
+						{props.clear.label}
+					</button>
+				) : null}
 			</div>
 			{queryWhy ? (
 				<span id={queryWhyId} style={S.described}>

@@ -257,7 +257,7 @@ test('the scope: the listing asks for its conditions, its documents resolve from
 	// A folder in the rail narrows what is loaded; setting the scope to it is its own, explicit action (C2).
 	assert.match(dir, /folderRows\(view\.rows, folder\)/);
 	assert.match(dir, /\{folderScopeLabel\(folderTargets\)\}/, 'the action names the surfaces it scopes');
-	assert.match(dir, /const next = folderScope\(scope, applied, prefix\);\s*const refused = checkScope\(next\);\s*setFolderError\(refused\);\s*if \(refused === null\) onScope\(next\);/, 'a folder the node would refuse is said, never sent; the list keeps its folder view (R1-I4)');
+	assert.match(dir, /const next = folderScope\(scope, applied, prefix\);\s*const refused = checkScope\(next\);\s*setFolderError\(refused\);\s*if \(refused === null\) onScope\(next\);/, 'a folder the node would refuse is said, never sent; folderScope decides whether the list is scoped (R1-I4, F1-1)');
 	assert.match(dir, /\{folderError !== null && \(\s*<div role="alert"[^>]*>\s*\{folderError\}/);
 	assert.doesNotMatch(code('components/FolderRail.tsx'), /onScope|setFilter|scopeWith/, 'the rail never changes the scope or the listing');
 });

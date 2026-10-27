@@ -16,7 +16,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { hiddenMask, normaliseLayout, pcaPositions } from '../src/map/model';
-import { combineMasks, expandByNeighbours, isolateMask, isolationLine, shownCount } from '../src/map/isolate';
+import { CLEAR_LABELS, clearStep, combineMasks, expandByNeighbours, isolateMask, isolationLine, shownCount } from '../src/map/isolate';
 import { lassoSelect } from '../src/map/lasso';
 import { buildScreenIndex, nearestInSector, pickNearest } from '../src/map/picking';
 import { knnFromRows, loadSample, modelOf } from './support/map.samples';
@@ -89,4 +89,12 @@ test('the layouts frame only the isolated points: normaliseLayout centres and sc
 		cy += isolated.positions[2 * i + 1] as number;
 	}
 	assert.ok(Math.abs(cx / keep.length) < 1e-4 && Math.abs(cy / keep.length) < 1e-4, 'the isolated points are centred');
+});
+
+test('Escape clears one thing a press, in order: the lasso, then a highlight, then the selection; nothing left, nothing to clear', () => {
+	assert.equal(clearStep({ lasso: true, highlight: true, selection: true }), 'lasso');
+	assert.equal(clearStep({ lasso: false, highlight: true, selection: true }), 'highlight');
+	assert.equal(clearStep({ lasso: false, highlight: false, selection: true }), 'selection');
+	assert.equal(clearStep({ lasso: false, highlight: false, selection: false }), null);
+	assert.deepEqual(CLEAR_LABELS, { lasso: 'Clear lasso selection', highlight: 'Clear highlight', selection: 'Clear selection' });
 });
