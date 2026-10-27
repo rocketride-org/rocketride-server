@@ -454,10 +454,11 @@ async function cmdRun(a: Record<string, string>): Promise<number> {
 // =============================================================================
 
 /** Starts the branch-built engine with the skill, and fingerprints its Variables in a process that holds the keys. */
-async function startEngine(prov: Provenance): Promise<{ variables: string[]; fingerprints: string }> {
+export async function startEngine(prov: Provenance): Promise<{ variables: string[]; fingerprints: string }> {
 	if (!proc.env.EVAL_LOCK_HELD) throw new Error('L3 must run under the 5565 lock (run.ts takes it itself; this is a runner bug)');
 	log('starting the branch-built engine through the verify skill (rr-verify-agent launch --engine source --engine-only)');
-	const launched = spawnSync(SKILL, ['launch', '--engine', 'source', '--engine-only'], { stdio: ['ignore', 'inherit', 'inherit'], env: { ...proc.env, RR_VERIFY_LOCK_HELD: '1' } });
+	// the skill's tokenstash runs in RR_VERIFY_KEYS_DIR, so EVAL_KEYS_DIR goes there
+	const launched = spawnSync(SKILL, ['launch', '--engine', 'source', '--engine-only'], { stdio: ['ignore', 'inherit', 'inherit'], env: { ...proc.env, RR_VERIFY_KEYS_DIR: keysDir(), RR_VERIFY_LOCK_HELD: '1' } });
 	if (launched.status !== 0) {
 		stopEngine();
 		throw new Error(`the engine did not start (rr-verify-agent launch exited ${launched.status})`);
@@ -465,7 +466,7 @@ async function startEngine(prov: Provenance): Promise<{ variables: string[]; fin
 	const variables = fs.existsSync(path.join(STATE_DIR, 'engine-vars.txt')) ? fs.readFileSync(path.join(STATE_DIR, 'engine-vars.txt'), 'utf8').split('\n').filter(Boolean) : [];
 	const fingerprints = path.join(STATE_DIR, 'eval-fingerprints.json');
 	// tokenstash runs in the keys folder, so the command moves back to apps/shared, where tsx resolves
-	const made = spawnSync(SKILL, ['keys', 'env', '-C', SHARED_DIR, proc.execPath, '--import', 'tsx', path.join(EVAL_DIR, 'run.ts'), 'fingerprint', fingerprints, ...variables], { cwd: SHARED_DIR, stdio: ['ignore', 'inherit', 'inherit'], env: proc.env });
+	const made = spawnSync(SKILL, ['keys', 'env', '-C', SHARED_DIR, proc.execPath, '--import', 'tsx', path.join(EVAL_DIR, 'run.ts'), 'fingerprint', fingerprints, ...variables], { cwd: SHARED_DIR, stdio: ['ignore', 'inherit', 'inherit'], env: { ...proc.env, RR_VERIFY_KEYS_DIR: keysDir() } });
 	if (made.status !== 0) throw new Error('could not fingerprint the engine Variables');
 	let engine: unknown = 'unknown';
 	try {

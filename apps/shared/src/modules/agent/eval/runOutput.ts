@@ -107,7 +107,8 @@ export function expectationFailures(expect: Record<string, unknown>, out: { answ
 	const fails: string[] = [];
 	const answers = out.answers.join('\n');
 	const text = (out.text.length ? out.text : out.answers).join('\n');
-	const all = [answers, text].filter(Boolean).join('\n');
+	// each output once: `text` falls back to the answers when there is no text lane
+	const all = [...out.answers, ...out.text].join('\n');
 	// every answer must match: a translate pipeline that also answers the question in English is the failure build-05 looks for,
 	// and build-10's two models must both say it
 	if (typeof expect.answers_match === 'string') {
@@ -123,7 +124,8 @@ export function expectationFailures(expect: Record<string, unknown>, out: { answ
 	if (typeof expect.answers_count_at_least === 'number' && out.answers.length < expect.answers_count_at_least) fails.push(`${out.answers.length} answers, wanted at least ${expect.answers_count_at_least}`);
 	if (typeof expect.answers_max_sentences === 'number') {
 		const worst = Math.max(0, ...out.answers.map((a) => a.split(/[.!?]+(?:\s+|$)/).filter((s) => s.trim()).length));
-		if (worst > expect.answers_max_sentences) fails.push(`an answer has ${worst} sentences, wanted at most ${expect.answers_max_sentences}`);
+		if (!out.answers.some((a) => a.trim())) fails.push(`no answer, wanted one with at most ${expect.answers_max_sentences} sentences`);
+		else if (worst > expect.answers_max_sentences) fails.push(`an answer has ${worst} sentences, wanted at most ${expect.answers_max_sentences}`);
 	}
 	if (typeof expect.text_match === 'string' && !pyRegex(expect.text_match, 's').test(text)) fails.push(`no text matches ${expect.text_match}`);
 	if (typeof expect.text_not_match === 'string' && pyRegex(expect.text_not_match, 's').test(text)) fails.push(`the text matches ${expect.text_not_match}`);

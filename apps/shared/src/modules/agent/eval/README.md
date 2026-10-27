@@ -84,7 +84,7 @@ Every turn ends with the product's TurnResult (`turn.ts`). The trial keeps it on
 - **check_app_passes** copies the app out of the final workspace and runs its own build script, `tsc --noEmit && rsbuild build`, with this checkout's React, rsbuild and Module Federation plugin, `rocketride` from packages/client-typescript, and `shell` typed by the newest frozen contract (packages/shell/contract/versions). It runs in every layer, since the runner is the host stub the scenarios README asks for. done_implies_checks_pass uses it for every app a run changed.
 - **run_output** (L3) starts the saved pipeline, sends the scenario's input and checks the output. `answers_match` holds only when every answer matches, so a translate pipeline that also answers the question fails, and both of build-10's models must answer. It is pending when the input is not made yet (`pending`), when the check needs an outside service not named in `EVAL_SERVICES` (`needs`), or when the pipeline uses a Variable the engine lacks.
 
-`run.ts selftest` gives each a passing control and a planted failure, and checks that the validator refuses planted defects by name. `selftest --layer L3` runs run_output against the engine.
+`run.ts selftest` gives each a passing control and a planted failure, and checks that the validator refuses planted defects by name. `selftest --layer L3` runs run_output against the engine. The unit tests next to the runner (`*.test.ts`) run in `./builder shared:test`.
 
 ## L1 recordings
 

@@ -203,6 +203,11 @@ export function writeReport(dir: string, prov: Provenance, results: ScenarioResu
 		md.push(row(['scenario', 'trial', 'turns', 'turn results', 'waves per turn', 'tool calls', 'model calls', 'repeated identical calls', 'longest run', 'tool errors', 'GATE_STATE failures', 'done refusals', 'confirms', 'tokens in/out/cache read', 'cost', 'est. tokens in/out', 'est. cost', 'wall s']));
 		md.push(row(Array(18).fill('---')));
 		for (const r of ran) {
+			// a crashed trial's record is its log, with no diagnostics
+			if (!Array.isArray(r.diagnostics.wavesPerTurn)) {
+				md.push(row([r.scenario, r.trial, 'no record', ...Array(15).fill('-')]));
+				continue;
+			}
 			const d = r.diagnostics as Record<string, unknown> & { tokens: { input: number; output: number; cacheRead: number } | null; estimatedTokens: { input: number; output: number } | null; estimatedCostUsd: number | null };
 			md.push(row([r.scenario, r.trial, String(d.turns), ((d.turnResults as string[] | undefined) ?? []).join(', '), (d.wavesPerTurn as number[]).join('/'), String(d.toolCalls), String(d.modelCalls), String(d.repeated), String(d.longestRun), String(d.toolErrors), String(d.gateStateWriteFailures), String(d.doneRefusals), String(d.confirms), d.tokens ? `${d.tokens.input}/${d.tokens.output}/${d.tokens.cacheRead}` : 'not reported', d.costUsd === null || d.costUsd === undefined ? '-' : `$${(d.costUsd as number).toFixed(2)}`, d.estimatedTokens ? `${d.estimatedTokens.input}/${d.estimatedTokens.output}` : '-', d.estimatedCostUsd === null || d.estimatedCostUsd === undefined ? '-' : `~$${d.estimatedCostUsd.toFixed(2)}`, Math.round(Number(d.wallMs) / 1000)]));
 		}

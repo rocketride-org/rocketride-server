@@ -83,7 +83,12 @@ if [[ "$MODE" == source ]]; then
 	echo "$RUN_ID" >"$STATE_DIR/engine.run"
 else
 	# Fresh container, empty data. Keys go in by name only (-e NAME).
-	docker rm -f "$ENGINE_NAME" >/dev/null 2>&1 || true
+	# The name is the same in every checkout: remove only a container with our label.
+	if docker inspect "$ENGINE_NAME" >/dev/null 2>&1; then
+		[[ "$(docker inspect -f "{{index .Config.Labels \"$ENGINE_LABEL\"}}" "$ENGINE_NAME" 2>/dev/null)" == "1" ]] \
+			|| die "a container named $ENGINE_NAME exists without the label $ENGINE_LABEL=1, so this skill did not start it. Never removing it. Set RR_VERIFY_ENGINE_NAME to use another name."
+		docker rm -f "$ENGINE_NAME" >/dev/null 2>&1 || true
+	fi
 	with_model_keys docker run -d --name "$ENGINE_NAME" --label "$ENGINE_LABEL=1" -p "127.0.0.1:$ENGINE_PORT:5565" \
 		-e ROCKETRIDE_APIKEY="$APIKEY" -e ROCKETRIDE_ANTHROPIC_KEY -e ROCKETRIDE_OPENAI_KEY "$ENGINE_IMAGE" >/dev/null \
 		|| die "engine container did not start"

@@ -98,7 +98,7 @@ function makeTestAction() {
 
 /**
  * Runs the eval runner. Its files are not named *.test.ts, so shared:test
- * never picks them up.
+ * runs only the runner's unit tests (eval/*.test.ts), never the runner.
  *
  * @returns {object} Action with run function.
  */

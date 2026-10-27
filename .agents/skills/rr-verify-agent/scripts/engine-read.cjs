@@ -19,9 +19,10 @@
 //   node engine-read.cjs status <token>                the run's status, or {"gone": true}, JSON out
 //   node engine-read.cjs terminate <token>             stop a run (cleanup)
 //
-// Env: RR_VERIFY_ENGINE (default http://127.0.0.1:5565), RR_VERIFY_APIKEY
-// (default local-test), RR_VERIFY_CANARY (fake keys, comma-separated, allowed
-// through the evidence scrubber so a leak stays visible).
+// Env: RR_VERIFY_APIKEY (default local-test), RR_VERIFY_CANARY (fake keys,
+// comma-separated, allowed through the evidence scrubber so a leak stays
+// visible). The engine is always http://127.0.0.1:5565, where launch starts it;
+// RR_VERIFY_ENGINE is launch's mode (source or image), not a URL.
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -31,7 +32,8 @@ const ROOT = execSync('git rev-parse --show-toplevel', { cwd: __dirname }).toStr
 // The checkout's built client, resolved from apps/shared, not from this folder.
 // eslint-disable-next-line n/no-missing-require
 const { RocketRideClient } = require(require.resolve('rocketride', { paths: [path.join(ROOT, 'apps/shared')] }));
-const URI = process.env.RR_VERIFY_ENGINE || 'http://127.0.0.1:5565';
+// Pinned, like ENGINE_PORT in lib.sh, because the shell's dev proxy sends the page there.
+const URI = 'http://127.0.0.1:5565';
 const APIKEY = process.env.RR_VERIFY_APIKEY || 'local-test';
 const CANARIES = (process.env.RR_VERIFY_CANARY || '').split(',').filter(Boolean);
 const PROJECTS = '.projects';

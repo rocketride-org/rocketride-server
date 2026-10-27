@@ -36,7 +36,7 @@ The shell's dev proxy pins the engine at `localhost:5565` (packages/shell/rsbuil
   ```bash
   flock /tmp/rr-verify-5565.lock bash -c 'S=.agents/skills/rr-verify-agent/scripts; $S/rr-verify-agent launch && $S/rr-verify-agent drive build-pipeline; $S/rr-verify-agent cleanup'
   ```
-- `launch` refuses to start when 5565, 3000 or 3010 is held by anything it did not start. Never stop someone else's engine or container to make room.
+- `launch` refuses to start when 5565, 3000 or 3010 is held by anything it did not start, or when a container named `rr-verify-agent-engine` exists without the label `rr-verify-agent=1`. Never stop someone else's engine or container to make room.
 
 `run` takes each journey as one argument. Quote a journey that has flags:
 
@@ -101,7 +101,7 @@ Any other WARN means `dist/server` is stale: rerun `build-engine`.
 
 1. Refuses to start if port 5565, 3000 or 3010 is in use (see above). Override the dev ports with `RR_VERIFY_SHELL_PORT` and `RR_VERIFY_UI_PORT`.
 2. Installs what is missing, once per checkout: `CI=true pnpm install --frozen-lockfile`, `./builder client-typescript:build` (the engine reader needs it), and the Playwright helper in `scripts/` (its own package.json, Playwright 1.63.0, never a product dependency).
-3. Starts the engine with empty data. For source, a fresh launcher run (`.verify/agent-<time>-<pid>/`) with a file store of its own, `.verify/agent-state/store` (`RR_STORE_URL`), emptied at each launch. The engine's default store is `~/.rocketlib`, which every local engine of this user shares, and each journey's reset deletes all workspace files and sessions in its store. For image, a fresh container `rr-verify-agent-engine` (label `rr-verify-agent=1`) with no volume. `ROCKETRIDE_APIKEY=local-test` is a local-only test key, not a secret.
+3. Starts the engine with empty data. For source, a fresh launcher run (`.verify/agent-<time>-<pid>/`) with a file store of its own, `.verify/agent-state/store` (`RR_STORE_URL`), emptied at each launch. The engine's default store is `~/.rocketlib`, which every local engine of this user shares, and each journey's reset deletes all workspace files and sessions in its store. For image, a fresh container `rr-verify-agent-engine` (label `rr-verify-agent=1`) with no volume. It replaces an old container of that name only when the old one has the label too. `ROCKETRIDE_APIKEY=local-test` is a local-only test key, not a secret.
 4. Gives the engine the model keys by name only (see Keys).
 5. Waits until the engine is usable: `/version` answers and a signed-in client can list the store. Then records the provenance.
 6. Writes two generated rsbuild wrappers into the gitignored `.rocketride/` folders:
