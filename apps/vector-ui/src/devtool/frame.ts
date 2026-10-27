@@ -320,6 +320,26 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 	let disposed = false;
 	let resetWhy: FrameResetReason | null = null;
 
+	// ── This frame's own state, declared before ANY subscription ─────────────────────────────────
+	// A host's channel replays each retained topic SYNCHRONOUSLY inside onState (the ToolChannel contract). A frame opened
+	// while the controller is already ready therefore hears `ready`, the maps and the identity while this function is
+	// still running, and those handlers read this state (flushHints, the offers, the identity reset). A `let` declared
+	// below the subscription that reaches it would throw ("Cannot access … before initialization") and take the whole
+	// host down. So every variable a handler can reach is declared here, first.
+	// The controller mount this frame last announced itself to (its readiness nonce).
+	let announcedTo: string | null = null;
+	// The console's hints: its query text and its median, and what was last sent of each (per controller).
+	let myQuery: { key: string; nonce: string; text: string | null } | null = null;
+	let mySummary: { key: string; median: number | null } | null = null;
+	let sentQuery = '';
+	let sentSummary = '';
+	let hintTimer: (() => void) | null = null;
+	// Requests for this frame: who takes them, and the last one an event brought.
+	let focusListener: ((chunkId: number) => void) | null = null;
+	let mapListener: ((request: { keys: VectorKey[]; source: HighlightSource }) => void) | null = null;
+	let eventFocus: IFocusRequest | null = null;
+	let eventMap: (IMapRequest & { docKey: string }) | null = null;
+
 	// ── Mirrors of the host's and the controller's retained state ───────────────────────────────
 	const connected = cell<boolean | undefined>(undefined);
 	const endpoints = cell<IVectorEndpointsState>(NO_ENDPOINTS);
@@ -336,7 +356,6 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 	// (the replay of the last frame event goes to its op server, which drops events), so the frame says which document
 	// it is, and sends its hints again, once per nonce.
 	const controllerReady = cell(false);
-	let announcedTo: string | null = null;
 	offs.push(channel.onState(CONTROLLER_STATE_TOPIC, (snapshot) => {
 		const ready = field(snapshot, 'ready');
 		const nonce = typeof ready === 'string' && ready !== '' ? ready : null;
@@ -408,11 +427,6 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 	offs.push(() => focusTarget?.removeEventListener('focus', onFocus));
 
 	// ── The console's hints: its query text and its median, each sent once per controller ───────
-	let myQuery: { key: string; nonce: string; text: string | null } | null = null;
-	let mySummary: { key: string; median: number | null } | null = null;
-	let sentQuery = '';
-	let sentSummary = '';
-	let hintTimer: (() => void) | null = null;
 	function flushHints(): void {
 		if (disposed || announcedTo === null || !controllerReady.get()) return;
 		if (myQuery !== null && queries.get()[myQuery.key]?.nonce !== myQuery.nonce) {
@@ -447,10 +461,6 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 	offs.push(summaries.subscribe(() => flushHints()));
 
 	// ── Requests for this frame, each taken once (realm-wide) and reported taken ────────────────
-	let focusListener: ((chunkId: number) => void) | null = null;
-	let mapListener: ((request: { keys: VectorKey[]; source: HighlightSource }) => void) | null = null;
-	let eventFocus: IFocusRequest | null = null;
-	let eventMap: (IMapRequest & { docKey: string }) | null = null;
 	const offerFocus = (): void => {
 		if (focusListener === null || route.kind !== 'document') return;
 		for (const request of [focus.get()[route.key], eventFocus]) {
