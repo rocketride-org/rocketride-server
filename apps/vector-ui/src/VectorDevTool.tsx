@@ -253,7 +253,11 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 	// into the document; after a confirmation, to its opener while it is shown.
 	const root = useRef<HTMLDivElement>(null);
 	const returnFocus = (opener: HTMLElement | null): HTMLElement | null => documentFocus(root.current, opener) as HTMLElement | null;
+	// Only on a change: when a frame opens, the focus belongs to wherever the user is (the host, another frame).
+	const seen = useRef({ version, gone });
 	useEffect(() => {
+		if (seen.current.version === version && seen.current.gone === gone) return;
+		seen.current = { version, gone };
 		if (typeof document === 'undefined' || !focusLost(document.activeElement, document.body, null)) return;
 		// After a read again or the document going; returnFocus reads the root when it runs.
 		returnFocus(null)?.focus();

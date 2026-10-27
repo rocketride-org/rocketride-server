@@ -31,12 +31,13 @@
 // write's result (removal.audit), and this disclosure, beside the result
 // line (outside its announced text), lists them, one line per batch
 // (vector/confirm.ts auditLines), opening upward over what is above it, so
-// the line keeps its height. Its summary is "Write details", not the
-// header's "Details" (the connection's).
+// the line keeps its height. Like the other popovers, Escape or a press
+// outside closes it (Escape puts the focus back on its summary). Its summary
+// is "Write details", not the header's "Details" (the connection's).
 // Nothing shows while the last write had none.
 // =============================================================================
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { auditLines } from '../vector/confirm';
 import type { IWriteAudit } from '../vector/results';
@@ -68,9 +69,35 @@ export const WRITE_DETAILS_LABEL = 'Write details';
  */
 export function WriteAuditDetails({ audit, label = WRITE_DETAILS_LABEL }: IWriteAuditDetailsProps): React.ReactElement | null {
 	if (!audit || audit.length === 0) return null;
+	return <AuditDisclosure audit={audit} label={label} />;
+}
+
+/** The disclosure itself: open over the panel, closed by Escape or a press outside it. */
+const AuditDisclosure: React.FC<{ audit: readonly IWriteAudit[]; label: string }> = ({ audit, label }) => {
+	const details = useRef<HTMLDetailsElement>(null);
+	const summary = useRef<HTMLElement>(null);
+	const [open, setOpen] = useState(false);
+	useEffect(() => {
+		if (!open) return undefined;
+		const outside = (event: PointerEvent): void => {
+			const node = details.current;
+			if (node && !node.contains(event.target as Node)) node.open = false;
+		};
+		document.addEventListener('pointerdown', outside);
+		return () => document.removeEventListener('pointerdown', outside);
+	}, [open]);
+	const onKeyDown = (event: React.KeyboardEvent): void => {
+		const node = details.current;
+		if (event.defaultPrevented || event.key !== 'Escape' || !node?.open) return;
+		event.preventDefault();
+		node.open = false;
+		summary.current?.focus();
+	};
 	return (
-		<details style={styles.details} data-write-audit="">
-			<summary style={styles.summary}>{label}</summary>
+		<details ref={details} style={styles.details} data-write-audit="" onToggle={() => setOpen(details.current?.open ?? false)} onKeyDown={onKeyDown}>
+			<summary ref={summary} style={styles.summary}>
+				{label}
+			</summary>
 			<ul aria-label="What the store recorded for this write" style={styles.list}>
 				{auditLines(audit).map((line, i) => (
 					<li key={`${i}:${line}`}>{line}</li>
@@ -78,6 +105,6 @@ export function WriteAuditDetails({ audit, label = WRITE_DETAILS_LABEL }: IWrite
 			</ul>
 		</details>
 	);
-}
+};
 
 export default WriteAuditDetails;

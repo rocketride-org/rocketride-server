@@ -155,6 +155,8 @@ export function reprobeFor(tried: string | null, disagree: boolean, key: string)
  * @param objectId - The document shown.
  * @returns True when the view should read the document again.
  */
+// A permanent delete sent with deleted_only leaves a document that still has live chunks whole (kept_live: nothing
+// of it was deleted), and `gone` does not name it, so its view rightly stays as it is.
 export function writeTouches(gone: readonly string[] | undefined, objectId: string): boolean {
 	return !Array.isArray(gone) || gone.length === 0 || gone.includes(objectId);
 }

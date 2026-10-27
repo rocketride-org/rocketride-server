@@ -290,6 +290,7 @@ test('every removal is confirmed inline in the document that shows it, in both m
 	assert.match(devFrame, /<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[live\.key\]\} returnFocus=\{returnFocus\} \/>/);
 	assert.match(devFrame, /if \(typeof document === 'undefined' \|\| !focusLost\(document\.activeElement, document\.body, null\)\) return;\s*returnFocus\(null\)\?\.focus\(\);/, 'and after a read again or the document going');
 	assert.match(devFrame, /<div tabIndex=\{-1\} style=\{styles\.gone\} data-document-gone="">/, 'the gone state can hold the focus');
+	assert.match(devFrame, /const seen = useRef\(\{ version, gone \}\);\s*useEffect\(\(\) => \{\s*if \(seen\.current\.version === version && seen\.current\.gone === gone\) return;\s*seen\.current = \{ version, gone \};\s*if \(typeof document === 'undefined' \|\| !focusLost/, 'only on a change: a frame that opens never takes the focus from the host or another frame');
 	// R1-I7: a dev-tool document reads itself again only for a write that may have changed it.
 	assert.match(devFrame, /version: \(written\) => \{\s*if \(!writeTouches\(written\.gone, objectId\)\) return;/);
 	assert.match(devFrame, /<DocumentView refreshKey=\{version\} /, 'in place: its sub-tab, sort, drawer and focus stay');
@@ -300,6 +301,9 @@ test('every removal is confirmed inline in the document that shows it, in both m
 	assert.match(hub, /slot: \{ flexShrink: 0, boxSizing: 'border-box', height: PENDING_BAR_HEIGHT,/, "exactly the pending bar's height");
 	assert.match(hub, /\{slot === 'pending' && <PendingBar \{\.\.\.panel\(tab\)\} \/>\}/);
 	assert.match(code('components/WriteAuditDetails.tsx'), /list: \{ position: 'absolute', bottom: '100%'/, 'Write details open upward: the line keeps its height');
+	assert.match(code('components/WriteAuditDetails.tsx'), /if \(event\.defaultPrevented \|\| event\.key !== 'Escape' \|\| !node\?\.open\) return;\s*event\.preventDefault\(\);\s*node\.open = false;\s*summary\.current\?\.focus\(\);/, 'Escape closes it (the innermost handler that acts), back to its summary');
+	assert.match(code('components/WriteAuditDetails.tsx'), /document\.addEventListener\('pointerdown', outside\)/, 'and a press outside it');
+	assert.doesNotMatch(code('components/WriteAuditDetails.tsx'), /stopPropagation/);
 	assert.match(app, /origin: documentOrigin\(payload\.objectId\),/, "the tab's actions ask under its origin");
 	for (const file of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/RemoveDialogHost.tsx']) assert.ok(!fs.existsSync(path.join(SRC, file)), `${file}: no modal confirmation is left`);
 	const panel = code('components/InlineRemoveConfirm.tsx');

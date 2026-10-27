@@ -37,6 +37,8 @@ export interface IFocusCandidate {
 	isConnected: boolean;
 	/** Null when it, or an ancestor, is not displayed (display: none). */
 	offsetParent: unknown;
+	/** True for a disabled control (it cannot take the focus); absent on what has no such state. */
+	disabled?: boolean;
 	focus(): void;
 }
 
@@ -54,13 +56,13 @@ export function focusLost(active: unknown, body: unknown, region: { contains(nod
 }
 
 /**
- * The first candidate focus can go to: still on the page and shown.
+ * The first candidate focus can go to: still on the page, shown and not disabled.
  *
  * @param candidates - In order of preference (null for one that does not exist).
  * @returns The candidate, or null when none can take the focus.
  */
 export function firstFocusable<T extends IFocusCandidate>(candidates: ReadonlyArray<T | null | undefined>): T | null {
-	for (const candidate of candidates) if (candidate && candidate.isConnected && candidate.offsetParent !== null) return candidate;
+	for (const candidate of candidates) if (candidate && candidate.isConnected && candidate.offsetParent !== null && candidate.disabled !== true) return candidate;
 	return null;
 }
 
