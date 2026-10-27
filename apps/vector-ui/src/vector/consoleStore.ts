@@ -72,7 +72,7 @@
 // =============================================================================
 
 import type { IChunkItem, IDocumentsFilter } from '../contract/types';
-import { EMPTY_TRASH_MAX_PAGES, QUICK_STATS_INTERVAL_MS } from './budgets';
+import { EMPTY_TRASH_MAX_PAGES, QUICK_STATS_INTERVAL_MS, REPROBE_WAIT_MS } from './budgets';
 import { CONSOLE_ORIGIN, confirmElsewhereText, removalSummary, runRemoval } from './confirm';
 import type { ConfirmOrigin, IRemovalOutcome, IRemoveTarget, RemovalAction } from './confirm';
 import { pagerApplyPage, pagerBegin, pagerFail, pagerInit, pagerLoadMore, pagerPause, pagerResume, pagerWantsPage } from './documents';
@@ -382,18 +382,28 @@ export function createConsoleStore(deps: IConsoleDeps, opts: IConsoleOptions): I
 		return deps.probed !== undefined && !deps.probed();
 	}
 
-	/** Probe the store again, then read (once; a Refresh or Retry while it probes is not asked again). */
+	/**
+	 * Probe the store again, then read (once; a Refresh or Retry while it probes is not asked again). A probe that has
+	 * not answered after REPROBE_WAIT_MS is not waited for any longer: the read goes ahead (and says why it failed), so
+	 * the console is never left checking with Refresh and Retry ignored.
+	 */
 	function afterProbe(read: () => void): void {
 		if (state.checking) return;
 		set({ checking: true });
+		let settled = false;
+		const finish = (): void => {
+			if (settled) return;
+			settled = true;
+			deps.clock.clearTimer(guard);
+			if (disposed) return;
+			// What it reads starts (stats loading) before the check ends, so Refreshing… does not blink.
+			read();
+			set({ checking: false });
+		};
+		const guard = deps.clock.setTimer(finish, REPROBE_WAIT_MS);
 		void Promise.resolve(deps.reprobe?.())
 			.catch(() => undefined)
-			.then(() => {
-				if (disposed) return;
-				// What it reads starts (stats loading) before the check ends, so Refreshing… does not blink.
-				read();
-				set({ checking: false });
-			});
+			.then(finish);
 	}
 
 	/** Start the trash listing over. */

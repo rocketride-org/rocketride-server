@@ -46,6 +46,7 @@ import { appConnections } from './adapters/connections';
 import { activeConnection, announcer, connectionCaches, vectorEndpoints, vectorQueryHistory } from './adapters/explorer';
 import { VectorHistoryPrefsBridge, useEndpointStoreLifecycle } from './adapters/react';
 import RealmLiveRegion from './components/RealmLiveRegion';
+import DocumentWriteLine from './components/DocumentWriteLine';
 import InlineRemoveConfirm from './components/InlineRemoveConfirm';
 import { createDocs, destroyDocs, getDocs, openDocumentTab, takeArrival } from './docs';
 import type { IConsoleDocPayload, IDocumentDocPayload } from './docs';
@@ -232,7 +233,13 @@ const DocumentTab: React.FC<{ uri: string; payload: IDocumentDocPayload; active:
 	}, []);
 	return (
 		<div ref={root} style={styles.documentRoot}>
-			<DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} beforeBody={<InlineRemoveConfirm entry={entry} probe={probes[endpoint.key]} origin={documentOrigin(payload.objectId)} returnFocus={returnFocus} />} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />
+			<DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} beforeBody={
+					<>
+						<InlineRemoveConfirm entry={entry} probe={probes[endpoint.key]} origin={documentOrigin(payload.objectId)} returnFocus={returnFocus} />
+						{/* What this tab's own write did (the console's line leaves it here). */}
+						<DocumentWriteLine entry={entry} origin={documentOrigin(payload.objectId)} />
+					</>
+				} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />
 		</div>
 	);
 };

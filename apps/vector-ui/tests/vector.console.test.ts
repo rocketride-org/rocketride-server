@@ -15,7 +15,7 @@ import type { IDocumentItem, IDocumentsFilter, IScopeState } from '../src/contra
 import { connectionCaches, vectorEndpoints } from '../src/adapters/explorer';
 import { connectionEntry } from '../src/adapters/connections';
 import { makeConsoleActions } from '../src/adapters/consoleActions';
-import { QUICK_STATS_INTERVAL_MS } from '../src/vector/budgets';
+import { QUICK_STATS_INTERVAL_MS, REPROBE_WAIT_MS } from '../src/vector/budgets';
 import { CHAT_UNSCOPED_TEXT, chatScopeFor, consoleScope, mapScopeFor } from '../src/vector/consoleModel';
 import { createConsoleStore } from '../src/vector/consoleStore';
 import { pagerApplyPage, pagerBegin, pagerFail, pagerFooter, pagerInit } from '../src/vector/documents';
@@ -1180,6 +1180,36 @@ test("B10: a document tab's write or cancel carries its origin; the console's ow
 	assert.deepEqual(store.getState().removal, { status: 'idle', message: CANCELLED_TEXT }, "the console's own: no origin");
 	await store.restore(kestrel, documentOrigin('kestrel'));
 	assert.equal(store.getState().removal.origin, documentOrigin('kestrel'), 'a Restore from a document too');
+	store.dispose();
+});
+
+test('B4: a probe that never answers is not waited for past REPROBE_WAIT_MS: the read goes ahead and Refresh works again', async () => {
+	let probes = 0;
+	const order: string[] = [];
+	const { store, clock } = harness({
+		probed: () => false,
+		reprobe: () => {
+			probes += 1;
+			return new Promise<void>(() => undefined);
+		},
+		documents: async (cursor) => {
+			order.push('documents');
+			return readDocumentsPage(cursor ? fixture('list_documents_page2_last') : fixture('list_documents_page1'));
+		},
+	});
+	store.open();
+	await clock.settle();
+	order.length = 0;
+	store.refresh();
+	await clock.settle();
+	assert.equal(store.getState().checking, true);
+	assert.deepEqual(order, []);
+	await clock.advance(REPROBE_WAIT_MS);
+	await clock.settle();
+	assert.equal(store.getState().checking, false, 'never left checking');
+	assert.equal(order[0], 'documents', 'the read went ahead');
+	store.refresh();
+	assert.equal(probes, 2, 'and Refresh is asked again');
 	store.dispose();
 });
 

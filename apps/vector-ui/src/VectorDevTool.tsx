@@ -48,6 +48,7 @@ import { Banner, EmptyState } from 'shell';
 import type { DevToolProps } from 'shell';
 import type { IExplorerEndpoint } from 'shared/explorer';
 import { announcer } from './adapters/explorer';
+import DocumentWriteLine from './components/DocumentWriteLine';
 import InlineRemoveConfirm from './components/InlineRemoveConfirm';
 import RealmLiveRegion from './components/RealmLiveRegion';
 import { createVectorFrame } from './devtool/frame';
@@ -59,6 +60,7 @@ import { FRAME_PROTOCOL } from './devtool/wiring';
 import { STOPPED_DETAIL } from './env';
 import { VectorEnvProvider, useConnection, useEndpointsState, useLiveEndpoint, useReadable, useVectorEnv } from './envContext';
 import { VectorIcon } from './icons';
+import { CONSOLE_ORIGIN } from './vector/confirm';
 import { documentFocus, focusAdrift, focusLost } from './vector/focus';
 import { writeTouches } from './vector/workbench';
 import { CODE_SENTENCES } from './vector/wording';
@@ -264,7 +266,9 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 	}, [version, gone]);
 	// A frame that opens in front was opened by a press in another frame (a row's "open"): the focus comes to its
 	// Reader | Chunks tabs, never the page. A frame that opens behind (restored, or opened elsewhere) leaves the focus
-	// where it is, in the host or another frame.
+	// where it is, in the host or another frame. A frame cannot tell a press from the host restoring it in front at
+	// load (no signal crosses the frames for that, and a new frame never has the page's focus yet), so that one takes
+	// the focus too.
 	useLayoutEffect(() => {
 		if (typeof document === 'undefined' || !frame.visible.get()) return;
 		if (focusAdrift(document.activeElement as HTMLElement | null, document.body)) returnFocus(null)?.focus();
@@ -277,7 +281,13 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 	}, [model.writes.enabled, entry]);
 	const actions = useMemo(() => frame.documentActions(entry), [frame, entry]);
 	const median = summaries[live.key]?.medianChunks ?? null;
-	const confirm = <InlineRemoveConfirm entry={entry} probe={probes[live.key]} returnFocus={returnFocus} />;
+	// Its own controller: every write of it is this frame's, said under its confirmation.
+	const confirm = (
+		<>
+			<InlineRemoveConfirm entry={entry} probe={probes[live.key]} returnFocus={returnFocus} />
+			<DocumentWriteLine entry={entry} origin={CONSOLE_ORIGIN} />
+		</>
+	);
 	return (
 		<div ref={root} style={styles.document}>
 			{live.state === 'stopped' && (
