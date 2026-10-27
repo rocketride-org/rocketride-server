@@ -666,7 +666,12 @@ def gather(repo: str, number: int, rules_ref: str | None) -> dict:
     body = clean_body(pr.get('body'))
     files = pr['files']
     author = pr['author']
-    triage_comments = [c for c in pr['issue_comments'] if MARKER in (c['body'] or '')]
+    # Only a maintainer's comment counts, so a contributor cannot plant the marker and have --apply edit theirs.
+    triage_comments = [
+        c
+        for c in pr['issue_comments']
+        if MARKER in (c['body'] or '') and c['association'] in MAINTAINER_ASSOCIATIONS
+    ]
     repo_labels = {label['name'] for label in gh_json('label', 'list', '-R', repo, '--limit', '1000', '--json', 'name')}
     facts = {
         'pr': pr['number'],
@@ -803,7 +808,8 @@ def render_comment(facts: dict, checks: dict) -> tuple[str | None, bool]:
         items.append(f'**{ITEM_TITLES[name]}.** {ask} See [{section}]({links[name]}).')
     sha = facts['policy']['sha'][:7]
     if not items:
-        if facts['triage_comment']:
+        held = any(checks[n]['status'] in ('fail', 'unclear') for n in CHECKS if n != 'branch_name')
+        if facts['triage_comment'] and not held:
             body = f'{MARKER}\nThanks for the updates. This PR now has what the contribution rules ask for, so it is ready for review.\n'
             return body + f'\n<sub>Checked against the contribution rules at {sha}.</sub>\n', False
         return None, False
@@ -942,7 +948,8 @@ def apply_plan(repo: str, number: int, rules_ref: str | None, p: dict) -> list:
         raise TriageError(
             'The PR changed since the assessment (new commits, state, or maintainer activity). Run triage again.'
         )
-    if (fresh['triage_comment'] or {}).get('id') != ((p.get('_existing') or {}).get('id')):
+    old, now = p.get('_existing') or {}, fresh['triage_comment'] or {}
+    if (old.get('id'), old.get('body')) != (now.get('id'), now.get('body')):
         raise TriageError('The triage comment changed since the assessment. Run triage again.')
     done = []
     with tempfile.TemporaryDirectory() as tmp:

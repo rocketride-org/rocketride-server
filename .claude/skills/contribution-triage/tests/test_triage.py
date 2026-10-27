@@ -266,6 +266,58 @@ def test_apply_stops_when_the_pr_moved():
     assert fake.writes == []
 
 
+def triage_comment(cid: int, login: str, association: str, body: str) -> dict:
+    return {
+        'id': cid,
+        'login': login,
+        'type': 'User',
+        'association': association,
+        'body': body,
+        'url': 'u',
+        'created': 'now',
+    }
+
+
+def test_a_contributor_cannot_plant_the_triage_comment():
+    planted = triage_comment(5, 'contributor', 'CONTRIBUTOR', f'{triage.MARKER}\nplease update me')
+    fake = FakeGitHub(GOOD_BODY.replace('Fixes #5', ''), [NODE_FILE], [planted], [], [], ALL_LABELS)
+    install(fake)
+    facts = triage.gather(REPO, 7, None)
+    assert facts['triage_comment'] is None
+    assert triage.plan(facts, PASS_VERDICT)['action'] == 'post'
+
+
+def test_unclear_checks_do_not_say_ready_for_review():
+    earlier = triage_comment(5, 'maintainer', 'MEMBER', f'{triage.MARKER}\nPlease link an issue.')
+    fake = FakeGitHub(GOOD_BODY, [NODE_FILE], [earlier], [], [], ALL_LABELS)
+    install(fake)
+    facts = triage.gather(REPO, 7, None)
+    verdict = PASS_VERDICT | {'checks': PASS_VERDICT['checks'] | {'docs': {'status': 'unclear', 'reason': 'x'}}}
+    plan = triage.plan(facts, verdict)
+    assert plan['draft_comment'] is None and 'ready-for-review' not in plan['labels']['add']
+
+
+def test_apply_stops_when_the_triage_comment_was_edited():
+    earlier = triage_comment(5, 'maintainer', 'MEMBER', f'{triage.MARKER}\nPlease link an issue.')
+    fake = FakeGitHub(GOOD_BODY, [NODE_FILE], [earlier], [], [], ALL_LABELS)
+    install(fake)
+    facts = triage.gather(REPO, 7, None)
+    plan = triage.plan(
+        facts,
+        PASS_VERDICT | {'checks': PASS_VERDICT['checks'] | {'docs': {'status': 'fail', 'reason': 'x', 'ask': 'y'}}},
+    )
+    plan['_existing'] = facts['triage_comment']
+    assert plan['action'] == 'update'
+    earlier['body'] += '\nEdited by a maintainer.'
+    try:
+        triage.apply_plan(REPO, 7, None, plan)
+    except triage.TriageError:
+        pass
+    else:
+        raise AssertionError('an edited triage comment must stop --apply')
+    assert fake.writes == []
+
+
 def test_missing_labels_are_reported_not_created():
     fake = FakeGitHub(GOOD_BODY, [NODE_FILE], [], [], [], ['bug'])
     install(fake)
