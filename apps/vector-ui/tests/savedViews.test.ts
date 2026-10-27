@@ -26,7 +26,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { connectionCaches } from '../src/adapters/explorer';
 import { savedViews } from '../src/adapters/connections';
-import { SavedViewsMenu, SavedViewsPanel } from '../src/components/SavedViewsMenu';
+import { SavedViewsMenu, SavedViewsPanel, draftNames } from '../src/components/SavedViewsMenu';
 import type { ISavedFilter, ISavedView, ISavedViewState, IVectorLimits, VectorKey } from '../src/contract/types';
 import { DEFAULT_LIMITS } from '../src/vector/results';
 import { SAVED_VIEWS_MAX, deleteView, keepSentence, listViews, planApply, resolveScope, restoreSelection, restoreSentence, saveView, viewSummary } from '../src/vector/savedViews';
@@ -150,6 +150,17 @@ test('views are per connection, survive switching connections and are emptied th
 	connectionCaches.clearAll();
 	assert.equal(savedViews.size, 0);
 	assert.deepEqual(listViews(savedViews, 'conn-a'), []);
+});
+
+test('a typed, unsaved view name is kept per connection, emptied on a change of identity and forgotten with its connection', () => {
+	assert.ok(connectionCaches.names().includes('saved view drafts'));
+	draftNames.set('conn-a', 'half typed');
+	draftNames.set('conn-b', 'other');
+	assert.ok(connectionCaches.forgetKey('conn-a').includes('saved view drafts'));
+	assert.equal(draftNames.has('conn-a'), false, 'forgotten with its connection');
+	assert.equal(draftNames.get('conn-b'), 'other', 'the others kept');
+	assert.ok(connectionCaches.clearAll().includes('saved view drafts'));
+	assert.equal(draftNames.size, 0, 'the next user does not see the last one\'s name');
 });
 
 test('applying re-samples with the saved size, mode, seed and scope, pinning at most project_keys_max saved keys', () => {

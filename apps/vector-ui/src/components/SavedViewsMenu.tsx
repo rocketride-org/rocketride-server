@@ -52,6 +52,7 @@
 
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { savedViews } from '../adapters/connections';
+import { connectionCaches } from '../adapters/explorer';
 import type { ISavedView, IVectorLimits, SavedViewsMenuProps } from '../contract/types';
 import { MAP_STYLES } from '../map/styles';
 import { POPOVER_PANEL, usePopover } from './AdvancedPopover';
@@ -98,6 +99,17 @@ export interface SavedViewsPanelProps {
 	/** The panel element, for measuring it. */
 	panelRef?: React.Ref<HTMLDivElement>;
 }
+
+/**
+ * A view name typed and not saved yet, per connection, in memory only: it survives the menu closing and the map
+ * toolbar moving the menu between its row and More (which mounts it again). Emptied on a change of identity, and
+ * forgotten with its connection, like the saved views.
+ */
+export const draftNames = new Map<string, string>();
+
+connectionCaches.register('saved view drafts', () => draftNames.clear(), (key) => {
+	draftNames.delete(key);
+});
 
 const S = {
 	root: { position: 'relative', display: 'inline-flex', alignItems: 'center' } as React.CSSProperties,
@@ -190,7 +202,15 @@ export function SavedViewsMenu(props: SavedViewsMenuProps): React.ReactElement {
 	const { connectionKey, limits } = props;
 	const panelId = `views-${useId().replace(/:/g, '')}`;
 	const [open, setOpen] = useState(false);
-	const [name, setName] = useState('');
+	const [name, setNameState] = useState(() => draftNames.get(connectionKey) ?? '');
+	const setName = useCallback(
+		(next: string): void => {
+			if (next === '') draftNames.delete(connectionKey);
+			else draftNames.set(connectionKey, next);
+			setNameState(next);
+		},
+		[connectionKey]
+	);
 	const [status, setStatus] = useState<string | null>(null);
 	const [busyId, setBusyId] = useState<string | null>(null);
 	const [, setVersion] = useState(0);
@@ -209,10 +229,10 @@ export function SavedViewsMenu(props: SavedViewsMenuProps): React.ReactElement {
 		};
 	}, []);
 
-	// Another connection: its own views, no stale status.
+	// Another connection: its own views and its own unsaved name, no stale status.
 	useEffect(() => {
 		setStatus(null);
-		setName('');
+		setNameState(draftNames.get(connectionKey) ?? '');
 	}, [connectionKey]);
 
 	const close = useCallback((refocus: boolean): void => {
@@ -246,7 +266,7 @@ export function SavedViewsMenu(props: SavedViewsMenuProps): React.ReactElement {
 		setStatus(`${result.replaced ? 'Replaced' : 'Saved'} “${result.view.name}”${kept}.`);
 		setName('');
 		refresh();
-	}, [props, name, connectionKey, limits]);
+	}, [props, name, connectionKey, limits, setName]);
 
 	const apply = useCallback(
 		(view: ISavedView): void => {

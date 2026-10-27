@@ -35,7 +35,7 @@ import { COLOUR_MODES, clusterColours, colourPoints } from '../src/map/colours';
 import { dimMask, isolateMask } from '../src/map/isolate';
 import { removeTargetsOf } from '../src/map/model';
 import { outlierRows } from '../src/map/outliers';
-import { POPOVER_GAP, POPOVER_MARGIN, afterCancelFocus, clipArea, firstEnabled, focusHold, placePopover, popoverKey, toolbarOverflow } from '../src/map/popover';
+import { POPOVER_GAP, POPOVER_MARGIN, afterCancelFocus, clipArea, firstEnabled, focusAfterMove, focusHold, placePopover, popoverKey, toolbarOverflow } from '../src/map/popover';
 import { STAGE_REMOVAL, pairLabel, removeAllLabel, removeOthersLabel } from '../src/map/reviewWording';
 import { LEGEND_COLLAPSED_HEIGHT, LEGEND_HEAD_HEIGHT, LEGEND_HEIGHT } from '../src/map/styles';
 import { readPalette } from '../src/map/tokens';
@@ -676,9 +676,44 @@ test('the toolbar is one row at any width: what has no room moves into More by m
 	assert.match(/aria-label="More map controls"([\s\S]*)$/.exec(narrow)?.[1] ?? '', /aria-label="Points"[\s\S]*aria-label="Layout"[\s\S]*aria-label="Colour by"/);
 	// The measure: after every render and on every change of the row's width, before paint.
 	const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'MapToolbar.tsx'), 'utf8');
-	assert.match(source, /useBrowserLayoutEffect\(\(\) => fitRef\.current\(\)\);/);
+	assert.match(source, /useBrowserLayoutEffect\(\(\) => \{[\s\S]*?fitRef\.current\(\);\s*\}\);/);
 	assert.match(source, /new ResizeObserver\(\(\) => fitRef\.current\(\)\)/);
 	assert.match(source, /toolbarOverflow\(\{ available: el\.clientWidth,/);
+});
+
+test('a move never loses the focus or a menu\'s state: into a closed More the focus goes to More\'s button, back from More to the item; nothing moves while a panel is open or an export runs', () => {
+	const movable = MOVABLE_ITEMS;
+	// m1: the focused item moves into a closed More: More's button takes the focus.
+	assert.equal(focusAfterMove({ from: 0, to: 1, movable, focused: 'extras', onMore: false, lastInMore: null }), 'more');
+	assert.equal(focusAfterMove({ from: 1, to: 3, movable, focused: 'layout', onMore: false, lastInMore: null }), 'more');
+	assert.equal(focusAfterMove({ from: 0, to: 1, movable, focused: 'query', onMore: false, lastInMore: null }), 'none', 'the focus is on an item that stays');
+	assert.equal(focusAfterMove({ from: 1, to: 2, movable, focused: 'layout', onMore: false, lastInMore: null }), 'none', 'Layout stays on the row');
+	// m3: back to the row from More (More closed first; its button holds the focus meanwhile): the item takes it again.
+	assert.equal(focusAfterMove({ from: 2, to: 1, movable, focused: 'more', onMore: true, lastInMore: 'colour' }), 'item');
+	assert.equal(focusAfterMove({ from: 1, to: 0, movable, focused: 'more', onMore: true, lastInMore: 'extras' }), 'item');
+	assert.equal(focusAfterMove({ from: 2, to: 1, movable, focused: 'more', onMore: true, lastInMore: 'extras' }), 'none', 'Export and Views stay in More');
+	assert.equal(focusAfterMove({ from: 2, to: 1, movable, focused: 'table', onMore: false, lastInMore: 'colour' }), 'none', 'the focus moved on');
+	assert.equal(focusAfterMove({ from: 1, to: 1, movable, focused: 'extras', onMore: false, lastInMore: null }), 'none');
+	// More closed keeps its items mounted, hidden (a running export, a typed view name survive it closing).
+	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
+	const closed = html(<MapToolbar {...base} extras={<button type="button" data-test-extra="export">Export ▾</button>} initialMoved={1} />);
+	assert.match(closed, /aria-expanded="false">More ▾<\/button><div id="[^"]*" role="group" aria-label="More map controls" tabindex="-1" hidden="" style="[^"]*;display:none;[^"]*"[^>]*data-advanced-panel=""><span style="[^"]*" data-more-extras=""><button type="button" data-test-extra="export">/);
+	const toolbar = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'MapToolbar.tsx'), 'utf8');
+	// m2: frozen while a toolbar panel is open (an expanded button: More, Export, Views, Advanced) or an export runs;
+	// fitted again when they close.
+	assert.match(toolbar, /if \(Array\.from\(el\.querySelectorAll\('\[aria-expanded="true"\]'\)\)\.some\(shown\) \|\| el\.querySelector\('\[data-export-busy\]'\) !== null\) return;/);
+	assert.match(toolbar, /const shown = \(node: Element\): boolean => node\.closest\('\[hidden\]'\) === null;/, 'a menu left open inside a closed More does not hold it');
+	assert.match(toolbar, /new MutationObserver\(\(\) => fitRef\.current\(\)\)[\s\S]*?attributeFilter: \['aria-expanded', 'data-export-busy'\]/);
+	assert.match(toolbar, /component="MoreControls" item="more" menus keepMounted/);
+	// The status line's Cancel hands the focus to Layout only on the row (a Layout in a closed More is hidden).
+	assert.match(toolbar, /querySelector<HTMLSelectElement>\('\[data-map-controls\] > \[data-toolbar-item="layout"\] select'\)/);
+	const exportMenu = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'ExportMenu.tsx'), 'utf8');
+	assert.match(exportMenu, /data-export-busy=\{busy \? '' : undefined\}/);
+	// A typed view name is kept per connection in memory, so a menu mounted again (a move) still has it.
+	const views = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'SavedViewsMenu.tsx'), 'utf8');
+	assert.match(views, /const \[name, setNameState\] = useState\(\(\) => draftNames\.get\(connectionKey\) \?\? ''\);/);
+	assert.match(views, /if \(next === ''\) draftNames\.delete\(connectionKey\);\s*else draftNames\.set\(connectionKey, next\);/);
+	assert.doesNotMatch(views, /localStorage|sessionStorage/);
 });
 
 test('a failure on the status line says "Failed:" in words and is the toolbar\'s alert (always there, visually hidden), read once', () => {

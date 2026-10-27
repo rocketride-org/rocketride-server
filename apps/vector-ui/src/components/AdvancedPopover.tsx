@@ -203,7 +203,12 @@ export interface AdvancedPopoverProps {
 	panelStyle?: CSSProperties;
 	/** The panel holds menus that open panels of their own: it never clips (no height cap), so they hang outside it. */
 	menus?: boolean;
+	/** Keep the panel's controls mounted while it is closed (hidden), so their state (a running export) survives. */
+	keepMounted?: boolean;
 }
+
+/** A closed panel kept mounted: not shown (its own display would beat the `hidden` attribute). */
+const CLOSED: CSSProperties = { display: 'none' };
 
 /** A panel whose menus hang outside it: not cut to a height, nothing clipped. */
 const NEVER_CLIPS: CSSProperties = { maxHeight: 'none', overflowY: 'visible' };
@@ -257,8 +262,8 @@ export function AdvancedPopover(props: AdvancedPopoverProps): React.ReactElement
 			<button ref={trigger} type="button" style={{ ...MAP_STYLES.button, ...(open ? MAP_STYLES.buttonPressed : null) }} aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => setOpen((v) => !v)}>
 				{props.label} ▾
 			</button>
-			{open ? (
-				<div ref={panel} id={panelId} role="group" aria-label={props.panelLabel} tabIndex={-1} style={{ ...S.panel, ...props.panelStyle, ...placement, ...(props.menus ? NEVER_CLIPS : null) }} data-advanced-panel="">
+			{open || props.keepMounted ? (
+				<div ref={panel} id={panelId} role="group" aria-label={props.panelLabel} tabIndex={-1} hidden={!open} style={{ ...S.panel, ...props.panelStyle, ...placement, ...(props.menus ? NEVER_CLIPS : null), ...(open ? null : CLOSED) }} data-advanced-panel="">
 					{typeof props.children === 'function' ? props.children(close) : props.children}
 				</div>
 			) : null}

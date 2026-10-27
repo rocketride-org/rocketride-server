@@ -31,7 +31,12 @@
 // items (measured: map/popover.ts toolbarOverflow), Export and Views move into
 // a More menu at its end, then Colour by, Layout and Points, as many as it
 // takes; they come back when the row has room. The query, Table and Advanced
-// stay on the row. Under it, a status line of its own, always there
+// stay on the row. Nothing moves while a toolbar panel is open (More, Export,
+// Views, Advanced) or an export runs: a move remounts Export and Views, so
+// the move waits until they close. More keeps its items mounted while it is
+// closed (hidden), so a running export or a typed view name in it survives.
+// An item that moves into a closed More with the focus leaves it on More's
+// button; one coming back from More takes it again on the row. Under it, a status line of its own, always there
 // at the same height: the busy words (a live region) and Cancel while a
 // layout runs; when nothing runs, the view's notice in the same live region
 // (a cancelled or limited layout, fewer edges drawn, a failure while a map is
@@ -81,7 +86,7 @@ import type { ReactNode } from 'react';
 import type { EdgeMode, EdgesPerPoint, MapLayout, MapToolbarProps as ContractMapToolbarProps, SampleMode } from '../contract/types';
 import { COLOUR_MODES } from '../map/colours';
 import type { IColourMode, MapColourBy } from '../map/colours';
-import { afterCancelFocus, focusHold, toolbarOverflow } from '../map/popover';
+import { afterCancelFocus, focusAfterMove, focusHold, toolbarOverflow } from '../map/popover';
 import { MAP_STYLES } from '../map/styles';
 import { num } from '../map/wording';
 import { AdvancedPopover, PANEL_ATTRIBUTE } from './AdvancedPopover';
@@ -177,7 +182,8 @@ function CancelButton(props: { onCancel(): void; root: React.RefObject<HTMLDivEl
 		() => () => {
 			if (button.current === null || typeof document === 'undefined' || document.activeElement !== button.current) return;
 			const toolbar = root.current;
-			const layout = toolbar?.querySelector<HTMLSelectElement>('select[aria-label="Layout"]') ?? null;
+			// Layout on the row (one in a closed More is hidden: it cannot take the focus).
+			const layout = toolbar?.querySelector<HTMLSelectElement>('[data-map-controls] > [data-toolbar-item="layout"] select') ?? null;
 			(afterCancelFocus({ present: layout !== null, disabled: !!layout?.disabled }) === 'layout' ? layout : toolbar)?.focus();
 		},
 		[root],
@@ -304,9 +310,16 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 	const movable = MOVABLE_ITEMS.filter((key) => key !== 'extras' || hasExtras);
 	const [moved, setMoved] = useState(Math.min(props.initialMoved ?? 0, movable.length));
 	const widths = useRef(new Map<string, number>());
+	// Where the focus goes once a move has rendered, and the item that last had the focus inside More.
+	const focusTarget = useRef<{ kind: 'more' } | { kind: 'item'; key: string; component: string | null } | null>(null);
+	const lastInMore = useRef<{ key: string; component: string | null } | null>(null);
 	const fitRow = (): void => {
 		const el = row.current;
 		if (!el) return;
+		// Frozen while a panel is open or an export runs (a move would remount Export and Views); the observer below
+		// fits again when they close. A menu left open inside a closed More is hidden and does not hold it.
+		const shown = (node: Element): boolean => node.closest('[hidden]') === null;
+		if (Array.from(el.querySelectorAll('[aria-expanded="true"]')).some(shown) || el.querySelector('[data-export-busy]') !== null) return;
 		// The items on the row now (the view's menus are its untagged children); what is in More keeps its last width.
 		let extras = 0;
 		let extrasCount = 0;
@@ -322,17 +335,59 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 		if (extrasCount > 0) widths.current.set('extras', extras + (extrasCount - 1) * TOOLBAR_GAP);
 		const items = ROW_ITEMS.filter((key) => (key !== 'extras' || hasExtras) && widths.current.has(key)).map((key) => [key, widths.current.get(key) as number] as const);
 		const next = toolbarOverflow({ available: el.clientWidth, widths: items, movable, more: widths.current.get('more') ?? MORE_GUESS, gap: TOOLBAR_GAP });
-		if (next !== moved) setMoved(next);
+		if (next === moved) return;
+		const active = typeof document !== 'undefined' ? document.activeElement : null;
+		const onRow = active instanceof Element && active.parentElement !== null ? Array.from(el.children).find((child) => child.contains(active)) ?? null : null;
+		const focused = onRow === null ? null : (onRow.getAttribute('data-toolbar-item') ?? 'extras');
+		const moreButton = el.querySelector('[data-component="MoreControls"] > button');
+		const where = focusAfterMove({ from: moved, to: next, movable, focused, onMore: active !== null && active === moreButton, lastInMore: lastInMore.current?.key ?? null });
+		focusTarget.current = where === 'more' ? { kind: 'more' } : where === 'item' && lastInMore.current ? { kind: 'item', ...lastInMore.current } : null;
+		setMoved(next);
 	};
 	const fitRef = useRef(fitRow);
 	fitRef.current = fitRow;
-	useBrowserLayoutEffect(() => fitRef.current());
+	useBrowserLayoutEffect(() => {
+		// A move has rendered: the focus goes where focusAfterMove said (else the focus hold applies).
+		const target = focusTarget.current;
+		const el = row.current;
+		if (target !== null && el !== null) {
+			focusTarget.current = null;
+			const more = el.querySelector<HTMLElement>('[data-component="MoreControls"] > button');
+			const item =
+				target.kind === 'item'
+					? target.component !== null
+						? el.querySelector<HTMLElement>(`:scope > [data-component="${target.component}"] button`)
+						: el.querySelector<HTMLElement>(`:scope > [data-toolbar-item="${target.key}"] select`)
+					: null;
+			const usable = item !== null && !(item as HTMLButtonElement).disabled ? item : null;
+			(usable ?? more)?.focus();
+		}
+		fitRef.current();
+	});
 	useEffect(() => {
 		const el = row.current;
-		if (!el || typeof ResizeObserver === 'undefined') return undefined;
-		const observer = new ResizeObserver(() => fitRef.current());
-		observer.observe(el);
-		return () => observer.disconnect();
+		if (!el) return undefined;
+		const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => fitRef.current());
+		resize?.observe(el);
+		// A panel closed or an export ended: a move held back meanwhile happens now.
+		const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(() => fitRef.current());
+		mutations?.observe(el, { subtree: true, attributes: true, attributeFilter: ['aria-expanded', 'data-export-busy'] });
+		// The item inside More that has the focus (kept while More's button holds it, as More closes).
+		const onFocusIn = (event: FocusEvent): void => {
+			const target = event.target instanceof Element ? event.target : null;
+			const panel = target?.closest('[data-component="MoreControls"] [data-advanced-panel]') ?? null;
+			if (panel !== null && target !== null) {
+				const key = target.closest('[data-more-extras]') !== null ? 'extras' : (target.closest('[data-toolbar-item]')?.getAttribute('data-toolbar-item') ?? null);
+				const component = target.closest('[data-component]')?.getAttribute('data-component') ?? null;
+				lastInMore.current = key !== null && key !== 'more' ? { key, component: component === 'MoreControls' ? null : component } : null;
+			} else if (target === null || target.closest('[data-component="MoreControls"]') === null) lastInMore.current = null;
+		};
+		el.addEventListener('focusin', onFocusIn);
+		return () => {
+			resize?.disconnect();
+			mutations?.disconnect();
+			el.removeEventListener('focusin', onFocusIn);
+		};
 	}, []);
 	const inMore = new Set<string>(movable.slice(0, moved));
 	const sample = props.sample;
@@ -500,11 +555,15 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 				</AdvancedPopover>
 				{inMore.has('extras') ? null : (props.extras ?? null)}
 				{moved > 0 ? (
-					<AdvancedPopover label="More" panelLabel="More map controls" component="MoreControls" item="more" menus panelStyle={S.more} initialOpen={props.initialMore}>
+					<AdvancedPopover label="More" panelLabel="More map controls" component="MoreControls" item="more" menus keepMounted panelStyle={S.more} initialOpen={props.initialMore}>
 						{inMore.has('points') ? pointsItem : null}
 						{inMore.has('layout') ? layoutItem : null}
 						{inMore.has('colour') ? colourItem : null}
-						{inMore.has('extras') ? <span style={{ display: 'inline-flex', gap: TOOLBAR_GAP }}>{props.extras}</span> : null}
+						{inMore.has('extras') ? (
+							<span style={{ display: 'inline-flex', gap: TOOLBAR_GAP }} data-more-extras="">
+								{props.extras}
+							</span>
+						) : null}
 					</AdvancedPopover>
 				) : null}
 			</div>
