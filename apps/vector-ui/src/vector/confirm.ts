@@ -497,15 +497,15 @@ export function confirmFirstFocus(kind: 'trash' | 'delete' | 'empty', count: num
 }
 
 /**
- * The typed field's hint: its prompt, and after Enter on what does not match yet, that it does not (in the same words
- * the field already shows, so nothing moves).
+ * The line under the typed field: after Enter on what does not match yet, that it does not; else nothing. The line
+ * keeps its height either way (components/InlineRemoveConfirm.tsx), so the field never moves.
  *
  * @param typed - The typed confirmation.
  * @param input - What is typed.
  * @param nudged - Enter was pressed on it while it did not match.
- * @returns The hint.
+ * @returns The sentence, or '' for none.
  */
-export function typedHint(typed: ITypedConfirmation, input: string, nudged: boolean): string {
-	if (!nudged || confirmReady(typed, input)) return typed.prompt;
-	return input.trim() === '' ? `${typed.prompt} Nothing is typed yet.` : `${typed.prompt} What is typed does not match.`;
+export function typedNudge(typed: ITypedConfirmation, input: string, nudged: boolean): string {
+	if (!nudged || confirmReady(typed, input)) return '';
+	return input.trim() === '' ? 'Nothing is typed yet.' : 'What is typed does not match.';
 }

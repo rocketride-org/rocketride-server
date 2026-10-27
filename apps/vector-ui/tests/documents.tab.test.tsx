@@ -326,7 +326,7 @@ test('the Trash: its export (as the old Trash view had), the first-chunk wording
 	assert.doesNotMatch(loading, /title="The trash is empty\."/, 'not claimed before the listing answered');
 });
 
-test('the typed field of a single permanent delete shows the whole path beside it, and the field is described by it', () => {
+test('the typed field of a single permanent delete shows the whole path beside it, and the field is described by it; the line under it is kept, empty, until Enter is pressed on what does not match', () => {
 	const { InlineRemoveConfirm } = require('../src/components/InlineRemoveConfirm') as typeof import('../src/components/InlineRemoveConfirm');
 	const { renderToStaticMarkup } = require('react-dom/server') as typeof import('react-dom/server');
 	const entry = panelEntry('k-typed');
@@ -335,7 +335,9 @@ test('the typed field of a single permanent delete shows the whole path beside i
 	const html = renderToStaticMarkup(<InlineRemoveConfirm entry={entry} probe={undefined} />);
 	assert.match(html, /Type the file name &#x27;guide\.md&#x27; to confirm\.<\/span><span id="([^"]+)">Full path: C:\/demo\/handbooks\/guide\.md<\/span>/);
 	const pathId = html.match(/<span id="([^"]+)">Full path:/)?.[1];
-	assert.ok(pathId && new RegExp(`aria-describedby="[^"]+ ${pathId.replace(/[:]/g, '\\:')}"`).test(html), 'the field is described by the consequence and the path');
+	const nudgeId = html.match(/<p id="([^"]+)" aria-live="polite" style="height:18px;[^"]*white-space:nowrap[^"]*"><\/p>/)?.[1];
+	assert.ok(nudgeId, 'the line under the field: announced, one line high, empty');
+	assert.ok(pathId && html.includes(`aria-describedby="${html.match(/aria-describedby="([^" ]+) /)?.[1]} ${pathId} ${nudgeId}"`), 'the field is described by the consequence, the path and that line');
 	entry.controller.dispose();
 });
 
