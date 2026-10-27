@@ -29,14 +29,15 @@
 // (env.ts): a Search run per mode, a Compare once (question A, with B beside
 // it as `compareWith`), an Ask question when its answer ends. The full app
 // keeps the history in the workspace preferences; a dev-tool mount keeps it
-// for the document's life. Either way a question is kept to its first 200
-// characters (the first 199 and "…"): a chunk's text used as the query must
-// not land in the workspace file whole. A Compare's question B is kept for
-// the session only, so after a reload its entry says "Question B isn't
-// saved."
+// for the document's life. A run is handed over whole: the history keeps the
+// first 200 characters of its question and marks a longer one `truncated`
+// (adapters/queryHistory.ts), so a chunk's text used as the query never lands
+// in the workspace file whole, and two long questions that share their start
+// stay two entries. A Compare's question B is kept for the session only, so
+// after a reload its entry says "Question B isn't saved."
 //
 //   - Load fills the form (or Ask's box) and runs nothing; a cut question
-//     loses its "…" and says only the first 200 characters were kept;
+//     says only the first 200 characters were kept;
 //   - Rerun runs again with the entry's mode and k, and the threshold, the
 //     scope and the table choice as they are NOW, and its title says so; it
 //     is off, with the reason, when the mode cannot run now, when the
@@ -48,50 +49,17 @@ import type { IQueryHistoryEntry, QueryHistoryKind } from '../env';
 import type { AskHandoff, ModeOption, SearchHandoff, SearchMode } from './searchWorkbench';
 import type { QueryMode } from './workbench';
 
-/** The longest question History keeps, the "…" included. */
-export const HISTORY_QUESTION_CHARS = 200;
-
-/** Said of an entry whose question was longer than History keeps. */
+/** Said of an entry whose question was longer than History keeps (adapters/queryHistory.ts QUERY_HISTORY_TEXT_MAX). */
 export const ONLY_FIRST_KEPT = 'Only the first 200 characters were kept.';
 
 /** Said of a Compare entry whose question B is not there (it is kept for the session only). */
 export const COMPARE_B_NOT_SAVED = "Question B isn't saved.";
 
-/** A run as the Query tab records it: an entry without its id, and a Compare's question B for the session. */
-export type QueryRunRecord = Omit<IQueryHistoryEntry, 'id'> & { compareWith?: string };
+/** A run as the Query tab records it: the whole question (History cuts it), and a Compare's question B for the session. */
+export type QueryRunRecord = Omit<IQueryHistoryEntry, 'id' | 'truncated'>;
 
 /** An entry as History shows it (a Compare's question B when the session still has it). */
-export type QueryHistoryItem = IQueryHistoryEntry & { compareWith?: string };
-
-/**
- * A question as History keeps it: at most {@link HISTORY_QUESTION_CHARS} characters, the "…" included.
- *
- * @param text - The question.
- * @returns The question, or its first 199 characters and "…".
- */
-export function historyQuestion(text: string): string {
-	return text.length > HISTORY_QUESTION_CHARS ? `${text.slice(0, HISTORY_QUESTION_CHARS - 1)}…` : text;
-}
-
-/**
- * Whether History cut this question.
- *
- * @param question - A kept question.
- * @returns True when it is exactly as long as History keeps and ends in "…".
- */
-export function wasCut(question: string): boolean {
-	return question.length === HISTORY_QUESTION_CHARS && question.endsWith('…');
-}
-
-/**
- * A kept question without the "…" History added.
- *
- * @param question - A kept question.
- * @returns The text to put back in a box.
- */
-function keptText(question: string): string {
-	return wasCut(question) ? question.slice(0, -1) : question;
-}
+export type QueryHistoryItem = IQueryHistoryEntry;
 
 /**
  * The record of one Search run.
@@ -102,7 +70,7 @@ function keptText(question: string): string {
  * @returns The record.
  */
 export function searchRecord(run: { question: string; mode: SearchMode; topK: number; results: number | null; error?: string }, at: number, ms: number): QueryRunRecord {
-	return { question: historyQuestion(run.question), kind: run.mode, at, ms, topK: run.topK, results: run.error === undefined ? run.results : null, outcome: run.error === undefined ? 'rows' : 'error', ...(run.error === undefined ? {} : { error: run.error }) };
+	return { question: run.question, kind: run.mode, at, ms, topK: run.topK, results: run.error === undefined ? run.results : null, outcome: run.error === undefined ? 'rows' : 'error', ...(run.error === undefined ? {} : { error: run.error }) };
 }
 
 /**
@@ -114,7 +82,7 @@ export function searchRecord(run: { question: string; mode: SearchMode; topK: nu
  * @returns The record.
  */
 export function compareRecord(run: { a: string; b: string; topK: number; shared: number | null; error?: string }, at: number, ms: number): QueryRunRecord {
-	return { question: historyQuestion(run.a), compareWith: historyQuestion(run.b), kind: 'compare', at, ms, topK: run.topK, results: run.error === undefined ? run.shared : null, outcome: run.error === undefined ? 'rows' : 'error', ...(run.error === undefined ? {} : { error: run.error }) };
+	return { question: run.a, compareWith: run.b, kind: 'compare', at, ms, topK: run.topK, results: run.error === undefined ? run.shared : null, outcome: run.error === undefined ? 'rows' : 'error', ...(run.error === undefined ? {} : { error: run.error }) };
 }
 
 /**
@@ -126,7 +94,7 @@ export function compareRecord(run: { a: string; b: string; topK: number; shared:
 export function askRecord(turn: ChatTurn): QueryRunRecord | null {
 	if (turn.status === 'asking') return null;
 	const ms = turn.answeredAt !== null ? Math.max(0, turn.answeredAt - turn.askedAt) : 0;
-	const base = { question: historyQuestion(turn.question), kind: 'ask' as const, at: turn.askedAt, ms, topK: null };
+	const base = { question: turn.question, kind: 'ask' as const, at: turn.askedAt, ms, topK: null };
 	if (turn.status === 'answered') return { ...base, results: turn.answer?.sources.length ?? 0, outcome: 'rows' };
 	return { ...base, results: null, outcome: 'error', error: turn.error?.message ?? 'The question was not answered.' };
 }
@@ -216,7 +184,7 @@ export function outcomeText(entry: Pick<IQueryHistoryEntry, 'kind' | 'results' |
  */
 export function entryMeta(entry: QueryHistoryItem, now: number): string {
 	const parts = [KIND_LABELS[entry.kind], entry.topK !== null ? `top ${entry.topK}` : null, outcomeText(entry), entryTime(entry.at, now), msText(entry.ms)];
-	if (wasCut(entry.question) || (entry.compareWith !== undefined && wasCut(entry.compareWith))) parts.push('first 200 characters kept');
+	if (entry.truncated === true) parts.push('first 200 characters kept');
 	return parts.filter(Boolean).join(' · ');
 }
 
@@ -240,13 +208,13 @@ export interface LoadPlan {
  * @returns The plan.
  */
 export function loadPlan(entry: QueryHistoryItem, nonce: string): LoadPlan {
-	const notes = wasCut(entry.question) || (entry.compareWith !== undefined && wasCut(entry.compareWith)) ? [ONLY_FIRST_KEPT] : [];
-	if (entry.kind === 'ask') return { mode: 'ask', search: null, ask: { nonce, question: keptText(entry.question), run: false }, notes };
+	const notes = entry.truncated === true ? [ONLY_FIRST_KEPT] : [];
+	if (entry.kind === 'ask') return { mode: 'ask', search: null, ask: { nonce, question: entry.question, run: false }, notes };
 	if (entry.kind === 'compare') {
 		const b = entry.compareWith;
-		return { mode: 'compare', search: { nonce, question: keptText(entry.question), questionB: b === undefined ? '' : keptText(b), topK: entry.topK, run: false, chat: null }, ask: null, notes: b === undefined ? [...notes, COMPARE_B_NOT_SAVED] : notes };
+		return { mode: 'compare', search: { nonce, question: entry.question, questionB: b ?? '', topK: entry.topK, run: false, chat: null }, ask: null, notes: b === undefined ? [...notes, COMPARE_B_NOT_SAVED] : notes };
 	}
-	return { mode: 'search', search: { nonce, question: keptText(entry.question), mode: entry.kind, topK: entry.topK, run: false, chat: null }, ask: null, notes };
+	return { mode: 'search', search: { nonce, question: entry.question, mode: entry.kind, topK: entry.topK, run: false, chat: null }, ask: null, notes };
 }
 
 /** What Rerun does, or why it cannot. */
@@ -272,7 +240,7 @@ export interface RerunContext {
  * @returns The plan, or why it cannot run.
  */
 export function rerunPlan(entry: QueryHistoryItem, context: RerunContext): RerunPlan {
-	if (wasCut(entry.question) || (entry.compareWith !== undefined && wasCut(entry.compareWith))) return { ok: false, reason: `${ONLY_FIRST_KEPT} Load it to edit and run.` };
+	if (entry.truncated === true) return { ok: false, reason: `${ONLY_FIRST_KEPT} Load it to edit and run.` };
 	if (entry.kind === 'ask') {
 		if (!context.chat.enabled) return { ok: false, reason: context.chat.reason ?? 'The chat cannot ask here.' };
 		return { ok: true, mode: 'ask', search: null, ask: { nonce: context.nonce, question: entry.question, run: true }, title: 'Ask this again, about the documents Ask is set to now' };

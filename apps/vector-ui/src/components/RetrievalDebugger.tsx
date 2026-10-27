@@ -34,9 +34,9 @@
 // it is never kept in state or shown. Hidden when `embed` is not reachable.
 // Its rows go to the ExportMenu in the search columns (src/vector/
 // searchWorkbench.ts), and "Open in Search" hands the question, the
-// answer's cited chunks, this k and these documents to the Search surface,
-// whose first run is therefore the same search and lists the same rows; there
-// the threshold can be tried at other values.
+// answer's cited chunks, this k and these documents to the Query tab's
+// Search, whose first run is therefore the same search and lists the same
+// rows; there the threshold can be tried at other values.
 //
 // The debugger still makes its two calls here rather than through Search's
 // runWorkbench: the chat's wiring rules read them in this file. The search

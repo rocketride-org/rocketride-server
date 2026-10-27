@@ -25,7 +25,7 @@
 // =============================================================================
 //
 // The conversation and the upload list of a connection outlive the panels
-// that show them (switching between the Console and Map tabs must not lose an
+// that show them (switching between the workbench's tabs must not lose an
 // answer or an upload in flight), so they are kept here, keyed by the
 // connection's endpoint key. The panels hand in fresh dependencies on every
 // render (the channels and actions of the moment); the session and queue

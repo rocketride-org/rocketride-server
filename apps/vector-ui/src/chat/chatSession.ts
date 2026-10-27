@@ -24,9 +24,9 @@
 // VECTOR-UI — CHAT SESSION (one connection's conversation)
 // =============================================================================
 //
-// The state behind the console's chat (R5), kept per connection so switching
-// between the Console and Map tabs does not lose it; useVectorChat.ts renders
-// it. Rules:
+// The state behind the Query tab's Ask (R5), kept per connection so switching
+// between the workbench's tabs, or the Query tab's modes, does not lose it;
+// useVectorChat.ts renders it. Rules:
 //
 //   - One question in flight; a second send while one is open is refused with
 //     a sentence (never queued, never retried).

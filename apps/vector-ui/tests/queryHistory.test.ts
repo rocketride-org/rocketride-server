@@ -31,9 +31,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ChatTurn } from '../src/chat/chatSession';
-import { sessionQueryHistory } from '../src/adapters/queryHistory';
 import { DEVTOOL_HISTORY_NOTE } from '../src/env';
-import { COMPARE_B_NOT_SAVED, HISTORY_QUESTION_CHARS, ONLY_FIRST_KEPT, askRecord, compareRecord, entryMeta, entryTime, historyQuestion, loadPlan, modeOfKind, msText, outcomeText, rerunPlan, searchRecord, shownEntries, wasCut } from '../src/vector/queryHistory';
+import { QUERY_HISTORY_TEXT_MAX, sessionQueryHistory } from '../src/adapters/queryHistory';
+import { COMPARE_B_NOT_SAVED, ONLY_FIRST_KEPT, askRecord, compareRecord, entryMeta, entryTime, loadPlan, modeOfKind, msText, outcomeText, rerunPlan, searchRecord, shownEntries } from '../src/vector/queryHistory';
 import type { QueryHistoryItem, RerunContext } from '../src/vector/queryHistory';
 import type { ModeOption } from '../src/vector/searchWorkbench';
 
@@ -68,20 +68,22 @@ function turn(fields: Partial<ChatTurn>): ChatTurn {
 	return { id: 1, question: 'Where is the water?', scope: null, status: 'answered', answer: null, error: null, askedAt: 1000, answeredAt: 1900, ...fields };
 }
 
-test('a question is kept to its first 200 characters (the first 199 and "…"), in every record, so a chunk used as the query never lands whole in the workspace file', () => {
-	assert.equal(HISTORY_QUESTION_CHARS, 200);
+test('a run is handed over whole and History keeps its first 200 characters, marked cut, in both mounts: a chunk used as the query never lands whole in the workspace file, and two long questions sharing their start stay two entries', () => {
+	assert.equal(QUERY_HISTORY_TEXT_MAX, 200);
+	assert.match(ONLY_FIRST_KEPT, /first 200 characters/);
 	const chunk = 'The cistern under Falcon Station holds rainwater. '.repeat(100);
-	assert.equal(chunk.length >= 5000, true, 'the premise: a long chunk text');
-	const kept = historyQuestion(chunk);
-	assert.equal(kept.length, 200);
-	assert.equal(kept, `${chunk.slice(0, 199)}…`);
-	assert.equal(wasCut(kept), true);
-	assert.equal(historyQuestion('water'), 'water');
-	assert.equal(wasCut('x'.repeat(200)), false, 'exactly 200 characters typed: not cut');
-	assert.equal(searchRecord({ question: chunk, mode: 'semantic', topK: 10, results: 3 }, 0, 1).question.length, 200);
-	const compare = compareRecord({ a: chunk, b: chunk, topK: 10, shared: 2 }, 0, 1);
-	assert.deepEqual([compare.question.length, compare.compareWith?.length], [200, 200]);
-	assert.equal(askRecord(turn({ question: chunk }))?.question.length, 200);
+	assert.equal(searchRecord({ question: chunk, mode: 'semantic', topK: 10, results: 3 }, 0, 1).question, chunk, 'the record carries the whole question; the history cuts it');
+	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+	history.record('k', searchRecord({ question: chunk, mode: 'semantic', topK: 10, results: 3 }, 1, 1));
+	history.record('k', searchRecord({ question: `${chunk} and the well`, mode: 'semantic', topK: 10, results: 2 }, 2, 1));
+	const [second, first] = history.entries('k').get();
+	assert.equal(first.question, chunk.slice(0, 200));
+	assert.equal(first.truncated, true);
+	assert.ok(second !== undefined && second.id !== first.id, 'two long questions that share their first 200 characters stay two entries');
+	history.record('k', compareRecord({ a: 'water', b: 'falcon', topK: 10, shared: 4 }, 3, 1));
+	assert.equal(history.entries('k').get()[0].compareWith, 'falcon', "a Compare's B is held for the session");
+	history.record('k', askRecord(turn({ question: chunk })) as never);
+	assert.deepEqual([history.entries('k').get()[0].question.length, history.entries('k').get()[0].truncated], [200, true], 'an Ask question too');
 });
 
 test('records: a Search run per mode, a Compare once with B beside A and the results both found, an Ask question once its answer ended', () => {
@@ -111,7 +113,7 @@ test('how an entry reads: its kind, k, what it came to, when and how long, and w
 	assert.equal(entryTime(at, at + 3 * 86_400_000), 'Oct 27, 02:37 PM', 'another day names it');
 	assert.equal(entryMeta(item({ at }), at), 'Semantic · top 10 · 12 results · 02:37 PM · 420 ms');
 	assert.equal(entryMeta(item({ kind: 'ask', topK: null, results: 4, at }), at), 'Ask · 4 sources · 02:37 PM · 420 ms');
-	assert.match(entryMeta(item({ question: historyQuestion('q'.repeat(300)), at }), at), / · first 200 characters kept$/);
+	assert.match(entryMeta(item({ question: 'q'.repeat(200), truncated: true, at }), at), / · first 200 characters kept$/);
 });
 
 test('the list: pinned first, then newest first; a filter by mode (Search holds every Search mode) or pinned', () => {
@@ -124,14 +126,14 @@ test('the list: pinned first, then newest first; a filter by mode (Search holds 
 	assert.deepEqual((['semantic', 'keyword', 'hybrid', 'auto', 'compare', 'ask'] as const).map(modeOfKind), ['search', 'search', 'search', 'search', 'compare', 'ask']);
 });
 
-test('Load: the form gets the question, mode and k back (Ask its box), nothing runs; a cut question loses its "…" and says so; a Compare without B says B is not saved', () => {
+test('Load: the form gets the question, mode and k back (Ask its box), nothing runs; a cut question says so; a Compare without B says B is not saved', () => {
 	assert.deepEqual(loadPlan(item({ kind: 'hybrid', topK: 25 }), 'n'), { mode: 'search', search: { nonce: 'n', question: 'kestrel survey', mode: 'hybrid', topK: 25, run: false, chat: null }, ask: null, notes: [] });
 	assert.deepEqual(loadPlan(item({ kind: 'ask', topK: null }), 'n'), { mode: 'ask', search: null, ask: { nonce: 'n', question: 'kestrel survey', run: false }, notes: [] });
 	assert.deepEqual(loadPlan(item({ kind: 'compare', compareWith: 'falcon' }), 'n').search, { nonce: 'n', question: 'kestrel survey', questionB: 'falcon', topK: 10, run: false, chat: null });
 	const noB = loadPlan(item({ kind: 'compare' }), 'n');
 	assert.deepEqual([noB.mode, noB.search?.question, noB.search?.questionB, noB.notes], ['compare', 'kestrel survey', '', [COMPARE_B_NOT_SAVED]]);
-	const cut = loadPlan(item({ question: historyQuestion('w'.repeat(500)) }), 'n');
-	assert.equal(cut.search?.question, 'w'.repeat(199), 'the "…" History added is not put in the box');
+	const cut = loadPlan(item({ question: 'w'.repeat(200), truncated: true }), 'n');
+	assert.equal(cut.search?.question, 'w'.repeat(200), 'what History kept, to edit');
 	assert.deepEqual(cut.notes, [ONLY_FIRST_KEPT]);
 	assert.equal(COMPARE_B_NOT_SAVED, "Question B isn't saved.");
 });
@@ -147,7 +149,7 @@ test('Rerun: the entry\'s mode and k with the threshold, scope and table filter 
 	assert.equal(compare.title, 'Run A and B again with top 10, and the mode, threshold, scope and table filter chosen now');
 	assert.deepEqual(rerunPlan(item({ kind: 'compare' }), CONTEXT), { ok: false, reason: COMPARE_B_NOT_SAVED });
 	assert.deepEqual(rerunPlan(item({ kind: 'keyword' }), { ...CONTEXT, options: modes({ keyword: 'This store cannot search by keyword' }) }), { ok: false, reason: 'Keyword cannot run now: This store cannot search by keyword' });
-	assert.deepEqual(rerunPlan(item({ question: historyQuestion('w'.repeat(500)) }), CONTEXT), { ok: false, reason: `${ONLY_FIRST_KEPT} Load it to edit and run.` });
+	assert.deepEqual(rerunPlan(item({ question: 'w'.repeat(200), truncated: true }), CONTEXT), { ok: false, reason: `${ONLY_FIRST_KEPT} Load it to edit and run.` });
 	const ask = rerunPlan(item({ kind: 'ask', topK: null }), CONTEXT);
 	assert.ok(ask.ok);
 	assert.deepEqual(ask.ask, { nonce: 'n1', question: 'kestrel survey', run: true });
@@ -169,9 +171,10 @@ test('a dev-tool mount\'s history records each run at once, with what the Query 
 test('wiring: every finished run goes to the mount\'s history, from Search, Compare and Ask; Load and Rerun hand the form an entry', () => {
 	const tab = code(path.join('components', 'QueryTab.tsx'));
 	assert.match(tab, /const record = \(run: QueryRunRecord\): void => history\.record\(historyKey, run\);/);
-	assert.match(tab, /<SearchPanel [^\n]*onRecord=\{record\} \/>/);
+	assert.match(tab, /<SearchPanel [^\n]*onRecord=\{record\} onShowDocument=\{onShowDocument\} \/>/);
 	assert.match(tab, /<ChatPanel [^\n]*onRecord=\{record\} \/>/);
 	assert.match(tab, /history=\{env\.queryHistory\}\s*historyKey=\{entry\.key\}/, 'the mount\'s own history, per connection');
+	assert.match(tab, /entry\.openDocument\.set\(\{ nonce: `query-\$\{requests\.current\}`, objectId \}\);\s*actions\.openTab\?\.\('documents'\);/, "a result's name asks Documents for its drawer (I23)");
 	assert.match(tab, /const plan = loadPlan\(entry, nonce\(\)\);/);
 	assert.match(tab, /const plan = rerunOf\(entry, nonce\(\)\);\s*if \(!plan\.ok\) return;/);
 	assert.match(tab, /setHistoryOpen\(false\);\s*setFocusNext\('history-toggle'\);/, 'closing the aside returns the focus to its button');

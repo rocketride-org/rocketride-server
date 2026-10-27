@@ -744,6 +744,9 @@ test("SearchResults: the slider over the store's range, its count beside the nod
 	assert.match(html, /aria-label="Open C:\/demo\/doc0\.md at chunk 0"/);
 	assert.match(html, /aria-label="Show chunk 0 of C:\/demo\/doc0\.md on the map"/);
 	assert.match(html, /aria-label="Ask about C:\/demo\/doc0\.md"/);
+	assert.doesNotMatch(html, /in Documents"/, 'no way to Documents given: names are plain text');
+	const named = render(h(SearchResults, { run, view: classifyAt(run.rows, 0.42, dialect.score), score: dialect.score, range, ...resultHandlers, onShowDocument: () => undefined }));
+	assert.match(named, /<button type="button"[^>]*aria-label="Show C:\/demo\/doc0\.md in Documents"[^>]*><span[^>]*>C:\/demo\/doc0\.md<\/span><\/button>/);
 	assert.match(html, /near miss: below the threshold/);
 	assert.match(html, /below the floor \(the store drops it\)/);
 });

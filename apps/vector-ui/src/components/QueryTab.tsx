@@ -50,6 +50,10 @@
 // control (a result's "ask about this", "Open in Search", "Use Search"), it
 // moves to the shown mode's first control (vector/queryFocus.ts).
 //
+// A result's document name asks the Documents tab to show it in its drawer
+// (`entry.openDocument`, taken once by its nonce); "open" still opens the
+// document's own tab at the chunk.
+//
 // QueryTab binds the connection's stores; QueryWorkbench is the tab itself,
 // with everything it needs as props.
 // =============================================================================
@@ -115,6 +119,8 @@ export interface IQueryWorkbenchProps {
 	history: IQueryHistorySource;
 	/** The connection's key in it. */
 	historyKey: string;
+	/** Show a document in the Documents tab's drawer (a result's name). Absent: names are plain text. */
+	onShowDocument?(objectId: string): void;
 }
 
 /**
@@ -144,7 +150,7 @@ function focusIn(root: HTMLElement | null, target: QueryFocusTarget): void {
  * @param props - {@link IQueryWorkbenchProps}.
  * @returns The tab.
  */
-export function QueryWorkbench({ model, surfaceModel, channels, selection, actions, mode, onMode, prefill, onPrefillTaken, chatDocuments, chatNotice, onClearChatScope, visible, history, historyKey }: IQueryWorkbenchProps): React.ReactElement {
+export function QueryWorkbench({ model, surfaceModel, channels, selection, actions, mode, onMode, prefill, onPrefillTaken, chatDocuments, chatNotice, onClearChatScope, visible, history, historyKey, onShowDocument }: IQueryWorkbenchProps): React.ReactElement {
 	const root = useRef<HTMLDivElement>(null);
 	const tabRefs = useRef<Partial<Record<QueryMode, HTMLButtonElement | null>>>({});
 	const ids = useId();
@@ -306,7 +312,7 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 			<div style={styles.body}>
 				<div style={styles.main}>
 					<div id={searchId} role="tabpanel" aria-labelledby={`${ids}-tab-${mode === 'compare' ? 'compare' : 'search'}`} hidden={mode === 'ask'} data-surface="search">
-						<SearchPanel key={surfaceModel.connectionKey} model={surfaceModel} channels={channels} selection={selection} actions={actions} comparing={mode === 'compare'} handoff={search} onRecord={record} />
+						<SearchPanel key={surfaceModel.connectionKey} model={surfaceModel} channels={channels} selection={selection} actions={actions} comparing={mode === 'compare'} handoff={search} onRecord={record} onShowDocument={onShowDocument} />
 					</div>
 					<div id={askId} role="tabpanel" aria-labelledby={`${ids}-tab-ask`} hidden={mode !== 'ask'} data-surface="ask" style={mode === 'ask' ? styles.ask : undefined}>
 						{model.chat.enabled && chatNotice !== null && (
@@ -353,6 +359,7 @@ export function QueryTab({ entry, model, channels, actions, visible, surfaceMode
 	const env = useVectorEnv();
 	const mode = useValueStore(entry.queryMode);
 	const prefill = useValueStore(entry.queryPrefill);
+	const requests = useRef(0);
 	return (
 		<QueryWorkbench
 			model={model}
@@ -370,6 +377,12 @@ export function QueryTab({ entry, model, channels, actions, visible, surfaceMode
 			visible={visible}
 			history={env.queryHistory}
 			historyKey={entry.key}
+			onShowDocument={(objectId) => {
+				// The Documents tab opens its drawer on it and clears the request (taken once, by its nonce).
+				requests.current += 1;
+				entry.openDocument.set({ nonce: `query-${requests.current}`, objectId });
+				actions.openTab?.('documents');
+			}}
 		/>
 	);
 }

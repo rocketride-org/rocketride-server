@@ -32,7 +32,8 @@
 // before it is pressed. The results table shows rank, document, chunk, the
 // score (its scale in the column's heading, a bar where the store reports a
 // range), the status at the threshold slider and a 120-character preview,
-// with open / map / ask about this. The slider runs over the store's score
+// with open / map / ask about this; a document's name shows it in the
+// Documents tab's drawer. The slider runs over the store's score
 // range from the node's own setting and re-classifies the rows in place (it
 // never searches again): its line names the count of passing rows beside
 // what today's setting passes, the count is announced once each time the
@@ -87,6 +88,8 @@ export interface SearchPanelProps extends ContractSearchPanelProps {
 	handoff?: SearchHandoff | null;
 	/** Record each finished run (the Query tab's History): a Search run per mode, a Compare once. Absent: nothing is recorded. */
 	onRecord?(record: QueryRunRecord): void;
+	/** Show a result's document in the Documents tab's drawer. Absent: its name is plain text. */
+	onShowDocument?(objectId: string): void;
 }
 
 const S = {
@@ -110,6 +113,7 @@ const S = {
 	th: { textAlign: 'left', fontWeight: 600, color: 'var(--rr-text-primary)', padding: '2px 4px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'bottom' } as CSSProperties,
 	td: { padding: '3px 4px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'top' } as CSSProperties,
 	nowrap: { whiteSpace: 'nowrap' } as CSSProperties,
+	link: { background: 'none', border: 'none', padding: 0, margin: 0, font: 'inherit', color: 'inherit', textAlign: 'left', textDecoration: 'underline', cursor: 'pointer' } as CSSProperties,
 	path: { display: 'block', maxWidth: 260, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
 	text: { display: 'block', maxWidth: 360, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
 	meta: { display: 'block', fontWeight: 400, color: 'var(--rr-text-primary)' } as CSSProperties,
@@ -217,6 +221,8 @@ export interface SearchResultsProps {
 	onShowAll?(): void;
 	/** Run searches within the console's scope (for the "From the chat" line). */
 	scopeOn?: boolean;
+	/** Show a row's document in the Documents tab's drawer. Absent: its name is plain text. */
+	onShowDocument?(row: WorkbenchRow): void;
 }
 
 /**
@@ -236,7 +242,7 @@ function fusedFrom(row: WorkbenchRow): string | null {
  * @param props - {@link SearchResultsProps}.
  * @returns The results.
  */
-export function SearchResults({ run, view, score, range, onThreshold, onCommit, onCopySetting, copied, onOpen, onMap, onAsk, canAsk, askReason = null, onShowAll, scopeOn = false }: SearchResultsProps): React.ReactElement {
+export function SearchResults({ run, view, score, range, onThreshold, onCommit, onCopySetting, copied, onOpen, onMap, onAsk, canAsk, askReason = null, onShowAll, scopeOn = false, onShowDocument }: SearchResultsProps): React.ReactElement {
 	const fromChat = fromChatLine(run, scopeOn);
 	const heading = scoreHeading(score, run.rows);
 	const noBarsId = useId();
@@ -308,7 +314,13 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 										<tr key={rowKey(row.key, index)} data-status={row.status} data-key={`${row.objectId}#${row.chunkId}`}>
 											<td style={S.td}>{row.rank}</td>
 											<td style={S.td} title={path}>
-												<span style={S.path}>{path}</span>
+												{onShowDocument ? (
+													<button type="button" style={S.link} aria-label={`Show ${path} in Documents`} onClick={() => onShowDocument(row)}>
+														<span style={S.path}>{path}</span>
+													</button>
+												) : (
+													<span style={S.path}>{path}</span>
+												)}
 											</td>
 											<td style={{ ...S.td, ...S.nowrap }}>{`#${row.chunkId}${row.cited ? ' · cited' : ''}`}</td>
 											<td style={{ ...S.td, ...S.nowrap }} title={scoreTitle(row, score)}>
@@ -389,7 +401,7 @@ function reasonLines(options: readonly ModeOption[]): string[] {
  * @param props - {@link SearchPanelProps}.
  * @returns The panel.
  */
-export function SearchPanel({ model, channels, selection, actions, comparing = false, handoff = null, onRecord }: SearchPanelProps): React.ReactElement {
+export function SearchPanel({ model, channels, selection, actions, comparing = false, handoff = null, onRecord, onShowDocument }: SearchPanelProps): React.ReactElement {
 	const dialect = model.connection.dialect;
 	const score = dialect?.score ?? null;
 	const options = useMemo(() => modeOptions(model), [model]);
@@ -739,6 +751,7 @@ export function SearchPanel({ model, channels, selection, actions, comparing = f
 					range={range}
 					{...handlers}
 					scopeOn={gate.objectIds !== null}
+					onShowDocument={onShowDocument ? (row) => onShowDocument(row.objectId) : undefined}
 					onMap={(row) => showSearchOnMap(selection, actions, (runs.a as WorkbenchRun).question, [row.key])}
 					onShowAll={() =>
 						showSearchOnMap(
