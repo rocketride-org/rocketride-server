@@ -319,7 +319,8 @@ export function emptyTrashConfirmation(targets: readonly IRemoveTarget[], ctx: I
  * @returns True when the confirm button may be enabled.
  */
 export function confirmReady(typed: ITypedConfirmation | null, input: string): boolean {
-	return typed === null || input.trim() === typed.expected;
+	// Both sides trimmed: a file name that starts or ends with a space can still be typed.
+	return typed === null || input.trim() === typed.expected.trim();
 }
 
 // =============================================================================

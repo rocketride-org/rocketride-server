@@ -255,12 +255,13 @@ test("the directory's export: the documents columns, each row the directory's ow
 });
 
 
-test('the "sorted within" line: only while the listing is incomplete and the rows are not in the store\'s own path order', () => {
+test('the "sorted within" line: only while the listing is incomplete and the rows are sorted here (a column, or storage order once loading stopped)', () => {
 	const rows = [doc('a', 'C:/a.md'), doc('b', 'C:/b.md')];
 	const loading = { status: 'loading' as const, storeSorted: true, rows };
 	assert.equal(sortNote(loading, false), null, 'a sorting store (pgvector) listing in its path order');
 	assert.equal(sortNote(loading, true), 'Sorted within the 2 loaded documents; more may exist.', 'a column sort over part of the documents');
-	assert.equal(sortNote({ ...loading, storeSorted: false }, false), 'Sorted within the 2 loaded documents; more may exist.', 'a store that lists in storage order (Qdrant)');
+	assert.equal(sortNote({ ...loading, storeSorted: false }, false), null, 'storage order while pages are still appended: nothing is sorted yet');
+	assert.equal(sortNote({ ...loading, storeSorted: false, status: 'paused' }, false), 'Sorted within the 2 loaded documents; more may exist.', 'a store that lists in storage order (Qdrant), sorted here once loading stopped');
 	for (const status of ['capped', 'paused', 'stalled', 'unsupported', 'error'] as const) assert.ok(sortNote({ ...loading, status }, true), status);
 	assert.equal(sortNote({ ...loading, status: 'done' }, true), null, 'complete: the sort covers everything');
 	assert.equal(sortNote({ ...loading, rows: [] }, true), null);
@@ -272,7 +273,7 @@ test('the counts say what is loaded and never a total the store did not give', (
 	assert.equal(listCountText(1, { status: 'done', rows }), '1 of 3 documents');
 	assert.equal(listCountText(3, { status: 'loading', rows }), '3 loaded');
 	assert.equal(listCountText(2, { status: 'capped', rows }), '2 of 3 loaded');
-	assert.equal(noDocumentsText(true), 'No documents yet. Add documents, in the header, adds the first one.');
+	assert.equal(noDocumentsText(true), 'No documents yet. Use Add documents, in the header, to add the first one.');
 	assert.equal(noDocumentsText(false), 'No documents yet.', 'a mount that cannot add says nothing it cannot do');
 });
 
@@ -307,7 +308,7 @@ test('Find similar: k covers the document\'s own chunks within the node\'s limit
 	assert.deepEqual(similarDocuments([item('self', 1, 0.99)], 'self'), [], 'only its own chunks: no other document');
 	const { ExplorerToolError } = await import('shared/explorer');
 	assert.equal(similarFailureText(new ExplorerToolError({ kind: 'store', tool: 'neighbors', code: 'BUSY', message: 'busy' })), 'The store is answering another neighbours or recommend request; try again in a moment.');
-	assert.equal(similarFailureText(new ExplorerToolError({ kind: 'stale', tool: 'neighbors', message: 'stale' })), null, 'an answer no longer wanted says nothing');
+	assert.equal(similarFailureText(new ExplorerToolError({ kind: 'stale', tool: 'neighbors', message: 'stale' })), 'A newer neighbours request replaced this one; try again.', 'replaced by a newer request: it says so, and Find similar asks again');
 });
 
 test('the review lists every staged document: its loaded row, else what staging kept', () => {
@@ -333,4 +334,13 @@ test('one test of completeness for every line: an incomplete listing is "loaded"
 		assert.doesNotMatch(footer, /the store holds|more exist\b/, `${status}: the footer claims nothing more`);
 		if (status === 'capped' || status === 'unsupported' || status === 'stalled') assert.ok(footer.endsWith(MORE_MAY_EXIST), `${status}: the footer agrees`);
 	}
+});
+
+test("the heading names the store's total only when the store counted what the list shows (never over a scope matched here)", () => {
+	const rows = [doc('a', 'C:/a.md'), doc('b', 'C:/b.md')];
+	const base = { ...pagerInit(), rows, status: 'capped' as const, pages: 1, total: 900 };
+	assert.equal(directoryHeading(base), '900 documents', 'no filter: the store total');
+	assert.equal(directoryHeading({ ...base, filter: { path_prefix: 'C:/' }, filterApplied: 'server' }), '900 documents', 'the store applied the filter');
+	assert.equal(directoryHeading({ ...base, filter: { path_prefix: 'C:/' }, filterApplied: 'none' }), '2 loaded', 'Qdrant: its total counted every document');
+	assert.equal(directoryHeading({ ...base, filter: { path_prefix: 'C:/' }, filterApplied: 'partial' }), '2 loaded', 'Chroma: only part applied');
 });

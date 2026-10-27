@@ -249,8 +249,8 @@ test('the scope: the listing asks for its conditions, its documents resolve from
 	assert.match(dir, /useDebounced\(text, FILTER_DEBOUNCE_MS\)/);
 	// A folder in the rail narrows what is loaded; setting the scope to it is its own, explicit action (C2).
 	assert.match(dir, /folderRows\(view\.rows, folder\)/);
-	assert.match(dir, /Scope search, map and Ask to this folder/);
-	assert.match(dir, /const next = scopeWith\(scope, applied, \{ path_prefix: prefix \}\);\s*const refused = checkScope\(next\);\s*setFolderError\(refused\);\s*if \(refused === null\) \{\s*onScope\(next\);/, 'a folder the node would refuse is said, never sent');
+	assert.match(dir, /\{folderScopeLabel\(folderTargets\)\}/, 'the action names the surfaces it scopes');
+	assert.match(dir, /const next = folderScope\(scope, applied, prefix\);\s*const refused = checkScope\(next\);\s*setFolderError\(refused\);\s*if \(refused === null\) onScope\(next\);/, 'a folder the node would refuse is said, never sent; the list keeps its folder view (R1-I4)');
 	assert.match(dir, /\{folderError !== null && \(\s*<div role="alert"[^>]*>\s*\{folderError\}/);
 	assert.doesNotMatch(code('components/FolderRail.tsx'), /onScope|setFilter|scopeWith/, 'the rail never changes the scope or the listing');
 });
@@ -275,7 +275,7 @@ test('every removal is confirmed inline in the document that shows it, in both m
 	assert.doesNotMatch(app, /RemoveDialogHost/, 'the full app mounts no modal confirmation');
 	assert.match(code('views/ConsoleView.tsx'), /<InlineRemoveConfirm entry=\{entry\} probe=\{probe\} origin=\{CONSOLE_ORIGIN\} returnFocus=\{returnFocus\} \/>/, 'the workbench confirms its own requests inline, on every tab');
 	assert.match(code('views/ConsoleView.tsx'), /firstFocusable\(\[inShown\('\[data-return-focus\]'\), inShown\('\[data-grid-focus\] \[data-grid-row\]\[tabindex="0"\]'\), inShown\('\[data-grid-focus\]'\), currentTab\(\)\]\)/, "a lost focus goes to the shown panel's marked row, else its grid, else the current tab");
-	assert.match(code('components/InlineRemoveConfirm.tsx'), /firstFocusable\(\[how\.current === 'cancel' \? back : null, closing\.current\.returnFocus\?\.\(\)\]\)/, 'after Cancel, back to the opener first');
+	assert.match(code('components/InlineRemoveConfirm.tsx'), /firstFocusable\(\[how\.current === 'cancel' \? back : null, closing\.current\.returnFocus\?\.\(\), surfaceTarget\(surface\)\]\)/, "after Cancel, back to the opener first; with no fallback named, the surface's own (R1-I1)");
 	assert.match(app, /<DocumentView [^>]*beforeBody=\{<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} origin=\{documentOrigin\(payload\.objectId\)\} \/>\}/, "and the full app's document tab its own (it shares the console's controller)");
 	assert.match(app, /origin: documentOrigin\(payload\.objectId\),/, "the tab's actions ask under its origin");
 	for (const file of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/RemoveDialogHost.tsx']) assert.ok(!fs.existsSync(path.join(SRC, file)), `${file}: no modal confirmation is left`);

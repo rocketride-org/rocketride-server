@@ -36,7 +36,9 @@
 //            locale. It reads the rows and never writes to them.
 //   KEYS     Up and Down move one row, Page Up and Page Down a page, Home and
 //            End to the first and last row; Enter activates the row and
-//            Space toggles it.
+//            Space toggles it. Up from the first row reaches the column
+//            headers' sort buttons (one tab stop for the whole grid), where
+//            Left, Right, Home and End move between them and Down returns.
 //   WINDOW   only the rows in view (plus an overscan) are rendered, and the
 //            focused row always is, wherever the list is scrolled, so the
 //            focus never leaves with a row scrolled out of view.
@@ -121,19 +123,22 @@ export function sortRows<R>(rows: readonly R[], columns: ReadonlyArray<IGridSort
 	return keyed.map((k) => k.row);
 }
 
-/** What a key does in the grid. */
-export type GridKeyAction = { kind: 'move'; index: number } | { kind: 'activate' } | { kind: 'toggle' };
+/** What a key does in the grid. `header`: up from the first row, into the column headers. */
+export type GridKeyAction = { kind: 'move'; index: number } | { kind: 'activate' } | { kind: 'toggle' } | { kind: 'header' };
 
 /**
  * What a key pressed on a row does.
  *
  * @param key - `KeyboardEvent.key`.
- * @param at - The focused row's index (-1: none yet), how many rows, and how many fit in a page.
+ * @param at - The focused row's index (-1: none yet), how many rows, how many fit in a page, and whether the header
+ *   row has sort buttons to move up to.
  * @returns The action, or null for a key the grid leaves alone.
  */
-export function gridKey(key: string, at: { index: number; count: number; page: number }): GridKeyAction | null {
+export function gridKey(key: string, at: { index: number; count: number; page: number; header?: boolean }): GridKeyAction | null {
 	const { index, count } = at;
 	if (count === 0) return null;
+	// The header row is the grid's first row: Up from the first data row reaches its sort buttons.
+	if (key === 'ArrowUp' && index === 0 && at.header) return { kind: 'header' };
 	const page = Math.max(1, Math.floor(at.page));
 	const last = count - 1;
 	const from = Math.min(Math.max(index, -1), last);
@@ -156,6 +161,35 @@ export function gridKey(key: string, at: { index: number; count: number; page: n
 		case ' ':
 		case 'Spacebar':
 			return from < 0 ? null : { kind: 'toggle' };
+		default:
+			return null;
+	}
+}
+
+/** What a key does on a column header's sort button: another header, or back down to the rows. */
+export type HeaderKeyAction = { kind: 'move'; index: number } | { kind: 'rows' };
+
+/**
+ * What a key pressed on a header's sort button does (Enter and Space are the button's own: they sort).
+ *
+ * @param key - `KeyboardEvent.key`.
+ * @param at - The focused header among the sortable ones, and how many there are.
+ * @returns The action, or null for a key the header leaves alone.
+ */
+export function headerKey(key: string, at: { index: number; count: number }): HeaderKeyAction | null {
+	if (at.count === 0) return null;
+	const last = at.count - 1;
+	switch (key) {
+		case 'ArrowLeft':
+			return { kind: 'move', index: Math.max(0, at.index - 1) };
+		case 'ArrowRight':
+			return { kind: 'move', index: Math.min(last, at.index + 1) };
+		case 'Home':
+			return { kind: 'move', index: 0 };
+		case 'End':
+			return { kind: 'move', index: last };
+		case 'ArrowDown':
+			return { kind: 'rows' };
 		default:
 			return null;
 	}

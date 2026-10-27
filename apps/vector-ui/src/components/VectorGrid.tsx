@@ -35,6 +35,9 @@
 //   Home / End       the first and the last row
 //   Enter            onActivate (the Documents tab opens the drawer)
 //   Space            onToggle (the Documents tab stages the document)
+//   Up on row 1      the column headers' sort buttons (Left, Right, Home,
+//                    End between them; Down back to the rows), so the
+//                    whole grid is one tab stop
 //
 // Only the rows in view are rendered (fixed-height rows, placed by their
 // index), plus the focused row and the selected one wherever the list is
@@ -60,7 +63,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ForwardedRef, ReactElement, ReactNode, Ref } from 'react';
 import { ACCENT_TOKEN, selectedRowBackground } from '../vector/colors';
-import { gridKey, gridTemplate, gridWindow, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../vector/grid';
+import { gridKey, gridTemplate, gridWindow, headerKey, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../vector/grid';
 import type { IGridSort, IGridSortable } from '../vector/grid';
 import { FOCUS_RING } from '../styles';
 
@@ -139,6 +142,11 @@ export interface IVectorGridProps<R> {
 	 * confirmation closes.
 	 */
 	leaving?: ReadonlySet<string> | null;
+	/**
+	 * Changes when the values a sortable column reads change outside the rows (a staged mark, a health computed
+	 * later): the rows are sorted again. Leave it unchanged to keep rows where they are while that column is not sorted.
+	 */
+	sortVersion?: unknown;
 }
 
 /** What a parent can ask of the grid. */
@@ -213,7 +221,7 @@ function minimumWidth(columns: ReadonlyArray<{ width: number | 'flex'; minWidth?
  * @returns The grid element.
  */
 function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVectorGridHandle>): ReactElement {
-	const { label, rowId, columns, sort, onSort, selectedId, onActivate, onToggle, activateOnClick = false, rowHeight = GRID_ROW_HEIGHT, empty, rowTitle, surface = 'var(--rr-bg-paper)', hold = false, leaving = null } = props;
+	const { label, rowId, columns, sort, onSort, selectedId, onActivate, onToggle, activateOnClick = false, rowHeight = GRID_ROW_HEIGHT, empty, rowTitle, surface = 'var(--rr-bg-paper)', hold = false, leaving = null, sortVersion } = props;
 	// While held, the rows of the last render that was not.
 	const lastRows = useRef(props.rows);
 	if (!hold) lastRows.current = props.rows;
@@ -231,7 +239,12 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 	// True while the focus is in the grid (a row or a control in it); a row leaving the list keeps it true.
 	const focusInside = useRef(false);
 
-	const shown = useMemo(() => sortRows(rows, columns, sort), [rows, columns, sort]);
+	// sortVersion: the sorted column reads a value that changed outside the rows.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	const shown = useMemo(() => sortRows(rows, columns, sort), [rows, columns, sort, sortVersion]);
+	// The sort buttons of the header row, in order (reached from the first row with Up; one tab stop for the grid).
+	const headerButtons = useRef<Array<HTMLButtonElement | null>>([]);
+	const sortable = useMemo(() => columns.filter((c) => c.sortValue !== undefined).map((c) => c.id), [columns]);
 	const ids = useMemo(() => shown.map(rowId), [shown, rowId]);
 	const indexOf = useMemo(() => new Map(ids.map((id, i) => [id, i])), [ids]);
 	const template = useMemo(() => gridTemplate(columns), [columns]);
@@ -328,6 +341,21 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 
 	const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
 		if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+		// A header's sort button: Left, Right, Home and End move between them, Down goes back to the rows.
+		const header = sortable.length === 0 ? -1 : headerButtons.current.findIndex((button) => button !== null && button === event.target);
+		if (header >= 0) {
+			const action = headerKey(event.key, { index: header, count: sortable.length });
+			if (action === null) return;
+			event.preventDefault();
+			if (action.kind === 'move') headerButtons.current[action.index]?.focus();
+			else if (stop >= 0) {
+				show(stop);
+				setActiveId(ids[stop] as string);
+				pending.current = ids[stop] as string;
+				setTick((n) => n + 1);
+			}
+			return;
+		}
 		const row = rowOf(event.target, grid.current);
 		// The grid itself has the focus (no row was left to take it): a move key enters at the row in the tab order.
 		if (row === null) {
@@ -345,8 +373,13 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 		const id = row.dataset.rowId ?? '';
 		const index = indexOf.get(id);
 		if (index === undefined) return;
-		const action = gridKey(event.key, { index, count, page: Math.floor(bodyHeight / rowHeight) });
+		const action = gridKey(event.key, { index, count, page: Math.floor(bodyHeight / rowHeight), header: sortable.length > 0 });
 		if (action === null) return;
+		if (action.kind === 'header') {
+			event.preventDefault();
+			headerButtons.current[0]?.focus();
+			return;
+		}
 		// Enter and Space on a control inside the row are the control's (a checkbox ticks, a button clicks).
 		if (action.kind !== 'move' && event.target !== row) return;
 		const item = shown[index] as R;
@@ -454,6 +487,10 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 									{column.sortValue ? (
 										<button
 											type="button"
+											tabIndex={-1}
+											ref={(el) => {
+												headerButtons.current[sortable.indexOf(column.id)] = el;
+											}}
 											style={styles.sortButton}
 											title={column.title ?? `Sort by ${column.label}`}
 											onClick={() => onSort(nextSort(sort, column.id))}

@@ -47,7 +47,9 @@
 // `onClosed` put it; else, after Cancel, back to what had it when the panel
 // opened; else to `returnFocus` (the surface's fallback: in the workbench,
 // the row its grid marks after the rows the write takes away, else the
-// grid, else the tab). Never `<body>`, and never an element of a hidden panel.
+// grid, else the tab); else to the first target of the surface it sits on
+// (components/focusTargets.ts surfaceTarget), so a caller that names none
+// still never leaves the focus on `<body>`. Never an element of a hidden panel.
 // =============================================================================
 
 import React, { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
@@ -60,6 +62,7 @@ import type { ConfirmOrigin, ConfirmationView } from '../vector/confirm';
 import { firstFocusable, focusLost } from '../vector/focus';
 import { formatCount } from '../vector/stats';
 import { FOCUS_RING, styles as appStyles } from '../styles';
+import { surfaceOf, surfaceTarget } from './focusTargets';
 
 const styles = {
 	panel: {
@@ -164,10 +167,12 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 	useEffect(() => {
 		const node = region.current;
 		const back = opener.current;
+		// The surface it sits on (read while it is on the page): its own fallback when the caller named none.
+		const surface = surfaceOf(node);
 		return () => {
 			closing.current.onClosed?.(how.current);
 			if (typeof document === 'undefined' || !focusLost(document.activeElement, document.body, node)) return;
-			firstFocusable([how.current === 'cancel' ? back : null, closing.current.returnFocus?.()])?.focus();
+			firstFocusable([how.current === 'cancel' ? back : null, closing.current.returnFocus?.(), surfaceTarget(surface)])?.focus();
 		};
 	}, []);
 	const onConfirm = (): void => {

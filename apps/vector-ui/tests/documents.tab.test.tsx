@@ -70,7 +70,7 @@ require.cache[exportMenuPath] = { id: exportMenuPath, filename: exportMenuPath, 
 
 const { WRITES_OFF, panelEntry, panelModel, renderDocumentsTab, renderPendingBar, renderTrashTab } = require('./support/panels') as typeof import('./support/panels');
 const { documentsFolder, stagedReview } = require('../src/adapters/consoleActions') as typeof import('../src/adapters/consoleActions');
-const { pagerApplyPage, pagerBegin, pagerInit } = require('../src/vector/documents') as typeof import('../src/vector/documents');
+const { pagerApplyPage, pagerBegin, pagerInit, pagerPause } = require('../src/vector/documents') as typeof import('../src/vector/documents');
 const { readDocumentsPage } = require('../src/vector/results') as typeof import('../src/vector/results');
 const { stage } = require('../src/vector/staged') as typeof import('../src/vector/staged');
 
@@ -157,9 +157,10 @@ test('the review lists only the staged documents, loaded or not, and says how ma
 	assert.doesNotMatch(html, /data-row-id="a"/);
 });
 
-test('"sorted within" shows while the listing is incomplete and the rows are not in the store\'s path order', () => {
+test('"sorted within" shows while the listing is incomplete and the rows are sorted here (storage order once loading stopped)', () => {
 	const partial = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage({ success: true, items: ROWS, next_cursor: 'c2', total: null, counts_exact: true, distinct: true, sorted: false, caveats: [] }));
-	assert.match(renderDocumentsTab({ directory: partial }), />Sorted within the 4 loaded documents; more may exist\.</);
+	assert.doesNotMatch(renderDocumentsTab({ directory: partial }), /Sorted within/, 'pages still arriving: nothing is sorted yet');
+	assert.match(renderDocumentsTab({ directory: pagerPause(partial) }), />Sorted within the 4 loaded documents; more may exist\.</, 'paused: sorted here, over what is loaded');
 	assert.doesNotMatch(renderDocumentsTab({ directory: listing(ROWS, { sorted: false }) }), /Sorted within/, 'complete: the sort covers everything');
 });
 
@@ -343,4 +344,40 @@ test("controls that go away when they act hand the focus to the grid's row, neve
 test('the Folders toggle asked for beside a drawer lets the layout decide again once the drawer closes, handing a focus on it to the grid', () => {
 	const documents = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'DocumentsTab.tsx'), 'utf8');
 	assert.match(documents, /if \(drawerWasShown\.current && !drawerShown && forceRailRef\.current\) \{\s*\/\/[^\n]*\n\s*refocus\.current = true;\s*setForceRail\(false\);/);
+});
+
+test('R1-I4: after "Scope … to this folder" the list keeps its folder view and the rail its siblings, on pgvector (server) and on a store that filters nothing', () => {
+	const { folderScope } = require('../src/vector/filters') as typeof import('../src/vector/filters');
+	const scope = folderScope(null, '', 'C:/demo/handbooks/');
+	assert.ok(scope);
+	const stores = {
+		pgvector: listing(ROWS),
+		qdrant: pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage({ success: true, items: ROWS, next_cursor: null, total: ROWS.length, counts_exact: true, distinct: true, sorted: false, caveats: [] })),
+	};
+	for (const [store, directory] of Object.entries(stores)) {
+		const entry = panelEntry(`k-i4-${store}`);
+		documentsFolder(entry).set({ kind: 'folder', prefix: 'C:/demo/handbooks/' });
+		const before = renderDocumentsTab({ entry, directory });
+		const after = renderDocumentsTab({ entry, directory, scope });
+		const listed = (html: string): string[] => [...html.matchAll(/data-row-id="(\w)"/g)].map((m) => m[1] as string).sort();
+		assert.deepEqual(listed(after), listed(before), `${store}: the list is unchanged`);
+		assert.deepEqual(listed(after), ['a', 'b'], `${store}: the folder view of what is loaded`);
+		assert.match(after, /data-item-id="f:C:\/demo\/"/, `${store}: the rail keeps every folder`);
+		assert.match(after, /aria-label="All documents, 4 loaded documents"/, `${store}: counted over every loaded document (the scope is off the list)`);
+		assert.match(after, /aria-pressed="false"[^>]*>Documents<\/button>/, `${store}: the ScopeBar shows the list off the scope`);
+	}
+});
+
+test('the export offers what the list shows when a folder or the review narrows it; Escape on a row closes the drawer', () => {
+	const entry = panelEntry('k-shown');
+	documentsFolder(entry).set({ kind: 'folder', prefix: 'C:/demo/handbooks/' });
+	renderDocumentsTab({ entry, directory: listing(ROWS) });
+	const shown = exportItems.find((i) => i.id === 'directory-shown');
+	assert.equal(shown?.label, 'Documents shown, folder C:/demo/handbooks/ (2)');
+	assert.deepEqual(shown?.rows?.().rows.map((r) => r.objectId), ['b', 'a']);
+	renderDocumentsTab({ directory: listing(ROWS) });
+	assert.ok(!exportItems.some((i) => i.id === 'directory-shown'), 'nothing narrows the list: no such item');
+	const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'DocumentsTab.tsx'), 'utf8');
+	assert.match(source, /if \(event\.defaultPrevented \|\| event\.key !== 'Escape' \|\| drawerId === null\) return;\s*event\.preventDefault\(\);\s*setDrawerOpen\(false\);/);
+	assert.match(source, /sortVersion=\{sort\?\.column === 'status' \? staged : sort\?\.column === 'health' \? healthOf : null\}/, 'Status and Health sort again when their values change');
 });

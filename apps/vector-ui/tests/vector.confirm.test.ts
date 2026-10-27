@@ -283,3 +283,11 @@ test("confirming the queue moves it to the trash in batches of the node's write_
 	assert.equal(store.getState().removal.status, 'done');
 	store.dispose();
 });
+
+test('a typed confirmation trims both sides: a file name that starts or ends with a space can be confirmed', () => {
+	const { confirmReady } = require('../src/vector/confirm') as typeof import('../src/vector/confirm');
+	assert.equal(confirmReady({ expected: ' notes.md ', prompt: '' }, 'notes.md'), true);
+	assert.equal(confirmReady({ expected: 'notes.md', prompt: '' }, '  notes.md '), true);
+	assert.equal(confirmReady({ expected: 'notes.md', prompt: '' }, 'notes'), false);
+	assert.equal(confirmReady(null, ''), true);
+});

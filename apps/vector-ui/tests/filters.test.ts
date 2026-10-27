@@ -727,3 +727,21 @@ test('building scopes: no condition is no scope, the same conditions keep the sc
 	assert.equal(folder?.filter.path_prefix, 'C:/demo/handbooks/', 'Scope to this folder replaces the folder');
 	assert.deepEqual(scopeWith(null, '', { file_types: ['pdf'] })?.filter, { file_types: ['pdf'] }, 'a chart bar with no scope starts one');
 });
+
+test('"Scope … to this folder" from the Documents tab scopes search, the map and Ask, never the list (R1-I4): no relist, and the label names exactly those', () => {
+	const { folderScope, folderScopeLabel, folderScopeTargets } = require('../src/vector/filters') as typeof import('../src/vector/filters');
+	assert.deepEqual(folderScopeTargets(null), { documents: false, map: true, search: true, chat: true }, 'a new scope: every surface but the list');
+	const prev = { filter: { file_types: ['md'] }, label: '', objectIds: null, overflow: null, applyTo: { documents: true, map: false, search: true, chat: true } };
+	assert.deepEqual(folderScopeTargets(prev), { documents: false, map: false, search: true, chat: true }, "the scope's own surfaces, minus the list");
+	assert.deepEqual(folderScopeTargets({ ...prev, applyTo: { documents: true, map: false, search: false, chat: false } }), { documents: false, map: true, search: true, chat: true }, 'none of them on: all three');
+	const next = folderScope(prev, '', 'C:/demo/handbooks/');
+	assert.ok(next);
+	assert.deepEqual(next.filter, { path_prefix: 'C:/demo/handbooks/', file_types: ['md'] }, "the folder joins the scope's other conditions");
+	assert.equal(next.applyTo.documents, false);
+	// What the console asks the listing for (views/ConsoleView.tsx): nothing, while the scope is off the list.
+	const listing = next.applyTo.documents ? listingFilter(next.filter) : null;
+	assert.equal(listing, null, 'the list is not listed again: on pgvector the rail keeps the folder\'s siblings');
+	assert.equal(folderScopeLabel(folderScopeTargets(null)), 'Scope search, map and Ask to this folder');
+	assert.equal(folderScopeLabel(folderScopeTargets(prev)), 'Scope search and Ask to this folder');
+	assert.equal(folderScopeLabel({ documents: false, map: true, search: false, chat: false }), 'Scope map to this folder');
+});
