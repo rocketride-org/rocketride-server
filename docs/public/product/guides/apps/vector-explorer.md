@@ -186,8 +186,7 @@ documents and chunks (once the console has counted them), embedding model,
 dimension, metric, index and size. Then come the metadata fields read so far (or
 a line saying the Collection tab reads them from a sample on request), **Sample
 chunks** (the first chunks of the first document: two reads when the drawer
-opens, only for a store that can hold documents, kept in memory until the
-console writes to the store), **Quick actions** (**Browse documents**,
+opens, only for a store that can hold documents, kept in memory until the console writes to the store or a refresh finds the store holding a different number of documents), **Quick actions** (**Browse documents**,
 **Search**, **Open map**, each opening the console on that tab) and a
 sentence per note. Behind a collapsed **Connection details** are the roles, the
 pipeline, the node, the backend and its version, the embedding and LLM node
@@ -205,9 +204,7 @@ per tab. A panel is built the first time its tab shows and then kept, so a tab
 keeps what you did in it.
 
 The header names the collection and its pipeline and has three buttons.
-**Refresh** counts the collection again, lists the documents again and asks the
-store node about itself again; it says "Refreshing…" only for a refresh you
-asked for, not for the quick check that runs in the background. **Details**
+**Refresh** counts the collection again, lists the documents again and asks the store node about itself again; it says "Refreshing…" only for a refresh you asked for, not for the quick check that runs in the background, and the button keeps one width. It is never disabled: where the connection cannot be opened it is marked unavailable, with the reason. When the store's last check failed, Refresh (and **Retry** on a banner, in Documents and in Trash) checks the store again first. A store that did not answer is said to have "not answered when it was last checked", never to need an update of the node, and a listing that fails again keeps the last known rows, marked as such. A store's error text drops a leading exception name. **Details**
 shows or hides what a connection's drawer shows on the Connections page, with
 **Test connection**, inside the console. **Add documents** opens the upload
 aside (see [Adding documents](#adding-documents)). The header and the tab row do
@@ -232,7 +229,7 @@ bar; otherwise it is the result of the last write, announced as a status (as an
 alert when the write failed), or nothing. A finished write's line is cut to one
 line and has **Write details** beside it, a popup that opens above the line and
 stays inside the window, with the whole result sentence and then the store's
-audit of each batch; Escape, a press outside it or a resize closes it. A result
+audit of each batch (for moves to the trash and restores as well as deletes); Escape, a press outside it or a resize closes it. A result
 that lands while documents are staged shows first: a success for 6 seconds, a
 failure or a write that did not do all it was asked (documents kept whole, or
 already gone) until the staged set changes or you press **Show pending**. It is
@@ -446,8 +443,7 @@ rows whatever their scores.
 
 Results show rank, document, chunk, score, whether the node's threshold would keep
 the row, a 120-character preview, and **open** (the document's own tab at that
-chunk), **map** and **ask about this**; a document's name shows it in the
-Documents tab's drawer. The Score heading gives the scale from the store's own
+chunk), **map** and **ask**, which stay on one line; a document's name shows it in the Documents tab's drawer. Rows are one line each, with a short status (passes, near miss, below floor, keyword match) whose meaning a legend line above the table gives, and a Hybrid run adds a **Found by** column (the semantic and keyword ranks). The Score heading gives the scale from the store's own
 score definition (formula, range, which direction is closer). A bar is drawn only
 where the store reports a range (higher is closer unless the store says lower is), inverted where lower is closer; otherwise there is the number alone, with the reason. A row found
 by keyword only has no score and no bar; a Hybrid row that the semantic search
@@ -464,7 +460,7 @@ console cannot change node settings.
 
 **Compare** runs a second question beside the first and says what they share: "A
 and B share 4 of 10 results (Jaccard 0.25); 3 documents only in A, 2 only in B";
-with the map open, both are drawn as stars (A ★, B ☆).
+with the map open, both are drawn as stars (A ★, B ☆): B is placed after A, and the map's status line says when B could not be placed.
 
 #### Ask
 
@@ -496,9 +492,7 @@ or this is a dev tool), it says why and offers **Use Search**.
 
 **History (N)** opens an aside beside the modes with the runs of this connection,
 newest first and pinned ones on top: the question (for Compare, A and B), its
-kind, k, what it came to, when and how long. A run of the same kind
-that repeats the newest entry's whole question updates that entry, which says "Ran again" (a Compare only when both its questions repeat), instead of adding one; a Search, a Compare and an Ask of the same
-text stay separate entries, and Compare keeps each pair. **Load** puts an entry back in the form and runs nothing. **Rerun** runs it
+kind, k, what it came to, when and how long. A run that repeats the newest entry's kind (for a Search, its mode), question and top-k updates that entry, which says "Ran again" (a Compare only when both its questions repeat), instead of adding one; a run in another mode or with another top-k is a new entry, and so are a Search, a Compare and an Ask of the same text, and Compare keeps each pair. **Load** puts an entry back in the form and runs nothing. **Rerun** runs it
 again with its mode and k and the threshold, scope and table choice you have now;
 it is off, with the reason, when it cannot run. Entries can be pinned, given a
 note and removed; the filter offers All runs, Search, Compare, Ask and Pinned;
@@ -553,8 +547,7 @@ more than one batch of the store's limit), which opens with **Cancel** focused.
 The app says what already moved if an
 error stops the run. A staged document the store no longer has leaves the set when
 the write answers ("N were already gone"); listing again never changes the set.
-The document tab's own **Move document to Trash** is asked at once, with the same
-confirmation, because staging belongs to the console.
+The document tab's own **Move document to Trash** is asked at once, with the same confirmation naming that document's own path and chunk count, because staging belongs to the console. What that write did shows in a fixed line at the bottom of the document (the console's rules, without a pending bar), and the document reads itself again after its own write. While every chunk is in the trash the tab offers **Restore** instead (marked unavailable, with the reason, when writes are off).
 
 The **Trash** tab lists the documents with chunks in the trash, as the store
 counts them (on a store that lists the trash by first chunk it says so), in a grid
@@ -566,7 +559,7 @@ button: "Deletes this document and its N chunks from `<collection>`. If it still
 has chunks outside the trash, it is kept whole. This cannot be undone; add the
 file again to restore it." One document asks you to type its file name (`1` for a
 document with no path; the full path is always shown beside the box); several
-documents, or Empty trash, ask you to type their count. **Empty trash…** lists the
+documents, or Empty trash, ask you to type their count. Enter confirms once what is typed matches; before that a line under the field says what is missing ("Nothing is typed yet." or "What is typed does not match."). **Empty trash…** lists the
 whole trash first. Deleting sends `delete` for the trash only, so a document that
 still has chunks outside the trash (a later upload added some after it was moved
 there) is kept whole (none of its chunks, in the trash or not, is deleted), and the answer names it by path: "Emptied the trash:
@@ -574,7 +567,7 @@ deleted 12 documents permanently (140 chunks). 1 was kept whole, because it stil
 has chunks outside the trash: `<path>`." On `rocketride_vector` the permanent
 deletes ask for the table name instead, because the table is shared by every
 pipeline in the organization that names it. A document in the trash cannot be read
-until it is restored: "This document is in the trash. Restore it to read it."
+until it is restored: "This document is in the trash. Restore it to read it." The grid's headers fit their words, and a row of a partly trashed document says "4 chunks outside the trash" (or "chunks outside the trash" where the count is not known), as far as the loaded documents say.
 
 After any of these the counts, both lists, the store's details (model,
 dimension, index) and the map refresh, and the app says what happened, for
@@ -736,6 +729,8 @@ with the reason, when the store node cannot sample; the console is unaffected.
   highlight (an answer's sources, Show on map, a duplicate group, a query's
   fading), then the selected point.
 
+Resizing keeps the zoom relative to the fit. Every map notice goes on the status line under the toolbar, and a failure reads "Failed: …" (announced as an alert, and repeated in the legend's notes). Every line and edge the map draws spans at least 2 device pixels (the Canvas 2D fallback outlines a point with 1 px).
+
 The map works on positions and neighbour lists computed by the store node; the
 browser never receives the raw embedding vectors of a sample.
 
@@ -761,7 +756,7 @@ says how to get one.
 number, its text, its length, whether it is a table or deleted, and a score
 while a query has scored the document. Sorting reorders only the chunks read
 ("Showing 100 of 340 chunks; sorting reorders only these."). A chunk opens a
-drawer with its text, its metadata, and its nearest chunks from other documents
+drawer with its text, its metadata (its own fields, without repeating the ids already shown), and its nearest chunks from other documents
 (the document's own chunks are dropped; **Try again** when the store is busy; none
 for a chunk in the trash), and the actions **Show on map**, **Use as query**
 (the app only), **Open in reader** and **Move document to Trash**.
@@ -848,6 +843,7 @@ What is different there:
 - **A document follows its console's writes.** A document tab refreshes in place
   after a write that names it, or that names no document (a restore, a write whose
   outcome is unknown); a write that names other documents leaves it as it is.
+- **Focus.** A console or document brought forward by a press (Show on map, open) takes the focus when nothing shown has it; a document restored at load, or opened behind, does not.
 - **History stays in memory.** The Query history lists this document's runs and
   says "Kept only while this document is open; nothing is saved."
 
@@ -891,12 +887,7 @@ What is different there:
   development runs and 30 days for deployments; see
   [Observability](/guides/observability). If that matters, start the pipeline,
   or set the deployment's schedule, with the trace level `none`.
-- **Query history** keeps your questions only: at most the first 200 characters
-  of each, with the run's mode, top-k, result count or error, pin and note; never
-  the answers or the results, and not the threshold, the scope, the table choice
-  or a Compare's question B (which is held in memory for the session). In the app
-  it is saved in your workspace file, per owner, while **Record runs** is on, and
-  History says so in its footer. A question can be chunk text, because **Use as
+- **Query history.** In the app it is saved in your workspace file, for each connection: whether recording is on and, while it is, the first 200 characters of each question, tagged with its kind (a Search and its mode, a Compare or an Ask), its top-k, when it ran, how long it took, its result count or error, and its pin and note. Never the answers or results, the threshold, the scope, the table filter or a Compare's question B (held in memory for the session). History says so in its footer. A question can be chunk text, because **Use as
   query** in a chunk's drawer puts a chunk's text in the Search box; the history
   keeps the first 200 characters of it. In a dev tool it is kept in memory only,
   and says "Kept only while this document is open; nothing is saved."

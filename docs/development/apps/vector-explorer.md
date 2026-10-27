@@ -139,7 +139,7 @@ Rules the tests pin:
   result with its sentence and audit behind "Write details", or nothing
   (`bottomSlot` in `vector/workbench.ts`: a success holds the line for
   `RESULT_FIRST_MS` while documents are staged, a failure or partial result until
-  the staged set changes or Show pending). What appears after a press never moves a row above it.
+  the staged set changes or Show pending). What appears after a press never moves a row above it. A document surface has a slot of its own for its own Move to Trash and Restore (`components/DocumentWriteLine.tsx`, `documentSlot`): the hub's rules without a pending bar, and the full app's document tab shows only the writes asked under its own origin.
 - **The grids are hand-windowed.** `VectorGrid` (with `vector/grid.ts`) is a
   keyboard grid with its own sorting, windowing and focus rules, not the shell's
   `DataGrid`, so column resize and reorder do not exist; the Documents, Trash
