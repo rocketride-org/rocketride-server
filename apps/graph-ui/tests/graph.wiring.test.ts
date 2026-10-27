@@ -179,17 +179,23 @@ test('a gate refusal is a warning with no pipeline hint and no History entry, an
 });
 
 // Live bug 1: with the strip's basis fixed at 220 px, a run bar that just fitted beside it squeezed the tabs, and the
-// tab list scrolled the new tab out of sight. The rule now: the strip is as wide as its tabs; when the tabs and the run
-// bar do not fit side by side, the run bar wraps to its own line; only tabs wider than the whole row scroll, and the
-// shown tab is scrolled into view.
-test('the tab row wraps the run bar before it hides a tab, and the shown tab is always in view', () => {
+// tab list scrolled the new tab out of sight. Live check at d9b7c0cb8: sharing the row, the run bar joined the tabs'
+// line while a run was out (narrower: Stop waiting, "Running…", no counts) and wrapped inside it, so the tabs sank to
+// the bottom of a two-row line. The rule now: the tabs have a row of their own, the shown tab's controls the row under
+// it; only tabs wider than the row scroll, and the shown tab is scrolled into view.
+test('the tabs have a row of their own and the run bar the row under it, and the shown tab is always in view', () => {
 	const tabs = code(read('components', 'QueryTabs.tsx'));
-	assert.ok(/strip: \{ flex: '1 1 auto', minWidth: 0,/.test(tabs), 'the strip\'s basis is its content: the row breaks before squeezing it');
+	assert.ok(/strip: \{ flex: '1 1 auto', minWidth: 0,/.test(tabs), 'the strip fills the tab row');
 	assert.ok(/list: \{[^}]*overflowX: 'auto'/.test(tabs), 'tabs wider than the row scroll');
 	assert.ok(/view\.scrollLeft = scrollLeftToShow\([^;]*\);\s*\}, \[active, tabs\.length\]\);/.test(tabs), 'the shown tab is scrolled into view');
 	const workbench = code(read('views', 'WorkbenchView.tsx'));
-	assert.ok(/tabRow: \{[^}]*flexWrap: 'wrap'/.test(workbench), 'the row wraps');
-	assert.ok(/barHost: \{ flex: '0 1 auto', minWidth: 0, marginLeft: 'auto'/.test(workbench), 'the run bar takes its own line, right-aligned, when it wraps');
+	assert.ok(/<div style=\{styles\.tabRow\}>\s*<QueryTabs[\s\S]*?focusRequest=\{focusTabs\}\s*\/>\s*<\/div>\s*<div style=\{styles\.controlRow\}>\s*<div ref=\{setBarHost\} style=\{tabs\.active === OVERVIEW_TAB \? styles\.hidden : styles\.barHost\} \/>\s*\{tabs\.active === OVERVIEW_TAB && \(\s*<div style=\{styles\.overviewActions\}>/.test(workbench), 'the tab row holds the tabs alone; the row under it holds the run bar, or Overview\'s actions');
+	assert.doesNotMatch(workbench.slice(workbench.indexOf('tabRow: {'), workbench.indexOf('\n', workbench.indexOf('tabRow: {'))), /flexWrap/, 'nothing wraps into the tab row');
+	assert.ok(/controlRow: \{ flex: '0 0 auto', display: 'flex', justifyContent: 'flex-end', padding: '4px 24px' \}/.test(workbench), 'right-aligned, with the bottom padding the hidden editor\'s divider sits over');
+	assert.ok(/barHost: \{ flex: '1 1 auto', minWidth: 0, display: 'flex' \}/.test(workbench));
+	const surface = code(read('components', 'RunSurface.tsx'));
+	assert.ok(/runBarInRow: \{ flex: '1 1 auto', display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', justifyContent: 'flex-end', minWidth: 0 \}/.test(surface), 'the bar fills the row: its lines break on the row\'s width, not on a measured width that counts the state text\'s content instead of its basis');
+	assert.ok(/firstLine: \{ flex: '1 1 0', maxWidth: '40%', minWidth: 60,/.test(surface), 'the hidden editor\'s first line takes the room left, and never wraps the bar');
 });
 
 // Review 4c: Stop waiting appearing beside Run widened the run bar by about 95 px, so a bar near the wrap threshold
@@ -198,10 +204,19 @@ test('the tab row wraps the run bar before it hides a tab, and the shown tab is 
 test('Stop waiting takes the Run / Run all slot while a run is out, and the focus follows the slot', () => {
 	const surface = code(read('components', 'RunSurface.tsx'));
 	const bar = surface.slice(surface.indexOf('const runBar = ('), surface.indexOf('return (', surface.indexOf('const runBar = (')));
-	assert.ok(/<span\s+ref=\{runSlot\}\s+style=\{styles\.runSlot\}/.test(bar), 'one slot');
+	assert.ok(/<span\s+ref=\{runSlot\}\s+style=\{styles\.runSlot\(runOut \? held\?\.slot : undefined\)\}/.test(bar), 'one slot');
 	assert.ok(/\{runner\.canStop \? \(\s*<Button variant="ghost" small=\{inRow\} title=\{STOP_WAITING_NOTE\} onClick=\{\(\) => runner\.stopWaiting\(\)\}>\s*Stop waiting\s*<\/Button>\s*\) : \(/.test(bar), 'Stop waiting in place of Run and Run all');
 	assert.equal((bar.match(/Stop waiting\s*<\/Button>/g) ?? []).length, 1, 'and nowhere else in the bar');
-	assert.ok(/runSlot: \{ display: 'contents' \}/.test(surface), 'the slot adds no box of its own');
+	// Live check at d9b7c0cb8: as display: contents the slot had no width to keep, so Stop waiting narrowed the bar.
+	// While a run is out the slot and the result switch keep the widths measured before it; every other control's
+	// width does not depend on a run, so the bar's lines break where they did.
+	assert.ok(/runSlot: \(minWidth: number \| undefined\): CSSProperties => \(\{ display: 'inline-flex', alignItems: 'center', gap: 'inherit', minWidth \}\)/.test(surface), 'a box of its own that can keep a width');
+	const hold = surface.slice(surface.indexOf('const viewsGroup = useRef'), surface.indexOf('const runStateText ='));
+	assert.ok(/const runOut = runner\.running \|\| runner\.canStop;/.test(hold));
+	assert.ok(/if \(runOut \|\| !runSlot\.current \|\| !viewsGroup\.current\) return;/.test(hold), 'measured only while no run is out');
+	assert.ok(/slot: runSlot\.current\.getBoundingClientRect\(\)\.width, views: viewsGroup\.current\.getBoundingClientRect\(\)\.width/.test(hold));
+	assert.ok(/\}, \[runOut, views, mode, inRow, active, barHost\]\);/.test(hold), 'measured again when the labels, the size or the bar change');
+	assert.ok(/<span ref=\{viewsGroup\} role="group" aria-label="Show the result as" style=\{styles\.views\(runOut \? held\?\.views : undefined\)\}>/.test(bar), 'the result switch keeps its width too');
 	// Review 4d: a focus lost with the button that went goes to the slot's button when it can be pressed, otherwise to
 	// the state text (it says why), and back to Run once Run can be pressed; only this tab's run moves a lost focus.
 	const focusRule = surface.slice(surface.indexOf('const parkedFromSlot = useRef(false);'), surface.indexOf('const runBar = ('));
@@ -210,11 +225,12 @@ test('Stop waiting takes the Run / Run all slot while a run is out, and the focu
 	assert.ok(/if \(button && !button\.disabled\) \{\s*parkedFromSlot\.current = false;\s*button\.focus\(\);\s*\} else if \(!parked && runState\.current\) \{\s*parkedFromSlot\.current = true;\s*runState\.current\.focus\(\);\s*\}/.test(focusRule), 'a pressable button, else the state text');
 	assert.ok(/\}, \[runner\.canStop, runner\.running, gateBusy\]\);/.test(focusRule), 'a run that ends before Stop waiting shows, and the gate freeing, both count');
 	assert.ok(/if \(event\.relatedTarget !== null && !event\.currentTarget\.contains\(event\.relatedTarget as Node\)\) runSlotFocused\.current = false;/.test(surface), 'focus going nowhere still belongs to the slot');
-	// Review 4d: the state text has a fixed flex basis, so the bar's width does not change with what it says.
-	assert.ok(/runState: \(focused: boolean\): CSSProperties => \(\{\s*flex: '0 1 220px',\s*minWidth: 0,[\s\S]*?textOverflow: 'ellipsis',/.test(surface), 'a fixed basis, cut with an ellipsis');
+	// Review 4d: line breaking sees one width for the state text whatever it says (a basis of 0 and a fixed minimum); it
+	// takes the room left on its line, cut with an ellipsis.
+	assert.ok(/runState: \(focused: boolean\): CSSProperties => \(\{\s*flex: '1 1 0',\s*minWidth: 120,\s*maxWidth: 260,[\s\S]*?textOverflow: 'ellipsis',/.test(surface), 'one width for line breaking, cut with an ellipsis');
 	assert.ok(/outline: focused \? '2px solid var\(--rr-border-focus\)' : 'none',/.test(surface), 'holding the focus, it shows the ring');
 	assert.ok(/<span\s+ref=\{runState\}\s+tabIndex=\{-1\}\s+style=\{styles\.runState\(runStateFocused\)\}\s+title=\{runStateText\}/.test(bar), 'the state text can hold the focus, and its title is the whole text');
-	// Review 4c: the hidden-editor divider sits 3 px over the tab row's bottom borders, in the workbench only.
+	// Review 4c: the hidden-editor divider sits 3 px over the control row's bottom padding, in the workbench only.
 	assert.ok(/overlap=\{split\.collapsed && barHost !== undefined \? 3 : 0\}/.test(surface));
 	const divider = code(read('components', 'SplitPane.tsx'));
 	assert.ok(/margin: overlap > 0 \? `-\$\{overlap\}px 24px 0` : '2px 24px 0'/.test(divider) && /height: 9,/.test(divider), 'same 9 px hit area, less height');
@@ -274,17 +290,17 @@ test('a tab keeps its layout choice, pinning and legend for its graph view, whic
 });
 
 // A hidden tab keeps its runs, result and graph session, but no canvas or grid (8 tabs x every open document).
-test('only the shown tab draws its results, puts its run bar in the tab row, and keeps a row open', () => {
+test('only the shown tab draws its results, puts its run bar under the tabs, and keeps a row open', () => {
 	const surface = code(read('components', 'RunSurface.tsx'));
 	assert.ok(/\{active && \(\s*<div style=\{styles\.fill\}>/.test(surface), 'the graph, the table and the raw view render only while the tab is shown');
-	assert.ok(/\{barHost !== undefined && active && barHost !== null && createPortal\(runBar, barHost\)\}/.test(surface), 'only the shown tab\'s run bar is in the tab row');
+	assert.ok(/\{barHost !== undefined && active && barHost !== null && createPortal\(runBar, barHost\)\}/.test(surface), 'only the shown tab\'s run bar is under the tabs');
 	assert.ok(/if \(!active\) setOpenRow\(null\);/.test(surface), 'a hidden tab closes its row panel');
 	assert.doesNotMatch(surface, /RowInspector/, 'no shared row drawer (it listens for Escape on the whole page)');
 	assert.ok(/<RowPanel /.test(surface), 'the row opens inline');
 	// I5: the results have no row of their own for Graph / Table / Raw; the switch is a compact toggle in the run bar.
 	assert.doesNotMatch(surface, /TabControl/, 'no results tab row');
 	const bar = surface.slice(surface.indexOf('const runBar = ('), surface.indexOf('return (', surface.indexOf('const runBar = (')));
-	assert.ok(/<span role="group" aria-label="Show the result as">\s*<ToggleGroup options=\{views\} value=\{tab\} onChange=\{\(id\) => setTab\(id\)\} \/>\s*<\/span>/.test(bar), 'the switch is in the run bar, named by its group');
+	assert.ok(/<span ref=\{viewsGroup\} role="group" aria-label="Show the result as" style=\{[^}]*\}>\s*<ToggleGroup options=\{views\} value=\{tab\} onChange=\{\(id\) => setTab\(id\)\} \/>\s*<\/span>/.test(bar), 'the switch is in the run bar, named by its group');
 	// Query 1's draft is written when its tab closes right after typing, not dropped with the timer.
 	assert.ok(/if \(draftTimer\.current\) clearTimeout\(draftTimer\.current\);\s*pendingDraft\.current\?\.\(\);/.test(surface), 'a pending draft is flushed on unmount');
 	assert.ok(/onRunFrom=\{mode === 'read' \? runFrom : undefined\}/.test(surface), 'Run from statement N only in the read workbench: a write that may have been applied is never re-sent from the banner');
@@ -294,7 +310,7 @@ test('only the shown tab draws its results, puts its run bar in the tab row, and
 test('every toggle is named by a group wrapper, and none passes the aria-label the shell drops', () => {
 	const surface = code(read('components', 'RunSurface.tsx'));
 	assert.ok(/<span role="group" aria-label="Row limit">\s*<ToggleGroup options=\{LIMIT_OPTIONS\}/.test(surface), 'the row limit');
-	assert.ok(/<span role="group" aria-label="Show the result as">\s*<ToggleGroup options=\{views\}/.test(surface), 'the result view');
+	assert.ok(/<span ref=\{viewsGroup\} role="group" aria-label="Show the result as" style=\{[^}]*\}>\s*<ToggleGroup options=\{views\}/.test(surface), 'the result view');
 	const workbench = code(read('views', 'WorkbenchView.tsx'));
 	assert.ok(/<span role="group" aria-label="Show history or saved queries">\s*<ToggleGroup options=\{SIDE_OPTIONS\}/.test(workbench), 'History or Saved');
 	for (const text of [surface, workbench]) assert.doesNotMatch(text, /<ToggleGroup[^>]*aria-label=/, 'no aria-label on the toggle itself');
@@ -309,8 +325,8 @@ test('the tab shown after a confirmed close takes the focus, and a flagged Ask d
 	const tabs = code(read('components', 'QueryTabs.tsx'));
 	assert.ok(/if \(focusRequest > 0\) buttons\.current\.get\(active\)\?\.focus\(\);/.test(tabs));
 	assert.ok(/\{note\.check !== null && \(\s*<>\s*(\{\}\s*)?<StatusBadge variant="warning">Check before running<\/StatusBadge>/.test(workbench), 'a visible cue beside Details');
-	// A run bar that wraps under the tabs stays right-aligned.
-	assert.ok(/barHost: \{[^}]*marginLeft: 'auto'/.test(workbench));
+	// The run bar under the tabs is right-aligned.
+	assert.ok(/controlRow: \{[^}]*justifyContent: 'flex-end'/.test(workbench));
 });
 
 // The seams the other packages left for the surface: the node's shortestPath flag (P3), the failure's place and the
@@ -391,7 +407,7 @@ test('the run surface settles, records and describes a run through the mode-awar
 	const surface = code(read('components', 'RunSurface.tsx'));
 	assert.ok(/settle: \(_run, result\) => settleRun\(mode, result, dialect\?\.dialect \?\? null\)/.test(surface), 'settle follows the mode (and the engine: Apache AGE reports rows, not changes)');
 	assert.ok(/patch: limitPatch\(mode, p\.limit\)/.test(surface), 'a limit is recorded only where one is sent');
-	assert.ok(/historySummaryOf\(run, Date\.now\(\)\)/.test(surface), 'history keeps an affected count');
+	assert.ok(/historySummaryOf\(run, Date\.now\(\), \{ affectedNotReported: notReported \}\)/.test(surface), 'history keeps an affected count, and an AGE write\'s is not reported');
 	assert.ok(/resultMeta\(displayed/.test(surface), 'the result line shows the affected count');
 });
 
