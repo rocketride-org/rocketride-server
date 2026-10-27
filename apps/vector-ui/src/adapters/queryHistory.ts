@@ -248,16 +248,20 @@ function sourceOver(holder: IStoreHolder, info: { persisted: boolean; note: stri
 			const store = holder.current();
 			const newest = store.getHistory(key)[0];
 			const tag = tagFor(newest, newest === undefined ? undefined : compared.get(newest.id), entry);
-			// The entry this run lands on: its own, or the newest one when it repeats that one's kind and full question (the
-			// store merges the two by their tagged text, keeping the older id). Question B is set for it before the store tells its listeners, so
-			// the first snapshot carries it; a run without one clears the B of the entry it lands on.
 			// While recording is off the store keeps nothing, and nothing changes here either.
-			if (store.getRecording(key)) {
-				const lands = newest !== undefined && !newest.truncated && newest.question === `${tag}${entry.question}` ? newest.id : id;
-				if (entry.compareWith !== undefined) compared.set(lands, entry.compareWith);
-				else compared.delete(lands);
+			if (!store.getRecording(key)) {
+				store.runs.emitRun(key, storedEntryOf(id, entry, tag));
+				return null;
 			}
+			// The entry this run lands on: its own, or the newest one when it repeats that one's tagged text (its kind,
+			// whole question and, for a Compare, its pair): the store merges the two, keeping the older id. Question B is
+			// set for it before the store tells its listeners, so the first snapshot carries it; a run without one clears
+			// the B of the entry it lands on.
+			const lands = newest !== undefined && !newest.truncated && newest.question === `${tag}${entry.question}` ? newest.id : id;
+			if (entry.compareWith !== undefined) compared.set(lands, entry.compareWith);
+			else compared.delete(lands);
 			store.runs.emitRun(key, storedEntryOf(id, entry, tag));
+			return { id: lands, again: lands !== id };
 		},
 		togglePin: (key, id) => holder.current().togglePin(key, id),
 		setNote: (key, id, note) => holder.current().setNote(key, id, note),

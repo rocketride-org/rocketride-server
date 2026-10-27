@@ -106,11 +106,13 @@ export interface IQueryHistorySource {
 	entries(key: string): IReadable<readonly IQueryHistoryEntry[]>;
 	/**
 	 * Record one finished run (nothing while recording is off for the connection). Hand it the whole question: the
-	 * history keeps its first QUERY_HISTORY_TEXT_MAX characters and marks it `truncated`. A run whose question is
-	 * the newest entry's (the same full text) is that entry run again: the entry keeps its id, pin and note and takes
-	 * the run's kind, top-k, results, time and question B; no entry is added.
+	 * history keeps its first QUERY_HISTORY_TEXT_MAX characters and marks it `truncated`. A run of the newest entry's
+	 * kind and question (the same full text, and for a Compare the same question B) is that entry run again: the entry
+	 * keeps its id, pin and note and takes the run's top-k, results and time; no entry is added.
+	 *
+	 * @returns The entry the run is now (`again`: an entry already there, run again), or null while recording is off.
 	 */
-	record(key: string, entry: Omit<IQueryHistoryEntry, 'id' | 'truncated'>): void;
+	record(key: string, entry: Omit<IQueryHistoryEntry, 'id' | 'truncated'>): { id: string; again: boolean } | null;
 	togglePin(key: string, id: string): void;
 	/** Set (or clear, with '') an entry's note. */
 	setNote(key: string, id: string, note: string): void;
