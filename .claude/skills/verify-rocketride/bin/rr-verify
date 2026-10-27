@@ -115,6 +115,8 @@ cmd_launch() {
 	# setsid makes the engine a process-group leader, so `stop` can end it and every
 	# pipeline process it spawned without touching anything else on the machine.
 	local engine_cmd=(setsid ./engine ./ai/eaas.py --host=127.0.0.1 --port="$port_arg" --base_port="$base_port")
+	# A store per run: shell apps are seeded from this checkout's dist/server/static/apps at startup.
+	export RR_STORE_URL="filesystem://$RUN_DIR/store"
 	(
 		cd "$SERVER_DIR"
 		if [ "$mock" = 1 ]; then
