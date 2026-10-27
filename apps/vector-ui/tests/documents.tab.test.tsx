@@ -164,19 +164,23 @@ test('"sorted within" shows while the listing is incomplete and the rows are sor
 	assert.doesNotMatch(renderDocumentsTab({ directory: listing(ROWS, { sorted: false }) }), /Sorted within/, 'complete: the sort covers everything');
 });
 
-test('the pending bar: nothing while nothing is staged; the documents and, by the confirmation\'s rule, their chunks; Review, Discard, Apply', () => {
+test('the pending bar: one fixed line for the bottom slot; nothing while nothing is staged; the documents and, by the confirmation\'s rule, their chunks; Review, Discard, Apply', () => {
+	const { PENDING_BAR_HEIGHT } = require('../src/components/PendingBar') as typeof import('../src/components/PendingBar');
 	assert.equal(renderPendingBar(), '');
 	const entry = panelEntry('k-bar');
 	entry.staged.set(stage(entry.staged.get(), [{ objectId: 'a', path: 'a.md', chunks: 4 }, { objectId: 'b', path: 'b.md', chunks: 3 }]));
 	const html = renderPendingBar({ entry });
-	assert.match(html, /role="region" aria-label="Pending changes"/);
-	assert.match(html, /role="status"[^>]*>2 documents staged to move to the trash \(7 chunks\)\.<\/span>/);
+	assert.match(html, /role="region" aria-label="Pending changes" data-pending-bar="" style="[^"]*box-sizing:border-box;height:32px;[^"]*flex-wrap:nowrap/, 'one line, a fixed height');
+	assert.equal(PENDING_BAR_HEIGHT, 32);
+	assert.match(html, /role="status"[^>]*white-space:nowrap[^>]*title="2 documents staged to move to the trash \(7 chunks\)\.">2 staged for the trash \(7 chunks\)<\/span>/, 'the short sentence, its whole text in the title');
 	assert.deepEqual([...html.matchAll(/<button type="button"[^>]*>([^<]*)<\/button>/g)].map((m) => m[1]), ['Review', 'Discard', 'Apply']);
 	entry.staged.set(stage(entry.staged.get(), [{ objectId: 'm', path: 'm.md', chunks: null }]));
-	assert.match(renderPendingBar({ entry }), /3 documents staged to move to the trash \(at least 7 chunks; 1 document not counted\)\./, 'never a sum that leaves some out');
+	assert.match(renderPendingBar({ entry }), /title="3 documents staged to move to the trash \(at least 7 chunks; 1 document not counted\)\.">3 staged for the trash \(7\+ chunks\)</, 'never a sum that leaves some out');
 	const off = renderPendingBar({ entry, model: panelModel({ writes: WRITES_OFF }) });
-	assert.match(off, /aria-disabled="true" aria-describedby="[^"]+" title="Removing documents[^"]*"[^>]*>Apply<\/button>/);
-	assert.match(off, />Apply is unavailable: Removing documents is turned off on this store node \(allow_writes\)\.</, 'the staged set stays, and the bar says why');
+	const describedBy = off.match(/aria-describedby="([^"]+)" title="Removing documents[^"]*"[^>]*>Apply<\/button>/)?.[1];
+	assert.ok(describedBy, 'Apply is unavailable and described');
+	assert.match(off, new RegExp(`<span id="${describedBy.replace(/:/g, '\\:')}" role="status"[^>]*>3 staged for the trash \\(7\\+ chunks\\) · Apply is unavailable: Removing documents is turned off on this store node \\(allow_writes\\)\\.</span>`), 'the reason on the same line, read with Apply; the staged set stays');
+	assert.equal((off.match(/<span/g) ?? []).length, 1, 'no second line');
 	assert.match(renderPendingBar({ entry, removal: { status: 'running', message: null } }), /aria-disabled="true"[^>]*>Apply<\/button>/, 'while another write runs');
 });
 
@@ -220,7 +224,11 @@ test("the tabs' sources: the hand grid (never the shell's DataGrid), no row copi
 });
 
 test("the pending sentence uses the confirmation's rule for chunks: a sum only when every count is known", () => {
-	const { pendingText, stagedChunksWords } = require('../src/vector/staged') as typeof import('../src/vector/staged');
+	const { pendingShortText, pendingText, stagedChunksWords } = require('../src/vector/staged') as typeof import('../src/vector/staged');
+	assert.equal(pendingShortText({ documents: 0, chunks: null, unknown: 0 }), '');
+	assert.equal(pendingShortText({ documents: 1, chunks: 1, unknown: 0 }), '1 staged for the trash (1 chunk)');
+	assert.equal(pendingShortText({ documents: 3, chunks: 14, unknown: 2 }), '3 staged for the trash (14+ chunks)', 'at least: "+"');
+	assert.equal(pendingShortText({ documents: 2, chunks: null, unknown: 2 }), '2 staged for the trash', 'no count: none claimed');
 	assert.equal(pendingText({ documents: 0, chunks: null, unknown: 0 }), '');
 	assert.equal(pendingText({ documents: 1, chunks: 1, unknown: 0 }), '1 document staged to move to the trash (1 chunk).');
 	assert.equal(stagedChunksWords({ documents: 3, chunks: 14, unknown: 0 }), '14 chunks');
