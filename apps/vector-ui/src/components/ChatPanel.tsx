@@ -21,33 +21,32 @@
 // SOFTWARE.
 
 // =============================================================================
-// VECTOR-UI — ChatPanel (the console's chat over the documents, R5)
+// VECTOR-UI — ChatPanel (the Query tab's Ask: the chat over the documents, R5)
 // =============================================================================
 //
-// The bottom half of the console's right column. Each question shows its
-// answer (safe Markdown, src/chat/Markdown.tsx) with the chunks it cites:
-// "3 sources · 0.58 top", each source with "open" (the document tab at that
-// chunk) and "map" (highlighted on the map), and "Why these?" (the retrieval
-// debugger) when the embedding node is reachable. The thread is the app's
-// own rather than the shell's chat view because each answer carries its
-// sources and its links must open with rel="noopener noreferrer nofollow".
+// Each question shows its answer (safe Markdown, src/chat/Markdown.tsx) with
+// the chunks it cites: "3 sources · 0.58 top", each source with "open" (the
+// document tab at that chunk) and "map" (highlighted on the map), and "Why
+// these?" (the retrieval debugger) when the embedding node is reachable. The
+// thread is the app's own rather than the shell's chat view because each
+// answer carries its sources and its links must open with
+// rel="noopener noreferrer nofollow".
 //
 // The header names only the LLM node. Stub answers carry the stub's prefix
 // and a "Stub LLM" mark. One question in flight; Enter asks, Shift+Enter
 // adds a line, ArrowUp in an empty box recalls earlier questions.
 //
-// The header's Search toggle swaps the chat body for the SearchPanel (search
-// without the LLM) in the same space, so the console's layout does not move;
-// the chat's thread and draft stay mounted, hidden, and come back with the
-// toggle. "Why these?" searches the documents the question was asked about
-// and can open its question in Search, whose first run is that same search
-// with the answer's cited chunks marked; Search's "ask about this" comes
-// back to the chat with the next question scoped to that document.
+// Search and Compare are the Query tab's other modes (components/
+// QueryTab.tsx), beside this one. "Why these?" searches the documents the
+// question was asked about and can open its question in Search, whose first
+// run is that same search with the answer's cited chunks marked. Without a
+// running Chat source (a pipeline without one, a dev-tool mount) the panel
+// says why, and offers "Use Search" whenever the store can run a search.
 //
-// Search needs no LLM, so the panel is the same without a running Chat
-// source: the header keeps the toggle, and the chat body's "Chat is not
-// available" offers "Search without the LLM" whenever the store can run a
-// search (the embedding node for Semantic, keyword search for Keyword).
+// The focus never falls to <body>: asking (the button turns off while the
+// answer is on its way), "Stop waiting" and "Ask about all documents" (which
+// go away) return it to the question box, and closing "Why these?" to its
+// button.
 // =============================================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -62,24 +61,24 @@ import { CHAT_MAX_CHARS, summariseSources } from '../vector/chatResult';
 import { showAnswerOnMap } from '../adapters/consoleActions';
 import { SourcesPanel } from './SourcesPanel';
 import { RetrievalDebugger } from './RetrievalDebugger';
-import { SHOWING_SEARCH, SearchPanel } from './SearchPanel';
 import { modeOptions } from '../vector/searchWorkbench';
-import type { ChatPrefill } from '../vector/searchWorkbench';
+import type { AskHandoff, ChatPrefill } from '../vector/searchWorkbench';
 
-/** The contract props plus the surface it opens on (the static render tests show Search with it). */
+/** The contract props plus the Query tab's ways into Search and its handed-in questions. */
 export interface ChatPanelProps extends ContractChatPanelProps {
-	/** Open with Search shown instead of the chat (default false). */
-	initialSearch?: boolean;
+	/** "Open in Search" from "Why these?": the question, its cited chunks, and the k and documents searched. Absent: no button. */
+	onOpenInSearch?(prefill: ChatPrefill): void;
+	/** "Use Search": show the Query tab's Search (offered where the chat cannot ask). Absent: no button. */
+	onUseSearch?(): void;
+	/** A question handed in (a history entry): put in the box, or asked at once. */
+	handoff?: AskHandoff | null;
 }
-
-/** What "Open in Search" hands the SearchPanel: the question, its cited chunks, and the k and documents "Why these?" searched. */
-type SearchPrefill = ChatPrefill;
 
 /** Shown when the connection has no running Chat source. */
 export const NO_CHAT_SENTENCE = 'This pipeline has no running Chat source.';
 
-/** The chat body's action without a Chat source: show Search, which needs no LLM. */
-export const SEARCH_WITHOUT_CHAT = 'Search without the LLM';
+/** The action where the chat cannot ask: Search, which needs no LLM. */
+export const USE_SEARCH = 'Use Search';
 
 /** Characters left before the counter appears. */
 const COUNTER_FROM = CHAT_MAX_CHARS - 500;
@@ -101,7 +100,6 @@ const S = {
 	composer: { display: 'flex', gap: 6, alignItems: 'flex-end' } as CSSProperties,
 	textarea: { flex: '1 1 auto', minHeight: 34, maxHeight: 120, resize: 'vertical', fontSize: 13, padding: '6px 8px', borderRadius: 4, border: '1px solid var(--rr-border-input)', background: 'var(--rr-bg-input)', color: 'var(--rr-text-primary)', fontFamily: 'inherit' } as CSSProperties,
 	notice: { fontSize: 12, color: 'var(--rr-text-secondary)', margin: 0 } as CSSProperties,
-	surface: { flex: '1 1 auto', minHeight: 0, overflowY: 'auto' } as CSSProperties,
 };
 
 /** Props of one turn. */
@@ -110,7 +108,7 @@ interface TurnViewProps extends Pick<ChatPanelProps, 'model' | 'channels' | 'sel
 	debugging: boolean;
 	onDebug(open: boolean): void;
 	onStopWaiting(): void;
-	onOpenInSearch(prefill: SearchPrefill): void;
+	onOpenInSearch?(prefill: ChatPrefill): void;
 }
 
 /**
@@ -123,6 +121,7 @@ function TurnView({ turn, model, channels, selection, actions, debugging, onDebu
 	const answer = turn.answer;
 	const sources: readonly IChatSource[] = answer?.sources ?? [];
 	const threshold = model.connection.dialect?.score?.threshold;
+	const why = useRef<HTMLButtonElement>(null);
 	return (
 		<article aria-label={`Question: ${turn.question.slice(0, 80)}`} data-turn={turn.status}>
 			<p style={S.question}>
@@ -164,14 +163,29 @@ function TurnView({ turn, model, channels, selection, actions, debugging, onDebu
 						<span>{summariseSources(sources).line}</span>
 						{typeof threshold === 'number' && <span>{`threshold ${threshold.toFixed(2)}`}</span>}
 						{model.embed.enabled && (
-							<button type="button" style={S.link} aria-expanded={debugging} onClick={() => onDebug(!debugging)}>
+							<button ref={why} type="button" style={S.link} aria-expanded={debugging} onClick={() => onDebug(!debugging)}>
 								Why these?
 							</button>
 						)}
 					</div>
 					{!answer.hasDocumentsLane && <p style={S.line}>This pipeline does not return the chunks it used, so the answer cannot cite them.</p>}
 					{sources.length > 0 && <SourcesPanel sources={sources} score={model.connection.dialect?.score ?? null} onOpen={(source) => actions.openDocument(source.objectId, source.chunkId)} onShowOnMap={(keys) => showAnswerOnMap(selection, actions, turn.question, keys)} />}
-					{debugging && <RetrievalDebugger model={model} channels={channels} question={turn.question} topK={sources.length} answerSources={sources} scope={turn.scope} onClose={() => onDebug(false)} onOpenInSearch={onOpenInSearch} />}
+					{debugging && (
+						<RetrievalDebugger
+							model={model}
+							channels={channels}
+							question={turn.question}
+							topK={sources.length}
+							answerSources={sources}
+							scope={turn.scope}
+							onClose={() => {
+								onDebug(false);
+								// The debugger goes away with its Close button: back to the button that opened it.
+								why.current?.focus();
+							}}
+							onOpenInSearch={onOpenInSearch}
+						/>
+					)}
 				</div>
 			)}
 		</article>
@@ -181,19 +195,18 @@ function TurnView({ turn, model, channels, selection, actions, debugging, onDebu
 /**
  * Ask questions over the connection's documents.
  *
- * @param props - The frozen props (src/contract/types.ts).
+ * @param props - {@link ChatPanelProps}.
  * @returns The panel.
  */
 export function ChatPanel(props: ChatPanelProps): React.ReactElement {
-	const { model, channels, selection, actions, scope, onClearScope, initialSearch = false } = props;
+	const { model, channels, selection, actions, scope, onClearScope, onOpenInSearch, onUseSearch, handoff = null } = props;
 	const chat = useVectorChat(props);
 	const [draft, setDraft] = useState('');
 	const [recall, setRecall] = useState(-1);
 	const [debugging, setDebugging] = useState<number | null>(null);
-	const [searching, setSearching] = useState(initialSearch);
-	// Kept with its connection: a Search panel remounted for another identity starts empty.
-	const [prefill, setPrefill] = useState<{ connectionKey: string; value: SearchPrefill } | null>(null);
 	const thread = useRef<HTMLDivElement>(null);
+	const composer = useRef<HTMLTextAreaElement>(null);
+	const lastHandoff = useRef<string | null>(null);
 	const turns = chat.state.turns;
 	const scrollKey = threadScrollKey(turns);
 
@@ -204,26 +217,32 @@ export function ChatPanel(props: ChatPanelProps): React.ReactElement {
 	}, [scrollKey]);
 
 	const available = model.chat.enabled && channels.chat !== null;
-	// Without the chat, Search is what this panel can still do (when the store can run any mode).
+	// Without the chat, Search is what the Query tab can still do (when the store can run any mode).
 	const searchable = !available && modeOptions(model).some((option) => option.enabled);
 	const llm = model.nodes.llmName;
 
-	/**
-	 * "Open in Search": show Search with the question and its cited chunks.
-	 *
-	 * @param next - The question and the keys its answer cited.
-	 */
-	const openInSearch = (next: SearchPrefill): void => {
-		setPrefill({ connectionKey: model.connectionKey, value: next });
-		setSearching(true);
-	};
+	// A question handed in (a history entry): asked at once when it says so and the chat is free, else put in the box.
+	useEffect(() => {
+		if (handoff === null || handoff.nonce === lastHandoff.current) return;
+		lastHandoff.current = handoff.nonce;
+		if (handoff.run && available && !chat.state.asking) {
+			chat.send(handoff.question);
+			setDraft('');
+		} else {
+			setDraft(handoff.question.slice(0, CHAT_MAX_CHARS));
+		}
+		setRecall(-1);
+		// One handoff once; the chat's own state does not restart it.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [handoff]);
 
-	/** Send the draft. */
+	/** Send the draft, and keep the focus in the box (the Ask button turns off while the answer is on its way). */
 	const ask = (): void => {
 		if (chat.state.asking || draft.trim() === '') return;
 		chat.send(draft);
 		setDraft('');
 		setRecall(-1);
+		composer.current?.focus();
 	};
 
 	/**
@@ -252,74 +271,84 @@ export function ChatPanel(props: ChatPanelProps): React.ReactElement {
 	};
 
 	return (
-		<section style={S.root} aria-label="Chat">
+		<section style={S.root} aria-label="Ask" data-component="ChatPanel">
 			<div style={S.head}>
-				<h2 style={S.heading}>Chat</h2>
+				<h2 style={S.heading}>Ask</h2>
 				{llm !== null && <span style={S.llm}>{`Answers by ${llm}`}</span>}
-				<button type="button" style={S.link} aria-pressed={searching} title="Search without the LLM" onClick={() => setSearching((on) => !on)}>
-					Search
-				</button>
 			</div>
-			{searching && (
-				<p style={S.notice} role="status">
-					{SHOWING_SEARCH}
-				</p>
-			)}
-			<div hidden={!searching} data-surface="search" style={S.surface}>
-				<SearchPanel key={model.connectionKey} model={model} channels={channels} selection={selection} actions={actions} prefill={prefill !== null && prefill.connectionKey === model.connectionKey ? prefill.value : null} onShowChat={() => setSearching(false)} />
-			</div>
-			<div data-surface="chat" style={{ display: searching ? 'none' : 'contents' }}>
-				{!available ? (
-					<EmptyState
-						title="Chat is not available"
-						description={model.chat.reason ?? NO_CHAT_SENTENCE}
-						action={
-							searchable ? (
-								<button type="button" style={commonStyles.buttonSecondary} onClick={() => setSearching(true)}>
-									{SEARCH_WITHOUT_CHAT}
-								</button>
-							) : undefined
-						}
-					/>
-				) : (
-					<>
-						<div ref={thread} style={S.thread} role="log" aria-label="Questions and answers" aria-live="off">
-							{turns.length === 0 && <p style={S.notice}>Ask a question; the answer cites the stored chunks it used.</p>}
-							{turns.map((turn) => (
-								<TurnView key={turn.id} turn={turn} model={model} channels={channels} selection={selection} actions={actions} debugging={debugging === turn.id} onDebug={(open) => setDebugging(open ? turn.id : null)} onStopWaiting={chat.stopWaiting} onOpenInSearch={openInSearch} />
-							))}
-						</div>
-						{scope !== null && scope.length > 0 && (
-							<div style={S.scope}>
-								<span>{`Asking about ${scope.length === 1 ? '1 document' : `${scope.length.toLocaleString('en-US')} documents`} only`}</span>
-								<button type="button" style={S.link} onClick={onClearScope}>
-									Ask about all documents
-								</button>
-							</div>
-						)}
-						{chat.state.notice !== null && <p style={S.notice}>{chat.state.notice}</p>}
-						<div style={S.composer}>
-							<textarea
-								style={S.textarea}
-								aria-label="Ask about these documents"
-								placeholder="Ask about these documents…"
-								value={draft}
-								maxLength={CHAT_MAX_CHARS}
-								rows={2}
-								onChange={(event) => {
-									setDraft(event.currentTarget.value);
-									setRecall(-1);
+			{!available ? (
+				<EmptyState
+					title="Chat is not available"
+					description={model.chat.reason ?? NO_CHAT_SENTENCE}
+					action={
+						searchable && onUseSearch ? (
+							<button type="button" style={commonStyles.buttonSecondary} data-query-focus="use-search" onClick={onUseSearch}>
+								{USE_SEARCH}
+							</button>
+						) : undefined
+					}
+				/>
+			) : (
+				<>
+					<div ref={thread} style={S.thread} role="log" aria-label="Questions and answers" aria-live="off">
+						{turns.length === 0 && <p style={S.notice}>Ask a question; the answer cites the stored chunks it used.</p>}
+						{turns.map((turn) => (
+							<TurnView
+								key={turn.id}
+								turn={turn}
+								model={model}
+								channels={channels}
+								selection={selection}
+								actions={actions}
+								debugging={debugging === turn.id}
+								onDebug={(open) => setDebugging(open ? turn.id : null)}
+								onStopWaiting={() => {
+									chat.stopWaiting();
+									composer.current?.focus();
 								}}
-								onKeyDown={onKeyDown}
+								onOpenInSearch={onOpenInSearch}
 							/>
-							<button type="button" style={commonStyles.buttonPrimary} disabled={chat.state.asking || draft.trim() === ''} onClick={ask}>
-								{chat.state.asking ? 'Asking…' : 'Ask'}
+						))}
+					</div>
+					{scope !== null && scope.length > 0 && (
+						<div style={S.scope}>
+							<span>{`Asking about ${scope.length === 1 ? '1 document' : `${scope.length.toLocaleString('en-US')} documents`} only`}</span>
+							<button
+								type="button"
+								style={S.link}
+								onClick={() => {
+									onClearScope();
+									composer.current?.focus();
+								}}
+							>
+								Ask about all documents
 							</button>
 						</div>
-						{draft.length > COUNTER_FROM && <p style={S.notice}>{`${draft.length.toLocaleString('en-US')} of ${CHAT_MAX_CHARS.toLocaleString('en-US')} characters`}</p>}
-					</>
-				)}
-			</div>
+					)}
+					{chat.state.notice !== null && <p style={S.notice}>{chat.state.notice}</p>}
+					<div style={S.composer}>
+						<textarea
+							ref={composer}
+							style={S.textarea}
+							aria-label="Ask about these documents"
+							placeholder="Ask about these documents…"
+							data-query-focus="composer"
+							value={draft}
+							maxLength={CHAT_MAX_CHARS}
+							rows={2}
+							onChange={(event) => {
+								setDraft(event.currentTarget.value);
+								setRecall(-1);
+							}}
+							onKeyDown={onKeyDown}
+						/>
+						<button type="button" style={commonStyles.buttonPrimary} disabled={chat.state.asking || draft.trim() === ''} onClick={ask}>
+							{chat.state.asking ? 'Asking…' : 'Ask'}
+						</button>
+					</div>
+					{draft.length > COUNTER_FROM && <p style={S.notice}>{`${draft.length.toLocaleString('en-US')} of ${CHAT_MAX_CHARS.toLocaleString('en-US')} characters`}</p>}
+				</>
+			)}
 		</section>
 	);
 }

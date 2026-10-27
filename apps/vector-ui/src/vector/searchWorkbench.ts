@@ -24,25 +24,34 @@
 // VECTOR — SEARCH WORKBENCH (pure): search without the LLM
 // =============================================================================
 //
-// The model behind the chat panel's Search toggle (components/SearchPanel.tsx)
-// and the "Why these?" debugger's export:
+// The model behind the Query tab's Search and Compare (components/
+// SearchPanel.tsx, components/QueryTab.tsx) and the "Why these?" debugger's
+// export:
 //
 //   - modes: Semantic (embed the question on the pipeline's embedding node,
 //     then `search` the store with exactly that vector), Keyword (`search`
-//     with the question and mode 'keyword'), Hybrid (both, fused here by
-//     reciprocal rank fusion, k = 60) and Auto (the semantic search with the
-//     question beside it, so the store may fall back to keyword search);
-//     each mode is offered only when the store and the embedding node can
-//     serve it, otherwise disabled with the sentence that says why;
-//   - the threshold slider re-classifies the rows a run already has, so the
-//     count it names is the table's count of passing rows at every position,
-//     next to what today's node setting passes, with the node setting to copy;
+//     with the question and mode 'keyword'), Hybrid (both, fused in the
+//     browser by reciprocal rank fusion, k = 60; the store has no hybrid
+//     search) and Auto (the semantic search with the question beside it, so
+//     the store may fall back to keyword search); each mode is offered only
+//     when the store and the embedding node can serve it, otherwise disabled
+//     with the sentence that says why;
+//   - the threshold slider re-classifies the rows a run already has (it never
+//     searches again), so the count it names is the table's count of passing
+//     rows at every position, next to what today's node setting passes, with
+//     the node setting to copy; the count is announced once per release of
+//     the slider (createCommitAnnouncer), never on every step of a drag;
 //   - the scope (folder, file type, ...) goes out as `filter.objectIds`, never
-//     more than `limits.scope_keys_max` ids;
+//     more than `limits.scope_keys_max` ids, and the table choice as
+//     `filter.isTable`; the "Will run" line says both before a run;
+//   - a score's bar and its column's words come from `dialect.score` (its
+//     formula, range and direction), never from the metric's name;
 //   - "Open in Search" brings the chat's question with the chunks its answer
 //     cited: the first run searches as "Why these?" did (its k, the
-//     documents the question was asked about), and the "cited" marks go only
-//     on a run of that question, never on another one on the same panel.
+//     documents the question was asked about, every table choice), and the
+//     "cited" marks go only on a run of that question, never on another one;
+//   - a question handed in from elsewhere (a history entry, "Use as query",
+//     "New query") is a SearchHandoff, taken once by its nonce.
 //
 // `runWorkbench` makes a run's calls through the function it is given (the
 // panel passes chat/toolCalls' callTool): the query vector is a local of that
@@ -50,6 +59,7 @@
 // =============================================================================
 
 import type { ConsoleActions, ConsoleModel, IChatSource, IExportItem, IExportRows, IScopeState, IScoreInfo, ISearchInput, ISearchResult, IVectorLimits, KeywordMatch, SelectionStore, VectorKey } from '../contract/types';
+import type { IQueryPrefill, QueryMode } from './workbench';
 import { EXPORT_COLUMNS } from '../contract/types';
 import type { CallOutcome } from '../chat/toolCalls';
 import { QUERY_NEEDS_EMBED } from '../map/wording';
@@ -72,7 +82,7 @@ export const MODE_LABELS: Readonly<Record<SearchMode, string>> = { semantic: 'Se
 export const MODE_HINTS: Readonly<Record<SearchMode, string>> = {
 	semantic: 'Ranks the chunks by meaning: the question is embedded and the store searches with that vector',
 	keyword: 'Finds the chunks that contain the words of the question',
-	hybrid: 'Runs both searches and fuses the two lists here by their ranks',
+	hybrid: 'Runs a semantic and a keyword search and fuses the two lists in the browser by their ranks; the store has no hybrid search',
 	auto: 'Searches by meaning; the store falls back to keyword search when it cannot',
 };
 
@@ -86,7 +96,17 @@ export const VECTOR_UNSUPPORTED = 'This store node cannot search by meaning; upd
 export const HYBRID_NEEDS_KEYWORD = 'Hybrid needs keyword search, which this store cannot do';
 
 /** How a hybrid list is labelled: the fusion happens in the browser, not on the store. */
-export const HYBRID_LABEL = 'hybrid (fused here)';
+export const HYBRID_LABEL = 'fused in the browser';
+
+/**
+ * A mode's words on its radio button: Hybrid says where its lists are fused.
+ *
+ * @param mode - The mode.
+ * @returns The words.
+ */
+export function modeLabel(mode: SearchMode): string {
+	return mode === 'hybrid' ? `${MODE_LABELS.hybrid} (${HYBRID_LABEL})` : MODE_LABELS[mode];
+}
 
 /** The reciprocal rank fusion constant (the usual 60). */
 export const RRF_K = 60;
@@ -206,6 +226,37 @@ function clampTopK(topK: number, limits: Pick<IVectorLimits, 'top_k_max'> | null
 	return Math.max(1, Math.min(max, Number.isFinite(topK) ? Math.floor(topK) : DEFAULT_TOP_K));
 }
 
+/** Which chunks a run asks for by their table flag (sent to the store as `filter.isTable`). */
+export type TableFilter = 'any' | 'only' | 'none';
+
+/** The table choices, in the order the panel offers them. */
+export const TABLE_FILTERS: readonly TableFilter[] = ['any', 'only', 'none'];
+
+/** The words of each table choice. */
+export const TABLE_FILTER_LABELS: Readonly<Record<TableFilter, string>> = { any: 'Any chunks', only: 'Tables only', none: 'No tables' };
+
+/**
+ * The `filter.isTable` a table choice sends.
+ *
+ * @param choice - The choice.
+ * @returns true (tables only), false (no tables), or null (no condition).
+ */
+export function isTableOf(choice: TableFilter): boolean | null {
+	return choice === 'only' ? true : choice === 'none' ? false : null;
+}
+
+/**
+ * A run's `filter`: the scope's documents and the table flag, or none.
+ *
+ * @param objectIds - The scope, or null.
+ * @param isTable - The table flag, or null.
+ * @returns The filter, or undefined when there is no condition.
+ */
+function searchFilter(objectIds: readonly string[] | null, isTable: boolean | null): ISearchInput['filter'] | undefined {
+	if (objectIds === null && isTable === null) return undefined;
+	return { ...(objectIds !== null ? { objectIds: [...objectIds] } : {}), ...(isTable !== null ? { isTable } : {}) };
+}
+
 /**
  * The `search` input of a semantic (or Auto) run.
  *
@@ -216,9 +267,10 @@ function clampTopK(topK: number, limits: Pick<IVectorLimits, 'top_k_max'> | null
  * @param limits - The node's limits.
  * @param mode - 'semantic' (no fallback) or 'auto'.
  * @param objectIds - The scope, or null.
+ * @param isTable - Tables only (true), no tables (false), or either (null).
  * @returns The input.
  */
-export function semanticSearchInput(vector: number[], embeddingModel: string | null, query: string, topK: number, limits: Pick<IVectorLimits, 'top_k_max'> | null, mode: 'semantic' | 'auto', objectIds: readonly string[] | null): ISearchInput {
+export function semanticSearchInput(vector: number[], embeddingModel: string | null, query: string, topK: number, limits: Pick<IVectorLimits, 'top_k_max'> | null, mode: 'semantic' | 'auto', objectIds: readonly string[] | null, isTable: boolean | null = null): ISearchInput {
 	const input: ISearchInput = { vector };
 	if (mode === 'auto') input.query = query.trim();
 	input.top_k = clampTopK(topK, limits);
@@ -226,7 +278,8 @@ export function semanticSearchInput(vector: number[], embeddingModel: string | n
 	input.include_below_floor = true;
 	input.include_below_threshold = true;
 	if (embeddingModel !== null && embeddingModel !== '') input.embedding_model = embeddingModel;
-	if (objectIds !== null) input.filter = { objectIds: [...objectIds] };
+	const filter = searchFilter(objectIds, isTable);
+	if (filter !== undefined) input.filter = filter;
 	return input;
 }
 
@@ -237,11 +290,13 @@ export function semanticSearchInput(vector: number[], embeddingModel: string | n
  * @param topK - k.
  * @param limits - The node's limits.
  * @param objectIds - The scope, or null.
+ * @param isTable - Tables only (true), no tables (false), or either (null).
  * @returns The input.
  */
-export function keywordSearchInput(query: string, topK: number, limits: Pick<IVectorLimits, 'top_k_max'> | null, objectIds: readonly string[] | null): ISearchInput {
+export function keywordSearchInput(query: string, topK: number, limits: Pick<IVectorLimits, 'top_k_max'> | null, objectIds: readonly string[] | null, isTable: boolean | null = null): ISearchInput {
 	const input: ISearchInput = { query: query.trim(), mode: 'keyword', top_k: clampTopK(topK, limits), include_below_threshold: true };
-	if (objectIds !== null) input.filter = { objectIds: [...objectIds] };
+	const filter = searchFilter(objectIds, isTable);
+	if (filter !== undefined) input.filter = filter;
 	return input;
 }
 
@@ -272,6 +327,21 @@ export function searchScope(scope: IScopeState | null | undefined, limits: Pick<
 	if (scope.objectIds.length === 0) return { objectIds: null, blocked: 'No documents match the scope.', line: null };
 	const n = scope.objectIds.length;
 	return { objectIds: [...scope.objectIds], blocked: null, line: `Searching ${n === 1 ? '1 document' : `${n.toLocaleString('en-US')} documents`} in scope: ${scope.label}` };
+}
+
+/**
+ * What the read-only scope chip beside the form says: the documents a run
+ * searches, why it cannot run yet, or that the console's scope is not applied
+ * to Search.
+ *
+ * @param scope - The scope as it applies to Search, or null.
+ * @param gate - {@link searchScope}.
+ * @returns The words, or null without a scope.
+ */
+export function scopeChipText(scope: IScopeState | null | undefined, gate: Pick<ScopeGate, 'blocked' | 'line'>): string | null {
+	if (!scope) return null;
+	if (!scope.applyTo.search) return `The scope (${scope.label}) is not applied to Search; Run searches the whole collection.`;
+	return gate.blocked ?? gate.line;
 }
 
 // ── Rows ────────────────────────────────────────────────────────────────────
@@ -546,7 +616,7 @@ export function sliderValueText(view: Classification): string {
 }
 
 /** Under the "Copy as node setting" button. */
-export const NODE_SETTING_NOTE = 'Set this on the store node in the pipeline editor; this console cannot change node settings.';
+export const NODE_SETTING_NOTE = 'Set this on the store node in the pipeline editor; Vector Explorer cannot change node settings.';
 
 /** The button's hover text: where the setting lives. */
 export const NODE_SETTING_FIELD = "The store node's Retrieval Score field holds this value";
@@ -573,10 +643,210 @@ export function nodeSettingText(at: number): string | null {
  * @returns The text.
  */
 export function scoreTitle(row: WorkbenchRow, score: IScoreInfo | null): string {
-	const fused = row.fused !== null && row.semanticRank !== null && row.keywordRank !== null ? `; fused here: 1/(${RRF_K} + ${row.semanticRank}) + 1/(${RRF_K} + ${row.keywordRank}) = ${row.fused.toFixed(4)}` : row.fused !== null ? `; fused here: ${row.fused.toFixed(4)}` : '';
+	const fused = row.fused !== null && row.semanticRank !== null && row.keywordRank !== null ? `; fused in the browser: 1/(${RRF_K} + ${row.semanticRank}) + 1/(${RRF_K} + ${row.keywordRank}) = ${row.fused.toFixed(4)}` : row.fused !== null ? `; fused in the browser: ${row.fused.toFixed(4)}` : '';
 	if (row.score === null) return `Found by keyword; a keyword result carries no similarity${fused}`;
 	const formula = score?.formula && score.formula !== 'unknown' ? ` (${score.formula}${score.higher_is_better === false ? ', lower is better' : ''})` : '';
 	return `Score ${row.score}${formula}${fused}`;
+}
+
+// ── The slider's announcement ──────────────────────────────────────────────
+
+/** How long after the last release of the slider its count is announced. */
+export const COMMIT_ANNOUNCE_MS = 400;
+
+/** The keys that move a slider, so their release commits it. */
+const COMMIT_KEYS: ReadonlySet<string> = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End']);
+
+/**
+ * Whether releasing this key commits the slider's position.
+ *
+ * @param key - KeyboardEvent.key.
+ * @returns True for the keys that move a slider.
+ */
+export function isCommitKey(key: string): boolean {
+	return COMMIT_KEYS.has(key);
+}
+
+/** Announces the slider's count once per release, never on every step of a drag. */
+export interface CommitAnnouncer {
+	/** The slider was released (pointer up, a key that moves it went up): announce the text after the delay, replacing a pending one. */
+	commit(text: string | (() => string)): void;
+	/** Drop a pending announcement (the panel went away). */
+	cancel(): void;
+}
+
+/** What a {@link CommitAnnouncer} needs. */
+export interface CommitAnnouncerDeps {
+	announce(text: string): void;
+	/** Delay in ms (default {@link COMMIT_ANNOUNCE_MS}). */
+	delayMs?: number;
+	setTimer?(fn: () => void, ms: number): unknown;
+	clearTimer?(handle: unknown): void;
+}
+
+/**
+ * The slider's announcer: moving the slider says nothing; each release waits
+ * the delay, and a release inside it (a held arrow key, a pointer-up then a
+ * key-up) replaces the pending one, so a burst is announced once, with the
+ * position it ended on.
+ *
+ * @param deps - The announcement and the timers.
+ * @returns The announcer.
+ */
+export function createCommitAnnouncer(deps: CommitAnnouncerDeps): CommitAnnouncer {
+	const delay = deps.delayMs ?? COMMIT_ANNOUNCE_MS;
+	const setTimer = deps.setTimer ?? ((fn: () => void, ms: number) => setTimeout(fn, ms));
+	const clearTimer = deps.clearTimer ?? ((handle: unknown) => clearTimeout(handle as ReturnType<typeof setTimeout>));
+	let pending: unknown = null;
+	const cancel = (): void => {
+		if (pending !== null) clearTimer(pending);
+		pending = null;
+	};
+	return {
+		commit(text) {
+			cancel();
+			pending = setTimer(() => {
+				pending = null;
+				deps.announce(typeof text === 'function' ? text() : text);
+			}, delay);
+		},
+		cancel,
+	};
+}
+
+// ── The question box, the "Will run" line and the score column ──────────────
+
+/** The longest question the Search boxes take: the search, its star on the map and the map's hint are one text. */
+export const SEARCH_QUESTION_MAX_CHARS = 1000;
+
+/** Said under the box when a handed-in question was longer. */
+export const QUESTION_CUT_SENTENCE = 'Cut to the first 1,000 characters.';
+
+/**
+ * A question as the Search boxes take it.
+ *
+ * @param text - The question handed in.
+ * @returns At most {@link SEARCH_QUESTION_MAX_CHARS} characters, and whether it was cut.
+ */
+export function capSearchQuestion(text: string): { text: string; cut: boolean } {
+	return text.length > SEARCH_QUESTION_MAX_CHARS ? { text: text.slice(0, SEARCH_QUESTION_MAX_CHARS), cut: true } : { text, cut: false };
+}
+
+/** What each mode runs, in the "Will run" line. */
+const MODE_RUNS: Readonly<Record<SearchMode, string>> = {
+	semantic: 'a Semantic search',
+	keyword: 'a Keyword search',
+	hybrid: `a Hybrid search (a semantic and a keyword search, ${HYBRID_LABEL})`,
+	auto: 'an Auto search (by meaning; the store may fall back to keyword search)',
+};
+
+/** What the "Will run" line describes. */
+export interface WillRun {
+	mode: SearchMode | null;
+	/** Compare: A and B. */
+	comparing: boolean;
+	topK: number;
+	/** The slider's position. */
+	at: number;
+	gate: Pick<ScopeGate, 'objectIds' | 'blocked'>;
+	tables: TableFilter;
+}
+
+/**
+ * The line under the form: what Run sends and what the threshold does.
+ *
+ * @param plan - The form's settings.
+ * @returns "Will run: a Semantic search, top 10, over the whole collection. The threshold 0.30 only marks rows here; …", or null when no mode can run.
+ */
+export function willRunText(plan: WillRun): string | null {
+	if (plan.mode === null) return null;
+	const what = plan.comparing ? `A and B, each ${MODE_RUNS[plan.mode]}` : MODE_RUNS[plan.mode];
+	const n = plan.gate.objectIds?.length ?? 0;
+	const where = plan.gate.objectIds !== null ? `in the ${n === 1 ? 'document' : `${n.toLocaleString('en-US')} documents`} of the scope (sent as their ids)` : plan.gate.blocked !== null ? 'within the scope' : 'over the whole collection';
+	const tables = plan.tables === 'only' ? ', tables only (sent to the store)' : plan.tables === 'none' ? ', no tables (sent to the store)' : '';
+	const threshold = plan.mode === 'keyword' ? 'Keyword results carry no similarity, so the threshold does not apply.' : `The threshold ${plan.at.toFixed(2)} only marks rows here; the store returns the top ${plan.topK} whatever their scores.`;
+	return `Will run: ${what}, top ${plan.topK}, ${where}${tables}. ${threshold}`;
+}
+
+/** The Score column's words. */
+export interface ScoreHeading {
+	/** The scale under "Score": "1 - cosine_distance · −1 to 1 · higher is closer", or null for keyword results. */
+	scale: string | null;
+	/** Why some or all rows have no bar, or null when every row has one. */
+	noBars: string | null;
+}
+
+/**
+ * A number in the score's words: two decimals at most, a true minus sign.
+ *
+ * @param value - The number.
+ * @returns The text.
+ */
+function scaleNumber(value: number): string {
+	const text = Number.isInteger(value) ? String(Math.abs(value)) : String(Math.abs(Number(value.toFixed(2))));
+	return value < 0 ? `−${text}` : text;
+}
+
+/**
+ * The score's range, when the store reports a usable one.
+ *
+ * @param score - `dialect.score`, or null.
+ * @returns [min, max], or null.
+ */
+function scoreRange(score: IScoreInfo | null): readonly [number, number] | null {
+	const range = score?.range;
+	if (!Array.isArray(range) || range.length !== 2) return null;
+	const [min, max] = range;
+	return Number.isFinite(min) && Number.isFinite(max) && max > min ? [min, max] : null;
+}
+
+/**
+ * The Score column's scale and why a row may have no bar: from `dialect.score`
+ * (formula, range, direction), never from the metric's name.
+ *
+ * @param score - `dialect.score`, or null.
+ * @param rows - The run's rows.
+ * @returns The words.
+ */
+export function scoreHeading(score: IScoreInfo | null, rows: readonly Pick<WorkbenchRow, 'score' | 'fused' | 'keywordRank'>[]): ScoreHeading {
+	const rated = rows.filter((row) => row.score !== null).length;
+	if (rows.length > 0 && rated === 0) return { scale: null, noBars: 'Keyword results carry no similarity, so they have no score or bar.' };
+	const range = scoreRange(score);
+	const direction = score?.higher_is_better === false ? 'lower is closer' : 'higher is closer';
+	const formula = score?.formula && score.formula !== 'unknown' ? score.formula : null;
+	const scale = [formula, range !== null ? `${scaleNumber(range[0])} to ${scaleNumber(range[1])}` : null, direction].filter(Boolean).join(' · ');
+	if (range === null) return { scale, noBars: 'The store reports no range for this score, so there are no bars.' };
+	if (rated < rows.length) return { scale, noBars: 'Rows found by keyword only carry no similarity, so they have no score or bar.' };
+	return { scale, noBars: null };
+}
+
+/**
+ * Where a row's score sits in the store's range, as a bar's length: 0 at the
+ * far end, 1 at the closest; null when there is no bar (no range reported,
+ * a keyword or fused row with no score).
+ *
+ * @param score - `dialect.score`, or null.
+ * @param value - The row's score, or null.
+ * @returns The fraction 0..1, or null.
+ */
+export function scoreBar(score: IScoreInfo | null, value: number | null): number | null {
+	const range = scoreRange(score);
+	if (range === null || value === null || !Number.isFinite(value)) return null;
+	const position = (value - range[0]) / (range[1] - range[0]);
+	const closeness = score?.higher_is_better === false ? 1 - position : position;
+	return Math.max(0, Math.min(1, closeness));
+}
+
+/**
+ * Escape in a question box: a box with text clears it (and that handler is
+ * the one that acts); an empty box leaves the key to the handlers around it.
+ *
+ * @param value - The box's text.
+ * @param defaultPrevented - An inner handler already acted.
+ * @returns 'clear' or 'pass'.
+ */
+export function questionEscape(value: string, defaultPrevented: boolean): 'clear' | 'pass' {
+	return !defaultPrevented && value !== '' ? 'clear' : 'pass';
 }
 
 // ── A run ───────────────────────────────────────────────────────────────────
@@ -602,6 +872,8 @@ export interface WorkbenchRequest {
 	embedNode: string | null;
 	/** The scope's ids, or null for the whole collection. */
 	objectIds: readonly string[] | null;
+	/** Tables only (true), no tables (false), or either (null or absent): sent as `filter.isTable`. */
+	isTable?: boolean | null;
 	/** What "Open in Search" brought: its cited chunks are marked on a run of its question only. */
 	chat?: ChatPrefill | null;
 }
@@ -730,13 +1002,13 @@ export async function runWorkbench(deps: WorkbenchDeps, request: WorkbenchReques
 		if (vector === null) return failed('embed', null, 'The embedding node answered without a vector.');
 		embeddingModel = typeof embedded.value.model === 'string' ? embedded.value.model : null;
 		deps.onPhase?.('searching');
-		const searched = await deps.call('search', { ...semanticSearchInput(vector, embeddingModel, question, topK, request.limits, steps.searches[0] === 'auto' ? 'auto' : 'semantic', request.objectIds) }, request.storeNode);
+		const searched = await deps.call('search', { ...semanticSearchInput(vector, embeddingModel, question, topK, request.limits, steps.searches[0] === 'auto' ? 'auto' : 'semantic', request.objectIds, request.isTable ?? null) }, request.storeNode);
 		if (!searched.ok) return searchFailure(searched);
 		semantic = searched.value as unknown as ISearchResult;
 	}
 	if (steps.searches.includes('keyword')) {
 		deps.onPhase?.('searching');
-		const searched = await deps.call('search', { ...keywordSearchInput(question, topK, request.limits, request.objectIds) }, request.storeNode);
+		const searched = await deps.call('search', { ...keywordSearchInput(question, topK, request.limits, request.objectIds, request.isTable ?? null) }, request.storeNode);
 		if (!searched.ok) return searchFailure(searched);
 		keyword = searched.value as unknown as ISearchResult;
 	}
@@ -956,6 +1228,103 @@ export function prefillRun(prefill: ChatPrefill, options: readonly ModeOption[],
  */
 export function topKChoices(ks: readonly number[], current: number): number[] {
 	return ks.includes(current) ? [...ks] : [...ks, current].sort((a, b) => a - b);
+}
+
+// ── Handed-in questions (the Query tab's handoffs) ──────────────────────────
+
+/**
+ * A question handed to Search, applied once (by its nonce): "Open in Search"
+ * from an answer, a history entry's Load or Rerun, "Use as query", "New query".
+ */
+export interface SearchHandoff {
+	nonce: string;
+	/** Question A (cut to {@link SEARCH_QUESTION_MAX_CHARS} when it is applied). */
+	question: string;
+	/** Question B (Compare), or null/absent to leave B as it is. */
+	questionB?: string | null;
+	/** The mode to set, or null/absent to keep the panel's. */
+	mode?: SearchMode | null;
+	/** The k to set, or null/absent to keep the panel's. */
+	topK?: number | null;
+	/** Run it at once (else only fill the form). */
+	run: boolean;
+	/** What "Open in Search" brought, or null for any other handoff. */
+	chat: ChatPrefill | null;
+	/** "New query": empty the form and the results. */
+	clear?: boolean;
+}
+
+/** A question handed to Ask: put in the box, or asked at once. */
+export interface AskHandoff {
+	nonce: string;
+	question: string;
+	run: boolean;
+}
+
+/** The form a handoff leaves, and the run it starts. */
+export interface AppliedHandoff {
+	question: string;
+	/** Question B, or null to leave it. */
+	questionB: string | null;
+	mode: SearchMode | null;
+	topK: number;
+	/** The table choice: "Open in Search" searches every chunk, as "Why these?" did; other handoffs keep the panel's. */
+	tables: TableFilter | null;
+	/** The question (A or B) was longer than the box takes and was cut. */
+	cut: boolean;
+	/** The documents a chat handoff searches (the question's own), or 'scope' for the console's scope. */
+	objectIds: string[] | null | 'scope';
+	run: boolean;
+}
+
+/**
+ * The form a handoff leaves: "Open in Search" searches as "Why these?" did
+ * ({@link prefillRun}); a history entry keeps its mode and k when the panel
+ * offers them, and searches the console's scope as it is now.
+ *
+ * @param handoff - The handoff.
+ * @param current - The panel's mode and k now.
+ * @param options - {@link modeOptions}.
+ * @param ks - {@link topKOptions}.
+ * @returns The form and whether to run.
+ */
+export function applyHandoff(handoff: SearchHandoff, current: { mode: SearchMode | null; topK: number }, options: readonly ModeOption[], ks: readonly number[]): AppliedHandoff {
+	const a = capSearchQuestion(handoff.question);
+	const b = handoff.questionB === undefined || handoff.questionB === null ? null : capSearchQuestion(handoff.questionB);
+	const cut = a.cut || (b?.cut ?? false);
+	if (handoff.chat !== null) {
+		const next = prefillRun({ ...handoff.chat, question: a.text }, options, ks);
+		return { question: next.question, questionB: null, mode: next.mode, topK: next.topK, tables: 'any', cut, objectIds: next.objectIds, run: handoff.run && next.mode !== null && next.question.trim() !== '' };
+	}
+	const offered = (mode: SearchMode | null | undefined): boolean => mode !== null && mode !== undefined && options.find((o) => o.mode === mode)?.enabled === true;
+	const mode = offered(handoff.mode) ? (handoff.mode as SearchMode) : current.mode;
+	const given = handoff.topK;
+	const topK = typeof given === 'number' && Number.isFinite(given) && given >= 1 ? Math.floor(given) : current.topK;
+	return { question: a.text, questionB: b?.text ?? null, mode, topK, tables: null, cut, objectIds: 'scope', run: handoff.run && mode !== null && a.text.trim() !== '' };
+}
+
+/** What the Query tab does with a question handed to it through the connection (`entry.queryPrefill`). */
+export interface TakenPrefill {
+	/** The sub-tab to show. */
+	mode: QueryMode;
+	search: SearchHandoff | null;
+	ask: AskHandoff | null;
+}
+
+/**
+ * A question handed to the Query tab from elsewhere ("Use as query", "New
+ * query"): it fills the box of the mode it names (else the tab's current one)
+ * and never runs by itself; an empty question empties the Search form.
+ *
+ * @param prefill - The handed-in question.
+ * @param current - The tab's mode now.
+ * @returns The sub-tab and the handoff.
+ */
+export function takePrefill(prefill: IQueryPrefill, current: QueryMode): TakenPrefill {
+	const mode = prefill.mode ?? current;
+	if (mode === 'ask') return { mode, search: null, ask: prefill.question.trim() === '' ? null : { nonce: prefill.nonce, question: prefill.question, run: false } };
+	if (prefill.question.trim() === '') return { mode: 'search', search: { nonce: prefill.nonce, question: '', run: false, chat: null, clear: true }, ask: null };
+	return { mode, search: { nonce: prefill.nonce, question: prefill.question, run: false, chat: null }, ask: null };
 }
 
 // ── Export ──────────────────────────────────────────────────────────────────

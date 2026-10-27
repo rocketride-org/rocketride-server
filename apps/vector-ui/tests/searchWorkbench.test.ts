@@ -25,10 +25,10 @@
 // hybrid fusion, the calls a run makes and what it keeps
 // =============================================================================
 //
-// The workbench behind the chat panel's Search toggle. A run embeds the
+// The workbench behind the Query tab's Search and Compare. A run embeds the
 // question on the pipeline's embedding node and searches the store with that
 // exact vector (Semantic, Auto), searches by keyword (Keyword), or both and
-// fuses the two lists here (Hybrid, reciprocal rank fusion). The threshold
+// fuses the two lists in the browser (Hybrid, reciprocal rank fusion). The threshold
 // slider re-classifies the rows the run already has, so the count it names is
 // the count of the table's "passes" rows at every position, and the line
 // compares it with the store node's own setting.
@@ -43,8 +43,9 @@ import { EXPORT_COLUMNS } from '../src/contract/types';
 import type { CallOutcome } from '../src/chat/toolCalls';
 import { classifyRetrieval, debuggerSearchInput, withScope } from '../src/vector/retrieval';
 import { QUERY_NEEDS_EMBED } from '../src/map/wording';
+import { COMMIT_ANNOUNCE_MS, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, applyHandoff, capSearchQuestion, createCommitAnnouncer, isCommitKey, isTableOf, modeLabel, questionEscape, scopeChipText, scoreBar, scoreHeading, takePrefill, willRunText } from '../src/vector/searchWorkbench';
 import { HYBRID_LABEL, HYBRID_NEEDS_KEYWORD, KEYWORD_UNSUPPORTED, NODE_SETTING_NOTE, RRF_K, SEARCH_MODES, STATUS_WORDS, TOP_K_OPTIONS, VECTOR_UNSUPPORTED, classifyAt, defaultMode, fromChatLine, fuse, initialThreshold, keywordCaption, keywordSearchInput, modeOptions, nodeSettingText, openInSearchPrefill, plan, prefillRun, previewOf, rateLimitSentence, retrievalExportRows, retryAfterSeconds, rowsFromSearch, runWorkbench, scoreTitle, searchExportItems, searchScope, secondsLeft, semanticSearchInput, showSearchOnMap, sliderRange, sliderValueText, thresholdSentence, topKChoices, topKOptions, workbenchExportRows } from '../src/vector/searchWorkbench';
-import type { ChatPrefill, RunFromChat, SearchMode, WorkbenchDeps, WorkbenchRow, WorkbenchRun } from '../src/vector/searchWorkbench';
+import type { ChatPrefill, RunFromChat, SearchHandoff, SearchMode, WorkbenchDeps, WorkbenchRow, WorkbenchRun } from '../src/vector/searchWorkbench';
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -358,12 +359,12 @@ test('sliderRange and initialThreshold: over dialect.score.range, starting at th
 	assert.equal(initialThreshold({ ...dialect.score, threshold: 5 }), 1, 'clamped into the range');
 });
 
-test('nodeSettingText: "Copy as node setting" copies threshold_search, and says the console cannot change it', () => {
+test('nodeSettingText: "Copy as node setting" copies threshold_search, and says Vector Explorer cannot change it', () => {
 	assert.equal(nodeSettingText(0.42), 'threshold_search: 0.42');
 	assert.equal(nodeSettingText(0.3), 'threshold_search: 0.30');
 	assert.equal(nodeSettingText(1), 'threshold_search: 1.00');
 	assert.equal(nodeSettingText(-0.2), null, 'the store node takes 0 to 1');
-	assert.equal(NODE_SETTING_NOTE, 'Set this on the store node in the pipeline editor; this console cannot change node settings.');
+	assert.equal(NODE_SETTING_NOTE, 'Set this on the store node in the pipeline editor; Vector Explorer cannot change node settings.');
 });
 
 test('scoreTitle: the formula on hover; keyword rows and fused rows say what their number is', () => {
@@ -373,7 +374,7 @@ test('scoreTitle: the formula on hover; keyword rows and fused rows say what the
 	const [keywordRow] = rowsFromSearch(keywordFallback, false, []);
 	assert.equal(scoreTitle(keywordRow, dialect.score), 'Found by keyword; a keyword result carries no similarity');
 	const [fused] = fuse(rowsFromSearch(searchVector, true, []), rowsFromSearch(keywordFallback, false, []), RRF_K, 10);
-	assert.equal(scoreTitle(fused, dialect.score), 'Score 0.5433 (1 - cosine_distance); fused here: 1/(60 + 1) + 1/(60 + 1) = 0.0328');
+	assert.equal(scoreTitle(fused, dialect.score), 'Score 0.5433 (1 - cosine_distance); fused in the browser: 1/(60 + 1) + 1/(60 + 1) = 0.0328');
 });
 
 // ── Hybrid: reciprocal rank fusion, here ────────────────────────────────────
@@ -425,7 +426,7 @@ test('fuse: reciprocal rank fusion (k = 60) — a chunk in both lists rises; tie
 	// Keyword-only rows have no similarity; the list is cut to k.
 	assert.equal(fused[3].score, null);
 	assert.equal(fuse(list(['a', 'b', 'c'], true), list(['d', 'e'], false), RRF_K, 2).length, 2);
-	assert.equal(HYBRID_LABEL, 'hybrid (fused here)');
+	assert.equal(HYBRID_LABEL, 'fused in the browser', 'the store has no hybrid search');
 });
 
 // ── A run ───────────────────────────────────────────────────────────────────
@@ -781,14 +782,15 @@ test('wiring: the panel hands each run the chat\'s prefill (never cited keys apa
 	const panel = code(path.join('components', 'SearchPanel.tsx'));
 	assert.doesNotMatch(panel, /setCited|useState<readonly VectorKey\[\]>/, 'no cited keys kept apart from their question');
 	assert.match(panel, /chat: request\.chat/);
-	assert.match(panel, /const next = prefillRun\(prefill, options, ks\);/);
-	assert.match(panel, /objectIds: next\.objectIds/);
+	assert.match(panel, /const next = applyHandoff\(handoff, \{ mode, topK \}, options, ks\);/);
+	assert.match(panel, /const objectIds = next\.objectIds === 'scope' \? gate\.objectIds : next\.objectIds;/, "a chat handoff searches the question's own documents; any other the scope as it is now");
+	assert.match(code(path.join('vector', 'searchWorkbench.ts')), /const next = prefillRun\(\{ \.\.\.handoff\.chat, question: a\.text \}, options, ks\);/, '"Open in Search" runs the search "Why these?" made');
 	assert.match(panel, /objectIds: gate\.objectIds/);
 	const debuggerSource = code(path.join('components', 'RetrievalDebugger.tsx'));
 	assert.match(debuggerSource, /withScope\(debuggerSearchInput\(vector, embeddingModel, topK, model\.limits\), scope\)/);
 	assert.match(debuggerSource, /openInSearchPrefill\(question, answerSources \?\? \[\], topK, model\.limits, scope\)/);
 	const chatPanel = code(path.join('components', 'ChatPanel.tsx'));
-	assert.match(chatPanel, /<RetrievalDebugger [^>]*scope=\{turn\.scope\}/);
+	assert.match(chatPanel, /<RetrievalDebugger\s[^>]*scope=\{turn\.scope\}/);
 });
 
 test('wiring: the search files insert no HTML, stop no propagation, listen for no keys, log nothing and hold no token', () => {
@@ -800,4 +802,188 @@ test('wiring: the search files insert no HTML, stop no propagation, listen for n
 		assert.doesNotMatch(text, /localStorage|sessionStorage|indexedDB|document\.cookie|console\.(log|info|debug|warn|error)/, file);
 		assert.doesNotMatch(text, /\.token\b|\btoken\s*:|getToken|roleTokens/, file);
 	}
+});
+
+// ── The Query tab's Search: the table choice, the "Will run" line, the score column ──
+
+test('isTable: the table choice goes to the store as filter.isTable, beside the scope, on every search a mode makes; Any sends none', async () => {
+	assert.deepEqual([isTableOf('any'), isTableOf('only'), isTableOf('none')], [null, true, false]);
+	assert.deepEqual(semanticSearchInput([0.1], null, 'q', 10, limits, 'semantic', null, true).filter, { isTable: true });
+	assert.deepEqual(semanticSearchInput([0.1], null, 'q', 10, limits, 'auto', ['o1'], false).filter, { objectIds: ['o1'], isTable: false });
+	assert.equal(semanticSearchInput([0.1], null, 'q', 10, limits, 'semantic', null, null).filter, undefined, 'Any and no scope: no filter at all');
+	assert.deepEqual(keywordSearchInput('KX4471', 10, limits, null, true), { query: 'KX4471', mode: 'keyword', top_k: 10, include_below_threshold: true, filter: { isTable: true } });
+	const { deps, calls } = fakeCalls({ embed: [embedOk as unknown as Record<string, unknown>], search: [searchVector as unknown as Record<string, unknown>, keywordFallback as unknown as Record<string, unknown>] });
+	const outcome = await runWorkbench(deps, { question: 'water', mode: 'hybrid', topK: 10, limits, storeNode: 'store_1', embedNode: 'embed_1', objectIds: ['d1'], isTable: false });
+	assert.ok(outcome.ok);
+	const searches = calls.filter((call) => call.tool === 'search').map((call) => call.input.filter);
+	assert.deepEqual(searches, [{ objectIds: ['d1'], isTable: false }, { objectIds: ['d1'], isTable: false }], 'both halves of Hybrid');
+});
+
+test('willRunText: what Run sends before it is pressed — the mode, k, where it searches, the table choice, and what the threshold does', () => {
+	const whole = { objectIds: null, blocked: null };
+	assert.equal(willRunText({ mode: 'semantic', comparing: false, topK: 10, at: 0.3, gate: whole, tables: 'any' }), 'Will run: a Semantic search, top 10, over the whole collection. The threshold 0.30 only marks rows here; the store returns the top 10 whatever their scores.');
+	assert.equal(willRunText({ mode: 'keyword', comparing: false, topK: 25, at: 0.3, gate: { objectIds: ['a', 'b', 'c'], blocked: null }, tables: 'only' }), 'Will run: a Keyword search, top 25, in the 3 documents of the scope (sent as their ids), tables only (sent to the store). Keyword results carry no similarity, so the threshold does not apply.');
+	assert.match(willRunText({ mode: 'hybrid', comparing: false, topK: 10, at: 0.3, gate: whole, tables: 'none' }) ?? '', /^Will run: a Hybrid search \(a semantic and a keyword search, fused in the browser\), top 10, over the whole collection, no tables \(sent to the store\)\./);
+	assert.match(willRunText({ mode: 'auto', comparing: true, topK: 5, at: 0.42, gate: { objectIds: ['a'], blocked: null }, tables: 'any' }) ?? '', /^Will run: A and B, each an Auto search \(by meaning; the store may fall back to keyword search\), top 5, in the document of the scope \(sent as their ids\)\. The threshold 0\.42/);
+	assert.match(willRunText({ mode: 'semantic', comparing: false, topK: 10, at: 0.3, gate: { objectIds: null, blocked: 'No documents match the scope.' }, tables: 'any' }) ?? '', /top 10, within the scope\./, 'over the cap or unresolved: not "the whole collection"');
+	assert.equal(willRunText({ mode: null, comparing: false, topK: 10, at: 0.3, gate: whole, tables: 'any' }), null);
+	assert.equal(modeLabel('hybrid'), 'Hybrid (fused in the browser)');
+	assert.equal(modeLabel('semantic'), 'Semantic');
+});
+
+test('scopeChipText: the documents a run searches, why it cannot run, or that the scope is not applied to Search', () => {
+	const scope: IScopeState = { filter: {}, label: 'folder is under C:/demo/', objectIds: ['a', 'b'], overflow: null, applyTo: { documents: true, map: true, search: true, chat: true } };
+	assert.equal(scopeChipText(null, searchScope(null, limits)), null);
+	assert.equal(scopeChipText(scope, searchScope(scope, limits)), 'Searching 2 documents in scope: folder is under C:/demo/');
+	assert.match(scopeChipText({ ...scope, objectIds: null, overflow: 2340 }, searchScope({ ...scope, objectIds: null, overflow: 2340 }, limits)) ?? '', /^Scope too large/);
+	const off = { ...scope, applyTo: { ...scope.applyTo, search: false } };
+	assert.equal(scopeChipText(off, searchScope(off, limits)), 'The scope (folder is under C:/demo/) is not applied to Search; Run searches the whole collection.');
+});
+
+/** One store's `dialect.score`, as NODE-FACTS A1 reads them from each driver. */
+function scoreOf(formula: string, range: [number, number] | null, higherIsBetter = true): IScoreInfo {
+	return { formula, range, higher_is_better: higherIsBetter, floor: 0.2, threshold: 0.3 } as unknown as IScoreInfo;
+}
+
+test('the score column: its scale and its bars come from dialect.score (formula, range, direction), per store, never from the metric', () => {
+	const rated = [{ score: 0.5, fused: null, keywordRank: null }];
+	const stores: Array<[string, IScoreInfo, string, Array<[number, number | null]>]> = [
+		['pgvector cosine', scoreOf('1 - cosine_distance', [-1, 1]), '1 - cosine_distance · −1 to 1 · higher is closer', [[1, 1], [0, 0.5], [-1, 0], [0.62, 0.81]]],
+		['qdrant cosine', scoreOf('(1 + cos) / 2', [0, 1]), '(1 + cos) / 2 · 0 to 1 · higher is closer', [[1, 1], [0.25, 0.25]]],
+		['chroma cosine', scoreOf('(2 - cosine_distance) / 2', [0, 1]), '(2 - cosine_distance) / 2 · 0 to 1 · higher is closer', [[0.9, 0.9]]],
+		['pgvector l2', scoreOf('1 / (1 + l2_distance)', [0, 1]), '1 / (1 + l2_distance) · 0 to 1 · higher is closer', [[0.5, 0.5]]],
+		['pinecone l2 (a raw distance, lower is closer, no range)', scoreOf('squared euclidean distance', null, false), 'squared euclidean distance · lower is closer', [[0.1, null], [42, null]]],
+		['inner product (no range)', scoreOf('inner_product', null), 'inner_product · higher is closer', [[12.5, null]]],
+		['an inverted range', scoreOf('distance', [0, 2], false), 'distance · 0 to 2 · lower is closer', [[0, 1], [2, 0], [0.5, 0.75]]],
+		['unknown formula', scoreOf('unknown', [0, 1]), '0 to 1 · higher is closer', [[0.3, 0.3]]],
+	];
+	for (const [name, score, scale, bars] of stores) {
+		const heading = scoreHeading(score, rated);
+		assert.equal(heading.scale, scale, name);
+		assert.equal(heading.noBars, score.range === null ? 'The store reports no range for this score, so there are no bars.' : null, name);
+		for (const [value, bar] of bars) assert.equal(scoreBar(score, value) === null ? null : Number((scoreBar(score, value) as number).toFixed(2)), bar, `${name}: ${value}`);
+	}
+	const cosine = scoreOf('1 - cosine_distance', [-1, 1]);
+	assert.equal(scoreBar(cosine, null), null, 'a keyword or fused row with no score: no bar');
+	assert.equal(scoreBar(cosine, 3), 1, 'clamped to the range');
+	assert.deepEqual(scoreHeading(cosine, [{ score: null, fused: null, keywordRank: 1 }]), { scale: null, noBars: 'Keyword results carry no similarity, so they have no score or bar.' });
+	assert.equal(scoreHeading(cosine, [...rated, { score: null, fused: 0.016, keywordRank: 2 }]).noBars, 'Rows found by keyword only carry no similarity, so they have no score or bar.');
+	assert.equal(scoreHeading(null, rated).scale, 'higher is closer', 'no dialect yet: the direction the app assumes, no range, no bars');
+});
+
+// ── The slider's announcement: once per release, never on every step ───────
+
+/** Timers driven by hand. */
+function manualTimers(): { setTimer(fn: () => void, ms: number): unknown; clearTimer(handle: unknown): void; advance(ms: number): void; pending(): number } {
+	let now = 0;
+	let next = 0;
+	const timers = new Map<number, { at: number; fn: () => void }>();
+	return {
+		setTimer(fn, ms) {
+			next += 1;
+			timers.set(next, { at: now + ms, fn });
+			return next;
+		},
+		clearTimer(handle) {
+			timers.delete(handle as number);
+		},
+		advance(ms) {
+			now += ms;
+			for (const [id, timer] of [...timers]) {
+				if (timer.at <= now) {
+					timers.delete(id);
+					timer.fn();
+				}
+			}
+		},
+		pending: () => timers.size,
+	};
+}
+
+test('createCommitAnnouncer: moving the slider says nothing; each release waits, a burst of releases is announced once with where it ended', () => {
+	const said: string[] = [];
+	const timers = manualTimers();
+	const announcer = createCommitAnnouncer({ announce: (text) => said.push(text), setTimer: timers.setTimer, clearTimer: timers.clearTimer });
+	assert.equal(COMMIT_ANNOUNCE_MS, 400);
+	// A drag: the slider moves many times and nothing commits until the pointer goes up.
+	timers.advance(5000);
+	assert.deepEqual(said, []);
+	announcer.commit('At 0.42: 7 of 20 would pass');
+	timers.advance(399);
+	assert.deepEqual(said, [], 'not before the delay');
+	timers.advance(1);
+	assert.deepEqual(said, ['At 0.42: 7 of 20 would pass']);
+	// A held arrow key: many key-ups inside the delay, one announcement, the last position.
+	let at = 0.42;
+	for (let i = 0; i < 10; i++) {
+		at += 0.01;
+		const text = `At ${at.toFixed(2)}`;
+		announcer.commit(() => text);
+		timers.advance(100);
+	}
+	timers.advance(400);
+	assert.deepEqual(said, ['At 0.42: 7 of 20 would pass', 'At 0.52']);
+	announcer.commit('dropped');
+	announcer.cancel();
+	timers.advance(1000);
+	assert.equal(said.length, 2, 'the panel went away: nothing is said');
+	assert.equal(timers.pending(), 0);
+	assert.deepEqual(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].map(isCommitKey), Array(8).fill(true));
+	assert.deepEqual(['Tab', 'Enter', 'a', 'Shift'].map(isCommitKey), [false, false, false, false]);
+});
+
+test("wiring: the slider never searches again — it sets the position, the rows are re-classified in memory, and only Run, a handoff or a Rerun call run()", () => {
+	const panel = code(path.join('components', 'SearchPanel.tsx'));
+	assert.match(panel, /onChange=\{\(event\) => onThreshold\(onGrid\(Number\(event\.currentTarget\.value\)\)\)\}/);
+	assert.match(panel, /onThreshold: setAt,/);
+	assert.match(panel, /const viewA = useMemo\(\(\) => \(runs\.a !== null \? classifyAt\(runs\.a\.rows, at, score\) : null\), \[runs\.a, at, score\]\);/);
+	for (const deps of panel.matchAll(/\}, \[([^\]]*)\]\);/g)) assert.doesNotMatch(deps[1], /\b(at|chosenAt)\b/, `an effect re-runs on the slider: [${deps[1]}]`);
+	assert.equal((panel.match(/void run\(/g) ?? []).length, 2, 'Run (the form) and a handoff');
+	// The count is announced on release only, through the one announcer.
+	assert.match(panel, /onPointerUp=\{\(\) => onCommit\?\.\(\)\}/);
+	assert.match(panel, /if \(isCommitKey\(event\.key\)\) onCommit\?\.\(\);/);
+	assert.match(panel, /const commitThreshold = \(\): void => announcer\.commit\(\(\) => sentence\.current\);/);
+	assert.doesNotMatch(panel, /<output/, 'the line is no live region');
+});
+
+// ── Questions handed in ─────────────────────────────────────────────────────
+
+test('capSearchQuestion and questionEscape: the boxes take 1,000 characters; Escape clears a box with text, and passes on an empty one', () => {
+	assert.equal(SEARCH_QUESTION_MAX_CHARS, 1000);
+	assert.deepEqual(capSearchQuestion('water'), { text: 'water', cut: false });
+	assert.deepEqual(capSearchQuestion('x'.repeat(1000)), { text: 'x'.repeat(1000), cut: false });
+	const long = capSearchQuestion('y'.repeat(5000));
+	assert.equal(long.text.length, 1000);
+	assert.equal(long.cut, true);
+	assert.equal(QUESTION_CUT_SENTENCE, 'Cut to the first 1,000 characters.');
+	assert.equal(questionEscape('water', false), 'clear');
+	assert.equal(questionEscape('', false), 'pass', 'an empty box leaves Escape to the handlers around it');
+	assert.equal(questionEscape('water', true), 'pass', 'an inner handler already acted');
+});
+
+test('applyHandoff: "Open in Search" searches as "Why these?" did (every table choice); a history entry keeps its mode and k when offered and searches the scope as it is now', () => {
+	const options = modeOptions(model());
+	const ks = topKOptions(limits);
+	const current = { mode: 'keyword' as SearchMode, topK: 25 };
+	const chat: ChatPrefill = { question: FALCON, cited: [CITED], topK: 13, objectIds: ['d1'] };
+	const fromChat = applyHandoff({ nonce: 'n', question: FALCON, run: true, chat }, current, options, ks);
+	assert.deepEqual(fromChat, { question: FALCON, questionB: null, mode: 'semantic', topK: 13, tables: 'any', cut: false, objectIds: ['d1'], run: true });
+	const entry: SearchHandoff = { nonce: 'n', question: 'kestrel', questionB: 'falcon', mode: 'hybrid', topK: 50, run: true, chat: null };
+	assert.deepEqual(applyHandoff(entry, current, options, ks), { question: 'kestrel', questionB: 'falcon', mode: 'hybrid', topK: 50, tables: null, cut: false, objectIds: 'scope', run: true });
+	const noEmbed = modeOptions(model({ embed: { enabled: false, reason: null }, nodes: { store: 'store_1', embed: null, llm: null, llmName: null } }));
+	assert.equal(applyHandoff(entry, current, noEmbed, ks).mode, 'keyword', 'a mode not offered now: the panel keeps its own');
+	assert.equal(applyHandoff({ ...entry, mode: undefined, topK: undefined }, current, options, ks).topK, 25);
+	assert.equal(applyHandoff({ ...entry, question: '   ' }, current, options, ks).run, false, 'nothing to run');
+	assert.deepEqual(
+		(({ question, cut }) => ({ length: question.length, cut }))(applyHandoff({ ...entry, question: 'z'.repeat(1200) }, current, options, ks)),
+		{ length: 1000, cut: true }
+	);
+});
+
+test('takePrefill: a question handed in through the connection fills the box of its mode and never runs by itself; an empty one is "New query"', () => {
+	assert.deepEqual(takePrefill({ nonce: 'p1', question: 'chunk text', mode: 'search' }, 'ask'), { mode: 'search', search: { nonce: 'p1', question: 'chunk text', run: false, chat: null }, ask: null });
+	assert.deepEqual(takePrefill({ nonce: 'p2', question: 'chunk text' }, 'compare'), { mode: 'compare', search: { nonce: 'p2', question: 'chunk text', run: false, chat: null }, ask: null }, 'no mode: the tab\'s own');
+	assert.deepEqual(takePrefill({ nonce: 'p3', question: 'why?', mode: 'ask' }, 'search'), { mode: 'ask', search: null, ask: { nonce: 'p3', question: 'why?', run: false } });
+	assert.deepEqual(takePrefill({ nonce: 'p4', question: '' }, 'compare'), { mode: 'search', search: { nonce: 'p4', question: '', run: false, chat: null, clear: true }, ask: null });
+	assert.equal(takePrefill({ nonce: 'p5', question: 'x', mode: 'search', keys: [['o1', 3]] }, 'search').search?.chat, null, 'keys (a chunk used as the query) are no chat citations');
 });

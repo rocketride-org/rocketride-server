@@ -135,6 +135,8 @@ const FEATURE_TESTS = {
 	// Search without the LLM.
 	'searchWorkbench.test.ts': 'src/vector/searchWorkbench.ts',
 	'compare.test.ts': 'src/vector/compare.ts',
+	// The Query tab: its modes, focus and keys.
+	'queryTab.test.ts': 'src/vector/queryFocus.ts',
 	// Exports and saved views.
 	'export.test.ts': 'src/vector/export.ts',
 	'exportPng.test.ts': 'src/map/exportPng.ts',

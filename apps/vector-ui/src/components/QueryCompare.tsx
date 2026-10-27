@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// VECTOR-UI — QueryCompare (Search's Compare: two questions side by side)
+// VECTOR-UI — QueryCompare (the Query tab's Compare: two questions side by side)
 // =============================================================================
 //
 // Runs A and B in two columns, each row saying whether the other run found
@@ -32,6 +32,8 @@
 // colours, tell the runs apart; chunk text is a React child, never markup.
 // A column whose question is the one "Open in Search" brought says so and
 // marks the chunks the chat's answer cited; the other column does not.
+// The agreement line is announced once by the panel when B's run lands
+// (SearchPanel), so it is no live region of its own.
 // =============================================================================
 
 import React from 'react';
@@ -170,7 +172,7 @@ export function QueryCompare({ a, b, score, onShowBoth, onOpen, scopeOn = false 
 	const summary = compareRuns(a.run.rows, b.run.rows);
 	return (
 		<section style={S.root} aria-label="Compare A and B" data-component="QueryCompare">
-			<p style={S.summary} role="status" data-compare-summary="">
+			<p style={S.summary} data-compare-summary="">
 				{compareSentence(summary)}
 			</p>
 			<div>

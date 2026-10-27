@@ -261,12 +261,14 @@ describe('F14 - no window-wide overlay in a frame: confirmations and details are
 });
 
 describe('R11 - what cannot work in a dev-tool mount degrades visibly, and keeps working in the full app', () => {
-	it('chat: the console still renders the chat panel where chat is off for the mount, so Search (no LLM) stays one click away under the reason', () => {
+	it('chat: the Query tab always mounts Ask; where chat is off for the mount, Ask says the reason and offers Search (no LLM), the tab\'s first mode', () => {
 		const view = code(read('components/QueryTab.tsx'));
-		assert.match(view, /\{model\.chat\.enabled \|\| env\.degraded !== null \? <ChatPanel /);
+		assert.match(view, /<ChatPanel model=\{surfaceModel\} [^>]*onUseSearch=\{\(\) => onMode\('search'\)\}/, 'Ask is rendered in every mount, and its "Use Search" shows Search');
+		assert.doesNotMatch(view, /degraded/, 'no branch on the mount: the served model says what the chat can do');
 		const panel = code(read('components/ChatPanel.tsx'));
 		assert.match(panel, /description=\{model\.chat\.reason \?\? NO_CHAT_SENTENCE\}/, 'the panel says the mount\'s reason');
-		assert.match(panel, /SEARCH_WITHOUT_CHAT/);
+		assert.match(panel, /\{USE_SEARCH\}/);
+		// What a frame shows is rendered in chatIngest.render.test.ts ("a dev-tool mount (the degraded model)"): the note, "Use Search", every Search mode.
 		assert.match(code(read('components/AddDocumentsAside.tsx')), /model\.ingest\.enabled \? <IngestPanel [^>]*\/> : <EmptyState title="Add documents" description=\{model\.ingest\.reason \?\? undefined\} \/>/, 'uploads: the area says why, the layout stays');
 		assert.match(code(read('devtool/frame.ts')), /consoleModel: devToolConsoleModel,/, 'the frame env serves the degraded model');
 	});
