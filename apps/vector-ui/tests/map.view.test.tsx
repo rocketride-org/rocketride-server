@@ -30,7 +30,7 @@ import type { IRoleChannel } from 'shared/explorer';
 import { recommendExamples } from '../src/adapters/connections';
 import { createSelectionStore } from '../src/contract/bridge';
 import { EXPORT_COLUMNS } from '../src/contract/types';
-import type { ConsoleActions, ConsoleModel, IDialectResult, IExportItem, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleModel, ISampleResult, ISavedView, ISavedViewRestore, ISavedViewState, IScopeState, ToolOutcome, VectorChannels, VectorKey } from '../src/contract/types';
+import type { ConsoleActions, ConsoleModel, IDialectResult, IExportItem, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleDoc, ISampleModel, ISampleResult, IStageTarget, ISavedView, ISavedViewRestore, ISavedViewState, IScopeState, ToolOutcome, VectorChannels, VectorKey } from '../src/contract/types';
 import { MapToolbar } from '../src/components/MapToolbar';
 import { PointCanvas } from '../src/components/PointCanvas';
 import { clusterLabel, clusterRows, clusterView } from '../src/map/clusters';
@@ -206,9 +206,7 @@ test('with the Table on, the canvas stays mounted but hidden: data-points and da
 	const sample = modelOf(loadSample('sample_demo_1000.json'));
 	const out = render({ sample, initialTable: true });
 	assert.match(out, /<caption[^>]*>Points of the sample \(the map as a table\)<\/caption>/);
-	// The Table toggle is in Advanced: pressed there.
-	assert.equal(last<{ table: boolean }>('MapToolbar').table, true);
-	assert.match(html(<MapToolbar {...last<React.ComponentProps<typeof MapToolbar>>('MapToolbar')} initialAdvanced />), /aria-pressed="true"[^>]*>Table<\/button>/);
+	assert.match(out, /aria-pressed="true"[^>]*>Table<\/button>/);
 	// The lanes read the canvas root while the table shows (lane_vector_map.cjs polls data-selected after "Inspect point 1").
 	assert.equal(attrOf(out, 'vector-map-canvas', 'data-points'), '1000');
 	assert.equal(attrOf(out, 'vector-map-canvas', 'data-selected'), '');
@@ -763,28 +761,33 @@ test('the legend\'s lines: edges drawn, a truncated listing, a scope, an isolati
 // Staging: where the console stages removals, the map's panels stage them
 // -----------------------------------------------------------------------------
 
-test('with a console that stages (stageRemove), every map removal is staged, never confirmed at once, and the panels say Stage removal; without one, requestRemove as before', () => {
-	const staged: Array<readonly string[]> = [];
+test('with a console that stages (stageRemove), every map removal is staged with the sample\'s paths and chunk counts, never confirmed at once, and the panels say Stage removal; without one, requestRemove as before', () => {
+	const staged: Array<readonly IStageTarget[]> = [];
 	const rec = recording();
-	const stagingActions: ConsoleActions = { ...rec.actions, stageRemove: (ids) => staged.push(ids) };
+	const stagingActions: ConsoleActions = { ...rec.actions, stageRemove: (targets) => staged.push(targets) };
 	const sample = modelOf(clustered);
+	const [d0, d1, d2] = clustered.docs as [ISampleDoc, ISampleDoc, ISampleDoc];
+	const named = (doc: ISampleDoc): IStageTarget => ({ objectId: doc.objectId, path: doc.path, chunks: typeof doc.chunks === 'number' ? doc.chunks : null });
 	render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'point' });
 	const inspector = last<{ onRemoveDocument(id: string): void; staging?: boolean }>('PointInspector');
 	assert.equal(inspector.staging, true);
-	inspector.onRemoveDocument('doc-1');
+	inspector.onRemoveDocument(d0.objectId);
 	render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'duplicates' });
 	const dup = last<{ onRemoveDocuments(ids: readonly string[]): void; onRemoveDocument(id: string): void; staging?: boolean }>('DuplicatesPanel');
 	assert.equal(dup.staging, true);
-	dup.onRemoveDocuments(['a', 'b']);
-	dup.onRemoveDocument('c');
+	dup.onRemoveDocuments([d1.objectId, d2.objectId]);
+	dup.onRemoveDocument('not-in-the-sample');
 	render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'outliers' });
 	const outliers = last<{ onRemoveDocument(id: string): void; staging?: boolean }>('OutliersPanel');
 	assert.equal(outliers.staging, true);
-	outliers.onRemoveDocument('d');
+	outliers.onRemoveDocument(d2.objectId);
 	const out = render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'outliers' });
 	assert.match(out, />Stage removal<\/button>/);
 	assert.doesNotMatch(out, />Move to trash<\/button>/);
-	assert.deepEqual(staged, [['doc-1'], ['a', 'b'], ['c'], ['d']]);
+	// Named by the sample's paths (the pending bar and the confirmation show files); what the sample does not know is
+	// left null for the console to take from its rows.
+	assert.deepEqual(staged, [[named(d0)], [named(d1), named(d2)], [{ objectId: 'not-in-the-sample', path: null, chunks: null }], [named(d2)]]);
+	assert.ok(staged.flat().slice(0, 3).every((t) => t.path && t.path !== t.objectId), 'file names, not ids');
 	assert.deepEqual(rec.removed, [], 'nothing asked to be confirmed at once');
 	// A console that does not stage: the same buttons confirm through requestRemove.
 	render({ model: enrichedModel(), sample, actions: rec.actions, initialTab: 'outliers' });
@@ -800,8 +803,8 @@ test('Show group on the Duplicates tab rings that group\'s pairs with their simi
 	render({ model: enrichedModel(), sample, selection, initialTab: 'duplicates' });
 	last<{ onSelect(indices: readonly number[]): void }>('DuplicatesPanel').onSelect([pair.a, pair.b]);
 	render({ model: enrichedModel(), sample, selection, initialTab: 'duplicates' });
-	const canvas = last<{ overlay: { duplicateRings?: Array<{ a: number; b: number; sim: number }> }; dimmed: Uint8Array | null }>('PointCanvas');
-	assert.ok((canvas.overlay.duplicateRings ?? []).some((r) => r.a === pair.a && r.b === pair.b && r.sim === pair.sim));
+	const canvas = last<{ overlay: { duplicateRings?: Array<{ a: number; b: number; label: string }> }; dimmed: Uint8Array | null }>('PointCanvas');
+	assert.ok((canvas.overlay.duplicateRings ?? []).some((r) => r.a === pair.a && r.b === pair.b && r.label === `${clustered.metric === 'cosine' ? 'cosine' : clustered.metric === 'ip' ? 'inner product' : 'L2 similarity'} ${pair.sim.toFixed(2)}`));
 	assert.ok(canvas.dimmed, 'the rest is faded');
 	assert.equal(canvas.dimmed![pair.a], 0);
 	assert.equal(canvas.dimmed![pair.b], 0);
@@ -831,4 +834,17 @@ test('the map fades nothing with nothing shown; a selection keeps itself and its
 	assert.equal(legend.marks.duplicates, Math.min(200, clustered.duplicates.length));
 	render({ model: enrichedModel(), sample, extra: { edges: 'tree' } });
 	assert.ok(last<{ marks: { edges: { weakest: string; strongest: string } | null } }>('Legend').marks.edges, 'edges drawn: the edge glyph');
+});
+
+test('the reasons a toolbar control is off are shown in full where they can wrap: the legend\'s notes with a sample, above the empty state without one', () => {
+	const why = 'Text queries need the embedding node reachable from the Tools source';
+	const off = modelWith({ embed: { enabled: false, reason: why } });
+	const light = render({ model: off, sample: modelOf(loadSample('sample_light_5000.json')) });
+	const legend = light.slice(light.indexOf('aria-label="Map legend"'));
+	assert.match(legend, new RegExp(`<p[^>]*>${why}</p>`));
+	assert.match(legend, /<p[^>]*>t-SNE is limited to 1,000 points; this sample has 5,000\.<\/p>/);
+	const empty = render({ model: off });
+	assert.match(empty, new RegExp(`<p[^>]*>${why}</p>`));
+	const view = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'views', 'MapView.tsx'), 'utf8');
+	assert.match(view, /setStagedNote\(stagedLine\(targets\.length\)\);/, 'a staging press says so in its panel');
 });

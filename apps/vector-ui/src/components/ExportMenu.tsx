@@ -184,7 +184,10 @@ export interface ExportMenuPanelProps {
 	onClose?(refocus: boolean): void;
 	/** The menu element, for moving focus into it when it opens. */
 	menuRef?: React.Ref<HTMLDivElement>;
-	/** Which edge of the button the panel hangs from (default 'right'), until it is placed. */
+	/**
+	 * Which edge of the button the panel hangs from (default 'right') when nothing places it: a static render. In the
+	 * browser usePopover places it before it is painted.
+	 */
 	side?: 'left' | 'right';
 	/** Where it was placed (usePopover), merged last. */
 	placement?: React.CSSProperties;
@@ -337,7 +340,6 @@ export function ExportMenu(props: ExportMenuProps): React.ReactElement {
 	const label = props.label ?? DEFAULT_LABEL;
 	const panelId = `export-${useId().replace(/:/g, '')}`;
 	const [open, setOpen] = useState(false);
-	const [side, setSide] = useState<'left' | 'right'>('right');
 	const [busy, setBusy] = useState(false);
 	const [status, setStatus] = useState<string | null>(null);
 	const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -432,15 +434,11 @@ export function ExportMenu(props: ExportMenuProps): React.ReactElement {
 				aria-haspopup="menu"
 				aria-expanded={open}
 				aria-controls={open ? panelId : undefined}
-				onClick={() => {
-					if (!open) setSide(sideFor(root.current, EXPORT_PANEL_WIDTH));
-					setOpen((v) => !v);
-				}}
+				onClick={() => setOpen((v) => !v)}
 				onKeyDown={(event) => {
 					if (event.defaultPrevented) return;
 					if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !open) {
 						event.preventDefault();
-						setSide(sideFor(root.current, EXPORT_PANEL_WIDTH));
 						setOpen(true);
 					} else if (event.key === 'Escape' && open) {
 						event.preventDefault();
@@ -456,7 +454,6 @@ export function ExportMenu(props: ExportMenuProps): React.ReactElement {
 					menuRef={menu}
 					panelRef={panel}
 					placement={placement}
-					side={side}
 					items={props.items}
 					busy={busy}
 					status={status}

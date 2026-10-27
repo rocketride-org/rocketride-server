@@ -51,9 +51,12 @@
 //     alpha painted the weakest edges at 1.1:1 in RocketRide dark.) In 2D the
 //     paths are built in layout units once per edge set and stroked through
 //     the camera's affine transform (edgeTransform2d), so panning and zooming
-//     build nothing; in 3D they are built from the projected points. The edges
-//     are decorative: the legend's counts and the Neighbours tab are their
-//     text alternative.
+//     build nothing; in 3D they are built from the projected points. While the
+//     map dims, an edge whose two ends are both faded is faded the same way
+//     (its colour mixed toward the surface, keeping DIM) and drawn first; an
+//     edge that touches the lit set keeps its measured colour. The edges are
+//     decorative: the legend's counts and the Neighbours tab are their text
+//     alternative.
 //   - Extras on the overlay (drawExtras): the compared question's star (B,
 //     hollow) and its rays, the hovered point's edges drawn thicker, the
 //     hovered cluster's points ringed, and the cluster labels (11 px text in
@@ -67,6 +70,7 @@ import { mixRgb, mixToContrast, opaqueOver, parseColor, toCss } from './contrast
 import type { Rgb } from './contrast';
 import type { IEdgeSet } from './graph';
 import type { IStar } from './queryProjection';
+import { DIM } from './renderer.webgl';
 import { MIN_GRAPHIC_CONTRAST } from './tokens';
 import type { IMapPalette } from './tokens';
 
@@ -107,6 +111,8 @@ export interface IOverlayModel {
 	duplicates: Array<[number, number]>;
 	/** The pairs of the duplicate group shown: a ring at each end and the pair's similarity. */
 	duplicateRings?: IDuplicateRing[];
+	/** 1 per faded point while the map dims: an outlier ring or duplicate line on faded points only is faded too. */
+	faded?: Uint8Array | null;
 	outliers: number[];
 	/** The lasso path, screen x,y interleaved. */
 	lasso: number[];
@@ -118,8 +124,8 @@ export interface IOverlayModel {
 export interface IDuplicateRing {
 	a: number;
 	b: number;
-	/** Their similarity, printed at the pair's midpoint. */
-	sim: number;
+	/** Their similarity with its scale (reviewWording pairLabel), printed at the pair's midpoint. */
+	label: string;
 }
 
 /** What a frame of the overlay actually drew (ends that resolved to a screen position, not what was asked). */
@@ -178,24 +184,32 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		return true;
 	};
 
-	// Duplicate pairs: dashed lines in the outline colour.
+	// While the map dims, a mark whose points are all faded is faded with them (the same opaque mix, drawn first).
+	const faded = model.faded ?? null;
+	const isFaded = (i: number): boolean => faded !== null && !!faded[i];
+	const fadedOutline = faded !== null ? fadeColour(colours.outline, colours.surface) : colours.outline;
+
+	// Duplicate pairs: dashed lines in the outline colour (faded when both ends are).
 	if (model.duplicates.length > 0) {
-		let any = false;
-		ctx.beginPath();
-		for (const [a, b] of model.duplicates) {
-			const pa = screen(a);
-			const pb = screen(b);
-			if (pa === null || pb === null) continue;
-			ctx.moveTo(pa[0], pa[1]);
-			ctx.lineTo(pb[0], pb[1]);
-			any = true;
-		}
-		if (any) {
-			ctx.setLineDash([4, 3]);
-			ctx.strokeStyle = colours.outline;
-			ctx.lineWidth = 1.5;
-			ctx.stroke();
-			ctx.setLineDash([]);
+		for (const fade of faded !== null ? [true, false] : [false]) {
+			let any = false;
+			ctx.beginPath();
+			for (const [a, b] of model.duplicates) {
+				if ((isFaded(a) && isFaded(b)) !== fade) continue;
+				const pa = screen(a);
+				const pb = screen(b);
+				if (pa === null || pb === null) continue;
+				ctx.moveTo(pa[0], pa[1]);
+				ctx.lineTo(pb[0], pb[1]);
+				any = true;
+			}
+			if (any) {
+				ctx.setLineDash([4, 3]);
+				ctx.strokeStyle = fade ? fadedOutline : colours.outline;
+				ctx.lineWidth = 1.5;
+				ctx.stroke();
+				ctx.setLineDash([]);
+			}
 		}
 	}
 
@@ -282,11 +296,20 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		}
 	}
 
-	// Outliers: rings in the outline colour over a halo of the surface (stroked first), so a ring reads over any point.
+	// Outliers: rings in the outline colour over a halo of the surface (stroked first), so a ring reads over any
+	// point; the ring of a faded outlier is faded (no halo: it is not meant to stand out).
 	if (model.outliers.length > 0) {
+		let anyFaded = false;
+		ctx.beginPath();
+		for (const i of model.outliers) if (isFaded(i)) anyFaded = ring(screen(i), 7) || anyFaded;
+		if (anyFaded) {
+			ctx.strokeStyle = fadedOutline;
+			ctx.lineWidth = 1.5;
+			ctx.stroke();
+		}
 		let any = false;
 		ctx.beginPath();
-		for (const i of model.outliers) any = ring(screen(i), 7) || any;
+		for (const i of model.outliers) if (!isFaded(i)) any = ring(screen(i), 7) || any;
 		if (any) {
 			ctx.strokeStyle = colours.surface;
 			ctx.lineWidth = 4;
@@ -307,7 +330,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 			const pb = screen(pair.b);
 			if (pa !== null) ends.set(pair.a, pa);
 			if (pb !== null) ends.set(pair.b, pb);
-			if (pa !== null && pb !== null) labels.push({ at: [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2], text: pair.sim.toFixed(2) });
+			if (pa !== null && pb !== null) labels.push({ at: [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2], text: pair.label });
 		}
 		if (ends.size > 0) {
 			ctx.beginPath();
@@ -474,32 +497,63 @@ export function edgeColours(palette: IMapPalette): string[] {
 }
 
 /**
- * Build one path per bucket.
+ * Build one path per bucket, and per bucket again for the faded edges.
  *
  * @param edges - The edges.
  * @param buckets - From {@link edgeBuckets}.
  * @param at - Where a point is (layout units in 2D, screen pixels in 3D), or null when it has no position.
  * @param makePath - A new empty path.
- * @returns The paths (null for an empty bucket) and the segments drawn.
+ * @param faded - 1 per faded point, or null: an edge with both ends faded goes to `fadedPaths`.
+ * @returns The lit and faded paths (null for an empty bucket), the segments drawn and how many of them are faded.
  */
-export function buildEdgePaths<P extends IPathSink>(edges: IEdgeSet, buckets: Uint8Array, at: (i: number) => [number, number] | null, makePath: () => P): { paths: Array<P | null>; segments: number } {
+export function buildEdgePaths<P extends IPathSink>(edges: IEdgeSet, buckets: Uint8Array, at: (i: number) => [number, number] | null, makePath: () => P, faded: ArrayLike<number> | null = null): { paths: Array<P | null>; fadedPaths: Array<P | null>; segments: number; fadedSegments: number } {
 	const paths: Array<P | null> = new Array(EDGE_BUCKETS).fill(null);
+	const fadedPaths: Array<P | null> = new Array(EDGE_BUCKETS).fill(null);
 	let segments = 0;
+	let fadedSegments = 0;
 	for (let e = 0; e < edges.count; e += 1) {
-		const pa = at(edges.a[e] as number);
-		const pb = at(edges.b[e] as number);
+		const a = edges.a[e] as number;
+		const bEnd = edges.b[e] as number;
+		const pa = at(a);
+		const pb = at(bEnd);
 		if (pa === null || pb === null) continue;
 		const b = buckets[e] ?? 0;
-		let path = paths[b] ?? null;
+		const fade = faded !== null && !!faded[a] && !!faded[bEnd];
+		const set = fade ? fadedPaths : paths;
+		let path = set[b] ?? null;
 		if (path === null) {
 			path = makePath();
-			paths[b] = path;
+			set[b] = path;
 		}
 		path.moveTo(pa[0], pa[1]);
 		path.lineTo(pb[0], pb[1]);
 		segments += 1;
+		if (fade) fadedSegments += 1;
 	}
-	return { paths, segments };
+	return { paths, fadedPaths, segments, fadedSegments };
+}
+
+/**
+ * The faded edges' colours: each bucket's colour mixed toward the surface, keeping DIM of it (as a faded point).
+ *
+ * @param colours - From {@link edgeColours}.
+ * @param surface - The map's surface (a CSS colour).
+ * @returns Opaque `rgb()` colours, one per bucket.
+ */
+export function fadedEdgeColours(colours: readonly string[], surface: string): string[] {
+	return colours.map((c) => fadeColour(c, surface));
+}
+
+/**
+ * A colour as a faded mark draws it: mixed toward the surface, keeping DIM of it, opaque (as a faded point).
+ *
+ * @param colour - A CSS colour (composited over the surface first when it has alpha).
+ * @param surface - The map's surface.
+ * @returns `rgb()`.
+ */
+export function fadeColour(colour: string, surface: string): string {
+	const bg = parseColor(surface) ?? { r: 255, g: 255, b: 255 };
+	return toCss(mixRgb(bg, opaqueOver(colour, bg) ?? bg, DIM));
 }
 
 /**

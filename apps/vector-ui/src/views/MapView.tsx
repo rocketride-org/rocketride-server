@@ -98,7 +98,7 @@ import { NO_EDGES, edgeStats, edgesOf, mergeEdges, spanningTree, topEdges, treeN
 import { tweenPositions } from '../map/interaction';
 import type { KeyAction } from '../map/interaction';
 import { combineMasks, dimMask, expandByNeighbours, isolateMask, isolationLine, shownCount } from '../map/isolate';
-import { UNSCOPED, applyTransform, chunkPath, clusterExportRows, ditherRounded, documentOf, drawnScope, duplicateExportRows, hiddenMask, keyIndex, keyString, mapScopeState, neighboursOf, normaliseLayout, pcaPositions, pointExportRows, pointKey, scopeDrawDue } from '../map/model';
+import { UNSCOPED, applyTransform, chunkPath, clusterExportRows, ditherRounded, documentOf, drawnScope, duplicateExportRows, hiddenMask, keyIndex, keyString, mapScopeState, neighboursOf, normaliseLayout, pcaPositions, pointExportRows, pointKey, removeTargetsOf, scopeDrawDue } from '../map/model';
 import type { ISampleScope, IScopeAttempt } from '../map/model';
 import { createLatestQueue } from '../map/neighbours';
 import { EDGE_BUCKETS, edgeColours } from '../map/overlay';
@@ -106,6 +106,7 @@ import type { IClusterLabel, IDuplicateRing, IOverlayEnd, IPlace } from '../map/
 import { centroidStar, chatQueryPlan, comparePlan, placeProjected, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject, withSampleRetry } from '../map/queryProjection';
 import type { IStar } from '../map/queryProjection';
 import { polarityOf } from '../map/recommend';
+import { pairLabel, pairScale, stagedLine } from '../map/reviewWording';
 import { spawnLayoutWorker } from '../map/spawnWorker';
 import { MAP_STYLES } from '../map/styles';
 import { FALLBACK_PALETTE, readPalette } from '../map/tokens';
@@ -465,6 +466,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const [centreOn, setCentreOn] = useState<{ index: number; seq: number } | null>(null);
 	const [pulse, setPulse] = useState(0);
 	const [rendererKind, setRendererKind] = useState<'webgl' | 'canvas2d' | 'none'>('none');
+	/** What the side panel says after it staged documents (where the console stages removals), or null. */
+	const [stagedNote, setStagedNote] = useState<string | null>(null);
 
 	// The one query vector (from `embed`), kept here and sent only to project / search / neighbors / recommend.
 	const queryVector = useRef<number[] | null>(null);
@@ -672,7 +675,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const duplicateRings: IDuplicateRing[] = useMemo(() => {
 		if (!sample || tab !== 'duplicates' || highlight === null || !DUPLICATE_GROUPS.has(highlight)) return [];
 		const group = new Set(resolveKeys(highlight.keys, keyIdx, []).points);
-		return sample.duplicates.filter((d) => group.has(d.a) && group.has(d.b) && !(hidden && (hidden[d.a] || hidden[d.b]))).slice(0, MAX_DRAWN_DUPLICATES).map((d) => ({ a: d.a, b: d.b, sim: d.sim }));
+		return sample.duplicates.filter((d) => group.has(d.a) && group.has(d.b) && !(hidden && (hidden[d.a] || hidden[d.b]))).slice(0, MAX_DRAWN_DUPLICATES).map((d) => ({ a: d.a, b: d.b, label: pairLabel(d.sim, sample.metric) }));
 	}, [sample, tab, highlight, keyIdx, hidden]);
 
 	// Everything outside the set the map is showing is drawn faded: a selection with its neighbours, else a
@@ -696,10 +699,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			edges: edgeSet ? { weakest: edgePalette[0] as string, strongest: edgePalette[EDGE_BUCKETS - 1] as string } : null,
 			links: selected !== null && neighbourEnds.length > 0,
 			outliers: sample.outliers.filter((i) => !(hidden && hidden[i])).length,
-			query: star && query?.search ? { top: query.search.results.length } : null,
+			query: star && query?.search ? { top: query.search.results.length, drawn: rays.length } : null,
 			duplicates: sample.duplicates.slice(0, MAX_DRAWN_DUPLICATES).filter(shownPair).length,
+			rings: duplicateRings.length > 0 ? { scale: pairScale(sample.metric) } : null,
 		};
-	}, [sample, hidden, edgeSet, edgePalette, selected, neighbourEnds, star, query]);
+	}, [sample, hidden, edgeSet, edgePalette, selected, neighbourEnds, star, query, rays, duplicateRings]);
 
 	const overlay = useMemo(
 		() => ({
@@ -1227,15 +1231,24 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	// Lasso and keys
 	// -------------------------------------------------------------------------
 
-	/** Removals: staged for the console's pending changes where it offers that, else confirmed by it at once. */
+	/**
+	 * Removals: staged for the console's pending changes where it offers that (named by the sample's paths and
+	 * chunk counts, so the pending bar and the confirmation show files, not ids), else confirmed by it at once.
+	 */
 	const staging = actions.stageRemove !== undefined;
 	const removeDocuments = useCallback(
 		(objectIds: readonly string[]): void => {
-			if (actions.stageRemove) actions.stageRemove(objectIds);
-			else actions.requestRemove(objectIds);
+			if (actions.stageRemove && sample) {
+				const targets = removeTargetsOf(sample, objectIds);
+				actions.stageRemove(targets);
+				// Seen in the panel that staged them (the pending bar's count is the announcement).
+				setStagedNote(stagedLine(targets.length));
+			} else actions.requestRemove(objectIds);
 		},
-		[actions],
+		[actions, sample],
 	);
+	// The line goes with the tab it was said in, and with the sample.
+	useEffect(() => setStagedNote(null), [tab, sample]);
 
 	const onLasso = useCallback(
 		(indices: readonly number[]): void => {
@@ -1640,7 +1653,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const edgeStatsNow = edgeSet ? edgeStats(edgeSet) : null;
 	const edgeLine = sample ? edgeLegend({ mode: edges, m: edgesPerPoint, count: edgeStatsNow?.count ?? 0, min: edgeStatsNow?.min ?? null, max: edgeStatsNow?.max ?? null, points: shownPoints, components: tree?.components ?? 0, expanded: expanded.length }) : null;
 	const listingLine = sample ? listingNote(sample) : null;
+	// Why the toolbar's Query and t-SNE are off, in full (the toolbar has them as the controls' descriptions only).
+	const queryWhy = !model.embed.enabled && model.embed.reason ? model.embed.reason : null;
+	const toolbarReasons = [queryWhy, tsneReason].filter((line): line is string => line !== null);
 	const legendNotes = [
+		...toolbarReasons,
 		...(query?.notes ?? []),
 		...(star && !star.exact && !query?.item ? [CENTROID_APPROX] : []),
 		...(sample?.mode === 'light' && layout === 'pca' ? [LIGHT_POSITIONS] : []),
@@ -1651,7 +1668,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		...(listingLine ? [listingLine] : []),
 		...(sample ? [scopeLine(scopeState, scopeTarget.key ? scopeTarget : null, shownScope.drawn.key ? shownScope.drawn : null)].filter((line): line is string => line !== null) : []),
 		...(isolation ? [isolationLine(isolation.shown, isolation.n)] : []),
-		...(queryB ? [`Hollow star: "${queryB.text}" (compared in Search)`] : []),
+		...(queryB ? [`Hollow star: "${queryB.text}" (compared on the Query tab)`] : []),
 	];
 	const describe = (index: number): string => {
 		if (!sample) return '';
@@ -1753,6 +1770,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			) : null}
 			{!sample ? (
 				<div style={{ padding: 16 }}>
+					{toolbarReasons.map((line) => (
+						<p key={line} style={MAP_STYLES.note}>
+							{line}
+						</p>
+					))}
 					<EmptyState
 						title={busy ? BUSY.sampling : 'No sample drawn yet'}
 						description={busy ? `Drawing up to ${num(Math.min(limits.sample_default, limits.sample_max))} points from the store.` : 'Draw a sample of the collection to see its points.'}
@@ -1822,6 +1844,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 							))}
 						</div>
 						<div role="tabpanel" aria-label={TABS.find((t) => t.id === tab)?.label} style={MAP_STYLES.sideBody}>
+							{stagedNote ? (
+								<p style={MAP_STYLES.note} data-map-staged="">
+									{stagedNote}
+								</p>
+							) : null}
 							{tab === 'point' ? (
 								<PointInspector
 									sample={sampleModel!}

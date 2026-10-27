@@ -24,26 +24,29 @@
 // VECTOR-UI — MapToolbar (sample, layout, colour, query; Advanced, Export, Views)
 // =============================================================================
 //
-// One row: Points, Layout, Colour by, the text query, then Advanced, the
-// view's menus (`extras`: Export, Views) and a status slot that is always
-// there, so nothing that appears when a run starts or a sample lands (the busy
-// words, Cancel, a reason) can push the row onto a second line.
+// One row: Points, Layout, Colour by, the text query, the Table toggle (the
+// map's non-visual alternative, and the keyboard route to select a point, so
+// it is never behind a popover), then Advanced, the view's menus (`extras`:
+// Export, Views) and a status slot that is always there and holds only the
+// busy words and Cancel, so nothing that appears when a run starts can push
+// the row onto a second line.
 //
 // Points: how many and which mode (Detailed up to the node's sample_max, Light
 // up to sample_max_light). Layout: PCA (the node's own), Neighbour graph
 // (seeded force layout over the kNN graph), t-SNE (at most 1,000 points;
-// disabled with its reason in the status slot). A running layout shows
-// "Laying out…" and Cancel in the slot. Colour by, grouped Content / Document /
-// Analysis, each mode without its data disabled with the reason as its title.
-// The text query (disabled with its reason when the embedding node is
-// unreachable).
+// disabled above that). A running layout shows "Laying out…" and Cancel in the
+// slot. Colour by, grouped Content / Document / Analysis, each mode without its
+// data disabled with the reason as its title. The text query (disabled when
+// the embedding node is unreachable). The reasons of a disabled Query and of
+// t-SNE are the controls' descriptions (aria-describedby); the map view shows
+// the same sentences in full in the legend's notes, where they can wrap.
 //
 // Advanced (components/AdvancedPopover.tsx) holds the rest in groups:
 //   - Graph: Edges (None, each point's strongest Neighbours, 3, 5 or 10 per
 //     point, 3 only on light samples above 3,000 points, or the spanning
 //     Tree), Expand selected (adds the selected point's own kNN edges); all
 //     computed from the sample, no call;
-//   - Select and view: the Lasso, Fit, Table and 3D toggles;
+//   - Select and view: the Lasso toggle, Fit and the 3D toggle;
 //   - Sample: the seed shown and New sample (the next seed), which closes the
 //     panel (drawing disables its controls) and puts the focus on Advanced.
 //
@@ -53,14 +56,15 @@
 // it back when it is enabled again.
 // =============================================================================
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { EdgeMode, EdgesPerPoint, MapLayout, MapToolbarProps as ContractMapToolbarProps, SampleMode } from '../contract/types';
 import { COLOUR_MODES } from '../map/colours';
 import type { IColourMode, MapColourBy } from '../map/colours';
+import { focusHold } from '../map/popover';
 import { MAP_STYLES } from '../map/styles';
 import { num } from '../map/wording';
-import { AdvancedPopover } from './AdvancedPopover';
+import { AdvancedPopover, PANEL_ATTRIBUTE } from './AdvancedPopover';
 
 /** Props: the frozen ones (Colour by widened to the document-detail modes) plus map extras. */
 export interface MapToolbarProps extends Omit<ContractMapToolbarProps, 'colourBy' | 'onColourBy'> {
@@ -120,9 +124,13 @@ const LAYOUTS: Array<{ id: MapLayout; label: string }> = [
 ];
 
 const S = {
-	// Always present and never wider than the room left: the row keeps its height whatever it says.
-	status: { ...MAP_STYLES.small, flex: '1 1 160px', minWidth: 120, display: 'inline-flex', alignItems: 'center', gap: 6, overflow: 'hidden', whiteSpace: 'nowrap' } as React.CSSProperties,
+	// Always present, and it takes only the room the controls leave (a zero basis never starts a new line): the row
+	// keeps its lines whatever it says. Its words are cut with an ellipsis when that room is short (the title holds them).
+	status: { ...MAP_STYLES.small, flex: '1 1 0', minWidth: 0, display: 'inline-flex', alignItems: 'center', gap: 6, overflow: 'hidden', whiteSpace: 'nowrap' } as React.CSSProperties,
+	query: { ...MAP_STYLES.input, minWidth: 160, width: 160 } as React.CSSProperties,
 	words: { overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 } as React.CSSProperties,
+	// A control's description, read by assistive tech; the view shows the sentence in the legend.
+	described: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' } as React.CSSProperties,
 	fieldset: { border: 'none', margin: 0, padding: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 } as React.CSSProperties,
 	legend: { ...MAP_STYLES.label, padding: 0, marginBottom: 4, width: '100%' } as React.CSSProperties,
 };
@@ -138,11 +146,15 @@ const S = {
 function useFocusHold(root: React.RefObject<HTMLDivElement | null>): void {
 	const last = useRef<HTMLElement | null>(null);
 	const held = useRef<HTMLElement | null>(null);
+	// What takes the focus meanwhile: the open Advanced panel when the control is in it (so the panel stays
+	// open), else the toolbar itself.
+	const holder = useRef<HTMLElement | null>(null);
 	useEffect(() => {
 		const el = root.current;
 		if (!el) return undefined;
+		const isHolder = (node: EventTarget | null): boolean => node === el || (node instanceof HTMLElement && node.hasAttribute(PANEL_ATTRIBUTE));
 		const onFocusIn = (event: FocusEvent): void => {
-			if (event.target instanceof HTMLElement && event.target !== el) last.current = event.target;
+			if (event.target instanceof HTMLElement && !isHolder(event.target)) last.current = event.target;
 		};
 		// Moved on to something outside the toolbar, or pressed a pointer there: nothing to keep.
 		const onFocusOut = (event: FocusEvent): void => {
@@ -160,27 +172,31 @@ function useFocusHold(root: React.RefObject<HTMLDivElement | null>): void {
 			document.removeEventListener('pointerdown', onDown);
 		};
 	}, [root]);
-	// After every render: a control that lost the focus by being disabled or removed hands it to the toolbar.
+	// After every render: a control that lost the focus by being disabled or removed hands it to the toolbar, or
+	// to the Advanced panel it is in (the rule is map/popover.ts focusHold).
 	useEffect(() => {
 		const el = root.current;
 		if (!el || typeof document === 'undefined') return;
 		const active = document.activeElement;
-		const control = last.current as (HTMLElement & { disabled?: boolean }) | null;
-		if (held.current !== null) {
-			const back = held.current as HTMLElement & { disabled?: boolean };
-			if (active !== el || !el.contains(back)) held.current = null;
-			else if (!back.disabled) {
-				held.current = null;
-				back.focus();
-			}
-			return;
+		const known = (control: HTMLElement | null): { inside: boolean; disabled: boolean } | null => (control === null ? null : { inside: el.contains(control), disabled: !!(control as HTMLElement & { disabled?: boolean }).disabled });
+		const holding = active !== null && (active === el || active === holder.current);
+		const where = holding ? 'toolbar' : active !== null && active === last.current ? 'last' : active === null || active === document.body ? 'page' : 'other';
+		const action = focusHold({ last: known(last.current), held: known(held.current), active: where });
+		if (action === 'release') {
+			held.current = null;
+			holder.current = null;
+		} else if (action === 'give-back') {
+			const back = held.current;
+			held.current = null;
+			holder.current = null;
+			back?.focus();
+		} else if (action === 'hold' || action === 'take') {
+			const panel = last.current?.closest<HTMLElement>(`[${PANEL_ATTRIBUTE}]`) ?? null;
+			holder.current = panel !== null && el.contains(panel) ? panel : el;
+			if (action === 'hold') held.current = last.current;
+			last.current = null;
+			holder.current.focus();
 		}
-		if (control === null || !(active === control || active === document.body || active === null)) return;
-		const gone = !el.contains(control);
-		if (!gone && !control.disabled) return;
-		last.current = null;
-		if (!gone) held.current = control;
-		el.focus();
 	});
 }
 
@@ -206,7 +222,11 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 	const cap: EdgesPerPoint = props.edgesMCap ?? 10;
 	const capReason = `Light samples above ${num(3000)} points draw at most ${cap} edges per point`;
 	const toggle = (pressed: boolean): React.CSSProperties => ({ ...MAP_STYLES.button, ...(pressed ? MAP_STYLES.buttonPressed : {}) });
-	const reasons = [!props.query.enabled ? props.query.reason : null, props.tsneReason ?? null].filter((r): r is string => !!r);
+	const uid = useId().replace(/:/g, '');
+	const queryWhy = !props.query.enabled && props.query.reason ? props.query.reason : null;
+	const tsneWhy = props.tsneReason ?? null;
+	const queryWhyId = `map-query-why-${uid}`;
+	const tsneWhyId = `map-tsne-why-${uid}`;
 	return (
 		<div ref={root} role="toolbar" aria-label="Map controls" tabIndex={-1} style={MAP_STYLES.toolbar}>
 			<label style={MAP_STYLES.group}>
@@ -230,7 +250,7 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 			</label>
 			<label style={MAP_STYLES.group}>
 				<span style={MAP_STYLES.label}>Layout</span>
-				<select aria-label="Layout" style={MAP_STYLES.select} value={props.layout} disabled={busy || !sample} onChange={(event) => props.onLayout(event.target.value as MapLayout)}>
+				<select aria-label="Layout" aria-describedby={tsneWhy ? tsneWhyId : undefined} style={MAP_STYLES.select} value={props.layout} disabled={busy || !sample} onChange={(event) => props.onLayout(event.target.value as MapLayout)}>
 					{LAYOUTS.map((l) => (
 						<option key={l.id} value={l.id} disabled={l.id === 'tsne' && !!props.tsneReason} title={l.id === 'tsne' ? (props.tsneReason ?? undefined) : undefined}>
 							{l.label}
@@ -264,10 +284,13 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 			>
 				<label style={MAP_STYLES.group}>
 					<span style={MAP_STYLES.label}>Query</span>
-					<input aria-label="Query" style={MAP_STYLES.input} type="search" value={text} maxLength={8000} placeholder="Place a question on the map" disabled={!props.query.enabled} onChange={(event) => setText(event.target.value)} />
+					<input aria-label="Query" aria-describedby={queryWhy ? queryWhyId : undefined} style={S.query} type="search" value={text} maxLength={8000} placeholder="Place a question on the map" disabled={!props.query.enabled} onChange={(event) => setText(event.target.value)} />
 				</label>
-				<button type="submit" style={MAP_STYLES.button} disabled={!props.query.enabled || busy || text.trim() === ''}>Run</button>
+				<button type="submit" style={MAP_STYLES.button} aria-describedby={queryWhy ? queryWhyId : undefined} disabled={!props.query.enabled || busy || text.trim() === ''}>
+					Run
+				</button>
 			</form>
+			<button type="button" style={toggle(props.table)} aria-pressed={props.table} onClick={props.onToggleTable} disabled={!sample}>Table</button>
 			<AdvancedPopover label="Advanced" panelLabel="Advanced map controls" initialOpen={props.initialAdvanced}>
 				{(close) => (
 					<>
@@ -308,7 +331,6 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 							<button type="button" style={MAP_STYLES.button} onClick={props.onFit} disabled={!sample}>
 								Fit
 							</button>
-							<button type="button" style={toggle(props.table)} aria-pressed={props.table} onClick={props.onToggleTable} disabled={!sample}>Table</button>
 							{props.onToggle3D ? (
 								<button type="button" style={toggle(!!props.threeD)} aria-pressed={!!props.threeD} onClick={props.onToggle3D} disabled={!sample || props.layout !== 'pca'}>3D</button>
 							) : null}
@@ -333,20 +355,25 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 			</AdvancedPopover>
 			{props.extras ?? null}
 			<span style={S.status} data-map-status="">
-				<span role="status" style={S.words}>
-					{props.busy ?? ''}
-				</span>
 				{props.busy && props.canCancel ? (
 					<button type="button" style={MAP_STYLES.button} onClick={props.onCancel}>
 						Cancel
 					</button>
 				) : null}
-				{!props.busy && reasons.length > 0 ? (
-					<span style={S.words} title={reasons.join(' ')}>
-						{reasons.join(' ')}
-					</span>
-				) : null}
+				<span role="status" style={S.words} title={props.busy ?? undefined}>
+					{props.busy ?? ''}
+				</span>
 			</span>
+			{queryWhy ? (
+				<span id={queryWhyId} style={S.described}>
+					{queryWhy}
+				</span>
+			) : null}
+			{tsneWhy ? (
+				<span id={tsneWhyId} style={S.described}>
+					{tsneWhy}
+				</span>
+			) : null}
 		</div>
 	);
 }

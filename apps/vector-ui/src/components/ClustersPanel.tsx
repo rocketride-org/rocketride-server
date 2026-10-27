@@ -46,6 +46,7 @@ import { CLUSTER_MIN_SIZES, clusterRows, clusterSentence } from '../map/clusters
 import type { IClusterView } from '../map/clusters';
 import { isolationLine } from '../map/isolate';
 import { MAP_STYLES } from '../map/styles';
+import { OTHER_TOKEN } from '../map/tokens';
 import { CLUSTERS_NOT_IN_SAMPLE, CLUSTERS_UNSUPPORTED, clustersNone, num } from '../map/wording';
 import { ExportMenu } from './ExportMenu';
 
@@ -72,6 +73,12 @@ export interface ClustersPanelProps extends ContractClustersPanelProps {
 	/** The collection, for the export's file name. */
 	collection?: string | null;
 }
+
+/**
+ * A swatch with no colour of its own (no palette read): the map's "other" points colour, a graphic measured at
+ * 3:1 or more in every theme (tests/a11y.contrast.map.test.ts). The panel writes no text in it.
+ */
+const NO_COLOUR = `var(${OTHER_TOKEN})`;
 
 /** A swatch of a group's colour. */
 function swatch(colour: string): React.ReactElement {
@@ -138,7 +145,7 @@ export function ClustersPanel(props: ClustersPanelProps): React.ReactElement {
 						return (
 							<li key={row.cluster} style={{ ...MAP_STYLES.row, display: 'block' }} data-cluster={row.cluster}>
 								<div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-									{swatch(props.colours?.[row.cluster] ?? 'var(--rr-text-secondary)')}
+									{swatch(props.colours?.[row.cluster] ?? NO_COLOUR)}
 									<button type="button" style={MAP_STYLES.linkButton} onClick={() => props.onSelect?.(row.indices)} title="Highlight these points on the map">
 										{row.label}
 									</button>
@@ -161,7 +168,7 @@ export function ClustersPanel(props: ClustersPanelProps): React.ReactElement {
 					})}
 					<li key="noise" style={{ ...MAP_STYLES.row, display: 'block' }} data-cluster="noise">
 						<div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-							{swatch(props.noiseColour ?? 'var(--rr-text-secondary)')}
+							{swatch(props.noiseColour ?? NO_COLOUR)}
 							<button type="button" style={MAP_STYLES.linkButton} disabled={noise.size === 0} onClick={() => props.onSelect?.(noise.indices)} title="Highlight these points on the map">
 								Noise
 							</button>

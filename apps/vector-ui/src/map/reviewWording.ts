@@ -152,6 +152,16 @@ export function queuedLine(n: number, policyChose = false): string {
 export const STAGE_REMOVAL = 'Stage removal';
 
 /**
+ * What the side panel says after a map button staged documents.
+ *
+ * @param n - Documents staged by that press.
+ * @returns The line.
+ */
+export function stagedLine(n: number): string {
+	return `Staged ${plural(n, 'document')} for the trash; nothing moves until the pending changes are applied.`;
+}
+
+/**
  * The bulk button.
  *
  * @param n - Queued documents.
@@ -415,6 +425,28 @@ export function matrixSourceLine(source: MatrixSource): string {
 	if (source === 'cache') return "Computed by the store node from the map's sample.";
 	if (source === 'store') return 'Computed by the store node from the stored vectors.';
 	return "Computed by the store node, partly from the map's sample and partly from the stored vectors.";
+}
+
+/**
+ * A near-duplicate pair's similarity as the map prints it beside the pair:
+ * the number with its scale (the sample's metric), never a bare number.
+ *
+ * @param sim - The pair's similarity.
+ * @param metric - The sample's metric.
+ * @returns E.g. "cosine 0.99".
+ */
+export function pairLabel(sim: number, metric: VectorMetric | string | null | undefined): string {
+	return `${pairScale(metric)} ${sim.toFixed(2)}`;
+}
+
+/**
+ * The scale of a pair's similarity, from the sample's metric.
+ *
+ * @param metric - The sample's metric.
+ * @returns "cosine", "inner product", "L2 similarity" or "similarity".
+ */
+export function pairScale(metric: VectorMetric | string | null | undefined): string {
+	return metric === 'cosine' ? 'cosine' : metric === 'ip' ? 'inner product' : metric === 'l2' ? 'L2 similarity' : 'similarity';
 }
 
 /**

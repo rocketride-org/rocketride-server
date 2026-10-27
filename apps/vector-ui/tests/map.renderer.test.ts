@@ -13,7 +13,7 @@ import { projectToScreen, viewMatrix } from '../src/map/camera';
 import { alphaOf, contrastRatio, parseColor } from '../src/map/contrast';
 import type { Rgb } from '../src/map/contrast';
 import { NO_EDGES, edgeStats, spanningTree, topEdges } from '../src/map/graph';
-import { EDGE_BUCKETS, buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, extrasDataset, overlayDataset, strokeEdgePaths } from '../src/map/overlay';
+import { EDGE_BUCKETS, buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, extrasDataset, fadeColour, fadedEdgeColours, overlayDataset, strokeEdgePaths } from '../src/map/overlay';
 import type { IOverlayExtras, IOverlayModel } from '../src/map/overlay';
 import { createCanvas2dRenderer } from '../src/map/renderer.canvas2d';
 import { DIM, FLAG, FRAGMENT_SHADER, PASS, VERTEX_SHADER, createWebglRenderer, dimFlags, packPoints, sizeCanvas } from '../src/map/renderer.webgl';
@@ -527,14 +527,14 @@ test('the star is filled with the accent and edged with the surface (as its comm
 	assert.deepEqual(links.sets[width + 1], ['lineWidth', 1.5]);
 });
 
-test('a shown duplicate group: a dashed outline ring at each end over a surface halo, and each pair\'s similarity at its midpoint with a halo', () => {
+test('a shown duplicate group: a dashed outline ring at each end over a surface halo, and each pair\'s similarity (with its scale) at its midpoint with a halo', () => {
 	const fake = fake2d();
-	drawOverlay(fake.ctx, { ...empty(), duplicateRings: [{ a: 1, b: 2, sim: 0.987 }, { a: 2, b: 9, sim: 0.99 }] }, screen, place, colours, 1);
+	drawOverlay(fake.ctx, { ...empty(), duplicateRings: [{ a: 1, b: 2, label: 'cosine 0.99' }, { a: 2, b: 9, label: 'cosine 0.99' }] }, screen, place, colours, 1);
 	// Ends 1 and 2 are on screen, 9 is not: two rings (r 8), one label.
 	assert.equal(fake.calls.filter((c) => c.name === 'arc' && c.args[2] === 8).length, 2);
 	assert.ok(fake.calls.some((c) => c.name === 'setLineDash' && (c.args[0] as number[]).length > 0));
 	const texts = fake.calls.filter((c) => c.name === 'fillText');
-	assert.deepEqual(texts.map((c) => c.args.slice(0, 3)), [['0.99', 15, 7.5]], 'the midpoint of points 1 and 2');
+	assert.deepEqual(texts.map((c) => c.args.slice(0, 3)), [['cosine 0.99', 15, 7.5]], 'the midpoint of points 1 and 2');
 	assert.equal(fake.calls.filter((c) => c.name === 'strokeText').length, 1, 'the label\'s halo');
 	const order = fake.sets.filter(([k]) => k === 'strokeStyle').map(([, v]) => v);
 	assert.deepEqual(order.slice(0, 2), [colours.surface, colours.outline], 'the halo before the ring');
@@ -547,4 +547,47 @@ test('a cluster label whose medoid is dimmed is not drawn (text over a faded gro
 	const drawn = drawExtras(fake.ctx, { ...noExtras(), labels, dimmed: new Uint8Array([0, 1, 0, 0]) }, spread, place, colours);
 	assert.equal(drawn.labels, 1);
 	assert.deepEqual(fake.calls.filter((c) => c.name === 'fillText').map((c) => c.args[0]), ['orchid']);
+});
+
+test('while the map dims, an edge with both ends faded goes to the faded paths (drawn first, mixed toward the surface); an edge touching the lit set keeps its colour', () => {
+	const sample = loadSample('sample_demo_1000.json');
+	const at = (i: number): [number, number] => [sample.points.x[i] as number, sample.points.y[i] as number];
+	const edges = topEdges(sample.knn, sample.n, 5);
+	const all = buildEdgePaths(edges, edgeBuckets(edges), at, () => new FakePath());
+	assert.equal(all.fadedSegments, 0);
+	assert.ok(all.fadedPaths.every((p) => p === null), 'no mask: nothing faded');
+	// Light points 0-9; fade the rest.
+	const mask = new Uint8Array(sample.n).fill(1);
+	for (let i = 0; i < 10; i += 1) mask[i] = 0;
+	const split = buildEdgePaths(edges, edgeBuckets(edges), at, () => new FakePath(), mask);
+	assert.equal(split.segments, all.segments, 'every edge is still drawn');
+	let touching = 0;
+	for (let e = 0; e < edges.count; e += 1) if (!mask[edges.a[e] as number] || !mask[edges.b[e] as number]) touching += 1;
+	assert.equal(split.segments - split.fadedSegments, touching, 'only the edges touching the lit points stay lit');
+	assert.equal(split.paths.reduce((n, p) => n + (p ? p.lines : 0), 0), touching);
+	// Faded colours: each bucket mixed toward the surface at DIM, opaque, and fainter than its lit colour.
+	const colours = edgeColours(FALLBACK_PALETTE);
+	const faded = fadedEdgeColours(colours, FALLBACK_PALETTE.surfaces.default);
+	const surface = parseColor(FALLBACK_PALETTE.surfaces.default) as Rgb;
+	faded.forEach((c, b) => {
+		assert.equal(alphaOf(c), 1);
+		assert.ok(contrastRatio(parseColor(c) as Rgb, surface) < contrastRatio(parseColor(colours[b] as string) as Rgb, surface), `bucket ${b} faded`);
+	});
+	assert.equal(fadedEdgeColours(['rgb(0, 0, 0)'], 'rgb(255, 255, 255)')[0], 'rgb(191, 191, 191)', '25 % of black over white');
+});
+
+test('while the map dims, an outlier ring or a duplicate line on faded points only is faded too (no halo), drawn before the lit ones', () => {
+	const fake = fake2d();
+	// Points 1 and 2 faded, 3 and 4 lit.
+	const faded = new Uint8Array([0, 1, 1, 0, 0]);
+	drawOverlay(fake.ctx, { ...empty(), outliers: [1, 3], duplicates: [[1, 2], [2, 3]], faded }, screen, place, colours, 1);
+	const dim = fadeColour(colours.outline, colours.surface);
+	const styles = fake.sets.filter(([k]) => k === 'strokeStyle').map(([, v]) => v);
+	// Duplicates: the faded pair (1-2) first, then the pair touching a lit point (2-3); outliers: faded ring 1, then the lit ring 3 over its halo.
+	assert.deepEqual(styles, [dim, colours.outline, dim, colours.surface, colours.outline]);
+	assert.equal(fadeColour('#000000', '#ffffff'), 'rgb(191, 191, 191)');
+	// No mask: as before, one stroke per mark kind.
+	const plain = fake2d();
+	drawOverlay(plain.ctx, { ...empty(), outliers: [1, 3], duplicates: [[1, 2]] }, screen, place, colours, 1);
+	assert.deepEqual(plain.sets.filter(([k]) => k === 'strokeStyle').map(([, v]) => v), [colours.outline, colours.surface, colours.outline]);
 });

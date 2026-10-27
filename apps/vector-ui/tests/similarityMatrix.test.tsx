@@ -21,7 +21,7 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { IRoleChannel } from 'shared/explorer';
-import { CELL_LABEL_PX, LABELLED_MAX, MatrixBody, SHADE_MIN, SimilarityMatrix, loadMatrix, paintHeatmap } from '../src/components/SimilarityMatrix';
+import { CELL_LABEL_PX, LABELLED_MAX, MatrixBody, SHADE_MIN, SimilarityMatrix, labelledCellSize, loadMatrix, paintHeatmap } from '../src/components/SimilarityMatrix';
 import type { MatrixBodyProps, MatrixState } from '../src/components/SimilarityMatrix';
 import { createSelectionStore } from '../src/contract/bridge';
 import type { IExportItem, ISimilarityMatrixResult, IVectorLimits, VectorKey } from '../src/contract/types';
@@ -444,4 +444,12 @@ test('values are printed in the cells at 11 px up to 12 x 12; above that each va
 	assert.equal((thirteen.match(/font-size:11px/g) ?? []).length, 0, 'no value printed');
 	assert.equal((thirteen.match(/<div[^>]*data-cell="[^"]*"[^>]*title="[^"]+: [0-9.]+"/g) ?? []).length + (thirteen.match(/<div[^>]*title="[^"]+: [0-9.]+"[^>]*data-cell=/g) ?? []).length, 169, 'each value in its title');
 	assert.match(thirteen, /grid-template-columns:repeat\(13, 23px\)/, 'floor(300 / 13) px');
+});
+
+test('a printed value never overflows its cell: three decimals, a minus sign or a large inner product widen every labelled cell', () => {
+	assert.equal(labelledCellSize(4), 28, '"0.91" fits the 28 px cell');
+	assert.equal(labelledCellSize(5), 34, '"0.912" or "-0.91" (about 30 px at 11 px with its padding)');
+	assert.ok(labelledCellSize(6) > labelledCellSize(5));
+	const three = renderToStaticMarkup(body({ state: { ...bigState(4), dp: 3 }, labelOf: bigLabel, selected: null }));
+	assert.match(three, new RegExp(`grid-template-columns:repeat\\(4, ${labelledCellSize(5)}px\\)`));
 });

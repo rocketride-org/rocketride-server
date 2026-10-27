@@ -36,7 +36,8 @@
 // usePopover is the placement every toolbar popover shares (this one, Export
 // and Views): the panel is measured before the browser paints and placed with
 // map/popover.ts placePopover (below the button, else above, else the side
-// with more room with its height capped; clamped inside the viewport), then
+// with more room with its height capped; clamped inside the viewport, cut
+// down by any ancestor that clips, so a menu in a clipped card stays seen), then
 // held there while it is open; it closes on a window resize (refocusing the
 // button) and on a pointer pressed outside. Its edge is the computed border of
 // a box over the map (map/styles.ts floatBorder) and the theme's shadow.
@@ -47,10 +48,14 @@
 
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode, RefObject } from 'react';
-import { placePopover, popoverKey } from '../map/popover';
+import { clipArea, firstEnabled, placePopover, popoverKey } from '../map/popover';
+import type { IPopoverAnchor } from '../map/popover';
 import { MAP_STYLES, floatBorder } from '../map/styles';
 import { readPalette } from '../map/tokens';
 import type { IMapPalette } from '../map/tokens';
+
+/** The attribute that marks the Advanced panel (the toolbar holds the focus there for a control inside it). */
+export const PANEL_ATTRIBUTE = 'data-advanced-panel';
 
 /** Layout effects run only in a browser (a server render would warn). */
 const useBrowserLayoutEffect = typeof document !== 'undefined' ? useLayoutEffect : useEffect;
@@ -66,6 +71,21 @@ export interface IPopoverRefs {
 	trigger: RefObject<HTMLElement | null>;
 	/** The panel. */
 	panel: RefObject<HTMLElement | null>;
+}
+
+/**
+ * The rectangles of the ancestors that clip what they hold (overflow other than visible): a panel must stay inside them.
+ *
+ * @param el - Where the panel hangs.
+ * @returns Their rectangles, nearest first.
+ */
+function clippingRects(el: HTMLElement): IPopoverAnchor[] {
+	const out: IPopoverAnchor[] = [];
+	for (let node = el.parentElement; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+		const style = getComputedStyle(node);
+		if (style.overflowX !== 'visible' || style.overflowY !== 'visible') out.push(node.getBoundingClientRect());
+	}
+	return out;
 }
 
 /**
@@ -107,7 +127,8 @@ export function usePopover(open: boolean, refs: IPopoverRefs, close: (refocus: b
 		if (!root || !trigger || !panel || typeof window === 'undefined') return;
 		const anchor = trigger.getBoundingClientRect();
 		const origin = root.getBoundingClientRect();
-		const at = placePopover(anchor, { width: panel.offsetWidth, height: panel.scrollHeight }, { width: window.innerWidth, height: window.innerHeight });
+		const area = clipArea({ width: window.innerWidth, height: window.innerHeight }, clippingRects(root));
+		const at = placePopover(anchor, { width: panel.offsetWidth, height: panel.scrollHeight }, area);
 		const next = { left: Math.round(at.left - origin.left), top: Math.round(at.top - origin.top), maxHeight: Math.floor(at.maxHeight), maxWidth: Math.floor(at.maxWidth) };
 		if (place === null || place.left !== next.left || place.top !== next.top || place.maxHeight !== next.maxHeight || place.maxWidth !== next.maxWidth) setPlace(next);
 	});
@@ -143,7 +164,7 @@ export function usePopover(open: boolean, refs: IPopoverRefs, close: (refocus: b
 function firstControl(panel: HTMLElement | null): HTMLElement | null {
 	if (!panel) return null;
 	const all = Array.from(panel.querySelectorAll<HTMLElement>('button, select, input, textarea, [tabindex]:not([tabindex="-1"])'));
-	return all.find((el) => !(el as HTMLButtonElement).disabled && el.getAttribute('aria-hidden') !== 'true') ?? null;
+	return all[firstEnabled(all.map((el) => ({ disabled: !!(el as HTMLButtonElement).disabled, hidden: el.getAttribute('aria-hidden') === 'true' })))] ?? null;
 }
 
 /** Props of the Advanced popover. */

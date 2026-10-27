@@ -62,6 +62,17 @@ export const LABELLED_MAX = 12;
 /** The printed values' size, CSS pixels. */
 export const CELL_LABEL_PX = 11;
 
+/**
+ * The side of a cell that prints its value: 28 px holds "0.91" at 11 px; a longer value ("0.912" at three
+ * decimals, "-0.91", an inner product of "12.50") widens every cell so none overflows.
+ *
+ * @param longest - The longest printed value, in characters.
+ * @returns CSS pixels.
+ */
+export function labelledCellSize(longest: number): number {
+	return Math.max(28, 6 * longest + 4);
+}
+
 /** Rows of the table alternative shown at a time. */
 export const TABLE_ROWS_PER_PAGE = 20;
 
@@ -281,7 +292,8 @@ function heatmap(props: MatrixBodyProps, ok: Extract<MatrixState, { kind: 'ok' }
 	const n = ok.keys.length;
 	const dp = ok.dp ?? 2;
 	const labelled = n <= LABELLED_MAX;
-	const size = labelled ? 28 : n <= IN_CELL_MAX ? Math.max(14, Math.floor(300 / n)) : Math.max(3, Math.floor(300 / n));
+	const longest = labelled ? Math.max(1, ...ok.matrix.flatMap((row) => row.map((cell) => cellText(cell, dp).length))) : 0;
+	const size = labelled ? labelledCellSize(longest) : n <= IN_CELL_MAX ? Math.max(14, Math.floor(300 / n)) : Math.max(3, Math.floor(300 / n));
 	const labels = ok.keys.map((key) => props.labelOf(key));
 	if (n > IN_CELL_MAX) {
 		return (

@@ -104,13 +104,18 @@ surface, with the theme's own `--rr-shadow-widget`. `--rr-border` was 1.38 /
   "outlier" in words.
 - **The star** is filled with the accent and edged with the surface.
 - **A shown duplicate group** gets a dashed `--rr-text-primary` ring at each
-  end of a pair, over a surface halo, and the pair's similarity in text with a
-  halo.
-- **Dimmed points.** Hovering a point of a cluster (while clusters are shown),
-  selecting a point, a highlighted set or a placed query fades the other points
-  to 25 % of their colour over the surface. They fall below 3:1 on purpose:
-  they are the part of the picture not being looked at, and the lit set keeps
-  its measured colours. No label is drawn over a faded group.
+  end of a pair, over a surface halo, and the pair's similarity with its scale
+  ("cosine 0.99") in text with a halo.
+- **Dimmed points and edges.** Hovering a point of a cluster (while clusters
+  are shown), selecting a point, a highlighted set or a placed query fades the
+  other points to 25 % of their colour over the surface (the same opaque mix
+  in WebGL, in the Canvas2D fallback and in the PNG). An edge whose two ends
+  are both faded is faded the same way, and so are an outlier ring or a
+  near-duplicate line on faded points only; an edge, ring or line that touches
+  the lit set keeps its measured colour. The selection, hover and keyboard
+  focus rings are never faded. Faded marks fall below 3:1 on purpose: they
+  are the part of the picture not being looked at. No label is drawn over a
+  faded group.
 
 ### Similarity matrix
 

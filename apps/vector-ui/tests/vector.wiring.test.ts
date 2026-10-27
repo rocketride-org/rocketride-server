@@ -58,10 +58,7 @@ const ALL_FILES = sources();
  * The files the lane rules below do not cover yet, each with why. Every other source file is checked, so a file
  * added later is covered without being listed here.
  */
-const LANE_EXEMPT: Readonly<Record<string, string>> = {
-	'components/ExportMenu.tsx': "the map's export menu stops its own key events (P5 reworks the menus, N9)",
-	'components/SavedViewsMenu.tsx': "the map's saved views menu stops its own key events (P5 reworks the menus, N9)",
-};
+const LANE_EXEMPT: Readonly<Record<string, string>> = {};
 
 /** The files the lane rules cover: no token, no configuration, no stopped events, no page key listeners, no browser storage. */
 const LANE_FILES = ALL_FILES.filter((f) => !(f in LANE_EXEMPT));

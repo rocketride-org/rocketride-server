@@ -57,10 +57,12 @@ export interface ILegendMarks {
 	links?: boolean;
 	/** Outlier rings drawn. */
 	outliers?: number;
-	/** The query's star is drawn, with rays to its true top N. */
-	query?: { top: number } | null;
+	/** The query's star is drawn: its true top N, and the rays drawn (a result not placed on the map has none). */
+	query?: { top: number; drawn: number } | null;
 	/** Near-duplicate pairs drawn. */
 	duplicates?: number;
+	/** A shown duplicate group's rings, labelled with this scale (reviewWording pairScale), or null. */
+	rings?: { scale: string } | null;
 }
 
 /** Legend props: the frozen ones (Colour by widened) plus what the map computed. */
@@ -75,6 +77,9 @@ export interface LegendProps extends Omit<ContractLegendProps, 'colourBy'> {
 	/** The marks drawn now (the glyph row). */
 	marks?: ILegendMarks | null;
 }
+
+/** The marks' list keeps two lines of 18 px. */
+export const MARK_ROWS_HEIGHT = 36;
 
 /** The canvas's colours, as the glyphs draw them. */
 const ACCENT = `var(${ACCENT_TOKEN})`;
@@ -129,7 +134,7 @@ export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: s
 	if (marks.links) {
 		rows.push({
 			key: 'links',
-			words: 'link from the selected point to a nearest chunk',
+			words: "selected point's nearest chunks",
 			picture: glyph(
 				<>
 					<line x1={7} y1={6} x2={20} y2={6} style={{ stroke: ACCENT, strokeWidth: 1.5 }} />
@@ -151,9 +156,10 @@ export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: s
 		});
 	}
 	if (marks.query) {
+		const { top, drawn } = marks.query;
 		rows.push({
 			key: 'query',
-			words: `query, rays to its true top ${num(marks.query.top)}`,
+			words: drawn < top ? `query, rays to ${num(drawn)} of its true top ${num(top)}` : `query, rays to its true top ${num(top)}`,
 			picture: glyph(
 				<>
 					<line x1={8} y1={6} x2={21} y2={6} style={{ stroke: ACCENT, strokeWidth: 1.25 }} />
@@ -167,6 +173,18 @@ export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: s
 			key: 'duplicates',
 			words: `near-duplicate pair (${num(marks.duplicates)})`,
 			picture: glyph(<line x1={3} y1={6} x2={19} y2={6} style={{ stroke: OUTLINE, strokeWidth: 1.5, strokeDasharray: '4 3' }} />),
+		});
+	}
+	if (marks.rings) {
+		rows.push({
+			key: 'rings',
+			words: `shown duplicate group, each pair's ${marks.rings.scale}`,
+			picture: glyph(
+				<>
+					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: SURFACE, strokeWidth: 3 }} />
+					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: OUTLINE, strokeWidth: 1.5, strokeDasharray: '3 2' }} />
+				</>,
+			),
 		});
 	}
 	return rows;
@@ -218,8 +236,9 @@ export function Legend(props: LegendProps): React.ReactElement {
 				</div>
 			) : null}
 			{colouring?.note ? <p style={MAP_STYLES.note}>{colouring.note}</p> : null}
-			{/* The row keeps its line while nothing is marked, so selecting a point does not resize the map. */}
-			<div style={{ minHeight: 18, margin: '4px 0' }} data-legend-marks={marks.map((m) => m.key).join(' ')}>
+			{/* Two lines kept whatever is marked (all six marks fit in two at a legend 750 px wide or more, measured in
+			    Chrome), so selecting a point or showing a group does not resize the map. */}
+			<div style={{ minHeight: MARK_ROWS_HEIGHT, margin: '4px 0' }} data-legend-marks={marks.map((m) => m.key).join(' ')}>
 				{marks.length > 0 ? (
 					<ul aria-label="Marks" style={{ ...MAP_STYLES.list, display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
 						{marks.map((mark) => (

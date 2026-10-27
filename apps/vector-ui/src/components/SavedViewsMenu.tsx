@@ -55,7 +55,7 @@ import { savedViews } from '../adapters/connections';
 import type { ISavedView, IVectorLimits, SavedViewsMenuProps } from '../contract/types';
 import { MAP_STYLES } from '../map/styles';
 import { POPOVER_PANEL, usePopover } from './AdvancedPopover';
-import { sideFor, sideStyle } from './ExportMenu';
+import { sideStyle } from './ExportMenu';
 import { VIEW_NAME_MAX, defaultViewName, deleteView, keepSentence, listViews, newViewId, restoreSentence, saveBlocker, saveView, viewSummary } from '../vector/savedViews';
 
 export type { SavedViewsMenuProps };
@@ -88,7 +88,10 @@ export interface SavedViewsPanelProps {
 	onDelete(view: ISavedView): void;
 	/** The name field, for moving focus into it when the menu opens. */
 	nameRef?: React.Ref<HTMLInputElement>;
-	/** Which edge of the button the panel hangs from (default 'right'), until it is placed. */
+	/**
+	 * Which edge of the button the panel hangs from (default 'right') when nothing places it: a static render. In the
+	 * browser usePopover places it before it is painted.
+	 */
 	side?: 'left' | 'right';
 	/** Where it was placed (usePopover), merged last. */
 	placement?: React.CSSProperties;
@@ -187,7 +190,6 @@ export function SavedViewsMenu(props: SavedViewsMenuProps): React.ReactElement {
 	const { connectionKey, limits } = props;
 	const panelId = `views-${useId().replace(/:/g, '')}`;
 	const [open, setOpen] = useState(false);
-	const [side, setSide] = useState<'left' | 'right'>('right');
 	const [name, setName] = useState('');
 	const [status, setStatus] = useState<string | null>(null);
 	const [busyId, setBusyId] = useState<string | null>(null);
@@ -294,14 +296,11 @@ export function SavedViewsMenu(props: SavedViewsMenuProps): React.ReactElement {
 				style={MAP_STYLES.button}
 				aria-expanded={open}
 				aria-controls={open ? panelId : undefined}
-				onClick={() => {
-					if (!open) setSide(sideFor(root.current, VIEWS_PANEL_WIDTH));
-					setOpen((v) => !v);
-				}}
+				onClick={() => setOpen((v) => !v)}
 			>
 				Views{views.length > 0 ? ` (${views.length})` : ''} ▾
 			</button>
-			{open ? <SavedViewsPanel id={panelId} side={side} placement={placement} panelRef={panel} limits={limits} views={views} name={name} busyId={busyId} status={status} saveDisabled={saveBlocker(savedViews, connectionKey)} nameRef={nameField} onName={setName} onSave={save} onApply={apply} onDelete={remove} /> : null}
+			{open ? <SavedViewsPanel id={panelId} placement={placement} panelRef={panel} limits={limits} views={views} name={name} busyId={busyId} status={status} saveDisabled={saveBlocker(savedViews, connectionKey)} nameRef={nameField} onName={setName} onSave={save} onApply={apply} onDelete={remove} /> : null}
 			{!open && status ? (
 				<span role="status" style={S.hidden}>
 					{status}
