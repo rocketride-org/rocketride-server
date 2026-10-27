@@ -30,13 +30,17 @@
 // =============================================================================
 
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
-import { Banner, Button, ConnectionCard, ContentHeader, DetailPanel, EmptyState, Section, StatusBadge } from 'shell';
+import { Banner, Button, ContentHeader, DetailPanel, EmptyState, Section, StatusBadge } from 'shell';
 import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import ConnectionDrawerDetails from '../components/ConnectionDrawerDetails';
+import VectorConnectionCard from '../components/VectorConnectionCard';
+import { useSampleChunks } from '../components/useSampleChunks';
 import { useEndpointsState, useVectorEnv } from '../envContext';
-import { getDocs } from '../docs';
+import { getDocs, markArrival } from '../docs';
 import { consoleUri } from '../vector/addresses';
 import { TONE_EDGE } from '../vector/colors';
+import { DEFAULT_LIMITS, readDialect } from '../vector/results';
+import type { WorkbenchTab } from '../vector/workbench';
 import { drawerKeyAfter, drawerView, landingView, testResultText, vectorCardView } from '../vector/connections';
 import type { ITestResult, IVectorCardView } from '../vector/connections';
 import { VectorIcon } from '../icons';
@@ -48,6 +52,7 @@ import { styles } from '../styles';
  * @param endpoint - The connection.
  */
 export function openConsole(endpoint: IExplorerEndpoint): void {
+	markArrival(consoleUri(endpoint.key));
 	getDocs()?.openStaticDocument(consoleUri(endpoint.key), endpoint.nodeName || 'Vector store', { endpoint });
 }
 
@@ -96,7 +101,7 @@ export const ConnectionsView: React.FC = () => {
 		<div style={styles.root}>
 			<ContentHeader
 				title="Connections"
-				subtitle="Vector stores reachable through your running pipelines. A connection is a store node a pipeline's Tools source controls; a pipeline without one is listed read-only. Elasticsearch and OpenSearch stores are not listed."
+				subtitle="Vector stores reachable through your running pipelines. Elasticsearch and OpenSearch stores are not listed."
 				actions={
 					<Button variant="ghost" onClick={refresh} disabled={!env.ready || status === 'loading'}>
 						{status === 'loading' ? 'Refreshing…' : 'Refresh'}
@@ -130,15 +135,9 @@ export const ConnectionsView: React.FC = () => {
 				)}
 				{landing.cards && (
 					<div style={styles.cardGrid}>
-						{endpoints.map((endpoint) => {
-							const view = vectorCardView(endpoint, probes[endpoint.key]);
-							return (
-								<div key={endpoint.key} data-card={endpoint.nodeId}>
-									<ConnectionCard icon={<VectorIcon />} name={view.title} address={view.address} status={view.badge.variant === 'warning' ? 'muted' : view.badge.variant} statusLabel={view.badge.label} connected={endpoint.state === 'ready'} onClick={() => setDrawerKey(endpoint.key)} />
-									<CardMeta view={view} />
-								</div>
-							);
-						})}
+						{endpoints.map((endpoint) => (
+							<VectorConnectionCard key={endpoint.key} endpoint={endpoint} probe={probes[endpoint.key]} onOpen={(target) => setDrawerKey(target.key)} />
+						))}
 					</div>
 				)}
 			</div>
@@ -148,6 +147,15 @@ export const ConnectionsView: React.FC = () => {
 				probe={drawerEndpoint ? probes[drawerEndpoint.key] : undefined}
 				onTest={(endpoint) => env.probe(endpoint.key)}
 				onOpen={(endpoint) => {
+					setDrawerKey(null);
+					env.openConsole(endpoint);
+				}}
+				onOpenTab={(endpoint, tab) => {
+					// The console reads its tab from the connection's entry when it opens.
+					const limits = (probes[endpoint.key]?.ok ? readDialect(probes[endpoint.key]?.info)?.limits : null) ?? DEFAULT_LIMITS;
+					const opened = env.connection(endpoint, limits);
+					if (tab === 'query') opened.queryMode.set('search');
+					opened.tab.set(tab);
 					setDrawerKey(null);
 					env.openConsole(endpoint);
 				}}
@@ -166,6 +174,8 @@ interface IConnectionDrawerProps {
 	probe: IProbeResult | undefined;
 	onTest(endpoint: IExplorerEndpoint): Promise<IProbeResult | null>;
 	onOpen(endpoint: IExplorerEndpoint): void;
+	/** Open the console on a tab (the quick actions). */
+	onOpenTab(endpoint: IExplorerEndpoint, tab: WorkbenchTab): void;
 	onClose(): void;
 }
 
@@ -175,19 +185,33 @@ interface IConnectionDrawerProps {
  * @param props - The endpoint, its probe and the actions.
  * @returns The drawer, or nothing while closed.
  */
-const ConnectionDrawer: React.FC<IConnectionDrawerProps> = ({ endpoint, probe, onTest, onOpen, onClose }) => {
+const ConnectionDrawer: React.FC<IConnectionDrawerProps> = ({ endpoint, ...rest }) => (endpoint ? <OpenDrawer endpoint={endpoint} {...rest} /> : null);
+
+/** Props of an open drawer. */
+interface IOpenDrawerProps extends Omit<IConnectionDrawerProps, 'endpoint'> {
+	endpoint: IExplorerEndpoint;
+}
+
+/**
+ * The drawer of a card while it is open.
+ *
+ * @param props - The endpoint, its probe and the actions.
+ * @returns The drawer.
+ */
+const OpenDrawer: React.FC<IOpenDrawerProps> = ({ endpoint, probe, onTest, onOpen, onOpenTab, onClose }) => {
 	const [testing, setTesting] = useState(false);
 	// Keyed on the card it shows, so a result never carries over to another connection.
 	const [tested, setTested] = useState<ITestResult | null>(null);
 	// The connection's last stats, once its console has them: they fill what the dialect read at discovery lacks.
-	const entry = useVectorEnv().existingConnection(endpoint?.key ?? '');
+	const entry = useVectorEnv().existingConnection(endpoint.key);
 	const stats = useSyncExternalStore(
 		entry?.controller.subscribe ?? NO_SUBSCRIBE,
 		() => entry?.controller.getState().stats.view ?? null,
 		() => null
 	);
-	if (!endpoint) return null;
-	const view = vectorCardView(endpoint, probe);
+	const fields = useSyncExternalStore(entry?.fields.subscribe ?? NO_SUBSCRIBE, () => entry?.fields.get() ?? null, () => null);
+	const sample = useSampleChunks(endpoint, probe, stats);
+	const view = vectorCardView(endpoint, probe, stats);
 	const test = async (): Promise<void> => {
 		setTesting(true);
 		try {
@@ -228,7 +252,7 @@ const ConnectionDrawer: React.FC<IConnectionDrawerProps> = ({ endpoint, probe, o
 					</div>
 				)}
 			</Section>
-			<ConnectionDrawerDetails drawer={drawerView(endpoint, probe, stats)} />
+			<ConnectionDrawerDetails drawer={drawerView(endpoint, probe, stats)} fields={fields} sample={sample} {...(view.openable ? { onOpenTab: (tab: WorkbenchTab) => onOpenTab(endpoint, tab) } : {})} />
 		</DetailPanel>
 	);
 };

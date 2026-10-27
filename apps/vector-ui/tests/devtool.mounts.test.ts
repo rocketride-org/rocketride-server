@@ -218,52 +218,59 @@ describe('F14 - no window-wide overlay in a frame: confirmations and details are
 	it('no module a frame loads renders a Modal, a ConfirmDialog or a DetailPanel (rocket-ui keeps hidden documents mounted)', () => {
 		const files = reachable('VectorDevTool.tsx');
 		assert.ok(files.includes('components/InlineRemoveConfirm.tsx') && files.includes('components/ConnectionDetailsPanel.tsx'), 'the premise: the inline panels');
-		for (const forbidden of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/RemoveDialogHost.tsx']) assert.ok(!files.includes(forbidden), `a frame loads ${forbidden}`);
+		for (const forbidden of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/RemoveDialogHost.tsx']) assert.ok(!files.includes(forbidden) && !fs.existsSync(path.join(SRC, forbidden)), `${forbidden}: no modal confirmation is left`);
 		// The upload panel's replace confirmation is the one overlay a frame loads: the panel renders only while uploads
 		// are on, and the frame env switches them off for every connection (R11, devToolConsoleModel).
 		const uploads = 'ingest/ReplaceConfirmDialog.tsx';
 		for (const file of files) if (file !== uploads) assert.doesNotMatch(code(read(file)), /<(Modal|ConfirmDialog|DetailPanel)\b/, `${file} renders a window-wide overlay`);
 		const renderers = files.filter((file) => /<ReplaceConfirmDialog\b/.test(code(read(file))));
 		assert.deepEqual(renderers, ['components/IngestPanel.tsx'], 'only the upload panel renders it');
-		assert.match(code(read('views/ConsoleView.tsx')), /\{model\.ingest\.enabled \? <IngestPanel /, 'and the console renders that panel only while uploads are on');
+		assert.match(code(read('components/AddDocumentsAside.tsx')), /\{model\.ingest\.enabled \? <IngestPanel /, 'and the console renders that panel only while uploads are on');
 	});
 
-	it('the inline confirmation: the same words and typed rule, Cancel focused when it opens, Escape on its own keydown, Confirm unavailable (aria-disabled) until ready', () => {
+	it('the inline confirmation: the same words and typed rule, the first focus by the write\'s weight, Escape on its own keydown, Confirm unavailable (aria-disabled) until ready', () => {
 		const panel = code(read('components/InlineRemoveConfirm.tsx'));
 		assert.match(panel, /confirmationFor\(pending, removeContextFor\(entry\.ctx\.endpoint, probe\)\)/);
 		assert.match(panel, /const ready = confirmReady\(content\.typed, typed\);/);
 		assert.match(panel, /button\.textContent\?\.trim\(\) === content\.cancelLabel/);
-		assert.match(panel, /onKeyDown=\{\(event\) => \{\s*if \(event\.key === 'Escape'\) \{\s*event\.preventDefault\(\);\s*onCancel\(\);/);
-		assert.match(panel, /aria-disabled=\{!ready\} onClick=\{\(\) => \{ if \(ready\) onConfirm\(\); \}\}/);
+		assert.match(panel, /onKeyDown=\{\(event\) => \{\s*if \(event\.defaultPrevented\) return;\s*if \(event\.key === 'Escape'\) \{\s*event\.preventDefault\(\);\s*onCancel\(\);/, 'Escape: the innermost handler acts');
+		assert.match(panel, /aria-disabled=\{!ready\} onClick=\{onConfirm\}/);
+		assert.match(panel, /const onConfirm = \(\): void => \{\s*if \(!ready\) return;/, 'Confirm does nothing until the typed rule is met');
 		assert.match(panel, /entry\.controller\.confirmRemove\(\)/);
 		assert.match(panel, /entry\.controller\.cancelRemove\(\)/);
-		for (const file of ['components/InlineRemoveConfirm.tsx', 'components/ConnectionDetailsPanel.tsx']) {
+		for (const file of ['components/InlineRemoveConfirm.tsx', 'components/ConnectionDetailsPanel.tsx', 'components/PendingBar.tsx', 'components/DocumentDrawer.tsx', 'components/focusTargets.ts']) {
 			const text = code(read(file));
 			assert.doesNotMatch(text, /(window|document)\.addEventListener/, `${file} listens on the page`);
 			assert.doesNotMatch(text, /style=\{\{/, `${file} keeps its styles in \`styles\``);
 		}
 	});
 
-	it('the console frame offers the connection\'s details (Test connection included) as an inline panel, keyed on the connection; both kinds of document confirm inline', () => {
+	it('the console offers the connection\'s details (Test connection included) as an inline panel, keyed on the connection; both kinds of document confirm inline', () => {
+		// The workbench owns both, in either mount: a console frame renders it as it is.
+		const view = code(read('views/ConsoleView.tsx'));
+		assert.match(view, /<Button variant="ghost" pressed=\{details\} onClick=\{\(\) => setDetails\(\(open\) => !open\)\}>\s*Details\s*<\/Button>/);
+		assert.match(view, /\{details && <ConnectionDetailsPanel key=\{endpoint\.key\} endpoint=\{endpoint\} probe=\{probe\} stats=\{state\.stats\.view\} onTest=\{\(target\) => env\.probe\(target\.key\)\} onClose=\{\(\) => setDetails\(false\)\} \/>\}/);
+		assert.equal(view.match(/<InlineRemoveConfirm entry=\{entry\} probe=\{/g)?.length, 1, 'the console');
 		const frame = code(read('VectorDevTool.tsx'));
-		assert.match(frame, /<Button variant="ghost" pressed=\{details\} onClick=\{\(\) => setDetails\(\(open\) => !open\)\}>\s*Details\s*<\/Button>/);
-		assert.match(frame, /\{details && <ConnectionDetailsPanel key=\{live\.key\} endpoint=\{live\} probe=\{probe\} stats=\{state\.stats\.view\} onTest=\{\(target\) => env\.probe\(target\.key\)\} onClose=\{\(\) => setDetails\(false\)\} \/>\}/);
-		assert.equal(frame.match(/<InlineRemoveConfirm entry=\{entry\} probe=\{/g)?.length, 2, 'the console and the document');
+		assert.match(frame, /return <ConsoleView opened=\{endpoint\} active=\{visible\} arrivals=\{arrivals\} \/>;/, 'a console frame adds nothing of its own but the presses that fronted it (a document\'s Show on map)');
+		assert.equal(frame.match(/<InlineRemoveConfirm entry=\{entry\} probe=\{/g)?.length, 1, 'the document');
 		const details = code(read('components/ConnectionDetailsPanel.tsx'));
 		assert.match(details, /onKeyDown=\{\(event\) => \{\s*if \(event\.key === 'Escape'\)/);
-		assert.match(details, /<ConnectionDrawerDetails drawer=\{drawerView\(endpoint, probe, stats\)\} \/>/);
+		assert.match(details, /<ConnectionDrawerDetails drawer=\{drawerView\(endpoint, probe, stats\)\} fields=\{fields\} sample=\{sample\}/);
 		assert.match(details, /testResultText\(await onTest\(endpoint\)\)/);
 	});
 });
 
 describe('R11 - what cannot work in a dev-tool mount degrades visibly, and keeps working in the full app', () => {
-	it('chat: the console still renders the chat panel where chat is off for the mount, so Search (no LLM) stays one click away under the reason', () => {
-		const view = code(read('views/ConsoleView.tsx'));
-		assert.match(view, /\{model\.chat\.enabled \|\| env\.degraded !== null \? <ChatPanel /);
+	it('chat: the Query tab always mounts Ask; where chat is off for the mount, Ask says the reason and offers Search (no LLM), the tab\'s first mode', () => {
+		const view = code(read('components/QueryTab.tsx'));
+		assert.match(view, /<ChatPanel model=\{surfaceModel\} [^>]*onUseSearch=\{\(\) => onMode\('search'\)\}/, 'Ask is rendered in every mount, and its "Use Search" shows Search');
+		assert.doesNotMatch(view, /degraded/, 'no branch on the mount: the served model says what the chat can do');
 		const panel = code(read('components/ChatPanel.tsx'));
 		assert.match(panel, /description=\{model\.chat\.reason \?\? NO_CHAT_SENTENCE\}/, 'the panel says the mount\'s reason');
-		assert.match(panel, /SEARCH_WITHOUT_CHAT/);
-		assert.match(view, /model\.ingest\.enabled \? <IngestPanel [^>]*\/> : <EmptyState title="Add documents" description=\{model\.ingest\.reason \?\? undefined\} \/>/, 'uploads: the area says why, the layout stays');
+		assert.match(panel, /\{USE_SEARCH\}/);
+		// What a frame shows is rendered in chatIngest.render.test.ts ("a dev-tool mount (the degraded model)"): the note, "Use Search", every Search mode.
+		assert.match(code(read('components/AddDocumentsAside.tsx')), /model\.ingest\.enabled \? <IngestPanel [^>]*\/> : <EmptyState title="Add documents" description=\{model\.ingest\.reason \?\? undefined\} \/>/, 'uploads: the area says why, the layout stays');
 		assert.match(code(read('devtool/frame.ts')), /consoleModel: devToolConsoleModel,/, 'the frame env serves the degraded model');
 	});
 
@@ -325,7 +332,7 @@ describe('R6, R7, F9 - the mounts: effects with cleanups, documents opened on a 
 		const frame = code(read('VectorDevTool.tsx'));
 		assert.match(frame, /useEffect\(\(\) => \{[\s\S]*?const created: IVectorFrame = createVectorFrame\(\{[\s\S]*?return \(\) => \{\s*created\.dispose\(\);/);
 		assert.doesNotMatch(frame, /useMemo\(\(\) => createVectorFrame|peer\.subscribe/);
-		assert.match(frame, /useEffect\(\(\) => frame\.bindConsole\(entry\), \[frame, entry\]\);/);
+		assert.match(frame, /useEffect\(\(\) => frame\.bindConsole\(entry, \{ arrived: \(\) => setArrivals\(\(n\) => n \+ 1\) \}\), \[frame, entry\]\);/);
 		assert.match(frame, /frame\.bindDocument\(entry, objectId, \{/);
 	});
 

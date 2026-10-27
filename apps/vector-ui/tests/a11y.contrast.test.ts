@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { ACCENT_TOKEN, CONSOLE_SURFACES, CONSOLE_TEXT_TOKEN, ICON_TOKEN, MIN_GRAPHIC_CONTRAST, MIN_TEXT_CONTRAST, SELECTED_TINT, contrastRatio, opaqueOver, parseColor, selectedRowBackground, tintOver } from '../src/vector/colors';
+import { ACCENT_TOKEN, CONSOLE_SURFACES, CONSOLE_TEXT_TOKEN, DATA_BAR_TOKEN, ICON_TOKEN, MIN_GRAPHIC_CONTRAST, MIN_TEXT_CONTRAST, SELECTED_TINT, contrastRatio, opaqueOver, parseColor, selectedRowBackground, tintOver } from '../src/vector/colors';
 import type { Rgb } from '../src/vector/colors';
 
 const THEME_DIR = path.resolve(__dirname, '..', '..', '..', 'packages', 'shell', 'public', 'themes');
@@ -39,8 +39,18 @@ function ratio(tokens: Record<string, string>, token: string, surface: string): 
 	return ratioOver(tokens, token, parseColor(tokens[surface]) as Rgb);
 }
 
-/** The files the console's own lane draws (the map's and the chat/ingest components are measured by their lanes). */
-const CONSOLE_FILES = ['components/StatsStrip.tsx', 'components/DocumentDirectory.tsx', 'components/DocumentRow.tsx', 'components/ChunkList.tsx', 'components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/ConnectionDrawerDetails.tsx', 'components/SupportBadge.tsx', 'views/ConnectionsView.tsx', 'views/ConsoleView.tsx', 'views/DocumentView.tsx', 'styles.ts'];
+/**
+ * The files that write text which are not under the console's text rule, each with why. None: every component, view
+ * and mount file is covered (the upload lane moved to the text token), so a file added later is checked too. A file
+ * listed here must say why.
+ */
+const TEXT_EXEMPT: Readonly<Record<string, string>> = {};
+
+/** The files the console's text rule covers: every mount, component and view file but the exempt ones, and the styles. */
+const CONSOLE_FILES = ['', 'components/', 'views/']
+	.flatMap((dir) => fs.readdirSync(path.resolve(__dirname, '..', 'src', dir)).map((name) => `${dir}${name}`))
+	.filter((f) => (f.endsWith('.tsx') || f === 'styles.ts') && !(f in TEXT_EXEMPT))
+	.sort();
 
 test('there are six shipped themes and each defines every token measured here', () => {
 	assert.equal(themes.length, 6, themes.map((t) => t.name).join(', '));
@@ -69,6 +79,20 @@ test('graphics: the focus ring and the selected-row bar (the accent) and the tra
 	}
 });
 
+test('data bars (scores, shares, the threshold track) are at least 3:1 on both surfaces in every theme', () => {
+	const rows: string[] = [];
+	for (const { name, tokens } of themes) {
+		assert.ok(tokens[DATA_BAR_TOKEN], `${name} lacks ${DATA_BAR_TOKEN}`);
+		const cells = CONSOLE_SURFACES.map((surface) => {
+			const r = ratio(tokens, DATA_BAR_TOKEN, surface);
+			assert.ok(r >= MIN_GRAPHIC_CONTRAST, `${name}: ${DATA_BAR_TOKEN} on ${surface} is ${r.toFixed(2)}:1`);
+			return r.toFixed(2);
+		});
+		rows.push(`${name} ${cells.join('/')}`);
+	}
+	console.log(`data bar ${DATA_BAR_TOKEN} (bg-default/bg-paper):`, rows.join(' | '));
+});
+
 test('the selected row: text stays at least 4.5:1 on its tinted background, and its bar at least 3:1 against the page', () => {
 	assert.equal(selectedRowBackground(), `color-mix(in srgb, var(${ACCENT_TOKEN}) ${Math.round(SELECTED_TINT * 100)}%, var(--rr-bg-paper))`);
 	for (const { name, tokens } of themes) {
@@ -84,6 +108,9 @@ test('the selected row: text stays at least 4.5:1 on its tinted background, and 
 test('the secondary and disabled text tokens fail in some theme, which is why the console never writes text in them', () => {
 	const dark = themes.find((t) => t.name === 'rocketride')!;
 	assert.ok(Math.min(...CONSOLE_SURFACES.map((s) => ratio(dark.tokens, '--rr-text-secondary', s))) < MIN_TEXT_CONTRAST, 'the premise');
+	for (const file of ['views/ConsoleView.tsx', 'components/WorkbenchTabs.tsx', 'components/InlineRemoveConfirm.tsx', 'components/DocumentsTab.tsx', 'components/IngestPanel.tsx', 'components/IngestDropZone.tsx', 'components/UploadList.tsx', 'VectorApp.tsx', 'styles.ts']) assert.ok(CONSOLE_FILES.includes(file), `the premise: ${file} is covered`);
+	assert.deepEqual(Object.keys(TEXT_EXEMPT), [], 'no file is exempt from the text rule');
+	for (const file of Object.keys(TEXT_EXEMPT)) assert.ok(fs.existsSync(path.resolve(__dirname, '..', 'src', file)), `${file} is exempt but does not exist`);
 	for (const file of CONSOLE_FILES) {
 		const full = path.resolve(__dirname, '..', 'src', file);
 		assert.ok(fs.existsSync(full), `${file} exists`);

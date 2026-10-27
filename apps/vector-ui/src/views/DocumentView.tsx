@@ -39,17 +39,22 @@
 // connection's anchor channel (Tools, or Chat on a read-only connection).
 // =============================================================================
 
-import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Banner, Button, BxTrash, ContentHeader } from 'shell';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Banner, Button, BxTrash, ContentHeader, ToggleGroup } from 'shell';
 import type { DocumentViewProps as ContractDocumentViewProps, IChunkItem, IDocumentItem, VectorKey } from '../contract/types';
 import { fetchChunks, fetchDocument, scoreChunks } from '../adapters/actions';
 import type { IVectorCaller } from '../adapters/actions';
 import { existingEntry } from '../adapters/connections';
+import ChunkDrawer from '../components/ChunkDrawer';
+import ChunksGrid from '../components/ChunksGrid';
 import HealthPanel from '../components/HealthPanel';
 import type { IHealthProbe } from '../components/HealthPanel';
+import type { IVectorGridHandle } from '../components/VectorGrid';
 import HeatStrip from '../components/HeatStrip';
 import SupportBadge from '../components/SupportBadge';
 import { CHUNKS_PAGE } from '../vector/budgets';
+import { chunkRows } from '../vector/chunkRows';
+import type { IChunkRow } from '../vector/chunkRows';
 import { fileTypeOf, formatSize } from '../vector/fileType';
 import { deletedFromTotals, medianChunks } from '../vector/health';
 import { HEAT_NO_EMBED, HEAT_NO_QUERY, HEAT_SCORING, heatCaption, heatKeys } from '../vector/heat';
@@ -71,8 +76,13 @@ export interface DocumentViewProps extends ContractDocumentViewProps {
 	consoleMedian?: number | null;
 	/** Told what the document's own row is once it was read (null: the store does not hold it). */
 	onDocument?: (row: IDocumentItem | null) => void;
-	/** Shown under the header (a dev-tool frame's inline confirmation). */
+	/** Shown under the header (the inline write confirmation, in both mounts). */
 	beforeBody?: React.ReactNode;
+	/**
+	 * Change it to re-read the document's row and chunks in place (a write named this document): the sub-tab, the sort,
+	 * the open chunk and the focus stay. The mount bumps it; the first value is the one the view starts with.
+	 */
+	refreshKey?: number;
 }
 
 /** The chunks of the document, loaded a page at a time. */
@@ -84,6 +94,21 @@ interface IChunkState {
 	loading: boolean;
 	error: IFailureText | null;
 }
+
+/** The document's two sub-tabs: the reading view, and the chunks as a grid with a drawer. */
+type DocumentSubTab = 'reader' | 'chunks';
+const SUB_TABS: ReadonlyArray<{ id: DocumentSubTab; label: string }> = [
+	{ id: 'reader', label: 'Reader' },
+	{ id: 'chunks', label: 'Chunks' },
+];
+
+const layout = {
+	subTabs: { flexShrink: 0, display: 'flex', alignItems: 'center', padding: '8px 24px 0' } as React.CSSProperties,
+	chunksPanel: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex' } as React.CSSProperties,
+	chunksMain: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '12px 24px 0' } as React.CSSProperties,
+	chunksBar: { flexShrink: 0, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', paddingBottom: 8 } as React.CSSProperties,
+	chunksFooter: { flexShrink: 0, display: 'flex', gap: 12, alignItems: 'center', padding: '8px 0 12px' } as React.CSSProperties,
+};
 
 const NO_CHUNKS: IChunkState = { items: [], hasMore: false, nextAfter: -1, total: null, loading: false, error: null };
 
@@ -123,7 +148,7 @@ type HeatState = { query: string; chunks: number; scores: IHeatScore[] } | { que
  * @param props - The frozen DocumentViewProps.
  * @returns The view.
  */
-export function DocumentView({ model, channels, selection, actions, objectId, path, chunkId, active = true, consoleMedian, onDocument, beforeBody }: DocumentViewProps): React.ReactElement {
+export function DocumentView({ model, channels, selection, actions, objectId, path, chunkId, active = true, consoleMedian, onDocument, beforeBody, refreshKey = 0 }: DocumentViewProps): React.ReactElement {
 	const caller: IVectorCaller | null = channels.tools ?? channels.chat ?? channels.ingest;
 	const embedCaller: IVectorCaller | null = channels.tools ?? channels.chat;
 	const store = model.nodes.store;
@@ -135,6 +160,10 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 	const [infoError, setInfoError] = useState<IFailureText | null>(null);
 	const [withDeleted, setWithDeleted] = useState(false);
 	const [chunks, setChunks] = useState<IChunkState>(NO_CHUNKS);
+	// Every chunk is in the trash (the store refuses to read it): the document offers Restore, not Move to trash.
+	const [inTrash, setInTrash] = useState(false);
+	// Bumped after a Restore this tab ran: the row and the chunks are read again in place.
+	const [restored, setRestored] = useState(0);
 	const [heat, setHeat] = useState<HeatState | null>(null);
 	const [probe, setProbe] = useState<IHealthProbe>({ status: 'idle' });
 	const run = useRef(0);
@@ -154,9 +183,11 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 			try {
 				const page = await fetchChunks(caller, store, { objectId, afterChunk, limit: Math.min(CHUNKS_PAGE, model.limits.chunks_page), deleted: withDeleted ? 'all' : 'active' });
 				if (mine !== run.current) return;
+				setInTrash(false);
 				setChunks((prev) => ({ items: afterChunk < 0 ? page.items : [...prev.items, ...page.items], hasMore: page.hasMore, nextAfter: page.nextAfter, total: page.total, loading: false, error: null }));
 			} catch (error) {
 				if (mine !== run.current) return;
+				setInTrash((error as { code?: string } | null)?.code === 'IN_TRASH');
 				const text = failureText(error);
 				if (text) setChunks((prev) => ({ ...prev, loading: false, error: text }));
 			}
@@ -167,7 +198,8 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 	useEffect(() => {
 		run.current += 1;
 		void load(-1);
-	}, [load]);
+		// A refresh (a write named this document) reloads the chunks from the start, in place.
+	}, [load, refreshKey, restored]);
 
 	useEffect(() => {
 		if (caller === null) return undefined;
@@ -185,7 +217,7 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 		return () => {
 			live = false;
 		};
-	}, [caller, store, objectId]);
+	}, [caller, store, objectId, refreshKey, restored]);
 
 	// Scroll to the chunk the tab was opened at, once it is listed.
 	const listRef = useRef<HTMLOListElement>(null);
@@ -220,6 +252,57 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 	}, [active, query, embedReady, caller, embedCaller, embedNode, store, objectId, chunkCount, scopeMax]);
 	const heatNow = heat !== null && heat.query === query ? heat : null;
 
+	// The Chunks sub-tab: mounted when first shown, then kept (a hidden panel keeps its grid and its drawer).
+	const [view, setView] = useState<DocumentSubTab>('reader');
+	const [chunksShown, setChunksShown] = useState(false);
+	const [openChunk, setOpenChunk] = useState<number | null>(null);
+	const [readerFocus, setReaderFocus] = useState<number | null>(null);
+	const gridRef = useRef<IVectorGridHandle>(null);
+	const refocusAfterMore = useRef(false);
+	const lastChunk = useRef<IChunkItem | null>(null);
+	const scores = heatNow !== null && 'scores' in heatNow ? heatNow.scores : null;
+	// Copies of the listing for the grid, rebuilt only when the listing or the scores change.
+	const rows: IChunkRow[] = useMemo(() => chunkRows(chunks.items, scores), [chunks.items, scores]);
+	const drawerChunk = chunks.items.find((c) => c.chunkId === openChunk) ?? (chunks.loading ? lastChunk.current : null);
+	if (drawerChunk !== null && drawerChunk.chunkId === openChunk) lastChunk.current = drawerChunk;
+	const showView = (next: DocumentSubTab): void => {
+		setView(next);
+		if (next === 'chunks') setChunksShown(true);
+	};
+	// Closing the drawer puts the focus back on its row (else the grid) before it unmounts.
+	const closeChunk = (): void => {
+		if (openChunk !== null && !gridRef.current?.focusRow(String(openChunk))) gridRef.current?.focusGrid();
+		setOpenChunk(null);
+	};
+	const openInReader = (id: number): void => {
+		setOpenChunk(null);
+		setReaderFocus(id);
+		setView('reader');
+	};
+	// "Open in reader": the chunk is scrolled to and takes the focus once the Reader is back in view.
+	useEffect(() => {
+		if (readerFocus === null || view !== 'reader') return;
+		const el = listRef.current?.querySelector<HTMLElement>(`[data-chunk="${readerFocus}"]`);
+		if (el) {
+			el.focus({ preventScroll: true });
+			if ('scrollIntoView' in el) el.scrollIntoView({ block: 'center' });
+		}
+		setReaderFocus(null);
+	}, [readerFocus, view]);
+	// "More chunks" is gone once the last page lands: the focus goes to the list, not the page.
+	useEffect(() => {
+		if (!refocusAfterMore.current || chunks.loading) return;
+		refocusAfterMore.current = false;
+		const fell = document.activeElement === null || document.activeElement === document.body;
+		if (!fell) return;
+		if (view === 'chunks') gridRef.current?.focusGrid();
+		else listRef.current?.focus();
+	}, [chunks.loading, view]);
+	const loadMore = (): void => {
+		refocusAfterMore.current = true;
+		void load(chunks.nextAfter);
+	};
+
 	// "Count deleted chunks": the document's chunk totals with and without soft-deleted rows (one row each).
 	const countDeleted = useCallback(async () => {
 		if (caller === null) return;
@@ -235,6 +318,32 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 	const canProbe = caller !== null && info !== null && (info.deleted_chunks === null || info.deleted_chunks === undefined) && model.capabilities.soft_delete === true;
 
 	const shownPath = info?.path ?? path ?? objectId;
+	// What this tab knows of its own document, so a confirmation (and a Restore) names it and counts its chunks even where
+	// no listing holds it (a dev-tool document frame).
+	const known = useMemo(() => [{ objectId, path: shownPath, chunks: info?.chunks ?? chunks.total }], [objectId, shownPath, info?.chunks, chunks.total]);
+	const [restoring, setRestoring] = useState(false);
+	const trashButton = useRef<HTMLButtonElement>(null);
+	const restoreButton = useRef<HTMLButtonElement>(null);
+	const restore = async (): Promise<void> => {
+		if (restoring || !model.writes.enabled || !actions.restore) return;
+		setRestoring(true);
+		try {
+			await actions.restore([objectId], known);
+			setRestored((n) => n + 1);
+		} finally {
+			setRestoring(false);
+		}
+	};
+	// Trashed or restored: the header button swapped, so a focus that fell to the page goes to the one now shown.
+	const trashSeen = useRef(inTrash);
+	useEffect(() => {
+		if (trashSeen.current === inTrash) return;
+		trashSeen.current = inTrash;
+		const fell = document.activeElement === null || document.activeElement === document.body;
+		if (fell) (inTrash ? restoreButton.current : trashButton.current)?.focus();
+	}, [inTrash]);
+	// The drawer's Move to Trash names this document too.
+	const drawerActions = useMemo(() => ({ ...actions, requestRemove: (ids: readonly string[]) => actions.requestRemove(ids, known) }), [actions, known]);
 	const focused = state.chunk;
 	const keys: VectorKey[] = chunks.items.map((c) => [objectId, c.chunkId] as const);
 
@@ -249,14 +358,23 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 						<Button variant="ghost" disabled={keys.length === 0} onClick={() => actions.showOnMap(keys, 'document')}>
 							Show chunk path on map
 						</Button>
-						<button type="button" style={{ ...styles.iconButton, opacity: model.writes.enabled ? 1 : 0.55, cursor: model.writes.enabled ? 'pointer' : 'not-allowed' }} aria-label={`Move ${shownPath} to the trash`} title={model.writes.enabled ? `Move ${shownPath} to the trash` : (model.writes.reason ?? undefined)} disabled={!model.writes.enabled} onClick={() => actions.requestRemove([objectId])} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')}>
-							<BxTrash />
-						</button>
+						{inTrash && !actions.restore ? null : inTrash ? (
+							<button ref={restoreButton} type="button" style={{ ...styles.iconButton, width: 'auto', padding: '0 10px', opacity: model.writes.enabled ? 1 : 0.55, cursor: model.writes.enabled ? 'pointer' : 'not-allowed' }} aria-disabled={!model.writes.enabled || restoring} title={model.writes.enabled ? 'Move this document out of the trash' : (model.writes.reason ?? undefined)} onClick={() => void restore()} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')}>
+								{restoring ? 'Restoring…' : 'Restore'}
+							</button>
+						) : (
+							<button ref={trashButton} type="button" style={{ ...styles.iconButton, opacity: model.writes.enabled ? 1 : 0.55, cursor: model.writes.enabled ? 'pointer' : 'not-allowed' }} aria-label={`Move ${shownPath} to the trash`} title={model.writes.enabled ? `Move ${shownPath} to the trash` : (model.writes.reason ?? undefined)} aria-disabled={!model.writes.enabled} onClick={() => model.writes.enabled && actions.requestRemove([objectId], known)} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')}>
+								<BxTrash />
+							</button>
+						)}
 					</>
 				}
 			/>
+			<div style={layout.subTabs} data-document-tabs="">
+				<ToggleGroup options={SUB_TABS.map((tab) => ({ id: tab.id, label: tab.label }))} value={view} onChange={showView} />
+			</div>
 			{beforeBody}
-			<div style={styles.content}>
+			<div style={{ ...styles.content, display: view === 'reader' ? undefined : 'none' }} data-document-panel="reader">
 				{caller === null && <Banner variant="warning">No source of this pipeline is running, so the document cannot be read.</Banner>}
 				{infoError && <Banner variant="error">{infoError.headline}</Banner>}
 				<dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 16px', margin: '0 0 12px', ...styles.small }}>
@@ -308,9 +426,9 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 					</p>
 				)}
 				{chunks.error && <Banner variant="error">{chunks.error.headline}</Banner>}
-				<ol ref={listRef} aria-label="Chunks in reading order" style={{ listStyle: 'none', margin: '12px 0 0', padding: 0 }}>
+				<ol ref={listRef} tabIndex={-1} aria-label="Chunks in reading order" style={{ listStyle: 'none', margin: '12px 0 0', padding: 0, outline: 'none' }}>
 					{chunks.items.map((chunk) => (
-						<li key={chunk.chunkId} data-chunk={chunk.chunkId} style={{ padding: '10px 0', borderTop: '1px solid var(--rr-border)', borderLeft: chunk.chunkId === chunkId ? '3px solid var(--rr-border-focus)' : '3px solid transparent', paddingLeft: 10 }}>
+						<li key={chunk.chunkId} data-chunk={chunk.chunkId} tabIndex={-1} style={{ outline: 'none', padding: '10px 0', borderTop: '1px solid var(--rr-border)', borderLeft: chunk.chunkId === chunkId ? '3px solid var(--rr-border-focus)' : '3px solid transparent', paddingLeft: 10 }}>
 							<div style={{ display: 'flex', gap: 8, alignItems: 'center', ...styles.small }}>
 								<strong>{`#${chunk.chunkId}`}</strong>
 								<span>{`${formatCount(chunk.length)} chars`}</span>
@@ -325,12 +443,38 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 					))}
 				</ol>
 				{chunks.loading && <div style={styles.small}>Loading chunks…</div>}
-				{chunks.hasMore && !chunks.loading && (
-					<Button variant="secondary" onClick={() => void load(chunks.nextAfter)}>
+				{chunks.hasMore && (
+					<Button variant="secondary" aria-disabled={chunks.loading} onClick={() => !chunks.loading && loadMore()}>
 						More chunks
 					</Button>
 				)}
 			</div>
+			{chunksShown && (
+				<div style={{ ...layout.chunksPanel, display: view === 'chunks' ? 'flex' : 'none' }} data-document-panel="chunks">
+					<div style={layout.chunksMain}>
+						<div style={layout.chunksBar}>
+							<label style={{ display: 'flex', gap: 6, alignItems: 'center', ...styles.small }}>
+								<input type="checkbox" checked={withDeleted} onChange={(event) => setWithDeleted(event.target.checked)} />
+								Include deleted chunks
+							</label>
+							{scores === null && <span style={styles.small}>Score appears when a query on the Map has scored this document's chunks.</span>}
+						</div>
+						{chunks.error && <Banner variant="error">{chunks.error.headline}</Banner>}
+						<ChunksGrid ref={gridRef} rows={rows} selectedId={openChunk === null ? null : String(openChunk)} withScore={scores !== null} hold={chunks.loading} onOpen={(row) => setOpenChunk(row.chunkId)} />
+						<div style={layout.chunksFooter}>
+							<span role="status" style={styles.small}>
+								{chunks.loading ? 'Loading chunks…' : `Showing ${formatCount(chunks.items.length)}${chunks.total !== null ? ` of ${formatCount(chunks.total)}` : ''} ${chunks.items.length === 1 ? 'chunk' : 'chunks'}; sorting reorders only these.`}
+							</span>
+							{chunks.hasMore && (
+								<Button variant="secondary" aria-disabled={chunks.loading} onClick={() => !chunks.loading && loadMore()}>
+									More chunks
+								</Button>
+							)}
+						</div>
+					</div>
+					{openChunk !== null && <ChunkDrawer objectId={objectId} path={shownPath} chunk={drawerChunk} caller={caller} store={store} documentChunks={info?.chunks ?? chunks.total} maxNeighbours={model.limits.neighbors_k_max} actions={drawerActions} writes={model.writes} onClose={closeChunk} onOpenInReader={openInReader} onCopy={(text) => copyText(text, actions.announce)} {...(actions.useAsQuery ? { onUseAsQuery: actions.useAsQuery } : {})} />}
+				</div>
+			)}
 		</div>
 	);
 }

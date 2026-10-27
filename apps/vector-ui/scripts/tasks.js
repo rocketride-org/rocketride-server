@@ -135,10 +135,18 @@ const FEATURE_TESTS = {
 	// Search without the LLM.
 	'searchWorkbench.test.ts': 'src/vector/searchWorkbench.ts',
 	'compare.test.ts': 'src/vector/compare.ts',
+	// The Query tab: its modes, focus and keys.
+	'queryTab.test.ts': 'src/vector/queryFocus.ts',
+	'queryHistory.test.ts': 'src/vector/queryHistory.ts',
 	// Exports and saved views.
 	'export.test.ts': 'src/vector/export.ts',
 	'exportPng.test.ts': 'src/map/exportPng.ts',
 	'savedViews.test.ts': 'src/vector/savedViews.ts',
+	// The grid of the Documents and Trash tabs and the document tab's chunks.
+	'vector.grid.test.tsx': 'src/vector/grid.ts',
+	// The Documents tab's folder rail, and the Documents and Trash tabs with the pending bar.
+	'vector.tree.test.ts': 'src/vector/tree.ts',
+	'documents.tab.test.tsx': 'src/components/DocumentsTab.tsx',
 };
 
 /**

@@ -41,7 +41,9 @@
 //                              one write batch each, `{ key, input, origin }`;
 //                              the controller re-checks the write gate, sends
 //                              once (never retried) and bumps `docVersions`
-//     vector.requestFocus      a document frame should show a chunk
+//     vector.requestFocus      a press opened (or fronted) a document frame:
+//                              it takes the focus, and shows the chunk when
+//                              one is named (chunkId null: none)
 //     vector.showOnMap         a console should show keys on its map
 //
 //   STATE (controller -> frames; retained, fixed topics of maps by key)
@@ -52,7 +54,8 @@
 //                      writes keep `gone` (versionsSnapshot)
 //     queries          per connection: the console's query text (a nonce each)
 //     consoleSummary   per connection: the console's median chunk count
-//     focusRequests    per connection: a pending chunk focus (a nonce)
+//     focusRequests    per connection: a pending arrival (a nonce, a chunk
+//                      or null), dropped after FOCUS_MAX_AGE_MS
 //     mapRequests      per connection: pending keys for the map (a nonce)
 //
 //   EVENTS (idempotent hints only; names disjoint from every op)
@@ -177,7 +180,7 @@ export interface VectorOps extends ToolOpMap {
 	'vector.trash': ToolOpSpec<IWriteParams, Reply<unknown>>;
 	'vector.restore': ToolOpSpec<IWriteParams, Reply<unknown>>;
 	'vector.deletePermanently': ToolOpSpec<IWriteParams, Reply<unknown>>;
-	'vector.requestFocus': ToolOpSpec<IDeadline & { key: string; docKey: string; chunkId: number }, Reply<null>>;
+	'vector.requestFocus': ToolOpSpec<IDeadline & { key: string; docKey: string; chunkId: number | null }, Reply<null>>;
 	'vector.showOnMap': ToolOpSpec<IDeadline & { key: string; keys: VectorKey[]; source: HighlightSource }, Reply<null>>;
 }
 
@@ -228,11 +231,14 @@ export interface IConsoleSummary {
 	medianChunks: number | null;
 }
 
-/** A pending chunk focus for one document frame. */
+/**
+ * A pending arrival for one document frame: a press opened or fronted it, so it takes the focus when nothing shown has
+ * it (a frame restored at load has none, and leaves the host's focus alone), and shows `chunkId` when not null.
+ */
 export interface IFocusRequest {
 	nonce: string;
 	docKey: string;
-	chunkId: number;
+	chunkId: number | null;
 }
 
 /** Pending keys for a connection's map. */
@@ -273,7 +279,7 @@ export interface VectorEventMap {
 	active: IActiveEvent;
 	queryChanged: { key: string; nonce: string; text: string | null };
 	consoleSummary: { key: string; medianChunks: number | null };
-	focusChunk: { docKey: string; chunkId: number; nonce: string };
+	focusChunk: { docKey: string; chunkId: number | null; nonce: string };
 	showOnMap: { docKey: string; keys: VectorKey[]; source: HighlightSource; nonce: string };
 }
 

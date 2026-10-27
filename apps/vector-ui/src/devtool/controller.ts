@@ -82,7 +82,9 @@ import { createDevToolDiscovery } from 'shared/explorer/devtool/watch';
 import type { IDevToolDiscovery, IDiscoveryBus, IFocusTarget } from 'shared/explorer/devtool/watch';
 import { makeVectorEndpointStore } from '../adapters/explorer';
 import { createConnectionRegistry } from '../adapters/connections';
+import { sessionQueryHistory } from '../adapters/queryHistory';
 import type { HighlightSource, IVectorLimits, VectorKey } from '../contract/types';
+import { DEVTOOL_HISTORY_NOTE } from '../env';
 import type { IReadable, IVectorEnv } from '../env';
 import { createLocalVectorEnv } from '../localEnv';
 import { consoleUri, documentTitle, documentUri, endpointKeyFromUri } from '../vector/addresses';
@@ -502,11 +504,13 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 			const chunkId = field(params, 'chunkId');
 			const route = routeDocKey(typeof docKey === 'string' ? docKey : null);
 			if (route.kind !== 'document' || route.key !== key) throw invalid(OP.requestFocus, 'A focus names one of this connection\'s documents.');
-			if (!Number.isInteger(chunkId) || (chunkId as number) < 0) throw invalid(OP.requestFocus, 'A focus names a chunk by its number.');
+			// No chunk (null, or left out): only the arrival, the frame takes the focus.
+			const chunk = chunkId === null || chunkId === undefined ? null : chunkId;
+			if (chunk !== null && (!Number.isInteger(chunk) || (chunk as number) < 0)) throw invalid(OP.requestFocus, 'A focus names a chunk by its number, or none.');
 			const nonce = mountNonce();
-			touch(focus, key, { nonce, docKey: docKey as string, chunkId: chunkId as number });
+			touch(focus, key, { nonce, docKey: docKey as string, chunkId: chunk as number | null });
 			publishFocus();
-			attached.channel.sendEvent(EVENT.focusChunk, { docKey, chunkId, nonce });
+			attached.channel.sendEvent(EVENT.focusChunk, { docKey, chunkId: chunk, nonce });
 			expire(focus, key, nonce, publishFocus);
 			return replyOk(null);
 		},
@@ -641,6 +645,9 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 	// ── Discovery: the store follows identity, activation, task events and focus ────────────────
 	offs.push(store.attach(client, identity.get().identity, discovery.watch));
 
+	// The sidebar's Query history: memory only (nothing of a dev-tool mount is stored), and another identity's goes.
+	const queryHistory = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+
 	// ── Identity: what the previous one's frames left goes ──────────────────────────────────────
 	let fingerprint = identity.get().known ? identity.get().fingerprint : null;
 	offs.push(identity.subscribe((snapshot) => {
@@ -648,6 +655,7 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 		if (next === fingerprint) return;
 		fingerprint = next;
 		for (const map of [versions, queries, summaries, focus, maps]) map.clear();
+		queryHistory.forget();
 		publishAll();
 	}));
 
@@ -676,6 +684,7 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 				client,
 				store,
 				registry,
+				queryHistory,
 				activeConnection,
 				// Documents open on a click only (R7), which is also the user activating the tool.
 				openConsole: (endpoint) => {

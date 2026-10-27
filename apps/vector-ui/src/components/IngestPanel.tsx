@@ -37,7 +37,7 @@
 // them.
 // =============================================================================
 
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { EmptyState } from 'shell';
 import type { IngestPanelProps } from '../contract/types';
@@ -54,11 +54,12 @@ export const NO_INGEST_SENTENCE = 'This pipeline has no running Ingest source. S
 
 const S = {
 	root: { display: 'flex', flexDirection: 'column', gap: 8, minHeight: 0, height: '100%', overflow: 'auto', padding: '8px 10px' } as CSSProperties,
-	heading: { margin: 0, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--rr-text-secondary)' } as CSSProperties,
-	prefixRow: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--rr-text-secondary)', flexWrap: 'wrap' } as CSSProperties,
+	heading: { margin: 0, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--rr-text-primary)' } as CSSProperties,
+	prefixRow: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--rr-text-primary)', flexWrap: 'wrap' } as CSSProperties,
 	input: { flex: '1 1 160px', minWidth: 120, fontSize: 12, padding: '3px 6px', borderRadius: 4, border: '1px solid var(--rr-border-input)', background: 'var(--rr-bg-input)', color: 'var(--rr-text-primary)' } as CSSProperties,
-	error: { fontSize: 12, color: 'var(--rr-color-error)', margin: 0 } as CSSProperties,
-	note: { fontSize: 12, color: 'var(--rr-text-secondary)', margin: 0, overflowWrap: 'anywhere' } as CSSProperties,
+	// The words say what is wrong (role alert): in the text token, which every theme measures at 4.5:1 or more.
+	error: { fontSize: 12, fontWeight: 600, color: 'var(--rr-text-primary)', margin: 0 } as CSSProperties,
+	note: { fontSize: 12, color: 'var(--rr-text-primary)', margin: 0, overflowWrap: 'anywhere' } as CSSProperties,
 };
 
 /**
@@ -75,6 +76,7 @@ export function IngestPanel(props: IngestPanelProps): React.ReactElement {
 	const available = model.ingest.enabled && channels.ingest !== null;
 	const reason = !available ? (model.ingest.reason ?? NO_INGEST_SENTENCE) : !prefixCheck.ok ? prefixCheck.reason : null;
 	const folder = prefixCheck.ok ? prefixCheck.path : '';
+	const prefixErrorId = useId();
 
 	return (
 		<section style={S.root} aria-label="Add documents">
@@ -86,9 +88,13 @@ export function IngestPanel(props: IngestPanelProps): React.ReactElement {
 					<IngestDropZone collection={model.collection} disabledReason={reason} onDrop={(transfer) => ingest.addFromDrop(transfer, folder)} onPick={(files) => ingest.addFromInput(files, folder)} />
 					<label style={S.prefixRow}>
 						Store under folder
-						<input style={S.input} type="text" value={prefix} placeholder="optional, e.g. C:/demo/inbox" spellCheck={false} onChange={(event) => setPrefix(event.currentTarget.value)} aria-invalid={!prefixCheck.ok || undefined} />
+						<input style={S.input} type="text" value={prefix} placeholder="optional, e.g. C:/demo/inbox" spellCheck={false} onChange={(event) => setPrefix(event.currentTarget.value)} aria-invalid={!prefixCheck.ok || undefined} aria-describedby={prefixCheck.ok ? undefined : prefixErrorId} />
 					</label>
-					{!prefixCheck.ok && <p style={S.error}>{prefixCheck.reason}</p>}
+					{!prefixCheck.ok && (
+						<p id={prefixErrorId} role="alert" style={S.error}>
+							{prefixCheck.reason}
+						</p>
+					)}
 					{alsoReaches.length > 0 && <p style={S.note}>{`This pipeline's ingest also reaches: ${alsoReaches.join(', ')}`}</p>}
 				</>
 			)}

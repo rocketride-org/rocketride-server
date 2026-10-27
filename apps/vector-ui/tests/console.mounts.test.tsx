@@ -33,6 +33,7 @@ const shellStandIn = {
 		</button>
 	),
 	BxTrash: () => <svg aria-hidden="true" />,
+	ToggleGroup: (p: { options: Array<{ id: string; label: string }> }) => <div>{p.options.map((o) => <button key={o.id} type="button">{o.label}</button>)}</div>,
 	ContentHeader: (p: { title: string; subtitle?: string; actions?: React.ReactNode }) => (
 		<header>
 			<h1>{p.title}</h1>
@@ -59,8 +60,9 @@ const exportMenuPath = require.resolve('../src/components/ExportMenu');
 require.cache[exportMenuPath] = { id: exportMenuPath, filename: exportMenuPath, loaded: true, exports: { __esModule: true, default: ExportMenuStandIn, ExportMenu: ExportMenuStandIn } } as never;
 
 const { createSelectionStore } = require('../src/contract/bridge') as typeof import('../src/contract/bridge');
-const { DocumentDirectory } = require('../src/components/DocumentDirectory') as typeof import('../src/components/DocumentDirectory');
+const { renderDocumentsTab } = require('./support/panels') as typeof import('./support/panels');
 const { StatsAsOf, StatsStrip } = require('../src/components/StatsStrip') as typeof import('../src/components/StatsStrip');
+const { OverviewView } = require('../src/components/OverviewPanel') as typeof import('../src/components/OverviewPanel');
 const { StatsCharts } = require('../src/components/StatsCharts') as typeof import('../src/components/StatsCharts');
 const { HealthPanel } = require('../src/components/HealthPanel') as typeof import('../src/components/HealthPanel');
 const { healthSummary } = require('../src/vector/health') as typeof import('../src/vector/health');
@@ -87,9 +89,9 @@ function mounted(html: string, name: string): number {
 	return at;
 }
 
-test('the directory: the ScopeBar is its filter row, with the path box first, and nothing else between the title and the list', () => {
+test('the Documents tab: the ScopeBar is its filter row, with the path box first, above the grid', () => {
 	const pager = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage(fixture('list_documents_page1')));
-	const html = renderToStaticMarkup(<DocumentDirectory pager={pager} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} />);
+	const html = renderDocumentsTab({ directory: pager });
 	const at = mounted(html, 'ScopeBar');
 	const bar = html.slice(at, html.indexOf('</div>', at));
 	assert.match(bar, /^<div[^>]*>(<div[^>]*>)?<input type="search" placeholder="Filter paths…" aria-label="Filter documents by path"/, 'the path box is its first field');
@@ -97,22 +99,28 @@ test('the directory: the ScopeBar is its filter row, with the path box first, an
 	assert.ok(html.indexOf('data-component="ScopeBar"') < html.indexOf('aria-label="Stored documents"'));
 });
 
-test('the stats strip ends with a collapsed Charts disclosure holding the StatsCharts', () => {
-	const rows: IDocumentItem[] = readDocumentsPage(fixture('list_documents_page1')).items;
+/** An Overview over these rows, with nothing to call. */
+function overview(rows: readonly IDocumentItem[], over: Partial<React.ComponentProps<typeof OverviewView>> = {}): string {
 	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
-	const html = renderToStaticMarkup(<StatsStrip stats={stats} dialect={dialect} readOnly={false} documents={rows} />);
-	assert.match(html, /<details[^>]*><summary[^>]*>Charts<\/summary>/);
-	assert.doesNotMatch(html, /<details[^>]* open/, 'collapsed by default');
-	assert.ok(mounted(html, 'StatsCharts') > html.indexOf('>Charts</summary>'));
+	const health = healthSummary(rows, { medianChunks: null, complete: true });
+	return renderToStaticMarkup(<OverviewView stats={stats} dialect={dialect} readOnly={false} rows={rows} scopedRows={rows} loading={false} complete scoped={false} scopeLine={null} scopeFilter={null} sample={null} health={health} median={null} onChartScope={noop} onOpenDocument={noop} onOpenTab={noop} onOpenFolder={noop} onNewQuery={noop} onAddDocuments={noop} fieldsRead={null} {...over} />);
+}
+
+test('the Overview: the cards on top, then Summary, Charts and Insights on a row of their own; Charts holds the StatsCharts', () => {
+	const rows: IDocumentItem[] = readDocumentsPage(fixture('list_documents_page1')).items;
+	const summary = overview(rows);
+	assert.ok(summary.indexOf('aria-label="Database summary"') < summary.indexOf('role="tablist" aria-label="Overview"'), 'the cards first');
+	assert.match(summary, /role="tab" id="([^"]*)-tab-summary" aria-selected="true" aria-controls="\1-panel-summary" tabindex="0"[^>]*>Summary</);
+	assert.match(summary, /role="tabpanel" id="[^"]*-panel-summary" aria-labelledby="[^"]*-tab-summary"/);
+	assert.match(summary, /-tab-insights"[^>]*>(<span[^>]*>){2}Insights \(\d+\)</);
+	assert.doesNotMatch(summary, /data-component="StatsCharts"/, 'the charts are drawn only on their view');
+	mounted(overview(rows, { initialView: 'charts' }), 'StatsCharts');
 });
 
-test('the stats strip renders with 130,000 loaded rows (Load more, 25 times): the closed Charts disclosure bins them without a RangeError', () => {
+test('the Overview renders with 130,000 loaded rows (Load more, 25 times): the charts bin them and Top folders counts them, without a RangeError', () => {
 	const rows: IDocumentItem[] = Array.from({ length: 130_000 }, (_, i) => ({ objectId: `d${i}`, path: `C:/corp/f${i % 97}/d${i}.pdf`, chunks: 1 + (i % 40), has_first_chunk: true, tables: 0, deleted: false, nodeId: null, size: 1, modifyTime: null, ingestedAt: `2026-0${1 + (i % 9)}-15T00:00:00Z`, pointId: null }));
-	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
-	const html = renderToStaticMarkup(<StatsStrip stats={stats} dialect={dialect} readOnly={false} documents={rows} />);
-	assert.doesNotMatch(html, /<details[^>]* open/, 'the disclosure is closed');
-	mounted(html, 'StatsCharts');
-	assert.match(html, /aria-label="Chunks per document, 130,000 documents in /, 'every loaded row is binned');
+	assert.match(overview(rows, { initialView: 'charts' }), /aria-label="Chunks per document, 130,000 documents in /, 'every loaded row is binned');
+	assert.match(overview(rows), /Other folders \(90\)/, 'seven folders named, the other 90 in one row');
 });
 
 test('while a scope is active the stats strip says what it covers on a second line', () => {
@@ -162,25 +170,17 @@ function elementsOf(node: React.ReactNode, out: React.ReactElement[] = []): Reac
 	return out;
 }
 
-test("the strip's one-second clock re-renders only the 'counts as of' words, never the charts", () => {
-	const rows: IDocumentItem[] = readDocumentsPage(fixture('list_documents_page1')).items;
+test("the strip's one-second clock re-renders only the 'counts as of' words; the charts are memoised and drawn apart", () => {
 	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
-	const onScope = (): void => undefined;
-	const props = { stats, dialect, readOnly: false, documents: rows, onScope };
+	const props = { stats, dialect, readOnly: false };
 	// The strip itself keeps no state (called outside React, a hook would throw): the clock lives in StatsAsOf.
-	const tree = (): React.ReactElement[] => elementsOf(StatsStrip(props));
-	const first = tree();
+	const first = elementsOf(StatsStrip(props));
 	const clock = first.filter((e) => e.type === StatsAsOf);
 	assert.equal(clock.length, 1, 'one clock');
 	assert.equal((clock[0]?.props as { view: unknown }).view, stats.view);
-	// The charts are memoised on props the strip passes through unchanged, so a tick of the clock leaves them alone.
+	assert.ok(!first.some((e) => e.type === StatsCharts), 'no chart under the clock');
 	assert.equal((StatsCharts as unknown as { $$typeof: symbol }).$$typeof, Symbol.for('react.memo'));
-	const charts = (elements: React.ReactElement[]) => elements.find((e) => e.type === StatsCharts)?.props as Record<string, unknown>;
-	const a = charts(first);
-	const b = charts(tree());
-	assert.ok(a && b);
-	for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) assert.ok(Object.is(a[key], b[key]), `${key} is the same between two renders`);
-	assert.match(renderToStaticMarkup(<StatsAsOf view={stats.view} stale={false} refreshing={false} />), /aria-live="off"/);
+	assert.match(renderToStaticMarkup(<StatsAsOf view={stats.view} stale={false} />), /aria-live="off"/);
 });
 
 test('the ingest chart with one far-off ingest time: a few dozen bars, not ninety thousand', () => {
@@ -195,12 +195,15 @@ test('the ingest chart with one far-off ingest time: a few dozen bars, not ninet
 	assert.ok(took < 200, `rendered in ${took.toFixed(1)} ms`);
 });
 
-test('the strip: a Size figure when the store reports it; no Charts disclosure for an empty collection', () => {
+test('the strip: a Size card only when the store reports it; the cards say "—" for what the store did not count', () => {
 	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
 	const enriched = readDialect(fixture('dialect_enriched'));
 	assert.match(renderToStaticMarkup(<StatsStrip stats={stats} dialect={enriched} readOnly={false} />), /data-figure="size"[^>]*>46 MB</);
+	assert.doesNotMatch(renderToStaticMarkup(<StatsStrip stats={stats} dialect={dialect} readOnly={false} />), /data-figure="size"/, 'never a dash for Size');
+	const html = renderToStaticMarkup(<StatsStrip stats={stats} dialect={dialect} readOnly={false} />);
+	for (const key of ['documents', 'chunks', 'avg', 'trash', 'model', 'index']) assert.match(html, new RegExp(`data-figure="${key}"`), key);
 	const empty = { ...stats, view: readStats(fixture('stats_collection_missing_legacy')) };
-	assert.doesNotMatch(renderToStaticMarkup(<StatsStrip stats={empty} dialect={dialect} readOnly={false} />), />Charts<\/summary>/);
+	assert.match(overview([], { stats: empty, initialView: 'charts' }), /No documents to chart yet\./, 'an empty collection: nothing to chart, and it says so');
 });
 
 test('a document tab holds its HealthPanel', () => {
@@ -237,7 +240,7 @@ test('the health panel: checking, the problems with their numbers, what this sto
 	const qdrant = readDocumentsPage(fixture('list_documents_filter_client')).items[0] as IDocumentItem;
 	const unreported = renderToStaticMarkup(<HealthPanel item={qdrant} medianChunks={10} />);
 	assert.match(unreported, /No problem found in what this store reports\./);
-	assert.match(unreported, /role="note"[^>]*>This store does not report chunk ids or soft-deleted chunks per document, so gaps and deleted chunks are not checked; pgvector stores report them\.</);
+	assert.match(unreported, /role="note"[^>]*>This store does not report chunk ids or soft-deleted chunks per document, so gaps and deleted chunks are not checked; pgvector and RocketRide Vector stores report them\.</);
 	const healthy = renderToStaticMarkup(<HealthPanel item={{ ...legacy, deleted_chunks: 0 }} listing="active" medianChunks={20} />);
 	assert.match(healthy, /No problem found: the first chunk is stored, the chunk ids have no gap, no chunk is soft-deleted, the parse found text and the size is ordinary\./);
 	assert.match(renderToStaticMarkup(<HealthPanel item={{ ...legacy, deleted_chunks: 0 }} listing="active" />), /Oversize is not checked until the console has loaded documents to compare with\./);
@@ -248,27 +251,51 @@ test('the health panel: checking, the problems with their numbers, what this sto
 	assert.match(renderToStaticMarkup(<HealthPanel item={qdrant} canProbe probe={{ status: 'running' }} />), /disabled=""[^>]*>Counting…<\/button>/);
 });
 
-test('the directory lists flagged documents under "Needs attention" with their badges; the strip says how many', () => {
+test('the Documents grid says a flagged document needs attention in its Health column and tooltip; the strip says how many', () => {
 	const rows: IDocumentItem[] = [...readDocumentsPage(fixture('list_documents_page1')).items.map((r) => ({ ...r, max_chunk_id: (r.chunks ?? 1) - 1, deleted_chunks: 0 })), { ...(readDocumentsPage(fixture('list_documents_filter_partial')).items[0] as IDocumentItem), objectId: 'legacy-falcon' }];
 	const pager = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage({ success: true, items: rows, next_cursor: null, total: rows.length, counts_exact: true, distinct: true, sorted: true, caveats: [] }));
-	const html = renderToStaticMarkup(<DocumentDirectory pager={pager} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} />);
-	assert.match(html, /aria-label="Folder Needs attention \(1\)"/);
-	assert.match(html, /<span style="[^"]*" data-flag="">1 deleted chunk<\/span>/);
+	const html = renderDocumentsTab({ directory: pager });
+	assert.match(html, /data-row-id="legacy-falcon"[^]*?role="gridcell"[^>]*><span title="1 soft-deleted chunk of this document is still stored\.">1 deleted chunk<\/span>/);
 	assert.match(html, /title="[^"]*needs attention: 1 deleted chunk · objectId legacy-falcon"/);
 	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
 	const strip = renderToStaticMarkup(<StatsStrip stats={stats} dialect={dialect} readOnly={false} health={healthSummary(rows, { medianChunks: 9, complete: true })} />);
 	assert.match(strip, /data-chip="attention">1 needs attention</);
+	// The Overview's Insights list the same documents: its count is the chip's.
+	const health = healthSummary(rows, { medianChunks: 9, complete: true });
+	const view = overview(rows, { health, median: 9, initialView: 'insights' });
+	assert.match(view, /-tab-insights"[^>]*>(<span[^>]*>){2}Insights \(1\)</);
+	assert.equal((view.match(/<li><button type="button"/g) ?? []).length, 1, 'one row per document that needs attention');
+	assert.match(view, /title="Open it in Documents"><span[^>]*>[^<]*<\/span><span[^>]*>1 deleted chunk</);
+	assert.match(overview(rows, { health: { ...health, complete: false }, median: 9 }), /Insights \(1\+\)/, 'while more documents may need attention than the loaded ones');
 });
 
-test('an oversize document stays in its folder with a muted "oversize" badge; its tooltip does not say it needs attention', () => {
+test('the Summary: Top folders with their share of the chunks and what they were counted over, the document fields, and the quick actions this mount offers', () => {
+	const rows: IDocumentItem[] = readDocumentsPage(fixture('list_documents_page1')).items;
+	const html = overview(rows, { scoped: true, complete: false });
+	assert.match(html, /<section aria-label="Top folders"/);
+	const shares = [...html.matchAll(/>(\d+)%</g)].map((m) => Number(m[1]));
+	assert.equal(shares.reduce((a, b) => a + b, 0), 100, 'the shares sum to 100');
+	assert.match(html, /Within the current scope; over the 5 documents loaded so far\./);
+	assert.match(html, /<button type="button"[^>]*title="Show its documents in Documents">C:\/demo\/field\/<\/button>/, "a folder shows its documents in Documents");
+	assert.match(html, /<section aria-label="Document fields"/);
+	assert.match(html, />Read fields in Collection</);
+	for (const action of ['Add documents', 'Browse documents', 'New query', 'Open map']) assert.match(html, new RegExp(`>${action}<`), action);
+	assert.doesNotMatch(overview(rows, { onAddDocuments: null }), />Add documents</, 'a mount that cannot add documents does not offer it');
+	assert.match(html, /Chunk metadata fields are read from a sample in Collection\./, 'before a sample, it says where the chunk fields come from');
+	const read = overview(rows, { fieldsRead: { rows: [{ name: 'section', type: 'text', coverage: 18, of: 20, example: 'Intro', searchFilter: false, listFilter: false, source: 'chunks' }], chunksRead: 20, documentsRead: 5, at: 0 } });
+	assert.match(read, /Chunk metadata, from 20 chunks read/);
+	assert.match(read, /<td[^>]*>section<\/td><td[^>]*>text<\/td><td[^>]*>18 of 20<\/td>/, 'what Collection read, with what it was read over');
+});
+
+test('an oversize document keeps its folder and says "oversize" in its Health column; its tooltip does not say it needs attention', () => {
 	const memo = (i: number): IDocumentItem => ({ objectId: `m${i}`, path: `C:/corp/memos/memo_${i}.txt`, chunks: 1, has_first_chunk: true, tables: 0, deleted: false, nodeId: null, size: null, modifyTime: null, ingestedAt: null, pointId: null, max_chunk_id: 0, deleted_chunks: 0 });
 	const manual: IDocumentItem = { ...memo(0), objectId: 'manual-1', path: 'C:/corp/handbooks/manual.pdf', chunks: 40, max_chunk_id: 39 };
 	const rows = [...Array.from({ length: 20 }, (_, i) => memo(i)), manual];
 	const pager = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage({ success: true, items: rows, next_cursor: null, total: rows.length, counts_exact: true, distinct: true, sorted: true, caveats: [] }));
-	const html = renderToStaticMarkup(<DocumentDirectory pager={pager} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} />);
-	assert.match(html, /aria-label="Folder C:\/corp\/handbooks\/"/);
-	assert.doesNotMatch(html, /Needs attention/);
-	assert.match(html, /<span style="[^"]*var\(--rr-border-input\)[^"]*" data-flag="">oversize<\/span>/);
+	const html = renderDocumentsTab({ directory: pager });
+	assert.match(html, /data-row-id="manual-1"[^]*?C:\/corp\/handbooks\/<\/div>/, 'listed in its folder');
+	assert.doesNotMatch(html, /needs attention/);
+	assert.match(html, /data-row-id="manual-1"[^]*?<span title="40 chunks: more than 10 times the median of 1 per document loaded\.">oversize<\/span>/);
 	assert.match(html, /title="C:\/corp\/handbooks\/manual\.pdf · [^"]*· oversize · objectId manual-1"/);
 });
 
@@ -279,21 +306,22 @@ function scopeOf(filter: IScopeState['filter'], documents = true): IScopeState {
 
 test("a scope's listing before the store answers: the status line says it is loading, never what the store cannot filter; a failed first page leaves the error and Retry to the footer", () => {
 	const filter = { path_prefix: 'C:/demo/greenhouse/', path_contains: 'orc' };
-	const directory = (pager: ReturnType<typeof pagerInit>): string => renderToStaticMarkup(<DocumentDirectory pager={pager} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} scope={scopeOf(filter)} onScope={noop} />);
+	const directory = (pager: ReturnType<typeof pagerInit>): string => renderDocumentsTab({ directory: pager, scope: scopeOf(filter) });
 	const loading = pagerBegin(pagerInit(), filter);
 	const html = directory(loading);
-	assert.match(html, /role="status">Loading the documents in scope…<\/div>/);
+	assert.match(html, /role="status"[^>]*>Loading the documents in scope…<\/div>/);
 	assert.doesNotMatch(html, /cannot filter|0 of 0 loaded/);
 	const failed = directory(pagerFail(loading, { headline: 'The store did not answer in time.' }));
 	assert.doesNotMatch(failed, /role="status">[^<]*(match|cannot filter|Loading)/, 'no status line about the scope');
 	assert.match(failed, /<span>Loading stopped at 0 documents: The store did not answer in time\.<\/span><button[^>]*>Retry<\/button>/);
+	assert.match(failed, /Store unreachable: The store did not answer in time\./, 'the grid says why it is empty');
 });
 
-test("the directory's export with the Documents toggle off: 'Documents in scope' holds only the scope's documents, its count in the label", () => {
+test("the Documents tab's export with the Documents toggle off: 'Documents in scope' holds only the scope's documents, its count in the label", () => {
 	const pager = pagerApplyPage(pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage(fixture('list_documents_page1'))), readDocumentsPage(fixture('list_documents_page2_last')));
 	const prefix = 'C:/demo/greenhouse/';
-	const html = renderToStaticMarkup(<DocumentDirectory pager={pager} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} scope={scopeOf({ path_prefix: prefix }, false)} onScope={noop} />);
-	assert.match(html, /role="status">Not applied to this list\. Scope: 2 of 7 loaded match \(filtered here\)<\/div>/);
+	const html = renderDocumentsTab({ directory: pager, scope: scopeOf({ path_prefix: prefix }, false) });
+	assert.match(html, /role="status"[^>]*>Not applied to this list\. Scope: 2 of 7 loaded match \(filtered here\)<\/div>/);
 	assert.equal(exportItems.find((i) => i.id === 'directory-loaded')?.label, 'Loaded documents (7)', 'the list on screen');
 	const scoped = exportItems.find((i) => i.id === 'directory-scope');
 	assert.ok(scoped);
@@ -306,29 +334,3 @@ test("the directory's export with the Documents toggle off: 'Documents in scope'
 	);
 });
 
-test('the directory: Documents and Trash (n); a document moves to the trash, a trashed one restores or deletes permanently, and the trash empties', () => {
-	const off = { enabled: false, reason: 'Removing documents is turned off on this store node (allow_writes).' };
-	const active = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage(fixture('list_documents_page1')));
-	const listed = readDocumentsPage(fixture('list_documents_page1'));
-	const trash = pagerApplyPage(pagerBegin(pagerInit()), { ...listed, items: listed.items.map((item) => ({ ...item, deleted: true })) });
-	const first = listed.items[0]!.path;
-	const html = renderToStaticMarkup(<DocumentDirectory pager={active} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} view="active" onView={noop} trashCount={3} onRestore={noop} onDelete={noop} onEmptyTrash={noop} />);
-	assert.match(html, /<button[^>]*aria-pressed="true"[^>]*>Documents<\/button>/);
-	assert.match(html, /<button[^>]*aria-pressed="false"[^>]*>Trash \(3\)<\/button>/, 'the Trash badge is the store count');
-	assert.ok(html.includes(`aria-label="Move ${first} to the trash"`), 'a document moves to the trash');
-	assert.doesNotMatch(html, /Delete permanently|Empty trash|aria-label="Restore /, 'nothing permanent in the Documents view');
-	const bin = renderToStaticMarkup(<DocumentDirectory pager={trash} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} view="trash" onView={noop} trashCount={null} onRestore={noop} onDelete={noop} onEmptyTrash={noop} />);
-	assert.match(bin, /<button[^>]*aria-pressed="true"[^>]*>Trash<\/button>/, 'no count where the store cannot count');
-	assert.ok(bin.includes(`aria-label="Restore ${first}"`));
-	assert.ok(bin.includes(`aria-label="Delete ${first} permanently"`));
-	assert.doesNotMatch(bin, /to the trash"/, 'a trashed document is not moved again');
-	assert.match(bin, /<button[^>]*>Empty trash<\/button>/);
-	const empty = renderToStaticMarkup(<DocumentDirectory pager={pagerApplyPage(pagerBegin(pagerInit()), { ...listed, items: [], nextCursor: null, total: 0 })} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} view="trash" onView={noop} trashCount={0} onRestore={noop} onDelete={noop} onEmptyTrash={noop} />);
-	assert.match(empty, /The trash is empty\./);
-	assert.match(empty, /<button[^>]*disabled=""[^>]*>Empty trash<\/button>/, 'nothing to empty');
-	const readOnly = renderToStaticMarkup(<DocumentDirectory pager={trash} selectedId={null} writes={off} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} view="trash" onView={noop} trashCount={7} onRestore={noop} onDelete={noop} onEmptyTrash={noop} />);
-	assert.match(readOnly, /<button[^>]*disabled=""[^>]*>Empty trash<\/button>/);
-	assert.match(readOnly, new RegExp(`aria-label="Restore ${first.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}"[^>]*disabled=""|disabled=""[^>]*aria-label="Restore ${first.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}"`), 'writes off: Restore is disabled with the reason');
-	const plain = renderToStaticMarkup(<DocumentDirectory pager={active} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} />);
-	assert.doesNotMatch(plain, />Trash/, 'a host without the trash shows no switch');
-});

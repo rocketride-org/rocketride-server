@@ -34,9 +34,9 @@
 // it is never kept in state or shown. Hidden when `embed` is not reachable.
 // Its rows go to the ExportMenu in the search columns (src/vector/
 // searchWorkbench.ts), and "Open in Search" hands the question, the
-// answer's cited chunks, this k and these documents to the Search surface,
-// whose first run is therefore the same search and lists the same rows; there
-// the threshold can be tried at other values.
+// answer's cited chunks, this k and these documents to the Query tab's
+// Search, whose first run is therefore the same search and lists the same
+// rows; there the threshold can be tried at other values.
 //
 // The debugger still makes its two calls here rather than through Search's
 // runWorkbench: the chat's wiring rules read them in this file. The search
@@ -80,11 +80,11 @@ const S = {
 	root: { border: '1px solid var(--rr-border)', borderRadius: 6, padding: '8px 10px', margin: '6px 0', background: 'var(--rr-bg-paper)', fontSize: 12 } as CSSProperties,
 	head: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } as CSSProperties,
 	title: { margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--rr-text-primary)' } as CSSProperties,
-	line: { margin: '4px 0', color: 'var(--rr-text-secondary)' } as CSSProperties,
+	line: { margin: '4px 0', color: 'var(--rr-text-primary)' } as CSSProperties,
+	mark: { fontWeight: 600, marginRight: 4 } as CSSProperties,
 	table: { width: '100%', borderCollapse: 'collapse', marginTop: 6 } as CSSProperties,
-	th: { textAlign: 'left', fontWeight: 600, color: 'var(--rr-text-secondary)', padding: '2px 4px', borderBottom: '1px solid var(--rr-border)' } as CSSProperties,
+	th: { textAlign: 'left', fontWeight: 600, color: 'var(--rr-text-primary)', padding: '2px 4px', borderBottom: '1px solid var(--rr-border)' } as CSSProperties,
 	td: { padding: '2px 4px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'top', overflowWrap: 'anywhere' } as CSSProperties,
-	muted: { color: 'var(--rr-text-secondary)' } as CSSProperties,
 };
 
 /** Where the debugger is. */
@@ -119,7 +119,7 @@ export function RetrievalTable({ view }: { view: RetrievalView }): React.ReactEl
 			</thead>
 			<tbody>
 				{view.rows.map((row, index) => (
-					<tr key={rowKey(row.key, index)} data-status={row.status} style={row.status === 'used' ? undefined : S.muted}>
+					<tr key={rowKey(row.key, index)} data-status={row.status}>
 						<td style={S.td}>{row.rank}</td>
 						<td style={S.td} title={row.preview}>
 							{`${row.path || row.objectId} #${row.chunkId}`}
@@ -205,7 +205,12 @@ export function RetrievalDebugger({ model, channels, question, topK, onClose, an
 			{scopeLine !== null && <p style={S.line}>{scopeLine}</p>}
 			{phase.kind === 'embedding' && <p style={S.line}>Embedding…</p>}
 			{phase.kind === 'searching' && <p style={S.line}>Searching…</p>}
-			{phase.kind === 'error' && <p style={{ ...S.line, color: 'var(--rr-color-error)' }}>{phase.message}</p>}
+			{phase.kind === 'error' && (
+				<p style={S.line} data-debugger-error="">
+					<span style={S.mark}>Error:</span>
+					{phase.message}
+				</p>
+			)}
 			{phase.kind === 'done' && (
 				<>
 					{phase.view.modelMismatchSentence !== null && <Banner variant="warning">{phase.view.modelMismatchSentence}</Banner>}

@@ -13,10 +13,11 @@ import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import { CONFIG_SENTINEL, fakeWorld, manualClock, projectRows, ragComponents, row, vectorComponents } from 'shared/explorer/connect/testing';
 import type { IFakeWorld } from 'shared/explorer/connect/testing';
 import { makeVectorEndpointStore } from '../src/adapters/explorer';
-import { NOT_GROUPED_NOTE, drawerKeyAfter, drawerView, landingView, roleLine, testResultText, vectorCardView } from '../src/vector/connections';
+import { NOT_GROUPED_NOTE, collectionView, drawerKeyAfter, drawerView, landingView, roleLine, testResultText, vectorCardView } from '../src/vector/connections';
 import { buildConsoleModel, consoleNodes, writesDuringRemoval } from '../src/vector/consoleModel';
 import { providerTitle } from '../src/vector/support';
-import { readStats } from '../src/vector/results';
+import { readDialect, readStats } from '../src/vector/results';
+import { collectionMissing } from '../src/vector/stats';
 import { BUSY, CODE_SENTENCES, EMPTY } from '../src/vector/wording';
 import { fixture } from './support/fixtures';
 
@@ -251,4 +252,67 @@ test('the drawer of a store found empty reads model, dimension and index from fr
 	assert.equal(value(probed, 'Model'), 'sentence-transformers/all-MiniLM-L6-v2');
 	assert.equal(value(probed, 'Dimension'), '384');
 	assert.equal(value(probed, 'Index'), 'hnsw (m 16, ef_construction 64)');
+});
+
+test('the drawer: the Metric row falls back to the stats; the rows split into the collection and the connection', async () => {
+	const [f] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_collection_missing')));
+	const value = (drawer: ReturnType<typeof drawerView>, label: string) => drawer.rows.find((r) => r.label === label)?.value;
+	assert.equal(value(drawerView(f.endpoint, f.probe), 'Metric'), '—');
+	const stats = readStats({ ...fixture('stats_pgvector'), metric: 'cosine' });
+	const drawer = drawerView(f.endpoint, f.probe, stats);
+	assert.equal(value(drawer, 'Metric'), 'cosine');
+	assert.deepEqual(drawer.rows, [...drawer.collection, ...drawer.connection]);
+	const names = (rows: ReturnType<typeof drawerView>['rows']) => rows.map((r) => r.label);
+	assert.ok(names(drawer.collection).includes('Model') && names(drawer.collection).includes('Index'));
+	assert.ok(names(drawer.connection).includes('Pipeline') && names(drawer.connection).includes('Removing documents'));
+	assert.equal(names(drawer.collection).includes('Pipeline'), false);
+});
+
+test('the card: fresh stats override a dialect that still says the collection is missing', async () => {
+	const [f] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_collection_missing')));
+	const labels = (stats: ReturnType<typeof readStats> | null) => vectorCardView(f.endpoint, f.probe, stats).flags.map((x) => x.label);
+	assert.deepEqual(labels(null), ['Empty collection']);
+	assert.deepEqual(labels(readStats({ ...fixture('stats_pgvector'), documents: 0, chunks: 0 })), [], "the strip's rule: stats that say the collection exists win, even with nothing in it");
+	assert.deepEqual(labels(readStats({ ...fixture('stats_pgvector'), collection_exists: false, documents: null, chunks: null })), ['Empty collection']);
+	assert.deepEqual(labels(readStats({ ...fixture('stats_pgvector'), documents: 4, chunks: 12 })), []);
+});
+
+test('the card and the strip share one rule: stats say missing while the dialect says it exists, and the reverse', async () => {
+	const [exists] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_pgvector')));
+	const [missing] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_collection_missing')));
+	const gone = readStats({ ...fixture('stats_pgvector'), collection_exists: false, documents: null, chunks: null });
+	const zero = readStats({ ...fixture('stats_pgvector'), documents: 0, chunks: 0 });
+	const labels = (f: typeof exists, stats: ReturnType<typeof readStats> | null) => vectorCardView(f.endpoint, f.probe, stats).flags.map((x) => x.label);
+	assert.deepEqual(labels(exists, gone), ['Empty collection'], 'stats win: the store lost its collection');
+	assert.deepEqual(labels(missing, zero), [], 'stats win: it exists now, with nothing in it');
+	assert.equal(collectionMissing(readDialect(exists.probe?.ok ? exists.probe.info : null), gone), true);
+	assert.equal(collectionMissing(readDialect(missing.probe?.ok ? missing.probe.info : null), zero), false);
+	assert.equal(collectionMissing(readDialect(missing.probe?.ok ? missing.probe.info : null), null), true, 'without stats the dialect decides');
+});
+
+test('the card description: the address, then the document count once the console has it', async () => {
+	const [f] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_pgvector')));
+	assert.equal(vectorCardView(f.endpoint, f.probe).description, vectorCardView(f.endpoint, f.probe).address);
+	assert.equal(vectorCardView(f.endpoint, f.probe, readStats({ ...fixture('stats_pgvector'), documents: 1234 })).description, `${vectorCardView(f.endpoint, f.probe).address} · 1,234 documents`);
+	assert.match(vectorCardView(f.endpoint, f.probe, readStats({ ...fixture('stats_pgvector'), documents: 1 })).description, / · 1 document$/);
+});
+
+test('the Collection facts: embedding, index, storage and writes from the dialect; nothing before it answers; stats fill what it lacks', async () => {
+	const [f] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_pgvector')));
+	const facts = new Map(collectionView(f.probe).flatMap((section) => section.rows.map((r) => [r.label, r.value] as const)));
+	assert.equal(facts.get('Model'), 'sentence-transformers/all-MiniLM-L6-v2');
+	assert.equal(facts.get('Dimensions'), '384');
+	assert.equal(facts.get('Metric'), 'cosine');
+	assert.equal(facts.get('Index'), 'hnsw (m 16, ef_construction 64)');
+	assert.equal(facts.get('Removing documents'), 'On (allow_writes)');
+	assert.match(facts.get('Delete mode') ?? '', /^(Moves to the Trash \(soft delete\)|Permanent only)$/);
+	assert.match(facts.get('Write batch') ?? '', /^\d[\d,]* documents per call$/);
+	assert.match(facts.get('Score') ?? '', /; range .*; (higher|lower) is closer$/);
+	assert.deepEqual(collectionView(undefined), [], 'no dialect: no sections, nothing invented');
+	const [empty] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_collection_missing')));
+	const before = new Map(collectionView(empty.probe).flatMap((section) => section.rows.map((r) => [r.label, r.value] as const)));
+	assert.equal(before.get('Model'), '—');
+	const after = new Map(collectionView(empty.probe, readStats({ ...fixture('stats_pgvector'), metric: 'cosine' })).flatMap((section) => section.rows.map((r) => [r.label, r.value] as const)));
+	assert.equal(after.get('Model'), 'sentence-transformers/all-MiniLM-L6-v2');
+	assert.equal(after.get('Metric'), 'cosine');
 });

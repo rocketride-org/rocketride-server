@@ -40,8 +40,9 @@
 // this view (queryVector) and is sent unchanged to `project`, `search` and
 // `neighbors` (scope scores). It passes through map/calls.ts, which forwards a
 // call's input untouched; no module under src/map reads or keeps it. The map never
-// writes: removals are asked of the console (actions.requestRemove), which
-// confirms them.
+// writes: removals are handed to the console, staged for its pending changes
+// where it offers that (actions.stageRemove), else asked of it
+// (actions.requestRemove), which confirms them.
 //
 // Every action lands back in the console: Open document, Ask about these only,
 // Remove, and the shared selection (focused chunk, highlights, lasso keys).
@@ -83,7 +84,7 @@ import { RecommendPanel } from '../components/RecommendPanel';
 import { SavedViewsMenu } from '../components/SavedViewsMenu';
 import { SimilarityMatrix } from '../components/SimilarityMatrix';
 import { recommendExamples } from '../adapters/connections';
-import type { Availability, ClusterMinSize, ColourBy, EdgeMode, EdgesPerPoint, ExamplePolarity, IChunksResult, IDocumentItem, IDocumentRowsSource, IEmbedResult, IExportItem, INeighborsResult, INeighborsScopeResult, IProjectItem, IProjectResult, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleInput, ISampleResult, ISavedView, ISavedViewRestore, ISavedViewState, ISearchResult, MapLayout, MapViewProps as ContractMapViewProps, SampleMode, ToolOutcome, VectorKey } from '../contract/types';
+import type { Availability, ClusterMinSize, ColourBy, EdgeMode, EdgesPerPoint, ExamplePolarity, IChunksResult, IDocumentItem, IDocumentRowsSource, IEmbedResult, IExportItem, INeighborsResult, INeighborsScopeResult, IProjectItem, IProjectResult, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleInput, ISampleResult, ISavedView, ISavedViewRestore, ISavedViewState, ISearchResult, MapLayout, MapViewProps as ContractMapViewProps, SampleMode, SelectionState, ToolOutcome, VectorKey } from '../contract/types';
 import { TSNE_MAX_POINTS } from '../map/budgets';
 import { callRecommend, callTool, isExpired } from '../map/calls';
 import type { ToolAnswer } from '../map/calls';
@@ -96,21 +97,23 @@ import { groupOf, groups, pairsAt } from '../map/dedupe';
 import { NO_EDGES, edgeStats, edgesOf, mergeEdges, spanningTree, topEdges, treeNeighbours } from '../map/graph';
 import { tweenPositions } from '../map/interaction';
 import type { KeyAction } from '../map/interaction';
-import { combineMasks, expandByNeighbours, isolateMask, isolationLine, shownCount } from '../map/isolate';
-import { UNSCOPED, applyTransform, chunkPath, clusterExportRows, ditherRounded, documentOf, drawnScope, duplicateExportRows, hiddenMask, keyIndex, keyString, mapScopeState, neighboursOf, normaliseLayout, pcaPositions, pointExportRows, pointKey, scopeDrawDue } from '../map/model';
+import { CLEAR_LABELS, clearStep, combineMasks, dimMask, expandByNeighbours, isolateMask, isolationLine, shownCount } from '../map/isolate';
+import { UNSCOPED, applyTransform, chunkPath, clusterExportRows, ditherRounded, documentOf, drawnScope, duplicateExportRows, hiddenMask, keyIndex, keyString, mapScopeState, neighboursOf, normaliseLayout, pcaPositions, pointExportRows, pointKey, removeTargetsOf, scopeDrawDue } from '../map/model';
 import type { ISampleScope, IScopeAttempt } from '../map/model';
 import { createLatestQueue } from '../map/neighbours';
-import type { IClusterLabel, IOverlayEnd, IPlace } from '../map/overlay';
-import { centroidStar, chatQueryPlan, comparePlan, placeProjected, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject, withSampleRetry } from '../map/queryProjection';
+import { EDGE_BUCKETS, edgeColours } from '../map/overlay';
+import type { IClusterLabel, IDuplicateRing, IOverlayEnd, IPlace } from '../map/overlay';
+import { centroidStar, chatQueryPlan, comparePlan, onSample, placeCompared, placeProjected, projectOn, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject } from '../map/queryProjection';
 import type { IStar } from '../map/queryProjection';
 import { polarityOf } from '../map/recommend';
+import { pairLabel, pairScale, stagedAnnouncement } from '../map/reviewWording';
 import { spawnLayoutWorker } from '../map/spawnWorker';
 import { MAP_STYLES } from '../map/styles';
-import { readPalette } from '../map/tokens';
+import { FALLBACK_PALETTE, readPalette } from '../map/tokens';
 import type { IMapPalette } from '../map/tokens';
 import { createLayoutClient } from '../map/workerClient';
 import type { ILayoutClient } from '../map/workerClient';
-import { BUSY, CENTROID_APPROX, CLUSTERS_UNSUPPORTED, EDGES_DEGRADED, EDGES_LIGHT_LIMIT, EDGES_LIGHT_NOTE, LAYOUT_CANCELLED, LAYOUT_NOT_BETTER, LIGHT_POSITIONS, MAP_UNAVAILABLE, QUERY_NEEDS_EMBED, QUERY_PLACED_APPROX, clusterAnnouncement, edgeLegend, listingNote, mapFailure, num, pointAnnouncement, sampleLabel, SCOPE_RETRY, scopeLine } from '../map/wording';
+import { BUSY, CENTROID_APPROX, CLUSTERS_UNSUPPORTED, EDGES_DEGRADED, EDGES_LIGHT_LIMIT, EDGES_LIGHT_NOTE, LAYOUT_CANCELLED, LAYOUT_NOT_BETTER, LIGHT_POSITIONS, MAP_UNAVAILABLE, QUERY_NEEDS_EMBED, QUERY_PLACED_APPROX, QUERY_SAMPLE_CHANGED, STAR_B_NEEDS_PROJECT, STAR_B_SAMPLE_CHANGED, clusterAnnouncement, edgeLegend, failedLine, listingNote, mapFailure, num, pointAnnouncement, sampleLabel, SCOPE_RETRY, scopeLine, starBNotPlaced, statusNotice } from '../map/wording';
 import { heatScores } from '../vector/heat';
 
 /** How many writes the console ran on the store (the connection's write count). */
@@ -187,6 +190,13 @@ function scopeOfSample(result: ISampleResult | null | undefined): ISampleScope {
 	return (result ? SAMPLE_SCOPES.get(result) : undefined) ?? NOT_RECORDED;
 }
 const NO_ROWS_SOURCE: IDocumentRowsSource = { getRows: () => NO_ROWS, subscribe: () => () => undefined };
+
+/**
+ * The highlights the Duplicates tab's "Show group" set: their pairs are ringed with their similarity while one of
+ * them is the highlight shown. Kept beside the highlight object, which the selection store holds across tab switches
+ * and remounts (its frozen shape has no field for it), the way SAMPLE_SCOPES is.
+ */
+const DUPLICATE_GROUPS = new WeakSet<NonNullable<SelectionState['highlight']>>();
 
 /** No console around the map: no write ever happens. */
 const NO_WRITES: IWriteCountSource = { get: () => 0, subscribe: () => () => undefined };
@@ -317,6 +327,8 @@ export interface SelectionTabProps {
 	onAskAbout(objectIds: readonly string[]): void;
 	/** "Move these documents to the trash": EVERY document of the selection; the console confirms and batches the writes (APP_SPEC §6). */
 	onRemove(objectIds: readonly string[]): void;
+	/** The console stages removals (its pending changes apply them): the button says so. */
+	staging?: boolean;
 	onCopy(keys: readonly VectorKey[]): void;
 	/** Show only the selected points on the map; absent: no such button. */
 	onIsolate?(keys: readonly VectorKey[]): void;
@@ -348,7 +360,7 @@ export function SelectionTab(props: SelectionTabProps): React.ReactElement {
 					Ask about these only
 				</button>
 				<button type="button" style={MAP_STYLES.button} disabled={!writes.enabled} onClick={() => props.onRemove(docs)}>
-					Move these documents to the trash
+					{props.staging ? 'Stage these documents for the trash' : 'Move these documents to the trash'}
 				</button>
 				<button type="button" style={MAP_STYLES.button} onClick={() => props.onCopy(keys)}>
 					Copy keys
@@ -447,6 +459,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const [neighbourError, setNeighbourError] = useState<string | null>(null);
 	const [chunkText, setChunkText] = useState<{ key: string; text: string } | null>(null);
 	const [query, setQueryView] = useState<IQueryView | null>(null);
+	/** Whether a placed query fades the points outside its top-k (a Clear turns it off until the next query). */
+	const [queryDims, setQueryDims] = useState(true);
 	/** True while a chat answer's question is being embedded and placed (no star until it lands, or fails). */
 	const [placingAnswer, setPlacingAnswer] = useState(false);
 	const [heat, setHeat] = useState<{ objectId: string; chunks: number; scores: Array<{ chunkId: number; sim: number }> } | null>(null);
@@ -656,6 +670,44 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		});
 	}, [neighbours, selected, sampleModel, neighbourPins, keyIdx, place, layout, raw, dims]);
 
+	// The shown duplicate group: its pairs (both ends shown) get rings and their similarity, while the Duplicates tab
+	// shows it and its highlight is still the one on the map.
+	const duplicateRings: IDuplicateRing[] = useMemo(() => {
+		if (!sample || tab !== 'duplicates' || highlight === null || !DUPLICATE_GROUPS.has(highlight)) return [];
+		const group = new Set(resolveKeys(highlight.keys, keyIdx, []).points);
+		return sample.duplicates.filter((d) => group.has(d.a) && group.has(d.b) && !(hidden && (hidden[d.a] || hidden[d.b]))).slice(0, MAX_DRAWN_DUPLICATES).map((d) => ({ a: d.a, b: d.b, label: pairLabel(d.sim, sample.metric) }));
+	}, [sample, tab, highlight, keyIdx, hidden]);
+
+	// Everything outside the set the map is showing is drawn faded: a selection with its neighbours, else a
+	// highlighted set, else a placed query's top-k.
+	const queryTop = useMemo(() => (queryDims ? rays.flatMap((e) => (e.index !== undefined ? [e.index] : [])) : []), [queryDims, rays]);
+	const dimmed = useMemo(() => {
+		if (!sample) return null;
+		return dimMask(sample.n, {
+			selected,
+			neighbours: neighbourEnds.flatMap((e) => (e.index !== undefined ? [e.index] : [])),
+			highlight: highlight ? resolveKeys(highlight.keys, keyIdx, []).points : null,
+			queryTop,
+		});
+	}, [sample, selected, neighbourEnds, highlight, keyIdx, queryTop]);
+	// A new question fades the rest again (its text: the search landing on the same query does not undo a Clear).
+	useEffect(() => setQueryDims(true), [query?.text]);
+
+	// What the legend's glyph row lists: only the marks drawn now.
+	const edgePalette = useMemo(() => edgeColours(palette ?? FALLBACK_PALETTE), [palette]);
+	const legendMarks = useMemo(() => {
+		if (!sample) return null;
+		const shownPair = (d: { a: number; b: number }): boolean => !(hidden && (hidden[d.a] || hidden[d.b]));
+		return {
+			edges: edgeSet ? { weakest: edgePalette[0] as string, strongest: edgePalette[EDGE_BUCKETS - 1] as string } : null,
+			links: selected !== null && neighbourEnds.length > 0,
+			outliers: sample.outliers.filter((i) => !(hidden && hidden[i])).length,
+			query: star && query?.search ? { top: query.search.results.length, drawn: rays.length } : null,
+			duplicates: sample.duplicates.slice(0, MAX_DRAWN_DUPLICATES).filter(shownPair).length,
+			rings: duplicateRings.length > 0 ? { scale: pairScale(sample.metric) } : null,
+		};
+	}, [sample, hidden, edgeSet, edgePalette, selected, neighbourEnds, star, query, rays, duplicateRings]);
+
 	const overlay = useMemo(
 		() => ({
 			selected,
@@ -667,10 +719,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			rays,
 			chunkPath: documentPath,
 			duplicates: (sample?.duplicates ?? []).slice(0, MAX_DRAWN_DUPLICATES).map((d): [number, number] => [d.a, d.b]),
+			duplicateRings,
 			outliers: sample?.outliers ?? [],
 			pulse,
 		}),
-		[selected, focused, ringPoints, neighbourEnds, pinnedPlaces, star, rays, documentPath, sample, pulse],
+		[selected, focused, ringPoints, neighbourEnds, pinnedPlaces, star, rays, documentPath, sample, duplicateRings, pulse],
 	);
 
 	// -------------------------------------------------------------------------
@@ -695,11 +748,13 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		setIsolated(null);
 		setEdgesDegraded(false);
 		setMatrixItem(null);
+		// Star B goes with every new sample, even one drawn again for the query (its place is in the old basis);
+		// the next showing places it on this one.
+		setQueryBView(null);
+		queryVectorB.current = null;
 		if (!keepQuery) {
 			setQueryView(null);
 			queryVector.current = null;
-			setQueryBView(null);
-			queryVectorB.current = null;
 			setColourBy((by) => colourAfterQuery(by, colourBefore.current));
 		}
 	}, []);
@@ -808,7 +863,10 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const pinKeys = useCallback(
 		async (keys: VectorKey[]): Promise<IProjectItem[]> => {
 			if (channel === null || !sampleModel || keys.length === 0) return [];
-			const answer = await withSampleRetry(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, keys: keys.slice(0, limits.project_keys_max), m: PROJECT_M }, { nodeId: storeNode }), resample);
+			const placed = await projectOn(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, keys: keys.slice(0, limits.project_keys_max), m: PROJECT_M }, { nodeId: storeNode }), resample);
+			// Projected on a sample replaced meanwhile: its places are in that sample's basis, so nothing is pinned.
+			if (!onSample(placed.sampleId, selection.getState().sampleModel?.sampleId)) return [];
+			const answer = placed.answer;
 			if (!answer.ok) {
 				if (!answer.stale) setNotice(mapFailure(answer.code, answer.message));
 				return [];
@@ -942,7 +1000,10 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	 */
 	const pinKeysQuiet = async (keys: VectorKey[], key: VectorKey, retried: boolean): Promise<IProjectItem[]> => {
 		if (channel === null || !sampleModel) return [];
-		const answer = await callTool<IProjectResult>(channel, 'project', { sample_id: sampleModel.sampleId, keys: keys.slice(0, limits.project_keys_max), m: PROJECT_M }, { nodeId: storeNode });
+		const asked = sampleModel.sampleId;
+		const answer = await callTool<IProjectResult>(channel, 'project', { sample_id: asked, keys: keys.slice(0, limits.project_keys_max), m: PROJECT_M }, { nodeId: storeNode });
+		// Projected on a sample replaced meanwhile: its places are in that sample's basis, so no hollow end is drawn.
+		if (!onSample(asked, selection.getState().sampleModel?.sampleId)) return [];
 		if (isExpired(answer) && !retried) {
 			repick.current = { key: keyString(key[0], key[1]), drawnAt: sampleModel.receivedAt };
 			void resample([key]).then((id) => {
@@ -991,10 +1052,10 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		lastHighlight.current = highlight;
 		if (highlight.source === 'lasso') return;
 		if (highlight.source === 'search') {
-			// Search's Compare told the map both questions before it highlighted both result lists: a star for each.
-			const compare = comparePlan({ told: state.query, toldB: state.queryB, mapQuery: query?.text ?? null, mapQueryB: queryB?.text ?? null, embedReady });
-			if (compare.runA) void runQuery(state.query as string, false, false);
-			if (compare.runB) void runQueryB(state.queryB as string);
+			// Search's Compare told the map both questions before it highlighted both result lists: a star for each,
+			// A then B (never two `project` calls at once). A B with no star is placed again on the next showing.
+			const compare = comparePlan({ told: state.query, toldB: state.queryB, mapQuery: query?.text ?? null, mapQueryB: queryB?.item ? queryB.text : null, embedReady });
+			void placeCompared(compare, () => runQuery(state.query as string, false, false), () => runQueryB(state.queryB as string));
 			return;
 		}
 		const res = resolveKeys(highlight.keys, keyIdx, sampleModel?.pinned ?? []);
@@ -1072,12 +1133,19 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			setError('The embedding node answered without a vector.');
 			return;
 		}
-		queryVector.current = vector;
 		setBusy(BUSY.projecting);
-		const projected = model.capabilities.project === false ? null : await withSampleRetry(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M, with_similarities: true }, { nodeId: storeNode }), resample);
+		const placed = model.capabilities.project === false ? null : await projectOn(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M, with_similarities: true }, { nodeId: storeNode }), resample);
+		const projected = placed?.answer ?? null;
 		const searched = await callTool<ISearchResult>(channel, 'search', { vector, top_k: Math.min(RAYS_TOP_K, limits.top_k_max), include_below_floor: true }, { nodeId: storeNode });
 		if (connectionRef.current !== key) return;
 		setBusy(null);
+		// Projected on a sample replaced meanwhile (another basis): not drawn, and said.
+		if (!onSample(placed?.sampleId ?? null, selection.getState().sampleModel?.sampleId)) {
+			setNotice(QUERY_SAMPLE_CHANGED);
+			return;
+		}
+		// Only now the map's question: the Heat strip and Recommend's "with query" never use one that was not drawn.
+		queryVector.current = vector;
 		const notes: string[] = [];
 		if (projected && !projected.ok) notes.push(mapFailure(projected.code, projected.message));
 		if (!searched.ok) notes.push(mapFailure(searched.code, searched.message));
@@ -1124,16 +1192,27 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		if (connectionRef.current !== key) return;
 		const vector = embedded.ok ? embedded.value.vectors[0] : undefined;
 		if (!Array.isArray(vector) || vector.length === 0) {
-			if (!embedded.ok && !embedded.stale) setNotice(mapFailure(embedded.code, embedded.message));
+			if (!embedded.ok && !embedded.stale) setNotice(starBNotPlaced(mapFailure(embedded.code, embedded.message)));
+			return;
+		}
+		const placed = model.capabilities.project === false ? null : await projectOn(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M }, { nodeId: storeNode }), resample);
+		const projected = placed?.answer ?? null;
+		const searched = await callTool<ISearchResult>(channel, 'search', { vector, top_k: Math.min(RAYS_TOP_K, limits.top_k_max), include_below_floor: true }, { nodeId: storeNode });
+		if (connectionRef.current !== key || selection.getState().queryB !== text) return;
+		// Projected on a sample replaced meanwhile (another basis): no star, and said; the next showing places it again.
+		if (!onSample(placed?.sampleId ?? null, selection.getState().sampleModel?.sampleId)) {
+			setNotice(starBNotPlaced(STAR_B_SAMPLE_CHANGED));
 			return;
 		}
 		queryVectorB.current = vector;
-		const projected = model.capabilities.project === false ? null : await withSampleRetry(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M }, { nodeId: storeNode }), resample);
-		const searched = await callTool<ISearchResult>(channel, 'search', { vector, top_k: Math.min(RAYS_TOP_K, limits.top_k_max), include_below_floor: true }, { nodeId: storeNode });
-		if (connectionRef.current !== key || selection.getState().queryB !== text) return;
 		const item = projected && projected.ok ? (projected.value.items[0] ?? null) : null;
 		const search = searched.ok ? searched.value : null;
 		setQueryBView({ text, item, sims: null, search, notes: [] });
+		if (item === null) {
+			// No star, so no rays from it: the status line says why.
+			setNotice(starBNotPlaced(projected === null ? STAR_B_NEEDS_PROJECT : !projected.ok ? mapFailure(projected.code, projected.message) : null));
+			return;
+		}
 		if (search) {
 			const current = selection.getState().sampleModel;
 			const outside = raysFromSearch(search, current ? keyIndex(current.result) : keyIdx, current?.pinned ?? []).outside;
@@ -1181,6 +1260,24 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	// Lasso and keys
 	// -------------------------------------------------------------------------
 
+	/**
+	 * Removals: staged for the console's pending changes where it offers that (named by the sample's paths and
+	 * chunk counts, so the pending bar and the confirmation show files, not ids), else confirmed by it at once.
+	 */
+	const staging = actions.stageRemove !== undefined;
+	const removeDocuments = useCallback(
+		(objectIds: readonly string[]): void => {
+			// Staged: the console's pending bar shows the count, and every press is announced (a repeat too). Nothing
+			// is inserted in the panel, so no row moves under the pointer between two presses.
+			if (actions.stageRemove && sample) {
+				const targets = removeTargetsOf(sample, objectIds);
+				actions.stageRemove(targets);
+				actions.announce(stagedAnnouncement(targets.length));
+			} else actions.requestRemove(objectIds);
+		},
+		[actions, sample],
+	);
+
 	const onLasso = useCallback(
 		(indices: readonly number[]): void => {
 			if (!sample) return;
@@ -1207,20 +1304,38 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		[sample, hidden, actions],
 	);
 
+	// What Escape and the toolbar's Clear clear next, in order: the lasso, then a highlight (or a query's fading),
+	// then the selected point; one step each (map/isolate.ts clearStep).
+	// This connection's selection only (the store holds another connection's until it is reset).
+	const ownKeys = state.connectionKey === model.connectionKey ? state.keys : [];
+	const lassoActive = lasso || (highlight?.source === 'lasso' ? highlight.keys.length > 0 : ownKeys.length > 0);
+	const highlightActive = (highlight !== null && highlight.source !== 'lasso') || queryTop.length > 0;
+	const nextClear = clearStep({ lasso: lassoActive, highlight: highlightActive, selection: selected !== null || focused !== null });
+	const clearOnce = useCallback((): void => {
+		if (nextClear === 'lasso') {
+			setLasso(false);
+			selection.setKeys([]);
+			if (highlight?.source === 'lasso') selection.setHighlight(null);
+			actions.announce('Lasso selection cleared.');
+		} else if (nextClear === 'highlight') {
+			if (highlight !== null && highlight.source !== 'lasso') selection.setHighlight(null);
+			setQueryDims(false);
+			actions.announce('Highlight cleared.');
+		} else if (nextClear === 'selection') {
+			setSelected(null);
+			setFocused(null);
+			setNeighbours(null);
+			actions.announce('Selection cleared.');
+		}
+	}, [nextClear, selection, highlight, actions]);
+
 	const onKeyAction = useCallback(
 		(action: KeyAction): void => {
 			if (action === 'inspect' && focused !== null) void onPick(focused);
-			else if (action === 'clear') {
-				setSelected(null);
-				setFocused(null);
-				setNeighbours(null);
-				setLasso(false);
-				selection.setKeys([]);
-				if (state.highlight?.source === 'lasso') selection.setHighlight(null);
-				actions.announce('Selection cleared.');
-			} else if (action === 'lasso') setLasso((on) => !on);
+			else if (action === 'clear') clearOnce();
+			else if (action === 'lasso') setLasso((on) => !on);
 		},
-		[focused, onPick, selection, state.highlight, actions],
+		[focused, onPick, clearOnce],
 	);
 
 	// -------------------------------------------------------------------------
@@ -1420,11 +1535,12 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		out.height = Math.max(1, Math.round(source.height * scale)) + Math.round(lineH * (lines.length + 1));
 		const octx = out.getContext('2d');
 		if (!octx) return null;
-		const style = getComputedStyle(document.documentElement);
-		octx.fillStyle = style.getPropertyValue('--rr-bg-default').trim() || '#ffffff';
+		// The theme the map is drawn in (its own fallbacks, by mode, in an unthemed host).
+		const theme = palette ?? FALLBACK_PALETTE;
+		octx.fillStyle = theme.surfaces.default;
 		octx.fillRect(0, 0, out.width, out.height);
 		octx.drawImage(source, 0, 0, out.width, Math.round(source.height * scale));
-		octx.fillStyle = style.getPropertyValue('--rr-text-primary').trim() || '#1a1a1a';
+		octx.fillStyle = theme.text;
 		octx.font = `${12 * ratio}px system-ui, sans-serif`;
 		const top = Math.round(source.height * scale);
 		lines.forEach((line, n) => {
@@ -1433,11 +1549,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 				octx.fillStyle = line.colour;
 				octx.fillRect(8 * ratio, y - 9 * ratio, 9 * ratio, 9 * ratio);
 			}
-			octx.fillStyle = style.getPropertyValue('--rr-text-primary').trim() || '#1a1a1a';
+			octx.fillStyle = theme.text;
 			octx.fillText(line.text, (line.colour ? 22 : 8) * ratio, y);
 		});
 		return new Promise<Blob | null>((resolve) => out.toBlob((blob) => resolve(blob), 'image/png'));
-	}, [sample, colouring, model.collection, shownPoints, layout, colourBy]);
+	}, [sample, colouring, model.collection, shownPoints, layout, colourBy, palette]);
 
 	/** The toolbar's export items: the sample, the selection, the points shown, the clusters, the duplicates, the outliers, the PNG. */
 	const exportItems: IExportItem[] = useMemo(() => {
@@ -1583,7 +1699,13 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const edgeStatsNow = edgeSet ? edgeStats(edgeSet) : null;
 	const edgeLine = sample ? edgeLegend({ mode: edges, m: edgesPerPoint, count: edgeStatsNow?.count ?? 0, min: edgeStatsNow?.min ?? null, max: edgeStatsNow?.max ?? null, points: shownPoints, components: tree?.components ?? 0, expanded: expanded.length }) : null;
 	const listingLine = sample ? listingNote(sample) : null;
+	// Why the toolbar's Query and t-SNE are off, in full (the toolbar has them as the controls' descriptions only).
+	const queryWhy = !model.embed.enabled && model.embed.reason ? model.embed.reason : null;
+	const toolbarReasons = [queryWhy, tsneReason].filter((line): line is string => line !== null);
 	const legendNotes = [
+		// A failure while the map is shown, whole (the status line may cut it).
+		...(sample && error ? [failedLine(error)] : []),
+		...toolbarReasons,
 		...(query?.notes ?? []),
 		...(star && !star.exact && !query?.item ? [CENTROID_APPROX] : []),
 		...(sample?.mode === 'light' && layout === 'pca' ? [LIGHT_POSITIONS] : []),
@@ -1594,8 +1716,17 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		...(listingLine ? [listingLine] : []),
 		...(sample ? [scopeLine(scopeState, scopeTarget.key ? scopeTarget : null, shownScope.drawn.key ? shownScope.drawn : null)].filter((line): line is string => line !== null) : []),
 		...(isolation ? [isolationLine(isolation.shown, isolation.n)] : []),
-		...(queryB ? [`Hollow star: "${queryB.text}" (compared in Search)`] : []),
+		// Only while the hollow star is drawn.
+		...(queryB && starB ? [`Hollow star: "${queryB.text}" (compared on the Query tab)`] : []),
 	];
+	// The status line's sentence (map/wording.ts statusNotice): nothing is put between the toolbar and the map.
+	const said = statusNotice({ error, notice, savedQuery, hasSample: sample !== null });
+	const runSavedQuery = (): void => {
+		if (savedQuery === null) return;
+		setSavedQuery(null);
+		void runQuery(savedQuery);
+	};
+	const lineNotice = said && { text: said.text, failure: said.kind === 'error', action: said.kind === 'saved-query' ? { label: 'Run saved query', reason: embedReady ? null : QUERY_NEEDS_EMBED, onAction: runSavedQuery } : null };
 	const describe = (index: number): string => {
 		if (!sample) return '';
 		const doc = documentOf(sample, index);
@@ -1617,7 +1748,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			data-renderer={rendererKind}
 			data-query-state={query === null ? 'none' : query.item || query.search ? 'placed' : 'failed'}
 			data-rays={rays.length}
-			data-query-b-state={queryB === null ? 'none' : queryB.item || queryB.search ? 'placed' : 'failed'}
+			data-query-b-state={queryB === null ? 'none' : starB ? 'placed' : 'failed'}
 			data-colour-by={colourBy}
 			data-edge-mode={edges}
 			data-edges-per-point={edgesPerPoint}
@@ -1632,6 +1763,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			data-scope-state={sample ? scopeState : ''}
 		>
 			<MapToolbar
+				clear={nextClear !== null ? { label: CLEAR_LABELS[nextClear], onClear: clearOnce } : null}
+				notice={lineNotice}
 				limits={model.capabilities.sample_light === false ? { ...limits, sample_max_light: limits.sample_max } : limits}
 				sample={sampleModel}
 				busy={busy ?? layoutBusy}
@@ -1670,32 +1803,18 @@ export function MapView(props: MapViewProps): React.ReactElement {
 					</>
 				}
 			/>
-			{error ? (
-				<div style={{ padding: '8px 10px' }}>
-					<Banner variant="error">{error}</Banner>
-				</div>
-			) : null}
-			{notice ? <p style={{ ...MAP_STYLES.note, padding: '0 10px' }}>{notice}</p> : null}
-			{savedQuery ? (
-				<div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '0 10px' }}>
-					<span style={MAP_STYLES.small}>This view had the query "{savedQuery}".</span>
-					<button
-						type="button"
-						style={MAP_STYLES.button}
-						disabled={!embedReady}
-						title={embedReady ? undefined : QUERY_NEEDS_EMBED}
-						onClick={() => {
-							const text = savedQuery;
-							setSavedQuery(null);
-							void runQuery(text);
-						}}
-					>
-						Run saved query
-					</button>
-				</div>
-			) : null}
 			{!sample ? (
 				<div style={{ padding: 16 }}>
+					{error ? (
+						<div style={{ marginBottom: 8 }}>
+							<Banner variant="error">{error}</Banner>
+						</div>
+					) : null}
+					{toolbarReasons.map((line) => (
+						<p key={line} style={MAP_STYLES.note}>
+							{line}
+						</p>
+					))}
 					<EmptyState
 						title={busy ? BUSY.sampling : 'No sample drawn yet'}
 						description={busy ? `Drawing up to ${num(Math.min(limits.sample_default, limits.sample_max))} points from the store.` : 'Draw a sample of the collection to see its points.'}
@@ -1722,6 +1841,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 								outlined={colouring?.outlined ?? null}
 								hidden={hidden}
 								emphasised={emphasised}
+								dimmed={dimmed}
+								dimOnHover={clusters !== null && (colourBy === 'cluster' || tab === 'clusters')}
 								overlay={overlay}
 								palette={palette}
 								pointSizePx={sample.mode === 'light' ? 3.5 : 5.5}
@@ -1737,6 +1858,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 								onLasso={onLasso}
 								onFocusMove={onFocusMove}
 								onKeyAction={onKeyAction}
+								canClear={nextClear !== null}
 								onRendererInfo={setRendererKind}
 								layout={layout}
 								selectionCount={lassoKeys.length > 0 ? lassoKeys.length : null}
@@ -1752,7 +1874,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 								cameraOverride={cameraOverride}
 							/>
 						</div>
-						<Legend sample={sampleModel!} colourBy={colourBy} pointCap={pointCap} backend={backend} colouring={colouring} notes={legendNotes} scopeRetry={scopeState === 'failed' && busy === null ? { label: SCOPE_RETRY, onClick: retryScope } : null} />
+						<Legend sample={sampleModel!} colourBy={colourBy} pointCap={pointCap} backend={backend} colouring={colouring} notes={legendNotes} marks={legendMarks} scopeRetry={scopeState === 'failed' && busy === null ? { label: SCOPE_RETRY, onClick: retryScope } : null} />
 					</div>
 					<aside style={MAP_STYLES.side} aria-label="Map details">
 						<div role="tablist" aria-label="Map details" style={MAP_STYLES.tabs}>
@@ -1780,7 +1902,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 										selectKey(key);
 									}}
 									onSelectNeighbour={selectKey}
-									onRemoveDocument={(objectId) => actions.requestRemove([objectId])}
+									onRemoveDocument={(objectId) => removeDocuments([objectId])}
+									staging={staging}
 									treeNeighbours={edges === 'tree' && tree && selected !== null ? treeNeighbours(tree.edges, selected) : null}
 									onAddExample={onAddExample}
 									examplePolarity={selectedKey ? polarityOf(examples, selectedKey) : null}
@@ -1809,11 +1932,16 @@ export function MapView(props: MapViewProps): React.ReactElement {
 								<DuplicatesPanel
 									sample={sampleModel!}
 									writes={model.writes}
-									onSelect={(indices) => selection.setHighlight({ source: 'neighbors', keys: indices.map((i) => pointKey(sample, i)) })}
-									onRemoveDocument={(objectId) => actions.requestRemove([objectId])}
+									onSelect={(indices) => {
+										selection.setHighlight({ source: 'neighbors', keys: indices.map((i) => pointKey(sample, i)) });
+										const shown = selection.getState().highlight;
+										if (shown) DUPLICATE_GROUPS.add(shown);
+									}}
+									onRemoveDocument={(objectId) => removeDocuments([objectId])}
 									connectionKey={model.connectionKey}
 									documents={props.documents ?? null}
-									onRemoveDocuments={(objectIds) => actions.requestRemove(objectIds)}
+									onRemoveDocuments={(objectIds) => removeDocuments(objectIds)}
+									staging={staging}
 									onOpenDocument={(objectId, chunkId) => actions.openDocument(objectId, chunkId)}
 								/>
 							) : null}
@@ -1826,7 +1954,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 									}}
 									connectionKey={model.connectionKey}
 									writes={model.writes}
-									onRemoveDocument={(objectId) => actions.requestRemove([objectId])}
+									onRemoveDocument={(objectId) => removeDocuments([objectId])}
+									staging={staging}
 									onShowNeighbours={(i) => {
 										void onPick(i);
 										setTab('neighbours');
@@ -1874,7 +2003,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 									chat={model.chat}
 									writes={model.writes}
 									onAskAbout={(ids) => actions.askAbout(ids)}
-									onRemove={(ids) => actions.requestRemove(ids)}
+									onRemove={(ids) => removeDocuments(ids)}
+									staging={staging}
 									onCopy={(keys) => {
 										const text = JSON.stringify(keys);
 										if (typeof navigator !== 'undefined' && navigator.clipboard) navigator.clipboard.writeText(text).then(() => actions.announce(`Copied ${num(keys.length)} keys.`), () => actions.announce(COPY_KEYS_BLOCKED));

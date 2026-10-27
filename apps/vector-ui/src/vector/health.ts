@@ -64,7 +64,7 @@ export const ATTENTION_KINDS: readonly HealthKind[] = ['no_first_chunk', 'gaps',
 export const OVERSIZE_FACTOR = 10;
 
 /** Why gaps and deleted chunks are not checked on a store. */
-export const HEALTH_NOT_REPORTED = 'This store does not report chunk ids or soft-deleted chunks per document, so gaps and deleted chunks are not checked; pgvector stores report them.';
+export const HEALTH_NOT_REPORTED = 'This store does not report chunk ids or soft-deleted chunks per document, so gaps and deleted chunks are not checked; pgvector and RocketRide Vector stores report them.';
 
 /** One flag. */
 export interface IHealthFlag {

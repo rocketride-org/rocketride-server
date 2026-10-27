@@ -27,15 +27,28 @@
 // ConsoleActions (src/contract/types.ts) are the only way another part of the
 // app changes what the console shows: open a document tab, show keys on the
 // map, ask to remove documents (the console confirms first; nothing is sent
-// here), scope the next chat question, refresh after an upload, announce.
+// here, on the surface that asked) or stage them for the pending bar, show
+// one of the console's tabs, hand a text to the Query tab, scope the next
+// chat question, refresh after an upload, announce.
 // Two helpers tell the map a question before they highlight: a chat answer's
 // (showAnswerOnMap) and Search's two compared questions (showCompareOnMap).
+//
+// Two small per-connection values pass between the console's parts without
+// a prop path, each made on first use and kept with the connection's staged
+// set (so they go when its entry goes, in both mounts): whether the
+// Documents tab shows only the staged documents (the pending bar's Review),
+// and the folder its list is narrowed to (the rail, Overview's Top folders).
 // =============================================================================
 
-import type { ConsoleActions, HighlightSource, SelectionStore, VectorKey } from '../contract/types';
-import type { IRemoveTarget } from '../vector/confirm';
+import type { ConsoleActions, HighlightSource, IStageTarget, SelectionStore, VectorKey } from '../contract/types';
+import { CONSOLE_ORIGIN } from '../vector/confirm';
+import type { ConfirmOrigin, IRemoveTarget } from '../vector/confirm';
 import { DEFAULT_LIMITS } from '../vector/results';
-import type { IConnectionEntry } from './connections';
+import { stage } from '../vector/staged';
+import type { FolderView } from '../vector/tree';
+import type { WorkbenchTab } from '../vector/workbench';
+import { createValueStore } from './connections';
+import type { IConnectionEntry, IValueStore } from './connections';
 
 /**
  * What "Ask about these" says instead of scoping the chat to more documents than the node takes.
@@ -59,6 +72,8 @@ export interface IConsoleActionDeps {
 	showConsole(): void;
 	/** Speak through the polite live region. */
 	announce(text: string): void;
+	/** The surface these actions belong to: its confirmations show there (default the console). */
+	origin?: ConfirmOrigin;
 }
 
 /**
@@ -78,6 +93,21 @@ export function removeTargets(entry: Pick<IConnectionEntry, 'controller' | 'sele
 		return { objectId, path: selected?.objectId === objectId ? selected.path : objectId, chunks: null };
 	});
 }
+
+/**
+ * Staging targets completed from the loaded rows: a path or count the caller gave wins over the row's.
+ *
+ * @param entry - The connection.
+ * @param targets - The documents, with what the caller knows of them.
+ * @returns The remove targets, in the order asked.
+ */
+export function stageTargets(entry: Pick<IConnectionEntry, 'controller' | 'selection'>, targets: readonly IStageTarget[]): IRemoveTarget[] {
+	const known = removeTargets(entry, targets.map((t) => t.objectId));
+	return targets.map((t, i) => ({ objectId: t.objectId, path: t.path || known[i].path, chunks: t.chunks ?? known[i].chunks }));
+}
+
+/** Prefills handed to the Query tab, each taken once by its nonce. */
+let prefills = 0;
 
 /**
  * Show a chat answer's sources on the map. The map is told the answer's
@@ -131,7 +161,8 @@ export function showCompareOnMap(selection: Pick<SelectionStore, 'setQuery' | 's
  * @param deps - Opening a document tab, fronting the connection's console and announcing.
  * @returns The actions.
  */
-export function makeConsoleActions(entry: Pick<IConnectionEntry, 'controller' | 'selection' | 'tab' | 'chatScope'> & Partial<Pick<IConnectionEntry, 'ctx'>>, deps: IConsoleActionDeps): ConsoleActions {
+export function makeConsoleActions(entry: Pick<IConnectionEntry, 'controller' | 'selection' | 'tab' | 'queryMode' | 'queryPrefill' | 'chatScope' | 'staged'> & Partial<Pick<IConnectionEntry, 'ctx'>>, deps: IConsoleActionDeps): ConsoleActions {
+	const origin = deps.origin ?? CONSOLE_ORIGIN;
 	return {
 		openDocument: (objectId: string, chunkId?: number) => deps.openDocument(objectId, chunkId),
 		showOnMap: (keys: readonly VectorKey[], source: HighlightSource) => {
@@ -139,7 +170,21 @@ export function makeConsoleActions(entry: Pick<IConnectionEntry, 'controller' | 
 			entry.tab.set('map');
 			deps.showConsole();
 		},
-		requestRemove: (objectIds: readonly string[]) => entry.controller.requestRemove(removeTargets(entry, objectIds)),
+		requestRemove: (objectIds: readonly string[], known?: readonly IStageTarget[]) => entry.controller.requestRemove(known ? stageTargets(entry, known.filter((t) => objectIds.includes(t.objectId))) : removeTargets(entry, objectIds), origin),
+		restore: (objectIds: readonly string[], known?: readonly IStageTarget[]) => entry.controller.restore(known ? stageTargets(entry, known.filter((t) => objectIds.includes(t.objectId))) : removeTargets(entry, objectIds), origin),
+		// Nothing is confirmed or sent here: the pending bar applies the staged set through requestRemove.
+		stageRemove: (targets: readonly IStageTarget[]) => entry.staged.set(stage(entry.staged.get(), stageTargets(entry, targets))),
+		openTab: (tab: WorkbenchTab) => {
+			entry.tab.set(tab);
+			deps.showConsole();
+		},
+		useAsQuery: (text: string) => {
+			prefills += 1;
+			entry.queryPrefill.set({ nonce: `prefill-${prefills}`, question: text, mode: 'search' });
+			entry.queryMode.set('search');
+			entry.tab.set('query');
+			deps.showConsole();
+		},
 		askAbout: (objectIds: readonly string[]) => {
 			// The chat's question carries the ids as its filter: never more than the node takes.
 			const cap = entry.ctx?.limits.scope_keys_max ?? DEFAULT_LIMITS.scope_keys_max;
@@ -148,10 +193,49 @@ export function makeConsoleActions(entry: Pick<IConnectionEntry, 'controller' | 
 				return;
 			}
 			entry.chatScope.set(objectIds.length === 0 ? null : [...objectIds]);
-			entry.tab.set('console');
+			entry.queryMode.set('ask');
+			entry.tab.set('query');
 			deps.showConsole();
 		},
 		documentsChanged: () => entry.controller.documentsChanged(),
 		announce: (text: string) => deps.announce(text),
 	};
+}
+
+/** The Documents tab shows only the staged documents, per connection (the pending bar's Review). */
+const reviews = new WeakMap<object, IValueStore<boolean>>();
+
+/**
+ * Whether the connection's Documents tab shows only its staged documents.
+ *
+ * @param entry - The connection (its staged set keys the value).
+ * @returns The value store.
+ */
+export function stagedReview(entry: Pick<IConnectionEntry, 'staged'>): IValueStore<boolean> {
+	let store = reviews.get(entry.staged);
+	if (!store) {
+		store = createValueStore(false);
+		reviews.set(entry.staged, store);
+	}
+	return store;
+}
+
+/** The folder the Documents tab's list is narrowed to, per connection (vector/tree.ts FolderView). */
+const folders = new WeakMap<object, IValueStore<FolderView | null>>();
+
+/**
+ * The folder the connection's Documents tab narrows its list to: a view of the loaded rows (subfolders included),
+ * never the scope and never a new listing. Null shows every loaded document. The folder rail sets it; another tab
+ * (Overview's Top folders) sets it, then shows the Documents tab (`openTab('documents')`).
+ *
+ * @param entry - The connection (its staged set keys the value).
+ * @returns The value store.
+ */
+export function documentsFolder(entry: Pick<IConnectionEntry, 'staged'>): IValueStore<FolderView | null> {
+	let store = folders.get(entry.staged);
+	if (!store) {
+		store = createValueStore<FolderView | null>(null);
+		folders.set(entry.staged, store);
+	}
+	return store;
 }

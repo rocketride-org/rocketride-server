@@ -34,6 +34,7 @@ import { consoleUri, documentUri } from '../src/vector/addresses';
 import { chunkTextScope, createChunkTextCache } from '../src/components/ChunkTextPanel';
 import { createCacheRegistry } from '../src/vector/identityChange';
 import { DEFAULT_LIMITS, readDialect } from '../src/vector/results';
+import { NO_STAGED, stage } from '../src/vector/staged';
 import { fixture } from './support/fixtures';
 import { account, disposeAll, latestStateMap, mountController, settle, signInVsCode, until, vscodeRealm } from './support/devtool';
 import { mountFrame } from './support/devtoolFrame';
@@ -235,22 +236,27 @@ describe('the console frame: hints out, other frames\' writes and map requests i
 	it('a map request (from a document frame) lands on its map once: highlight and the Map tab; a console mounted later finds nothing', async () => {
 		const run = await connected((key) => consoleUri(key));
 		const entry = entryOf(run);
-		const unbind = run.frame.bindConsole(entry);
+		let arrivals = 0;
+		const unbind = run.frame.bindConsole(entry, { arrived: () => void (arrivals += 1) });
 		const doc = mountFrame(run.h, documentUri(run.key, ID), { hintDelayMs: 0 });
 		await until(() => doc.frame.endpoints.get().endpoints.length === 1 && doc.frame.controllerReady.get(), 'the document frame');
 		const docEntry = doc.frame.env(true).connection(doc.frame.endpoints.get().endpoints[0], DEFAULT_LIMITS);
 		const actions = doc.frame.documentActions(docEntry);
+		assert.equal(arrivals, 0, 'no press, no arrival');
 		actions.showOnMap([[ID, 0], [ID, 1]], 'document');
 		assert.deepEqual(doc.docs.opened.map((o) => o.key), [consoleUri(run.key)], 'the console is opened (or fronted)');
 		await until(() => entry.tab.get() === 'map', 'the console to switch to its map');
 		assert.deepEqual(entry.selection.getState().highlight, { source: 'document', keys: [[ID, 0], [ID, 1]] });
+		assert.equal(arrivals, 1, "the press's arrival (B5): the console frame takes the focus to its Map tab if nothing shown has it");
 		await until(() => (latestStateMap(run.h)[STATE.mapRequests]?.snapshot as Record<string, unknown> | undefined)?.[run.key] === undefined, 'taken, so the controller ends it');
 		const later = mountFrame(run.h, consoleUri(run.key), { hintDelayMs: 0 });
 		await until(() => later.frame.endpoints.get().endpoints.length === 1, 'a later console');
 		const laterEntry = later.frame.env(true).connection(later.frame.endpoints.get().endpoints[0], DEFAULT_LIMITS);
-		const unbindLater = later.frame.bindConsole(laterEntry);
+		let laterArrivals = 0;
+		const unbindLater = later.frame.bindConsole(laterEntry, { arrived: () => void (laterArrivals += 1) });
 		await settle();
-		assert.equal(laterEntry.tab.get(), 'console', 'nothing to take');
+		assert.equal(laterEntry.tab.get(), 'overview', 'nothing to take: it stays on the tab a connection opens on');
+		assert.equal(laterArrivals, 0, 'and takes no focus');
 		unbindLater();
 		unbind();
 		for (const f of [later, doc, run]) f.frame.dispose();
@@ -327,7 +333,7 @@ describe('the document frame: its focus, the console\'s query and median, and wr
 	it('a chunk focus for its document is taken once; one for another document is not; the console\'s query becomes its own', async () => {
 		const run = await connected((key) => documentUri(key, ID));
 		const entry = entryOf(run);
-		const focused: number[] = [];
+		const focused: Array<number | null> = [];
 		const versions: IDocVersion[] = [];
 		const unbind = run.frame.bindDocument(entry, ID, { focus: (chunkId) => focused.push(chunkId), version: (v) => versions.push(v) });
 		const console = mountFrame(run.h, consoleUri(run.key), { hintDelayMs: 0 });
@@ -342,6 +348,11 @@ describe('the document frame: its focus, the console\'s query and median, and wr
 		await settle();
 		await settle();
 		assert.deepEqual(focused, [3], 'a focus for another document is not taken');
+		// B5: a row's "open" (no chunk) is the press's arrival: taken once, with no chunk, and the chunk shown stays.
+		console.frame.env(true).openDocument(run.endpoint, ID, 'a.md');
+		await until(() => focused.length === 2, 'the arrival');
+		assert.deepEqual(focused, [3, null]);
+		assert.deepEqual(entry.selection.getState().chunk, [ID, 3]);
 		consoleEntry.selection.setQuery('radio check-in');
 		await until(() => entry.selection.getState().query === 'radio check-in', 'the console\'s query, for the heat strip');
 		assert.equal(run.frame.summaries.get()[run.key]?.medianChunks, undefined, 'no summary until the console listed');
@@ -354,6 +365,27 @@ describe('the document frame: its focus, the console\'s query and median, and wr
 		unbindConsole();
 		unbind();
 		console.frame.dispose();
+		run.frame.dispose();
+		run.controller.dispose();
+	});
+
+	it('another frame\'s write takes the documents it moved out of the console\'s staged set; a document frame stages nothing and switches no tab', async () => {
+		const run = await connected((key) => consoleUri(key));
+		const entry = entryOf(run);
+		const unbind = run.frame.bindConsole(entry);
+		entry.staged.set(stage(NO_STAGED, [{ objectId: ID, path: 'a.md', chunks: 2 }, { objectId: 'kept', path: 'b.md', chunks: 1 }]));
+		const doc = mountFrame(run.h, documentUri(run.key, ID), { hintDelayMs: 0 });
+		await until(() => doc.frame.endpoints.get().endpoints.length === 1 && doc.frame.controllerReady.get(), 'the document frame');
+		const docEntry = doc.frame.env(true).connection(doc.frame.endpoints.get().endpoints[0], DEFAULT_LIMITS);
+		const actions = doc.frame.documentActions(docEntry);
+		assert.equal(actions.stageRemove, undefined, 'its Move to trash confirms in the document (D9)');
+		assert.equal(actions.openTab, undefined, "the console's tabs are another frame's");
+		assert.equal(actions.useAsQuery, undefined, 'and so is its Query tab (D9b)');
+		await doc.frame.caller.callReply(OP.trash, { key: run.key, input: { object_ids: [ID] }, origin: doc.frame.origin }, { timeoutMs: 30_000 });
+		await until(() => !entry.staged.get().has(ID), 'the moved document to leave the staged set');
+		assert.deepEqual([...entry.staged.get().keys()], ['kept']);
+		unbind();
+		doc.frame.dispose();
 		run.frame.dispose();
 		run.controller.dispose();
 	});
@@ -567,15 +599,22 @@ describe('a frame\'s reset clears its own objects; only an identity reset forget
 		};
 
 		let entry = frameObjects();
+		const history = run.frame.env(true).queryHistory;
+		assert.equal(history.persisted, false, 'a frame stores no history');
+		history.record(key, { question: 'q', kind: 'semantic', at: 1, ms: 1, topK: 10, results: 1, outcome: 'rows' });
+		assert.equal(history.entries(key).get().length, 1, 'recorded at once, in memory');
+		entry.staged.set(stage(NO_STAGED, [{ objectId: 'doc-staged', path: 'a.md', chunks: 1 }]));
 		run.h.setHostConnection(false);
 		await until(() => run.frame.lastReset() === 'disconnected', 'the frame\'s host-drop reset');
 		assert.equal(run.frame.connections.count(), 0, 'the frame\'s own objects are gone');
+		assert.equal(history.entries(key).get().length, 1, 'a host drop keeps the Query history');
 		assert.equal(entry.selection.getState().connectionKey, null, 'and reset');
 		assert.deepEqual(appState(), ALL_KEPT, 'a host drop leaves the full app\'s state for the same connection alone');
 
 		run.h.setHostConnection(true);
 		await until(() => run.frame.connected.get() === true, 'the host back');
 		entry = frameObjects();
+		assert.deepEqual([...entry.staged.get().keys()], ['doc-staged'], "and the connection's new objects take back what was staged");
 		run.engine.realm.root.disconnect();
 		await until(() => run.frame.lastReset() === 'unknown', 'the frame\'s unknown reset');
 		assert.equal(run.frame.connections.count(), 0, 'the frame\'s own objects are gone');
@@ -585,9 +624,12 @@ describe('a frame\'s reset clears its own objects; only an identity reset forget
 		run.engine.realm.root.connect(account('u1'));
 		await settle();
 		entry = frameObjects();
+		entry.staged.set(stage(NO_STAGED, [{ objectId: 'doc-staged', path: 'a.md', chunks: 1 }]));
 		run.engine.realm.root.connect(account('u2'));
 		await until(() => run.frame.lastReset() === 'identity', 'the frame\'s identity reset');
 		assert.equal(run.frame.connections.count(), 0, 'the frame\'s own objects are gone');
+		assert.equal(history.entries(key).get().length, 0, 'another identity: the Query history goes');
+		assert.equal(entryOf(run).staged.get().size, 0, 'and so does what was staged');
 		assert.deepEqual(appState(), { ...ALL_KEPT, filters: false, views: false, reviewed: false, examples: false },
 			'an identity reset forgets the frame\'s connection in the per-connection caches; the app\'s registry, chat and uploads are the app\'s to clear, another connection is untouched');
 		assert.ok(!connectionCaches.forgetKey('k1|nothing').includes(CHAT_AND_INGEST_CACHE), 'chat and uploads have no per-connection forget');

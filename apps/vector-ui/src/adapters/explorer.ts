@@ -56,8 +56,11 @@ import { DEFAULT_TOOL_TIMEOUTS, VECTOR_ROLES, checkObject, createActiveKeyStore,
 import type { IEndpointStore, IEndpointStoreOptions, IExplorerComponent, IHistoryStore, IProbeResult, IRequestChannel, IToolSession, IToolSpec } from 'shared/explorer';
 import { EMBED_TOOL } from '../contract/types';
 import type { VectorKey } from '../contract/types';
+import { APP_HISTORY_NOTE } from '../env';
+import type { IQueryHistorySource } from '../env';
 import { createCacheRegistry } from '../vector/identityChange';
 import type { ICacheRegistry } from '../vector/identityChange';
+import { QUERY_HISTORY_LIMITS, persistedQueryHistory } from './queryHistory';
 
 // =============================================================================
 // PROVIDERS, TOOLS
@@ -206,18 +209,22 @@ export function makeVectorEndpointStore(overrides: Partial<IEndpointStoreOptions
 export const vectorEndpoints: IEndpointStore = makeVectorEndpointStore();
 
 /**
- * Make the chat history store (`vector.history`, text field `question`):
- * questions only, never answers, documents or tokens.
+ * Make the Query history store (`vector.history`, text field `question`):
+ * questions only (their first 200 characters), never answers, documents or
+ * tokens.
  *
  * @param persistDelayMs - Debounce before a write (tests shorten it).
  * @returns The store.
  */
 export function makeVectorHistory(persistDelayMs?: number): IHistoryStore<'question'> {
-	return createHistoryStore({ historyKey: 'vector.history', recordingKey: 'vector.historyRecording', textField: 'question', ...(persistDelayMs === undefined ? {} : { persistDelayMs }) });
+	return createHistoryStore({ historyKey: 'vector.history', recordingKey: 'vector.historyRecording', textField: 'question', limits: QUERY_HISTORY_LIMITS, ...(persistDelayMs === undefined ? {} : { persistDelayMs }) });
 }
 
-/** Chat history: `vector.history` / `vector.historyRecording`, entry text field `question`. */
+/** Query history: `vector.history` / `vector.historyRecording`, entry text field `question`. */
 export const vectorHistory: IHistoryStore<'question'> = makeVectorHistory();
+
+/** The full app's Query history over it (adapters/queryHistory.ts), as the env hands it out. */
+export const vectorQueryHistory: IQueryHistorySource = persistedQueryHistory(vectorHistory, APP_HISTORY_NOTE);
 
 /** The one announcement channel and its live region. */
 export const announcer = createAnnouncer();

@@ -38,17 +38,17 @@
 // What a dev-tool mount cannot do degrades in place (R11): the chat area says
 // why and still offers Search, the upload area says why, a refused download
 // offers a copy. Writes are confirmed inline in the document that asked, and
-// the connection's details open as an inline panel (F14): nothing here is a
+// the console's Details open as an inline panel (F14): nothing here is a
 // window-wide overlay.
 // =============================================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Banner, Button, EmptyState } from 'shell';
+import { Banner, EmptyState } from 'shell';
 import type { DevToolProps } from 'shell';
 import type { IExplorerEndpoint } from 'shared/explorer';
 import { announcer } from './adapters/explorer';
-import ConnectionDetailsPanel from './components/ConnectionDetailsPanel';
+import DocumentWriteLine from './components/DocumentWriteLine';
 import InlineRemoveConfirm from './components/InlineRemoveConfirm';
 import RealmLiveRegion from './components/RealmLiveRegion';
 import { createVectorFrame } from './devtool/frame';
@@ -60,6 +60,9 @@ import { FRAME_PROTOCOL } from './devtool/wiring';
 import { STOPPED_DETAIL } from './env';
 import { VectorEnvProvider, useConnection, useEndpointsState, useLiveEndpoint, useReadable, useVectorEnv } from './envContext';
 import { VectorIcon } from './icons';
+import { CONSOLE_ORIGIN } from './vector/confirm';
+import { documentFocus, focusAdrift, focusLost } from './vector/focus';
+import { writeTouches } from './vector/workbench';
 import { CODE_SENTENCES } from './vector/wording';
 import ConsoleView from './views/ConsoleView';
 import DocumentView from './views/DocumentView';
@@ -69,6 +72,9 @@ const styles = {
 	center: { display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center' } as CSSProperties,
 	notice: { padding: '8px 24px 0' } as CSSProperties,
 	document: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } as CSSProperties,
+	/** The document (or what says it is gone) above its write slot: the room the slot leaves. */
+	documentBody: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 } as CSSProperties,
+	gone: { display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', outline: 'none' } as CSSProperties,
 };
 
 /**
@@ -199,39 +205,21 @@ const FrameConnectionDocument: React.FC<{ frame: IVectorFrame; route: Extract<Do
 };
 
 /**
- * A connection's console in a frame: the full app's console over the REMOTE env, with its inline confirmation and its
- * Details panel, bound to the frame (hints out; other frames' writes and map requests in).
+ * A connection's console in a frame: the full app's console (its inline confirmation and Details panel included) over
+ * the REMOTE env, bound to the frame (hints out; other frames' writes and map requests in).
  *
  * @param props.frame - The frame.
  * @param props.endpoint - The connection.
  * @returns The console.
  */
 const ConsoleFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint }> = ({ frame, endpoint }) => {
-	const env = useVectorEnv();
 	const live = useLiveEndpoint(endpoint);
-	const { entry, console: state } = useConnection(live);
-	const { probes } = useEndpointsState();
+	const { entry } = useConnection(live);
 	const visible = useReadable(frame.visible);
-	const [details, setDetails] = useState(false);
-	useEffect(() => frame.bindConsole(entry), [frame, entry]);
-	const probe = probes[live.key];
-	return (
-		<ConsoleView
-			opened={endpoint}
-			active={visible}
-			headerActions={
-				<Button variant="ghost" pressed={details} onClick={() => setDetails((open) => !open)}>
-					Details
-				</Button>
-			}
-			beforeBody={
-				<>
-					<InlineRemoveConfirm entry={entry} probe={probe} />
-					{details && <ConnectionDetailsPanel key={live.key} endpoint={live} probe={probe} stats={state.stats.view} onTest={(target) => env.probe(target.key)} onClose={() => setDetails(false)} />}
-				</>
-			}
-		/>
-	);
+	// A document's Show on map (its map request, taken once and short-lived) is a press's arrival: counted for the view.
+	const [arrivals, setArrivals] = useState(0);
+	useEffect(() => frame.bindConsole(entry, { arrived: () => setArrivals((n) => n + 1) }), [frame, entry]);
+	return <ConsoleView opened={endpoint} active={visible} arrivals={arrivals} />;
 };
 
 /**
@@ -256,38 +244,66 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 	useEffect(
 		() =>
 			frame.bindDocument(entry, objectId, {
-				focus: (id) => setChunkId(id),
-				version: () => {
+				// A press opened or fronted this frame (its arrival, taken once): the focus comes to its Reader | Chunks tabs
+				// when nothing shown has it, never the page. A frame nobody pressed for (restored at load, opened behind)
+				// gets no arrival, and leaves the focus where it is, in the host or another frame.
+				focus: (id) => {
+					if (id !== null) setChunkId(id);
+					if (typeof document !== 'undefined' && focusAdrift(document.activeElement as HTMLElement | null, document.body)) returnFocus(null)?.focus();
+				},
+				// Read again, in place (DocumentView's refreshKey), only for a write that may have changed THIS document: another
+				// document's write leaves the view as it is.
+				version: (written) => {
+					if (!writeTouches(written.gone, objectId)) return;
 					setGone(false);
 					setVersion((n) => n + 1);
 				},
 			}),
 		[frame, entry, objectId]
 	);
+	// The focus never stays on the page body: after a read again (a remount) or when the document is gone, it goes back
+	// into the document; after a confirmation, to its opener while it is shown.
+	const root = useRef<HTMLDivElement>(null);
+	const returnFocus = (opener: HTMLElement | null): HTMLElement | null => documentFocus(root.current, opener) as HTMLElement | null;
+	// Only on a change: a read again or the document going is not a frame opening.
+	const seen = useRef({ version, gone });
+	useEffect(() => {
+		if (seen.current.version === version && seen.current.gone === gone) return;
+		seen.current = { version, gone };
+		if (typeof document === 'undefined' || !focusLost(document.activeElement, document.body, null)) return;
+		// After a read again or the document going; returnFocus reads the root when it runs.
+		returnFocus(null)?.focus();
+	}, [version, gone]);
 	// Removing from a document needs the console model's write switch (its own controller confirms and sends).
 	useEffect(() => {
 		entry.controller.setWritesEnabled(model.writes.enabled);
 	}, [model.writes.enabled, entry]);
 	const actions = useMemo(() => frame.documentActions(entry), [frame, entry]);
 	const median = summaries[live.key]?.medianChunks ?? null;
-	const confirm = <InlineRemoveConfirm entry={entry} probe={probes[live.key]} />;
+	const confirm = <InlineRemoveConfirm entry={entry} probe={probes[live.key]} returnFocus={returnFocus} />;
+	// The document (or what says it is gone) and its write slot are one surface (data-document): Write details opens
+	// inside its rectangle.
 	return (
-		<div style={styles.document}>
+		<div ref={root} style={styles.document} data-document={objectId}>
 			{live.state === 'stopped' && (
 				<div style={styles.notice}>
 					<Banner variant="info">{live.stateDetail ?? STOPPED_DETAIL}</Banner>
 				</div>
 			)}
-			{gone ? (
-				<>
-					{confirm}
-					<div style={styles.center}>
-						<EmptyState icon={<VectorIcon />} title={DOCUMENT_GONE_TITLE} description={CODE_SENTENCES.NOT_FOUND} />
-					</div>
-				</>
-			) : (
-				<DocumentView key={version} model={model} channels={channels} selection={entry.selection} actions={actions} objectId={objectId} path={null} active={visible} consoleMedian={median} onDocument={(row) => setGone(row === null)} beforeBody={confirm} {...(chunkId === undefined ? {} : { chunkId })} />
-			)}
+			<div style={styles.documentBody}>
+				{gone ? (
+					<>
+						{confirm}
+						<div tabIndex={-1} style={styles.gone} data-document-gone="">
+							<EmptyState icon={<VectorIcon />} title={DOCUMENT_GONE_TITLE} description={CODE_SENTENCES.NOT_FOUND} />
+						</div>
+					</>
+				) : (
+					<DocumentView refreshKey={version} model={model} channels={channels} selection={entry.selection} actions={actions} objectId={objectId} path={null} active={visible} consoleMedian={median} onDocument={(row) => setGone(row === null)} beforeBody={confirm} {...(chunkId === undefined ? {} : { chunkId })} />
+				)}
+			</div>
+			{/* Its own controller: every write of it is this frame's, in a fixed slot under the document. */}
+			{model.writes.enabled && <DocumentWriteLine entry={entry} origin={CONSOLE_ORIGIN} returnFocus={() => returnFocus(null)} />}
 		</div>
 	);
 };

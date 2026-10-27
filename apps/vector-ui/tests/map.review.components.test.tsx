@@ -757,17 +757,17 @@ function dayZeroMap(): boolean {
 
 const NEEDS_MAP: string | false = dayZeroMap() ? 'views/MapView.tsx is still the day-0 mount: checked once the map is merged' : false;
 
-test('the map hands the duplicates queue its connection, the console rows and the batched, confirmed removal', { skip: NEEDS_MAP }, () => {
+test('the map hands the duplicates queue its connection, the console rows and the batched removal (staged where the console stages, else confirmed)', { skip: NEEDS_MAP }, () => {
 	const panel = element(source('views/MapView.tsx'), 'DuplicatesPanel');
-	for (const prop of ['connectionKey=', 'documents=', 'onRemoveDocuments=', 'onOpenDocument=']) assert.ok(panel.includes(prop), prop);
-	assert.match(panel, /onRemoveDocuments=\{[^}]*requestRemove\(/);
+	for (const prop of ['connectionKey=', 'documents=', 'onRemoveDocuments=', 'onOpenDocument=', 'staging=']) assert.ok(panel.includes(prop), prop);
+	assert.match(panel, /onRemoveDocuments=\{[^}]*removeDocuments\(/);
 	assert.doesNotMatch(panel, /\.slice\(0, limits\.write_ids_max\)/, 'the queue is never cut to write_ids_max');
 });
 
-test('the map hands the outlier review its connection, writes, the confirmed removal and Show neighbours', { skip: NEEDS_MAP }, () => {
+test('the map hands the outlier review its connection, writes, the removal (staged or confirmed) and Show neighbours', { skip: NEEDS_MAP }, () => {
 	const panel = element(source('views/MapView.tsx'), 'OutliersPanel');
-	for (const prop of ['connectionKey=', 'writes=', 'onRemoveDocument=', 'onShowNeighbours=']) assert.ok(panel.includes(prop), prop);
-	assert.match(panel, /onRemoveDocument=\{[^}]*requestRemove\(\[/);
+	for (const prop of ['connectionKey=', 'writes=', 'onRemoveDocument=', 'onShowNeighbours=', 'staging=']) assert.ok(panel.includes(prop), prop);
+	assert.match(panel, /onRemoveDocument=\{[^}]*removeDocuments\(\[/);
 });
 
 test("the map runs Recommend on the store node and keeps the examples in the connection's cache", { skip: NEEDS_MAP }, () => {

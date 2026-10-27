@@ -36,28 +36,52 @@
 // lasso; the outline (--rr-text-primary) for hover, outliers and duplicates;
 // --rr-text-secondary for hollow points. Each is measured in
 // tests/a11y.contrast.map.test.ts. Shapes and dashes, not colour alone, tell
-// the marks apart.
+// the marks apart. Marks that cross points get a halo of the surface under
+// them (the outlier rings, the duplicate rings and their similarity), and the
+// star is edged with the surface, so they read over any point colour.
 //
 // Beside it, two more layers:
 //
 //   - The similarity edges (Neighbours or Tree) on their own canvas under the
-//     points: one path per alpha bucket (8 steps of similarity, weakest
-//     faintest), so a frame is at most 8 strokes. In 2D the paths are built in
-//     layout units once per edge set and stroked through the camera's affine
-//     transform (edgeTransform2d), so panning and zooming build nothing; in 3D
-//     they are built from the projected points. The edges are decorative: the
-//     legend's counts and the Neighbours tab are their text alternative.
+//     points: one path per bucket (8 steps of similarity, weakest faintest),
+//     so a frame is at most 8 strokes. Each bucket is stroked OPAQUE in its own
+//     colour (edgeColours): the surface mixed toward the text colour, the
+//     weakest just far enough to clear 3:1 on both map surfaces, the strongest
+//     at 80 % of the way. (An alpha ramp over a token that already carries
+//     alpha painted the weakest edges at 1.1:1 in RocketRide dark.) A stroke
+//     spans at least EDGE_DEVICE_PX device pixels (2 CSS px at 1 dppx, 1 at
+//     2 dppx), so a whole pixel of each cross-section carries that colour: a
+//     1 px line at 1 dppx is spread over two pixels, each nearer the surface
+//     (the weakest bucket's median was 2.3:1 in both RocketRide themes,
+//     docs/contrast.md). Every line of the overlay keeps the same floor
+//     (markWidth). In 2D the
+//     paths are built in layout units once per edge set and stroked through
+//     the camera's affine transform (edgeTransform2d), so panning and zooming
+//     build nothing; in 3D they are built from the projected points. While the
+//     map dims, an edge whose two ends are both faded is faded the same way
+//     (its colour mixed toward the surface, keeping DIM) and drawn first; an
+//     edge that touches the lit set keeps its measured colour. The edges are
+//     decorative: the legend's counts and the Neighbours tab are their text
+//     alternative.
 //   - Extras on the overlay (drawExtras): the compared question's star (B,
-//     hollow) and its rays, the hovered point's edges drawn thicker, the
+//     hollow) and its rays, the hovered point's edges drawn heavier, the
 //     hovered cluster's points ringed, and the cluster labels (11 px text in
 //     --rr-text-primary with a halo of the surface, at each group's medoid,
 //     largest groups first, never two overlapping, at most 50, hidden when the
-//     map is zoomed out).
+//     map is zoomed out, and not drawn for a group whose medoid is dimmed).
 // =============================================================================
 
 import type { ICamera2D, IViewport } from './camera';
+import { mixRgb, mixToContrast, opaqueOver, parseColor, toCss } from './contrast';
+import type { Rgb } from './contrast';
 import type { IEdgeSet } from './graph';
 import type { IStar } from './queryProjection';
+import { DIM } from './renderer.webgl';
+import { MIN_GRAPHIC_CONTRAST } from './tokens';
+import type { IMapPalette } from './tokens';
+
+/** The text drawn on the canvas: cluster labels and a duplicate pair's similarity. */
+const LABEL_FONT = '11px system-ui, -apple-system, "Segoe UI", sans-serif';
 
 /** A place in layout coordinates (a projected point outside the sample). */
 export interface IPlace {
@@ -91,11 +115,23 @@ export interface IOverlayModel {
 	chunkPath: number[];
 	/** Near-duplicate pairs. */
 	duplicates: Array<[number, number]>;
+	/** The pairs of the duplicate group shown: a ring at each end and the pair's similarity. */
+	duplicateRings?: IDuplicateRing[];
+	/** 1 per faded point while the map dims: an outlier ring or duplicate line on faded points only is faded too. */
+	faded?: Uint8Array | null;
 	outliers: number[];
 	/** The lasso path, screen x,y interleaved. */
 	lasso: number[];
 	/** 0..1: the one-off pulse of highlighted points (0 = none; always 0 under reduced motion). */
 	pulse: number;
+}
+
+/** One pair of a shown duplicate group. */
+export interface IDuplicateRing {
+	a: number;
+	b: number;
+	/** Their similarity with its scale (reviewWording pairLabel), printed at the pair's midpoint. */
+	label: string;
 }
 
 /** What a frame of the overlay actually drew (ends that resolved to a screen position, not what was asked). */
@@ -140,11 +176,10 @@ export interface IOverlayColours {
  * @param screen - Screen position of a sample point, or null.
  * @param place - Screen position of a layout place, or null.
  * @param colours - Resolved colours.
- * @param dpr - devicePixelRatio (line widths stay in CSS pixels).
+ * @param dpr - devicePixelRatio (line widths are CSS pixels; the links are heavier than the edges at any ratio).
  * @returns What was drawn (counts of the marks whose ends were on screen).
  */
 export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel, screen: (index: number) => [number, number] | null, place: (p: IPlace) => [number, number] | null, colours: IOverlayColours, dpr: number): IOverlayDrawn {
-	void dpr;
 	const drawn: IOverlayDrawn = { star: false, rays: 0, links: 0, chunkPath: 0 };
 	const at = (end: IOverlayEnd): [number, number] | null => (end.index !== undefined ? screen(end.index) : end.at ? place(end.at) : null);
 	const ring = (p: [number, number] | null, r: number): boolean => {
@@ -154,24 +189,32 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		return true;
 	};
 
-	// Duplicate pairs: dashed lines in the outline colour.
+	// While the map dims, a mark whose points are all faded is faded with them (the same opaque mix, drawn first).
+	const faded = model.faded ?? null;
+	const isFaded = (i: number): boolean => faded !== null && !!faded[i];
+	const fadedOutline = faded !== null ? fadeColour(colours.outline, colours.surface) : colours.outline;
+
+	// Duplicate pairs: dashed lines in the outline colour (faded when both ends are).
 	if (model.duplicates.length > 0) {
-		let any = false;
-		ctx.beginPath();
-		for (const [a, b] of model.duplicates) {
-			const pa = screen(a);
-			const pb = screen(b);
-			if (pa === null || pb === null) continue;
-			ctx.moveTo(pa[0], pa[1]);
-			ctx.lineTo(pb[0], pb[1]);
-			any = true;
-		}
-		if (any) {
-			ctx.setLineDash([4, 3]);
-			ctx.strokeStyle = colours.outline;
-			ctx.lineWidth = 1.5;
-			ctx.stroke();
-			ctx.setLineDash([]);
+		for (const fade of faded !== null ? [true, false] : [false]) {
+			let any = false;
+			ctx.beginPath();
+			for (const [a, b] of model.duplicates) {
+				if ((isFaded(a) && isFaded(b)) !== fade) continue;
+				const pa = screen(a);
+				const pb = screen(b);
+				if (pa === null || pb === null) continue;
+				ctx.moveTo(pa[0], pa[1]);
+				ctx.lineTo(pb[0], pb[1]);
+				any = true;
+			}
+			if (any) {
+				ctx.setLineDash([4, 3]);
+				ctx.strokeStyle = fade ? fadedOutline : colours.outline;
+				ctx.lineWidth = markWidth(1.5, dpr);
+				ctx.stroke();
+				ctx.setLineDash([]);
+			}
 		}
 	}
 
@@ -199,7 +242,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		}
 		if (any) {
 			ctx.strokeStyle = colours.accent;
-			ctx.lineWidth = 1.5;
+			ctx.lineWidth = markWidth(1.5, dpr);
 			ctx.stroke();
 		}
 	}
@@ -219,7 +262,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		}
 		if (any) {
 			ctx.strokeStyle = colours.accent;
-			ctx.lineWidth = 1;
+			ctx.lineWidth = linkWidth(dpr);
 			ctx.stroke();
 		}
 	}
@@ -240,7 +283,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		if (any) {
 			ctx.setLineDash(model.star?.exact === false ? [6, 3] : []);
 			ctx.strokeStyle = colours.accent;
-			ctx.lineWidth = 1.25;
+			ctx.lineWidth = markWidth(1.25, dpr);
 			ctx.stroke();
 			ctx.setLineDash([]);
 		}
@@ -253,20 +296,71 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		for (const p of model.hollow) any = ring(place(p), 4.5) || any;
 		if (any) {
 			ctx.strokeStyle = colours.other;
-			ctx.lineWidth = 2;
+			ctx.lineWidth = markWidth(2, dpr);
 			ctx.stroke();
 		}
 	}
 
-	// Outliers: thin rings in the outline colour.
+	// Outliers: rings in the outline colour over a halo of the surface (stroked first), so a ring reads over any
+	// point; the ring of a faded outlier is faded (no halo: it is not meant to stand out).
 	if (model.outliers.length > 0) {
+		let anyFaded = false;
+		ctx.beginPath();
+		for (const i of model.outliers) if (isFaded(i)) anyFaded = ring(screen(i), 7) || anyFaded;
+		if (anyFaded) {
+			ctx.strokeStyle = fadedOutline;
+			ctx.lineWidth = markWidth(1.5, dpr);
+			ctx.stroke();
+		}
 		let any = false;
 		ctx.beginPath();
-		for (const i of model.outliers) any = ring(screen(i), 7) || any;
+		for (const i of model.outliers) if (!isFaded(i)) any = ring(screen(i), 7) || any;
 		if (any) {
-			ctx.strokeStyle = colours.outline;
-			ctx.lineWidth = 1;
+			ctx.strokeStyle = colours.surface;
+			ctx.lineWidth = haloWidth(4, markWidth(1.5, dpr), dpr);
 			ctx.stroke();
+			ctx.strokeStyle = colours.outline;
+			ctx.lineWidth = markWidth(1.5, dpr);
+			ctx.stroke();
+		}
+	}
+
+	// The shown duplicate group: a dashed ring at each end of a pair (over a surface halo) and the pair's similarity.
+	const pairs = model.duplicateRings ?? [];
+	if (pairs.length > 0) {
+		const ends = new Map<number, [number, number]>();
+		const labels: Array<{ at: [number, number]; text: string }> = [];
+		for (const pair of pairs) {
+			const pa = screen(pair.a);
+			const pb = screen(pair.b);
+			if (pa !== null) ends.set(pair.a, pa);
+			if (pb !== null) ends.set(pair.b, pb);
+			if (pa !== null && pb !== null) labels.push({ at: [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2], text: pair.label });
+		}
+		if (ends.size > 0) {
+			ctx.beginPath();
+			for (const p of ends.values()) ring(p, 8);
+			ctx.strokeStyle = colours.surface;
+			ctx.lineWidth = haloWidth(4, markWidth(1.5, dpr), dpr);
+			ctx.stroke();
+			ctx.setLineDash([3, 2]);
+			ctx.strokeStyle = colours.outline;
+			ctx.lineWidth = markWidth(1.5, dpr);
+			ctx.stroke();
+			ctx.setLineDash([]);
+		}
+		if (labels.length > 0) {
+			ctx.font = LABEL_FONT;
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'middle';
+			ctx.lineJoin = 'round';
+			for (const label of labels) {
+				ctx.lineWidth = 3;
+				ctx.strokeStyle = colours.surface;
+				ctx.strokeText(label.text, label.at[0], label.at[1]);
+				ctx.fillStyle = colours.text;
+				ctx.fillText(label.text, label.at[0], label.at[1]);
+			}
 		}
 	}
 
@@ -278,7 +372,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		for (const i of model.highlight) any = ring(screen(i), r) || any;
 		if (any) {
 			ctx.strokeStyle = colours.accent;
-			ctx.lineWidth = 2;
+			ctx.lineWidth = markWidth(2, dpr);
 			ctx.stroke();
 		}
 	}
@@ -300,7 +394,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		ctx.closePath();
 		ctx.fillStyle = colours.accent;
 		ctx.fill();
-		ctx.strokeStyle = colours.outline;
+		ctx.strokeStyle = colours.surface;
 		ctx.lineWidth = 1;
 		ctx.stroke();
 	}
@@ -311,14 +405,14 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		ctx.beginPath();
 		ring(hover, 7);
 		ctx.strokeStyle = colours.outline;
-		ctx.lineWidth = 1.5;
+		ctx.lineWidth = markWidth(1.5, dpr);
 		ctx.stroke();
 	}
 	if (from !== null) {
 		ctx.beginPath();
 		ring(from, 9);
 		ctx.strokeStyle = colours.accent;
-		ctx.lineWidth = 2.5;
+		ctx.lineWidth = markWidth(2.5, dpr);
 		ctx.stroke();
 	}
 	const focus = model.focused === null ? null : screen(model.focused);
@@ -327,7 +421,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		ring(focus, 12);
 		ctx.setLineDash([3, 2]);
 		ctx.strokeStyle = colours.accent;
-		ctx.lineWidth = 2;
+		ctx.lineWidth = markWidth(2, dpr);
 		ctx.stroke();
 		ctx.setLineDash([]);
 	}
@@ -340,7 +434,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		ctx.closePath();
 		ctx.setLineDash([5, 4]);
 		ctx.strokeStyle = colours.accent;
-		ctx.lineWidth = 1.5;
+		ctx.lineWidth = markWidth(1.5, dpr);
 		ctx.stroke();
 		ctx.setLineDash([]);
 	}
@@ -351,8 +445,64 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 // THE EDGE LAYER
 // =============================================================================
 
-/** Alpha steps of the edge layer (one path, one stroke each). */
+/** Similarity steps of the edge layer (one path, one stroke, one colour each). */
 export const EDGE_BUCKETS = 8;
+
+/** How far toward the text colour the strongest bucket is mixed. */
+export const EDGE_STRONGEST = 0.8;
+
+/**
+ * The fewest device pixels an edge stroke spans. Any 2-pixel span holds one whole pixel, which carries the bucket's
+ * measured colour; a 1-pixel line at 1 dppx is anti-aliased over two pixels, each nearer the surface.
+ */
+export const EDGE_DEVICE_PX = 2;
+
+/**
+ * A line of the map, CSS pixels: its own width, but never under EDGE_DEVICE_PX device pixels, so a whole pixel of
+ * each cross-section carries its colour. Every mark the overlay strokes is set with it (rays, rings, the chunk
+ * path, duplicate pairs, the lasso, star B) or is heavier (the links and the hovered point's edges, linkWidth);
+ * the halos and the star's edge are the surface colour, not marks.
+ *
+ * @param css - The line's own width, CSS pixels (what a 2 dppx screen draws).
+ * @param dpr - devicePixelRatio.
+ * @returns The width in CSS pixels.
+ */
+export function markWidth(css: number, dpr: number): number {
+	return Math.max(css, EDGE_DEVICE_PX / (dpr > 0 ? dpr : 1));
+}
+
+/**
+ * A ring's halo of the surface, CSS pixels: its own width, but always a device pixel wider than the ring it is
+ * under (at 0.5 dppx a 1.5 px ring is 4 CSS px, as wide as its 4 px halo would be).
+ *
+ * @param own - The halo's own width, CSS pixels.
+ * @param ring - The ring's width at this ratio (from markWidth).
+ * @param dpr - devicePixelRatio.
+ * @returns The width in CSS pixels.
+ */
+export function haloWidth(own: number, ring: number, dpr: number): number {
+	return Math.max(own, ring + 1 / (dpr > 0 ? dpr : 1));
+}
+
+/**
+ * The similarity edges' stroke, CSS pixels: 1, wider under 2 dppx so it still spans EDGE_DEVICE_PX device pixels.
+ *
+ * @param dpr - devicePixelRatio.
+ * @returns The width in CSS pixels (2 at 1 dppx, 1 at 2 dppx and above).
+ */
+export function edgeWidth(dpr: number): number {
+	return markWidth(1, dpr);
+}
+
+/**
+ * The links from the selected point: half as heavy again as the edges, so they stand out over them.
+ *
+ * @param dpr - devicePixelRatio.
+ * @returns The width in CSS pixels (3 at 1 dppx, 1.5 at 2 dppx and above).
+ */
+export function linkWidth(dpr: number): number {
+	return 1.5 * edgeWidth(dpr);
+}
 
 /** Something segments are drawn into: a Path2D in the browser, a recorder in tests. */
 export interface IPathSink {
@@ -361,7 +511,7 @@ export interface IPathSink {
 }
 
 /**
- * The alpha bucket of every edge: linear in similarity between the set's
+ * The bucket of every edge: linear in similarity between the set's
  * weakest (0) and strongest (EDGE_BUCKETS - 1) edge.
  *
  * @param edges - The edges.
@@ -384,70 +534,110 @@ export function edgeBuckets(edges: IEdgeSet): Uint8Array {
 }
 
 /**
- * The opacity of a bucket (weakest faintest).
+ * The colour of each bucket, weakest first: opaque mixes of the map's surface
+ * (--rr-bg-default) toward the text colour. The weakest is mixed just far
+ * enough to clear 3:1 on both map surfaces (bg-default and bg-paper), the
+ * strongest EDGE_STRONGEST of the way (at least 0.15 further than the
+ * weakest), and the steps between are even. They are stroked at full opacity:
+ * the colour painted is the colour measured.
  *
- * @param bucket - 0..EDGE_BUCKETS-1.
- * @returns Alpha, 0.15 to 0.8.
+ * @param palette - The map palette.
+ * @returns EDGE_BUCKETS CSS colours (`rgb()`).
  */
-export function edgeAlpha(bucket: number): number {
-	return 0.15 + (0.65 * Math.max(0, Math.min(EDGE_BUCKETS - 1, bucket))) / (EDGE_BUCKETS - 1);
+export function edgeColours(palette: IMapPalette): string[] {
+	const surface = parseColor(palette.surfaces.default) ?? { r: 255, g: 255, b: 255 };
+	const paper = opaqueOver(palette.surfaces.paper, surface) ?? surface;
+	const text: Rgb = opaqueOver(palette.text, surface) ?? { r: 0, g: 0, b: 0 };
+	const weakest = mixToContrast(surface, text, [surface, paper], MIN_GRAPHIC_CONTRAST);
+	if (weakest === null) return new Array<string>(EDGE_BUCKETS).fill(toCss(text));
+	const strongest = Math.min(1, Math.max(EDGE_STRONGEST, weakest + 0.15));
+	return Array.from({ length: EDGE_BUCKETS }, (_, b) => toCss(mixRgb(surface, text, weakest + ((strongest - weakest) * b) / (EDGE_BUCKETS - 1))));
 }
 
 /**
- * Build one path per bucket.
+ * Build one path per bucket, and per bucket again for the faded edges.
  *
  * @param edges - The edges.
  * @param buckets - From {@link edgeBuckets}.
  * @param at - Where a point is (layout units in 2D, screen pixels in 3D), or null when it has no position.
  * @param makePath - A new empty path.
- * @returns The paths (null for an empty bucket) and the segments drawn.
+ * @param faded - 1 per faded point, or null: an edge with both ends faded goes to `fadedPaths`.
+ * @returns The lit and faded paths (null for an empty bucket), the segments drawn and how many of them are faded.
  */
-export function buildEdgePaths<P extends IPathSink>(edges: IEdgeSet, buckets: Uint8Array, at: (i: number) => [number, number] | null, makePath: () => P): { paths: Array<P | null>; segments: number } {
+export function buildEdgePaths<P extends IPathSink>(edges: IEdgeSet, buckets: Uint8Array, at: (i: number) => [number, number] | null, makePath: () => P, faded: ArrayLike<number> | null = null): { paths: Array<P | null>; fadedPaths: Array<P | null>; segments: number; fadedSegments: number } {
 	const paths: Array<P | null> = new Array(EDGE_BUCKETS).fill(null);
+	const fadedPaths: Array<P | null> = new Array(EDGE_BUCKETS).fill(null);
 	let segments = 0;
+	let fadedSegments = 0;
 	for (let e = 0; e < edges.count; e += 1) {
-		const pa = at(edges.a[e] as number);
-		const pb = at(edges.b[e] as number);
+		const a = edges.a[e] as number;
+		const bEnd = edges.b[e] as number;
+		const pa = at(a);
+		const pb = at(bEnd);
 		if (pa === null || pb === null) continue;
 		const b = buckets[e] ?? 0;
-		let path = paths[b] ?? null;
+		const fade = faded !== null && !!faded[a] && !!faded[bEnd];
+		const set = fade ? fadedPaths : paths;
+		let path = set[b] ?? null;
 		if (path === null) {
 			path = makePath();
-			paths[b] = path;
+			set[b] = path;
 		}
 		path.moveTo(pa[0], pa[1]);
 		path.lineTo(pb[0], pb[1]);
 		segments += 1;
+		if (fade) fadedSegments += 1;
 	}
-	return { paths, segments };
+	return { paths, fadedPaths, segments, fadedSegments };
 }
 
 /**
- * Stroke the bucket paths (the caller set the transform).
+ * The faded edges' colours: each bucket's colour mixed toward the surface, keeping DIM of it (as a faded point).
+ *
+ * @param colours - From {@link edgeColours}.
+ * @param surface - The map's surface (a CSS colour).
+ * @returns Opaque `rgb()` colours, one per bucket.
+ */
+export function fadedEdgeColours(colours: readonly string[], surface: string): string[] {
+	return colours.map((c) => fadeColour(c, surface));
+}
+
+/**
+ * A colour as a faded mark draws it: mixed toward the surface, keeping DIM of it, opaque (as a faded point).
+ *
+ * @param colour - A CSS colour (composited over the surface first when it has alpha).
+ * @param surface - The map's surface.
+ * @returns `rgb()`.
+ */
+export function fadeColour(colour: string, surface: string): string {
+	const bg = parseColor(surface) ?? { r: 255, g: 255, b: 255 };
+	return toCss(mixRgb(bg, opaqueOver(colour, bg) ?? bg, DIM));
+}
+
+/**
+ * Stroke the bucket paths, each in its own opaque colour (the caller set the transform).
  *
  * @param ctx - The edge canvas's context.
  * @param paths - From {@link buildEdgePaths}.
- * @param colour - The edge colour.
+ * @param colours - From {@link edgeColours}, one per bucket.
  * @param lineWidth - In the transform's units.
  * @returns Strokes made (at most EDGE_BUCKETS).
  */
-export function strokeEdgePaths(ctx: CanvasRenderingContext2D, paths: ReadonlyArray<Path2D | null>, colour: string, lineWidth: number): number {
+export function strokeEdgePaths(ctx: CanvasRenderingContext2D, paths: ReadonlyArray<Path2D | null>, colours: readonly string[], lineWidth: number): number {
 	let strokes = 0;
-	ctx.strokeStyle = colour;
 	ctx.lineWidth = lineWidth;
 	paths.forEach((path, b) => {
 		if (path === null) return;
-		ctx.globalAlpha = edgeAlpha(b);
+		ctx.strokeStyle = colours[Math.min(b, colours.length - 1)] as string;
 		ctx.stroke(path);
 		strokes += 1;
 	});
-	ctx.globalAlpha = 1;
 	return strokes;
 }
 
 /**
  * The canvas transform that draws layout units where the 2D camera draws the
- * points (device pixels), and the line width of one CSS pixel in those units.
+ * points (device pixels), and the edges' line width (edgeWidth) in those units.
  *
  * @param camera - The 2D camera.
  * @param vp - The viewport (CSS pixels).
@@ -456,7 +646,8 @@ export function strokeEdgePaths(ctx: CanvasRenderingContext2D, paths: ReadonlyAr
  */
 export function edgeTransform2d(camera: ICamera2D, vp: IViewport, dpr: number): { a: number; b: number; c: number; d: number; e: number; f: number; lineWidth: number } {
 	const s = camera.scale;
-	return { a: dpr * s, b: 0, c: 0, d: -dpr * s, e: dpr * (vp.width / 2 - camera.cx * s), f: dpr * (vp.height / 2 + camera.cy * s), lineWidth: s > 0 ? 1 / s : 1 };
+	const width = edgeWidth(dpr);
+	return { a: dpr * s, b: 0, c: 0, d: -dpr * s, e: dpr * (vp.width / 2 - camera.cx * s), f: dpr * (vp.height / 2 + camera.cy * s), lineWidth: s > 0 ? width / s : width };
 }
 
 // =============================================================================
@@ -485,6 +676,8 @@ export interface IOverlayExtras {
 	showLabels: boolean;
 	/** The hovered label's cluster: its points get a ring. */
 	clusterHighlight: number[];
+	/** 1 per dimmed point: a label at a dimmed medoid is not drawn (text over a faded group would not read). */
+	dimmed?: Uint8Array | null;
 }
 
 /** What drawExtras drew. */
@@ -521,13 +714,14 @@ export function extrasDataset(drawn: IExtrasDrawn): { starB: string; raysB: stri
  * @param screen - Screen position of a sample point, or null.
  * @param place - Screen position of a layout place, or null.
  * @param colours - Resolved colours.
+ * @param dpr - devicePixelRatio (the hovered point's edges are heavier than the edges at any ratio).
  * @returns What was drawn.
  */
-export function drawExtras(ctx: CanvasRenderingContext2D, extras: IOverlayExtras, screen: (index: number) => [number, number] | null, place: (p: IPlace) => [number, number] | null, colours: IOverlayColours): IExtrasDrawn {
+export function drawExtras(ctx: CanvasRenderingContext2D, extras: IOverlayExtras, screen: (index: number) => [number, number] | null, place: (p: IPlace) => [number, number] | null, colours: IOverlayColours, dpr: number): IExtrasDrawn {
 	const drawn: IExtrasDrawn = { starB: false, raysB: 0, labels: 0, boxes: [], hoverEdges: 0 };
 	const at = (end: IOverlayEnd): [number, number] | null => (end.index !== undefined ? screen(end.index) : end.at ? place(end.at) : null);
 
-	// The hovered point's edges, thicker, in the accent.
+	// The hovered point's edges, heavier than the edges, in the accent.
 	if (extras.hoverEdges.length > 0) {
 		ctx.beginPath();
 		for (const [a, b] of extras.hoverEdges) {
@@ -540,7 +734,7 @@ export function drawExtras(ctx: CanvasRenderingContext2D, extras: IOverlayExtras
 		}
 		if (drawn.hoverEdges > 0) {
 			ctx.strokeStyle = colours.accent;
-			ctx.lineWidth = 2;
+			ctx.lineWidth = Math.max(2, linkWidth(dpr));
 			ctx.stroke();
 		}
 	}
@@ -558,7 +752,7 @@ export function drawExtras(ctx: CanvasRenderingContext2D, extras: IOverlayExtras
 		}
 		if (any) {
 			ctx.strokeStyle = colours.accent;
-			ctx.lineWidth = 1.5;
+			ctx.lineWidth = markWidth(1.5, dpr);
 			ctx.stroke();
 		}
 	}
@@ -578,7 +772,7 @@ export function drawExtras(ctx: CanvasRenderingContext2D, extras: IOverlayExtras
 			if (drawn.raysB > 0) {
 				ctx.setLineDash([2, 3]);
 				ctx.strokeStyle = colours.accent;
-				ctx.lineWidth = 1.25;
+				ctx.lineWidth = markWidth(1.25, dpr);
 				ctx.stroke();
 				ctx.setLineDash([]);
 			}
@@ -596,19 +790,20 @@ export function drawExtras(ctx: CanvasRenderingContext2D, extras: IOverlayExtras
 		ctx.fillStyle = colours.surface;
 		ctx.fill();
 		ctx.strokeStyle = colours.accent;
-		ctx.lineWidth = 2;
+		ctx.lineWidth = markWidth(2, dpr);
 		ctx.stroke();
 		drawn.starB = true;
 	}
 
 	// Cluster labels at their medoids: largest groups first, none over another.
 	if (extras.showLabels && extras.labels.length > 0) {
-		ctx.font = '11px system-ui, -apple-system, "Segoe UI", sans-serif';
+		ctx.font = LABEL_FONT;
 		ctx.textAlign = 'center';
 		ctx.textBaseline = 'middle';
 		ctx.lineJoin = 'round';
 		for (const label of extras.labels) {
 			if (drawn.labels >= MAX_LABELS) break;
+			if (extras.dimmed && extras.dimmed[label.at]) continue;
 			const p = screen(label.at);
 			if (p === null) continue;
 			const text = label.text.split(' · ').slice(0, LABEL_TERMS).join(' · ');

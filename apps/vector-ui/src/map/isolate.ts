@@ -30,6 +30,15 @@
 // these too: the layouts, picking, the keyboard path, the lasso, the counts.
 // "Expand by neighbours" adds one ring from the node's kNN graph (no call) and
 // never brings back a removed document's point. "Show all" drops the isolation.
+//
+// Dimming is the soft form of it: every point outside the set the map is
+// showing is drawn faded (dimMask), the most specific set winning: a selected
+// point with its neighbours, else a highlighted set (a lasso selection, a
+// document, Find similar or a duplicate group, an answer's sources), else a
+// placed query's true top-k. Nothing to light, nothing faded. Escape (and the
+// toolbar's Clear) takes them away one step a press, the lasso first, then a
+// highlight, then the selection (clearStep); the map's hover fading is back
+// once nothing is lit.
 // =============================================================================
 
 import type { IKnnBlock } from '../contract/types';
@@ -46,6 +55,52 @@ export function isolateMask(n: number, keep: Iterable<number>): Uint8Array {
 	const mask = new Uint8Array(n).fill(1);
 	for (const i of keep) if (Number.isInteger(i) && i >= 0 && i < n) mask[i] = 0;
 	return mask;
+}
+
+/** What Escape (and the map's Clear) clears next. */
+export type ClearStep = 'lasso' | 'highlight' | 'selection';
+
+/** The toolbar's Clear button, by what it clears. */
+export const CLEAR_LABELS: Readonly<Record<ClearStep, string>> = { lasso: 'Clear lasso selection', highlight: 'Clear highlight', selection: 'Clear selection' };
+
+/**
+ * What one Escape clears, in order: the lasso (its toggle or its selection), then a highlight (an answer's
+ * sources, a query's top-k, Show on map, a duplicate group), then the selected point. One step per press;
+ * null when nothing is left (the key is then not the map's).
+ *
+ * @param state - What is active.
+ * @returns The step, or null.
+ */
+export function clearStep(state: { lasso: boolean; highlight: boolean; selection: boolean }): ClearStep | null {
+	if (state.lasso) return 'lasso';
+	if (state.highlight) return 'highlight';
+	if (state.selection) return 'selection';
+	return null;
+}
+
+/** The sets the map can light (indices into the sample). */
+export interface ILitSets {
+	/** The selected point, or null. */
+	selected: number | null;
+	/** Its neighbours in the sample. */
+	neighbours: readonly number[];
+	/** A highlighted set's points, or null for none. */
+	highlight: readonly number[] | null;
+	/** A placed query's true top-k in the sample. */
+	queryTop: readonly number[];
+}
+
+/**
+ * The points to draw faded: all but the most specific set shown.
+ *
+ * @param n - Points in the sample.
+ * @param sets - What is shown.
+ * @returns 1 per faded point, or null when nothing is lit (then nothing is faded).
+ */
+export function dimMask(n: number, sets: ILitSets): Uint8Array | null {
+	const lit = sets.selected !== null ? [sets.selected, ...sets.neighbours] : sets.highlight !== null && sets.highlight.length > 0 ? sets.highlight : sets.queryTop;
+	const keep = lit.filter((i) => Number.isInteger(i) && i >= 0 && i < n);
+	return keep.length === 0 ? null : isolateMask(n, keep);
 }
 
 /**

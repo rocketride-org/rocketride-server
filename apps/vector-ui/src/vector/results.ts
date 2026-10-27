@@ -367,14 +367,39 @@ export function readChunksPage(value: Record<string, unknown>): IChunksPageView 
 // WRITES
 // =============================================================================
 
+/** A write's `audit` block, as far as the app shows it (it never carries content or vectors). */
+export interface IWriteAudit {
+	/** The tool's audit name ('vector.delete', 'vector.soft_delete', 'vector.restore'), or null. */
+	action: string | null;
+	/** Rows the write touched, or null where the store could not count them. */
+	rows: number | null;
+	/** Who called: the caller's `auth` ('account', 'agent', ...), or null. */
+	caller: string | null;
+}
+
+/**
+ * Read a write answer's `audit` block.
+ *
+ * @param value - The audit block, or anything.
+ * @returns The audit, or null without one.
+ */
+export function readAudit(value: unknown): IWriteAudit | null {
+	if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+	const audit = value as Record<string, unknown>;
+	const caller = audit.caller !== null && typeof audit.caller === 'object' ? str((audit.caller as Record<string, unknown>).auth) : null;
+	return { action: str(audit.action), rows: count(audit.rows), caller };
+}
+
 /** A `delete` answer, per document. `delete` names no removed rows, so a document's own chunk count is unknown (null). */
 export interface IRemoveView {
 	removed: Array<{ objectId: string; chunks: number | null }>;
 	notFound: string[];
-	/** With `deleted_only`: documents left untouched because a chunk of them is live. */
+	/** With `deleted_only`: documents left whole because a chunk of them is live. */
 	keptLive: string[];
 	/** Rows the node says it removed; null when it could not count them. */
 	removedChunks: number | null;
+	/** The answer's audit block, when it had one. */
+	audit?: IWriteAudit | null;
 }
 
 /**
@@ -389,7 +414,7 @@ export function readDeleteResult(value: Record<string, unknown>, sent: readonly 
 	const keptLive = strings(value.kept_live);
 	const left = new Set([...notFound, ...keptLive]);
 	const removed = [...new Set(sent)].filter((objectId) => objectId !== '' && !left.has(objectId)).map((objectId) => ({ objectId, chunks: null }));
-	return { removed, notFound, keptLive, removedChunks: count(value.removed_chunks) };
+	return { removed, notFound, keptLive, removedChunks: count(value.removed_chunks), audit: readAudit(value.audit) };
 }
 
 /** A `soft_delete` or `restore` answer. */
@@ -399,6 +424,8 @@ export interface ITrashView {
 	notFound: string[];
 	/** The chunks the call moved; null when the store cannot count them. */
 	matchedChunks: number | null;
+	/** The answer's audit block, when it had one. */
+	audit?: IWriteAudit | null;
 }
 
 /**
@@ -410,5 +437,5 @@ export interface ITrashView {
 export function readTrashResult(value: Record<string, unknown>): ITrashView {
 	const notFound = strings(value.not_found);
 	const gone = new Set(notFound);
-	return { moved: [...new Set(strings(value.object_ids))].filter((objectId) => !gone.has(objectId)), notFound, matchedChunks: count(value.matched_chunks) };
+	return { moved: [...new Set(strings(value.object_ids))].filter((objectId) => !gone.has(objectId)), notFound, matchedChunks: count(value.matched_chunks), audit: readAudit(value.audit) };
 }

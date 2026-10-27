@@ -51,7 +51,7 @@ const S = {
 	codeBlock: { fontFamily: 'var(--rr-font-mono, monospace)', whiteSpace: 'pre' } as CSSProperties,
 	code: { fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 12, padding: '0 3px', borderRadius: 3, background: 'var(--rr-bg-widget)', border: '1px solid var(--rr-border)' } as CSSProperties,
 	list: { margin: '4px 0', paddingLeft: 20 } as CSSProperties,
-	quote: { margin: '6px 0', paddingLeft: 10, borderLeft: '3px solid var(--rr-border)', color: 'var(--rr-text-secondary)' } as CSSProperties,
+	quote: { margin: '6px 0', paddingLeft: 10, borderLeft: '3px solid var(--rr-border)', color: 'var(--rr-text-primary)' } as CSSProperties,
 	rule: { border: 0, borderTop: '1px solid var(--rr-border)', margin: '8px 0' } as CSSProperties,
 	tableWrap: { overflowX: 'auto', margin: '6px 0' } as CSSProperties,
 	table: { borderCollapse: 'collapse', fontSize: 12 } as CSSProperties,

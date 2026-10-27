@@ -101,11 +101,11 @@ export function knnSourceLine(sample: ISampleResult, backend: string | null): st
  * @returns E.g. "Detailed mode draws up to 2,000 points".
  */
 export function pointCapLine(mode: SampleMode, cap: number): string {
-	return `${mode === 'light' ? 'Light' : 'Detailed'} mode draws up to ${num(cap)} points`;
+	return mode === 'light' ? `Light mode draws up to ${num(cap)} points, without their text` : `Detailed mode draws up to ${num(cap)} points`;
 }
 
 /** Shown instead of the map when the store cannot sample. */
-export const MAP_UNAVAILABLE = 'This store cannot draw a sample of its points, so there is no map for it. The Console lists every document.';
+export const MAP_UNAVAILABLE = 'This store cannot draw a sample of its points, so there is no map for it. Browse its documents on the Documents tab.';
 
 /** The refined layout was no better than PCA. */
 export const LAYOUT_NOT_BETTER = 'Neighbour layout did not improve on PCA for this sample';
@@ -128,6 +128,60 @@ export const CENTROID_APPROX = 'approximate: the centre of the answer\'s sources
 /** Cancelled layout. */
 export const LAYOUT_CANCELLED = 'Layout cancelled. The map shows PCA.';
 
+/**
+ * A failure, said as one in words (not by colour alone): on the status line, in its alert, and in the legend's notes.
+ *
+ * @param sentence - What failed and why.
+ * @returns The sentence, marked as a failure.
+ */
+export function failedLine(sentence: string): string {
+	return `Failed: ${sentence}`;
+}
+
+/** A query answered for a sample that was replaced meanwhile (its places are in the old sample's basis): not drawn. */
+export const QUERY_SAMPLE_CHANGED = 'The sample changed while the query was being placed, so it is not drawn; run it again.';
+
+/** The same for the compared question (said after starBNotPlaced's sentence). */
+export const STAR_B_SAMPLE_CHANGED = 'The sample changed while it was being placed; show it on the map again.';
+
+/**
+ * A saved view's query, offered again on the status line.
+ *
+ * @param query - The view's query.
+ * @returns The sentence.
+ */
+export function savedQueryLine(query: string): string {
+	return `This view had the query "${query}".`;
+}
+
+/**
+ * The one sentence the map's status line shows while nothing runs, so none is a block above the map that moves
+ * it: a failure while a map is shown (with no map, the failure is the empty state's banner), else the view's
+ * notice (a cancelled or limited layout, fewer edges, a placement that failed), else a saved view's query.
+ *
+ * @param state - The view's failure, notice and saved query, and whether a map is shown.
+ * @returns The sentence and what it is, or null for none.
+ */
+export function statusNotice(state: { error: string | null; notice: string | null; savedQuery: string | null; hasSample: boolean }): { text: string; kind: 'error' | 'notice' | 'saved-query' } | null {
+	if (state.error !== null && state.hasSample) return { text: failedLine(state.error), kind: 'error' };
+	if (state.notice !== null) return { text: state.notice, kind: 'notice' };
+	if (state.savedQuery !== null) return { text: savedQueryLine(state.savedQuery), kind: 'saved-query' };
+	return null;
+}
+
+/** Why star B is missing on a store that cannot place a question among the sample. */
+export const STAR_B_NEEDS_PROJECT = 'This store cannot place a question among the sampled points.';
+
+/**
+ * The compared question (B) has no hollow star: said on the map's status line.
+ *
+ * @param reason - Why (a failure sentence), or null.
+ * @returns The sentence.
+ */
+export function starBNotPlaced(reason: string | null): string {
+	return `The second question could not be placed on the map (no hollow star).${reason ? ` ${reason}` : ''}`;
+}
+
 /** Busy labels. */
 export const BUSY = { sampling: 'Sampling…', layout: 'Laying out…', embedding: 'Embedding…', projecting: 'Placing the query…', neighbours: 'Finding neighbours…' } as const;
 
@@ -149,7 +203,7 @@ export function mapFailure(code: string | undefined, fallback: string): string {
 		case 'UNSUPPORTED':
 			return 'This store cannot do that.';
 		case 'COLLECTION_MISSING':
-			return 'The collection does not exist yet. Add a document in the Console first.';
+			return 'The collection does not exist yet; adding a document creates it.';
 		case 'SAMPLE_EXPIRED':
 			return 'The store no longer holds this sample; it was drawn again.';
 		case 'DIMENSION_MISMATCH':

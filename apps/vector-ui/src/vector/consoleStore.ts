@@ -28,8 +28,8 @@
 // pacing, so the React view only renders its snapshot and forwards clicks:
 //
 //   STATS      `stats({mode:'full'})` on open, after a write, after a
-//              completed upload and on Refresh (after an upload or a write
-//              the store's dialect is probed again too, deps.reprobe);
+//              completed upload and on Refresh (after each of those but the
+//              open, the store's dialect is probed again too, deps.reprobe);
 //              `stats({mode:'quick'})` at most every 15 s while the console
 //              is visible. A failure keeps the last figures (the strip greys
 //              them) and says why; with no figures yet, the full call is
@@ -50,12 +50,17 @@
 //              whose chunks are all in the trash answers IN_TRASH, which says
 //              so (vector/wording.ts).
 //   WRITES     Move to trash (`soft_delete`) and Delete permanently
-//              (`delete`) open a confirmation and send NOTHING; Cancel sends
-//              nothing and says so; Confirm sends the batches once (never
-//              retried). Restore (`restore`) runs at once: it can be undone.
-//              Empty trash lists the whole trash first, then confirms, then
-//              sends `delete {deleted_only: true}` in batches and says which
-//              documents it kept because a chunk of them is live. After any
+//              (`delete {deleted_only: true}`: a Trash action, so a partly
+//              trashed document is kept whole) open a confirmation and send
+//              NOTHING; Cancel sends nothing and says so; Confirm sends the
+//              batches once (never retried). Restore (`restore`) runs at
+//              once: it can be undone. Empty trash lists the whole trash
+//              first, then confirms, then sends `delete {deleted_only: true}`
+//              in batches. Both permanent writes name the documents they
+//              kept because a chunk of them is live. A confirmation belongs
+//              to the surface that asked (its origin); while it is open,
+//              another surface's request opens nothing and says so
+//              (`elsewhere`). After any
 //              write that ran, the stats are asked in full, both listings
 //              start over, the dialect is probed again and the map is told to
 //              draw its sample again (deps.onWritten). Nothing opens or is
@@ -67,13 +72,13 @@
 // =============================================================================
 
 import type { IChunkItem, IDocumentsFilter } from '../contract/types';
-import { EMPTY_TRASH_MAX_PAGES, QUICK_STATS_INTERVAL_MS } from './budgets';
-import { removalSummary, runRemoval } from './confirm';
-import type { IRemovalOutcome, IRemoveTarget, RemovalAction } from './confirm';
+import { EMPTY_TRASH_MAX_PAGES, QUICK_STATS_INTERVAL_MS, REPROBE_WAIT_MS } from './budgets';
+import { CONSOLE_ORIGIN, confirmElsewhereText, removalSummary, runRemoval } from './confirm';
+import type { ConfirmOrigin, IRemovalOutcome, IRemoveTarget, RemovalAction } from './confirm';
 import { pagerApplyPage, pagerBegin, pagerFail, pagerInit, pagerLoadMore, pagerPause, pagerResume, pagerWantsPage } from './documents';
 import type { IPagerState } from './documents';
 import { filterKeys, keepListing, sameFilter } from './filters';
-import type { IChunksPageView, IDocumentsPageView, IRemoveView, IStatsView, ITrashView } from './results';
+import type { IChunksPageView, IDocumentsPageView, IRemoveView, IStatsView, ITrashView, IWriteAudit } from './results';
 import { statsRefreshPlan } from './stats';
 import type { StatsTrigger } from './stats';
 import { BUSY, CANCELLED_TEXT, EMPTY, failureText } from './wording';
@@ -103,7 +108,7 @@ export interface IConsoleDeps {
 	trash(objectIds: string[]): Promise<ITrashView>;
 	/** One `restore` batch: move documents back out of the trash. */
 	restore(objectIds: string[]): Promise<ITrashView>;
-	/** One `delete` batch (the permanent delete); `deletedOnly` for Empty trash. */
+	/** One `delete` batch (the permanent delete); `deletedOnly` keeps a document that still has a live chunk. */
 	remove(objectIds: string[], opts?: { deletedOnly?: boolean }): Promise<IRemoveView>;
 	/** Speak a short outcome through the polite live region. */
 	announce(text: string): void;
@@ -113,9 +118,15 @@ export interface IConsoleDeps {
 	onWritten?(): void;
 	/**
 	 * Probe the store again (its `dialect`): after an upload completes and after a write, so what was read at
-	 * discovery (an empty collection, no model or index yet) does not stay on screen. Fire and forget.
+	 * discovery (an empty collection, no model or index yet) does not stay on screen. Settles when the answer is in
+	 * (never rejects); fire and forget unless the store has no probe that answered (see `probed`).
 	 */
-	reprobe?(): void;
+	reprobe?(): void | Promise<void>;
+	/**
+	 * Whether the store answered its last probe. Without one (it failed, or none ran) the session refuses every call
+	 * that needs a capability, so Refresh and Retry probe again first. Absent: always.
+	 */
+	probed?(): boolean;
 	clock: IConsoleClock;
 }
 
@@ -157,6 +168,8 @@ export interface IPendingRemoval {
 	action: 'trash' | 'delete' | 'empty';
 	kind: 'single' | 'multi';
 	targets: IRemoveTarget[];
+	/** The surface that asked: the confirmation shows there only. */
+	origin: ConfirmOrigin;
 }
 
 /** The console's snapshot (replaced, never mutated). */
@@ -169,8 +182,17 @@ export interface IConsoleState {
 	view: DirectoryView;
 	chunks: IChunksSlot;
 	confirm: IPendingRemoval | null;
-	/** The last write; while one runs, `message` says what it is doing (null: the generic busy word). */
-	removal: { status: 'idle' | 'running' | 'done' | 'error'; message: string | null };
+	/** A surface that asked for a confirmation while `confirm` was open on another one (it is told to finish that first), or null. */
+	elsewhere: ConfirmOrigin | null;
+	/** Refresh or Retry is probing the store again before it reads (its last probe did not answer). */
+	checking?: boolean;
+	/**
+	 * The last write; while one runs, `message` says what it is doing (null: the generic busy word). `audit`: the
+	 * audit blocks of a finished write's batches. `partial`: a finished write that did not do all it was asked
+	 * (documents kept whole, or already gone): the hub holds its line like a failure's. `origin`: the surface that
+	 * asked, when it is not the console (a document tab's write or cancel shows there, not in the console's line).
+	 */
+	removal: { status: 'idle' | 'running' | 'done' | 'error'; message: string | null; audit?: readonly IWriteAudit[]; partial?: boolean; origin?: ConfirmOrigin };
 }
 
 /** The controller. */
@@ -199,14 +221,17 @@ export interface IConsoleStore {
 	setView(view: DirectoryView): void;
 	selectDocument(objectId: string | null): void;
 	loadMoreChunks(): void;
-	/** Move to trash: opens the confirmation (nothing to type). */
-	requestRemove(targets: readonly IRemoveTarget[]): void;
-	/** Delete permanently: opens the confirmation (typed as vector/confirm.ts says). */
-	requestDelete(targets: readonly IRemoveTarget[]): void;
+	/** Move to trash: opens the confirmation (nothing to type) on the surface that asked (default the console). */
+	requestRemove(targets: readonly IRemoveTarget[], origin?: ConfirmOrigin): void;
+	/**
+	 * Delete permanently, from the Trash: opens the confirmation (typed as vector/confirm.ts says); Confirm sends
+	 * `delete {deleted_only: true}`, so a document that still has a live chunk is kept whole.
+	 */
+	requestDelete(targets: readonly IRemoveTarget[], origin?: ConfirmOrigin): void;
 	/** Restore from the trash, at once (it can be undone). */
-	restore(targets: readonly IRemoveTarget[]): Promise<void>;
+	restore(targets: readonly IRemoveTarget[], origin?: ConfirmOrigin): Promise<void>;
 	/** Empty trash: list the whole trash, then open its confirmation (or say it is empty). */
-	requestEmptyTrash(): Promise<void>;
+	requestEmptyTrash(origin?: ConfirmOrigin): Promise<void>;
 	cancelRemove(): void;
 	confirmRemove(): Promise<void>;
 	/** Stop every timer; later answers are dropped. */
@@ -222,9 +247,9 @@ const NO_CHUNKS: IChunksSlot = { objectId: null, items: [], status: 'idle', hasM
 /** The two listings, by their key in the snapshot. */
 type ListKey = 'directory' | 'trash';
 
-/** A trash answer read as a write's view: the documents it moved, the chunks it moved. */
+/** A trash answer read as a write's view: the documents it moved, the chunks it moved, and its audit block. */
 function moved(view: ITrashView): IRemoveView {
-	return { removed: view.moved.map((objectId) => ({ objectId, chunks: null })), notFound: view.notFound, keptLive: [], removedChunks: view.matchedChunks };
+	return { removed: view.moved.map((objectId) => ({ objectId, chunks: null })), notFound: view.notFound, keptLive: [], removedChunks: view.matchedChunks, audit: view.audit };
 }
 
 /**
@@ -243,6 +268,7 @@ export function createConsoleStore(deps: IConsoleDeps, opts: IConsoleOptions): I
 		view: 'active',
 		chunks: NO_CHUNKS,
 		confirm: null,
+		elsewhere: null,
 		removal: { status: 'idle', message: null },
 	};
 	const listeners = new Set<() => void>();
@@ -351,6 +377,35 @@ export function createConsoleStore(deps: IConsoleDeps, opts: IConsoleOptions): I
 		void pump('directory', runs.directory);
 	}
 
+	/** Whether the store has no probe that answered (it failed, or none ran). */
+	function unprobed(): boolean {
+		return deps.probed !== undefined && !deps.probed();
+	}
+
+	/**
+	 * Probe the store again, then read (once; a Refresh or Retry while it probes is not asked again). A probe that has
+	 * not answered after REPROBE_WAIT_MS is not waited for any longer: the read goes ahead (and says why it failed), so
+	 * the console is never left checking with Refresh and Retry ignored.
+	 */
+	function afterProbe(read: () => void): void {
+		if (state.checking) return;
+		set({ checking: true });
+		let settled = false;
+		const finish = (): void => {
+			if (settled) return;
+			settled = true;
+			deps.clock.clearTimer(guard);
+			if (disposed) return;
+			// What it reads starts (stats loading) before the check ends, so Refreshing… does not blink.
+			read();
+			set({ checking: false });
+		};
+		const guard = deps.clock.setTimer(finish, REPROBE_WAIT_MS);
+		void Promise.resolve(deps.reprobe?.())
+			.catch(() => undefined)
+			.then(finish);
+	}
+
 	/** Start the trash listing over. */
 	function startTrash(): void {
 		runs.trash += 1;
@@ -395,24 +450,43 @@ export function createConsoleStore(deps: IConsoleDeps, opts: IConsoleOptions): I
 		return true;
 	}
 
-	/** Open a confirmation. */
-	function ask(action: IPendingRemoval['action'], targets: readonly IRemoveTarget[]): void {
-		if (targets.length === 0 || !canWrite()) return;
-		set({ confirm: { action, kind: targets.length === 1 ? 'single' : 'multi', targets: [...targets] } });
+	/**
+	 * Whether a surface may open a confirmation now. One open on another surface stays (it is never replaced): the
+	 * asking surface is told to finish that one first.
+	 */
+	function mayAsk(origin: ConfirmOrigin): boolean {
+		const open = state.confirm;
+		if (open === null || open.origin === origin) return true;
+		set({ elsewhere: origin });
+		deps.announce(confirmElsewhereText(open.origin));
+		return false;
+	}
+
+	/** Open a confirmation on the surface that asked. */
+	function ask(action: IPendingRemoval['action'], targets: readonly IRemoveTarget[], origin: ConfirmOrigin): void {
+		if (targets.length === 0 || !canWrite() || !mayAsk(origin)) return;
+		set({ confirm: { action, kind: targets.length === 1 ? 'single' : 'multi', targets: [...targets], origin }, elsewhere: null });
+	}
+
+	/** The write state's origin key: none for the console's own. */
+	function originOf(origin: ConfirmOrigin): { origin?: ConfirmOrigin } {
+		return origin === CONSOLE_ORIGIN ? {} : { origin };
 	}
 
 	/** Run a write's batches, say what it did, and refresh what a write changes. */
-	async function write(action: RemovalAction, targets: readonly IRemoveTarget[]): Promise<void> {
-		set({ confirm: null, removal: { status: 'running', message: action === 'restore' ? BUSY.restoring : null } });
+	async function write(action: RemovalAction, targets: readonly IRemoveTarget[], origin: ConfirmOrigin): Promise<void> {
+		set({ confirm: null, elsewhere: null, removal: { status: 'running', message: action === 'restore' ? BUSY.restoring : null, ...originOf(origin) } });
 		const ids = targets.map((t) => t.objectId);
 		const call = (batch: string[]): Promise<IRemoveView> => {
 			if (action === 'trash') return deps.trash(batch).then(moved);
 			if (action === 'restore') return deps.restore(batch).then(moved);
-			return deps.remove(batch, action === 'empty' ? { deletedOnly: true } : {});
+			// Both permanent writes are Trash actions: a document that still has a live chunk is kept whole.
+			return deps.remove(batch, { deletedOnly: true });
 		};
 		const outcome: IRemovalOutcome = await runRemoval(ids, call, opts.writeBatch);
 		const message = removalSummary(outcome, targets, action);
-		set({ removal: { status: outcome.error ? 'error' : 'done', message } });
+		const partial = !outcome.error && (outcome.keptLive.length > 0 || outcome.notFound.length > 0);
+		set({ removal: { status: outcome.error ? 'error' : 'done', message, audit: outcome.audits ?? [], ...(partial ? { partial: true } : {}), ...originOf(origin) } });
 		deps.announce(message);
 		// What left the stored documents: a restored one comes back, a kept one stays where it was.
 		const gone = action === 'restore' ? [] : [...outcome.removed.map((r) => r.objectId), ...outcome.notFound];
@@ -435,7 +509,7 @@ export function createConsoleStore(deps: IConsoleDeps, opts: IConsoleOptions): I
 	 * Every document of the trash, page after page (EMPTY_TRASH_MAX_PAGES at most), or null when a page failed.
 	 * A page that brings no document not already listed ends the listing, as the directory's does.
 	 */
-	async function wholeTrash(): Promise<IRemoveTarget[] | null> {
+	async function wholeTrash(origin: ConfirmOrigin): Promise<IRemoveTarget[] | null> {
 		const found = new Map<string, IRemoveTarget>();
 		let cursor: string | null = null;
 		for (let n = 0; n < EMPTY_TRASH_MAX_PAGES; n++) {
@@ -444,7 +518,7 @@ export function createConsoleStore(deps: IConsoleDeps, opts: IConsoleOptions): I
 				answer = await deps.documents(cursor, opts.pageSize, null, 'deleted');
 			} catch (error) {
 				const text = failureText(error) ?? { headline: 'The trash could not be listed.' };
-				set({ removal: { status: 'error', message: text.headline } });
+				set({ removal: { status: 'error', message: text.headline, ...originOf(origin) } });
 				deps.announce(text.headline);
 				return null;
 			}
@@ -488,11 +562,22 @@ export function createConsoleStore(deps: IConsoleDeps, opts: IConsoleOptions): I
 		},
 		setWritesEnabled(enabled: boolean): void {
 			writesEnabled = enabled;
-			if (!enabled && state.confirm !== null) set({ confirm: null });
+			if (!enabled && state.confirm !== null) set({ confirm: null, elsewhere: null });
 		},
 		refresh(): void {
+			// No probe answered (the store was down): every read would be refused, so the store is probed first.
+			if (unprobed()) {
+				afterProbe(() => {
+					planStats('manual');
+					relist();
+				});
+				return;
+			}
 			planStats('manual');
 			relist();
+			// The dialect too: a store found empty and filled from elsewhere (a seed script, another app) would keep its
+			// empty-collection answer (no index, no size) until a Test connection otherwise.
+			deps.reprobe?.();
 		},
 		documentsChanged(): void {
 			planStats('upload');
@@ -505,9 +590,13 @@ export function createConsoleStore(deps: IConsoleDeps, opts: IConsoleOptions): I
 			void pump(key, runs[key]);
 		},
 		retryDocuments(): void {
+			if (state.checking) return;
 			const key: ListKey = state.view === 'trash' ? 'trash' : 'directory';
 			set({ [key]: pagerResume(state[key]) });
-			void pump(key, runs[key]);
+			const run = runs[key];
+			// As Refresh: without a probe that answered, the store is probed again before the page is asked.
+			if (unprobed()) afterProbe(() => void pump(key, run));
+			else void pump(key, run);
 		},
 		setFilter(filter: IDocumentsFilter | null): void {
 			const next = filter !== null && filterKeys(filter).length > 0 ? { ...filter } : null;
@@ -543,39 +632,39 @@ export function createConsoleStore(deps: IConsoleDeps, opts: IConsoleOptions): I
 			if (objectId === null || !hasMore || status === 'loading') return;
 			void loadChunks(chunkRun, objectId, nextAfter);
 		},
-		requestRemove(targets: readonly IRemoveTarget[]): void {
-			ask('trash', targets);
+		requestRemove(targets: readonly IRemoveTarget[], origin: ConfirmOrigin = CONSOLE_ORIGIN): void {
+			ask('trash', targets, origin);
 		},
-		requestDelete(targets: readonly IRemoveTarget[]): void {
-			ask('delete', targets);
+		requestDelete(targets: readonly IRemoveTarget[], origin: ConfirmOrigin = CONSOLE_ORIGIN): void {
+			ask('delete', targets, origin);
 		},
-		async restore(targets: readonly IRemoveTarget[]): Promise<void> {
+		async restore(targets: readonly IRemoveTarget[], origin: ConfirmOrigin = CONSOLE_ORIGIN): Promise<void> {
 			if (targets.length === 0 || !canWrite()) return;
-			await write('restore', targets);
+			await write('restore', targets, origin);
 		},
-		async requestEmptyTrash(): Promise<void> {
-			if (!canWrite()) return;
-			set({ removal: { status: 'running', message: BUSY.listingTrash } });
-			const targets = await wholeTrash();
+		async requestEmptyTrash(origin: ConfirmOrigin = CONSOLE_ORIGIN): Promise<void> {
+			if (!canWrite() || !mayAsk(origin)) return;
+			set({ removal: { status: 'running', message: BUSY.listingTrash, ...originOf(origin) } });
+			const targets = await wholeTrash(origin);
 			if (disposed || targets === null) return;
 			if (targets.length === 0) {
-				set({ removal: { status: 'done', message: EMPTY.trash } });
+				set({ removal: { status: 'done', message: EMPTY.trash, ...originOf(origin) } });
 				deps.announce(EMPTY.trash);
 				return;
 			}
 			set({ removal: { status: 'idle', message: null } });
-			if (!writesEnabled) return;
-			set({ confirm: { action: 'empty', kind: 'multi', targets } });
+			if (!writesEnabled || !mayAsk(origin)) return;
+			set({ confirm: { action: 'empty', kind: 'multi', targets, origin }, elsewhere: null });
 		},
 		cancelRemove(): void {
 			if (state.confirm === null) return;
-			set({ confirm: null, removal: { status: 'idle', message: CANCELLED_TEXT } });
+			set({ confirm: null, elsewhere: null, removal: { status: 'idle', message: CANCELLED_TEXT, ...originOf(state.confirm.origin) } });
 			deps.announce(CANCELLED_TEXT);
 		},
 		async confirmRemove(): Promise<void> {
 			const pending = state.confirm;
 			if (pending === null || !writesEnabled || state.removal.status === 'running') return;
-			await write(pending.action, pending.targets);
+			await write(pending.action, pending.targets, pending.origin);
 		},
 		dispose(): void {
 			if (timer !== null) deps.clock.clearTimer(timer);

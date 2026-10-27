@@ -54,7 +54,7 @@ moduleWithLoad._load = function (request: string, parent: unknown, isMain: boole
 
 const { createSelectionStore } = require('../src/contract/bridge') as typeof import('../src/contract/bridge');
 const { MapView } = require('../src/views/MapView') as typeof import('../src/views/MapView');
-const { DocumentDirectory } = require('../src/components/DocumentDirectory') as typeof import('../src/components/DocumentDirectory');
+const { renderDocumentsTab } = require('./support/panels') as typeof import('./support/panels');
 const { RetrievalDebugger } = require('../src/components/RetrievalDebugger') as typeof import('../src/components/RetrievalDebugger');
 const { pagerInit } = require('../src/vector/documents') as typeof import('../src/vector/documents');
 
@@ -128,9 +128,10 @@ test("the map's Selection tab holds the SimilarityMatrix of the selection", () =
 	mounted(html, 'SimilarityMatrix');
 });
 
-test('the directory carries the ExportMenu', () => {
-	const html = renderToStaticMarkup(<DocumentDirectory pager={pagerInit()} selectedId={null} writes={on} onSelect={noop} onRemove={noop} onLoadMore={noop} onRetry={noop} collection="vx_demo_docs" />);
+test('the Documents tab carries the ExportMenu, in its header (outside the grid that scrolls)', () => {
+	const html = renderDocumentsTab({ directory: pagerInit() });
 	mounted(html, 'ExportMenu');
+	assert.ok(html.indexOf('data-component="ExportMenu"') < html.indexOf('role="grid"'));
 });
 
 test('"Why these?" carries the ExportMenu', () => {

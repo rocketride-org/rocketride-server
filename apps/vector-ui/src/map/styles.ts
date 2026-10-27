@@ -28,12 +28,56 @@
 // RocketRide Dark); emphasis comes from size and weight. Focus rings use the
 // accent and are injected once as a stylesheet, because inline styles cannot
 // express :focus-visible.
+//
+// A box that floats over the map (the tooltip, the Advanced, Export and Views
+// panels) is the paper over the map's surface, which is 1.1:1 in RocketRide
+// dark, so its edge is drawn: a border computed per theme (the paper mixed
+// toward the text colour until it clears 3:1 on both surfaces;
+// --rr-border-input is 1.6:1 there) and the theme's own shadow colour.
 // =============================================================================
 
 import type { CSSProperties } from 'react';
-import { ACCENT_TOKEN, OUTLINE_TOKEN } from './tokens';
+import { mixRgb, mixToContrast, opaqueOver, parseColor, toCss } from './contrast';
+import { ACCENT_TOKEN, MIN_GRAPHIC_CONTRAST, OUTLINE_TOKEN } from './tokens';
+import type { IMapPalette } from './tokens';
 
 const text: CSSProperties = { color: 'var(--rr-text-primary)', fontSize: 12.5, lineHeight: 1.45 };
+
+/** The shadow of a box over the map: the theme's own shadow colour. */
+export const FLOAT_SHADOW = '0 2px 8px var(--rr-shadow-widget, rgba(0, 0, 0, 0.25))';
+
+/**
+ * The border of a box that floats over the map: the paper mixed toward the
+ * text colour until it clears 3:1 against both the paper (inside the box) and
+ * the map's surface (around it).
+ *
+ * @param palette - The map palette, or null (no theme read: the text colour).
+ * @returns A CSS colour.
+ */
+export function floatBorder(palette: IMapPalette | null): string {
+	if (!palette) return `var(${OUTLINE_TOKEN})`;
+	const surface = parseColor(palette.surfaces.default);
+	const paper = surface ? opaqueOver(palette.surfaces.paper, surface) : null;
+	const text = paper ? opaqueOver(palette.text, paper) : null;
+	if (!surface || !paper || !text) return `var(${OUTLINE_TOKEN})`;
+	const t = mixToContrast(paper, text, [surface, paper], MIN_GRAPHIC_CONTRAST);
+	return toCss(t === null ? text : mixRgb(paper, text, t));
+}
+
+/**
+ * The legend's height, CSS pixels, the same in every state (a query landing, a selection, edges on), so the map
+ * never shrinks or moves under it. The smallest that holds the common states whole at 1440 (measured in Chrome,
+ * RocketRide dark, a 1,020 px legend beside the side panel): Document colouring 142, a placed query 137, a
+ * selection 142, Cluster colouring with its note 144 (re-measured with the header row: the four still fit whole).
+ * More (edges with their note, a narrower dev-tool frame) scrolls inside it.
+ */
+export const LEGEND_HEIGHT = 144;
+
+/** The legend's header row (its disclosure and the sample line), CSS pixels. */
+export const LEGEND_HEAD_HEIGHT = 24;
+
+/** The collapsed legend: its border and its header row only, the same in every state. */
+export const LEGEND_COLLAPSED_HEIGHT = LEGEND_HEAD_HEIGHT + 1;
 
 /** Style objects. */
 export const MAP_STYLES = {
@@ -66,8 +110,15 @@ export const MAP_STYLES = {
 	table: { ...text, width: '100%', borderCollapse: 'collapse' } as CSSProperties,
 	th: { textAlign: 'left', fontWeight: 700, fontSize: 11.5, padding: '4px 6px', borderBottom: '1px solid var(--rr-border)', position: 'sticky', top: 0, background: 'var(--rr-bg-paper)' } as CSSProperties,
 	td: { padding: '3px 6px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'top' } as CSSProperties,
-	tooltip: { position: 'absolute', pointerEvents: 'none', maxWidth: 320, padding: '6px 8px', borderRadius: 6, background: 'var(--rr-bg-paper)', color: 'var(--rr-text-primary)', border: '1px solid var(--rr-border)', boxShadow: '0 2px 8px rgba(0,0,0,0.25)', fontSize: 12, lineHeight: 1.4, zIndex: 2 } as CSSProperties,
-	legend: { padding: '8px 10px', borderTop: '1px solid var(--rr-border)', background: 'var(--rr-bg-paper)' } as CSSProperties,
+	tooltip: { position: 'absolute', pointerEvents: 'none', maxWidth: 320, padding: '6px 8px', borderRadius: 6, background: 'var(--rr-bg-paper)', color: 'var(--rr-text-primary)', border: `1px solid var(${OUTLINE_TOKEN})`, boxShadow: FLOAT_SHADOW, fontSize: 12, lineHeight: 1.4, zIndex: 2 } as CSSProperties,
+	// One fixed height in every state, open (LEGEND_HEIGHT) or collapsed (its header row): what does not fit scrolls
+	// inside the legend's body, and only the user's own toggle changes the map's height (no transition: one step).
+	legend: { borderTop: '1px solid var(--rr-border)', background: 'var(--rr-bg-paper)', height: LEGEND_HEIGHT, boxSizing: 'border-box', flex: 'none', display: 'flex', flexDirection: 'column' } as CSSProperties,
+	legendCollapsed: { borderTop: '1px solid var(--rr-border)', background: 'var(--rr-bg-paper)', height: LEGEND_COLLAPSED_HEIGHT, boxSizing: 'border-box', flex: 'none', display: 'flex', flexDirection: 'column' } as CSSProperties,
+	legendHead: { height: LEGEND_HEAD_HEIGHT, flex: 'none', display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' } as CSSProperties,
+	legendToggle: { ...text, height: 20, padding: '0 6px', borderRadius: 4, border: '1px solid var(--rr-border-input, var(--rr-border))', background: 'var(--rr-bg-default)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', flex: 'none' } as CSSProperties,
+	legendLine: { ...text, fontSize: 11.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
+	legendBody: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 10px 0' } as CSSProperties,
 	/**
 	 * A colour swatch; an outlined colour gets the outline ring.
 	 *
@@ -79,6 +130,16 @@ export const MAP_STYLES = {
 		return { display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: colour, boxShadow: outlined ? `0 0 0 1px var(${OUTLINE_TOKEN})` : undefined, marginRight: 6, verticalAlign: 'middle', flex: 'none' };
 	},
 };
+
+/**
+ * The map's tooltip box, edged for the theme.
+ *
+ * @param palette - The map palette, or null.
+ * @returns The style.
+ */
+export function tooltipStyle(palette: IMapPalette | null): CSSProperties {
+	return { ...MAP_STYLES.tooltip, border: `1px solid ${floatBorder(palette)}` };
+}
 
 /** Id of the injected stylesheet. */
 const STYLE_ID = 'vector-ui-map-style';

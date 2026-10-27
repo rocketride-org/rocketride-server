@@ -47,7 +47,7 @@ import type { IBadge } from '../vector/connections';
 /** A row's state dot, by the card badge's variant (the suffix says the state in words). */
 const DOT_COLOR: Record<IBadge['variant'], string> = {
 	success: 'var(--rr-color-success)',
-	muted: 'var(--rr-text-disabled)',
+	muted: 'var(--rr-border-input)',
 	error: 'var(--rr-color-error)',
 	warning: 'var(--rr-color-warning)',
 };
@@ -76,7 +76,7 @@ const styles = {
 		fontWeight: 600,
 		textTransform: 'uppercase',
 		letterSpacing: '0.5px',
-		color: 'var(--rr-text-secondary)',
+		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
 
 	/** The platform's pane-header treatment (Explorer's): a hover-revealed cluster of 18px icon buttons. */
@@ -102,14 +102,14 @@ const styles = {
 	}),
 
 	/** Leading glyph slot. */
-	rowIcon: (active: boolean): CSSProperties => ({
+	rowIcon: (_active: boolean): CSSProperties => ({
 		display: 'inline-flex',
 		alignItems: 'center',
 		justifyContent: 'center',
 		width: 17,
 		height: 17,
 		flexShrink: 0,
-		color: active ? 'inherit' : 'var(--rr-text-secondary)',
+		color: 'inherit',
 	}),
 
 	/** Row label (fills so the state right-aligns). */
@@ -124,7 +124,6 @@ const styles = {
 	rowStatus: {
 		flexShrink: 0,
 		fontSize: 12,
-		color: 'var(--rr-text-secondary)',
 	} as CSSProperties,
 
 	/** The state dot (the panel vocabulary's 8px dot). */
@@ -134,14 +133,14 @@ const styles = {
 	empty: {
 		padding: '2px 8px 4px 18px',
 		fontSize: 12,
-		color: 'var(--rr-text-secondary)',
 	} as CSSProperties,
 
 	/** Failure line under the list. */
 	error: {
 		padding: '2px 8px 4px 18px',
 		fontSize: 12,
-		color: 'var(--rr-color-error)',
+		// The words say it failed; the colour is only an edge, never the text.
+		borderLeft: '3px solid var(--rr-color-error)',
 	} as CSSProperties,
 };
 

@@ -93,8 +93,8 @@ const DOCUMENT_MODES: ReadonlySet<MapColourBy> = new Set(['ingest-date', 'file-s
 /** A sample without `points.table` (an older node). */
 export const TABLE_UNSUPPORTED = 'This store node does not mark table chunks; update the node.';
 
-/** No directory rows for the sample's documents yet. */
-export const DOCUMENT_ROWS_NONE = 'Load the documents in the Console to colour by their details.';
+/** None of the sample's documents is among the listed documents (the Documents tab's listing) yet. */
+export const DOCUMENT_ROWS_NONE = "None of this sample's documents is among the documents listed so far, so there are no details to colour by.";
 
 /** Why a document-detail mode has nothing to show. */
 const DOCUMENT_FIELD_MISSING: Record<'ingest-date' | 'file-size' | 'ingest-node', string> = {
@@ -340,8 +340,8 @@ const RAMP_ENDS: Record<'chunk-position' | 'query-similarity' | 'density', [stri
 	density: ['sparse', 'dense'],
 };
 
-/** Legend row of the points whose document the directory has not loaded. */
-const NOT_LOADED = 'Not loaded in the directory';
+/** Legend row of the points whose document is not among the listed documents. */
+const NOT_LOADED = 'Not among the listed documents';
 
 /** What colourPoints reads besides the sample and the mode. */
 export interface IColourOptions {

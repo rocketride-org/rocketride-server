@@ -30,14 +30,16 @@ import type { IRoleChannel } from 'shared/explorer';
 import { recommendExamples } from '../src/adapters/connections';
 import { createSelectionStore } from '../src/contract/bridge';
 import { EXPORT_COLUMNS } from '../src/contract/types';
-import type { ConsoleActions, ConsoleModel, IDialectResult, IExportItem, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleModel, ISampleResult, ISavedView, ISavedViewRestore, ISavedViewState, IScopeState, ToolOutcome, VectorChannels, VectorKey } from '../src/contract/types';
+import type { ConsoleActions, ConsoleModel, IDialectResult, IExportItem, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleDoc, ISampleModel, ISampleResult, IStageTarget, ISavedView, ISavedViewRestore, ISavedViewState, IScopeState, ToolOutcome, VectorChannels, VectorKey } from '../src/contract/types';
+import { MapToolbar } from '../src/components/MapToolbar';
 import { PointCanvas } from '../src/components/PointCanvas';
 import { clusterLabel, clusterRows, clusterView } from '../src/map/clusters';
 import { spanningTree } from '../src/map/graph';
 import { UNSCOPED, clusterExportRows, drawnScope, duplicateExportRows, mapScopeState, pointExportRows, scopeDrawDue } from '../src/map/model';
-import { comparePlan } from '../src/map/queryProjection';
+import { comparePlan, onSample, placeCompared, projectOn } from '../src/map/queryProjection';
+import type { ToolAnswer } from '../src/map/calls';
 import type { ILayoutClient, ILayoutSpec, LayoutOutcome } from '../src/map/workerClient';
-import { EDGES_LIGHT_NOTE, MAP_UNAVAILABLE, SCOPE_RETRY, edgeLegend, listingNote, scopeFailedNote, scopeLeftNote, scopeNote, scopePendingNote } from '../src/map/wording';
+import { EDGES_DEGRADED, EDGES_LIGHT_NOTE, LAYOUT_CANCELLED, MAP_UNAVAILABLE, SCOPE_RETRY, STAR_B_NEEDS_PROJECT, STAR_B_SAMPLE_CHANGED, edgeLegend, failedLine, listingNote, mapFailure, savedQueryLine, scopeFailedNote, scopeLeftNote, scopeNote, scopePendingNote, starBNotPlaced, statusNotice } from '../src/map/wording';
 import type { SideTab } from '../src/views/MapView';
 import { deepFreeze, loadSample, modelOf, pcaXY } from './support/map.samples';
 
@@ -86,6 +88,9 @@ loader._load = function (request: string, parent: { filename?: string } | null, 
 	return spy;
 };
 const { MapView } = require('../src/views/MapView') as typeof import('../src/views/MapView');
+
+/** A static render. */
+const html = (el: React.ReactElement): string => renderToStaticMarkup(el);
 
 /** The props of the last render of a child. */
 function last<T = Record<string, unknown>>(name: string): T {
@@ -182,9 +187,10 @@ test('with sample_demo_1000.json drawn: the canvas has data-points 1000 on PCA, 
 	assert.equal(attrOf(out, 'vector-map-canvas', 'data-layout'), 'pca');
 	assert.equal(attrOf(out, 'vector-map-canvas', 'data-selection'), '');
 	assert.match(out, /role="toolbar" aria-label="Map controls"/);
-	assert.match(out, /of 1,318 chunks · 42 docs · seed 7/);
 	assert.match(out, /aria-label="Map legend"/);
-	assert.match(out, /Showing 1,000 of 1,318 chunks/);
+	// The sample line is in the legend's header row, beside its disclosure, at the legend's bottom (it left the toolbar,
+	// which keeps one row).
+	assert.match(out, /<div style="[^"]*"><button[^>]*data-legend-toggle="">▾ Legend<\/button><span[^>]*>Showing 1,000 of 1,318 chunks \(random sample\) · 42 docs · seed 7<\/span><\/div><\/section>/);
 	assert.match(out, /role="tab" aria-selected="true"[^>]*>Point</);
 	assert.match(out, /Click a point or use the arrow keys/);
 });
@@ -233,8 +239,11 @@ test('the Clusters tab holds the ClustersPanel, and the toolbar offers Edges: No
 	const at = out.search(/<[a-z]+[^>]*data-component="ClustersPanel"/);
 	assert.ok(at >= 0, 'the panel is mounted in its tab');
 	assert.doesNotMatch(out.slice(at, out.indexOf('>', at)), /data-placeholder/, 'the panel is built');
-	assert.match(out, /<select aria-label="Edges"[^>]*>/);
-	assert.match(out, /<option value="none" selected="">None<\/option><option value="neighbours">Neighbours<\/option><option value="tree">Tree<\/option>/);
+	// Edges are in the toolbar's Advanced panel (closed until it is opened).
+	assert.match(out, /<button[^>]*aria-expanded="false"[^>]*>Advanced ▾<\/button>/);
+	const advanced = html(<MapToolbar {...last<React.ComponentProps<typeof MapToolbar>>('MapToolbar')} initialAdvanced />);
+	assert.match(advanced, /<select aria-label="Edges"[^>]*>/);
+	assert.match(advanced, /<option value="none" selected="">None<\/option><option value="neighbours">Neighbours<\/option><option value="tree">Tree<\/option>/);
 });
 
 // -----------------------------------------------------------------------------
@@ -325,7 +334,7 @@ test('edges: Tree draws the spanning tree (n-1 edges on a connected graph), Neig
 	const light = render({ channels: counted, sample: modelOf(loadSample('sample_light_5000.json')), extra: { edges: 'neighbours', edgesM: 10 } });
 	assert.equal(attr(light, 'data-edges-per-point'), '3');
 	assert.ok(light.includes(EDGES_LIGHT_NOTE));
-	assert.match(light, /<option value="10" disabled="" title="Light samples above 3,000 points draw at most 3 edges per point">10<\/option>/);
+	assert.match(html(<MapToolbar {...last<React.ComponentProps<typeof MapToolbar>>('MapToolbar')} initialAdvanced />), /<option value="10" disabled="" title="Light samples above 3,000 points draw at most 3 edges per point">10<\/option>/);
 	// The toolbar's edge controls, as the view wired them: nothing is sent.
 	render({ channels: counted, sample: demo });
 	const toolbar = last<{ onEdges(m: string): void; onEdgesM(m: number): void; onExpandSelected(): void; expandReason: string | null }>('MapToolbar');
@@ -707,6 +716,106 @@ test('the compare plan: both questions placed once each, nothing without an embe
 	assert.deepEqual(comparePlan({ told: 'water', toldB: null, mapQuery: null, mapQueryB: null, embedReady: true }), { runA: false, runB: false }, 'a single search is the map\'s own query path');
 });
 
+test('the compared pair is placed one after the other: B starts only when A has ended (the store answers BUSY to a second project), however A ended', async () => {
+	const order: string[] = [];
+	/** A placement that ends when its gate opens. */
+	const gated = (name: string, fail = false): { run: () => Promise<void>; open: () => void } => {
+		let open: () => void = () => undefined;
+		const gate = new Promise<void>((resolve) => {
+			open = resolve;
+		});
+		return {
+			run: async () => {
+				order.push(`${name} start`);
+				await gate;
+				order.push(`${name} end`);
+				if (fail) throw new Error(`${name} failed`);
+			},
+			open: () => open(),
+		};
+	};
+	const a = gated('A');
+	const b = gated('B');
+	const both = placeCompared({ runA: true, runB: true }, a.run, b.run);
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(order, ['A start'], 'B waits while A runs');
+	b.open();
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(order, ['A start'], 'still waiting for A, whatever B could do');
+	a.open();
+	await both;
+	assert.deepEqual(order, ['A start', 'A end', 'B start', 'B end']);
+	// A failed: B is still placed after it, and A's failure is not swallowed.
+	order.length = 0;
+	const failing = gated('A', true);
+	const after = gated('B');
+	after.open();
+	const run = placeCompared({ runA: true, runB: true }, failing.run, after.run);
+	failing.open();
+	await assert.rejects(run, /A failed/);
+	assert.deepEqual(order, ['A start', 'A end', 'B start', 'B end']);
+	// Only one of them.
+	order.length = 0;
+	const onlyB = gated('B');
+	onlyB.open();
+	await placeCompared({ runA: false, runB: true }, () => Promise.reject(new Error('A must not run')), onlyB.run);
+	assert.deepEqual(order, ['B start', 'B end']);
+	// B with no star is placed again: the plan counts only a placed B.
+	assert.deepEqual(comparePlan({ told: 'water', toldB: 'orchids', mapQuery: 'water', mapQueryB: null, embedReady: true }), { runA: false, runB: true });
+});
+
+test('a placement projected on a sample replaced while it ran is not drawn: the answer says which sample it is for', async () => {
+	type Answer = ToolAnswer<{ items: string[] }>;
+	const ok = (value: string): Answer => ({ ok: true, value: { items: [value] } }) as Answer;
+	let shown = 's-1';
+	// The project call waits on a gate; a new sample is drawn meanwhile (the store still answers the old id).
+	let open: (answer: Answer) => void = () => undefined;
+	const pending = projectOn('s-1', (id) => new Promise<Answer>((resolve) => (open = (a) => resolve(id === 's-1' ? a : ok('other')))), async () => null);
+	shown = 's-2';
+	open(ok('old basis'));
+	const late = await pending;
+	assert.equal(late.sampleId, 's-1');
+	assert.equal(late.answer.ok, true, 'the store answered');
+	assert.equal(onSample(late.sampleId, shown), false, 'no star, no "placed": the sample changed');
+	// Unchanged: drawn.
+	const same = await projectOn('s-2', async () => ok('here'), async () => null);
+	assert.equal(onSample(same.sampleId, shown), true);
+	// SAMPLE_EXPIRED: drawn again, retried on the new id, and the answer is for that new sample.
+	const expired = { ok: false, code: 'SAMPLE_EXPIRED', message: 'gone', stale: false } as Answer;
+	const calls: string[] = [];
+	const retried = await projectOn('s-2', async (id) => {
+		calls.push(id);
+		return id === 's-2' ? expired : ok('fresh');
+	}, async () => {
+		shown = 's-3';
+		return 's-3';
+	});
+	assert.deepEqual(calls, ['s-2', 's-3']);
+	assert.equal(retried.sampleId, 's-3');
+	assert.equal(onSample(retried.sampleId, shown), true);
+	// Nothing projected (a store with no project): nothing in another basis.
+	assert.equal(onSample(null, shown), true);
+	assert.equal(starBNotPlaced(STAR_B_SAMPLE_CHANGED), 'The second question could not be placed on the map (no hollow star). The sample changed while it was being placed; show it on the map again.');
+});
+
+test('a compared question with no star says so on the status line, with why', () => {
+	assert.equal(starBNotPlaced(mapFailure('BUSY', '')), 'The second question could not be placed on the map (no hollow star). The store is computing another sample or neighbour search; try again in a moment.');
+	assert.equal(starBNotPlaced(STAR_B_NEEDS_PROJECT), 'The second question could not be placed on the map (no hollow star). This store cannot place a question among the sampled points.');
+	assert.equal(starBNotPlaced(null), 'The second question could not be placed on the map (no hollow star).');
+});
+
+test('the status line\'s one sentence: a failure while a map is shown, else the notice, else a saved view\'s query; with no map a failure is the empty state\'s banner', () => {
+	const none = { error: null, notice: null, savedQuery: null, hasSample: true };
+	assert.equal(statusNotice(none), null);
+	assert.deepEqual(statusNotice({ ...none, notice: LAYOUT_CANCELLED }), { text: LAYOUT_CANCELLED, kind: 'notice' });
+	assert.deepEqual(statusNotice({ ...none, notice: EDGES_DEGRADED, error: 'The store did not finish.' }), { text: 'Failed: The store did not finish.', kind: 'error' }, 'a failure says so in words');
+	assert.equal(failedLine('The store did not finish.'), 'Failed: The store did not finish.');
+	assert.deepEqual(statusNotice({ ...none, notice: EDGES_DEGRADED, error: 'The store did not finish.', hasSample: false }), { text: EDGES_DEGRADED, kind: 'notice' }, 'no map: the failure is the banner');
+	assert.deepEqual(statusNotice({ ...none, savedQuery: 'water' }), { text: savedQueryLine('water'), kind: 'saved-query' });
+	assert.equal(savedQueryLine('water'), 'This view had the query "water".');
+	assert.deepEqual(statusNotice({ ...none, savedQuery: 'water', notice: LAYOUT_CANCELLED }), { text: LAYOUT_CANCELLED, kind: 'notice' });
+});
+
 test('export rows: the frozen point columns, clusters with their words, duplicate pairs whose points are shown', () => {
 	const view = clusterView(clustered.clusters!, 2);
 	const points = pointExportRows(clustered, [0, 5], { positions: pcaXY(clustered), dims: 2, querySims: null, clusters: { labels: view.labels, label: (g) => clusterLabel(view, g) } });
@@ -748,4 +857,166 @@ test('the legend\'s lines: edges drawn, a truncated listing, a scope, an isolati
 	assert.equal(SCOPE_RETRY, 'Draw the sample again');
 	const out = render({ sample: modelOf(truncated) });
 	assert.match(out, /Sampled from the first 500 documents by path; the collection has more/);
+});
+
+// -----------------------------------------------------------------------------
+// Staging: where the console stages removals, the map's panels stage them
+// -----------------------------------------------------------------------------
+
+test('with a console that stages (stageRemove), every map removal is staged with the sample\'s paths and chunk counts, never confirmed at once, and the panels say Stage removal; without one, requestRemove as before', () => {
+	const staged: Array<readonly IStageTarget[]> = [];
+	const rec = recording();
+	const stagingActions: ConsoleActions = { ...rec.actions, stageRemove: (targets) => staged.push(targets) };
+	const sample = modelOf(clustered);
+	const [d0, d1, d2] = clustered.docs as [ISampleDoc, ISampleDoc, ISampleDoc];
+	const named = (doc: ISampleDoc): IStageTarget => ({ objectId: doc.objectId, path: doc.path, chunks: typeof doc.chunks === 'number' ? doc.chunks : null });
+	render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'point' });
+	const inspector = last<{ onRemoveDocument(id: string): void; staging?: boolean }>('PointInspector');
+	assert.equal(inspector.staging, true);
+	inspector.onRemoveDocument(d0.objectId);
+	render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'duplicates' });
+	const dup = last<{ onRemoveDocuments(ids: readonly string[]): void; onRemoveDocument(id: string): void; staging?: boolean }>('DuplicatesPanel');
+	assert.equal(dup.staging, true);
+	dup.onRemoveDocuments([d1.objectId, d2.objectId]);
+	dup.onRemoveDocument('not-in-the-sample');
+	render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'outliers' });
+	const outliers = last<{ onRemoveDocument(id: string): void; staging?: boolean }>('OutliersPanel');
+	assert.equal(outliers.staging, true);
+	outliers.onRemoveDocument(d2.objectId);
+	const out = render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'outliers' });
+	assert.match(out, />Stage removal<\/button>/);
+	assert.doesNotMatch(out, />Move to trash<\/button>/);
+	// Named by the sample's paths (the pending bar and the confirmation show files); what the sample does not know is
+	// left null for the console to take from its rows.
+	assert.deepEqual(staged, [[named(d0)], [named(d1), named(d2)], [{ objectId: 'not-in-the-sample', path: null, chunks: null }], [named(d2)]]);
+	assert.ok(staged.flat().slice(0, 3).every((t) => t.path && t.path !== t.objectId), 'file names, not ids');
+	assert.deepEqual(rec.removed, [], 'nothing asked to be confirmed at once');
+	// A console that does not stage: the same buttons confirm through requestRemove.
+	render({ model: enrichedModel(), sample, actions: rec.actions, initialTab: 'outliers' });
+	assert.equal(last<{ staging?: boolean }>('OutliersPanel').staging, false);
+	last<{ onRemoveDocument(id: string): void }>('OutliersPanel').onRemoveDocument('e');
+	assert.deepEqual(rec.removed, [['e']]);
+});
+
+test('Show group on the Duplicates tab rings that group\'s pairs with their similarity and fades the rest; another highlight drops the rings', () => {
+	const selection = createSelectionStore(KEY);
+	const sample = modelOf(clustered);
+	const pair = clustered.duplicates[0]!;
+	render({ model: enrichedModel(), sample, selection, initialTab: 'duplicates' });
+	last<{ onSelect(indices: readonly number[]): void }>('DuplicatesPanel').onSelect([pair.a, pair.b]);
+	render({ model: enrichedModel(), sample, selection, initialTab: 'duplicates' });
+	const canvas = last<{ overlay: { duplicateRings?: Array<{ a: number; b: number; label: string }> }; dimmed: Uint8Array | null }>('PointCanvas');
+	assert.ok((canvas.overlay.duplicateRings ?? []).some((r) => r.a === pair.a && r.b === pair.b && r.label === `${clustered.metric === 'cosine' ? 'cosine' : clustered.metric === 'ip' ? 'inner product' : 'L2 similarity'} ${pair.sim.toFixed(2)}`));
+	assert.ok(canvas.dimmed, 'the rest is faded');
+	assert.equal(canvas.dimmed![pair.a], 0);
+	assert.equal(canvas.dimmed![pair.b], 0);
+	assert.equal(Array.from(canvas.dimmed!).filter((v) => v === 0).length >= 2, true);
+	// Another highlight (Find similar, the chat): no rings.
+	selection.setHighlight({ source: 'neighbors', keys: [[clustered.docs[0]!.objectId, 0]] });
+	render({ model: enrichedModel(), sample, selection, initialTab: 'duplicates' });
+	assert.deepEqual(last<{ overlay: { duplicateRings?: unknown[] } }>('PointCanvas').overlay.duplicateRings, []);
+});
+
+test('the map fades nothing with nothing shown; a selection keeps itself and its neighbour links lit; dimOnHover only while clusters are on screen', () => {
+	const sample = modelOf(clustered);
+	render({ model: enrichedModel(), sample });
+	const plain = last<{ dimmed: Uint8Array | null; dimOnHover?: boolean }>('PointCanvas');
+	assert.equal(plain.dimmed, null);
+	assert.equal(plain.dimOnHover, false, 'coloured by document, Point tab: hovering fades nothing');
+	render({ model: enrichedModel(), sample, initialTab: 'clusters' });
+	assert.equal(last<{ dimOnHover?: boolean }>('PointCanvas').dimOnHover, true);
+	render({ model: enrichedModel(), sample, extra: { initialColourBy: 'cluster' } });
+	assert.equal(last<{ dimOnHover?: boolean }>('PointCanvas').dimOnHover, true);
+	// The legend lists the marks drawn: outliers and duplicate pairs of this sample, no edges by default.
+	const legend = last<{ marks: { edges: unknown; outliers: number; duplicates: number; links: boolean; query: unknown } }>('Legend');
+	assert.equal(legend.marks.edges, null);
+	assert.equal(legend.marks.links, false);
+	assert.equal(legend.marks.query, null);
+	assert.equal(legend.marks.outliers, clustered.outliers.length);
+	assert.equal(legend.marks.duplicates, Math.min(200, clustered.duplicates.length));
+	render({ model: enrichedModel(), sample, extra: { edges: 'tree' } });
+	assert.ok(last<{ marks: { edges: { weakest: string; strongest: string } | null } }>('Legend').marks.edges, 'edges drawn: the edge glyph');
+});
+
+test('the reasons a toolbar control is off are shown in full where they can wrap: the legend\'s notes with a sample, above the empty state without one', () => {
+	const why = 'Text queries need the embedding node reachable from the Tools source';
+	const off = modelWith({ embed: { enabled: false, reason: why } });
+	const light = render({ model: off, sample: modelOf(loadSample('sample_light_5000.json')) });
+	const legend = light.slice(light.indexOf('aria-label="Map legend"'));
+	assert.match(legend, new RegExp(`<p[^>]*>${why}</p>`));
+	assert.match(legend, /<p[^>]*>t-SNE is limited to 1,000 points; this sample has 5,000\.<\/p>/);
+	const empty = render({ model: off });
+	assert.match(empty, new RegExp(`<p[^>]*>${why}</p>`));
+	const view = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'views', 'MapView.tsx'), 'utf8');
+	// A staging press inserts nothing in the panel (the pending bar says it), so no row moves under the pointer.
+	assert.doesNotMatch(view, /setStagedNote|data-map-staged/);
+});
+
+test('the map\'s busy words and Cancel are in the toolbar\'s status line, never over the map column; Cancel leaving with the focus hands it to Layout, else the toolbar', () => {
+	const view = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'views', 'MapView.tsx'), 'utf8');
+	assert.doesNotMatch(view, /BusyChip|data-map-status/, 'no overlay in the map column');
+	const toolbar = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'MapToolbar.tsx'), 'utf8');
+	// A layout cleanup runs before Cancel is removed, while it still has the focus.
+	assert.match(toolbar, /useBrowserLayoutEffect\(\s*\(\) => \(\) => \{\s*if \(button\.current === null \|\| typeof document === 'undefined' \|\| document\.activeElement !== button\.current\) return;/);
+	assert.match(toolbar, /\(afterCancelFocus\(\{ present: layout !== null, disabled: !!layout\?\.disabled \}\) === 'layout' \? layout : toolbar\)\?\.focus\(\);/);
+	// In the rendered map: the line is there, empty, while nothing runs.
+	const out = render({ sample: modelOf(loadSample('sample_demo_1000.json')) });
+	assert.match(out, /<div style="[^"]*" data-map-status=""><span role="status"[^>]*><\/span><\/div>/);
+});
+
+test('Escape and the toolbar\'s Clear take one thing away a press (the lasso, then a highlight, then the selection), so dimming always has a way out and hover fading comes back', () => {
+	const sample = modelOf(clustered);
+	const selection = createSelectionStore(KEY);
+	const keys = [0, 1, 2].map((i) => [clustered.docs[clustered.points.doc[i] as number]!.objectId, clustered.points.chunk[i] as number] as VectorKey);
+	// An answer's sources: the map dims everything else, and the toolbar offers Clear highlight.
+	selection.setHighlight({ source: 'chat', keys });
+	const rec = recording();
+	render({ model: enrichedModel(), sample, selection, actions: rec.actions, extra: { initialColourBy: 'cluster' } });
+	assert.ok(last<{ dimmed: Uint8Array | null }>('PointCanvas').dimmed, 'dimmed by the highlight');
+	assert.equal(last<{ canClear?: boolean }>('PointCanvas').canClear, true);
+	const toolbar = last<{ clear: { label: string; onClear(): void } | null }>('MapToolbar');
+	assert.equal(toolbar.clear?.label, 'Clear highlight');
+	// Escape on the map clears it.
+	last<{ onKeyAction(a: 'clear'): void }>('PointCanvas').onKeyAction('clear');
+	assert.equal(selection.getState().highlight, null);
+	assert.match(rec.announced.join(' '), /Highlight cleared\./);
+	render({ model: enrichedModel(), sample, selection, actions: rec.actions, extra: { initialColourBy: 'cluster' } });
+	const after = last<{ dimmed: Uint8Array | null; dimOnHover?: boolean; canClear?: boolean }>('PointCanvas');
+	assert.equal(after.dimmed, null, 'nothing faded');
+	assert.equal(after.dimOnHover, true, 'hover fading is back');
+	assert.equal(after.canClear, false, 'Escape is left to what is around the map');
+	assert.equal(last<{ clear: unknown }>('MapToolbar').clear, null);
+	// A lasso selection is cleared first, before a highlight.
+	selection.setKeys(keys);
+	selection.setHighlight({ source: 'lasso', keys });
+	render({ model: enrichedModel(), sample, selection, actions: rec.actions });
+	assert.equal(last<{ clear: { label: string } | null }>('MapToolbar').clear?.label, 'Clear lasso selection');
+	last<{ clear: { onClear(): void } }>('MapToolbar').clear.onClear();
+	assert.deepEqual(selection.getState().keys, []);
+	assert.equal(selection.getState().highlight, null);
+	assert.match(rec.announced.join(' '), /Lasso selection cleared\./);
+});
+
+test('a staging press is announced every time (a repeat too)', () => {
+	const rec = recording();
+	const stagingActions: ConsoleActions = { ...rec.actions, stageRemove: () => undefined };
+	render({ model: enrichedModel(), sample: modelOf(clustered), actions: stagingActions, initialTab: 'outliers' });
+	const outliers = last<{ onRemoveDocument(id: string): void }>('OutliersPanel');
+	outliers.onRemoveDocument(clustered.docs[0]!.objectId);
+	outliers.onRemoveDocument(clustered.docs[0]!.objectId);
+	// It says where the document stands, so a repeat that staged nothing new is still true.
+	const said = '1 document is staged for the trash; nothing moves until the pending changes are applied.';
+	assert.deepEqual(rec.announced.filter((t) => t.includes('staged for the trash')), [said, said]);
+});
+
+test('the clear rule reads this connection\'s selection only (another connection\'s keys or highlight offer nothing to clear), and a query re-arms its fading only for a new question', () => {
+	const other = createSelectionStore('conn-2');
+	const keys = [[clustered.docs[0]!.objectId, 0]] as VectorKey[];
+	other.setKeys(keys);
+	other.setHighlight({ source: 'chat', keys });
+	render({ model: enrichedModel(), selection: other });
+	assert.equal(last<{ clear: unknown }>('MapToolbar').clear, null, 'nothing of this connection is lit');
+	const view = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'views', 'MapView.tsx'), 'utf8');
+	assert.match(view, /const lassoActive = lasso \|\| \(highlight\?\.source === 'lasso' \? highlight\.keys\.length > 0 : ownKeys\.length > 0\);/);
+	assert.match(view, /useEffect\(\(\) => setQueryDims\(true\), \[query\?\.text\]\);/, 'keyed on the question, not on each update of the query');
 });

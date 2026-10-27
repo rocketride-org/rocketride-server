@@ -607,6 +607,25 @@ async function measurePan(page, canvas, box) {
 }
 
 /**
+ * Use a control of the map toolbar's Advanced panel (Edges, Edges per point, Lasso, Fit...): open the panel, act on
+ * the control, close the panel again, since it hangs over the canvas and a press outside it closes it anyway.
+ *
+ * @param page - The page.
+ * @param role - The control's role.
+ * @param name - Its accessible name (exact).
+ * @param act - What to do with it.
+ * @returns What `act` returned.
+ */
+async function withAdvanced(page, role, name, act) {
+	const toggle = page.getByRole('button', { name: /^Advanced\b/ }).first();
+	if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+	const panel = page.getByRole('group', { name: 'Advanced map controls' }).first();
+	const result = await act(panel.getByRole(role, { name, exact: true }).first());
+	if ((await toggle.getAttribute('aria-expanded')) === 'true') await toggle.click();
+	return result;
+}
+
+/**
  * One edge row on the sample in front: set Edges (and Edges per point), wait until the map root
  * says it draws that mode, pan, and read what the root says about the edges it drew and the
  * slow-frame switch it ran with. Missing attributes are recorded as such, never as a pass.
@@ -615,8 +634,8 @@ async function measureEdges(page, mode, sample) {
 	const { edges, m } = edgeModeOf(mode);
 	const map = page.locator('.vector-map').first();
 	const canvas = page.locator('[data-points]').first();
-	await page.getByRole('combobox', { name: 'Edges', exact: true }).selectOption(edges);
-	if (m !== null) await page.getByRole('combobox', { name: 'Edges per point', exact: true }).selectOption(String(m));
+	await withAdvanced(page, 'combobox', 'Edges', (select) => select.selectOption(edges));
+	if (m !== null) await withAdvanced(page, 'combobox', 'Edges per point', (select) => select.selectOption(String(m)));
 	await page.waitForFunction(
 		(want) => {
 			const root = document.querySelector('.vector-map');
@@ -753,7 +772,7 @@ async function mapSteps(page, box, row) {
 		return true;
 	});
 	await step(steps, 'the lasso selects points and says how many', async () => {
-		await page.getByRole('button', { name: 'Lasso' }).click();
+		await withAdvanced(page, 'button', 'Lasso', (lasso) => lasso.click());
 		const cx = box.x + box.width / 2;
 		const cy = box.y + box.height / 2;
 		await page.mouse.move(cx - 150, cy - 110);
@@ -771,7 +790,7 @@ async function mapSteps(page, box, row) {
 		if (!m) return `no count in ${JSON.stringify(text.slice(0, 120))}`;
 		const n = Number(m[1].replace(/,/g, ''));
 		// The toggle stays pressed after a selection: turn it off for the steps that follow.
-		await page.getByRole('button', { name: 'Lasso' }).click();
+		await withAdvanced(page, 'button', 'Lasso', (lasso) => lasso.click());
 		return n > 0 && n <= points ? true : `${n} selected of ${points}`;
 	});
 	await step(steps, 'the Table alternative lists the points', async () => {

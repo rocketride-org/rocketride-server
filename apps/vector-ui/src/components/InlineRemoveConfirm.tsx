@@ -21,32 +21,52 @@
 // SOFTWARE.
 
 // =============================================================================
-// VECTOR-UI - INLINE REMOVE CONFIRMATION (in a dev-tool document, never a modal)
+// VECTOR-UI - INLINE REMOVE CONFIRMATION (in the workbench and a document, never a modal)
 // =============================================================================
 //
-// The full app confirms a write with the shell's ConfirmDialog from one host
-// at its root. A dev-tool document cannot: rocket-ui keeps hidden documents
-// mounted (display: none), and a window-wide modal left open in a background
-// document would trap Tab, lock the page scroll and take Escape for the whole
-// realm (F14). So a frame shows the SAME confirmation (vector/confirm.ts: the
-// words, the typed rule, Cancel first) as a panel inside its own document,
-// with no overlay, no focus trap and no document or window listener: Cancel
-// takes the focus when it opens, Escape cancels while the focus is inside it,
-// and Confirm stays unavailable until the typed rule is met.
+// rocket-ui keeps hidden documents mounted (display: none), and a
+// window-wide modal left open in a background document would trap Tab, lock
+// the page scroll and take Escape for the whole realm (F14). So every write
+// is confirmed by this panel inside its own document, in both mounts (D10),
+// with the words and the typed rule of vector/confirm.ts, no overlay, no
+// focus trap and no document or window listener. When it opens the focus
+// goes by the write's weight (vector/confirm.ts confirmFirstFocus): Confirm
+// for one that can be undone (Move to trash), but Cancel for a bulk move
+// (over 100 documents, or over one store batch), so a stray Enter does not
+// move them all; for one that cannot (Delete permanently, Empty trash) the
+// typed field, else Cancel, never the destructive button. Escape cancels while the
+// focus is inside it (unless an inner handler already acted), and Confirm
+// stays unavailable (aria-disabled, so it keeps the focus) until the typed
+// rule is met. Enter in the typed field confirms once it matches (never the
+// Enter that ends an input method's composition); before that a line kept
+// under the field says it does not match yet, so the field never moves.
 //
-// It shows the pending confirmation of THIS frame's connection controller,
-// which alone sends anything.
+// It shows the pending confirmation of its connection's controller, which
+// alone sends anything, on the surface that asked for it (its origin: the
+// console, or one document tab of the full app, which shares the console's
+// controller). Elsewhere it shows nothing, except to a surface that asked
+// meanwhile: one line saying where the open one is.
+//
+// When it closes with the focus inside it (or lost), the focus goes where
+// `onClosed` put it; else, after Cancel, back to what had it when the panel
+// opened; else to `returnFocus` (the surface's fallback: in the workbench,
+// the row its grid marks after the rows the write takes away, else the
+// grid, else the tab); else to the first target of the surface it sits on
+// (components/focusTargets.ts surfaceTarget), so a caller that names none
+// still never leaves the focus on `<body>`. Never an element of a hidden panel.
 // =============================================================================
 
-import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { Button, commonStyles } from 'shell';
 import type { IProbeResult } from 'shared/explorer';
 import type { IConnectionEntry } from '../adapters/connections';
-import { confirmReady, confirmationFor, removeContextFor } from '../vector/confirm';
-import type { ConfirmationView } from '../vector/confirm';
+import { CONSOLE_ORIGIN, confirmElsewhereText, confirmFirstFocus, confirmReady, confirmationFor, removeContextFor, typedNudge } from '../vector/confirm';
+import type { ConfirmFirstFocus, ConfirmOrigin, ConfirmationView } from '../vector/confirm';
+import { firstFocusable, focusLost } from '../vector/focus';
 import { formatCount } from '../vector/stats';
-import { styles as appStyles } from '../styles';
+import { FOCUS_RING, styles as appStyles } from '../styles';
+import { surfaceOf, surfaceTarget } from './focusTargets';
 
 const styles = {
 	panel: {
@@ -71,54 +91,120 @@ const styles = {
 	list: { margin: '8px 0', paddingLeft: 20, maxHeight: 180, overflowY: 'auto', fontSize: 13 } as CSSProperties,
 	item: { overflowWrap: 'anywhere' } as CSSProperties,
 	sentence: { margin: '8px 0', fontSize: 13 } as CSSProperties,
+	elsewhere: { flexShrink: 0, margin: '8px 24px 0', fontSize: 13 } as CSSProperties,
 	typed: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8, fontSize: 13 } as CSSProperties,
+	/** Under the typed field: one line whether it says anything or not, so the field and the buttons never move. */
+	nudge: { height: 18, margin: '4px 0 0', fontSize: 13, lineHeight: '18px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
 	actions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 } as CSSProperties,
 	/** Confirm: destructive for a permanent write; unavailable (aria-disabled, it keeps the focus) until the typed rule is met. */
 	confirm: (destructive: boolean, ready: boolean): CSSProperties => ({ ...(destructive ? commonStyles.buttonDanger : commonStyles.buttonPrimary), ...(ready ? null : commonStyles.buttonDisabled) }),
 };
 
+/** How a confirmation closed: Confirm sent the write, or it was cancelled (Cancel, Escape, writes switched off). */
+export type ConfirmClose = 'confirm' | 'cancel';
+
 /** Props. */
 export interface IInlineRemoveConfirmProps {
-	/** The frame's connection objects (their controller holds the pending write). */
+	/** The connection's objects (their controller holds the pending write). */
 	entry: IConnectionEntry;
 	/** The connection's probe (where the documents are removed from). */
 	probe: IProbeResult | undefined;
+	/** The surface this renders on: it shows only the confirmations asked for here (default the console). */
+	origin?: ConfirmOrigin;
+	/**
+	 * Where the focus goes when the panel closes with the focus inside it, if `onClosed` did not move it (and, after
+	 * Cancel, the opener cannot take it back).
+	 */
+	returnFocus?: (opener: HTMLElement | null) => HTMLElement | null;
+	/** Told when the panel closes, before the focus falls back to `returnFocus`. */
+	onClosed?: (how: ConfirmClose) => void;
 }
 
 /**
- * The pending confirmation of a frame's connection, inline.
+ * The pending confirmation of a connection, inline, on the surface that asked for it.
  *
  * @param props - See {@link IInlineRemoveConfirmProps}.
- * @returns The panel, or nothing while nothing is pending.
+ * @returns The panel; the "open elsewhere" line for a surface that asked meanwhile; or nothing.
  */
-export function InlineRemoveConfirm({ entry, probe }: IInlineRemoveConfirmProps): React.ReactElement | null {
-	const pending = useSyncExternalStore(entry.controller.subscribe, () => entry.controller.getState().confirm, () => null);
+export function InlineRemoveConfirm({ entry, probe, origin = CONSOLE_ORIGIN, returnFocus, onClosed }: IInlineRemoveConfirmProps): React.ReactElement | null {
+	const pending = useSyncExternalStore(entry.controller.subscribe, () => entry.controller.getState().confirm, () => entry.controller.getState().confirm);
+	const elsewhere = useSyncExternalStore(entry.controller.subscribe, () => entry.controller.getState().elsewhere, () => entry.controller.getState().elsewhere);
 	if (pending === null) return null;
+	if (pending.origin !== origin) {
+		return elsewhere === origin ? (
+			<p role="status" data-confirm-elsewhere="" style={styles.elsewhere}>
+				{confirmElsewhereText(pending.origin)}
+			</p>
+		) : null;
+	}
 	const view = confirmationFor(pending, removeContextFor(entry.ctx.endpoint, probe));
 	const dialogKey = `${pending.action}:${pending.targets.length}:${pending.targets[0]?.objectId ?? ''}`;
-	return <ConfirmPanel key={dialogKey} view={view} onConfirm={() => void entry.controller.confirmRemove()} onCancel={() => entry.controller.cancelRemove()} />;
+	const first = confirmFirstFocus(pending.action, pending.targets.length, entry.ctx.limits.write_ids_max);
+	return <ConfirmPanel key={dialogKey} view={view} first={first} onConfirm={() => void entry.controller.confirmRemove()} onCancel={() => entry.controller.cancelRemove()} returnFocus={returnFocus} onClosed={onClosed} />;
 }
 
-/** One confirmation, keyed on what it confirms (a new one starts with an empty typed field and the focus on Cancel). */
-const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCancel(): void }> = ({ view, onConfirm, onCancel }) => {
+/** One confirmation, keyed on what it confirms (a new one starts with an empty typed field and its own first focus). */
+const ConfirmPanel: React.FC<{ view: ConfirmationView; first: ConfirmFirstFocus; onConfirm(): void; onCancel(): void; returnFocus?: (opener: HTMLElement | null) => HTMLElement | null; onClosed?: (how: ConfirmClose) => void }> = ({ view, first, onConfirm: sendWrite, onCancel: dropWrite, returnFocus, onClosed }) => {
+	const region = useRef<HTMLElement>(null);
 	const actions = useRef<HTMLDivElement>(null);
+	const confirmButton = useRef<HTMLButtonElement>(null);
+	const input = useRef<HTMLInputElement>(null);
+	const sentenceId = useId();
+	const pathId = useId();
+	const nudgeId = useId();
+	// What had the focus when the confirmation opened (before Cancel takes it): Cancel gives it back.
+	const opener = useRef<HTMLElement | null>(typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null);
 	const [typed, setTyped] = useState('');
+	// Enter was pressed in the typed field before it matched: the hint says so until the text changes.
+	const [nudged, setNudged] = useState(false);
 	const content = view.content;
 	const ready = confirmReady(content.typed, typed);
-	// Opened: Cancel has the focus, so a stray Enter cancels (the dialogs' own rule).
+	const nudge = content.typed ? typedNudge(content.typed, typed, nudged) : '';
+	// One document typed by its file name: its whole path beside the field (a file name can repeat across folders).
+	const typedPath = view.kind === 'single' && content.typed ? (view.content.lines.find((line) => line.label === 'Path')?.value ?? null) : null;
+	// The latest close handlers, for the unmount below.
+	const how = useRef<ConfirmClose>('cancel');
+	const closing = useRef({ returnFocus, onClosed });
+	closing.current = { returnFocus, onClosed };
+	// Opened: the first focus by the write's weight (vector/confirm.ts confirmFirstFocus; never the destructive button).
 	useEffect(() => {
-		const cancel = Array.from(actions.current?.querySelectorAll('button') ?? []).find((button) => button.textContent?.trim() === content.cancelLabel);
-		cancel?.focus();
+		if (first === 'confirm') confirmButton.current?.focus();
+		else if (first === 'typed' && content.typed) input.current?.focus();
+		else Array.from(actions.current?.querySelectorAll('button') ?? []).find((button) => button.textContent?.trim() === content.cancelLabel)?.focus();
 		// Once, when the confirmation opens (it is keyed on what it confirms).
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
+	// Closed: the surface hears how; a focus left inside (or on the body) goes to the surface's fallback.
+	useEffect(() => {
+		const node = region.current;
+		const back = opener.current;
+		// The surface it sits on (read while it is on the page): its own fallback when the caller named none.
+		const surface = surfaceOf(node);
+		return () => {
+			closing.current.onClosed?.(how.current);
+			if (typeof document === 'undefined' || !focusLost(document.activeElement, document.body, node)) return;
+			// The caller's fallback is told the opener: a document surface puts the focus back there after Confirm too.
+			firstFocusable([how.current === 'cancel' ? back : null, closing.current.returnFocus?.(back), surfaceTarget(surface)])?.focus();
+		};
+	}, []);
+	const onConfirm = (): void => {
+		if (!ready) return;
+		how.current = 'confirm';
+		sendWrite();
+	};
+	const onCancel = (): void => {
+		how.current = 'cancel';
+		dropWrite();
+	};
 	return (
 		<section
+			ref={region}
 			role="group"
 			aria-label={content.title}
 			data-inline-confirm=""
 			style={styles.panel}
 			onKeyDown={(event) => {
+				if (event.defaultPrevented) return;
 				if (event.key === 'Escape') {
 					event.preventDefault();
 					onCancel();
@@ -147,7 +233,9 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 					{view.content.more > 0 && <p style={styles.sentence}>{`and ${formatCount(view.content.more)} more`}</p>}
 				</>
 			)}
-			<p style={styles.sentence}>{content.sentence}</p>
+			<p id={sentenceId} style={styles.sentence}>
+				{content.sentence}
+			</p>
 			{content.extra.map((sentence) => (
 				<p key={sentence} style={styles.sentence}>
 					{sentence}
@@ -156,14 +244,42 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 			{content.typed && (
 				<label style={styles.typed}>
 					<span>{content.typed.prompt}</span>
-					<input type="text" value={typed} onChange={(event) => setTyped(event.target.value)} style={appStyles.input} autoComplete="off" spellCheck={false} />
+					{typedPath !== null && <span id={pathId}>{`Full path: ${typedPath}`}</span>}
+					<input
+						ref={input}
+						type="text"
+						value={typed}
+						onChange={(event) => {
+							setTyped(event.target.value);
+							setNudged(false);
+						}}
+						onKeyDown={(event) => {
+							// Enter confirms once the typed text matches; before that the line under the field says what is missing.
+							// The Enter that ends an input method's composition only commits the word (Safari reports it as 229).
+							if (event.defaultPrevented || event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return;
+							event.preventDefault();
+							if (ready) onConfirm();
+							else setNudged(true);
+						}}
+						style={appStyles.input}
+						autoComplete="off"
+						spellCheck={false}
+						aria-describedby={typedPath !== null ? `${sentenceId} ${pathId} ${nudgeId}` : `${sentenceId} ${nudgeId}`}
+						onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)}
+						onBlur={(event) => (event.currentTarget.style.outline = 'none')}
+					/>
 				</label>
+			)}
+			{content.typed && (
+				<p id={nudgeId} aria-live="polite" title={nudge || undefined} style={styles.nudge}>
+					{nudge}
+				</p>
 			)}
 			<div ref={actions} style={styles.actions}>
 				<Button variant="ghost" onClick={onCancel}>
 					{content.cancelLabel}
 				</Button>
-				<button type="button" style={styles.confirm(content.destructive, ready)} aria-disabled={!ready} onClick={() => { if (ready) onConfirm(); }}>
+				<button ref={confirmButton} type="button" style={styles.confirm(content.destructive, ready)} aria-disabled={!ready} onClick={onConfirm} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')}>
 					{content.confirmLabel}
 				</button>
 			</div>

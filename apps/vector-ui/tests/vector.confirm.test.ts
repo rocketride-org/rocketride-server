@@ -60,7 +60,7 @@ test('move to trash: the same lines, nothing to type, and where it can be restor
 	assert.equal(several.sentence, 'Moves these 23 documents and their 46 chunks to the trash of vx_demo_docs, in batches of at most 100; the first error stops the rest. Restore them from the Trash.');
 });
 
-test('delete permanently, one document: path, short objectId, chunk count, where, and what cannot be undone', () => {
+test('delete permanently, one document: path, short objectId, chunk count, where, what cannot be undone, and its file name typed', () => {
 	const c = removeConfirmation(KESTREL, PG);
 	assert.equal(c.title, 'Delete this document permanently?');
 	assert.deepEqual(c.lines, [
@@ -69,13 +69,14 @@ test('delete permanently, one document: path, short objectId, chunk count, where
 		{ label: 'Chunks', value: '12' },
 		{ label: 'Store', value: 'PostgreSQL (pgvector) · vx_demo_docs · pgvector' },
 	]);
-	assert.equal(c.sentence, 'Deletes this document and its 12 chunks from vx_demo_docs. This cannot be undone; add the file again to restore it.');
+	assert.equal(c.sentence, 'Deletes this document and its 12 chunks from vx_demo_docs. If it still has chunks outside the trash, it is kept whole. This cannot be undone; add the file again to restore it.');
 	assert.equal(c.confirmLabel, 'Delete permanently');
 	assert.equal(c.destructive, true);
 	assert.equal(c.cancelLabel, REMOVE_CANCEL_LABEL);
 	assert.equal(REMOVE_CANCEL_LABEL, 'Cancel');
-	assert.equal(c.typed, null, 'a store of its own needs no typed confirmation');
-	assert.equal(removeConfirmation({ ...KESTREL, chunks: null }, PG).sentence, 'Deletes this document and all its chunks from vx_demo_docs. This cannot be undone; add the file again to restore it.', 'no invented count');
+	assert.deepEqual(c.typed, { expected: 'kestrel_field_guide.md', prompt: "Type the file name 'kestrel_field_guide.md' to confirm." }, 'a permanent delete of one document types its file name (DA-R0 C1)');
+	assert.deepEqual(removeConfirmation({ ...KESTREL, path: '' }, PG).typed, { expected: '1', prompt: 'Type 1 to confirm.' }, 'no path: the count, 1');
+	assert.equal(removeConfirmation({ ...KESTREL, chunks: null }, PG).sentence, 'Deletes this document and all its chunks from vx_demo_docs. If it still has chunks outside the trash, it is kept whole. This cannot be undone; add the file again to restore it.', 'no invented count');
 	assert.equal(removeConfirmation({ ...KESTREL, chunks: 1 }, PG).sentence.includes('its 1 chunk from'), true);
 });
 
@@ -97,7 +98,7 @@ test('delete permanently, several documents: type the count, at most 20 paths li
 	assert.equal(c.more, 3);
 	assert.deepEqual(c.typed, { expected: '23', prompt: 'Type 23 to confirm.' });
 	assert.equal(c.confirmLabel, 'Delete 23 documents permanently');
-	assert.equal(c.sentence, 'Deletes these 23 documents and their 46 chunks from vx_demo_docs, in batches of at most 100; the first error stops the rest. This cannot be undone.');
+	assert.equal(c.sentence, 'Deletes these 23 documents and their 46 chunks from vx_demo_docs, in batches of at most 100; the first error stops the rest. A document that still has chunks outside the trash is kept whole. This cannot be undone.');
 	const shared = multiRemoveConfirmation(targets.slice(0, 2), RRV);
 	assert.equal(shared.typed?.expected, 'vector_explorer_docs', 'on a shared table the table name is typed, not the count');
 	assert.equal(multiRemoveConfirmation([...targets.slice(0, 1), { objectId: 'x', path: 'x', chunks: null }], PG).sentence.includes('and all their chunks'), true);
@@ -177,8 +178,8 @@ test('the announcement after a write names the document and the rows it moved or
 	assert.equal(removalSummary(one, kestrel, 'trash'), 'Moved C:/demo/field/kestrel_field_guide.md to the trash (12 chunks)');
 	assert.equal(removalSummary(one, kestrel, 'restore'), 'Restored C:/demo/field/kestrel_field_guide.md (12 chunks)');
 	const gone = { removed: [], notFound: ['k'], keptLive: [], removedChunks: 0, batchesRun: 1, batchesTotal: 1, error: null };
-	assert.equal(removalSummary(gone, [{ objectId: 'k', path: 'x.md' }], 'delete'), 'x.md was not stored any more; nothing was deleted');
-	assert.equal(removalSummary(gone, [{ objectId: 'k', path: 'x.md' }], 'trash'), 'x.md was not stored any more; nothing was moved to the trash');
+	assert.equal(removalSummary(gone, [{ objectId: 'k', path: 'x.md' }], 'delete'), 'x.md was already gone; nothing was deleted');
+	assert.equal(removalSummary(gone, [{ objectId: 'k', path: 'x.md' }], 'trash'), 'x.md was already gone; nothing was moved to the trash');
 	const many = {
 		removed: [
 			{ objectId: 'a', chunks: 1 },
@@ -191,10 +192,11 @@ test('the announcement after a write names the document and the rows it moved or
 		batchesTotal: 1,
 		error: null,
 	};
-	assert.equal(removalSummary(many, [], 'delete'), 'Deleted 2 documents permanently (3 chunks). 1 was not stored any more.');
-	assert.equal(removalSummary(many, [], 'restore'), 'Restored 2 documents (3 chunks). 1 was not stored any more.');
+	assert.equal(removalSummary(many, [], 'delete'), 'Deleted 2 documents permanently (3 chunks). 1 was already gone.');
+	assert.equal(removalSummary(many, [], 'restore'), 'Restored 2 documents (3 chunks). 1 was already gone.');
 	const emptied = { ...many, notFound: [], keptLive: ['p', 'q'] };
-	assert.equal(removalSummary(emptied, [], 'empty'), 'Emptied the trash: deleted 2 documents permanently (3 chunks). 2 were kept: they still have chunks outside the trash.');
+	assert.equal(removalSummary(emptied, [], 'empty'), 'Emptied the trash: deleted 2 documents permanently (3 chunks). 2 were kept whole, because they still have chunks outside the trash: p, q.', 'named by objectId where no path is known');
+	assert.equal(removalSummary(emptied, [{ objectId: 'p', path: 'docs/p.md' }], 'empty'), 'Emptied the trash: deleted 2 documents permanently (3 chunks). 2 were kept whole, because they still have chunks outside the trash: docs/p.md, q.', 'by path where it is');
 	assert.equal(removalSummary({ ...emptied, keptLive: [] }, [{ objectId: 'a', path: 'a.md' }], 'empty'), 'Emptied the trash: deleted 2 documents permanently (3 chunks).', 'Empty trash always counts, even for one document');
 	const timeout = { removed: [], notFound: [], keptLive: [], removedChunks: null, batchesRun: 0, batchesTotal: 1, error: { headline: 'The request may still complete on the server. Refresh to check.' } };
 	assert.equal(removalSummary(timeout, [{ objectId: 'k', path: 'x.md' }], 'trash'), 'The request may still complete on the server. Refresh to check.');
@@ -280,4 +282,47 @@ test("confirming the queue moves it to the trash in batches of the node's write_
 	assert.deepEqual(sent.flat(), ids);
 	assert.equal(store.getState().removal.status, 'done');
 	store.dispose();
+});
+
+test('a typed confirmation trims both sides: a file name that starts or ends with a space can be confirmed', () => {
+	const { confirmReady } = require('../src/vector/confirm') as typeof import('../src/vector/confirm');
+	assert.equal(confirmReady({ expected: ' notes.md ', prompt: '' }, 'notes.md'), true);
+	assert.equal(confirmReady({ expected: 'notes.md', prompt: '' }, '  notes.md '), true);
+	assert.equal(confirmReady({ expected: 'notes.md', prompt: '' }, 'notes'), false);
+	assert.equal(confirmReady(null, ''), true);
+});
+
+test("the first focus (P2-11): Confirm for a move to the trash, Cancel for a bulk one (over 100 documents or one store batch), the typed field for a permanent write", () => {
+	const { BULK_TRASH_FOCUS_CANCEL, confirmFirstFocus } = require('../src/vector/confirm') as typeof import('../src/vector/confirm');
+	assert.equal(BULK_TRASH_FOCUS_CANCEL, 100);
+	assert.equal(confirmFirstFocus('trash', 1, 100), 'confirm');
+	assert.equal(confirmFirstFocus('trash', 100, 100), 'confirm', 'one full batch: still Confirm');
+	assert.equal(confirmFirstFocus('trash', 101, 100), 'cancel', 'over 100: Cancel');
+	assert.equal(confirmFirstFocus('trash', 5_000, 100), 'cancel', '"Stage all shown (5,000)" then Apply: Enter does not move them');
+	assert.equal(confirmFirstFocus('trash', 30, 25), 'cancel', 'over the store\'s smaller batch');
+	assert.equal(confirmFirstFocus('trash', 25, 25), 'confirm');
+	assert.equal(confirmFirstFocus('trash', 150, 500), 'cancel', 'the smaller of 100 and the batch');
+	assert.equal(confirmFirstFocus('delete', 1, 100), 'typed');
+	assert.equal(confirmFirstFocus('empty', 3, 100), 'typed');
+	const { multiTrashConfirmation } = require('../src/vector/confirm') as typeof import('../src/vector/confirm');
+	const many = Array.from({ length: 150 }, (_, i) => ({ objectId: `d${i}`, path: `a/${i}.md`, chunks: 1 }));
+	const content = multiTrashConfirmation(many, { storeName: 'Store', collection: 'docs', backend: 'pgvector', provider: 'postgres' });
+	assert.match(content.title, /^Move 150 documents/, 'the count leads the title');
+	assert.equal(content.typed, null, 'nothing to type: Restore undoes it');
+});
+
+test("Enter in the typed field: it confirms once the text matches, never on the Enter that ends a composition; before that a line kept under the field says what is missing, so the field never moves", () => {
+	const { typedNudge } = require('../src/vector/confirm') as typeof import('../src/vector/confirm');
+	const typed = { expected: '2', prompt: 'Type 2 to confirm.' };
+	assert.equal(typedNudge(typed, '', false), '');
+	assert.equal(typedNudge(typed, '', true), 'Nothing is typed yet.');
+	assert.equal(typedNudge(typed, '1', true), 'What is typed does not match.');
+	assert.equal(typedNudge(typed, ' 2 ', true), '', 'it matches: nothing to say');
+	const fs = require('node:fs') as typeof import('node:fs');
+	const path = require('node:path') as typeof import('node:path');
+	const panel = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'InlineRemoveConfirm.tsx'), 'utf8');
+	assert.match(panel, /if \(event\.defaultPrevented \|\| event\.key !== 'Enter' \|\| event\.nativeEvent\.isComposing \|\| event\.keyCode === 229\) return;\s*event\.preventDefault\(\);\s*if \(ready\) onConfirm\(\);\s*else setNudged\(true\);/);
+	assert.match(panel, /<span>\{content\.typed\.prompt\}<\/span>/, 'the prompt never changes, so it never rewraps');
+	assert.match(panel, /<p id=\{nudgeId\} aria-live="polite" title=\{nudge \|\| undefined\} style=\{styles\.nudge\}>\s*\{nudge\}\s*<\/p>/, 'the nudge, announced, on its own line');
+	assert.match(panel, /nudge: \{ height: 18, [^}]*lineHeight: '18px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' \}/, 'one line, said or not: nothing under it moves');
 });

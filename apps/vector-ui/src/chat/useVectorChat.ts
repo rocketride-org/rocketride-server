@@ -65,11 +65,11 @@ export function buildQuestion(text: string, scope: readonly string[] | null): Qu
 /**
  * The connection's chat.
  *
- * @param props - The chat panel's props.
+ * @param props - The chat panel's props, and who hears when a question ends (the Query tab's History).
  * @returns State and actions.
  */
-export function useVectorChat(props: Pick<ChatPanelProps, 'model' | 'channels' | 'selection' | 'actions' | 'scope'>): VectorChat {
-	const { model, channels, selection, actions, scope } = props;
+export function useVectorChat(props: Pick<ChatPanelProps, 'model' | 'channels' | 'selection' | 'actions' | 'scope'> & { onSettled?(turn: ChatTurn): void }): VectorChat {
+	const { model, channels, selection, actions, scope, onSettled } = props;
 	const deps: ChatDeps = {
 		ask: (question, options) => {
 			const chat = channels.chat;
@@ -83,6 +83,7 @@ export function useVectorChat(props: Pick<ChatPanelProps, 'model' | 'channels' |
 			if (keys.length > 0) selection.setHighlight({ source: 'chat', keys });
 		},
 		announce: (message) => actions.announce(message),
+		onSettled: (turn: ChatTurn) => onSettled?.(turn),
 	};
 	const session = chatSessionFor(model.connectionKey, deps);
 	const state = useSyncExternalStore(session.subscribe, session.getState, session.getState);

@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { IDocumentItem } from '../src/contract/types';
-import { buildGroups } from '../src/vector/documents';
+import { healthCell } from '../src/vector/documents';
 import { HEALTH_NOT_REPORTED, OVERSIZE_FACTOR, deletedFromTotals, documentHealth, healthSummary, medianChunks } from '../src/vector/health';
 import { readDocumentsPage, readStats } from '../src/vector/results';
 import { statsChips } from '../src/vector/stats';
@@ -98,7 +98,7 @@ test('a store that does not report chunk ids or deleted chunks (null or absent):
 	const old = readDocumentsPage(fixture('list_documents_page1')).items[0] as IDocumentItem;
 	assert.equal('max_chunk_id' in old, false, 'an older node sends no key at all');
 	assert.deepEqual(documentHealth(old, { medianChunks: 10 }).unchecked, ['gaps', 'deleted_chunks']);
-	assert.equal(HEALTH_NOT_REPORTED, 'This store does not report chunk ids or soft-deleted chunks per document, so gaps and deleted chunks are not checked; pgvector stores report them.');
+	assert.equal(HEALTH_NOT_REPORTED, 'This store does not report chunk ids or soft-deleted chunks per document, so gaps and deleted chunks are not checked; pgvector and RocketRide Vector stores report them.');
 	assert.deepEqual(documentHealth(doc('a', 'a', { chunks: null, max_chunk_id: null, deleted_chunks: null }), { medianChunks: 4 }).unchecked, ['gaps', 'deleted_chunks', 'empty_parse', 'oversize']);
 });
 
@@ -116,37 +116,22 @@ test('medianChunks over the loaded rows (documents without a count left out); de
 	assert.equal(deletedFromTotals(10, 11), null, 'a store whose totals disagree is not trusted');
 });
 
-test('the directory lists a document with a defect under "Needs attention" (sorted by path); an oversize one keeps its folder, with the badge', () => {
+test('the Documents grid\'s Health column: a defect needs attention; an oversize document gets a note only once the median is settled', () => {
 	const rows = [doc('a', 'C:/demo/a.md'), doc('b', 'C:/demo/b.md', { deleted_chunks: 1, max_chunk_id: 4 }), doc('c', 'C:/demo/c.md', { has_first_chunk: false, max_chunk_id: 4 }), doc('m', 'C:/demo/big.pdf', { chunks: 96, max_chunk_id: 95 }), doc('d', 'C:/demo/d.md', { chunks: 2, max_chunk_id: 1 })];
-	const settled = buildGroups(rows, { medianChunks: 4 });
 	assert.deepEqual(
-		settled.map((g) => [g.kind, g.label, g.rows.map((r) => r.item.objectId)]),
+		rows.map((row) => [row.objectId, healthCell(row, 4).text, healthCell(row, 4).attention]),
 		[
-			['folder', 'C:/demo/', ['a', 'm', 'd']],
-			['attention', 'Needs attention (2)', ['b', 'c']],
+			['a', '', false],
+			['b', '1 deleted chunk', true],
+			['c', 'no first chunk', true],
+			['m', 'oversize', false],
+			['d', '', false],
 		]
 	);
 	assert.deepEqual(
-		settled.flatMap((g) => g.rows).map((r) => [r.name, r.flags, r.attention]),
-		[
-			['a.md', [], false],
-			['big.pdf', ['oversize'], false],
-			['d.md', [], false],
-			['C:/demo/b.md', ['1 deleted chunk'], true],
-			['C:/demo/c.md', ['no first chunk'], true],
-		]
-	);
-	const loading = buildGroups(rows, { medianChunks: null });
-	assert.deepEqual(
-		loading.map((g) => [g.kind, g.rows.map((r) => r.item.objectId)]),
-		settled.map((g) => [g.kind, g.rows.map((r) => r.item.objectId)]),
-		'with or without the median, no row moves: only the oversize badge waits for it'
-	);
-	assert.deepEqual(loading[0]?.rows[1]?.flags, []);
-	assert.deepEqual(
-		buildGroups(rows).map((g) => g.label),
-		['C:/demo/', 'Needs attention (2)'],
-		'without a median: the documents flagged by their own fields'
+		rows.map((row) => healthCell(row, null).text),
+		['', '1 deleted chunk', 'no first chunk', '', ''],
+		'without the median (still loading): the documents flagged by their own fields only'
 	);
 });
 
@@ -160,7 +145,7 @@ test('the chip: "N need attention" with the breakdown in its tooltip; counted ov
 	assert.ok(chip);
 	assert.equal(chip.label, '2 need attention');
 	assert.equal(chip.tone, 'warning');
-	assert.equal(chip.tooltip, 'Without a first chunk: 1 · Gaps in chunk ids: 0 · Deleted chunks: 1 · Empty: 0 · Oversize: 1. Counted over the 4 documents loaded; the directory lists them under "Needs attention" and marks oversize documents in their folders. The store counts 2 documents without a first chunk.');
+	assert.equal(chip.tooltip, 'Without a first chunk: 1 · Gaps in chunk ids: 0 · Deleted chunks: 1 · Empty: 0 · Oversize: 1. Counted over the 4 documents loaded; the Overview\'s Insights list them, and Documents shows each document\'s flags, oversize included. The store counts 2 documents without a first chunk.');
 	assert.equal(
 		statsChips({ dialect: null, stats: readStats(fixture('stats_pgvector')), readOnly: false, health: healthSummary([rows[0] as IDocumentItem, rows[3] as IDocumentItem], { medianChunks: 4, complete: true }) }).some((c) => c.key === 'attention'),
 		false,

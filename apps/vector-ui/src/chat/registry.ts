@@ -25,7 +25,7 @@
 // =============================================================================
 //
 // The conversation and the upload list of a connection outlive the panels
-// that show them (switching between the Console and Map tabs must not lose an
+// that show them (switching between the workbench's tabs must not lose an
 // answer or an upload in flight), so they are kept here, keyed by the
 // connection's endpoint key. The panels hand in fresh dependencies on every
 // render (the channels and actions of the moment); the session and queue
@@ -64,6 +64,7 @@ export function chatSessionFor(connectionKey: string, deps: ChatDeps): ChatSessi
 		makeQuestion: (text, scope) => live.current.makeQuestion(text, scope),
 		now: () => live.current.now(),
 		onAnswer: (turn) => live.current.onAnswer?.(turn),
+		onSettled: (turn) => live.current.onSettled?.(turn),
 		announce: (message) => live.current.announce(message),
 	});
 	chats.set(connectionKey, { session, live });

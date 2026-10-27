@@ -89,6 +89,10 @@ const MAP = {
 	cancel: /^Cancel$/,
 	queryBox: /question on the map/i,
 	run: /^Run$/,
+	// Lasso, Fit, Edges, Edges per point and Expand selected are in the toolbar's Advanced panel
+	// (common.cjs openAdvanced, withAdvanced).
+	advanced: /^Advanced\b/,
+	advancedPanel: 'Advanced map controls',
 	lasso: /^Lasso$/,
 	fit: /^Fit$/,
 	table: /^Table$/,

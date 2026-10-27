@@ -25,10 +25,13 @@
 // =============================================================================
 //
 // What one open connection keeps while its console and document tabs come
-// and go: the console controller (stats, directory, trash, chunks, writes), the
-// shared selection (vector/bridge), the console's tab (Console or Map), the
-// chat's scope ("Ask about these only"), the directory's scope (conditions
-// shared with the map, search and chat) and its loaded rows as a source for
+// and go: the console controller (stats, directory, trash, chunks, writes),
+// the shared selection (vector/bridge), the console's inner tab
+// (vector/workbench.ts) with the Query tab's mode and handed-in question and
+// the document asked of the Documents tab, the chat's scope ("Ask about these
+// only"), the directory's scope (conditions shared with the map, search and
+// chat), the documents staged for the trash (vector/staged.ts), the metadata
+// fields read so far (vector/fields.ts), and the loaded rows as a source for
 // the map. Every one is built from the endpoint KEY plus refs: the controller
 // reads the client and the live endpoint from `ctx` at call time, so a
 // restarted pipeline (same key, new token) is called correctly without
@@ -58,8 +61,13 @@ import type { IDocumentRowsSource, IRecommendExamples, IScopeState, ISavedFilter
 import { CHUNKS_PAGE } from '../vector/budgets';
 import { createConsoleStore } from '../vector/consoleStore';
 import type { IConsoleClock, IConsoleStore } from '../vector/consoleStore';
+import type { IFieldsEstimate } from '../vector/fields';
 import { DEFAULT_LIMITS } from '../vector/results';
-import { deleteBatch, fetchChunks, fetchDocumentsPage, fetchStats, restoreBatch, trashBatch } from './actions';
+import { NO_STAGED, unstage } from '../vector/staged';
+import type { IStagedSet } from '../vector/staged';
+import { DEFAULT_TAB } from '../vector/workbench';
+import type { IOpenDocumentRequest, IQueryPrefill, QueryMode, WorkbenchTab } from '../vector/workbench';
+import { deleteBatch, fetchChunks, fetchDocumentsPage, fetchStats, probeAware, restoreBatch, trashBatch } from './actions';
 import type { IVectorCaller } from './actions';
 import { announcer, connectionCaches, vectorEndpoints } from './explorer';
 
@@ -95,15 +103,17 @@ export function createValueStore<T>(initial: T): IValueStore<T> {
 	};
 }
 
-/** The tabs of a console. */
-export type ConsoleTab = 'console' | 'map';
+/** The tabs of a console (its workbench). */
+export type ConsoleTab = WorkbenchTab;
 
 /** How one mount calls a connection's store (read by the console controller at call time). */
 export interface IConnectionLink {
 	/** The connection's anchor session, or what stands in for it in a dev-tool frame. */
 	session(endpoint: IExplorerEndpoint): IVectorCaller;
-	/** Probe the store again (its `dialect`), fire and forget. */
-	reprobe(endpointKey: string): void;
+	/** Probe the store again (its `dialect`); settles when the answer is in, and never rejects. */
+	reprobe(endpointKey: string): void | Promise<void>;
+	/** Whether the store answered its last probe (false: it failed, or none ran). Absent: always. */
+	probed?(endpointKey: string): boolean;
 }
 
 /** What the controller reads at call time. */
@@ -121,6 +131,12 @@ export interface IConnectionEntry {
 	controller: IConsoleStore;
 	selection: SelectionStore;
 	tab: IValueStore<ConsoleTab>;
+	/** The Query tab's mode. */
+	queryMode: IValueStore<QueryMode>;
+	/** A question handed to the Query tab (Ask about these, Use as query, a history entry), or null. */
+	queryPrefill: IValueStore<IQueryPrefill | null>;
+	/** A document another tab asks the Documents tab to show in its drawer (read once, then set back to null). */
+	openDocument: IValueStore<IOpenDocumentRequest | null>;
 	chatScope: IValueStore<readonly string[] | null>;
 	/** The directory's scope (ConsoleModel.scope), or null with no condition. */
 	scope: IValueStore<IScopeState | null>;
@@ -128,6 +144,10 @@ export interface IConnectionEntry {
 	documents: IDocumentRowsSource;
 	/** How many writes the console ran on this store; a change asks the map to draw its sample again (MapViewProps.writes). */
 	writes: IValueStore<number>;
+	/** Documents staged to move to the trash (applied through the controller's confirmation). */
+	staged: IValueStore<IStagedSet>;
+	/** The metadata fields read so far, or null before any were read. */
+	fields: IValueStore<IFieldsEstimate | null>;
 	/** True once the console asked for its first stats and page. */
 	opened: boolean;
 }
@@ -146,11 +166,12 @@ const REAL_CLOCK: IConsoleClock = {
  * @param clock - The clock (tests pass a manual one).
  * @returns The controller.
  */
-function makeController(entry: Pick<IConnectionEntry, 'ctx' | 'selection' | 'writes'>, clock: IConsoleClock): IConsoleStore {
+function makeController(entry: Pick<IConnectionEntry, 'ctx' | 'selection' | 'writes' | 'staged'>, clock: IConsoleClock): IConsoleStore {
 	const { ctx } = entry;
+	const probed = (): boolean => ctx.link?.probed?.(ctx.endpoint.key) ?? true;
 	const session = (tool: string): IVectorCaller => {
 		if (ctx.link === null) throw new ExplorerToolError({ kind: 'unavailable', tool, message: 'Not connected to the server. Reconnect, then refresh.' });
-		return ctx.link.session(ctx.endpoint);
+		return probeAware(ctx.link.session(ctx.endpoint), probed);
 	};
 	return createConsoleStore(
 		{
@@ -163,8 +184,10 @@ function makeController(entry: Pick<IConnectionEntry, 'ctx' | 'selection' | 'wri
 			announce: (text) => announcer.announce(text),
 			onRemoved: (ids) => {
 				for (const id of ids) entry.selection.forgetDocument(id);
+				entry.staged.set(unstage(entry.staged.get(), ids));
 			},
 			reprobe: () => ctx.link?.reprobe(ctx.endpoint.key),
+			probed,
 			onWritten: () => entry.writes.set(entry.writes.get() + 1),
 			clock,
 		},
@@ -223,11 +246,16 @@ export function createConnectionRegistry(): IConnectionRegistry {
 					ctx,
 					selection,
 					controller: undefined as unknown as IConsoleStore,
-					tab: createValueStore<ConsoleTab>('console'),
+					tab: createValueStore<ConsoleTab>(DEFAULT_TAB),
+					queryMode: createValueStore<QueryMode>('search'),
+					queryPrefill: createValueStore<IQueryPrefill | null>(null),
+					openDocument: createValueStore<IOpenDocumentRequest | null>(null),
 					chatScope: createValueStore<readonly string[] | null>(null),
 					scope: createValueStore<IScopeState | null>(null),
 					documents: undefined as unknown as IDocumentRowsSource,
 					writes: createValueStore(0),
+					staged: createValueStore<IStagedSet>(NO_STAGED),
+					fields: createValueStore<IFieldsEstimate | null>(null),
 					opened: false,
 				};
 				made.controller = makeController(made, clock);
@@ -264,9 +292,11 @@ export const appConnections: IConnectionRegistry = createConnectionRegistry();
 export function appLink(client: IExplorerClient): IConnectionLink {
 	return {
 		session: (endpoint) => vectorEndpoints.session(client, endpoint),
-		reprobe: (endpointKey) => {
-			void vectorEndpoints.probe(client, endpointKey);
-		},
+		reprobe: (endpointKey) => vectorEndpoints.probe(client, endpointKey).then(
+			() => undefined,
+			() => undefined
+		),
+		probed: (endpointKey) => vectorEndpoints.getState().probes[endpointKey]?.ok === true,
 	};
 }
 

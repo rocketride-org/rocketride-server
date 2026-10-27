@@ -2,9 +2,10 @@
 
 Vector Explorer (`apps/vector-ui`, app id `rocketride.vector`) is the shell app
 for managing and visualising the documents in a vector store through a store
-node in a running pipeline: counts, a directory of documents with removal, drag
-and drop ingest, a chat over the documents, and a map of how close the chunks
-are. This page is for people changing the app, the store tools it calls, or the
+node in a running pipeline: a console of six tabs (Overview, Documents, Query,
+Map, Collection and Trash) with staged removal, an Add documents aside for
+ingest, search, comparison and an LLM question over the documents, and a map of
+how close the chunks are. This page is for people changing the app, the store tools it calls, or the
 drivers behind them.
 
 - What users see is the public guide,
@@ -58,8 +59,7 @@ drivers behind them.
    answers the provider, backend, collection, metric, model, dimension, score
    definition, support level, write switches, capabilities, limits, health and
    caveats, and never a host, DSN, credential or database name. The console
-   asks it again (`vectorEndpoints.probe`) when an upload completes and after
-   every write, so a store found empty shows its model, dimension and index
+   asks it again (`vectorEndpoints.probe`) when an upload completes, after every write, on Refresh, and once when fresh stats contradict the dialect (in a dev tool through the controller's `probe` op), so a store found empty shows its model, dimension and index
    once documents exist; until then the drawer reads them from the last
    `stats` answer, and the strip's "Empty collection" follows fresh stats.
 3. **Tool calls.** `store.channel(client, endpoint, role)` returns a channel
@@ -76,7 +76,7 @@ drivers behind them.
    chunker, embedder and `store_1` write them through the data lane. Each file
    carries `objinfo: { name: <path>, origin: 'vector-explorer' }` and never an
    `objectId`.
-6. **Chat.** `channel('chat').ask(...)` runs the chat path; the answer carries
+6. **Ask.** `channel('chat').ask(...)` runs the chat path; the answer carries
    `answers` and, through `response_2`, the retrieved `documents` the sources
    panel and the map use.
 7. **Map.** `sample` returns positions computed on the node (PCA), a kNN graph
@@ -106,10 +106,10 @@ and disables text queries on the map, with the reason, when nothing reaches it.
 | --- | --- |
 | `adapters/` | The one seam to the shared library and the shell: provider list, tool names, the endpoint store with its roles and node filter, history, the announcer, the per-connection request channel for `neighbors` |
 | `contract/` | The wire types and the selection bridge, changed only together with the contract (see [Changing the contract](#changing-the-contract)) |
-| `vector/` | Pure modules tested under `node:test`: addresses, connections, stats, the document tree and its background pager, pure-JS SHA-1 and the uuid5 objectId, file types, upload batching, chat results, retrieval, safe markdown, wording, colours, support levels, identity changes, budgets, panel ratios; the scope and saved filters (`filters.ts`, `savedFilters.ts`), the collection charts (`charts.ts`, `chartTokens.ts`), document health (`health.ts`), the search workbench and its comparison (`searchWorkbench.ts`, `compare.ts`), exports (`export.ts`), saved views (`savedViews.ts`) and query-word highlighting (`highlight.ts`) |
-| `map/` | Renderer (WebGL points with a Canvas2D fallback, both with `snapshot` for the PNG export), camera, picking, lasso, the layouts and their worker, the layout-quality metric, query projection; clusters folded in the browser (`clusters.ts`), similarity edges and the spanning tree (`graph.ts`), isolation (`isolate.ts`), the duplicates queue (`dedupe.ts`), outlier review (`outliers.ts`), recommend examples (`recommend.ts`), matrix ordering (`matrixOrder.ts`), the PNG composite (`exportPng.ts`) |
-| `chat/`, `ingest/` | The chat and upload hooks and the folder-drop traversal |
-| `views/`, `components/` | Connections, the console (the default view), the map and the document tab, and their parts |
+| `vector/` | Pure modules tested under `node:test`: addresses, connections, stats, the document tree and its background pager, pure-JS SHA-1 and the uuid5 objectId, file types, upload batching, chat results, retrieval, safe markdown, wording, colours, support levels, identity changes, budgets; the workbench's tabs and focus rules (`workbench.ts`, `focus.ts`), the Overview's cards, top folders and insights (`overview.ts`), the Documents tab's folder tree and grid logic (`tree.ts`, `grid.ts`, `documents.ts`), staged removals and the confirmations' words and typed rules (`staged.ts`, `confirm.ts`), the Collection tab's fields and the drawer's sample chunks (`fields.ts`, `fieldsRead.ts`, `sampleChunks.ts`, `chunkRows.ts`), the scope and saved filters (`filters.ts`, `savedFilters.ts`), the collection charts (`charts.ts`, `chartTokens.ts`), document health (`health.ts`), the search workbench and its comparison (`searchWorkbench.ts`, `compare.ts`), the Query history and its focus rules (`queryHistory.ts`, `queryFocus.ts`), exports (`export.ts`), saved views (`savedViews.ts`) and query-word highlighting (`highlight.ts`) |
+| `map/` | Renderer (WebGL points with a Canvas2D fallback, both with `snapshot` for the PNG export), camera, picking, lasso, the layouts and their worker, the layout-quality metric, query projection; clusters folded in the browser (`clusters.ts`), similarity edges and the spanning tree (`graph.ts`), isolation (`isolate.ts`), the duplicates queue (`dedupe.ts`), outlier review (`outliers.ts`), recommend examples (`recommend.ts`), matrix ordering (`matrixOrder.ts`), the PNG composite (`exportPng.ts`); the edge colours, ring and star drawing (`overlay.ts`), the contrast helpers they use (`contrast.ts`) and where a popover goes in the window (`popover.ts`); the dimming in both renderers (`renderer.webgl.ts`, `renderer.canvas2d.ts`) |
+| `chat/`, `ingest/` | The chat (Ask) and upload hooks and the folder-drop traversal |
+| `views/`, `components/` | Connections, the console (the default view: the header, the tab row, the banners and one panel per tab), the map and the document tab, and their parts: `WorkbenchTabs` and `TabRow` (the tab rows), `OverviewPanel` (with `StatsStrip` and `StatsCharts`), `DocumentsTab`, `FolderRail`, `VectorGrid`, `DocumentDrawer`, `PendingBar`, `TrashTab`, `QueryTab` with `SearchPanel`, `QueryCompare`, `ChatPanel` and `HistoryAside`, `CollectionPanel`, `ChunksGrid` and `ChunkDrawer`, `AddDocumentsAside`, `InlineRemoveConfirm`, and the map's `MapToolbar` and `AdvancedPopover` (`usePopover`, which `ExportMenu` and `SavedViewsMenu` use too) |
 
 Rules the tests pin:
 
@@ -130,26 +130,54 @@ Rules the tests pin:
 - **Same-name uploads.** The upload queue sends files whose base name repeats
   within one drop one at a time, because upload progress events are keyed by
   file name.
-- **No browser storage.** Nothing under `src/` touches `localStorage`,
-  `sessionStorage` or IndexedDB. Saved filters, saved views, the reviewed
-  documents and the recommend examples are per-connection maps registered with
-  the connection caches and cleared with them.
+- **No browser storage.** Nothing under `src/` touches `localStorage` or `sessionStorage` (pinned for every source file), nor IndexedDB (pinned for the map, chat, upload and Query files). Saved filters, saved views, the reviewed
+  documents, the recommend examples, the staged set, the sampled metadata fields
+  and the drawer's sample chunks are per-connection state registered with the
+  connection caches (or held by the connection's entry) and cleared with them.
+- **The bottom line is one fixed height.** The workbench ends in one line of the
+  pending bar's height (`PENDING_BAR_HEIGHT`, 32 px): the pending bar, or a write's
+  result with its sentence and audit behind "Write details", or nothing
+  (`bottomSlot` in `vector/workbench.ts`: a success holds the line for
+  `RESULT_FIRST_MS` while documents are staged, a failure or partial result until
+  the staged set changes or Show pending). What appears after a press never moves a row above it. A document surface has a slot of its own for its own Move to Trash and Restore (`components/DocumentWriteLine.tsx`, `documentSlot`): the hub's rules without a pending bar, and the full app's document tab shows only the writes asked under its own origin.
+- **The grids are hand-windowed.** `VectorGrid` (with `vector/grid.ts`) is a
+  keyboard grid with its own sorting, windowing and focus rules, not the shell's
+  `DataGrid`, so column resize and reorder do not exist; the Documents, Trash
+  and document-tab Chunks grids use it, read the rows they are given and never write to them (`tests/vector.grid.test.tsx` sorts frozen rows); their columns are declared in each tab's module, never derived from rows.
+- **No modal dialogs in documents.** rocket-ui keeps hidden documents mounted, so
+  the removal confirmations, the Add documents aside, the drawers and the map's
+  popovers are in the document's tree. There are two exceptions, both full-app only: the replace question of an upload (`ingest/ReplaceConfirmDialog.tsx`, the shell's `ConfirmDialog`) and the Connections page's drawer (the shell's `DetailPanel`, `views/ConnectionsView.tsx`). No dev-tool frame reaches either (`tests/devtool.mounts.test.ts`). Escape is handled by the innermost handler that acts,
+  which calls `preventDefault`; outer handlers skip a `defaultPrevented` event,
+  and no handler calls `stopPropagation`.
 - **A derived view never re-samples.** Minimum cluster size, the duplicates
   threshold, the outlier share, edges and isolation are computed from the
   sample the browser holds (`sample.knn`, `sample.density`,
   `sample.duplicates`, `clusters.labels`); `sample` is called again only for
   another size, mode, seed, scope, an expired sample, or after a write (below).
-- **Writes.** The directory has a Documents / Trash switch; **Trash (N)** is
-  `stats.deleted_documents`. Move to trash (`soft_delete`) and Restore
-  (`restore`) can be undone, so nothing is typed for them (Restore asks
-  nothing at all); Delete permanently (`delete`) and Empty trash (`delete` with
-  `deleted_only: true` over the whole `list_documents {deleted: 'deleted'}`
-  listing, reporting `kept_live`) keep the typed confirmations. Every write is
-  sent once per batch of `write_ids_max`, never retried, and confirmed by the
-  console's controller only (`vector/consoleStore.ts`, `vector/confirm.ts`).
-  After any write that ran the console asks `stats` in full, lists both
-  listings again, probes the dialect again and bumps the connection's write
-  count, which makes the map draw its sample again.
+- **Writes.** The Documents and Trash tabs each list through the controller's
+  one `view` (`setView('active')` / `setView('trash')`, the trash listed the
+  first time it shows); **Trash (N)** is `stats.deleted_documents`. Move to
+  trash (`soft_delete`) and Restore (`restore`) can be undone, so nothing is
+  typed for them (Restore asks nothing at all); inside the console, Move to
+  trash is staged first (`entry.staged`, `vector/staged.ts`: the grid's tick, the
+  drawer, the map's review queues) and the pending bar's Apply is the one
+  confirmation. A document tab's own trash button confirms at once. Delete
+  permanently and Empty trash send `delete` with `deleted_only: true` (Empty
+  trash over the whole `list_documents {deleted: 'deleted'}` listing), so a
+  document with live chunks keeps them, and the result names the `kept_live`
+  documents by path; they keep the typed confirmations (one document: its file
+  name, or `1` with no path; several, or Empty trash: the count; on
+  `rocketride_vector` the table name). Every write is sent once per batch of `write_ids_max` and never retried, and every write but Restore is confirmed by the console's controller only (`vector/consoleStore.ts`, `vector/confirm.ts`), inline in both mounts. A confirmation belongs to the surface that asked (its origin) and renders only there; another surface asking meanwhile is told to finish that one first. The staged
+  set is never pruned against a listing; it shrinks on this realm's own removal result (moved, or `not_found`), on another frame's write that names it (`docVersions` `gone`), and on Discard and Unstage; a dev-tool frame keeps it across a reconnect and drops it only on an identity change. After any write that ran
+  the console asks `stats` in full, lists both listings again, probes the dialect
+  again and bumps the connection's write count, which makes the map draw its
+  sample again.
+- **The Query history.** Every finished Search, Compare and Ask run, while recording is on, goes to
+  `env.queryHistory` (`adapters/queryHistory.ts`): the shared history store
+  over the workspace preferences in the full app (`vector.history`, per
+  owner), a store of its own that reads and writes nothing in a dev-tool
+  mount. Both keep the first 200 characters of a question; a Compare's question
+  B is held in memory beside the store and is never handed to it.
 - **Exports carry no vector.** `vector/export.ts` imports nothing that calls a
   tool; its rows are words and numbers, snippets at most `snippet_chars`.
 
@@ -178,7 +206,7 @@ contract the [Explorer library](explorer-library.md#running-the-library-in-a-dev
 describes. The sidebar mount is the controller: it owns the endpoint store,
 the bus-backed client, identity and discovery, and serves `vector.*` ops by
 connection key. Every document is a frame with no client: `console:<key>`
-(the map is a tab inside it) and `document:<key>:<encoded objectId>`; the
+(its tabs, the map among them, are inside it) and `document:<key>:<encoded objectId>`; the
 generic frame is one empty state, and any other docKey is "not found".
 
 - **Calls.** A frame's views call the same functions as the full app, through a
@@ -194,10 +222,12 @@ generic frame is one empty state, and any other docKey is "not found".
 - **Across frames.** The console's query text and median travel as hints
   (`queries`, `consoleSummary`); a chunk focus and keys for the map travel as
   relay ops whose requests are retained with a nonce and taken once.
-- **Degraded.** Chat and uploads need `client.chat` and file uploads, which the
-  dev-tool hosts do not broker for store tools: both say so in place. Exports
-  fall back to a copy, the layout worker to PCA. Nothing is persisted in a
-  dev-tool mount.
+- **Degraded.** Ask and Add documents need `client.chat` and file uploads, which
+  the dev-tool hosts do not broker for store tools: Ask (in the Query tab, with
+  **Use Search**) and the Add documents aside say so in place
+  (`DEVTOOL_CHAT_NOTE`, `DEVTOOL_UPLOADS_NOTE` in `src/env.ts`). Exports fall
+  back to a copy, the layout worker to PCA. Nothing is persisted in a dev-tool
+  mount: the Query history is in memory and says so (`DEVTOOL_HISTORY_NOTE`).
 
 Where the code lives and what the tests pin is in
 `apps/vector-ui/docs/development.md` ("Mounts and the env seam"); the suites
@@ -298,7 +328,7 @@ runs `check_write` (§6.3).
 | Clusters and their labels, the sampler's listing, the table flag | `nodes/test/test_vector_clusters.py`, `test_vector_sample_ext.py` | `./builder nodes:test` |
 | `recommend` and `similarity_matrix` (Qdrant's native best score through the Qdrant fake) | `nodes/test/test_vector_recommend.py`, `test_vector_similarity_matrix.py`, `store_qdrant/test_vx_recommend.py` | `./builder nodes:test` |
 | The documents filter and its `filter_applied` | `nodes/test/test_vector_documents_filter.py` | `./builder nodes:test` |
-| The app | `apps/vector-ui/tests/*.test.ts` | `./builder vector-ui:test` |
+| The app | `apps/vector-ui/tests/*.test.ts(x)` | `./builder vector-ui:test` |
 | Browser lanes | `scripts/acceptance/vector-explorer/browser/` (`lane_vector.cjs` console, `lane_vector_map.cjs` map, `lane_vector_enrich.cjs` the enrichment, `lane_vector_perf.cjs` frame times) | `./builder vector-ui:e2e-live`, manual |
 | The lanes' own self-tests (no browser or engine: every step must fail on a stand-in page) | `scripts/acceptance/vector-explorer/selftest/` | `node --test scripts/acceptance/vector-explorer/selftest/*.test.cjs`, `python3 -m unittest discover -s scripts/acceptance/vector-explorer/selftest -p 'test_*.py'` |
 
@@ -419,6 +449,14 @@ out), skipping a file with a `NEEDS:` reason while it is still a placeholder;
 `VX_APP_SRC=<tree>/apps/vector-ui/src` points that check at another tree, for
 example the merged app from a lane branch whose own copy still holds the
 placeholders.
+
+The map's toolbar gives the lanes these hooks. Lasso, Fit, 3D, Edges, Edges per point and Expand selected sit inside the Advanced panel (`data-advanced-panel`,
+a disclosure whose button has `aria-expanded`), so a lane opens it first
+(`openAdvanced` and `withAdvanced` in `browser/common.cjs`); Table stays on the
+row. The busy words and Cancel sit in one status line that is always there
+(`data-map-status`). The legend's row of glyphs names the marks drawn
+(`data-legend-marks`), and the map canvas reports the points and edges it drew
+faded (`data-dimmed`, `data-edges-dimmed`).
 
 A lasso is only as good as the camera under it. Isolate, Show all and Show only
 cluster move the points (the shown ones fill the layout, over a short tween), so

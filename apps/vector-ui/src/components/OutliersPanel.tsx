@@ -29,8 +29,9 @@
 // browser from the sample's density, so changing it sends nothing; 1 % is
 // the node's own list. Each row says why (density against the sample's
 // median, nearest neighbour in the sample) and offers Show neighbours, Mark
-// reviewed and Move to trash (the console confirms; without writes the
-// button is disabled with the reason as text). A reviewed outlier is its
+// reviewed and Move to trash (the console confirms), or Stage removal where
+// the console stages removals for its pending changes; without writes the
+// button is disabled with the reason as text. A reviewed outlier is its
 // chunk, kept in the registry's reviewed cache under the connection's
 // outliers scope, apart from the documents the duplicates queue marks.
 // =============================================================================
@@ -42,7 +43,7 @@ import { markReviewed, reviewedOf, unmarkReviewed } from '../map/dedupe';
 import type { ReviewedCache } from '../map/dedupe';
 import { OUTLIER_PERCENTILES, outlierKey, outlierRows, outliersScope } from '../map/outliers';
 import type { IOutlierRow, OutlierPercentile } from '../map/outliers';
-import { OUTLIERS_NONE, OUTLIERS_NOTE, outliersStatus } from '../map/reviewWording';
+import { OUTLIERS_NONE, OUTLIERS_NOTE, STAGE_REMOVAL, outliersStatus } from '../map/reviewWording';
 import { MAP_STYLES } from '../map/styles';
 
 /** Props: the frozen ones, plus the starting percentile and the reviewed cache. */
@@ -51,6 +52,8 @@ export interface OutliersPanelProps extends ContractOutliersPanelProps {
 	initial?: { percentile?: OutlierPercentile };
 	/** The reviewed cache (default: the registry's; outliers live under outliersScope(connectionKey)). */
 	reviewedCache?: ReviewedCache;
+	/** The console stages removals: the buttons say Stage removal. */
+	staging?: boolean;
 }
 
 /** What the review's body is drawn from. */
@@ -61,6 +64,8 @@ export interface OutliersBodyProps {
 	writes?: Availability;
 	/** The host gave a remove handler. */
 	canRemove: boolean;
+	/** The host stages removals (Stage removal) rather than confirming them (Move to trash). */
+	staging?: boolean;
 	/** The host gave a Show neighbours handler. */
 	canShowNeighbours: boolean;
 	onPercentile(pct: OutlierPercentile): void;
@@ -117,7 +122,7 @@ export function OutliersBody(props: OutliersBodyProps): React.ReactElement {
 							</button>
 							{props.canRemove ? (
 								<button type="button" style={MAP_STYLES.button} disabled={!writes.enabled} title={writes.enabled ? undefined : (writes.reason ?? undefined)} onClick={() => props.onRemove(row.objectId)}>
-									Move to trash
+									{props.staging ? STAGE_REMOVAL : 'Move to trash'}
 								</button>
 							) : null}
 						</div>
@@ -165,7 +170,7 @@ export function OutliersPanel(props: OutliersPanelProps): React.ReactElement {
 	);
 
 	if (result.outliers.length === 0) return <p style={MAP_STYLES.note}>{OUTLIERS_NONE}</p>;
-	return <OutliersBody rows={rows} percentile={percentile} writes={props.writes} canRemove={props.onRemoveDocument !== undefined} canShowNeighbours={props.onShowNeighbours !== undefined} onPercentile={setPercentile} onSelect={(index) => props.onSelect(index)} onReview={onReview} onRemove={(objectId) => props.onRemoveDocument?.(objectId)} onShowNeighbours={(index) => props.onShowNeighbours?.(index)} />;
+	return <OutliersBody rows={rows} percentile={percentile} writes={props.writes} canRemove={props.onRemoveDocument !== undefined} staging={props.staging} canShowNeighbours={props.onShowNeighbours !== undefined} onPercentile={setPercentile} onSelect={(index) => props.onSelect(index)} onReview={onReview} onRemove={(objectId) => props.onRemoveDocument?.(objectId)} onShowNeighbours={(index) => props.onShowNeighbours?.(index)} />;
 }
 
 export default OutliersPanel;

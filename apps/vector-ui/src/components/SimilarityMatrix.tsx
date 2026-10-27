@@ -27,10 +27,15 @@
 // The pairwise similarities of 2 to `limits.matrix_keys_max` selected chunks
 // as a heatmap with a table alternative, rows and columns ordered by
 // nearest-neighbour chaining, a legend in words, Export CSV and Show pair.
-// Up to 20 x 20 the heatmap's cells are elements with their values printed;
-// above that it is one canvas (10,000 cells at the cap would be 20,000
-// elements), with the hovered pair in its title and the picked pair outlined
-// over it, so a pick redraws no cell. The table shows 20 rows at a time.
+// Up to 12 x 12 the heatmap's cells are elements with their values printed
+// (11 px); up to 20 x 20 they are smaller elements with the value in each
+// cell's title; above that it is one canvas (10,000 cells at the cap would be
+// 20,000 elements), with the hovered pair in its title and the picked pair
+// outlined over it, so a pick redraws no cell. The table shows 20 rows at a
+// time and holds every value. The lightest shade is 15 % of the chart blue,
+// so the lowest cell still differs from an empty one (1.18:1 at worst, in
+// RocketRide dark; 6 % gave 1.05:1); the value itself is always in the title
+// and the table.
 // Calls `similarity_matrix` with the selection's keys (never sample indices,
 // so a re-drawn sample cannot shift the matrix) through map/calls.ts; the
 // answer carries scalars only. A newer selection replaces an older answer.
@@ -48,8 +53,25 @@ import { readPalette } from '../map/tokens';
 
 export type { SimilarityMatrixProps };
 
-/** Largest matrix whose values are printed in its cells (drawn as elements; a larger one is one canvas). */
+/** Largest matrix drawn as elements (a larger one is one canvas). */
 export const IN_CELL_MAX = 20;
+
+/** Largest matrix whose values are printed in its cells (above it, in each cell's title and the table). */
+export const LABELLED_MAX = 12;
+
+/** The printed values' size, CSS pixels. */
+export const CELL_LABEL_PX = 11;
+
+/**
+ * The side of a cell that prints its value: 28 px holds "0.91" at 11 px; a longer value ("0.912" at three
+ * decimals, "-0.91", an inner product of "12.50") widens every cell so none overflows.
+ *
+ * @param longest - The longest printed value, in characters.
+ * @returns CSS pixels.
+ */
+export function labelledCellSize(longest: number): number {
+	return Math.max(28, 6 * longest + 4);
+}
 
 /** Rows of the table alternative shown at a time. */
 export const TABLE_ROWS_PER_PAGE = 20;
@@ -57,9 +79,9 @@ export const TABLE_ROWS_PER_PAGE = 20;
 /** The gap between heatmap cells, in CSS pixels. */
 const HEAT_GAP = 1;
 
-/** The lightest and darkest shade of the ramp (the legend's ends). */
-const SHADE_MIN = 0.06;
-const SHADE_SPAN = 0.84;
+/** The lightest and darkest shade of the ramp (the legend's ends): 0.15 to 0.90 of the chart blue. */
+export const SHADE_MIN = 0.15;
+export const SHADE_SPAN = 0.75;
 
 /** What the panel shows. */
 export type MatrixState = { kind: 'blocked'; message: string } | { kind: 'busy' } | { kind: 'error'; message: string } | { kind: 'ok'; keys: VectorKey[]; matrix: MatrixCell[][]; metric: VectorMetric; source: MatrixSource; notFound: VectorKey[]; dp?: number };
@@ -269,7 +291,9 @@ function HeatmapCanvas(props: HeatmapCanvasProps): React.ReactElement {
 function heatmap(props: MatrixBodyProps, ok: Extract<MatrixState, { kind: 'ok' }>): React.ReactElement {
 	const n = ok.keys.length;
 	const dp = ok.dp ?? 2;
-	const size = n <= IN_CELL_MAX ? 28 : Math.max(3, Math.floor(300 / n));
+	const labelled = n <= LABELLED_MAX;
+	const longest = labelled ? Math.max(1, ...ok.matrix.flatMap((row) => row.map((cell) => cellText(cell, dp).length))) : 0;
+	const size = labelled ? labelledCellSize(longest) : n <= IN_CELL_MAX ? Math.max(14, Math.floor(300 / n)) : Math.max(3, Math.floor(300 / n));
 	const labels = ok.keys.map((key) => props.labelOf(key));
 	if (n > IN_CELL_MAX) {
 		return (
@@ -289,7 +313,7 @@ function heatmap(props: MatrixBodyProps, ok: Extract<MatrixState, { kind: 'ok' }
 			cells.push(
 				<div key={`${i}-${j}`} data-cell={`${i}-${j}`} title={`${labels[i]} ↔ ${labels[j]}: ${words}`} onClick={() => props.onSelectPair(i, j)} style={{ position: 'relative', width: size, height: size, background: 'var(--rr-bg-default)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: picked ? 'inset 0 0 0 2px var(--rr-text-primary)' : undefined }}>
 					{value === null ? null : <div style={{ position: 'absolute', inset: 0, background: 'var(--rr-chart-blue)', opacity: SHADE_MIN + SHADE_SPAN * shadeOf(value, range) }} />}
-					<span style={{ position: 'relative', fontSize: 8.5, lineHeight: 1.2, color: 'var(--rr-text-primary)', background: 'var(--rr-bg-paper)', borderRadius: 2, padding: '0 1px' }}>{words}</span>
+					{labelled ? <span style={{ position: 'relative', fontSize: CELL_LABEL_PX, lineHeight: 1.2, color: 'var(--rr-text-primary)', background: 'var(--rr-bg-paper)', borderRadius: 2, padding: '0 1px' }}>{words}</span> : null}
 				</div>
 			);
 		}

@@ -28,12 +28,15 @@
 // colour is not the only carrier) and every cell speaks it ("Chunk 3:
 // similarity 0.412"). A chunk with no score is a flat, empty cell. One tab
 // stop for the whole strip: arrow keys, Home and End move between chunks,
-// Enter or a click selects one.
+// Enter or a click selects one. The bars are the data-bar colour
+// (DATA_BAR_TOKEN, at least 3:1 on both surfaces in every theme) with a
+// text-primary outline, which carries a short bar's edge.
 // =============================================================================
 
 import React, { useState } from 'react';
 import type { HeatStripProps } from '../contract/types';
-import { ACCENT_TOKEN, OUTLINE_TOKEN } from '../map/tokens';
+import { OUTLINE_TOKEN } from '../map/tokens';
+import { DATA_BAR_TOKEN } from '../vector/colors';
 
 export type { HeatStripProps };
 
@@ -90,7 +93,7 @@ export function HeatStrip(props: HeatStripProps): React.ReactElement {
 							height,
 							padding: 0,
 							border: focused ? `2px solid var(${OUTLINE_TOKEN})` : `1px solid var(${OUTLINE_TOKEN})`,
-							background: sim === undefined ? 'transparent' : `var(${ACCENT_TOKEN})`,
+							background: sim === undefined ? 'transparent' : `var(${DATA_BAR_TOKEN})`,
 							cursor: 'pointer',
 						}}
 					/>

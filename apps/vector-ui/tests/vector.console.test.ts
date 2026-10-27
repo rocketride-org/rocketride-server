@@ -15,7 +15,7 @@ import type { IDocumentItem, IDocumentsFilter, IScopeState } from '../src/contra
 import { connectionCaches, vectorEndpoints } from '../src/adapters/explorer';
 import { connectionEntry } from '../src/adapters/connections';
 import { makeConsoleActions } from '../src/adapters/consoleActions';
-import { QUICK_STATS_INTERVAL_MS } from '../src/vector/budgets';
+import { QUICK_STATS_INTERVAL_MS, REPROBE_WAIT_MS } from '../src/vector/budgets';
 import { CHAT_UNSCOPED_TEXT, chatScopeFor, consoleScope, mapScopeFor } from '../src/vector/consoleModel';
 import { createConsoleStore } from '../src/vector/consoleStore';
 import { pagerApplyPage, pagerBegin, pagerFail, pagerFooter, pagerInit } from '../src/vector/documents';
@@ -24,7 +24,10 @@ import { DEFAULT_LIMITS } from '../src/vector/results';
 import type { IConsoleDeps } from '../src/vector/consoleStore';
 import { readChunksPage, readDocumentsPage, readDeleteResult, readStats, readTrashResult } from '../src/vector/results';
 import type { IDocumentsPageView } from '../src/vector/results';
-import { BUSY, CANCELLED_TEXT, CODE_SENTENCES } from '../src/vector/wording';
+import { BUSY, CANCELLED_TEXT, CODE_SENTENCES, NOT_PROBED_TEXT, failureText } from '../src/vector/wording';
+import { probeAware, probeAwareChannel } from '../src/adapters/actions';
+import { documentOrigin } from '../src/vector/confirm';
+import { directoryHeading } from '../src/vector/documents';
 import { fixture } from './support/fixtures';
 
 interface ICall {
@@ -515,7 +518,7 @@ test('restore runs at once (it can be undone), refreshes everything a write does
 	store.dispose();
 });
 
-test('delete permanently: a confirmation first, then one delete without deleted_only; the document is forgotten', async () => {
+test('delete permanently (a Trash action): a confirmation first, then one delete with deleted_only, so a partly trashed document is kept; the document is forgotten', async () => {
 	const { store, clock, calls, announced, removedIds } = harness();
 	store.setWritesEnabled(true);
 	store.open();
@@ -529,7 +532,7 @@ test('delete permanently: a confirmation first, then one delete without deleted_
 	await clock.settle();
 	assert.deepEqual(
 		calls.filter((c) => c.tool === 'delete').map((c) => c.args),
-		[[['gull']]]
+		[[['gull'], 'deleted_only']]
 	);
 	assert.deepEqual(announced, ['Deleted C:/demo/field/gull.md permanently (12 chunks)']);
 	assert.deepEqual(removedIds, [['gull']]);
@@ -572,8 +575,9 @@ test('empty trash: every page of the trash is listed first, then a confirmation;
 		],
 		'batches of write_ids_max, every one with deleted_only'
 	);
-	assert.equal(announced.at(-1), 'Emptied the trash: deleted 149 documents permanently (298 chunks). 1 was kept: it still has chunks outside the trash.');
+	assert.equal(announced.at(-1), 'Emptied the trash: deleted 149 documents permanently (298 chunks). 1 was kept whole, because it still has chunks outside the trash: C:/demo/trash/t7.md.');
 	assert.ok(!removedIds.flat().includes('t-7'), 'a kept document is not forgotten');
+	assert.equal(store.getState().removal.partial, true, 'not all it was asked: the hub holds the line like a failure (R2-I2)');
 	assert.equal(removedIds.flat().length, 149);
 	assert.equal(written(), 1);
 	store.dispose();
@@ -901,7 +905,7 @@ test('consoleScope: the chat is scoped only once the scope names its documents; 
 	assert.equal(ready.readiness?.phase, 'ready');
 	// The first page failed, or the listing stopped short: nothing is scoped by it, and every surface is told so.
 	for (const [dir, words] of [
-		[failed, "The scope's documents did not load; Retry the directory. The map, search and chat are not scoped."],
+		[failed, "The scope's documents did not load; Retry under the Documents list. The map, search and chat are not scoped."],
 		[capped, "Only 500 of 12,000 documents are loaded, so the scope's documents are not all known: the map, search and chat are not scoped. Load more to include the other 11,500 (5,000 at a time)."],
 	] as const) {
 		const unknown = consoleScope(null, fresh, dir, 2_000);
@@ -947,7 +951,7 @@ test('mapScopeFor: while a new scope finds its documents the map keeps the scope
 	assert.equal(mapScopeFor(held, consoleScope(null, null, whole, 2_000)), null);
 });
 
-test('the store is probed again (its dialect) after an upload completes and after a write', async () => {
+test('the store is probed again (its dialect) after an upload completes, after a write and on Refresh', async () => {
 	let probes = 0;
 	const { store, clock } = harness({ reprobe: () => void (probes += 1) });
 	store.setWritesEnabled(true);
@@ -961,10 +965,13 @@ test('the store is probed again (its dialect) after an upload completes and afte
 	await store.confirmRemove();
 	await clock.settle();
 	assert.equal(probes, 2, 'after a write');
+	store.requestRemove([{ objectId: 'kestrel', path: 'C:/demo/field/kestrel_field_guide.md', chunks: 12 }]);
 	store.cancelRemove();
+	await clock.settle();
+	assert.equal(probes, 2, 'Cancel sends no probe');
 	store.refresh();
 	await clock.settle();
-	assert.equal(probes, 2, 'Refresh and Cancel send no probe of their own');
+	assert.equal(probes, 3, 'Refresh probes again: a store found empty and filled from elsewhere gets its index and size');
 	store.dispose();
 });
 
@@ -986,3 +993,257 @@ test("a connection's controller probes its endpoint again through the endpoint s
 		connectionCaches.clearAll();
 	}
 });
+
+test('Documents, then Trash, then Documents: Retry and Load more page the documents again (each tab names its listing when it shows)', async () => {
+	let failOnce = true;
+	const h = harness({
+		documents: async (cursor, _limit, _filter, deleted) => {
+			if (deleted === 'deleted') {
+				h.calls.push({ tool: 'trash listing', args: [cursor] });
+				return readDocumentsPage({ success: true, items: [], next_cursor: null, total: 0, counts_exact: true, distinct: true, sorted: true, caveats: [] });
+			}
+			h.calls.push({ tool: 'documents', args: [cursor] });
+			if (failOnce) {
+				failOnce = false;
+				throw new ExplorerToolError({ kind: 'store', tool: 'list_documents', code: 'TIMEOUT', message: 'The store did not finish within its time budget.' });
+			}
+			return readDocumentsPage(fixture('list_documents_page1'));
+		},
+	});
+	h.store.open();
+	await h.clock.settle();
+	assert.equal(h.store.getState().directory.status, 'error', 'the premise: the documents failed');
+	h.store.setView('trash');
+	await h.clock.settle();
+	h.store.setView('active');
+	const before = h.calls.length;
+	h.store.retryDocuments();
+	await h.clock.settle();
+	const after = h.calls.slice(before).map((c) => c.tool).filter((t) => t !== 'stats');
+	assert.ok(after.length > 0 && after.every((t) => t === 'documents'), `Retry pages the documents, not the trash: ${after.join(', ')}`);
+	assert.notEqual(h.store.getState().directory.status, 'error');
+	h.store.dispose();
+});
+
+test('staged documents applied: one confirmation for all of them with the paths and counts they were staged with, then one soft_delete batch; the moved ones are reported', async () => {
+	const h = harness();
+	h.store.setWritesEnabled(true);
+	const staged = [
+		{ objectId: 'a', path: 'docs/a.md', chunks: 4 },
+		{ objectId: 'm', path: 'map/m.md', chunks: null },
+	];
+	h.store.requestRemove(staged);
+	const pending = h.store.getState().confirm;
+	assert.deepEqual(pending, { action: 'trash', kind: 'multi', targets: staged, origin: 'console' }, 'nothing is sent before Confirm');
+	assert.ok(!h.tools().includes('soft_delete'));
+	await h.store.confirmRemove();
+	await h.clock.settle();
+	assert.deepEqual(h.calls.filter((c) => c.tool === 'soft_delete').map((c) => c.args), [[['a', 'm']]]);
+	assert.deepEqual(h.removedIds, [['a', 'm']], 'what moved leaves the selection, the map and the staged set (adapters/connections.ts onRemoved)');
+	h.store.requestRemove(staged);
+	h.store.cancelRemove();
+	assert.equal(h.store.getState().confirm, null);
+	assert.equal(h.calls.filter((c) => c.tool === 'soft_delete').length, 1, 'Cancel sends nothing');
+	h.store.dispose();
+});
+
+test('B4: with no probe that answered, Refresh and Retry probe the store first, and a failed relist keeps the last known rows', async () => {
+	let probed = true;
+	let down = false;
+	const order: string[] = [];
+	let answer: () => void = () => undefined;
+	const { store, clock } = harness({
+		probed: () => probed,
+		reprobe: () => {
+			order.push('probe');
+			return new Promise<void>((resolve) => {
+				answer = () => {
+					probed = !down;
+					resolve();
+				};
+			});
+		},
+		documents: async (cursor) => {
+			order.push('documents');
+			if (down) throw new ExplorerToolError({ kind: 'unavailable', tool: 'list_documents', message: NOT_PROBED_TEXT });
+			return readDocumentsPage(cursor ? fixture('list_documents_page2_last') : fixture('list_documents_page1'));
+		},
+	});
+	store.open();
+	await clock.settle();
+	const known = store.getState().directory.rows.map((row) => row.objectId);
+	assert.ok(known.length > 0, 'the premise: rows were read');
+	// The store went down and its probe failed: Refresh probes first, and reads nothing until the probe answers.
+	down = true;
+	probed = false;
+	order.length = 0;
+	store.refresh();
+	await clock.settle();
+	assert.deepEqual(order, ['probe'], 'nothing is read before the probe answers');
+	assert.equal(store.getState().checking, true, 'Refreshing… while it checks');
+	store.refresh();
+	assert.deepEqual(order, ['probe'], 'a Refresh while it checks is not asked again');
+	answer();
+	await clock.settle();
+	assert.equal(store.getState().checking, false);
+	assert.deepEqual(order, ['probe', 'documents'], 'then it reads');
+	const failed = store.getState().directory;
+	assert.equal(failed.status, 'error');
+	assert.deepEqual(failed.rows.map((row) => row.objectId).sort(), [...known].sort(), 'the last known rows stay');
+	assert.equal(failed.stale, true, 'marked as the last known');
+	assert.match(pagerFooter(failed)?.text ?? '', /^Showing the last known \d+ documents; reading them again failed: The store did not answer when it was last checked\./);
+	assert.match(directoryHeading(failed), /^\d+ last known$/);
+	assert.equal(pagerFooter(failed)?.retry, true);
+	// Retry probes first too; the store is back: the listing is read again and is no longer the last known.
+	down = false;
+	order.length = 0;
+	store.retryDocuments();
+	store.retryDocuments();
+	assert.deepEqual(order, ['probe'], 'Retry probes first, once');
+	answer();
+	await clock.settle();
+	assert.equal(order[0], 'probe');
+	assert.ok(order.slice(1).every((step) => step === 'documents') && order.length > 1);
+	const back = store.getState().directory;
+	assert.equal(back.status, 'done');
+	assert.equal(back.stale, undefined);
+	assert.equal(back.held, undefined);
+	// With a probe that answered, Refresh reads at once (and probes alongside, as before).
+	order.length = 0;
+	store.refresh();
+	await clock.settle();
+	assert.equal(order[0], 'documents');
+	store.dispose();
+});
+
+test('B4: a listing that starts over keeps nothing for another filter, and its first page replaces what it held', () => {
+	const read = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage(fixture('list_documents_page2_last')));
+	const again = pagerBegin(read);
+	assert.equal(again.rows.length, 0, 'loading shows nothing new yet');
+	assert.equal(again.held?.length, read.rows.length);
+	assert.equal(pagerBegin(read, { path_prefix: 'C:/demo' }).held, undefined, 'another filter is another listing');
+	const ok = pagerApplyPage(again, readDocumentsPage(fixture('list_documents_page2_last')));
+	assert.equal(ok.held, undefined);
+	assert.equal(ok.stale, undefined);
+	const failedFirst = pagerFail(pagerBegin(pagerInit()), { headline: 'down' });
+	assert.equal(failedFirst.stale, undefined, 'nothing to hold: an empty error as before');
+	assert.match(pagerFooter(failedFirst)?.text ?? '', /^Loading stopped at 0 documents/);
+});
+
+test("B4: a call refused for want of a probe that answered says so, never 'update the node'", async () => {
+	let probed = false;
+	const refusing = { invoke: async () => Promise.reject(new ExplorerToolError({ kind: 'upgrade', tool: 'list_documents', message: 'This node cannot run list_documents: it does not advertise "list_documents". Update the pipeline\'s node to a version that supports it.' })) };
+	const aware = probeAware(refusing, () => probed);
+	assert.equal(probeAware(refusing, () => probed), aware, 'one stand-in per caller (its identity is a dependency)');
+	const notProbed = await aware.invoke('list_documents').then(() => null, (error: unknown) => error);
+	assert.ok(notProbed instanceof ExplorerToolError);
+	assert.equal(notProbed.kind, 'unavailable');
+	assert.equal(failureText(notProbed)?.headline, NOT_PROBED_TEXT);
+	assert.doesNotMatch(NOT_PROBED_TEXT, /[Uu]pdate/);
+	// A node whose probe answered without the capability is out of date: that refusal stays as it was.
+	probed = true;
+	const upgrade = await aware.invoke('list_documents').then(() => null, (error: unknown) => error);
+	assert.ok(upgrade instanceof ExplorerToolError && upgrade.kind === 'upgrade');
+	assert.match(failureText(upgrade)?.headline ?? '', /Update the pipeline's store node/);
+	// Other failures pass through.
+	const other = probeAware({ invoke: async () => Promise.reject(new ExplorerToolError({ kind: 'timeout', tool: 'stats', message: 'slow' })) }, () => false);
+	const timeout = await other.invoke('stats').then(() => null, (error: unknown) => error);
+	assert.ok(timeout instanceof ExplorerToolError && timeout.kind === 'timeout');
+	// A role channel keeps what it is (its role, binding, uploads and questions); only its calls are probe-aware.
+	const channel = { role: 'tools', bound: true, invoke: refusing.invoke, sendFiles: () => 'files', ask: () => 'ask' } as unknown as Parameters<typeof probeAwareChannel>[0];
+	const awareChannel = probeAwareChannel(channel, () => false);
+	assert.equal(awareChannel.role, 'tools');
+	assert.equal(awareChannel.bound, true);
+	assert.equal((awareChannel as unknown as { ask(): string }).ask(), 'ask');
+	assert.equal(probeAwareChannel(channel, () => false), awareChannel);
+	const viaChannel = await awareChannel.invoke('list_documents').then(() => null, (error: unknown) => error);
+	assert.ok(viaChannel instanceof ExplorerToolError && viaChannel.kind === 'unavailable');
+});
+
+test("B10: a document tab's write or cancel carries its origin; the console's own carry none", async () => {
+	const { store, clock } = harness();
+	store.setWritesEnabled(true);
+	store.open();
+	await clock.settle();
+	const kestrel = [{ objectId: 'kestrel', path: 'C:/demo/field/kestrel_field_guide.md', chunks: 12 }];
+	store.requestRemove(kestrel, documentOrigin('kestrel'));
+	store.cancelRemove();
+	assert.deepEqual(store.getState().removal, { status: 'idle', message: CANCELLED_TEXT, origin: documentOrigin('kestrel') });
+	store.requestRemove(kestrel, documentOrigin('kestrel'));
+	const running = store.confirmRemove();
+	assert.equal(store.getState().removal.origin, documentOrigin('kestrel'), 'while it runs');
+	await running;
+	assert.equal(store.getState().removal.status, 'done');
+	assert.equal(store.getState().removal.origin, documentOrigin('kestrel'), 'and its result');
+	store.requestRemove(kestrel);
+	store.cancelRemove();
+	assert.deepEqual(store.getState().removal, { status: 'idle', message: CANCELLED_TEXT }, "the console's own: no origin");
+	await store.restore(kestrel, documentOrigin('kestrel'));
+	assert.equal(store.getState().removal.origin, documentOrigin('kestrel'), 'a Restore from a document too');
+	store.dispose();
+});
+
+test("a document tab's Restore goes through its own origin, so its result stays out of the console's slot", async () => {
+	const calls: Array<{ method: string; targets: unknown; origin: unknown }> = [];
+	const controller = {
+		getState: () => ({ directory: { rows: [] } }),
+		requestRemove: (targets: unknown, origin: unknown) => calls.push({ method: 'requestRemove', targets, origin }),
+		restore: async (targets: unknown, origin: unknown) => {
+			calls.push({ method: 'restore', targets, origin });
+		},
+	};
+	const entry = { controller, selection: { getState: () => ({ document: null }) } } as unknown as Parameters<typeof makeConsoleActions>[0];
+	const origin = documentOrigin('kestrel');
+	const known = [{ objectId: 'kestrel', path: 'C:/demo/field/kestrel_field_guide.md', chunks: 12 }];
+	const doc = makeConsoleActions(entry, { openDocument: () => undefined, showConsole: () => undefined, announce: () => undefined, origin });
+	await doc.restore?.(['kestrel'], known);
+	doc.requestRemove(['kestrel'], known);
+	assert.deepEqual(calls, [
+		{ method: 'restore', targets: known, origin },
+		{ method: 'requestRemove', targets: known, origin },
+	]);
+	calls.length = 0;
+	await makeConsoleActions(entry, { openDocument: () => undefined, showConsole: () => undefined, announce: () => undefined }).restore?.(['kestrel'], known);
+	assert.equal(calls[0].origin, 'console', "the console's own Restore keeps the console's origin");
+	// And the store files the document's result under that origin, not the console's line (B10).
+	const { store, clock } = harness();
+	store.setWritesEnabled(true);
+	store.open();
+	await clock.settle();
+	await store.restore(known, origin);
+	assert.equal(store.getState().removal.origin, origin);
+	await store.restore(known);
+	assert.equal(store.getState().removal.origin, undefined, "the console's own result carries no origin");
+	store.dispose();
+});
+
+test('B4: a probe that never answers is not waited for past REPROBE_WAIT_MS: the read goes ahead and Refresh works again', async () => {
+	let probes = 0;
+	const order: string[] = [];
+	const { store, clock } = harness({
+		probed: () => false,
+		reprobe: () => {
+			probes += 1;
+			return new Promise<void>(() => undefined);
+		},
+		documents: async (cursor) => {
+			order.push('documents');
+			return readDocumentsPage(cursor ? fixture('list_documents_page2_last') : fixture('list_documents_page1'));
+		},
+	});
+	store.open();
+	await clock.settle();
+	order.length = 0;
+	store.refresh();
+	await clock.settle();
+	assert.equal(store.getState().checking, true);
+	assert.deepEqual(order, []);
+	await clock.advance(REPROBE_WAIT_MS);
+	await clock.settle();
+	assert.equal(store.getState().checking, false, 'never left checking');
+	assert.equal(order[0], 'documents', 'the read went ahead');
+	store.refresh();
+	assert.equal(probes, 2, 'and Refresh is asked again');
+	store.dispose();
+});
+

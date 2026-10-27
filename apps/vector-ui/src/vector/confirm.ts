@@ -25,27 +25,35 @@
 // =============================================================================
 //
 // The console's writes: Move to trash (`soft_delete`), Restore (`restore`),
-// Delete permanently (`delete`) and Empty trash (`delete` with
-// `deleted_only`). They follow Graph Explorer's rules: Cancel has the focus
-// (so a stray Enter cancels), Cancel sends nothing, and the text says exactly
-// what will happen: the path, a short objectId, the chunk count the store
-// reported (never an estimate), and where.
+// and the two permanent ones, Delete permanently and Empty trash, both
+// `delete` with `deleted_only` (both are Trash actions: a document that
+// still has a live chunk, a partly trashed one, is left whole and named).
+// They follow Graph Explorer's rules: Cancel has the focus (so a stray Enter
+// cancels), Cancel sends nothing, and the text says exactly what will
+// happen: the path, a short objectId, the chunk count the store reported
+// (never an estimate), and where.
 //
 // Moving to the trash can be undone from the Trash, so nothing is typed for
 // it and its dialog is not destructive; Restore runs without a dialog. The
-// permanent writes keep their typed confirmations: on `rocketride_vector`,
-// whose table is shared by every pipeline of the organization that names it,
-// the user types the table name; several documents (and the trash, emptied)
-// are confirmed by typing their count. Every write is sent in batches of at
-// most `write_ids_max` (100), and the first error stops the rest; the summary
-// says what already ran, and what Empty trash kept because a chunk of it was
-// still live.
+// permanent writes are typed: on `rocketride_vector`, whose table is shared
+// by every pipeline of the organization that names it, the user types the
+// table name; one document is confirmed by typing its file name, several
+// documents (and the trash, emptied) by typing their count. Every write is
+// sent in batches of at most `write_ids_max` (100), and the first error stops
+// the rest; the summary says what already ran, and names the documents kept
+// because a chunk of them was still live.
+//
+// A confirmation belongs to the surface that asked for it (its ORIGIN: the
+// console, or one document tab of the full app, which shares the console's
+// controller). It shows there only, and another surface asking meanwhile is
+// told to finish it first (confirmElsewhereText).
 // =============================================================================
 
 import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import { MULTI_REMOVE_LIST_MAX } from './budgets';
+import { splitPath } from './documents';
 import { readDialect } from './results';
-import type { IRemoveView } from './results';
+import type { IRemoveView, IWriteAudit } from './results';
 import { formatCount } from './stats';
 import { providerTitle } from './support';
 import { failureText } from './wording';
@@ -53,6 +61,33 @@ import type { IFailureText } from './wording';
 
 /** The dialogs' cancel label (the focus step looks for it). */
 export const REMOVE_CANCEL_LABEL = 'Cancel';
+
+/** Where a confirmation was asked for: the connection's console, or one document tab (`document:<objectId>`). */
+export type ConfirmOrigin = string;
+
+/** The console's own confirmations (its tabs, the map, the pending bar). */
+export const CONSOLE_ORIGIN: ConfirmOrigin = 'console';
+
+/**
+ * The origin of a document tab's confirmations.
+ *
+ * @param objectId - The document the tab shows.
+ * @returns The origin.
+ */
+export function documentOrigin(objectId: string): ConfirmOrigin {
+	return `document:${objectId}`;
+}
+
+/**
+ * What a surface says when it asked for a confirmation while another one is open elsewhere.
+ *
+ * @param origin - Where the open one is.
+ * @returns The sentence.
+ */
+export function confirmElsewhereText(origin: ConfirmOrigin): string {
+	const where = origin === CONSOLE_ORIGIN ? "this connection's console" : 'a document tab of this connection';
+	return `Another confirmation is open in ${where}; finish or cancel it first.`;
+}
 
 /** A document to remove. */
 export interface IRemoveTarget {
@@ -204,7 +239,7 @@ export function multiTrashConfirmation(targets: readonly IRemoveTarget[], ctx: I
 }
 
 /**
- * Delete one document permanently (from the Trash). A shared table asks for its name typed.
+ * Delete one document permanently (from the Trash): its file name typed (a shared table's name).
  *
  * @param target - The document.
  * @param ctx - Where it is stored.
@@ -212,15 +247,17 @@ export function multiTrashConfirmation(targets: readonly IRemoveTarget[], ctx: I
  */
 export function removeConfirmation(target: IRemoveTarget, ctx: IRemoveContext): IRemoveConfirmation {
 	const collection = collectionName(ctx);
-	const typed = sharedTyped(ctx);
+	const shared = sharedTyped(ctx);
+	// The file name; with no path, the count (1), as several documents are confirmed.
+	const typed = target.path === '' ? { expected: '1', prompt: 'Type 1 to confirm.' } : { expected: splitPath(target.path).name, prompt: `Type the file name '${splitPath(target.path).name}' to confirm.` };
 	return {
 		title: 'Delete this document permanently?',
 		lines: targetLines(target, ctx),
-		sentence: `Deletes this document and ${itsChunks(target)} from ${collection}. This cannot be undone; add the file again to restore it.`,
-		extra: typed ? [sharedTableSentence(collection)] : [],
+		sentence: `Deletes this document and ${itsChunks(target)} from ${collection}. If it still has chunks outside the trash, it is kept whole. This cannot be undone; add the file again to restore it.`,
+		extra: shared ? [sharedTableSentence(collection)] : [],
 		confirmLabel: 'Delete permanently',
 		cancelLabel: REMOVE_CANCEL_LABEL,
-		typed,
+		typed: shared ?? typed,
 		destructive: true,
 	};
 }
@@ -240,7 +277,7 @@ export function multiRemoveConfirmation(targets: readonly IRemoveTarget[], ctx: 
 		title: `Delete ${formatCount(n)} documents permanently?`,
 		listLabel: 'Documents to delete permanently',
 		...listedPaths(targets),
-		sentence: `Deletes these ${formatCount(n)} documents and ${theirChunks(targets)} from ${collection}, in batches of at most 100; the first error stops the rest. This cannot be undone.`,
+		sentence: `Deletes these ${formatCount(n)} documents and ${theirChunks(targets)} from ${collection}, in batches of at most 100; the first error stops the rest. A document that still has chunks outside the trash is kept whole. This cannot be undone.`,
 		extra: shared ? [sharedTableSentence(collection)] : [],
 		confirmLabel: `Delete ${formatCount(n)} documents permanently`,
 		cancelLabel: REMOVE_CANCEL_LABEL,
@@ -282,7 +319,8 @@ export function emptyTrashConfirmation(targets: readonly IRemoveTarget[], ctx: I
  * @returns True when the confirm button may be enabled.
  */
 export function confirmReady(typed: ITypedConfirmation | null, input: string): boolean {
-	return typed === null || input.trim() === typed.expected;
+	// Both sides trimmed: a file name that starts or ends with a space can still be typed.
+	return typed === null || input.trim() === typed.expected.trim();
 }
 
 // =============================================================================
@@ -315,6 +353,8 @@ export interface IRemovalOutcome {
 	batchesTotal: number;
 	/** Why it stopped, when a batch failed. */
 	error: IFailureText | null;
+	/** The audit block of each batch that answered with one. */
+	audits?: IWriteAudit[];
 }
 
 /**
@@ -327,13 +367,14 @@ export interface IRemovalOutcome {
  */
 export async function runRemoval(ids: readonly string[], call: (batch: string[]) => Promise<IRemoveView>, size: number): Promise<IRemovalOutcome> {
 	const all = batches(ids, size);
-	const outcome: IRemovalOutcome = { removed: [], notFound: [], keptLive: [], removedChunks: 0, batchesRun: 0, batchesTotal: all.length, error: null };
+	const outcome: IRemovalOutcome = { removed: [], notFound: [], keptLive: [], removedChunks: 0, batchesRun: 0, batchesTotal: all.length, error: null, audits: [] };
 	for (const batch of all) {
 		try {
 			const view = await call(batch);
 			outcome.removed.push(...view.removed);
 			outcome.notFound.push(...view.notFound);
 			outcome.keptLive.push(...view.keptLive);
+			if (view.audit) outcome.audits?.push(view.audit);
 			outcome.removedChunks = outcome.removedChunks === null || view.removedChunks === null ? null : outcome.removedChunks + view.removedChunks;
 			outcome.batchesRun += 1;
 		} catch (error) {
@@ -364,13 +405,19 @@ export function removalSummary(outcome: IRemovalOutcome, targets: ReadonlyArray<
 	const words = SUMMARY_WORDS[action];
 	const rows = outcome.removedChunks === null ? '' : ` (${formatCount(outcome.removedChunks)} ${outcome.removedChunks === 1 ? 'chunk' : 'chunks'})`;
 	const stopped = outcome.error ? ` Stopped after ${outcome.batchesRun} of ${outcome.batchesTotal} batches: ${outcome.error.headline}` : '';
-	const kept = outcome.keptLive.length === 0 ? '' : outcome.keptLive.length === 1 ? ' 1 was kept: it still has chunks outside the trash.' : ` ${formatCount(outcome.keptLive.length)} were kept: they still have chunks outside the trash.`;
+	// The documents kept whole, by path where the targets know it.
+	const paths = new Map(targets.map((t) => [t.objectId, t.path || t.objectId]));
+	const keptPaths = outcome.keptLive.slice(0, MULTI_REMOVE_LIST_MAX).map((id) => paths.get(id) ?? id);
+	const keptMore = outcome.keptLive.length - keptPaths.length;
+	const keptList = `${keptPaths.join(', ')}${keptMore > 0 ? ` and ${formatCount(keptMore)} more` : ''}`;
+	const kept = outcome.keptLive.length === 0 ? '' : outcome.keptLive.length === 1 ? ` 1 was kept whole, because it still has chunks outside the trash: ${keptList}.` : ` ${formatCount(outcome.keptLive.length)} were kept whole, because they still have chunks outside the trash: ${keptList}.`;
 	if (outcome.removed.length === 0 && outcome.notFound.length === 0 && outcome.keptLive.length === 0) return outcome.error ? outcome.error.headline : `Nothing was ${words.none}.`;
 	if (action !== 'empty' && targets.length === 1 && outcome.removed.length <= 1 && !outcome.error) {
 		const path = targets[0].path || targets[0].objectId;
-		return outcome.removed.length === 1 ? `${words.done} ${path}${words.tail}${rows}` : `${path} was not stored any more; nothing was ${words.none}`;
+		if (outcome.keptLive.length === 1) return `${path} was kept whole, because it still has chunks outside the trash; nothing was ${words.none}.`;
+		return outcome.removed.length === 1 ? `${words.done} ${path}${words.tail}${rows}` : `${path} was already gone; nothing was ${words.none}`;
 	}
-	const gone = outcome.notFound.length === 0 ? '' : ` ${formatCount(outcome.notFound.length)} ${outcome.notFound.length === 1 ? 'was' : 'were'} not stored any more.`;
+	const gone = outcome.notFound.length === 0 ? '' : ` ${formatCount(outcome.notFound.length)} ${outcome.notFound.length === 1 ? 'was' : 'were'} already gone.`;
 	const removedRows = outcome.error && outcome.removedChunks === null ? '' : rows;
 	const what = `${words.done} ${formatCount(outcome.removed.length)} ${outcome.removed.length === 1 ? 'document' : 'documents'}${words.tail}${removedRows}.`;
 	return `${action === 'empty' ? `Emptied the trash: ${what}` : what}${gone}${kept}${stopped}`;
@@ -409,4 +456,56 @@ export function confirmationFor(pending: { action: 'trash' | 'delete' | 'empty';
 	if (pending.action === 'empty') return { kind: 'multi', content: emptyTrashConfirmation(pending.targets, ctx) };
 	if (pending.kind === 'single') return { kind: 'single', content: pending.action === 'trash' ? trashConfirmation(pending.targets[0], ctx) : removeConfirmation(pending.targets[0], ctx) };
 	return { kind: 'multi', content: pending.action === 'trash' ? multiTrashConfirmation(pending.targets, ctx) : multiRemoveConfirmation(pending.targets, ctx) };
+}
+
+/**
+ * A finished write's audit blocks in words, one line per batch (what the store recorded: the tool, the rows, who
+ * called; never content).
+ *
+ * @param audits - The batches' audit blocks.
+ * @returns The lines.
+ */
+export function auditLines(audits: readonly IWriteAudit[]): string[] {
+	return audits.map((audit, i) => {
+		const rows = audit.rows === null ? 'rows not counted' : `${formatCount(audit.rows)} ${audit.rows === 1 ? 'row' : 'rows'}`;
+		const prefix = audits.length > 1 ? `Batch ${i + 1}: ` : '';
+		return `${prefix}${audit.action ?? 'write'}, ${rows}, called by ${audit.caller ?? 'an unnamed caller'}`;
+	});
+}
+
+/** A move to the trash of more documents than this opens with Cancel focused (the store's batch can be smaller). */
+export const BULK_TRASH_FOCUS_CANCEL = 100;
+
+/** Where a confirmation's first focus goes: Confirm, the typed field (Cancel when there is none), or Cancel. */
+export type ConfirmFirstFocus = 'confirm' | 'typed' | 'cancel';
+
+/**
+ * Where a confirmation's first focus goes (the lead's rule): a move to the trash can be undone, so Confirm, unless it
+ * moves more than BULK_TRASH_FOCUS_CANCEL documents or more than one batch of the store (`write_ids_max`), whichever
+ * is smaller; then Cancel, so a stray Enter does not move them all (nothing is typed: Restore undoes it). A permanent
+ * write: its typed field, else Cancel. Never the destructive button.
+ *
+ * @param kind - What Confirm sends: 'trash', 'delete' or 'empty'.
+ * @param count - How many documents it covers.
+ * @param writeIdsMax - The store's `limits.write_ids_max`.
+ * @returns Where the focus goes.
+ */
+export function confirmFirstFocus(kind: 'trash' | 'delete' | 'empty', count: number, writeIdsMax: number): ConfirmFirstFocus {
+	if (kind !== 'trash') return 'typed';
+	const bulk = Math.min(BULK_TRASH_FOCUS_CANCEL, Math.max(1, Math.floor(writeIdsMax)));
+	return count > bulk ? 'cancel' : 'confirm';
+}
+
+/**
+ * The line under the typed field: after Enter on what does not match yet, that it does not; else nothing. The line
+ * keeps its height either way (components/InlineRemoveConfirm.tsx), so the field never moves.
+ *
+ * @param typed - The typed confirmation.
+ * @param input - What is typed.
+ * @param nudged - Enter was pressed on it while it did not match.
+ * @returns The sentence, or '' for none.
+ */
+export function typedNudge(typed: ITypedConfirmation, input: string, nudged: boolean): string {
+	if (!nudged || confirmReady(typed, input)) return '';
+	return input.trim() === '' ? 'Nothing is typed yet.' : 'What is typed does not match.';
 }

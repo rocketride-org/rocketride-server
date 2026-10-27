@@ -557,7 +557,7 @@ test("while the scope's documents are not all known, the map, search and chat ar
 	assert.deepEqual(others({ ...half, total: null }), off("Waiting for the scope's documents (500 loaded); the map, search and chat are not scoped yet."));
 	// The first page failed: Retry.
 	assert.deepEqual(others(pagerFail(begun, { headline: 'The store did not answer in time.' })), off(SCOPE_FAILED_TEXT));
-	assert.equal(SCOPE_FAILED_TEXT, "The scope's documents did not load; Retry the directory. The map, search and chat are not scoped.");
+	assert.equal(SCOPE_FAILED_TEXT, "The scope's documents did not load; Retry under the Documents list. The map, search and chat are not scoped.");
 	// Every page in: the scope is its matches, and every surface is offered.
 	const whole = clientListed(folder, 2, handbooks, 1_000, false);
 	assert.equal(whole.status, 'done');
@@ -576,7 +576,7 @@ test('a listing that stopped short never resolves the scope from the rows it loa
 		['capped, no total', clientListed(legal, 10, rows, null, true), "Only 5,000 documents are loaded and more may exist, so the scope's documents are not all known: the map, search and chat are not scoped. Load more to include them (5,000 at a time)."],
 		['stalled', clientListed(legal, 4, rows, 12_000, true, 'stalled'), "Loading stopped at 2,000 documents, so the scope's documents are not all known: the map, search and chat are not scoped."],
 		['unsupported', clientListed(legal, 1, rows, 12_000, true, 'unsupported'), "Only the first page of documents is listed (500 loaded), so the scope's documents are not all known: the map, search and chat are not scoped."],
-		['error', clientListed(legal, 3, rows, 12_000, true, 'error'), "Loading stopped at 1,500 documents, so the scope's documents are not all known: the map, search and chat are not scoped. Retry the directory to include them."],
+		['error', clientListed(legal, 3, rows, 12_000, true, 'error'), "Loading stopped at 1,500 documents, so the scope's documents are not all known: the map, search and chat are not scoped. Retry under the Documents list to include them."],
 	];
 	for (const [name, dir, sentence] of cases) {
 		const resolved = resolveScope(scope, dir, 2_000);
@@ -726,4 +726,32 @@ test('building scopes: no condition is no scope, the same conditions keep the sc
 	const folder = scopeWith(charted, 'orchid', { path_prefix: 'C:/demo/handbooks/' });
 	assert.equal(folder?.filter.path_prefix, 'C:/demo/handbooks/', 'Scope to this folder replaces the folder');
 	assert.deepEqual(scopeWith(null, '', { file_types: ['pdf'] })?.filter, { file_types: ['pdf'] }, 'a chart bar with no scope starts one');
+});
+
+test('"Scope … to this folder" from the Documents tab (R1-I4, F1-1): a fresh scope or one off the list leaves the list on its folder view (no new listing); a scope on the list keeps it there; the label names exactly what it scopes', () => {
+	const { folderScope, folderScopeLabel, folderScopeTargets } = require('../src/vector/filters') as typeof import('../src/vector/filters');
+	// What the console asks the listing for (views/ConsoleView.tsx).
+	const listed = (scope: IScopeState | null): ReturnType<typeof listingFilter> => (scope !== null && scope.applyTo.documents ? listingFilter(scope.filter) : null);
+	// A fresh scope: every surface but the list; the listing is not asked again (on pgvector the rail keeps the siblings).
+	assert.deepEqual(folderScopeTargets(null), { documents: false, map: true, search: true, chat: true });
+	const fresh = folderScope(null, '', 'C:/demo/handbooks/');
+	assert.ok(fresh);
+	assert.equal(listed(fresh), null, 'no new listing');
+	assert.equal(folderScopeLabel(fresh.applyTo), 'Scope search, map and Ask to this folder');
+	// A scope off the list: its own surfaces, still off the list.
+	const offList = { filter: { file_types: ['md'] }, label: '', objectIds: null, overflow: null, applyTo: { documents: false, map: false, search: true, chat: true } };
+	assert.deepEqual(folderScopeTargets(offList), { documents: false, map: false, search: true, chat: true });
+	assert.equal(listed(folderScope(offList, '', 'C:/demo/handbooks/')), null);
+	assert.equal(folderScopeLabel(folderScopeTargets(offList)), 'Scope search and Ask to this folder');
+	// A scope on the list (the user's choice): the list keeps it, with the folder added, and the label says so.
+	const onList = { ...offList, applyTo: { ...offList.applyTo, documents: true } };
+	const kept = folderScope(onList, '', 'C:/demo/handbooks/');
+	assert.ok(kept);
+	assert.deepEqual(kept.filter, { path_prefix: 'C:/demo/handbooks/', file_types: ['md'] }, "the folder joins the scope's other conditions");
+	assert.equal(kept.applyTo.documents, true, 'the md filter stays on the list');
+	assert.deepEqual(listed(kept), { path_prefix: 'C:/demo/handbooks/', file_types: ['md'] }, 'the list is listed again with the folder added (on the server where the store filters)');
+	assert.equal(folderScopeLabel(kept.applyTo), 'Scope the list, search and Ask to this folder');
+	// None of search, map and chat on: all three, the list as it was.
+	assert.deepEqual(folderScopeTargets({ ...onList, applyTo: { documents: true, map: false, search: false, chat: false } }), { documents: true, map: true, search: true, chat: true });
+	assert.equal(folderScopeLabel({ documents: false, map: true, search: false, chat: false }), 'Scope map to this folder');
 });

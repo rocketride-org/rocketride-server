@@ -14,7 +14,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { boundsOf, cameraSignature, fitCamera, fitCamera3D, orbitCamera, panBy, projectToScreen, screenToWorld, viewMatrix, worldToScreen, zoomAt } from '../src/map/camera';
+import { boundsOf, cameraSignature, fitCamera, fitCamera3D, orbitCamera, panBy, projectToScreen, resizeCamera, screenToWorld, viewMatrix, worldToScreen, zoomAt } from '../src/map/camera';
 import type { ICamera2D, ICamera3D, IViewport } from '../src/map/camera';
 import { lassoSelect, pointInPolygon, simplifyPath } from '../src/map/lasso';
 import { buildScreenIndex, nearestInSector, pickNearest } from '../src/map/picking';
@@ -59,6 +59,42 @@ test('fit puts every visible point inside the viewport with the padding, centred
 	const one = fitCamera({ minX: 3, maxX: 3, minY: 3, maxY: 3 }, vp, 20);
 	assert.ok(Number.isFinite(one.scale) && one.scale > 0);
 	assert.equal(boundsOf(new Float32Array(0), 2), null);
+});
+
+test('a resize keeps the zoom relative to the fit: shrinking and growing back twice returns the scale, and a camera at fit stays at fit', () => {
+	// The live map: 1,020 x 477 at 1440, 880 x 477 at 1300 (the side panel keeps its width).
+	const wide: IViewport = { width: 1020, height: 477 };
+	const narrow: IViewport = { width: 880, height: 477 };
+	const bounds = { minX: -6, maxX: 7, minY: -2.5, maxY: 3 };
+	const fitted = fitCamera(bounds, wide, 28);
+	const zoomed = zoomAt(fitted, wide, 300, 200, 2.5);
+	for (const start of [fitted, zoomed]) {
+		let c = start;
+		const scales = [c.scale];
+		for (const next of [[wide, narrow], [narrow, wide], [wide, narrow], [narrow, wide]] as const) {
+			c = resizeCamera(c, bounds, next[0], next[1], 28);
+			scales.push(c.scale);
+		}
+		assert.ok(Math.abs(c.scale - start.scale) < 1e-9 * start.scale, `back to ${start.scale}: ${scales.join(' → ')}`);
+		assert.ok(Math.abs((scales[1] as number) - (scales[3] as number)) < 1e-9 * start.scale, 'the same scale at the same size, every time');
+		assert.ok((scales[1] as number) < start.scale, 'narrower: zoomed out, so what was in view stays in view');
+		assert.deepEqual([c.cx, c.cy], [start.cx, start.cy], 'the same centre');
+	}
+	// At fit it stays at fit, at any size (the whole layout in view, centred).
+	for (const size of [narrow, { width: 600, height: 700 }, { width: 1400, height: 300 }]) {
+		const resized = resizeCamera(fitted, bounds, wide, size, 28);
+		assert.ok(Math.abs(resized.scale - fitCamera(bounds, size, 28).scale) < 1e-9 * resized.scale, `${size.width}x${size.height}`);
+	}
+	// The old rule (scale by the smaller of the two ratios) ratcheted: 1440 → 1300 → 1440 never came back.
+	const ratchet = (c: ICamera2D, a: IViewport, b: IViewport): number => c.scale * Math.min(b.width / a.width, b.height / a.height);
+	assert.ok(ratchet({ ...fitted, scale: ratchet(fitted, wide, narrow) }, narrow, wide) < fitted.scale);
+	// The legend collapsed and opened again (the canvas 1,020 x 434 to 553 and back): the same zoom, the same scale.
+	const open: IViewport = { width: 1020, height: 434 };
+	const shut: IViewport = { width: 1020, height: 553 };
+	const toggled = resizeCamera(resizeCamera(zoomed, bounds, open, shut, 28), bounds, shut, open, 28);
+	assert.ok(Math.abs(toggled.scale - zoomed.scale) < 1e-9 * zoomed.scale);
+	// Nothing visible: the camera is left as it was.
+	assert.deepEqual(resizeCamera(zoomed, null, wide, narrow, 28), zoomed);
 });
 
 test('zooming keeps the point under the cursor still, and the zoom stays within its range', () => {

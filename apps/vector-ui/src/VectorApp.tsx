@@ -36,22 +36,26 @@
 // cache, so nothing of one identity's stores shows in the next.
 // =============================================================================
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { AppLayout, Button, DocSplitLayout, DocTabs, EmptyState, commonStyles, useShellConnection } from 'shell';
 import type { Documents, ShellAppProps } from 'shell';
 import { identityFingerprint, identityFromConnectResult } from 'shared/explorer';
 import { makeConsoleActions } from './adapters/consoleActions';
 import { appConnections } from './adapters/connections';
-import { activeConnection, announcer, connectionCaches, vectorEndpoints } from './adapters/explorer';
+import { activeConnection, announcer, connectionCaches, vectorEndpoints, vectorQueryHistory } from './adapters/explorer';
 import { VectorHistoryPrefsBridge, useEndpointStoreLifecycle } from './adapters/react';
 import RealmLiveRegion from './components/RealmLiveRegion';
-import RemoveDialogHost from './components/RemoveDialogHost';
-import { createDocs, destroyDocs, getDocs, openDocumentTab } from './docs';
+import DocumentWriteLine from './components/DocumentWriteLine';
+import InlineRemoveConfirm from './components/InlineRemoveConfirm';
+import { createDocs, destroyDocs, getDocs, openDocumentTab, takeArrival } from './docs';
 import type { IConsoleDocPayload, IDocumentDocPayload } from './docs';
-import { VectorEnvProvider, useConnection, useLiveEndpoint } from './envContext';
+import { VectorEnvProvider, useConnection, useEndpointsState, useLiveEndpoint } from './envContext';
 import { createLocalVectorEnv } from './localEnv';
 import { CONNECTIONS_URI, endpointKeyFromUri, isConsoleUri, isDocumentUri } from './vector/addresses';
+import { documentOrigin } from './vector/confirm';
+import { documentFocus, focusAdrift } from './vector/focus';
+import { takesFocusOnShow } from './vector/workbench';
 import { forgetConnections } from './vector/identityChange';
 import VectorSidebar from './VectorSidebar';
 import { VectorIcon } from './icons';
@@ -65,6 +69,10 @@ const styles = {
 	content: { flex: 1, display: 'flex', minHeight: 0, minWidth: 0, overflow: 'hidden' } as CSSProperties,
 	editorPane: (active: boolean): CSSProperties => ({ display: active ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0, flexDirection: 'column' }),
 	welcome: { display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center' } as CSSProperties,
+	/** A document tab's own root (its focus stays inside): it lays out as its view did. */
+	documentRoot: { display: 'flex', flex: 1, minHeight: 0, minWidth: 0, flexDirection: 'column' } as CSSProperties,
+	/** The document above its write slot: the room the slot leaves. */
+	documentBody: { display: 'flex', flex: 1, minHeight: 0, minWidth: 0, flexDirection: 'column' } as CSSProperties,
 };
 
 /** The landing document's URI and label. */
@@ -84,7 +92,7 @@ const VectorApp: React.FC<ShellAppProps> = ({ identity }) => {
 	const { client, isConnected } = useShellConnection();
 	useEndpointStoreLifecycle(vectorEndpoints, client, identity);
 	// The LOCAL env every view below reads: the app's store, its client, its connection registry and its documents.
-	const env = useMemo(() => createLocalVectorEnv({ ready: client !== null && isConnected, client, store: vectorEndpoints, registry: appConnections, activeConnection: ACTIVE, openConsole, openDocument: openDocumentTab }), [client, isConnected]);
+	const env = useMemo(() => createLocalVectorEnv({ ready: client !== null && isConnected, client, store: vectorEndpoints, registry: appConnections, queryHistory: vectorQueryHistory, activeConnection: ACTIVE, openConsole, openDocument: openDocumentTab }), [client, isConnected]);
 
 	// A different user, organization or team (or a sign-out) must find nothing from before: every console and
 	// document tab closes and every per-connection cache clears. On the first run the documents do not exist yet.
@@ -125,7 +133,7 @@ const VectorApp: React.FC<ShellAppProps> = ({ identity }) => {
 const VectorAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 	const state = docs.useStore();
 
-	// Publish the active connection (the sidebar and the remove dialog follow it), for any connection-scoped document.
+	// Publish the active connection (the sidebar follows it), for any connection-scoped document.
 	useEffect(() => {
 		const group = state.groups[state.activeGroupId];
 		const editorId = group?.editorIds[group.activeEditorIndex];
@@ -139,10 +147,8 @@ const VectorAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 		<div style={styles.container}>
 			{/* One polite live region for the whole realm (rocket-ui may run dev-tool documents beside the app); every announcement goes through it. */}
 			<RealmLiveRegion />
-			{/* Chat history only records while a bridge is mounted; app-level so it survives closing a console. */}
+			{/* The Query history only records while a bridge is mounted; app-level so it survives closing a console. */}
 			<VectorHistoryPrefsBridge />
-			{/* Removal is confirmed here, outside every pane, so the dialog is visible wherever it was asked for. */}
-			<RemoveDialogHost />
 			<DocSplitLayout
 				docs={docs}
 				renderPane={(groupId: string) => {
@@ -151,7 +157,7 @@ const VectorAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 					return (
 						<div style={styles.groupPane} onClick={() => docs.setActiveGroup(groupId)}>
 							<DocTabs docs={docs} groupId={groupId} isActive={state.activeGroupId === groupId} canClose={canCloseGroups} onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)} onCloseGroup={(gid) => docs.closeGroup(gid)} />
-							{/* All editors stay mounted and visibility toggles, so a tab keeps its directory, chat and map. */}
+							{/* All editors stay mounted and visibility toggles, so a tab keeps its documents, queries and map. */}
 							<div style={styles.content}>
 								{group.editorIds.length === 0 ? (
 									<div style={styles.welcome}>
@@ -188,9 +194,10 @@ const VectorAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 };
 
 /** One stored document's tab, bound to its connection's live model. */
-const DocumentTab: React.FC<{ payload: IDocumentDocPayload; active: boolean }> = ({ payload, active }) => {
+const DocumentTab: React.FC<{ uri: string; payload: IDocumentDocPayload; active: boolean }> = ({ uri, payload, active }) => {
 	const endpoint = useLiveEndpoint(payload.endpoint);
 	const { entry, model, channels } = useConnection(endpoint);
+	const { probes } = useEndpointsState();
 	const actions = useMemo(
 		() =>
 			makeConsoleActions(entry, {
@@ -198,6 +205,8 @@ const DocumentTab: React.FC<{ payload: IDocumentDocPayload; active: boolean }> =
 				// "Show chunk path on map", a chunk's "map" and "Ask about" land on the console, in front of this tab.
 				showConsole: () => openConsole(entry.ctx.endpoint),
 				announce: (text) => announcer.announce(text),
+				// Its confirmations show in this tab, not in the console that shares its controller.
+				origin: documentOrigin(payload.objectId),
 			}),
 		[entry, payload.objectId, payload.path]
 	);
@@ -205,7 +214,35 @@ const DocumentTab: React.FC<{ payload: IDocumentDocPayload; active: boolean }> =
 	useEffect(() => {
 		entry.controller.setWritesEnabled(model.writes.enabled);
 	}, [model.writes.enabled, entry]);
-	return <DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />;
+	// Its Move to trash is confirmed in the tab itself, inline; when the confirmation goes, the focus stays in the tab.
+	const root = useRef<HTMLDivElement>(null);
+	const returnFocus = (opener: HTMLElement | null): HTMLElement | null => documentFocus(root.current, opener) as HTMLElement | null;
+	// Opened by a press (a row's "open", a chunk's "open"): that press's tab is hidden now, so the focus comes to this
+	// document's Reader | Chunks tabs (else its first control), never the page. A tab restored, or opened another way,
+	// leaves the focus alone. Once more on the next frame: the tab that pressed may be hidden after this one shows.
+	useLayoutEffect(() => {
+		if (typeof document === 'undefined' || !takeArrival(uri)) return undefined;
+		const settle = (): void => {
+			if (takesFocusOnShow({ mounting: true, arrival: true, active, pageFocused: document.hasFocus(), adrift: focusAdrift(document.activeElement as HTMLElement | null, document.body) })) returnFocus(null)?.focus();
+		};
+		settle();
+		const later = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(settle) : null;
+		return () => {
+			if (later !== null) cancelAnimationFrame(later);
+		};
+		// Once, as the tab mounts.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+	// The document and its write slot are one surface (data-document): Write details opens inside its rectangle.
+	return (
+		<div ref={root} style={styles.documentRoot} data-document={payload.objectId}>
+			<div style={styles.documentBody}>
+				<DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} beforeBody={<InlineRemoveConfirm entry={entry} probe={probes[endpoint.key]} origin={documentOrigin(payload.objectId)} returnFocus={returnFocus} />} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />
+			</div>
+			{/* What this tab's own write did (the console's line leaves it here), in a fixed slot under the document. */}
+			{model.writes.enabled && <DocumentWriteLine entry={entry} origin={documentOrigin(payload.objectId)} returnFocus={() => returnFocus(null)} />}
+		</div>
+	);
 };
 
 /**
@@ -221,11 +258,11 @@ const DocumentPane: React.FC<{ uri: string; docs: Documents; active: boolean }> 
 	const content = docs.getState().documents[uri]?.content;
 	if (isConsoleUri(uri)) {
 		const payload = content as IConsoleDocPayload | undefined;
-		if (payload?.endpoint) return <ConsoleView key={uri} opened={payload.endpoint} active={active} />;
+		if (payload?.endpoint) return <ConsoleView key={uri} opened={payload.endpoint} active={active} arrival={() => takeArrival(uri)} />;
 	}
 	if (isDocumentUri(uri)) {
 		const payload = content as IDocumentDocPayload | undefined;
-		if (payload?.endpoint && payload.objectId) return <DocumentTab key={uri} payload={payload} active={active} />;
+		if (payload?.endpoint && payload.objectId) return <DocumentTab key={uri} uri={uri} payload={payload} active={active} />;
 	}
 	return <EmptyState title="Unknown document" description={uri} />;
 };

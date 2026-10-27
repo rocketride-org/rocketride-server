@@ -24,20 +24,41 @@
 // VECTOR-UI — CONNECTION DRAWER DETAILS (what the store node says about itself)
 // =============================================================================
 //
-// Renders vector/connections.ts drawerView: roles, backend and version,
-// collection, metric, model, dimension, index, the embedding and LLM node
-// names, the write switch and support, then the notes. Nothing here reads a
-// component's configuration or holds a credential.
+// Describes the collection first (vector/connections.ts drawerView: its name,
+// documents and chunks when the console has counted them, embedding model,
+// dimension, metric, index and size), then the metadata fields read so far,
+// the first chunks of the first document (two reads, on open), and the
+// quick actions that open the workbench on a tab. The connection's own rows
+// (sources, pipeline, node, run, backend, nodes, write switch) are behind a
+// collapsed "Connection details". Nothing here reads a component's
+// configuration or holds a credential.
 // =============================================================================
 
 import React from 'react';
-import { LabelValue, Section } from 'shell';
+import { Button, LabelValue, Section } from 'shell';
 import type { IDrawerView } from '../vector/connections';
+import { fieldsSummary } from '../vector/fields';
+import type { IFieldsEstimate } from '../vector/fields';
+import type { SampleState } from '../vector/sampleChunks';
+import type { WorkbenchTab } from '../vector/workbench';
 import { styles } from '../styles';
+
+/** The quick actions: the tab each opens. */
+export const QUICK_ACTIONS: ReadonlyArray<{ label: string; tab: WorkbenchTab }> = [
+	{ label: 'Browse documents', tab: 'documents' },
+	{ label: 'Search', tab: 'query' },
+	{ label: 'Open map', tab: 'map' },
+];
 
 /** Props for the {@link ConnectionDrawerDetails} component. */
 export interface IConnectionDrawerDetailsProps {
 	drawer: IDrawerView;
+	/** The metadata fields read so far (the Collection tab reads them); undefined leaves the section out. */
+	fields?: IFieldsEstimate | null;
+	/** The sample chunks' state; undefined leaves the section out. */
+	sample?: SampleState;
+	/** Open the workbench on a tab; undefined leaves the quick actions out. */
+	onOpenTab?(tab: WorkbenchTab): void;
 }
 
 /**
@@ -46,16 +67,68 @@ export interface IConnectionDrawerDetailsProps {
  * @param props - {@link IConnectionDrawerDetailsProps}.
  * @returns The sections.
  */
-export function ConnectionDrawerDetails({ drawer }: IConnectionDrawerDetailsProps): React.ReactElement {
+export function ConnectionDrawerDetails({ drawer, fields, sample, onOpenTab }: IConnectionDrawerDetailsProps): React.ReactElement {
 	return (
 		<>
-			<Section label="Connection">
-				{drawer.rows.map((row) => (
-					<LabelValue key={row.label} label={row.label}>
-						{row.value}
-					</LabelValue>
-				))}
-			</Section>
+			{drawer.collection.length > 0 && (
+				<Section label="Collection">
+					{drawer.collection.map((row) => (
+						<LabelValue key={row.label} label={row.label}>
+							{row.value}
+						</LabelValue>
+					))}
+				</Section>
+			)}
+			{fields !== undefined && (
+				<Section label="Metadata fields">
+					<div style={styles.small}>{fieldsSummary(fields)}</div>
+				</Section>
+			)}
+			{sample !== undefined && sample.status !== 'skipped' && (
+				<Section label="Sample chunks">
+					{sample.status === 'loading' && (
+						<div role="status" style={styles.small}>
+							Reading the first document…
+						</div>
+					)}
+					{sample.status === 'empty' && <div style={styles.small}>The store lists no document.</div>}
+					{sample.status === 'error' && <div style={styles.small}>{sample.message}</div>}
+					{sample.status === 'done' && (
+						<>
+							<div style={{ ...styles.small, marginBottom: 6, overflowWrap: 'anywhere' }}>{`The first chunks of ${sample.sample.path}`}</div>
+							<ol style={{ margin: 0, paddingLeft: 20 }} aria-label="First chunks of the first document">
+								{sample.sample.chunks.map((chunk) => (
+									<li key={chunk.chunkId} style={{ ...styles.small, marginBottom: 6, overflowWrap: 'anywhere' }}>
+										{chunk.snippet === '' ? '(no text)' : chunk.snippet}
+									</li>
+								))}
+							</ol>
+							{sample.sample.chunks.length === 0 && <div style={styles.small}>The store returned no chunks for it.</div>}
+						</>
+					)}
+				</Section>
+			)}
+			{onOpenTab && (
+				<Section label="Quick actions">
+					<div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+						{QUICK_ACTIONS.map((action) => (
+							<Button key={action.tab} variant="secondary" onClick={() => onOpenTab(action.tab)}>
+								{action.label}
+							</Button>
+						))}
+					</div>
+				</Section>
+			)}
+			<details style={{ margin: '12px 0' }}>
+				<summary style={{ cursor: 'pointer', fontWeight: 600 }}>Connection details</summary>
+				<Section label="Connection">
+					{drawer.connection.map((row) => (
+						<LabelValue key={row.label} label={row.label}>
+							{row.value}
+						</LabelValue>
+					))}
+				</Section>
+			</details>
 			{drawer.notes.length > 0 && (
 				<Section label="What to know">
 					{drawer.notes.map((note) => (

@@ -160,6 +160,24 @@ export function fitCamera(bounds: IBounds, vp: IViewport, padding = 24): ICamera
 }
 
 /**
+ * The 2D camera after its viewport changes size. Its zoom relative to the fit is kept: a camera at fit is at fit
+ * again (the whole layout in view), and a shrink then a grow back returns the scale it had (the ratio depends on
+ * the two sizes only, never on the path between them).
+ *
+ * @param cam - The camera.
+ * @param bounds - What the fit shows (the visible points), or null for nothing.
+ * @param before - The viewport it had.
+ * @param after - The viewport it has now.
+ * @param padding - The fit's margin in pixels.
+ * @returns The camera for the new size (the same centre).
+ */
+export function resizeCamera(cam: ICamera2D, bounds: IBounds | null, before: IViewport, after: IViewport, padding = 24): ICamera2D {
+	if (bounds === null) return cam;
+	const scale = cam.scale * (fitCamera(bounds, after, padding).scale / fitCamera(bounds, before, padding).scale);
+	return Number.isFinite(scale) && scale > 0 ? { ...cam, scale } : cam;
+}
+
+/**
  * Zoom about a screen point: the layout point under it stays under it.
  *
  * @param cam - The camera.

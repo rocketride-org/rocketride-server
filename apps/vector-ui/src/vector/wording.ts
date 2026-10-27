@@ -97,7 +97,7 @@ export const CAVEAT_SENTENCES: Readonly<Record<Caveat, string>> = {
 	extras_not_stored: 'This backend does not keep file size or ingest time.',
 	documents_by_first_chunk: 'Documents are counted by their first chunk on this store.',
 	document_count_capped: 'Orphan counts above 1,000 are not exact on this store.',
-	documents_unsorted: 'This store lists documents in storage order; the directory sorts what is loaded.',
+	documents_unsorted: 'This store lists documents in storage order; Documents sorts what is loaded.',
 	documents_paging_unsupported: 'This store cannot page its document list; only the first page is shown.',
 	model_mismatch: 'The chat embedding model differs from the one this collection was built with; results may be meaningless.',
 	meta_column_pending: 'File size and ingest time are not stored yet: another session holds this table; the store will retry.',
@@ -128,8 +128,8 @@ export const WRITE_TIMEOUT_TEXT = 'The request may still complete on the server.
 /** What a cancelled confirmation says. */
 export const CANCELLED_TEXT = 'Cancelled. Nothing was sent.';
 
-/** Under the directory when a page brought no document that was not already listed (the listing stops there). */
-export const DOCUMENTS_REPEATED_TEXT = 'The store sent documents it had already listed instead of the next page, so the directory stopped asking.';
+/** Under the Documents list when a page brought no document that was not already listed (the listing stops there). */
+export const DOCUMENTS_REPEATED_TEXT = 'The store sent documents it had already listed instead of the next page, so the Documents list stopped asking.';
 
 /** Server codes that mean the task is not running (yet). */
 const NOT_RUNNING_CODES: ReadonlySet<string> = new Set(['TASK_STOPPED', 'TASK_NOT_REGISTERED', 'TASK_COMPLETED']);
@@ -139,6 +139,24 @@ export interface IFailureText {
 	headline: string;
 	detail?: string;
 }
+
+/**
+ * A store's error text without a leading exception or class name ("ResponseHandlingException: The store could not be
+ * reached" reads "The store could not be reached"): the words a person reads. The raw text stays where the details are.
+ *
+ * @param text - The text.
+ * @returns It, without the name (the text as it was when nothing else is left).
+ */
+export function withoutExceptionName(text: string): string {
+	const stripped = text.replace(/^\s*(?:[A-Za-z_$][\w$]*\.)*[A-Z][\w$]*(?:Exception|Error|Fault)\s*:\s*/, '');
+	return stripped.trim() === '' ? text : stripped;
+}
+
+/**
+ * A call refused before it was sent because the store's last probe did not answer (it failed, or none has run): the
+ * store may be down, and the node is not out of date. Retry and Refresh probe it again first.
+ */
+export const NOT_PROBED_TEXT = 'The store did not answer when it was last checked. Retry or Refresh checks it again.';
 
 /**
  * What a failed call says on screen.
@@ -165,6 +183,7 @@ export function failureText(error: unknown, ctx: { write?: boolean } = {}): IFai
 			case 'timeout':
 				return ctx.write ? { headline: WRITE_TIMEOUT_TEXT } : { headline: error.headline, ...(error.detail ? { detail: error.detail } : {}) };
 			case 'upgrade':
+				// Only for a node whose probe answered without the capability (adapters/actions.ts probeAware maps the others).
 				return { headline: `This store node cannot run ${error.tool}. Update the pipeline's store node to a version that supports Vector Explorer.` };
 			case 'raised':
 				if (error.code !== undefined && NOT_RUNNING_CODES.has(error.code)) {
@@ -200,10 +219,10 @@ export const BUSY = {
 
 /** The console's empty states. */
 export const EMPTY = {
-	noDocuments: 'No documents yet. Drop a file on the right to add the first one.',
+	noDocuments: 'No documents yet.',
 	trash: 'The trash is empty.',
 	noMatch: (filter: string): string => `No documents match '${filter}'`,
-	unreachable: (detail: string): string => `Store unreachable: ${detail}`,
+	unreachable: (detail: string): string => `Store unreachable: ${withoutExceptionName(detail)}`,
 	noIngest: 'This pipeline has no running Ingest source. Start its dropper source to add documents.',
 	noChat: 'This pipeline has no running Chat source.',
 	readOnly: 'No Tools source: documents cannot be added or removed from here',
