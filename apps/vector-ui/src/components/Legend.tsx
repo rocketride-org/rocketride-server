@@ -204,6 +204,18 @@ export function scrollsInside(scrollHeight: number, clientHeight: number): boole
 }
 
 /**
+ * Whether the legend keeps its tab stop: while it scrolls, and while it holds the focus (taking the stop away from
+ * the focused legend would drop the focus to the page).
+ *
+ * @param scrolls - Its content runs past its height.
+ * @param focused - The focus is on it or inside it.
+ * @returns True to keep it.
+ */
+export function keepTabStop(scrolls: boolean, focused: boolean): boolean {
+	return scrolls || focused;
+}
+
+/**
  * The map legend.
  *
  * @param props - Sample, colour mode, point cap, backend, colouring.
@@ -211,17 +223,21 @@ export function scrollsInside(scrollHeight: number, clientHeight: number): boole
  */
 export function Legend(props: LegendProps): React.ReactElement {
 	const section = useRef<HTMLElement>(null);
-	// A tab stop only while it scrolls past its cap (a keyboard must reach what is below); measured when what it
-	// says changes and when its box changes size.
+	// A tab stop while it scrolls past its cap (a keyboard must reach what is below), and while it holds the focus
+	// (removing the stop then would drop the focus to the page); measured when what it says changes, when its box
+	// changes size, and when the focus leaves it.
 	const [scrolls, setScrolls] = useState(false);
-	useEffect(() => {
+	const measure = (): void => {
 		const el = section.current;
-		if (el) setScrolls(scrollsInside(el.scrollHeight, el.clientHeight));
-	}, [props.sample, props.colourBy, props.colouring, props.notes, props.marks, props.scopeRetry]);
+		if (el) setScrolls(keepTabStop(scrollsInside(el.scrollHeight, el.clientHeight), typeof document !== 'undefined' && el.contains(document.activeElement)));
+	};
+	const measureRef = useRef(measure);
+	measureRef.current = measure;
+	useEffect(() => measureRef.current(), [props.sample, props.colourBy, props.colouring, props.notes, props.marks, props.scopeRetry]);
 	useEffect(() => {
 		const el = section.current;
 		if (!el || typeof ResizeObserver === 'undefined') return undefined;
-		const observer = new ResizeObserver(() => setScrolls(scrollsInside(el.scrollHeight, el.clientHeight)));
+		const observer = new ResizeObserver(() => measureRef.current());
 		observer.observe(el);
 		return () => observer.disconnect();
 	}, []);
@@ -237,7 +253,19 @@ export function Legend(props: LegendProps): React.ReactElement {
 	const marks = markRows(props.marks);
 	const docs = sample.of.documents === null || sample.of.documents === undefined ? '—' : num(sample.of.documents);
 	return (
-		<section ref={section} aria-label="Map legend" tabIndex={scrolls ? 0 : undefined} style={MAP_STYLES.legend} data-knn-source={sample.knn_source} data-colour-by={props.colourBy}>
+		<section
+			ref={section}
+			aria-label="Map legend"
+			tabIndex={scrolls ? 0 : undefined}
+			onBlur={(event) => {
+				// The focus left the legend: drop the stop if it no longer scrolls.
+				const el = section.current;
+				if (el && !(event.relatedTarget instanceof Node && el.contains(event.relatedTarget))) setScrolls(keepTabStop(scrollsInside(el.scrollHeight, el.clientHeight), false));
+			}}
+			style={MAP_STYLES.legend}
+			data-knn-source={sample.knn_source}
+			data-colour-by={props.colourBy}
+		>
 			<p style={MAP_STYLES.note}>
 				{sampleLabel(sample)} · {docs} docs · seed {props.sample.seed}
 			</p>
