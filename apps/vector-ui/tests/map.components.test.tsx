@@ -21,10 +21,10 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ClustersPanel } from '../src/components/ClustersPanel';
 import { DuplicatesPanel } from '../src/components/DuplicatesPanel';
 import { HeatStrip } from '../src/components/HeatStrip';
-import { LEGEND_CLUSTERS, Legend } from '../src/components/Legend';
-import { MapToolbar, TREE_HINT } from '../src/components/MapToolbar';
+import { LEGEND_CLUSTERS, Legend, markRows } from '../src/components/Legend';
+import { MapToolbar, STATUS_HEIGHT, TREE_HINT } from '../src/components/MapToolbar';
 import { NeighbourList } from '../src/components/NeighbourList';
-import { OutliersPanel } from '../src/components/OutliersPanel';
+import { OutliersBody, OutliersPanel } from '../src/components/OutliersPanel';
 import { PointCanvas } from '../src/components/PointCanvas';
 import { PointInspector } from '../src/components/PointInspector';
 import { PointsTable } from '../src/components/PointsTable';
@@ -32,7 +32,11 @@ import { createSelectionStore } from '../src/contract/bridge';
 import type { INeighborsResult, ISampleResult, IVectorLimits, VectorKey } from '../src/contract/types';
 import { clusterLabel, clusterRows, clusterSentence, clusterView } from '../src/map/clusters';
 import { COLOUR_MODES, clusterColours, colourPoints } from '../src/map/colours';
-import { isolateMask } from '../src/map/isolate';
+import { dimMask, isolateMask } from '../src/map/isolate';
+import { removeTargetsOf } from '../src/map/model';
+import { outlierRows } from '../src/map/outliers';
+import { POPOVER_GAP, POPOVER_MARGIN, afterCancelFocus, clipArea, firstEnabled, focusHold, placePopover, popoverKey } from '../src/map/popover';
+import { STAGE_REMOVAL, pairLabel, removeAllLabel, removeOthersLabel } from '../src/map/reviewWording';
 import { readPalette } from '../src/map/tokens';
 import { SelectionTab } from '../src/views/MapView';
 import { deepFreeze, loadSample, modelOf, pcaXY } from './support/map.samples';
@@ -134,9 +138,9 @@ test('HeatStrip: one cell per chunk with its similarity spoken, a single tab sto
 	assert.match(out, /aria-current="true"/);
 });
 
-test('MapToolbar: sizes capped by the node\'s limits, t-SNE disabled above 1,000 with its reason, query disabled with its reason, toggles pressed', () => {
+test('MapToolbar: sizes capped by the node\'s limits, t-SNE disabled above 1,000 with its reason, query disabled with its reason, toggles pressed (in Advanced)', () => {
 	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: true, table: false, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
-	const out = html(<MapToolbar {...base} query={{ enabled: false, reason: 'Text queries need the embedding node reachable from the Tools source' }} tsneReason="t-SNE is limited to 1,000 points." />);
+	const out = html(<MapToolbar {...base} initialAdvanced query={{ enabled: false, reason: 'Text queries need the embedding node reachable from the Tools source' }} tsneReason="t-SNE is limited to 1,000 points." />);
 	assert.match(out, /<option value="detailed:2000"/);
 	assert.doesNotMatch(out, /detailed:3000/);
 	assert.match(out, /<option value="light:5000"/);
@@ -148,8 +152,44 @@ test('MapToolbar: sizes capped by the node\'s limits, t-SNE disabled above 1,000
 	assert.match(out, /aria-pressed="true"[^>]*>Lasso/);
 	assert.match(out, /aria-pressed="false"[^>]*>Table/);
 	const busy = html(<MapToolbar {...base} busy="Laying out…" canCancel query={{ enabled: true, reason: null }} />);
-	assert.match(busy, /Laying out…/);
-	assert.match(busy, />Cancel<\/button>/);
+	assert.match(busy, /role="status"[^>]*>Laying out…</);
+	// The busy words (a live region) and Cancel are in the status line: a line of its own under the controls, at a
+	// fixed height, always there.
+	const line = (markup: string): string => /<div style="([^"]*)" data-map-status="">/.exec(markup)?.[1] ?? '';
+	assert.match(busy, /<div style="[^"]*" data-map-status=""><span role="status"[^>]*>Laying out…<\/span><button[^>]*>Cancel<\/button><\/div>/);
+	const idle = html(<MapToolbar {...base} query={{ enabled: true, reason: null }} />);
+	assert.match(idle, /<div style="[^"]*" data-map-status=""><span role="status"[^>]*><\/span><\/div>/, 'idle: the line is there, empty');
+	for (const out2 of [busy, idle]) {
+		assert.match(line(out2), new RegExp(`flex-basis:100%;height:${STATUS_HEIGHT}px`), 'its own line, at a fixed height');
+		assert.doesNotMatch(out2, /position:absolute;top|position:fixed/, 'nothing floats over the map or the rows under the toolbar');
+	}
+	// Busy or idle, the markup differs only in the words, Cancel and what busy disables: nothing moves.
+	const flow = (markup: string): string => markup.replace(/(<span role="status"[^>]*>)[^<]*(<\/span>)/, '$1$2').replace(/<button[^>]*>Cancel<\/button>/, '').replace(/ disabled=""/g, '').replace(/ title="[^"]*"/g, '');
+	assert.equal(flow(busy), flow(idle));
+	assert.equal(line(busy), line(idle), 'the same line style');
+	// Cancel leaving with the focus hands it to Layout, else the toolbar.
+	assert.equal(afterCancelFocus({ present: true, disabled: false }), 'layout');
+	assert.equal(afterCancelFocus({ present: true, disabled: true }), 'toolbar');
+	assert.equal(afterCancelFocus({ present: false, disabled: false }), 'toolbar');
+});
+
+test('MapToolbar is one row of controls: Points, Layout, Colour by, Query, Table, Advanced, the view\'s menus, then its status line; the rest is in Advanced, closed at first', () => {
+	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop, onExpandSelected: noop, onToggle3D: noop, extras: <span data-extras="">Export Views</span> };
+	const closed = html(<MapToolbar {...base} />);
+	const order = ['aria-label="Points"', 'aria-label="Layout"', 'aria-label="Colour by"', 'aria-label="Query"', '>Table</button>', 'data-component="AdvancedPopover"', 'data-extras=""', 'data-map-status=""'].map((needle) => closed.indexOf(needle));
+	assert.ok(order.every((at) => at >= 0), JSON.stringify(order));
+	assert.deepEqual([...order].sort((a, b) => a - b), order, 'in that order');
+	assert.match(closed, /<button[^>]*aria-expanded="false"[^>]*>Advanced ▾<\/button>/);
+	for (const moved of ['aria-label="Edges"', '>Lasso<', '>Fit<', '>3D<', '>Expand selected<', 'New sample']) assert.ok(!closed.includes(moved), `${moved} is in Advanced, not on the row`);
+	// The Table is the map's non-visual alternative and the keyboard route to a point: never behind the popover.
+	assert.match(closed, /<button[^>]*aria-pressed="false"[^>]*>Table<\/button>/);
+	const open = html(<MapToolbar {...base} initialAdvanced />);
+	assert.match(open, /<button[^>]*aria-expanded="true" aria-controls="(advanced-[^"]+)"[^>]*>Advanced ▾<\/button><div id="\1" role="group" aria-label="Advanced map controls"/);
+	const groups = [...open.matchAll(/<legend[^>]*>([^<]+)<\/legend>/g)].map((m) => m[1]);
+	assert.deepEqual(groups, ['Graph', 'Select and view', 'Sample']);
+	for (const control of ['aria-label="Edges"', '>Expand selected<', '>Lasso<', '>Fit<', '>3D<', '>New sample (seed 8)<']) assert.ok(open.includes(control), control);
+	const panel = open.slice(open.indexOf('data-advanced-panel'));
+	assert.doesNotMatch(panel, />Table</, 'the Table is not in the panel');
 });
 
 test('Selection tab: "Move these documents to the trash" hands the console EVERY selected document (it confirms and batches), never a silent first 100', () => {
@@ -201,18 +241,24 @@ test('PointCanvas root carries the browser lanes\' attribute table: mode, layout
 	assert.match(canvasRoot(loadSample('sample_light_5000.json')), /data-mode="light"/);
 });
 
-test('MapToolbar states what the sample is drawn from and its seed, so "New sample" visibly moves the seed', () => {
-	const base = { limits, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
-	assert.match(html(<MapToolbar {...base} sample={demo} />), /of 1,318 chunks · 42 docs · seed 7/);
-	assert.match(html(<MapToolbar {...base} sample={modelOf(demo.result, { seed: 8 })} />), /seed 8/);
+test('the legend\'s first line states what the sample is drawn from, its documents and its seed; Advanced says which seed New sample draws', () => {
+	const legend = (sample: typeof demo): string => html(<Legend sample={sample} colourBy="document" pointCap={2000} backend="pgvector" />);
+	assert.match(legend(demo), /<p[^>]*>Showing 1,000 of 1,318 chunks \(random sample\) · 42 docs · seed 7<\/p>/);
+	assert.match(legend(modelOf(demo.result, { seed: 8 })), /· seed 8</);
 	const unknown = modelOf({ ...demo.result, of: { chunks: null, documents: null } } as unknown as ISampleResult);
-	assert.match(html(<MapToolbar {...base} sample={unknown} />), /of — chunks · — docs · seed 7/);
-	assert.doesNotMatch(html(<MapToolbar {...base} sample={null} />), /chunks ·/);
+	assert.match(legend(unknown), /the store did not say how many it holds\) · — docs · seed 7/);
+	const base = { limits, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop, initialAdvanced: true };
+	const asked: Array<{ n: number; mode: string; seed: number }> = [];
+	const out = html(<MapToolbar {...base} sample={demo} onSample={(o) => asked.push(o)} />);
+	assert.match(out, />This sample: seed 7<\/span>/);
+	assert.match(out, />New sample \(seed 8\)<\/button>/);
+	assert.doesNotMatch(out, /chunks ·/, 'the toolbar no longer carries the sample line');
+	assert.doesNotMatch(html(<MapToolbar {...base} sample={null} onSample={noop} />), /This sample/);
 });
 
 test('a pressed toggle restyles its border with the same shorthand as an unpressed one (React warns when a toggle mixes border and borderColor)', () => {
 	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
-	const lassoTag = (lasso: boolean): string => /<button[^>]*aria-pressed="(?:true|false)"[^>]*>Lasso/.exec(html(<MapToolbar {...base} lasso={lasso} />))?.[0] ?? '';
+	const lassoTag = (lasso: boolean): string => /<button[^>]*aria-pressed="(?:true|false)"[^>]*>Lasso/.exec(html(<MapToolbar {...base} initialAdvanced lasso={lasso} />))?.[0] ?? '';
 	for (const pressed of [true, false]) {
 		const tag = lassoTag(pressed);
 		assert.match(tag, /border:1px solid/, `the ${pressed ? 'pressed' : 'unpressed'} Lasso sets the border shorthand`);
@@ -283,8 +329,8 @@ test('ClustersPanel states: an older node, a node whose sample has none, no grou
 	assert.match(isolated, />Show all<\/button>/);
 });
 
-test('MapToolbar edges: None, Neighbours (3, 5 or 10 per point; capped on light samples) and Tree; Expand selected with its reason; the Tree hint off the neighbour layout', () => {
-	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop, onExpandSelected: noop };
+test('MapToolbar edges (in Advanced): None, Neighbours (3, 5 or 10 per point; capped on light samples) and Tree; Expand selected with its reason; the Tree hint off the neighbour layout', () => {
+	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop, onExpandSelected: noop, initialAdvanced: true };
 	const none = html(<MapToolbar {...base} edges="none" expandReason="Select a point first" />);
 	assert.match(none, /<option value="none" selected="">None<\/option><option value="neighbours">Neighbours<\/option><option value="tree">Tree<\/option>/);
 	assert.doesNotMatch(none, /Edges per point/);
@@ -341,4 +387,209 @@ test('PointCanvas: the edge layer is its own canvas under the points and the ove
 	assert.match(canvases[0] as string, /transition:opacity 250ms/);
 	const reduced = html(<PointCanvas sample={demo} positions={pcaXY(demo.result)} dimensions={2} colours={[]} selection={createSelectionStore()} lasso={false} onHover={noop} onPick={noop} onLasso={noop} reducedMotion />);
 	assert.match(reduced, /<canvas[^>]*transition:none[^>]*data-layer="edges"/, 'no fade-in under reduced motion');
+});
+
+// -----------------------------------------------------------------------------
+// Popovers: placed inside the viewport before paint; Escape closes and refocuses
+// -----------------------------------------------------------------------------
+
+test('placePopover: below the button when it fits, from its left edge, clamped inside the viewport, never wider than it', () => {
+	const vp = { width: 1440, height: 900 };
+	const below = placePopover({ left: 600, top: 40, right: 690, bottom: 68 }, { width: 340, height: 300 }, vp);
+	assert.deepEqual(below, { left: 600, top: 68 + POPOVER_GAP, maxHeight: 900 - POPOVER_MARGIN - 68 - POPOVER_GAP, maxWidth: 1440 - 2 * POPOVER_MARGIN, side: 'below' });
+	// Near the right edge: it ends at the button's right edge instead.
+	assert.equal(placePopover({ left: 1300, top: 40, right: 1380, bottom: 68 }, { width: 340, height: 300 }, vp).left, 1380 - 340);
+	// A button wider than nothing at the far right of a narrow window: clamped to the margin.
+	assert.equal(placePopover({ left: 380, top: 40, right: 395, bottom: 68 }, { width: 360, height: 100 }, { width: 400, height: 900 }).left, 400 - POPOVER_MARGIN - 360);
+	assert.equal(placePopover({ left: 2, top: 40, right: 30, bottom: 68 }, { width: 340, height: 100 }, vp).left, POPOVER_MARGIN);
+	// Wider than the viewport: capped, from the margin.
+	const wide = placePopover({ left: 10, top: 10, right: 40, bottom: 30 }, { width: 500, height: 100 }, { width: 320, height: 900 });
+	assert.equal(wide.maxWidth, 320 - 2 * POPOVER_MARGIN);
+	assert.equal(wide.left, POPOVER_MARGIN);
+});
+
+test('placePopover: above the button when only that fits; on the roomier side with its height capped when neither does', () => {
+	const vp = { width: 1440, height: 900 };
+	const above = placePopover({ left: 100, top: 800, right: 180, bottom: 828 }, { width: 300, height: 400 }, vp);
+	assert.equal(above.side, 'above');
+	assert.equal(above.top, 800 - POPOVER_GAP - 400);
+	assert.ok(above.top >= POPOVER_MARGIN);
+	const tall = placePopover({ left: 100, top: 300, right: 180, bottom: 328 }, { width: 300, height: 2000 }, vp);
+	assert.equal(tall.side, 'below', 'more room below');
+	assert.equal(tall.maxHeight, 900 - POPOVER_MARGIN - 328 - POPOVER_GAP);
+	assert.ok(tall.top + tall.maxHeight <= 900 - POPOVER_MARGIN, 'inside the viewport');
+	const low = placePopover({ left: 100, top: 700, right: 180, bottom: 728 }, { width: 300, height: 2000 }, vp);
+	assert.equal(low.side, 'above');
+	assert.equal(low.top, POPOVER_MARGIN, 'capped to the room above');
+});
+
+test('popoverKey: Escape closes the popover, puts the focus back on its button and is marked handled; an Escape an inner control handled is left alone; other keys do nothing', () => {
+	assert.deepEqual(popoverKey('Escape', false), { close: true, refocus: true, prevent: true });
+	assert.deepEqual(popoverKey('Escape', true), { close: false, refocus: false, prevent: false });
+	assert.deepEqual(popoverKey('Tab', false), { close: false, refocus: false, prevent: false });
+	assert.deepEqual(popoverKey('ArrowDown', false), { close: false, refocus: false, prevent: false });
+});
+
+test('dimMask: a selection lights itself and its neighbours; else a highlighted set; else the query\'s top-k; nothing to light dims nothing', () => {
+	const lit = (mask: Uint8Array | null): number[] => (mask ? Array.from(mask).flatMap((v, i) => (v ? [] : [i])) : []);
+	assert.deepEqual(lit(dimMask(6, { selected: 2, neighbours: [4, 5], highlight: [0], queryTop: [1] })), [2, 4, 5]);
+	assert.deepEqual(lit(dimMask(6, { selected: null, neighbours: [], highlight: [0, 3], queryTop: [1] })), [0, 3]);
+	assert.deepEqual(lit(dimMask(6, { selected: null, neighbours: [], highlight: [], queryTop: [1] })), [1], 'an empty highlight falls through');
+	assert.equal(dimMask(6, { selected: null, neighbours: [], highlight: null, queryTop: [] }), null);
+	assert.equal(dimMask(6, { selected: null, neighbours: [], highlight: [9], queryTop: [] }), null, 'only out-of-range points: nothing faded');
+});
+
+test('the legend\'s glyph row lists only the marks drawn now, each with words, in the canvas\'s colours', () => {
+	assert.deepEqual(markRows(null), []);
+	assert.deepEqual(markRows({ edges: null, links: false, outliers: 0, query: null, duplicates: 0 }), []);
+	const all = markRows({ edges: { weakest: 'rgb(99, 99, 99)', strongest: 'rgb(206, 206, 206)' }, links: true, outliers: 3, query: { top: 10, drawn: 10 }, duplicates: 1200 });
+	assert.deepEqual(all.map((m) => m.words), ['similarity edge (fainter: less similar)', "selected point's nearest chunks", 'outlier (3)', 'query, rays to its true top 10', 'near-duplicate pair (1,200)']);
+	// Rays only to the results placed on the map: the words say how many of the top-k.
+	assert.equal(markRows({ query: { top: 10, drawn: 7 } })[0]?.words, 'query, rays to 7 of its true top 10');
+	assert.equal(markRows({ rings: { scale: 'cosine' } })[0]?.words, "shown duplicate group: each pair's similarity (cosine)");
+	const out = html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" marks={{ edges: { weakest: 'rgb(99, 99, 99)', strongest: 'rgb(206, 206, 206)' }, outliers: 3 }} />);
+	assert.match(out, /data-legend-marks="edges outliers"/);
+	assert.match(out, /<ul aria-label="Marks"/);
+	assert.match(out, /stroke:rgb\(99, 99, 99\)/, 'the weakest edge colour as painted');
+	assert.match(out, /stroke:var\(--rr-text-primary\)/, 'the outlier ring in the outline colour');
+	assert.match(out, /<svg aria-hidden="true"/, 'the words carry it');
+	// Nothing marked: the row keeps its line (selecting a point does not resize the map) and lists nothing.
+	const none = html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" />);
+	assert.match(none, /<div style="min-height:36px[^"]*" data-legend-marks=""><\/div>/, 'two lines kept');
+});
+
+// -----------------------------------------------------------------------------
+// Staging: the map's removal buttons say what they do
+// -----------------------------------------------------------------------------
+
+test('where the console stages removals, the map\'s buttons say Stage removal (inspector, outliers, duplicates, selection); else Move to trash as before', () => {
+	const writes = { enabled: true, reason: null };
+	const staged = html(<PointInspector sample={demo} index={5} neighbours={neighbours} querySim={null} writes={writes} onOpenDocument={noop} onFindSimilar={noop} onRemoveDocument={noop} staging />);
+	assert.match(staged, /<button[^>]*>Stage removal<\/button>/);
+	assert.doesNotMatch(staged, />Move to trash</);
+	assert.match(html(<PointInspector sample={demo} index={5} neighbours={neighbours} querySim={null} writes={writes} onOpenDocument={noop} onFindSimilar={noop} onRemoveDocument={noop} />), /<button[^>]*>Move to trash<\/button>/);
+	const removed: string[] = [];
+	const rows = outlierRows(demo.result, 1);
+	const body = OutliersBody({ rows, percentile: 1, writes, canRemove: true, staging: true, canShowNeighbours: false, onPercentile: noop, onSelect: noop, onReview: noop, onRemove: (id) => removed.push(id), onShowNeighbours: noop });
+	button(body, STAGE_REMOVAL).props.onClick();
+	assert.deepEqual(removed, [rows[0]!.objectId]);
+	assert.equal(removeOthersLabel(1, true), 'Stage removal');
+	assert.equal(removeOthersLabel(3, true), 'Stage 3 removals');
+	assert.equal(removeAllLabel(1, true), 'Stage 1 removal');
+	assert.equal(removeAllLabel(1200, true), 'Stage all 1,200 removals');
+	assert.equal(removeOthersLabel(3), 'Move the others to the trash (3)', 'unchanged without staging');
+	assert.equal(removeAllLabel(2), 'Move all queued to the trash (2 documents)');
+	const keys: VectorKey[] = [['doc-1', 0], ['doc-2', 1]];
+	const tab = SelectionTab({ keys, chat: { enabled: true, reason: null }, writes, onAskAbout: noop, onRemove: noop, onCopy: noop, staging: true });
+	assert.ok(button(tab, 'Stage these documents for the trash'));
+	// Writes off: staging is closed the same way, with the reason as text.
+	const off = { enabled: false, reason: 'Removing documents is turned off on this store node (allow_writes).' };
+	assert.match(html(<PointInspector sample={demo} index={5} neighbours={neighbours} querySim={null} writes={off} onOpenDocument={noop} onFindSimilar={noop} onRemoveDocument={noop} staging />), /<button[^>]*disabled=""[^>]*>Stage removal<\/button>/);
+});
+
+test('a duplicate pair\'s similarity is printed with its scale, never a bare number (the number depends on the store\'s metric)', () => {
+	assert.equal(pairLabel(0.9874, 'cosine'), 'cosine 0.99');
+	assert.equal(pairLabel(12.5, 'ip'), 'inner product 12.50');
+	assert.equal(pairLabel(0.5, 'l2'), 'L2 similarity 0.50');
+	assert.equal(pairLabel(0.5, null), 'similarity 0.50');
+});
+
+test('a popover inside a clipping ancestor (a scrolled or clipped card) is placed inside that ancestor, not only inside the window', () => {
+	const vp = { width: 1440, height: 900 };
+	assert.deepEqual(clipArea(vp, []), { left: 0, top: 0, width: 1440, height: 900 });
+	const card = { left: 300, top: 100, right: 900, bottom: 600 };
+	const area = clipArea(vp, [card, { left: 0, top: 0, right: 1440, bottom: 700 }]);
+	assert.deepEqual(area, { left: 300, top: 100, width: 600, height: 500 });
+	// A button near the card's right edge: the panel ends inside the card.
+	const at = placePopover({ left: 820, top: 120, right: 880, bottom: 148 }, { width: 340, height: 200 }, area);
+	assert.ok(at.left >= 300 + POPOVER_MARGIN && at.left + 340 <= 900 - POPOVER_MARGIN, JSON.stringify(at));
+	assert.equal(at.maxHeight, 600 - POPOVER_MARGIN - 148 - POPOVER_GAP, 'its height is capped to the card');
+	// Near the card's bottom: above, inside the card.
+	const up = placePopover({ left: 320, top: 560, right: 380, bottom: 588 }, { width: 300, height: 200 }, area);
+	assert.equal(up.side, 'above');
+	assert.ok(up.top >= 100 + POPOVER_MARGIN);
+	assert.deepEqual(clipArea(vp, [{ left: 2000, top: 0, right: 2100, bottom: 10 }]).width, 0, 'scrolled out of view: no room, never negative');
+});
+
+test('focusHold: a focused toolbar control that is disabled or removed hands the focus to the toolbar (never the page), and a disabled one gets it back once enabled', () => {
+	const on = { inside: true, disabled: false };
+	const off = { inside: true, disabled: true };
+	const gone = { inside: false, disabled: false };
+	// Drawing a sample disables the focused Points select (the browser may still report it, or the page).
+	assert.equal(focusHold({ last: off, held: null, active: 'last' }), 'hold');
+	assert.equal(focusHold({ last: off, held: null, active: 'page' }), 'hold');
+	// Cancel unmounted when the layout ended: the focus fell to the page.
+	assert.equal(focusHold({ last: gone, held: null, active: 'page' }), 'take');
+	// Enabled again while the toolbar still has the focus: give it back; disabled still: wait.
+	assert.equal(focusHold({ last: null, held: on, active: 'toolbar' }), 'give-back');
+	assert.equal(focusHold({ last: null, held: off, active: 'toolbar' }), 'none');
+	// The user moved on (or the held control went away): forget it, never pull the focus back.
+	assert.equal(focusHold({ last: null, held: off, active: 'other' }), 'release');
+	assert.equal(focusHold({ last: null, held: gone, active: 'toolbar' }), 'release');
+	// Nothing to do: an enabled control, the focus elsewhere, nothing known.
+	assert.equal(focusHold({ last: on, held: null, active: 'last' }), 'none');
+	assert.equal(focusHold({ last: off, held: null, active: 'other' }), 'none');
+	assert.equal(focusHold({ last: gone, held: null, active: 'other' }), 'none');
+	assert.equal(focusHold({ last: null, held: null, active: 'page' }), 'none');
+});
+
+test('removeTargetsOf names the documents the map stages by the sample\'s paths and chunk counts, once each, in order; the rest is left to the console', () => {
+	const docs = demo.result.docs;
+	const a = docs[0]!;
+	const b = docs[1]!;
+	const targets = removeTargetsOf(demo.result, [b.objectId, a.objectId, b.objectId, 'not-in-sample']);
+	assert.deepEqual(targets, [
+		{ objectId: b.objectId, path: b.path, chunks: typeof b.chunks === 'number' ? b.chunks : null },
+		{ objectId: a.objectId, path: a.path, chunks: typeof a.chunks === 'number' ? a.chunks : null },
+		{ objectId: 'not-in-sample', path: null, chunks: null },
+	]);
+	// What the sample does not know is left null: the console takes it from its loaded rows (IStageTarget).
+	assert.ok(targets.slice(0, 2).every((t) => t.path !== t.objectId), 'file names, not ids');
+});
+
+test('an opened panel focuses its first control that is neither disabled nor hidden (Edges is off with no sample: Expand selected or Lasso then)', () => {
+	assert.equal(firstEnabled([{ disabled: false, hidden: false }]), 0);
+	assert.equal(firstEnabled([{ disabled: true, hidden: false }, { disabled: false, hidden: true }, { disabled: false, hidden: false }]), 2);
+	assert.equal(firstEnabled([{ disabled: true, hidden: false }]), -1, 'none: the panel itself takes the focus');
+	assert.equal(firstEnabled([]), -1);
+});
+
+test('a disabled Query and t-SNE carry their reasons as the controls\' descriptions; the status line holds only the busy words and Cancel', () => {
+	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
+	const why = 'Text queries need the embedding node reachable from the Tools source';
+	const out = html(<MapToolbar {...base} query={{ enabled: false, reason: why }} tsneReason="t-SNE is limited to 1,000 points; this sample has 5,000." />);
+	const queryId = /<input aria-label="Query" aria-describedby="([^"]+)"/.exec(out)?.[1];
+	assert.ok(queryId, 'the Query box is described');
+	assert.match(out, new RegExp(`<button type="submit"[^>]*aria-describedby="${queryId}"[^>]*>Run</button>`), 'and so is Run');
+	assert.match(out, new RegExp(`<span id="${queryId}"[^>]*>${why}</span>`));
+	const tsneId = /<select aria-label="Layout" aria-describedby="([^"]+)"/.exec(out)?.[1];
+	assert.ok(tsneId);
+	assert.match(out, new RegExp(`<span id="${tsneId}"[^>]*>t-SNE is limited to 1,000 points; this sample has 5,000\\.</span>`));
+	const busy = html(<MapToolbar {...base} busy="Laying out…" canCancel query={{ enabled: false, reason: why }} tsneReason="t-SNE is limited to 1,000 points; this sample has 5,000." />);
+	const status = /<div[^>]*data-map-status="">([\s\S]*?)<\/div>/.exec(busy)?.[1] ?? '';
+	assert.match(status, /Laying out…/);
+	assert.doesNotMatch(status, /Text queries|t-SNE/, 'no reason in the status line');
+	// Nothing to explain: no description on Query, Run or Layout.
+	const fine = html(<MapToolbar {...base} query={{ enabled: true, reason: null }} />);
+	assert.doesNotMatch(fine, /<input aria-label="Query" aria-describedby|<select aria-label="Layout" aria-describedby|type="submit"[^>]*aria-describedby/);
+});
+
+test('the toolbar is compact enough for a dev-tool frame: short Points options (the light one titled and described), a 120 px query box, 6 px gaps', () => {
+	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
+	const out = html(<MapToolbar {...base} />);
+	assert.match(out, /<option value="detailed:1000" selected="">1,000 \(detailed\)<\/option>/);
+	assert.match(out, /<option value="light:5000" title="5,000 \(light: no text\)">5,000 \(light\)<\/option>/);
+	const lightId = /<select aria-label="Points" aria-describedby="([^"]+)"/.exec(out)?.[1];
+	assert.ok(lightId, 'the Points select is described');
+	assert.match(out, new RegExp(`<span id="${lightId}"[^>]*>A light sample has no text\\.</span>`));
+	assert.match(out, /<div role="toolbar" aria-label="Map controls" tabindex="-1" style="[^"]*gap:6px/);
+	assert.match(out, /<input aria-label="Query" style="[^"]*min-width:120px;[^"]*width:120px"/);
+	// A node without light samples: nothing to describe.
+	assert.doesNotMatch(html(<MapToolbar {...base} limits={{ ...limits, sample_max_light: limits.sample_max }} />), /A light sample/);
+});
+
+test('the legend\'s cap line says a light sample has no text (the Points option says only "light")', () => {
+	const light = modelOf(loadSample('sample_light_5000.json'));
+	assert.match(html(<Legend sample={light} colourBy="document" pointCap={5000} backend="pgvector" />), /Light mode draws up to 5,000 points, without their text/);
+	assert.match(html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" />), /Detailed mode draws up to 2,000 points ·/);
 });

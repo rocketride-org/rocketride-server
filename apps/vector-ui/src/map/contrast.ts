@@ -149,6 +149,46 @@ export function minContrast(color: Rgb, surfaces: readonly Rgb[]): number {
 }
 
 /**
+ * An opaque mix of two colours, rounded to whole channel values (what an
+ * opaque stroke in that colour paints).
+ *
+ * @param from - The colour at t = 0.
+ * @param toward - The colour at t = 1.
+ * @param t - 0-1.
+ * @returns The mix.
+ */
+export function mixRgb(from: Rgb, toward: Rgb, t: number): Rgb {
+	const k = Math.max(0, Math.min(1, t));
+	return { r: Math.round(from.r + (toward.r - from.r) * k), g: Math.round(from.g + (toward.g - from.g) * k), b: Math.round(from.b + (toward.b - from.b) * k) };
+}
+
+/**
+ * How far to mix `from` toward `toward` before the (rounded) mix clears
+ * `min` on every surface: the smallest such t, found by bisection. Past the
+ * nearer surface's luminance the contrast only grows with t, so the first
+ * passing t is the answer.
+ *
+ * @param from - Where the mix starts (a surface).
+ * @param toward - Where it goes (the text colour).
+ * @param surfaces - What the mix must stand out from.
+ * @param min - The ratio to clear (3 for graphics).
+ * @returns t in 0-1, or null when even `toward` does not clear it.
+ */
+export function mixToContrast(from: Rgb, toward: Rgb, surfaces: readonly Rgb[], min: number): number | null {
+	const clears = (t: number): boolean => minContrast(mixRgb(from, toward, t), surfaces) >= min;
+	if (!clears(1)) return null;
+	if (clears(0)) return 0;
+	let lo = 0;
+	let hi = 1;
+	for (let step = 0; step < 24; step += 1) {
+		const mid = (lo + hi) / 2;
+		if (clears(mid)) hi = mid;
+		else lo = mid;
+	}
+	return hi;
+}
+
+/**
  * A stable 32-bit hash (FNV-1a over UTF-16 code units).
  *
  * @param text - Any text.

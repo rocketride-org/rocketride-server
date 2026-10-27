@@ -53,7 +53,6 @@ const TEXT_EXEMPT: Readonly<Record<string, string>> = {
 	'components/IngestDropZone.tsx': 'the upload lane writes secondary text (P1 rehomes it in Add documents, W11)',
 	'components/IngestPanel.tsx': 'the upload lane writes secondary and status-coloured text (P1, W11)',
 	'components/UploadList.tsx': 'the upload lane writes secondary text (P1, W11)',
-	'components/ClustersPanel.tsx': "the map lane's clusters panel writes secondary text (P5)",
 };
 
 /** The files the console's text rule covers: every mount, component and view file but the exempt ones, and the styles. */

@@ -15,7 +15,7 @@ import { test } from 'node:test';
 const SRC = path.resolve(__dirname, '..', 'src');
 const strip = (text: string): string => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 const read = (rel: string): string => strip(fs.readFileSync(path.join(SRC, rel), 'utf8'));
-const MAP_COMPONENTS = ['MapToolbar', 'PointCanvas', 'PointInspector', 'NeighbourList', 'DuplicatesPanel', 'OutliersPanel', 'PointsTable', 'Legend', 'HeatStrip'];
+const MAP_COMPONENTS = ['MapToolbar', 'AdvancedPopover', 'ExportMenu', 'SavedViewsMenu', 'SimilarityMatrix', 'ClustersPanel', 'RecommendPanel', 'PointCanvas', 'PointInspector', 'NeighbourList', 'DuplicatesPanel', 'OutliersPanel', 'PointsTable', 'Legend', 'HeatStrip'];
 const files = [...fs.readdirSync(path.join(SRC, 'map')).map((f) => `map/${f}`), ...MAP_COMPONENTS.map((n) => `components/${n}.tsx`), 'views/MapView.tsx'];
 
 test('no map file stops event propagation or listens for keys above the map (shell drawers and dialogs keep their keys)', () => {
@@ -74,9 +74,12 @@ test('light samples are dithered within their 2-decimal rounding on PCA, so no l
 	assert.match(read('views/MapView.tsx'), /sample\.mode === 'light' \? ditherRounded\(pca, 0\.01, /);
 });
 
-test('the Selection tab is wired to the console unchanged: every selected document goes to requestRemove (no cap here)', () => {
+test('every removal on the map goes to the console uncut: staged where it stages (stageRemove), else confirmed (requestRemove); never a cap here', () => {
 	const view = read('views/MapView.tsx');
-	assert.match(view, /<SelectionTab[\s\S]*?onRemove=\{\(ids\) => actions\.requestRemove\(ids\)\}/);
+	assert.match(view, /<SelectionTab[\s\S]*?onRemove=\{\(ids\) => removeDocuments\(ids\)\}/);
+	const remove = callbackBody(view, 'removeDocuments');
+	assert.match(remove, /if \(actions\.stageRemove && sample\) actions\.stageRemove\(removeTargetsOf\(sample, objectIds\)\);\s*else actions\.requestRemove\(objectIds\);/, 'staged with the sample\'s paths, else confirmed');
+	assert.equal((view.match(/actions\.requestRemove\(/g) ?? []).length, 1, 'removeDocuments is the one way out');
 	assert.doesNotMatch(view, /requestRemove\([^)]*\.slice\(|\.slice\(0, limits\.write_ids_max\)/, 'the map never truncates a removal to write_ids_max');
 });
 
@@ -272,4 +275,82 @@ test('nothing on the map is kept in browser storage; Recommend examples live in 
 	const view = read('views/MapView.tsx');
 	assert.match(view, /recommendExamples\.set\(model\.connectionKey, next\)/);
 	assert.match(view, /recommendExamples\.get\(model\.connectionKey\) \?\? NO_EXAMPLES/);
+});
+
+// -----------------------------------------------------------------------------
+// Popovers, dimming, the edge colours
+// -----------------------------------------------------------------------------
+
+test('every toolbar popover (Advanced, Export, Views) is placed by usePopover: measured before paint, closed on a window resize with the focus back on its button', () => {
+	const hook = read('components/AdvancedPopover.tsx');
+	assert.match(hook, /const useBrowserLayoutEffect = typeof document !== 'undefined' \? useLayoutEffect : useEffect;/, 'a layout effect in the browser (no server warning)');
+	assert.match(hook, /useBrowserLayoutEffect\(\(\) => \{[\s\S]*?getBoundingClientRect\(\)[\s\S]*?placePopover\(/, 'measured, then placed');
+	assert.match(hook, /const area = clipArea\(\{ width: window\.innerWidth, height: window\.innerHeight \}, clippingRects\(root\)\);/, 'inside the window and every clipping ancestor');
+	assert.match(hook, /style\.overflowX !== 'visible' \|\| style\.overflowY !== 'visible'/);
+	assert.match(hook, /const onResize = \(\): void => closeRef\.current\(true\);/, 'resize closes and refocuses');
+	assert.match(hook, /window\.addEventListener\('resize', onResize\)/);
+	assert.match(hook, /document\.addEventListener\('pointerdown', onDown\)/);
+	assert.match(hook, /const close = useCallback\(\(refocus: boolean\): void => \{\s*setOpen\(false\);\s*if \(refocus\) trigger\.current\?\.focus\(\);/);
+	assert.match(hook, /const action = popoverKey\(event\.key, event\.defaultPrevented\);/, 'Escape through popoverKey (skips a handled one)');
+	for (const file of ['components/ExportMenu.tsx', 'components/SavedViewsMenu.tsx']) {
+		const text = read(file);
+		assert.match(text, /usePopover\(open/, `${file} is placed by usePopover`);
+		assert.match(text, /placement=\{placement\}/);
+		assert.doesNotMatch(text, /addEventListener\('mousedown'/, `${file} closes through the hook`);
+	}
+});
+
+test('New sample in Advanced closes the panel and puts the focus on Advanced before drawing (drawing disables the controls); the toolbar holds the focus of a control that is disabled or removed', () => {
+	const toolbar = read('components/MapToolbar.tsx');
+	assert.match(toolbar, /onClick=\{\(\) => \{\s*close\(true\);\s*props\.onSample\(\{ n, mode, seed: seed \+ 1 \}\);/);
+	assert.match(toolbar, /<div ref=\{root\} role="toolbar" aria-label="Map controls" tabIndex=\{-1\}/, 'the toolbar can take the focus');
+	assert.match(toolbar, /useFocusHold\(root\);/);
+	assert.match(toolbar, /const action = focusHold\(\{ last: known\(last\.current\), held: known\(held\.current\), active: where \}\);/, 'the rule is the pure focusHold');
+	assert.match(toolbar, /\} else if \(action === 'hold' \|\| action === 'take'\) \{[\s\S]*?holder\.current = panel !== null && el\.contains\(panel\) \? panel : el;[\s\S]*?holder\.current\.focus\(\);/, 'the open Advanced panel holds the focus for a control in it (so it stays open), else the toolbar');
+	assert.match(toolbar, /back\?\.focus\(\);/);
+});
+
+test('the canvas fades what the view (or the hovered cluster) dims, says how many in data-dimmed, and strokes the edges in their own opaque colours', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	assert.match(canvas, /const dim = applyDim\(renderer\);\s*renderer\.render\(/, 'the mask is applied before the frame is drawn (and so before a snapshot)');
+	assert.match(canvas, /el\.dataset\.dimmed = String\(dim\.count\)/);
+	assert.doesNotMatch(canvas, /data-dimmed=\{/, 'written by the frame, not by React');
+	assert.match(canvas, /const colour = coloursRef\.current\.edges;/);
+	assert.doesNotMatch(canvas, /overlay\.other[^\n]*strokeEdgePaths|strokeEdgePaths\([^)]*overlay\.other/);
+	assert.match(canvas, /dimmed: dim\.mask/, 'labels at faded medoids are skipped');
+	const view = read('views/MapView.tsx');
+	assert.match(view, /<PointCanvas[\s\S]*?dimmed=\{dimmed\}[\s\S]*?dimOnHover=\{/);
+	assert.match(view, /return dimMask\(sample\.n, \{/);
+});
+
+test('no map file draws a literal fallback colour where the palette has one (an unthemed host gets the fallbacks for its mode)', () => {
+	for (const file of ['components/PointCanvas.tsx', 'views/MapView.tsx', 'map/exportPng.ts']) {
+		const text = read(file);
+		assert.doesNotMatch(text, /'#ffffff'|'#1a1a1a'|'#0078d4'|'#666666'/, `${file} has a literal fallback`);
+	}
+	assert.match(read('map/exportPng.ts'), /const p = palette \?\? FALLBACK_PALETTE;/);
+	assert.match(read('views/MapView.tsx'), /const theme = palette \?\? FALLBACK_PALETTE;/);
+	// The surface a faded point is mixed toward is the one behind the canvas and under the PNG.
+	assert.match(read('components/PointCanvas.tsx'), /const surface = p\.surfaces\.default;/);
+	assert.match(read('components/PointCanvas.tsx'), /background: 'var\(--rr-bg-default\)'/);
+	assert.match(read('views/MapView.tsx'), /octx\.fillStyle = theme\.surfaces\.default;/);
+});
+
+test('the edge layer fades the edges whose two ends are faded: split by the dimming, stroked first, and rebuilt when the dimming changes', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	assert.match(canvas, /const rebuild = cache\.edges !== edges \|\| cache\.positions !== positions \|\| cache\.dimVersion !== dim\.version/);
+	assert.match(canvas, /makePath, dim\.mask\);/);
+	const faded = canvas.indexOf('strokeEdgePaths(ctx, cache.fadedPaths, faded, t.lineWidth);');
+	const lit = canvas.indexOf('strokeEdgePaths(ctx, cache.paths, colour, t.lineWidth);');
+	assert.ok(faded > 0 && lit > faded, 'faded first, then lit');
+	assert.match(canvas, /el\.dataset\.edgesDimmed = String\(cache\.fadedSegments\)/);
+	assert.match(canvas, /const edgesDrawn = drawEdges\(camera, vp, dim\);/);
+});
+
+test('every overlay mark the view hands the canvas reaches the frame: the shown duplicate group\'s rings, and the fade mask for the marks on faded points', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	const model = /const model: IOverlayModel = \{([\s\S]*?)\n\t\t\t\};/.exec(canvas);
+	assert.ok(model, 'the overlay model');
+	assert.match(model[1] as string, /duplicateRings: o\.duplicateRings \?\? \[\]/);
+	assert.match(model[1] as string, /faded: dim\.mask/);
 });

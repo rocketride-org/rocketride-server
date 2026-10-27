@@ -32,11 +32,12 @@
 // duplicate pairs), built only when an export is chosen. An export row holds
 // words and numbers only: paths, chunk numbers, scores, layout coordinates and
 // the short snippet the node already sent; never a vector. The scope rule says
-// whether the console's scope is the one the points on screen were drawn with.
+// whether the console's scope is the one the points on screen were drawn with,
+// and removeTargetsOf names the documents the map hands the console to remove.
 // =============================================================================
 
 import { EXPORT_COLUMNS } from '../contract/types';
-import type { ExportCell, IExportRows, ISampleDoc, ISampleModel, ISampleResult, VectorKey } from '../contract/types';
+import type { ExportCell, IExportRows, ISampleDoc, ISampleModel, ISampleResult, IStageTarget, VectorKey } from '../contract/types';
 
 /**
  * The string form of a key.
@@ -69,6 +70,25 @@ export function pointKey(sample: ISampleResult, i: number): VectorKey {
  */
 export function documentOf(sample: ISampleResult, i: number): ISampleDoc | null {
 	return sample.docs[sample.points.doc[i] as number] ?? null;
+}
+
+/**
+ * What the map hands the console to stage: each document with the path and
+ * chunk count the sample carries, so the pending changes and the confirmation
+ * name files, not ids, even for a document the console has not listed. What
+ * the sample does not know is left null, and the console takes it from its
+ * loaded rows.
+ *
+ * @param sample - The sample on screen.
+ * @param objectIds - The documents.
+ * @returns One target per document, in order, without repeats.
+ */
+export function removeTargetsOf(sample: ISampleResult, objectIds: readonly string[]): IStageTarget[] {
+	const docs = new Map(sample.docs.map((d) => [d.objectId, d]));
+	return Array.from(new Set(objectIds), (objectId) => {
+		const doc = docs.get(objectId);
+		return { objectId, path: doc?.path || null, chunks: typeof doc?.chunks === 'number' ? doc.chunks : null };
+	});
 }
 
 /**

@@ -101,11 +101,11 @@ export function knnSourceLine(sample: ISampleResult, backend: string | null): st
  * @returns E.g. "Detailed mode draws up to 2,000 points".
  */
 export function pointCapLine(mode: SampleMode, cap: number): string {
-	return `${mode === 'light' ? 'Light' : 'Detailed'} mode draws up to ${num(cap)} points`;
+	return mode === 'light' ? `Light mode draws up to ${num(cap)} points, without their text` : `Detailed mode draws up to ${num(cap)} points`;
 }
 
 /** Shown instead of the map when the store cannot sample. */
-export const MAP_UNAVAILABLE = 'This store cannot draw a sample of its points, so there is no map for it. The Console lists every document.';
+export const MAP_UNAVAILABLE = 'This store cannot draw a sample of its points, so there is no map for it. The Documents tab lists every document.';
 
 /** The refined layout was no better than PCA. */
 export const LAYOUT_NOT_BETTER = 'Neighbour layout did not improve on PCA for this sample';
@@ -149,7 +149,7 @@ export function mapFailure(code: string | undefined, fallback: string): string {
 		case 'UNSUPPORTED':
 			return 'This store cannot do that.';
 		case 'COLLECTION_MISSING':
-			return 'The collection does not exist yet. Add a document in the Console first.';
+			return 'The collection does not exist yet; adding a document creates it.';
 		case 'SAMPLE_EXPIRED':
 			return 'The store no longer holds this sample; it was drawn again.';
 		case 'DIMENSION_MISMATCH':

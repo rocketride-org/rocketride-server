@@ -38,8 +38,10 @@
 // Moving to the trash is the console's: the queued objectIds go to the host's
 // batched move, which confirms (nothing to type: the Trash restores them) and
 // sends `soft_delete` at most `write_ids_max` at a time, stopping at the first
-// error. Without writes the radios and every button that moves documents are
-// disabled with the reason as text.
+// error. Where the console stages removals (`staging`), the buttons say Stage
+// removal / Stage all N removals and the documents join its pending changes,
+// which apply them through that same move. Without writes the radios and every
+// button that moves documents are disabled with the reason as text.
 // The reviewed documents are the connection's 'reviewed documents' cache.
 // =============================================================================
 
@@ -58,6 +60,8 @@ export interface DuplicatesPanelProps extends ContractDuplicatesPanelProps {
 	initial?: Partial<IQueueState> & { requested?: readonly string[] };
 	/** The reviewed documents per connection (default: the registry's 'reviewed documents'). */
 	reviewedCache?: ReviewedCache;
+	/** The console stages removals (its pending changes apply them): the buttons say so. */
+	staging?: boolean;
 }
 
 /** What the queue's body is drawn from. */
@@ -73,6 +77,8 @@ export interface DuplicatesBodyProps {
 	done: string | null;
 	/** Whether the host can remove several documents in one confirmed batch. */
 	bulk: boolean;
+	/** The host stages removals rather than confirming them. */
+	staging?: boolean;
 	/** What the sample shows about each group, by group key (worked out once per view and documents; else per group as drawn). */
 	verdicts?: ReadonlyMap<string, CopyVerdict>;
 	onThreshold(value: number): void;
@@ -280,7 +286,7 @@ function groupFieldset(props: DuplicatesBodyProps, group: IDocumentGroup, review
 				</button>
 				{reviewed ? null : (
 					<button type="button" style={MAP_STYLES.button} disabled={writesOff || mine.length === 0 || cannotBulk} title={removeWhy} onClick={() => props.onRemove(mine)}>
-						{removeOthersLabel(mine.length)}
+						{removeOthersLabel(mine.length, props.staging)}
 					</button>
 				)}
 			</div>
@@ -365,7 +371,7 @@ export function DuplicatesBody(props: DuplicatesBodyProps): React.ReactElement {
 							</select>
 						</label>
 						<button type="button" style={MAP_STYLES.button} disabled={!writes.enabled || total === 0 || bulkBlocked} title={!writes.enabled ? (writes.reason ?? undefined) : bulkBlocked ? NO_BULK_REMOVE : undefined} onClick={() => props.onRemove(queue.objectIds)}>
-							{removeAllLabel(total)}
+							{removeAllLabel(total, props.staging)}
 						</button>
 					</div>
 					<p style={MAP_STYLES.note} role="status">
@@ -463,7 +469,7 @@ function DuplicatesQueue(props: DuplicatesPanelProps): React.ReactElement {
 		done = removedLine(removedNow.length, counts.every((c) => c !== null) ? counts.reduce<number>((sum, c) => sum + (c ?? 0), 0) : null);
 	}
 
-	return <DuplicatesBody sample={props.sample} writes={props.writes} view={view} info={info} state={state} reviewed={reviewed} queue={queue} done={done} bulk={props.onRemoveDocuments !== undefined} verdicts={verdicts} onThreshold={(value) => dispatch({ type: 'threshold', value })} onPolicy={(value) => dispatch({ type: 'policy', value })} onKeep={(group, objectId) => dispatch({ type: 'keep', group, objectId })} onShow={(points) => props.onSelect(points)} onReview={onReview} onRemove={onRemove} onOpenDocument={props.onOpenDocument} />;
+	return <DuplicatesBody sample={props.sample} writes={props.writes} view={view} info={info} state={state} reviewed={reviewed} queue={queue} done={done} bulk={props.onRemoveDocuments !== undefined} staging={props.staging} verdicts={verdicts} onThreshold={(value) => dispatch({ type: 'threshold', value })} onPolicy={(value) => dispatch({ type: 'policy', value })} onKeep={(group, objectId) => dispatch({ type: 'keep', group, objectId })} onShow={(points) => props.onSelect(points)} onReview={onReview} onRemove={onRemove} onOpenDocument={props.onOpenDocument} />;
 }
 
 /**

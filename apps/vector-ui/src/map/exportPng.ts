@@ -54,6 +54,7 @@
 import type { ColourBy, IExportItem, MapLayout } from '../contract/types';
 import { MAP_NOT_DRAWN } from '../vector/export';
 import type { IColouring } from './colours';
+import { FALLBACK_PALETTE } from './tokens';
 import type { IMapPalette } from './tokens';
 
 export { MAP_NOT_DRAWN };
@@ -206,12 +207,12 @@ export function pngLegend(colouring: IColouring | null): IPngLegend {
 /**
  * The picture's colours from the map palette.
  *
- * @param palette - The palette (map/tokens.ts), or null outside a themed host.
+ * @param palette - The palette (map/tokens.ts), or null outside a themed host (the palette's own fallbacks).
  * @returns Background, text, border and outline.
  */
 export function pngTheme(palette: IMapPalette | null): IPngTheme {
-	if (!palette) return { background: '#ffffff', text: '#1a1a1a', border: '#8a8a8a', outline: '#1a1a1a' };
-	return { background: palette.surfaces.default, text: palette.text, border: palette.other, outline: palette.outline };
+	const p = palette ?? FALLBACK_PALETTE;
+	return { background: p.surfaces.default, text: p.text, border: p.other, outline: p.outline };
 }
 
 /**

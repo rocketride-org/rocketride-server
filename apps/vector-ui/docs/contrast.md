@@ -54,3 +54,73 @@ secondary column, 3:1 for the warning and brand columns as graphics.
   tone is only an edge beside a label that says the same thing.
 - `--rr-brand` is 1.85:1 in RocketRide Light, below even the 3:1 for graphics,
   so nothing is drawn in it.
+
+## The map
+
+The map is measured by its own suite, `tests/a11y.contrast.map.test.ts`, in
+the same six themes and against both surfaces (the canvas sits on
+`--rr-bg-default`, the panels and the boxes over it on `--rr-bg-paper`). Every
+colour is measured as it is painted: a token that carries alpha is composited
+over the surface first.
+
+### Edges
+
+The similarity edges (Edges: Neighbours or Tree, under Advanced) are drawn in
+8 steps of similarity. Each step is stroked opaque in its own colour: the
+surface mixed toward `--rr-text-primary`, the weakest step just far enough to
+clear 3:1 on both surfaces, the strongest 80 % of the way. They used to be
+`--rr-text-secondary` (already `rgba(255,255,255,0.40)` in RocketRide dark)
+times an alpha ramp of 0.15 to 0.8, which painted the weakest edges at 1.1:1.
+
+| Theme | Before: weakest / strongest (default) | Now: weakest (default / paper) | Now: strongest (default / paper) |
+| --- | ---: | ---: | ---: |
+| dark | **1.30** / 5.31 | 3.50 / 3.00 | 9.53 / 8.17 |
+| gray | **1.32** / 4.14 | 3.56 / 3.00 | 6.25 / 5.27 |
+| light | **1.23** / 3.69 | 3.03 / 3.03 | 9.15 / 9.15 |
+| rocketride-light | **1.22** / 3.57 | 3.25 / 3.02 | 10.19 / 9.47 |
+| rocketride | **1.12** / **2.77** | 3.33 / 3.01 | 12.73 / 11.50 |
+| visual-studio | **1.21** / 3.46 | 3.03 / 3.36 | 8.64 / 9.59 |
+
+These are the stroke colours. A 1 px line is anti-aliased across device
+pixels, so a pixel at the side of a line is closer to the surface than its
+colour; the middle of the line carries the colour above.
+
+### Boxes over the map
+
+The tooltip and the Advanced, Export and Views panels are the paper over the
+map's surface (1.1:1 in RocketRide dark), so their edge is drawn: the paper
+mixed toward the text colour until it clears 3:1 against both the paper and the
+surface, with the theme's own `--rr-shadow-widget`. `--rr-border` was 1.38 /
+1.24 in RocketRide dark; the computed border is 3.33 / 3.01 there and at least
+3.00 everywhere.
+
+### Marks
+
+- **The accent** (`--rr-border-focus`: selection ring, links from the selected
+  point, now 1.5 px, the query's star and rays, the lasso) clears 3:1
+  everywhere, at 3.22:1 at worst (RocketRide Light, on the paper).
+- **Outlier rings** are `--rr-text-primary`, 1.5 px, over a 4 px halo of the
+  surface, so a ring reads over any point colour. The Outliers tab says
+  "outlier" in words.
+- **The star** is filled with the accent and edged with the surface.
+- **A shown duplicate group** gets a dashed `--rr-text-primary` ring at each
+  end of a pair, over a surface halo, and the pair's similarity with its scale
+  ("cosine 0.99") in text with a halo.
+- **Dimmed points and edges.** Hovering a point of a cluster (while clusters
+  are shown), selecting a point, a highlighted set or a placed query fades the
+  other points to 25 % of their colour over the surface (the same opaque mix
+  in WebGL, in the Canvas2D fallback and in the PNG). An edge whose two ends
+  are both faded is faded the same way, and so are an outlier ring or a
+  near-duplicate line on faded points only; an edge, ring or line that touches
+  the lit set keeps its measured colour. The selection, hover and keyboard
+  focus rings are never faded. Faded marks fall below 3:1 on purpose: they
+  are the part of the picture not being looked at. No label is drawn over a
+  faded group.
+
+### Similarity matrix
+
+The cells are the chart blue over the surface, from 15 % (the least similar
+pair) to 90 %. The lowest cell differs from an empty one by 1.18:1 at worst
+(RocketRide dark); at 6 % it was 1.05:1. The values are printed in the cells at
+11 px up to 12 x 12 (8.5 px before); above that each value is in its cell's
+title, and the table alternative always holds every value.

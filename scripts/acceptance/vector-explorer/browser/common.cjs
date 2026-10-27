@@ -16,7 +16,7 @@ const nodeCrypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const E = require('../env.cjs');
-const { CONSOLE } = require('./ui.cjs');
+const { CONSOLE, MAP } = require('./ui.cjs');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -668,8 +668,53 @@ async function trashCount(page) {
 	return m && m[1] ? Number(m[1].replace(/,/g, '')) : null;
 }
 
+/**
+ * Open the map toolbar's Advanced panel (when it is closed) and return it. Lasso, Fit, Edges, Edges per point,
+ * Expand selected, 3D and New sample are in the page only while it is open, and a press outside it (on the canvas,
+ * in a side tab) closes it, so look a control up through this each time it is used, never keep its locator.
+ *
+ * @param scope - The page, the map or its toolbar.
+ * @returns The panel.
+ */
+async function openAdvanced(scope) {
+	const toggle = scope.getByRole('button', { name: MAP.advanced }).filter({ visible: true }).first();
+	if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+	const panel = scope.getByRole('group', { name: MAP.advancedPanel }).filter({ visible: true }).first();
+	await panel.waitFor({ timeout: 5000 });
+	return panel;
+}
+
+/**
+ * Close the map toolbar's Advanced panel (when it is open) with its own button, so it covers no part of the canvas.
+ *
+ * @param scope - The page, the map or its toolbar.
+ */
+async function closeAdvanced(scope) {
+	const toggle = scope.getByRole('button', { name: MAP.advanced }).filter({ visible: true }).first();
+	if ((await toggle.getAttribute('aria-expanded')) === 'true') await toggle.click();
+}
+
+/**
+ * Use one control of the Advanced panel: open it, act on the control, close it again (it hangs over the canvas).
+ *
+ * @param scope - The page, the map or its toolbar.
+ * @param role - The control's role ('button', 'combobox').
+ * @param name - Its accessible name.
+ * @param act - What to do with it; its result is returned.
+ * @returns What `act` returned.
+ */
+async function withAdvanced(scope, role, name, act) {
+	const panel = await openAdvanced(scope);
+	const result = await act(panel.getByRole(role, { name, exact: typeof name === 'string' }).first());
+	await closeAdvanced(scope);
+	return result;
+}
+
 module.exports = {
 	sleep,
+	openAdvanced,
+	closeAdvanced,
+	withAdvanced,
 	createRecorder,
 	objectId,
 	makePdf,

@@ -30,7 +30,8 @@ import type { IRoleChannel } from 'shared/explorer';
 import { recommendExamples } from '../src/adapters/connections';
 import { createSelectionStore } from '../src/contract/bridge';
 import { EXPORT_COLUMNS } from '../src/contract/types';
-import type { ConsoleActions, ConsoleModel, IDialectResult, IExportItem, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleModel, ISampleResult, ISavedView, ISavedViewRestore, ISavedViewState, IScopeState, ToolOutcome, VectorChannels, VectorKey } from '../src/contract/types';
+import type { ConsoleActions, ConsoleModel, IDialectResult, IExportItem, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleDoc, ISampleModel, ISampleResult, IStageTarget, ISavedView, ISavedViewRestore, ISavedViewState, IScopeState, ToolOutcome, VectorChannels, VectorKey } from '../src/contract/types';
+import { MapToolbar } from '../src/components/MapToolbar';
 import { PointCanvas } from '../src/components/PointCanvas';
 import { clusterLabel, clusterRows, clusterView } from '../src/map/clusters';
 import { spanningTree } from '../src/map/graph';
@@ -86,6 +87,9 @@ loader._load = function (request: string, parent: { filename?: string } | null, 
 	return spy;
 };
 const { MapView } = require('../src/views/MapView') as typeof import('../src/views/MapView');
+
+/** A static render. */
+const html = (el: React.ReactElement): string => renderToStaticMarkup(el);
 
 /** The props of the last render of a child. */
 function last<T = Record<string, unknown>>(name: string): T {
@@ -182,9 +186,9 @@ test('with sample_demo_1000.json drawn: the canvas has data-points 1000 on PCA, 
 	assert.equal(attrOf(out, 'vector-map-canvas', 'data-layout'), 'pca');
 	assert.equal(attrOf(out, 'vector-map-canvas', 'data-selection'), '');
 	assert.match(out, /role="toolbar" aria-label="Map controls"/);
-	assert.match(out, /of 1,318 chunks · 42 docs · seed 7/);
 	assert.match(out, /aria-label="Map legend"/);
-	assert.match(out, /Showing 1,000 of 1,318 chunks/);
+	// The sample line is the legend's first line (it left the toolbar, which keeps one row).
+	assert.match(out, /aria-label="Map legend"[^>]*><p[^>]*>Showing 1,000 of 1,318 chunks \(random sample\) · 42 docs · seed 7<\/p>/);
 	assert.match(out, /role="tab" aria-selected="true"[^>]*>Point</);
 	assert.match(out, /Click a point or use the arrow keys/);
 });
@@ -233,8 +237,11 @@ test('the Clusters tab holds the ClustersPanel, and the toolbar offers Edges: No
 	const at = out.search(/<[a-z]+[^>]*data-component="ClustersPanel"/);
 	assert.ok(at >= 0, 'the panel is mounted in its tab');
 	assert.doesNotMatch(out.slice(at, out.indexOf('>', at)), /data-placeholder/, 'the panel is built');
-	assert.match(out, /<select aria-label="Edges"[^>]*>/);
-	assert.match(out, /<option value="none" selected="">None<\/option><option value="neighbours">Neighbours<\/option><option value="tree">Tree<\/option>/);
+	// Edges are in the toolbar's Advanced panel (closed until it is opened).
+	assert.match(out, /<button[^>]*aria-expanded="false"[^>]*>Advanced ▾<\/button>/);
+	const advanced = html(<MapToolbar {...last<React.ComponentProps<typeof MapToolbar>>('MapToolbar')} initialAdvanced />);
+	assert.match(advanced, /<select aria-label="Edges"[^>]*>/);
+	assert.match(advanced, /<option value="none" selected="">None<\/option><option value="neighbours">Neighbours<\/option><option value="tree">Tree<\/option>/);
 });
 
 // -----------------------------------------------------------------------------
@@ -325,7 +332,7 @@ test('edges: Tree draws the spanning tree (n-1 edges on a connected graph), Neig
 	const light = render({ channels: counted, sample: modelOf(loadSample('sample_light_5000.json')), extra: { edges: 'neighbours', edgesM: 10 } });
 	assert.equal(attr(light, 'data-edges-per-point'), '3');
 	assert.ok(light.includes(EDGES_LIGHT_NOTE));
-	assert.match(light, /<option value="10" disabled="" title="Light samples above 3,000 points draw at most 3 edges per point">10<\/option>/);
+	assert.match(html(<MapToolbar {...last<React.ComponentProps<typeof MapToolbar>>('MapToolbar')} initialAdvanced />), /<option value="10" disabled="" title="Light samples above 3,000 points draw at most 3 edges per point">10<\/option>/);
 	// The toolbar's edge controls, as the view wired them: nothing is sent.
 	render({ channels: counted, sample: demo });
 	const toolbar = last<{ onEdges(m: string): void; onEdgesM(m: number): void; onExpandSelected(): void; expandReason: string | null }>('MapToolbar');
@@ -748,4 +755,109 @@ test('the legend\'s lines: edges drawn, a truncated listing, a scope, an isolati
 	assert.equal(SCOPE_RETRY, 'Draw the sample again');
 	const out = render({ sample: modelOf(truncated) });
 	assert.match(out, /Sampled from the first 500 documents by path; the collection has more/);
+});
+
+// -----------------------------------------------------------------------------
+// Staging: where the console stages removals, the map's panels stage them
+// -----------------------------------------------------------------------------
+
+test('with a console that stages (stageRemove), every map removal is staged with the sample\'s paths and chunk counts, never confirmed at once, and the panels say Stage removal; without one, requestRemove as before', () => {
+	const staged: Array<readonly IStageTarget[]> = [];
+	const rec = recording();
+	const stagingActions: ConsoleActions = { ...rec.actions, stageRemove: (targets) => staged.push(targets) };
+	const sample = modelOf(clustered);
+	const [d0, d1, d2] = clustered.docs as [ISampleDoc, ISampleDoc, ISampleDoc];
+	const named = (doc: ISampleDoc): IStageTarget => ({ objectId: doc.objectId, path: doc.path, chunks: typeof doc.chunks === 'number' ? doc.chunks : null });
+	render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'point' });
+	const inspector = last<{ onRemoveDocument(id: string): void; staging?: boolean }>('PointInspector');
+	assert.equal(inspector.staging, true);
+	inspector.onRemoveDocument(d0.objectId);
+	render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'duplicates' });
+	const dup = last<{ onRemoveDocuments(ids: readonly string[]): void; onRemoveDocument(id: string): void; staging?: boolean }>('DuplicatesPanel');
+	assert.equal(dup.staging, true);
+	dup.onRemoveDocuments([d1.objectId, d2.objectId]);
+	dup.onRemoveDocument('not-in-the-sample');
+	render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'outliers' });
+	const outliers = last<{ onRemoveDocument(id: string): void; staging?: boolean }>('OutliersPanel');
+	assert.equal(outliers.staging, true);
+	outliers.onRemoveDocument(d2.objectId);
+	const out = render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'outliers' });
+	assert.match(out, />Stage removal<\/button>/);
+	assert.doesNotMatch(out, />Move to trash<\/button>/);
+	// Named by the sample's paths (the pending bar and the confirmation show files); what the sample does not know is
+	// left null for the console to take from its rows.
+	assert.deepEqual(staged, [[named(d0)], [named(d1), named(d2)], [{ objectId: 'not-in-the-sample', path: null, chunks: null }], [named(d2)]]);
+	assert.ok(staged.flat().slice(0, 3).every((t) => t.path && t.path !== t.objectId), 'file names, not ids');
+	assert.deepEqual(rec.removed, [], 'nothing asked to be confirmed at once');
+	// A console that does not stage: the same buttons confirm through requestRemove.
+	render({ model: enrichedModel(), sample, actions: rec.actions, initialTab: 'outliers' });
+	assert.equal(last<{ staging?: boolean }>('OutliersPanel').staging, false);
+	last<{ onRemoveDocument(id: string): void }>('OutliersPanel').onRemoveDocument('e');
+	assert.deepEqual(rec.removed, [['e']]);
+});
+
+test('Show group on the Duplicates tab rings that group\'s pairs with their similarity and fades the rest; another highlight drops the rings', () => {
+	const selection = createSelectionStore(KEY);
+	const sample = modelOf(clustered);
+	const pair = clustered.duplicates[0]!;
+	render({ model: enrichedModel(), sample, selection, initialTab: 'duplicates' });
+	last<{ onSelect(indices: readonly number[]): void }>('DuplicatesPanel').onSelect([pair.a, pair.b]);
+	render({ model: enrichedModel(), sample, selection, initialTab: 'duplicates' });
+	const canvas = last<{ overlay: { duplicateRings?: Array<{ a: number; b: number; label: string }> }; dimmed: Uint8Array | null }>('PointCanvas');
+	assert.ok((canvas.overlay.duplicateRings ?? []).some((r) => r.a === pair.a && r.b === pair.b && r.label === `${clustered.metric === 'cosine' ? 'cosine' : clustered.metric === 'ip' ? 'inner product' : 'L2 similarity'} ${pair.sim.toFixed(2)}`));
+	assert.ok(canvas.dimmed, 'the rest is faded');
+	assert.equal(canvas.dimmed![pair.a], 0);
+	assert.equal(canvas.dimmed![pair.b], 0);
+	assert.equal(Array.from(canvas.dimmed!).filter((v) => v === 0).length >= 2, true);
+	// Another highlight (Find similar, the chat): no rings.
+	selection.setHighlight({ source: 'neighbors', keys: [[clustered.docs[0]!.objectId, 0]] });
+	render({ model: enrichedModel(), sample, selection, initialTab: 'duplicates' });
+	assert.deepEqual(last<{ overlay: { duplicateRings?: unknown[] } }>('PointCanvas').overlay.duplicateRings, []);
+});
+
+test('the map fades nothing with nothing shown; a selection keeps itself and its neighbour links lit; dimOnHover only while clusters are on screen', () => {
+	const sample = modelOf(clustered);
+	render({ model: enrichedModel(), sample });
+	const plain = last<{ dimmed: Uint8Array | null; dimOnHover?: boolean }>('PointCanvas');
+	assert.equal(plain.dimmed, null);
+	assert.equal(plain.dimOnHover, false, 'coloured by document, Point tab: hovering fades nothing');
+	render({ model: enrichedModel(), sample, initialTab: 'clusters' });
+	assert.equal(last<{ dimOnHover?: boolean }>('PointCanvas').dimOnHover, true);
+	render({ model: enrichedModel(), sample, extra: { initialColourBy: 'cluster' } });
+	assert.equal(last<{ dimOnHover?: boolean }>('PointCanvas').dimOnHover, true);
+	// The legend lists the marks drawn: outliers and duplicate pairs of this sample, no edges by default.
+	const legend = last<{ marks: { edges: unknown; outliers: number; duplicates: number; links: boolean; query: unknown } }>('Legend');
+	assert.equal(legend.marks.edges, null);
+	assert.equal(legend.marks.links, false);
+	assert.equal(legend.marks.query, null);
+	assert.equal(legend.marks.outliers, clustered.outliers.length);
+	assert.equal(legend.marks.duplicates, Math.min(200, clustered.duplicates.length));
+	render({ model: enrichedModel(), sample, extra: { edges: 'tree' } });
+	assert.ok(last<{ marks: { edges: { weakest: string; strongest: string } | null } }>('Legend').marks.edges, 'edges drawn: the edge glyph');
+});
+
+test('the reasons a toolbar control is off are shown in full where they can wrap: the legend\'s notes with a sample, above the empty state without one', () => {
+	const why = 'Text queries need the embedding node reachable from the Tools source';
+	const off = modelWith({ embed: { enabled: false, reason: why } });
+	const light = render({ model: off, sample: modelOf(loadSample('sample_light_5000.json')) });
+	const legend = light.slice(light.indexOf('aria-label="Map legend"'));
+	assert.match(legend, new RegExp(`<p[^>]*>${why}</p>`));
+	assert.match(legend, /<p[^>]*>t-SNE is limited to 1,000 points; this sample has 5,000\.<\/p>/);
+	const empty = render({ model: off });
+	assert.match(empty, new RegExp(`<p[^>]*>${why}</p>`));
+	const view = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'views', 'MapView.tsx'), 'utf8');
+	// A staging press inserts nothing in the panel (the pending bar says it), so no row moves under the pointer.
+	assert.doesNotMatch(view, /setStagedNote|data-map-staged/);
+});
+
+test('the map\'s busy words and Cancel are in the toolbar\'s status line, never over the map column; Cancel leaving with the focus hands it to Layout, else the toolbar', () => {
+	const view = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'views', 'MapView.tsx'), 'utf8');
+	assert.doesNotMatch(view, /BusyChip|data-map-status/, 'no overlay in the map column');
+	const toolbar = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'MapToolbar.tsx'), 'utf8');
+	// A layout cleanup runs before Cancel is removed, while it still has the focus.
+	assert.match(toolbar, /useBrowserLayoutEffect\(\s*\(\) => \(\) => \{\s*if \(button\.current === null \|\| typeof document === 'undefined' \|\| document\.activeElement !== button\.current\) return;/);
+	assert.match(toolbar, /\(afterCancelFocus\(\{ present: layout !== null, disabled: !!layout\?\.disabled \}\) === 'layout' \? layout : toolbar\)\?\.focus\(\);/);
+	// In the rendered map: the line is there, empty, while nothing runs.
+	const out = render({ sample: modelOf(loadSample('sample_demo_1000.json')) });
+	assert.match(out, /<div style="[^"]*" data-map-status=""><span role="status"[^>]*><\/span><\/div>/);
 });

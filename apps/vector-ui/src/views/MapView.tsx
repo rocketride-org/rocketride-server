@@ -40,8 +40,9 @@
 // this view (queryVector) and is sent unchanged to `project`, `search` and
 // `neighbors` (scope scores). It passes through map/calls.ts, which forwards a
 // call's input untouched; no module under src/map reads or keeps it. The map never
-// writes: removals are asked of the console (actions.requestRemove), which
-// confirms them.
+// writes: removals are handed to the console, staged for its pending changes
+// where it offers that (actions.stageRemove), else asked of it
+// (actions.requestRemove), which confirms them.
 //
 // Every action lands back in the console: Open document, Ask about these only,
 // Remove, and the shared selection (focused chunk, highlights, lasso keys).
@@ -83,7 +84,7 @@ import { RecommendPanel } from '../components/RecommendPanel';
 import { SavedViewsMenu } from '../components/SavedViewsMenu';
 import { SimilarityMatrix } from '../components/SimilarityMatrix';
 import { recommendExamples } from '../adapters/connections';
-import type { Availability, ClusterMinSize, ColourBy, EdgeMode, EdgesPerPoint, ExamplePolarity, IChunksResult, IDocumentItem, IDocumentRowsSource, IEmbedResult, IExportItem, INeighborsResult, INeighborsScopeResult, IProjectItem, IProjectResult, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleInput, ISampleResult, ISavedView, ISavedViewRestore, ISavedViewState, ISearchResult, MapLayout, MapViewProps as ContractMapViewProps, SampleMode, ToolOutcome, VectorKey } from '../contract/types';
+import type { Availability, ClusterMinSize, ColourBy, EdgeMode, EdgesPerPoint, ExamplePolarity, IChunksResult, IDocumentItem, IDocumentRowsSource, IEmbedResult, IExportItem, INeighborsResult, INeighborsScopeResult, IProjectItem, IProjectResult, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleInput, ISampleResult, ISavedView, ISavedViewRestore, ISavedViewState, ISearchResult, MapLayout, MapViewProps as ContractMapViewProps, SampleMode, SelectionState, ToolOutcome, VectorKey } from '../contract/types';
 import { TSNE_MAX_POINTS } from '../map/budgets';
 import { callRecommend, callTool, isExpired } from '../map/calls';
 import type { ToolAnswer } from '../map/calls';
@@ -96,17 +97,19 @@ import { groupOf, groups, pairsAt } from '../map/dedupe';
 import { NO_EDGES, edgeStats, edgesOf, mergeEdges, spanningTree, topEdges, treeNeighbours } from '../map/graph';
 import { tweenPositions } from '../map/interaction';
 import type { KeyAction } from '../map/interaction';
-import { combineMasks, expandByNeighbours, isolateMask, isolationLine, shownCount } from '../map/isolate';
-import { UNSCOPED, applyTransform, chunkPath, clusterExportRows, ditherRounded, documentOf, drawnScope, duplicateExportRows, hiddenMask, keyIndex, keyString, mapScopeState, neighboursOf, normaliseLayout, pcaPositions, pointExportRows, pointKey, scopeDrawDue } from '../map/model';
+import { combineMasks, dimMask, expandByNeighbours, isolateMask, isolationLine, shownCount } from '../map/isolate';
+import { UNSCOPED, applyTransform, chunkPath, clusterExportRows, ditherRounded, documentOf, drawnScope, duplicateExportRows, hiddenMask, keyIndex, keyString, mapScopeState, neighboursOf, normaliseLayout, pcaPositions, pointExportRows, pointKey, removeTargetsOf, scopeDrawDue } from '../map/model';
 import type { ISampleScope, IScopeAttempt } from '../map/model';
 import { createLatestQueue } from '../map/neighbours';
-import type { IClusterLabel, IOverlayEnd, IPlace } from '../map/overlay';
+import { EDGE_BUCKETS, edgeColours } from '../map/overlay';
+import type { IClusterLabel, IDuplicateRing, IOverlayEnd, IPlace } from '../map/overlay';
 import { centroidStar, chatQueryPlan, comparePlan, placeProjected, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject, withSampleRetry } from '../map/queryProjection';
 import type { IStar } from '../map/queryProjection';
 import { polarityOf } from '../map/recommend';
+import { pairLabel, pairScale } from '../map/reviewWording';
 import { spawnLayoutWorker } from '../map/spawnWorker';
 import { MAP_STYLES } from '../map/styles';
-import { readPalette } from '../map/tokens';
+import { FALLBACK_PALETTE, readPalette } from '../map/tokens';
 import type { IMapPalette } from '../map/tokens';
 import { createLayoutClient } from '../map/workerClient';
 import type { ILayoutClient } from '../map/workerClient';
@@ -187,6 +190,13 @@ function scopeOfSample(result: ISampleResult | null | undefined): ISampleScope {
 	return (result ? SAMPLE_SCOPES.get(result) : undefined) ?? NOT_RECORDED;
 }
 const NO_ROWS_SOURCE: IDocumentRowsSource = { getRows: () => NO_ROWS, subscribe: () => () => undefined };
+
+/**
+ * The highlights the Duplicates tab's "Show group" set: their pairs are ringed with their similarity while one of
+ * them is the highlight shown. Kept beside the highlight object, which the selection store holds across tab switches
+ * and remounts (its frozen shape has no field for it), the way SAMPLE_SCOPES is.
+ */
+const DUPLICATE_GROUPS = new WeakSet<NonNullable<SelectionState['highlight']>>();
 
 /** No console around the map: no write ever happens. */
 const NO_WRITES: IWriteCountSource = { get: () => 0, subscribe: () => () => undefined };
@@ -317,6 +327,8 @@ export interface SelectionTabProps {
 	onAskAbout(objectIds: readonly string[]): void;
 	/** "Move these documents to the trash": EVERY document of the selection; the console confirms and batches the writes (APP_SPEC §6). */
 	onRemove(objectIds: readonly string[]): void;
+	/** The console stages removals (its pending changes apply them): the button says so. */
+	staging?: boolean;
 	onCopy(keys: readonly VectorKey[]): void;
 	/** Show only the selected points on the map; absent: no such button. */
 	onIsolate?(keys: readonly VectorKey[]): void;
@@ -348,7 +360,7 @@ export function SelectionTab(props: SelectionTabProps): React.ReactElement {
 					Ask about these only
 				</button>
 				<button type="button" style={MAP_STYLES.button} disabled={!writes.enabled} onClick={() => props.onRemove(docs)}>
-					Move these documents to the trash
+					{props.staging ? 'Stage these documents for the trash' : 'Move these documents to the trash'}
 				</button>
 				<button type="button" style={MAP_STYLES.button} onClick={() => props.onCopy(keys)}>
 					Copy keys
@@ -656,6 +668,41 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		});
 	}, [neighbours, selected, sampleModel, neighbourPins, keyIdx, place, layout, raw, dims]);
 
+	// The shown duplicate group: its pairs (both ends shown) get rings and their similarity, while the Duplicates tab
+	// shows it and its highlight is still the one on the map.
+	const duplicateRings: IDuplicateRing[] = useMemo(() => {
+		if (!sample || tab !== 'duplicates' || highlight === null || !DUPLICATE_GROUPS.has(highlight)) return [];
+		const group = new Set(resolveKeys(highlight.keys, keyIdx, []).points);
+		return sample.duplicates.filter((d) => group.has(d.a) && group.has(d.b) && !(hidden && (hidden[d.a] || hidden[d.b]))).slice(0, MAX_DRAWN_DUPLICATES).map((d) => ({ a: d.a, b: d.b, label: pairLabel(d.sim, sample.metric) }));
+	}, [sample, tab, highlight, keyIdx, hidden]);
+
+	// Everything outside the set the map is showing is drawn faded: a selection with its neighbours, else a
+	// highlighted set, else a placed query's top-k.
+	const dimmed = useMemo(() => {
+		if (!sample) return null;
+		return dimMask(sample.n, {
+			selected,
+			neighbours: neighbourEnds.flatMap((e) => (e.index !== undefined ? [e.index] : [])),
+			highlight: highlight ? resolveKeys(highlight.keys, keyIdx, []).points : null,
+			queryTop: rays.flatMap((e) => (e.index !== undefined ? [e.index] : [])),
+		});
+	}, [sample, selected, neighbourEnds, highlight, keyIdx, rays]);
+
+	// What the legend's glyph row lists: only the marks drawn now.
+	const edgePalette = useMemo(() => edgeColours(palette ?? FALLBACK_PALETTE), [palette]);
+	const legendMarks = useMemo(() => {
+		if (!sample) return null;
+		const shownPair = (d: { a: number; b: number }): boolean => !(hidden && (hidden[d.a] || hidden[d.b]));
+		return {
+			edges: edgeSet ? { weakest: edgePalette[0] as string, strongest: edgePalette[EDGE_BUCKETS - 1] as string } : null,
+			links: selected !== null && neighbourEnds.length > 0,
+			outliers: sample.outliers.filter((i) => !(hidden && hidden[i])).length,
+			query: star && query?.search ? { top: query.search.results.length, drawn: rays.length } : null,
+			duplicates: sample.duplicates.slice(0, MAX_DRAWN_DUPLICATES).filter(shownPair).length,
+			rings: duplicateRings.length > 0 ? { scale: pairScale(sample.metric) } : null,
+		};
+	}, [sample, hidden, edgeSet, edgePalette, selected, neighbourEnds, star, query, rays, duplicateRings]);
+
 	const overlay = useMemo(
 		() => ({
 			selected,
@@ -667,10 +714,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			rays,
 			chunkPath: documentPath,
 			duplicates: (sample?.duplicates ?? []).slice(0, MAX_DRAWN_DUPLICATES).map((d): [number, number] => [d.a, d.b]),
+			duplicateRings,
 			outliers: sample?.outliers ?? [],
 			pulse,
 		}),
-		[selected, focused, ringPoints, neighbourEnds, pinnedPlaces, star, rays, documentPath, sample, pulse],
+		[selected, focused, ringPoints, neighbourEnds, pinnedPlaces, star, rays, documentPath, sample, duplicateRings, pulse],
 	);
 
 	// -------------------------------------------------------------------------
@@ -1181,6 +1229,21 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	// Lasso and keys
 	// -------------------------------------------------------------------------
 
+	/**
+	 * Removals: staged for the console's pending changes where it offers that (named by the sample's paths and
+	 * chunk counts, so the pending bar and the confirmation show files, not ids), else confirmed by it at once.
+	 */
+	const staging = actions.stageRemove !== undefined;
+	const removeDocuments = useCallback(
+		(objectIds: readonly string[]): void => {
+			// Staged: the console's pending bar shows and announces the count (nothing is inserted in the panel, so no
+			// row moves under the pointer between two presses).
+			if (actions.stageRemove && sample) actions.stageRemove(removeTargetsOf(sample, objectIds));
+			else actions.requestRemove(objectIds);
+		},
+		[actions, sample],
+	);
+
 	const onLasso = useCallback(
 		(indices: readonly number[]): void => {
 			if (!sample) return;
@@ -1420,11 +1483,12 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		out.height = Math.max(1, Math.round(source.height * scale)) + Math.round(lineH * (lines.length + 1));
 		const octx = out.getContext('2d');
 		if (!octx) return null;
-		const style = getComputedStyle(document.documentElement);
-		octx.fillStyle = style.getPropertyValue('--rr-bg-default').trim() || '#ffffff';
+		// The theme the map is drawn in (its own fallbacks, by mode, in an unthemed host).
+		const theme = palette ?? FALLBACK_PALETTE;
+		octx.fillStyle = theme.surfaces.default;
 		octx.fillRect(0, 0, out.width, out.height);
 		octx.drawImage(source, 0, 0, out.width, Math.round(source.height * scale));
-		octx.fillStyle = style.getPropertyValue('--rr-text-primary').trim() || '#1a1a1a';
+		octx.fillStyle = theme.text;
 		octx.font = `${12 * ratio}px system-ui, sans-serif`;
 		const top = Math.round(source.height * scale);
 		lines.forEach((line, n) => {
@@ -1433,11 +1497,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 				octx.fillStyle = line.colour;
 				octx.fillRect(8 * ratio, y - 9 * ratio, 9 * ratio, 9 * ratio);
 			}
-			octx.fillStyle = style.getPropertyValue('--rr-text-primary').trim() || '#1a1a1a';
+			octx.fillStyle = theme.text;
 			octx.fillText(line.text, (line.colour ? 22 : 8) * ratio, y);
 		});
 		return new Promise<Blob | null>((resolve) => out.toBlob((blob) => resolve(blob), 'image/png'));
-	}, [sample, colouring, model.collection, shownPoints, layout, colourBy]);
+	}, [sample, colouring, model.collection, shownPoints, layout, colourBy, palette]);
 
 	/** The toolbar's export items: the sample, the selection, the points shown, the clusters, the duplicates, the outliers, the PNG. */
 	const exportItems: IExportItem[] = useMemo(() => {
@@ -1583,7 +1647,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const edgeStatsNow = edgeSet ? edgeStats(edgeSet) : null;
 	const edgeLine = sample ? edgeLegend({ mode: edges, m: edgesPerPoint, count: edgeStatsNow?.count ?? 0, min: edgeStatsNow?.min ?? null, max: edgeStatsNow?.max ?? null, points: shownPoints, components: tree?.components ?? 0, expanded: expanded.length }) : null;
 	const listingLine = sample ? listingNote(sample) : null;
+	// Why the toolbar's Query and t-SNE are off, in full (the toolbar has them as the controls' descriptions only).
+	const queryWhy = !model.embed.enabled && model.embed.reason ? model.embed.reason : null;
+	const toolbarReasons = [queryWhy, tsneReason].filter((line): line is string => line !== null);
 	const legendNotes = [
+		...toolbarReasons,
 		...(query?.notes ?? []),
 		...(star && !star.exact && !query?.item ? [CENTROID_APPROX] : []),
 		...(sample?.mode === 'light' && layout === 'pca' ? [LIGHT_POSITIONS] : []),
@@ -1594,7 +1662,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		...(listingLine ? [listingLine] : []),
 		...(sample ? [scopeLine(scopeState, scopeTarget.key ? scopeTarget : null, shownScope.drawn.key ? shownScope.drawn : null)].filter((line): line is string => line !== null) : []),
 		...(isolation ? [isolationLine(isolation.shown, isolation.n)] : []),
-		...(queryB ? [`Hollow star: "${queryB.text}" (compared in Search)`] : []),
+		...(queryB ? [`Hollow star: "${queryB.text}" (compared on the Query tab)`] : []),
 	];
 	const describe = (index: number): string => {
 		if (!sample) return '';
@@ -1696,6 +1764,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			) : null}
 			{!sample ? (
 				<div style={{ padding: 16 }}>
+					{toolbarReasons.map((line) => (
+						<p key={line} style={MAP_STYLES.note}>
+							{line}
+						</p>
+					))}
 					<EmptyState
 						title={busy ? BUSY.sampling : 'No sample drawn yet'}
 						description={busy ? `Drawing up to ${num(Math.min(limits.sample_default, limits.sample_max))} points from the store.` : 'Draw a sample of the collection to see its points.'}
@@ -1722,6 +1795,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 								outlined={colouring?.outlined ?? null}
 								hidden={hidden}
 								emphasised={emphasised}
+								dimmed={dimmed}
+								dimOnHover={clusters !== null && (colourBy === 'cluster' || tab === 'clusters')}
 								overlay={overlay}
 								palette={palette}
 								pointSizePx={sample.mode === 'light' ? 3.5 : 5.5}
@@ -1752,7 +1827,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 								cameraOverride={cameraOverride}
 							/>
 						</div>
-						<Legend sample={sampleModel!} colourBy={colourBy} pointCap={pointCap} backend={backend} colouring={colouring} notes={legendNotes} scopeRetry={scopeState === 'failed' && busy === null ? { label: SCOPE_RETRY, onClick: retryScope } : null} />
+						<Legend sample={sampleModel!} colourBy={colourBy} pointCap={pointCap} backend={backend} colouring={colouring} notes={legendNotes} marks={legendMarks} scopeRetry={scopeState === 'failed' && busy === null ? { label: SCOPE_RETRY, onClick: retryScope } : null} />
 					</div>
 					<aside style={MAP_STYLES.side} aria-label="Map details">
 						<div role="tablist" aria-label="Map details" style={MAP_STYLES.tabs}>
@@ -1780,7 +1855,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 										selectKey(key);
 									}}
 									onSelectNeighbour={selectKey}
-									onRemoveDocument={(objectId) => actions.requestRemove([objectId])}
+									onRemoveDocument={(objectId) => removeDocuments([objectId])}
+									staging={staging}
 									treeNeighbours={edges === 'tree' && tree && selected !== null ? treeNeighbours(tree.edges, selected) : null}
 									onAddExample={onAddExample}
 									examplePolarity={selectedKey ? polarityOf(examples, selectedKey) : null}
@@ -1809,11 +1885,16 @@ export function MapView(props: MapViewProps): React.ReactElement {
 								<DuplicatesPanel
 									sample={sampleModel!}
 									writes={model.writes}
-									onSelect={(indices) => selection.setHighlight({ source: 'neighbors', keys: indices.map((i) => pointKey(sample, i)) })}
-									onRemoveDocument={(objectId) => actions.requestRemove([objectId])}
+									onSelect={(indices) => {
+										selection.setHighlight({ source: 'neighbors', keys: indices.map((i) => pointKey(sample, i)) });
+										const shown = selection.getState().highlight;
+										if (shown) DUPLICATE_GROUPS.add(shown);
+									}}
+									onRemoveDocument={(objectId) => removeDocuments([objectId])}
 									connectionKey={model.connectionKey}
 									documents={props.documents ?? null}
-									onRemoveDocuments={(objectIds) => actions.requestRemove(objectIds)}
+									onRemoveDocuments={(objectIds) => removeDocuments(objectIds)}
+									staging={staging}
 									onOpenDocument={(objectId, chunkId) => actions.openDocument(objectId, chunkId)}
 								/>
 							) : null}
@@ -1826,7 +1907,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 									}}
 									connectionKey={model.connectionKey}
 									writes={model.writes}
-									onRemoveDocument={(objectId) => actions.requestRemove([objectId])}
+									onRemoveDocument={(objectId) => removeDocuments([objectId])}
+									staging={staging}
 									onShowNeighbours={(i) => {
 										void onPick(i);
 										setTab('neighbours');
@@ -1874,7 +1956,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 									chat={model.chat}
 									writes={model.writes}
 									onAskAbout={(ids) => actions.askAbout(ids)}
-									onRemove={(ids) => actions.requestRemove(ids)}
+									onRemove={(ids) => removeDocuments(ids)}
+									staging={staging}
 									onCopy={(keys) => {
 										const text = JSON.stringify(keys);
 										if (typeof navigator !== 'undefined' && navigator.clipboard) navigator.clipboard.writeText(text).then(() => actions.announce(`Copied ${num(keys.length)} keys.`), () => actions.announce(COPY_KEYS_BLOCKED));

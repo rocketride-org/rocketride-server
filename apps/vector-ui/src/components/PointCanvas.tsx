@@ -33,7 +33,12 @@
 //     release selects what is inside;
 //   - arrow keys move the keyboard focus to the nearest point in that 90° sector,
 //     +/- zoom, 0 fits; Enter, Escape and L are handed to the map view;
-//   - hover shows a tooltip; the overlay draws rings, links, the star and rays.
+//   - hover shows a tooltip; the overlay draws rings, links, the star and rays;
+//   - dimming: the view's `dimmed` points (a selection, a highlighted set) are
+//     faded toward the surface and drawn under the rest; without one, hovering
+//     a point of a cluster fades the other clusters (when `dimOnHover`). An
+//     edge with both ends faded is faded too, and a cluster label whose medoid
+//     is faded is not drawn.
 //
 // Canvas rules: the size is observed (ResizeObserver), the backing store is
 // never 0x0 and follows devicePixelRatio, the map redraws when revealed, a lost
@@ -54,14 +59,17 @@
 // and, written by each frame (what it DREW, not what was asked):
 //   data-star ('1'/'0'), data-rays, data-links, data-chunk-path,
 //   data-star-b ('1'/'0'), data-rays-b, data-labels (cluster labels),
-//   data-edges (segments of the edge layer's last redraw), data-edge-strokes,
+//   data-edges (segments of the edge layer's last redraw), data-edges-dimmed
+//   (those of them faded), data-edge-strokes, data-dimmed (shown points drawn
+//   faded),
 //   data-draw-count (frames drawn so far), data-camera, data-draw-p95.
 // The hover box is role="tooltip" (data-map-tooltip holds the point index).
 //
 // The similarity edges (Neighbours or Tree) have their own canvas UNDER the
-// points, redrawn only when the camera, the size or the edge set changes (in
-// 2D the paths are built once per edge set, in layout units, and stroked
-// through the camera's transform: map/overlay.ts). They fade in unless reduced
+// points, redrawn only when the camera, the size, the colours or the edge set
+// changes (in 2D the paths are built once per edge set, in layout units, and
+// stroked through the camera's transform, each bucket in its own opaque colour
+// from edgeColours: map/overlay.ts). They fade in unless reduced
 // motion is asked for. When two frames that drew edges each take over 33 ms,
 // onSlowEdges is called once per edge set (the view may draw fewer). Hovering
 // a point thickens its edges; hovering a cluster label rings its points.
@@ -80,7 +88,7 @@ import type { IEdgeSet } from '../map/graph';
 import { createFrameStats, createGesture, keyAction, wheelZoomFactor } from '../map/interaction';
 import type { KeyAction } from '../map/interaction';
 import { lassoSelect, simplifyPath } from '../map/lasso';
-import { buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeTransform2d, extrasDataset, overlayDataset, strokeEdgePaths } from '../map/overlay';
+import { buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, extrasDataset, fadedEdgeColours, overlayDataset, strokeEdgePaths } from '../map/overlay';
 import type { IClusterLabel, IExtrasDrawn, IOverlayDrawn, IOverlayModel, IPlace } from '../map/overlay';
 import { buildScreenIndex, nearestInSector, pickNearest } from '../map/picking';
 import type { IScreenIndex } from '../map/picking';
@@ -88,7 +96,8 @@ import type { IStar } from '../map/queryProjection';
 import { createCanvas2dRenderer } from '../map/renderer.canvas2d';
 import { createWebglRenderer, packPoints, sizeCanvas } from '../map/renderer.webgl';
 import type { IPointData, IPointRenderer } from '../map/renderer.webgl';
-import { MAP_STYLES, ensureMapStyle } from '../map/styles';
+import { MAP_STYLES, ensureMapStyle, tooltipStyle } from '../map/styles';
+import { FALLBACK_PALETTE } from '../map/tokens';
 import type { IMapPalette } from '../map/tokens';
 
 /** Props: the frozen ones plus what the map view supplies. */
@@ -101,6 +110,10 @@ export interface PointCanvasProps extends ContractPointCanvasProps {
 	hidden?: Uint8Array | null;
 	/** 1 per emphasised point (larger, outlined). */
 	emphasised?: Uint8Array | null;
+	/** 1 per point drawn faded (the view's selection or highlighted set keeps the rest lit), or null for none. */
+	dimmed?: Uint8Array | null;
+	/** With no `dimmed` from the view: hovering a point of a cluster fades the other clusters. */
+	dimOnHover?: boolean;
 	/** Overlay marks (rings, links, star, rays, path, duplicates, outliers). */
 	overlay?: Partial<Omit<IOverlayModel, 'hovered' | 'lasso'>>;
 	palette?: IMapPalette | null;
@@ -170,13 +183,33 @@ interface IEdgeCache {
 	dims: number;
 	/** World-space paths (2D); rebuilt per frame in 3D. */
 	paths: Array<Path2D | null>;
+	/** The edges with both ends faded, drawn first in the faded colours. */
+	fadedPaths: Array<Path2D | null>;
 	segments: number;
-	/** camera|size|dpr|colour of the last redraw ('' forces one). */
+	fadedSegments: number;
+	/** The dimming the paths were split by (IDimApplied.version). */
+	dimVersion: number;
+	/** camera|size|dpr|colours|dimming of the last redraw ('' forces one). */
 	drawnKey: string;
 	/** Frames over SLOW_FRAME_MS that drew edges, and whether onSlowEdges was called for this set. */
 	slow: number;
 	fired: boolean;
 }
+
+/** What the renderer was last told to fade: the view's mask or the hovered cluster, over which points and surface. */
+interface IDimApplied {
+	source: Uint8Array | number | null;
+	surface: string;
+	data: IPointData | null;
+	mask: Uint8Array | null;
+	/** Shown points drawn faded. */
+	count: number;
+	/** Grows with every change (the edge layer splits its paths again). */
+	version: number;
+}
+
+/** Nothing told yet (the next frame tells the renderer). */
+const NOT_DIMMED: IDimApplied = { source: null, surface: '', data: null, mask: null, count: 0, version: 0 };
 
 /** An overlap for its data attribute: 4 decimals, '' when there is none. */
 const overlapAttr = (value: number | null | undefined): string => (typeof value === 'number' && Number.isFinite(value) ? value.toFixed(4) : '');
@@ -214,7 +247,7 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 	const edgeRef = useRef<HTMLCanvasElement>(null);
 	const overlayRef = useRef<HTMLCanvasElement>(null);
-	const edgeCacheRef = useRef<IEdgeCache>({ edges: null, positions: null, dims: 2, paths: [], segments: 0, drawnKey: '', slow: 0, fired: false });
+	const edgeCacheRef = useRef<IEdgeCache>({ edges: null, positions: null, dims: 2, paths: [], fadedPaths: [], segments: 0, fadedSegments: 0, dimVersion: -1, drawnKey: '', slow: 0, fired: false });
 	const fitScaleRef = useRef<number | null>(null);
 	const labelBoxesRef = useRef<IExtrasDrawn['boxes']>([]);
 	const hoveredClusterRef = useRef<number | null>(null);
@@ -225,6 +258,8 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 	const gestureRef = useRef(createGesture());
 	const lassoRef = useRef<number[]>([]);
 	const hoveredRef = useRef<number | null>(null);
+	// What the renderer was last told to fade: the view's mask, or the hovered cluster's number, and the surface.
+	const dimRef = useRef<IDimApplied>(NOT_DIMMED);
 	const frameRef = useRef(0);
 	const statsRef = useRef(createFrameStats());
 	const drawCountRef = useRef(0);
@@ -250,19 +285,24 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 	/** The viewport in CSS pixels. */
 	const viewport = (): IViewport => ({ width: Math.max(1, sizeRef.current.width), height: Math.max(1, sizeRef.current.height) });
 
-	/** Overlay and outline colours of the current palette. */
+	/** Overlay, outline, edge and surface colours of the current palette (the palette's own fallbacks without one). */
 	const colours = useMemo(() => {
-		const p = props.palette;
-		const surface = p?.surfaces.default ?? '#ffffff';
+		const p = props.palette ?? FALLBACK_PALETTE;
+		const surface = p.surfaces.default;
 		const bg = parseColor(surface) ?? { r: 255, g: 255, b: 255 };
-		const outline = opaqueOver(p?.outline ?? '#1a1a1a', bg) ?? { r: 26, g: 26, b: 26 };
+		const outline = opaqueOver(p.outline, bg) ?? bg;
+		const edges = edgeColours(p);
 		return {
-			overlay: { accent: p?.accent ?? '#0078d4', outline: p?.outline ?? '#1a1a1a', other: p?.other ?? '#666666', text: p?.text ?? '#1a1a1a', surface },
+			overlay: { accent: p.accent, outline: p.outline, other: p.other, text: p.text, surface },
 			outlineRgb: [outline.r / 255, outline.g / 255, outline.b / 255] as [number, number, number],
+			surfaceRgb: [bg.r / 255, bg.g / 255, bg.b / 255] as [number, number, number],
+			edges,
+			fadedEdges: fadedEdgeColours(edges, surface),
 		};
 	}, [props.palette]);
 	const coloursRef = useRef(colours);
 	coloursRef.current = colours;
+	const tooltipBox = useMemo(() => tooltipStyle(props.palette ?? null), [props.palette]);
 
 	/** Fit the camera to the visible points. */
 	const fit = useCallback((): void => {
@@ -287,7 +327,7 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 	 *
 	 * @returns True when it drew (the frame counts towards the slow-frame rule).
 	 */
-	const drawEdges = useCallback((camera: MapCamera, vp: IViewport): boolean => {
+	const drawEdges = useCallback((camera: MapCamera, vp: IViewport, dim: IDimApplied): boolean => {
 		const canvas = edgeRef.current;
 		const ctx = canvas ? canvas.getContext('2d') : null;
 		if (!canvas || !ctx) return false;
@@ -295,14 +335,15 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 		const edges = p.edges ?? null;
 		const cache = edgeCacheRef.current;
 		const size = sizeRef.current;
-		const colour = coloursRef.current.overlay.other;
+		const colour = coloursRef.current.edges;
+		const faded = coloursRef.current.fadedEdges;
 		const positions = dataRef.current.positions;
 		if (cache.edges !== edges) {
 			cache.slow = 0;
 			cache.fired = false;
 		}
-		const rebuild = cache.edges !== edges || cache.positions !== positions || camera.mode === '3d';
-		const key = `${cameraSignature(camera)}|${size.width}x${size.height}@${size.dpr}|${colour}`;
+		const rebuild = cache.edges !== edges || cache.positions !== positions || cache.dimVersion !== dim.version || camera.mode === '3d';
+		const key = `${cameraSignature(camera)}|${size.width}x${size.height}@${size.dpr}|${colour.join(' ')}|${dim.version}`;
 		if (!rebuild && key === cache.drawnKey) return false;
 		ctx.setTransform(1, 0, 0, 1, 0, 0);
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -311,19 +352,26 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 			cache.edges = edges;
 			cache.positions = positions;
 			cache.paths = [];
+			cache.fadedPaths = [];
 			cache.segments = 0;
+			cache.fadedSegments = 0;
+			cache.dimVersion = dim.version;
 			return false;
 		}
 		const makePath = (): Path2D => new Path2D();
 		if (camera.mode === '2d') {
 			if (rebuild) {
 				// Layout units (x, y of the packed points): built once per edge set and stroked through the camera.
-				const built = buildEdgePaths(edges, edgeBuckets(edges), (i) => (i < dataRef.current.count ? [positions[3 * i] as number, positions[3 * i + 1] as number] : null), makePath);
+				const built = buildEdgePaths(edges, edgeBuckets(edges), (i) => (i < dataRef.current.count ? [positions[3 * i] as number, positions[3 * i + 1] as number] : null), makePath, dim.mask);
 				cache.paths = built.paths;
+				cache.fadedPaths = built.fadedPaths;
 				cache.segments = built.segments;
+				cache.fadedSegments = built.fadedSegments;
 			}
 			const t = edgeTransform2d(camera, vp, size.dpr);
 			ctx.setTransform(t.a, t.b, t.c, t.d, t.e, t.f);
+			// The faded edges first, then the ones touching the lit set over them.
+			strokeEdgePaths(ctx, cache.fadedPaths, faded, t.lineWidth);
 			strokeEdgePaths(ctx, cache.paths, colour, t.lineWidth);
 		} else {
 			const xy = screenRef.current.xy;
@@ -333,15 +381,46 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 				const x = xy[2 * i] as number;
 				const y = xy[2 * i + 1] as number;
 				return Number.isFinite(x) && Number.isFinite(y) ? [x, y] : null;
-			}, makePath);
+			}, makePath, dim.mask);
 			cache.paths = built.paths;
+			cache.fadedPaths = built.fadedPaths;
 			cache.segments = built.segments;
+			cache.fadedSegments = built.fadedSegments;
 			ctx.setTransform(size.dpr, 0, 0, size.dpr, 0, 0);
+			strokeEdgePaths(ctx, cache.fadedPaths, faded, 1);
 			strokeEdgePaths(ctx, cache.paths, colour, 1);
 		}
 		cache.edges = edges;
 		cache.positions = positions;
+		cache.dimVersion = dim.version;
 		return true;
+	}, []);
+
+	/**
+	 * Tell the renderer what to fade, when that changed: the view's mask, else (with dimOnHover) every point
+	 * outside the hovered point's cluster.
+	 *
+	 * @returns What is faded now.
+	 */
+	const applyDim = useCallback((renderer: IPointRenderer): IDimApplied => {
+		const p = propsRef.current;
+		const points = dataRef.current;
+		const surface = coloursRef.current.overlay.surface;
+		const clusterOf = p.clusterOf ?? null;
+		const hovered = hoveredRef.current;
+		const cluster = !p.dimmed && p.dimOnHover && clusterOf !== null && hovered !== null ? (clusterOf[hovered] ?? -1) : -1;
+		const source = p.dimmed ?? (cluster >= 0 ? cluster : null);
+		const now = dimRef.current;
+		if (now.source === source && now.surface === surface && now.data === points) return now;
+		let mask: Uint8Array | null = null;
+		if (source instanceof Uint8Array) mask = source;
+		else if (source !== null && clusterOf !== null) {
+			mask = new Uint8Array(points.count);
+			for (let i = 0; i < points.count; i += 1) mask[i] = clusterOf[i] === source ? 0 : 1;
+		}
+		const count = renderer.setDimmed(mask, coloursRef.current.surfaceRgb);
+		dimRef.current = { source, surface, data: points, mask: count > 0 ? mask : null, count, version: now.version + 1 };
+		return dimRef.current;
 	}, []);
 
 	/** Draw one frame now. */
@@ -355,6 +434,7 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 		const started = typeof performance !== 'undefined' ? performance.now() : Date.now();
 		const vp = viewport();
 		const matrix = viewMatrix(camera, vp);
+		const dim = applyDim(renderer);
 		renderer.render({ matrix, pointSizePx: p.pointSizePx ?? 5, dpr: size.dpr });
 		const points = dataRef.current;
 		const screen = screenRef.current;
@@ -400,7 +480,9 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 				rays: o.rays ?? [],
 				chunkPath: o.chunkPath ?? [],
 				duplicates: o.duplicates ?? [],
+				duplicateRings: o.duplicateRings ?? [],
 				outliers: o.outliers ?? [],
+				faded: dim.mask,
 				lasso: lassoRef.current,
 				pulse: o.pulse ?? 0,
 			};
@@ -414,10 +496,10 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 			if (cluster !== null && clusterOf !== null) for (let i = 0; i < points.count; i += 1) if (clusterOf[i] === cluster) clusterHighlight.push(i);
 			const fitScale = fitScaleRef.current;
 			const showLabels = camera.mode === '3d' || fitScale === null || camera.scale >= LABEL_MIN_ZOOM * fitScale;
-			extras = drawExtras(ctx, { starB: p.starB ?? null, raysB: p.raysB ?? [], hoverEdges, labels: [...(p.clusterLabels ?? [])], showLabels, clusterHighlight }, screenOf, placeOf, coloursRef.current.overlay);
+			extras = drawExtras(ctx, { starB: p.starB ?? null, raysB: p.raysB ?? [], hoverEdges, labels: [...(p.clusterLabels ?? [])], showLabels, clusterHighlight, dimmed: dim.mask }, screenOf, placeOf, coloursRef.current.overlay);
 			labelBoxesRef.current = extras.boxes;
 		}
-		const edgesDrawn = drawEdges(camera, vp);
+		const edgesDrawn = drawEdges(camera, vp, dim);
 		const ended = typeof performance !== 'undefined' ? performance.now() : Date.now();
 		statsRef.current.record(ended - started);
 		drawCountRef.current += 1;
@@ -435,12 +517,14 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 			Object.assign(el.dataset, overlayDataset(drawn));
 			Object.assign(el.dataset, extrasDataset(extras));
 			el.dataset.edges = String(cache.segments);
-			el.dataset.edgeStrokes = String(cache.paths.filter((path) => path !== null).length);
+			el.dataset.edgesDimmed = String(cache.fadedSegments);
+			el.dataset.edgeStrokes = String([...cache.paths, ...cache.fadedPaths].filter((path) => path !== null).length);
+			el.dataset.dimmed = String(dim.count);
 			el.dataset.drawCount = String(drawCountRef.current);
 			el.dataset.camera = cameraSignature(camera);
 			if (statsRef.current.count() % 30 === 0) el.dataset.drawP95 = String(Math.round((statsRef.current.p95() ?? 0) * 10) / 10);
 		}
-	}, [fit, drawEdges]);
+	}, [fit, drawEdges, applyDim]);
 
 	/** Ask for a frame (coalesced). */
 	const requestDraw = useCallback((): void => {
@@ -460,6 +544,8 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 		if (!canvas || !wanted || rendererRef.current !== null) return;
 		const renderer = createWebglRenderer(canvas, () => requestDraw()) ?? createCanvas2dRenderer(canvas);
 		rendererRef.current = renderer;
+		// A new renderer holds no dimming yet: the next frame tells it again (and the edge layer splits again).
+		dimRef.current = { ...NOT_DIMMED, version: dimRef.current.version + 1 };
 		const kind = renderer ? renderer.kind : 'none';
 		setRendererKind(kind);
 		propsRef.current.onRendererInfo?.(kind);
@@ -527,10 +613,10 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 		requestDraw();
 	}, [data, colours, rendererKind, requestDraw]);
 
-	// Overlay, extras or size changes.
+	// Overlay, extras, dimming or size changes.
 	useEffect(() => {
 		requestDraw();
-	}, [props.overlay, props.pointSizePx, props.starB, props.raysB, props.clusterLabels, requestDraw]);
+	}, [props.overlay, props.pointSizePx, props.starB, props.raysB, props.clusterLabels, props.dimmed, props.dimOnHover, requestDraw]);
 
 	// A new edge set: drawn on the next frame, faded in unless reduced motion is asked for.
 	useEffect(() => {
@@ -779,7 +865,7 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 			<canvas ref={canvasRef} style={LAYER} aria-hidden="true" />
 			<canvas ref={overlayRef} style={{ ...LAYER, pointerEvents: 'none' }} aria-hidden="true" />
 			{tooltip !== null ? (
-				<div role="tooltip" data-map-tooltip={tooltip.index} style={{ ...MAP_STYLES.tooltip, left: Math.min(tooltip.x + 14, Math.max(0, sizeRef.current.width - 330)), top: tooltip.y + 14 }}>
+				<div role="tooltip" data-map-tooltip={tooltip.index} style={{ ...tooltipBox, left: Math.min(tooltip.x + 14, Math.max(0, sizeRef.current.width - 330)), top: tooltip.y + 14 }}>
 					{tooltipText}
 				</div>
 			) : null}

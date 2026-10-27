@@ -27,7 +27,8 @@
 // What the selected point is (path, chunk of N, length, text), how similar it
 // is to the active query (and the pipeline's own score when known), its 12
 // nearest chunks in the whole collection, and the actions that land back in the
-// console: Open document, Find similar, Move to trash (gated; when it is not
+// console: Open document, Find similar, Move to trash, or Stage removal where
+// the console stages removals for its pending changes (gated; when it is not
 // available the reason is shown as text). Beside them:
 //
 //   - Add as example (+) / (−): the point becomes a Recommend example;
@@ -42,6 +43,7 @@
 import React from 'react';
 import type { ExamplePolarity, PointInspectorProps as ContractPointInspectorProps, VectorKey } from '../contract/types';
 import { documentOf, pointKey } from '../map/model';
+import { STAGE_REMOVAL } from '../map/reviewWording';
 import { MAP_STYLES } from '../map/styles';
 import { num } from '../map/wording';
 import { ChunkTextSection, chunkTextScope } from './ChunkTextPanel';
@@ -68,6 +70,8 @@ export interface PointInspectorProps extends ContractPointInspectorProps {
 	query?: string | null;
 	/** The side this point is on as a Recommend example, or null. */
 	examplePolarity?: ExamplePolarity | null;
+	/** The console stages removals (its pending changes apply them): the button says Stage removal. */
+	staging?: boolean;
 }
 
 /**
@@ -116,7 +120,7 @@ export function PointInspector(props: PointInspectorProps): React.ReactElement {
 					Find similar
 				</button>
 				<button type="button" style={MAP_STYLES.button} disabled={!props.writes.enabled || removed} onClick={() => props.onRemoveDocument(objectId)}>
-					Move to trash
+					{props.staging ? STAGE_REMOVAL : 'Move to trash'}
 				</button>
 			</div>
 			{props.onAddExample ? (

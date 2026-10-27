@@ -10,11 +10,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { projectToScreen, viewMatrix } from '../src/map/camera';
+import { alphaOf, contrastRatio, parseColor } from '../src/map/contrast';
+import type { Rgb } from '../src/map/contrast';
 import { NO_EDGES, edgeStats, spanningTree, topEdges } from '../src/map/graph';
-import { EDGE_BUCKETS, buildEdgePaths, drawExtras, drawOverlay, edgeAlpha, edgeBuckets, edgeTransform2d, extrasDataset, overlayDataset, strokeEdgePaths } from '../src/map/overlay';
+import { EDGE_BUCKETS, buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, extrasDataset, fadeColour, fadedEdgeColours, overlayDataset, strokeEdgePaths } from '../src/map/overlay';
 import type { IOverlayExtras, IOverlayModel } from '../src/map/overlay';
 import { createCanvas2dRenderer } from '../src/map/renderer.canvas2d';
-import { FLAG, FRAGMENT_SHADER, VERTEX_SHADER, createWebglRenderer, packPoints, sizeCanvas } from '../src/map/renderer.webgl';
+import { DIM, FLAG, FRAGMENT_SHADER, PASS, VERTEX_SHADER, createWebglRenderer, dimFlags, packPoints, sizeCanvas } from '../src/map/renderer.webgl';
+import { FALLBACK_PALETTE, readPalette } from '../src/map/tokens';
 import { FakeCanvas, fake2d, fakeGl } from './support/map.fakes';
 import { loadSample } from './support/map.samples';
 
@@ -253,7 +256,7 @@ class FakePath {
 	}
 }
 
-test('edges are bucketed by similarity into 8 alpha steps, weakest faintest', () => {
+test('edges are bucketed by similarity into 8 steps, weakest faintest (its colour the closest to the surface)', () => {
 	const sample = loadSample('sample_demo_1000.json');
 	const edges = topEdges(sample.knn, sample.n, 5);
 	const buckets = edgeBuckets(edges);
@@ -268,7 +271,9 @@ test('edges are bucketed by similarity into 8 alpha steps, weakest faintest', ()
 	}
 	assert.equal(buckets[weakest], 0);
 	assert.equal(buckets[strongest], EDGE_BUCKETS - 1);
-	for (let b = 1; b < EDGE_BUCKETS; b += 1) assert.ok(edgeAlpha(b) > edgeAlpha(b - 1));
+	const surface = parseColor(FALLBACK_PALETTE.surfaces.default) as Rgb;
+	const colours = edgeColours(FALLBACK_PALETTE);
+	for (let b = 1; b < EDGE_BUCKETS; b += 1) assert.ok(contrastRatio(parseColor(colours[b] as string) as Rgb, surface) > contrastRatio(parseColor(colours[b - 1] as string) as Rgb, surface), `bucket ${b} stands out more than ${b - 1}`);
 	// All edges equally similar: one bucket.
 	assert.equal(new Set(edgeBuckets({ ...edges, sim: new Float32Array(edges.count).fill(0.5) })).size, 1);
 });
@@ -285,7 +290,7 @@ test('the tree draws n-1 segments, Neighbours m=5 at most 5n, each frame in at m
 	assert.ok(fivePaths.segments <= 5 * sample.n);
 	assert.equal(fivePaths.segments, five.count);
 	const fake = fake2d();
-	const strokes = strokeEdgePaths(fake.ctx, fivePaths.paths as unknown as Array<Path2D | null>, '#666666', 1);
+	const strokes = strokeEdgePaths(fake.ctx, fivePaths.paths as unknown as Array<Path2D | null>, edgeColours(FALLBACK_PALETTE), 1);
 	assert.ok(strokes >= 1 && strokes <= EDGE_BUCKETS, `${strokes} strokes`);
 	assert.equal(fake.count('stroke'), strokes);
 	assert.equal(fake.count('lineTo'), 0, 'the frame strokes the cached paths; it builds none');
@@ -364,4 +369,225 @@ test('hovering a point thickens its edges; hovering a label rings its cluster', 
 	assert.equal(drawn.hoverEdges, 1, 'an edge to an off-screen point is not drawn');
 	assert.ok(fake.sets.some(([k, v]) => k === 'lineWidth' && (v as number) >= 2));
 	assert.ok(fake.count('arc') >= 3);
+});
+
+// -----------------------------------------------------------------------------
+// The edge colours: opaque, one per bucket, never an alpha over a token
+// -----------------------------------------------------------------------------
+
+test('each bucket is stroked opaque in its own colour, and nothing writes globalAlpha (the colour painted is the colour measured)', () => {
+	const colours = edgeColours(FALLBACK_PALETTE);
+	assert.equal(colours.length, EDGE_BUCKETS);
+	assert.equal(new Set(colours).size, EDGE_BUCKETS, 'eight distinct steps');
+	for (const c of colours) assert.equal(alphaOf(c), 1, `${c} is opaque`);
+	const fake = fake2d();
+	const paths = Array.from({ length: EDGE_BUCKETS }, (_, b) => (b === 3 ? null : ({} as Path2D)));
+	assert.equal(strokeEdgePaths(fake.ctx, paths, colours, 1.5), EDGE_BUCKETS - 1);
+	const styles = fake.sets.filter(([k]) => k === 'strokeStyle').map(([, v]) => v);
+	assert.deepEqual(styles, colours.filter((_, b) => b !== 3), 'bucket b in colours[b]');
+	assert.ok(!fake.sets.some(([k]) => k === 'globalAlpha'), 'no alpha ramp');
+	// A dark theme: the weakest is the surface mixed toward the text just far enough (RocketRide dark: rgb(99, 99, 99)).
+	const rocketride = readPalette((t) => ({ '--rr-palette-mode': 'dark', '--rr-bg-default': '#080808', '--rr-bg-paper': '#161616', '--rr-text-primary': '#ffffff' } as Record<string, string>)[t] ?? '');
+	const dark = edgeColours(rocketride);
+	assert.equal(dark[0], 'rgb(99, 99, 99)');
+	assert.ok(contrastRatio(parseColor(dark[0] as string) as Rgb, { r: 8, g: 8, b: 8 }) >= 3);
+	assert.ok(contrastRatio(parseColor(dark[0] as string) as Rgb, { r: 22, g: 22, b: 22 }) >= 3);
+	assert.equal(dark[EDGE_BUCKETS - 1], 'rgb(206, 206, 206)', 'the strongest is 80 % of the way to the text');
+});
+
+// -----------------------------------------------------------------------------
+// Dimming: a flag bit, two passes, opaque, and back after a lost context
+// -----------------------------------------------------------------------------
+
+/** Calls of uniform1f/uniform3f on a named uniform, in order. */
+function uniformCalls(fake: ReturnType<typeof fakeGl>, name: string): unknown[][] {
+	return fake.calls.filter((c) => (c.name === 'uniform1f' || c.name === 'uniform3f') && (c.args[0] as { uniform?: string } | null)?.uniform === name).map((c) => c.args.slice(1));
+}
+
+test('dimFlags sets the dimmed bit on masked points, never counts a hidden one, and ignores a mask of another length', () => {
+	const base = three().flags;
+	const out = dimFlags(base, new Uint8Array([1, 0, 1]));
+	assert.deepEqual(Array.from(out.flags), [FLAG.dimmed, FLAG.outlined, FLAG.hidden], 'the hidden point stays hidden, undimmed');
+	assert.equal(out.dimmed, 1);
+	assert.equal(dimFlags(base, null).dimmed, 0);
+	assert.equal(dimFlags(base, new Uint8Array(5).fill(1)).dimmed, 0, 'a stale mask (another sample) dims nothing');
+	assert.deepEqual(Array.from(dimFlags(dimFlags(base, new Uint8Array([1, 1, 0])).flags, new Uint8Array([0, 0, 0])).flags), Array.from(base), 'undimming clears the bit');
+});
+
+test('the shaders dim by mixing toward u_surface (opaque), and u_pass culls the other set in the vertex stage', () => {
+	assert.match(VERTEX_SHADER, /uniform float u_pass;/);
+	assert.match(VERTEX_SHADER, /bit\(a_flags, 16\.0\)/);
+	assert.match(VERTEX_SHADER, /if \(bit\(a_flags, 2\.0\) > 0\.5 \|\| culled\)/, 'a point outside the pass is dropped like a hidden one');
+	assert.match(FRAGMENT_SHADER, /uniform vec3 u_surface;/);
+	assert.match(FRAGMENT_SHADER, /rgb = mix\(u_surface, rgb, u_dim\)/);
+	assert.match(FRAGMENT_SHADER, /gl_FragColor = vec4\(rgb, 1\.0\);/);
+	assert.doesNotMatch(FRAGMENT_SHADER, /gl_FragColor = vec4\([^)]*, (?!1\.0)[0-9.]+\)/, 'no translucent fragment');
+	assert.equal(FLAG.dimmed, 16);
+	assert.equal(DIM, 0.25);
+});
+
+test('WebGL dimming: setDimmed uploads the flags only; a frame with none dimmed is one draw, with some it is two (faded first, then the lit ones over them)', () => {
+	const fake = fakeGl();
+	const canvas = new FakeCanvas({ webgl: fake.gl });
+	const renderer = createWebglRenderer(canvas as unknown as HTMLCanvasElement, () => undefined);
+	assert.ok(renderer);
+	renderer.resize(400, 300, 1);
+	renderer.setPoints(three(), [1, 1, 1]);
+	renderer.render({ matrix, pointSizePx: 6, dpr: 1 });
+	assert.equal(fake.count('drawArrays'), 1);
+	assert.deepEqual(uniformCalls(fake, 'u_pass').at(-1), [PASS.all]);
+	const uploads = fake.count('bufferData');
+	assert.equal(renderer.setDimmed(new Uint8Array([1, 0, 0]), [0.03, 0.03, 0.03]), 1);
+	assert.equal(fake.count('bufferData'), uploads + 1, 'only the flags');
+	assert.equal(((fake.last('bufferData')?.args[1] as Uint8Array)[0] as number) & FLAG.dimmed, FLAG.dimmed);
+	const before = fake.calls.length;
+	renderer.render({ matrix, pointSizePx: 6, dpr: 1 });
+	const frame = fake.calls.slice(before);
+	assert.equal(frame.filter((c) => c.name === 'drawArrays').length, 2);
+	const passes = frame.filter((c) => c.name === 'uniform1f' && (c.args[0] as { uniform: string }).uniform === 'u_pass').map((c) => c.args[1]);
+	assert.deepEqual(passes, [PASS.dimmed, PASS.lit], 'the faded set first');
+	assert.ok(frame.some((c) => c.name === 'uniform3f' && (c.args[0] as { uniform: string }).uniform === 'u_surface' && c.args[1] === 0.03));
+	assert.ok(frame.some((c) => c.name === 'uniform1f' && (c.args[0] as { uniform: string }).uniform === 'u_dim' && c.args[1] === DIM));
+	assert.ok(!frame.some((c) => c.name === 'enable' || c.name === 'blendFunc'), 'no blending');
+	// New points of the same count keep the mask; the snapshot (the PNG) draws the same two passes.
+	renderer.setPoints(three(), [1, 1, 1]);
+	assert.equal(((fake.last('bufferData')?.args[1] as Uint8Array)[0] as number) & FLAG.dimmed, FLAG.dimmed);
+	const draws = fake.count('drawArrays');
+	assert.equal(renderer.snapshot({ drawImage: () => undefined } as unknown as CanvasRenderingContext2D), true);
+	assert.equal(fake.count('drawArrays'), draws + 2, 'the PNG shows the dimming as drawn');
+	assert.equal(renderer.setDimmed(null, [0.03, 0.03, 0.03]), 0);
+	const one = fake.count('drawArrays');
+	renderer.render({ matrix, pointSizePx: 6, dpr: 1 });
+	assert.equal(fake.count('drawArrays'), one + 1, 'nothing dimmed: one draw again');
+});
+
+test('a lost context keeps the dimming: a mask set while lost is uploaded on restore, and the new program\'s u_surface, u_dim and u_pass are read and set', () => {
+	const fake = fakeGl();
+	const canvas = new FakeCanvas({ webgl: fake.gl });
+	const renderer = createWebglRenderer(canvas as unknown as HTMLCanvasElement, () => undefined);
+	assert.ok(renderer);
+	renderer.resize(400, 300, 1);
+	renderer.setPoints(three(), [1, 1, 1]);
+	canvas.dispatch('webglcontextlost');
+	const uploads = fake.count('bufferData');
+	assert.equal(renderer.setDimmed(new Uint8Array([0, 1, 0]), [0.1, 0.1, 0.1]), 1);
+	assert.equal(fake.count('bufferData'), uploads, 'nothing is uploaded to a lost context');
+	const before = fake.calls.length;
+	canvas.dispatch('webglcontextrestored');
+	const restore = fake.calls.slice(before);
+	assert.equal(restore.filter((c) => c.name === 'createProgram').length, 1);
+	for (const name of ['u_surface', 'u_dim', 'u_pass']) assert.ok(restore.some((c) => c.name === 'getUniformLocation' && c.args[1] === name), `${name} read from the new program`);
+	const flags = restore.filter((c) => c.name === 'bufferData').at(-1)?.args[1] as Uint8Array;
+	assert.equal((flags[1] as number) & FLAG.dimmed, FLAG.dimmed, 'the merged flags are uploaded');
+	const frameAt = fake.calls.length;
+	renderer.render({ matrix, pointSizePx: 6, dpr: 1 });
+	const frame = fake.calls.slice(frameAt);
+	assert.equal(frame.filter((c) => c.name === 'drawArrays').length, 2);
+	assert.ok(frame.some((c) => c.name === 'uniform3f' && (c.args[0] as { uniform: string }).uniform === 'u_surface' && c.args[1] === 0.1));
+});
+
+test('Canvas2D dimming: the faded points are drawn first, in the colour mixed toward the surface (opaque), then the lit ones', () => {
+	const fake = fake2d();
+	const canvas = new FakeCanvas({ '2d': fake.ctx });
+	const renderer = createCanvas2dRenderer(canvas as unknown as HTMLCanvasElement);
+	assert.ok(renderer);
+	renderer.resize(400, 300, 1);
+	renderer.setPoints(three(), [0, 0, 0]);
+	assert.equal(renderer.setDimmed(new Uint8Array([1, 0, 0]), [1, 1, 1]), 1);
+	renderer.render({ matrix, pointSizePx: 6, dpr: 1 });
+	const fills = fake.sets.filter(([k]) => k === 'fillStyle').map(([, v]) => v);
+	// Red at 25 % over white: 255 * 0.75 + 255 * 0.25, 255 * 0.75 + 0, 255 * 0.75 + 0.
+	assert.deepEqual(fills, ['rgb(255, 191, 191)', 'rgb(0, 255, 0)'], 'the faded red first, then the lit green');
+	assert.ok(!fake.sets.some(([k]) => k === 'globalAlpha'), 'opaque: no alpha');
+	assert.equal(fake.count('arc'), 2 + 1, 'every shown point once, plus the lit outline');
+});
+
+// -----------------------------------------------------------------------------
+// The marks that cross points: halos, the star's edge, the links, duplicate rings
+// -----------------------------------------------------------------------------
+
+test('an outlier ring is stroked over a 4 px halo of the surface first, then 1.5 px in the outline colour', () => {
+	const fake = fake2d();
+	drawOverlay(fake.ctx, { ...empty(), outliers: [1, 2] }, screen, place, colours, 1);
+	const strokes = fake.calls.filter((c) => c.name === 'stroke').length;
+	assert.equal(strokes, 2);
+	const pairs = fake.sets.filter(([k]) => k === 'strokeStyle' || k === 'lineWidth').map(([k, v]) => `${k}=${String(v)}`);
+	assert.deepEqual(pairs, [`strokeStyle=${colours.surface}`, 'lineWidth=4', `strokeStyle=${colours.outline}`, 'lineWidth=1.5'], 'the halo, then the ring');
+});
+
+test('the star is filled with the accent and edged with the surface (as its comment says); the selected point\'s links are 1.5 px', () => {
+	const fake = fake2d();
+	drawOverlay(fake.ctx, { ...empty(), star: { x: 100, y: 100, exact: true } }, screen, place, colours, 1);
+	const at = fake.sets.findIndex(([k, v]) => k === 'fillStyle' && v === colours.accent);
+	assert.ok(at >= 0);
+	assert.deepEqual(fake.sets.slice(at + 1, at + 3), [['strokeStyle', colours.surface], ['lineWidth', 1]]);
+	const links = fake2d();
+	drawOverlay(links.ctx, { ...empty(), selected: 2, neighbours: [{ index: 1 }, { index: 3 }] }, screen, place, colours, 1);
+	const width = links.sets.findIndex(([k, v]) => k === 'strokeStyle' && v === colours.accent);
+	assert.deepEqual(links.sets[width + 1], ['lineWidth', 1.5]);
+});
+
+test('a shown duplicate group: a dashed outline ring at each end over a surface halo, and each pair\'s similarity (with its scale) at its midpoint with a halo', () => {
+	const fake = fake2d();
+	drawOverlay(fake.ctx, { ...empty(), duplicateRings: [{ a: 1, b: 2, label: 'cosine 0.99' }, { a: 2, b: 9, label: 'cosine 0.99' }] }, screen, place, colours, 1);
+	// Ends 1 and 2 are on screen, 9 is not: two rings (r 8), one label.
+	assert.equal(fake.calls.filter((c) => c.name === 'arc' && c.args[2] === 8).length, 2);
+	assert.ok(fake.calls.some((c) => c.name === 'setLineDash' && (c.args[0] as number[]).length > 0));
+	const texts = fake.calls.filter((c) => c.name === 'fillText');
+	assert.deepEqual(texts.map((c) => c.args.slice(0, 3)), [['cosine 0.99', 15, 7.5]], 'the midpoint of points 1 and 2');
+	assert.equal(fake.calls.filter((c) => c.name === 'strokeText').length, 1, 'the label\'s halo');
+	const order = fake.sets.filter(([k]) => k === 'strokeStyle').map(([, v]) => v);
+	assert.deepEqual(order.slice(0, 2), [colours.surface, colours.outline], 'the halo before the ring');
+});
+
+test('a cluster label whose medoid is dimmed is not drawn (text over a faded group would not read)', () => {
+	const labels = [{ cluster: 0, at: 1, text: 'falcon' }, { cluster: 1, at: 3, text: 'orchid' }];
+	const spread = (i: number): [number, number] => [i * 200, i * 60];
+	const fake = fake2d();
+	const drawn = drawExtras(fake.ctx, { ...noExtras(), labels, dimmed: new Uint8Array([0, 1, 0, 0]) }, spread, place, colours);
+	assert.equal(drawn.labels, 1);
+	assert.deepEqual(fake.calls.filter((c) => c.name === 'fillText').map((c) => c.args[0]), ['orchid']);
+});
+
+test('while the map dims, an edge with both ends faded goes to the faded paths (drawn first, mixed toward the surface); an edge touching the lit set keeps its colour', () => {
+	const sample = loadSample('sample_demo_1000.json');
+	const at = (i: number): [number, number] => [sample.points.x[i] as number, sample.points.y[i] as number];
+	const edges = topEdges(sample.knn, sample.n, 5);
+	const all = buildEdgePaths(edges, edgeBuckets(edges), at, () => new FakePath());
+	assert.equal(all.fadedSegments, 0);
+	assert.ok(all.fadedPaths.every((p) => p === null), 'no mask: nothing faded');
+	// Light points 0-9; fade the rest.
+	const mask = new Uint8Array(sample.n).fill(1);
+	for (let i = 0; i < 10; i += 1) mask[i] = 0;
+	const split = buildEdgePaths(edges, edgeBuckets(edges), at, () => new FakePath(), mask);
+	assert.equal(split.segments, all.segments, 'every edge is still drawn');
+	let touching = 0;
+	for (let e = 0; e < edges.count; e += 1) if (!mask[edges.a[e] as number] || !mask[edges.b[e] as number]) touching += 1;
+	assert.equal(split.segments - split.fadedSegments, touching, 'only the edges touching the lit points stay lit');
+	assert.equal(split.paths.reduce((n, p) => n + (p ? p.lines : 0), 0), touching);
+	// Faded colours: each bucket mixed toward the surface at DIM, opaque, and fainter than its lit colour.
+	const colours = edgeColours(FALLBACK_PALETTE);
+	const faded = fadedEdgeColours(colours, FALLBACK_PALETTE.surfaces.default);
+	const surface = parseColor(FALLBACK_PALETTE.surfaces.default) as Rgb;
+	faded.forEach((c, b) => {
+		assert.equal(alphaOf(c), 1);
+		assert.ok(contrastRatio(parseColor(c) as Rgb, surface) < contrastRatio(parseColor(colours[b] as string) as Rgb, surface), `bucket ${b} faded`);
+	});
+	assert.equal(fadedEdgeColours(['rgb(0, 0, 0)'], 'rgb(255, 255, 255)')[0], 'rgb(191, 191, 191)', '25 % of black over white');
+});
+
+test('while the map dims, an outlier ring or a duplicate line on faded points only is faded too (no halo), drawn before the lit ones', () => {
+	const fake = fake2d();
+	// Points 1 and 2 faded, 3 and 4 lit.
+	const faded = new Uint8Array([0, 1, 1, 0, 0]);
+	drawOverlay(fake.ctx, { ...empty(), outliers: [1, 3], duplicates: [[1, 2], [2, 3]], faded }, screen, place, colours, 1);
+	const dim = fadeColour(colours.outline, colours.surface);
+	const styles = fake.sets.filter(([k]) => k === 'strokeStyle').map(([, v]) => v);
+	// Duplicates: the faded pair (1-2) first, then the pair touching a lit point (2-3); outliers: faded ring 1, then the lit ring 3 over its halo.
+	assert.deepEqual(styles, [dim, colours.outline, dim, colours.surface, colours.outline]);
+	assert.equal(fadeColour('#000000', '#ffffff'), 'rgb(191, 191, 191)');
+	// No mask: as before, one stroke per mark kind.
+	const plain = fake2d();
+	drawOverlay(plain.ctx, { ...empty(), outliers: [1, 3], duplicates: [[1, 2]] }, screen, place, colours, 1);
+	assert.deepEqual(plain.sets.filter(([k]) => k === 'strokeStyle').map(([, v]) => v), [colours.outline, colours.surface, colours.outline]);
 });
