@@ -53,8 +53,8 @@ const S = {
 	over: { borderColor: 'var(--rr-border-focus)', borderStyle: 'solid', background: 'var(--rr-bg-widget-hover)' } as CSSProperties,
 	disabled: { opacity: 0.7 } as CSSProperties,
 	title: { fontSize: 13, fontWeight: 600, color: 'var(--rr-text-primary)', margin: 0, overflowWrap: 'anywhere' } as CSSProperties,
-	hint: { fontSize: 12, color: 'var(--rr-text-secondary)', margin: 0 } as CSSProperties,
-	reason: { fontSize: 12, color: 'var(--rr-text-secondary)', margin: 0 } as CSSProperties,
+	hint: { fontSize: 12, color: 'var(--rr-text-primary)', margin: 0 } as CSSProperties,
+	reason: { fontSize: 12, color: 'var(--rr-text-primary)', margin: 0 } as CSSProperties,
 	buttons: { display: 'flex', gap: 8, flexWrap: 'wrap' } as CSSProperties,
 };
 

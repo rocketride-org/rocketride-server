@@ -37,7 +37,8 @@
 // typed field, else Cancel, never the destructive button. Escape cancels while the
 // focus is inside it (unless an inner handler already acted), and Confirm
 // stays unavailable (aria-disabled, so it keeps the focus) until the typed
-// rule is met.
+// rule is met. Enter in the typed field confirms once it matches; before
+// that the field's hint says it does not match yet.
 //
 // It shows the pending confirmation of its connection's controller, which
 // alone sends anything, on the surface that asked for it (its origin: the
@@ -59,7 +60,7 @@ import type { CSSProperties } from 'react';
 import { Button, commonStyles } from 'shell';
 import type { IProbeResult } from 'shared/explorer';
 import type { IConnectionEntry } from '../adapters/connections';
-import { CONSOLE_ORIGIN, confirmElsewhereText, confirmFirstFocus, confirmReady, confirmationFor, removeContextFor } from '../vector/confirm';
+import { CONSOLE_ORIGIN, confirmElsewhereText, confirmFirstFocus, confirmReady, confirmationFor, removeContextFor, typedHint } from '../vector/confirm';
 import type { ConfirmFirstFocus, ConfirmOrigin, ConfirmationView } from '../vector/confirm';
 import { firstFocusable, focusLost } from '../vector/focus';
 import { formatCount } from '../vector/stats';
@@ -150,6 +151,8 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; first: ConfirmFirstFocus;
 	// What had the focus when the confirmation opened (before Cancel takes it): Cancel gives it back.
 	const opener = useRef<HTMLElement | null>(typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null);
 	const [typed, setTyped] = useState('');
+	// Enter was pressed in the typed field before it matched: the hint says so until the text changes.
+	const [nudged, setNudged] = useState(false);
 	const content = view.content;
 	const ready = confirmReady(content.typed, typed);
 	// One document typed by its file name: its whole path beside the field (a file name can repeat across folders).
@@ -235,9 +238,30 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; first: ConfirmFirstFocus;
 			))}
 			{content.typed && (
 				<label style={styles.typed}>
-					<span>{content.typed.prompt}</span>
+					<span aria-live="polite">{typedHint(content.typed, typed, nudged)}</span>
 					{typedPath !== null && <span id={pathId}>{`Full path: ${typedPath}`}</span>}
-					<input ref={input} type="text" value={typed} onChange={(event) => setTyped(event.target.value)} style={appStyles.input} autoComplete="off" spellCheck={false} aria-describedby={typedPath !== null ? `${sentenceId} ${pathId}` : sentenceId} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')} />
+					<input
+						ref={input}
+						type="text"
+						value={typed}
+						onChange={(event) => {
+							setTyped(event.target.value);
+							setNudged(false);
+						}}
+						onKeyDown={(event) => {
+							// Enter confirms once the typed text matches; before that the hint says what is missing.
+							if (event.defaultPrevented || event.key !== 'Enter') return;
+							event.preventDefault();
+							if (ready) onConfirm();
+							else setNudged(true);
+						}}
+						style={appStyles.input}
+						autoComplete="off"
+						spellCheck={false}
+						aria-describedby={typedPath !== null ? `${sentenceId} ${pathId}` : sentenceId}
+						onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)}
+						onBlur={(event) => (event.currentTarget.style.outline = 'none')}
+					/>
 				</label>
 			)}
 			<div ref={actions} style={styles.actions}>

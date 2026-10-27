@@ -36,11 +36,14 @@ import type { IGridSort } from '../vector/grid';
 import VectorGrid from './VectorGrid';
 import type { IGridColumn, IVectorGridHandle } from './VectorGrid';
 
-/** The columns. Score only when the chunks were scored. */
+/**
+ * The columns. Score only when the chunks were scored. At their least they come to 594 px together with Score, what
+ * they took before every header was fitted to its words: Text's minimum gives back what Table and Deleted gained.
+ */
 export function chunkColumns(withScore: boolean): Array<IGridColumn<IChunkRow>> {
 	const columns: Array<IGridColumn<IChunkRow>> = [
 		{ id: 'chunk', label: '#', width: 64, align: 'right', sortValue: (r) => r.chunkId, cell: (r) => String(r.chunkId) },
-		{ id: 'text', label: 'Text', width: 'flex', minWidth: 220, sortValue: (r) => r.text, cell: (r) => r.text || '(no text)' },
+		{ id: 'text', label: 'Text', width: 'flex', minWidth: 206, sortValue: (r) => r.text, cell: (r) => r.text || '(no text)' },
 		{ id: 'chars', label: 'Chars', width: 80, align: 'right', sortValue: (r) => r.chars, cell: (r) => r.chars.toLocaleString('en-US') },
 		{ id: 'table', label: 'Table', width: 70, sortValue: (r) => (r.isTable ? 1 : 0), cell: (r) => (r.isTable ? `Table ${r.tableId}` : '') },
 		{ id: 'deleted', label: 'Deleted', width: 80, sortValue: (r) => (r.isDeleted ? 1 : 0), cell: (r) => (r.isDeleted ? 'Deleted' : '') },

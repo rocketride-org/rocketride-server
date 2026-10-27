@@ -419,3 +419,14 @@ test('the folder scope action on a scope already on the list keeps it there, and
 	const off = renderDocumentsTab({ entry, directory: listing(ROWS), scope: { ...onList, applyTo: { ...onList.applyTo, documents: false } } });
 	assert.match(off, />Scope search and Ask to this folder<\/button>/);
 });
+
+test("a partly trashed document's Trash row says how many chunks it still has outside the trash, when the live listing holds it", () => {
+	const trashed = [doc('p', 'C:/demo/partly.md', { chunks: 1, deleted: true, deleted_chunks: 1 }), doc('t', 'C:/demo/whole.md', { chunks: 2, deleted: true, deleted_chunks: 2 })];
+	const trash = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage({ success: true, items: trashed, next_cursor: null, total: 2, counts_exact: true, distinct: true, sorted: true, caveats: [] }));
+	const directory = listing([doc('p', 'C:/demo/partly.md', { chunks: 4 }), doc('x', 'C:/demo/other.md')]);
+	const html = renderTrashTab({ trash, directory });
+	assert.match(html, /data-row-id="p"[^>]*title="C:\/demo\/partly\.md · 4 chunks outside the trash · objectId p"/);
+	assert.match(html, /<span[^>]*>partly\.md<\/span><span[^>]*>· 4 chunks outside the trash<\/span>/);
+	assert.doesNotMatch(html, /whole\.md<\/span><span/, 'a document wholly in the trash says nothing more');
+	assert.doesNotMatch(renderTrashTab({ trash }), /outside the trash<\/span>/, 'nothing loaded live: nothing claimed');
+});

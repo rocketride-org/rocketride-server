@@ -310,3 +310,17 @@ test("the first focus (P2-11): Confirm for a move to the trash, Cancel for a bul
 	assert.match(content.title, /^Move 150 documents/, 'the count leads the title');
 	assert.equal(content.typed, null, 'nothing to type: Restore undoes it');
 });
+
+test('Enter in the typed field: it confirms once the text matches; before that the hint says what is missing, in the same line', () => {
+	const { typedHint } = require('../src/vector/confirm') as typeof import('../src/vector/confirm');
+	const typed = { expected: '2', prompt: 'Type 2 to confirm.' };
+	assert.equal(typedHint(typed, '', false), 'Type 2 to confirm.');
+	assert.equal(typedHint(typed, '', true), 'Type 2 to confirm. Nothing is typed yet.');
+	assert.equal(typedHint(typed, '1', true), 'Type 2 to confirm. What is typed does not match.');
+	assert.equal(typedHint(typed, ' 2 ', true), 'Type 2 to confirm.', 'it matches: the prompt alone');
+	const fs = require('node:fs') as typeof import('node:fs');
+	const path = require('node:path') as typeof import('node:path');
+	const panel = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'InlineRemoveConfirm.tsx'), 'utf8');
+	assert.match(panel, /if \(event\.defaultPrevented \|\| event\.key !== 'Enter'\) return;\s*event\.preventDefault\(\);\s*if \(ready\) onConfirm\(\);\s*else setNudged\(true\);/);
+	assert.match(panel, /<span aria-live="polite">\{typedHint\(content\.typed, typed, nudged\)\}<\/span>/, 'the existing hint, announced; no new line');
+});
