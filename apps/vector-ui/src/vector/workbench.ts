@@ -204,16 +204,42 @@ export const RESULT_FIRST_MS = 6000;
 /** What the workbench's bottom slot shows: the pending bar, the write's line, or nothing (the same height). */
 export type BottomSlot = 'pending' | 'write' | 'empty';
 
+/** The write's line: a write running, its result (or "Cancelled"), a failure, or nothing (none, or dismissed). */
+export type SlotWrite = 'running' | 'result' | 'failure' | null;
+
+/** What {@link bottomSlot} decides from. */
+export interface IBottomSlotInput {
+	/** Documents staged. */
+	staged: number;
+	/** The write's line. */
+	write: SlotWrite;
+	/** Its result landed less than {@link RESULT_FIRST_MS} ago. */
+	fresh: boolean;
+	/** The staged set changed since it landed (the user acted on it). */
+	stagedSince: boolean;
+	/** The focus or the pointer is in the slot. */
+	held: boolean;
+	/** What the slot shows now. */
+	showing: BottomSlot;
+}
+
 /**
- * The one line of the workbench's bottom slot. The pending bar while documents are staged, else a write's line
- * (running, its result, or "Cancelled"); a result that lands while documents are staged shows first.
+ * The one line of the workbench's bottom slot: the pending bar while documents are staged, else the write's line.
+ * While documents are staged, the write's line still shows when:
  *
- * @param input - Documents staged, whether a write's line has words, and whether its result shows first.
+ * - a write is running (its result follows on the same line);
+ * - it shows and the focus or the pointer is in it (Write details, Dismiss: never swapped out from under them);
+ * - unless the staged set changed since it landed: a failure (until dismissed), or a result for a few seconds.
+ *
+ * @param input - {@link IBottomSlotInput}.
  * @returns What the slot shows.
  */
-export function bottomSlot(input: { staged: number; writeLine: boolean; resultFirst: boolean }): BottomSlot {
-	if (input.staged > 0 && !(input.writeLine && input.resultFirst)) return 'pending';
-	return input.writeLine ? 'write' : 'empty';
+export function bottomSlot(input: IBottomSlotInput): BottomSlot {
+	if (input.write === null) return input.staged > 0 ? 'pending' : 'empty';
+	if (input.staged === 0 || input.write === 'running') return 'write';
+	if (input.held && input.showing === 'write') return 'write';
+	if (input.stagedSince) return 'pending';
+	return input.write === 'failure' || input.fresh ? 'write' : 'pending';
 }
 
 /** What {@link panelOf} reads of an element. */

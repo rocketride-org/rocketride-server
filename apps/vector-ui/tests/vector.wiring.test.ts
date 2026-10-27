@@ -217,7 +217,7 @@ test('the console renders the strip, the directory, the chunks, adding documents
 	for (const file of ['components/DocumentsTab.tsx', 'components/TrashTab.tsx']) {
 		assert.match(code(file), /const writes = writesDuringRemoval\(model\.writes, state\.removal\.status\);/, `${file}: the writes follow the model, and are unavailable while a removal runs`);
 	}
-	assert.match(view, /const writeLine = state\.removal\.status === 'running' \|\| state\.removal\.message !== null;/, 'the status line says Removing… while a removal runs');
+	assert.match(view, /const write: SlotWrite = removal === dismissed \|\| \(removal\.status !== 'running' && removal\.message === null\) \? null : removal\.status === 'running' \? 'running' : removal\.status === 'error' \? 'failure' : 'result';/, 'the status line says Removing… while a removal runs');
 	assert.match(view, /entry\.controller\.open\(\)/);
 	assert.match(view, /\{addingMounted && <AddDocumentsAside [^>]*open=\{adding\}/, 'Add documents is an aside beside the panels, kept mounted once opened (an upload keeps following its progress)');
 	const strip = code('components/StatsStrip.tsx');
@@ -297,13 +297,28 @@ test('every removal is confirmed inline in the document that shows it, in both m
 	assert.doesNotMatch(devFrame, /<DocumentView key=\{version\}/, 'never a remount');
 	// I6/R1-I12: the bottom slot is always there, one style in every state; what it holds changes, its height never.
 	const hub = code('views/ConsoleView.tsx');
-	assert.equal(hub.match(/<div style=\{layout\.slot\} data-bottom-slot="">/g)?.length, 1);
+	assert.equal(hub.match(/<div\s+ref=\{slotRef\}\s+style=\{layout\.slot\}\s+data-bottom-slot=""/g)?.length, 1);
+	assert.doesNotMatch(hub, /style=\{\{ \.\.\.layout\.slot/, 'one style, never merged with a state');
+	// The flip back to the pending bar (bottomSlot): never while a write runs, nor under the focus or the pointer.
+	assert.match(hub, /const slot = bottomSlot\(\{ staged: staged\.size, write, fresh, stagedSince, held: inSlot\.focus \|\| inSlot\.pointer, showing: showing\.current \}\);/);
+	assert.match(hub, /onPointerEnter=\{\(\) => setInSlot\(\(was\) => \(\{ \.\.\.was, pointer: true \}\)\)\}\s*onPointerLeave=\{\(\) => setInSlot\(\(was\) => \(\{ \.\.\.was, pointer: false \}\)\)\}/);
+	assert.match(hub, /\{write === 'failure' && \(\s*<Button small variant="ghost" onClick=\{\(\) => setDismissed\(removal\)\}>\s*Dismiss\s*<\/Button>\s*\)\}/, 'a failure stays until dismissed (or the staged set changes)');
+	assert.match(hub, /if \(focusLost\(document\.activeElement, document\.body, null\)\) firstFocusable\(\[node\?\.querySelector<HTMLElement>\(TABBABLE\) \?\? null, returnFocus\(\)\]\)\?\.focus\(\);/, 'a control that leaves the slot with the focus hands it on, never to the page');
+	assert.match(hub, /status: \{ \.\.\.styles\.small, flex: 1,/, 'the sentence takes the room: Write details sit at the right end');
 	assert.match(hub, /slot: \{ flexShrink: 0, boxSizing: 'border-box', height: PENDING_BAR_HEIGHT,/, "exactly the pending bar's height");
 	assert.match(hub, /\{slot === 'pending' && <PendingBar \{\.\.\.panel\(tab\)\} \/>\}/);
-	assert.match(code('components/WriteAuditDetails.tsx'), /list: \{ position: 'absolute', bottom: '100%'/, 'Write details open upward: the line keeps its height');
-	assert.match(code('components/WriteAuditDetails.tsx'), /if \(event\.defaultPrevented \|\| event\.key !== 'Escape' \|\| !node\?\.open\) return;\s*event\.preventDefault\(\);\s*node\.open = false;\s*summary\.current\?\.focus\(\);/, 'Escape closes it (the innermost handler that acts), back to its summary');
-	assert.match(code('components/WriteAuditDetails.tsx'), /document\.addEventListener\('pointerdown', outside\)/, 'and a press outside it');
-	assert.doesNotMatch(code('components/WriteAuditDetails.tsx'), /stopPropagation/);
+	const audit = code('components/WriteAuditDetails.tsx');
+	assert.match(audit, /list: \{ position: 'absolute',/, 'Write details open over the panel: the line keeps its height');
+	assert.match(audit, /unplaced: \{ bottom: `calc\(100% \+ \$\{POPOVER_GAP\}px\)`, right: 0 \}/, 'up from the line until placed');
+	// Placed before paint by the map popovers' rules, inside the window, clipping ancestors and its surface (never under the sidebar).
+	assert.match(audit, /import \{ POPOVER_GAP, clipArea, placePopover, popoverKey \} from '\.\.\/map\/popover';/);
+	assert.match(audit, /const surface = node\.closest<HTMLElement>\('\[data-console\], \[data-document\]'\);\s*const area = clipArea\(\{ width: window\.innerWidth, height: window\.innerHeight \}, \[\.\.\.clippingRects\(node\), \.\.\.\(surface \? \[surface\.getBoundingClientRect\(\)\] : \[\]\)\]\);/);
+	assert.match(audit, /const at = placePopover\(\{ left: across\.left, right: across\.right, top: Math\.min\(line\.top, across\.top\), bottom: Math\.max\(line\.bottom, across\.bottom\) \}, size, area\);/, 'above its whole line, never over its words');
+	// Closed like them: Escape (the innermost handler that acts) back to its summary, a press outside, a resize.
+	assert.match(audit, /const key = popoverKey\(event\.key, event\.defaultPrevented\);\s*if \(!open \|\| !key\.close\) return;\s*event\.preventDefault\(\);\s*close\(key\.refocus\);/);
+	assert.match(audit, /window\.addEventListener\('resize', onResize\);\s*document\.addEventListener\('pointerdown', onDown\);/);
+	assert.match(audit, /new ResizeObserver/, 'and a resize of its line');
+	assert.doesNotMatch(audit, /stopPropagation/);
 	assert.match(app, /origin: documentOrigin\(payload\.objectId\),/, "the tab's actions ask under its origin");
 	for (const file of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/RemoveDialogHost.tsx']) assert.ok(!fs.existsSync(path.join(SRC, file)), `${file}: no modal confirmation is left`);
 	const panel = code('components/InlineRemoveConfirm.tsx');

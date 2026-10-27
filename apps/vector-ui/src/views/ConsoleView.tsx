@@ -96,7 +96,7 @@ import WriteAuditDetails from '../components/WriteAuditDetails';
 import type { IWorkbenchPanelProps } from '../components/workbenchProps';
 import { CONSOLE_ORIGIN } from '../vector/confirm';
 import { consoleScope, mapScopeFor } from '../vector/consoleModel';
-import { firstFocusable } from '../vector/focus';
+import { TABBABLE, firstFocusable, focusLost } from '../vector/focus';
 import { CONDITION_KINDS, checkScope, conditionAvailability, listingFilter, resolveScope, scopeStripText, scopeView, scopeWith } from '../vector/filters';
 import type { ConditionKind } from '../vector/filters';
 import { healthSummary, medianChunks } from '../vector/health';
@@ -106,7 +106,7 @@ import { providerTitle } from '../vector/support';
 import { REPAIR_NEEDED_TEXT, collectionMissing, formatCount } from '../vector/stats';
 import { BUSY, CAVEAT_SENTENCES, EMPTY } from '../vector/wording';
 import { NO_FAILURES, RESULT_FIRST_MS, bottomSlot, focusStranded, reprobeFor, statsFailures, unreachableShown } from '../vector/workbench';
-import type { WorkbenchTab } from '../vector/workbench';
+import type { BottomSlot, SlotWrite, WorkbenchTab } from '../vector/workbench';
 import { styles } from '../styles';
 import MapView from './MapView';
 
@@ -122,8 +122,9 @@ const layout = {
 	 */
 	slot: { flexShrink: 0, boxSizing: 'border-box', height: PENDING_BAR_HEIGHT, margin: '0 12px 8px', display: 'flex', alignItems: 'stretch', minWidth: 0 } as CSSProperties,
 	/** The write line in the slot: its sentence (announced), then the audit disclosure beside it (not announced). */
-	writeLine: { flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', padding: '0 12px' } as CSSProperties,
-	status: { ...styles.small, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
+	writeLine: { flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', gap: 8, padding: '0 12px' } as CSSProperties,
+	/** The sentence takes the room left, so Write details (and a failure's Dismiss) sit at the slot's right end. */
+	status: { ...styles.small, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
 	/** The panels beside the Add documents aside. */
 	body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' } as CSSProperties,
 	panels: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column' } as CSSProperties,
@@ -292,26 +293,30 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 		setAdding(true);
 	};
 	const prefix = `wb${useId().replace(/:/g, '')}`;
-	// The bottom slot's one line: the pending bar while documents are staged, else the write's line. A write's result
-	// that lands while documents are staged shows first (seen, not only announced), and the bar comes back after a few
-	// seconds or as soon as the staged set changes.
+	// The bottom slot's one line (bottomSlot): the pending bar while documents are staged, else the write's line. A
+	// write's result that lands while documents are staged shows first (seen, not only announced): a running write and
+	// a failure until the staged set changes (or Dismiss), a result for a few seconds; never swapped out from under the
+	// focus or the pointer.
 	const staged = useValueStore(entry.staged);
-	const writeLine = state.removal.status === 'running' || state.removal.message !== null;
-	const [resultFirst, setResultFirst] = useState(false);
-	const resultKey = writeLine ? `${state.removal.status}|${state.removal.message ?? ''}` : null;
-	// The staged set changed (the user acted): the bar comes back. Declared first, so a write that changes the staged
-	// set and lands its result in the same render still shows the result.
-	useEffect(() => setResultFirst(false), [staged]);
+	const removal = state.removal;
+	// Each write's line is its own object (the store sets a new one per write), so a Dismiss lasts until the next.
+	const [dismissed, setDismissed] = useState<typeof removal | null>(null);
+	const write: SlotWrite = removal === dismissed || (removal.status !== 'running' && removal.message === null) ? null : removal.status === 'running' ? 'running' : removal.status === 'error' ? 'failure' : 'result';
+	const [fresh, setFresh] = useState(false);
+	const [stagedSince, setStagedSince] = useState(false);
+	// The staged set changed (the user acted). Declared first, so a write that changes the staged set and lands its
+	// result in the same render still shows the result.
+	useEffect(() => setStagedSince(true), [staged]);
 	useEffect(() => {
-		if (resultKey === null) {
-			setResultFirst(false);
-			return undefined;
-		}
-		setResultFirst(true);
-		const timer = setTimeout(() => setResultFirst(false), RESULT_FIRST_MS);
+		setStagedSince(false);
+		setFresh(true);
+		const timer = setTimeout(() => setFresh(false), RESULT_FIRST_MS);
 		return () => clearTimeout(timer);
-	}, [resultKey]);
-	const slot = bottomSlot({ staged: staged.size, writeLine, resultFirst });
+	}, [removal]);
+	const slotRef = useRef<HTMLDivElement>(null);
+	const [inSlot, setInSlot] = useState({ focus: false, pointer: false });
+	const showing = useRef<BottomSlot>('empty');
+	const slot = bottomSlot({ staged: staged.size, write, fresh, stagedSince, held: inSlot.focus || inSlot.pointer, showing: showing.current });
 	const panel = (id: WorkbenchTab): IWorkbenchPanelProps => ({ entry, model, channels, actions, console: state, selection, visible: active && tab === id });
 	// Where the focus goes after a confirmation closes: the shown panel's marked row, else its grid, else the current tab.
 	const root = useRef<HTMLDivElement>(null);
@@ -323,6 +328,18 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 		const inShown = (selector: string): HTMLElement | null => shown?.querySelector<HTMLElement>(selector) ?? null;
 		return firstFocusable([inShown('[data-return-focus]'), inShown('[data-grid-focus] [data-grid-row][tabindex="0"]'), inShown('[data-grid-focus]'), currentTab()]);
 	};
+	// The slot changed what it shows: what it shows now is what it showed last; and a control in it that left with the
+	// focus (Dismiss, the pending bar going) hands the focus to the slot's first control, else the shown panel's chain.
+	useLayoutEffect(() => {
+		showing.current = slot;
+		if (typeof document === 'undefined' || !inSlot.focus) return;
+		const node = slotRef.current;
+		if (focusLost(document.activeElement, document.body, null)) firstFocusable([node?.querySelector<HTMLElement>(TABBABLE) ?? null, returnFocus()])?.focus();
+		const focus = !!node && node.contains(document.activeElement);
+		setInSlot((was) => (was.focus === focus ? was : { ...was, focus }));
+		// Only when the slot's content changed.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [slot]);
 	// Where the focus goes when Add documents closes and its opener cannot take it back: the header's button, else the tab.
 	const asideFocus = (): HTMLElement | null => firstFocusable([root.current?.querySelector<HTMLElement>('[data-add-documents] button'), currentTab()]);
 	// A tab switch made from inside a panel leaves the focus on an element now hidden: it goes to the new tab.
@@ -480,7 +497,17 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 						</WorkbenchPanel>
 					)}
 					{/* Under the panels, one line of a fixed height: what comes and goes after a press never moves a row above it. */}
-					<div style={layout.slot} data-bottom-slot="">
+					<div
+						ref={slotRef}
+						style={layout.slot}
+						data-bottom-slot=""
+						onFocus={() => setInSlot((was) => (was.focus ? was : { ...was, focus: true }))}
+						onBlur={(event) => {
+							if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setInSlot((was) => ({ ...was, focus: false }));
+						}}
+						onPointerEnter={() => setInSlot((was) => ({ ...was, pointer: true }))}
+						onPointerLeave={() => setInSlot((was) => ({ ...was, pointer: false }))}
+					>
 						{slot === 'pending' && <PendingBar {...panel(tab)} />}
 						{slot === 'write' && (
 							<div style={layout.writeLine} data-write-line="" title={state.removal.message ?? undefined}>
@@ -496,6 +523,11 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 								)}
 								{/* Outside the live element: opening it does not announce the line again. */}
 								{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails audit={state.removal.audit} />}
+								{write === 'failure' && (
+									<Button small variant="ghost" onClick={() => setDismissed(removal)}>
+										Dismiss
+									</Button>
+								)}
 							</div>
 						)}
 					</div>

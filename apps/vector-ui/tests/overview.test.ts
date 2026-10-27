@@ -169,10 +169,24 @@ test('the focus in a document surface: the opener while shown, the shown sub-tab
 });
 
 test("the bottom slot's one line: the pending bar while staged, else the write's line; a result that lands while staged shows first", () => {
-	assert.equal(bottomSlot({ staged: 0, writeLine: false, resultFirst: false }), 'empty');
-	assert.equal(bottomSlot({ staged: 0, writeLine: true, resultFirst: false }), 'write');
-	assert.equal(bottomSlot({ staged: 3, writeLine: false, resultFirst: false }), 'pending');
-	assert.equal(bottomSlot({ staged: 3, writeLine: true, resultFirst: true }), 'write', 'a Restore in the Trash while documents are staged: seen, not only announced');
-	assert.equal(bottomSlot({ staged: 3, writeLine: true, resultFirst: false }), 'pending', 'then the bar comes back');
+	const at = (over: Partial<Parameters<typeof bottomSlot>[0]>) => bottomSlot({ staged: 3, write: 'result', fresh: false, stagedSince: false, held: false, showing: 'write', ...over });
+	assert.equal(at({ staged: 0, write: null }), 'empty');
+	assert.equal(at({ staged: 0 }), 'write');
+	assert.equal(at({ write: null }), 'pending');
+	assert.equal(at({ fresh: true, showing: 'pending' }), 'write', 'a Restore in the Trash while documents are staged: seen, not only announced');
+	assert.equal(at({}), 'pending', 'then the bar comes back');
+	assert.equal(at({ fresh: true, stagedSince: true }), 'pending', 'or as soon as the staged set changes');
+	// A running write: its line until its result, whatever else.
+	assert.equal(at({ write: 'running', stagedSince: true, showing: 'pending' }), 'write');
+	// The focus or the pointer in the line (Write details, Dismiss): it is not swapped out from under them...
+	assert.equal(at({ held: true }), 'write');
+	assert.equal(at({ held: true, stagedSince: true }), 'write');
+	// ...but resting on the bar never brings an old result back.
+	assert.equal(at({ held: true, showing: 'pending' }), 'pending');
+	// A failure stays until the staged set changes or it is dismissed (no longer a line).
+	assert.equal(at({ write: 'failure' }), 'write');
+	assert.equal(at({ write: 'failure', stagedSince: true }), 'pending');
+	assert.equal(at({ write: null, showing: 'write' }), 'pending', 'Dismiss: the bar');
+	assert.equal(at({ write: null, staged: 0, showing: 'write' }), 'empty', 'Dismiss with nothing staged: an empty line');
 });
 
