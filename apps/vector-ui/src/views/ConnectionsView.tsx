@@ -152,7 +152,9 @@ export const ConnectionsView: React.FC = () => {
 				onOpenTab={(endpoint, tab) => {
 					// The console reads its tab from the connection's entry when it opens.
 					const limits = (probes[endpoint.key]?.ok ? readDialect(probes[endpoint.key]?.info)?.limits : null) ?? DEFAULT_LIMITS;
-					env.connection(endpoint, limits).tab.set(tab);
+					const opened = env.connection(endpoint, limits);
+					if (tab === 'query') opened.queryMode.set('search');
+					opened.tab.set(tab);
 					setDrawerKey(null);
 					env.openConsole(endpoint);
 				}}

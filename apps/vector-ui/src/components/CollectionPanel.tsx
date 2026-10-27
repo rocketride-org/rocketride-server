@@ -35,7 +35,10 @@
 import React, { useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { Banner, Button, LabelValue, Section } from 'shell';
+import { useVectorEnv } from '../envContext';
 import { collectionView } from '../vector/connections';
+import { listingComplete } from '../vector/documents';
+import { directoryView } from '../vector/filters';
 import { documentFields, filterPhrase, mergeFields } from '../vector/fields';
 import type { IFieldRow, IFieldsEstimate } from '../vector/fields';
 import { CHUNKS_PER_DOCUMENT, SAMPLE_DOCUMENTS, readFieldsSample } from '../vector/fieldsRead';
@@ -59,15 +62,18 @@ export const FIELDS_READING = 'Reading chunks…';
 /**
  * What the fields table says it was read over.
  *
+ * @param counted - How many documents the fields were counted over.
  * @param loaded - How many documents are loaded.
- * @param scoped - Whether the listing is under a scope (it then holds only the documents that match).
- * @param complete - Whether the listing has no more pages.
+ * @param scoped - Whether a scope was applied to choose them (by the store or here: the count is of what it keeps).
+ * @param complete - Whether the listing holds every document (it ended; not merely before the first page).
  * @param estimate - The chunk sample, when one was read and still current.
  * @param stale - A sample was read but documents were written since.
  * @returns The caption lines.
  */
-export function fieldsCaption(loaded: number, scoped: boolean, complete: boolean, estimate: IFieldsEstimate | null, stale = false): string[] {
-	const lines = [`Document fields are exact over the ${formatCount(loaded)} ${loaded === 1 ? 'document' : 'documents'} loaded${scoped ? ' under the current scope' : ''}${complete ? '' : '; more are not loaded yet'}.`];
+export function fieldsCaption(counted: number, loaded: number, scoped: boolean, complete: boolean, estimate: IFieldsEstimate | null, stale = false): string[] {
+	const noun = (n: number): string => (n === 1 ? 'document' : 'documents');
+	const over = scoped ? `the ${formatCount(counted)} ${noun(counted)} the current scope keeps, of ${formatCount(loaded)} loaded` : `the ${formatCount(counted)} ${noun(counted)} loaded`;
+	const lines = [`Document fields are exact over ${over}${complete ? '' : '; more are not loaded yet'}.`];
 	if (estimate && estimate.chunksRead > 0) {
 		lines.push(`Chunk fields are estimated: ${formatCount(estimate.chunksRead)} ${estimate.chunksRead === 1 ? 'chunk' : 'chunks'} read from ${formatCount(estimate.documentsRead)} ${estimate.documentsRead === 1 ? 'document' : 'documents'} at ${new Date(estimate.at).toLocaleTimeString()}. Types are guessed from those values and coverage is of those chunks, not of the collection.`);
 	} else if (estimate) {
@@ -99,15 +105,21 @@ export function coverageText(field: Pick<IFieldRow, 'coverage' | 'of'>): string 
 export function CollectionPanel({ entry, model, channels, actions, probe, console: state }: ICollectionPanelProps): React.ReactElement {
 	const sections = collectionView(probe, state.stats.view);
 	const writes = useSyncExternalStore(entry.writes.subscribe, entry.writes.get, entry.writes.get);
-	const kept = useSyncExternalStore(entry.fields.subscribe, entry.fields.get, entry.fields.get);
+	const sampled = useSyncExternalStore(entry.fields.subscribe, entry.fields.get, entry.fields.get);
 	// A write since the sample was read: its chunk fields describe documents that may have changed, so they are not shown.
-	const stale = kept !== null && (kept.writes ?? 0) !== writes;
-	const estimate = stale ? null : kept;
+	const documentsNow = state.stats.view?.documents ?? null;
+	const stale = sampled !== null && ((sampled.writes ?? 0) !== writes || (sampled.documents != null && documentsNow !== null && sampled.documents !== documentsNow));
+	const estimate = stale ? null : sampled;
 	const [reading, setReading] = useState(false);
 	const [failed, setFailed] = useState<IFailureText | null>(null);
 	const run = useRef(0);
 	const caller = channels.tools ?? channels.chat ?? channels.ingest;
-	const rows = state.directory.rows;
+	const scope = useSyncExternalStore(entry.scope.subscribe, entry.scope.get, entry.scope.get);
+	const env = useVectorEnv();
+	// The documents the fields are counted over: the loaded ones the scope keeps (matched here where the store did not
+	// apply it), else every loaded one.
+	const kept = scope === null ? null : directoryView(state.directory, scope, '', model.limits.scope_keys_max).scopeRows;
+	const rows = kept ?? state.directory.rows;
 	const listing = documentFields(rows);
 	const fields = mergeFields(listing, estimate ? estimate.rows.filter((f) => f.source === 'chunks') : []);
 	const blocked = caller === null ? 'No source of this pipeline is running, so chunks cannot be read.' : rows.length === 0 ? 'No documents are loaded, so there is nothing to sample.' : null;
@@ -118,7 +130,7 @@ export function CollectionPanel({ entry, model, channels, actions, probe, consol
 		setFailed(null);
 		actions.announce(FIELDS_READING);
 		try {
-			const next = await readFieldsSample(caller, model.nodes.store, rows, entry.writes.get());
+			const next = await readFieldsSample(caller, model.nodes.store, rows, entry.writes.get(), state.stats.view?.documents ?? null);
 			if (mine !== run.current) return;
 			entry.fields.set(next);
 			actions.announce(`Read ${next.chunksRead} chunks from ${next.documentsRead} documents.`);
@@ -130,7 +142,7 @@ export function CollectionPanel({ entry, model, channels, actions, probe, consol
 	};
 	return (
 		<div style={local.scroll} data-collection-tab>
-			{sections.length === 0 && <p style={{ ...styles.small, margin: '12px 0' }}>The store node has not answered its dialect, so there is nothing to show yet. Test connection on the Connections page asks again.</p>}
+			{sections.length === 0 && <p style={{ ...styles.small, margin: '12px 0' }}>{`The store node has not answered its dialect, so there is nothing to show yet.${env.kind === 'local' ? ' Test connection on the Connections page asks again.' : ' Refresh the connection list to ask again.'}`}</p>}
 			{sections.map((section) => (
 				<Section key={section.label} label={section.label}>
 					{section.rows.map((row) => (
@@ -174,7 +186,7 @@ export function CollectionPanel({ entry, model, channels, actions, probe, consol
 					{blocked !== null && <span style={styles.small}>{blocked}</span>}
 				</div>
 				{failed && <Banner variant="error">{failed.headline}</Banner>}
-				{fieldsCaption(rows.length, state.directory.filter !== null, state.directory.cursor === null, estimate, stale).map((line) => (
+				{fieldsCaption(rows.length, state.directory.rows.length, scope !== null && kept !== null, listingComplete(state.directory), estimate, stale).map((line) => (
 					<p key={line} style={{ ...styles.small, margin: '4px 0' }}>{line}</p>
 				))}
 			</Section>

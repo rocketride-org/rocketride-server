@@ -124,8 +124,8 @@ test('the fields line says what was read, and the card says which sources run', 
 
 test('the fields caption says when documents were written since the sample', () => {
 	const read = { rows: [], chunksRead: 3, documentsRead: 1, at: 0, writes: 0 };
-	assert.match(fieldsCaption(4, false, true, null, true)[1], /^Documents were written since the chunk fields were read/);
-	assert.match(fieldsCaption(4, false, true, read, false)[1], /^Chunk fields are estimated/);
+	assert.match(fieldsCaption(4, 4, false, true, null, true)[1], /^Documents were written since the chunk fields were read/);
+	assert.match(fieldsCaption(4, 4, false, true, read, false)[1], /^Chunk fields are estimated/);
 });
 
 test('wiring: the landing drawer is the only DetailPanel; the card and the details panel use the shared content', () => {

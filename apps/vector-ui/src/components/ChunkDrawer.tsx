@@ -73,7 +73,7 @@ export function metadataText(value: unknown): string {
 	return text.length > VALUE_CHARS ? `${text.slice(0, VALUE_CHARS - 1)}…` : text;
 }
 
-type NeighboursState = { status: 'skipped'; reason: string } | { status: 'loading' } | { status: 'error'; error: IFailureText } | { status: 'done'; list: INeighbourList; asked: number };
+type NeighboursState = { status: 'skipped'; reason: string } | { status: 'loading' } | { status: 'error'; error: IFailureText } | { status: 'done'; list: INeighbourList; returned: number };
 
 /** Props. */
 export interface IChunkDrawerProps {
@@ -134,12 +134,11 @@ export function ChunkDrawer({ objectId, path, chunk, caller, store, documentChun
 		const asked = neighboursK(documentChunks, maxNeighbours);
 		fetchNeighbors(caller, store, key, asked).then(
 			(answer) => {
-				if (live) setState({ status: 'done', list: neighbourRows(answer.items, objectId), asked });
+				if (live) setState({ status: 'done', list: neighbourRows(answer.items, objectId), returned: answer.items.length });
 			},
 			(error) => {
-				// A request a newer one replaced says nothing (failureText is null for it).
-				const text = failureText(error);
-				if (live && text) setState({ status: 'error', error: text });
+				// A request a newer one replaced has no failure text of its own: say so, with a way to ask again.
+				if (live) setState({ status: 'error', error: failureText(error) ?? { headline: 'Another neighbours request replaced this one.' } });
 			}
 		);
 		return () => {
@@ -222,7 +221,7 @@ export function ChunkDrawer({ objectId, path, chunk, caller, store, documentChun
 						)}
 						{state.status === 'done' && (
 							<>
-								<p style={{ ...appStyles.small, margin: '0 0 6px' }}>{state.list.rows.length === 0 && state.list.leftOut === 0 ? 'The store returned no neighbours for this chunk.' : neighboursCaption(state.list, state.asked)}</p>
+								<p style={{ ...appStyles.small, margin: '0 0 6px' }}>{state.list.rows.length === 0 && state.list.leftOut === 0 ? 'The store returned no neighbours for this chunk.' : neighboursCaption(state.list, state.returned)}</p>
 								<ol style={styles.list} aria-label="Nearest chunks in the collection">
 									{state.list.rows.map((row) => (
 										<li key={row.id} style={styles.neighbour}>
@@ -255,7 +254,7 @@ export function ChunkDrawer({ objectId, path, chunk, caller, store, documentChun
 							<Button variant="ghost" onClick={() => onCopy(chunk.content)}>
 								Copy text
 							</Button>
-							<Button variant="ghost" disabled={!writes.enabled} title={writes.enabled ? 'Move the whole document to the trash' : (writes.reason ?? undefined)} onClick={() => actions.requestRemove([objectId])}>
+							<Button variant="ghost" aria-disabled={!writes.enabled} title={writes.enabled ? 'Move the whole document to the trash' : (writes.reason ?? undefined)} onClick={() => writes.enabled && actions.requestRemove([objectId])}>
 								Move document to Trash
 							</Button>
 						</div>
