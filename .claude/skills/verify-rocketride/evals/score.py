@@ -74,7 +74,7 @@ def outcome(case: dict, result: dict, run_dir: Path, use_model: bool) -> tuple[s
         )
         if j.get('match') is None:
             return 'unjudged', j.get('reason', '')
-        return ('caught', j['reason']) if j['match'] else ('wrong-defect', j['reason'])
+        return ('caught', j.get('reason', '')) if j['match'] else ('wrong-defect', j.get('reason', ''))
     if not found:
         return 'clean', 'no defect reported'
     known = case.get('known_issues')
@@ -89,7 +89,7 @@ def outcome(case: dict, result: dict, run_dir: Path, use_model: bool) -> tuple[s
     )
     if j.get('match') is None:
         return 'unjudged', j.get('reason', '')
-    return ('clean', 'only known issues reported') if j['match'] else ('false-alarm', j['reason'])
+    return ('clean', 'only known issues reported') if j['match'] else ('false-alarm', j.get('reason', ''))
 
 
 def main() -> None:
