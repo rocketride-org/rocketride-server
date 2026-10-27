@@ -180,6 +180,9 @@ const styles = {
 	firstLine: { maxWidth: '40%', minWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 12, padding: '4px 8px', border: '1px solid var(--rr-border)', borderRadius: 4, background: 'var(--rr-bg-paper)', color: 'var(--rr-text-primary)', cursor: 'pointer', textAlign: 'left' } as CSSProperties,
 	// Run and Run all, or Stop waiting in their place: one slot, so the run bar keeps its width while a run is out.
 	runSlot: { display: 'contents' } as CSSProperties,
+	// The run bar's state text ("Will run…", "Running…", "Waiting…"): a fixed basis, so line breaking sees one width
+	// whatever it says, and the bar does not wrap and unwrap around each run. It can hold the focus (see the run slot).
+	runState: { flex: '0 1 220px', minWidth: 0, fontSize: 12, color: 'var(--rr-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', outline: 'none' } as CSSProperties,
 	willRun: { flex: '0 1 auto', maxWidth: 260, fontSize: 12, color: 'var(--rr-text-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
 	notices: { padding: '6px 24px 0', display: 'flex', flexDirection: 'column', gap: 6 } as CSSProperties,
 	resultsRow: { flex: 1, minHeight: 0, display: 'flex' } as CSSProperties,
@@ -716,12 +719,30 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 		changeSplit(splitToggled(split));
 	};
 
-	// The focus was on Run or Run all when the run started (or on Stop waiting when it ended): the button it was on is
-	// gone, so the one now in the slot takes it, rather than the page.
+	// The focus was in the run slot (Run, Run all, or Stop waiting) when this tab's run changed: the button it was on is
+	// gone or disabled, so the slot's button takes it when it can be pressed, and otherwise the state text beside it,
+	// which says why (parked). Parked focus moves back to Run once Run can be pressed again. Only this tab's run moves a
+	// lost focus, so another tab's request freeing the gate never takes the focus from the page.
+	const runState = useRef<HTMLSpanElement | null>(null);
+	const parkedFromSlot = useRef(false);
+	const lastRun = useRef({ canStop: runner.canStop, running: runner.running });
 	useLayoutEffect(() => {
+		const runChanged = lastRun.current.canStop !== runner.canStop || lastRun.current.running !== runner.running;
+		lastRun.current = { canStop: runner.canStop, running: runner.running };
 		const focused = document.activeElement;
-		if (runSlotFocused.current && (focused === null || focused === document.body || !focused.isConnected)) runSlot.current?.querySelector<HTMLElement>('button')?.focus();
-	}, [runner.canStop]);
+		const lost = focused === null || focused === document.body || !focused.isConnected;
+		const stuck = focused instanceof HTMLButtonElement && focused.disabled && runSlot.current?.contains(focused) === true;
+		const parked = parkedFromSlot.current && focused === runState.current;
+		if (!parked && !(runChanged && runSlotFocused.current && (lost || stuck))) return;
+		const button = runSlot.current?.querySelector<HTMLButtonElement>('button');
+		if (button && !button.disabled) {
+			parkedFromSlot.current = false;
+			button.focus();
+		} else if (!parked && runState.current) {
+			parkedFromSlot.current = true;
+			runState.current.focus();
+		}
+	}, [runner.canStop, runner.running, gateBusy]);
 	const runBar = (
 		<div style={barHost === undefined ? styles.runBar : styles.runBarInRow}>
 			{split.collapsed && (
@@ -736,7 +757,8 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 					runSlotFocused.current = true;
 				}}
 				onBlur={(event) => {
-					if (!event.currentTarget.contains(event.relatedTarget as Node | null)) runSlotFocused.current = false;
+					// Focus going nowhere (its button removed or disabled) still belongs to the slot; focus going elsewhere does not.
+					if (event.relatedTarget !== null && !event.currentTarget.contains(event.relatedTarget as Node)) runSlotFocused.current = false;
 				}}
 			>
 				{runner.canStop ? (
@@ -771,7 +793,16 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 				const chip = rowLimitChip(limitChoice, dialect);
 				return <span title={chip.title ?? undefined}><StatusBadge variant="muted">{chip.text}</StatusBadge></span>;
 			})()}
-			<span style={styles.willRun}>{runner.running ? 'Running…' : waiting ? 'Waiting for an earlier request to finish…' : willRun}</span>
+			<span
+				ref={runState}
+				tabIndex={-1}
+				style={styles.runState}
+				onBlur={() => {
+					parkedFromSlot.current = false;
+				}}
+			>
+				{runner.running ? 'Running…' : waiting ? 'Waiting for an earlier request to finish…' : willRun}
+			</span>
 			<span role="group" aria-label="Show the result as">
 				<ToggleGroup options={views} value={tab} onChange={(id) => setTab(id)} />
 			</span>

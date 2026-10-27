@@ -202,7 +202,17 @@ test('Stop waiting takes the Run / Run all slot while a run is out, and the focu
 	assert.ok(/\{runner\.canStop \? \(\s*<Button variant="ghost" small=\{inRow\} title=\{STOP_WAITING_NOTE\} onClick=\{\(\) => runner\.stopWaiting\(\)\}>\s*Stop waiting\s*<\/Button>\s*\) : \(/.test(bar), 'Stop waiting in place of Run and Run all');
 	assert.equal((bar.match(/Stop waiting\s*<\/Button>/g) ?? []).length, 1, 'and nowhere else in the bar');
 	assert.ok(/runSlot: \{ display: 'contents' \}/.test(surface), 'the slot adds no box of its own');
-	assert.ok(/useLayoutEffect\(\(\) => \{\s*const focused = document\.activeElement;\s*if \(runSlotFocused\.current && \(focused === null \|\| focused === document\.body \|\| !focused\.isConnected\)\) runSlot\.current\?\.querySelector<HTMLElement>\('button'\)\?\.focus\(\);\s*\}, \[runner\.canStop\]\);/.test(surface), 'a focus lost with the button that went goes to the one in the slot');
+	// Review 4d: a focus lost with the button that went goes to the slot's button when it can be pressed, otherwise to
+	// the state text (it says why), and back to Run once Run can be pressed; only this tab's run moves a lost focus.
+	const focusRule = surface.slice(surface.indexOf('const parkedFromSlot = useRef(false);'), surface.indexOf('const runBar = ('));
+	assert.ok(/const stuck = focused instanceof HTMLButtonElement && focused\.disabled && runSlot\.current\?\.contains\(focused\) === true;/.test(focusRule), 'a disabled Run that kept the focus counts as lost');
+	assert.ok(/if \(!parked && !\(runChanged && runSlotFocused\.current && \(lost \|\| stuck\)\)\) return;/.test(focusRule), 'only this tab\'s run (or parked focus) moves it');
+	assert.ok(/if \(button && !button\.disabled\) \{\s*parkedFromSlot\.current = false;\s*button\.focus\(\);\s*\} else if \(!parked && runState\.current\) \{\s*parkedFromSlot\.current = true;\s*runState\.current\.focus\(\);\s*\}/.test(focusRule), 'a pressable button, else the state text');
+	assert.ok(/\}, \[runner\.canStop, runner\.running, gateBusy\]\);/.test(focusRule), 'a run that ends before Stop waiting shows, and the gate freeing, both count');
+	assert.ok(/if \(event\.relatedTarget !== null && !event\.currentTarget\.contains\(event\.relatedTarget as Node\)\) runSlotFocused\.current = false;/.test(surface), 'focus going nowhere still belongs to the slot');
+	// Review 4d: the state text has a fixed flex basis, so the bar's width does not change with what it says.
+	assert.ok(/runState: \{ flex: '0 1 220px', minWidth: 0,[^}]*textOverflow: 'ellipsis'/.test(surface), 'a fixed basis, cut with an ellipsis');
+	assert.ok(/<span\s+ref=\{runState\}\s+tabIndex=\{-1\}\s+style=\{styles\.runState\}/.test(bar), 'the state text can hold the focus');
 	// Review 4c: the hidden-editor divider sits 3 px over the tab row's bottom borders, in the workbench only.
 	assert.ok(/overlap=\{split\.collapsed && barHost !== undefined \? 3 : 0\}/.test(surface));
 	const divider = code(read('components', 'SplitPane.tsx'));
