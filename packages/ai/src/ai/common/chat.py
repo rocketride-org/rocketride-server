@@ -29,6 +29,7 @@ from ai.common.validation import (
 )
 from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, STOP_SEQUENCES_VAR, dispatch_native_chat_stream
 from ai.common.llm_adapter import LangChainAdapter, NativeOpenAIResponsesAdapter, drive_adapter
+from ai.common.llm_tools import ToolNames, from_langchain, is_turn, model_origin, to_langchain, tool_specs
 
 
 # Finish reasons that mean the model ran out of output budget, as the Responses API
@@ -88,6 +89,11 @@ class ChatBase:
     # Opt-in: a driver sets True when its request builder reads PROMPT_CACHE_PREFIX_VAR
     # and marks that prefix for the provider's prompt cache (Anthropic).
     SUPPORTS_PROMPT_CACHE_PREFIX: bool = False
+
+    # Opt-in: a driver sets True when its model takes a turn-mode Question natively
+    # through chat_turn. LLMBase refuses turns to every other driver before any request;
+    # nothing is emulated. A flagged driver must not override chat(), which routes turns.
+    SUPPORTS_NATIVE_TOOLS: bool = False
 
     # Native stream handler key, set by non-OpenAI drivers (e.g. Anthropic);
     # left empty for OpenAI-compatible drivers, which ChatBase auto-wires.
@@ -389,6 +395,10 @@ class ChatBase:
             Exception: If network/API retries are exhausted or non-retryable
                       errors occur
         """
+        return self._with_retries(lambda: self._chat(prompt))
+
+    def _with_retries(self, call: Callable[[], Any]) -> Any:
+        """Run one model call, retrying transient errors with exponential backoff (see _chat_with_retries)."""
         from ai.constants import CONST_CHAT_MAX_RETRIES, CONST_CHAT_BASE_DELAY, CONST_CHAT_MAX_DELAY
 
         max_network_retries = CONST_CHAT_MAX_RETRIES
@@ -398,7 +408,7 @@ class ChatBase:
         for attempt in range(max_network_retries):
             try:
                 # Call the actual chat implementation provided by the subclass
-                return self._chat(prompt)
+                return call()
 
             except Exception as e:
                 # Determine if this is a retryable error
@@ -592,6 +602,72 @@ class ChatBase:
         # Return the model's response
         return result
 
+    @property
+    def supports_tools(self) -> bool:
+        """True when this driver takes turn-mode Questions (native tool calling)."""
+        return self.SUPPORTS_NATIVE_TOOLS
+
+    def _turn_llm(self) -> Any:
+        """Return the LangChain chat model a turn runs on. A driver adjusts it here (thinking, Responses API)."""
+        return self._llm
+
+    def chat_turn(
+        self,
+        question: Question,
+        on_chunk: Optional[Callable[[str], None]] = None,
+        on_finish: Optional[Callable[[Optional[str]], None]] = None,
+        on_reasoning_chunk: Optional[Callable[[str], None]] = None,
+    ) -> Answer:
+        """Send one turn of a turn-mode Question natively and return the model's message.
+
+        Streams when on_chunk is given, falling back to one invoke with retries if the stream
+        fails before any text reached the caller. Reasoning goes to on_reasoning_chunk.
+        """
+        question.checkTurn()
+        llm = self._turn_llm()
+        origin = model_origin(llm)
+        cache = bool(self.SUPPORTS_PROMPT_CACHE_PREFIX and question.cachePrefix)
+        history = to_langchain(question.getSystemPrompt(), question.getTurnMessages(), origin, cache)
+        if question.tools:
+            llm = llm.bind_tools(tool_specs(question.tools))
+
+        message = None
+        emitted = False
+        if on_chunk is not None and hasattr(llm, 'stream'):
+
+            def on_text(text: str) -> None:
+                nonlocal emitted
+                emitted = True
+                on_chunk(text)
+
+            adapter = LangChainAdapter(llm, history=list(history), stream_kwargs=_stop_kwargs())
+            try:
+                drive_adapter(adapter, None, on_text, on_reasoning_chunk)
+                message = adapter.message
+            except Exception as e:
+                if emitted:
+                    raise
+                warning(
+                    f'Streaming disabled for model={self._model} '
+                    f'({type(e).__name__}): {e}. Falling back to non-streaming response.'
+                )
+        if message is None:
+
+            def invoke() -> LangChainAdapter:
+                adapter = LangChainAdapter(llm, history=list(history), stream_kwargs=_stop_kwargs())
+                adapter.collect(None)
+                return adapter
+
+            adapter = self._with_retries(invoke)
+            message = adapter.message
+            if adapter.reasoning and on_reasoning_chunk is not None:
+                on_reasoning_chunk(adapter.reasoning)
+
+        turn, stop = from_langchain(message, ToolNames.build(question.tools, question.messages), origin)
+        if on_finish is not None:
+            on_finish(stop)
+        return Answer(message=turn, stopReason=stop)
+
     def _prompt_cache_prefix(self, question: Question) -> Optional[str]:
         """Return the start of *question*'s prompt that stays the same between calls.
 
@@ -616,6 +692,9 @@ class ChatBase:
         """Chat with Question/Answer objects (JSON validation + retry); forwards the
         streaming callbacks unless expectJson, which needs the validated final answer.
         """
+        if is_turn(question):
+            return self.chat_turn(question, on_chunk, on_finish, on_reasoning_chunk)
+
         # No streaming for expectJson: repair retries would paint a bad first attempt.
         stream_cbs = (None, None, None) if question.expectJson else (on_chunk, on_finish, on_reasoning_chunk)
 

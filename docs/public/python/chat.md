@@ -77,3 +77,47 @@ Semantics worth knowing:
 - `answer.tokens` carries the turn-total LLM token usage reported by the server.
 
 A complete chat program is [example 6](/clients/python/examples#6-chat-question-with-instructions-and-examples-parse-json-answer).
+
+## Native tool calling
+
+Put the conversation in `messages` to send it as real model turns, with tools
+the model can call. A non-empty `messages` is turn mode. The model answers with
+a message you append unchanged, a stop reason, and any tool calls. You run the
+tools and send each result back under the call's `id`.
+
+```python
+from rocketride.schema import Answer, Question, Tool, UserMessage
+
+question = Question(
+    role='You file GitHub issues.',
+    tools=[Tool(name='github.create_issue', description='Create an issue.', inputSchema=schema)],
+    messages=[UserMessage(content='File an issue about the flaky test.')],
+)
+while True:
+    answer = Answer.fromResult(await client.chat(token=token, question=question))
+    if answer.error:
+        raise RuntimeError(answer.error.message)
+    question.addMessage(answer.message)
+    if answer.stopReason != 'tool_use':
+        break
+    for call in answer.toolCalls():
+        question.addToolResult(call.id, run_tool(call.name, call.args))
+print(answer.getText())
+```
+
+- Tool names stay yours, dots included. The engine maps them to names the
+  provider accepts and maps calls back.
+- `call.args` is a dict, or the raw string when the model's arguments were not
+  valid JSON. Answer a string with `addToolResult(call.id, '...', isError=True)`.
+- The system prompt is `role`, instructions and examples. Context, documents and
+  goals are added to the last user message, so a RAG node upstream still works.
+  `history`, `questions` and `expectJson` are rejected in turn mode.
+- Reasoning blocks in `answer.message` carry provider state. Keep them as they
+  are; the next request needs them.
+- With `cachePrefix=True`, the Anthropic node caches the system prompt and the
+  conversation so far.
+- The Anthropic, OpenAI and OpenAI-Compatible API nodes support turn mode. Any
+  other LLM node answers with `answer.error.code == 'tools_unsupported'` before calling
+  its model.
+- An engine older than turn mode ignores `messages` and answers a near-empty
+  prompt as text, so `fromResult` returns a text `Answer` with no `message`.

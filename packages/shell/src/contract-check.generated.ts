@@ -21,6 +21,7 @@ import type { ShellApiV3 } from '../contract/versions/v3';
 import type { ShellApiV4 } from '../contract/versions/v4';
 import type { ShellApiV5 } from '../contract/versions/v5';
 import type { ShellApiV6 } from '../contract/versions/v6';
+import type { ShellApiV7 } from '../contract/versions/v7';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -619,6 +620,26 @@ import type { LogStreamsResult as Frozen_LogStreamsResult } from '../contract/ve
 import type { LogStreamsResult as Current_LogStreamsResult } from './api';
 import type { CProfileFunctionStats as Frozen_CProfileFunctionStats } from '../contract/versions/v6';
 import type { CProfileFunctionStats as Current_CProfileFunctionStats } from './api';
+import type { Tool as Frozen_Tool } from '../contract/versions/v7';
+import type { Tool as Current_Tool } from './api';
+import type { TextBlock as Frozen_TextBlock } from '../contract/versions/v7';
+import type { TextBlock as Current_TextBlock } from './api';
+import type { ToolCallBlock as Frozen_ToolCallBlock } from '../contract/versions/v7';
+import type { ToolCallBlock as Current_ToolCallBlock } from './api';
+import type { ToolResultBlock as Frozen_ToolResultBlock } from '../contract/versions/v7';
+import type { ToolResultBlock as Current_ToolResultBlock } from './api';
+import type { ReasoningBlock as Frozen_ReasoningBlock } from '../contract/versions/v7';
+import type { ReasoningBlock as Current_ReasoningBlock } from './api';
+import type { UserMessage as Frozen_UserMessage } from '../contract/versions/v7';
+import type { UserMessage as Current_UserMessage } from './api';
+import type { AssistantMessage as Frozen_AssistantMessage } from '../contract/versions/v7';
+import type { AssistantMessage as Current_AssistantMessage } from './api';
+import type { Message as Frozen_Message } from '../contract/versions/v7';
+import type { Message as Current_Message } from './api';
+import type { StopReason as Frozen_StopReason } from '../contract/versions/v7';
+import type { StopReason as Current_StopReason } from './api';
+import type { AnswerError as Frozen_AnswerError } from '../contract/versions/v7';
+import type { AnswerError as Current_AnswerError } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -635,6 +656,8 @@ const _floor_v5: ShellApiV5 = {} as ShellApiShape;
 void _floor_v5;
 const _floor_v6: ShellApiV6 = {} as ShellApiShape;
 void _floor_v6;
+const _floor_v7: ShellApiV7 = {} as ShellApiShape;
+void _floor_v7;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1237,3 +1260,23 @@ const _t_LogStreamsResult: Frozen_LogStreamsResult = {} as Current_LogStreamsRes
 void _t_LogStreamsResult;
 const _t_CProfileFunctionStats: Frozen_CProfileFunctionStats = {} as Current_CProfileFunctionStats;
 void _t_CProfileFunctionStats;
+const _t_Tool: Frozen_Tool = {} as Current_Tool;
+void _t_Tool;
+const _t_TextBlock: Frozen_TextBlock = {} as Current_TextBlock;
+void _t_TextBlock;
+const _t_ToolCallBlock: Frozen_ToolCallBlock = {} as Current_ToolCallBlock;
+void _t_ToolCallBlock;
+const _t_ToolResultBlock: Frozen_ToolResultBlock = {} as Current_ToolResultBlock;
+void _t_ToolResultBlock;
+const _t_ReasoningBlock: Frozen_ReasoningBlock = {} as Current_ReasoningBlock;
+void _t_ReasoningBlock;
+const _t_UserMessage: Frozen_UserMessage = {} as Current_UserMessage;
+void _t_UserMessage;
+const _t_AssistantMessage: Frozen_AssistantMessage = {} as Current_AssistantMessage;
+void _t_AssistantMessage;
+const _t_Message: Frozen_Message = {} as Current_Message;
+void _t_Message;
+const _t_StopReason: Frozen_StopReason = {} as Current_StopReason;
+void _t_StopReason;
+const _t_AnswerError: Frozen_AnswerError = {} as Current_AnswerError;
+void _t_AnswerError;

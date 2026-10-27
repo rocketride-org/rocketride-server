@@ -72,8 +72,13 @@ def flatten_content_blocks(content: Any) -> Tuple[str, str, bool]:
             elif block.get('signature'):
                 saw_signature_only = True
         elif btype == 'reasoning':
-            # LangChain v1 renamed the standard block: thinking -> reasoning.
-            piece = block.get('reasoning') or block.get('text') or ''
+            # LangChain v1 renamed the standard block: thinking -> reasoning. The OpenAI
+            # Responses API (through LangChain) carries its text in a summary list.
+            piece = (
+                block.get('reasoning')
+                or block.get('text')
+                or ''.join(part.get('text', '') for part in block.get('summary') or [] if isinstance(part, dict))
+            )
             if piece:
                 reasoning_parts.append(piece)
         elif btype == 'text' or not btype:

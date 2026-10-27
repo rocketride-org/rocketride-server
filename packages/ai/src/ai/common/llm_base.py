@@ -4,9 +4,10 @@ import inspect
 from typing import Callable, List, Optional
 
 from rocketlib import IInstanceBase, invoke_function, warning
-from ai.common.schema import Question, Answer
+from ai.common.schema import Question, Answer, AnswerError
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
 from ai.common.llm_adapter import turn_usage
+from ai.common.llm_tools import ToolsUnsupported, is_turn
 
 
 class LLMBase(IInstanceBase):
@@ -25,6 +26,10 @@ class LLMBase(IInstanceBase):
         stop: Optional[List[str]] = None,
     ) -> Answer:
         chat = self.IGlobal._chat
+        # Every driver passes here, including those that override chat(), so the refusal
+        # happens before any provider call and costs no tokens.
+        if is_turn(question) and not getattr(chat, 'supports_tools', False):
+            raise ToolsUnsupported(getattr(chat, '_model', None) or type(chat).__name__)
         # Publish the stop sequences on the per-call contextvar so ChatBase's model sinks
         # forward them to the provider API. A contextvar (not a chat() kwarg) leaves the
         # many chat()/_chat() provider overrides untouched. Reset in finally so a stop from
@@ -92,10 +97,15 @@ class LLMBase(IInstanceBase):
                     on_reasoning_chunk=on_reasoning_chunk,
                 )
             except Exception as e:
-                err_msg = f'**LLM error** — {type(e).__name__}: {e}'
                 warning(f'writeQuestions: LLM call failed: {type(e).__name__}: {e}')
-                answer = Answer()
-                answer.setAnswer(err_msg)
+                if is_turn(question):
+                    # Typed, so a client can tell "no tools here" from "the provider failed".
+                    code = 'tools_unsupported' if isinstance(e, ToolsUnsupported) else 'provider_error'
+                    answer = Answer(error=AnswerError(code=code, message=f'{type(e).__name__}: {e}'))
+                else:
+                    err_msg = f'**LLM error** — {type(e).__name__}: {e}'
+                    answer = Answer()
+                    answer.setAnswer(err_msg)
                 # A turn that failed after burning tokens still spent them: the adapters
                 # report from their own finally, so the scope holds what was billed —
                 # hang it on the error answer or the Trace shows nothing for exactly the

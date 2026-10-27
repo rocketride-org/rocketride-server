@@ -279,6 +279,10 @@ constructor(options?: {
 | `addDocuments` | `addDocuments(documents: Doc \| Doc[]): void` | Adds documents for the AI to reference. |
 | `addGoal` | `addGoal(goal: string): void` | Adds a goal statement for the AI. |
 | `getPrompt` | `getPrompt(hasPreviousJsonFailed?: boolean): string` | Returns the full prompt (internal use). |
+| `messages` | field, default `[]` | The conversation, as `UserMessage` / `AssistantMessage` items. Non-empty switches the question to turn mode (native tool calling). See [Chat](/clients/typescript/chat#native-tool-calling). |
+| `tools` | field, default `[]` | `{ name, description?, inputSchema }` items the model may call. Turn mode only. |
+| `addMessage` | `addMessage(message: Message): void` | Appends a message, such as `answer.message`. |
+| `addToolResult` | `addToolResult(callId: string, content: string, isError?: boolean): void` | Adds a tool result to the user message after the assistant turn that made the call. Throws for an unknown `callId`. |
 | `cachePrefix` | field, default `false` | Set to `true` when the question will be sent again with only its context, documents, goals or questions changed (an agent loop). A provider with prompt caching (the Anthropic node, and Claude models on the Bedrock node) may then cache the unchanging start of the prompt: role, instructions, examples and history. Other providers ignore it. |
 
 ## Answer
@@ -297,6 +301,12 @@ constructor(expectJson?: boolean)  // default false
 | `getJson` | `getJson(): unknown` | The stored answer as parsed JSON; **throws** if it is not JSON-compatible. |
 | `isJson` | `isJson(): boolean` | Returns the `expectJson` flag this `Answer` was constructed with (does not inspect content). |
 | `Answer.parsePython` | `parsePython(value: string): string` | Static. Extracts Python code from a code block in the response. |
+| `Answer.fromResult` | `fromResult(result: PIPELINE_RESULT, key?: string): Answer` | Static. Reads the answer a turn-mode `client.chat()` returned. A text entry gives a text `Answer`. |
+| `message` | field | The model's turn (`AssistantMessage`). Set only in turn mode. |
+| `stopReason` | field | `end_turn`, `tool_use`, `max_tokens`, `stop_sequence` or `refusal`. Set only in turn mode. |
+| `error` | field | `{ code, message }` when a turn failed; `code` is `tools_unsupported` or `provider_error`. |
+| `toolCalls` | getter | The calls in `message`, in order. Empty for a text answer. |
+| `tokens` | field | Turn token usage, set by `fromResult`. |
 
 ## Types
 

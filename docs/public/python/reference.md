@@ -246,6 +246,11 @@ Question(
 | `addDocuments` | `addDocuments(self, documents: Doc \| List[Doc])` | Adds documents for the AI to reference. |
 | `addGoal` | `addGoal(self, goal: str)` | Adds a goal statement for the AI. |
 | `getPrompt` | `getPrompt(self, has_previous_json_failed: bool = False) -> str` | Returns the full prompt (internal). |
+| `messages` | field, default `[]` | The conversation, as `UserMessage` / `AssistantMessage` items. Non-empty switches the question to turn mode (native tool calling). See [Chat](/clients/python/chat#native-tool-calling). |
+| `tools` | field, default `[]` | `Tool(name, description, inputSchema)` items the model may call. Turn mode only. |
+| `addMessage` | `addMessage(self, message: UserMessage \| AssistantMessage \| dict)` | Appends a message, such as `answer.message`. Raises `ValueError` if the question uses a field turn mode rejects. |
+| `addToolResult` | `addToolResult(self, callId: str, content: str, isError: bool = False)` | Adds a tool result to the user message after the assistant turn that made the call. Raises `ValueError` for an unknown `callId`. |
+| `checkTurn` | `checkTurn(self)` | Checks the turn-mode rules (parsing runs it); raises `ValueError`. <!-- language-specific --> |
 | `cachePrefix` | field, default `False` | Set to `True` when the question will be sent again with only its context, documents, goals or questions changed (an agent loop). A provider with prompt caching (the Anthropic node, and Claude models on the Bedrock node) may then cache the unchanging start of the prompt: role, instructions, examples and history. Other providers ignore it. |
 
 ## Answer
@@ -260,7 +265,12 @@ From `rocketride.schema`. Parses chat response content — see
 | `getJson` | `getJson(self) -> Optional[dict]` | The parsed JSON. Returns `None` only when no answer has been set; **raises `ValueError`** on invalid JSON. |
 | `isJson` | `isJson(self) -> bool` | Returns the `expectJson` flag (does not inspect content). |
 | `parsePython` | `parsePython(self, value: str) -> Any` | Extracts Python code from a code block in the response. |
-| `tokens` | field | Turn-total LLM token usage reported by the server. The TypeScript `Answer` carries no usage field. <!-- language-specific --> |
+| `tokens` | field | Turn-total LLM token usage reported by the server. |
+| `fromResult` | `Answer.fromResult(result: dict, key: str = 'answers') -> Answer` | Classmethod. Reads the answer a turn-mode `client.chat()` returned. A text entry gives a text `Answer`. |
+| `message` | field | The model's turn (`AssistantMessage`). Set only in turn mode. |
+| `stopReason` | field | `end_turn`, `tool_use`, `max_tokens`, `stop_sequence` or `refusal`. Set only in turn mode. |
+| `error` | field | `AnswerError(code, message)` when a turn failed; `code` is `tools_unsupported` or `provider_error`. |
+| `toolCalls` | `toolCalls(self) -> List[ToolCallBlock]` | The calls in `message`, in order. Empty for a text answer. |
 
 ## Types
 

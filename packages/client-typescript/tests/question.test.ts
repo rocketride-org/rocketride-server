@@ -22,8 +22,13 @@
  * SOFTWARE.
  */
 
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { describe, it, expect } from '@jest/globals';
-import { Question } from '../src/client/schema/Question';
+import { Answer, Question } from '../src/client/schema/Question';
+
+// The same fixture the Python SDK round-trips, so the two cannot drift on the wire shape.
+const FIXTURE = JSON.parse(readFileSync(join(__dirname, '../../client-python/tests/fixtures/turn_blocks.json'), 'utf8'));
 
 describe('Question.cachePrefix', () => {
 	it('is off unless the caller turns it on', () => {
@@ -49,5 +54,48 @@ describe('Question.cachePrefix', () => {
 
 		expect(cachePrefix).toBe(false);
 		expect(Question.fromDict(older).cachePrefix).toBe(false);
+	});
+});
+
+describe('Question turn mode', () => {
+	it('leaves messages and tools out of a legacy question', () => {
+		const sent = new Question({ role: 'Planner.' }).toDict();
+
+		expect('messages' in sent).toBe(false);
+		expect('tools' in sent).toBe(false);
+	});
+
+	it('round-trips every block type in the shared fixture', () => {
+		const sent = Question.fromDict(FIXTURE.question).toDict();
+
+		expect(sent.messages).toEqual(FIXTURE.question.messages);
+		expect(sent.tools).toEqual(FIXTURE.question.tools);
+	});
+
+	it('builds the next turn from an answer, with results under the same call ids', () => {
+		const question = Question.fromDict(FIXTURE.question);
+		const answer = Answer.fromResult(FIXTURE.result);
+
+		question.addMessage(answer.message!);
+		for (const call of answer.toolCalls) {
+			question.addToolResult(call.id, 'done');
+		}
+
+		expect(answer.stopReason).toBe('tool_use');
+		expect(answer.getText()).toBe('Labelling #42.');
+		expect(answer.tokens).toEqual(FIXTURE.result.answers[0].tokens);
+		expect(question.messages[question.messages.length - 1]).toEqual({
+			role: 'user',
+			content: [{ type: 'tool_result', callId: 'toolu_03', content: 'done', isError: false }],
+		});
+		expect(() => question.addToolResult('unknown', 'x')).toThrow('no tool call');
+	});
+
+	it('reads a text entry as a text answer', () => {
+		const answer = Answer.fromResult({ answers: ['plain'] } as never);
+
+		expect(answer.getText()).toBe('plain');
+		expect(answer.toolCalls).toEqual([]);
+		expect(answer.message).toBeUndefined();
 	});
 });

@@ -287,7 +287,14 @@ _LLM_BASE_PATH = Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src'
 def _load_llm_base(stop_var):
     saved = {
         k: sys.modules.get(k)
-        for k in ('rocketlib', 'ai', 'ai.common', 'ai.common.schema', 'ai.common.llm_native_stream')
+        for k in (
+            'rocketlib',
+            'ai',
+            'ai.common',
+            'ai.common.schema',
+            'ai.common.llm_native_stream',
+            'ai.common.llm_tools',
+        )
     }
     rl = types.ModuleType('rocketlib')
     rl.IInstanceBase = object
@@ -299,10 +306,15 @@ def _load_llm_base(stop_var):
     schema = types.ModuleType('ai.common.schema')
     schema.Question = object
     schema.Answer = object
+    schema.AnswerError = object
     sys.modules['ai.common.schema'] = schema
     nsmod = types.ModuleType('ai.common.llm_native_stream')
     nsmod.STOP_SEQUENCES_VAR = stop_var  # share the SAME contextvar the test asserts on
     sys.modules['ai.common.llm_native_stream'] = nsmod
+    tools = types.ModuleType('ai.common.llm_tools')
+    tools.ToolsUnsupported = Exception
+    tools.is_turn = lambda question: False
+    sys.modules['ai.common.llm_tools'] = tools
     try:
         spec = importlib.util.spec_from_file_location('rr_real_llm_base', _LLM_BASE_PATH)
         mod = importlib.util.module_from_spec(spec)

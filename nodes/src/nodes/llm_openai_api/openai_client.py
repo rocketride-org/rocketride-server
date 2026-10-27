@@ -17,6 +17,8 @@ class Chat(ChatBase):
 
     _llm: ChatOpenAI
 
+    SUPPORTS_NATIVE_TOOLS = True
+
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
         Initialize the OpenAI-compatible chat bot.
