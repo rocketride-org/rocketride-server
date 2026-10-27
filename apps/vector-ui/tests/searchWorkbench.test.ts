@@ -43,7 +43,7 @@ import { EXPORT_COLUMNS } from '../src/contract/types';
 import type { CallOutcome } from '../src/chat/toolCalls';
 import { classifyRetrieval, debuggerSearchInput, withScope } from '../src/vector/retrieval';
 import { QUERY_NEEDS_EMBED } from '../src/map/wording';
-import { COMMIT_ANNOUNCE_MS, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, applyHandoff, capSearchQuestion, createCommitAnnouncer, isTableOf, modeLabel, questionEscape, scopeChipText, scoreBar, scoreHeading, takePrefill, willRunText } from '../src/vector/searchWorkbench';
+import { COMMIT_ANNOUNCE_MS, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, STATUS_SHORT, applyHandoff, capSearchQuestion, createCommitAnnouncer, isTableOf, modeLabel, questionEscape, scopeChipText, scoreBar, scoreHeading, statusLegend, takePrefill, willRunText } from '../src/vector/searchWorkbench';
 import { HYBRID_LABEL, HYBRID_NEEDS_KEYWORD, KEYWORD_UNSUPPORTED, NODE_SETTING_NOTE, RRF_K, SEARCH_MODES, STATUS_WORDS, TOP_K_OPTIONS, VECTOR_UNSUPPORTED, classifyAt, defaultMode, fromChatLine, fuse, initialThreshold, keywordCaption, keywordSearchInput, modeOptions, nodeSettingText, openInSearchPrefill, plan, prefillRun, previewOf, rateLimitSentence, retrievalExportRows, retryAfterSeconds, rowsFromSearch, runWorkbench, scoreTitle, searchExportItems, searchScope, secondsLeft, semanticSearchInput, showSearchOnMap, sliderRange, sliderValueText, thresholdSentence, topKChoices, topKOptions, workbenchExportRows } from '../src/vector/searchWorkbench';
 import type { ChatPrefill, RunFromChat, SearchHandoff, SearchMode, WorkbenchDeps, WorkbenchRow, WorkbenchRun } from '../src/vector/searchWorkbench';
 
@@ -313,6 +313,25 @@ test('classifyAt: passes, near misses, below the floor, keyword rows; the floor 
 	assert.deepEqual(keyword.counts, { passing: 0, nearMisses: 0, belowFloor: 0, keywordOnly: 3, rated: 0 });
 	assert.ok(keyword.rows.every((row) => row.status === 'keyword'));
 	assert.equal(STATUS_WORDS.keyword, 'keyword match (no similarity)');
+});
+
+test('statusLegend: what each short status a run can take means, above the table; the same at every threshold, so the table never shifts as the slider moves', () => {
+	const rows = rowsFromSearch(scored(TWENTY), true, []);
+	const legend = 'near miss: below the threshold · below floor: the store drops it';
+	assert.equal(statusLegend(rows, dialect.score), legend);
+	// At 0.1 no row is a near miss, and the line is still the same.
+	assert.equal(classifyAt(rows, 0.1, dialect.score).counts.nearMisses, 0);
+	for (const at of [-1, 0.1, 0.42, 1]) assert.equal(statusLegend(classifyAt(rows, at, dialect.score).rows, dialect.score), legend, `at ${at}`);
+	// Only the statuses the run's rows can take, in the table's words.
+	assert.equal(statusLegend(rows.slice(0, 5), dialect.score), 'near miss: below the threshold', 'no row under the floor');
+	assert.equal(statusLegend(rowsFromSearch(keywordFallback, false, []), dialect.score), 'keyword match: no similarity');
+	assert.equal(statusLegend([...rows, ...rowsFromSearch(keywordFallback, false, [])], dialect.score), `${legend} · keyword match: no similarity`);
+	assert.equal(statusLegend([], dialect.score), null, 'only with no rows, so the line is there whenever a table is');
+	for (const one of [...rows, ...rowsFromSearch(keywordFallback, false, [])]) assert.notEqual(statusLegend([one], dialect.score), null, 'every row has a status the legend names');
+	// A lower-is-better score: the near miss is past the line the other way.
+	const score: IScoreInfo = { formula: 'l2 distance', higher_is_better: false, floor: 2, threshold: 1 };
+	const result: ISearchResult = { results: [0.5, 1.5, 3].map((value, i) => ({ content: String(i), score: value, metadata: { objectId: `o${i}`, chunkId: 0 } })), total: 3 };
+	assert.equal(statusLegend(rowsFromSearch(result, true, []), score), legend);
 });
 
 test('classifyAt: a lower-is-better score inverts the comparison', () => {
@@ -1001,4 +1020,10 @@ test('"Open in Search" with a question longer than the box: the user\'s run of t
 	assert.ok(outcome.ok);
 	assert.equal(outcome.run.rows.find((row) => row.chunkId === CITED[1])?.cited, true, 'the cited chunk is marked');
 	assert.ok(outcome.run.fromChat !== null, 'and the "From the chat" line describes the run');
+});
+
+test('STATUS_SHORT: a status in a table cell is short (one line per row, live B12); the full words stay its title', () => {
+	assert.deepEqual(Object.keys(STATUS_SHORT).sort(), Object.keys(STATUS_WORDS).sort());
+	assert.deepEqual(STATUS_SHORT, { used: 'passes', near_miss: 'near miss', below_floor: 'below floor', keyword: 'keyword match' });
+	for (const [status, short] of Object.entries(STATUS_SHORT)) assert.ok(short.length <= 13, `${status}: ${short}`);
 });
