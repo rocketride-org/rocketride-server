@@ -108,9 +108,9 @@ export interface IOverviewViewProps {
 	stats: IStatsSlot;
 	dialect: IDialectResult | null;
 	readOnly: boolean;
-	/** The documents loaded so far (the charts, the fields, and Insights, which are the attention chip's). */
+	/** The documents loaded so far (the charts, and Insights, which are the attention chip's). */
 	rows: readonly IDocumentItem[];
-	/** Those of them the scope covers (Top folders); the same rows without a scope. */
+	/** Those of them the scope covers (Top folders, the document fields); the same rows without a scope. */
 	scopedRows: readonly IDocumentItem[];
 	/** The listing is still loading pages. */
 	loading: boolean;
@@ -187,9 +187,9 @@ export function OverviewView(props: IOverviewViewProps): React.ReactElement {
 }
 
 /** The Summary view. */
-const Summary: React.FC<IOverviewViewProps> = ({ rows, scopedRows, complete, scoped, onOpenTab, onOpenFolder, onNewQuery, onAddDocuments, fieldsRead }) => {
+const Summary: React.FC<IOverviewViewProps> = ({ scopedRows, complete, scoped, onOpenTab, onOpenFolder, onNewQuery, onAddDocuments, fieldsRead }) => {
 	const folders = useMemo(() => topFolders(scopedRows), [scopedRows]);
-	const fields = useMemo(() => documentFields(rows), [rows]);
+	const fields = useMemo(() => documentFields(scopedRows), [scopedRows]);
 	const chunkFields = (fieldsRead?.rows ?? []).filter((f) => f.source === 'chunks');
 	const over = overLine({ loaded: scopedRows.length, complete, scoped });
 	return (
@@ -270,7 +270,7 @@ const Summary: React.FC<IOverviewViewProps> = ({ rows, scopedRows, complete, sco
 								</tbody>
 							</table>
 						)}
-						{fields.length > 0 && <p style={local.note}>{`Counted over the ${formatCount(rows.length)} ${rows.length === 1 ? 'document' : 'documents'} loaded.`}</p>}
+						{fields.length > 0 && over !== null && <p style={local.note}>{over}</p>}
 						{chunkFields.length > 0 && fieldsRead !== null ? (
 							<>
 								<h3 style={local.subheading}>{`Chunk metadata, from ${formatCount(fieldsRead.chunksRead)} ${fieldsRead.chunksRead === 1 ? 'chunk' : 'chunks'} read`}</h3>

@@ -239,8 +239,8 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 		() =>
 			frame.bindDocument(entry, objectId, {
 				focus: (id) => setChunkId(id),
-				// Read again only for a write that may have changed THIS document: another document's write leaves the view
-				// as it is (its sub-tab, sort, drawer, focus and heat).
+				// Read again, in place (DocumentView's refreshKey), only for a write that may have changed THIS document: another
+				// document's write leaves the view as it is.
 				version: (written) => {
 					if (!writeTouches(written.gone, objectId)) return;
 					setGone(false);
@@ -280,7 +280,7 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 					</div>
 				</>
 			) : (
-				<DocumentView key={version} model={model} channels={channels} selection={entry.selection} actions={actions} objectId={objectId} path={null} active={visible} consoleMedian={median} onDocument={(row) => setGone(row === null)} beforeBody={confirm} {...(chunkId === undefined ? {} : { chunkId })} />
+				<DocumentView refreshKey={version} model={model} channels={channels} selection={entry.selection} actions={actions} objectId={objectId} path={null} active={visible} consoleMedian={median} onDocument={(row) => setGone(row === null)} beforeBody={confirm} {...(chunkId === undefined ? {} : { chunkId })} />
 			)}
 		</div>
 	);

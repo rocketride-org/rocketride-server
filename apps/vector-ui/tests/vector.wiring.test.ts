@@ -217,7 +217,7 @@ test('the console renders the strip, the directory, the chunks, adding documents
 	for (const file of ['components/DocumentsTab.tsx', 'components/TrashTab.tsx']) {
 		assert.match(code(file), /const writes = writesDuringRemoval\(model\.writes, state\.removal\.status\);/, `${file}: the writes follow the model, and are unavailable while a removal runs`);
 	}
-	assert.match(view, /\(state\.removal\.status === 'running' \|\| state\.removal\.message\) &&/, 'the status line says Removing… while a removal runs');
+	assert.match(view, /const writeLine = state\.removal\.status === 'running' \|\| state\.removal\.message !== null;/, 'the status line says Removing… while a removal runs');
 	assert.match(view, /entry\.controller\.open\(\)/);
 	assert.match(view, /\{addingMounted && <AddDocumentsAside [^>]*open=\{adding\}/, 'Add documents is an aside beside the panels, kept mounted once opened (an upload keeps following its progress)');
 	const strip = code('components/StatsStrip.tsx');
@@ -292,6 +292,14 @@ test('every removal is confirmed inline in the document that shows it, in both m
 	assert.match(devFrame, /<div tabIndex=\{-1\} style=\{styles\.gone\} data-document-gone="">/, 'the gone state can hold the focus');
 	// R1-I7: a dev-tool document reads itself again only for a write that may have changed it.
 	assert.match(devFrame, /version: \(written\) => \{\s*if \(!writeTouches\(written\.gone, objectId\)\) return;/);
+	assert.match(devFrame, /<DocumentView refreshKey=\{version\} /, 'in place: its sub-tab, sort, drawer and focus stay');
+	assert.doesNotMatch(devFrame, /<DocumentView key=\{version\}/, 'never a remount');
+	// I6/R1-I12: the bottom slot is always there, one style in every state; what it holds changes, its height never.
+	const hub = code('views/ConsoleView.tsx');
+	assert.equal(hub.match(/<div style=\{layout\.slot\} data-bottom-slot="">/g)?.length, 1);
+	assert.match(hub, /slot: \{ flexShrink: 0, boxSizing: 'border-box', height: PENDING_BAR_HEIGHT,/, "exactly the pending bar's height");
+	assert.match(hub, /\{slot === 'pending' && <PendingBar \{\.\.\.panel\(tab\)\} \/>\}/);
+	assert.match(code('components/WriteAuditDetails.tsx'), /list: \{ position: 'absolute', bottom: '100%'/, 'Write details open upward: the line keeps its height');
 	assert.match(app, /origin: documentOrigin\(payload\.objectId\),/, "the tab's actions ask under its origin");
 	for (const file of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/RemoveDialogHost.tsx']) assert.ok(!fs.existsSync(path.join(SRC, file)), `${file}: no modal confirmation is left`);
 	const panel = code('components/InlineRemoveConfirm.tsx');

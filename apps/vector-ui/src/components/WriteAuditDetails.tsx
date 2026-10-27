@@ -30,7 +30,8 @@
 // readAudit; never content or vectors). The console keeps them with the
 // write's result (removal.audit), and this disclosure, beside the result
 // line (outside its announced text), lists them, one line per batch
-// (vector/confirm.ts auditLines). Its summary is "Write details", not the
+// (vector/confirm.ts auditLines), opening upward over what is above it, so
+// the line keeps its height. Its summary is "Write details", not the
 // header's "Details" (the connection's).
 // Nothing shows while the last write had none.
 // =============================================================================
@@ -42,9 +43,10 @@ import type { IWriteAudit } from '../vector/results';
 import { styles as appStyles } from '../styles';
 
 const styles = {
-	details: { ...appStyles.small, display: 'inline-block', marginLeft: 8 } as CSSProperties,
-	summary: { cursor: 'pointer' } as CSSProperties,
-	list: { margin: '4px 0 0', paddingLeft: 18 } as CSSProperties,
+	details: { ...appStyles.small, position: 'relative', display: 'inline-block', marginLeft: 8, flexShrink: 0 } as CSSProperties,
+	summary: { cursor: 'pointer', whiteSpace: 'nowrap' } as CSSProperties,
+	/** Opens upward, over what is above the line: the line it sits on keeps its height. */
+	list: { position: 'absolute', bottom: '100%', right: 0, zIndex: 1, width: 'max-content', maxWidth: 'min(480px, 80vw)', maxHeight: 200, overflowY: 'auto', margin: '0 0 4px', padding: '6px 10px 6px 26px', border: '1px solid var(--rr-border)', borderRadius: 6, background: 'var(--rr-bg-paper)', boxShadow: 'var(--rr-shadow-widget)' } as CSSProperties,
 };
 
 /** Props for the {@link WriteAuditDetails} component. */

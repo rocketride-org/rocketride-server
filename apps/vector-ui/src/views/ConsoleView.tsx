@@ -81,14 +81,14 @@ import type { IExplorerEndpoint } from 'shared/explorer';
 import { makeConsoleActions } from '../adapters/consoleActions';
 import { savedFilters } from '../adapters/connections';
 import { announcer } from '../adapters/explorer';
-import { useConnection, useEndpointsState, useLiveEndpoint, useVectorEnv } from '../envContext';
+import { useConnection, useEndpointsState, useLiveEndpoint, useValueStore, useVectorEnv } from '../envContext';
 import AddDocumentsAside from '../components/AddDocumentsAside';
 import CollectionPanel from '../components/CollectionPanel';
 import ConnectionDetailsPanel from '../components/ConnectionDetailsPanel';
 import DocumentsTab from '../components/DocumentsTab';
 import InlineRemoveConfirm from '../components/InlineRemoveConfirm';
 import OverviewPanel from '../components/OverviewPanel';
-import PendingBar from '../components/PendingBar';
+import PendingBar, { PENDING_BAR_HEIGHT } from '../components/PendingBar';
 import QueryTab from '../components/QueryTab';
 import TrashTab from '../components/TrashTab';
 import WorkbenchTabs, { workbenchIds } from '../components/WorkbenchTabs';
@@ -105,7 +105,7 @@ import { roleLine, vectorCardView } from '../vector/connections';
 import { providerTitle } from '../vector/support';
 import { REPAIR_NEEDED_TEXT, collectionMissing, formatCount } from '../vector/stats';
 import { BUSY, CAVEAT_SENTENCES, EMPTY } from '../vector/wording';
-import { NO_FAILURES, focusStranded, reprobeFor, statsFailures, unreachableShown } from '../vector/workbench';
+import { NO_FAILURES, RESULT_FIRST_MS, bottomSlot, focusStranded, reprobeFor, statsFailures, unreachableShown } from '../vector/workbench';
 import type { WorkbenchTab } from '../vector/workbench';
 import { styles } from '../styles';
 import MapView from './MapView';
@@ -116,9 +116,14 @@ const layout = {
 	/** Two labels in one cell: the button keeps the width of the longer one, whichever shows. */
 	held: { display: 'inline-grid' } as CSSProperties,
 	heldLabel: (shown: boolean): CSSProperties => ({ gridArea: '1 / 1', visibility: shown ? 'visible' : 'hidden' }),
-	/** The write line: its sentence (announced), then the audit disclosure beside it (not announced). */
-	statusRow: { display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', padding: '6px 24px' } as CSSProperties,
-	status: { ...styles.small, minWidth: 0 } as CSSProperties,
+	/**
+	 * The bottom slot: one line of the pending bar's height, always there and the same whether empty or full, so a
+	 * stage, a write's result or a cancel never changes the height of the panels above (the map's canvas, a grid).
+	 */
+	slot: { flexShrink: 0, boxSizing: 'border-box', height: PENDING_BAR_HEIGHT, margin: '0 12px 8px', display: 'flex', alignItems: 'stretch', minWidth: 0 } as CSSProperties,
+	/** The write line in the slot: its sentence (announced), then the audit disclosure beside it (not announced). */
+	writeLine: { flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', padding: '0 12px' } as CSSProperties,
+	status: { ...styles.small, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
 	/** The panels beside the Add documents aside. */
 	body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' } as CSSProperties,
 	panels: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column' } as CSSProperties,
@@ -287,6 +292,26 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 		setAdding(true);
 	};
 	const prefix = `wb${useId().replace(/:/g, '')}`;
+	// The bottom slot's one line: the pending bar while documents are staged, else the write's line. A write's result
+	// that lands while documents are staged shows first (seen, not only announced), and the bar comes back after a few
+	// seconds or as soon as the staged set changes.
+	const staged = useValueStore(entry.staged);
+	const writeLine = state.removal.status === 'running' || state.removal.message !== null;
+	const [resultFirst, setResultFirst] = useState(false);
+	const resultKey = writeLine ? `${state.removal.status}|${state.removal.message ?? ''}` : null;
+	// The staged set changed (the user acted): the bar comes back. Declared first, so a write that changes the staged
+	// set and lands its result in the same render still shows the result.
+	useEffect(() => setResultFirst(false), [staged]);
+	useEffect(() => {
+		if (resultKey === null) {
+			setResultFirst(false);
+			return undefined;
+		}
+		setResultFirst(true);
+		const timer = setTimeout(() => setResultFirst(false), RESULT_FIRST_MS);
+		return () => clearTimeout(timer);
+	}, [resultKey]);
+	const slot = bottomSlot({ staged: staged.size, writeLine, resultFirst });
 	const panel = (id: WorkbenchTab): IWorkbenchPanelProps => ({ entry, model, channels, actions, console: state, selection, visible: active && tab === id });
 	// Where the focus goes after a confirmation closes: the shown panel's marked row, else its grid, else the current tab.
 	const root = useRef<HTMLDivElement>(null);
@@ -454,24 +479,26 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 							<TrashTab {...panel('trash')} />
 						</WorkbenchPanel>
 					)}
-					<PendingBar {...panel(tab)} />
-					{/* Under the panels with the pending bar: a write's line appearing or going never moves a row above it. */}
-					{(state.removal.status === 'running' || state.removal.message) && (
-						<div style={layout.statusRow} data-write-line="">
-							{state.removal.status === 'error' ? (
-								// Its own element, so a failure is announced as one (a role changed on the same element often is not).
-								<div key="alert" role="alert" style={layout.status}>
-									{state.removal.message}
-								</div>
-							) : (
-								<div key="status" role="status" style={layout.status}>
-									{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
-								</div>
-							)}
-							{/* Outside the live element: opening it does not announce the line again. */}
-							{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails audit={state.removal.audit} />}
-						</div>
-					)}
+					{/* Under the panels, one line of a fixed height: what comes and goes after a press never moves a row above it. */}
+					<div style={layout.slot} data-bottom-slot="">
+						{slot === 'pending' && <PendingBar {...panel(tab)} />}
+						{slot === 'write' && (
+							<div style={layout.writeLine} data-write-line="" title={state.removal.message ?? undefined}>
+								{state.removal.status === 'error' ? (
+									// Its own element, so a failure is announced as one (a role changed on the same element often is not).
+									<div key="alert" role="alert" style={layout.status}>
+										{state.removal.message}
+									</div>
+								) : (
+									<div key="status" role="status" style={layout.status}>
+										{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
+									</div>
+								)}
+								{/* Outside the live element: opening it does not announce the line again. */}
+								{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails audit={state.removal.audit} />}
+							</div>
+						)}
+					</div>
 				</div>
 				{addingMounted && <AddDocumentsAside model={model} channels={channels} actions={actions} endpoint={endpoint} open={adding} onClose={() => setAdding(false)} returnFocus={asideFocus} />}
 			</div>

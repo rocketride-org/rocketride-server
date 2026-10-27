@@ -30,7 +30,7 @@ import type { IDocumentItem } from '../src/contract/types';
 import { healthSummary } from '../src/vector/health';
 import { TOP_FOLDERS, insights, insightsLabel, overLine, overviewCards, percentShares, topFolders } from '../src/vector/overview';
 import { readDialect, readStats } from '../src/vector/results';
-import { NO_FAILURES, focusStranded, panelOf, reprobeFor, statsFailures, tabKeyTarget, unreachableShown, workbenchNonce, writeTouches } from '../src/vector/workbench';
+import { NO_FAILURES, bottomSlot, focusStranded, panelOf, reprobeFor, statsFailures, tabKeyTarget, unreachableShown, workbenchNonce, writeTouches } from '../src/vector/workbench';
 import { documentFocus } from '../src/vector/focus';
 import { fixture } from './support/fixtures';
 
@@ -166,5 +166,13 @@ test('the focus in a document surface: the opener while shown, the shown sub-tab
 	assert.equal(documentFocus(root({ '[data-document-gone]': gone }), null), gone);
 	assert.equal(documentFocus(root({}, [el(false), first]), null), first, 'else the first control shown');
 	assert.equal(documentFocus(null, opener), opener);
+});
+
+test("the bottom slot's one line: the pending bar while staged, else the write's line; a result that lands while staged shows first", () => {
+	assert.equal(bottomSlot({ staged: 0, writeLine: false, resultFirst: false }), 'empty');
+	assert.equal(bottomSlot({ staged: 0, writeLine: true, resultFirst: false }), 'write');
+	assert.equal(bottomSlot({ staged: 3, writeLine: false, resultFirst: false }), 'pending');
+	assert.equal(bottomSlot({ staged: 3, writeLine: true, resultFirst: true }), 'write', 'a Restore in the Trash while documents are staged: seen, not only announced');
+	assert.equal(bottomSlot({ staged: 3, writeLine: true, resultFirst: false }), 'pending', 'then the bar comes back');
 });
 

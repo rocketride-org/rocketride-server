@@ -34,6 +34,7 @@ import { manualClock } from 'shared/explorer/connect/testing';
 import type { IExplorerEndpoint } from 'shared/explorer';
 import type { IVectorEnv } from '../src/env';
 import type { WorkbenchTab } from '../src/vector/workbench';
+import { NO_STAGED, stage } from '../src/vector/staged';
 import { vectorWorld } from './support/vectorWorld';
 
 // The shell's building blocks exist only inside a running shell: a stand-in for each that renders its text.
@@ -125,3 +126,31 @@ test('the workbench renders its header and tab row, and on each tab only that ta
 		assert.match(html, parts[tab], `${tab}: its panel holds today's part`);
 	}
 });
+
+test('the bottom slot is one line of the same height whatever it holds: nothing, a write\'s line, or the pending bar', async () => {
+	const { env, endpoint } = await discovered();
+	const probe = env.endpoints.get().probes[endpoint.key];
+	const entry = env.connection(endpoint, (probe?.ok ? readDialect(probe.info)?.limits : null) ?? DEFAULT_LIMITS);
+	const slotOf = (html: string): string => {
+		const at = html.indexOf('data-bottom-slot=""');
+		assert.ok(at > 0, 'the slot is always there');
+		const open = html.lastIndexOf('<div', at);
+		return html.slice(open, at);
+	};
+	const empty = render(env, endpoint, 'documents');
+	assert.match(empty, /data-bottom-slot=""><\/div>/, 'empty: no words, the same line');
+	// A cancelled confirmation leaves "Cancelled. Nothing was sent." in the slot.
+	entry.controller.setWritesEnabled(true);
+	entry.controller.requestRemove([{ objectId: 'doc-x', path: 'x.md', chunks: 1 }]);
+	entry.controller.cancelRemove();
+	const cancelled = render(env, endpoint, 'documents');
+	assert.match(cancelled, /data-write-line=""[^>]*><div role="status"[^>]*>Cancelled\. Nothing was sent\.</, 'the write line, in the slot');
+	// Staged documents: the pending bar takes the slot (the cancelled line shows first only when it lands while staged).
+	entry.staged.set(stage(NO_STAGED, [{ objectId: 'doc-y', path: 'y.md', chunks: 2 }]));
+	const staged = render(env, endpoint, 'documents');
+	assert.equal(slotOf(cancelled), slotOf(empty), 'the slot looks the same with a write line as empty');
+	assert.equal(slotOf(staged), slotOf(empty), 'and with the pending bar');
+	assert.match(slotOf(empty), /height:32px/, "the pending bar's height");
+	entry.controller.dispose();
+});
+

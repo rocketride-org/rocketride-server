@@ -196,6 +196,24 @@ export function unreachableShown(failures: IStatsFailures, hasFigures: boolean):
 	return failures.count > 0 && (failures.asked || failures.count >= 2 || !hasFigures);
 }
 
+/** How long a write's result shows before the pending bar comes back, while documents are staged. */
+export const RESULT_FIRST_MS = 6000;
+
+/** What the workbench's bottom slot shows: the pending bar, the write's line, or nothing (the same height). */
+export type BottomSlot = 'pending' | 'write' | 'empty';
+
+/**
+ * The one line of the workbench's bottom slot. The pending bar while documents are staged, else a write's line
+ * (running, its result, or "Cancelled"); a result that lands while documents are staged shows first.
+ *
+ * @param input - Documents staged, whether a write's line has words, and whether its result shows first.
+ * @returns What the slot shows.
+ */
+export function bottomSlot(input: { staged: number; writeLine: boolean; resultFirst: boolean }): BottomSlot {
+	if (input.staged > 0 && !(input.writeLine && input.resultFirst)) return 'pending';
+	return input.writeLine ? 'write' : 'empty';
+}
+
 /** What {@link panelOf} reads of an element. */
 export interface IPanelLookup {
 	closest(selector: string): { getAttribute(name: string): string | null } | null;
