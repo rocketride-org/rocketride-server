@@ -63,7 +63,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ForwardedRef, ReactElement, ReactNode, Ref } from 'react';
 import { ACCENT_TOKEN, selectedRowBackground } from '../vector/colors';
-import { columnWidth, gridKey, gridTemplate, gridWindow, headerKey, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../vector/grid';
+import { gridKey, gridMinimumWidth, gridTemplate, gridWindow, headerKey, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../vector/grid';
 import type { IGridSort, IGridSortable } from '../vector/grid';
 import { FOCUS_RING } from '../styles';
 
@@ -208,11 +208,6 @@ function rowOf(target: EventTarget | null, grid: HTMLElement | null): HTMLElemen
 	return row !== null && grid !== null && grid.contains(row) ? row : null;
 }
 
-/** The narrowest the columns get together (px): the grid scrolls sideways below it. */
-function minimumWidth(columns: ReadonlyArray<IGridColumn<never>>): number {
-	return columns.reduce((sum, c) => sum + columnWidth(c), 0);
-}
-
 /**
  * The grid.
  *
@@ -248,7 +243,7 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 	const ids = useMemo(() => shown.map(rowId), [shown, rowId]);
 	const indexOf = useMemo(() => new Map(ids.map((id, i) => [id, i])), [ids]);
 	const template = useMemo(() => gridTemplate(columns), [columns]);
-	const minWidth = useMemo(() => minimumWidth(columns), [columns]);
+	const minWidth = useMemo(() => gridMinimumWidth(columns), [columns]);
 	const count = ids.length;
 	const activeIndex = activeId === null ? -1 : (indexOf.get(activeId) ?? -1);
 	// The row in the tab order: the active one, else the first.

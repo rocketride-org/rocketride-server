@@ -39,7 +39,10 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { VectorGrid } from '../src/components/VectorGrid';
 import type { IGridColumn } from '../src/components/VectorGrid';
-import { HEADER_METRICS, afterDrawerClosed, afterNeighbourChosen, afterToolGone, columnWidth, gridKey, gridTemplate, headerKey, headerWidth, gridWindow, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../src/vector/grid';
+import { chunkColumns } from '../src/components/ChunksGrid';
+import { documentColumns } from '../src/components/DocumentsTab';
+import { trashColumns } from '../src/components/TrashTab';
+import { HEADER_METRICS, afterDrawerClosed, afterNeighbourChosen, afterToolGone, columnWidth, gridKey, gridMinimumWidth, gridTemplate, headerKey, headerWidth, gridWindow, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../src/vector/grid';
 
 interface IRow {
 	id: string;
@@ -221,4 +224,21 @@ test('a column is never narrower than its header\'s words (with the sort mark wh
 	assert.equal(columnWidth({ width: 'flex', minWidth: 40, label: 'Folder', sortValue: () => 1 }), headerWidth('Folder', true), "a flexible column's least");
 	assert.equal(gridTemplate([{ width: 34, label: '' }, { width: 110, label: 'Deleted chunks', sortValue: () => 1 }]), `34px ${headerWidth('Deleted chunks', true)}px`);
 	assert.equal(gridTemplate(COLUMNS), 'minmax(160px, 1fr) 80px 60px', 'columns already wide enough are unchanged');
+});
+
+test('fitting the headers to their words widens no grid: each one\'s least is what it was before, so a narrow tab scrolls no further sideways', () => {
+	// The cells are never called here.
+	const ctx = { current: {} as never };
+	const grids: Array<[string, ReadonlyArray<IGridColumn<never>>, number]> = [
+		['Documents', documentColumns(ctx), 908],
+		['Trash, with Deleted chunks', trashColumns(ctx, true), 784],
+		['Trash', trashColumns(ctx, false), 674],
+		['Chunks, with Score', chunkColumns(true), 594],
+		['Chunks', chunkColumns(false), 514],
+	];
+	for (const [name, columns, before] of grids) {
+		assert.ok(gridMinimumWidth(columns) <= before, `${name}: ${gridMinimumWidth(columns)} px at least, no more than the ${before} px before`);
+		for (const column of columns) assert.ok(columnWidth(column) >= headerWidth(column.label, column.sortValue !== undefined), `${name}: ${column.id} shows its header whole`);
+	}
+	assert.equal(gridMinimumWidth([{ width: 34, label: '' }, { width: 110, label: 'Deleted chunks', sortValue: () => 1 }]), 34 + headerWidth('Deleted chunks', true), 'the least sums the fitted widths');
 });

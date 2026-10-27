@@ -308,6 +308,16 @@ export function columnWidth(column: IColumnShape): number {
 }
 
 /**
+ * The narrowest the columns get together (px): the grid scrolls sideways below it.
+ *
+ * @param columns - The columns' widths, minimum widths, words and whether they sort.
+ * @returns The sum of their {@link columnWidth}s.
+ */
+export function gridMinimumWidth(columns: ReadonlyArray<IColumnShape>): number {
+	return columns.reduce((sum, c) => sum + columnWidth(c), 0);
+}
+
+/**
  * The CSS grid template every row and the header share: a number is a fixed width in px, 'flex' a column that takes
  * the room left (never narrower than its minimum); neither narrower than its header's words ({@link columnWidth}).
  *

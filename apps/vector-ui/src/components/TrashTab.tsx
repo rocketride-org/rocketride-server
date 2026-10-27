@@ -124,13 +124,15 @@ const ring = {
 };
 
 /**
- * The Trash grid's columns (declared here, never derived from rows).
+ * The Trash grid's columns (declared here, never derived from rows). At their least they come to 784 px together with
+ * Deleted chunks, what they took before every header was fitted to its words: Name's and Folder's minimums give back
+ * what Chunks and Deleted chunks gained, so a narrow tab scrolls no further sideways.
  *
  * @param ctx - What the cells read.
  * @param deletedChunks - Show the Deleted chunks column (the store reports it).
  * @returns The columns.
  */
-function trashColumns(ctx: { current: ITrashContext }, deletedChunks: boolean): Array<IGridColumn<IDocumentItem>> {
+export function trashColumns(ctx: { current: ITrashContext }, deletedChunks: boolean): Array<IGridColumn<IDocumentItem>> {
 	const label = (item: IDocumentItem): string => item.path || item.objectId;
 	const columns: Array<IGridColumn<IDocumentItem>> = [
 		{ id: 'select', label: '', ariaLabel: 'Selected', width: 34, align: 'center', cell: (item, cell) => <input type="checkbox" style={styles.check} checked={ctx.current.checked.has(item.objectId)} aria-label={`Select ${label(item)}`} tabIndex={cell.tabIndex} onChange={() => ctx.current.onCheck(item)} /> },
@@ -138,7 +140,7 @@ function trashColumns(ctx: { current: ITrashContext }, deletedChunks: boolean): 
 			id: 'name',
 			label: 'Name',
 			width: 'flex',
-			minWidth: 160,
+			minWidth: 137,
 			sortValue: (item) => splitPath(item.path).name,
 			cell: (item) => {
 				// A partly trashed document: its chunks outside the trash, as far as the loaded live listing says.
@@ -151,7 +153,7 @@ function trashColumns(ctx: { current: ITrashContext }, deletedChunks: boolean): 
 				);
 			},
 		},
-		{ id: 'folder', label: 'Folder', width: 'flex', minWidth: 120, sortValue: (item) => splitPath(item.path).folder, cell: (item) => (splitPath(item.path).uploaded ? 'Uploaded' : splitPath(item.path).folder) },
+		{ id: 'folder', label: 'Folder', width: 'flex', minWidth: 88, sortValue: (item) => splitPath(item.path).folder, cell: (item) => (splitPath(item.path).uploaded ? 'Uploaded' : splitPath(item.path).folder) },
 		{ id: 'chunks', label: 'Chunks', width: 70, align: 'right', sortValue: (item) => item.chunks, cell: (item) => (item.chunks === null ? <span title="The store does not count chunks per document">—</span> : formatCount(item.chunks)) },
 	];
 	if (deletedChunks) columns.push({ id: 'deleted', label: 'Deleted chunks', width: 110, align: 'right', sortValue: (item) => item.deleted_chunks ?? null, cell: (item) => (item.deleted_chunks === null || item.deleted_chunks === undefined ? '—' : formatCount(item.deleted_chunks)) });
