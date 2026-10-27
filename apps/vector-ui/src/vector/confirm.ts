@@ -495,3 +495,17 @@ export function confirmFirstFocus(kind: 'trash' | 'delete' | 'empty', count: num
 	const bulk = Math.min(BULK_TRASH_FOCUS_CANCEL, Math.max(1, Math.floor(writeIdsMax)));
 	return count > bulk ? 'cancel' : 'confirm';
 }
+
+/**
+ * The typed field's hint: its prompt, and after Enter on what does not match yet, that it does not (in the same words
+ * the field already shows, so nothing moves).
+ *
+ * @param typed - The typed confirmation.
+ * @param input - What is typed.
+ * @param nudged - Enter was pressed on it while it did not match.
+ * @returns The hint.
+ */
+export function typedHint(typed: ITypedConfirmation, input: string, nudged: boolean): string {
+	if (!nudged || confirmReady(typed, input)) return typed.prompt;
+	return input.trim() === '' ? `${typed.prompt} Nothing is typed yet.` : `${typed.prompt} What is typed does not match.`;
+}

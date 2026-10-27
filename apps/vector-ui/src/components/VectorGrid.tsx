@@ -63,7 +63,7 @@
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ForwardedRef, ReactElement, ReactNode, Ref } from 'react';
 import { ACCENT_TOKEN, selectedRowBackground } from '../vector/colors';
-import { gridKey, gridTemplate, gridWindow, headerKey, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../vector/grid';
+import { columnWidth, gridKey, gridTemplate, gridWindow, headerKey, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../vector/grid';
 import type { IGridSort, IGridSortable } from '../vector/grid';
 import { FOCUS_RING } from '../styles';
 
@@ -209,8 +209,8 @@ function rowOf(target: EventTarget | null, grid: HTMLElement | null): HTMLElemen
 }
 
 /** The narrowest the columns get together (px): the grid scrolls sideways below it. */
-function minimumWidth(columns: ReadonlyArray<{ width: number | 'flex'; minWidth?: number }>): number {
-	return columns.reduce((sum, c) => sum + (c.width === 'flex' ? (c.minWidth ?? 120) : c.width), 0);
+function minimumWidth(columns: ReadonlyArray<IGridColumn<never>>): number {
+	return columns.reduce((sum, c) => sum + columnWidth(c), 0);
 }
 
 /**

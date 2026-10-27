@@ -39,6 +39,8 @@
 //
 // Both permanent writes send `delete {deleted_only: true}`: a document that
 // still has a chunk outside the trash is kept whole, and the result names it.
+// Such a partly trashed document says by its name how many chunks it has
+// outside the trash, when the loaded live listing holds it.
 //
 // The header's export menu exports the loaded trash listing, as the old
 // directory's Trash view did. The permanent writes sit apart from Restore,
@@ -54,7 +56,7 @@ import { BxTrash } from 'shell';
 import type { IDocumentItem } from '../contract/types';
 import { CONSOLE_ORIGIN } from '../vector/confirm';
 import { writesDuringRemoval } from '../vector/consoleModel';
-import { directoryHeading, listCountText, listingComplete, pagerFooter, pagerProgressText, splitPath, targetOf } from '../vector/documents';
+import { directoryHeading, listCountText, listingComplete, outsideTrashText, pagerFooter, pagerProgressText, splitPath, targetOf } from '../vector/documents';
 import { formatSize } from '../vector/fileType';
 import { FILTER_DEBOUNCE_MS, directoryExportItems, directoryView } from '../vector/filters';
 import { afterToolGone } from '../vector/grid';
@@ -94,6 +96,8 @@ const styles = {
 	footer: { ...appStyles.small, padding: '6px 12px', borderTop: '1px solid var(--rr-border)', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' } as CSSProperties,
 	caveat: { flexBasis: '100%' } as CSSProperties,
 	check: { margin: 0 } as CSSProperties,
+	name: { overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 } as CSSProperties,
+	outside: { ...appStyles.small, flex: 'none' } as CSSProperties,
 	rowButton: (off: boolean): CSSProperties => ({ ...appStyles.small, background: 'none', border: '1px solid var(--rr-border-input)', borderRadius: 4, padding: '0 6px', color: 'inherit', opacity: off ? 0.55 : 1, cursor: off ? 'not-allowed' : 'pointer' }),
 	rowIcon: (off: boolean): CSSProperties => ({ ...appStyles.iconButton, opacity: off ? 0.55 : 1, cursor: off ? 'not-allowed' : 'pointer' }),
 };
@@ -109,6 +113,8 @@ interface ITrashContext {
 	onCheck(item: IDocumentItem): void;
 	onRestore(item: IDocumentItem): void;
 	onDelete(item: IDocumentItem): void;
+	/** The loaded live listing's rows, by objectId (a partly trashed document is in both listings). */
+	live: ReadonlyMap<string, IDocumentItem>;
 }
 
 /** A row button's focus ring. */
@@ -128,7 +134,23 @@ function trashColumns(ctx: { current: ITrashContext }, deletedChunks: boolean): 
 	const label = (item: IDocumentItem): string => item.path || item.objectId;
 	const columns: Array<IGridColumn<IDocumentItem>> = [
 		{ id: 'select', label: '', ariaLabel: 'Selected', width: 34, align: 'center', cell: (item, cell) => <input type="checkbox" style={styles.check} checked={ctx.current.checked.has(item.objectId)} aria-label={`Select ${label(item)}`} tabIndex={cell.tabIndex} onChange={() => ctx.current.onCheck(item)} /> },
-		{ id: 'name', label: 'Name', width: 'flex', minWidth: 160, sortValue: (item) => splitPath(item.path).name, cell: (item) => splitPath(item.path).name },
+		{
+			id: 'name',
+			label: 'Name',
+			width: 'flex',
+			minWidth: 160,
+			sortValue: (item) => splitPath(item.path).name,
+			cell: (item) => {
+				// A partly trashed document: its chunks outside the trash, as far as the loaded live listing says.
+				const outside = outsideTrashText(ctx.current.live.get(item.objectId));
+				return (
+					<>
+						<span style={styles.name}>{splitPath(item.path).name}</span>
+						{outside !== null && <span style={styles.outside}>{`· ${outside}`}</span>}
+					</>
+				);
+			},
+		},
 		{ id: 'folder', label: 'Folder', width: 'flex', minWidth: 120, sortValue: (item) => splitPath(item.path).folder, cell: (item) => (splitPath(item.path).uploaded ? 'Uploaded' : splitPath(item.path).folder) },
 		{ id: 'chunks', label: 'Chunks', width: 70, align: 'right', sortValue: (item) => item.chunks, cell: (item) => (item.chunks === null ? <span title="The store does not count chunks per document">—</span> : formatCount(item.chunks)) },
 	];
@@ -195,8 +217,9 @@ export function TrashTab({ entry, model, console: state, visible }: IWorkbenchPa
 		else next.add(item.objectId);
 		setChecked(next);
 	};
-	const ctx = useRef<ITrashContext>({ checked, off, onCheck: toggle, onRestore: () => undefined, onDelete: () => undefined });
-	ctx.current = { checked, off, onCheck: toggle, onRestore: (item) => void entry.controller.restore([targetOf(item)]), onDelete: (item) => entry.controller.requestDelete([targetOf(item)]) };
+	const live = useMemo(() => new Map(state.directory.rows.map((row) => [row.objectId, row])), [state.directory.rows]);
+	const ctx = useRef<ITrashContext>({ checked, off, onCheck: toggle, onRestore: () => undefined, onDelete: () => undefined, live });
+	ctx.current = { checked, off, onCheck: toggle, onRestore: (item) => void entry.controller.restore([targetOf(item)]), onDelete: (item) => entry.controller.requestDelete([targetOf(item)]), live };
 	const deletedChunks = useMemo(() => pager.rows.some((row) => row.deleted_chunks !== null && row.deleted_chunks !== undefined), [pager.rows]);
 	const columns = useMemo(() => trashColumns(ctx, deletedChunks), [deletedChunks]);
 	const [sort, setSort] = useState<IGridSort | null>(null);
@@ -276,7 +299,7 @@ export function TrashTab({ entry, model, console: state, visible }: IWorkbenchPa
 				<span style={styles.dangerText}>{TRASH_DANGER_SENTENCE}</span>
 			</div>
 			<div style={styles.gridBox}>
-				<VectorGrid ref={grid} label="Documents in the trash" rows={rows} rowId={rowId} columns={columns} sort={sort} onSort={setSort} onToggle={toggle} hold={pager.status === 'loading' && pager.pages === 0} leaving={leaving} empty={empty} rowTitle={(item) => `${item.path || '(no path)'} · objectId ${item.objectId}`} />
+				<VectorGrid ref={grid} label="Documents in the trash" rows={rows} rowId={rowId} columns={columns} sort={sort} onSort={setSort} onToggle={toggle} hold={pager.status === 'loading' && pager.pages === 0} leaving={leaving} empty={empty} rowTitle={(item) => [item.path || '(no path)', outsideTrashText(live.get(item.objectId)), `objectId ${item.objectId}`].filter(Boolean).join(' · ')} />
 			</div>
 			<div style={styles.footer}>
 				<span>{listCountText(rows.length, pager)}</span>
