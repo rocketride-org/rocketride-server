@@ -233,8 +233,9 @@ const DocumentTab: React.FC<{ uri: string; payload: IDocumentDocPayload; active:
 		// Once, as the tab mounts.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
+	// The document and its write slot are one surface (data-document): Write details opens inside its rectangle.
 	return (
-		<div ref={root} style={styles.documentRoot}>
+		<div ref={root} style={styles.documentRoot} data-document={payload.objectId}>
 			<div style={styles.documentBody}>
 				<DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} beforeBody={<InlineRemoveConfirm entry={entry} probe={probes[endpoint.key]} origin={documentOrigin(payload.objectId)} returnFocus={returnFocus} />} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />
 			</div>

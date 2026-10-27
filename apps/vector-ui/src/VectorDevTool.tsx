@@ -281,8 +281,10 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 	const actions = useMemo(() => frame.documentActions(entry), [frame, entry]);
 	const median = summaries[live.key]?.medianChunks ?? null;
 	const confirm = <InlineRemoveConfirm entry={entry} probe={probes[live.key]} returnFocus={returnFocus} />;
+	// The document (or what says it is gone) and its write slot are one surface (data-document): Write details opens
+	// inside its rectangle.
 	return (
-		<div ref={root} style={styles.document}>
+		<div ref={root} style={styles.document} data-document={objectId}>
 			{live.state === 'stopped' && (
 				<div style={styles.notice}>
 					<Banner variant="info">{live.stateDetail ?? STOPPED_DETAIL}</Banner>

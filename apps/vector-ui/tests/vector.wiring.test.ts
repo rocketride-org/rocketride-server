@@ -574,3 +574,10 @@ test("live B5 (dev tool): a document's Show on map is the console frame's arriva
 	assert.match(view, /<span title=\{statsError\.detail \? `\$\{statsError\.headline\}\\n\$\{statsError\.detail\}` : statsError\.headline\}>/, 'the raw text in the title');
 });
 
+test("live B10: a document's write slot is inside its surface, so Write details is clamped to the document's rectangle", () => {
+	// Write details bounds its popup by the nearest [data-console] or [data-document]: the slot and the body share one.
+	assert.match(code('VectorApp.tsx'), /<div ref=\{root\} style=\{styles\.documentRoot\} data-document=\{payload\.objectId\}>\s*<div style=\{styles\.documentBody\}>[\s\S]*?<DocumentWriteLine /);
+	assert.match(code('VectorDevTool.tsx'), /<div ref=\{root\} style=\{styles\.document\} data-document=\{objectId\}>[\s\S]*?<div style=\{styles\.documentBody\}>[\s\S]*?<DocumentWriteLine /);
+	assert.match(code('components/WriteAuditDetails.tsx'), /node\.closest<HTMLElement>\('\[data-console\], \[data-document\]'\)/);
+});
+
