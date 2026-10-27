@@ -70,7 +70,7 @@ import { QUERY_MODES, QUERY_MODE_LABELS, needsFocusRescue, nextQueryTab, primary
 import type { ActiveFocus, QueryFocusTarget } from '../vector/queryFocus';
 import { modeOptions, takePrefill } from '../vector/searchWorkbench';
 import type { AskHandoff, ChatPrefill, SearchHandoff } from '../vector/searchWorkbench';
-import { landsOn, loadPlan, rerunPlan } from '../vector/queryHistory';
+import { loadPlan, rerunPlan } from '../vector/queryHistory';
 import type { QueryHistoryItem, QueryRunRecord } from '../vector/queryHistory';
 import type { IQueryPrefill, QueryMode } from '../vector/workbench';
 import ChatPanel from './ChatPanel';
@@ -224,15 +224,13 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 	};
 
 	/**
-	 * Record a finished run in the mount's history (nothing while recording is off).
+	 * Record a finished run in the mount's history (nothing while recording is off); an entry it ran again says so.
 	 *
 	 * @param run - The run.
 	 */
 	const record = (run: QueryRunRecord): void => {
-		// Read now, not from the render that started the run: another run may have landed since.
-		const lands = history.recording(historyKey).get() ? landsOn(history.entries(historyKey).get(), run) : null;
-		history.record(historyKey, run);
-		setRanAgain(lands);
+		const landed = history.record(historyKey, run);
+		setRanAgain(landed !== null && landed.again ? landed.id : null);
 	};
 
 	/**
