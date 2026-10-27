@@ -44,6 +44,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { LegendProps as ContractLegendProps } from '../contract/types';
 import type { IColouring, MapColourBy } from '../map/colours';
+import { edgeWidth, haloWidth, linkWidth, markWidth } from '../map/overlay';
 import { MAP_STYLES } from '../map/styles';
 import { ACCENT_TOKEN, OUTLINE_TOKEN } from '../map/tokens';
 import { DISTANCE_CAVEAT, biasedNote, knnSourceLine, num, pointCapLine, sampleLabel } from '../map/wording';
@@ -113,13 +114,20 @@ function starPoints(cx: number, cy: number, outer: number, inner: number): strin
 }
 
 /**
- * The glyph row: one entry per mark drawn now.
+ * The glyph row: one entry per mark drawn now, its lines as wide as the map draws them at this ratio.
  *
  * @param marks - What the map draws.
+ * @param dpr - devicePixelRatio (1, the widest, when unknown).
  * @returns The entries.
  */
-export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: string; picture: React.ReactElement; words: string }> {
+export function markRows(marks: ILegendMarks | null | undefined, dpr = 1): Array<{ key: string; picture: React.ReactElement; words: string }> {
 	if (!marks) return [];
+	// The map's own line widths at this ratio (map/overlay.ts): at least two device pixels, as on the canvas.
+	const edge = edgeWidth(dpr);
+	const link = linkWidth(dpr);
+	const line = markWidth(1.5, dpr);
+	const ray = markWidth(1.25, dpr);
+	const halo = haloWidth(3, line, dpr);
 	const rows: Array<{ key: string; picture: React.ReactElement; words: string }> = [];
 	if (marks.edges) {
 		rows.push({
@@ -127,8 +135,8 @@ export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: s
 			words: 'similarity edge (fainter: less similar)',
 			picture: glyph(
 				<>
-					<line x1={2} y1={6} x2={10} y2={6} style={{ stroke: marks.edges.weakest, strokeWidth: 1.5 }} />
-					<line x1={12} y1={6} x2={20} y2={6} style={{ stroke: marks.edges.strongest, strokeWidth: 1.5 }} />
+					<line x1={2} y1={6} x2={10} y2={6} style={{ stroke: marks.edges.weakest, strokeWidth: edge }} />
+					<line x1={12} y1={6} x2={20} y2={6} style={{ stroke: marks.edges.strongest, strokeWidth: edge }} />
 				</>,
 			),
 		});
@@ -139,8 +147,8 @@ export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: s
 			words: "selected point's nearest chunks",
 			picture: glyph(
 				<>
-					<line x1={7} y1={6} x2={20} y2={6} style={{ stroke: ACCENT, strokeWidth: 1.5 }} />
-					<circle cx={5} cy={6} r={3} style={{ fill: 'none', stroke: ACCENT, strokeWidth: 1.5 }} />
+					<line x1={7} y1={6} x2={20} y2={6} style={{ stroke: ACCENT, strokeWidth: link }} />
+					<circle cx={5} cy={6} r={3} style={{ fill: 'none', stroke: ACCENT, strokeWidth: line }} />
 				</>,
 			),
 		});
@@ -151,8 +159,8 @@ export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: s
 			words: `outlier (${num(marks.outliers)})`,
 			picture: glyph(
 				<>
-					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: SURFACE, strokeWidth: 3 }} />
-					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: OUTLINE, strokeWidth: 1.5 }} />
+					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: SURFACE, strokeWidth: halo }} />
+					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: OUTLINE, strokeWidth: line }} />
 				</>,
 			),
 		});
@@ -164,7 +172,7 @@ export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: s
 			words: drawn < top ? `query, rays to ${num(drawn)} of its true top ${num(top)}` : `query, rays to its true top ${num(top)}`,
 			picture: glyph(
 				<>
-					<line x1={8} y1={6} x2={21} y2={6} style={{ stroke: ACCENT, strokeWidth: 1.25 }} />
+					<line x1={8} y1={6} x2={21} y2={6} style={{ stroke: ACCENT, strokeWidth: ray }} />
 					<polygon points={starPoints(6, 6, 5, 2.2)} style={{ fill: ACCENT, stroke: SURFACE, strokeWidth: 1 }} />
 				</>,
 			),
@@ -174,7 +182,7 @@ export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: s
 		rows.push({
 			key: 'duplicates',
 			words: `near-duplicate pair (${num(marks.duplicates)})`,
-			picture: glyph(<line x1={3} y1={6} x2={19} y2={6} style={{ stroke: OUTLINE, strokeWidth: 1.5, strokeDasharray: '4 3' }} />),
+			picture: glyph(<line x1={3} y1={6} x2={19} y2={6} style={{ stroke: OUTLINE, strokeWidth: line, strokeDasharray: '4 3' }} />),
 		});
 	}
 	if (marks.rings) {
@@ -183,8 +191,8 @@ export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: s
 			words: `shown duplicate group: each pair's similarity (${marks.rings.scale})`,
 			picture: glyph(
 				<>
-					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: SURFACE, strokeWidth: 3 }} />
-					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: OUTLINE, strokeWidth: 1.5, strokeDasharray: '3 2' }} />
+					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: SURFACE, strokeWidth: halo }} />
+					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: OUTLINE, strokeWidth: line, strokeDasharray: '3 2' }} />
 				</>,
 			),
 		});
@@ -250,7 +258,7 @@ export function Legend(props: LegendProps): React.ReactElement {
 	const groups = props.colourBy === 'cluster' ? all.filter((e) => e.key !== 'noise') : all;
 	const rows = props.colourBy === 'cluster' ? [...groups.slice(0, LEGEND_CLUSTERS), ...all.filter((e) => e.key === 'noise')] : all;
 	const more = props.colourBy === 'cluster' ? Math.max(0, groups.length - LEGEND_CLUSTERS) : 0;
-	const marks = markRows(props.marks);
+	const marks = markRows(props.marks, typeof window !== 'undefined' && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1);
 	const docs = sample.of.documents === null || sample.of.documents === undefined ? '—' : num(sample.of.documents);
 	return (
 		<section
