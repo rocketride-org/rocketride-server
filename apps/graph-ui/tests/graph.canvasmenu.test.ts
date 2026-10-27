@@ -10,7 +10,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { clampMenuPosition, menuItemsFor, menuKey, relationshipTypesFor } from '../src/graph/canvasMenu';
+import { clampMenuPosition, fitInViewport, menuItemsFor, menuKey, relationshipTypesFor } from '../src/graph/canvasMenu';
 import type { IMenuContext, IMenuItem } from '../src/graph/canvasMenu';
 import type { ISchemaView } from '../src/graph/schema';
 import { NO_SCHEMA } from '../src/graph/schema';
@@ -119,4 +119,16 @@ test('"Expand by type" offers the types whose schema endpoints include one of th
 	assert.deepEqual(relationshipTypesFor(view, ['Company']), ['MAKES', 'WORKS_AT']);
 	assert.deepEqual(relationshipTypesFor(view, ['Topic']), []);
 	assert.deepEqual(relationshipTypesFor(null, ['Person']), []);
+});
+
+test('a menu that runs past the right or bottom edge of the viewport is moved back inside, and one that fits is left alone', () => {
+	const view = { width: 1440, height: 900 };
+	assert.deepEqual(fitInViewport({ left: 1280, top: 40, width: 260, height: 200 }, view), { dx: -104, dy: 0 });
+	assert.deepEqual(fitInViewport({ left: 100, top: 800, width: 200, height: 300 }, view), { dx: 0, dy: -204 });
+	assert.deepEqual(fitInViewport({ left: 100, top: 100, width: 200, height: 300 }, view), { dx: 0, dy: 0 });
+});
+
+test('a menu wider than the viewport is pinned to the left margin, never pushed off the left edge', () => {
+	assert.deepEqual(fitInViewport({ left: 50, top: 10, width: 700, height: 100 }, { width: 400, height: 500 }), { dx: -46, dy: 0 });
+	assert.deepEqual(fitInViewport({ left: -30, top: -20, width: 100, height: 100 }, { width: 400, height: 500 }), { dx: 34, dy: 24 });
 });
