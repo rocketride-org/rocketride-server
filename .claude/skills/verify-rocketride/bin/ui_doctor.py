@@ -88,12 +88,15 @@ def ui_table(repo: Path):
         )
     for pkg in sorted(repo.glob('apps/*/package.json')):
         try:
-            app_id = json.loads(pkg.read_text()).get('appManifest', {}).get('id')
+            manifest = json.loads(pkg.read_text()).get('appManifest', {})
         except (OSError, ValueError):
             continue
+        app_id = manifest.get('id')
         if not app_id:
             continue
         name = pkg.parent.name
+        # The shell shows the manifest's icon, which some apps keep outside src/.
+        icon = [f'apps/{name}/{manifest["icon"].removeprefix("./")}'] if manifest.get('icon') else []
         uis.append(
             (
                 name,
@@ -107,6 +110,7 @@ def ui_table(repo: Path):
                     f'apps/{name}/rsbuild.config.mts',
                     f'apps/{name}/rsbuild.config.ts',
                     'apps/shared/src',
+                    *icon,
                 ],
                 f'./builder {name}:build',
             )
