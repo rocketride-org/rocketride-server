@@ -33,6 +33,7 @@ const shellStandIn = {
 		</button>
 	),
 	BxTrash: () => <svg aria-hidden="true" />,
+	ToggleGroup: (p: { options: Array<{ id: string; label: string }> }) => <div>{p.options.map((o) => <button key={o.id} type="button">{o.label}</button>)}</div>,
 	ContentHeader: (p: { title: string; subtitle?: string; actions?: React.ReactNode }) => (
 		<header>
 			<h1>{p.title}</h1>

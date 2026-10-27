@@ -37,6 +37,7 @@ const shellStandIn = {
 	Button: ({ children }: { children?: React.ReactNode }) => h('button', { type: 'button' }, children),
 	ContentHeader: ({ title, actions }: { title: string; actions?: React.ReactNode }) => h('header', null, h('h2', null, title), actions),
 	BxTrash: () => h('span', null, 'trash'),
+	ToggleGroup: ({ options }: { options: Array<{ id: string; label: string }> }) => h('div', null, options.map((o) => h('button', { key: o.id, type: 'button' }, o.label))),
 };
 const moduleWithLoad = Module as unknown as { _load: (request: string, parent: unknown, isMain: boolean) => unknown };
 const originalLoad = moduleWithLoad._load;
