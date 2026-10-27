@@ -26,10 +26,12 @@
 //
 // For now it holds the upload area as the console had it: the drop zone,
 // "Store under folder", the upload rows and the replace question. Where
-// uploads cannot work (a dev-tool mount) it says why instead. Once opened it
-// stays mounted, hidden while closed, so an upload in flight keeps
-// following its progress. Closing it with the focus inside gives the focus
-// back to what opened it.
+// uploads cannot work (a dev-tool mount, a pipeline with no Ingest source) it
+// says why instead, so the reason is one keyboard step away. Once opened it
+// stays mounted, hidden while closed, so an upload in flight keeps following
+// its progress. Opened, it takes the focus; Escape (inside it, unless an
+// inner control handled it) or its close button closes it, and the focus
+// goes back to what opened it.
 // =============================================================================
 
 import React, { useEffect, useRef } from 'react';
@@ -42,7 +44,7 @@ import { alsoReaches } from '../vector/consoleModel';
 import IngestPanel from './IngestPanel';
 
 const styles = {
-	aside: (open: boolean): CSSProperties => ({ display: open ? 'flex' : 'none', flexDirection: 'column', flex: '0 0 360px', minHeight: 0, minWidth: 0, borderLeft: '1px solid var(--rr-border)' }),
+	aside: (open: boolean): CSSProperties => ({ display: open ? 'flex' : 'none', flexDirection: 'column', flex: '0 0 360px', minHeight: 0, minWidth: 0, borderLeft: '1px solid var(--rr-border)', outline: 'none' }),
 	header: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 8px 0 12px' } as CSSProperties,
 	title: { ...commonStyles.textEllipsis, flex: 1, margin: 0, fontSize: 14, fontWeight: 600 } as CSSProperties,
 	close: commonStyles.paneHeaderButton,
@@ -70,11 +72,12 @@ export interface IAddDocumentsAsideProps {
 export function AddDocumentsAside({ model, channels, actions, endpoint, open, onClose }: IAddDocumentsAsideProps): React.ReactElement {
 	const region = useRef<HTMLElement>(null);
 	const opener = useRef<Element | null>(null);
-	// Opened: remember what had the focus. Closed with the focus inside (or lost): give it back, if still on the page.
+	// Opened: remember what had the focus, and take it. Closed with the focus inside (or lost): give it back, if still on the page.
 	useEffect(() => {
 		if (typeof document === 'undefined') return;
 		if (open) {
 			opener.current = document.activeElement;
+			region.current?.focus();
 			return;
 		}
 		const focused = document.activeElement;
@@ -85,7 +88,17 @@ export function AddDocumentsAside({ model, channels, actions, endpoint, open, on
 		if (lost && back instanceof HTMLElement && back.isConnected) back.focus();
 	}, [open]);
 	return (
-		<aside ref={region} aria-label="Add documents" style={styles.aside(open)}>
+		<aside
+			ref={region}
+			tabIndex={-1}
+			aria-label="Add documents"
+			style={styles.aside(open)}
+			onKeyDown={(event) => {
+				if (event.key !== 'Escape' || event.defaultPrevented) return;
+				event.preventDefault();
+				onClose();
+			}}
+		>
 			<div style={styles.header}>
 				<h2 style={styles.title}>Add documents</h2>
 				<button type="button" style={styles.close} title="Close Add documents" aria-label="Close Add documents" onClick={onClose}>

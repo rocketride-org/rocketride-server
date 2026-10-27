@@ -200,7 +200,7 @@ export const BUSY = {
 
 /** The console's empty states. */
 export const EMPTY = {
-	noDocuments: 'No documents yet. Drop a file on the right to add the first one.',
+	noDocuments: 'No documents yet.',
 	trash: 'The trash is empty.',
 	noMatch: (filter: string): string => `No documents match '${filter}'`,
 	unreachable: (detail: string): string => `Store unreachable: ${detail}`,

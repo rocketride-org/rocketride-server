@@ -78,6 +78,20 @@ export interface IOpenDocumentRequest {
 	objectId: string;
 }
 
+/** Nonces handed out on this page. */
+let nonces = 0;
+
+/**
+ * A new nonce for a request handed to another tab (taken once).
+ *
+ * @param kind - What it asks ("query", "document").
+ * @returns The nonce.
+ */
+export function workbenchNonce(kind: string): string {
+	nonces += 1;
+	return `${kind}-${nonces}`;
+}
+
 /**
  * A tab's label in the tab row: the Trash adds the store's count of trashed documents when it reports one.
  *
@@ -89,4 +103,57 @@ export function tabLabel(tab: WorkbenchTab, counts: { trash: number | null }): s
 	const label = WORKBENCH_TABS.find((t) => t.id === tab)?.label ?? tab;
 	if (tab === 'trash' && counts.trash !== null) return `${label} (${formatCount(counts.trash)})`;
 	return label;
+}
+
+/**
+ * Where a key moves the focus along a row of tabs (APG tabs: Left and Right wrap, Home and End). The tab row
+ * activates on Enter or Space only, so moving along it never opens a tab that calls the store (the Map samples).
+ *
+ * @param key - `KeyboardEvent.key`.
+ * @param index - The focused tab.
+ * @param count - How many tabs.
+ * @returns The tab to focus, or null for a key that does not move.
+ */
+export function tabKeyTarget(key: string, index: number, count: number): number | null {
+	if (count <= 0) return null;
+	switch (key) {
+		case 'ArrowRight':
+			return (index + 1) % count;
+		case 'ArrowLeft':
+			return (index - 1 + count) % count;
+		case 'Home':
+			return 0;
+		case 'End':
+			return count - 1;
+		default:
+			return null;
+	}
+}
+
+/** What {@link panelOf} reads of an element. */
+export interface IPanelLookup {
+	closest(selector: string): { getAttribute(name: string): string | null } | null;
+}
+
+/**
+ * The workbench panel an element is in (its `data-workbench-panel`), or null outside every panel.
+ *
+ * @param element - The element (`document.activeElement`), or null.
+ * @returns The panel's tab id, or null.
+ */
+export function panelOf(element: IPanelLookup | null): string | null {
+	return element?.closest('[data-workbench-panel]')?.getAttribute('data-workbench-panel') ?? null;
+}
+
+/**
+ * Whether a tab switch left the focus stranded in a panel that is now hidden (a "Show on map" or a quick action
+ * inside a panel switched the tab): the focus must then move to the tab row.
+ *
+ * @param element - `document.activeElement`.
+ * @param shown - The tab now shown.
+ * @returns True when the focus is inside another tab's panel.
+ */
+export function focusStranded(element: IPanelLookup | null, shown: WorkbenchTab): boolean {
+	const panel = panelOf(element);
+	return panel !== null && panel !== shown;
 }

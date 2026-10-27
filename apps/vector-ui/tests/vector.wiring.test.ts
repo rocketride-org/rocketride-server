@@ -125,12 +125,13 @@ test('the Map is a tab of the workbench: every panel mounts the first time its t
 	assert.match(view, /if \(!mounted\.has\(tab\)\) setMounted\(new Set\(\[\.\.\.mounted, tab\]\)\);/, 'a tab shown once keeps its panel');
 	assert.match(view, /panel: \(shown: boolean, gutter: number\): CSSProperties => \(\{[^}]*display: shown \? 'flex' : 'none'/, 'hidden, never unmounted');
 	for (const id of ['overview', 'documents', 'query', 'map', 'collection', 'trash']) {
-		assert.match(view, new RegExp(`\\{mounted\\.has\\('${id}'\\) && \\(\\s*<div style=\\{layout\\.panel\\(tab === '${id}', \\d+\\)\\} data-workbench-panel="${id}">`), id);
+		assert.match(view, new RegExp(`\\{mounted\\.has\\('${id}'\\) && \\(\\s*<WorkbenchPanel id="${id}" shown=\\{tab === '${id}'\\} gutter=\\{\\d+\\} prefix=\\{prefix\\}>`), id);
 	}
+	assert.match(view, /<div role="tabpanel" id=\{ids\.panel\} aria-labelledby=\{ids\.tab\} style=\{layout\.panel\(shown, gutter\)\} data-workbench-panel=\{id\}>/, 'each panel is the tab panel its tab names');
 	assert.match(view, /<MapView model=\{mapModel\} channels=\{channels\} selection=\{entry\.selection\} actions=\{actions\} visible=\{active && tab === 'map'\} documents=\{entry\.documents\} writes=\{entry\.writes\} \/>/);
 	assert.match(view, /const nextMapScope = mapScopeFor\(mapScope, wiring\);\s*if \(nextMapScope !== mapScope\) setMapScope\(nextMapScope\);/, 'the map keeps the scope it drew with while a new one finds its documents');
 	assert.match(view, /const mapModel = useMemo\(\(\) => \(nextMapScope === \(model\.scope \?\? null\) \? model : \{ \.\.\.model, scope: nextMapScope \}\), \[model, nextMapScope\]\)/);
-	assert.match(view, /<WorkbenchTabs value=\{tab\} onChange=\{\(id\) => entry\.tab\.set\(id\)\} trashCount=\{state\.stats\.view\?\.deletedDocuments \?\? null\} \/>/, 'the tab row is the entry\'s tab, with the store\'s trash count');
+	assert.match(view, /<WorkbenchTabs value=\{tab\} onChange=\{\(id\) => entry\.tab\.set\(id\)\} trashCount=\{state\.stats\.view\?\.deletedDocuments \?\? null\} idPrefix=\{prefix\} \/>/, 'the tab row is the entry\'s tab, with the store\'s trash count');
 	assert.deepEqual(WORKBENCH_TABS.map((t) => t.label), ['Overview', 'Documents', 'Query', 'Map', 'Collection', 'Trash']);
 	assert.equal(DEFAULT_TAB, 'overview');
 	assert.equal(tabLabel('trash', { trash: 1234 }), 'Trash (1,234)');
@@ -140,6 +141,38 @@ test('the Map is a tab of the workbench: every panel mounts the first time its t
 	// The pending bar sits under the panels, so staging never moves a row above it (DA-R0 I14).
 	const order = ['<ContentHeader', '<WorkbenchTabs', '<InlineRemoveConfirm', '<ConnectionDetailsPanel', "{mounted.has('overview')", "{mounted.has('trash')", '<PendingBar', '<AddDocumentsAside'].map((part) => view.indexOf(part));
 	assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), order.join(' < '));
+});
+
+test('the workbench header and tab row never move: Refresh keeps its width and says Refreshing… only for a refresh someone asked for', () => {
+	const view = code('views/ConsoleView.tsx');
+	assert.match(view, /<span style=\{layout\.held\}>\s*<span style=\{layout\.heldLabel\(!refreshing\)\}>Refresh<\/span>\s*<span style=\{layout\.heldLabel\(refreshing\)\}>\{BUSY\.refreshing\}<\/span>/, 'both labels in one grid cell: the button keeps the longer width');
+	assert.match(view, /heldLabel: \(shown: boolean\): CSSProperties => \(\{ gridArea: '1 \/ 1', visibility: shown \? 'visible' : 'hidden' \}\)/, 'the hidden label is not read out');
+	assert.match(view, /const refreshing = refreshAsked && statsLoading;/, 'the 15 s quick tick changes nothing in the header');
+	// The tab row is its own row, under the header and above every banner and panel.
+	const order = ['<ContentHeader', '<WorkbenchTabs', '{card.blocked &&', '{!card.blocked && statsError !== null &&', '{!card.blocked && entry.opened && !model.writes.enabled', '{!card.blocked && statsError === null && emptyCollection &&', '<InlineRemoveConfirm', "{mounted.has('overview')"].map((part) => view.indexOf(part));
+	assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), order.join(' < '));
+	assert.match(view, /<Button small variant="secondary" onClick=\{refresh\}>\s*Retry/, 'a store error keeps the last figures and offers Retry');
+	assert.match(view, /\{EMPTY\.noDocuments\}\s*\{model\.ingest\.enabled \? \(/, 'an empty collection says how to add documents where the mount can, and why not where it cannot');
+	const tabs = code('components/WorkbenchTabs.tsx');
+	assert.match(tabs, /role="tablist"/);
+	assert.match(tabs, /role="tab"[\s\S]*?aria-selected=\{selected\}[\s\S]*?tabIndex=\{selected \? 0 : -1\}/, 'a roving tabindex');
+	assert.match(tabs, /const target = tabKeyTarget\(event\.key, index, WORKBENCH_TABS\.length\);[\s\S]*?\.focus\(\);/, 'arrows move the focus only: activation is manual (the Map samples)');
+	assert.match(tabs, /fontVariantNumeric: 'tabular-nums'/, 'a changing count keeps the label width');
+});
+
+test('focus in the workbench: a tab switch from inside a panel moves the focus to the new tab; the aside closes on Escape and gives the focus back', () => {
+	const view = code('views/ConsoleView.tsx');
+	assert.match(view, /useLayoutEffect\(\(\) => \{[\s\S]*?focusStranded\(focused, tab\)[\s\S]*?currentTab\(\)\?\.focus\(\);\s*\}, \[tab\]\);/);
+	const aside = code('components/AddDocumentsAside.tsx');
+	assert.match(aside, /if \(event\.key !== 'Escape' \|\| event\.defaultPrevented\) return;\s*event\.preventDefault\(\);\s*onClose\(\);/, 'the Escape rule: an inner handler that acted wins; no stopPropagation');
+	assert.match(aside, /opener\.current = document\.activeElement;\s*region\.current\?\.focus\(\);/, 'opened: it takes the focus');
+	assert.match(aside, /if \(lost && back instanceof HTMLElement && back\.isConnected\) back\.focus\(\);/, 'closed: back to its opener');
+});
+
+test('B1(b): fresh stats that say the collection exists, against a probe that said it did not, probe the store again once per stats answer', () => {
+	const view = code('views/ConsoleView.tsx');
+	assert.match(view, /const disagree = state\.stats\.view !== null && state\.stats\.view\.collectionExists && dialect\?\.health\.collection_exists === false;/);
+	assert.match(view, /if \(!disagree \|\| statsAt === null \|\| reprobedFor\.current === statsAt\) return;\s*reprobedFor\.current = statsAt;\s*void env\.probe\(endpoint\.key\);/, 'never in a loop: one probe per stats answer');
 });
 
 test('the console renders the strip, the directory, the chunks, adding documents and the chat (each in its tab), and paces itself through its controller', () => {
@@ -165,7 +198,8 @@ test('the console renders the strip, the directory, the chunks, adding documents
 	assert.match(view, /entry\.controller\.open\(\)/);
 	assert.match(view, /\{addingMounted && <AddDocumentsAside [^>]*open=\{adding\}/, 'Add documents is an aside beside the panels, kept mounted once opened (an upload keeps following its progress)');
 	const strip = code('components/StatsStrip.tsx');
-	for (const fn of ['statsFigures(', 'statsChips(', 'countsAsOfText(']) assert.ok(strip.includes(fn), fn);
+	for (const fn of ['overviewCards(', 'statsChips(', 'countsAsOfText(']) assert.ok(strip.includes(fn), fn);
+	assert.ok(code('vector/overview.ts').includes('statsFigures('), "the cards are the strip's figures");
 });
 
 test('the scope: the listing asks for its conditions, its documents resolve from the listing, the chat is scoped within the cap, filters are saved per connection', () => {
@@ -183,10 +217,12 @@ test('the scope: the listing asks for its conditions, its documents resolve from
 	assert.match(view, /savedFiltersFor\(savedFilters, entry\.key\)/, "the app's per-connection map, emptied on a change of identity");
 	assert.match(view, /<DocumentsTab [^>]*scope=\{scope\} onScope=\{setScope\} cap=\{cap\}/);
 	assert.match(code('components/DocumentsTab.tsx'), /<ScopeBar [^>]*scope=\{scope\} onScope=\{onScope\} cap=\{cap\}/);
-	assert.match(view, /<OverviewPanel [^>]*scopeLine=\{scopeLine\} health=\{health\} onChartScope=\{scopeFromChart\} \/>/);
+	assert.match(view, /<OverviewPanel [^>]*scopeLine=\{scopeLine\} health=\{health\} median=\{median\} onChartScope=\{scopeFromChart\} /);
 	const overview = code('components/OverviewPanel.tsx');
 	assert.match(overview, /<StatsStrip [^>]*scopeLine=\{scopeLine\}/);
-	assert.match(overview, /<StatsStrip [^>]*sample=\{selection\.connectionKey === entry\.key \? selection\.sampleModel : null\}[^>]*onScope=\{onChartScope\}/, "the charts read the map's sample and a bar scopes the directory");
+	assert.match(overview, /sample=\{selection\.connectionKey === entry\.key \? selection\.sampleModel : null\}/, "the charts read the map's sample");
+	assert.match(overview, /<StatsCharts [^>]*onScope=\{props\.onChartScope\}/, 'and a bar scopes the documents');
+	assert.match(overview, /onChartScope=\{\(filter\) => \{\s*onChartScope\(filter\);\s*openTab\('documents'\);/, 'then shows them');
 	assert.match(view, /scopeWith\(scope, scope\?\.filter\.path_contains \?\? '', filter\)/, "a bar sets its kind of condition and keeps the scope's others");
 	assert.match(view, /const scopeFromChart = useCallback\(/, 'the charts are memoised: their click handler keeps its identity between renders');
 	assert.match(view, /const next = scopeWith\(scope, scope\?\.filter\.path_contains \?\? '', filter\);\s*const refused = checkScope\(next\);\s*if \(refused !== null\) announcer\.announce\(refused\);\s*else entry\.scope\.set\(next\);/, 'a bar the node would refuse is said, never sent');
@@ -214,14 +250,14 @@ test("a document's health: the tab compares with the console's loaded documents 
 	assert.doesNotMatch(view, /Without first chunk/);
 	assert.match(code('components/DocumentsTab.tsx'), /healthCell\(item, median\)/, "the Documents grid's Health column");
 	assert.match(code('components/DocumentsTab.tsx'), /pager\.status === 'loading' \|\| pager\.status === 'idle' \? null : medianChunks\(pager\.rows\)/, 'oversize waits for the listing to settle');
-	assert.match(code('views/ConsoleView.tsx'), /healthSummary\(state\.directory\.rows, \{ medianChunks: settled \? medianChunks\(state\.directory\.rows\) : null, complete: state\.directory\.status === 'done' && state\.directory\.filter === null \}\)/);
+	assert.match(code('views/ConsoleView.tsx'), /const median = settled \? medianChunks\(state\.directory\.rows\) : null;\s*return \{ median, health: healthSummary\(state\.directory\.rows, \{ medianChunks: median, complete: state\.directory\.status === 'done' && state\.directory\.filter === null \}\) \};/, 'the chip and Insights read the same rows and median');
 });
 
 test('every removal is confirmed inline in the document that shows it, in both mounts (no app-level dialog); the panel takes the first focus by the write\'s weight', () => {
 	const app = code('VectorApp.tsx');
 	assert.doesNotMatch(app, /RemoveDialogHost/, 'the full app mounts no modal confirmation');
 	assert.match(code('views/ConsoleView.tsx'), /<InlineRemoveConfirm entry=\{entry\} probe=\{probe\} origin=\{CONSOLE_ORIGIN\} returnFocus=\{returnFocus\} \/>/, 'the workbench confirms its own requests inline, on every tab');
-	assert.match(code('views/ConsoleView.tsx'), /firstFocusable\(\[shown\?\.querySelector<HTMLElement>\('\[data-return-focus\]'\), shown\?\.querySelector<HTMLElement>\('\[role="grid"\]'\), currentTab\]\)/, "a lost focus goes to the shown panel's marked row, else its grid, else the current tab");
+	assert.match(code('views/ConsoleView.tsx'), /firstFocusable\(\[shown\?\.querySelector<HTMLElement>\('\[data-return-focus\]'\), shown\?\.querySelector<HTMLElement>\('\[role="grid"\]'\), currentTab\(\)\]\)/, "a lost focus goes to the shown panel's marked row, else its grid, else the current tab");
 	assert.match(code('components/InlineRemoveConfirm.tsx'), /firstFocusable\(\[how\.current === 'cancel' \? back : null, closing\.current\.returnFocus\?\.\(\)\]\)/, 'after Cancel, back to the opener first');
 	assert.match(app, /<DocumentView [^>]*beforeBody=\{<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} origin=\{documentOrigin\(payload\.objectId\)\} \/>\}/, "and the full app's document tab its own (it shares the console's controller)");
 	assert.match(app, /origin: documentOrigin\(payload\.objectId\),/, "the tab's actions ask under its origin");
