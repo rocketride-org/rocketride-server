@@ -46,9 +46,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shell';
+import { firstFocusable } from '../vector/focus';
 import { escapeLayer, focusAfterClear, focusAfterPin, focusAfterRemove } from '../vector/queryFocus';
 import type { QueryFocusTarget } from '../vector/queryFocus';
-import { COMPARE_B_NOT_SAVED, HISTORY_FILTERS, RAN_AGAIN, entryMeta, shownEntries } from '../vector/queryHistory';
+import { HISTORY_FILTERS, RAN_AGAIN, entryMeta, shownEntries, shownQuestion } from '../vector/queryHistory';
 import type { HistoryFilter, QueryHistoryItem, RerunPlan } from '../vector/queryHistory';
 
 /** Props for the {@link HistoryAside} component. */
@@ -118,12 +119,14 @@ export function HistoryAside({ id, entries, recording, onRecording, note, now, r
 	const [focusNext, setFocusNext] = useState<AsideFocus | null>(null);
 	const shown = shownEntries(entries, filter);
 
-	// The focus an action asked for, once the entries it changed are drawn.
+	// The focus an action asked for, once the entries it changed are drawn: that control, else the Show filter, else the
+	// heading (vector/focus.ts firstFocusable: never <body>, never a control that is gone or hidden).
 	useEffect(() => {
 		if (focusNext === null) return;
 		const element = root.current;
 		const selector = typeof focusNext === 'string' ? `[data-query-focus="${focusNext}"]` : `[data-history-entry="${focusNext.entry}"] [data-history-control="${focusNext.control}"]`;
-		element?.querySelector<HTMLElement>(selector)?.focus();
+		const find = (query: string): HTMLElement | null => element?.querySelector<HTMLElement>(query) ?? null;
+		firstFocusable([find(selector), find('[data-history-control="filter"]'), find('[data-query-focus="history-heading"]')])?.focus();
 		setFocusNext(null);
 	}, [focusNext, entries]);
 
@@ -193,7 +196,7 @@ export function HistoryAside({ id, entries, recording, onRecording, note, now, r
 				</label>
 				<label style={S.row}>
 					Show
-					<select style={S.select} value={filter} onChange={(event) => setFilter(event.currentTarget.value as HistoryFilter)}>
+					<select style={S.select} value={filter} data-history-control="filter" onChange={(event) => setFilter(event.currentTarget.value as HistoryFilter)}>
 						{HISTORY_FILTERS.map((option) => (
 							<option key={option.id} value={option.id}>
 								{option.label}
@@ -238,7 +241,7 @@ export function HistoryAside({ id, entries, recording, onRecording, note, now, r
 						const short = entry.question.length > 40 ? `${entry.question.slice(0, 39)}…` : entry.question;
 						return (
 							<li key={entry.id} style={S.entry} data-history-entry={entry.id} data-kind={entry.kind}>
-								<p style={S.question}>{entry.kind === 'compare' ? `A: ${entry.question}\nB: ${entry.compareWith ?? COMPARE_B_NOT_SAVED}` : entry.question}</p>
+								<p style={S.question}>{shownQuestion(entry)}</p>
 								<p style={S.meta}>{entryMeta(entry, now)}</p>
 								{ranAgain === entry.id && (
 									<p style={S.meta} data-ran-again="">

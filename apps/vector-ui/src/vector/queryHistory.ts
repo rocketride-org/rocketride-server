@@ -158,6 +158,33 @@ export function shownEntries<T extends Pick<IQueryHistoryEntry, 'kind' | 'pinned
 	return [...kept.filter((entry) => entry.pinned === true), ...kept.filter((entry) => entry.pinned !== true)];
 }
 
+/** The longest question an entry shows: the history's own cut, which question B (held whole for Rerun) follows on screen. */
+const SHOWN_CHARS = 200;
+
+/**
+ * Question B as an entry shows it: whole for Load and Rerun, but on screen cut like A.
+ *
+ * @param b - Question B.
+ * @returns At most 200 characters, and "…" when it was longer.
+ */
+function shownB(b: string): string {
+	return b.length > SHOWN_CHARS ? `${b.slice(0, SHOWN_CHARS)}…` : b;
+}
+
+/**
+ * An entry's question as History shows it: "…" after a cut question, and a
+ * Compare as "A: …" and "B: …" (B cut to 200 characters on screen like A; it
+ * is held whole, for the session, so Load and Rerun restore it).
+ *
+ * @param entry - The entry.
+ * @returns The text.
+ */
+export function shownQuestion(entry: Pick<QueryHistoryItem, 'question' | 'truncated' | 'kind' | 'compareWith'>): string {
+	const a = entry.truncated === true ? `${entry.question}…` : entry.question;
+	if (entry.kind !== 'compare') return a;
+	return `A: ${a}\nB: ${entry.compareWith === undefined ? COMPARE_B_NOT_SAVED : shownB(entry.compareWith)}`;
+}
+
 /**
  * How long a run took.
  *
@@ -204,7 +231,7 @@ export function outcomeText(entry: Pick<IQueryHistoryEntry, 'kind' | 'results' |
  */
 export function entryMeta(entry: QueryHistoryItem, now: number): string {
 	const parts = [KIND_LABELS[entry.kind], entry.topK !== null ? `top ${entry.topK}` : null, outcomeText(entry), entryTime(entry.at, now), msText(entry.ms)];
-	if (entry.truncated === true) parts.push('first 200 characters kept');
+	if (entry.truncated === true || (entry.compareWith !== undefined && entry.compareWith.length > SHOWN_CHARS)) parts.push('first 200 characters kept');
 	return parts.filter(Boolean).join(' · ');
 }
 

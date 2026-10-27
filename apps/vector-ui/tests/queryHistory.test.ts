@@ -33,7 +33,7 @@ import path from 'node:path';
 import type { ChatTurn } from '../src/chat/chatSession';
 import { DEVTOOL_HISTORY_NOTE } from '../src/env';
 import { QUERY_HISTORY_TEXT_MAX, sessionQueryHistory } from '../src/adapters/queryHistory';
-import { COMPARE_B_NOT_SAVED, ONLY_FIRST_KEPT, RAN_AGAIN, askRecord, landsOn, compareRecord, entryMeta, entryTime, loadPlan, modeOfKind, msText, outcomeText, rerunPlan, searchRecord, shownEntries } from '../src/vector/queryHistory';
+import { COMPARE_B_NOT_SAVED, ONLY_FIRST_KEPT, RAN_AGAIN, askRecord, landsOn, shownQuestion, compareRecord, entryMeta, entryTime, loadPlan, modeOfKind, msText, outcomeText, rerunPlan, searchRecord, shownEntries } from '../src/vector/queryHistory';
 import type { QueryHistoryItem, RerunContext } from '../src/vector/queryHistory';
 import type { ModeOption } from '../src/vector/searchWorkbench';
 
@@ -137,6 +137,15 @@ test('how an entry reads: its kind, k, what it came to, when and how long, and w
 	assert.equal(entryMeta(item({ at }), at), 'Semantic · top 10 · 12 results · 02:37 PM · 420 ms');
 	assert.equal(entryMeta(item({ kind: 'ask', topK: null, results: 4, at }), at), 'Ask · 4 sources · 02:37 PM · 420 ms');
 	assert.match(entryMeta(item({ question: 'q'.repeat(200), truncated: true, at }), at), / · first 200 characters kept$/);
+	// Question B is held whole (Load and Rerun restore it) but shown cut like A.
+	assert.equal(shownQuestion(item({ question: 'q'.repeat(200), truncated: true })), `${'q'.repeat(200)}…`);
+	assert.equal(shownQuestion(item({ question: 'water' })), 'water');
+	assert.equal(shownQuestion(item({ kind: 'compare', question: 'water', compareWith: 'b'.repeat(600) })), `A: water\nB: ${'b'.repeat(200)}…`);
+	assert.equal(shownQuestion(item({ kind: 'compare', question: 'water', compareWith: 'falcon' })), 'A: water\nB: falcon');
+	assert.equal(shownQuestion(item({ kind: 'compare', question: 'water' })), `A: water\nB: ${COMPARE_B_NOT_SAVED}`);
+	assert.match(entryMeta(item({ kind: 'compare', compareWith: 'b'.repeat(600), at }), at), / · first 200 characters kept$/);
+	assert.doesNotMatch(entryMeta(item({ kind: 'compare', compareWith: 'falcon', at }), at), /kept/);
+	assert.equal(loadPlan(item({ kind: 'compare', compareWith: 'b'.repeat(600) }), LOAD).search?.questionB, 'b'.repeat(600), 'Load restores B whole');
 });
 
 test('the list: pinned first, then newest first; a filter by mode (Search holds every Search mode) or pinned', () => {
@@ -224,6 +233,8 @@ test('wiring: the History aside asks inline, keeps the focus, and handles Escape
 	assert.doesNotMatch(aside, /<(Modal|ConfirmDialog|DetailPanel)\b/);
 	assert.match(aside, /if \(confirming\) root\.current\?\.querySelector<HTMLElement>\('\[data-history-confirm\] \[data-history-control="cancel"\]'\)\?\.focus\(\);/, 'Clear… opens on Cancel: it cannot be undone');
 	assert.match(aside, /setFocusNext\(focusAfterClear\(confirmed\)\);/);
+	assert.match(aside, /firstFocusable\(\[find\(selector\), find\('\[data-history-control="filter"\]'\), find\('\[data-query-focus="history-heading"\]'\)\]\)\?\.focus\(\);/, 'the asked-for control, else the Show filter, else the heading');
+	assert.match(aside, /<select [^>]*data-history-control="filter"/);
 	assert.match(aside, /const next = focusAfterRemove\(/);
 	assert.match(aside, /const next = focusAfterPin\(\s*filter === 'pinned',\s*shown\.map\(\(e\) => e\.id\),\s*entry\.id,\s*entry\.pinned === true\s*\);\s*onPin\(entry\.id\);\s*setFocusNext\(next\);/, 'unpinning under "Pinned" never drops the focus');
 	assert.match(aside, /setFocusNext\(\{ entry: entryId, control: 'note' \}\);/);

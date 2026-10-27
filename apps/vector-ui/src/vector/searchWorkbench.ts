@@ -1287,9 +1287,10 @@ export function applyHandoff(handoff: SearchHandoff, current: { mode: SearchMode
 	const cut = a.cut || (b?.cut ?? false);
 	if (handoff.chat !== null) {
 		const next = prefillRun({ ...handoff.chat, question: a.text }, options, ks);
-		// A question longer than the box is no longer the one "Why these?" searched: it is put in the box, not run, and
-		// claims no tie to the answer (no "cited" marks, no "From the chat" line).
-		if (a.cut) return { question: next.question, questionB: null, mode: next.mode, topK: next.topK, tables: 'any', cut, objectIds: next.objectIds, chat: null, run: false };
+		// A question longer than the box is no longer the one "Why these?" searched: it is put in the box (the cut line
+		// says so) and not run. The answer's cited chunks stay tied to the cut question, so a run of it marks them, and its
+		// "From the chat" line says which documents that run searched.
+		if (a.cut) return { question: next.question, questionB: null, mode: next.mode, topK: next.topK, tables: 'any', cut, objectIds: next.objectIds, chat: { ...handoff.chat, question: next.question }, run: false };
 		return { question: next.question, questionB: null, mode: next.mode, topK: next.topK, tables: 'any', cut, objectIds: next.objectIds, chat: handoff.chat, run: handoff.run && next.mode !== null && next.question.trim() !== '' };
 	}
 	const offered = (mode: SearchMode | null | undefined): boolean => mode !== null && mode !== undefined && options.find((o) => o.mode === mode)?.enabled === true;

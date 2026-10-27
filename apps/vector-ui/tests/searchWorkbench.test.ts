@@ -968,10 +968,10 @@ test('applyHandoff: "Open in Search" searches as "Why these?" did (every table c
 	assert.deepEqual(fromChat, { question: FALCON, questionB: null, mode: 'semantic', topK: 13, tables: 'any', cut: false, objectIds: ['d1'], chat, run: true });
 	assert.deepEqual(topKChoices(ks, fromChat.topK), [5, 10, 13, 25, 50], 'its k joins the choices');
 	// A chat question longer than the box (chat questions go to 4,000) is no longer the one "Why these?" searched: it is
-	// put in the box, cut, and neither run nor tied to the answer.
+	// put in the box, cut, and not run; the answer's cited chunks stay tied to the cut question, so a run of it marks them.
 	const long = 'w'.repeat(1500);
 	const cutChat = applyHandoff({ nonce: 'n', question: long, run: true, chat: { ...chat, question: long } }, current, options, ks);
-	assert.deepEqual([cutChat.question.length, cutChat.cut, cutChat.run, cutChat.chat], [1000, true, false, null]);
+	assert.deepEqual([cutChat.question.length, cutChat.cut, cutChat.run, cutChat.chat?.question, cutChat.chat?.cited], [1000, true, false, 'w'.repeat(1000), chat.cited]);
 	const entry: SearchHandoff = { nonce: 'n', question: 'kestrel', questionB: 'falcon', mode: 'hybrid', topK: 50, run: true, chat: null };
 	assert.deepEqual(applyHandoff(entry, current, options, ks), { question: 'kestrel', questionB: 'falcon', mode: 'hybrid', topK: 50, tables: null, cut: false, objectIds: 'scope', chat: null, run: true });
 	const noEmbed = modeOptions(model({ embed: { enabled: false, reason: null }, nodes: { store: 'store_1', embed: null, llm: null, llmName: null } }));
@@ -990,4 +990,15 @@ test('takePrefill: a question handed in through the connection fills the box of 
 	assert.deepEqual(takePrefill({ nonce: 'p3', question: 'why?', mode: 'ask' }, 'search'), { mode: 'ask', search: null, ask: { nonce: 'p3', question: 'why?', run: false } });
 	assert.deepEqual(takePrefill({ nonce: 'p4', question: '' }, 'compare'), { mode: 'search', search: { nonce: 'p4', question: '', run: false, chat: null, clear: true }, ask: null });
 	assert.equal(takePrefill({ nonce: 'p5', question: 'x', mode: 'search', keys: [['o1', 3]] }, 'search').search?.chat, null, 'keys (a chunk used as the query) are no chat citations');
+});
+
+test('"Open in Search" with a question longer than the box: the user\'s run of the cut question still marks the answer\'s cited chunks', async () => {
+	const long = `${FALCON} ${'w'.repeat(1200)}`;
+	const applied = applyHandoff({ nonce: 'n', question: long, run: true, chat: { question: long, cited: [CITED], topK: 13, objectIds: null } }, { mode: 'semantic', topK: 10 }, modeOptions(model()), topKOptions(limits));
+	assert.equal(applied.run, false, 'not run by itself');
+	const { deps } = fakeCalls({ embed: [embedOk as unknown as Record<string, unknown>], search: [searchVector as unknown as Record<string, unknown>] });
+	const outcome = await runWorkbench(deps, { ...base, question: applied.question, mode: 'semantic', topK: applied.topK, chat: applied.chat });
+	assert.ok(outcome.ok);
+	assert.equal(outcome.run.rows.find((row) => row.chunkId === CITED[1])?.cited, true, 'the cited chunk is marked');
+	assert.ok(outcome.run.fromChat !== null, 'and the "From the chat" line describes the run');
 });
