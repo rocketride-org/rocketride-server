@@ -444,7 +444,7 @@ export function collectionView(probe: IProbeResult | undefined, stats: IStatsVie
 		{
 			label: 'Storage and writes',
 			rows: [
-				{ label: 'Size', value: typeof dialect.size_bytes === 'number' ? formatSize(dialect.size_bytes) : 'not reported by this store' },
+				{ label: 'Size', value: typeof dialect.size_bytes === 'number' ? formatSize(dialect.size_bytes) : dialect.health.collection_exists === false ? '—' : 'not reported by this store' },
 				{ label: 'Chunks', value: chunks === null ? '—' : chunks.toLocaleString('en-US') },
 				{ label: 'Removing documents', value: dialect.allow_writes ? 'On (allow_writes)' : 'Off (allow_writes)' },
 				{ label: 'Delete mode', value: dialect.capabilities.soft_delete ? 'Moves to the Trash (soft delete)' : 'Permanent only' },

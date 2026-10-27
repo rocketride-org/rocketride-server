@@ -137,11 +137,11 @@ export function neighbourRows(items: readonly INeighborItem[], objectId: string)
  * The line above the neighbours.
  *
  * @param list - The rows and what was left out.
- * @param asked - How many the store was asked for.
+ * @param returned - How many chunks the store returned (before the document's own were left out).
  * @returns What they are, or why there are none.
  */
-export function neighboursCaption(list: INeighbourList, asked: number): string {
+export function neighboursCaption(list: INeighbourList, returned: number): string {
 	const out = list.leftOut === 0 ? '' : ` ${list.leftOut} ${list.leftOut === 1 ? 'chunk' : 'chunks'} of this document ${list.leftOut === 1 ? 'was' : 'were'} left out.`;
-	if (list.rows.length === 0) return `None of the ${asked} nearest chunks the store returned is from another document.${out}`;
-	return `The ${list.rows.length} nearest ${list.rows.length === 1 ? 'chunk' : 'chunks'} from other documents, out of the ${asked} nearest in the collection.${out}`;
+	if (list.rows.length === 0) return `None of the ${returned} nearest chunks the store returned is from another document.${out}`;
+	return `The ${list.rows.length} nearest ${list.rows.length === 1 ? 'chunk' : 'chunks'} from other documents, out of the ${returned} nearest the store returned.${out}`;
 }

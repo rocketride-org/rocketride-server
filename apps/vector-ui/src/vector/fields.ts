@@ -74,6 +74,8 @@ export interface IFieldsEstimate {
 	at: number;
 	/** The connection's write count when it was read: a later count means the documents may have changed. */
 	writes?: number;
+	/** The store's document count (stats) when it was read, or null: a different count later means documents were added or removed. */
+	documents?: number | null;
 }
 
 /** The longest example shown. */

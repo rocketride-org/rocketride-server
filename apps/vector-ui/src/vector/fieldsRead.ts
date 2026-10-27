@@ -50,15 +50,24 @@ export const CHUNKS_PER_DOCUMENT = 20;
  * @param nodeId - The store node.
  * @param rows - The loaded documents.
  * @param writes - The connection's write count now (kept with the estimate).
+ * @param documents - The store's document count now, when stats have one (kept with the estimate).
  * @returns The estimate (document fields over `rows`, chunk fields over the chunks read).
  * @throws The first failed read's error: nothing is kept from a sample that did not finish.
  */
-export async function readFieldsSample(caller: IVectorCaller, nodeId: string, rows: readonly IDocumentItem[], writes = 0): Promise<IFieldsEstimate> {
+export async function readFieldsSample(caller: IVectorCaller, nodeId: string, rows: readonly IDocumentItem[], writes = 0, documents: number | null = null): Promise<IFieldsEstimate> {
 	const picked = sampleDocuments(rows, SAMPLE_DOCUMENTS);
 	const chunks: IChunkItem[] = [];
+	let read = 0;
 	for (const row of picked) {
-		const page = await fetchChunks(caller, nodeId, { objectId: row.objectId, afterChunk: -1, limit: CHUNKS_PER_DOCUMENT, deleted: 'active' });
-		chunks.push(...page.items);
+		try {
+			const page = await fetchChunks(caller, nodeId, { objectId: row.objectId, afterChunk: -1, limit: CHUNKS_PER_DOCUMENT, deleted: 'active' });
+			chunks.push(...page.items);
+			read += 1;
+		} catch (error) {
+			// A document trashed or removed since the listing is skipped; any other failure ends the sample.
+			const code = (error as { code?: string } | null)?.code;
+			if (code !== 'IN_TRASH' && code !== 'NOT_FOUND') throw error;
+		}
 	}
-	return { rows: mergeFields(documentFields(rows), chunkFields(chunks)), chunksRead: chunks.length, documentsRead: picked.length, at: Date.now(), writes };
+	return { rows: mergeFields(documentFields(rows), chunkFields(chunks)), chunksRead: chunks.length, documentsRead: read, at: Date.now(), writes, documents };
 }

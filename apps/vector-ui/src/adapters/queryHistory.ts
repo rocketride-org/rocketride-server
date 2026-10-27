@@ -51,6 +51,21 @@
 // never merged. A run that repeats the newest entry's question is that
 // entry run again: the shared store keeps the older entry (its id, pin and
 // note) with the new run's facts, and question B follows that run here.
+//
+// KINDS NEVER MERGE: the shared store merges adjacent entries by their text
+// alone, so the text it is handed carries its kind's tag ("sem␟", "ask␟",
+// "cmp␟", ... all four characters wide): a Semantic run and an Ask of the
+// same words, or a Search and a Compare with that A, stay two entries, and a
+// pinned entry keeps its mode and k. Only the same kind with the same
+// question is "the same entry run again". A Compare is one with its pair, but
+// its question B never goes to the store: a Compare of the same A with
+// ANOTHER B (or one whose B this page does not know, after a reload) takes
+// the other of the two Compare tags ("cmp␟", "cm2␟"), so it is a new entry
+// and the pair before it keeps its B. The tag is stripped wherever an
+// entry is read, so nothing shows it. The store's bound is the question's
+// 200 characters plus the tag, so every question still keeps exactly its
+// first 200 characters, and the text the workspace file holds gains only
+// that four-character tag (APP_HISTORY_NOTE stays true).
 // =============================================================================
 
 import { DEFAULT_HISTORY_LIMITS, createHistoryStore } from 'shared/explorer';
@@ -60,11 +75,65 @@ import type { IQueryHistoryEntry, IQueryHistorySource, IReadable, QueryHistoryKi
 /** The longest question the history keeps: the first 200 characters (a longer one is marked `truncated`). */
 export const QUERY_HISTORY_TEXT_MAX = 200;
 
-/** The bounds of both mounts' Query history stores. */
-export const QUERY_HISTORY_LIMITS: IHistoryLimits = { ...DEFAULT_HISTORY_LIMITS, maxTextChars: QUERY_HISTORY_TEXT_MAX };
+/** Each kind's tag on the stored text, all as wide, so the store's one bound keeps 200 characters of every question. */
+const KIND_TAGS: Readonly<Record<QueryHistoryKind, string>> = { semantic: 'sem␟', keyword: 'key␟', hybrid: 'hyb␟', auto: 'aut␟', ask: 'ask␟', compare: 'cmp␟' };
+
+/** The width of a kind's tag. */
+export const QUERY_HISTORY_TAG_CHARS = 4;
+
+/** Compare's second tag: a Compare of the newest Compare's A with another B takes the tag that one does not have. */
+const COMPARE_OTHER_TAG = 'cm2␟';
+
+/** The bounds of both mounts' Query history stores: the question's 200 characters plus its kind's tag. */
+export const QUERY_HISTORY_LIMITS: IHistoryLimits = { ...DEFAULT_HISTORY_LIMITS, maxTextChars: QUERY_HISTORY_TEXT_MAX + QUERY_HISTORY_TAG_CHARS };
 
 /** The kinds a Query tab run is recorded under. */
 const KINDS: ReadonlySet<string> = new Set<QueryHistoryKind>(['semantic', 'keyword', 'hybrid', 'auto', 'ask', 'compare']);
+
+/**
+ * The text the store keeps for a run: its kind's tag, then the whole question (the store cuts it).
+ *
+ * @param kind - The run's kind.
+ * @param question - The whole question.
+ * @returns The stored text.
+ */
+export function storedText(kind: QueryHistoryKind, question: string): string {
+	return `${KIND_TAGS[kind]}${question}`;
+}
+
+/**
+ * A stored text without its kind's tag (an entry written before the tags has none, and is read as it is).
+ *
+ * @param kind - The entry's kind.
+ * @param text - The stored text.
+ * @returns The question.
+ */
+export function questionOf(kind: QueryHistoryKind, text: string): string {
+	const tag = KIND_TAGS[kind];
+	if (text.startsWith(tag)) return text.slice(tag.length);
+	return kind === 'compare' && text.startsWith(COMPARE_OTHER_TAG) ? text.slice(COMPARE_OTHER_TAG.length) : text;
+}
+
+/**
+ * The tag a run's stored text takes. A Compare whose A is the newest entry's
+ * (a Compare, uncut) keeps that entry's tag only when it is the same pair (the
+ * B this page holds for it is the run's B): the store then merges the two as
+ * the pair run again. With another B, or a B this page does not know, it takes
+ * the other Compare tag and is a new entry. Every other run takes its kind's tag.
+ *
+ * @param newest - The newest stored entry, or undefined.
+ * @param newestB - The question B this page holds for it, or undefined.
+ * @param entry - The run.
+ * @returns The tag.
+ */
+function tagFor(newest: IHistoryEntry<'question'> | undefined, newestB: string | undefined, entry: Pick<IQueryHistoryEntry, 'kind' | 'question' | 'compareWith'>): string {
+	const tag = KIND_TAGS[entry.kind];
+	if (entry.kind !== 'compare' || newest === undefined || newest.truncated || newest.kind !== 'compare') return tag;
+	const newestTag = newest.question.startsWith(tag) ? tag : newest.question.startsWith(COMPARE_OTHER_TAG) ? COMPARE_OTHER_TAG : null;
+	if (newestTag === null || newest.question.slice(newestTag.length) !== entry.question) return tag;
+	if (newestB !== undefined && newestB === entry.compareWith) return newestTag;
+	return newestTag === tag ? COMPARE_OTHER_TAG : tag;
+}
 
 /**
  * A stored entry as a Query history entry.
@@ -76,7 +145,7 @@ export function queryEntryOf(entry: IHistoryEntry<'question'>): IQueryHistoryEnt
 	if (!KINDS.has(entry.kind) || (entry.outcome !== 'rows' && entry.outcome !== 'error')) return null;
 	return {
 		id: entry.id,
-		question: entry.question,
+		question: questionOf(entry.kind as QueryHistoryKind, entry.question),
 		kind: entry.kind as QueryHistoryKind,
 		at: entry.at,
 		ms: entry.ms,
@@ -95,12 +164,13 @@ export function queryEntryOf(entry: IHistoryEntry<'question'>): IQueryHistoryEnt
  *
  * @param id - The new entry's id.
  * @param entry - The run.
+ * @param tag - The tag its text takes (default its kind's; a Compare may take the other Compare tag).
  * @returns The stored entry.
  */
-export function storedEntryOf(id: string, entry: Omit<IQueryHistoryEntry, 'id' | 'truncated'>): IHistoryEntry<'question'> {
+export function storedEntryOf(id: string, entry: Omit<IQueryHistoryEntry, 'id' | 'truncated'>, tag: string = KIND_TAGS[entry.kind]): IHistoryEntry<'question'> {
 	return {
 		id,
-		question: entry.question,
+		question: `${tag}${entry.question}`,
 		at: entry.at,
 		ms: entry.ms,
 		outcome: entry.outcome,
@@ -176,17 +246,18 @@ function sourceOver(holder: IStoreHolder, info: { persisted: boolean; note: stri
 		record(key, entry) {
 			const id = newId(entry.at);
 			const store = holder.current();
-			// The entry this run lands on: its own, or the newest one when it repeats that one's full question (the store
-			// merges the two, keeping the older id). Question B is set for it before the store tells its listeners, so
+			const newest = store.getHistory(key)[0];
+			const tag = tagFor(newest, newest === undefined ? undefined : compared.get(newest.id), entry);
+			// The entry this run lands on: its own, or the newest one when it repeats that one's kind and full question (the
+			// store merges the two by their tagged text, keeping the older id). Question B is set for it before the store tells its listeners, so
 			// the first snapshot carries it; a run without one clears the B of the entry it lands on.
 			// While recording is off the store keeps nothing, and nothing changes here either.
 			if (store.getRecording(key)) {
-				const newest = store.getHistory(key)[0];
-				const lands = newest !== undefined && !newest.truncated && newest.question === entry.question ? newest.id : id;
+				const lands = newest !== undefined && !newest.truncated && newest.question === `${tag}${entry.question}` ? newest.id : id;
 				if (entry.compareWith !== undefined) compared.set(lands, entry.compareWith);
 				else compared.delete(lands);
 			}
-			store.runs.emitRun(key, storedEntryOf(id, entry));
+			store.runs.emitRun(key, storedEntryOf(id, entry, tag));
 		},
 		togglePin: (key, id) => holder.current().togglePin(key, id),
 		setNote: (key, id, note) => holder.current().setNote(key, id, note),

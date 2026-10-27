@@ -764,9 +764,11 @@ test('SearchResults: without a Chat source every "ask about this" is off and say
 	const asks = [...html.matchAll(/<button[^>]*aria-label="Ask about [^"]*"[^>]*>/g)].map(([tag]) => tag);
 	assert.equal(asks.length, 20);
 	for (const tag of asks) {
-		assert.ok(tag.includes('disabled=""'), tag);
+		assert.ok(tag.includes('aria-disabled="true"'), `off, and still in the tab order: ${tag}`);
+		assert.ok(!tag.includes(' disabled=""'), tag);
 		assert.ok(tag.includes(`title="${NO_CHAT_SENTENCE}"`), tag);
 	}
+	assert.match(html, /<p[^>]*data-ask-off=""[^>]*>&quot;Ask about this&quot; is off: This pipeline has no running Chat source\.<\/p>/, 'the reason is on screen, once');
 	const others = [...html.matchAll(/<button[^>]*aria-label="(?:Open|Show chunk) [^"]*"[^>]*>/g)].map(([tag]) => tag);
 	assert.equal(others.length, 40, 'open and map on every row');
 	assert.ok(
