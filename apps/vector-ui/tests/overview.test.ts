@@ -178,15 +178,18 @@ test("the bottom slot's one line: the pending bar while staged, else the write's
 	assert.equal(at({ fresh: true, stagedSince: true }), 'pending', 'or as soon as the staged set changes');
 	// A running write: its line until its result, whatever else.
 	assert.equal(at({ write: 'running', stagedSince: true, showing: 'pending' }), 'write');
-	// The focus or the pointer in the line (Write details, Dismiss): it is not swapped out from under them...
+	// The focus or the pointer in the line (Write details, Show pending): it is not swapped out from under them...
 	assert.equal(at({ held: true }), 'write');
 	assert.equal(at({ held: true, stagedSince: true }), 'write');
 	// ...but resting on the bar never brings an old result back.
 	assert.equal(at({ held: true, showing: 'pending' }), 'pending');
-	// A failure stays until the staged set changes or it is dismissed (no longer a line).
+	// A failure, or a write that did not do all it was asked (kept whole, already gone), has no timer: it stays until
+	// the staged set changes or Show pending sets it aside (no longer a line).
 	assert.equal(at({ write: 'failure' }), 'write');
+	assert.equal(at({ write: 'failure', fresh: false, showing: 'write' }), 'write', 'long after it landed');
 	assert.equal(at({ write: 'failure', stagedSince: true }), 'pending');
-	assert.equal(at({ write: null, showing: 'write' }), 'pending', 'Dismiss: the bar');
-	assert.equal(at({ write: null, staged: 0, showing: 'write' }), 'empty', 'Dismiss with nothing staged: an empty line');
+	assert.equal(at({ write: 'result', fresh: false, showing: 'write' }), 'pending', 'only a success goes after a few seconds');
+	assert.equal(at({ write: null, showing: 'write' }), 'pending', 'Show pending: the bar');
+	assert.equal(at({ write: null, staged: 0, showing: 'write' }), 'empty', 'nothing to show, nothing staged: an empty line');
 });
 

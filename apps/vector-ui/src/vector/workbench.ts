@@ -204,7 +204,10 @@ export const RESULT_FIRST_MS = 6000;
 /** What the workbench's bottom slot shows: the pending bar, the write's line, or nothing (the same height). */
 export type BottomSlot = 'pending' | 'write' | 'empty';
 
-/** The write's line: a write running, its result (or "Cancelled"), a failure, or nothing (none, or dismissed). */
+/**
+ * The write's line: a write running, its result (or "Cancelled"), a failure (or a write that did not do all it was
+ * asked: documents kept whole, or already gone), or nothing (none, or set aside by Show pending).
+ */
 export type SlotWrite = 'running' | 'result' | 'failure' | null;
 
 /** What {@link bottomSlot} decides from. */
@@ -228,8 +231,9 @@ export interface IBottomSlotInput {
  * While documents are staged, the write's line still shows when:
  *
  * - a write is running (its result follows on the same line);
- * - it shows and the focus or the pointer is in it (Write details, Dismiss: never swapped out from under them);
- * - unless the staged set changed since it landed: a failure (until dismissed), or a result for a few seconds.
+ * - it shows and the focus or the pointer is in it (Write details, Show pending: never swapped out from under them);
+ * - unless the staged set changed since it landed: a failure with no timer (until Show pending), a success for a few
+ *   seconds.
  *
  * @param input - {@link IBottomSlotInput}.
  * @returns What the slot shows.

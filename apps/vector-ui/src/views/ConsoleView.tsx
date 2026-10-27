@@ -123,7 +123,7 @@ const layout = {
 	slot: { flexShrink: 0, boxSizing: 'border-box', height: PENDING_BAR_HEIGHT, margin: '0 12px 8px', display: 'flex', alignItems: 'stretch', minWidth: 0 } as CSSProperties,
 	/** The write line in the slot: its sentence (announced), then the audit disclosure beside it (not announced). */
 	writeLine: { flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', gap: 8, padding: '0 12px' } as CSSProperties,
-	/** The sentence takes the room left, so Write details (and a failure's Dismiss) sit at the slot's right end. */
+	/** The sentence takes the room left, so Write details (and a held failure's Show pending) sit at the slot's right end. */
 	status: { ...styles.small, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
 	/** The panels beside the Add documents aside. */
 	body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' } as CSSProperties,
@@ -294,14 +294,14 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 	};
 	const prefix = `wb${useId().replace(/:/g, '')}`;
 	// The bottom slot's one line (bottomSlot): the pending bar while documents are staged, else the write's line. A
-	// write's result that lands while documents are staged shows first (seen, not only announced): a running write and
-	// a failure until the staged set changes (or Dismiss), a result for a few seconds; never swapped out from under the
-	// focus or the pointer.
+	// write's result that lands while documents are staged shows first (seen, not only announced): a running write, and
+	// a failure or a write that did not do all it was asked, until the staged set changes (or Show pending); a success
+	// for a few seconds; never swapped out from under the focus or the pointer.
 	const staged = useValueStore(entry.staged);
 	const removal = state.removal;
-	// Each write's line is its own object (the store sets a new one per write), so a Dismiss lasts until the next.
+	// Each write's line is its own object (the store sets a new one per write), so Show pending lasts until the next.
 	const [dismissed, setDismissed] = useState<typeof removal | null>(null);
-	const write: SlotWrite = removal === dismissed || (removal.status !== 'running' && removal.message === null) ? null : removal.status === 'running' ? 'running' : removal.status === 'error' ? 'failure' : 'result';
+	const write: SlotWrite = removal === dismissed || (removal.status !== 'running' && removal.message === null) ? null : removal.status === 'running' ? 'running' : removal.status === 'error' || removal.partial ? 'failure' : 'result';
 	const [fresh, setFresh] = useState(false);
 	const [stagedSince, setStagedSince] = useState(false);
 	// The staged set changed (the user acted). Declared first, so a write that changes the staged set and lands its
@@ -329,7 +329,7 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 		return firstFocusable([inShown('[data-return-focus]'), inShown('[data-grid-focus] [data-grid-row][tabindex="0"]'), inShown('[data-grid-focus]'), currentTab()]);
 	};
 	// The slot changed what it shows: what it shows now is what it showed last; and a control in it that left with the
-	// focus (Dismiss, the pending bar going) hands the focus to the slot's first control, else the shown panel's chain.
+	// focus (Show pending, the pending bar going) hands the focus to the slot's first control, else the shown panel's chain.
 	useLayoutEffect(() => {
 		showing.current = slot;
 		if (typeof document === 'undefined' || !inSlot.focus) return;
@@ -521,11 +521,12 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 										{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
 									</div>
 								)}
-								{/* Outside the live element: opening it does not announce the line again. */}
-								{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails audit={state.removal.audit} />}
-								{write === 'failure' && (
+								{/* Outside the live element: opening it does not announce the line again. Always there for a finished
+								    write: the line is cut to one line, and Write details has the whole sentence. */}
+								{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails result={state.removal.message ?? undefined} audit={state.removal.audit} />}
+								{write === 'failure' && staged.size > 0 && (
 									<Button small variant="ghost" onClick={() => setDismissed(removal)}>
-										Dismiss
+										Show pending
 									</Button>
 								)}
 							</div>

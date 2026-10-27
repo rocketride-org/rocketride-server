@@ -29,9 +29,11 @@
 // the tool, the rows it touched and who called (vector/results.ts
 // readAudit; never content or vectors). The console keeps them with the
 // write's result (removal.audit), and this disclosure, at the right end of
-// the hub's bottom line (outside its announced text), lists them, one line
-// per batch (vector/confirm.ts auditLines). Its summary is "Write details",
-// not the header's "Details" (the connection's).
+// the hub's bottom line (outside its announced text), shows the result's
+// whole sentence first (the line is one line and cuts it: the documents kept
+// whole, those already gone, where it stopped), then the audit, one line per
+// batch (vector/confirm.ts auditLines). Its summary is "Write details", not
+// the header's "Details" (the connection's).
 //
 // The list opens over the panel, never growing the line: placed before the
 // browser paints by the map popovers' rules (map/popover.ts placePopover:
@@ -39,7 +41,7 @@
 // ancestor and the surface it sits on, so never under the sidebar), and
 // closed like them: Escape (focus back on the summary), a press outside it,
 // or a resize of the window or of its line.
-// Nothing shows while the last write had none.
+// Nothing shows while there is neither a sentence nor an audit.
 // =============================================================================
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -50,14 +52,16 @@ import { auditLines } from '../vector/confirm';
 import type { IWriteAudit } from '../vector/results';
 import { styles as appStyles } from '../styles';
 
-/** The list's own caps: a few lines of the store's audit. */
+/** The panel's own caps: the sentence and a few lines of the store's audit. */
 const LIST_MAX = { width: 480, height: 200 };
 
 const styles = {
 	details: { ...appStyles.small, position: 'relative', display: 'inline-block', flexShrink: 0 } as CSSProperties,
 	summary: { cursor: 'pointer', whiteSpace: 'nowrap' } as CSSProperties,
 	/** Over what is above the line: the line it sits on keeps its height. Before it is placed: up, ending at the summary. */
-	list: { position: 'absolute', zIndex: 20, boxSizing: 'border-box', width: 'max-content', maxWidth: LIST_MAX.width, maxHeight: LIST_MAX.height, overflowY: 'auto', margin: 0, padding: '6px 10px 6px 26px', border: '1px solid var(--rr-border)', borderRadius: 6, background: 'var(--rr-bg-paper)', boxShadow: 'var(--rr-shadow-widget)' } as CSSProperties,
+	list: { position: 'absolute', zIndex: 20, boxSizing: 'border-box', width: 'max-content', maxWidth: LIST_MAX.width, maxHeight: LIST_MAX.height, overflowY: 'auto', margin: 0, padding: '6px 10px', border: '1px solid var(--rr-border)', borderRadius: 6, background: 'var(--rr-bg-paper)', boxShadow: 'var(--rr-shadow-widget)', whiteSpace: 'normal', overflowWrap: 'anywhere' } as CSSProperties,
+	result: { margin: 0 } as CSSProperties,
+	lines: { margin: '4px 0 0', paddingLeft: 16 } as CSSProperties,
 	unplaced: { bottom: `calc(100% + ${POPOVER_GAP}px)`, right: 0 } as CSSProperties,
 };
 
@@ -90,6 +94,8 @@ function clippingRects(el: HTMLElement): IPopoverAnchor[] {
 export interface IWriteAuditDetailsProps {
 	/** The last write's audit blocks (IConsoleState.removal.audit). */
 	audit: readonly IWriteAudit[] | undefined;
+	/** The result's whole sentence, shown first (the line it sits on may cut it). */
+	result?: string;
 	/** The disclosure's summary (default {@link WRITE_DETAILS_LABEL}). */
 	label?: string;
 }
@@ -103,16 +109,16 @@ export const WRITE_DETAILS_LABEL = 'Write details';
  * @param props - {@link IWriteAuditDetailsProps}.
  * @returns The disclosure, or nothing without an audit.
  */
-export function WriteAuditDetails({ audit, label = WRITE_DETAILS_LABEL }: IWriteAuditDetailsProps): React.ReactElement | null {
-	if (!audit || audit.length === 0) return null;
-	return <AuditDisclosure audit={audit} label={label} />;
+export function WriteAuditDetails({ audit, result, label = WRITE_DETAILS_LABEL }: IWriteAuditDetailsProps): React.ReactElement | null {
+	if ((!audit || audit.length === 0) && !result) return null;
+	return <AuditDisclosure audit={audit ?? []} result={result} label={label} />;
 }
 
 /** The disclosure itself: open over the panel, closed by Escape, a press outside it or a resize. */
-const AuditDisclosure: React.FC<{ audit: readonly IWriteAudit[]; label: string }> = ({ audit, label }) => {
+const AuditDisclosure: React.FC<{ audit: readonly IWriteAudit[]; result: string | undefined; label: string }> = ({ audit, result, label }) => {
 	const details = useRef<HTMLDetailsElement>(null);
 	const summary = useRef<HTMLElement>(null);
-	const list = useRef<HTMLUListElement>(null);
+	const list = useRef<HTMLDivElement>(null);
 	const [open, setOpen] = useState(false);
 	const [place, setPlace] = useState<IListPlace | null>(null);
 	// Closing hides the list: the focus it held (a scrolling list can take it) goes back to the summary.
@@ -194,11 +200,16 @@ const AuditDisclosure: React.FC<{ audit: readonly IWriteAudit[]; label: string }
 			>
 				{label}
 			</summary>
-			<ul ref={list} aria-label="What the store recorded for this write" style={{ ...styles.list, ...(place === null ? styles.unplaced : place) }} data-write-audit-list="">
-				{auditLines(audit).map((line, i) => (
-					<li key={`${i}:${line}`}>{line}</li>
-				))}
-			</ul>
+			<div ref={list} style={{ ...styles.list, ...(place === null ? styles.unplaced : place) }} data-write-audit-list="">
+				{result && <p style={styles.result}>{result}</p>}
+				{audit.length > 0 && (
+					<ul aria-label="What the store recorded for this write" style={result ? styles.lines : { ...styles.lines, marginTop: 0 }}>
+						{auditLines(audit).map((line, i) => (
+							<li key={`${i}:${line}`}>{line}</li>
+						))}
+					</ul>
+				)}
+			</div>
 		</details>
 	);
 };

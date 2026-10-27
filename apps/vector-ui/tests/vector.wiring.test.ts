@@ -188,7 +188,7 @@ test("the Overview's Top folders show a folder's documents in Documents (its cli
 	assert.doesNotMatch(overview, /setFilter|entry\.scope\.set/, 'a folder opened from the Overview never relists or changes the scope');
 	const hub = code('views/ConsoleView.tsx');
 	assert.match(hub, /<div key="alert" role="alert" style=\{layout\.status\}>\s*\{state\.removal\.message\}\s*<\/div>/, 'a failure in an element of its own, so it is announced as one');
-	assert.match(hub, /<div key="status" role="status" style=\{layout\.status\}>\s*\{state\.removal\.status === 'running' \? \(state\.removal\.message \?\? BUSY\.removing\) : state\.removal\.message\}\s*<\/div>\s*\)\}\s*(\{\}\s*)?\{\(state\.removal\.status === 'done' \|\| state\.removal\.status === 'error'\) && <WriteAuditDetails audit=\{state\.removal\.audit\} \/>\}/, "after the result sentence, once the write finished, and outside the announced element: opening it does not announce the line again");
+	assert.match(hub, /<div key="status" role="status" style=\{layout\.status\}>\s*\{state\.removal\.status === 'running' \? \(state\.removal\.message \?\? BUSY\.removing\) : state\.removal\.message\}\s*<\/div>\s*\)\}\s*(\{\}\s*)?\{\(state\.removal\.status === 'done' \|\| state\.removal\.status === 'error'\) && <WriteAuditDetails result=\{state\.removal\.message \?\? undefined\} audit=\{state\.removal\.audit\} \/>\}/, "after the result sentence, once the write finished, and outside the announced element: opening it does not announce the line again; always, with the whole sentence the one line cuts (R2-I1)");
 });
 
 test('B1(b): fresh stats that say the collection exists, against a probe that said it did not, probe the store again once per disagreement', () => {
@@ -217,7 +217,7 @@ test('the console renders the strip, the directory, the chunks, adding documents
 	for (const file of ['components/DocumentsTab.tsx', 'components/TrashTab.tsx']) {
 		assert.match(code(file), /const writes = writesDuringRemoval\(model\.writes, state\.removal\.status\);/, `${file}: the writes follow the model, and are unavailable while a removal runs`);
 	}
-	assert.match(view, /const write: SlotWrite = removal === dismissed \|\| \(removal\.status !== 'running' && removal\.message === null\) \? null : removal\.status === 'running' \? 'running' : removal\.status === 'error' \? 'failure' : 'result';/, 'the status line says Removing… while a removal runs');
+	assert.match(view, /const write: SlotWrite = removal === dismissed \|\| \(removal\.status !== 'running' && removal\.message === null\) \? null : removal\.status === 'running' \? 'running' : removal\.status === 'error' \|\| removal\.partial \? 'failure' : 'result';/, 'the status line says Removing… while a removal runs');
 	assert.match(view, /entry\.controller\.open\(\)/);
 	assert.match(view, /\{addingMounted && <AddDocumentsAside [^>]*open=\{adding\}/, 'Add documents is an aside beside the panels, kept mounted once opened (an upload keeps following its progress)');
 	const strip = code('components/StatsStrip.tsx');
@@ -302,7 +302,8 @@ test('every removal is confirmed inline in the document that shows it, in both m
 	// The flip back to the pending bar (bottomSlot): never while a write runs, nor under the focus or the pointer.
 	assert.match(hub, /const slot = bottomSlot\(\{ staged: staged\.size, write, fresh, stagedSince, held: inSlot\.focus \|\| inSlot\.pointer, showing: showing\.current \}\);/);
 	assert.match(hub, /onPointerEnter=\{\(\) => setInSlot\(\(was\) => \(\{ \.\.\.was, pointer: true \}\)\)\}\s*onPointerLeave=\{\(\) => setInSlot\(\(was\) => \(\{ \.\.\.was, pointer: false \}\)\)\}/);
-	assert.match(hub, /\{write === 'failure' && \(\s*<Button small variant="ghost" onClick=\{\(\) => setDismissed\(removal\)\}>\s*Dismiss\s*<\/Button>\s*\)\}/, 'a failure stays until dismissed (or the staged set changes)');
+	assert.match(hub, /\{write === 'failure' && staged\.size > 0 && \(\s*<Button small variant="ghost" onClick=\{\(\) => setDismissed\(removal\)\}>\s*Show pending\s*<\/Button>\s*\)\}/, 'a held failure stays until Show pending (or the staged set changes)');
+	assert.match(hub, /removal\.status === 'error' \|\| removal\.partial \? 'failure' : 'result'/, 'a write that did not do all it was asked holds like a failure (R2-I2)');
 	assert.match(hub, /if \(focusLost\(document\.activeElement, document\.body, null\)\) firstFocusable\(\[node\?\.querySelector<HTMLElement>\(TABBABLE\) \?\? null, returnFocus\(\)\]\)\?\.focus\(\);/, 'a control that leaves the slot with the focus hands it on, never to the page');
 	assert.match(hub, /status: \{ \.\.\.styles\.small, flex: 1,/, 'the sentence takes the room: Write details sit at the right end');
 	assert.match(hub, /slot: \{ flexShrink: 0, boxSizing: 'border-box', height: PENDING_BAR_HEIGHT,/, "exactly the pending bar's height");

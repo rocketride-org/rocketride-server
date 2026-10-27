@@ -180,9 +180,10 @@ export interface IConsoleState {
 	elsewhere: ConfirmOrigin | null;
 	/**
 	 * The last write; while one runs, `message` says what it is doing (null: the generic busy word). `audit`: the
-	 * audit blocks of a finished write's batches.
+	 * audit blocks of a finished write's batches. `partial`: a finished write that did not do all it was asked
+	 * (documents kept whole, or already gone): the hub holds its line like a failure's.
 	 */
-	removal: { status: 'idle' | 'running' | 'done' | 'error'; message: string | null; audit?: readonly IWriteAudit[] };
+	removal: { status: 'idle' | 'running' | 'done' | 'error'; message: string | null; audit?: readonly IWriteAudit[]; partial?: boolean };
 }
 
 /** The controller. */
@@ -441,7 +442,8 @@ export function createConsoleStore(deps: IConsoleDeps, opts: IConsoleOptions): I
 		};
 		const outcome: IRemovalOutcome = await runRemoval(ids, call, opts.writeBatch);
 		const message = removalSummary(outcome, targets, action);
-		set({ removal: { status: outcome.error ? 'error' : 'done', message, audit: outcome.audits ?? [] } });
+		const partial = !outcome.error && (outcome.keptLive.length > 0 || outcome.notFound.length > 0);
+		set({ removal: { status: outcome.error ? 'error' : 'done', message, audit: outcome.audits ?? [], ...(partial ? { partial: true } : {}) } });
 		deps.announce(message);
 		// What left the stored documents: a restored one comes back, a kept one stays where it was.
 		const gone = action === 'restore' ? [] : [...outcome.removed.map((r) => r.objectId), ...outcome.notFound];
