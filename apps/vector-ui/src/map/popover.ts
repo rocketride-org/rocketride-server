@@ -205,7 +205,7 @@ export function firstEnabled(controls: ReadonlyArray<{ disabled: boolean; hidden
 }
 
 /**
- * Where the focus goes when the busy chip leaves with the focus on its Cancel: the Layout select (the control a
+ * Where the focus goes when the status line's Cancel leaves with the focus on it: the Layout select (the control a
  * cancelled layout is chosen again from) when it can take it, else the toolbar itself. Never the page.
  *
  * @param layout - The Layout select: whether it is there and whether it is disabled.

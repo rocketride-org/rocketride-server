@@ -861,3 +861,46 @@ test('the map\'s busy words and Cancel are in the toolbar\'s status line, never 
 	const out = render({ sample: modelOf(loadSample('sample_demo_1000.json')) });
 	assert.match(out, /<div style="[^"]*" data-map-status=""><span role="status"[^>]*><\/span><\/div>/);
 });
+
+test('Escape and the toolbar\'s Clear take one thing away a press (the lasso, then a highlight, then the selection), so dimming always has a way out and hover fading comes back', () => {
+	const sample = modelOf(clustered);
+	const selection = createSelectionStore(KEY);
+	const keys = [0, 1, 2].map((i) => [clustered.docs[clustered.points.doc[i] as number]!.objectId, clustered.points.chunk[i] as number] as VectorKey);
+	// An answer's sources: the map dims everything else, and the toolbar offers Clear highlight.
+	selection.setHighlight({ source: 'chat', keys });
+	const rec = recording();
+	render({ model: enrichedModel(), sample, selection, actions: rec.actions, extra: { initialColourBy: 'cluster' } });
+	assert.ok(last<{ dimmed: Uint8Array | null }>('PointCanvas').dimmed, 'dimmed by the highlight');
+	assert.equal(last<{ canClear?: boolean }>('PointCanvas').canClear, true);
+	const toolbar = last<{ clear: { label: string; onClear(): void } | null }>('MapToolbar');
+	assert.equal(toolbar.clear?.label, 'Clear highlight');
+	// Escape on the map clears it.
+	last<{ onKeyAction(a: 'clear'): void }>('PointCanvas').onKeyAction('clear');
+	assert.equal(selection.getState().highlight, null);
+	assert.match(rec.announced.join(' '), /Highlight cleared\./);
+	render({ model: enrichedModel(), sample, selection, actions: rec.actions, extra: { initialColourBy: 'cluster' } });
+	const after = last<{ dimmed: Uint8Array | null; dimOnHover?: boolean; canClear?: boolean }>('PointCanvas');
+	assert.equal(after.dimmed, null, 'nothing faded');
+	assert.equal(after.dimOnHover, true, 'hover fading is back');
+	assert.equal(after.canClear, false, 'Escape is left to what is around the map');
+	assert.equal(last<{ clear: unknown }>('MapToolbar').clear, null);
+	// A lasso selection is cleared first, before a highlight.
+	selection.setKeys(keys);
+	selection.setHighlight({ source: 'lasso', keys });
+	render({ model: enrichedModel(), sample, selection, actions: rec.actions });
+	assert.equal(last<{ clear: { label: string } | null }>('MapToolbar').clear?.label, 'Clear lasso selection');
+	last<{ clear: { onClear(): void } }>('MapToolbar').clear.onClear();
+	assert.deepEqual(selection.getState().keys, []);
+	assert.equal(selection.getState().highlight, null);
+	assert.match(rec.announced.join(' '), /Lasso selection cleared\./);
+});
+
+test('a staging press is announced every time (a repeat too)', () => {
+	const rec = recording();
+	const stagingActions: ConsoleActions = { ...rec.actions, stageRemove: () => undefined };
+	render({ model: enrichedModel(), sample: modelOf(clustered), actions: stagingActions, initialTab: 'outliers' });
+	const outliers = last<{ onRemoveDocument(id: string): void }>('OutliersPanel');
+	outliers.onRemoveDocument(clustered.docs[0]!.objectId);
+	outliers.onRemoveDocument(clustered.docs[0]!.objectId);
+	assert.deepEqual(rec.announced.filter((t) => t.startsWith('Staged')), ['Staged 1 document for the trash; nothing moves until the pending changes are applied.', 'Staged 1 document for the trash; nothing moves until the pending changes are applied.']);
+});
