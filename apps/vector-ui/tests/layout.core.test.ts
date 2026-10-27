@@ -7,8 +7,8 @@
 // LAYOUT CORE: the seeded neighbour-graph force layout the worker runs
 // =============================================================================
 //
-// The last tests pin the console's own layout (src/vector/layout.ts): the
-// Search surface opens inside the chat panel, so the console's ratios stay.
+// The last test pins that the Query tab's surfaces size nothing of their own
+// (the console's two-column layout is gone with its tabs).
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -18,7 +18,6 @@ import type { IForceLayoutInput, ILayoutClock } from '../src/map/layout.core';
 import { knnFromRows, loadSample, pcaXY } from './support/map.samples';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { CONSOLE_LAYOUT, consoleColumns } from '../src/vector/layout';
 
 const native = loadSample('sample_native_knn.json');
 
@@ -123,13 +122,7 @@ test('empty and single-point samples lay out without error', () => {
 	assert.ok(one.positions.every((v) => Number.isFinite(v)));
 });
 
-// ── The console's layout: Search lives inside the chat's 55 % ──────────────
-
-test("the console's panel ratios are unchanged: documents 38 %, right column 62 % split 45 % ingest / 55 % chat", () => {
-	assert.deepEqual({ ...CONSOLE_LAYOUT }, { left: 0.38, right: 0.62, ingest: 0.45, chat: 0.55, stackBelowPx: 900 });
-	assert.deepEqual(consoleColumns(1440), { stacked: false, left: '38%', right: '62%', ingest: '45%', chat: '55%' });
-	assert.equal(consoleColumns(800).stacked, true);
-});
+// ── The Query tab: Search lives in the tab's own space ───────────────────────
 
 test('the Query tab swaps Search, Compare and Ask in one space, not the console layout: no panel sizes itself', () => {
 	const src = (relative: string): string => readFileSync(path.join(__dirname, '..', 'src', 'components', relative), 'utf8');

@@ -32,19 +32,21 @@
 // is its own row, and Refresh keeps its width while it says Refreshing…
 // (only for a refresh someone asked for, never the 15 s quick tick).
 //
-// Under the tab row, on every tab: the banners (the console cannot open,
-// the store failed with the last known figures kept, writes are off, the
-// collection is empty), the inline write confirmation of the console's own
-// requests and the connection's Details (both inline in both mounts:
-// rocket-ui keeps hidden documents mounted, so nothing here is a window-wide
-// overlay) and the write status line (an alert when the write failed, with
-// the store's audit of each batch behind a "Write details" disclosure beside
-// it, outside the announced text). Each
-// tab's panel is mounted the first time it shows, then stays mounted and
-// hidden, so it keeps its state (the map gets `visible` so its canvas sleeps
-// while hidden). Under the panels, the pending bar, so staging never moves a
-// row above it. Add documents is an aside beside the panels, kept mounted
-// once opened (an upload in flight keeps following its progress).
+// Under the tab row, on every tab, the banners of a lasting state: the
+// console cannot open; the store is unreachable (after a refresh someone
+// asked for failed, or two quick ticks in a row: one failed tick moves
+// nothing); the collection needs repair or was built with another model;
+// writes are off; the collection is empty. Then the inline write
+// confirmation of the console's own requests and the connection's Details
+// (both inline in both mounts: rocket-ui keeps hidden documents mounted, so
+// nothing here is a window-wide overlay). Each tab's panel is mounted the
+// first time it shows, then stays mounted and hidden, so it keeps its state
+// (the map gets `visible` so its canvas sleeps while hidden). Under the
+// panels, what comes and goes after a press: the pending bar and the write's
+// line (an alert of its own when the write failed, the store's audit of each
+// batch beside it, behind "Write details"), so neither moves a row above it.
+// Add documents is an aside beside the panels, kept mounted once opened (an
+// upload in flight keeps following its progress).
 //
 // FOCUS. A confirmation that closes with the focus inside it (and, after
 // Cancel, cannot give it back to its opener) gives it to the row the shown
@@ -101,9 +103,9 @@ import { healthSummary, medianChunks } from '../vector/health';
 import { savedFiltersFor } from '../vector/savedFilters';
 import { roleLine, vectorCardView } from '../vector/connections';
 import { providerTitle } from '../vector/support';
-import { collectionMissing } from '../vector/stats';
-import { BUSY, EMPTY } from '../vector/wording';
-import { focusStranded, reprobeFor } from '../vector/workbench';
+import { REPAIR_NEEDED_TEXT, collectionMissing, formatCount } from '../vector/stats';
+import { BUSY, CAVEAT_SENTENCES, EMPTY } from '../vector/wording';
+import { NO_FAILURES, focusStranded, reprobeFor, statsFailures, unreachableShown } from '../vector/workbench';
 import type { WorkbenchTab } from '../vector/workbench';
 import { styles } from '../styles';
 import MapView from './MapView';
@@ -333,8 +335,15 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 	const title = `${providerTitle(endpoint.provider)}${model.collection ? ` · ${model.collection}` : ''}`;
 	const subtitle = `"${endpoint.pipelineName}" · ${endpoint.nodeName || endpoint.nodeId} · ${roleLine(endpoint)}`;
 	const statsError = state.stats.status === 'error' ? state.stats.error : null;
+	// The store failed: said above every tab only once it is more than one quick tick (unreachableShown).
+	const failures = useRef(NO_FAILURES);
+	failures.current = statsFailures(failures.current, { status: state.stats.status, error: state.stats.error, asked: refreshAsked });
+	const unreachable = statsError !== null && unreachableShown(failures.current, state.stats.view !== null);
 	// One "Empty collection" rule with the chip and the connection card (vector/stats.ts collectionMissing), or no documents.
-	const emptyCollection = collectionMissing(dialect, state.stats.view) || state.stats.view?.documents === 0;
+	const missing = collectionMissing(dialect, state.stats.view);
+	const emptyCollection = missing || state.stats.view?.documents === 0;
+	const inTrash = state.stats.view?.deletedDocuments ?? 0;
+	const emptyText = !missing && inTrash > 0 ? `No documents outside the trash (${formatCount(inTrash)} in the Trash).` : EMPTY.noDocuments;
 
 	return (
 		<div ref={root} style={styles.root} data-console={endpoint.nodeId}>
@@ -360,18 +369,18 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 					</>
 				}
 			/>
-			<WorkbenchTabs value={tab} onChange={(id) => entry.tab.set(id)} trashCount={state.stats.view?.deletedDocuments ?? null} idPrefix={prefix} />
+			<WorkbenchTabs value={tab} onChange={(id) => entry.tab.set(id)} trashCount={state.stats.view?.deletedDocuments ?? null} idPrefix={prefix} mounted={mounted} />
 			{card.blocked && (
 				<div style={layout.banner}>
 					<Banner variant={endpoint.state === 'ready' ? 'warning' : 'info'}>{card.blocked}</Banner>
 				</div>
 			)}
-			{!card.blocked && statsError !== null && (
+			{!card.blocked && unreachable && statsError !== null && (
 				<div style={layout.banner}>
 					<Banner variant="error">
 						{statsError.headline}
 						{statsError.detail ? ` ${statsError.detail}` : ''}
-						{state.stats.view !== null ? ' The figures shown are the last known ones.' : ''}
+						{state.stats.view !== null ? ' The Overview keeps the last figures read.' : ''}
 						<span style={layout.bannerAction}>
 							<Button small variant="secondary" onClick={refresh}>
 								Retry
@@ -380,15 +389,25 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 					</Banner>
 				</div>
 			)}
+			{!card.blocked && dialect?.health.control_record === false && (
+				<div style={layout.banner}>
+					<Banner variant="warning">{REPAIR_NEEDED_TEXT}</Banner>
+				</div>
+			)}
+			{!card.blocked && dialect?.health.model_mismatch === true && (
+				<div style={layout.banner}>
+					<Banner variant="warning">{CAVEAT_SENTENCES.model_mismatch}</Banner>
+				</div>
+			)}
 			{!card.blocked && entry.opened && !model.writes.enabled && model.writes.reason !== null && (
 				<div style={layout.banner}>
 					<Banner variant="info">{model.writes.reason}</Banner>
 				</div>
 			)}
-			{!card.blocked && statsError === null && emptyCollection && (
+			{!card.blocked && !unreachable && emptyCollection && (
 				<div style={layout.banner}>
 					<Banner variant="info">
-						{EMPTY.noDocuments}
+						{emptyText}
 						{model.ingest.enabled ? (
 							<span style={layout.bannerAction}>
 								<Button small variant="secondary" onClick={openAdding}>
@@ -403,15 +422,6 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 			)}
 			<InlineRemoveConfirm entry={entry} probe={probe} origin={CONSOLE_ORIGIN} returnFocus={returnFocus} />
 			{details && <ConnectionDetailsPanel key={endpoint.key} endpoint={endpoint} probe={probe} stats={state.stats.view} onTest={(target) => env.probe(target.key)} onClose={() => setDetails(false)} />}
-			{(state.removal.status === 'running' || state.removal.message) && (
-				<div style={layout.statusRow}>
-					<div role={state.removal.status === 'error' ? 'alert' : 'status'} style={layout.status}>
-						{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
-					</div>
-					{/* Outside the live element: opening it does not announce the line again. */}
-					{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails audit={state.removal.audit} />}
-				</div>
-			)}
 			<div style={layout.body}>
 				<div style={layout.panels}>
 					{mounted.has('overview') && (
@@ -445,6 +455,23 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 						</WorkbenchPanel>
 					)}
 					<PendingBar {...panel(tab)} />
+					{/* Under the panels with the pending bar: a write's line appearing or going never moves a row above it. */}
+					{(state.removal.status === 'running' || state.removal.message) && (
+						<div style={layout.statusRow} data-write-line="">
+							{state.removal.status === 'error' ? (
+								// Its own element, so a failure is announced as one (a role changed on the same element often is not).
+								<div key="alert" role="alert" style={layout.status}>
+									{state.removal.message}
+								</div>
+							) : (
+								<div key="status" role="status" style={layout.status}>
+									{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
+								</div>
+							)}
+							{/* Outside the live element: opening it does not announce the line again. */}
+							{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails audit={state.removal.audit} />}
+						</div>
+					)}
 				</div>
 				{addingMounted && <AddDocumentsAside model={model} channels={channels} actions={actions} endpoint={endpoint} open={adding} onClose={() => setAdding(false)} returnFocus={asideFocus} />}
 			</div>

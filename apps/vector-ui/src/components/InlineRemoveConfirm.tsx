@@ -57,7 +57,7 @@ import type { IProbeResult } from 'shared/explorer';
 import type { IConnectionEntry } from '../adapters/connections';
 import { CONSOLE_ORIGIN, confirmElsewhereText, confirmReady, confirmationFor, removeContextFor } from '../vector/confirm';
 import type { ConfirmOrigin, ConfirmationView } from '../vector/confirm';
-import { firstFocusable, focusLost } from '../vector/focus';
+import { TABBABLE, firstFocusable, focusLost } from '../vector/focus';
 import { formatCount } from '../vector/stats';
 import { FOCUS_RING, styles as appStyles } from '../styles';
 
@@ -106,7 +106,7 @@ export interface IInlineRemoveConfirmProps {
 	 * Where the focus goes when the panel closes with the focus inside it, if `onClosed` did not move it (and, after
 	 * Cancel, the opener cannot take it back).
 	 */
-	returnFocus?: () => HTMLElement | null;
+	returnFocus?: (opener: HTMLElement | null) => HTMLElement | null;
 	/** Told when the panel closes, before the focus falls back to `returnFocus`. */
 	onClosed?: (how: ConfirmClose) => void;
 }
@@ -134,7 +134,7 @@ export function InlineRemoveConfirm({ entry, probe, origin = CONSOLE_ORIGIN, ret
 }
 
 /** One confirmation, keyed on what it confirms (a new one starts with an empty typed field and its own first focus). */
-const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCancel(): void; returnFocus?: () => HTMLElement | null; onClosed?: (how: ConfirmClose) => void }> = ({ view, onConfirm: sendWrite, onCancel: dropWrite, returnFocus, onClosed }) => {
+const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCancel(): void; returnFocus?: (opener: HTMLElement | null) => HTMLElement | null; onClosed?: (how: ConfirmClose) => void }> = ({ view, onConfirm: sendWrite, onCancel: dropWrite, returnFocus, onClosed }) => {
 	const region = useRef<HTMLElement>(null);
 	const actions = useRef<HTMLDivElement>(null);
 	const confirmButton = useRef<HTMLButtonElement>(null);
@@ -164,10 +164,14 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 	useEffect(() => {
 		const node = region.current;
 		const back = opener.current;
+		// Without a fallback from the surface: the first control of the workbench or document it is in.
+		const surface = node?.closest<HTMLElement>('[data-console], [data-document]') ?? null;
+		const fallback = (): HTMLElement | null => firstFocusable(Array.from(surface?.querySelectorAll<HTMLElement>(TABBABLE) ?? []));
 		return () => {
 			closing.current.onClosed?.(how.current);
 			if (typeof document === 'undefined' || !focusLost(document.activeElement, document.body, node)) return;
-			firstFocusable([how.current === 'cancel' ? back : null, closing.current.returnFocus?.()])?.focus();
+			// The surface's fallback is told the opener: a document surface puts the focus back there after Confirm too.
+			firstFocusable([how.current === 'cancel' ? back : null, closing.current.returnFocus ? closing.current.returnFocus(back) : fallback()])?.focus();
 		};
 	}, []);
 	const onConfirm = (): void => {

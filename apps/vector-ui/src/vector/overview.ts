@@ -33,16 +33,21 @@
 // =============================================================================
 
 import type { IDialectResult, IDocumentItem } from '../contract/types';
-import { splitPath } from './documents';
+import { UPLOADED_LABEL } from './documents';
 import { formatSize } from './fileType';
 import { documentHealth, needsAttention } from './health';
 import type { IHealthFlag } from './health';
 import type { IStatsView } from './results';
+import { buildTree } from './tree';
+import type { ITreeFolder } from './tree';
 import { MISSING, formatCount, statsFigures } from './stats';
 
 // =============================================================================
 // CARDS
 // =============================================================================
+
+/** A card's reason while nothing was read yet. */
+export const NOT_READ_YET = 'Not read yet.';
 
 /** One card of the Summary. */
 export interface IOverviewCard {
@@ -88,6 +93,8 @@ export function overviewCards(stats: IStatsView | null, dialect: IDialectResult 
 	const indexCard: IOverviewCard = parts.every((p) => p === null) ? { key: 'index', label: 'Dimensions · metric · index', value: MISSING, tooltip: 'This store does not report its dimension, metric or index.', missing: true } : { key: 'index', label: 'Dimensions · metric · index', value: parts.map((p) => p ?? MISSING).join(' · '), tooltip: parts.some((p) => p === null) ? 'A part the store does not report reads "—".' : null, missing: false };
 
 	const cards = [from('documents', 'Documents', 'documents'), from('chunks', 'Chunks', 'chunks'), avg, trash, modelCard, indexCard];
+	// Nothing read yet (the first answer is on its way, or failed): no card blames the store for it.
+	if (stats === null) for (const card of cards) if (card.missing && (dialect === null || ['documents', 'chunks', 'avg', 'trash'].includes(card.key))) card.tooltip = NOT_READ_YET;
 	const bytes = dialect?.size_bytes;
 	if (typeof bytes === 'number' && Number.isFinite(bytes) && bytes >= 0) cards.push({ key: 'size', label: 'Size', value: formatSize(bytes), tooltip: `${formatSize(bytes)} on the store (${formatCount(bytes)} bytes)`, missing: false });
 	return cards;
@@ -100,9 +107,13 @@ export function overviewCards(stats: IStatsView | null, dialect: IDialectResult 
 /** How many folders the table names; the rest are one "Other folders" row. */
 export const TOP_FOLDERS = 7;
 
-/** One row of Top folders. */
+/**
+ * One row of Top folders: a folder with its subfolders (as Documents' folder view shows it), the documents stored
+ * directly in a folder whose subfolders have rows of their own, or the documents stored under a bare name.
+ */
 export interface ITopFolder {
-	/** The folder ("docs/field/"), or the label of documents stored without one. */
+	kind: 'folder' | 'direct' | 'uploaded';
+	/** The folder's prefix ("docs/field/"), separator included; the uploaded label for bare names. */
 	folder: string;
 	documents: number;
 	/** Chunks of its documents, or null when the store did not count every one of them. */
@@ -143,32 +154,51 @@ export function percentShares(values: readonly number[]): number[] {
 	return floors;
 }
 
+/** A group of documents before it is a row. */
+interface IGroup {
+	kind: ITopFolder['kind'];
+	folder: string;
+	rows: readonly IDocumentItem[];
+}
+
+/** Every document under a folder, its subfolders' included. */
+function documentsUnder(folder: ITreeFolder): IDocumentItem[] {
+	return [...folder.files, ...folder.children.flatMap(documentsUnder)];
+}
+
 /**
- * The folders of the loaded documents, by their chunks (by documents where the store does not count chunks).
+ * The folders of the loaded documents, each with its subfolders (the same documents Documents shows for it), by
+ * their chunks (by documents where the store does not count chunks). The rows never overlap: from the top of the
+ * folder tree, a level that is one folder alone is opened into its subfolders, and the documents stored directly in
+ * it become a row of their own.
  *
  * @param rows - The loaded documents.
- * @param n - How many folders to name.
+ * @param n - How many rows to name.
  * @returns The rows, the rest in one row, and what they were counted over.
  */
 export function topFolders(rows: readonly IDocumentItem[], n: number = TOP_FOLDERS): ITopFolders {
-	const by = new Map<string, { documents: number; chunks: number; unknown: number }>();
-	for (const row of rows) {
-		const folder = splitPath(row.path).folder;
-		const slot = by.get(folder) ?? { documents: 0, chunks: 0, unknown: 0 };
-		slot.documents += 1;
-		if (row.chunks === null) slot.unknown += 1;
-		else slot.chunks += row.chunks;
-		by.set(folder, slot);
+	const tree = buildTree(rows);
+	let level: ITreeFolder[] = tree.folders;
+	const groups: IGroup[] = [];
+	// A level of one folder says nothing: show what is inside it instead.
+	while (level.length === 1 && tree.uploaded.length === 0 && level[0].children.length > 0) {
+		const only = level[0];
+		if (only.files.length > 0) groups.push({ kind: 'direct', folder: only.prefix, rows: only.files });
+		level = only.children;
 	}
-	const chunksKnown = rows.length > 0 && [...by.values()].every((s) => s.unknown === 0);
-	const sorted = [...by.entries()].sort(([fa, a], [fb, b]) => (chunksKnown ? b.chunks - a.chunks : 0) || b.documents - a.documents || fa.localeCompare(fb));
+	for (const folder of level) groups.push({ kind: 'folder', folder: folder.prefix, rows: documentsUnder(folder) });
+	if (tree.uploaded.length > 0) groups.push({ kind: 'uploaded', folder: UPLOADED_LABEL, rows: tree.uploaded });
+
+	const counted = groups.map((g) => ({ ...g, documents: g.rows.length, chunks: g.rows.reduce((sum, r) => sum + (r.chunks ?? 0), 0), unknown: g.rows.filter((r) => r.chunks === null).length }));
+	const chunksKnown = rows.length > 0 && counted.every((g) => g.unknown === 0);
+	const sorted = [...counted].sort((a, b) => (chunksKnown ? b.chunks - a.chunks : 0) || b.documents - a.documents || a.folder.localeCompare(b.folder));
 	const named = sorted.slice(0, n);
 	const rest = sorted.slice(n);
-	const groups = rest.length === 0 ? named : [...named, ['', rest.reduce((sum, [, s]) => ({ documents: sum.documents + s.documents, chunks: sum.chunks + s.chunks, unknown: sum.unknown + s.unknown }), { documents: 0, chunks: 0, unknown: 0 })] as const];
-	const shares = chunksKnown ? percentShares(groups.map(([, s]) => s.chunks)) : null;
-	const toRow = (folder: string, s: { documents: number; chunks: number; unknown: number }, i: number): ITopFolder => ({ folder, documents: s.documents, chunks: s.unknown === 0 ? s.chunks : null, share: shares === null ? null : (shares[i] ?? null) });
-	const out = named.map(([folder, s], i) => toRow(folder, s, i));
-	const others = rest.length === 0 ? null : { ...toRow('', groups[groups.length - 1][1], groups.length - 1), folders: rest.length };
+	const restSum = rest.reduce((sum, g) => ({ documents: sum.documents + g.documents, chunks: sum.chunks + g.chunks, unknown: sum.unknown + g.unknown }), { documents: 0, chunks: 0, unknown: 0 });
+	const shares = chunksKnown ? percentShares([...named.map((g) => g.chunks), ...(rest.length === 0 ? [] : [restSum.chunks])]) : null;
+	const toRow = (g: { kind: ITopFolder['kind']; folder: string; documents: number; chunks: number; unknown: number }, i: number): ITopFolder => ({ kind: g.kind, folder: g.folder, documents: g.documents, chunks: g.unknown === 0 ? g.chunks : null, share: shares === null ? null : (shares[i] ?? null) });
+	const out = named.map((g, i) => toRow(g, i));
+	const others = rest.length === 0 ? null : { ...toRow({ kind: 'folder', folder: '', ...restSum }, named.length), folders: rest.length };
 	return { rows: out, others, loaded: rows.length, chunksKnown };
 }
 
