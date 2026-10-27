@@ -257,6 +257,18 @@ test('Search\'s Compare places two stars: the highlight runs the compare plan, B
 	assert.ok(runA, 'runQuery');
 	assert.match(runA[1] as string, /if \(!onSample\(placed\?\.sampleId \?\? null, selection\.getState\(\)\.sampleModel\?\.sampleId\)\) \{\s*setNotice\(QUERY_SAMPLE_CHANGED\);\s*return;\s*\}[\s\S]*setQueryView\(/);
 	assert.match(view, /if \(!onSample\(placed\.sampleId, selection\.getState\(\)\.sampleModel\?\.sampleId\)\) return \[\];[\s\S]*?selection\.addPinned\(items\);/, 'pinKeys too');
+	// The question's vector is the map's only once it is drawn on this sample (the Heat strip and Recommend's "with
+	// query" read it), A and B alike: set once, after the guard.
+	const after = (body: string, guard: string, assign: string): void => {
+		assert.equal(body.split(assign).length - 1, 1, `${assign} once`);
+		assert.ok(body.indexOf(guard) >= 0 && body.indexOf(guard) < body.indexOf(assign), `${assign} after the sample guard`);
+	};
+	after(runA[1] as string, 'if (!onSample(placed?.sampleId ?? null, selection.getState().sampleModel?.sampleId))', 'queryVector.current = vector;');
+	after(runB[1] as string, 'if (!onSample(placed?.sampleId ?? null, selection.getState().sampleModel?.sampleId))', 'queryVectorB.current = vector;');
+	// The selected point's hollow neighbour ends: the same guard before anything is drawn or re-sampled.
+	const quiet = /const pinKeysQuiet = async \([^)]*\): Promise<IProjectItem\[\]> => \{([\s\S]*?)\n\t\};/.exec(view);
+	assert.ok(quiet, 'pinKeysQuiet');
+	assert.match(quiet[1] as string, /const asked = sampleModel\.sampleId;\s*const answer = await callTool<IProjectResult>\(channel, 'project', \{ sample_id: asked,[^\n]*\n\s*(?:\/\/[^\n]*\n\s*)?if \(!onSample\(asked, selection\.getState\(\)\.sampleModel\?\.sampleId\)\) return \[\];\s*if \(isExpired\(answer\) && !retried\)/);
 	assert.doesNotMatch(view, /withSampleRetry\(/, 'every project goes through projectOn');
 	// A new sample clears star B's placement even when the query is kept (a redraw for it): its place is in the old basis.
 	assert.match(view, /const resetView = useCallback\(\(keepQuery: boolean\): void => \{[\s\S]*?setQueryBView\(null\);\s*queryVectorB\.current = null;\s*if \(!keepQuery\) \{\s*setQueryView\(null\);/);

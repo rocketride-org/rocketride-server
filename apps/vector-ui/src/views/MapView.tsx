@@ -1000,7 +1000,10 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	 */
 	const pinKeysQuiet = async (keys: VectorKey[], key: VectorKey, retried: boolean): Promise<IProjectItem[]> => {
 		if (channel === null || !sampleModel) return [];
-		const answer = await callTool<IProjectResult>(channel, 'project', { sample_id: sampleModel.sampleId, keys: keys.slice(0, limits.project_keys_max), m: PROJECT_M }, { nodeId: storeNode });
+		const asked = sampleModel.sampleId;
+		const answer = await callTool<IProjectResult>(channel, 'project', { sample_id: asked, keys: keys.slice(0, limits.project_keys_max), m: PROJECT_M }, { nodeId: storeNode });
+		// Projected on a sample replaced meanwhile: its places are in that sample's basis, so no hollow end is drawn.
+		if (!onSample(asked, selection.getState().sampleModel?.sampleId)) return [];
 		if (isExpired(answer) && !retried) {
 			repick.current = { key: keyString(key[0], key[1]), drawnAt: sampleModel.receivedAt };
 			void resample([key]).then((id) => {
@@ -1130,7 +1133,6 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			setError('The embedding node answered without a vector.');
 			return;
 		}
-		queryVector.current = vector;
 		setBusy(BUSY.projecting);
 		const placed = model.capabilities.project === false ? null : await projectOn(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M, with_similarities: true }, { nodeId: storeNode }), resample);
 		const projected = placed?.answer ?? null;
@@ -1142,6 +1144,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			setNotice(QUERY_SAMPLE_CHANGED);
 			return;
 		}
+		// Only now the map's question: the Heat strip and Recommend's "with query" never use one that was not drawn.
+		queryVector.current = vector;
 		const notes: string[] = [];
 		if (projected && !projected.ok) notes.push(mapFailure(projected.code, projected.message));
 		if (!searched.ok) notes.push(mapFailure(searched.code, searched.message));
@@ -1191,7 +1195,6 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			if (!embedded.ok && !embedded.stale) setNotice(starBNotPlaced(mapFailure(embedded.code, embedded.message)));
 			return;
 		}
-		queryVectorB.current = vector;
 		const placed = model.capabilities.project === false ? null : await projectOn(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M }, { nodeId: storeNode }), resample);
 		const projected = placed?.answer ?? null;
 		const searched = await callTool<ISearchResult>(channel, 'search', { vector, top_k: Math.min(RAYS_TOP_K, limits.top_k_max), include_below_floor: true }, { nodeId: storeNode });
@@ -1201,6 +1204,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			setNotice(starBNotPlaced(STAR_B_SAMPLE_CHANGED));
 			return;
 		}
+		queryVectorB.current = vector;
 		const item = projected && projected.ok ? (projected.value.items[0] ?? null) : null;
 		const search = searched.ok ? searched.value : null;
 		setQueryBView({ text, item, sims: null, search, notes: [] });
