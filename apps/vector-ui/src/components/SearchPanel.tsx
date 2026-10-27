@@ -268,6 +268,11 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 							</button>
 						</div>
 					)}
+					{!canAsk && askReason !== null && (
+						<p style={S.note} data-ask-off="">
+							{`"Ask about this" is off: ${askReason}`}
+						</p>
+					)}
 					{heading.noBars !== null && (
 						<p style={S.note} id={noBarsId}>
 							{heading.noBars}
@@ -341,7 +346,16 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 													<button type="button" style={S.button} aria-label={`Show chunk ${row.chunkId} of ${path} on the map`} onClick={() => onMap(row)}>
 														map
 													</button>
-													<button type="button" style={S.button} aria-label={`Ask about ${path}`} disabled={!canAsk} title={canAsk ? undefined : (askReason ?? undefined)} onClick={() => onAsk(row)}>
+													<button
+														type="button"
+														style={canAsk ? S.button : { ...S.button, ...S.off }}
+														aria-label={`Ask about ${path}`}
+														aria-disabled={!canAsk}
+														title={canAsk ? undefined : (askReason ?? undefined)}
+														onClick={() => {
+															if (canAsk) onAsk(row);
+														}}
+													>
 														ask about this
 													</button>
 												</span>
@@ -590,7 +604,8 @@ export function SearchPanel({ model, channels, selection, actions, comparing = f
 		}
 		// Its own documents (the question's), not the console's scope, so the console's gate does not stop a chat handoff.
 		const objectIds = next.objectIds === 'scope' ? gate.objectIds : next.objectIds;
-		void run({ question: next.question, questionB: comparing ? next.questionB : null, mode: next.mode, topK: next.topK, objectIds, isTable: isTableOf(next.tables ?? tables), chat: next.chat });
+		// A Compare handoff carries its B (a Search one none), so what runs never hangs on the mode having rendered first.
+		void run({ question: next.question, questionB: next.questionB !== null && next.questionB.trim() !== '' ? next.questionB : null, mode: next.mode, topK: next.topK, objectIds, isTable: isTableOf(next.tables ?? tables), chat: next.chat });
 		// Runs once per handoff; the rest of the panel's state does not restart it.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [handoff]);
