@@ -617,6 +617,7 @@ export const GraphView: React.FC<IGraphViewProps> = ({ session, schemaLabels, ca
 	const widths = useRef(new Map<string, number>());
 	const [hiddenIds, setHiddenIds] = useState<readonly string[]>([]);
 	const [tick, setTick] = useState(0);
+	const drawn = state.model.nodes.size > 0;
 	// The row's width changes when a panel opens beside it; measuring is a ResizeObserver, not a document listener.
 	useLayoutEffect(() => {
 		const el = toolbar.current;
@@ -625,12 +626,22 @@ export const GraphView: React.FC<IGraphViewProps> = ({ session, schemaLabels, ca
 		// returned to where it came from: it was placed for a size that no longer holds. The first report of each element is
 		// its initial size, not a change.
 		const seen = new Set<Element>();
+		let viewport = `${window.innerWidth}x${window.innerHeight}`;
 		const observer = new ResizeObserver((entries) => {
 			setTick((n) => n + 1);
 			let changed = false;
 			for (const entry of entries) {
+				// The document is only a way to hear about the window: its own size can follow its content (an open menu or a
+				// legend can grow it), which is not a resize. It counts through the window size below, and only then.
+				if (entry.target === document.documentElement) continue;
 				if (seen.has(entry.target)) changed = true;
 				else seen.add(entry.target);
+			}
+			// The window itself changed size, whichever box moved with it.
+			const now = `${window.innerWidth}x${window.innerHeight}`;
+			if (now !== viewport) {
+				viewport = now;
+				changed = true;
 			}
 			if (!changed) return;
 			const menuEl = document.activeElement?.closest('[role="menu"]') ?? null;
@@ -643,8 +654,10 @@ export const GraphView: React.FC<IGraphViewProps> = ({ session, schemaLabels, ca
 		});
 		observer.observe(el);
 		if (canvasBox.current) observer.observe(canvasBox.current);
+		observer.observe(document.documentElement);
 		return () => observer.disconnect();
-	}, []);
+		// The toolbar exists only while something is drawn: a view mounted before its result arrives has none yet.
+	}, [drawn]);
 	// eslint-disable-next-line react-hooks/exhaustive-deps
 	useLayoutEffect(() => {
 		const el = toolbar.current;
