@@ -35,6 +35,9 @@
 //     turn says the pipeline may still be answering. The generation ticket
 //     drops an answer that arrives after that, or after a reset.
 //   - History holds the questions only (for recall), newest first.
+//   - Once a question ends (answered, failed, timed out, or stopped), the
+//     session says so once (`onSettled`): the Query tab records it in its
+//     History. A late answer the generation dropped is no end.
 // =============================================================================
 
 import { createGeneration } from 'shared/explorer';
@@ -79,6 +82,8 @@ export interface ChatDeps {
 	now(): number;
 	/** An answer arrived (the panel highlights its sources). */
 	onAnswer?(turn: ChatTurn): void;
+	/** A question ended: answered, failed, timed out or stopped (once per question). */
+	onSettled?(turn: ChatTurn): void;
 	announce(message: string): void;
 }
 
@@ -145,6 +150,8 @@ export function createChatSession(deps: ChatDeps): ChatSession {
 	 */
 	const finish = (id: number, patch: Partial<ChatTurn>, asking: boolean): void => {
 		set({ turns: state.turns.map((turn) => (turn.id === id ? { ...turn, ...patch } : turn)), asking });
+		const ended = state.turns.find((turn) => turn.id === id);
+		if (ended && ended.status !== 'asking' && !disposed) deps.onSettled?.(ended);
 	};
 
 	return {

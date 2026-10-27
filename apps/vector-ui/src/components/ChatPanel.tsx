@@ -43,6 +43,10 @@
 // running Chat source (a pipeline without one, a dev-tool mount) the panel
 // says why, and offers "Use Search" whenever the store can run a search.
 //
+// Each question is recorded in the Query tab's History once its answer ends
+// (answered, failed, timed out or stopped), through the chat session, so an
+// answer that lands while another mode is shown is recorded too.
+//
 // The focus never falls to <body>: asking (the button turns off while the
 // answer is on its way), "Stop waiting" and "Ask about all documents" (which
 // go away) return it to the question box, and closing "Why these?" to its
@@ -63,6 +67,8 @@ import { SourcesPanel } from './SourcesPanel';
 import { RetrievalDebugger } from './RetrievalDebugger';
 import { modeOptions } from '../vector/searchWorkbench';
 import type { AskHandoff, ChatPrefill } from '../vector/searchWorkbench';
+import { askRecord } from '../vector/queryHistory';
+import type { QueryRunRecord } from '../vector/queryHistory';
 
 /** The contract props plus the Query tab's ways into Search and its handed-in questions. */
 export interface ChatPanelProps extends ContractChatPanelProps {
@@ -72,6 +78,8 @@ export interface ChatPanelProps extends ContractChatPanelProps {
 	onUseSearch?(): void;
 	/** A question handed in (a history entry): put in the box, or asked at once. */
 	handoff?: AskHandoff | null;
+	/** Record each question once its answer ended (the Query tab's History). Absent: nothing is recorded. */
+	onRecord?(record: QueryRunRecord): void;
 }
 
 /** Shown when the connection has no running Chat source. */
@@ -199,8 +207,14 @@ function TurnView({ turn, model, channels, selection, actions, debugging, onDebu
  * @returns The panel.
  */
 export function ChatPanel(props: ChatPanelProps): React.ReactElement {
-	const { model, channels, selection, actions, scope, onClearScope, onOpenInSearch, onUseSearch, handoff = null } = props;
-	const chat = useVectorChat(props);
+	const { model, channels, selection, actions, scope, onClearScope, onOpenInSearch, onUseSearch, handoff = null, onRecord } = props;
+	const chat = useVectorChat({
+		...props,
+		onSettled: (turn) => {
+			const record = askRecord(turn);
+			if (record !== null) onRecord?.(record);
+		},
+	});
 	const [draft, setDraft] = useState('');
 	const [recall, setRecall] = useState(-1);
 	const [debugging, setDebugging] = useState<number | null>(null);

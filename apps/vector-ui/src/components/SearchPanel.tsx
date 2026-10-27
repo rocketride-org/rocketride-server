@@ -51,6 +51,11 @@
 // the brought question only. The boxes take 1,000 characters; a longer
 // question handed in is cut, and the panel says so.
 //
+// Each finished run is recorded in the Query tab's History (onRecord): a
+// Search run with its mode, k and row count, a Compare once with both
+// questions and the results they share, a failure with its sentence; a run a
+// newer one replaced is not.
+//
 // The model is src/vector/searchWorkbench.ts. Calls go through
 // chat/toolCalls' callTool only: `embed` on the embedding node and `search`
 // on the store node. The query vector lives in the run's closure for those
@@ -68,6 +73,8 @@ import { DATA_BAR_TOKEN } from '../vector/colors';
 import { compareRuns, compareSentence, rowKey } from '../vector/compare';
 import { CALL_TIMEOUT_MS, DEFAULT_TOP_K, KEYWORD_FALLBACK_SENTENCE, MODEL_MISMATCH_SENTENCE, MODE_HINTS, NODE_SETTING_FIELD, NODE_SETTING_NOTE, NODE_SETTING_RANGE, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, STATUS_WORDS, TABLE_FILTERS, TABLE_FILTER_LABELS, applyHandoff, classifyAt, createCommitAnnouncer, defaultMode, fromChatLine, initialThreshold, isCommitKey, isTableOf, keywordCaption, modeLabel, modeOptions, noResultsSentence, nodeSettingText, onGrid, questionEscape, rateLimitSentence, runCaption, runWorkbench, scopeChipText, scoreBar, scoreHeading, scoreTitle, searchExportItems, searchScope, secondsLeft, showSearchOnMap, sliderRange, sliderValueText, thresholdSentence, topKChoices, topKOptions, willRunText } from '../vector/searchWorkbench';
 import type { ChatPrefill, Classification, ModeOption, SearchHandoff, SearchMode, SliderRange, TableFilter, WorkbenchDeps, WorkbenchOutcome, WorkbenchRow, WorkbenchRun } from '../vector/searchWorkbench';
+import { compareRecord, searchRecord } from '../vector/queryHistory';
+import type { QueryRunRecord } from '../vector/queryHistory';
 import { ExportMenu } from './ExportMenu';
 import { QueryCompare } from './QueryCompare';
 import { ScoreHistogram } from './ScoreHistogram';
@@ -78,6 +85,8 @@ export interface SearchPanelProps extends ContractSearchPanelProps {
 	comparing?: boolean;
 	/** A question handed in ("Open in Search", a history entry, "Use as query", "New query"), applied once by its nonce. */
 	handoff?: SearchHandoff | null;
+	/** Record each finished run (the Query tab's History): a Search run per mode, a Compare once. Absent: nothing is recorded. */
+	onRecord?(record: QueryRunRecord): void;
 }
 
 const S = {
@@ -382,7 +391,7 @@ function reasonLines(options: readonly ModeOption[]): string[] {
  * @param props - {@link SearchPanelProps}.
  * @returns The panel.
  */
-export function SearchPanel({ model, channels, selection, actions, comparing = false, handoff = null }: SearchPanelProps): React.ReactElement {
+export function SearchPanel({ model, channels, selection, actions, comparing = false, handoff = null, onRecord }: SearchPanelProps): React.ReactElement {
 	const dialect = model.connection.dialect;
 	const score = dialect?.score ?? null;
 	const options = useMemo(() => modeOptions(model), [model]);
@@ -486,7 +495,20 @@ export function SearchPanel({ model, channels, selection, actions, comparing = f
 	 */
 	const run = async (request: RunPlan): Promise<void> => {
 		const id = ++runId.current;
+		const startedAt = Date.now();
 		const tools = toolChannelFor(model, channels);
+		/**
+		 * Record the run in History (once it ended and no newer run replaced it).
+		 *
+		 * @param outcome - The rows found (A's, or the count A and B share) or why it stopped.
+		 * @param outcome.results - The count.
+		 * @param outcome.error - The sentence shown, when it failed.
+		 */
+		const record = (outcome: { results: number | null; error?: string }): void => {
+			const ms = Date.now() - startedAt;
+			if (request.questionB === null) onRecord?.(searchRecord({ question: request.question, mode: request.mode, topK: request.topK, ...outcome }, startedAt, ms));
+			else onRecord?.(compareRecord({ a: request.question, b: request.questionB, topK: request.topK, shared: outcome.results, ...(outcome.error === undefined ? {} : { error: outcome.error }) }, startedAt, ms));
+		};
 		/**
 		 * The calls of one side.
 		 *
@@ -504,8 +526,12 @@ export function SearchPanel({ model, channels, selection, actions, comparing = f
 		setPhase({ kind: request.mode === 'keyword' ? 'searching' : 'embedding', side: 'A' });
 		const a = await runWorkbench(deps('A'), { ...base, question: request.question });
 		if (runId.current !== id) return;
-		if (!a.ok) return failed(a, 'A');
+		if (!a.ok) {
+			record({ results: null, error: request.questionB === null ? a.message : `A: ${a.message}` });
+			return failed(a, 'A');
+		}
 		if (request.questionB === null) {
+			record({ results: a.run.rows.length });
 			setRuns({ a: a.run, b: null });
 			setPhase({ kind: 'done' });
 			actions.announce(`${runCaption(a.run)}. ${thresholdSentence(a.run.rows, at, score)}`);
@@ -514,12 +540,15 @@ export function SearchPanel({ model, channels, selection, actions, comparing = f
 		const b = await runWorkbench(deps('B'), { ...base, question: request.questionB });
 		if (runId.current !== id) return;
 		if (!b.ok) {
+			record({ results: null, error: `B: ${b.message}` });
 			setRuns({ a: a.run, b: null });
 			return failed(b, 'B');
 		}
+		const summary = compareRuns(a.run.rows, b.run.rows);
+		record({ results: summary.shared });
 		setRuns({ a: a.run, b: b.run });
 		setPhase({ kind: 'done' });
-		actions.announce(compareSentence(compareRuns(a.run.rows, b.run.rows)));
+		actions.announce(compareSentence(summary));
 	};
 
 	// A question handed in, once per nonce: "Open in Search" runs the search "Why these?" made; a history entry's

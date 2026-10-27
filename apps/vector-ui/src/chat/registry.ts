@@ -64,6 +64,7 @@ export function chatSessionFor(connectionKey: string, deps: ChatDeps): ChatSessi
 		makeQuestion: (text, scope) => live.current.makeQuestion(text, scope),
 		now: () => live.current.now(),
 		onAnswer: (turn) => live.current.onAnswer?.(turn),
+		onSettled: (turn) => live.current.onSettled?.(turn),
 		announce: (message) => live.current.announce(message),
 	});
 	chats.set(connectionKey, { session, live });

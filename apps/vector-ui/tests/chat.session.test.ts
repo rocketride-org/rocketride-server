@@ -291,3 +291,30 @@ test('chat: history keeps questions only, newest first, bounded; clear empties i
 	assert.deepEqual(session.history(), []);
 	assert.deepEqual(session.getState().turns, []);
 });
+
+test('chat: each question that ends is told once (onSettled: the Query tab\'s History) — answered, failed, timed out or stopped; a late answer after Stop is no second end', async () => {
+	const settled: string[] = [];
+	const fake = fakeDeps({ onSettled: (turn) => settled.push(`${turn.question}:${turn.status}`) });
+	const session = createChatSession(fake.deps);
+	const answered = session.send('q1', null);
+	await flush();
+	assert.deepEqual(settled, [], 'not while it is being answered');
+	fake.asks[0].answer.resolve(WITH_DOCUMENTS);
+	await answered;
+	const failed = session.send('q2', null);
+	await flush();
+	fake.asks[1].answer.reject(new ExplorerToolError({ kind: 'raised', tool: 'chat', message: 'The pipeline failed.' }));
+	await failed;
+	const timedOut = session.send('q3', null);
+	await flush();
+	fake.asks[2].answer.reject(new ExplorerToolError({ kind: 'timeout', tool: 'chat', message: 'late' }));
+	await timedOut;
+	const stopped = session.send('q4', null);
+	await flush();
+	session.stopWaiting();
+	fake.asks[3].answer.resolve(WITH_DOCUMENTS);
+	await stopped;
+	assert.deepEqual(settled, ['q1:answered', 'q2:failed', 'q3:timeout', 'q4:stopped']);
+	session.dispose();
+	assert.equal(settled.length, 4, 'a disposed session tells nothing more');
+});

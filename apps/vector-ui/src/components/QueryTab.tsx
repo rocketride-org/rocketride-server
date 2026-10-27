@@ -25,18 +25,26 @@
 // =============================================================================
 //
 // Three modes on a tab row of their own (Search, Compare, Ask), with "New
-// query" at its end; the row never moves when a run starts or its results
-// land. The mode is the connection's (`entry.queryMode`), so "Ask about
+// query" and "History (N)" at its end; the row never moves when a run starts
+// or its results land. The mode is the connection's (`entry.queryMode`), so "Ask about
 // these" anywhere opens Ask, and every mode stays mounted while another is
 // shown: Search and Compare are one SearchPanel (question A, the mode, k, the
 // threshold and the last run carry over), Ask is the ChatPanel. Where the
 // chat cannot ask (no Chat source, a dev-tool mount), Ask says why and offers
 // "Use Search".
 //
+// Every finished run is recorded in the mount's Query history
+// (`env.queryHistory`: the workspace preferences in the full app, the
+// document's life in a dev-tool mount), shown in the History aside docked
+// beside the modes: Load fills the form, Rerun runs an entry again with its
+// mode and k and the threshold, scope and table filter chosen now
+// (vector/queryHistory.ts).
+//
 // Questions come in two ways, each taken once: through the connection
 // (`entry.queryPrefill`: "Use as query", "New query"), which this tab clears
 // as it takes it, so a tab mounted later still gets it and a remount does not
-// take it again; and from inside the tab ("Open in Search" from an answer).
+// take it again; and from inside the tab ("Open in Search" from an answer,
+// History's Load and Rerun).
 //
 // The focus never falls to <body>: when a mode change hides the focused
 // control (a result's "ask about this", "Open in Search", "Use Search"), it
@@ -46,18 +54,22 @@
 // with everything it needs as props.
 // =============================================================================
 
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shell';
-import { useValueStore } from '../envContext';
+import { useReadable, useValueStore, useVectorEnv } from '../envContext';
+import type { IQueryHistorySource } from '../env';
 import type { ConsoleActions, ConsoleModel, SelectionStore, VectorChannels } from '../contract/types';
 import { styles as appStyles } from '../styles';
 import { QUERY_MODES, QUERY_MODE_LABELS, needsFocusRescue, nextQueryTab, primaryTarget } from '../vector/queryFocus';
 import type { ActiveFocus, QueryFocusTarget } from '../vector/queryFocus';
 import { modeOptions, takePrefill } from '../vector/searchWorkbench';
 import type { AskHandoff, ChatPrefill, SearchHandoff } from '../vector/searchWorkbench';
+import { loadPlan, rerunPlan } from '../vector/queryHistory';
+import type { QueryHistoryItem, QueryRunRecord } from '../vector/queryHistory';
 import type { IQueryPrefill, QueryMode } from '../vector/workbench';
 import ChatPanel from './ChatPanel';
+import HistoryAside from './HistoryAside';
 import SearchPanel from './SearchPanel';
 import type { IQueryTabProps } from './workbenchProps';
 
@@ -69,6 +81,7 @@ const styles = {
 	selected: { borderBottom: '2px solid var(--rr-border-focus)', fontWeight: 600 } as CSSProperties,
 	barEnd: { display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 4 } as CSSProperties,
 	button: { ...commonStyles.buttonSecondary, padding: '1px 8px', fontSize: 11 } as CSSProperties,
+	toggle: { ...commonStyles.buttonSecondary, padding: '1px 8px', fontSize: 11, minWidth: '8.5em' } as CSSProperties,
 	body: { flex: 1, minHeight: 0, display: 'flex', flexWrap: 'wrap', gap: 12 } as CSSProperties,
 	main: { flex: '999 1 520px', minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto' } as CSSProperties,
 	ask: { height: '100%', display: 'flex', flexDirection: 'column' } as CSSProperties,
@@ -98,6 +111,10 @@ export interface IQueryWorkbenchProps {
 	onClearChatScope(): void;
 	/** True while the tab is the one shown and its document is in front. */
 	visible: boolean;
+	/** The mount's Query history. */
+	history: IQueryHistorySource;
+	/** The connection's key in it. */
+	historyKey: string;
 }
 
 /**
@@ -127,7 +144,7 @@ function focusIn(root: HTMLElement | null, target: QueryFocusTarget): void {
  * @param props - {@link IQueryWorkbenchProps}.
  * @returns The tab.
  */
-export function QueryWorkbench({ model, surfaceModel, channels, selection, actions, mode, onMode, prefill, onPrefillTaken, chatDocuments, chatNotice, onClearChatScope, visible }: IQueryWorkbenchProps): React.ReactElement {
+export function QueryWorkbench({ model, surfaceModel, channels, selection, actions, mode, onMode, prefill, onPrefillTaken, chatDocuments, chatNotice, onClearChatScope, visible, history, historyKey }: IQueryWorkbenchProps): React.ReactElement {
 	const root = useRef<HTMLDivElement>(null);
 	const tabRefs = useRef<Partial<Record<QueryMode, HTMLButtonElement | null>>>({});
 	const ids = useId();
@@ -137,7 +154,12 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 	const sequence = useRef(0);
 	const searchId = `${ids}-search`;
 	const askId = `${ids}-ask`;
-	const asking = { chatAvailable: surfaceModel.chat.enabled && channels.chat !== null, searchable: modeOptions(surfaceModel).some((option) => option.enabled) };
+	const asideId = `${ids}-history`;
+	const options = modeOptions(surfaceModel);
+	const asking = { chatAvailable: surfaceModel.chat.enabled && channels.chat !== null, searchable: options.some((option) => option.enabled) };
+	const entries = useReadable(useMemo(() => history.entries(historyKey), [history, historyKey])) as readonly QueryHistoryItem[];
+	const recording = useReadable(useMemo(() => history.recording(historyKey), [history, historyKey]));
+	const [historyOpen, setHistoryOpen] = useState(false);
 
 	/**
 	 * A nonce for a handoff made here.
@@ -182,6 +204,49 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 	const openInSearch = (brought: ChatPrefill): void => {
 		setSearch({ nonce: nonce(), question: brought.question, run: true, chat: brought });
 		onMode('search');
+	};
+
+	/**
+	 * Record a finished run in the mount's history (nothing while recording is off).
+	 *
+	 * @param run - The run.
+	 */
+	const record = (run: QueryRunRecord): void => history.record(historyKey, run);
+
+	/**
+	 * What Rerun would do with an entry now, or why it cannot.
+	 *
+	 * @param entry - The entry.
+	 * @param handoffNonce - The nonce its handoff gets.
+	 * @returns The plan.
+	 */
+	const rerunOf = (entry: QueryHistoryItem, handoffNonce: string): ReturnType<typeof rerunPlan> => rerunPlan(entry, { options, chat: { enabled: asking.chatAvailable, reason: surfaceModel.chat.reason }, nonce: handoffNonce });
+
+	/**
+	 * Load: the entry back in the form (or Ask's box), nothing run; the focus goes to that box.
+	 *
+	 * @param entry - The entry.
+	 */
+	const load = (entry: QueryHistoryItem): void => {
+		const plan = loadPlan(entry, nonce());
+		onMode(plan.mode);
+		if (plan.search !== null) setSearch(plan.search);
+		if (plan.ask !== null) setAsk(plan.ask);
+		setFocusNext(primaryTarget(plan.mode, asking));
+		if (plan.notes.length > 0) actions.announce(plan.notes.join(' '));
+	};
+
+	/**
+	 * Rerun: the entry's mode and k, with the threshold, scope and table filter chosen now (the focus stays on Rerun).
+	 *
+	 * @param entry - The entry.
+	 */
+	const rerun = (entry: QueryHistoryItem): void => {
+		const plan = rerunOf(entry, nonce());
+		if (!plan.ok) return;
+		onMode(plan.mode);
+		if (plan.search !== null) setSearch(plan.search);
+		if (plan.ask !== null) setAsk(plan.ask);
 	};
 
 	/** "New query": an empty Search form (the last run stays in History). */
@@ -233,12 +298,15 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 					<button type="button" style={styles.button} title="Empty the Search form; the last run stays in History" onClick={newQuery}>
 						New query
 					</button>
+					<button type="button" style={styles.toggle} aria-expanded={historyOpen} aria-controls={asideId} data-query-focus="history-toggle" onClick={() => setHistoryOpen((open) => !open)}>
+						{`History (${entries.length})`}
+					</button>
 				</div>
 			</div>
 			<div style={styles.body}>
 				<div style={styles.main}>
 					<div id={searchId} role="tabpanel" aria-labelledby={`${ids}-tab-${mode === 'compare' ? 'compare' : 'search'}`} hidden={mode === 'ask'} data-surface="search">
-						<SearchPanel key={surfaceModel.connectionKey} model={surfaceModel} channels={channels} selection={selection} actions={actions} comparing={mode === 'compare'} handoff={search} />
+						<SearchPanel key={surfaceModel.connectionKey} model={surfaceModel} channels={channels} selection={selection} actions={actions} comparing={mode === 'compare'} handoff={search} onRecord={record} />
 					</div>
 					<div id={askId} role="tabpanel" aria-labelledby={`${ids}-tab-ask`} hidden={mode !== 'ask'} data-surface="ask" style={mode === 'ask' ? styles.ask : undefined}>
 						{model.chat.enabled && chatNotice !== null && (
@@ -246,9 +314,30 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 								{chatNotice}
 							</p>
 						)}
-						<ChatPanel model={surfaceModel} channels={channels} selection={selection} actions={actions} scope={chatDocuments} onClearScope={onClearChatScope} onOpenInSearch={openInSearch} onUseSearch={() => onMode('search')} handoff={ask} />
+						<ChatPanel model={surfaceModel} channels={channels} selection={selection} actions={actions} scope={chatDocuments} onClearScope={onClearChatScope} onOpenInSearch={openInSearch} onUseSearch={() => onMode('search')} handoff={ask} onRecord={record} />
 					</div>
 				</div>
+				{historyOpen && (
+					<HistoryAside
+						id={asideId}
+						entries={entries}
+						recording={recording}
+						onRecording={(on) => history.setRecording(historyKey, on)}
+						note={history.note}
+						now={Date.now()}
+						rerunOf={(entry) => rerunOf(entry, 'preview')}
+						onLoad={load}
+						onRerun={rerun}
+						onPin={(id) => history.togglePin(historyKey, id)}
+						onNote={(id, text) => history.setNote(historyKey, id, text)}
+						onRemove={(id) => history.remove(historyKey, id)}
+						onClear={() => history.clear(historyKey)}
+						onClose={() => {
+							setHistoryOpen(false);
+							setFocusNext('history-toggle');
+						}}
+					/>
+				)}
 			</div>
 		</div>
 	);
@@ -261,6 +350,7 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
  * @returns The tab's panel.
  */
 export function QueryTab({ entry, model, channels, actions, visible, surfaceModel, chatDocuments, chatNotice, onClearChatScope }: IQueryTabProps): React.ReactElement {
+	const env = useVectorEnv();
 	const mode = useValueStore(entry.queryMode);
 	const prefill = useValueStore(entry.queryPrefill);
 	return (
@@ -278,6 +368,8 @@ export function QueryTab({ entry, model, channels, actions, visible, surfaceMode
 			chatNotice={chatNotice}
 			onClearChatScope={onClearChatScope}
 			visible={visible}
+			history={env.queryHistory}
+			historyKey={entry.key}
 		/>
 	);
 }

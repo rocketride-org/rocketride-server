@@ -148,7 +148,10 @@ const { chatSessionFor, forgetChatAndIngest } = require('../src/chat/registry') 
 const { parseChatResult } = require('../src/vector/chatResult') as typeof import('../src/vector/chatResult');
 const { replaceQuestion } = require('../src/vector/uploads') as typeof import('../src/vector/uploads');
 const { buildConsoleModel } = require('../src/vector/consoleModel') as typeof import('../src/vector/consoleModel');
-const { DEVTOOL_CHAT_NOTE, devToolConsoleModel } = require('../src/env') as typeof import('../src/env');
+const { DEVTOOL_CHAT_NOTE, DEVTOOL_HISTORY_NOTE, devToolConsoleModel } = require('../src/env') as typeof import('../src/env');
+const { sessionQueryHistory } = require('../src/adapters/queryHistory') as typeof import('../src/adapters/queryHistory');
+const { HistoryAside } = require('../src/components/HistoryAside') as typeof import('../src/components/HistoryAside');
+const { rerunPlan } = require('../src/vector/queryHistory') as typeof import('../src/vector/queryHistory');
 const { makeVectorEndpointStore } = require('../src/adapters/explorer') as typeof import('../src/adapters/explorer');
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
@@ -344,7 +347,7 @@ test('ChatPanel: no "Why these?" without the embedding node; the scope chip when
  */
 function workbench(mode: QueryMode, overrides: Partial<IQueryWorkbenchProps> = {}): IQueryWorkbenchProps {
 	const m = overrides.model ?? model();
-	return { model: m, surfaceModel: m, channels, selection: createSelectionStore('render-1'), actions, mode, onMode: () => undefined, prefill: null, onPrefillTaken: () => undefined, chatDocuments: null, chatNotice: null, onClearChatScope: () => undefined, visible: true, ...overrides };
+	return { model: m, surfaceModel: m, channels, selection: createSelectionStore('render-1'), actions, mode, onMode: () => undefined, prefill: null, onPrefillTaken: () => undefined, chatDocuments: null, chatNotice: null, onClearChatScope: () => undefined, visible: true, history: sessionQueryHistory(DEVTOOL_HISTORY_NOTE), historyKey: 'render-1', ...overrides };
 }
 
 /**
@@ -375,6 +378,8 @@ test('QueryWorkbench: Search, Compare and Ask on a tab row of their own; Search 
 		assert.match(row, /tabindex="0"[^>]*data-query-focus="tab"/, 'roving: the selected tab is the one in the tab order');
 		assert.equal((row.match(/tabindex="-1"/g) ?? []).length, 2);
 		assert.match(row, />New query<\/button>/);
+		assert.match(row, /<button type="button"[^>]*aria-expanded="false" aria-controls="[^"]+-history" data-query-focus="history-toggle"[^>]*>History \(0\)<\/button>/, 'History is closed until asked for');
+		assert.doesNotMatch(html, /data-component="HistoryAside"/);
 		assert.equal(surfaceTag(html, 'search').includes('hidden=""'), mode === 'ask', `${mode}: Search and Compare's panel`);
 		assert.equal(surfaceTag(html, 'ask').includes('hidden=""'), mode !== 'ask', `${mode}: Ask's panel`);
 		assert.equal((html.match(/data-component="SearchPanel"/g) ?? []).length, 1, 'Search and Compare are one panel');
@@ -908,4 +913,39 @@ test("ScoreHistogram: the store node's setting as a second line when the slider 
 	assert.match(html, /data-line="setting"/);
 	assert.match(html, /aria-label="Scores of 4 results from -1\.00 to 1\.00; threshold 0\.42, floor 0\.20, node setting 0\.30\."/);
 	assert.doesNotMatch(render(h(ScoreHistogram, { scores: [0.5], range: [-1, 1], threshold: 0.3, floor: 0.2, setting: 0.3 })), /data-line="setting"/);
+});
+
+// ── History ─────────────────────────────────────────────────────────────────
+
+test('HistoryAside: pinned entries first, each with its kind, k, what it came to, Load, Rerun (off with its reason), Pin, Note and Remove; the mount\'s own footer; no dialog', () => {
+	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+	const at = new Date(2026, 9, 27, 14, 37).getTime();
+	history.record('k', { question: 'kestrel survey', kind: 'semantic', at, ms: 420, topK: 10, results: 12, outcome: 'rows' });
+	history.record('k', { question: 'water', kind: 'keyword', at: at + 1, ms: 1300, topK: 25, results: null, outcome: 'error', error: 'The store did not answer in time. Try again.' });
+	history.record('k', { question: 'falcon', kind: 'compare', at: at + 2, ms: 900, topK: 10, results: 6, outcome: 'rows' });
+	const [compare, failed, first] = history.entries('k').get();
+	history.togglePin('k', first.id);
+	const entries = history.entries('k').get();
+	const options = { options: [{ mode: 'semantic', label: 'Semantic', enabled: true, reason: null }, { mode: 'keyword', label: 'Keyword', enabled: false, reason: 'This store cannot search by keyword' }] as never, chat: { enabled: false, reason: NO_CHAT_SENTENCE }, nonce: 'preview' };
+	const props = { id: 'h1', entries, recording: true, onRecording: () => undefined, note: DEVTOOL_HISTORY_NOTE, now: at + 60_000, rerunOf: (entry: (typeof entries)[number]) => rerunPlan(entry, options), onLoad: () => undefined, onRerun: () => undefined, onPin: () => undefined, onNote: () => undefined, onRemove: () => undefined, onClear: () => undefined, onClose: () => undefined };
+	const html = render(h(HistoryAside, props));
+	assert.match(html, /<aside id="h1" aria-label="History" data-component="HistoryAside"/);
+	assert.deepEqual([...html.matchAll(/data-history-entry="([^"]+)"/g)].map((m) => m[1]), [first.id, compare.id, failed.id], 'pinned first, then newest first');
+	assert.match(html, /<button type="button"[^>]*data-history-control="pin" aria-pressed="true"[^>]*>Pin<\/button>/);
+	assert.match(html, /Semantic · top 10 · 12 results · 02:37 PM · 420 ms/);
+	assert.match(html, /Keyword · top 25 · failed: The store did not answer in time\. Try again\. · 02:37 PM · 1\.3 s/);
+	assert.match(html, /A: falcon\nB: Question B isn(&#x27;|')t saved\./, 'B is kept for the session only');
+	assert.match(html, /Compare · top 10 · A and B shared 6/);
+	assert.match(html, /Rerun is off: Keyword cannot run now: This store cannot search by keyword/, 'the reason is visible, not only in a title');
+	assert.match(html, /<button type="button"[^>]*data-history-control="rerun" aria-disabled="false" title="Run again with Semantic and top 10, and the threshold, scope and table filter chosen now"[^>]*>Rerun<\/button>/);
+	assert.match(html, /<button type="button"[^>]*aria-label="Remove &quot;kestrel survey&quot; from History"[^>]*>Remove<\/button>/);
+	assert.match(html, /<input type="checkbox" role="switch"(?=[^>]*aria-checked="true")(?=[^>]*checked="")[^>]*\/>Record runs/);
+	assert.match(html, /<p[^>]*data-history-note=""[^>]*>Kept only while this document is open; nothing is saved\.<\/p>/);
+	assert.match(html, /<h3[^>]*tabindex="-1" data-query-focus="history-heading"[^>]*>History<\/h3>/i);
+	assert.doesNotMatch(html, /role="dialog"|aria-modal/, 'Clear… asks inline');
+	const off = render(h(HistoryAside, { ...props, recording: false }));
+	assert.match(off, /Recording is off: new runs are not added\. The entries below stay\./);
+	const empty = render(h(HistoryAside, { ...props, entries: [] }));
+	assert.match(empty, /No runs yet\. Each Search, Compare and Ask run is listed here\./);
+	assert.match(empty, /<button type="button"[^>]*disabled=""[^>]*data-query-focus="history-clear"[^>]*>Clear…<\/button>/);
 });
