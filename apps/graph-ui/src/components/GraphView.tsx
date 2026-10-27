@@ -631,6 +631,9 @@ export const GraphView: React.FC<IGraphViewProps> = ({ session, schemaLabels, ca
 			setTick((n) => n + 1);
 			let changed = false;
 			for (const entry of entries) {
+				// The document is only a way to hear about the window: its own size can follow its content (an open menu or a
+				// legend can grow it), which is not a resize. It counts through the window size below, and only then.
+				if (entry.target === document.documentElement) continue;
 				if (seen.has(entry.target)) changed = true;
 				else seen.add(entry.target);
 			}
