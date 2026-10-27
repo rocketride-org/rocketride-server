@@ -462,6 +462,19 @@ export const MembersPanel: React.FC<MembersPanelProps> = ({ members, teams, prof
 	// Drives the materializing [Send Invite] and the discard guard.
 	const inviteDirty = panel?.mode === 'create' && (formEmail.trim() !== '' || formGivenName.trim() !== '' || formFamilyName.trim() !== '' || formRole !== 'member' || !sameAssignments(formTeams, initialFormTeams));
 
+	// Teams and the profile load independently, so an admin can open the
+	// invite panel before the team list (or the default dev team id) arrives
+	// and the seed on open is empty. Re-seed the untouched form when either
+	// changes; a form whose assignments differ from the seeded snapshot has
+	// been edited and is left alone.
+	useEffect(() => {
+		if (panel?.mode !== 'create' || !sameAssignments(formTeams, initialFormTeams)) return;
+		const seeded = seedTeamAssignments(teams, defaultDevTeamId);
+		if (sameAssignments(seeded, initialFormTeams)) return;
+		setFormTeams(seeded);
+		setInitialFormTeams(seeded);
+	}, [panel?.mode, teams, defaultDevTeamId, formTeams, initialFormTeams]);
+
 	// Mounted flag guarding the async resend flow — the await and the 3s
 	// confirmation timer can both outlive the panel (e.g. the dialog closes).
 	const mountedRef = useRef(true);
