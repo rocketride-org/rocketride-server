@@ -76,6 +76,8 @@ export interface Recording {
 	verdicts: Record<string, ValidateResult>;
 	/** The final files' sha256, by path. */
 	finalFiles: Record<string, string>;
+	/** The step and cost limits the trial ran under (0 is off). Absent: it was recorded before the agent had limits, so it replays with both off. */
+	limits?: { steps: number; costUsd: number };
 }
 
 /** The parts of a baseline trial record the converter reads. */
@@ -269,5 +271,6 @@ export function validateRecording(r: Recording, scenarios: Set<string>): string[
 		if (!Array.isArray(t.events) || t.events.length === 0) problems.push(`turn ${i + 1} has no replies`);
 	}
 	if (!r.baseline || !Array.isArray(r.baseline.results)) problems.push('it has no baseline results');
+	if (r.limits !== undefined && !(Number.isFinite(r.limits.steps) && r.limits.steps >= 0 && Number.isFinite(r.limits.costUsd) && r.limits.costUsd >= 0)) problems.push('its limits are not two numbers of 0 or more');
 	return problems;
 }

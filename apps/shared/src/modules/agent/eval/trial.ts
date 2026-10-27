@@ -47,7 +47,14 @@
  * (none), and app scaffolding, packing and dev sessions (none).
  *
  * Recording only wraps; it never changes what the agent sees. The harness
- * stop (60 waves or 15 minutes per turn) presses Stop.
+ * stop (60 waves or 15 minutes per turn) presses Stop. The agent's own step
+ * limit (60 by default) pauses a turn before the harness's wave stop, so
+ * that stop fires only when the limits are off, as for a replay recorded
+ * before the agent had them.
+ *
+ * Each turn's TurnResult (outcome, reason, usage with the estimated cost,
+ * what it asks) goes into the record. A turn ask_user ended counts as asking;
+ * a turn a limit paused ends the trial, since Continue is the user's call.
  *
  * Usage (cwd apps/shared; run.ts starts it):
  *   node --require ./scripts/stub-css.cjs --require <eval>/shell-stub.cjs --import tsx <eval>/trial.ts --config <file>
@@ -64,10 +71,11 @@ import { TurnController } from 'shell/src/components/chat/turns/turnController';
 import { isReferencePath } from '../../vfs/referenceTree';
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import { AgentSession } from '../agent';
-import { setAgentHost } from '../host';
+import { DEFAULT_LIMITS, setAgentHost, type AgentLimits } from '../host';
 import { CheckRecord } from '../run';
 import { AGENT_ORIGIN } from '../toolkits/filesystem';
 import { validateSaved } from '../toolkits/saveValidation';
+import { TurnError, type TurnResult } from '../turn';
 import { CanaryScanner, checkFingerprints, fingerprint, scrubDeep, syntheticVariables, type Fingerprint } from './canary';
 import { REPO_ROOT } from './catalog';
 import { createFakeEngine, type ModelAnswer, type ModelQuestion } from './engine';
@@ -76,7 +84,7 @@ import type { Recording } from './recordings';
 import { runOutputCheck } from './runOutput';
 import { CHANGE_TOOLS, sha256 } from './score';
 import { fixtureTree, loadScenario } from './scenarios';
-import type { Layer, ModelCallRecord, RecordedCall, Scenario, TrialRecord, TurnRecord, UserEvent } from './types';
+import type { Layer, ModelCallRecord, RecordedCall, Scenario, TrialRecord, TurnRecord, TurnResultRecord, UserEvent } from './types';
 
 /** Node's process. The package's global.d.ts declares a browser `process` that has only `env`. */
 const proc = process as unknown as NodeJS.Process;
@@ -102,6 +110,8 @@ export interface TrialConfig {
 	maxMinutes: number;
 	/** Overrides each `asks` follow-up's max. */
 	maxFollowups?: number;
+	/** The agent's step and cost limits for each turn (0 is off). Unset: the product's defaults (host.ts DEFAULT_LIMITS). */
+	limits?: AgentLimits;
 }
 
 /** The app id that namespaces the sessions, the Pipeline Builder's (the Agent tab's host). */
@@ -145,6 +155,7 @@ function newTurn(n: number, request: string): TurnRecord {
 		finishedAfter: false,
 		reply: null,
 		followupKind: null,
+		result: null,
 	};
 }
 
@@ -350,7 +361,10 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 	const race = (scenario.fixture.user_events ?? []).find((ev) => ev.when === 'between_freshness_check_and_write' && ev.action === 'save');
 	if (race) holdAgentWrite(view, race, fixture);
 
-	const host = { vfs: view, scaffoldApp: notHere('scaffoldApp'), packApp: notHere('packApp'), devSession: () => null };
+	// step: the turn limits the host serves; without them every turn gets the product's defaults
+	const limits = cfg.limits;
+	record.settings.limits = limits ?? { ...DEFAULT_LIMITS, source: 'product default' };
+	const host = { vfs: view, scaffoldApp: notHere('scaffoldApp'), packApp: notHere('packApp'), devSession: () => null, ...(limits ? { limits: { read: () => limits } } : {}) };
 	setAgentHost(host);
 	AgentSession.configure(SESSIONS_APP_ID);
 	const session = AgentSession.newSession();
@@ -413,7 +427,20 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 	// step: the chat. Cards are answered as the scenario says (default no) and recorded
 	const answer: ChatAskAnswer = scenario.fixture.confirm?.default ? 'approve' : 'deny';
 	const answered = new Set<number>();
-	controller = new TurnController({ request: () => (text, onStatus, chatTurn) => session.execute(text, onStatus, chatTurn), stopGraceMs: 3000 });
+	// execute hands back how the turn ended; the chat renders only the rows, as AgentConversation does
+	let ended: TurnResult[] = [];
+	const execute = (text: string, onStatus?: (type: string, content: string) => void, chatTurn?: Parameters<AgentSession['execute']>[2]) =>
+		session.execute(text, onStatus, chatTurn).then(
+			({ results, turn: result }) => {
+				ended.push(result);
+				return results;
+			},
+			(err: unknown) => {
+				if (err instanceof TurnError) ended.push(err.turn);
+				throw err;
+			}
+		);
+	controller = new TurnController({ request: () => execute, stopGraceMs: 3000 });
 	const chat = controller;
 	chat.subscribe(() => {
 		for (const ask of chat.snapshot().asks) {
@@ -427,6 +454,7 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 	const asksFollowup = scenario.followups.find((f) => f.when === 'asks');
 	const asksMax = cfg.maxFollowups ?? asksFollowup?.max ?? 0;
 	let asksSent = 0;
+	let cutByLimit = false;
 	let request = cfg.layer === 'L1' ? (replay?.request(0) ?? scenario.prompt) : scenario.prompt;
 
 	for (let n = 1; ; n++) {
@@ -434,6 +462,8 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 		wave = -1;
 		record.turns.push(turn);
 		replay?.beginTurn();
+		ended = [];
+		const turnsBefore = session.turns.length;
 		const before = chat.snapshot().messages.length;
 		const started = performance.now();
 		chat.send(request);
@@ -459,19 +489,34 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 		} catch (err) {
 			record.session = { saved: false, error: String(err instanceof Error ? err.message : err).slice(0, 300), messages: chat.snapshot().messages.length };
 		}
+		// step: how the product says the turn ended: execute's result, or the session's for a message it refused
+		const result = ended.at(-1) ?? session.turns.slice(turnsBefore).at(-1);
+		turn.result = result ? turnResultRecord(result) : null;
 		saveRecord(cfg, record);
 
 		if (turn.harnessStop) {
 			record.endReason = `harness stop (${turn.harnessStop})`;
 			break;
 		}
-		turn.asked = detectAsk(turn);
+		// step: ask_user ended the turn, so it asked, whatever its text says
+		turn.asked = result?.reason === 'needs_input' ? { rule: 'ask_user', options: (result.request?.choices?.length ?? 0) >= 2 } : detectAsk(turn);
 		turn.finishedAfter = await isFinished(view, client, turn);
+
+		// step: a limit paused the turn. Continue would start a fresh budget, which the user grants, not the scenario.
+		// A replay it cuts short has replies left, which is the limit's doing, not a replay that left its recording
+		const paused = result?.reason === 'limited' || result?.reason === 'cost_limit';
+		if (replay && replay.left() > 0 && !replay.diverged) {
+			replay.diverged = paused ? `turn ${n} paused at the ${result.reason === 'limited' ? 'step' : 'cost'} limit with ${replay.left()} recorded replies unused` : `turn ${n} ended with ${replay.left()} recorded replies unused`;
+			cutByLimit = paused;
+		}
+		if (paused) {
+			record.endReason = `paused at the ${result.reason === 'limited' ? 'step' : 'cost'} limit: ${result.request?.question ?? result.reason}`;
+			break;
+		}
 
 		// step: L1 follows the recording's turns; L2 and L3 follow the scenario
 		if (replay) {
 			const next = replay.request(n);
-			if (replay.left() > 0) replay.diverged ??= `turn ${n} ended with ${replay.left()} recorded replies unused`;
 			if (next === null) {
 				record.finished = turn.finishedAfter;
 				record.endReason = turn.finishedAfter ? 'finished' : turn.asked ? 'asked; the recording ends here' : 'the recording ends here';
@@ -599,7 +644,7 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 			}
 		});
 		record.replay = { recording: path.basename(cfg.recording ?? ''), consumed: replay.consumed, recorded: replay.recorded, diverged: replay.diverged, callMismatches: mismatches };
-		if (replay.diverged) record.infraError = `the replay left its recording: ${replay.diverged}`;
+		if (replay.diverged && !cutByLimit) record.infraError = `the replay left its recording: ${replay.diverged}`;
 	}
 	saveRecord(cfg, record);
 	try {
@@ -612,6 +657,19 @@ async function main(cfg: TrialConfig, record: TrialRecord): Promise<void> {
 // =============================================================================
 // PIECES
 // =============================================================================
+
+/**
+ * How the product says a turn ended, for the record: its TurnResult without
+ * the answer, which the turn record already holds, and with the runs it
+ * started as a count.
+ *
+ * @param result - The turn's result.
+ * @returns The part the record keeps.
+ */
+function turnResultRecord(result: TurnResult): TurnResultRecord {
+	const { turnId: _id, messageId: _row, finalText: _text, runsStarted, ...rest } = result;
+	return { ...rest, runsStarted: runsStarted?.length ?? 0 };
+}
 
 /** A host step the eval has no stand-in for. */
 function notHere(what: string): () => Promise<never> {

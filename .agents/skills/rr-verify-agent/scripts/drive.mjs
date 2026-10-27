@@ -107,6 +107,8 @@ class Run {
 		this.received = 0;
 		this.consoleLines = [];
 		this.checks = [];
+		// "Needs your OK" cards the journey did not plan for, and how each was answered (answerCard).
+		this.cards = [];
 	}
 
 	log(action, result) {
@@ -240,6 +242,7 @@ class Run {
 						heardFrames: this.heardFrames,
 					}
 				: {}),
+			...(this.cards.length ? { unplannedCards: this.cards } : {}),
 			evidence: this.dir,
 			...extra,
 		};
@@ -340,7 +343,50 @@ const textShown = (page, text) =>
 		.isVisible()
 		.catch(() => false);
 
-/** Waits for the agent's turn to end: the typing dots appear, then go away. */
+// A "Needs your OK" card waiting in the running turn (the shell's AskCard).
+const askCard = (page) => page.getByRole('group', { name: 'Needs your OK' }).filter({ visible: true }).first();
+// The line an approval card for a pipeline run ends with when this conversation started the run (#2869).
+const OWN_RUN = 'This conversation started it.';
+
+/** A "Needs your OK" card the journey does not expect. answerCard has already recorded the failed check. */
+class UnexpectedCard extends Error {}
+
+/**
+ * Answers a "Needs your OK" card the journey has no plan for. A card for an
+ * action on a run this conversation started gets Approve: the agent may stop
+ * or restart its own run, and Ask first still asks. Any other card gets Deny,
+ * a failed check that names it, and the journey stops there, so no turn waits
+ * out the timeout on a card. Journeys about approvals (foreign-terminate)
+ * answer their own cards first, through waitTurn's onRunning.
+ *
+ * @returns Whether a card was answered.
+ */
+async function answerCard(page, run, label) {
+	const card = askCard(page);
+	if (!(await card.isVisible().catch(() => false))) return false;
+	const text = ((await card.innerText().catch(() => '')) || '').trim().replace(/\n/g, ' | ');
+	if (!text) return false;
+	const base = await run.shot(page, `${label}-card`);
+	if (text.includes(OWN_RUN)) {
+		await card.getByRole('button', { name: 'Approve', exact: true }).click();
+		run.cards.push({ turn: label, text, answer: 'approve', shot: base });
+		run.log('answer an unplanned card', `Approve, since it is for the agent's own run: "${text}"`);
+		return true;
+	}
+	await card
+		.getByRole('button', { name: 'Deny', exact: true })
+		.click()
+		.catch(() => {});
+	run.cards.push({ turn: label, text, answer: 'deny', shot: base });
+	const why = `the ${label} turn showed a "Needs your OK" card this journey does not expect: "${text}"`;
+	run.check('no-unexpected-card', false, `${why}. Denied it and stopped the journey`);
+	throw new UnexpectedCard(why);
+}
+
+/**
+ * Waits for the agent's turn to end: the typing dots appear, then go away.
+ * While it runs, a "Needs your OK" card left unanswered goes to answerCard.
+ */
 async function waitTurn(page, run, label, onRunning) {
 	const dots = typingDots(page);
 	try {
@@ -350,12 +396,15 @@ async function waitTurn(page, run, label, onRunning) {
 	}
 	if (onRunning) await onRunning();
 	const t0 = Date.now();
-	try {
-		await dots.waitFor({ state: 'detached', timeout: TURN_MS });
-	} catch {
-		run.log(`wait for the ${label} turn`, `still running after ${TURN_MS / 60000} min`);
-		await run.shot(page, `${label}-timeout`);
-		return { ended: false, ms: Date.now() - t0 };
+	for (;;) {
+		if (await answerCard(page, run, label)) continue;
+		if (!(await dots.isVisible().catch(() => false))) break;
+		if (Date.now() - t0 > TURN_MS) {
+			run.log(`wait for the ${label} turn`, `still running after ${TURN_MS / 60000} min`);
+			await run.shot(page, `${label}-timeout`);
+			return { ended: false, ms: Date.now() - t0 };
+		}
+		await page.waitForTimeout(500);
 	}
 	await run.shot(page, `${label}-ended`);
 	run.log(`wait for the ${label} turn`, `ended after ${Math.round((Date.now() - t0) / 1000)}s`);
@@ -1945,7 +1994,9 @@ async function main() {
 	try {
 		extra = (await fn(page, run)) || {};
 	} catch (err) {
-		run.check('journey-ran', false, `${err && err.message ? err.message.split('\n')[0] : err}`);
+		// answerCard recorded its own check for an unexpected card
+		if (!(err instanceof UnexpectedCard))
+			run.check('journey-ran', false, `${err && err.message ? err.message.split('\n')[0] : err}`);
 		try {
 			await run.shot(page, 'error');
 		} catch {

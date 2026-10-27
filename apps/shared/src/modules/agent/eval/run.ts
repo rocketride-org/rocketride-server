@@ -28,9 +28,9 @@
  * Usage (cwd apps/shared, or through ./builder shared:eval):
  *
  *   node --import tsx src/modules/agent/eval/run.ts validate
- *   node --import tsx src/modules/agent/eval/run.ts run --layer L1 [--scenarios a,b] [--set claude-369f0511] [--jobs 4]
- *   node --import tsx src/modules/agent/eval/run.ts run --layer L2 --scenarios build-01-chat-claude [--provider anthropic] [--model claude-sonnet-5] [--trials 1]
- *   node --import tsx src/modules/agent/eval/run.ts run --layer L3 --scenarios build-01-chat-claude [--trials 1]
+ *   node --import tsx src/modules/agent/eval/run.ts run --layer L1 [--scenarios a,b] [--set claude-369f0511] [--jobs 4] [--limits recorded|default|off]
+ *   node --import tsx src/modules/agent/eval/run.ts run --layer L2 --scenarios build-01-chat-claude [--provider anthropic] [--model claude-sonnet-5] [--trials 1] [--limits default|off]
+ *   node --import tsx src/modules/agent/eval/run.ts run --layer L3 --scenarios build-01-chat-claude [--trials 1] [--limits default|off]
  *   node --import tsx src/modules/agent/eval/run.ts selftest [--layer L3]
  *   node --import tsx src/modules/agent/eval/run.ts record --from <baseline runs/<variant> dir> --set <name> --head <sha>
  *   node --import tsx src/modules/agent/eval/run.ts pack <folder> <data/fixtures/name.json>
@@ -46,6 +46,11 @@
  * whose model calls use it. L3 gives the keys to the engine only, through the
  * skill's launcher; trials run with every key unset. No value is printed or
  * written.
+ *
+ * --limits sets the agent's step and cost limits for each turn: `recorded`
+ * (L1's default) replays a trial under the limits it was recorded with, and
+ * a recording made before the agent had limits with both off; `default`
+ * (L2's and L3's) is the product's 60 steps and $2; `off` is no limit.
  *
  * Exit codes: 0 done; 1 an L1 replay did not reproduce its baseline, or a
  * self-test failed; 2 invalid scenarios or a runner failure.
@@ -267,6 +272,24 @@ interface RunOptions {
 	maxMinutes: number;
 	maxFollowups?: number;
 	standin?: string;
+	limits: 'recorded' | 'default' | 'off';
+}
+
+/** Both limits off: how every trial ran before the agent had limits. */
+const LIMITS_OFF = { steps: 0, costUsd: 0 };
+
+/** A trial's limits under --limits: undefined is the product's defaults. */
+function limitsFor(o: RunOptions, recording?: Recording): TrialConfig['limits'] {
+	if (o.limits === 'off') return LIMITS_OFF;
+	if (o.limits === 'recorded') return recording?.limits ?? LIMITS_OFF;
+	return undefined;
+}
+
+/** --limits as the report's settings say it. */
+function limitsSetting(o: RunOptions): string {
+	if (o.limits === 'off') return 'off';
+	if (o.limits === 'recorded') return "each recording's own (off for one recorded before the agent had limits)";
+	return 'the product default (60 steps, $2 estimated)';
 }
 
 function runOptions(a: Record<string, string>): RunOptions {
@@ -288,7 +311,15 @@ function runOptions(a: Record<string, string>): RunOptions {
 		maxMinutes: Number(a['max-minutes'] ?? 15),
 		maxFollowups: a['max-followups'] ? Number(a['max-followups']) : undefined,
 		standin: a.standin,
+		limits: limitsOption(a.limits, layer),
 	};
+}
+
+function limitsOption(given: string | undefined, layer: Layer): RunOptions['limits'] {
+	const limits = given ?? (layer === 'L1' ? 'recorded' : 'default');
+	if (limits !== 'recorded' && limits !== 'default' && limits !== 'off') throw new Error(`--limits must be recorded, default or off (got ${limits})`);
+	if (limits === 'recorded' && layer !== 'L1') throw new Error('--limits recorded is for L1 replays; L2 and L3 take default or off');
+	return limits;
 }
 
 /** The model id behind the product's stand-in profile (standin.ts STANDIN_PROFILE), read from the branch. */
@@ -328,7 +359,7 @@ async function cmdRun(a: Record<string, string>): Promise<number> {
 
 	if (o.layer === 'L1') {
 		prov.model = 'replay of recorded replies';
-		prov.settings = { maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, set: o.set ?? 'all' };
+		prov.settings = { maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, limits: limitsSetting(o), set: o.set ?? 'all' };
 		prov.engine = 'the eval fake engine (engine.ts): in-memory store, static validate, no pipeline runs';
 		prov.keys = 'none (L1 needs no key)';
 		const recs = loadRecordings().filter((r) => o.scenarios.includes(r.recording.scenario) && (!o.set || r.recording.set === o.set));
@@ -336,7 +367,7 @@ async function cmdRun(a: Record<string, string>): Promise<number> {
 		await pool(recs, o.jobs, async ({ file, recording }) => {
 			const scenario = loadScenario(recording.scenario);
 			const label = path.basename(file, '.json');
-			const cfg: TrialConfig = { layer: 'L1', scenario: scenario.id, trial: recording.trial, out: path.join(records, `${scenario.id}--${label}.json`), recording: file, maxWaves: o.maxWaves, maxMinutes: o.maxMinutes };
+			const cfg: TrialConfig = { layer: 'L1', scenario: scenario.id, trial: recording.trial, out: path.join(records, `${scenario.id}--${label}.json`), recording: file, maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, limits: limitsFor(o, recording) };
 			log(`L1 ${scenario.id} ${label}`);
 			const s = await spawnTrial(cfg, keyless());
 			if (!s.record) {
@@ -354,7 +385,7 @@ async function cmdRun(a: Record<string, string>): Promise<number> {
 		const source = keySource(o.provider);
 		if (source === 'none') throw new Error(`L2 needs a ${o.provider} key: set it in the environment, or install tokenstash`);
 		prov.model = `${o.provider}:${o.model} direct, behind the fake engine's stand-in`;
-		prov.settings = { maxTokens: o.maxTokens, maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, maxFollowups: o.maxFollowups ?? 'scenario', trials: o.trials, thinking: 'not set (the engine sets none on this path)' };
+		prov.settings = { maxTokens: o.maxTokens, maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, limits: limitsSetting(o), maxFollowups: o.maxFollowups ?? 'scenario', trials: o.trials, thinking: 'not set (the engine sets none on this path)' };
 		prov.engine = 'the eval fake engine (engine.ts): in-memory store, static validate, no pipeline runs';
 		prov.keys = source === 'tokenstash' ? `tokenstash in ${keysDir()}, names only` : 'the caller environment, names only';
 		const wrap = source === 'tokenstash' ? ['tokenstash', 'run', '--retries', '0', '--'] : [];
@@ -365,7 +396,7 @@ async function cmdRun(a: Record<string, string>): Promise<number> {
 				continue;
 			}
 			for (let t = 1; t <= o.trials; t++) {
-				const cfg: TrialConfig = { layer: 'L2', scenario: id, trial: t, out: path.join(records, `${id}-t${t}.json`), model: { provider: o.provider, model: o.model, maxTokens: o.maxTokens }, maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, maxFollowups: o.maxFollowups };
+				const cfg: TrialConfig = { layer: 'L2', scenario: id, trial: t, out: path.join(records, `${id}-t${t}.json`), model: { provider: o.provider, model: o.model, maxTokens: o.maxTokens }, maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, maxFollowups: o.maxFollowups, limits: limitsFor(o) };
 				log(`L2 ${id} trial ${t} (${o.provider}:${o.model})`);
 				const s = await spawnTrial(cfg, source === 'tokenstash' ? keyless() : proc.env, wrap);
 				if (!s.record) results.push(crashed(scenario, 'L2', t, o.model, s));
@@ -386,7 +417,7 @@ async function cmdRun(a: Record<string, string>): Promise<number> {
 				}
 				for (let t = 1; t <= o.trials; t++) {
 					const standin = o.standin ? { provider: o.standin.split(':')[0], profile: o.standin.split(':')[1], key: o.standin.startsWith('llm_openai') ? 'ROCKETRIDE_OPENAI_KEY' : 'ROCKETRIDE_ANTHROPIC_KEY' } : undefined;
-					const cfg: TrialConfig = { layer: 'L3', scenario: id, trial: t, out: path.join(records, `${id}-t${t}.json`), engine: { uri: ENGINE_URI, auth: ENGINE_AUTH, variables: engine.variables, fingerprints: engine.fingerprints, standin }, maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, maxFollowups: o.maxFollowups };
+					const cfg: TrialConfig = { layer: 'L3', scenario: id, trial: t, out: path.join(records, `${id}-t${t}.json`), engine: { uri: ENGINE_URI, auth: ENGINE_AUTH, variables: engine.variables, fingerprints: engine.fingerprints, standin }, maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, maxFollowups: o.maxFollowups, limits: limitsFor(o) };
 					log(`L3 ${id} trial ${t}`);
 					const s = await spawnTrial(cfg, keyless());
 					if (!s.record) results.push(crashed(scenario, 'L3', t, 'stand-in', s));
@@ -402,7 +433,7 @@ async function cmdRun(a: Record<string, string>): Promise<number> {
 		} finally {
 			stopEngine();
 		}
-		prov.settings = { maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, maxFollowups: o.maxFollowups ?? 'scenario', trials: o.trials, services: proc.env.EVAL_SERVICES ?? 'none' };
+		prov.settings = { maxWaves: o.maxWaves, maxMinutes: o.maxMinutes, limits: limitsSetting(o), maxFollowups: o.maxFollowups ?? 'scenario', trials: o.trials, services: proc.env.EVAL_SERVICES ?? 'none' };
 	}
 
 	results.sort((x, y) => (x.scenario + x.model + x.trial < y.scenario + y.model + y.trial ? -1 : 1));
@@ -508,13 +539,15 @@ async function cmdSelftest(a: Record<string, string>): Promise<number> {
 			const where = pr.hits.map((h) => `${h.canary} on ${h.surface}`).join(', ');
 			add('canary_absent', `unit planted on ${s}`, 'fail', pr.hits.length > 0 && pr.hits.every((h) => h.surface === s) ? 'fail' : 'pass', where || 'no hit');
 		}
-		// canary_absent, end to end: a real L1 trial that reads the inline key, and one that does not
+		// canary_absent, end to end: real L1 trials. One never reads the inline key; one reads it, and since #2836 the
+		// file marker keeps it from the model; one plants it in the model's own notes, which reach its next question
 		for (const [file, expect] of [
 			['secret-01-control.json', 'pass'],
-			['secret-01-leak.json', 'fail'],
+			['secret-01-inline-read.json', 'pass'],
+			['secret-01-planted.json', 'fail'],
 		] as const) {
 			const rec = path.join(EVAL_DIR, 'data/selftest', file);
-			const cfg: TrialConfig = { layer: 'L1', scenario: 'secret-01-inline-key-describe', trial: 1, out: path.join(out, 'records', file), recording: rec, maxWaves: 60, maxMinutes: 15 };
+			const cfg: TrialConfig = { layer: 'L1', scenario: 'secret-01-inline-key-describe', trial: 1, out: path.join(out, 'records', file), recording: rec, maxWaves: 60, maxMinutes: 15, limits: LIMITS_OFF };
 			const s = await spawnTrial(cfg, keyless());
 			const scan = s.record?.canary?.[ck.id];
 			const got = !scan ? 'error' : scan.hits.length ? 'fail' : scan.missing.length ? 'pending' : 'pass';

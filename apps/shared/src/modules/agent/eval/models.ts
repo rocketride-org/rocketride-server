@@ -249,7 +249,9 @@ export class ReplayModel {
 	 * @returns The recorded reply, or one that ends the turn when the recording has none.
 	 */
 	answer = async (q: ModelQuestion): Promise<ModelAnswer> => {
-		const plan = q.expectJson === true;
+		// the plan question is the one that marks its start for caching. Since #2835 it no longer
+		// asks for JSON (parseReply reads the text), so expectJson cannot tell it from the best effort
+		const plan = q.cachePrefix === true;
 		const event = this.turns[this.turn]?.events[this.at];
 		const fits = event && (plan ? 'reply' in event || 'error' in event : 'bestEffort' in event);
 		if (!event || !fits) {

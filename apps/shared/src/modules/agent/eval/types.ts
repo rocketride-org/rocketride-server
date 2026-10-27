@@ -31,6 +31,8 @@
  * fields this runner adds. A result is what scoring makes of a record.
  */
 
+import type { TurnResult } from '../turn';
+
 // =============================================================================
 // SCENARIOS
 // =============================================================================
@@ -149,7 +151,12 @@ export interface TurnRecord {
 	finishedAfter: boolean;
 	reply: null | string;
 	followupKind: null | 'approval' | 'retry' | 'after_turn';
+	/** How the product says the turn ended (its TurnResult), or null when the turn left none, as a turn the harness cut off may. */
+	result: null | TurnResultRecord;
 }
+
+/** A turn's TurnResult as the record keeps it: no ids, no answer (the turn record has it), and the runs it started as a count. */
+export type TurnResultRecord = Omit<TurnResult, 'turnId' | 'messageId' | 'finalText' | 'runsStarted'> & { runsStarted: number };
 
 /** What a canary scan found for one canary_absent check. Names and surfaces only, never values. */
 export interface CanaryScan {
@@ -235,8 +242,8 @@ export interface CheckResult {
 	soft: boolean;
 }
 
-/** The six ways a scenario run ends, counted separately. */
-export type RunStatus = 'pass' | 'fail' | 'error' | 'incomplete' | 'abstain' | 'pending';
+/** The seven ways a scenario run ends, counted separately. */
+export type RunStatus = 'pass' | 'fail' | 'error' | 'incomplete' | 'needs_input' | 'abstain' | 'pending';
 
 /** One scored trial. */
 export interface ScenarioResult {

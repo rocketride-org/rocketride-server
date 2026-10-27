@@ -21,13 +21,13 @@
 // SOFTWARE.
 
 // =============================================================================
-// REPORT — the six counts, the provenance, and the comparison with the baseline
+// REPORT — the seven counts, the provenance, and the comparison with the baseline
 // =============================================================================
 
 /**
  * Writes what a run found: results.json for machines, report.md for people,
  * and human-review.md with every ASK scenario's first answer for a person to
- * score. The six statuses are counted separately, overall, by scenario type
+ * score. The seven statuses are counted separately, overall, by scenario type
  * and by model, and never folded into one score. A pending check or scenario
  * is never counted as a pass.
  */
@@ -40,7 +40,7 @@ import type { Recording } from './recordings';
 import type { Layer, RunStatus, ScenarioResult } from './types';
 
 /** The statuses, in report order. */
-export const STATUSES: RunStatus[] = ['pass', 'fail', 'error', 'incomplete', 'abstain', 'pending'];
+export const STATUSES: RunStatus[] = ['pass', 'fail', 'error', 'incomplete', 'needs_input', 'abstain', 'pending'];
 
 /** Where the run came from: everything a reader needs to reproduce it. */
 export interface Provenance {
@@ -119,7 +119,7 @@ export function compare(result: ScenarioResult, rec: Recording, file: string, mi
 	return out;
 }
 
-/** The six counts over some results. */
+/** The seven counts over some results. */
 export function counts(results: ScenarioResult[]): Record<RunStatus, number> {
 	const out = Object.fromEntries(STATUSES.map((s) => [s, 0])) as Record<RunStatus, number>;
 	for (const r of results) out[r.status]++;
@@ -176,7 +176,7 @@ export function writeReport(dir: string, prov: Provenance, results: ScenarioResu
 	md.push('## Counts', '');
 	const c = counts(results);
 	md.push(STATUSES.map((s) => `${s} ${c[s]}`).join(', ') + `, of ${results.length}.`, '');
-	md.push('Error is left out of the denominator. Pending is never a pass: it is a scenario with no recording (L1), a scenario this layer does not run, an ASK scenario waiting for a person, or a check whose input, service or engine verdict is missing.', '');
+	md.push('Error is left out of the denominator. Needs_input is a run whose last turn ended needs_input where the scenario expects another outcome: ask_user asked, or the step or cost limit paused it. Pending is never a pass: it is a scenario with no recording (L1), a scenario this layer does not run, an ASK scenario waiting for a person, or a check whose input, service or engine verdict is missing.', '');
 	md.push(
 		...countTable(
 			'By type',
@@ -199,11 +199,12 @@ export function writeReport(dir: string, prov: Provenance, results: ScenarioResu
 	const ran = results.filter((r) => r.record);
 	if (ran.length) {
 		md.push('## Diagnostics (never pass or fail)', '');
-		md.push(row(['scenario', 'trial', 'turns', 'waves per turn', 'tool calls', 'model calls', 'repeated identical calls', 'longest run', 'tool errors', 'GATE_STATE failures', 'done refusals', 'confirms', 'tokens in/out/cache read', 'cost', 'wall s']));
-		md.push(row(Array(15).fill('---')));
+		md.push("Turn results are the product's own TurnResult per turn (outcome/reason). The estimated cost is the agent's meter, from characters at the stand-in model's price, the figure its cost limit checks; the cost column is the provider's token counts at list price, where the provider reports them.", '');
+		md.push(row(['scenario', 'trial', 'turns', 'turn results', 'waves per turn', 'tool calls', 'model calls', 'repeated identical calls', 'longest run', 'tool errors', 'GATE_STATE failures', 'done refusals', 'confirms', 'tokens in/out/cache read', 'cost', 'est. tokens in/out', 'est. cost', 'wall s']));
+		md.push(row(Array(18).fill('---')));
 		for (const r of ran) {
-			const d = r.diagnostics as Record<string, unknown> & { tokens: { input: number; output: number; cacheRead: number } | null };
-			md.push(row([r.scenario, r.trial, String(d.turns), (d.wavesPerTurn as number[]).join('/'), String(d.toolCalls), String(d.modelCalls), String(d.repeated), String(d.longestRun), String(d.toolErrors), String(d.gateStateWriteFailures), String(d.doneRefusals), String(d.confirms), d.tokens ? `${d.tokens.input}/${d.tokens.output}/${d.tokens.cacheRead}` : 'not reported', d.costUsd === null || d.costUsd === undefined ? '-' : `$${(d.costUsd as number).toFixed(2)}`, Math.round(Number(d.wallMs) / 1000)]));
+			const d = r.diagnostics as Record<string, unknown> & { tokens: { input: number; output: number; cacheRead: number } | null; estimatedTokens: { input: number; output: number } | null; estimatedCostUsd: number | null };
+			md.push(row([r.scenario, r.trial, String(d.turns), ((d.turnResults as string[] | undefined) ?? []).join(', '), (d.wavesPerTurn as number[]).join('/'), String(d.toolCalls), String(d.modelCalls), String(d.repeated), String(d.longestRun), String(d.toolErrors), String(d.gateStateWriteFailures), String(d.doneRefusals), String(d.confirms), d.tokens ? `${d.tokens.input}/${d.tokens.output}/${d.tokens.cacheRead}` : 'not reported', d.costUsd === null || d.costUsd === undefined ? '-' : `$${(d.costUsd as number).toFixed(2)}`, d.estimatedTokens ? `${d.estimatedTokens.input}/${d.estimatedTokens.output}` : '-', d.estimatedCostUsd === null || d.estimatedCostUsd === undefined ? '-' : `~$${d.estimatedCostUsd.toFixed(2)}`, Math.round(Number(d.wallMs) / 1000)]));
 		}
 		md.push('');
 	}

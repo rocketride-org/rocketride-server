@@ -13,9 +13,9 @@ From `apps/shared`, the same commands run directly:
 
 ```bash
 node --import tsx src/modules/agent/eval/run.ts validate
-node --import tsx src/modules/agent/eval/run.ts run --layer L1 [--scenarios a,b] [--set claude-369f0511]
-node --import tsx src/modules/agent/eval/run.ts run --layer L2 --scenarios build-01-chat-claude [--provider anthropic|openai] [--model <id>] [--trials 1]
-node --import tsx src/modules/agent/eval/run.ts run --layer L3 --scenarios build-01-chat-claude [--trials 1]
+node --import tsx src/modules/agent/eval/run.ts run --layer L1 [--scenarios a,b] [--set claude-369f0511] [--limits recorded|default|off]
+node --import tsx src/modules/agent/eval/run.ts run --layer L2 --scenarios build-01-chat-claude [--provider anthropic|openai] [--model <id>] [--trials 1] [--limits default|off]
+node --import tsx src/modules/agent/eval/run.ts run --layer L3 --scenarios build-01-chat-claude [--trials 1] [--limits default|off]
 node --import tsx src/modules/agent/eval/run.ts selftest [--layer L3]
 ```
 
@@ -32,7 +32,7 @@ Output goes to `.verify/eval/<layer>-<time>/` in the checkout, or `--out`: `repo
 Every layer runs the same trial (`trial.ts`) through the product's own path: the shell's `TurnController` (rows, Stop, the "Needs your OK" cards), `AgentSession` and its session storage, `agent()` with its stand-in model pipeline, `runAgent`, the Wave loop, every toolkit, the approval list, and the rocket-ui workspace with its read-only `.rocketride/` guides. Only the client behind it changes. Cards are answered as the scenario says, `no` by default.
 
 - **L1** replays the baseline's recorded trials (`data/recordings/`) on the fake engine. It is deterministic and takes seconds. A scenario with no recording is `pending`, never `pass`. A replay that leaves its recording, for example because the loop asks for a reply the recording does not have, is an `error`.
-- **L2** asks a live model through the fake engine's stand-in `chat`. It renders each question the way the engine does (the Python client's `Question.getPrompt`), marks the stable start for prompt caching, and repeats the engine's JSON check and its three tries. The default model is the one behind the product's stand-in profile (`claude-sonnet-5`).
+- **L2** asks a live model through the fake engine's stand-in `chat`. It renders each question the way the engine does (the Python client's `Question.getPrompt`), marks the stable start for prompt caching, and repeats the engine's JSON check and its three tries for a question that asks for JSON. Since #2835 the plan question does not: the loop reads the reply itself. The default model is the one behind the product's stand-in profile (`claude-sonnet-5`).
 - **L3** extends the baseline harness (round3/baseline/harness) to this branch. It takes `/tmp/rr-verify-5565.lock`, starts the branch-built engine with `rr-verify-agent launch --engine source --engine-only`, runs each trial with every key unset, and stops the engine with `rr-verify-agent cleanup`. The engine's provenance is the skill's `engine.json`.
 
 The fake engine serves the file store in memory, the catalog from `nodes/src/nodes/*/services*.json`, `validate` by the static pipeline rules, and `use`, `getTaskStatus`, `send` and `terminate`. A start checks `${ROCKETRIDE_*}` names against the run's Variables and refuses a second start of a running pipeline, as the engine does. Pipelines never run, and `send` says so. Any other client method throws a message that names it.
@@ -53,20 +53,30 @@ Changes from the notes' draft:
 
 `score.ts` ports the scenario tools' check.py (static checks) and check_workspace.py (run checks), so a record scores here as it did for the baseline. A check is `pass`, `fail`, `pending` (it belongs in this layer, but what it needs is missing) or `not_in_layer` (listed, never counted). A pending check never counts as a pass.
 
-A trial is one of six statuses, counted separately and never folded into one score:
+A trial is one of seven statuses, counted separately and never folded into one score:
 
-| Status     | When                                                                                                                                               |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| error      | the infrastructure failed: the engine, a provider 5xx or rate limit, the runner, or a replay that left its recording. Left out of the denominator. |
-| fail       | a blocker fired, or a counted check failed                                                                                                         |
-| incomplete | the last turn ended `empty_plan` or `error` after the model was reached                                                                            |
-| abstain    | the scenario expects done and the model was still asking when the follow-ups ran out                                                               |
-| pending    | no recording (L1), a scenario this layer does not run, an ASK scenario, or a counted check that is pending                                         |
-| pass       | every counted check passed                                                                                                                         |
+| Status      | When                                                                                                                                                                                                 |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| error       | the infrastructure failed: the engine, a provider 5xx or rate limit, the runner, or a replay that left its recording. Left out of the denominator.                                                   |
+| fail        | a blocker fired, or a counted check failed                                                                                                                                                           |
+| incomplete  | the last turn ended `empty_plan` or `error` after the model was reached                                                                                                                              |
+| needs_input | the last turn's TurnResult is `needs_input` where the scenario expects another outcome: ask_user asked, or the step or cost limit paused the turn. A limit's pause is this status in every scenario. |
+| abstain     | the scenario expects done and the model was still asking when the follow-ups ran out                                                                                                                 |
+| pending     | no recording (L1), a scenario this layer does not run, an ASK scenario, or a counted check that is pending                                                                                           |
+| pass        | every counted check passed                                                                                                                                                                           |
 
 ASK scenarios stay human-scored. The runner scores their deterministic checks, writes the first answer and the judge question to `human-review.md`, and reports the scenario as pending. A blocker that fires still fails it.
 
-Diagnostics are recorded and never decide anything: waves, tool calls, model calls, repeated identical calls and the longest run of them, tool errors, GATE_STATE write failures, done refusals, confirm cards, tokens, cost at list price (L2), wall time and model time.
+Diagnostics are recorded and never decide anything: each turn's TurnResult (outcome/reason), waves, tool calls, model calls, repeated identical calls and the longest run of them, tool errors, GATE_STATE write failures, done refusals, confirm cards, tokens, cost at list price (L2), the agent's estimated tokens and cost, wall time and model time.
+
+### Turn results and limits
+
+Every turn ends with the product's TurnResult (`turn.ts`). The trial keeps it on each turn record as `result`: outcome, reason, the files and checks, what a `needs_input` turn asks, and the usage, with the agent's estimated tokens and cost (from characters, at the stand-in model's price; the figure the cost limit checks). The report shows each trial's turn results and estimated cost.
+
+- A turn that ask_user ended counts as asking, so an `asks` follow-up answers it. A question with two or more choices gets "Use the first option you listed." in front of the reply.
+- A turn the step or cost limit paused ends the trial. Continue would start a fresh budget, and that is the user's call, not the scenario's.
+- `--limits` sets the limits each turn runs under. `default` (L2 and L3) is the product's 60 steps and $2. `off` turns both off. `recorded` (L1) replays a trial under the limits it was recorded with, and a recording made before the agent had limits, as all 27 are, with both off.
+- The harness stop (60 waves, `--max-waves`) presses Stop. Under the product's step limit a turn pauses before it, so it fires only with the limits off.
 
 ### The three checks the baseline could not run
 
@@ -79,6 +89,8 @@ Diagnostics are recorded and never decide anything: waves, tool calls, model cal
 ## L1 recordings
 
 The baseline harness kept every tool call with its arguments and wave, every thinking row, every model error and the final answer, but not the raw replies. `run.ts record` rebuilds each reply from those (`recordings.ts`): a wave's thought and calls, the accepted answer with the code's own lines removed, the recorded model error and the best-effort answer for a turn that ended `stop=error`. A reply that was retried had its first, unusable version thrown away, so it is not replayed; each recording counts them. Each recording also carries the baseline's check results for that trial and the engine's validate verdicts on its final files, keyed by content hash. L1 uses those verdicts for engine_validate when a final file is byte for byte the one the engine checked.
+
+L1 tells the plan question from the best-effort one by its cached start: the plan question marks it, the best effort does not. Since #2835 the plan question no longer asks for JSON, so that flag cannot tell them apart.
 
 The sets are `claude-369f0511` (15 trials), `gpt-369f0511` (5, before the plan JSON fix), `gpt-8bd0122f-jsonfix` (5) and `scripted-369f0511` (2), from round3/baseline/runs. L1 compares each replay with its baseline score on the same checks and with its recorded final files, and exits 1 when any differs.
 

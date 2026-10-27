@@ -25,8 +25,8 @@
 // =============================================================================
 
 /**
- * Applies a scenario's checks to a trial record and gives the run one of six
- * statuses: pass, fail, error, incomplete, abstain or pending. The static
+ * Applies a scenario's checks to a trial record and gives the run one of seven
+ * statuses: pass, fail, error, incomplete, needs_input, abstain or pending. The static
  * checks are a port of the scenario tools' check.py, and the run checks a
  * port of check_workspace.py, so a record scores here as it scored for the
  * baseline. Three checks are new: canary_absent, check_app_passes and
@@ -487,7 +487,8 @@ function staticCheckOrThrow(ck: ScenarioCheck, final: Record<string, string>, fi
 
 /**
  * A turn's outcome, the way the eval README reads it on this branch: done is
- * stop=done with no "Not checked" line; a turn that asked is needs_input.
+ * stop=done with no "Not checked" line; a turn that asked is needs_input, and
+ * so is one the product ended needs_input (ask_user, or a limit's pause).
  *
  * @param turn - The turn, or undefined.
  * @returns The outcome word, or null for no turn.
@@ -495,8 +496,41 @@ function staticCheckOrThrow(ck: ScenarioCheck, final: Record<string, string>, fi
 export function turnOutcome(turn: TurnRecord | undefined): string | null {
 	if (!turn) return null;
 	if (turn.stopReason === 'done' && !NOT_CHECKED.test(turn.finalText ?? '')) return 'done';
-	if (turn.asked) return 'needs_input';
+	if (turn.asked || turn.result?.outcome === 'needs_input') return 'needs_input';
 	return turn.stopReason || 'error';
+}
+
+/**
+ * Whether a scenario expects its run to end needs_input: its expected
+ * outcome, or an outcome check on the last turn that accepts it. A check on
+ * turn 1 only (ASK's `after_turn_1`) says nothing about the end.
+ *
+ * @param scenario - The scenario.
+ * @returns Whether needs_input is an outcome it accepts.
+ */
+export function expectsNeedsInput(scenario: Scenario): boolean {
+	if (scenario.expect.outcome === 'needs_input') return true;
+	return scenario.checks.some((ck) => ck.kind === 'outcome' && ck.applies !== 'after_turn_1' && (ck.equals === 'needs_input' || (Array.isArray(ck.any_of) && ck.any_of.includes('needs_input'))));
+}
+
+/**
+ * Why a trial ends with the needs_input status, or null when it does not:
+ * its last turn ended needs_input, and either a limit paused it, which no
+ * scenario asks for, or ask_user ended it where the scenario expects another
+ * outcome.
+ *
+ * @param scenario - The scenario.
+ * @param last - The trial's last turn.
+ * @returns The why line, or null.
+ */
+function needsInputWhy(scenario: Scenario, last: TurnRecord | undefined): string | null {
+	const result = last?.result;
+	if (result?.outcome !== 'needs_input') return null;
+	const paused = result.reason === 'limited' || result.reason === 'cost_limit';
+	if (!paused && expectsNeedsInput(scenario)) return null;
+	const how = result.reason === 'limited' ? 'at the step limit' : result.reason === 'cost_limit' ? 'at the cost limit' : 'with ask_user';
+	const cost = result.usage.cost ? `, ~$${result.usage.cost.usd.toFixed(2)} est.` : '';
+	return `the last turn ended needs_input ${how} after ${result.usage.waves} steps${cost}: ${result.request?.question ?? '(no question)'}`;
 }
 
 /** The calls the finish rule heard in some turns, late ones left out. */
@@ -670,7 +704,13 @@ function repeats(turns: TurnRecord[]): { repeated: number; longestRun: number } 
  */
 export function diagnostics(record: TrialRecord): Record<string, unknown> {
 	const turns = record.turns ?? [];
+	// the product's own account of each turn: how it ended, and its estimated usage
+	const results = turns.map((t) => t.result ?? null);
+	const costs = results.map((r) => r?.usage.cost?.usd);
 	return {
+		turnResults: results.map((r) => (r ? `${r.outcome}/${r.reason}` : 'none')),
+		estimatedCostUsd: costs.some((c) => c !== undefined) ? costs.reduce<number>((n, c) => n + (c ?? 0), 0) : null,
+		estimatedTokens: results.some((r) => r?.usage.tokens) ? results.reduce((n, r) => ({ input: n.input + (r?.usage.tokens?.input ?? 0), output: n.output + (r?.usage.tokens?.output ?? 0) }), { input: 0, output: 0 }) : null,
 		turns: turns.length,
 		wavesPerTurn: turns.map((t) => t.waves),
 		toolCalls: turns.reduce((n, t) => n + (t.calls?.length ?? 0), 0),
@@ -716,6 +756,7 @@ export function scoreTrial(scenario: Scenario, layer: Layer, record: TrialRecord
 	const failed = counted.filter((c) => c.status === 'fail').map((c) => c.id);
 	const pending = counted.filter((c) => c.status === 'pending').map((c) => c.id);
 	const last = record.turns[record.turns.length - 1];
+	const needsInput = needsInputWhy(scenario, last);
 
 	let status: RunStatus;
 	let why: string;
@@ -731,6 +772,9 @@ export function scoreTrial(scenario: Scenario, layer: Layer, record: TrialRecord
 	} else if (last && (last.stopReason === 'empty_plan' || last.stopReason === 'error' || (last.runError && !last.stopReason))) {
 		status = 'incomplete';
 		why = `the last turn ended ${last.stopReason || 'with an error'}${last.runError ? `: ${last.runError.slice(0, 160)}` : ''}`;
+	} else if (needsInput) {
+		status = 'needs_input';
+		why = needsInput;
 	} else if (scenario.expect.outcome === 'done' && /^still asking/.test(record.endReason)) {
 		status = 'abstain';
 		why = record.endReason;

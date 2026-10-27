@@ -155,6 +155,12 @@ Handles used, in order of preference:
 - **Rail tabs:** the first click after the app loads is swallowed while the app restores its default view. The driver clicks until `aria-selected="true"`.
 - **Monaco text:** Monaco renders spaces as non-breaking spaces. The driver normalizes them before comparing.
 
+A "Needs your OK" card that a journey has no plan for is answered by one rule, so no turn waits out the timeout on a card:
+
+- A card for an action on a run this conversation started (its detail says "This conversation started it.") gets Approve. The agent may stop or restart its own run, and Ask first still asks. `result.json` lists the card under `unplannedCards`.
+- Any other card gets Deny. The check `no-unexpected-card` fails with the card's text, and the journey stops at once.
+- `foreign-terminate` is about these cards, so it answers its own first, as its checks need. The rule covers any card after those.
+
 For a path no journey covers, write a steps file and run `rr-verify-agent drive steps <file.json>`, or name one kept in `steps/` (`steps closed-dirty-tab`). See `steps/README.md` for the actions.
 
 Handles to add in our PRs so journeys stop leaning on styles:
