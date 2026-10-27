@@ -265,6 +265,11 @@ test('a database text that says the transaction was rolled back, or was killed b
 		assert.equal(notice.hint, WRITE_PROBABLY_ROLLED_BACK, detail);
 	}
 	assert.doesNotMatch(WRITE_PROBABLY_ROLLED_BACK, /nothing is rolled back/i);
+	// Loose matches are the harmful direction: these mean the opposite, or are the user's own data echoed back.
+	for (const detail of ['The transaction could not be rolled back.', 'rollback failed', "Invalid input near CREATE (n {note:'rollback'})", 'Failed: CREATE (n {note: "was rolled back"})', 'The transaction was not rolled back.']) {
+		const message = `Query failed\n${detail}`;
+		assert.equal(describeWriteFailure(message, new ExplorerToolError({ kind: 'raised', tool: 'execute', message })).hint, WRITE_MAY_HAVE_APPLIED, detail);
+	}
 	const other = 'Query failed\nconnection reset';
 	assert.equal(describeWriteFailure(other, new ExplorerToolError({ kind: 'raised', tool: 'execute', message: other })).hint, WRITE_MAY_HAVE_APPLIED);
 });

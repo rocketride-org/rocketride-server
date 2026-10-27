@@ -336,8 +336,11 @@ in the banner itself, six lines at a time with the rest scrolling, not behind a
 button. **Copy error** copies the headline, where it was and that text. When a
 batch stopped part way and the workbench offers it, **Run from statement N** runs
 the batch again from the statement that failed. A hint, where the app knows what
-to do next, sits under the text. In the write console, a failure that can come after the
-database ran the statement also says the write may or may not have been applied, or, when the database's text says it rolled the transaction back, that it was probably not applied.
+to do next, sits under the text. In the write console, a failure that can come
+after the database ran the statement also says the write may or may not have
+been applied. When the database's own text says the transaction was rolled back,
+or that it hit the transaction memory limit, it says the statement was probably
+not applied instead.
 
 ## Overview
 
