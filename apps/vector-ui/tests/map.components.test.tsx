@@ -707,7 +707,7 @@ test('the legend collapses to its header row by its own disclosure, open at firs
 	try {
 		rememberLegendOpen(false);
 		const shut = legend();
-		assert.match(shut, /aria-expanded="false" aria-controls="[^"]*-body" data-legend-toggle="">▸ Legend<\/button>/);
+		assert.match(shut, /aria-expanded="false" aria-controls="[^"]*-body" data-legend-toggle="">▴ Legend<\/button>/);
 		assert.match(shut, /<div id="[^"]*-body" role="group" aria-labelledby="[^"]*-toggle" hidden=""/, 'the body is hidden, not gone (the disclosure controls it)');
 		assert.ok(section(shut).includes(`height:${LEGEND_COLLAPSED_HEIGHT}px`));
 		// One fixed row whatever is drawn, the sample line still on it.
@@ -716,6 +716,12 @@ test('the legend collapses to its header row by its own disclosure, open at firs
 	} finally {
 		rememberLegendOpen(true);
 	}
+	// The header row is the box's last child, at its bottom, with the body above it (and before it in the DOM, so Tab
+	// goes top to bottom): collapsing removes the body over the button, and the box stays on the panel's bottom, so the
+	// button does not move. Measured in Chrome (a client render of the canvas column, 434 px of canvas over the open
+	// legend, 1,020 and 767 px wide, four states each): the button moved 0 px across collapse and reopen while the
+	// canvas went 434 to 553 and back.
+	assert.match(open, /<section aria-label="Map legend"[^>]*><div id="[^"]*-body" role="group"[\s\S]*<\/div><div style="[^"]*"><button id="[^"]*-toggle"[^>]*>▾ Legend<\/button><span[^>]*>[^<]*<\/span><\/div><\/section>$/);
 	// The map gains the rest in one step: no transition, one header row of 24 px (and the border).
 	assert.equal(LEGEND_HEAD_HEIGHT, 24);
 	assert.equal(LEGEND_COLLAPSED_HEIGHT, 25);
@@ -731,7 +737,7 @@ test('the legend has one fixed height in every state and scrolls inside itself, 
 	const out = html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" notes={Array.from({ length: 12 }, (_, i) => `note ${i}`)} />);
 	assert.match(out, new RegExp(`<section aria-label="Map legend" style="[^"]*;height:${LEGEND_HEIGHT}px;box-sizing:border-box;flex:none;display:flex;flex-direction:column"`));
 	// Its body scrolls under the header row; not measured yet (a server render): no tab stop.
-	assert.match(out, /<div id="[^"]*-body" role="group" aria-labelledby="[^"]*-toggle" style="flex:1;min-height:0;overflow-y:auto;padding:0 10px 8px">/);
+	assert.match(out, /<div id="[^"]*-body" role="group" aria-labelledby="[^"]*-toggle" style="flex:1;min-height:0;overflow-y:auto;padding:8px 10px 0">/);
 	assert.doesNotMatch(out, /max-height/, 'a fixed height, not a cap');
 	assert.equal(LEGEND_HEIGHT, 144);
 	// The same style whatever the legend lists: no marks, a query's marks, every mark.
