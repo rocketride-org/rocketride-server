@@ -1,0 +1,2236 @@
+{
+	"about": "Labeled PRs for the contribution-triage eval. linked_issue, branch_name, and title come from the PR data and were checked with a separate script. verification, ui_evidence, one_problem, and docs are draft hand labels for a maintainer to confirm; \"borderline\": true marks the ones a reasonable maintainer could call either way. These PRs predate the evidence rules, so the labels say how the rules apply, not whether the authors followed them.",
+	"labeled_against": "ea3074c7e (the commit that added the rules)",
+	"expected_action": "report-only, because every PR here is closed or merged",
+	"cases": [
+		{
+			"pr": 1619,
+			"title": "fix(shared-ui,dropper-ui): render media lanes as players instead of dumping base64 into the trace webview",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1610",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/1610-shared-ui-media-lanes does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(shared-ui,dropper-ui): render media lanes as players instead of dumping base64 into the trace webview",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "Only the template checkboxes under Testing; nothing names what ran.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "fail",
+					"reason": "Adds Audio and Video tabs and players to dropper-ui and media players in the trace view, with no screenshot or recording.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The trace renderers, the JsonTree cap, and the dropper tabs all make media lanes render as players (#1610); the title scopes both apps.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A rendering fix and new tabs in an app; no node, SDK, protocol, or extension contract changes.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2230,
+			"title": "fix(ai,ui): stop silently dropping webhook bodies sent on an unread lane",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 6,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #2229",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "fix/RR-2229-webhook-content-type-lane",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(ai,ui): stop silently dropping webhook bodies sent on an unread lane",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "A table of ai:run-pytest, shared:test, and nodes/test/webhook with pass counts, plus tsc, prettier, ruff, and builds.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "pass",
+					"reason": "Before and after screenshots of the endpoint panel with per-lane examples.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The task warning, the per-lane examples, and the published readable lanes all address webhook bodies sent to an unread lane (#2229).",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "The webhook endpoint note gains readable lanes, and packages/server/docs/index.md and docs/agents/ROCKETRIDE_INTEGRATIONS.md describe it.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2506,
+			"title": "fix(shell): end the dev-preview hold and name unresolvable apps ",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 3,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #2460",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "fix/RR-2460-shell-silent-app-resolve",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(shell): end the dev-preview hold and name unresolvable apps ",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Names appLoader.test.ts (8 tests), shell:test 39/39, tsc, and a headless Chromium run with a before and after table.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "pass",
+					"reason": "Three screenshots of the new error screens (wrong app id, dev build failed, bundle 404).",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "Ending the dev-preview hold and naming unresolvable apps are the same bug (#2460).",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "Internal shell behavior and error wording; no public contract changes.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2686,
+			"title": "fix(sql-ui): discover RocketRide SQL nodes as connections",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 4,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Closes #2703",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/sql-ui-discover-rocketride-sql does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(sql-ui): discover RocketRide SQL nodes as connections",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Names the sql-ui:test runner command (676 pass, new cases failed before), tsc, and eslint.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "pass",
+					"reason": "Before and after screenshots of the Connections page with a rocketride_sql pipeline running.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One provider added to discovery, with the matching list text and README.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "SQL Explorer now supports rocketride_sql, and apps/sql-ui/README.md lists it.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 446,
+			"title": "feat: Improve webhook endpoint visibility in canvas",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 2,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Closes #403",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "feat/RR-403-webhook-accessibility-endpoint-management",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "feat: Improve webhook endpoint visibility in canvas",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "Only the template checkboxes under Testing.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "pass",
+					"reason": "Two screenshots of the canvas endpoint preview and the endpoint modal.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "Moving the endpoint modal to shared-ui and the toolbar shortcut both serve webhook endpoint visibility (#403).",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A canvas toolbar shortcut and modal layout; no command, setting, or API changes.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 56,
+			"title": "fix(ui): Improve chat usability",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 2,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/improve-chat does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(ui): Improve chat usability",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "Only the template checkboxes under Testing.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "fail",
+					"reason": "Two screenshots show the new layout, but the auto-expanding input, clear-on-send, and paste are interaction changes with no recording.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "Logo, message alignment, input behavior, and the paste bridge in PageStatusProvider are one chat usability pass.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "Chat UI look and input behavior; no public contract.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 301,
+			"title": "feat(dropper): Extended dropper ui to include video",
+			"state": "closed",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "feat/dropper-video-extension does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "feat(dropper): Extended dropper ui to include video",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "Only the template checkboxes under Testing.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "fail",
+					"reason": "Adds a Videos tab and player to dropper-ui with no screenshot or recording.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The SDK onSSE callback exists to deliver the video chunks the new tab shows.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "fail",
+					"reason": "Adds an onSSE parameter to the public client.sendFiles() in the TypeScript SDK, and docs/public/typescript/ is unchanged.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 718,
+			"title": "Add \"Cancel Connection\" button to VS Code extension UI",
+			"state": "closed",
+			"ui_paths_changed": true,
+			"attachments": 1,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "feat/add-cancel-button in a fork does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "fail",
+					"reason": "\"Add \"Cancel Connection\" button to VS Code extension UI\" does not start with a conventional type such as fix: or feat(scope):.",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "\"How to Test\" gives steps for a reviewer, not what the author ran or saw.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"ui_evidence": {
+					"status": "pass",
+					"reason": "The author posted a demo video (video/mp4) in a comment.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The new Connections view and the cancel logic both deliver the cancel-connection button.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"docs": {
+					"status": "fail",
+					"reason": "Adds a Connections view to the extension (contributes.views) without updating the VS Code extension docs.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 926,
+			"title": "refactor(icons): move SVGs to node dirs, auto-tint monochromes",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 2,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1028",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/node-as-integral-part does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "refactor(icons): move SVGs to node dirs, auto-tint monochromes",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Names builder shared-ui:test 19/19, shell-ui:bundle, and builder build, plus a manual theme toggle check.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "pass",
+					"reason": "Icons now tint with the theme, and the author posted screenshots of the canvas and node list in a comment.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "Co-locating icons and auto-tinting replace the same hand-kept icon list; the test glob fixes keep the build green (#1028).",
+					"source": "hand label",
+					"borderline": true
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "Node authors now put the icon in the node folder, and docs/README-nodes.md says so.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2343,
+			"title": "fix(rocket-ui): send a single-component validation as a one-item pipeline",
+			"state": "closed",
+			"ui_paths_changed": true,
+			"attachments": 1,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/validate-single-component-payload does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(rocket-ui): send a single-component validation as a one-item pipeline",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Shows the validatePipeline repro (errors=1 vs errors=0) and tsc with the same 109 errors before and after.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"ui_evidence": {
+					"status": "fail",
+					"reason": "The one screenshot shows the error banner before the fix; nothing shows a save without it.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One payload fix in ProjectProvider.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A bug fix; no public contract changes.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2199,
+			"title": "fix(shell): don't paint the outage banner over a reachable server",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/banner-cors-misclass-develop does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(shell): don't paint the outage banner over a reachable server",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "The description has no Verification or Testing section.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "fail",
+					"reason": "Changes which banner users see (session expiry with Sign in instead of the outage banner), with no screenshot.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One fix to how a stored-token network failure is classified.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A bug fix in the shell; no public contract.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1492,
+			"title": "fix(vscode): auto-populate .env with resolved engine URI/key on connect",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1413",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "fix/RR-1413-local-env-autopopulate",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(vscode): auto-populate .env with resolved engine URI/key on connect",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Names envFile.test.ts with 16/16 passing and a filesystem simulation of syncEnvFile with the cases it covered.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "The extension files write a .env file on connect; nothing on screen changes.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The env writer, the SDK env loading, and the doc fixes all restore .env auto-population (#1413).",
+					"source": "hand label",
+					"borderline": true
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "The extension now writes .env on connect, and apps/vscode/docs/usage.md and the agent quickstart say so.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 132,
+			"title": "fix(vscode): shorten \"Pipeline Flow\" tab label to \"Flow\"",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/rename-tab does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(vscode): shorten \"Pipeline Flow\" tab label to \"Flow\"",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "The description has no Verification or Testing section.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "fail",
+					"reason": "Renames a visible tab label with no screenshot.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One label change.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A tab label; no public contract.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1321,
+			"title": "fix(profiler-ui): rehydrate report on mount so split panes keep the chart",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/profiler-split-loses-report-data does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(profiler-ui): rehydrate report on mount so split panes keep the chart",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Names the manual steps (load a report, split the view) and the result (both panes keep the chart and table).",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "fail",
+					"reason": "Fixes split Profiler panes that showed \"No profiling data available\", with no screenshot.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One mount-time rehydration fix.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A bug fix in an app; no public contract.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1556,
+			"title": "fix(shell-ui): route all auth entries to the Zitadel login page (register via its built-in link)",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes rocketride-ai/rocketride-saas#300",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/300-returning-user-login does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(shell-ui): route all auth entries to the Zitadel login page (register via its built-in link)",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "A Playwright run on a local Zitadel stack: Get Started shows Register new user, and an existing user signs in. tsc clean.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "Only the OAuth prompt parameter changes; the pages users see belong to the identity provider.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One change to the prompt sent by every auth entry.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "No public contract changes.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2789,
+			"title": "fix(pipeline-builder): let a free app run",
+			"state": "closed",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #2787",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/pipeline-builder-free-run does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(pipeline-builder): let a free app run",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Before and after on a local OSS server: the lock and plan dialog before, document-processor.pipe running after rocket-ui:build.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "fail",
+					"reason": "Removes the lock on the source node and unlocks Run for free apps, with no screenshot.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One status check plus its changelog line.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A bug fix; the changelog notes it.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1563,
+			"title": "fix(ui): guard sessionStorage access against strict-privacy crash (#1453)",
+			"state": "closed",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1453",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/gh-1453-safe-sessionstorage in a fork does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(ui): guard sessionStorage access against strict-privacy crash (#1453)",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "Says the change is static and that no type-check or test was run.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "Swaps sessionStorage calls for a guarded wrapper; nothing looks different in normal use.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The same storage guard in each app that crashed (#1453).",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "No public contract changes.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1633,
+			"title": "fix(explorer-ui): correct hex viewer virtual scrolling for large files",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1631",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "fix/RR-1631-hex-viewer-large-file-scroll",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(explorer-ui): correct hex viewer virtual scrolling for large files",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Ran against 64 MB and 512 MB fixtures: scroll and Go to reach EOF (0x03FFFFF0, 0x1FFFFFFF) where they stuck at 0x00CCCCC0 before.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "fail",
+					"reason": "Changes hex viewer scrolling and adds an error row and Retry button, with no screenshot or recording.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The scroll fix, chunk cache bound, and surfaced fetch errors all make the hex viewer work on large files (#1631).",
+					"source": "hand label",
+					"borderline": true
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "An app bug fix; no public contract.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2195,
+			"title": "fix(checkout): wire Free tier action button to open self-hosting docs",
+			"state": "closed",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1302",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "agent/issue-1302-vscode-free-tier-get-s in a fork does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(checkout): wire Free tier action button to open self-hosting docs",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "No Verification or Testing section, and the description says the suite could not run.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "fail",
+					"reason": "Wires the Free tier button in the plan picker to open the docs, with no screenshot or recording.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One button handler.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "No public contract changes.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2373,
+			"title": "fix(ui): key Microsoft login scopes by node protocol so the broker requests Graph scopes",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/m365-login-scope-keys does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(ui): key Microsoft login scopes by node protocol so the broker requests Graph scopes",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Names LoginWithMicrosoftButton.test.ts (2 passed), the shared suite (121 passed), tsc, prettier, and eslint, and a consent-screen check.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "Only the scope map behind the button changes; the button looks the same and the consent screen is Microsoft's.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One scope-key fix with its test.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A bug fix; no public contract.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1271,
+			"title": "fix(canvas): pipeline render-loop fix + sidebar logo home nav",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/home-ui-changes-v5 does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(canvas): pipeline render-loop fix + sidebar logo home nav",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "The test plan names the steps (rapid add and delete across pipelines, undo and redo, clicking the logo) with what happened.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"ui_evidence": {
+					"status": "fail",
+					"reason": "The sidebar logo becomes a button with hover shading, with no screenshot or recording.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "fail",
+					"reason": "Bundles two unrelated changes: a canvas render-loop fix and sidebar logo navigation.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "No public contract changes.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 902,
+			"title": "fix(nodes): remove llm_vertex, fix llm_gemini key handling, migrate vision nodes to LLMBase",
+			"state": "merged",
+			"ui_paths_changed": true,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/gdg-fixes does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(nodes): remove llm_vertex, fix llm_gemini key handling, migrate vision nodes to LLMBase",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "The test plan is a list of unchecked boxes; nothing says what ran or what happened.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "The chat-ui and dropper-ui edits change which auth token wins; nothing on screen changes.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"one_problem": {
+					"status": "fail",
+					"reason": "Removes llm_vertex, fixes llm_gemini key handling, migrates vision nodes, changes UI auth precedence, and adds a task token fallback.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "fail",
+					"reason": "Vertex AI now goes through llm_gemini and its config changes, but nodes/src/nodes/llm_gemini/README.md is unchanged.",
+					"source": "hand label",
+					"borderline": true
+				}
+			}
+		},
+		{
+			"pr": 1559,
+			"title": "fix(store): honor _createCollection() return value before indexing",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1495",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "fix/RR-1495-createcollection-honor-result",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(store): honor _createCollection() return value before indexing",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Names the 5 createCollection cases in test_document_store.py and nodes/test/store_milvus (20 passed, 2 skipped), plus ruff.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The Milvus fix is the prerequisite for honoring the return value (#1495).",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "An internal driver contract; no node inputs, outputs, or config change.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1129,
+			"title": "fix(release): remove orphaned TWINE lines crashing the MCP PyPI publish",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/release-mcp-twine-orphan does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(release): remove orphaned TWINE lines crashing the MCP PyPI publish",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "The description has no Verification or Testing section.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "Deletes two stray lines in one workflow.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "CI only.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2504,
+			"title": "docs(clients): reconcile deploy, app-ladder and use() docs with the SDK",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #2475",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "fix/RR-2475-sdk-doc-drift",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "docs(clients): reconcile deploy, app-ladder and use() docs with the SDK",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Names validate-client-docs.py, docs:validate, docs:check, and docs:build, and says the new rows render.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "Edits existing doc pages; no new page.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The six doc mismatches from #2475.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A docs-only change; no contract changes.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 267,
+			"title": "fix(node): Fix mcp-client sse and streamable-http",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/mcp-client-config does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(node): Fix mcp-client sse and streamable-http",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "Only the template checkboxes under Testing.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No file under a UI path (the widget is in packages/shared-ui).",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "fail",
+					"reason": "Alongside the MCP client fixes, it widens the shared SelectWidget for every node, an independent UI fix.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"docs": {
+					"status": "fail",
+					"reason": "Makes the bearer token optional and drops serverName from mcp_client config without updating its README.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 344,
+			"title": "fix(client-python): honor exported env vars during bootstrap",
+			"state": "closed",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/client-python-env-bootstrap in a fork does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(client-python): honor exported env vars during bootstrap",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Names the regression cases and the pytest command for test_client_env.py.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "fail",
+					"reason": "Also rewrites union type syntax for Python 3.8 and 3.9, which is unrelated to honoring env vars.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "Restores the documented env-var behavior; no doc change needed.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1861,
+			"title": "fix(guardrails): stop delivering every answer/question/document twice",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1849",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "fix/RR-1849-guardrails-duplicate-answers",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(guardrails): stop delivering every answer/question/document twice",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "pytest nodes/test/guardrails/ with 103 passed, and the new tests fail with the fix reverted.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The same missing preventDefault in writeAnswers, writeQuestions, and writeDocuments of one node.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A bug fix; the node's contract is unchanged.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1786,
+			"title": "feat(nodes): add a FalkorDB URL connection profile to graph_falkordb",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1785",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "feat/falkordb-url-profile does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "feat(nodes): add a FalkorDB URL connection profile to graph_falkordb",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Names the pytest run (374 passed) and live connections to FalkorDB Cloud with a table of results.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One new connection profile with its redaction and tests.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "Adds a connection profile, and the node README documents it.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2715,
+			"title": "fix(agent_rocketride): log the wait for timed-out calls as a warning (#2714 to stage)",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Closes #2707",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/stage-agent-timeout-wait-warning in a fork does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(agent_rocketride): log the wait for timed-out calls as a warning (#2714 to stage)",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "A before and after table from a running engine, plus nodes/test/agent_rocketride (234 passed).",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One log level change with its test.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A log level change; no contract.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2000,
+			"title": "fix(ai,nodes): stream-absolute audio timestamps; declare transcribe language",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1999",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "fix/RR-1999-transcribe-timestamps-language",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(ai,nodes): stream-absolute audio timestamps; declare transcribe language",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "There is no Verification or Testing section; the end-to-end result sits in the summary.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "Both the timestamp fix and the declared language come from #1999.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "Declares transcribe.language in services.json and regenerates the node README.",
+					"source": "hand label",
+					"borderline": true
+				}
+			}
+		},
+		{
+			"pr": 682,
+			"title": "Feat: Filesystem Tool",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #652",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "feat/filesys-tool does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "fail",
+					"reason": "\"Feat: Filesystem Tool\" does not start with a conventional type such as fix: or feat(scope):.",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "Only checkboxes (one malformed); nothing names what ran.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One new node with its tests and README.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "A new node, with its README.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1119,
+			"title": "feat(ci): add Discord notifier for published releases",
+			"state": "closed",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1118",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "feat/RR-1118-discord-release-notifier",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "feat(ci): add Discord notifier for published releases",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Names actionlint with shellcheck, a YAML parse, and a payload dry run, each with its result.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One new workflow.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "CI only.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2526,
+			"title": "feat(nodes): let Claude on Bedrock cache the unchanging start of an agent's prompt",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "feat/bedrock-prompt-cache in a fork does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "feat(nodes): let Claude on Bedrock cache the unchanging start of an agent's prompt",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Lists each engine -m pytest run with its pass count.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The shared cache prefix and the Anthropic and Bedrock drivers are one prompt-caching change.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "Question.cachePrefix and the driver behavior are in docs/public/{python,typescript} and both node READMEs.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 222,
+			"title": "test: test",
+			"state": "closed",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "test/test does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "test: test",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "The section says only \"test\".",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "fail",
+					"reason": "Mixes a CODEOWNERS change with a stray test/test file.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "No contract changes.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 790,
+			"title": "chore(security): add top-level permissions to 5 reusable workflows",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #789",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "chore/workflow-permissions-batch1 does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "chore(security): add top-level permissions to 5 reusable workflows",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "The description has no Verification or Testing section.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The same permissions default in five workflows (#789).",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "CI only.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 2865,
+			"title": "fix(server): let Crashpad dump an execute-only engine on Linux",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #2782",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/2782-linux-dumpable does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(server): let Crashpad dump an execute-only engine on Linux",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "The description has no Verification or Testing section.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One flag change in minidump.hpp.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "Internal crash-dump behavior; not the engine protocol.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 767,
+			"title": "fix(shared-ui): replace AJV validator with cfworker for CSP-safe webview validation",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/csp-unsafe-eval does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(shared-ui): replace AJV validator with cfworker for CSP-safe webview validation",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "All three template checkboxes are unchecked and nothing else is said.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No file under a UI path (packages/shared-ui).",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One validator swap.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A bug fix; no public contract.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1003,
+			"title": "fix: test(client-typescript) disconnect timeout guard should reject instead of resolve",
+			"state": "closed",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #968",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/disconnect-timeout-968-retry in a fork does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix: test(client-typescript) disconnect timeout guard should reject instead of resolve",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "Only the template checkboxes under Testing.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One test guard fix.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "Tests only.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1689,
+			"title": "feat(nodes): add Guild.ai tool node",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Closes #1688",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "feat/RR-1688-tool-guild",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "feat(nodes): add Guild.ai tool node",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "pytest test_tool_guild.py (82 pass), test_contracts.py (298 pass), ruff, gitleaks, and a live Guild workspace run.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One new node with its tests, README, and example pipelines.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "A new node, with its README and examples.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 256,
+			"title": "feat(nodes): adds support for max chunks per file",
+			"state": "closed",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "feat/preprocessor-langchain-max-chunks does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "feat(nodes): adds support for max chunks per file",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "All three template checkboxes are unchecked and nothing else is said.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One new chunk limit.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "fail",
+					"reason": "Adds a max-chunks setting to preprocessor_langchain's services.json without updating its README.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1354,
+			"title": "fix(engine): error instead of crashing on unregistered providers ",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1353",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "fix/RR-1353-unit-test-crash-on-nodes-with-debug",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(engine): error instead of crashing on unregistered providers ",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "Only the template checkboxes under Testing.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The engine guard and the test exclusions both address the crash on debug-capability nodes (#1353).",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "Turns a crash into an error; no protocol change.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1707,
+			"title": "fix(google-workspace): stop reporting connection_ok when nothing was checked",
+			"state": "closed",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Closes #1694",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "fix/gw-connection-check-honest does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(google-workspace): stop reporting connection_ok when nothing was checked",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Says all five modules compile and ruff is clean, checked the execute import, and says a live call was not run.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The probes, checked list, and error reason all make check_connection report what it verified (#1694).",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "fail",
+					"reason": "check_connection now returns connection_ok unknown, a checked list, and errorReason, and the node README is unchanged.",
+					"source": "hand label",
+					"borderline": true
+				}
+			}
+		},
+		{
+			"pr": 2337,
+			"title": "fix(crustdata): expose search filters and field projections",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #2335",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "fix/RR-2335-crustdata-search-schema",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(crustdata): expose search filters and field projections",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "tool_crustdata suite 52 passed, plus ruff, shown in a code block.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "Filter schemas and field projections both fix the search tool contract (#2335).",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "The tool schema changes, and the node README documents the search behavior.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 927,
+			"title": "feat(audio_tts): add OpenAI and ElevenLabs cloud TTS engines",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "feat/RR-411-tts-cloud-service",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "feat(audio_tts): add OpenAI and ElevenLabs cloud TTS engines",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "Names the test file and what it covers but never says the tests ran or passed.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One new node with two vendor registrations.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "A new node, with its README.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1729,
+			"title": "fix(deps): bump onnxruntime-gpu 1.20.1 → 1.20.2 (release pulled from PyPI)",
+			"state": "closed",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "pass",
+					"reason": "Fixes #1728",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "fix/RR-1728-onnxruntime-gpu-pin",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(deps): bump onnxruntime-gpu 1.20.1 → 1.20.2 (release pulled from PyPI)",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Checked the PyPI JSON API (1.20.1 has no files, 1.20.2 exists) and that the failing uv pip compile step resolves.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One version pin in every file that carries it (#1728).",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "A dependency pin.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1097,
+			"title": "feat(node): add tool_tavily web-search agent tool",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference. It has \"Part of #1047\", which does not use Fixes, Closes, or Resolves.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "feat/RR-1047-tool-tavily",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "feat(node): add tool_tavily web-search agent tool",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "The description has no Verification or Testing section.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "The shared retry and URL helpers were extracted for this node at review.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "A new node, with its README and a docs/README-nodes.md entry.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 861,
+			"title": "Feature enhancements",
+			"state": "closed",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "feature-enhancements in a fork does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "fail",
+					"reason": "\"Feature enhancements\" does not start with a conventional type such as fix: or feat(scope):.",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "fail",
+					"reason": "All three template checkboxes are unchecked and the summary is empty.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "fail",
+					"reason": "Bundles a sync.js dry-run feature, a store.py table fix, pipeline edits, and a Copilot instructions file.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "fail",
+					"reason": "Adds a ROCKETRIDE_SYNC_DRY_RUN option to the builder sync without documenting it.",
+					"source": "hand label",
+					"borderline": true
+				}
+			}
+		},
+		{
+			"pr": 2626,
+			"title": "feat(datacore): cloud DB nodes choose org, team or user; task start authorizes every database",
+			"state": "merged",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "fail",
+					"reason": "feat/datacore-engine-nodes does not match <type>/RR-<issue>-<short-description>.",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "feat(datacore): cloud DB nodes choose org, team or user; task start authorizes every database",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Names ./builder ai:test (3658 passed), nodes:test -k rocketride (317 passed), and the container suites (523 passed).",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "Scope settings, task-start authorization, and the pooler fixes are all the engine side of datacore isolation.",
+					"source": "hand label",
+					"borderline": true
+				},
+				"docs": {
+					"status": "pass",
+					"reason": "The scope setting is documented in each node README and in security.md.",
+					"source": "hand label"
+				}
+			}
+		},
+		{
+			"pr": 1015,
+			"title": "fix(engine): skip CUDA install on non-NVIDIA hosts (RR-997)",
+			"state": "closed",
+			"ui_paths_changed": false,
+			"attachments": 0,
+			"expect": {
+				"linked_issue": {
+					"status": "fail",
+					"reason": "No Fixes, Closes, or Resolves followed by an issue reference.",
+					"source": "pr data"
+				},
+				"branch_name": {
+					"status": "pass",
+					"reason": "fix/RR-997-runtime-installs-full-cuda",
+					"source": "pr data"
+				},
+				"title": {
+					"status": "pass",
+					"reason": "fix(engine): skip CUDA install on non-NVIDIA hosts (RR-997)",
+					"source": "pr data"
+				},
+				"verification": {
+					"status": "pass",
+					"reason": "Ran has_nvidia_gpu() and _find_requirement_files() on an NVIDIA host and forced the inverse, with results.",
+					"source": "hand label"
+				},
+				"ui_evidence": {
+					"status": "n/a",
+					"reason": "No UI files.",
+					"source": "hand label"
+				},
+				"one_problem": {
+					"status": "pass",
+					"reason": "One install-time GPU check.",
+					"source": "hand label"
+				},
+				"docs": {
+					"status": "n/a",
+					"reason": "An install detail; no public contract.",
+					"source": "hand label"
+				}
+			}
+		}
+	]
+}

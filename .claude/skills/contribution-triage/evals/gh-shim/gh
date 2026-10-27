@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# gh shim for contribution-triage evals. It passes read commands to the real gh and
+# refuses everything else, so an eval run cannot write to GitHub.
+#
+# evals/run puts this directory first on PATH and sets:
+#   TRIAGE_REAL_GH         the real gh binary
+#   TRIAGE_REAL_GH_CONFIG  the real gh config directory. The agent itself gets an empty
+#                          GH_CONFIG_DIR, so calling the real gh directly has no login.
+#   TRIAGE_GH_LOG          a log file. Every call adds a line: time, ALLOW or DENY, arguments.
+#
+# Allowed: pr view|list|diff|checks, issue view|list, label list, run view|list, repo view,
+# and api with GET and no fields. Everything else is refused, including --web.
+set -uo pipefail
+
+log() {
+	local verdict="$1"
+	shift
+	printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$verdict" "$*" >>"${TRIAGE_GH_LOG:-/dev/null}"
+}
+
+deny() {
+	local reason="$1"
+	shift
+	log DENY "$@"
+	echo "gh-shim: refused 'gh $*': $reason. This eval may only read from GitHub." >&2
+	exit 1
+}
+
+# api_is_read ARGS...: succeed only for a GET with no fields and no request body.
+api_is_read() {
+	local method=GET a
+	while [ $# -gt 0 ]; do
+		a="$1"
+		shift
+		case "$a" in
+		-X | --method)
+			method="${1:-}"
+			[ $# -gt 0 ] && shift
+			;;
+		--method=*) method="${a#--method=}" ;;
+		-X*) method="${a#-X}" ;;
+		-f | -F | --field | --raw-field | --input | -f* | -F* | --field=* | --raw-field=* | --input=*) return 1 ;;
+		# A cluster of short flags such as -iXPOST or -iF can hide a method or a field.
+		-[!-]*[XfF]*) return 1 ;;
+		esac
+	done
+	[ "$(printf '%s' "$method" | tr '[:lower:]' '[:upper:]')" = GET ]
+}
+
+if [ -z "${TRIAGE_REAL_GH:-}" ] || [ ! -x "${TRIAGE_REAL_GH}" ]; then
+	deny 'TRIAGE_REAL_GH is not set' "$@"
+fi
+
+for a in "$@"; do
+	case "$a" in
+	--web | -w) deny 'opening a browser is not allowed' "$@" ;;
+	esac
+done
+
+# The first two words that are not flags name the command, for example "pr view".
+words=()
+skip=0
+for a in "$@"; do
+	if [ "$skip" = 1 ]; then
+		skip=0
+		continue
+	fi
+	case "$a" in
+	-R | --repo | --hostname) skip=1 ;;
+	-*) ;;
+	*) words+=("$a") ;;
+	esac
+	[ "${#words[@]}" -ge 2 ] && break
+done
+command="${words[0]:-} ${words[1]:-}"
+
+case "$command" in
+"pr view" | "pr list" | "pr diff" | "pr checks" | "issue view" | "issue list" | "label list" | "run view" | "run list" | "repo view") ;;
+"api graphql") deny 'GraphQL requests are not allowed' "$@" ;;
+api\ *)
+	api_is_read "$@" || deny 'only GET requests without fields are allowed' "$@"
+	;;
+*) deny 'not a read command' "$@" ;;
+esac
+
+log ALLOW "$@"
+GH_CONFIG_DIR="${TRIAGE_REAL_GH_CONFIG:-$HOME/.config/gh}" exec "$TRIAGE_REAL_GH" "$@"

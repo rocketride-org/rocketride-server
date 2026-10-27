@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# run: triage labeled PRs headless as a dry run, behind a gh shim that refuses writes.
+#
+#   run --agent claude|codex [--model M] [--rules-ref REF] [--jobs N] [--timeout SECONDS] PR... | all
+#
+# Each PR gets its own agent session. Results go to <this checkout>/.triage/evals/<pr>/<agent>-<time>/:
+# prompt.txt, the agent's transcript, final.md, gh.log (every gh call the shim saw), and result.json.
+# The agent runs with the shim first on PATH and an empty GH_CONFIG_DIR, so only the shim's
+# allowed read commands reach GitHub with a login. A run that tries a write counts as a failure.
+set -euo pipefail
+
+EVALS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO=$(git -C "$EVALS" rev-parse --show-toplevel)
+SHIM="$EVALS/gh-shim"
+AGENT="" MODEL="" RULES_REF="" JOBS=1 TIMEOUT=1200
+PRS=()
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--agent) AGENT="$2"; shift 2 ;;
+	--model) MODEL="$2"; shift 2 ;;
+	--rules-ref) RULES_REF="$2"; shift 2 ;;
+	--jobs) JOBS="$2"; shift 2 ;;
+	--timeout) TIMEOUT="$2"; shift 2 ;;
+	-*) echo "run: unknown option $1" >&2; exit 2 ;;
+	*) PRS+=("$1"); shift ;;
+	esac
+done
+if [ -z "$AGENT" ] || [ "${#PRS[@]}" -eq 0 ]; then
+	echo "usage: run --agent claude|codex [--model M] [--rules-ref REF] [--jobs N] [--timeout SECONDS] PR... | all" >&2
+	exit 2
+fi
+case "$AGENT" in
+claude) MODEL="${MODEL:-sonnet}" ;;
+codex) MODEL="${MODEL:-gpt-6.1-sol}" ;;
+*) echo "run: --agent must be claude or codex" >&2; exit 2 ;;
+esac
+# The rules live on this checkout's branch until they land on develop. Pin them to one commit.
+RULES_REF=$(git -C "$REPO" rev-parse --verify "${RULES_REF:-HEAD}^{commit}")
+
+if [ "${PRS[0]}" = all ]; then
+	mapfile -t PRS < <(python3 -I -c 'import json,sys; print("\n".join(str(c["pr"]) for c in json.load(open(sys.argv[1]))["cases"]))' "$EVALS/cases.json")
+fi
+
+# Find the real gh: the first gh on PATH that is not this shim.
+REAL_GH=""
+while IFS= read -r candidate; do
+	if [ "$(cd "$(dirname "$candidate")" && pwd)" != "$SHIM" ]; then
+		REAL_GH="$candidate"
+		break
+	fi
+done < <(type -ap gh)
+[ -n "$REAL_GH" ] || { echo "run: no gh on PATH" >&2; exit 2; }
+REAL_GH_CONFIG="${GH_CONFIG_DIR:-$HOME/.config/gh}"
+
+if [ "${#PRS[@]}" -gt 1 ] && [ "$JOBS" -gt 1 ]; then
+	printf '%s\n' "${PRS[@]}" | xargs -P "$JOBS" -I{} "$0" --agent "$AGENT" --model "$MODEL" --rules-ref "$RULES_REF" --timeout "$TIMEOUT" {}
+	exit 0
+fi
+
+run_one() {
+	local pr="$1" stamp out prompt code started ended before after
+	stamp=$(date +%Y%m%d-%H%M%S)-$$
+	out="$REPO/.triage/evals/$pr/$AGENT-$stamp"
+	mkdir -p "$out/scratch" "$out/gh-config"
+	python3 -I - "$EVALS/prompt.md" "$out/prompt.txt" "$pr" "$RULES_REF" "$out/scratch" <<'EOF'
+import sys
+template, target, pr, rules_ref, scratch = sys.argv[1:]
+text = open(template).read()
+for key, value in (('pr', pr), ('rules_ref', rules_ref), ('scratch', scratch)):
+    text = text.replace('{' + key + '}', value)
+open(target, 'w').write(text)
+EOF
+	prompt=$(cat "$out/prompt.txt")
+	before=$(git -C "$REPO" status --porcelain)
+	started=$(date +%s)
+	code=0
+	if [ "$AGENT" = claude ]; then
+		(cd "$REPO" && env -u GH_TOKEN -u GITHUB_TOKEN \
+			PATH="$SHIM:$PATH" GH_CONFIG_DIR="$out/gh-config" \
+			TRIAGE_REAL_GH="$REAL_GH" TRIAGE_REAL_GH_CONFIG="$REAL_GH_CONFIG" TRIAGE_GH_LOG="$out/gh.log" \
+			timeout "$TIMEOUT" claude -p "$prompt" --output-format stream-json --verbose \
+			--model "$MODEL" --dangerously-skip-permissions --no-session-persistence) \
+			>"$out/agent.jsonl" 2>"$out/agent.stderr" || code=$?
+	else
+		(cd "$REPO" && env -u GH_TOKEN -u GITHUB_TOKEN \
+			PATH="$SHIM:$PATH" GH_CONFIG_DIR="$out/gh-config" \
+			TRIAGE_REAL_GH="$REAL_GH" TRIAGE_REAL_GH_CONFIG="$REAL_GH_CONFIG" TRIAGE_GH_LOG="$out/gh.log" \
+			timeout "$TIMEOUT" codex exec --json -C "$REPO" -m "$MODEL" -c model_reasoning_effort=medium \
+			--dangerously-bypass-approvals-and-sandbox --ephemeral -o "$out/final.md" "$prompt") \
+			>"$out/agent.jsonl" 2>"$out/agent.stderr" || code=$?
+	fi
+	ended=$(date +%s)
+	after=$(git -C "$REPO" status --porcelain)
+	if [ "$before" != "$after" ]; then
+		printf '%s\n' "$after" >"$out/repo-changed.txt"
+	fi
+	touch "$out/gh.log"
+	python3 -I "$EVALS/collect.py" "$out" "$pr" "$AGENT" "$MODEL" "$RULES_REF" "$code" "$((ended - started))"
+}
+
+for pr in "${PRS[@]}"; do
+	run_one "$pr"
+done
