@@ -42,7 +42,7 @@
 // window-wide overlay.
 // =============================================================================
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Banner, EmptyState } from 'shell';
 import type { DevToolProps } from 'shell';
@@ -240,7 +240,13 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 	useEffect(
 		() =>
 			frame.bindDocument(entry, objectId, {
-				focus: (id) => setChunkId(id),
+				// A press opened or fronted this frame (its arrival, taken once): the focus comes to its Reader | Chunks tabs
+				// when nothing shown has it, never the page. A frame nobody pressed for (restored at load, opened behind)
+				// gets no arrival, and leaves the focus where it is, in the host or another frame.
+				focus: (id) => {
+					if (id !== null) setChunkId(id);
+					if (typeof document !== 'undefined' && focusAdrift(document.activeElement as HTMLElement | null, document.body)) returnFocus(null)?.focus();
+				},
 				// Read again, in place (DocumentView's refreshKey), only for a write that may have changed THIS document: another
 				// document's write leaves the view as it is.
 				version: (written) => {
@@ -264,17 +270,6 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 		// After a read again or the document going; returnFocus reads the root when it runs.
 		returnFocus(null)?.focus();
 	}, [version, gone]);
-	// A frame that opens in front was opened by a press in another frame (a row's "open"): the focus comes to its
-	// Reader | Chunks tabs, never the page. A frame that opens behind (restored, or opened elsewhere) leaves the focus
-	// where it is, in the host or another frame. A frame cannot tell a press from the host restoring it in front at
-	// load (no signal crosses the frames for that, and a new frame never has the page's focus yet), so that one takes
-	// the focus too.
-	useLayoutEffect(() => {
-		if (typeof document === 'undefined' || !frame.visible.get()) return;
-		if (focusAdrift(document.activeElement as HTMLElement | null, document.body)) returnFocus(null)?.focus();
-		// Once, as the frame mounts.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
 	// Removing from a document needs the console model's write switch (its own controller confirms and sends).
 	useEffect(() => {
 		entry.controller.setWritesEnabled(model.writes.enabled);

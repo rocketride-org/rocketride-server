@@ -538,6 +538,9 @@ test('B5: a press whose own page or panel is hidden never leaves the focus on th
 	const app = code('VectorApp.tsx');
 	assert.match(app, /if \(typeof document === 'undefined' \|\| !takeArrival\(uri\)\) return undefined;[\s\S]*?returnFocus\(null\)\?\.focus\(\);/);
 	const devFrame = code('VectorDevTool.tsx');
-	assert.match(devFrame, /if \(typeof document === 'undefined' \|\| !frame\.visible\.get\(\)\) return;\s*if \(focusAdrift\(document\.activeElement as HTMLElement \| null, document\.body\)\) returnFocus\(null\)\?\.focus\(\);/, 'a frame that opens in front; one opening behind leaves the focus');
+	// The dev tool: only on a press's arrival (the controller's focus request, taken once, short-lived); never on mount alone.
+	assert.match(devFrame, /focus: \(id\) => \{\s*if \(id !== null\) setChunkId\(id\);\s*if \(typeof document !== 'undefined' && focusAdrift\(document\.activeElement as HTMLElement \| null, document\.body\)\) returnFocus\(null\)\?\.focus\(\);\s*\},/);
+	assert.doesNotMatch(devFrame, /frame\.visible\.get\(\)\) return;/, 'visibility alone never takes the focus (a frame restored in front at load)');
+	assert.match(code('devtool/frame.ts'), /caller\.callReply\(OP\.requestFocus, \{ key: endpoint\.key, docKey: target, chunkId: chunkId \?\? null \}/, 'every open sends its arrival');
 });
 
