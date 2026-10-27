@@ -3,7 +3,7 @@
 	// Required:
 	//		The displayable name of this node
 	//
-	"title": "Text To Speech (OpenAI)",
+	"title": "OpenAI Text to Speech",
 	//
 	// Required:
 	//		The protocol is the endpoint protocol
@@ -48,7 +48,7 @@
 	// Optional:
 	//		Description of this driver
 	//
-	"description": ["Converts incoming text into speech using the OpenAI text-to-speech API.", "Calls the vendor API directly from the engine host over HTTPS and emits MP3 bytes on the audio lane.", "Model and voice lists are maintained manually; the API key falls back to the OPENAI_API_KEY environment variable when blank."],
+	"description": ["OpenAI text-to-speech: converts incoming text into speech using the OpenAI API.", "Calls the vendor API directly from the engine host over HTTPS and emits MP3 bytes on the audio lane.", "Model and voice lists are maintained manually; the API key falls back to the OPENAI_API_KEY environment variable when blank."],
 	//
 	// Optional:
 	//	  The icon to display in the UI for this node
