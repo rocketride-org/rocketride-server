@@ -122,11 +122,22 @@ tabs, and one panel per tab.
   the trash ("Trash (3)"). The arrow keys move along the row and Enter or Space
   opens a tab, because a tab can call the store. A panel is built the first time
   its tab shows and then kept, so each tab keeps its state.
-- **Banners**, under the tab row on every tab: the console cannot open (the
-  pipeline is stopped, you may not call its tools, or the node needs an
-  upgrade); the store failed, with the last known figures kept and **Retry**;
-  writes are off, with the reason; the collection is empty ("No documents yet.",
-  with **Add documents** where uploads can work, otherwise why they cannot).
+- **Banners**, under the tab row on every tab, for a lasting state: the console
+  cannot open (the pipeline is stopped, you may not call its tools, or the node
+  needs an upgrade); the store is unreachable (a refresh you asked for failed,
+  two quick checks in a row failed, or nothing was ever read), with the reason
+  and **Retry**; the collection has no control record, or was built with another
+  embedding model than the chat's; writes are off, with the reason; the
+  collection is empty ("No documents yet.", or "No documents outside the trash
+  (3 in the Trash)." when the trash holds some, with **Add documents** where
+  uploads can work, otherwise why they cannot). One failed quick check shows no
+  banner: the Overview marks its figures "last known values".
+- **Bottom line.** Under the panels, one line of a fixed height holds what comes
+  and goes after a press, so nothing above it moves: the pending bar while
+  documents are staged, otherwise the result of the last write (announced as a
+  status, as an alert when it failed) with **Write details**, a disclosure of the
+  store's audit of each batch. A result that lands while documents are staged
+  shows first, for a few seconds, before the bar returns.
 - **Removals are confirmed inline.** Applying staged documents, deleting them
   permanently and emptying the trash ask in a panel under the banners, in the
   app and in the dev tool alike; no window opens over the page for them. See
@@ -153,8 +164,9 @@ While a scope is active a line says what it covers.
 Under the cards, three views on a row of their own (the arrow keys show the
 view they reach):
 
-- **Summary**: **Top folders** (documents, chunks and share of the chunks, the
-  rest in one "Other folders" row; a folder opens Documents on it),
+- **Summary**: **Top folders** (a folder counts its subfolders, as Documents'
+  folder view shows it; documents, chunks and share of the chunks, the rest in
+  one "Other folders" row; a folder opens Documents on it),
   **Document fields** (each field, its type and how many documents have a
   value), the chunk metadata fields once the Collection tab has read a sample of
   them, and **Quick actions** (**Add documents** where the mount can,
@@ -182,12 +194,16 @@ The **Documents** tab is a folder rail, a grid, and a drawer.
   Enter, type-ahead. Clicking a folder is a view filter over the rows already
   loaded: nothing is listed again, the scope does not change, and sibling folders
   stay. **Scope search, map and Ask to this folder** (beside the grid's status
-  line) is the separate, explicit action that sets the scope. Where the drawer
+  line) is the separate, explicit action: it adds the folder to the scope for
+  search, the map and Ask, and leaves the list as it is (its label names the
+  list too only when the scope already applies to it, and then the list is
+  listed again with it). Where the drawer
   and the grid would not both fit, the rail hides and **Folders** brings it back.
 - **Grid.** One row per document, by its path: a staging tick, **Name**,
   **Folder**, **Type**, **Chunks**, **Tables**, **Size**, **Ingested**,
   **Health** and **Status** ("to Trash" while staged). A header sorts the column
-  (ascending, descending, none). The grid is a keyboard grid: Up, Down, Home,
+  (ascending, descending, none); Up from the first row reaches the headers' sort
+  buttons. The grid is a keyboard grid: Up, Down, Home,
   End, Page Up and Page Down move between rows, Enter opens the drawer and Space
   stages the row. Health says what is wrong with a document whose stored chunks
   look wrong (no first chunk, gaps in its chunk numbers, soft-deleted chunks
@@ -214,7 +230,10 @@ The **Documents** tab is a folder rail, a grid, and a drawer.
   where the store applies the conditions, "12 of 1,200 loaded match (filtered
   here; the store cannot filter by these)" where it cannot. The map, the search
   and Ask take at most 2,000 documents; a larger scope says so and leaves them
-  unscoped. **Save** keeps the conditions under a name for this connection until
+  unscoped. The scope reaches them as the ids of the documents it covers,
+  worked out from the documents loaded (on pgvector too) once the listing holds
+  every document; until then Search waits and the map keeps the scope it drew
+  with. **Save** keeps the conditions under a name for this connection until
   you sign out.
 - **Drawer.** Selecting a row (or Enter, or a document in the rail) opens a
   drawer beside the grid: the first three loaded chunks (**Show all** the ones
@@ -224,15 +243,21 @@ The **Documents** tab is a folder rail, a grid, and a drawer.
   **Neighbours**: **Find similar** asks the store for the chunks nearest the
   document's first chunk that was read and lists the other documents among them,
   dropping the document's own chunks. The actions are **Show on map**, **Ask
-  about this**, **Open document** and, apart, **Move to Trash**. Escape closes
-  the drawer and the focus goes back to the row.
+  about this**, **Open document** and, apart, **Move to Trash**. Escape (in the
+  drawer, or on a row) closes it and the focus stays on, or goes back to, the
+  row. When a folder view or the review narrows the list, the export menu offers
+  **Documents shown** beside the loaded and in-scope exports.
 - **Move to Trash stages.** Ticking a row, **Stage all shown** or the drawer's
   **Move to Trash** only marks documents; nothing is sent. While anything is
-  staged, a **pending bar** under the panels says "3 documents staged to move to
-  the trash (14 chunks)." (a chunk figure only as far as the store counted them)
-  with **Review** (Documents, listing only the staged documents), **Discard**
+  staged, a **pending bar** in the bottom line says "3 staged for the trash (14
+  chunks)" ("14+ chunks" when the store did not count every document; its title
+  has the whole sentence, "3 documents staged to move to the trash (14
+  chunks).", and why Apply is unavailable when it is) with **Review** (Documents, listing only the staged documents), **Discard**
   (unstage all) and **Apply**. Apply asks once, inline: nothing is typed, because
-  the Trash can restore them, and **Confirm** has the focus. It sends the
+  the Trash can restore them, and **Confirm** has the focus, except for more
+  than 100 documents (or more than one batch of the store's limit), which opens
+  with **Cancel** focused. Every staging press is announced ("3 documents are
+  staged for the trash; nothing moves until the pending changes are applied."). It sends the
   documents in batches of at most 100; the first error stops the run and says
   what already ran. The map's review queues stage the same way ("Stage removal").
   A staged document the store no longer has leaves the set when the write
@@ -301,8 +326,9 @@ switch.
   running Chat source; the dev tool) and offers **Use Search**.
 - **History** is an aside beside the modes. Every finished run is recorded: its
   question (for Compare, A and B), its kind, k, what it came to, when and how
-  long. A run that repeats the newest entry's question updates that entry ("Ran
-  again") rather than adding one. **Load** puts an entry back in the form and
+  long. A run of the same kind that repeats the newest entry's whole question
+  updates that entry ("Ran again") rather than adding one; a Search, a Compare
+  and an Ask of the same text stay separate entries. **Load** puts an entry back in the form and
   runs nothing; **Rerun** runs it again with its mode and k and the threshold,
   scope and table choice you have now (it is off, with the reason, when it
   cannot run); entries can be pinned, annotated and removed, filtered (All runs,
@@ -324,7 +350,9 @@ fill in the model, dimension and metric, and anything else reads "—".
 **Metadata fields** is a table of Field, Type, Coverage, Example and
 **Filterable**. No store lists a collection's fields, so the table has two
 sources. Document fields (path, size, ingest time, chunks, tables) are exact
-over the documents loaded. Chunk metadata fields come only from **Read fields
+over the documents loaded; the caption says "the 40 documents the current scope
+keeps, of 1,200 loaded" while a scope applies, or "the 1,200 documents loaded".
+Chunk metadata fields come only from **Read fields
 from a sample**, which reads the first 20 chunks of up to 5 documents spread over
 the loaded folders (at most 5 `chunks` calls); the table says how many chunks it
 read from how many documents, that types are guesses and that coverage is of the
@@ -367,10 +395,14 @@ stays on the row), **Advanced**, **Export** and **Views**. **Advanced** is a
 panel that opens under its button and holds **Edges** (with **Per point** and
 **Expand selected**), **Lasso**, **Fit**, **3D** and the **Sample**'s seed with
 **New sample**; **Export** and **Views** open the same way, and all three stay
-inside the window and close when it is resized. A status line of its own under
-the toolbar holds the busy words ("Sampling…") and **Cancel** while a layout
-runs, so nothing in the toolbar moves when a run starts. Under the map, the
-legend says how many of how many chunks are shown ("Showing 1,000 of 1,318
+inside the window and close when it, or the panel holding them, is resized. A
+status line of its own under the toolbar holds the busy words ("Sampling…") and
+**Cancel** while a layout runs, and **Clear lasso selection**, **Clear
+highlight** or **Clear selection** while something is lit, so nothing in the
+toolbar moves when a run starts. Escape on the map does the same one step at a
+time: the lasso, then a highlight (an answer's sources, Show on map, a duplicate
+group, a query's fading), then the selected point. Under the map, the
+legend (capped in height; it scrolls inside itself past that) says how many of how many chunks are shown ("Showing 1,000 of 1,318
 chunks (random sample) · 42 docs · seed 7") and shows a glyph for each kind of
 mark that is drawn: similarity edges (fainter: less similar), the selected
 point's nearest chunks, outliers, the query's star and rays, near-duplicate
@@ -490,7 +522,10 @@ What is different there:
   document of that connection; a document that was deleted says it is no
   longer stored, and one moved to the trash says so. A document scores its
   heat strip against the question its console shows, and compares its chunk
-  count with the console's listing once the console has listed.
+  count with the console's listing once the console has listed. A document
+  refreshes in place after a write that names it, or that names no document (a
+  restore, a write whose outcome is unknown); a write that names other documents
+  leaves it as it is.
 - **Show on map** in a document opens (or fronts) the console and highlights at
   most 200 chunks there (the node's `project_keys_max`); it says when it showed
   fewer than you asked for.

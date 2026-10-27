@@ -217,12 +217,24 @@ aside (see [Adding documents](#adding-documents)). The header and the tab row do
 not move when a run starts or an answer arrives; the arrow keys move along the
 tab row and Enter or Space opens a tab, because a tab can call the store.
 
-Under the tab row, on every tab, banners say what needs saying: the console
-cannot open (the pipeline is stopped, you may not call its tools, or the node
-needs an upgrade); the store failed ("The figures shown are the last known
-ones." with **Retry**); writes are off, with the reason; or the collection is
-empty ("No documents yet.", with **Add documents** where uploads can work, and
-otherwise why they cannot).
+Under the tab row, on every tab, banners say what lasts: the console cannot open
+(the pipeline is stopped, you may not call its tools, or the node needs an
+upgrade); the store is unreachable (a refresh you asked for failed, two quick
+checks in a row failed, or nothing was ever read), with the reason and **Retry**
+("The Overview keeps the last figures read."); the collection has no control
+record, or was built with another embedding model than the chat's; writes are
+off, with the reason; or the collection is empty ("No documents yet.", or "No
+documents outside the trash (3 in the Trash)." when the trash holds some, with
+**Add documents** where uploads can work, and otherwise why they cannot). One
+failed quick check shows no banner: the Overview marks its figures "last known
+values".
+
+Under the panels, one line of a fixed height holds what comes and goes after a
+press, so nothing above it moves. While documents are staged it is the pending
+bar; otherwise it is the result of the last write, announced as a status (as an
+alert when the write failed), with **Write details**, a disclosure of the store's
+audit of each batch. A result that lands while documents are staged shows first,
+for a few seconds, before the bar returns.
 
 Every removal is confirmed in a panel inside the console or the document that
 asked, under the banners, in the app and in the dev tool alike; no window opens
@@ -254,9 +266,10 @@ here)".
 Three views sit on a row of their own under the chips; the arrow keys show the
 view they reach.
 
-- **Summary.** **Top folders** lists the folders of the loaded documents with
-  their documents, chunks and share of the chunks, the rest in one "Other
-  folders" row; a folder opens Documents on it. **Document fields** lists each
+- **Summary.** **Top folders** lists the folders of the loaded documents, each
+  counting its subfolders as Documents' folder view shows them, with their
+  documents, chunks and share of the chunks, the rest in one "Other folders" row;
+  a folder opens Documents on it. **Document fields** lists each
   field the documents carry, its type and how many have a value, and, once the
   Collection tab has read a sample, the chunk metadata fields too.
   **Quick actions** are **Add documents** (where the mount can), **Browse
@@ -287,7 +300,10 @@ both listed, with their short ids. The grid's columns are a staging tick,
 **Health** and **Status** (which says "to Trash" while the document is staged);
 a column header sorts it, ascending, then descending, then not at all. The grid
 works from the keyboard: Up, Down, Home, End, Page Up and Page Down move between
-rows, Enter opens the drawer and Space stages the row.
+rows, Enter opens the drawer and Space stages the row; Up from the first row
+reaches the headers' sort buttons. When a folder view or the review narrows the
+list, the tab's export menu offers **Documents shown** beside the loaded and
+in-scope exports.
 
 **Health** says what is wrong with a document whose stored chunks look wrong,
 with a badge per problem: *no first chunk* (chunk 0 is not stored: the document
@@ -315,7 +331,10 @@ root "All documents" and a **Trash (N)** item that opens the Trash tab, and work
 from the keyboard (arrows, Home, End, Enter, type-ahead). Clicking a folder
 filters the rows already loaded and nothing else: nothing is listed again, the
 scope does not change and the sibling folders stay. **Scope search, map and Ask
-to this folder** is the separate, explicit action that sets the scope. When the
+to this folder** is the separate, explicit action: it adds the folder to the
+scope for search, the map and Ask, and leaves the list as it is (the button names
+the list too only when the scope already applies to it, and then the list is
+listed again with it). When the
 drawer and the grid would not both fit, the rail hides and **Folders** brings it
 back, and a drawer that still does not fit moves under the grid.
 
@@ -337,7 +356,10 @@ filter by these)" when the app filtered the rows it loaded. pgvector stores
 filter in the store; Chroma filters by first chunk only; Qdrant and the
 experimental stores do not, so the app filters there.
 
-The map, the search and Ask take a scope of at most 2,000 documents. A larger one
+The map, the search and Ask are handed the scope as the ids of the documents it
+covers, worked out from the documents loaded, on pgvector as well as elsewhere
+and once the listing holds every document; until then Search waits and the map
+keeps the scope it drew with. They take a scope of at most 2,000 documents. A larger one
 says "Scope too large for the map, search and chat (2,340 documents; at most
 2,000). Narrow the folder." and leaves them unscoped, with their toggles off.
 **Save…** keeps the conditions under a name; **Saved** lists them with **Apply**
@@ -354,8 +376,8 @@ chunks where the store reports them); the document's health; and **Neighbours**,
 where **Find similar** asks the store for the chunks nearest the document's first
 chunk that was read and lists the other documents among them, with the document's
 own chunks dropped. Its actions are **Show on map**, **Ask about this**, **Open
-document** and, set apart, **Move to Trash**. Escape closes the drawer and the
-focus goes back to its row.
+document** and, set apart, **Move to Trash**. Escape (in the drawer, or on a row)
+closes it, and the focus stays on, or goes back to, the row.
 
 ### Adding documents
 
@@ -478,9 +500,10 @@ or this is a dev tool), it says why and offers **Use Search**.
 
 **History (N)** opens an aside beside the modes with the runs of this connection,
 newest first and pinned ones on top: the question (for Compare, A and B), its
-kind, k, what it came to, when and how long. A run that repeats the newest
-entry's question updates that entry, which says "Ran again", instead of adding
-one. **Load** puts an entry back in the form and runs nothing. **Rerun** runs it
+kind, k, what it came to, when and how long. A run of the same kind
+that repeats the newest entry's whole question updates that entry, which says
+"Ran again", instead of adding one; a Search, a Compare and an Ask of the same
+text stay separate entries, and Compare keeps each pair. **Load** puts an entry back in the form and runs nothing. **Rerun** runs it
 again with its mode and k and the threshold, scope and table choice you have now;
 it is off, with the reason, when it cannot run. Entries can be pinned, given a
 note and removed; the filter offers All runs, Search, Compare, Ask and Pinned;
@@ -503,7 +526,8 @@ the model, dimension and metric, and anything else reads "—".
 No store lists a collection's fields, so it has two sources. The document fields
 (path, size, ingest time, chunks, tables) are exact over the documents loaded
 ("Document fields are exact over the 1,200 documents loaded; more are not loaded
-yet."). The chunk metadata fields come only from **Read fields from a sample**,
+yet."; while a scope applies, "…over the 40 documents the current scope keeps, of
+1,200 loaded"). The chunk metadata fields come only from **Read fields from a sample**,
 which reads the first 20 chunks of up to 5 documents spread over the loaded
 folders (at most 5 requests) and says how many chunks it read from how many
 documents, that the types are guesses and that coverage is of the chunks read,
@@ -518,9 +542,12 @@ choice and the scope's documents.
 
 **Move to Trash** only stages. Ticking a row, **Stage all shown** or the drawer's
 **Move to Trash** marks documents; nothing is sent. While anything is staged, a
-**pending bar** under the panels says, for example, "3 documents staged to move to
-the trash (14 chunks)." (the chunk figure only as far as the store counted them)
-and offers **Review** (the Documents tab, listing only the staged documents),
+**pending bar** in the bottom line says, for example, "3 staged for the trash (14
+chunks)" ("14+ chunks" when the store did not count every document; its title has
+the whole sentence, "3 documents staged to move to the trash (14 chunks).", and
+why Apply is unavailable when it is). Every staging press is announced ("3
+documents are staged for the trash; nothing moves until the pending changes are
+applied."). The bar offers **Review** (the Documents tab, listing only the staged documents),
 **Discard** (unstage them all) and **Apply**. The map's review queues stage the
 same way ("Stage removal", "Stage all N removals"), and a lasso's **Stage these
 documents for the trash** too. When writes are off the staging controls are
@@ -529,7 +556,9 @@ unavailable and say why.
 **Apply** asks once, inline: "Moves these 3 documents and their 14 chunks to the
 trash of `<collection>`, in batches of at most 100; the first error stops the
 rest. Restore them from the Trash." Nothing is typed, because the Trash can
-restore them; **Confirm** has the focus. The app says what already moved if an
+restore them; **Confirm** has the focus, except for more than 100 documents (or
+more than one batch of the store's limit), which opens with **Cancel** focused.
+The app says what already moved if an
 error stops the run. A staged document the store no longer has leaves the set when
 the write answers ("N were already gone"); listing again never changes the set.
 The document tab's own **Move document to Trash** is asked at once, with the same
@@ -586,10 +615,11 @@ with the reason, when the store node cannot sample; the console is unaffected.
   **Advanced** opens a panel under its button with **Edges** (and **Per point**
   and **Expand selected**), **Lasso**, **Fit**, **3D** and the sample's seed with
   **New sample**. **Export** and **Views** open the same way. These panels stay
-  inside the window, and close when it is resized. Under the row a status line of
-  its own, always there at the same height, holds the busy words ("Sampling…")
-  and **Cancel** while a layout runs, so nothing in the toolbar moves when a run
-  starts.
+  inside the window, and close when it, or the panel holding them, is resized.
+  Under the row a status line of its own, always there at the same height, holds
+  the busy words ("Sampling…") and **Cancel** while a layout runs, and **Clear
+  lasso selection**, **Clear highlight** or **Clear selection** while something
+  is lit, so nothing in the toolbar moves when a run starts.
 - **Sample.** **Detailed** draws up to 2,000 points with a short snippet each;
   **Light** draws up to 5,000 points without text (the inspector fetches it on
   demand). The legend says "Light mode draws up to 5,000 points, without their
@@ -600,7 +630,8 @@ with the reason, when the store node cannot sample; the console is unaffected.
   than asked for. Below it a glyph
   names each kind of mark that is drawn: similarity edges (fainter: less
   similar), the selected point's nearest chunks, outliers, the query's star and
-  rays, near-duplicate pairs and a shown duplicate group's rings.
+  rays, near-duplicate pairs and a shown duplicate group's rings. The legend's
+  height is capped, and it scrolls inside itself past that.
 - **Layout.** The first picture is a PCA projection computed on the node.
   **Neighbour graph** refines it in your browser by pulling each chunk towards
   its nearest neighbours, and is kept only when it preserves neighbours at
@@ -709,7 +740,9 @@ with the reason, when the store node cannot sample; the console is unaffected.
   only on **Run saved query**, because it costs an embedding. Up to 20 views
   per connection, kept until you sign out.
 - **Keyboard.** The arrow keys move to the nearest point in that direction,
-  Enter inspects it, Escape clears.
+  Enter inspects it, Escape clears one step at a time: the lasso, then a
+  highlight (an answer's sources, Show on map, a duplicate group, a query's
+  fading), then the selected point.
 
 The map works on positions and neighbour lists computed by the store node; the
 browser never receives the raw embedding vectors of a sample.
@@ -820,6 +853,9 @@ What is different there:
   an app to ask questions or add documents.
 - **Removals are confirmed inside the document** that asked, with the same words
   and typed confirmations as in the app, where they are inline too.
+- **A document follows its console's writes.** A document tab refreshes in place
+  after a write that names it, or that names no document (a restore, a write whose
+  outcome is unknown); a write that names other documents leaves it as it is.
 - **History stays in memory.** The Query history lists this document's runs and
   says "Kept only while this document is open; nothing is saved."
 
