@@ -771,6 +771,8 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 	useLayoutEffect(() => {
 		if (runOut || !runSlot.current || !viewsGroup.current) return;
 		const next = { slot: runSlot.current.getBoundingClientRect().width, views: viewsGroup.current.getBoundingClientRect().width };
+		// In a hidden document or panel (display: none) everything measures 0: keep what was measured while shown.
+		if (next.slot === 0 || next.views === 0) return;
 		setHeld((prev) => (prev !== null && prev.slot === next.slot && prev.views === next.views ? prev : next));
 	}, [runOut, views, mode, inRow, active, barHost]);
 	// What the state text says; also its title, since its width can cut it.
