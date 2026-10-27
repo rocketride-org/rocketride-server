@@ -96,5 +96,5 @@ test('the chunk drawer: neighbours on open (12, none for a trashed chunk), Escap
 	const view = code('views/DocumentView.tsx');
 	assert.match(view, /gridRef\.current\?\.focusRow\(String\(openChunk\)\)/);
 	assert.match(view, /\{openChunk !== null && <ChunkDrawer /);
-	assert.match(view, /\{\.\.\.\(onUseAsQuery \? \{ onUseAsQuery \} : \{\}\)\}/, "'Use as query' only where the mount hands one to the workbench");
+	assert.match(view, /\{\.\.\.\(actions\.useAsQuery \? \{ onUseAsQuery: actions\.useAsQuery \} : \{\}\)\}/, "'Use as query' only where the console's actions carry it (a dev-tool document frame strips it)");
 });

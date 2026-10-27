@@ -78,8 +78,6 @@ export interface DocumentViewProps extends ContractDocumentViewProps {
 	onDocument?: (row: IDocumentItem | null) => void;
 	/** Shown under the header (the inline write confirmation, in both mounts). */
 	beforeBody?: React.ReactNode;
-	/** Use a chunk's text as the Query tab's question. Absent where this mount cannot hand one to the workbench (a dev-tool document frame). */
-	onUseAsQuery?: (text: string) => void;
 }
 
 /** The chunks of the document, loaded a page at a time. */
@@ -145,7 +143,7 @@ type HeatState = { query: string; chunks: number; scores: IHeatScore[] } | { que
  * @param props - The frozen DocumentViewProps.
  * @returns The view.
  */
-export function DocumentView({ model, channels, selection, actions, objectId, path, chunkId, active = true, consoleMedian, onDocument, beforeBody, onUseAsQuery }: DocumentViewProps): React.ReactElement {
+export function DocumentView({ model, channels, selection, actions, objectId, path, chunkId, active = true, consoleMedian, onDocument, beforeBody }: DocumentViewProps): React.ReactElement {
 	const caller: IVectorCaller | null = channels.tools ?? channels.chat ?? channels.ingest;
 	const embedCaller: IVectorCaller | null = channels.tools ?? channels.chat;
 	const store = model.nodes.store;
@@ -430,7 +428,7 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 							)}
 						</div>
 					</div>
-					{openChunk !== null && <ChunkDrawer objectId={objectId} path={shownPath} chunk={drawerChunk} caller={caller} store={store} actions={actions} writes={model.writes} onClose={closeChunk} onOpenInReader={openInReader} onCopy={(text) => copyText(text, actions.announce)} {...(onUseAsQuery ? { onUseAsQuery } : {})} />}
+					{openChunk !== null && <ChunkDrawer objectId={objectId} path={shownPath} chunk={drawerChunk} caller={caller} store={store} actions={actions} writes={model.writes} onClose={closeChunk} onOpenInReader={openInReader} onCopy={(text) => copyText(text, actions.announce)} {...(actions.useAsQuery ? { onUseAsQuery: actions.useAsQuery } : {})} />}
 				</div>
 			)}
 		</div>

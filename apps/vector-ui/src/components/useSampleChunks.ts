@@ -61,22 +61,22 @@ export function useSampleChunks(endpoint: IExplorerEndpoint, probe: IProbeResult
 	const reason = skipReason(vectorCardView(endpoint, probe, stats).openable, dialect?.health.collection_exists !== false, stats);
 	const channels = env.channels(endpoint);
 	const caller = channels.tools ?? channels.chat ?? channels.ingest;
-	const token = `${endpoint.key}#${writes}`;
-	const [read, setRead] = useState<{ token: string; state: SampleState } | null>(null);
+	const stamp = `${endpoint.key}#${writes}`;
+	const [read, setRead] = useState<{ stamp: string; state: SampleState } | null>(null);
 	useEffect(() => {
 		if (reason !== null || caller === null) return undefined;
 		const kept = cachedSample(endpoint.key, writes);
 		if (kept !== undefined) {
-			setRead({ token, state: kept === null ? { status: 'empty' } : { status: 'done', sample: kept } });
+			setRead({ stamp, state: kept === null ? { status: 'empty' } : { status: 'done', sample: kept } });
 			return undefined;
 		}
 		let live = true;
 		loadSampleChunks(caller, endpoint.nodeId, endpoint.key, writes).then(
 			(sample) => {
-				if (live) setRead({ token, state: sample === null ? { status: 'empty' } : { status: 'done', sample } });
+				if (live) setRead({ stamp, state: sample === null ? { status: 'empty' } : { status: 'done', sample } });
 			},
 			(error) => {
-				if (live) setRead({ token, state: { status: 'error', message: failureText(error)?.headline ?? 'The chunks could not be read.' } });
+				if (live) setRead({ stamp, state: { status: 'error', message: failureText(error)?.headline ?? 'The chunks could not be read.' } });
 			}
 		);
 		return () => {
@@ -86,5 +86,5 @@ export function useSampleChunks(endpoint: IExplorerEndpoint, probe: IProbeResult
 	}, [endpoint.key, endpoint.nodeId, writes, reason, caller === null]);
 	if (reason !== null) return { status: 'skipped', reason };
 	if (caller === null) return { status: 'skipped', reason: 'No source of this pipeline is running, so chunks cannot be read.' };
-	return read !== null && read.token === token ? read.state : { status: 'loading' };
+	return read !== null && read.stamp === stamp ? read.state : { status: 'loading' };
 }
