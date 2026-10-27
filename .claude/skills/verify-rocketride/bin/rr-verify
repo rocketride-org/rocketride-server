@@ -44,6 +44,7 @@ rr-verify <command> [--id RUN_ID] [--label FEATURE] [args]
                               save screenshots, a video, and the console and request errors.
                               `rr-verify browse --help` lists the options and the helper API.
   docs                        Serve the built docs site (dist/docs) for this run.
+  vscode COMMAND [ARGS...]    Drive VS Code with the extension from this checkout. rr-verify vscode help lists commands.
   stop                        Stop the run's engine and everything it started. Evidence stays.
   runs                        List runs and whether their engine is alive.
   help                        Show this text.
@@ -249,6 +250,7 @@ cmd_doctor() {
 		fi
 	fi
 	ui_doctor
+	node "$SKILL_DIR/bin/vscode.mjs" doctor || fail=1
 	echo "info mock mode: $([ "$ENGINE_MOCK" = 1 ] && echo on || echo off)"
 	echo "info log: $ENGINE_LOG"
 	return $fail
@@ -379,6 +381,7 @@ cmd_mcp() {
 cmd_stop() {
 	load_run
 	browser_stop
+	node "$SKILL_DIR/bin/vscode.mjs" close --quiet || true
 	if ! engine_alive; then
 		echo "engine pid $ENGINE_PID already stopped"
 	else
@@ -428,6 +431,7 @@ case "$cmd" in
 	record) cmd_record ;;
 	browse) cmd_browse ;;
 	docs) cmd_docs ;;
+	vscode) load_run; exec node "$SKILL_DIR/bin/vscode.mjs" ${LABEL:+--label "$LABEL"} ${ARGS[@]+"${ARGS[@]}"} ;;
 	stop) cmd_stop ;;
 	runs) cmd_runs ;;
 	help | -h | --help) usage ;;
