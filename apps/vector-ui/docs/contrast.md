@@ -10,7 +10,7 @@ map's colours are measured by the map's own suite.
 ## Rules
 
 - **All text is `--rr-text-primary`**: figures, document rows, chunk text,
-  chips, footers, the drawer and the dialogs. Hierarchy comes from size and
+  chips, footers and the drawers. Hierarchy comes from size and
   weight, not from a lighter colour.
 - **The accent is `--rr-border-focus`**: the focus ring of every control and
   the bar on the left of the selected row. It is the shell's own colour for
