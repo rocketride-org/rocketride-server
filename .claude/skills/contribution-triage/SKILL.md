@@ -5,7 +5,7 @@ description: Triage one RocketRide pull request for a maintainer against CONTRIB
 
 # Contribution triage
 
-A maintainer runs this skill from their own agent session, with their own `gh` login. It checks one PR against the contribution rules and drafts a short comment that asks for what is missing. By default it is a dry run: it prints the comment and labels it would apply and changes nothing on GitHub.
+A maintainer runs this skill from their own agent session, with their own `gh` login. It checks one PR against the contribution rules and drafts a short comment that asks for what is missing. By default it is a dry run. It prints the comment and labels it would apply and changes nothing on GitHub.
 
 ## What it never does
 
@@ -94,13 +94,13 @@ Read `checks.verification.text`. The section can be headed Verification, or Test
 
 Trace how each change serves the problem in the linked issue or the title. Code, tests, docs, and generated files that the same change needs belong together, even across many areas. Fail only when the PR also carries an independent change that could merge on its own: an unrelated fix, a second feature, or a drive-by refactor somewhere else. Do not decide by counting files, commits, or areas.
 
-When the linked issue itself lists several items and the PR does what the issue asks, treat the issue as the one problem: a maintainer scoped it that way. A PR with no linked issue that bundles several features, each of which could ship alone, fails. In the ask, name the independent changes and suggest moving them to their own PRs.
+When the linked issue itself lists several items and the PR does what the issue asks, treat the issue as the one problem, because a maintainer scoped it that way. A PR with no linked issue that bundles several features, each of which could ship alone, fails. In the ask, name the independent changes and suggest moving them to their own PRs.
 
 ### Docs
 
 Apply "Documentation rules" in `AGENTS.md`. `checks.docs.rules` maps changed code to the doc that area needs and lists the doc files the PR changed. It is a hint. Decide yourself whether a public contract changed.
 
-- `n/a` when no public contract changed: an internal refactor, a bug fix that keeps the documented behavior, tests, CI, build, or prose-only edits.
+- `n/a` when no public contract changed: an internal refactor, a bug fix that keeps the documented behavior, tests, CI, build, prose-only edits, or a docs-only PR.
 - `pass` when a contract changed and the matching doc changed in the same PR.
 - `fail` when a contract changed and its doc did not. Contracts include a node's inputs, outputs, or config; a public SDK signature; the MCP or WebSocket protocol; the VS Code extension's commands and settings; and documented product behavior. Also fail a hand edit to a generated package README instead of its source under `docs/public/`.
 
