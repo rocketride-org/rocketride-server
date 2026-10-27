@@ -39,7 +39,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { VectorGrid } from '../src/components/VectorGrid';
 import type { IGridColumn } from '../src/components/VectorGrid';
-import { gridKey, gridTemplate, gridWindow, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../src/vector/grid';
+import { afterDrawerClosed, afterNeighbourChosen, afterToolGone, gridKey, gridTemplate, gridWindow, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../src/vector/grid';
 
 interface IRow {
 	id: string;
@@ -170,4 +170,28 @@ test('rows a write is about to take away: the row after them is rendered and mar
 	const last = renderToStaticMarkup(<VectorGrid label="Rows" rows={ROWS} rowId={rowId} columns={COLUMNS} sort={null} onSort={noop} leaving={new Set(['d'])} />);
 	assert.match(last, /data-row-id="c" aria-rowindex="4" data-return-focus=""/, 'the last rows: the one before them');
 	assert.doesNotMatch(renderToStaticMarkup(<VectorGrid label="Rows" rows={ROWS} rowId={rowId} columns={COLUMNS} sort={null} onSort={noop} leaving={new Set(ids(ROWS))} />), /data-return-focus/, 'no row left: the grid itself takes the focus');
+});
+
+/** A focus target as vector/focus.ts reads it. */
+function target(name: string, state: 'shown' | 'hidden' | 'gone' = 'shown'): { name: string; isConnected: boolean; offsetParent: unknown; focus(): void } {
+	return { name, isConnected: state !== 'gone', offsetParent: state === 'shown' ? {} : null, focus: () => undefined };
+}
+
+test('where the focus goes when a control goes away, the drawer closes or a neighbour is chosen: the first target on the page and shown', () => {
+	const chain = { stopRow: target('row'), grid: target('grid'), tab: target('tab') };
+	assert.equal(afterToolGone(chain)?.name, 'row', "the grid's row in the tab order");
+	assert.equal(afterToolGone({ ...chain, stopRow: null })?.name, 'grid', 'no row: the grid');
+	assert.equal(afterToolGone({ stopRow: null, grid: target('grid', 'hidden'), tab: chain.tab })?.name, 'tab', 'a hidden grid: the tab');
+	assert.equal(afterToolGone({ stopRow: target('row', 'gone'), grid: null, tab: null }), null);
+	assert.equal(afterDrawerClosed(target('its row'), chain)?.name, 'its row', "the drawer's document's row");
+	assert.equal(afterDrawerClosed(null, chain)?.name, 'row', 'not listed: the row in the tab order');
+	assert.equal(afterDrawerClosed(target('its row', 'gone'), { ...chain, stopRow: null })?.name, 'grid');
+	assert.equal(afterNeighbourChosen(target('its row'), target('heading'))?.name, 'its row', 'a listed neighbour: its row');
+	assert.equal(afterNeighbourChosen(null, target('heading'))?.name, 'heading', "not listed: the drawer's heading, which names it now");
+});
+
+test("the selected row (the drawer's) is rendered wherever the list is scrolled, so closing the drawer can focus it", () => {
+	const many = Array.from({ length: 500 }, (_, i) => ({ id: `r${i}`, name: `n${i}`, size: i }));
+	const html = renderToStaticMarkup(<VectorGrid label="Many" rows={many} rowId={rowId} columns={COLUMNS} sort={null} onSort={noop} selectedId="r420" />);
+	assert.match(html, /data-row-id="r420" aria-rowindex="422" aria-selected="true"/);
 });

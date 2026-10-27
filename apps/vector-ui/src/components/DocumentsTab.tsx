@@ -69,11 +69,12 @@ import { documentsFolder, stagedReview } from '../adapters/consoleActions';
 import type { Availability, IDocumentItem } from '../contract/types';
 import { CONSOLE_ORIGIN } from '../vector/confirm';
 import { writesDuringRemoval } from '../vector/consoleModel';
-import { directoryHeading, documentTooltip, documentsLayout, healthCell, listCountText, noDocumentsText, pagerFooter, pagerProgressText, sortNote, splitPath, stagedRows, targetOf } from '../vector/documents';
+import { directoryHeading, documentTooltip, documentsLayout, healthCell, listCountText, listingComplete, noDocumentsText, pagerFooter, pagerProgressText, sortNote, splitPath, stagedRows, targetOf } from '../vector/documents';
 import type { IHealthCell } from '../vector/documents';
 import { fileTypeOf, formatSize } from '../vector/fileType';
 import { FILTER_DEBOUNCE_MS, checkScope, directoryExportItems, directoryView, sameFilter, scopeNoMatchText, scopeWith, withText } from '../vector/filters';
-import type { IGridSort } from '../vector/grid';
+import { afterDrawerClosed, afterNeighbourChosen, afterToolGone } from '../vector/grid';
+import type { IFocusChain, IGridSort } from '../vector/grid';
 import { medianChunks } from '../vector/health';
 import { stage, unstage } from '../vector/staged';
 import type { IStagedSet } from '../vector/staged';
@@ -89,7 +90,7 @@ import GatedButton from './GatedButton';
 import ScopeBar from './ScopeBar';
 import VectorGrid from './VectorGrid';
 import type { IGridColumn, IVectorGridHandle } from './VectorGrid';
-import { focusFell } from './focusTargets';
+import { currentTabOf, focusFell } from './focusTargets';
 import type { IDocumentsTabProps } from './workbenchProps';
 
 const styles = {
@@ -298,6 +299,11 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 	// Retry, a Folders toggle that is no longer needed): the focus goes to the grid's row in the tab order, else the
 	// grid, when it fell to the page.
 	const refocus = useRef(false);
+	const focusChain = (): IFocusChain<HTMLElement> => {
+		const handle = grid.current;
+		const element = handle?.element() ?? null;
+		return { stopRow: handle?.stopElement() ?? null, grid: element, tab: currentTabOf(element) };
+	};
 	const thenGrid = (act: () => void) => (): void => {
 		refocus.current = true;
 		act();
@@ -305,7 +311,7 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 	useEffect(() => {
 		if (!refocus.current) return;
 		refocus.current = false;
-		if (focusFell()) grid.current?.focusStop();
+		if (focusFell()) afterToolGone(focusChain())?.focus();
 	});
 
 	// The drawer: the selected document, opened from a row (or Neighbours); it follows the shared selection.
@@ -327,8 +333,19 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 		const was = lastDrawer.current;
 		lastDrawer.current = drawerId;
 		if (was === null || drawerId !== null) return;
-		if (focusFell() && !grid.current?.focusRow(was)) grid.current?.focusGrid();
+		if (focusFell()) afterDrawerClosed(grid.current?.rowElement(was) ?? null, focusChain())?.focus();
 	}, [drawerId]);
+
+	// A neighbour chosen in the drawer: once it is the selected document, its row when the grid lists it, else the
+	// drawer's heading (the list it was chosen from goes with the old document).
+	const neighbour = useRef<string | null>(null);
+	useEffect(() => {
+		const id = neighbour.current;
+		if (id === null || selectedId !== id) return;
+		neighbour.current = null;
+		const heading = root.current?.querySelector<HTMLElement>('[data-document-drawer] h2') ?? null;
+		afterNeighbourChosen(grid.current?.rowElement(id) ?? null, heading)?.focus();
+	});
 
 	// Another tab asks for a document (Overview's Insights, a query result): its drawer opens here, once.
 	const asked = useSyncExternalStore(entry.openDocument.subscribe, entry.openDocument.get, entry.openDocument.get);
@@ -397,7 +414,7 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 	const offReason = model.writes.enabled ? null : model.writes.reason;
 	const folderLabel = folder === null ? null : folder.kind === 'uploaded' ? 'Uploaded (documents stored under a bare file name)' : folder.prefix;
 	const counted = treeRows.length;
-	const countsLine = pager.status === 'done' && !scopeOnList ? `${formatCount(counted)} ${counted === 1 ? 'document' : 'documents'}` : `Counts over ${formatCount(counted)} loaded ${counted === 1 ? 'document' : 'documents'}${scopeOnList ? ' in the scope' : ''}`;
+	const countsLine = listingComplete(pager) && !scopeOnList ? `${formatCount(counted)} ${counted === 1 ? 'document' : 'documents'}` : `Counts over ${formatCount(counted)} loaded ${counted === 1 ? 'document' : 'documents'}${scopeOnList ? ' in the scope' : ''}`;
 	const drawerItem = drawerId === null ? null : (loadedById.get(drawerId) ?? null);
 
 	return (
@@ -486,8 +503,7 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 								onMoreChunks={() => entry.controller.loadMoreChunks()}
 								onShowDocument={(objectId, path) => {
 									entry.selection.selectDocument({ objectId, path });
-									// Its row when the grid lists it; else the drawer's heading (the list it came from goes).
-									if (!grid.current?.focusRow(objectId)) setFocusNonce((n) => n + 1);
+									neighbour.current = objectId;
 								}}
 								announce={(message) => actions.announce(message)}
 							/>

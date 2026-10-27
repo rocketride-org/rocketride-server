@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { IDocumentItem } from '../src/contract/types';
 import { DIRECTORY_AUTO_ROWS, DIRECTORY_LOAD_MORE } from '../src/vector/budgets';
-import { DOCUMENTS_LAYOUT, chunkPreview, directoryHeading, documentTooltip, documentsLayout, healthCell, listCountText, noDocumentsText, similarDocuments, similarFailureText, similarK, sortNote, stagedRows, filterItems, filterSummary, pagerApplyPage, pagerBegin, pagerFail, pagerFooter, pagerInit, pagerLoadMore, pagerPause, pagerProgressText, pagerResume, pagerWantsPage, splitPath } from '../src/vector/documents';
+import { DOCUMENTS_LAYOUT, MORE_MAY_EXIST, listingComplete, chunkPreview, directoryHeading, documentTooltip, documentsLayout, healthCell, listCountText, noDocumentsText, similarDocuments, similarFailureText, similarK, sortNote, stagedRows, filterItems, filterSummary, pagerApplyPage, pagerBegin, pagerFail, pagerFooter, pagerInit, pagerLoadMore, pagerPause, pagerProgressText, pagerResume, pagerWantsPage, splitPath } from '../src/vector/documents';
 import { readDocumentsPage } from '../src/vector/results';
 import type { IDocumentsPageView } from '../src/vector/results';
 import { HEALTH_NOT_REPORTED } from '../src/vector/health';
@@ -318,4 +318,19 @@ test('the review lists every staged document: its loaded row, else what staging 
 	assert.deepEqual([...unloaded], ['m']);
 	assert.equal(chunkPreview('  a\n b  '), 'a b');
 	assert.ok(chunkPreview('word '.repeat(100)).endsWith('…'));
+});
+
+test('one test of completeness for every line: an incomplete listing is "loaded", never a total, and every line that speaks of the rest says "more may exist"', () => {
+	const rows = [doc('a', 'C:/a.md'), doc('b', 'C:/b.md')];
+	assert.equal(listingComplete({ status: 'done' }), true);
+	for (const status of ['loading', 'paused', 'capped', 'unsupported', 'stalled', 'error'] as const) {
+		const state = { ...pagerInit(), rows, status, pages: 1, storeSorted: false };
+		assert.equal(listingComplete(state), false, status);
+		assert.equal(listCountText(2, state), '2 loaded', `${status}: what is loaded`);
+		assert.equal(directoryHeading(state), '2 loaded', `${status}: the heading too`);
+		assert.ok(sortNote(state, true)?.endsWith(`; ${MORE_MAY_EXIST}.`), `${status}: the sort line`);
+		const footer = pagerFooter(state)?.text ?? '';
+		assert.doesNotMatch(footer, /the store holds|more exist\b/, `${status}: the footer claims nothing more`);
+		if (status === 'capped' || status === 'unsupported' || status === 'stalled') assert.ok(footer.endsWith(MORE_MAY_EXIST), `${status}: the footer agrees`);
+	}
 });

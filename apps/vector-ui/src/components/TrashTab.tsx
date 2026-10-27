@@ -54,10 +54,11 @@ import { BxTrash } from 'shell';
 import type { IDocumentItem } from '../contract/types';
 import { CONSOLE_ORIGIN } from '../vector/confirm';
 import { writesDuringRemoval } from '../vector/consoleModel';
-import { directoryHeading, listCountText, pagerFooter, pagerProgressText, splitPath, targetOf } from '../vector/documents';
+import { directoryHeading, listCountText, listingComplete, pagerFooter, pagerProgressText, splitPath, targetOf } from '../vector/documents';
 import { formatSize } from '../vector/fileType';
 import { FILTER_DEBOUNCE_MS, directoryExportItems, directoryView } from '../vector/filters';
-import type { IGridSort } from '../vector/grid';
+import { afterToolGone } from '../vector/grid';
+import type { IFocusChain, IGridSort } from '../vector/grid';
 import { DEFAULT_LIMITS } from '../vector/results';
 import { formatCount } from '../vector/stats';
 import { EMPTY } from '../vector/wording';
@@ -68,7 +69,7 @@ import GatedButton from './GatedButton';
 import ScopeBar from './ScopeBar';
 import VectorGrid from './VectorGrid';
 import type { IGridColumn, IVectorGridHandle } from './VectorGrid';
-import { focusFell } from './focusTargets';
+import { currentTabOf, focusFell } from './focusTargets';
 import type { IWorkbenchPanelProps } from './workbenchProps';
 
 /** What the permanent writes do, beside them. */
@@ -202,6 +203,11 @@ export function TrashTab({ entry, model, console: state, visible }: IWorkbenchPa
 	const grid = useRef<IVectorGridHandle>(null);
 	// Load more and Retry go away when they act: the focus goes to the grid's row in the tab order, else the grid.
 	const refocus = useRef(false);
+	const focusChain = (): IFocusChain<HTMLElement> => {
+		const handle = grid.current;
+		const element = handle?.element() ?? null;
+		return { stopRow: handle?.stopElement() ?? null, grid: element, tab: currentTabOf(element) };
+	};
 	const thenGrid = (act: () => void) => (): void => {
 		refocus.current = true;
 		act();
@@ -209,7 +215,7 @@ export function TrashTab({ entry, model, console: state, visible }: IWorkbenchPa
 	useEffect(() => {
 		if (!refocus.current) return;
 		refocus.current = false;
-		if (focusFell()) grid.current?.focusStop();
+		if (focusFell()) afterToolGone(focusChain())?.focus();
 	});
 
 	// The rows a permanent write is about to take away (its confirmation open, or its write running): the grid marks the
@@ -223,7 +229,7 @@ export function TrashTab({ entry, model, console: state, visible }: IWorkbenchPa
 
 	let empty: string;
 	if (pager.rows.length === 0 && pager.status === 'error') empty = EMPTY.unreachable(pager.error?.headline ?? 'the store did not answer.');
-	else if (pager.rows.length === 0 && pager.status === 'done') empty = EMPTY.trash;
+	else if (pager.rows.length === 0 && listingComplete(pager)) empty = EMPTY.trash;
 	else if (pager.rows.length === 0) empty = 'Loading the trash…';
 	else empty = EMPTY.noMatch(applied.trim());
 	const progress = pagerProgressText(pager);
@@ -264,7 +270,7 @@ export function TrashTab({ entry, model, console: state, visible }: IWorkbenchPa
 				<GatedButton variant="danger" unavailable={off ?? nothingSelected} onClick={() => entry.controller.requestDelete(checkedItems.map(targetOf))}>
 					Delete selected permanently…
 				</GatedButton>
-				<GatedButton variant="danger" unavailable={off ?? (pager.status === 'done' && pager.rows.length === 0 && (trashCount ?? 0) === 0 ? EMPTY.trash : null)} onClick={() => void entry.controller.requestEmptyTrash()}>
+				<GatedButton variant="danger" unavailable={off ?? (listingComplete(pager) && pager.rows.length === 0 && (trashCount ?? 0) === 0 ? EMPTY.trash : null)} onClick={() => void entry.controller.requestEmptyTrash()}>
 					Empty trash…
 				</GatedButton>
 				<span style={styles.dangerText}>{TRASH_DANGER_SENTENCE}</span>

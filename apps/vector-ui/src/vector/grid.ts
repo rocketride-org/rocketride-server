@@ -42,8 +42,15 @@
 //            focus never leaves with a row scrolled out of view.
 //   FOCUS    a focused row that leaves the list hands the focus to the row
 //            after it, else the one before it, else nobody (the caller then
-//            focuses the grid itself or the tab).
+//            focuses the grid itself or the tab). A control that goes away
+//            when it acts, the drawer closing and a neighbour chosen in the
+//            drawer each hand it on through a fixed chain (afterToolGone,
+//            afterDrawerClosed, afterNeighbourChosen): the first target that
+//            is on the page and shown (vector/focus.ts firstFocusable).
 // =============================================================================
+
+import { firstFocusable } from './focus';
+import type { IFocusCandidate } from './focus';
 
 /** A sort direction. */
 export type SortDir = 'asc' | 'desc';
@@ -237,4 +244,49 @@ export function nextRowAfter(ids: readonly string[], targets: ReadonlySet<string
  */
 export function gridTemplate(columns: ReadonlyArray<{ width: number | 'flex'; minWidth?: number }>): string {
 	return columns.map((c) => (c.width === 'flex' ? `minmax(${Math.max(0, c.minWidth ?? 120)}px, 1fr)` : `${Math.max(0, c.width)}px`)).join(' ');
+}
+
+/** The focus targets a tab offers when a control goes away; null for one it does not have now. */
+export interface IFocusChain<T extends IFocusCandidate> {
+	/** The grid's row in the tab order. */
+	stopRow: T | null;
+	/** The grid itself. */
+	grid: T | null;
+	/** The current tab of the workbench's tab row. */
+	tab: T | null;
+}
+
+/**
+ * Where the focus goes when a control that held it went away as it acted (Show all documents, a scope action, Load
+ * more, Retry, a Folders toggle no longer needed): the grid's row in the tab order, else the grid, else the tab.
+ *
+ * @param chain - The tab's targets.
+ * @returns The first that can take the focus, or null.
+ */
+export function afterToolGone<T extends IFocusCandidate>(chain: IFocusChain<T>): T | null {
+	return firstFocusable([chain.stopRow, chain.grid, chain.tab]);
+}
+
+/**
+ * Where the focus goes when the document drawer closed with the focus in it: its document's row, else as after a
+ * control went away.
+ *
+ * @param row - The row of the document it showed (null when the grid does not list it).
+ * @param chain - The tab's targets.
+ * @returns The first that can take the focus, or null.
+ */
+export function afterDrawerClosed<T extends IFocusCandidate>(row: T | null, chain: IFocusChain<T>): T | null {
+	return firstFocusable([row, chain.stopRow, chain.grid, chain.tab]);
+}
+
+/**
+ * Where the focus goes when a neighbour was chosen in the drawer (the list it was in goes with the old document): its
+ * row when the grid lists it, else the drawer's heading, which now names it.
+ *
+ * @param row - The chosen document's row, or null.
+ * @param heading - The drawer's heading.
+ * @returns The first that can take the focus, or null.
+ */
+export function afterNeighbourChosen<T extends IFocusCandidate>(row: T | null, heading: T | null): T | null {
+	return firstFocusable([row, heading]);
 }

@@ -37,8 +37,9 @@
 //   Space            onToggle (the Documents tab stages the document)
 //
 // Only the rows in view are rendered (fixed-height rows, placed by their
-// index), plus the focused row wherever the list is scrolled, so a row
-// scrolled out of view never takes the focus with it. Rows are keyed by
+// index), plus the focused row and the selected one wherever the list is
+// scrolled, so a row scrolled out of view never takes the focus with it and
+// a closing drawer can hand it back to its row. Rows are keyed by
 // their id, so new pages and changed rows keep the focused row's element
 // and its focus. When the focused row leaves the list (moved to the trash,
 // restored, filtered out), the focus goes to the row after it, else the one
@@ -146,8 +147,12 @@ export interface IVectorGridHandle {
 	focusRow(id: string): boolean;
 	/** Focus the grid itself (no row listed, or nothing better). */
 	focusGrid(): void;
-	/** Focus the row in the tab order, else the grid itself. */
-	focusStop(): void;
+	/** The grid element itself. */
+	element(): HTMLElement | null;
+	/** The row in the tab order (always rendered), or null without rows. */
+	stopElement(): HTMLElement | null;
+	/** A row's element while it is rendered (the row in the tab order and the selected row always are), else null. */
+	rowElement(id: string): HTMLElement | null;
 	/** Bring a row into view and make it the one in the tab order, without moving the focus; false when not listed. */
 	showRow(id: string): boolean;
 	/** The ids in the order they are shown. */
@@ -306,17 +311,9 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 			focusGrid(): void {
 				grid.current?.focus({ preventScroll: true });
 			},
-			focusStop(): void {
-				const id = stop >= 0 ? ids[stop] : undefined;
-				if (id === undefined) {
-					grid.current?.focus({ preventScroll: true });
-					return;
-				}
-				show(stop);
-				setActiveId(id);
-				pending.current = id;
-				setTick((n) => n + 1);
-			},
+			element: () => grid.current,
+			stopElement: () => (stop >= 0 ? (rowEls.current.get(ids[stop] as string) ?? null) : null),
+			rowElement: (id: string) => rowEls.current.get(id) ?? null,
 			showRow(id: string): boolean {
 				const index = indexOf.get(id);
 				if (index === undefined) return false;
@@ -374,6 +371,9 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 	for (let i = view.first; i < view.last; i++) indices.push(i);
 	if (view.extra !== null) indices.push(view.extra);
 	if (returnIndex >= 0 && !indices.includes(returnIndex)) indices.push(returnIndex);
+	// The selected row (the drawer's) too: closing the drawer gives it the focus back.
+	const selectedIndex = selectedId === undefined || selectedId === null ? -1 : (indexOf.get(selectedId) ?? -1);
+	if (selectedIndex >= 0 && !indices.includes(selectedIndex)) indices.push(selectedIndex);
 	for (const index of indices) {
 		const item = shown[index] as R;
 		const id = ids[index] as string;
