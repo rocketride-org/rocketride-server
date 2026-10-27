@@ -1,0 +1,626 @@
+{
+	"format": 1,
+	"scenario": "build-04-extract-invoice",
+	"set": "claude-369f0511",
+	"trial": 1,
+	"source": {
+		"record": "anthropic/build-04-extract-invoice-t1.json",
+		"harness": "baseline-v3",
+		"head": "369f0511",
+		"model": "llm_anthropic:claude-sonnet-5"
+	},
+	"turns": [
+		{
+			"request": "Create a pipeline invoice-fields. I send an invoice file (PDF or plain text) to a webhook and get back four fields: invoice_number, vendor, total as a number and due_date as a date. Use OpenAI to do the extraction.",
+			"events": [
+				{
+					"wave": 0,
+					"reply": "{\"thought\":\"Start by orienting: list the workspace and read the pipeline-building guides.\",\"tool_calls\":[{\"tool\":\"list_workspace\",\"args\":{}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/docs/ROCKETRIDE_CONCEPTS.md\"}}]}"
+				},
+				{
+					"wave": 1,
+					"reply": "{\"thought\":\"Read the pipeline-building skill and component reference guides before designing the pipeline.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-building-pipelines/SKILL.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/docs/ROCKETRIDE_PIPELINES.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md\"}},{\"tool\":\"list_components\",\"args\":{}}]}"
+				},
+				{
+					"wave": 2,
+					"reply": "{\"thought\":\"Search the component catalog for structured-extraction and document-to-text components to design the pipeline.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"maxResults\":200,\"path\":\".rocketride/services-catalog.json\",\"pattern\":\"\\\"name\\\": \\\"\"}},{\"tool\":\"search_files\",\"args\":{\"isRegex\":false,\"maxResults\":50,\"path\":\".rocketride/services-catalog.json\",\"pattern\":\"extract\"}}]}"
+				},
+				{
+					"wave": 3,
+					"reply": "{\"thought\":\"Search the whole workspace (no path restriction) for relevant provider names in the catalog, since pointing search directly at services-catalog.json is blocked.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"pattern\":\"pdf\"}},{\"tool\":\"search_files\",\"args\":{\"pattern\":\"structured\"}},{\"tool\":\"search_files\",\"args\":{\"pattern\":\"response_\"}}]}"
+				},
+				{
+					"wave": 4,
+					"reply": "{\"thought\":\"Search_files can't be used on .rocketride; read the services-catalog.json directly to find pdf-extraction, OpenAI LLM, and response node providers.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"maxBytes\":200000,\"path\":\".rocketride/services-catalog.json\"}}]}"
+				},
+				{
+					"wave": 5,
+					"reply": "{\"thought\":\"Peek the full list_components result to find document/text-extraction and structured-output components without re-querying the engine.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 6,
+					"reply": "{\"thought\":\"View the rest of the component catalog summary to find text-extraction and response components alongside extract_data and llm_openai.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 7,
+					"reply": "{\"thought\":\"Peek the rest of the components catalog list to find PDF/document-to-text extraction and response components.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 8,
+					"reply": "{\"thought\":\"Need lane/config details for webhook, parse, extract_data, llm_openai, and response_json to wire the pipeline correctly.\",\"tool_calls\":[{\"tool\":\"describe_component\",\"args\":{\"name\":\"webhook\"}},{\"tool\":\"describe_component\",\"args\":{\"name\":\"parse\"}},{\"tool\":\"describe_component\",\"args\":{\"name\":\"extract_data\"}},{\"tool\":\"describe_component\",\"args\":{\"name\":\"llm_openai\"}},{\"tool\":\"describe_component\",\"args\":{\"name\":\"response_json\"}}]}"
+				},
+				{
+					"wave": 9,
+					"reply": "{\"thought\":\"Need to see the extract_data->response wiring convention; check pipeline-patterns.md and response_answers lanes before building the pipe.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-building-pipelines/pipeline-patterns.md\"}},{\"tool\":\"describe_component\",\"args\":{\"name\":\"response_answers\"}}]}"
+				},
+				{
+					"wave": 10,
+					"reply": "{\"thought\":\"Fetch the full extract_data schema to learn the exact fields config shape (column/type keys) before writing the pipeline.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\",\"path\":\"Pipe.schema.dependencies\"}}]}"
+				},
+				{
+					"wave": 11,
+					"reply": "{\"thought\":\"Need the full llm_openai profile enum list and required fields for a standard profile before writing the pipeline config.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\",\"path\":\"Pipe.schema.properties.profile.enum\"}}]}"
+				},
+				{
+					"wave": 12,
+					"reply": "{\"thought\":\"Peek llm_openai's profile enum list from the stored text result to pick a model and build correct config.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 13,
+					"reply": "{\"thought\":\"Check the full set of lanes webhook's _source produces, to confirm both 'tags' (files) and 'text' (plain text) are available for routing into parse and extract_data.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\",\"path\":\"lanes._source\"}}]}"
+				},
+				{
+					"wave": 14,
+					"reply": "{\"thought\":\"Search the pipelines guide content we already have for the control-array syntax example before writing the pipeline.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"pattern\":\"\\\"control\\\"\"}}]}"
+				},
+				{
+					"wave": 15,
+					"reply": "{\"thought\":\"Search the pipelines guide for the exact 'control' array syntax before writing the pipeline.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"isRegex\":false,\"maxResults\":50,\"path\":\".rocketride/docs/ROCKETRIDE_PIPELINES.md\",\"pattern\":\"\\\"control\\\"\"}}]}"
+				},
+				{
+					"wave": 16,
+					"reply": "{\"thought\":\"Need exact control-array field syntax for attaching an LLM to extract_data via invoke; check the designing-pipelines guide before writing the pipeline.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-designing-pipelines/PIPELINE_RULES_SUMMARY.md\"}}]}"
+				},
+				{
+					"wave": 17,
+					"reply": "{\"thought\":\"Write the invoice-fields.pipe file using webhook->parse->extract_data(+llm control)->response_answers, then validate it.\",\"tool_calls\":[{\"tool\":\"write_file\",\"args\":{\"content\":\"{\\n\\t\\\"components\\\": [\\n\\t\\t{\\n\\t\\t\\t\\\"id\\\": \\\"webhook_1\\\",\\n\\t\\t\\t\\\"provider\\\": \\\"webhook\\\",\\n\\t\\t\\t\\\"config\\\": { \\\"hideForm\\\": true, \\\"mode\\\": \\\"Source\\\", \\\"parameters\\\": {}, \\\"type\\\": \\\"webhook\\\" }\\n\\t\\t},\\n\\t\\t{\\n\\t\\t\\t\\\"id\\\": \\\"parse_1\\\",\\n\\t\\t\\t\\\"provider\\\": \\\"parse\\\",\\n\\t\\t\\t\\\"config\\\": {},\\n\\t\\t\\t\\\"input\\\": [{ \\\"lane\\\": \\\"tags\\\", \\\"from\\\": \\\"webhook_1\\\" }]\\n\\t\\t},\\n\\t\\t{\\n\\t\\t\\t\\\"id\\\": \\\"llm_openai_1\\\",\\n\\t\\t\\t\\\"provider\\\": \\\"llm_openai\\\",\\n\\t\\t\\t\\\"config\\\": {\\n\\t\\t\\t\\t\\\"profile\\\": \\\"gpt-4-1-mini\\\",\\n\\t\\t\\t\\t\\\"gpt-4-1-mini\\\": {\\n\\t\\t\\t\\t\\t\\\"apikey\\\": \\\"${ROCKETRIDE_OPENAI_API_KEY}\\\",\\n\\t\\t\\t\\t\\t\\\"temperature\\\": 0\\n\\t\\t\\t\\t}\\n\\t\\t\\t}\\n\\t\\t},\\n\\t\\t{\\n\\t\\t\\t\\\"id\\\": \\\"extract_data_1\\\",\\n\\t\\t\\t\\\"provider\\\": \\\"extract_data\\\",\\n\\t\\t\\t\\\"config\\\": {\\n\\t\\t\\t\\t\\\"profile\\\": \\\"default\\\",\\n\\t\\t\\t\\t\\\"default\\\": {\\n\\t\\t\\t\\t\\t\\\"fields\\\": [\\n\\t\\t\\t\\t\\t\\t{ \\\"column\\\": \\\"invoice_number\\\", \\\"type\\\": \\\"text\\\" },\\n\\t\\t\\t\\t\\t\\t{ \\\"column\\\": \\\"vendor\\\", \\\"type\\\": \\\"text\\\" },\\n\\t\\t\\t\\t\\t\\t{ \\\"column\\\": \\\"total\\\", \\\"type\\\": \\\"decimal\\\" },\\n\\t\\t\\t\\t\\t\\t{ \\\"column\\\": \\\"due_date\\\", \\\"type\\\": \\\"date\\\" }\\n\\t\\t\\t\\t\\t]\\n\\t\\t\\t\\t}\\n\\t\\t\\t},\\n\\t\\t\\t\\\"input\\\": [{ \\\"lane\\\": \\\"text\\\", \\\"from\\\": \\\"parse_1\\\" }],\\n\\t\\t\\t\\\"control\\\": [{ \\\"classType\\\": \\\"llm\\\", \\\"from\\\": \\\"llm_openai_1\\\" }]\\n\\t\\t},\\n\\t\\t{\\n\\t\\t\\t\\\"id\\\": \\\"response_answers_1\\\",\\n\\t\\t\\t\\\"provider\\\": \\\"response_answers\\\",\\n\\t\\t\\t\\\"config\\\": { \\\"laneName\\\": \\\"answers\\\" },\\n\\t\\t\\t\\\"input\\\": [{ \\\"lane\\\": \\\"answers\\\", \\\"from\\\": \\\"extract_data_1\\\" }]\\n\\t\\t}\\n\\t],\\n\\t\\\"project_id\\\": \\\"7b3e9f52-6c41-4d8a-9a2f-1e5c0b7d4a93\\\",\\n\\t\\\"viewport\\\": { \\\"x\\\": 0, \\\"y\\\": 0, \\\"zoom\\\": 1 },\\n\\t\\\"version\\\": 1\\n}\\n\",\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 18,
+					"reply": "{\"thought\":\"Pipeline validated OK; now run it with a sample invoice text to confirm the extraction works end-to-end.\",\"tool_calls\":[{\"tool\":\"run_pipeline\",\"args\":{\"inputs\":\"Invoice #INV-2024-0057\\nVendor: Acme Supplies Inc.\\nDate Issued: 2024-03-15\\nDue Date: 2024-04-14\\n\\nDescription: Office supplies and equipment\\nSubtotal: $1,200.00\\nTax: $96.00\\nTotal Due: $1,296.00\\n\\nPlease remit payment by the due date to avoid late fees.\",\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 19,
+					"reply": "{\"thought\":\"The run failed with 'No control listeners registered for llm' - extract_data_1 needs llm_openai_1 wired via a control connection, not just the lane; let me read the full pipeline file to fix it.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 20,
+					"reply": "{\"thought\":\"The file now has the control link for extract_data_1 -> llm_openai_1; validate and re-run the pipeline to confirm the fix works.\",\"tool_calls\":[{\"tool\":\"validate_pipeline\",\"args\":{\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 21,
+					"reply": "{\"thought\":\"Pipeline validates; now run it with a sample invoice text to confirm the webhook->parse->extract_data->llm->response chain actually works end to end.\",\"tool_calls\":[{\"tool\":\"run_pipeline\",\"args\":{\"inputs\":\"Invoice #INV-2024-00123\\nVendor: Acme Supplies Inc.\\nDate Issued: 2024-03-01\\nDue Date: 2024-03-31\\nItems: Widgets x10 @ $25.00 = $250.00\\nShipping: $15.00\\nTax: $21.20\\nTotal Due: $286.20\\nThank you for your business.\",\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 22,
+					"reply": "{\"thought\":\"A previous run is already active for this pipeline; terminate it then start a fresh run with the sample invoice text.\",\"tool_calls\":[{\"tool\":\"list_running_pipelines\",\"args\":{}}]}"
+				},
+				{
+					"wave": 23,
+					"reply": "{\"thought\":\"Terminate the existing running task for our pipeline's project, then run it fresh with the sample invoice text.\",\"tool_calls\":[{\"tool\":\"terminate\",\"args\":{\"task_token\":\"tk_f62c4993f60339d0c8398b4138ccec5f\"}}]}"
+				},
+				{
+					"wave": 24,
+					"reply": "{\"thought\":\"Now that the old task is terminated, run the pipeline fresh with a sample invoice and monitor the result.\",\"tool_calls\":[{\"tool\":\"run_pipeline\",\"args\":{\"inputs\":\"Invoice #INV-2024-00123\\nVendor: Acme Supplies Inc.\\nDate Issued: 2024-03-01\\nDue Date: 2024-03-31\\nItems: Widgets x10 @ $25.00 = $250.00\\nShipping: $15.00\\nTax: $21.20\\nTotal Due: $286.20\\nThank you for your business.\",\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 25,
+					"reply": "{\"thought\":\"Read the current pipeline file to see how llm_openai is wired, since the run failed with 'No control listeners registered for llm' meaning the LLM needs to be a control connection on extract_data, not a data lane.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 26,
+					"reply": "{\"thought\":\"Validate the updated pipeline (now with control array) and terminate the stale running task before re-running.\",\"tool_calls\":[{\"tool\":\"terminate\",\"args\":{\"task_token\":\"tk_f62c4993f60339d0c8398b4138ccec5f\"}},{\"tool\":\"validate_pipeline\",\"args\":{\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 27,
+					"reply": "{\"thought\":\"Re-read the pipeline file to verify the control array is actually present and correctly wired before rerunning, since the last run still failed with 'No control listeners registered for llm'.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 28,
+					"reply": "{\"thought\":\"The pipeline file now has the control connection correctly set and the old stale task was terminated; run it fresh to confirm extraction works.\",\"tool_calls\":[{\"tool\":\"run_pipeline\",\"args\":{\"inputs\":\"Invoice #INV-2024-00123\\nVendor: Acme Supplies Inc.\\nDate Issued: 2024-03-01\\nDue Date: 2024-03-31\\nItems: Widgets x10 @ $25.00 = $250.00\\nShipping: $15.00\\nTax: $21.20\\nTotal Due: $286.20\\nThank you for your business.\",\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 29,
+					"reply": "{\"thought\":\"Search the debugging guide and antipatterns doc for the 'No control listeners registered for llm' error before changing the pipeline again.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-debugging-pipelines/ERROR_TABLE.md\"}},{\"tool\":\"search_files\",\"args\":{\"pattern\":\"control listeners\"}}]}"
+				},
+				{
+					"wave": 30,
+					"reply": "{\"thought\":\"Look at pipeline-patterns.md and designing-pipelines skill for a working extract_data + llm_openai control wiring example, since the control array format I used produces 'No control listeners registered for llm' at runtime despite passing validation.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-building-pipelines/pipeline-patterns.md\"}}]}"
+				},
+				{
+					"wave": 31,
+					"reply": "{\"thought\":\"Look at the worked examples directory for a pipeline that actually uses control-plane wiring (agentic-chat or similar) to see the exact format that works at runtime.\",\"tool_calls\":[{\"tool\":\"list_directory\",\"args\":{\"path\":\".rocketride/skills/rocketride-designing-pipelines/examples\"}}]}"
+				},
+				{
+					"wave": 32,
+					"reply": "{\"thought\":\"Check the FAILURE_SCENARIOS doc for the exact 'no control listeners' issue and correct control wiring pattern.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-designing-pipelines/examples/FAILURE_SCENARIOS.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-designing-pipelines/examples/README.md\"}}]}"
+				},
+				{
+					"wave": 33,
+					"reply": "{\"thought\":\"The control array is wired backwards: it must live on the llm_openai_1 node (the provider) pointing from: extract_data_1 (the consumer), not on extract_data_1 pointing from llm_openai_1 — matching the agentic-chat example's pattern.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 34,
+					"reply": "{\"thought\":\"Fix the control-plane direction: move control from extract_data_1 to llm_openai_1 (pointing back at extract_data_1, the node needing the LLM), matching the worked pattern.\",\"tool_calls\":[{\"tool\":\"edit_file\",\"args\":{\"newString\":\"\\t\\t{\\n\\t\\t\\t\\\"id\\\": \\\"llm_openai_1\\\",\\n\\t\\t\\t\\\"provider\\\": \\\"llm_openai\\\",\\n\\t\\t\\t\\\"config\\\": {\\n\\t\\t\\t\\t\\\"profile\\\": \\\"gpt-4-1-mini\\\",\\n\\t\\t\\t\\t\\\"gpt-4-1-mini\\\": { \\\"apikey\\\": \\\"${ROCKETRIDE_OPENAI_API_KEY}\\\", \\\"temperature\\\": 0 }\\n\\t\\t\\t},\\n\\t\\t\\t\\\"control\\\": [{ \\\"classType\\\": \\\"llm\\\", \\\"from\\\": \\\"extract_data_1\\\" }]\\n\\t\\t},\",\"oldString\":\"\\t\\t{\\n\\t\\t\\t\\\"id\\\": \\\"llm_openai_1\\\",\\n\\t\\t\\t\\\"provider\\\": \\\"llm_openai\\\",\\n\\t\\t\\t\\\"config\\\": {\\n\\t\\t\\t\\t\\\"profile\\\": \\\"gpt-4-1-mini\\\",\\n\\t\\t\\t\\t\\\"gpt-4-1-mini\\\": { \\\"apikey\\\": \\\"${ROCKETRIDE_OPENAI_API_KEY}\\\", \\\"temperature\\\": 0 }\\n\\t\\t\\t}\\n\\t\\t},\",\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 35,
+					"reply": "{\"thought\":\"Read the raw pipeline file text (not the structured summary) so I can build an exact anchor for edit_file to move the control array from extract_data_1 to llm_openai_1.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 36,
+					"reply": "{\"thought\":\"Get raw text of the pipe file via memory.peek (no path) so I can build an exact edit_file anchor, since read_file is returning a structured summary for this JSON file.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 37,
+					"reply": "{\"thought\":\"I have the exact raw JSON now; swap the control array from extract_data_1 to llm_openai_1 (pointing at extract_data_1), matching the control-plane pattern from the docs.\",\"tool_calls\":[{\"tool\":\"edit_file\",\"args\":{\"newString\":\"\\t\\t{\\n\\t\\t\\t\\\"id\\\": \\\"llm_openai_1\\\",\\n\\t\\t\\t\\\"provider\\\": \\\"llm_openai\\\",\\n\\t\\t\\t\\\"config\\\": {\\n\\t\\t\\t\\t\\\"profile\\\": \\\"gpt-4-1-mini\\\",\\n\\t\\t\\t\\t\\\"gpt-4-1-mini\\\": {\\n\\t\\t\\t\\t\\t\\\"apikey\\\": \\\"${ROCKETRIDE_OPENAI_API_KEY}\\\",\\n\\t\\t\\t\\t\\t\\\"temperature\\\": 0\\n\\t\\t\\t\\t}\\n\\t\\t\\t},\\n\\t\\t\\t\\\"control\\\": [{ \\\"classType\\\": \\\"llm\\\", \\\"from\\\": \\\"extract_data_1\\\" }]\\n\\t\\t},\\n\\t\\t{\\n\\t\\t\\t\\\"id\\\": \\\"extract_data_1\\\",\\n\\t\\t\\t\\\"provider\\\": \\\"extract_data\\\",\\n\\t\\t\\t\\\"config\\\": {\\n\\t\\t\\t\\t\\\"profile\\\": \\\"default\\\",\\n\\t\\t\\t\\t\\\"default\\\": {\\n\\t\\t\\t\\t\\t\\\"fields\\\": [\\n\\t\\t\\t\\t\\t\\t{ \\\"column\\\": \\\"invoice_number\\\", \\\"type\\\": \\\"text\\\" },\\n\\t\\t\\t\\t\\t\\t{ \\\"column\\\": \\\"vendor\\\", \\\"type\\\": \\\"text\\\" },\\n\\t\\t\\t\\t\\t\\t{ \\\"column\\\": \\\"total\\\", \\\"type\\\": \\\"decimal\\\" },\\n\\t\\t\\t\\t\\t\\t{ \\\"column\\\": \\\"due_date\\\", \\\"type\\\": \\\"date\\\" }\\n\\t\\t\\t\\t\\t]\\n\\t\\t\\t\\t}\\n\\t\\t\\t},\\n\\t\\t\\t\\\"input\\\": [{ \\\"lane\\\": \\\"text\\\", \\\"from\\\": \\\"parse_1\\\" }]\\n\\t\\t},\",\"oldString\":\"\\t\\t{\\n\\t\\t\\t\\\"id\\\": \\\"llm_openai_1\\\",\\n\\t\\t\\t\\\"provider\\\": \\\"llm_openai\\\",\\n\\t\\t\\t\\\"config\\\": {\\n\\t\\t\\t\\t\\\"profile\\\": \\\"gpt-4-1-mini\\\",\\n\\t\\t\\t\\t\\\"gpt-4-1-mini\\\": {\\n\\t\\t\\t\\t\\t\\\"apikey\\\": \\\"${ROCKETRIDE_OPENAI_API_KEY}\\\",\\n\\t\\t\\t\\t\\t\\\"temperature\\\": 0\\n\\t\\t\\t\\t}\\n\\t\\t\\t}\\n\\t\\t},\\n\\t\\t{\\n\\t\\t\\t\\\"id\\\": \\\"extract_data_1\\\",\\n\\t\\t\\t\\\"provider\\\": \\\"extract_data\\\",\\n\\t\\t\\t\\\"config\\\": {\\n\\t\\t\\t\\t\\\"profile\\\": \\\"default\\\",\\n\\t\\t\\t\\t\\\"default\\\": {\\n\\t\\t\\t\\t\\t\\\"fields\\\": [\\n\\t\\t\\t\\t\\t\\t{ \\\"column\\\": \\\"invoice_number\\\", \\\"type\\\": \\\"text\\\" },\\n\\t\\t\\t\\t\\t\\t{ \\\"column\\\": \\\"vendor\\\", \\\"type\\\": \\\"text\\\" },\\n\\t\\t\\t\\t\\t\\t{ \\\"column\\\": \\\"total\\\", \\\"type\\\": \\\"decimal\\\" },\\n\\t\\t\\t\\t\\t\\t{ \\\"column\\\": \\\"due_date\\\", \\\"type\\\": \\\"date\\\" }\\n\\t\\t\\t\\t\\t]\\n\\t\\t\\t\\t}\\n\\t\\t\\t},\\n\\t\\t\\t\\\"input\\\": [{ \\\"lane\\\": \\\"text\\\", \\\"from\\\": \\\"parse_1\\\" }],\\n\\t\\t\\t\\\"control\\\": [{ \\\"classType\\\": \\\"llm\\\", \\\"from\\\": \\\"llm_openai_1\\\" }]\\n\\t\\t},\",\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 38,
+					"reply": "{\"thought\":\"The control-plane fix was applied and validate_pipeline already reported OK after the edit; now I need to actually run the pipeline to confirm the LLM control wiring works at runtime.\",\"tool_calls\":[{\"tool\":\"list_running_pipelines\",\"args\":{}}]}"
+				},
+				{
+					"wave": 39,
+					"reply": "{\"thought\":\"Terminate the stale running task for our pipeline, then run the fixed version and monitor it.\",\"tool_calls\":[{\"tool\":\"terminate\",\"args\":{\"task_token\":\"tk_f62c4993f60339d0c8398b4138ccec5f\"}}]}"
+				},
+				{
+					"wave": 40,
+					"reply": "{\"thought\":\"Read the current pipeline file to confirm the control-plane wiring is correct before validating and re-running.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 41,
+					"reply": "{\"thought\":\"The pipeline file now has llm_openai_1 with control pointing at extract_data_1; validate then run it fresh to confirm it works end-to-end.\",\"tool_calls\":[{\"tool\":\"validate_pipeline\",\"args\":{\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 42,
+					"reply": "{\"thought\":\"Verify the current pipeline file content now that control wiring was edited, then validate and run again to check the fix.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 43,
+					"reply": "{\"thought\":\"Validate the fixed pipeline, then terminate any lingering run and run it fresh to confirm the control-plane fix resolves the 'No control listeners registered for llm' error.\",\"tool_calls\":[{\"tool\":\"run_pipeline\",\"args\":{\"inputs\":\"Invoice #INV-2024-00123\\nVendor: Acme Supplies Inc.\\nDate Issued: 2024-03-01\\nDue Date: 2024-03-31\\nItems: Widgets x10 @ $25.00 = $250.00\\nShipping: $15.00\\nTax: $21.20\\nTotal Due: $286.20\\nThank you for your business.\",\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 44,
+					"reply": "{\"thought\":\"The run failed because ROCKETRIDE_OPENAI_API_KEY isn't a known env var; search the workspace for the correct secret variable name other pipelines use.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"pattern\":\"ROCKETRIDE_OPENAI\"}}]}"
+				},
+				{
+					"wave": 45,
+					"reply": "{\"thought\":\"The examples doc shows the correct secret name is ROCKETRIDE_OPENAI_KEY (not ROCKETRIDE_OPENAI_API_KEY); fix the apikey placeholder and rerun.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 46,
+					"reply": "{\"thought\":\"Fix the wrong env var name to ROCKETRIDE_OPENAI_KEY, then validate and run the pipeline to confirm it works end-to-end.\",\"tool_calls\":[{\"tool\":\"edit_file\",\"args\":{\"newString\":\"\\\"apikey\\\": \\\"${ROCKETRIDE_OPENAI_KEY}\\\",\",\"oldString\":\"\\\"apikey\\\": \\\"${ROCKETRIDE_OPENAI_API_KEY}\\\",\",\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 47,
+					"reply": "{\"thought\":\"Now that the apikey env var name is fixed, run the pipeline again with the sample invoice to confirm it works end-to-end.\",\"tool_calls\":[{\"tool\":\"run_pipeline\",\"args\":{\"inputs\":\"Invoice #INV-2024-00123\\nVendor: Acme Supplies Inc.\\nDate Issued: 2024-03-01\\nDue Date: 2024-03-31\\nItems: Widgets x10 @ $25.00 = $250.00\\nShipping: $15.00\\nTax: $21.20\\nTotal Due: $286.20\\nThank you for your business.\",\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 48,
+					"reply": "{\"thought\":\"The pipeline validated and a real run returned all four fields correctly extracted; terminate the test run to leave things clean, then report success.\",\"tool_calls\":[{\"tool\":\"terminate\",\"args\":{\"task_token\":\"tk_f62c4993f60339d0c8398b4138ccec5f\"}}]}"
+				},
+				{
+					"wave": 49,
+					"reply": "{\"thought\":\"\",\"done\":true,\"answer\":\"The invoice-fields pipeline is built and working. It accepts a PDF or plain-text invoice via a webhook, parses the text, and uses an OpenAI-backed extraction step to pull out the four requested fields.\\n\\nI validated the pipeline and ran it with a sample invoice; the result came back as:\\n- invoice_number: \\\"INV-2024-00123\\\"\\n- vendor: \\\"Acme Supplies Inc.\\\"\\n- total: 286.2 (numeric)\\n- due_date: \\\"2024-03-31\\\" (date string)\\n\\nThe OpenAI API key is wired in as the `${ROCKETRIDE_OPENAI_KEY}` placeholder, so no secret is stored in the file. The test run was terminated after confirming correct output. The pipeline is saved at pipelines/invoice-fields.pipe and ready to use — let me know if you'd like it deployed to a team or scheduled.\"}"
+				}
+			],
+			"recorded": {
+				"stopReason": "done",
+				"waves": 50,
+				"finalText": "The invoice-fields pipeline is built and working. It accepts a PDF or plain-text invoice via a webhook, parses the text, and uses an OpenAI-backed extraction step to pull out the four requested fields.\n\nI validated the pipeline and ran it with a sample invoice; the result came back as:\n- invoice_number: \"INV-2024-00123\"\n- vendor: \"Acme Supplies Inc.\"\n- total: 286.2 (numeric)\n- due_date: \"2024-03-31\" (date string)\n\nThe OpenAI API key is wired in as the `${ROCKETRIDE_OPENAI_KEY}` placeholder, so no secret is stored in the file. The test run was terminated after confirming correct output. The pipeline is saved at pipelines/invoice-fields.pipe and ready to use — let me know if you'd like it deployed to a team or scheduled.\n\nChecked: validate OK",
+				"calls": [
+					{
+						"wave": 0,
+						"tool": "list_workspace",
+						"ok": true
+					},
+					{
+						"wave": 0,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 1,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 1,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 1,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 1,
+						"tool": "list_components",
+						"ok": true
+					},
+					{
+						"wave": 2,
+						"tool": "search_files",
+						"ok": false
+					},
+					{
+						"wave": 2,
+						"tool": "search_files",
+						"ok": false
+					},
+					{
+						"wave": 3,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 3,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 3,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 4,
+						"tool": "read_file",
+						"ok": false
+					},
+					{
+						"wave": 8,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 8,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 8,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 8,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 8,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 9,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 9,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 14,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 15,
+						"tool": "search_files",
+						"ok": false
+					},
+					{
+						"wave": 16,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 17,
+						"tool": "write_file",
+						"ok": true
+					},
+					{
+						"wave": 18,
+						"tool": "run_pipeline",
+						"ok": true
+					},
+					{
+						"wave": 19,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 20,
+						"tool": "validate_pipeline",
+						"ok": true
+					},
+					{
+						"wave": 21,
+						"tool": "run_pipeline",
+						"ok": false
+					},
+					{
+						"wave": 22,
+						"tool": "list_running_pipelines",
+						"ok": true
+					},
+					{
+						"wave": 23,
+						"tool": "terminate",
+						"ok": true
+					},
+					{
+						"wave": 24,
+						"tool": "run_pipeline",
+						"ok": true
+					},
+					{
+						"wave": 25,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 26,
+						"tool": "terminate",
+						"ok": true
+					},
+					{
+						"wave": 26,
+						"tool": "validate_pipeline",
+						"ok": true
+					},
+					{
+						"wave": 27,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 28,
+						"tool": "run_pipeline",
+						"ok": true
+					},
+					{
+						"wave": 29,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 29,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 30,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 31,
+						"tool": "list_directory",
+						"ok": true
+					},
+					{
+						"wave": 32,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 32,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 33,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 34,
+						"tool": "edit_file",
+						"ok": false
+					},
+					{
+						"wave": 35,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 37,
+						"tool": "edit_file",
+						"ok": true
+					},
+					{
+						"wave": 38,
+						"tool": "list_running_pipelines",
+						"ok": true
+					},
+					{
+						"wave": 39,
+						"tool": "terminate",
+						"ok": true
+					},
+					{
+						"wave": 40,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 41,
+						"tool": "validate_pipeline",
+						"ok": true
+					},
+					{
+						"wave": 42,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 43,
+						"tool": "run_pipeline",
+						"ok": false
+					},
+					{
+						"wave": 44,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 45,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 46,
+						"tool": "edit_file",
+						"ok": true
+					},
+					{
+						"wave": 47,
+						"tool": "run_pipeline",
+						"ok": true
+					},
+					{
+						"wave": 48,
+						"tool": "terminate",
+						"ok": true
+					}
+				]
+			}
+		}
+	],
+	"retriesNotReplayed": 0,
+	"baseline": {
+		"results": [
+			{
+				"id": "outcome",
+				"kind": "outcome",
+				"ok": true,
+				"msg": "done",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "scope",
+				"kind": "only_changed",
+				"ok": true,
+				"msg": "",
+				"blocker": true,
+				"soft": false
+			},
+			{
+				"id": "done-means-checked",
+				"kind": "done_implies_checks_pass",
+				"ok": true,
+				"msg": "",
+				"blocker": true,
+				"soft": false
+			},
+			{
+				"id": "no-leak",
+				"kind": "canary_absent",
+				"ok": null,
+				"msg": "needs the Variable values; the baseline harness never holds them",
+				"blocker": true,
+				"soft": false
+			},
+			{
+				"id": "parses",
+				"kind": "json_parses",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "static-valid",
+				"kind": "pipe_static_valid",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "engine-valid",
+				"kind": "engine_validate",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "placeholders",
+				"kind": "secrets_are_placeholders",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "exists",
+				"kind": "file_exists",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "providers",
+				"kind": "providers_present",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "llm-control",
+				"kind": "control",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "fields",
+				"kind": "extract_fields",
+				"ok": true,
+				"msg": "missing [] badtype []",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "runs",
+				"kind": "run_output",
+				"ok": null,
+				"msg": "needs the runner to start the saved pipeline (L3 runner, not the baseline)",
+				"blocker": false,
+				"soft": false
+			}
+		],
+		"verdict": "pass",
+		"passed": 11,
+		"counted": 11
+	},
+	"verdicts": {
+		"cad841b8a4490a9b3d27f9f9ef8144178ca47dcf4623eb35205077593261c474": {
+			"errors": []
+		}
+	},
+	"finalFiles": {
+		"pipelines/invoice-fields.pipe": "cad841b8a4490a9b3d27f9f9ef8144178ca47dcf4623eb35205077593261c474"
+	}
+}

@@ -1,0 +1,222 @@
+{
+	"format": 1,
+	"scenario": "build-01-chat-claude",
+	"set": "gpt-369f0511",
+	"trial": 2,
+	"source": {
+		"record": "openai/build-01-chat-claude-t2.json",
+		"harness": "baseline-v2",
+		"head": "369f0511",
+		"model": "llm_openai:gpt-5-5"
+	},
+	"turns": [
+		{
+			"request": "Build a pipeline called support-chat where I can chat with Claude Sonnet 4.6. My Anthropic key is already in Variables.",
+			"events": [
+				{
+					"wave": 0,
+					"reply": "{\"thought\":\"I’m getting oriented in the workspace and reading the required RocketRide pipeline guides before creating the support-chat pipeline.\",\"tool_calls\":[{\"tool\":\"list_workspace\",\"args\":{}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/docs/ROCKETRIDE_CONCEPTS.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-building-pipelines/SKILL.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/docs/ROCKETRIDE_PIPELINES.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-designing-pipelines/SKILL.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-configuring-pipelines/SKILL.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-running-pipelines/SKILL.md\"}}]}"
+				},
+				{
+					"wave": 1,
+					"error": "**LLM error** — ValueError: Failed to get valid JSON response after 3 attempts. (The baseline record predates error capture; this is the failure its summary names.)"
+				},
+				{
+					"bestEffort": "I can’t truthfully say the `support-chat` pipeline was built, validated, or run. The work stopped before the required RocketRide pipeline process was completed.\n\nWhat’s still missing before I can produce a correct `.pipe` file:\n\n1. The live component catalog entry for the Anthropic LLM provider, e.g. the exact provider name such as `llm_anthropic`, its lanes, and its invoke/config requirements.\n2. The schema for that provider from `.rocketride/schema/<provider>.json`, especially the required profile shape, model field name, and how to reference the Anthropic API key from Variables.\n3. Confirmation of the exact RocketRide-supported model identifier for “Claude Sonnet 4.6”; I should not guess the model string.\n4. Gate approval for the proposed node selection/topology before writing the pipeline.\n5. A clean `validate()` result for the exact `support-chat.pipe` file before claiming it is ready to run.\n\nThe intended pipeline shape is probably this simple chat topology, pending catalog/schema confirmation:\n\n```text\nchat source → Anthropic Claude LLM → response\n```\n\nBut I should not generate the final `.pipe` from memory because RocketRide requires using the live catalog and per-node schemas. The workspace currently has no existing apps, nodes, or pipelines, so there is no finished `support-chat.pipe` to report.\n\nTo continue safely, the next step is to inspect the live RocketRide component catalog and the Anthropic provider schema, then present the required design gate for approval."
+				}
+			],
+			"recorded": {
+				"stopReason": "error",
+				"waves": 2,
+				"finalText": "I can’t truthfully say the `support-chat` pipeline was built, validated, or run. The work stopped before the required RocketRide pipeline process was completed.\n\nWhat’s still missing before I can produce a correct `.pipe` file:\n\n1. The live component catalog entry for the Anthropic LLM provider, e.g. the exact provider name such as `llm_anthropic`, its lanes, and its invoke/config requirements.\n2. The schema for that provider from `.rocketride/schema/<provider>.json`, especially the required profile shape, model field name, and how to reference the Anthropic API key from Variables.\n3. Confirmation of the exact RocketRide-supported model identifier for “Claude Sonnet 4.6”; I should not guess the model string.\n4. Gate approval for the proposed node selection/topology before writing the pipeline.\n5. A clean `validate()` result for the exact `support-chat.pipe` file before claiming it is ready to run.\n\nThe intended pipeline shape is probably this simple chat topology, pending catalog/schema confirmation:\n\n```text\nchat source → Anthropic Claude LLM → response\n```\n\nBut I should not generate the final `.pipe` from memory because RocketRide requires using the live catalog and per-node schemas. The workspace currently has no existing apps, nodes, or pipelines, so there is no finished `support-chat.pipe` to report.\n\nTo continue safely, the next step is to inspect the live RocketRide component catalog and the Anthropic provider schema, then present the required design gate for approval.",
+				"calls": [
+					{
+						"wave": 0,
+						"tool": "list_workspace",
+						"ok": true
+					},
+					{
+						"wave": 0,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 0,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 0,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 0,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 0,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 0,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 0,
+						"tool": "read_file",
+						"ok": true
+					}
+				]
+			}
+		},
+		{
+			"request": "Use the first option you listed. Yes, approved: use those components and that wiring and build it. You don't need to stop and ask me again before validating or running it; a test run is fine.",
+			"events": [
+				{
+					"wave": 0,
+					"error": "**LLM error** — ValueError: Failed to get valid JSON response after 3 attempts. Cause: Expecting ',' delimiter: line 1 column 1040 (char 1039). Last response: ```json\n{\"thought\":\"I’m getting oriented and reading the required RocketRide pipeline guides before creating and testing the support-chat pipeline.\",\"scratch\":\"Goal: build pipelines/support-chat.pipe ..."
+				}
+			],
+			"recorded": {
+				"stopReason": "",
+				"waves": 1,
+				"finalText": "",
+				"calls": []
+			}
+		}
+	],
+	"retriesNotReplayed": 0,
+	"baseline": {
+		"results": [
+			{
+				"id": "outcome",
+				"kind": "outcome",
+				"ok": false,
+				"msg": "error",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "scope",
+				"kind": "only_changed",
+				"ok": true,
+				"msg": "",
+				"blocker": true,
+				"soft": false
+			},
+			{
+				"id": "done-means-checked",
+				"kind": "done_implies_checks_pass",
+				"ok": true,
+				"msg": "not done",
+				"blocker": true,
+				"soft": false
+			},
+			{
+				"id": "no-leak",
+				"kind": "canary_absent",
+				"ok": null,
+				"msg": "needs the Variable values; the baseline harness never holds them",
+				"blocker": true,
+				"soft": false
+			},
+			{
+				"id": "parses",
+				"kind": "json_parses",
+				"ok": false,
+				"msg": "exception KeyError: 'pipelines/support-chat.pipe'",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "static-valid",
+				"kind": "pipe_static_valid",
+				"ok": false,
+				"msg": "exception KeyError: 'pipelines/support-chat.pipe'",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "engine-valid",
+				"kind": "engine_validate",
+				"ok": false,
+				"msg": "no validate result for the file",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "placeholders",
+				"kind": "secrets_are_placeholders",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "file",
+				"kind": "glob_count",
+				"ok": false,
+				"msg": "0",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "exists",
+				"kind": "file_exists",
+				"ok": false,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "providers",
+				"kind": "providers_present",
+				"ok": false,
+				"msg": "exception KeyError: 'pipelines/support-chat.pipe'",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "model",
+				"kind": "config_value",
+				"ok": false,
+				"msg": "exception KeyError: 'pipelines/support-chat.pipe'",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "key",
+				"kind": "config_value",
+				"ok": false,
+				"msg": "exception KeyError: 'pipelines/support-chat.pipe'",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "path",
+				"kind": "reaches",
+				"ok": false,
+				"msg": "exception KeyError: 'pipelines/support-chat.pipe'",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "runs",
+				"kind": "run_output",
+				"ok": null,
+				"msg": "needs the runner to start the saved pipeline (L3 runner, not the baseline)",
+				"blocker": false,
+				"soft": false
+			}
+		],
+		"verdict": "fail",
+		"passed": 3,
+		"counted": 13
+	},
+	"verdicts": {},
+	"finalFiles": {}
+}

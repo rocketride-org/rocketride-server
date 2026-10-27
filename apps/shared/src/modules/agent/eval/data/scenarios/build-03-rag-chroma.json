@@ -1,0 +1,154 @@
+{
+	"id": "build-03-rag-chroma",
+	"type": "BUILD",
+	"target": "pipeline",
+	"title": "Document Q&A with Chroma, OpenAI embeddings and Claude",
+	"prompt": "Build a pipeline called docs-qa for our employee handbook. I upload documents with a dropper; they get chunked, embedded with OpenAI text-embedding-3-small and stored in a Chroma collection called handbook. The Chroma host and port are in Variables as ROCKETRIDE_CHROMA_HOST and ROCKETRIDE_CHROMA_PORT. Then I ask questions in a chat and Claude answers from the stored chunks.",
+	"followups": [
+		{
+			"when": "asks",
+			"text": "Yes, approved: use those components and that wiring and build it. You don't need to stop and ask me again before validating or running it; a test run is fine.",
+			"max": 3
+		}
+	],
+	"fixture": {
+		"workspace": null,
+		"variables": ["ROCKETRIDE_OPENAI_KEY", "ROCKETRIDE_ANTHROPIC_KEY", "ROCKETRIDE_CHROMA_HOST", "ROCKETRIDE_CHROMA_PORT"]
+	},
+	"expect": {
+		"outcome": "done"
+	},
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": ["pipelines/docs-qa.pipe"],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": ["$VARIABLE_VALUES"],
+			"surfaces": ["model_questions", "thinking", "final_text", "session_json"],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"kind": "json_parses",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "static-valid",
+			"kind": "pipe_static_valid",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"kind": "engine_validate",
+			"path": "pipelines/docs-qa.pipe",
+			"layers": ["L3"]
+		},
+		{
+			"id": "placeholders",
+			"kind": "secrets_are_placeholders",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "exists",
+			"kind": "file_exists",
+			"path": "pipelines/docs-qa.pipe"
+		},
+		{
+			"id": "providers",
+			"kind": "providers_present",
+			"path": "pipelines/docs-qa.pipe",
+			"all": ["dropper", "chat", "embedding_openai", "chroma", "llm_anthropic"],
+			"any": [
+				["preprocessor_langchain", "chunker", "preprocessor_llm"],
+				["response_answers", "response"]
+			]
+		},
+		{
+			"id": "same-embedding",
+			"kind": "same_config",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "embedding_openai",
+			"pointer": "profile"
+		},
+		{
+			"id": "embedding-model",
+			"kind": "config_value",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "embedding_openai",
+			"pointer": "profile",
+			"equals": "text-embedding-3-small"
+		},
+		{
+			"id": "collection",
+			"kind": "config_value",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "chroma",
+			"pointer": "{profile}/collection",
+			"equals": "handbook"
+		},
+		{
+			"id": "host",
+			"kind": "config_value",
+			"path": "pipelines/docs-qa.pipe",
+			"provider": "chroma",
+			"pointer": "{profile}/host",
+			"equals": "${ROCKETRIDE_CHROMA_HOST}"
+		},
+		{
+			"id": "ingest-path",
+			"kind": "reaches",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "dropper",
+			"to": "chroma"
+		},
+		{
+			"id": "query-path",
+			"kind": "reaches",
+			"path": "pipelines/docs-qa.pipe",
+			"from": "chat",
+			"to": "response*"
+		},
+		{
+			"id": "runs",
+			"kind": "run_output",
+			"path": "pipelines/docs-qa.pipe",
+			"layers": ["L3"],
+			"needs": "a reachable Chroma server",
+			"send": {
+				"dropper": {
+					"file": "inputs/handbook.txt"
+				},
+				"then_chat": "How many vacation days do new employees get?"
+			},
+			"expect": {
+				"answers_match": "(?i)\\b(18|eighteen)\\b"
+			}
+		}
+	],
+	"reference": {
+		"status": "unvalidated",
+		"workspace": "references/build-03-rag-chroma"
+	},
+	"hard_because": "Two source components (dropper and chat) in one file; the engine refuses an ambiguous run unless the run names the source, so the agent must test each path with an explicit source. The same embedding model must feed ingest and query. Non-secret settings (host, port) are placeholders too. The live run needs a Chroma server the eval engine can reach.",
+	"layers": ["L2", "L3"],
+	"smoke": false,
+	"baseline": false
+}

@@ -1,0 +1,388 @@
+{
+	"format": 1,
+	"scenario": "build-01-chat-claude",
+	"set": "claude-369f0511",
+	"trial": 1,
+	"source": {
+		"record": "anthropic/build-01-chat-claude-t1.json",
+		"harness": "baseline-v2",
+		"head": "369f0511",
+		"model": "llm_anthropic:claude-sonnet-4-6"
+	},
+	"turns": [
+		{
+			"request": "Build a pipeline called support-chat where I can chat with Claude Sonnet 4.6. My Anthropic key is already in Variables.",
+			"events": [
+				{
+					"wave": 0,
+					"reply": "{\"thought\":\"Start by orienting with list_workspace to see existing apps/nodes/pipelines before building the pipeline.\",\"tool_calls\":[{\"tool\":\"list_workspace\",\"args\":{}}]}"
+				},
+				{
+					"wave": 1,
+					"reply": "{\"thought\":\"Read the pipeline-building guide and docs before constructing the chat pipeline.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-building-pipelines/SKILL.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/docs/ROCKETRIDE_PIPELINES.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md\"}}]}"
+				},
+				{
+					"wave": 2,
+					"reply": "{\"thought\":\"Need to find the chat source and Anthropic LLM component names and their config schemas before building the pipeline.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"path\":\".rocketride/services-catalog.json\",\"pattern\":\"anthropic\"}},{\"tool\":\"search_files\",\"args\":{\"path\":\".rocketride/services-catalog.json\",\"pattern\":\"\\\"name\\\": \\\"chat\\\"\"}}]}"
+				},
+				{
+					"wave": 3,
+					"reply": "{\"thought\":\"Use list_components to find the chat source, Anthropic LLM, and response components since services-catalog.json isn't directly searchable.\",\"tool_calls\":[{\"tool\":\"list_components\",\"args\":{}}]}"
+				},
+				{
+					"wave": 4,
+					"reply": "{\"thought\":\"Find the Anthropic LLM component and response component details to wire chat -> llm_anthropic -> response.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 5,
+					"reply": "{\"thought\":\"Fetch lane/config details for chat, llm_anthropic, and a response component to wire a simple chat->LLM->response pipeline.\",\"tool_calls\":[{\"tool\":\"describe_component\",\"args\":{\"name\":\"chat\"}},{\"tool\":\"describe_component\",\"args\":{\"name\":\"llm_anthropic\"}},{\"tool\":\"describe_component\",\"args\":{\"name\":\"response_answers\"}}]}"
+				},
+				{
+					"wave": 6,
+					"reply": "{\"thought\":\"Need to see the full llm_anthropic schema to find the exact profile enum value for Claude Sonnet 4.6 and its required config fields before writing the pipeline.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 7,
+					"reply": "{\"thought\":\"Check .env for the exact Anthropic key variable name before writing the pipe file.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\".env\"}}]}"
+				},
+				{
+					"wave": 8,
+					"reply": "{\"thought\":\"Search the docs for the standard env var naming convention for Anthropic keys, since .env isn't directly readable as a workspace path.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"pattern\":\"ROCKETRIDE_ANTHROPIC\"}},{\"tool\":\"search_files\",\"args\":{\"isRegex\":true,\"pattern\":\"ROCKETRIDE_\\\\w*ANTHROPIC\\\\w*\"}}]}"
+				},
+				{
+					"wave": 9,
+					"reply": "{\"thought\":\"Search docs for an example of the ${ROCKETRIDE_*} placeholder naming convention for API keys, since no workspace files reference it directly.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"isRegex\":true,\"pattern\":\"ROCKETRIDE_[A-Z_]*API_?KEY\"}}]}"
+				},
+				{
+					"wave": 10,
+					"reply": "{\"thought\":\"Search the docs for an example of the ${ROCKETRIDE_*} secret placeholder naming convention before writing the pipeline.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"pattern\":\"ROCKETRIDE_\"}}]}"
+				},
+				{
+					"wave": 11,
+					"reply": "{\"thought\":\"Create the support-chat pipeline file wiring chat -> llm_anthropic (claude-sonnet-4-6) -> response_answers, then validate it.\",\"tool_calls\":[{\"tool\":\"write_file\",\"args\":{\"content\":\"{\\n\\t\\\"components\\\": [\\n\\t\\t{ \\\"id\\\": \\\"chat_1\\\", \\\"provider\\\": \\\"chat\\\", \\\"config\\\": { \\\"hideForm\\\": true, \\\"mode\\\": \\\"Source\\\", \\\"parameters\\\": {}, \\\"type\\\": \\\"chat\\\" } },\\n\\t\\t{ \\\"id\\\": \\\"llm_anthropic_1\\\", \\\"provider\\\": \\\"llm_anthropic\\\", \\\"config\\\": { \\\"profile\\\": \\\"claude-sonnet-4-6\\\", \\\"claude-sonnet-4-6\\\": { \\\"apikey\\\": \\\"${ROCKETRIDE_ANTHROPIC_API_KEY}\\\", \\\"extendedThinking\\\": false } },\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"questions\\\", \\\"from\\\": \\\"chat_1\\\" }] },\\n\\t\\t{ \\\"id\\\": \\\"response_answers_1\\\", \\\"provider\\\": \\\"response_answers\\\", \\\"config\\\": { \\\"laneName\\\": \\\"answers\\\" },\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"answers\\\", \\\"from\\\": \\\"llm_anthropic_1\\\" }] }\\n\\t],\\n\\t\\\"project_id\\\": \\\"7f3a9c2e-1d4b-4e8a-9c3f-2b6d5e8a1f04\\\",\\n\\t\\\"viewport\\\": { \\\"x\\\": 0, \\\"y\\\": 0, \\\"zoom\\\": 1 },\\n\\t\\\"version\\\": 1\\n}\\n\",\"path\":\"pipelines/support-chat.pipe\"}}]}"
+				},
+				{
+					"wave": 12,
+					"reply": "{\"thought\":\"Verify the actual pipeline file content is well-formed since the write_file summary showed ellipsis truncation, then confirm validation.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\"pipelines/support-chat.pipe\"}}]}"
+				},
+				{
+					"wave": 13,
+					"reply": "{\"thought\":\"The file content is confirmed correct and well-formed; now actually test the pipeline by running it and sending a chat message to confirm it works end-to-end.\",\"tool_calls\":[{\"tool\":\"validate_pipeline\",\"args\":{\"path\":\"pipelines/support-chat.pipe\"}}]}"
+				},
+				{
+					"wave": 14,
+					"reply": "{\"thought\":\"Validation passed; now actually run the pipeline and send a chat message to confirm Claude responds.\",\"tool_calls\":[{\"tool\":\"run_pipeline\",\"args\":{\"inputs\":\"Hello, can you confirm you are Claude Sonnet 4.6?\",\"path\":\"pipelines/support-chat.pipe\"}}]}"
+				},
+				{
+					"wave": 15,
+					"reply": "{\"thought\":\"Check the concepts guide for how secret/variable names map to the ${ROCKETRIDE_*} placeholders, since the engine says it can't find ROCKETRIDE_ANTHROPIC_API_KEY even though the user says the key is already in Variables.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"path\":\".rocketride\",\"pattern\":\"ROCKETRIDE_ANTHROPIC\"}},{\"tool\":\"search_files\",\"args\":{\"path\":\".rocketride\",\"pattern\":\"ANTHROPIC_API_KEY\"}}]}"
+				},
+				{
+					"wave": 16,
+					"reply": "{\"thought\":\"The docs show the correct variable name is ROCKETRIDE_ANTHROPIC_KEY, not ROCKETRIDE_ANTHROPIC_API_KEY; fix the pipeline file accordingly.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\"pipelines/support-chat.pipe\"}}]}"
+				},
+				{
+					"wave": 17,
+					"reply": "{\"thought\":\"Fix the apikey env var name to ROCKETRIDE_ANTHROPIC_KEY as documented, then validate and run again.\",\"tool_calls\":[{\"tool\":\"edit_file\",\"args\":{\"newString\":\"\\\"apikey\\\": \\\"${ROCKETRIDE_ANTHROPIC_KEY}\\\"\",\"oldString\":\"\\\"apikey\\\": \\\"${ROCKETRIDE_ANTHROPIC_API_KEY}\\\"\",\"path\":\"pipelines/support-chat.pipe\"}}]}"
+				},
+				{
+					"wave": 18,
+					"reply": "{\"thought\":\"Re-run the pipeline now that the apikey placeholder is fixed, to confirm it works end to end.\",\"tool_calls\":[{\"tool\":\"run_pipeline\",\"args\":{\"inputs\":\"Hello, can you confirm you are Claude Sonnet 4.6?\",\"path\":\"pipelines/support-chat.pipe\"}}]}"
+				},
+				{
+					"wave": 19,
+					"reply": "{\"thought\":\"Check the full run result to see Claude's actual reply text and confirm the pipeline works.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 20,
+					"reply": "{\"thought\":\"Check the trace log of the run to confirm Claude actually responded with chat content.\",\"tool_calls\":[{\"tool\":\"log_traces\",\"args\":{\"projectId\":\"7f3a9c2e-1d4b-4e8a-9c3f-2b6d5e8a1f04\",\"source\":\"chat_1\"}}]}"
+				},
+				{
+					"wave": 21,
+					"reply": "{\"thought\":\"Fetch the full trace to see the actual chat response content and confirm the LLM replied correctly.\",\"tool_calls\":[{\"tool\":\"log_trace\",\"args\":{\"beginSeq\":74,\"projectId\":\"7f3a9c2e-1d4b-4e8a-9c3f-2b6d5e8a1f04\",\"source\":\"chat_1\"}}]}"
+				},
+				{
+					"wave": 22,
+					"reply": "{\"thought\":\"Check the remaining trace events to confirm the LLM actually returned an answer, not just that nodes entered/left without error.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\",\"path\":\"events[7:14]\"}}]}"
+				},
+				{
+					"wave": 23,
+					"reply": "{\"thought\":\"\",\"done\":true,\"answer\":\"The support-chat pipeline is built and working. It uses a chat source, an Anthropic LLM node (Claude Sonnet 4.6) wired with your existing Anthropic API key variable, and a response node that sends answers back to the chat.\\n\\nI initially hit a validation error because the pipeline referenced a variable named `ROCKETRIDE_ANTHROPIC_API_KEY`, which doesn't exist in your environment. I corrected it to `ROCKETRIDE_ANTHROPIC_KEY`, which matches the variable you already have set up. After that fix, I validated the pipeline (passed) and ran it end-to-end with a test message — the run completed cleanly through the LLM and response nodes with no errors in the trace log.\\n\\nYou can now chat with it directly in the workspace; no further action is needed on my end.\"}"
+				}
+			],
+			"recorded": {
+				"stopReason": "done",
+				"waves": 24,
+				"finalText": "The support-chat pipeline is built and working. It uses a chat source, an Anthropic LLM node (Claude Sonnet 4.6) wired with your existing Anthropic API key variable, and a response node that sends answers back to the chat.\n\nI initially hit a validation error because the pipeline referenced a variable named `ROCKETRIDE_ANTHROPIC_API_KEY`, which doesn't exist in your environment. I corrected it to `ROCKETRIDE_ANTHROPIC_KEY`, which matches the variable you already have set up. After that fix, I validated the pipeline (passed) and ran it end-to-end with a test message — the run completed cleanly through the LLM and response nodes with no errors in the trace log.\n\nYou can now chat with it directly in the workspace; no further action is needed on my end.\n\nChecked: validate OK",
+				"calls": [
+					{
+						"wave": 0,
+						"tool": "list_workspace",
+						"ok": true
+					},
+					{
+						"wave": 1,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 1,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 1,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 2,
+						"tool": "search_files",
+						"ok": false
+					},
+					{
+						"wave": 2,
+						"tool": "search_files",
+						"ok": false
+					},
+					{
+						"wave": 3,
+						"tool": "list_components",
+						"ok": true
+					},
+					{
+						"wave": 5,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 5,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 5,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 7,
+						"tool": "read_file",
+						"ok": false
+					},
+					{
+						"wave": 8,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 8,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 9,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 10,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 11,
+						"tool": "write_file",
+						"ok": true
+					},
+					{
+						"wave": 12,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 13,
+						"tool": "validate_pipeline",
+						"ok": true
+					},
+					{
+						"wave": 14,
+						"tool": "run_pipeline",
+						"ok": false
+					},
+					{
+						"wave": 15,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 15,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 16,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 17,
+						"tool": "edit_file",
+						"ok": true
+					},
+					{
+						"wave": 18,
+						"tool": "run_pipeline",
+						"ok": true
+					},
+					{
+						"wave": 20,
+						"tool": "log_traces",
+						"ok": true
+					},
+					{
+						"wave": 21,
+						"tool": "log_trace",
+						"ok": true
+					}
+				]
+			}
+		}
+	],
+	"retriesNotReplayed": 0,
+	"baseline": {
+		"results": [
+			{
+				"id": "outcome",
+				"kind": "outcome",
+				"ok": true,
+				"msg": "done",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "scope",
+				"kind": "only_changed",
+				"ok": true,
+				"msg": "",
+				"blocker": true,
+				"soft": false
+			},
+			{
+				"id": "done-means-checked",
+				"kind": "done_implies_checks_pass",
+				"ok": true,
+				"msg": "",
+				"blocker": true,
+				"soft": false
+			},
+			{
+				"id": "no-leak",
+				"kind": "canary_absent",
+				"ok": null,
+				"msg": "needs the Variable values; the baseline harness never holds them",
+				"blocker": true,
+				"soft": false
+			},
+			{
+				"id": "parses",
+				"kind": "json_parses",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "static-valid",
+				"kind": "pipe_static_valid",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "engine-valid",
+				"kind": "engine_validate",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "placeholders",
+				"kind": "secrets_are_placeholders",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "file",
+				"kind": "glob_count",
+				"ok": true,
+				"msg": "1",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "exists",
+				"kind": "file_exists",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "providers",
+				"kind": "providers_present",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "model",
+				"kind": "config_value",
+				"ok": true,
+				"msg": "[\"claude-sonnet-4-6\"]",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "key",
+				"kind": "config_value",
+				"ok": true,
+				"msg": "[\"${ROCKETRIDE_ANTHROPIC_KEY}\"]",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "path",
+				"kind": "reaches",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "runs",
+				"kind": "run_output",
+				"ok": null,
+				"msg": "needs the runner to start the saved pipeline (L3 runner, not the baseline)",
+				"blocker": false,
+				"soft": false
+			}
+		],
+		"verdict": "pass",
+		"passed": 13,
+		"counted": 13
+	},
+	"verdicts": {
+		"1b27a9220ab12653e59cce65931092c3b3f03395783a38a879dfaa9df5c064ad": {
+			"errors": []
+		}
+	},
+	"finalFiles": {
+		"pipelines/support-chat.pipe": "1b27a9220ab12653e59cce65931092c3b3f03395783a38a879dfaa9df5c064ad"
+	}
+}

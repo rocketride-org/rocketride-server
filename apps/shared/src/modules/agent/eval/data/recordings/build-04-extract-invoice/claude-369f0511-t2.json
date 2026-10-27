@@ -1,0 +1,318 @@
+{
+	"format": 1,
+	"scenario": "build-04-extract-invoice",
+	"set": "claude-369f0511",
+	"trial": 2,
+	"source": {
+		"record": "anthropic/build-04-extract-invoice-t2.json",
+		"harness": "baseline-v3",
+		"head": "369f0511",
+		"model": "llm_anthropic:claude-sonnet-5"
+	},
+	"turns": [
+		{
+			"request": "Create a pipeline invoice-fields. I send an invoice file (PDF or plain text) to a webhook and get back four fields: invoice_number, vendor, total as a number and due_date as a date. Use OpenAI to do the extraction.",
+			"events": [
+				{
+					"wave": 0,
+					"reply": "{\"thought\":\"Start by orienting myself in the workspace and reading the pipeline-building guides.\",\"tool_calls\":[{\"tool\":\"list_workspace\",\"args\":{}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/docs/ROCKETRIDE_CONCEPTS.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-building-pipelines/SKILL.md\"}}]}"
+				},
+				{
+					"wave": 1,
+					"reply": "{\"thought\":\"Read the pipelines guide, component reference, and designing/configuring skills to learn how to build a webhook->LLM extraction pipeline.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/docs/ROCKETRIDE_PIPELINES.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/docs/ROCKETRIDE_COMPONENT_REFERENCE.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-designing-pipelines/SKILL.md\"}},{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/skills/rocketride-configuring-pipelines/SKILL.md\"}}]}"
+				},
+				{
+					"wave": 2,
+					"reply": "{\"thought\":\"Look at the component catalog to find webhook, extraction, and response providers before designing the pipeline.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\".rocketride/services-catalog.json\"}}]}"
+				},
+				{
+					"wave": 3,
+					"reply": "{\"thought\":\"Discover available components since services-catalog.json isn't directly readable as a guide; use list_components and then describe_component for the ones needed (webhook, parser, extraction, response).\",\"tool_calls\":[{\"tool\":\"list_components\",\"args\":{}}]}"
+				},
+				{
+					"wave": 4,
+					"reply": "{\"thought\":\"Look up the exact component names (parse, extract_data, llm_openai, response) from the already-fetched catalog before describing each one.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 5,
+					"reply": "{\"thought\":\"Look at the rest of the component catalog to find the generic 'parse' node and confirm extract_data/response component names before designing the pipeline.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 6,
+					"reply": "{\"thought\":\"Look at the rest of the component catalog to find the 'parse' node and confirm llm_openai/extract_data/response_answers exact names.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 7,
+					"reply": "{\"thought\":\"Fetch schemas/lanes for the candidate nodes (webhook, parse, extract_data, llm_openai, response_json) before wiring the pipeline.\",\"tool_calls\":[{\"tool\":\"describe_component\",\"args\":{\"name\":\"webhook\"}},{\"tool\":\"describe_component\",\"args\":{\"name\":\"parse\"}},{\"tool\":\"describe_component\",\"args\":{\"name\":\"extract_data\"}},{\"tool\":\"describe_component\",\"args\":{\"name\":\"llm_openai\"}},{\"tool\":\"describe_component\",\"args\":{\"name\":\"response_json\"}}]}"
+				},
+				{
+					"wave": 8,
+					"reply": "{\"thought\":\"Need to see extract_data's full field-config schema and check response_answers lanes before wiring the pipeline.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\",\"path\":\"Pipe.schema.dependencies.profile.oneOf[0]\"}},{\"tool\":\"describe_component\",\"args\":{\"name\":\"response_answers\"}}]}"
+				},
+				{
+					"wave": 9,
+					"reply": "{\"thought\":\"Need the llm_openai profile enum options and the exact shape for a simple profile to configure the LLM control node correctly.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\",\"path\":\"Pipe.schema.properties.profile\"}},{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\",\"path\":\"Pipe.schema.dependencies.profile.oneOf[1]\"}}]}"
+				},
+				{
+					"wave": 10,
+					"reply": "{\"thought\":\"Need the llm_openai schema's top-level profile enum list and a concrete non-custom profile's required fields, so peek the raw text for that section.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 11,
+					"reply": "{\"thought\":\"Need the top-level schema (properties/required, including full profile enum) for llm_openai to confirm parameters field and valid profile list before writing the pipeline.\",\"tool_calls\":[{\"tool\":\"memory.peek\",\"args\":{\"key\":\"wave-0.r0\"}}]}"
+				},
+				{
+					"wave": 12,
+					"reply": "{\"thought\":\"Search the pipelines guide for the exact control-array syntax used to wire an LLM into extract_data before writing the pipeline file.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"path\":\".rocketride/docs/ROCKETRIDE_PIPELINES.md\",\"pattern\":\"\\\"control\\\":\"}}]}"
+				},
+				{
+					"wave": 13,
+					"reply": "{\"thought\":\"Find the exact control-array wiring syntax for an invoke-requiring node like extract_data, by searching the pipelines doc directory for 'control' usage.\",\"tool_calls\":[{\"tool\":\"search_files\",\"args\":{\"maxResults\":30,\"path\":\".rocketride/docs\",\"pattern\":\"\\\"control\\\"\"}}]}"
+				},
+				{
+					"wave": 14,
+					"reply": "{\"thought\":\"Write the invoice-fields.pipe file with webhook->parse->extract_data(llm-controlled)->response_answers, using the control array syntax confirmed from the docs.\",\"tool_calls\":[{\"tool\":\"write_file\",\"args\":{\"content\":\"{\\n\\t\\\"components\\\": [\\n\\t\\t{ \\\"id\\\": \\\"webhook_1\\\", \\\"provider\\\": \\\"webhook\\\",\\n\\t\\t  \\\"config\\\": { \\\"hideForm\\\": true, \\\"mode\\\": \\\"Source\\\", \\\"parameters\\\": {}, \\\"type\\\": \\\"webhook\\\" } },\\n\\t\\t{ \\\"id\\\": \\\"parse_1\\\", \\\"provider\\\": \\\"parse\\\",\\n\\t\\t  \\\"config\\\": {},\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"tags\\\", \\\"from\\\": \\\"webhook_1\\\" }] },\\n\\t\\t{ \\\"id\\\": \\\"extract_data_1\\\", \\\"provider\\\": \\\"extract_data\\\",\\n\\t\\t  \\\"config\\\": {\\n\\t\\t\\t\\\"profile\\\": \\\"default\\\",\\n\\t\\t\\t\\\"default\\\": {\\n\\t\\t\\t  \\\"fields\\\": [\\n\\t\\t\\t\\t{ \\\"column\\\": \\\"invoice_number\\\", \\\"type\\\": \\\"text\\\", \\\"defval\\\": \\\"\\\" },\\n\\t\\t\\t\\t{ \\\"column\\\": \\\"vendor\\\", \\\"type\\\": \\\"text\\\", \\\"defval\\\": \\\"\\\" },\\n\\t\\t\\t\\t{ \\\"column\\\": \\\"total\\\", \\\"type\\\": \\\"decimal\\\", \\\"defval\\\": \\\"\\\" },\\n\\t\\t\\t\\t{ \\\"column\\\": \\\"due_date\\\", \\\"type\\\": \\\"date\\\", \\\"defval\\\": \\\"\\\" }\\n\\t\\t\\t  ]\\n\\t\\t\\t}\\n\\t\\t  },\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"text\\\", \\\"from\\\": \\\"parse_1\\\" }] },\\n\\t\\t{ \\\"id\\\": \\\"llm_openai_1\\\", \\\"provider\\\": \\\"llm_openai\\\",\\n\\t\\t  \\\"config\\\": {\\n\\t\\t\\t\\\"profile\\\": \\\"openai-5-4\\\",\\n\\t\\t\\t\\\"openai-5-4\\\": { \\\"apikey\\\": \\\"${ROCKETRIDE_OPENAI_KEY}\\\", \\\"temperature\\\": 0 }\\n\\t\\t  },\\n\\t\\t  \\\"control\\\": [{ \\\"classType\\\": \\\"llm\\\", \\\"from\\\": \\\"extract_data_1\\\" }] },\\n\\t\\t{ \\\"id\\\": \\\"response_answers_1\\\", \\\"provider\\\": \\\"response_answers\\\",\\n\\t\\t  \\\"config\\\": { \\\"laneName\\\": \\\"answers\\\" },\\n\\t\\t  \\\"input\\\": [{ \\\"lane\\\": \\\"answers\\\", \\\"from\\\": \\\"extract_data_1\\\" }] }\\n\\t],\\n\\t\\\"project_id\\\": \\\"7f3a1c4e-9b2d-4f6a-8e1d-2c5b9a7f3d61\\\",\\n\\t\\\"viewport\\\": { \\\"x\\\": 0, \\\"y\\\": 0, \\\"zoom\\\": 1 },\\n\\t\\\"version\\\": 1\\n}\\n\",\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 15,
+					"reply": "{\"thought\":\"Read the written pipeline file to verify full config (llm profile, control wiring) before testing it with a run.\",\"tool_calls\":[{\"tool\":\"read_file\",\"args\":{\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 16,
+					"reply": "{\"thought\":\"Run the validated pipeline with a sample invoice text to prove the extraction works end-to-end.\",\"tool_calls\":[{\"tool\":\"run_pipeline\",\"args\":{\"inputs\":\"INVOICE\\nInvoice Number: INV-2024-00123\\nVendor: Acme Supplies Inc.\\nTotal Due: $1,245.50\\nDue Date: 2024-08-15\\n\\nThank you for your business.\",\"path\":\"pipelines/invoice-fields.pipe\"}}]}"
+				},
+				{
+					"wave": 17,
+					"reply": "{\"thought\":\"\",\"done\":true,\"answer\":\"The invoice-fields pipeline is built and working. It's wired as: webhook_1 (accepts the uploaded PDF or text) → parse_1 (extracts text/markdown from the document) → extract_data_1 (pulls out invoice_number, vendor, total as decimal, and due_date as date, using the OpenAI LLM for extraction) → llm_openai_1 (controls the extraction, model gpt-5.4, API key via ${ROCKETRIDE_OPENAI_KEY}) → response_answers_1 (returns the four fields as JSON answers).\\n\\nI validated the pipeline (no errors) and ran it with a sample invoice text. It returned exactly the expected structured result:\\n- invoice_number: \\\"INV-2024-00123\\\"\\n- vendor: \\\"Acme Supplies Inc.\\\"\\n- total: 1245.5 (numeric)\\n- due_date: \\\"2024-08-15\\\"\\n\\nSend a PDF or plain-text invoice to the webhook and you'll get this same four-field JSON back. This is a standalone pipeline (no app), so there was nothing to run check_app on.\"}"
+				}
+			],
+			"recorded": {
+				"stopReason": "done",
+				"waves": 18,
+				"finalText": "The invoice-fields pipeline is built and working. It's wired as: webhook_1 (accepts the uploaded PDF or text) → parse_1 (extracts text/markdown from the document) → extract_data_1 (pulls out invoice_number, vendor, total as decimal, and due_date as date, using the OpenAI LLM for extraction) → llm_openai_1 (controls the extraction, model gpt-5.4, API key via ${ROCKETRIDE_OPENAI_KEY}) → response_answers_1 (returns the four fields as JSON answers).\n\nI validated the pipeline (no errors) and ran it with a sample invoice text. It returned exactly the expected structured result:\n- invoice_number: \"INV-2024-00123\"\n- vendor: \"Acme Supplies Inc.\"\n- total: 1245.5 (numeric)\n- due_date: \"2024-08-15\"\n\nSend a PDF or plain-text invoice to the webhook and you'll get this same four-field JSON back. This is a standalone pipeline (no app), so there was nothing to run check_app on.\n\nChecked: validate OK",
+				"calls": [
+					{
+						"wave": 0,
+						"tool": "list_workspace",
+						"ok": true
+					},
+					{
+						"wave": 0,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 0,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 1,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 1,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 1,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 1,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 2,
+						"tool": "read_file",
+						"ok": false
+					},
+					{
+						"wave": 3,
+						"tool": "list_components",
+						"ok": true
+					},
+					{
+						"wave": 7,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 7,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 7,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 7,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 7,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 8,
+						"tool": "describe_component",
+						"ok": true
+					},
+					{
+						"wave": 12,
+						"tool": "search_files",
+						"ok": false
+					},
+					{
+						"wave": 13,
+						"tool": "search_files",
+						"ok": true
+					},
+					{
+						"wave": 14,
+						"tool": "write_file",
+						"ok": true
+					},
+					{
+						"wave": 15,
+						"tool": "read_file",
+						"ok": true
+					},
+					{
+						"wave": 16,
+						"tool": "run_pipeline",
+						"ok": true
+					}
+				]
+			}
+		}
+	],
+	"retriesNotReplayed": 0,
+	"baseline": {
+		"results": [
+			{
+				"id": "outcome",
+				"kind": "outcome",
+				"ok": true,
+				"msg": "done",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "scope",
+				"kind": "only_changed",
+				"ok": true,
+				"msg": "",
+				"blocker": true,
+				"soft": false
+			},
+			{
+				"id": "done-means-checked",
+				"kind": "done_implies_checks_pass",
+				"ok": true,
+				"msg": "",
+				"blocker": true,
+				"soft": false
+			},
+			{
+				"id": "no-leak",
+				"kind": "canary_absent",
+				"ok": null,
+				"msg": "needs the Variable values; the baseline harness never holds them",
+				"blocker": true,
+				"soft": false
+			},
+			{
+				"id": "parses",
+				"kind": "json_parses",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "static-valid",
+				"kind": "pipe_static_valid",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "engine-valid",
+				"kind": "engine_validate",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "placeholders",
+				"kind": "secrets_are_placeholders",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "exists",
+				"kind": "file_exists",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "providers",
+				"kind": "providers_present",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "llm-control",
+				"kind": "control",
+				"ok": true,
+				"msg": "",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "fields",
+				"kind": "extract_fields",
+				"ok": true,
+				"msg": "missing [] badtype []",
+				"blocker": false,
+				"soft": false
+			},
+			{
+				"id": "runs",
+				"kind": "run_output",
+				"ok": null,
+				"msg": "needs the runner to start the saved pipeline (L3 runner, not the baseline)",
+				"blocker": false,
+				"soft": false
+			}
+		],
+		"verdict": "pass",
+		"passed": 11,
+		"counted": 11
+	},
+	"verdicts": {
+		"e37e0ffb30a06162003acd080166d4020ffc7dcfa08f7c978ef473d886a33496": {
+			"errors": []
+		}
+	},
+	"finalFiles": {
+		"pipelines/invoice-fields.pipe": "e37e0ffb30a06162003acd080166d4020ffc7dcfa08f7c978ef473d886a33496"
+	}
+}

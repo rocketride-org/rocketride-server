@@ -59,6 +59,7 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
     "@rsbuild/core": "~2.2.12",
     "@rsbuild/plugin-react": "~2.0.1",
     "@rsbuild/plugin-sass": "~1.5.3",
@@ -70,6 +71,7 @@
     "monaco-editor": "^0.55.1",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/tabulator-tables": "~6.2.0",
+    "openai": "^7.45.0",
     "run-script-os": "^1.1.6",
     "svgo": "^3.3.4",
     "tsx": "~4.23.1",

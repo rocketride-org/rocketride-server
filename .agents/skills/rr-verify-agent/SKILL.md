@@ -23,6 +23,7 @@ $S/rr-verify-agent doctor                           # read-only health check; ru
 $S/rr-verify-agent drive <journey>                  # build-pipeline | secrets | unsaved-edits | needs-you | stop | team-switch | steps <file or name>
 $S/rr-verify-agent engine <cmd>                     # read the workspace through the engine (ls, cat, validate, probe, whoami, snapshot)
 $S/rr-verify-agent cleanup                          # stop only what launch started; evidence stays
+$S/rr-verify-agent keys <cmd> [...]                 # run a command with the model keys, found the way launch finds them
 ```
 
 ## One run per machine
@@ -112,6 +113,8 @@ Any other WARN means `dist/server` is stale: rerun `build-engine`.
 The page to drive is `http://127.0.0.1:3000/?appid=rocketride.pipeBuilder&rrdev=1`. `rrdev=1` makes the shell self-register the branch's rocket-ui from the dev prefix instead of the engine's published bundle.
 
 `rr-verify-agent launch --dev-only` starts only the two dev servers, with no engine. Use it as a compile check while another run owns 5565. Never open the page in that mode, because the shell would talk to the other run's engine. `drive` and `engine` refuse to run unless the engine on 5565 is this checkout's.
+
+`rr-verify-agent launch --engine-only` starts the engine alone, with its provenance, and no browser or dev servers. The eval runner's L3 (`shared:eval`, apps/shared/src/modules/agent/eval/README.md) starts its engine this way, under the same lock, and stops it with `cleanup`.
 
 ## Keys
 

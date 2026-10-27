@@ -1,0 +1,117 @@
+{
+	"id": "edit-05-user-saves-mid-turn",
+	"type": "EDIT",
+	"target": "pipeline",
+	"title": "Model switch while the user saves the same file",
+	"prompt": "Switch translate-bot to Claude Sonnet 4.6.",
+	"followups": [
+		{
+			"when": "asks",
+			"text": "Yes, go ahead.",
+			"max": 2
+		}
+	],
+	"fixture": {
+		"workspace": "fixtures/translate-bot",
+		"variables": ["ROCKETRIDE_ANTHROPIC_KEY"],
+		"user_events": [
+			{
+				"when": "between_freshness_check_and_write",
+				"path": "pipelines/translate-bot.pipe",
+				"action": "save",
+				"description": "The user edits the prompt instructions in the canvas and saves while the agent's write is in flight. The runner holds the agent's write with a deferred, as the round 3 probe does, applies the save, then releases the write.",
+				"set_pointer": {
+					"components/1/config/instructions/0": "Translate the user's message into French. Keep product names in English."
+				}
+			}
+		]
+	},
+	"expect": {
+		"outcome": "done"
+	},
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": ["pipelines/translate-bot.pipe"],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": ["$VARIABLE_VALUES"],
+			"surfaces": ["model_questions", "thinking", "final_text", "session_json"],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "parses",
+			"kind": "json_parses",
+			"path": "pipelines/translate-bot.pipe"
+		},
+		{
+			"id": "static-valid",
+			"kind": "pipe_static_valid",
+			"path": "pipelines/translate-bot.pipe"
+		},
+		{
+			"id": "engine-valid",
+			"kind": "engine_validate",
+			"path": "pipelines/translate-bot.pipe",
+			"layers": ["L3"]
+		},
+		{
+			"id": "placeholders",
+			"kind": "secrets_are_placeholders",
+			"path": "pipelines/translate-bot.pipe"
+		},
+		{
+			"id": "project-id",
+			"kind": "project_id_unchanged",
+			"path": "pipelines/translate-bot.pipe",
+			"from": "pipelines/translate-bot.pipe"
+		},
+		{
+			"id": "user-save-kept",
+			"kind": "user_edit_kept",
+			"path": "pipelines/translate-bot.pipe",
+			"contains": "Keep product names in English",
+			"blocker": true,
+			"blocker_name": "stale write landed"
+		},
+		{
+			"id": "model",
+			"kind": "config_value",
+			"path": "pipelines/translate-bot.pipe",
+			"provider": "llm_anthropic",
+			"pointer": "profile",
+			"equals": "claude-sonnet-4-6"
+		},
+		{
+			"id": "openai-gone",
+			"kind": "providers_absent",
+			"path": "pipelines/translate-bot.pipe",
+			"providers": ["llm_openai"]
+		}
+	],
+	"reference": {
+		"status": "unvalidated",
+		"workspace": "references/edit-05-user-saves-mid-turn"
+	},
+	"layers": ["L2"],
+	"hard_because": "Issue 1's race: the user's save lands after edit_file's hash check passes and before its write lands, so the write is computed from an old read. A save that lands before the check is already refused on 369f0511 (\"changed since you read it\") and the model should re-read and redo; that variant passes today. This one is expected to fail the blocker until PR A makes the write conditional on the version. The exact timing needs the L2 harness hook; a browser run can only approximate it.",
+	"smoke": false,
+	"baseline": false
+}

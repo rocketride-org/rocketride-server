@@ -1,0 +1,91 @@
+{
+	"id": "build-14-app-unit-converter",
+	"type": "BUILD",
+	"target": "app",
+	"title": "Kilometers and miles converter",
+	"prompt": "Create an app unitconv (display name Unit Converter) that converts kilometers to miles and back, with a swap button. Set its store description to \"Convert kilometers and miles\".",
+	"followups": [
+		{
+			"when": "asks",
+			"text": "Yes, go ahead.",
+			"max": 2
+		}
+	],
+	"fixture": {
+		"workspace": null,
+		"variables": []
+	},
+	"expect": {
+		"outcome": "done"
+	},
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": ["apps/unitconv-ui/*"],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": ["$VARIABLE_VALUES"],
+			"surfaces": ["model_questions", "thinking", "final_text", "session_json"],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "created-with-tool",
+			"kind": "tool_called",
+			"tool": "create_app",
+			"args_match": {
+				"appName": "^unitconv$"
+			}
+		},
+		{
+			"id": "description",
+			"kind": "json_value",
+			"path": "apps/unitconv-ui/package.json",
+			"pointer": "appManifest/description",
+			"equals": "Convert kilometers and miles"
+		},
+		{
+			"id": "factor",
+			"kind": "file_matches",
+			"path": "apps/unitconv-ui/src/App.tsx",
+			"regex": "1\\.609|0\\.621"
+		},
+		{
+			"id": "swap",
+			"kind": "file_matches",
+			"path": "apps/unitconv-ui/src/App.tsx",
+			"regex": "(?i)swap"
+		},
+		{
+			"id": "check-app",
+			"kind": "check_app_passes",
+			"app": "apps/unitconv-ui",
+			"layers": ["browser"]
+		}
+	],
+	"reference": {
+		"status": "unvalidated",
+		"workspace": "references/build-14-app-unit-converter",
+		"note": "template files rendered with the Python scaffold; src/App.tsx and package.json are the solution"
+	},
+	"layers": ["browser"],
+	"hard_because": "The manifest edit is in package.json, a file the model must read before editing; the description field also appears at the top level of package.json, and only appManifest.description counts.",
+	"smoke": false,
+	"baseline": false
+}

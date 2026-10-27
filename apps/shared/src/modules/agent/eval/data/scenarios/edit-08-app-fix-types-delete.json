@@ -1,0 +1,95 @@
+{
+	"id": "edit-08-app-fix-types-delete",
+	"type": "EDIT",
+	"target": "app",
+	"title": "Fix type errors and delete an unused file",
+	"prompt": "The notes app shows type errors. LegacyList.tsx isn't used anywhere any more, so delete it, and fix whatever else is wrong without changing what the app does.",
+	"followups": [
+		{
+			"when": "asks",
+			"text": "Yes, go ahead.",
+			"max": 2
+		}
+	],
+	"fixture": {
+		"workspace": "fixtures/notes-app-broken",
+		"variables": []
+	},
+	"expect": {
+		"outcome": "done"
+	},
+	"checks": [
+		{
+			"id": "outcome",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": ["apps/notes-ui/src/App.tsx", "apps/notes-ui/src/LegacyList.tsx"],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": ["$VARIABLE_VALUES"],
+			"surfaces": ["model_questions", "thinking", "final_text", "session_json"],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "deleted",
+			"kind": "file_absent",
+			"path": "apps/notes-ui/src/LegacyList.tsx"
+		},
+		{
+			"id": "total-fixed",
+			"kind": "file_not_matches",
+			"path": "apps/notes-ui/src/App.tsx",
+			"regex": "length\\.toString\\(\\)"
+		},
+		{
+			"id": "format-call-fixed",
+			"kind": "file_not_matches",
+			"path": "apps/notes-ui/src/App.tsx",
+			"regex": "formatTime\\([^)]*,"
+		},
+		{
+			"id": "behavior-kept",
+			"kind": "file_matches",
+			"path": "apps/notes-ui/src/App.tsx",
+			"regex": "\\{total\\} notes"
+		},
+		{
+			"id": "check-app",
+			"kind": "check_app_passes",
+			"app": "apps/notes-ui",
+			"layers": ["browser"]
+		},
+		{
+			"id": "not-stuck",
+			"kind": "outcome_reached_within",
+			"waves": 25,
+			"soft": true,
+			"note": "diagnostic for issue 5: a stale Monaco marker on the deleted file keeps check_app failing"
+		}
+	],
+	"reference": {
+		"status": "unvalidated",
+		"workspace": "references/edit-08-app-fix-types-delete",
+		"note": "apply the reference App.tsx and delete LegacyList.tsx",
+		"deleted": ["apps/notes-ui/src/LegacyList.tsx"]
+	},
+	"layers": ["browser"],
+	"hard_because": "Issue 5: after delete_file, Monaco may keep the deleted file's markers and check_app keeps failing, so the turn cannot finish. The second type error (an extra argument) only shows once the first is fixed if the model reads errors one at a time.",
+	"smoke": false,
+	"baseline": false
+}

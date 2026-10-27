@@ -1,0 +1,23 @@
+NORTHWIND TRADERS LTD
+14 Harbour Road, Portland, OR 97201
+
+INVOICE
+
+Invoice number: INV-2041
+Invoice date: 2026-10-16
+Due date: 2026-11-15
+
+Bill to:
+Contoso Bakery
+88 Elm Street, Salem, OR 97301
+
+Description                         Qty   Unit price    Amount
+Flour, 25 kg sack                    20       $40.00    $800.00
+Cane sugar, 10 kg bag                15       $20.00    $300.00
+Delivery                              1      $150.00    $150.00
+
+Subtotal                                                $1,250.00
+Tax (0%)                                                    $0.00
+Total due                                               $1,250.00
+
+Payment terms: net 30. Please quote INV-2041 with your payment.

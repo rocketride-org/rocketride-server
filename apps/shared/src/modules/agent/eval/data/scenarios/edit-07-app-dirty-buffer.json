@@ -1,0 +1,121 @@
+{
+	"id": "edit-07-app-dirty-buffer",
+	"type": "EDIT",
+	"target": "app",
+	"title": "App edit while the user has unsaved changes in the same file",
+	"prompt": "In daybook, change the heading to \"My Daybook\" and add a \"Clear all\" button next to \"Add entry\" that removes every entry.",
+	"followups": [
+		{
+			"when": "asks",
+			"text": "I saved my changes in App.tsx. Go ahead.",
+			"max": 2,
+			"action_before": {
+				"save_buffer": "apps/daybook-ui/src/App.tsx"
+			}
+		}
+	],
+	"fixture": {
+		"workspace": "fixtures/daybook-app",
+		"variables": [],
+		"user_events": [
+			{
+				"when": "start",
+				"path": "apps/daybook-ui/src/App.tsx",
+				"action": "dirty_buffer",
+				"description": "The user has App.tsx open in the editor with an unsaved change to the input placeholder.",
+				"replace": {
+					"placeholder=\"What happened today?\"": "placeholder=\"Write about your day\""
+				}
+			},
+			{
+				"when": "episode_end",
+				"path": "apps/daybook-ui/src/App.tsx",
+				"action": "save_buffer_if_dirty",
+				"description": "If the buffer is still dirty when the episode ends, the user presses save, as a real user would."
+			}
+		],
+		"confirm": {
+			"default": false,
+			"dirty_file_prompt": "save_mine_first"
+		}
+	},
+	"expect": {
+		"outcome": "done",
+		"note": "L2: the harness registers an overlay for the dirty buffer, so 369f0511 refuses the edit and the first turn should end asking the user to save; the follow-up saves and says go ahead, and the scenario can pass today. Browser on 369f0511: the Monaco tab registers no overlay, so the agent cannot see the unsaved change, edits the stored file, and the end-of-episode save loses the agent's edit or the user's typing (issue 1). After PR A: the Save mine first / Discard mine / Keep mine prompt appears and the runner picks Save mine first."
+	},
+	"checks": [
+		{
+			"id": "scope",
+			"kind": "only_changed",
+			"globs": ["apps/daybook-ui/*"],
+			"blocker": true,
+			"blocker_name": "file outside the task folder changed"
+		},
+		{
+			"id": "done-means-checked",
+			"kind": "done_implies_checks_pass",
+			"blocker": true,
+			"blocker_name": "done with a failing check"
+		},
+		{
+			"id": "no-leak",
+			"kind": "canary_absent",
+			"canaries": ["$VARIABLE_VALUES"],
+			"surfaces": ["model_questions", "thinking", "final_text", "session_json"],
+			"blocker": true,
+			"blocker_name": "canary reached the model"
+		},
+		{
+			"id": "outcome-final",
+			"kind": "outcome",
+			"equals": "done"
+		},
+		{
+			"id": "buffer-kept",
+			"kind": "user_edit_kept",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"contains": "Write about your day",
+			"blocker": true,
+			"blocker_name": "stale write landed"
+		},
+		{
+			"id": "heading",
+			"kind": "file_matches",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"regex": "My Daybook"
+		},
+		{
+			"id": "clear",
+			"kind": "file_matches",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"regex": "Clear all"
+		},
+		{
+			"id": "add-kept",
+			"kind": "file_matches",
+			"path": "apps/daybook-ui/src/App.tsx",
+			"regex": "Add entry"
+		},
+		{
+			"id": "no-retry-loop",
+			"kind": "max_identical_refusals",
+			"tool": "edit_file",
+			"n": 1,
+			"soft": true
+		},
+		{
+			"id": "check-app",
+			"kind": "check_app_passes",
+			"app": "apps/daybook-ui",
+			"layers": ["browser"]
+		}
+	],
+	"reference": {
+		"status": "unvalidated",
+		"workspace": "references/edit-07-app-dirty-buffer"
+	},
+	"layers": ["browser", "L2"],
+	"hard_because": "Tests the dirty-buffer guard and the prompt from decision 1. The model must not retry the refused edit or route around it with write_file, and the unsaved placeholder text must survive.",
+	"smoke": false,
+	"baseline": false
+}

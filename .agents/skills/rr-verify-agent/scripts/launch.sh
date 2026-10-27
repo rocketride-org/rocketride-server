@@ -1,25 +1,30 @@
 #!/usr/bin/env bash
 # Starts an engine on 5565, the rocket-ui dev remote and the shell dev server
 # for verifying the browser agent. Refuses to touch anything it did not start.
-# Usage: rr-verify-agent launch [--engine source|image] [--dev-only]
+# Usage: rr-verify-agent launch [--engine source|image] [--dev-only | --engine-only]
 #   --engine source  (default) dist/server of this checkout, started by
 #                    verify-rocketride's launcher. Falls back to the image, and
 #                    says why, when the launcher or dist/server is missing.
 #   --engine image   the published engine image ($ENGINE_IMAGE)
 #   --dev-only       build and serve rocket-ui and the shell only, no engine (a
 #                    compile check; drive refuses to run, never open the page)
+#   --engine-only    the engine alone, with its provenance: no browser, no dev
+#                    servers (the eval runner's L3, shared:eval)
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 REQUESTED="${RR_VERIFY_ENGINE:-source}"
 DEV_ONLY=""
+ENGINE_ONLY=""
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 		--engine) REQUESTED="${2:?--engine needs source or image}"; shift 2 ;;
 		--engine=*) REQUESTED="${1#--engine=}"; shift ;;
 		--dev-only) DEV_ONLY=1; shift ;;
+		--engine-only) ENGINE_ONLY=1; shift ;;
 		*) die "launch: unknown argument $1" ;;
 	esac
 done
 [[ "$REQUESTED" == source || "$REQUESTED" == image ]] || die "--engine must be source or image (got $REQUESTED)"
+[[ -n "$DEV_ONLY" && -n "$ENGINE_ONLY" ]] && die "--dev-only and --engine-only exclude each other"
 
 # step: isolation. 5565 is pinned by the shell's dev proxy, so a second engine
 # on this machine is a hard stop, never something to stop or share.
@@ -27,15 +32,19 @@ if [[ -z "$DEV_ONLY" && -n "$(port_owner "$ENGINE_PORT")" ]]; then
 	if engine_is_ours; then die "an rr-verify-agent engine is already running. Run 'rr-verify-agent doctor' or 'rr-verify-agent cleanup'."; fi
 	die "port $ENGINE_PORT is in use by something this checkout's rr-verify-agent did not start ($(port_owner "$ENGINE_PORT" | grep -oE 'users:.*' || true)). Wait for it, or hold $LOCK_FILE as every run should. Never stop it."
 fi
-for p in "$SHELL_PORT" "$UI_PORT"; do
-	[[ -z "$(port_owner "$p")" ]] || die "port $p is in use. Free it or set RR_VERIFY_SHELL_PORT / RR_VERIFY_UI_PORT."
-done
+if [[ -z "$ENGINE_ONLY" ]]; then
+	for p in "$SHELL_PORT" "$UI_PORT"; do
+		[[ -z "$(port_owner "$p")" ]] || die "port $p is in use. Free it or set RR_VERIFY_SHELL_PORT / RR_VERIFY_UI_PORT."
+	done
+fi
 
 # step: dependencies, once per checkout
 if [[ ! -d "$ROOT/node_modules" ]]; then log "installing workspace dependencies"; (cd "$ROOT" && CI=true pnpm install --frozen-lockfile >"$STATE_DIR/install.log" 2>&1) || die "pnpm install failed, see $STATE_DIR/install.log"; fi
 if [[ ! -f "$ROOT/packages/client-typescript/dist/cjs/client/index.js" ]]; then log "building the TypeScript client (engine reads)"; (cd "$ROOT" && CI=true ./builder client-typescript:build >"$STATE_DIR/client-build.log" 2>&1) || die "client build failed, see $STATE_DIR/client-build.log"; fi
-if [[ ! -d "$SKILL_DIR/scripts/node_modules/playwright" ]]; then log "installing the Playwright helper"; (cd "$SKILL_DIR/scripts" && npm ci --no-audit --no-fund >"$STATE_DIR/helper-install.log" 2>&1) || die "helper install failed, see $STATE_DIR/helper-install.log"; fi
-(cd "$SKILL_DIR/scripts" && npx playwright install chromium >"$STATE_DIR/browser-install.log" 2>&1) || die "chromium install failed, see $STATE_DIR/browser-install.log"
+if [[ -z "$ENGINE_ONLY" ]]; then
+	if [[ ! -d "$SKILL_DIR/scripts/node_modules/playwright" ]]; then log "installing the Playwright helper"; (cd "$SKILL_DIR/scripts" && npm ci --no-audit --no-fund >"$STATE_DIR/helper-install.log" 2>&1) || die "helper install failed, see $STATE_DIR/helper-install.log"; fi
+	(cd "$SKILL_DIR/scripts" && npx playwright install chromium >"$STATE_DIR/browser-install.log" 2>&1) || die "chromium install failed, see $STATE_DIR/browser-install.log"
+fi
 
 if [[ -z "$DEV_ONLY" ]]; then
 rm -f "$STATE_DIR/engine.mode" "$STATE_DIR/engine.run" "$STATE_DIR/engine.container" "$STATE_DIR/engine.json"
@@ -95,6 +104,14 @@ RR_MODE="$MODE" RR_STORE_DIR="$STORE_DIR" RR_REQUESTED="$REQUESTED" RR_FALLBACK=
 	RR_IMAGE="$ENGINE_IMAGE" RR_CONTAINER="$ENGINE_NAME" RR_BUILD_RECORD="$BUILD_RECORD" \
 	node "$SKILL_DIR/scripts/provenance.cjs" >"$STATE_DIR/engine.json" || die "could not record the engine's provenance"
 node -e 'const e = require(process.argv[1]); console.error(`[rr-verify-agent] engine: ${e.summary}`); if (!e.capabilities.fsPutJson) console.error(`[rr-verify-agent] this engine has no fs_put_json (${e.capabilities.detail}). Session-save checks report not verifiable.`);' "$STATE_DIR/engine.json"
+fi
+
+if [[ -n "$ENGINE_ONLY" ]]; then
+	cat >"$STATE_DIR/run.json" <<JSON
+{"startedAt":"$(date -Is)","checkout":"$ROOT","revision":"$(git -C "$ROOT" rev-parse HEAD)","engineMode":"$(engine_mode)","url":null}
+JSON
+	log "engine up on $ENGINE_PORT (no dev servers)."
+	exit 0
 fi
 
 # step: dev wrappers. .rocketride/ is gitignored; cleanup removes them.
