@@ -30,6 +30,7 @@ Read the doc for your task before writing code. Paths are repo-relative.
 | Document a shipped app | `apps/<app>/` only (`README.md`, `docs/`, `assets/`); never a site page or spine entry. Exceptions: VS Code (`docs/docusaurus/apps/vscode/`) and App Builder (`docs/public/product/guides/apps/app-builder.md`) |
 | Builder / hooks | `docs/development/builder/reference.md` (run builds), `docs/development/builder/authoring.md` (write tasks.js), `docs/development/builder/pre-commit-hooks.md` |
 | Product docs (site spine) | `docs/public/product/` |
+| Prove a change works before a PR (launch, use the product, save evidence) | `.claude/skills/verify-rocketride/SKILL.md` |
 
 ## Common commands
 
@@ -52,6 +53,7 @@ node scripts/build.js docs:check                     # export drift gate (CI-enf
 
 - **Commits**: conventional commits (`feat(scope):`, `fix(scope):`, `chore(scope):`).
 - **Branches**: `feat/RR-<ticket>-short-description`, `fix/RR-<ticket>-...`; PR base is `develop`.
+- **Pull requests**: fill in the template's Verification section with what you ran and what you saw. UI changes need screenshots, and interaction changes need a recording. See "Show that it works" in `CONTRIBUTING.md`.
 - **Python**: 3.10+, single quotes, ruff for lint/format.
 - **TypeScript**: tabs, single quotes, semicolons.
 - **Store apps**: pipelines bundled in an app for the public store use
