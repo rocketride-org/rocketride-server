@@ -37,7 +37,7 @@ import { removeTargetsOf } from '../src/map/model';
 import { outlierRows } from '../src/map/outliers';
 import { POPOVER_GAP, POPOVER_MARGIN, afterCancelFocus, clipArea, firstEnabled, focusHold, placePopover, popoverKey } from '../src/map/popover';
 import { STAGE_REMOVAL, pairLabel, removeAllLabel, removeOthersLabel } from '../src/map/reviewWording';
-import { LEGEND_MAX_HEIGHT } from '../src/map/styles';
+import { LEGEND_HEIGHT } from '../src/map/styles';
 import { readPalette } from '../src/map/tokens';
 import { SelectionTab } from '../src/views/MapView';
 import { deepFreeze, loadSample, modelOf, pcaXY } from './support/map.samples';
@@ -605,10 +605,17 @@ test('the status line offers Clear (what Escape on the map clears next) while so
 	assert.equal(line(lit), line(none), 'the same line, the same height');
 });
 
-test('the legend is capped in height and scrolls inside itself, a tab stop only while it scrolls, so its notes never take the map\'s height', () => {
+test('the legend has one fixed height in every state and scrolls inside itself, a tab stop only while it scrolls, so the map never moves under it', () => {
 	const out = html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" notes={Array.from({ length: 12 }, (_, i) => `note ${i}`)} />);
-	assert.match(out, new RegExp(`<section aria-label="Map legend" style="[^"]*max-height:${LEGEND_MAX_HEIGHT}px;box-sizing:border-box;overflow-y:auto`), 'not measured yet (a server render): no tab stop');
-	assert.ok(LEGEND_MAX_HEIGHT <= 140);
+	assert.match(out, new RegExp(`<section aria-label="Map legend" style="[^"]*;height:${LEGEND_HEIGHT}px;box-sizing:border-box;overflow-y:auto`), 'not measured yet (a server render): no tab stop');
+	assert.doesNotMatch(out, /max-height/, 'a fixed height, not a cap');
+	assert.equal(LEGEND_HEIGHT, 144);
+	// The same style whatever the legend lists: no marks, a query's marks, every mark.
+	const style = (marks: Parameters<typeof markRows>[0]): string => /<section aria-label="Map legend" style="([^"]*)"/.exec(html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" marks={marks} />))?.[1] ?? '';
+	const none = style(null);
+	assert.ok(none.includes(`height:${LEGEND_HEIGHT}px`));
+	assert.equal(style({ outliers: 3, duplicates: 40, query: { top: 10, drawn: 10 } }), none);
+	assert.equal(style({ edges: { weakest: 'rgb(99, 99, 99)', strongest: 'rgb(206, 206, 206)' }, links: true, outliers: 3, query: { top: 10, drawn: 7 }, duplicates: 40, rings: { scale: 'cosine' } }), none);
 	assert.equal(scrollsInside(300, 132), true);
 	assert.equal(scrollsInside(132, 132), false);
 	assert.equal(scrollsInside(133, 132), false, 'a pixel of rounding is not scrolling');
