@@ -44,12 +44,6 @@ function ratio(tokens: Record<string, string>, token: string, surface: string): 
  * view and mount file is, so a file added later is checked without being listed here.
  */
 const TEXT_EXEMPT: Readonly<Record<string, string>> = {
-	'components/ChatPanel.tsx': 'the chat lane writes secondary and status-coloured text (P3 reworks it as Query, N5)',
-	'components/QueryCompare.tsx': 'the search lane writes secondary text (P3 reworks it as Query, N5)',
-	'components/RetrievalDebugger.tsx': 'the chat lane writes secondary and status-coloured text (P3, N5)',
-	'components/ScoreHistogram.tsx': 'the search lane writes secondary text (P3, N5)',
-	'components/SearchPanel.tsx': 'the search lane writes secondary and status-coloured text (P3, N5)',
-	'components/SourcesPanel.tsx': 'the chat lane writes secondary text (P3, N5)',
 	'components/IngestDropZone.tsx': 'the upload lane writes secondary text (P1 rehomes it in Add documents, W11)',
 	'components/IngestPanel.tsx': 'the upload lane writes secondary and status-coloured text (P1, W11)',
 	'components/UploadList.tsx': 'the upload lane writes secondary text (P1, W11)',

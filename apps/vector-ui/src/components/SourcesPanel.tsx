@@ -44,12 +44,12 @@ const PREVIEW_CHARS = 140;
 const S = {
 	list: { listStyle: 'none', margin: '4px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 4 } as CSSProperties,
 	row: { display: 'grid', gridTemplateColumns: '22px minmax(0, 1fr) auto', columnGap: 6, alignItems: 'start', fontSize: 12, padding: '4px 0', borderTop: '1px solid var(--rr-border)' } as CSSProperties,
-	rank: { color: 'var(--rr-text-secondary)', textAlign: 'right' } as CSSProperties,
+	rank: { color: 'var(--rr-text-primary)', textAlign: 'right' } as CSSProperties,
 	path: { color: 'var(--rr-text-primary)', overflowWrap: 'anywhere' } as CSSProperties,
-	meta: { color: 'var(--rr-text-secondary)', marginLeft: 6, whiteSpace: 'nowrap' } as CSSProperties,
+	meta: { color: 'var(--rr-text-primary)', marginLeft: 6, whiteSpace: 'nowrap' } as CSSProperties,
 	actions: { display: 'flex', gap: 4 } as CSSProperties,
 	button: { ...commonStyles.buttonSecondary, padding: '1px 8px', fontSize: 11 } as CSSProperties,
-	details: { gridColumn: '2 / span 2', color: 'var(--rr-text-secondary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } as CSSProperties,
+	details: { gridColumn: '2 / span 2', color: 'var(--rr-text-primary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' } as CSSProperties,
 	summary: { cursor: 'pointer' } as CSSProperties,
 };
 
@@ -74,7 +74,7 @@ export function scoreText(source: IChatSource, score: SourcesPanelProps['score']
  */
 export function SourcesPanel({ sources, score, onOpen, onShowOnMap }: SourcesPanelProps): React.ReactElement {
 	if (sources.length === 0) {
-		return <p style={{ fontSize: 12, color: 'var(--rr-text-secondary)', margin: '4px 0 0' }}>The answer cited no stored chunks.</p>;
+		return <p style={{ fontSize: 12, color: 'var(--rr-text-primary)', margin: '4px 0 0' }}>The answer cited no stored chunks.</p>;
 	}
 	return (
 		<ol style={S.list} aria-label="Sources of this answer">

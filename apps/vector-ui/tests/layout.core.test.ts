@@ -131,13 +131,14 @@ test("the console's panel ratios are unchanged: documents 38 %, right column 62 
 	assert.equal(consoleColumns(800).stacked, true);
 });
 
-test('the Search toggle swaps what the chat panel shows, not the console layout: neither panel sizes itself', () => {
+test('the Query tab swaps Search, Compare and Ask in one space, not the console layout: no panel sizes itself', () => {
 	const src = (relative: string): string => readFileSync(path.join(__dirname, '..', 'src', 'components', relative), 'utf8');
-	for (const file of ['ChatPanel.tsx', 'SearchPanel.tsx', 'QueryCompare.tsx']) {
+	for (const file of ['QueryTab.tsx', 'ChatPanel.tsx', 'SearchPanel.tsx', 'QueryCompare.tsx']) {
 		const text = src(file);
 		assert.doesNotMatch(text, /vector\/layout|CONSOLE_LAYOUT|consoleColumns/, `${file} reads the console layout`);
 		assert.doesNotMatch(text, /\b(width|minWidth|maxWidth|flexBasis)\s*:\s*['"]?(?!100%)\d+(\.\d+)?(%|vw)/, `${file} sets its own share of the console`);
 	}
-	// The search body sits in the chat panel's own flex column, in the space the thread uses.
-	assert.match(src('ChatPanel.tsx'), /<div hidden=\{!searching\} data-surface="search" style=\{S\.surface\}>/);
+	// Search (and Compare) and Ask sit in the same space of the tab, one shown, the other hidden and kept.
+	assert.match(src('QueryTab.tsx'), /hidden=\{mode === 'ask'\} data-surface="search"/);
+	assert.match(src('QueryTab.tsx'), /hidden=\{mode !== 'ask'\} data-surface="ask"/);
 });

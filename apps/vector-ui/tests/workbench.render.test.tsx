@@ -107,7 +107,7 @@ test('the workbench renders its header and tab row, and on each tab only that ta
 	const parts: Record<WorkbenchTab, RegExp> = {
 		overview: /<section aria-label="Database summary"/,
 		documents: /role="tree" aria-label="Folders of the loaded documents"[^]*?role="grid" aria-label="Stored documents"/,
-		query: /aria-label="Chat" role="region"[^]*?data-component="SearchPanel"/,
+		query: /data-component="QueryTab"[^]*?role="tablist" aria-label="Query"[^]*?data-component="SearchPanel"[^]*?data-component="ChatPanel"/,
 		map: /class="vector-map"/,
 		collection: /hnsw \(m 16, ef_construction 64\)/,
 		trash: /role="grid" aria-label="Documents in the trash"/,

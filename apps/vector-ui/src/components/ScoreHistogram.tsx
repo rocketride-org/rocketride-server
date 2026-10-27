@@ -28,7 +28,9 @@
 // In Search the threshold is the slider's position, and the store node's own
 // setting is drawn as a third line while the slider is away from it. An SVG
 // with a text alternative: the same counts are in the table beside it, and
-// the label states the range and the lines.
+// the label states the range and the lines. The bars are the accent; the
+// lines and labels are the text colour (4.5:1 in every theme), told apart by
+// their dashes: the floor solid, the threshold dashed, the setting dotted.
 // =============================================================================
 
 import React from 'react';
@@ -67,12 +69,12 @@ export function ScoreHistogram({ scores, range, threshold, floor, setting = null
 			<line x1={0} y1={HEIGHT} x2={WIDTH} y2={HEIGHT} stroke="var(--rr-border)" strokeWidth={1} />
 			{histogram.bins.map((count, index) => (count === 0 ? null : <rect key={index} x={index * binWidth + 0.2} y={HEIGHT - (count / peak) * (HEIGHT - 4)} width={Math.max(0.6, binWidth - 0.4)} height={(count / peak) * (HEIGHT - 4)} fill="var(--rr-border-focus)" />))}
 			{threshold !== null && threshold >= histogram.min && threshold <= histogram.max && <line x1={x(threshold)} y1={0} x2={x(threshold)} y2={HEIGHT} stroke="var(--rr-text-primary)" strokeWidth={1} strokeDasharray="3 2" data-line="threshold" />}
-			{floor !== null && floor >= histogram.min && floor <= histogram.max && <line x1={x(floor)} y1={0} x2={x(floor)} y2={HEIGHT} stroke="var(--rr-color-error)" strokeWidth={1} data-line="floor" />}
-			{showSetting && (setting as number) >= histogram.min && (setting as number) <= histogram.max && <line x1={x(setting as number)} y1={0} x2={x(setting as number)} y2={HEIGHT} stroke="var(--rr-text-secondary)" strokeWidth={1} strokeDasharray="1 2" data-line="setting" />}
-			<text x={0} y={HEIGHT + 10} fontSize={9} fill="var(--rr-text-secondary)">
+			{floor !== null && floor >= histogram.min && floor <= histogram.max && <line x1={x(floor)} y1={0} x2={x(floor)} y2={HEIGHT} stroke="var(--rr-text-primary)" strokeWidth={1} data-line="floor" />}
+			{showSetting && (setting as number) >= histogram.min && (setting as number) <= histogram.max && <line x1={x(setting as number)} y1={0} x2={x(setting as number)} y2={HEIGHT} stroke="var(--rr-text-primary)" strokeWidth={1} strokeDasharray="1 2" data-line="setting" />}
+			<text x={0} y={HEIGHT + 10} fontSize={9} fill="var(--rr-text-primary)">
 				{histogram.min.toFixed(2)}
 			</text>
-			<text x={WIDTH} y={HEIGHT + 10} fontSize={9} fill="var(--rr-text-secondary)" textAnchor="end">
+			<text x={WIDTH} y={HEIGHT + 10} fontSize={9} fill="var(--rr-text-primary)" textAnchor="end">
 				{histogram.max.toFixed(2)}
 			</text>
 		</svg>
