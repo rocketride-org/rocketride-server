@@ -34,7 +34,7 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ChunksGrid, chunkColumns } from '../src/components/ChunksGrid';
-import { metadataText } from '../src/components/ChunkDrawer';
+import { metadataText, shownAbove } from '../src/components/ChunkDrawer';
 import { chunkRows } from '../src/vector/chunkRows';
 import type { IChunkItem } from '../src/contract/types';
 
@@ -98,7 +98,7 @@ test('the Collection fields count what the scope keeps, and "complete" needs a f
 test('the document tab refreshes in place; its confirmation sits below the sub-tab row; the drawer\'s Move button keeps the focus', () => {
 	const view = code('views/DocumentView.tsx');
 	assert.match(view, /refreshKey = 0/);
-	assert.match(view, /\}, \[load, refreshKey\]\);/, 'the chunks reload in place');
+	assert.match(view, /\}, \[load, refreshKey, restored\]\);/, 'the chunks reload in place');
 	assert.ok(view.indexOf('data-document-tabs') < view.indexOf('{beforeBody}'), 'the tab row does not move when a confirmation opens');
 	assert.match(code('components/ChunkDrawer.tsx'), /aria-disabled=\{!writes\.enabled\}/);
 });
@@ -113,4 +113,21 @@ test('the chunk drawer: neighbours on open (12, none for a trashed chunk), Escap
 	assert.match(view, /gridRef\.current\?\.focusRow\(String\(openChunk\)\)/);
 	assert.match(view, /\{openChunk !== null && <ChunkDrawer /);
 	assert.match(view, /\{\.\.\.\(actions\.useAsQuery \? \{ onUseAsQuery: actions\.useAsQuery \} : \{\}\)\}/, "'Use as query' only where the console's actions carry it (a dev-tool document frame strips it)");
+});
+
+test('the chunk drawer does not repeat what it shows as fixed fields', () => {
+	assert.deepEqual([...shownAbove({ isTable: false, pointId: null })].sort(), ['chunkId', 'objectId']);
+	assert.deepEqual([...shownAbove({ isTable: true, pointId: 'p' })].sort(), ['chunkId', 'objectId', 'pointId', 'tableId']);
+	assert.match(code('components/ChunkDrawer.tsx'), /\.filter\(\(\[name\]\) => !shownAbove\(chunk\)\.has\(name\)\)/);
+});
+
+test('a document tab names itself in its confirmations and offers Restore while every chunk is in the trash', () => {
+	const view = code('views/DocumentView.tsx');
+	assert.match(view, /actions\.requestRemove\(\[objectId\], known\)/, 'the header button hands the confirmation this document\'s path and chunk count');
+	assert.match(view, /requestRemove: \(ids: readonly string\[\]\) => actions\.requestRemove\(ids, known\)/, 'and so does the chunk drawer');
+	assert.match(view, /setInTrash\(\(error as \{ code\?: string \} \| null\)\?\.code === 'IN_TRASH'\)/);
+	assert.match(view, /\{inTrash \? \(\s*<button ref=\{restoreButton\}/, 'Restore while trashed, the trash button otherwise');
+	assert.match(view, /await actions\.restore\(\[objectId\], known\)/);
+	const actions = code('adapters/consoleActions.ts');
+	assert.match(actions, /restore: \(objectIds: readonly string\[\], known\?: readonly IStageTarget\[\]\) => entry\.controller\.restore\(/);
 });
