@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { CANVAS_RULES } from '../src/canvas/environment';
+import { FLOW_INTERACTION_PROPS } from '../src/canvas/flowProps';
 import { EDGE_HIT_MIN_PX, edgeHitWidth, edgeLabelsVisible, LABELS_ALWAYS_FROM_ZOOM, LABELS_MAX_EDGES, LABELS_NEVER_BELOW_ZOOM, labelsVisibleAt, sameShallow, stabilise, zoomLevel } from '../src/canvas/stable';
 
 interface IItem {
@@ -84,8 +85,9 @@ test('the relationship hit band is never under 12 screen pixels at any zoom, and
 	const widths = new Set<number>();
 	for (let zoom = 0.1; zoom <= 2.5; zoom += 0.001) widths.add(edgeHitWidth(zoom));
 	assert.ok(widths.size <= 16, `${widths.size} distinct widths: the stylesheet value changes on steps, not on every zoom step`);
-	assert.equal(edgeHitWidth(0), edgeHitWidth(0.1), 'a nonsense zoom is treated as the minimum');
-	assert.equal(edgeHitWidth(Number.NaN), edgeHitWidth(0.1));
+	assert.equal(edgeHitWidth(0), edgeHitWidth(FLOW_INTERACTION_PROPS.minZoom), 'a nonsense zoom is treated as the minimum the canvas allows');
+	assert.equal(edgeHitWidth(Number.NaN), edgeHitWidth(FLOW_INTERACTION_PROPS.minZoom));
+	assert.equal(edgeHitWidth(FLOW_INTERACTION_PROPS.minZoom / 2), edgeHitWidth(FLOW_INTERACTION_PROPS.minZoom), 'nothing below the minimum zoom widens it further');
 });
 
 test('the canvas stylesheet hides labels when the container says off, takes the edge layer out of hit-testing and puts it behind the nodes', () => {

@@ -157,6 +157,10 @@ test('wiring: the hit band follows the zoom through one stylesheet variable, set
 	assert.match(effect, /edgeHitWidth\(state\.transform\[2\]\)/, 'the zoom only, never the pan offset');
 	assert.match(effect, /if \(width === shown\) return;/, 'the stylesheet is touched only when the width steps');
 	assert.match(effect, /el\.style\.setProperty\('--graph-ui-edge-hit', `\$\{width\}px`\);/);
+	// Scoped to this canvas's own container (two graphs on a page each keep their own width), and unsubscribed on unmount.
+	assert.match(effect, /const el = container\.current;/);
+	assert.match(effect, /return flowStore\.subscribe\(follow\);/, 'the effect returns the unsubscribe');
+	assert.doesNotMatch(canvas, /(document|documentElement|body)[^;\n]*setProperty\('--graph-ui-edge-hit'/, 'never set on the document');
 	const tree = walk(EdgeShapeImpl({ ...SHAPE, onClick: () => undefined }));
 	assert.equal(tree.find((el) => el.props.className === 'graph-ui-edge-hit')?.props.strokeWidth, 12, '12 units where the stylesheet has not loaded');
 });

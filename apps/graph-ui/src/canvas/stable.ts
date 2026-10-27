@@ -35,6 +35,8 @@
 // only what changed is redone. It is a pure function over a cache the caller keeps.
 // =============================================================================
 
+import { FLOW_INTERACTION_PROPS } from './flowProps';
+
 /**
  * Whether two flat records hold the same values (one level deep, by Object.is).
  *
@@ -74,8 +76,8 @@ export function stabilise<T extends { id: string }>(cache: Map<string, T>, items
 /** The narrowest the clickable band along a relationship ever is on screen, in pixels. */
 export const EDGE_HIT_MIN_PX = 12;
 
-/** The smallest zoom the canvas allows (flowProps.ts `minZoom`); a zoom that is not a positive number is read as it. */
-const MIN_ZOOM = 0.1;
+/** The smallest zoom the canvas allows; a zoom that is not a positive number is read as it. */
+const MIN_ZOOM = FLOW_INTERACTION_PROPS.minZoom;
 
 /**
  * The width, in canvas units, of a relationship's invisible hit path at a zoom: 12 units from normal size up (so at
