@@ -179,7 +179,7 @@ export function DocumentDrawer(props: IDocumentDrawerProps): React.ReactElement 
 			},
 			(error: unknown) => {
 				if (run !== asking.current) return;
-				// A request dropped for a newer one (fetchNeighbors keeps only the newest waiting) says nothing: ask again.
+				// A request dropped for a newer one (fetchNeighbors keeps only the newest waiting) says so; Find similar asks again.
 				const message = similarFailureText(error);
 				setSimilar(message === null ? { status: 'idle' } : { status: 'error', message });
 			}

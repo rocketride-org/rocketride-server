@@ -142,3 +142,17 @@ export function pendingText(summary: IStagedSummary): string {
 	if (n === 0) return '';
 	return `${formatCount(n)} ${n === 1 ? 'document' : 'documents'} staged to move to the trash (${stagedChunksWords(summary)}).`;
 }
+
+/**
+ * The pending bar's one-line sentence (its full text, pendingText, is its title): the documents and, where every
+ * count is known, the chunks; "N+" where some are not counted (at least N).
+ *
+ * @param summary - The staged set's summary.
+ * @returns e.g. '3 staged for the trash (14 chunks)', '3 staged for the trash (14+ chunks)', or '' with nothing staged.
+ */
+export function pendingShortText(summary: IStagedSummary): string {
+	const n = summary.documents;
+	if (n === 0) return '';
+	const chunks = summary.chunks === null ? '' : ` (${formatCount(summary.chunks)}${summary.unknown > 0 ? '+' : ''} ${summary.chunks === 1 && summary.unknown === 0 ? 'chunk' : 'chunks'})`;
+	return `${formatCount(n)} staged for the trash${chunks}`;
+}
