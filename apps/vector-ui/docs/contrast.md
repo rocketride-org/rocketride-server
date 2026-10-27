@@ -1,7 +1,6 @@
 # Vector Explorer: colour and contrast
 
-The console draws with shell tokens only, named once in
-`src/vector/colors.ts`. `tests/a11y.contrast.test.ts` measures each of them in
+The console's text, accent, data-bar and icon colours are shell tokens named once in `src/vector/colors.ts`; borders and hover fills use the shell's own tokens, and the map's are in `map/tokens.ts` and computed from them. `tests/a11y.contrast.test.ts` measures each of them in
 the six themes under `packages/shell/public/themes`, against both surfaces the
 console sits on (`--rr-bg-default` and `--rr-bg-paper`). This page records the
 measurements, so the rules below are decisions with numbers behind them. The
@@ -59,9 +58,7 @@ secondary column, 3:1 for the warning and brand columns as graphics.
 
 The map is measured by its own suite, `tests/a11y.contrast.map.test.ts`, in
 the same six themes and against both surfaces (the canvas sits on
-`--rr-bg-default`, the panels and the boxes over it on `--rr-bg-paper`). Every
-colour is measured as it is painted: a token that carries alpha is composited
-over the surface first.
+`--rr-bg-default`, the panels and the boxes over it on `--rr-bg-paper`). Every colour the suite measures is measured as painted (a token that carries alpha is composited over the surface first); faded marks are left out on purpose, and the rings, glyphs and labels use the measured tokens.
 
 ### Edges
 
@@ -120,7 +117,7 @@ surface, with the theme's own `--rr-shadow-widget`. `--rr-border` was 1.38 /
 ### Similarity matrix
 
 The cells are the chart blue over the surface, from 15 % (the least similar
-pair) to 90 %. The lowest cell differs from an empty one by 1.18:1 at worst
+pair) to 90 %. The lowest cell differs from an empty one by 1.19:1 at worst
 (RocketRide dark); at 6 % it was 1.05:1. The values are printed in the cells at
 11 px up to 12 x 12 (8.5 px before); above that each value is in its cell's
 title, and the table alternative always holds every value.
