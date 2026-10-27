@@ -59,7 +59,7 @@
 
 import React, { useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { ControlButton, Controls, ReactFlow, ReactFlowProvider, applyNodeChanges, getViewportForBounds, useReactFlow, useStore } from '@xyflow/react';
+import { ControlButton, Controls, ReactFlow, ReactFlowProvider, applyNodeChanges, getViewportForBounds, useReactFlow, useStore, useStoreApi } from '@xyflow/react';
 import type { NodeChange } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { captionOf } from '../graph/captions';
@@ -73,7 +73,7 @@ import type { IGraphModel } from '../graph/model';
 import type { GraphId } from '../graph/types';
 import type { BadgeMode, LabelSize } from '../graph/userData';
 import { STATIC_LAYOUT_ABOVE } from '../graph/budgets';
-import { LABELS_MAX_EDGES, labelsVisibleAt, sameShallow, stabilise, zoomLevel } from './stable';
+import { LABELS_MAX_EDGES, edgeHitWidth, labelsVisibleAt, sameShallow, stabilise, zoomLevel } from './stable';
 import { ensureCanvasStyle, useReducedMotion, useThemeMode } from './environment';
 import { FLOW_INTERACTION_PROPS } from './flowProps';
 import { EdgeLayer, edgePaint } from './EdgeLayer';
@@ -491,6 +491,24 @@ function CanvasInner(props: IGraphCanvasProps): React.ReactElement {
 	// thing to repaint, so they are drawn only when they can be read (see stable.ts). The zoom is read as a LEVEL: this
 	// component re-renders when the level changes, not on every pan or zoom step.
 	const level = useStore((state) => zoomLevel(state.transform[2]));
+
+	// The relationships' hit band is drawn in canvas units inside the scaled viewport: as the view zooms out, it is widened
+	// in steps (edgeHitWidth) so it is never under 12 screen pixels. One stylesheet variable on the container carries it,
+	// set from a store subscription: no relationship re-renders on a zoom step, and the pan offset is never read.
+	const flowStore = useStoreApi();
+	useEffect(() => {
+		const el = container.current;
+		if (!el) return undefined;
+		let shown = 0;
+		const follow = (state: { transform: [number, number, number] }): void => {
+			const width = edgeHitWidth(state.transform[2]);
+			if (width === shown) return;
+			shown = width;
+			el.style.setProperty('--graph-ui-edge-hit', `${width}px`);
+		};
+		follow(flowStore.getState());
+		return flowStore.subscribe(follow);
+	}, [flowStore]);
 	const edgeLabels = labelsVisibleAt(level, edges.length);
 
 	// Focus follows the model when the change came from the keyboard. Node ids are NOT unique

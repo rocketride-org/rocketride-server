@@ -71,6 +71,31 @@ export function stabilise<T extends { id: string }>(cache: Map<string, T>, items
 	return out;
 }
 
+/** The narrowest the clickable band along a relationship ever is on screen, in pixels. */
+export const EDGE_HIT_MIN_PX = 12;
+
+/** The smallest zoom the canvas allows (flowProps.ts `minZoom`); a zoom that is not a positive number is read as it. */
+const MIN_ZOOM = 0.1;
+
+/**
+ * The width, in canvas units, of a relationship's invisible hit path at a zoom: 12 units from normal size up (so at
+ * least 12 screen pixels), and wider as the view zooms out, so the band is never under 12 screen pixels. The hit path is
+ * drawn inside React Flow's CSS-scaled viewport, where a fixed 12 units shrank to 1.2 pixels at the minimum zoom, and
+ * `vector-effect: non-scaling-stroke` cannot help: it ignores a CSS transform on an HTML ancestor.
+ *
+ * The width is rounded UP to quarter-octave steps (at most 19% wider than needed), so the stylesheet value that carries it
+ * changes about fifteen times across the whole zoom range, not on every zoom step.
+ *
+ * @param zoom - The canvas zoom (1 = normal size).
+ * @returns The stroke width in canvas units.
+ */
+export function edgeHitWidth(zoom: number): number {
+	const z = Number.isFinite(zoom) && zoom > 0 ? Math.max(zoom, MIN_ZOOM) : MIN_ZOOM;
+	if (z >= 1) return EDGE_HIT_MIN_PX;
+	const steps = Math.ceil(Math.log2(1 / z) * 4) / 4;
+	return Math.ceil(EDGE_HIT_MIN_PX * 2 ** steps * 100) / 100;
+}
+
 /** The zoom at or above which relationship type labels are always drawn. */
 export const LABELS_ALWAYS_FROM_ZOOM = 1;
 
