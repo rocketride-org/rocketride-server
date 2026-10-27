@@ -526,3 +526,29 @@ test('Clear path is offered whenever a path is shown, on the toolbar and beside 
 	assert.match(inspector, /const clearPath = \(\): void => \{\s*session\.clearPath\(\);\s*onClosed\?\.\(\);/);
 	assert.match(view, /id: 'clear-path'[^\]]*run: \(\) => \{ session\.clearPath\(\); restoreFocus\(\); \}/);
 });
+
+// A menu is placed for the size the window and canvas had when it opened. Closing it on a resize (a ResizeObserver, since a
+// listener on the window is not allowed here) keeps it from being left cut off, and focus goes back to its trigger.
+test('an open menu is closed when the toolbar or the canvas changes size, through a ResizeObserver and not a window listener', () => {
+	const view = code(read('components', 'GraphView.tsx'));
+	const observer = view.slice(view.indexOf('new ResizeObserver'), view.indexOf('return () => observer.disconnect()'));
+	assert.match(observer, /seen\.has\(entry\.target\)/, 'the first report of an element is not a change');
+	assert.match(observer, /setMenu\(null\);\s*setToolMenu\(null\);/);
+	assert.match(observer, /closest\('\[data-menu-trigger\]'\)\?\.querySelector\('button'\);\s*if \(trigger\) trigger\.focus\(\);\s*else restoreFocusRef\.current\(\)/, 'focus goes back to the trigger, or to the node for a context menu');
+	assert.match(observer, /observer\.observe\(canvasBox\.current\)/);
+	assert.doesNotMatch(view, /addEventListener/);
+});
+
+// The menu-button pattern: Down opens the menu on its first item, Up on its last. A key from inside an open menu, a key
+// something already handled and a modified key are not the button's.
+test('Down and Up open a toolbar menu from its button, on the first and the last item, and ignore keys that are not the button\'s', () => {
+	const view = code(read('components', 'GraphView.tsx'));
+	const open = view.slice(view.indexOf('const openFromKey'), view.indexOf('const toolMenuTrigger'));
+	assert.match(open, /event\.key !== 'ArrowDown' && event\.key !== 'ArrowUp'/);
+	assert.match(open, /event\.defaultPrevented \|\| event\.ctrlKey \|\| event\.metaKey \|\| event\.altKey\) return/);
+	assert.match(open, /closest\('\[role="menu"\]'\)\) return/);
+	assert.match(open, /setToolStart\(event\.key === 'ArrowUp' \? 'last' : 'first'\)/);
+	assert.match(view, /start=\{toolStart\}/);
+	assert.equal(view.split('onKeyDown={(event) => openFromKey(event,').length - 1, 2, 'both the toolbar menu buttons and More');
+	assert.match(code(read('components', 'CanvasMenu.tsx')), /useState\(start === 'last' \? Math\.max\(0, items\.length - 1\) : 0\)/);
+});

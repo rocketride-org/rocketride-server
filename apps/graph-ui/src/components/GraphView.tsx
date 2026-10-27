@@ -247,6 +247,7 @@ export const GraphView: React.FC<IGraphViewProps> = ({ session, schemaLabels, ca
 	const searchInput = useRef<HTMLInputElement>(null);
 	const triggers = useRef<Record<ToolMenu, HTMLSpanElement | null>>({ view: null, export: null, more: null });
 	const toolbar = useRef<HTMLDivElement | null>(null);
+	const restoreFocusRef = useRef<() => void>(() => undefined);
 
 	// An informational notice leaves by itself; a warning or an error stays until the next action.
 	const [expiredNotice, setExpiredNotice] = useState<unknown>(null);
@@ -317,6 +318,7 @@ export const GraphView: React.FC<IGraphViewProps> = ({ session, schemaLabels, ca
 		if (id !== null && id !== undefined && handle.current?.focusNode(id)) return;
 		toolbar.current?.querySelector('button')?.focus();
 	};
+	restoreFocusRef.current = () => restoreFocus();
 	const restoreToolFocus = (which: ToolMenu): void => triggers.current[which]?.querySelector('button')?.focus();
 
 	const inspect = (id: string): void => {
@@ -619,8 +621,28 @@ export const GraphView: React.FC<IGraphViewProps> = ({ session, schemaLabels, ca
 	useLayoutEffect(() => {
 		const el = toolbar.current;
 		if (!el || typeof ResizeObserver === 'undefined') return undefined;
-		const observer = new ResizeObserver(() => setTick((n) => n + 1));
+		// A menu open while the toolbar or the canvas changes size (a panel opens, full screen, the window) is closed, with focus
+		// returned to where it came from: it was placed for a size that no longer holds. The first report of each element is
+		// its initial size, not a change.
+		const seen = new Set<Element>();
+		const observer = new ResizeObserver((entries) => {
+			setTick((n) => n + 1);
+			let changed = false;
+			for (const entry of entries) {
+				if (seen.has(entry.target)) changed = true;
+				else seen.add(entry.target);
+			}
+			if (!changed) return;
+			const menuEl = document.activeElement?.closest('[role="menu"]') ?? null;
+			setMenu(null);
+			setToolMenu(null);
+			if (!menuEl) return;
+			const trigger = menuEl.closest('[data-menu-trigger]')?.querySelector('button');
+			if (trigger) trigger.focus();
+			else restoreFocusRef.current();
+		});
 		observer.observe(el);
+		if (canvasBox.current) observer.observe(canvasBox.current);
 		return () => observer.disconnect();
 	}, []);
 	// eslint-disable-next-line react-hooks/exhaustive-deps
