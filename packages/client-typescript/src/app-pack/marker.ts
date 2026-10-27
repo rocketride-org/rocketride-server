@@ -152,6 +152,19 @@ function legacyMarkerProjectId(folder: string, appId: string): string | null {
 }
 
 /**
+ * Reads the app's working-copy projectId WITHOUT writing anything: the
+ * appManifest's, else a legacy `{ id, projectId }` marker's.
+ *
+ * @param folder - The app's bound folder (absolute path).
+ * @returns The projectId, or null when the working copy has none yet.
+ * @throws Error when package.json is unreadable or carries no appManifest.id.
+ */
+export function readProjectId(folder: string): string | null {
+	const manifest = readPkg(folder).pkg.appManifest as AppManifestJson;
+	return manifest.projectId || legacyMarkerProjectId(folder, manifest.id as string);
+}
+
+/**
  * Ensures the app's working-copy projectId in package.json appManifest.
  *
  * - Present: returned as-is (package.json untouched).

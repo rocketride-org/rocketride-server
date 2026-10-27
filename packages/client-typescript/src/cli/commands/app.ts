@@ -41,7 +41,7 @@
 import { Command } from 'commander';
 import type { RocketRideClient } from '../../client/client';
 import { parseRegistryVersion, pickPublishVersion } from '../../client/deploy-helpers';
-import { addConnectionOptions, addDeployConnectionOptions, connectClient, connectDeploy, formatWhen, runCliCommand } from '../common';
+import { addConnectionOptions, addDeployConnectionOptions, connectClient, connectDeploy, disconnectAll, formatWhen, runCliCommand } from '../common';
 import type { ConnectionOptions } from '../common';
 import type { Output } from '../output';
 import { toHttpBase } from '../../../../client-common/typescript/src/provision';
@@ -86,12 +86,15 @@ async function resolveCreateDeveloperId(options: AppCreateOptions, out: Output):
 	// step: no key = no account to ask
 	if (!options.apikey) return fallback('no account credentials (ROCKETRIDE_APIKEY) to read a developer id from');
 
-	// step: the developer id rides the auth response — one connect, no extra call
+	// step: the developer id rides the auth response — one connect, no extra
+	// call, closed before the scaffold so no idle socket outlives the read
 	let developerId: string | null;
 	try {
 		developerId = resolveDeveloperId(await connectClient(options));
 	} catch (err) {
 		return fallback(`could not read the developer id from ${options.uri} (${err instanceof Error ? err.message : String(err)})`);
+	} finally {
+		await disconnectAll();
 	}
 	if (!developerId) return fallback('the connected account has no registered developer id');
 	return developerId;
@@ -194,6 +197,23 @@ async function resolveVersion(client: RocketRideClient, appId: string, version: 
 }
 
 /**
+ * Waits for a version's server build — publish and store submission both
+ * refuse a version that is still building. Progress narrates on `out`.
+ *
+ * @param client - Connected deploy client.
+ * @param appId - App id.
+ * @param registryVersion - The version whose build to wait for.
+ * @param out - Command output.
+ */
+async function waitForBuild(client: RocketRideClient, appId: string, registryVersion: number, out: Output): Promise<void> {
+	await client.waitForAppBuild(appId, registryVersion, {
+		onStatus: (status) => {
+			if (status !== 'ok') out.line(`  build v${registryVersion}: ${status || 'pending'}...`);
+		},
+	});
+}
+
+/**
  * Waits for a version's server build, then binds it to the target — the
  * App Builder's Publish button. Build progress narrates on `out`.
  *
@@ -205,11 +225,7 @@ async function resolveVersion(client: RocketRideClient, appId: string, version: 
  * @returns The binding row.
  */
 export async function publishWhenBuilt(client: RocketRideClient, appId: string, registryVersion: number, target: string, out: Output): Promise<Record<string, unknown>> {
-	await client.waitForAppBuild(appId, registryVersion, {
-		onStatus: (status) => {
-			if (status !== 'ok') out.line(`  build v${registryVersion}: ${status || 'pending'}...`);
-		},
-	});
+	await waitForBuild(client, appId, registryVersion, out);
 	const { publish } = await client.publishApp(appId, registryVersion, target);
 	out.line(`Published ${appId} v${registryVersion} to ${target}.`);
 	return publish;
@@ -398,6 +414,9 @@ export async function executeAppReview(verb: 'submit' | 'withdraw', appArg: stri
 	const client = await connectDeploy(options, out);
 	if (!client) return 1;
 	const registryVersion = await resolveVersion(client, appId, version);
+	// step: the server refuses to submit a version that is still building
+	// (right after `app deploy`, the newest one is) — wait like publish does
+	if (verb === 'submit') await waitForBuild(client, appId, registryVersion, out);
 	const { artifact } = verb === 'submit' ? await client.submitApp(appId, registryVersion) : await client.withdrawApp(appId, registryVersion);
 	out.line(`${verb === 'submit' ? 'Submitted' : 'Withdrew'} ${appId} v${registryVersion}${verb === 'submit' ? ' for store review' : ' from review'} (state ${String(artifact?.state ?? '?')}).`);
 	out.result({ appId, registryVersion, artifact });
@@ -407,17 +426,21 @@ export async function executeAppReview(verb: 'submit' | 'withdraw', appArg: stri
 /**
  * `app reply`: a developer message on the app's review thread.
  *
- * @param ref - The `[app]` argument.
- * @param options - Parsed command options (`--message`, `--version`).
+ * @param appArg - The `[app]` argument.
+ * @param versionArg - The `[version]` argument (the version the message
+ *   refers to; positional like `submit`/`withdraw` — a `--version` option
+ *   would be taken by the root program's own version flag).
+ * @param options - Parsed command options (`--message`).
  * @param out - Command output.
  * @returns The exit code.
  */
-export async function executeAppReply(ref: string | undefined, options: AppVerbOptions & { message?: string; version?: string }, out: Output): Promise<number> {
+export async function executeAppReply(appArg: string | undefined, versionArg: string | undefined, options: AppVerbOptions & { message?: string }, out: Output): Promise<number> {
 	if (!options.message?.trim()) return out.fail('--message <text> is required');
-	const { appId } = await resolveApp(ref, options);
+	const { app, version } = splitAppVersion(appArg, versionArg);
+	const { appId } = await resolveApp(app, options);
 	const client = await connectDeploy(options, out);
 	if (!client) return 1;
-	const registryVersion = options.version !== undefined ? parseRegistryVersion(options.version) : undefined;
+	const registryVersion = version !== undefined ? parseRegistryVersion(version) : undefined;
 	const result = await client.replyApp(appId, options.message, registryVersion);
 	out.line(`Replied on ${appId}'s review thread.`);
 	out.result(result);
@@ -591,13 +614,12 @@ export function registerAppCommands(program: Command): void {
 	}
 
 	const replyCmd = appCmd
-		.command('reply [app]')
-		.description("Post a developer message on an app's store review thread")
+		.command('reply [app] [version]')
+		.description("Post a developer message on an app's store review thread (optionally about one version)")
 		.option('-m, --message <text>', 'The message')
-		.option('--version <n>', 'The version the message refers to')
 		.option(workspaceOption, workspaceHelp)
-		.action(async (app, options) => {
-			await runCliCommand(options, (out) => executeAppReply(app, options, out));
+		.action(async (app, version, options) => {
+			await runCliCommand(options, (out) => executeAppReply(app, version, options, out));
 		});
 	addDeployConnectionOptions(replyCmd);
 

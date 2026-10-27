@@ -175,8 +175,9 @@ export class DeployApi {
 	 * @param options.comment - "What changed" note kept in the registry.
 	 * @param options.metadata - Extra metadata merged over the packed
 	 *   defaults; `appRoot` is always set from the pack, and `projectId`
-	 *   provenance is ensured in the appManifest (stamped on first deploy,
-	 *   before packing) when the caller does not supply one.
+	 *   provenance defaults to the working copy's appManifest projectId.
+	 *   Deploying never writes it — the id is stamped at creation and by
+	 *   the editor, so CI and read-only checkouts deploy unchanged.
 	 * @param options.onProgress - Receives one line per pack step (include
 	 *   checks, per-file adds, totals) for hosts that surface progress.
 	 * @returns The artifact entry for the new version.
@@ -184,14 +185,12 @@ export class DeployApi {
 	async addApp(appRoot: string, options: { workspaceRoot?: string; comment?: string; metadata?: Record<string, unknown>; onProgress?: (line: string) => void } = {}): Promise<PublishResult> {
 		const pack = await this.loadAppPack();
 		const workspaceRoot = options.workspaceRoot ?? process.cwd();
-		// Stamped BEFORE packing so a first deploy's freshly written
-		// package.json is inside the zip, not just on disk.
-		const projectId = options.metadata?.projectId ?? pack.ensureProjectIdAt(workspaceRoot, appRoot);
+		const projectId = options.metadata?.projectId ?? pack.readProjectIdAt(workspaceRoot, appRoot);
 		const packed = pack.packAppSource(workspaceRoot, appRoot, options.onProgress);
 		return this.add({
 			kind: 'app',
 			data: packed.data,
-			metadata: { ...options.metadata, projectId, ...(packed.appRoot ? { appRoot: packed.appRoot } : {}) },
+			metadata: { ...options.metadata, ...(projectId ? { projectId } : {}), ...(packed.appRoot ? { appRoot: packed.appRoot } : {}) },
 			...(options.comment !== undefined && { comment: options.comment }),
 		});
 	}

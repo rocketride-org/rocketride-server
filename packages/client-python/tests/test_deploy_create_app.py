@@ -21,7 +21,10 @@
 # SOFTWARE.
 # =============================================================================
 
-"""deploy.create_app defaults the app-id namespace to the connected org's developer id (TS twin parity)."""
+"""deploy.create_app defaults the developer id from the account; deploy.add_app forwards the working copy's projectId without stamping it (TS twin parity)."""
+
+import json
+import os
 
 import pytest
 
@@ -74,3 +77,67 @@ async def test_falls_through_to_the_scaffold_default(captured, account_info):
     await DeployApi(_FakeClient(account_info)).create_app('clock', install=False)
 
     assert captured['developer_id'] is None
+
+
+def _write_app(ws, manifest, legacy_marker=None):
+    """Write a minimal app folder under ws/apps/clock."""
+    folder = os.path.join(ws, 'apps', 'clock')
+    os.makedirs(os.path.join(folder, 'src'))
+    with open(os.path.join(folder, 'package.json'), 'w', encoding='utf-8') as f:
+        json.dump({'name': 'clock', 'appManifest': manifest}, f)
+    with open(os.path.join(folder, 'src', 'App.tsx'), 'w', encoding='utf-8') as f:
+        f.write('export default () => null;\n')
+    if legacy_marker is not None:
+        with open(os.path.join(folder, 'clock.rrapp'), 'w', encoding='utf-8') as f:
+            json.dump(legacy_marker, f)
+    return folder
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    """Capture the metadata add_app sends instead of calling a server."""
+    calls = {}
+
+    async def fake_add(self, **kwargs):
+        calls.update(kwargs)
+        return {'artifact': {}}
+
+    monkeypatch.setattr(DeployApi, 'add', fake_add)
+    return calls
+
+
+@pytest.mark.parametrize(
+    ('manifest', 'legacy_marker', 'expected'),
+    [
+        ({'id': 'acme.clock', 'projectId': 'manifest-guid'}, None, 'manifest-guid'),
+        ({'id': 'acme.clock'}, {'id': 'acme.clock', 'projectId': 'legacy-guid'}, 'legacy-guid'),
+    ],
+)
+async def test_add_app_forwards_the_working_copy_project_id(sent, tmp_path, manifest, legacy_marker, expected):
+    _write_app(str(tmp_path), manifest, legacy_marker)
+
+    await DeployApi(_FakeClient({})).add_app('apps/clock', workspace_root=str(tmp_path))
+
+    assert sent['metadata'] == {'projectId': expected, 'appRoot': 'apps/clock'}
+
+
+async def test_add_app_never_stamps_a_missing_project_id(sent, tmp_path):
+    folder = _write_app(str(tmp_path), {'id': 'acme.clock'})
+    with open(os.path.join(folder, 'package.json'), encoding='utf-8') as f:
+        before = f.read()
+
+    await DeployApi(_FakeClient({})).add_app('apps/clock', workspace_root=str(tmp_path))
+
+    assert sent['metadata'] == {'appRoot': 'apps/clock'}
+    with open(os.path.join(folder, 'package.json'), encoding='utf-8') as f:
+        assert f.read() == before
+
+
+async def test_add_app_caller_project_id_wins(sent, tmp_path):
+    _write_app(str(tmp_path), {'id': 'acme.clock', 'projectId': 'manifest-guid'})
+
+    await DeployApi(_FakeClient({})).add_app(
+        'apps/clock', workspace_root=str(tmp_path), metadata={'projectId': 'caller-guid'}
+    )
+
+    assert sent['metadata']['projectId'] == 'caller-guid'

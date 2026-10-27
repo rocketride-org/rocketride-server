@@ -147,7 +147,7 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 	}
 
 	// ── 2. The one scaffold (shared with `rocketride app create`) ────────
-	// Apps live under ./apps/<name> — symmetric with ./pipelines and the
+	// Apps live under ./apps/<slug>-ui — symmetric with ./pipelines and the
 	// node designer's ./nodes. The SDK refuses an existing folder. Its
 	// install and vendoring are left to this host: the WatchManager owns
 	// the single-flight install and ensureShell the session vendor memo.

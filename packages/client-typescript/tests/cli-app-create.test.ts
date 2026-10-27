@@ -88,7 +88,7 @@ describe('executeAppCreate developer id', () => {
 			throw new Error('ECONNREFUSED');
 		});
 
-		const { code, appId } = await create({ apikey: 'key', uri: 'http://localhost:5565' });
+		const { code, appId } = await create({ apikey: 'key' });
 
 		expect(code).toBe(0);
 		expect(appId).toBe('local.clock');
