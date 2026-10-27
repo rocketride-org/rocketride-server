@@ -39,13 +39,18 @@ rr-verify <command> [--id RUN_ID] [--label FEATURE] [args]
                               `mcp initialize` with no params uses default client params.
   record FEATURE -- CMD...    Run any command (curl, rr-verify doctor, ...) and save its output.
   py SCRIPT [ARGS...]         Run a Python script with the SDK venv and the run's connection env.
+  browse [OPTIONS] SCRIPT.mjs [ARGS...]
+                              Run a browser script against the run's engine (or docs server) and
+                              save screenshots, a video, and the console and request errors.
+                              `rr-verify browse --help` lists the options and the helper API.
+  docs                        Serve the built docs site (dist/docs) for this run.
   stop                        Stop the run's engine and everything it started. Evidence stays.
   runs                        List runs and whether their engine is alive.
   help                        Show this text.
 
 The run is --id, then $RR_VERIFY_ID, then the most recent launch (.verify/latest).
---label sets the evidence folder for chat, send, cli, tscli, and mcp.
-Every command except launch, sdk, runs, and help saves evidence under .verify/<run-id>/.
+--label sets the evidence folder for chat, send, cli, tscli, mcp, and browse.
+Every command except launch, sdk, docs, runs, and help saves evidence under .verify/<run-id>/.
 EOF
 }
 
@@ -88,6 +93,9 @@ record() {
 	shift
 	python3 -I "$SKILL_DIR/bin/record.py" "$label" -- "$@"
 }
+
+# shellcheck source=SCRIPTDIR/browser.sh
+. "$SKILL_DIR/bin/browser.sh"
 
 cmd_launch() {
 	local mock=0 port_arg=""
@@ -369,6 +377,7 @@ cmd_mcp() {
 
 cmd_stop() {
 	load_run
+	browser_stop
 	if ! engine_alive; then
 		echo "engine pid $ENGINE_PID already stopped"
 	else
@@ -416,6 +425,8 @@ case "$cmd" in
 	tscli) cmd_tscli ;;
 	mcp) cmd_mcp ;;
 	record) cmd_record ;;
+	browse) cmd_browse ;;
+	docs) cmd_docs ;;
 	stop) cmd_stop ;;
 	runs) cmd_runs ;;
 	help | -h | --help) usage ;;
