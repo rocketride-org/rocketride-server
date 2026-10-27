@@ -219,6 +219,57 @@ test('the workspace file holds each question with its kind\'s four-character tag
 	assert.equal(storedText('ask', 'why?'), 'ask␟why?');
 });
 
+test('APP_HISTORY_NOTE names everything the workspace file holds (DA-CLAIMS C-2): a preference or entry field saved but not named in the note fails', () => {
+	// What each saved preference and entry field is, and the words of the note that name it.
+	const NAMED: Readonly<Record<string, RegExp>> = {
+		'vector.historyRecording': /whether recording is on/,
+		'vector.history': /while it is, /,
+		question: /the first 200 characters of each question/,
+		truncated: /the first 200 characters/,
+		kind: /tagged with its kind \(a Search and its mode, a Compare or an Ask\)/,
+		limit: /its top-k/,
+		at: /when it ran/,
+		ms: /how long it took/,
+		outcome: /its result count or error/,
+		rows: /result count/,
+		error: /or error/,
+		pinned: /its pin\b/,
+		note: /and note\b/,
+	};
+	// Saved, but nothing the note need name: an entry's id is when it ran (named) and a random number.
+	const UNNAMED = new Set(['id']);
+	const writes: Array<[string, unknown]> = [];
+	const store = makeVectorHistory(0);
+	const detach = store.attachPrefs({ getPref: () => undefined, setPref: (key, value) => writes.push([key, value]) }, 'owner-1');
+	const history = persistedQueryHistory(store, APP_HISTORY_NOTE);
+	// Every kind of entry, and every optional field set at least once.
+	history.record('k', searchRecord({ question: 'x'.repeat(300), mode: 'semantic', topK: 10, results: 4 }, 1, 2));
+	history.record('k', searchRecord({ question: 'water', mode: 'hybrid', topK: 25, results: null, error: 'The store refused the search: x' }, 3, 4));
+	history.record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 5, 6));
+	history.record('k', askRecord(turn({ question: 'why?', askedAt: 7, answeredAt: 8, answer: { sources: [{}] } as never })) as never);
+	const [newest] = history.entries('k').get();
+	history.togglePin('k', newest.id);
+	history.setNote('k', newest.id, 'a note');
+	history.setRecording('k', false);
+	history.setRecording('k', true);
+	store.flush();
+	detach();
+	const fields = new Set<string>();
+	for (const [key, value] of writes) {
+		fields.add(key);
+		if (key !== 'vector.history') continue;
+		for (const entries of Object.values(value as Record<string, Array<Record<string, unknown>>>)) for (const entry of entries) for (const field of Object.keys(entry)) fields.add(field);
+	}
+	for (const field of ['vector.historyRecording', 'vector.history', 'question', 'truncated', 'kind', 'limit', 'at', 'ms', 'outcome', 'rows', 'error', 'pinned', 'note']) assert.ok(fields.has(field), `the run saves ${field} (the test covers it)`);
+	for (const field of fields) {
+		if (UNNAMED.has(field)) continue;
+		assert.ok(NAMED[field] !== undefined, `${field} is saved but the note does not name it`);
+		assert.match(APP_HISTORY_NOTE, NAMED[field], `the note names ${field}`);
+	}
+	assert.match(APP_HISTORY_NOTE, /Never the answers or results, the threshold, the scope, the table filter or a Compare's question B\.$/);
+	assert.doesNotMatch(JSON.stringify(writes), /wells/, 'question B is not saved');
+});
+
 test('records: a Search run per mode, a Compare once with B beside A and the results both found, an Ask question once its answer ended', () => {
 	assert.deepEqual(searchRecord({ question: 'water', mode: 'auto', topK: 25, results: 7 }, 100, 420), { question: 'water', kind: 'auto', at: 100, ms: 420, topK: 25, results: 7, outcome: 'rows' });
 	assert.deepEqual(searchRecord({ question: 'water', mode: 'hybrid', topK: 10, results: null, error: 'The store refused the search: x' }, 100, 5), { question: 'water', kind: 'hybrid', at: 100, ms: 5, topK: 10, results: null, outcome: 'error', error: 'The store refused the search: x' });
