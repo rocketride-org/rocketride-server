@@ -11,7 +11,7 @@ A chat pipeline takes a question from a Chat source, sends it to an LLM node, an
 ## How to get to it (user POV)
 
 - Build Chat, then an LLM node, then Return Answers on the VS Code canvas, press Run on the Chat node, and type in the chat panel. This skill cannot drive VS Code yet.
-- Open the engine's chat page at `/chat?auth=<pipeline public key>` in a browser. This skill cannot drive browsers yet.
+- Open the engine's chat page at `/chat?auth=<pipeline public key>` in a browser. [The chat page feature](./chat-ui.md) drives it.
 - Call `client.use(filepath=...)` and then `client.chat(token=..., question=...)` from the Python SDK.
 
 ## Driving it with rr-verify
@@ -30,7 +30,7 @@ Preconditions:
 
 ## Gotchas
 
-- The chat UI shows `I don't see any answers in there...` when a result has no answers. The SDK check above proves the missing `answers` field, not the UI message.
+- The chat page shows `I don't see any answers in there...` when a result has no answers. The SDK check above proves the missing `answers` field; `chatui-no-answer` in [the chat page feature](./chat-ui.md) proves the message.
 - `${ROCKETRIDE_OPENAI_KEY}` in a `.pipe` file is filled from the engine's environment when the pipeline starts. `rr-verify launch --mock` sets a placeholder. Without `--mock`, export the real key before launching.
 - Two pipelines with the same `project_id` cannot run at once. A second start fails with `Pipeline is already running.` Stop the first task, or give the copy a different `project_id`.
 - Use `client.chat` for chat-source pipelines. `client.send` is for webhook and dropper sources.

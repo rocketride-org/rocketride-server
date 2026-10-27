@@ -8,6 +8,7 @@ This directory is the maintained source for verifying RocketRide's user-facing b
 - A run is live: `rr-verify launch --mock` printed a line starting `engine:   http://127.0.0.1:<port>` for your run ID.
 - `rr-verify doctor` exits 0 for that run.
 - Never drive an engine that this run did not start, such as one from the VS Code extension, `./builder server:run`, or another agent's run.
+- For a browser feature, doctor shows no `WARN` line for the UI under test.
 
 ## Driving conventions
 
@@ -21,12 +22,13 @@ This directory is the maintained source for verifying RocketRide's user-facing b
 ## Proof and skip reporting
 
 - Capture the user action and the resulting state, not only the final output.
-- Every recipe command that checks behavior saves its own evidence: `chat` and `send` write `-chat.json` or `-send.json`, `cli`, `tscli`, and `record` write `-cmd.json`, and `mcp` writes the request and response. Setup commands that only create input files need no evidence.
+- Every recipe command that checks behavior saves its own evidence: `chat` and `send` write `-chat.json` or `-send.json`, `cli`, `tscli`, and `record` write `-cmd.json`, `mcp` writes the request and response, and `browse` writes `-browse.json` with its screenshots and video. Setup commands that only create input files need no evidence.
 - Scratch files go under `/tmp` with your run ID in the name, as the recipes show, so two runs never share one.
 - Record the sub-feature ID with every result.
 - Report an unreachable path with the command you tried and the unmet precondition.
 - Do not report a skipped entry point as verified through a different path.
 - Mark results from a `--mock` run as "mocked LLM". The evidence JSON has a `mock` field.
+- For a browser feature, attach the screenshots that show the behavior and the run's video to the PR.
 
 ## Feature entry contract
 
@@ -46,3 +48,7 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Webhook pipeline](./webhook-pipeline.md) covers sending text to a webhook-source pipeline, uploading from the CLI, and termination.
 - [CLIs](./cli.md) covers the Python and TypeScript `rocketride` CLIs: validate, start, list, stop, and upload.
 - [MCP](./mcp.md) covers the engine's HTTP MCP endpoint: initialize, tool listing, validation, one-shot runs, and task cleanup.
+- [Shell and Pipeline Builder](./shell.md) covers the browser shell the engine serves: the home page, sign-in, and adding a node on the Pipeline Builder canvas.
+- [Chat page](./chat-ui.md) covers `/chat` for a running chat pipeline: asking a question and reading the conversation.
+- [Dropper page](./dropper-ui.md) covers `/dropper` for a running dropper pipeline: uploading and removing files, including the link MCP hands out.
+- [Docs site](./docs-site.md) covers the built docs site: the home page, sidebar navigation, search, and the 404 page.
