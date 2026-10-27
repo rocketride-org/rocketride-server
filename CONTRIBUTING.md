@@ -64,6 +64,7 @@ All other branches **must** follow the naming convention:
 
 3. Make your changes, ensuring:
 
+   - The PR solves one problem. Put unrelated changes in their own PRs, each with its own issue
    - Code follows the project style guidelines
    - All tests pass
    - New code has appropriate tests
