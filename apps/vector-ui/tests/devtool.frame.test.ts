@@ -16,7 +16,8 @@ import { codedError, projectRows, vectorComponents } from 'shared/explorer/conne
 import type { IExplorerEndpoint } from 'shared/explorer';
 import { jsonByteLength } from 'shared/explorer/devtool/state';
 import { SUMMON_EVENT, SUMMON_GRACE_MS, SUMMON_SETTLE_MS } from 'shared/explorer/devtool/summon';
-import { createDevToolHarness } from 'shared/explorer/devtool/testing';
+import { createDevToolHarness, shellProtocol } from 'shared/explorer/devtool/testing';
+import type { ToolChannel } from 'shell';
 import { callVector, fetchChunks, fetchDocument, fetchStats, scoreChunks } from '../src/adapters/actions';
 import { connectionCaches, vectorEndpoints } from '../src/adapters/explorer';
 import { connectionEntry, existingEntry, recommendExamples, reviewedDocuments, savedFilters, savedViews } from '../src/adapters/connections';
@@ -25,7 +26,7 @@ import { CHAT_AND_INGEST_CACHE } from '../src/ingest/useIngest';
 import type { IConnectionEntry } from '../src/adapters/connections';
 import { remoteChannel } from '../src/devtool/frame';
 import { CONTROLLER_NOT_READY_TEXT } from '../src/devtool/frameText';
-import { OP, STATE, VECTOR_APP_ID, VERSIONS_STATE_BYTES } from '../src/devtool/protocol';
+import { EVENT, OP, STATE, VECTOR_APP_ID, VERSIONS_STATE_BYTES, field } from '../src/devtool/protocol';
 import type { IDocVersion, IQueryHint } from '../src/devtool/protocol';
 import { DEVTOOL_CHAT_NOTE, DEVTOOL_UPLOADS_NOTE, NO_CHANNELS } from '../src/env';
 import { buildConsoleModel } from '../src/vector/consoleModel';
@@ -267,6 +268,58 @@ describe('the console frame: hints out, other frames\' writes and map requests i
 		assert.ok(said.some((s) => /first 200/.test(s)), said.join(' / '));
 		run.frame.dispose();
 		run.controller.dispose();
+	});
+});
+
+describe('a frame created while the controller is already ready (its retained state replayed synchronously on subscribe)', () => {
+	it('does not read its state before it exists: it is created, says which document it is, and its hints flush', async () => {
+		const run = await connected((key) => consoleUri(key));
+		// rocket-ui's channel replays every retained topic SYNCHRONOUSLY inside onState (the ToolChannel contract), so a
+		// frame opened after the controller is ready hears `ready` while createVectorFrame is still running. The
+		// harness's fresh channel holds nothing yet; this one replays what the realm already retained, as rocket-ui's does.
+		const inner = shellProtocol.createToolChannel(run.h.newFramePeer());
+		const sent: Array<[string, unknown]> = [];
+		const replayed: string[] = [];
+		const channel: ToolChannel = {
+			publishState: (topic, snapshot) => inner.publishState(topic, snapshot),
+			onState: (topic, cb) => {
+				let retained: { snapshot: unknown } | null = null;
+				run.frame.channel.onState(topic, (snapshot) => {
+					retained = { snapshot };
+				})();
+				if (retained !== null) {
+					replayed.push(topic);
+					cb((retained as { snapshot: unknown }).snapshot);
+				}
+				return inner.onState(topic, cb);
+			},
+			sendEvent: (name, payload) => {
+				sent.push([name, payload]);
+				inner.sendEvent(name, payload);
+			},
+			onEvent: (name, cb) => inner.onEvent(name, cb),
+		};
+		let second: ReturnType<typeof mountFrame> | null = null;
+		assert.doesNotThrow(() => {
+			second = mountFrame(run.h, consoleUri(run.key), { channel, hintDelayMs: 0 });
+		}, 'creating the frame reads no state before it exists');
+		const frame = (second as unknown as ReturnType<typeof mountFrame>).frame;
+		assert.ok(replayed.length >= 3, `the premise: retained topics were replayed during creation (${replayed.join(', ')})`);
+		assert.equal(frame.controllerReady.get(), true, 'ready at once, from the replay');
+		assert.ok(
+			sent.some(([name, payload]) => name === EVENT.active && field(payload, 'docKey') === consoleUri(run.key)),
+			'it told the ready controller which document it is'
+		);
+		// Its hints flush once its console binds: the query the console shows goes to the controller.
+		const probe = frame.endpoints.get().probes[run.key];
+		const entry = frame.env(true).connection(run.endpoint, (probe?.ok ? readDialect(probe.info)?.limits : null) ?? DEFAULT_LIMITS);
+		const unbind = frame.bindConsole(entry);
+		entry.selection.setQuery('falcon water');
+		assert.ok(
+			sent.some(([name, payload]) => name === EVENT.queryChanged && field(payload, 'text') === 'falcon water'),
+			'the hint is sent'
+		);
+		unbind();
 	});
 });
 
