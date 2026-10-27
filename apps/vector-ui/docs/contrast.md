@@ -20,8 +20,7 @@ map's colours are measured by the map's own suite.
   info, warning, error, muted) is a 4 px edge in the status colour; the edge is
   decoration, never the only carrier of meaning.
 - **Icons** (the trash button) draw in `currentColor`, which is the text token.
-- Not used for text or graphics: `--rr-text-secondary`, `--rr-text-disabled`,
-  the status colours (`--rr-color-*`) and `--rr-brand` (see below).
+- Not used for text: `--rr-text-secondary`, `--rr-text-disabled`, the status colours (`--rr-color-*`) and `--rr-brand` (see below). As graphics, the status colours appear only as a chip's tone edge, the Trash danger zone's 4 px edge and the dev-tool sidebar's state dot, each beside words that say the same; the map draws its "other" and hollow points in `--rr-text-secondary`, measured at 3:1 or more by the map's suite. `--rr-brand` is not drawn.
 
 ## Measurements
 
