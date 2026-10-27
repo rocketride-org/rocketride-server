@@ -153,17 +153,23 @@ test('MapToolbar: sizes capped by the node\'s limits, t-SNE disabled above 1,000
 	assert.match(out, /aria-pressed="false"[^>]*>Table/);
 	const busy = html(<MapToolbar {...base} busy="Laying out…" canCancel query={{ enabled: true, reason: null }} />);
 	assert.match(busy, /role="status"[^>]*>Laying out…</);
-	assert.match(busy, />Cancel<\/button>/);
-	// The busy words, Cancel and the reasons share one slot that is always there: the row never gains a line.
+	// The busy words and Cancel float in a chip under the toolbar (absolute: the row never changes), said by a live
+	// region that is always there.
+	assert.match(busy, /<div style="[^"]*position:absolute;top:calc\(100% \+ 6px\)[^"]*" data-map-status=""><span aria-hidden="true">Laying out…<\/span><button[^>]*>Cancel<\/button><\/div>/);
 	const idle = html(<MapToolbar {...base} query={{ enabled: true, reason: null }} />);
-	for (const out2 of [idle, busy]) assert.equal((out2.match(/data-map-status=""/g) ?? []).length, 1);
-	assert.match(idle, /<span[^>]*data-map-status=""[^>]*><span role="status"[^>]*><\/span><\/span>/, 'idle: the slot holds an empty live region');
+	assert.match(idle, /<span role="status" style="position:absolute;[^"]*"><\/span>/, 'idle: an empty live region');
+	assert.doesNotMatch(idle, /data-map-status/, 'idle: no chip');
+	// Everything that is not absolute is the same, busy or idle: the row is deterministic.
+	const flow = (markup: string): string => markup.replace(/<span role="status"[^>]*>[^<]*<\/span>/, '').replace(/<div style="[^"]*" data-map-status="">[\s\S]*?<\/div>/, '').replace(/ disabled=""/g, '');
+	assert.equal(flow(busy), flow(idle));
+	// Without a sample the empty state says it: no chip.
+	assert.doesNotMatch(html(<MapToolbar {...base} sample={null} busy="Sampling…" query={{ enabled: true, reason: null }} />), /data-map-status/);
 });
 
-test('MapToolbar is one row: Points, Layout, Colour by, Query, Table, Advanced, the view\'s menus, the status slot; the rest is in Advanced, closed at first', () => {
+test('MapToolbar is one row: Points, Layout, Colour by, Query, Table, Advanced, the view\'s menus (and an always-present live region); the rest is in Advanced, closed at first', () => {
 	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop, onExpandSelected: noop, onToggle3D: noop, extras: <span data-extras="">Export Views</span> };
 	const closed = html(<MapToolbar {...base} />);
-	const order = ['aria-label="Points"', 'aria-label="Layout"', 'aria-label="Colour by"', 'aria-label="Query"', '>Table</button>', 'data-component="AdvancedPopover"', 'data-extras=""', 'data-map-status=""'].map((needle) => closed.indexOf(needle));
+	const order = ['aria-label="Points"', 'aria-label="Layout"', 'aria-label="Colour by"', 'aria-label="Query"', '>Table</button>', 'data-component="AdvancedPopover"', 'data-extras=""', 'role="status"'].map((needle) => closed.indexOf(needle));
 	assert.ok(order.every((at) => at >= 0), JSON.stringify(order));
 	assert.deepEqual([...order].sort((a, b) => a - b), order, 'in that order');
 	assert.match(closed, /<button[^>]*aria-expanded="false"[^>]*>Advanced ▾<\/button>/);
@@ -541,7 +547,7 @@ test('an opened panel focuses its first control that is neither disabled nor hid
 	assert.equal(firstEnabled([]), -1);
 });
 
-test('a disabled Query and t-SNE carry their reasons as the controls\' descriptions; the one-line status slot holds only the busy words and Cancel', () => {
+test('a disabled Query and t-SNE carry their reasons as the controls\' descriptions; the busy chip holds only the busy words and Cancel', () => {
 	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
 	const why = 'Text queries need the embedding node reachable from the Tools source';
 	const out = html(<MapToolbar {...base} query={{ enabled: false, reason: why }} tsneReason="t-SNE is limited to 1,000 points; this sample has 5,000." />);
@@ -552,10 +558,27 @@ test('a disabled Query and t-SNE carry their reasons as the controls\' descripti
 	const tsneId = /<select aria-label="Layout" aria-describedby="([^"]+)"/.exec(out)?.[1];
 	assert.ok(tsneId);
 	assert.match(out, new RegExp(`<span id="${tsneId}"[^>]*>t-SNE is limited to 1,000 points; this sample has 5,000\\.</span>`));
-	const slot = out.slice(out.indexOf('data-map-status'), out.indexOf('</span></span>', out.indexOf('data-map-status')));
-	assert.doesNotMatch(slot, /Text queries|t-SNE/, 'no reason in the one-line slot');
-	// Nothing to explain: no description.
-	assert.doesNotMatch(html(<MapToolbar {...base} query={{ enabled: true, reason: null }} />), /aria-describedby/);
+	const busy = html(<MapToolbar {...base} busy="Laying out…" canCancel query={{ enabled: false, reason: why }} tsneReason="t-SNE is limited to 1,000 points; this sample has 5,000." />);
+	const chip = /<div[^>]*data-map-status="">([\s\S]*?)<\/div>/.exec(busy)?.[1] ?? '';
+	assert.match(chip, /Laying out…/);
+	assert.doesNotMatch(chip, /Text queries|t-SNE/, 'no reason in the busy chip');
+	// Nothing to explain: no description on Query, Run or Layout.
+	const fine = html(<MapToolbar {...base} query={{ enabled: true, reason: null }} />);
+	assert.doesNotMatch(fine, /<input aria-label="Query" aria-describedby|<select aria-label="Layout" aria-describedby|type="submit"[^>]*aria-describedby/);
 	assert.equal(stagedLine(3), 'Staged 3 documents for the trash; nothing moves until the pending changes are applied.');
 	assert.equal(stagedLine(1), 'Staged 1 document for the trash; nothing moves until the pending changes are applied.');
+});
+
+test('the toolbar is compact enough for a dev-tool frame: short Points options (the light one titled and described), a 120 px query box, 6 px gaps', () => {
+	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
+	const out = html(<MapToolbar {...base} />);
+	assert.match(out, /<option value="detailed:1000" selected="">1,000 \(detailed\)<\/option>/);
+	assert.match(out, /<option value="light:5000" title="5,000 \(light: no text\)">5,000 \(light\)<\/option>/);
+	const lightId = /<select aria-label="Points" aria-describedby="([^"]+)"/.exec(out)?.[1];
+	assert.ok(lightId, 'the Points select is described');
+	assert.match(out, new RegExp(`<span id="${lightId}"[^>]*>A light sample has no text\\.</span>`));
+	assert.match(out, /<div role="toolbar" aria-label="Map controls" tabindex="-1" style="[^"]*gap:6px/);
+	assert.match(out, /<input aria-label="Query" style="[^"]*min-width:120px;[^"]*width:120px"/);
+	// A node without light samples: nothing to describe.
+	assert.doesNotMatch(html(<MapToolbar {...base} limits={{ ...limits, sample_max_light: limits.sample_max }} />), /A light sample/);
 });

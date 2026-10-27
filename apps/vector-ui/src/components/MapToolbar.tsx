@@ -26,16 +26,19 @@
 //
 // One row: Points, Layout, Colour by, the text query, the Table toggle (the
 // map's non-visual alternative, and the keyboard route to select a point, so
-// it is never behind a popover), then Advanced, the view's menus (`extras`:
-// Export, Views) and a status slot that is always there and holds only the
-// busy words and Cancel, so nothing that appears when a run starts can push
-// the row onto a second line.
+// it is never behind a popover), then Advanced and the view's menus
+// (`extras`: Export, Views). Nothing on the row comes or goes with a run: the
+// busy words and Cancel float in a chip just under the toolbar, over the
+// map's top-left corner, and a live region that is always there says them.
+// The row is kept compact (a 120 px query box, 6 px gaps) so it is one row in
+// a dev-tool frame at 1440 too (measured: its controls span 1,061 px).
 //
 // Points: how many and which mode (Detailed up to the node's sample_max, Light
-// up to sample_max_light). Layout: PCA (the node's own), Neighbour graph
-// (seeded force layout over the kNN graph), t-SNE (at most 1,000 points;
+// up to sample_max_light; a light option's title and the select's description
+// say a light sample has no text). Layout: PCA (the node's own), Neighbour
+// graph (seeded force layout over the kNN graph), t-SNE (at most 1,000 points;
 // disabled above that). A running layout shows "Laying out…" and Cancel in the
-// slot. Colour by, grouped Content / Document / Analysis, each mode without its
+// chip. Colour by, grouped Content / Document / Analysis, each mode without its
 // data disabled with the reason as its title. The text query (disabled when
 // the embedding node is unreachable). The reasons of a disabled Query and of
 // t-SNE are the controls' descriptions (aria-describedby); the map view shows
@@ -62,7 +65,8 @@ import type { EdgeMode, EdgesPerPoint, MapLayout, MapToolbarProps as ContractMap
 import { COLOUR_MODES } from '../map/colours';
 import type { IColourMode, MapColourBy } from '../map/colours';
 import { focusHold } from '../map/popover';
-import { MAP_STYLES } from '../map/styles';
+import { FLOAT_SHADOW, MAP_STYLES } from '../map/styles';
+import { OUTLINE_TOKEN } from '../map/tokens';
 import { num } from '../map/wording';
 import { AdvancedPopover, PANEL_ATTRIBUTE } from './AdvancedPopover';
 
@@ -113,6 +117,9 @@ export const TREE_HINT = 'Tree reads best over the Neighbour graph layout';
 /** The Colour by groups, in order. */
 const COLOUR_GROUPS: Array<IColourMode['group']> = ['Content', 'Document', 'Analysis'];
 
+/** What a light sample lacks (the Points options say "light"; their title and the select's description say this). */
+const LIGHT_WORDS = 'no text';
+
 /** Detailed and light sizes offered (capped by the node's limits). */
 const DETAILED_SIZES = [250, 500, 1000, 2000];
 const LIGHT_SIZES = [3000, 5000];
@@ -124,11 +131,11 @@ const LAYOUTS: Array<{ id: MapLayout; label: string }> = [
 ];
 
 const S = {
-	// Always present, and it takes only the room the controls leave (a zero basis never starts a new line): the row
-	// keeps its lines whatever it says. Its words are cut with an ellipsis when that room is short (the title holds them).
-	status: { ...MAP_STYLES.small, flex: '1 1 0', minWidth: 0, display: 'inline-flex', alignItems: 'center', gap: 6, overflow: 'hidden', whiteSpace: 'nowrap' } as React.CSSProperties,
-	query: { ...MAP_STYLES.input, minWidth: 160, width: 160 } as React.CSSProperties,
-	words: { overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 } as React.CSSProperties,
+	// The busy words and Cancel: over the map's top-left corner, under the toolbar, so the row never changes.
+	chip: { ...MAP_STYLES.small, position: 'absolute', top: 'calc(100% + 6px)', left: 10, zIndex: 3, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 4px 4px 10px', borderRadius: 6, background: 'var(--rr-bg-paper)', border: `1px solid var(${OUTLINE_TOKEN})`, boxShadow: FLOAT_SHADOW, whiteSpace: 'nowrap' } as React.CSSProperties,
+	query: { ...MAP_STYLES.input, minWidth: 120, width: 120 } as React.CSSProperties,
+	// Compact enough for one row in a dev-tool frame at 1440 (measured: 1,110 px of map width there).
+	row: { ...MAP_STYLES.toolbar, gap: 6, position: 'relative' } as React.CSSProperties,
 	// A control's description, read by assistive tech; the view shows the sentence in the legend.
 	described: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' } as React.CSSProperties,
 	fieldset: { border: 'none', margin: 0, padding: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 } as React.CSSProperties,
@@ -227,12 +234,15 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 	const tsneWhy = props.tsneReason ?? null;
 	const queryWhyId = `map-query-why-${uid}`;
 	const tsneWhyId = `map-tsne-why-${uid}`;
+	const lightWhyId = `map-light-why-${uid}`;
+	const offersLight = sizes.some((s) => s.mode === 'light');
 	return (
-		<div ref={root} role="toolbar" aria-label="Map controls" tabIndex={-1} style={MAP_STYLES.toolbar}>
+		<div ref={root} role="toolbar" aria-label="Map controls" tabIndex={-1} style={S.row}>
 			<label style={MAP_STYLES.group}>
 				<span style={MAP_STYLES.label}>Points</span>
 				<select
 					aria-label="Points"
+					aria-describedby={offersLight ? lightWhyId : undefined}
 					style={MAP_STYLES.select}
 					value={current}
 					disabled={busy}
@@ -242,8 +252,8 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 					}}
 				>
 					{sizes.map((s) => (
-						<option key={`${s.mode}:${s.n}`} value={`${s.mode}:${s.n}`}>
-							{num(s.n)} {s.mode === 'light' ? '(light: no text)' : '(detailed)'}
+						<option key={`${s.mode}:${s.n}`} value={`${s.mode}:${s.n}`} title={s.mode === 'light' ? `${num(s.n)} (light: ${LIGHT_WORDS})` : undefined}>
+							{num(s.n)} ({s.mode})
 						</option>
 					))}
 				</select>
@@ -354,16 +364,21 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 				)}
 			</AdvancedPopover>
 			{props.extras ?? null}
-			<span style={S.status} data-map-status="">
-				{props.busy && props.canCancel ? (
-					<button type="button" style={MAP_STYLES.button} onClick={props.onCancel}>
-						Cancel
-					</button>
-				) : null}
-				<span role="status" style={S.words} title={props.busy ?? undefined}>
-					{props.busy ?? ''}
-				</span>
+			{/* Always there, so the busy words are announced when they come. */}
+			<span role="status" style={S.described}>
+				{props.busy ?? ''}
 			</span>
+			{props.busy && sample ? (
+				<div style={S.chip} data-map-status="">
+					{/* Said by the live region above; shown here. */}
+					<span aria-hidden="true">{props.busy}</span>
+					{props.canCancel ? (
+						<button type="button" style={MAP_STYLES.button} onClick={props.onCancel}>
+							Cancel
+						</button>
+					) : null}
+				</div>
+			) : null}
 			{queryWhy ? (
 				<span id={queryWhyId} style={S.described}>
 					{queryWhy}
@@ -372,6 +387,11 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 			{tsneWhy ? (
 				<span id={tsneWhyId} style={S.described}>
 					{tsneWhy}
+				</span>
+			) : null}
+			{offersLight ? (
+				<span id={lightWhyId} style={S.described}>
+					A light sample has {LIGHT_WORDS}.
 				</span>
 			) : null}
 		</div>

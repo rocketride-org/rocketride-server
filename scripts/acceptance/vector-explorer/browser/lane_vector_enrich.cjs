@@ -1895,13 +1895,14 @@ async function drive(fixtureKey, base, out, planned, step) {
 	};
 	/** A map reading for a step's note (the legend shortened). */
 	const brief = (reading) => (reading ? { ...reading, legend: String(reading.legend || '').slice(0, 300) } : null);
-	const fitButton = () => toolbar.getByRole('button', { name: MAP.fit }).first();
+	/** Fit, in the toolbar's Advanced panel (closed again: it hangs over the canvas). */
+	const clickFit = () => C.withAdvanced(toolbar, 'button', MAP.fit, (fit) => fit.click());
 	/** Fit once the points have stopped moving, then Fit again: the camera of each ({ camera, refit }). */
 	const fitMap = async () => {
 		await settle();
-		await fitButton().click();
+		await clickFit();
 		const first = await settle();
-		await fitButton().click();
+		await clickFit();
 		const second = await settle();
 		return { camera: first && first.camera, refit: second && second.camera };
 	};
@@ -1911,7 +1912,7 @@ async function drive(fixtureKey, base, out, planned, step) {
 	 */
 	const framing = async () => {
 		const auto = await settle();
-		await fitButton().click();
+		await clickFit();
 		const fitted = await settle();
 		return { camera: auto && auto.camera, fitted: fitted && fitted.camera };
 	};
@@ -1925,10 +1926,11 @@ async function drive(fixtureKey, base, out, planned, step) {
 		if (fitted !== true) throw new Error(fitted);
 		const box = await canvas.boundingBox();
 		if (!box) throw new Error('the map canvas has no size');
-		const lasso = toolbar.getByRole('button', { name: MAP.lasso }).first();
+		// Lasso is in the Advanced panel, closed again before the canvas is pressed.
+		const toggleLasso = () => C.withAdvanced(toolbar, 'button', MAP.lasso, (lasso) => lasso.click());
 		// What the canvas counted before: a reading equal to it may be the earlier selection, not this lasso's.
 		const before = await C.attrInt(canvas, MAP.attr.selection);
-		await lasso.click();
+		await toggleLasso();
 		// The lasso's corners stay inside the canvas (2 px in).
 		const right = box.x + Math.min(box.width * share, box.width - 2);
 		await lassoThrough([
@@ -1944,7 +1946,7 @@ async function drive(fixtureKey, base, out, planned, step) {
 		);
 		await C.sleep(300);
 		const selected = await C.attrInt(canvas, MAP.attr.selection);
-		await lasso.click();
+		await toggleLasso();
 		const took = lassoShareVerdict({ share, selected, shown: await C.attrInt(canvas, MAP.attr.points) });
 		if (took !== true) throw new Error(took);
 		return selected;
@@ -2239,23 +2241,25 @@ async function drive(fixtureKey, base, out, planned, step) {
 		await step(page, STEP_TITLES['edges'], async (note) => {
 			if (!sample) return 'no sample';
 			await C.switchView(page, CONSOLE.mapTab);
-			const edges = combo(UI.map.edges, toolbar);
+			// Edges, Edges per point and Expand selected are in the toolbar's Advanced panel, closed after each use.
+			const setEdges = (mode) =>
+				C.withAdvanced(toolbar, 'combobox', UI.map.edges, (edges) => edges.selectOption(mode));
 			const read = (mode) =>
 				poll(
 					async () => ((await attr(UI.map.attr.edgeMode)) === mode ? attrInt(UI.map.attr.edgeCount) : null),
 					(v) => v !== null && (mode === 'none' || v > 0),
 					10000
 				);
-			await edges.selectOption('tree');
+			await setEdges('tree');
 			const tree = await read('tree');
-			await edges.selectOption('neighbours');
-			await combo(UI.map.edgesPerPoint, toolbar).selectOption('5');
+			await setEdges('neighbours');
+			await C.withAdvanced(toolbar, 'combobox', UI.map.edgesPerPoint, (m) => m.selectOption('5'));
 			const neighbours5 = await read('neighbours');
 			// Hover: sweep for a point (the tooltip shows). The map says nothing about the edges it
 			// thickens, so the overlay layer's drawn pixels are read with the pointer over the point
 			// and away from it, with the edges on (Neighbours m=5) and off (None): what the hover adds
 			// over the edges is the difference (the hover ring is drawn in both).
-			await toolbar.getByRole('button', { name: MAP.fit }).first().click();
+			await clickFit();
 			const box = await canvas.boundingBox();
 			let hovered = null;
 			let at = null;
@@ -2282,14 +2286,14 @@ async function drive(fixtureKey, base, out, planned, step) {
 					return overlayPixels();
 				};
 				const withEdges = { away: await drawnAt(away), over: await drawnAt(at) };
-				await edges.selectOption('none');
+				await setEdges('none');
 				await read('none');
 				const without = { away: await drawnAt(away), over: await drawnAt(at) };
 				hover = { withEdges, without };
 				hovered = hoverEdgePixels(hover);
 			}
 			// Expand selected: Edges None, select a point that has kNN neighbours (through the Table), Expand selected.
-			await edges.selectOption('none');
+			await setEdges('none');
 			await read('none');
 			let selected = null;
 			let expanded = null;
@@ -2298,7 +2302,7 @@ async function drive(fixtureKey, base, out, planned, step) {
 			);
 			if (withNeighbours !== undefined) {
 				selected = await inspectPoint(withNeighbours);
-				await button(UI.map.expandSelected, toolbar).click();
+				await C.withAdvanced(toolbar, 'button', UI.map.expandSelected, (expand) => expand.click());
 				expanded = await poll(
 					() => attrInt(UI.map.attr.edgeCount),
 					(v) => v !== null && v > 0,

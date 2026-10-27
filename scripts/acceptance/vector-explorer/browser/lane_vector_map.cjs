@@ -313,7 +313,7 @@ async function main() {
 
 		await step(page, 'hover: a tooltip names the sampled document under the pointer', async (note) => {
 			if (!sample) return 'no sample';
-			await toolbar.getByRole('button', { name: MAP.fit }).first().click();
+			await C.withAdvanced(toolbar, 'button', MAP.fit, (fit) => fit.click());
 			const box = await canvas.boundingBox();
 			if (!box || !(box.width > 0 && box.height > 0)) return 'the map canvas has no size';
 			const tooltip = page.locator(MAP.tooltip).first();
@@ -362,12 +362,15 @@ async function main() {
 		await step(page, 'lasso: the selection count follows the points inside it', async (note) => {
 			if (!sample) return 'no sample';
 			const n = await C.attrInt(canvas, MAP.attr.points);
-			await toolbar.getByRole('button', { name: MAP.fit }).first().click();
+			await C.withAdvanced(toolbar, 'button', MAP.fit, (fit) => fit.click());
 			const box = await canvas.boundingBox();
 			if (!box || !(box.width > 0 && box.height > 0)) return 'the map canvas has no size';
-			const lasso = toolbar.getByRole('button', { name: MAP.lasso }).first();
-			await lasso.click();
-			if ((await C.attrText(lasso, 'aria-pressed')) !== 'true') return 'Lasso is not pressed after a click';
+			// Lasso is in the Advanced panel, which is closed again before the canvas is pressed (it hangs over it).
+			const pressed = await C.withAdvanced(toolbar, 'button', MAP.lasso, async (lasso) => {
+				await lasso.click();
+				return C.attrText(lasso, 'aria-pressed');
+			});
+			if (pressed !== 'true') return 'Lasso is not pressed after a click';
 			const [l, t, r, b] = [box.x + 2, box.y + 2, box.x + box.width - 2, box.y + box.height - 2];
 			const counted = async (previous) => {
 				const onCanvas = await pollInt(MAP.attr.selection, (v) => v !== null && v !== previous);
@@ -389,7 +392,7 @@ async function main() {
 				[l, b],
 			]);
 			const half = await counted(all.onCanvas);
-			await lasso.click();
+			await C.withAdvanced(toolbar, 'button', MAP.lasso, (lasso) => lasso.click());
 			note({ n, all, half });
 			if (!(n > 0)) return 'the canvas drew no points';
 			if (all.onCanvas !== n || all.shown !== n)
