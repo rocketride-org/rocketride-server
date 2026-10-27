@@ -253,6 +253,22 @@ test('on an engine with shortestPath, Find path makes ONE call, keeps the path i
 	assert.equal(s.notice?.text, 'Path cleared.');
 });
 
+test('Clear path leaves the selection, the inspected element and the selected relationship exactly as they were', async () => {
+	const { session } = rig(NEO_SP, (recipe) => envelope(/shortestPath/.test(recipe.cypher) ? [[PATH]] : []));
+	session.load(base());
+	session.select('a', 'only');
+	session.select('b', 'toggle');
+	await session.findPath();
+	const before = session.getState();
+	assert.notEqual(before.path, null);
+	session.clearPath();
+	const after = session.getState();
+	assert.equal(after.path, null);
+	assert.deepEqual([...after.selected], [...before.selected]);
+	assert.deepEqual(after.inspect, before.inspect);
+	assert.equal(after.selectedRelationship, before.selectedRelationship);
+});
+
 test('a failed shortestPath call falls back to the depth search, which finds the path and is named as the method; an empty one is final', async () => {
 	const { session, log } = rig(NEO_SP, (recipe) => {
 		if (/shortestPath/.test(recipe.cypher)) throw new Error('Query failed');

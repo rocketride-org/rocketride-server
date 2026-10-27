@@ -521,5 +521,8 @@ test('Clear path is offered whenever a path is shown, on the toolbar and beside 
 	assert.match(view, /\.\.\.\(state\.path \? \[\{ id: 'clear-path', label: 'Clear path'[^\]]*session\.clearPath\(\)/);
 	const inspector = code(read('components', 'InspectorPanel.tsx'));
 	const nodeView = inspector.slice(inspector.indexOf('New query from here'));
-	assert.match(nodeView, /\{state\.path && <Button[^>]*onClick=\{\(\) => session\.clearPath\(\)\}>Clear path<\/Button>\}/);
+	assert.match(nodeView, /\{state\.path && <Button[^>]*onClick=\{clearPath\}>Clear path<\/Button>\}/);
+	// The button that was pressed goes away with the path, so focus is put back (the same way Close does).
+	assert.match(inspector, /const clearPath = \(\): void => \{\s*session\.clearPath\(\);\s*onClosed\?\.\(\);/);
+	assert.match(view, /id: 'clear-path'[^\]]*run: \(\) => \{ session\.clearPath\(\); restoreFocus\(\); \}/);
 });
