@@ -406,6 +406,65 @@ export function drawerView(endpoint: IExplorerEndpoint, probe: IProbeResult | un
 }
 
 // =============================================================================
+// COLLECTION TAB
+// =============================================================================
+
+/** One block of the Collection tab. */
+export interface ICollectionSection {
+	label: string;
+	rows: IDetailRow[];
+}
+
+/**
+ * The Collection tab's facts, read-only: what the store node reports about the embedding, the index, the storage and
+ * the writes. A fact the node does not report reads "—"; the console's last stats fill what the dialect lacks, as in
+ * the drawer. Nothing here is estimated.
+ *
+ * @param probe - The connection's probe, when one exists.
+ * @param stats - The connection's last stats answer, when its console has one.
+ * @returns The sections; none while the store has not answered its dialect.
+ */
+export function collectionView(probe: IProbeResult | undefined, stats: IStatsView | null = null): ICollectionSection[] {
+	const dialect = probe?.ok ? readDialect(probe.info) : null;
+	if (!dialect) return [];
+	const index = dialect.index ?? stats?.index ?? null;
+	const params = index?.params ? Object.entries(index.params).map(([k, v]) => `${k} ${String(v)}`) : [];
+	const dimension = dialect.dimension ?? stats?.dimension ?? null;
+	const score = dialect.score;
+	const range = score.range ? `${score.range[0]} to ${score.range[1]}` : 'not reported';
+	const chunks = stats?.chunks ?? null;
+	return [
+		{
+			label: 'Embedding',
+			rows: [
+				{ label: 'Model', value: dialect.model ?? stats?.model ?? '—' },
+				{ label: 'Dimensions', value: dimension === null ? '—' : String(dimension) },
+			],
+		},
+		{
+			label: 'Index',
+			rows: [
+				{ label: 'Metric', value: dialect.metric ?? stats?.metric ?? '—' },
+				{ label: 'Index', value: index ? `${index.type}${params.length ? ` (${params.join(', ')})` : ''}` : '—' },
+				{ label: 'Backend', value: [dialect.backend, dialect.backend_version].filter(Boolean).join(' ') || '—' },
+				{ label: 'Score', value: `${score.formula === 'unknown' ? 'formula not reported' : score.formula}; range ${range}; ${score.higher_is_better ? 'higher is closer' : 'lower is closer'}` },
+				{ label: 'Score threshold', value: score.threshold === null ? 'none set on the node' : String(score.threshold) },
+			],
+		},
+		{
+			label: 'Storage and writes',
+			rows: [
+				{ label: 'Size', value: typeof dialect.size_bytes === 'number' ? formatSize(dialect.size_bytes) : 'not reported by this store' },
+				{ label: 'Chunks', value: chunks === null ? '—' : chunks.toLocaleString('en-US') },
+				{ label: 'Removing documents', value: dialect.allow_writes ? 'On (allow_writes)' : 'Off (allow_writes)' },
+				{ label: 'Delete mode', value: dialect.capabilities.soft_delete ? 'Moves to the Trash (soft delete)' : 'Permanent only' },
+				{ label: 'Write batch', value: `${dialect.limits.write_ids_max.toLocaleString('en-US')} documents per call` },
+			],
+		},
+	];
+}
+
+// =============================================================================
 // TEST CONNECTION, DRAWER KEY
 // =============================================================================
 

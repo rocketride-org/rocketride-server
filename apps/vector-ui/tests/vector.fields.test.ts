@@ -27,6 +27,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { IChunkItem, IDocumentItem } from '../src/contract/types';
 import { FIELD_EXAMPLE_MAX, chunkFields, documentFields, filterPhrase, mergeFields, sampleDocuments } from '../src/vector/fields';
+import { coverageText, fieldsCaption } from '../src/components/CollectionPanel';
 import { CHUNKS_PER_DOCUMENT, SAMPLE_DOCUMENTS, readFieldsSample } from '../src/vector/fieldsRead';
 
 const chunk = (id: number, metadata: Record<string, unknown>): IChunkItem => ({ chunkId: id, content: 'text', length: 4, isTable: false, tableId: 0, isDeleted: false, pointId: null, metadata });
@@ -117,4 +118,14 @@ test('reading a sample sends at most five chunks calls, one after the other, and
 	assert.equal(estimate.rows.find((f) => f.name === 'path')?.of, 12, 'document fields stay exact over all the loaded rows');
 	const failing = { invoke: async () => Promise.reject(new Error('boom')) };
 	await assert.rejects(readFieldsSample(failing as never, 'store_1', rows), /boom/);
+});
+
+test('the fields caption says what each part was read over, and that the chunk part is an estimate', () => {
+	assert.deepEqual(fieldsCaption(1, false, true, null), ['Document fields are exact over the 1 document loaded.', 'Chunk fields are not read yet. No store lists them, so they are read from a sample on request.']);
+	assert.match(fieldsCaption(40, true, false, null)[0], /40 documents loaded under the current scope; more are not loaded yet\./);
+	const read = fieldsCaption(40, false, true, { rows: [], chunksRead: 90, documentsRead: 5, at: 0 })[1];
+	assert.match(read, /^Chunk fields are estimated: 90 chunks read from 5 documents at /);
+	assert.match(read, /coverage is of those chunks, not of the collection\.$/);
+	assert.match(fieldsCaption(40, false, true, { rows: [], chunksRead: 0, documentsRead: 5, at: 0 })[1], /No chunks came back/);
+	assert.equal(coverageText({ coverage: 12, of: 2000 }), '12 of 2,000');
 });

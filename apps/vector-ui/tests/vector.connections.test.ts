@@ -13,7 +13,7 @@ import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import { CONFIG_SENTINEL, fakeWorld, manualClock, projectRows, ragComponents, row, vectorComponents } from 'shared/explorer/connect/testing';
 import type { IFakeWorld } from 'shared/explorer/connect/testing';
 import { makeVectorEndpointStore } from '../src/adapters/explorer';
-import { NOT_GROUPED_NOTE, drawerKeyAfter, drawerView, landingView, roleLine, testResultText, vectorCardView } from '../src/vector/connections';
+import { NOT_GROUPED_NOTE, collectionView, drawerKeyAfter, drawerView, landingView, roleLine, testResultText, vectorCardView } from '../src/vector/connections';
 import { buildConsoleModel, consoleNodes, writesDuringRemoval } from '../src/vector/consoleModel';
 import { providerTitle } from '../src/vector/support';
 import { readStats } from '../src/vector/results';
@@ -280,4 +280,24 @@ test('the card description: the address, then the document count once the consol
 	assert.equal(vectorCardView(f.endpoint, f.probe).description, vectorCardView(f.endpoint, f.probe).address);
 	assert.equal(vectorCardView(f.endpoint, f.probe, readStats({ ...fixture('stats_pgvector'), documents: 1234 })).description, `${vectorCardView(f.endpoint, f.probe).address} · 1,234 documents`);
 	assert.match(vectorCardView(f.endpoint, f.probe, readStats({ ...fixture('stats_pgvector'), documents: 1 })).description, / · 1 document$/);
+});
+
+test('the Collection facts: embedding, index, storage and writes from the dialect; nothing before it answers; stats fill what it lacks', async () => {
+	const [f] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_pgvector')));
+	const facts = new Map(collectionView(f.probe).flatMap((section) => section.rows.map((r) => [r.label, r.value] as const)));
+	assert.equal(facts.get('Model'), 'sentence-transformers/all-MiniLM-L6-v2');
+	assert.equal(facts.get('Dimensions'), '384');
+	assert.equal(facts.get('Metric'), 'cosine');
+	assert.equal(facts.get('Index'), 'hnsw (m 16, ef_construction 64)');
+	assert.equal(facts.get('Removing documents'), 'On (allow_writes)');
+	assert.match(facts.get('Delete mode') ?? '', /^(Moves to the Trash \(soft delete\)|Permanent only)$/);
+	assert.match(facts.get('Write batch') ?? '', /^\d[\d,]* documents per call$/);
+	assert.match(facts.get('Score') ?? '', /; range .*; (higher|lower) is closer$/);
+	assert.deepEqual(collectionView(undefined), [], 'no dialect: no sections, nothing invented');
+	const [empty] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_collection_missing')));
+	const before = new Map(collectionView(empty.probe).flatMap((section) => section.rows.map((r) => [r.label, r.value] as const)));
+	assert.equal(before.get('Model'), '—');
+	const after = new Map(collectionView(empty.probe, readStats({ ...fixture('stats_pgvector'), metric: 'cosine' })).flatMap((section) => section.rows.map((r) => [r.label, r.value] as const)));
+	assert.equal(after.get('Model'), 'sentence-transformers/all-MiniLM-L6-v2');
+	assert.equal(after.get('Metric'), 'cosine');
 });

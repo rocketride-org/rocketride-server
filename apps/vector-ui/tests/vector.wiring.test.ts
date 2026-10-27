@@ -155,7 +155,7 @@ test('the console renders the strip, the directory, the chunks, adding documents
 		['components/TrashTab.tsx', ['<DocumentDirectory']],
 		['components/QueryTab.tsx', ['<ChatPanel']],
 		['components/AddDocumentsAside.tsx', ['<IngestPanel']],
-		['components/CollectionPanel.tsx', ['<ConnectionDrawerDetails']],
+		['components/CollectionPanel.tsx', ['collectionView(', '<Section label="Metadata fields"']],
 	] as const) {
 		for (const part of parts) assert.ok(code(file).includes(part), `${file} ${part}`);
 	}
