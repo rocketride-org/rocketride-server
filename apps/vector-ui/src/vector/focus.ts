@@ -37,6 +37,8 @@ export interface IFocusCandidate {
 	isConnected: boolean;
 	/** Null when it, or an ancestor, is not displayed (display: none). */
 	offsetParent: unknown;
+	/** True for a disabled control (it cannot take the focus); absent on what has no such state. */
+	disabled?: boolean;
 	focus(): void;
 }
 
@@ -54,12 +56,37 @@ export function focusLost(active: unknown, body: unknown, region: { contains(nod
 }
 
 /**
- * The first candidate focus can go to: still on the page and shown.
+ * The first candidate focus can go to: still on the page, shown and not disabled.
  *
  * @param candidates - In order of preference (null for one that does not exist).
  * @returns The candidate, or null when none can take the focus.
  */
 export function firstFocusable<T extends IFocusCandidate>(candidates: ReadonlyArray<T | null | undefined>): T | null {
-	for (const candidate of candidates) if (candidate && candidate.isConnected && candidate.offsetParent !== null) return candidate;
+	for (const candidate of candidates) if (candidate && candidate.isConnected && candidate.offsetParent !== null && candidate.disabled !== true) return candidate;
 	return null;
 }
+
+/** What can take the focus by Tab (a control that is not disabled, or anything in the tab order). */
+export const TABBABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** What {@link documentFocus} reads of a document surface's root. */
+export interface IFocusRoot<T extends IFocusCandidate> {
+	querySelector(selector: string): T | null;
+	querySelectorAll(selector: string): ArrayLike<T>;
+}
+
+/**
+ * Where the focus goes in a stored document's surface (its tab in the full app, its frame in the dev tool) when what
+ * held it went away (a confirmation, a document read again): the opener while it is still shown, else the
+ * document's own tabs (Reader | Chunks, the one shown), else what says it is gone, else the first control of the
+ * document. Never the page body.
+ *
+ * @param root - The surface's root, or null.
+ * @param opener - What opened the confirmation, or null.
+ * @returns The element to focus, or null.
+ */
+export function documentFocus<T extends IFocusCandidate>(root: IFocusRoot<T> | null, opener: T | null): T | null {
+	if (root === null) return firstFocusable([opener]);
+	return firstFocusable([opener, root.querySelector('[data-document-tabs] [aria-pressed="true"]'), root.querySelector('[data-document-gone]'), ...Array.from(root.querySelectorAll(TABBABLE))]);
+}
+

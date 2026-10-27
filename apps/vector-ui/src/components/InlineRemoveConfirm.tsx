@@ -111,7 +111,7 @@ export interface IInlineRemoveConfirmProps {
 	 * Where the focus goes when the panel closes with the focus inside it, if `onClosed` did not move it (and, after
 	 * Cancel, the opener cannot take it back).
 	 */
-	returnFocus?: () => HTMLElement | null;
+	returnFocus?: (opener: HTMLElement | null) => HTMLElement | null;
 	/** Told when the panel closes, before the focus falls back to `returnFocus`. */
 	onClosed?: (how: ConfirmClose) => void;
 }
@@ -140,7 +140,7 @@ export function InlineRemoveConfirm({ entry, probe, origin = CONSOLE_ORIGIN, ret
 }
 
 /** One confirmation, keyed on what it confirms (a new one starts with an empty typed field and its own first focus). */
-const ConfirmPanel: React.FC<{ view: ConfirmationView; first: ConfirmFirstFocus; onConfirm(): void; onCancel(): void; returnFocus?: () => HTMLElement | null; onClosed?: (how: ConfirmClose) => void }> = ({ view, first, onConfirm: sendWrite, onCancel: dropWrite, returnFocus, onClosed }) => {
+const ConfirmPanel: React.FC<{ view: ConfirmationView; first: ConfirmFirstFocus; onConfirm(): void; onCancel(): void; returnFocus?: (opener: HTMLElement | null) => HTMLElement | null; onClosed?: (how: ConfirmClose) => void }> = ({ view, first, onConfirm: sendWrite, onCancel: dropWrite, returnFocus, onClosed }) => {
 	const region = useRef<HTMLElement>(null);
 	const actions = useRef<HTMLDivElement>(null);
 	const confirmButton = useRef<HTMLButtonElement>(null);
@@ -175,7 +175,8 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; first: ConfirmFirstFocus;
 		return () => {
 			closing.current.onClosed?.(how.current);
 			if (typeof document === 'undefined' || !focusLost(document.activeElement, document.body, node)) return;
-			firstFocusable([how.current === 'cancel' ? back : null, closing.current.returnFocus?.(), surfaceTarget(surface)])?.focus();
+			// The caller's fallback is told the opener: a document surface puts the focus back there after Confirm too.
+			firstFocusable([how.current === 'cancel' ? back : null, closing.current.returnFocus?.(back), surfaceTarget(surface)])?.focus();
 		};
 	}, []);
 	const onConfirm = (): void => {

@@ -56,6 +56,8 @@ export interface IWorkbenchTabsProps {
 	trashCount: number | null;
 	/** The workbench's unique prefix for the tab and panel ids ({@link workbenchIds}). */
 	idPrefix: string;
+	/** The tabs whose panels are mounted. */
+	mounted?: ReadonlySet<WorkbenchTab>;
 }
 
 /**
@@ -64,9 +66,9 @@ export interface IWorkbenchTabsProps {
  * @param props - {@link IWorkbenchTabsProps}.
  * @returns The row.
  */
-export function WorkbenchTabs({ value, onChange, trashCount, idPrefix }: IWorkbenchTabsProps): React.ReactElement {
+export function WorkbenchTabs({ value, onChange, trashCount, idPrefix, mounted }: IWorkbenchTabsProps): React.ReactElement {
 	const tabs = WORKBENCH_TABS.map((tab) => ({ id: tab.id, label: tabLabel(tab.id, { trash: trashCount }), ...(tab.id === 'trash' ? { reserve: tabLabel('trash', { trash: 888 }) } : {}) }));
-	return <TabRow tabs={tabs} value={value} onSelect={onChange} activation="manual" label="Collection views" idPrefix={idPrefix} marker="workbench-tabs" />;
+	return <TabRow tabs={tabs} value={value} onSelect={onChange} activation="manual" label="Collection views" idPrefix={idPrefix} marker="workbench-tabs" mounted={mounted} />;
 }
 
 export default WorkbenchTabs;

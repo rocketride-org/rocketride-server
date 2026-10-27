@@ -36,7 +36,7 @@
 // cache, so nothing of one identity's stores shows in the next.
 // =============================================================================
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { AppLayout, Button, DocSplitLayout, DocTabs, EmptyState, commonStyles, useShellConnection } from 'shell';
 import type { Documents, ShellAppProps } from 'shell';
@@ -53,6 +53,7 @@ import { VectorEnvProvider, useConnection, useEndpointsState, useLiveEndpoint } 
 import { createLocalVectorEnv } from './localEnv';
 import { CONNECTIONS_URI, endpointKeyFromUri, isConsoleUri, isDocumentUri } from './vector/addresses';
 import { documentOrigin } from './vector/confirm';
+import { documentFocus } from './vector/focus';
 import { forgetConnections } from './vector/identityChange';
 import VectorSidebar from './VectorSidebar';
 import { VectorIcon } from './icons';
@@ -66,6 +67,8 @@ const styles = {
 	content: { flex: 1, display: 'flex', minHeight: 0, minWidth: 0, overflow: 'hidden' } as CSSProperties,
 	editorPane: (active: boolean): CSSProperties => ({ display: active ? 'flex' : 'none', flex: 1, minHeight: 0, minWidth: 0, flexDirection: 'column' }),
 	welcome: { display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center' } as CSSProperties,
+	/** A document tab's own root (its focus stays inside): it lays out as its view did. */
+	documentRoot: { display: 'flex', flex: 1, minHeight: 0, minWidth: 0, flexDirection: 'column' } as CSSProperties,
 };
 
 /** The landing document's URI and label. */
@@ -207,8 +210,14 @@ const DocumentTab: React.FC<{ payload: IDocumentDocPayload; active: boolean }> =
 	useEffect(() => {
 		entry.controller.setWritesEnabled(model.writes.enabled);
 	}, [model.writes.enabled, entry]);
-	// Its Move to trash is confirmed in the tab itself, inline.
-	return <DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} beforeBody={<InlineRemoveConfirm entry={entry} probe={probes[endpoint.key]} origin={documentOrigin(payload.objectId)} />} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />;
+	// Its Move to trash is confirmed in the tab itself, inline; when the confirmation goes, the focus stays in the tab.
+	const root = useRef<HTMLDivElement>(null);
+	const returnFocus = (opener: HTMLElement | null): HTMLElement | null => documentFocus(root.current, opener) as HTMLElement | null;
+	return (
+		<div ref={root} style={styles.documentRoot}>
+			<DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} beforeBody={<InlineRemoveConfirm entry={entry} probe={probes[endpoint.key]} origin={documentOrigin(payload.objectId)} returnFocus={returnFocus} />} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />
+		</div>
+	);
 };
 
 /**

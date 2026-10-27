@@ -59,6 +59,8 @@ import { FRAME_PROTOCOL } from './devtool/wiring';
 import { STOPPED_DETAIL } from './env';
 import { VectorEnvProvider, useConnection, useEndpointsState, useLiveEndpoint, useReadable, useVectorEnv } from './envContext';
 import { VectorIcon } from './icons';
+import { documentFocus, focusLost } from './vector/focus';
+import { writeTouches } from './vector/workbench';
 import { CODE_SENTENCES } from './vector/wording';
 import ConsoleView from './views/ConsoleView';
 import DocumentView from './views/DocumentView';
@@ -68,6 +70,7 @@ const styles = {
 	center: { display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center' } as CSSProperties,
 	notice: { padding: '8px 24px 0' } as CSSProperties,
 	document: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } as CSSProperties,
+	gone: { display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', outline: 'none' } as CSSProperties,
 };
 
 /**
@@ -236,22 +239,38 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 		() =>
 			frame.bindDocument(entry, objectId, {
 				focus: (id) => setChunkId(id),
-				version: () => {
+				// Read again, in place (DocumentView's refreshKey), only for a write that may have changed THIS document: another
+				// document's write leaves the view as it is.
+				version: (written) => {
+					if (!writeTouches(written.gone, objectId)) return;
 					setGone(false);
 					setVersion((n) => n + 1);
 				},
 			}),
 		[frame, entry, objectId]
 	);
+	// The focus never stays on the page body: after a read again (a remount) or when the document is gone, it goes back
+	// into the document; after a confirmation, to its opener while it is shown.
+	const root = useRef<HTMLDivElement>(null);
+	const returnFocus = (opener: HTMLElement | null): HTMLElement | null => documentFocus(root.current, opener) as HTMLElement | null;
+	// Only on a change: when a frame opens, the focus belongs to wherever the user is (the host, another frame).
+	const seen = useRef({ version, gone });
+	useEffect(() => {
+		if (seen.current.version === version && seen.current.gone === gone) return;
+		seen.current = { version, gone };
+		if (typeof document === 'undefined' || !focusLost(document.activeElement, document.body, null)) return;
+		// After a read again or the document going; returnFocus reads the root when it runs.
+		returnFocus(null)?.focus();
+	}, [version, gone]);
 	// Removing from a document needs the console model's write switch (its own controller confirms and sends).
 	useEffect(() => {
 		entry.controller.setWritesEnabled(model.writes.enabled);
 	}, [model.writes.enabled, entry]);
 	const actions = useMemo(() => frame.documentActions(entry), [frame, entry]);
 	const median = summaries[live.key]?.medianChunks ?? null;
-	const confirm = <InlineRemoveConfirm entry={entry} probe={probes[live.key]} />;
+	const confirm = <InlineRemoveConfirm entry={entry} probe={probes[live.key]} returnFocus={returnFocus} />;
 	return (
-		<div style={styles.document}>
+		<div ref={root} style={styles.document}>
 			{live.state === 'stopped' && (
 				<div style={styles.notice}>
 					<Banner variant="info">{live.stateDetail ?? STOPPED_DETAIL}</Banner>
@@ -260,12 +279,12 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 			{gone ? (
 				<>
 					{confirm}
-					<div style={styles.center}>
+					<div tabIndex={-1} style={styles.gone} data-document-gone="">
 						<EmptyState icon={<VectorIcon />} title={DOCUMENT_GONE_TITLE} description={CODE_SENTENCES.NOT_FOUND} />
 					</div>
 				</>
 			) : (
-				<DocumentView key={version} model={model} channels={channels} selection={entry.selection} actions={actions} objectId={objectId} path={null} active={visible} consoleMedian={median} onDocument={(row) => setGone(row === null)} beforeBody={confirm} {...(chunkId === undefined ? {} : { chunkId })} />
+				<DocumentView refreshKey={version} model={model} channels={channels} selection={entry.selection} actions={actions} objectId={objectId} path={null} active={visible} consoleMedian={median} onDocument={(row) => setGone(row === null)} beforeBody={confirm} {...(chunkId === undefined ? {} : { chunkId })} />
 			)}
 		</div>
 	);

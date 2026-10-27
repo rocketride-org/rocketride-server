@@ -225,6 +225,9 @@ test('focus after a close: only when it was lost (nothing, the body, or inside w
 	const tab = el(true);
 	assert.equal(firstFocusable([null, hidden, gone, tab]), tab, 'a hidden panel\'s element and a removed one are passed over');
 	assert.equal(firstFocusable([hidden]), null);
+	const disabledOpener = { ...el(true), disabled: true };
+	assert.equal(firstFocusable([disabledOpener, tab]), tab, 'a disabled opener (a button a write turned off) is passed over for the tab');
+	assert.equal(firstFocusable([{ ...el(true), disabled: false }]) !== null, true, 'an enabled control takes it');
 });
 
 test('document fields: exact over the rows given, each with its coverage, one example, and what each filter takes', () => {

@@ -52,12 +52,12 @@ import type { IDialectResult, IDocumentItem, IDocumentsFilter, ISampleModel } fr
 import { DATA_BAR_TOKEN, TONE_EDGE } from '../vector/colors';
 import type { IStatsSlot } from '../vector/consoleStore';
 import { documentsFolder } from '../adapters/consoleActions';
-import { UPLOADED_LABEL } from '../vector/documents';
 import { documentFields } from '../vector/fields';
 import type { IFieldsEstimate } from '../vector/fields';
 import { directoryView } from '../vector/filters';
 import type { IHealthSummary } from '../vector/health';
 import { insights, insightsLabel, overLine, topFolders } from '../vector/overview';
+import type { FolderView } from '../vector/tree';
 import { formatCount } from '../vector/stats';
 import { workbenchNonce } from '../vector/workbench';
 import type { OverviewView as OverviewViewId, WorkbenchTab } from '../vector/workbench';
@@ -86,6 +86,7 @@ const local = {
 	share: { display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' } as CSSProperties,
 	bar: (percent: number): CSSProperties => ({ display: 'inline-block', width: 64, height: 8, border: '1px solid var(--rr-text-primary)', background: `linear-gradient(to right, var(${DATA_BAR_TOKEN}) ${percent}%, transparent ${percent}%)` }),
 	note: { ...styles.small, margin: '6px 0 0' } as CSSProperties,
+	lead: { ...styles.small, margin: '0 0 6px' } as CSSProperties,
 	actions: { display: 'flex', flexWrap: 'wrap', gap: 6 } as CSSProperties,
 	charts: { padding: '8px 24px 16px' } as CSSProperties,
 	list: { listStyle: 'none', margin: 0, padding: 0 } as CSSProperties,
@@ -107,9 +108,9 @@ export interface IOverviewViewProps {
 	stats: IStatsSlot;
 	dialect: IDialectResult | null;
 	readOnly: boolean;
-	/** The documents loaded so far (the charts, the fields, and Insights, which are the attention chip's). */
+	/** The documents loaded so far (the charts, and Insights, which are the attention chip's). */
 	rows: readonly IDocumentItem[];
-	/** Those of them the scope covers (Top folders); the same rows without a scope. */
+	/** Those of them the scope covers (Top folders, the document fields); the same rows without a scope. */
 	scopedRows: readonly IDocumentItem[];
 	/** The listing is still loading pages. */
 	loading: boolean;
@@ -132,7 +133,7 @@ export interface IOverviewViewProps {
 	/** Open a document's drawer in Documents. */
 	onOpenDocument(objectId: string): void;
 	/** Show one folder's loaded documents in Documents (splitPath's folder, or the uploaded label). */
-	onOpenFolder(folder: string): void;
+	onOpenFolder(view: FolderView): void;
 	onOpenTab(tab: WorkbenchTab): void;
 	/** Open Query with an empty question. */
 	onNewQuery(): void;
@@ -172,7 +173,7 @@ export function OverviewView(props: IOverviewViewProps): React.ReactElement {
 		<div style={local.root}>
 			<StatsStrip stats={stats} dialect={dialect} readOnly={readOnly} scopeLine={scopeLine} health={health} />
 			{/* Automatic activation: these views call nothing. */}
-			<TabRow<OverviewViewId> tabs={tabs} value={view} onSelect={setView} activation="automatic" label="Overview" idPrefix={prefix} small />
+			<TabRow<OverviewViewId> tabs={tabs} value={view} onSelect={setView} activation="automatic" label="Overview" idPrefix={prefix} small mounted={mounted} />
 			{panel('summary', <Summary {...props} />)}
 			{panel(
 				'charts',
@@ -186,9 +187,9 @@ export function OverviewView(props: IOverviewViewProps): React.ReactElement {
 }
 
 /** The Summary view. */
-const Summary: React.FC<IOverviewViewProps> = ({ rows, scopedRows, complete, scoped, onOpenTab, onOpenFolder, onNewQuery, onAddDocuments, fieldsRead }) => {
+const Summary: React.FC<IOverviewViewProps> = ({ scopedRows, complete, scoped, onOpenTab, onOpenFolder, onNewQuery, onAddDocuments, fieldsRead }) => {
 	const folders = useMemo(() => topFolders(scopedRows), [scopedRows]);
-	const fields = useMemo(() => documentFields(rows), [rows]);
+	const fields = useMemo(() => documentFields(scopedRows), [scopedRows]);
 	const chunkFields = (fieldsRead?.rows ?? []).filter((f) => f.source === 'chunks');
 	const over = overLine({ loaded: scopedRows.length, complete, scoped });
 	return (
@@ -196,6 +197,7 @@ const Summary: React.FC<IOverviewViewProps> = ({ rows, scopedRows, complete, sco
 			<div style={local.columns}>
 				<section aria-label="Top folders" style={local.card}>
 					<h2 style={local.heading}>Top folders</h2>
+					{folders.rows.length > 0 && <p style={local.lead}>Each folder counts its subfolders, as Documents shows it.</p>}
 					{folders.rows.length === 0 ? (
 						<p style={local.note}>No documents loaded yet.</p>
 					) : (
@@ -210,12 +212,15 @@ const Summary: React.FC<IOverviewViewProps> = ({ rows, scopedRows, complete, sco
 							</thead>
 							<tbody>
 								{[...folders.rows, ...(folders.others ? [folders.others] : [])].map((f) => (
-									<tr key={f.folder || '(others)'} data-folder={f.folder}>
+									<tr key={`${f.kind}:${f.folder}`} data-folder={f.folder}>
 										<td style={local.td}>
-											{f.folder === '' && folders.others ? (
+											{f === folders.others ? (
 												`Other folders (${formatCount(folders.others.folders)})`
+											) : f.kind === 'direct' ? (
+												// A folder view shows its subfolders too, so these documents alone are not offered as one.
+												`Directly in ${f.folder}`
 											) : (
-												<button type="button" style={local.folder} onClick={() => onOpenFolder(f.folder)} title="Show its documents in Documents">
+												<button type="button" style={local.folder} onClick={() => onOpenFolder(f.kind === 'uploaded' ? { kind: 'uploaded' } : { kind: 'folder', prefix: f.folder })} title="Show its documents in Documents">
 													{f.folder}
 												</button>
 											)}
@@ -265,6 +270,7 @@ const Summary: React.FC<IOverviewViewProps> = ({ rows, scopedRows, complete, sco
 								</tbody>
 							</table>
 						)}
+						{fields.length > 0 && over !== null && <p style={local.note}>{over}</p>}
 						{chunkFields.length > 0 && fieldsRead !== null ? (
 							<>
 								<h3 style={local.subheading}>{`Chunk metadata, from ${formatCount(fieldsRead.chunksRead)} ${fieldsRead.chunksRead === 1 ? 'chunk' : 'chunks'} read`}</h3>
@@ -401,9 +407,9 @@ export function OverviewPanel({ entry, model, console: state, selection, scopeLi
 				entry.openDocument.set({ nonce: workbenchNonce('document'), objectId });
 				openTab('documents');
 			}}
-			onOpenFolder={(folder) => {
+			onOpenFolder={(view) => {
 				// The Documents tab's own folder view (C2): its loaded documents under that folder; nothing is listed again.
-				documentsFolder(entry).set(folder === UPLOADED_LABEL ? { kind: 'uploaded' } : { kind: 'folder', prefix: folder });
+				documentsFolder(entry).set(view);
 				openTab('documents');
 			}}
 			onOpenTab={openTab}

@@ -131,7 +131,7 @@ test('the Map is a tab of the workbench: every panel mounts the first time its t
 	assert.match(view, /<MapView model=\{mapModel\} channels=\{channels\} selection=\{entry\.selection\} actions=\{actions\} visible=\{active && tab === 'map'\} documents=\{entry\.documents\} writes=\{entry\.writes\} \/>/);
 	assert.match(view, /const nextMapScope = mapScopeFor\(mapScope, wiring\);\s*if \(nextMapScope !== mapScope\) setMapScope\(nextMapScope\);/, 'the map keeps the scope it drew with while a new one finds its documents');
 	assert.match(view, /const mapModel = useMemo\(\(\) => \(nextMapScope === \(model\.scope \?\? null\) \? model : \{ \.\.\.model, scope: nextMapScope \}\), \[model, nextMapScope\]\)/);
-	assert.match(view, /<WorkbenchTabs value=\{tab\} onChange=\{\(id\) => entry\.tab\.set\(id\)\} trashCount=\{state\.stats\.view\?\.deletedDocuments \?\? null\} idPrefix=\{prefix\} \/>/, 'the tab row is the entry\'s tab, with the store\'s trash count');
+	assert.match(view, /<WorkbenchTabs value=\{tab\} onChange=\{\(id\) => entry\.tab\.set\(id\)\} trashCount=\{state\.stats\.view\?\.deletedDocuments \?\? null\} idPrefix=\{prefix\} mounted=\{mounted\} \/>/, 'the tab row is the entry\'s tab, with the store\'s trash count');
 	assert.deepEqual(WORKBENCH_TABS.map((t) => t.label), ['Overview', 'Documents', 'Query', 'Map', 'Collection', 'Trash']);
 	assert.equal(DEFAULT_TAB, 'overview');
 	assert.equal(tabLabel('trash', { trash: 1234 }), 'Trash (1,234)');
@@ -149,16 +149,19 @@ test('the workbench header and tab row never move: Refresh keeps its width and s
 	assert.match(view, /heldLabel: \(shown: boolean\): CSSProperties => \(\{ gridArea: '1 \/ 1', visibility: shown \? 'visible' : 'hidden' \}\)/, 'the hidden label is not read out');
 	assert.match(view, /const refreshing = refreshAsked && statsLoading;/, 'the 15 s quick tick changes nothing in the header');
 	// The tab row is its own row, under the header and above every banner and panel.
-	const order = ['<ContentHeader', '<WorkbenchTabs', '{card.blocked &&', '{!card.blocked && statsError !== null &&', '{!card.blocked && entry.opened && !model.writes.enabled', '{!card.blocked && statsError === null && emptyCollection &&', '<InlineRemoveConfirm', "{mounted.has('overview')"].map((part) => view.indexOf(part));
+	// The banners of a lasting state at the top; what comes and goes after a write (its line, the pending bar) under the panels (R1-I6).
+	const order = ['<ContentHeader', '<WorkbenchTabs', '{card.blocked &&', '{!card.blocked && unreachable && statsError !== null &&', "{!card.blocked && dialect?.health.control_record === false &&", '{!card.blocked && dialect?.health.model_mismatch === true &&', '{!card.blocked && entry.opened && !model.writes.enabled', '{!card.blocked && !unreachable && emptyCollection &&', '<InlineRemoveConfirm', "{mounted.has('overview')", "{mounted.has('trash')", '<PendingBar', 'data-write-line=""'].map((part) => view.indexOf(part));
 	assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), order.join(' < '));
 	assert.match(view, /<Button small variant="secondary" onClick=\{refresh\}>\s*Retry/, 'a store error keeps the last figures and offers Retry');
-	assert.match(view, /\{EMPTY\.noDocuments\}\s*\{model\.ingest\.enabled \? \(/, 'an empty collection says how to add documents where the mount can, and why not where it cannot');
-	assert.match(view, /const emptyCollection = collectionMissing\(dialect, state\.stats\.view\) \|\| state\.stats\.view\?\.documents === 0;/, 'one "Empty collection" rule with the chip and the card');
+	assert.match(view, /\{emptyText\}\s*\{model\.ingest\.enabled \? \(/, 'an empty collection says how to add documents where the mount can, and why not where it cannot');
+	assert.match(view, /const emptyText = !missing && inTrash > 0 \? `No documents outside the trash \(\$\{formatCount\(inTrash\)\} in the Trash\)\.` : EMPTY\.noDocuments;/, 'every document in the Trash is not "No documents yet"');
+	assert.match(view, /const unreachable = statsError !== null && unreachableShown\(failures\.current, state\.stats\.view !== null\);/, 'one failed quick tick never adds a banner above every tab');
+	assert.match(view, /const missing = collectionMissing\(dialect, state\.stats\.view\);\s*const emptyCollection = missing \|\| state\.stats\.view\?\.documents === 0;/, 'one "Empty collection" rule with the chip and the card');
 	assert.match(code('components/WorkbenchTabs.tsx'), /<TabRow tabs=\{tabs\} value=\{value\} onSelect=\{onChange\} activation="manual" label="Collection views"/, 'arrows move the focus only: activation is manual (the Map samples)');
 	assert.match(code('components/WorkbenchTabs.tsx'), /reserve: tabLabel\('trash', \{ trash: 888 \}\)/, 'the Trash label keeps the width of a three-digit count');
 	const row = code('components/TabRow.tsx');
 	assert.match(row, /role="tablist"/);
-	assert.match(row, /role="tab"[\s\S]*?id=\{ids\.tab\}[\s\S]*?aria-selected=\{selected\}[\s\S]*?aria-controls=\{ids\.panel\}[\s\S]*?tabIndex=\{selected \? 0 : -1\}/, 'a roving tabindex; each tab names its panel');
+	assert.match(row, /role="tab"[\s\S]*?id=\{ids\.tab\}[\s\S]*?aria-selected=\{selected\}[\s\S]*?aria-controls=\{mounted === undefined \|\| mounted\.has\(tab\.id\) \|\| selected \? ids\.panel : undefined\}[\s\S]*?tabIndex=\{selected \? 0 : -1\}/, 'a roving tabindex; each tab names its panel');
 	assert.match(row, /const target = tabKeyTarget\(event\.key, index, tabs\.length\);\s*if \(target === null\) return;\s*event\.preventDefault\(\);\s*if \(activation === 'automatic'\) onSelect\(tabs\[target\]\.id\);/, 'only an automatic row shows the tab a key reaches');
 	assert.match(row, /fontVariantNumeric: 'tabular-nums'/);
 	const overviewRow = code('components/OverviewPanel.tsx');
@@ -179,9 +182,13 @@ test('focus in the workbench: a tab switch from inside a panel moves the focus t
 
 test("the Overview's Top folders show a folder's documents in Documents (its client-side folder view, C2); the write line keeps the store's audit", () => {
 	const overview = code('components/OverviewPanel.tsx');
-	assert.match(overview, /documentsFolder\(entry\)\.set\(folder === UPLOADED_LABEL \? \{ kind: 'uploaded' \} : \{ kind: 'folder', prefix: folder \}\);\s*openTab\('documents'\);/);
+	assert.match(overview, /onOpenFolder=\{\(view\) => \{\s*documentsFolder\(entry\)\.set\(view\);\s*openTab\('documents'\);/);
+	assert.match(overview, /onOpenFolder\(f\.kind === 'uploaded' \? \{ kind: 'uploaded' \} : \{ kind: 'folder', prefix: f\.folder \}\)/, 'a folder row opens that folder with its subfolders, which is what it counts');
+	assert.match(overview, /`Directly in \$\{f\.folder\}`/, "an opened folder's own documents are not a button: a folder view would show its subfolders too");
 	assert.doesNotMatch(overview, /setFilter|entry\.scope\.set/, 'a folder opened from the Overview never relists or changes the scope');
-	assert.match(code('views/ConsoleView.tsx'), /<div role=\{state\.removal\.status === 'error' \? 'alert' : 'status'\} style=\{layout\.status\}>\s*\{state\.removal\.status === 'running' \? \(state\.removal\.message \?\? BUSY\.removing\) : state\.removal\.message\}\s*<\/div>\s*(\{\}\s*)?\{\(state\.removal\.status === 'done' \|\| state\.removal\.status === 'error'\) && <WriteAuditDetails audit=\{state\.removal\.audit\} \/>\}/, "after the result sentence, once the write finished, and outside the announced element: opening it does not announce the line again");
+	const hub = code('views/ConsoleView.tsx');
+	assert.match(hub, /<div key="alert" role="alert" style=\{layout\.status\}>\s*\{state\.removal\.message\}\s*<\/div>/, 'a failure in an element of its own, so it is announced as one');
+	assert.match(hub, /<div key="status" role="status" style=\{layout\.status\}>\s*\{state\.removal\.status === 'running' \? \(state\.removal\.message \?\? BUSY\.removing\) : state\.removal\.message\}\s*<\/div>\s*\)\}\s*(\{\}\s*)?\{\(state\.removal\.status === 'done' \|\| state\.removal\.status === 'error'\) && <WriteAuditDetails result=\{state\.removal\.message \?\? undefined\} audit=\{state\.removal\.audit\} \/>\}/, "after the result sentence, once the write finished, and outside the announced element: opening it does not announce the line again; always, with the whole sentence the one line cuts (R2-I1)");
 });
 
 test('B1(b): fresh stats that say the collection exists, against a probe that said it did not, probe the store again once per disagreement', () => {
@@ -210,7 +217,7 @@ test('the console renders the strip, the directory, the chunks, adding documents
 	for (const file of ['components/DocumentsTab.tsx', 'components/TrashTab.tsx']) {
 		assert.match(code(file), /const writes = writesDuringRemoval\(model\.writes, state\.removal\.status\);/, `${file}: the writes follow the model, and are unavailable while a removal runs`);
 	}
-	assert.match(view, /\(state\.removal\.status === 'running' \|\| state\.removal\.message\) &&/, 'the status line says Removing… while a removal runs');
+	assert.match(view, /const write: SlotWrite = removal === dismissed \|\| \(removal\.status !== 'running' && removal\.message === null\) \? null : removal\.status === 'running' \? 'running' : removal\.status === 'error' \|\| removal\.partial \? 'failure' : 'result';/, 'the status line says Removing… while a removal runs');
 	assert.match(view, /entry\.controller\.open\(\)/);
 	assert.match(view, /\{addingMounted && <AddDocumentsAside [^>]*open=\{adding\}/, 'Add documents is an aside beside the panels, kept mounted once opened (an upload keeps following its progress)');
 	const strip = code('components/StatsStrip.tsx');
@@ -275,8 +282,44 @@ test('every removal is confirmed inline in the document that shows it, in both m
 	assert.doesNotMatch(app, /RemoveDialogHost/, 'the full app mounts no modal confirmation');
 	assert.match(code('views/ConsoleView.tsx'), /<InlineRemoveConfirm entry=\{entry\} probe=\{probe\} origin=\{CONSOLE_ORIGIN\} returnFocus=\{returnFocus\} \/>/, 'the workbench confirms its own requests inline, on every tab');
 	assert.match(code('views/ConsoleView.tsx'), /firstFocusable\(\[inShown\('\[data-return-focus\]'\), inShown\('\[data-grid-focus\] \[data-grid-row\]\[tabindex="0"\]'\), inShown\('\[data-grid-focus\]'\), currentTab\(\)\]\)/, "a lost focus goes to the shown panel's marked row, else its grid, else the current tab");
-	assert.match(code('components/InlineRemoveConfirm.tsx'), /firstFocusable\(\[how\.current === 'cancel' \? back : null, closing\.current\.returnFocus\?\.\(\), surfaceTarget\(surface\)\]\)/, "after Cancel, back to the opener first; with no fallback named, the surface's own (R1-I1)");
-	assert.match(app, /<DocumentView [^>]*beforeBody=\{<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} origin=\{documentOrigin\(payload\.objectId\)\} \/>\}/, "and the full app's document tab its own (it shares the console's controller)");
+	assert.match(code('components/InlineRemoveConfirm.tsx'), /firstFocusable\(\[how\.current === 'cancel' \? back : null, closing\.current\.returnFocus\?\.\(back\), surfaceTarget\(surface\)\]\)/, "after Cancel, back to the opener first; the caller's fallback hears the opener; with none named, the surface's own (R1-I1)");
+	assert.match(app, /<DocumentView [^>]*beforeBody=\{<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} origin=\{documentOrigin\(payload\.objectId\)\} returnFocus=\{returnFocus\} \/>\}/, "and the full app's document tab its own (it shares the console's controller)");
+	// R1-I1: after Confirm on a document surface the focus stays in the document: the opener while shown, its tabs, then its first control.
+	assert.match(app, /const returnFocus = \(opener: HTMLElement \| null\): HTMLElement \| null => documentFocus\(root\.current, opener\) as HTMLElement \| null;/);
+	const devFrame = code('VectorDevTool.tsx');
+	assert.match(devFrame, /<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[live\.key\]\} returnFocus=\{returnFocus\} \/>/);
+	assert.match(devFrame, /if \(typeof document === 'undefined' \|\| !focusLost\(document\.activeElement, document\.body, null\)\) return;\s*returnFocus\(null\)\?\.focus\(\);/, 'and after a read again or the document going');
+	assert.match(devFrame, /<div tabIndex=\{-1\} style=\{styles\.gone\} data-document-gone="">/, 'the gone state can hold the focus');
+	assert.match(devFrame, /const seen = useRef\(\{ version, gone \}\);\s*useEffect\(\(\) => \{\s*if \(seen\.current\.version === version && seen\.current\.gone === gone\) return;\s*seen\.current = \{ version, gone \};\s*if \(typeof document === 'undefined' \|\| !focusLost/, 'only on a change: a frame that opens never takes the focus from the host or another frame');
+	// R1-I7: a dev-tool document reads itself again only for a write that may have changed it.
+	assert.match(devFrame, /version: \(written\) => \{\s*if \(!writeTouches\(written\.gone, objectId\)\) return;/);
+	assert.match(devFrame, /<DocumentView refreshKey=\{version\} /, 'in place: its sub-tab, sort, drawer and focus stay');
+	assert.doesNotMatch(devFrame, /<DocumentView key=\{version\}/, 'never a remount');
+	// I6/R1-I12: the bottom slot is always there, one style in every state; what it holds changes, its height never.
+	const hub = code('views/ConsoleView.tsx');
+	assert.equal(hub.match(/<div\s+ref=\{slotRef\}\s+style=\{layout\.slot\}\s+data-bottom-slot=""/g)?.length, 1);
+	assert.doesNotMatch(hub, /style=\{\{ \.\.\.layout\.slot/, 'one style, never merged with a state');
+	// The flip back to the pending bar (bottomSlot): never while a write runs, nor under the focus or the pointer.
+	assert.match(hub, /const slot = bottomSlot\(\{ staged: staged\.size, write, fresh, stagedSince, held: inSlot\.focus \|\| inSlot\.pointer, showing: showing\.current \}\);/);
+	assert.match(hub, /onPointerEnter=\{\(\) => setInSlot\(\(was\) => \(\{ \.\.\.was, pointer: true \}\)\)\}\s*onPointerLeave=\{\(\) => setInSlot\(\(was\) => \(\{ \.\.\.was, pointer: false \}\)\)\}/);
+	assert.match(hub, /\{write === 'failure' && staged\.size > 0 && \(\s*<Button small variant="ghost" onClick=\{\(\) => setDismissed\(removal\)\}>\s*Show pending\s*<\/Button>\s*\)\}/, 'a held failure stays until Show pending (or the staged set changes)');
+	assert.match(hub, /removal\.status === 'error' \|\| removal\.partial \? 'failure' : 'result'/, 'a write that did not do all it was asked holds like a failure (R2-I2)');
+	assert.match(hub, /if \(focusLost\(document\.activeElement, document\.body, null\)\) firstFocusable\(\[node\?\.querySelector<HTMLElement>\(TABBABLE\) \?\? null, returnFocus\(\)\]\)\?\.focus\(\);/, 'a control that leaves the slot with the focus hands it on, never to the page');
+	assert.match(hub, /status: \{ \.\.\.styles\.small, flex: 1,/, 'the sentence takes the room: Write details sit at the right end');
+	assert.match(hub, /slot: \{ flexShrink: 0, boxSizing: 'border-box', height: PENDING_BAR_HEIGHT,/, "exactly the pending bar's height");
+	assert.match(hub, /\{slot === 'pending' && <PendingBar \{\.\.\.panel\(tab\)\} \/>\}/);
+	const audit = code('components/WriteAuditDetails.tsx');
+	assert.match(audit, /list: \{ position: 'absolute',/, 'Write details open over the panel: the line keeps its height');
+	assert.match(audit, /unplaced: \{ bottom: `calc\(100% \+ \$\{POPOVER_GAP\}px\)`, right: 0 \}/, 'up from the line until placed');
+	// Placed before paint by the map popovers' rules, inside the window, clipping ancestors and its surface (never under the sidebar).
+	assert.match(audit, /import \{ POPOVER_GAP, clipArea, placePopover, popoverKey \} from '\.\.\/map\/popover';/);
+	assert.match(audit, /const surface = node\.closest<HTMLElement>\('\[data-console\], \[data-document\]'\);\s*const area = clipArea\(\{ width: window\.innerWidth, height: window\.innerHeight \}, \[\.\.\.clippingRects\(node\), \.\.\.\(surface \? \[surface\.getBoundingClientRect\(\)\] : \[\]\)\]\);/);
+	assert.match(audit, /const at = placePopover\(\{ left: across\.left, right: across\.right, top: Math\.min\(line\.top, across\.top\), bottom: Math\.max\(line\.bottom, across\.bottom\) \}, size, area\);/, 'above its whole line, never over its words');
+	// Closed like them: Escape (the innermost handler that acts) back to its summary, a press outside, a resize.
+	assert.match(audit, /const key = popoverKey\(event\.key, event\.defaultPrevented\);\s*if \(!open \|\| !key\.close\) return;\s*event\.preventDefault\(\);\s*close\(key\.refocus\);/);
+	assert.match(audit, /window\.addEventListener\('resize', onResize\);\s*document\.addEventListener\('pointerdown', onDown\);/);
+	assert.match(audit, /new ResizeObserver/, 'and a resize of its line');
+	assert.doesNotMatch(audit, /stopPropagation/);
 	assert.match(app, /origin: documentOrigin\(payload\.objectId\),/, "the tab's actions ask under its origin");
 	for (const file of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/RemoveDialogHost.tsx']) assert.ok(!fs.existsSync(path.join(SRC, file)), `${file}: no modal confirmation is left`);
 	const panel = code('components/InlineRemoveConfirm.tsx');

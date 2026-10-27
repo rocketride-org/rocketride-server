@@ -136,6 +136,9 @@ export interface IStatChip {
 	tooltip: string | null;
 }
 
+/** Why a collection needs repair (its chip, and the workbench's banner). */
+export const REPAIR_NEEDED_TEXT = 'This collection has no control record, so its embedding model and dimension are not recorded.';
+
 /** Chip labels for the caveats the strip shows (Documents shows its own: unsorted, paging). */
 const CAVEAT_CHIPS: Readonly<Record<string, { label: string; tone: IStatChip['tone'] }>> = {
 	brute_force_search: { label: 'Brute-force search', tone: 'info' },
@@ -178,7 +181,7 @@ export function statsChips(input: { dialect: IDialectResult | null; stats: IStat
 		chips.push(known ? { key: caveat, label: known.label, tone: known.tone, tooltip: caveatSentence(caveat) } : { key: caveat, label: caveat.replace(/_/g, ' '), tone: 'muted', tooltip: null });
 	}
 
-	if (dialect?.health.control_record === false) chips.push({ key: 'repair', label: 'Repair needed', tone: 'error', tooltip: 'This collection has no control record, so its embedding model and dimension are not recorded.' });
+	if (dialect?.health.control_record === false) chips.push({ key: 'repair', label: 'Repair needed', tone: 'error', tooltip: REPAIR_NEEDED_TEXT });
 	// Fresh stats win: the dialect is read at discovery (and again after a write), so a store found empty would
 	// otherwise stay "Empty collection" beside the documents an upload just added.
 	if (collectionMissing(dialect, stats)) chips.push({ key: 'empty', label: 'Empty collection', tone: 'muted', tooltip: CODE_SENTENCES.COLLECTION_MISSING });

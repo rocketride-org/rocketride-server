@@ -269,6 +269,11 @@ test('the audit of the last write behind a disclosure: one line per batch, what 
 	assert.match(html, /<summary[^>]*>Write details<\/summary>/, 'not the header\'s "Details" (the connection\'s)');
 	assert.match(renderToStaticMarkup(<WriteAuditDetails audit={[{ action: 'vector.delete', rows: 1, caller: null }]} label="Audit" />), /<summary[^>]*>Audit<\/summary>/, 'a label replaces it');
 	assert.match(html, /<li>Batch 1: vector\.soft_delete, 12 rows, called by account<\/li><li>Batch 2: vector\.soft_delete, rows not counted, called by an unnamed caller<\/li>/);
+	// R2-I1: the result's whole sentence first (the hub's one line cuts it), and offered even without an audit.
+	const sentence = 'Moved 3 documents to the trash. 1 was already gone. 2 were kept whole, because they still have chunks outside the trash: a.md, b.md.';
+	const both = renderToStaticMarkup(<WriteAuditDetails result={sentence} audit={[{ action: 'vector.soft_delete', rows: 3, caller: null }]} />);
+	assert.ok(both.indexOf(sentence) > 0 && both.indexOf(sentence) < both.indexOf('<li>vector.soft_delete, 3 rows'), 'the sentence, then the audit');
+	assert.match(renderToStaticMarkup(<WriteAuditDetails result={sentence} audit={[]} />), /<summary[^>]*>Write details<\/summary>[\s\S]*1 was already gone\./);
 });
 
 test("the Documents tab takes another tab's request for a document once, and the Trash's danger sentence says what deleted_only keeps", () => {

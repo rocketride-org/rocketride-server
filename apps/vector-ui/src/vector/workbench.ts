@@ -146,6 +146,106 @@ export function reprobeFor(tried: string | null, disagree: boolean, key: string)
 	return { probe: true, tried: key };
 }
 
+/**
+ * Whether a write on the connection may have changed one stored document, so a view of it reads it again: the write
+ * names it among the documents that left, or names none (a restore, a write whose outcome is unknown, an older write
+ * the shared list no longer carries). A write that names other documents only leaves the view as it is.
+ *
+ * @param gone - The write's documents that left (IDocVersion.gone).
+ * @param objectId - The document shown.
+ * @returns True when the view should read the document again.
+ */
+// A permanent delete sent with deleted_only leaves a document that still has live chunks whole (kept_live: nothing
+// of it was deleted), and `gone` does not name it, so its view rightly stays as it is.
+export function writeTouches(gone: readonly string[] | undefined, objectId: string): boolean {
+	return !Array.isArray(gone) || gone.length === 0 || gone.includes(objectId);
+}
+
+/** The stats calls that failed in a row, and whether one of them was a refresh someone asked for. */
+export interface IStatsFailures {
+	count: number;
+	asked: boolean;
+	/** The failure last counted (each failed call answers a new one). */
+	seen: unknown;
+}
+
+/** No failure. */
+export const NO_FAILURES: IStatsFailures = { count: 0, asked: false, seen: null };
+
+/**
+ * Count the stats calls that failed in a row (the same object back when nothing changed).
+ *
+ * @param prev - The count so far.
+ * @param input - The stats slot's status and failure, and whether a refresh someone asked for is running.
+ * @returns The count.
+ */
+export function statsFailures(prev: IStatsFailures, input: { status: string; error: unknown; asked: boolean }): IStatsFailures {
+	if (input.status === 'ready') return prev.count === 0 && !prev.asked ? prev : NO_FAILURES;
+	if (input.status !== 'error' || input.error === prev.seen) return prev;
+	return { count: prev.count + 1, asked: prev.asked || input.asked, seen: input.error };
+}
+
+/**
+ * Whether the "store unreachable" banner shows above every tab: after a refresh someone asked for failed, after two
+ * quick ticks in a row failed, or when nothing was ever read. A single failed quick tick shows nothing there (the
+ * Overview marks its figures "last known values"), so a passing hiccup never moves every tab's content.
+ *
+ * @param failures - The calls that failed in a row.
+ * @param hasFigures - Whether any stats were read.
+ * @returns True to show the banner.
+ */
+export function unreachableShown(failures: IStatsFailures, hasFigures: boolean): boolean {
+	return failures.count > 0 && (failures.asked || failures.count >= 2 || !hasFigures);
+}
+
+/** How long a write's result shows before the pending bar comes back, while documents are staged. */
+export const RESULT_FIRST_MS = 6000;
+
+/** What the workbench's bottom slot shows: the pending bar, the write's line, or nothing (the same height). */
+export type BottomSlot = 'pending' | 'write' | 'empty';
+
+/**
+ * The write's line: a write running, its result (or "Cancelled"), a failure (or a write that did not do all it was
+ * asked: documents kept whole, or already gone), or nothing (none, or set aside by Show pending).
+ */
+export type SlotWrite = 'running' | 'result' | 'failure' | null;
+
+/** What {@link bottomSlot} decides from. */
+export interface IBottomSlotInput {
+	/** Documents staged. */
+	staged: number;
+	/** The write's line. */
+	write: SlotWrite;
+	/** Its result landed less than {@link RESULT_FIRST_MS} ago. */
+	fresh: boolean;
+	/** The staged set changed since it landed (the user acted on it). */
+	stagedSince: boolean;
+	/** The focus or the pointer is in the slot. */
+	held: boolean;
+	/** What the slot shows now. */
+	showing: BottomSlot;
+}
+
+/**
+ * The one line of the workbench's bottom slot: the pending bar while documents are staged, else the write's line.
+ * While documents are staged, the write's line still shows when:
+ *
+ * - a write is running (its result follows on the same line);
+ * - it shows and the focus or the pointer is in it (Write details, Show pending: never swapped out from under them);
+ * - unless the staged set changed since it landed: a failure with no timer (until Show pending), a success for a few
+ *   seconds.
+ *
+ * @param input - {@link IBottomSlotInput}.
+ * @returns What the slot shows.
+ */
+export function bottomSlot(input: IBottomSlotInput): BottomSlot {
+	if (input.write === null) return input.staged > 0 ? 'pending' : 'empty';
+	if (input.staged === 0 || input.write === 'running') return 'write';
+	if (input.held && input.showing === 'write') return 'write';
+	if (input.stagedSince) return 'pending';
+	return input.write === 'failure' || input.fresh ? 'write' : 'pending';
+}
+
 /** What {@link panelOf} reads of an element. */
 export interface IPanelLookup {
 	closest(selector: string): { getAttribute(name: string): string | null } | null;

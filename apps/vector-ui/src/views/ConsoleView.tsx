@@ -32,19 +32,21 @@
 // is its own row, and Refresh keeps its width while it says Refreshing…
 // (only for a refresh someone asked for, never the 15 s quick tick).
 //
-// Under the tab row, on every tab: the banners (the console cannot open,
-// the store failed with the last known figures kept, writes are off, the
-// collection is empty), the inline write confirmation of the console's own
-// requests and the connection's Details (both inline in both mounts:
-// rocket-ui keeps hidden documents mounted, so nothing here is a window-wide
-// overlay) and the write status line (an alert when the write failed, with
-// the store's audit of each batch behind a "Write details" disclosure beside
-// it, outside the announced text). Each
-// tab's panel is mounted the first time it shows, then stays mounted and
-// hidden, so it keeps its state (the map gets `visible` so its canvas sleeps
-// while hidden). Under the panels, the pending bar, so staging never moves a
-// row above it. Add documents is an aside beside the panels, kept mounted
-// once opened (an upload in flight keeps following its progress).
+// Under the tab row, on every tab, the banners of a lasting state: the
+// console cannot open; the store is unreachable (after a refresh someone
+// asked for failed, or two quick ticks in a row: one failed tick moves
+// nothing); the collection needs repair or was built with another model;
+// writes are off; the collection is empty. Then the inline write
+// confirmation of the console's own requests and the connection's Details
+// (both inline in both mounts: rocket-ui keeps hidden documents mounted, so
+// nothing here is a window-wide overlay). Each tab's panel is mounted the
+// first time it shows, then stays mounted and hidden, so it keeps its state
+// (the map gets `visible` so its canvas sleeps while hidden). Under the
+// panels, what comes and goes after a press: the pending bar and the write's
+// line (an alert of its own when the write failed, the store's audit of each
+// batch beside it, behind "Write details"), so neither moves a row above it.
+// Add documents is an aside beside the panels, kept mounted once opened (an
+// upload in flight keeps following its progress).
 //
 // FOCUS. A confirmation that closes with the focus inside it (and, after
 // Cancel, cannot give it back to its opener) gives it to the row the shown
@@ -79,14 +81,14 @@ import type { IExplorerEndpoint } from 'shared/explorer';
 import { makeConsoleActions } from '../adapters/consoleActions';
 import { savedFilters } from '../adapters/connections';
 import { announcer } from '../adapters/explorer';
-import { useConnection, useEndpointsState, useLiveEndpoint, useVectorEnv } from '../envContext';
+import { useConnection, useEndpointsState, useLiveEndpoint, useValueStore, useVectorEnv } from '../envContext';
 import AddDocumentsAside from '../components/AddDocumentsAside';
 import CollectionPanel from '../components/CollectionPanel';
 import ConnectionDetailsPanel from '../components/ConnectionDetailsPanel';
 import DocumentsTab from '../components/DocumentsTab';
 import InlineRemoveConfirm from '../components/InlineRemoveConfirm';
 import OverviewPanel from '../components/OverviewPanel';
-import PendingBar from '../components/PendingBar';
+import PendingBar, { PENDING_BAR_HEIGHT } from '../components/PendingBar';
 import QueryTab from '../components/QueryTab';
 import TrashTab from '../components/TrashTab';
 import WorkbenchTabs, { workbenchIds } from '../components/WorkbenchTabs';
@@ -94,17 +96,17 @@ import WriteAuditDetails from '../components/WriteAuditDetails';
 import type { IWorkbenchPanelProps } from '../components/workbenchProps';
 import { CONSOLE_ORIGIN } from '../vector/confirm';
 import { consoleScope, mapScopeFor } from '../vector/consoleModel';
-import { firstFocusable } from '../vector/focus';
+import { TABBABLE, firstFocusable, focusLost } from '../vector/focus';
 import { CONDITION_KINDS, checkScope, conditionAvailability, listingFilter, resolveScope, scopeStripText, scopeView, scopeWith } from '../vector/filters';
 import type { ConditionKind } from '../vector/filters';
 import { healthSummary, medianChunks } from '../vector/health';
 import { savedFiltersFor } from '../vector/savedFilters';
 import { roleLine, vectorCardView } from '../vector/connections';
 import { providerTitle } from '../vector/support';
-import { collectionMissing } from '../vector/stats';
-import { BUSY, EMPTY } from '../vector/wording';
-import { focusStranded, reprobeFor } from '../vector/workbench';
-import type { WorkbenchTab } from '../vector/workbench';
+import { REPAIR_NEEDED_TEXT, collectionMissing, formatCount } from '../vector/stats';
+import { BUSY, CAVEAT_SENTENCES, EMPTY } from '../vector/wording';
+import { NO_FAILURES, RESULT_FIRST_MS, bottomSlot, focusStranded, reprobeFor, statsFailures, unreachableShown } from '../vector/workbench';
+import type { BottomSlot, SlotWrite, WorkbenchTab } from '../vector/workbench';
 import { styles } from '../styles';
 import MapView from './MapView';
 
@@ -114,9 +116,15 @@ const layout = {
 	/** Two labels in one cell: the button keeps the width of the longer one, whichever shows. */
 	held: { display: 'inline-grid' } as CSSProperties,
 	heldLabel: (shown: boolean): CSSProperties => ({ gridArea: '1 / 1', visibility: shown ? 'visible' : 'hidden' }),
-	/** The write line: its sentence (announced), then the audit disclosure beside it (not announced). */
-	statusRow: { display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', padding: '6px 24px' } as CSSProperties,
-	status: { ...styles.small, minWidth: 0 } as CSSProperties,
+	/**
+	 * The bottom slot: one line of the pending bar's height, always there and the same whether empty or full, so a
+	 * stage, a write's result or a cancel never changes the height of the panels above (the map's canvas, a grid).
+	 */
+	slot: { flexShrink: 0, boxSizing: 'border-box', height: PENDING_BAR_HEIGHT, margin: '0 12px 8px', display: 'flex', alignItems: 'stretch', minWidth: 0 } as CSSProperties,
+	/** The write line in the slot: its sentence (announced), then the audit disclosure beside it (not announced). */
+	writeLine: { flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', gap: 8, padding: '0 12px' } as CSSProperties,
+	/** The sentence takes the room left, so Write details (and a held failure's Show pending) sit at the slot's right end. */
+	status: { ...styles.small, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
 	/** The panels beside the Add documents aside. */
 	body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' } as CSSProperties,
 	panels: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column' } as CSSProperties,
@@ -285,6 +293,30 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 		setAdding(true);
 	};
 	const prefix = `wb${useId().replace(/:/g, '')}`;
+	// The bottom slot's one line (bottomSlot): the pending bar while documents are staged, else the write's line. A
+	// write's result that lands while documents are staged shows first (seen, not only announced): a running write, and
+	// a failure or a write that did not do all it was asked, until the staged set changes (or Show pending); a success
+	// for a few seconds; never swapped out from under the focus or the pointer.
+	const staged = useValueStore(entry.staged);
+	const removal = state.removal;
+	// Each write's line is its own object (the store sets a new one per write), so Show pending lasts until the next.
+	const [dismissed, setDismissed] = useState<typeof removal | null>(null);
+	const write: SlotWrite = removal === dismissed || (removal.status !== 'running' && removal.message === null) ? null : removal.status === 'running' ? 'running' : removal.status === 'error' || removal.partial ? 'failure' : 'result';
+	const [fresh, setFresh] = useState(false);
+	const [stagedSince, setStagedSince] = useState(false);
+	// The staged set changed (the user acted). Declared first, so a write that changes the staged set and lands its
+	// result in the same render still shows the result.
+	useEffect(() => setStagedSince(true), [staged]);
+	useEffect(() => {
+		setStagedSince(false);
+		setFresh(true);
+		const timer = setTimeout(() => setFresh(false), RESULT_FIRST_MS);
+		return () => clearTimeout(timer);
+	}, [removal]);
+	const slotRef = useRef<HTMLDivElement>(null);
+	const [inSlot, setInSlot] = useState({ focus: false, pointer: false });
+	const showing = useRef<BottomSlot>('empty');
+	const slot = bottomSlot({ staged: staged.size, write, fresh, stagedSince, held: inSlot.focus || inSlot.pointer, showing: showing.current });
 	const panel = (id: WorkbenchTab): IWorkbenchPanelProps => ({ entry, model, channels, actions, console: state, selection, visible: active && tab === id });
 	// Where the focus goes after a confirmation closes: the shown panel's marked row, else its grid, else the current tab.
 	const root = useRef<HTMLDivElement>(null);
@@ -296,6 +328,18 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 		const inShown = (selector: string): HTMLElement | null => shown?.querySelector<HTMLElement>(selector) ?? null;
 		return firstFocusable([inShown('[data-return-focus]'), inShown('[data-grid-focus] [data-grid-row][tabindex="0"]'), inShown('[data-grid-focus]'), currentTab()]);
 	};
+	// The slot changed what it shows: what it shows now is what it showed last; and a control in it that left with the
+	// focus (Show pending, the pending bar going) hands the focus to the slot's first control, else the shown panel's chain.
+	useLayoutEffect(() => {
+		showing.current = slot;
+		if (typeof document === 'undefined' || !inSlot.focus) return;
+		const node = slotRef.current;
+		if (focusLost(document.activeElement, document.body, null)) firstFocusable([node?.querySelector<HTMLElement>(TABBABLE) ?? null, returnFocus()])?.focus();
+		const focus = !!node && node.contains(document.activeElement);
+		setInSlot((was) => (was.focus === focus ? was : { ...was, focus }));
+		// Only when the slot's content changed.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [slot]);
 	// Where the focus goes when Add documents closes and its opener cannot take it back: the header's button, else the tab.
 	const asideFocus = (): HTMLElement | null => firstFocusable([root.current?.querySelector<HTMLElement>('[data-add-documents] button'), currentTab()]);
 	// A tab switch made from inside a panel leaves the focus on an element now hidden: it goes to the new tab.
@@ -333,8 +377,15 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 	const title = `${providerTitle(endpoint.provider)}${model.collection ? ` · ${model.collection}` : ''}`;
 	const subtitle = `"${endpoint.pipelineName}" · ${endpoint.nodeName || endpoint.nodeId} · ${roleLine(endpoint)}`;
 	const statsError = state.stats.status === 'error' ? state.stats.error : null;
+	// The store failed: said above every tab only once it is more than one quick tick (unreachableShown).
+	const failures = useRef(NO_FAILURES);
+	failures.current = statsFailures(failures.current, { status: state.stats.status, error: state.stats.error, asked: refreshAsked });
+	const unreachable = statsError !== null && unreachableShown(failures.current, state.stats.view !== null);
 	// One "Empty collection" rule with the chip and the connection card (vector/stats.ts collectionMissing), or no documents.
-	const emptyCollection = collectionMissing(dialect, state.stats.view) || state.stats.view?.documents === 0;
+	const missing = collectionMissing(dialect, state.stats.view);
+	const emptyCollection = missing || state.stats.view?.documents === 0;
+	const inTrash = state.stats.view?.deletedDocuments ?? 0;
+	const emptyText = !missing && inTrash > 0 ? `No documents outside the trash (${formatCount(inTrash)} in the Trash).` : EMPTY.noDocuments;
 
 	return (
 		<div ref={root} style={styles.root} data-console={endpoint.nodeId}>
@@ -360,18 +411,18 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 					</>
 				}
 			/>
-			<WorkbenchTabs value={tab} onChange={(id) => entry.tab.set(id)} trashCount={state.stats.view?.deletedDocuments ?? null} idPrefix={prefix} />
+			<WorkbenchTabs value={tab} onChange={(id) => entry.tab.set(id)} trashCount={state.stats.view?.deletedDocuments ?? null} idPrefix={prefix} mounted={mounted} />
 			{card.blocked && (
 				<div style={layout.banner}>
 					<Banner variant={endpoint.state === 'ready' ? 'warning' : 'info'}>{card.blocked}</Banner>
 				</div>
 			)}
-			{!card.blocked && statsError !== null && (
+			{!card.blocked && unreachable && statsError !== null && (
 				<div style={layout.banner}>
 					<Banner variant="error">
 						{statsError.headline}
 						{statsError.detail ? ` ${statsError.detail}` : ''}
-						{state.stats.view !== null ? ' The figures shown are the last known ones.' : ''}
+						{state.stats.view !== null ? ' The Overview keeps the last figures read.' : ''}
 						<span style={layout.bannerAction}>
 							<Button small variant="secondary" onClick={refresh}>
 								Retry
@@ -380,15 +431,25 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 					</Banner>
 				</div>
 			)}
+			{!card.blocked && dialect?.health.control_record === false && (
+				<div style={layout.banner}>
+					<Banner variant="warning">{REPAIR_NEEDED_TEXT}</Banner>
+				</div>
+			)}
+			{!card.blocked && dialect?.health.model_mismatch === true && (
+				<div style={layout.banner}>
+					<Banner variant="warning">{CAVEAT_SENTENCES.model_mismatch}</Banner>
+				</div>
+			)}
 			{!card.blocked && entry.opened && !model.writes.enabled && model.writes.reason !== null && (
 				<div style={layout.banner}>
 					<Banner variant="info">{model.writes.reason}</Banner>
 				</div>
 			)}
-			{!card.blocked && statsError === null && emptyCollection && (
+			{!card.blocked && !unreachable && emptyCollection && (
 				<div style={layout.banner}>
 					<Banner variant="info">
-						{EMPTY.noDocuments}
+						{emptyText}
 						{model.ingest.enabled ? (
 							<span style={layout.bannerAction}>
 								<Button small variant="secondary" onClick={openAdding}>
@@ -403,15 +464,6 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 			)}
 			<InlineRemoveConfirm entry={entry} probe={probe} origin={CONSOLE_ORIGIN} returnFocus={returnFocus} />
 			{details && <ConnectionDetailsPanel key={endpoint.key} endpoint={endpoint} probe={probe} stats={state.stats.view} onTest={(target) => env.probe(target.key)} onClose={() => setDetails(false)} />}
-			{(state.removal.status === 'running' || state.removal.message) && (
-				<div style={layout.statusRow}>
-					<div role={state.removal.status === 'error' ? 'alert' : 'status'} style={layout.status}>
-						{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
-					</div>
-					{/* Outside the live element: opening it does not announce the line again. */}
-					{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails audit={state.removal.audit} />}
-				</div>
-			)}
 			<div style={layout.body}>
 				<div style={layout.panels}>
 					{mounted.has('overview') && (
@@ -444,7 +496,42 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 							<TrashTab {...panel('trash')} />
 						</WorkbenchPanel>
 					)}
-					<PendingBar {...panel(tab)} />
+					{/* Under the panels, one line of a fixed height: what comes and goes after a press never moves a row above it. */}
+					<div
+						ref={slotRef}
+						style={layout.slot}
+						data-bottom-slot=""
+						onFocus={() => setInSlot((was) => (was.focus ? was : { ...was, focus: true }))}
+						onBlur={(event) => {
+							if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setInSlot((was) => ({ ...was, focus: false }));
+						}}
+						onPointerEnter={() => setInSlot((was) => ({ ...was, pointer: true }))}
+						onPointerLeave={() => setInSlot((was) => ({ ...was, pointer: false }))}
+					>
+						{slot === 'pending' && <PendingBar {...panel(tab)} />}
+						{slot === 'write' && (
+							<div style={layout.writeLine} data-write-line="" title={state.removal.message ?? undefined}>
+								{state.removal.status === 'error' ? (
+									// Its own element, so a failure is announced as one (a role changed on the same element often is not).
+									<div key="alert" role="alert" style={layout.status}>
+										{state.removal.message}
+									</div>
+								) : (
+									<div key="status" role="status" style={layout.status}>
+										{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
+									</div>
+								)}
+								{/* Outside the live element: opening it does not announce the line again. Always there for a finished
+								    write: the line is cut to one line, and Write details has the whole sentence. */}
+								{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails result={state.removal.message ?? undefined} audit={state.removal.audit} />}
+								{write === 'failure' && staged.size > 0 && (
+									<Button small variant="ghost" onClick={() => setDismissed(removal)}>
+										Show pending
+									</Button>
+								)}
+							</div>
+						)}
+					</div>
 				</div>
 				{addingMounted && <AddDocumentsAside model={model} channels={channels} actions={actions} endpoint={endpoint} open={adding} onClose={() => setAdding(false)} returnFocus={asideFocus} />}
 			</div>

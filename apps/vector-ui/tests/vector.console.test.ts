@@ -574,6 +574,7 @@ test('empty trash: every page of the trash is listed first, then a confirmation;
 	);
 	assert.equal(announced.at(-1), 'Emptied the trash: deleted 149 documents permanently (298 chunks). 1 was kept whole, because it still has chunks outside the trash: C:/demo/trash/t7.md.');
 	assert.ok(!removedIds.flat().includes('t-7'), 'a kept document is not forgotten');
+	assert.equal(store.getState().removal.partial, true, 'not all it was asked: the hub holds the line like a failure (R2-I2)');
 	assert.equal(removedIds.flat().length, 149);
 	assert.equal(written(), 1);
 	store.dispose();

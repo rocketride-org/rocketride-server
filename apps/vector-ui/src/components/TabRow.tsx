@@ -97,6 +97,8 @@ export interface ITabRowProps<T extends string> {
 	small?: boolean;
 	/** A data attribute on the row, so the workbench finds its tabs. */
 	marker?: string;
+	/** The tabs whose panels are on the page (they mount the first time they show): only those name their panel. */
+	mounted?: ReadonlySet<T>;
 }
 
 /**
@@ -105,7 +107,7 @@ export interface ITabRowProps<T extends string> {
  * @param props - {@link ITabRowProps}.
  * @returns The row.
  */
-export function TabRow<T extends string>({ tabs, value, onSelect, activation, label, idPrefix, small = false, marker }: ITabRowProps<T>): React.ReactElement {
+export function TabRow<T extends string>({ tabs, value, onSelect, activation, label, idPrefix, small = false, marker, mounted }: ITabRowProps<T>): React.ReactElement {
 	const row = useRef<HTMLDivElement>(null);
 	const [focused, setFocused] = useState<T | null>(null);
 	const onKeyDown = (event: React.KeyboardEvent, index: number): void => {
@@ -127,8 +129,8 @@ export function TabRow<T extends string>({ tabs, value, onSelect, activation, la
 						role="tab"
 						id={ids.tab}
 						aria-selected={selected}
-						// Unselected panels mount the first time their tab shows (they are kept then): the selected one always exists.
-						aria-controls={ids.panel}
+						// A panel mounts the first time its tab shows: a tab names its panel once it is on the page.
+						aria-controls={mounted === undefined || mounted.has(tab.id) || selected ? ids.panel : undefined}
 						tabIndex={selected ? 0 : -1}
 						style={styles.tab(selected, focused === tab.id, small)}
 						onClick={() => onSelect(tab.id)}
