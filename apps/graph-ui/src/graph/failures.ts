@@ -203,8 +203,34 @@ export function describeFailureOf(message: string, error: unknown, canWrite: boo
 // user stopped waiting) does not mean nothing changed. Only a refusal raised
 // before anything reached the database means that.
 
-/** Said under a write-console failure that can have come after the statement ran. */
-export const WRITE_MAY_HAVE_APPLIED = 'The write may have been applied: this error can come after the database ran the statement, and nothing is rolled back. Check the data before running it again.';
+/**
+ * Said under a write-console failure that can have come after the statement ran. The app cannot know what became of the
+ * failing statement itself (it may have been applied, or the database may have rolled it back); what it does know is
+ * about EARLIER statements of a batch, and runConfig's wording says that.
+ */
+export const WRITE_MAY_HAVE_APPLIED = 'The write may or may not have been applied: some errors arrive after the database ran the statement. Check the data before running it again.';
+
+/** Said instead when the database's own text says it stopped the statement and rolled the transaction back. */
+export const WRITE_PROBABLY_ROLLED_BACK = 'The database stopped this statement with an error that rolls the transaction back, so it was probably not applied. Check the data before running it again.';
+
+/**
+ * Database texts that say, affirmatively, that the transaction was rolled back, plus Neo4j's two memory-limit signatures
+ * (the limit aborts the transaction). "could not be rolled back" and "rollback failed" do not match.
+ */
+const ROLLED_BACK = /\b(?:was|has been|have been|been) rolled back\b|dbms\.memory\.transaction\.[\w.]+ threshold reached|\bTransactionMemoryLimit\b/i;
+
+/** Quoted text and quoted names, where a database echoes the user's own query or data and so says nothing about itself. */
+const QUOTED = /'(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*"|`[^`]*`/g;
+
+/**
+ * Whether the database's own words say the failed statement's transaction was rolled back.
+ *
+ * @param message - The failure's message.
+ * @returns True only for an affirmative statement outside any quoted echo of the query.
+ */
+export function saysRolledBack(message: string): boolean {
+	return ROLLED_BACK.test(message.replace(QUOTED, ' '));
+}
 
 /**
  * The kind of a failure: the thrown error's own `kind`, else the one the session's fixed wording stands for.
@@ -255,7 +281,7 @@ export function writeMayHaveApplied(error: unknown): boolean {
 export function describeWriteFailure(message: string, error: unknown): IFailureNotice {
 	const notice = describeFailureOf(message, error, true);
 	if (notice.ignore || !writeMayHaveApplied(error ?? message)) return notice;
-	return { ...notice, hint: WRITE_MAY_HAVE_APPLIED };
+	return { ...notice, hint: saysRolledBack(message) ? WRITE_PROBABLY_ROLLED_BACK : WRITE_MAY_HAVE_APPLIED };
 }
 
 /** Re-exported so the canvas notice and the failure strip share one place for their wording. */
