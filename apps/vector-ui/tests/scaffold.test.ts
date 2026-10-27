@@ -57,7 +57,8 @@ test('manifest identity: id, name, publisher, description and the module federat
 
 test('the launcher card: categories, mode, sign-in, status bar, shared library include, README and icon', () => {
 	const m = pkg.appManifest;
-	assert.deepEqual(m.categories, ['tools']);
+	// `devTool` lists it among the hosts' dev tools (VS Code, rocket-ui); `tools` keeps its launcher card.
+	assert.deepEqual(m.categories, ['tools', 'devTool']);
 	assert.equal(m.mode, 'free');
 	assert.equal(m.authenticated, true);
 	assert.equal(m.showStatusBar, true);

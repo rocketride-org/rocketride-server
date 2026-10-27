@@ -47,6 +47,22 @@ const LANE_FILES = [
 	'adapters/connections.ts',
 	'adapters/consoleActions.ts',
 	'adapters/react.ts',
+	'env.ts',
+	'envContext.tsx',
+	'localEnv.ts',
+	// The dev-tool mounts follow the same rules (no token, no configuration, no page key listeners, no browser storage).
+	'VectorDevTool.tsx',
+	'VectorDevToolSidebar.tsx',
+	'realmRegion.ts',
+	'devtool/protocol.ts',
+	'devtool/controller.ts',
+	'devtool/frame.ts',
+	'devtool/frameText.ts',
+	'devtool/wiring.ts',
+	'components/DevToolConnectionList.tsx',
+	'components/InlineRemoveConfirm.tsx',
+	'components/ConnectionDetailsPanel.tsx',
+	'components/RealmLiveRegion.tsx',
 	'components/StatsStrip.tsx',
 	'components/StatsCharts.tsx',
 	'components/ScopeBar.tsx',
@@ -84,9 +100,12 @@ test("a document tab and the console both front the connection's console tab for
 	const app = code('VectorApp.tsx');
 	assert.match(app, /import ConnectionsView, \{ openConsole \} from '\.\/views\/ConnectionsView';/);
 	assert.match(app, /makeConsoleActions\(entry, \{[\s\S]*?showConsole: \(\) => openConsole\(entry\.ctx\.endpoint\),[\s\S]*?\}\)/);
+	// The console is also a dev-tool frame's document, so it fronts the console through its mount's env (the full
+	// app's env opens it with openConsole, tests/devtool.env.test.ts), never through the full app's landing.
 	const view = code('views/ConsoleView.tsx');
-	assert.match(view, /import \{ openConsole \} from '\.\/ConnectionsView';/);
-	assert.match(view, /makeConsoleActions\(entry, \{[\s\S]*?showConsole: \(\) => openConsole\(entry\.ctx\.endpoint\),[\s\S]*?\}\)/);
+	assert.doesNotMatch(view, /from '\.\/ConnectionsView'/);
+	assert.match(view, /makeConsoleActions\(entry, \{[\s\S]*?showConsole: \(\) => env\.openConsole\(entry\.ctx\.endpoint\),[\s\S]*?\}\)/);
+	assert.match(app, /createLocalVectorEnv\(\{[^}]*openConsole, openDocument: openDocumentTab \}\)/, "and the full app's env is the landing's openConsole");
 });
 
 test('the console is the first view of a connection: the landing and the sidebar open its console', () => {
@@ -159,7 +178,10 @@ test('the scope: the listing asks for its conditions, its documents resolve from
 test("a document's health: the tab compares with the console's loaded documents and counts deleted chunks only when asked; the directory and the strip use the same flags", () => {
 	const view = code('views/DocumentView.tsx');
 	assert.match(view, /<HealthPanel item=\{info\} medianChunks=\{median\} listing="all"/, "the tab's row is listed with deleted:'all'");
-	assert.match(view, /const median = medianChunks\(consoleState\)/);
+	// The full app's tab compares with its console's rows; a dev-tool document frame passes the console's median in
+	// (its summary hint: tests/devtool.frame.test.ts), so the tab never reads another frame's memory.
+	assert.match(view, /const median = consoleMedian !== undefined \? consoleMedian : medianChunks\(consoleState\);/);
+	assert.match(view, /const consoleEntry = consoleMedian === undefined \? existingEntry\(model\.connectionKey\) : undefined;/);
 	assert.match(view, /onProbe=\{\(\) => void countDeleted\(\)\}/, 'the two one-row chunks calls run only on the click');
 	assert.match(view, /model\.capabilities\.soft_delete === true/, 'offered only where the store soft-deletes');
 	assert.doesNotMatch(view, /Without first chunk/);
@@ -228,7 +250,7 @@ test("no lane file reads a token or a component's configuration, or stops events
 });
 
 test('pure modules stay pure: vector/ and the pure adapters import no shell value and no React', () => {
-	const pure = LANE_FILES.filter((f) => f.startsWith('vector/') || ['adapters/explorer.ts', 'adapters/actions.ts', 'adapters/connections.ts', 'adapters/consoleActions.ts'].includes(f));
+	const pure = LANE_FILES.filter((f) => f.startsWith('vector/') || ['adapters/explorer.ts', 'adapters/actions.ts', 'adapters/connections.ts', 'adapters/consoleActions.ts', 'env.ts', 'localEnv.ts', 'realmRegion.ts', 'devtool/protocol.ts', 'devtool/controller.ts', 'devtool/frame.ts', 'devtool/frameText.ts'].includes(f));
 	for (const file of pure) {
 		const source = code(file);
 		assert.doesNotMatch(source, /^import (?!type )[^;]*from 'shell';/m, `${file} imports a shell value`);
@@ -242,7 +264,9 @@ test('identity: the store is attached to the platform, and a change of fingerpri
 	const app = code('VectorApp.tsx');
 	assert.match(app, /useEndpointStoreLifecycle\(vectorEndpoints, client, identity\)/);
 	assert.match(app, /useEffect\(\(\) => \{\s*forgetConnections\(getDocs\(\), connectionCaches, endpointKeyFromUri, LANDING\);\s*\}, \[fingerprint\]\);/);
-	assert.match(app, /<LiveRegion \/>/);
+	// One polite region per REALM: in rocket-ui dev-tool documents may share the app's realm (tests/devtool.mounts.test.ts).
+	assert.match(app, /<RealmLiveRegion \/>/);
+	assert.doesNotMatch(app, /<LiveRegion \/>/);
 	assert.match(app, /<VectorHistoryPrefsBridge \/>/);
 	assert.match(app, /display: active \? 'flex' : 'none'/, 'editors stay mounted and hidden');
 	assert.match(code('adapters/explorer.ts'), /textField: 'question'/, 'chat history keeps questions only');

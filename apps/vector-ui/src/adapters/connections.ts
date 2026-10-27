@@ -42,6 +42,13 @@
 // controller is disposed (its late answers are dropped), every selection is
 // reset and every cache is emptied, so nothing of the previous identity's
 // connections remains.
+//
+// THE REGISTRIES. Each mount keeps its own (createConnectionRegistry): the
+// full app's is the module-level one below (`connectionEntry`, bound to the
+// app's endpoint store and client), and every dev-tool frame makes one of
+// its own, so two frames in one realm never share a controller (or the
+// confirmation it holds). How an entry calls its store is its `link`, read at
+// call time: the full app's store session, or a frame's controller ops.
 // =============================================================================
 
 import { ExplorerToolError } from 'shared/explorer';
@@ -53,6 +60,7 @@ import { createConsoleStore } from '../vector/consoleStore';
 import type { IConsoleClock, IConsoleStore } from '../vector/consoleStore';
 import { DEFAULT_LIMITS } from '../vector/results';
 import { deleteBatch, fetchChunks, fetchDocumentsPage, fetchStats, restoreBatch, trashBatch } from './actions';
+import type { IVectorCaller } from './actions';
 import { announcer, connectionCaches, vectorEndpoints } from './explorer';
 
 /** A tiny external store of one value (useSyncExternalStore-compatible). */
@@ -90,9 +98,18 @@ export function createValueStore<T>(initial: T): IValueStore<T> {
 /** The tabs of a console. */
 export type ConsoleTab = 'console' | 'map';
 
+/** How one mount calls a connection's store (read by the console controller at call time). */
+export interface IConnectionLink {
+	/** The connection's anchor session, or what stands in for it in a dev-tool frame. */
+	session(endpoint: IExplorerEndpoint): IVectorCaller;
+	/** Probe the store again (its `dialect`), fire and forget. */
+	reprobe(endpointKey: string): void;
+}
+
 /** What the controller reads at call time. */
 export interface IConnectionContext {
-	client: IExplorerClient | null;
+	/** How to call the store, or null while this mount cannot (not connected). */
+	link: IConnectionLink | null;
 	endpoint: IExplorerEndpoint;
 	limits: IVectorLimits;
 }
@@ -122,10 +139,8 @@ const REAL_CLOCK: IConsoleClock = {
 	clearTimer: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
-const entries = new Map<string, IConnectionEntry>();
-
 /**
- * Build the controller of one connection, calling through the store's session at call time.
+ * Build the controller of one connection, calling through the entry's link at call time.
  *
  * @param entry - The entry (its ctx and selection).
  * @param clock - The clock (tests pass a manual one).
@@ -133,9 +148,9 @@ const entries = new Map<string, IConnectionEntry>();
  */
 function makeController(entry: Pick<IConnectionEntry, 'ctx' | 'selection' | 'writes'>, clock: IConsoleClock): IConsoleStore {
 	const { ctx } = entry;
-	const session = (tool: string) => {
-		if (ctx.client === null) throw new ExplorerToolError({ kind: 'unavailable', tool, message: 'Not connected to the server. Reconnect, then refresh.' });
-		return vectorEndpoints.session(ctx.client, ctx.endpoint);
+	const session = (tool: string): IVectorCaller => {
+		if (ctx.link === null) throw new ExplorerToolError({ kind: 'unavailable', tool, message: 'Not connected to the server. Reconnect, then refresh.' });
+		return ctx.link.session(ctx.endpoint);
 	};
 	return createConsoleStore(
 		{
@@ -149,9 +164,7 @@ function makeController(entry: Pick<IConnectionEntry, 'ctx' | 'selection' | 'wri
 			onRemoved: (ids) => {
 				for (const id of ids) entry.selection.forgetDocument(id);
 			},
-			reprobe: () => {
-				if (ctx.client !== null) void vectorEndpoints.probe(ctx.client, ctx.endpoint.key);
-			},
+			reprobe: () => ctx.link?.reprobe(ctx.endpoint.key),
 			onWritten: () => entry.writes.set(entry.writes.get() + 1),
 			clock,
 		},
@@ -169,8 +182,96 @@ function makeController(entry: Pick<IConnectionEntry, 'ctx' | 'selection' | 'wri
 	);
 }
 
+/** One mount's per-connection objects. */
+export interface IConnectionRegistry {
+	/**
+	 * The objects of one connection, made on first use and kept until the registry is cleared; refreshed in place.
+	 *
+	 * @param endpoint - The live endpoint (its key names the entry; the rest refreshes ctx).
+	 * @param link - How this mount calls the store now, or null while it cannot.
+	 * @param limits - The node's limits (the dialect's, else the documented ones).
+	 * @param clock - The clock of a new entry (tests pass a manual one).
+	 */
+	entry(endpoint: IExplorerEndpoint, link: IConnectionLink | null, limits?: IVectorLimits, clock?: IConsoleClock): IConnectionEntry;
+	/** The entry of a connection, if one was made. */
+	existing(key: string): IConnectionEntry | undefined;
+	/** How many connections have objects. */
+	count(): number;
+	/** Every entry. */
+	entries(): IConnectionEntry[];
+	/** Forget every entry, as it is (the full app's cache registry disposes and resets them first, each by name). */
+	forget(): void;
+	/** Dispose every controller (late answers are dropped), reset every selection, forget every entry. */
+	clear(): void;
+}
+
 /**
- * The objects of one connection, made on first use and kept until a change of identity.
+ * Create a mount's registry of per-connection objects.
+ *
+ * @returns An empty registry.
+ */
+export function createConnectionRegistry(): IConnectionRegistry {
+	const entries = new Map<string, IConnectionEntry>();
+	return {
+		entry(endpoint, link, limits = DEFAULT_LIMITS, clock = REAL_CLOCK) {
+			let entry = entries.get(endpoint.key);
+			if (!entry) {
+				const ctx: IConnectionContext = { link, endpoint, limits };
+				const selection = createSelectionStore(endpoint.key);
+				const made: IConnectionEntry = {
+					key: endpoint.key,
+					ctx,
+					selection,
+					controller: undefined as unknown as IConsoleStore,
+					tab: createValueStore<ConsoleTab>('console'),
+					chatScope: createValueStore<readonly string[] | null>(null),
+					scope: createValueStore<IScopeState | null>(null),
+					documents: undefined as unknown as IDocumentRowsSource,
+					writes: createValueStore(0),
+					opened: false,
+				};
+				made.controller = makeController(made, clock);
+				made.documents = directoryRows(made.controller);
+				entries.set(endpoint.key, made);
+				entry = made;
+			}
+			entry.ctx.link = link;
+			entry.ctx.endpoint = endpoint;
+			entry.ctx.limits = limits;
+			return entry;
+		},
+		existing: (key) => entries.get(key),
+		count: () => entries.size,
+		entries: () => [...entries.values()],
+		forget: () => entries.clear(),
+		clear() {
+			for (const entry of entries.values()) entry.controller.dispose();
+			for (const entry of entries.values()) entry.selection.reset(null);
+			entries.clear();
+		},
+	};
+}
+
+/** The full app's registry (its console tabs and document tabs share one entry per connection). */
+export const appConnections: IConnectionRegistry = createConnectionRegistry();
+
+/**
+ * How the full app calls a connection: through the app's endpoint store, on its client.
+ *
+ * @param client - The client.
+ * @returns The link.
+ */
+export function appLink(client: IExplorerClient): IConnectionLink {
+	return {
+		session: (endpoint) => vectorEndpoints.session(client, endpoint),
+		reprobe: (endpointKey) => {
+			void vectorEndpoints.probe(client, endpointKey);
+		},
+	};
+}
+
+/**
+ * The full app's objects of one connection, made on first use and kept until a change of identity.
  *
  * @param endpoint - The live endpoint (its key names the entry; the rest refreshes ctx).
  * @param client - The client, or null while disconnected.
@@ -179,31 +280,7 @@ function makeController(entry: Pick<IConnectionEntry, 'ctx' | 'selection' | 'wri
  * @returns The entry.
  */
 export function connectionEntry(endpoint: IExplorerEndpoint, client: IExplorerClient | null, limits: IVectorLimits = DEFAULT_LIMITS, clock: IConsoleClock = REAL_CLOCK): IConnectionEntry {
-	let entry = entries.get(endpoint.key);
-	if (!entry) {
-		const ctx: IConnectionContext = { client, endpoint, limits };
-		const selection = createSelectionStore(endpoint.key);
-		const made: IConnectionEntry = {
-			key: endpoint.key,
-			ctx,
-			selection,
-			controller: undefined as unknown as IConsoleStore,
-			tab: createValueStore<ConsoleTab>('console'),
-			chatScope: createValueStore<readonly string[] | null>(null),
-			scope: createValueStore<IScopeState | null>(null),
-			documents: undefined as unknown as IDocumentRowsSource,
-			writes: createValueStore(0),
-			opened: false,
-		};
-		made.controller = makeController(made, clock);
-		made.documents = directoryRows(made.controller);
-		entries.set(endpoint.key, made);
-		entry = made;
-	}
-	entry.ctx.client = client;
-	entry.ctx.endpoint = endpoint;
-	entry.ctx.limits = limits;
-	return entry;
+	return appConnections.entry(endpoint, client === null ? null : appLink(client), limits, clock);
 }
 
 /**
@@ -217,28 +294,28 @@ function directoryRows(controller: IConsoleStore): IDocumentRowsSource {
 }
 
 /**
- * The entry of a connection, if one was made.
+ * The full app's entry of a connection, if one was made.
  *
  * @param key - The endpoint key.
  * @returns The entry or undefined.
  */
 export function existingEntry(key: string): IConnectionEntry | undefined {
-	return entries.get(key);
+	return appConnections.existing(key);
 }
 
-/** How many connections have objects (tests). */
+/** How many connections have objects in the full app (tests). */
 export function entryCount(): number {
-	return entries.size;
+	return appConnections.count();
 }
 
 connectionCaches.register('documents, auto-pager, chunks and removals', () => {
-	for (const entry of entries.values()) entry.controller.dispose();
+	for (const entry of appConnections.entries()) entry.controller.dispose();
 });
 connectionCaches.register('selection and sample models', () => {
-	for (const entry of entries.values()) entry.selection.reset(null);
+	for (const entry of appConnections.entries()) entry.selection.reset(null);
 });
 connectionCaches.register('console tabs and chat scope', () => {
-	entries.clear();
+	appConnections.forget();
 });
 
 // =============================================================================
@@ -257,7 +334,7 @@ export const reviewedDocuments = new Map<string, ReadonlySet<string>>();
 /** The examples of the map's Recommend tab. */
 export const recommendExamples = new Map<string, IRecommendExamples>();
 
-connectionCaches.register('saved filters', () => savedFilters.clear());
-connectionCaches.register('saved views', () => savedViews.clear());
-connectionCaches.register('reviewed documents', () => reviewedDocuments.clear());
-connectionCaches.register('recommend examples', () => recommendExamples.clear());
+connectionCaches.register('saved filters', () => savedFilters.clear(), (key) => savedFilters.delete(key));
+connectionCaches.register('saved views', () => savedViews.clear(), (key) => savedViews.delete(key));
+connectionCaches.register('reviewed documents', () => reviewedDocuments.clear(), (key) => reviewedDocuments.delete(key));
+connectionCaches.register('recommend examples', () => recommendExamples.clear(), (key) => recommendExamples.delete(key));

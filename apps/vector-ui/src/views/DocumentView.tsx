@@ -64,6 +64,15 @@ import { FOCUS_RING, styles } from '../styles';
 export interface DocumentViewProps extends ContractDocumentViewProps {
 	/** The tab is the one in front (editors stay mounted when hidden); nothing is scored while it is not. Default true. */
 	active?: boolean;
+	/**
+	 * The console's median chunks per document, when the mount knows it apart from the console (a dev-tool document
+	 * frame reads it from the console's summary). Undefined: read from the full app's console of the connection.
+	 */
+	consoleMedian?: number | null;
+	/** Told what the document's own row is once it was read (null: the store does not hold it). */
+	onDocument?: (row: IDocumentItem | null) => void;
+	/** Shown under the header (a dev-tool frame's inline confirmation). */
+	beforeBody?: React.ReactNode;
 }
 
 /** The chunks of the document, loaded a page at a time. */
@@ -83,6 +92,28 @@ const NO_ROWS: readonly IDocumentItem[] = [];
 const noRows = (): readonly IDocumentItem[] => NO_ROWS;
 const noSubscription = (): (() => void) => () => undefined;
 
+/** Said when the window does not allow the clipboard (a VS Code webview may not): the text is on screen to select. */
+export const COPY_BLOCKED_NOTE = 'Copying is not allowed in this window. Select the objectId and copy it with Ctrl+C (Cmd+C on a Mac).';
+
+/**
+ * Copy a text (silently, as before), and say so when the window does not allow it (a dev-tool mount may block the
+ * clipboard).
+ *
+ * @param text - The text.
+ * @param announce - Speaks through the polite live region.
+ */
+export function copyText(text: string, announce: (message: string) => void): void {
+	const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+	if (!clipboard) {
+		announce(COPY_BLOCKED_NOTE);
+		return;
+	}
+	clipboard.writeText(text).then(
+		() => undefined,
+		() => announce(COPY_BLOCKED_NOTE)
+	);
+}
+
 /** The heat strip's answer for one query: the scores, or why there are none. */
 type HeatState = { query: string; chunks: number; scores: IHeatScore[] } | { query: string; chunks: number; error: IFailureText };
 
@@ -92,7 +123,7 @@ type HeatState = { query: string; chunks: number; scores: IHeatScore[] } | { que
  * @param props - The frozen DocumentViewProps.
  * @returns The view.
  */
-export function DocumentView({ model, channels, selection, actions, objectId, path, chunkId, active = true }: DocumentViewProps): React.ReactElement {
+export function DocumentView({ model, channels, selection, actions, objectId, path, chunkId, active = true, consoleMedian, onDocument, beforeBody }: DocumentViewProps): React.ReactElement {
 	const caller: IVectorCaller | null = channels.tools ?? channels.chat ?? channels.ingest;
 	const embedCaller: IVectorCaller | null = channels.tools ?? channels.chat;
 	const store = model.nodes.store;
@@ -107,10 +138,13 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 	const [heat, setHeat] = useState<HeatState | null>(null);
 	const [probe, setProbe] = useState<IHealthProbe>({ status: 'idle' });
 	const run = useRef(0);
-	// The console's loaded documents (when its connection is open), for the median chunks "oversize" compares with.
-	const consoleEntry = existingEntry(model.connectionKey);
+	// The console's loaded documents (when its connection is open), for the median chunks "oversize" compares with; a
+	// mount that knows the median apart from the console passes it in.
+	const consoleEntry = consoleMedian === undefined ? existingEntry(model.connectionKey) : undefined;
 	const consoleState = useSyncExternalStore(consoleEntry ? consoleEntry.controller.subscribe : noSubscription, consoleEntry ? () => consoleEntry.controller.getState().directory.rows : noRows, consoleEntry ? () => consoleEntry.controller.getState().directory.rows : noRows);
-	const median = medianChunks(consoleState);
+	const median = consoleMedian !== undefined ? consoleMedian : medianChunks(consoleState);
+	const told = useRef(onDocument);
+	told.current = onDocument;
 
 	const load = useCallback(
 		async (afterChunk: number) => {
@@ -140,7 +174,9 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 		let live = true;
 		fetchDocument(caller, store, objectId).then(
 			(row) => {
-				if (live) setInfo(row);
+				if (!live) return;
+				setInfo(row);
+				told.current?.(row);
 			},
 			(error) => {
 				if (live) setInfoError(failureText(error));
@@ -219,6 +255,7 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 					</>
 				}
 			/>
+			{beforeBody}
 			<div style={styles.content}>
 				{caller === null && <Banner variant="warning">No source of this pipeline is running, so the document cannot be read.</Banner>}
 				{infoError && <Banner variant="error">{infoError.headline}</Banner>}
@@ -226,7 +263,7 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 					<dt style={{ fontWeight: 600 }}>objectId</dt>
 					<dd style={{ margin: 0, display: 'flex', gap: 8, alignItems: 'center' }}>
 						<code style={{ overflowWrap: 'anywhere' }}>{objectId}</code>
-						<Button mini variant="ghost" onClick={() => void navigator.clipboard?.writeText(objectId)}>
+						<Button mini variant="ghost" onClick={() => copyText(objectId, actions.announce)}>
 							Copy
 						</Button>
 					</dd>

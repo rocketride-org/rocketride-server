@@ -169,6 +169,40 @@ module it is paired with is in the checkout (the enrichment's suites, so a merge
 that brings a feature without its suite fails instead of passing with the suite
 never run).
 
+## As a dev tool
+
+The app also declares `devToolFrame` and `devToolSidebar`
+(`apps/vector-ui/src/AppDescriptor.ts`; manifest category `devTool`), so VS
+Code and rocket-ui mount it beside the pipeline editor on the dev-tool
+contract the [Explorer library](explorer-library.md#running-the-library-in-a-dev-tool-controller)
+describes. The sidebar mount is the controller: it owns the endpoint store,
+the bus-backed client, identity and discovery, and serves `vector.*` ops by
+connection key. Every document is a frame with no client: `console:<key>`
+(the map is a tab inside it) and `document:<key>:<encoded objectId>`; the
+generic frame is one empty state, and any other docKey is "not found".
+
+- **Calls.** A frame's views call the same functions as the full app, through a
+  remote role channel that maps each tool to its op. The controller resolves
+  the node, waits exactly the session wait the protocol names
+  (`apps/vector-ui/src/devtool/protocol.ts` `waitFor`), and answers the tool's
+  raw value, so failure envelopes keep their codes for the frame's own
+  readers. Results and arguments are capped before anything is sent.
+- **Writes.** The frame's console controller confirms (inline) and sends one
+  batch per op; the controller re-checks the console model's `writes` on its
+  own record and probe for every write, sends it once, and publishes
+  `docVersions`, which every other frame of the connection reads as "refetch".
+- **Across frames.** The console's query text and median travel as hints
+  (`queries`, `consoleSummary`); a chunk focus and keys for the map travel as
+  relay ops whose requests are retained with a nonce and taken once.
+- **Degraded.** Chat and uploads need `client.chat` and file uploads, which the
+  dev-tool hosts do not broker for store tools: both say so in place. Exports
+  fall back to a copy, the layout worker to PCA. Nothing is persisted in a
+  dev-tool mount.
+
+Where the code lives and what the tests pin is in
+`apps/vector-ui/docs/development.md` ("Mounts and the env seam"); the suites
+are `apps/vector-ui/tests/devtool.*.test.ts`.
+
 ## The write switch
 
 - **One source for the default.** `VECTOR_ALLOW_WRITES_DEFAULT` (false) lives

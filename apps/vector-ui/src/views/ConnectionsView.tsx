@@ -30,12 +30,10 @@
 // =============================================================================
 
 import React, { useEffect, useState, useSyncExternalStore } from 'react';
-import { Banner, Button, ConnectionCard, ContentHeader, DetailPanel, EmptyState, Section, StatusBadge, useShellConnection } from 'shell';
+import { Banner, Button, ConnectionCard, ContentHeader, DetailPanel, EmptyState, Section, StatusBadge } from 'shell';
 import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
-import { existingEntry } from '../adapters/connections';
-import { vectorEndpoints } from '../adapters/explorer';
-import { useVectorEndpoints } from '../adapters/react';
 import ConnectionDrawerDetails from '../components/ConnectionDrawerDetails';
+import { useEndpointsState, useVectorEnv } from '../envContext';
 import { getDocs } from '../docs';
 import { consoleUri } from '../vector/addresses';
 import { TONE_EDGE } from '../vector/colors';
@@ -72,14 +70,14 @@ const CardMeta: React.FC<{ view: IVectorCardView }> = ({ view }) => (
  * @returns The view.
  */
 export const ConnectionsView: React.FC = () => {
-	const { client, isConnected } = useShellConnection();
-	const { status, endpoints, probes, error } = useVectorEndpoints();
+	const env = useVectorEnv();
+	const { status, endpoints, probes, error } = useEndpointsState();
 	const [drawerKey, setDrawerKey] = useState<string | null>(null);
 
 	// First discovery as soon as the shell connection is live.
 	useEffect(() => {
-		if (client && isConnected && status === 'idle') void vectorEndpoints.refresh(client);
-	}, [client, isConnected, status]);
+		if (env.ready && status === 'idle') void env.refresh({ quiet: true });
+	}, [env, status]);
 
 	// A sign-out or a change of identity resets the store: the drawer closes with the connections it forgot.
 	useEffect(() => {
@@ -88,7 +86,7 @@ export const ConnectionsView: React.FC = () => {
 	}, [drawerKey, endpoints]);
 
 	const refresh = (): void => {
-		if (client) void vectorEndpoints.refresh(client);
+		if (env.ready) void env.refresh();
 	};
 	const drawerEndpoint = endpoints.find((e) => e.key === drawerKey) ?? null;
 	const landing = landingView(status, endpoints, error);
@@ -100,7 +98,7 @@ export const ConnectionsView: React.FC = () => {
 				title="Connections"
 				subtitle="Vector stores reachable through your running pipelines. A connection is a store node a pipeline's Tools source controls; a pipeline without one is listed read-only. Elasticsearch and OpenSearch stores are not listed."
 				actions={
-					<Button variant="ghost" onClick={refresh} disabled={!client || status === 'loading'}>
+					<Button variant="ghost" onClick={refresh} disabled={!env.ready || status === 'loading'}>
 						{status === 'loading' ? 'Refreshing…' : 'Refresh'}
 					</Button>
 				}
@@ -118,7 +116,7 @@ export const ConnectionsView: React.FC = () => {
 						description={messageText}
 						action={
 							landing.message.kind === 'loading' ? undefined : (
-								<Button variant="primary" onClick={refresh} disabled={!client}>
+								<Button variant="primary" onClick={refresh} disabled={!env.ready}>
 									Refresh
 								</Button>
 							)
@@ -148,10 +146,10 @@ export const ConnectionsView: React.FC = () => {
 				key={drawerKey ?? ''}
 				endpoint={drawerEndpoint}
 				probe={drawerEndpoint ? probes[drawerEndpoint.key] : undefined}
-				onTest={(endpoint) => (client ? vectorEndpoints.probe(client, endpoint.key) : Promise.resolve(null))}
+				onTest={(endpoint) => env.probe(endpoint.key)}
 				onOpen={(endpoint) => {
 					setDrawerKey(null);
-					openConsole(endpoint);
+					env.openConsole(endpoint);
 				}}
 				onClose={() => setDrawerKey(null)}
 			/>
@@ -182,7 +180,7 @@ const ConnectionDrawer: React.FC<IConnectionDrawerProps> = ({ endpoint, probe, o
 	// Keyed on the card it shows, so a result never carries over to another connection.
 	const [tested, setTested] = useState<ITestResult | null>(null);
 	// The connection's last stats, once its console has them: they fill what the dialect read at discovery lacks.
-	const entry = endpoint ? existingEntry(endpoint.key) : undefined;
+	const entry = useVectorEnv().existingConnection(endpoint?.key ?? '');
 	const stats = useSyncExternalStore(
 		entry?.controller.subscribe ?? NO_SUBSCRIBE,
 		() => entry?.controller.getState().stats.view ?? null,

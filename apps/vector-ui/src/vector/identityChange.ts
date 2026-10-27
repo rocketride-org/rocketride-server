@@ -52,13 +52,19 @@ export interface IConnectionDocs {
 /** A set of named per-connection caches, cleared together. */
 export interface ICacheRegistry {
 	/**
-	 * Register a cache's clear function under a name (registering the same name again replaces it).
+	 * Register a cache's clear function under a name (registering the same name again replaces it), and, for a cache
+	 * kept per connection, how to forget one connection.
 	 *
 	 * @returns The unregister function.
 	 */
-	register(name: string, clear: () => void): () => void;
+	register(name: string, clear: () => void, forget?: (connectionKey: string) => void): () => void;
 	/** Clear every registered cache; one that throws does not stop the others. Returns the names cleared. */
 	clearAll(): string[];
+	/**
+	 * Forget one connection in every cache that keeps it apart (a dev-tool frame's reset: the realm may run other
+	 * mounts). A cache that can only clear everything is left alone. Returns the names that forgot it.
+	 */
+	forgetKey(connectionKey: string): string[];
 	/** The registered names, in registration order. */
 	names(): string[];
 }
@@ -70,12 +76,29 @@ export interface ICacheRegistry {
  */
 export function createCacheRegistry(): ICacheRegistry {
 	const caches = new Map<string, () => void>();
+	const forgets = new Map<string, (connectionKey: string) => void>();
 	return {
-		register(name: string, clear: () => void): () => void {
+		register(name: string, clear: () => void, forget?: (connectionKey: string) => void): () => void {
 			caches.set(name, clear);
+			if (forget) forgets.set(name, forget);
+			else forgets.delete(name);
 			return () => {
-				if (caches.get(name) === clear) caches.delete(name);
+				if (caches.get(name) !== clear) return;
+				caches.delete(name);
+				forgets.delete(name);
 			};
+		},
+		forgetKey(connectionKey: string): string[] {
+			const forgot: string[] = [];
+			for (const [name, forget] of [...forgets]) {
+				try {
+					forget(connectionKey);
+					forgot.push(name);
+				} catch {
+					// A cache that cannot forget must not keep the others.
+				}
+			}
+			return forgot;
 		},
 		clearAll(): string[] {
 			const cleared: string[] = [];

@@ -724,7 +724,26 @@ export interface IExportRunOptions {
 }
 
 /** What an export did. */
-export type ExportOutcome = { status: 'done'; fileName: string; rows: number | null; bytes: number } | { status: 'blocked'; fileName: string; message: string } | { status: 'cancelled'; message: string } | { status: 'unavailable'; message: string } | { status: 'failed'; message: string };
+export type ExportOutcome =
+	| { status: 'done'; fileName: string; rows: number | null; bytes: number }
+	// A refused download of rows keeps the written text, so it can be copied instead (a dev-tool mount's webview may block downloads).
+	| { status: 'blocked'; fileName: string; message: string; copy?: { format: 'csv' | 'json'; text: string } }
+	| { status: 'cancelled'; message: string }
+	| { status: 'unavailable'; message: string }
+	| { status: 'failed'; message: string };
+
+/**
+ * What the menu offers instead of a refused download of rows.
+ *
+ * @param format - csv or json.
+ * @returns The button's words.
+ */
+export function copyLabel(format: 'csv' | 'json'): string {
+	return `Copy as ${format.toUpperCase()}`;
+}
+
+/** Said when the clipboard is blocked too: the export is shown to select. */
+export const COPY_BLOCKED_SENTENCE = 'Copying is not allowed in this window either. The export is below: select it and copy it with Ctrl+C (Cmd+C on a Mac).';
 
 /** A zero timeout. */
 function breathe(): Promise<void> {
@@ -775,6 +794,7 @@ export async function runExport(item: IExportItem, format: ExportFormat, options
 	const name = fileName(options.collection, item.kind, format, at);
 	let blob: Blob;
 	let rowCount: number | null = null;
+	let written: { format: 'csv' | 'json'; text: string } | null = null;
 	try {
 		if (format === 'png') {
 			const picture = item.png ? await item.png() : null;
@@ -787,6 +807,7 @@ export async function runExport(item: IExportItem, format: ExportFormat, options
 			rowCount = rows.rows.length;
 			const text = await writeRows(rows, format, { kind: item.kind, collection: options.collection, exportedAt: at }, options);
 			if (text === null) return { status: 'cancelled', message: CANCELLED_SENTENCE };
+			written = { format, text };
 			blob = format === 'csv' ? new Blob(['﻿', text], { type: 'text/csv;charset=utf-8' }) : new Blob([text], { type: 'application/json;charset=utf-8' });
 		}
 	} catch (error) {
@@ -799,7 +820,7 @@ export async function runExport(item: IExportItem, format: ExportFormat, options
 	} catch {
 		handed = false;
 	}
-	if (!handed) return { status: 'blocked', fileName: name, message: BLOCKED_SENTENCE };
+	if (!handed) return { status: 'blocked', fileName: name, message: BLOCKED_SENTENCE, ...(written === null ? {} : { copy: written }) };
 	return { status: 'done', fileName: name, rows: rowCount, bytes: blob.size };
 }
 

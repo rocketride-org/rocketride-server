@@ -379,6 +379,9 @@ export function SelectionTab(props: SelectionTabProps): React.ReactElement {
 	);
 }
 
+/** Said when the window does not allow the clipboard (a VS Code webview may not). */
+export const COPY_KEYS_BLOCKED = 'Copying is not allowed in this window, so the keys were not copied.';
+
 // =============================================================================
 // VIEW
 // =============================================================================
@@ -1874,7 +1877,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 									onRemove={(ids) => actions.requestRemove(ids)}
 									onCopy={(keys) => {
 										const text = JSON.stringify(keys);
-										if (typeof navigator !== 'undefined' && navigator.clipboard) void navigator.clipboard.writeText(text).then(() => actions.announce(`Copied ${num(keys.length)} keys.`));
+										if (typeof navigator !== 'undefined' && navigator.clipboard) navigator.clipboard.writeText(text).then(() => actions.announce(`Copied ${num(keys.length)} keys.`), () => actions.announce(COPY_KEYS_BLOCKED));
+										else actions.announce(COPY_KEYS_BLOCKED);
 									}}
 									onIsolate={(keys) => isolate(resolveKeys(keys, keyIdx, []).points)}
 									isolated={isolation}

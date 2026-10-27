@@ -243,6 +243,71 @@ says otherwise.
 - Anyone with the data permission on the Ingest task can add documents, with or
   without this app.
 
+## As a dev tool
+
+Vector Explorer also runs as a dev tool beside the pipeline editor, in VS Code
+and in the RocketRide workspace. There the sidebar lists your vector store
+connections, and each console and each stored document opens as its own
+document; the map stays a tab of the console. A connection's row shows its
+state as a dot and, when it is not running or cannot be written, in words
+(**Checking**, **Stopped**, **Unreachable**, **No access**, **Needs upgrade**,
+**Read-only**); its tooltip names the store, the collection and the pipeline,
+the sources that run, and why the console cannot be opened. Click a row, or
+press Enter or Space on it, to open its console. **Refresh** is on the
+Connections header, and a line under the rows says when discovery is running,
+found nothing, or failed. What a card's drawer shows in the app (the state,
+the sources and flags, **Test connection**, the store's details) is on the
+console itself: **Details** on its header shows or hides it. The tool's own
+page, with no document, only says to open a connection from the sidebar.
+Everything that reaches the engine goes through the sidebar, which holds the
+tool's one connection; the documents hold none.
+
+What is different there:
+
+- **No chat and no uploads.** The editors do not pass a chat question or a
+  file upload on for a dev tool, so the chat area and the upload area say so
+  and stay in place. Search, which needs no LLM, still works from the chat
+  area. Open Vector Explorer as an app to ask questions or add documents.
+- **Removals are confirmed in the document.** Move to trash, Delete
+  permanently and Empty trash ask in a panel inside the console or the
+  document that asked, with the same words and typed confirmations as the
+  app's dialogs; Cancel has the focus and Escape cancels.
+- **Documents follow each other.** A removal in one document refreshes the
+  console of its connection (its listing, figures and map) and every open
+  document of that connection; a document that was deleted says it is no
+  longer stored, and one moved to the trash says so. A document scores its
+  heat strip against the question its console shows, and compares its chunk
+  count with the console's listing once the console has listed.
+- **Show on map** in a document opens (or fronts) the console and highlights at
+  most 200 chunks there (the node's `project_keys_max`); it says when it showed
+  fewer than you asked for.
+- **Exports and the clipboard.** Where the editor refuses a download, the export
+  menu offers **Copy as CSV** or **Copy as JSON**; where it refuses the
+  clipboard too, it shows the export to select and copy by hand. A refused copy
+  of an objectId or of the map's keys is said, and the text is on screen.
+- **Layouts.** The map's neighbour-graph and t-SNE layouts run in a worker,
+  which a VS Code panel cannot start (it loads the app from the engine, another
+  origin). The map then stays on PCA and says why.
+- **Error codes in VS Code.** The sidebar does not receive the server's error
+  codes there, so a call interrupted by a pipeline restart is reported as
+  failed instead of being retried once, and a stopped pipeline and an
+  unreachable one read the same. **Refresh** always checks every connection
+  again.
+- **Sizes.** An answer too large to send to a document (a sample above 1.5 MB,
+  a listing page above 512 KB, a chunk page above 768 KB) is refused with a
+  reason; draw a smaller sample.
+- **Hidden documents.** A console in a VS Code panel that is not visible stops
+  paging and refreshing its figures until it is shown again; in the RocketRide
+  workspace a console in a background tab keeps them.
+- **Account changes.** When the signed-in user, organization or team changes,
+  every console and document closes, as in the app.
+- **Before it can open,** a document says what it waits for: the server
+  connection (**Not connected**, or **Waiting for the server connection…**),
+  the sidebar (**Starting Vector Explorer…**, then **Open the Vector Explorer
+  sidebar to connect** if it does not come), sign-in (**Waiting for sign-in**),
+  or its connection (**Looking for this connection**, **This connection is not
+  listed**).
+
 ## Privacy
 
 - The app never saves a task token, a connection string or a document's
@@ -258,6 +323,10 @@ says otherwise.
 - Saved filters and saved views live in memory for the session, per
   connection, and are gone when you sign out; nothing is written to the
   browser's storage.
+- As a dev tool nothing is stored at all: no history and no preference, on the
+  server or in the editor. Saved filters and views last until the document's
+  panel closes in VS Code, and until the page reloads in the RocketRide
+  workspace.
 
 ## What it does that the stores' own consoles do not
 
@@ -305,3 +374,5 @@ store node's graph, and the legend says which one computed it.
   browser, not by the store.
 - **Saved filters and views last for the session.** They are not kept across
   sign-ins or browsers.
+- **As a dev tool, no chat and no uploads** (see [As a dev tool](#as-a-dev-tool)).
+  Open the app for both.

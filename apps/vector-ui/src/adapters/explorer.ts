@@ -262,4 +262,4 @@ export function neighbourRequests(connectionKey: string): IRequestChannel<INeigh
 	return channel;
 }
 
-connectionCaches.register('neighbour queues', () => neighbourChannels.clear());
+connectionCaches.register('neighbour queues', () => neighbourChannels.clear(), (key) => neighbourChannels.delete(key));

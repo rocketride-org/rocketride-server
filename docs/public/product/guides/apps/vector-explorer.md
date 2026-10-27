@@ -577,6 +577,30 @@ kind of source recorded under the same path keeps its own id and is listed
 beside the new one. Uploads from the app are tagged as coming from Vector
 Explorer.
 
+## As a dev tool
+
+Vector Explorer also runs as a dev tool beside the pipeline editor, in VS Code
+and in the RocketRide workspace. The sidebar lists your vector store
+connections, each with its state; click one to open its console, and open a
+stored document from the console as its own document. **Details** on the
+console's header shows what a connection's drawer shows in the app, with
+**Test connection**.
+
+What is different there:
+
+- **No chat and no uploads.** The editors do not pass a chat question or a file
+  upload on for dev tools, so both areas say so. Search still works from the
+  chat area. Open Vector Explorer as an app to ask questions or add documents.
+- **Removals are confirmed inside the document** that asked, with the same
+  words and typed confirmations.
+- **Where downloads are refused**, the export menu offers to copy the CSV or
+  JSON instead; where the clipboard is refused too, it shows the text to copy by
+  hand.
+- **The map stays on PCA** where the editor cannot start the layout worker,
+  and says why.
+- **Nothing is stored**: no history and no preference; saved filters and views
+  last until the document (VS Code) or the page (RocketRide workspace) closes.
+
 ## Privacy
 
 - **Only through your nodes.** The app sees what the pipeline's nodes return

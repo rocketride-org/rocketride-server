@@ -56,7 +56,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ExportMenuProps, IExportItem } from '../contract/types';
 import { MAP_STYLES } from '../map/styles';
-import { outcomeSentence, progressSentence, runExport } from '../vector/export';
+import { COPY_BLOCKED_SENTENCE, copyLabel, outcomeSentence, progressSentence, runExport } from '../vector/export';
 import type { ExportFormat, ExportOutcome } from '../vector/export';
 
 export type { ExportMenuProps };
@@ -181,6 +181,10 @@ export interface ExportMenuPanelProps {
 	menuRef?: React.Ref<HTMLDivElement>;
 	/** Which edge of the button the panel hangs from (default 'right'). */
 	side?: 'left' | 'right';
+	/** A refused download of rows: copy it instead (its button's words, and the copy). */
+	fallback?: { label: string; onCopy(): void } | null;
+	/** The clipboard was refused too: the export to select by hand. */
+	copyBlocked?: string | null;
 }
 
 /**
@@ -219,6 +223,7 @@ const S = {
 	format: { ...MAP_STYLES.button, height: 24, padding: '0 8px', fontSize: 11.5 } as React.CSSProperties,
 	status: { ...MAP_STYLES.note, margin: '6px 2px 0' } as React.CSSProperties,
 	hidden: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' } as React.CSSProperties,
+	copied: { width: '100%', boxSizing: 'border-box', height: 120, marginTop: 4, resize: 'vertical', fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 11, color: 'var(--rr-text-primary)', background: 'var(--rr-bg-input)', border: '1px solid var(--rr-border-input)', borderRadius: 4 } as React.CSSProperties,
 };
 
 /**
@@ -298,6 +303,19 @@ export function ExportMenuPanel(props: ExportMenuPanelProps): React.ReactElement
 					{props.status ?? ''}
 				</p>
 			)}
+			{props.fallback ? (
+				<p style={S.status}>
+					<button type="button" style={S.format} onClick={props.fallback.onCopy} data-export-copy="">
+						{props.fallback.label}
+					</button>
+				</p>
+			) : null}
+			{props.copyBlocked != null ? (
+				<div data-export-copy-blocked="">
+					<p style={S.status}>{COPY_BLOCKED_SENTENCE}</p>
+					<textarea readOnly value={props.copyBlocked} aria-label="The export, to select and copy" style={S.copied} />
+				</div>
+			) : null}
 		</div>
 	);
 }
@@ -316,6 +334,9 @@ export function ExportMenu(props: ExportMenuProps): React.ReactElement {
 	const [busy, setBusy] = useState(false);
 	const [status, setStatus] = useState<string | null>(null);
 	const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+	// A refused download of rows (a dev-tool mount's webview may refuse them): its text, to copy instead.
+	const [fallback, setFallback] = useState<{ format: 'csv' | 'json'; text: string; fileName: string } | null>(null);
+	const [copyBlocked, setCopyBlocked] = useState<string | null>(null);
 	const abort = useRef<{ aborted: boolean } | null>(null);
 	const root = useRef<HTMLSpanElement>(null);
 	const button = useRef<HTMLButtonElement>(null);
@@ -354,6 +375,25 @@ export function ExportMenu(props: ExportMenuProps): React.ReactElement {
 		};
 	}, []);
 
+	// Copy a refused download instead; when the clipboard is refused too, show the text to select by hand.
+	const copyExport = (copy: { format: 'csv' | 'json'; text: string; fileName: string }): void => {
+		const refused = (): void => {
+			if (!live.current) return;
+			setFallback(null);
+			setCopyBlocked(copy.text);
+		};
+		const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+		if (!clipboard) {
+			refused();
+			return;
+		}
+		clipboard.writeText(copy.text).then(() => {
+			if (!live.current) return;
+			setFallback(null);
+			setStatus(`Copied ${copy.fileName} as ${copy.format.toUpperCase()}.`);
+		}, refused);
+	};
+
 	const close = useCallback((refocus: boolean): void => {
 		setOpen(false);
 		if (refocus) button.current?.focus();
@@ -366,12 +406,15 @@ export function ExportMenu(props: ExportMenuProps): React.ReactElement {
 			setBusy(true);
 			setStatus(null);
 			setProgress(null);
+			setFallback(null);
+			setCopyBlocked(null);
 			void runExport(item, format, { collection: props.collection, download: browserDownload, signal, onProgress: (done, total) => live.current && setProgress({ done, total }) }).then((outcome) => {
 				if (abort.current === signal) abort.current = null;
 				if (!live.current) return;
 				setBusy(false);
 				setProgress(null);
 				setStatus(outcomeSentence(outcome));
+				if (outcome.status === 'blocked' && outcome.copy) setFallback({ ...outcome.copy, fileName: outcome.fileName });
 				if (outcome.status === 'done') props.onExported?.(outcome.fileName);
 			});
 		},
@@ -420,6 +463,8 @@ export function ExportMenu(props: ExportMenuProps): React.ReactElement {
 					onCancel={() => {
 						if (abort.current) abort.current.aborted = true;
 					}}
+					fallback={fallback ? { label: copyLabel(fallback.format), onCopy: () => copyExport(fallback) } : null}
+					copyBlocked={copyBlocked}
 				/>
 			) : null}
 			{!open && status ? (

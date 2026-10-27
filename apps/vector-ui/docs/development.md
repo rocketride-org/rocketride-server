@@ -27,12 +27,97 @@ limits) is `docs/development/nodes/vector-tool-contract.md`.
   React bindings.
 - The views (`src/views`) and components render what the pure modules decide.
   The console is the first view of every connection; the Map is a tab of the
-  same document; a stored document opens in its own tab. Removal is confirmed
-  by one dialog host at the app root.
+  same document; a stored document opens in its own tab. In the full app
+  removal is confirmed by one dialog host at the app root; a dev-tool document
+  confirms inline (below).
 - The app imports the shared library as `shared/*` (tsconfig paths), so its
   manifest declares `"include": ["apps/shared"]`.
 - The pipeline templates in `templates/` are not part of the build: users get
   them from the repository (the README links them).
+
+## Mounts and the env seam
+
+- Three mounts: the full app (`app:`, `VectorApp.tsx`) and, as a dev tool,
+  the sidebar CONTROLLER (`VectorDevToolSidebar.tsx`) and each document FRAME
+  (`VectorDevTool.tsx`). Views never call `useShellConnection` or the
+  adapter's store: they read the VectorEnv through `envContext.tsx`
+  (`useVectorEnv`, `useConnection`, `useLiveEndpoint`, `useEndpointsState`).
+  The env type and its pure helpers are `src/env.ts`. The full app and the
+  controller use the LOCAL env (`src/localEnv.ts`): the full app over the
+  store singleton and its SDK client (the client it uses for chat and uploads,
+  which the bus does not carry), the controller over its own store and the
+  realm's bus-backed client. A frame uses the REMOTE env built by
+  `src/devtool/frame.ts`, which holds no client.
+- Connection objects (console controller, selection, tab, scope) live in a
+  per-mount registry (`createConnectionRegistry` in `adapters/connections.ts`)
+  and call their store through a link read at call time. The full app's is the
+  module-level `appConnections` (`connectionEntry`, cleared with the
+  connection caches); each frame has its own, so a confirmation shows only in
+  the document that asked. A frame's reset clears its own registry. Only an
+  account change also forgets the frame's own connection in the realm's
+  caches (`connectionCaches.forgetKey`; a cache kept per connection registers
+  how to forget one, and the chat and uploads, which a frame never holds,
+  register none). The host connection dropping, or the identity becoming
+  unknown, forgets nothing there: in rocket-ui the realm may also run the full
+  app, which keeps a connection's saved views and filters, chat and uploads
+  across a reconnect.
+- `src/devtool/protocol.ts` is the contract: the `vector.*` ops (each answers
+  a Reply and carries a deadline; a tool op is `{ key, input }` with the
+  tool's own input, a write also names the calling frame as `origin`), the
+  fixed state topics (`endpoints`, `identity`, `docVersions`, `queries`,
+  `consoleSummary`, `focusRequests`, `mapRequests`, each budgeted and cut by the
+  protocol) and the events (`active`, `queryChanged`, `consoleSummary` from
+  frames; `focusChunk`, `showOnMap` to frames). `waitFor` names each op's
+  session wait (a sample its budget, capped at 300 s, plus 30 s; search and
+  embed 60 s; everything else the statement deadline plus 10 s, or 40 s); the
+  controller asks the session for exactly that, the bus adds 6 s and the frame
+  5 s more (`frameTimeoutFor`).
+- `src/devtool/controller.ts` serves it. It resolves the key to its endpoint
+  and the node (the embedding node for `embed`), answers the raw tool value
+  (failure envelopes included: the frame unwraps them with their code), caps
+  results (`RESULT_TOO_LARGE`) and arguments before any call, re-checks the
+  write gate on its own record and probe for every write, sends a write once
+  and bumps `docVersions` for every write that ran or timed out. Each version
+  carries the controller mount's `epoch` (a remounted controller counts again
+  from 1). Over its budget the snapshot keeps every connection's stamp first
+  and gives the list of documents that left (`gone`) back to the newest writes
+  that fit (`versionsSnapshot`): a stamp that left and came back would read as
+  a new write. A bump names the asking frame as `origin` only when the write
+  answered (that frame relists itself); a timeout, or an answer still over the
+  cap after it was cut to the fields a frame reads, names no frame, so the one
+  that asked relists too. A call that arrives before its discovery listed and
+  probed the connection (a call held across a remount) waits for it, then runs
+  with what is left of its deadline less a second, and is not sent when less
+  than a second is left. `src/devtool/wiring.ts`
+  is the only module that imports the shell's protocol factories. Both build on
+  `shared/explorer/devtool` (see `docs/development/apps/explorer-library.md`).
+- `src/devtool/frame.ts` holds the frame's side as plain functions:
+  `remoteChannel` (each tool to its op; generation tickets checked locally; a
+  call no controller took says to open the sidebar), `bindConsole` (the
+  console's query and median out as hints, sent again to a controller that
+  remounted without them; another frame's write in, which relists, refreshes,
+  probes, redraws the map and forgets what left; map requests in, taken once),
+  `bindDocument` (the console's query in for the heat strip, focus requests in,
+  every write in), and `documentActions` (Show on map goes to the console).
+  Both bindings follow a connection's versions by (epoch, version), and a map
+  that no longer holds the connection forgets what was seen. The
+  React mount only routes the docKey and calls these in effects. What a
+  document shows before it can open is `connectionDocState` in
+  `src/devtool/frameText.ts` (F13 order).
+- No window-wide overlay in a frame: confirmations are
+  `components/InlineRemoveConfirm.tsx` (the same `vector/confirm.ts` content as
+  the dialogs, through `confirmationFor`) and the connection details
+  `components/ConnectionDetailsPanel.tsx`; neither has an overlay or a
+  document or window listener. The sidebar list is
+  `components/DevToolConnectionList.tsx` (wording in `vector/connections.ts`:
+  `connectionRow`, `rowStatusText`, `sidebarListLine`); the full app keeps
+  `VectorSidebar` and `ConnectionsView`.
+- Degraded in a dev-tool mount (R11): the REMOTE env serves the console model
+  with chat and uploads off and their notes (`devToolConsoleModel`); the console
+  still renders the chat panel there, so Search stays reachable. A refused
+  download keeps its text (`ExportOutcome.copy`) for **Copy as**; refused
+  copies are announced. One live region serves each realm
+  (`components/RealmLiveRegion.tsx`), the full app's included.
 
 ## Tests
 
@@ -53,6 +138,12 @@ limits) is `docs/development/nodes/vector-tool-contract.md`.
 - A test whose subject lives outside the app (the browser lanes and their
   privacy checker in `scripts/acceptance/vector-explorer/browser`) asserts
   that the file is there instead of skipping: a missing lane fails the suite.
+- The dev-tool suites (`tests/devtool.*.test.ts`) run the controller and
+  frames over the shell's REAL bus peer, op lane and channel through the base's
+  harness (`shared/explorer/devtool/testing`, JSON wire on), with a fake engine
+  behind the base's fake VS Code and rocket-ui realms (`tests/support/`). They
+  dispose what they mounted after each test, so a failing test leaves no timer
+  behind.
 - `./builder vector-ui:e2e-live` runs the browser lanes in
   `scripts/acceptance/vector-explorer/browser` against `ENGINE_URL`. It is
   opt-in: not part of `vector-ui:test`, `builder test` or CI.

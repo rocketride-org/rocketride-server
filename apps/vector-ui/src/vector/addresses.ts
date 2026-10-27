@@ -93,3 +93,14 @@ export function isDocumentUri(uri: string): boolean {
 export function endpointKeyFromUri(uri: string): string | null {
 	return endpointKeyFromAnyUri(uri, DOC_SCHEMES);
 }
+
+/**
+ * A stored document's title (its tab, its dev-tool document): its path's last segment, else the start of its objectId.
+ *
+ * @param objectId - The document.
+ * @param path - Its path, when known.
+ * @returns The title.
+ */
+export function documentTitle(objectId: string, path: string | null): string {
+	return path ? (path.split(/[\\/]/).pop() ?? path) : objectId.slice(0, 8);
+}

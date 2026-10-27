@@ -34,14 +34,11 @@
 // =============================================================================
 
 import React, { useSyncExternalStore } from 'react';
-import { existingEntry } from '../adapters/connections';
+import type { IProbeResult } from 'shared/explorer';
 import type { IConnectionEntry } from '../adapters/connections';
-import { useActiveConnection } from '../adapters/react';
-import { emptyTrashConfirmation, multiRemoveConfirmation, multiTrashConfirmation, removeConfirmation, trashConfirmation } from '../vector/confirm';
+import { useEndpointsState, useEnvActiveConnection, useVectorEnv } from '../envContext';
+import { emptyTrashConfirmation, multiRemoveConfirmation, multiTrashConfirmation, removeConfirmation, removeContextFor, trashConfirmation } from '../vector/confirm';
 import type { IRemoveContext } from '../vector/confirm';
-import { readDialect } from '../vector/results';
-import { providerTitle } from '../vector/support';
-import { vectorEndpoints } from '../adapters/explorer';
 import MultiRemoveConfirmDialog from './MultiRemoveConfirmDialog';
 import RemoveConfirmDialog from './RemoveConfirmDialog';
 
@@ -52,13 +49,11 @@ const IDLE = { subscribe: () => () => undefined, getState: () => null } as const
  * Where a connection's documents are removed from, as the dialogs say it.
  *
  * @param entry - The connection.
+ * @param probe - Its probe, when one exists.
  * @returns The context.
  */
-export function removeContext(entry: IConnectionEntry): IRemoveContext {
-	const probe = vectorEndpoints.getState().probes[entry.key];
-	const dialect = probe?.ok ? readDialect(probe.info) : null;
-	const endpoint = entry.ctx.endpoint;
-	return { storeName: endpoint.nodeName || providerTitle(endpoint.provider), collection: dialect?.collection ?? null, backend: dialect?.backend ?? providerTitle(endpoint.provider), provider: endpoint.provider };
+export function removeContext(entry: IConnectionEntry, probe: IProbeResult | undefined): IRemoveContext {
+	return removeContextFor(entry.ctx.endpoint, probe);
 }
 
 /**
@@ -67,8 +62,10 @@ export function removeContext(entry: IConnectionEntry): IRemoveContext {
  * @returns The dialog of the active connection's pending confirmation, or nothing.
  */
 export function RemoveDialogHost(): React.ReactElement | null {
-	const key = useActiveConnection();
-	const entry = key ? existingEntry(key) : undefined;
+	const env = useVectorEnv();
+	const { probes } = useEndpointsState();
+	const key = useEnvActiveConnection();
+	const entry = key ? env.existingConnection(key) : undefined;
 	const source = entry?.controller ?? IDLE;
 	const pending = useSyncExternalStore(
 		source.subscribe,
@@ -76,7 +73,7 @@ export function RemoveDialogHost(): React.ReactElement | null {
 		() => null
 	);
 	if (!entry || pending === null) return null;
-	const ctx = removeContext(entry);
+	const ctx = removeContext(entry, probes[entry.key]);
 	const confirm = (): void => void entry.controller.confirmRemove();
 	const cancel = (): void => entry.controller.cancelRemove();
 	const dialogKey = `${pending.action}:${pending.targets.length}:${pending.targets[0]?.objectId ?? ''}`;

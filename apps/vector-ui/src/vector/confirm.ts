@@ -42,9 +42,12 @@
 // still live.
 // =============================================================================
 
+import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import { MULTI_REMOVE_LIST_MAX } from './budgets';
+import { readDialect } from './results';
 import type { IRemoveView } from './results';
 import { formatCount } from './stats';
+import { providerTitle } from './support';
 import { failureText } from './wording';
 import type { IFailureText } from './wording';
 
@@ -371,4 +374,39 @@ export function removalSummary(outcome: IRemovalOutcome, targets: ReadonlyArray<
 	const removedRows = outcome.error && outcome.removedChunks === null ? '' : rows;
 	const what = `${words.done} ${formatCount(outcome.removed.length)} ${outcome.removed.length === 1 ? 'document' : 'documents'}${words.tail}${removedRows}.`;
 	return `${action === 'empty' ? `Emptied the trash: ${what}` : what}${gone}${kept}${stopped}`;
+}
+
+// =============================================================================
+// WHICH CONFIRMATION A PENDING WRITE SHOWS
+// =============================================================================
+
+/**
+ * Where a connection's documents are removed from, as the confirmations say it.
+ *
+ * @param endpoint - The connection's live endpoint.
+ * @param probe - Its probe, when one exists.
+ * @returns The context.
+ */
+export function removeContextFor(endpoint: Pick<IExplorerEndpoint, 'nodeName' | 'provider'>, probe: IProbeResult | undefined): IRemoveContext {
+	const dialect = probe?.ok ? readDialect(probe.info) : null;
+	return { storeName: endpoint.nodeName || providerTitle(endpoint.provider), collection: dialect?.collection ?? null, backend: dialect?.backend ?? providerTitle(endpoint.provider), provider: endpoint.provider };
+}
+
+/** A pending write's confirmation: one document's, or several documents'. */
+export type ConfirmationView = { kind: 'single'; content: IRemoveConfirmation } | { kind: 'multi'; content: IMultiRemoveConfirmation };
+
+/**
+ * The confirmation a pending write shows (Move to trash, Delete permanently or Empty trash; one document or several).
+ *
+ * @param pending - The console controller's pending write.
+ * @param pending.action - What Confirm sends.
+ * @param pending.kind - One document or several.
+ * @param pending.targets - The documents.
+ * @param ctx - Where they are removed from.
+ * @returns The confirmation.
+ */
+export function confirmationFor(pending: { action: 'trash' | 'delete' | 'empty'; kind: 'single' | 'multi'; targets: readonly IRemoveTarget[] }, ctx: IRemoveContext): ConfirmationView {
+	if (pending.action === 'empty') return { kind: 'multi', content: emptyTrashConfirmation(pending.targets, ctx) };
+	if (pending.kind === 'single') return { kind: 'single', content: pending.action === 'trash' ? trashConfirmation(pending.targets[0], ctx) : removeConfirmation(pending.targets[0], ctx) };
+	return { kind: 'multi', content: pending.action === 'trash' ? multiTrashConfirmation(pending.targets, ctx) : multiRemoveConfirmation(pending.targets, ctx) };
 }

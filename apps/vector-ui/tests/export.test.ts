@@ -451,7 +451,8 @@ test('an export hands one named file to the browser; its rows match the on-scree
 test('a refused download says the browser blocked it; a disabled item or an empty picture exports nothing', async () => {
 	const item: IExportItem = { id: 'x', label: 'X', kind: 'points', disabled: null, rows: () => ({ columns: ['a'], rows: [{ a: 1 }] }) };
 	const refused = await runExport(item, 'csv', { collection: 'c', now: () => AT, download: capture(false).download });
-	assert.deepEqual(refused, { status: 'blocked', fileName: 'vector-explorer_c_points_20261015-0905.csv', message: BLOCKED_SENTENCE });
+	// The written text is kept, so the menu can offer to copy it instead (a dev-tool mount's webview may refuse downloads).
+	assert.deepEqual(refused, { status: 'blocked', fileName: 'vector-explorer_c_points_20261015-0905.csv', message: BLOCKED_SENTENCE, copy: { format: 'csv', text: 'a\r\n1\r\n' } });
 	assert.equal(BLOCKED_SENTENCE, 'Your browser blocked the download.');
 	const thrown = await runExport(item, 'csv', {
 		collection: 'c',

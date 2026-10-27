@@ -53,20 +53,18 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Availability, IDocumentsFilter, IScopeState } from '../contract/types';
-import { Banner, Button, ContentHeader, EmptyState, ToggleGroup, useShellConnection } from 'shell';
+import { Banner, Button, ContentHeader, EmptyState, ToggleGroup } from 'shell';
 import type { IExplorerEndpoint } from 'shared/explorer';
 import { makeConsoleActions } from '../adapters/consoleActions';
 import { savedFilters } from '../adapters/connections';
 import type { ConsoleTab } from '../adapters/connections';
 import { VECTOR_PROVIDERS, announcer } from '../adapters/explorer';
-import { useConnection, useLiveEndpoint, useVectorEndpoints } from '../adapters/react';
+import { useConnection, useEndpointsState, useLiveEndpoint, useVectorEnv } from '../envContext';
 import ChatPanel from '../components/ChatPanel';
 import ChunkList from '../components/ChunkList';
 import DocumentDirectory from '../components/DocumentDirectory';
 import IngestPanel from '../components/IngestPanel';
 import StatsStrip from '../components/StatsStrip';
-import { getDocs } from '../docs';
-import { documentUri } from '../vector/addresses';
 import { alsoReaches, consoleScope, mapScopeFor, writesDuringRemoval } from '../vector/consoleModel';
 import { CONDITION_KINDS, checkScope, conditionAvailability, listingFilter, resolveScope, scopeStripText, scopeView, scopeWith } from '../vector/filters';
 import type { ConditionKind } from '../vector/filters';
@@ -77,7 +75,6 @@ import { consoleColumns } from '../vector/layout';
 import { providerTitle } from '../vector/support';
 import { BUSY } from '../vector/wording';
 import { styles } from '../styles';
-import { openConsole } from './ConnectionsView';
 import MapView from './MapView';
 
 /** The console's two tabs. */
@@ -92,19 +89,10 @@ export interface IConsoleViewProps {
 	opened: IExplorerEndpoint;
 	/** False while another document is the active tab. */
 	active: boolean;
-}
-
-/**
- * Open one stored document's tab.
- *
- * @param endpoint - The connection.
- * @param objectId - The document.
- * @param path - Its path, when known.
- * @param chunkId - A chunk to scroll to.
- */
-export function openDocumentTab(endpoint: IExplorerEndpoint, objectId: string, path: string | null, chunkId?: number): void {
-	const name = path ? (path.split(/[\\/]/).pop() ?? path) : objectId.slice(0, 8);
-	getDocs()?.openStaticDocument(documentUri(endpoint.key, objectId), name, { endpoint, objectId, path, ...(chunkId === undefined ? {} : { chunkId }) });
+	/** More header actions after Refresh (a dev-tool frame's Details). */
+	headerActions?: React.ReactNode;
+	/** Shown under the header (a dev-tool frame's inline confirmation and connection details). */
+	beforeBody?: React.ReactNode;
 }
 
 /**
@@ -113,12 +101,12 @@ export function openDocumentTab(endpoint: IExplorerEndpoint, objectId: string, p
  * @param props - {@link IConsoleViewProps}.
  * @returns The view.
  */
-export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => {
-	const { client } = useShellConnection();
+export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active, headerActions, beforeBody }) => {
+	const env = useVectorEnv();
 	const endpoint = useLiveEndpoint(opened);
-	const { probes } = useVectorEndpoints();
+	const { probes } = useEndpointsState();
 	const probe = probes[endpoint.key];
-	const { entry, console: state, selection, tab, chatScope, model, channels } = useConnection(endpoint, client);
+	const { entry, console: state, selection, tab, chatScope, model, channels } = useConnection(endpoint);
 	const card = vectorCardView(endpoint, probe);
 	const dialect = model.connection.dialect;
 
@@ -220,13 +208,13 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 			makeConsoleActions(entry, {
 				openDocument: (objectId, chunkId) => {
 					const row = entry.controller.getState().directory.rows.find((r) => r.objectId === objectId);
-					openDocumentTab(entry.ctx.endpoint, objectId, row?.path ?? null, chunkId);
+					env.openDocument(entry.ctx.endpoint, objectId, row?.path ?? null, chunkId);
 				},
 				// Focuses this console's tab: nothing changes while it is in front; in a split it activates its group.
-				showConsole: () => openConsole(entry.ctx.endpoint),
+				showConsole: () => env.openConsole(entry.ctx.endpoint),
 				announce: (text) => announcer.announce(text),
 			}),
-		[entry]
+		[entry, env]
 	);
 
 	// Stack the panels below the layout's breakpoint.
@@ -258,6 +246,7 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 						<Button variant="ghost" disabled={!card.openable || !entry.opened} onClick={() => entry.controller.refresh()}>
 							{refreshing ? BUSY.refreshing : 'Refresh'}
 						</Button>
+						{headerActions}
 					</>
 				}
 			/>
@@ -266,6 +255,7 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 					<Banner variant={endpoint.state === 'ready' ? 'warning' : 'info'}>{card.blocked}</Banner>
 				</div>
 			)}
+			{beforeBody}
 			<StatsStrip stats={state.stats} dialect={dialect} readOnly={model.readOnly} documents={state.directory.rows} scopeLine={scopeLine} sample={selection.connectionKey === entry.key ? selection.sampleModel : null} loading={state.directory.status === 'loading'} scopeFilter={scope?.filter ?? null} onScope={scopeFromChart} health={health} />
 			{(state.removal.status === 'running' || state.removal.message) && (
 				<div role="status" style={{ ...styles.small, padding: '6px 24px' }}>
@@ -287,7 +277,8 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 								{wiring.chatNotice}
 							</p>
 						)}
-						{model.chat.enabled ? <ChatPanel model={surfaceModel} channels={channels} selection={entry.selection} actions={actions} scope={chatDocuments} onClearScope={clearChatScope} /> : <EmptyState title="Chat" description={model.chat.reason ?? undefined} />}
+						{/* Where chat cannot work at all (a dev-tool mount), the panel still offers Search, which needs no LLM, under the reason. */}
+						{model.chat.enabled || env.degraded !== null ? <ChatPanel model={surfaceModel} channels={channels} selection={entry.selection} actions={actions} scope={chatDocuments} onClearScope={clearChatScope} /> : <EmptyState title="Chat" description={model.chat.reason ?? undefined} />}
 					</div>
 				</div>
 			</div>

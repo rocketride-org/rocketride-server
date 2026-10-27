@@ -32,6 +32,8 @@ import React from 'react';
 import type { AppDescriptor } from 'shell';
 import { RocketRideMark } from 'shell';
 import VectorApp from './VectorApp';
+import { VectorDevTool } from './VectorDevTool';
+import { VectorDevToolSidebar } from './VectorDevToolSidebar';
 
 const VECTOR_APP: AppDescriptor = {
 	id: 'rocketride.vector',
@@ -47,6 +49,10 @@ const VECTOR_APP: AppDescriptor = {
 	app: VectorApp,
 	// The console is the reason to open the app, not the navigation: the rail opens collapsed.
 	sidebar: 'collapsed',
+	// As a dev tool (VS Code, rocket-ui): each document is a frame with no client; the sidebar is the controller that
+	// holds the tool's one engine connection (devtool/controller.ts, devtool/frame.ts).
+	devToolFrame: VectorDevTool,
+	devToolSidebar: VectorDevToolSidebar,
 };
 
 export default VECTOR_APP;

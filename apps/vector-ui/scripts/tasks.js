@@ -101,6 +101,12 @@ const ALWAYS_REQUIRED_TESTS = [
 	'console.mounts.test.tsx',
 	'chunkText.test.tsx',
 	'ingest.summary.test.ts',
+	// The dev-tool mounts (devToolFrame / devToolSidebar): the env seam, the protocol, the controller and frames.
+	'devtool.env.test.ts',
+	'devtool.protocol.test.ts',
+	'devtool.controller.test.ts',
+	'devtool.frame.test.ts',
+	'devtool.mounts.test.ts',
 ];
 
 // The enrichment's suites, each with the module it tests: a suite is required

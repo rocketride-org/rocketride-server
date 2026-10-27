@@ -215,6 +215,97 @@ export function vectorCardView(endpoint: IExplorerEndpoint, probe: IProbeResult 
 }
 
 // =============================================================================
+// DEV-TOOL SIDEBAR ROWS (the parity spec S3-S6: Rod's list, one row per store)
+// =============================================================================
+
+/** What one dev-tool sidebar row shows. */
+export interface IConnectionRow {
+	/** The row's name (the store node's). */
+	label: string;
+	/** The muted suffix after the name, or null for a running connection that can be written. */
+	status: string | null;
+	/** The dot's colour family (the card badge's variant). */
+	variant: IBadge['variant'];
+	/** The row's `title`: the address, the state, the sources and why it cannot be opened. */
+	tooltip: string;
+	/** The row's accessible name (name and state). */
+	ariaLabel: string;
+}
+
+/**
+ * The state a sidebar row says after its name: the card's badge label for a connection that is not running (or needs
+ * an upgrade), "Read-only" for a running read-only one, nothing for a running one.
+ *
+ * @param endpoint - The endpoint (token-free).
+ * @param probe - Its probe result, when one exists.
+ * @returns The suffix text, or null.
+ */
+export function rowStatusText(endpoint: IExplorerEndpoint, probe: IProbeResult | undefined): string | null {
+	const badge = vectorCardView(endpoint, probe).badge;
+	if (badge.variant !== 'success') return badge.label;
+	return endpoint.readOnly === true ? 'Read-only' : null;
+}
+
+/**
+ * Everything a dev-tool sidebar row shows for one endpoint.
+ *
+ * @param endpoint - The endpoint (token-free).
+ * @param probe - Its probe result, when one exists.
+ * @returns The row.
+ */
+export function connectionRow(endpoint: IExplorerEndpoint, probe: IProbeResult | undefined): IConnectionRow {
+	const view = vectorCardView(endpoint, probe);
+	const status = rowStatusText(endpoint, probe);
+	const lines = [`${view.title} \u2014 ${view.address} \u00b7 ${view.badge.label}`, `Sources: ${view.roleLine}`];
+	if (view.blocked) lines.push(view.blocked);
+	return {
+		label: view.title,
+		status,
+		variant: view.badge.variant,
+		tooltip: lines.join('\n'),
+		ariaLabel: status !== null && status !== view.badge.label ? `${view.title}, ${view.badge.label}, ${status}` : `${view.title}, ${view.badge.label}`,
+	};
+}
+
+/** The line under the dev-tool sidebar's rows. */
+export interface IListLine {
+	/** Muted text, or the error colour. */
+	tone: 'muted' | 'error';
+	text: string;
+	/** What the line cannot say in its room (its tooltip), or null. */
+	detail: string | null;
+}
+
+/**
+ * The line under the dev-tool sidebar's rows, from the same empty states as the full app's landing. Nothing while
+ * discovery has not started (it waits for the activation and a known identity, so "discovering" would not be true),
+ * and nothing while the rows say it all.
+ *
+ * @param status - The discovery lifecycle.
+ * @param endpoints - The discovered endpoints.
+ * @param error - The discovery failure text, when it failed.
+ * @returns The line, or null.
+ */
+export function sidebarListLine(status: 'idle' | 'loading' | 'ready' | 'error', endpoints: readonly IExplorerEndpoint[], error: string | null): IListLine | null {
+	if (status === 'idle') return null;
+	if (status === 'error' && endpoints.length > 0) return { tone: 'error', text: `Refresh failed: ${error ?? 'the list of running pipelines could not be read'}. Showing what was found before.`, detail: null };
+	const empty = emptyState(status, endpoints, error);
+	if (!empty) return null;
+	switch (empty.kind) {
+		case 'loading':
+			return { tone: 'muted', text: `${empty.title}\u2026`, detail: null };
+		case 'error':
+			return { tone: 'error', text: `${empty.title}: ${empty.description}`, detail: empty.unknown };
+		case 'none-running':
+			return { tone: 'muted', text: empty.title, detail: [empty.description, empty.unknown].filter(Boolean).join(' ') };
+		case 'unreachable':
+			return { tone: 'muted', text: empty.title, detail: empty.description };
+		default:
+			return null;
+	}
+}
+
+// =============================================================================
 // DRAWER
 // =============================================================================
 

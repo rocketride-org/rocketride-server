@@ -33,6 +33,7 @@
 
 import { Documents, NOOP_VFS } from 'shell';
 import type { IExplorerEndpoint } from 'shared/explorer';
+import { documentTitle, documentUri } from './vector/addresses';
 
 /** The app's Documents instance. Set by VectorApp on mount. */
 let _docs: Documents | null = null;
@@ -73,4 +74,16 @@ export interface IDocumentDocPayload {
 	objectId: string;
 	path: string | null;
 	chunkId?: number;
+}
+
+/**
+ * Open one stored document's tab (the full app's documents).
+ *
+ * @param endpoint - The connection.
+ * @param objectId - The document.
+ * @param path - Its path, when known.
+ * @param chunkId - A chunk to scroll to.
+ */
+export function openDocumentTab(endpoint: IExplorerEndpoint, objectId: string, path: string | null, chunkId?: number): void {
+	getDocs()?.openStaticDocument(documentUri(endpoint.key, objectId), documentTitle(objectId, path), { endpoint, objectId, path, ...(chunkId === undefined ? {} : { chunkId }) });
 }
