@@ -188,9 +188,11 @@ describe('DevSession', () => {
 		installs[2]();
 		await waitFor(() => states.filter((s) => s === 'starting').length === 3);
 
-		const proc = (session as unknown as { proc: { exitCode: number | null; killed: boolean } }).proc;
+		// the last spawned server is the one stop() must end; a signal-killed
+		// process (Linux/macOS tree kill) has exitCode null and signalCode set
+		const proc = (session as unknown as { proc: { exitCode: number | null; signalCode: string | null } }).proc;
 		await session.stop();
-		expect(proc.exitCode !== null || proc.killed).toBe(true);
+		await waitFor(() => proc.exitCode !== null || proc.signalCode !== null);
 	});
 
 	it('keeps restarting after successive atomic saves of package.json', async () => {
