@@ -51,6 +51,11 @@
  * Every write names the version it was computed from, so the view refuses
  * it when anything else changed the file in between.
  *
+ * Each change also goes into the run's Undo record (./undo.ts): the content
+ * at the path's first touch, and what the change left. A delete or a rename
+ * reads the content first, for it; a delete of a path with nothing staged
+ * reads the server's copy afresh.
+ *
  * Reads and searches show a `«secret:<id>»` marker in place of each secret
  * value, and writes and edits put the value back (./secretMarkers.ts). The
  * server's guides under .rocketride/ show as served.
@@ -68,6 +73,7 @@ import { AgentTool, AgentToolkit, RefusedError, type ToolStep } from '../tools';
 import { replaceSpans, type ChoiceFn } from './common';
 import { FileTracker } from './fileTracker';
 import { SecretMarkers } from './secretMarkers';
+import { UndoRecord } from './undo';
 
 // =============================================================================
 // CONSTANTS — caps and hygiene
@@ -237,6 +243,9 @@ export class FilesystemTools extends AgentToolkit {
 	/** Each file this run read or changed: its version and hash then, and what the run did to it. */
 	readonly tracker = new FileTracker();
 
+	/** What this run's changes replaced and left, so Undo can put the files back. */
+	readonly undo: UndoRecord;
+
 	/** The secret values this run's reads hid, each with its marker; writes put them back. */
 	private readonly secrets = new SecretMarkers();
 
@@ -265,6 +274,7 @@ export class FilesystemTools extends AgentToolkit {
 	constructor(vfs: IWorkspaceFileSystem, instructions = '', afterSave?: (path: string) => Promise<string>, unsaved?: UnsavedOptions) {
 		super();
 		this.vfs = vfs;
+		this.undo = new UndoRecord(vfs);
 		this.afterSave = afterSave;
 		this.unsaved = unsaved;
 		// step: mechanics first, then the host's map of its own tree
@@ -392,12 +402,13 @@ export class FilesystemTools extends AgentToolkit {
 	 * @param path - Canonical path.
 	 * @param content - The new content.
 	 * @param expect - The version the content was computed from.
+	 * @param before - What the file held at that version (null for no file), for Undo.
 	 * @param op - Tool name for refusal messages.
 	 * @param existed - Whether the file existed before the write.
 	 * @param saved - True when the user's save landed earlier in this call (see refusal()).
 	 * @returns The version of this write.
 	 */
-	private async writeAt(path: string, content: string, expect: number, op: string, existed = true, saved = false): Promise<number> {
+	private async writeAt(path: string, content: string, expect: number, before: string | null, op: string, existed = true, saved = false): Promise<number> {
 		this.refuseDirty([path], op, saved);
 		const writing = this.vfs.write(path, content, AGENT_ORIGIN, expect);
 		const mine = this.vfs.version(path);
@@ -409,10 +420,29 @@ export class FilesystemTools extends AgentToolkit {
 				this.vfs.invalidate(path);
 				throw refusal(`${op} refused: ${path} changed on the server since you read it (another tab or a teammate). Read it again, then redo the change from the current content.`, saved);
 			}
+			// step: the write may have landed in part, so Undo cannot say what to put back
+			this.undo.failed(path, before, expect);
 			throw err;
 		}
 		this.tracker.wrote(path, mine, await sha256Hex(content), existed);
+		await this.undo.landed(path, before, expect, { version: mine, content });
 		return mine;
+	}
+
+	/**
+	 * A file's content as Undo keeps it. Undo puts back text only, so a file
+	 * that is not text makes the turn one that cannot be undone. The store
+	 * decodes every file as UTF-8, so such a file still reads as a string,
+	 * with U+FFFD where its bytes were not UTF-8, or with NUL characters.
+	 * Written back, that string would not be the file's bytes.
+	 *
+	 * @param content - What a read returned.
+	 * @returns The text, or null when it is not text.
+	 */
+	private undoText(content: unknown): string | null {
+		if (typeof content === 'string' && !content.includes('\0') && !content.includes('\uFFFD')) return content;
+		this.undo.unavailable('this turn changed a file that is not text');
+		return null;
 	}
 
 	/**
@@ -553,12 +583,14 @@ export class FilesystemTools extends AgentToolkit {
 		const seen = existed ? this.requireRead(path, 'write_file') : undefined;
 		// step: after "Save mine first" the user's text has landed, so a stale write is no refusal (see refusal())
 		const saved = (await this.settleUnsaved([path], 'write_file', `change ${path}`))?.choice === 'save';
+		let before: string | null = null;
 		if (seen) {
 			const current = await this.vfs.readVersioned(path);
 			if (seen.readVersion !== current.version || seen.readHash !== (await sha256Hex(String(current.content)))) throw this.staleRefusal('write_file', path, seen.readVersion, current.version, saved);
 			expect = current.version;
+			before = this.undoText(current.content);
 		}
-		await this.writeAt(path, content, expect, 'write_file', existed, saved);
+		await this.writeAt(path, content, expect, before, 'write_file', existed, saved);
 		return `Wrote ${size} bytes to ${path}.${await this.noteAfterSave(path)}`;
 	}
 
@@ -613,7 +645,7 @@ export class FilesystemTools extends AgentToolkit {
 			throw new Error(`edit_file result exceeds the ${WRITE_MAX_BYTES}-byte file cap.`);
 		}
 		const writer = this.vfs.lastWriter(path);
-		await this.writeAt(path, updated, version, 'edit_file', true, saved);
+		await this.writeAt(path, updated, version, this.undoText(content), 'edit_file', true, saved);
 		const note = stale ? ` ${this.appliedNote(choice, writer, path)}` : '';
 		return `Replaced ${occurrences} occurrence(s) in ${path}.${note}${await this.noteAfterSave(path)}`;
 	}
@@ -733,10 +765,47 @@ export class FilesystemTools extends AgentToolkit {
 		const settled = await this.settleUnsaved([oldPath, newPath], 'rename', `move ${oldPath} to ${newPath}`);
 		// step: the user's text landed, so what the agent decided to move has changed: it reads again and asks
 		if (settled?.choice === 'save') throw new Error(`rename refused: the user saved their unsaved changes in ${listPaths(settled.dirty)} first, so the files changed since you planned the move. Read ${listPaths(settled.dirty)} again, then ask the user whether to move ${oldPath} to ${newPath}.`);
+		const ends = await this.undoEnds(oldPath, newPath);
 		this.refuseDirty([oldPath, newPath], 'rename');
-		await this.vfs.rename(oldPath, newPath, AGENT_ORIGIN);
+		const from = { old: this.vfs.version(oldPath), new: this.vfs.version(newPath) };
+		const moving = this.vfs.rename(oldPath, newPath, AGENT_ORIGIN);
+		const left = { old: this.vfs.version(oldPath), new: this.vfs.version(newPath) };
+		try {
+			await moving;
+		} catch (err) {
+			// step: a rename the view counted may have moved the file in part
+			if (ends && left.old !== from.old) {
+				this.undo.failed(oldPath, ends.old.content, from.old);
+				this.undo.failed(newPath, ends.new.content, from.new);
+			}
+			throw err;
+		}
 		this.tracker.renamed(oldPath, newPath, (p) => this.vfs.version(p));
+		if (ends) {
+			await this.undo.landed(oldPath, ends.old.content, from.old, { version: left.old, content: null }, ends.old.version);
+			await this.undo.landed(newPath, ends.new.content, from.new, { version: left.new, content: ends.old.content }, ends.new.version);
+		}
 		return `Renamed ${oldPath} to ${newPath}.`;
+	}
+
+	/**
+	 * What both ends of a rename hold before it, for Undo. A folder's move
+	 * cannot be undone, and neither can a move onto a folder.
+	 *
+	 * @param oldPath - Canonical source.
+	 * @param newPath - Canonical target.
+	 * @returns Each end's content (null for no file) and the version it was read at; null when Undo cannot cover the rename.
+	 */
+	private async undoEnds(oldPath: string, newPath: string): Promise<{ old: { content: string; version: number }; new: { content: string | null; version: number } } | null> {
+		const [fromType, toType] = [await this.entryType(oldPath), await this.entryType(newPath)];
+		if (fromType === 'dir' || toType === 'dir') this.undo.unavailable('this turn moved a folder');
+		if (fromType !== 'file' || toType === 'dir') return null;
+		const source = await this.vfs.readVersioned(oldPath, { stored: true });
+		const target = toType === 'file' ? await this.vfs.readVersioned(newPath, { stored: true }) : { content: null, version: this.vfs.version(newPath) };
+		const content = this.undoText(source.content);
+		const replaced = target.content === null ? null : this.undoText(target.content);
+		if (content === null || (target.content !== null && replaced === null)) return null;
+		return { old: { content, version: source.version }, new: { content: replaced, version: target.version } };
 	}
 
 	/**
@@ -778,21 +847,59 @@ export class FilesystemTools extends AgentToolkit {
 		if (!this.canSettle([path])) this.refuseDirty([path], 'delete_file');
 		return {
 			act: { name: 'delete_file', params: [path, type] },
-			run: async () => {
-				// step: the user may have edited it while the card waited, so the unsaved changes are settled now
-				const settled = await this.settleUnsaved([path], 'delete_file', `delete ${path}`);
-				// step: the user's text landed, so what the agent decided to delete has changed: it reads again and asks
-				if (settled?.choice === 'save') throw new Error(`delete_file refused: the user saved their unsaved changes in ${listPaths(settled.dirty)} first, so ${path} changed since you decided to delete it. Read it again, then ask the user whether to delete it.`);
-				this.refuseDirty([path], 'delete_file');
-				// step: the files a folder holds go with it, read or not, so each is a deletion of its own
-				const held = type === 'dir' ? this.vfs.listEntries().flatMap((entry) => (entry.type === 'file' && entry.path.startsWith(`${path}/`) ? [entry.path] : [])) : [];
-				const deleting = this.vfs.delete(path, AGENT_ORIGIN);
-				const mine = this.vfs.version(path);
-				await deleting;
-				this.tracker.deleted(path, mine, held);
-				return `Deleted ${path}.`;
-			},
+			run: () => this.undo.track(this.deleteNow(path, type)),
 		};
+	}
+
+	/**
+	 * delete_file's run, once its act is let through.
+	 *
+	 * @param path - Canonical path.
+	 * @param type - What the prepare found there.
+	 * @returns A confirmation line.
+	 */
+	private async deleteNow(path: string, type: 'file' | 'dir'): Promise<string> {
+		// step: the user may have edited it while the card waited, so the unsaved changes are settled now
+		const settled = await this.settleUnsaved([path], 'delete_file', `delete ${path}`);
+		// step: the user's text landed, so what the agent decided to delete has changed: it reads again and asks
+		if (settled?.choice === 'save') throw new Error(`delete_file refused: the user saved their unsaved changes in ${listPaths(settled.dirty)} first, so ${path} changed since you decided to delete it. Read it again, then ask the user whether to delete it.`);
+		// step: what Undo needs: the file's content before the delete; a folder's delete cannot be undone
+		if (type === 'dir') this.undo.unavailable('this turn deleted a folder');
+		const read = type === 'file' ? await this.deletedContent(path) : null;
+		const before = read ? this.undoText(read.content) : null;
+		this.refuseDirty([path], 'delete_file');
+		// step: the files a folder holds go with it, read or not, so each is a deletion of its own
+		const held = type === 'dir' ? this.vfs.listEntries().flatMap((entry) => (entry.type === 'file' && entry.path.startsWith(`${path}/`) ? [entry.path] : [])) : [];
+		const from = this.vfs.version(path);
+		const deleting = this.vfs.delete(path, AGENT_ORIGIN);
+		const mine = this.vfs.version(path);
+		try {
+			await deleting;
+		} catch (err) {
+			// step: a delete the view counted may have landed
+			if (read && before !== null && mine !== from) this.undo.failed(path, before, from);
+			throw err;
+		}
+		this.tracker.deleted(path, mine, held);
+		if (read && before !== null) await this.undo.landed(path, before, from, { version: mine, content: null }, read.version);
+		return `Deleted ${path}.`;
+	}
+
+	/**
+	 * What a delete of a file replaces, for Undo. A path whose change is
+	 * still staged replaces its staged content. Any other path is read afresh
+	 * from the server, as the cached copy may be older than a teammate's
+	 * change, which a delete in auto mode removes too. The Undo record
+	 * compares it with what the agent's last change of the path left.
+	 *
+	 * @param path - Canonical path of a file.
+	 * @returns The content and the version it was read at.
+	 */
+	private async deletedContent(path: string): Promise<{ content: unknown; version: number }> {
+		const staged = this.vfs.changedPaths?.().has(path) === true;
+		// step: drop the cached copy, so the read takes the server's
+		if (!staged) this.vfs.invalidate(path);
+		return this.vfs.readVersioned(path, { stored: true });
 	}
 
 	// ── Toolkit surface ──────────────────────────────────────────────────
@@ -881,7 +988,7 @@ export class FilesystemTools extends AgentToolkit {
 					required: ['path', 'oldString', 'newString'],
 					additionalProperties: false,
 				},
-				execute: (a) => this.editFile(a.path, String(a.oldString), String(a.newString), a.replaceAll === true),
+				execute: (a) => this.undo.track(this.editFile(a.path, String(a.oldString), String(a.newString), a.replaceAll === true)),
 			}),
 			new AgentTool({
 				name: 'write_file',
@@ -895,7 +1002,7 @@ export class FilesystemTools extends AgentToolkit {
 					required: ['path', 'content'],
 					additionalProperties: false,
 				},
-				execute: (a) => this.writeFile(a.path, String(a.content)),
+				execute: (a) => this.undo.track(this.writeFile(a.path, String(a.content))),
 			}),
 			new AgentTool({
 				name: 'rename',
@@ -909,7 +1016,7 @@ export class FilesystemTools extends AgentToolkit {
 					required: ['oldPath', 'newPath'],
 					additionalProperties: false,
 				},
-				execute: (a) => this.rename(a.oldPath, a.newPath),
+				execute: (a) => this.undo.track(this.rename(a.oldPath, a.newPath)),
 			}),
 			new AgentTool({
 				name: 'create_directory',

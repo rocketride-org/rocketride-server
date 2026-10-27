@@ -29,8 +29,8 @@
  * builds its AgentHost here and installs it right after the workspace is
  * created: the workspace view (whose read-only .rocketride/ holds the
  * guides), the New App scaffold, the deploy packer, the open apps' dev
- * sessions, the user's approval settings, the open editors, and the opener
- * a turn card's file links use.
+ * sessions, the user's approval settings and turn limits, the open editors,
+ * and the opener a turn card's file links use.
  *
  * The host is bound to one workspace. A team switch builds a new workspace
  * and a new host; a run that started before keeps this one, so its reads,
@@ -38,7 +38,7 @@
  */
 
 import type { RocketRideClient } from 'shell';
-import type { AgentDevSession, AgentHost, ApprovalControls, ApprovalPrefs, ApprovalSettings, Grant } from 'shared/modules/agent/host';
+import { DEFAULT_LIMITS, type AgentDevSession, type AgentHost, type AgentLimits, type ApprovalControls, type ApprovalPrefs, type ApprovalSettings, type Grant } from 'shared/modules/agent/host';
 import type { FrameOptions } from 'shared/tools/appdev';
 import { scaffoldApp } from '../surfaces/preview/session/appStore';
 import { findDevSession, type WebDevSession } from '../surfaces/preview/session/devSession';
@@ -156,15 +156,42 @@ class ApprovalFeed {
 /** The page's one feed: every host built here hands out the same one. */
 const approvalFeed = new ApprovalFeed();
 
+// =============================================================================
+// LIMITS — how far one agent turn goes before it pauses
+// =============================================================================
+
+/** The settings behind a turn's limits, as package.json declares them. */
+const LIMIT_KEYS: Readonly<Record<keyof AgentLimits, string>> = {
+	steps: 'rocketride.pipeBuilder.agentStepLimit',
+	costUsd: 'rocketride.pipeBuilder.agentCostLimit',
+};
+
 /**
- * Pushes the workspace settings into the agent's approvals. RocketApp calls
- * it on every settings change.
+ * One limit in the effective settings. A missing, negative or garbled value
+ * reads as the default, so the limit fails safe.
+ *
+ * @param settings - The effective workspace settings.
+ * @param key - Which limit.
+ * @returns The limit; 0 means off.
+ */
+function limitOf(settings: Readonly<Record<string, unknown>>, key: keyof AgentLimits): number {
+	const value = settings[LIMIT_KEYS[key]];
+	return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : DEFAULT_LIMITS[key];
+}
+
+/** The limits as the settings now stand; a turn reads them when it starts. */
+let limits: AgentLimits = DEFAULT_LIMITS;
+
+/**
+ * Pushes the workspace settings into the agent's approvals and limits.
+ * RocketApp calls it on every settings change.
  *
  * @param settings - The effective workspace settings.
  * @param write - Writes one setting (the workspace's updateSetting).
  */
 export function feedApprovalSettings(settings: Readonly<Record<string, unknown>>, write: SettingWriter): void {
 	approvalFeed.push(settings, write);
+	limits = { steps: Math.floor(limitOf(settings, 'steps')), costUsd: limitOf(settings, 'costUsd') };
 }
 
 // =============================================================================
@@ -213,6 +240,7 @@ export function createRocketAgentHost(client: RocketRideClient, ws: Workspace): 
 			return session ? agentDevSession(session) : null;
 		},
 		approvals: { run: approvalFeed.run, controls: approvalFeed.controls },
+		limits: { read: () => limits },
 		// step: the editors of this host's workspace, where its tabs register. While another team's
 		// workspace is current the lookup finds none, so an old run opens no dialog, and an answer
 		// given after a switch saves and discards nothing

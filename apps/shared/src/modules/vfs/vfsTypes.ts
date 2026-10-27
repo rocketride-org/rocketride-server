@@ -47,6 +47,7 @@
  */
 
 import type { IVirtualFileSystem, VfsEntry, VfsOverlay } from 'shell';
+import type { ChangeKind } from 'shell/src/workspace/workspaceFs';
 
 export type { IVirtualFileSystem, VfsEntry, VfsOverlay } from 'shell';
 
@@ -228,6 +229,24 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 	 * @param path - The path to look up.
 	 */
 	lastWriter(path: string): string | undefined;
+
+	// ── Staged changes (views that stage; others omit them) ─────────────
+
+	/**
+	 * How each staged path differs from what the server stores. A view that
+	 * writes through stages nothing, so its map is empty.
+	 *
+	 * @returns Map of canonical path to change kind.
+	 */
+	changedPaths?(): Map<string, ChangeKind>;
+
+	/**
+	 * Drops one path's staged changes, so the next read sees the server's
+	 * copy again. The server is not touched.
+	 *
+	 * @param path - The path to revert.
+	 */
+	discardPath?(path: string): Promise<void>;
 }
 
 /**
