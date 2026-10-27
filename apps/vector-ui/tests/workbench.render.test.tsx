@@ -73,7 +73,7 @@ const { DEFAULT_LIMITS, readDialect } = require('../src/vector/results') as type
 const { ConsoleView } = require('../src/views/ConsoleView') as typeof import('../src/views/ConsoleView');
 
 /** A LOCAL env over a fake pgvector engine, discovered and probed once. */
-async function discovered(over: Parameters<typeof vectorWorld>[0] = {}): Promise<{ env: IVectorEnv; endpoint: IExplorerEndpoint }> {
+async function discovered(over: Parameters<typeof vectorWorld>[0] = {}): Promise<{ env: IVectorEnv; endpoint: IExplorerEndpoint; clock: ReturnType<typeof manualClock> }> {
 	const world = vectorWorld(over);
 	const clock = manualClock();
 	const store = makeVectorEndpointStore({ clock, debounceMs: 0 });
@@ -82,7 +82,7 @@ async function discovered(over: Parameters<typeof vectorWorld>[0] = {}): Promise
 	await clock.advance(0);
 	await refreshing;
 	await clock.settle();
-	return { env, endpoint: env.endpoints.get().endpoints[0] };
+	return { env, endpoint: env.endpoints.get().endpoints[0], clock };
 }
 
 /**
@@ -189,6 +189,25 @@ test('R2-I1: every finished write line offers Write details with its whole sente
 		assert.ok(sentenceIn(line, state.message), 'Write details, with the whole sentence first');
 		entry.controller.dispose();
 	}
+});
+
+test("R2-B3: Write details lists what the store recorded after Move to trash and after Restore, as after a permanent delete", async () => {
+	const { env, endpoint, clock } = await discovered();
+	const probe = env.endpoints.get().probes[endpoint.key];
+	const entry = env.connection(endpoint, (probe?.ok ? readDialect(probe.info)?.limits : null) ?? DEFAULT_LIMITS);
+	const lineOf = (html: string): string => html.slice(html.indexOf('data-bottom-slot=""'));
+	const target = { objectId: '91ae15d4-3f6e-589f-bb81-72301f2ca1b6', path: 'C:/demo/a.md', chunks: 12 };
+	entry.controller.setWritesEnabled(true);
+	entry.controller.requestRemove([target]);
+	await entry.controller.confirmRemove();
+	assert.deepEqual(entry.controller.getState().removal.audit, [{ action: 'vector.soft_delete', rows: 12, caller: 'account' }], "the soft_delete answer's audit is kept");
+	assert.match(lineOf(render(env, endpoint, 'documents')), /<summary[^>]*>Write details<\/summary>[\s\S]*<li>vector\.soft_delete, 12 rows, called by account<\/li>/);
+	// The write checks the store again; Restore waits for that answer, as it would on the page.
+	await clock.settle();
+	await entry.controller.restore([target]);
+	assert.deepEqual(entry.controller.getState().removal.audit, [{ action: 'vector.restore', rows: 12, caller: 'account' }], "the restore answer's audit is kept");
+	assert.match(lineOf(render(env, endpoint, 'trash')), /<summary[^>]*>Write details<\/summary>[\s\S]*<li>vector\.restore, 12 rows, called by account<\/li>/);
+	entry.controller.dispose();
 });
 
 test("B10: a document tab's cancel or write (sharing this controller in the full app) is not the console's line", async () => {

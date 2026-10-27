@@ -490,6 +490,30 @@ export function healthCell(item: IDocumentItem, median: number | null): IHealthC
 	return { text: '', title: 'No problem found in what this store reports.', attention: false };
 }
 
+/** A staged document the review lists but the listing has not loaded. */
+const HEALTH_NOT_LOADED: IHealthCell = Object.freeze({ text: '—', title: 'Not among the loaded rows: its health is not known here.', attention: false });
+
+/**
+ * The grid's Health cells, each worked out once per row. They are kept by the row itself, never by its objectId: a
+ * relist (Refresh, a write, the first listing after one held over) brings new rows, so their cells are worked out
+ * again even when the median is unchanged.
+ *
+ * @param median - The loaded documents' median chunks (null while unknown).
+ * @param unloaded - The staged documents the review lists without a loaded row.
+ * @returns A row's Health cell.
+ */
+export function healthLookup(median: number | null, unloaded: ReadonlySet<string>): (item: IDocumentItem) => IHealthCell {
+	const cache = new WeakMap<IDocumentItem, IHealthCell>();
+	return (item) => {
+		let cell = cache.get(item);
+		if (!cell) {
+			cell = unloaded.has(item.objectId) ? HEALTH_NOT_LOADED : healthCell(item, median);
+			cache.set(item, cell);
+		}
+		return cell;
+	};
+}
+
 /**
  * The Documents tab's widths (px): the rail (with the gap after it), the drawer (with the gap before it), the grid's
  * least, and the chrome around the grid (the panel's borders and the body's padding).
