@@ -338,3 +338,8 @@ test("controls that go away when they act hand the focus to the grid's row, neve
 	assert.match(grid, /if \(event\.target !== grid\.current \|\| stop < 0\) return;/, 'the grid itself focused: a move key enters at the row in the tab order');
 	assert.match(read('ScopeBar.tsx'), /if \(event\.defaultPrevented \|\| event\.key !== 'Escape' \|\| \(menu === null && editor === null && !saving\)\) return;\s*event\.preventDefault\(\);/);
 });
+
+test('the Folders toggle asked for beside a drawer lets the layout decide again once the drawer closes, handing a focus on it to the grid', () => {
+	const documents = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'DocumentsTab.tsx'), 'utf8');
+	assert.match(documents, /if \(drawerWasShown\.current && !drawerShown && forceRailRef\.current\) \{\s*\/\/[^\n]*\n\s*refocus\.current = true;\s*setForceRail\(false\);/);
+});
