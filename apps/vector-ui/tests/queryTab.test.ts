@@ -35,7 +35,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { QUERY_MODES, QUERY_MODE_LABELS, escapeLayer, focusAfterClear, focusAfterRemove, needsFocusRescue, nextQueryTab, primaryTarget } from '../src/vector/queryFocus';
+import { QUERY_MODES, QUERY_MODE_LABELS, escapeLayer, focusAfterClear, focusAfterPin, focusAfterRemove, needsFocusRescue, nextQueryTab, primaryTarget } from '../src/vector/queryFocus';
 
 const SRC = path.join(__dirname, '..', 'src');
 
@@ -77,6 +77,13 @@ test('focus in History: a removed entry hands it to the next one, else the previ
 	assert.deepEqual(focusAfterRemove(['a', 'b', 'c'], 'c'), { entry: 'b' });
 	assert.equal(focusAfterRemove(['a'], 'a'), 'history-heading');
 	assert.equal(focusAfterRemove([], 'x'), 'history-heading');
+	// Pin keeps the focus on its button (the entry moves to the top and back); unpinned under "Pinned" the entry leaves
+	// the list, and the focus goes where a removed entry's would.
+	assert.deepEqual(focusAfterPin(false, ['a', 'b'], 'b', true), { entry: 'b', control: 'pin' });
+	assert.deepEqual(focusAfterPin(true, ['a', 'b'], 'b', false), { entry: 'b', control: 'pin' }, 'pinning under "Pinned" cannot happen, and keeps it');
+	assert.deepEqual(focusAfterPin(true, ['a', 'b', 'c'], 'b', true), { entry: 'c', control: 'load' });
+	assert.deepEqual(focusAfterPin(true, ['a', 'b'], 'b', true), { entry: 'a', control: 'load' });
+	assert.equal(focusAfterPin(true, ['a'], 'a', true), 'history-heading');
 	assert.equal(focusAfterClear(true), 'history-heading');
 	assert.equal(focusAfterClear(false), 'history-clear');
 });
@@ -94,8 +101,15 @@ test('wiring: a question handed in through the connection is taken once and clea
 	assert.match(tab, /onMode=\{\(next\) => entry\.queryMode\.set\(next\)\}/);
 	// "Open in Search" runs the search "Why these?" made, on Search.
 	assert.match(tab, /setSearch\(\{ nonce: nonce\(\), question: brought\.question, run: true, chat: brought \}\);\s*onMode\('search'\);/);
-	// A handoff present when Search mounts fills its form from the start (the tab mounts on first show).
-	assert.match(code(path.join('components', 'SearchPanel.tsx')), /const \[initial\] = useState\(\(\) => \(handoff !== null && !handoff\.clear \? applyHandoff\(/);
+	// A handoff is applied by the panel's effect, once per nonce, and only on the connection it was made for: a panel
+	// remounted for another connection (key={connectionKey}) replays nothing.
+	const search = code(path.join('components', 'SearchPanel.tsx'));
+	assert.doesNotMatch(search, /useState\(\(\) => \(handoff/, 'no form is taken from a handoff at mount');
+	assert.match(search, /if \(handoff\.connectionKey !== undefined && handoff\.connectionKey !== model\.connectionKey\) return;/);
+	assert.match(tab, /const setSearch = \(handoff: SearchHandoff\): void => setSearchHandoff\(\{ \.\.\.handoff, connectionKey: surfaceModel\.connectionKey \}\);/);
+	// A run asked for that cannot start says why.
+	assert.match(search, /if \(blocked !== null\) actions\.announce\(`Not run: \$\{blocked\}`\);/);
+	assert.match(code(path.join('components', 'ChatPanel.tsx')), /if \(handoff\.run && available\) actions\.announce\('Not asked: wait for the answer to the current question\. The question is in the box\.'\);/);
 });
 
 test('wiring: the focus never falls to <body> in the Query tab — a mode change that hides it, the tab row, and the chat\'s controls that go away', () => {
@@ -130,4 +144,12 @@ test('wiring: the Query tab\'s files insert no HTML, stop no propagation, listen
 	}
 	const focus = code(path.join('vector', 'queryFocus.ts'));
 	for (const line of focus.split('\n').filter((l) => /^import /.test(l))) assert.match(line, /^import type /, `queryFocus.ts is pure: ${line}`);
+});
+
+test('layout: narrow (a split, a VS Code group), History wraps under the modes and the tab\'s body scrolls to it; side by side it stretches to the row', () => {
+	const tab = code(path.join('components', 'QueryTab.tsx'));
+	assert.match(tab, /body: \{ flex: 1, minHeight: 0, display: 'flex', flexWrap: 'wrap', gap: 12, overflowY: 'auto' \}/);
+	const aside = code(path.join('components', 'HistoryAside.tsx'));
+	assert.match(aside, /root: \{ flex: '1 1 300px', minWidth: 0, minHeight: 0, maxHeight: '100%', overflowY: 'auto',/);
+	assert.doesNotMatch(aside, /root: \{[^}]*\bheight: '100%'/, 'a fixed height would start a wrapped aside below the body\'s edge');
 });

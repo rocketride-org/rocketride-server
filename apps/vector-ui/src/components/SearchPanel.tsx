@@ -408,24 +408,22 @@ export function SearchPanel({ model, channels, selection, actions, comparing = f
 	const chipText = scopeChipText(model.scope ?? null, gate);
 	const radioName = useId();
 
-	// A question handed in before the panel mounted (the tab mounts on first show) fills the form from the start.
-	const [initial] = useState(() => (handoff !== null && !handoff.clear ? applyHandoff(handoff, { mode: defaultMode(options), topK: ks.includes(DEFAULT_TOP_K) ? DEFAULT_TOP_K : (ks[ks.length - 1] ?? DEFAULT_TOP_K) }, options, ks) : null));
-	const [question, setQuestion] = useState(initial?.question ?? '');
-	const [questionB, setQuestionB] = useState(initial?.questionB ?? '');
-	const [chosenMode, setMode] = useState<SearchMode | null>(() => initial?.mode ?? defaultMode(options));
-	const [topK, setTopK] = useState(() => initial?.topK ?? (ks.includes(DEFAULT_TOP_K) ? DEFAULT_TOP_K : (ks[ks.length - 1] ?? DEFAULT_TOP_K)));
-	const [tables, setTables] = useState<TableFilter>(initial?.tables ?? 'any');
+	const [question, setQuestion] = useState('');
+	const [questionB, setQuestionB] = useState('');
+	const [chosenMode, setMode] = useState<SearchMode | null>(() => defaultMode(options));
+	const [topK, setTopK] = useState(() => (ks.includes(DEFAULT_TOP_K) ? DEFAULT_TOP_K : (ks[ks.length - 1] ?? DEFAULT_TOP_K)));
+	const [tables, setTables] = useState<TableFilter>('any');
 	// null follows the node's setting (the dialect may answer after the panel mounted); a number is the user's.
 	const [chosenAt, setAt] = useState<number | null>(null);
 	// What "Open in Search" brought: kept with its question, so only a run of that question is marked.
-	const [chat, setChat] = useState<ChatPrefill | null>(handoff?.chat ?? null);
+	const [chat, setChat] = useState<ChatPrefill | null>(null);
 	const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
 	const [runs, setRuns] = useState<{ a: WorkbenchRun | null; b: WorkbenchRun | null }>({ a: null, b: null });
 	const [limitedUntil, setLimitedUntil] = useState<number | null>(null);
 	const [now, setNow] = useState(() => Date.now());
 	const [copied, setCopied] = useState<string | null>(null);
 	// A handed-in question was longer than the box takes, and was cut.
-	const [cut, setCut] = useState(initial?.cut ?? false);
+	const [cut, setCut] = useState(false);
 	const runId = useRef(0);
 	const lastHandoff = useRef<string | null>(null);
 	const sentence = useRef('');
@@ -562,6 +560,8 @@ export function SearchPanel({ model, channels, selection, actions, comparing = f
 	// Rerun runs with its mode and k in the scope as it is now; Load, "Use as query" and "New query" fill the form.
 	useEffect(() => {
 		if (handoff === null || handoff.nonce === lastHandoff.current) return;
+		// One made for another connection (this panel remounted on a change of key) is not this panel's.
+		if (handoff.connectionKey !== undefined && handoff.connectionKey !== model.connectionKey) return;
 		lastHandoff.current = handoff.nonce;
 		if (handoff.clear) {
 			runId.current += 1;
@@ -576,16 +576,21 @@ export function SearchPanel({ model, channels, selection, actions, comparing = f
 		const next = applyHandoff(handoff, { mode, topK }, options, ks);
 		setQuestion(next.question);
 		if (next.questionB !== null) setQuestionB(next.questionB);
-		setChat(handoff.chat);
+		setChat(next.chat);
 		setMode(next.mode);
 		setTopK(next.topK);
 		if (next.tables !== null) setTables(next.tables);
 		setCut(next.cut);
-		if (!next.run || next.mode === null || limited) return;
+		if (!next.run) return;
+		// A run asked for that cannot start now says why (the form is filled; Run is there when it can).
+		const blocked = next.mode === null ? 'Search is not available on this connection.' : limited ? rateLimitSentence(secondsLeft(limitedUntil as number, now)) : next.objectIds === 'scope' ? gate.blocked : null;
+		if (blocked !== null || next.mode === null) {
+			if (blocked !== null) actions.announce(`Not run: ${blocked}`);
+			return;
+		}
 		// Its own documents (the question's), not the console's scope, so the console's gate does not stop a chat handoff.
-		if (next.objectIds === 'scope' && gate.blocked !== null) return;
 		const objectIds = next.objectIds === 'scope' ? gate.objectIds : next.objectIds;
-		void run({ question: next.question, questionB: comparing ? next.questionB : null, mode: next.mode, topK: next.topK, objectIds, isTable: isTableOf(next.tables ?? tables), chat: handoff.chat });
+		void run({ question: next.question, questionB: comparing ? next.questionB : null, mode: next.mode, topK: next.topK, objectIds, isTable: isTableOf(next.tables ?? tables), chat: next.chat });
 		// Runs once per handoff; the rest of the panel's state does not restart it.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [handoff]);
@@ -635,6 +640,8 @@ export function SearchPanel({ model, channels, selection, actions, comparing = f
 	const reasons = reasonLines(options);
 	const willRun = willRunText({ mode, comparing, topK, at, gate, tables });
 	const off = blockedBy !== null || running;
+	// Dimmed only while it cannot run: while a run is on its way its label ("Searching A…") is the progress.
+	const dimmed = blockedBy !== null && !running;
 
 	return (
 		<section aria-label={comparing ? 'Compare' : 'Search'} data-component="SearchPanel" data-comparing={comparing ? 'true' : 'false'} style={S.root}>
@@ -714,7 +721,7 @@ export function SearchPanel({ model, channels, selection, actions, comparing = f
 							</option>
 						))}
 					</select>
-					<button type="submit" style={off ? { ...S.run, ...S.off } : S.run} aria-disabled={off} title={blockedBy ?? undefined}>
+					<button type="submit" style={dimmed ? { ...S.run, ...S.off } : S.run} aria-disabled={off} title={blockedBy ?? undefined}>
 						{running ? busyLabel : comparing ? 'Run A and B' : 'Run'}
 					</button>
 				</div>

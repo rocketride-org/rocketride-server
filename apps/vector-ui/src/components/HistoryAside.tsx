@@ -24,10 +24,10 @@
 // VECTOR-UI - THE QUERY TAB'S HISTORY (an aside docked beside the modes)
 // =============================================================================
 //
-// One entry per question, pinned ones first: the question (a Compare's A and
-// B), then its kind, k, what its latest run came to, when and how long. A run
-// that repeats the newest entry's question updates that entry, which then
-// says "Ran again". Each entry
+// The runs, newest first and pinned ones on top: the question (a Compare's A
+// and B), then its kind, k, what it came to, when and how long. A run that
+// repeats the newest entry's whole question updates that entry instead of
+// adding one, and the entry says "Ran again". Each entry
 // has Load (fills the form, runs nothing), Rerun (its mode and k with the
 // threshold, scope and table filter chosen now; off, with the reason, when
 // it cannot run), Pin, a one-line Note and Remove. "Record runs" turns
@@ -46,7 +46,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shell';
-import { escapeLayer, focusAfterClear, focusAfterRemove } from '../vector/queryFocus';
+import { escapeLayer, focusAfterClear, focusAfterPin, focusAfterRemove } from '../vector/queryFocus';
 import type { QueryFocusTarget } from '../vector/queryFocus';
 import { COMPARE_B_NOT_SAVED, HISTORY_FILTERS, RAN_AGAIN, entryMeta, shownEntries } from '../vector/queryHistory';
 import type { HistoryFilter, QueryHistoryItem, RerunPlan } from '../vector/queryHistory';
@@ -79,7 +79,7 @@ export interface IHistoryAsideProps {
 }
 
 const S = {
-	root: { flex: '1 1 300px', minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, padding: '0 0 0 12px', borderLeft: '1px solid var(--rr-border)', fontSize: 12, color: 'var(--rr-text-primary)' } as CSSProperties,
+	root: { flex: '1 1 300px', minWidth: 0, minHeight: 0, maxHeight: '100%', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, padding: '0 0 0 12px', borderLeft: '1px solid var(--rr-border)', fontSize: 12, color: 'var(--rr-text-primary)' } as CSSProperties,
 	head: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } as CSSProperties,
 	heading: { margin: 0, fontSize: 13, fontWeight: 600 } as CSSProperties,
 	row: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } as CSSProperties,
@@ -296,9 +296,16 @@ export function HistoryAside({ id, entries, recording, onRecording, note, now, r
 										data-history-control="pin"
 										aria-pressed={entry.pinned === true}
 										onClick={() => {
+											// A pinned entry moves to the top (and back), and the focus goes with it; unpinned under "Pinned" it
+											// leaves the list, and the focus goes where a removed entry's would.
+											const next = focusAfterPin(
+												filter === 'pinned',
+												shown.map((e) => e.id),
+												entry.id,
+												entry.pinned === true
+											);
 											onPin(entry.id);
-											// A pinned entry moves to the top (and back): the focus goes with it.
-											setFocusNext({ entry: entry.id, control: 'pin' });
+											setFocusNext(next);
 										}}
 									>
 										Pin

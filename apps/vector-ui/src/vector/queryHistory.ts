@@ -210,6 +210,26 @@ export function entryMeta(entry: QueryHistoryItem, now: number): string {
 
 // ── Load and Rerun ──────────────────────────────────────────────────────────
 
+/** What Load and Rerun need to know about the tab now. */
+export interface HistoryContext {
+	/** The Search modes and whether each can run now. */
+	options: readonly ModeOption[];
+	/** The store's largest k (`limits.top_k_max`): a stored k above it is sent as this. */
+	topKMax: number;
+	nonce: string;
+}
+
+/**
+ * An entry's k as the store takes it now.
+ *
+ * @param topK - The stored k, or null.
+ * @param max - The store's largest k.
+ * @returns The k, or null.
+ */
+function kNow(topK: number | null, max: number): number | null {
+	return topK === null ? null : Math.max(1, Math.min(topK, max));
+}
+
 /** What Load does: the mode to show and the form it fills (nothing runs). */
 export interface LoadPlan {
 	mode: QueryMode;
@@ -221,32 +241,33 @@ export interface LoadPlan {
 
 /**
  * Load an entry into the Query tab: its question, mode and k in the form, or
- * its question in Ask's box; nothing runs.
+ * its question in Ask's box; nothing runs. A mode that cannot run now leaves
+ * the form's own, and Load says so.
  *
  * @param entry - The entry.
- * @param nonce - The handoff's nonce.
+ * @param context - The modes offered now, the store's largest k, the handoff's nonce.
  * @returns The plan.
  */
-export function loadPlan(entry: QueryHistoryItem, nonce: string): LoadPlan {
+export function loadPlan(entry: QueryHistoryItem, context: HistoryContext): LoadPlan {
+	const { nonce } = context;
+	const topK = kNow(entry.topK, context.topKMax);
 	const notes = entry.truncated === true ? [ONLY_FIRST_KEPT] : [];
 	if (entry.kind === 'ask') return { mode: 'ask', search: null, ask: { nonce, question: entry.question, run: false }, notes };
 	if (entry.kind === 'compare') {
 		const b = entry.compareWith;
-		return { mode: 'compare', search: { nonce, question: entry.question, questionB: b ?? '', topK: entry.topK, run: false, chat: null }, ask: null, notes: b === undefined ? [...notes, COMPARE_B_NOT_SAVED] : notes };
+		return { mode: 'compare', search: { nonce, question: entry.question, questionB: b ?? '', topK, run: false, chat: null }, ask: null, notes: b === undefined ? [...notes, COMPARE_B_NOT_SAVED] : notes };
 	}
-	return { mode: 'search', search: { nonce, question: entry.question, mode: entry.kind, topK: entry.topK, run: false, chat: null }, ask: null, notes };
+	const offered = context.options.find((o) => o.mode === entry.kind)?.enabled === true;
+	return { mode: 'search', search: { nonce, question: entry.question, mode: entry.kind, topK, run: false, chat: null }, ask: null, notes: offered ? notes : [...notes, `${KIND_LABELS[entry.kind]} cannot run now; the form keeps its mode.`] };
 }
 
 /** What Rerun does, or why it cannot. */
 export type RerunPlan = { ok: true; mode: QueryMode; search: SearchHandoff | null; ask: AskHandoff | null; title: string } | { ok: false; reason: string };
 
 /** What Rerun needs to know about the tab now. */
-export interface RerunContext {
-	/** The Search modes and whether each can run now. */
-	options: readonly ModeOption[];
+export interface RerunContext extends HistoryContext {
 	/** Whether Ask can ask now, and if not why. */
 	chat: { enabled: boolean; reason: string | null };
-	nonce: string;
 }
 
 /**
@@ -265,13 +286,14 @@ export function rerunPlan(entry: QueryHistoryItem, context: RerunContext): Rerun
 		if (!context.chat.enabled) return { ok: false, reason: context.chat.reason ?? 'The chat cannot ask here.' };
 		return { ok: true, mode: 'ask', search: null, ask: { nonce: context.nonce, question: entry.question, run: true }, title: 'Ask this again, about the documents Ask is set to now' };
 	}
-	const k = entry.topK !== null ? `top ${entry.topK}` : 'the k chosen now';
+	const topK = kNow(entry.topK, context.topKMax);
+	const k = topK !== null ? `top ${topK}` : 'the k chosen now';
 	if (entry.kind === 'compare') {
 		if (entry.compareWith === undefined) return { ok: false, reason: COMPARE_B_NOT_SAVED };
 		if (!context.options.some((option) => option.enabled)) return { ok: false, reason: 'Search is not available on this connection.' };
-		return { ok: true, mode: 'compare', search: { nonce: context.nonce, question: entry.question, questionB: entry.compareWith, topK: entry.topK, run: true, chat: null }, ask: null, title: `Run A and B again with ${k}, and the mode, threshold, scope and table filter chosen now` };
+		return { ok: true, mode: 'compare', search: { nonce: context.nonce, question: entry.question, questionB: entry.compareWith, topK, run: true, chat: null }, ask: null, title: `Run A and B again with ${k}, and the mode, threshold, scope and table filter chosen now` };
 	}
 	const option = context.options.find((o) => o.mode === entry.kind);
 	if (!option?.enabled) return { ok: false, reason: `${KIND_LABELS[entry.kind]} cannot run now: ${option?.reason ?? 'this connection does not offer it'}` };
-	return { ok: true, mode: 'search', search: { nonce: context.nonce, question: entry.question, mode: entry.kind, topK: entry.topK, run: true, chat: null }, ask: null, title: `Run again with ${KIND_LABELS[entry.kind]} and ${k}, and the threshold, scope and table filter chosen now` };
+	return { ok: true, mode: 'search', search: { nonce: context.nonce, question: entry.question, mode: entry.kind, topK, run: true, chat: null }, ask: null, title: `Run again with ${KIND_LABELS[entry.kind]} and ${k}, and the threshold, scope and table filter chosen now` };
 }

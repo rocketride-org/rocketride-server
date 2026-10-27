@@ -798,6 +798,8 @@ function scoreRange(score: IScoreInfo | null): readonly [number, number] | null 
 export function scoreHeading(score: IScoreInfo | null, rows: readonly Pick<WorkbenchRow, 'score' | 'fused' | 'keywordRank'>[]): ScoreHeading {
 	const rated = rows.filter((row) => row.score !== null).length;
 	if (rows.length > 0 && rated === 0) return { scale: null, noBars: 'Keyword results carry no similarity, so they have no score or bar.' };
+	// Without the store's dialect there is no formula, range or direction to name.
+	if (score === null) return { scale: null, noBars: 'The store has not said how its scores read, so there are no bars.' };
 	const range = scoreRange(score);
 	const direction = score?.higher_is_better === false ? 'lower is closer' : 'higher is closer';
 	const formula = score?.formula && score.formula !== 'unknown' ? score.formula : null;
@@ -1225,6 +1227,8 @@ export function topKChoices(ks: readonly number[], current: number): number[] {
  */
 export interface SearchHandoff {
 	nonce: string;
+	/** The connection it was made for: a panel of another connection (remounted on a change of key) ignores it. */
+	connectionKey?: string;
 	/** Question A (cut to {@link SEARCH_QUESTION_MAX_CHARS} when it is applied). */
 	question: string;
 	/** Question B (Compare), or null/absent to leave B as it is. */
@@ -1261,6 +1265,8 @@ export interface AppliedHandoff {
 	cut: boolean;
 	/** The documents a chat handoff searches (the question's own), or 'scope' for the console's scope. */
 	objectIds: string[] | null | 'scope';
+	/** What "Open in Search" brought, kept with its question; null for any other handoff, or when its question was cut. */
+	chat: ChatPrefill | null;
 	run: boolean;
 }
 
@@ -1281,13 +1287,16 @@ export function applyHandoff(handoff: SearchHandoff, current: { mode: SearchMode
 	const cut = a.cut || (b?.cut ?? false);
 	if (handoff.chat !== null) {
 		const next = prefillRun({ ...handoff.chat, question: a.text }, options, ks);
-		return { question: next.question, questionB: null, mode: next.mode, topK: next.topK, tables: 'any', cut, objectIds: next.objectIds, run: handoff.run && next.mode !== null && next.question.trim() !== '' };
+		// A question longer than the box is no longer the one "Why these?" searched: it is put in the box, not run, and
+		// claims no tie to the answer (no "cited" marks, no "From the chat" line).
+		if (a.cut) return { question: next.question, questionB: null, mode: next.mode, topK: next.topK, tables: 'any', cut, objectIds: next.objectIds, chat: null, run: false };
+		return { question: next.question, questionB: null, mode: next.mode, topK: next.topK, tables: 'any', cut, objectIds: next.objectIds, chat: handoff.chat, run: handoff.run && next.mode !== null && next.question.trim() !== '' };
 	}
 	const offered = (mode: SearchMode | null | undefined): boolean => mode !== null && mode !== undefined && options.find((o) => o.mode === mode)?.enabled === true;
 	const mode = offered(handoff.mode) ? (handoff.mode as SearchMode) : current.mode;
 	const given = handoff.topK;
 	const topK = typeof given === 'number' && Number.isFinite(given) && given >= 1 ? Math.floor(given) : current.topK;
-	return { question: a.text, questionB: b?.text ?? null, mode, topK, tables: null, cut, objectIds: 'scope', run: handoff.run && mode !== null && a.text.trim() !== '' };
+	return { question: a.text, questionB: b?.text ?? null, mode, topK, tables: null, cut, objectIds: 'scope', chat: null, run: handoff.run && mode !== null && a.text.trim() !== '' };
 }
 
 /** What the Query tab does with a question handed to it through the connection (`entry.queryPrefill`). */

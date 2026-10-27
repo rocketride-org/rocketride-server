@@ -87,7 +87,8 @@ const styles = {
 	barEnd: { display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 4 } as CSSProperties,
 	button: { ...commonStyles.buttonSecondary, padding: '1px 8px', fontSize: 11 } as CSSProperties,
 	toggle: { ...commonStyles.buttonSecondary, padding: '1px 8px', fontSize: 11, minWidth: '8.5em' } as CSSProperties,
-	body: { flex: 1, minHeight: 0, display: 'flex', flexWrap: 'wrap', gap: 12 } as CSSProperties,
+	// Narrow (a split, a VS Code group), History wraps under the modes and the body scrolls to it.
+	body: { flex: 1, minHeight: 0, display: 'flex', flexWrap: 'wrap', gap: 12, overflowY: 'auto' } as CSSProperties,
 	main: { flex: '999 1 520px', minWidth: 0, minHeight: 0, height: '100%', overflowY: 'auto' } as CSSProperties,
 	ask: { height: '100%', display: 'flex', flexDirection: 'column' } as CSSProperties,
 	notice: { ...appStyles.small, margin: '0 0 6px' } as CSSProperties,
@@ -155,7 +156,7 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 	const root = useRef<HTMLDivElement>(null);
 	const tabRefs = useRef<Partial<Record<QueryMode, HTMLButtonElement | null>>>({});
 	const ids = useId();
-	const [search, setSearch] = useState<SearchHandoff | null>(null);
+	const [search, setSearchHandoff] = useState<SearchHandoff | null>(null);
 	const [ask, setAsk] = useState<AskHandoff | null>(null);
 	const [focusNext, setFocusNext] = useState<QueryFocusTarget | null>(null);
 	const sequence = useRef(0);
@@ -169,6 +170,13 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 	const [historyOpen, setHistoryOpen] = useState(false);
 	// The entry the last run updated instead of adding one ("Ran again"), or null.
 	const [ranAgain, setRanAgain] = useState<string | null>(null);
+
+	/**
+	 * Hand Search a question, for this connection: a panel remounted for another connection ignores it.
+	 *
+	 * @param handoff - The handoff.
+	 */
+	const setSearch = (handoff: SearchHandoff): void => setSearchHandoff({ ...handoff, connectionKey: surfaceModel.connectionKey });
 
 	/**
 	 * A nonce for a handoff made here.
@@ -234,7 +242,7 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 	 * @param handoffNonce - The nonce its handoff gets.
 	 * @returns The plan.
 	 */
-	const rerunOf = (entry: QueryHistoryItem, handoffNonce: string): ReturnType<typeof rerunPlan> => rerunPlan(entry, { options, chat: { enabled: asking.chatAvailable, reason: surfaceModel.chat.reason }, nonce: handoffNonce });
+	const rerunOf = (entry: QueryHistoryItem, handoffNonce: string): ReturnType<typeof rerunPlan> => rerunPlan(entry, { options, topKMax: surfaceModel.limits.top_k_max, chat: { enabled: asking.chatAvailable, reason: surfaceModel.chat.reason }, nonce: handoffNonce });
 
 	/**
 	 * Load: the entry back in the form (or Ask's box), nothing run; the focus goes to that box.
@@ -242,7 +250,7 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 	 * @param entry - The entry.
 	 */
 	const load = (entry: QueryHistoryItem): void => {
-		const plan = loadPlan(entry, nonce());
+		const plan = loadPlan(entry, { options, topKMax: surfaceModel.limits.top_k_max, nonce: nonce() });
 		onMode(plan.mode);
 		if (plan.search !== null) setSearch(plan.search);
 		if (plan.ask !== null) setAsk(plan.ask);
@@ -309,7 +317,7 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 					))}
 				</div>
 				<div style={styles.barEnd}>
-					<button type="button" style={styles.button} title="Empty the Search form; the last run stays in History" onClick={newQuery}>
+					<button type="button" style={styles.button} title="Empty the Search form and its results" onClick={newQuery}>
 						New query
 					</button>
 					<button type="button" style={styles.toggle} aria-expanded={historyOpen} aria-controls={asideId} data-query-focus="history-toggle" onClick={() => setHistoryOpen((open) => !open)}>
@@ -358,6 +366,9 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 	);
 }
 
+/** Requests for the Documents tab's drawer, numbered across the page's life (a remounted tab never reuses a nonce). */
+let documentRequests = 0;
+
 /**
  * The Query tab of a connection's workbench.
  *
@@ -368,7 +379,6 @@ export function QueryTab({ entry, model, channels, actions, visible, surfaceMode
 	const env = useVectorEnv();
 	const mode = useValueStore(entry.queryMode);
 	const prefill = useValueStore(entry.queryPrefill);
-	const requests = useRef(0);
 	return (
 		<QueryWorkbench
 			model={model}
@@ -388,8 +398,8 @@ export function QueryTab({ entry, model, channels, actions, visible, surfaceMode
 			historyKey={entry.key}
 			onShowDocument={(objectId) => {
 				// The Documents tab opens its drawer on it and clears the request (taken once, by its nonce).
-				requests.current += 1;
-				entry.openDocument.set({ nonce: `query-${requests.current}`, objectId });
+				documentRequests += 1;
+				entry.openDocument.set({ nonce: `query-${documentRequests}`, objectId });
 				actions.openTab?.('documents');
 			}}
 		/>

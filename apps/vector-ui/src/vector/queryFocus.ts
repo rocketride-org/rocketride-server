@@ -106,6 +106,23 @@ export function focusAfterRemove(ids: readonly string[], removed: string): { ent
 }
 
 /**
+ * Where the focus goes after Pin: it stays on the Pin button, unless the list
+ * shows pinned entries only and the entry was just unpinned (it leaves the
+ * list), when it goes where a removed entry's would.
+ *
+ * @param pinnedOnly - The list shows pinned entries only.
+ * @param ids - The entries shown, in order.
+ * @param id - The entry pinned or unpinned.
+ * @param wasPinned - It was pinned before the click.
+ * @returns The control of an entry, or the heading.
+ */
+export function focusAfterPin(pinnedOnly: boolean, ids: readonly string[], id: string, wasPinned: boolean): { entry: string; control: 'pin' | 'load' } | 'history-heading' {
+	if (!pinnedOnly || !wasPinned) return { entry: id, control: 'pin' };
+	const next = focusAfterRemove(ids, id);
+	return typeof next === 'string' ? next : { entry: next.entry, control: 'load' };
+}
+
+/**
  * Where the focus goes when the "Clear…" confirmation closes: the heading after clearing, its opener after Cancel.
  *
  * @param confirmed - The history was cleared.

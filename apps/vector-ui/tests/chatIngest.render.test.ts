@@ -40,6 +40,7 @@ import Module from 'node:module';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { IExplorerEndpoint, IProbeResult, IRoleChannel } from 'shared/explorer';
+import { ExplorerToolError } from 'shared/explorer';
 import { fakeWorld, manualClock, projectRows, vectorComponents } from 'shared/explorer/connect/testing';
 import type { ConsoleActions, ConsoleModel, IChatSource, IDialectResult, IScopeState, ISearchResult, VectorChannels, VectorKey } from '../src/contract/types';
 import type { IQueryWorkbenchProps } from '../src/components/QueryTab';
@@ -404,6 +405,25 @@ test('QueryWorkbench: the chat stays mounted while Search is shown; only the two
 	forgetChatAndIngest();
 });
 
+test('ChatPanel: a failed question reads as text with its word, never a second alert (the session already announced it)', async () => {
+	forgetChatAndIngest();
+	const session = chatSessionFor('render-1', {
+		ask: async () => {
+			throw new ExplorerToolError({ kind: 'raised', tool: 'chat', message: 'LLM call failed' });
+		},
+		makeQuestion: (text) => ({ text }),
+		now: () => 0,
+		announce: () => undefined,
+	});
+	await session.send('Where is the water?', null);
+	const html = render(h(ChatPanel, { model: model(), channels, selection: createSelectionStore('render-1'), actions, scope: null, onClearScope: () => undefined }));
+	assert.match(html, /<p[^>]*data-turn-error=""[^>]*><span[^>]*>Error:<\/span>The question failed: LLM call failed<\/p>/);
+	assert.doesNotMatch(html, /role="alert"|data-banner=/);
+	const debuggerSource = readFileSync(path.join(__dirname, '..', 'src', 'components', 'RetrievalDebugger.tsx'), 'utf8');
+	assert.doesNotMatch(debuggerSource, /<Banner variant="error"/, '"Why these?" fails the same way');
+	forgetChatAndIngest();
+});
+
 test('ChatPanel: without a Chat source it says so and offers no composer', () => {
 	forgetChatAndIngest();
 	const html = render(h(ChatPanel, { model: model(), channels: { ...channels, chat: null }, selection: createSelectionStore('render-1'), actions, scope: null, onClearScope: () => undefined }));
@@ -675,25 +695,12 @@ test('SearchPanel: a scope above the cap turns Run off with its sentence; a scop
 	assert.match(off, /The scope \(folder is under C:\/demo\/\) is not applied to Search; Run searches the whole collection\./);
 });
 
-test('SearchPanel: "Open in Search" fills the question and the k "Why these?" used; the "From the chat" line waits for a run of it', () => {
-	const cited: VectorKey[] = [
-		['a', 0],
-		['b', 1],
-		['c', 2],
-	];
-	const html = render(h(SearchPanel, { model: modelOn(enriched), channels, selection: createSelectionStore('render-1'), actions, handoff: { nonce: 'n1', question: 'Where does Falcon Station get its water?', run: true, chat: { question: 'Where does Falcon Station get its water?', cited, topK: 13, objectIds: null } } }));
-	assert.match(html, /<input type="search"[^>]*value="Where does Falcon Station get its water\?"/);
-	assert.deepEqual(
-		[...html.matchAll(/<option value="(\d+)"/g)].map((m) => Number(m[1])),
-		[5, 10, 13, 25, 50]
-	);
-	assert.match(html, /<option value="13" selected="">/);
-	// The line describes a run's rows; before the run there are none.
+test('SearchPanel: a handed-in question is applied by the panel once it is mounted, never at render, so a remount replays nothing; the form is applyHandoff\'s', () => {
+	const handoff = { nonce: 'n1', question: 'Where does Falcon Station get its water?', run: true, chat: { question: 'Where does Falcon Station get its water?', cited: [] as VectorKey[], topK: 13, objectIds: null } };
+	const html = render(h(SearchPanel, { model: modelOn(enriched), channels, selection: createSelectionStore('render-1'), actions, handoff }));
+	assert.match(html, /<input type="search"[^>]*value=""/, 'the render takes nothing from the handoff (searchWorkbench.test.ts tests the form applyHandoff leaves)');
 	assert.doesNotMatch(html, /From the chat/);
-	assert.match(html, /<button type="submit"[^>]*aria-disabled="false"[^>]*>Run<\/button>/);
-	const long = render(h(SearchPanel, { model: modelOn(enriched), channels, selection: createSelectionStore('render-1'), actions, handoff: { nonce: 'n2', question: 'w'.repeat(1500), run: false, chat: null } }));
-	assert.ok(long.includes(`value="${'w'.repeat(1000)}"`), 'a longer question handed in is cut to 1,000 characters');
-	assert.match(long, /Cut to the first 1,000 characters\./);
+	assert.match(html, /<button type="submit"[^>]*aria-disabled="true"[^>]*>Run<\/button>/);
 });
 
 test('SearchResults: "From the chat" and the cited mark on a run of the brought question only', async () => {
@@ -805,6 +812,10 @@ test('QueryCompare: A and B side by side, the shared count and the Jaccard index
 	assert.match(html, /B ☆/);
 	assert.match(html, />Show A ★ and B ☆ on the map</);
 	assert.equal((html.match(/data-side="only-a"/g) ?? []).length, 2);
+	// The slider's statuses, in words, as in Search's table: in Compare they are the only thing it changes on screen.
+	assert.equal((html.match(/<th scope="col"[^>]*>Status<\/th>/g) ?? []).length, 2);
+	const statuses = [...html.matchAll(/<td[^>]*>(passes the threshold|near miss: below the threshold|below the floor \(the store drops it\)|keyword match \(no similarity\))<\/td>/g)].length;
+	assert.equal(statuses, (html.match(/<tr[^>]*data-status="/g) ?? []).length, 'one status per row');
 	assert.equal((html.match(/data-side="both"/g) ?? []).length, 12);
 });
 
@@ -929,7 +940,7 @@ test('HistoryAside: pinned entries first, each with its kind, k, what it came to
 	const [compare, failed, first] = history.entries('k').get();
 	history.togglePin('k', first.id);
 	const entries = history.entries('k').get();
-	const options = { options: [{ mode: 'semantic', label: 'Semantic', enabled: true, reason: null }, { mode: 'keyword', label: 'Keyword', enabled: false, reason: 'This store cannot search by keyword' }] as never, chat: { enabled: false, reason: NO_CHAT_SENTENCE }, nonce: 'preview' };
+	const options = { options: [{ mode: 'semantic', label: 'Semantic', enabled: true, reason: null }, { mode: 'keyword', label: 'Keyword', enabled: false, reason: 'This store cannot search by keyword' }] as never, topKMax: 100, chat: { enabled: false, reason: NO_CHAT_SENTENCE }, nonce: 'preview' };
 	const props = { id: 'h1', entries, recording: true, onRecording: () => undefined, note: DEVTOOL_HISTORY_NOTE, now: at + 60_000, rerunOf: (entry: (typeof entries)[number]) => rerunPlan(entry, options), onLoad: () => undefined, onRerun: () => undefined, onPin: () => undefined, onNote: () => undefined, onRemove: () => undefined, onClear: () => undefined, onClose: () => undefined };
 	const html = render(h(HistoryAside, props));
 	assert.match(html, /<aside id="h1" aria-label="History" data-component="HistoryAside"/);

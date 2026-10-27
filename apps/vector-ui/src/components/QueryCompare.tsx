@@ -24,8 +24,9 @@
 // VECTOR-UI — QueryCompare (the Query tab's Compare: two questions side by side)
 // =============================================================================
 //
-// Runs A and B in two columns, each row saying whether the other run found
-// it too, under one line that says how far they agree ("A and B share 4 of
+// Runs A and B in two columns, each row saying where it falls at the
+// threshold slider (in words, as Search's table does) and whether the other
+// run found it too, under one line that says how far they agree ("A and B share 4 of
 // 10 results (Jaccard 0.25); 3 documents only in A, 2 only in B"). "Show A ★
 // and B ☆ on the map" tells the map both questions so it can place a star
 // for each (adapters/consoleActions.ts showCompareOnMap). The letters, not
@@ -130,6 +131,9 @@ function Column({ letter, side, summary, score, onOpen, scopeOn }: SideProps): R
 								Score
 							</th>
 							<th scope="col" style={S.th}>
+								Status
+							</th>
+							<th scope="col" style={S.th}>
 								{letter === 'A' ? 'Also in B' : 'Also in A'}
 							</th>
 						</tr>
@@ -147,9 +151,10 @@ function Column({ letter, side, summary, score, onOpen, scopeOn }: SideProps): R
 										</button>
 										{row.cited ? ' · cited' : ''}
 									</td>
-									<td style={S.td} title={`${scoreTitle(row, score)} · ${STATUS_WORDS[row.status]}`}>
+									<td style={S.td} title={scoreTitle(row, score)}>
 										{row.score !== null ? row.score.toFixed(3) : 'match'}
 									</td>
+									<td style={S.td}>{STATUS_WORDS[row.status]}</td>
 									<td style={S.td}>{SIDE_WORDS[where]}</td>
 								</tr>
 							);

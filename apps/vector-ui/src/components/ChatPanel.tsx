@@ -55,7 +55,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Banner, EmptyState, commonStyles } from 'shell';
+import { EmptyState, commonStyles } from 'shell';
 import type { ChatPanelProps as ContractChatPanelProps, IChatSource } from '../contract/types';
 import { useVectorChat } from '../chat/useVectorChat';
 import { threadScrollKey } from '../chat/chatSession';
@@ -99,6 +99,7 @@ const S = {
 	thread: { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 } as CSSProperties,
 	question: { fontSize: 13, color: 'var(--rr-text-primary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: 0 } as CSSProperties,
 	who: { fontWeight: 600, marginRight: 4 } as CSSProperties,
+	mark: { fontWeight: 600, marginRight: 4 } as CSSProperties,
 	answer: { borderLeft: '2px solid var(--rr-border-focus)', paddingLeft: 8 } as CSSProperties,
 	line: { fontSize: 12, color: 'var(--rr-text-primary)', margin: '4px 0 0', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } as CSSProperties,
 	badge: { fontSize: 11, padding: '0 6px', borderRadius: 8, border: '1px solid var(--rr-border)', color: 'var(--rr-text-primary)' } as CSSProperties,
@@ -146,7 +147,11 @@ function TurnView({ turn, model, channels, selection, actions, debugging, onDebu
 			)}
 			{turn.error !== null && (
 				<div>
-					{turn.status === 'failed' ? <Banner variant="error">{turn.error.message}</Banner> : <p style={S.line}>{turn.error.message}</p>}
+					{/* The session announced the failure once; in the thread it is text with its word, no second alert. */}
+					<p style={S.line} data-turn-error="">
+						{turn.status === 'failed' && <span style={S.mark}>Error:</span>}
+						{turn.error.message}
+					</p>
 					{turn.error.detail && (
 						<details style={S.line}>
 							<summary>Details</summary>
@@ -243,6 +248,8 @@ export function ChatPanel(props: ChatPanelProps): React.ReactElement {
 			setDraft('');
 		} else {
 			setDraft(handoff.question.slice(0, CHAT_MAX_CHARS));
+			// Asked to run while a question is on its way: it waits in the box, and that is said.
+			if (handoff.run && available) actions.announce('Not asked: wait for the answer to the current question. The question is in the box.');
 		}
 		setRecall(-1);
 		// One handoff once; the chat's own state does not restart it.

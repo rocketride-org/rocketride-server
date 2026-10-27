@@ -868,7 +868,7 @@ test('the score column: its scale and its bars come from dialect.score (formula,
 	assert.equal(scoreBar(cosine, 3), 1, 'clamped to the range');
 	assert.deepEqual(scoreHeading(cosine, [{ score: null, fused: null, keywordRank: 1 }]), { scale: null, noBars: 'Keyword results carry no similarity, so they have no score or bar.' });
 	assert.equal(scoreHeading(cosine, [...rated, { score: null, fused: 0.016, keywordRank: 2 }]).noBars, 'Rows found by keyword only carry no similarity, so they have no score or bar.');
-	assert.equal(scoreHeading(null, rated).scale, 'higher is closer', 'no dialect yet: the direction the app assumes, no range, no bars');
+	assert.deepEqual(scoreHeading(null, rated), { scale: null, noBars: 'The store has not said how its scores read, so there are no bars.' }, 'no dialect yet: no direction is named that the store has not given');
 });
 
 // ── The slider's announcement: once per release, never on every step ───────
@@ -965,9 +965,15 @@ test('applyHandoff: "Open in Search" searches as "Why these?" did (every table c
 	const current = { mode: 'keyword' as SearchMode, topK: 25 };
 	const chat: ChatPrefill = { question: FALCON, cited: [CITED], topK: 13, objectIds: ['d1'] };
 	const fromChat = applyHandoff({ nonce: 'n', question: FALCON, run: true, chat }, current, options, ks);
-	assert.deepEqual(fromChat, { question: FALCON, questionB: null, mode: 'semantic', topK: 13, tables: 'any', cut: false, objectIds: ['d1'], run: true });
+	assert.deepEqual(fromChat, { question: FALCON, questionB: null, mode: 'semantic', topK: 13, tables: 'any', cut: false, objectIds: ['d1'], chat, run: true });
+	assert.deepEqual(topKChoices(ks, fromChat.topK), [5, 10, 13, 25, 50], 'its k joins the choices');
+	// A chat question longer than the box (chat questions go to 4,000) is no longer the one "Why these?" searched: it is
+	// put in the box, cut, and neither run nor tied to the answer.
+	const long = 'w'.repeat(1500);
+	const cutChat = applyHandoff({ nonce: 'n', question: long, run: true, chat: { ...chat, question: long } }, current, options, ks);
+	assert.deepEqual([cutChat.question.length, cutChat.cut, cutChat.run, cutChat.chat], [1000, true, false, null]);
 	const entry: SearchHandoff = { nonce: 'n', question: 'kestrel', questionB: 'falcon', mode: 'hybrid', topK: 50, run: true, chat: null };
-	assert.deepEqual(applyHandoff(entry, current, options, ks), { question: 'kestrel', questionB: 'falcon', mode: 'hybrid', topK: 50, tables: null, cut: false, objectIds: 'scope', run: true });
+	assert.deepEqual(applyHandoff(entry, current, options, ks), { question: 'kestrel', questionB: 'falcon', mode: 'hybrid', topK: 50, tables: null, cut: false, objectIds: 'scope', chat: null, run: true });
 	const noEmbed = modeOptions(model({ embed: { enabled: false, reason: null }, nodes: { store: 'store_1', embed: null, llm: null, llmName: null } }));
 	assert.equal(applyHandoff(entry, current, noEmbed, ks).mode, 'keyword', 'a mode not offered now: the panel keeps its own');
 	assert.equal(applyHandoff({ ...entry, mode: undefined, topK: undefined }, current, options, ks).topK, 25);

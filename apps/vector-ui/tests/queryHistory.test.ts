@@ -61,7 +61,10 @@ function modes(off: Partial<Record<ModeOption['mode'], string>> = {}): ModeOptio
 	return (['semantic', 'keyword', 'hybrid', 'auto'] as const).map((mode) => ({ mode, label: mode[0].toUpperCase() + mode.slice(1), enabled: off[mode] === undefined, reason: off[mode] ?? null }));
 }
 
-const CONTEXT: RerunContext = { options: modes(), chat: { enabled: true, reason: null }, nonce: 'n1' };
+const CONTEXT: RerunContext = { options: modes(), topKMax: 100, chat: { enabled: true, reason: null }, nonce: 'n1' };
+
+/** Load's context: every mode offered, k up to 100. */
+const LOAD = { options: modes(), topKMax: 100, nonce: 'n' };
 
 /** A chat turn. */
 function turn(fields: Partial<ChatTurn>): ChatTurn {
@@ -147,15 +150,19 @@ test('the list: pinned first, then newest first; a filter by mode (Search holds 
 });
 
 test('Load: the form gets the question, mode and k back (Ask its box), nothing runs; a cut question says so; a Compare without B says B is not saved', () => {
-	assert.deepEqual(loadPlan(item({ kind: 'hybrid', topK: 25 }), 'n'), { mode: 'search', search: { nonce: 'n', question: 'kestrel survey', mode: 'hybrid', topK: 25, run: false, chat: null }, ask: null, notes: [] });
-	assert.deepEqual(loadPlan(item({ kind: 'ask', topK: null }), 'n'), { mode: 'ask', search: null, ask: { nonce: 'n', question: 'kestrel survey', run: false }, notes: [] });
-	assert.deepEqual(loadPlan(item({ kind: 'compare', compareWith: 'falcon' }), 'n').search, { nonce: 'n', question: 'kestrel survey', questionB: 'falcon', topK: 10, run: false, chat: null });
-	const noB = loadPlan(item({ kind: 'compare' }), 'n');
+	assert.deepEqual(loadPlan(item({ kind: 'hybrid', topK: 25 }), LOAD), { mode: 'search', search: { nonce: 'n', question: 'kestrel survey', mode: 'hybrid', topK: 25, run: false, chat: null }, ask: null, notes: [] });
+	assert.deepEqual(loadPlan(item({ kind: 'ask', topK: null }), LOAD), { mode: 'ask', search: null, ask: { nonce: 'n', question: 'kestrel survey', run: false }, notes: [] });
+	assert.deepEqual(loadPlan(item({ kind: 'compare', compareWith: 'falcon' }), LOAD).search, { nonce: 'n', question: 'kestrel survey', questionB: 'falcon', topK: 10, run: false, chat: null });
+	const noB = loadPlan(item({ kind: 'compare' }), LOAD);
 	assert.deepEqual([noB.mode, noB.search?.question, noB.search?.questionB, noB.notes], ['compare', 'kestrel survey', '', [COMPARE_B_NOT_SAVED]]);
-	const cut = loadPlan(item({ question: 'w'.repeat(200), truncated: true }), 'n');
+	const cut = loadPlan(item({ question: 'w'.repeat(200), truncated: true }), LOAD);
 	assert.equal(cut.search?.question, 'w'.repeat(200), 'what History kept, to edit');
 	assert.deepEqual(cut.notes, [ONLY_FIRST_KEPT]);
 	assert.equal(COMPARE_B_NOT_SAVED, "Question B isn't saved.");
+	// A mode that cannot run now: the form keeps its own, and Load says so.
+	assert.deepEqual(loadPlan(item({ kind: 'keyword' }), { ...LOAD, options: modes({ keyword: 'This store cannot search by keyword' }) }).notes, ['Keyword cannot run now; the form keeps its mode.']);
+	// A k above what the store takes now goes in as the store's largest.
+	assert.equal(loadPlan(item({ topK: 100 }), { ...LOAD, topKMax: 50 }).search?.topK, 50);
 });
 
 test('Rerun: the entry\'s mode and k with the threshold, scope and table filter chosen now, and its title says so; off with the reason when it cannot run', () => {
@@ -170,6 +177,9 @@ test('Rerun: the entry\'s mode and k with the threshold, scope and table filter 
 	assert.deepEqual(rerunPlan(item({ kind: 'compare' }), CONTEXT), { ok: false, reason: COMPARE_B_NOT_SAVED });
 	assert.deepEqual(rerunPlan(item({ kind: 'keyword' }), { ...CONTEXT, options: modes({ keyword: 'This store cannot search by keyword' }) }), { ok: false, reason: 'Keyword cannot run now: This store cannot search by keyword' });
 	assert.deepEqual(rerunPlan(item({ question: 'w'.repeat(200), truncated: true }), CONTEXT), { ok: false, reason: `${ONLY_FIRST_KEPT} Load it to edit and run.` });
+	const capped = rerunPlan(item({ topK: 100 }), { ...CONTEXT, topKMax: 50 });
+	assert.ok(capped.ok);
+	assert.deepEqual([capped.search?.topK, capped.title], [50, 'Run again with Semantic and top 50, and the threshold, scope and table filter chosen now'], 'the title names the k that is sent');
 	const ask = rerunPlan(item({ kind: 'ask', topK: null }), CONTEXT);
 	assert.ok(ask.ok);
 	assert.deepEqual(ask.ask, { nonce: 'n1', question: 'kestrel survey', run: true });
@@ -194,8 +204,10 @@ test('wiring: every finished run goes to the mount\'s history, from Search, Comp
 	assert.match(tab, /<SearchPanel [^\n]*onRecord=\{record\} onShowDocument=\{onShowDocument\} \/>/);
 	assert.match(tab, /<ChatPanel [^\n]*onRecord=\{record\} \/>/);
 	assert.match(tab, /history=\{env\.queryHistory\}\s*historyKey=\{entry\.key\}/, 'the mount\'s own history, per connection');
-	assert.match(tab, /entry\.openDocument\.set\(\{ nonce: `query-\$\{requests\.current\}`, objectId \}\);\s*actions\.openTab\?\.\('documents'\);/, "a result's name asks Documents for its drawer (I23)");
-	assert.match(tab, /const plan = loadPlan\(entry, nonce\(\)\);/);
+	assert.match(tab, /documentRequests \+= 1;\s*entry\.openDocument\.set\(\{ nonce: `query-\$\{documentRequests\}`, objectId \}\);\s*actions\.openTab\?\.\('documents'\);/, "a result's name asks Documents for its drawer (I23)");
+	assert.match(tab, /^let documentRequests = 0;$/m, 'numbered across the page\'s life: a remounted tab never reuses a nonce');
+	assert.match(tab, /const plan = loadPlan\(entry, \{ options, topKMax: surfaceModel\.limits\.top_k_max, nonce: nonce\(\) \}\);/, 'Load knows the modes offered now and the store\'s largest k');
+	assert.match(tab, /rerunPlan\(entry, \{ options, topKMax: surfaceModel\.limits\.top_k_max,/);
 	assert.match(tab, /const plan = rerunOf\(entry, nonce\(\)\);\s*if \(!plan\.ok\) return;/);
 	assert.match(tab, /setHistoryOpen\(false\);\s*setFocusNext\('history-toggle'\);/, 'closing the aside returns the focus to its button');
 	const search = code(path.join('components', 'SearchPanel.tsx'));
@@ -213,6 +225,7 @@ test('wiring: the History aside asks inline, keeps the focus, and handles Escape
 	assert.match(aside, /if \(confirming\) root\.current\?\.querySelector<HTMLElement>\('\[data-history-confirm\] \[data-history-control="cancel"\]'\)\?\.focus\(\);/, 'Clear… opens on Cancel: it cannot be undone');
 	assert.match(aside, /setFocusNext\(focusAfterClear\(confirmed\)\);/);
 	assert.match(aside, /const next = focusAfterRemove\(/);
+	assert.match(aside, /const next = focusAfterPin\(\s*filter === 'pinned',\s*shown\.map\(\(e\) => e\.id\),\s*entry\.id,\s*entry\.pinned === true\s*\);\s*onPin\(entry\.id\);\s*setFocusNext\(next\);/, 'unpinning under "Pinned" never drops the focus');
 	assert.match(aside, /setFocusNext\(\{ entry: entryId, control: 'note' \}\);/);
 	assert.equal((aside.match(/escapeLayer\(event\.defaultPrevented\)/g) ?? []).length, 3, 'the note box, the confirmation and the aside');
 	assert.equal((aside.match(/event\.preventDefault\(\);/g) ?? []).length, 4, 'each Escape that acts, and Enter in the note box');

@@ -81,6 +81,7 @@ const S = {
 	head: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } as CSSProperties,
 	title: { margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--rr-text-primary)' } as CSSProperties,
 	line: { margin: '4px 0', color: 'var(--rr-text-primary)' } as CSSProperties,
+	mark: { fontWeight: 600, marginRight: 4 } as CSSProperties,
 	table: { width: '100%', borderCollapse: 'collapse', marginTop: 6 } as CSSProperties,
 	th: { textAlign: 'left', fontWeight: 600, color: 'var(--rr-text-primary)', padding: '2px 4px', borderBottom: '1px solid var(--rr-border)' } as CSSProperties,
 	td: { padding: '2px 4px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'top', overflowWrap: 'anywhere' } as CSSProperties,
@@ -204,7 +205,12 @@ export function RetrievalDebugger({ model, channels, question, topK, onClose, an
 			{scopeLine !== null && <p style={S.line}>{scopeLine}</p>}
 			{phase.kind === 'embedding' && <p style={S.line}>Embedding…</p>}
 			{phase.kind === 'searching' && <p style={S.line}>Searching…</p>}
-			{phase.kind === 'error' && <Banner variant="error">{phase.message}</Banner>}
+			{phase.kind === 'error' && (
+				<p style={S.line} data-debugger-error="">
+					<span style={S.mark}>Error:</span>
+					{phase.message}
+				</p>
+			)}
 			{phase.kind === 'done' && (
 				<>
 					{phase.view.modelMismatchSentence !== null && <Banner variant="warning">{phase.view.modelMismatchSentence}</Banner>}
