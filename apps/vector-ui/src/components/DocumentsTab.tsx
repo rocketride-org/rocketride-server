@@ -385,6 +385,20 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 	const root = useRef<HTMLDivElement>(null);
 	const [width, setWidth] = useState(1200);
 	const [forceRail, setForceRail] = useState(false);
+	const forceRailRef = useRef(forceRail);
+	forceRailRef.current = forceRail;
+	// The rail asked back beside an open drawer: once that drawer closes, the layout decides again (a rail asked for
+	// on a narrow tab with no drawer stays).
+	const drawerShown = drawerId !== null;
+	const drawerWasShown = useRef(drawerShown);
+	useEffect(() => {
+		if (drawerWasShown.current && !drawerShown && forceRailRef.current) {
+			// The Folders toggle may go with it: a focus on it goes to the grid.
+			refocus.current = true;
+			setForceRail(false);
+		}
+		drawerWasShown.current = drawerShown;
+	}, [drawerShown]);
 	useEffect(() => {
 		const el = root.current;
 		if (!el || typeof ResizeObserver === 'undefined') return undefined;
