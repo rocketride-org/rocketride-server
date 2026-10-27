@@ -152,16 +152,6 @@ export function queuedLine(n: number, policyChose = false): string {
 export const STAGE_REMOVAL = 'Stage removal';
 
 /**
- * What the side panel says after a map button staged documents.
- *
- * @param n - Documents staged by that press.
- * @returns The line.
- */
-export function stagedLine(n: number): string {
-	return `Staged ${plural(n, 'document')} for the trash; nothing moves until the pending changes are applied.`;
-}
-
-/**
  * The bulk button.
  *
  * @param n - Queued documents.

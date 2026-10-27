@@ -106,7 +106,7 @@ import type { IClusterLabel, IDuplicateRing, IOverlayEnd, IPlace } from '../map/
 import { centroidStar, chatQueryPlan, comparePlan, placeProjected, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject, withSampleRetry } from '../map/queryProjection';
 import type { IStar } from '../map/queryProjection';
 import { polarityOf } from '../map/recommend';
-import { pairLabel, pairScale, stagedLine } from '../map/reviewWording';
+import { pairLabel, pairScale } from '../map/reviewWording';
 import { spawnLayoutWorker } from '../map/spawnWorker';
 import { MAP_STYLES } from '../map/styles';
 import { FALLBACK_PALETTE, readPalette } from '../map/tokens';
@@ -466,8 +466,6 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const [centreOn, setCentreOn] = useState<{ index: number; seq: number } | null>(null);
 	const [pulse, setPulse] = useState(0);
 	const [rendererKind, setRendererKind] = useState<'webgl' | 'canvas2d' | 'none'>('none');
-	/** What the side panel says after it staged documents (where the console stages removals), or null. */
-	const [stagedNote, setStagedNote] = useState<string | null>(null);
 
 	// The one query vector (from `embed`), kept here and sent only to project / search / neighbors / recommend.
 	const queryVector = useRef<number[] | null>(null);
@@ -1238,17 +1236,13 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const staging = actions.stageRemove !== undefined;
 	const removeDocuments = useCallback(
 		(objectIds: readonly string[]): void => {
-			if (actions.stageRemove && sample) {
-				const targets = removeTargetsOf(sample, objectIds);
-				actions.stageRemove(targets);
-				// Seen in the panel that staged them (the pending bar's count is the announcement).
-				setStagedNote(stagedLine(targets.length));
-			} else actions.requestRemove(objectIds);
+			// Staged: the console's pending bar shows and announces the count (nothing is inserted in the panel, so no
+			// row moves under the pointer between two presses).
+			if (actions.stageRemove && sample) actions.stageRemove(removeTargetsOf(sample, objectIds));
+			else actions.requestRemove(objectIds);
 		},
 		[actions, sample],
 	);
-	// The line goes with the tab it was said in, and with the sample.
-	useEffect(() => setStagedNote(null), [tab, sample]);
 
 	const onLasso = useCallback(
 		(indices: readonly number[]): void => {
@@ -1844,11 +1838,6 @@ export function MapView(props: MapViewProps): React.ReactElement {
 							))}
 						</div>
 						<div role="tabpanel" aria-label={TABS.find((t) => t.id === tab)?.label} style={MAP_STYLES.sideBody}>
-							{stagedNote ? (
-								<p style={MAP_STYLES.note} data-map-staged="">
-									{stagedNote}
-								</p>
-							) : null}
 							{tab === 'point' ? (
 								<PointInspector
 									sample={sampleModel!}

@@ -846,5 +846,6 @@ test('the reasons a toolbar control is off are shown in full where they can wrap
 	const empty = render({ model: off });
 	assert.match(empty, new RegExp(`<p[^>]*>${why}</p>`));
 	const view = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'views', 'MapView.tsx'), 'utf8');
-	assert.match(view, /setStagedNote\(stagedLine\(targets\.length\)\);/, 'a staging press says so in its panel');
+	// A staging press inserts nothing in the panel (the pending bar says it), so no row moves under the pointer.
+	assert.doesNotMatch(view, /setStagedNote|data-map-staged/);
 });

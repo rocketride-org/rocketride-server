@@ -36,7 +36,7 @@ import { dimMask, isolateMask } from '../src/map/isolate';
 import { removeTargetsOf } from '../src/map/model';
 import { outlierRows } from '../src/map/outliers';
 import { POPOVER_GAP, POPOVER_MARGIN, clipArea, firstEnabled, focusHold, placePopover, popoverKey } from '../src/map/popover';
-import { STAGE_REMOVAL, pairLabel, removeAllLabel, removeOthersLabel, stagedLine } from '../src/map/reviewWording';
+import { STAGE_REMOVAL, pairLabel, removeAllLabel, removeOthersLabel } from '../src/map/reviewWording';
 import { readPalette } from '../src/map/tokens';
 import { SelectionTab } from '../src/views/MapView';
 import { deepFreeze, loadSample, modelOf, pcaXY } from './support/map.samples';
@@ -439,7 +439,7 @@ test('the legend\'s glyph row lists only the marks drawn now, each with words, i
 	assert.deepEqual(all.map((m) => m.words), ['similarity edge (fainter: less similar)', "selected point's nearest chunks", 'outlier (3)', 'query, rays to its true top 10', 'near-duplicate pair (1,200)']);
 	// Rays only to the results placed on the map: the words say how many of the top-k.
 	assert.equal(markRows({ query: { top: 10, drawn: 7 } })[0]?.words, 'query, rays to 7 of its true top 10');
-	assert.equal(markRows({ rings: { scale: 'cosine' } })[0]?.words, "shown duplicate group, each pair's cosine");
+	assert.equal(markRows({ rings: { scale: 'cosine' } })[0]?.words, "shown duplicate group: each pair's similarity (cosine)");
 	const out = html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" marks={{ edges: { weakest: 'rgb(99, 99, 99)', strongest: 'rgb(206, 206, 206)' }, outliers: 3 }} />);
 	assert.match(out, /data-legend-marks="edges outliers"/);
 	assert.match(out, /<ul aria-label="Marks"/);
@@ -565,8 +565,6 @@ test('a disabled Query and t-SNE carry their reasons as the controls\' descripti
 	// Nothing to explain: no description on Query, Run or Layout.
 	const fine = html(<MapToolbar {...base} query={{ enabled: true, reason: null }} />);
 	assert.doesNotMatch(fine, /<input aria-label="Query" aria-describedby|<select aria-label="Layout" aria-describedby|type="submit"[^>]*aria-describedby/);
-	assert.equal(stagedLine(3), 'Staged 3 documents for the trash; nothing moves until the pending changes are applied.');
-	assert.equal(stagedLine(1), 'Staged 1 document for the trash; nothing moves until the pending changes are applied.');
 });
 
 test('the toolbar is compact enough for a dev-tool frame: short Points options (the light one titled and described), a 120 px query box, 6 px gaps', () => {
@@ -581,4 +579,10 @@ test('the toolbar is compact enough for a dev-tool frame: short Points options (
 	assert.match(out, /<input aria-label="Query" style="[^"]*min-width:120px;[^"]*width:120px"/);
 	// A node without light samples: nothing to describe.
 	assert.doesNotMatch(html(<MapToolbar {...base} limits={{ ...limits, sample_max_light: limits.sample_max }} />), /A light sample/);
+});
+
+test('the legend\'s cap line says a light sample has no text (the Points option says only "light")', () => {
+	const light = modelOf(loadSample('sample_light_5000.json'));
+	assert.match(html(<Legend sample={light} colourBy="document" pointCap={5000} backend="pgvector" />), /Light mode draws up to 5,000 points, without their text/);
+	assert.match(html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" />), /Detailed mode draws up to 2,000 points ·/);
 });

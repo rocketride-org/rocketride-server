@@ -178,7 +178,7 @@ export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: s
 	if (marks.rings) {
 		rows.push({
 			key: 'rings',
-			words: `shown duplicate group, each pair's ${marks.rings.scale}`,
+			words: `shown duplicate group: each pair's similarity (${marks.rings.scale})`,
 			picture: glyph(
 				<>
 					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: SURFACE, strokeWidth: 3 }} />

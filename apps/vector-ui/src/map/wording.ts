@@ -101,7 +101,7 @@ export function knnSourceLine(sample: ISampleResult, backend: string | null): st
  * @returns E.g. "Detailed mode draws up to 2,000 points".
  */
 export function pointCapLine(mode: SampleMode, cap: number): string {
-	return `${mode === 'light' ? 'Light' : 'Detailed'} mode draws up to ${num(cap)} points`;
+	return mode === 'light' ? `Light mode draws up to ${num(cap)} points, without their text` : `Detailed mode draws up to ${num(cap)} points`;
 }
 
 /** Shown instead of the map when the store cannot sample. */

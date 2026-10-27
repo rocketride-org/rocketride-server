@@ -78,7 +78,7 @@ test('every removal on the map goes to the console uncut: staged where it stages
 	const view = read('views/MapView.tsx');
 	assert.match(view, /<SelectionTab[\s\S]*?onRemove=\{\(ids\) => removeDocuments\(ids\)\}/);
 	const remove = callbackBody(view, 'removeDocuments');
-	assert.match(remove, /if \(actions\.stageRemove && sample\) \{\s*const targets = removeTargetsOf\(sample, objectIds\);\s*actions\.stageRemove\(targets\);[\s\S]*?\} else actions\.requestRemove\(objectIds\);/, 'staged with the sample\'s paths, else confirmed');
+	assert.match(remove, /if \(actions\.stageRemove && sample\) actions\.stageRemove\(removeTargetsOf\(sample, objectIds\)\);\s*else actions\.requestRemove\(objectIds\);/, 'staged with the sample\'s paths, else confirmed');
 	assert.equal((view.match(/actions\.requestRemove\(/g) ?? []).length, 1, 'removeDocuments is the one way out');
 	assert.doesNotMatch(view, /requestRemove\([^)]*\.slice\(|\.slice\(0, limits\.write_ids_max\)/, 'the map never truncates a removal to write_ids_max');
 });
