@@ -219,3 +219,22 @@ export function clampMenuPosition(at: { x: number; y: number }, bounds: { width:
 		y: Math.max(margin, Math.min(at.y, bounds.height - size.height - margin)),
 	};
 }
+
+/**
+ * How far to move a menu so it lies inside the viewport (the window, which a maximised document fills too). It moves
+ * left or up by what overflows the right or bottom edge, then right or down if that pushed it past the left or top.
+ *
+ * @param rect - Where the menu is now, in viewport coordinates.
+ * @param viewport - The viewport's size.
+ * @param margin - The room kept at every edge.
+ * @returns The shift to apply.
+ */
+export function fitInViewport(rect: { left: number; top: number; width: number; height: number }, viewport: { width: number; height: number }, margin = 4): { dx: number; dy: number } {
+	const shift = (start: number, size: number, limit: number): number => {
+		let d = 0;
+		if (start + size > limit - margin) d = limit - margin - (start + size);
+		if (start + d < margin) d = margin - start;
+		return d;
+	};
+	return { dx: shift(rect.left, rect.width, viewport.width), dy: shift(rect.top, rect.height, viewport.height) };
+}

@@ -38,7 +38,7 @@
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { clampMenuPosition, menuKey } from '../graph/canvasMenu';
+import { clampMenuPosition, fitInViewport, menuKey } from '../graph/canvasMenu';
 import type { IMenuItem } from '../graph/canvasMenu';
 
 /** The id of the Back item a submenu page starts with. */
@@ -58,6 +58,8 @@ export interface ICanvasMenuProps {
 	onActivate(id: string): void;
 	/** The menu asks to go away; `restoreFocus` is false when the owner moves focus itself. */
 	onClose(restoreFocus: boolean): void;
+	/** Which item has focus when the menu opens (the menu-button pattern opens on the last one from Up). */
+	start?: 'first' | 'last';
 }
 
 const styles = {
@@ -73,11 +75,13 @@ const styles = {
  * @param props - See {@link ICanvasMenuProps}.
  * @returns The menu.
  */
-export const CanvasMenu: React.FC<ICanvasMenuProps> = ({ label, items, x, y, bounds, onActivate, onClose }) => {
+export const CanvasMenu: React.FC<ICanvasMenuProps> = ({ label, items, x, y, bounds, onActivate, onClose, start = 'first' }) => {
 	const root = useRef<HTMLDivElement>(null);
 	const itemRefs = useRef<Array<HTMLDivElement | null>>([]);
 	const [page, setPage] = useState<{ title: string; items: readonly IMenuItem[] } | null>(null);
-	const [active, setActive] = useState(0);
+	const [active, setActive] = useState(start === 'last' ? Math.max(0, items.length - 1) : 0);
+	// How far the menu was moved to keep it inside the viewport (a menu opened near the right edge would be cut off).
+	const [nudge, setNudge] = useState({ dx: 0, dy: 0 });
 	const [at, setAt] = useState({ x, y });
 	// Swapping the items replaces the focused element, and the browser may report that as focus leaving the menu.
 	const paging = useRef(false);
@@ -93,6 +97,15 @@ export const CanvasMenu: React.FC<ICanvasMenuProps> = ({ label, items, x, y, bou
 		}
 		setAt(clampMenuPosition({ x, y }, bounds, { width: el.offsetWidth, height: el.offsetHeight }));
 	}, [x, y, bounds?.width, bounds?.height, page]); // eslint-disable-line react-hooks/exhaustive-deps
+
+	// Keep the whole menu inside the viewport: measured where it would be without the last nudge.
+	useLayoutEffect(() => {
+		const el = root.current;
+		if (!el || typeof window === 'undefined') return;
+		const r = el.getBoundingClientRect();
+		const next = fitInViewport({ left: r.left - nudge.dx, top: r.top - nudge.dy, width: r.width, height: r.height }, { width: window.innerWidth, height: window.innerHeight });
+		if (next.dx !== nudge.dx || next.dy !== nudge.dy) setNudge(next);
+	}, [nudge.dx, nudge.dy, at.x, at.y, page, items.length, nudge]);
 
 	// Focus follows the current item (and the first item when the menu opens).
 	useEffect(() => {
@@ -152,7 +165,7 @@ export const CanvasMenu: React.FC<ICanvasMenuProps> = ({ label, items, x, y, bou
 			ref={root}
 			role="menu"
 			aria-label={label}
-			style={{ ...styles.menu, left: at.x, top: at.y }}
+			style={{ ...styles.menu, left: at.x + nudge.dx, top: at.y + nudge.dy }}
 			onKeyDown={onKeyDown}
 			onBlur={(event) => {
 				// Focus left the menu for somewhere else (a click in another part of the page): it goes away without taking focus back.

@@ -518,7 +518,7 @@ VS Code panel is narrow), the focused-node label is hidden first, then the least
 actions move into a **More** menu, one at a time and always in the same order: Show more nodes,
 Clear selection, Connect nodes, Dismiss, Collapse, Fit, Inspect, Find path and Expand;
 Stop waiting stays longest while a request runs. Search, **View** and **Export** never
-move. **More** follows the same menu keys as the others. **View** holds Layout (Force, Tree (top down), Left to
+move. **More** follows the same menu keys as the others, and every menu is moved back inside the window when it would run past its edge. On a closed menu button, Down Arrow opens the menu on its first item and Up Arrow on its last. **View** holds Layout (Force, Tree (top down), Left to
 right), Re-run layout, whether nodes you dragged stay pinned, the legend, the
 keyboard shortcuts and Full screen (while full screen is on, **Exit full screen**
 is also a button on the toolbar). Export offers PNG and SVG images and the drawn
