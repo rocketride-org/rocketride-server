@@ -118,7 +118,7 @@ export const MAP_STYLES = {
 	legendHead: { height: LEGEND_HEAD_HEIGHT, flex: 'none', display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' } as CSSProperties,
 	legendToggle: { ...text, height: 20, padding: '0 6px', borderRadius: 4, border: '1px solid var(--rr-border-input, var(--rr-border))', background: 'var(--rr-bg-default)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', flex: 'none' } as CSSProperties,
 	legendLine: { ...text, fontSize: 11.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
-	legendBody: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 10px 8px' } as CSSProperties,
+	legendBody: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 10px 0' } as CSSProperties,
 	/**
 	 * A colour swatch; an outlined colour gets the outline ring.
 	 *

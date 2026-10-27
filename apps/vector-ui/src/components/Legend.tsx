@@ -36,14 +36,17 @@
 // drawn is not listed. The view adds its lines (what a cluster is, the edges
 // drawn, how the sample's listing ended, the scope, an isolation) as notes,
 // and the draw again when the store refused to draw the sample for the
-// console's scope. A header row holds a disclosure ("Legend", aria-expanded,
-// open at first) and the sample line. Open, the legend's height is fixed
-// (map/styles.ts LEGEND_HEIGHT) and the same in every state: what does not fit
-// scrolls inside its body (then the body is a tab stop, so a keyboard reaches
-// what is below). Collapsed, it is the header row only
-// (LEGEND_COLLAPSED_HEIGHT), so the map gains the rest in one step; only the
-// user's toggle changes it. Open or collapsed is kept for the session, in
-// memory (every map's legend shares it; nothing is stored).
+// console's scope. A header row at the legend's bottom holds a disclosure
+// ("Legend", aria-expanded, open at first) and the sample line; the body is
+// above it (and before it in the DOM, so Tab goes body, then the button, top
+// to bottom). Open, the legend's height is fixed (map/styles.ts LEGEND_HEIGHT)
+// and the same in every state: what does not fit scrolls inside its body
+// (then the body is a tab stop, so a keyboard reaches what is below).
+// Collapsed, it is the header row only (LEGEND_COLLAPSED_HEIGHT): the box
+// stays on the panel's bottom, the body goes, and the map grows down into its
+// place in one step, so the button stays exactly under the pointer. Open or
+// collapsed is kept for the session, in memory (every map's legend shares it;
+// nothing is stored).
 // =============================================================================
 
 import React, { useEffect, useId, useRef, useState } from 'react';
@@ -285,14 +288,6 @@ export function Legend(props: LegendProps): React.ReactElement {
 	};
 	return (
 		<section aria-label="Map legend" style={open ? MAP_STYLES.legend : MAP_STYLES.legendCollapsed} data-knn-source={sample.knn_source} data-colour-by={props.colourBy} data-legend-open={open ? '1' : '0'}>
-			<div style={MAP_STYLES.legendHead}>
-				<button id={`${ids}-toggle`} type="button" style={MAP_STYLES.legendToggle} aria-expanded={open} aria-controls={`${ids}-body`} onClick={toggle} data-legend-toggle="">
-					{open ? '▾' : '▸'} Legend
-				</button>
-				<span style={MAP_STYLES.legendLine} title={`${sampleLabel(sample)} · ${docs} docs · seed ${props.sample.seed}`}>
-					{sampleLabel(sample)} · {docs} docs · seed {props.sample.seed}
-				</span>
-			</div>
 			<div
 				ref={section}
 				id={`${ids}-body`}
@@ -359,6 +354,15 @@ export function Legend(props: LegendProps): React.ReactElement {
 						</button>
 					</p>
 				) : null}
+			</div>
+			{/* The header row last, at the box's bottom: collapsing shrinks the body above it, so the button stays put. */}
+			<div style={MAP_STYLES.legendHead}>
+				<button id={`${ids}-toggle`} type="button" style={MAP_STYLES.legendToggle} aria-expanded={open} aria-controls={`${ids}-body`} onClick={toggle} data-legend-toggle="">
+					{open ? '▾' : '▴'} Legend
+				</button>
+				<span style={MAP_STYLES.legendLine} title={`${sampleLabel(sample)} · ${docs} docs · seed ${props.sample.seed}`}>
+					{sampleLabel(sample)} · {docs} docs · seed {props.sample.seed}
+				</span>
 			</div>
 		</section>
 	);
