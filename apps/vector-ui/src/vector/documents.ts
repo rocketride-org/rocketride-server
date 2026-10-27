@@ -21,40 +21,43 @@
 // SOFTWARE.
 
 // =============================================================================
-// VECTOR - DOCUMENT DIRECTORY (pure): folders from paths, and the background auto-pager
+// VECTOR - THE DOCUMENTS LISTING (pure): paths, the background auto-pager, and the Documents tab's words
 // =============================================================================
 //
-// The directory lists every document once by its path (R3). Folders are
-// derived here, in the browser, from `/` and `\` in the stored path (the
-// store keeps paths as the ingest sent them: Windows drive letters, network
-// shares and POSIX roots stay as they are). A bare file name goes under
-// "Uploaded"; a document with a defect (vector/health.ts: no first chunk,
-// gaps, deleted chunks, empty parse) goes under "Needs attention", by its
-// whole path, with its flags as badges; an oversize document keeps its
-// folder and gets the badge there; two documents with the same path stay two
-// rows, told apart by a short objectId.
+// The Documents tab lists every document once by its path (R3). Folders are
+// derived in the browser from `/` and `\` in the stored path (the store keeps
+// paths as the ingest sent them: Windows drive letters, network shares and
+// POSIX roots stay as they are); a bare file name is "Uploaded". Two
+// documents with the same path stay two rows, told apart by a short
+// objectId. A document's defects (vector/health.ts) are its Health cell.
 //
-// AUTO-PAGING. After the first page the directory keeps asking for pages in
+// AUTO-PAGING. After the first page the listing keeps asking for pages in
 // the background, up to DIRECTORY_AUTO_ROWS (5,000) rows. The first page is
-// sorted; later pages are APPENDED (each row at the end of its folder, new
-// folders after the existing ones), so a row that is on screen never moves
-// above another while pages arrive; everything is sorted again when loading
-// ends, pauses or fails. Past the cap the footer says "Limit reached at N
+// sorted; later pages are APPENDED, so a row on screen never moves above
+// another while pages arrive; everything is sorted again when loading ends,
+// pauses or fails (folders, then Uploaded, then documents without a first
+// chunk; by name inside). Past the cap the footer says "Limit reached at N
 // documents; more may exist" with Load more (+5,000). A store that ignores
 // the page offset ends the listing with `documents_paging_unsupported`. A row
 // seen before (same objectId) is never listed twice, and a page that brings no
 // row not already listed ends the listing too (the store sent rows it had sent
 // before; asking again would get them again), so every page that keeps the
 // listing going adds a row and the cap always ends it.
+//
+// THE TAB'S WORDS. Counts are of what is loaded unless the store gave a total
+// (listCountText, directoryHeading); a column sort says when it covers only
+// the loaded rows (sortNote); the layout keeps the grid its room (documentsLayout).
 // =============================================================================
 
-import type { FilterApplied, IDocumentItem, IDocumentsFilter, IExportRows } from '../contract/types';
+import { ExplorerToolError } from 'shared/explorer';
+import type { FilterApplied, IDocumentItem, IDocumentsFilter, IExportRows, INeighborItem } from '../contract/types';
 import { EXPORT_COLUMNS } from '../contract/types';
 import { DIRECTORY_AUTO_ROWS, DIRECTORY_LOAD_MORE } from './budgets';
-import { documentHealth, needsAttention } from './health';
+import { HEALTH_NOT_REPORTED, documentHealth, needsAttention } from './health';
 import type { IDocumentsPageView } from './results';
+import { fileTypeOf, formatSize } from './fileType';
 import { formatCount } from './stats';
-import { CAVEAT_SENTENCES, DOCUMENTS_REPEATED_TEXT } from './wording';
+import { CAVEAT_SENTENCES, DOCUMENTS_REPEATED_TEXT, failureText } from './wording';
 import type { IFailureText } from './wording';
 
 // =============================================================================
@@ -86,34 +89,14 @@ export function splitPath(path: string): IPathParts {
 	return { folder: path.slice(0, cut + 1), name: path.slice(cut + 1) || path, uploaded: false };
 }
 
-/** One row of the directory. */
-export interface IDirectoryRow {
-	item: IDocumentItem;
-	/** The name shown: the file name, or the whole path in the "Needs attention" group. */
-	name: string;
-	/** True when another loaded document has the same path. */
-	duplicate: boolean;
-	/** The first 8 characters of the objectId (shown on hover, and beside a duplicate). */
-	shortId: string;
-	/** The health flags' badges ('no first chunk', '1 deleted chunk', 'oversize'); empty for a healthy document. */
-	flags: string[];
-	/** The row is under "Needs attention" (a defect; an oversize document alone keeps its folder). */
-	attention: boolean;
-}
+/** Where a document sorts: in a folder, under a bare name, or without its first chunk. */
+type PlaceKind = 'folder' | 'uploaded' | 'attention';
 
-/** One group of the directory. */
-export interface IDirectoryGroup {
-	key: string;
-	label: string;
-	kind: 'folder' | 'uploaded' | 'attention';
-	rows: IDirectoryRow[];
-}
+/** Rank of each place: folders, then bare names, then documents without a first chunk. */
+const KIND_RANK: Readonly<Record<PlaceKind, number>> = { folder: 0, uploaded: 1, attention: 2 };
 
-/** Rank of each group kind: folders, then Uploaded, then Needs attention. */
-const KIND_RANK: Readonly<Record<IDirectoryGroup['kind'], number>> = { folder: 0, uploaded: 1, attention: 2 };
-
-/** The group kind and folder label of one document (by its first chunk; buildGroups adds the other flags). */
-function placeOf(item: IDocumentItem): { kind: IDirectoryGroup['kind']; folder: string; name: string } {
+/** Where one document sorts (by its first chunk). */
+function placeOf(item: IDocumentItem): { kind: PlaceKind; folder: string; name: string } {
 	if (!item.has_first_chunk) return { kind: 'attention', folder: '', name: item.path || '(no path)' };
 	const parts = splitPath(item.path);
 	return { kind: parts.uploaded ? 'uploaded' : 'folder', folder: parts.folder, name: parts.name };
@@ -128,7 +111,7 @@ function compareText(a: string, b: string): number {
 }
 
 /**
- * The directory's order: folders (by label), Uploaded, documents without a first chunk; inside a group by name, path, objectId.
+ * The listing's order: folders (by label), bare names, documents without a first chunk; inside each by name, path, objectId.
  *
  * @param a - A document.
  * @param b - Another document.
@@ -141,55 +124,13 @@ export function compareDocuments(a: IDocumentItem, b: IDocumentItem): number {
 }
 
 /**
- * Sort documents in the directory's order (a copy).
+ * Sort documents in the listing's order (a copy).
  *
  * @param items - The documents.
  * @returns The sorted copy.
  */
 export function sortDocuments(items: readonly IDocumentItem[]): IDocumentItem[] {
 	return [...items].sort(compareDocuments);
-}
-
-/**
- * Group rows for display, keeping their order: folders in order of first
- * appearance, then Uploaded, then Needs attention (by path). The pager decides
- * when the rows are sorted (see the header), so grouping never reorders a
- * folder. A document goes under Needs attention when it has a defect flag;
- * "oversize" (which needs the median, passed once the listing settled) is a
- * badge in the document's own folder, so no row moves when it comes or goes.
- *
- * In the Trash view (`trash`) every document has chunks in the trash: that is why it is listed there, so its
- * deleted chunks are neither a badge nor a reason to need attention.
- *
- * @param rows - The documents, in display order.
- * @param health - The median chunks per loaded document (null while unknown); `trash` for the Trash view.
- * @returns The groups.
- */
-export function buildGroups(rows: readonly IDocumentItem[], health: { medianChunks: number | null; trash?: boolean } = { medianChunks: null }): IDirectoryGroup[] {
-	const pathCounts = new Map<string, number>();
-	for (const item of rows) pathCounts.set(item.path, (pathCounts.get(item.path) ?? 0) + 1);
-	const folders = new Map<string, IDirectoryGroup>();
-	const uploaded: IDirectoryGroup = { key: 'uploaded', label: UPLOADED_LABEL, kind: 'uploaded', rows: [] };
-	const attention: IDirectoryGroup = { key: 'attention', label: '', kind: 'attention', rows: [] };
-	for (const item of rows) {
-		const place = placeOf(item);
-		const all = documentHealth(item, { medianChunks: health.medianChunks }).flags;
-		const shown = health.trash ? all.filter((f) => f.kind !== 'deleted_chunks') : all;
-		const row: IDirectoryRow = { item, name: place.name, duplicate: (pathCounts.get(item.path) ?? 0) > 1, shortId: item.objectId.slice(0, 8), flags: shown.map((f) => f.label), attention: needsAttention({ flags: shown }) };
-		if (row.attention) attention.rows.push({ ...row, name: item.path || '(no path)' });
-		else if (place.kind === 'uploaded') uploaded.rows.push(row);
-		else {
-			let group = folders.get(place.folder);
-			if (!group) {
-				group = { key: `folder:${place.folder}`, label: place.folder, kind: 'folder', rows: [] };
-				folders.set(place.folder, group);
-			}
-			group.rows.push(row);
-		}
-	}
-	attention.rows.sort((a, b) => compareText(a.item.path, b.item.path) || compareText(a.item.objectId, b.item.objectId));
-	attention.label = `Needs attention (${formatCount(attention.rows.length)})`;
-	return [...folders.values(), uploaded, attention].filter((group) => group.rows.length > 0);
 }
 
 /**
@@ -209,10 +150,10 @@ export function filterItems(items: readonly IDocumentItem[], text: string): IDoc
 // AUTO-PAGER
 // =============================================================================
 
-/** Where the directory's listing is. */
+/** Where the documents listing is. */
 export type PagerStatus = 'idle' | 'loading' | 'paused' | 'done' | 'capped' | 'unsupported' | 'stalled' | 'error';
 
-/** The directory's listing state (replaced, never mutated). */
+/** The documents listing's state (replaced, never mutated). */
 export interface IPagerState {
 	/** Every loaded document once, in display order (see the header). */
 	rows: IDocumentItem[];
@@ -223,7 +164,7 @@ export interface IPagerState {
 	status: PagerStatus;
 	/** Stop asking at this many rows (Load more raises it). */
 	cap: number;
-	/** False when the store lists in storage order (the directory sorts here). */
+	/** False when the store lists in storage order (the rows are sorted here). */
 	storeSorted: boolean;
 	/** Caveats of the last page. */
 	caveats: string[];
@@ -371,7 +312,7 @@ export function pagerProgressText(state: IPagerState): string | null {
 	return state.total === null ? `Loading documents… ${loaded} loaded` : `Loading documents… ${loaded} of ${formatCount(state.total)}`;
 }
 
-/** The directory's footer. */
+/** The listing's footer. */
 export interface IPagerFooter {
 	text: string;
 	/** Offer Load more (past the cap, with a cursor). */
@@ -383,7 +324,7 @@ export interface IPagerFooter {
 }
 
 /**
- * The footer under the directory, or null when there is nothing to say.
+ * The footer under the list, or null when there is nothing to say.
  *
  * @param state - The state.
  * @returns The footer.
@@ -401,8 +342,6 @@ export function pagerFooter(state: IPagerState): IPagerFooter | null {
 			return { text: `Loading stopped at ${loaded} documents: ${state.error?.headline ?? 'the store did not answer.'}`, loadMore: false, caveat: null, retry: true };
 		case 'paused':
 			return { text: `Loading paused at ${loaded} documents`, loadMore: false, caveat: null, retry: false };
-		case 'done':
-			return state.storeSorted ? null : { text: 'sorted here; this store lists documents in storage order', loadMore: false, caveat: null, retry: false };
 		default:
 			return null;
 	}
@@ -437,10 +376,10 @@ export function filterSummary(state: IPagerState, filter: string, matches: numbe
 }
 
 /**
- * Directory rows as an export (the documents columns): words and numbers the
- * directory shows, never anything else the store sent.
+ * Listed documents as an export (the documents columns): words and numbers the
+ * list shows, never anything else the store sent.
  *
- * @param items - The documents, in the directory's order.
+ * @param items - The documents, in the listing's order.
  * @returns The columns and rows.
  */
 export function documentExportRows(items: readonly IDocumentItem[]): IExportRows {
@@ -458,4 +397,231 @@ export function documentExportRows(items: readonly IDocumentItem[]): IExportRows
 			max_chunk_id: item.max_chunk_id ?? null,
 		})),
 	};
+}
+
+// =============================================================================
+// THE DOCUMENTS TAB: its grid's words, its layout and Find similar
+// =============================================================================
+
+/**
+ * The line beside a sorted grid when the sort covers only what is loaded (the store has more): shown exactly while
+ * the listing is incomplete and the rows are not in the store's own path order (a column is sorted, or the store
+ * lists in storage order). A complete listing is sorted whole, so it never shows.
+ *
+ * @param state - The listing.
+ * @param columnSorted - True while a column's header sorts the grid.
+ * @returns The line, or null.
+ */
+export function sortNote(state: Pick<IPagerState, 'status' | 'storeSorted' | 'rows'>, columnSorted: boolean): string | null {
+	if (state.status === 'done' || state.status === 'idle' || state.rows.length === 0) return null;
+	if (!columnSorted && state.storeSorted) return null;
+	const n = state.rows.length;
+	return `Sorted within the ${formatCount(n)} loaded ${n === 1 ? 'document' : 'documents'}; the store holds more.`;
+}
+
+/**
+ * How many documents the list shows, out of what is loaded (never a total the store did not give).
+ *
+ * @param shown - Rows the grid lists (after the path box, the folder and the review).
+ * @param state - The listing.
+ * @returns e.g. '42 documents', '12 of 42 documents', '1,200 loaded', '12 of 1,200 loaded'.
+ */
+export function listCountText(shown: number, state: Pick<IPagerState, 'status' | 'rows'>): string {
+	const loaded = state.rows.length;
+	if (state.status === 'done') return shown === loaded ? `${formatCount(loaded)} ${loaded === 1 ? 'document' : 'documents'}` : `${formatCount(shown)} of ${formatCount(loaded)} documents`;
+	return shown === loaded ? `${formatCount(loaded)} loaded` : `${formatCount(shown)} of ${formatCount(loaded)} loaded`;
+}
+
+/** A document's Health cell: the flags' words, '—' where the store does not report what they need, else empty. */
+export interface IHealthCell {
+	text: string;
+	/** The flags' sentences, or why nothing is said. */
+	title: string;
+	/** A defect (not oversize alone). */
+	attention: boolean;
+}
+
+/**
+ * The Health column of one document (its flags' words; a defect needs attention).
+ *
+ * @param item - The document.
+ * @param median - The median chunks per loaded document once the listing settled, else null (oversize not checked).
+ * @returns The cell.
+ */
+export function healthCell(item: IDocumentItem, median: number | null): IHealthCell {
+	const health = documentHealth(item, { medianChunks: median });
+	if (health.flags.length > 0) return { text: health.flags.map((f) => f.label).join(', '), title: health.flags.map((f) => f.detail).join(' '), attention: needsAttention(health) };
+	if (health.unchecked.includes('gaps') || health.unchecked.includes('deleted_chunks')) return { text: '—', title: HEALTH_NOT_REPORTED, attention: false };
+	return { text: '', title: 'No problem found in what this store reports.', attention: false };
+}
+
+/** The Documents tab's widths (px). */
+export const DOCUMENTS_LAYOUT = Object.freeze({ rail: 220, drawer: 360, drawerMin: 300, gridMin: 600 });
+
+/** Where the Documents tab's parts go. */
+export interface IDocumentsLayout {
+	/** The folder rail is shown. */
+	rail: boolean;
+	/** The rail is hidden only to leave the grid its room (a "Folders" button brings it back). */
+	railHidden: boolean;
+	/** The drawer's width beside the grid (px), or 0 when it is closed or stacked under the grid. */
+	drawer: number;
+	/** The drawer goes under the grid (too narrow for both side by side). */
+	stacked: boolean;
+}
+
+/**
+ * The Documents tab's layout: the grid keeps at least `gridMin` px. With the drawer open the rail goes first, then the
+ * drawer narrows to its minimum, then it moves under the grid.
+ *
+ * @param width - The tab's width (px).
+ * @param opts - `drawer`: the drawer is open; `forceRail`: the rail was asked back.
+ * @returns The layout.
+ */
+export function documentsLayout(width: number, opts: { drawer: boolean; forceRail: boolean }): IDocumentsLayout {
+	const { rail, drawer, drawerMin, gridMin } = DOCUMENTS_LAYOUT;
+	if (!opts.drawer) {
+		const fits = width >= rail + gridMin;
+		return { rail: fits || opts.forceRail, railHidden: !fits && !opts.forceRail, drawer: 0, stacked: false };
+	}
+	if (width >= rail + drawer + gridMin) return { rail: true, railHidden: false, drawer, stacked: false };
+	if (opts.forceRail) return width >= rail + drawerMin + gridMin ? { rail: true, railHidden: false, drawer: width - rail - gridMin, stacked: false } : { rail: true, railHidden: false, drawer: 0, stacked: true };
+	if (width >= drawer + gridMin) return { rail: false, railHidden: true, drawer, stacked: false };
+	if (width >= drawerMin + gridMin) return { rail: false, railHidden: true, drawer: width - gridMin, stacked: false };
+	return { rail: false, railHidden: true, drawer: 0, stacked: true };
+}
+
+/** The neighbours the drawer asks for, beyond the document's own chunks. */
+export const SIMILAR_K = 12;
+
+/**
+ * How many neighbours Find similar asks for: enough that the document's own chunks (left out of the answer) do not
+ * crowd out the others, within the node's limit.
+ *
+ * @param max - `limits.neighbors_k_max`.
+ * @param chunks - The document's chunk count, or null when the store did not count them.
+ * @param loaded - Chunks of it the drawer has read (the count to use when the store gave none).
+ * @returns k.
+ */
+export function similarK(max: number, chunks: number | null, loaded: number): number {
+	return Math.max(1, Math.min(max, SIMILAR_K + Math.max(0, chunks ?? loaded)));
+}
+
+/** One document near another one's chunk. */
+export interface ISimilarDocument {
+	objectId: string;
+	path: string;
+	/** The highest similarity of its chunks among the neighbours. */
+	best: number;
+	/** How many of its chunks are among the neighbours. */
+	chunks: number;
+}
+
+/**
+ * The documents among a chunk's neighbours, the document itself left out, the nearest first.
+ *
+ * @param items - The `neighbors` answer's items.
+ * @param objectId - The document whose chunk was asked about.
+ * @returns The documents.
+ */
+export function similarDocuments(items: readonly INeighborItem[], objectId: string): ISimilarDocument[] {
+	const byDoc = new Map<string, ISimilarDocument>();
+	for (const item of items) {
+		const id = item.key[0];
+		if (id === objectId) continue;
+		const known = byDoc.get(id);
+		if (known) {
+			known.best = Math.max(known.best, item.sim);
+			known.chunks += 1;
+		} else byDoc.set(id, { objectId: id, path: item.path, best: item.sim, chunks: 1 });
+	}
+	return [...byDoc.values()].sort((a, b) => b.best - a.best || compareText(a.path, b.path) || compareText(a.objectId, b.objectId));
+}
+
+/**
+ * The rows of the staged documents (the review): the loaded row of each, else what staging kept (its path and chunk
+ * count; the rest not known).
+ *
+ * @param staged - The staged documents, in the order staged.
+ * @param loaded - The loaded rows by objectId.
+ * @returns The rows, and the ids that have no loaded row.
+ */
+export function stagedRows(staged: Iterable<{ objectId: string; path: string; chunks: number | null }>, loaded: ReadonlyMap<string, IDocumentItem>): { rows: IDocumentItem[]; unloaded: ReadonlySet<string> } {
+	const rows: IDocumentItem[] = [];
+	const unloaded = new Set<string>();
+	for (const target of staged) {
+		const row = loaded.get(target.objectId);
+		if (row) {
+			rows.push(row);
+			continue;
+		}
+		unloaded.add(target.objectId);
+		rows.push({ objectId: target.objectId, path: target.path, chunks: target.chunks, has_first_chunk: true, tables: null, deleted: false, nodeId: null, size: null, modifyTime: null, ingestedAt: null, pointId: null });
+	}
+	return { rows, unloaded };
+}
+
+/** How much of a chunk the drawer shows (the document tab shows it all). */
+export const CHUNK_PREVIEW_CHARS = 180;
+
+/**
+ * The first characters of a chunk, on one line.
+ *
+ * @param text - The chunk.
+ * @returns At most CHUNK_PREVIEW_CHARS characters, with an ellipsis when cut.
+ */
+export function chunkPreview(text: string): string {
+	const flat = text.replace(/\s+/g, ' ').trim();
+	return flat.length <= CHUNK_PREVIEW_CHARS ? flat : `${flat.slice(0, CHUNK_PREVIEW_CHARS).replace(/\s+\S*$/, '')}…`;
+}
+
+/**
+ * The Documents list when the store holds no document yet.
+ *
+ * @param canAdd - Adding documents works in this mount (the header's Add documents).
+ * @returns The sentence.
+ */
+export function noDocumentsText(canAdd: boolean): string {
+	return canAdd ? 'No documents yet. Add documents, in the header, adds the first one.' : 'No documents yet.';
+}
+
+/**
+ * A document as the write confirmations need it.
+ *
+ * @param item - The document.
+ * @returns The target: its path and the chunk count the store reported.
+ */
+export function targetOf(item: Pick<IDocumentItem, 'objectId' | 'path' | 'chunks'>): { objectId: string; path: string; chunks: number | null } {
+	return { objectId: item.objectId, path: item.path, chunks: item.chunks };
+}
+
+/** Find similar while the store answers another neighbours or recommend call (it runs one at a time). */
+export const SIMILAR_BUSY_TEXT = 'The store is answering another neighbours or recommend request; try again in a moment.';
+
+/**
+ * Why Find similar has no answer.
+ *
+ * @param error - What the call threw.
+ * @returns The sentence, or null for an answer that is no longer wanted.
+ */
+export function similarFailureText(error: unknown): string | null {
+	if (error instanceof ExplorerToolError && error.code === 'BUSY') return SIMILAR_BUSY_TEXT;
+	const text = failureText(error);
+	return text === null ? null : text.headline;
+}
+
+/**
+ * A row's tooltip in the Documents grid: path, type, size, ingest time, its health and its objectId.
+ *
+ * @param item - The document.
+ * @param health - Its Health cell.
+ * @returns The tooltip.
+ */
+export function documentTooltip(item: IDocumentItem, health: Pick<IHealthCell, 'text' | 'attention'>): string {
+	const parts = [item.path || '(no path)', fileTypeOf(item.path)];
+	if (item.size !== null) parts.push(formatSize(item.size));
+	if (item.ingestedAt !== null) parts.push(`ingested ${item.ingestedAt.replace('T', ' ').replace('Z', ' UTC')}`);
+	if (health.text !== '' && health.text !== '—') parts.push(health.attention ? `needs attention: ${health.text}` : health.text);
+	parts.push(`objectId ${item.objectId}`);
+	return parts.join(' · ');
 }

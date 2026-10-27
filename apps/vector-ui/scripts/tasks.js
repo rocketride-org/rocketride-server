@@ -141,6 +141,9 @@ const FEATURE_TESTS = {
 	'savedViews.test.ts': 'src/vector/savedViews.ts',
 	// The grid of the Documents and Trash tabs and the document tab's chunks.
 	'vector.grid.test.tsx': 'src/vector/grid.ts',
+	// The Documents tab's folder rail, and the Documents and Trash tabs with the pending bar.
+	'vector.tree.test.ts': 'src/vector/tree.ts',
+	'documents.tab.test.tsx': 'src/components/DocumentsTab.tsx',
 };
 
 /**

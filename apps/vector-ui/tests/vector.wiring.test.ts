@@ -151,8 +151,8 @@ test('the console renders the strip, the directory, the chunks, adding documents
 	// Today's parts, each in the tab that holds it now.
 	for (const [file, parts] of [
 		['components/OverviewPanel.tsx', ['<StatsStrip']],
-		['components/DocumentsTab.tsx', ['<DocumentDirectory', '<ChunkList']],
-		['components/TrashTab.tsx', ['<DocumentDirectory']],
+		['components/DocumentsTab.tsx', ['<FolderRail', '<ScopeBar', '<VectorGrid', '<DocumentDrawer']],
+		['components/TrashTab.tsx', ['<ScopeBar', '<VectorGrid']],
 		['components/QueryTab.tsx', ['<ChatPanel']],
 		['components/AddDocumentsAside.tsx', ['<IngestPanel']],
 		['components/CollectionPanel.tsx', ['<ConnectionDrawerDetails']],
@@ -162,7 +162,7 @@ test('the console renders the strip, the directory, the chunks, adding documents
 	assert.match(view, /entry\.controller\.setVisible\(active\)/, 'hidden: no quick stats, the directory pauses');
 	assert.match(view, /entry\.controller\.setWritesEnabled\(model\.writes\.enabled\)/, 'nothing is confirmed or sent while writes are off');
 	for (const file of ['components/DocumentsTab.tsx', 'components/TrashTab.tsx']) {
-		assert.match(code(file), /writes=\{writesDuringRemoval\(model\.writes, state\.removal\.status\)\}/, `${file}: the trash follows the model, and is disabled while a removal runs`);
+		assert.match(code(file), /const writes = writesDuringRemoval\(model\.writes, state\.removal\.status\);/, `${file}: the writes follow the model, and are unavailable while a removal runs`);
 	}
 	assert.match(view, /\(state\.removal\.status === 'running' \|\| state\.removal\.message\) &&/, 'the status line says Removing… while a removal runs');
 	assert.match(view, /entry\.controller\.open\(\)/);
@@ -185,7 +185,7 @@ test('the scope: the listing asks for its conditions, its documents resolve from
 	assert.match(query, /\{model\.chat\.enabled && chatNotice !== null && \(\s*<p role="status" data-chat-scope-notice=""[^>]*>\s*\{chatNotice\}/, 'the chat says when its question goes to every document');
 	assert.match(view, /savedFiltersFor\(savedFilters, entry\.key\)/, "the app's per-connection map, emptied on a change of identity");
 	assert.match(view, /<DocumentsTab [^>]*scope=\{scope\} onScope=\{setScope\} cap=\{cap\}/);
-	assert.match(code('components/DocumentsTab.tsx'), /<DocumentDirectory [\s\S]*?scope=\{scope\} onScope=\{onScope\} cap=\{cap\}/);
+	assert.match(code('components/DocumentsTab.tsx'), /<ScopeBar [^>]*scope=\{scope\} onScope=\{onScope\} cap=\{cap\}/);
 	assert.match(view, /<OverviewPanel [^>]*scopeLine=\{scopeLine\} health=\{health\} onChartScope=\{scopeFromChart\} \/>/);
 	const overview = code('components/OverviewPanel.tsx');
 	assert.match(overview, /<StatsStrip [^>]*scopeLine=\{scopeLine\}/);
@@ -193,13 +193,16 @@ test('the scope: the listing asks for its conditions, its documents resolve from
 	assert.match(view, /scopeWith\(scope, scope\?\.filter\.path_contains \?\? '', filter\)/, "a bar sets its kind of condition and keeps the scope's others");
 	assert.match(view, /const scopeFromChart = useCallback\(/, 'the charts are memoised: their click handler keeps its identity between renders');
 	assert.match(view, /const next = scopeWith\(scope, scope\?\.filter\.path_contains \?\? '', filter\);\s*const refused = checkScope\(next\);\s*if \(refused !== null\) announcer\.announce\(refused\);\s*else entry\.scope\.set\(next\);/, 'a bar the node would refuse is said, never sent');
-	const dir = code('components/DocumentDirectory.tsx');
+	const dir = code('components/DocumentsTab.tsx');
 	assert.match(dir, /directoryView\(pager, scope, applied, cap\)/);
-	assert.match(dir, /<ScopeBar [^>]*listing=\{pager\}/, "the toggles say how far the scope's documents are");
-	assert.match(dir, /useDebounced\(filter, FILTER_DEBOUNCE_MS\)/);
-	assert.match(dir, /Scope to this folder/);
-	assert.match(dir, /const next = scopeWith\(scope, applied, \{ path_prefix: folderMenu\.folder \}\);\s*const refused = checkScope\(next\);\s*setFolderError\(refused\);\s*if \(refused === null\) onScope\?\.\(next\);/, 'a folder the node would refuse is said, never sent');
+	assert.match(dir, /<ScopeBar [^>]*listing=\{state\.directory\}/, "the toggles say how far the scope's documents are (the listing itself, even while the grid holds its last rows)");
+	assert.match(dir, /useDebounced\(text, FILTER_DEBOUNCE_MS\)/);
+	// A folder in the rail narrows what is loaded; setting the scope to it is its own, explicit action (C2).
+	assert.match(dir, /folderRows\(view\.rows, folder\)/);
+	assert.match(dir, /Scope search, map and Ask to this folder/);
+	assert.match(dir, /const next = scopeWith\(scope, applied, \{ path_prefix: prefix \}\);\s*const refused = checkScope\(next\);\s*setFolderError\(refused\);\s*if \(refused === null\) \{\s*onScope\(next\);/, 'a folder the node would refuse is said, never sent');
 	assert.match(dir, /\{folderError !== null && \(\s*<div role="alert"[^>]*>\s*\{folderError\}/);
+	assert.doesNotMatch(code('components/FolderRail.tsx'), /onScope|setFilter|scopeWith/, 'the rail never changes the scope or the listing');
 });
 
 test("a document's health: the tab compares with the console's loaded documents and counts deleted chunks only when asked; the directory and the strip use the same flags", () => {
@@ -212,11 +215,12 @@ test("a document's health: the tab compares with the console's loaded documents 
 	assert.match(view, /onProbe=\{\(\) => void countDeleted\(\)\}/, 'the two one-row chunks calls run only on the click');
 	assert.match(view, /model\.capabilities\.soft_delete === true/, 'offered only where the store soft-deletes');
 	assert.doesNotMatch(view, /Without first chunk/);
-	assert.match(code('components/DocumentDirectory.tsx'), /buildGroups\(matches, \{ medianChunks: median, trash: inTrash \}\)/);
+	assert.match(code('components/DocumentsTab.tsx'), /healthCell\(item, median\)/, "the Documents grid's Health column");
+	assert.match(code('components/DocumentsTab.tsx'), /pager\.status === 'loading' \|\| pager\.status === 'idle' \? null : medianChunks\(pager\.rows\)/, 'oversize waits for the listing to settle');
 	assert.match(code('views/ConsoleView.tsx'), /healthSummary\(state\.directory\.rows, \{ medianChunks: settled \? medianChunks\(state\.directory\.rows\) : null, complete: state\.directory\.status === 'done' && state\.directory\.filter === null \}\)/);
 });
 
-test('every removal is confirmed inline in the document that shows it, in both mounts (no app-level dialog); the dialogs keep Cancel focused by their own mount effect', () => {
+test('every removal is confirmed inline in the document that shows it, in both mounts (no app-level dialog); the panel takes the first focus by the write\'s weight', () => {
 	const app = code('VectorApp.tsx');
 	assert.doesNotMatch(app, /RemoveDialogHost/, 'the full app mounts no modal confirmation');
 	assert.match(code('views/ConsoleView.tsx'), /<InlineRemoveConfirm entry=\{entry\} probe=\{probe\} origin=\{CONSOLE_ORIGIN\} returnFocus=\{returnFocus\} \/>/, 'the workbench confirms its own requests inline, on every tab');
@@ -224,49 +228,46 @@ test('every removal is confirmed inline in the document that shows it, in both m
 	assert.match(code('components/InlineRemoveConfirm.tsx'), /firstFocusable\(\[how\.current === 'cancel' \? back : null, closing\.current\.returnFocus\?\.\(\)\]\)/, 'after Cancel, back to the opener first');
 	assert.match(app, /<DocumentView [^>]*beforeBody=\{<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} origin=\{documentOrigin\(payload\.objectId\)\} \/>\}/, "and the full app's document tab its own (it shares the console's controller)");
 	assert.match(app, /origin: documentOrigin\(payload\.objectId\),/, "the tab's actions ask under its origin");
-	for (const file of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx']) {
-		const source = code(file);
-		assert.match(source, /useEffect\(\(\) => \{\s*focusCancelIn\(anchor\.current, REMOVE_CANCEL_LABEL\);\s*\}, \[\]\);/, file);
-		assert.match(source, /\bdestructive\b/, file);
-		assert.match(source, /confirmDisabled=\{!ready\}/, `${file}: a typed confirmation gates Remove`);
-	}
-	const host = code('components/RemoveDialogHost.tsx');
-	assert.match(host, /entry\.controller\.confirmRemove\(\)/);
-	assert.match(host, /entry\.controller\.cancelRemove\(\)/);
-	for (const file of ['components/DocumentRow.tsx', 'views/DocumentView.tsx', 'components/DocumentDirectory.tsx', 'views/ConsoleView.tsx', 'components/DocumentsTab.tsx', 'components/TrashTab.tsx', 'components/PendingBar.tsx']) {
+	for (const file of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/RemoveDialogHost.tsx']) assert.ok(!fs.existsSync(path.join(SRC, file)), `${file}: no modal confirmation is left`);
+	const panel = code('components/InlineRemoveConfirm.tsx');
+	assert.match(panel, /if \(!content\.destructive\) confirmButton\.current\?\.focus\(\);\s*else if \(content\.typed\) input\.current\?\.focus\(\);\s*else Array\.from\(actions\.current\?\.querySelectorAll\('button'\) \?\? \[\]\)\.find\(\(button\) => button\.textContent\?\.trim\(\) === content\.cancelLabel\)\?\.focus\(\);/, 'Confirm for a move to the trash; the typed field, else Cancel, for a permanent write');
+	assert.match(code('components/VectorGrid.tsx'), /data-return-focus=\{returnId === id \? '' : undefined\}/, 'the grid marks the row after the rows a confirmed write takes away, for the hub\'s fallback');
+	for (const file of ['components/DocumentsTab.tsx', 'components/TrashTab.tsx']) assert.match(code(file), /leaving=\{leaving\}/, `${file}: tells its grid which rows the open confirmation takes away`);
+	for (const file of ['views/DocumentView.tsx', 'views/ConsoleView.tsx', 'components/DocumentsTab.tsx', 'components/TrashTab.tsx', 'components/PendingBar.tsx', 'components/DocumentDrawer.tsx', 'components/FolderRail.tsx', 'components/VectorGrid.tsx']) {
 		assert.doesNotMatch(code(file), /\b(deleteBatch|trashBatch|restoreBatch)\b|'(remove_document|delete|soft_delete|restore)'/, `${file} never writes on its own`);
 	}
 });
 
-test('the trash buttons say what they do, and are disabled with the reason', () => {
-	for (const file of ['components/DocumentRow.tsx', 'views/DocumentView.tsx']) {
-		const source = code(file);
-		assert.match(source, /aria-label=\{`Move \$\{\w+\} to the trash`\}/, file);
-		assert.match(source, /disabled=\{!(model\.)?writes\.enabled\}/, file);
-		assert.match(source, /writes\.reason/, file);
-	}
-	const row = code('components/DocumentRow.tsx');
-	assert.match(row, /aria-label=\{`Restore \$\{\w+\}`\}/, 'a trashed row restores');
-	assert.match(row, /aria-label=\{`Delete \$\{\w+\} permanently`\}/, 'and deletes permanently');
+test('the trash buttons say what they do, and say why when they are unavailable', () => {
+	const view = code('views/DocumentView.tsx');
+	assert.match(view, /aria-label=\{`Move \$\{\w+\} to the trash`\}/);
+	assert.match(view, /disabled=\{!(model\.)?writes\.enabled\}/);
+	assert.match(view, /writes\.reason/);
+	const documents = code('components/DocumentsTab.tsx');
+	assert.match(documents, /aria-label=\{`Stage \$\{name\} to move to the trash`\} aria-disabled=\{writes\.enabled \? undefined : true\} title=\{writes\.enabled \? undefined : \(writes\.reason \?\? undefined\)\}/, 'a row stages; writes off, it says why and stays focusable');
+	const trash = code('components/TrashTab.tsx');
+	assert.match(trash, /aria-label=\{`Restore \$\{label\(item\)\}`\} title=\{off \?\? `Restore \$\{label\(item\)\}`\} aria-disabled=\{off !== null \|\| undefined\}/, 'a trashed row restores');
+	assert.match(trash, /aria-label=\{`Delete \$\{label\(item\)\} permanently`\} title=\{off \?\? `Delete \$\{label\(item\)\} permanently`\} aria-disabled=\{off !== null \|\| undefined\}/, 'and deletes permanently');
+	assert.match(code('components/GatedButton.tsx'), /aria-disabled=\{off \|\| undefined\}[\s\S]*title=\{off \? unavailable : title\}[\s\S]*if \(!off\) onClick\(\);/, 'an unavailable control keeps the focus and says why');
 });
 
-test('the Trash tab: the directory gets the trash listing, the store count and the trash actions; each write is confirmed with its own words', () => {
+test('the Trash tab: the trash listing, the store count and the trash actions; each write is confirmed with its own words', () => {
 	const view = code('views/ConsoleView.tsx');
 	const documents = code('components/DocumentsTab.tsx');
 	const trash = code('components/TrashTab.tsx');
 	assert.match(view, /<TrashTab \{\.\.\.panel\('trash'\)\} \/>/);
-	assert.match(documents, /pager=\{state\.directory\}/);
-	assert.match(trash, /pager=\{state\.trash\}/);
+	assert.match(documents, /const pager = restarting \? held\.current : state\.directory;/, 'Documents lists the directory (holding its rows while the same listing starts over)');
+	assert.match(trash, /const pager = state\.trash;/);
 	// The controller pages the listing its view names: each tab names its own while it shows (the trash is listed once, when first shown).
 	assert.match(documents, /if \(visible\) entry\.controller\.setView\('active'\);/);
 	assert.match(trash, /if \(visible\) entry\.controller\.setView\('trash'\);/);
-	// The directory's Documents / Trash switch follows the tabs.
-	assert.match(documents, /view="active" onView=\{\(next\) => entry\.tab\.set\(next === 'trash' \? 'trash' : 'documents'\)\}/);
-	assert.match(trash, /view="trash" onView=\{\(next\) => entry\.tab\.set\(next === 'trash' \? 'trash' : 'documents'\)\}/);
-	for (const file of [documents, trash]) assert.match(file, /trashCount=\{state\.stats\.view\?\.deletedDocuments \?\? null\}/, 'the badge is the store count, never the loaded rows');
-	assert.match(trash, /onRestore=\{\(targets\) => void entry\.controller\.restore\(targets\)\}/);
-	assert.match(trash, /onDelete=\{\(targets\) => entry\.controller\.requestDelete\(targets\)\}/);
-	assert.match(trash, /onEmptyTrash=\{\(\) => void entry\.controller\.requestEmptyTrash\(\)\}/);
+	for (const file of [documents, trash]) assert.match(file, /state\.stats\.view\?\.deletedDocuments \?\? null/, 'the Trash count is the store count, never the loaded rows');
+	assert.match(trash, /onRestore: \(item\) => void entry\.controller\.restore\(\[targetOf\(item\)\]\)/);
+	assert.match(trash, /onClick=\{\(\) => void entry\.controller\.restore\(checkedItems\.map\(targetOf\)\)\}/);
+	assert.match(trash, /onDelete: \(item\) => entry\.controller\.requestDelete\(\[targetOf\(item\)\]\)/);
+	assert.match(trash, /onClick=\{\(\) => entry\.controller\.requestDelete\(checkedItems\.map\(targetOf\)\)\}/);
+	assert.match(trash, /onClick=\{\(\) => void entry\.controller\.requestEmptyTrash\(\)\}/);
+	assert.match(code('components/PendingBar.tsx'), /onClick=\{\(\) => entry\.controller\.requestRemove\(\[\.\.\.staged\.values\(\)\]\)\}/, 'Apply: the one confirmation for every staged document');
 	assert.match(code('components/InlineRemoveConfirm.tsx'), /confirmationFor\(pending, removeContextFor\(entry\.ctx\.endpoint, probe\)\)/);
 	const confirm = code('vector/confirm.ts');
 	const chooser = confirm.slice(confirm.indexOf('export function confirmationFor'));

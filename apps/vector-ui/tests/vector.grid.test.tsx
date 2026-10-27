@@ -161,3 +161,13 @@ test("the grid's source: keys on its own element, no listener above it, nothing 
 	assert.match(source, /if \(action\.kind !== 'move' && event\.target !== row\) return;/, "Enter and Space on a control inside a row are the control's");
 	assert.doesNotMatch(source, /rows\[[^\]]+\]\s*=|\.sort\(\)|\.reverse\(\)|\.splice\(/, 'the rows are read, never written');
 });
+
+test('rows a write is about to take away: the row after them is rendered and marked for the focus, wherever the list is scrolled', () => {
+	const many = Array.from({ length: 500 }, (_, i) => ({ id: `r${i}`, name: `n${i}`, size: i }));
+	const html = renderToStaticMarkup(<VectorGrid label="Many" rows={many} rowId={rowId} columns={COLUMNS} sort={null} onSort={noop} leaving={new Set(['r300', 'r301'])} />);
+	assert.match(html, /data-row-id="r302" aria-rowindex="304" data-return-focus=""/, 'the row after them, rendered though far out of view');
+	assert.equal(html.match(/data-return-focus/g)?.length, 1);
+	const last = renderToStaticMarkup(<VectorGrid label="Rows" rows={ROWS} rowId={rowId} columns={COLUMNS} sort={null} onSort={noop} leaving={new Set(['d'])} />);
+	assert.match(last, /data-row-id="c" aria-rowindex="4" data-return-focus=""/, 'the last rows: the one before them');
+	assert.doesNotMatch(renderToStaticMarkup(<VectorGrid label="Rows" rows={ROWS} rowId={rowId} columns={COLUMNS} sort={null} onSort={noop} leaving={new Set(ids(ROWS))} />), /data-return-focus/, 'no row left: the grid itself takes the focus');
+});

@@ -32,6 +32,12 @@
 // chat question, refresh after an upload, announce.
 // Two helpers tell the map a question before they highlight: a chat answer's
 // (showAnswerOnMap) and Search's two compared questions (showCompareOnMap).
+//
+// Two small per-connection values pass between the console's parts without
+// a prop path, each made on first use and kept with the connection's staged
+// set (so they go when its entry goes, in both mounts): whether the
+// Documents tab shows only the staged documents (the pending bar's Review),
+// and the folder its list is narrowed to (the rail, Overview's Top folders).
 // =============================================================================
 
 import type { ConsoleActions, HighlightSource, IStageTarget, SelectionStore, VectorKey } from '../contract/types';
@@ -39,8 +45,10 @@ import { CONSOLE_ORIGIN } from '../vector/confirm';
 import type { ConfirmOrigin, IRemoveTarget } from '../vector/confirm';
 import { DEFAULT_LIMITS } from '../vector/results';
 import { stage } from '../vector/staged';
+import type { FolderView } from '../vector/tree';
 import type { WorkbenchTab } from '../vector/workbench';
-import type { IConnectionEntry } from './connections';
+import { createValueStore } from './connections';
+import type { IConnectionEntry, IValueStore } from './connections';
 
 /**
  * What "Ask about these" says instead of scoping the chat to more documents than the node takes.
@@ -191,4 +199,42 @@ export function makeConsoleActions(entry: Pick<IConnectionEntry, 'controller' | 
 		documentsChanged: () => entry.controller.documentsChanged(),
 		announce: (text: string) => deps.announce(text),
 	};
+}
+
+/** The Documents tab shows only the staged documents, per connection (the pending bar's Review). */
+const reviews = new WeakMap<object, IValueStore<boolean>>();
+
+/**
+ * Whether the connection's Documents tab shows only its staged documents.
+ *
+ * @param entry - The connection (its staged set keys the value).
+ * @returns The value store.
+ */
+export function stagedReview(entry: Pick<IConnectionEntry, 'staged'>): IValueStore<boolean> {
+	let store = reviews.get(entry.staged);
+	if (!store) {
+		store = createValueStore(false);
+		reviews.set(entry.staged, store);
+	}
+	return store;
+}
+
+/** The folder the Documents tab's list is narrowed to, per connection (vector/tree.ts FolderView). */
+const folders = new WeakMap<object, IValueStore<FolderView | null>>();
+
+/**
+ * The folder the connection's Documents tab narrows its list to: a view of the loaded rows (subfolders included),
+ * never the scope and never a new listing. Null shows every loaded document. The folder rail sets it; another tab
+ * (Overview's Top folders) sets it, then shows the Documents tab (`openTab('documents')`).
+ *
+ * @param entry - The connection (its staged set keys the value).
+ * @returns The value store.
+ */
+export function documentsFolder(entry: Pick<IConnectionEntry, 'staged'>): IValueStore<FolderView | null> {
+	let store = folders.get(entry.staged);
+	if (!store) {
+		store = createValueStore<FolderView | null>(null);
+		folders.set(entry.staged, store);
+	}
+	return store;
 }

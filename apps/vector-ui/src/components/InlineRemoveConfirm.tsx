@@ -21,18 +21,21 @@
 // SOFTWARE.
 
 // =============================================================================
-// VECTOR-UI - INLINE REMOVE CONFIRMATION (in a dev-tool document, never a modal)
+// VECTOR-UI - INLINE REMOVE CONFIRMATION (in the workbench and a document, never a modal)
 // =============================================================================
 //
-// The full app confirms a write with the shell's ConfirmDialog from one host
-// at its root. A dev-tool document cannot: rocket-ui keeps hidden documents
-// mounted (display: none), and a window-wide modal left open in a background
-// document would trap Tab, lock the page scroll and take Escape for the whole
-// realm (F14). So a frame shows the SAME confirmation (vector/confirm.ts: the
-// words, the typed rule, Cancel first) as a panel inside its own document,
-// with no overlay, no focus trap and no document or window listener: Cancel
-// takes the focus when it opens, Escape cancels while the focus is inside it,
-// and Confirm stays unavailable until the typed rule is met.
+// rocket-ui keeps hidden documents mounted (display: none), and a
+// window-wide modal left open in a background document would trap Tab, lock
+// the page scroll and take Escape for the whole realm (F14). So every write
+// is confirmed by this panel inside its own document, in both mounts (D10),
+// with the words and the typed rule of vector/confirm.ts, no overlay, no
+// focus trap and no document or window listener. When it opens the focus
+// goes by the write's weight: Confirm for one that can be undone (Move to
+// trash); for one that cannot (Delete permanently, Empty trash) the typed
+// field, else Cancel, never the destructive button. Escape cancels while the
+// focus is inside it (unless an inner handler already acted), and Confirm
+// stays unavailable (aria-disabled, so it keeps the focus) until the typed
+// rule is met.
 //
 // It shows the pending confirmation of its connection's controller, which
 // alone sends anything, on the surface that asked for it (its origin: the
@@ -42,11 +45,12 @@
 //
 // When it closes with the focus inside it (or lost), the focus goes where
 // `onClosed` put it; else, after Cancel, back to what had it when the panel
-// opened; else to `returnFocus` (the surface's fallback). Never `<body>`, and
-// never an element of a hidden panel.
+// opened; else to `returnFocus` (the surface's fallback: in the workbench,
+// the row its grid marks after the rows the write takes away, else the
+// grid, else the tab). Never `<body>`, and never an element of a hidden panel.
 // =============================================================================
 
-import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { Button, commonStyles } from 'shell';
 import type { IProbeResult } from 'shared/explorer';
@@ -55,7 +59,7 @@ import { CONSOLE_ORIGIN, confirmElsewhereText, confirmReady, confirmationFor, re
 import type { ConfirmOrigin, ConfirmationView } from '../vector/confirm';
 import { firstFocusable, focusLost } from '../vector/focus';
 import { formatCount } from '../vector/stats';
-import { styles as appStyles } from '../styles';
+import { FOCUS_RING, styles as appStyles } from '../styles';
 
 const styles = {
 	panel: {
@@ -129,10 +133,13 @@ export function InlineRemoveConfirm({ entry, probe, origin = CONSOLE_ORIGIN, ret
 	return <ConfirmPanel key={dialogKey} view={view} onConfirm={() => void entry.controller.confirmRemove()} onCancel={() => entry.controller.cancelRemove()} returnFocus={returnFocus} onClosed={onClosed} />;
 }
 
-/** One confirmation, keyed on what it confirms (a new one starts with an empty typed field and the focus on Cancel). */
+/** One confirmation, keyed on what it confirms (a new one starts with an empty typed field and its own first focus). */
 const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCancel(): void; returnFocus?: () => HTMLElement | null; onClosed?: (how: ConfirmClose) => void }> = ({ view, onConfirm: sendWrite, onCancel: dropWrite, returnFocus, onClosed }) => {
 	const region = useRef<HTMLElement>(null);
 	const actions = useRef<HTMLDivElement>(null);
+	const confirmButton = useRef<HTMLButtonElement>(null);
+	const input = useRef<HTMLInputElement>(null);
+	const sentenceId = useId();
 	// What had the focus when the confirmation opened (before Cancel takes it): Cancel gives it back.
 	const opener = useRef<HTMLElement | null>(typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null);
 	const [typed, setTyped] = useState('');
@@ -142,10 +149,11 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 	const how = useRef<ConfirmClose>('cancel');
 	const closing = useRef({ returnFocus, onClosed });
 	closing.current = { returnFocus, onClosed };
-	// Opened: Cancel has the focus, so a stray Enter cancels (the dialogs' own rule).
+	// Opened: the first focus by the write's weight (Confirm for one that can be undone; never the destructive button).
 	useEffect(() => {
-		const cancel = Array.from(actions.current?.querySelectorAll('button') ?? []).find((button) => button.textContent?.trim() === content.cancelLabel);
-		cancel?.focus();
+		if (!content.destructive) confirmButton.current?.focus();
+		else if (content.typed) input.current?.focus();
+		else Array.from(actions.current?.querySelectorAll('button') ?? []).find((button) => button.textContent?.trim() === content.cancelLabel)?.focus();
 		// Once, when the confirmation opens (it is keyed on what it confirms).
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
@@ -160,6 +168,7 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 		};
 	}, []);
 	const onConfirm = (): void => {
+		if (!ready) return;
 		how.current = 'confirm';
 		sendWrite();
 	};
@@ -175,6 +184,7 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 			data-inline-confirm=""
 			style={styles.panel}
 			onKeyDown={(event) => {
+				if (event.defaultPrevented) return;
 				if (event.key === 'Escape') {
 					event.preventDefault();
 					onCancel();
@@ -203,7 +213,9 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 					{view.content.more > 0 && <p style={styles.sentence}>{`and ${formatCount(view.content.more)} more`}</p>}
 				</>
 			)}
-			<p style={styles.sentence}>{content.sentence}</p>
+			<p id={sentenceId} style={styles.sentence}>
+				{content.sentence}
+			</p>
 			{content.extra.map((sentence) => (
 				<p key={sentence} style={styles.sentence}>
 					{sentence}
@@ -212,14 +224,14 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 			{content.typed && (
 				<label style={styles.typed}>
 					<span>{content.typed.prompt}</span>
-					<input type="text" value={typed} onChange={(event) => setTyped(event.target.value)} style={appStyles.input} autoComplete="off" spellCheck={false} />
+					<input ref={input} type="text" value={typed} onChange={(event) => setTyped(event.target.value)} style={appStyles.input} autoComplete="off" spellCheck={false} aria-describedby={sentenceId} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')} />
 				</label>
 			)}
 			<div ref={actions} style={styles.actions}>
 				<Button variant="ghost" onClick={onCancel}>
 					{content.cancelLabel}
 				</Button>
-				<button type="button" style={styles.confirm(content.destructive, ready)} aria-disabled={!ready} onClick={() => { if (ready) onConfirm(); }}>
+				<button ref={confirmButton} type="button" style={styles.confirm(content.destructive, ready)} aria-disabled={!ready} onClick={onConfirm} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')}>
 					{content.confirmLabel}
 				</button>
 			</div>

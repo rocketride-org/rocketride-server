@@ -557,7 +557,7 @@ test("while the scope's documents are not all known, the map, search and chat ar
 	assert.deepEqual(others({ ...half, total: null }), off("Waiting for the scope's documents (500 loaded); the map, search and chat are not scoped yet."));
 	// The first page failed: Retry.
 	assert.deepEqual(others(pagerFail(begun, { headline: 'The store did not answer in time.' })), off(SCOPE_FAILED_TEXT));
-	assert.equal(SCOPE_FAILED_TEXT, "The scope's documents did not load; Retry the directory. The map, search and chat are not scoped.");
+	assert.equal(SCOPE_FAILED_TEXT, "The scope's documents did not load; Retry under the Documents list. The map, search and chat are not scoped.");
 	// Every page in: the scope is its matches, and every surface is offered.
 	const whole = clientListed(folder, 2, handbooks, 1_000, false);
 	assert.equal(whole.status, 'done');
@@ -576,7 +576,7 @@ test('a listing that stopped short never resolves the scope from the rows it loa
 		['capped, no total', clientListed(legal, 10, rows, null, true), "Only 5,000 documents are loaded and more may exist, so the scope's documents are not all known: the map, search and chat are not scoped. Load more to include them (5,000 at a time)."],
 		['stalled', clientListed(legal, 4, rows, 12_000, true, 'stalled'), "Loading stopped at 2,000 documents, so the scope's documents are not all known: the map, search and chat are not scoped."],
 		['unsupported', clientListed(legal, 1, rows, 12_000, true, 'unsupported'), "Only the first page of documents is listed (500 loaded), so the scope's documents are not all known: the map, search and chat are not scoped."],
-		['error', clientListed(legal, 3, rows, 12_000, true, 'error'), "Loading stopped at 1,500 documents, so the scope's documents are not all known: the map, search and chat are not scoped. Retry the directory to include them."],
+		['error', clientListed(legal, 3, rows, 12_000, true, 'error'), "Loading stopped at 1,500 documents, so the scope's documents are not all known: the map, search and chat are not scoped. Retry under the Documents list to include them."],
 	];
 	for (const [name, dir, sentence] of cases) {
 		const resolved = resolveScope(scope, dir, 2_000);

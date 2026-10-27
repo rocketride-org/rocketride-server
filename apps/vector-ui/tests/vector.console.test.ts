@@ -901,7 +901,7 @@ test('consoleScope: the chat is scoped only once the scope names its documents; 
 	assert.equal(ready.readiness?.phase, 'ready');
 	// The first page failed, or the listing stopped short: nothing is scoped by it, and every surface is told so.
 	for (const [dir, words] of [
-		[failed, "The scope's documents did not load; Retry the directory. The map, search and chat are not scoped."],
+		[failed, "The scope's documents did not load; Retry under the Documents list. The map, search and chat are not scoped."],
 		[capped, "Only 500 of 12,000 documents are loaded, so the scope's documents are not all known: the map, search and chat are not scoped. Load more to include the other 11,500 (5,000 at a time)."],
 	] as const) {
 		const unknown = consoleScope(null, fresh, dir, 2_000);
@@ -988,4 +988,57 @@ test("a connection's controller probes its endpoint again through the endpoint s
 		vectorEndpoints.probe = real;
 		connectionCaches.clearAll();
 	}
+});
+
+test('Documents, then Trash, then Documents: Retry and Load more page the documents again (each tab names its listing when it shows)', async () => {
+	let failOnce = true;
+	const h = harness({
+		documents: async (cursor, _limit, _filter, deleted) => {
+			if (deleted === 'deleted') {
+				h.calls.push({ tool: 'trash listing', args: [cursor] });
+				return readDocumentsPage({ success: true, items: [], next_cursor: null, total: 0, counts_exact: true, distinct: true, sorted: true, caveats: [] });
+			}
+			h.calls.push({ tool: 'documents', args: [cursor] });
+			if (failOnce) {
+				failOnce = false;
+				throw new ExplorerToolError({ kind: 'store', tool: 'list_documents', code: 'TIMEOUT', message: 'The store did not finish within its time budget.' });
+			}
+			return readDocumentsPage(fixture('list_documents_page1'));
+		},
+	});
+	h.store.open();
+	await h.clock.settle();
+	assert.equal(h.store.getState().directory.status, 'error', 'the premise: the documents failed');
+	h.store.setView('trash');
+	await h.clock.settle();
+	h.store.setView('active');
+	const before = h.calls.length;
+	h.store.retryDocuments();
+	await h.clock.settle();
+	const after = h.calls.slice(before).map((c) => c.tool).filter((t) => t !== 'stats');
+	assert.ok(after.length > 0 && after.every((t) => t === 'documents'), `Retry pages the documents, not the trash: ${after.join(', ')}`);
+	assert.notEqual(h.store.getState().directory.status, 'error');
+	h.store.dispose();
+});
+
+test('staged documents applied: one confirmation for all of them with the paths and counts they were staged with, then one soft_delete batch; the moved ones are reported', async () => {
+	const h = harness();
+	h.store.setWritesEnabled(true);
+	const staged = [
+		{ objectId: 'a', path: 'docs/a.md', chunks: 4 },
+		{ objectId: 'm', path: 'map/m.md', chunks: null },
+	];
+	h.store.requestRemove(staged);
+	const pending = h.store.getState().confirm;
+	assert.deepEqual(pending, { action: 'trash', kind: 'multi', targets: staged, origin: 'console' }, 'nothing is sent before Confirm');
+	assert.ok(!h.tools().includes('soft_delete'));
+	await h.store.confirmRemove();
+	await h.clock.settle();
+	assert.deepEqual(h.calls.filter((c) => c.tool === 'soft_delete').map((c) => c.args), [[['a', 'm']]]);
+	assert.deepEqual(h.removedIds, [['a', 'm']], 'what moved leaves the selection, the map and the staged set (adapters/connections.ts onRemoved)');
+	h.store.requestRemove(staged);
+	h.store.cancelRemove();
+	assert.equal(h.store.getState().confirm, null);
+	assert.equal(h.calls.filter((c) => c.tool === 'soft_delete').length, 1, 'Cancel sends nothing');
+	h.store.dispose();
 });

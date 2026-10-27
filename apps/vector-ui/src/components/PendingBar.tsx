@@ -20,26 +20,98 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+
 // =============================================================================
 // VECTOR-UI - THE PENDING BAR (documents staged to move to the trash)
 // =============================================================================
 //
-// The workbench shows it under the tab row on every tab. It renders nothing
-// until staging is offered: nothing stages yet, and a document's Move to
-// trash confirms at once.
+// Inside the workbench, "Move to Trash" (the Documents grid's tick, the
+// document drawer, the map's review queues) stages a document instead of
+// confirming at once. While anything is staged this bar says how many
+// documents and, as the confirmation does, how many chunks (a sum only when
+// the store counted every one), and offers:
+//
+//   Review    the Documents tab, listing only the staged documents;
+//   Discard   unstage them all (nothing is sent);
+//   Apply     the controller's one confirmation for them all (requestRemove:
+//             nothing to type; Confirm sends soft_delete in batches). The
+//             documents that moved, or that were already gone, leave
+//             the set when the write answers (adapters/connections.ts).
+//
+// Apply is unavailable, with the reason shown, while writing is off or
+// another write runs; the staged set stays. The bar renders nothing while
+// nothing is staged, and when it goes the focus goes to the grid or the tab
+// (components/focusTargets.ts), never to the page.
 // =============================================================================
 
-import type React from 'react';
+import React, { useEffect, useId, useRef, useSyncExternalStore } from 'react';
+import type { CSSProperties } from 'react';
+import { stagedReview } from '../adapters/consoleActions';
+import { writesDuringRemoval } from '../vector/consoleModel';
+import { pendingText, stagedSummary, unstage } from '../vector/staged';
+import { styles as appStyles } from '../styles';
+import GatedButton from './GatedButton';
+import { focusFell, focusWorkbench, workbenchOf } from './focusTargets';
 import type { IWorkbenchPanelProps } from './workbenchProps';
+
+const styles = {
+	bar: { flexShrink: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, margin: '8px 24px 0', padding: '6px 12px', border: '1px solid var(--rr-border)', borderRadius: 8, background: 'var(--rr-bg-paper)' } as CSSProperties,
+	text: { ...appStyles.small, flex: '1 1 260px', minWidth: 0 } as CSSProperties,
+	reason: { ...appStyles.small, flexBasis: '100%' } as CSSProperties,
+};
 
 /**
  * The pending bar.
  *
- * @param _props - {@link IWorkbenchPanelProps}.
- * @returns Nothing yet.
+ * @param props - {@link IWorkbenchPanelProps}.
+ * @returns The bar, or nothing while nothing is staged.
  */
-export function PendingBar(_props: IWorkbenchPanelProps): React.ReactElement | null {
-	return null;
+export function PendingBar({ entry, model, console: state, actions }: IWorkbenchPanelProps): React.ReactElement | null {
+	const staged = useSyncExternalStore(entry.staged.subscribe, entry.staged.get, entry.staged.get);
+	const bar = useRef<HTMLDivElement>(null);
+	// The workbench, read while the bar is on the page: when it goes, the focus goes to the grid or the tab there.
+	const workbench = useRef<HTMLElement | null>(null);
+	const reasonId = useId();
+	const count = staged.size;
+	const shownBefore = useRef(false);
+	useEffect(() => {
+		if (count > 0) {
+			workbench.current = workbenchOf(bar.current);
+			shownBefore.current = true;
+			return;
+		}
+		// Gone (Discard, or the last staged document moved): focus the grid or the tab when it fell to the page.
+		if (shownBefore.current && focusFell()) focusWorkbench(workbench.current);
+		shownBefore.current = false;
+	}, [count]);
+	if (count === 0) return null;
+	const writes = writesDuringRemoval(model.writes, state.removal.status);
+	const reason = writes.enabled ? null : writes.reason;
+	return (
+		<div ref={bar} role="region" aria-label="Pending changes" data-pending-bar="" style={styles.bar}>
+			<span role="status" style={styles.text}>
+				{pendingText(stagedSummary(staged))}
+			</span>
+			<GatedButton
+				onClick={() => {
+					stagedReview(entry).set(true);
+					if (actions.openTab) actions.openTab('documents');
+					else entry.tab.set('documents');
+				}}
+			>
+				Review
+			</GatedButton>
+			<GatedButton onClick={() => entry.staged.set(unstage(staged, [...staged.keys()]))}>Discard</GatedButton>
+			<GatedButton variant="primary" unavailable={reason} describedBy={reason ? reasonId : undefined} onClick={() => entry.controller.requestRemove([...staged.values()])}>
+				Apply
+			</GatedButton>
+			{reason && (
+				<span id={reasonId} style={styles.reason}>
+					{`Apply is unavailable: ${reason}`}
+				</span>
+			)}
+		</div>
+	);
 }
 
 export default PendingBar;
