@@ -605,6 +605,25 @@ test('the status line offers Clear (what Escape on the map clears next) while so
 	assert.equal(line(lit), line(none), 'the same line, the same height');
 });
 
+test('the status line holds the view\'s notice in its live region while nothing runs, with its button, at the same fixed height', () => {
+	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
+	const line = (markup: string): string => /<div style="([^"]*)" data-map-status="">/.exec(markup)?.[1] ?? '';
+	const idle = html(<MapToolbar {...base} notice={null} />);
+	const cancelled = html(<MapToolbar {...base} notice={{ text: 'Layout cancelled. The map shows PCA.' }} />);
+	assert.match(cancelled, /data-map-status=""><span role="status" style="[^"]*text-overflow:ellipsis[^"]*" title="Layout cancelled\. The map shows PCA\." data-map-notice="">Layout cancelled\. The map shows PCA\.<\/span><\/div>/);
+	assert.equal(line(cancelled), line(idle), 'the same line, the same height');
+	// A saved view's query, with its button (disabled with the reason when the query cannot run).
+	const saved = html(<MapToolbar {...base} notice={{ text: 'This view had the query "water".', action: { label: 'Run saved query', onAction: noop, reason: null } }} />);
+	assert.match(saved, /data-map-notice="">This view had the query &quot;water&quot;\.<\/span><button type="button" style="[^"]*" data-map-notice-action="">Run saved query<\/button>/);
+	const blocked = html(<MapToolbar {...base} notice={{ text: 'This view had the query "water".', action: { label: 'Run saved query', onAction: noop, reason: 'Text queries need the embedding node' } }} />);
+	assert.match(blocked, /<button type="button" style="[^"]*" disabled="" title="Text queries need the embedding node" data-map-notice-action="">/);
+	// While something runs, the line has the busy words (and Cancel), never the notice.
+	const running = html(<MapToolbar {...base} busy="Laying out… 40%" canCancel notice={{ text: 'Layout cancelled. The map shows PCA.', action: { label: 'Run saved query', onAction: noop } }} />);
+	assert.match(running, /<span role="status"[^>]*>Laying out… 40%<\/span><button[^>]*>Cancel<\/button><\/div>/);
+	assert.doesNotMatch(running, /data-map-notice/);
+	assert.equal(line(running), line(idle));
+});
+
 test('the legend has one fixed height in every state and scrolls inside itself, a tab stop only while it scrolls, so the map never moves under it', () => {
 	const out = html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" notes={Array.from({ length: 12 }, (_, i) => `note ${i}`)} />);
 	assert.match(out, new RegExp(`<section aria-label="Map legend" style="[^"]*;height:${LEGEND_HEIGHT}px;box-sizing:border-box;overflow-y:auto`), 'not measured yet (a server render): no tab stop');

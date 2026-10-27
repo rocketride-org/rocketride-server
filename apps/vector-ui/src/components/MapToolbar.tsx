@@ -29,9 +29,14 @@
 // it is never behind a popover), then Advanced and the view's menus
 // (`extras`: Export, Views). Under it, a status line of its own, always there
 // at the same height: the busy words (a live region) and Cancel while a
-// layout runs, and Clear (lasso selection, highlight, selection: what Escape
-// on the map clears next) while something is lit, empty when idle. Nothing moves when a run starts or ends, and
-// nothing floats over the map or the rows under the toolbar.
+// layout runs; when nothing runs, the view's notice in the same live region
+// (a cancelled or limited layout, fewer edges drawn, a failure while a map is
+// shown, a saved view's query with its Run button); and Clear (lasso
+// selection, highlight, selection: what Escape on the map clears next) while
+// something is lit. Empty when idle. A sentence wider than the line is cut
+// with an ellipsis, its whole text in the title (and read whole by the live
+// region). Nothing moves when a run starts or ends or a notice comes or goes,
+// and nothing floats over the map or the rows under the toolbar.
 // The row is kept compact (a 120 px query box, 6 px gaps) so it is one row in
 // a dev-tool frame at 1440 too (measured: its controls span 1,061 px).
 //
@@ -104,6 +109,11 @@ export interface MapToolbarProps extends Omit<ContractMapToolbarProps, 'colourBy
 	initialAdvanced?: boolean;
 	/** What the map can clear next (a lasso, a highlight, the selection), shown on the status line; null for nothing. */
 	clear?: { label: string; onClear(): void } | null;
+	/**
+	 * The view's sentence for the status line while nothing runs (a notice, a failure, a saved view's query), with a
+	 * button when it offers one (disabled with its reason as the title); null for none.
+	 */
+	notice?: { text: string; action?: { label: string; onAction(): void; reason?: string | null } | null } | null;
 }
 
 /** The edge modes. */
@@ -264,6 +274,9 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 	const current = `${mode}:${n}`;
 	if (!sizes.some((s) => `${s.mode}:${s.n}` === current)) sizes.push({ mode, n });
 	const busy = props.busy !== null;
+	// The status line's words: the busy words while something runs, else the view's notice.
+	const notice = props.notice ?? null;
+	const words = props.busy ?? notice?.text ?? '';
 	const edges = props.edges ?? 'none';
 	const cap: EdgesPerPoint = props.edgesMCap ?? 10;
 	const capReason = `Light samples above ${num(3000)} points draw at most ${cap} edges per point`;
@@ -405,10 +418,15 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 			{props.extras ?? null}
 			{/* The status line: always there, at the same height idle or busy, so nothing moves with a run. */}
 			<div style={S.status} data-map-status="">
-				<span role="status" style={S.words} title={props.busy ?? undefined}>
-					{props.busy ?? ''}
+				<span role="status" style={S.words} title={words || undefined} data-map-notice={props.busy === null && notice ? '' : undefined}>
+					{words}
 				</span>
 				{props.busy && props.canCancel ? <CancelButton onCancel={props.onCancel} root={root} /> : null}
+				{props.busy === null && notice?.action ? (
+					<button type="button" style={S.cancel} disabled={!!notice.action.reason} title={notice.action.reason ?? undefined} onClick={notice.action.onAction} data-map-notice-action="">
+						{notice.action.label}
+					</button>
+				) : null}
 				{props.clear ? (
 					<button type="button" style={S.cancel} onClick={props.clear.onClear} data-map-clear="">
 						{props.clear.label}

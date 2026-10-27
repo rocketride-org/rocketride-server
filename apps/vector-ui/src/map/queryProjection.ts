@@ -279,3 +279,21 @@ export function comparePlan(state: { told: string | null; toldB: string | null; 
 	if (!state.embedReady || state.told === null || state.told === '' || state.toldB === null || state.toldB === '') return { runA: false, runB: false };
 	return { runA: state.told !== state.mapQuery, runB: state.toldB !== state.mapQueryB };
 }
+
+/**
+ * Place the compared pair one after the other: A, then B. The store runs one
+ * `sample` or `project` at a time and refuses a second with BUSY, so B starts
+ * only when A has ended, however it ended.
+ *
+ * @param plan - From {@link comparePlan}.
+ * @param placeA - Places A (embed, project, search).
+ * @param placeB - Places B.
+ * @returns When both have ended.
+ */
+export async function placeCompared(plan: { runA: boolean; runB: boolean }, placeA: () => Promise<void>, placeB: () => Promise<void>): Promise<void> {
+	try {
+		if (plan.runA) await placeA();
+	} finally {
+		if (plan.runB) await placeB();
+	}
+}

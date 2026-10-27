@@ -128,6 +128,44 @@ export const CENTROID_APPROX = 'approximate: the centre of the answer\'s sources
 /** Cancelled layout. */
 export const LAYOUT_CANCELLED = 'Layout cancelled. The map shows PCA.';
 
+/**
+ * A saved view's query, offered again on the status line.
+ *
+ * @param query - The view's query.
+ * @returns The sentence.
+ */
+export function savedQueryLine(query: string): string {
+	return `This view had the query "${query}".`;
+}
+
+/**
+ * The one sentence the map's status line shows while nothing runs, so none is a block above the map that moves
+ * it: a failure while a map is shown (with no map, the failure is the empty state's banner), else the view's
+ * notice (a cancelled or limited layout, fewer edges, a placement that failed), else a saved view's query.
+ *
+ * @param state - The view's failure, notice and saved query, and whether a map is shown.
+ * @returns The sentence and what it is, or null for none.
+ */
+export function statusNotice(state: { error: string | null; notice: string | null; savedQuery: string | null; hasSample: boolean }): { text: string; kind: 'error' | 'notice' | 'saved-query' } | null {
+	if (state.error !== null && state.hasSample) return { text: state.error, kind: 'error' };
+	if (state.notice !== null) return { text: state.notice, kind: 'notice' };
+	if (state.savedQuery !== null) return { text: savedQueryLine(state.savedQuery), kind: 'saved-query' };
+	return null;
+}
+
+/** Why star B is missing on a store that cannot place a question among the sample. */
+export const STAR_B_NEEDS_PROJECT = 'This store cannot place a question among the sampled points.';
+
+/**
+ * The compared question (B) has no hollow star: said on the map's status line.
+ *
+ * @param reason - Why (a failure sentence), or null.
+ * @returns The sentence.
+ */
+export function starBNotPlaced(reason: string | null): string {
+	return `The second question could not be placed on the map (no hollow star).${reason ? ` ${reason}` : ''}`;
+}
+
 /** Busy labels. */
 export const BUSY = { sampling: 'Sampling…', layout: 'Laying out…', embedding: 'Embedding…', projecting: 'Placing the query…', neighbours: 'Finding neighbours…' } as const;
 

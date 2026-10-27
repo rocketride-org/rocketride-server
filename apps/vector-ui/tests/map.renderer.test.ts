@@ -13,7 +13,7 @@ import { projectToScreen, viewMatrix } from '../src/map/camera';
 import { alphaOf, contrastRatio, parseColor } from '../src/map/contrast';
 import type { Rgb } from '../src/map/contrast';
 import { NO_EDGES, edgeStats, spanningTree, topEdges } from '../src/map/graph';
-import { EDGE_BUCKETS, buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, extrasDataset, fadeColour, fadedEdgeColours, overlayDataset, strokeEdgePaths } from '../src/map/overlay';
+import { EDGE_BUCKETS, EDGE_DEVICE_PX, buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, edgeWidth, extrasDataset, fadeColour, fadedEdgeColours, linkWidth, overlayDataset, strokeEdgePaths } from '../src/map/overlay';
 import type { IOverlayExtras, IOverlayModel } from '../src/map/overlay';
 import { createCanvas2dRenderer } from '../src/map/renderer.canvas2d';
 import { DIM, FLAG, FRAGMENT_SHADER, PASS, VERTEX_SHADER, createWebglRenderer, dimFlags, packPoints, sizeCanvas } from '../src/map/renderer.webgl';
@@ -312,7 +312,36 @@ test('in 2D the cached paths are in layout units: the edge transform maps them e
 		assert.ok(Math.abs(t.a * x + t.c * y + t.e - sx * dpr) < 1e-3);
 		assert.ok(Math.abs(t.b * x + t.d * y + t.f - sy * dpr) < 1e-3);
 	}
-	assert.ok(Math.abs(t.lineWidth * t.a - dpr) < 1e-9, 'a 1 CSS-pixel line');
+	assert.ok(Math.abs(t.lineWidth * t.a - dpr) < 1e-9, 'a 1 CSS-pixel line at 2 dppx');
+	assert.ok(Math.abs(edgeTransform2d(camera, view, 1).lineWidth * camera.scale - 2) < 1e-9, '2 CSS pixels at 1 dppx');
+});
+
+test('edge strokes span two device pixels at any ratio, so a whole pixel of each cross-section carries the measured colour; links stay heavier', () => {
+	for (const dpr of [1, 1.25, 1.5, 2, 3]) {
+		assert.ok(edgeWidth(dpr) * dpr >= EDGE_DEVICE_PX - 1e-9, `${dpr} dppx`);
+		assert.ok(edgeWidth(dpr) >= 1);
+		assert.ok(linkWidth(dpr) >= 1.5 * edgeWidth(dpr), 'the links stand out over the edges');
+	}
+	assert.equal(edgeWidth(1), 2);
+	assert.equal(edgeWidth(2), 1, 'unchanged on a 2 dppx screen');
+	assert.equal(linkWidth(1), 3);
+	assert.equal(linkWidth(2), 1.5);
+	// Why two: any span of EDGE_DEVICE_PX pixels, at any offset, holds a whole pixel; one pixel holds none unless aligned.
+	const holdsWholePixel = (offset: number, width: number): boolean => Math.ceil(offset) + 1 <= offset + width;
+	for (let o = 0; o < 1; o += 1 / 64) {
+		assert.ok(holdsWholePixel(o, EDGE_DEVICE_PX));
+		if (o > 0) assert.ok(!holdsWholePixel(o, 1));
+	}
+	// The overlay draws the links and the hovered point's edges at these widths.
+	const fake = fake2d();
+	drawOverlay(fake.ctx, { ...empty(), selected: 2, neighbours: [{ index: 1 }] }, screen, place, colours, 1);
+	assert.ok(fake.sets.some(([k, v]) => k === 'lineWidth' && v === 3), 'links at 3 CSS px at 1 dppx');
+	const hover = fake2d();
+	drawExtras(hover.ctx, { ...noExtras(), hoverEdges: [[1, 2]] }, screen, place, colours, 1);
+	assert.ok(hover.sets.some(([k, v]) => k === 'lineWidth' && v === 3), 'the hovered point\'s edges at 3 CSS px at 1 dppx');
+	const hover2 = fake2d();
+	drawExtras(hover2.ctx, { ...noExtras(), hoverEdges: [[1, 2]] }, screen, place, colours, 2);
+	assert.ok(hover2.sets.some(([k, v]) => k === 'lineWidth' && v === 2), 'unchanged at 2 dppx');
 });
 
 // -----------------------------------------------------------------------------
@@ -326,13 +355,13 @@ function noExtras(): IOverlayExtras {
 
 test('star B is drawn hollow with its own rays; what was drawn becomes data-star-b and data-rays-b', () => {
 	const fake = fake2d();
-	const drawn = drawExtras(fake.ctx, { ...noExtras(), starB: { x: 50, y: 50, exact: true }, raysB: [{ index: 1 }, { index: 9 }, { index: 2 }] }, screen, place, colours);
+	const drawn = drawExtras(fake.ctx, { ...noExtras(), starB: { x: 50, y: 50, exact: true }, raysB: [{ index: 1 }, { index: 9 }, { index: 2 }] }, screen, place, colours, 1);
 	assert.equal(drawn.starB, true);
 	assert.equal(drawn.raysB, 2, 'the ray to an off-screen point is not drawn');
 	assert.deepEqual(extrasDataset(drawn), { starB: '1', raysB: '2', labels: '0' });
 	assert.equal(fake.count('fill'), 1, 'hollow: filled with the surface, outlined in the accent');
 	assert.ok(fake.sets.some(([k, v]) => k === 'fillStyle' && v === colours.surface));
-	assert.deepEqual(extrasDataset(drawExtras(fake2d().ctx, noExtras(), screen, place, colours)), { starB: '0', raysB: '0', labels: '0' });
+	assert.deepEqual(extrasDataset(drawExtras(fake2d().ctx, noExtras(), screen, place, colours, 1)), { starB: '0', raysB: '0', labels: '0' });
 });
 
 test('cluster labels: drawn once at their medoid in 11 px text with a halo, never overlapping, hidden when zoomed out, at most 50', () => {
@@ -345,7 +374,7 @@ test('cluster labels: drawn once at their medoid in 11 px text with a halo, neve
 		{ cluster: 3, at: 9, text: 'off screen' },
 	];
 	const spread = (i: number): [number, number] | null => (i === 9 ? null : [i * 200, i * 60]);
-	const drawn = drawExtras(fake.ctx, { ...noExtras(), labels }, spread, place, colours);
+	const drawn = drawExtras(fake.ctx, { ...noExtras(), labels }, spread, place, colours, 1);
 	assert.equal(drawn.labels, 2);
 	assert.equal(drawn.boxes.length, 2);
 	assert.deepEqual(drawn.boxes.map((b) => b.cluster), [0, 1]);
@@ -353,19 +382,19 @@ test('cluster labels: drawn once at their medoid in 11 px text with a halo, neve
 	assert.equal(fake.count('strokeText'), 2, 'the halo');
 	assert.ok(fake.sets.some(([k, v]) => k === 'font' && String(v).startsWith('11px')));
 	assert.ok(fake.sets.some(([k, v]) => k === 'fillStyle' && v === colours.text));
-	assert.equal(drawExtras(fake2d().ctx, { ...noExtras(), labels, showLabels: false }, spread, place, colours).labels, 0);
+	assert.equal(drawExtras(fake2d().ctx, { ...noExtras(), labels, showLabels: false }, spread, place, colours, 1).labels, 0);
 	const many = Array.from({ length: 80 }, (_, g) => ({ cluster: g, at: g === 9 ? 0 : g, text: `g${g}` }));
 	const far = (i: number): [number, number] => [i * 100, i * 40];
-	assert.ok(drawExtras(fake2d().ctx, { ...noExtras(), labels: many }, far, place, colours).labels <= 50);
+	assert.ok(drawExtras(fake2d().ctx, { ...noExtras(), labels: many }, far, place, colours, 1).labels <= 50);
 	// Only the first three terms go on the canvas (the Clusters tab shows them all).
 	const one = fake2d();
-	drawExtras(one.ctx, { ...noExtras(), labels: [labels[0]!] }, screen, place, colours);
+	drawExtras(one.ctx, { ...noExtras(), labels: [labels[0]!] }, screen, place, colours, 1);
 	assert.equal(one.calls.find((c) => c.name === 'fillText')?.args[0], 'falcon · station · water');
 });
 
 test('hovering a point thickens its edges; hovering a label rings its cluster', () => {
 	const fake = fake2d();
-	const drawn = drawExtras(fake.ctx, { ...noExtras(), hoverEdges: [[1, 2], [2, 9]], clusterHighlight: [1, 2, 3] }, screen, place, colours);
+	const drawn = drawExtras(fake.ctx, { ...noExtras(), hoverEdges: [[1, 2], [2, 9]], clusterHighlight: [1, 2, 3] }, screen, place, colours, 1);
 	assert.equal(drawn.hoverEdges, 1, 'an edge to an off-screen point is not drawn');
 	assert.ok(fake.sets.some(([k, v]) => k === 'lineWidth' && (v as number) >= 2));
 	assert.ok(fake.count('arc') >= 3);
@@ -515,16 +544,19 @@ test('an outlier ring is stroked over a 4 px halo of the surface first, then 1.5
 	assert.deepEqual(pairs, [`strokeStyle=${colours.surface}`, 'lineWidth=4', `strokeStyle=${colours.outline}`, 'lineWidth=1.5'], 'the halo, then the ring');
 });
 
-test('the star is filled with the accent and edged with the surface (as its comment says); the selected point\'s links are 1.5 px', () => {
+test('the star is filled with the accent and edged with the surface (as its comment says); the selected point\'s links are 1.5 px at 2 dppx, 3 at 1', () => {
 	const fake = fake2d();
 	drawOverlay(fake.ctx, { ...empty(), star: { x: 100, y: 100, exact: true } }, screen, place, colours, 1);
 	const at = fake.sets.findIndex(([k, v]) => k === 'fillStyle' && v === colours.accent);
 	assert.ok(at >= 0);
 	assert.deepEqual(fake.sets.slice(at + 1, at + 3), [['strokeStyle', colours.surface], ['lineWidth', 1]]);
 	const links = fake2d();
-	drawOverlay(links.ctx, { ...empty(), selected: 2, neighbours: [{ index: 1 }, { index: 3 }] }, screen, place, colours, 1);
+	drawOverlay(links.ctx, { ...empty(), selected: 2, neighbours: [{ index: 1 }, { index: 3 }] }, screen, place, colours, 2);
 	const width = links.sets.findIndex(([k, v]) => k === 'strokeStyle' && v === colours.accent);
 	assert.deepEqual(links.sets[width + 1], ['lineWidth', 1.5]);
+	const links1 = fake2d();
+	drawOverlay(links1.ctx, { ...empty(), selected: 2, neighbours: [{ index: 1 }, { index: 3 }] }, screen, place, colours, 1);
+	assert.deepEqual(links1.sets[links1.sets.findIndex(([k, v]) => k === 'strokeStyle' && v === colours.accent) + 1], ['lineWidth', 3]);
 });
 
 test('a shown duplicate group: a dashed outline ring at each end over a surface halo, and each pair\'s similarity (with its scale) at its midpoint with a halo', () => {
@@ -544,7 +576,7 @@ test('a cluster label whose medoid is dimmed is not drawn (text over a faded gro
 	const labels = [{ cluster: 0, at: 1, text: 'falcon' }, { cluster: 1, at: 3, text: 'orchid' }];
 	const spread = (i: number): [number, number] => [i * 200, i * 60];
 	const fake = fake2d();
-	const drawn = drawExtras(fake.ctx, { ...noExtras(), labels, dimmed: new Uint8Array([0, 1, 0, 0]) }, spread, place, colours);
+	const drawn = drawExtras(fake.ctx, { ...noExtras(), labels, dimmed: new Uint8Array([0, 1, 0, 0]) }, spread, place, colours, 1);
 	assert.equal(drawn.labels, 1);
 	assert.deepEqual(fake.calls.filter((c) => c.name === 'fillText').map((c) => c.args[0]), ['orchid']);
 });

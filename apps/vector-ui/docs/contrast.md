@@ -81,9 +81,32 @@ times an alpha ramp of 0.15 to 0.8, which painted the weakest edges at 1.1:1.
 | rocketride | **1.12** / **2.77** | 3.33 / 3.01 | 12.73 / 11.50 |
 | visual-studio | **1.21** / 3.46 | 3.03 / 3.36 | 8.64 / 9.59 |
 
-These are the stroke colours. A 1 px line is anti-aliased across device
-pixels, so a pixel at the side of a line is closer to the surface than its
-colour; the middle of the line carries the colour above.
+These are the stroke colours. A line is anti-aliased across device pixels,
+so a pixel at its side is nearer the surface than its colour. A stroke spans
+at least two device pixels (`EDGE_DEVICE_PX`: 2 CSS px at 1 dppx, 1 CSS px at
+2 dppx), and any two-pixel span holds one whole pixel, which carries the
+colour above. A 1 px line at 1 dppx is spread over two pixels, so it rarely
+does.
+
+Measured in headless Chrome through the map's own `edgeTransform2d` and
+`strokeEdgePaths`: 300 segments of the weakest bucket at random angles,
+lengths and sub-pixel offsets, on the default surface, with 7 cross-sections
+each. For each cross-section the table gives the contrast of its most
+contrasting pixel, as painted. It shows the median, and the share under 3:1.
+
+| Theme | Colour | Before: 1 px at 1 dppx | 1.5 px at 1 dppx | Now: 1 / 1.25 / 1.5 / 2 dppx |
+| --- | ---: | ---: | ---: | ---: |
+| rocketride-light | 3.25 | 2.33, 88 % under | 3.16, 35 % under | 3.25, 1.9-2.3 % under |
+| rocketride | 3.33 | 2.33, 87 % under | 3.23, 30 % under | 3.33, 1.7-1.8 % under |
+| light | 3.03 | 2.22, 97 % under | | 3.03, 6.0-6.4 % under |
+| visual-studio | 3.03 | 2.22, 97 % under | | 3.03, 6.0-6.4 % under |
+| dark | 3.50 | 2.50, 78 % under | | 3.50, 0.4-0.5 % under |
+| gray | 3.56 | 2.65, 70 % under | | 3.56, 0.1 % under |
+
+The median is the colour itself at every ratio. The links from the selected
+point are half as heavy again as the edges (3 CSS px at 1 dppx, 1.5 at 2 dppx).
+At 3 px every cross-section carries the accent whole: 3.46:1 in RocketRide
+Light and 8.73:1 in RocketRide dark.
 
 ### Boxes over the map
 
@@ -97,7 +120,7 @@ surface, with the theme's own `--rr-shadow-widget`. `--rr-border` was 1.38 /
 ### Marks
 
 - **The accent** (`--rr-border-focus`: selection ring, links from the selected
-  point, now 1.5 px, the query's star and rays, the lasso) clears 3:1
+  point, 3 px at 1 dppx and 1.5 px at 2 dppx, the query's star and rays, the lasso) clears 3:1
   everywhere, at 3.22:1 at worst (RocketRide Light, on the paper).
 - **Outlier rings** are `--rr-text-primary`, 1.5 px, over a 4 px halo of the
   surface, so a ring reads over any point colour. The Outliers tab says

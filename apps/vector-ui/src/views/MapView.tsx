@@ -103,7 +103,7 @@ import type { ISampleScope, IScopeAttempt } from '../map/model';
 import { createLatestQueue } from '../map/neighbours';
 import { EDGE_BUCKETS, edgeColours } from '../map/overlay';
 import type { IClusterLabel, IDuplicateRing, IOverlayEnd, IPlace } from '../map/overlay';
-import { centroidStar, chatQueryPlan, comparePlan, placeProjected, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject, withSampleRetry } from '../map/queryProjection';
+import { centroidStar, chatQueryPlan, comparePlan, placeCompared, placeProjected, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject, withSampleRetry } from '../map/queryProjection';
 import type { IStar } from '../map/queryProjection';
 import { polarityOf } from '../map/recommend';
 import { pairLabel, pairScale, stagedAnnouncement } from '../map/reviewWording';
@@ -113,7 +113,7 @@ import { FALLBACK_PALETTE, readPalette } from '../map/tokens';
 import type { IMapPalette } from '../map/tokens';
 import { createLayoutClient } from '../map/workerClient';
 import type { ILayoutClient } from '../map/workerClient';
-import { BUSY, CENTROID_APPROX, CLUSTERS_UNSUPPORTED, EDGES_DEGRADED, EDGES_LIGHT_LIMIT, EDGES_LIGHT_NOTE, LAYOUT_CANCELLED, LAYOUT_NOT_BETTER, LIGHT_POSITIONS, MAP_UNAVAILABLE, QUERY_NEEDS_EMBED, QUERY_PLACED_APPROX, clusterAnnouncement, edgeLegend, listingNote, mapFailure, num, pointAnnouncement, sampleLabel, SCOPE_RETRY, scopeLine } from '../map/wording';
+import { BUSY, CENTROID_APPROX, CLUSTERS_UNSUPPORTED, EDGES_DEGRADED, EDGES_LIGHT_LIMIT, EDGES_LIGHT_NOTE, LAYOUT_CANCELLED, LAYOUT_NOT_BETTER, LIGHT_POSITIONS, MAP_UNAVAILABLE, QUERY_NEEDS_EMBED, QUERY_PLACED_APPROX, STAR_B_NEEDS_PROJECT, clusterAnnouncement, edgeLegend, listingNote, mapFailure, num, pointAnnouncement, sampleLabel, SCOPE_RETRY, scopeLine, starBNotPlaced, statusNotice } from '../map/wording';
 import { heatScores } from '../vector/heat';
 
 /** How many writes the console ran on the store (the connection's write count). */
@@ -1044,10 +1044,10 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		lastHighlight.current = highlight;
 		if (highlight.source === 'lasso') return;
 		if (highlight.source === 'search') {
-			// Search's Compare told the map both questions before it highlighted both result lists: a star for each.
-			const compare = comparePlan({ told: state.query, toldB: state.queryB, mapQuery: query?.text ?? null, mapQueryB: queryB?.text ?? null, embedReady });
-			if (compare.runA) void runQuery(state.query as string, false, false);
-			if (compare.runB) void runQueryB(state.queryB as string);
+			// Search's Compare told the map both questions before it highlighted both result lists: a star for each,
+			// A then B (never two `project` calls at once). A B with no star is placed again on the next showing.
+			const compare = comparePlan({ told: state.query, toldB: state.queryB, mapQuery: query?.text ?? null, mapQueryB: queryB?.item ? queryB.text : null, embedReady });
+			void placeCompared(compare, () => runQuery(state.query as string, false, false), () => runQueryB(state.queryB as string));
 			return;
 		}
 		const res = resolveKeys(highlight.keys, keyIdx, sampleModel?.pinned ?? []);
@@ -1177,7 +1177,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		if (connectionRef.current !== key) return;
 		const vector = embedded.ok ? embedded.value.vectors[0] : undefined;
 		if (!Array.isArray(vector) || vector.length === 0) {
-			if (!embedded.ok && !embedded.stale) setNotice(mapFailure(embedded.code, embedded.message));
+			if (!embedded.ok && !embedded.stale) setNotice(starBNotPlaced(mapFailure(embedded.code, embedded.message)));
 			return;
 		}
 		queryVectorB.current = vector;
@@ -1187,6 +1187,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		const item = projected && projected.ok ? (projected.value.items[0] ?? null) : null;
 		const search = searched.ok ? searched.value : null;
 		setQueryBView({ text, item, sims: null, search, notes: [] });
+		if (item === null) {
+			// No star, so no rays from it: the status line says why.
+			setNotice(starBNotPlaced(projected === null ? STAR_B_NEEDS_PROJECT : !projected.ok ? mapFailure(projected.code, projected.message) : null));
+			return;
+		}
 		if (search) {
 			const current = selection.getState().sampleModel;
 			const outside = raysFromSearch(search, current ? keyIndex(current.result) : keyIdx, current?.pinned ?? []).outside;
@@ -1688,8 +1693,17 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		...(listingLine ? [listingLine] : []),
 		...(sample ? [scopeLine(scopeState, scopeTarget.key ? scopeTarget : null, shownScope.drawn.key ? shownScope.drawn : null)].filter((line): line is string => line !== null) : []),
 		...(isolation ? [isolationLine(isolation.shown, isolation.n)] : []),
-		...(queryB ? [`Hollow star: "${queryB.text}" (compared on the Query tab)`] : []),
+		// Only while the hollow star is drawn.
+		...(queryB && starB ? [`Hollow star: "${queryB.text}" (compared on the Query tab)`] : []),
 	];
+	// The status line's sentence (map/wording.ts statusNotice): nothing is put between the toolbar and the map.
+	const said = statusNotice({ error, notice, savedQuery, hasSample: sample !== null });
+	const runSavedQuery = (): void => {
+		if (savedQuery === null) return;
+		setSavedQuery(null);
+		void runQuery(savedQuery);
+	};
+	const lineNotice = said && { text: said.text, action: said.kind === 'saved-query' ? { label: 'Run saved query', reason: embedReady ? null : QUERY_NEEDS_EMBED, onAction: runSavedQuery } : null };
 	const describe = (index: number): string => {
 		if (!sample) return '';
 		const doc = documentOf(sample, index);
@@ -1711,7 +1725,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			data-renderer={rendererKind}
 			data-query-state={query === null ? 'none' : query.item || query.search ? 'placed' : 'failed'}
 			data-rays={rays.length}
-			data-query-b-state={queryB === null ? 'none' : queryB.item || queryB.search ? 'placed' : 'failed'}
+			data-query-b-state={queryB === null ? 'none' : starB ? 'placed' : 'failed'}
 			data-colour-by={colourBy}
 			data-edge-mode={edges}
 			data-edges-per-point={edgesPerPoint}
@@ -1727,6 +1741,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		>
 			<MapToolbar
 				clear={nextClear !== null ? { label: CLEAR_LABELS[nextClear], onClear: clearOnce } : null}
+				notice={lineNotice}
 				limits={model.capabilities.sample_light === false ? { ...limits, sample_max_light: limits.sample_max } : limits}
 				sample={sampleModel}
 				busy={busy ?? layoutBusy}
@@ -1765,32 +1780,13 @@ export function MapView(props: MapViewProps): React.ReactElement {
 					</>
 				}
 			/>
-			{error ? (
-				<div style={{ padding: '8px 10px' }}>
-					<Banner variant="error">{error}</Banner>
-				</div>
-			) : null}
-			{notice ? <p style={{ ...MAP_STYLES.note, padding: '0 10px' }}>{notice}</p> : null}
-			{savedQuery ? (
-				<div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '0 10px' }}>
-					<span style={MAP_STYLES.small}>This view had the query "{savedQuery}".</span>
-					<button
-						type="button"
-						style={MAP_STYLES.button}
-						disabled={!embedReady}
-						title={embedReady ? undefined : QUERY_NEEDS_EMBED}
-						onClick={() => {
-							const text = savedQuery;
-							setSavedQuery(null);
-							void runQuery(text);
-						}}
-					>
-						Run saved query
-					</button>
-				</div>
-			) : null}
 			{!sample ? (
 				<div style={{ padding: 16 }}>
+					{error ? (
+						<div style={{ marginBottom: 8 }}>
+							<Banner variant="error">{error}</Banner>
+						</div>
+					) : null}
 					{toolbarReasons.map((line) => (
 						<p key={line} style={MAP_STYLES.note}>
 							{line}

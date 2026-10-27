@@ -237,12 +237,19 @@ test('the slow-frame rule drops to 3 edges per point only while edgesAutoDegrade
 
 test('Search\'s Compare places two stars: the highlight runs the compare plan, B is embedded through the one embed call and drawn hollow with its own rays', () => {
 	const view = read('views/MapView.tsx');
-	assert.match(view, /const compare = comparePlan\(\{ told: state\.query, toldB: state\.queryB, mapQuery: query\?\.text \?\? null, mapQueryB: queryB\?\.text \?\? null, embedReady \}\);/);
-	assert.match(view, /if \(compare\.runB\) void runQueryB\(state\.queryB as string\);/);
+	// A B with no star is placed again on the next showing; A then B, never two `project` calls at once.
+	assert.match(view, /const compare = comparePlan\(\{ told: state\.query, toldB: state\.queryB, mapQuery: query\?\.text \?\? null, mapQueryB: queryB\?\.item \? queryB\.text : null, embedReady \}\);/);
+	assert.match(view, /void placeCompared\(compare, \(\) => runQuery\(state\.query as string, false, false\), \(\) => runQueryB\(state\.queryB as string\)\);/);
+	assert.doesNotMatch(view, /void runQueryB\(/, 'B is never started beside A');
 	assert.match(view, /<PointCanvas[\s\S]*?starB=\{starB\}[\s\S]*?raysB=\{raysB\}/);
 	const runB = /const runQueryB = async \(text: string\): Promise<void> => \{([\s\S]*?)\n\t\};/.exec(view);
 	assert.ok(runB, 'runQueryB');
 	assert.match(runB[1] as string, /await embedQuestion\(text\)/);
+	// No star: the status line says why (and nothing claims a star).
+	assert.match(runB[1] as string, /if \(item === null\) \{\s*setNotice\(starBNotPlaced\(projected === null \? STAR_B_NEEDS_PROJECT : !projected\.ok \? mapFailure\(projected\.code, projected\.message\) : null\)\);\s*return;\s*\}/);
+	assert.match(runB[1] as string, /setNotice\(starBNotPlaced\(mapFailure\(embedded\.code, embedded\.message\)\)\)/);
+	assert.match(view, /\.\.\.\(queryB && starB \? \[`Hollow star: "\$\{queryB\.text\}" \(compared on the Query tab\)`\] : \[\]\),/, 'the legend line only while the star is drawn');
+	assert.match(view, /data-query-b-state=\{queryB === null \? 'none' : starB \? 'placed' : 'failed'\}/);
 	// A question typed on the map drops the compared pair.
 	assert.match(view, /if \(ownQuery\) clearCompare\(\);/);
 	const canvas = read('components/PointCanvas.tsx');
@@ -255,6 +262,30 @@ test('the edge layer is drawn on its own canvas only when the camera, the size o
 	assert.match(canvas, /el\.dataset\.edges = String\(cache\.segments\)/);
 	assert.match(canvas, /edgeTransform2d\(camera, vp, size\.dpr\)/, '2D strokes the cached paths through the camera transform');
 	assert.doesNotMatch(canvas, /data-edges=\{/);
+	// The widths follow the screen's pixel ratio (two device pixels at least) in 3D too, and the extras' hover edges.
+	assert.match(canvas, /strokeEdgePaths\(ctx, cache\.paths, colour, edgeWidth\(size\.dpr\)\);/);
+	assert.doesNotMatch(canvas, /strokeEdgePaths\([^)]*, 1\);/);
+	assert.match(canvas, /coloursRef\.current\.overlay, size\.dpr\);\n/);
+});
+
+test('every map notice and failure goes on the toolbar\'s status line: nothing is put between the toolbar and the map', () => {
+	const view = read('views/MapView.tsx');
+	assert.match(view, /const said = statusNotice\(\{ error, notice, savedQuery, hasSample: sample !== null \}\);/);
+	assert.match(view, /<MapToolbar[\s\S]*?notice=\{lineNotice\}[\s\S]*?\n\t\t\t\/>\s*\{!sample \? \(\s*<div style=\{\{ padding: 16 \}\}>\s*\{error \? \(/, 'the toolbar, then the empty state (its banner inside it) or the map');
+	assert.doesNotMatch(view, /\{notice \? </, 'no notice paragraph');
+	assert.doesNotMatch(view, /This view had the query/, 'the saved query is the status line\'s too');
+	// Every notice the view sets reaches that one line.
+	for (const set of ['setNotice(LAYOUT_NOT_BETTER)', 'setNotice(EDGES_DEGRADED)', 'setNotice(outcome.kind === \'cancelled\' ? LAYOUT_CANCELLED : outcome.message)']) assert.ok(view.includes(set), set);
+	const toolbar = read('components/MapToolbar.tsx');
+	assert.match(toolbar, /const words = props\.busy \?\? notice\?\.text \?\? '';/);
+});
+
+test('a resize keeps the camera\'s zoom relative to the fit (resizeCamera, the fit\'s own padding), never the smaller of the two ratios', () => {
+	const canvas = read('components/PointCanvas.tsx');
+	assert.match(canvas, /const next = resizeCamera\(cameraRef\.current, boundsOf\(p\.positions, 2, p\.hidden \?\? null\), before, \{ width: rect\.width, height: rect\.height \}, FIT_PADDING\);/);
+	assert.match(canvas, /fitCamera\(bounds, vp, FIT_PADDING\)/, 'the same padding as the fit');
+	assert.match(canvas, /if \(fitScaleRef\.current !== null\) fitScaleRef\.current \*= next\.scale \/ cameraRef\.current\.scale;/, 'the labels\' zoom threshold follows');
+	assert.doesNotMatch(canvas, /Math\.min\(rect\.width \/ before\.width/);
 });
 
 test('the PNG copies the edge layer, then the points through the renderer\'s snapshot, then the overlay', () => {

@@ -36,9 +36,9 @@ import { PointCanvas } from '../src/components/PointCanvas';
 import { clusterLabel, clusterRows, clusterView } from '../src/map/clusters';
 import { spanningTree } from '../src/map/graph';
 import { UNSCOPED, clusterExportRows, drawnScope, duplicateExportRows, mapScopeState, pointExportRows, scopeDrawDue } from '../src/map/model';
-import { comparePlan } from '../src/map/queryProjection';
+import { comparePlan, placeCompared } from '../src/map/queryProjection';
 import type { ILayoutClient, ILayoutSpec, LayoutOutcome } from '../src/map/workerClient';
-import { EDGES_LIGHT_NOTE, MAP_UNAVAILABLE, SCOPE_RETRY, edgeLegend, listingNote, scopeFailedNote, scopeLeftNote, scopeNote, scopePendingNote } from '../src/map/wording';
+import { EDGES_DEGRADED, EDGES_LIGHT_NOTE, LAYOUT_CANCELLED, MAP_UNAVAILABLE, SCOPE_RETRY, STAR_B_NEEDS_PROJECT, edgeLegend, listingNote, mapFailure, savedQueryLine, scopeFailedNote, scopeLeftNote, scopeNote, scopePendingNote, starBNotPlaced, statusNotice } from '../src/map/wording';
 import type { SideTab } from '../src/views/MapView';
 import { deepFreeze, loadSample, modelOf, pcaXY } from './support/map.samples';
 
@@ -712,6 +712,71 @@ test('the compare plan: both questions placed once each, nothing without an embe
 	assert.deepEqual(comparePlan({ told: 'water', toldB: 'orchids', mapQuery: 'water', mapQueryB: 'orchids', embedReady: true }), { runA: false, runB: false });
 	assert.deepEqual(comparePlan({ told: 'water', toldB: 'orchids', mapQuery: null, mapQueryB: null, embedReady: false }), { runA: false, runB: false });
 	assert.deepEqual(comparePlan({ told: 'water', toldB: null, mapQuery: null, mapQueryB: null, embedReady: true }), { runA: false, runB: false }, 'a single search is the map\'s own query path');
+});
+
+test('the compared pair is placed one after the other: B starts only when A has ended (the store answers BUSY to a second project), however A ended', async () => {
+	const order: string[] = [];
+	/** A placement that ends when its gate opens. */
+	const gated = (name: string, fail = false): { run: () => Promise<void>; open: () => void } => {
+		let open: () => void = () => undefined;
+		const gate = new Promise<void>((resolve) => {
+			open = resolve;
+		});
+		return {
+			run: async () => {
+				order.push(`${name} start`);
+				await gate;
+				order.push(`${name} end`);
+				if (fail) throw new Error(`${name} failed`);
+			},
+			open: () => open(),
+		};
+	};
+	const a = gated('A');
+	const b = gated('B');
+	const both = placeCompared({ runA: true, runB: true }, a.run, b.run);
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(order, ['A start'], 'B waits while A runs');
+	b.open();
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(order, ['A start'], 'still waiting for A, whatever B could do');
+	a.open();
+	await both;
+	assert.deepEqual(order, ['A start', 'A end', 'B start', 'B end']);
+	// A failed: B is still placed after it, and A's failure is not swallowed.
+	order.length = 0;
+	const failing = gated('A', true);
+	const after = gated('B');
+	after.open();
+	const run = placeCompared({ runA: true, runB: true }, failing.run, after.run);
+	failing.open();
+	await assert.rejects(run, /A failed/);
+	assert.deepEqual(order, ['A start', 'A end', 'B start', 'B end']);
+	// Only one of them.
+	order.length = 0;
+	const onlyB = gated('B');
+	onlyB.open();
+	await placeCompared({ runA: false, runB: true }, () => Promise.reject(new Error('A must not run')), onlyB.run);
+	assert.deepEqual(order, ['B start', 'B end']);
+	// B with no star is placed again: the plan counts only a placed B.
+	assert.deepEqual(comparePlan({ told: 'water', toldB: 'orchids', mapQuery: 'water', mapQueryB: null, embedReady: true }), { runA: false, runB: true });
+});
+
+test('a compared question with no star says so on the status line, with why', () => {
+	assert.equal(starBNotPlaced(mapFailure('BUSY', '')), 'The second question could not be placed on the map (no hollow star). The store is computing another sample or neighbour search; try again in a moment.');
+	assert.equal(starBNotPlaced(STAR_B_NEEDS_PROJECT), 'The second question could not be placed on the map (no hollow star). This store cannot place a question among the sampled points.');
+	assert.equal(starBNotPlaced(null), 'The second question could not be placed on the map (no hollow star).');
+});
+
+test('the status line\'s one sentence: a failure while a map is shown, else the notice, else a saved view\'s query; with no map a failure is the empty state\'s banner', () => {
+	const none = { error: null, notice: null, savedQuery: null, hasSample: true };
+	assert.equal(statusNotice(none), null);
+	assert.deepEqual(statusNotice({ ...none, notice: LAYOUT_CANCELLED }), { text: LAYOUT_CANCELLED, kind: 'notice' });
+	assert.deepEqual(statusNotice({ ...none, notice: EDGES_DEGRADED, error: 'The store did not finish.' }), { text: 'The store did not finish.', kind: 'error' });
+	assert.deepEqual(statusNotice({ ...none, notice: EDGES_DEGRADED, error: 'The store did not finish.', hasSample: false }), { text: EDGES_DEGRADED, kind: 'notice' }, 'no map: the failure is the banner');
+	assert.deepEqual(statusNotice({ ...none, savedQuery: 'water' }), { text: savedQueryLine('water'), kind: 'saved-query' });
+	assert.equal(savedQueryLine('water'), 'This view had the query "water".');
+	assert.deepEqual(statusNotice({ ...none, savedQuery: 'water', notice: LAYOUT_CANCELLED }), { text: LAYOUT_CANCELLED, kind: 'notice' });
 });
 
 test('export rows: the frozen point columns, clusters with their words, duplicate pairs whose points are shown', () => {
