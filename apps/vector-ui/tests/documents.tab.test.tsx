@@ -257,7 +257,8 @@ test('the audit of the last write behind a disclosure: one line per batch, what 
 	assert.equal(renderToStaticMarkup(<WriteAuditDetails audit={undefined} />), '');
 	assert.equal(renderToStaticMarkup(<WriteAuditDetails audit={[]} />), '');
 	const html = renderToStaticMarkup(<WriteAuditDetails audit={[{ action: 'vector.soft_delete', rows: 12, caller: 'account' }, { action: 'vector.soft_delete', rows: null, caller: null }]} />);
-	assert.match(html, /<summary[^>]*>Details<\/summary>/);
+	assert.match(html, /<summary[^>]*>Write details<\/summary>/, 'not the header\'s "Details" (the connection\'s)');
+	assert.match(renderToStaticMarkup(<WriteAuditDetails audit={[{ action: 'vector.delete', rows: 1, caller: null }]} label="Audit" />), /<summary[^>]*>Audit<\/summary>/, 'a label replaces it');
 	assert.match(html, /<li>Batch 1: vector\.soft_delete, 12 rows, called by account<\/li><li>Batch 2: vector\.soft_delete, rows not counted, called by an unnamed caller<\/li>/);
 });
 

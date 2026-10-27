@@ -29,7 +29,9 @@
 // the tool, the rows it touched and who called (vector/results.ts
 // readAudit; never content or vectors). The console keeps them with the
 // write's result (removal.audit), and this disclosure, beside the result
-// line, lists them, one line per batch (vector/confirm.ts auditLines).
+// line (outside its announced text), lists them, one line per batch
+// (vector/confirm.ts auditLines). Its summary is "Write details", not the
+// header's "Details" (the connection's).
 // Nothing shows while the last write had none.
 // =============================================================================
 
@@ -49,19 +51,24 @@ const styles = {
 export interface IWriteAuditDetailsProps {
 	/** The last write's audit blocks (IConsoleState.removal.audit). */
 	audit: readonly IWriteAudit[] | undefined;
+	/** The disclosure's summary (default {@link WRITE_DETAILS_LABEL}). */
+	label?: string;
 }
 
+/** The disclosure's summary: not "Details", which is the header's button for the connection. */
+export const WRITE_DETAILS_LABEL = 'Write details';
+
 /**
- * The audit of the last write, behind a "Details" disclosure.
+ * The audit of the last write, behind a "Write details" disclosure.
  *
  * @param props - {@link IWriteAuditDetailsProps}.
  * @returns The disclosure, or nothing without an audit.
  */
-export function WriteAuditDetails({ audit }: IWriteAuditDetailsProps): React.ReactElement | null {
+export function WriteAuditDetails({ audit, label = WRITE_DETAILS_LABEL }: IWriteAuditDetailsProps): React.ReactElement | null {
 	if (!audit || audit.length === 0) return null;
 	return (
 		<details style={styles.details} data-write-audit="">
-			<summary style={styles.summary}>Details</summary>
+			<summary style={styles.summary}>{label}</summary>
 			<ul aria-label="What the store recorded for this write" style={styles.list}>
 				{auditLines(audit).map((line, i) => (
 					<li key={`${i}:${line}`}>{line}</li>

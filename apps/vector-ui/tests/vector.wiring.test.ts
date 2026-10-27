@@ -181,7 +181,7 @@ test("the Overview's Top folders show a folder's documents in Documents (its cli
 	const overview = code('components/OverviewPanel.tsx');
 	assert.match(overview, /documentsFolder\(entry\)\.set\(folder === UPLOADED_LABEL \? \{ kind: 'uploaded' \} : \{ kind: 'folder', prefix: folder \}\);\s*openTab\('documents'\);/);
 	assert.doesNotMatch(overview, /setFilter|entry\.scope\.set/, 'a folder opened from the Overview never relists or changes the scope');
-	assert.match(code('views/ConsoleView.tsx'), /\{\(state\.removal\.status === 'done' \|\| state\.removal\.status === 'error'\) && <WriteAuditDetails audit=\{state\.removal\.audit\} \/>\}/, 'after the result sentence, once the write finished');
+	assert.match(code('views/ConsoleView.tsx'), /<div role=\{state\.removal\.status === 'error' \? 'alert' : 'status'\} style=\{layout\.status\}>\s*\{state\.removal\.status === 'running' \? \(state\.removal\.message \?\? BUSY\.removing\) : state\.removal\.message\}\s*<\/div>\s*(\{\}\s*)?\{\(state\.removal\.status === 'done' \|\| state\.removal\.status === 'error'\) && <WriteAuditDetails audit=\{state\.removal\.audit\} \/>\}/, "after the result sentence, once the write finished, and outside the announced element: opening it does not announce the line again");
 });
 
 test('B1(b): fresh stats that say the collection exists, against a probe that said it did not, probe the store again once per disagreement', () => {
