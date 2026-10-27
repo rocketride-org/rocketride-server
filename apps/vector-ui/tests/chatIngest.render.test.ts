@@ -744,6 +744,11 @@ test("SearchResults: the slider over the store's range, its count beside the nod
 	// Live B12: one line per row however narrow the panel: set column widths, cells cut with an ellipsis, short statuses.
 	assert.match(html, /<table[^>]*style="[^"]*table-layout:fixed/);
 	assert.match(html, /<td[^>]*title="near miss: below the threshold"[^>]*>near miss<\/td>/, 'a short status, whole in its title');
+	// What the short statuses mean is on screen, once above the table, and the Status heading points at it.
+	const legend = /<p[^>]*id="([^"]+)"[^>]*data-status-legend=""[^>]*>near miss: below the threshold · below floor: the store drops it<\/p>/.exec(html);
+	assert.ok(legend, 'the status legend');
+	assert.match(html, new RegExp(`<th scope="col"[^>]*aria-describedby="${legend[1]}"[^>]*>Status</th>`));
+	assert.equal(/data-status-legend=""[^>]*>([^<]*)</.exec(render(h(SearchResults, { run, view: classifyAt(run.rows, -1, dialect.score), score: dialect.score, range, ...resultHandlers })))?.[1], 'near miss: below the threshold · below floor: the store drops it', 'the same line with no near miss at this threshold');
 	assert.doesNotMatch(html, />Found by</, 'the ranks column is Hybrid\'s only');
 	assert.equal((html.match(/>ask<\/button>/g) ?? []).length, 20, 'compact action labels; their accessible names stay whole');
 	assert.equal((html.match(/data-bar="/g) ?? []).length, 20);
@@ -825,6 +830,13 @@ test('QueryCompare: A and B side by side, the shared count and the Jaccard index
 	assert.equal((html.match(/<th scope="col"[^>]*>Status<\/th>/g) ?? []).length, 2);
 	const statuses = [...html.matchAll(/<td[^>]*title="(passes the threshold|near miss: below the threshold|below the floor \(the store drops it\)|keyword match \(no similarity\))"[^>]*>(passes|near miss|below floor|keyword match)<\/td>/g)].length;
 	assert.equal(statuses, (html.match(/<tr[^>]*data-status="/g) ?? []).length, 'one status per row');
+	// Each side says what its short statuses mean, and its Status heading points at that line.
+	const legends = [...html.matchAll(/<p[^>]*id="([^"]+)"[^>]*data-status-legend=""[^>]*>([^<]+)<\/p>/g)];
+	assert.equal(legends.length, 2);
+	for (const [, id, words] of legends) {
+		assert.match(words, /^near miss: below the threshold/);
+		assert.match(html, new RegExp(`<th scope="col"[^>]*aria-describedby="${id}"[^>]*>Status</th>`));
+	}
 	assert.equal((html.match(/data-side="both"/g) ?? []).length, 12);
 });
 

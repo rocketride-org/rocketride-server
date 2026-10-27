@@ -75,7 +75,7 @@ import { callTool, toolChannelFor } from '../chat/toolCalls';
 import { showCompareOnMap } from '../adapters/consoleActions';
 import { DATA_BAR_TOKEN } from '../vector/colors';
 import { compareRuns, compareSentence, rowKey } from '../vector/compare';
-import { CALL_TIMEOUT_MS, DEFAULT_TOP_K, KEYWORD_FALLBACK_SENTENCE, MODEL_MISMATCH_SENTENCE, MODE_HINTS, NODE_SETTING_FIELD, NODE_SETTING_NOTE, NODE_SETTING_RANGE, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, STATUS_SHORT, STATUS_WORDS, TABLE_FILTERS, TABLE_FILTER_LABELS, applyHandoff, classifyAt, createCommitAnnouncer, defaultMode, fromChatLine, initialThreshold, isTableOf, keywordCaption, modeLabel, modeOptions, noResultsSentence, nodeSettingText, onGrid, questionEscape, rateLimitSentence, runCaption, runWorkbench, scopeChipText, scoreBar, scoreHeading, scoreTitle, searchExportItems, searchScope, secondsLeft, showSearchOnMap, sliderRange, sliderValueText, thresholdSentence, topKChoices, topKOptions, willRunText } from '../vector/searchWorkbench';
+import { CALL_TIMEOUT_MS, DEFAULT_TOP_K, KEYWORD_FALLBACK_SENTENCE, MODEL_MISMATCH_SENTENCE, MODE_HINTS, NODE_SETTING_FIELD, NODE_SETTING_NOTE, NODE_SETTING_RANGE, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, STATUS_SHORT, STATUS_WORDS, TABLE_FILTERS, TABLE_FILTER_LABELS, applyHandoff, classifyAt, createCommitAnnouncer, defaultMode, fromChatLine, initialThreshold, isTableOf, keywordCaption, modeLabel, modeOptions, noResultsSentence, nodeSettingText, onGrid, questionEscape, rateLimitSentence, runCaption, runWorkbench, scopeChipText, scoreBar, scoreHeading, scoreTitle, searchExportItems, searchScope, secondsLeft, showSearchOnMap, sliderRange, sliderValueText, statusLegend, thresholdSentence, topKChoices, topKOptions, willRunText } from '../vector/searchWorkbench';
 import type { ChatPrefill, Classification, ModeOption, SearchHandoff, SearchMode, SliderRange, TableFilter, WorkbenchDeps, WorkbenchOutcome, WorkbenchRow, WorkbenchRun } from '../vector/searchWorkbench';
 import { compareRecord, searchRecord } from '../vector/queryHistory';
 import type { QueryRunRecord } from '../vector/queryHistory';
@@ -246,6 +246,9 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 	const scaleId = useId();
 	// The score's scale and why a row has no bar, said once above the table (the column heading stays one line).
 	const scaleLine = [heading.scale !== null ? `Score: ${heading.scale}.` : null, heading.noBars].filter((part): part is string => part !== null).join(' ');
+	// What each short status means, once above the table (the Status heading points at it).
+	const legend = statusLegend(run.rows, score);
+	const legendId = useId();
 	// Hybrid lists where each row came from (its semantic and keyword ranks) in a column of its own.
 	const fused = run.modeUsed === 'hybrid';
 	return (
@@ -283,16 +286,22 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 							{scaleLine}
 						</p>
 					)}
+					{legend !== null && (
+						<p style={S.note} id={legendId} data-status-legend="">
+							{legend}
+						</p>
+					)}
 					<div style={S.scroll}>
 						<table style={S.table}>
 							<caption style={S.caption}>{runCaption(run)}</caption>
 							<colgroup>
 								<col style={{ width: 32 }} />
 								<col />
-								<col style={{ width: 80 }} />
+								{/* "#123 · cited" fits; "semantic #1 · keyword #1" fits Found by (two-digit ranks are cut, whole in the title). */}
+								<col style={{ width: 72 }} />
 								<col style={{ width: 104 }} />
 								<col style={{ width: 96 }} />
-								{fused && <col style={{ width: 168 }} />}
+								{fused && <col style={{ width: 144 }} />}
 								<col />
 								{/* open, map and ask (125 px in Figtree) with room for a focus ring and a wider fallback font. */}
 								<col style={{ width: 144 }} />
@@ -311,7 +320,7 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 									<th scope="col" style={S.th} aria-describedby={scaleLine !== '' ? scaleId : undefined}>
 										Score
 									</th>
-									<th scope="col" style={S.th}>
+									<th scope="col" style={S.th} aria-describedby={legend !== null ? legendId : undefined}>
 										Status
 									</th>
 									{fused && (

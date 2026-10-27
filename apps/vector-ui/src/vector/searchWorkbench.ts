@@ -486,8 +486,9 @@ export const STATUS_WORDS: Readonly<Record<WorkbenchStatus, string>> = {
 };
 
 /**
- * A status in a table cell, short so every row stays on one line: the cell's
- * title (and the threshold line above the table) says it in full ({@link STATUS_WORDS}).
+ * A status in a table cell, short so every row stays on one line. The status
+ * legend above the table says what each short word means ({@link statusLegend}),
+ * and the cell's title gives the whole sentence ({@link STATUS_WORDS}).
  */
 export const STATUS_SHORT: Readonly<Record<WorkbenchStatus, string>> = {
 	used: 'passes',
@@ -495,6 +496,30 @@ export const STATUS_SHORT: Readonly<Record<WorkbenchStatus, string>> = {
 	below_floor: 'below floor',
 	keyword: 'keyword match',
 };
+
+/** What each status but "passes" means, in the legend above a results table. */
+const STATUS_MEANINGS: ReadonlyArray<[Exclude<WorkbenchStatus, 'used'>, string]> = [
+	['near_miss', 'below the threshold'],
+	['below_floor', 'the store drops it'],
+	['keyword', 'no similarity'],
+];
+
+/**
+ * The status legend above a results table: what each short status a run's
+ * rows can take means, "passes" left out. It is over the run's rows at any
+ * threshold (a rated row above the floor can be a near miss), so the line
+ * stays the same while the slider moves and the table never shifts.
+ *
+ * @param rows - The run's rows.
+ * @param score - `dialect.score`, or null.
+ * @returns For example "near miss: below the threshold · keyword match: no similarity", or null when no row can take one.
+ */
+export function statusLegend(rows: readonly WorkbenchRow[], score: IScoreInfo | null): string | null {
+	// At a threshold past every score, each rated row above the floor is a near miss.
+	const statuses = new Set(classifyAt(rows, score?.higher_is_better === false ? -Infinity : Infinity, score).rows.map((row) => row.status));
+	const parts = STATUS_MEANINGS.filter(([status]) => statuses.has(status)).map(([status, meaning]) => `${STATUS_SHORT[status]}: ${meaning}`);
+	return parts.length === 0 ? null : parts.join(' · ');
+}
 
 /** A row and where it falls. */
 export interface ClassifiedRow extends WorkbenchRow {

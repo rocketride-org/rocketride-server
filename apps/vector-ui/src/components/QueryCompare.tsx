@@ -37,13 +37,13 @@
 // (SearchPanel), so it is no live region of its own.
 // =============================================================================
 
-import React from 'react';
+import React, { useId } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shell';
 import type { IScoreInfo } from '../contract/types';
 import { compareRuns, compareSentence, rowKey, sideOf } from '../vector/compare';
 import type { CompareSide, CompareSummary } from '../vector/compare';
-import { STATUS_SHORT, STATUS_WORDS, fromChatLine, runCaption, scoreTitle } from '../vector/searchWorkbench';
+import { STATUS_SHORT, STATUS_WORDS, fromChatLine, runCaption, scoreTitle, statusLegend } from '../vector/searchWorkbench';
 import type { Classification, WorkbenchRow, WorkbenchRun } from '../vector/searchWorkbench';
 
 /** One side of the comparison: the run and its rows at the slider. */
@@ -105,6 +105,8 @@ function Column({ letter, side, summary, score, onOpen, scopeOn }: SideProps): R
 	const { run, view } = side;
 	const passing = view.counts.rated > 0 ? ` · ${view.counts.passing} of ${view.counts.rated} pass at ${view.at.toFixed(2)}` : '';
 	const fromChat = fromChatLine(run, scopeOn);
+	const legend = statusLegend(run.rows, score);
+	const legendId = useId();
 	return (
 		<section style={S.side} aria-label={`${letter}: ${run.question}`} data-run={letter}>
 			<h4 style={S.title}>{`${letter} ${STARS[letter]} ${run.question}`}</h4>
@@ -117,52 +119,59 @@ function Column({ letter, side, summary, score, onOpen, scopeOn }: SideProps): R
 			{view.rows.length === 0 ? (
 				<p style={S.line}>{`No chunks matched “${run.question}”.`}</p>
 			) : (
-				<table style={S.table}>
-					<caption style={{ ...S.line, textAlign: 'left' }}>{`Results of ${letter}, and whether ${letter === 'A' ? 'B' : 'A'} found them too`}</caption>
-					<thead>
-						<tr>
-							<th scope="col" style={S.th}>
-								#
-							</th>
-							<th scope="col" style={S.th}>
-								Document
-							</th>
-							<th scope="col" style={S.th}>
-								Score
-							</th>
-							<th scope="col" style={S.th}>
-								Status
-							</th>
-							<th scope="col" style={S.th}>
-								{letter === 'A' ? 'Also in B' : 'Also in A'}
-							</th>
-						</tr>
-					</thead>
-					<tbody>
-						{view.rows.map((row, index) => {
-							const where = sideOf(summary, row.key, letter);
-							const path = row.path || row.objectId;
-							return (
-								<tr key={rowKey(row.key, index)} data-status={row.status} data-side={where}>
-									<td style={S.td}>{row.rank}</td>
-									<td style={S.td} title={row.preview}>
-										<button type="button" style={S.link} aria-label={`Open ${path} at chunk ${row.chunkId}`} onClick={() => onOpen(row)}>
-											{`${path} #${row.chunkId}`}
-										</button>
-										{row.cited ? ' · cited' : ''}
-									</td>
-									<td style={S.td} title={scoreTitle(row, score)}>
-										{row.score !== null ? row.score.toFixed(3) : 'match'}
-									</td>
-									<td style={{ ...S.td, whiteSpace: 'nowrap' }} title={STATUS_WORDS[row.status]}>
-										{STATUS_SHORT[row.status]}
-									</td>
-									<td style={S.td}>{SIDE_WORDS[where]}</td>
-								</tr>
-							);
-						})}
-					</tbody>
-				</table>
+				<>
+					{legend !== null && (
+						<p style={S.line} id={legendId} data-status-legend="">
+							{legend}
+						</p>
+					)}
+					<table style={S.table}>
+						<caption style={{ ...S.line, textAlign: 'left' }}>{`Results of ${letter}, and whether ${letter === 'A' ? 'B' : 'A'} found them too`}</caption>
+						<thead>
+							<tr>
+								<th scope="col" style={S.th}>
+									#
+								</th>
+								<th scope="col" style={S.th}>
+									Document
+								</th>
+								<th scope="col" style={S.th}>
+									Score
+								</th>
+								<th scope="col" style={S.th} aria-describedby={legend !== null ? legendId : undefined}>
+									Status
+								</th>
+								<th scope="col" style={S.th}>
+									{letter === 'A' ? 'Also in B' : 'Also in A'}
+								</th>
+							</tr>
+						</thead>
+						<tbody>
+							{view.rows.map((row, index) => {
+								const where = sideOf(summary, row.key, letter);
+								const path = row.path || row.objectId;
+								return (
+									<tr key={rowKey(row.key, index)} data-status={row.status} data-side={where}>
+										<td style={S.td}>{row.rank}</td>
+										<td style={S.td} title={row.preview}>
+											<button type="button" style={S.link} aria-label={`Open ${path} at chunk ${row.chunkId}`} onClick={() => onOpen(row)}>
+												{`${path} #${row.chunkId}`}
+											</button>
+											{row.cited ? ' · cited' : ''}
+										</td>
+										<td style={S.td} title={scoreTitle(row, score)}>
+											{row.score !== null ? row.score.toFixed(3) : 'match'}
+										</td>
+										<td style={{ ...S.td, whiteSpace: 'nowrap' }} title={STATUS_WORDS[row.status]}>
+											{STATUS_SHORT[row.status]}
+										</td>
+										<td style={S.td}>{SIDE_WORDS[where]}</td>
+									</tr>
+								);
+							})}
+						</tbody>
+					</table>
+				</>
 			)}
 		</section>
 	);
