@@ -103,7 +103,7 @@ test('the Documents tab: the ScopeBar is its filter row, with the path box first
 function overview(rows: readonly IDocumentItem[], over: Partial<React.ComponentProps<typeof OverviewView>> = {}): string {
 	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
 	const health = healthSummary(rows, { medianChunks: null, complete: true });
-	return renderToStaticMarkup(<OverviewView stats={stats} dialect={dialect} readOnly={false} rows={rows} scopedRows={rows} loading={false} complete scoped={false} scopeLine={null} scopeFilter={null} sample={null} health={health} median={null} onChartScope={noop} onOpenDocument={noop} onOpenTab={noop} onNewQuery={noop} onAddDocuments={noop} fieldsRead={null} {...over} />);
+	return renderToStaticMarkup(<OverviewView stats={stats} dialect={dialect} readOnly={false} rows={rows} scopedRows={rows} loading={false} complete scoped={false} scopeLine={null} scopeFilter={null} sample={null} health={health} median={null} onChartScope={noop} onOpenDocument={noop} onOpenTab={noop} onOpenFolder={noop} onNewQuery={noop} onAddDocuments={noop} fieldsRead={null} {...over} />);
 }
 
 test('the Overview: the cards on top, then Summary, Charts and Insights on a row of their own; Charts holds the StatsCharts', () => {
@@ -276,6 +276,7 @@ test('the Summary: Top folders with their share of the chunks and what they were
 	const shares = [...html.matchAll(/>(\d+)%</g)].map((m) => Number(m[1]));
 	assert.equal(shares.reduce((a, b) => a + b, 0), 100, 'the shares sum to 100');
 	assert.match(html, /Within the current scope; over the 5 documents loaded so far\./);
+	assert.match(html, /<button type="button"[^>]*title="Show its documents in Documents">C:\/demo\/field\/<\/button>/, "a folder shows its documents in Documents");
 	assert.match(html, /<section aria-label="Document fields"/);
 	assert.match(html, />Read fields in Collection</);
 	for (const action of ['Add documents', 'Browse documents', 'New query', 'Open map']) assert.match(html, new RegExp(`>${action}<`), action);

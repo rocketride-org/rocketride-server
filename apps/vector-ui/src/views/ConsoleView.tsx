@@ -37,7 +37,8 @@
 // collection is empty), the inline write confirmation of the console's own
 // requests and the connection's Details (both inline in both mounts:
 // rocket-ui keeps hidden documents mounted, so nothing here is a window-wide
-// overlay) and the write status line (an alert when the write failed). Each
+// overlay) and the write status line (an alert when the write failed, with
+// the store's audit of each batch behind a Details disclosure). Each
 // tab's panel is mounted the first time it shows, then stays mounted and
 // hidden, so it keeps its state (the map gets `visible` so its canvas sleeps
 // while hidden). Under the panels, the pending bar, so staging never moves a
@@ -88,6 +89,7 @@ import PendingBar from '../components/PendingBar';
 import QueryTab from '../components/QueryTab';
 import TrashTab from '../components/TrashTab';
 import WorkbenchTabs, { workbenchIds } from '../components/WorkbenchTabs';
+import WriteAuditDetails from '../components/WriteAuditDetails';
 import type { IWorkbenchPanelProps } from '../components/workbenchProps';
 import { CONSOLE_ORIGIN } from '../vector/confirm';
 import { consoleScope, mapScopeFor } from '../vector/consoleModel';
@@ -396,6 +398,7 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 			{(state.removal.status === 'running' || state.removal.message) && (
 				<div role={state.removal.status === 'error' ? 'alert' : 'status'} style={layout.status}>
 					{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
+					{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails audit={state.removal.audit} />}
 				</div>
 			)}
 			<div style={layout.body}>

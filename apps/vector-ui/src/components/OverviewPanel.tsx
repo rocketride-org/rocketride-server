@@ -28,7 +28,9 @@
 // views on a row of their own (automatic activation: they call nothing):
 //
 //   Summary    Top folders of the loaded documents (the scope's, while one
-//              filters the listing) with their share of the chunks; the
+//              filters the listing) with their share of the chunks, each
+//              showing its documents in Documents (that tab's folder view:
+//              the loaded documents under it, nothing listed again); the
 //              document fields the listing carries, and the chunk metadata
 //              fields once Collection read a sample of them; and quick
 //              actions (Add documents where the mount can, Browse documents,
@@ -49,6 +51,8 @@ import { Button } from 'shell';
 import type { IDialectResult, IDocumentItem, IDocumentsFilter, ISampleModel } from '../contract/types';
 import { DATA_BAR_TOKEN, TONE_EDGE } from '../vector/colors';
 import type { IStatsSlot } from '../vector/consoleStore';
+import { documentsFolder } from '../adapters/consoleActions';
+import { UPLOADED_LABEL } from '../vector/documents';
 import { documentFields } from '../vector/fields';
 import type { IFieldsEstimate } from '../vector/fields';
 import { directoryView } from '../vector/filters';
@@ -87,6 +91,7 @@ const local = {
 	list: { listStyle: 'none', margin: 0, padding: 0 } as CSSProperties,
 	insight: { display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 6, width: '100%', padding: '4px 0', border: 'none', borderBottom: '1px solid var(--rr-border)', background: 'none', color: 'var(--rr-text-primary)', font: 'inherit', fontSize: 12, textAlign: 'left', cursor: 'pointer' } as CSSProperties,
 	path: { overflowWrap: 'anywhere', fontWeight: 600 } as CSSProperties,
+	folder: { padding: 0, border: 'none', background: 'none', color: 'var(--rr-text-primary)', font: 'inherit', textAlign: 'left', textDecoration: 'underline', overflowWrap: 'anywhere', cursor: 'pointer' } as CSSProperties,
 	padded: { padding: '8px 24px 16px' } as CSSProperties,
 };
 
@@ -126,6 +131,8 @@ export interface IOverviewViewProps {
 	onChartScope(filter: IDocumentsFilter): void;
 	/** Open a document's drawer in Documents. */
 	onOpenDocument(objectId: string): void;
+	/** Show one folder's loaded documents in Documents (splitPath's folder, or the uploaded label). */
+	onOpenFolder(folder: string): void;
 	onOpenTab(tab: WorkbenchTab): void;
 	/** Open Query with an empty question. */
 	onNewQuery(): void;
@@ -179,7 +186,7 @@ export function OverviewView(props: IOverviewViewProps): React.ReactElement {
 }
 
 /** The Summary view. */
-const Summary: React.FC<IOverviewViewProps> = ({ rows, scopedRows, complete, scoped, onOpenTab, onNewQuery, onAddDocuments, fieldsRead }) => {
+const Summary: React.FC<IOverviewViewProps> = ({ rows, scopedRows, complete, scoped, onOpenTab, onOpenFolder, onNewQuery, onAddDocuments, fieldsRead }) => {
 	const folders = useMemo(() => topFolders(scopedRows), [scopedRows]);
 	const fields = useMemo(() => documentFields(rows), [rows]);
 	const chunkFields = (fieldsRead?.rows ?? []).filter((f) => f.source === 'chunks');
@@ -204,7 +211,15 @@ const Summary: React.FC<IOverviewViewProps> = ({ rows, scopedRows, complete, sco
 							<tbody>
 								{[...folders.rows, ...(folders.others ? [folders.others] : [])].map((f) => (
 									<tr key={f.folder || '(others)'} data-folder={f.folder}>
-										<td style={local.td}>{f.folder === '' && folders.others ? `Other folders (${formatCount(folders.others.folders)})` : f.folder}</td>
+										<td style={local.td}>
+											{f.folder === '' && folders.others ? (
+												`Other folders (${formatCount(folders.others.folders)})`
+											) : (
+												<button type="button" style={local.folder} onClick={() => onOpenFolder(f.folder)} title="Show its documents in Documents">
+													{f.folder}
+												</button>
+											)}
+										</td>
 										<td style={local.tdNum}>{formatCount(f.documents)}</td>
 										<td style={local.tdNum}>{f.chunks === null ? '—' : formatCount(f.chunks)}</td>
 										<td style={local.tdNum}>
@@ -384,6 +399,11 @@ export function OverviewPanel({ entry, model, console: state, selection, scopeLi
 			}}
 			onOpenDocument={(objectId) => {
 				entry.openDocument.set({ nonce: workbenchNonce('document'), objectId });
+				openTab('documents');
+			}}
+			onOpenFolder={(folder) => {
+				// The Documents tab's own folder view (C2): its loaded documents under that folder; nothing is listed again.
+				documentsFolder(entry).set(folder === UPLOADED_LABEL ? { kind: 'uploaded' } : { kind: 'folder', prefix: folder });
 				openTab('documents');
 			}}
 			onOpenTab={openTab}

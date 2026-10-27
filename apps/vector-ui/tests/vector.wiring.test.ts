@@ -176,6 +176,13 @@ test('focus in the workbench: a tab switch from inside a panel moves the focus t
 	assert.match(view, /returnFocus=\{asideFocus\} \/>/);
 });
 
+test("the Overview's Top folders show a folder's documents in Documents (its client-side folder view, C2); the write line keeps the store's audit", () => {
+	const overview = code('components/OverviewPanel.tsx');
+	assert.match(overview, /documentsFolder\(entry\)\.set\(folder === UPLOADED_LABEL \? \{ kind: 'uploaded' \} : \{ kind: 'folder', prefix: folder \}\);\s*openTab\('documents'\);/);
+	assert.doesNotMatch(overview, /setFilter|entry\.scope\.set/, 'a folder opened from the Overview never relists or changes the scope');
+	assert.match(code('views/ConsoleView.tsx'), /\{\(state\.removal\.status === 'done' \|\| state\.removal\.status === 'error'\) && <WriteAuditDetails audit=\{state\.removal\.audit\} \/>\}/, 'after the result sentence, once the write finished');
+});
+
 test('B1(b): fresh stats that say the collection exists, against a probe that said it did not, probe the store again once per disagreement', () => {
 	const view = code('views/ConsoleView.tsx');
 	assert.match(view, /const disagree = state\.stats\.view !== null && state\.stats\.view\.collectionExists && dialect\?\.health\.collection_exists === false;/);
