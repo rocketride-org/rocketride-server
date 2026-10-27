@@ -171,8 +171,11 @@ export interface IVectorFrame {
 	readonly visible: IReadable<boolean>;
 	/** The REMOTE env (rebuild when `connected` changes). */
 	env(ready: boolean): IVectorEnv;
-	/** A console's side: hints out, other frames' writes and map requests in. Returns the unbind. */
-	bindConsole(entry: IConnectionEntry): () => void;
+	/**
+	 * A console's side: hints out, other frames' writes and map requests in. `arrived` is told when a map request (a
+	 * document's Show on map, which fronts this frame) is taken: a press's arrival. Returns the unbind.
+	 */
+	bindConsole(entry: IConnectionEntry, on?: { arrived?(): void }): () => void;
 	/** A document's side: the console's query in, focus requests and writes in. Returns the unbind. */
 	bindDocument(entry: IConnectionEntry, objectId: string, on: IDocumentBinding): () => void;
 	/** The actions a document frame's view uses: the map and the chat land in the connection's console frame. */
@@ -622,7 +625,7 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 			envs.set(ready, env);
 			return env;
 		},
-		bindConsole(entry) {
+		bindConsole(entry, on) {
 			const key = entry.key;
 			const unbind: Array<() => void> = [];
 			// Hints out: the query the console shows on its map (the document frames' heat strip), and its median.
@@ -665,6 +668,8 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 			const listener = (request: { keys: VectorKey[]; source: HighlightSource }): void => {
 				entry.selection.setHighlight({ source: request.source, keys: request.keys });
 				entry.tab.set('map');
+				// The press that asked (in a document frame) fronts this one: it takes the focus if nothing shown has it.
+				on?.arrived?.();
 			};
 			mapListener = listener;
 			offerMap();

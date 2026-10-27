@@ -252,7 +252,7 @@ describe('F14 - no window-wide overlay in a frame: confirmations and details are
 		assert.match(view, /\{details && <ConnectionDetailsPanel key=\{endpoint\.key\} endpoint=\{endpoint\} probe=\{probe\} stats=\{state\.stats\.view\} onTest=\{\(target\) => env\.probe\(target\.key\)\} onClose=\{\(\) => setDetails\(false\)\} \/>\}/);
 		assert.equal(view.match(/<InlineRemoveConfirm entry=\{entry\} probe=\{/g)?.length, 1, 'the console');
 		const frame = code(read('VectorDevTool.tsx'));
-		assert.match(frame, /return <ConsoleView opened=\{endpoint\} active=\{visible\} \/>;/, 'a console frame adds nothing of its own');
+		assert.match(frame, /return <ConsoleView opened=\{endpoint\} active=\{visible\} arrivals=\{arrivals\} \/>;/, 'a console frame adds nothing of its own but the presses that fronted it (a document\'s Show on map)');
 		assert.equal(frame.match(/<InlineRemoveConfirm entry=\{entry\} probe=\{/g)?.length, 1, 'the document');
 		const details = code(read('components/ConnectionDetailsPanel.tsx'));
 		assert.match(details, /onKeyDown=\{\(event\) => \{\s*if \(event\.key === 'Escape'\)/);
@@ -332,7 +332,7 @@ describe('R6, R7, F9 - the mounts: effects with cleanups, documents opened on a 
 		const frame = code(read('VectorDevTool.tsx'));
 		assert.match(frame, /useEffect\(\(\) => \{[\s\S]*?const created: IVectorFrame = createVectorFrame\(\{[\s\S]*?return \(\) => \{\s*created\.dispose\(\);/);
 		assert.doesNotMatch(frame, /useMemo\(\(\) => createVectorFrame|peer\.subscribe/);
-		assert.match(frame, /useEffect\(\(\) => frame\.bindConsole\(entry\), \[frame, entry\]\);/);
+		assert.match(frame, /useEffect\(\(\) => frame\.bindConsole\(entry, \{ arrived: \(\) => setArrivals\(\(n\) => n \+ 1\) \}\), \[frame, entry\]\);/);
 		assert.match(frame, /frame\.bindDocument\(entry, objectId, \{/);
 	});
 

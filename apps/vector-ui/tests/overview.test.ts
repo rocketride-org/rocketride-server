@@ -230,3 +230,14 @@ test("live B10: a document's bottom slot keeps the hub's rules, without a pendin
 	assert.equal(at({ held: true, showing: 'empty' }), 'empty', 'resting on the empty slot brings nothing back');
 });
 
+test("R2-B7: a store's words without a leading exception or class name", async () => {
+	const { EMPTY, withoutExceptionName } = await import('../src/vector/wording');
+	assert.equal(withoutExceptionName('ResponseHandlingException: The store could not be reached.'), 'The store could not be reached.');
+	assert.equal(withoutExceptionName('qdrant_client.http.exceptions.ResponseHandlingException: [Errno 111] Connection refused'), '[Errno 111] Connection refused');
+	assert.equal(withoutExceptionName('ConnectionError: timed out'), 'timed out');
+	assert.equal(withoutExceptionName('psycopg.OperationalError:   server closed'), 'server closed');
+	assert.equal(withoutExceptionName('The store could not be reached: try again.'), 'The store could not be reached: try again.', 'a sentence stays');
+	assert.equal(withoutExceptionName('Error: '), 'Error: ', 'nothing left: the text as it was');
+	assert.equal(EMPTY.unreachable('ResponseHandlingException: The store could not be reached.'), 'Store unreachable: The store could not be reached.');
+});
+
