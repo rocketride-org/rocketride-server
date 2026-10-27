@@ -43,6 +43,8 @@ Evidence paths below are relative to the evidence root. Runs from 2026-10-27 on 
 | [Secrets stay out of the model](./secrets.md) | B1 (B2 not provable here) | `secrets` | Fail, real. The fake key leaves the page inside the model question. `secrets/2026-10-24T02-22-01-969Z/` |
 | [Unsaved edits while the agent edits](./unsaved-edits.md) | A1 | `unsaved-edits`, `steps closed-dirty-tab`, `steps split-save` | Fail, real. The agent writes behind the dirty editor without asking. `unsaved-edits/2026-10-24T02-22-23-196Z/` |
 | [Turn result and needs you](./turn-result.md) | C | `needs-you` | Fail, real. The missing Variable is named only in reply text. `needs-you/2026-10-24T02-26-49-311Z/` |
+| [Stopping a run the agent did not start](./run-ownership.md) | C1 | `foreign-terminate` | Not run: terminate had no card and no ownership rule. |
+| [Step limit, cost estimate and Undo](./limits-and-undo.md) | C2 | `step-cap`, `undo` | Not run: no step limit, no cost and no Undo. |
 | [Team switch mid-run, and stop](./team-switch-and-stop.md) | A (team switch), Dylan's cancel work (stop) | `stop`, `team-switch` | stop: fail, real, no Stop control. team-switch: precondition unmet on the OSS engine. `stop/2026-10-24T02-28-48-463Z/`, `team-switch/2026-10-24T00-21-39-244Z/` |
 
 Driver problems found and fixed while getting these results: the swallowed first rail click, Explorer rows matched outside the side panel, Monaco's non-breaking spaces, the editor header read, and the layout carrying tabs between journeys. None changed a check's pass rule.
@@ -52,6 +54,8 @@ Later changes, all kept in the one `drive.mjs`:
 - PR B1 (2026-10-24, 2026-10-25): the `secrets` journey checks what the B1 spec's proof lists, not only the frames. The marker is sent, and the fake key is absent from the DOM with thinking groups open, the thinking rows, the saved sessions and the catalog. It pastes a second fake key and checks that it is blocked and never sent or stored, and sends a third while a turn runs. The engine snapshot keeps all fake keys visible. Results are in `secrets.md`.
 - PR A1 (2026-10-25, 2026-10-26): `unsaved-edits --choice save|discard|keep` answers every "Unsaved changes" dialog and checks the end state for that answer. The steps runner gained `view`, `openFile`, `wait`, `expectNoText`, `css` and `nth` handles, `waitTurn` with `answer` and `expectDialogs`, and `fixtures/` arguments, for the `closed-dirty-tab` and `split-save` steps files. Results are in `unsaved-edits.md`.
 - PR D (2026-10-27): the skill moved to `.agents/skills/rr-verify-agent/` with portable defaults, optional tokenstash, a pinned image, `--engine source` through verify-rocketride's launcher with provenance in every result, the not-verifiable status, and a fixture `package.json` for the `verify-notes` app.
+- PRs C1 and C2 (2026-10-27): `needs-you` reads the turn's card, and `foreign-terminate`, `step-cap` and `undo` are new. Each was written and passed on its product branch. Results are in `turn-result.md`, `run-ownership.md` and `limits-and-undo.md`.
+- PR D, after C1 and C2 (2026-10-27): `file-link-opens` counts only the editor tab labels, so a file name in the model's answer cannot change it. `secrets` gained `pasted-row-redacted` and `midrun-row-redacted`, since #2836 shows both keys as `[redacted]` in the user's rows.
 
 On the bare tip fda7c679, 2026-10-27, with the source engine (`server-v3.5.0` binary, the checkout's engine Python, `fs_put_json` present), Claude Sonnet through the stand-in:
 
@@ -62,5 +66,8 @@ On the bare tip fda7c679, 2026-10-27, with the source engine (`server-v3.5.0` bi
 | `secrets` | Fail, 10 of 14, all B1 behavior. `sessions-saved` passes. | `secrets/2026-10-27T06-04-25-152Z/` |
 | `steps closed-dirty-tab` | Fail, `agent-edit-kept` only, A1 behavior. check_app passed on the fixture manifest. | `steps-closed-dirty-tab/2026-10-27T06-05-25-367Z/` |
 | `build-pipeline` on the image (fallback) | Incomplete: three pass, `reply-recorded` not verifiable. | `build-pipeline/2026-10-27T06-07-15-724Z/` |
+| `build-pipeline`, with the C1 and C2 journeys merged | Pass, 4 of 4. | `build-pipeline/2026-10-27T16-15-27-767Z/` |
+| `needs-you` | Fail, `needs-you-card`, C1 behavior. Three turns ended, and the agent asked for the Variable only in reply text. | `needs-you/2026-10-27T16-16-50-072Z/` |
+| `secrets`, with the two row checks | Fail, 10 of 16, all B1 behavior. Both row checks fail: the user's rows show the raw keys. | `secrets/2026-10-27T16-22-04-398Z/` |
 
-Not run on the tip: `unsaved-edits` and `split-save` (A1, not on the tip), `needs-you` (C, not on the tip), `team-switch` (the OSS engine has one team).
+Not run on the tip: `unsaved-edits` and `split-save` (A1, not on the tip), `foreign-terminate`, `step-cap` and `undo` (C1 and C2, not on the tip), `team-switch` (the OSS engine has one team).

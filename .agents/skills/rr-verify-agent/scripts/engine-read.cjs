@@ -14,6 +14,10 @@
 //   node engine-read.cjs reset                         delete every workspace file, agent session and
 //                                                      the saved workbench layout
 //   node engine-read.cjs snapshot <dir>                copy workspace files and agent sessions into <dir>
+//   node engine-read.cjs start <workspace path> <name> start a .pipe as the user would from another tab
+//                                                      (an execute run, which outlives this connection), JSON out
+//   node engine-read.cjs status <token>                the run's status, or {"gone": true}, JSON out
+//   node engine-read.cjs terminate <token>             stop a run (cleanup)
 //
 // Env: RR_VERIFY_ENGINE (default http://127.0.0.1:5565), RR_VERIFY_APIKEY
 // (default local-test), RR_VERIFY_CANARY (fake keys, comma-separated, allowed
@@ -187,8 +191,46 @@ async function main() {
 				console.log(`snapshot written to ${out}`);
 				break;
 			}
+			case 'start': {
+				const pipe = JSON.parse(await client.fsReadString(storePath(prefix, a)));
+				const r = await client.use({ pipeline: pipe.pipeline || pipe, name: b || undefined, ttl: 900 });
+				console.log(
+					JSON.stringify({ token: r.token, projectId: r.projectId, source: r.source, reused: r.reused })
+				);
+				break;
+			}
+			case 'status': {
+				try {
+					const st = await client.getTaskStatus(a);
+					console.log(
+						JSON.stringify({
+							name: st.name,
+							project_id: st.project_id,
+							source: st.source,
+							state: st.state,
+							completed: st.completed,
+							startTime: st.startTime,
+						})
+					);
+				} catch (err) {
+					console.log(
+						JSON.stringify({
+							gone: true,
+							error: (err && err.message ? err.message : String(err)).split('\n')[0],
+						})
+					);
+				}
+				break;
+			}
+			case 'terminate':
+				await client.terminate(a);
+				console.log(`terminated ${a.slice(0, 11)}…`);
+				break;
 			default:
-				console.error('usage: engine-read.cjs ping|probe|whoami|ls|cat|validate|write|rm|reset|snapshot');
+				console.error(
+					'usage: engine-read.cjs ping|probe|whoami|ls|cat|validate|write|rm|reset|snapshot' +
+						'|start|status|terminate'
+				);
 				process.exitCode = 2;
 		}
 	} finally {

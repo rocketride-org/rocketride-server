@@ -1,18 +1,20 @@
 # Turn result and needs you
 
-When a turn ends, the chat says how it ended, and not only through the model's own words. Possible endings are done, not finished, or needs you, along with which files changed and which checks passed. When the agent needs something only the user can give, like a missing Variable, the turn ends as "needs you" and names it (PR C).
+When a turn ends, a card under the agent's answer says how it ended: Done, Not finished, Needs you or Stopped, with the files it changed and the checks that ran. When the agent needs something only the user can give, like a missing Variable, it asks with `ask_user` and the turn ends as needs-you. The card names the Variable and opens Variables. The user's next message answers the request, and the card is saved with the conversation (PR C1).
 
 ## Sub-features
 
-- `result-done` shows a result row with "Done", the files changed, and the check that passed.
-- `result-not-finished` shows "Not finished" with the failing check when a check failed, even if the reply says it is done.
-- `needs-you-variable` shows "Needs you" and names the missing Variable.
-- `needs-you-continue` lets the user set the Variable and send "continue", and the next turn finishes.
+- `needs-you-card` shows a "Needs you" card when the agent asks.
+- `card-names-variable` names the missing Variable on the card and offers Open Variables. It says only whether the name is set, never whether the key works.
+- `open-variables` opens the Variables overlay from the card.
+- `reply-answers-request` makes the user's next message answer the request: the model reads "(answering request <id>)", and the saved turn records which turn answered it.
+- `card-saved` and `card-after-reload` keep the card in the session file (version 2), so a reload shows it again.
+- `file-link-opens` opens a pipeline the turn wrote from the reloaded card's file link. It is checked only when the card has one, since the model decides whether the turn writes a pipeline.
 
 ## How to get to it (user POV)
 
-- `Agent`, `New session`. Ask for a pipeline that uses a key the workspace does not have, then read the row that appears when the turn ends.
-- Any build request. The result row appears above the reply when the turn ends.
+- `Agent`, `New session`. Ask for a pipeline that uses a key the workspace does not have. The card appears under the agent's question when the turn ends.
+- Any build request. A "Done" card with the changed files and the checks appears under the answer.
 
 ## Driving it with rr-verify-agent
 
@@ -21,18 +23,16 @@ Preconditions:
 - `rr-verify-agent doctor` exits 0.
 - No Variable named `ROCKETRIDE_VERIFY_MISSING_KEY` exists. The OSS engine only has the Variables launch passed.
 
-- **Ask for something that needs a missing key.** Run `rr-verify-agent drive needs-you`. It sends "Build a pipeline called verify-search that answers questions with GPT-5 using my key in ROCKETRIDE_VERIFY_MISSING_KEY, then run it once to show me it works." It answers approval stops, up to 3 turns in total.
-- **Proof.** `result.json` passes `needs-you-shown` when a row starting with "Needs you" is visible after the turn. The final reply goes in `result.json` (`finalReply`) for comparison.
-- **Done row.** After PR C, add a steps file that runs a build and checks `expectText` "Done" and "validate passed".
+- **Ask for something that needs a missing key.** Run `rr-verify-agent drive needs-you`. It sends "Build a pipeline called verify-search that answers questions with GPT-5 using my key in ROCKETRIDE_VERIFY_MISSING_KEY, then run it once to show me it works." It answers approval stops until the card shows, up to 3 turns.
+- **Card.** It reads the "Turn result: Needs you" group, clicks Open Variables, checks the `environment` dialog, and closes it.
+- **Reply.** It sends "I can't add that key right now. Skip the run and tell me what you built." It then reads the session file through the engine (`engine-after-reply/`) and the frames the page sent.
+- **Reload.** It reloads the page, reopens the session from the Agent sidebar if its tab is not restored, and waits for the card. Then it clicks the card's `pipelines/` link, if there is one, and counts the editor tabs named after the file. Only the labels in the editor tab strip count.
 
 ## Gotchas
 
-- Result on 369f0511 (2026-10-24): fail, real product behavior, and the gap PR C targets.
-  - The agent built and validated `verify-search.pipe` and tried to run it. It quoted the engine's refusal: no variable named `ROCKETRIDE_VERIFY_MISSING_KEY`.
-  - It asked the user to add the Variable, but only in reply text.
-  - No row or structured outcome said "needs you", and each "approved" follow-up just retried the run.
-  - Evidence: `needs-you/2026-10-24T02-26-49-311Z/`.
-- The journey sends the approval reply while no "Needs you" row is visible, so today it runs all 3 turns even though the agent asked for a Variable. After PR C, the row should appear on turn 1 and the loop stops there.
-- PR C starts with a one-line status row (decision pending with Krish), drawn like the thinking lines. The journey finds it by text ("Needs you"). If the card version lands later, switch to its handle.
-- Status rows have no ARIA role or test id. `data-testid="chat-status"` with `data-sse-type` would make this journey robust.
-- "Open Variables" as a button exists only in the card version.
+- Result on 369f0511 (2026-10-24): fail, real product behavior, and the gap PR C targets. The agent asked for the Variable only in reply text. Evidence: `needs-you/2026-10-24T02-26-49-311Z/`.
+- Result on the bare tip fda7c679 with this journey (2026-10-27): fail on `needs-you-card`, the same gap. Three turns ended, and each answer asked for the Variable in text. No snapshot has a `Turn result` group. Evidence: `needs-you/2026-10-27T16-16-50-072Z/`.
+- The model decides when to call `ask_user`. A model that asks in plain text instead fails `needs-you-card` with no product bug in the card itself; the reply text is in `transcript.txt`.
+- The card has no test id. The driver finds it by its ARIA group name, `Turn result: <title>`.
+- `file-link-opens` once counted every visible text that read exactly the file's name. On C1's af612977 the model's second answer held `verify-search` in a code span, so the count was 1 before the click and 1 after, and the check failed though the tab opened (`needs-you/2026-10-27T10-29-49-913Z/`). It now counts only the editor tab labels, the spans in DocTabs' `.rr-doctabs-scroll` strip, since the tabs have no ARIA role. The model's text cannot change that count.
+- Open Variables stays enabled after the reply, since opening Variables answers nothing. Choice and Continue buttons go disabled once a reply answers the request; the unit tests cover them.

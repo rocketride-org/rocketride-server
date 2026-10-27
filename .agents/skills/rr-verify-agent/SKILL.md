@@ -20,7 +20,7 @@ $S/rr-verify-agent run build-pipeline stop              # lock, launch, drive ea
 ```bash
 $S/rr-verify-agent launch [--engine source|image]   # engine + branch rocket-ui + branch shell
 $S/rr-verify-agent doctor                           # read-only health check; run it whenever anything looks off
-$S/rr-verify-agent drive <journey>                  # build-pipeline | secrets | unsaved-edits | needs-you | stop | team-switch | steps <file or name>
+$S/rr-verify-agent drive <journey>                  # build-pipeline | secrets | unsaved-edits | needs-you | foreign-terminate | step-cap | undo | stop | team-switch | steps <file or name>
 $S/rr-verify-agent engine <cmd>                     # read the workspace through the engine (ls, cat, validate, probe, whoami, snapshot)
 $S/rr-verify-agent cleanup                          # stop only what launch started; evidence stays
 $S/rr-verify-agent keys <cmd> [...]                 # run a command with the model keys, found the way launch finds them
@@ -204,7 +204,7 @@ All helpers are in `scripts/`, executable, and called through `rr-verify-agent`:
 | `keys-exec.sh` | Gives the model keys the engine's names and records which names are set. |
 | `provenance.cjs` | Writes `engine.json`. |
 | `drive.mjs` | Playwright journeys and the steps runner. `node scripts/drive.mjs <journey> [--headed] [--turn-timeout-min 20]`. |
-| `engine-read.cjs` | `ping`, `probe`, `whoami`, `ls <path>`, `cat <path>`, `validate <path>`, `write <path> <file>`, `rm <path>`, `reset` (workspace, sessions, saved layout), `snapshot <dir>`. Paths are workspace paths (`pipelines/x.pipe`, `apps/<app>/...`), mapped to the store the same way apps/rocket-ui/src/surfaces/workspace/vfs/workspace.ts does. |
+| `engine-read.cjs` | `ping`, `probe`, `whoami`, `ls <path>`, `cat <path>`, `validate <path>`, `write <path> <file>`, `rm <path>`, `reset` (workspace, sessions, saved layout), `snapshot <dir>`, and for the foreign-run journey `start <path> <name>`, `status <token>`, `terminate <token>`. Paths are workspace paths (`pipelines/x.pipe`, `apps/<app>/...`), mapped to the store the same way apps/rocket-ui/src/surfaces/workspace/vfs/workspace.ts does. |
 
 Settings (environment):
 - `RR_VERIFY_ENGINE` (`source` or `image`, default source), `RR_VERIFY_IMAGE`, `RR_VERIFY_LAUNCHER`

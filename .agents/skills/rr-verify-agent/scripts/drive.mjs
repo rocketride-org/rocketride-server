@@ -7,6 +7,7 @@
 //   node drive.mjs secrets
 //   node drive.mjs unsaved-edits [--choice save|discard|keep]
 //   node drive.mjs needs-you
+//   node drive.mjs foreign-terminate
 //   node drive.mjs stop
 //   node drive.mjs team-switch
 //   node drive.mjs steps <file.json | name in steps/>
@@ -35,8 +36,11 @@ const EVIDENCE_ROOT = process.env.RR_VERIFY_EVIDENCE || path.join(ROOT, '.verify
 const STATE_DIR = process.env.RR_VERIFY_STATE || path.join(ROOT, '.verify', 'agent-state');
 const APPROVAL = 'Yes, approved. Go ahead and build it, and validate it when you are done.';
 const LOAD_MS = 180_000;
-// The secrets journey's mid-run message, before and after its key is replaced.
+// The secrets journey's pasted and mid-run messages, before and after their key is replaced.
+const PASTE_TEXT = (key) => `My Anthropic key is ${key}. Keep it in mind for later; there is nothing else to do now.`;
 const MIDRUN_TEXT = (key) => `Also, my OpenAI key for later is ${key}. Nothing to do with it now.`;
+// The note the chat adds when a key is sent while a turn runs (#2836).
+const REMOVED_NOTE = /I removed a key \(.+\) from your message, so it was not sent/;
 // heardText numbers each message; this one is the first of its run.
 const MIDRUN_SEEN = '1. Also, my OpenAI key for later is [redacted]. Nothing to do with it now.';
 
@@ -327,6 +331,15 @@ async function send(page, run, text, label) {
 
 const typingDots = (page) => page.locator('span[style*="rr-chat-dot"]').filter({ visible: true }).first();
 
+/** Whether visible text holds `text` (a string or a RegExp). */
+const textShown = (page, text) =>
+	page
+		.getByText(text)
+		.filter({ visible: true })
+		.first()
+		.isVisible()
+		.catch(() => false);
+
 /** Waits for the agent's turn to end: the typing dots appear, then go away. */
 async function waitTurn(page, run, label, onRunning) {
 	const dots = typingDots(page);
@@ -512,7 +525,8 @@ const where = (hits) =>
  * (PR B1). Then a fake key pasted into the composer must be blocked before
  * the model and kept out of the session, its title and the catalog. Last, a
  * fake key sent while a turn runs must reach the model only with the key
- * replaced. The stored checks count only when the sessions were saved.
+ * replaced. The user's rows show both keys as [redacted], so the page holds
+ * neither. The stored checks count only when the sessions were saved.
  */
 async function secrets(page, run) {
 	run.canary = `sk-ant-api03-RRVERIFY${crypto.randomBytes(16).toString('hex')}`;
@@ -552,18 +566,17 @@ async function secrets(page, run) {
 
 	// Part 2: a key pasted into the composer, as the first message of a new session.
 	await newSession(page, run);
-	await send(
-		page,
-		run,
-		`My Anthropic key is ${run.pasted}. Keep it in mind for later; there is nothing else to do now.`,
-		'paste'
-	);
+	await send(page, run, PASTE_TEXT(run.pasted), 'paste');
 	const pasteTurn = await waitTurn(page, run, 'paste');
 	const blockedRow = page
 		.getByText(/looks like it contains a key/i)
 		.filter({ visible: true })
 		.first();
 	const blocked = await blockedRow.isVisible().catch(() => false);
+	// The user's own row shows the key as [redacted] (#2836), so the page holds no copy of it.
+	const pasteDom = await page.content();
+	fs.writeFileSync(path.join(run.dir, 'dom-paste.html'), run.scrub(pasteDom));
+	const pastedRow = await textShown(page, PASTE_TEXT('[redacted]'));
 
 	// Part 3: a key sent while a turn runs. The send queues, and the running
 	// turn takes it as a mid-run message, which skips the request's key check.
@@ -576,12 +589,12 @@ async function secrets(page, run) {
 		await send(page, run, MIDRUN_TEXT(run.midrun), 'midrun');
 		midrunSent = true;
 	});
-	const midrunBlocked = await page
-		.getByText(/looks like it contains a key/i)
-		.filter({ visible: true })
-		.first()
-		.isVisible()
-		.catch(() => false);
+	const midrunBlocked = await textShown(page, /looks like it contains a key/i);
+	// The queued and then live row shows the key as [redacted], with a note that it was not sent (#2836).
+	const midrunDom = await page.content();
+	fs.writeFileSync(path.join(run.dir, 'dom-midrun.html'), run.scrub(midrunDom));
+	const midrunRow = await textShown(page, MIDRUN_TEXT('[redacted]'));
+	const midrunNote = await textShown(page, REMOVED_NOTE);
 	run.log(
 		'send a key while the turn runs',
 		midrunSent
@@ -687,6 +700,17 @@ async function secrets(page, run) {
 		blocked,
 		blocked ? 'an error row says the message looks like it contains a key' : 'no error row about the pasted key'
 	);
+	const pastedInDom = pasteDom.includes(run.pasted);
+	run.check(
+		'pasted-row-redacted',
+		pastedRow && !pastedInDom,
+		[
+			pastedRow
+				? "the user's row reads the message with [redacted]"
+				: 'no user row reads the message with [redacted]',
+			pastedInDom ? 'the pasted key is in the page DOM' : 'the pasted key is absent from the page DOM',
+		].join('; ')
+	);
 	const pastedHits = where([
 		['a saved session file', sessionText.includes(run.pasted)],
 		['the session catalog', catalog.includes(run.pasted)],
@@ -722,6 +746,20 @@ async function secrets(page, run) {
 			: midrunBlocked
 				? 'the message opened its own turn, so the mid-run path did not run'
 				: 'no frame holds the mid-run message as the model gets it'
+	);
+	const midrunInDom = midrunDom.includes(run.midrun);
+	run.check(
+		'midrun-row-redacted',
+		midrunSent && midrunRow && midrunNote && !midrunInDom,
+		!midrunSent
+			? 'the turn ended before the mid-run send'
+			: [
+					midrunRow
+						? "the user's row reads the message with [redacted]"
+						: 'no user row reads the message with [redacted]',
+					midrunNote ? 'a note says the key was removed and not sent' : 'no note that the key was removed',
+					midrunInDom ? 'the mid-run key is in the page DOM' : 'the mid-run key is absent from the page DOM',
+				].join('; ')
 	);
 	const midrunStored = where([
 		['a saved session file', sessionText.includes(run.midrun)],
@@ -958,36 +996,330 @@ async function unsavedEdits(page, run) {
 	};
 }
 
-/** A pipeline needs a Variable that does not exist: the turn should end as "needs you". */
+/** A turn's result card under its bot row, by its title ("Needs you", "Done"). */
+const resultCard = (page, title) =>
+	page.getByRole('group', { name: `Turn result: ${title}` }).filter({ visible: true });
+
+/**
+ * The label of each visible editor tab. The tabs have no ARIA role; each is a
+ * div in DocTabs' `rr-doctabs-scroll` strip whose label is a direct child span.
+ */
+const editorTabLabels = (page) => page.locator('.rr-doctabs-scroll > div > span').filter({ visible: true });
+
+/** The newest agent session file in an engine snapshot, parsed whole, or null. */
+function newestSessionFile(dir) {
+	const sdir = path.join(dir, 'sessions', APP_ID);
+	if (!fs.existsSync(sdir)) return null;
+	const files = fs
+		.readdirSync(sdir)
+		.filter((f) => /^[0-9a-f-]{36}\.json$/i.test(f))
+		.map((f) => path.join(sdir, f));
+	files.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+	try {
+		return files.length ? JSON.parse(fs.readFileSync(files[0], 'utf8')) : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Waits while a turn runs, calling `each` every half second, until the
+ * typing dots are gone or `each` returns true.
+ */
+async function whileRunning(page, each) {
+	const dots = typingDots(page);
+	const t0 = Date.now();
+	while (Date.now() - t0 < TURN_MS) {
+		if (await each()) return;
+		if (!(await dots.isVisible())) return;
+		await page.waitForTimeout(500);
+	}
+}
+
+/**
+ * A pipeline needs a Variable that does not exist (PR C1). The turn ends as
+ * needs-you with a card that names the Variable and opens Variables. The
+ * user's next message answers the request, and the saved session (version 2)
+ * keeps the card, so a reload shows it again.
+ */
 async function needsYou(page, run) {
+	const variable = 'ROCKETRIDE_VERIFY_MISSING_KEY';
+	const prompt =
+		'Build a pipeline called verify-search that answers questions with GPT-5 using my key in ' +
+		`${variable}, then run it once to show me it works.`;
 	await openApp(page, run);
 	await newSession(page, run);
-	await send(
-		page,
-		run,
-		'Build a pipeline called verify-search that answers questions with GPT-5 using my key in ' +
-			'ROCKETRIDE_VERIFY_MISSING_KEY, then run it once to show me it works.',
-		'turn1'
-	);
+	await send(page, run, prompt, 'turn1');
 	let turn = await waitTurn(page, run, 'turn1');
 	let turns = 1;
-	const needsRow = page.getByText(/^Needs you/).first();
-	while (turn.ended && turns < 3 && !(await needsRow.isVisible())) {
+	const card = () => resultCard(page, 'Needs you').last();
+	while (turn.ended && turns < 3 && !(await card().isVisible())) {
 		turns += 1;
 		await send(page, run, APPROVAL, `turn${turns}`);
 		turn = await waitTurn(page, run, `turn${turns}`);
 	}
-	const messages = await engineView(run, 'final', turns);
-	await transcript(page, run);
-	const visible = await needsRow.isVisible();
+	const shown = await card().isVisible();
 	run.check(
-		'needs-you-shown',
-		visible,
-		visible
-			? 'a "Needs you" row names what is missing'
-			: `no "Needs you" row after ${turns} turn(s); the only signal is the reply text`
+		'needs-you-card',
+		shown,
+		shown ? `a "Needs you" card ended turn ${turns}` : `no "Needs you" card after ${turns} turn(s)`
 	);
-	return { turns, finalReply: run.scrub(lastBot(messages)).slice(0, 2000) };
+	if (!shown) {
+		await transcript(page, run);
+		return { turns };
+	}
+	const cardText = (await card().innerText()).trim();
+	run.log('read the card', cardText.replace(/\n/g, ' | '));
+	await run.shot(page, 'needs-you-card');
+	const openVariables = card().getByRole('button', { name: 'Open Variables' });
+	const offers = await openVariables.isVisible();
+	run.check(
+		'card-names-variable',
+		offers && cardText.includes(variable),
+		`card text "${cardText.replace(/\n/g, ' | ')}"; Open Variables ${offers ? 'shown' : 'missing'}`
+	);
+	if (offers) {
+		await openVariables.click();
+		const overlay = page.getByRole('dialog', { name: 'environment' });
+		let opened = false;
+		try {
+			await overlay.waitFor({ timeout: 10_000 });
+			opened = true;
+		} catch {
+			/* reported below */
+		}
+		await run.shot(page, 'variables-overlay');
+		run.check(
+			'open-variables',
+			opened,
+			opened ? 'Open Variables opened the Variables overlay' : 'no Variables overlay after Open Variables'
+		);
+		if (opened) {
+			await overlay.getByRole('button', { name: 'Close' }).click();
+			await overlay.waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {});
+		}
+	}
+
+	// The reply answers the request: the model reads "(answering request <id>)",
+	// and the saved turn says which turn answered it.
+	const framesBefore = run.sent.length;
+	turns += 1;
+	await send(page, run, "I can't add that key right now. Skip the run and tell me what you built.", `turn${turns}`);
+	turn = await waitTurn(page, run, `turn${turns}`);
+	let file = null;
+	const dir = path.join(run.dir, 'engine-after-reply');
+	for (let i = 0; i < 10; i++) {
+		fs.rmSync(dir, { recursive: true, force: true });
+		run.engine('snapshot', dir);
+		file = newestSessionFile(dir);
+		const asked = (file?.turns || []).filter((t) => t.outcome === 'needs_input').at(-1);
+		if (asked?.request?.answeredBy) break;
+		await new Promise((r) => setTimeout(r, 1000));
+	}
+	const asked = (file?.turns || []).filter((t) => t.outcome === 'needs_input').at(-1);
+	const note = asked?.request ? `(answering request ${asked.request.id})` : '';
+	const noteSent = !!note && run.sent.slice(framesBefore).some((f) => f.text.includes(note));
+	run.checkSaved(
+		'reply-answers-request',
+		!!asked?.request?.answeredBy && noteSent,
+		asked
+			? `request ${asked.request?.id} (${asked.request?.kind}) ` +
+					`answeredBy ${asked.request?.answeredBy ?? 'nobody'}; ` +
+					`the next question ${noteSent ? 'carried' : 'lacked'} "${note}"`
+			: 'no needs_input turn in the saved session'
+	);
+	const row = (file?.messages || []).find((m) => m.id === asked?.messageId);
+	run.checkSaved(
+		'card-saved',
+		file?.version === 2 && row?.card?.title === 'Needs you',
+		`session version ${file?.version}; turn linked to row ${asked?.messageId}, ` +
+			`whose card is ${JSON.stringify(row?.card ?? null)}`
+	);
+
+	// A reload reads the session file again; the card comes back from it.
+	await page.reload({ waitUntil: 'domcontentloaded' });
+	await page
+		.locator('input[aria-label="API key"], [role="tab"][aria-label="Agent"]')
+		.first()
+		.waitFor({ timeout: LOAD_MS });
+	if (await page.getByPlaceholder('API key').isVisible()) await submitApiKey(page, run, 'reload');
+	await showView(page, run, 'Agent');
+	if (
+		!(await card()
+			.isVisible()
+			.catch(() => false))
+	) {
+		await page.locator(`[role="button"][title^="Build a pipeline called verify-search"]`).first().click();
+		run.log('reopen the session from the Agent sidebar', 'clicked its row');
+	}
+	let again = false;
+	try {
+		await card().waitFor({ timeout: 30_000 });
+		again = true;
+	} catch {
+		/* reported below */
+	}
+	await run.shot(page, 'after-reload');
+	const after = again ? (await card().innerText()).trim() : '';
+	run.checkSaved(
+		'card-after-reload',
+		again && after.includes(variable),
+		again
+			? `after the reload the card reads "${after.replace(/\n/g, ' | ')}"`
+			: 'no "Needs you" card after the reload'
+	);
+	// A file link on the reloaded card opens the file in its editor. The model decides whether the turn wrote one.
+	const link = again
+		? card()
+				.getByRole('button', { name: /^pipelines\// })
+				.first()
+		: null;
+	if (link && (await link.isVisible())) {
+		const file = ((await link.innerText()) || '').trim();
+		const name = file.split('/').pop();
+		const stem = name.replace(/\.pipe$/, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		// Only the editor tab strip's labels count, so the file's name in the model's answer cannot.
+		const tabs = () =>
+			editorTabLabels(page)
+				.filter({ hasText: new RegExp(`^${stem}(\\.pipe)?$`) })
+				.count();
+		const before = await tabs();
+		await link.click();
+		await page.waitForTimeout(3000);
+		const opened = await tabs();
+		await run.shot(page, 'file-link-opened');
+		run.check(
+			'file-link-opens',
+			opened > before,
+			`clicked ${file} on the card: ${before} editor tab(s) named "${name}" before and ${opened} after`
+		);
+	} else run.log('file link', 'the card has no pipeline file link, so none was clicked');
+	await transcript(page, run);
+	return {
+		turns,
+		card: cardText,
+		request: asked?.request ?? null,
+		finalReply: run.scrub(lastBot(file?.messages || [])).slice(0, 2000),
+	};
+}
+
+/**
+ * A pipeline run the agent did not start (PR C1). The journey starts it
+ * through the engine, as another tab would. In Ask mode the agent's
+ * terminate shows a "Needs your OK" card that says this conversation did not
+ * start the run, and Deny leaves it running. In Auto mode, in a new session,
+ * the agent's terminate is refused with no card, and the run still runs.
+ */
+async function foreignTerminate(page, run) {
+	const seeded = run.engine(
+		'write',
+		'pipelines/verify-foreign.pipe',
+		path.join(SKILL, 'steps/fixtures/foreign-run.pipe')
+	);
+	run.log('precondition: seed pipelines/verify-foreign.pipe', seeded.ok ? 'written' : seeded.out.trim());
+	const started = run.engine('start', 'pipelines/verify-foreign.pipe', 'verify-foreign');
+	let token = '';
+	try {
+		token = JSON.parse(started.out).token || '';
+	} catch {
+		/* reported below */
+	}
+	run.check(
+		'precondition-foreign-run',
+		!!token,
+		token ? `run ${token.slice(0, 11)}… started outside the agent` : `could not start it: ${started.out.trim()}`
+	);
+	if (!token) return {};
+	const status = () => {
+		try {
+			return JSON.parse(run.engine('status', token).out);
+		} catch {
+			return { gone: true };
+		}
+	};
+	const alive = () => {
+		const st = status();
+		return !st.gone && !st.completed;
+	};
+	const mode = page
+		.getByRole('button', { name: /^(Ask first|Don't ask)/ })
+		.filter({ visible: true })
+		.first();
+	const ask = page.getByRole('group', { name: 'Needs your OK' }).filter({ visible: true }).first();
+	const request = `Stop the pipeline run with token ${token}. I started it from another tab.`;
+	let cardText = '';
+	let sawCardInAuto = false;
+	let refusal = '';
+	try {
+		await openApp(page, run);
+		await newSession(page, run);
+		const before = (await mode.innerText()).trim();
+		run.check('starts-in-ask', before.startsWith('Ask first'), `the mode switch reads "${before}"`);
+
+		// Ask mode: the card asks, whoever started the run, and says this conversation did not.
+		await send(page, run, request, 'ask-turn');
+		await waitTurn(page, run, 'ask-turn', () =>
+			whileRunning(page, async () => {
+				if (!(await ask.isVisible())) return false;
+				cardText = (await ask.innerText()).trim();
+				await run.shot(page, 'ask-card');
+				await ask.getByRole('button', { name: 'Deny' }).click();
+				run.log('answer the card', `Deny; it read "${cardText.replace(/\n/g, ' | ')}"`);
+				return true;
+			})
+		);
+		run.check(
+			'ask-card-shown',
+			!!cardText,
+			cardText ? 'Ask mode showed a "Needs your OK" card for terminate' : 'no card in Ask mode'
+		);
+		run.check(
+			'ask-card-says-foreign',
+			cardText.includes('Stop the pipeline run') && cardText.includes('This conversation did not start it.'),
+			`card text "${cardText.replace(/\n/g, ' | ')}"`
+		);
+		run.check('denied-run-alive', alive(), `after Deny the run's status is ${JSON.stringify(status())}`);
+
+		// Auto mode: no card, the call is refused, and the model is told to ask the user.
+		await mode.click();
+		await page.waitForTimeout(500);
+		const now = (await mode.innerText()).trim();
+		run.check('switched-to-auto', now.startsWith("Don't ask"), `the mode switch reads "${now}"`);
+		await newSession(page, run);
+		await send(page, run, request, 'auto-turn');
+		await waitTurn(page, run, 'auto-turn', () =>
+			whileRunning(page, async () => {
+				if (await ask.isVisible()) sawCardInAuto = true;
+				return false;
+			})
+		);
+		const thinking = await openThinking(page);
+		await run.shot(page, 'auto-thinking');
+		refusal = (thinking.text.match(/[^\n]*did not start the pipeline run[^\n]*/) || [''])[0];
+		run.check(
+			'auto-refused',
+			!!refusal && !sawCardInAuto,
+			(sawCardInAuto ? 'a card showed in Auto; ' : '') +
+				(refusal ? `refusal: "${refusal.slice(0, 300)}"` : 'no refusal in the thinking rows')
+		);
+		run.check('auto-run-alive', alive(), `after the Auto turn the run's status is ${JSON.stringify(status())}`);
+	} finally {
+		// back to Ask, so later journeys start where they expect, and stop the run
+		try {
+			if ((await mode.innerText()).trim().startsWith("Don't ask")) await mode.click();
+		} catch {
+			/* the page is gone */
+		}
+		run.log('cleanup: stop the foreign run', run.engine('terminate', token).out.trim());
+	}
+	await transcript(page, run);
+	const messages = await engineView(run, 'final', 2, 2);
+	return {
+		token: `${token.slice(0, 11)}…`,
+		card: cardText,
+		refusal: refusal.slice(0, 500),
+		finalReply: run.scrub(lastBot(messages)).slice(0, 2000),
+	};
 }
 
 /** During a running turn the user can stop it. */
@@ -1269,11 +1601,320 @@ async function steps(page, run) {
 	return { steps: list.length, turns: answered };
 }
 
+// -----------------------------------------------------------------------------
+// limits and Undo (PR C2)
+// -----------------------------------------------------------------------------
+
+/** The bot row meta line with the turn's estimated cost ("~$0.42 est."). */
+const COST_META = /^(~\$\d+\.\d\d|<\$0\.01) est\.$/;
+
+/**
+ * Sets the Agent Step Limit in the shell's Settings, the way a user does: the
+ * sidebar footer's menu, Settings, a search, the number field, then Save (the
+ * page keeps a draft until Save). '' resets it to its default.
+ *
+ * @returns The value the field shows after Save.
+ */
+async function setStepLimit(page, run, value) {
+	await page.locator('[role="button"][aria-haspopup="menu"]').filter({ visible: true }).first().click();
+	await page.getByText('Settings', { exact: true }).filter({ visible: true }).last().click();
+	const overlay = page.getByRole('dialog', { name: 'settings' });
+	await overlay.waitFor({ timeout: 10_000 });
+	await overlay.getByPlaceholder('Search settings').fill('Step Limit');
+	// the row reads "Rocket Builder: Agent Step Limit", the name in its own element
+	await overlay
+		.getByText(/Agent Step Limit/)
+		.first()
+		.waitFor({ timeout: 10_000 });
+	const field = overlay.locator('input[type="number"]').filter({ visible: true }).first();
+	await field.fill(String(value));
+	await overlay.getByRole('button', { name: 'Save', exact: true }).click();
+	await page.waitForTimeout(500);
+	const shown = await field.inputValue();
+	await run.shot(page, `step-limit-${value === '' ? 'reset' : value}`);
+	await overlay.getByRole('button', { name: 'Close' }).click();
+	await overlay.waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {});
+	run.log(
+		`Settings: Agent Step Limit ${value === '' ? 'reset to its default' : `set to ${value}`}`,
+		`the field shows "${shown}"`
+	);
+	return shown;
+}
+
+/** The Agent view with a conversation's tab in front: its row in the Agent sidebar, by the start of its title. */
+async function showSession(page, run, title) {
+	await showView(page, run, 'Agent');
+	await page.locator(`[role="button"][title^="${title}"]`).first().click();
+	await composer(page).waitFor({ timeout: 30_000 });
+	run.log(`bring the conversation "${title}…" to the front`, 'clicked its row in the Agent sidebar');
+}
+
+/** The newest saved session and its turns, read back through the engine, waiting for `n` turns. */
+async function savedTurns(run, label, n) {
+	const dir = path.join(run.dir, `engine-${label}`);
+	let file = null;
+	for (let i = 0; i < 15; i++) {
+		fs.rmSync(dir, { recursive: true, force: true });
+		run.engine('snapshot', dir);
+		file = newestSessionFile(dir);
+		if ((file?.turns || []).length >= n) break;
+		await new Promise((r) => setTimeout(r, 1000));
+	}
+	return file;
+}
+
+/**
+ * The step limit (PR C2). With the Agent Step Limit at 2 in Settings, a task
+ * that follows a chain of notes needs more steps. The turn pauses with a
+ * "Paused after 2 steps" card and Continue, after a best-effort answer. Continue
+ * starts a new turn with a fresh budget, which answers the request. The row
+ * shows the turn's estimated cost.
+ */
+async function stepCap(page, run) {
+	// the engine reader writes under pipelines/, apps/ or nodes/; a note under pipelines/ needs no check
+	const chain = [
+		'pipelines/chain/start.md',
+		'pipelines/chain/q7x.md',
+		'pipelines/chain/m3k.md',
+		'pipelines/chain/z9p.md',
+		'pipelines/chain/w2b.md',
+	];
+	const fixtures = path.join(run.dir, 'fixtures');
+	fs.mkdirSync(fixtures, { recursive: true });
+	for (const [i, note] of chain.entries()) {
+		const next = chain[i + 1];
+		const last = next ? `Next: read ${next}` : 'This is the last note.';
+		const text = `# Note ${i + 1}\n\nNumber: ${(i + 1) * 7}\n\n${last}\n`;
+		const local = path.join(fixtures, path.basename(note));
+		fs.writeFileSync(local, text);
+		const seeded = run.engine('write', note, local);
+		if (!seeded.ok) throw new Error(`could not seed ${note}: ${seeded.out}`);
+	}
+	run.log('precondition: seed a chain of 5 notes under pipelines/chain/', 'written through the engine');
+	await openApp(page, run);
+	const set = await setStepLimit(page, run, 2);
+	run.check('limit-set', set === '2', `the Agent Step Limit field shows "${set}"`);
+	try {
+		await newSession(page, run);
+		await send(
+			page,
+			run,
+			'Follow the chain of notes that starts at pipelines/chain/start.md. Each note names the next one, ' +
+				'so read them one at a time, in order. Then tell me the sum of the numbers in all of them.',
+			'turn1'
+		);
+		await waitTurn(page, run, 'turn1');
+		const paused = resultCard(page, 'Paused after 2 steps').last();
+		const shown = await paused.isVisible();
+		const cardText = shown ? (await paused.innerText()).trim() : '';
+		await run.shot(page, 'paused-card');
+		const cont = paused.getByRole('button', { name: 'Continue', exact: true });
+		const offers = shown && (await cont.isVisible());
+		run.check(
+			'paused-card',
+			shown && offers,
+			shown
+				? `card "${cardText.replace(/\n/g, ' | ')}"; Continue ${offers ? 'shown' : 'missing'}`
+				: 'no "Paused after 2 steps" card'
+		);
+		const meta = await page.getByText(COST_META).filter({ visible: true }).allInnerTexts();
+		run.check(
+			'cost-shown',
+			meta.length > 0,
+			meta.length ? `the row's meta line reads "${meta.at(-1)}"` : 'no "~$… est." meta line on a bot row'
+		);
+		const first = await savedTurns(run, 'turn1', 1);
+		const t1 = (first?.turns || []).at(-1);
+		run.checkSaved(
+			'saved-limited',
+			t1?.outcome === 'needs_input' &&
+				t1?.reason === 'limited' &&
+				t1?.usage?.waves === 2 &&
+				t1?.request?.kind === 'continue' &&
+				t1?.usage?.cost?.estimated === true,
+			t1
+				? `turn 1: outcome ${t1.outcome}, reason ${t1.reason}, waves ${t1.usage?.waves}, ` +
+						`request ${t1.request?.kind} "${t1.request?.question}", cost ${JSON.stringify(t1.usage?.cost)}`
+				: 'no turn in the saved session'
+		);
+		if (!offers) return { card: cardText };
+
+		// Continue: a new turn with a fresh budget, which answers the request
+		const framesBefore = run.sent.length;
+		await cont.click();
+		run.log('press Continue', 'clicked');
+		await waitTurn(page, run, 'turn2');
+		const second = await savedTurns(run, 'turn2', 2);
+		const turns = second?.turns || [];
+		const [a, b] = [turns.at(-2), turns.at(-1)];
+		const note = a?.request ? `(answering request ${a.request.id})` : '';
+		const noteSent = !!note && run.sent.slice(framesBefore).some((f) => f.text.includes(note));
+		const answeredBy = a?.request?.answeredBy === b?.turnId ? 'turn 2' : (a?.request?.answeredBy ?? 'nobody');
+		run.checkSaved(
+			'continue-fresh-budget',
+			!!b && b.turnId !== a?.turnId && b.usage?.waves >= 1 && a?.request?.answeredBy === b.turnId && noteSent,
+			b
+				? `turn 2: outcome ${b.outcome}, reason ${b.reason}, waves ${b.usage?.waves}; ` +
+						`turn 1's request answeredBy ${answeredBy}; ` +
+						`the next question ${noteSent ? 'carried' : 'lacked'} "${note}"`
+				: 'no second turn in the saved session'
+		);
+		await transcript(page, run);
+		return {
+			card: cardText,
+			turn1: t1 ? { reason: t1.reason, waves: t1.usage?.waves, cost: t1.usage?.cost } : null,
+			turn2: b ? { outcome: b.outcome, reason: b.reason, waves: b.usage?.waves } : null,
+			finalReply: run.scrub(lastBot(second?.messages || [])).slice(0, 2000),
+		};
+	} finally {
+		// back to the default, so later journeys run with it
+		try {
+			await setStepLimit(page, run, '');
+		} catch (err) {
+			run.log('cleanup: reset the Agent Step Limit', `failed: ${err.message}`);
+		}
+	}
+}
+
+/**
+ * Undo (PR C2). The agent changes a note, and the turn's card offers Undo.
+ * Undo puts the note back as it was, says so in a row, and the button goes.
+ * The next turn's question carries that row, and the agent changes the note
+ * again. With the note typed into in an editor, Undo on that turn refuses and
+ * names it, and the note keeps the agent's change. (An editor stays unsaved
+ * after Ctrl+Z, and closing its tab keeps the text, so the refusal comes last.)
+ */
+async function undoJourney(page, run) {
+	const file = 'pipelines/undo-me.md';
+	const title = `In ${file}, change the heading`;
+	const original = '# Original heading\n\nThis line stays as it is.\n';
+	const local = path.join(run.dir, 'undo-me.md');
+	fs.writeFileSync(local, original);
+	const seeded = run.engine('write', file, local);
+	run.log(`precondition: seed ${file}`, seeded.ok ? 'written through the engine' : seeded.out.trim());
+	if (!seeded.ok) throw new Error('could not seed the fixture');
+	const stored = () => run.engine('cat', file).out;
+	const undoOn = () => resultCard(page, 'Done').last().getByRole('button', { name: 'Undo', exact: true });
+	await openApp(page, run);
+	await newSession(page, run);
+	await send(page, run, `${title} line to "# Changed by the agent". Change nothing else.`, 'turn1');
+	await waitTurn(page, run, 'turn1');
+	const changed = stored();
+	run.check(
+		'agent-changed',
+		changed === '# Changed by the agent\n\nThis line stays as it is.\n',
+		`the stored note reads ${JSON.stringify(changed.slice(0, 200))}`
+	);
+	const offered = (await undoOn().isVisible()) && (await undoOn().isEnabled());
+	await run.shot(page, 'done-card');
+	run.check(
+		'undo-offered',
+		offered,
+		offered ? 'the "Done" card has an enabled Undo button' : 'no enabled Undo on a "Done" card'
+	);
+	if (!offered) {
+		await transcript(page, run);
+		return {};
+	}
+
+	// Undo with no editor open: the note is back, the row says so, and the button goes
+	await undoOn().click();
+	run.log('press Undo', 'clicked');
+	const doneText =
+		'Undo: the user reversed the file changes of the turn before, ' +
+		`so these files are back as they were before it: ${file}.`;
+	let undone = false;
+	try {
+		await page.getByText(doneText).filter({ visible: true }).first().waitFor({ timeout: 30_000 });
+		undone = true;
+	} catch {
+		/* reported below */
+	}
+	await run.shot(page, 'undone');
+	const back = stored();
+	run.check(
+		'undone',
+		undone && back === original,
+		`${undone ? 'the chat says' : 'no row saying'} "${doneText}"; the stored note ` +
+			(back === original ? 'is the original again' : `reads ${JSON.stringify(back.slice(0, 200))}`)
+	);
+	const gone = !(await undoOn()
+		.isVisible()
+		.catch(() => false));
+	run.check('undo-gone', gone, gone ? 'the card has no Undo after it ran (one level)' : 'Undo is still on the card');
+
+	// The next turn reads the row, and changes the note again
+	const framesBefore = run.sent.length;
+	await send(
+		page,
+		run,
+		`Read ${file}. What is its heading now? ` +
+			'Then change the heading line to "# Changed again". Change nothing else.',
+		'turn2'
+	);
+	await waitTurn(page, run, 'turn2');
+	const read = run.sent
+		.slice(framesBefore)
+		.some((f) => f.text.includes('Undo: the user reversed the file changes of the turn before'));
+	run.check(
+		'model-reads-undo',
+		read,
+		read ? 'a frame sent to the model after the Undo carries its row' : 'no frame after the Undo carries its row'
+	);
+	const again = stored();
+	const offeredAgain = (await undoOn().isVisible()) && (await undoOn().isEnabled());
+	run.check(
+		'changed-again',
+		again.startsWith('# Changed again') && offeredAgain,
+		`the stored note reads ${JSON.stringify(again.slice(0, 200))}; ` +
+			`Undo ${offeredAgain ? 'is offered' : 'is not offered'} on turn 2's card`
+	);
+
+	// An editor with unsaved typing on the note: Undo refuses, names it, and changes nothing
+	await openFile(page, run, file);
+	await page.locator('.monaco-editor .view-lines').filter({ visible: true }).first().click();
+	await page.keyboard.press('Control+End');
+	await page.keyboard.type(' typing');
+	await run.shot(page, 'editor-dirty');
+	run.log(`type in ${file} without saving`, 'added " typing"');
+	await showSession(page, run, title);
+	await undoOn().click();
+	const refusal = `Undo refused, nothing was changed: ${file} has unsaved changes in an editor.`;
+	let refused = false;
+	try {
+		await page.getByText(refusal).filter({ visible: true }).first().waitFor({ timeout: 30_000 });
+		refused = true;
+	} catch {
+		/* reported below */
+	}
+	await run.shot(page, 'undo-refused');
+	const kept = stored();
+	run.check(
+		'dirty-refused',
+		refused && kept === again,
+		`${refused ? 'the chat says' : 'no row saying'} "${refusal}"; the stored note ` +
+			(kept === again ? "still has the agent's second change" : `changed: ${JSON.stringify(kept.slice(0, 200))}`)
+	);
+
+	const saved = await savedTurns(run, 'final', 2);
+	const row = (saved?.messages || []).find((m) => m.sender === 'system' && m.text === doneText);
+	run.checkSaved(
+		'row-saved',
+		!!row,
+		row ? `the saved session keeps the Undo row (id ${row.id})` : 'the saved session has no Undo row'
+	);
+	await transcript(page, run);
+	return { finalReply: run.scrub(lastBot(saved?.messages || [])).slice(0, 2000) };
+}
+
 const JOURNEYS = {
 	'build-pipeline': buildPipeline,
 	secrets,
 	'unsaved-edits': unsavedEdits,
 	'needs-you': needsYou,
+	'foreign-terminate': foreignTerminate,
+	'step-cap': stepCap,
+	undo: undoJourney,
 	stop,
 	'team-switch': teamSwitch,
 	steps,
