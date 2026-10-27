@@ -64,8 +64,14 @@ export function floatBorder(palette: IMapPalette | null): string {
 	return toCss(t === null ? text : mixRgb(paper, text, t));
 }
 
-/** The legend's height cap, CSS pixels: the first line, the colours, the marks' two lines and a note or two. */
-export const LEGEND_MAX_HEIGHT = 132;
+/**
+ * The legend's height, CSS pixels, the same in every state (a query landing, a selection, edges on), so the map
+ * never shrinks or moves under it. The smallest that holds the common states whole at 1440 (measured in Chrome,
+ * RocketRide dark, a 1,020 px legend beside the side panel): Document colouring 142, a placed query 137, a
+ * selection 142, Cluster colouring with its note 144. More (edges with their note, a narrower dev-tool frame)
+ * scrolls inside it.
+ */
+export const LEGEND_HEIGHT = 144;
 
 /** Style objects. */
 export const MAP_STYLES = {
@@ -99,8 +105,8 @@ export const MAP_STYLES = {
 	th: { textAlign: 'left', fontWeight: 700, fontSize: 11.5, padding: '4px 6px', borderBottom: '1px solid var(--rr-border)', position: 'sticky', top: 0, background: 'var(--rr-bg-paper)' } as CSSProperties,
 	td: { padding: '3px 6px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'top' } as CSSProperties,
 	tooltip: { position: 'absolute', pointerEvents: 'none', maxWidth: 320, padding: '6px 8px', borderRadius: 6, background: 'var(--rr-bg-paper)', color: 'var(--rr-text-primary)', border: `1px solid var(${OUTLINE_TOKEN})`, boxShadow: FLOAT_SHADOW, fontSize: 12, lineHeight: 1.4, zIndex: 2 } as CSSProperties,
-	// Capped, so its notes never take the map's height: what is past the cap scrolls inside the legend.
-	legend: { padding: '8px 10px', borderTop: '1px solid var(--rr-border)', background: 'var(--rr-bg-paper)', maxHeight: LEGEND_MAX_HEIGHT, boxSizing: 'border-box', overflowY: 'auto', flex: 'none' } as CSSProperties,
+	// One fixed height in every state: what does not fit scrolls inside the legend, and the map never moves.
+	legend: { padding: '8px 10px', borderTop: '1px solid var(--rr-border)', background: 'var(--rr-bg-paper)', height: LEGEND_HEIGHT, boxSizing: 'border-box', overflowY: 'auto', flex: 'none' } as CSSProperties,
 	/**
 	 * A colour swatch; an outlined colour gets the outline ring.
 	 *

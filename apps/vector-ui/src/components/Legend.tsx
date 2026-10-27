@@ -36,9 +36,9 @@
 // drawn is not listed. The view adds its lines (what a cluster is, the edges
 // drawn, how the sample's listing ended, the scope, an isolation) as notes,
 // and the draw again when the store refused to draw the sample for the
-// console's scope. Its height is capped (map/styles.ts LEGEND_MAX_HEIGHT):
-// past it the legend scrolls inside itself (then it is a tab stop, so a
-// keyboard reaches what is below), so its notes never take the map's height.
+// console's scope. Its height is fixed (map/styles.ts LEGEND_HEIGHT), the
+// same in every state: what does not fit scrolls inside it (then it is a tab
+// stop, so a keyboard reaches what is below), and the map never moves.
 // =============================================================================
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -223,7 +223,7 @@ export function keepTabStop(scrolls: boolean, focused: boolean): boolean {
  */
 export function Legend(props: LegendProps): React.ReactElement {
 	const section = useRef<HTMLElement>(null);
-	// A tab stop while it scrolls past its cap (a keyboard must reach what is below), and while it holds the focus
+	// A tab stop while it scrolls past its height (a keyboard must reach what is below), and while it holds the focus
 	// (removing the stop then would drop the focus to the page); measured when what it says changes, when its box
 	// changes size, and when the focus leaves it.
 	const [scrolls, setScrolls] = useState(false);
