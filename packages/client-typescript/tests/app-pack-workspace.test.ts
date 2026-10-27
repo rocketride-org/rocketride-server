@@ -40,6 +40,7 @@ import {
 	ensureWorkspaceGitignore,
 	preflightApp,
 	readAppListing,
+	readProjectIdAt,
 	resolveDeveloperId,
 	saveAppListing,
 	scanAppMarkers,
@@ -213,6 +214,22 @@ describe('manifest', () => {
 		expect(ensureProjectId(folder)).toBe('legacy-guid');
 		expect(ensureProjectId(folder)).toBe('legacy-guid');
 		expect(read('apps/clock/package.json')).toContain('\t"appManifest"');
+	});
+
+	it('readProjectIdAt forwards the manifest id, else a legacy marker guid, and never writes', () => {
+		writeApp('apps/clock', { id: 'acme.clock', projectId: 'manifest-guid' });
+		expect(readProjectIdAt(ws, 'apps/clock')).toBe('manifest-guid');
+
+		const legacy = writeApp('apps/timer', { id: 'acme.timer' }, { marker: false });
+		fs.writeFileSync(path.join(legacy, 'timer.rrapp'), JSON.stringify({ id: 'acme.timer', projectId: 'legacy-guid' }));
+		const before = read('apps/timer/package.json');
+		expect(readProjectIdAt(ws, legacy)).toBe('legacy-guid');
+		expect(read('apps/timer/package.json')).toBe(before);
+
+		writeApp('apps/bare', { id: 'acme.bare' });
+		const bare = read('apps/bare/package.json');
+		expect(readProjectIdAt(ws, 'apps/bare')).toBeNull();
+		expect(read('apps/bare/package.json')).toBe(bare);
 	});
 
 	it('ensureProjectId refuses a folder that is not an app', () => {

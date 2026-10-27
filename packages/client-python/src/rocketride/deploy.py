@@ -206,7 +206,10 @@ class DeployApi:
                 (default: the current working directory).
             comment: Optional "what changed" note kept in the registry.
             metadata: Extra metadata merged over the packed defaults
-                (``appRoot`` is always set from the pack).
+                (``appRoot`` is always set from the pack; ``projectId``
+                provenance defaults to the working copy's appManifest
+                projectId). Deploying never writes the projectId — it is
+                stamped at creation and by the editor.
             on_progress: Optional ``callable(line: str)`` receiving one
                 line per pack step.
 
@@ -215,10 +218,17 @@ class DeployApi:
         """
         # step: pack with the shared rules (raises ValueError on a missing
         # folder, a bad include entry, or a breached size cap)
-        from ._app_pack import pack_app_source
+        from ._app_pack import pack_app_source, read_project_id_at
 
-        packed = pack_app_source(workspace_root or os.getcwd(), app_root, on_progress)
+        root = workspace_root or os.getcwd()
+        packed = pack_app_source(root, app_root, on_progress)
         merged: dict[str, Any] = dict(metadata or {})
+        # step: provenance — forward the working copy's projectId (read,
+        # never stamped) unless the caller supplied one
+        if not merged.get('projectId'):
+            project_id = read_project_id_at(root, app_root)
+            if project_id:
+                merged['projectId'] = project_id
         if packed.app_root:
             merged['appRoot'] = packed.app_root
         return await self.add(
