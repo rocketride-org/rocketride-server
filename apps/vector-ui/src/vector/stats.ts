@@ -136,7 +136,7 @@ export interface IStatChip {
 	tooltip: string | null;
 }
 
-/** Chip labels for the caveats the strip shows (the directory shows its own: unsorted, paging). */
+/** Chip labels for the caveats the strip shows (Documents shows its own: unsorted, paging). */
 const CAVEAT_CHIPS: Readonly<Record<string, { label: string; tone: IStatChip['tone'] }>> = {
 	brute_force_search: { label: 'Brute-force search', tone: 'info' },
 	score_scale_raw: { label: 'Raw scores', tone: 'info' },
@@ -184,7 +184,7 @@ export function statsChips(input: { dialect: IDialectResult | null; stats: IStat
 	if (collectionMissing(dialect, stats)) chips.push({ key: 'empty', label: 'Empty collection', tone: 'muted', tooltip: CODE_SENTENCES.COLLECTION_MISSING });
 	const orphans = stats?.withoutFirstChunk ?? 0;
 	if (health !== null && health.flagged > 0) chips.push(attentionChip(health, stats?.withoutFirstChunk ?? null));
-	else if (orphans > 0) chips.push({ key: 'orphans', label: `${formatCount(orphans)} without first chunk`, tone: 'warning', tooltip: `${formatCount(orphans)} ${orphans === 1 ? 'document has' : 'documents have'} lost its first chunk; the directory lists ${orphans === 1 ? 'it' : 'them'} under "Needs attention".` });
+	else if (orphans > 0) chips.push({ key: 'orphans', label: `${formatCount(orphans)} without first chunk`, tone: 'warning', tooltip: `${formatCount(orphans)} ${orphans === 1 ? 'document has' : 'documents have'} lost ${orphans === 1 ? 'its' : 'their'} first chunk; the Overview's Insights list the loaded ones.` });
 	return chips;
 }
 
@@ -215,7 +215,7 @@ function attentionChip(health: IHealthSummary, storeOrphans: number | null): ISt
 	const n = formatCount(health.flagged);
 	const label = health.complete ? `${n} ${health.flagged === 1 ? 'needs' : 'need'} attention` : `${n} of ${formatCount(health.loaded)} loaded need attention`;
 	const parts = HEALTH_KINDS.map((kind) => `${HEALTH_TITLES[kind]}: ${health.unreported.includes(kind) ? 'not reported' : formatCount(health.counts[kind])}`);
-	let tooltip = `${parts.join(' · ')}. Counted over the ${formatCount(health.loaded)} ${health.loaded === 1 ? 'document' : 'documents'} loaded; the directory lists them under "Needs attention" and marks oversize documents in their folders.`;
+	let tooltip = `${parts.join(' · ')}. Counted over the ${formatCount(health.loaded)} ${health.loaded === 1 ? 'document' : 'documents'} loaded; the Overview's Insights list them, and Documents shows each document's flags, oversize included.`;
 	if (storeOrphans !== null && storeOrphans !== health.counts.no_first_chunk) tooltip += ` The store counts ${formatCount(storeOrphans)} ${storeOrphans === 1 ? 'document' : 'documents'} without a first chunk.`;
 	return { key: 'attention', label, tone: 'warning', tooltip };
 }

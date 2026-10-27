@@ -145,7 +145,7 @@ test('the chip: "N need attention" with the breakdown in its tooltip; counted ov
 	assert.ok(chip);
 	assert.equal(chip.label, '2 need attention');
 	assert.equal(chip.tone, 'warning');
-	assert.equal(chip.tooltip, 'Without a first chunk: 1 · Gaps in chunk ids: 0 · Deleted chunks: 1 · Empty: 0 · Oversize: 1. Counted over the 4 documents loaded; the directory lists them under "Needs attention" and marks oversize documents in their folders. The store counts 2 documents without a first chunk.');
+	assert.equal(chip.tooltip, 'Without a first chunk: 1 · Gaps in chunk ids: 0 · Deleted chunks: 1 · Empty: 0 · Oversize: 1. Counted over the 4 documents loaded; the Overview\'s Insights list them, and Documents shows each document\'s flags, oversize included. The store counts 2 documents without a first chunk.');
 	assert.equal(
 		statsChips({ dialect: null, stats: readStats(fixture('stats_pgvector')), readOnly: false, health: healthSummary([rows[0] as IDocumentItem, rows[3] as IDocumentItem], { medianChunks: 4, complete: true }) }).some((c) => c.key === 'attention'),
 		false,

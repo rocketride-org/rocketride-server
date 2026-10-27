@@ -62,6 +62,7 @@ require.cache[exportMenuPath] = { id: exportMenuPath, filename: exportMenuPath, 
 const { createSelectionStore } = require('../src/contract/bridge') as typeof import('../src/contract/bridge');
 const { renderDocumentsTab } = require('./support/panels') as typeof import('./support/panels');
 const { StatsAsOf, StatsStrip } = require('../src/components/StatsStrip') as typeof import('../src/components/StatsStrip');
+const { OverviewView } = require('../src/components/OverviewPanel') as typeof import('../src/components/OverviewPanel');
 const { StatsCharts } = require('../src/components/StatsCharts') as typeof import('../src/components/StatsCharts');
 const { HealthPanel } = require('../src/components/HealthPanel') as typeof import('../src/components/HealthPanel');
 const { healthSummary } = require('../src/vector/health') as typeof import('../src/vector/health');
@@ -98,22 +99,28 @@ test('the Documents tab: the ScopeBar is its filter row, with the path box first
 	assert.ok(html.indexOf('data-component="ScopeBar"') < html.indexOf('aria-label="Stored documents"'));
 });
 
-test('the stats strip ends with a collapsed Charts disclosure holding the StatsCharts', () => {
-	const rows: IDocumentItem[] = readDocumentsPage(fixture('list_documents_page1')).items;
+/** An Overview over these rows, with nothing to call. */
+function overview(rows: readonly IDocumentItem[], over: Partial<React.ComponentProps<typeof OverviewView>> = {}): string {
 	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
-	const html = renderToStaticMarkup(<StatsStrip stats={stats} dialect={dialect} readOnly={false} documents={rows} />);
-	assert.match(html, /<details[^>]*><summary[^>]*>Charts<\/summary>/);
-	assert.doesNotMatch(html, /<details[^>]* open/, 'collapsed by default');
-	assert.ok(mounted(html, 'StatsCharts') > html.indexOf('>Charts</summary>'));
+	const health = healthSummary(rows, { medianChunks: null, complete: true });
+	return renderToStaticMarkup(<OverviewView stats={stats} dialect={dialect} readOnly={false} rows={rows} scopedRows={rows} loading={false} complete scoped={false} scopeLine={null} scopeFilter={null} sample={null} health={health} median={null} onChartScope={noop} onOpenDocument={noop} onOpenTab={noop} onOpenFolder={noop} onNewQuery={noop} onAddDocuments={noop} fieldsRead={null} {...over} />);
+}
+
+test('the Overview: the cards on top, then Summary, Charts and Insights on a row of their own; Charts holds the StatsCharts', () => {
+	const rows: IDocumentItem[] = readDocumentsPage(fixture('list_documents_page1')).items;
+	const summary = overview(rows);
+	assert.ok(summary.indexOf('aria-label="Database summary"') < summary.indexOf('role="tablist" aria-label="Overview"'), 'the cards first');
+	assert.match(summary, /role="tab" id="([^"]*)-tab-summary" aria-selected="true" aria-controls="\1-panel-summary" tabindex="0"[^>]*>Summary</);
+	assert.match(summary, /role="tabpanel" id="[^"]*-panel-summary" aria-labelledby="[^"]*-tab-summary"/);
+	assert.match(summary, /-tab-insights"[^>]*>(<span[^>]*>){2}Insights \(\d+\)</);
+	assert.doesNotMatch(summary, /data-component="StatsCharts"/, 'the charts are drawn only on their view');
+	mounted(overview(rows, { initialView: 'charts' }), 'StatsCharts');
 });
 
-test('the stats strip renders with 130,000 loaded rows (Load more, 25 times): the closed Charts disclosure bins them without a RangeError', () => {
+test('the Overview renders with 130,000 loaded rows (Load more, 25 times): the charts bin them and Top folders counts them, without a RangeError', () => {
 	const rows: IDocumentItem[] = Array.from({ length: 130_000 }, (_, i) => ({ objectId: `d${i}`, path: `C:/corp/f${i % 97}/d${i}.pdf`, chunks: 1 + (i % 40), has_first_chunk: true, tables: 0, deleted: false, nodeId: null, size: 1, modifyTime: null, ingestedAt: `2026-0${1 + (i % 9)}-15T00:00:00Z`, pointId: null }));
-	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
-	const html = renderToStaticMarkup(<StatsStrip stats={stats} dialect={dialect} readOnly={false} documents={rows} />);
-	assert.doesNotMatch(html, /<details[^>]* open/, 'the disclosure is closed');
-	mounted(html, 'StatsCharts');
-	assert.match(html, /aria-label="Chunks per document, 130,000 documents in /, 'every loaded row is binned');
+	assert.match(overview(rows, { initialView: 'charts' }), /aria-label="Chunks per document, 130,000 documents in /, 'every loaded row is binned');
+	assert.match(overview(rows), /Other folders \(90\)/, 'seven folders named, the other 90 in one row');
 });
 
 test('while a scope is active the stats strip says what it covers on a second line', () => {
@@ -163,25 +170,17 @@ function elementsOf(node: React.ReactNode, out: React.ReactElement[] = []): Reac
 	return out;
 }
 
-test("the strip's one-second clock re-renders only the 'counts as of' words, never the charts", () => {
-	const rows: IDocumentItem[] = readDocumentsPage(fixture('list_documents_page1')).items;
+test("the strip's one-second clock re-renders only the 'counts as of' words; the charts are memoised and drawn apart", () => {
 	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
-	const onScope = (): void => undefined;
-	const props = { stats, dialect, readOnly: false, documents: rows, onScope };
+	const props = { stats, dialect, readOnly: false };
 	// The strip itself keeps no state (called outside React, a hook would throw): the clock lives in StatsAsOf.
-	const tree = (): React.ReactElement[] => elementsOf(StatsStrip(props));
-	const first = tree();
+	const first = elementsOf(StatsStrip(props));
 	const clock = first.filter((e) => e.type === StatsAsOf);
 	assert.equal(clock.length, 1, 'one clock');
 	assert.equal((clock[0]?.props as { view: unknown }).view, stats.view);
-	// The charts are memoised on props the strip passes through unchanged, so a tick of the clock leaves them alone.
+	assert.ok(!first.some((e) => e.type === StatsCharts), 'no chart under the clock');
 	assert.equal((StatsCharts as unknown as { $$typeof: symbol }).$$typeof, Symbol.for('react.memo'));
-	const charts = (elements: React.ReactElement[]) => elements.find((e) => e.type === StatsCharts)?.props as Record<string, unknown>;
-	const a = charts(first);
-	const b = charts(tree());
-	assert.ok(a && b);
-	for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) assert.ok(Object.is(a[key], b[key]), `${key} is the same between two renders`);
-	assert.match(renderToStaticMarkup(<StatsAsOf view={stats.view} stale={false} refreshing={false} />), /aria-live="off"/);
+	assert.match(renderToStaticMarkup(<StatsAsOf view={stats.view} stale={false} />), /aria-live="off"/);
 });
 
 test('the ingest chart with one far-off ingest time: a few dozen bars, not ninety thousand', () => {
@@ -196,12 +195,15 @@ test('the ingest chart with one far-off ingest time: a few dozen bars, not ninet
 	assert.ok(took < 200, `rendered in ${took.toFixed(1)} ms`);
 });
 
-test('the strip: a Size figure when the store reports it; no Charts disclosure for an empty collection', () => {
+test('the strip: a Size card only when the store reports it; the cards say "—" for what the store did not count', () => {
 	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
 	const enriched = readDialect(fixture('dialect_enriched'));
 	assert.match(renderToStaticMarkup(<StatsStrip stats={stats} dialect={enriched} readOnly={false} />), /data-figure="size"[^>]*>46 MB</);
+	assert.doesNotMatch(renderToStaticMarkup(<StatsStrip stats={stats} dialect={dialect} readOnly={false} />), /data-figure="size"/, 'never a dash for Size');
+	const html = renderToStaticMarkup(<StatsStrip stats={stats} dialect={dialect} readOnly={false} />);
+	for (const key of ['documents', 'chunks', 'avg', 'trash', 'model', 'index']) assert.match(html, new RegExp(`data-figure="${key}"`), key);
 	const empty = { ...stats, view: readStats(fixture('stats_collection_missing_legacy')) };
-	assert.doesNotMatch(renderToStaticMarkup(<StatsStrip stats={empty} dialect={dialect} readOnly={false} />), />Charts<\/summary>/);
+	assert.match(overview([], { stats: empty, initialView: 'charts' }), /No documents to chart yet\./, 'an empty collection: nothing to chart, and it says so');
 });
 
 test('a document tab holds its HealthPanel', () => {
@@ -258,6 +260,31 @@ test('the Documents grid says a flagged document needs attention in its Health c
 	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
 	const strip = renderToStaticMarkup(<StatsStrip stats={stats} dialect={dialect} readOnly={false} health={healthSummary(rows, { medianChunks: 9, complete: true })} />);
 	assert.match(strip, /data-chip="attention">1 needs attention</);
+	// The Overview's Insights list the same documents: its count is the chip's.
+	const health = healthSummary(rows, { medianChunks: 9, complete: true });
+	const view = overview(rows, { health, median: 9, initialView: 'insights' });
+	assert.match(view, /-tab-insights"[^>]*>(<span[^>]*>){2}Insights \(1\)</);
+	assert.equal((view.match(/<li><button type="button"/g) ?? []).length, 1, 'one row per document that needs attention');
+	assert.match(view, /title="Open it in Documents"><span[^>]*>[^<]*<\/span><span[^>]*>1 deleted chunk</);
+	assert.match(overview(rows, { health: { ...health, complete: false }, median: 9 }), /Insights \(1\+\)/, 'while more documents may need attention than the loaded ones');
+});
+
+test('the Summary: Top folders with their share of the chunks and what they were counted over, the document fields, and the quick actions this mount offers', () => {
+	const rows: IDocumentItem[] = readDocumentsPage(fixture('list_documents_page1')).items;
+	const html = overview(rows, { scoped: true, complete: false });
+	assert.match(html, /<section aria-label="Top folders"/);
+	const shares = [...html.matchAll(/>(\d+)%</g)].map((m) => Number(m[1]));
+	assert.equal(shares.reduce((a, b) => a + b, 0), 100, 'the shares sum to 100');
+	assert.match(html, /Within the current scope; over the 5 documents loaded so far\./);
+	assert.match(html, /<button type="button"[^>]*title="Show its documents in Documents">C:\/demo\/field\/<\/button>/, "a folder shows its documents in Documents");
+	assert.match(html, /<section aria-label="Document fields"/);
+	assert.match(html, />Read fields in Collection</);
+	for (const action of ['Add documents', 'Browse documents', 'New query', 'Open map']) assert.match(html, new RegExp(`>${action}<`), action);
+	assert.doesNotMatch(overview(rows, { onAddDocuments: null }), />Add documents</, 'a mount that cannot add documents does not offer it');
+	assert.match(html, /Chunk metadata fields are read from a sample in Collection\./, 'before a sample, it says where the chunk fields come from');
+	const read = overview(rows, { fieldsRead: { rows: [{ name: 'section', type: 'text', coverage: 18, of: 20, example: 'Intro', searchFilter: false, listFilter: false, source: 'chunks' }], chunksRead: 20, documentsRead: 5, at: 0 } });
+	assert.match(read, /Chunk metadata, from 20 chunks read/);
+	assert.match(read, /<td[^>]*>section<\/td><td[^>]*>text<\/td><td[^>]*>18 of 20<\/td>/, 'what Collection read, with what it was read over');
 });
 
 test('an oversize document keeps its folder and says "oversize" in its Health column; its tooltip does not say it needs attention', () => {

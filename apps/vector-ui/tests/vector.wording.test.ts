@@ -57,7 +57,7 @@ test('the caveat sentences the console shows', () => {
 	assert.equal(caveatSentence('cloud_only_unverified'), 'This backend was not run against a live server in this build.');
 	assert.equal(caveatSentence('documents_by_first_chunk'), 'Documents are counted by their first chunk on this store.');
 	assert.equal(caveatSentence('document_count_capped'), 'Orphan counts above 1,000 are not exact on this store.');
-	assert.equal(caveatSentence('documents_unsorted'), 'This store lists documents in storage order; the directory sorts what is loaded.');
+	assert.equal(caveatSentence('documents_unsorted'), 'This store lists documents in storage order; Documents sorts what is loaded.');
 	assert.equal(caveatSentence('documents_paging_unsupported'), 'This store cannot page its document list; only the first page is shown.');
 	assert.equal(caveatSentence('model_mismatch'), 'The chat embedding model differs from the one this collection was built with; results may be meaningless.');
 	assert.equal(caveatSentence('meta_column_pending'), 'File size and ingest time are not stored yet: another session holds this table; the store will retry.');

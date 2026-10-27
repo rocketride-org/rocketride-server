@@ -28,22 +28,33 @@
 // Details, Add documents) a row of tabs of its own: Overview, Documents,
 // Query, Map, Collection and Trash (vector/workbench.ts; the tab is the
 // connection's `entry.tab`, so the map's and the chat's actions can switch
-// it). Under the tab row, on every tab: the blocked banner, the inline write
-// confirmation of the console's own requests and the connection's Details
-// (both inline in both mounts: rocket-ui keeps hidden documents mounted, so
-// nothing here is a window-wide overlay) and the write status line. Each
+// it). Neither row moves when a run starts or an answer lands: the tab row
+// is its own row, and Refresh keeps its width while it says Refreshing…
+// (only for a refresh someone asked for, never the 15 s quick tick).
+//
+// Under the tab row, on every tab: the banners (the console cannot open,
+// the store failed with the last known figures kept, writes are off, the
+// collection is empty), the inline write confirmation of the console's own
+// requests and the connection's Details (both inline in both mounts:
+// rocket-ui keeps hidden documents mounted, so nothing here is a window-wide
+// overlay) and the write status line (an alert when the write failed, with
+// the store's audit of each batch behind a Details disclosure). Each
 // tab's panel is mounted the first time it shows, then stays mounted and
 // hidden, so it keeps its state (the map gets `visible` so its canvas sleeps
 // while hidden). Under the panels, the pending bar, so staging never moves a
 // row above it. Add documents is an aside beside the panels, kept mounted
-// once opened. A confirmation that closes with the focus inside it (and,
-// after Cancel, cannot give it back to its opener) gives it to the row the
-// shown panel marks `data-return-focus` (the row after the ones written),
-// else to that panel's grid, else to the tab row's current tab.
+// once opened (an upload in flight keeps following its progress).
 //
-// The console's calls and their pacing live in its controller
-// (vector/consoleStore.ts); this view renders the controller's snapshot and
-// forwards clicks.
+// FOCUS. A confirmation that closes with the focus inside it (and, after
+// Cancel, cannot give it back to its opener) gives it to the row the shown
+// panel marks `data-return-focus` (the row after the ones written), else to
+// that panel's grid, else to the current tab. A tab switch made from inside
+// a panel (Show on map, a quick action) moves the focus to the new tab, so
+// it never stays on an element of a hidden panel.
+//
+// THE DIALECT. When fresh stats say the collection exists but the probe
+// read at discovery says it does not, the store is probed again, once per
+// disagreement, so the index and size fill in without a Test connection.
 //
 // THE SCOPE. The directory's ScopeBar sets the connection's scope (the
 // entry's value store, read by the map and search as ConsoleModel.scope);
@@ -59,7 +70,7 @@
 // once, when they are known.
 // =============================================================================
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { Availability, IDocumentsFilter, IScopeState } from '../contract/types';
 import { Banner, Button, ContentHeader } from 'shell';
@@ -77,7 +88,8 @@ import OverviewPanel from '../components/OverviewPanel';
 import PendingBar from '../components/PendingBar';
 import QueryTab from '../components/QueryTab';
 import TrashTab from '../components/TrashTab';
-import WorkbenchTabs from '../components/WorkbenchTabs';
+import WorkbenchTabs, { workbenchIds } from '../components/WorkbenchTabs';
+import WriteAuditDetails from '../components/WriteAuditDetails';
 import type { IWorkbenchPanelProps } from '../components/workbenchProps';
 import { CONSOLE_ORIGIN } from '../vector/confirm';
 import { consoleScope, mapScopeFor } from '../vector/consoleModel';
@@ -88,19 +100,44 @@ import { healthSummary, medianChunks } from '../vector/health';
 import { savedFiltersFor } from '../vector/savedFilters';
 import { roleLine, vectorCardView } from '../vector/connections';
 import { providerTitle } from '../vector/support';
-import { BUSY } from '../vector/wording';
+import { collectionMissing } from '../vector/stats';
+import { BUSY, EMPTY } from '../vector/wording';
+import { focusStranded, reprobeFor } from '../vector/workbench';
 import type { WorkbenchTab } from '../vector/workbench';
 import { styles } from '../styles';
 import MapView from './MapView';
 
 const layout = {
 	banner: { padding: '8px 24px 0' } as CSSProperties,
+	bannerAction: { marginLeft: 8 } as CSSProperties,
+	/** Two labels in one cell: the button keeps the width of the longer one, whichever shows. */
+	held: { display: 'inline-grid' } as CSSProperties,
+	heldLabel: (shown: boolean): CSSProperties => ({ gridArea: '1 / 1', visibility: shown ? 'visible' : 'hidden' }),
 	status: { ...styles.small, padding: '6px 24px' } as CSSProperties,
 	/** The panels beside the Add documents aside. */
 	body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' } as CSSProperties,
 	panels: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column' } as CSSProperties,
 	/** One tab's panel: shown or hidden, never unmounted once shown (the Overview's strip has its own gutters). */
 	panel: (shown: boolean, gutter: number): CSSProperties => ({ flex: 1, minHeight: 0, minWidth: 0, display: shown ? 'flex' : 'none', flexDirection: 'column', padding: gutter }),
+};
+
+/**
+ * One tab's panel: shown or hidden, never unmounted once shown; named by its tab.
+ *
+ * @param props.id - The tab.
+ * @param props.shown - Whether it is the tab shown.
+ * @param props.gutter - Its padding (the Overview's strip has its own gutters).
+ * @param props.prefix - The workbench's id prefix.
+ * @param props.children - The panel's content.
+ * @returns The panel.
+ */
+const WorkbenchPanel: React.FC<{ id: WorkbenchTab; shown: boolean; gutter: number; prefix: string; children: React.ReactNode }> = ({ id, shown, gutter, prefix, children }) => {
+	const ids = workbenchIds(prefix, id);
+	return (
+		<div role="tabpanel" id={ids.panel} aria-labelledby={ids.tab} style={layout.panel(shown, gutter)} data-workbench-panel={id}>
+			{children}
+		</div>
+	);
 };
 
 /** Props for the {@link ConsoleView} component. */
@@ -180,9 +217,10 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 	const mapModel = useMemo(() => (nextMapScope === (model.scope ?? null) ? model : { ...model, scope: nextMapScope }), [model, nextMapScope]);
 	const scopeLine = wiring.scope !== null ? scopeStripText(scopeView(wiring.scope, state.directory, cap), state.stats.view) : null;
 	// The "N need attention" chip: the loaded documents' health; complete only for the whole, finished listing.
-	const health = useMemo(() => {
+	const { health, median } = useMemo(() => {
 		const settled = state.directory.status !== 'loading' && state.directory.status !== 'idle';
-		return healthSummary(state.directory.rows, { medianChunks: settled ? medianChunks(state.directory.rows) : null, complete: state.directory.status === 'done' && state.directory.filter === null });
+		const median = settled ? medianChunks(state.directory.rows) : null;
+		return { median, health: healthSummary(state.directory.rows, { medianChunks: median, complete: state.directory.status === 'done' && state.directory.filter === null }) };
 	}, [state.directory]);
 	// A chart's bar sets its kind of condition (a chunk range, a file type, a period) and keeps the others.
 	// Kept between renders so the memoised charts are not drawn again for nothing.
@@ -239,18 +277,61 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 	const [details, setDetails] = useState(false);
 	const [adding, setAdding] = useState(false);
 	const [addingMounted, setAddingMounted] = useState(false);
+	const openAdding = (): void => {
+		setAddingMounted(true);
+		setAdding(true);
+	};
+	const prefix = `wb${useId().replace(/:/g, '')}`;
 	const panel = (id: WorkbenchTab): IWorkbenchPanelProps => ({ entry, model, channels, actions, console: state, selection, visible: active && tab === id });
 	// Where the focus goes after a confirmation closes: the shown panel's marked row, else its grid, else the current tab.
 	const root = useRef<HTMLDivElement>(null);
+	const currentTab = (): HTMLElement | null => root.current?.querySelector<HTMLElement>('[data-workbench-tabs] [role="tab"][aria-selected="true"]') ?? null;
+	// The same order as the pending bar's (components/focusTargets.ts): the row the grid marks, its row in the tab order,
+	// the grid, then the tab.
 	const returnFocus = (): HTMLElement | null => {
 		const shown = root.current?.querySelector<HTMLElement>(`[data-workbench-panel="${tab}"]`) ?? null;
-		const currentTab = root.current?.querySelector<HTMLElement>('[data-workbench-tabs] button[aria-pressed="true"]') ?? null;
-		return firstFocusable([shown?.querySelector<HTMLElement>('[data-return-focus]'), shown?.querySelector<HTMLElement>('[role="grid"]'), currentTab]);
+		const inShown = (selector: string): HTMLElement | null => shown?.querySelector<HTMLElement>(selector) ?? null;
+		return firstFocusable([inShown('[data-return-focus]'), inShown('[data-grid-focus] [data-grid-row][tabindex="0"]'), inShown('[data-grid-focus]'), currentTab()]);
 	};
+	// Where the focus goes when Add documents closes and its opener cannot take it back: the header's button, else the tab.
+	const asideFocus = (): HTMLElement | null => firstFocusable([root.current?.querySelector<HTMLElement>('[data-add-documents] button'), currentTab()]);
+	// A tab switch made from inside a panel leaves the focus on an element now hidden: it goes to the new tab.
+	useLayoutEffect(() => {
+		if (typeof document === 'undefined') return;
+		const focused = document.activeElement;
+		if (!(focused instanceof HTMLElement) || !root.current?.contains(focused) || !focusStranded(focused, tab)) return;
+		currentTab()?.focus();
+	}, [tab]);
+
+	// Refreshing… only for a refresh someone asked for; the quick tick every 15 s changes nothing in the header.
+	const [refreshAsked, setRefreshAsked] = useState(false);
+	const statsLoading = state.stats.status === 'loading';
+	useEffect(() => {
+		if (!statsLoading && refreshAsked) setRefreshAsked(false);
+	}, [statsLoading, refreshAsked]);
+	const refreshing = refreshAsked && statsLoading;
+	const refresh = (): void => {
+		// A refresh already running is not asked again.
+		if (refreshing) return;
+		setRefreshAsked(true);
+		entry.controller.refresh();
+	};
+
+	// B1(b): fresh stats say the collection exists while the probe read at discovery says it does not: probe again,
+	// once per disagreement (a store whose probe keeps disagreeing is not asked on every quick tick).
+	const reprobed = useRef<string | null>(null);
+	const disagree = state.stats.view !== null && state.stats.view.collectionExists && dialect?.health.collection_exists === false;
+	useEffect(() => {
+		const next = reprobeFor(reprobed.current, disagree, endpoint.key);
+		reprobed.current = next.tried;
+		if (next.probe) void env.probe(endpoint.key);
+	}, [disagree, env, endpoint.key]);
 
 	const title = `${providerTitle(endpoint.provider)}${model.collection ? ` · ${model.collection}` : ''}`;
 	const subtitle = `"${endpoint.pipelineName}" · ${endpoint.nodeName || endpoint.nodeId} · ${roleLine(endpoint)}`;
-	const refreshing = state.stats.status === 'loading';
+	const statsError = state.stats.status === 'error' ? state.stats.error : null;
+	// One "Empty collection" rule with the chip and the connection card (vector/stats.ts collectionMissing), or no documents.
+	const emptyCollection = collectionMissing(dialect, state.stats.view) || state.stats.view?.documents === 0;
 
 	return (
 		<div ref={root} style={styles.root} data-console={endpoint.nodeId}>
@@ -259,29 +340,62 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 				subtitle={subtitle}
 				actions={
 					<>
-						<Button variant="ghost" disabled={!card.openable || !entry.opened} onClick={() => entry.controller.refresh()}>
-							{refreshing ? BUSY.refreshing : 'Refresh'}
+						<Button variant="ghost" disabled={!card.openable || !entry.opened} onClick={refresh}>
+							<span style={layout.held}>
+								<span style={layout.heldLabel(!refreshing)}>Refresh</span>
+								<span style={layout.heldLabel(refreshing)}>{BUSY.refreshing}</span>
+							</span>
 						</Button>
 						<Button variant="ghost" pressed={details} onClick={() => setDetails((open) => !open)}>
 							Details
 						</Button>
-						<Button
-							variant="ghost"
-							pressed={adding}
-							onClick={() => {
-								setAddingMounted(true);
-								setAdding((open) => !open);
-							}}
-						>
-							Add documents
-						</Button>
+						<span data-add-documents="">
+							<Button variant="ghost" pressed={adding} onClick={() => (adding ? setAdding(false) : openAdding())}>
+								Add documents
+							</Button>
+						</span>
 					</>
 				}
 			/>
-			<WorkbenchTabs value={tab} onChange={(id) => entry.tab.set(id)} trashCount={state.stats.view?.deletedDocuments ?? null} />
+			<WorkbenchTabs value={tab} onChange={(id) => entry.tab.set(id)} trashCount={state.stats.view?.deletedDocuments ?? null} idPrefix={prefix} />
 			{card.blocked && (
 				<div style={layout.banner}>
 					<Banner variant={endpoint.state === 'ready' ? 'warning' : 'info'}>{card.blocked}</Banner>
+				</div>
+			)}
+			{!card.blocked && statsError !== null && (
+				<div style={layout.banner}>
+					<Banner variant="error">
+						{statsError.headline}
+						{statsError.detail ? ` ${statsError.detail}` : ''}
+						{state.stats.view !== null ? ' The figures shown are the last known ones.' : ''}
+						<span style={layout.bannerAction}>
+							<Button small variant="secondary" onClick={refresh}>
+								Retry
+							</Button>
+						</span>
+					</Banner>
+				</div>
+			)}
+			{!card.blocked && entry.opened && !model.writes.enabled && model.writes.reason !== null && (
+				<div style={layout.banner}>
+					<Banner variant="info">{model.writes.reason}</Banner>
+				</div>
+			)}
+			{!card.blocked && statsError === null && emptyCollection && (
+				<div style={layout.banner}>
+					<Banner variant="info">
+						{EMPTY.noDocuments}
+						{model.ingest.enabled ? (
+							<span style={layout.bannerAction}>
+								<Button small variant="secondary" onClick={openAdding}>
+									Add documents
+								</Button>
+							</span>
+						) : (
+							` ${model.ingest.reason ?? ''}`
+						)}
+					</Banner>
 				</div>
 			)}
 			<InlineRemoveConfirm entry={entry} probe={probe} origin={CONSOLE_ORIGIN} returnFocus={returnFocus} />
@@ -289,43 +403,44 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 			{(state.removal.status === 'running' || state.removal.message) && (
 				<div role={state.removal.status === 'error' ? 'alert' : 'status'} style={layout.status}>
 					{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
+					{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails audit={state.removal.audit} />}
 				</div>
 			)}
 			<div style={layout.body}>
 				<div style={layout.panels}>
 					{mounted.has('overview') && (
-						<div style={layout.panel(tab === 'overview', 0)} data-workbench-panel="overview">
-							<OverviewPanel {...panel('overview')} scopeLine={scopeLine} health={health} onChartScope={scopeFromChart} />
-						</div>
+						<WorkbenchPanel id="overview" shown={tab === 'overview'} gutter={0} prefix={prefix}>
+							<OverviewPanel {...panel('overview')} scopeLine={scopeLine} health={health} median={median} onChartScope={scopeFromChart} onAddDocuments={model.ingest.enabled ? openAdding : null} />
+						</WorkbenchPanel>
 					)}
 					{mounted.has('documents') && (
-						<div style={layout.panel(tab === 'documents', 12)} data-workbench-panel="documents">
+						<WorkbenchPanel id="documents" shown={tab === 'documents'} gutter={12} prefix={prefix}>
 							<DocumentsTab {...panel('documents')} scope={scope} onScope={setScope} cap={cap} available={available} saved={saved} onSave={saveFilter} onDeleteSaved={deleteFilter} scopeLine={scopeLine} health={health} />
-						</div>
+						</WorkbenchPanel>
 					)}
 					{mounted.has('query') && (
-						<div style={layout.panel(tab === 'query', 12)} data-workbench-panel="query">
+						<WorkbenchPanel id="query" shown={tab === 'query'} gutter={12} prefix={prefix}>
 							<QueryTab {...panel('query')} surfaceModel={surfaceModel} chatDocuments={chatDocuments} chatNotice={wiring.chatNotice} onClearChatScope={clearChatScope} />
-						</div>
+						</WorkbenchPanel>
 					)}
 					{mounted.has('map') && (
-						<div style={layout.panel(tab === 'map', 12)} data-workbench-panel="map">
+						<WorkbenchPanel id="map" shown={tab === 'map'} gutter={12} prefix={prefix}>
 							<MapView model={mapModel} channels={channels} selection={entry.selection} actions={actions} visible={active && tab === 'map'} documents={entry.documents} writes={entry.writes} />
-						</div>
+						</WorkbenchPanel>
 					)}
 					{mounted.has('collection') && (
-						<div style={layout.panel(tab === 'collection', 12)} data-workbench-panel="collection">
+						<WorkbenchPanel id="collection" shown={tab === 'collection'} gutter={12} prefix={prefix}>
 							<CollectionPanel {...panel('collection')} endpoint={endpoint} probe={probe} />
-						</div>
+						</WorkbenchPanel>
 					)}
 					{mounted.has('trash') && (
-						<div style={layout.panel(tab === 'trash', 12)} data-workbench-panel="trash">
+						<WorkbenchPanel id="trash" shown={tab === 'trash'} gutter={12} prefix={prefix}>
 							<TrashTab {...panel('trash')} />
-						</div>
+						</WorkbenchPanel>
 					)}
 					<PendingBar {...panel(tab)} />
 				</div>
-				{addingMounted && <AddDocumentsAside model={model} channels={channels} actions={actions} endpoint={endpoint} open={adding} onClose={() => setAdding(false)} />}
+				{addingMounted && <AddDocumentsAside model={model} channels={channels} actions={actions} endpoint={endpoint} open={adding} onClose={() => setAdding(false)} returnFocus={asideFocus} />}
 			</div>
 		</div>
 	);

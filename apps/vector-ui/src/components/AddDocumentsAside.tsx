@@ -26,10 +26,13 @@
 //
 // For now it holds the upload area as the console had it: the drop zone,
 // "Store under folder", the upload rows and the replace question. Where
-// uploads cannot work (a dev-tool mount) it says why instead. Once opened it
-// stays mounted, hidden while closed, so an upload in flight keeps
-// following its progress. Closing it with the focus inside gives the focus
-// back to what opened it.
+// uploads cannot work (a dev-tool mount, a pipeline with no Ingest source) it
+// says why instead, so the reason is one keyboard step away. Once opened it
+// stays mounted, hidden while closed, so an upload in flight keeps following
+// its progress. Opened, it takes the focus; Escape (inside it, unless an
+// inner control handled it) or its close button closes it, and the focus
+// goes back to what opened it, or, when that is gone or hidden (another tab
+// shows), to `returnFocus`: never to the page body.
 // =============================================================================
 
 import React, { useEffect, useRef } from 'react';
@@ -39,10 +42,11 @@ import type { IExplorerEndpoint } from 'shared/explorer';
 import { VECTOR_PROVIDERS } from '../adapters/explorer';
 import type { ConsoleActions, ConsoleModel, VectorChannels } from '../contract/types';
 import { alsoReaches } from '../vector/consoleModel';
+import { firstFocusable, focusLost } from '../vector/focus';
 import IngestPanel from './IngestPanel';
 
 const styles = {
-	aside: (open: boolean): CSSProperties => ({ display: open ? 'flex' : 'none', flexDirection: 'column', flex: '0 0 360px', minHeight: 0, minWidth: 0, borderLeft: '1px solid var(--rr-border)' }),
+	aside: (open: boolean): CSSProperties => ({ display: open ? 'flex' : 'none', flexDirection: 'column', flex: '0 0 360px', minHeight: 0, minWidth: 0, borderLeft: '1px solid var(--rr-border)', outline: 'none' }),
 	header: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 8px 0 12px' } as CSSProperties,
 	title: { ...commonStyles.textEllipsis, flex: 1, margin: 0, fontSize: 14, fontWeight: 600 } as CSSProperties,
 	close: commonStyles.paneHeaderButton,
@@ -59,6 +63,8 @@ export interface IAddDocumentsAsideProps {
 	/** Shown, or hidden (it stays mounted). */
 	open: boolean;
 	onClose(): void;
+	/** Where the focus goes on close when the opener is gone or hidden. */
+	returnFocus?: () => HTMLElement | null;
 }
 
 /**
@@ -67,25 +73,36 @@ export interface IAddDocumentsAsideProps {
  * @param props - {@link IAddDocumentsAsideProps}.
  * @returns The aside.
  */
-export function AddDocumentsAside({ model, channels, actions, endpoint, open, onClose }: IAddDocumentsAsideProps): React.ReactElement {
+export function AddDocumentsAside({ model, channels, actions, endpoint, open, onClose, returnFocus }: IAddDocumentsAsideProps): React.ReactElement {
 	const region = useRef<HTMLElement>(null);
 	const opener = useRef<Element | null>(null);
-	// Opened: remember what had the focus. Closed with the focus inside (or lost): give it back, if still on the page.
+	const fallback = useRef(returnFocus);
+	fallback.current = returnFocus;
+	// Opened: remember what had the focus, and take it. Closed with the focus inside (or lost): give it back, if still on the page.
 	useEffect(() => {
 		if (typeof document === 'undefined') return;
 		if (open) {
 			opener.current = document.activeElement;
+			region.current?.focus();
 			return;
 		}
-		const focused = document.activeElement;
-		const node = region.current;
-		const lost = focused === null || focused === document.body || (node !== null && node.contains(focused));
 		const back = opener.current;
 		opener.current = null;
-		if (lost && back instanceof HTMLElement && back.isConnected) back.focus();
+		if (!focusLost(document.activeElement, document.body, region.current)) return;
+		firstFocusable([back instanceof HTMLElement ? back : null, fallback.current?.()])?.focus();
 	}, [open]);
 	return (
-		<aside ref={region} aria-label="Add documents" style={styles.aside(open)}>
+		<aside
+			ref={region}
+			tabIndex={-1}
+			aria-label="Add documents"
+			style={styles.aside(open)}
+			onKeyDown={(event) => {
+				if (event.key !== 'Escape' || event.defaultPrevented) return;
+				event.preventDefault();
+				onClose();
+			}}
+		>
 			<div style={styles.header}>
 				<h2 style={styles.title}>Add documents</h2>
 				<button type="button" style={styles.close} title="Close Add documents" aria-label="Close Add documents" onClick={onClose}>
