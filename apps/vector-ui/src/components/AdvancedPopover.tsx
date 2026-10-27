@@ -43,8 +43,12 @@
 // pressed outside. Its edge is the computed border of
 // a box over the map (map/styles.ts floatBorder) and the theme's shadow.
 //
-// Lane hooks: the root carries data-component="AdvancedPopover", the panel
-// data-advanced-panel.
+// The toolbar's More (the controls its row has no room for) is the same
+// disclosure under another name; its panel holds menus of their own (Export,
+// Views), so it never clips them (`menus`).
+//
+// Lane hooks: the root carries data-component="AdvancedPopover" (More:
+// "MoreControls"), the panel data-advanced-panel.
 // =============================================================================
 
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -191,7 +195,18 @@ export interface AdvancedPopoverProps {
 	initialOpen?: boolean;
 	/** The panel's controls; `close(true)` closes it and puts the focus on the button. */
 	children: ReactNode | ((close: (refocus: boolean) => void) => ReactNode);
+	/** The root's data-component (lanes find it by it); 'AdvancedPopover' when absent. */
+	component?: string;
+	/** The toolbar item it is (data-toolbar-item, which the toolbar measures). */
+	item?: string;
+	/** Merged into the panel's own style (before its placement). */
+	panelStyle?: CSSProperties;
+	/** The panel holds menus that open panels of their own: it never clips (no height cap), so they hang outside it. */
+	menus?: boolean;
 }
+
+/** A panel whose menus hang outside it: not cut to a height, nothing clipped. */
+const NEVER_CLIPS: CSSProperties = { maxHeight: 'none', overflowY: 'visible' };
 
 const S = {
 	root: { position: 'relative', display: 'inline-flex', alignItems: 'center' } as CSSProperties,
@@ -238,12 +253,12 @@ export function AdvancedPopover(props: AdvancedPopoverProps): React.ReactElement
 	};
 
 	return (
-		<span ref={root} style={S.root} data-component="AdvancedPopover" onKeyDown={onKeyDown} onBlur={onBlur}>
+		<span ref={root} style={S.root} data-component={props.component ?? 'AdvancedPopover'} data-toolbar-item={props.item} onKeyDown={onKeyDown} onBlur={onBlur}>
 			<button ref={trigger} type="button" style={{ ...MAP_STYLES.button, ...(open ? MAP_STYLES.buttonPressed : null) }} aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => setOpen((v) => !v)}>
 				{props.label} ▾
 			</button>
 			{open ? (
-				<div ref={panel} id={panelId} role="group" aria-label={props.panelLabel} tabIndex={-1} style={{ ...S.panel, ...placement }} data-advanced-panel="">
+				<div ref={panel} id={panelId} role="group" aria-label={props.panelLabel} tabIndex={-1} style={{ ...S.panel, ...props.panelStyle, ...placement, ...(props.menus ? NEVER_CLIPS : null) }} data-advanced-panel="">
 					{typeof props.children === 'function' ? props.children(close) : props.children}
 				</div>
 			) : null}

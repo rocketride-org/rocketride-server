@@ -27,7 +27,11 @@
 // One row: Points, Layout, Colour by, the text query, the Table toggle (the
 // map's non-visual alternative, and the keyboard route to select a point, so
 // it is never behind a popover), then Advanced and the view's menus
-// (`extras`: Export, Views). Under it, a status line of its own, always there
+// (`extras`: Export, Views). The row never wraps: when it is narrower than its
+// items (measured: map/popover.ts toolbarOverflow), Export and Views move into
+// a More menu at its end, then Colour by, Layout and Points, as many as it
+// takes; they come back when the row has room. The query, Table and Advanced
+// stay on the row. Under it, a status line of its own, always there
 // at the same height: the busy words (a live region) and Cancel while a
 // layout runs; when nothing runs, the view's notice in the same live region
 // (a cancelled or limited layout, fewer edges drawn, a failure while a map is
@@ -77,7 +81,7 @@ import type { ReactNode } from 'react';
 import type { EdgeMode, EdgesPerPoint, MapLayout, MapToolbarProps as ContractMapToolbarProps, SampleMode } from '../contract/types';
 import { COLOUR_MODES } from '../map/colours';
 import type { IColourMode, MapColourBy } from '../map/colours';
-import { afterCancelFocus, focusHold } from '../map/popover';
+import { afterCancelFocus, focusHold, toolbarOverflow } from '../map/popover';
 import { MAP_STYLES } from '../map/styles';
 import { num } from '../map/wording';
 import { AdvancedPopover, PANEL_ATTRIBUTE } from './AdvancedPopover';
@@ -113,6 +117,10 @@ export interface MapToolbarProps extends Omit<ContractMapToolbarProps, 'colourBy
 	initialAdvanced?: boolean;
 	/** What the map can clear next (a lasso, a highlight, the selection), shown on the status line; null for nothing. */
 	clear?: { label: string; onClear(): void } | null;
+	/** How many movable items start in More (only its starting state; the tests render it so). */
+	initialMoved?: number;
+	/** Open More at first (the tests render it open). */
+	initialMore?: boolean;
 	/**
 	 * The view's sentence for the status line while nothing runs (a notice, a failure, a saved view's query), with a
 	 * button when it offers one (disabled with its reason as the title); null for none. A failure (`failure`) is
@@ -139,6 +147,18 @@ const COLOUR_GROUPS: Array<IColourMode['group']> = ['Content', 'Document', 'Anal
 
 /** The status line's height, CSS pixels (a small Cancel fits it). */
 export const STATUS_HEIGHT = 24;
+
+/** The gap between the row's items, CSS pixels. */
+export const TOOLBAR_GAP = 6;
+
+/** The row's items in order (data-toolbar-item; `extras` are the view's menus, Export and Views). */
+const ROW_ITEMS = ['points', 'layout', 'colour', 'query', 'table', 'advanced', 'extras'] as const;
+
+/** What moves into More when the row has no room, first to last. */
+export const MOVABLE_ITEMS = ['extras', 'colour', 'layout', 'points'] as const;
+
+/** More's width before it has been measured (its button, "More ▾"). */
+const MORE_GUESS = 72;
 
 /** Layout effects run only in a browser (a server render would warn). */
 const useBrowserLayoutEffect = typeof document !== 'undefined' ? useLayoutEffect : useEffect;
@@ -183,13 +203,20 @@ const LAYOUTS: Array<{ id: MapLayout; label: string }> = [
 ];
 
 const S = {
-	// The status line: a line of its own (full width) at a fixed height, the same idle and busy.
-	status: { ...MAP_STYLES.small, flexBasis: '100%', height: STATUS_HEIGHT, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden', whiteSpace: 'nowrap' } as React.CSSProperties,
+	// The status line: a line of its own under the row, at a fixed height, the same idle and busy.
+	status: { ...MAP_STYLES.small, height: STATUS_HEIGHT, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden', whiteSpace: 'nowrap', flex: 'none' } as React.CSSProperties,
 	words: { overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 } as React.CSSProperties,
 	cancel: { ...MAP_STYLES.button, height: STATUS_HEIGHT - 2, padding: '0 8px', fontSize: 11.5 } as React.CSSProperties,
 	query: { ...MAP_STYLES.input, minWidth: 120, width: 120 } as React.CSSProperties,
-	// Compact enough for one row in a dev-tool frame at 1440 (measured: 1,110 px of map width there).
-	row: { ...MAP_STYLES.toolbar, gap: 6 } as React.CSSProperties,
+	// The toolbar: the row, then the status line.
+	bar: { ...MAP_STYLES.toolbar, flexDirection: 'column', flexWrap: 'nowrap', alignItems: 'stretch', gap: TOOLBAR_GAP } as React.CSSProperties,
+	// One row, never wrapped: what has no room goes into More. Compact enough that nothing moves in a dev-tool frame at
+	// 1440 (measured: 1,110 px of map width there; the items span 1,061 px).
+	row: { display: 'flex', flexWrap: 'nowrap', alignItems: 'center', gap: TOOLBAR_GAP, minWidth: 0 } as React.CSSProperties,
+	// An item of the row keeps its width (never squeezed, so its words never wrap).
+	item: { ...MAP_STYLES.group, flex: 'none' } as React.CSSProperties,
+	// More's panel: the moved items one under the other.
+	more: { width: 'auto', minWidth: 200, alignItems: 'flex-start' } as React.CSSProperties,
 	// A control's description, read by assistive tech; the view shows the sentence in the legend.
 	described: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' } as React.CSSProperties,
 	fieldset: { border: 'none', margin: 0, padding: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 } as React.CSSProperties,
@@ -270,7 +297,44 @@ function useFocusHold(root: React.RefObject<HTMLDivElement | null>): void {
 export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 	const [text, setText] = useState('');
 	const root = useRef<HTMLDivElement>(null);
+	const row = useRef<HTMLDivElement>(null);
 	useFocusHold(root);
+	// Which items are in More: measured after every render and on every change of the row's width, before paint.
+	const hasExtras = props.extras !== undefined && props.extras !== null;
+	const movable = MOVABLE_ITEMS.filter((key) => key !== 'extras' || hasExtras);
+	const [moved, setMoved] = useState(Math.min(props.initialMoved ?? 0, movable.length));
+	const widths = useRef(new Map<string, number>());
+	const fitRow = (): void => {
+		const el = row.current;
+		if (!el) return;
+		// The items on the row now (the view's menus are its untagged children); what is in More keeps its last width.
+		let extras = 0;
+		let extrasCount = 0;
+		for (const child of Array.from(el.children)) {
+			const width = child.getBoundingClientRect().width;
+			const key = child.getAttribute('data-toolbar-item');
+			if (key !== null) widths.current.set(key, width);
+			else {
+				extras += width;
+				extrasCount += 1;
+			}
+		}
+		if (extrasCount > 0) widths.current.set('extras', extras + (extrasCount - 1) * TOOLBAR_GAP);
+		const items = ROW_ITEMS.filter((key) => (key !== 'extras' || hasExtras) && widths.current.has(key)).map((key) => [key, widths.current.get(key) as number] as const);
+		const next = toolbarOverflow({ available: el.clientWidth, widths: items, movable, more: widths.current.get('more') ?? MORE_GUESS, gap: TOOLBAR_GAP });
+		if (next !== moved) setMoved(next);
+	};
+	const fitRef = useRef(fitRow);
+	fitRef.current = fitRow;
+	useBrowserLayoutEffect(() => fitRef.current());
+	useEffect(() => {
+		const el = row.current;
+		if (!el || typeof ResizeObserver === 'undefined') return undefined;
+		const observer = new ResizeObserver(() => fitRef.current());
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
+	const inMore = new Set<string>(movable.slice(0, moved));
 	const sample = props.sample;
 	const mode: SampleMode = sample?.mode ?? 'detailed';
 	const n = sample?.result.n_requested ?? Math.min(props.limits.sample_default, props.limits.sample_max);
@@ -295,134 +359,155 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 	const tsneWhyId = `map-tsne-why-${uid}`;
 	const lightWhyId = `map-light-why-${uid}`;
 	const offersLight = sizes.some((s) => s.mode === 'light');
-	return (
-		<div ref={root} role="toolbar" aria-label="Map controls" tabIndex={-1} style={S.row}>
-			<label style={MAP_STYLES.group}>
-				<span style={MAP_STYLES.label}>Points</span>
-				<select
-					aria-label="Points"
-					aria-describedby={offersLight ? lightWhyId : undefined}
-					style={MAP_STYLES.select}
-					value={current}
-					disabled={busy}
-					onChange={(event) => {
-						const [m, size] = event.target.value.split(':');
-						props.onSample({ n: Number(size), mode: m === 'light' ? 'light' : 'detailed', seed });
-					}}
-				>
-					{sizes.map((s) => (
-						<option key={`${s.mode}:${s.n}`} value={`${s.mode}:${s.n}`} title={s.mode === 'light' ? `${num(s.n)} (light: ${LIGHT_WORDS})` : undefined}>
-							{num(s.n)} ({s.mode})
-						</option>
-					))}
-				</select>
-			</label>
-			<label style={MAP_STYLES.group}>
-				<span style={MAP_STYLES.label}>Layout</span>
-				<select aria-label="Layout" aria-describedby={tsneWhy ? tsneWhyId : undefined} style={MAP_STYLES.select} value={props.layout} disabled={busy || !sample} onChange={(event) => props.onLayout(event.target.value as MapLayout)}>
-					{LAYOUTS.map((l) => (
-						<option key={l.id} value={l.id} disabled={l.id === 'tsne' && !!props.tsneReason} title={l.id === 'tsne' ? (props.tsneReason ?? undefined) : undefined}>
-							{l.label}
-						</option>
-					))}
-				</select>
-			</label>
-			<label style={MAP_STYLES.group}>
-				<span style={MAP_STYLES.label}>Colour by</span>
-				<select aria-label="Colour by" style={MAP_STYLES.select} value={props.colourBy} onChange={(event) => props.onColourBy(event.target.value as MapColourBy)}>
-					{COLOUR_GROUPS.map((group) => (
-						<optgroup key={group} label={group}>
-							{COLOUR_MODES.filter((c) => c.group === group).map((c) => {
-								const reason = props.colourReasons?.[c.id] ?? null;
-								return (
-									<option key={c.id} value={c.id} disabled={reason !== null && c.id !== props.colourBy} title={reason ?? undefined}>
-										{c.label}
-									</option>
-								);
-							})}
-						</optgroup>
-					))}
-				</select>
-			</label>
-			<form
-				style={MAP_STYLES.group}
-				onSubmit={(event) => {
-					event.preventDefault();
-					if (props.query.enabled && text.trim() !== '' && !busy) props.onQuery(text.trim());
+	// The movable items: on the row, or in More when the row has no room for them.
+	const pointsItem = (
+		<label style={S.item} data-toolbar-item="points">
+			<span style={MAP_STYLES.label}>Points</span>
+			<select
+				aria-label="Points"
+				aria-describedby={offersLight ? lightWhyId : undefined}
+				style={MAP_STYLES.select}
+				value={current}
+				disabled={busy}
+				onChange={(event) => {
+					const [m, size] = event.target.value.split(':');
+					props.onSample({ n: Number(size), mode: m === 'light' ? 'light' : 'detailed', seed });
 				}}
 			>
-				<label style={MAP_STYLES.group}>
-					<span style={MAP_STYLES.label}>Query</span>
-					<input aria-label="Query" aria-describedby={queryWhy ? queryWhyId : undefined} style={S.query} type="search" value={text} maxLength={8000} placeholder="Place a question on the map" disabled={!props.query.enabled} onChange={(event) => setText(event.target.value)} />
-				</label>
-				<button type="submit" style={MAP_STYLES.button} aria-describedby={queryWhy ? queryWhyId : undefined} disabled={!props.query.enabled || busy || text.trim() === ''}>
-					Run
-				</button>
-			</form>
-			<button type="button" style={toggle(props.table)} aria-pressed={props.table} onClick={props.onToggleTable} disabled={!sample}>Table</button>
-			<AdvancedPopover label="Advanced" panelLabel="Advanced map controls" initialOpen={props.initialAdvanced}>
-				{(close) => (
-					<>
-						<fieldset style={S.fieldset}>
-							<legend style={S.legend}>Graph</legend>
-							<label style={MAP_STYLES.group}>
-								<span style={MAP_STYLES.label}>Edges</span>
-								<select aria-label="Edges" style={MAP_STYLES.select} value={edges} disabled={busy || !sample} onChange={(event) => props.onEdges?.(event.target.value as EdgeMode)}>
-									{EDGES.map((e) => (
-										<option key={e.id} value={e.id}>
-											{e.label}
-										</option>
-									))}
-								</select>
-							</label>
-							{edges === 'neighbours' ? (
+				{sizes.map((s) => (
+					<option key={`${s.mode}:${s.n}`} value={`${s.mode}:${s.n}`} title={s.mode === 'light' ? `${num(s.n)} (light: ${LIGHT_WORDS})` : undefined}>
+						{num(s.n)} ({s.mode})
+					</option>
+				))}
+			</select>
+		</label>
+	);
+	const layoutItem = (
+		<label style={S.item} data-toolbar-item="layout">
+			<span style={MAP_STYLES.label}>Layout</span>
+			<select aria-label="Layout" aria-describedby={tsneWhy ? tsneWhyId : undefined} style={MAP_STYLES.select} value={props.layout} disabled={busy || !sample} onChange={(event) => props.onLayout(event.target.value as MapLayout)}>
+				{LAYOUTS.map((l) => (
+					<option key={l.id} value={l.id} disabled={l.id === 'tsne' && !!props.tsneReason} title={l.id === 'tsne' ? (props.tsneReason ?? undefined) : undefined}>
+						{l.label}
+					</option>
+				))}
+			</select>
+		</label>
+	);
+	const colourItem = (
+		<label style={S.item} data-toolbar-item="colour">
+			<span style={MAP_STYLES.label}>Colour by</span>
+			<select aria-label="Colour by" style={MAP_STYLES.select} value={props.colourBy} onChange={(event) => props.onColourBy(event.target.value as MapColourBy)}>
+				{COLOUR_GROUPS.map((group) => (
+					<optgroup key={group} label={group}>
+						{COLOUR_MODES.filter((c) => c.group === group).map((c) => {
+							const reason = props.colourReasons?.[c.id] ?? null;
+							return (
+								<option key={c.id} value={c.id} disabled={reason !== null && c.id !== props.colourBy} title={reason ?? undefined}>
+									{c.label}
+								</option>
+							);
+						})}
+					</optgroup>
+				))}
+			</select>
+		</label>
+	);
+	return (
+		<div ref={root} role="toolbar" aria-label="Map controls" tabIndex={-1} style={S.bar}>
+			<div ref={row} style={S.row} data-map-controls="">
+				{inMore.has('points') ? null : pointsItem}
+				{inMore.has('layout') ? null : layoutItem}
+				{inMore.has('colour') ? null : colourItem}
+				<form
+					style={S.item}
+					data-toolbar-item="query"
+					onSubmit={(event) => {
+						event.preventDefault();
+						if (props.query.enabled && text.trim() !== '' && !busy) props.onQuery(text.trim());
+					}}
+				>
+					<label style={MAP_STYLES.group}>
+						<span style={MAP_STYLES.label}>Query</span>
+						<input aria-label="Query" aria-describedby={queryWhy ? queryWhyId : undefined} style={S.query} type="search" value={text} maxLength={8000} placeholder="Place a question on the map" disabled={!props.query.enabled} onChange={(event) => setText(event.target.value)} />
+					</label>
+					<button type="submit" style={MAP_STYLES.button} aria-describedby={queryWhy ? queryWhyId : undefined} disabled={!props.query.enabled || busy || text.trim() === ''}>
+						Run
+					</button>
+				</form>
+				<button type="button" style={toggle(props.table)} aria-pressed={props.table} onClick={props.onToggleTable} disabled={!sample} data-toolbar-item="table">Table</button>
+				<AdvancedPopover label="Advanced" panelLabel="Advanced map controls" initialOpen={props.initialAdvanced} item="advanced">
+					{(close) => (
+						<>
+							<fieldset style={S.fieldset}>
+								<legend style={S.legend}>Graph</legend>
 								<label style={MAP_STYLES.group}>
-									<span style={MAP_STYLES.label}>Per point</span>
-									<select aria-label="Edges per point" style={MAP_STYLES.select} value={String(Math.min(props.edgesM ?? 5, cap))} disabled={busy || !sample} onChange={(event) => props.onEdgesM?.(Number(event.target.value) as EdgesPerPoint)}>
-										{EDGES_PER_POINT.map((m) => (
-											<option key={m} value={String(m)} disabled={m > cap} title={m > cap ? capReason : undefined}>
-												{m}
+									<span style={MAP_STYLES.label}>Edges</span>
+									<select aria-label="Edges" style={MAP_STYLES.select} value={edges} disabled={busy || !sample} onChange={(event) => props.onEdges?.(event.target.value as EdgeMode)}>
+										{EDGES.map((e) => (
+											<option key={e.id} value={e.id}>
+												{e.label}
 											</option>
 										))}
 									</select>
 								</label>
-							) : null}
-							{props.onExpandSelected ? (
-								<button type="button" style={MAP_STYLES.button} disabled={busy || !sample || !!props.expandReason} title={props.expandReason ?? 'Add the selected point\'s neighbour edges'} onClick={props.onExpandSelected}>
-									Expand selected
+								{edges === 'neighbours' ? (
+									<label style={MAP_STYLES.group}>
+										<span style={MAP_STYLES.label}>Per point</span>
+										<select aria-label="Edges per point" style={MAP_STYLES.select} value={String(Math.min(props.edgesM ?? 5, cap))} disabled={busy || !sample} onChange={(event) => props.onEdgesM?.(Number(event.target.value) as EdgesPerPoint)}>
+											{EDGES_PER_POINT.map((m) => (
+												<option key={m} value={String(m)} disabled={m > cap} title={m > cap ? capReason : undefined}>
+													{m}
+												</option>
+											))}
+										</select>
+									</label>
+								) : null}
+								{props.onExpandSelected ? (
+									<button type="button" style={MAP_STYLES.button} disabled={busy || !sample || !!props.expandReason} title={props.expandReason ?? 'Add the selected point\'s neighbour edges'} onClick={props.onExpandSelected}>
+										Expand selected
+									</button>
+								) : null}
+								{edges === 'tree' && props.layout !== 'neighbour-graph' ? <span style={MAP_STYLES.small}>{TREE_HINT}</span> : null}
+							</fieldset>
+							<fieldset style={S.fieldset}>
+								<legend style={S.legend}>Select and view</legend>
+								<button type="button" style={toggle(props.lasso)} aria-pressed={props.lasso} onClick={props.onToggleLasso} disabled={!sample}>Lasso</button>
+								<button type="button" style={MAP_STYLES.button} onClick={props.onFit} disabled={!sample}>
+									Fit
 								</button>
-							) : null}
-							{edges === 'tree' && props.layout !== 'neighbour-graph' ? <span style={MAP_STYLES.small}>{TREE_HINT}</span> : null}
-						</fieldset>
-						<fieldset style={S.fieldset}>
-							<legend style={S.legend}>Select and view</legend>
-							<button type="button" style={toggle(props.lasso)} aria-pressed={props.lasso} onClick={props.onToggleLasso} disabled={!sample}>Lasso</button>
-							<button type="button" style={MAP_STYLES.button} onClick={props.onFit} disabled={!sample}>
-								Fit
-							</button>
-							{props.onToggle3D ? (
-								<button type="button" style={toggle(!!props.threeD)} aria-pressed={!!props.threeD} onClick={props.onToggle3D} disabled={!sample || props.layout !== 'pca'}>3D</button>
-							) : null}
-						</fieldset>
-						<fieldset style={S.fieldset}>
-							<legend style={S.legend}>Sample</legend>
-							{sample ? <span style={MAP_STYLES.small}>This sample: seed {seed}</span> : null}
-							<button
-								type="button"
-								style={MAP_STYLES.button}
-								disabled={busy}
-								onClick={() => {
-									close(true);
-									props.onSample({ n, mode, seed: seed + 1 });
-								}}
-							>
-								New sample (seed {seed + 1})
-							</button>
-						</fieldset>
-					</>
-				)}
-			</AdvancedPopover>
-			{props.extras ?? null}
+								{props.onToggle3D ? (
+									<button type="button" style={toggle(!!props.threeD)} aria-pressed={!!props.threeD} onClick={props.onToggle3D} disabled={!sample || props.layout !== 'pca'}>3D</button>
+								) : null}
+							</fieldset>
+							<fieldset style={S.fieldset}>
+								<legend style={S.legend}>Sample</legend>
+								{sample ? <span style={MAP_STYLES.small}>This sample: seed {seed}</span> : null}
+								<button
+									type="button"
+									style={MAP_STYLES.button}
+									disabled={busy}
+									onClick={() => {
+										close(true);
+										props.onSample({ n, mode, seed: seed + 1 });
+									}}
+								>
+									New sample (seed {seed + 1})
+								</button>
+							</fieldset>
+						</>
+					)}
+				</AdvancedPopover>
+				{inMore.has('extras') ? null : (props.extras ?? null)}
+				{moved > 0 ? (
+					<AdvancedPopover label="More" panelLabel="More map controls" component="MoreControls" item="more" menus panelStyle={S.more} initialOpen={props.initialMore}>
+						{inMore.has('points') ? pointsItem : null}
+						{inMore.has('layout') ? layoutItem : null}
+						{inMore.has('colour') ? colourItem : null}
+						{inMore.has('extras') ? <span style={{ display: 'inline-flex', gap: TOOLBAR_GAP }}>{props.extras}</span> : null}
+					</AdvancedPopover>
+				) : null}
+			</div>
 			{/* The status line: always there, at the same height idle or busy, so nothing moves with a run. */}
 			<div style={S.status} data-map-status="">
 				<span role="status" style={S.words} title={words || undefined} data-map-notice={props.busy === null && notice ? '' : undefined}>
