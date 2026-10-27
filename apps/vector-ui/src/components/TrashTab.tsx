@@ -96,8 +96,10 @@ const styles = {
 	footer: { ...appStyles.small, padding: '6px 12px', borderTop: '1px solid var(--rr-border)', display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' } as CSSProperties,
 	caveat: { flexBasis: '100%' } as CSSProperties,
 	check: { margin: 0 } as CSSProperties,
-	name: { overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 } as CSSProperties,
-	outside: { ...appStyles.small, flex: 'none' } as CSSProperties,
+	// The name comes first: it keeps its width (up to the cell's) and the count after it gives way, cut with an
+	// ellipsis; the row's title says both.
+	name: { flex: '0 0 auto', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
+	outside: { ...appStyles.small, flex: '0 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
 	rowButton: (off: boolean): CSSProperties => ({ ...appStyles.small, background: 'none', border: '1px solid var(--rr-border-input)', borderRadius: 4, padding: '0 6px', color: 'inherit', opacity: off ? 0.55 : 1, cursor: off ? 'not-allowed' : 'pointer' }),
 	rowIcon: (off: boolean): CSSProperties => ({ ...appStyles.iconButton, opacity: off ? 0.55 : 1, cursor: off ? 'not-allowed' : 'pointer' }),
 };

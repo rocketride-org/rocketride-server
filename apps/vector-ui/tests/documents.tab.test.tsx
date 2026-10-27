@@ -429,6 +429,8 @@ test("a partly trashed document's Trash row says how many chunks it still has ou
 	const html = renderTrashTab({ trash, directory });
 	assert.match(html, /data-row-id="p"[^>]*title="C:\/demo\/partly\.md · 4 chunks outside the trash · objectId p"/);
 	assert.match(html, /<span[^>]*>partly\.md<\/span><span[^>]*>· 4 chunks outside the trash<\/span>/);
+	// At Name's least (137 px) the count gives way to the name, never the other way round.
+	assert.match(html, /<span style="flex:0 0 auto;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">partly\.md<\/span><span style="[^"]*flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">· 4/);
 	assert.doesNotMatch(html, /whole\.md<\/span><span/, 'a document wholly in the trash says nothing more');
 	assert.doesNotMatch(renderTrashTab({ trash }), /outside the trash<\/span>/, 'nothing loaded live: nothing claimed');
 });
