@@ -37,7 +37,7 @@
 // them.
 // =============================================================================
 
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { EmptyState } from 'shell';
 import type { IngestPanelProps } from '../contract/types';
@@ -76,6 +76,7 @@ export function IngestPanel(props: IngestPanelProps): React.ReactElement {
 	const available = model.ingest.enabled && channels.ingest !== null;
 	const reason = !available ? (model.ingest.reason ?? NO_INGEST_SENTENCE) : !prefixCheck.ok ? prefixCheck.reason : null;
 	const folder = prefixCheck.ok ? prefixCheck.path : '';
+	const prefixErrorId = useId();
 
 	return (
 		<section style={S.root} aria-label="Add documents">
@@ -87,10 +88,10 @@ export function IngestPanel(props: IngestPanelProps): React.ReactElement {
 					<IngestDropZone collection={model.collection} disabledReason={reason} onDrop={(transfer) => ingest.addFromDrop(transfer, folder)} onPick={(files) => ingest.addFromInput(files, folder)} />
 					<label style={S.prefixRow}>
 						Store under folder
-						<input style={S.input} type="text" value={prefix} placeholder="optional, e.g. C:/demo/inbox" spellCheck={false} onChange={(event) => setPrefix(event.currentTarget.value)} aria-invalid={!prefixCheck.ok || undefined} />
+						<input style={S.input} type="text" value={prefix} placeholder="optional, e.g. C:/demo/inbox" spellCheck={false} onChange={(event) => setPrefix(event.currentTarget.value)} aria-invalid={!prefixCheck.ok || undefined} aria-describedby={prefixCheck.ok ? undefined : prefixErrorId} />
 					</label>
 					{!prefixCheck.ok && (
-						<p role="alert" style={S.error}>
+						<p id={prefixErrorId} role="alert" style={S.error}>
 							{prefixCheck.reason}
 						</p>
 					)}
