@@ -39,25 +39,30 @@
 //             the set when the write answers (adapters/connections.ts).
 //
 // Apply is unavailable, with the reason shown, while writing is off or
-// another write runs; the staged set stays. The bar renders nothing while
-// nothing is staged, and when it goes the focus goes to the grid or the tab
-// (components/focusTargets.ts), never to the page.
+// another write runs; the staged set stays. It is one line of a fixed height
+// (PENDING_BAR_HEIGHT) for the hub's bottom slot: the short sentence and the
+// reason, cut with an ellipsis where they do not fit, their whole text in
+// its title. The bar renders nothing while nothing is staged, and when it
+// goes the focus goes to the grid or the tab (components/focusTargets.ts),
+// never to the page.
 // =============================================================================
 
 import React, { useEffect, useId, useRef, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { stagedReview } from '../adapters/consoleActions';
 import { writesDuringRemoval } from '../vector/consoleModel';
-import { pendingText, stagedSummary, unstage } from '../vector/staged';
+import { pendingShortText, pendingText, stagedSummary, unstage } from '../vector/staged';
 import { styles as appStyles } from '../styles';
 import GatedButton from './GatedButton';
 import { focusFell, focusWorkbench, workbenchOf } from './focusTargets';
 import type { IWorkbenchPanelProps } from './workbenchProps';
 
+/** The bar's height (px): one line, the same whatever it says, so the hub's bottom slot can hold it exactly. */
+export const PENDING_BAR_HEIGHT = 32;
+
 const styles = {
-	bar: { flexShrink: 0, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, margin: '8px 24px 0', padding: '6px 12px', border: '1px solid var(--rr-border)', borderRadius: 8, background: 'var(--rr-bg-paper)' } as CSSProperties,
-	text: { ...appStyles.small, flex: '1 1 260px', minWidth: 0 } as CSSProperties,
-	reason: { ...appStyles.small, flexBasis: '100%' } as CSSProperties,
+	bar: { flexShrink: 0, boxSizing: 'border-box', height: PENDING_BAR_HEIGHT, display: 'flex', alignItems: 'center', flexWrap: 'nowrap', gap: 8, padding: '0 12px', border: '1px solid var(--rr-border)', borderRadius: 8, background: 'var(--rr-bg-paper)', overflow: 'hidden' } as CSSProperties,
+	text: { ...appStyles.small, flex: '1 1 auto', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
 };
 
 /**
@@ -87,10 +92,13 @@ export function PendingBar({ entry, model, console: state, actions }: IWorkbench
 	if (count === 0) return null;
 	const writes = writesDuringRemoval(model.writes, state.removal.status);
 	const reason = writes.enabled ? null : writes.reason;
+	// One line: the short sentence, and why Apply waits; the whole of both in the title (and in the text it cuts).
+	const summary = stagedSummary(staged);
+	const why = reason === null ? '' : ` · Apply is unavailable: ${reason}`;
 	return (
 		<div ref={bar} role="region" aria-label="Pending changes" data-pending-bar="" style={styles.bar}>
-			<span role="status" style={styles.text}>
-				{pendingText(stagedSummary(staged))}
+			<span id={reasonId} role="status" style={styles.text} title={`${pendingText(summary)}${why}`}>
+				{`${pendingShortText(summary)}${why}`}
 			</span>
 			<GatedButton
 				onClick={() => {
@@ -105,11 +113,6 @@ export function PendingBar({ entry, model, console: state, actions }: IWorkbench
 			<GatedButton variant="primary" unavailable={reason} describedBy={reason ? reasonId : undefined} onClick={() => entry.controller.requestRemove([...staged.values()])}>
 				Apply
 			</GatedButton>
-			{reason && (
-				<span id={reasonId} style={styles.reason}>
-					{`Apply is unavailable: ${reason}`}
-				</span>
-			)}
 		</div>
 	);
 }

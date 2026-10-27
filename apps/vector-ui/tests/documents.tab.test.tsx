@@ -70,7 +70,7 @@ require.cache[exportMenuPath] = { id: exportMenuPath, filename: exportMenuPath, 
 
 const { WRITES_OFF, panelEntry, panelModel, renderDocumentsTab, renderPendingBar, renderTrashTab } = require('./support/panels') as typeof import('./support/panels');
 const { documentsFolder, stagedReview } = require('../src/adapters/consoleActions') as typeof import('../src/adapters/consoleActions');
-const { pagerApplyPage, pagerBegin, pagerInit } = require('../src/vector/documents') as typeof import('../src/vector/documents');
+const { pagerApplyPage, pagerBegin, pagerInit, pagerPause } = require('../src/vector/documents') as typeof import('../src/vector/documents');
 const { readDocumentsPage } = require('../src/vector/results') as typeof import('../src/vector/results');
 const { stage } = require('../src/vector/staged') as typeof import('../src/vector/staged');
 
@@ -157,25 +157,30 @@ test('the review lists only the staged documents, loaded or not, and says how ma
 	assert.doesNotMatch(html, /data-row-id="a"/);
 });
 
-test('"sorted within" shows while the listing is incomplete and the rows are not in the store\'s path order', () => {
+test('"sorted within" shows while the listing is incomplete and the rows are sorted here (storage order once loading stopped)', () => {
 	const partial = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage({ success: true, items: ROWS, next_cursor: 'c2', total: null, counts_exact: true, distinct: true, sorted: false, caveats: [] }));
-	assert.match(renderDocumentsTab({ directory: partial }), />Sorted within the 4 loaded documents; more may exist\.</);
+	assert.doesNotMatch(renderDocumentsTab({ directory: partial }), /Sorted within/, 'pages still arriving: nothing is sorted yet');
+	assert.match(renderDocumentsTab({ directory: pagerPause(partial) }), />Sorted within the 4 loaded documents; more may exist\.</, 'paused: sorted here, over what is loaded');
 	assert.doesNotMatch(renderDocumentsTab({ directory: listing(ROWS, { sorted: false }) }), /Sorted within/, 'complete: the sort covers everything');
 });
 
-test('the pending bar: nothing while nothing is staged; the documents and, by the confirmation\'s rule, their chunks; Review, Discard, Apply', () => {
+test('the pending bar: one fixed line for the bottom slot; nothing while nothing is staged; the documents and, by the confirmation\'s rule, their chunks; Review, Discard, Apply', () => {
+	const { PENDING_BAR_HEIGHT } = require('../src/components/PendingBar') as typeof import('../src/components/PendingBar');
 	assert.equal(renderPendingBar(), '');
 	const entry = panelEntry('k-bar');
 	entry.staged.set(stage(entry.staged.get(), [{ objectId: 'a', path: 'a.md', chunks: 4 }, { objectId: 'b', path: 'b.md', chunks: 3 }]));
 	const html = renderPendingBar({ entry });
-	assert.match(html, /role="region" aria-label="Pending changes"/);
-	assert.match(html, /role="status"[^>]*>2 documents staged to move to the trash \(7 chunks\)\.<\/span>/);
+	assert.match(html, /role="region" aria-label="Pending changes" data-pending-bar="" style="[^"]*box-sizing:border-box;height:32px;[^"]*flex-wrap:nowrap/, 'one line, a fixed height');
+	assert.equal(PENDING_BAR_HEIGHT, 32);
+	assert.match(html, /role="status"[^>]*white-space:nowrap[^>]*title="2 documents staged to move to the trash \(7 chunks\)\.">2 staged for the trash \(7 chunks\)<\/span>/, 'the short sentence, its whole text in the title');
 	assert.deepEqual([...html.matchAll(/<button type="button"[^>]*>([^<]*)<\/button>/g)].map((m) => m[1]), ['Review', 'Discard', 'Apply']);
 	entry.staged.set(stage(entry.staged.get(), [{ objectId: 'm', path: 'm.md', chunks: null }]));
-	assert.match(renderPendingBar({ entry }), /3 documents staged to move to the trash \(at least 7 chunks; 1 document not counted\)\./, 'never a sum that leaves some out');
+	assert.match(renderPendingBar({ entry }), /title="3 documents staged to move to the trash \(at least 7 chunks; 1 document not counted\)\.">3 staged for the trash \(7\+ chunks\)</, 'never a sum that leaves some out');
 	const off = renderPendingBar({ entry, model: panelModel({ writes: WRITES_OFF }) });
-	assert.match(off, /aria-disabled="true" aria-describedby="[^"]+" title="Removing documents[^"]*"[^>]*>Apply<\/button>/);
-	assert.match(off, />Apply is unavailable: Removing documents is turned off on this store node \(allow_writes\)\.</, 'the staged set stays, and the bar says why');
+	const describedBy = off.match(/aria-describedby="([^"]+)" title="Removing documents[^"]*"[^>]*>Apply<\/button>/)?.[1];
+	assert.ok(describedBy, 'Apply is unavailable and described');
+	assert.match(off, new RegExp(`<span id="${describedBy.replace(/:/g, '\\:')}" role="status"[^>]*>3 staged for the trash \\(7\\+ chunks\\) · Apply is unavailable: Removing documents is turned off on this store node \\(allow_writes\\)\\.</span>`), 'the reason on the same line, read with Apply; the staged set stays');
+	assert.equal((off.match(/<span/g) ?? []).length, 1, 'no second line');
 	assert.match(renderPendingBar({ entry, removal: { status: 'running', message: null } }), /aria-disabled="true"[^>]*>Apply<\/button>/, 'while another write runs');
 });
 
@@ -219,7 +224,11 @@ test("the tabs' sources: the hand grid (never the shell's DataGrid), no row copi
 });
 
 test("the pending sentence uses the confirmation's rule for chunks: a sum only when every count is known", () => {
-	const { pendingText, stagedChunksWords } = require('../src/vector/staged') as typeof import('../src/vector/staged');
+	const { pendingShortText, pendingText, stagedChunksWords } = require('../src/vector/staged') as typeof import('../src/vector/staged');
+	assert.equal(pendingShortText({ documents: 0, chunks: null, unknown: 0 }), '');
+	assert.equal(pendingShortText({ documents: 1, chunks: 1, unknown: 0 }), '1 staged for the trash (1 chunk)');
+	assert.equal(pendingShortText({ documents: 3, chunks: 14, unknown: 2 }), '3 staged for the trash (14+ chunks)', 'at least: "+"');
+	assert.equal(pendingShortText({ documents: 2, chunks: null, unknown: 2 }), '2 staged for the trash', 'no count: none claimed');
 	assert.equal(pendingText({ documents: 0, chunks: null, unknown: 0 }), '');
 	assert.equal(pendingText({ documents: 1, chunks: 1, unknown: 0 }), '1 document staged to move to the trash (1 chunk).');
 	assert.equal(stagedChunksWords({ documents: 3, chunks: 14, unknown: 0 }), '14 chunks');
@@ -343,4 +352,63 @@ test("controls that go away when they act hand the focus to the grid's row, neve
 test('the Folders toggle asked for beside a drawer lets the layout decide again once the drawer closes, handing a focus on it to the grid', () => {
 	const documents = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'DocumentsTab.tsx'), 'utf8');
 	assert.match(documents, /if \(drawerWasShown\.current && !drawerShown && forceRailRef\.current\) \{\s*\/\/[^\n]*\n\s*refocus\.current = true;\s*setForceRail\(false\);/);
+});
+
+test('R1-I4: after "Scope … to this folder" the list keeps its folder view and the rail its siblings, on pgvector (server) and on a store that filters nothing', () => {
+	const { folderScope } = require('../src/vector/filters') as typeof import('../src/vector/filters');
+	const scope = folderScope(null, '', 'C:/demo/handbooks/');
+	assert.ok(scope);
+	const stores = {
+		pgvector: listing(ROWS),
+		qdrant: pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage({ success: true, items: ROWS, next_cursor: null, total: ROWS.length, counts_exact: true, distinct: true, sorted: false, caveats: [] })),
+	};
+	for (const [store, directory] of Object.entries(stores)) {
+		const entry = panelEntry(`k-i4-${store}`);
+		documentsFolder(entry).set({ kind: 'folder', prefix: 'C:/demo/handbooks/' });
+		const before = renderDocumentsTab({ entry, directory });
+		const after = renderDocumentsTab({ entry, directory, scope });
+		const listed = (html: string): string[] => [...html.matchAll(/data-row-id="(\w)"/g)].map((m) => m[1] as string).sort();
+		assert.deepEqual(listed(after), listed(before), `${store}: the list is unchanged`);
+		assert.deepEqual(listed(after), ['a', 'b'], `${store}: the folder view of what is loaded`);
+		assert.match(after, /data-item-id="f:C:\/demo\/"/, `${store}: the rail keeps every folder`);
+		assert.match(after, /aria-label="All documents, 4 loaded documents"/, `${store}: counted over every loaded document (the scope is off the list)`);
+		assert.match(after, /aria-pressed="false"[^>]*>Documents<\/button>/, `${store}: the ScopeBar shows the list off the scope`);
+	}
+});
+
+test('the export offers what the list shows when a folder or the review narrows it; Escape on a row closes the drawer', () => {
+	const entry = panelEntry('k-shown');
+	documentsFolder(entry).set({ kind: 'folder', prefix: 'C:/demo/handbooks/' });
+	renderDocumentsTab({ entry, directory: listing(ROWS) });
+	const shown = exportItems.find((i) => i.id === 'directory-shown');
+	assert.equal(shown?.label, 'Documents shown, folder C:/demo/handbooks/ (2)');
+	assert.deepEqual(shown?.rows?.().rows.map((r) => r.objectId), ['b', 'a']);
+	renderDocumentsTab({ directory: listing(ROWS) });
+	assert.ok(!exportItems.some((i) => i.id === 'directory-shown'), 'nothing narrows the list: no such item');
+	const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'DocumentsTab.tsx'), 'utf8');
+	assert.match(source, /if \(event\.defaultPrevented \|\| event\.key !== 'Escape' \|\| drawerId === null\) return;\s*event\.preventDefault\(\);\s*setDrawerOpen\(false\);/);
+	assert.match(source, /sortVersion=\{sort\?\.column === 'status' \? statusSort\.current\.version : sort\?\.column === 'health' \? healthOf : null\}/, 'Status and Health sort again when their values change elsewhere');
+	assert.match(source, /ownTick\.current = next;\s*entry\.staged\.set\(next\);/, "a row's own tick is remembered");
+});
+
+test("a sort by Status follows staging from elsewhere but not a row's own tick, which would move it under the pointer", () => {
+	const { NO_STAGED, statusSortVersion } = require('../src/vector/staged') as typeof import('../src/vector/staged');
+	let state = { version: 0, seen: NO_STAGED };
+	const ticked = stage(NO_STAGED, [{ objectId: 'a', path: 'a.md', chunks: 1 }]);
+	state = statusSortVersion(state, ticked, ticked);
+	assert.equal(state.version, 0, "the grid's own tick: no re-sort");
+	const applied = stage(ticked, [{ objectId: 'b', path: 'b.md', chunks: 1 }]);
+	state = statusSortVersion(state, applied, ticked);
+	assert.equal(state.version, 1, 'Stage all shown, the drawer, the map, Apply or Discard: sorted again');
+	assert.equal(statusSortVersion(state, applied, ticked), state, 'nothing changed: the same state');
+});
+
+test('the folder scope action on a scope already on the list keeps it there, and says so', () => {
+	const entry = panelEntry('k-f11');
+	documentsFolder(entry).set({ kind: 'folder', prefix: 'C:/demo/handbooks/' });
+	const onList = { filter: { file_types: ['md'] }, label: 'file type is md', objectIds: null, overflow: null, applyTo: { documents: true, map: false, search: true, chat: true } };
+	const html = renderDocumentsTab({ entry, directory: listing(ROWS), scope: onList });
+	assert.match(html, /title="The scope gets this folder; the list stays scoped and is listed again with it"[^>]*>Scope the list, search and Ask to this folder<\/button>/);
+	const off = renderDocumentsTab({ entry, directory: listing(ROWS), scope: { ...onList, applyTo: { ...onList.applyTo, documents: false } } });
+	assert.match(off, />Scope search and Ask to this folder<\/button>/);
 });

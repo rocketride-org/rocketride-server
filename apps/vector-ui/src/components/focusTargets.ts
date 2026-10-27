@@ -106,3 +106,37 @@ export function focusFell(): boolean {
 export function currentTabOf(el: Element | null): HTMLElement | null {
 	return workbenchOf(el)?.querySelector<HTMLElement>('[data-workbench-tabs] [aria-selected="true"], [data-workbench-tabs] [aria-pressed="true"]') ?? null;
 }
+
+/** What a surface (the workbench, a document) offers the focus when nothing better was named, in order. */
+export const SURFACE_FALLBACK: readonly string[] = [
+	'[data-return-focus]',
+	'[role="grid"]',
+	'[data-workbench-tabs] [aria-selected="true"], [data-workbench-tabs] [aria-pressed="true"]',
+	'[data-document-tabs] [aria-selected="true"], [data-document-tabs] [aria-pressed="true"]',
+	'h1[tabindex], h2[tabindex]',
+	'button',
+];
+
+/**
+ * The surface an element is in: the workbench (data-console) or a document (data-document).
+ *
+ * @param el - An element of it (read while it is on the page).
+ * @returns The surface, or null.
+ */
+export function surfaceOf(el: Element | null): HTMLElement | null {
+	return el?.closest<HTMLElement>('[data-console], [data-document]') ?? null;
+}
+
+/**
+ * The first element of a surface that can take the focus, by SURFACE_FALLBACK (shown only).
+ *
+ * @param surface - The surface (from {@link surfaceOf}).
+ * @returns The element, or null.
+ */
+export function surfaceTarget(surface: HTMLElement | null): HTMLElement | null {
+	if (surface === null || !surface.isConnected) return null;
+	for (const selector of SURFACE_FALLBACK) {
+		for (const el of surface.querySelectorAll<HTMLElement>(selector)) if (shown(el)) return el;
+	}
+	return null;
+}

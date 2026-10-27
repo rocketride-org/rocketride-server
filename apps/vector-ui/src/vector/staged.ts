@@ -142,3 +142,38 @@ export function pendingText(summary: IStagedSummary): string {
 	if (n === 0) return '';
 	return `${formatCount(n)} ${n === 1 ? 'document' : 'documents'} staged to move to the trash (${stagedChunksWords(summary)}).`;
 }
+
+/**
+ * The pending bar's one-line sentence (its full text, pendingText, is its title): the documents and, where every
+ * count is known, the chunks; "N+" where some are not counted (at least N).
+ *
+ * @param summary - The staged set's summary.
+ * @returns e.g. '3 staged for the trash (14 chunks)', '3 staged for the trash (14+ chunks)', or '' with nothing staged.
+ */
+export function pendingShortText(summary: IStagedSummary): string {
+	const n = summary.documents;
+	if (n === 0) return '';
+	const chunks = summary.chunks === null ? '' : ` (${formatCount(summary.chunks)}${summary.unknown > 0 ? '+' : ''} ${summary.chunks === 1 && summary.unknown === 0 ? 'chunk' : 'chunks'})`;
+	return `${formatCount(n)} staged for the trash${chunks}`;
+}
+
+/** The Status column's sort version, and the staged set it was counted from. */
+export interface IStatusSortState {
+	version: number;
+	seen: IStagedSet;
+}
+
+/**
+ * The Status column's sort version after the staged set changed: a change from elsewhere (Apply, Discard, Stage all
+ * shown, the drawer, the map) sorts the grid again; a row ticked in the grid itself does not, so the row stays under
+ * the pointer until the next sort.
+ *
+ * @param state - The version and the set it was counted from.
+ * @param staged - The staged set now.
+ * @param ownTick - The set a tick in the grid produced last, or null.
+ * @returns The state (the same object when nothing changed).
+ */
+export function statusSortVersion(state: IStatusSortState, staged: IStagedSet, ownTick: IStagedSet | null): IStatusSortState {
+	if (staged === state.seen) return state;
+	return { version: staged === ownTick ? state.version : state.version + 1, seen: staged };
+}

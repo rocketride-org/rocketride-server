@@ -249,8 +249,8 @@ test('the scope: the listing asks for its conditions, its documents resolve from
 	assert.match(dir, /useDebounced\(text, FILTER_DEBOUNCE_MS\)/);
 	// A folder in the rail narrows what is loaded; setting the scope to it is its own, explicit action (C2).
 	assert.match(dir, /folderRows\(view\.rows, folder\)/);
-	assert.match(dir, /Scope search, map and Ask to this folder/);
-	assert.match(dir, /const next = scopeWith\(scope, applied, \{ path_prefix: prefix \}\);\s*const refused = checkScope\(next\);\s*setFolderError\(refused\);\s*if \(refused === null\) \{\s*onScope\(next\);/, 'a folder the node would refuse is said, never sent');
+	assert.match(dir, /\{folderScopeLabel\(folderTargets\)\}/, 'the action names the surfaces it scopes');
+	assert.match(dir, /const next = folderScope\(scope, applied, prefix\);\s*const refused = checkScope\(next\);\s*setFolderError\(refused\);\s*if \(refused === null\) onScope\(next\);/, 'a folder the node would refuse is said, never sent; folderScope decides whether the list is scoped (R1-I4, F1-1)');
 	assert.match(dir, /\{folderError !== null && \(\s*<div role="alert"[^>]*>\s*\{folderError\}/);
 	assert.doesNotMatch(code('components/FolderRail.tsx'), /onScope|setFilter|scopeWith/, 'the rail never changes the scope or the listing');
 });
@@ -275,12 +275,13 @@ test('every removal is confirmed inline in the document that shows it, in both m
 	assert.doesNotMatch(app, /RemoveDialogHost/, 'the full app mounts no modal confirmation');
 	assert.match(code('views/ConsoleView.tsx'), /<InlineRemoveConfirm entry=\{entry\} probe=\{probe\} origin=\{CONSOLE_ORIGIN\} returnFocus=\{returnFocus\} \/>/, 'the workbench confirms its own requests inline, on every tab');
 	assert.match(code('views/ConsoleView.tsx'), /firstFocusable\(\[inShown\('\[data-return-focus\]'\), inShown\('\[data-grid-focus\] \[data-grid-row\]\[tabindex="0"\]'\), inShown\('\[data-grid-focus\]'\), currentTab\(\)\]\)/, "a lost focus goes to the shown panel's marked row, else its grid, else the current tab");
-	assert.match(code('components/InlineRemoveConfirm.tsx'), /firstFocusable\(\[how\.current === 'cancel' \? back : null, closing\.current\.returnFocus\?\.\(\)\]\)/, 'after Cancel, back to the opener first');
+	assert.match(code('components/InlineRemoveConfirm.tsx'), /firstFocusable\(\[how\.current === 'cancel' \? back : null, closing\.current\.returnFocus\?\.\(\), surfaceTarget\(surface\)\]\)/, "after Cancel, back to the opener first; with no fallback named, the surface's own (R1-I1)");
 	assert.match(app, /<DocumentView [^>]*beforeBody=\{<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} origin=\{documentOrigin\(payload\.objectId\)\} \/>\}/, "and the full app's document tab its own (it shares the console's controller)");
 	assert.match(app, /origin: documentOrigin\(payload\.objectId\),/, "the tab's actions ask under its origin");
 	for (const file of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/RemoveDialogHost.tsx']) assert.ok(!fs.existsSync(path.join(SRC, file)), `${file}: no modal confirmation is left`);
 	const panel = code('components/InlineRemoveConfirm.tsx');
-	assert.match(panel, /if \(!content\.destructive\) confirmButton\.current\?\.focus\(\);\s*else if \(content\.typed\) input\.current\?\.focus\(\);\s*else Array\.from\(actions\.current\?\.querySelectorAll\('button'\) \?\? \[\]\)\.find\(\(button\) => button\.textContent\?\.trim\(\) === content\.cancelLabel\)\?\.focus\(\);/, 'Confirm for a move to the trash; the typed field, else Cancel, for a permanent write');
+	assert.match(panel, /const first = confirmFirstFocus\(pending\.action, pending\.targets\.length, entry\.ctx\.limits\.write_ids_max\);/, 'the first focus is the pure rule (P2-11: a bulk move opens on Cancel)');
+	assert.match(panel, /if \(first === 'confirm'\) confirmButton\.current\?\.focus\(\);\s*else if \(first === 'typed' && content\.typed\) input\.current\?\.focus\(\);\s*else Array\.from\(actions\.current\?\.querySelectorAll\('button'\) \?\? \[\]\)\.find\(\(button\) => button\.textContent\?\.trim\(\) === content\.cancelLabel\)\?\.focus\(\);/, 'Confirm for a move to the trash; the typed field, else Cancel, for a permanent write');
 	assert.match(code('components/VectorGrid.tsx'), /data-return-focus=\{returnId === id \? '' : undefined\}/, 'the grid marks the row after the rows a confirmed write takes away, for the hub\'s fallback');
 	for (const file of ['components/DocumentsTab.tsx', 'components/TrashTab.tsx']) assert.match(code(file), /leaving=\{leaving\}/, `${file}: tells its grid which rows the open confirmation takes away`);
 	for (const file of ['views/DocumentView.tsx', 'views/ConsoleView.tsx', 'components/DocumentsTab.tsx', 'components/TrashTab.tsx', 'components/PendingBar.tsx', 'components/DocumentDrawer.tsx', 'components/FolderRail.tsx', 'components/VectorGrid.tsx']) {

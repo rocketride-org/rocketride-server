@@ -362,13 +362,17 @@ export function pagerFooter(state: IPagerState): IPagerFooter | null {
 }
 
 /**
- * The count beside the DOCUMENTS heading: the store's total when it said, else what is loaded.
+ * The count beside the DOCUMENTS heading: the store's total when it said (and counted what the list shows), else
+ * what is loaded.
  *
  * @param state - The state.
  * @returns e.g. '42 documents' or '1,200 loaded'.
  */
 export function directoryHeading(state: IPagerState): string {
-	if (state.total !== null) return `${formatCount(state.total)} ${state.total === 1 ? 'document' : 'documents'}`;
+	// A store that did not apply the listing's filter (or only part of it) counted every document: its total is not
+	// what the list shows, which is matched here.
+	const totalShown = state.filter === null || state.filterApplied === 'server';
+	if (state.total !== null && totalShown) return `${formatCount(state.total)} ${state.total === 1 ? 'document' : 'documents'}`;
 	const n = state.rows.length;
 	if (listingComplete(state)) return `${formatCount(n)} ${n === 1 ? 'document' : 'documents'}`;
 	return `${formatCount(n)} loaded`;
@@ -418,9 +422,9 @@ export function documentExportRows(items: readonly IDocumentItem[]): IExportRows
 // =============================================================================
 
 /**
- * The line beside a sorted grid when the sort covers only what is loaded (the store has more): shown exactly while
- * the listing is incomplete and the rows are not in the store's own path order (a column is sorted, or the store
- * lists in storage order). A complete listing is sorted whole, so it never shows.
+ * The line beside a sorted grid when the sort covers only what is loaded (more may exist): shown while the listing is
+ * incomplete and the rows are sorted here, by a column or (a store that lists in storage order) once loading stopped.
+ * A complete listing is sorted whole, and rows still arriving are not sorted at all, so neither shows it.
  *
  * @param state - The listing.
  * @param columnSorted - True while a column's header sorts the grid.
@@ -428,7 +432,9 @@ export function documentExportRows(items: readonly IDocumentItem[]): IExportRows
  */
 export function sortNote(state: Pick<IPagerState, 'status' | 'storeSorted' | 'rows'>, columnSorted: boolean): string | null {
 	if (listingComplete(state) || state.status === 'idle' || state.rows.length === 0) return null;
-	if (!columnSorted && state.storeSorted) return null;
+	// Without a column sort the rows are in the store's order, or sorted here once loading stopped (while pages are
+	// still appended, nothing is sorted yet).
+	if (!columnSorted && (state.storeSorted || state.status === 'loading')) return null;
 	const n = state.rows.length;
 	return `Sorted within the ${formatCount(n)} loaded ${n === 1 ? 'document' : 'documents'}; ${MORE_MAY_EXIST}.`;
 }
@@ -604,7 +610,7 @@ export function chunkPreview(text: string): string {
  * @returns The sentence.
  */
 export function noDocumentsText(canAdd: boolean): string {
-	return canAdd ? 'No documents yet. Add documents, in the header, adds the first one.' : 'No documents yet.';
+	return canAdd ? 'No documents yet. Use Add documents, in the header, to add the first one.' : 'No documents yet.';
 }
 
 /**
@@ -617,6 +623,9 @@ export function targetOf(item: Pick<IDocumentItem, 'objectId' | 'path' | 'chunks
 	return { objectId: item.objectId, path: item.path, chunks: item.chunks };
 }
 
+/** Find similar replaced by a newer neighbours request of the same connection before the store answered it. */
+export const SIMILAR_REPLACED_TEXT = 'A newer neighbours request replaced this one; try again.';
+
 /** Find similar while the store answers another neighbours or recommend call (it runs one at a time). */
 export const SIMILAR_BUSY_TEXT = 'The store is answering another neighbours or recommend request; try again in a moment.';
 
@@ -624,10 +633,11 @@ export const SIMILAR_BUSY_TEXT = 'The store is answering another neighbours or r
  * Why Find similar has no answer.
  *
  * @param error - What the call threw.
- * @returns The sentence, or null for an answer that is no longer wanted.
+ * @returns The sentence (a request replaced by a newer one says so), or null.
  */
 export function similarFailureText(error: unknown): string | null {
 	if (error instanceof ExplorerToolError && error.code === 'BUSY') return SIMILAR_BUSY_TEXT;
+	if (error instanceof ExplorerToolError && error.kind === 'stale') return SIMILAR_REPLACED_TEXT;
 	const text = failureText(error);
 	return text === null ? null : text.headline;
 }

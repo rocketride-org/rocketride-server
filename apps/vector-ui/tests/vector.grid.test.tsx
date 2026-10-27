@@ -39,7 +39,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { VectorGrid } from '../src/components/VectorGrid';
 import type { IGridColumn } from '../src/components/VectorGrid';
-import { afterDrawerClosed, afterNeighbourChosen, afterToolGone, gridKey, gridTemplate, gridWindow, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../src/vector/grid';
+import { afterDrawerClosed, afterNeighbourChosen, afterToolGone, gridKey, gridTemplate, headerKey, gridWindow, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../src/vector/grid';
 
 interface IRow {
 	id: string;
@@ -194,4 +194,20 @@ test("the selected row (the drawer's) is rendered wherever the list is scrolled,
 	const many = Array.from({ length: 500 }, (_, i) => ({ id: `r${i}`, name: `n${i}`, size: i }));
 	const html = renderToStaticMarkup(<VectorGrid label="Many" rows={many} rowId={rowId} columns={COLUMNS} sort={null} onSort={noop} selectedId="r420" />);
 	assert.match(html, /data-row-id="r420" aria-rowindex="422" aria-selected="true"/);
+});
+
+test('the header row is part of the grid: Up from the first row reaches its sort buttons, which move with Left, Right, Home, End and go back with Down; they are not tab stops', () => {
+	assert.deepEqual(gridKey('ArrowUp', { index: 0, count: 10, page: 4, header: true }), { kind: 'header' });
+	assert.deepEqual(gridKey('ArrowUp', { index: 0, count: 10, page: 4 }), { kind: 'move', index: 0 }, 'no sort button: the first row stays');
+	assert.deepEqual(gridKey('ArrowUp', { index: 3, count: 10, page: 4, header: true }), { kind: 'move', index: 2 });
+	assert.deepEqual(headerKey('ArrowRight', { index: 1, count: 3 }), { kind: 'move', index: 2 });
+	assert.deepEqual(headerKey('ArrowRight', { index: 2, count: 3 }), { kind: 'move', index: 2 });
+	assert.deepEqual(headerKey('ArrowLeft', { index: 0, count: 3 }), { kind: 'move', index: 0 });
+	assert.deepEqual(headerKey('End', { index: 0, count: 3 }), { kind: 'move', index: 2 });
+	assert.deepEqual(headerKey('Home', { index: 2, count: 3 }), { kind: 'move', index: 0 });
+	assert.deepEqual(headerKey('ArrowDown', { index: 1, count: 3 }), { kind: 'rows' });
+	assert.equal(headerKey('Enter', { index: 1, count: 3 }), null, "Enter is the button's own: it sorts");
+	const html = renderToStaticMarkup(<VectorGrid label="Rows" rows={ROWS} rowId={rowId} columns={COLUMNS} sort={null} onSort={noop} />);
+	assert.equal(html.match(/<button type="button" tabindex="-1"[^>]*title="Sort by/g)?.length, 2, 'both sort buttons out of the tab order');
+	assert.equal(html.match(/tabindex="0"/g)?.length, 1, 'one tab stop: the row');
 });
