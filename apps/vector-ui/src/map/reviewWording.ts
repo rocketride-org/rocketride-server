@@ -152,13 +152,14 @@ export function queuedLine(n: number, policyChose = false): string {
 export const STAGE_REMOVAL = 'Stage removal';
 
 /**
- * What a staging press announces (every press, so a repeat is heard too).
+ * What a staging press announces (every press, so a repeat is heard too). It states where the documents stand,
+ * true whether the press staged them or they were staged already.
  *
- * @param n - Documents the press staged.
+ * @param n - Documents the press named.
  * @returns The sentence.
  */
 export function stagedAnnouncement(n: number): string {
-	return `Staged ${plural(n, 'document')} for the trash; nothing moves until the pending changes are applied.`;
+	return `${plural(n, 'document')} ${n === 1 ? 'is' : 'are'} staged for the trash; nothing moves until the pending changes are applied.`;
 }
 
 /**

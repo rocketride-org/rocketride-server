@@ -21,7 +21,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ClustersPanel } from '../src/components/ClustersPanel';
 import { DuplicatesPanel } from '../src/components/DuplicatesPanel';
 import { HeatStrip } from '../src/components/HeatStrip';
-import { LEGEND_CLUSTERS, Legend, markRows } from '../src/components/Legend';
+import { LEGEND_CLUSTERS, Legend, keepTabStop, markRows, scrollsInside } from '../src/components/Legend';
 import { MapToolbar, STATUS_HEIGHT, TREE_HINT } from '../src/components/MapToolbar';
 import { NeighbourList } from '../src/components/NeighbourList';
 import { OutliersBody, OutliersPanel } from '../src/components/OutliersPanel';
@@ -605,8 +605,21 @@ test('the status line offers Clear (what Escape on the map clears next) while so
 	assert.equal(line(lit), line(none), 'the same line, the same height');
 });
 
-test('the legend is capped in height and scrolls inside itself (a tab stop), so its notes never take the map\'s height', () => {
+test('the legend is capped in height and scrolls inside itself, a tab stop only while it scrolls, so its notes never take the map\'s height', () => {
 	const out = html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" notes={Array.from({ length: 12 }, (_, i) => `note ${i}`)} />);
-	assert.match(out, new RegExp(`<section aria-label="Map legend" tabindex="0" style="[^"]*max-height:${LEGEND_MAX_HEIGHT}px;box-sizing:border-box;overflow-y:auto`));
+	assert.match(out, new RegExp(`<section aria-label="Map legend" style="[^"]*max-height:${LEGEND_MAX_HEIGHT}px;box-sizing:border-box;overflow-y:auto`), 'not measured yet (a server render): no tab stop');
 	assert.ok(LEGEND_MAX_HEIGHT <= 140);
+	assert.equal(scrollsInside(300, 132), true);
+	assert.equal(scrollsInside(132, 132), false);
+	assert.equal(scrollsInside(133, 132), false, 'a pixel of rounding is not scrolling');
+	const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'Legend.tsx'), 'utf8');
+	assert.match(source, /tabIndex=\{scrolls \? 0 : undefined\}/);
+	assert.match(source, /new ResizeObserver\(\(\) => measureRef\.current\(\)\)/, 'measured again when its box changes');
+	// The stop stays while the legend holds the focus (taking it away would drop the focus to the page), and goes
+	// once the focus leaves a legend that no longer scrolls.
+	assert.equal(keepTabStop(true, false), true);
+	assert.equal(keepTabStop(false, true), true, 'focused: kept, though it stopped scrolling');
+	assert.equal(keepTabStop(false, false), false);
+	assert.match(source, /setScrolls\(keepTabStop\(scrollsInside\(el\.scrollHeight, el\.clientHeight\), typeof document !== 'undefined' && el\.contains\(document\.activeElement\)\)\)/);
+	assert.match(source, /onBlur=\{\(event\) => \{[\s\S]*?setScrolls\(keepTabStop\(scrollsInside\(el\.scrollHeight, el\.clientHeight\), false\)\);/);
 });

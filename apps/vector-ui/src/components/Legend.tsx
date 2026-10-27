@@ -37,11 +37,11 @@
 // drawn, how the sample's listing ended, the scope, an isolation) as notes,
 // and the draw again when the store refused to draw the sample for the
 // console's scope. Its height is capped (map/styles.ts LEGEND_MAX_HEIGHT):
-// past it the legend scrolls inside itself (a tab stop), so its notes never
-// take the map's height.
+// past it the legend scrolls inside itself (then it is a tab stop, so a
+// keyboard reaches what is below), so its notes never take the map's height.
 // =============================================================================
 
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { LegendProps as ContractLegendProps } from '../contract/types';
 import type { IColouring, MapColourBy } from '../map/colours';
 import { MAP_STYLES } from '../map/styles';
@@ -193,12 +193,54 @@ export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: s
 }
 
 /**
+ * Whether a box's content runs past its height (a pixel of rounding is not scrolling).
+ *
+ * @param scrollHeight - Its content's height.
+ * @param clientHeight - Its own height.
+ * @returns True when it scrolls.
+ */
+export function scrollsInside(scrollHeight: number, clientHeight: number): boolean {
+	return scrollHeight - clientHeight > 1;
+}
+
+/**
+ * Whether the legend keeps its tab stop: while it scrolls, and while it holds the focus (taking the stop away from
+ * the focused legend would drop the focus to the page).
+ *
+ * @param scrolls - Its content runs past its height.
+ * @param focused - The focus is on it or inside it.
+ * @returns True to keep it.
+ */
+export function keepTabStop(scrolls: boolean, focused: boolean): boolean {
+	return scrolls || focused;
+}
+
+/**
  * The map legend.
  *
  * @param props - Sample, colour mode, point cap, backend, colouring.
  * @returns The legend.
  */
 export function Legend(props: LegendProps): React.ReactElement {
+	const section = useRef<HTMLElement>(null);
+	// A tab stop while it scrolls past its cap (a keyboard must reach what is below), and while it holds the focus
+	// (removing the stop then would drop the focus to the page); measured when what it says changes, when its box
+	// changes size, and when the focus leaves it.
+	const [scrolls, setScrolls] = useState(false);
+	const measure = (): void => {
+		const el = section.current;
+		if (el) setScrolls(keepTabStop(scrollsInside(el.scrollHeight, el.clientHeight), typeof document !== 'undefined' && el.contains(document.activeElement)));
+	};
+	const measureRef = useRef(measure);
+	measureRef.current = measure;
+	useEffect(() => measureRef.current(), [props.sample, props.colourBy, props.colouring, props.notes, props.marks, props.scopeRetry]);
+	useEffect(() => {
+		const el = section.current;
+		if (!el || typeof ResizeObserver === 'undefined') return undefined;
+		const observer = new ResizeObserver(() => measureRef.current());
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
 	const sample = props.sample.result;
 	const colouring = props.colouring ?? null;
 	const bias = biasedNote(sample);
@@ -211,8 +253,19 @@ export function Legend(props: LegendProps): React.ReactElement {
 	const marks = markRows(props.marks);
 	const docs = sample.of.documents === null || sample.of.documents === undefined ? '—' : num(sample.of.documents);
 	return (
-		// A tab stop: the legend scrolls past its height cap, and a keyboard must reach what is below.
-		<section aria-label="Map legend" tabIndex={0} style={MAP_STYLES.legend} data-knn-source={sample.knn_source} data-colour-by={props.colourBy}>
+		<section
+			ref={section}
+			aria-label="Map legend"
+			tabIndex={scrolls ? 0 : undefined}
+			onBlur={(event) => {
+				// The focus left the legend: drop the stop if it no longer scrolls.
+				const el = section.current;
+				if (el && !(event.relatedTarget instanceof Node && el.contains(event.relatedTarget))) setScrolls(keepTabStop(scrollsInside(el.scrollHeight, el.clientHeight), false));
+			}}
+			style={MAP_STYLES.legend}
+			data-knn-source={sample.knn_source}
+			data-colour-by={props.colourBy}
+		>
 			<p style={MAP_STYLES.note}>
 				{sampleLabel(sample)} · {docs} docs · seed {props.sample.seed}
 			</p>

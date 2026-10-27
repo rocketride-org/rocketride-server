@@ -902,5 +902,19 @@ test('a staging press is announced every time (a repeat too)', () => {
 	const outliers = last<{ onRemoveDocument(id: string): void }>('OutliersPanel');
 	outliers.onRemoveDocument(clustered.docs[0]!.objectId);
 	outliers.onRemoveDocument(clustered.docs[0]!.objectId);
-	assert.deepEqual(rec.announced.filter((t) => t.startsWith('Staged')), ['Staged 1 document for the trash; nothing moves until the pending changes are applied.', 'Staged 1 document for the trash; nothing moves until the pending changes are applied.']);
+	// It says where the document stands, so a repeat that staged nothing new is still true.
+	const said = '1 document is staged for the trash; nothing moves until the pending changes are applied.';
+	assert.deepEqual(rec.announced.filter((t) => t.includes('staged for the trash')), [said, said]);
+});
+
+test('the clear rule reads this connection\'s selection only (another connection\'s keys or highlight offer nothing to clear), and a query re-arms its fading only for a new question', () => {
+	const other = createSelectionStore('conn-2');
+	const keys = [[clustered.docs[0]!.objectId, 0]] as VectorKey[];
+	other.setKeys(keys);
+	other.setHighlight({ source: 'chat', keys });
+	render({ model: enrichedModel(), selection: other });
+	assert.equal(last<{ clear: unknown }>('MapToolbar').clear, null, 'nothing of this connection is lit');
+	const view = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'views', 'MapView.tsx'), 'utf8');
+	assert.match(view, /const lassoActive = lasso \|\| \(highlight\?\.source === 'lasso' \? highlight\.keys\.length > 0 : ownKeys\.length > 0\);/);
+	assert.match(view, /useEffect\(\(\) => setQueryDims\(true\), \[query\?\.text\]\);/, 'keyed on the question, not on each update of the query');
 });
