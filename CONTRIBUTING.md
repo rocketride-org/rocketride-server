@@ -132,6 +132,8 @@ Drag screenshots and recordings into the PR description. Do not commit them.
 
 If you work with a coding agent, have it follow `.claude/skills/verify-rocketride/SKILL.md`. The skill launches an engine built from your checkout, uses the product the way a user does, and saves what happened under `.verify/<run-id>/`. Paste its report into the Verification section and attach the screenshots it saved. Its coverage table lists what it can check. For anything it does not cover, say what you checked by hand.
 
+Maintainers may run the contribution-triage skill (`.claude/skills/contribution-triage/SKILL.md`) on your PR. It checks the items above and, if something is missing, leaves one comment that says what to add.
+
 ## Code Style Guidelines
 
 ### C++ (Core and Engine Libraries)

@@ -31,6 +31,7 @@ Read the doc for your task before writing code. Paths are repo-relative.
 | Builder / hooks | `docs/development/builder/reference.md` (run builds), `docs/development/builder/authoring.md` (write tasks.js), `docs/development/builder/pre-commit-hooks.md` |
 | Product docs (site spine) | `docs/public/product/` |
 | Prove a change works before a PR (launch, use the product, save evidence) | `.claude/skills/verify-rocketride/SKILL.md` |
+| Triage incoming PRs (maintainers) | `.claude/skills/contribution-triage/SKILL.md` |
 
 ## Common commands
 
