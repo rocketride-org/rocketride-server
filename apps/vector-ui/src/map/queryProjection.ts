@@ -232,6 +232,41 @@ export async function withSampleRetry<T>(sampleId: string, call: (id: string) =>
 }
 
 /**
+ * {@link withSampleRetry}, also saying which sample the answer is for: the id given, or the new one after a
+ * SAMPLE_EXPIRED redraw. The store keeps the last two samples, so a call on the previous id still answers after a
+ * new draw, in that sample's basis.
+ *
+ * @param sampleId - The current sample id.
+ * @param call - The call (project, …) for a sample id.
+ * @param resample - Draws the sample again; resolves the new id, or null when it failed.
+ * @returns The call's answer and the sample id it was made on.
+ */
+export async function projectOn<T>(sampleId: string, call: (id: string) => Promise<ToolAnswer<T>>, resample: () => Promise<string | null>): Promise<{ answer: ToolAnswer<T>; sampleId: string }> {
+	let used = sampleId;
+	const answer = await withSampleRetry(
+		sampleId,
+		(id) => {
+			used = id;
+			return call(id);
+		},
+		resample,
+	);
+	return { answer, sampleId: used };
+}
+
+/**
+ * Whether a placement may be drawn: what it was projected on is still the sample shown (null: nothing was
+ * projected, so nothing is in another sample's basis).
+ *
+ * @param projectedOn - The sample id the projection was made on, or null for none.
+ * @param shown - The sample id shown now.
+ * @returns True to draw it.
+ */
+export function onSample(projectedOn: string | null, shown: string | null | undefined): boolean {
+	return projectedOn === null || projectedOn === shown;
+}
+
+/**
  * Why a text query cannot run on the map, or null when it can.
  *
  * @param state - Whether the embedding node is reachable and a sample is drawn.

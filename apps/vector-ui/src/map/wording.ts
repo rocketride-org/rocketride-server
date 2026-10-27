@@ -129,6 +129,22 @@ export const CENTROID_APPROX = 'approximate: the centre of the answer\'s sources
 export const LAYOUT_CANCELLED = 'Layout cancelled. The map shows PCA.';
 
 /**
+ * A failure, said as one in words (not by colour alone): on the status line, in its alert, and in the legend's notes.
+ *
+ * @param sentence - What failed and why.
+ * @returns The sentence, marked as a failure.
+ */
+export function failedLine(sentence: string): string {
+	return `Failed: ${sentence}`;
+}
+
+/** A query answered for a sample that was replaced meanwhile (its places are in the old sample's basis): not drawn. */
+export const QUERY_SAMPLE_CHANGED = 'The sample changed while the query was being placed, so it is not drawn; run it again.';
+
+/** The same for the compared question (said after starBNotPlaced's sentence). */
+export const STAR_B_SAMPLE_CHANGED = 'The sample changed while it was being placed; show it on the map again.';
+
+/**
  * A saved view's query, offered again on the status line.
  *
  * @param query - The view's query.
@@ -147,7 +163,7 @@ export function savedQueryLine(query: string): string {
  * @returns The sentence and what it is, or null for none.
  */
 export function statusNotice(state: { error: string | null; notice: string | null; savedQuery: string | null; hasSample: boolean }): { text: string; kind: 'error' | 'notice' | 'saved-query' } | null {
-	if (state.error !== null && state.hasSample) return { text: state.error, kind: 'error' };
+	if (state.error !== null && state.hasSample) return { text: failedLine(state.error), kind: 'error' };
 	if (state.notice !== null) return { text: state.notice, kind: 'notice' };
 	if (state.savedQuery !== null) return { text: savedQueryLine(state.savedQuery), kind: 'saved-query' };
 	return null;

@@ -111,12 +111,17 @@ Light and 8.73:1 in RocketRide dark.
 Every other line of the overlay has the same floor (`markWidth`): its own
 width, but never under two device pixels. That covers the query's rays, star
 B's dotted rays, the rings, the chunk path, duplicate pairs and the lasso.
-The halos and the star's edge are the surface colour, not marks. So every
-line the map draws spans at least two device pixels at any ratio.
+The halos and the star's edge are the surface colour, not marks; a ring's
+halo stays a device pixel wider than its ring at any ratio. So every overlay
+line, and every edge, spans at least two device pixels at any ratio. The
+legend's glyphs draw their lines at the same widths.
 
-Point outlines are the point's own ring. WebGL draws it 1 CSS px wide in
-whole pixels (no blending at its edge), so every pixel of it carries the
-outline colour. The Canvas 2D fallback strokes it 1 CSS px wide.
+Point outlines are the point's own ring, not overlay lines. WebGL draws it
+1 CSS px wide in whole pixels (no blending at its edge), so every pixel of it
+carries the outline colour.
+
+The Canvas 2D fallback (used without WebGL) strokes the point outline 1 CSS
+px wide, anti-aliased, so at 1 dppx it is not covered by the two-pixel rule.
 
 The rays were 1.25 px. They are measured the same way, in the accent, through
 the overlay's own `drawOverlay` and `drawExtras`: 300 rays of each kind, with

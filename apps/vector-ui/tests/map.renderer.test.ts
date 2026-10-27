@@ -13,7 +13,7 @@ import { projectToScreen, viewMatrix } from '../src/map/camera';
 import { alphaOf, contrastRatio, parseColor } from '../src/map/contrast';
 import type { Rgb } from '../src/map/contrast';
 import { NO_EDGES, edgeStats, spanningTree, topEdges } from '../src/map/graph';
-import { EDGE_BUCKETS, EDGE_DEVICE_PX, buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, edgeWidth, extrasDataset, fadeColour, fadedEdgeColours, linkWidth, markWidth, overlayDataset, strokeEdgePaths } from '../src/map/overlay';
+import { EDGE_BUCKETS, EDGE_DEVICE_PX, buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, edgeWidth, extrasDataset, fadeColour, fadedEdgeColours, haloWidth, linkWidth, markWidth, overlayDataset, strokeEdgePaths } from '../src/map/overlay';
 import type { IOverlayExtras, IOverlayModel } from '../src/map/overlay';
 import { createCanvas2dRenderer } from '../src/map/renderer.canvas2d';
 import { DIM, FLAG, FRAGMENT_SHADER, PASS, VERTEX_SHADER, createWebglRenderer, dimFlags, packPoints, sizeCanvas } from '../src/map/renderer.webgl';
@@ -611,6 +611,16 @@ test('an outlier ring is stroked over a 4 px halo of the surface first, then 1.5
 	const one = fake2d();
 	drawOverlay(one.ctx, { ...empty(), outliers: [1, 2] }, screen, place, colours, 1);
 	assert.deepEqual(one.sets.filter(([k]) => k === 'lineWidth').map(([, v]) => v), [4, 2], 'the halo stays wider than the ring');
+	// At 50 % browser zoom (0.5 dppx) the ring is 4 CSS px (two device pixels): the halo is a device pixel wider still.
+	const half = fake2d();
+	drawOverlay(half.ctx, { ...empty(), outliers: [1, 2] }, screen, place, colours, 0.5);
+	assert.deepEqual(half.sets.filter(([k]) => k === 'lineWidth').map(([, v]) => v), [6, 4]);
+	for (const dpr of [0.25, 0.5, 0.75, 1, 1.5, 2, 3]) {
+		const ring = markWidth(1.5, dpr);
+		assert.ok((haloWidth(4, ring, dpr) - ring) * dpr >= 1 - 1e-9, `${dpr} dppx: the halo shows around the ring`);
+		assert.ok(haloWidth(4, ring, dpr) >= 4, 'never under its own width');
+	}
+	assert.equal(haloWidth(4, markWidth(1.5, 1), 1), 4, 'unchanged at 1 dppx and above');
 });
 
 test('the star is filled with the accent and edged with the surface (as its comment says); the selected point\'s links are 1.5 px at 2 dppx, 3 at 1', () => {

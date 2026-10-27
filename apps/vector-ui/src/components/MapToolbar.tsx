@@ -33,10 +33,14 @@
 // (a cancelled or limited layout, fewer edges drawn, a failure while a map is
 // shown, a saved view's query with its Run button); and Clear (lasso
 // selection, highlight, selection: what Escape on the map clears next) while
-// something is lit. Empty when idle. A sentence wider than the line is cut
-// with an ellipsis, its whole text in the title (and read whole by the live
-// region). Nothing moves when a run starts or ends or a notice comes or goes,
-// and nothing floats over the map or the rows under the toolbar.
+// something is lit. Empty when idle. A failure says so in words ("Failed: …")
+// and is also put in a visually hidden role="alert" span, always there, so it
+// is announced assertively (its visible copy is hidden from assistive tech,
+// so it is not read twice). A sentence wider than the line is cut with an
+// ellipsis, its whole text in the title; the view repeats a failure whole in
+// the legend's notes. Nothing moves when a run starts or ends or a notice
+// comes or goes, and nothing floats over the map or the rows under the
+// toolbar.
 // The row is kept compact (a 120 px query box, 6 px gaps) so it is one row in
 // a dev-tool frame at 1440 too (measured: its controls span 1,061 px).
 //
@@ -111,9 +115,10 @@ export interface MapToolbarProps extends Omit<ContractMapToolbarProps, 'colourBy
 	clear?: { label: string; onClear(): void } | null;
 	/**
 	 * The view's sentence for the status line while nothing runs (a notice, a failure, a saved view's query), with a
-	 * button when it offers one (disabled with its reason as the title); null for none.
+	 * button when it offers one (disabled with its reason as the title); null for none. A failure (`failure`) is
+	 * also the toolbar's alert.
 	 */
-	notice?: { text: string; action?: { label: string; onAction(): void; reason?: string | null } | null } | null;
+	notice?: { text: string; failure?: boolean; action?: { label: string; onAction(): void; reason?: string | null } | null } | null;
 }
 
 /** The edge modes. */
@@ -277,6 +282,8 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 	// The status line's words: the busy words while something runs, else the view's notice.
 	const notice = props.notice ?? null;
 	const words = props.busy ?? notice?.text ?? '';
+	// A failure: announced by the alert below, so its copy on the line is not read a second time.
+	const failure = notice?.failure === true ? notice.text : null;
 	const edges = props.edges ?? 'none';
 	const cap: EdgesPerPoint = props.edgesMCap ?? 10;
 	const capReason = `Light samples above ${num(3000)} points draw at most ${cap} edges per point`;
@@ -419,7 +426,7 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 			{/* The status line: always there, at the same height idle or busy, so nothing moves with a run. */}
 			<div style={S.status} data-map-status="">
 				<span role="status" style={S.words} title={words || undefined} data-map-notice={props.busy === null && notice ? '' : undefined}>
-					{words}
+					{props.busy === null && failure !== null ? <span aria-hidden="true">{words}</span> : words}
 				</span>
 				{props.busy && props.canCancel ? <CancelButton onCancel={props.onCancel} root={root} /> : null}
 				{props.busy === null && notice?.action ? (
@@ -433,6 +440,10 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 					</button>
 				) : null}
 			</div>
+			{/* Always there (empty when nothing failed), so a failure put in it is announced. */}
+			<span role="alert" style={S.described} data-map-alert="">
+				{failure ?? ''}
+			</span>
 			{queryWhy ? (
 				<span id={queryWhyId} style={S.described}>
 					{queryWhy}

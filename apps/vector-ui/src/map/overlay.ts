@@ -317,7 +317,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		for (const i of model.outliers) if (!isFaded(i)) any = ring(screen(i), 7) || any;
 		if (any) {
 			ctx.strokeStyle = colours.surface;
-			ctx.lineWidth = 4;
+			ctx.lineWidth = haloWidth(4, markWidth(1.5, dpr), dpr);
 			ctx.stroke();
 			ctx.strokeStyle = colours.outline;
 			ctx.lineWidth = markWidth(1.5, dpr);
@@ -341,7 +341,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 			ctx.beginPath();
 			for (const p of ends.values()) ring(p, 8);
 			ctx.strokeStyle = colours.surface;
-			ctx.lineWidth = 4;
+			ctx.lineWidth = haloWidth(4, markWidth(1.5, dpr), dpr);
 			ctx.stroke();
 			ctx.setLineDash([3, 2]);
 			ctx.strokeStyle = colours.outline;
@@ -469,6 +469,19 @@ export const EDGE_DEVICE_PX = 2;
  */
 export function markWidth(css: number, dpr: number): number {
 	return Math.max(css, EDGE_DEVICE_PX / (dpr > 0 ? dpr : 1));
+}
+
+/**
+ * A ring's halo of the surface, CSS pixels: its own width, but always a device pixel wider than the ring it is
+ * under (at 0.5 dppx a 1.5 px ring is 4 CSS px, as wide as its 4 px halo would be).
+ *
+ * @param own - The halo's own width, CSS pixels.
+ * @param ring - The ring's width at this ratio (from markWidth).
+ * @param dpr - devicePixelRatio.
+ * @returns The width in CSS pixels.
+ */
+export function haloWidth(own: number, ring: number, dpr: number): number {
+	return Math.max(own, ring + 1 / (dpr > 0 ? dpr : 1));
 }
 
 /**

@@ -250,6 +250,16 @@ test('Search\'s Compare places two stars: the highlight runs the compare plan, B
 	assert.match(runB[1] as string, /setNotice\(starBNotPlaced\(mapFailure\(embedded\.code, embedded\.message\)\)\)/);
 	assert.match(view, /\.\.\.\(queryB && starB \? \[`Hollow star: "\$\{queryB\.text\}" \(compared on the Query tab\)`\] : \[\]\),/, 'the legend line only while the star is drawn');
 	assert.match(view, /data-query-b-state=\{queryB === null \? 'none' : starB \? 'placed' : 'failed'\}/);
+	// A projection answered for a sample replaced meanwhile is dropped (B, A and the pinned keys), said for A and B.
+	assert.match(runB[1] as string, /const placed = model\.capabilities\.project === false \? null : await projectOn\(sampleModel\.sampleId,/);
+	assert.match(runB[1] as string, /if \(!onSample\(placed\?\.sampleId \?\? null, selection\.getState\(\)\.sampleModel\?\.sampleId\)\) \{\s*setNotice\(starBNotPlaced\(STAR_B_SAMPLE_CHANGED\)\);\s*return;\s*\}[\s\S]*setQueryBView\(/);
+	const runA = /const runQuery = async \(text: string[^)]*\): Promise<void> => \{([\s\S]*?)\n\t\};/.exec(view);
+	assert.ok(runA, 'runQuery');
+	assert.match(runA[1] as string, /if \(!onSample\(placed\?\.sampleId \?\? null, selection\.getState\(\)\.sampleModel\?\.sampleId\)\) \{\s*setNotice\(QUERY_SAMPLE_CHANGED\);\s*return;\s*\}[\s\S]*setQueryView\(/);
+	assert.match(view, /if \(!onSample\(placed\.sampleId, selection\.getState\(\)\.sampleModel\?\.sampleId\)\) return \[\];[\s\S]*?selection\.addPinned\(items\);/, 'pinKeys too');
+	assert.doesNotMatch(view, /withSampleRetry\(/, 'every project goes through projectOn');
+	// A new sample clears star B's placement even when the query is kept (a redraw for it): its place is in the old basis.
+	assert.match(view, /const resetView = useCallback\(\(keepQuery: boolean\): void => \{[\s\S]*?setQueryBView\(null\);\s*queryVectorB\.current = null;\s*if \(!keepQuery\) \{\s*setQueryView\(null\);/);
 	// A question typed on the map drops the compared pair.
 	assert.match(view, /if \(ownQuery\) clearCompare\(\);/);
 	const canvas = read('components/PointCanvas.tsx');
@@ -278,6 +288,9 @@ test('every map notice and failure goes on the toolbar\'s status line: nothing i
 	for (const set of ['setNotice(LAYOUT_NOT_BETTER)', 'setNotice(EDGES_DEGRADED)', 'setNotice(outcome.kind === \'cancelled\' ? LAYOUT_CANCELLED : outcome.message)']) assert.ok(view.includes(set), set);
 	const toolbar = read('components/MapToolbar.tsx');
 	assert.match(toolbar, /const words = props\.busy \?\? notice\?\.text \?\? '';/);
+	// A failure keeps its alert and is repeated whole in the legend's notes.
+	assert.match(view, /const lineNotice = said && \{ text: said\.text, failure: said\.kind === 'error',/);
+	assert.match(view, /const legendNotes = \[\s*\.\.\.\(sample && error \? \[failedLine\(error\)\] : \[\]\),/);
 });
 
 test('a resize keeps the camera\'s zoom relative to the fit (resizeCamera, the fit\'s own padding), never the smaller of the two ratios', () => {

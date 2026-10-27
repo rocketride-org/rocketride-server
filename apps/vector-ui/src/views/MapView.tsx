@@ -103,7 +103,7 @@ import type { ISampleScope, IScopeAttempt } from '../map/model';
 import { createLatestQueue } from '../map/neighbours';
 import { EDGE_BUCKETS, edgeColours } from '../map/overlay';
 import type { IClusterLabel, IDuplicateRing, IOverlayEnd, IPlace } from '../map/overlay';
-import { centroidStar, chatQueryPlan, comparePlan, placeCompared, placeProjected, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject, withSampleRetry } from '../map/queryProjection';
+import { centroidStar, chatQueryPlan, comparePlan, onSample, placeCompared, placeProjected, projectOn, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject } from '../map/queryProjection';
 import type { IStar } from '../map/queryProjection';
 import { polarityOf } from '../map/recommend';
 import { pairLabel, pairScale, stagedAnnouncement } from '../map/reviewWording';
@@ -113,7 +113,7 @@ import { FALLBACK_PALETTE, readPalette } from '../map/tokens';
 import type { IMapPalette } from '../map/tokens';
 import { createLayoutClient } from '../map/workerClient';
 import type { ILayoutClient } from '../map/workerClient';
-import { BUSY, CENTROID_APPROX, CLUSTERS_UNSUPPORTED, EDGES_DEGRADED, EDGES_LIGHT_LIMIT, EDGES_LIGHT_NOTE, LAYOUT_CANCELLED, LAYOUT_NOT_BETTER, LIGHT_POSITIONS, MAP_UNAVAILABLE, QUERY_NEEDS_EMBED, QUERY_PLACED_APPROX, STAR_B_NEEDS_PROJECT, clusterAnnouncement, edgeLegend, listingNote, mapFailure, num, pointAnnouncement, sampleLabel, SCOPE_RETRY, scopeLine, starBNotPlaced, statusNotice } from '../map/wording';
+import { BUSY, CENTROID_APPROX, CLUSTERS_UNSUPPORTED, EDGES_DEGRADED, EDGES_LIGHT_LIMIT, EDGES_LIGHT_NOTE, LAYOUT_CANCELLED, LAYOUT_NOT_BETTER, LIGHT_POSITIONS, MAP_UNAVAILABLE, QUERY_NEEDS_EMBED, QUERY_PLACED_APPROX, QUERY_SAMPLE_CHANGED, STAR_B_NEEDS_PROJECT, STAR_B_SAMPLE_CHANGED, clusterAnnouncement, edgeLegend, failedLine, listingNote, mapFailure, num, pointAnnouncement, sampleLabel, SCOPE_RETRY, scopeLine, starBNotPlaced, statusNotice } from '../map/wording';
 import { heatScores } from '../vector/heat';
 
 /** How many writes the console ran on the store (the connection's write count). */
@@ -748,11 +748,13 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		setIsolated(null);
 		setEdgesDegraded(false);
 		setMatrixItem(null);
+		// Star B goes with every new sample, even one drawn again for the query (its place is in the old basis);
+		// the next showing places it on this one.
+		setQueryBView(null);
+		queryVectorB.current = null;
 		if (!keepQuery) {
 			setQueryView(null);
 			queryVector.current = null;
-			setQueryBView(null);
-			queryVectorB.current = null;
 			setColourBy((by) => colourAfterQuery(by, colourBefore.current));
 		}
 	}, []);
@@ -861,7 +863,10 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const pinKeys = useCallback(
 		async (keys: VectorKey[]): Promise<IProjectItem[]> => {
 			if (channel === null || !sampleModel || keys.length === 0) return [];
-			const answer = await withSampleRetry(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, keys: keys.slice(0, limits.project_keys_max), m: PROJECT_M }, { nodeId: storeNode }), resample);
+			const placed = await projectOn(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, keys: keys.slice(0, limits.project_keys_max), m: PROJECT_M }, { nodeId: storeNode }), resample);
+			// Projected on a sample replaced meanwhile: its places are in that sample's basis, so nothing is pinned.
+			if (!onSample(placed.sampleId, selection.getState().sampleModel?.sampleId)) return [];
+			const answer = placed.answer;
 			if (!answer.ok) {
 				if (!answer.stale) setNotice(mapFailure(answer.code, answer.message));
 				return [];
@@ -1127,10 +1132,16 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		}
 		queryVector.current = vector;
 		setBusy(BUSY.projecting);
-		const projected = model.capabilities.project === false ? null : await withSampleRetry(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M, with_similarities: true }, { nodeId: storeNode }), resample);
+		const placed = model.capabilities.project === false ? null : await projectOn(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M, with_similarities: true }, { nodeId: storeNode }), resample);
+		const projected = placed?.answer ?? null;
 		const searched = await callTool<ISearchResult>(channel, 'search', { vector, top_k: Math.min(RAYS_TOP_K, limits.top_k_max), include_below_floor: true }, { nodeId: storeNode });
 		if (connectionRef.current !== key) return;
 		setBusy(null);
+		// Projected on a sample replaced meanwhile (another basis): not drawn, and said.
+		if (!onSample(placed?.sampleId ?? null, selection.getState().sampleModel?.sampleId)) {
+			setNotice(QUERY_SAMPLE_CHANGED);
+			return;
+		}
 		const notes: string[] = [];
 		if (projected && !projected.ok) notes.push(mapFailure(projected.code, projected.message));
 		if (!searched.ok) notes.push(mapFailure(searched.code, searched.message));
@@ -1181,9 +1192,15 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			return;
 		}
 		queryVectorB.current = vector;
-		const projected = model.capabilities.project === false ? null : await withSampleRetry(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M }, { nodeId: storeNode }), resample);
+		const placed = model.capabilities.project === false ? null : await projectOn(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M }, { nodeId: storeNode }), resample);
+		const projected = placed?.answer ?? null;
 		const searched = await callTool<ISearchResult>(channel, 'search', { vector, top_k: Math.min(RAYS_TOP_K, limits.top_k_max), include_below_floor: true }, { nodeId: storeNode });
 		if (connectionRef.current !== key || selection.getState().queryB !== text) return;
+		// Projected on a sample replaced meanwhile (another basis): no star, and said; the next showing places it again.
+		if (!onSample(placed?.sampleId ?? null, selection.getState().sampleModel?.sampleId)) {
+			setNotice(starBNotPlaced(STAR_B_SAMPLE_CHANGED));
+			return;
+		}
 		const item = projected && projected.ok ? (projected.value.items[0] ?? null) : null;
 		const search = searched.ok ? searched.value : null;
 		setQueryBView({ text, item, sims: null, search, notes: [] });
@@ -1682,6 +1699,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const queryWhy = !model.embed.enabled && model.embed.reason ? model.embed.reason : null;
 	const toolbarReasons = [queryWhy, tsneReason].filter((line): line is string => line !== null);
 	const legendNotes = [
+		// A failure while the map is shown, whole (the status line may cut it).
+		...(sample && error ? [failedLine(error)] : []),
 		...toolbarReasons,
 		...(query?.notes ?? []),
 		...(star && !star.exact && !query?.item ? [CENTROID_APPROX] : []),
@@ -1703,7 +1722,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		setSavedQuery(null);
 		void runQuery(savedQuery);
 	};
-	const lineNotice = said && { text: said.text, action: said.kind === 'saved-query' ? { label: 'Run saved query', reason: embedReady ? null : QUERY_NEEDS_EMBED, onAction: runSavedQuery } : null };
+	const lineNotice = said && { text: said.text, failure: said.kind === 'error', action: said.kind === 'saved-query' ? { label: 'Run saved query', reason: embedReady ? null : QUERY_NEEDS_EMBED, onAction: runSavedQuery } : null };
 	const describe = (index: number): string => {
 		if (!sample) return '';
 		const doc = documentOf(sample, index);

@@ -448,10 +448,17 @@ test('the legend\'s glyph row lists only the marks drawn now, each with words, i
 	// Rays only to the results placed on the map: the words say how many of the top-k.
 	assert.equal(markRows({ query: { top: 10, drawn: 7 } })[0]?.words, 'query, rays to 7 of its true top 10');
 	assert.equal(markRows({ rings: { scale: 'cosine' } })[0]?.words, "shown duplicate group: each pair's similarity (cosine)");
+	// The glyphs' lines are as wide as the map draws them: at least two device pixels (2 / 3 / 2 px at 1 dppx; the
+	// map's own widths at 2 dppx).
+	const widths = (dpr: number): string[] => markRows({ edges: { weakest: 'rgb(99, 99, 99)', strongest: 'rgb(206, 206, 206)' }, links: true, outliers: 3, query: { top: 10, drawn: 10 }, duplicates: 2, rings: { scale: 'cosine' } }, dpr).map((m) => html(m.picture).match(/stroke-width:[0-9.]+/g)?.join(' ') ?? '');
+	assert.deepEqual(widths(1), ['stroke-width:2 stroke-width:2', 'stroke-width:3 stroke-width:2', 'stroke-width:3 stroke-width:2', 'stroke-width:2 stroke-width:1', 'stroke-width:2', 'stroke-width:3 stroke-width:2']);
+	assert.deepEqual(widths(2), ['stroke-width:1 stroke-width:1', 'stroke-width:1.5 stroke-width:1.5', 'stroke-width:3 stroke-width:1.5', 'stroke-width:1.25 stroke-width:1', 'stroke-width:1.5', 'stroke-width:3 stroke-width:1.5']);
+	// At 0.5 dppx the rings are 4 px: their halos are a device pixel wider (6).
+	assert.deepEqual(widths(0.5)[2], 'stroke-width:6 stroke-width:4');
 	const out = html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" marks={{ edges: { weakest: 'rgb(99, 99, 99)', strongest: 'rgb(206, 206, 206)' }, outliers: 3 }} />);
 	assert.match(out, /data-legend-marks="edges outliers"/);
 	assert.match(out, /<ul aria-label="Marks"/);
-	assert.match(out, /stroke:rgb\(99, 99, 99\)/, 'the weakest edge colour as painted');
+	assert.match(out, /stroke:rgb\(99, 99, 99\);stroke-width:2/, 'the weakest edge colour as painted, as wide as the canvas draws it at 1 dppx');
 	assert.match(out, /stroke:var\(--rr-text-primary\)/, 'the outlier ring in the outline colour');
 	assert.match(out, /<svg aria-hidden="true"/, 'the words carry it');
 	// Nothing marked: the row keeps its line (selecting a point does not resize the map) and lists nothing.
@@ -622,6 +629,22 @@ test('the status line holds the view\'s notice in its live region while nothing 
 	assert.match(running, /<span role="status"[^>]*>Laying out… 40%<\/span><button[^>]*>Cancel<\/button><\/div>/);
 	assert.doesNotMatch(running, /data-map-notice/);
 	assert.equal(line(running), line(idle));
+});
+
+test('a failure on the status line says "Failed:" in words and is the toolbar\'s alert (always there, visually hidden), read once', () => {
+	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
+	const line = (markup: string): string => /<div style="([^"]*)" data-map-status="">/.exec(markup)?.[1] ?? '';
+	const alert = (markup: string): string | null => /<span role="alert" style="([^"]*)" data-map-alert="">([^<]*)<\/span>/.exec(markup)?.[2] ?? null;
+	const failed = html(<MapToolbar {...base} notice={{ text: 'Failed: The store did not finish within its time budget.', failure: true }} />);
+	assert.equal(alert(failed), 'Failed: The store did not finish within its time budget.');
+	assert.match(failed, /<span role="alert" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect\(0 0 0 0\);white-space:nowrap" data-map-alert="">/, 'visually hidden');
+	// On the line, in words; hidden from assistive tech there, since the alert says it.
+	assert.match(failed, /<span role="status"[^>]*data-map-notice=""><span aria-hidden="true">Failed: The store did not finish within its time budget\.<\/span><\/span>/);
+	// Always there: empty with a plain notice, and with nothing.
+	assert.equal(alert(html(<MapToolbar {...base} notice={{ text: 'Layout cancelled. The map shows PCA.' }} />)), '');
+	assert.equal(alert(html(<MapToolbar {...base} notice={null} />)), '');
+	assert.doesNotMatch(html(<MapToolbar {...base} notice={{ text: 'Layout cancelled. The map shows PCA.' }} />), /aria-hidden="true">Layout/, 'a notice is the status line\'s own');
+	assert.equal(line(failed), line(html(<MapToolbar {...base} notice={null} />)), 'the same line');
 });
 
 test('the legend has one fixed height in every state and scrolls inside itself, a tab stop only while it scrolls, so the map never moves under it', () => {

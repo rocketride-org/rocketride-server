@@ -36,9 +36,10 @@ import { PointCanvas } from '../src/components/PointCanvas';
 import { clusterLabel, clusterRows, clusterView } from '../src/map/clusters';
 import { spanningTree } from '../src/map/graph';
 import { UNSCOPED, clusterExportRows, drawnScope, duplicateExportRows, mapScopeState, pointExportRows, scopeDrawDue } from '../src/map/model';
-import { comparePlan, placeCompared } from '../src/map/queryProjection';
+import { comparePlan, onSample, placeCompared, projectOn } from '../src/map/queryProjection';
+import type { ToolAnswer } from '../src/map/calls';
 import type { ILayoutClient, ILayoutSpec, LayoutOutcome } from '../src/map/workerClient';
-import { EDGES_DEGRADED, EDGES_LIGHT_NOTE, LAYOUT_CANCELLED, MAP_UNAVAILABLE, SCOPE_RETRY, STAR_B_NEEDS_PROJECT, edgeLegend, listingNote, mapFailure, savedQueryLine, scopeFailedNote, scopeLeftNote, scopeNote, scopePendingNote, starBNotPlaced, statusNotice } from '../src/map/wording';
+import { EDGES_DEGRADED, EDGES_LIGHT_NOTE, LAYOUT_CANCELLED, MAP_UNAVAILABLE, SCOPE_RETRY, STAR_B_NEEDS_PROJECT, STAR_B_SAMPLE_CHANGED, edgeLegend, failedLine, listingNote, mapFailure, savedQueryLine, scopeFailedNote, scopeLeftNote, scopeNote, scopePendingNote, starBNotPlaced, statusNotice } from '../src/map/wording';
 import type { SideTab } from '../src/views/MapView';
 import { deepFreeze, loadSample, modelOf, pcaXY } from './support/map.samples';
 
@@ -762,6 +763,40 @@ test('the compared pair is placed one after the other: B starts only when A has 
 	assert.deepEqual(comparePlan({ told: 'water', toldB: 'orchids', mapQuery: 'water', mapQueryB: null, embedReady: true }), { runA: false, runB: true });
 });
 
+test('a placement projected on a sample replaced while it ran is not drawn: the answer says which sample it is for', async () => {
+	type Answer = ToolAnswer<{ items: string[] }>;
+	const ok = (value: string): Answer => ({ ok: true, value: { items: [value] } }) as Answer;
+	let shown = 's-1';
+	// The project call waits on a gate; a new sample is drawn meanwhile (the store still answers the old id).
+	let open: (answer: Answer) => void = () => undefined;
+	const pending = projectOn('s-1', (id) => new Promise<Answer>((resolve) => (open = (a) => resolve(id === 's-1' ? a : ok('other')))), async () => null);
+	shown = 's-2';
+	open(ok('old basis'));
+	const late = await pending;
+	assert.equal(late.sampleId, 's-1');
+	assert.equal(late.answer.ok, true, 'the store answered');
+	assert.equal(onSample(late.sampleId, shown), false, 'no star, no "placed": the sample changed');
+	// Unchanged: drawn.
+	const same = await projectOn('s-2', async () => ok('here'), async () => null);
+	assert.equal(onSample(same.sampleId, shown), true);
+	// SAMPLE_EXPIRED: drawn again, retried on the new id, and the answer is for that new sample.
+	const expired = { ok: false, code: 'SAMPLE_EXPIRED', message: 'gone', stale: false } as Answer;
+	const calls: string[] = [];
+	const retried = await projectOn('s-2', async (id) => {
+		calls.push(id);
+		return id === 's-2' ? expired : ok('fresh');
+	}, async () => {
+		shown = 's-3';
+		return 's-3';
+	});
+	assert.deepEqual(calls, ['s-2', 's-3']);
+	assert.equal(retried.sampleId, 's-3');
+	assert.equal(onSample(retried.sampleId, shown), true);
+	// Nothing projected (a store with no project): nothing in another basis.
+	assert.equal(onSample(null, shown), true);
+	assert.equal(starBNotPlaced(STAR_B_SAMPLE_CHANGED), 'The second question could not be placed on the map (no hollow star). The sample changed while it was being placed; show it on the map again.');
+});
+
 test('a compared question with no star says so on the status line, with why', () => {
 	assert.equal(starBNotPlaced(mapFailure('BUSY', '')), 'The second question could not be placed on the map (no hollow star). The store is computing another sample or neighbour search; try again in a moment.');
 	assert.equal(starBNotPlaced(STAR_B_NEEDS_PROJECT), 'The second question could not be placed on the map (no hollow star). This store cannot place a question among the sampled points.');
@@ -772,7 +807,8 @@ test('the status line\'s one sentence: a failure while a map is shown, else the 
 	const none = { error: null, notice: null, savedQuery: null, hasSample: true };
 	assert.equal(statusNotice(none), null);
 	assert.deepEqual(statusNotice({ ...none, notice: LAYOUT_CANCELLED }), { text: LAYOUT_CANCELLED, kind: 'notice' });
-	assert.deepEqual(statusNotice({ ...none, notice: EDGES_DEGRADED, error: 'The store did not finish.' }), { text: 'The store did not finish.', kind: 'error' });
+	assert.deepEqual(statusNotice({ ...none, notice: EDGES_DEGRADED, error: 'The store did not finish.' }), { text: 'Failed: The store did not finish.', kind: 'error' }, 'a failure says so in words');
+	assert.equal(failedLine('The store did not finish.'), 'Failed: The store did not finish.');
 	assert.deepEqual(statusNotice({ ...none, notice: EDGES_DEGRADED, error: 'The store did not finish.', hasSample: false }), { text: EDGES_DEGRADED, kind: 'notice' }, 'no map: the failure is the banner');
 	assert.deepEqual(statusNotice({ ...none, savedQuery: 'water' }), { text: savedQueryLine('water'), kind: 'saved-query' });
 	assert.equal(savedQueryLine('water'), 'This view had the query "water".');
