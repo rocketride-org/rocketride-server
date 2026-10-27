@@ -100,6 +100,7 @@ import { healthSummary, medianChunks } from '../vector/health';
 import { savedFiltersFor } from '../vector/savedFilters';
 import { roleLine, vectorCardView } from '../vector/connections';
 import { providerTitle } from '../vector/support';
+import { collectionMissing } from '../vector/stats';
 import { BUSY, EMPTY } from '../vector/wording';
 import { focusStranded, reprobeFor } from '../vector/workbench';
 import type { WorkbenchTab } from '../vector/workbench';
@@ -285,9 +286,12 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 	// Where the focus goes after a confirmation closes: the shown panel's marked row, else its grid, else the current tab.
 	const root = useRef<HTMLDivElement>(null);
 	const currentTab = (): HTMLElement | null => root.current?.querySelector<HTMLElement>('[data-workbench-tabs] [role="tab"][aria-selected="true"]') ?? null;
+	// The same order as the pending bar's (components/focusTargets.ts): the row the grid marks, its row in the tab order,
+	// the grid, then the tab.
 	const returnFocus = (): HTMLElement | null => {
 		const shown = root.current?.querySelector<HTMLElement>(`[data-workbench-panel="${tab}"]`) ?? null;
-		return firstFocusable([shown?.querySelector<HTMLElement>('[data-return-focus]'), shown?.querySelector<HTMLElement>('[role="grid"]'), currentTab()]);
+		const inShown = (selector: string): HTMLElement | null => shown?.querySelector<HTMLElement>(selector) ?? null;
+		return firstFocusable([inShown('[data-return-focus]'), inShown('[data-grid-focus] [data-grid-row][tabindex="0"]'), inShown('[data-grid-focus]'), currentTab()]);
 	};
 	// Where the focus goes when Add documents closes and its opener cannot take it back: the header's button, else the tab.
 	const asideFocus = (): HTMLElement | null => firstFocusable([root.current?.querySelector<HTMLElement>('[data-add-documents] button'), currentTab()]);
@@ -326,7 +330,8 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 	const title = `${providerTitle(endpoint.provider)}${model.collection ? ` · ${model.collection}` : ''}`;
 	const subtitle = `"${endpoint.pipelineName}" · ${endpoint.nodeName || endpoint.nodeId} · ${roleLine(endpoint)}`;
 	const statsError = state.stats.status === 'error' ? state.stats.error : null;
-	const emptyCollection = state.stats.view !== null && (!state.stats.view.collectionExists || state.stats.view.documents === 0);
+	// One "Empty collection" rule with the chip and the connection card (vector/stats.ts collectionMissing), or no documents.
+	const emptyCollection = collectionMissing(dialect, state.stats.view) || state.stats.view?.documents === 0;
 
 	return (
 		<div ref={root} style={styles.root} data-console={endpoint.nodeId}>

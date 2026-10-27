@@ -153,6 +153,7 @@ test('the workbench header and tab row never move: Refresh keeps its width and s
 	assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), order.join(' < '));
 	assert.match(view, /<Button small variant="secondary" onClick=\{refresh\}>\s*Retry/, 'a store error keeps the last figures and offers Retry');
 	assert.match(view, /\{EMPTY\.noDocuments\}\s*\{model\.ingest\.enabled \? \(/, 'an empty collection says how to add documents where the mount can, and why not where it cannot');
+	assert.match(view, /const emptyCollection = collectionMissing\(dialect, state\.stats\.view\) \|\| state\.stats\.view\?\.documents === 0;/, 'one "Empty collection" rule with the chip and the card');
 	assert.match(code('components/WorkbenchTabs.tsx'), /<TabRow tabs=\{tabs\} value=\{value\} onSelect=\{onChange\} activation="manual" label="Collection views"/, 'arrows move the focus only: activation is manual (the Map samples)');
 	assert.match(code('components/WorkbenchTabs.tsx'), /reserve: tabLabel\('trash', \{ trash: 888 \}\)/, 'the Trash label keeps the width of a three-digit count');
 	const row = code('components/TabRow.tsx');
@@ -273,7 +274,7 @@ test('every removal is confirmed inline in the document that shows it, in both m
 	const app = code('VectorApp.tsx');
 	assert.doesNotMatch(app, /RemoveDialogHost/, 'the full app mounts no modal confirmation');
 	assert.match(code('views/ConsoleView.tsx'), /<InlineRemoveConfirm entry=\{entry\} probe=\{probe\} origin=\{CONSOLE_ORIGIN\} returnFocus=\{returnFocus\} \/>/, 'the workbench confirms its own requests inline, on every tab');
-	assert.match(code('views/ConsoleView.tsx'), /firstFocusable\(\[shown\?\.querySelector<HTMLElement>\('\[data-return-focus\]'\), shown\?\.querySelector<HTMLElement>\('\[role="grid"\]'\), currentTab\(\)\]\)/, "a lost focus goes to the shown panel's marked row, else its grid, else the current tab");
+	assert.match(code('views/ConsoleView.tsx'), /firstFocusable\(\[inShown\('\[data-return-focus\]'\), inShown\('\[data-grid-focus\] \[data-grid-row\]\[tabindex="0"\]'\), inShown\('\[data-grid-focus\]'\), currentTab\(\)\]\)/, "a lost focus goes to the shown panel's marked row, else its grid, else the current tab");
 	assert.match(code('components/InlineRemoveConfirm.tsx'), /firstFocusable\(\[how\.current === 'cancel' \? back : null, closing\.current\.returnFocus\?\.\(\)\]\)/, 'after Cancel, back to the opener first');
 	assert.match(app, /<DocumentView [^>]*beforeBody=\{<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} origin=\{documentOrigin\(payload\.objectId\)\} \/>\}/, "and the full app's document tab its own (it shares the console's controller)");
 	assert.match(app, /origin: documentOrigin\(payload\.objectId\),/, "the tab's actions ask under its origin");

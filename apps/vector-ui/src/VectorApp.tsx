@@ -150,7 +150,7 @@ const VectorAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 					return (
 						<div style={styles.groupPane} onClick={() => docs.setActiveGroup(groupId)}>
 							<DocTabs docs={docs} groupId={groupId} isActive={state.activeGroupId === groupId} canClose={canCloseGroups} onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)} onCloseGroup={(gid) => docs.closeGroup(gid)} />
-							{/* All editors stay mounted and visibility toggles, so a tab keeps its directory, chat and map. */}
+							{/* All editors stay mounted and visibility toggles, so a tab keeps its documents, queries and map. */}
 							<div style={styles.content}>
 								{group.editorIds.length === 0 ? (
 									<div style={styles.welcome}>
