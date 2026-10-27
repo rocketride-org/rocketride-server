@@ -259,8 +259,8 @@ test('the "sorted within" line: only while the listing is incomplete and the row
 	const rows = [doc('a', 'C:/a.md'), doc('b', 'C:/b.md')];
 	const loading = { status: 'loading' as const, storeSorted: true, rows };
 	assert.equal(sortNote(loading, false), null, 'a sorting store (pgvector) listing in its path order');
-	assert.equal(sortNote(loading, true), 'Sorted within the 2 loaded documents; the store holds more.', 'a column sort over part of the documents');
-	assert.equal(sortNote({ ...loading, storeSorted: false }, false), 'Sorted within the 2 loaded documents; the store holds more.', 'a store that lists in storage order (Qdrant)');
+	assert.equal(sortNote(loading, true), 'Sorted within the 2 loaded documents; more may exist.', 'a column sort over part of the documents');
+	assert.equal(sortNote({ ...loading, storeSorted: false }, false), 'Sorted within the 2 loaded documents; more may exist.', 'a store that lists in storage order (Qdrant)');
 	for (const status of ['capped', 'paused', 'stalled', 'unsupported', 'error'] as const) assert.ok(sortNote({ ...loading, status }, true), status);
 	assert.equal(sortNote({ ...loading, status: 'done' }, true), null, 'complete: the sort covers everything');
 	assert.equal(sortNote({ ...loading, rows: [] }, true), null);
@@ -276,18 +276,21 @@ test('the counts say what is loaded and never a total the store did not give', (
 	assert.equal(noDocumentsText(false), 'No documents yet.', 'a mount that cannot add says nothing it cannot do');
 });
 
-test('the layout keeps the grid at least 600 px: the rail goes first when the drawer opens, then the drawer narrows, then it moves under the grid', () => {
-	const { rail, drawer, drawerMin, gridMin } = DOCUMENTS_LAYOUT;
+test('the layout keeps the grid at least 600 px inside its chrome: the rail goes first when the drawer opens, then the drawer narrows, then it moves under the grid', () => {
+	const { rail, railGap, drawer, drawerMin, drawerGap, gridMin, chrome } = DOCUMENTS_LAYOUT;
+	const withRail = rail + railGap;
+	const grid = gridMin + chrome;
 	assert.deepEqual(documentsLayout(1400, { drawer: false, forceRail: false }), { rail: true, railHidden: false, drawer: 0, stacked: false });
-	assert.deepEqual(documentsLayout(rail + drawer + gridMin, { drawer: true, forceRail: false }), { rail: true, railHidden: false, drawer, stacked: false });
+	assert.deepEqual(documentsLayout(withRail + drawer + drawerGap + grid, { drawer: true, forceRail: false }), { rail: true, railHidden: false, drawer, stacked: false });
 	assert.deepEqual(documentsLayout(1100, { drawer: true, forceRail: false }), { rail: false, railHidden: true, drawer, stacked: false }, 'VS Code at 1440 with its sidebar open');
-	assert.deepEqual(documentsLayout(gridMin + drawerMin + 20, { drawer: true, forceRail: false }), { rail: false, railHidden: true, drawer: drawerMin + 20, stacked: false });
+	assert.deepEqual(documentsLayout(grid + drawerMin + drawerGap + 20, { drawer: true, forceRail: false }), { rail: false, railHidden: true, drawer: drawerMin + 20, stacked: false });
 	assert.deepEqual(documentsLayout(700, { drawer: true, forceRail: false }), { rail: false, railHidden: true, drawer: 0, stacked: true });
-	assert.deepEqual(documentsLayout(1150, { drawer: true, forceRail: true }), { rail: true, railHidden: false, drawer: 1150 - rail - gridMin, stacked: false }, 'the rail asked back: the drawer narrows');
+	assert.deepEqual(documentsLayout(1200, { drawer: true, forceRail: true }), { rail: true, railHidden: false, drawer: 1200 - withRail - grid - drawerGap, stacked: false }, 'the rail asked back: the drawer narrows');
 	assert.deepEqual(documentsLayout(1100, { drawer: true, forceRail: true }), { rail: true, railHidden: false, drawer: 0, stacked: true }, 'too narrow for both beside the grid: the drawer goes under it');
 	for (const width of [700, 900, 1000, 1100, 1180, 1300, 1440]) {
 		const layout = documentsLayout(width, { drawer: true, forceRail: false });
-		assert.ok(layout.stacked || width - (layout.rail ? rail : 0) - layout.drawer >= gridMin, `${width}: the grid keeps ${gridMin} px`);
+		const left = width - (layout.rail ? withRail : 0) - (layout.drawer > 0 ? layout.drawer + drawerGap : 0) - chrome;
+		assert.ok(layout.stacked || left >= gridMin, `${width}: the grid keeps ${gridMin} px (${left})`);
 	}
 	assert.deepEqual(documentsLayout(700, { drawer: false, forceRail: false }), { rail: false, railHidden: true, drawer: 0, stacked: false });
 });

@@ -40,7 +40,9 @@
 // Both permanent writes send `delete {deleted_only: true}`: a document that
 // still has a chunk outside the trash is kept whole, and the result names it.
 //
-// The permanent writes sit apart from Restore, under their consequence. The
+// The header's export menu exports the loaded trash listing, as the old
+// directory's Trash view did. The permanent writes sit apart from Restore,
+// under their consequence. The
 // Deleted chunks column shows where the store reports it (pgvector). Space
 // ticks a row; the controls are unavailable, with the reason shown, while
 // writing is off or another write runs.
@@ -54,17 +56,19 @@ import { CONSOLE_ORIGIN } from '../vector/confirm';
 import { writesDuringRemoval } from '../vector/consoleModel';
 import { directoryHeading, listCountText, pagerFooter, pagerProgressText, splitPath, targetOf } from '../vector/documents';
 import { formatSize } from '../vector/fileType';
-import { FILTER_DEBOUNCE_MS, directoryView } from '../vector/filters';
+import { FILTER_DEBOUNCE_MS, directoryExportItems, directoryView } from '../vector/filters';
 import type { IGridSort } from '../vector/grid';
 import { DEFAULT_LIMITS } from '../vector/results';
 import { formatCount } from '../vector/stats';
-import { CAVEAT_SENTENCES, EMPTY } from '../vector/wording';
+import { EMPTY } from '../vector/wording';
 import { FOCUS_RING, styles as appStyles } from '../styles';
 import { useDebounced } from './DocumentsTab';
+import ExportMenu from './ExportMenu';
 import GatedButton from './GatedButton';
 import ScopeBar from './ScopeBar';
 import VectorGrid from './VectorGrid';
 import type { IGridColumn, IVectorGridHandle } from './VectorGrid';
+import { focusFell } from './focusTargets';
 import type { IWorkbenchPanelProps } from './workbenchProps';
 
 /** What the permanent writes do, beside them. */
@@ -73,11 +77,14 @@ export const TRASH_DANGER_SENTENCE = 'Delete permanently removes from the store,
 /** What the Trash lists. */
 export const TRASH_INTRO = 'Documents with chunks in the trash. Search, chat and the map leave trashed chunks out until they are restored.';
 
+/** What the Trash lists on a store that lists the trash by each document's first chunk. */
+export const TRASH_INTRO_FIRST_CHUNK = 'Documents whose first chunk is in the trash (this store lists the trash by the first chunk). Search, chat and the map leave trashed chunks out until they are restored.';
+
 const styles = {
 	main: { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--rr-bg-paper)', border: '1px solid var(--rr-border)', borderRadius: 8 } as CSSProperties,
 	header: { ...appStyles.panelTitle, flexWrap: 'wrap' } as CSSProperties,
 	headerCount: { ...appStyles.small, fontWeight: 400, textTransform: 'none', letterSpacing: 0 } as CSSProperties,
-	headerEnd: { marginLeft: 'auto' } as CSSProperties,
+	headerEnd: { marginLeft: 'auto', textTransform: 'none', letterSpacing: 0, fontWeight: 400 } as CSSProperties,
 	line: { ...appStyles.small, padding: '0 12px 6px' } as CSSProperties,
 	toolbar: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, padding: '0 12px 8px' } as CSSProperties,
 	danger: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, margin: '0 12px 8px', padding: '6px 8px', border: '1px solid var(--rr-border)', borderLeft: '4px solid var(--rr-color-error)', borderRadius: 6 } as CSSProperties,
@@ -170,14 +177,16 @@ export function TrashTab({ entry, model, console: state, visible }: IWorkbenchPa
 	const view = useMemo(() => directoryView(pager, null, applied, DEFAULT_LIMITS.scope_keys_max), [pager, applied]);
 	const rows = view.rows;
 
-	// The ticked rows: a ticked document that is no longer listed is unticked.
+	// The ticked rows: a ticked document that is no longer listed is unticked (once a listing that starts over has its
+	// first page: until then the grid holds the last rows).
 	const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+	const restarting = pager.status === 'loading' && pager.pages === 0;
 	useEffect(() => {
-		if (checked.size === 0) return;
+		if (checked.size === 0 || restarting) return;
 		const listed = new Set(pager.rows.map((r) => r.objectId));
 		const kept = [...checked].filter((id) => listed.has(id));
 		if (kept.length !== checked.size) setChecked(new Set(kept));
-	}, [pager.rows, checked]);
+	}, [pager.rows, checked, restarting]);
 	const checkedItems = pager.rows.filter((row) => checked.has(row.objectId));
 	const toggle = (item: IDocumentItem): void => {
 		const next = new Set(checked);
@@ -191,6 +200,17 @@ export function TrashTab({ entry, model, console: state, visible }: IWorkbenchPa
 	const columns = useMemo(() => trashColumns(ctx, deletedChunks), [deletedChunks]);
 	const [sort, setSort] = useState<IGridSort | null>(null);
 	const grid = useRef<IVectorGridHandle>(null);
+	// Load more and Retry go away when they act: the focus goes to the grid's row in the tab order, else the grid.
+	const refocus = useRef(false);
+	const thenGrid = (act: () => void) => (): void => {
+		refocus.current = true;
+		act();
+	};
+	useEffect(() => {
+		if (!refocus.current) return;
+		refocus.current = false;
+		if (focusFell()) grid.current?.focusStop();
+	});
 
 	// The rows a permanent write is about to take away (its confirmation open, or its write running): the grid marks the
 	// row after them, where the focus goes when the confirmation closes.
@@ -216,15 +236,18 @@ export function TrashTab({ entry, model, console: state, visible }: IWorkbenchPa
 			<div style={styles.header}>
 				<span>Trash</span>
 				<span style={styles.headerCount}>{pager.status === 'idle' ? '' : directoryHeading(pager)}</span>
+				<span style={styles.headerEnd}>
+					<ExportMenu items={directoryExportItems(pager, view)} collection={model.collection} />
+				</span>
 			</div>
-			<p style={styles.line}>{TRASH_INTRO}</p>
+			<p style={styles.line}>{firstChunkCaveat ? TRASH_INTRO_FIRST_CHUNK : TRASH_INTRO}</p>
 			<ScopeBar text={text} scopeText={applied} onText={setText} listing={pager} />
 			{(view.summary || progress) && (
 				<div role="status" style={styles.line}>
 					{view.summary ?? progress}
 				</div>
 			)}
-			<div style={styles.toolbar} role="toolbar" aria-label="Restore">
+			<div style={styles.toolbar} role="group" aria-label="Restore">
 				<span style={appStyles.small}>{`${formatCount(checkedItems.length)} selected`}</span>
 				<GatedButton unavailable={rows.length === 0 ? 'Nothing is listed.' : null} onClick={() => setChecked(new Set([...checked, ...rows.map((r) => r.objectId)]))}>
 					{`Select all shown (${formatCount(rows.length)})`}
@@ -241,7 +264,7 @@ export function TrashTab({ entry, model, console: state, visible }: IWorkbenchPa
 				<GatedButton variant="danger" unavailable={off ?? nothingSelected} onClick={() => entry.controller.requestDelete(checkedItems.map(targetOf))}>
 					Delete selected permanently…
 				</GatedButton>
-				<GatedButton variant="danger" unavailable={off ?? (pager.rows.length === 0 && (trashCount ?? 0) === 0 ? EMPTY.trash : null)} onClick={() => void entry.controller.requestEmptyTrash()}>
+				<GatedButton variant="danger" unavailable={off ?? (pager.status === 'done' && pager.rows.length === 0 && (trashCount ?? 0) === 0 ? EMPTY.trash : null)} onClick={() => void entry.controller.requestEmptyTrash()}>
 					Empty trash…
 				</GatedButton>
 				<span style={styles.dangerText}>{TRASH_DANGER_SENTENCE}</span>
@@ -253,10 +276,9 @@ export function TrashTab({ entry, model, console: state, visible }: IWorkbenchPa
 				<span>{listCountText(rows.length, pager)}</span>
 				{trashCount !== null && <span>{`The store counts ${formatCount(trashCount)} ${trashCount === 1 ? 'document' : 'documents'} in the trash.`}</span>}
 				{footer && <span>{footer.text}</span>}
-				{footer?.loadMore && <GatedButton onClick={() => entry.controller.loadMoreDocuments()}>Load more</GatedButton>}
-				{footer?.retry && <GatedButton onClick={() => entry.controller.retryDocuments()}>Retry</GatedButton>}
+				{footer?.loadMore && <GatedButton onClick={thenGrid(() => entry.controller.loadMoreDocuments())}>Load more</GatedButton>}
+				{footer?.retry && <GatedButton onClick={thenGrid(() => entry.controller.retryDocuments())}>Retry</GatedButton>}
 				{footer?.caveat && <span style={styles.caveat}>{footer.caveat}</span>}
-				{firstChunkCaveat && <span style={styles.caveat}>{CAVEAT_SENTENCES.documents_by_first_chunk}</span>}
 			</div>
 		</section>
 	);

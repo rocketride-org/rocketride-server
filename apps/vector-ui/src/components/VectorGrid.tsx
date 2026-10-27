@@ -146,6 +146,8 @@ export interface IVectorGridHandle {
 	focusRow(id: string): boolean;
 	/** Focus the grid itself (no row listed, or nothing better). */
 	focusGrid(): void;
+	/** Focus the row in the tab order, else the grid itself. */
+	focusStop(): void;
 	/** Bring a row into view and make it the one in the tab order, without moving the focus; false when not listed. */
 	showRow(id: string): boolean;
 	/** The ids in the order they are shown. */
@@ -304,6 +306,17 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 			focusGrid(): void {
 				grid.current?.focus({ preventScroll: true });
 			},
+			focusStop(): void {
+				const id = stop >= 0 ? ids[stop] : undefined;
+				if (id === undefined) {
+					grid.current?.focus({ preventScroll: true });
+					return;
+				}
+				show(stop);
+				setActiveId(id);
+				pending.current = id;
+				setTick((n) => n + 1);
+			},
 			showRow(id: string): boolean {
 				const index = indexOf.get(id);
 				if (index === undefined) return false;
@@ -313,13 +326,25 @@ function VectorGridInner<R>(props: IVectorGridProps<R>, ref: ForwardedRef<IVecto
 			},
 			shownIds: () => ids,
 		}),
-		[indexOf, ids, show]
+		[indexOf, ids, show, stop]
 	);
 
 	const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
 		if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
 		const row = rowOf(event.target, grid.current);
-		if (row === null) return;
+		// The grid itself has the focus (no row was left to take it): a move key enters at the row in the tab order.
+		if (row === null) {
+			if (event.target !== grid.current || stop < 0) return;
+			const entered = gridKey(event.key, { index: stop, count, page: Math.floor(bodyHeight / rowHeight) });
+			if (entered === null || entered.kind !== 'move') return;
+			event.preventDefault();
+			const to = event.key === 'Home' || event.key === 'End' ? entered.index : stop;
+			show(to);
+			setActiveId(ids[to] as string);
+			pending.current = ids[to] as string;
+			setTick((n) => n + 1);
+			return;
+		}
 		const id = row.dataset.rowId ?? '';
 		const index = indexOf.get(id);
 		if (index === undefined) return;

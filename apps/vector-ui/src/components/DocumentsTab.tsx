@@ -162,7 +162,9 @@ function documentColumns(ctx: { current: IGridContext }): Array<IGridColumn<IDoc
 			cell: (item, cell) => {
 				const { staged, writes } = ctx.current;
 				const name = nameOf(item, ctx.current.duplicate(item));
-				return <input type="checkbox" style={styles.check} checked={staged.has(item.objectId)} aria-label={`Stage ${name} to move to the trash`} aria-disabled={writes.enabled ? undefined : true} title={writes.enabled ? undefined : (writes.reason ?? undefined)} tabIndex={cell.tabIndex} onChange={() => ctx.current.onToggle(item)} />;
+				// Unstaging is always possible; staging waits for the writes.
+				const blocked = !writes.enabled && !staged.has(item.objectId);
+				return <input type="checkbox" style={styles.check} checked={staged.has(item.objectId)} aria-label={`Stage ${name} to move to the trash`} aria-disabled={blocked ? true : undefined} title={blocked ? (writes.reason ?? undefined) : undefined} tabIndex={cell.tabIndex} onChange={() => ctx.current.onToggle(item)} />;
 			},
 		},
 		{ id: 'name', label: 'Name', width: 'flex', minWidth: 160, sortValue: (item) => splitPath(item.path).name, cell: (item) => nameOf(item, ctx.current.duplicate(item)) },
@@ -231,8 +233,12 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 	const setFolder = (next: FolderView | null): void => folderStore.set(next);
 	const [folderError, setFolderError] = useState<string | null>(null);
 	useEffect(() => setFolderError(null), [scope]);
-	const tree = useMemo(() => buildTree(pager.rows), [pager.rows]);
-	const folders = useMemo(() => flatFolders(tree).map((f) => f.prefix), [tree]);
+	// The rail counts what the list can show: with the scope on the list, the loaded documents it keeps (a store that
+	// filters nothing, or part of it, lists every document and the scope is matched here).
+	const scopeOnList = scope !== null && scope.applyTo.documents;
+	const treeRows = useMemo(() => (scopeOnList ? (view.scopeRows ?? []) : pager.rows), [scopeOnList, view.scopeRows, pager.rows]);
+	const tree = useMemo(() => buildTree(treeRows), [treeRows]);
+	const folders = useMemo(() => flatFolders(buildTree(pager.rows)).map((f) => f.prefix), [pager.rows]);
 	const chooseFolder = (next: FolderView | null): void => {
 		reviewStore.set(false);
 		setFolder(next);
@@ -270,19 +276,37 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 		};
 	}, [median, unloaded]);
 
+	// Unstaging sends nothing, so it works whatever the writes; staging waits for them.
 	const toggle = (item: IDocumentItem): void => {
+		const now = entry.staged.get();
+		if (now.has(item.objectId)) {
+			entry.staged.set(unstage(now, [item.objectId]));
+			return;
+		}
 		if (!writes.enabled) {
 			if (writes.reason) actions.announce(writes.reason);
 			return;
 		}
-		const now = entry.staged.get();
-		entry.staged.set(now.has(item.objectId) ? unstage(now, [item.objectId]) : stage(now, [targetOf(item)]));
+		entry.staged.set(stage(now, [targetOf(item)]));
 	};
 	const ctx = useRef<IGridContext>({ staged, writes, health: healthOf, duplicate: () => false, onToggle: toggle });
 	ctx.current = { staged, writes, health: healthOf, duplicate: (item) => (pathCounts.get(item.path) ?? 0) > 1, onToggle: toggle };
 	const columns = useMemo(() => documentColumns(ctx), []);
 	const [sort, setSort] = useState<IGridSort | null>(null);
 	const grid = useRef<IVectorGridHandle>(null);
+	// A control that goes away when it acts (Show all documents, the scope action, the review's way out, Load more,
+	// Retry, a Folders toggle that is no longer needed): the focus goes to the grid's row in the tab order, else the
+	// grid, when it fell to the page.
+	const refocus = useRef(false);
+	const thenGrid = (act: () => void) => (): void => {
+		refocus.current = true;
+		act();
+	};
+	useEffect(() => {
+		if (!refocus.current) return;
+		refocus.current = false;
+		if (focusFell()) grid.current?.focusStop();
+	});
 
 	// The drawer: the selected document, opened from a row (or Neighbours); it follows the shared selection.
 	const selectedId = selection.document?.objectId ?? null;
@@ -317,14 +341,18 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 		const view = folderStore.get();
 		if (view !== null && (row === null || folderRows([row], view).length === 0)) folderStore.set(null);
 		if (reviewStore.get() && !entry.staged.get().has(asked.objectId)) reviewStore.set(false);
-		entry.selection.selectDocument({ objectId: asked.objectId, path: row?.path ?? asked.objectId });
+		// Its path where the listing or the selection knows it; else none (the drawer says it is not known).
+		const known = entry.selection.getState().document;
+		entry.selection.selectDocument({ objectId: asked.objectId, path: row?.path ?? (known?.objectId === asked.objectId ? known.path : '') });
 		setDrawerOpen(true);
 		setFocusNonce((n) => n + 1);
 		showPending.current = asked.objectId;
 	}, [asked, entry, folderStore, reviewStore]);
 	useEffect(() => {
 		const id = showPending.current;
-		if (id !== null && grid.current?.showRow(id)) showPending.current = null;
+		if (id === null) return;
+		// Shown once listed; forgotten when the drawer moved on to another document.
+		if (selectedId !== id || grid.current?.showRow(id)) showPending.current = null;
 	});
 
 	// The rows a move to the trash is about to take away (its confirmation open, or its write running): the grid marks
@@ -365,8 +393,11 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 	const note = review ? null : sortNote(pager, sort !== null);
 	const shownStaged = rows.reduce((n, row) => n + (staged.has(row.objectId) ? 1 : 0), 0);
 	const writesReason = writes.enabled ? null : writes.reason;
+	// The reason shown as text is the store's (it stays); a write running elsewhere only makes the controls wait.
+	const offReason = model.writes.enabled ? null : model.writes.reason;
 	const folderLabel = folder === null ? null : folder.kind === 'uploaded' ? 'Uploaded (documents stored under a bare file name)' : folder.prefix;
-	const countsLine = pager.status === 'done' && pager.filter === null ? `${formatCount(pager.rows.length)} ${pager.rows.length === 1 ? 'document' : 'documents'}` : `Counts over ${formatCount(pager.rows.length)} loaded ${pager.rows.length === 1 ? 'document' : 'documents'}${pager.filter !== null ? ' in the scope' : ''}`;
+	const counted = treeRows.length;
+	const countsLine = pager.status === 'done' && !scopeOnList ? `${formatCount(counted)} ${counted === 1 ? 'document' : 'documents'}` : `Counts over ${formatCount(counted)} loaded ${counted === 1 ? 'document' : 'documents'}${scopeOnList ? ' in the scope' : ''}`;
 	const drawerItem = drawerId === null ? null : (loadedById.get(drawerId) ?? null);
 
 	return (
@@ -381,13 +412,8 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 					<span>Documents</span>
 					<span style={styles.headerCount}>{pager.status === 'idle' ? '' : directoryHeading(pager)}</span>
 					<span style={styles.headerEnd}>
-						{layout.railHidden && (
-							<GatedButton pressed={false} onClick={() => setForceRail(true)} title="Show the folder rail (the drawer narrows)">
-								Folders
-							</GatedButton>
-						)}
-						{forceRail && layout.rail && drawerId !== null && (
-							<GatedButton pressed onClick={() => setForceRail(false)} title="Hide the folder rail while the drawer is open">
+						{(layout.railHidden || forceRail) && (
+							<GatedButton pressed={forceRail} onClick={thenGrid(() => setForceRail(!forceRail))} title={forceRail ? 'Hide the folder rail again (it makes room for the drawer)' : 'Show the folder rail (the drawer narrows)'}>
 								Folders
 							</GatedButton>
 						)}
@@ -400,23 +426,27 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 						{folderError}
 					</div>
 				)}
-				{(view.summary || progress || restarting) && (
+				{(view.summary || progress) && (
 					<div role="status" style={styles.line}>
-						{restarting ? 'Listing the documents again…' : (view.summary ?? progress)}
+						{view.summary ?? progress}
 					</div>
 				)}
 				{folderLabel !== null && !review && (
 					<div style={styles.lineRow}>
 						<span role="status">{`Folder ${folderLabel}: ${listCountText(rows.length, pager)}, of what is loaded.`}</span>
-						<GatedButton onClick={() => setFolder(null)}>Show all documents</GatedButton>
-						{folder?.kind === 'folder' && <GatedButton onClick={() => scopeToFolder(folder.prefix)} title="Sets the connection's scope to this folder: the list, search, the map and Ask follow it">Scope search, map and Ask to this folder</GatedButton>}
+						<GatedButton onClick={thenGrid(() => setFolder(null))}>Show all documents</GatedButton>
+						{folder?.kind === 'folder' && (
+							<GatedButton onClick={thenGrid(() => scopeToFolder(folder.prefix))} title="Sets the connection's scope to this folder: the list, search, the map and Ask follow it">
+								Scope search, map and Ask to this folder
+							</GatedButton>
+						)}
 					</div>
 				)}
-				<div style={styles.toolbar} role="toolbar" aria-label="Staging">
+				<div style={styles.toolbar} role="group" aria-label="Staging">
 					{review ? (
 						<>
 							<span role="status" style={appStyles.small}>{`Showing the ${formatCount(rows.length)} staged ${rows.length === 1 ? 'document' : 'documents'}${unloaded.size > 0 ? ` (${formatCount(unloaded.size)} not among the loaded rows)` : ''}.`}</span>
-							<GatedButton onClick={() => reviewStore.set(false)}>Show all documents</GatedButton>
+							<GatedButton onClick={thenGrid(() => reviewStore.set(false))}>Show all documents</GatedButton>
 						</>
 					) : (
 						<span style={appStyles.small}>{shownStaged === 0 ? 'Tick a document to stage it for the trash.' : `${formatCount(shownStaged)} of the ${formatCount(rows.length)} shown ${shownStaged === 1 ? 'is' : 'are'} staged.`}</span>
@@ -424,12 +454,11 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 					<GatedButton unavailable={writesReason ?? (rows.length === 0 || shownStaged === rows.length ? 'Every document shown is staged.' : null)} onClick={() => entry.staged.set(stage(entry.staged.get(), rows.map(targetOf)))}>
 						{`Stage all shown (${formatCount(rows.length)})`}
 					</GatedButton>
-					<GatedButton unavailable={writesReason ?? (shownStaged === 0 ? 'No document shown is staged.' : null)} onClick={() => entry.staged.set(unstage(entry.staged.get(), rows.map((row) => row.objectId)))}>
+					<GatedButton unavailable={shownStaged === 0 ? 'No document shown is staged.' : null} onClick={() => entry.staged.set(unstage(entry.staged.get(), rows.map((row) => row.objectId)))}>
 						Unstage all shown
 					</GatedButton>
-					{writesReason !== null && <span style={appStyles.small}>{`Staging is unavailable: ${writesReason}`}</span>}
+					{offReason !== null && <span style={appStyles.small}>{`Staging is unavailable: ${offReason}`}</span>}
 				</div>
-				{note !== null && <div style={styles.line}>{note}</div>}
 				<div style={styles.body(layout.stacked)}>
 					<div style={styles.gridBox}>
 						<VectorGrid ref={grid} label="Stored documents" rows={rows} rowId={rowId} columns={columns} sort={sort} onSort={setSort} selectedId={selectedId} onActivate={openRow} onToggle={toggle} activateOnClick leaving={leaving} empty={empty} rowTitle={(item) => documentTooltip(item, healthOf(item))} />
@@ -439,7 +468,7 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 							<DocumentDrawer
 								objectId={drawerId}
 								item={drawerItem}
-								path={drawerItem?.path ?? selection.document?.path ?? drawerId}
+								path={drawerItem?.path ?? selection.document?.path ?? ''}
 								chunks={state.chunks}
 								median={median}
 								staged={staged.has(drawerId)}
@@ -449,7 +478,7 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 								neighbors={{ caller: channels.tools, nodeId: model.nodes.store }}
 								focusNonce={focusNonce}
 								onClose={() => setDrawerOpen(false)}
-								onStage={() => entry.staged.set(stage(entry.staged.get(), [drawerItem ? targetOf(drawerItem) : { objectId: drawerId, path: selection.document?.path ?? drawerId, chunks: null }]))}
+								onStage={() => entry.staged.set(stage(entry.staged.get(), [drawerItem ? targetOf(drawerItem) : { objectId: drawerId, path: selection.document?.path ?? '', chunks: null }]))}
 								onUnstage={() => entry.staged.set(unstage(entry.staged.get(), [drawerId]))}
 								onShowOnMap={(keys) => actions.showOnMap(keys, 'document')}
 								onAskAbout={() => actions.askAbout([drawerId])}
@@ -457,7 +486,8 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 								onMoreChunks={() => entry.controller.loadMoreChunks()}
 								onShowDocument={(objectId, path) => {
 									entry.selection.selectDocument({ objectId, path });
-									grid.current?.focusRow(objectId);
+									// Its row when the grid lists it; else the drawer's heading (the list it came from goes).
+									if (!grid.current?.focusRow(objectId)) setFocusNonce((n) => n + 1);
 								}}
 								announce={(message) => actions.announce(message)}
 							/>
@@ -465,10 +495,12 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 					)}
 				</div>
 				<div style={styles.footer}>
-					<span>{listCountText(rows.length, pager)}</span>
+					<span>{review ? `${formatCount(rows.length)} staged` : listCountText(rows.length, pager)}</span>
+					{restarting && <span role="status">Listing the documents again…</span>}
 					{footer && <span>{footer.text}</span>}
-					{footer?.loadMore && <GatedButton onClick={() => entry.controller.loadMoreDocuments()}>Load more</GatedButton>}
-					{footer?.retry && <GatedButton onClick={() => entry.controller.retryDocuments()}>Retry</GatedButton>}
+					{footer?.loadMore && <GatedButton onClick={thenGrid(() => entry.controller.loadMoreDocuments())}>Load more</GatedButton>}
+					{footer?.retry && <GatedButton onClick={thenGrid(() => entry.controller.retryDocuments())}>Retry</GatedButton>}
+					{note !== null && <span style={styles.caveat}>{note}</span>}
 					{footer?.caveat && <span style={styles.caveat}>{footer.caveat}</span>}
 				</div>
 			</section>

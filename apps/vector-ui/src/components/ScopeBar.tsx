@@ -280,7 +280,10 @@ export function ScopeBar({ text, onText, scope = null, onScope, available = {}, 
 		<div
 			data-component="ScopeBar"
 			onKeyDown={(event) => {
-				if (event.key === 'Escape' && (menu !== null || editor !== null || saving)) closeAll();
+				// The innermost handler acts: an inner one that already did wins, and this one tells the outer ones.
+				if (event.defaultPrevented || event.key !== 'Escape' || (menu === null && editor === null && !saving)) return;
+				event.preventDefault();
+				closeAll();
 			}}
 		>
 			<div style={row}>

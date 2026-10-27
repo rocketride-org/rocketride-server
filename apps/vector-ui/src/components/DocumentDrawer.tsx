@@ -158,6 +158,9 @@ export function DocumentDrawer(props: IDocumentDrawerProps): React.ReactElement 
 	const asking = useRef(0);
 
 	const parts = splitPath(path);
+	// A document asked for from elsewhere that the listing has not loaded may have no known path: its objectId names it.
+	const unknownPath = path === '' && item === null;
+	const name = unknownPath ? `objectId ${objectId.slice(0, 8)}…` : parts.name;
 	const mine = chunks.objectId === objectId ? chunks : null;
 	const read = mine?.items ?? [];
 	const listed = allChunks ? read : read.slice(0, FIRST_CHUNKS);
@@ -186,7 +189,7 @@ export function DocumentDrawer(props: IDocumentDrawerProps): React.ReactElement 
 
 	return (
 		<aside
-			aria-label={`Document ${parts.name}`}
+			aria-label={`Document ${name}`}
 			data-document-drawer=""
 			style={styles.drawer}
 			onKeyDown={(event) => {
@@ -198,9 +201,9 @@ export function DocumentDrawer(props: IDocumentDrawerProps): React.ReactElement 
 			<div style={styles.head}>
 				<div style={styles.headText}>
 					<h2 ref={heading} tabIndex={-1} style={styles.title}>
-						{parts.name}
+						{name}
 					</h2>
-					<p style={styles.subtitle}>{[parts.uploaded ? 'Uploaded' : parts.folder, fileTypeOf(path), total === null ? 'chunk count not reported' : `${formatCount(total)} ${total === 1 ? 'chunk' : 'chunks'}`, item?.size !== null && item?.size !== undefined ? formatSize(item.size) : null].filter(Boolean).join(' · ')}</p>
+					<p style={styles.subtitle}>{[unknownPath ? null : parts.uploaded ? 'Uploaded' : parts.folder, unknownPath ? null : fileTypeOf(path), total === null ? 'chunk count not reported' : `${formatCount(total)} ${total === 1 ? 'chunk' : 'chunks'}`, item?.size !== null && item?.size !== undefined ? formatSize(item.size) : null].filter(Boolean).join(' · ')}</p>
 				</div>
 				<span style={styles.close}>
 					<GatedButton onClick={onClose} title="Close (Escape)">
@@ -237,8 +240,8 @@ export function DocumentDrawer(props: IDocumentDrawerProps): React.ReactElement 
 							{allChunks ? `Show the first ${FIRST_CHUNKS}` : `Show all ${formatCount(read.length)} read`}
 						</GatedButton>
 					)}
-					{allChunks && mine?.hasMore && (
-						<GatedButton unavailable={mine.status === 'loading' ? 'Loading chunks…' : null} onClick={onMoreChunks}>
+					{allChunks && (
+						<GatedButton unavailable={mine?.hasMore ? (mine.status === 'loading' ? 'Loading chunks…' : null) : 'Every chunk is read.'} onClick={onMoreChunks}>
 							More chunks
 						</GatedButton>
 					)}
@@ -249,7 +252,7 @@ export function DocumentDrawer(props: IDocumentDrawerProps): React.ReactElement 
 				<h3 style={styles.heading}>Metadata</h3>
 				<dl style={styles.lines}>
 					<dt style={styles.term}>Path</dt>
-					<dd style={styles.value}>{path || '(no path)'}</dd>
+					<dd style={styles.value}>{path || (item === null ? 'not known: this document is not among the loaded rows' : '(no path)')}</dd>
 					<dt style={styles.term}>objectId</dt>
 					<dd style={styles.value}>
 						<span style={styles.mono}>{objectId}</span>
@@ -318,7 +321,7 @@ export function DocumentDrawer(props: IDocumentDrawerProps): React.ReactElement 
 									<button type="button" style={styles.link} title={doc.path} onClick={() => onShowDocument(doc.objectId, doc.path)} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')}>
 										{doc.path || doc.objectId}
 									</button>
-									<span style={appStyles.small}>{`${doc.best.toFixed(3)} · ${doc.chunks} ${doc.chunks === 1 ? 'chunk' : 'chunks'}`}</span>
+									<span style={appStyles.small}>{`similarity ${doc.best.toFixed(3)} · ${doc.chunks} ${doc.chunks === 1 ? 'chunk' : 'chunks'}`}</span>
 								</li>
 							))}
 						</ul>
@@ -342,9 +345,7 @@ export function DocumentDrawer(props: IDocumentDrawerProps): React.ReactElement 
 
 			<div style={styles.danger}>
 				{staged ? (
-					<GatedButton unavailable={writes.enabled ? null : writes.reason} onClick={onUnstage}>
-						Unstage
-					</GatedButton>
+					<GatedButton onClick={onUnstage}>Unstage</GatedButton>
 				) : (
 					<GatedButton variant="danger" unavailable={writes.enabled ? null : writes.reason} title="Stage it: the pending bar applies the staged documents" onClick={onStage}>
 						Move to Trash

@@ -159,7 +159,7 @@ test('the review lists only the staged documents, loaded or not, and says how ma
 
 test('"sorted within" shows while the listing is incomplete and the rows are not in the store\'s path order', () => {
 	const partial = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage({ success: true, items: ROWS, next_cursor: 'c2', total: null, counts_exact: true, distinct: true, sorted: false, caveats: [] }));
-	assert.match(renderDocumentsTab({ directory: partial }), />Sorted within the 4 loaded documents; the store holds more\.</);
+	assert.match(renderDocumentsTab({ directory: partial }), />Sorted within the 4 loaded documents; more may exist\.</);
 	assert.doesNotMatch(renderDocumentsTab({ directory: listing(ROWS, { sorted: false }) }), /Sorted within/, 'complete: the sort covers everything');
 });
 
@@ -266,4 +266,73 @@ test("the Documents tab takes another tab's request for a document once, and the
 	assert.match(source, /if \(asked === null\) return;\s*entry\.openDocument\.set\(null\);/, 'read once, then cleared');
 	const { TRASH_DANGER_SENTENCE } = require('../src/components/TrashTab') as typeof import('../src/components/TrashTab');
 	assert.match(TRASH_DANGER_SENTENCE, /a document that still has chunks outside the trash is kept whole/);
+});
+
+test('on a store that filters nothing (Qdrant: filter_applied none) the rail counts the loaded documents the scope keeps, as the grid lists them', () => {
+	const filter = { path_prefix: 'C:/demo/handbooks/' };
+	const page = readDocumentsPage({ success: true, items: ROWS, next_cursor: null, total: ROWS.length, counts_exact: true, distinct: true, sorted: false, caveats: ['documents_filter_client'], filter_applied: 'none', filter_ignored: ['path_prefix'] });
+	const pager = pagerApplyPage(pagerBegin(pagerInit(), filter), page);
+	assert.equal(pager.rows.length, 4, 'the premise: every loaded document is kept by the listing');
+	const scope = { filter, label: 'folder is under C:/demo/handbooks/', objectIds: null, overflow: null, applyTo: { documents: true, map: true, search: true, chat: true } };
+	const html = renderDocumentsTab({ directory: pager, scope });
+	assert.match(html, /aria-rowcount="3"/, 'the grid lists the 2 in scope');
+	assert.match(html, />Counts over 2 loaded documents in the scope</);
+	assert.match(html, /aria-label="All documents, 2 loaded documents"/);
+	assert.doesNotMatch(html, /data-item-id="f:C:\/demo\/greenhouse\/"|data-item-id="uploaded"/, 'no folder outside the scope');
+	const off = renderDocumentsTab({ directory: pager, scope: { ...scope, applyTo: { ...scope.applyTo, documents: false } } });
+	assert.match(off, />4 documents</, 'the scope off the list: every loaded document');
+});
+
+test('unstaging never waits for the writes: a staged row stays tickable and Unstage all shown stays available while writes are off', () => {
+	const entry = panelEntry('k-unstage');
+	entry.staged.set(stage(entry.staged.get(), [{ objectId: 'b', path: 'C:/demo/handbooks/guide.md', chunks: 3 }]));
+	const html = renderDocumentsTab({ entry, model: panelModel({ writes: WRITES_OFF }), directory: listing(ROWS) });
+	assert.match(html, /<input type="checkbox"[^>]*aria-label="Stage guide\.md to move to the trash"[^>]*tabindex="-1" checked=""/);
+	assert.doesNotMatch(html, /aria-label="Stage guide\.md to move to the trash" aria-disabled/);
+	assert.match(html, /aria-label="Stage manual\.pdf to move to the trash" aria-disabled="true"/);
+	assert.match(html, /<button type="button"[^>]*>Unstage all shown<\/button>/);
+	assert.doesNotMatch(html, /aria-disabled="true"[^>]*>Unstage all shown/);
+	stagedReview(entry).set(true);
+	assert.match(renderDocumentsTab({ entry, directory: listing(ROWS) }), /<span>1 staged<\/span>/, 'the review counts the staged documents, not the loaded ones');
+});
+
+test('the Trash: its export (as the old Trash view had), the first-chunk wording where the store lists by first chunk, and no "empty" before it is listed', () => {
+	const listed = readDocumentsPage(fixture('list_documents_page1'));
+	const trash = pagerApplyPage(pagerBegin(pagerInit()), { ...listed, items: listed.items.map((item) => ({ ...item, deleted: true })) });
+	const html = renderTrashTab({ trash });
+	assert.match(html, /data-component="ExportMenu"/);
+	assert.deepEqual(exportItems.map((i) => [i.id, i.label]), [['directory-loaded', `Loaded documents (${listed.items.length})`]]);
+	assert.match(html, />Documents with chunks in the trash\./);
+	const byFirst = pagerApplyPage(pagerBegin(pagerInit()), { ...listed, caveats: ['documents_by_first_chunk'], items: listed.items.map((item) => ({ ...item, deleted: true })) });
+	assert.match(renderTrashTab({ trash: byFirst }), />Documents whose first chunk is in the trash \(this store lists the trash by the first chunk\)\./);
+	const loading = renderTrashTab({ trash: pagerBegin(pagerInit()), trashCount: null });
+	assert.doesNotMatch(loading, /title="The trash is empty\."/, 'not claimed before the listing answered');
+});
+
+test('the typed field of a single permanent delete shows the whole path beside it, and the field is described by it', () => {
+	const { InlineRemoveConfirm } = require('../src/components/InlineRemoveConfirm') as typeof import('../src/components/InlineRemoveConfirm');
+	const { renderToStaticMarkup } = require('react-dom/server') as typeof import('react-dom/server');
+	const entry = panelEntry('k-typed');
+	entry.controller.setWritesEnabled(true);
+	entry.controller.requestDelete([{ objectId: 'x1', path: 'C:/demo/handbooks/guide.md', chunks: 3 }]);
+	const html = renderToStaticMarkup(<InlineRemoveConfirm entry={entry} probe={undefined} />);
+	assert.match(html, /Type the file name &#x27;guide\.md&#x27; to confirm\.<\/span><span id="([^"]+)">Full path: C:\/demo\/handbooks\/guide\.md<\/span>/);
+	const pathId = html.match(/<span id="([^"]+)">Full path:/)?.[1];
+	assert.ok(pathId && new RegExp(`aria-describedby="[^"]+ ${pathId.replace(/[:]/g, '\\:')}"`).test(html), 'the field is described by the consequence and the path');
+	entry.controller.dispose();
+});
+
+test("controls that go away when they act hand the focus to the grid's row, never the page", () => {
+	const read = (file: string): string => fs.readFileSync(path.join(__dirname, '..', 'src', 'components', file), 'utf8');
+	const documents = read('DocumentsTab.tsx');
+	for (const control of ['thenGrid(() => setFolder(null))', 'thenGrid(() => scopeToFolder(folder.prefix))', 'thenGrid(() => reviewStore.set(false))', 'thenGrid(() => entry.controller.loadMoreDocuments())', 'thenGrid(() => entry.controller.retryDocuments())', 'thenGrid(() => setForceRail(!forceRail))']) assert.ok(documents.includes(control), control);
+	assert.match(documents, /if \(focusFell\(\)\) grid\.current\?\.focusStop\(\);/);
+	assert.equal(documents.match(/>\s*Folders\s*</g)?.length, 1, 'one Folders toggle, pressed or not');
+	assert.match(documents, /if \(!grid\.current\?\.focusRow\(objectId\)\) setFocusNonce\(\(n\) => n \+ 1\);/, "a neighbour the grid does not list: the drawer's heading");
+	assert.match(read('DocumentDrawer.tsx'), /\{allChunks && \(\s*<GatedButton unavailable=\{mine\?\.hasMore \?/, 'More chunks stays, unavailable once every chunk is read');
+	const trash = read('TrashTab.tsx');
+	for (const control of ['thenGrid(() => entry.controller.loadMoreDocuments())', 'thenGrid(() => entry.controller.retryDocuments())']) assert.ok(trash.includes(control), control);
+	const grid = read('VectorGrid.tsx');
+	assert.match(grid, /if \(event\.target !== grid\.current \|\| stop < 0\) return;/, 'the grid itself focused: a move key enters at the row in the tab order');
+	assert.match(read('ScopeBar.tsx'), /if \(event\.defaultPrevented \|\| event\.key !== 'Escape' \|\| \(menu === null && editor === null && !saving\)\) return;\s*event\.preventDefault\(\);/);
 });

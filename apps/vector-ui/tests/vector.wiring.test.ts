@@ -244,7 +244,8 @@ test('the trash buttons say what they do, and say why when they are unavailable'
 	assert.match(view, /disabled=\{!(model\.)?writes\.enabled\}/);
 	assert.match(view, /writes\.reason/);
 	const documents = code('components/DocumentsTab.tsx');
-	assert.match(documents, /aria-label=\{`Stage \$\{name\} to move to the trash`\} aria-disabled=\{writes\.enabled \? undefined : true\} title=\{writes\.enabled \? undefined : \(writes\.reason \?\? undefined\)\}/, 'a row stages; writes off, it says why and stays focusable');
+	assert.match(documents, /const blocked = !writes\.enabled && !staged\.has\(item\.objectId\);/, 'staging waits for the writes; unstaging never does');
+	assert.match(documents, /aria-label=\{`Stage \$\{name\} to move to the trash`\} aria-disabled=\{blocked \? true : undefined\} title=\{blocked \? \(writes\.reason \?\? undefined\) : undefined\}/, 'a row stages; writes off, it says why and stays focusable');
 	const trash = code('components/TrashTab.tsx');
 	assert.match(trash, /aria-label=\{`Restore \$\{label\(item\)\}`\} title=\{off \?\? `Restore \$\{label\(item\)\}`\} aria-disabled=\{off !== null \|\| undefined\}/, 'a trashed row restores');
 	assert.match(trash, /aria-label=\{`Delete \$\{label\(item\)\} permanently`\} title=\{off \?\? `Delete \$\{label\(item\)\} permanently`\} aria-disabled=\{off !== null \|\| undefined\}/, 'and deletes permanently');

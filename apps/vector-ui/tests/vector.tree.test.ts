@@ -79,14 +79,14 @@ test('the tree: a folder holding one folder and nothing else shows as one; count
 	assert.equal(sum(tree.folders) + tree.uploaded.length, tree.total, 'every loaded document is counted once');
 });
 
-test('the flat view lists every folder that holds documents by its whole path', () => {
+test('the flat view lists every folder that holds documents by its whole path, counting what a click shows (subfolders included)', () => {
 	assert.deepEqual(
 		flatFolders(buildTree(ROWS)).map((f) => [f.label, f.documents]),
 		[
 			['/home/ann/', 1],
 			['\\\\server\\share\\docs\\', 1],
 			['C:/demo/greenhouse/', 1],
-			['C:/demo/handbooks/', 2],
+			['C:/demo/handbooks/', 3],
 			['C:/demo/handbooks/old/', 1],
 		]
 	);

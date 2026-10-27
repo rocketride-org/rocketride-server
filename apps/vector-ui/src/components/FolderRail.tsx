@@ -45,7 +45,7 @@ import type { IDocumentItem } from '../contract/types';
 import { ACCENT_TOKEN, selectedRowBackground } from '../vector/colors';
 import { gridWindow, nextFocusAfterRemoval, scrollToShow } from '../vector/grid';
 import { formatCount } from '../vector/stats';
-import { TREE_ALL, collapsedAll, treeItems, treeKey, typeAhead, viewItemId } from '../vector/tree';
+import { TREE_ALL, ancestorsOf, collapsedAll, treeItems, treeKey, typeAhead, viewItemId } from '../vector/tree';
 import type { FolderView, IFolderTree, TreeItem } from '../vector/tree';
 import { ChevronIcon } from '../icons';
 import { FOCUS_RING, styles as appStyles } from '../styles';
@@ -176,6 +176,17 @@ export function FolderRail({ tree: built, countsLine, view, onView, onOpenDocume
 		},
 		[]
 	);
+	// A folder chosen elsewhere (Overview's Top folders) is shown: the folders above it open, once per choice (a folder
+	// the user closes later stays closed).
+	const viewPrefix = view?.kind === 'folder' ? view.prefix : null;
+	const revealed = useRef<string | null>(null);
+	useEffect(() => {
+		if (viewPrefix === null || revealed.current === viewPrefix) return;
+		const above = ancestorsOf(built, viewPrefix);
+		if (above.length === 1 && !built.folders.some((f) => f.prefix === viewPrefix)) return;
+		revealed.current = viewPrefix;
+		setExpanded((open) => (above.every((id) => open.has(id)) ? open : new Set([...open, ...above])));
+	}, [viewPrefix, built]);
 
 	// The focused item left (its folder closed, its document left the list): the focus goes to the next item, else the one before.
 	const before = useRef<readonly string[]>(ids);

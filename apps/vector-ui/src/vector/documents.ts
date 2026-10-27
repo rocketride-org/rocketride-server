@@ -416,7 +416,7 @@ export function sortNote(state: Pick<IPagerState, 'status' | 'storeSorted' | 'ro
 	if (state.status === 'done' || state.status === 'idle' || state.rows.length === 0) return null;
 	if (!columnSorted && state.storeSorted) return null;
 	const n = state.rows.length;
-	return `Sorted within the ${formatCount(n)} loaded ${n === 1 ? 'document' : 'documents'}; the store holds more.`;
+	return `Sorted within the ${formatCount(n)} loaded ${n === 1 ? 'document' : 'documents'}; more may exist.`;
 }
 
 /**
@@ -455,8 +455,11 @@ export function healthCell(item: IDocumentItem, median: number | null): IHealthC
 	return { text: '', title: 'No problem found in what this store reports.', attention: false };
 }
 
-/** The Documents tab's widths (px). */
-export const DOCUMENTS_LAYOUT = Object.freeze({ rail: 220, drawer: 360, drawerMin: 300, gridMin: 600 });
+/**
+ * The Documents tab's widths (px): the rail (with the gap after it), the drawer (with the gap before it), the grid's
+ * least, and the chrome around the grid (the panel's borders and the body's padding).
+ */
+export const DOCUMENTS_LAYOUT = Object.freeze({ rail: 220, railGap: 12, drawer: 360, drawerMin: 300, drawerGap: 8, gridMin: 600, chrome: 18 });
 
 /** Where the Documents tab's parts go. */
 export interface IDocumentsLayout {
@@ -479,15 +482,20 @@ export interface IDocumentsLayout {
  * @returns The layout.
  */
 export function documentsLayout(width: number, opts: { drawer: boolean; forceRail: boolean }): IDocumentsLayout {
-	const { rail, drawer, drawerMin, gridMin } = DOCUMENTS_LAYOUT;
+	const { rail: railWidth, railGap, drawer: drawerWidth, drawerMin, drawerGap, gridMin, chrome } = DOCUMENTS_LAYOUT;
+	const rail = railWidth + railGap;
+	// What the grid needs with the chrome around it, and the room a drawer takes with its gap.
+	const grid = gridMin + chrome;
+	const drawer = drawerWidth + drawerGap;
+	const narrowest = drawerMin + drawerGap;
 	if (!opts.drawer) {
-		const fits = width >= rail + gridMin;
+		const fits = width >= rail + grid;
 		return { rail: fits || opts.forceRail, railHidden: !fits && !opts.forceRail, drawer: 0, stacked: false };
 	}
-	if (width >= rail + drawer + gridMin) return { rail: true, railHidden: false, drawer, stacked: false };
-	if (opts.forceRail) return width >= rail + drawerMin + gridMin ? { rail: true, railHidden: false, drawer: width - rail - gridMin, stacked: false } : { rail: true, railHidden: false, drawer: 0, stacked: true };
-	if (width >= drawer + gridMin) return { rail: false, railHidden: true, drawer, stacked: false };
-	if (width >= drawerMin + gridMin) return { rail: false, railHidden: true, drawer: width - gridMin, stacked: false };
+	if (width >= rail + drawer + grid) return { rail: true, railHidden: false, drawer: drawerWidth, stacked: false };
+	if (opts.forceRail) return width >= rail + narrowest + grid ? { rail: true, railHidden: false, drawer: width - rail - grid - drawerGap, stacked: false } : { rail: true, railHidden: false, drawer: 0, stacked: true };
+	if (width >= drawer + grid) return { rail: false, railHidden: true, drawer: drawerWidth, stacked: false };
+	if (width >= narrowest + grid) return { rail: false, railHidden: true, drawer: width - grid - drawerGap, stacked: false };
 	return { rail: false, railHidden: true, drawer: 0, stacked: true };
 }
 

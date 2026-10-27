@@ -164,7 +164,8 @@ export function buildTree(rows: readonly IDocumentItem[]): IFolderTree {
 }
 
 /**
- * Every folder that holds documents directly, by its whole path (the flat view).
+ * Every folder that holds documents directly, by its whole path (the flat view), each counting the documents under
+ * it as a click narrows the list (its subfolders' included).
  *
  * @param tree - The tree.
  * @returns The folders, each without subfolders, sorted by path.
@@ -172,7 +173,8 @@ export function buildTree(rows: readonly IDocumentItem[]): IFolderTree {
 export function flatFolders(tree: IFolderTree): ITreeFolder[] {
 	const out: ITreeFolder[] = [];
 	const walk = (folder: ITreeFolder): void => {
-		if (folder.files.length > 0) out.push({ prefix: folder.prefix, label: folder.prefix, documents: folder.files.length, children: [], files: folder.files });
+		// Counted as a click narrows the list: the folder's documents and those of the folders under it.
+		if (folder.files.length > 0) out.push({ prefix: folder.prefix, label: folder.prefix, documents: folder.documents, children: [], files: folder.files });
 		for (const child of folder.children) walk(child);
 	};
 	for (const folder of tree.folders) walk(folder);

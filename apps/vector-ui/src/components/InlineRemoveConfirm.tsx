@@ -118,8 +118,8 @@ export interface IInlineRemoveConfirmProps {
  * @returns The panel; the "open elsewhere" line for a surface that asked meanwhile; or nothing.
  */
 export function InlineRemoveConfirm({ entry, probe, origin = CONSOLE_ORIGIN, returnFocus, onClosed }: IInlineRemoveConfirmProps): React.ReactElement | null {
-	const pending = useSyncExternalStore(entry.controller.subscribe, () => entry.controller.getState().confirm, () => null);
-	const elsewhere = useSyncExternalStore(entry.controller.subscribe, () => entry.controller.getState().elsewhere, () => null);
+	const pending = useSyncExternalStore(entry.controller.subscribe, () => entry.controller.getState().confirm, () => entry.controller.getState().confirm);
+	const elsewhere = useSyncExternalStore(entry.controller.subscribe, () => entry.controller.getState().elsewhere, () => entry.controller.getState().elsewhere);
 	if (pending === null) return null;
 	if (pending.origin !== origin) {
 		return elsewhere === origin ? (
@@ -140,11 +140,14 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 	const confirmButton = useRef<HTMLButtonElement>(null);
 	const input = useRef<HTMLInputElement>(null);
 	const sentenceId = useId();
+	const pathId = useId();
 	// What had the focus when the confirmation opened (before Cancel takes it): Cancel gives it back.
 	const opener = useRef<HTMLElement | null>(typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null);
 	const [typed, setTyped] = useState('');
 	const content = view.content;
 	const ready = confirmReady(content.typed, typed);
+	// One document typed by its file name: its whole path beside the field (a file name can repeat across folders).
+	const typedPath = view.kind === 'single' && content.typed ? (view.content.lines.find((line) => line.label === 'Path')?.value ?? null) : null;
 	// The latest close handlers, for the unmount below.
 	const how = useRef<ConfirmClose>('cancel');
 	const closing = useRef({ returnFocus, onClosed });
@@ -224,7 +227,8 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 			{content.typed && (
 				<label style={styles.typed}>
 					<span>{content.typed.prompt}</span>
-					<input ref={input} type="text" value={typed} onChange={(event) => setTyped(event.target.value)} style={appStyles.input} autoComplete="off" spellCheck={false} aria-describedby={sentenceId} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')} />
+					{typedPath !== null && <span id={pathId}>{`Full path: ${typedPath}`}</span>}
+					<input ref={input} type="text" value={typed} onChange={(event) => setTyped(event.target.value)} style={appStyles.input} autoComplete="off" spellCheck={false} aria-describedby={typedPath !== null ? `${sentenceId} ${pathId}` : sentenceId} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')} />
 				</label>
 			)}
 			<div ref={actions} style={styles.actions}>
