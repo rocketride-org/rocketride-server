@@ -69,6 +69,12 @@ stop_engines() {
 			kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null || true
 		fi
 	done
+	# Also any docs server or browser script an agent left running in this checkout.
+	for pid in $(pgrep -f 'docusaurus serve|bin/browse\.mjs' || true); do
+		case "$(readlink "/proc/$pid/cwd" 2>/dev/null)" in
+			"$WORKTREE" | "$WORKTREE"/*) kill -TERM "$pid" 2>/dev/null || true ;;
+		esac
+	done
 }
 
 started=$(date +%s)

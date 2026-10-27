@@ -6,11 +6,13 @@ These evals measure whether the verification skill helps an agent find real defe
 
 `cases.json` holds every case. There are three kinds.
 
-- **Planted** (`P1` to `P5`): a small, realistic bug applied from `seeds/*.patch`, such as a dropped `else` branch or an off-by-one.
-- **Replay** (`R1`, `R3` to `R7`): a real bug that shipped. The case reverts the code of the PR that fixed it on top of the current branch.
+- **Planted** (`P1` to `P7`): a small, realistic bug applied from `seeds/*.patch`, such as a dropped `else` branch or an off-by-one. `P6` and `P7` are in the chat page and the dropper page.
+- **Replay** (`R1`, `R3` to `R8`): a real bug that shipped. The case reverts the code of the PR that fixed it on top of the current branch. `R8` is in the Pipeline Builder canvas.
 - **Clean** (`C-*`): no change, with the same area prompt as a bug case. Any defect reported here is a false alarm, except the case's `known_issues`.
 
-Every bug case was reproduced by hand against the same check on clean code before it was added. `cases.json` records which case was dropped and why.
+Every bug case was reproduced by hand against the same check on clean code before it was added. `cases.json` records which cases were dropped and why.
+
+The browser cases (areas `canvas`, `chat-ui`, `dropper-ui`, and `docs-site`) need the UIs built in the eval checkout. `prepare` runs `./builder ui:build shell:bundle shell:copy` for every case; the builder skips a UI whose source has not changed, so this takes seconds unless a case changed one. It runs `./builder docs:build` only when a case changes the docs, when the last build was from changed docs, or when a `docs-site` case finds no build, because the docs build takes minutes.
 
 ## Running
 
@@ -56,5 +58,5 @@ Claude Haiku judges whether a reported defect matches the ground truth, once per
 ## Adding a case
 
 1. For a planted bug, add a patch to `seeds/` that applies to the current branch. For a replay, find the fix's squash commit with `git log --grep='(#<pr>)'` and list its non-test source paths; check that `git show <sha> -- <paths> | git apply -R --check` succeeds.
-2. Reproduce the bug by hand: run `prepare`, launch a run, show the defect, then show the same check passing on a clean `prepare`. If you cannot make the difference visible to a user, do not add the case.
+2. Reproduce the bug by hand: run `prepare`, launch a run, show the defect, then show the same check passing on a clean `prepare`. For a browser case, run the feature file's `rr-verify browse` recipe both times and keep the two `-browse.json` files. If you cannot make the difference visible to a user, do not add the case.
 3. Add the case and, if the area is new, its clean control to `cases.json`. Keep the area text to what a PR author would ask a reviewer to check, without describing the bug.

@@ -36,7 +36,7 @@ KIND=$(field kind)
 
 echo "prepare: resetting $WORKTREE to $BASE"
 git -C "$WORKTREE" reset -q --hard "$BASE"
-git -C "$WORKTREE" clean -qfd -- packages nodes .claude
+git -C "$WORKTREE" clean -qfd -- packages nodes apps docs .claude
 
 case "$KIND" in
 	clean) ;;
@@ -53,9 +53,21 @@ esac
 
 # Always re-sync what earlier cases may have changed in dist/server, so no case inherits
 # another case's bug. The TypeScript SDK is rebuilt only when this case touches it.
-changed=$(git -C "$WORKTREE" status --porcelain -- packages nodes | awk '{print $2}')
+changed=$(git -C "$WORKTREE" status --porcelain -- packages nodes apps docs | awk '{print $2}')
 steps=(ai:sync nodes:sync client-python:sync-source client-python:wheel-source client-python:copy-readme client-python:wheel-build client-python:sync)
 grep -qE '^packages/client-typescript/' <<<"$changed" && steps+=(client-typescript:build)
+# The browser UIs: the shell, chat-ui, dropper-ui, and every shell app. The builder caches each
+# by a hash of its source, so this takes seconds when nothing changed, and it rebuilds a UI that
+# an earlier case modified.
+steps+=(ui:build shell:bundle shell:copy)
+# The docs site has no cache and takes minutes. Build it when this case changes docs, when the
+# last build was from a changed docs tree, or when a docs-site case finds no build.
+docs_marker="$WORKTREE/.verify/prepare-docs-changed"
+docs_changed=0
+grep -qE '^(docs/|nodes/src/nodes/.*README\.md$)' <<<"$changed" && docs_changed=1
+if [ "$docs_changed" = 1 ] || [ -f "$docs_marker" ] || { [ "$(field area)" = docs-site ] && [ ! -f "$WORKTREE/dist/docs/index.html" ]; }; then
+	steps+=(docs:build)
+fi
 if [ "${#steps[@]}" -gt 0 ]; then
 	echo "prepare: ./builder ${steps[*]}"
 	mkdir -p "$WORKTREE/.verify"
@@ -64,6 +76,7 @@ if [ "${#steps[@]}" -gt 0 ]; then
 		exit 1
 	}
 fi
+if [ "$docs_changed" = 1 ]; then touch "$docs_marker"; else rm -f "$docs_marker"; fi
 
 if [ "$NO_SKILL" = 1 ]; then
 	rm -rf "$WORKTREE/.claude/skills/verify-rocketride"

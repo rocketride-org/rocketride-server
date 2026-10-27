@@ -10,7 +10,11 @@
 		"local-text-output": "the Local Text Output node (provider `local-text-output`) and its `exclude` setting, which removes one leading path prefix from each object's path before the node writes the file; the path comes from the object name sent with the data; read the node's README for its settings",
 		"question-instructions": "how the Python SDK's `Question.addInstruction()` text appears in the prompt that `Question.getPrompt()` builds, including multi-line, indented content such as a code example",
 		"pipe-diff": "`rocketride diff` on pipeline files, including pipelines whose nodes sit inside canvas groups and files with unusual numeric values",
-		"context-optimizer": "the Context Optimizer node (provider `context_optimizer`) in a chat pipeline (Chat, Context Optimizer, an LLM node, Return Answers) on an engine launched with mocks; read the node's README for its lanes"
+		"context-optimizer": "the Context Optimizer node (provider `context_optimizer`) in a chat pipeline (Chat, Context Optimizer, an LLM node, Return Answers) on an engine launched with mocks; read the node's README for its lanes",
+		"canvas": "the Pipeline Builder app in the browser shell the engine serves: signing in, starting a new pipeline from a source, adding nodes to the canvas, and how the nodes render there",
+		"chat-ui": "the browser chat page the engine serves at /chat for a running chat pipeline, opened with ?auth=<the pipeline's public key>: connecting, asking questions, and the conversation it shows; use the quickstart chat pipeline on an engine launched with mocks",
+		"dropper-ui": "the browser dropper page the engine serves at /dropper for a running dropper pipeline, opened with ?auth=<the pipeline's public key>: uploading files, the result it shows for each file, and removing files; a Dropper, Parse, Return Text pipeline is enough",
+		"docs-site": "the documentation site built from this checkout into dist/docs, served the way GitHub Pages serves it: the home page, sidebar navigation, search, and the page for a URL that does not exist"
 	},
 	"cases": [
 		{
@@ -177,6 +181,37 @@
 			"ground_truth": "Any of: NaN or Infinity accepted; moving a node inside a canvas group reported as a change instead of layout; empty values breaking the Markdown report."
 		},
 		{
+			"id": "R8",
+			"kind": "replay",
+			"area": "canvas",
+			"pr": 2257,
+			"commit": "94b8d5093",
+			"expect": "defect",
+			"paths": [
+				"apps/shared/src/components/canvas/context/FlowProjectContext.tsx",
+				"nodes/src/nodes/rocketride_graph/rocketride_graph.svg",
+				"nodes/src/nodes/rocketride_sql/rocketride_sql.svg",
+				"nodes/src/nodes/rocketride_vector/rocketride_vector.svg"
+			],
+			"ground_truth": "Nodes on the Pipeline Builder canvas lose their header icon once the node's full definition loads, while the node list still shows the icons. Reporting that the RocketRide Graph, SQL, and Vector nodes show the PostgreSQL elephant icon is also a match."
+		},
+		{
+			"id": "P6",
+			"kind": "planted",
+			"area": "chat-ui",
+			"seed": "P6-chat-ui-drops-question.patch",
+			"expect": "defect",
+			"ground_truth": "When the answer arrives, the chat page drops the question the user just asked (and any status lines) from the conversation, so only the greeting and the answer remain."
+		},
+		{
+			"id": "P7",
+			"kind": "planted",
+			"area": "dropper-ui",
+			"seed": "P7-dropper-remove-keeps-result.patch",
+			"expect": "defect",
+			"ground_truth": "Removing a file on the dropper page keeps that file's result and drops the results of the other files: after removing the only file, its text is still shown."
+		},
+		{
 			"id": "C-chat",
 			"kind": "clean",
 			"area": "chat",
@@ -228,7 +263,7 @@
 			"kind": "clean",
 			"area": "local-text-output",
 			"expect": "no-defect",
-			"known_issues": "Objects whose names contain non-ASCII characters (for example plain/caf\u00e9.md or u/\u6587.md) are silently not written, while ASCII names are. Confirmed by hand on 2026-10-24."
+			"known_issues": "Objects whose names contain non-ASCII characters (for example plain/café.md or u/文.md) are silently not written, while ASCII names are. Confirmed by hand on 2026-10-24."
 		},
 		{
 			"id": "C-question-instructions",
@@ -242,7 +277,34 @@
 			"kind": "clean",
 			"area": "pipe-diff",
 			"expect": "no-defect"
+		},
+		{
+			"id": "C-canvas",
+			"kind": "clean",
+			"area": "canvas",
+			"expect": "no-defect",
+			"known_issues": "Pipeline Builder crashes with \"Pipeline Builder encountered an error\" (minified React error #185, maximum update depth) in about half of the attempts to pick a starting source such as Chat right after New pipeline; reproduced with plain Playwright and no recording. In an OSS engine the Run button on a source node shows a lock titled \"Subscription required\" and clicking it does nothing, because the app accepts only subscribed or trialing while OSS marks every app free. After a wrong API key and Cancel, the shell shows \"Your session has expired. Please sign in again.\" although nobody was signed in. All confirmed by hand on 2026-10-27."
+		},
+		{
+			"id": "C-chat-ui",
+			"kind": "clean",
+			"area": "chat-ui",
+			"expect": "no-defect",
+			"known_issues": "A wrong or stale public key leaves the page on \"Connecting...\" with no error message; the only sign is the console error \"Failed to start client: AuthenticationException: Bad request\". Confirmed by hand on 2026-10-27."
+		},
+		{
+			"id": "C-dropper-ui",
+			"kind": "clean",
+			"area": "dropper-ui",
+			"expect": "no-defect",
+			"known_issues": "A wrong or stale public key leaves the page on \"Connecting...\" with no error message; the only sign is the console error \"Failed to start client: AuthenticationException: Bad request\". Confirmed by hand on 2026-10-27."
+		},
+		{
+			"id": "C-docs-site",
+			"kind": "clean",
+			"area": "docs-site",
+			"expect": "no-defect"
 		}
 	],
-	"calibration": "Every bug case was reproduced by hand on 2026-10-24 against the same check on clean code. R2 (#2376) was dropped: reverting it on current develop wraps the component as a pipeline and validates it without error, which a user cannot see as a failure. Defects that agents reported on clean controls were reproduced independently before being added to known_issues; one Codex report (Local Text Output skipping absolute or backslash exclude prefixes on Linux) was judged not a defect and stays a false alarm. Reports judged not defects because the docs state the behavior: send() on a chat-source pipeline returns no answer (docs say use chat()); rocketride validate passes unknown providers (docs say provider availability is a runtime concern)."
+	"calibration": "Every bug case was reproduced by hand on 2026-10-24 against the same check on clean code. R2 (#2376) was dropped: reverting it on current develop wraps the component as a pipeline and validates it without error, which a user cannot see as a failure. Defects that agents reported on clean controls were reproduced independently before being added to known_issues; one Codex report (Local Text Output skipping absolute or backslash exclude prefixes on Linux) was judged not a defect and stays a false alarm. Reports judged not defects because the docs state the behavior: send() on a chat-source pipeline returns no answer (docs say use chat()); rocketride validate passes unknown providers (docs say provider availability is a runtime concern). Browser cases (R8, P6, P7, C-canvas, C-chat-ui, C-dropper-ui, C-docs-site) were reproduced by hand on 2026-10-27 with the recipes in features/: each bug case failed its recipe on a prepared eval checkout, and a clean prepare passed the same recipe. #2508 (App Builder preview) was dropped: its fix reverts cleanly, but the preview it repairs runs only inside the VS Code App Builder panel, which hosts the shell in an iframe and injects the dev-server remote by postMessage. No browser path reaches it, and imitating the panel would not be a user path. It belongs with the VS Code surface."
 }
