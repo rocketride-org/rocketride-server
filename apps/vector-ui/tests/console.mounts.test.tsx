@@ -240,7 +240,7 @@ test('the health panel: checking, the problems with their numbers, what this sto
 	const qdrant = readDocumentsPage(fixture('list_documents_filter_client')).items[0] as IDocumentItem;
 	const unreported = renderToStaticMarkup(<HealthPanel item={qdrant} medianChunks={10} />);
 	assert.match(unreported, /No problem found in what this store reports\./);
-	assert.match(unreported, /role="note"[^>]*>This store does not report chunk ids or soft-deleted chunks per document, so gaps and deleted chunks are not checked; pgvector stores report them\.</);
+	assert.match(unreported, /role="note"[^>]*>This store does not report chunk ids or soft-deleted chunks per document, so gaps and deleted chunks are not checked; pgvector and RocketRide Vector stores report them\.</);
 	const healthy = renderToStaticMarkup(<HealthPanel item={{ ...legacy, deleted_chunks: 0 }} listing="active" medianChunks={20} />);
 	assert.match(healthy, /No problem found: the first chunk is stored, the chunk ids have no gap, no chunk is soft-deleted, the parse found text and the size is ordinary\./);
 	assert.match(renderToStaticMarkup(<HealthPanel item={{ ...legacy, deleted_chunks: 0 }} listing="active" />), /Oversize is not checked until the console has loaded documents to compare with\./);

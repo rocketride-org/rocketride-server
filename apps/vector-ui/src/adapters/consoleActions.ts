@@ -170,7 +170,8 @@ export function makeConsoleActions(entry: Pick<IConnectionEntry, 'controller' | 
 			entry.tab.set('map');
 			deps.showConsole();
 		},
-		requestRemove: (objectIds: readonly string[]) => entry.controller.requestRemove(removeTargets(entry, objectIds), origin),
+		requestRemove: (objectIds: readonly string[], known?: readonly IStageTarget[]) => entry.controller.requestRemove(known ? stageTargets(entry, known.filter((t) => objectIds.includes(t.objectId))) : removeTargets(entry, objectIds), origin),
+		restore: (objectIds: readonly string[], known?: readonly IStageTarget[]) => entry.controller.restore(known ? stageTargets(entry, known.filter((t) => objectIds.includes(t.objectId))) : removeTargets(entry, objectIds)),
 		// Nothing is confirmed or sent here: the pending bar applies the staged set through requestRemove.
 		stageRemove: (targets: readonly IStageTarget[]) => entry.staged.set(stage(entry.staged.get(), stageTargets(entry, targets))),
 		openTab: (tab: WorkbenchTab) => {
