@@ -211,8 +211,9 @@ test('Stop waiting takes the Run / Run all slot while a run is out, and the focu
 	assert.ok(/\}, \[runner\.canStop, runner\.running, gateBusy\]\);/.test(focusRule), 'a run that ends before Stop waiting shows, and the gate freeing, both count');
 	assert.ok(/if \(event\.relatedTarget !== null && !event\.currentTarget\.contains\(event\.relatedTarget as Node\)\) runSlotFocused\.current = false;/.test(surface), 'focus going nowhere still belongs to the slot');
 	// Review 4d: the state text has a fixed flex basis, so the bar's width does not change with what it says.
-	assert.ok(/runState: \{ flex: '0 1 220px', minWidth: 0,[^}]*textOverflow: 'ellipsis'/.test(surface), 'a fixed basis, cut with an ellipsis');
-	assert.ok(/<span\s+ref=\{runState\}\s+tabIndex=\{-1\}\s+style=\{styles\.runState\}/.test(bar), 'the state text can hold the focus');
+	assert.ok(/runState: \(focused: boolean\): CSSProperties => \(\{\s*flex: '0 1 220px',\s*minWidth: 0,[\s\S]*?textOverflow: 'ellipsis',/.test(surface), 'a fixed basis, cut with an ellipsis');
+	assert.ok(/outline: focused \? '2px solid var\(--rr-border-focus\)' : 'none',/.test(surface), 'holding the focus, it shows the ring');
+	assert.ok(/<span\s+ref=\{runState\}\s+tabIndex=\{-1\}\s+style=\{styles\.runState\(runStateFocused\)\}\s+title=\{runStateText\}/.test(bar), 'the state text can hold the focus, and its title is the whole text');
 	// Review 4c: the hidden-editor divider sits 3 px over the tab row's bottom borders, in the workbench only.
 	assert.ok(/overlap=\{split\.collapsed && barHost !== undefined \? 3 : 0\}/.test(surface));
 	const divider = code(read('components', 'SplitPane.tsx'));
