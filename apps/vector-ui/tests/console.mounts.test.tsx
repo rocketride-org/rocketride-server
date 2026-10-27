@@ -103,7 +103,7 @@ test('the Documents tab: the ScopeBar is its filter row, with the path box first
 function overview(rows: readonly IDocumentItem[], over: Partial<React.ComponentProps<typeof OverviewView>> = {}): string {
 	const stats = { view: readStats(fixture('stats_pgvector')), status: 'ready' as const, error: null, lastAt: 0, mode: 'full' as const };
 	const health = healthSummary(rows, { medianChunks: null, complete: true });
-	return renderToStaticMarkup(<OverviewView stats={stats} dialect={dialect} readOnly={false} rows={rows} scopedRows={rows} loading={false} complete scoped={false} scopeLine={null} scopeFilter={null} sample={null} health={health} median={null} onChartScope={noop} onOpenDocument={noop} onOpenTab={noop} onNewQuery={noop} onAddDocuments={noop} {...over} />);
+	return renderToStaticMarkup(<OverviewView stats={stats} dialect={dialect} readOnly={false} rows={rows} scopedRows={rows} loading={false} complete scoped={false} scopeLine={null} scopeFilter={null} sample={null} health={health} median={null} onChartScope={noop} onOpenDocument={noop} onOpenTab={noop} onNewQuery={noop} onAddDocuments={noop} fieldsRead={null} {...over} />);
 }
 
 test('the Overview: the cards on top, then Summary, Charts and Insights on a row of their own; Charts holds the StatsCharts', () => {
@@ -279,6 +279,10 @@ test('the Summary: Top folders with their share of the chunks and what they were
 	assert.match(html, />Read fields in Collection</);
 	for (const action of ['Add documents', 'Browse documents', 'New query', 'Open map']) assert.match(html, new RegExp(`>${action}<`), action);
 	assert.doesNotMatch(overview(rows, { onAddDocuments: null }), />Add documents</, 'a mount that cannot add documents does not offer it');
+	assert.match(html, /Chunk metadata fields are read from a sample in Collection\./, 'before a sample, it says where the chunk fields come from');
+	const read = overview(rows, { fieldsRead: { rows: [{ name: 'section', type: 'text', coverage: 18, of: 20, example: 'Intro', searchFilter: false, listFilter: false, source: 'chunks' }], chunksRead: 20, documentsRead: 5, at: 0 } });
+	assert.match(read, /Chunk metadata, from 20 chunks read/);
+	assert.match(read, /<td[^>]*>section<\/td><td[^>]*>text<\/td><td[^>]*>18 of 20<\/td>/, 'what Collection read, with what it was read over');
 });
 
 test('an oversize document keeps its folder and says "oversize" in its Health column; its tooltip does not say it needs attention', () => {

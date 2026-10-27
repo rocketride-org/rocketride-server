@@ -29,7 +29,8 @@
 //
 //   Summary    Top folders of the loaded documents (the scope's, while one
 //              filters the listing) with their share of the chunks; the
-//              document fields the listing carries; and quick
+//              document fields the listing carries, and the chunk metadata
+//              fields once Collection read a sample of them; and quick
 //              actions (Add documents where the mount can, Browse documents,
 //              New query, Open map).
 //   Charts     the collection's four charts; a bar sets its condition on the
@@ -49,12 +50,14 @@ import type { IDialectResult, IDocumentItem, IDocumentsFilter, ISampleModel } fr
 import { DATA_BAR_TOKEN, TONE_EDGE } from '../vector/colors';
 import type { IStatsSlot } from '../vector/consoleStore';
 import { documentFields } from '../vector/fields';
+import type { IFieldsEstimate } from '../vector/fields';
 import { clientKeys, matches } from '../vector/filters';
 import type { IHealthSummary } from '../vector/health';
 import { insights, insightsLabel, overLine, topFolders } from '../vector/overview';
 import { formatCount } from '../vector/stats';
 import { tabKeyTarget, workbenchNonce } from '../vector/workbench';
 import type { OverviewView as OverviewViewId, WorkbenchTab } from '../vector/workbench';
+import { useValueStore } from '../envContext';
 import { FOCUS_RING, styles } from '../styles';
 import StatsCharts from './StatsCharts';
 import StatsStrip from './StatsStrip';
@@ -70,6 +73,7 @@ const local = {
 	more: { marginTop: 6 } as CSSProperties,
 	card: { ...styles.panel, padding: '8px 12px' } as CSSProperties,
 	heading: { margin: '0 0 6px', fontSize: 13, fontWeight: 600 } as CSSProperties,
+	subheading: { margin: '8px 0 4px', fontSize: 12, fontWeight: 600 } as CSSProperties,
 	table: { width: '100%', borderCollapse: 'collapse', fontSize: 12, fontVariantNumeric: 'tabular-nums' } as CSSProperties,
 	th: { textAlign: 'left', fontWeight: 600, padding: '2px 6px 4px 0', borderBottom: '1px solid var(--rr-border)' } as CSSProperties,
 	thNum: { textAlign: 'right', fontWeight: 600, padding: '2px 0 4px 6px', borderBottom: '1px solid var(--rr-border)' } as CSSProperties,
@@ -127,6 +131,8 @@ export interface IOverviewViewProps {
 	onNewQuery(): void;
 	/** Open Add documents, or null where the mount cannot add documents. */
 	onAddDocuments: (() => void) | null;
+	/** The fields Collection read from a sample of chunks, or null before it did. */
+	fieldsRead: IFieldsEstimate | null;
 	/** The view shown first (tests). */
 	initialView?: OverviewViewId;
 }
@@ -176,9 +182,10 @@ export function OverviewView(props: IOverviewViewProps): React.ReactElement {
 }
 
 /** The Summary view. */
-const Summary: React.FC<IOverviewViewProps> = ({ rows, scopedRows, complete, scoped, onOpenTab, onNewQuery, onAddDocuments }) => {
+const Summary: React.FC<IOverviewViewProps> = ({ rows, scopedRows, complete, scoped, onOpenTab, onNewQuery, onAddDocuments, fieldsRead }) => {
 	const folders = useMemo(() => topFolders(scopedRows), [scopedRows]);
 	const fields = useMemo(() => documentFields(rows), [rows]);
+	const chunkFields = (fieldsRead?.rows ?? []).filter((f) => f.source === 'chunks');
 	const over = overLine({ loaded: scopedRows.length, complete, scoped });
 	return (
 		<>
@@ -246,7 +253,31 @@ const Summary: React.FC<IOverviewViewProps> = ({ rows, scopedRows, complete, sco
 								</tbody>
 							</table>
 						)}
-						<p style={local.note}>Chunk metadata fields are read from a sample in Collection.</p>
+						{chunkFields.length > 0 && fieldsRead !== null ? (
+							<>
+								<h3 style={local.subheading}>{`Chunk metadata, from ${formatCount(fieldsRead.chunksRead)} ${fieldsRead.chunksRead === 1 ? 'chunk' : 'chunks'} read`}</h3>
+								<table style={local.table}>
+									<thead>
+										<tr>
+											<th style={local.th}>Field</th>
+											<th style={local.th}>Type (estimated)</th>
+											<th style={local.thNum}>Has a value</th>
+										</tr>
+									</thead>
+									<tbody>
+										{chunkFields.map((f) => (
+											<tr key={f.name}>
+												<td style={local.td}>{f.name}</td>
+												<td style={local.td}>{f.type}</td>
+												<td style={local.tdNum}>{`${formatCount(f.coverage)} of ${formatCount(f.of)}`}</td>
+											</tr>
+										))}
+									</tbody>
+								</table>
+							</>
+						) : (
+							<p style={local.note}>Chunk metadata fields are read from a sample in Collection.</p>
+						)}
 						<div style={local.more}>
 							<Button small variant="secondary" onClick={() => onOpenTab('collection')}>
 								Read fields in Collection
@@ -328,6 +359,7 @@ export function OverviewPanel({ entry, model, actions, console: state, selection
 	// The documents the scope covers: the store filtered the listing; what it did not apply is matched here.
 	const scopedRows = useMemo(() => (dir.filter === null ? dir.rows : dir.rows.filter((r) => matches(r, dir.filter as IDocumentsFilter, clientKeys(dir.filter as IDocumentsFilter, dir.filterApplied, dir.filterIgnored)))), [dir]);
 	const openTab = (tab: WorkbenchTab): void => actions.openTab?.(tab);
+	const fieldsRead = useValueStore(entry.fields);
 	return (
 		<OverviewView
 			stats={state.stats}
@@ -357,6 +389,7 @@ export function OverviewPanel({ entry, model, actions, console: state, selection
 				openTab('query');
 			}}
 			onAddDocuments={onAddDocuments}
+			fieldsRead={fieldsRead}
 		/>
 	);
 }
