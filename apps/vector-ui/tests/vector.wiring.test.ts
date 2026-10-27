@@ -231,6 +231,7 @@ test('the scope: the listing asks for its conditions, its documents resolve from
 	assert.match(overview, /sample=\{selection\.connectionKey === entry\.key \? selection\.sampleModel : null\}/, "the charts read the map's sample");
 	assert.match(overview, /<StatsCharts [^>]*onScope=\{props\.onChartScope\}/, 'and a bar scopes the documents');
 	assert.match(overview, /onChartScope=\{\(filter\) => \{\s*onChartScope\(filter\);\s*openTab\('documents'\);/, 'then shows them');
+	assert.match(overview, /scoped && scope !== null \? \(directoryView\(dir, scope, '', cap\)\.scopeRows \?\? \[\]\) : dir\.rows/, "Top folders count the scope's documents as Documents and its folder rail do");
 	assert.match(view, /scopeWith\(scope, scope\?\.filter\.path_contains \?\? '', filter\)/, "a bar sets its kind of condition and keeps the scope's others");
 	assert.match(view, /const scopeFromChart = useCallback\(/, 'the charts are memoised: their click handler keeps its identity between renders');
 	assert.match(view, /const next = scopeWith\(scope, scope\?\.filter\.path_contains \?\? '', filter\);\s*const refused = checkScope\(next\);\s*if \(refused !== null\) announcer\.announce\(refused\);\s*else entry\.scope\.set\(next\);/, 'a bar the node would refuse is said, never sent');

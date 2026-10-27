@@ -51,7 +51,7 @@ import { DATA_BAR_TOKEN, TONE_EDGE } from '../vector/colors';
 import type { IStatsSlot } from '../vector/consoleStore';
 import { documentFields } from '../vector/fields';
 import type { IFieldsEstimate } from '../vector/fields';
-import { clientKeys, matches } from '../vector/filters';
+import { directoryView } from '../vector/filters';
 import type { IHealthSummary } from '../vector/health';
 import { insights, insightsLabel, overLine, topFolders } from '../vector/overview';
 import { formatCount } from '../vector/stats';
@@ -354,7 +354,12 @@ export interface IOverviewPanelProps extends IWorkbenchPanelProps {
 export function OverviewPanel({ entry, model, console: state, selection, scopeLine, health, median, onChartScope, onAddDocuments }: IOverviewPanelProps): React.ReactElement {
 	const dir = state.directory;
 	// The documents the scope covers: the store filtered the listing; what it did not apply is matched here.
-	const scopedRows = useMemo(() => (dir.filter === null ? dir.rows : dir.rows.filter((r) => matches(r, dir.filter as IDocumentsFilter, clientKeys(dir.filter as IDocumentsFilter, dir.filterApplied, dir.filterIgnored)))), [dir]);
+	// While the scope applies to the list, the documents it keeps, as Documents (and its folder rail) count them: the store
+	// filtered the listing, and what it did not apply is matched here. Otherwise every loaded document.
+	const scope = model.scope ?? null;
+	const scoped = scope !== null && scope.applyTo.documents;
+	const cap = model.limits.scope_keys_max;
+	const scopedRows = useMemo(() => (scoped && scope !== null ? (directoryView(dir, scope, '', cap).scopeRows ?? []) : dir.rows), [dir, scope, scoped, cap]);
 	// The console is in front already: showing one of its tabs is setting it.
 	const openTab = (tab: WorkbenchTab): void => entry.tab.set(tab);
 	const fieldsRead = useValueStore(entry.fields);
@@ -367,7 +372,7 @@ export function OverviewPanel({ entry, model, console: state, selection, scopeLi
 			scopedRows={scopedRows}
 			loading={dir.status === 'loading'}
 			complete={dir.status === 'done'}
-			scoped={dir.filter !== null}
+			scoped={scoped}
 			scopeLine={scopeLine}
 			scopeFilter={model.scope?.filter ?? null}
 			sample={selection.connectionKey === entry.key ? selection.sampleModel : null}
