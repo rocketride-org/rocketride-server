@@ -88,6 +88,11 @@ test('a resize keeps the zoom relative to the fit: shrinking and growing back tw
 	// The old rule (scale by the smaller of the two ratios) ratcheted: 1440 → 1300 → 1440 never came back.
 	const ratchet = (c: ICamera2D, a: IViewport, b: IViewport): number => c.scale * Math.min(b.width / a.width, b.height / a.height);
 	assert.ok(ratchet({ ...fitted, scale: ratchet(fitted, wide, narrow) }, narrow, wide) < fitted.scale);
+	// The legend collapsed and opened again (the canvas 1,020 x 434 to 553 and back): the same zoom, the same scale.
+	const open: IViewport = { width: 1020, height: 434 };
+	const shut: IViewport = { width: 1020, height: 553 };
+	const toggled = resizeCamera(resizeCamera(zoomed, bounds, open, shut, 28), bounds, shut, open, 28);
+	assert.ok(Math.abs(toggled.scale - zoomed.scale) < 1e-9 * zoomed.scale);
 	// Nothing visible: the camera is left as it was.
 	assert.deepEqual(resizeCamera(zoomed, null, wide, narrow, 28), zoomed);
 });

@@ -188,8 +188,8 @@ test('with sample_demo_1000.json drawn: the canvas has data-points 1000 on PCA, 
 	assert.equal(attrOf(out, 'vector-map-canvas', 'data-selection'), '');
 	assert.match(out, /role="toolbar" aria-label="Map controls"/);
 	assert.match(out, /aria-label="Map legend"/);
-	// The sample line is the legend's first line (it left the toolbar, which keeps one row).
-	assert.match(out, /aria-label="Map legend"[^>]*><p[^>]*>Showing 1,000 of 1,318 chunks \(random sample\) · 42 docs · seed 7<\/p>/);
+	// The sample line is the legend's header row, beside its disclosure (it left the toolbar, which keeps one row).
+	assert.match(out, /aria-label="Map legend"[^>]*><div style="[^"]*"><button[^>]*data-legend-toggle="">▾ Legend<\/button><span[^>]*>Showing 1,000 of 1,318 chunks \(random sample\) · 42 docs · seed 7<\/span>/);
 	assert.match(out, /role="tab" aria-selected="true"[^>]*>Point</);
 	assert.match(out, /Click a point or use the arrow keys/);
 });

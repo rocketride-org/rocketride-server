@@ -36,12 +36,17 @@
 // drawn is not listed. The view adds its lines (what a cluster is, the edges
 // drawn, how the sample's listing ended, the scope, an isolation) as notes,
 // and the draw again when the store refused to draw the sample for the
-// console's scope. Its height is fixed (map/styles.ts LEGEND_HEIGHT), the
-// same in every state: what does not fit scrolls inside it (then it is a tab
-// stop, so a keyboard reaches what is below), and the map never moves.
+// console's scope. A header row holds a disclosure ("Legend", aria-expanded,
+// open at first) and the sample line. Open, the legend's height is fixed
+// (map/styles.ts LEGEND_HEIGHT) and the same in every state: what does not fit
+// scrolls inside its body (then the body is a tab stop, so a keyboard reaches
+// what is below). Collapsed, it is the header row only
+// (LEGEND_COLLAPSED_HEIGHT), so the map gains the rest in one step; only the
+// user's toggle changes it. Open or collapsed is kept for the session, in
+// memory (every map's legend shares it; nothing is stored).
 // =============================================================================
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import type { LegendProps as ContractLegendProps } from '../contract/types';
 import type { IColouring, MapColourBy } from '../map/colours';
 import { edgeWidth, haloWidth, linkWidth, markWidth } from '../map/overlay';
@@ -223,6 +228,18 @@ export function keepTabStop(scrolls: boolean, focused: boolean): boolean {
 	return scrolls || focused;
 }
 
+/** Whether the legend is open: kept for the session, in memory only (each new legend starts as the last one was). */
+let openForSession = true;
+
+/**
+ * Remember the legend open or collapsed for the session.
+ *
+ * @param open - Open (true) or collapsed.
+ */
+export function rememberLegendOpen(open: boolean): void {
+	openForSession = open;
+}
+
 /**
  * The map legend.
  *
@@ -230,7 +247,9 @@ export function keepTabStop(scrolls: boolean, focused: boolean): boolean {
  * @returns The legend.
  */
 export function Legend(props: LegendProps): React.ReactElement {
-	const section = useRef<HTMLElement>(null);
+	const ids = useId().replace(/:/g, '');
+	const [open, setOpen] = useState(() => openForSession);
+	const section = useRef<HTMLDivElement>(null);
 	// A tab stop while it scrolls past its height (a keyboard must reach what is below), and while it holds the focus
 	// (removing the stop then would drop the focus to the page); measured when what it says changes, when its box
 	// changes size, and when the focus leaves it.
@@ -241,7 +260,7 @@ export function Legend(props: LegendProps): React.ReactElement {
 	};
 	const measureRef = useRef(measure);
 	measureRef.current = measure;
-	useEffect(() => measureRef.current(), [props.sample, props.colourBy, props.colouring, props.notes, props.marks, props.scopeRetry]);
+	useEffect(() => measureRef.current(), [props.sample, props.colourBy, props.colouring, props.notes, props.marks, props.scopeRetry, open]);
 	useEffect(() => {
 		const el = section.current;
 		if (!el || typeof ResizeObserver === 'undefined') return undefined;
@@ -260,75 +279,87 @@ export function Legend(props: LegendProps): React.ReactElement {
 	const more = props.colourBy === 'cluster' ? Math.max(0, groups.length - LEGEND_CLUSTERS) : 0;
 	const marks = markRows(props.marks, typeof window !== 'undefined' && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1);
 	const docs = sample.of.documents === null || sample.of.documents === undefined ? '—' : num(sample.of.documents);
+	const toggle = (): void => {
+		rememberLegendOpen(!open);
+		setOpen(!open);
+	};
 	return (
-		<section
-			ref={section}
-			aria-label="Map legend"
-			tabIndex={scrolls ? 0 : undefined}
-			onBlur={(event) => {
-				// The focus left the legend: drop the stop if it no longer scrolls.
-				const el = section.current;
-				if (el && !(event.relatedTarget instanceof Node && el.contains(event.relatedTarget))) setScrolls(keepTabStop(scrollsInside(el.scrollHeight, el.clientHeight), false));
-			}}
-			style={MAP_STYLES.legend}
-			data-knn-source={sample.knn_source}
-			data-colour-by={props.colourBy}
-		>
-			<p style={MAP_STYLES.note}>
-				{sampleLabel(sample)} · {docs} docs · seed {props.sample.seed}
-			</p>
-			{bias ? <p style={MAP_STYLES.note}>{bias}</p> : null}
-			{rows.length > 0 ? (
-				<ul aria-label="Colours" style={{ ...MAP_STYLES.list, display: 'flex', flexWrap: 'wrap', gap: '2px 14px', margin: '4px 0' }}>
-					{rows.map((entry) => (
-						<li key={entry.key} style={{ ...MAP_STYLES.small, display: 'inline-flex', alignItems: 'center' }}>
-							<span aria-hidden="true" style={MAP_STYLES.swatch(entry.colour, entry.outlined)} />
-							<span>{entry.label}</span>
-							<span style={{ marginLeft: 4 }}>({num(entry.count)})</span>
-						</li>
-					))}
-				</ul>
-			) : null}
-			{more > 0 ? <p style={MAP_STYLES.note}>{`and ${num(more)} more ${more === 1 ? 'group' : 'groups'}, each with its own colour (the Clusters tab lists them all)`}</p> : null}
-			{colouring?.ramp && rampStyle ? (
-				<div role="img" aria-label={`Colour ramp from ${colouring.ramp.low} to ${colouring.ramp.high}`} style={{ maxWidth: 320 }}>
-					<div style={rampStyle} />
-					<div style={{ ...MAP_STYLES.small, display: 'flex', justifyContent: 'space-between' }}>
-						<span>{colouring.ramp.low}</span>
-						<span>{colouring.ramp.high}</span>
-					</div>
-				</div>
-			) : null}
-			{colouring?.note ? <p style={MAP_STYLES.note}>{colouring.note}</p> : null}
-			{/* Two lines kept whatever is marked (all six marks fit in two at a legend 750 px wide or more, measured in
-			    Chrome), so selecting a point or showing a group does not resize the map. */}
-			<div style={{ minHeight: MARK_ROWS_HEIGHT, margin: '4px 0' }} data-legend-marks={marks.map((m) => m.key).join(' ')}>
-				{marks.length > 0 ? (
-					<ul aria-label="Marks" style={{ ...MAP_STYLES.list, display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
-						{marks.map((mark) => (
-							<li key={mark.key} style={{ ...MAP_STYLES.small, display: 'inline-flex', alignItems: 'center' }}>
-								{mark.picture}
-								<span>{mark.words}</span>
+		<section aria-label="Map legend" style={open ? MAP_STYLES.legend : MAP_STYLES.legendCollapsed} data-knn-source={sample.knn_source} data-colour-by={props.colourBy} data-legend-open={open ? '1' : '0'}>
+			<div style={MAP_STYLES.legendHead}>
+				<button id={`${ids}-toggle`} type="button" style={MAP_STYLES.legendToggle} aria-expanded={open} aria-controls={`${ids}-body`} onClick={toggle} data-legend-toggle="">
+					{open ? '▾' : '▸'} Legend
+				</button>
+				<span style={MAP_STYLES.legendLine} title={`${sampleLabel(sample)} · ${docs} docs · seed ${props.sample.seed}`}>
+					{sampleLabel(sample)} · {docs} docs · seed {props.sample.seed}
+				</span>
+			</div>
+			<div
+				ref={section}
+				id={`${ids}-body`}
+				role="group"
+				aria-labelledby={`${ids}-toggle`}
+				hidden={!open}
+				tabIndex={open && scrolls ? 0 : undefined}
+				onBlur={(event) => {
+					// The focus left the legend's body: drop the stop if it no longer scrolls.
+					const el = section.current;
+					if (el && !(event.relatedTarget instanceof Node && el.contains(event.relatedTarget))) setScrolls(keepTabStop(scrollsInside(el.scrollHeight, el.clientHeight), false));
+				}}
+				style={MAP_STYLES.legendBody}
+			>
+				{bias ? <p style={MAP_STYLES.note}>{bias}</p> : null}
+				{rows.length > 0 ? (
+					<ul aria-label="Colours" style={{ ...MAP_STYLES.list, display: 'flex', flexWrap: 'wrap', gap: '2px 14px', margin: '4px 0' }}>
+						{rows.map((entry) => (
+							<li key={entry.key} style={{ ...MAP_STYLES.small, display: 'inline-flex', alignItems: 'center' }}>
+								<span aria-hidden="true" style={MAP_STYLES.swatch(entry.colour, entry.outlined)} />
+								<span>{entry.label}</span>
+								<span style={{ marginLeft: 4 }}>({num(entry.count)})</span>
 							</li>
 						))}
 					</ul>
 				) : null}
-			</div>
-			<p style={MAP_STYLES.note}>
-				{pointCapLine(sample.mode, props.pointCap)} · {knnSourceLine(sample, props.backend)} · {DISTANCE_CAVEAT}
-			</p>
-			{(props.notes ?? []).map((line) => (
-				<p key={line} style={MAP_STYLES.note}>
-					{line}
-				</p>
-			))}
-			{props.scopeRetry ? (
+				{more > 0 ? <p style={MAP_STYLES.note}>{`and ${num(more)} more ${more === 1 ? 'group' : 'groups'}, each with its own colour (the Clusters tab lists them all)`}</p> : null}
+				{colouring?.ramp && rampStyle ? (
+					<div role="img" aria-label={`Colour ramp from ${colouring.ramp.low} to ${colouring.ramp.high}`} style={{ maxWidth: 320 }}>
+						<div style={rampStyle} />
+						<div style={{ ...MAP_STYLES.small, display: 'flex', justifyContent: 'space-between' }}>
+							<span>{colouring.ramp.low}</span>
+							<span>{colouring.ramp.high}</span>
+						</div>
+					</div>
+				) : null}
+				{colouring?.note ? <p style={MAP_STYLES.note}>{colouring.note}</p> : null}
+				{/* Two lines kept whatever is marked (all six marks fit in two at a legend 750 px wide or more, measured in
+			    Chrome), so selecting a point or showing a group does not resize the map. */}
+				<div style={{ minHeight: MARK_ROWS_HEIGHT, margin: '4px 0' }} data-legend-marks={marks.map((m) => m.key).join(' ')}>
+					{marks.length > 0 ? (
+						<ul aria-label="Marks" style={{ ...MAP_STYLES.list, display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
+							{marks.map((mark) => (
+								<li key={mark.key} style={{ ...MAP_STYLES.small, display: 'inline-flex', alignItems: 'center' }}>
+									{mark.picture}
+									<span>{mark.words}</span>
+								</li>
+							))}
+						</ul>
+					) : null}
+				</div>
 				<p style={MAP_STYLES.note}>
-					<button type="button" style={MAP_STYLES.button} data-scope-retry="" onClick={props.scopeRetry.onClick}>
-						{props.scopeRetry.label}
-					</button>
+					{pointCapLine(sample.mode, props.pointCap)} · {knnSourceLine(sample, props.backend)} · {DISTANCE_CAVEAT}
 				</p>
-			) : null}
+				{(props.notes ?? []).map((line) => (
+					<p key={line} style={MAP_STYLES.note}>
+						{line}
+					</p>
+				))}
+				{props.scopeRetry ? (
+					<p style={MAP_STYLES.note}>
+						<button type="button" style={MAP_STYLES.button} data-scope-retry="" onClick={props.scopeRetry.onClick}>
+							{props.scopeRetry.label}
+						</button>
+					</p>
+				) : null}
+			</div>
 		</section>
 	);
 }

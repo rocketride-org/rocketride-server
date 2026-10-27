@@ -21,8 +21,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { ClustersPanel } from '../src/components/ClustersPanel';
 import { DuplicatesPanel } from '../src/components/DuplicatesPanel';
 import { HeatStrip } from '../src/components/HeatStrip';
-import { LEGEND_CLUSTERS, Legend, keepTabStop, markRows, scrollsInside } from '../src/components/Legend';
-import { MapToolbar, STATUS_HEIGHT, TREE_HINT } from '../src/components/MapToolbar';
+import { LEGEND_CLUSTERS, Legend, keepTabStop, markRows, rememberLegendOpen, scrollsInside } from '../src/components/Legend';
+import { MOVABLE_ITEMS, MapToolbar, STATUS_HEIGHT, TOOLBAR_GAP, TREE_HINT } from '../src/components/MapToolbar';
 import { NeighbourList } from '../src/components/NeighbourList';
 import { OutliersBody, OutliersPanel } from '../src/components/OutliersPanel';
 import { PointCanvas } from '../src/components/PointCanvas';
@@ -35,9 +35,9 @@ import { COLOUR_MODES, clusterColours, colourPoints } from '../src/map/colours';
 import { dimMask, isolateMask } from '../src/map/isolate';
 import { removeTargetsOf } from '../src/map/model';
 import { outlierRows } from '../src/map/outliers';
-import { POPOVER_GAP, POPOVER_MARGIN, afterCancelFocus, clipArea, firstEnabled, focusHold, placePopover, popoverKey } from '../src/map/popover';
+import { POPOVER_GAP, POPOVER_MARGIN, afterCancelFocus, clipArea, firstEnabled, focusHold, placePopover, popoverKey, toolbarOverflow } from '../src/map/popover';
 import { STAGE_REMOVAL, pairLabel, removeAllLabel, removeOthersLabel } from '../src/map/reviewWording';
-import { LEGEND_HEIGHT } from '../src/map/styles';
+import { LEGEND_COLLAPSED_HEIGHT, LEGEND_HEAD_HEIGHT, LEGEND_HEIGHT } from '../src/map/styles';
 import { readPalette } from '../src/map/tokens';
 import { SelectionTab } from '../src/views/MapView';
 import { deepFreeze, loadSample, modelOf, pcaXY } from './support/map.samples';
@@ -161,7 +161,7 @@ test('MapToolbar: sizes capped by the node\'s limits, t-SNE disabled above 1,000
 	const idle = html(<MapToolbar {...base} query={{ enabled: true, reason: null }} />);
 	assert.match(idle, /<div style="[^"]*" data-map-status=""><span role="status"[^>]*><\/span><\/div>/, 'idle: the line is there, empty');
 	for (const out2 of [busy, idle]) {
-		assert.match(line(out2), new RegExp(`flex-basis:100%;height:${STATUS_HEIGHT}px`), 'its own line, at a fixed height');
+		assert.match(line(out2), new RegExp(`;height:${STATUS_HEIGHT}px;[^"]*flex:none`), 'its own line under the row, at a fixed height');
 		assert.doesNotMatch(out2, /position:absolute;top|position:fixed/, 'nothing floats over the map or the rows under the toolbar');
 	}
 	// Busy or idle, the markup differs only in the words, Cancel and what busy disables: nothing moves.
@@ -244,7 +244,7 @@ test('PointCanvas root carries the browser lanes\' attribute table: mode, layout
 
 test('the legend\'s first line states what the sample is drawn from, its documents and its seed; Advanced says which seed New sample draws', () => {
 	const legend = (sample: typeof demo): string => html(<Legend sample={sample} colourBy="document" pointCap={2000} backend="pgvector" />);
-	assert.match(legend(demo), /<p[^>]*>Showing 1,000 of 1,318 chunks \(random sample\) · 42 docs · seed 7<\/p>/);
+	assert.match(legend(demo), /data-legend-toggle="">▾ Legend<\/button><span style="[^"]*" title="[^"]*">Showing 1,000 of 1,318 chunks \(random sample\) · 42 docs · seed 7<\/span>/, 'the header row, beside the disclosure');
 	assert.match(legend(modelOf(demo.result, { seed: 8 })), /· seed 8</);
 	const unknown = modelOf({ ...demo.result, of: { chunks: null, documents: null } } as unknown as ISampleResult);
 	assert.match(legend(unknown), /the store did not say how many it holds\) · — docs · seed 7/);
@@ -631,6 +631,56 @@ test('the status line holds the view\'s notice in its live region while nothing 
 	assert.equal(line(running), line(idle));
 });
 
+test('the toolbar is one row at any width: what has no room moves into More by measured width (Export and Views first, then the selects), never wrapped', () => {
+	// Measured in Chrome (RocketRide dark, system-ui) from the browser-rendered toolbar.
+	const widths = [['points', 158.7], ['layout', 167.9], ['colour', 191.2], ['query', 212.9], ['table', 53.7], ['advanced', 93.2], ['extras', 147.7]] as const;
+	const fit = (row: number): number => toolbarOverflow({ available: row, widths, movable: MOVABLE_ITEMS, more: 63.3, gap: TOOLBAR_GAP });
+	assert.equal(fit(1340), 0, '1440, the full app: everything on the row');
+	assert.equal(fit(1088), 0, '1440, the dev tool');
+	assert.equal(fit(1062), 0, 'room for the items (1,061.3 px)');
+	assert.equal(fit(1061), 1, 'a third of a pixel short: Export and Views go, never a squeezed item (measured: that wrapped Colour by)');
+	// The full app with Add documents open: Views alone went to a second row (75 to 109 px), so the row there was at
+	// least 986.6 px (everything up to Export) and under 1,061.3. Across that whole range Export and Views go to More.
+	for (let row = 987; row <= 1061; row += 1) assert.equal(fit(row), 1, `Add documents open, a ${row} px row: Export and Views in More`);
+	assert.equal(fit(981), 1);
+	assert.equal(fit(940), 2, 'then Colour by');
+	assert.equal(fit(680), 3, 'then Layout');
+	assert.equal(fit(580), 4, 'then Points: the query, Table, Advanced and More stay');
+	assert.equal(fit(300), 4, 'nothing more can move');
+	// Without the view's menus there is nothing to move first.
+	assert.equal(toolbarOverflow({ available: 1000, widths: widths.slice(0, 6), movable: MOVABLE_ITEMS.filter((k) => k !== 'extras'), more: 63.3, gap: TOOLBAR_GAP }), 0);
+	assert.deepEqual([...MOVABLE_ITEMS], ['extras', 'colour', 'layout', 'points']);
+	// Rendered with Export and Views in More (the aside-open width), More open.
+	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
+	const extras = (
+		<>
+			<button type="button" data-test-extra="export">Export ▾</button>
+			<button type="button" data-test-extra="views">Views ▾</button>
+		</>
+	);
+	const all = html(<MapToolbar {...base} extras={extras} />);
+	const rowOf = (markup: string): string => /<div style="([^"]*)" data-map-controls="">/.exec(markup)?.[1] ?? '';
+	assert.match(rowOf(all), /display:flex;flex-wrap:nowrap;align-items:center;gap:6px;min-width:0/, 'one row, never wrapped');
+	assert.doesNotMatch(all, /MoreControls/, 'no More while everything fits');
+	const aside = html(<MapToolbar {...base} extras={extras} initialMoved={1} initialMore />);
+	const row = /data-map-controls="">([\s\S]*?)<div style="[^"]*" data-map-status="">/.exec(aside)?.[1] ?? '';
+	assert.deepEqual([...row.matchAll(/data-toolbar-item="([a-z]+)"/g)].map((m) => m[1]), ['points', 'layout', 'colour', 'query', 'table', 'advanced', 'more']);
+	assert.match(aside, /data-component="MoreControls" data-toolbar-item="more"><button type="button" style="[^"]*" aria-expanded="true" aria-controls="[^"]*">More ▾<\/button><div[^>]*role="group" aria-label="More map controls"[^>]*style="[^"]*max-height:none;overflow-y:visible"[^>]*data-advanced-panel="">/, 'its panel never clips the menus it holds');
+	const more = /aria-label="More map controls"([\s\S]*)$/.exec(aside)?.[1] ?? '';
+	assert.ok(more.includes('data-test-extra="export"') && more.includes('data-test-extra="views"'), 'Export and Views in More');
+	assert.equal((aside.match(/data-test-extra="export"/g) ?? []).length, 1, 'once, not on the row too');
+	// Narrow: the selects go too; the query, Table and Advanced stay on the row.
+	const narrow = html(<MapToolbar {...base} extras={extras} initialMoved={4} initialMore />);
+	const narrowRow = /data-map-controls="">([\s\S]*?)<div style="[^"]*" data-map-status="">/.exec(narrow)?.[1] ?? '';
+	assert.deepEqual([...narrowRow.matchAll(/data-toolbar-item="([a-z]+)"/g)].map((m) => m[1]).filter((k) => k !== 'points' && k !== 'layout' && k !== 'colour').slice(0, 4), ['query', 'table', 'advanced', 'more']);
+	assert.match(/aria-label="More map controls"([\s\S]*)$/.exec(narrow)?.[1] ?? '', /aria-label="Points"[\s\S]*aria-label="Layout"[\s\S]*aria-label="Colour by"/);
+	// The measure: after every render and on every change of the row's width, before paint.
+	const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'MapToolbar.tsx'), 'utf8');
+	assert.match(source, /useBrowserLayoutEffect\(\(\) => fitRef\.current\(\)\);/);
+	assert.match(source, /new ResizeObserver\(\(\) => fitRef\.current\(\)\)/);
+	assert.match(source, /toolbarOverflow\(\{ available: el\.clientWidth,/);
+});
+
 test('a failure on the status line says "Failed:" in words and is the toolbar\'s alert (always there, visually hidden), read once', () => {
 	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
 	const line = (markup: string): string => /<div style="([^"]*)" data-map-status="">/.exec(markup)?.[1] ?? '';
@@ -647,9 +697,41 @@ test('a failure on the status line says "Failed:" in words and is the toolbar\'s
 	assert.equal(line(failed), line(html(<MapToolbar {...base} notice={null} />)), 'the same line');
 });
 
+test('the legend collapses to its header row by its own disclosure, open at first; open or collapsed is kept for the session, in memory', () => {
+	const legend = (marks: Parameters<typeof markRows>[0] = null): string => html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" marks={marks} />);
+	const section = (markup: string): string => /<section aria-label="Map legend" style="([^"]*)"/.exec(markup)?.[1] ?? '';
+	const open = legend();
+	assert.match(open, /<button id="([^"]*)-toggle" type="button" style="[^"]*" aria-expanded="true" aria-controls="\1-body" data-legend-toggle="">▾ Legend<\/button>/);
+	assert.match(open, /data-legend-open="1"/);
+	assert.ok(section(open).includes(`height:${LEGEND_HEIGHT}px`));
+	try {
+		rememberLegendOpen(false);
+		const shut = legend();
+		assert.match(shut, /aria-expanded="false" aria-controls="[^"]*-body" data-legend-toggle="">▸ Legend<\/button>/);
+		assert.match(shut, /<div id="[^"]*-body" role="group" aria-labelledby="[^"]*-toggle" hidden=""/, 'the body is hidden, not gone (the disclosure controls it)');
+		assert.ok(section(shut).includes(`height:${LEGEND_COLLAPSED_HEIGHT}px`));
+		// One fixed row whatever is drawn, the sample line still on it.
+		assert.equal(section(legend({ outliers: 3, duplicates: 40, query: { top: 10, drawn: 10 } })), section(shut));
+		assert.match(shut, /Showing 1,000 of 1,318 chunks \(random sample\) · 42 docs · seed 7<\/span>/);
+	} finally {
+		rememberLegendOpen(true);
+	}
+	// The map gains the rest in one step: no transition, one header row of 24 px (and the border).
+	assert.equal(LEGEND_HEAD_HEIGHT, 24);
+	assert.equal(LEGEND_COLLAPSED_HEIGHT, 25);
+	assert.equal(LEGEND_HEIGHT - LEGEND_COLLAPSED_HEIGHT, 119);
+	assert.doesNotMatch(section(open), /transition/);
+	const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'Legend.tsx'), 'utf8');
+	assert.match(source, /const \[open, setOpen\] = useState\(\(\) => openForSession\);/, 'a new legend starts as the last one was');
+	assert.match(source, /rememberLegendOpen\(!open\);\s*setOpen\(!open\);/);
+	assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB/, 'kept in memory only');
+});
+
 test('the legend has one fixed height in every state and scrolls inside itself, a tab stop only while it scrolls, so the map never moves under it', () => {
 	const out = html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" notes={Array.from({ length: 12 }, (_, i) => `note ${i}`)} />);
-	assert.match(out, new RegExp(`<section aria-label="Map legend" style="[^"]*;height:${LEGEND_HEIGHT}px;box-sizing:border-box;overflow-y:auto`), 'not measured yet (a server render): no tab stop');
+	assert.match(out, new RegExp(`<section aria-label="Map legend" style="[^"]*;height:${LEGEND_HEIGHT}px;box-sizing:border-box;flex:none;display:flex;flex-direction:column"`));
+	// Its body scrolls under the header row; not measured yet (a server render): no tab stop.
+	assert.match(out, /<div id="[^"]*-body" role="group" aria-labelledby="[^"]*-toggle" style="flex:1;min-height:0;overflow-y:auto;padding:0 10px 8px">/);
 	assert.doesNotMatch(out, /max-height/, 'a fixed height, not a cap');
 	assert.equal(LEGEND_HEIGHT, 144);
 	// The same style whatever the legend lists: no marks, a query's marks, every mark.
@@ -662,7 +744,7 @@ test('the legend has one fixed height in every state and scrolls inside itself, 
 	assert.equal(scrollsInside(132, 132), false);
 	assert.equal(scrollsInside(133, 132), false, 'a pixel of rounding is not scrolling');
 	const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'Legend.tsx'), 'utf8');
-	assert.match(source, /tabIndex=\{scrolls \? 0 : undefined\}/);
+	assert.match(source, /tabIndex=\{open && scrolls \? 0 : undefined\}/);
 	assert.match(source, /new ResizeObserver\(\(\) => measureRef\.current\(\)\)/, 'measured again when its box changes');
 	// The stop stays while the legend holds the focus (taking it away would drop the focus to the page), and goes
 	// once the focus leaves a legend that no longer scrolls.

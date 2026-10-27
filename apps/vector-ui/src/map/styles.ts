@@ -68,10 +68,16 @@ export function floatBorder(palette: IMapPalette | null): string {
  * The legend's height, CSS pixels, the same in every state (a query landing, a selection, edges on), so the map
  * never shrinks or moves under it. The smallest that holds the common states whole at 1440 (measured in Chrome,
  * RocketRide dark, a 1,020 px legend beside the side panel): Document colouring 142, a placed query 137, a
- * selection 142, Cluster colouring with its note 144. More (edges with their note, a narrower dev-tool frame)
- * scrolls inside it.
+ * selection 142, Cluster colouring with its note 144 (re-measured with the header row: the four still fit whole).
+ * More (edges with their note, a narrower dev-tool frame) scrolls inside it.
  */
 export const LEGEND_HEIGHT = 144;
+
+/** The legend's header row (its disclosure and the sample line), CSS pixels. */
+export const LEGEND_HEAD_HEIGHT = 24;
+
+/** The collapsed legend: its border and its header row only, the same in every state. */
+export const LEGEND_COLLAPSED_HEIGHT = LEGEND_HEAD_HEIGHT + 1;
 
 /** Style objects. */
 export const MAP_STYLES = {
@@ -105,8 +111,14 @@ export const MAP_STYLES = {
 	th: { textAlign: 'left', fontWeight: 700, fontSize: 11.5, padding: '4px 6px', borderBottom: '1px solid var(--rr-border)', position: 'sticky', top: 0, background: 'var(--rr-bg-paper)' } as CSSProperties,
 	td: { padding: '3px 6px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'top' } as CSSProperties,
 	tooltip: { position: 'absolute', pointerEvents: 'none', maxWidth: 320, padding: '6px 8px', borderRadius: 6, background: 'var(--rr-bg-paper)', color: 'var(--rr-text-primary)', border: `1px solid var(${OUTLINE_TOKEN})`, boxShadow: FLOAT_SHADOW, fontSize: 12, lineHeight: 1.4, zIndex: 2 } as CSSProperties,
-	// One fixed height in every state: what does not fit scrolls inside the legend, and the map never moves.
-	legend: { padding: '8px 10px', borderTop: '1px solid var(--rr-border)', background: 'var(--rr-bg-paper)', height: LEGEND_HEIGHT, boxSizing: 'border-box', overflowY: 'auto', flex: 'none' } as CSSProperties,
+	// One fixed height in every state, open (LEGEND_HEIGHT) or collapsed (its header row): what does not fit scrolls
+	// inside the legend's body, and only the user's own toggle changes the map's height (no transition: one step).
+	legend: { borderTop: '1px solid var(--rr-border)', background: 'var(--rr-bg-paper)', height: LEGEND_HEIGHT, boxSizing: 'border-box', flex: 'none', display: 'flex', flexDirection: 'column' } as CSSProperties,
+	legendCollapsed: { borderTop: '1px solid var(--rr-border)', background: 'var(--rr-bg-paper)', height: LEGEND_COLLAPSED_HEIGHT, boxSizing: 'border-box', flex: 'none', display: 'flex', flexDirection: 'column' } as CSSProperties,
+	legendHead: { height: LEGEND_HEAD_HEIGHT, flex: 'none', display: 'flex', alignItems: 'center', gap: 8, padding: '0 10px', minWidth: 0, overflow: 'hidden', whiteSpace: 'nowrap' } as CSSProperties,
+	legendToggle: { ...text, height: 20, padding: '0 6px', borderRadius: 4, border: '1px solid var(--rr-border-input, var(--rr-border))', background: 'var(--rr-bg-default)', fontSize: 11.5, fontWeight: 600, cursor: 'pointer', flex: 'none' } as CSSProperties,
+	legendLine: { ...text, fontSize: 11.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
+	legendBody: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '0 10px 8px' } as CSSProperties,
 	/**
 	 * A colour swatch; an outlined colour gets the outline ring.
 	 *

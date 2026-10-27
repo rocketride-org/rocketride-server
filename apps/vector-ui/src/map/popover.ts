@@ -214,3 +214,24 @@ export function firstEnabled(controls: ReadonlyArray<{ disabled: boolean; hidden
 export function afterCancelFocus(layout: { present: boolean; disabled: boolean }): 'layout' | 'toolbar' {
 	return layout.present && !layout.disabled ? 'layout' : 'toolbar';
 }
+
+/**
+ * How many of the toolbar's movable items go into its More menu so its row fits the width it has: one row, never
+ * wrapped. Items go in `movable` order (Export and Views first, then the selects from the right); More takes a
+ * place in the row once anything is in it. Widths are as measured while each item was in the row.
+ *
+ * @param input - The row's width, each item's width in row order, the movable keys, More's width and the gap.
+ * @returns How many of `movable` go into More (0: everything fits; all of them when even that does not fit).
+ */
+export function toolbarOverflow(input: { available: number; widths: ReadonlyArray<readonly [string, number]>; movable: readonly string[]; more: number; gap: number }): number {
+	const rowWidth = (moved: number): number => {
+		const out = new Set(input.movable.slice(0, moved));
+		const kept = input.widths.filter(([key]) => !out.has(key));
+		const count = kept.length + (moved > 0 ? 1 : 0);
+		return kept.reduce((sum, [, width]) => sum + width, 0) + (moved > 0 ? input.more : 0) + Math.max(0, count - 1) * input.gap;
+	};
+	// No slack: a row a fraction of a pixel short would squeeze its items (measured: 1,061.3 px of items in a 1,061 px
+	// row wrapped the Colour by label, 28 to 33 px).
+	for (let moved = 0; moved < input.movable.length; moved += 1) if (rowWidth(moved) <= input.available) return moved;
+	return input.movable.length;
+}
