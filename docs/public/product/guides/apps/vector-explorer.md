@@ -630,8 +630,8 @@ with the reason, when the store node cannot sample; the console is unaffected.
   than asked for. Below it a glyph
   names each kind of mark that is drawn: similarity edges (fainter: less
   similar), the selected point's nearest chunks, outliers, the query's star and
-  rays, near-duplicate pairs and a shown duplicate group's rings. The legend's
-  height is capped, and it scrolls inside itself past that.
+  rays, near-duplicate pairs and a shown duplicate group's rings. The legend is a box of a fixed
+  height (144 px) that scrolls inside itself.
 - **Layout.** The first picture is a PCA projection computed on the node.
   **Neighbour graph** refines it in your browser by pulling each chunk towards
   its nearest neighbours, and is kept only when it preserves neighbours at
@@ -693,7 +693,8 @@ with the reason, when the store node cannot sample; the console is unaffected.
   duplicate group, an answer's sources) or a placed query fades the other points,
   and the edges, outlier rings and duplicate lines that touch only faded points,
   to a quarter of their colour; hovering a point of a cluster, while clusters are
-  shown, fades the other clusters. The lit marks keep their colour, and what is
+  shown, fades the other clusters, and the cluster stays lit across the gaps
+  between its points. The lit marks keep their colour, and what is
   faded is below the contrast they keep, on purpose. The PNG export shows what is
   drawn on screen at that moment.
 - **Isolate, Show all, Expand by neighbours.** Show only the selection or a

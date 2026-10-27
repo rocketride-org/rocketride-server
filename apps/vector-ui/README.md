@@ -402,7 +402,7 @@ highlight** or **Clear selection** while something is lit, so nothing in the
 toolbar moves when a run starts. Escape on the map does the same one step at a
 time: the lasso, then a highlight (an answer's sources, Show on map, a duplicate
 group, a query's fading), then the selected point. Under the map, the
-legend (capped in height; it scrolls inside itself past that) says how many of how many chunks are shown ("Showing 1,000 of 1,318
+legend (a box of a fixed height, 144 px, that scrolls inside itself) says how many of how many chunks are shown ("Showing 1,000 of 1,318
 chunks (random sample) · 42 docs · seed 7") and shows a glyph for each kind of
 mark that is drawn: similarity edges (fainter: less similar), the selected
 point's nearest chunks, outliers, the query's star and rays, near-duplicate
@@ -423,7 +423,7 @@ pairs, and a shown duplicate group's rings.
   **Expand selected** adds the selected point's own. Selecting a point, a
   highlighted set (a lasso, a document, a duplicate group, an answer's sources)
   or a placed query fades the other points and the edges between them, and
-  hovering a point of a cluster fades the other clusters; what is faded is
+  hovering a point of a cluster fades the other clusters, and keeps them faded across the gaps between its points; what is faded is
   below the contrast the lit marks keep, on purpose.
 - **Isolate** shows only the lasso selection or a cluster ("Showing 212 of
   1,000"), **Expand by neighbours** grows it by one ring, **Show all** brings
