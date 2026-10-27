@@ -36,7 +36,26 @@ export interface ChatMessage {
 	 * Queued rows are always the last rows of the list. A load clears the flag.
 	 */
 	queued?: true;
+	/** On a bot row: a card under the bubble, saved with the row. The view shows it; the host's onCardAction handles its links and buttons. */
+	card?: ChatCard;
 }
+
+/** A card under a bot row: how the request that wrote it ended. The shell knows nothing of what it means. */
+export interface ChatCard {
+	/** The colour of its heading. */
+	tone: 'success' | 'danger' | 'info' | 'neutral';
+	/** The heading ("Done", "Needs you"). */
+	title: string;
+	/** Short lines under the heading. */
+	lines?: string[];
+	/** Workspace paths, shown as links. */
+	files?: string[];
+	/** Buttons; a disabled one shows but does nothing. */
+	actions?: Array<{ id: string; label: string; disabled?: boolean }>;
+}
+
+/** A press on a card: one of its file links, or one of its buttons by id. */
+export type ChatCardAction = { kind: 'file'; path: string } | { kind: 'action'; id: string };
 
 // =============================================================================
 // VIEW PROPS
@@ -64,6 +83,8 @@ export interface IChatViewProps {
 	leadingInputSlot?: ReactNode;
 	/** Turn controls from `useChatMessages().turn`: Stop (and Esc) while a turn runs, and Edit and Remove on queued messages. Without it the view is v0's. */
 	turn?: ChatTurnView;
+	/** Handles a press on a row's card. Without it the card's links and buttons show disabled. */
+	onCardAction?: (messageId: number, action: ChatCardAction) => void;
 }
 
 // =============================================================================

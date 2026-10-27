@@ -47,6 +47,7 @@ import type { AgentSessionFile, AgentSessionMeta } from './sessions';
 // TEMPORARY (spec §11): delete when Rod's wiring lands
 import { StandinPipelines } from './standin';
 import { looksLikeCredential, redactText } from './toolkits/common';
+import { choiceAction, CONTINUE, CONTINUE_TEXT, failedTurn, OPEN_VARIABLES, redactDeep, TurnError, turnCard, type RunRecord, type TurnCardAction, type TurnRecord, type TurnResult } from './turn';
 import type { AppPrompts } from './wave/plan';
 
 export type { AgentSessionFile, AgentSessionMeta } from './sessions';
@@ -67,8 +68,12 @@ export interface AgentOptions {
 	prompts?: AppPrompts;
 	/** The token of a running LLM pipeline (default: the stand-in pipeline, TEMPORARY). */
 	token?: string;
-	/** The conversation the request belongs to; names its stand-in pipeline (TEMPORARY). */
+	/** The conversation the request belongs to; names its stand-in pipeline (TEMPORARY), and owns the runs the request starts. */
 	conversationId?: string;
+	/** The turn's id (default: a new one). */
+	turnId?: string;
+	/** The runs the conversation started; the request adds the ones it starts. */
+	runs?: RunRecord[];
 }
 
 // TEMPORARY (spec §11): delete when Rod's wiring lands
@@ -82,9 +87,11 @@ const standin = new StandinPipelines(getClient);
  * @param request - The user's request text.
  * @param callback - Receives each output chunk as (type, content).
  * @param options - The chat turn, the app's prompts, and the model pipeline.
+ * @returns How the turn ended.
+ * @throws A TurnError when the model fails before the run gathered anything.
  */
-export async function agent(request: string, callback: AgentCallback, options: AgentOptions): Promise<void> {
-	const { turn, prompts = BUILDER_PROMPTS, token: given, conversationId = crypto.randomUUID() } = options;
+export async function agent(request: string, callback: AgentCallback, options: AgentOptions): Promise<TurnResult> {
+	const { turn, prompts = BUILDER_PROMPTS, token: given, conversationId = crypto.randomUUID(), turnId, runs } = options;
 	// TEMPORARY (spec §11): delete when Rod's wiring lands
 	// step: a given token is used as is; without one, the conversation's stand-in pipeline answers (and restarts on a failure)
 	const token = given ? async () => given : () => standin.token(conversationId);
@@ -93,7 +100,7 @@ export async function agent(request: string, callback: AgentCallback, options: A
 		: async () => {
 				await standin.restart(conversationId);
 			};
-	await runAgent(request, callback, { history: [...turn.history], prompts, token, onPipelineError, signal: turn.signal, takeQueued: () => turn.takeQueued(), ask: (card) => turn.ask(card) }, { host: getAgentHost(), client: getClient });
+	return runAgent(request, callback, { history: [...turn.history], prompts, token, onPipelineError, signal: turn.signal, takeQueued: () => turn.takeQueued(), ask: (card) => turn.ask(card), turnId, conversationId, runs }, { host: getAgentHost(), client: getClient });
 }
 
 // =============================================================================
@@ -170,6 +177,30 @@ function scopeName(scopeKey: string, name?: string): string {
 }
 
 /**
+ * What the model reads under a reply that answers a needs-you request, so a
+ * late or second answer can be told apart.
+ *
+ * @param id - The request's id.
+ * @returns The note.
+ */
+function answeringNote(id: string): string {
+	return `(answering request ${id})`;
+}
+
+/** The start of the row that closes a turn the Agent tab closed on; the model reads it as a stop by the user. */
+const CLOSED_TAB = 'Stopped by you: the Agent tab closed.';
+
+/** What a card press may do outside the session: open a file, open Variables, or send a message. */
+export interface CardActionHandlers {
+	/** Opens a workspace file in its editor. */
+	openFile(path: string): void;
+	/** Opens the Variables overlay. */
+	openVariables(): void;
+	/** Sends a message as the user, as the composer does. */
+	send(text: string): void;
+}
+
+/**
  * One agent conversation. The mounted tab provider owns its instance:
  * Documents keeps open tabs mounted, so switching tabs never unmounts a
  * conversation, and reopening a closed tab reloads from disk via
@@ -189,10 +220,24 @@ export class AgentSession {
 	messages: ChatMessage[];
 	/** The workspace scope the conversation runs in; set by its first request, unset in sessions saved before scopes. */
 	scopeKey?: string;
+	/** Every turn that ended, linked to the row that closes it, oldest first. A version 1 file has none. */
+	readonly turns: TurnRecord[];
+	/** The pipeline runs this conversation started, which Auto may stop or restart. A version 1 file has none. */
+	readonly runsStarted: RunRecord[];
 	/** Whether the conversation has a session file (loaded from one, or saved since). */
 	private stored = false;
 	/** What screen() sent in place of a message with a key, each with what the key looked like. */
 	private readonly withheld = new Map<string, string>();
+	/** Turns that ended and have no row linked yet, each with the index of its opening user row. */
+	private readonly pending: Array<{ turn: TurnResult; opening: number }> = [];
+	/** How many turns are running. */
+	private running = 0;
+	/** Set once the Agent tab unmounted: from then on a turn that ends saves itself. */
+	private detached = false;
+	/** The request a card button answered, while its reply is on the way. */
+	private claimed: string | null = null;
+	/** The last save, so saves land in order. */
+	private saving: Promise<void> = Promise.resolve();
 
 	/**
 	 * Builds an in-memory session; private — hosts go through the statics.
@@ -203,14 +248,18 @@ export class AgentSession {
 	 * @param contextRefs - Workspace-relative context paths.
 	 * @param messages - The stored conversation.
 	 * @param scopeKey - The workspace scope it runs in, when known.
+	 * @param turns - The turns, linked to their rows.
+	 * @param runsStarted - The runs the conversation started.
 	 */
-	private constructor(sessionId: string, title: string, date: number, contextRefs: string[], messages: ChatMessage[], scopeKey?: string) {
+	private constructor(sessionId: string, title: string, date: number, contextRefs: string[], messages: ChatMessage[], scopeKey?: string, turns: TurnRecord[] = [], runsStarted: RunRecord[] = []) {
 		this.sessionId = sessionId;
 		this.title = title;
 		this.date = date;
 		this.contextRefs = contextRefs;
 		this.messages = messages;
 		this.scopeKey = scopeKey;
+		this.turns = turns;
+		this.runsStarted = runsStarted;
 	}
 
 	// ── Statics — session management ─────────────────────────────────────
@@ -257,7 +306,9 @@ export class AgentSession {
 			throw err;
 		}
 		const stored = JSON.parse(raw) as AgentSessionFile;
-		const session = new AgentSession(sessionId, stored.title ?? UNTITLED, stored.date ?? Date.now(), stored.contextRefs ?? [], stored.messages ?? [], stored.scopeKey);
+		// step: a version 1 file has no turns and no runs, so its runs are nobody's
+		const v2 = stored.version === 2;
+		const session = new AgentSession(sessionId, stored.title ?? UNTITLED, stored.date ?? Date.now(), stored.contextRefs ?? [], stored.messages ?? [], stored.scopeKey, v2 ? (stored.turns ?? []) : [], v2 ? (stored.runsStarted ?? []) : []);
 		session.stored = true;
 		return session;
 	}
@@ -310,12 +361,44 @@ export class AgentSession {
 	 * @param text - The user's request.
 	 * @param onStatus - The chat's live status sink (the hook's second `request` argument). With it, each `thinking` chunk goes to it as it arrives and is not returned; without it, every chunk is returned.
 	 * @param turn - The running chat turn (the hook's third `request` argument). The hook always passes it; it is optional only because the shell's v0 `request` type is frozen.
-	 * @returns One TextResult per agent output chunk that was not sent to the sink.
-	 * @throws When no turn is passed, when the conversation belongs to another scope than the host's, or when the request looks like it holds a key; the hook shows the message as an error row, and the model is never called.
+	 * @returns One TextResult per agent output chunk that was not sent to the sink, and how the turn ended.
+	 * @throws When no turn is passed, when the conversation belongs to another scope than the host's, when the request looks like it holds a key, or when the model fails before the run gathered anything; the hook shows the message as an error row. Every turn that started still ends in `turns`.
 	 */
-	async execute(text: string, onStatus?: AgentCallback, turn?: ChatTurn): Promise<TextResult[]> {
+	async execute(text: string, onStatus?: AgentCallback, turn?: ChatTurn): Promise<{ results: TextResult[]; turn: TurnResult }> {
 		// queued turns can chain with no idle save between them, so this.messages may miss the turn before; the turn's history never does
 		if (!turn) throw new Error('AgentSession.execute runs inside a chat turn: pass the turn useChatMessages hands its request.');
+		// step: one terminal path: whatever happens below, the turn ends here once, refused, failed, stopped or answered
+		const turnId = crypto.randomUUID();
+		const opening = turn.history.length;
+		let result: TurnResult | undefined;
+		let started = false;
+		this.running++;
+		try {
+			const { results, turn: ended } = await this.run(text, onStatus, turn, turnId, () => {
+				started = true;
+			});
+			result = ended;
+			return { results, turn: ended };
+		} catch (err) {
+			result = err instanceof TurnError ? err.turn : failedTurn(turnId, err, !started, this.scopeKey);
+			throw err;
+		} finally {
+			this.running--;
+			if (result) this.ended(result, opening);
+		}
+	}
+
+	/**
+	 * The body of execute: the scope rule, the title, the key check, then the run.
+	 *
+	 * @param text - The user's request.
+	 * @param onStatus - The chat's live status sink.
+	 * @param turn - The running chat turn.
+	 * @param turnId - The turn's id.
+	 * @param starting - Called once the message passed every check, just before the run.
+	 * @returns The collected rows and the turn's result.
+	 */
+	private async run(text: string, onStatus: AgentCallback | undefined, turn: ChatTurn, turnId: string, starting: () => void): Promise<{ results: TextResult[]; turn: TurnResult }> {
 		// step: a conversation runs in the scope it started in; the chat shows the refusal as an error
 		const host = getAgentHost();
 		const scopeKey = host.scopeKey;
@@ -342,34 +425,212 @@ export class AgentSession {
 		// step: a request that looks like it holds a key, or that screen() sent without one, never reaches the model
 		const kind = looksLikeCredential(text) ?? this.withheld.get(text);
 		if (kind) throw new Error(pastedKeyMessage(kind));
+		// step: this message is the user's reply to an open needs-you request, so it answers it, and the model reads which
+		const answering = this.takeRequest(turnId);
+		starting();
 		// step: thinking streams live to the sink; the rest is collected into renderable rows
 		const { callback, results } = routeChunks(onStatus);
 		// TEMPORARY (spec §11): delete when Rod's wiring lands
-		await agent(text, callback, { turn, conversationId: this.sessionId });
-		return results;
+		const ended = await agent(answering ? `${text}\n\n${answeringNote(answering)}` : text, callback, { turn, conversationId: this.sessionId, turnId, runs: this.runsStarted });
+		return { results, turn: ended };
+	}
+
+	/**
+	 * Marks every open needs-you request answered by this turn. Only the next
+	 * user message after a needs-you turn answers it; later presses on its
+	 * card do nothing.
+	 *
+	 * @param turnId - The turn whose message answers.
+	 * @returns The id of the request it answers, or null when none was open.
+	 */
+	private takeRequest(turnId: string): string | null {
+		this.claimed = null;
+		let answered: string | null = null;
+		for (const turn of [...this.turns, ...this.pending.map((p) => p.turn)]) {
+			if (!turn.request || turn.request.answeredBy !== undefined) continue;
+			turn.request = { ...turn.request, answeredBy: turnId };
+			answered = turn.request.id;
+		}
+		return answered;
+	}
+
+	/**
+	 * A turn ended. It waits for its closing row, which the chat writes after
+	 * the request settles. When the chat already wrote it (Stop's grace ran out
+	 * first), or the Agent tab is gone, nothing else saves the conversation, so
+	 * the turn saves it here.
+	 *
+	 * @param turn - How the turn ended.
+	 * @param opening - The index of the turn's opening user row.
+	 */
+	private ended(turn: TurnResult, opening: number): void {
+		const result: TurnResult = this.detached && turn.outcome === 'stopped' ? { ...turn, reason: 'unmounted' } : turn;
+		this.pending.push({ turn: result, opening });
+		if (this.detached) this.closeDetached();
+		if (this.detached || this.link(this.messages)) {
+			this.persist(this.messages).catch((err) => {
+				console.log('[AgentSession] could not save the ended turn', err);
+			});
+		}
+	}
+
+	/**
+	 * Links each ended turn to the row that closes it: the first bot row after
+	 * its opening user row that is not a thinking row (its answer, its error, or
+	 * the stop row).
+	 *
+	 * @param messages - The chat's rows.
+	 * @returns Whether any turn was linked.
+	 */
+	private link(messages: ChatMessage[]): boolean {
+		let linked = false;
+		for (const entry of [...this.pending]) {
+			if (messages[entry.opening]?.sender !== 'user') continue;
+			const closing = messages.slice(entry.opening + 1).find((m) => m.sender === 'bot' && !m.resultKey && !m.queued);
+			if (!closing) continue;
+			this.pending.splice(this.pending.indexOf(entry), 1);
+			this.turns.push({ ...entry.turn, messageId: closing.id });
+			linked = true;
+		}
+		return linked;
+	}
+
+	/**
+	 * Writes the closing row the chat can no longer write, for each ended turn
+	 * of a tab that unmounted: the turn's answer, or for a stopped turn a stop
+	 * row with the progress the chat showed, as the chat's own stop row has.
+	 */
+	private closeDetached(): void {
+		for (const { turn, opening } of this.pending) {
+			const rows = this.messages;
+			if (rows[opening]?.sender !== 'user' || rows.slice(opening + 1).some((m) => m.sender === 'bot' && !m.resultKey && !m.queued)) continue;
+			const progress = rows.slice(opening).filter((m) => m.sender === 'status' && !m.queued);
+			const text = turn.finalText || [CLOSED_TAB, ...(progress.length ? ['Progress before the stop:', ...progress.map((m) => m.text)] : [])].join('\n\n');
+			const row: ChatMessage = { id: rows.reduce((max, m) => Math.max(max, m.id), 0) + 1, text, sender: 'bot', timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+			const at = rows.findIndex((m) => m.queued);
+			this.messages = at < 0 ? [...rows, row] : [...rows.slice(0, at), row, ...rows.slice(at)];
+		}
+		this.link(this.messages);
+	}
+
+	/**
+	 * The Agent tab mounted. A tab mounted again after detach (React's dev
+	 * double mount runs the unmount once at start) shows the turns again, so
+	 * a turn that ends waits for the chat's rows.
+	 */
+	attach(): void {
+		this.detached = false;
+	}
+
+	/**
+	 * The Agent tab is unmounting (closed, or a team switch). The chat's rows
+	 * go with it, so the session keeps the last rows it showed and saves them
+	 * now, in the conversation's own scope. A turn still running stops with the
+	 * tab; when it ends, it adds its closing row and saves again.
+	 *
+	 * @param messages - The rows the chat showed last.
+	 */
+	detach(messages: ChatMessage[]): void {
+		if (this.detached) return;
+		this.detached = true;
+		const last = this.messages.at(-1);
+		const unchanged = messages.length === this.messages.length && messages.at(-1)?.id === last?.id;
+		if (this.running === 0 && this.pending.length === 0 && unchanged) return;
+		this.messages = messages;
+		this.closeDetached();
+		this.persist(this.messages).catch((err) => {
+			console.log('[AgentSession] could not save the conversation on unmount', err);
+		});
+	}
+
+	/**
+	 * The rows with each linked turn's card under its row. Error rows show
+	 * their own banner, so they get none. Turns that ended since the last call
+	 * are linked first.
+	 *
+	 * @param messages - The chat's rows.
+	 * @returns The rows to show and save; the same array when no row has a turn.
+	 */
+	decorate(messages: ChatMessage[]): ChatMessage[] {
+		this.link(messages);
+		if (this.turns.length === 0) return messages;
+		const byRow = new Map(this.turns.map((t) => [t.messageId, t]));
+		return messages.map((m) => {
+			const turn = byRow.get(m.id);
+			if (!turn || m.isError) return m;
+			// a request a card button already answered shows its buttons disabled while the reply is on its way
+			const shown = turn.request && turn.request.id === this.claimed ? { ...turn, request: { ...turn.request, answeredBy: '' } } : turn;
+			return { ...m, card: turnCard(shown) };
+		});
+	}
+
+	/**
+	 * Handles a press on a turn's card. A file link opens the file, Open
+	 * Variables opens the Variables overlay, and a choice or Continue sends its
+	 * text as the user's reply. A reply goes only to the open request, once: a
+	 * press on a card whose request was answered, or a second press, does
+	 * nothing.
+	 *
+	 * @param messageId - The row the card is under.
+	 * @param action - What was pressed.
+	 * @param handlers - Opens files and Variables, and sends.
+	 * @returns Whether the press did anything.
+	 */
+	cardAction(messageId: number, action: TurnCardAction, handlers: CardActionHandlers): boolean {
+		if (action.kind === 'file') {
+			handlers.openFile(action.path);
+			return true;
+		}
+		if (action.id === OPEN_VARIABLES) {
+			handlers.openVariables();
+			return true;
+		}
+		const request = this.turns.find((t) => t.messageId === messageId)?.request;
+		if (!request || request.answeredBy !== undefined || this.claimed === request.id) return false;
+		const reply = request.kind === 'continue' ? (action.id === CONTINUE ? CONTINUE_TEXT : undefined) : request.choices?.find((_, i) => choiceAction(i) === action.id);
+		if (reply === undefined) return false;
+		this.claimed = request.id;
+		handlers.send(reply);
+		return true;
 	}
 
 	/**
 	 * Persists the conversation (session file + catalog row). Called by the
 	 * provider after each completed exchange with the hook's message list.
-	 * Every row and the title pass through redactText, so a key the user
-	 * pasted is stored, and shown again when the session reopens, only as
-	 * `[redacted]`. The history a turn sends is redacted in run.ts (toHistory).
+	 * Every row, card, turn and run record and the title pass through
+	 * redactText, so a key the user pasted is stored, and shown again when the
+	 * session reopens, only as `[redacted]`. The history a turn sends is
+	 * redacted in run.ts (toHistory).
 	 *
 	 * @param messages - The full conversation as rendered by the chat hook.
 	 */
 	async save(messages: ChatMessage[]): Promise<void> {
-		const rows = messages.map((m) => ({ ...m, text: redactText(m.text) }));
+		await this.persist(messages);
+	}
+
+	/**
+	 * Writes the session file, version 2: the rows with their cards, the turns
+	 * and the runs. Writes land in the order they were asked for.
+	 *
+	 * @param messages - The rows to keep.
+	 */
+	private async persist(messages: ChatMessage[]): Promise<void> {
+		const rows = this.decorate(messages).map((m) => ({ ...m, text: redactText(m.text), ...(m.card ? { card: redactDeep(m.card) } : {}) }));
 		this.messages = rows;
-		await saveSession({
-			version: 1,
+		const file: AgentSessionFile = {
+			version: 2,
 			sessionId: this.sessionId,
 			title: redactText(this.title),
 			date: this.date,
 			contextRefs: this.contextRefs,
 			messages: rows,
 			...(this.scopeKey !== undefined ? { scopeKey: this.scopeKey } : {}),
-		});
+			turns: redactDeep(this.turns),
+			runsStarted: redactDeep(this.runsStarted),
+		};
+		const write = this.saving.then(() => saveSession(file));
+		this.saving = write.catch(() => undefined);
+		await write;
 		this.stored = true;
 	}
 }
