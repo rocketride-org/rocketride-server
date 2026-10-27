@@ -37,10 +37,13 @@
 //
 // Relationships can be clicked and right-clicked, but React Flow never sees them (it is
 // given no edges), so its edge events cannot fire. Each relationship therefore carries
-// its own HIT PATH: the same curve, invisible and 12 units wide, the only part of the
-// layer the pointer can hit (the visible line, arrow and label stay out of hit-testing).
-// The hit paths exist only when the view handles a click or a menu. The handlers are the
-// same two functions for every relationship, so a click changes nothing here.
+// its own HIT PATH: the same curve, invisible, the only part of the layer the pointer can
+// hit (the visible line, arrow and label stay out of hit-testing). It is at least 12
+// SCREEN pixels wide at any zoom: 12 canvas units from normal size up, and wider as the
+// view zooms out (a stylesheet variable the canvas keeps in step with the zoom, see
+// edgeHitWidth in stable.ts; the `strokeWidth` here is only the fallback). The hit paths
+// exist only when the view handles a click or a menu. The handlers are the same two
+// functions for every relationship, so a click changes nothing here.
 //
 // Edges are not focusable: the keyboard path to a relationship is R on a node (keynav.ts),
 // which selects its relationships in turn, and the Table lists every relationship. Each

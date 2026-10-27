@@ -103,8 +103,9 @@ export const CANVAS_RULES = [
 	'.graph-ui-canvas[data-edge-labels="off"] .graph-ui-edge-label { display: none; }',
 	// The drawn lines, arrows and labels take no pointer events: hit-testing them on every mouse move would be wasted.
 	'.graph-ui-canvas .graph-ui-edge-layer, .graph-ui-canvas .graph-ui-edge-layer * { pointer-events: none; }',
-	// The one exception: each relationship's invisible, wide hit path (EdgeLayer.tsx), present only when relationships can be clicked.
-	'.graph-ui-canvas .graph-ui-edge-layer .graph-ui-edge-hit { pointer-events: stroke; cursor: pointer; }',
+	// The one exception: each relationship's invisible, wide hit path (EdgeLayer.tsx), present only when relationships can be
+	// clicked. Its width follows the zoom (GraphCanvas sets the variable, see edgeHitWidth), so it is never under 12 screen px.
+	'.graph-ui-canvas .graph-ui-edge-layer .graph-ui-edge-hit { pointer-events: stroke; cursor: pointer; stroke-width: var(--graph-ui-edge-hit, 12px); }',
 	// Not on the shown path, or not matching a search: faint, still in place and still clickable.
 	'.graph-ui-canvas .graph-ui-node[data-dim="true"] { opacity: 0.25; }',
 	// The edge layer sits behind the nodes: the viewport is a stacking context, so a negative index is behind its nodes and still in front of the page.

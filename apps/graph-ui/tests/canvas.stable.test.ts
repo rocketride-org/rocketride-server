@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { CANVAS_RULES } from '../src/canvas/environment';
-import { LABELS_ALWAYS_FROM_ZOOM, LABELS_MAX_EDGES, LABELS_NEVER_BELOW_ZOOM, edgeLabelsVisible, labelsVisibleAt, sameShallow, stabilise, zoomLevel } from '../src/canvas/stable';
+import { EDGE_HIT_MIN_PX, edgeHitWidth, edgeLabelsVisible, LABELS_ALWAYS_FROM_ZOOM, LABELS_MAX_EDGES, LABELS_NEVER_BELOW_ZOOM, labelsVisibleAt, sameShallow, stabilise, zoomLevel } from '../src/canvas/stable';
 
 interface IItem {
 	id: string;
@@ -68,6 +68,24 @@ test('relationship labels: drawn at normal size or larger; between the threshold
 test('the zoom is read as three levels, and the decision from a level matches the decision from the zoom', () => {
 	assert.deepEqual([0.1, 0.59, 0.6, 0.99, 1, 2.5].map(zoomLevel), [0, 0, 1, 1, 2, 2]);
 	for (const zoom of [0.1, 0.3, 0.59, 0.6, 0.75, 0.99, 1, 1.4, 2.5]) for (const edges of [0, 50, 200, 201, 2000]) assert.equal(labelsVisibleAt(zoomLevel(zoom), edges), edgeLabelsVisible(zoom, edges), `zoom ${zoom} edges ${edges}`);
+});
+
+// The hit band is drawn in canvas units inside React Flow's CSS-scaled viewport, so a fixed 12 shrank to 1.2 screen
+// pixels at the minimum zoom (found live on a 941-node drawing). `vector-effect: non-scaling-stroke` does not help: the
+// scaling is a CSS transform on an HTML ancestor, which it ignores (measured in Chrome 156: 1.25 px at 0.1 either way).
+test('the relationship hit band is never under 12 screen pixels at any zoom, and changes width only a few times across the range', () => {
+	assert.equal(EDGE_HIT_MIN_PX, 12);
+	for (const zoom of [0.1, 0.13, 0.2, 0.33, 0.5, 0.6, 0.75, 0.9, 0.99]) {
+		const screen = edgeHitWidth(zoom) * zoom;
+		assert.ok(screen >= 12 - 1e-9, `zoom ${zoom}: ${screen.toFixed(2)} px`);
+		assert.ok(screen < 12 * 1.2, `zoom ${zoom}: not much wider than asked (${screen.toFixed(2)} px)`);
+	}
+	for (const zoom of [1, 1.4, 2.5]) assert.equal(edgeHitWidth(zoom), 12, `zoom ${zoom}: 12 units, at least 12 px`);
+	const widths = new Set<number>();
+	for (let zoom = 0.1; zoom <= 2.5; zoom += 0.001) widths.add(edgeHitWidth(zoom));
+	assert.ok(widths.size <= 16, `${widths.size} distinct widths: the stylesheet value changes on steps, not on every zoom step`);
+	assert.equal(edgeHitWidth(0), edgeHitWidth(0.1), 'a nonsense zoom is treated as the minimum');
+	assert.equal(edgeHitWidth(Number.NaN), edgeHitWidth(0.1));
 });
 
 test('the canvas stylesheet hides labels when the container says off, takes the edge layer out of hit-testing and puts it behind the nodes', () => {

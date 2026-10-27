@@ -381,7 +381,8 @@ A click selects a node or a relationship on its own, and the inspector follows
 it. Shift, Ctrl or Cmd-click adds a node to the selection or takes it out (Find
 path needs two); Space does the same for the focused node. Relationships are drawn
 by the app, not by the canvas library, so each one has an invisible, wider band
-along its line that takes the click.
+along its line that takes the click. The band is at least 12 screen pixels wide at
+any zoom, so relationships can still be clicked when a large graph is zoomed out.
 
 | Action | What it does |
 |---|---|

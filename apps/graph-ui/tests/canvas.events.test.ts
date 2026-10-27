@@ -60,7 +60,7 @@ test('without a click or menu handler there is no hit path: relationships stay o
 	const tree = walk(EdgeShapeImpl(SHAPE));
 	assert.equal(tree.filter((el) => el.props.className === 'graph-ui-edge-hit').length, 0);
 	assert.match(CANVAS_RULES, /\.graph-ui-canvas \.graph-ui-edge-layer, \.graph-ui-canvas \.graph-ui-edge-layer \* \{ pointer-events: none; \}/, 'the drawn parts take no pointer events');
-	assert.match(CANVAS_RULES, /\.graph-ui-canvas \.graph-ui-edge-layer \.graph-ui-edge-hit \{ pointer-events: stroke; cursor: pointer; \}/, 'only the hit path does');
+	assert.match(CANVAS_RULES, /\.graph-ui-canvas \.graph-ui-edge-layer \.graph-ui-edge-hit \{ pointer-events: stroke; cursor: pointer;/, 'only the hit path does');
 });
 
 test('the selected relationship is drawn selected (a halo and data-selected), a dimmed one faint, a typed one in its colour, ends at each circle\'s own radius', () => {
@@ -147,4 +147,16 @@ test('wiring: a click puts keyboard focus on the clicked node, without panning, 
 	assert.match(helper, /el\.focus\(\{ preventScroll: true \}\);/);
 	const handle = canvas.slice(canvas.indexOf('focusNode(id: GraphId): boolean {'), canvas.indexOf('fit: refit'));
 	assert.match(handle, /return focusElement\(id\);/, 'the handle\'s focusNode is the same step');
+});
+
+test('wiring: the hit band follows the zoom through one stylesheet variable, set from the store without re-rendering any relationship', () => {
+	assert.match(CANVAS_RULES, /\.graph-ui-edge-hit \{ pointer-events: stroke; cursor: pointer; stroke-width: var\(--graph-ui-edge-hit, 12px\); \}/, 'the hit path takes its width from the variable');
+	const canvas = source('canvas', 'GraphCanvas.tsx');
+	const effect = canvas.slice(canvas.indexOf('const flowStore = useStoreApi();'), canvas.indexOf('}, [flowStore]);'));
+	assert.match(effect, /flowStore\.subscribe\(/, 'a store subscription, not a hook: no re-render on a zoom step');
+	assert.match(effect, /edgeHitWidth\(state\.transform\[2\]\)/, 'the zoom only, never the pan offset');
+	assert.match(effect, /if \(width === shown\) return;/, 'the stylesheet is touched only when the width steps');
+	assert.match(effect, /el\.style\.setProperty\('--graph-ui-edge-hit', `\$\{width\}px`\);/);
+	const tree = walk(EdgeShapeImpl({ ...SHAPE, onClick: () => undefined }));
+	assert.equal(tree.find((el) => el.props.className === 'graph-ui-edge-hit')?.props.strokeWidth, 12, '12 units where the stylesheet has not loaded');
 });
