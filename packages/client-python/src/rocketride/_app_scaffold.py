@@ -52,6 +52,7 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -936,6 +937,16 @@ def create_app_workspace(
         with open(abs_path, 'w', encoding='utf-8', newline='') as f:
             f.write(content)
         progress(f'+ {folder_rel}/{rel_path}')
+
+    # step: working-copy identity — the appManifest projectId exists from
+    # creation, so deploy provenance never depends on the app having been
+    # opened in an editor first (twin of the TS scaffold's ensureProjectId)
+    pkg_path = os.path.join(folder_abs, 'package.json')
+    with open(pkg_path, 'r', encoding='utf-8') as f:
+        pkg = json.load(f)
+    pkg['appManifest']['projectId'] = str(uuid.uuid4())
+    with open(pkg_path, 'w', encoding='utf-8', newline='') as f:
+        f.write(json.dumps(pkg, indent=2, ensure_ascii=False) + '\n')
 
     # step: workspace hygiene — the pnpm workspace file that links every
     # app, and the ignore entries that keep credentials and outputs out

@@ -34,7 +34,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { findApp } from '../src/app-pack/index';
 import * as common from '../src/cli/common';
-import { executeAppDeploy, executeAppPublish, executeAppUnbind, normalizePublishTarget, splitAppVersion } from '../src/cli/commands/app';
+import { executeAppDeploy, executeAppPublish, executeAppReply, executeAppReview, executeAppUnbind, normalizePublishTarget, splitAppVersion } from '../src/cli/commands/app';
 import { executeDeploySourceConfig } from '../src/cli/commands/deploy';
 import { Output } from '../src/cli/output';
 
@@ -82,11 +82,15 @@ function stubClient(overrides: Record<string, unknown> = {}) {
 		]),
 		waitForAppBuild: stub({ registryVersion: 2, buildStatus: 'ok' }),
 		publishApp: stub({ publish: { audience: '@me', version: 2 } }),
+		submitApp: stub({ artifact: { state: 'submitted' } }),
+		withdrawApp: stub({ artifact: { state: 'private' } }),
+		replyApp: stub({ ok: true }),
 		removeAppPublish: stub({ publish: { state: 'removed' } }),
 		disableAppPublish: stub({ publish: { state: 'disabled' } }),
 		deploy: {
 			addApp: stub({ artifact: { registryVersion: 5, appVersion: '0.1.0', buildStatus: 'queued' } }),
 			setSourceConfig: stub({ teamId: '@me', schedules: { webhook_1: { traceLevel: 'summary', debugOut: true } } }),
+			get: stub({ teamId: '@me', schedules: { webhook_1: { traceLevel: 'metadata', debugOut: true } } }),
 		},
 		getAccountInfo: () => ({ userId: 'u1', organization: null }),
 		...overrides,
@@ -240,8 +244,26 @@ describe('executeDeploySourceConfig', () => {
 		const code = await executeDeploySourceConfig('proj', 'webhook_1', { ...target, team: '@me', traceLevel: 'summary', debugOut: true }, new Output(undefined));
 
 		expect(code).toBe(0);
+		expect(client.deploy.get).not.toHaveBeenCalled();
 		expect(client.deploy.setSourceConfig).toHaveBeenCalledWith('proj', 'webhook_1', '@me', { traceLevel: 'summary', debugOut: true });
 		expect(logs.join('\n')).toContain('trace summary, debug output on');
+	});
+
+	it('keeps the current debug output when only the trace level is passed', async () => {
+		const client = stubClient();
+
+		await executeDeploySourceConfig('proj', 'webhook_1', { ...target, team: '@me', traceLevel: 'summary' }, new Output(undefined));
+
+		expect(client.deploy.get).toHaveBeenCalledWith('proj', '@me');
+		expect(client.deploy.setSourceConfig).toHaveBeenCalledWith('proj', 'webhook_1', '@me', { traceLevel: 'summary', debugOut: true });
+	});
+
+	it('keeps the current trace level when only debug output is passed', async () => {
+		const client = stubClient();
+
+		await executeDeploySourceConfig('proj', 'webhook_1', { ...target, team: '@me', debugOut: false }, new Output(undefined));
+
+		expect(client.deploy.setSourceConfig).toHaveBeenCalledWith('proj', 'webhook_1', '@me', { traceLevel: 'metadata', debugOut: false });
 	});
 
 	it('rejects an unknown trace level before connecting', async () => {
@@ -249,5 +271,46 @@ describe('executeDeploySourceConfig', () => {
 
 		expect(await executeDeploySourceConfig('proj', 'webhook_1', { ...target, traceLevel: 'loud' }, new Output(undefined))).toBe(1);
 		expect(client.deploy.setSourceConfig).not.toHaveBeenCalled();
+	});
+});
+
+describe('executeAppReview', () => {
+	it('waits for the build before submitting the newest version', async () => {
+		const client = stubClient();
+
+		const code = await executeAppReview('submit', 'acme.clock', undefined, { ...target, workspace: ws }, new Output(undefined));
+
+		expect(code).toBe(0);
+		expect(client.waitForAppBuild).toHaveBeenCalledWith('acme.clock', 2, expect.any(Object));
+		expect(client.waitForAppBuild.mock.invocationCallOrder[0]).toBeLessThan(client.submitApp.mock.invocationCallOrder[0]);
+		expect(client.submitApp).toHaveBeenCalledWith('acme.clock', 2);
+	});
+
+	it('withdraws without waiting for a build', async () => {
+		const client = stubClient();
+
+		await executeAppReview('withdraw', 'acme.clock', '1', { ...target, workspace: ws }, new Output(undefined));
+
+		expect(client.waitForAppBuild).not.toHaveBeenCalled();
+		expect(client.withdrawApp).toHaveBeenCalledWith('acme.clock', 1);
+	});
+});
+
+describe('executeAppReply', () => {
+	it('takes the version positionally', async () => {
+		const client = stubClient();
+
+		const code = await executeAppReply('acme.clock', '3', { ...target, workspace: ws, message: 'hi' }, new Output(undefined));
+
+		expect(code).toBe(0);
+		expect(client.replyApp).toHaveBeenCalledWith('acme.clock', 'hi', 3);
+	});
+
+	it('replies on the thread with no version', async () => {
+		const client = stubClient();
+
+		await executeAppReply('acme.clock', undefined, { ...target, workspace: ws, message: 'hi' }, new Output(undefined));
+
+		expect(client.replyApp).toHaveBeenCalledWith('acme.clock', 'hi', undefined);
 	});
 });

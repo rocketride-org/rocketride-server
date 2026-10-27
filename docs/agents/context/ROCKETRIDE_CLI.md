@@ -165,8 +165,9 @@ directory is the app. A lone number is read as the version, so
 - `rocketride app log [app] [version]` — a version's server build log
   (default: the newest version).
 - `rocketride app submit [app] [version]` / `app withdraw [app] [version]`
-  — enter or leave public store review; `rocketride app reply [app] -m
-  <text> [--version <n>]` posts on the review thread.
+  — enter or leave public store review (submit waits for the version's
+  server build first); `rocketride app reply [app] [version] -m
+  <text>` posts on the review thread.
 - `rocketride app developer status` / `app developer register <id>` —
   your organization's developer id (the `<developerId>` in every app id);
   registering is an org-admin step.
@@ -207,7 +208,7 @@ rocketride deploy schedule set <projectId> <sourceId> "0 9 * * 1-5" --team <team
 rocketride deploy schedule pause <projectId> <sourceId> --team <teamId>
 rocketride deploy schedule resume <projectId> <sourceId> --team <teamId>
 rocketride deploy schedule preview "0 9 * * 1-5"                    # validate a cron + next firings
-rocketride deploy source-config <projectId> <sourceId> --team <teamId> --trace-level summary --debug-out   # per-source run settings (none|metadata|summary|full)
+rocketride deploy source-config <projectId> <sourceId> --team <teamId> --trace-level summary --debug-out   # per-source run settings (none|metadata|summary|full); a flag left out keeps its current value
 rocketride deploy log <appId> <version>                             # read an app version's build log (or: rocketride app log)
 rocketride deploy enable|disable|remove <projectId> --team <teamId>
 ```
