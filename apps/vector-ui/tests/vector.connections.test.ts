@@ -252,3 +252,32 @@ test('the drawer of a store found empty reads model, dimension and index from fr
 	assert.equal(value(probed, 'Dimension'), '384');
 	assert.equal(value(probed, 'Index'), 'hnsw (m 16, ef_construction 64)');
 });
+
+test('the drawer: the Metric row falls back to the stats; the rows split into the collection and the connection', async () => {
+	const [f] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_collection_missing')));
+	const value = (drawer: ReturnType<typeof drawerView>, label: string) => drawer.rows.find((r) => r.label === label)?.value;
+	assert.equal(value(drawerView(f.endpoint, f.probe), 'Metric'), '—');
+	const stats = readStats({ ...fixture('stats_pgvector'), metric: 'cosine' });
+	const drawer = drawerView(f.endpoint, f.probe, stats);
+	assert.equal(value(drawer, 'Metric'), 'cosine');
+	assert.deepEqual(drawer.rows, [...drawer.collection, ...drawer.connection]);
+	const names = (rows: ReturnType<typeof drawerView>['rows']) => rows.map((r) => r.label);
+	assert.ok(names(drawer.collection).includes('Model') && names(drawer.collection).includes('Index'));
+	assert.ok(names(drawer.connection).includes('Pipeline') && names(drawer.connection).includes('Removing documents'));
+	assert.equal(names(drawer.collection).includes('Pipeline'), false);
+});
+
+test('the card: stats that count documents override a dialect that still says the collection is missing', async () => {
+	const [f] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_collection_missing')));
+	const labels = (stats: ReturnType<typeof readStats> | null) => vectorCardView(f.endpoint, f.probe, stats).flags.map((x) => x.label);
+	assert.deepEqual(labels(null), ['Empty collection']);
+	assert.deepEqual(labels(readStats({ ...fixture('stats_pgvector'), documents: 0, chunks: 0 })), ['Empty collection'], 'stats that count nothing do not override it');
+	assert.deepEqual(labels(readStats({ ...fixture('stats_pgvector'), documents: 4, chunks: 12 })), []);
+});
+
+test('the card description: the address, then the document count once the console has it', async () => {
+	const [f] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_pgvector')));
+	assert.equal(vectorCardView(f.endpoint, f.probe).description, vectorCardView(f.endpoint, f.probe).address);
+	assert.equal(vectorCardView(f.endpoint, f.probe, readStats({ ...fixture('stats_pgvector'), documents: 1234 })).description, `${vectorCardView(f.endpoint, f.probe).address} · 1,234 documents`);
+	assert.match(vectorCardView(f.endpoint, f.probe, readStats({ ...fixture('stats_pgvector'), documents: 1 })).description, / · 1 document$/);
+});

@@ -42,6 +42,7 @@ import { READ_ONLY_DETAIL } from 'shared/explorer';
 import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import type { IDialectResult } from '../contract/types';
 import { sharedTableSentence } from './confirm';
+import { formatSize } from './fileType';
 import { readDialect } from './results';
 import type { IStatsView } from './results';
 import { EXPERIMENTAL_BADGE, providerTitle, supportOf } from './support';
@@ -73,6 +74,8 @@ export interface IVectorCardView {
 	line: string | null;
 	badge: IBadge;
 	flags: IFlag[];
+	/** One line under the title: store · collection · pipeline, and the document count once the console has it. */
+	description: string;
 	/** True when the console can be opened. */
 	openable: boolean;
 	/** Why it cannot be opened, when it cannot. */
@@ -87,6 +90,11 @@ export interface IDetailRow {
 
 /** What the drawer shows. */
 export interface IDrawerView {
+	/** About the collection: its name, size, embedding model, dimension, metric and index. */
+	collection: IDetailRow[];
+	/** About the connection: the sources, pipeline, node, run, backend, nodes and write switch. */
+	connection: IDetailRow[];
+	/** Both lists, collection first. */
 	rows: IDetailRow[];
 	notes: string[];
 }
@@ -165,17 +173,29 @@ export function ownerText(endpoint: IExplorerEndpoint): string {
 }
 
 /**
+ * Whether the console's last stats found the collection holding something: a store found empty and filled since keeps
+ * the dialect's "no collection" until it is probed again, and the stats are the fresher answer.
+ *
+ * @param stats - The stats, or null.
+ * @returns True when they count documents or chunks.
+ */
+function statsShowContent(stats: IStatsView | null): boolean {
+	return stats !== null && stats.collectionExists && ((stats.documents ?? 0) > 0 || (stats.chunks ?? 0) > 0);
+}
+
+/**
  * The flags of a card (each carries its whole message).
  *
  * @param endpoint - The endpoint.
  * @param dialect - The node's dialect, or null.
+ * @param stats - The connection's last stats answer, when its console has one.
  * @returns The flags.
  */
-function flagsOf(endpoint: IExplorerEndpoint, dialect: IDialectResult | null): IFlag[] {
+function flagsOf(endpoint: IExplorerEndpoint, dialect: IDialectResult | null, stats: IStatsView | null): IFlag[] {
 	const flags: IFlag[] = [];
 	if (endpoint.readOnly === true) flags.push({ variant: 'muted', label: 'Read-only', tooltip: `${EMPTY.readOnly}.` });
 	if (supportOf(endpoint.provider, dialect) === 'experimental') flags.push({ variant: 'warning', ...EXPERIMENTAL_BADGE });
-	if (dialect?.health.collection_exists === false) flags.push({ variant: 'muted', label: 'Empty collection', tooltip: 'The collection does not exist yet; add a document to create it.' });
+	if (dialect?.health.collection_exists === false && !statsShowContent(stats)) flags.push({ variant: 'muted', label: 'Empty collection', tooltip: 'The collection does not exist yet; add a document to create it.' });
 	if (dialect?.health.control_record === false) flags.push({ variant: 'error', label: 'Repair needed', tooltip: 'This collection has no control record, so its embedding model and dimension are not recorded.' });
 	if (dialect?.health.meta_column === false || dialect?.caveats.includes('meta_column_pending')) flags.push({ variant: 'warning', label: 'Metadata column pending', tooltip: CAVEAT_SENTENCES.meta_column_pending });
 	return flags;
@@ -186,9 +206,11 @@ function flagsOf(endpoint: IExplorerEndpoint, dialect: IDialectResult | null): I
  *
  * @param endpoint - The endpoint (token-free).
  * @param probe - Its probe result, when one exists.
+ * @param stats - The connection's last stats answer, when its console has one: it overrides a dialect that still says
+ *   the collection does not exist.
  * @returns The view.
  */
-export function vectorCardView(endpoint: IExplorerEndpoint, probe: IProbeResult | undefined): IVectorCardView {
+export function vectorCardView(endpoint: IExplorerEndpoint, probe: IProbeResult | undefined, stats: IStatsView | null = null): IVectorCardView {
 	const dialect = probe?.ok ? readDialect(probe.info) : null;
 	const collection = dialect?.collection ?? null;
 	const deploy = endpoint.runKind === 'deploy' ? ' (deployment)' : '';
@@ -202,13 +224,15 @@ export function vectorCardView(endpoint: IExplorerEndpoint, probe: IProbeResult 
 	let line: string | null = null;
 	if (endpoint.readOnly === true) line = EMPTY.readOnly;
 	if (endpoint.state === 'stopped' && endpoint.stateDetail && endpoint.stateDetail !== READ_ONLY_DETAIL) line = endpoint.stateDetail;
+	const address = [providerTitle(endpoint.provider), collection, `${endpoint.pipelineName}${deploy}`].filter((part) => part !== null && part !== '').join(' · ');
 	return {
 		title: endpoint.nodeName || endpoint.nodeId,
-		address: [providerTitle(endpoint.provider), collection, `${endpoint.pipelineName}${deploy}`].filter((part) => part !== null && part !== '').join(' · '),
+		address,
+		description: stats !== null && stats.documents !== null ? `${address} · ${stats.documents.toLocaleString('en-US')} ${stats.documents === 1 ? 'document' : 'documents'}` : address,
 		roleLine: roleLine(endpoint),
 		line,
 		badge,
-		flags: flagsOf(endpoint, dialect),
+		flags: flagsOf(endpoint, dialect, stats),
 		openable: blocked === null && endpoint.state === 'ready' && dialect !== null,
 		blocked,
 	};
@@ -336,32 +360,37 @@ function componentName(endpoint: IExplorerEndpoint, prefix: string): string | nu
  */
 export function drawerView(endpoint: IExplorerEndpoint, probe: IProbeResult | undefined, stats: IStatsView | null = null): IDrawerView {
 	const dialect = probe?.ok ? readDialect(probe.info) : null;
-	const rows: IDetailRow[] = [];
-	for (const role of ROLE_ORDER) {
-		const binding = endpoint.roles[role];
-		rows.push({ label: role[0].toUpperCase() + role.slice(1), value: binding ? binding.source : 'not running' });
-	}
-	rows.push({ label: 'Pipeline', value: endpoint.pipelineName || '(unnamed)' });
-	rows.push({ label: 'Node', value: `${endpoint.nodeName || endpoint.nodeId} (${providerTitle(endpoint.provider)})` });
-	rows.push({ label: 'Run', value: ownerText(endpoint) });
+	const collection: IDetailRow[] = [];
+	const connection: IDetailRow[] = [];
 	if (dialect) {
-		rows.push({ label: 'Backend', value: [dialect.backend, dialect.backend_version].filter(Boolean).join(' ') });
-		rows.push({ label: 'Collection', value: dialect.collection ?? '—' });
-		rows.push({ label: 'Metric', value: dialect.metric ?? '—' });
+		collection.push({ label: 'Collection', value: dialect.collection ?? '—' });
+		if (stats !== null && stats.documents !== null) collection.push({ label: 'Documents', value: stats.documents.toLocaleString('en-US') });
+		if (stats !== null && stats.chunks !== null) collection.push({ label: 'Chunks', value: stats.chunks.toLocaleString('en-US') });
 		const model = dialect.model ?? stats?.model ?? null;
 		const dimension = dialect.dimension ?? stats?.dimension ?? null;
 		const index = dialect.index ?? stats?.index ?? null;
-		rows.push({ label: 'Model', value: model ?? '—' });
-		rows.push({ label: 'Dimension', value: dimension === null ? '—' : String(dimension) });
+		collection.push({ label: 'Model', value: model ?? '—' });
+		collection.push({ label: 'Dimension', value: dimension === null ? '—' : String(dimension) });
+		collection.push({ label: 'Metric', value: dialect.metric ?? stats?.metric ?? '—' });
 		const params = index?.params ? Object.entries(index.params).map(([k, v]) => `${k} ${String(v)}`) : [];
-		rows.push({ label: 'Index', value: index ? `${index.type}${params.length ? ` (${params.join(', ')})` : ''}` : '—' });
+		collection.push({ label: 'Index', value: index ? `${index.type}${params.length ? ` (${params.join(', ')})` : ''}` : '—' });
+		if (typeof dialect.size_bytes === 'number') collection.push({ label: 'Size', value: formatSize(dialect.size_bytes) });
 	}
-	rows.push({ label: 'Embedding node', value: componentName(endpoint, 'embedding_') ?? '—' });
-	rows.push({ label: 'LLM node', value: componentName(endpoint, 'llm_') ?? '—' });
+	for (const role of ROLE_ORDER) {
+		const binding = endpoint.roles[role];
+		connection.push({ label: role[0].toUpperCase() + role.slice(1), value: binding ? binding.source : 'not running' });
+	}
+	connection.push({ label: 'Pipeline', value: endpoint.pipelineName || '(unnamed)' });
+	connection.push({ label: 'Node', value: `${endpoint.nodeName || endpoint.nodeId} (${providerTitle(endpoint.provider)})` });
+	connection.push({ label: 'Run', value: ownerText(endpoint) });
+	if (dialect) connection.push({ label: 'Backend', value: [dialect.backend, dialect.backend_version].filter(Boolean).join(' ') });
+	connection.push({ label: 'Embedding node', value: componentName(endpoint, 'embedding_') ?? '—' });
+	connection.push({ label: 'LLM node', value: componentName(endpoint, 'llm_') ?? '—' });
 	if (dialect) {
-		rows.push({ label: 'Removing documents', value: dialect.allow_writes ? 'On (allow_writes)' : 'Off (allow_writes)' });
-		rows.push({ label: 'Support', value: dialect.support === 'supported' ? 'Supported' : 'Experimental' });
+		connection.push({ label: 'Removing documents', value: dialect.allow_writes ? 'On (allow_writes)' : 'Off (allow_writes)' });
+		connection.push({ label: 'Support', value: dialect.support === 'supported' ? 'Supported' : 'Experimental' });
 	}
+	const rows = [...collection, ...connection];
 
 	const notes: string[] = [];
 	if (endpoint.readOnly === true) notes.push(`${EMPTY.readOnly}.`);
@@ -373,7 +402,7 @@ export function drawerView(endpoint: IExplorerEndpoint, probe: IProbeResult | un
 	if (endpoint.roles.ingest) notes.push('Anyone with the data permission on the ingest task can add documents.');
 	const bound = ROLE_ORDER.filter((role) => endpoint.roles[role]).length;
 	if (endpoint.projectId === '' && bound <= 1) notes.push(NOT_GROUPED_NOTE);
-	return { rows, notes };
+	return { collection, connection, rows, notes };
 }
 
 // =============================================================================

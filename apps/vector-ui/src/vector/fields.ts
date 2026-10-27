@@ -40,6 +40,7 @@
 // =============================================================================
 
 import type { IChunkItem, IDocumentItem } from '../contract/types';
+import { splitPath } from './documents';
 
 /** A field's type, as read from its values. */
 export type FieldType = 'text' | 'integer' | 'number' | 'boolean' | 'timestamp' | 'uuid' | 'json' | 'unknown';
@@ -123,12 +124,143 @@ export function documentFields(rows: readonly IDocumentItem[]): IFieldRow[] {
 	});
 }
 
+/** The `search.filter` keys a chunk metadata key maps to (NF: objectId/objectIds, nodeId, parent as an exact path, isTable, the chunk range). */
+const SEARCH_FILTER_KEYS: Readonly<Record<string, string>> = {
+	objectId: 'objectId, objectIds',
+	nodeId: 'nodeId',
+	parent: 'parent (an exact path)',
+	isTable: 'isTable',
+	chunkId: 'minChunkId, maxChunkId',
+};
+
+/** The `list_documents.filter` keys a field has conditions on. */
+const LIST_FILTER_KEYS: Readonly<Record<string, string>> = {
+	path: 'path_prefix, path_contains, file_types',
+	ingestedAt: 'ingested_after, ingested_before',
+	chunks: 'min_chunks, max_chunks',
+	tables: 'has_tables',
+};
+
 /**
- * The chunk fields read from chunks (their `metadata` keys). Not read yet: the sampler comes with the Collection tab.
+ * What can filter on a field, in words that claim no more than the node does: a listing filter is applied by the
+ * store only where it answers `filter_applied: server` (pgvector); elsewhere it is matched over the loaded rows.
  *
- * @param _chunks - The chunks read.
- * @returns The fields (none yet).
+ * @param field - The field.
+ * @returns The phrase.
  */
-export function chunkFields(_chunks: readonly IChunkItem[]): IFieldRow[] {
-	return [];
+export function filterPhrase(field: Pick<IFieldRow, 'name' | 'searchFilter' | 'listFilter'>): string {
+	const parts: string[] = [];
+	if (field.searchFilter) parts.push(`Search filter: ${SEARCH_FILTER_KEYS[field.name] ?? field.name}`);
+	if (field.listFilter) parts.push(`Listing filter: ${LIST_FILTER_KEYS[field.name] ?? field.name} (applied by the store on pgvector; elsewhere matched over loaded rows)`);
+	return parts.length > 0 ? parts.join('; ') : 'Not filterable';
+}
+
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The type of one value.
+ *
+ * @param value - A non-null value.
+ * @returns Its type.
+ */
+function typeOfValue(value: unknown): FieldType {
+	if (typeof value === 'boolean') return 'boolean';
+	if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number';
+	if (typeof value === 'string') return UUID.test(value) ? 'uuid' : ISO_TIME.test(value) ? 'timestamp' : 'text';
+	if (typeof value === 'object') return 'json';
+	return 'unknown';
+}
+
+/**
+ * The type of a field from all its values: the same type for all, integer and number together are number, anything
+ * else mixed is unknown.
+ *
+ * @param types - One type per value.
+ * @returns The type.
+ */
+function mergeTypes(types: ReadonlySet<FieldType>): FieldType {
+	if (types.size === 1) return [...types][0];
+	if (types.size === 2 && types.has('integer') && types.has('number')) return 'number';
+	return 'unknown';
+}
+
+/**
+ * The chunk fields read from chunks: every key of their `metadata`, with its type guessed from the values, how many
+ * of the chunks have a value, and one example. A key no chunk has a value for is not listed. The result is an
+ * estimate over the chunks given, never over the collection.
+ *
+ * @param chunks - The chunks read.
+ * @returns One row per key, in the order the keys were first seen.
+ */
+export function chunkFields(chunks: readonly IChunkItem[]): IFieldRow[] {
+	const seen = new Map<string, { coverage: number; example: string | null; types: Set<FieldType> }>();
+	for (const chunk of chunks) {
+		for (const [name, value] of Object.entries(chunk.metadata ?? {})) {
+			if (value === null || value === undefined || value === '') continue;
+			let entry = seen.get(name);
+			if (!entry) {
+				entry = { coverage: 0, example: null, types: new Set() };
+				seen.set(name, entry);
+			}
+			entry.coverage += 1;
+			entry.example ??= exampleText(value);
+			entry.types.add(typeOfValue(value));
+		}
+	}
+	return [...seen].map(([name, entry]) => ({
+		name,
+		type: mergeTypes(entry.types),
+		coverage: entry.coverage,
+		of: chunks.length,
+		example: entry.example,
+		searchFilter: name in SEARCH_FILTER_KEYS,
+		listFilter: false,
+		source: 'chunks',
+	}));
+}
+
+/**
+ * The documents to read chunks from: up to `n` spread over the folders, one from each folder in turn (folders in name
+ * order, documents in the order given), skipping the trashed and the empty.
+ *
+ * @param rows - The loaded documents.
+ * @param n - How many to pick.
+ * @returns The picked rows.
+ */
+export function sampleDocuments(rows: readonly IDocumentItem[], n = 5): IDocumentItem[] {
+	const byFolder = new Map<string, IDocumentItem[]>();
+	for (const row of rows) {
+		if (row.deleted || row.chunks === 0) continue;
+		const folder = splitPath(row.path).folder;
+		const list = byFolder.get(folder);
+		if (list) list.push(row);
+		else byFolder.set(folder, [row]);
+	}
+	const lists = [...byFolder.keys()].sort().map((folder) => byFolder.get(folder) ?? []);
+	const picked: IDocumentItem[] = [];
+	for (let round = 0; picked.length < n; round += 1) {
+		let any = false;
+		for (const list of lists) {
+			if (round < list.length) {
+				any = true;
+				picked.push(list[round]);
+				if (picked.length >= n) break;
+			}
+		}
+		if (!any) break;
+	}
+	return picked;
+}
+
+/**
+ * The fields to show: the listing's rows first (exact), then the chunk fields that are not already a document field.
+ *
+ * @param listing - {@link documentFields}.
+ * @param chunks - {@link chunkFields}.
+ * @returns The merged rows.
+ */
+export function mergeFields(listing: readonly IFieldRow[], chunks: readonly IFieldRow[]): IFieldRow[] {
+	const names = new Set(listing.map((f) => f.name));
+	return [...listing, ...chunks.filter((f) => !names.has(f.name))];
 }
