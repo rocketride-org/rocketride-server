@@ -225,7 +225,7 @@ describe('F14 - no window-wide overlay in a frame: confirmations and details are
 		for (const file of files) if (file !== uploads) assert.doesNotMatch(code(read(file)), /<(Modal|ConfirmDialog|DetailPanel)\b/, `${file} renders a window-wide overlay`);
 		const renderers = files.filter((file) => /<ReplaceConfirmDialog\b/.test(code(read(file))));
 		assert.deepEqual(renderers, ['components/IngestPanel.tsx'], 'only the upload panel renders it');
-		assert.match(code(read('views/ConsoleView.tsx')), /\{model\.ingest\.enabled \? <IngestPanel /, 'and the console renders that panel only while uploads are on');
+		assert.match(code(read('components/AddDocumentsAside.tsx')), /\{model\.ingest\.enabled \? <IngestPanel /, 'and the console renders that panel only while uploads are on');
 	});
 
 	it('the inline confirmation: the same words and typed rule, Cancel focused when it opens, Escape on its own keydown, Confirm unavailable (aria-disabled) until ready', () => {
@@ -244,11 +244,15 @@ describe('F14 - no window-wide overlay in a frame: confirmations and details are
 		}
 	});
 
-	it('the console frame offers the connection\'s details (Test connection included) as an inline panel, keyed on the connection; both kinds of document confirm inline', () => {
+	it('the console offers the connection\'s details (Test connection included) as an inline panel, keyed on the connection; both kinds of document confirm inline', () => {
+		// The workbench owns both, in either mount: a console frame renders it as it is.
+		const view = code(read('views/ConsoleView.tsx'));
+		assert.match(view, /<Button variant="ghost" pressed=\{details\} onClick=\{\(\) => setDetails\(\(open\) => !open\)\}>\s*Details\s*<\/Button>/);
+		assert.match(view, /\{details && <ConnectionDetailsPanel key=\{endpoint\.key\} endpoint=\{endpoint\} probe=\{probe\} stats=\{state\.stats\.view\} onTest=\{\(target\) => env\.probe\(target\.key\)\} onClose=\{\(\) => setDetails\(false\)\} \/>\}/);
+		assert.equal(view.match(/<InlineRemoveConfirm entry=\{entry\} probe=\{/g)?.length, 1, 'the console');
 		const frame = code(read('VectorDevTool.tsx'));
-		assert.match(frame, /<Button variant="ghost" pressed=\{details\} onClick=\{\(\) => setDetails\(\(open\) => !open\)\}>\s*Details\s*<\/Button>/);
-		assert.match(frame, /\{details && <ConnectionDetailsPanel key=\{live\.key\} endpoint=\{live\} probe=\{probe\} stats=\{state\.stats\.view\} onTest=\{\(target\) => env\.probe\(target\.key\)\} onClose=\{\(\) => setDetails\(false\)\} \/>\}/);
-		assert.equal(frame.match(/<InlineRemoveConfirm entry=\{entry\} probe=\{/g)?.length, 2, 'the console and the document');
+		assert.match(frame, /return <ConsoleView opened=\{endpoint\} active=\{visible\} \/>;/, 'a console frame adds nothing of its own');
+		assert.equal(frame.match(/<InlineRemoveConfirm entry=\{entry\} probe=\{/g)?.length, 1, 'the document');
 		const details = code(read('components/ConnectionDetailsPanel.tsx'));
 		assert.match(details, /onKeyDown=\{\(event\) => \{\s*if \(event\.key === 'Escape'\)/);
 		assert.match(details, /<ConnectionDrawerDetails drawer=\{drawerView\(endpoint, probe, stats\)\} \/>/);
@@ -258,12 +262,12 @@ describe('F14 - no window-wide overlay in a frame: confirmations and details are
 
 describe('R11 - what cannot work in a dev-tool mount degrades visibly, and keeps working in the full app', () => {
 	it('chat: the console still renders the chat panel where chat is off for the mount, so Search (no LLM) stays one click away under the reason', () => {
-		const view = code(read('views/ConsoleView.tsx'));
+		const view = code(read('components/QueryTab.tsx'));
 		assert.match(view, /\{model\.chat\.enabled \|\| env\.degraded !== null \? <ChatPanel /);
 		const panel = code(read('components/ChatPanel.tsx'));
 		assert.match(panel, /description=\{model\.chat\.reason \?\? NO_CHAT_SENTENCE\}/, 'the panel says the mount\'s reason');
 		assert.match(panel, /SEARCH_WITHOUT_CHAT/);
-		assert.match(view, /model\.ingest\.enabled \? <IngestPanel [^>]*\/> : <EmptyState title="Add documents" description=\{model\.ingest\.reason \?\? undefined\} \/>/, 'uploads: the area says why, the layout stays');
+		assert.match(code(read('components/AddDocumentsAside.tsx')), /model\.ingest\.enabled \? <IngestPanel [^>]*\/> : <EmptyState title="Add documents" description=\{model\.ingest\.reason \?\? undefined\} \/>/, 'uploads: the area says why, the layout stays');
 		assert.match(code(read('devtool/frame.ts')), /consoleModel: devToolConsoleModel,/, 'the frame env serves the degraded model');
 	});
 

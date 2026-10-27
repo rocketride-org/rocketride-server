@@ -947,7 +947,7 @@ test('mapScopeFor: while a new scope finds its documents the map keeps the scope
 	assert.equal(mapScopeFor(held, consoleScope(null, null, whole, 2_000)), null);
 });
 
-test('the store is probed again (its dialect) after an upload completes and after a write', async () => {
+test('the store is probed again (its dialect) after an upload completes, after a write and on Refresh', async () => {
 	let probes = 0;
 	const { store, clock } = harness({ reprobe: () => void (probes += 1) });
 	store.setWritesEnabled(true);
@@ -961,10 +961,13 @@ test('the store is probed again (its dialect) after an upload completes and afte
 	await store.confirmRemove();
 	await clock.settle();
 	assert.equal(probes, 2, 'after a write');
+	store.requestRemove([{ objectId: 'kestrel', path: 'C:/demo/field/kestrel_field_guide.md', chunks: 12 }]);
 	store.cancelRemove();
+	await clock.settle();
+	assert.equal(probes, 2, 'Cancel sends no probe');
 	store.refresh();
 	await clock.settle();
-	assert.equal(probes, 2, 'Refresh and Cancel send no probe of their own');
+	assert.equal(probes, 3, 'Refresh probes again: a store found empty and filled from elsewhere gets its index and size');
 	store.dispose();
 });
 

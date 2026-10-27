@@ -21,21 +21,25 @@
 // SOFTWARE.
 
 // =============================================================================
-// VECTOR-UI - CONSOLE VIEW (R2-R5, R9: the main screen of a connection)
+// VECTOR-UI - CONSOLE VIEW (the workbench: the main screen of a connection)
 // =============================================================================
 //
-// The default document of every connection. Across the top, the database
-// summary (StatsStrip); on the left, every document by its path with its
-// trash button (and, one switch away, the Trash: Restore, Delete permanently,
-// Empty trash) and, under it, the selected document's chunks; on the right,
-// adding documents above the chat. The Map is a second tab of the same
-// document: both stay mounted (the map gets `visible` so its canvas sleeps
-// while hidden), and every map action lands back here through the console's
-// actions and the shared selection.
+// The default document of every connection. Under its header (Refresh,
+// Details, Add documents) a row of tabs of its own: Overview, Documents,
+// Query, Map, Collection and Trash (vector/workbench.ts; the tab is the
+// connection's `entry.tab`, so the map's and the chat's actions can switch
+// it). Under the tab row, on every tab: the blocked banner, the inline write
+// confirmation and the connection's Details (both inline in both mounts:
+// rocket-ui keeps hidden documents mounted, so nothing here is a window-wide
+// overlay), the pending bar and the write status line. Each tab's panel is
+// mounted the first time it shows, then stays mounted and hidden, so it
+// keeps its state (the map gets `visible` so its canvas sleeps while
+// hidden). Add documents is an aside beside the panels, kept mounted once
+// opened.
 //
 // The console's calls and their pacing live in its controller
 // (vector/consoleStore.ts); this view renders the controller's snapshot and
-// forwards clicks. Writes are confirmed by the app-level dialog host.
+// forwards clicks.
 //
 // THE SCOPE. The directory's ScopeBar sets the connection's scope (the
 // entry's value store, read by the map and search as ConsoleModel.scope);
@@ -51,37 +55,47 @@
 // once, when they are known.
 // =============================================================================
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
 import type { Availability, IDocumentsFilter, IScopeState } from '../contract/types';
-import { Banner, Button, ContentHeader, EmptyState, ToggleGroup } from 'shell';
+import { Banner, Button, ContentHeader } from 'shell';
 import type { IExplorerEndpoint } from 'shared/explorer';
 import { makeConsoleActions } from '../adapters/consoleActions';
 import { savedFilters } from '../adapters/connections';
-import type { ConsoleTab } from '../adapters/connections';
-import { VECTOR_PROVIDERS, announcer } from '../adapters/explorer';
+import { announcer } from '../adapters/explorer';
 import { useConnection, useEndpointsState, useLiveEndpoint, useVectorEnv } from '../envContext';
-import ChatPanel from '../components/ChatPanel';
-import ChunkList from '../components/ChunkList';
-import DocumentDirectory from '../components/DocumentDirectory';
-import IngestPanel from '../components/IngestPanel';
-import StatsStrip from '../components/StatsStrip';
-import { alsoReaches, consoleScope, mapScopeFor, writesDuringRemoval } from '../vector/consoleModel';
+import AddDocumentsAside from '../components/AddDocumentsAside';
+import CollectionPanel from '../components/CollectionPanel';
+import ConnectionDetailsPanel from '../components/ConnectionDetailsPanel';
+import DocumentsTab from '../components/DocumentsTab';
+import InlineRemoveConfirm from '../components/InlineRemoveConfirm';
+import OverviewPanel from '../components/OverviewPanel';
+import PendingBar from '../components/PendingBar';
+import QueryTab from '../components/QueryTab';
+import TrashTab from '../components/TrashTab';
+import WorkbenchTabs from '../components/WorkbenchTabs';
+import type { IWorkbenchPanelProps } from '../components/workbenchProps';
+import { consoleScope, mapScopeFor } from '../vector/consoleModel';
 import { CONDITION_KINDS, checkScope, conditionAvailability, listingFilter, resolveScope, scopeStripText, scopeView, scopeWith } from '../vector/filters';
 import type { ConditionKind } from '../vector/filters';
 import { healthSummary, medianChunks } from '../vector/health';
 import { savedFiltersFor } from '../vector/savedFilters';
 import { roleLine, vectorCardView } from '../vector/connections';
-import { consoleColumns } from '../vector/layout';
 import { providerTitle } from '../vector/support';
 import { BUSY } from '../vector/wording';
+import type { WorkbenchTab } from '../vector/workbench';
 import { styles } from '../styles';
 import MapView from './MapView';
 
-/** The console's two tabs. */
-const TABS: Array<{ id: ConsoleTab; label: string }> = [
-	{ id: 'console', label: 'Console' },
-	{ id: 'map', label: 'Map' },
-];
+const layout = {
+	banner: { padding: '8px 24px 0' } as CSSProperties,
+	status: { ...styles.small, padding: '6px 24px' } as CSSProperties,
+	/** The panels beside the Add documents aside. */
+	body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' } as CSSProperties,
+	panels: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column' } as CSSProperties,
+	/** One tab's panel: shown or hidden, never unmounted once shown (the Overview's strip has its own gutters). */
+	panel: (shown: boolean, gutter: number): CSSProperties => ({ flex: 1, minHeight: 0, minWidth: 0, display: shown ? 'flex' : 'none', flexDirection: 'column', padding: gutter }),
+};
 
 /** Props for the {@link ConsoleView} component. */
 export interface IConsoleViewProps {
@@ -89,10 +103,6 @@ export interface IConsoleViewProps {
 	opened: IExplorerEndpoint;
 	/** False while another document is the active tab. */
 	active: boolean;
-	/** More header actions after Refresh (a dev-tool frame's Details). */
-	headerActions?: React.ReactNode;
-	/** Shown under the header (a dev-tool frame's inline confirmation and connection details). */
-	beforeBody?: React.ReactNode;
 }
 
 /**
@@ -101,7 +111,7 @@ export interface IConsoleViewProps {
  * @param props - {@link IConsoleViewProps}.
  * @returns The view.
  */
-export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active, headerActions, beforeBody }) => {
+export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => {
 	const env = useVectorEnv();
 	const endpoint = useLiveEndpoint(opened);
 	const { probes } = useEndpointsState();
@@ -117,7 +127,7 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active, heade
 			entry.controller.open();
 		}
 	}, [card.openable, entry]);
-	// Hidden (another tab, another document): no quick stats, and the directory pauses.
+	// Hidden (another document): no quick stats, and the directory pauses.
 	useEffect(() => {
 		entry.controller.setVisible(active);
 	}, [active, entry]);
@@ -217,19 +227,13 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active, heade
 		[entry, env]
 	);
 
-	// Stack the panels below the layout's breakpoint.
-	const body = useRef<HTMLDivElement>(null);
-	const [width, setWidth] = useState(0);
-	useEffect(() => {
-		const el = body.current;
-		if (!el || typeof ResizeObserver === 'undefined') return undefined;
-		const observer = new ResizeObserver(() => {
-			if (el.clientWidth > 0) setWidth(el.clientWidth);
-		});
-		observer.observe(el);
-		return () => observer.disconnect();
-	}, []);
-	const cols = consoleColumns(width);
+	// Each panel mounts the first time its tab shows, then stays (state from the last render, as the map's scope).
+	const [mounted, setMounted] = useState<ReadonlySet<WorkbenchTab>>(() => new Set([tab]));
+	if (!mounted.has(tab)) setMounted(new Set([...mounted, tab]));
+	const [details, setDetails] = useState(false);
+	const [adding, setAdding] = useState(false);
+	const [addingMounted, setAddingMounted] = useState(false);
+	const panel = (id: WorkbenchTab): IWorkbenchPanelProps => ({ entry, model, channels, actions, console: state, selection, visible: active && tab === id });
 
 	const title = `${providerTitle(endpoint.provider)}${model.collection ? ` · ${model.collection}` : ''}`;
 	const subtitle = `"${endpoint.pipelineName}" · ${endpoint.nodeName || endpoint.nodeId} · ${roleLine(endpoint)}`;
@@ -242,48 +246,73 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active, heade
 				subtitle={subtitle}
 				actions={
 					<>
-						<ToggleGroup small options={TABS} value={tab} onChange={(id) => entry.tab.set(id)} />
 						<Button variant="ghost" disabled={!card.openable || !entry.opened} onClick={() => entry.controller.refresh()}>
 							{refreshing ? BUSY.refreshing : 'Refresh'}
 						</Button>
-						{headerActions}
+						<Button variant="ghost" pressed={details} onClick={() => setDetails((open) => !open)}>
+							Details
+						</Button>
+						<Button
+							variant="ghost"
+							pressed={adding}
+							onClick={() => {
+								setAddingMounted(true);
+								setAdding((open) => !open);
+							}}
+						>
+							Add documents
+						</Button>
 					</>
 				}
 			/>
+			<WorkbenchTabs value={tab} onChange={(id) => entry.tab.set(id)} trashCount={state.stats.view?.deletedDocuments ?? null} />
 			{card.blocked && (
-				<div style={{ padding: '8px 24px 0' }}>
+				<div style={layout.banner}>
 					<Banner variant={endpoint.state === 'ready' ? 'warning' : 'info'}>{card.blocked}</Banner>
 				</div>
 			)}
-			{beforeBody}
-			<StatsStrip stats={state.stats} dialect={dialect} readOnly={model.readOnly} documents={state.directory.rows} scopeLine={scopeLine} sample={selection.connectionKey === entry.key ? selection.sampleModel : null} loading={state.directory.status === 'loading'} scopeFilter={scope?.filter ?? null} onScope={scopeFromChart} health={health} />
+			<InlineRemoveConfirm entry={entry} probe={probe} />
+			{details && <ConnectionDetailsPanel key={endpoint.key} endpoint={endpoint} probe={probe} stats={state.stats.view} onTest={(target) => env.probe(target.key)} onClose={() => setDetails(false)} />}
+			<PendingBar {...panel(tab)} />
 			{(state.removal.status === 'running' || state.removal.message) && (
-				<div role="status" style={{ ...styles.small, padding: '6px 24px' }}>
+				<div role="status" style={layout.status}>
 					{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
 				</div>
 			)}
-			<div ref={body} style={{ flex: 1, minHeight: 0, display: tab === 'console' ? 'flex' : 'none', flexDirection: cols.stacked ? 'column' : 'row', gap: 12, padding: 12, overflow: cols.stacked ? 'auto' : 'hidden' }}>
-				<div style={{ flex: cols.stacked ? 'none' : `0 0 ${cols.left}`, height: cols.stacked ? 520 : undefined, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
-					<DocumentDirectory pager={state.view === 'trash' ? state.trash : state.directory} selectedId={selectedId} writes={writesDuringRemoval(model.writes, state.removal.status)} onSelect={(item) => entry.selection.selectDocument({ objectId: item.objectId, path: item.path })} onRemove={(targets) => entry.controller.requestRemove(targets)} onLoadMore={() => entry.controller.loadMoreDocuments()} onRetry={() => entry.controller.retryDocuments()} collection={model.collection} scope={scope} onScope={setScope} cap={cap} available={available} saved={saved} onSave={saveFilter} onDeleteSaved={deleteFilter} view={state.view} onView={(next) => entry.controller.setView(next)} trashCount={state.stats.view?.deletedDocuments ?? null} onRestore={(targets) => void entry.controller.restore(targets)} onDelete={(targets) => entry.controller.requestDelete(targets)} onEmptyTrash={() => void entry.controller.requestEmptyTrash()} />
-					<ChunkList chunks={state.chunks} path={selection.document?.path ?? null} onMore={() => entry.controller.loadMoreChunks()} onOpen={(chunkId) => actions.openDocument(state.chunks.objectId ?? '', chunkId)} onMap={(key) => actions.showOnMap([key], 'document')} />
+			<div style={layout.body}>
+				<div style={layout.panels}>
+					{mounted.has('overview') && (
+						<div style={layout.panel(tab === 'overview', 0)}>
+							<OverviewPanel {...panel('overview')} scopeLine={scopeLine} health={health} onChartScope={scopeFromChart} />
+						</div>
+					)}
+					{mounted.has('documents') && (
+						<div style={layout.panel(tab === 'documents', 12)}>
+							<DocumentsTab {...panel('documents')} scope={scope} onScope={setScope} cap={cap} available={available} saved={saved} onSave={saveFilter} onDeleteSaved={deleteFilter} scopeLine={scopeLine} health={health} />
+						</div>
+					)}
+					{mounted.has('query') && (
+						<div style={layout.panel(tab === 'query', 12)}>
+							<QueryTab {...panel('query')} surfaceModel={surfaceModel} chatDocuments={chatDocuments} chatNotice={wiring.chatNotice} onClearChatScope={clearChatScope} />
+						</div>
+					)}
+					{mounted.has('map') && (
+						<div style={layout.panel(tab === 'map', 12)}>
+							<MapView model={mapModel} channels={channels} selection={entry.selection} actions={actions} visible={active && tab === 'map'} documents={entry.documents} writes={entry.writes} />
+						</div>
+					)}
+					{mounted.has('collection') && (
+						<div style={layout.panel(tab === 'collection', 12)}>
+							<CollectionPanel {...panel('collection')} endpoint={endpoint} probe={probe} />
+						</div>
+					)}
+					{mounted.has('trash') && (
+						<div style={layout.panel(tab === 'trash', 12)}>
+							<TrashTab {...panel('trash')} />
+						</div>
+					)}
 				</div>
-				<div style={{ flex: cols.stacked ? 'none' : `1 1 ${cols.right}`, display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, minHeight: 0 }}>
-					<div style={{ flex: cols.stacked ? 'none' : `0 0 ${cols.ingest}`, minHeight: cols.stacked ? 260 : 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }} aria-label="Add documents" role="region">
-						{model.ingest.enabled ? <IngestPanel model={model} channels={channels} actions={actions} alsoReaches={alsoReaches(endpoint, VECTOR_PROVIDERS)} /> : <EmptyState title="Add documents" description={model.ingest.reason ?? undefined} />}
-					</div>
-					<div style={{ flex: cols.stacked ? 'none' : `1 1 ${cols.chat}`, minHeight: cols.stacked ? 360 : 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }} aria-label="Chat" role="region">
-						{model.chat.enabled && wiring.chatNotice !== null && (
-							<p role="status" data-chat-scope-notice="" style={{ ...styles.small, margin: '0 0 6px' }}>
-								{wiring.chatNotice}
-							</p>
-						)}
-						{/* Where chat cannot work at all (a dev-tool mount), the panel still offers Search, which needs no LLM, under the reason. */}
-						{model.chat.enabled || env.degraded !== null ? <ChatPanel model={surfaceModel} channels={channels} selection={entry.selection} actions={actions} scope={chatDocuments} onClearScope={clearChatScope} /> : <EmptyState title="Chat" description={model.chat.reason ?? undefined} />}
-					</div>
-				</div>
-			</div>
-			<div style={{ flex: 1, minHeight: 0, display: tab === 'map' ? 'flex' : 'none', flexDirection: 'column', padding: 12 }}>
-				<MapView model={mapModel} channels={channels} selection={entry.selection} actions={actions} visible={active && tab === 'map'} documents={entry.documents} writes={entry.writes} />
+				{addingMounted && <AddDocumentsAside model={model} channels={channels} actions={actions} endpoint={endpoint} open={adding} onClose={() => setAdding(false)} />}
 			</div>
 		</div>
 	);

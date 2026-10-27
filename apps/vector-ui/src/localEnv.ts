@@ -35,7 +35,7 @@ import type { IEndpointStore, IExplorerClient, IExplorerEndpoint } from 'shared/
 import { vectorChannels } from './adapters/actions';
 import type { IConnectionLink, IConnectionRegistry } from './adapters/connections';
 import { NO_CHANNELS } from './env';
-import type { IReadable, IVectorEndpointsState, IVectorEnv } from './env';
+import type { IQueryHistorySource, IReadable, IVectorEndpointsState, IVectorEnv } from './env';
 
 /** What {@link createLocalVectorEnv} needs. */
 export interface ILocalVectorEnvOptions {
@@ -47,6 +47,8 @@ export interface ILocalVectorEnvOptions {
 	store: IEndpointStore;
 	/** The mount's connection registry. */
 	registry: IConnectionRegistry;
+	/** The Query tab's history (the full app's persisted one; the controller's in memory). */
+	queryHistory: IQueryHistorySource;
 	/** The connection the fronted document belongs to. */
 	activeConnection: IReadable<string | null>;
 	/** Open (or focus) a connection's console. */
@@ -97,6 +99,7 @@ export function createLocalVectorEnv(opts: ILocalVectorEnvOptions): IVectorEnv {
 		openDocument: opts.openDocument,
 		activeConnection: opts.activeConnection,
 		degraded: null,
+		queryHistory: opts.queryHistory,
 	};
 }
 

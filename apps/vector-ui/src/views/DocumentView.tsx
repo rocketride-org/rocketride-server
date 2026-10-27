@@ -71,7 +71,7 @@ export interface DocumentViewProps extends ContractDocumentViewProps {
 	consoleMedian?: number | null;
 	/** Told what the document's own row is once it was read (null: the store does not hold it). */
 	onDocument?: (row: IDocumentItem | null) => void;
-	/** Shown under the header (a dev-tool frame's inline confirmation). */
+	/** Shown under the header (the inline write confirmation, in both mounts). */
 	beforeBody?: React.ReactNode;
 }
 

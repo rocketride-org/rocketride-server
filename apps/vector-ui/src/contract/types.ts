@@ -46,6 +46,7 @@
 // =============================================================================
 
 import type { IExplorerEndpoint, IRoleChannel } from 'shared/explorer';
+import type { WorkbenchTab } from '../vector/workbench';
 
 // =============================================================================
 // 1. WIRE TYPES
@@ -1199,7 +1200,14 @@ export interface ConsoleActions {
 	showOnMap(keys: readonly VectorKey[], source: HighlightSource): void;
 	/** Ask to move documents to the trash: the console confirms (Cancel focused, nothing to type) and runs the gated soft_delete. */
 	requestRemove(objectIds: readonly string[]): void;
-	/** "Ask about these only": scope the next chat question to these documents. */
+	/**
+	 * Stage documents to move to the trash; the console's pending bar applies them through requestRemove. Absent where
+	 * nothing can be staged (a dev-tool document frame): call requestRemove instead.
+	 */
+	stageRemove?(objectIds: readonly string[]): void;
+	/** Show one of the console's tabs (and bring the console to the front). Absent where the console is another frame's. */
+	openTab?(tab: WorkbenchTab): void;
+	/** "Ask about these only": scope the next chat question to these documents, on the Query tab's Ask mode. */
 	askAbout(objectIds: readonly string[]): void;
 	/** After an upload completed or a document changed: refresh stats and the directory. */
 	documentsChanged(objectIds: readonly string[]): void;

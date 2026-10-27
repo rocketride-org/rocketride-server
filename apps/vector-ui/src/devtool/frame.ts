@@ -37,8 +37,10 @@
 //             chat and uploads are not brokered for store tools (R11).
 //   OBJECTS   The frame keeps its OWN connection registry: its console
 //             controller (directory, trash, chunks, writes and their inline
-//             confirmation), selection, tab and scope. Two frames never share
-//             one, so a confirmation shows in the frame that asked for it.
+//             confirmation), selection, tab, scope and staged documents. Two
+//             frames never share one, so a confirmation shows in the frame
+//             that asked for it. Its Query history is its own too, in memory
+//             only.
 //   ACROSS    What another frame did arrives as retained state, read
 //             idempotently (every publish re-delivers every topic):
 //               docVersions     a console relists, refreshes its figures,
@@ -75,14 +77,16 @@ import { createControllerSummon } from 'shared/explorer/devtool/summon';
 import type { SummonState } from 'shared/explorer/devtool/summon';
 import { makeConsoleActions } from '../adapters/consoleActions';
 import { createConnectionRegistry } from '../adapters/connections';
+import { sessionQueryHistory } from '../adapters/queryHistory';
 import type { IConnectionEntry, IConnectionLink, IConnectionRegistry } from '../adapters/connections';
 import { announcer, connectionCaches } from '../adapters/explorer';
 import type { ConsoleActions, HighlightSource, VectorKey } from '../contract/types';
-import { DEVTOOL_CHAT_NOTE, DEVTOOL_DEGRADED, DEVTOOL_UPLOADS_NOTE, NO_CHANNELS, devToolConsoleModel } from '../env';
+import { DEVTOOL_CHAT_NOTE, DEVTOOL_DEGRADED, DEVTOOL_HISTORY_NOTE, DEVTOOL_UPLOADS_NOTE, NO_CHANNELS, devToolConsoleModel } from '../env';
 import type { IReadable, IVectorEndpointsState, IVectorEnv } from '../env';
 import { consoleUri, documentTitle, documentUri } from '../vector/addresses';
 import { consoleNodes } from '../vector/consoleModel';
 import { medianChunks } from '../vector/health';
+import { unstage } from '../vector/staged';
 import { controllerNotReadyError, isNotSent } from './frameText';
 import { EVENT, NO_ENDPOINTS, OP, STATE, TOOL_OP, WRITE_OPS, field, frameTimeoutFor, routeDocKey, toWire } from './protocol';
 import type { DocRoute, IActiveEvent, IConsoleSummary, IDocVersion, IFocusRequest, IMapRequest, IQueryHint, VectorOps } from './protocol';
@@ -304,6 +308,8 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 	const channel = opts.channel ?? channelFor(opts.peer, opts.createToolChannel);
 	const caller = createFrameCaller<VectorOps>({ peer: opts.peer, channel, createToolController: opts.createToolController, createToolChannel: opts.createToolChannel, ...(opts.now ? { now: opts.now } : {}) });
 	const registry = createConnectionRegistry();
+	// The Query tab's history: memory only, emptied with the frame's other objects on every reset.
+	const queryHistory = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
 	const offs: Array<() => void> = [];
 	let disposed = false;
 	let resetWhy: FrameResetReason | null = null;
@@ -490,6 +496,7 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 			// and uploads across a reconnect. Only another identity forgets the frame's connection in the realm's
 			// per-connection caches (the full app then clears everything anyway).
 			registry.clear();
+			queryHistory.forget();
 			if (reason === 'identity' && frameKey !== null) connectionCaches.forgetKey(frameKey);
 			myQuery = null;
 			mySummary = null;
@@ -575,6 +582,7 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 				openDocument,
 				activeConnection,
 				degraded: DEVTOOL_DEGRADED,
+				queryHistory,
 			};
 			envs.set(ready, env);
 			return env;
@@ -613,7 +621,10 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 				// lists the store as it is when it opens.
 				if (entry.opened) entry.controller.documentsChanged();
 				entry.writes.set(entry.writes.get() + 1);
-				for (const id of Array.isArray(version.gone) ? version.gone : []) entry.selection.forgetDocument(id);
+				const gone = Array.isArray(version.gone) ? version.gone : [];
+				for (const id of gone) entry.selection.forgetDocument(id);
+				// A document another frame moved or deleted is no longer this console's to stage.
+				entry.staged.set(unstage(entry.staged.get(), gone));
 			}));
 			// Keys a document frame asked to see on the map: highlighted here, on the Map tab.
 			const listener = (request: { keys: VectorKey[]; source: HighlightSource }): void => {
@@ -657,7 +668,9 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 		},
 		documentActions(entry, announce = (text) => announcer.announce(text)) {
 			const endpoint = (): IExplorerEndpoint => entry.ctx.endpoint;
-			const base = makeConsoleActions(entry, {
+			// The console is another frame with its own objects: a document frame neither stages (its Move to trash confirms
+			// here, D9) nor switches the console's tabs, so those two actions are left out.
+			const { stageRemove: _stageRemove, openTab: _openTab, ...base } = makeConsoleActions(entry, {
 				openDocument: (id, chunkId) => openDocument(endpoint(), id, null, chunkId),
 				showConsole: () => openConsole(endpoint()),
 				announce,

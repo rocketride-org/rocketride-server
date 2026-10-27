@@ -38,17 +38,16 @@
 // What a dev-tool mount cannot do degrades in place (R11): the chat area says
 // why and still offers Search, the upload area says why, a refused download
 // offers a copy. Writes are confirmed inline in the document that asked, and
-// the connection's details open as an inline panel (F14): nothing here is a
+// the console's Details open as an inline panel (F14): nothing here is a
 // window-wide overlay.
 // =============================================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { Banner, Button, EmptyState } from 'shell';
+import { Banner, EmptyState } from 'shell';
 import type { DevToolProps } from 'shell';
 import type { IExplorerEndpoint } from 'shared/explorer';
 import { announcer } from './adapters/explorer';
-import ConnectionDetailsPanel from './components/ConnectionDetailsPanel';
 import InlineRemoveConfirm from './components/InlineRemoveConfirm';
 import RealmLiveRegion from './components/RealmLiveRegion';
 import { createVectorFrame } from './devtool/frame';
@@ -199,39 +198,19 @@ const FrameConnectionDocument: React.FC<{ frame: IVectorFrame; route: Extract<Do
 };
 
 /**
- * A connection's console in a frame: the full app's console over the REMOTE env, with its inline confirmation and its
- * Details panel, bound to the frame (hints out; other frames' writes and map requests in).
+ * A connection's console in a frame: the full app's console (its inline confirmation and Details panel included) over
+ * the REMOTE env, bound to the frame (hints out; other frames' writes and map requests in).
  *
  * @param props.frame - The frame.
  * @param props.endpoint - The connection.
  * @returns The console.
  */
 const ConsoleFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint }> = ({ frame, endpoint }) => {
-	const env = useVectorEnv();
 	const live = useLiveEndpoint(endpoint);
-	const { entry, console: state } = useConnection(live);
-	const { probes } = useEndpointsState();
+	const { entry } = useConnection(live);
 	const visible = useReadable(frame.visible);
-	const [details, setDetails] = useState(false);
 	useEffect(() => frame.bindConsole(entry), [frame, entry]);
-	const probe = probes[live.key];
-	return (
-		<ConsoleView
-			opened={endpoint}
-			active={visible}
-			headerActions={
-				<Button variant="ghost" pressed={details} onClick={() => setDetails((open) => !open)}>
-					Details
-				</Button>
-			}
-			beforeBody={
-				<>
-					<InlineRemoveConfirm entry={entry} probe={probe} />
-					{details && <ConnectionDetailsPanel key={live.key} endpoint={live} probe={probe} stats={state.stats.view} onTest={(target) => env.probe(target.key)} onClose={() => setDetails(false)} />}
-				</>
-			}
-		/>
-	);
+	return <ConsoleView opened={endpoint} active={visible} />;
 };
 
 /**

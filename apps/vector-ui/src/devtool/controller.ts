@@ -82,7 +82,9 @@ import { createDevToolDiscovery } from 'shared/explorer/devtool/watch';
 import type { IDevToolDiscovery, IDiscoveryBus, IFocusTarget } from 'shared/explorer/devtool/watch';
 import { makeVectorEndpointStore } from '../adapters/explorer';
 import { createConnectionRegistry } from '../adapters/connections';
+import { sessionQueryHistory } from '../adapters/queryHistory';
 import type { HighlightSource, IVectorLimits, VectorKey } from '../contract/types';
+import { DEVTOOL_HISTORY_NOTE } from '../env';
 import type { IReadable, IVectorEnv } from '../env';
 import { createLocalVectorEnv } from '../localEnv';
 import { consoleUri, documentTitle, documentUri, endpointKeyFromUri } from '../vector/addresses';
@@ -635,6 +637,9 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 	// ── Discovery: the store follows identity, activation, task events and focus ────────────────
 	offs.push(store.attach(client, identity.get().identity, discovery.watch));
 
+	// The sidebar's Query history: memory only (nothing of a dev-tool mount is stored), and another identity's goes.
+	const queryHistory = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+
 	// ── Identity: what the previous one's frames left goes ──────────────────────────────────────
 	let fingerprint = identity.get().known ? identity.get().fingerprint : null;
 	offs.push(identity.subscribe((snapshot) => {
@@ -642,6 +647,7 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 		if (next === fingerprint) return;
 		fingerprint = next;
 		for (const map of [versions, queries, summaries, focus, maps]) map.clear();
+		queryHistory.forget();
 		publishAll();
 	}));
 
@@ -670,6 +676,7 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 				client,
 				store,
 				registry,
+				queryHistory,
 				activeConnection,
 				// Documents open on a click only (R7), which is also the user activating the tool.
 				openConsole: (endpoint) => {

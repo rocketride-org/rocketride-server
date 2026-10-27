@@ -28,8 +28,8 @@
 // pacing, so the React view only renders its snapshot and forwards clicks:
 //
 //   STATS      `stats({mode:'full'})` on open, after a write, after a
-//              completed upload and on Refresh (after an upload or a write
-//              the store's dialect is probed again too, deps.reprobe);
+//              completed upload and on Refresh (after each of those but the
+//              open, the store's dialect is probed again too, deps.reprobe);
 //              `stats({mode:'quick'})` at most every 15 s while the console
 //              is visible. A failure keeps the last figures (the strip greys
 //              them) and says why; with no figures yet, the full call is
@@ -493,6 +493,9 @@ export function createConsoleStore(deps: IConsoleDeps, opts: IConsoleOptions): I
 		refresh(): void {
 			planStats('manual');
 			relist();
+			// The dialect too: a store found empty and filled from elsewhere (a seed script, another app) would keep its
+			// empty-collection answer (no index, no size) until a Test connection otherwise.
+			deps.reprobe?.();
 		},
 		documentsChanged(): void {
 			planStats('upload');

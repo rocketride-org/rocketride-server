@@ -81,12 +81,12 @@ export function useKeyed<T>(keyed: IKeyed<T>, key: string): T {
 }
 
 /**
- * Follow a value store.
+ * Follow a value store (an entry's tab, query mode, staged documents, fields).
  *
  * @param store - The store.
  * @returns Its value.
  */
-function useValue<T>(store: IValueStore<T>): T {
+export function useValueStore<T>(store: IValueStore<T>): T {
 	return useSyncExternalStore(store.subscribe, store.get, store.get);
 }
 
@@ -137,9 +137,9 @@ export function useConnection(endpoint: IExplorerEndpoint): IConnectionView {
 	const entry = env.connection(endpoint, limits);
 	const consoleState = useSyncExternalStore(entry.controller.subscribe, entry.controller.getState, entry.controller.getState);
 	const selection = useSyncExternalStore(entry.selection.subscribe, entry.selection.getState, entry.selection.getState);
-	const tab = useValue(entry.tab);
-	const chatScope = useValue(entry.chatScope);
-	const scope = useValue(entry.scope);
+	const tab = useValueStore(entry.tab);
+	const chatScope = useValueStore(entry.chatScope);
+	const scope = useValueStore(entry.scope);
 	const model = useMemo(() => env.consoleModel({ ...buildConsoleModel(endpoint, probe, consoleState.stats.view), scope }), [env, endpoint, probe, consoleState.stats.view, scope]);
 	const channels = useMemo(() => env.channels(endpoint), [env, endpoint]);
 	return { entry, console: consoleState, selection, tab, chatScope, model, channels };

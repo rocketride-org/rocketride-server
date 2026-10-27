@@ -33,6 +33,7 @@ import { consoleUri, documentUri } from '../src/vector/addresses';
 import { chunkTextScope, createChunkTextCache } from '../src/components/ChunkTextPanel';
 import { createCacheRegistry } from '../src/vector/identityChange';
 import { DEFAULT_LIMITS, readDialect } from '../src/vector/results';
+import { NO_STAGED, stage } from '../src/vector/staged';
 import { fixture } from './support/fixtures';
 import { account, disposeAll, latestStateMap, mountController, settle, signInVsCode, until, vscodeRealm } from './support/devtool';
 import { mountFrame } from './support/devtoolFrame';
@@ -249,7 +250,7 @@ describe('the console frame: hints out, other frames\' writes and map requests i
 		const laterEntry = later.frame.env(true).connection(later.frame.endpoints.get().endpoints[0], DEFAULT_LIMITS);
 		const unbindLater = later.frame.bindConsole(laterEntry);
 		await settle();
-		assert.equal(laterEntry.tab.get(), 'console', 'nothing to take');
+		assert.equal(laterEntry.tab.get(), 'overview', 'nothing to take: it stays on the tab a connection opens on');
 		unbindLater();
 		unbind();
 		for (const f of [later, doc, run]) f.frame.dispose();
@@ -301,6 +302,26 @@ describe('the document frame: its focus, the console\'s query and median, and wr
 		unbindConsole();
 		unbind();
 		console.frame.dispose();
+		run.frame.dispose();
+		run.controller.dispose();
+	});
+
+	it('another frame\'s write takes the documents it moved out of the console\'s staged set; a document frame stages nothing and switches no tab', async () => {
+		const run = await connected((key) => consoleUri(key));
+		const entry = entryOf(run);
+		const unbind = run.frame.bindConsole(entry);
+		entry.staged.set(stage(NO_STAGED, [{ objectId: ID, path: 'a.md', chunks: 2 }, { objectId: 'kept', path: 'b.md', chunks: 1 }]));
+		const doc = mountFrame(run.h, documentUri(run.key, ID), { hintDelayMs: 0 });
+		await until(() => doc.frame.endpoints.get().endpoints.length === 1 && doc.frame.controllerReady.get(), 'the document frame');
+		const docEntry = doc.frame.env(true).connection(doc.frame.endpoints.get().endpoints[0], DEFAULT_LIMITS);
+		const actions = doc.frame.documentActions(docEntry);
+		assert.equal(actions.stageRemove, undefined, 'its Move to trash confirms in the document (D9)');
+		assert.equal(actions.openTab, undefined, "the console's tabs are another frame's");
+		await doc.frame.caller.callReply(OP.trash, { key: run.key, input: { object_ids: [ID] }, origin: doc.frame.origin }, { timeoutMs: 30_000 });
+		await until(() => !entry.staged.get().has(ID), 'the moved document to leave the staged set');
+		assert.deepEqual([...entry.staged.get().keys()], ['kept']);
+		unbind();
+		doc.frame.dispose();
 		run.frame.dispose();
 		run.controller.dispose();
 	});
@@ -514,9 +535,14 @@ describe('a frame\'s reset clears its own objects; only an identity reset forget
 		};
 
 		let entry = frameObjects();
+		const history = run.frame.env(true).queryHistory;
+		assert.equal(history.persisted, false, 'a frame stores no history');
+		history.record(key, { question: 'q', kind: 'semantic', at: 1, ms: 1, topK: 10, results: 1, outcome: 'rows' });
+		assert.equal(history.entries(key).get().length, 1, 'the premise');
 		run.h.setHostConnection(false);
 		await until(() => run.frame.lastReset() === 'disconnected', 'the frame\'s host-drop reset');
 		assert.equal(run.frame.connections.count(), 0, 'the frame\'s own objects are gone');
+		assert.equal(history.entries(key).get().length, 0, 'and its Query history');
 		assert.equal(entry.selection.getState().connectionKey, null, 'and reset');
 		assert.deepEqual(appState(), ALL_KEPT, 'a host drop leaves the full app\'s state for the same connection alone');
 

@@ -34,7 +34,7 @@
 
 import { ExplorerToolError } from 'shared/explorer';
 import type { IExplorerClient, IExplorerEndpoint, IEndpointStore, IInvokeOptions } from 'shared/explorer';
-import type { IDocumentsFilter, IEmbedResult, INeighborsScopeResult, VectorChannels, VectorKey } from '../contract/types';
+import type { IDocumentsFilter, IEmbedResult, INeighborsResult, INeighborsScopeResult, VectorChannels, VectorKey } from '../contract/types';
 import { heatScores } from '../vector/heat';
 import type { IHeatScore } from '../vector/heat';
 import { readChunksPage, readDeleteResult, readDocumentsPage, readStats, readTrashResult, unwrapEnvelope } from '../vector/results';
@@ -103,6 +103,22 @@ export async function fetchDocumentsPage(caller: IVectorCaller, nodeId: string, 
  */
 export async function fetchChunks(caller: IVectorCaller, nodeId: string, page: { objectId: string; afterChunk: number; limit: number; deleted?: 'active' | 'all' }, opts: IInvokeOptions = {}): Promise<IChunksPageView> {
 	return readChunksPage(await callVector(caller, nodeId, TOOL.chunks, { object_id: page.objectId, after_chunk: page.afterChunk, limit: page.limit, deleted: page.deleted ?? 'active' }, opts));
+}
+
+/**
+ * A chunk's nearest neighbours in the whole collection (`neighbors` by key, itself left out). Trashed chunks are
+ * skipped by the store.
+ *
+ * @param caller - A session or channel.
+ * @param nodeId - The store node.
+ * @param key - The chunk.
+ * @param k - How many (at most `limits.neighbors_k_max`; the store clamps).
+ * @param opts - Per-call options.
+ * @returns The answer, its `items` always an array.
+ */
+export async function fetchNeighbors(caller: IVectorCaller, nodeId: string, key: VectorKey, k: number, opts: IInvokeOptions = {}): Promise<INeighborsResult> {
+	const answer = await callVector<INeighborsResult>(caller, nodeId, TOOL.neighbors, { key: [key[0], key[1]], k, exclude_self: true }, opts);
+	return { ...answer, items: Array.isArray(answer.items) ? answer.items : [] };
 }
 
 /**

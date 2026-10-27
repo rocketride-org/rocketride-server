@@ -43,13 +43,13 @@ import type { Documents, ShellAppProps } from 'shell';
 import { identityFingerprint, identityFromConnectResult } from 'shared/explorer';
 import { makeConsoleActions } from './adapters/consoleActions';
 import { appConnections } from './adapters/connections';
-import { activeConnection, announcer, connectionCaches, vectorEndpoints } from './adapters/explorer';
+import { activeConnection, announcer, connectionCaches, vectorEndpoints, vectorQueryHistory } from './adapters/explorer';
 import { VectorHistoryPrefsBridge, useEndpointStoreLifecycle } from './adapters/react';
 import RealmLiveRegion from './components/RealmLiveRegion';
-import RemoveDialogHost from './components/RemoveDialogHost';
+import InlineRemoveConfirm from './components/InlineRemoveConfirm';
 import { createDocs, destroyDocs, getDocs, openDocumentTab } from './docs';
 import type { IConsoleDocPayload, IDocumentDocPayload } from './docs';
-import { VectorEnvProvider, useConnection, useLiveEndpoint } from './envContext';
+import { VectorEnvProvider, useConnection, useEndpointsState, useLiveEndpoint } from './envContext';
 import { createLocalVectorEnv } from './localEnv';
 import { CONNECTIONS_URI, endpointKeyFromUri, isConsoleUri, isDocumentUri } from './vector/addresses';
 import { forgetConnections } from './vector/identityChange';
@@ -84,7 +84,7 @@ const VectorApp: React.FC<ShellAppProps> = ({ identity }) => {
 	const { client, isConnected } = useShellConnection();
 	useEndpointStoreLifecycle(vectorEndpoints, client, identity);
 	// The LOCAL env every view below reads: the app's store, its client, its connection registry and its documents.
-	const env = useMemo(() => createLocalVectorEnv({ ready: client !== null && isConnected, client, store: vectorEndpoints, registry: appConnections, activeConnection: ACTIVE, openConsole, openDocument: openDocumentTab }), [client, isConnected]);
+	const env = useMemo(() => createLocalVectorEnv({ ready: client !== null && isConnected, client, store: vectorEndpoints, registry: appConnections, queryHistory: vectorQueryHistory, activeConnection: ACTIVE, openConsole, openDocument: openDocumentTab }), [client, isConnected]);
 
 	// A different user, organization or team (or a sign-out) must find nothing from before: every console and
 	// document tab closes and every per-connection cache clears. On the first run the documents do not exist yet.
@@ -125,7 +125,7 @@ const VectorApp: React.FC<ShellAppProps> = ({ identity }) => {
 const VectorAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 	const state = docs.useStore();
 
-	// Publish the active connection (the sidebar and the remove dialog follow it), for any connection-scoped document.
+	// Publish the active connection (the sidebar follows it), for any connection-scoped document.
 	useEffect(() => {
 		const group = state.groups[state.activeGroupId];
 		const editorId = group?.editorIds[group.activeEditorIndex];
@@ -139,10 +139,8 @@ const VectorAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 		<div style={styles.container}>
 			{/* One polite live region for the whole realm (rocket-ui may run dev-tool documents beside the app); every announcement goes through it. */}
 			<RealmLiveRegion />
-			{/* Chat history only records while a bridge is mounted; app-level so it survives closing a console. */}
+			{/* The Query history only records while a bridge is mounted; app-level so it survives closing a console. */}
 			<VectorHistoryPrefsBridge />
-			{/* Removal is confirmed here, outside every pane, so the dialog is visible wherever it was asked for. */}
-			<RemoveDialogHost />
 			<DocSplitLayout
 				docs={docs}
 				renderPane={(groupId: string) => {
@@ -191,6 +189,7 @@ const VectorAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 const DocumentTab: React.FC<{ payload: IDocumentDocPayload; active: boolean }> = ({ payload, active }) => {
 	const endpoint = useLiveEndpoint(payload.endpoint);
 	const { entry, model, channels } = useConnection(endpoint);
+	const { probes } = useEndpointsState();
 	const actions = useMemo(
 		() =>
 			makeConsoleActions(entry, {
@@ -205,7 +204,8 @@ const DocumentTab: React.FC<{ payload: IDocumentDocPayload; active: boolean }> =
 	useEffect(() => {
 		entry.controller.setWritesEnabled(model.writes.enabled);
 	}, [model.writes.enabled, entry]);
-	return <DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />;
+	// Its Move to trash is confirmed in the tab itself, inline (the console of the connection shows the same one).
+	return <DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} beforeBody={<InlineRemoveConfirm entry={entry} probe={probes[endpoint.key]} />} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />;
 };
 
 /**

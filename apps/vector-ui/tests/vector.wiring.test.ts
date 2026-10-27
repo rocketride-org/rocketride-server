@@ -23,6 +23,7 @@ import { makeConsoleActions, removeTargets, showAnswerOnMap } from '../src/adapt
 import { connectionEntry, entryCount, existingEntry } from '../src/adapters/connections';
 import { connectionCaches } from '../src/adapters/explorer';
 import { DEFAULT_LIMITS } from '../src/vector/results';
+import { DEFAULT_TAB, WORKBENCH_TABS, tabLabel } from '../src/vector/workbench';
 
 const SRC = path.resolve(__dirname, '..', 'src');
 
@@ -75,12 +76,23 @@ const LANE_FILES = [
 	'components/RemoveDialogHost.tsx',
 	'components/ConnectionDrawerDetails.tsx',
 	'components/SupportBadge.tsx',
+	// The workbench's tab row, its panels and the props it hands them.
+	'components/workbenchProps.ts',
+	'components/WorkbenchTabs.tsx',
+	'components/OverviewPanel.tsx',
+	'components/DocumentsTab.tsx',
+	'components/TrashTab.tsx',
+	'components/PendingBar.tsx',
+	'components/QueryTab.tsx',
+	'components/CollectionPanel.tsx',
+	'components/AddDocumentsAside.tsx',
+	'adapters/queryHistory.ts',
 	'views/ConnectionsView.tsx',
 	'views/ConsoleView.tsx',
 	'views/DocumentView.tsx',
 	...fs
 		.readdirSync(path.join(SRC, 'vector'))
-		.filter((f) => /^(addresses|budgets|chartTokens|charts|colors|confirm|connections|consoleModel|consoleStore|documents|fileType|filters|health|identityChange|layout|results|savedFilters|stats|support|wording)\.ts$/.test(f))
+		.filter((f) => /^(addresses|budgets|chartTokens|charts|colors|confirm|connections|consoleModel|consoleStore|documents|fields|fileType|filters|health|identityChange|layout|results|savedFilters|staged|stats|support|wording|workbench)\.ts$/.test(f))
 		.map((f) => `vector/${f}`),
 ];
 
@@ -126,25 +138,49 @@ test('a document tab is told when it is in front, and scores its chunks against 
 	assert.match(view, /heat\.query === query && heat\.chunks === chunkCount\) return undefined;/, 'coming back to the same query does not score again');
 });
 
-test('the Map is a tab of the console: both stay mounted, the map is told when it is visible', () => {
+test('the Map is a tab of the workbench: every panel mounts the first time its tab shows and stays mounted, the map is told when it is visible', () => {
 	const view = code('views/ConsoleView.tsx');
-	assert.match(view, /display: tab === 'console' \? 'flex' : 'none'/);
-	assert.match(view, /display: tab === 'map' \? 'flex' : 'none'/);
+	assert.match(view, /if \(!mounted\.has\(tab\)\) setMounted\(new Set\(\[\.\.\.mounted, tab\]\)\);/, 'a tab shown once keeps its panel');
+	assert.match(view, /panel: \(shown: boolean, gutter: number\): CSSProperties => \(\{[^}]*display: shown \? 'flex' : 'none'/, 'hidden, never unmounted');
+	for (const id of ['overview', 'documents', 'query', 'map', 'collection', 'trash']) {
+		assert.match(view, new RegExp(`\\{mounted\\.has\\('${id}'\\) && \\(\\s*<div style=\\{layout\\.panel\\(tab === '${id}', \\d+\\)\\}>`), id);
+	}
 	assert.match(view, /<MapView model=\{mapModel\} channels=\{channels\} selection=\{entry\.selection\} actions=\{actions\} visible=\{active && tab === 'map'\} documents=\{entry\.documents\} writes=\{entry\.writes\} \/>/);
 	assert.match(view, /const nextMapScope = mapScopeFor\(mapScope, wiring\);\s*if \(nextMapScope !== mapScope\) setMapScope\(nextMapScope\);/, 'the map keeps the scope it drew with while a new one finds its documents');
 	assert.match(view, /const mapModel = useMemo\(\(\) => \(nextMapScope === \(model\.scope \?\? null\) \? model : \{ \.\.\.model, scope: nextMapScope \}\), \[model, nextMapScope\]\)/);
-	assert.match(view, /\{ id: 'console', label: 'Console' \},\s*\{ id: 'map', label: 'Map' \}/);
+	assert.match(view, /<WorkbenchTabs value=\{tab\} onChange=\{\(id\) => entry\.tab\.set\(id\)\} trashCount=\{state\.stats\.view\?\.deletedDocuments \?\? null\} \/>/, 'the tab row is the entry\'s tab, with the store\'s trash count');
+	assert.deepEqual(WORKBENCH_TABS.map((t) => t.label), ['Overview', 'Documents', 'Query', 'Map', 'Collection', 'Trash']);
+	assert.equal(DEFAULT_TAB, 'overview');
+	assert.equal(tabLabel('trash', { trash: 1234 }), 'Trash (1,234)');
+	assert.equal(tabLabel('trash', { trash: null }), 'Trash', 'no count where the store cannot count');
+	assert.equal(tabLabel('map', { trash: 3 }), 'Map');
+	// The header, then the tab row on a row of its own, then what shows on every tab, then the panels.
+	const order = ['<ContentHeader', '<WorkbenchTabs', '<InlineRemoveConfirm', '<ConnectionDetailsPanel', '<PendingBar', "{mounted.has('overview')"].map((part) => view.indexOf(part));
+	assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), order.join(' < '));
 });
 
-test('the console renders the strip, the directory, the chunks, adding documents and the chat, and paces itself through its controller', () => {
+test('the console renders the strip, the directory, the chunks, adding documents and the chat (each in its tab), and paces itself through its controller', () => {
 	const view = code('views/ConsoleView.tsx');
-	for (const part of ['<StatsStrip', '<DocumentDirectory', '<ChunkList', '<IngestPanel', '<ChatPanel']) assert.ok(view.includes(part), part);
+	for (const part of ['<OverviewPanel', '<DocumentsTab', '<QueryTab', '<MapView', '<CollectionPanel', '<TrashTab', '<PendingBar', '<AddDocumentsAside']) assert.ok(view.includes(part), part);
+	// Today's parts, each in the tab that holds it now.
+	for (const [file, parts] of [
+		['components/OverviewPanel.tsx', ['<StatsStrip']],
+		['components/DocumentsTab.tsx', ['<DocumentDirectory', '<ChunkList']],
+		['components/TrashTab.tsx', ['<DocumentDirectory']],
+		['components/QueryTab.tsx', ['<ChatPanel']],
+		['components/AddDocumentsAside.tsx', ['<IngestPanel']],
+		['components/CollectionPanel.tsx', ['<ConnectionDrawerDetails']],
+	] as const) {
+		for (const part of parts) assert.ok(code(file).includes(part), `${file} ${part}`);
+	}
 	assert.match(view, /entry\.controller\.setVisible\(active\)/, 'hidden: no quick stats, the directory pauses');
 	assert.match(view, /entry\.controller\.setWritesEnabled\(model\.writes\.enabled\)/, 'nothing is confirmed or sent while writes are off');
-	assert.match(view, /writes=\{writesDuringRemoval\(model\.writes, state\.removal\.status\)\}/, 'the trash follows the model, and is disabled while a removal runs');
+	for (const file of ['components/DocumentsTab.tsx', 'components/TrashTab.tsx']) {
+		assert.match(code(file), /writes=\{writesDuringRemoval\(model\.writes, state\.removal\.status\)\}/, `${file}: the trash follows the model, and is disabled while a removal runs`);
+	}
 	assert.match(view, /\(state\.removal\.status === 'running' \|\| state\.removal\.message\) &&/, 'the status line says Removing… while a removal runs');
 	assert.match(view, /entry\.controller\.open\(\)/);
-	assert.match(view, /consoleColumns\(width\)/, 'the ratios come from vector/layout.ts');
+	assert.match(view, /\{addingMounted && <AddDocumentsAside [^>]*open=\{adding\}/, 'Add documents is an aside beside the panels, kept mounted once opened (an upload keeps following its progress)');
 	const strip = code('components/StatsStrip.tsx');
 	for (const fn of ['statsFigures(', 'statsChips(', 'countsAsOfText(']) assert.ok(strip.includes(fn), fn);
 });
@@ -157,12 +193,17 @@ test('the scope: the listing asks for its conditions, its documents resolve from
 	assert.match(view, /if \(next !== current\) entry\.scope\.set\(next\)/, 'set only when it changed, so the effect settles');
 	assert.match(view, /const wiring = useMemo\(\(\) => consoleScope\(chatScope, scope, state\.directory, cap\), \[chatScope, scope, state\.directory, cap\]\)/, 'the chat, search and the map are scoped exactly when the ScopeBar shows their toggles on');
 	assert.match(view, /const chatDocuments = wiring\.chat;/);
-	assert.match(view, /<ChatPanel model=\{surfaceModel\} [^>]*scope=\{chatDocuments\}/, 'search gets the scope as it applies');
-	assert.match(view, /\{model\.chat\.enabled && wiring\.chatNotice !== null && \(\s*<p role="status" data-chat-scope-notice=""[^>]*>\s*\{wiring\.chatNotice\}/, 'the chat says when its question goes to every document');
+	assert.match(view, /<QueryTab [^>]*surfaceModel=\{surfaceModel\} chatDocuments=\{chatDocuments\} chatNotice=\{wiring\.chatNotice\} onClearChatScope=\{clearChatScope\} \/>/);
+	const query = code('components/QueryTab.tsx');
+	assert.match(query, /<ChatPanel model=\{surfaceModel\} [^>]*scope=\{chatDocuments\}/, 'search gets the scope as it applies');
+	assert.match(query, /\{model\.chat\.enabled && chatNotice !== null && \(\s*<p role="status" data-chat-scope-notice=""[^>]*>\s*\{chatNotice\}/, 'the chat says when its question goes to every document');
 	assert.match(view, /savedFiltersFor\(savedFilters, entry\.key\)/, "the app's per-connection map, emptied on a change of identity");
-	assert.match(view, /<DocumentDirectory [\s\S]*?scope=\{scope\} onScope=\{setScope\} cap=\{cap\}/);
-	assert.match(view, /<StatsStrip [^>]*scopeLine=\{scopeLine\}/);
-	assert.match(view, /<StatsStrip [^>]*sample=\{selection\.connectionKey === entry\.key \? selection\.sampleModel : null\}[^>]*onScope=\{scopeFromChart\}/, "the charts read the map's sample and a bar scopes the directory");
+	assert.match(view, /<DocumentsTab [^>]*scope=\{scope\} onScope=\{setScope\} cap=\{cap\}/);
+	assert.match(code('components/DocumentsTab.tsx'), /<DocumentDirectory [\s\S]*?scope=\{scope\} onScope=\{onScope\} cap=\{cap\}/);
+	assert.match(view, /<OverviewPanel [^>]*scopeLine=\{scopeLine\} health=\{health\} onChartScope=\{scopeFromChart\} \/>/);
+	const overview = code('components/OverviewPanel.tsx');
+	assert.match(overview, /<StatsStrip [^>]*scopeLine=\{scopeLine\}/);
+	assert.match(overview, /<StatsStrip [^>]*sample=\{selection\.connectionKey === entry\.key \? selection\.sampleModel : null\}[^>]*onScope=\{onChartScope\}/, "the charts read the map's sample and a bar scopes the directory");
 	assert.match(view, /scopeWith\(scope, scope\?\.filter\.path_contains \?\? '', filter\)/, "a bar sets its kind of condition and keeps the scope's others");
 	assert.match(view, /const scopeFromChart = useCallback\(/, 'the charts are memoised: their click handler keeps its identity between renders');
 	assert.match(view, /const next = scopeWith\(scope, scope\?\.filter\.path_contains \?\? '', filter\);\s*const refused = checkScope\(next\);\s*if \(refused !== null\) announcer\.announce\(refused\);\s*else entry\.scope\.set\(next\);/, 'a bar the node would refuse is said, never sent');
@@ -189,8 +230,11 @@ test("a document's health: the tab compares with the console's loaded documents 
 	assert.match(code('views/ConsoleView.tsx'), /healthSummary\(state\.directory\.rows, \{ medianChunks: settled \? medianChunks\(state\.directory\.rows\) : null, complete: state\.directory\.status === 'done' && state\.directory\.filter === null \}\)/);
 });
 
-test("every removal is confirmed by the app-level host, with Cancel focused by the dialog's own mount effect", () => {
-	assert.match(code('VectorApp.tsx'), /<RemoveDialogHost \/>/);
+test('every removal is confirmed inline in the document that shows it, in both mounts (no app-level dialog); the dialogs keep Cancel focused by their own mount effect', () => {
+	const app = code('VectorApp.tsx');
+	assert.doesNotMatch(app, /RemoveDialogHost/, 'the full app mounts no modal confirmation');
+	assert.match(code('views/ConsoleView.tsx'), /<InlineRemoveConfirm entry=\{entry\} probe=\{probe\} \/>/, 'the workbench confirms inline, on every tab');
+	assert.match(app, /<DocumentView [^>]*beforeBody=\{<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} \/>\}/, "and so does the full app's document tab");
 	for (const file of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx']) {
 		const source = code(file);
 		assert.match(source, /useEffect\(\(\) => \{\s*focusCancelIn\(anchor\.current, REMOVE_CANCEL_LABEL\);\s*\}, \[\]\);/, file);
@@ -200,7 +244,7 @@ test("every removal is confirmed by the app-level host, with Cancel focused by t
 	const host = code('components/RemoveDialogHost.tsx');
 	assert.match(host, /entry\.controller\.confirmRemove\(\)/);
 	assert.match(host, /entry\.controller\.cancelRemove\(\)/);
-	for (const file of ['components/DocumentRow.tsx', 'views/DocumentView.tsx', 'components/DocumentDirectory.tsx', 'views/ConsoleView.tsx']) {
+	for (const file of ['components/DocumentRow.tsx', 'views/DocumentView.tsx', 'components/DocumentDirectory.tsx', 'views/ConsoleView.tsx', 'components/DocumentsTab.tsx', 'components/TrashTab.tsx', 'components/PendingBar.tsx']) {
 		assert.doesNotMatch(code(file), /\b(deleteBatch|trashBatch|restoreBatch)\b|'(remove_document|delete|soft_delete|restore)'/, `${file} never writes on its own`);
 	}
 });
@@ -217,16 +261,27 @@ test('the trash buttons say what they do, and are disabled with the reason', () 
 	assert.match(row, /aria-label=\{`Delete \$\{\w+\} permanently`\}/, 'and deletes permanently');
 });
 
-test('the Trash view: the console hands the directory its view, the store count and the trash actions; the host confirms each write with its own dialog', () => {
+test('the Trash tab: the directory gets the trash listing, the store count and the trash actions; each write is confirmed with its own words', () => {
 	const view = code('views/ConsoleView.tsx');
-	assert.match(view, /pager=\{state\.view === 'trash' \? state\.trash : state\.directory\}/);
-	assert.match(view, /view=\{state\.view\} onView=\{\(next\) => entry\.controller\.setView\(next\)\}/);
-	assert.match(view, /trashCount=\{state\.stats\.view\?\.deletedDocuments \?\? null\}/, 'the badge is the store count, never the loaded rows');
-	assert.match(view, /onRestore=\{\(targets\) => void entry\.controller\.restore\(targets\)\}/);
-	assert.match(view, /onDelete=\{\(targets\) => entry\.controller\.requestDelete\(targets\)\}/);
-	assert.match(view, /onEmptyTrash=\{\(\) => void entry\.controller\.requestEmptyTrash\(\)\}/);
-	const host = code('components/RemoveDialogHost.tsx');
-	for (const fn of ['trashConfirmation(', 'multiTrashConfirmation(', 'removeConfirmation(', 'multiRemoveConfirmation(', 'emptyTrashConfirmation(']) assert.ok(host.includes(fn), fn);
+	const documents = code('components/DocumentsTab.tsx');
+	const trash = code('components/TrashTab.tsx');
+	assert.match(view, /<TrashTab \{\.\.\.panel\('trash'\)\} \/>/);
+	assert.match(documents, /pager=\{state\.directory\}/);
+	assert.match(trash, /pager=\{state\.trash\}/);
+	// The controller pages the listing its view names: each tab names its own while it shows (the trash is listed once, when first shown).
+	assert.match(documents, /if \(visible\) entry\.controller\.setView\('active'\);/);
+	assert.match(trash, /if \(visible\) entry\.controller\.setView\('trash'\);/);
+	// The directory's Documents / Trash switch follows the tabs.
+	assert.match(documents, /view="active" onView=\{\(next\) => entry\.tab\.set\(next === 'trash' \? 'trash' : 'documents'\)\}/);
+	assert.match(trash, /view="trash" onView=\{\(next\) => entry\.tab\.set\(next === 'trash' \? 'trash' : 'documents'\)\}/);
+	for (const file of [documents, trash]) assert.match(file, /trashCount=\{state\.stats\.view\?\.deletedDocuments \?\? null\}/, 'the badge is the store count, never the loaded rows');
+	assert.match(trash, /onRestore=\{\(targets\) => void entry\.controller\.restore\(targets\)\}/);
+	assert.match(trash, /onDelete=\{\(targets\) => entry\.controller\.requestDelete\(targets\)\}/);
+	assert.match(trash, /onEmptyTrash=\{\(\) => void entry\.controller\.requestEmptyTrash\(\)\}/);
+	assert.match(code('components/InlineRemoveConfirm.tsx'), /confirmationFor\(pending, removeContextFor\(entry\.ctx\.endpoint, probe\)\)/);
+	const confirm = code('vector/confirm.ts');
+	const chooser = confirm.slice(confirm.indexOf('export function confirmationFor'));
+	for (const fn of ['trashConfirmation(', 'multiTrashConfirmation(', 'removeConfirmation(', 'multiRemoveConfirmation(', 'emptyTrashConfirmation(']) assert.ok(chooser.includes(fn), fn);
 	const connections = code('adapters/connections.ts');
 	assert.match(connections, /trash: \(ids\) => trashBatch\(session\('soft_delete'\)/);
 	assert.match(connections, /restore: \(ids\) => restoreBatch\(session\('restore'\)/);
@@ -250,7 +305,7 @@ test("no lane file reads a token or a component's configuration, or stops events
 });
 
 test('pure modules stay pure: vector/ and the pure adapters import no shell value and no React', () => {
-	const pure = LANE_FILES.filter((f) => f.startsWith('vector/') || ['adapters/explorer.ts', 'adapters/actions.ts', 'adapters/connections.ts', 'adapters/consoleActions.ts', 'env.ts', 'localEnv.ts', 'realmRegion.ts', 'devtool/protocol.ts', 'devtool/controller.ts', 'devtool/frame.ts', 'devtool/frameText.ts'].includes(f));
+	const pure = LANE_FILES.filter((f) => f.startsWith('vector/') || ['adapters/explorer.ts', 'adapters/actions.ts', 'adapters/connections.ts', 'adapters/consoleActions.ts', 'adapters/queryHistory.ts', 'env.ts', 'localEnv.ts', 'realmRegion.ts', 'devtool/protocol.ts', 'devtool/controller.ts', 'devtool/frame.ts', 'devtool/frameText.ts'].includes(f));
 	for (const file of pure) {
 		const source = code(file);
 		assert.doesNotMatch(source, /^import (?!type )[^;]*from 'shell';/m, `${file} imports a shell value`);
@@ -268,6 +323,7 @@ test('identity: the store is attached to the platform, and a change of fingerpri
 	assert.match(app, /<RealmLiveRegion \/>/);
 	assert.doesNotMatch(app, /<LiveRegion \/>/);
 	assert.match(app, /<VectorHistoryPrefsBridge \/>/);
+	assert.match(app, /queryHistory: vectorQueryHistory,/, "the full app's Query history is the bridged, persisted store");
 	assert.match(app, /display: active \? 'flex' : 'none'/, 'editors stay mounted and hidden');
 	assert.match(code('adapters/explorer.ts'), /textField: 'question'/, 'chat history keeps questions only');
 });
@@ -344,8 +400,9 @@ test('console actions: show on the map, ask about these, remove (confirmed by th
 	assert.deepEqual(fronted, ['map:1'], 'showing on the map fronts the console, already on its Map tab with the highlight set');
 	actions.askAbout(['doc-1', 'doc-2']);
 	assert.deepEqual(entry.chatScope.get(), ['doc-1', 'doc-2']);
-	assert.equal(entry.tab.get(), 'console', 'asking lands back in the console');
-	assert.deepEqual(fronted, ['map:1', 'console:1'], 'asking about documents fronts the console too');
+	assert.equal(entry.tab.get(), 'query', 'asking lands on the Query tab');
+	assert.equal(entry.queryMode.get(), 'ask', 'in its Ask mode');
+	assert.deepEqual(fronted, ['map:1', 'query:1'], 'asking about documents fronts the console too');
 	actions.askAbout([]);
 	assert.equal(entry.chatScope.get(), null);
 	actions.openDocument('doc-1', 4);

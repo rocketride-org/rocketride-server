@@ -27,7 +27,8 @@
 // ConsoleActions (src/contract/types.ts) are the only way another part of the
 // app changes what the console shows: open a document tab, show keys on the
 // map, ask to remove documents (the console confirms first; nothing is sent
-// here), scope the next chat question, refresh after an upload, announce.
+// here) or stage them for the pending bar, show one of the console's tabs,
+// scope the next chat question, refresh after an upload, announce.
 // Two helpers tell the map a question before they highlight: a chat answer's
 // (showAnswerOnMap) and Search's two compared questions (showCompareOnMap).
 // =============================================================================
@@ -35,6 +36,8 @@
 import type { ConsoleActions, HighlightSource, SelectionStore, VectorKey } from '../contract/types';
 import type { IRemoveTarget } from '../vector/confirm';
 import { DEFAULT_LIMITS } from '../vector/results';
+import { stage } from '../vector/staged';
+import type { WorkbenchTab } from '../vector/workbench';
 import type { IConnectionEntry } from './connections';
 
 /**
@@ -131,7 +134,7 @@ export function showCompareOnMap(selection: Pick<SelectionStore, 'setQuery' | 's
  * @param deps - Opening a document tab, fronting the connection's console and announcing.
  * @returns The actions.
  */
-export function makeConsoleActions(entry: Pick<IConnectionEntry, 'controller' | 'selection' | 'tab' | 'chatScope'> & Partial<Pick<IConnectionEntry, 'ctx'>>, deps: IConsoleActionDeps): ConsoleActions {
+export function makeConsoleActions(entry: Pick<IConnectionEntry, 'controller' | 'selection' | 'tab' | 'queryMode' | 'chatScope' | 'staged'> & Partial<Pick<IConnectionEntry, 'ctx'>>, deps: IConsoleActionDeps): ConsoleActions {
 	return {
 		openDocument: (objectId: string, chunkId?: number) => deps.openDocument(objectId, chunkId),
 		showOnMap: (keys: readonly VectorKey[], source: HighlightSource) => {
@@ -140,6 +143,12 @@ export function makeConsoleActions(entry: Pick<IConnectionEntry, 'controller' | 
 			deps.showConsole();
 		},
 		requestRemove: (objectIds: readonly string[]) => entry.controller.requestRemove(removeTargets(entry, objectIds)),
+		// Nothing is confirmed or sent here: the pending bar applies the staged set through requestRemove.
+		stageRemove: (objectIds: readonly string[]) => entry.staged.set(stage(entry.staged.get(), removeTargets(entry, objectIds))),
+		openTab: (tab: WorkbenchTab) => {
+			entry.tab.set(tab);
+			deps.showConsole();
+		},
 		askAbout: (objectIds: readonly string[]) => {
 			// The chat's question carries the ids as its filter: never more than the node takes.
 			const cap = entry.ctx?.limits.scope_keys_max ?? DEFAULT_LIMITS.scope_keys_max;
@@ -148,7 +157,8 @@ export function makeConsoleActions(entry: Pick<IConnectionEntry, 'controller' | 
 				return;
 			}
 			entry.chatScope.set(objectIds.length === 0 ? null : [...objectIds]);
-			entry.tab.set('console');
+			entry.queryMode.set('ask');
+			entry.tab.set('query');
 			deps.showConsole();
 		},
 		documentsChanged: () => entry.controller.documentsChanged(),

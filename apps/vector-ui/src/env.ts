@@ -64,6 +64,58 @@ export interface IVectorEndpointsState extends IEndpointState {
 /** Which implementation an env is. */
 export type VectorEnvKind = 'local' | 'remote';
 
+/** What a query-history entry's run was: a Search mode, an Ask question or a Compare. */
+export type QueryHistoryKind = 'semantic' | 'keyword' | 'hybrid' | 'auto' | 'ask' | 'compare';
+
+/** One finished run of the Query tab. */
+export interface IQueryHistoryEntry {
+	id: string;
+	question: string;
+	kind: QueryHistoryKind;
+	/** When it started (ms since the epoch). */
+	at: number;
+	/** How long it took (ms). */
+	ms: number;
+	/** The top-k it asked for, or null. */
+	topK: number | null;
+	/** How many results came back, or null. */
+	results: number | null;
+	outcome: 'rows' | 'error';
+	error?: string;
+	pinned?: boolean;
+	note?: string;
+}
+
+/**
+ * The Query tab's history of one mount, per connection key. The full app keeps it in the workspace preferences (the
+ * shared history store `vector.history`); a dev-tool mount keeps it in memory only.
+ */
+export interface IQueryHistorySource {
+	/** True where the history outlives the page (the full app). */
+	persisted: boolean;
+	/** The one true sentence about where the history is kept (the History footer). */
+	note: string;
+	/** One connection's entries, newest first (the same readable for the same key). */
+	entries(key: string): IReadable<readonly IQueryHistoryEntry[]>;
+	/** Record one finished run (nothing while recording is off for the connection). */
+	record(key: string, entry: Omit<IQueryHistoryEntry, 'id'>): void;
+	togglePin(key: string, id: string): void;
+	/** Set (or clear, with '') an entry's note. */
+	setNote(key: string, id: string, note: string): void;
+	remove(key: string, id: string): void;
+	/** Forget every entry of the connection, pinned ones included. */
+	clear(key: string): void;
+	/** Whether runs on the connection are recorded (default on; the same readable for the same key). */
+	recording(key: string): IReadable<boolean>;
+	setRecording(key: string, on: boolean): void;
+}
+
+/** The full app's History note: what the workspace preferences keep of a run, and what they do not. */
+export const APP_HISTORY_NOTE = 'Saved with your workspace preferences while recording is on: the question, mode, top-k, result count, pin and note of each run. The threshold and the scope are not saved.';
+
+/** A dev-tool mount's History note. */
+export const DEVTOOL_HISTORY_NOTE = 'Kept only while this document is open; nothing is saved.';
+
 /** What a dev-tool mount cannot serve, and why (the inline notes). */
 export interface IDegraded {
 	/** Why the chat cannot ask questions here. */
@@ -104,10 +156,12 @@ export interface IVectorEnv {
 	openConsole(endpoint: IExplorerEndpoint): void;
 	/** Open (or focus) one stored document, optionally at a chunk. Only ever on a user action. */
 	openDocument(endpoint: IExplorerEndpoint, objectId: string, path: string | null, chunkId?: number): void;
-	/** The connection the fronted document belongs to (the sidebar and the full app's dialog host follow it). */
+	/** The connection the fronted document belongs to (the sidebar follows it). */
 	activeConnection: IReadable<string | null>;
 	/** What this mount cannot serve and why: null in the full app (and the controller). */
 	degraded: IDegraded | null;
+	/** The Query tab's history in this mount (persisted in the full app, memory only in a dev-tool mount). */
+	queryHistory: IQueryHistorySource;
 }
 
 /** No role channel at all (not connected). */

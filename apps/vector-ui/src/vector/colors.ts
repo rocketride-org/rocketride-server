@@ -41,6 +41,12 @@ export const CONSOLE_TEXT_TOKEN = '--rr-text-primary';
 /** The focus ring and the selected-row bar. Graphics: at least 3:1. */
 export const ACCENT_TOKEN = '--rr-border-focus';
 
+/**
+ * Data bars (a score, a share of chunks, the threshold's filled track): the accent, so a bar is at least 3:1 on both
+ * surfaces. A short bar keeps a text-primary outline, which carries its edge whatever its length.
+ */
+export const DATA_BAR_TOKEN = '--rr-border-focus';
+
 /** Icons (the trash button draws in currentColor, which is the text token). Graphics: at least 3:1. */
 export const ICON_TOKEN = '--rr-text-primary';
 

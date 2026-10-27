@@ -18,7 +18,8 @@ import { createConnectionRegistry } from '../src/adapters/connections';
 import { makeVectorEndpointStore } from '../src/adapters/explorer';
 import { buildConsoleModel } from '../src/vector/consoleModel';
 import { DEFAULT_LIMITS } from '../src/vector/results';
-import { DEVTOOL_CHAT_NOTE, DEVTOOL_UPLOADS_NOTE, NO_CHANNELS, devToolConsoleModel, liveEndpoint } from '../src/env';
+import { sessionQueryHistory } from '../src/adapters/queryHistory';
+import { DEVTOOL_CHAT_NOTE, DEVTOOL_HISTORY_NOTE, DEVTOOL_UPLOADS_NOTE, NO_CHANNELS, devToolConsoleModel, liveEndpoint } from '../src/env';
 import type { IVectorEnv } from '../src/env';
 import { createLocalVectorEnv } from '../src/localEnv';
 import { fixture } from './support/fixtures';
@@ -61,6 +62,7 @@ async function localEnv(over: Parameters<typeof vectorWorld>[0] = {}) {
 		client: world.client,
 		store,
 		registry,
+		queryHistory: sessionQueryHistory(DEVTOOL_HISTORY_NOTE),
 		activeConnection: NO_ACTIVE,
 		openConsole: (endpoint) => opened.push({ kind: 'console', key: endpoint.key }),
 		openDocument: (endpoint, objectId, _path, chunkId) => opened.push({ kind: 'document', key: endpoint.key, objectId, ...(chunkId === undefined ? {} : { chunkId }) }),
@@ -119,7 +121,7 @@ describe('T12 - the LOCAL env does what the full app did, over its own store and
 		env.openConsole(endpoint);
 		env.openDocument(endpoint, 'doc-1', 'a.md', 3);
 		assert.deepEqual(opened, [{ kind: 'console', key: endpoint.key }, { kind: 'document', key: endpoint.key, objectId: 'doc-1', chunkId: 3 }]);
-		const offline = createLocalVectorEnv({ ready: false, client: null, store, registry, activeConnection: NO_ACTIVE, openConsole: () => undefined, openDocument: () => undefined });
+		const offline = createLocalVectorEnv({ ready: false, client: null, store, registry, queryHistory: sessionQueryHistory(DEVTOOL_HISTORY_NOTE), activeConnection: NO_ACTIVE, openConsole: () => undefined, openDocument: () => undefined });
 		assert.equal(offline.ready, false);
 		assert.equal(offline.session(endpoint), null);
 		assert.deepEqual(offline.channels(endpoint), NO_CHANNELS);

@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { ACCENT_TOKEN, CONSOLE_SURFACES, CONSOLE_TEXT_TOKEN, ICON_TOKEN, MIN_GRAPHIC_CONTRAST, MIN_TEXT_CONTRAST, SELECTED_TINT, contrastRatio, opaqueOver, parseColor, selectedRowBackground, tintOver } from '../src/vector/colors';
+import { ACCENT_TOKEN, CONSOLE_SURFACES, CONSOLE_TEXT_TOKEN, DATA_BAR_TOKEN, ICON_TOKEN, MIN_GRAPHIC_CONTRAST, MIN_TEXT_CONTRAST, SELECTED_TINT, contrastRatio, opaqueOver, parseColor, selectedRowBackground, tintOver } from '../src/vector/colors';
 import type { Rgb } from '../src/vector/colors';
 
 const THEME_DIR = path.resolve(__dirname, '..', '..', '..', 'packages', 'shell', 'public', 'themes');
@@ -40,7 +40,7 @@ function ratio(tokens: Record<string, string>, token: string, surface: string): 
 }
 
 /** The files the console's own lane draws (the map's and the chat/ingest components are measured by their lanes). */
-const CONSOLE_FILES = ['components/StatsStrip.tsx', 'components/DocumentDirectory.tsx', 'components/DocumentRow.tsx', 'components/ChunkList.tsx', 'components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/ConnectionDrawerDetails.tsx', 'components/SupportBadge.tsx', 'views/ConnectionsView.tsx', 'views/ConsoleView.tsx', 'views/DocumentView.tsx', 'styles.ts'];
+const CONSOLE_FILES = ['components/StatsStrip.tsx', 'components/DocumentDirectory.tsx', 'components/DocumentRow.tsx', 'components/ChunkList.tsx', 'components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx', 'components/ConnectionDrawerDetails.tsx', 'components/SupportBadge.tsx', 'components/WorkbenchTabs.tsx', 'components/OverviewPanel.tsx', 'components/DocumentsTab.tsx', 'components/TrashTab.tsx', 'components/PendingBar.tsx', 'components/QueryTab.tsx', 'components/CollectionPanel.tsx', 'components/AddDocumentsAside.tsx', 'views/ConnectionsView.tsx', 'views/ConsoleView.tsx', 'views/DocumentView.tsx', 'styles.ts'];
 
 test('there are six shipped themes and each defines every token measured here', () => {
 	assert.equal(themes.length, 6, themes.map((t) => t.name).join(', '));
@@ -67,6 +67,20 @@ test('graphics: the focus ring and the selected-row bar (the accent) and the tra
 			assert.ok(ratio(tokens, ICON_TOKEN, surface) >= MIN_GRAPHIC_CONTRAST, `${name}: icon on ${surface}`);
 		}
 	}
+});
+
+test('data bars (scores, shares, the threshold track) are at least 3:1 on both surfaces in every theme', () => {
+	const rows: string[] = [];
+	for (const { name, tokens } of themes) {
+		assert.ok(tokens[DATA_BAR_TOKEN], `${name} lacks ${DATA_BAR_TOKEN}`);
+		const cells = CONSOLE_SURFACES.map((surface) => {
+			const r = ratio(tokens, DATA_BAR_TOKEN, surface);
+			assert.ok(r >= MIN_GRAPHIC_CONTRAST, `${name}: ${DATA_BAR_TOKEN} on ${surface} is ${r.toFixed(2)}:1`);
+			return r.toFixed(2);
+		});
+		rows.push(`${name} ${cells.join('/')}`);
+	}
+	console.log(`data bar ${DATA_BAR_TOKEN} (bg-default/bg-paper):`, rows.join(' | '));
 });
 
 test('the selected row: text stays at least 4.5:1 on its tinted background, and its bar at least 3:1 against the page', () => {
