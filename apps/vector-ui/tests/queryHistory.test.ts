@@ -33,7 +33,7 @@ import path from 'node:path';
 import type { ChatTurn } from '../src/chat/chatSession';
 import { DEVTOOL_HISTORY_NOTE } from '../src/env';
 import { QUERY_HISTORY_TEXT_MAX, sessionQueryHistory } from '../src/adapters/queryHistory';
-import { COMPARE_B_NOT_SAVED, ONLY_FIRST_KEPT, askRecord, compareRecord, entryMeta, entryTime, loadPlan, modeOfKind, msText, outcomeText, rerunPlan, searchRecord, shownEntries } from '../src/vector/queryHistory';
+import { COMPARE_B_NOT_SAVED, ONLY_FIRST_KEPT, RAN_AGAIN, askRecord, landsOn, compareRecord, entryMeta, entryTime, loadPlan, modeOfKind, msText, outcomeText, rerunPlan, searchRecord, shownEntries } from '../src/vector/queryHistory';
 import type { QueryHistoryItem, RerunContext } from '../src/vector/queryHistory';
 import type { ModeOption } from '../src/vector/searchWorkbench';
 
@@ -84,6 +84,26 @@ test('a run is handed over whole and History keeps its first 200 characters, mar
 	assert.equal(history.entries('k').get()[0].compareWith, 'falcon', "a Compare's B is held for the session");
 	history.record('k', askRecord(turn({ question: chunk })) as never);
 	assert.deepEqual([history.entries('k').get()[0].question.length, history.entries('k').get()[0].truncated], [200, true], 'an Ask question too');
+});
+
+test('a run that repeats the newest entry\'s whole question is that entry run again: no entry is added, History says "Ran again"; a cut entry never takes a run', () => {
+	assert.equal(RAN_AGAIN, 'Ran again: this entry shows the latest run.');
+	assert.equal(landsOn([], 'water'), null);
+	assert.equal(landsOn([{ id: 'n', question: 'water' }, { id: 'o', question: 'falcon' }], 'water'), 'n');
+	assert.equal(landsOn([{ id: 'n', question: 'water' }, { id: 'o', question: 'falcon' }], 'falcon'), null, 'only the newest entry');
+	assert.equal(landsOn([{ id: 'n', question: 'w'.repeat(200), truncated: true }], 'w'.repeat(200)), null);
+	// What landsOn predicts is what the store does (P0's QUERY_HISTORY_LIMITS store).
+	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+	history.record('k', searchRecord({ question: 'water', mode: 'semantic', topK: 10, results: 4 }, 1, 1));
+	const [first] = history.entries('k').get();
+	assert.equal(landsOn(history.entries('k').get(), 'water'), first.id);
+	history.togglePin('k', first.id);
+	history.record('k', searchRecord({ question: 'water', mode: 'keyword', topK: 25, results: 2 }, 2, 1));
+	const after = history.entries('k').get();
+	assert.equal(after.length, 1, 'no entry added');
+	assert.deepEqual([after[0].id, after[0].pinned, after[0].kind, after[0].topK], [first.id, true, 'keyword', 25], 'its id and pin kept, the run\'s facts taken');
+	history.record('k', searchRecord({ question: 'falcon', mode: 'semantic', topK: 10, results: 1 }, 3, 1));
+	assert.equal(history.entries('k').get().length, 2, 'another question adds an entry');
 });
 
 test('records: a Search run per mode, a Compare once with B beside A and the results both found, an Ask question once its answer ended', () => {
@@ -170,7 +190,7 @@ test('a dev-tool mount\'s history records each run at once, with what the Query 
 
 test('wiring: every finished run goes to the mount\'s history, from Search, Compare and Ask; Load and Rerun hand the form an entry', () => {
 	const tab = code(path.join('components', 'QueryTab.tsx'));
-	assert.match(tab, /const record = \(run: QueryRunRecord\): void => history\.record\(historyKey, run\);/);
+	assert.match(tab, /const lands = history\.recording\(historyKey\)\.get\(\) \? landsOn\(history\.entries\(historyKey\)\.get\(\), run\.question\) : null;\s*history\.record\(historyKey, run\);\s*setRanAgain\(lands\);/, 'the entry a repeat lands on says "Ran again"');
 	assert.match(tab, /<SearchPanel [^\n]*onRecord=\{record\} onShowDocument=\{onShowDocument\} \/>/);
 	assert.match(tab, /<ChatPanel [^\n]*onRecord=\{record\} \/>/);
 	assert.match(tab, /history=\{env\.queryHistory\}\s*historyKey=\{entry\.key\}/, 'the mount\'s own history, per connection');

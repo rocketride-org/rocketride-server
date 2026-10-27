@@ -946,9 +946,11 @@ test('HistoryAside: pinned entries first, each with its kind, k, what it came to
 	assert.match(html, /<p[^>]*data-history-note=""[^>]*>Kept only while this document is open; nothing is saved\.<\/p>/);
 	assert.match(html, /<h3[^>]*tabindex="-1" data-query-focus="history-heading"[^>]*>History<\/h3>/i);
 	assert.doesNotMatch(html, /role="dialog"|aria-modal/, 'Clear… asks inline');
+	assert.doesNotMatch(html, /Ran again/);
+	assert.match(render(h(HistoryAside, { ...props, ranAgain: compare.id })), new RegExp(`data-history-entry="${compare.id}"[^]*?<p[^>]*data-ran-again=""[^>]*>Ran again: this entry shows the latest run\\.</p>`));
 	const off = render(h(HistoryAside, { ...props, recording: false }));
 	assert.match(off, /Recording is off: new runs are not added\. The entries below stay\./);
 	const empty = render(h(HistoryAside, { ...props, entries: [] }));
-	assert.match(empty, /No runs yet\. Each Search, Compare and Ask run is listed here\./);
+	assert.match(empty, /No runs yet\. Search, Compare and Ask runs are listed here\./);
 	assert.match(empty, /<button type="button"[^>]*disabled=""[^>]*data-query-focus="history-clear"[^>]*>Clear…<\/button>/);
 });

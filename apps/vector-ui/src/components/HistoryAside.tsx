@@ -24,8 +24,10 @@
 // VECTOR-UI - THE QUERY TAB'S HISTORY (an aside docked beside the modes)
 // =============================================================================
 //
-// One entry per finished run, pinned ones first: the question (a Compare's A
-// and B), then its kind, k, what it came to, when and how long. Each entry
+// One entry per question, pinned ones first: the question (a Compare's A and
+// B), then its kind, k, what its latest run came to, when and how long. A run
+// that repeats the newest entry's question updates that entry, which then
+// says "Ran again". Each entry
 // has Load (fills the form, runs nothing), Rerun (its mode and k with the
 // threshold, scope and table filter chosen now; off, with the reason, when
 // it cannot run), Pin, a one-line Note and Remove. "Record runs" turns
@@ -46,7 +48,7 @@ import type { CSSProperties } from 'react';
 import { commonStyles } from 'shell';
 import { escapeLayer, focusAfterClear, focusAfterRemove } from '../vector/queryFocus';
 import type { QueryFocusTarget } from '../vector/queryFocus';
-import { COMPARE_B_NOT_SAVED, HISTORY_FILTERS, entryMeta, shownEntries } from '../vector/queryHistory';
+import { COMPARE_B_NOT_SAVED, HISTORY_FILTERS, RAN_AGAIN, entryMeta, shownEntries } from '../vector/queryHistory';
 import type { HistoryFilter, QueryHistoryItem, RerunPlan } from '../vector/queryHistory';
 
 /** Props for the {@link HistoryAside} component. */
@@ -62,6 +64,8 @@ export interface IHistoryAsideProps {
 	note: string;
 	/** Now, for the entries' times. */
 	now: number;
+	/** The entry the last run landed on when it repeated the newest question (no entry added), or null. */
+	ranAgain?: string | null;
 	/** What Rerun would do with an entry, or why it cannot. */
 	rerunOf(entry: QueryHistoryItem): RerunPlan;
 	onLoad(entry: QueryHistoryItem): void;
@@ -105,7 +109,7 @@ type AsideFocus = QueryFocusTarget | { entry: string; control: 'load' | 'note' |
  * @param props - {@link IHistoryAsideProps}.
  * @returns The aside.
  */
-export function HistoryAside({ id, entries, recording, onRecording, note, now, rerunOf, onLoad, onRerun, onPin, onNote, onRemove, onClear, onClose }: IHistoryAsideProps): React.ReactElement {
+export function HistoryAside({ id, entries, recording, onRecording, note, now, ranAgain = null, rerunOf, onLoad, onRerun, onPin, onNote, onRemove, onClear, onClose }: IHistoryAsideProps): React.ReactElement {
 	const root = useRef<HTMLElement>(null);
 	const [filter, setFilter] = useState<HistoryFilter>('all');
 	const [editing, setEditing] = useState<{ id: string; draft: string } | null>(null);
@@ -226,7 +230,7 @@ export function HistoryAside({ id, entries, recording, onRecording, note, now, r
 				</p>
 			)}
 			{shown.length === 0 ? (
-				<p style={S.line}>{entries.length === 0 ? 'No runs yet. Each Search, Compare and Ask run is listed here.' : 'No runs match this filter.'}</p>
+				<p style={S.line}>{entries.length === 0 ? 'No runs yet. Search, Compare and Ask runs are listed here.' : 'No runs match this filter.'}</p>
 			) : (
 				<ul style={S.list} aria-label="Runs">
 					{shown.map((entry) => {
@@ -236,6 +240,11 @@ export function HistoryAside({ id, entries, recording, onRecording, note, now, r
 							<li key={entry.id} style={S.entry} data-history-entry={entry.id} data-kind={entry.kind}>
 								<p style={S.question}>{entry.kind === 'compare' ? `A: ${entry.question}\nB: ${entry.compareWith ?? COMPARE_B_NOT_SAVED}` : entry.question}</p>
 								<p style={S.meta}>{entryMeta(entry, now)}</p>
+								{ranAgain === entry.id && (
+									<p style={S.meta} data-ran-again="">
+										{RAN_AGAIN}
+									</p>
+								)}
 								{!plan.ok && <p style={S.meta}>{`Rerun is off: ${plan.reason}`}</p>}
 								{entry.note !== undefined && entry.note !== '' && editing?.id !== entry.id && <p style={S.meta}>{`Note: ${entry.note}`}</p>}
 								{editing?.id === entry.id && (

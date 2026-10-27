@@ -35,7 +35,8 @@
 //
 // Every finished run is recorded in the mount's Query history
 // (`env.queryHistory`: the workspace preferences in the full app, the
-// document's life in a dev-tool mount), shown in the History aside docked
+// document's life in a dev-tool mount; a run of the newest entry's question
+// updates that entry, which says "Ran again"), shown in the History aside docked
 // beside the modes: Load fills the form, Rerun runs an entry again with its
 // mode and k and the threshold, scope and table filter chosen now
 // (vector/queryHistory.ts).
@@ -69,7 +70,7 @@ import { QUERY_MODES, QUERY_MODE_LABELS, needsFocusRescue, nextQueryTab, primary
 import type { ActiveFocus, QueryFocusTarget } from '../vector/queryFocus';
 import { modeOptions, takePrefill } from '../vector/searchWorkbench';
 import type { AskHandoff, ChatPrefill, SearchHandoff } from '../vector/searchWorkbench';
-import { loadPlan, rerunPlan } from '../vector/queryHistory';
+import { landsOn, loadPlan, rerunPlan } from '../vector/queryHistory';
 import type { QueryHistoryItem, QueryRunRecord } from '../vector/queryHistory';
 import type { IQueryPrefill, QueryMode } from '../vector/workbench';
 import ChatPanel from './ChatPanel';
@@ -166,6 +167,8 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 	const entries = useReadable(useMemo(() => history.entries(historyKey), [history, historyKey])) as readonly QueryHistoryItem[];
 	const recording = useReadable(useMemo(() => history.recording(historyKey), [history, historyKey]));
 	const [historyOpen, setHistoryOpen] = useState(false);
+	// The entry the last run updated instead of adding one ("Ran again"), or null.
+	const [ranAgain, setRanAgain] = useState<string | null>(null);
 
 	/**
 	 * A nonce for a handoff made here.
@@ -217,7 +220,12 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 	 *
 	 * @param run - The run.
 	 */
-	const record = (run: QueryRunRecord): void => history.record(historyKey, run);
+	const record = (run: QueryRunRecord): void => {
+		// Read now, not from the render that started the run: another run may have landed since.
+		const lands = history.recording(historyKey).get() ? landsOn(history.entries(historyKey).get(), run.question) : null;
+		history.record(historyKey, run);
+		setRanAgain(lands);
+	};
 
 	/**
 	 * What Rerun would do with an entry now, or why it cannot.
@@ -331,6 +339,7 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 						onRecording={(on) => history.setRecording(historyKey, on)}
 						note={history.note}
 						now={Date.now()}
+						ranAgain={ranAgain}
 						rerunOf={(entry) => rerunOf(entry, 'preview')}
 						onLoad={load}
 						onRerun={rerun}

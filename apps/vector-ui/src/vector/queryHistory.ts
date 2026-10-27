@@ -33,8 +33,11 @@
 // first 200 characters of its question and marks a longer one `truncated`
 // (adapters/queryHistory.ts), so a chunk's text used as the query never lands
 // in the workspace file whole, and two long questions that share their start
-// stay two entries. A Compare's question B is kept for the session only, so
-// after a reload its entry says "Question B isn't saved."
+// stay two entries. A run that repeats the newest entry's whole question is
+// that entry run again: the entry keeps its id, pin and note, takes the run's
+// facts, and History says "Ran again" (no entry is added). A Compare's
+// question B is kept for the session only, so after a reload its entry says
+// "Question B isn't saved."
 //
 //   - Load fills the form (or Ask's box) and runs nothing; a cut question
 //     says only the first 200 characters were kept;
@@ -52,6 +55,9 @@ import type { QueryMode } from './workbench';
 /** Said of an entry whose question was longer than History keeps (adapters/queryHistory.ts QUERY_HISTORY_TEXT_MAX). */
 export const ONLY_FIRST_KEPT = 'Only the first 200 characters were kept.';
 
+/** Said on the entry a run landed on when it repeated the newest entry's question (no entry was added). */
+export const RAN_AGAIN = 'Ran again: this entry shows the latest run.';
+
 /** Said of a Compare entry whose question B is not there (it is kept for the session only). */
 export const COMPARE_B_NOT_SAVED = "Question B isn't saved.";
 
@@ -60,6 +66,20 @@ export type QueryRunRecord = Omit<IQueryHistoryEntry, 'id' | 'truncated'>;
 
 /** An entry as History shows it (a Compare's question B when the session still has it). */
 export type QueryHistoryItem = IQueryHistoryEntry;
+
+/**
+ * The entry a run lands on when it repeats the newest entry's whole question
+ * (the history updates that entry instead of adding one); an entry History
+ * already cut never takes a run.
+ *
+ * @param entries - The connection's entries, newest first.
+ * @param question - The run's whole question (a Compare's A).
+ * @returns The newest entry's id, or null when the run adds an entry.
+ */
+export function landsOn(entries: readonly Pick<IQueryHistoryEntry, 'id' | 'question' | 'truncated'>[], question: string): string | null {
+	const newest = entries[0];
+	return newest !== undefined && newest.truncated !== true && newest.question === question ? newest.id : null;
+}
 
 /**
  * The record of one Search run.
