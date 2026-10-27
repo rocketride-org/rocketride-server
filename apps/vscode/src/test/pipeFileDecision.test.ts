@@ -182,6 +182,21 @@ test('only same-file candidates: no duplicate, and the first same-file one is re
 	assert.equal(found.sameFile, ALIAS);
 });
 
+test('an unreadable first candidate is reported, and a genuine second one is still the duplicate', async () => {
+	const { check } = scripted({ '/ws/held.pipe': 'unreadable', [OTHER]: 'duplicate' });
+	const found = await firstDuplicate(['/ws/held.pipe', OTHER], check);
+	assert.equal(found.duplicate, OTHER);
+	assert.equal(found.unreadable, '/ws/held.pipe');
+});
+
+test('only unreadable candidates: no duplicate, and the first unreadable one is reported for the restart guard', async () => {
+	const { check } = scripted({ '/ws/held.pipe': 'unreadable', '/ws/busy.pipe': 'unreadable', [STALE]: 'resolved' });
+	const found = await firstDuplicate([STALE, '/ws/held.pipe', '/ws/busy.pipe'], check);
+	assert.equal(found.duplicate, undefined);
+	assert.equal(found.unreadable, '/ws/held.pipe');
+	assert.equal(found.sameFile, undefined);
+});
+
 test('the search stops at the first duplicate, and resolved candidates alone report nothing', async () => {
 	const { check, asked } = scripted({ [STALE]: 'resolved', [OTHER]: 'duplicate', [THIRD]: 'duplicate' });
 	assert.equal((await firstDuplicate([STALE], check)).duplicate, undefined);

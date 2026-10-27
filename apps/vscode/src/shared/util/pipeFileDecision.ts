@@ -122,16 +122,23 @@ export function otherFilesWithProjectId(filePath: string, projectId: string | un
 	return known.filter((f) => f.projectId === projectId && !samePath(f.filePath, filePath)).map((f) => f.filePath);
 }
 
-/** What the on-disk check of one cached candidate found; see firstDuplicate. */
-export type DuplicateCheck = 'duplicate' | 'same-file' | 'resolved';
+/**
+ * What the on-disk check of one cached candidate found; see firstDuplicate.
+ * 'unreadable' means the candidate is on disk but could not be read or
+ * parsed just now (held by another program, or mid-write), so the clash is
+ * neither confirmed nor ruled out.
+ */
+export type DuplicateCheck = 'duplicate' | 'same-file' | 'resolved' | 'unreadable';
 
 /**
  * The first cached candidate that `check` confirms as a genuine duplicate,
  * in the order given. A candidate the check rejects does not end the search:
  * the cache can hold a renamed file's previous path ('resolved') or another
  * spelling of the file itself ('same-file') ahead of a real duplicate. The
- * first same-file candidate is reported as well, so the caller can say why
- * there was nothing to ask.
+ * first same-file and the first unreadable candidate are reported as well:
+ * the warning says why there was nothing to ask, and the restart guard
+ * treats an unreadable candidate as a twin, since a restart it cannot rule
+ * out would replace another file's task.
  *
  * Pure on purpose: the check is passed in, so the choice can be asserted
  * without `vscode` (see pipeFileDecision.test.ts); SidebarProvider supplies
@@ -141,14 +148,16 @@ export type DuplicateCheck = 'duplicate' | 'same-file' | 'resolved';
  * @param candidates The cached files that carry the id, in cache order.
  * @param check Confirms one candidate against the disk.
  */
-export async function firstDuplicate(candidates: readonly string[], check: (candidate: string) => Promise<DuplicateCheck>): Promise<{ duplicate?: string; sameFile?: string }> {
+export async function firstDuplicate(candidates: readonly string[], check: (candidate: string) => Promise<DuplicateCheck>): Promise<{ duplicate?: string; sameFile?: string; unreadable?: string }> {
 	let sameFile: string | undefined;
+	let unreadable: string | undefined;
 	for (const candidate of candidates) {
 		const clash = await check(candidate);
-		if (clash === 'duplicate') return { duplicate: candidate, sameFile };
+		if (clash === 'duplicate') return { duplicate: candidate, sameFile, unreadable };
 		if (clash === 'same-file') sameFile ??= candidate;
+		if (clash === 'unreadable') unreadable ??= candidate;
 	}
-	return { sameFile };
+	return { sameFile, unreadable };
 }
 
 /**
