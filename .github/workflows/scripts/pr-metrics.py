@@ -27,11 +27,13 @@ UI_PREFIXES = (
 UI_APP = re.compile(r'^apps/[^/]+-ui/src/')
 TEST_FILE = re.compile(r'(^|/)(tests?|__tests__)/|\.(test|spec)\.[jt]sx?$')
 
+# An embedded image or video, or a GitHub attachment. Badges from img.shields.io do not count.
 EVIDENCE = re.compile(
-    r'!\[[^\]]*\]\([^)]+\)|<img\b|<video\b|github\.com/user-attachments/|user-images\.githubusercontent\.com/'
-    r'|\.(png|jpe?g|gif|webp|mp4|mov|webm)\b',
+    r'!\[[^\]]*\]\((?!https?://img\.shields\.io)[^)]+\)|<img\b(?![^>]*img\.shields\.io)|<video\b'
+    r'|github\.com/user-attachments/assets/|user-images\.githubusercontent\.com/',
     re.IGNORECASE,
 )
+COMMENT = re.compile(r'<!--.*?-->', re.DOTALL)
 PLACEHOLDER_LINE = re.compile(r'^(steps:|result:|\d+\.|-\s*\[[ x]\].*)$', re.IGNORECASE)
 
 # Measured with this script for PRs merged from 2026-08-22 to 2026-10-23, before the
@@ -121,7 +123,7 @@ def measure(prs: list[dict]) -> dict:
     return {
         'merged': len(prs),
         'ui_prs': len(ui),
-        'ui_with_evidence': sum(bool(EVIDENCE.search(p['body'] or '')) for p in ui),
+        'ui_with_evidence': sum(bool(EVIDENCE.search(COMMENT.sub('', p['body'] or ''))) for p in ui),
         'verification_filled': sum(verification_filled(p['body'] or '') for p in prs),
         'linked_issue': sum(p['closingIssuesReferences']['totalCount'] > 0 for p in prs),
         'changes_requested': sum(any(not is_bot(r['author']) for r in p['reviews']['nodes']) for p in prs),
@@ -157,8 +159,9 @@ def main() -> None:
     parser.add_argument('--format', choices=('markdown', 'discord', 'json'), default='markdown')
     args = parser.parse_args()
 
-    until = args.until or dt.datetime.now(dt.timezone.utc).date()
-    since = args.since or until - dt.timedelta(days=args.days)
+    # Both ends are inclusive. --days counts whole UTC days ending yesterday, so weekly runs neither overlap nor skip.
+    until = args.until or dt.datetime.now(dt.timezone.utc).date() - dt.timedelta(days=1)
+    since = args.since or until - dt.timedelta(days=args.days - 1)
     m = measure(fetch(args.repo, args.base, since, until))
     window = f'{since.isoformat()} to {until.isoformat()}'
 
