@@ -269,7 +269,8 @@ export function placeRequest(state: IQueryTabsState, request: TabRequest): { sta
  */
 export function scrollLeftToShow(view: { left: number; right: number }, item: { left: number; right: number }, scrollLeft: number): number {
 	const tooWide = item.right - item.left > view.right - view.left;
-	if (item.left >= view.left && (item.right <= view.right || tooWide)) return scrollLeft;
+	// In view: wholly, or (a tab wider than the list) with its start inside it.
+	if (item.left >= view.left && (item.right <= view.right || (tooWide && item.left < view.right))) return scrollLeft;
 	if (item.left < view.left || tooWide) return Math.max(0, scrollLeft - (view.left - item.left));
 	return scrollLeft + (item.right - view.right);
 }

@@ -199,4 +199,5 @@ test('the tab list scrolls just enough to show the shown tab, and not at all whe
 	assert.equal(scrollLeftToShow({ left: 100, right: 400 }, { left: 20, right: 90 }, 30), 0, 'never below 0');
 	assert.equal(scrollLeftToShow({ left: 100, right: 200 }, { left: 120, right: 260 }, 0), 0, 'a tab wider than the list whose start is in view: no change');
 	assert.equal(scrollLeftToShow({ left: 100, right: 200 }, { left: 60, right: 260 }, 50), 10, 'a tab wider than the list that starts before it: its start is brought in');
+	assert.equal(scrollLeftToShow({ left: 100, right: 200 }, { left: 250, right: 450 }, 0), 150, 'a tab wider than the list that starts past its right edge: its start is brought in');
 });
