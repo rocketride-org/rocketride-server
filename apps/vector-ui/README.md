@@ -108,7 +108,7 @@ Opening a connection opens its console, the main screen: a header, a row of
 tabs, and one panel per tab.
 
 - **Header.** The collection and its pipeline, then **Refresh**, **Details**
-  and **Add documents**. **Refresh** counts the collection again, lists the documents again and probes the store node again, and says "Refreshing…" only for a refresh you asked for, not for the quick check that runs in the background; the button keeps one width. It is never disabled: where the connection cannot be opened it is marked unavailable, with the reason. When the store's last check failed, Refresh (and **Retry** on a banner, in Documents and in Trash) checks the store again before anything else. A store that did not answer is said to have "not answered when it was last checked", never to need an update of the node, and a listing that fails again keeps the last known rows, marked as such. A store's error text drops a leading exception name. **Details** shows or hides the connection's details inside the
+  and **Add documents**. **Refresh** counts the collection again, lists the documents again and probes the store node again, and says "Refreshing…" only for a refresh you asked for, not for the quick check that runs in the background; the button keeps one width. It is never disabled: where the connection cannot be opened it is marked unavailable, with the reason. When the store's last check failed, Refresh (and **Retry** on a banner, in Documents and in Trash) checks the store again before anything else. A store that did not answer is said to have "not answered when it was last checked", never to need an update of the node, and a listing that fails again keeps the last known rows, marked as such. The banner's error text for an unreachable store drops a leading exception name. **Details** shows or hides the connection's details inside the
   console: what a card's drawer shows on the Connections page, with **Test
   connection**. The header and the tab row do not move when a run starts or an
   answer arrives.
@@ -272,7 +272,7 @@ row, or **Delete selected permanently…**) and **Empty trash…** remove docume
 from the store for good, after an inline confirmation that does not focus the
 destructive button. Deleting a document sends `delete` with `deleted_only`, so a document that still has chunks outside the trash is kept whole: none of its chunks, in the trash or not, is deleted. The answer names the documents it kept, by path. Typing: one document asks for its file name
 (for a document with no path, `1`; the full path is always shown beside the box);
-several documents, or Empty trash, ask for their count; Enter confirms once what is typed matches, and before that a line under the field says what is missing ("Nothing is typed yet." or "What is typed does not match."); on `rocketride_vector`
+several documents, or Empty trash, ask for their count; Enter confirms once what is typed matches; an Enter before that confirms nothing, and a line under the field says what is missing ("Nothing is typed yet." or "What is typed does not match."); on `rocketride_vector`
 the permanent deletes ask for the table name instead, because the table is
 shared by every pipeline of your organization that names it. A document in the trash says "This document is in the trash. Restore it to read it." until it is restored. The grid's headers fit their words, and a row of a partly trashed document says "4 chunks outside the trash" (or "chunks outside the trash" where the count is not known), as far as the loaded documents say.
 
@@ -307,7 +307,7 @@ switch.
   rows whatever their scores; the threshold only marks them here.
 - **Compare** runs a second question beside the first and reports what the two
   share ("A and B share 4 of 10 results (Jaccard 0.25); 3 documents only in A, 2
-  only in B"); the map draws both as stars: B is placed after A, and the status line says when B could not be placed.
+  only in B"); the map draws both as stars: B is placed after A, and the status line says when B could not be placed. An answer that arrives for a sample that has been replaced is not drawn, and the status line says so (for B, to show it again; B is placed again on the next showing).
 - **Ask** is the question over the stored documents through the pipeline's LLM
   (up to 4,000 characters, one at a time). The answer lists the chunks it was
   given, each with **open** and **map**; "Why these?" under an answer shows the
@@ -376,8 +376,7 @@ says otherwise.
 
 One toolbar row holds **Points** (Detailed: up to 2,000 points with text; Light:
 up to 5,000 points, without their text), **Layout**, **Colour by**, **Query**,
-**Table** (the same points as a list, for keyboard and screen-reader use, so it
-stays on the row), **Advanced**, **Export** and **Views**. **Advanced** is a
+**Table** (the same points as a list, for keyboard and screen-reader use, so it stays on the row), **Advanced**, **Export** and **Views**. The row never wraps: when it has no room, Export and Views, then Colour by, Layout and Points, move into **More ▾**. **Advanced** is a
 panel that opens under its button and holds **Edges** (with **Per point** and
 **Expand selected**), **Lasso**, **Fit**, **3D** and the **Sample**'s seed with
 **New sample**; **Export** and **Views** open the same way, and all three stay
@@ -386,7 +385,7 @@ status line of its own under the toolbar holds the busy words ("Sampling…") an
 **Cancel** while a layout runs, and **Clear lasso selection**, **Clear
 highlight** or **Clear selection** while something is lit, so nothing in the
 toolbar moves when a run starts. Every map notice goes on this line, and a failure reads "Failed: …" (announced as an alert, and repeated in the legend's notes). Escape on the map does the same one step at a time: the lasso, then a highlight (an answer's sources, Show on map, a duplicate
-group, a query's fading), then the selected point. Resizing keeps the zoom relative to the fit. Under the map, the legend (a box of a fixed height, 144 px, that scrolls inside itself) says how many of how many chunks are shown ("Showing 1,000 of 1,318
+group, a query's fading), then the selected point. Resizing keeps the zoom relative to the fit. Under the map, the legend (it collapses to one row, "▾ Legend", kept for the session; open, it is a box of a fixed height, 144 px, that scrolls inside itself) says how many of how many chunks are shown ("Showing 1,000 of 1,318
 chunks (random sample) · 42 docs · seed 7") and shows a glyph for each kind of
 mark that is drawn: similarity edges (fainter: less similar), the selected
 point's nearest chunks, outliers, the query's star and rays, near-duplicate
@@ -402,8 +401,7 @@ pairs, and a shown duplicate group's rings.
   strongest links (3, 5 or 10; 3 only, above 3,000 points of a light sample) and
   **Tree** the spanning tree of the neighbour graph. Each edge is drawn in an
   opaque colour measured to stand out from the background in every theme, and every line and edge the map draws spans at least 2 device pixels (the Canvas 2D fallback outlines a point with 1 px),
-  fainter for a less similar pair; the links from the selected point are drawn
-  (1.5 px) whether or not edges are on. Hovering a point thickens its edges and
+  fainter for a less similar pair; the links from the selected point are drawn heavier than the edges (3 px on a standard screen, 1.5 px on a high-density one) whether or not edges are on. Hovering a point thickens its edges and
   **Expand selected** adds the selected point's own. Selecting a point, a
   highlighted set (a lasso, a document, a duplicate group, an answer's sources)
   or a placed query fades the other points and the edges between them, and

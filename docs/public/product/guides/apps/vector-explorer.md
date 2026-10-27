@@ -204,7 +204,7 @@ per tab. A panel is built the first time its tab shows and then kept, so a tab
 keeps what you did in it.
 
 The header names the collection and its pipeline and has three buttons.
-**Refresh** counts the collection again, lists the documents again and asks the store node about itself again; it says "Refreshing…" only for a refresh you asked for, not for the quick check that runs in the background, and the button keeps one width. It is never disabled: where the connection cannot be opened it is marked unavailable, with the reason. When the store's last check failed, Refresh (and **Retry** on a banner, in Documents and in Trash) checks the store again first. A store that did not answer is said to have "not answered when it was last checked", never to need an update of the node, and a listing that fails again keeps the last known rows, marked as such. A store's error text drops a leading exception name. **Details**
+**Refresh** counts the collection again, lists the documents again and asks the store node about itself again; it says "Refreshing…" only for a refresh you asked for, not for the quick check that runs in the background, and the button keeps one width. It is never disabled: where the connection cannot be opened it is marked unavailable, with the reason. When the store's last check failed, Refresh (and **Retry** on a banner, in Documents and in Trash) checks the store again first. A store that did not answer is said to have "not answered when it was last checked", never to need an update of the node, and a listing that fails again keeps the last known rows, marked as such. The banner's error text for an unreachable store drops a leading exception name. **Details**
 shows or hides what a connection's drawer shows on the Connections page, with
 **Test connection**, inside the console. **Add documents** opens the upload
 aside (see [Adding documents](#adding-documents)). The header and the tab row do
@@ -460,7 +460,7 @@ console cannot change node settings.
 
 **Compare** runs a second question beside the first and says what they share: "A
 and B share 4 of 10 results (Jaccard 0.25); 3 documents only in A, 2 only in B";
-with the map open, both are drawn as stars (A ★, B ☆): B is placed after A, and the map's status line says when B could not be placed.
+with the map open, both are drawn as stars (A ★, B ☆): B is placed after A, and the map's status line says when B could not be placed. An answer that arrives for a sample that has been replaced is not drawn, and the status line says so (for B, to show it again).
 
 #### Ask
 
@@ -559,7 +559,7 @@ button: "Deletes this document and its N chunks from `<collection>`. If it still
 has chunks outside the trash, it is kept whole. This cannot be undone; add the
 file again to restore it." One document asks you to type its file name (`1` for a
 document with no path; the full path is always shown beside the box); several
-documents, or Empty trash, ask you to type their count. Enter confirms once what is typed matches; before that a line under the field says what is missing ("Nothing is typed yet." or "What is typed does not match."). **Empty trash…** lists the
+documents, or Empty trash, ask you to type their count. Enter confirms once what is typed matches; an Enter before that confirms nothing, and a line under the field says what is missing ("Nothing is typed yet." or "What is typed does not match."). **Empty trash…** lists the
 whole trash first. Deleting sends `delete` for the trash only, so a document that
 still has chunks outside the trash (a later upload added some after it was moved
 there) is kept whole (none of its chunks, in the trash or not, is deleted), and the answer names it by path: "Emptied the trash:
@@ -595,8 +595,7 @@ placed so that chunks with similar meaning sit close together. It is hidden,
 with the reason, when the store node cannot sample; the console is unaffected.
 
 - **Toolbar.** One row holds **Points**, **Layout**, **Colour by**, **Query**,
-  **Table**, **Advanced**, **Export** and **Views**. **Table** lists the same
-  points for screen readers and keyboard use, so it stays on the row.
+  **Table**, **Advanced**, **Export** and **Views**. **Table** lists the same points for screen readers and keyboard use, so it stays on the row. The row never wraps: when it has no room, Export and Views, then Colour by, Layout and Points, move into **More ▾**.
   **Advanced** opens a panel under its button with **Edges** (and **Per point**
   and **Expand selected**), **Lasso**, **Fit**, **3D** and the sample's seed with
   **New sample**. **Export** and **Views** open the same way. These panels stay
@@ -615,8 +614,7 @@ with the reason, when the store node cannot sample; the console is unaffected.
   than asked for. Below it a glyph
   names each kind of mark that is drawn: similarity edges (fainter: less
   similar), the selected point's nearest chunks, outliers, the query's star and
-  rays, near-duplicate pairs and a shown duplicate group's rings. The legend is a box of a fixed
-  height (144 px) that scrolls inside itself.
+  rays, near-duplicate pairs and a shown duplicate group's rings. The legend collapses to one row ("▾ Legend"), kept for the session; open, it is a box of a fixed height (144 px) that scrolls inside itself, and its glyphs draw their lines at the canvas widths for the screen's pixel ratio.
 - **Layout.** The first picture is a PCA projection computed on the node.
   **Neighbour graph** refines it in your browser by pulling each chunk towards
   its nearest neighbours, and is kept only when it preserves neighbours at
@@ -671,7 +669,7 @@ with the reason, when the store node cannot sample; the console is unaffected.
   tree of the neighbour graph, "2,000 points, 1,999 edges". Each edge is drawn in
   an opaque colour measured to stand out from the background in every theme,
   fainter for a less similar pair, and the links from the selected point are
-  drawn (1.5 px thick) whether or not edges are on. Hovering a point thickens its
+  drawn heavier than the edges (3 px thick on a standard screen, 1.5 px on a high-density one) whether or not edges are on. Hovering a point thickens its
   edges; **Expand selected** adds the selected point's own. When frames get slow
   the map draws fewer edges and says so.
 - **Dimming.** Selecting a point, a highlighted set (a lasso, a document, a
