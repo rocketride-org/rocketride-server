@@ -128,6 +128,8 @@ const TRACE_LEVELS = ['none', 'metadata', 'summary', 'full'] as const;
 
 /**
  * `deploy source-config`: persist one source's trace level and debug output.
+ * The server stores both settings on every call, so a setting not passed
+ * keeps the source's current value rather than resetting to its default.
  *
  * @param project - The project id.
  * @param source - The source id.
@@ -142,7 +144,13 @@ export async function executeDeploySourceConfig(project: string, source: string,
 	}
 	const client = await connectDeploy(options, out);
 	if (!client) return 1;
-	const deployment = await client.deploy.setSourceConfig(project, source, teamArgOf(client, options.team), { traceLevel, debugOut: options.debugOut ?? false });
+	const teamId = teamArgOf(client, options.team);
+	// step: carry over the setting the user did not pass
+	const current = traceLevel === undefined || options.debugOut === undefined ? (await client.deploy.get(project, teamId)).schedules?.[source] : undefined;
+	const deployment = await client.deploy.setSourceConfig(project, source, teamId, {
+		traceLevel: traceLevel ?? current?.traceLevel,
+		debugOut: options.debugOut ?? current?.debugOut ?? false,
+	});
 	const config = deployment.schedules?.[source];
 	out.line(`Source ${project}/${source}: trace ${config?.traceLevel ?? traceLevel ?? 'full'}, debug output ${(config?.debugOut ?? options.debugOut) ? 'on' : 'off'}.`);
 	out.result({ deployment: withTeamName(deployment, teamContextOf(client, [deployment])) });
@@ -397,7 +405,7 @@ export function registerDeployCommands(program: Command): void {
 		.option('--team <team>', 'Team the deployment belongs to (@me, a name, or an id)', '')
 		.option('--trace-level <level>', 'none, metadata, summary, or full (default: full)')
 		.option('--debug-out', 'Turn full task debug output on')
-		.option('--no-debug-out', 'Turn full task debug output off (default)')
+		.option('--no-debug-out', 'Turn full task debug output off')
 		.action(async (project, source, options) => {
 			await runCliCommand(options, (out) => executeDeploySourceConfig(project, source, options, out));
 		});
