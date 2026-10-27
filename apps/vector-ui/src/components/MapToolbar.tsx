@@ -559,6 +559,8 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 						{inMore.has('points') ? pointsItem : null}
 						{inMore.has('layout') ? layoutItem : null}
 						{inMore.has('colour') ? colourItem : null}
+						{/* When More closes this is hidden, so its width drops to 0: an Export or Views panel open in it
+						    closes (usePopover closes on a change of its container's width), and stays mounted. */}
 						{inMore.has('extras') ? (
 							<span style={{ display: 'inline-flex', gap: TOOLBAR_GAP }} data-more-extras="">
 								{props.extras}
