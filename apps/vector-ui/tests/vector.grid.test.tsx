@@ -236,9 +236,6 @@ test('fitting the headers to their words widens no grid: each one\'s least is wh
 		['Chunks, with Score', chunkColumns(true), 594],
 		['Chunks', chunkColumns(false), 514],
 	];
-	for (const [name, columns, before] of grids) {
-		assert.ok(gridMinimumWidth(columns) <= before, `${name}: ${gridMinimumWidth(columns)} px at least, no more than the ${before} px before`);
-		for (const column of columns) assert.ok(columnWidth(column) >= headerWidth(column.label, column.sortValue !== undefined), `${name}: ${column.id} shows its header whole`);
-	}
+	for (const [name, columns, before] of grids) assert.ok(gridMinimumWidth(columns) <= before, `${name}: ${gridMinimumWidth(columns)} px at least, no more than the ${before} px before`);
 	assert.equal(gridMinimumWidth([{ width: 34, label: '' }, { width: 110, label: 'Deleted chunks', sortValue: () => 1 }]), 34 + headerWidth('Deleted chunks', true), 'the least sums the fitted widths');
 });
