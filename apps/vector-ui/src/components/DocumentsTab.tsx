@@ -76,8 +76,8 @@ import { FILTER_DEBOUNCE_MS, checkScope, directoryExportItems, directoryView, fo
 import { afterDrawerClosed, afterNeighbourChosen, afterToolGone } from '../vector/grid';
 import type { IFocusChain, IGridSort } from '../vector/grid';
 import { medianChunks } from '../vector/health';
-import { stage, unstage } from '../vector/staged';
-import type { IStagedSet } from '../vector/staged';
+import { stage, statusSortVersion, unstage } from '../vector/staged';
+import type { IStagedSet, IStatusSortState } from '../vector/staged';
 import { formatCount } from '../vector/stats';
 import { buildTree, flatFolders, folderRows } from '../vector/tree';
 import type { FolderView } from '../vector/tree';
@@ -244,7 +244,8 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 		reviewStore.set(false);
 		setFolder(next);
 	};
-	// The folder for search, the map and Ask only: the list keeps this folder view (its listing is not asked again).
+	// The folder for the scope's surfaces (vector/filters.ts folderScope): a scope off the list (or a new one) leaves the
+	// list on this folder view, with no new listing; a scope already on the list keeps it there, as the label says.
 	const scopeToFolder = (prefix: string): void => {
 		const next = folderScope(scope, applied, prefix);
 		const refused = checkScope(next);
@@ -277,18 +278,21 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 	}, [median, unloaded]);
 
 	// Unstaging sends nothing, so it works whatever the writes; staging waits for them.
+	// A row ticked in the grid (its set is remembered: a sort by Status does not move that row under the pointer).
+	const ownTick = useRef<IStagedSet | null>(null);
 	const toggle = (item: IDocumentItem): void => {
 		const now = entry.staged.get();
-		if (now.has(item.objectId)) {
-			entry.staged.set(unstage(now, [item.objectId]));
-			return;
-		}
-		if (!writes.enabled) {
+		if (!now.has(item.objectId) && !writes.enabled) {
 			if (writes.reason) actions.announce(writes.reason);
 			return;
 		}
-		entry.staged.set(stage(now, [targetOf(item)]));
+		const next = now.has(item.objectId) ? unstage(now, [item.objectId]) : stage(now, [targetOf(item)]);
+		ownTick.current = next;
+		entry.staged.set(next);
 	};
+	// Status and Health sort again only when their values change elsewhere (vector/staged.ts statusSortVersion).
+	const statusSort = useRef<IStatusSortState>({ version: 0, seen: staged });
+	statusSort.current = statusSortVersion(statusSort.current, staged, ownTick.current);
 	const ctx = useRef<IGridContext>({ staged, writes, health: healthOf, duplicate: () => false, onToggle: toggle });
 	ctx.current = { staged, writes, health: healthOf, duplicate: (item) => (pathCounts.get(item.path) ?? 0) > 1, onToggle: toggle };
 	const columns = useMemo(() => documentColumns(ctx), []);
@@ -469,7 +473,7 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 						<span role="status">{`Folder ${folderLabel}: ${listCountText(rows.length, pager)}, of what is loaded.`}</span>
 						<GatedButton onClick={thenGrid(() => setFolder(null))}>Show all documents</GatedButton>
 						{folder?.kind === 'folder' && (
-							<GatedButton onClick={thenGrid(() => scopeToFolder(folder.prefix))} title="The scope gets this folder for these only; the list keeps showing what is loaded under it">
+							<GatedButton onClick={thenGrid(() => scopeToFolder(folder.prefix))} title={folderTargets.documents ? 'The scope gets this folder; the list stays scoped and is listed again with it' : 'The scope gets this folder for these only; the list keeps showing what is loaded under it'}>
 								{folderScopeLabel(folderTargets)}
 							</GatedButton>
 						)}
@@ -502,7 +506,7 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 							setDrawerOpen(false);
 						}}
 					>
-						<VectorGrid ref={grid} label="Stored documents" rows={rows} rowId={rowId} columns={columns} sort={sort} onSort={setSort} sortVersion={sort?.column === 'status' ? staged : sort?.column === 'health' ? healthOf : null} selectedId={selectedId} onActivate={openRow} onToggle={toggle} activateOnClick leaving={leaving} empty={empty} rowTitle={(item) => documentTooltip(item, healthOf(item))} />
+						<VectorGrid ref={grid} label="Stored documents" rows={rows} rowId={rowId} columns={columns} sort={sort} onSort={setSort} sortVersion={sort?.column === 'status' ? statusSort.current.version : sort?.column === 'health' ? healthOf : null} selectedId={selectedId} onActivate={openRow} onToggle={toggle} activateOnClick leaving={leaving} empty={empty} rowTitle={(item) => documentTooltip(item, healthOf(item))} />
 					</div>
 					{drawerId !== null && (
 						<div style={styles.drawerBox(layout.drawer, layout.stacked)}>
