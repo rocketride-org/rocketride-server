@@ -74,9 +74,12 @@ test('light samples are dithered within their 2-decimal rounding on PCA, so no l
 	assert.match(read('views/MapView.tsx'), /sample\.mode === 'light' \? ditherRounded\(pca, 0\.01, /);
 });
 
-test('the Selection tab is wired to the console unchanged: every selected document goes to requestRemove (no cap here)', () => {
+test('every removal on the map goes to the console uncut: staged where it stages (stageRemove), else confirmed (requestRemove); never a cap here', () => {
 	const view = read('views/MapView.tsx');
-	assert.match(view, /<SelectionTab[\s\S]*?onRemove=\{\(ids\) => actions\.requestRemove\(ids\)\}/);
+	assert.match(view, /<SelectionTab[\s\S]*?onRemove=\{\(ids\) => removeDocuments\(ids\)\}/);
+	const remove = callbackBody(view, 'removeDocuments');
+	assert.match(remove, /if \(actions\.stageRemove\) actions\.stageRemove\(objectIds\);\s*else actions\.requestRemove\(objectIds\);/);
+	assert.equal((view.match(/actions\.requestRemove\(/g) ?? []).length, 1, 'removeDocuments is the one way out');
 	assert.doesNotMatch(view, /requestRemove\([^)]*\.slice\(|\.slice\(0, limits\.write_ids_max\)/, 'the map never truncates a removal to write_ids_max');
 });
 

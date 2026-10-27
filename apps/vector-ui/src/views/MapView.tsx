@@ -40,8 +40,9 @@
 // this view (queryVector) and is sent unchanged to `project`, `search` and
 // `neighbors` (scope scores). It passes through map/calls.ts, which forwards a
 // call's input untouched; no module under src/map reads or keeps it. The map never
-// writes: removals are asked of the console (actions.requestRemove), which
-// confirms them.
+// writes: removals are handed to the console, staged for its pending changes
+// where it offers that (actions.stageRemove), else asked of it
+// (actions.requestRemove), which confirms them.
 //
 // Every action lands back in the console: Open document, Ask about these only,
 // Remove, and the shared selection (focused chunk, highlights, lasso keys).
@@ -189,6 +190,13 @@ function scopeOfSample(result: ISampleResult | null | undefined): ISampleScope {
 }
 const NO_ROWS_SOURCE: IDocumentRowsSource = { getRows: () => NO_ROWS, subscribe: () => () => undefined };
 
+/**
+ * The highlights the Duplicates tab's "Show group" set: their pairs are ringed with their similarity while one of
+ * them is the highlight shown. Kept beside the highlight object, which the selection store holds across tab switches
+ * and remounts (its frozen shape has no field for it), the way SAMPLE_SCOPES is.
+ */
+const DUPLICATE_GROUPS = new WeakSet<NonNullable<SelectionState['highlight']>>();
+
 /** No console around the map: no write ever happens. */
 const NO_WRITES: IWriteCountSource = { get: () => 0, subscribe: () => () => undefined };
 
@@ -318,6 +326,8 @@ export interface SelectionTabProps {
 	onAskAbout(objectIds: readonly string[]): void;
 	/** "Move these documents to the trash": EVERY document of the selection; the console confirms and batches the writes (APP_SPEC §6). */
 	onRemove(objectIds: readonly string[]): void;
+	/** The console stages removals (its pending changes apply them): the button says so. */
+	staging?: boolean;
 	onCopy(keys: readonly VectorKey[]): void;
 	/** Show only the selected points on the map; absent: no such button. */
 	onIsolate?(keys: readonly VectorKey[]): void;
@@ -349,7 +359,7 @@ export function SelectionTab(props: SelectionTabProps): React.ReactElement {
 					Ask about these only
 				</button>
 				<button type="button" style={MAP_STYLES.button} disabled={!writes.enabled} onClick={() => props.onRemove(docs)}>
-					Move these documents to the trash
+					{props.staging ? 'Stage these documents for the trash' : 'Move these documents to the trash'}
 				</button>
 				<button type="button" style={MAP_STYLES.button} onClick={() => props.onCopy(keys)}>
 					Copy keys
@@ -455,8 +465,6 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const [centreOn, setCentreOn] = useState<{ index: number; seq: number } | null>(null);
 	const [pulse, setPulse] = useState(0);
 	const [rendererKind, setRendererKind] = useState<'webgl' | 'canvas2d' | 'none'>('none');
-	/** The highlight the Duplicates tab's "Show group" set (its pairs are ringed while it is the one shown). */
-	const [duplicateHighlight, setDuplicateHighlight] = useState<SelectionState['highlight']>(null);
 
 	// The one query vector (from `embed`), kept here and sent only to project / search / neighbors / recommend.
 	const queryVector = useRef<number[] | null>(null);
@@ -662,10 +670,10 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	// The shown duplicate group: its pairs (both ends shown) get rings and their similarity, while the Duplicates tab
 	// shows it and its highlight is still the one on the map.
 	const duplicateRings: IDuplicateRing[] = useMemo(() => {
-		if (!sample || tab !== 'duplicates' || highlight === null || highlight !== duplicateHighlight) return [];
+		if (!sample || tab !== 'duplicates' || highlight === null || !DUPLICATE_GROUPS.has(highlight)) return [];
 		const group = new Set(resolveKeys(highlight.keys, keyIdx, []).points);
 		return sample.duplicates.filter((d) => group.has(d.a) && group.has(d.b) && !(hidden && (hidden[d.a] || hidden[d.b]))).slice(0, MAX_DRAWN_DUPLICATES).map((d) => ({ a: d.a, b: d.b, sim: d.sim }));
-	}, [sample, tab, highlight, duplicateHighlight, keyIdx, hidden]);
+	}, [sample, tab, highlight, keyIdx, hidden]);
 
 	// Everything outside the set the map is showing is drawn faded: a selection with its neighbours, else a
 	// highlighted set, else a placed query's top-k.
@@ -1218,6 +1226,16 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	// -------------------------------------------------------------------------
 	// Lasso and keys
 	// -------------------------------------------------------------------------
+
+	/** Removals: staged for the console's pending changes where it offers that, else confirmed by it at once. */
+	const staging = actions.stageRemove !== undefined;
+	const removeDocuments = useCallback(
+		(objectIds: readonly string[]): void => {
+			if (actions.stageRemove) actions.stageRemove(objectIds);
+			else actions.requestRemove(objectIds);
+		},
+		[actions],
+	);
 
 	const onLasso = useCallback(
 		(indices: readonly number[]): void => {
@@ -1821,7 +1839,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 										selectKey(key);
 									}}
 									onSelectNeighbour={selectKey}
-									onRemoveDocument={(objectId) => actions.requestRemove([objectId])}
+									onRemoveDocument={(objectId) => removeDocuments([objectId])}
+									staging={staging}
 									treeNeighbours={edges === 'tree' && tree && selected !== null ? treeNeighbours(tree.edges, selected) : null}
 									onAddExample={onAddExample}
 									examplePolarity={selectedKey ? polarityOf(examples, selectedKey) : null}
@@ -1852,12 +1871,14 @@ export function MapView(props: MapViewProps): React.ReactElement {
 									writes={model.writes}
 									onSelect={(indices) => {
 										selection.setHighlight({ source: 'neighbors', keys: indices.map((i) => pointKey(sample, i)) });
-										setDuplicateHighlight(selection.getState().highlight);
+										const shown = selection.getState().highlight;
+										if (shown) DUPLICATE_GROUPS.add(shown);
 									}}
-									onRemoveDocument={(objectId) => actions.requestRemove([objectId])}
+									onRemoveDocument={(objectId) => removeDocuments([objectId])}
 									connectionKey={model.connectionKey}
 									documents={props.documents ?? null}
-									onRemoveDocuments={(objectIds) => actions.requestRemove(objectIds)}
+									onRemoveDocuments={(objectIds) => removeDocuments(objectIds)}
+									staging={staging}
 									onOpenDocument={(objectId, chunkId) => actions.openDocument(objectId, chunkId)}
 								/>
 							) : null}
@@ -1870,7 +1891,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 									}}
 									connectionKey={model.connectionKey}
 									writes={model.writes}
-									onRemoveDocument={(objectId) => actions.requestRemove([objectId])}
+									onRemoveDocument={(objectId) => removeDocuments([objectId])}
+									staging={staging}
 									onShowNeighbours={(i) => {
 										void onPick(i);
 										setTab('neighbours');
@@ -1918,7 +1940,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 									chat={model.chat}
 									writes={model.writes}
 									onAskAbout={(ids) => actions.askAbout(ids)}
-									onRemove={(ids) => actions.requestRemove(ids)}
+									onRemove={(ids) => removeDocuments(ids)}
+									staging={staging}
 									onCopy={(keys) => {
 										const text = JSON.stringify(keys);
 										if (typeof navigator !== 'undefined' && navigator.clipboard) navigator.clipboard.writeText(text).then(() => actions.announce(`Copied ${num(keys.length)} keys.`), () => actions.announce(COPY_KEYS_BLOCKED));

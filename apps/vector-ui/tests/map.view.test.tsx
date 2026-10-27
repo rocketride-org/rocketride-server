@@ -758,3 +758,77 @@ test('the legend\'s lines: edges drawn, a truncated listing, a scope, an isolati
 	const out = render({ sample: modelOf(truncated) });
 	assert.match(out, /Sampled from the first 500 documents by path; the collection has more/);
 });
+
+// -----------------------------------------------------------------------------
+// Staging: where the console stages removals, the map's panels stage them
+// -----------------------------------------------------------------------------
+
+test('with a console that stages (stageRemove), every map removal is staged, never confirmed at once, and the panels say Stage removal; without one, requestRemove as before', () => {
+	const staged: Array<readonly string[]> = [];
+	const rec = recording();
+	const stagingActions: ConsoleActions = { ...rec.actions, stageRemove: (ids) => staged.push(ids) };
+	const sample = modelOf(clustered);
+	render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'point' });
+	const inspector = last<{ onRemoveDocument(id: string): void; staging?: boolean }>('PointInspector');
+	assert.equal(inspector.staging, true);
+	inspector.onRemoveDocument('doc-1');
+	render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'duplicates' });
+	const dup = last<{ onRemoveDocuments(ids: readonly string[]): void; onRemoveDocument(id: string): void; staging?: boolean }>('DuplicatesPanel');
+	assert.equal(dup.staging, true);
+	dup.onRemoveDocuments(['a', 'b']);
+	dup.onRemoveDocument('c');
+	render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'outliers' });
+	const outliers = last<{ onRemoveDocument(id: string): void; staging?: boolean }>('OutliersPanel');
+	assert.equal(outliers.staging, true);
+	outliers.onRemoveDocument('d');
+	const out = render({ model: enrichedModel(), sample, actions: stagingActions, initialTab: 'outliers' });
+	assert.match(out, />Stage removal<\/button>/);
+	assert.doesNotMatch(out, />Move to trash<\/button>/);
+	assert.deepEqual(staged, [['doc-1'], ['a', 'b'], ['c'], ['d']]);
+	assert.deepEqual(rec.removed, [], 'nothing asked to be confirmed at once');
+	// A console that does not stage: the same buttons confirm through requestRemove.
+	render({ model: enrichedModel(), sample, actions: rec.actions, initialTab: 'outliers' });
+	assert.equal(last<{ staging?: boolean }>('OutliersPanel').staging, false);
+	last<{ onRemoveDocument(id: string): void }>('OutliersPanel').onRemoveDocument('e');
+	assert.deepEqual(rec.removed, [['e']]);
+});
+
+test('Show group on the Duplicates tab rings that group\'s pairs with their similarity and fades the rest; another highlight drops the rings', () => {
+	const selection = createSelectionStore(KEY);
+	const sample = modelOf(clustered);
+	const pair = clustered.duplicates[0]!;
+	render({ model: enrichedModel(), sample, selection, initialTab: 'duplicates' });
+	last<{ onSelect(indices: readonly number[]): void }>('DuplicatesPanel').onSelect([pair.a, pair.b]);
+	render({ model: enrichedModel(), sample, selection, initialTab: 'duplicates' });
+	const canvas = last<{ overlay: { duplicateRings?: Array<{ a: number; b: number; sim: number }> }; dimmed: Uint8Array | null }>('PointCanvas');
+	assert.ok((canvas.overlay.duplicateRings ?? []).some((r) => r.a === pair.a && r.b === pair.b && r.sim === pair.sim));
+	assert.ok(canvas.dimmed, 'the rest is faded');
+	assert.equal(canvas.dimmed![pair.a], 0);
+	assert.equal(canvas.dimmed![pair.b], 0);
+	assert.equal(Array.from(canvas.dimmed!).filter((v) => v === 0).length >= 2, true);
+	// Another highlight (Find similar, the chat): no rings.
+	selection.setHighlight({ source: 'neighbors', keys: [[clustered.docs[0]!.objectId, 0]] });
+	render({ model: enrichedModel(), sample, selection, initialTab: 'duplicates' });
+	assert.deepEqual(last<{ overlay: { duplicateRings?: unknown[] } }>('PointCanvas').overlay.duplicateRings, []);
+});
+
+test('the map fades nothing with nothing shown; a selection keeps itself and its neighbour links lit; dimOnHover only while clusters are on screen', () => {
+	const sample = modelOf(clustered);
+	render({ model: enrichedModel(), sample });
+	const plain = last<{ dimmed: Uint8Array | null; dimOnHover?: boolean }>('PointCanvas');
+	assert.equal(plain.dimmed, null);
+	assert.equal(plain.dimOnHover, false, 'coloured by document, Point tab: hovering fades nothing');
+	render({ model: enrichedModel(), sample, initialTab: 'clusters' });
+	assert.equal(last<{ dimOnHover?: boolean }>('PointCanvas').dimOnHover, true);
+	render({ model: enrichedModel(), sample, extra: { initialColourBy: 'cluster' } });
+	assert.equal(last<{ dimOnHover?: boolean }>('PointCanvas').dimOnHover, true);
+	// The legend lists the marks drawn: outliers and duplicate pairs of this sample, no edges by default.
+	const legend = last<{ marks: { edges: unknown; outliers: number; duplicates: number; links: boolean; query: unknown } }>('Legend');
+	assert.equal(legend.marks.edges, null);
+	assert.equal(legend.marks.links, false);
+	assert.equal(legend.marks.query, null);
+	assert.equal(legend.marks.outliers, clustered.outliers.length);
+	assert.equal(legend.marks.duplicates, Math.min(200, clustered.duplicates.length));
+	render({ model: enrichedModel(), sample, extra: { edges: 'tree' } });
+	assert.ok(last<{ marks: { edges: { weakest: string; strongest: string } | null } }>('Legend').marks.edges, 'edges drawn: the edge glyph');
+});

@@ -24,7 +24,7 @@ import { HeatStrip } from '../src/components/HeatStrip';
 import { LEGEND_CLUSTERS, Legend, markRows } from '../src/components/Legend';
 import { MapToolbar, TREE_HINT } from '../src/components/MapToolbar';
 import { NeighbourList } from '../src/components/NeighbourList';
-import { OutliersPanel } from '../src/components/OutliersPanel';
+import { OutliersBody, OutliersPanel } from '../src/components/OutliersPanel';
 import { PointCanvas } from '../src/components/PointCanvas';
 import { PointInspector } from '../src/components/PointInspector';
 import { PointsTable } from '../src/components/PointsTable';
@@ -33,7 +33,9 @@ import type { INeighborsResult, ISampleResult, IVectorLimits, VectorKey } from '
 import { clusterLabel, clusterRows, clusterSentence, clusterView } from '../src/map/clusters';
 import { COLOUR_MODES, clusterColours, colourPoints } from '../src/map/colours';
 import { dimMask, isolateMask } from '../src/map/isolate';
+import { outlierRows } from '../src/map/outliers';
 import { POPOVER_GAP, POPOVER_MARGIN, placePopover, popoverKey } from '../src/map/popover';
+import { STAGE_REMOVAL, removeAllLabel, removeOthersLabel } from '../src/map/reviewWording';
 import { readPalette } from '../src/map/tokens';
 import { SelectionTab } from '../src/views/MapView';
 import { deepFreeze, loadSample, modelOf, pcaXY } from './support/map.samples';
@@ -433,4 +435,33 @@ test('the legend\'s glyph row lists only the marks drawn now, each with words, i
 	// Nothing marked: the row keeps its line (selecting a point does not resize the map) and lists nothing.
 	const none = html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" />);
 	assert.match(none, /<div style="min-height:18px[^"]*" data-legend-marks=""><\/div>/);
+});
+
+// -----------------------------------------------------------------------------
+// Staging: the map's removal buttons say what they do
+// -----------------------------------------------------------------------------
+
+test('where the console stages removals, the map\'s buttons say Stage removal (inspector, outliers, duplicates, selection); else Move to trash as before', () => {
+	const writes = { enabled: true, reason: null };
+	const staged = html(<PointInspector sample={demo} index={5} neighbours={neighbours} querySim={null} writes={writes} onOpenDocument={noop} onFindSimilar={noop} onRemoveDocument={noop} staging />);
+	assert.match(staged, /<button[^>]*>Stage removal<\/button>/);
+	assert.doesNotMatch(staged, />Move to trash</);
+	assert.match(html(<PointInspector sample={demo} index={5} neighbours={neighbours} querySim={null} writes={writes} onOpenDocument={noop} onFindSimilar={noop} onRemoveDocument={noop} />), /<button[^>]*>Move to trash<\/button>/);
+	const removed: string[] = [];
+	const rows = outlierRows(demo.result, 1);
+	const body = OutliersBody({ rows, percentile: 1, writes, canRemove: true, staging: true, canShowNeighbours: false, onPercentile: noop, onSelect: noop, onReview: noop, onRemove: (id) => removed.push(id), onShowNeighbours: noop });
+	button(body, STAGE_REMOVAL).props.onClick();
+	assert.deepEqual(removed, [rows[0]!.objectId]);
+	assert.equal(removeOthersLabel(1, true), 'Stage removal');
+	assert.equal(removeOthersLabel(3, true), 'Stage 3 removals');
+	assert.equal(removeAllLabel(1, true), 'Stage 1 removal');
+	assert.equal(removeAllLabel(1200, true), 'Stage all 1,200 removals');
+	assert.equal(removeOthersLabel(3), 'Move the others to the trash (3)', 'unchanged without staging');
+	assert.equal(removeAllLabel(2), 'Move all queued to the trash (2 documents)');
+	const keys: VectorKey[] = [['doc-1', 0], ['doc-2', 1]];
+	const tab = SelectionTab({ keys, chat: { enabled: true, reason: null }, writes, onAskAbout: noop, onRemove: noop, onCopy: noop, staging: true });
+	assert.ok(button(tab, 'Stage these documents for the trash'));
+	// Writes off: staging is closed the same way, with the reason as text.
+	const off = { enabled: false, reason: 'Removing documents is turned off on this store node (allow_writes).' };
+	assert.match(html(<PointInspector sample={demo} index={5} neighbours={neighbours} querySim={null} writes={off} onOpenDocument={noop} onFindSimilar={noop} onRemoveDocument={noop} staging />), /<button[^>]*disabled=""[^>]*>Stage removal<\/button>/);
 });

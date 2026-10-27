@@ -148,13 +148,18 @@ export function queuedLine(n: number, policyChose = false): string {
 	return policyChose ? 'No document queued: this sample does not show that a kept document holds another one. Choose a keep by hand to queue one anyway.' : 'No document queued. Choose which document to keep in each group.';
 }
 
+/** A map button that stages a document for the trash (the console's pending changes apply it). */
+export const STAGE_REMOVAL = 'Stage removal';
+
 /**
  * The bulk button.
  *
  * @param n - Queued documents.
+ * @param staging - The console stages removals (its pending changes apply them).
  * @returns E.g. "Move all queued to the trash (3 documents)".
  */
-export function removeAllLabel(n: number): string {
+export function removeAllLabel(n: number, staging = false): string {
+	if (staging) return n === 1 ? 'Stage 1 removal' : `Stage all ${num(n)} removals`;
 	return `Move all queued to the trash (${plural(n, 'document')})`;
 }
 
@@ -162,9 +167,11 @@ export function removeAllLabel(n: number): string {
  * A group's own remove button.
  *
  * @param n - The group's queued documents.
+ * @param staging - The console stages removals.
  * @returns E.g. "Move the others to the trash (2)".
  */
-export function removeOthersLabel(n: number): string {
+export function removeOthersLabel(n: number, staging = false): string {
+	if (staging) return n <= 1 ? STAGE_REMOVAL : `Stage ${num(n)} removals`;
 	if (n === 0) return 'Move the others to the trash';
 	return n === 1 ? 'Move the other to the trash' : `Move the others to the trash (${num(n)})`;
 }
