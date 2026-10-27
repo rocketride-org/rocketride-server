@@ -1,0 +1,9 @@
+{
+	"name": "rr-verify-agent-helpers",
+	"private": true,
+	"description": "Browser driver for the rr-verify-agent skill. Not a product dependency.",
+	"type": "module",
+	"dependencies": {
+		"playwright": "1.63.0"
+	}
+}

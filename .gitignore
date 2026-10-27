@@ -237,3 +237,7 @@ packages/ai/src/ai/modules/mcp/apps/dist/
 !packages/n8n-nodes/credentials/**
 **/node_modules/
 **/dist/
+
+# Verification runs: rr-verify-agent evidence and state (.agents/skills/rr-verify-agent)
+# and the engine runs of verify-rocketride's launcher
+.verify/

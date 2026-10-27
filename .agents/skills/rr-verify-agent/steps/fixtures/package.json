@@ -1,0 +1,25 @@
+{
+	"name": "local-verify-notes",
+	"version": "0.1.0",
+	"private": true,
+	"description": "Verify notes, a RocketRide app",
+	"license": "MIT",
+	"appManifest": {
+		"id": "local.verify-notes",
+		"publisher": "local",
+		"name": "Verify notes",
+		"description": "Verify notes, a RocketRide app",
+		"categories": ["custom"],
+		"mode": "free",
+		"authenticated": false
+	},
+	"scripts": {
+		"dev": "rsbuild dev",
+		"build": "tsc --noEmit && rsbuild build",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"react": "^18.2.0",
+		"react-dom": "^18.2.0"
+	}
+}

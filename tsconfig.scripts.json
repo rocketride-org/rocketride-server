@@ -16,7 +16,10 @@
   "include": [
     "**/scripts/**/*.js",
     "**/scripts/**/*.cjs",
-    "**/scripts/**/*.mjs"
+    "**/scripts/**/*.mjs",
+    // "**" skips dot folders, so the shipped agent skills are listed by name.
+    ".agents/skills/*/scripts/**/*.cjs",
+    ".agents/skills/*/scripts/**/*.mjs"
   ],
   "exclude": [
     "scripts/assets",
