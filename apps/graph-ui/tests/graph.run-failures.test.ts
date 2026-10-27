@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import { formatBatchOutcome, formatPriorStatements } from 'shared/explorer';
 import type { IStatementRunBase } from 'shared/explorer';
 import { ExplorerToolError } from 'shared/explorer';
-import { WRITE_MAY_HAVE_APPLIED, describeFailure, describeFailureMessage, describeFailureOf, describeWriteFailure } from '../src/graph/failures';
+import { WRITE_MAY_HAVE_APPLIED, WRITE_PROBABLY_ROLLED_BACK, describeFailure, describeFailureMessage, describeFailureOf, describeWriteFailure } from '../src/graph/failures';
 import type { IFailureInput } from '../src/graph/failures';
 import { GRAPH_BATCH_WORDS, prepareStatement, refuseNonReads, toHistoryEntry } from '../src/graph/runConfig';
 import { parseDialect } from '../src/graph/dialect';
@@ -246,11 +246,27 @@ test('in the write console a failure that can come after the statement ran says 
 	const refused = describeWriteFailure(message, new ExplorerToolError({ kind: 'raised', tool: 'execute', message }));
 	assert.equal(refused.headline, message, 'the node\'s own words lead');
 	assert.equal(refused.hint, WRITE_MAY_HAVE_APPLIED);
-	assert.match(refused.hint ?? '', /^The write may have been applied/);
+	assert.match(refused.hint ?? '', /^The write may or may not have been applied/);
 	assert.doesNotMatch(refused.hint ?? '', /use the write console/i);
 	const timeout = 'Stopped waiting for execute after 40 s. The node may still be running it; there is no way to cancel it from here.';
 	assert.equal(describeWriteFailure(timeout, new ExplorerToolError({ kind: 'timeout', tool: 'execute', message: timeout })).hint, WRITE_MAY_HAVE_APPLIED);
 	assert.equal(describeWriteFailure('Query result cannot be represented', undefined).hint, WRITE_MAY_HAVE_APPLIED, 'a bare message counts too');
+});
+
+test('the may-have-applied note makes no claim about a rollback of the failing statement, which the app cannot know', () => {
+	assert.doesNotMatch(WRITE_MAY_HAVE_APPLIED, /nothing is rolled back/i);
+	assert.match(WRITE_MAY_HAVE_APPLIED, /may or may not have been applied/);
+});
+
+test('a database text that says the transaction was rolled back, or was killed by a memory limit, says it was probably not applied', () => {
+	for (const detail of ['The transaction was rolled back.', 'dbms.memory.transaction.total.max threshold reached', 'Neo.TransientError.General.TransactionMemoryLimit']) {
+		const message = `Query failed\n${detail}`;
+		const notice = describeWriteFailure(message, new ExplorerToolError({ kind: 'raised', tool: 'execute', message }));
+		assert.equal(notice.hint, WRITE_PROBABLY_ROLLED_BACK, detail);
+	}
+	assert.doesNotMatch(WRITE_PROBABLY_ROLLED_BACK, /nothing is rolled back/i);
+	const other = 'Query failed\nconnection reset';
+	assert.equal(describeWriteFailure(other, new ExplorerToolError({ kind: 'raised', tool: 'execute', message: other })).hint, WRITE_MAY_HAVE_APPLIED);
 });
 
 test('in the write console a refusal before anything was sent keeps its own words, and a dropped answer stays silent', () => {

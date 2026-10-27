@@ -203,8 +203,18 @@ export function describeFailureOf(message: string, error: unknown, canWrite: boo
 // user stopped waiting) does not mean nothing changed. Only a refusal raised
 // before anything reached the database means that.
 
-/** Said under a write-console failure that can have come after the statement ran. */
-export const WRITE_MAY_HAVE_APPLIED = 'The write may have been applied: this error can come after the database ran the statement, and nothing is rolled back. Check the data before running it again.';
+/**
+ * Said under a write-console failure that can have come after the statement ran. The app cannot know what became of the
+ * failing statement itself (it may have been applied, or the database may have rolled it back); what it does know is
+ * about EARLIER statements of a batch, and runConfig's wording says that.
+ */
+export const WRITE_MAY_HAVE_APPLIED = 'The write may or may not have been applied: some errors arrive after the database ran the statement. Check the data before running it again.';
+
+/** Said instead when the database's own text says it stopped the statement and rolled the transaction back. */
+export const WRITE_PROBABLY_ROLLED_BACK = 'The database stopped this statement with an error that rolls the transaction back, so it was probably not applied. Check the data before running it again.';
+
+/** Database texts that say the transaction was rolled back or killed by a limit (Neo4j's memory limit aborts the transaction). */
+const ROLLED_BACK = /rolled back|\brollback\b|dbms\.memory\.transaction\.[\w.]+ threshold reached|TransactionMemoryLimit/i;
 
 /**
  * The kind of a failure: the thrown error's own `kind`, else the one the session's fixed wording stands for.
@@ -255,7 +265,7 @@ export function writeMayHaveApplied(error: unknown): boolean {
 export function describeWriteFailure(message: string, error: unknown): IFailureNotice {
 	const notice = describeFailureOf(message, error, true);
 	if (notice.ignore || !writeMayHaveApplied(error ?? message)) return notice;
-	return { ...notice, hint: WRITE_MAY_HAVE_APPLIED };
+	return { ...notice, hint: ROLLED_BACK.test(message) ? WRITE_PROBABLY_ROLLED_BACK : WRITE_MAY_HAVE_APPLIED };
 }
 
 /** Re-exported so the canvas notice and the failure strip share one place for their wording. */
