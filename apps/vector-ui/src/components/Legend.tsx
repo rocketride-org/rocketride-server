@@ -36,7 +36,9 @@
 // drawn is not listed. The view adds its lines (what a cluster is, the edges
 // drawn, how the sample's listing ended, the scope, an isolation) as notes,
 // and the draw again when the store refused to draw the sample for the
-// console's scope.
+// console's scope. Its height is capped (map/styles.ts LEGEND_MAX_HEIGHT):
+// past it the legend scrolls inside itself (a tab stop), so its notes never
+// take the map's height.
 // =============================================================================
 
 import React from 'react';
@@ -209,7 +211,8 @@ export function Legend(props: LegendProps): React.ReactElement {
 	const marks = markRows(props.marks);
 	const docs = sample.of.documents === null || sample.of.documents === undefined ? '—' : num(sample.of.documents);
 	return (
-		<section aria-label="Map legend" style={MAP_STYLES.legend} data-knn-source={sample.knn_source} data-colour-by={props.colourBy}>
+		// A tab stop: the legend scrolls past its height cap, and a keyboard must reach what is below.
+		<section aria-label="Map legend" tabIndex={0} style={MAP_STYLES.legend} data-knn-source={sample.knn_source} data-colour-by={props.colourBy}>
 			<p style={MAP_STYLES.note}>
 				{sampleLabel(sample)} · {docs} docs · seed {props.sample.seed}
 			</p>

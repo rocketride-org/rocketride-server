@@ -9,7 +9,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { CLICK_SLOP_PX, createFrameStats, createGesture, easeInOut, keyAction, tweenPositions, wheelZoomFactor } from '../src/map/interaction';
+import { CLICK_SLOP_PX, HOVER_HOLD_MS, NO_HOVER, countsAsSlowEdges, createFrameStats, createGesture, easeInOut, hoverHold, keyAction, tweenPositions, wheelZoomFactor } from '../src/map/interaction';
 
 test('a press that barely moves is a click; one that moves further pans by the pointer movement', () => {
 	const g = createGesture();
@@ -92,4 +92,36 @@ test('frame stats keep the last frames and report the 95th percentile', () => {
 	assert.equal(stats.p95(), 196);
 	stats.reset();
 	assert.equal(stats.count(), 0);
+});
+
+test('the hovered cluster holds through the gaps between its points: it changes over a point of another cluster, and goes 150 ms after the pointer is over no point', () => {
+	let { hold, recheckIn } = hoverHold(NO_HOVER, 3, 0);
+	assert.deepEqual(hold, { cluster: 3, since: null });
+	assert.equal(recheckIn, null);
+	// A gap between points (nothing under the pointer): still cluster 3, with a release due.
+	({ hold, recheckIn } = hoverHold(hold, null, 10));
+	assert.equal(hold.cluster, 3);
+	assert.equal(recheckIn, HOVER_HOLD_MS);
+	// Back over a point of the same cluster before the hold ends: nothing changed, nothing pending.
+	({ hold, recheckIn } = hoverHold(hold, 3, 100));
+	assert.deepEqual(hold, { cluster: 3, since: null });
+	// A point in no cluster (-1) counts as a gap; the hold runs from the first gap, not from the last move.
+	({ hold } = hoverHold(hold, -1, 200));
+	({ hold, recheckIn } = hoverHold(hold, null, 300));
+	assert.equal(hold.cluster, 3);
+	assert.equal(recheckIn, HOVER_HOLD_MS - 100);
+	({ hold, recheckIn } = hoverHold(hold, null, 200 + HOVER_HOLD_MS));
+	assert.deepEqual(hold, NO_HOVER, 'released once the hold has passed');
+	assert.equal(recheckIn, null);
+	// Another cluster takes over at once, with no gap.
+	assert.equal(hoverHold({ cluster: 3, since: null }, 5, 0).hold.cluster, 5);
+	// Nothing hovered stays nothing.
+	assert.deepEqual(hoverHold(NO_HOVER, null, 0), { hold: NO_HOVER, recheckIn: null });
+});
+
+test('a frame rebuilt only for a new dimming never counts toward dropping edges; a slow frame that drew edges does', () => {
+	assert.equal(countsAsSlowEdges({ drewEdges: true, dimRebuild: false, ms: 50 }, 33), true);
+	assert.equal(countsAsSlowEdges({ drewEdges: true, dimRebuild: true, ms: 500 }, 33), false, 'a hover or a selection is not the user asking for fewer edges');
+	assert.equal(countsAsSlowEdges({ drewEdges: false, dimRebuild: false, ms: 500 }, 33), false);
+	assert.equal(countsAsSlowEdges({ drewEdges: true, dimRebuild: false, ms: 20 }, 33), false);
 });

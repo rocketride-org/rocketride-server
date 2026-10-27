@@ -97,7 +97,7 @@ import { groupOf, groups, pairsAt } from '../map/dedupe';
 import { NO_EDGES, edgeStats, edgesOf, mergeEdges, spanningTree, topEdges, treeNeighbours } from '../map/graph';
 import { tweenPositions } from '../map/interaction';
 import type { KeyAction } from '../map/interaction';
-import { combineMasks, dimMask, expandByNeighbours, isolateMask, isolationLine, shownCount } from '../map/isolate';
+import { CLEAR_LABELS, clearStep, combineMasks, dimMask, expandByNeighbours, isolateMask, isolationLine, shownCount } from '../map/isolate';
 import { UNSCOPED, applyTransform, chunkPath, clusterExportRows, ditherRounded, documentOf, drawnScope, duplicateExportRows, hiddenMask, keyIndex, keyString, mapScopeState, neighboursOf, normaliseLayout, pcaPositions, pointExportRows, pointKey, removeTargetsOf, scopeDrawDue } from '../map/model';
 import type { ISampleScope, IScopeAttempt } from '../map/model';
 import { createLatestQueue } from '../map/neighbours';
@@ -106,7 +106,7 @@ import type { IClusterLabel, IDuplicateRing, IOverlayEnd, IPlace } from '../map/
 import { centroidStar, chatQueryPlan, comparePlan, placeProjected, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject, withSampleRetry } from '../map/queryProjection';
 import type { IStar } from '../map/queryProjection';
 import { polarityOf } from '../map/recommend';
-import { pairLabel, pairScale } from '../map/reviewWording';
+import { pairLabel, pairScale, stagedAnnouncement } from '../map/reviewWording';
 import { spawnLayoutWorker } from '../map/spawnWorker';
 import { MAP_STYLES } from '../map/styles';
 import { FALLBACK_PALETTE, readPalette } from '../map/tokens';
@@ -459,6 +459,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const [neighbourError, setNeighbourError] = useState<string | null>(null);
 	const [chunkText, setChunkText] = useState<{ key: string; text: string } | null>(null);
 	const [query, setQueryView] = useState<IQueryView | null>(null);
+	/** Whether a placed query fades the points outside its top-k (a Clear turns it off until the next query). */
+	const [queryDims, setQueryDims] = useState(true);
 	/** True while a chat answer's question is being embedded and placed (no star until it lands, or fails). */
 	const [placingAnswer, setPlacingAnswer] = useState(false);
 	const [heat, setHeat] = useState<{ objectId: string; chunks: number; scores: Array<{ chunkId: number; sim: number }> } | null>(null);
@@ -678,15 +680,18 @@ export function MapView(props: MapViewProps): React.ReactElement {
 
 	// Everything outside the set the map is showing is drawn faded: a selection with its neighbours, else a
 	// highlighted set, else a placed query's top-k.
+	const queryTop = useMemo(() => (queryDims ? rays.flatMap((e) => (e.index !== undefined ? [e.index] : [])) : []), [queryDims, rays]);
 	const dimmed = useMemo(() => {
 		if (!sample) return null;
 		return dimMask(sample.n, {
 			selected,
 			neighbours: neighbourEnds.flatMap((e) => (e.index !== undefined ? [e.index] : [])),
 			highlight: highlight ? resolveKeys(highlight.keys, keyIdx, []).points : null,
-			queryTop: rays.flatMap((e) => (e.index !== undefined ? [e.index] : [])),
+			queryTop,
 		});
-	}, [sample, selected, neighbourEnds, highlight, keyIdx, rays]);
+	}, [sample, selected, neighbourEnds, highlight, keyIdx, queryTop]);
+	// A new query fades the rest again.
+	useEffect(() => setQueryDims(true), [query]);
 
 	// What the legend's glyph row lists: only the marks drawn now.
 	const edgePalette = useMemo(() => edgeColours(palette ?? FALLBACK_PALETTE), [palette]);
@@ -1236,10 +1241,13 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const staging = actions.stageRemove !== undefined;
 	const removeDocuments = useCallback(
 		(objectIds: readonly string[]): void => {
-			// Staged: the console's pending bar shows and announces the count (nothing is inserted in the panel, so no
-			// row moves under the pointer between two presses).
-			if (actions.stageRemove && sample) actions.stageRemove(removeTargetsOf(sample, objectIds));
-			else actions.requestRemove(objectIds);
+			// Staged: the console's pending bar shows the count, and every press is announced (a repeat too). Nothing
+			// is inserted in the panel, so no row moves under the pointer between two presses.
+			if (actions.stageRemove && sample) {
+				const targets = removeTargetsOf(sample, objectIds);
+				actions.stageRemove(targets);
+				actions.announce(stagedAnnouncement(targets.length));
+			} else actions.requestRemove(objectIds);
 		},
 		[actions, sample],
 	);
@@ -1270,20 +1278,36 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		[sample, hidden, actions],
 	);
 
+	// What Escape and the toolbar's Clear clear next, in order: the lasso, then a highlight (or a query's fading),
+	// then the selected point; one step each (map/isolate.ts clearStep).
+	const lassoActive = lasso || (state.highlight?.source === 'lasso' ? state.highlight.keys.length > 0 : state.keys.length > 0);
+	const highlightActive = (highlight !== null && highlight.source !== 'lasso') || queryTop.length > 0;
+	const nextClear = clearStep({ lasso: lassoActive, highlight: highlightActive, selection: selected !== null || focused !== null });
+	const clearOnce = useCallback((): void => {
+		if (nextClear === 'lasso') {
+			setLasso(false);
+			selection.setKeys([]);
+			if (state.highlight?.source === 'lasso') selection.setHighlight(null);
+			actions.announce('Lasso selection cleared.');
+		} else if (nextClear === 'highlight') {
+			if (state.highlight !== null && state.highlight.source !== 'lasso') selection.setHighlight(null);
+			setQueryDims(false);
+			actions.announce('Highlight cleared.');
+		} else if (nextClear === 'selection') {
+			setSelected(null);
+			setFocused(null);
+			setNeighbours(null);
+			actions.announce('Selection cleared.');
+		}
+	}, [nextClear, selection, state.highlight, actions]);
+
 	const onKeyAction = useCallback(
 		(action: KeyAction): void => {
 			if (action === 'inspect' && focused !== null) void onPick(focused);
-			else if (action === 'clear') {
-				setSelected(null);
-				setFocused(null);
-				setNeighbours(null);
-				setLasso(false);
-				selection.setKeys([]);
-				if (state.highlight?.source === 'lasso') selection.setHighlight(null);
-				actions.announce('Selection cleared.');
-			} else if (action === 'lasso') setLasso((on) => !on);
+			else if (action === 'clear') clearOnce();
+			else if (action === 'lasso') setLasso((on) => !on);
 		},
-		[focused, onPick, selection, state.highlight, actions],
+		[focused, onPick, clearOnce],
 	);
 
 	// -------------------------------------------------------------------------
@@ -1700,6 +1724,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			data-scope-state={sample ? scopeState : ''}
 		>
 			<MapToolbar
+				clear={nextClear !== null ? { label: CLEAR_LABELS[nextClear], onClear: clearOnce } : null}
 				limits={model.capabilities.sample_light === false ? { ...limits, sample_max_light: limits.sample_max } : limits}
 				sample={sampleModel}
 				busy={busy ?? layoutBusy}
@@ -1812,6 +1837,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 								onLasso={onLasso}
 								onFocusMove={onFocusMove}
 								onKeyAction={onKeyAction}
+								canClear={nextClear !== null}
 								onRendererInfo={setRendererKind}
 								layout={layout}
 								selectionCount={lassoKeys.length > 0 ? lassoKeys.length : null}

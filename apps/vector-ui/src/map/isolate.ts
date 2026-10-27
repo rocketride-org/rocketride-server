@@ -35,7 +35,10 @@
 // showing is drawn faded (dimMask), the most specific set winning: a selected
 // point with its neighbours, else a highlighted set (a lasso selection, a
 // document, Find similar or a duplicate group, an answer's sources), else a
-// placed query's true top-k. Nothing to light, nothing faded.
+// placed query's true top-k. Nothing to light, nothing faded. Escape (and the
+// toolbar's Clear) takes them away one step a press, the lasso first, then a
+// highlight, then the selection (clearStep); the map's hover fading is back
+// once nothing is lit.
 // =============================================================================
 
 import type { IKnnBlock } from '../contract/types';
@@ -52,6 +55,27 @@ export function isolateMask(n: number, keep: Iterable<number>): Uint8Array {
 	const mask = new Uint8Array(n).fill(1);
 	for (const i of keep) if (Number.isInteger(i) && i >= 0 && i < n) mask[i] = 0;
 	return mask;
+}
+
+/** What Escape (and the map's Clear) clears next. */
+export type ClearStep = 'lasso' | 'highlight' | 'selection';
+
+/** The toolbar's Clear button, by what it clears. */
+export const CLEAR_LABELS: Readonly<Record<ClearStep, string>> = { lasso: 'Clear lasso selection', highlight: 'Clear highlight', selection: 'Clear selection' };
+
+/**
+ * What one Escape clears, in order: the lasso (its toggle or its selection), then a highlight (an answer's
+ * sources, a query's top-k, Show on map, a duplicate group), then the selected point. One step per press;
+ * null when nothing is left (the key is then not the map's).
+ *
+ * @param state - What is active.
+ * @returns The step, or null.
+ */
+export function clearStep(state: { lasso: boolean; highlight: boolean; selection: boolean }): ClearStep | null {
+	if (state.lasso) return 'lasso';
+	if (state.highlight) return 'highlight';
+	if (state.selection) return 'selection';
+	return null;
 }
 
 /** The sets the map can light (indices into the sample). */

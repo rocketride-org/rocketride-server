@@ -38,8 +38,9 @@
 // map/popover.ts placePopover (below the button, else above, else the side
 // with more room with its height capped; clamped inside the viewport, cut
 // down by any ancestor that clips, so a menu in a clipped card stays seen), then
-// held there while it is open; it closes on a window resize (refocusing the
-// button) and on a pointer pressed outside. Its edge is the computed border of
+// held there while it is open; it closes on a window resize or a change of its
+// container's width (a split pane; refocusing the button) and on a pointer
+// pressed outside. Its edge is the computed border of
 // a box over the map (map/styles.ts floatBorder) and the theme's shadow.
 //
 // Lane hooks: the root carries data-component="AdvancedPopover", the panel
@@ -142,9 +143,22 @@ export function usePopover(open: boolean, refs: IPopoverRefs, close: (refocus: b
 		};
 		window.addEventListener('resize', onResize);
 		document.addEventListener('pointerdown', onDown);
+		// The container resized without the window (a split pane): the place is stale, so close the same way.
+		const container = refs.root.current?.parentElement ?? null;
+		let width: number | null = null;
+		const observer =
+			container && typeof ResizeObserver !== 'undefined'
+				? new ResizeObserver((entries) => {
+						const next = Math.round(entries[0]?.contentRect.width ?? 0);
+						if (width === null) width = next;
+						else if (next !== width) closeRef.current(true);
+					})
+				: null;
+		if (observer && container) observer.observe(container);
 		return () => {
 			window.removeEventListener('resize', onResize);
 			document.removeEventListener('pointerdown', onDown);
+			observer?.disconnect();
 		};
 		// The refs are stable objects.
 		// eslint-disable-next-line react-hooks/exhaustive-deps

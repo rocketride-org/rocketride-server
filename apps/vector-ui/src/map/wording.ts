@@ -105,7 +105,7 @@ export function pointCapLine(mode: SampleMode, cap: number): string {
 }
 
 /** Shown instead of the map when the store cannot sample. */
-export const MAP_UNAVAILABLE = 'This store cannot draw a sample of its points, so there is no map for it. The Documents tab lists every document.';
+export const MAP_UNAVAILABLE = 'This store cannot draw a sample of its points, so there is no map for it. Browse its documents on the Documents tab.';
 
 /** The refined layout was no better than PCA. */
 export const LAYOUT_NOT_BETTER = 'Neighbour layout did not improve on PCA for this sample';

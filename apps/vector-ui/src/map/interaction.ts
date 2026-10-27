@@ -33,9 +33,56 @@
 //   - arrow keys, Enter, Escape, L, +/- and 0 drive the map, but never while
 //     Ctrl, Cmd or Alt is held (those belong to the shell and the browser);
 //   - a new layout tweens from the old positions (skipped under reduced motion);
+//   - the hovered cluster (which the map keeps lit while it fades the others)
+//     holds through the gaps between its points: it changes only over a
+//     point of another cluster, and goes after HOVER_HOLD_MS over no point,
+//     so moving through a cluster does not strobe the map;
+//   - a frame whose edge paths were rebuilt only because the dimming changed
+//     does not count toward dropping edges (the user did not ask for fewer);
 //   - frame times are kept in a ring buffer for the 95th percentile the
 //     performance lane reads.
 // =============================================================================
+
+/** How long the hovered cluster holds over no point before the map undims, ms. */
+export const HOVER_HOLD_MS = 150;
+
+/** The hovered cluster, and since when the pointer has been over no point of a cluster (null while it is). */
+export interface IHoverHold {
+	cluster: number | null;
+	since: number | null;
+}
+
+/** No cluster hovered. */
+export const NO_HOVER: IHoverHold = { cluster: null, since: null };
+
+/**
+ * The hovered cluster after the pointer moved (or time passed).
+ *
+ * @param prev - The state before.
+ * @param under - The cluster of the point under the pointer (a label counts as its cluster); -1 or null for none
+ *   (a gap between points, a point in no cluster).
+ * @param now - The time, ms.
+ * @returns The state now, and when to look again (ms from now) while a release is pending, else null.
+ */
+export function hoverHold(prev: IHoverHold, under: number | null, now: number): { hold: IHoverHold; recheckIn: number | null } {
+	if (under !== null && under >= 0) return { hold: { cluster: under, since: null }, recheckIn: null };
+	if (prev.cluster === null) return { hold: NO_HOVER, recheckIn: null };
+	const since = prev.since ?? now;
+	if (now - since >= HOVER_HOLD_MS) return { hold: NO_HOVER, recheckIn: null };
+	return { hold: { cluster: prev.cluster, since }, recheckIn: HOVER_HOLD_MS - (now - since) };
+}
+
+/**
+ * Whether a frame counts toward dropping edges: it drew edges, it was slow, and its edge paths were not rebuilt
+ * just because the dimming changed.
+ *
+ * @param frame - What the frame did and how long it took.
+ * @param slowMs - The slow-frame threshold.
+ * @returns True when it counts.
+ */
+export function countsAsSlowEdges(frame: { drewEdges: boolean; dimRebuild: boolean; ms: number }, slowMs: number): boolean {
+	return frame.drewEdges && !frame.dimRebuild && frame.ms > slowMs;
+}
 
 /** Movement (pixels) below which a press is a click. */
 export const CLICK_SLOP_PX = 4;

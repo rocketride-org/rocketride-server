@@ -37,6 +37,7 @@ import { removeTargetsOf } from '../src/map/model';
 import { outlierRows } from '../src/map/outliers';
 import { POPOVER_GAP, POPOVER_MARGIN, afterCancelFocus, clipArea, firstEnabled, focusHold, placePopover, popoverKey } from '../src/map/popover';
 import { STAGE_REMOVAL, pairLabel, removeAllLabel, removeOthersLabel } from '../src/map/reviewWording';
+import { LEGEND_MAX_HEIGHT } from '../src/map/styles';
 import { readPalette } from '../src/map/tokens';
 import { SelectionTab } from '../src/views/MapView';
 import { deepFreeze, loadSample, modelOf, pcaXY } from './support/map.samples';
@@ -592,4 +593,20 @@ test('the legend\'s cap line says a light sample has no text (the Points option 
 	const light = modelOf(loadSample('sample_light_5000.json'));
 	assert.match(html(<Legend sample={light} colourBy="document" pointCap={5000} backend="pgvector" />), /Light mode draws up to 5,000 points, without their text/);
 	assert.match(html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" />), /Detailed mode draws up to 2,000 points ·/);
+});
+
+test('the status line offers Clear (what Escape on the map clears next) while something is lit, at its fixed height', () => {
+	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
+	const lit = html(<MapToolbar {...base} clear={{ label: 'Clear highlight', onClear: noop }} />);
+	assert.match(lit, /<div style="[^"]*" data-map-status=""><span role="status"[^>]*><\/span><button[^>]*data-map-clear="">Clear highlight<\/button><\/div>/);
+	const none = html(<MapToolbar {...base} clear={null} />);
+	assert.doesNotMatch(none, /data-map-clear/);
+	const line = (markup: string): string => /<div style="([^"]*)" data-map-status="">/.exec(markup)?.[1] ?? '';
+	assert.equal(line(lit), line(none), 'the same line, the same height');
+});
+
+test('the legend is capped in height and scrolls inside itself (a tab stop), so its notes never take the map\'s height', () => {
+	const out = html(<Legend sample={demo} colourBy="document" pointCap={2000} backend="pgvector" notes={Array.from({ length: 12 }, (_, i) => `note ${i}`)} />);
+	assert.match(out, new RegExp(`<section aria-label="Map legend" tabindex="0" style="[^"]*max-height:${LEGEND_MAX_HEIGHT}px;box-sizing:border-box;overflow-y:auto`));
+	assert.ok(LEGEND_MAX_HEIGHT <= 140);
 });
