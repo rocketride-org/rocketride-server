@@ -181,6 +181,13 @@ def test_rules_and_deterministic_checks():
     assert triage.gather(REPO, 7, None)['checks']['linked_issue']['status'] == 'fail', '#6 is a pull request'
 
 
+def test_template_checkboxes_alone_fail_verification():
+    # From #682: a box written "- []" is still a template box.
+    body = '## Testing\n\n- [] Tests added or updated\n- [x] Tested locally\n- [x] `./builder test` passes\n'
+    assert triage.verification_hint(body)['status'] == 'fail'
+    assert triage.verification_hint(body + '- [x] Ran pytest nodes/test/chunker: 12 passed\n')['status'] == 'judge'
+
+
 def test_apply_posts_one_comment_and_sets_labels():
     fake = FakeGitHub(GOOD_BODY.replace('Fixes #5', ''), [NODE_FILE], [], [], ['ready-for-review'], ALL_LABELS)
     install(fake)

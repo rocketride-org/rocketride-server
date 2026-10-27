@@ -416,7 +416,7 @@ def verification_hint(body: str) -> dict:
         stripped = line.strip()
         if not stripped or stripped.lower() in TEMPLATE_LINES:
             continue
-        box = re.match(r'^[-*]\s*\[[ xX]\]\s*(.*)$', stripped)
+        box = re.match(r'^[-*]\s*\[\s*[xX]?\s*\]\s*(.*)$', stripped)
         if box and box.group(1).strip().lower() in TEMPLATE_CHECKBOXES:
             continue
         if not box:
