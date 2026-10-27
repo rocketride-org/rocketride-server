@@ -52,3 +52,5 @@ Keep implementation details out of the map. Name only user paths, stable handles
 - [Chat page](./chat-ui.md) covers `/chat` for a running chat pipeline: asking a question and reading the conversation.
 - [Dropper page](./dropper-ui.md) covers `/dropper` for a running dropper pipeline: uploading and removing files, including the link MCP hands out.
 - [Docs site](./docs-site.md) covers the built docs site: the home page, sidebar navigation, search, and the 404 page.
+- [VS Code extension](./vscode.md) covers the extension in a private VS Code: activation, Direct Connect from the Welcome page, the workspace `.env`, the Pipelines tab with files changed outside VS Code, Command Palette commands, and New app with the App Builder.
+- [Pipeline canvas in VS Code](./vscode-canvas.md) covers opening a `.pipe` in the canvas, running it, chatting with it from the Chat node, and stopping it.

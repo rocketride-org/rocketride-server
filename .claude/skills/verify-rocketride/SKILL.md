@@ -1,6 +1,6 @@
 ---
 name: verify-rocketride
-description: Launch RocketRide from this checkout, use it the way a user does, and save evidence. Covers the engine, pipelines run through the Python SDK, the Python and TypeScript CLIs, the engine's HTTP MCP endpoint, and the browser UIs the engine serves (the shell and Pipeline Builder, the chat page, the dropper page) plus the docs site. Use it to prove a change works before opening a PR, to reproduce a bug report, or to collect the transcripts, screenshots, and recordings a PR description needs.
+description: Launch RocketRide from this checkout, use it the way a user does, and save evidence. Covers the engine, pipelines run through the Python SDK, the Python and TypeScript CLIs, the engine's HTTP MCP endpoint, and the browser UIs the engine serves (the shell and Pipeline Builder, the chat page, the dropper page), the docs site, and the VS Code extension. Use it to prove a change works before opening a PR, to reproduce a bug report, or to collect the transcripts, screenshots, and recordings a PR description needs.
 ---
 
 # Verify RocketRide
@@ -21,8 +21,9 @@ This skill starts a RocketRide engine built from this checkout, drives it throug
 | Dropper page (`/dropper`, `apps/dropper-ui`) | covered | [features/dropper-ui.md](features/dropper-ui.md) |
 | Docs site (`docs/docusaurus`, built to `dist/docs`) | covered | [features/docs-site.md](features/docs-site.md) |
 | Other shell apps (Hello World, Event Monitor, File Explorer, Profiler, Server Monitor, SQL Explorer, Test UI, Aparavi AQL) | not covered yet. `rr-verify browse` can drive them, but no recipes exist | |
-| App Builder preview | not covered yet. It runs only inside VS Code | |
-| VS Code extension | not covered yet | |
+| VS Code extension: activation, Direct Connect, workspace `.env`, Pipelines tab, commands, New app and the App Builder | covered | [features/vscode.md](features/vscode.md) |
+| VS Code canvas: open a `.pipe`, run it, chat with it, stop it | covered | [features/vscode-canvas.md](features/vscode-canvas.md) |
+| App Builder preview | not covered yet. `rr-verify vscode app` opens the App Builder, but no recipe drives its preview | |
 | n8n nodes, Docker image, Helm chart | not covered yet | |
 
 If a change touches a surface that is not covered, say so in the PR and describe what you checked by hand. Never report an uncovered surface as verified.
@@ -33,8 +34,9 @@ If a change touches a surface that is not covered, say so in the PR and describe
 - **The C++ nodes need root once.** `parse`, `hash`, `indexer`, `azure`, `msservices`, and `objstore` compile locally and need packages that only `sudo` can install: `sudo ./scripts/compiler-unix.sh --autoinstall`. Without them, `server:build` stops at "Build c++ nodes". Finish the rest of the build with `./builder --sequential nodes:sync ai:sync server:setup-test-deps client-typescript:build shell:build client-init:build client-python:sync-source client-python:wheel-source client-python:copy-readme client-python:wheel-build client-python:sync`. Pipelines that parse documents, hash, index, or use the Azure, Microsoft services, or object storage nodes cannot be verified until the C++ nodes build. A downloaded engine is the exception, because the release ships its own build of these nodes, such as `dist/server/nodes/parse/libparse.so`.
 - **The browser UIs.** `server:build` builds the shell, but not the chat page, the dropper page, or the shell apps. After a download, `dist/server/static` holds the release's copies of those, not this checkout's. Run `./builder ui:build` once; it builds every `apps/*-ui` and copies each into `dist/server/static`. For the docs site, run `./builder docs:build`, which writes `dist/docs`. Doctor's UI lines tell you when one of these is missing or older than its source.
 - **Playwright and Chromium.** `pnpm install --frozen-lockfile` installs the `playwright` package at the repository root. If `rr-verify browse` reports that Chromium is missing, run `pnpm exec playwright install chromium`.
+- **The VS Code extension.** Run `./builder vscode:build`; it builds the extension into `build/vscode`, which `rr-verify vscode` loads, and takes about 40 seconds once the shell is built. The first `rr-verify vscode launch` downloads VS Code 1.143.1 with `@vscode/test-electron` (335 MB, about 1 GB unpacked) into `.verify/vscode-cache`, and unpacks the GTK, CUPS, Cairo, and Pango libraries a server lacks there with `apt-get download`. Neither needs root or a display. Set `RR_VERIFY_VSCODE_CACHE` to share one cache between checkouts.
 - **`uv`, or a working `python3 -m venv`.** `rr-verify` installs the built Python wheel into `.verify/venv`. On Ubuntu without the `python3-venv` package, `python3 -m venv` fails, and `rr-verify` uses `uv` instead.
-- **Rebuild after editing code.** The engine runs copies in `dist/server`, not the source tree. After editing Python in `packages/ai` or `nodes/`, run `./builder ai:sync nodes:sync`. After editing C++ in `packages/server`, run `./builder server:build`. After editing the Python SDK or CLI, rebuild its wheel with `./builder --sequential client-python:sync-source client-python:wheel-source client-python:copy-readme client-python:wheel-build client-python:sync`. After editing the TypeScript SDK or CLI, run `./builder client-typescript:build`. After editing the shell in `packages/shell`, run `./builder shell:build`. After editing the chat page or the dropper page, run `./builder chat-ui:build` or `./builder dropper-ui:build`. After editing a shell app in `apps/<name>`, run `./builder <name>:build`, such as `./builder rocket-ui:build` for Pipeline Builder. After editing `apps/shared`, which every shell app bundles, run `./builder ui:build`. After editing the docs, run `./builder docs:build`. If a UI build prints `No changes detected` while doctor still warns, add `--force`. Then launch a new run. `./builder` runs the actions you list in parallel unless you pass `--sequential`, so keep `--sequential` on every multi-step command here. `rr-verify doctor` warns when engine C++ changed since the build, when an ai or node file differs from its copy in `dist/server`, when the Python SDK source is newer than its wheel, and when a UI's source is newer than the build the run serves.
+- **Rebuild after editing code.** The engine runs copies in `dist/server`, not the source tree. After editing Python in `packages/ai` or `nodes/`, run `./builder ai:sync nodes:sync`. After editing C++ in `packages/server`, run `./builder server:build`. After editing the Python SDK or CLI, rebuild its wheel with `./builder --sequential client-python:sync-source client-python:wheel-source client-python:copy-readme client-python:wheel-build client-python:sync`. After editing the TypeScript SDK or CLI, run `./builder client-typescript:build`. After editing the shell in `packages/shell`, run `./builder shell:build`. After editing the chat page or the dropper page, run `./builder chat-ui:build` or `./builder dropper-ui:build`. After editing a shell app in `apps/<name>`, run `./builder <name>:build`, such as `./builder rocket-ui:build` for Pipeline Builder. After editing `apps/shared`, which every shell app bundles, run `./builder ui:build`. After editing the docs, run `./builder docs:build`. After editing the VS Code extension in `apps/vscode`, or `apps/shared`, which its webviews bundle, run `./builder vscode:build`, then `rr-verify vscode close` and `rr-verify vscode launch`. If a UI build prints `No changes detected` while doctor still warns, add `--force`. Then launch a new run. `./builder` runs the actions you list in parallel unless you pass `--sequential`, so keep `--sequential` on every multi-step command here. `rr-verify doctor` warns when engine C++ changed since the build, when an ai or node file differs from its copy in `dist/server`, when the Python SDK source is newer than its wheel, when a UI's source is newer than the build the run serves, and when the VS Code extension's source is newer than `build/vscode`.
 
 ## Shell setup
 
@@ -69,6 +71,8 @@ A read-only check that the run's engine is worth driving. It checks that the pro
 
 It also checks the browser UIs. For the shell, the chat page, the dropper page, and each shell app, it prints a `WARN` line with the build command to run when a source file is newer than the last build, when `dist/server/static` differs from the build, or when the bundle seeded into the run's store differs from `dist/server/static/apps`. The rest share one line starting `ok   this run serves UIs built from this checkout's current source`. A last line covers the docs site in `dist/docs`. These lines are warnings and do not change the exit code, so read them before you drive a UI.
 
+For VS Code it prints `ok   the VS Code extension build is newer than its source`, or a `WARN` line with the build to run. Once `rr-verify vscode launch` has run, it also checks that VS Code is alive and answers on its DevTools port, and a `FAIL` there makes doctor exit 1.
+
 Run it before the first recipe, between features, after any unexpected `FAIL`, and whenever output looks wrong. A recipe step that expects a `FAIL` does not count. If it fails, run `rr-verify stop`, launch a new run with a new ID, and do not drive the failed one.
 
 ## Drive
@@ -86,8 +90,9 @@ Use what a user uses: the SDK, a CLI, MCP, HTTP, or a browser page the engine se
 | Run your own SDK script | `rr-verify py script.py [args]` (not recorded; save your own output) |
 | Use a page in a browser | `rr-verify browse [--site engine\|docs] [--strict] [--ignore REGEX] SCRIPT.mjs [args]` |
 | Serve the docs site | `rr-verify docs` |
+| Use the VS Code extension | `rr-verify vscode launch`, then steps such as `rr-verify vscode connect`, `open NAME`, `run`, `chat "question"`, `stop-pipeline`, `command "TITLE"`, and `app NAME`; see [features/vscode.md](features/vscode.md) |
 
-`--label <feature-id>` puts the evidence of `chat`, `send`, `cli`, `tscli`, `mcp`, and `browse` in that feature's folder.
+`--label <feature-id>` puts the evidence of `chat`, `send`, `cli`, `tscli`, `mcp`, `browse`, and `vscode` steps in that feature's folder.
 
 Fixtures in `$F`:
 
@@ -96,6 +101,7 @@ Fixtures in `$F`:
 - `echo.pipe` is a webhook source wired to a Return Text node. It returns the text it receives.
 - `dropper-text.pipe` is Dropper, then Parse, then Return Text. It returns the text of each uploaded file.
 - `browser/*.mjs` are the browser scripts the feature files run, one per page.
+- `vscode/*.pipe` are the quickstart pipelines with canvas positions. `rr-verify vscode launch` copies them into the VS Code workspace's `pipelines` folder.
 
 To verify a pipeline your change touches, pass the repository's own `.pipe` file with `--pipe`.
 
@@ -105,6 +111,7 @@ Results:
 - `mcp` prints the JSON-RPC response, then `MCP: ok` or `MCP: error (see the response above)` on stderr, and exits 1 on any error or `isError` response.
 - `cli`, `tscli`, and `record` print the command's output and exit with its exit code.
 - `browse` prints one `ok` or `FAIL` line per step, the counts of console errors and failed requests with the first few of each, the screenshot and video paths, and then `PASS:` or `FAIL:` with the reason. Exit code 0 means every step passed, 1 means a step failed, and 2 means the run itself failed, such as a missing script or browser.
+- `vscode` steps print one `ok` or `FAIL` line per check and any notification VS Code showed, then `PASS: <step>` or `FAIL: <step>: <failed checks>`. Exit code 0 means every check passed, 1 means one failed, and 2 means the step could not run, such as VS Code not running.
 - Every command that saves evidence also prints `saved: <path>` on stderr. In a combined view of stdout and stderr, that line can come before or after the output, so match the result lines, not the last line.
 
 ### Browser scripts
@@ -140,6 +147,7 @@ Everything lands in `.verify/<run-id>/`, which git ignores:
 - `<feature>/<time>-cmd.json` holds a `cli`, `tscli`, or `record` command with its exit code, stdout, and stderr.
 - `<feature>/<time>-<method>[-<tool>].json` holds each MCP request and response, including the `initialize` exchange that precedes it.
 - `<feature>/<time>-browse.json` holds a browser run: the script and its arguments, each step with its result and duration, the console errors, the failed requests, what `--ignore` left out, the screenshot and video paths, `ok`, the verdict, and the duration. Beside it are `<time>-<name>.png`, `<time>-video.webm`, any `<time>-<name>.aria.yml` from `snapshot`, and `<time>-trace.zip` with `--trace`.
+- `<feature>/<time>-<step>.json` holds a VS Code step: each check with its result and detail, `ok`, the duration, the notifications VS Code showed, `errors` from the extension host log, the RocketRide output channel, webview consoles, and error notifications, and the last lines of the RocketRide output channel. Beside it are `<time>-<step>-<n>-<name>.png` and `<time>-<step>.webm`. `vscode-profile/` holds VS Code's user data, extensions, private `HOME`, workspace, and `vscode.log`.
 - `store/` is the run's file store, `docs.env` and `docs.log` belong to the docs server, and `browsers/` lists browser sessions that are still running.
 
 Times have millisecond precision, so files never overwrite each other. A command run without `--label` saves to `mcp/` (for `mcp`) or `cli/` (for `cli` and `tscli`).
@@ -159,7 +167,7 @@ Proof standards:
 . .claude/skills/verify-rocketride/bin/env.sh my-run && rr-verify stop
 ```
 
-It first ends every browser session and docs server the run started, then the engine's process group, which holds the engine and every pipeline process it started. It never kills processes by name. Evidence stays where it is. `rr-verify runs` lists runs and whether each engine is still running. Delete a run's folder with `rm -rf .verify/<run-id>` once you no longer need its evidence.
+It first ends every browser session and docs server the run started, then closes the run's VS Code with the processes it started, then the engine's process group, which holds the engine and every pipeline process it started. It never kills processes by name. Evidence stays where it is. `rr-verify runs` lists runs and whether each engine is still running. Delete a run's folder with `rm -rf .verify/<run-id>` once you no longer need its evidence.
 
 ## Helpers
 
@@ -170,6 +178,7 @@ It first ends every browser session and docs server the run started, then the en
 - `bin/browse.mjs` runs a browser script with Playwright and writes its evidence. Call it through `rr-verify browse`.
 - `bin/browser.sh` holds the `browse` and `docs` commands and the browser parts of `stop` and `doctor`. `rr-verify` sources it.
 - `bin/ui_doctor.py` compares each UI's source, build, and served copy for `rr-verify doctor`.
+- `bin/vscode.mjs` downloads and starts VS Code, runs the `vscode` steps over the DevTools protocol with Playwright, and writes their evidence. Call it through `rr-verify vscode`.
 
 ## Feature map
 

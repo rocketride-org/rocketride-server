@@ -9,7 +9,7 @@ The engine serves the chat page (`apps/chat-ui`) at `/chat`. Opened with `?auth=
 
 ## How to get to it (user POV)
 
-- Run a pipeline with a Chat source in VS Code and type in the chat panel. This skill cannot drive VS Code yet.
+- Run a pipeline with a Chat source in VS Code and type in the chat panel. [vscode-canvas.md](./vscode-canvas.md) drives that path with `rr-verify vscode chat`.
 - Open `http://127.0.0.1:<port>/chat?auth=<public key>` in a browser. The public key is the `publicToken` that `client.use()` returns for the task, and it starts with `pk_`. The endpoint dialog in VS Code shows the same URL.
 
 ## Driving it with rr-verify

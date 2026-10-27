@@ -13,7 +13,7 @@ The engine serves the shell, its browser UI, at `/`. Signed out, the home page l
 
 - Open `http://127.0.0.1:<port>/` in a browser, where the port is the engine's. A desktop install and a self-hosted engine serve the same shell.
 - Click a tile, such as `Pipeline Builder`, to open that app. Most apps need **Sign In** first.
-- The VS Code extension draws pipelines with the same canvas component in an editor tab. This skill cannot drive VS Code yet.
+- The VS Code extension draws pipelines with the same canvas component in an editor tab. See [vscode-canvas.md](./vscode-canvas.md).
 
 ## Driving it with rr-verify
 

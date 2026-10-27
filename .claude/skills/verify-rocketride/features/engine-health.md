@@ -13,7 +13,7 @@ A running engine reports its version and the commit it was built from, rejects r
 
 - Open `http://127.0.0.1:<port>/version` in a browser or with `curl`.
 - Connect any SDK or CLI with `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY`.
-- In VS Code, the "Rocket Ride: Extension" output channel prints `Engine ready (port N)`. This skill cannot drive VS Code yet.
+- In VS Code, the "Rocket Ride: Extension" output channel prints `Engine ready (port N)`. `rr-verify vscode` drives the extension in Direct Connect mode against your run's engine, not the engine Local mode starts; see [vscode.md](./vscode.md).
 
 ## Driving it with rr-verify
 

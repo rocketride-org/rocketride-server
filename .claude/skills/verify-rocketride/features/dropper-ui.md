@@ -10,7 +10,7 @@ The engine serves the dropper page (`apps/dropper-ui`) at `/dropper`. Opened wit
 
 ## How to get to it (user POV)
 
-- Run a pipeline with a Dropper source in VS Code and drop files on its panel. This skill cannot drive VS Code yet.
+- Run a pipeline with a Dropper source in VS Code and drop files on its panel. `rr-verify vscode` can open and run such a pipeline, but no recipe drops files on its panel yet.
 - Open `http://127.0.0.1:<port>/dropper?auth=<public key>` in a browser. The public key is the `publicToken` that `client.use()` returns for the task.
 - Ask an MCP client to run a dropper pipeline. `run_dropper_pipe` returns a `dropper_url` to hand to the user.
 

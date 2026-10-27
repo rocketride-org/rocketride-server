@@ -10,7 +10,7 @@ A chat pipeline takes a question from a Chat source, sends it to an LLM node, an
 
 ## How to get to it (user POV)
 
-- Build Chat, then an LLM node, then Return Answers on the VS Code canvas, press Run on the Chat node, and type in the chat panel. This skill cannot drive VS Code yet.
+- Build Chat, then an LLM node, then Return Answers on the VS Code canvas, press Run on the Chat node, and type in the chat panel. [vscode-canvas.md](./vscode-canvas.md) drives the run and the chat; building the pipeline by hand is not driven.
 - Open the engine's chat page at `/chat?auth=<pipeline public key>` in a browser. [The chat page feature](./chat-ui.md) drives it.
 - Call `client.use(filepath=...)` and then `client.chat(token=..., question=...)` from the Python SDK.
 
