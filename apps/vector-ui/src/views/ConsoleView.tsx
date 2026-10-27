@@ -96,7 +96,7 @@ import WriteAuditDetails from '../components/WriteAuditDetails';
 import type { IWorkbenchPanelProps } from '../components/workbenchProps';
 import { CONSOLE_ORIGIN } from '../vector/confirm';
 import { consoleScope, mapScopeFor } from '../vector/consoleModel';
-import { TABBABLE, firstFocusable, focusLost } from '../vector/focus';
+import { TABBABLE, firstFocusable, focusAdrift, focusLost } from '../vector/focus';
 import { CONDITION_KINDS, checkScope, conditionAvailability, listingFilter, resolveScope, scopeStripText, scopeView, scopeWith } from '../vector/filters';
 import type { ConditionKind } from '../vector/filters';
 import { healthSummary, medianChunks } from '../vector/health';
@@ -105,7 +105,7 @@ import { roleLine, vectorCardView } from '../vector/connections';
 import { providerTitle } from '../vector/support';
 import { REPAIR_NEEDED_TEXT, collectionMissing, formatCount } from '../vector/stats';
 import { BUSY, CAVEAT_SENTENCES, EMPTY } from '../vector/wording';
-import { NO_FAILURES, RESULT_FIRST_MS, bottomSlot, focusStranded, reprobeFor, statsFailures, unreachableShown } from '../vector/workbench';
+import { NO_FAILURES, RESULT_FIRST_MS, bottomSlot, focusStranded, reprobeFor, statsFailures, takesFocusOnShow, unreachableShown } from '../vector/workbench';
 import type { BottomSlot, SlotWrite, WorkbenchTab } from '../vector/workbench';
 import { styles } from '../styles';
 import MapView from './MapView';
@@ -157,6 +157,11 @@ export interface IConsoleViewProps {
 	opened: IExplorerEndpoint;
 	/** False while another document is the active tab. */
 	active: boolean;
+	/**
+	 * Whether a press just opened this console (a card, a connection's Browse documents or Open map), read once when it
+	 * mounts: it then takes the focus if nothing shown has it. Absent: never on mount (restored, or opened elsewhere).
+	 */
+	arrival?: () => boolean;
 }
 
 /**
@@ -165,13 +170,15 @@ export interface IConsoleViewProps {
  * @param props - {@link IConsoleViewProps}.
  * @returns The view.
  */
-export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => {
+export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active, arrival }) => {
 	const env = useVectorEnv();
 	const endpoint = useLiveEndpoint(opened);
 	const { probes } = useEndpointsState();
 	const probe = probes[endpoint.key];
 	const { entry, console: state, selection, tab, chatScope, model, channels } = useConnection(endpoint);
 	const card = vectorCardView(endpoint, probe);
+	// Openable but for a probe that did not answer (the store was down): Refresh stays, and probes it again first.
+	const reprobable = card.blocked === null && endpoint.state === 'ready' && probe?.ok !== true;
 	const dialect = model.connection.dialect;
 
 	// First load once the store node answered as a vector store; later loads are the controller's.
@@ -301,7 +308,8 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 	const removal = state.removal;
 	// Each write's line is its own object (the store sets a new one per write), so Show pending lasts until the next.
 	const [dismissed, setDismissed] = useState<typeof removal | null>(null);
-	const write: SlotWrite = removal === dismissed || (removal.status !== 'running' && removal.message === null) ? null : removal.status === 'running' ? 'running' : removal.status === 'error' || removal.partial ? 'failure' : 'result';
+	// A document tab's write or cancel (it shares this controller in the full app) is that tab's to show, not this line's.
+	const write: SlotWrite = removal === dismissed || removal.origin !== undefined || (removal.status !== 'running' && removal.message === null) ? null : removal.status === 'running' ? 'running' : removal.status === 'error' || removal.partial ? 'failure' : 'result';
 	const [fresh, setFresh] = useState(false);
 	const [stagedSince, setStagedSince] = useState(false);
 	// The staged set changed (the user acted). Declared first, so a write that changes the staged set and lands its
@@ -349,14 +357,38 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 		if (!(focused instanceof HTMLElement) || !root.current?.contains(focused) || !focusStranded(focused, tab)) return;
 		currentTab()?.focus();
 	}, [tab]);
+	// The console came to the front from a press elsewhere (a document's Show on map, a connection's Browse documents or
+	// Open map), or a press opened it: that press's own page is hidden now, so the focus goes to the current tab, never
+	// the page. Only when this page has the focus (a dev-tool frame brought forward by a click in the host leaves the
+	// host's), and on mount only when a press asked for it (a console restored, or opened behind, leaves it alone). Once
+	// more on the next frame: the page that pressed may be hidden after this one shows.
+	const mounting = useRef(true);
+	useLayoutEffect(() => {
+		const onMount = mounting.current;
+		mounting.current = false;
+		if (typeof document === 'undefined') return undefined;
+		const asked = { mounting: onMount, arrival: onMount && (arrival?.() ?? false), active };
+		const settle = (): void => {
+			if (takesFocusOnShow({ ...asked, pageFocused: document.hasFocus(), adrift: focusAdrift(document.activeElement as HTMLElement | null, document.body) })) currentTab()?.focus();
+		};
+		if (!active || (onMount && !asked.arrival)) return undefined;
+		settle();
+		const later = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(settle) : null;
+		return () => {
+			if (later !== null) cancelAnimationFrame(later);
+		};
+		// The arrival is read on mount only.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [active]);
 
 	// Refreshing… only for a refresh someone asked for; the quick tick every 15 s changes nothing in the header.
+	// The store probed again first (its last probe did not answer) counts as refreshing too.
 	const [refreshAsked, setRefreshAsked] = useState(false);
-	const statsLoading = state.stats.status === 'loading';
+	const refreshBusy = state.stats.status === 'loading' || state.checking === true;
 	useEffect(() => {
-		if (!statsLoading && refreshAsked) setRefreshAsked(false);
-	}, [statsLoading, refreshAsked]);
-	const refreshing = refreshAsked && statsLoading;
+		if (!refreshBusy && refreshAsked) setRefreshAsked(false);
+	}, [refreshBusy, refreshAsked]);
+	const refreshing = refreshAsked && refreshBusy;
 	const refresh = (): void => {
 		// A refresh already running is not asked again.
 		if (refreshing) return;
@@ -394,7 +426,7 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 				subtitle={subtitle}
 				actions={
 					<>
-						<Button variant="ghost" disabled={!card.openable || !entry.opened} onClick={refresh}>
+						<Button variant="ghost" disabled={!entry.opened || !(card.openable || reprobable)} onClick={refresh}>
 							<span style={layout.held}>
 								<span style={layout.heldLabel(!refreshing)}>Refresh</span>
 								<span style={layout.heldLabel(refreshing)}>{BUSY.refreshing}</span>

@@ -78,6 +78,7 @@ import { CONTROLLER_STATE_TOPIC, channelFor, mountNonce } from 'shared/explorer/
 import type { DevToolPeer } from 'shared/explorer/devtool/realm';
 import { createControllerSummon } from 'shared/explorer/devtool/summon';
 import type { SummonState } from 'shared/explorer/devtool/summon';
+import { probeAwareChannel } from '../adapters/actions';
 import { makeConsoleActions } from '../adapters/consoleActions';
 import { createConnectionRegistry } from '../adapters/connections';
 import { sessionQueryHistory } from '../adapters/queryHistory';
@@ -526,6 +527,8 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 
 	// ── Remote channels: one per connection, over the live endpoint record ──────────────────────
 	const channels = new Map<string, IRoleChannel>();
+	// Whether the store answered its last probe (the controller's state, mirrored here).
+	const probedOn = (key: string): boolean => endpoints.get().probes[key]?.ok === true;
 	const channelOf = (endpoint: IExplorerEndpoint): IRoleChannel => {
 		let made = channels.get(endpoint.key);
 		if (!made) {
@@ -534,7 +537,8 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 				last = endpoints.get().endpoints.find((candidate) => candidate.key === endpoint.key) ?? last;
 				return last;
 			};
-			made = remoteChannel(caller, live, () => infoOf(endpoint.key), origin);
+			// A call refused for want of a probe that answered says so, never "update the node" (probeAware).
+			made = probeAwareChannel(remoteChannel(caller, live, () => infoOf(endpoint.key), origin), () => probedOn(endpoint.key));
 			channels.set(endpoint.key, made);
 		}
 		return made;
@@ -542,9 +546,8 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 	const probe = (key: string): Promise<IProbeResult | null> => caller.callReply(OP.probe, { key }, { timeoutMs: frameTimeoutFor(OP.probe, infoOf(key)) }).then((value) => value, () => null);
 	const link: IConnectionLink = {
 		session: (endpoint) => channelOf(endpoint),
-		reprobe: (key) => {
-			void probe(key);
-		},
+		reprobe: (key) => probe(key).then(() => undefined),
+		probed: probedOn,
 	};
 	const openConsole = (endpoint: IExplorerEndpoint): void => {
 		opts.documents?.open(consoleUri(endpoint.key), endpoint.nodeName || 'Vector store');

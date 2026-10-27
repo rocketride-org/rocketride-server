@@ -24,7 +24,10 @@ import { DEFAULT_LIMITS } from '../src/vector/results';
 import type { IConsoleDeps } from '../src/vector/consoleStore';
 import { readChunksPage, readDocumentsPage, readDeleteResult, readStats, readTrashResult } from '../src/vector/results';
 import type { IDocumentsPageView } from '../src/vector/results';
-import { BUSY, CANCELLED_TEXT, CODE_SENTENCES } from '../src/vector/wording';
+import { BUSY, CANCELLED_TEXT, CODE_SENTENCES, NOT_PROBED_TEXT, failureText } from '../src/vector/wording';
+import { probeAware, probeAwareChannel } from '../src/adapters/actions';
+import { documentOrigin } from '../src/vector/confirm';
+import { directoryHeading } from '../src/vector/documents';
 import { fixture } from './support/fixtures';
 
 interface ICall {
@@ -1043,3 +1046,140 @@ test('staged documents applied: one confirmation for all of them with the paths 
 	assert.equal(h.calls.filter((c) => c.tool === 'soft_delete').length, 1, 'Cancel sends nothing');
 	h.store.dispose();
 });
+
+test('B4: with no probe that answered, Refresh and Retry probe the store first, and a failed relist keeps the last known rows', async () => {
+	let probed = true;
+	let down = false;
+	const order: string[] = [];
+	let answer: () => void = () => undefined;
+	const { store, clock } = harness({
+		probed: () => probed,
+		reprobe: () => {
+			order.push('probe');
+			return new Promise<void>((resolve) => {
+				answer = () => {
+					probed = !down;
+					resolve();
+				};
+			});
+		},
+		documents: async (cursor) => {
+			order.push('documents');
+			if (down) throw new ExplorerToolError({ kind: 'unavailable', tool: 'list_documents', message: NOT_PROBED_TEXT });
+			return readDocumentsPage(cursor ? fixture('list_documents_page2_last') : fixture('list_documents_page1'));
+		},
+	});
+	store.open();
+	await clock.settle();
+	const known = store.getState().directory.rows.map((row) => row.objectId);
+	assert.ok(known.length > 0, 'the premise: rows were read');
+	// The store went down and its probe failed: Refresh probes first, and reads nothing until the probe answers.
+	down = true;
+	probed = false;
+	order.length = 0;
+	store.refresh();
+	await clock.settle();
+	assert.deepEqual(order, ['probe'], 'nothing is read before the probe answers');
+	assert.equal(store.getState().checking, true, 'Refreshing… while it checks');
+	store.refresh();
+	assert.deepEqual(order, ['probe'], 'a Refresh while it checks is not asked again');
+	answer();
+	await clock.settle();
+	assert.equal(store.getState().checking, false);
+	assert.deepEqual(order, ['probe', 'documents'], 'then it reads');
+	const failed = store.getState().directory;
+	assert.equal(failed.status, 'error');
+	assert.deepEqual(failed.rows.map((row) => row.objectId).sort(), [...known].sort(), 'the last known rows stay');
+	assert.equal(failed.stale, true, 'marked as the last known');
+	assert.match(pagerFooter(failed)?.text ?? '', /^Showing the last known \d+ documents; reading them again failed: The store did not answer when it was last checked\./);
+	assert.match(directoryHeading(failed), /^\d+ last known$/);
+	assert.equal(pagerFooter(failed)?.retry, true);
+	// Retry probes first too; the store is back: the listing is read again and is no longer the last known.
+	down = false;
+	order.length = 0;
+	store.retryDocuments();
+	store.retryDocuments();
+	assert.deepEqual(order, ['probe'], 'Retry probes first, once');
+	answer();
+	await clock.settle();
+	assert.equal(order[0], 'probe');
+	assert.ok(order.slice(1).every((step) => step === 'documents') && order.length > 1);
+	const back = store.getState().directory;
+	assert.equal(back.status, 'done');
+	assert.equal(back.stale, undefined);
+	assert.equal(back.held, undefined);
+	// With a probe that answered, Refresh reads at once (and probes alongside, as before).
+	order.length = 0;
+	store.refresh();
+	await clock.settle();
+	assert.equal(order[0], 'documents');
+	store.dispose();
+});
+
+test('B4: a listing that starts over keeps nothing for another filter, and its first page replaces what it held', () => {
+	const read = pagerApplyPage(pagerBegin(pagerInit()), readDocumentsPage(fixture('list_documents_page2_last')));
+	const again = pagerBegin(read);
+	assert.equal(again.rows.length, 0, 'loading shows nothing new yet');
+	assert.equal(again.held?.length, read.rows.length);
+	assert.equal(pagerBegin(read, { path_prefix: 'C:/demo' }).held, undefined, 'another filter is another listing');
+	const ok = pagerApplyPage(again, readDocumentsPage(fixture('list_documents_page2_last')));
+	assert.equal(ok.held, undefined);
+	assert.equal(ok.stale, undefined);
+	const failedFirst = pagerFail(pagerBegin(pagerInit()), { headline: 'down' });
+	assert.equal(failedFirst.stale, undefined, 'nothing to hold: an empty error as before');
+	assert.match(pagerFooter(failedFirst)?.text ?? '', /^Loading stopped at 0 documents/);
+});
+
+test("B4: a call refused for want of a probe that answered says so, never 'update the node'", async () => {
+	let probed = false;
+	const refusing = { invoke: async () => Promise.reject(new ExplorerToolError({ kind: 'upgrade', tool: 'list_documents', message: 'This node cannot run list_documents: it does not advertise "list_documents". Update the pipeline\'s node to a version that supports it.' })) };
+	const aware = probeAware(refusing, () => probed);
+	assert.equal(probeAware(refusing, () => probed), aware, 'one stand-in per caller (its identity is a dependency)');
+	const notProbed = await aware.invoke('list_documents').then(() => null, (error: unknown) => error);
+	assert.ok(notProbed instanceof ExplorerToolError);
+	assert.equal(notProbed.kind, 'unavailable');
+	assert.equal(failureText(notProbed)?.headline, NOT_PROBED_TEXT);
+	assert.doesNotMatch(NOT_PROBED_TEXT, /[Uu]pdate/);
+	// A node whose probe answered without the capability is out of date: that refusal stays as it was.
+	probed = true;
+	const upgrade = await aware.invoke('list_documents').then(() => null, (error: unknown) => error);
+	assert.ok(upgrade instanceof ExplorerToolError && upgrade.kind === 'upgrade');
+	assert.match(failureText(upgrade)?.headline ?? '', /Update the pipeline's store node/);
+	// Other failures pass through.
+	const other = probeAware({ invoke: async () => Promise.reject(new ExplorerToolError({ kind: 'timeout', tool: 'stats', message: 'slow' })) }, () => false);
+	const timeout = await other.invoke('stats').then(() => null, (error: unknown) => error);
+	assert.ok(timeout instanceof ExplorerToolError && timeout.kind === 'timeout');
+	// A role channel keeps what it is (its role, binding, uploads and questions); only its calls are probe-aware.
+	const channel = { role: 'tools', bound: true, invoke: refusing.invoke, sendFiles: () => 'files', ask: () => 'ask' } as unknown as Parameters<typeof probeAwareChannel>[0];
+	const awareChannel = probeAwareChannel(channel, () => false);
+	assert.equal(awareChannel.role, 'tools');
+	assert.equal(awareChannel.bound, true);
+	assert.equal((awareChannel as unknown as { ask(): string }).ask(), 'ask');
+	assert.equal(probeAwareChannel(channel, () => false), awareChannel);
+	const viaChannel = await awareChannel.invoke('list_documents').then(() => null, (error: unknown) => error);
+	assert.ok(viaChannel instanceof ExplorerToolError && viaChannel.kind === 'unavailable');
+});
+
+test("B10: a document tab's write or cancel carries its origin; the console's own carry none", async () => {
+	const { store, clock } = harness();
+	store.setWritesEnabled(true);
+	store.open();
+	await clock.settle();
+	const kestrel = [{ objectId: 'kestrel', path: 'C:/demo/field/kestrel_field_guide.md', chunks: 12 }];
+	store.requestRemove(kestrel, documentOrigin('kestrel'));
+	store.cancelRemove();
+	assert.deepEqual(store.getState().removal, { status: 'idle', message: CANCELLED_TEXT, origin: documentOrigin('kestrel') });
+	store.requestRemove(kestrel, documentOrigin('kestrel'));
+	const running = store.confirmRemove();
+	assert.equal(store.getState().removal.origin, documentOrigin('kestrel'), 'while it runs');
+	await running;
+	assert.equal(store.getState().removal.status, 'done');
+	assert.equal(store.getState().removal.origin, documentOrigin('kestrel'), 'and its result');
+	store.requestRemove(kestrel);
+	store.cancelRemove();
+	assert.deepEqual(store.getState().removal, { status: 'idle', message: CANCELLED_TEXT }, "the console's own: no origin");
+	await store.restore(kestrel, documentOrigin('kestrel'));
+	assert.equal(store.getState().removal.origin, documentOrigin('kestrel'), 'a Restore from a document too');
+	store.dispose();
+});
+

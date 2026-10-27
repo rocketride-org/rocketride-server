@@ -36,7 +36,7 @@
 // cache, so nothing of one identity's stores shows in the next.
 // =============================================================================
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { AppLayout, Button, DocSplitLayout, DocTabs, EmptyState, commonStyles, useShellConnection } from 'shell';
 import type { Documents, ShellAppProps } from 'shell';
@@ -47,13 +47,14 @@ import { activeConnection, announcer, connectionCaches, vectorEndpoints, vectorQ
 import { VectorHistoryPrefsBridge, useEndpointStoreLifecycle } from './adapters/react';
 import RealmLiveRegion from './components/RealmLiveRegion';
 import InlineRemoveConfirm from './components/InlineRemoveConfirm';
-import { createDocs, destroyDocs, getDocs, openDocumentTab } from './docs';
+import { createDocs, destroyDocs, getDocs, openDocumentTab, takeArrival } from './docs';
 import type { IConsoleDocPayload, IDocumentDocPayload } from './docs';
 import { VectorEnvProvider, useConnection, useEndpointsState, useLiveEndpoint } from './envContext';
 import { createLocalVectorEnv } from './localEnv';
 import { CONNECTIONS_URI, endpointKeyFromUri, isConsoleUri, isDocumentUri } from './vector/addresses';
 import { documentOrigin } from './vector/confirm';
-import { documentFocus } from './vector/focus';
+import { documentFocus, focusAdrift } from './vector/focus';
+import { takesFocusOnShow } from './vector/workbench';
 import { forgetConnections } from './vector/identityChange';
 import VectorSidebar from './VectorSidebar';
 import { VectorIcon } from './icons';
@@ -190,7 +191,7 @@ const VectorAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 };
 
 /** One stored document's tab, bound to its connection's live model. */
-const DocumentTab: React.FC<{ payload: IDocumentDocPayload; active: boolean }> = ({ payload, active }) => {
+const DocumentTab: React.FC<{ uri: string; payload: IDocumentDocPayload; active: boolean }> = ({ uri, payload, active }) => {
 	const endpoint = useLiveEndpoint(payload.endpoint);
 	const { entry, model, channels } = useConnection(endpoint);
 	const { probes } = useEndpointsState();
@@ -213,6 +214,22 @@ const DocumentTab: React.FC<{ payload: IDocumentDocPayload; active: boolean }> =
 	// Its Move to trash is confirmed in the tab itself, inline; when the confirmation goes, the focus stays in the tab.
 	const root = useRef<HTMLDivElement>(null);
 	const returnFocus = (opener: HTMLElement | null): HTMLElement | null => documentFocus(root.current, opener) as HTMLElement | null;
+	// Opened by a press (a row's "open", a chunk's "open"): that press's tab is hidden now, so the focus comes to this
+	// document's Reader | Chunks tabs (else its first control), never the page. A tab restored, or opened another way,
+	// leaves the focus alone. Once more on the next frame: the tab that pressed may be hidden after this one shows.
+	useLayoutEffect(() => {
+		if (typeof document === 'undefined' || !takeArrival(uri)) return undefined;
+		const settle = (): void => {
+			if (takesFocusOnShow({ mounting: true, arrival: true, active, pageFocused: document.hasFocus(), adrift: focusAdrift(document.activeElement as HTMLElement | null, document.body) })) returnFocus(null)?.focus();
+		};
+		settle();
+		const later = typeof requestAnimationFrame === 'function' ? requestAnimationFrame(settle) : null;
+		return () => {
+			if (later !== null) cancelAnimationFrame(later);
+		};
+		// Once, as the tab mounts.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
 	return (
 		<div ref={root} style={styles.documentRoot}>
 			<DocumentView model={model} channels={channels} selection={entry.selection} actions={actions} objectId={payload.objectId} path={payload.path} active={active} beforeBody={<InlineRemoveConfirm entry={entry} probe={probes[endpoint.key]} origin={documentOrigin(payload.objectId)} returnFocus={returnFocus} />} {...(payload.chunkId === undefined ? {} : { chunkId: payload.chunkId })} />
@@ -233,11 +250,11 @@ const DocumentPane: React.FC<{ uri: string; docs: Documents; active: boolean }> 
 	const content = docs.getState().documents[uri]?.content;
 	if (isConsoleUri(uri)) {
 		const payload = content as IConsoleDocPayload | undefined;
-		if (payload?.endpoint) return <ConsoleView key={uri} opened={payload.endpoint} active={active} />;
+		if (payload?.endpoint) return <ConsoleView key={uri} opened={payload.endpoint} active={active} arrival={() => takeArrival(uri)} />;
 	}
 	if (isDocumentUri(uri)) {
 		const payload = content as IDocumentDocPayload | undefined;
-		if (payload?.endpoint && payload.objectId) return <DocumentTab key={uri} payload={payload} active={active} />;
+		if (payload?.endpoint && payload.objectId) return <DocumentTab key={uri} uri={uri} payload={payload} active={active} />;
 	}
 	return <EmptyState title="Unknown document" description={uri} />;
 };

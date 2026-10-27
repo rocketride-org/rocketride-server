@@ -32,7 +32,7 @@
 // =============================================================================
 
 import type { IEndpointStore, IExplorerClient, IExplorerEndpoint } from 'shared/explorer';
-import { vectorChannels } from './adapters/actions';
+import { probeAware, probeAwareChannel, vectorChannels } from './adapters/actions';
 import type { IConnectionLink, IConnectionRegistry } from './adapters/connections';
 import { NO_CHANNELS } from './env';
 import type { IQueryHistorySource, IReadable, IVectorEndpointsState, IVectorEnv } from './env';
@@ -90,8 +90,13 @@ export function createLocalVectorEnv(opts: ILocalVectorEnvOptions): IVectorEnv {
 		endpoints,
 		refresh: opts.refresh ?? ((o) => (client ? store.refresh(client, { reprobe: o?.reprobe === true }) : Promise.resolve())),
 		probe: (key) => (client ? store.probe(client, key) : Promise.resolve(null)),
-		session: (endpoint) => (client ? store.session(client, endpoint) : null),
-		channels: (endpoint) => (client ? vectorChannels(store, client, endpoint) : NO_CHANNELS),
+		// A call refused for want of a probe that answered says so (probeAware), never "update the node".
+		session: (endpoint) => (client ? probeAware(store.session(client, endpoint), () => probedOn(store, endpoint.key)) : null),
+		channels: (endpoint) => {
+			if (!client) return NO_CHANNELS;
+			const channels = vectorChannels(store, client, endpoint);
+			return channels.tools === null ? channels : { ...channels, tools: probeAwareChannel(channels.tools, () => probedOn(store, endpoint.key)) };
+		},
 		connection: (endpoint, limits) => registry.entry(endpoint, link, limits),
 		existingConnection: (key) => registry.existing(key),
 		consoleModel: (model) => model,
@@ -110,11 +115,25 @@ export function createLocalVectorEnv(opts: ILocalVectorEnvOptions): IVectorEnv {
  * @param client - The client.
  * @returns The link.
  */
-export function linkOver(store: Pick<IEndpointStore, 'session' | 'probe'>, client: IExplorerClient): IConnectionLink {
+export function linkOver(store: Pick<IEndpointStore, 'session' | 'probe' | 'getState'>, client: IExplorerClient): IConnectionLink {
 	return {
 		session: (endpoint) => store.session(client, endpoint),
-		reprobe: (endpointKey) => {
-			void store.probe(client, endpointKey);
-		},
+		reprobe: (endpointKey) =>
+			store.probe(client, endpointKey).then(
+				() => undefined,
+				() => undefined
+			),
+		probed: (endpointKey) => probedOn(store, endpointKey),
 	};
+}
+
+/**
+ * Whether the store answered its last probe of an endpoint.
+ *
+ * @param store - The realm's store.
+ * @param endpointKey - The endpoint.
+ * @returns False when the probe failed or none ran.
+ */
+function probedOn(store: Pick<IEndpointStore, 'getState'>, endpointKey: string): boolean {
+	return store.getState().probes[endpointKey]?.ok === true;
 }

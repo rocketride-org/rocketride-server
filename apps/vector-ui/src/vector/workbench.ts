@@ -246,6 +246,21 @@ export function bottomSlot(input: IBottomSlotInput): BottomSlot {
 	return input.write === 'failure' || input.fresh ? 'write' : 'pending';
 }
 
+/**
+ * Whether a console or document takes the focus as it shows (B5): a press elsewhere brought it forward, or opened it,
+ * and that press's own page is hidden, so nothing shown has the focus. Never on a mount nobody pressed for (restored,
+ * opened behind), never while hidden, and never when the page does not have the focus (a dev-tool frame brought
+ * forward by a click in the host leaves the host's).
+ *
+ * @param input - Whether it is mounting, whether a press asked for it, whether it is shown, whether its page has the
+ * focus, and whether nothing shown has it (vector/focus.ts focusAdrift).
+ * @returns True when it takes the focus.
+ */
+export function takesFocusOnShow(input: { mounting: boolean; arrival: boolean; active: boolean; pageFocused: boolean; adrift: boolean }): boolean {
+	if (!input.active || (input.mounting && !input.arrival)) return false;
+	return input.pageFocused && input.adrift;
+}
+
 /** What {@link panelOf} reads of an element. */
 export interface IPanelLookup {
 	closest(selector: string): { getAttribute(name: string): string | null } | null;

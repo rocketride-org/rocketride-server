@@ -35,6 +35,7 @@ import type { IExplorerEndpoint } from 'shared/explorer';
 import type { IVectorEnv } from '../src/env';
 import type { WorkbenchTab } from '../src/vector/workbench';
 import { NO_STAGED, stage } from '../src/vector/staged';
+import { documentOrigin } from '../src/vector/confirm';
 import { pgvectorNode, vectorWorld } from './support/vectorWorld';
 
 // The shell's building blocks exist only inside a running shell: a stand-in for each that renders its text.
@@ -188,5 +189,20 @@ test('R2-I1: every finished write line offers Write details with its whole sente
 		assert.ok(sentenceIn(line, state.message), 'Write details, with the whole sentence first');
 		entry.controller.dispose();
 	}
+});
+
+test("B10: a document tab's cancel or write (sharing this controller in the full app) is not the console's line", async () => {
+	const { env, endpoint } = await discovered();
+	const probe = env.endpoints.get().probes[endpoint.key];
+	const entry = env.connection(endpoint, (probe?.ok ? readDialect(probe.info)?.limits : null) ?? DEFAULT_LIMITS);
+	entry.controller.setWritesEnabled(true);
+	entry.controller.requestRemove([{ objectId: 'doc-x', path: 'x.md', chunks: 1 }], documentOrigin('doc-x'));
+	entry.controller.cancelRemove();
+	assert.equal(entry.controller.getState().removal.message, 'Cancelled. Nothing was sent.', 'the premise: a cancel in the document tab');
+	assert.match(render(env, endpoint, 'documents'), /data-bottom-slot=""><\/div>/, 'the console shows nothing of it');
+	entry.controller.requestRemove([{ objectId: 'doc-x', path: 'x.md', chunks: 1 }]);
+	entry.controller.cancelRemove();
+	assert.match(render(env, endpoint, 'documents'), /data-write-line=""[^>]*><div role="status"[^>]*>Cancelled\. Nothing was sent\.</, "the console's own cancel shows");
+	entry.controller.dispose();
 });
 

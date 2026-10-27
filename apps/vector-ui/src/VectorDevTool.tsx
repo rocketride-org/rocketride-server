@@ -42,7 +42,7 @@
 // window-wide overlay.
 // =============================================================================
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Banner, EmptyState } from 'shell';
 import type { DevToolProps } from 'shell';
@@ -59,7 +59,7 @@ import { FRAME_PROTOCOL } from './devtool/wiring';
 import { STOPPED_DETAIL } from './env';
 import { VectorEnvProvider, useConnection, useEndpointsState, useLiveEndpoint, useReadable, useVectorEnv } from './envContext';
 import { VectorIcon } from './icons';
-import { documentFocus, focusLost } from './vector/focus';
+import { documentFocus, focusAdrift, focusLost } from './vector/focus';
 import { writeTouches } from './vector/workbench';
 import { CODE_SENTENCES } from './vector/wording';
 import ConsoleView from './views/ConsoleView';
@@ -253,7 +253,7 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 	// into the document; after a confirmation, to its opener while it is shown.
 	const root = useRef<HTMLDivElement>(null);
 	const returnFocus = (opener: HTMLElement | null): HTMLElement | null => documentFocus(root.current, opener) as HTMLElement | null;
-	// Only on a change: when a frame opens, the focus belongs to wherever the user is (the host, another frame).
+	// Only on a change: a read again or the document going is not a frame opening.
 	const seen = useRef({ version, gone });
 	useEffect(() => {
 		if (seen.current.version === version && seen.current.gone === gone) return;
@@ -262,6 +262,15 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 		// After a read again or the document going; returnFocus reads the root when it runs.
 		returnFocus(null)?.focus();
 	}, [version, gone]);
+	// A frame that opens in front was opened by a press in another frame (a row's "open"): the focus comes to its
+	// Reader | Chunks tabs, never the page. A frame that opens behind (restored, or opened elsewhere) leaves the focus
+	// where it is, in the host or another frame.
+	useLayoutEffect(() => {
+		if (typeof document === 'undefined' || !frame.visible.get()) return;
+		if (focusAdrift(document.activeElement as HTMLElement | null, document.body)) returnFocus(null)?.focus();
+		// Once, as the frame mounts.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
 	// Removing from a document needs the console model's write switch (its own controller confirms and sends).
 	useEffect(() => {
 		entry.controller.setWritesEnabled(model.writes.enabled);

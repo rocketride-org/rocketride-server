@@ -107,13 +107,13 @@ test('the console is the first view of a connection: the landing and the sidebar
 	assert.match(code('views/ConnectionsView.tsx'), /Elasticsearch and OpenSearch stores are not listed\./, "the landing's help text says which stores are left out");
 	assert.match(code('VectorSidebar.tsx'), /openConsole\(endpoint\)/);
 	const app = code('VectorApp.tsx');
-	assert.match(app, /if \(isConsoleUri\(uri\)\)[\s\S]*<ConsoleView key=\{uri\} opened=\{payload\.endpoint\} active=\{active\} \/>/);
+	assert.match(app, /if \(isConsoleUri\(uri\)\)[\s\S]*<ConsoleView key=\{uri\} opened=\{payload\.endpoint\} active=\{active\} arrival=\{\(\) => takeArrival\(uri\)\} \/>/);
 	assert.match(app, /docs\.openStaticDocument\(CONNECTIONS_URI, 'Connections'\)/, 'the landing opens with the app');
 });
 
 test('a document tab is told when it is in front, and scores its chunks against the query only then', () => {
 	const app = code('VectorApp.tsx');
-	assert.match(app, /if \(isDocumentUri\(uri\)\)[\s\S]*<DocumentTab key=\{uri\} payload=\{payload\} active=\{active\} \/>/);
+	assert.match(app, /if \(isDocumentUri\(uri\)\)[\s\S]*<DocumentTab key=\{uri\} uri=\{uri\} payload=\{payload\} active=\{active\} \/>/);
 	assert.match(app, /<DocumentView [^>]*active=\{active\}/);
 	const view = code('views/DocumentView.tsx');
 	assert.match(view, /if \(!active \|\| query === null \|\| !embedReady/, 'a hidden tab (every editor stays mounted) sends nothing');
@@ -147,7 +147,10 @@ test('the workbench header and tab row never move: Refresh keeps its width and s
 	const view = code('views/ConsoleView.tsx');
 	assert.match(view, /<span style=\{layout\.held\}>\s*<span style=\{layout\.heldLabel\(!refreshing\)\}>Refresh<\/span>\s*<span style=\{layout\.heldLabel\(refreshing\)\}>\{BUSY\.refreshing\}<\/span>/, 'both labels in one grid cell: the button keeps the longer width');
 	assert.match(view, /heldLabel: \(shown: boolean\): CSSProperties => \(\{ gridArea: '1 \/ 1', visibility: shown \? 'visible' : 'hidden' \}\)/, 'the hidden label is not read out');
-	assert.match(view, /const refreshing = refreshAsked && statsLoading;/, 'the 15 s quick tick changes nothing in the header');
+	assert.match(view, /const refreshBusy = state\.stats\.status === 'loading' \|\| state\.checking === true;[\s\S]*const refreshing = refreshAsked && refreshBusy;/, 'the 15 s quick tick changes nothing in the header; probing the store again first is refreshing too (B4)');
+	// B4: Refresh stays for a store whose probe did not answer (it probes it again first); B9: one width (above).
+	assert.match(view, /const reprobable = card\.blocked === null && endpoint\.state === 'ready' && probe\?\.ok !== true;/);
+	assert.match(view, /<Button variant="ghost" disabled=\{!entry\.opened \|\| !\(card\.openable \|\| reprobable\)\} onClick=\{refresh\}>/);
 	// The tab row is its own row, under the header and above every banner and panel.
 	// The banners of a lasting state at the top; what comes and goes after a write (its line, the pending bar) under the panels (R1-I6).
 	const order = ['<ContentHeader', '<WorkbenchTabs', '{card.blocked &&', '{!card.blocked && unreachable && statsError !== null &&', "{!card.blocked && dialect?.health.control_record === false &&", '{!card.blocked && dialect?.health.model_mismatch === true &&', '{!card.blocked && entry.opened && !model.writes.enabled', '{!card.blocked && !unreachable && emptyCollection &&', '<InlineRemoveConfirm', "{mounted.has('overview')", "{mounted.has('trash')", '<PendingBar', 'data-write-line=""'].map((part) => view.indexOf(part));
@@ -217,7 +220,8 @@ test('the console renders the strip, the directory, the chunks, adding documents
 	for (const file of ['components/DocumentsTab.tsx', 'components/TrashTab.tsx']) {
 		assert.match(code(file), /const writes = writesDuringRemoval\(model\.writes, state\.removal\.status\);/, `${file}: the writes follow the model, and are unavailable while a removal runs`);
 	}
-	assert.match(view, /const write: SlotWrite = removal === dismissed \|\| \(removal\.status !== 'running' && removal\.message === null\) \? null : removal\.status === 'running' \? 'running' : removal\.status === 'error' \|\| removal\.partial \? 'failure' : 'result';/, 'the status line says Removing… while a removal runs');
+	assert.match(view, /const write: SlotWrite = removal === dismissed \|\| removal\.origin !== undefined \|\| \(removal\.status !== 'running' && removal\.message === null\) \? null : removal\.status === 'running' \? 'running' : removal\.status === 'error' \|\| removal\.partial \? 'failure' : 'result';/, 'the status line says Removing… while a removal runs');
+	assert.match(view, /const write: SlotWrite = removal === dismissed \|\| removal\.origin !== undefined \|\|/, "a document tab's write or cancel is not this console's line (B10)");
 	assert.match(view, /entry\.controller\.open\(\)/);
 	assert.match(view, /\{addingMounted && <AddDocumentsAside [^>]*open=\{adding\}/, 'Add documents is an aside beside the panels, kept mounted once opened (an upload keeps following its progress)');
 	const strip = code('components/StatsStrip.tsx');
@@ -290,7 +294,7 @@ test('every removal is confirmed inline in the document that shows it, in both m
 	assert.match(devFrame, /<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[live\.key\]\} returnFocus=\{returnFocus\} \/>/);
 	assert.match(devFrame, /if \(typeof document === 'undefined' \|\| !focusLost\(document\.activeElement, document\.body, null\)\) return;\s*returnFocus\(null\)\?\.focus\(\);/, 'and after a read again or the document going');
 	assert.match(devFrame, /<div tabIndex=\{-1\} style=\{styles\.gone\} data-document-gone="">/, 'the gone state can hold the focus');
-	assert.match(devFrame, /const seen = useRef\(\{ version, gone \}\);\s*useEffect\(\(\) => \{\s*if \(seen\.current\.version === version && seen\.current\.gone === gone\) return;\s*seen\.current = \{ version, gone \};\s*if \(typeof document === 'undefined' \|\| !focusLost/, 'only on a change: a frame that opens never takes the focus from the host or another frame');
+	assert.match(devFrame, /const seen = useRef\(\{ version, gone \}\);\s*useEffect\(\(\) => \{\s*if \(seen\.current\.version === version && seen\.current\.gone === gone\) return;\s*seen\.current = \{ version, gone \};\s*if \(typeof document === 'undefined' \|\| !focusLost/, 'a read again or the document going acts only on a change, never as the frame mounts');
 	// R1-I7: a dev-tool document reads itself again only for a write that may have changed it.
 	assert.match(devFrame, /version: \(written\) => \{\s*if \(!writeTouches\(written\.gone, objectId\)\) return;/);
 	assert.match(devFrame, /<DocumentView refreshKey=\{version\} /, 'in place: its sub-tab, sort, drawer and focus stay');
@@ -504,3 +508,36 @@ test('console actions: show on the map, ask about these, remove (confirmed by th
 	assert.deepEqual(entry.controller.getState().confirm?.targets, [{ objectId: 'doc-9', path: 'C:/x/nine.md', chunks: null }], 'the console confirms; nothing is sent');
 	connectionCaches.clearAll();
 });
+
+test('B4: no recovery path is blocked after a store outage, and a refusal for want of a probe never says "update the node"', () => {
+	// Every caller of the store is probe-aware: the console's, the env's session and tools channel, and a frame's.
+	assert.match(code('adapters/connections.ts'), /return probeAware\(ctx\.link\.session\(ctx\.endpoint\), probed\);/);
+	assert.match(code('adapters/connections.ts'), /reprobe: \(\) => ctx\.link\?\.reprobe\(ctx\.endpoint\.key\),\s*probed,/);
+	const local = code('localEnv.ts');
+	assert.match(local, /session: \(endpoint\) => \(client \? probeAware\(store\.session\(client, endpoint\), \(\) => probedOn\(store, endpoint\.key\)\) : null\)/);
+	assert.match(local, /tools: probeAwareChannel\(channels\.tools, \(\) => probedOn\(store, endpoint\.key\)\)/);
+	assert.match(local, /probed: \(endpointKey\) => probedOn\(store, endpointKey\),/);
+	const frame = code('devtool/frame.ts');
+	assert.match(frame, /made = probeAwareChannel\(remoteChannel\(caller, live, \(\) => infoOf\(endpoint\.key\), origin\), \(\) => probedOn\(endpoint\.key\)\);/);
+	assert.match(frame, /reprobe: \(key\) => probe\(key\)\.then\(\(\) => undefined\),\s*probed: probedOn,/);
+	// Refresh and Retry (Documents, Trash and the unreachable banner) go through the controller, which probes first.
+	assert.match(code('components/DocumentsTab.tsx'), /entry\.controller\.retryDocuments\(\)/);
+	assert.match(code('components/TrashTab.tsx'), /entry\.controller\.retryDocuments\(\)/);
+});
+
+test('B5: a press whose own page or panel is hidden never leaves the focus on the page', () => {
+	// The console: a tab switch from inside a panel (the Query to Map hand-offs) goes to the new tab...
+	const view = code('views/ConsoleView.tsx');
+	assert.match(view, /if \(!\(focused instanceof HTMLElement\) \|\| !root\.current\?\.contains\(focused\) \|\| !focusStranded\(focused, tab\)\) return;\s*currentTab\(\)\?\.focus\(\);/);
+	// ...and coming to the front, or opened by a press (a document's Show on map, a connection's Browse documents or Open map), to the current tab.
+	assert.match(view, /if \(takesFocusOnShow\(\{ \.\.\.asked, pageFocused: document\.hasFocus\(\), adrift: focusAdrift\(document\.activeElement as HTMLElement \| null, document\.body\) \}\)\) currentTab\(\)\?\.focus\(\);/);
+	assert.match(view, /const later = typeof requestAnimationFrame === 'function' \? requestAnimationFrame\(settle\) : null;/, 'once more on the next frame');
+	assert.match(code('views/ConnectionsView.tsx'), /export function openConsole\(endpoint: IExplorerEndpoint\): void \{\s*markArrival\(consoleUri\(endpoint\.key\)\);/);
+	// A new document tab from a row's "open": its Reader | Chunks tabs, in both mounts.
+	assert.match(code('docs.ts'), /export function openDocumentTab\([^)]*\): void \{\s*markArrival\(documentUri\(endpoint\.key, objectId\)\);/);
+	const app = code('VectorApp.tsx');
+	assert.match(app, /if \(typeof document === 'undefined' \|\| !takeArrival\(uri\)\) return undefined;[\s\S]*?returnFocus\(null\)\?\.focus\(\);/);
+	const devFrame = code('VectorDevTool.tsx');
+	assert.match(devFrame, /if \(typeof document === 'undefined' \|\| !frame\.visible\.get\(\)\) return;\s*if \(focusAdrift\(document\.activeElement as HTMLElement \| null, document\.body\)\) returnFocus\(null\)\?\.focus\(\);/, 'a frame that opens in front; one opening behind leaves the focus');
+});
+

@@ -66,6 +66,19 @@ export function firstFocusable<T extends IFocusCandidate>(candidates: ReadonlyAr
 	return null;
 }
 
+/**
+ * Whether nothing the user can see has the focus: nothing, the page body, or an element removed, hidden or disabled.
+ * A press whose own panel or page is then hidden (a hand-off to another tab) leaves the focus there, and the browser
+ * moves it to the body.
+ *
+ * @param active - `document.activeElement`.
+ * @param body - `document.body`.
+ * @returns True when the focus should be given somewhere.
+ */
+export function focusAdrift<T extends IFocusCandidate>(active: T | null | undefined, body: unknown): boolean {
+	return active === null || active === undefined || active === body || firstFocusable([active]) === null;
+}
+
 /** What can take the focus by Tab (a control that is not disabled, or anything in the tab order). */
 export const TABBABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
