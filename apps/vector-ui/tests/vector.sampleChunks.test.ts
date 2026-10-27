@@ -32,7 +32,7 @@ import type { IDialectResult } from '../src/contract/types';
 import { fieldsCaption } from '../src/components/CollectionPanel';
 import { fieldsSummary } from '../src/vector/fields';
 import { readStats } from '../src/vector/results';
-import { SAMPLE_CHUNKS, SNIPPET_CHARS, cachedSample, loadSampleChunks, skipReason, snippetOf } from '../src/vector/sampleChunks';
+import { SAMPLE_CHUNKS, SNIPPET_CHARS, cachedSample, loadSampleChunks, sampleVersion, skipReason, snippetOf } from '../src/vector/sampleChunks';
 import { fixture } from './support/fixtures';
 
 const src = (file: string): string => fs.readFileSync(path.resolve(__dirname, '..', 'src', file), 'utf8');
@@ -68,17 +68,19 @@ test('two reads: the first document and its first chunks; the answer is kept unt
 			return { success: true, items: [0, 1, 2, 3].map((i) => ({ chunkId: i, content: `chunk ${i}\n text`, length: 10, isTable: false, tableId: 0, isDeleted: false, pointId: null, metadata: {} })), has_more: false, next_after: -1, total: 4 };
 		},
 	};
-	assert.equal(cachedSample('k1', 0), undefined);
-	const sample = await loadSampleChunks(caller as never, 'store_1', 'k1', 0);
+	const v0 = sampleVersion(0, 3);
+	assert.equal(cachedSample('k1', v0), undefined);
+	const sample = await loadSampleChunks(caller as never, 'store_1', 'k1', v0);
 	assert.equal(calls.length, 2);
 	assert.deepEqual(calls.map((c) => c.tool), ['list_documents', 'chunks']);
 	assert.equal(calls[0].input.limit, 1);
 	assert.equal(calls[1].input.limit, SAMPLE_CHUNKS);
 	assert.equal(sample?.path, 'docs/a.md');
 	assert.deepEqual(sample?.chunks.map((c) => c.snippet), ['chunk 0 text', 'chunk 1 text', 'chunk 2 text']);
-	assert.deepEqual(cachedSample('k1', 0), sample, 'kept for the same write count');
-	assert.equal(cachedSample('k1', 1), undefined, 'a write drops it');
-	assert.equal(cachedSample('k1', 1), undefined);
+	assert.deepEqual(cachedSample('k1', v0), sample, 'kept for the same version');
+	assert.equal(cachedSample('k1', sampleVersion(1, 3)), undefined, 'a write drops it');
+	assert.equal(cachedSample('k1', sampleVersion(0, 4)), undefined, 'so does a refresh that finds another document count');
+	assert.equal(cachedSample('k1', sampleVersion(0, 3)), undefined, 'and it stays dropped');
 });
 
 test('a read that began before a reset does not put its answer back (a new identity must not see the old sample)', async () => {
@@ -93,16 +95,16 @@ test('a read that began before a reset does not put its answer back (a new ident
 			return { success: true, items: [{ chunkId: 0, content: 'old', length: 3, isTable: false, tableId: 0, isDeleted: false, pointId: null, metadata: {} }], has_more: false, next_after: -1, total: 1 };
 		},
 	};
-	const reading = loadSampleChunks(caller as never, 'store_1', 'k3', 0);
+	const reading = loadSampleChunks(caller as never, 'store_1', 'k3', sampleVersion(0, 1));
 	connectionCaches.clearAll();
 	release();
 	assert.equal((await reading)?.path, 'docs/a.md', 'the caller still gets its answer');
-	assert.equal(cachedSample('k3', 0), undefined, 'but it is not kept');
-	await loadSampleChunks({ invoke: caller.invoke } as never, 'store_1', 'k3', 0);
-	assert.ok(cachedSample('k3', 0), 'a read after the reset is kept');
+	assert.equal(cachedSample('k3', sampleVersion(0, 1)), undefined, 'but it is not kept');
+	await loadSampleChunks({ invoke: caller.invoke } as never, 'store_1', 'k3', sampleVersion(0, 1));
+	assert.ok(cachedSample('k3', sampleVersion(0, 1)), 'a read after the reset is kept');
 });
 
-test('a store that lists nothing is kept as no sample, without a second call', async () => {
+test('a store that lists nothing is asked with one call and not remembered', async () => {
 	let n = 0;
 	const caller = {
 		invoke: async () => {
@@ -110,9 +112,9 @@ test('a store that lists nothing is kept as no sample, without a second call', a
 			return { success: true, items: [], next_cursor: null, total: 0, sorted: true };
 		},
 	};
-	assert.equal(await loadSampleChunks(caller as never, 'store_1', 'k2', 0), null);
+	assert.equal(await loadSampleChunks(caller as never, 'store_1', 'k2', sampleVersion(0, null)), null);
 	assert.equal(n, 1, 'one call');
-	assert.equal(cachedSample('k2', 0), null);
+	assert.equal(cachedSample('k2', sampleVersion(0, null)), undefined, 'an empty answer is not kept: a store found empty is the one filled next');
 });
 
 test('the fields line says what was read, and the card says which sources run', () => {
@@ -134,4 +136,13 @@ test('wiring: the landing drawer is the only DetailPanel; the card and the detai
 	assert.match(src('views/ConnectionsView.tsx'), /<VectorConnectionCard key=\{endpoint\.key\}/);
 	assert.match(src('views/ConnectionsView.tsx'), /vectorCardView\(endpoint, probe, stats\)/, 'the drawer reads the same flags as the card');
 	assert.match(src('components/ConnectionDetailsPanel.tsx'), /useSampleChunks\(endpoint, probe, stats\)/);
+});
+
+test('the drawer reads again when the console refreshes and finds documents (R2-B5)', () => {
+	const hook = fs.readFileSync(path.resolve(__dirname, '..', 'src/components/useSampleChunks.ts'), 'utf8');
+	assert.match(hook, /sampleVersion\(writes, stats\?\.documents \?\? null\)/);
+	assert.match(hook, /\[endpoint\.key, endpoint\.nodeId, version, reason, caller === null\]/, 'a new version reads again');
+	assert.equal(sampleVersion(0, null), '0:');
+	assert.notEqual(sampleVersion(0, null), sampleVersion(0, 2), 'a store found empty and filled from outside');
+	assert.equal(skipReason(true, { health: { collection_exists: false } } as never, readStats({ ...fixture('stats_pgvector'), documents: 2, chunks: 6 })), null, 'and the skip lifts once the stats count documents');
 });

@@ -25,9 +25,12 @@
 // Two reads when a drawer or the Details panel opens: the first document
 // the store lists (`list_documents {limit: 1}`) and its first chunks
 // (`chunks {limit: 3}`). Only a store that may hold documents is asked.
-// The answer is kept per connection in memory until the console writes to the
-// store (the documents may have changed) or the identity changes, so closing
-// and opening the drawer asks nothing again.
+// A sample is kept per connection in memory until the console writes to the
+// store, the store's document count changes (an upload or a seed from outside,
+// seen when the console refreshes) or the identity changes, so closing and
+// opening the drawer asks nothing again. An empty answer (the store listed no
+// document) is never kept: it is one cheap read, and a store found empty is the
+// one most likely to be filled next.
 // =============================================================================
 
 import { fetchChunks, fetchDocumentsPage } from '../adapters/actions';
@@ -81,9 +84,9 @@ export function skipReason(openable: boolean, dialect: IDialectResult | null, st
 }
 
 interface ICached {
-	/** The console's write count when it was read. */
-	writes: number;
-	sample: ISampleChunks | null;
+	/** What the sample was read under: see {@link sampleVersion}. */
+	version: string;
+	sample: ISampleChunks;
 }
 
 const cache = new Map<string, ICached>();
@@ -102,16 +105,28 @@ connectionCaches.register(
 );
 
 /**
- * The kept sample of a connection, when no write has happened since it was read.
+ * What a kept sample is valid for: the console's write count and the store's document count as its last stats say.
+ * A write, or a refresh that finds the store holding a different number of documents, makes a new version.
+ *
+ * @param writes - The console's write count now.
+ * @param documents - The store's document count in the console's last stats, or null.
+ * @returns The version.
+ */
+export function sampleVersion(writes: number, documents: number | null): string {
+	return `${writes}:${documents ?? ''}`;
+}
+
+/**
+ * The kept sample of a connection, when it was read under the same version.
  *
  * @param key - The connection key.
- * @param writes - The console's write count now.
- * @returns The kept answer, or undefined.
+ * @param version - {@link sampleVersion} now.
+ * @returns The kept sample, or undefined.
  */
-export function cachedSample(key: string, writes: number): ISampleChunks | null | undefined {
+export function cachedSample(key: string, version: string): ISampleChunks | undefined {
 	const kept = cache.get(key);
 	if (kept === undefined) return undefined;
-	if (kept.writes !== writes) {
+	if (kept.version !== version) {
 		cache.delete(key);
 		return undefined;
 	}
@@ -124,10 +139,10 @@ export function cachedSample(key: string, writes: number): ISampleChunks | null 
  * @param caller - The channel to the store.
  * @param nodeId - The store node.
  * @param key - The connection key.
- * @param writes - The console's write count now.
- * @returns The sample, or null when the store lists no document.
+ * @param version - {@link sampleVersion} now.
+ * @returns The sample, or null when the store lists no document (not kept).
  */
-export async function loadSampleChunks(caller: IVectorCaller, nodeId: string, key: string, writes: number): Promise<ISampleChunks | null> {
+export async function loadSampleChunks(caller: IVectorCaller, nodeId: string, key: string, version: string): Promise<ISampleChunks | null> {
 	const started = generation;
 	const page = await fetchDocumentsPage(caller, nodeId, { cursor: null, limit: 1 });
 	const first = page.items[0];
@@ -137,6 +152,6 @@ export async function loadSampleChunks(caller: IVectorCaller, nodeId: string, ke
 		sample = { path: first.path, objectId: first.objectId, chunks: chunks.items.slice(0, SAMPLE_CHUNKS).map((c) => ({ chunkId: c.chunkId, snippet: snippetOf(c.content) })) };
 	}
 	// A reset while the two reads ran (a new identity): the answer is for the old one and is not kept.
-	if (started === generation) cache.set(key, { writes, sample });
+	if (started === generation && sample !== null) cache.set(key, { version, sample });
 	return sample;
 }
