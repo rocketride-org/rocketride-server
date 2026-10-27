@@ -1183,6 +1183,40 @@ test("B10: a document tab's write or cancel carries its origin; the console's ow
 	store.dispose();
 });
 
+test("a document tab's Restore goes through its own origin, so its result stays out of the console's slot", async () => {
+	const calls: Array<{ method: string; targets: unknown; origin: unknown }> = [];
+	const controller = {
+		getState: () => ({ directory: { rows: [] } }),
+		requestRemove: (targets: unknown, origin: unknown) => calls.push({ method: 'requestRemove', targets, origin }),
+		restore: async (targets: unknown, origin: unknown) => {
+			calls.push({ method: 'restore', targets, origin });
+		},
+	};
+	const entry = { controller, selection: { getState: () => ({ document: null }) } } as unknown as Parameters<typeof makeConsoleActions>[0];
+	const origin = documentOrigin('kestrel');
+	const known = [{ objectId: 'kestrel', path: 'C:/demo/field/kestrel_field_guide.md', chunks: 12 }];
+	const doc = makeConsoleActions(entry, { openDocument: () => undefined, showConsole: () => undefined, announce: () => undefined, origin });
+	await doc.restore?.(['kestrel'], known);
+	doc.requestRemove(['kestrel'], known);
+	assert.deepEqual(calls, [
+		{ method: 'restore', targets: known, origin },
+		{ method: 'requestRemove', targets: known, origin },
+	]);
+	calls.length = 0;
+	await makeConsoleActions(entry, { openDocument: () => undefined, showConsole: () => undefined, announce: () => undefined }).restore?.(['kestrel'], known);
+	assert.equal(calls[0].origin, 'console', "the console's own Restore keeps the console's origin");
+	// And the store files the document's result under that origin, not the console's line (B10).
+	const { store, clock } = harness();
+	store.setWritesEnabled(true);
+	store.open();
+	await clock.settle();
+	await store.restore(known, origin);
+	assert.equal(store.getState().removal.origin, origin);
+	await store.restore(known);
+	assert.equal(store.getState().removal.origin, undefined, "the console's own result carries no origin");
+	store.dispose();
+});
+
 test('B4: a probe that never answers is not waited for past REPROBE_WAIT_MS: the read goes ahead and Refresh works again', async () => {
 	let probes = 0;
 	const order: string[] = [];

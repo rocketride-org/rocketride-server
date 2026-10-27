@@ -32,8 +32,11 @@
 // before it is pressed. The results table shows rank, document, chunk, the
 // score (its scale in the column's heading, a bar where the store reports a
 // range), the status at the threshold slider and a 120-character preview,
-// with open / map / ask about this; a document's name shows it in the
-// Documents tab's drawer. The slider runs over the store's score
+// with open / map / ask; a document's name shows it in the Documents tab's
+// drawer. Every row is one line however narrow the panel (History open
+// beside it): the columns have set widths, Document and Text share what is
+// left, and each cell cuts its text with an ellipsis and keeps it whole in
+// its title; the score's scale is said once above the table. The slider runs over the store's score
 // range from the node's own setting and re-classifies the rows in place (it
 // never searches again): its line names the count of passing rows beside
 // what today's setting passes, the count is announced once each time the
@@ -72,7 +75,7 @@ import { callTool, toolChannelFor } from '../chat/toolCalls';
 import { showCompareOnMap } from '../adapters/consoleActions';
 import { DATA_BAR_TOKEN } from '../vector/colors';
 import { compareRuns, compareSentence, rowKey } from '../vector/compare';
-import { CALL_TIMEOUT_MS, DEFAULT_TOP_K, KEYWORD_FALLBACK_SENTENCE, MODEL_MISMATCH_SENTENCE, MODE_HINTS, NODE_SETTING_FIELD, NODE_SETTING_NOTE, NODE_SETTING_RANGE, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, STATUS_WORDS, TABLE_FILTERS, TABLE_FILTER_LABELS, applyHandoff, classifyAt, createCommitAnnouncer, defaultMode, fromChatLine, initialThreshold, isTableOf, keywordCaption, modeLabel, modeOptions, noResultsSentence, nodeSettingText, onGrid, questionEscape, rateLimitSentence, runCaption, runWorkbench, scopeChipText, scoreBar, scoreHeading, scoreTitle, searchExportItems, searchScope, secondsLeft, showSearchOnMap, sliderRange, sliderValueText, thresholdSentence, topKChoices, topKOptions, willRunText } from '../vector/searchWorkbench';
+import { CALL_TIMEOUT_MS, DEFAULT_TOP_K, KEYWORD_FALLBACK_SENTENCE, MODEL_MISMATCH_SENTENCE, MODE_HINTS, NODE_SETTING_FIELD, NODE_SETTING_NOTE, NODE_SETTING_RANGE, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, STATUS_SHORT, STATUS_WORDS, TABLE_FILTERS, TABLE_FILTER_LABELS, applyHandoff, classifyAt, createCommitAnnouncer, defaultMode, fromChatLine, initialThreshold, isTableOf, keywordCaption, modeLabel, modeOptions, noResultsSentence, nodeSettingText, onGrid, questionEscape, rateLimitSentence, runCaption, runWorkbench, scopeChipText, scoreBar, scoreHeading, scoreTitle, searchExportItems, searchScope, secondsLeft, showSearchOnMap, sliderRange, sliderValueText, statusLegend, thresholdSentence, topKChoices, topKOptions, willRunText } from '../vector/searchWorkbench';
 import type { ChatPrefill, Classification, ModeOption, SearchHandoff, SearchMode, SliderRange, TableFilter, WorkbenchDeps, WorkbenchOutcome, WorkbenchRow, WorkbenchRun } from '../vector/searchWorkbench';
 import { compareRecord, searchRecord } from '../vector/queryHistory';
 import type { QueryRunRecord } from '../vector/queryHistory';
@@ -96,6 +99,7 @@ const S = {
 	root: { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--rr-text-primary)' } as CSSProperties,
 	head: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } as CSSProperties,
 	note: { margin: 0, fontSize: 12, color: 'var(--rr-text-primary)' } as CSSProperties,
+	statusLine: { margin: 0, fontSize: 12, color: 'var(--rr-text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
 	form: { display: 'flex', flexDirection: 'column', gap: 6 } as CSSProperties,
 	row: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } as CSSProperties,
 	input: { flex: '1 1 200px', minWidth: 0, fontSize: 13, padding: '5px 8px', borderRadius: 4, border: '1px solid var(--rr-border-input)', background: 'var(--rr-bg-input)', color: 'var(--rr-text-primary)', fontFamily: 'inherit' } as CSSProperties,
@@ -108,17 +112,15 @@ const S = {
 	off: { opacity: 0.55, cursor: 'not-allowed' } as CSSProperties,
 	chip: { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 8px', border: '1px solid var(--rr-border)', borderRadius: 10, overflowWrap: 'anywhere' } as CSSProperties,
 	scroll: { overflowX: 'auto' } as CSSProperties,
-	table: { width: '100%', borderCollapse: 'collapse', marginTop: 4 } as CSSProperties,
+	table: { width: '100%', borderCollapse: 'collapse', marginTop: 4, tableLayout: 'fixed' } as CSSProperties,
 	caption: { textAlign: 'left', color: 'var(--rr-text-primary)', padding: '2px 0' } as CSSProperties,
 	th: { textAlign: 'left', fontWeight: 600, color: 'var(--rr-text-primary)', padding: '2px 4px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'bottom' } as CSSProperties,
-	td: { padding: '3px 4px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'top' } as CSSProperties,
-	nowrap: { whiteSpace: 'nowrap' } as CSSProperties,
-	link: { background: 'none', border: 'none', padding: 0, margin: 0, font: 'inherit', color: 'inherit', textAlign: 'left', textDecoration: 'underline', cursor: 'pointer' } as CSSProperties,
-	path: { display: 'block', maxWidth: 260, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
-	text: { display: 'block', maxWidth: 360, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
-	meta: { display: 'block', fontWeight: 400, color: 'var(--rr-text-primary)' } as CSSProperties,
-	actions: { display: 'flex', gap: 4, flexWrap: 'nowrap' } as CSSProperties,
-	barTrack: { display: 'block', width: 64, height: 6, marginTop: 2 } as CSSProperties,
+	td: { padding: '3px 4px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'top', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
+	link: { background: 'none', border: 'none', padding: 0, margin: 0, font: 'inherit', color: 'inherit', textAlign: 'left', textDecoration: 'underline', cursor: 'pointer', display: 'block', maxWidth: '100%' } as CSSProperties,
+	path: { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
+	text: { display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
+	actions: { display: 'flex', gap: 4, flexWrap: 'wrap' } as CSSProperties,
+	barTrack: { display: 'inline-block', width: 48, height: 6, marginLeft: 6, verticalAlign: 'middle' } as CSSProperties,
 	bar: { display: 'block', height: '100%', minWidth: 2, background: `var(${DATA_BAR_TOKEN})`, boxShadow: 'inset 0 0 0 1px var(--rr-text-primary)' } as CSSProperties,
 	threshold: { display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' } as CSSProperties,
 	thresholdLeft: { flex: '1 1 260px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 } as CSSProperties,
@@ -242,7 +244,15 @@ function fusedFrom(row: WorkbenchRow): string | null {
 export function SearchResults({ run, view, score, range, onThreshold, onCommit, onCopySetting, copied, onOpen, onMap, onAsk, canAsk, askReason = null, onShowAll, scopeOn = false, onShowDocument }: SearchResultsProps): React.ReactElement {
 	const fromChat = fromChatLine(run, scopeOn);
 	const heading = scoreHeading(score, run.rows);
-	const noBarsId = useId();
+	const scaleId = useId();
+	// The score's scale and why a row has no bar, said once above the table (the column heading stays one line).
+	const scaleLine = [heading.scale !== null ? `Score: ${heading.scale}.` : null, heading.noBars].filter((part): part is string => part !== null).join(' ');
+	// What each short status means, once above the table (the Status heading points at it). Every row has a
+	// status it names, so the line is there whenever the table is, and it is one line: the table never moves for it.
+	const legend = statusLegend(run.rows, score);
+	const legendId = useId();
+	// Hybrid lists where each row came from (its semantic and keyword ranks) in a column of its own.
+	const fused = run.modeUsed === 'hybrid';
 	return (
 		<div data-results="" data-mode-used={run.modeUsed}>
 			{fromChat !== null && (
@@ -270,17 +280,34 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 					)}
 					{!canAsk && askReason !== null && (
 						<p style={S.note} data-ask-off="">
-							{`"Ask about this" is off: ${askReason}`}
+							{`"ask" is off: ${askReason}`}
 						</p>
 					)}
-					{heading.noBars !== null && (
-						<p style={S.note} id={noBarsId}>
-							{heading.noBars}
+					{scaleLine !== '' && (
+						<p style={S.note} id={scaleId} data-score-scale="">
+							{scaleLine}
 						</p>
 					)}
+					<p style={S.statusLine} id={legendId} data-status-legend="" title={legend ?? undefined}>
+						{legend}
+					</p>
 					<div style={S.scroll}>
 						<table style={S.table}>
 							<caption style={S.caption}>{runCaption(run)}</caption>
+							<colgroup>
+								<col style={{ width: 32 }} />
+								<col />
+								{/* "#123 · cited" fits; "semantic #1 · keyword #1" fits Found by (two-digit ranks are cut, whole in the title). */}
+								<col style={{ width: 72 }} />
+								<col style={{ width: 104 }} />
+								<col style={{ width: 96 }} />
+								{fused && <col style={{ width: 144 }} />}
+								<col />
+								{/* open, map and ask: 125 px at the table's 12 px in Figtree, with room for a focus ring and a wider
+								    fallback font. In em, so it grows with text-only zoom; where it cannot (Chrome's minimum font
+								    size does not scale em), the buttons wrap in the cell rather than being cut. */}
+								<col style={{ width: '12em' }} />
+							</colgroup>
 							<thead>
 								<tr>
 									<th scope="col" style={S.th}>
@@ -292,13 +319,17 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 									<th scope="col" style={S.th}>
 										Chunk
 									</th>
-									<th scope="col" style={S.th} aria-describedby={heading.noBars !== null ? noBarsId : undefined}>
+									<th scope="col" style={S.th} aria-describedby={scaleLine !== '' ? scaleId : undefined}>
 										Score
-										{heading.scale !== null && <span style={S.meta}>{heading.scale}</span>}
 									</th>
-									<th scope="col" style={S.th}>
+									<th scope="col" style={S.th} aria-describedby={legendId}>
 										Status
 									</th>
+									{fused && (
+										<th scope="col" style={S.th}>
+											Found by
+										</th>
+									)}
 									<th scope="col" style={S.th}>
 										Text
 									</th>
@@ -312,6 +343,7 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 									const path = row.path || row.objectId;
 									const from = fusedFrom(row);
 									const bar = scoreBar(score, row.score);
+									const chunk = `#${row.chunkId}${row.cited ? ' · cited' : ''}`;
 									return (
 										<tr key={rowKey(row.key, index)} data-status={row.status} data-key={`${row.objectId}#${row.chunkId}`}>
 											<td style={S.td}>{row.rank}</td>
@@ -324,17 +356,25 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 													<span style={S.path}>{path}</span>
 												)}
 											</td>
-											<td style={{ ...S.td, ...S.nowrap }}>{`#${row.chunkId}${row.cited ? ' · cited' : ''}`}</td>
-											<td style={{ ...S.td, ...S.nowrap }} title={scoreTitle(row, score)}>
+											<td style={S.td} title={chunk}>
+												{chunk}
+											</td>
+											<td style={S.td} title={scoreTitle(row, score)}>
 												{row.score !== null ? row.score.toFixed(3) : 'match'}
 												{bar !== null && (
 													<span aria-hidden="true" style={S.barTrack} data-bar={bar.toFixed(2)}>
 														<span style={{ ...S.bar, width: `${Math.round(bar * 100)}%` }} />
 													</span>
 												)}
-												{from !== null && <span style={S.meta}>{from}</span>}
 											</td>
-											<td style={S.td}>{STATUS_WORDS[row.status]}</td>
+											<td style={S.td} title={STATUS_WORDS[row.status]}>
+												{STATUS_SHORT[row.status]}
+											</td>
+											{fused && (
+												<td style={S.td} title={from ?? undefined}>
+													{from ?? ''}
+												</td>
+											)}
 											<td style={S.td} title={row.preview}>
 												<span style={S.text}>{row.preview}</span>
 											</td>
@@ -356,7 +396,7 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 															if (canAsk) onAsk(row);
 														}}
 													>
-														ask about this
+														ask
 													</button>
 												</span>
 											</td>

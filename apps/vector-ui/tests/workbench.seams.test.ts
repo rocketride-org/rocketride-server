@@ -291,13 +291,16 @@ test('the history keeps the first 200 characters of a question and says so; it c
 	history.record('k', { ...RUN, question: 'water', at: 1, results: 7 });
 	const first = entries.get()[0];
 	history.togglePin('k', first.id);
-	history.record('k', { ...RUN, question: 'water', at: 2, results: 3, topK: 25 });
-	assert.equal(entries.get().length, 1, 'the same kind and question run again is the same entry, run again');
-	assert.deepEqual([entries.get()[0].id, entries.get()[0].pinned, entries.get()[0].kind, entries.get()[0].results, entries.get()[0].topK, entries.get()[0].at], [first.id, true, 'semantic', 3, 25, 2], 'it keeps its id and pin and takes the new run');
+	history.record('k', { ...RUN, question: 'water', at: 2, results: 3 });
+	assert.equal(entries.get().length, 1, 'the same kind, question and top-k run again is the same entry, run again');
+	assert.deepEqual([entries.get()[0].id, entries.get()[0].pinned, entries.get()[0].kind, entries.get()[0].results, entries.get()[0].topK, entries.get()[0].at], [first.id, true, 'semantic', 3, RUN.topK, 2], 'it keeps its id and pin and takes the new run');
+	history.record('k', { ...RUN, question: 'water', at: 3, results: 3, topK: 25 });
+	assert.deepEqual(entries.get().map((e) => [e.topK, e.pinned === true]), [[25, false], [RUN.topK, true]], 'another top-k is a new entry; the pinned one keeps its k');
+	history.remove('k', entries.get()[0].id);
 	assert.equal(entries.get()[0].truncated, undefined, 'a short question is whole');
 	// DA-R1 I2: another kind of run of the same words is its own entry; the pinned one keeps its mode and k.
 	history.record('k', { ...RUN, question: 'water', kind: 'ask', topK: null, at: 3, results: 2 });
-	assert.deepEqual(entries.get().map((e) => [e.kind, e.topK, e.pinned === true]), [['ask', null, false], ['semantic', 25, true]]);
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.topK, e.pinned === true]), [['ask', null, false], ['semantic', RUN.topK, true]]);
 });
 
 test("a Compare is its own entry beside a Search of the same A and is one with its pair (another B is a new entry); it keeps its B when a Search of it follows; nothing changes while recording is off", () => {

@@ -98,10 +98,10 @@ test('a run of the same kind that repeats the newest entry\'s whole question is 
 	const [first] = history.entries('k').get();
 	assert.deepEqual(added, { id: first.id, again: false });
 	history.togglePin('k', first.id);
-	assert.deepEqual(history.record('k', searchRecord({ question: 'water', mode: 'semantic', topK: 25, results: 2 }, 2, 1)), { id: first.id, again: true }, 'the same kind and question: run again');
+	assert.deepEqual(history.record('k', searchRecord({ question: 'water', mode: 'semantic', topK: 10, results: 2 }, 2, 1)), { id: first.id, again: true }, 'the same kind, question and k: run again');
 	const after = history.entries('k').get();
 	assert.equal(after.length, 1, 'no entry added');
-	assert.deepEqual([after[0].id, after[0].pinned, after[0].kind, after[0].topK, after[0].results], [first.id, true, 'semantic', 25, 2], 'its id and pin kept, the run\'s facts taken');
+	assert.deepEqual([after[0].id, after[0].pinned, after[0].kind, after[0].topK, after[0].results], [first.id, true, 'semantic', 10, 2], 'its id and pin kept, the run\'s facts taken');
 	assert.equal(history.record('k', searchRecord({ question: 'water', mode: 'keyword', topK: 10, results: 1 }, 3, 1))?.again, false, 'another kind of run is its own entry');
 	assert.equal(history.record('k', searchRecord({ question: 'falcon', mode: 'keyword', topK: 10, results: 1 }, 4, 1))?.again, false, 'another question adds an entry');
 	assert.equal(history.record('k', searchRecord({ question: 'water', mode: 'semantic', topK: 10, results: 1 }, 5, 1))?.again, false, 'only the newest entry can be run again');
@@ -111,6 +111,36 @@ test('a run of the same kind that repeats the newest entry\'s whole question is 
 	assert.equal(history.record('k', searchRecord({ question: long, mode: 'semantic', topK: 10, results: 1 }, 7, 1))?.again, false, 'a cut entry never takes a run');
 	history.setRecording('k', false);
 	assert.equal(history.record('k', searchRecord({ question: 'water', mode: 'semantic', topK: 10, results: 1 }, 8, 1)), null, 'recording off: nothing recorded');
+});
+
+test('"Ran again" only for the same run (live N1): the same kind (the Search mode), question and top-k; another mode or k is a new entry, also after a reload', () => {
+	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+	// The live round's sequence: one question in Keyword, then Hybrid, then Auto, is three entries.
+	for (const mode of ['keyword', 'hybrid', 'auto'] as const) assert.equal(history.record('k', searchRecord({ question: 'vacation days', mode, topK: 10, results: 3 }, 1, 1))?.again, false, mode);
+	assert.deepEqual(history.entries('k').get().map((e) => e.kind), ['auto', 'hybrid', 'keyword']);
+	// Another k: a new entry, and the one before it keeps its k.
+	assert.equal(history.record('k', searchRecord({ question: 'vacation days', mode: 'auto', topK: 25, results: 9 }, 2, 1))?.again, false, 'another k');
+	assert.deepEqual(history.entries('k').get().slice(0, 2).map((e) => [e.kind, e.topK]), [['auto', 25], ['auto', 10]]);
+	// The same mode, question and k: run again.
+	const again = history.record('k', searchRecord({ question: 'vacation days', mode: 'auto', topK: 25, results: 8 }, 3, 1));
+	assert.deepEqual(again, { id: history.entries('k').get()[0].id, again: true });
+	assert.equal(history.entries('k').get().length, 4, 'keyword, hybrid, auto at 10, auto at 25');
+	// Back to the first k after it: a new entry again (the kind's other tag), never the 25 one overwritten.
+	assert.equal(history.record('k', searchRecord({ question: 'vacation days', mode: 'auto', topK: 10, results: 3 }, 4, 1))?.again, false);
+	assert.deepEqual(history.entries('k').get().slice(0, 2).map((e) => e.topK), [10, 25]);
+	// Ask has no k: the same question asked again is run again.
+	history.record('k', askRecord(turn({ question: 'why?', askedAt: 5, answeredAt: 6, answer: { sources: [] } as never })) as never);
+	assert.equal(history.record('k', askRecord(turn({ question: 'why?', askedAt: 7, answeredAt: 8, answer: { sources: [{}] } as never })) as never)?.again, true);
+
+	// After a reload the stored k (and tag) still tell: the same k is run again, another k is new.
+	const store = makeVectorHistory(0);
+	const detach = store.attachPrefs({ getPref: () => undefined, setPref: () => undefined }, 'owner-1');
+	persistedQueryHistory(store, APP_HISTORY_NOTE).record('k', searchRecord({ question: 'water', mode: 'semantic', topK: 10, results: 4 }, 1, 1));
+	const reloaded = persistedQueryHistory(store, APP_HISTORY_NOTE);
+	assert.equal(reloaded.record('k', searchRecord({ question: 'water', mode: 'semantic', topK: 10, results: 5 }, 2, 1))?.again, true);
+	assert.equal(reloaded.record('k', searchRecord({ question: 'water', mode: 'semantic', topK: 50, results: 5 }, 3, 1))?.again, false);
+	assert.deepEqual(reloaded.entries('k').get().map((e) => [e.question, e.topK]), [['water', 50], ['water', 10]], 'shown without a tag');
+	detach();
 });
 
 test('runs of different kinds never merge (DA-R1 I2): a pinned Semantic entry survives an Ask of the same words, a Search and a Compare with that A stay two, and a Search after a Compare keeps its B', () => {
@@ -145,8 +175,8 @@ test('a Compare is one with its pair (DA-R1 F1): the same A with another B is a 
 	assert.equal(history.record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 1, 1))?.again, false);
 	assert.equal(history.record('k', compareRecord({ a: 'water', b: 'rivers', topK: 10, shared: 2 }, 2, 1))?.again, false, 'another B: not run again');
 	assert.deepEqual(history.entries('k').get().map((e) => [e.question, e.compareWith]), [['water', 'rivers'], ['water', 'wells']], 'two pairs, two entries, both B kept');
-	assert.deepEqual(history.record('k', compareRecord({ a: 'water', b: 'rivers', topK: 25, shared: 4 }, 3, 1)), { id: history.entries('k').get()[0].id, again: true }, 'the same pair: run again');
-	assert.deepEqual(history.entries('k').get().map((e) => [e.compareWith, e.topK, e.results]), [['rivers', 25, 4], ['wells', 10, 3]], 'the same pair run again: one entry, the new run');
+	assert.deepEqual(history.record('k', compareRecord({ a: 'water', b: 'rivers', topK: 10, shared: 4 }, 3, 1)), { id: history.entries('k').get()[0].id, again: true }, 'the same pair and k: run again');
+	assert.deepEqual(history.entries('k').get().map((e) => [e.compareWith, e.topK, e.results]), [['rivers', 10, 4], ['wells', 10, 3]], 'the same pair run again: one entry, the new run');
 	history.record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 4, 1));
 	assert.deepEqual(history.entries('k').get().map((e) => e.compareWith), ['wells', 'rivers', 'wells'], 'a third pair after it is new again (only the newest entry can merge)');
 
@@ -187,6 +217,61 @@ test('the workspace file holds each question with its kind\'s four-character tag
 	assert.equal(questionOf('hybrid', hybrid.question), long.slice(0, 200));
 	assert.equal(questionOf('semantic', 'an entry written before the tags'), 'an entry written before the tags', 'read as it is');
 	assert.equal(storedText('ask', 'why?'), 'ask␟why?');
+});
+
+test('APP_HISTORY_NOTE names everything the workspace file holds (DA-CLAIMS C-2): a preference or entry field saved but not named in the note fails', () => {
+	// What each saved preference and entry field is, and the words of the note that name it.
+	const NAMED: Readonly<Record<string, RegExp>> = {
+		'(connection)': /^Saved in your workspace file, for each connection: /,
+		'vector.historyRecording': /whether recording is on/,
+		'vector.history': /while it is, /,
+		question: /the first 200 characters of each question/,
+		truncated: /the first 200 characters/,
+		kind: /tagged with its kind \(a Search and its mode, a Compare or an Ask\)/,
+		limit: /its top-k/,
+		at: /when it ran/,
+		ms: /how long it took/,
+		outcome: /its result count or error/,
+		rows: /result count/,
+		error: /or error/,
+		pinned: /its pin\b/,
+		note: /and note\b/,
+	};
+	// Saved, but nothing the note need name: an entry's id is when it ran (named) and a random number.
+	const UNNAMED = new Set(['id']);
+	const writes: Array<[string, unknown]> = [];
+	const store = makeVectorHistory(0);
+	const detach = store.attachPrefs({ getPref: () => undefined, setPref: (key, value) => writes.push([key, value]) }, 'owner-1');
+	const history = persistedQueryHistory(store, APP_HISTORY_NOTE);
+	// Every kind of entry, and every optional field set at least once.
+	history.record('k', searchRecord({ question: 'x'.repeat(300), mode: 'semantic', topK: 10, results: 4 }, 1, 2));
+	history.record('other', searchRecord({ question: 'water', mode: 'hybrid', topK: 25, results: null, error: 'The store refused the search: x' }, 3, 4));
+	history.record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 5, 6));
+	history.record('k', askRecord(turn({ question: 'why?', askedAt: 7, answeredAt: 8, answer: { sources: [{}] } as never })) as never);
+	const [newest] = history.entries('k').get();
+	history.togglePin('k', newest.id);
+	history.setNote('k', newest.id, 'a note');
+	history.setRecording('k', false);
+	history.setRecording('k', true);
+	store.flush();
+	detach();
+	const fields = new Set<string>();
+	for (const [key, value] of writes) {
+		fields.add(key);
+		// Both preferences are kept per connection (keyed by it).
+		assert.ok(Object.keys(value as object).every((connection) => ['k', 'other'].includes(connection)), key);
+		fields.add('(connection)');
+		if (key !== 'vector.history') continue;
+		for (const entries of Object.values(value as Record<string, Array<Record<string, unknown>>>)) for (const entry of entries) for (const field of Object.keys(entry)) fields.add(field);
+	}
+	for (const field of ['(connection)', 'vector.historyRecording', 'vector.history', 'question', 'truncated', 'kind', 'limit', 'at', 'ms', 'outcome', 'rows', 'error', 'pinned', 'note']) assert.ok(fields.has(field), `the run saves ${field} (the test covers it)`);
+	for (const field of fields) {
+		if (UNNAMED.has(field)) continue;
+		assert.ok(NAMED[field] !== undefined, `${field} is saved but the note does not name it`);
+		assert.match(APP_HISTORY_NOTE, NAMED[field], `the note names ${field}`);
+	}
+	assert.match(APP_HISTORY_NOTE, /Never the answers or results, the threshold, the scope, the table filter or a Compare's question B\.$/);
+	assert.doesNotMatch(JSON.stringify(writes), /wells/, 'question B is not saved');
 });
 
 test('records: a Search run per mode, a Compare once with B beside A and the results both found, an Ask question once its answer ended', () => {

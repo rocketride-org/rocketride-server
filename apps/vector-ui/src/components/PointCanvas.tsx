@@ -82,7 +82,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointCanvasProps as ContractPointCanvasProps, MapLayout } from '../contract/types';
-import { boundsOf, cameraSignature, dollyCamera, fitCamera, fitCamera3D, orbitCamera, panBy, projectToScreen, viewMatrix, zoomAt } from '../map/camera';
+import { boundsOf, cameraSignature, dollyCamera, fitCamera, fitCamera3D, orbitCamera, panBy, projectToScreen, resizeCamera, viewMatrix, zoomAt } from '../map/camera';
 import type { ICamera2D, IViewport, MapCamera } from '../map/camera';
 import { recallCamera, rememberCamera } from '../map/cameraMemory';
 import { opaqueOver, parseColor } from '../map/contrast';
@@ -92,7 +92,7 @@ import { NO_HOVER, countsAsSlowEdges, createFrameStats, createGesture, hoverHold
 import type { IHoverHold } from '../map/interaction';
 import type { KeyAction } from '../map/interaction';
 import { lassoSelect, simplifyPath } from '../map/lasso';
-import { buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, extrasDataset, fadedEdgeColours, overlayDataset, strokeEdgePaths } from '../map/overlay';
+import { buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, edgeWidth, extrasDataset, fadedEdgeColours, overlayDataset, strokeEdgePaths } from '../map/overlay';
 import type { IClusterLabel, IExtrasDrawn, IOverlayDrawn, IOverlayModel, IPlace } from '../map/overlay';
 import { buildScreenIndex, nearestInSector, pickNearest } from '../map/picking';
 import type { IScreenIndex } from '../map/picking';
@@ -174,6 +174,9 @@ export interface PointCanvasProps extends ContractPointCanvasProps {
 
 /** Labels hide below this fraction of the fitted zoom. */
 export const LABEL_MIN_ZOOM = 0.6;
+
+/** The fit's margin, CSS pixels (a resize keeps the zoom relative to this fit). */
+const FIT_PADDING = 28;
 
 /** A frame slower than this counts towards dropping edges. */
 const SLOW_FRAME_MS = 33;
@@ -328,7 +331,7 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 		if (p.dimensions === 3) cameraRef.current = fitCamera3D(p.positions, p.hidden ?? null);
 		else {
 			const bounds = boundsOf(p.positions, 2, p.hidden ?? null);
-			cameraRef.current = bounds ? fitCamera(bounds, vp, 28) : { mode: '2d', cx: 0, cy: 0, scale: 1 };
+			cameraRef.current = bounds ? fitCamera(bounds, vp, FIT_PADDING) : { mode: '2d', cx: 0, cy: 0, scale: 1 };
 			fitScaleRef.current = cameraRef.current.scale;
 		}
 		if (p.cameraKey) rememberCamera(p.cameraKey, cameraRef.current);
@@ -402,8 +405,8 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 			cache.segments = built.segments;
 			cache.fadedSegments = built.fadedSegments;
 			ctx.setTransform(size.dpr, 0, 0, size.dpr, 0, 0);
-			strokeEdgePaths(ctx, cache.fadedPaths, faded, 1);
-			strokeEdgePaths(ctx, cache.paths, colour, 1);
+			strokeEdgePaths(ctx, cache.fadedPaths, faded, edgeWidth(size.dpr));
+			strokeEdgePaths(ctx, cache.paths, colour, edgeWidth(size.dpr));
 		}
 		cache.edges = edges;
 		cache.positions = positions;
@@ -511,7 +514,7 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 			if (cluster !== null && clusterOf !== null) for (let i = 0; i < points.count; i += 1) if (clusterOf[i] === cluster) clusterHighlight.push(i);
 			const fitScale = fitScaleRef.current;
 			const showLabels = camera.mode === '3d' || fitScale === null || camera.scale >= LABEL_MIN_ZOOM * fitScale;
-			extras = drawExtras(ctx, { starB: p.starB ?? null, raysB: p.raysB ?? [], hoverEdges, labels: [...(p.clusterLabels ?? [])], showLabels, clusterHighlight, dimmed: dim.mask }, screenOf, placeOf, coloursRef.current.overlay);
+			extras = drawExtras(ctx, { starB: p.starB ?? null, raysB: p.raysB ?? [], hoverEdges, labels: [...(p.clusterLabels ?? [])], showLabels, clusterHighlight, dimmed: dim.mask }, screenOf, placeOf, coloursRef.current.overlay, size.dpr);
 			labelBoxesRef.current = extras.boxes;
 		}
 		const edgesDrawn = drawEdges(camera, vp, dim);
@@ -590,9 +593,11 @@ export function PointCanvas(props: PointCanvasProps): React.ReactElement {
 		if (overlayRef.current) sizeCanvas(overlayRef.current, rect.width, rect.height, dpr);
 		if (edgeRef.current) sizeCanvas(edgeRef.current, rect.width, rect.height, dpr);
 		if (cameraRef.current !== null && cameraRef.current.mode === '2d' && before.width > 0 && before.height > 0) {
-			// Keep the same layout in view when the box changes size.
-			const scale = cameraRef.current.scale * Math.min(rect.width / before.width, rect.height / before.height);
-			cameraRef.current = { ...cameraRef.current, scale: Number.isFinite(scale) && scale > 0 ? scale : cameraRef.current.scale };
+			// The same zoom relative to the fit: at fit it stays at fit, and a shrink then a grow back gives the scale back.
+			const p = propsRef.current;
+			const next = resizeCamera(cameraRef.current, boundsOf(p.positions, 2, p.hidden ?? null), before, { width: rect.width, height: rect.height }, FIT_PADDING);
+			if (fitScaleRef.current !== null) fitScaleRef.current *= next.scale / cameraRef.current.scale;
+			cameraRef.current = next;
 		}
 		requestDraw();
 	}, [requestDraw]);

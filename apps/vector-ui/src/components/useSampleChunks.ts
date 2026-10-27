@@ -35,7 +35,7 @@ import { useVectorEnv } from '../envContext';
 import { vectorCardView } from '../vector/connections';
 import { readDialect } from '../vector/results';
 import type { IStatsView } from '../vector/results';
-import { cachedSample, loadSampleChunks, skipReason } from '../vector/sampleChunks';
+import { cachedSample, loadSampleChunks, sampleVersion, skipReason } from '../vector/sampleChunks';
 import type { SampleState } from '../vector/sampleChunks';
 import { failureText } from '../vector/wording';
 
@@ -61,17 +61,19 @@ export function useSampleChunks(endpoint: IExplorerEndpoint, probe: IProbeResult
 	const reason = skipReason(vectorCardView(endpoint, probe, stats).openable, dialect, stats);
 	// The connection's own session (the anchor token): the landing has no console channels yet.
 	const caller = env.session(endpoint);
-	const stamp = `${endpoint.key}#${writes}`;
+	// What a kept sample is valid for: a write, or a refresh that finds a different document count, reads it again.
+	const version = sampleVersion(writes, stats?.documents ?? null);
+	const stamp = `${endpoint.key}#${version}`;
 	const [read, setRead] = useState<{ stamp: string; state: SampleState } | null>(null);
 	useEffect(() => {
 		if (reason !== null || caller === null) return undefined;
-		const kept = cachedSample(endpoint.key, writes);
+		const kept = cachedSample(endpoint.key, version);
 		if (kept !== undefined) {
-			setRead({ stamp, state: kept === null ? { status: 'empty' } : { status: 'done', sample: kept } });
+			setRead({ stamp, state: { status: 'done', sample: kept } });
 			return undefined;
 		}
 		let live = true;
-		loadSampleChunks(caller, endpoint.nodeId, endpoint.key, writes).then(
+		loadSampleChunks(caller, endpoint.nodeId, endpoint.key, version).then(
 			(sample) => {
 				if (live) setRead({ stamp, state: sample === null ? { status: 'empty' } : { status: 'done', sample } });
 			},
@@ -82,8 +84,8 @@ export function useSampleChunks(endpoint: IExplorerEndpoint, probe: IProbeResult
 		return () => {
 			live = false;
 		};
-		// `caller` is a fresh object each render in some mounts; the key and the write count say when to read again.
-	}, [endpoint.key, endpoint.nodeId, writes, reason, caller === null]);
+		// `caller` is a fresh object each render in some mounts; the key and the version say when to read again.
+	}, [endpoint.key, endpoint.nodeId, version, reason, caller === null]);
 	if (reason !== null) return { status: 'skipped', reason };
 	if (caller === null) return { status: 'skipped', reason: 'No source of this pipeline is running, so chunks cannot be read.' };
 	return read !== null && read.stamp === stamp ? read.state : { status: 'loading' };

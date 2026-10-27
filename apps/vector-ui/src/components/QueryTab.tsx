@@ -48,7 +48,7 @@
 // History's Load and Rerun).
 //
 // The focus never falls to <body>: when a mode change hides the focused
-// control (a result's "ask about this", "Open in Search", "Use Search"), it
+// control (a result's "ask", "Open in Search", "Use Search"), it
 // moves to the shown mode's first control (vector/queryFocus.ts).
 //
 // A result's document name asks the Documents tab to show it in its drawer

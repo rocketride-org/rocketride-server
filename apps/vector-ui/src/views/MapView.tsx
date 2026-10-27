@@ -103,7 +103,7 @@ import type { ISampleScope, IScopeAttempt } from '../map/model';
 import { createLatestQueue } from '../map/neighbours';
 import { EDGE_BUCKETS, edgeColours } from '../map/overlay';
 import type { IClusterLabel, IDuplicateRing, IOverlayEnd, IPlace } from '../map/overlay';
-import { centroidStar, chatQueryPlan, comparePlan, placeProjected, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject, withSampleRetry } from '../map/queryProjection';
+import { centroidStar, chatQueryPlan, comparePlan, onSample, placeCompared, placeProjected, projectOn, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject } from '../map/queryProjection';
 import type { IStar } from '../map/queryProjection';
 import { polarityOf } from '../map/recommend';
 import { pairLabel, pairScale, stagedAnnouncement } from '../map/reviewWording';
@@ -113,7 +113,7 @@ import { FALLBACK_PALETTE, readPalette } from '../map/tokens';
 import type { IMapPalette } from '../map/tokens';
 import { createLayoutClient } from '../map/workerClient';
 import type { ILayoutClient } from '../map/workerClient';
-import { BUSY, CENTROID_APPROX, CLUSTERS_UNSUPPORTED, EDGES_DEGRADED, EDGES_LIGHT_LIMIT, EDGES_LIGHT_NOTE, LAYOUT_CANCELLED, LAYOUT_NOT_BETTER, LIGHT_POSITIONS, MAP_UNAVAILABLE, QUERY_NEEDS_EMBED, QUERY_PLACED_APPROX, clusterAnnouncement, edgeLegend, listingNote, mapFailure, num, pointAnnouncement, sampleLabel, SCOPE_RETRY, scopeLine } from '../map/wording';
+import { BUSY, CENTROID_APPROX, CLUSTERS_UNSUPPORTED, EDGES_DEGRADED, EDGES_LIGHT_LIMIT, EDGES_LIGHT_NOTE, LAYOUT_CANCELLED, LAYOUT_NOT_BETTER, LIGHT_POSITIONS, MAP_UNAVAILABLE, QUERY_NEEDS_EMBED, QUERY_PLACED_APPROX, QUERY_SAMPLE_CHANGED, STAR_B_NEEDS_PROJECT, STAR_B_SAMPLE_CHANGED, clusterAnnouncement, edgeLegend, failedLine, listingNote, mapFailure, num, pointAnnouncement, sampleLabel, SCOPE_RETRY, scopeLine, starBNotPlaced, statusNotice } from '../map/wording';
 import { heatScores } from '../vector/heat';
 
 /** How many writes the console ran on the store (the connection's write count). */
@@ -748,11 +748,13 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		setIsolated(null);
 		setEdgesDegraded(false);
 		setMatrixItem(null);
+		// Star B goes with every new sample, even one drawn again for the query (its place is in the old basis);
+		// the next showing places it on this one.
+		setQueryBView(null);
+		queryVectorB.current = null;
 		if (!keepQuery) {
 			setQueryView(null);
 			queryVector.current = null;
-			setQueryBView(null);
-			queryVectorB.current = null;
 			setColourBy((by) => colourAfterQuery(by, colourBefore.current));
 		}
 	}, []);
@@ -861,7 +863,10 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const pinKeys = useCallback(
 		async (keys: VectorKey[]): Promise<IProjectItem[]> => {
 			if (channel === null || !sampleModel || keys.length === 0) return [];
-			const answer = await withSampleRetry(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, keys: keys.slice(0, limits.project_keys_max), m: PROJECT_M }, { nodeId: storeNode }), resample);
+			const placed = await projectOn(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, keys: keys.slice(0, limits.project_keys_max), m: PROJECT_M }, { nodeId: storeNode }), resample);
+			// Projected on a sample replaced meanwhile: its places are in that sample's basis, so nothing is pinned.
+			if (!onSample(placed.sampleId, selection.getState().sampleModel?.sampleId)) return [];
+			const answer = placed.answer;
 			if (!answer.ok) {
 				if (!answer.stale) setNotice(mapFailure(answer.code, answer.message));
 				return [];
@@ -1044,10 +1049,10 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		lastHighlight.current = highlight;
 		if (highlight.source === 'lasso') return;
 		if (highlight.source === 'search') {
-			// Search's Compare told the map both questions before it highlighted both result lists: a star for each.
-			const compare = comparePlan({ told: state.query, toldB: state.queryB, mapQuery: query?.text ?? null, mapQueryB: queryB?.text ?? null, embedReady });
-			if (compare.runA) void runQuery(state.query as string, false, false);
-			if (compare.runB) void runQueryB(state.queryB as string);
+			// Search's Compare told the map both questions before it highlighted both result lists: a star for each,
+			// A then B (never two `project` calls at once). A B with no star is placed again on the next showing.
+			const compare = comparePlan({ told: state.query, toldB: state.queryB, mapQuery: query?.text ?? null, mapQueryB: queryB?.item ? queryB.text : null, embedReady });
+			void placeCompared(compare, () => runQuery(state.query as string, false, false), () => runQueryB(state.queryB as string));
 			return;
 		}
 		const res = resolveKeys(highlight.keys, keyIdx, sampleModel?.pinned ?? []);
@@ -1127,10 +1132,16 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		}
 		queryVector.current = vector;
 		setBusy(BUSY.projecting);
-		const projected = model.capabilities.project === false ? null : await withSampleRetry(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M, with_similarities: true }, { nodeId: storeNode }), resample);
+		const placed = model.capabilities.project === false ? null : await projectOn(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M, with_similarities: true }, { nodeId: storeNode }), resample);
+		const projected = placed?.answer ?? null;
 		const searched = await callTool<ISearchResult>(channel, 'search', { vector, top_k: Math.min(RAYS_TOP_K, limits.top_k_max), include_below_floor: true }, { nodeId: storeNode });
 		if (connectionRef.current !== key) return;
 		setBusy(null);
+		// Projected on a sample replaced meanwhile (another basis): not drawn, and said.
+		if (!onSample(placed?.sampleId ?? null, selection.getState().sampleModel?.sampleId)) {
+			setNotice(QUERY_SAMPLE_CHANGED);
+			return;
+		}
 		const notes: string[] = [];
 		if (projected && !projected.ok) notes.push(mapFailure(projected.code, projected.message));
 		if (!searched.ok) notes.push(mapFailure(searched.code, searched.message));
@@ -1177,16 +1188,27 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		if (connectionRef.current !== key) return;
 		const vector = embedded.ok ? embedded.value.vectors[0] : undefined;
 		if (!Array.isArray(vector) || vector.length === 0) {
-			if (!embedded.ok && !embedded.stale) setNotice(mapFailure(embedded.code, embedded.message));
+			if (!embedded.ok && !embedded.stale) setNotice(starBNotPlaced(mapFailure(embedded.code, embedded.message)));
 			return;
 		}
 		queryVectorB.current = vector;
-		const projected = model.capabilities.project === false ? null : await withSampleRetry(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M }, { nodeId: storeNode }), resample);
+		const placed = model.capabilities.project === false ? null : await projectOn(sampleModel.sampleId, (id) => callTool<IProjectResult>(channel, 'project', { sample_id: id, vector, m: PROJECT_M }, { nodeId: storeNode }), resample);
+		const projected = placed?.answer ?? null;
 		const searched = await callTool<ISearchResult>(channel, 'search', { vector, top_k: Math.min(RAYS_TOP_K, limits.top_k_max), include_below_floor: true }, { nodeId: storeNode });
 		if (connectionRef.current !== key || selection.getState().queryB !== text) return;
+		// Projected on a sample replaced meanwhile (another basis): no star, and said; the next showing places it again.
+		if (!onSample(placed?.sampleId ?? null, selection.getState().sampleModel?.sampleId)) {
+			setNotice(starBNotPlaced(STAR_B_SAMPLE_CHANGED));
+			return;
+		}
 		const item = projected && projected.ok ? (projected.value.items[0] ?? null) : null;
 		const search = searched.ok ? searched.value : null;
 		setQueryBView({ text, item, sims: null, search, notes: [] });
+		if (item === null) {
+			// No star, so no rays from it: the status line says why.
+			setNotice(starBNotPlaced(projected === null ? STAR_B_NEEDS_PROJECT : !projected.ok ? mapFailure(projected.code, projected.message) : null));
+			return;
+		}
 		if (search) {
 			const current = selection.getState().sampleModel;
 			const outside = raysFromSearch(search, current ? keyIndex(current.result) : keyIdx, current?.pinned ?? []).outside;
@@ -1677,6 +1699,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const queryWhy = !model.embed.enabled && model.embed.reason ? model.embed.reason : null;
 	const toolbarReasons = [queryWhy, tsneReason].filter((line): line is string => line !== null);
 	const legendNotes = [
+		// A failure while the map is shown, whole (the status line may cut it).
+		...(sample && error ? [failedLine(error)] : []),
 		...toolbarReasons,
 		...(query?.notes ?? []),
 		...(star && !star.exact && !query?.item ? [CENTROID_APPROX] : []),
@@ -1688,8 +1712,17 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		...(listingLine ? [listingLine] : []),
 		...(sample ? [scopeLine(scopeState, scopeTarget.key ? scopeTarget : null, shownScope.drawn.key ? shownScope.drawn : null)].filter((line): line is string => line !== null) : []),
 		...(isolation ? [isolationLine(isolation.shown, isolation.n)] : []),
-		...(queryB ? [`Hollow star: "${queryB.text}" (compared on the Query tab)`] : []),
+		// Only while the hollow star is drawn.
+		...(queryB && starB ? [`Hollow star: "${queryB.text}" (compared on the Query tab)`] : []),
 	];
+	// The status line's sentence (map/wording.ts statusNotice): nothing is put between the toolbar and the map.
+	const said = statusNotice({ error, notice, savedQuery, hasSample: sample !== null });
+	const runSavedQuery = (): void => {
+		if (savedQuery === null) return;
+		setSavedQuery(null);
+		void runQuery(savedQuery);
+	};
+	const lineNotice = said && { text: said.text, failure: said.kind === 'error', action: said.kind === 'saved-query' ? { label: 'Run saved query', reason: embedReady ? null : QUERY_NEEDS_EMBED, onAction: runSavedQuery } : null };
 	const describe = (index: number): string => {
 		if (!sample) return '';
 		const doc = documentOf(sample, index);
@@ -1711,7 +1744,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			data-renderer={rendererKind}
 			data-query-state={query === null ? 'none' : query.item || query.search ? 'placed' : 'failed'}
 			data-rays={rays.length}
-			data-query-b-state={queryB === null ? 'none' : queryB.item || queryB.search ? 'placed' : 'failed'}
+			data-query-b-state={queryB === null ? 'none' : starB ? 'placed' : 'failed'}
 			data-colour-by={colourBy}
 			data-edge-mode={edges}
 			data-edges-per-point={edgesPerPoint}
@@ -1727,6 +1760,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		>
 			<MapToolbar
 				clear={nextClear !== null ? { label: CLEAR_LABELS[nextClear], onClear: clearOnce } : null}
+				notice={lineNotice}
 				limits={model.capabilities.sample_light === false ? { ...limits, sample_max_light: limits.sample_max } : limits}
 				sample={sampleModel}
 				busy={busy ?? layoutBusy}
@@ -1765,32 +1799,13 @@ export function MapView(props: MapViewProps): React.ReactElement {
 					</>
 				}
 			/>
-			{error ? (
-				<div style={{ padding: '8px 10px' }}>
-					<Banner variant="error">{error}</Banner>
-				</div>
-			) : null}
-			{notice ? <p style={{ ...MAP_STYLES.note, padding: '0 10px' }}>{notice}</p> : null}
-			{savedQuery ? (
-				<div style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '0 10px' }}>
-					<span style={MAP_STYLES.small}>This view had the query "{savedQuery}".</span>
-					<button
-						type="button"
-						style={MAP_STYLES.button}
-						disabled={!embedReady}
-						title={embedReady ? undefined : QUERY_NEEDS_EMBED}
-						onClick={() => {
-							const text = savedQuery;
-							setSavedQuery(null);
-							void runQuery(text);
-						}}
-					>
-						Run saved query
-					</button>
-				</div>
-			) : null}
 			{!sample ? (
 				<div style={{ padding: 16 }}>
+					{error ? (
+						<div style={{ marginBottom: 8 }}>
+							<Banner variant="error">{error}</Banner>
+						</div>
+					) : null}
 					{toolbarReasons.map((line) => (
 						<p key={line} style={MAP_STYLES.note}>
 							{line}
