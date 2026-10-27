@@ -428,7 +428,7 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 							)}
 						</div>
 					</div>
-					{openChunk !== null && <ChunkDrawer objectId={objectId} path={shownPath} chunk={drawerChunk} caller={caller} store={store} actions={actions} writes={model.writes} onClose={closeChunk} onOpenInReader={openInReader} onCopy={(text) => copyText(text, actions.announce)} {...(actions.useAsQuery ? { onUseAsQuery: actions.useAsQuery } : {})} />}
+					{openChunk !== null && <ChunkDrawer objectId={objectId} path={shownPath} chunk={drawerChunk} caller={caller} store={store} documentChunks={info?.chunks ?? chunks.total} maxNeighbours={model.limits.neighbors_k_max} actions={actions} writes={model.writes} onClose={closeChunk} onOpenInReader={openInReader} onCopy={(text) => copyText(text, actions.announce)} {...(actions.useAsQuery ? { onUseAsQuery: actions.useAsQuery } : {})} />}
 				</div>
 			)}
 		</div>

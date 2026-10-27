@@ -89,7 +89,7 @@ test('the document tab: Reader and Chunks; the grid has no persisted layout; cop
 
 test('the chunk drawer: neighbours on open (12, none for a trashed chunk), Escape that skips a handled event, focus back on the row', () => {
 	const drawer = code('components/ChunkDrawer.tsx');
-	assert.match(drawer, /fetchNeighbors\(caller, store, key, DRAWER_NEIGHBOURS\)/);
+	assert.match(drawer, /fetchNeighbors\(caller, store, key, asked\)/);
 	assert.match(drawer, /neighboursUnavailable\(\{ isDeleted: deleted \}\)/);
 	assert.match(drawer, /if \(event\.key !== 'Escape' \|\| event\.defaultPrevented\) return;\s*event\.preventDefault\(\);\s*onClose\(\);/);
 	assert.match(drawer, /Try again/, 'a busy store is said, with a way to ask again');

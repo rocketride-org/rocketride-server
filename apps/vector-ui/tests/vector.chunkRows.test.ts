@@ -25,7 +25,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { IChunkItem, INeighborItem } from '../src/contract/types';
-import { CELL_TEXT_CHARS, cellText, chunkRows, neighbourRows, neighboursCaption, neighboursUnavailable } from '../src/vector/chunkRows';
+import { CELL_TEXT_CHARS, DRAWER_NEIGHBOURS, cellText, chunkRows, neighbourRows, neighboursCaption, neighboursK, neighboursUnavailable } from '../src/vector/chunkRows';
 
 const chunk = (id: number, over: Partial<IChunkItem> = {}): IChunkItem => ({ chunkId: id, content: `text ${id}`, length: 6, isTable: false, tableId: 0, isDeleted: false, pointId: null, metadata: {}, ...over });
 
@@ -51,10 +51,18 @@ test('a trashed chunk has no neighbours, and says why', () => {
 	assert.match(neighboursUnavailable({ isDeleted: true }) ?? '', /trash.*skips trashed chunks/);
 });
 
-test('neighbours keep the store\'s order and mark the chunks of the same document', () => {
+test('neighbours: the document\'s own chunks are left out, the rest keep the store\'s order and are cut to 12; k covers the own chunks', () => {
 	const item = (o: string, c: number, sim: number): INeighborItem => ({ key: [o, c], sim, score: sim, below_floor: false, path: `${o}.md`, chunkId: c, preview: 'p' });
-	const rows = neighbourRows([item('a', 3, 0.9), item('b', 0, 0.8), item('a', 4, 0.7)], 'a');
-	assert.deepEqual(rows.map((r) => [r.id, r.sameDocument]), [['a#3', true], ['b#0', false], ['a#4', true]]);
-	assert.equal(neighboursCaption(rows), 'The 3 nearest chunks in the whole collection; 2 are from this document.');
-	assert.equal(neighboursCaption(rows.filter((r) => !r.sameDocument)), 'The 1 nearest chunk in the whole collection.');
+	const list = neighbourRows([item('a', 3, 0.9), item('b', 0, 0.8), item('a', 4, 0.7), item('c', 1, 0.6)], 'a');
+	assert.deepEqual(list.rows.map((r) => r.id), ['b#0', 'c#1']);
+	assert.equal(list.leftOut, 2);
+	assert.equal(neighboursCaption(list, 16), 'The 2 nearest chunks from other documents, out of the 16 nearest in the collection. 2 chunks of this document were left out.');
+	const none = neighbourRows([item('a', 3, 0.9)], 'a');
+	assert.equal(neighboursCaption(none, 12), 'None of the 12 nearest chunks the store returned is from another document. 1 chunk of this document was left out.');
+	const many = neighbourRows(Array.from({ length: 30 }, (_, i) => item('b', i, 1 - i / 100)), 'a');
+	assert.equal(many.rows.length, DRAWER_NEIGHBOURS);
+	assert.equal(neighboursK(null, 50), 12);
+	assert.equal(neighboursK(20, 50), 32);
+	assert.equal(neighboursK(500, 50), 50, 'never over the store\'s limit');
+	assert.equal(neighboursK(500, 10), 10);
 });

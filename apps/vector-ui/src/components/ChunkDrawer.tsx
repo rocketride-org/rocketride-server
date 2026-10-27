@@ -37,8 +37,8 @@ import { Banner, BxX, Button, commonStyles } from 'shell';
 import type { ConsoleActions, IChunkItem, VectorKey } from '../contract/types';
 import { fetchNeighbors } from '../adapters/actions';
 import type { IVectorCaller } from '../adapters/actions';
-import { DRAWER_NEIGHBOURS, neighbourRows, neighboursCaption, neighboursUnavailable } from '../vector/chunkRows';
-import type { INeighbourRow } from '../vector/chunkRows';
+import { neighbourRows, neighboursCaption, neighboursK, neighboursUnavailable } from '../vector/chunkRows';
+import type { INeighbourList } from '../vector/chunkRows';
 import { formatCount } from '../vector/stats';
 import { failureText } from '../vector/wording';
 import type { IFailureText } from '../vector/wording';
@@ -73,7 +73,7 @@ export function metadataText(value: unknown): string {
 	return text.length > VALUE_CHARS ? `${text.slice(0, VALUE_CHARS - 1)}…` : text;
 }
 
-type NeighboursState = { status: 'skipped'; reason: string } | { status: 'loading' } | { status: 'error'; error: IFailureText } | { status: 'done'; rows: INeighbourRow[] };
+type NeighboursState = { status: 'skipped'; reason: string } | { status: 'loading' } | { status: 'error'; error: IFailureText } | { status: 'done'; list: INeighbourList; asked: number };
 
 /** Props. */
 export interface IChunkDrawerProps {
@@ -83,6 +83,9 @@ export interface IChunkDrawerProps {
 	chunk: IChunkItem | null;
 	caller: IVectorCaller | null;
 	store: string;
+	/** The document's chunk count, when known, and the store's neighbour limit: they set how many neighbours are asked for. */
+	documentChunks: number | null;
+	maxNeighbours: number;
 	actions: Pick<ConsoleActions, 'showOnMap' | 'openDocument' | 'requestRemove' | 'announce'>;
 	writes: { enabled: boolean; reason: string | null };
 	/** Close it (the parent puts the focus back on the grid). */
@@ -101,7 +104,7 @@ export interface IChunkDrawerProps {
  * @param props - {@link IChunkDrawerProps}.
  * @returns The drawer.
  */
-export function ChunkDrawer({ objectId, path, chunk, caller, store, actions, writes, onClose, onOpenInReader, onCopy, onUseAsQuery }: IChunkDrawerProps): React.ReactElement {
+export function ChunkDrawer({ objectId, path, chunk, caller, store, documentChunks, maxNeighbours, actions, writes, onClose, onOpenInReader, onCopy, onUseAsQuery }: IChunkDrawerProps): React.ReactElement {
 	const region = useRef<HTMLElement>(null);
 	const [state, setState] = useState<NeighboursState>({ status: 'loading' });
 	const [attempt, setAttempt] = useState(0);
@@ -128,18 +131,21 @@ export function ChunkDrawer({ objectId, path, chunk, caller, store, actions, wri
 		let live = true;
 		setState({ status: 'loading' });
 		const key: VectorKey = [objectId, chunkId];
-		fetchNeighbors(caller, store, key, DRAWER_NEIGHBOURS).then(
+		const asked = neighboursK(documentChunks, maxNeighbours);
+		fetchNeighbors(caller, store, key, asked).then(
 			(answer) => {
-				if (live) setState({ status: 'done', rows: neighbourRows(answer.items, objectId) });
+				if (live) setState({ status: 'done', list: neighbourRows(answer.items, objectId), asked });
 			},
 			(error) => {
-				if (live) setState({ status: 'error', error: failureText(error) ?? { headline: 'The neighbours could not be read.' } });
+				// A request a newer one replaced says nothing (failureText is null for it).
+				const text = failureText(error);
+				if (live && text) setState({ status: 'error', error: text });
 			}
 		);
 		return () => {
 			live = false;
 		};
-	}, [caller, store, objectId, chunkId, deleted, attempt]);
+	}, [caller, store, objectId, chunkId, deleted, attempt, documentChunks, maxNeighbours]);
 
 	const keys = useCallback((): VectorKey[] => (chunkId === null ? [] : [[objectId, chunkId]]), [objectId, chunkId]);
 
@@ -210,17 +216,16 @@ export function ChunkDrawer({ objectId, path, chunk, caller, store, actions, wri
 						)}
 						{state.status === 'done' && (
 							<>
-								<p style={{ ...appStyles.small, margin: '0 0 6px' }}>{state.rows.length === 0 ? 'The store returned no neighbours for this chunk.' : neighboursCaption(state.rows)}</p>
+								<p style={{ ...appStyles.small, margin: '0 0 6px' }}>{state.list.rows.length === 0 && state.list.leftOut === 0 ? 'The store returned no neighbours for this chunk.' : neighboursCaption(state.list, state.asked)}</p>
 								<ol style={styles.list} aria-label="Nearest chunks in the collection">
-									{state.rows.map((row) => (
+									{state.list.rows.map((row) => (
 										<li key={row.id} style={styles.neighbour}>
 											<button type="button" style={styles.link} onClick={() => actions.openDocument(row.objectId, row.chunkId)}>
 												{`${row.path} #${row.chunkId}`}
 											</button>
 											<div style={appStyles.small}>
 												{`similarity ${row.similarity.toFixed(3)}`}
-												{row.sameDocument ? ' · this document' : ''}
-												{row.belowFloor ? ' · below the store\'s floor' : ''}
+																{row.belowFloor ? ' · below the store\'s floor' : ''}
 											</div>
 											{row.preview !== '' && <div style={{ ...appStyles.small, overflowWrap: 'anywhere' }}>{row.preview}</div>}
 										</li>

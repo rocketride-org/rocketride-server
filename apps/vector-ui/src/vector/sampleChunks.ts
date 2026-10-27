@@ -33,7 +33,9 @@
 import { fetchChunks, fetchDocumentsPage } from '../adapters/actions';
 import type { IVectorCaller } from '../adapters/actions';
 import { connectionCaches } from '../adapters/explorer';
+import type { IDialectResult } from '../contract/types';
 import type { IStatsView } from './results';
+import { collectionMissing } from './stats';
 
 /** How many chunks are shown. */
 export const SAMPLE_CHUNKS = 3;
@@ -64,18 +66,17 @@ export function snippetOf(content: string): string {
 }
 
 /**
- * Whether to ask the store for a sample, and if not why not.
+ * Whether to ask the store for a sample, and if not why not. A missing collection is decided by the rule the stats
+ * strip and the card flag use.
  *
  * @param openable - Whether the console can be opened (the card's `openable`).
- * @param collectionExists - What the dialect says.
+ * @param dialect - The node's dialect, or null.
  * @param stats - The console's last stats, when it has them.
  * @returns A reason to skip, or null to ask.
  */
-export function skipReason(openable: boolean, collectionExists: boolean, stats: IStatsView | null): string | null {
+export function skipReason(openable: boolean, dialect: IDialectResult | null, stats: IStatsView | null): string | null {
 	if (!openable) return 'The store cannot be read now.';
-	const statsEmpty = stats !== null && stats.collectionExists && stats.documents === 0;
-	const statsFull = stats !== null && stats.collectionExists && ((stats.documents ?? 0) > 0 || (stats.chunks ?? 0) > 0);
-	if (statsEmpty || (!collectionExists && !statsFull)) return 'The collection has no documents yet.';
+	if (collectionMissing(dialect, stats) || (stats !== null && stats.documents === 0)) return 'The collection has no documents yet.';
 	return null;
 }
 

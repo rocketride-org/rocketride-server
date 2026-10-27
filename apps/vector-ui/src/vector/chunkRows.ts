@@ -94,30 +94,52 @@ export interface INeighbourRow {
 	path: string;
 	similarity: number;
 	preview: string;
-	/** The neighbour is a chunk of the same document. */
-	sameDocument: boolean;
 	belowFloor: boolean;
 }
 
+/** The drawer's neighbours. */
+export interface INeighbourList {
+	rows: INeighbourRow[];
+	/** Chunks of the document itself that were left out. */
+	leftOut: number;
+}
+
 /**
- * The neighbours as rows, nearest first as the store ranked them, the chunks of the same document marked as such.
+ * How many neighbours to ask the store for: the rows wanted plus every chunk of the document itself (they can all be
+ * among the nearest), at most the store's limit.
+ *
+ * @param documentChunks - The document's chunk count, when known.
+ * @param max - `limits.neighbors_k_max`.
+ * @returns k.
+ */
+export function neighboursK(documentChunks: number | null, max: number): number {
+	const extra = documentChunks !== null && Number.isFinite(documentChunks) ? Math.max(0, Math.floor(documentChunks)) : 0;
+	return Math.max(1, Math.min(DRAWER_NEIGHBOURS + extra, Math.floor(max)));
+}
+
+/**
+ * The neighbours as rows, nearest first as the store ranked them: the chunks of the document itself are left out (the
+ * Chunks grid lists those) and the rest cut to {@link DRAWER_NEIGHBOURS}.
  *
  * @param items - The store's neighbours.
  * @param objectId - The document the chunk belongs to.
- * @returns The rows.
+ * @returns The rows and how many of the document's own chunks were left out.
  */
-export function neighbourRows(items: readonly INeighborItem[], objectId: string): INeighbourRow[] {
-	return items.map((item) => ({ id: `${item.key[0]}#${item.key[1]}`, objectId: item.key[0], chunkId: item.key[1], path: item.path, similarity: item.sim, preview: item.preview, sameDocument: item.key[0] === objectId, belowFloor: item.below_floor }));
+export function neighbourRows(items: readonly INeighborItem[], objectId: string): INeighbourList {
+	const others = items.filter((item) => item.key[0] !== objectId);
+	const rows = others.slice(0, DRAWER_NEIGHBOURS).map((item) => ({ id: `${item.key[0]}#${item.key[1]}`, objectId: item.key[0], chunkId: item.key[1], path: item.path, similarity: item.sim, preview: item.preview, belowFloor: item.below_floor }));
+	return { rows, leftOut: items.length - others.length };
 }
 
 /**
  * The line above the neighbours.
  *
- * @param rows - The rows.
- * @returns What they are and how many are of the same document.
+ * @param list - The rows and what was left out.
+ * @param asked - How many the store was asked for.
+ * @returns What they are, or why there are none.
  */
-export function neighboursCaption(rows: readonly INeighbourRow[]): string {
-	const same = rows.filter((r) => r.sameDocument).length;
-	const base = `The ${rows.length} nearest ${rows.length === 1 ? 'chunk' : 'chunks'} in the whole collection`;
-	return same === 0 ? `${base}.` : `${base}; ${same} ${same === 1 ? 'is' : 'are'} from this document.`;
+export function neighboursCaption(list: INeighbourList, asked: number): string {
+	const out = list.leftOut === 0 ? '' : ` ${list.leftOut} ${list.leftOut === 1 ? 'chunk' : 'chunks'} of this document ${list.leftOut === 1 ? 'was' : 'were'} left out.`;
+	if (list.rows.length === 0) return `None of the ${asked} nearest chunks the store returned is from another document.${out}`;
+	return `The ${list.rows.length} nearest ${list.rows.length === 1 ? 'chunk' : 'chunks'} from other documents, out of the ${asked} nearest in the collection.${out}`;
 }

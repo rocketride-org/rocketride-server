@@ -27,6 +27,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { sourcesSentence } from '../src/components/VectorConnectionCard';
+import type { IDialectResult } from '../src/contract/types';
 import { fieldsSummary } from '../src/vector/fields';
 import { readStats } from '../src/vector/results';
 import { SAMPLE_CHUNKS, SNIPPET_CHARS, cachedSample, loadSampleChunks, skipReason, snippetOf } from '../src/vector/sampleChunks';
@@ -41,15 +42,17 @@ test('a snippet folds whitespace and is cut to one short line', () => {
 	assert.ok(cut.endsWith('…'));
 });
 
-test('the store is asked only when it can be read and may hold documents', () => {
+test('the store is asked only when it can be read and may hold documents (the rule the strip and the card use)', () => {
+	const missing = { health: { collection_exists: false } } as unknown as IDialectResult;
+	const present = { health: { collection_exists: true } } as unknown as IDialectResult;
 	const full = readStats({ ...fixture('stats_pgvector'), documents: 3, chunks: 9 });
 	const empty = readStats({ ...fixture('stats_pgvector'), documents: 0, chunks: 0 });
-	assert.match(skipReason(false, true, null) ?? '', /cannot be read/);
-	assert.match(skipReason(true, false, null) ?? '', /no documents yet/, 'the dialect says no collection');
-	assert.match(skipReason(true, true, empty) ?? '', /no documents yet/, 'the stats count none');
-	assert.equal(skipReason(true, true, null), null);
-	assert.equal(skipReason(true, true, full), null);
-	assert.equal(skipReason(true, false, full), null, 'fresh stats win over a dialect that still says no collection');
+	assert.match(skipReason(false, present, null) ?? '', /cannot be read/);
+	assert.match(skipReason(true, missing, null) ?? '', /no documents yet/, 'the dialect says no collection');
+	assert.match(skipReason(true, present, empty) ?? '', /no documents yet/, 'the stats count none');
+	assert.equal(skipReason(true, present, null), null);
+	assert.equal(skipReason(true, present, full), null);
+	assert.equal(skipReason(true, missing, full), null, 'fresh stats win over a dialect that still says no collection');
 });
 
 test('two reads: the first document and its first chunks; the answer is kept until a write', async () => {

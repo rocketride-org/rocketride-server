@@ -45,6 +45,7 @@ import { sharedTableSentence } from './confirm';
 import { formatSize } from './fileType';
 import { readDialect } from './results';
 import type { IStatsView } from './results';
+import { collectionMissing } from './stats';
 import { EXPERIMENTAL_BADGE, providerTitle, supportOf } from './support';
 import { CAVEAT_SENTENCES, EMPTY, caveatSentence } from './wording';
 
@@ -173,17 +174,6 @@ export function ownerText(endpoint: IExplorerEndpoint): string {
 }
 
 /**
- * Whether the console's last stats found the collection holding something: a store found empty and filled since keeps
- * the dialect's "no collection" until it is probed again, and the stats are the fresher answer.
- *
- * @param stats - The stats, or null.
- * @returns True when they count documents or chunks.
- */
-function statsShowContent(stats: IStatsView | null): boolean {
-	return stats !== null && stats.collectionExists && ((stats.documents ?? 0) > 0 || (stats.chunks ?? 0) > 0);
-}
-
-/**
  * The flags of a card (each carries its whole message).
  *
  * @param endpoint - The endpoint.
@@ -195,7 +185,7 @@ function flagsOf(endpoint: IExplorerEndpoint, dialect: IDialectResult | null, st
 	const flags: IFlag[] = [];
 	if (endpoint.readOnly === true) flags.push({ variant: 'muted', label: 'Read-only', tooltip: `${EMPTY.readOnly}.` });
 	if (supportOf(endpoint.provider, dialect) === 'experimental') flags.push({ variant: 'warning', ...EXPERIMENTAL_BADGE });
-	if (dialect?.health.collection_exists === false && !statsShowContent(stats)) flags.push({ variant: 'muted', label: 'Empty collection', tooltip: 'The collection does not exist yet; add a document to create it.' });
+	if (collectionMissing(dialect, stats)) flags.push({ variant: 'muted', label: 'Empty collection', tooltip: 'The collection does not exist yet; add a document to create it.' });
 	if (dialect?.health.control_record === false) flags.push({ variant: 'error', label: 'Repair needed', tooltip: 'This collection has no control record, so its embedding model and dimension are not recorded.' });
 	if (dialect?.health.meta_column === false || dialect?.caveats.includes('meta_column_pending')) flags.push({ variant: 'warning', label: 'Metadata column pending', tooltip: CAVEAT_SENTENCES.meta_column_pending });
 	return flags;

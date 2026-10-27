@@ -58,9 +58,9 @@ export function useSampleChunks(endpoint: IExplorerEndpoint, probe: IProbeResult
 		() => 0
 	);
 	const dialect = probe?.ok ? readDialect(probe.info) : null;
-	const reason = skipReason(vectorCardView(endpoint, probe, stats).openable, dialect?.health.collection_exists !== false, stats);
-	const channels = env.channels(endpoint);
-	const caller = channels.tools ?? channels.chat ?? channels.ingest;
+	const reason = skipReason(vectorCardView(endpoint, probe, stats).openable, dialect, stats);
+	// The connection's own session (the anchor token): the landing has no console channels yet.
+	const caller = env.session(endpoint);
 	const stamp = `${endpoint.key}#${writes}`;
 	const [read, setRead] = useState<{ stamp: string; state: SampleState } | null>(null);
 	useEffect(() => {

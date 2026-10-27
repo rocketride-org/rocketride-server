@@ -267,11 +267,12 @@ test('the drawer: the Metric row falls back to the stats; the rows split into th
 	assert.equal(names(drawer.collection).includes('Pipeline'), false);
 });
 
-test('the card: stats that count documents override a dialect that still says the collection is missing', async () => {
+test('the card: fresh stats override a dialect that still says the collection is missing', async () => {
 	const [f] = await discover(world(projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres')), fixture('dialect_collection_missing')));
 	const labels = (stats: ReturnType<typeof readStats> | null) => vectorCardView(f.endpoint, f.probe, stats).flags.map((x) => x.label);
 	assert.deepEqual(labels(null), ['Empty collection']);
-	assert.deepEqual(labels(readStats({ ...fixture('stats_pgvector'), documents: 0, chunks: 0 })), ['Empty collection'], 'stats that count nothing do not override it');
+	assert.deepEqual(labels(readStats({ ...fixture('stats_pgvector'), documents: 0, chunks: 0 })), [], "the strip's rule: stats that say the collection exists win, even with nothing in it");
+	assert.deepEqual(labels(readStats({ ...fixture('stats_pgvector'), collection_exists: false, documents: null, chunks: null })), ['Empty collection']);
 	assert.deepEqual(labels(readStats({ ...fixture('stats_pgvector'), documents: 4, chunks: 12 })), []);
 });
 
