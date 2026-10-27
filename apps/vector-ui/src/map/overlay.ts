@@ -53,7 +53,8 @@
 //     2 dppx), so a whole pixel of each cross-section carries that colour: a
 //     1 px line at 1 dppx is spread over two pixels, each nearer the surface
 //     (the weakest bucket's median was 2.3:1 in both RocketRide themes,
-//     docs/contrast.md). In 2D the
+//     docs/contrast.md). Every line of the overlay keeps the same floor
+//     (markWidth). In 2D the
 //     paths are built in layout units once per edge set and stroked through
 //     the camera's affine transform (edgeTransform2d), so panning and zooming
 //     build nothing; in 3D they are built from the projected points. While the
@@ -210,7 +211,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 			if (any) {
 				ctx.setLineDash([4, 3]);
 				ctx.strokeStyle = fade ? fadedOutline : colours.outline;
-				ctx.lineWidth = 1.5;
+				ctx.lineWidth = markWidth(1.5, dpr);
 				ctx.stroke();
 				ctx.setLineDash([]);
 			}
@@ -241,7 +242,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		}
 		if (any) {
 			ctx.strokeStyle = colours.accent;
-			ctx.lineWidth = 1.5;
+			ctx.lineWidth = markWidth(1.5, dpr);
 			ctx.stroke();
 		}
 	}
@@ -282,7 +283,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		if (any) {
 			ctx.setLineDash(model.star?.exact === false ? [6, 3] : []);
 			ctx.strokeStyle = colours.accent;
-			ctx.lineWidth = 1.25;
+			ctx.lineWidth = markWidth(1.25, dpr);
 			ctx.stroke();
 			ctx.setLineDash([]);
 		}
@@ -295,7 +296,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		for (const p of model.hollow) any = ring(place(p), 4.5) || any;
 		if (any) {
 			ctx.strokeStyle = colours.other;
-			ctx.lineWidth = 2;
+			ctx.lineWidth = markWidth(2, dpr);
 			ctx.stroke();
 		}
 	}
@@ -308,7 +309,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		for (const i of model.outliers) if (isFaded(i)) anyFaded = ring(screen(i), 7) || anyFaded;
 		if (anyFaded) {
 			ctx.strokeStyle = fadedOutline;
-			ctx.lineWidth = 1.5;
+			ctx.lineWidth = markWidth(1.5, dpr);
 			ctx.stroke();
 		}
 		let any = false;
@@ -319,7 +320,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 			ctx.lineWidth = 4;
 			ctx.stroke();
 			ctx.strokeStyle = colours.outline;
-			ctx.lineWidth = 1.5;
+			ctx.lineWidth = markWidth(1.5, dpr);
 			ctx.stroke();
 		}
 	}
@@ -344,7 +345,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 			ctx.stroke();
 			ctx.setLineDash([3, 2]);
 			ctx.strokeStyle = colours.outline;
-			ctx.lineWidth = 1.5;
+			ctx.lineWidth = markWidth(1.5, dpr);
 			ctx.stroke();
 			ctx.setLineDash([]);
 		}
@@ -371,7 +372,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		for (const i of model.highlight) any = ring(screen(i), r) || any;
 		if (any) {
 			ctx.strokeStyle = colours.accent;
-			ctx.lineWidth = 2;
+			ctx.lineWidth = markWidth(2, dpr);
 			ctx.stroke();
 		}
 	}
@@ -404,14 +405,14 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		ctx.beginPath();
 		ring(hover, 7);
 		ctx.strokeStyle = colours.outline;
-		ctx.lineWidth = 1.5;
+		ctx.lineWidth = markWidth(1.5, dpr);
 		ctx.stroke();
 	}
 	if (from !== null) {
 		ctx.beginPath();
 		ring(from, 9);
 		ctx.strokeStyle = colours.accent;
-		ctx.lineWidth = 2.5;
+		ctx.lineWidth = markWidth(2.5, dpr);
 		ctx.stroke();
 	}
 	const focus = model.focused === null ? null : screen(model.focused);
@@ -420,7 +421,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		ring(focus, 12);
 		ctx.setLineDash([3, 2]);
 		ctx.strokeStyle = colours.accent;
-		ctx.lineWidth = 2;
+		ctx.lineWidth = markWidth(2, dpr);
 		ctx.stroke();
 		ctx.setLineDash([]);
 	}
@@ -433,7 +434,7 @@ export function drawOverlay(ctx: CanvasRenderingContext2D, model: IOverlayModel,
 		ctx.closePath();
 		ctx.setLineDash([5, 4]);
 		ctx.strokeStyle = colours.accent;
-		ctx.lineWidth = 1.5;
+		ctx.lineWidth = markWidth(1.5, dpr);
 		ctx.stroke();
 		ctx.setLineDash([]);
 	}
@@ -457,13 +458,27 @@ export const EDGE_STRONGEST = 0.8;
 export const EDGE_DEVICE_PX = 2;
 
 /**
+ * A line of the map, CSS pixels: its own width, but never under EDGE_DEVICE_PX device pixels, so a whole pixel of
+ * each cross-section carries its colour. Every mark the overlay strokes is set with it (rays, rings, the chunk
+ * path, duplicate pairs, the lasso, star B) or is heavier (the links and the hovered point's edges, linkWidth);
+ * the halos and the star's edge are the surface colour, not marks.
+ *
+ * @param css - The line's own width, CSS pixels (what a 2 dppx screen draws).
+ * @param dpr - devicePixelRatio.
+ * @returns The width in CSS pixels.
+ */
+export function markWidth(css: number, dpr: number): number {
+	return Math.max(css, EDGE_DEVICE_PX / (dpr > 0 ? dpr : 1));
+}
+
+/**
  * The similarity edges' stroke, CSS pixels: 1, wider under 2 dppx so it still spans EDGE_DEVICE_PX device pixels.
  *
  * @param dpr - devicePixelRatio.
  * @returns The width in CSS pixels (2 at 1 dppx, 1 at 2 dppx and above).
  */
 export function edgeWidth(dpr: number): number {
-	return Math.max(1, EDGE_DEVICE_PX / (dpr > 0 ? dpr : 1));
+	return markWidth(1, dpr);
 }
 
 /**
@@ -724,7 +739,7 @@ export function drawExtras(ctx: CanvasRenderingContext2D, extras: IOverlayExtras
 		}
 		if (any) {
 			ctx.strokeStyle = colours.accent;
-			ctx.lineWidth = 1.5;
+			ctx.lineWidth = markWidth(1.5, dpr);
 			ctx.stroke();
 		}
 	}
@@ -744,7 +759,7 @@ export function drawExtras(ctx: CanvasRenderingContext2D, extras: IOverlayExtras
 			if (drawn.raysB > 0) {
 				ctx.setLineDash([2, 3]);
 				ctx.strokeStyle = colours.accent;
-				ctx.lineWidth = 1.25;
+				ctx.lineWidth = markWidth(1.25, dpr);
 				ctx.stroke();
 				ctx.setLineDash([]);
 			}
@@ -762,7 +777,7 @@ export function drawExtras(ctx: CanvasRenderingContext2D, extras: IOverlayExtras
 		ctx.fillStyle = colours.surface;
 		ctx.fill();
 		ctx.strokeStyle = colours.accent;
-		ctx.lineWidth = 2;
+		ctx.lineWidth = markWidth(2, dpr);
 		ctx.stroke();
 		drawn.starB = true;
 	}

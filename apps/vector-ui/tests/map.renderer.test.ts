@@ -13,7 +13,7 @@ import { projectToScreen, viewMatrix } from '../src/map/camera';
 import { alphaOf, contrastRatio, parseColor } from '../src/map/contrast';
 import type { Rgb } from '../src/map/contrast';
 import { NO_EDGES, edgeStats, spanningTree, topEdges } from '../src/map/graph';
-import { EDGE_BUCKETS, EDGE_DEVICE_PX, buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, edgeWidth, extrasDataset, fadeColour, fadedEdgeColours, linkWidth, overlayDataset, strokeEdgePaths } from '../src/map/overlay';
+import { EDGE_BUCKETS, EDGE_DEVICE_PX, buildEdgePaths, drawExtras, drawOverlay, edgeBuckets, edgeColours, edgeTransform2d, edgeWidth, extrasDataset, fadeColour, fadedEdgeColours, linkWidth, markWidth, overlayDataset, strokeEdgePaths } from '../src/map/overlay';
 import type { IOverlayExtras, IOverlayModel } from '../src/map/overlay';
 import { createCanvas2dRenderer } from '../src/map/renderer.canvas2d';
 import { DIM, FLAG, FRAGMENT_SHADER, PASS, VERTEX_SHADER, createWebglRenderer, dimFlags, packPoints, sizeCanvas } from '../src/map/renderer.webgl';
@@ -344,6 +344,72 @@ test('edge strokes span two device pixels at any ratio, so a whole pixel of each
 	assert.ok(hover2.sets.some(([k, v]) => k === 'lineWidth' && v === 2), 'unchanged at 2 dppx');
 });
 
+/**
+ * A 2D context that records the stroke style, width and dash of every stroke.
+ *
+ * @returns The context and its strokes.
+ */
+function strokeRecorder(): { ctx: CanvasRenderingContext2D; strokes: Array<{ style: unknown; width: number; dashed: boolean }> } {
+	const strokes: Array<{ style: unknown; width: number; dashed: boolean }> = [];
+	const state: Record<string, unknown> = { lineWidth: 1, strokeStyle: '#000', dash: [] };
+	const ctx = new Proxy(state, {
+		get(target, prop: string | symbol) {
+			if (typeof prop !== 'string') return undefined;
+			if (prop === 'stroke' || prop === 'strokeText') return () => strokes.push({ style: target.strokeStyle, width: target.lineWidth as number, dashed: (target.dash as number[]).length > 0 });
+			if (prop === 'setLineDash') return (dash: number[]) => (target.dash = dash);
+			if (prop === 'measureText') return (text: string) => ({ width: text.length * 6 });
+			if (prop in target) return target[prop];
+			return () => undefined;
+		},
+		set(target, prop: string | symbol, value) {
+			if (typeof prop === 'string') target[prop] = value;
+			return true;
+		},
+	}) as unknown as CanvasRenderingContext2D;
+	return { ctx, strokes };
+}
+
+test('every line the overlay draws spans at least two device pixels at any ratio: rays, star B\'s dotted rays, rings, paths, the lasso (the halos and the star\'s edge are the surface)', () => {
+	const model: IOverlayModel = {
+		...empty(),
+		hovered: 1,
+		selected: 2,
+		focused: 3,
+		highlight: [4],
+		neighbours: [{ index: 1 }],
+		hollow: [{ x: 5, y: 5 }],
+		star: { x: 100, y: 100, exact: false },
+		rays: [{ index: 1 }, { index: 3 }],
+		chunkPath: [1, 2, 3],
+		duplicates: [[1, 2]],
+		duplicateRings: [{ a: 1, b: 2, label: 'cosine 0.99' }],
+		outliers: [4],
+		lasso: [0, 0, 50, 0, 50, 50],
+	};
+	const extras: IOverlayExtras = { ...noExtras(), starB: { x: 60, y: 60, exact: true }, raysB: [{ index: 1 }, { index: 2 }], hoverEdges: [[1, 2]], clusterHighlight: [3] };
+	const widths = (dpr: number): Array<{ style: unknown; width: number; dashed: boolean }> => {
+		const a = strokeRecorder();
+		drawOverlay(a.ctx, model, screen, place, colours, dpr);
+		drawOverlay(a.ctx, { ...model, faded: new Uint8Array(10).fill(1) }, screen, place, colours, dpr);
+		const b = strokeRecorder();
+		drawExtras(b.ctx, extras, screen, place, colours, dpr);
+		return [...a.strokes, ...b.strokes];
+	};
+	for (const dpr of [0.8, 1, 1.25, 1.5, 2, 3]) {
+		const marks = widths(dpr).filter((s) => s.style !== colours.surface);
+		assert.ok(marks.length >= 14, `${marks.length} marks`);
+		for (const mark of marks) assert.ok(mark.width * dpr >= EDGE_DEVICE_PX - 1e-9, `${dpr} dppx: a ${String(mark.style)} line of ${mark.width} px`);
+	}
+	// The query's rays (solid and dashed) and star B's dotted rays: 2 CSS px at 1 dppx, their own 1.25 at 2 dppx.
+	const rays = (dpr: number): number[] => widths(dpr).filter((s) => s.style === colours.accent && s.dashed).map((s) => s.width);
+	assert.ok(rays(1).length >= 2 && rays(1).every((w) => w === 2), 'the approximate star\'s dashed rays and star B\'s dotted rays');
+	assert.ok(rays(2).includes(1.25));
+	assert.equal(markWidth(1.25, 1), 2);
+	assert.equal(markWidth(1.25, 2), 1.25, 'unchanged on a 2 dppx screen');
+	assert.equal(markWidth(2.5, 1), 2.5, 'a heavier line keeps its width');
+	assert.equal(edgeWidth(1), markWidth(1, 1));
+});
+
 // -----------------------------------------------------------------------------
 // Extras: the second star, hover edges, cluster labels
 // -----------------------------------------------------------------------------
@@ -535,13 +601,16 @@ test('Canvas2D dimming: the faded points are drawn first, in the colour mixed to
 // The marks that cross points: halos, the star's edge, the links, duplicate rings
 // -----------------------------------------------------------------------------
 
-test('an outlier ring is stroked over a 4 px halo of the surface first, then 1.5 px in the outline colour', () => {
+test('an outlier ring is stroked over a 4 px halo of the surface first, then 1.5 px in the outline colour (2 px at 1 dppx)', () => {
 	const fake = fake2d();
-	drawOverlay(fake.ctx, { ...empty(), outliers: [1, 2] }, screen, place, colours, 1);
+	drawOverlay(fake.ctx, { ...empty(), outliers: [1, 2] }, screen, place, colours, 2);
 	const strokes = fake.calls.filter((c) => c.name === 'stroke').length;
 	assert.equal(strokes, 2);
 	const pairs = fake.sets.filter(([k]) => k === 'strokeStyle' || k === 'lineWidth').map(([k, v]) => `${k}=${String(v)}`);
 	assert.deepEqual(pairs, [`strokeStyle=${colours.surface}`, 'lineWidth=4', `strokeStyle=${colours.outline}`, 'lineWidth=1.5'], 'the halo, then the ring');
+	const one = fake2d();
+	drawOverlay(one.ctx, { ...empty(), outliers: [1, 2] }, screen, place, colours, 1);
+	assert.deepEqual(one.sets.filter(([k]) => k === 'lineWidth').map(([, v]) => v), [4, 2], 'the halo stays wider than the ring');
 });
 
 test('the star is filled with the accent and edged with the surface (as its comment says); the selected point\'s links are 1.5 px at 2 dppx, 3 at 1', () => {

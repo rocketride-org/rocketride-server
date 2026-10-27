@@ -108,6 +108,32 @@ point are half as heavy again as the edges (3 CSS px at 1 dppx, 1.5 at 2 dppx).
 At 3 px every cross-section carries the accent whole: 3.46:1 in RocketRide
 Light and 8.73:1 in RocketRide dark.
 
+Every other line of the overlay has the same floor (`markWidth`): its own
+width, but never under two device pixels. That covers the query's rays, star
+B's dotted rays, the rings, the chunk path, duplicate pairs and the lasso.
+The halos and the star's edge are the surface colour, not marks. So every
+line the map draws spans at least two device pixels at any ratio.
+
+Point outlines are the point's own ring. WebGL draws it 1 CSS px wide in
+whole pixels (no blending at its edge), so every pixel of it carries the
+outline colour. The Canvas 2D fallback strokes it 1 CSS px wide.
+
+The rays were 1.25 px. They are measured the same way, in the accent, through
+the overlay's own `drawOverlay` and `drawExtras`: 300 rays of each kind, with
+a cross-section at the middle of every dash (every tenth of a solid ray),
+away from the star.
+
+| Theme | Accent | Rays | Before: 1.25 px at 1 dppx | Now: 1 / 1.25 / 1.5 / 2 dppx |
+| --- | ---: | --- | ---: | ---: |
+| rocketride-light | 3.46 | solid (exact star) | 3.11, 42 % under | 3.46, 0-0.4 % under |
+| rocketride-light | 3.46 | dashed (approximate star) | 3.14, 42 % under | 3.46, 0-0.4 % under |
+| rocketride-light | 3.46 | dotted (star B) | 3.07, 46 % under | 3.46, 0-0.6 % under |
+| rocketride | 8.73 | solid (exact star) | 7.30, 0.9 % under | 8.73, none under |
+| rocketride | 8.73 | dashed (approximate star) | 7.31, 0.9 % under | 8.73, none under |
+| rocketride | 8.73 | dotted (star B) | 7.14, 1.1 % under | 8.73, none under |
+
+At 2 dppx the rays keep their 1.25 px (2.5 device pixels).
+
 ### Boxes over the map
 
 The tooltip and the Advanced, Export and Views panels are the paper over the
@@ -122,7 +148,7 @@ surface, with the theme's own `--rr-shadow-widget`. `--rr-border` was 1.38 /
 - **The accent** (`--rr-border-focus`: selection ring, links from the selected
   point, 3 px at 1 dppx and 1.5 px at 2 dppx, the query's star and rays, the lasso) clears 3:1
   everywhere, at 3.22:1 at worst (RocketRide Light, on the paper).
-- **Outlier rings** are `--rr-text-primary`, 1.5 px, over a 4 px halo of the
+- **Outlier rings** are `--rr-text-primary`, 1.5 px (2 px at 1 dppx), over a 4 px halo of the
   surface, so a ring reads over any point colour. The Outliers tab says
   "outlier" in words.
 - **The star** is filled with the accent and edged with the surface.
