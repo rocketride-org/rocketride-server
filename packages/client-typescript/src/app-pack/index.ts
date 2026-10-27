@@ -63,13 +63,13 @@ import { registerAppPack } from '../client/app-pack-registry.js';
 import { renderTemplate, TEMPLATE_NAMES } from '../app-scaffold/index.js';
 import type { TemplateName } from '../app-scaffold/index.js';
 import { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, readProjectId, saveAppListing } from './marker.js';
-import { appIconDataUri, MAX_ICON_BYTES, MAX_README_IMAGE_BYTES, probeAppFolder, scanAppMarkers } from './scan.js';
+import { appIconDataUri, findApp, findAppMarkers, MAX_ICON_BYTES, MAX_README_IMAGE_BYTES, probeAppFolder, scanAppMarkers } from './scan.js';
 import { ensureDependencyWiring, ensureWorkspaceFile, ensureWorkspaceGitignore, extractInstallCause, isTransientLockError, runRootInstall, vendorPlatformPackages } from './vendor.js';
 
 export { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, readProjectId, saveAppListing } from './marker.js';
 export type { AppListing } from './marker.js';
-export { appIconDataUri, MAX_ICON_BYTES, MAX_README_IMAGE_BYTES, probeAppFolder, scanAppMarkers } from './scan.js';
-export type { ScannedApp } from './scan.js';
+export { appIconDataUri, findApp, findAppMarkers, MAX_ICON_BYTES, MAX_README_IMAGE_BYTES, probeAppFolder, scanAppMarkers } from './scan.js';
+export type { AppRef, ScannedApp } from './scan.js';
 export { ensureDependencyWiring, ensureWorkspaceFile, ensureWorkspaceGitignore, extractInstallCause, isTransientLockError, runRootInstall, vendorPlatformPackages } from './vendor.js';
 export type { PlatformVendorResult, VendorLog, VendorPlatformOptions } from './vendor.js';
 
@@ -1006,6 +1006,8 @@ registerAppPack({
 	saveAppListing,
 	probeAppFolder,
 	scanAppMarkers,
+	findAppMarkers,
+	findApp,
 	appIconDataUri,
 	ensureWorkspaceFile,
 	ensureWorkspaceGitignore,

@@ -18,6 +18,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
+import { parseRegistryVersion } from 'rocketride';
 import { preflightApp } from 'rocketride/app-pack';
 import { ConnectionManager } from '../connection/connection';
 import { GenericEvent } from '../shared/types';
@@ -727,18 +728,8 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	 * @returns The validated integer registry version.
 	 */
 	private requireRegistryVersion(arg: unknown): number {
-		// Number(null) and Number('') both coerce to 0, which would pass a
-		// bare isInteger check and reach submit/publish/withdraw as version
-		// 0 — the "unspecified version" this guard exists to reject.
-		// Registry versions are positive integers (v1 is the first).
-		if (typeof arg !== 'number' && typeof arg !== 'string') {
-			throw new Error(`Invalid registry version: ${JSON.stringify(arg)}`);
-		}
-		const version = Number(arg);
-		if (!Number.isSafeInteger(version) || version <= 0) {
-			throw new Error(`Invalid registry version: ${JSON.stringify(arg)}`);
-		}
-		return version;
+		// The SDK's rule, shared with the `rocketride app` verbs
+		return parseRegistryVersion(arg);
 	}
 
 	/**

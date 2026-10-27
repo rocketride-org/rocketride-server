@@ -1785,17 +1785,18 @@ Mechanics worth knowing:
 Everything the Deploy tab does is scriptable — the UI and the SDKs call the
 same verbs (TypeScript camelCase / Python snake_case):
 
-| Action | TypeScript verb |
-|---|---|
-| List versions | `client.listDeployments(appId)` |
-| Deploy a source zip | `client.deploy.add({ kind: 'app', data, metadata })` |
-| Publish to a rung | `client.publishApp(appId, version, target)` |
-| Remove a binding | `client.removeAppPublish(appId, target)` |
-| Disable a binding | `client.disableAppPublish(appId, target)` |
-| Where live | `client.whereApp(appId)` |
-| Submit / withdraw review | `client.submitApp(...)` / `client.withdrawApp(...)` |
-| Review thread reply | `client.replyApp(appId, message)` |
-| Build log | `client.buildLog(appId, version)` |
+| Action | TypeScript verb | CLI |
+|---|---|---|
+| List versions | `client.listDeployments(appId)` | `rocketride app versions [app]` |
+| Deploy the app's source | `client.deploy.addApp(appFolder, { comment })` | `rocketride app deploy [app]` |
+| Wait for the server build | `client.waitForAppBuild(appId, version)` | (built into `app publish` / `app deploy --publish`) |
+| Publish to a rung | `client.publishApp(appId, version, target)` | `rocketride app publish [app] [version] --to <target>` |
+| Remove a binding | `client.removeAppPublish(appId, target)` | `rocketride app unpublish [app] --from <target>` |
+| Disable a binding | `client.disableAppPublish(appId, target)` | `rocketride app disable [app] --from <target>` |
+| Where live | `client.whereApp(appId)` | `rocketride app where [app]` |
+| Submit / withdraw review | `client.submitApp(...)` / `client.withdrawApp(...)` | `rocketride app submit|withdraw [app] [version]` |
+| Review thread reply | `client.replyApp(appId, message)` | `rocketride app reply [app] -m <text>` |
+| Build log | `client.buildLog(appId, version)` | `rocketride app log [app] [version]` |
 
 The Python client mirrors every verb (`publish_app`, `submit_app`,
 `where_app`, ...). See `ROCKETRIDE_typescript_API.md` and

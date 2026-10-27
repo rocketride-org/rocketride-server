@@ -149,6 +149,96 @@ export async function scanAppMarkers(markerPaths: string[]): Promise<ScannedApp[
 }
 
 // =============================================================================
+// FIND (hosts without a workspace index — the CLI)
+// =============================================================================
+
+/** Directories a marker walk never descends into. */
+const WALK_SKIP = new Set(['node_modules', '.git', 'dist', '.rocketride']);
+
+/**
+ * Finds every `.rrapp` marker under a workspace with a plain file-system
+ * walk — the CLI's stand-in for an editor's workspace index. Skips
+ * dependency trees, build output, VCS data, and vendored platform files.
+ *
+ * @param workspaceRoot - The folder to search.
+ * @param maxDepth - How deep to descend (default 6 — apps live at apps/<name>).
+ * @returns Absolute marker paths.
+ */
+export function findAppMarkers(workspaceRoot: string, maxDepth = 6): string[] {
+	const markers: string[] = [];
+	const walk = (dir: string, depth: number): void => {
+		let entries: fs.Dirent[];
+		try {
+			entries = fs.readdirSync(dir, { withFileTypes: true });
+		} catch {
+			return;
+		}
+		for (const entry of entries) {
+			const abs = path.join(dir, entry.name);
+			if (entry.isDirectory()) {
+				if (depth < maxDepth && !WALK_SKIP.has(entry.name)) walk(abs, depth + 1);
+			} else if (entry.isFile() && entry.name.endsWith('.rrapp')) {
+				markers.push(abs);
+			}
+		}
+	};
+	walk(path.resolve(workspaceRoot), 0);
+	return markers;
+}
+
+/** What an app argument resolved to. */
+export interface AppRef {
+	/** The app id (`<developerId>.<name>`). */
+	appId: string;
+	/** The local working copy, when there is one (absent for a server-only id). */
+	app?: ScannedApp;
+}
+
+/** Full app-id grammar — an id that may exist only on the server. */
+const FULL_APP_ID_RE = /^[a-z][a-z_]*\.[a-z][a-zA-Z0-9_-]*$/;
+
+/**
+ * Resolves what a person typed to name an app:
+ *
+ * - nothing: the current directory must be an app folder;
+ * - a path to an app folder;
+ * - an app id (`personal.clock`), its name part (`clock`), or its folder
+ *   name (`clock-ui`), matched against the workspace's working copies;
+ * - a full app id with no local working copy — returned without `app`, for
+ *   verbs that only talk to the server (versions, publish, where, ...).
+ *
+ * @param workspaceRoot - The workspace to search for working copies.
+ * @param ref - The typed reference (undefined/'' = the current directory).
+ * @param cwd - The current directory (default `process.cwd()`).
+ * @returns The resolved app id and, when local, its working copy.
+ * @throws Error naming the local apps when nothing (or more than one) matches.
+ */
+export async function findApp(workspaceRoot: string, ref?: string, cwd: string = process.cwd()): Promise<AppRef> {
+	// step: a folder (or the current directory) names its app directly
+	const asFolder = ref ? path.resolve(workspaceRoot, ref) : cwd;
+	if (!ref || (fs.existsSync(asFolder) && fs.statSync(asFolder).isDirectory())) {
+		const app = await probeAppFolder(asFolder);
+		if (app) return { appId: app.id, app };
+		if (ref) throw new Error(`"${ref}" is not an app folder (its package.json has no appManifest.id).`);
+	}
+
+	// step: match ids, name parts, and folder names across working copies
+	const apps = await scanAppMarkers(findAppMarkers(workspaceRoot));
+	if (ref) {
+		const exact = apps.find((a) => a.id === ref);
+		if (exact) return { appId: exact.id, app: exact };
+		const loose = apps.filter((a) => a.id.endsWith(`.${ref}`) || path.basename(a.folder) === ref);
+		if (loose.length === 1) return { appId: loose[0].id, app: loose[0] };
+		if (loose.length > 1) {
+			throw new Error(`"${ref}" matches several apps — use the full id: ${loose.map((a) => a.id).join(', ')}`);
+		}
+		if (FULL_APP_ID_RE.test(ref)) return { appId: ref };
+	}
+	const known = apps.length > 0 ? ` Apps in ${workspaceRoot}: ${apps.map((a) => a.id).join(', ')}.` : '';
+	throw new Error(ref ? `No app "${ref}" found.${known}` : `The current directory is not an app folder — pass an app folder or app id.${known}`);
+}
+
+// =============================================================================
 // ICON
 // =============================================================================
 

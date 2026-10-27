@@ -145,11 +145,20 @@ A deploy packs the app folder plus any folders listed under
 rocketride app deploy ./apps/reports-ui --comment "first version"
 ```
 
-`rocketride app deploy` needs a deployment target (`ROCKETRIDE_DEPLOY_URI`
-and `ROCKETRIDE_DEPLOY_APIKEY`) and refuses to run without one; `app
-create` uses the development connection (`ROCKETRIDE_URI`) to vendor
-platform packages, and `app verify` needs no connection. Publishing
-happens on the Deploy tab.
+Publishing happens on the Deploy tab, or from the terminal:
+
+```bash
+rocketride app deploy reports --publish @me   # deploy, wait for the build, publish to your desktop
+rocketride app publish reports 2 --to @team/QA
+rocketride app versions reports                # the version rail
+rocketride app where reports                   # which audiences serve which version
+```
+
+The deploy and publish commands need a deployment target
+(`ROCKETRIDE_DEPLOY_URI` and `ROCKETRIDE_DEPLOY_APIKEY`, written by
+`rocketride login`) and refuse to run without one; `app create` uses the
+development connection (`ROCKETRIDE_URI`) to vendor platform packages, and
+`app verify` needs no connection.
 
 ## Adding a pipeline to your app
 
