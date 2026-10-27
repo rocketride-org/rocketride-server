@@ -13,6 +13,7 @@ import type { IExplorerEndpoint } from 'shared/explorer';
 import { manualClock } from 'shared/explorer/connect/testing';
 import { connectionEntry, savedFilters } from '../src/adapters/connections';
 import { connectionCaches, neighbourRequests } from '../src/adapters/explorer';
+import { draftNames } from '../src/components/SavedViewsMenu';
 import { savedFiltersFor } from '../src/vector/savedFilters';
 import { DEFAULT_LIMITS } from '../src/vector/results';
 import { CONNECTIONS_URI, consoleUri, documentUri, endpointKeyFromUri } from '../src/vector/addresses';
@@ -104,6 +105,16 @@ test("the app's registry clears the neighbour request queues of every connection
 	assert.ok(connectionCaches.names().includes('neighbour queues'));
 	connectionCaches.clearAll();
 	assert.notEqual(neighbourRequests(KEY_A), before, 'a new identity gets a new channel');
+});
+
+test("an unsaved view name (the map's Views menu) is gone after a change of identity, and forgotten with its connection", () => {
+	assert.ok(connectionCaches.names().includes('saved view drafts'));
+	draftNames.set(KEY_A, 'the last user typed this');
+	draftNames.set(KEY_B, 'and this');
+	assert.ok(connectionCaches.forgetKey(KEY_B).includes('saved view drafts'));
+	assert.equal(draftNames.has(KEY_B), false);
+	assert.ok(connectionCaches.clearAll().includes('saved view drafts'));
+	assert.equal(draftNames.has(KEY_A), false, 'the next user on the same connection key does not see it');
 });
 
 test("the console's scope and the saved filters are per connection and gone after a change of identity", () => {
