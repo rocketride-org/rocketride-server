@@ -8,7 +8,7 @@
  *
  * Displays the user's avatar card with identity information, the active
  * organization's teams with development-team assignment (a per-user setting;
- * the org switcher / creator lives on the Organization tab), and the Edit
+ * the org switcher lives on the Organization tab), and the Edit
  * Profile record panel — an edit-only form DetailPanel per the interaction standard
  * (2026-07-18): [Save Changes] MATERIALIZES only while a field differs from
  * the seeded profile snapshot; Cancel / X / Escape on a dirty form raise the
@@ -299,7 +299,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 	const displayName = profile?.displayName || authUser?.displayName || '—';
 	const email = profile?.email || authUser?.email || '';
 	// The active organization's teams drive the development-team picker. The
-	// org switcher / creator lives on the Organization tab (OrganizationsCard).
+	// org switcher lives on the Organization tab (OrganizationsCard).
 	const org = profile?.organization ?? authUser?.organization ?? null;
 	const defaultOrgId = profile?.defaultOrgId ?? org?.id;
 	const activeOrg = profile?.memberships?.find((o) => o.id === defaultOrgId) ?? org;
@@ -345,7 +345,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 			    discoverable; empty state when the active org has no teams. */}
 			<Card header="Development team" noBodyPadding>
 				<div style={S.rowList}>
-					{teams.length === 0 && <div style={styles.emptyTeams}>{activeOrg ? 'Your organization has no teams yet.' : 'Join or create an organization to pick a development team.'}</div>}
+					{teams.length === 0 && <div style={styles.emptyTeams}>{activeOrg ? 'Your organization has no teams yet.' : 'Join an organization to pick a development team.'}</div>}
 					{teams.map((t, i) => {
 						const isDevTeam = authUser?.devTeam === t.id;
 						return (

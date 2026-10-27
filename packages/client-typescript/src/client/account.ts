@@ -193,9 +193,7 @@ export class AccountApi {
 	 *
 	 * @param orgId  - Organisation UUID.
 	 * @param params - Invitation parameters (email, givenName, familyName, role,
-	 *                 optional teamAssignments). The server derives the invitee's
-	 *                 development team from the assignments; the frozen shell
-	 *                 contract keeps this method's return type at void.
+	 *                 optional teamAssignments).
 	 */
 	async inviteMember(orgId: string, params: InviteMemberParams): Promise<void> {
 		await this.client.call('rrext_account_members', { subcommand: 'invite', orgId, ...params });
