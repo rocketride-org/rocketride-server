@@ -147,12 +147,14 @@ function nameOf(item: IDocumentItem, duplicate: boolean): string {
 }
 
 /**
- * The Documents grid's columns (declared here, never derived from rows).
+ * The Documents grid's columns (declared here, never derived from rows). At their least they come to 908 px together,
+ * what they took before every header was fitted to its words: Folder's minimum gives back what Chunks, Tables and
+ * Status gained, so a narrow tab scrolls no further sideways.
  *
  * @param ctx - What the cells read.
  * @returns The columns.
  */
-function documentColumns(ctx: { current: IGridContext }): Array<IGridColumn<IDocumentItem>> {
+export function documentColumns(ctx: { current: IGridContext }): Array<IGridColumn<IDocumentItem>> {
 	return [
 		{
 			id: 'stage',
@@ -169,7 +171,7 @@ function documentColumns(ctx: { current: IGridContext }): Array<IGridColumn<IDoc
 			},
 		},
 		{ id: 'name', label: 'Name', width: 'flex', minWidth: 160, sortValue: (item) => splitPath(item.path).name, cell: (item) => nameOf(item, ctx.current.duplicate(item)) },
-		{ id: 'folder', label: 'Folder', width: 'flex', minWidth: 120, sortValue: (item) => splitPath(item.path).folder, cell: (item) => (splitPath(item.path).uploaded ? 'Uploaded' : splitPath(item.path).folder) },
+		{ id: 'folder', label: 'Folder', width: 'flex', minWidth: 88, sortValue: (item) => splitPath(item.path).folder, cell: (item) => (splitPath(item.path).uploaded ? 'Uploaded' : splitPath(item.path).folder) },
 		{ id: 'type', label: 'Type', width: 70, sortValue: (item) => fileTypeOf(item.path), cell: (item) => fileTypeOf(item.path) },
 		{ id: 'chunks', label: 'Chunks', width: 70, align: 'right', sortValue: (item) => item.chunks, cell: (item) => (item.chunks === null ? <span title="The store does not count chunks per document">—</span> : formatCount(item.chunks)) },
 		{ id: 'tables', label: 'Tables', width: 64, align: 'right', sortValue: (item) => item.tables, cell: (item) => (item.tables === null ? '—' : formatCount(item.tables)) },

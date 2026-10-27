@@ -6,8 +6,7 @@ title: Vector Explorer
 
 Vector Explorer is the app for managing the documents in a vector store your
 pipelines already use. Its main screen is a console with six tabs. **Overview**
-shows what the collection holds. **Documents** lists every document in a
-sortable grid beside a folder tree, and stages documents to move to the trash.
+shows what the collection holds. **Documents** lists the documents in a sortable grid beside a folder tree, and stages documents to move to the trash.
 **Query** searches the chunks, compares two questions and asks the pipeline's LLM
 about the documents, and keeps a history of the runs. **Map** shows how close the
 chunks are to each other and to a question you type. **Collection** shows what the
@@ -33,7 +32,7 @@ against mock clients only.
 are never listed.
 
 Each connection shows the support level its node reports, in its drawer and as
-a chip on the console's stats strip: **Supported** when that store's tests
+a chip on the Overview tab: **Supported** when that store's tests
 passed against a live server in this build, on a new collection and on one
 written by an earlier release, and **Experimental** otherwise.
 
@@ -166,15 +165,13 @@ are never listed. A card is one button that opens the store's drawer. It shows:
 - a line `<store> · <collection> · <pipeline>`, with `· 1,200 documents` added
   once the console has counted them;
 - notes when they apply: **Experimental**, **Read-only**, **Empty collection**
-  (the collection does not exist yet; the first upload creates it; the note goes
-  away once the console's figures show documents), **Repair
+  (the collection does not exist yet; the first upload creates it; the note goes away once the console's figures show the collection exists), **Repair
   needed** (the collection's control record, which the store node writes when
   it creates the collection, is missing), and **Metadata column pending**
   (pgvector: file size and ingest time are not stored yet, see
   [What the notes mean](#what-the-notes-mean)).
 
-Which of the pipeline's sources run (`ingest ✓ · chat ✓ · tools ✓`, with `–`
-for a source that is not running) is in the card's tooltip and its accessible
+Which of the pipeline's sources run ("Sources: ingest running, chat running, tools running", or "not running" for one that is not) is in the card's tooltip and its accessible
 description, and in the drawer.
 
 On a read-only card, a store node the anchor source cannot reach is shown
@@ -250,7 +247,7 @@ question of [Adding documents](#adding-documents), in the app.
 
 Cards across the top: **Documents**, **Chunks**, **Chunks per document**, **In
 trash**, **Model**, **Dimensions · metric · index** and, where the store reports
-how much space the collection takes, **Size** ("48.2 MB on the store"). They are
+how much space the collection takes, **Size** (for example 48.2 MB; its tooltip gives the bytes). They are
 counted when the console opens, after every write (moving to or out of the trash,
 deleting) or completed upload, and on **Refresh**. While the console is visible a
 lighter check runs at most every 15 seconds and the strip says "counts as of N s
@@ -319,10 +316,7 @@ deleted chunks are reported by pgvector stores; on other stores the cell reads
 "—" and says these are not checked. An empty cell means no problem was found.
 
 The first page loads at once, then the rest load in the background, up to 5,000
-documents, with "Loading documents… 1,200 of 10,000". The grid does not reshuffle
-while pages arrive; it is re-sorted when loading finishes. Past 5,000, or when a
-store cannot page its list, the footer reads "Limit reached at N documents; more
-may exist" with **Load more**. While the listing is incomplete and the grid is in
+documents, with "Loading documents… 1,200 of 10,000". In the store's order the grid does not reshuffle while pages arrive and is re-sorted when loading finishes; a column sort places arriving rows as they come. Past 5,000 the footer reads "Limit reached at N documents; more may exist" with **Load more**; when a store cannot page its list, the line says so, without Load more. While the listing is incomplete and the grid is in
 an order other than the store's own, a note says "Sorted within the 1,200 loaded
 documents; more may exist." The grid and the rail count what is loaded and never
 state a total the store did not give.
@@ -331,7 +325,7 @@ state a total the store did not give.
 
 The rail shows the loaded documents as a tree, with folders built from `/` and `\`
 (Windows drive roots included) and names without a folder grouped under
-**Uploaded**. It has **Tree** and **Flat**, **Collapse all** and **Refresh**, a
+**Uploaded**. It has a **Flat** toggle (off: the tree), **Collapse all** and **Refresh**, a
 root "All documents" and a **Trash (N)** item that opens the Trash tab, and works
 from the keyboard (arrows, Home, End, Enter, type-ahead). Clicking a folder
 filters the rows already loaded and nothing else: nothing is listed again, the
@@ -357,8 +351,7 @@ covers Ask).
 The tab then says who applied the conditions: "12 documents match (store)" when
 the store filtered, "12 documents match (store; ingest dates filtered here)" when
 it applied some, and "12 of 1,200 loaded match (filtered here; the store cannot
-filter by these)" when the app filtered the rows it loaded. pgvector stores
-filter in the store; Chroma filters by first chunk only; Qdrant and the
+filter by these)" when the app filtered the rows it loaded. pgvector and RocketRide Vector stores filter in the store; Chroma filters by first chunk only; Qdrant and the
 experimental stores do not, so the app filters there.
 
 The map, the search and Ask are handed the scope as the ids of the documents it
@@ -368,8 +361,7 @@ keeps the scope it drew with. They take a scope of at most 2,000 documents. A la
 says "Scope too large for the map, search and chat (2,340 documents; at most
 2,000). Narrow the folder." and leaves them unscoped, with their toggles off.
 **Save…** keeps the conditions under a name; **Saved** lists them with **Apply**
-and **Delete**. Saved filters belong to the connection and last until you sign
-out.
+and **Delete**. Saved filters belong to the connection and are kept in memory for the session: a reload or a sign-out clears them (in a dev tool, closing the document does).
 
 #### The drawer
 
@@ -457,8 +449,7 @@ the row, a 120-character preview, and **open** (the document's own tab at that
 chunk), **map** and **ask about this**; a document's name shows it in the
 Documents tab's drawer. The Score heading gives the scale from the store's own
 score definition (formula, range, which direction is closer). A bar is drawn only
-where the store reports a range and which direction is closer, inverted where
-lower is closer; otherwise there is the number alone, with the reason. A row found
+where the store reports a range (higher is closer unless the store says lower is), inverted where lower is closer; otherwise there is the number alone, with the reason. A row found
 by keyword only has no score and no bar; a Hybrid row that the semantic search
 also found keeps its semantic score and bar.
 
@@ -506,8 +497,7 @@ or this is a dev tool), it says why and offers **Use Search**.
 **History (N)** opens an aside beside the modes with the runs of this connection,
 newest first and pinned ones on top: the question (for Compare, A and B), its
 kind, k, what it came to, when and how long. A run of the same kind
-that repeats the newest entry's whole question updates that entry, which says
-"Ran again", instead of adding one; a Search, a Compare and an Ask of the same
+that repeats the newest entry's whole question updates that entry, which says "Ran again" (a Compare only when both its questions repeat), instead of adding one; a Search, a Compare and an Ask of the same
 text stay separate entries, and Compare keeps each pair. **Load** puts an entry back in the form and runs nothing. **Rerun** runs it
 again with its mode and k and the threshold, scope and table choice you have now;
 it is off, with the reason, when it cannot run. Entries can be pinned, given a
@@ -523,13 +513,12 @@ The **Collection** tab is read-only: what the store node reports about the
 collection. **Embedding** (model, dimensions), **Index** (metric, the index and its
 parameters, backend and version, how the score reads, the score threshold set on
 the node) and **Storage and writes** (size, chunks, whether removing documents
-is on, whether delete moves to the trash, the write batch) come from the node's
-answer about itself; where it has not said, the console's last figures fill in
+is on, whether delete moves to the trash, the write batch) come from the node's answer about itself (Chunks from the console's figures); where it has not said, the console's last figures fill in
 the model, dimension and metric, and anything else reads "—".
 
 **Metadata fields** is a table of Field, Type, Coverage, Example and Filterable.
 No store lists a collection's fields, so it has two sources. The document fields
-(path, size, ingest time, chunks, tables) are exact over the documents loaded
+(path, size, modified and ingest time, node, chunks, tables) are exact over the documents loaded
 ("Document fields are exact over the 1,200 documents loaded; more are not loaded
 yet."; while a scope applies, "…over the 40 documents the current scope keeps, of
 1,200 loaded"). The chunk metadata fields come only from **Read fields from a sample**,
@@ -537,9 +526,7 @@ which reads the first 20 chunks of up to 5 documents spread over the loaded
 folders (at most 5 requests) and says how many chunks it read from how many
 documents, that the types are guesses and that coverage is of the chunks read,
 not of the collection; a write to the store drops that result. **Filterable**
-says only what the node does: its listing filters are applied by the store on
-pgvector only (and only with a meta column for ingest dates), Chroma applies none
-of them, and elsewhere they are matched over the loaded rows; the node's search
+says only what the node does: its listing filters are applied by the store on pgvector and RocketRide Vector only (and only with a meta column for ingest dates), Chroma applies none of these (only the first-chunk condition), and elsewhere they are matched over the loaded rows; the node's search
 accepts filters on a few keys, of which the Query tab offers only the table
 choice and the scope's documents.
 
@@ -550,9 +537,9 @@ choice and the scope's documents.
 **pending bar** in the bottom line says, for example, "3 staged for the trash (14
 chunks)" ("14+ chunks" when the store did not count every document; its title has
 the whole sentence, "3 documents staged to move to the trash (14 chunks).", and
-why Apply is unavailable when it is). Every staging press is announced ("3
+why Apply is unavailable when it is). Every staging press on the map is announced ("3
 documents are staged for the trash; nothing moves until the pending changes are
-applied."). The bar offers **Review** (the Documents tab, listing only the staged documents),
+applied."); in Documents the pending bar's count is a live status. The bar offers **Review** (the Documents tab, listing only the staged documents),
 **Discard** (unstage them all) and **Apply**. The map's review queues stage the
 same way ("Stage removal", "Stage all N removals"), and a lasso's **Stage these
 documents for the trash** too. When writes are off the staging controls are
@@ -582,7 +569,7 @@ document with no path; the full path is always shown beside the box); several
 documents, or Empty trash, ask you to type their count. **Empty trash…** lists the
 whole trash first. Deleting sends `delete` for the trash only, so a document that
 still has chunks outside the trash (a later upload added some after it was moved
-there) keeps those chunks, and the answer names it by path: "Emptied the trash:
+there) is kept whole (none of its chunks, in the trash or not, is deleted), and the answer names it by path: "Emptied the trash:
 deleted 12 documents permanently (140 chunks). 1 was kept whole, because it still
 has chunks outside the trash: `<path>`." On `rocketride_vector` the permanent
 deletes ask for the table name instead, because the table is shared by every
@@ -697,8 +684,7 @@ with the reason, when the store node cannot sample; the console is unaffected.
 - **Dimming.** Selecting a point, a highlighted set (a lasso, a document, a
   duplicate group, an answer's sources) or a placed query fades the other points,
   and the edges, outlier rings and duplicate lines that touch only faded points,
-  to a quarter of their colour; hovering a point of a cluster, while clusters are
-  shown, fades the other clusters, and the cluster stays lit across the gaps
+  to a quarter of their colour; hovering a point of a cluster, while the map is coloured by cluster or the Clusters tab is open, fades the other clusters, and the cluster stays lit across the gaps
   between its points. The lit marks keep their colour, and what is
   faded is below the contrast they keep, on purpose. The PNG export shows what is
   drawn on screen at that moment.
@@ -744,7 +730,7 @@ with the reason, when the store node cannot sample; the console is unaffected.
   selected points restored; 200 drawn hollow" (up to 200 points missing from the
   new sample are drawn hollow, the rest are dropped). A saved query runs again
   only on **Run saved query**, because it costs an embedding. Up to 20 views
-  per connection, kept until you sign out.
+  per connection, kept in memory for the session: a reload or a sign-out clears them.
 - **Keyboard.** The arrow keys move to the nearest point in that direction,
   Enter inspects it, Escape clears one step at a time: the lasso, then a
   highlight (an answer's sources, Show on map, a duplicate group, a query's

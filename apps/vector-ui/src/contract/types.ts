@@ -1206,7 +1206,12 @@ export interface ConsoleActions {
 	/** Switch to the Map tab and highlight these keys. */
 	showOnMap(keys: readonly VectorKey[], source: HighlightSource): void;
 	/** Ask to move documents to the trash: the console confirms (Cancel focused, nothing to type) and runs the gated soft_delete. */
-	requestRemove(objectIds: readonly string[]): void;
+	requestRemove(objectIds: readonly string[], known?: readonly IStageTarget[]): void;
+	/**
+	 * Move documents back out of the trash at once (it can be undone). The document tab's Restore. `known` carries the
+	 * path and chunk count the caller has. Resolves when the write finished.
+	 */
+	restore?(objectIds: readonly string[], known?: readonly IStageTarget[]): Promise<void>;
 	/**
 	 * Stage documents to move to the trash; the console's pending bar applies them through requestRemove. A path or
 	 * count the caller does not give is taken from the loaded rows. Absent where nothing can be staged (a dev-tool

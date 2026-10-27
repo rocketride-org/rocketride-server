@@ -310,3 +310,19 @@ test("the first focus (P2-11): Confirm for a move to the trash, Cancel for a bul
 	assert.match(content.title, /^Move 150 documents/, 'the count leads the title');
 	assert.equal(content.typed, null, 'nothing to type: Restore undoes it');
 });
+
+test("Enter in the typed field: it confirms once the text matches, never on the Enter that ends a composition; before that a line kept under the field says what is missing, so the field never moves", () => {
+	const { typedNudge } = require('../src/vector/confirm') as typeof import('../src/vector/confirm');
+	const typed = { expected: '2', prompt: 'Type 2 to confirm.' };
+	assert.equal(typedNudge(typed, '', false), '');
+	assert.equal(typedNudge(typed, '', true), 'Nothing is typed yet.');
+	assert.equal(typedNudge(typed, '1', true), 'What is typed does not match.');
+	assert.equal(typedNudge(typed, ' 2 ', true), '', 'it matches: nothing to say');
+	const fs = require('node:fs') as typeof import('node:fs');
+	const path = require('node:path') as typeof import('node:path');
+	const panel = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'InlineRemoveConfirm.tsx'), 'utf8');
+	assert.match(panel, /if \(event\.defaultPrevented \|\| event\.key !== 'Enter' \|\| event\.nativeEvent\.isComposing \|\| event\.keyCode === 229\) return;\s*event\.preventDefault\(\);\s*if \(ready\) onConfirm\(\);\s*else setNudged\(true\);/);
+	assert.match(panel, /<span>\{content\.typed\.prompt\}<\/span>/, 'the prompt never changes, so it never rewraps');
+	assert.match(panel, /<p id=\{nudgeId\} aria-live="polite" title=\{nudge \|\| undefined\} style=\{styles\.nudge\}>\s*\{nudge\}\s*<\/p>/, 'the nudge, announced, on its own line');
+	assert.match(panel, /nudge: \{ height: 18, [^}]*lineHeight: '18px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' \}/, 'one line, said or not: nothing under it moves');
+});

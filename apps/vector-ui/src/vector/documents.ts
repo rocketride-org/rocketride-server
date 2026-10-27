@@ -672,3 +672,16 @@ export function documentTooltip(item: IDocumentItem, health: Pick<IHealthCell, '
 	parts.push(`objectId ${item.objectId}`);
 	return parts.join(' · ');
 }
+
+/**
+ * What a Trash row says of a document that also has chunks outside the trash (a partly trashed one), when the
+ * loaded live listing holds it; nothing otherwise (the live listing may not have loaded it).
+ *
+ * @param live - The live listing's row of the same objectId, or undefined.
+ * @returns e.g. '4 chunks outside the trash', 'chunks outside the trash' (no count), or null.
+ */
+export function outsideTrashText(live: Pick<IDocumentItem, 'chunks'> | undefined): string | null {
+	if (live === undefined) return null;
+	if (live.chunks === null) return 'chunks outside the trash';
+	return `${formatCount(live.chunks)} ${live.chunks === 1 ? 'chunk' : 'chunks'} outside the trash`;
+}

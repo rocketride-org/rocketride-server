@@ -242,6 +242,12 @@ test('IngestPanel: the drop zone names the collection, offers files and folders,
 	forgetChatAndIngest();
 });
 
+test('IngestPanel: a refused folder is described by the alert that says why', () => {
+	const panel = readFileSync(path.join(__dirname, '..', 'src', 'components', 'IngestPanel.tsx'), 'utf8');
+	assert.match(panel, /aria-invalid=\{!prefixCheck\.ok \|\| undefined\} aria-describedby=\{prefixCheck\.ok \? undefined : prefixErrorId\}/);
+	assert.match(panel, /<p id=\{prefixErrorId\} role="alert" style=\{S\.error\}>\s*\{prefixCheck\.reason\}/);
+});
+
 test('IngestPanel: names the other stores the ingest source feeds', () => {
 	forgetChatAndIngest();
 	const html = render(h(IngestPanel, { model: model(), channels, actions, alsoReaches: ['Archive store'] }));

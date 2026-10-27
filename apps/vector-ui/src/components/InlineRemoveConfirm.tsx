@@ -37,7 +37,9 @@
 // typed field, else Cancel, never the destructive button. Escape cancels while the
 // focus is inside it (unless an inner handler already acted), and Confirm
 // stays unavailable (aria-disabled, so it keeps the focus) until the typed
-// rule is met.
+// rule is met. Enter in the typed field confirms once it matches (never the
+// Enter that ends an input method's composition); before that a line kept
+// under the field says it does not match yet, so the field never moves.
 //
 // It shows the pending confirmation of its connection's controller, which
 // alone sends anything, on the surface that asked for it (its origin: the
@@ -59,7 +61,7 @@ import type { CSSProperties } from 'react';
 import { Button, commonStyles } from 'shell';
 import type { IProbeResult } from 'shared/explorer';
 import type { IConnectionEntry } from '../adapters/connections';
-import { CONSOLE_ORIGIN, confirmElsewhereText, confirmFirstFocus, confirmReady, confirmationFor, removeContextFor } from '../vector/confirm';
+import { CONSOLE_ORIGIN, confirmElsewhereText, confirmFirstFocus, confirmReady, confirmationFor, removeContextFor, typedNudge } from '../vector/confirm';
 import type { ConfirmFirstFocus, ConfirmOrigin, ConfirmationView } from '../vector/confirm';
 import { firstFocusable, focusLost } from '../vector/focus';
 import { formatCount } from '../vector/stats';
@@ -91,6 +93,8 @@ const styles = {
 	sentence: { margin: '8px 0', fontSize: 13 } as CSSProperties,
 	elsewhere: { flexShrink: 0, margin: '8px 24px 0', fontSize: 13 } as CSSProperties,
 	typed: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8, fontSize: 13 } as CSSProperties,
+	/** Under the typed field: one line whether it says anything or not, so the field and the buttons never move. */
+	nudge: { height: 18, margin: '4px 0 0', fontSize: 13, lineHeight: '18px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
 	actions: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 12 } as CSSProperties,
 	/** Confirm: destructive for a permanent write; unavailable (aria-disabled, it keeps the focus) until the typed rule is met. */
 	confirm: (destructive: boolean, ready: boolean): CSSProperties => ({ ...(destructive ? commonStyles.buttonDanger : commonStyles.buttonPrimary), ...(ready ? null : commonStyles.buttonDisabled) }),
@@ -147,11 +151,15 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; first: ConfirmFirstFocus;
 	const input = useRef<HTMLInputElement>(null);
 	const sentenceId = useId();
 	const pathId = useId();
+	const nudgeId = useId();
 	// What had the focus when the confirmation opened (before Cancel takes it): Cancel gives it back.
 	const opener = useRef<HTMLElement | null>(typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null);
 	const [typed, setTyped] = useState('');
+	// Enter was pressed in the typed field before it matched: the hint says so until the text changes.
+	const [nudged, setNudged] = useState(false);
 	const content = view.content;
 	const ready = confirmReady(content.typed, typed);
+	const nudge = content.typed ? typedNudge(content.typed, typed, nudged) : '';
 	// One document typed by its file name: its whole path beside the field (a file name can repeat across folders).
 	const typedPath = view.kind === 'single' && content.typed ? (view.content.lines.find((line) => line.label === 'Path')?.value ?? null) : null;
 	// The latest close handlers, for the unmount below.
@@ -237,8 +245,35 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; first: ConfirmFirstFocus;
 				<label style={styles.typed}>
 					<span>{content.typed.prompt}</span>
 					{typedPath !== null && <span id={pathId}>{`Full path: ${typedPath}`}</span>}
-					<input ref={input} type="text" value={typed} onChange={(event) => setTyped(event.target.value)} style={appStyles.input} autoComplete="off" spellCheck={false} aria-describedby={typedPath !== null ? `${sentenceId} ${pathId}` : sentenceId} onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)} onBlur={(event) => (event.currentTarget.style.outline = 'none')} />
+					<input
+						ref={input}
+						type="text"
+						value={typed}
+						onChange={(event) => {
+							setTyped(event.target.value);
+							setNudged(false);
+						}}
+						onKeyDown={(event) => {
+							// Enter confirms once the typed text matches; before that the line under the field says what is missing.
+							// The Enter that ends an input method's composition only commits the word (Safari reports it as 229).
+							if (event.defaultPrevented || event.key !== 'Enter' || event.nativeEvent.isComposing || event.keyCode === 229) return;
+							event.preventDefault();
+							if (ready) onConfirm();
+							else setNudged(true);
+						}}
+						style={appStyles.input}
+						autoComplete="off"
+						spellCheck={false}
+						aria-describedby={typedPath !== null ? `${sentenceId} ${pathId} ${nudgeId}` : `${sentenceId} ${nudgeId}`}
+						onFocus={(event) => (event.currentTarget.style.outline = FOCUS_RING)}
+						onBlur={(event) => (event.currentTarget.style.outline = 'none')}
+					/>
 				</label>
+			)}
+			{content.typed && (
+				<p id={nudgeId} aria-live="polite" title={nudge || undefined} style={styles.nudge}>
+					{nudge}
+				</p>
 			)}
 			<div ref={actions} style={styles.actions}>
 				<Button variant="ghost" onClick={onCancel}>

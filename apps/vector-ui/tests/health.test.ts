@@ -98,7 +98,7 @@ test('a store that does not report chunk ids or deleted chunks (null or absent):
 	const old = readDocumentsPage(fixture('list_documents_page1')).items[0] as IDocumentItem;
 	assert.equal('max_chunk_id' in old, false, 'an older node sends no key at all');
 	assert.deepEqual(documentHealth(old, { medianChunks: 10 }).unchecked, ['gaps', 'deleted_chunks']);
-	assert.equal(HEALTH_NOT_REPORTED, 'This store does not report chunk ids or soft-deleted chunks per document, so gaps and deleted chunks are not checked; pgvector stores report them.');
+	assert.equal(HEALTH_NOT_REPORTED, 'This store does not report chunk ids or soft-deleted chunks per document, so gaps and deleted chunks are not checked; pgvector and RocketRide Vector stores report them.');
 	assert.deepEqual(documentHealth(doc('a', 'a', { chunks: null, max_chunk_id: null, deleted_chunks: null }), { medianChunks: 4 }).unchecked, ['gaps', 'deleted_chunks', 'empty_parse', 'oversize']);
 });
 

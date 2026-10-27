@@ -147,7 +147,7 @@ const LIST_FILTER_KEYS: Readonly<Record<string, string>> = {
 
 /**
  * What can filter on a field, in words that claim no more than the node does: a listing filter is applied by the
- * store only where it answers `filter_applied: server` (pgvector); elsewhere it is matched over the loaded rows.
+ * store only where it answers `filter_applied: server` (pgvector and RocketRide Vector, which share one driver); elsewhere it is matched over the loaded rows.
  *
  * @param field - The field.
  * @returns The phrase.
@@ -163,7 +163,7 @@ export function filterPhrase(field: Pick<IFieldRow, 'name' | 'searchFilter' | 'l
 	if (field.listFilter) {
 		const keys = Object.hasOwn(LIST_FILTER_KEYS, field.name) ? LIST_FILTER_KEYS[field.name] : field.name;
 		const meta = field.name === 'ingestedAt' ? ', and only when the table has a meta column' : '';
-		parts.push(`Listing filter: ${keys} (applied by the store on pgvector only${meta}; Chroma applies none of these; elsewhere matched over loaded rows)`);
+		parts.push(`Listing filter: ${keys} (applied by the store on pgvector and RocketRide Vector only${meta}; Chroma applies none of these; elsewhere matched over loaded rows)`);
 	}
 	return parts.length > 0 ? parts.join('; ') : 'Not filterable';
 }

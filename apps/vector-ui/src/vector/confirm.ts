@@ -495,3 +495,17 @@ export function confirmFirstFocus(kind: 'trash' | 'delete' | 'empty', count: num
 	const bulk = Math.min(BULK_TRASH_FOCUS_CANCEL, Math.max(1, Math.floor(writeIdsMax)));
 	return count > bulk ? 'cancel' : 'confirm';
 }
+
+/**
+ * The line under the typed field: after Enter on what does not match yet, that it does not; else nothing. The line
+ * keeps its height either way (components/InlineRemoveConfirm.tsx), so the field never moves.
+ *
+ * @param typed - The typed confirmation.
+ * @param input - What is typed.
+ * @param nudged - Enter was pressed on it while it did not match.
+ * @returns The sentence, or '' for none.
+ */
+export function typedNudge(typed: ITypedConfirmation, input: string, nudged: boolean): string {
+	if (!nudged || confirmReady(typed, input)) return '';
+	return input.trim() === '' ? 'Nothing is typed yet.' : 'What is typed does not match.';
+}

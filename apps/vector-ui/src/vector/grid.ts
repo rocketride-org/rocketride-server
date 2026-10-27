@@ -270,14 +270,62 @@ export function nextRowAfter(ids: readonly string[], targets: ReadonlySet<string
 }
 
 /**
- * The CSS grid template every row and the header share: a number is a fixed width in px, 'flex' a column that takes
- * the room left (never narrower than its minimum).
+ * The header's width per character, padding and sort mark (px): its words are 11 px, bold, upper case, with a
+ * 0.08 em letter spacing (components/VectorGrid.tsx). The per-character figure is on the wide side of the shell's
+ * fonts, so a header never clips ("DELETED CHUNI").
+ */
+export const HEADER_METRICS = Object.freeze({ charPx: 8.9, paddingPx: 16, sortMarkPx: 12 });
+
+/**
+ * The width a column's header needs to show its words whole, with the sort mark when it sorts.
  *
- * @param columns - The columns' widths and minimum widths.
+ * @param label - The header's words.
+ * @param sortable - The column sorts (its mark takes room when it is the sorted one).
+ * @returns The width (px).
+ */
+export function headerWidth(label: string, sortable: boolean): number {
+	const { charPx, paddingPx, sortMarkPx } = HEADER_METRICS;
+	return Math.ceil(label.length * charPx + paddingPx + (sortable ? sortMarkPx : 0));
+}
+
+/** A column as the layout reads it. */
+interface IColumnShape {
+	width: number | 'flex';
+	minWidth?: number;
+	label?: string;
+	sortValue?: unknown;
+}
+
+/**
+ * A column's fixed width, or a flexible column's least: never narrower than its header needs.
+ *
+ * @param column - The column.
+ * @returns The width (px).
+ */
+export function columnWidth(column: IColumnShape): number {
+	const needed = headerWidth(column.label ?? '', column.sortValue !== undefined);
+	return Math.max(column.width === 'flex' ? (column.minWidth ?? 120) : column.width, needed);
+}
+
+/**
+ * The narrowest the columns get together (px): the grid scrolls sideways below it.
+ *
+ * @param columns - The columns' widths, minimum widths, words and whether they sort.
+ * @returns The sum of their {@link columnWidth}s.
+ */
+export function gridMinimumWidth(columns: ReadonlyArray<IColumnShape>): number {
+	return columns.reduce((sum, c) => sum + columnWidth(c), 0);
+}
+
+/**
+ * The CSS grid template every row and the header share: a number is a fixed width in px, 'flex' a column that takes
+ * the room left (never narrower than its minimum); neither narrower than its header's words ({@link columnWidth}).
+ *
+ * @param columns - The columns' widths, minimum widths, words and whether they sort.
  * @returns The `grid-template-columns` value.
  */
-export function gridTemplate(columns: ReadonlyArray<{ width: number | 'flex'; minWidth?: number }>): string {
-	return columns.map((c) => (c.width === 'flex' ? `minmax(${Math.max(0, c.minWidth ?? 120)}px, 1fr)` : `${Math.max(0, c.width)}px`)).join(' ');
+export function gridTemplate(columns: ReadonlyArray<IColumnShape>): string {
+	return columns.map((c) => (c.width === 'flex' ? `minmax(${columnWidth(c)}px, 1fr)` : `${columnWidth(c)}px`)).join(' ');
 }
 
 /** The focus targets a tab offers when a control goes away; null for one it does not have now. */

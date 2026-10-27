@@ -59,6 +59,20 @@ const styles = {
 	link: { padding: 0, border: 'none', background: 'none', color: 'inherit', font: 'inherit', fontWeight: 600, textDecoration: 'underline', cursor: 'pointer', textAlign: 'left', overflowWrap: 'anywhere' } as CSSProperties,
 };
 
+/**
+ * The metadata keys the drawer already shows as fixed fields, so the dump does not repeat them: objectId and chunkId
+ * always, tableId for a table chunk, pointId when the chunk has one.
+ *
+ * @param chunk - The chunk.
+ * @returns The keys.
+ */
+export function shownAbove(chunk: Pick<IChunkItem, 'isTable' | 'pointId'>): ReadonlySet<string> {
+	const keys = new Set(['objectId', 'chunkId']);
+	if (chunk.isTable) keys.add('tableId');
+	if (chunk.pointId !== null) keys.add('pointId');
+	return keys;
+}
+
 /** The longest metadata value shown. */
 const VALUE_CHARS = 200;
 
@@ -195,7 +209,9 @@ export function ChunkDrawer({ objectId, path, chunk, caller, store, documentChun
 									<dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{chunk.pointId}</dd>
 								</>
 							)}
-							{Object.entries(chunk.metadata).map(([name, value]) => (
+							{Object.entries(chunk.metadata)
+								.filter(([name]) => !shownAbove(chunk).has(name))
+								.map(([name, value]) => (
 								<React.Fragment key={name}>
 									<dt style={{ fontWeight: 600 }}>{name}</dt>
 									<dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{metadataText(value)}</dd>

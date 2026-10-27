@@ -39,7 +39,10 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { VectorGrid } from '../src/components/VectorGrid';
 import type { IGridColumn } from '../src/components/VectorGrid';
-import { afterDrawerClosed, afterNeighbourChosen, afterToolGone, gridKey, gridTemplate, headerKey, gridWindow, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../src/vector/grid';
+import { chunkColumns } from '../src/components/ChunksGrid';
+import { documentColumns } from '../src/components/DocumentsTab';
+import { trashColumns } from '../src/components/TrashTab';
+import { HEADER_METRICS, afterDrawerClosed, afterNeighbourChosen, afterToolGone, columnWidth, gridKey, gridMinimumWidth, gridTemplate, headerKey, headerWidth, gridWindow, nextFocusAfterRemoval, nextRowAfter, nextSort, scrollToShow, sortRows } from '../src/vector/grid';
 
 interface IRow {
 	id: string;
@@ -210,4 +213,29 @@ test('the header row is part of the grid: Up from the first row reaches its sort
 	const html = renderToStaticMarkup(<VectorGrid label="Rows" rows={ROWS} rowId={rowId} columns={COLUMNS} sort={null} onSort={noop} />);
 	assert.equal(html.match(/<button type="button" tabindex="-1"[^>]*title="Sort by/g)?.length, 2, 'both sort buttons out of the tab order');
 	assert.equal(html.match(/tabindex="0"/g)?.length, 1, 'one tab stop: the row');
+});
+
+test('a column is never narrower than its header\'s words (with the sort mark when it sorts): "DELETED CHUNKS" no longer clips at 1440', () => {
+	const { charPx, paddingPx, sortMarkPx } = HEADER_METRICS;
+	assert.equal(headerWidth('Deleted chunks', true), Math.ceil(14 * charPx + paddingPx + sortMarkPx));
+	assert.ok(headerWidth('Deleted chunks', true) >= 146, 'about 118 px of words at 11 px bold upper case, plus padding and the mark');
+	assert.equal(columnWidth({ width: 110, label: 'Deleted chunks', sortValue: () => 1 }), headerWidth('Deleted chunks', true), 'a declared 110 px grows to fit');
+	assert.equal(columnWidth({ width: 200, label: 'Size', sortValue: () => 1 }), 200, 'a wider declaration stays');
+	assert.equal(columnWidth({ width: 'flex', minWidth: 40, label: 'Folder', sortValue: () => 1 }), headerWidth('Folder', true), "a flexible column's least");
+	assert.equal(gridTemplate([{ width: 34, label: '' }, { width: 110, label: 'Deleted chunks', sortValue: () => 1 }]), `34px ${headerWidth('Deleted chunks', true)}px`);
+	assert.equal(gridTemplate(COLUMNS), 'minmax(160px, 1fr) 80px 60px', 'columns already wide enough are unchanged');
+});
+
+test('fitting the headers to their words widens no grid: each one\'s least is what it was before, so a narrow tab scrolls no further sideways', () => {
+	// The cells are never called here.
+	const ctx = { current: {} as never };
+	const grids: Array<[string, ReadonlyArray<IGridColumn<never>>, number]> = [
+		['Documents', documentColumns(ctx), 908],
+		['Trash, with Deleted chunks', trashColumns(ctx, true), 784],
+		['Trash', trashColumns(ctx, false), 674],
+		['Chunks, with Score', chunkColumns(true), 594],
+		['Chunks', chunkColumns(false), 514],
+	];
+	for (const [name, columns, before] of grids) assert.ok(gridMinimumWidth(columns) <= before, `${name}: ${gridMinimumWidth(columns)} px at least, no more than the ${before} px before`);
+	assert.equal(gridMinimumWidth([{ width: 34, label: '' }, { width: 110, label: 'Deleted chunks', sortValue: () => 1 }]), 34 + headerWidth('Deleted chunks', true), 'the least sums the fitted widths');
 });

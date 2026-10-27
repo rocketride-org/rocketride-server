@@ -67,8 +67,7 @@ The Connections page lists one card per store node a running Tools source
 controls. A card is one button: the node's name, a state badge (**Checking**,
 **Running**, **Stopped**, **Unreachable**, **No access** or **Needs upgrade**), a
 line `<store> · <collection> · <pipeline>` (with "· 1,200 documents" once the
-console has counted them) and its flags. Which of the pipeline's three sources
-run (`ingest ✓ · chat ✓ · tools ✓`) is in the card's tooltip. The flags say
+console has counted them) and its flags. Which of the pipeline's three sources run ("Sources: ingest running, chat running, tools running") is in the card's tooltip. The flags say
 **Read-only**, **Experimental**, **Empty collection** (the collection does not
 exist yet; add a document to create it; it goes away once the console's figures
 show documents), **Repair needed** (the collection's control record is missing)
@@ -218,8 +217,7 @@ The **Documents** tab is a folder rail, a grid, and a drawer.
   listed, with their short ids.
 - **Loading and counts.** The list loads its first page at once and keeps loading
   in the background up to 5,000 documents ("Loading documents… 1,200 of
-  10,000"); rows are re-sorted only when loading ends or pauses, so nothing moves
-  under the pointer. Past 5,000 the footer says "Limit reached at 5,000
+  10,000"); in the store's order, rows are re-sorted only when loading ends or pauses, so nothing moves under the pointer; a column you sort by is re-sorted as pages arrive. Past 5,000 the footer says "Limit reached at 5,000
   documents; more may exist" with **Load more**. While the listing is incomplete
   and the grid is in an order other than the store's own, a note says "Sorted
   within the 1,200 loaded documents; more may exist." When a store sends back
@@ -277,9 +275,7 @@ box, an export menu and the store's own count. **Restore** (on a row, or
 **Restore selected**) brings documents back at once. **Delete permanently** (on a
 row, or **Delete selected permanently…**) and **Empty trash…** remove documents
 from the store for good, after an inline confirmation that does not focus the
-destructive button. Deleting a document sends `delete` with `deleted_only`, so a
-document that still has chunks outside the trash keeps those chunks; the answer
-names the documents it kept, by path. Typing: one document asks for its file name
+destructive button. Deleting a document sends `delete` with `deleted_only`, so a document that still has chunks outside the trash is kept whole: none of its chunks, in the trash or not, is deleted. The answer names the documents it kept, by path. Typing: one document asks for its file name
 (for a document with no path, `1`; the full path is always shown beside the box);
 several documents, or Empty trash, ask for their count; on `rocketride_vector`
 the permanent deletes ask for the table name instead, because the table is
@@ -308,9 +304,7 @@ switch.
   would keep the row, a 120-character preview, and **open** (the document's own
   tab at that chunk), **map** and **ask about this**; a document's name shows it
   in the Documents tab's drawer. The Score heading gives the scale from the
-  store's `dialect.score` (formula, range, which direction is closer); a bar is
-  drawn only where the store reports a range and a direction, inverted where lower
-  is closer, and otherwise there is the number alone with the reason. A row found
+  store's `dialect.score` (formula, range, which direction is closer); a bar is drawn only where the store reports a range (higher is closer unless the store says lower is), inverted where lower is closer, and otherwise there is the number alone with the reason. A row found
   by keyword only has no score and no bar; a Hybrid row that the semantic search
   also found keeps its semantic score and bar.
 - **Threshold.** The slider runs over the store's score range and marks the rows
@@ -332,8 +326,7 @@ switch.
 - **History** is an aside beside the modes. Every finished run is recorded: its
   question (for Compare, A and B), its kind, k, what it came to, when and how
   long. A run of the same kind that repeats the newest entry's whole question
-  updates that entry ("Ran again") rather than adding one; a Search, a Compare
-  and an Ask of the same text stay separate entries. **Load** puts an entry back in the form and
+  updates that entry ("Ran again"), a Compare only when both its questions repeat; a Search, a Compare and an Ask of the same text stay separate entries. **Load** puts an entry back in the form and
   runs nothing; **Rerun** runs it again with its mode and k and the threshold,
   scope and table choice you have now (it is off, with the reason, when it
   cannot run); entries can be pinned, annotated and removed, filtered (All runs,
@@ -347,14 +340,12 @@ switch.
 The **Collection** tab is read-only: what the store node reports about the
 collection. **Embedding** (model, dimensions), **Index** (metric,
 index and its parameters, backend, how the score reads, the score threshold set
-on the node) and **Storage and writes** (size, chunks, whether removing
-documents is on, whether delete moves to the trash, the write batch) come from
-the node's `dialect`; where the node has not said, the console's last statistics
+on the node) and **Storage and writes** (size, chunks, whether removing documents is on, whether delete moves to the trash, the write batch) come from the node's `dialect`, and Chunks from the console's statistics; where the node has not said, the console's last statistics
 fill in the model, dimension and metric, and anything else reads "—".
 
 **Metadata fields** is a table of Field, Type, Coverage, Example and
 **Filterable**. No store lists a collection's fields, so the table has two
-sources. Document fields (path, size, ingest time, chunks, tables) are exact
+sources. Document fields (path, size, modified and ingest time, node, chunks, tables) are exact
 over the documents loaded; the caption says "the 40 documents the current scope
 keeps, of 1,200 loaded" while a scope applies, or "the 1,200 documents loaded".
 Chunk metadata fields come only from **Read fields
@@ -363,8 +354,8 @@ the loaded folders (at most 5 `chunks` calls); the table says how many chunks it
 read from how many documents, that types are guesses and that coverage is of the
 chunks read, not of the collection, and the result is dropped once documents are
 written. **Filterable** says only what the node does: its listing filters are
-applied by the store on pgvector only (and only with a meta column for ingest
-dates), Chroma applies none of them, and elsewhere they are matched over the
+applied by the store on pgvector and RocketRide Vector only (and only with a meta column for ingest
+dates), Chroma applies none of these (only the first-chunk condition), and elsewhere they are matched over the
 loaded rows; the node's search accepts filters on a few keys, of which the Query
 tab offers only the table choice and the scope's documents.
 
@@ -428,7 +419,7 @@ pairs, and a shown duplicate group's rings.
   **Expand selected** adds the selected point's own. Selecting a point, a
   highlighted set (a lasso, a document, a duplicate group, an answer's sources)
   or a placed query fades the other points and the edges between them, and
-  hovering a point of a cluster fades the other clusters, and keeps them faded across the gaps between its points; what is faded is
+  while the map is coloured by cluster (or the Clusters tab is open), hovering a point of a cluster fades the other clusters, and keeps them faded across the gaps between its points; what is faded is
   below the contrast the lit marks keep, on purpose.
 - **Isolate** shows only the lasso selection or a cluster ("Showing 212 of
   1,000"), **Expand by neighbours** grows it by one ring, **Show all** brings
@@ -517,15 +508,10 @@ What is different there:
   Search**; **Add documents** opens with the reason uploads are not available.
   Search and Compare, which need no LLM, work as in the app. Open Vector Explorer
   as an app to ask questions or add documents.
-- **Removals are confirmed in the document.** As in the app, Apply, Delete
-  permanently and Empty trash ask in a panel inside the console or the document
-  that asked, with the same words and typed confirmations; Escape cancels.
+- **Removals are confirmed inline.** As in the app, Apply, Delete permanently and Empty trash ask in a panel inside the console, and a document's Move to Trash asks inside that document, with the same words and typed confirmations; Escape cancels.
 - **Query history is kept in memory.** History lists the runs of this document
   and says "Kept only while this document is open; nothing is saved."
-- **Documents follow each other.** A removal in one document refreshes the
-  console of its connection (its listing, figures and map) and every open
-  document of that connection; a document that was deleted says it is no
-  longer stored, and one moved to the trash says so. A document scores its
+- **Documents follow each other.** A removal in one document refreshes the console of its connection (its listing, figures and map), and any open document it names or that a write naming no document might have changed; a document that was deleted says it is no longer stored, and one moved to the trash says so. A document scores its
   heat strip against the question its console shows, and compares its chunk
   count with the console's listing once the console has listed. A document
   refreshes in place after a write that names it, or that names no document (a
@@ -634,7 +620,7 @@ store node's graph, and the legend says which one computed it.
   edges cover the sampled chunks; draw a larger or light sample to cover more.
   A collection of more than 500 documents is sampled from the first 500 the
   store lists, unless a scope names the documents, and the legend says so.
-- **Scopes and filters.** pgvector filters the documents in the store; Chroma
+- **Scopes and filters.** pgvector and RocketRide Vector filter the documents in the store; Chroma
   filters by first chunk only and Qdrant not at all, so the app filters the
   rows it has loaded there and says so. The map, the search and Ask take a
   scope of at most 2,000 documents. A folder chosen in the Documents rail only
