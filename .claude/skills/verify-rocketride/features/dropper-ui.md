@@ -31,3 +31,4 @@ Preconditions:
 
 - A wrong or stale public key leaves the page on `Connecting...` and `Please wait` with no error message. The only sign is the console error `Failed to start client: AuthenticationException: Bad request`. This is pre-existing (confirmed 2026-10-27).
 - The recipe sets the files on the page's file input, which is what picking files in the file dialog does. Dragging files from the desktop onto the page is not covered.
+- With two uploaded files of the same name, removing one removes both files' results while the other file stays listed, because results are matched by file name. This is pre-existing (confirmed 2026-10-27). A second upload replacing the earlier files is intended, not a bug. When Playwright sets two local paths with the same base name, the page receives the second file's bytes twice; use distinct names, or in-memory files, to test same-named files.

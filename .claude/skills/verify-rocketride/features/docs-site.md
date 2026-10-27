@@ -32,3 +32,4 @@ Preconditions:
 - `./builder docs:build` is not part of `./builder build`; run it yourself. It took about two minutes here on 2026-10-27.
 - `./builder docs:serve` serves the same folder on the fixed port 3000. Use `rr-verify docs`, which picks a free port and is stopped with the run.
 - The search box changes from a textbox to a combobox once it has text. Fill `role=textbox[name="Search"]`, then read `role=listbox >> role=option`.
+- The 404 page keeps the home page's title, `RocketRide Documentation`, although its heading says `Page Not Found`. This is pre-existing (confirmed 2026-10-27): the site serves docs at `/`, and Docusaurus then renders unknown URLs without a page title.

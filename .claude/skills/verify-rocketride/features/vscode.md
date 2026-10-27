@@ -7,7 +7,7 @@ The RocketRide extension (`apps/vscode`) adds a RocketRide view to the activity 
 - `vscode-launch` starts VS Code with this checkout's extension in a private profile, and the extension activates.
 - `vscode-connect` connects from the Welcome page with Direct Connect, the run's host URL, and its API key. The status bar shows `RocketRide: Connected (Direct)`, and the RocketRide view shows the Apps, Nodes, and Pipelines tabs.
 - `vscode-env` writes `ROCKETRIDE_URI` and `ROCKETRIDE_APIKEY` for the connected engine into the workspace `.env`, and keeps the user's own variables when it rewrites the file.
-- `vscode-sidebar` lists the workspace's `.pipe` files in the Pipelines tab, follows files created and deleted outside VS Code, and never rewrites a file without asking.
+- `vscode-sidebar` lists the workspace's `.pipe` files in the Pipelines tab, follows files created and deleted outside VS Code, and asks before it changes a file whose `project_id` duplicates another. It fills in a missing `project_id`, and reformats the file, without asking; that is intended.
 - `vscode-commands` opens the Settings page, the Server Monitor, and the Welcome page from the Command Palette.
 - `vscode-app-builder` creates an app with **New app** and opens it in the App Builder.
 
@@ -54,3 +54,4 @@ Preconditions:
 - **`errors` in the JSON is broad.** It holds `[error]` lines from the extension host log, error lines from the RocketRide output channel, console errors from every webview, and error notifications, all from the time of the step. Read them before calling a step clean, and compare with the same step on a run of the base branch when in doubt.
 - **New app installs packages.** The App Builder runs `pnpm install` in the workspace in the background. The pnpm store is shared in `.verify/vscode-cache/pnpm-store`, so only the first app downloads packages.
 - **MCP and the engine's port.** The extension never calls the engine's `/mcp` endpoint, so the `--port 0` problem in [mcp.md](./mcp.md) does not show in VS Code itself. Local mode starts its engine with `--port=0` and without `ROCKETRIDE_URI`, so an MCP client pointed at that engine's `/mcp` would hit it. See the MCP gotchas.
+- **External writers can collide with the starter pipeline.** A `.pipe` file that stays empty for more than 500 ms gets the starter pipeline written into it in place, so a writer that pauses before writing (or appends with `>>`) can leave trailing skeleton bytes and invalid JSON. Empty `.pipe` files copied in together with `cp -r` are sometimes never given the starter pipeline, with nothing logged. Both are pre-existing (confirmed 2026-10-27). Write a whole file at once when a recipe needs one.
