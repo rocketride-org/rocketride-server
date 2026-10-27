@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { IDocumentItem } from '../src/contract/types';
 import { DIRECTORY_AUTO_ROWS, DIRECTORY_LOAD_MORE } from '../src/vector/budgets';
-import { DOCUMENTS_LAYOUT, MORE_MAY_EXIST, listingComplete, chunkPreview, directoryHeading, documentTooltip, documentsLayout, healthCell, listCountText, noDocumentsText, similarDocuments, similarFailureText, similarK, sortNote, stagedRows, filterItems, filterSummary, pagerApplyPage, pagerBegin, pagerFail, pagerFooter, pagerInit, pagerLoadMore, pagerPause, pagerProgressText, pagerResume, pagerWantsPage, splitPath } from '../src/vector/documents';
+import { DOCUMENTS_LAYOUT, MORE_MAY_EXIST, listingComplete, chunkPreview, directoryHeading, documentTooltip, documentsLayout, healthCell, healthLookup, listCountText, noDocumentsText, similarDocuments, similarFailureText, similarK, sortNote, stagedRows, filterItems, filterSummary, pagerApplyPage, pagerBegin, pagerFail, pagerFooter, pagerInit, pagerLoadMore, pagerPause, pagerProgressText, pagerResume, pagerWantsPage, splitPath } from '../src/vector/documents';
 import { readDocumentsPage } from '../src/vector/results';
 import type { IDocumentsPageView } from '../src/vector/results';
 import { HEALTH_NOT_REPORTED } from '../src/vector/health';
@@ -58,6 +58,23 @@ test('the listing\'s order: folders, then bare names, then documents without a f
 	const orphan = state.rows[state.rows.length - 1]!;
 	assert.deepEqual(healthCell(orphan, null), { text: 'no first chunk', title: 'Chunk 0 is not stored: the document was partly removed or partly ingested.', attention: true }, 'its Health cell says why it needs attention');
 	assert.equal(healthCell(reports[0]!, null).attention, false);
+});
+
+test('R2-B2: a Health cell is kept by its row, never by its objectId: a relist with the same median shows the new health', () => {
+	const lookup = healthLookup(3, new Set());
+	const before = doc('jp', '/misc/japanese.txt', { chunks: 2, max_chunk_id: 1, deleted_chunks: 0 });
+	// The same document after its chunk 0 was removed and the list was refreshed: a new row, the same median.
+	const after = { ...before, chunks: 1, has_first_chunk: false };
+	assert.equal(lookup(before).text, '');
+	assert.equal(lookup(after).text, 'no first chunk', 'the relisted row is worked out again');
+	assert.equal(lookup(after).attention, true, 'so the grid agrees with the Overview\'s "need attention"');
+	assert.equal(lookup(before), lookup(before), 'the same row: worked out once');
+	assert.deepEqual(healthLookup(3, new Set(['jp']))(after), { text: '—', title: 'Not among the loaded rows: its health is not known here.', attention: false }, 'a staged document the listing has not loaded');
+	const fs = require('node:fs') as typeof import('node:fs');
+	const path = require('node:path') as typeof import('node:path');
+	const tab = fs.readFileSync(path.join(__dirname, '..', 'src', 'components', 'DocumentsTab.tsx'), 'utf8');
+	assert.ok(tab.includes('const healthOf = useMemo(() => healthLookup(median, unloaded), [median, unloaded]);'), 'the Documents grid reads its cells through it');
+	assert.doesNotMatch(tab, /new Map<string, IHealthCell>/, 'and keeps no cache of its own by objectId');
 });
 
 test('the Health cell: a defect needs attention; "oversize" is a note that waits for the median; "—" where the store reports nothing to check', () => {

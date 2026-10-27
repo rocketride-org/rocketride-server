@@ -247,9 +247,9 @@ const NO_CHUNKS: IChunksSlot = { objectId: null, items: [], status: 'idle', hasM
 /** The two listings, by their key in the snapshot. */
 type ListKey = 'directory' | 'trash';
 
-/** A trash answer read as a write's view: the documents it moved, the chunks it moved. */
+/** A trash answer read as a write's view: the documents it moved, the chunks it moved, and its audit block. */
 function moved(view: ITrashView): IRemoveView {
-	return { removed: view.moved.map((objectId) => ({ objectId, chunks: null })), notFound: view.notFound, keptLive: [], removedChunks: view.matchedChunks };
+	return { removed: view.moved.map((objectId) => ({ objectId, chunks: null })), notFound: view.notFound, keptLive: [], removedChunks: view.matchedChunks, audit: view.audit };
 }
 
 /**

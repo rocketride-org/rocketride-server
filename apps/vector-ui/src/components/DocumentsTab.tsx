@@ -69,7 +69,7 @@ import { documentsFolder, stagedReview } from '../adapters/consoleActions';
 import type { Availability, IDocumentItem } from '../contract/types';
 import { CONSOLE_ORIGIN } from '../vector/confirm';
 import { writesDuringRemoval } from '../vector/consoleModel';
-import { directoryHeading, documentTooltip, documentsLayout, healthCell, listCountText, listingComplete, noDocumentsText, pagerFooter, pagerProgressText, sortNote, splitPath, stagedRows, targetOf } from '../vector/documents';
+import { directoryHeading, documentTooltip, documentsLayout, healthLookup, listCountText, listingComplete, noDocumentsText, pagerFooter, pagerProgressText, sortNote, splitPath, stagedRows, targetOf } from '../vector/documents';
 import type { IHealthCell } from '../vector/documents';
 import { fileTypeOf, formatSize } from '../vector/fileType';
 import { FILTER_DEBOUNCE_MS, checkScope, directoryExportItems, directoryView, folderScope, folderScopeLabel, folderScopeTargets, sameFilter, scopeNoMatchText, shownExportItem, withText } from '../vector/filters';
@@ -267,17 +267,8 @@ export function DocumentsTab({ entry, model, channels, actions, console: state, 
 		for (const row of pager.rows) counts.set(row.path, (counts.get(row.path) ?? 0) + 1);
 		return counts;
 	}, [pager.rows]);
-	const healthOf = useMemo(() => {
-		const cache = new Map<string, IHealthCell>();
-		return (item: IDocumentItem): IHealthCell => {
-			let cell = cache.get(item.objectId);
-			if (!cell) {
-				cell = unloaded.has(item.objectId) ? { text: '—', title: 'Not among the loaded rows: its health is not known here.', attention: false } : healthCell(item, median);
-				cache.set(item.objectId, cell);
-			}
-			return cell;
-		};
-	}, [median, unloaded]);
+	// Kept by row, never by objectId: a relist's new rows are worked out again, even with the same median.
+	const healthOf = useMemo(() => healthLookup(median, unloaded), [median, unloaded]);
 
 	// Unstaging sends nothing, so it works whatever the writes; staging waits for them.
 	// A row ticked in the grid (its set is remembered: a sort by Status does not move that row under the pointer).

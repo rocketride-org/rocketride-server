@@ -276,7 +276,8 @@ test("a document's health: the tab compares with the console's loaded documents 
 	assert.match(view, /onProbe=\{\(\) => void countDeleted\(\)\}/, 'the two one-row chunks calls run only on the click');
 	assert.match(view, /model\.capabilities\.soft_delete === true/, 'offered only where the store soft-deletes');
 	assert.doesNotMatch(view, /Without first chunk/);
-	assert.match(code('components/DocumentsTab.tsx'), /healthCell\(item, median\)/, "the Documents grid's Health column");
+	assert.match(code('components/DocumentsTab.tsx'), /healthLookup\(median, unloaded\)/, "the Documents grid's Health column");
+	assert.match(code('vector/documents.ts'), /unloaded\.has\(item\.objectId\) \? HEALTH_NOT_LOADED : healthCell\(item, median\)/, 'the same flags, per row');
 	assert.match(code('components/DocumentsTab.tsx'), /pager\.status === 'loading' \|\| pager\.status === 'idle' \? null : medianChunks\(pager\.rows\)/, 'oversize waits for the listing to settle');
 	assert.match(code('views/ConsoleView.tsx'), /const median = settled \? medianChunks\(state\.directory\.rows\) : null;\s*return \{ median, health: healthSummary\(state\.directory\.rows, \{ medianChunks: median, complete: state\.directory\.status === 'done' && state\.directory\.filter === null \}\) \};/, 'the chip and Insights read the same rows and median');
 });
