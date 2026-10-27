@@ -38,18 +38,21 @@
 // Test result never carries over to another connection.
 // =============================================================================
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { Banner, BxX, Button, StatusBadge, commonStyles } from 'shell';
 import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import { announcer } from '../adapters/explorer';
+import { useVectorEnv } from '../envContext';
 import { TONE_EDGE } from '../vector/colors';
 import { drawerView, testResultText, vectorCardView } from '../vector/connections';
 import type { ITestResult } from '../vector/connections';
 import type { IStatsView } from '../vector/results';
+import type { WorkbenchTab } from '../vector/workbench';
 import { VectorIcon } from '../icons';
 import { styles as appStyles } from '../styles';
 import ConnectionDrawerDetails from './ConnectionDrawerDetails';
+import { useSampleChunks } from './useSampleChunks';
 
 const styles = {
 	/** A bordered block under the console's header; its body scrolls when the details are long. */
@@ -66,16 +69,18 @@ const styles = {
 		outline: 'none',
 	} as CSSProperties,
 	header: { display: 'flex', alignItems: 'center', gap: 10, padding: '12px 12px 0 16px' } as CSSProperties,
-	icon: { display: 'inline-flex', width: 20, height: 20, flexShrink: 0, color: 'var(--rr-text-secondary)' } as CSSProperties,
+	icon: { display: 'inline-flex', width: 20, height: 20, flexShrink: 0, color: 'var(--rr-text-primary)' } as CSSProperties,
 	heading: { flex: 1, minWidth: 0 } as CSSProperties,
 	title: { ...commonStyles.textEllipsis, fontSize: 14, fontWeight: 600, color: 'var(--rr-text-primary)' } as CSSProperties,
-	subtitle: { ...commonStyles.textEllipsis, fontSize: 12, color: 'var(--rr-text-secondary)' } as CSSProperties,
+	subtitle: { ...commonStyles.textEllipsis, fontSize: 12 } as CSSProperties,
 	close: commonStyles.paneHeaderButton,
 	body: { flex: 1, minHeight: 0, overflowY: 'auto', padding: '8px 16px' } as CSSProperties,
 	status: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 } as CSSProperties,
 	banner: { marginBottom: 8 } as CSSProperties,
 	footer: { display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '8px 16px 12px', borderTop: '1px solid var(--rr-border)' } as CSSProperties,
 };
+
+const NO_SUBSCRIBE = (): (() => void) => () => undefined;
 
 /** Props. */
 export interface IConnectionDetailsPanelProps {
@@ -95,7 +100,12 @@ export interface IConnectionDetailsPanelProps {
  * @returns The panel.
  */
 export const ConnectionDetailsPanel: React.FC<IConnectionDetailsPanelProps> = ({ endpoint, probe, stats, onTest, onClose }) => {
-	const view = vectorCardView(endpoint, probe);
+	const view = vectorCardView(endpoint, probe, stats);
+	const env = useVectorEnv();
+	// The connection's objects in this mount: where the fields read so far are kept, and the tab the quick actions set.
+	const entry = env.existingConnection(endpoint.key);
+	const fields = useSyncExternalStore(entry?.fields.subscribe ?? NO_SUBSCRIBE, () => entry?.fields.get() ?? null, () => null);
+	const sample = useSampleChunks(endpoint, probe, stats);
 	const region = useRef<HTMLElement>(null);
 	const [testing, setTesting] = useState(false);
 	const [tested, setTested] = useState<ITestResult | null>(null);
@@ -113,6 +123,11 @@ export const ConnectionDetailsPanel: React.FC<IConnectionDetailsPanelProps> = ({
 			if (lost && opener instanceof HTMLElement && opener.isConnected) opener.focus();
 		};
 	}, []);
+
+	const openTab = (tab: WorkbenchTab): void => {
+		entry?.tab.set(tab);
+		onClose();
+	};
 
 	const test = async (): Promise<void> => {
 		if (testing) return;
@@ -170,7 +185,7 @@ export const ConnectionDetailsPanel: React.FC<IConnectionDetailsPanelProps> = ({
 						<Banner variant={tested.variant}>{tested.text}</Banner>
 					</div>
 				)}
-				<ConnectionDrawerDetails drawer={drawerView(endpoint, probe, stats)} />
+				<ConnectionDrawerDetails drawer={drawerView(endpoint, probe, stats)} fields={fields} sample={sample} {...(entry ? { onOpenTab: openTab } : {})} />
 			</div>
 			<div style={styles.footer}>
 				<Button variant="ghost" onClick={() => void test()}>

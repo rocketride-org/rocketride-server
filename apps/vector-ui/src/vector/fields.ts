@@ -264,3 +264,20 @@ export function mergeFields(listing: readonly IFieldRow[], chunks: readonly IFie
 	const names = new Set(listing.map((f) => f.name));
 	return [...listing, ...chunks.filter((f) => !names.has(f.name))];
 }
+
+/** How many field names the drawer lists. */
+export const FIELDS_SUMMARY_NAMES = 8;
+
+/**
+ * One line about the fields read, for the connection drawer.
+ *
+ * @param estimate - The connection's fields, or null before any were read.
+ * @returns The sentence.
+ */
+export function fieldsSummary(estimate: IFieldsEstimate | null): string {
+	if (estimate === null || estimate.rows.length === 0) return 'Not read yet. No store lists a collection\'s fields, so the Collection tab reads them from a sample on request.';
+	const names = estimate.rows.slice(0, FIELDS_SUMMARY_NAMES).map((f) => f.name).join(', ');
+	const more = estimate.rows.length > FIELDS_SUMMARY_NAMES ? `, and ${estimate.rows.length - FIELDS_SUMMARY_NAMES} more` : '';
+	const basis = estimate.chunksRead > 0 ? `chunk fields estimated from ${estimate.chunksRead} ${estimate.chunksRead === 1 ? 'chunk' : 'chunks'}` : 'document fields only';
+	return `${names}${more} (${basis}).`;
+}
