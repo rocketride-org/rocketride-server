@@ -53,13 +53,18 @@ export interface ISplitDividerProps {
 	label: string;
 	/** The id of the editor region it sizes. */
 	controls?: string;
+	/**
+	 * Pixels the bar may sit over the row above (the workbench's tab row while the editor is hidden: its bottom pixels
+	 * are borders, not controls), so it costs that much less height. Its 9 px hit area stays.
+	 */
+	overlap?: number;
 }
 
 const styles = {
-	bar: (focused: boolean, offset: number, dragging: boolean): CSSProperties => ({
+	bar: (focused: boolean, offset: number, dragging: boolean, overlap: number): CSSProperties => ({
 		flex: '0 0 auto',
 		height: 9,
-		margin: '2px 24px 0',
+		margin: overlap > 0 ? `-${overlap}px 24px 0` : '2px 24px 0',
 		display: 'flex',
 		alignItems: 'center',
 		justifyContent: 'center',
@@ -69,8 +74,8 @@ const styles = {
 		outlineOffset: -1,
 		borderRadius: 3,
 		transform: offset === 0 ? undefined : `translateY(${offset}px)`,
-		position: dragging ? 'relative' : undefined,
-		zIndex: dragging ? 30 : undefined,
+		position: dragging || overlap > 0 ? 'relative' : undefined,
+		zIndex: dragging ? 30 : overlap > 0 ? 1 : undefined,
 	}),
 	grip: (active: boolean): CSSProperties => ({
 		width: '100%',
@@ -100,7 +105,7 @@ function keyboardFocus(el: HTMLElement): boolean {
  * @param props - See {@link ISplitDividerProps}.
  * @returns The separator.
  */
-export const SplitDivider: React.FC<ISplitDividerProps> = ({ split, available, onChange, label, controls }) => {
+export const SplitDivider: React.FC<ISplitDividerProps> = ({ split, available, onChange, label, controls, overlap = 0 }) => {
 	const [focused, setFocused] = useState(false);
 	const [hovered, setHovered] = useState(false);
 	// The pointer's travel while the button is down (null: no drag). Only the line moves until release.
@@ -131,7 +136,7 @@ export const SplitDivider: React.FC<ISplitDividerProps> = ({ split, available, o
 			aria-valuetext={aria.text}
 			tabIndex={0}
 			title={split.collapsed ? 'Drag to resize; double-click to show the editor' : 'Drag to resize; double-click to hide the editor'}
-			style={styles.bar(focused, offset ?? 0, offset !== null)}
+			style={styles.bar(focused, offset ?? 0, offset !== null, overlap)}
 			onFocus={(event) => setFocused(keyboardFocus(event.currentTarget))}
 			onBlur={() => setFocused(false)}
 			onMouseEnter={() => setHovered(true)}

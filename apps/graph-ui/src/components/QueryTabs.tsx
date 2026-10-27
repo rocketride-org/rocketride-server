@@ -42,7 +42,7 @@
 import React, { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { BxX, Button } from 'shell';
-import { stepTab } from '../graph/queryTabs';
+import { scrollLeftToShow, stepTab } from '../graph/queryTabs';
 
 /** One tab as the strip shows it. */
 export interface IStripTab {
@@ -133,9 +133,13 @@ export const QueryTabs: React.FC<IQueryTabsProps> = ({ tabs, active, idPrefix, o
 		follow.current = false;
 		buttons.current.get(active)?.focus();
 	}, [active, tabs]);
-	// A tab opened or shown at the far end of a list that scrolls is brought into view.
+	// A tab opened or shown at the far end of a list that scrolls is brought into view, by scrolling the list itself.
+	const list = useRef<HTMLDivElement | null>(null);
 	useEffect(() => {
-		buttons.current.get(active)?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+		const view = list.current;
+		const tab = buttons.current.get(active)?.parentElement;
+		if (!view || !tab) return;
+		view.scrollLeft = scrollLeftToShow(view.getBoundingClientRect(), tab.getBoundingClientRect(), view.scrollLeft);
 	}, [active, tabs.length]);
 	// A close confirmed in a dialog: the focus would fall to the page when the dialog goes, so the shown tab takes it.
 	useEffect(() => {
@@ -147,6 +151,7 @@ export const QueryTabs: React.FC<IQueryTabsProps> = ({ tabs, active, idPrefix, o
 	return (
 		<div style={styles.strip}>
 			<div
+				ref={list}
 				role="tablist"
 				aria-label="Query tabs"
 				style={styles.list}

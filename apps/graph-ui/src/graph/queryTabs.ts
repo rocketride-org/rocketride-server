@@ -257,3 +257,19 @@ export function placeRequest(state: IQueryTabsState, request: TabRequest): { sta
 	if ('refused' in opened) return opened;
 	return { state: opened.state, target: opened.id, put: { text: request.text, run: request.kind === 'new' && request.run, insert: false } };
 }
+
+/**
+ * Where to scroll the tab list so a tab is in view: not at all when it already is, else just enough. A tab wider than
+ * the list shows its start. Only the list scrolls (scrollIntoView would also scroll its ancestors, a frame's document).
+ *
+ * @param view - The list's visible edges on screen.
+ * @param item - The tab's edges on screen.
+ * @param scrollLeft - The list's scroll position now.
+ * @returns The scroll position to set (never below 0).
+ */
+export function scrollLeftToShow(view: { left: number; right: number }, item: { left: number; right: number }, scrollLeft: number): number {
+	const tooWide = item.right - item.left > view.right - view.left;
+	if (item.left >= view.left && (item.right <= view.right || tooWide)) return scrollLeft;
+	if (item.left < view.left || tooWide) return Math.max(0, scrollLeft - (view.left - item.left));
+	return scrollLeft + (item.right - view.right);
+}

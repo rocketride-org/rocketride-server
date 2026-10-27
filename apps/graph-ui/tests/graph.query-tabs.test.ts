@@ -15,7 +15,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { FIRST_QUERY_TAB, MAX_QUERY_TABS, OVERVIEW_TAB, activateTab, askTitle, clipTitle, closeTab, historyTitle, initialTabs, openTab, placeRequest, previewTitle, stepTab, tabOrder, tabsFullText } from '../src/graph/queryTabs';
+import { FIRST_QUERY_TAB, MAX_QUERY_TABS, OVERVIEW_TAB, activateTab, askTitle, clipTitle, closeTab, historyTitle, initialTabs, openTab, placeRequest, previewTitle, scrollLeftToShow, stepTab, tabOrder, tabsFullText } from '../src/graph/queryTabs';
 import type { IQueryTabsState } from '../src/graph/queryTabs';
 
 /** Open `n` more query tabs. */
@@ -188,4 +188,15 @@ test('a tab can open in the background: the shown tab and the query tab shown la
 	const opened = openTab(state, { origin: 'query', activate: false });
 	assert.ok('id' in opened);
 	assert.equal(opened.state.active, FIRST_QUERY_TAB);
+});
+
+// The shown tab is brought into view by scrolling the tab list itself (never an ancestor, such as a frame's document).
+test('the tab list scrolls just enough to show the shown tab, and not at all when it is in view', () => {
+	// The list shows 100..400 on screen and is scrolled 50 px.
+	assert.equal(scrollLeftToShow({ left: 100, right: 400 }, { left: 150, right: 250 }, 50), 50, 'in view: no change');
+	assert.equal(scrollLeftToShow({ left: 100, right: 400 }, { left: 380, right: 460 }, 50), 110, 'past the right edge: scroll right by 60');
+	assert.equal(scrollLeftToShow({ left: 100, right: 400 }, { left: 60, right: 140 }, 50), 10, 'past the left edge: scroll left by 40');
+	assert.equal(scrollLeftToShow({ left: 100, right: 400 }, { left: 20, right: 90 }, 30), 0, 'never below 0');
+	assert.equal(scrollLeftToShow({ left: 100, right: 200 }, { left: 120, right: 260 }, 0), 0, 'a tab wider than the list whose start is in view: no change');
+	assert.equal(scrollLeftToShow({ left: 100, right: 200 }, { left: 60, right: 260 }, 50), 10, 'a tab wider than the list that starts before it: its start is brought in');
 });

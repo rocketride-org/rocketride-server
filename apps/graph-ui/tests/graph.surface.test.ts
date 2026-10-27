@@ -66,7 +66,7 @@ test('on Apache AGE a write settles as the rows it returned, and the result line
 	assert.deepEqual(settleRun('write', created, 'age'), { outcome: 'rows', rowCount: 0, result: created });
 	assert.equal(settleRun('write', created, 'neo4j').outcome, 'affected');
 	assert.equal(resultMeta({ outcome: 'rows', ms: 400 }, created, true), `${AGE_AFFECTED_NOT_REPORTED} · 0 rows returned (limit 25,000) · 0.4 s round trip`);
-	assert.equal(AGE_AFFECTED_NOT_REPORTED, 'Affected count not reported by Apache AGE');
+	assert.equal(AGE_AFFECTED_NOT_REPORTED, 'Change count not reported by Apache AGE');
 	assert.doesNotMatch(resultMeta({ outcome: 'rows', ms: 400 }, created, true), /0 affected/);
 	assert.equal(resultMeta({ outcome: 'rows', ms: 400 }, created), '0 rows returned (limit 25,000) · 0.4 s round trip', 'elsewhere nothing is added');
 });
@@ -88,14 +88,14 @@ test('history keeps a write\'s affected count without a limit, and a read\'s row
 	assert.equal(failed.error, 'boom');
 	const unreported = historySummaryOf({ cypher: 'CREATE (:X)', verb: 'CREATE', outcome: 'affected', ms: 1, limitApplied: null }, 1_000);
 	assert.equal('affected' in unreported, false, 'no count is invented');
-	assert.equal(entrySummary(toHistoryEntry(unreported, 'u')), 'affected count not reported');
+	assert.equal(entrySummary(toHistoryEntry(unreported, 'u')), 'change count not reported');
 });
 
 // Live bug 7: Neo4j and FalkorDB report their change counters added up (a CREATE of one node with a label and one
 // property is 3), so "3 affected" read as 3 nodes. The count is said as changes, with what it adds up.
 test('the result line of a write leads with the changes the node counted, and says what they add up', () => {
-	assert.equal(resultMeta({ outcome: 'affected', affected: 3, ms: 400 }, answer([])), '3 changes (nodes, relationships, labels and properties counted together) · 0 rows returned (limit 25,000) · 0.4 s round trip');
-	assert.equal(CHANGES_NOTE, 'nodes, relationships, labels and properties counted together');
+	assert.equal(resultMeta({ outcome: 'affected', affected: 3, ms: 400 }, answer([])), '3 changes (nodes, relationships, labels, properties and indexes counted together) · 0 rows returned (limit 25,000) · 0.4 s round trip');
+	assert.equal(CHANGES_NOTE, 'nodes, relationships, labels, properties and indexes counted together');
 	assert.equal(changesText(1), '1 change');
 	assert.equal(changesText(1200), '1,200 changes');
 	assert.doesNotMatch(resultMeta({ outcome: 'affected', affected: 3, ms: 400 }, answer([])), /affected/);

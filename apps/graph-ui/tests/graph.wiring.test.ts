@@ -186,10 +186,31 @@ test('the tab row wraps the run bar before it hides a tab, and the shown tab is 
 	const tabs = code(read('components', 'QueryTabs.tsx'));
 	assert.ok(/strip: \{ flex: '1 1 auto', minWidth: 0,/.test(tabs), 'the strip\'s basis is its content: the row breaks before squeezing it');
 	assert.ok(/list: \{[^}]*overflowX: 'auto'/.test(tabs), 'tabs wider than the row scroll');
-	assert.ok(/buttons\.current\.get\(active\)\?\.scrollIntoView\?\.\(\{ block: 'nearest', inline: 'nearest' \}\);\s*\}, \[active, tabs\.length\]\);/.test(tabs), 'the shown tab is scrolled into view');
+	assert.ok(/view\.scrollLeft = scrollLeftToShow\([^;]*\);\s*\}, \[active, tabs\.length\]\);/.test(tabs), 'the shown tab is scrolled into view');
 	const workbench = code(read('views', 'WorkbenchView.tsx'));
 	assert.ok(/tabRow: \{[^}]*flexWrap: 'wrap'/.test(workbench), 'the row wraps');
 	assert.ok(/barHost: \{ flex: '0 1 auto', minWidth: 0, marginLeft: 'auto'/.test(workbench), 'the run bar takes its own line, right-aligned, when it wraps');
+});
+
+// Review 4c: Stop waiting appearing beside Run widened the run bar by about 95 px, so a bar near the wrap threshold
+// wrapped and unwrapped around every run. It takes Run's slot instead, and a focus on the button that went moves to the
+// one that came.
+test('Stop waiting takes the Run / Run all slot while a run is out, and the focus follows the slot', () => {
+	const surface = code(read('components', 'RunSurface.tsx'));
+	const bar = surface.slice(surface.indexOf('const runBar = ('), surface.indexOf('return (', surface.indexOf('const runBar = (')));
+	assert.ok(/<span\s+ref=\{runSlot\}\s+style=\{styles\.runSlot\}/.test(bar), 'one slot');
+	assert.ok(/\{runner\.canStop \? \(\s*<Button variant="ghost" small=\{inRow\} title=\{STOP_WAITING_NOTE\} onClick=\{\(\) => runner\.stopWaiting\(\)\}>\s*Stop waiting\s*<\/Button>\s*\) : \(/.test(bar), 'Stop waiting in place of Run and Run all');
+	assert.equal((bar.match(/Stop waiting\s*<\/Button>/g) ?? []).length, 1, 'and nowhere else in the bar');
+	assert.ok(/runSlot: \{ display: 'contents' \}/.test(surface), 'the slot adds no box of its own');
+	assert.ok(/useLayoutEffect\(\(\) => \{\s*const focused = document\.activeElement;\s*if \(runSlotFocused\.current && \(focused === null \|\| focused === document\.body \|\| !focused\.isConnected\)\) runSlot\.current\?\.querySelector<HTMLElement>\('button'\)\?\.focus\(\);\s*\}, \[runner\.canStop\]\);/.test(surface), 'a focus lost with the button that went goes to the one in the slot');
+	// Review 4c: the hidden-editor divider sits 3 px over the tab row's bottom borders, in the workbench only.
+	assert.ok(/overlap=\{split\.collapsed && barHost !== undefined \? 3 : 0\}/.test(surface));
+	const divider = code(read('components', 'SplitPane.tsx'));
+	assert.ok(/margin: overlap > 0 \? `-\$\{overlap\}px 24px 0` : '2px 24px 0'/.test(divider) && /height: 9,/.test(divider), 'same 9 px hit area, less height');
+	// Review 4c: the shown tab is brought into view by scrolling the tab list itself, never an ancestor.
+	const tabs = code(read('components', 'QueryTabs.tsx'));
+	assert.doesNotMatch(tabs, /scrollIntoView/);
+	assert.ok(/view\.scrollLeft = scrollLeftToShow\(view\.getBoundingClientRect\(\), tab\.getBoundingClientRect\(\), view\.scrollLeft\);/.test(tabs));
 });
 
 // Live bug 3: Home hid the editor and unmounted the divider, so the focus fell to the page and End did nothing.
