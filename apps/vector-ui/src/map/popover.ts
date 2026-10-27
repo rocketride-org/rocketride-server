@@ -203,3 +203,14 @@ export function focusHold(input: IFocusHoldInput): 'none' | 'hold' | 'take' | 'g
 export function firstEnabled(controls: ReadonlyArray<{ disabled: boolean; hidden: boolean }>): number {
 	return controls.findIndex((c) => !c.disabled && !c.hidden);
 }
+
+/**
+ * Where the focus goes when the busy chip leaves with the focus on its Cancel: the Layout select (the control a
+ * cancelled layout is chosen again from) when it can take it, else the toolbar itself. Never the page.
+ *
+ * @param layout - The Layout select: whether it is there and whether it is disabled.
+ * @returns The target.
+ */
+export function afterCancelFocus(layout: { present: boolean; disabled: boolean }): 'layout' | 'toolbar' {
+	return layout.present && !layout.disabled ? 'layout' : 'toolbar';
+}

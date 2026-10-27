@@ -22,7 +22,7 @@ import { ClustersPanel } from '../src/components/ClustersPanel';
 import { DuplicatesPanel } from '../src/components/DuplicatesPanel';
 import { HeatStrip } from '../src/components/HeatStrip';
 import { LEGEND_CLUSTERS, Legend, markRows } from '../src/components/Legend';
-import { MapToolbar, TREE_HINT } from '../src/components/MapToolbar';
+import { MapToolbar, STATUS_HEIGHT, TREE_HINT } from '../src/components/MapToolbar';
 import { NeighbourList } from '../src/components/NeighbourList';
 import { OutliersBody, OutliersPanel } from '../src/components/OutliersPanel';
 import { PointCanvas } from '../src/components/PointCanvas';
@@ -35,7 +35,7 @@ import { COLOUR_MODES, clusterColours, colourPoints } from '../src/map/colours';
 import { dimMask, isolateMask } from '../src/map/isolate';
 import { removeTargetsOf } from '../src/map/model';
 import { outlierRows } from '../src/map/outliers';
-import { POPOVER_GAP, POPOVER_MARGIN, clipArea, firstEnabled, focusHold, placePopover, popoverKey } from '../src/map/popover';
+import { POPOVER_GAP, POPOVER_MARGIN, afterCancelFocus, clipArea, firstEnabled, focusHold, placePopover, popoverKey } from '../src/map/popover';
 import { STAGE_REMOVAL, pairLabel, removeAllLabel, removeOthersLabel } from '../src/map/reviewWording';
 import { readPalette } from '../src/map/tokens';
 import { SelectionTab } from '../src/views/MapView';
@@ -153,23 +153,30 @@ test('MapToolbar: sizes capped by the node\'s limits, t-SNE disabled above 1,000
 	assert.match(out, /aria-pressed="false"[^>]*>Table/);
 	const busy = html(<MapToolbar {...base} busy="Laying out…" canCancel query={{ enabled: true, reason: null }} />);
 	assert.match(busy, /role="status"[^>]*>Laying out…</);
-	// The busy words and Cancel float in a chip under the toolbar (absolute: the row never changes), said by a live
-	// region that is always there.
-	assert.match(busy, /<div style="[^"]*position:absolute;top:calc\(100% \+ 6px\)[^"]*" data-map-status=""><span aria-hidden="true">Laying out…<\/span><button[^>]*>Cancel<\/button><\/div>/);
+	// The busy words (a live region) and Cancel are in the status line: a line of its own under the controls, at a
+	// fixed height, always there.
+	const line = (markup: string): string => /<div style="([^"]*)" data-map-status="">/.exec(markup)?.[1] ?? '';
+	assert.match(busy, /<div style="[^"]*" data-map-status=""><span role="status"[^>]*>Laying out…<\/span><button[^>]*>Cancel<\/button><\/div>/);
 	const idle = html(<MapToolbar {...base} query={{ enabled: true, reason: null }} />);
-	assert.match(idle, /<span role="status" style="position:absolute;[^"]*"><\/span>/, 'idle: an empty live region');
-	assert.doesNotMatch(idle, /data-map-status/, 'idle: no chip');
-	// Everything that is not absolute is the same, busy or idle: the row is deterministic.
-	const flow = (markup: string): string => markup.replace(/<span role="status"[^>]*>[^<]*<\/span>/, '').replace(/<div style="[^"]*" data-map-status="">[\s\S]*?<\/div>/, '').replace(/ disabled=""/g, '');
+	assert.match(idle, /<div style="[^"]*" data-map-status=""><span role="status"[^>]*><\/span><\/div>/, 'idle: the line is there, empty');
+	for (const out2 of [busy, idle]) {
+		assert.match(line(out2), new RegExp(`flex-basis:100%;height:${STATUS_HEIGHT}px`), 'its own line, at a fixed height');
+		assert.doesNotMatch(out2, /position:absolute;top|position:fixed/, 'nothing floats over the map or the rows under the toolbar');
+	}
+	// Busy or idle, the markup differs only in the words, Cancel and what busy disables: nothing moves.
+	const flow = (markup: string): string => markup.replace(/(<span role="status"[^>]*>)[^<]*(<\/span>)/, '$1$2').replace(/<button[^>]*>Cancel<\/button>/, '').replace(/ disabled=""/g, '').replace(/ title="[^"]*"/g, '');
 	assert.equal(flow(busy), flow(idle));
-	// Without a sample the empty state says it: no chip.
-	assert.doesNotMatch(html(<MapToolbar {...base} sample={null} busy="Sampling…" query={{ enabled: true, reason: null }} />), /data-map-status/);
+	assert.equal(line(busy), line(idle), 'the same line style');
+	// Cancel leaving with the focus hands it to Layout, else the toolbar.
+	assert.equal(afterCancelFocus({ present: true, disabled: false }), 'layout');
+	assert.equal(afterCancelFocus({ present: true, disabled: true }), 'toolbar');
+	assert.equal(afterCancelFocus({ present: false, disabled: false }), 'toolbar');
 });
 
-test('MapToolbar is one row: Points, Layout, Colour by, Query, Table, Advanced, the view\'s menus (and an always-present live region); the rest is in Advanced, closed at first', () => {
+test('MapToolbar is one row of controls: Points, Layout, Colour by, Query, Table, Advanced, the view\'s menus, then its status line; the rest is in Advanced, closed at first', () => {
 	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, query: { enabled: true, reason: null }, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop, onExpandSelected: noop, onToggle3D: noop, extras: <span data-extras="">Export Views</span> };
 	const closed = html(<MapToolbar {...base} />);
-	const order = ['aria-label="Points"', 'aria-label="Layout"', 'aria-label="Colour by"', 'aria-label="Query"', '>Table</button>', 'data-component="AdvancedPopover"', 'data-extras=""', 'role="status"'].map((needle) => closed.indexOf(needle));
+	const order = ['aria-label="Points"', 'aria-label="Layout"', 'aria-label="Colour by"', 'aria-label="Query"', '>Table</button>', 'data-component="AdvancedPopover"', 'data-extras=""', 'data-map-status=""'].map((needle) => closed.indexOf(needle));
 	assert.ok(order.every((at) => at >= 0), JSON.stringify(order));
 	assert.deepEqual([...order].sort((a, b) => a - b), order, 'in that order');
 	assert.match(closed, /<button[^>]*aria-expanded="false"[^>]*>Advanced ▾<\/button>/);
@@ -547,7 +554,7 @@ test('an opened panel focuses its first control that is neither disabled nor hid
 	assert.equal(firstEnabled([]), -1);
 });
 
-test('a disabled Query and t-SNE carry their reasons as the controls\' descriptions; the busy chip holds only the busy words and Cancel', () => {
+test('a disabled Query and t-SNE carry their reasons as the controls\' descriptions; the status line holds only the busy words and Cancel', () => {
 	const base = { limits, sample: demo, busy: null, layout: 'pca' as const, colourBy: 'document' as const, lasso: false, table: false, onSample: noop, onLayout: noop, onCancel: noop, onColourBy: noop, onQuery: noop, onToggleLasso: noop, onFit: noop, onToggleTable: noop };
 	const why = 'Text queries need the embedding node reachable from the Tools source';
 	const out = html(<MapToolbar {...base} query={{ enabled: false, reason: why }} tsneReason="t-SNE is limited to 1,000 points; this sample has 5,000." />);
@@ -559,9 +566,9 @@ test('a disabled Query and t-SNE carry their reasons as the controls\' descripti
 	assert.ok(tsneId);
 	assert.match(out, new RegExp(`<span id="${tsneId}"[^>]*>t-SNE is limited to 1,000 points; this sample has 5,000\\.</span>`));
 	const busy = html(<MapToolbar {...base} busy="Laying out…" canCancel query={{ enabled: false, reason: why }} tsneReason="t-SNE is limited to 1,000 points; this sample has 5,000." />);
-	const chip = /<div[^>]*data-map-status="">([\s\S]*?)<\/div>/.exec(busy)?.[1] ?? '';
-	assert.match(chip, /Laying out…/);
-	assert.doesNotMatch(chip, /Text queries|t-SNE/, 'no reason in the busy chip');
+	const status = /<div[^>]*data-map-status="">([\s\S]*?)<\/div>/.exec(busy)?.[1] ?? '';
+	assert.match(status, /Laying out…/);
+	assert.doesNotMatch(status, /Text queries|t-SNE/, 'no reason in the status line');
 	// Nothing to explain: no description on Query, Run or Layout.
 	const fine = html(<MapToolbar {...base} query={{ enabled: true, reason: null }} />);
 	assert.doesNotMatch(fine, /<input aria-label="Query" aria-describedby|<select aria-label="Layout" aria-describedby|type="submit"[^>]*aria-describedby/);

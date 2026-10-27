@@ -849,3 +849,15 @@ test('the reasons a toolbar control is off are shown in full where they can wrap
 	// A staging press inserts nothing in the panel (the pending bar says it), so no row moves under the pointer.
 	assert.doesNotMatch(view, /setStagedNote|data-map-staged/);
 });
+
+test('the map\'s busy words and Cancel are in the toolbar\'s status line, never over the map column; Cancel leaving with the focus hands it to Layout, else the toolbar', () => {
+	const view = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'views', 'MapView.tsx'), 'utf8');
+	assert.doesNotMatch(view, /BusyChip|data-map-status/, 'no overlay in the map column');
+	const toolbar = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'components', 'MapToolbar.tsx'), 'utf8');
+	// A layout cleanup runs before Cancel is removed, while it still has the focus.
+	assert.match(toolbar, /useBrowserLayoutEffect\(\s*\(\) => \(\) => \{\s*if \(button\.current === null \|\| typeof document === 'undefined' \|\| document\.activeElement !== button\.current\) return;/);
+	assert.match(toolbar, /\(afterCancelFocus\(\{ present: layout !== null, disabled: !!layout\?\.disabled \}\) === 'layout' \? layout : toolbar\)\?\.focus\(\);/);
+	// In the rendered map: the line is there, empty, while nothing runs.
+	const out = render({ sample: modelOf(loadSample('sample_demo_1000.json')) });
+	assert.match(out, /<div style="[^"]*" data-map-status=""><span role="status"[^>]*><\/span><\/div>/);
+});

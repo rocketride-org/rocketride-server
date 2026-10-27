@@ -27,9 +27,10 @@
 // One row: Points, Layout, Colour by, the text query, the Table toggle (the
 // map's non-visual alternative, and the keyboard route to select a point, so
 // it is never behind a popover), then Advanced and the view's menus
-// (`extras`: Export, Views). Nothing on the row comes or goes with a run: the
-// busy words and Cancel float in a chip just under the toolbar, over the
-// map's top-left corner, and a live region that is always there says them.
+// (`extras`: Export, Views). Under it, a status line of its own, always there
+// at the same height: the busy words (a live region) and Cancel while a
+// layout runs, empty when idle. Nothing moves when a run starts or ends, and
+// nothing floats over the map or the rows under the toolbar.
 // The row is kept compact (a 120 px query box, 6 px gaps) so it is one row in
 // a dev-tool frame at 1440 too (measured: its controls span 1,061 px).
 //
@@ -38,7 +39,9 @@
 // say a light sample has no text). Layout: PCA (the node's own), Neighbour
 // graph (seeded force layout over the kNN graph), t-SNE (at most 1,000 points;
 // disabled above that). A running layout shows "Laying out…" and Cancel in the
-// chip. Colour by, grouped Content / Document / Analysis, each mode without its
+// status line; when Cancel goes with the focus on it (the layout ended or was
+// cancelled), the focus moves to Layout, else to the toolbar, never to the
+// page. Colour by, grouped Content / Document / Analysis, each mode without its
 // data disabled with the reason as its title. The text query (disabled when
 // the embedding node is unreachable). The reasons of a disabled Query and of
 // t-SNE are the controls' descriptions (aria-describedby); the map view shows
@@ -59,14 +62,13 @@
 // it back when it is enabled again.
 // =============================================================================
 
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { EdgeMode, EdgesPerPoint, MapLayout, MapToolbarProps as ContractMapToolbarProps, SampleMode } from '../contract/types';
 import { COLOUR_MODES } from '../map/colours';
 import type { IColourMode, MapColourBy } from '../map/colours';
-import { focusHold } from '../map/popover';
-import { FLOAT_SHADOW, MAP_STYLES } from '../map/styles';
-import { OUTLINE_TOKEN } from '../map/tokens';
+import { afterCancelFocus, focusHold } from '../map/popover';
+import { MAP_STYLES } from '../map/styles';
 import { num } from '../map/wording';
 import { AdvancedPopover, PANEL_ATTRIBUTE } from './AdvancedPopover';
 
@@ -117,6 +119,38 @@ export const TREE_HINT = 'Tree reads best over the Neighbour graph layout';
 /** The Colour by groups, in order. */
 const COLOUR_GROUPS: Array<IColourMode['group']> = ['Content', 'Document', 'Analysis'];
 
+/** The status line's height, CSS pixels (a small Cancel fits it). */
+export const STATUS_HEIGHT = 24;
+
+/** Layout effects run only in a browser (a server render would warn). */
+const useBrowserLayoutEffect = typeof document !== 'undefined' ? useLayoutEffect : useEffect;
+
+/**
+ * Cancel of a running layout. When it leaves the page with the focus on it (the layout ended, or was cancelled),
+ * a layout cleanup, which runs before it is removed, hands the focus to Layout, else to the toolbar.
+ *
+ * @param props - Cancel's handler and the toolbar.
+ * @returns The button.
+ */
+function CancelButton(props: { onCancel(): void; root: React.RefObject<HTMLDivElement | null> }): React.ReactElement {
+	const button = useRef<HTMLButtonElement>(null);
+	const root = props.root;
+	useBrowserLayoutEffect(
+		() => () => {
+			if (button.current === null || typeof document === 'undefined' || document.activeElement !== button.current) return;
+			const toolbar = root.current;
+			const layout = toolbar?.querySelector<HTMLSelectElement>('select[aria-label="Layout"]') ?? null;
+			(afterCancelFocus({ present: layout !== null, disabled: !!layout?.disabled }) === 'layout' ? layout : toolbar)?.focus();
+		},
+		[root],
+	);
+	return (
+		<button ref={button} type="button" style={S.cancel} onClick={props.onCancel}>
+			Cancel
+		</button>
+	);
+}
+
 /** What a light sample lacks (the Points options say "light"; their title and the select's description say this). */
 const LIGHT_WORDS = 'no text';
 
@@ -131,11 +165,13 @@ const LAYOUTS: Array<{ id: MapLayout; label: string }> = [
 ];
 
 const S = {
-	// The busy words and Cancel: over the map's top-left corner, under the toolbar, so the row never changes.
-	chip: { ...MAP_STYLES.small, position: 'absolute', top: 'calc(100% + 6px)', left: 10, zIndex: 3, display: 'inline-flex', alignItems: 'center', gap: 8, padding: '4px 4px 4px 10px', borderRadius: 6, background: 'var(--rr-bg-paper)', border: `1px solid var(${OUTLINE_TOKEN})`, boxShadow: FLOAT_SHADOW, whiteSpace: 'nowrap' } as React.CSSProperties,
+	// The status line: a line of its own (full width) at a fixed height, the same idle and busy.
+	status: { ...MAP_STYLES.small, flexBasis: '100%', height: STATUS_HEIGHT, minWidth: 0, display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden', whiteSpace: 'nowrap' } as React.CSSProperties,
+	words: { overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 } as React.CSSProperties,
+	cancel: { ...MAP_STYLES.button, height: STATUS_HEIGHT - 2, padding: '0 8px', fontSize: 11.5 } as React.CSSProperties,
 	query: { ...MAP_STYLES.input, minWidth: 120, width: 120 } as React.CSSProperties,
 	// Compact enough for one row in a dev-tool frame at 1440 (measured: 1,110 px of map width there).
-	row: { ...MAP_STYLES.toolbar, gap: 6, position: 'relative' } as React.CSSProperties,
+	row: { ...MAP_STYLES.toolbar, gap: 6 } as React.CSSProperties,
 	// A control's description, read by assistive tech; the view shows the sentence in the legend.
 	described: { position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' } as React.CSSProperties,
 	fieldset: { border: 'none', margin: 0, padding: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 } as React.CSSProperties,
@@ -364,21 +400,13 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 				)}
 			</AdvancedPopover>
 			{props.extras ?? null}
-			{/* Always there, so the busy words are announced when they come. */}
-			<span role="status" style={S.described}>
-				{props.busy ?? ''}
-			</span>
-			{props.busy && sample ? (
-				<div style={S.chip} data-map-status="">
-					{/* Said by the live region above; shown here. */}
-					<span aria-hidden="true">{props.busy}</span>
-					{props.canCancel ? (
-						<button type="button" style={MAP_STYLES.button} onClick={props.onCancel}>
-							Cancel
-						</button>
-					) : null}
-				</div>
-			) : null}
+			{/* The status line: always there, at the same height idle or busy, so nothing moves with a run. */}
+			<div style={S.status} data-map-status="">
+				<span role="status" style={S.words} title={props.busy ?? undefined}>
+					{props.busy ?? ''}
+				</span>
+				{props.busy && props.canCancel ? <CancelButton onCancel={props.onCancel} root={root} /> : null}
+			</div>
 			{queryWhy ? (
 				<span id={queryWhyId} style={S.described}>
 					{queryWhy}
