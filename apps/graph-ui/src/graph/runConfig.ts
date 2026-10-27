@@ -181,15 +181,19 @@ export interface IFinishedRun {
 
 /**
  * The history summary of a finished run: its outcome, its count (rows for a read, affected for a write), and the
- * row limit only when one was sent.
+ * row limit only when one was sent. A write whose node does not count changes (Apache AGE, see
+ * {@link affectedNotReported}) settles as rows; History records it as a write whose count was not reported, never as
+ * "0 rows".
  *
  * @param run - The finished run.
  * @param now - The clock reading when it finished (ms since the epoch).
+ * @param opts - `affectedNotReported`: the run is a write on such a node.
  * @returns The summary for {@link toHistoryEntry}.
  */
-export function historySummaryOf(run: IFinishedRun, now: number): IRunSummary {
+export function historySummaryOf(run: IFinishedRun, now: number, opts: { affectedNotReported?: boolean } = {}): IRunSummary {
 	const ms = Math.round(run.ms ?? 0);
-	const outcome: IRunSummary['outcome'] = run.outcome === 'rows' || run.outcome === 'affected' || run.outcome === 'abandoned' ? run.outcome : 'error';
+	const settled: IRunSummary['outcome'] = run.outcome === 'rows' || run.outcome === 'affected' || run.outcome === 'abandoned' ? run.outcome : 'error';
+	const outcome: IRunSummary['outcome'] = opts.affectedNotReported === true && settled === 'rows' ? 'affected' : settled;
 	return {
 		cypher: run.cypher,
 		at: Math.round(now - (run.ms ?? 0)),

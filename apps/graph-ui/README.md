@@ -153,13 +153,15 @@ another account signed in without a reload.
 ## The workbench
 
 Opening a connection gives it a workbench document. It opens on **Overview**,
-beside **Query 1**, and nothing runs by itself. One row holds the tabs and, on
-the right, the shown tab's run bar, or on Overview its actions: **Explore**,
-**New query** and **Refresh schema** (read the schema again). **Explore** opens
-an Explore tab and runs a sample of 25 relationships with their end nodes
-(`MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 25`, a read every engine runs).
-Pressing it again shows that tab without running it again; once you have
-edited that tab's text, Explore opens a new one and runs the sample there.
+beside **Query 1**, and nothing runs by itself. The tabs have a row of their
+own; the row under it holds the shown tab's run bar, or on Overview its actions:
+**Explore**, **New query** and **Refresh schema** (read the schema again). A run
+moves neither row, and no control in the run bar changes line while a run is
+out. **Explore** opens an Explore tab and runs a sample of 25 relationships
+with their end nodes (`MATCH (a)-[r]->(b) RETURN a, r, b LIMIT 25`, a read
+every engine runs). Pressing it again shows that tab without running it again;
+once you have edited that tab's text, Explore opens a new one and runs the
+sample there.
 
 - **Query tabs.** Each query tab has its own editor, row limit, runs, results
   and graph, and a tab you are not looking at keeps them; only the tab shown
@@ -821,9 +823,10 @@ and it always says what it is:
   property reads "3 changes", not three nodes, and the result line says what
   the count adds up. Apache AGE's node reports the number of rows the statement
   returned there instead (0 for a write with no `RETURN`), so on Apache AGE the
-  result line says **Change count not reported by Apache AGE**, and the strip
-  and History show the rows returned. There is no row-limit choice here:
-  `execute` returns at most the node's own maximum.
+  result line says **Change count not reported by Apache AGE**, History says
+  *change count not reported*, and the statement strip shows the rows
+  returned. There is no row-limit choice here: `execute` returns at most the
+  node's own maximum.
 - History opens beside the editor here too. **Load into editor** and **Run
   again** only put the statement in the editor; nothing is sent until you press
   Execute.

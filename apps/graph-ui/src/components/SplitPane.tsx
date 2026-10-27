@@ -54,8 +54,8 @@ export interface ISplitDividerProps {
 	/** The id of the editor region it sizes. */
 	controls?: string;
 	/**
-	 * Pixels the bar may sit over the row above (the workbench's tab row while the editor is hidden: its bottom pixels
-	 * are borders, not controls), so it costs that much less height. Its 9 px hit area stays.
+	 * Pixels the bar may sit over the row above (the workbench's control row while the editor is hidden: its bottom
+	 * pixels are padding, not controls), so it costs that much less height. Its 9 px hit area stays.
 	 */
 	overlap?: number;
 }

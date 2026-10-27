@@ -89,6 +89,17 @@ test('history keeps a write\'s affected count without a limit, and a read\'s row
 	const unreported = historySummaryOf({ cypher: 'CREATE (:X)', verb: 'CREATE', outcome: 'affected', ms: 1, limitApplied: null }, 1_000);
 	assert.equal('affected' in unreported, false, 'no count is invented');
 	assert.equal(entrySummary(toHistoryEntry(unreported, 'u')), 'change count not reported');
+	// Live check at d9b7c0cb8: an Apache AGE write settles as the rows it returned (its node's count is rows, not
+	// changes), so History said "0 rows". Its History entry says the change count is not reported, as its result line does.
+	const ageWrite = historySummaryOf({ cypher: 'CREATE (:T {a: 1})', verb: 'CREATE', outcome: 'rows', result: answer([]), ms: 46, limitApplied: null }, 1_000, { affectedNotReported: true });
+	assert.equal(ageWrite.outcome, 'affected');
+	assert.equal('affected' in ageWrite, false, 'no count is invented');
+	assert.equal('rows' in ageWrite, false);
+	assert.equal(entrySummary(toHistoryEntry(ageWrite, 'a')), 'change count not reported');
+	const ageRead = historySummaryOf({ cypher: 'MATCH (n) RETURN n', verb: 'MATCH', outcome: 'rows', result: answer([[1]]), ms: 5, limitApplied: 1000 }, 1_000, { affectedNotReported: false });
+	assert.equal(entrySummary(toHistoryEntry(ageRead, 'r')), '1 row (limit 1,000)', 'a read is unchanged');
+	const ageFailed = historySummaryOf({ cypher: 'CREATE (', verb: 'CREATE', outcome: 'error', error: 'boom', ms: 1, limitApplied: null }, 1_000, { affectedNotReported: true });
+	assert.equal(ageFailed.outcome, 'error', 'a failed write stays a failure');
 });
 
 // Live bug 7: Neo4j and FalkorDB report their change counters added up (a CREATE of one node with a label and one

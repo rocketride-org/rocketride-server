@@ -34,10 +34,10 @@
 // graph session and load slot); the write console mounts one.
 //
 // The room the results get:
-//   - in the workbench the run bar sits in the tab row (the host hands a
-//     `barHost` and the bar is portalled there), so a query tab adds only its
-//     editor above the results; the bar also holds the Graph / Table / Raw
-//     switch, so the results have no row of their own for it;
+//   - in the workbench the run bar sits in the row under the tabs (the host
+//     hands a `barHost` and the bar is portalled there), so a query tab adds
+//     only its editor above the results; the bar also holds the Graph / Table /
+//     Raw switch, so the results have no row of their own for it;
 //   - a divider (SplitPane.tsx) sets the editor's height, kept in the prefs
 //     (graph.editorHeight), and can hide the editor, leaving the run bar with
 //     the statement's first line;
@@ -157,7 +157,7 @@ export interface IRunSurfaceProps {
 	/** Open a new query tab with this text, not run (the workbench only). */
 	onNewQuery?(cypher: string, title: string): void;
 	/**
-	 * Where the run bar goes: an element in the host's tab row (the workbench), or null while it is not there yet.
+	 * Where the run bar goes: an element in the host's control row (the workbench), or null while it is not there yet.
 	 * Absent: the bar sits under the editor (the write console).
 	 */
 	barHost?: HTMLElement | null;
@@ -175,16 +175,22 @@ const styles = {
 	editorRegion: (hidden: boolean): CSSProperties => ({ flex: '0 0 auto', padding: '6px 24px 0', display: hidden ? 'none' : 'flex', flexDirection: 'column', gap: 6 }),
 	editorBox: (height: number, hidden: boolean): CSSProperties => ({ flex: '0 0 auto', height, display: hidden ? 'none' : undefined }),
 	runBar: { display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' } as CSSProperties,
-	// In the tab row: the same controls, right of the tabs, wrapping only when the row is too narrow.
-	runBarInRow: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', justifyContent: 'flex-end', minWidth: 0 } as CSSProperties,
-	firstLine: { maxWidth: '40%', minWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 12, padding: '4px 8px', border: '1px solid var(--rr-border)', borderRadius: 4, background: 'var(--rr-bg-paper)', color: 'var(--rr-text-primary)', cursor: 'pointer', textAlign: 'left' } as CSSProperties,
-	// Run and Run all, or Stop waiting in their place: one slot, so the run bar keeps its width while a run is out.
-	runSlot: { display: 'contents' } as CSSProperties,
-	// The run bar's state text ("Will run…", "Running…", "Waiting…"): a fixed basis, so line breaking sees one width
-	// whatever it says, and the bar does not wrap and unwrap around each run. It can hold the focus (see the run slot).
+	// In the workbench's control row: the same controls, right-aligned, filling the row, so its lines break on the row's
+	// width (not on a measured width of its own, which Chrome takes from the items' content, not their flex basis) and
+	// it wraps only when the row is too narrow.
+	runBarInRow: { flex: '1 1 auto', display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', justifyContent: 'flex-end', minWidth: 0 } as CSSProperties,
+	// The hidden editor's first line takes the room left on its line (up to 40%): line breaking counts only its 60 px.
+	firstLine: { flex: '1 1 0', maxWidth: '40%', minWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 12, padding: '4px 8px', border: '1px solid var(--rr-border)', borderRadius: 4, background: 'var(--rr-bg-paper)', color: 'var(--rr-text-primary)', cursor: 'pointer', textAlign: 'left' } as CSSProperties,
+	// Run and Run all, or Stop waiting in their place: one slot, at least as wide while a run is out as before it.
+	runSlot: (minWidth: number | undefined): CSSProperties => ({ display: 'inline-flex', alignItems: 'center', gap: 'inherit', minWidth }),
+	// The Graph / Table / Raw switch, at least as wide while a run is out (its counts gone) as before it.
+	views: (minWidth: number | undefined): CSSProperties => ({ minWidth }),
+	// The run bar's state text ("Will run…", "Running…", "Waiting…"): line breaking counts only its 120 px minimum,
+	// whatever it says, and it takes the room left on its line (up to 260 px). It can hold the focus (see the run slot).
 	runState: (focused: boolean): CSSProperties => ({
-		flex: '0 1 220px',
-		minWidth: 0,
+		flex: '1 1 0',
+		minWidth: 120,
+		maxWidth: 260,
 		fontSize: 12,
 		color: 'var(--rr-text-secondary)',
 		overflow: 'hidden',
@@ -469,7 +475,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 			if (isAbandonedWrite(mode, run.outcome)) env.markAbandonedWrite(endpoint.key);
 			// A statement the gate refused was never sent: History keeps only what ran.
 			if (run.outcome === 'error' && isGateRefusalText(run.error)) return;
-			env.history.record(endpoint.key, toHistoryEntry(historySummaryOf(run, Date.now()), entryId()));
+			env.history.record(endpoint.key, toHistoryEntry(historySummaryOf(run, Date.now(), { affectedNotReported: notReported }), entryId()));
 		},
 		summarize: ({ shown, runs }) => {
 			if (shown?.result) {
@@ -713,7 +719,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 		{ id: 'table', label: result ? `Table (${num(result.rows.length)})` : 'Table' },
 		{ id: 'raw', label: 'Raw' },
 	], [summary, result]);
-	// In the tab row the controls are the compact size, so the row stays one line of small buttons.
+	// In the control row the controls are the compact size, so the row stays one line of small buttons.
 	const inRow = barHost !== undefined;
 
 	const emptyTitle = runner.running ? 'Waiting for the node' : runner.failure ? 'Statement failed' : runner.refusal ? 'Nothing ran' : mode === 'read' ? 'Run a query' : 'Nothing executed yet';
@@ -756,7 +762,18 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 			runState.current.focus();
 		}
 	}, [runner.canStop, runner.running, gateBusy]);
-	// What the state text says; also its title, since 220 px can cut it.
+	// While a run is out, the run slot (Stop waiting in place of Run and Run all) and the result switch (no counts until
+	// the result) keep at least the widths they had before it, measured here while none is: every other control has a
+	// width a run does not change, so the bar's lines break where they did and a run never moves a control to another line.
+	const viewsGroup = useRef<HTMLSpanElement | null>(null);
+	const [held, setHeld] = useState<{ slot: number; views: number } | null>(null);
+	const runOut = runner.running || runner.canStop;
+	useLayoutEffect(() => {
+		if (runOut || !runSlot.current || !viewsGroup.current) return;
+		const next = { slot: runSlot.current.getBoundingClientRect().width, views: viewsGroup.current.getBoundingClientRect().width };
+		setHeld((prev) => (prev !== null && prev.slot === next.slot && prev.views === next.views ? prev : next));
+	}, [runOut, views, mode, inRow, active, barHost]);
+	// What the state text says; also its title, since its width can cut it.
 	const runStateText = runner.running ? 'Running…' : waiting ? 'Waiting for an earlier request to finish…' : willRun;
 	const runBar = (
 		<div style={barHost === undefined ? styles.runBar : styles.runBarInRow}>
@@ -767,7 +784,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 			)}
 			<span
 				ref={runSlot}
-				style={styles.runSlot}
+				style={styles.runSlot(runOut ? held?.slot : undefined)}
 				onFocus={() => {
 					runSlotFocused.current = true;
 				}}
@@ -821,7 +838,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 			>
 				{runStateText}
 			</span>
-			<span role="group" aria-label="Show the result as">
+			<span ref={viewsGroup} role="group" aria-label="Show the result as" style={styles.views(runOut ? held?.views : undefined)}>
 				<ToggleGroup options={views} value={tab} onChange={(id) => setTab(id)} />
 			</span>
 			<Button variant="ghost" small ariaExpanded={!split.collapsed} title={split.collapsed ? 'Show the editor' : 'Hide the editor; the run bar stays'} onClick={() => (split.collapsed ? showEditor() : changeSplit(splitToggled(split)))}>
@@ -832,7 +849,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 
 	return (
 		<div ref={rootRef} style={styles.root}>
-			{/* In the tab row while this tab is shown (the workbench); under the editor otherwise (the write console). */}
+			{/* In the row under the tabs while this tab is shown (the workbench); under the editor otherwise (the write console). */}
 			{barHost !== undefined && active && barHost !== null && createPortal(runBar, barHost)}
 			<div style={styles.editorRegion(split.collapsed && barHost !== undefined)}>
 				<div id={editorId} style={styles.editorBox(editorHeight, split.collapsed)}>
@@ -841,8 +858,8 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 				{barHost === undefined && runBar}
 			</div>
 			{/* Mounted while the editor is hidden too, so Home keeps the focus here and End shows the editor again. */}
-			{/* With the editor hidden in the workbench, the bar sits 3 px over the tab row's bottom borders (each tab's 2 px
-			    border and the row's 1 px; no control reaches them), so the hidden editor costs 6 px, not 11. */}
+			{/* With the editor hidden in the workbench, the bar sits 3 px over the control row's 4 px bottom padding (no
+			    control reaches it), so the hidden editor costs 6 px, not 11. */}
 			<SplitDivider split={{ height: editorHeight, collapsed: split.collapsed }} available={available} onChange={changeSplit} label="Editor and results" controls={editorId} overlap={split.collapsed && barHost !== undefined ? 3 : 0} />
 
 			{showNotices && (

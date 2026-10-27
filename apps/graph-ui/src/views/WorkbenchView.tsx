@@ -46,9 +46,10 @@
 // one whose text was edited asks first. At most MAX_QUERY_TABS: past that, a
 // sentence says to close one, and nothing is dropped.
 //
-// One row holds the tabs and the shown tab's run bar (each surface portals its
-// bar into it), or Overview's actions: the graph gets the height a second row
-// would take. Every read of every tab, and Ask, goes through one request gate
+// The tabs have a row of their own, and the shown tab's controls the row under
+// it: its run bar (each surface portals its bar there) or Overview's actions.
+// Sharing one row moved the tabs whenever the bar's width changed, and a run
+// changes it, so nothing beside the tabs can move them. Every read of every tab, and Ask, goes through one request gate
 // (graph/requestGate.ts), so the workbench sends one request at a time (Refresh
 // schema is the connection's, for every document, and is not counted). While a
 // tab's graph fills the document, the document hides what it covers.
@@ -108,10 +109,12 @@ const SIDE_OPTIONS: { id: SideView; label: string }[] = [
 ];
 
 const styles = {
-	// The tab row: the tabs, then the shown tab's run bar (or Overview's actions).
-	tabRow: { flex: '0 0 auto', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8, minHeight: 38, padding: '0 24px', borderBottom: '1px solid var(--rr-border)' } as CSSProperties,
-	// marginLeft auto: right of the tabs, and right-aligned on a line of its own when the row wraps.
-	barHost: { flex: '0 1 auto', minWidth: 0, marginLeft: 'auto', display: 'flex', justifyContent: 'flex-end', padding: '4px 0' } as CSSProperties,
+	// The tab row holds the tabs and nothing else, so they keep their place whatever the shown tab does.
+	tabRow: { flex: '0 0 auto', display: 'flex', alignItems: 'center', minHeight: 38, padding: '0 24px', borderBottom: '1px solid var(--rr-border)' } as CSSProperties,
+	// Under it, the shown tab's controls, right-aligned: its run bar, which fills the row and wraps only inside it, or
+	// Overview's actions. Its 4 px bottom padding is what the hidden editor's divider sits over (RunSurface).
+	controlRow: { flex: '0 0 auto', display: 'flex', justifyContent: 'flex-end', padding: '4px 24px' } as CSSProperties,
+	barHost: { flex: '1 1 auto', minWidth: 0, display: 'flex' } as CSSProperties,
 	notice: { padding: '8px 24px 0' } as CSSProperties,
 	body: { flex: 1, minHeight: 0, display: 'flex' } as CSSProperties,
 	panes: { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' } as CSSProperties,
@@ -119,7 +122,7 @@ const styles = {
 	hidden: { display: 'none' } as CSSProperties,
 	surface: { flex: 1, minHeight: 0 } as CSSProperties,
 	overview: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } as CSSProperties,
-	overviewActions: { display: 'flex', flexWrap: 'wrap', gap: 6, padding: '4px 0', marginLeft: 'auto' } as CSSProperties,
+	overviewActions: { display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6 } as CSSProperties,
 	overviewBody: { flex: 1, minHeight: 0, overflowY: 'auto' } as CSSProperties,
 	askNote: { marginTop: 4, fontSize: 12 } as CSSProperties,
 	askActions: { display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 } as CSSProperties,
@@ -181,7 +184,7 @@ export const WorkbenchView: React.FC<IWorkbenchViewProps> = ({ endpoint }) => {
 	// The tab whose close waits for a confirmation, and a request for the tab shown next to take the focus after it.
 	const [closing, setClosing] = useState<string | null>(null);
 	const [focusTabs, setFocusTabs] = useState(0);
-	// The shown tab's run bar goes into the tab row (an element of this document).
+	// The shown tab's run bar goes into the control row (an element of this document).
 	const [barHost, setBarHost] = useState<HTMLElement | null>(null);
 	// One request at a time across the tabs (graph/requestGate.ts).
 	const [requests] = useState(createRequestGate);
@@ -378,7 +381,9 @@ export const WorkbenchView: React.FC<IWorkbenchViewProps> = ({ endpoint }) => {
 							onNew={newQuery}
 							focusRequest={focusTabs}
 						/>
-						<div ref={setBarHost} style={styles.barHost} />
+					</div>
+					<div style={styles.controlRow}>
+						<div ref={setBarHost} style={tabs.active === OVERVIEW_TAB ? styles.hidden : styles.barHost} />
 						{tabs.active === OVERVIEW_TAB && (
 							<div style={styles.overviewActions}>
 								<Button variant="primary" onClick={explore} title="Open the Explore tab and run a sample of 25 relationships with their end nodes">
@@ -407,7 +412,7 @@ export const WorkbenchView: React.FC<IWorkbenchViewProps> = ({ endpoint }) => {
 							gate={requests}
 							onClose={() => {
 								setAskOpen(false);
-								// The focus was in the bar: give it to the Ask button that showed it, in the tab row.
+								// The focus was in the bar: give it to the Ask button that showed it, in the control row.
 								barHost?.querySelector<HTMLElement>('[data-ask-toggle] button')?.focus();
 							}}
 						/>

@@ -28,13 +28,10 @@
 // to the next tab and show it (wrapping), Home and End go to the first and the
 // last, Delete (or Backspace) closes a query tab. Only the shown tab is in the Tab order. Each
 // query tab has a close button for the mouse (out of the Tab order; Delete is
-// its key), and "New query" opens a tab at the end. The strip is the left part
-// of the workbench's tab row; the shown tab's run bar takes the rest.
-//
-// The strip's size in that row is its content (every tab and New query), never
-// less: when the tabs and the run bar do not fit side by side, the run bar wraps
-// to a line of its own instead of squeezing the tabs out of sight. Only tabs
-// that do not fit the whole row scroll, and the shown tab is scrolled into view.
+// its key), and "New query" opens a tab at the end. The strip fills the
+// workbench's tab row, which holds nothing else (the shown tab's run bar has the
+// row under it), so the tabs keep their place whatever a tab does. Only tabs
+// that do not fit the row scroll, and the shown tab is scrolled into view.
 //
 // Keys are the tab list's own onKeyDown: no document or window listener.
 // =============================================================================
@@ -88,8 +85,7 @@ export function panelElementId(prefix: string, id: string): string {
 }
 
 const styles = {
-	// Basis auto (its content): the row breaks before the run bar rather than shrink the tabs; minWidth 0 lets the tab
-	// list scroll only when the tabs alone are wider than the row.
+	// The whole tab row; minWidth 0 lets the tab list scroll when the tabs are wider than the row.
 	strip: { flex: '1 1 auto', minWidth: 0, display: 'flex', alignItems: 'flex-end', gap: 8, alignSelf: 'stretch' } as CSSProperties,
 	list: { display: 'flex', alignItems: 'flex-end', gap: 2, minWidth: 0, overflowX: 'auto' } as CSSProperties,
 	tab: (selected: boolean): CSSProperties => ({
