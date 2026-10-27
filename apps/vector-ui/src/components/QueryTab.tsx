@@ -230,7 +230,7 @@ export function QueryWorkbench({ model, surfaceModel, channels, selection, actio
 	 */
 	const record = (run: QueryRunRecord): void => {
 		// Read now, not from the render that started the run: another run may have landed since.
-		const lands = history.recording(historyKey).get() ? landsOn(history.entries(historyKey).get(), run.question) : null;
+		const lands = history.recording(historyKey).get() ? landsOn(history.entries(historyKey).get(), run) : null;
 		history.record(historyKey, run);
 		setRanAgain(lands);
 	};

@@ -31,8 +31,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { ChatTurn } from '../src/chat/chatSession';
-import { DEVTOOL_HISTORY_NOTE } from '../src/env';
-import { QUERY_HISTORY_TEXT_MAX, sessionQueryHistory } from '../src/adapters/queryHistory';
+import { APP_HISTORY_NOTE, DEVTOOL_HISTORY_NOTE } from '../src/env';
+import { QUERY_HISTORY_LIMITS, QUERY_HISTORY_TAG_CHARS, QUERY_HISTORY_TEXT_MAX, persistedQueryHistory, questionOf, sessionQueryHistory, storedText } from '../src/adapters/queryHistory';
+import { makeVectorHistory } from '../src/adapters/explorer';
 import { COMPARE_B_NOT_SAVED, ONLY_FIRST_KEPT, RAN_AGAIN, askRecord, landsOn, shownQuestion, compareRecord, entryMeta, entryTime, loadPlan, modeOfKind, msText, outcomeText, rerunPlan, searchRecord, shownEntries } from '../src/vector/queryHistory';
 import type { QueryHistoryItem, RerunContext } from '../src/vector/queryHistory';
 import type { ModeOption } from '../src/vector/searchWorkbench';
@@ -89,24 +90,107 @@ test('a run is handed over whole and History keeps its first 200 characters, mar
 	assert.deepEqual([history.entries('k').get()[0].question.length, history.entries('k').get()[0].truncated], [200, true], 'an Ask question too');
 });
 
-test('a run that repeats the newest entry\'s whole question is that entry run again: no entry is added, History says "Ran again"; a cut entry never takes a run', () => {
+test('a run of the same kind that repeats the newest entry\'s whole question is that entry run again: no entry is added, History says "Ran again"; another kind, or a cut entry, never takes a run', () => {
 	assert.equal(RAN_AGAIN, 'Ran again: this entry shows the latest run.');
-	assert.equal(landsOn([], 'water'), null);
-	assert.equal(landsOn([{ id: 'n', question: 'water' }, { id: 'o', question: 'falcon' }], 'water'), 'n');
-	assert.equal(landsOn([{ id: 'n', question: 'water' }, { id: 'o', question: 'falcon' }], 'falcon'), null, 'only the newest entry');
-	assert.equal(landsOn([{ id: 'n', question: 'w'.repeat(200), truncated: true }], 'w'.repeat(200)), null);
-	// What landsOn predicts is what the store does (P0's QUERY_HISTORY_LIMITS store).
+	const water = { kind: 'semantic' as const, question: 'water' };
+	assert.equal(landsOn([], water), null);
+	assert.equal(landsOn([{ id: 'n', kind: 'semantic', question: 'water' }, { id: 'o', kind: 'semantic', question: 'falcon' }], water), 'n');
+	assert.equal(landsOn([{ id: 'n', kind: 'semantic', question: 'water' }, { id: 'o', kind: 'semantic', question: 'falcon' }], { kind: 'semantic', question: 'falcon' }), null, 'only the newest entry');
+	assert.equal(landsOn([{ id: 'n', kind: 'ask', question: 'water' }], water), null, 'another kind of run is its own entry');
+	assert.equal(landsOn([{ id: 'n', kind: 'semantic', question: 'w'.repeat(200), truncated: true }], { kind: 'semantic', question: 'w'.repeat(200) }), null);
+	// What landsOn predicts is what the store does (both mounts' QUERY_HISTORY_LIMITS store).
 	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
 	history.record('k', searchRecord({ question: 'water', mode: 'semantic', topK: 10, results: 4 }, 1, 1));
 	const [first] = history.entries('k').get();
-	assert.equal(landsOn(history.entries('k').get(), 'water'), first.id);
+	assert.equal(landsOn(history.entries('k').get(), water), first.id);
 	history.togglePin('k', first.id);
-	history.record('k', searchRecord({ question: 'water', mode: 'keyword', topK: 25, results: 2 }, 2, 1));
+	history.record('k', searchRecord({ question: 'water', mode: 'semantic', topK: 25, results: 2 }, 2, 1));
 	const after = history.entries('k').get();
 	assert.equal(after.length, 1, 'no entry added');
-	assert.deepEqual([after[0].id, after[0].pinned, after[0].kind, after[0].topK], [first.id, true, 'keyword', 25], 'its id and pin kept, the run\'s facts taken');
+	assert.deepEqual([after[0].id, after[0].pinned, after[0].kind, after[0].topK, after[0].results], [first.id, true, 'semantic', 25, 2], 'its id and pin kept, the run\'s facts taken');
 	history.record('k', searchRecord({ question: 'falcon', mode: 'semantic', topK: 10, results: 1 }, 3, 1));
 	assert.equal(history.entries('k').get().length, 2, 'another question adds an entry');
+});
+
+test('runs of different kinds never merge (DA-R1 I2): a pinned Semantic entry survives an Ask of the same words, a Search and a Compare with that A stay two, and a Search after a Compare keeps its B', () => {
+	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+	history.record('k', searchRecord({ question: 'foo', mode: 'semantic', topK: 10, results: 4 }, 1, 1));
+	const [pinned] = history.entries('k').get();
+	history.togglePin('k', pinned.id);
+	history.record('k', askRecord(turn({ question: 'foo', askedAt: 2, answeredAt: 3, answer: { sources: [{}] } as never })) as never);
+	const [ask, kept] = history.entries('k').get();
+	assert.deepEqual([ask.kind, ask.question, ask.results], ['ask', 'foo', 1]);
+	assert.deepEqual([kept.id, kept.kind, kept.topK, kept.results, kept.pinned], [pinned.id, 'semantic', 10, 4, true], 'the pinned Semantic entry keeps its mode, k and pin');
+
+	const other = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+	other.record('k', searchRecord({ question: 'foo', mode: 'keyword', topK: 10, results: 2 }, 1, 1));
+	other.record('k', compareRecord({ a: 'foo', b: 'bar', topK: 10, shared: 3 }, 2, 1));
+	assert.deepEqual(other.entries('k').get().map((e) => [e.kind, e.question, e.compareWith]), [['compare', 'foo', 'bar'], ['keyword', 'foo', undefined]], 'a Search, then a Compare with that A: two entries');
+	other.record('k', searchRecord({ question: 'foo', mode: 'semantic', topK: 10, results: 2 }, 3, 1));
+	const [search, compare] = other.entries('k').get();
+	assert.deepEqual([search.kind, compare.kind, compare.compareWith], ['semantic', 'compare', 'bar'], 'a Search after a Compare keeps its B');
+
+	// Displayed and loaded questions carry no tag.
+	for (const entry of [...history.entries('k').get(), ...other.entries('k').get()]) {
+		assert.doesNotMatch(entry.question, /␟/, entry.kind);
+		assert.doesNotMatch(shownQuestion(entry), /␟/, entry.kind);
+		const plan = loadPlan(entry, LOAD);
+		assert.doesNotMatch(plan.search?.question ?? plan.ask?.question ?? '', /␟/, entry.kind);
+	}
+});
+
+test('a Compare is one with its pair (DA-R1 F1): the same A with another B is a new entry and both keep their B; the same pair run again is "Ran again"; after a reload (B unknown) it is a new entry', () => {
+	const pair = (b: string) => ({ kind: 'compare' as const, question: 'water', compareWith: b });
+	assert.equal(landsOn([{ id: 'n', kind: 'compare', question: 'water', compareWith: 'wells' }], pair('wells')), 'n');
+	assert.equal(landsOn([{ id: 'n', kind: 'compare', question: 'water', compareWith: 'wells' }], pair('rivers')), null, 'another B');
+	assert.equal(landsOn([{ id: 'n', kind: 'compare', question: 'water' }], pair('wells')), null, 'a B this page does not know');
+	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+	history.record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 1, 1));
+	history.record('k', compareRecord({ a: 'water', b: 'rivers', topK: 10, shared: 2 }, 2, 1));
+	assert.deepEqual(history.entries('k').get().map((e) => [e.question, e.compareWith]), [['water', 'rivers'], ['water', 'wells']], 'two pairs, two entries, both B kept');
+	assert.equal(landsOn(history.entries('k').get(), pair('rivers')), history.entries('k').get()[0].id, 'the prediction matches the store');
+	history.record('k', compareRecord({ a: 'water', b: 'rivers', topK: 25, shared: 4 }, 3, 1));
+	assert.deepEqual(history.entries('k').get().map((e) => [e.compareWith, e.topK, e.results]), [['rivers', 25, 4], ['wells', 10, 3]], 'the same pair run again: one entry, the new run');
+	history.record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 4, 1));
+	assert.deepEqual(history.entries('k').get().map((e) => e.compareWith), ['wells', 'rivers', 'wells'], 'a third pair after it is new again (only the newest entry can merge)');
+
+	// After a reload this page holds no B: a Compare of the same A is a new entry, never merged into one whose B is unknown.
+	const writes: Array<[string, unknown]> = [];
+	const store = makeVectorHistory(0);
+	const detach = store.attachPrefs({ getPref: () => undefined, setPref: (key, value) => writes.push([key, value]) }, 'owner-1');
+	persistedQueryHistory(store, APP_HISTORY_NOTE).record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 1, 1));
+	const reloaded = persistedQueryHistory(store, APP_HISTORY_NOTE);
+	assert.equal(reloaded.entries('k').get()[0].compareWith, undefined, 'the reloaded page does not know B');
+	reloaded.record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 2, 1));
+	assert.deepEqual(reloaded.entries('k').get().map((e) => e.compareWith), ['wells', undefined]);
+	store.flush();
+	detach();
+	const json = JSON.stringify(writes.filter(([key]) => key === 'vector.history').pop()?.[1]);
+	assert.deepEqual([...json.matchAll(/"question":"([^"]*)"/g)].map((m) => m[1]).sort(), ['cm2␟water', 'cmp␟water'], 'the file holds a Compare tag and A, never B');
+	assert.doesNotMatch(json, /wells/);
+});
+
+test('the workspace file holds each question with its kind\'s four-character tag and its first 200 characters, never question B (APP_HISTORY_NOTE stays true)', () => {
+	assert.deepEqual(QUERY_HISTORY_LIMITS.maxTextChars, QUERY_HISTORY_TEXT_MAX + QUERY_HISTORY_TAG_CHARS);
+	const writes: Array<[string, unknown]> = [];
+	const store = makeVectorHistory(0);
+	const detach = store.attachPrefs({ getPref: () => undefined, setPref: (key, value) => writes.push([key, value]) }, 'owner-1');
+	const history = persistedQueryHistory(store, APP_HISTORY_NOTE);
+	const long = `Rotate the token ${'x'.repeat(400)}`;
+	history.record('k', searchRecord({ question: long, mode: 'hybrid', topK: 10, results: 3 }, 1, 1));
+	history.record('k', compareRecord({ a: 'foo', b: 'the secret question B', topK: 10, shared: 2 }, 2, 1));
+	store.flush();
+	detach();
+	const saved = writes.filter(([key]) => key === 'vector.history').pop()?.[1] as Record<string, Array<{ question: string; kind: string; truncated?: boolean }>>;
+	assert.ok(saved, 'the history was written');
+	const json = JSON.stringify(saved);
+	assert.doesNotMatch(json, /the secret question B/, 'question B never reaches the workspace file');
+	const [compare, hybrid] = saved.k;
+	assert.deepEqual([compare.kind, compare.question], ['compare', 'cmp␟foo']);
+	assert.deepEqual([hybrid.kind, hybrid.question, hybrid.truncated], ['hybrid', `hyb␟${long.slice(0, 200)}`, true], 'the tag and exactly the first 200 characters of the question');
+	assert.equal(questionOf('hybrid', hybrid.question), long.slice(0, 200));
+	assert.equal(questionOf('semantic', 'an entry written before the tags'), 'an entry written before the tags', 'read as it is');
+	assert.equal(storedText('ask', 'why?'), 'ask␟why?');
 });
 
 test('records: a Search run per mode, a Compare once with B beside A and the results both found, an Ask question once its answer ended', () => {
@@ -209,7 +293,7 @@ test('a dev-tool mount\'s history records each run at once, with what the Query 
 
 test('wiring: every finished run goes to the mount\'s history, from Search, Compare and Ask; Load and Rerun hand the form an entry', () => {
 	const tab = code(path.join('components', 'QueryTab.tsx'));
-	assert.match(tab, /const lands = history\.recording\(historyKey\)\.get\(\) \? landsOn\(history\.entries\(historyKey\)\.get\(\), run\.question\) : null;\s*history\.record\(historyKey, run\);\s*setRanAgain\(lands\);/, 'the entry a repeat lands on says "Ran again"');
+	assert.match(tab, /const lands = history\.recording\(historyKey\)\.get\(\) \? landsOn\(history\.entries\(historyKey\)\.get\(\), run\) : null;\s*history\.record\(historyKey, run\);\s*setRanAgain\(lands\);/, 'the entry a repeat lands on says "Ran again"');
 	assert.match(tab, /<SearchPanel [^\n]*onRecord=\{record\} onShowDocument=\{onShowDocument\} \/>/);
 	assert.match(tab, /<ChatPanel [^\n]*onRecord=\{record\} \/>/);
 	assert.match(tab, /history=\{env\.queryHistory\}\s*historyKey=\{entry\.key\}/, 'the mount\'s own history, per connection');

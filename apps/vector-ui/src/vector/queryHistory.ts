@@ -33,8 +33,9 @@
 // first 200 characters of its question and marks a longer one `truncated`
 // (adapters/queryHistory.ts), so a chunk's text used as the query never lands
 // in the workspace file whole, and two long questions that share their start
-// stay two entries. A run that repeats the newest entry's whole question is
-// that entry run again: the entry keeps its id, pin and note, takes the run's
+// stay two entries. A run of the same kind that repeats the newest entry's
+// whole question is that entry run again (a run of another kind, a Search
+// after a Compare of the same words, is its own entry): the entry keeps its id, pin and note, takes the run's
 // facts, and History says "Ran again" (no entry is added). A Compare's
 // question B is kept for the session only, so after a reload its entry says
 // "Question B isn't saved."
@@ -68,17 +69,24 @@ export type QueryRunRecord = Omit<IQueryHistoryEntry, 'id' | 'truncated'>;
 export type QueryHistoryItem = IQueryHistoryEntry;
 
 /**
- * The entry a run lands on when it repeats the newest entry's whole question
- * (the history updates that entry instead of adding one); an entry History
- * already cut never takes a run.
+ * The entry a run lands on when it repeats the newest entry's kind and whole
+ * question, and for a Compare its question B too (the history updates that
+ * entry instead of adding one); an entry History already cut never takes a
+ * run, another kind never does, and nor does a Compare with another B (or
+ * one whose B this page does not know).
  *
  * @param entries - The connection's entries, newest first.
- * @param question - The run's whole question (a Compare's A).
+ * @param run - The run's kind, whole question (a Compare's A) and question B.
+ * @param run.kind - The run's kind.
+ * @param run.question - The run's whole question.
+ * @param run.compareWith - A Compare's question B.
  * @returns The newest entry's id, or null when the run adds an entry.
  */
-export function landsOn(entries: readonly Pick<IQueryHistoryEntry, 'id' | 'question' | 'truncated'>[], question: string): string | null {
+export function landsOn(entries: readonly Pick<IQueryHistoryEntry, 'id' | 'kind' | 'question' | 'truncated' | 'compareWith'>[], run: { kind: QueryHistoryKind; question: string; compareWith?: string }): string | null {
 	const newest = entries[0];
-	return newest !== undefined && newest.truncated !== true && newest.question === question ? newest.id : null;
+	if (newest === undefined || newest.truncated === true || newest.kind !== run.kind || newest.question !== run.question) return null;
+	if (run.kind === 'compare' && (newest.compareWith === undefined || newest.compareWith !== run.compareWith)) return null;
+	return newest.id;
 }
 
 /**

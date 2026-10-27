@@ -743,13 +743,16 @@ export interface WillRun {
  * The line under the form: what Run sends and what the threshold does.
  *
  * @param plan - The form's settings.
- * @returns "Will run: a Semantic search, top 10, over the whole collection. The threshold 0.30 only marks rows here; …", or null when no mode can run.
+ * @returns "Will run: a Semantic search, top 10, over the whole collection. The threshold 0.30 only marks rows here; …",
+ *   "Run is off: <why>" while the scope stops Run, or null when no mode can run.
  */
 export function willRunText(plan: WillRun): string | null {
 	if (plan.mode === null) return null;
+	// The scope stops Run (too many documents, none, or not found yet): there is no run to describe.
+	if (plan.gate.objectIds === null && plan.gate.blocked !== null) return `Run is off: ${plan.gate.blocked}`;
 	const what = plan.comparing ? `A and B, each ${MODE_RUNS[plan.mode]}` : MODE_RUNS[plan.mode];
 	const n = plan.gate.objectIds?.length ?? 0;
-	const where = plan.gate.objectIds !== null ? `in the ${n === 1 ? 'document' : `${n.toLocaleString('en-US')} documents`} of the scope (sent as their ids)` : plan.gate.blocked !== null ? 'within the scope' : 'over the whole collection';
+	const where = plan.gate.objectIds !== null ? `in the ${n === 1 ? 'document' : `${n.toLocaleString('en-US')} documents`} of the scope (sent as their ids)` : 'over the whole collection';
 	const tables = plan.tables === 'only' ? ', tables only (sent to the store)' : plan.tables === 'none' ? ', no tables (sent to the store)' : '';
 	const threshold = plan.mode === 'keyword' ? 'Keyword results carry no similarity, so the threshold does not apply.' : `The threshold ${plan.at.toFixed(2)} only marks rows here; the store returns the top ${plan.topK} whatever their scores.`;
 	return `Will run: ${what}, top ${plan.topK}, ${where}${tables}. ${threshold}`;

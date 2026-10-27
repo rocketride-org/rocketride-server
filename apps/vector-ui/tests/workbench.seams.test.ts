@@ -36,7 +36,7 @@ import { makeConsoleActions, stageTargets } from '../src/adapters/consoleActions
 import { createConnectionRegistry } from '../src/adapters/connections';
 import type { IConnectionLink } from '../src/adapters/connections';
 import { makeVectorHistory, vectorQueryHistory } from '../src/adapters/explorer';
-import { QUERY_HISTORY_TEXT_MAX, persistedQueryHistory, queryEntryOf, sessionQueryHistory, storedEntryOf } from '../src/adapters/queryHistory';
+import { QUERY_HISTORY_TEXT_MAX, persistedQueryHistory, queryEntryOf, sessionQueryHistory, storedEntryOf, storedText } from '../src/adapters/queryHistory';
 import type { IDocumentItem } from '../src/contract/types';
 import { APP_HISTORY_NOTE, DEVTOOL_HISTORY_NOTE } from '../src/env';
 import type { IQueryHistoryEntry } from '../src/env';
@@ -288,30 +288,36 @@ test('the history keeps the first 200 characters of a question and says so; it c
 	history.record('k', { ...RUN, question: 'water', at: 1, results: 7 });
 	const first = entries.get()[0];
 	history.togglePin('k', first.id);
-	history.record('k', { ...RUN, question: 'water', kind: 'keyword', at: 2, results: 3 });
-	assert.equal(entries.get().length, 1, 'the same question run again is the same entry, run again');
-	assert.deepEqual([entries.get()[0].id, entries.get()[0].pinned, entries.get()[0].kind, entries.get()[0].results, entries.get()[0].at], [first.id, true, 'keyword', 3, 2], 'it keeps its id and pin and takes the new run');
+	history.record('k', { ...RUN, question: 'water', at: 2, results: 3, topK: 25 });
+	assert.equal(entries.get().length, 1, 'the same kind and question run again is the same entry, run again');
+	assert.deepEqual([entries.get()[0].id, entries.get()[0].pinned, entries.get()[0].kind, entries.get()[0].results, entries.get()[0].topK, entries.get()[0].at], [first.id, true, 'semantic', 3, 25, 2], 'it keeps its id and pin and takes the new run');
 	assert.equal(entries.get()[0].truncated, undefined, 'a short question is whole');
+	// DA-R1 I2: another kind of run of the same words is its own entry; the pinned one keeps its mode and k.
+	history.record('k', { ...RUN, question: 'water', kind: 'ask', topK: null, at: 3, results: 2 });
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.topK, e.pinned === true]), [['ask', null, false], ['semantic', 25, true]]);
 });
 
-test("a Compare that repeats the newest entry's question lands on it with its question B; a later Search of it clears B; nothing changes while recording is off", () => {
+test("a Compare is its own entry beside a Search of the same A and is one with its pair (another B is a new entry); it keeps its B when a Search of it follows; nothing changes while recording is off", () => {
 	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
 	const entries = history.entries('k');
 	history.record('k', { ...RUN, question: 'water', at: 1 });
 	history.record('k', { ...RUN, question: 'water', kind: 'compare', at: 2, compareWith: 'wells' });
-	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith]), [['compare', 'wells']]);
-	history.record('k', { ...RUN, question: 'water', at: 3 });
-	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith]), [['semantic', undefined]], 'run again as a Search: no question B');
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith]), [['compare', 'wells'], ['semantic', undefined]], 'a Search and a Compare of the same A: two entries');
+	history.record('k', { ...RUN, question: 'water', kind: 'compare', at: 3, compareWith: 'rivers' });
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith, e.at]), [['compare', 'rivers', 3], ['compare', 'wells', 2], ['semantic', undefined, 1]], 'a Compare is one with its pair: the same A with another B is a new entry, and the first pair keeps its B');
 	history.record('k', { ...RUN, question: 'water', kind: 'compare', at: 4, compareWith: 'rivers' });
-	history.setRecording('k', false);
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith, e.at]), [['compare', 'rivers', 4], ['compare', 'wells', 2], ['semantic', undefined, 1]], 'the same pair run again is that entry');
 	history.record('k', { ...RUN, question: 'water', at: 5 });
-	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith, e.at]), [['compare', 'rivers', 4]], 'a run not recorded changes nothing');
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith]), [['semantic', undefined], ['compare', 'rivers'], ['compare', 'wells'], ['semantic', undefined]], 'a Search after it is its own entry, and the Compare keeps B');
+	history.setRecording('k', false);
+	history.record('k', { ...RUN, question: 'water', kind: 'compare', at: 6, compareWith: 'lakes' });
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith, e.at]), [['semantic', undefined, 5], ['compare', 'rivers', 4], ['compare', 'wells', 2], ['semantic', undefined, 1]], 'a run not recorded changes nothing');
 });
 
 test('Query history entries map onto the shared store: mode as kind, top-k as limit, results as rows; another kind is not shown', () => {
 	const stored = storedEntryOf('q1', { ...RUN, pinned: true, note: 'n' });
-	assert.deepEqual(stored, { id: 'q1', question: RUN.question, at: 1_000, ms: 40, outcome: 'rows', kind: 'semantic', rows: 7, limit: 10, pinned: true, note: 'n' });
-	assert.deepEqual(queryEntryOf(stored), { id: 'q1', ...RUN, pinned: true, note: 'n' });
+	assert.deepEqual(stored, { id: 'q1', question: storedText('semantic', RUN.question), at: 1_000, ms: 40, outcome: 'rows', kind: 'semantic', rows: 7, limit: 10, pinned: true, note: 'n' });
+	assert.deepEqual(queryEntryOf(stored), { id: 'q1', ...RUN, pinned: true, note: 'n' }, 'read back without its kind\'s tag');
 	const failed = storedEntryOf('q2', { ...RUN, kind: 'ask', topK: null, results: null, outcome: 'error', error: 'BUSY' });
 	assert.deepEqual(queryEntryOf(failed), { id: 'q2', ...RUN, kind: 'ask', topK: null, results: null, outcome: 'error', error: 'BUSY' });
 	assert.equal(queryEntryOf({ ...stored, kind: 'other' }), null);
@@ -370,7 +376,7 @@ test("the full app's Query history is the shared store in the workspace preferen
 	assert.deepEqual(shown.map((e) => [e.question, e.kind, e.topK, e.results]), [[RUN.question, 'semantic', 10, 7]], 'the run, and not the entry of another kind');
 	store.flush();
 	const saved = (prefs['vector.history'] as Record<string, IHistoryEntry<'question'>[]>).k;
-	assert.deepEqual(saved.map((e) => [e.question, e.kind, e.limit, e.rows]), [[RUN.question, 'semantic', 10, 7], ['from another tool', 'other', undefined, undefined]], 'written with the store, the other entry kept');
+	assert.deepEqual(saved.map((e) => [e.question, e.kind, e.limit, e.rows]), [[storedText('semantic', RUN.question), 'semantic', 10, 7], ['from another tool', 'other', undefined, undefined]], 'written with the store (its kind\'s tag before the question), the other entry kept');
 	detach();
 });
 

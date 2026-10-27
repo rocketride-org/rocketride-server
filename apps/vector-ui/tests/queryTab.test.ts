@@ -111,6 +111,8 @@ test('wiring: a question handed in through the connection is taken once and clea
 	assert.match(search, /setCut\(next\.cut\);/);
 	assert.match(search, /\{cut && <p style=\{S\.note\}>\{QUESTION_CUT_SENTENCE\}<\/p>\}/);
 	assert.equal((search.match(/setCut\(false\);/g) ?? []).length, 3, 'editing A or B, or "New query", takes the line away');
+	// A Compare handoff runs A and B from its own B, whatever mode has rendered.
+	assert.match(search, /questionB: next\.questionB !== null && next\.questionB\.trim\(\) !== '' \? next\.questionB : null,/);
 	// A run asked for that cannot start says why.
 	assert.match(search, /if \(blocked !== null\) actions\.announce\(`Not run: \$\{blocked\}`\);/);
 	assert.match(code(path.join('components', 'ChatPanel.tsx')), /if \(handoff\.run && available\) actions\.announce\('Not asked: wait for the answer to the current question\. The question is in the box\.'\);/);
