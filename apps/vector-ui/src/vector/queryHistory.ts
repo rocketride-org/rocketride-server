@@ -70,18 +70,23 @@ export type QueryHistoryItem = IQueryHistoryEntry;
 
 /**
  * The entry a run lands on when it repeats the newest entry's kind and whole
- * question (the history updates that entry instead of adding one); an entry
- * History already cut never takes a run, and another kind never does.
+ * question, and for a Compare its question B too (the history updates that
+ * entry instead of adding one); an entry History already cut never takes a
+ * run, another kind never does, and nor does a Compare with another B (or
+ * one whose B this page does not know).
  *
  * @param entries - The connection's entries, newest first.
- * @param run - The run's kind and whole question (a Compare's A).
+ * @param run - The run's kind, whole question (a Compare's A) and question B.
  * @param run.kind - The run's kind.
  * @param run.question - The run's whole question.
+ * @param run.compareWith - A Compare's question B.
  * @returns The newest entry's id, or null when the run adds an entry.
  */
-export function landsOn(entries: readonly Pick<IQueryHistoryEntry, 'id' | 'kind' | 'question' | 'truncated'>[], run: { kind: QueryHistoryKind; question: string }): string | null {
+export function landsOn(entries: readonly Pick<IQueryHistoryEntry, 'id' | 'kind' | 'question' | 'truncated' | 'compareWith'>[], run: { kind: QueryHistoryKind; question: string; compareWith?: string }): string | null {
 	const newest = entries[0];
-	return newest !== undefined && newest.truncated !== true && newest.kind === run.kind && newest.question === run.question ? newest.id : null;
+	if (newest === undefined || newest.truncated === true || newest.kind !== run.kind || newest.question !== run.question) return null;
+	if (run.kind === 'compare' && (newest.compareWith === undefined || newest.compareWith !== run.compareWith)) return null;
+	return newest.id;
 }
 
 /**

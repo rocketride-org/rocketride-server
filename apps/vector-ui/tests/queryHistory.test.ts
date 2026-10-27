@@ -139,6 +139,37 @@ test('runs of different kinds never merge (DA-R1 I2): a pinned Semantic entry su
 	}
 });
 
+test('a Compare is one with its pair (DA-R1 F1): the same A with another B is a new entry and both keep their B; the same pair run again is "Ran again"; after a reload (B unknown) it is a new entry', () => {
+	const pair = (b: string) => ({ kind: 'compare' as const, question: 'water', compareWith: b });
+	assert.equal(landsOn([{ id: 'n', kind: 'compare', question: 'water', compareWith: 'wells' }], pair('wells')), 'n');
+	assert.equal(landsOn([{ id: 'n', kind: 'compare', question: 'water', compareWith: 'wells' }], pair('rivers')), null, 'another B');
+	assert.equal(landsOn([{ id: 'n', kind: 'compare', question: 'water' }], pair('wells')), null, 'a B this page does not know');
+	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+	history.record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 1, 1));
+	history.record('k', compareRecord({ a: 'water', b: 'rivers', topK: 10, shared: 2 }, 2, 1));
+	assert.deepEqual(history.entries('k').get().map((e) => [e.question, e.compareWith]), [['water', 'rivers'], ['water', 'wells']], 'two pairs, two entries, both B kept');
+	assert.equal(landsOn(history.entries('k').get(), pair('rivers')), history.entries('k').get()[0].id, 'the prediction matches the store');
+	history.record('k', compareRecord({ a: 'water', b: 'rivers', topK: 25, shared: 4 }, 3, 1));
+	assert.deepEqual(history.entries('k').get().map((e) => [e.compareWith, e.topK, e.results]), [['rivers', 25, 4], ['wells', 10, 3]], 'the same pair run again: one entry, the new run');
+	history.record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 4, 1));
+	assert.deepEqual(history.entries('k').get().map((e) => e.compareWith), ['wells', 'rivers', 'wells'], 'a third pair after it is new again (only the newest entry can merge)');
+
+	// After a reload this page holds no B: a Compare of the same A is a new entry, never merged into one whose B is unknown.
+	const writes: Array<[string, unknown]> = [];
+	const store = makeVectorHistory(0);
+	const detach = store.attachPrefs({ getPref: () => undefined, setPref: (key, value) => writes.push([key, value]) }, 'owner-1');
+	persistedQueryHistory(store, APP_HISTORY_NOTE).record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 1, 1));
+	const reloaded = persistedQueryHistory(store, APP_HISTORY_NOTE);
+	assert.equal(reloaded.entries('k').get()[0].compareWith, undefined, 'the reloaded page does not know B');
+	reloaded.record('k', compareRecord({ a: 'water', b: 'wells', topK: 10, shared: 3 }, 2, 1));
+	assert.deepEqual(reloaded.entries('k').get().map((e) => e.compareWith), ['wells', undefined]);
+	store.flush();
+	detach();
+	const json = JSON.stringify(writes.filter(([key]) => key === 'vector.history').pop()?.[1]);
+	assert.deepEqual([...json.matchAll(/"question":"([^"]*)"/g)].map((m) => m[1]).sort(), ['cm2␟water', 'cmp␟water'], 'the file holds a Compare tag and A, never B');
+	assert.doesNotMatch(json, /wells/);
+});
+
 test('the workspace file holds each question with its kind\'s four-character tag and its first 200 characters, never question B (APP_HISTORY_NOTE stays true)', () => {
 	assert.deepEqual(QUERY_HISTORY_LIMITS.maxTextChars, QUERY_HISTORY_TEXT_MAX + QUERY_HISTORY_TAG_CHARS);
 	const writes: Array<[string, unknown]> = [];

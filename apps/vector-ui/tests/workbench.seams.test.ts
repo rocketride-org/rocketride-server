@@ -297,19 +297,21 @@ test('the history keeps the first 200 characters of a question and says so; it c
 	assert.deepEqual(entries.get().map((e) => [e.kind, e.topK, e.pinned === true]), [['ask', null, false], ['semantic', 25, true]]);
 });
 
-test("a Compare is its own entry beside a Search of the same A, keeps its question B when a Search of it follows, and a Compare of the same A run again takes the new B; nothing changes while recording is off", () => {
+test("a Compare is its own entry beside a Search of the same A and is one with its pair (another B is a new entry); it keeps its B when a Search of it follows; nothing changes while recording is off", () => {
 	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
 	const entries = history.entries('k');
 	history.record('k', { ...RUN, question: 'water', at: 1 });
 	history.record('k', { ...RUN, question: 'water', kind: 'compare', at: 2, compareWith: 'wells' });
 	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith]), [['compare', 'wells'], ['semantic', undefined]], 'a Search and a Compare of the same A: two entries');
 	history.record('k', { ...RUN, question: 'water', kind: 'compare', at: 3, compareWith: 'rivers' });
-	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith, e.at]), [['compare', 'rivers', 3], ['semantic', undefined, 1]], 'the Compare run again, with its new B');
-	history.record('k', { ...RUN, question: 'water', at: 4 });
-	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith]), [['semantic', undefined], ['compare', 'rivers'], ['semantic', undefined]], 'a Search after it is its own entry, and the Compare keeps B');
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith, e.at]), [['compare', 'rivers', 3], ['compare', 'wells', 2], ['semantic', undefined, 1]], 'a Compare is one with its pair: the same A with another B is a new entry, and the first pair keeps its B');
+	history.record('k', { ...RUN, question: 'water', kind: 'compare', at: 4, compareWith: 'rivers' });
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith, e.at]), [['compare', 'rivers', 4], ['compare', 'wells', 2], ['semantic', undefined, 1]], 'the same pair run again is that entry');
+	history.record('k', { ...RUN, question: 'water', at: 5 });
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith]), [['semantic', undefined], ['compare', 'rivers'], ['compare', 'wells'], ['semantic', undefined]], 'a Search after it is its own entry, and the Compare keeps B');
 	history.setRecording('k', false);
-	history.record('k', { ...RUN, question: 'water', kind: 'compare', at: 5, compareWith: 'lakes' });
-	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith, e.at]), [['semantic', undefined, 4], ['compare', 'rivers', 3], ['semantic', undefined, 1]], 'a run not recorded changes nothing');
+	history.record('k', { ...RUN, question: 'water', kind: 'compare', at: 6, compareWith: 'lakes' });
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith, e.at]), [['semantic', undefined, 5], ['compare', 'rivers', 4], ['compare', 'wells', 2], ['semantic', undefined, 1]], 'a run not recorded changes nothing');
 });
 
 test('Query history entries map onto the shared store: mode as kind, top-k as limit, results as rows; another kind is not shown', () => {
