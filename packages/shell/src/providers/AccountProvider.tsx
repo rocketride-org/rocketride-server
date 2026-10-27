@@ -27,7 +27,7 @@
 // and async callbacks down to the host-agnostic AccountView.
 // =============================================================================
 
-import React, { useState, useEffect, useCallback, CSSProperties } from 'react';
+import React, { useState, useEffect, useCallback, useRef, CSSProperties } from 'react';
 import AccountView from '../modules/account/AccountView';
 import type { IDataGridPageRequest } from '../components/data-grid/DataGrid';
 import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
@@ -118,14 +118,21 @@ const AccountProvider: React.FC = () => {
 	 * Fetches the current user's profile from the server. Resolves true on
 	 * success; a failure is surfaced as sectionError and resolves false so a
 	 * caller that depends on the refresh (e.g. leaving an org) can tell.
+	 * Only the most recent request may update state: an older response that
+	 * lands after a newer one (e.g. a refresh started before a leave) is
+	 * dropped so it cannot restore a membership that no longer exists.
 	 */
+	const profileRequestSeq = useRef(0);
 	const loadProfile = useCallback(async (): Promise<boolean> => {
 		if (!client) return false;
+		const seq = ++profileRequestSeq.current;
 		try {
 			const body = await client.account.getProfile();
+			if (seq !== profileRequestSeq.current) return true;
 			setProfile(body);
 			return true;
 		} catch (e) {
+			if (seq !== profileRequestSeq.current) return false;
 			setSectionError(errMsg(e));
 			return false;
 		}
