@@ -37,6 +37,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { classifyDevOutput, DEV_SERVER_GUARD_SOURCE, DEV_SESSION_NONCE, DevSession, devPreviewUrl, materializeDevServerGuard, registerDevOverlay, resolveRsbuildInvocation, splitCompleteLines, stopDevServer, unregisterDevOverlay } from '../src/app-dev/index';
+import * as vendor from '../src/app-pack/vendor';
 import * as common from '../src/cli/common';
 import { executeAppDev } from '../src/cli/commands/app';
 import { Output } from '../src/cli/output';
@@ -67,6 +68,12 @@ function writeServedApp(port = 3999): { folder: string; app: { id: string; name:
 	fs.writeFileSync(path.join(folder, 'clock.rrapp'), '{}');
 	fs.writeFileSync(path.join(bin, 'rsbuild.js'), `console.log('  \\u279c Local:    http://localhost:${port}/');\nconsole.log('ready   built in 0.10 s');\nsetInterval(() => {}, 1000);\n`);
 	return { folder, app: { id: 'acme.clock', name: 'Clock', moduleId: 'acme_clock', folder } };
+}
+
+/** Polls until the condition holds (fails the test after ~5 s). */
+async function waitFor(condition: () => boolean): Promise<void> {
+	for (let i = 0; i < 100 && !condition(); i++) await new Promise((resolve) => setTimeout(resolve, 50));
+	expect(condition()).toBe(true);
 }
 
 describe('primitives', () => {
@@ -153,6 +160,57 @@ describe('DevSession', () => {
 		expect(states).toContain('ok');
 		expect(states[states.length - 1]).toBe('stopped');
 	});
+
+	it('serializes package.json restarts so an overlapping one never spawns a second server', async () => {
+		const { app } = writeServedApp(3997);
+		const installs: Array<() => void> = [];
+		jest.spyOn(vendor, 'runRootInstall').mockImplementation(() => new Promise<void>((resolve) => installs.push(resolve)));
+		const states: string[] = [];
+		const session = new DevSession({ app, workspaceRoot: ws, client: fakeClient(), watchPackageJson: false, onState: (s) => states.push(s) });
+		const restart = () => (session as unknown as { requestRestart(): void }).requestRestart();
+
+		const started = session.start();
+		await waitFor(() => installs.length === 1);
+		installs[0]();
+		await started;
+
+		// step: a second change lands while the first restart is installing
+		restart();
+		await waitFor(() => installs.length === 2);
+		restart();
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		expect(installs.length).toBe(2);
+
+		// step: the queued restart runs only after the first one spawned
+		installs[1]();
+		await waitFor(() => installs.length === 3);
+		expect(states.filter((s) => s === 'starting').length).toBe(2);
+		installs[2]();
+		await waitFor(() => states.filter((s) => s === 'starting').length === 3);
+
+		const proc = (session as unknown as { proc: { exitCode: number | null; killed: boolean } }).proc;
+		await session.stop();
+		expect(proc.exitCode !== null || proc.killed).toBe(true);
+	});
+
+	it('keeps restarting after successive atomic saves of package.json', async () => {
+		const { folder, app } = writeServedApp(3996);
+		const lines: string[] = [];
+		const session = new DevSession({ app, workspaceRoot: ws, client: fakeClient(), install: false, onLine: (line) => lines.push(line) });
+		const restarts = () => lines.filter((l) => l.startsWith('package.json changed')).length;
+		const atomicSave = (version: string) => {
+			const pkg = path.join(folder, 'package.json');
+			fs.writeFileSync(`${pkg}.new`, JSON.stringify({ name: 'clock-ui', version, appManifest: { id: 'acme.clock', name: 'Clock' } }));
+			fs.renameSync(`${pkg}.new`, pkg);
+		};
+
+		await session.start();
+		atomicSave('0.1.1');
+		await waitFor(() => restarts() === 1);
+		atomicSave('0.1.2');
+		await waitFor(() => restarts() === 2);
+		await session.stop();
+	}, 15000);
 });
 
 describe('executeAppDev', () => {

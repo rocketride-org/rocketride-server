@@ -334,6 +334,8 @@ export class DevSession {
 	private iconUri: string | undefined;
 	private pkgWatcher: fs.FSWatcher | null = null;
 	private pkgTimer: NodeJS.Timeout | undefined;
+	private restarts: Promise<void> = Promise.resolve();
+	private restartQueued = false;
 	private readiness: { resolve: (origin: string) => void; reject: (err: Error) => void } | null = null;
 
 	/**
@@ -377,6 +379,9 @@ export class DevSession {
 		if (this.pkgTimer) clearTimeout(this.pkgTimer);
 		this.pkgWatcher?.close();
 		this.pkgWatcher = null;
+		// a restart in flight may be stopping the old server; let it finish
+		// (it will not spawn again once `stopping` is set)
+		await this.restarts;
 		const proc = this.proc;
 		this.proc = null;
 		if (proc) await stopDevServer(proc);
@@ -505,17 +510,35 @@ export class DevSession {
 		}
 	}
 
-	/** Restarts (reinstall + respawn) when the app's package.json changes. */
+	/**
+	 * Restarts (reinstall + respawn) when the app's package.json changes.
+	 * Watches the folder, not the file: an editor's atomic save renames a new
+	 * file over package.json, and a file watch stays on the replaced inode.
+	 */
 	private watchPackageJson(): void {
-		const pkg = path.join(this.options.app.folder, 'package.json');
 		try {
-			this.pkgWatcher = fs.watch(pkg, () => {
+			this.pkgWatcher = fs.watch(this.options.app.folder, (_event, filename) => {
+				if (filename?.toString() !== 'package.json') return;
 				if (this.pkgTimer) clearTimeout(this.pkgTimer);
-				this.pkgTimer = setTimeout(() => void this.restart(), 800);
+				this.pkgTimer = setTimeout(() => this.requestRestart(), 800);
 			});
 		} catch {
 			// no watcher on this platform/filesystem — edits need a manual restart
 		}
+	}
+
+	/**
+	 * Queues a restart behind any in flight, so two never overlap (both would
+	 * spawn, and the first server would outlive stop()). Requests made while
+	 * one is already queued fold into it.
+	 */
+	private requestRestart(): void {
+		if (this.restartQueued) return;
+		this.restartQueued = true;
+		this.restarts = this.restarts.then(() => {
+			this.restartQueued = false;
+			return this.restart();
+		});
 	}
 
 	/** Stops the server, reinstalls, and starts it again. */
@@ -526,6 +549,7 @@ export class DevSession {
 		this.proc = null;
 		this.origin = '';
 		if (proc) await stopDevServer(proc);
+		if (this.stopping) return;
 		this.strikes = 0;
 		try {
 			if (this.options.install !== false) await this.install();
