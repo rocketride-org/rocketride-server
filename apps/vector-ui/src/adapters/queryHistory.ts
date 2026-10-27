@@ -56,16 +56,17 @@
 // alone, so the text it is handed carries its kind's tag ("sem␟", "ask␟",
 // "cmp␟", ... all four characters wide): a Semantic run and an Ask of the
 // same words, or a Search and a Compare with that A, stay two entries, and a
-// pinned entry keeps its mode and k. Only the same kind with the same
-// question is "the same entry run again". A Compare is one with its pair, but
-// its question B never goes to the store: a Compare of the same A with
-// ANOTHER B (or one whose B this page does not know, after a reload) takes
-// the other of the two Compare tags ("cmp␟", "cm2␟"), so it is a new entry
-// and the pair before it keeps its B. The tag is stripped wherever an
-// entry is read, so nothing shows it. The store's bound is the question's
-// 200 characters plus the tag, so every question still keeps exactly its
-// first 200 characters, and the text the workspace file holds gains only
-// that four-character tag (APP_HISTORY_NOTE stays true).
+// pinned entry keeps its mode and k. Only the same run is "the same entry
+// run again": the same kind (for a Search, its mode), question and top-k,
+// and for a Compare the same question B, which never goes to the store. A
+// run of the newest entry's kind and question that differs in k (or B, or
+// whose B this page does not know, after a reload) takes the kind's other
+// tag ("se2␟", "cm2␟", ...), so it is a new entry and the one before it
+// keeps its k and B. The tag is stripped wherever an entry is read, so
+// nothing shows it. The store's bound is the question's 200 characters plus
+// the tag, so every question still keeps exactly its first 200 characters,
+// and the text the workspace file holds gains only that four-character tag
+// (APP_HISTORY_NOTE stays true).
 // =============================================================================
 
 import { DEFAULT_HISTORY_LIMITS, createHistoryStore } from 'shared/explorer';
@@ -81,8 +82,12 @@ const KIND_TAGS: Readonly<Record<QueryHistoryKind, string>> = { semantic: 'sem�
 /** The width of a kind's tag. */
 export const QUERY_HISTORY_TAG_CHARS = 4;
 
-/** Compare's second tag: a Compare of the newest Compare's A with another B takes the tag that one does not have. */
-const COMPARE_OTHER_TAG = 'cm2␟';
+/**
+ * Each kind's second tag, as wide: a run of the newest entry's kind and question that is NOT the same run (another
+ * top-k; for a Compare, another question B, or one this page does not know) takes the tag that entry does not have,
+ * so the store keeps it as a new entry instead of merging it.
+ */
+const OTHER_TAGS: Readonly<Record<QueryHistoryKind, string>> = { semantic: 'se2␟', keyword: 'ke2␟', hybrid: 'hy2␟', auto: 'au2␟', ask: 'as2␟', compare: 'cm2␟' };
 
 /** The bounds of both mounts' Query history stores: the question's 200 characters plus its kind's tag. */
 export const QUERY_HISTORY_LIMITS: IHistoryLimits = { ...DEFAULT_HISTORY_LIMITS, maxTextChars: QUERY_HISTORY_TEXT_MAX + QUERY_HISTORY_TAG_CHARS };
@@ -109,30 +114,35 @@ export function storedText(kind: QueryHistoryKind, question: string): string {
  * @returns The question.
  */
 export function questionOf(kind: QueryHistoryKind, text: string): string {
-	const tag = KIND_TAGS[kind];
-	if (text.startsWith(tag)) return text.slice(tag.length);
-	return kind === 'compare' && text.startsWith(COMPARE_OTHER_TAG) ? text.slice(COMPARE_OTHER_TAG.length) : text;
+	for (const tag of [KIND_TAGS[kind], OTHER_TAGS[kind]]) if (text.startsWith(tag)) return text.slice(tag.length);
+	return text;
 }
 
 /**
- * The tag a run's stored text takes. A Compare whose A is the newest entry's
- * (a Compare, uncut) keeps that entry's tag only when it is the same pair (the
- * B this page holds for it is the run's B): the store then merges the two as
- * the pair run again. With another B, or a B this page does not know, it takes
- * the other Compare tag and is a new entry. Every other run takes its kind's tag.
+ * The tag a run's stored text takes. A run whose kind and question are the
+ * newest entry's (uncut) keeps that entry's tag only when it is the same run
+ * again: the same top-k (the kind is the Search mode) and, for a Compare, the
+ * same question B as this page holds for it. The store then merges the two
+ * ("Ran again"). Otherwise it takes the kind's other tag and is a new entry, so
+ * a run with another k, or a Compare with another B (or one whose B this page
+ * does not know, after a reload), never overwrites the entry before it. Any
+ * other run takes its kind's tag.
  *
  * @param newest - The newest stored entry, or undefined.
  * @param newestB - The question B this page holds for it, or undefined.
  * @param entry - The run.
  * @returns The tag.
  */
-function tagFor(newest: IHistoryEntry<'question'> | undefined, newestB: string | undefined, entry: Pick<IQueryHistoryEntry, 'kind' | 'question' | 'compareWith'>): string {
+function tagFor(newest: IHistoryEntry<'question'> | undefined, newestB: string | undefined, entry: Pick<IQueryHistoryEntry, 'kind' | 'question' | 'topK' | 'compareWith'>): string {
 	const tag = KIND_TAGS[entry.kind];
-	if (entry.kind !== 'compare' || newest === undefined || newest.truncated || newest.kind !== 'compare') return tag;
-	const newestTag = newest.question.startsWith(tag) ? tag : newest.question.startsWith(COMPARE_OTHER_TAG) ? COMPARE_OTHER_TAG : null;
+	const other = OTHER_TAGS[entry.kind];
+	if (newest === undefined || newest.truncated || newest.kind !== entry.kind) return tag;
+	const newestTag = newest.question.startsWith(tag) ? tag : newest.question.startsWith(other) ? other : null;
 	if (newestTag === null || newest.question.slice(newestTag.length) !== entry.question) return tag;
-	if (newestB !== undefined && newestB === entry.compareWith) return newestTag;
-	return newestTag === tag ? COMPARE_OTHER_TAG : tag;
+	const sameK = (newest.limit ?? null) === entry.topK;
+	const sameB = entry.kind !== 'compare' || (newestB !== undefined && newestB === entry.compareWith);
+	if (sameK && sameB) return newestTag;
+	return newestTag === tag ? other : tag;
 }
 
 /**
