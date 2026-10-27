@@ -122,6 +122,35 @@ export function otherFilesWithProjectId(filePath: string, projectId: string | un
 	return known.filter((f) => f.projectId === projectId && !samePath(f.filePath, filePath)).map((f) => f.filePath);
 }
 
+/** What the on-disk check of one cached candidate found; see firstDuplicate. */
+export type DuplicateCheck = 'duplicate' | 'same-file' | 'resolved';
+
+/**
+ * The first cached candidate that `check` confirms as a genuine duplicate,
+ * in the order given. A candidate the check rejects does not end the search:
+ * the cache can hold a renamed file's previous path ('resolved') or another
+ * spelling of the file itself ('same-file') ahead of a real duplicate. The
+ * first same-file candidate is reported as well, so the caller can say why
+ * there was nothing to ask.
+ *
+ * Pure on purpose: the check is passed in, so the choice can be asserted
+ * without `vscode` (see pipeFileDecision.test.ts); SidebarProvider supplies
+ * the on-disk check, and both its duplicate warning and its restart guard
+ * decide on this one function.
+ *
+ * @param candidates The cached files that carry the id, in cache order.
+ * @param check Confirms one candidate against the disk.
+ */
+export async function firstDuplicate(candidates: readonly string[], check: (candidate: string) => Promise<DuplicateCheck>): Promise<{ duplicate?: string; sameFile?: string }> {
+	let sameFile: string | undefined;
+	for (const candidate of candidates) {
+		const clash = await check(candidate);
+		if (clash === 'duplicate') return { duplicate: candidate, sameFile };
+		if (clash === 'same-file') sameFile ??= candidate;
+	}
+	return { sameFile };
+}
+
 /**
  * What identifies a file on its volume, as `fs.promises.stat(path, { bigint:
  * true })` reports it. Bigints, not numbers: an NTFS file id is 64 bits wide

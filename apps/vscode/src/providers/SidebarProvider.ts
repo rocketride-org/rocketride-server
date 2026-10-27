@@ -33,8 +33,8 @@ import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from '../shared/util/runClassification';
 import { checkMissingEnvVars } from '../shared/util/envVarCheck';
 import { getLogger } from '../shared/util/output';
-import { decidePipeFile, emptyPipelineSkeleton, otherFilesWithProjectId, readPipeProjectId, sameFileIdentity, withProjectId, EMPTY_FILE_SETTLE_MS } from '../shared/util/pipeFileDecision';
-import type { PipeFileEvent } from '../shared/util/pipeFileDecision';
+import { decidePipeFile, emptyPipelineSkeleton, firstDuplicate, otherFilesWithProjectId, readPipeProjectId, sameFileIdentity, withProjectId, EMPTY_FILE_SETTLE_MS } from '../shared/util/pipeFileDecision';
+import type { DuplicateCheck, PipeFileEvent } from '../shared/util/pipeFileDecision';
 import { SerialQueue } from '../shared/util/serialQueue';
 import { ReloadingCache, isUnderNodeModules } from '../shared/util/reloadingCache';
 import { getProjectProvider } from '../extension';
@@ -562,25 +562,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	}
 
 	/**
-	 * Confirms the cache's duplicate candidates on disk, in cache order, and
-	 * names the first genuine one. The cache can hold several, and the first
-	 * can be a stale path or this very file while a later one is a real
-	 * duplicate, so every candidate is checked until one is. Both the
-	 * duplicate warning and the restart guard decide on this, so they cannot
-	 * disagree.
-	 *
-	 * @returns `duplicate`, the first candidate that carries the id on disk,
-	 * and `sameFile`, the first candidate that turned out to be this file;
-	 * each undefined when there was none.
+	 * The first genuine duplicate among the cache's candidates, confirmed on
+	 * disk in cache order. The choice itself is firstDuplicate, pure and
+	 * tested; this supplies the on-disk check. Both the duplicate warning and
+	 * the restart guard decide on it, so they cannot disagree.
 	 */
-	private async findDuplicate(uri: vscode.Uri, projectId: string, candidates: readonly string[]): Promise<{ duplicate?: string; sameFile?: string }> {
-		let sameFile: string | undefined;
-		for (const candidate of candidates) {
-			const clash = await this.confirmDuplicate(uri, projectId, candidate);
-			if (clash === 'duplicate') return { duplicate: candidate, sameFile };
-			if (clash === 'same-file') sameFile ??= candidate;
-		}
-		return { sameFile };
+	private findDuplicate(uri: vscode.Uri, projectId: string, candidates: readonly string[]): Promise<{ duplicate?: string; sameFile?: string }> {
+		return firstDuplicate(candidates, (candidate) => this.confirmDuplicate(uri, projectId, candidate));
 	}
 
 	/**
@@ -596,7 +584,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 * the two paths name one file, 'resolved' when the other path is gone or
 	 * no longer carries the id.
 	 */
-	private async confirmDuplicate(uri: vscode.Uri, projectId: string, otherPath: string): Promise<'duplicate' | 'same-file' | 'resolved'> {
+	private async confirmDuplicate(uri: vscode.Uri, projectId: string, otherPath: string): Promise<DuplicateCheck> {
 		if (await this.sameFile(uri.fsPath, otherPath)) return 'same-file';
 		const other = await PipelineFileParser.parseFile(otherPath, this.getServiceClassInfoMap());
 		return other.projectId === projectId ? 'duplicate' : 'resolved';

@@ -25,8 +25,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as path from 'node:path';
 
-import { decidePipeFile, emptyPipelineSkeleton, otherFilesWithProjectId, readPipeProjectId, sameFileIdentity, withProjectId } from '../shared/util/pipeFileDecision';
-import type { KnownPipeFile, PipeFileEvent } from '../shared/util/pipeFileDecision';
+import { decidePipeFile, emptyPipelineSkeleton, firstDuplicate, otherFilesWithProjectId, readPipeProjectId, sameFileIdentity, withProjectId } from '../shared/util/pipeFileDecision';
+import type { DuplicateCheck, KnownPipeFile, PipeFileEvent } from '../shared/util/pipeFileDecision';
 
 const FILE = '/ws/pipelines/a.pipe';
 const OTHER = '/ws/pipelines/b.pipe';
@@ -142,6 +142,52 @@ test('the restart guard and the duplicate warning agree on which file is the twi
 	assert.equal(decision.kind, 'ask-duplicate');
 	assert.deepEqual(decision.kind === 'ask-duplicate' ? decision.otherPaths : [], [OTHER, '/ws/c.pipe']);
 	assert.deepEqual(otherFilesWithProjectId(FILE, ID_A, known), decision.kind === 'ask-duplicate' ? decision.otherPaths : []);
+});
+
+// --- firstDuplicate: which cached candidate is the twin ------------------------
+
+const STALE = '/ws/pipelines/old-name.pipe'; // a renamed file's previous path, still cached
+const ALIAS = '/ws/pipelines/A.pipe'; // another spelling of this file on a case-insensitive volume
+const THIRD = '/ws/c.pipe';
+
+/** An on-disk check scripted per path; every path asked is recorded, in order. */
+function scripted(results: Record<string, DuplicateCheck>) {
+	const asked: string[] = [];
+	const check = async (candidate: string): Promise<DuplicateCheck> => {
+		asked.push(candidate);
+		return results[candidate];
+	};
+	return { check, asked };
+}
+
+test('a stale first candidate does not hide the genuine duplicate behind it', async () => {
+	const { check, asked } = scripted({ [STALE]: 'resolved', [OTHER]: 'duplicate' });
+	const found = await firstDuplicate([STALE, OTHER], check);
+	assert.equal(found.duplicate, OTHER);
+	assert.equal(found.sameFile, undefined);
+	assert.deepEqual(asked, [STALE, OTHER]);
+});
+
+test('a same-file first candidate is remembered and the genuine second one is the duplicate', async () => {
+	const { check } = scripted({ [ALIAS]: 'same-file', [OTHER]: 'duplicate', [THIRD]: 'duplicate' });
+	const found = await firstDuplicate([ALIAS, OTHER, THIRD], check);
+	assert.equal(found.duplicate, OTHER);
+	assert.equal(found.sameFile, ALIAS);
+});
+
+test('only same-file candidates: no duplicate, and the first same-file one is reported', async () => {
+	const { check } = scripted({ [ALIAS]: 'same-file', '/ws/link.pipe': 'same-file' });
+	const found = await firstDuplicate([ALIAS, '/ws/link.pipe'], check);
+	assert.equal(found.duplicate, undefined);
+	assert.equal(found.sameFile, ALIAS);
+});
+
+test('the search stops at the first duplicate, and resolved candidates alone report nothing', async () => {
+	const { check, asked } = scripted({ [STALE]: 'resolved', [OTHER]: 'duplicate', [THIRD]: 'duplicate' });
+	assert.equal((await firstDuplicate([STALE], check)).duplicate, undefined);
+	assert.equal((await firstDuplicate([STALE, OTHER, THIRD], check)).duplicate, OTHER);
+	assert.deepEqual(asked, [STALE, STALE, OTHER]); // the third candidate is never asked
+	assert.equal((await firstDuplicate([], check)).duplicate, undefined);
 });
 
 // --- file identity: a case-only rename or a hard link is the file itself -------
