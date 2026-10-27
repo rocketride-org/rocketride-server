@@ -92,29 +92,27 @@ export interface SearchPanelProps extends ContractSearchPanelProps {
 const S = {
 	root: { display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--rr-text-primary)' } as CSSProperties,
 	head: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } as CSSProperties,
-	note: { margin: 0, fontSize: 12, color: 'var(--rr-text-secondary)' } as CSSProperties,
+	note: { margin: 0, fontSize: 12, color: 'var(--rr-text-primary)' } as CSSProperties,
 	form: { display: 'flex', flexDirection: 'column', gap: 6 } as CSSProperties,
 	row: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } as CSSProperties,
 	input: { flex: '1 1 200px', minWidth: 0, fontSize: 13, padding: '5px 8px', borderRadius: 4, border: '1px solid var(--rr-border-input)', background: 'var(--rr-bg-input)', color: 'var(--rr-text-primary)', fontFamily: 'inherit' } as CSSProperties,
 	fieldset: { display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', border: 'none', margin: 0, padding: 0 } as CSSProperties,
-	legend: { float: 'left', marginRight: 6, padding: 0, color: 'var(--rr-text-secondary)' } as CSSProperties,
+	legend: { float: 'left', marginRight: 6, padding: 0, color: 'var(--rr-text-primary)' } as CSSProperties,
 	radio: { display: 'inline-flex', gap: 4, alignItems: 'center' } as CSSProperties,
 	select: { fontSize: 12, padding: '3px 4px', borderRadius: 4, border: '1px solid var(--rr-border-input)', background: 'var(--rr-bg-input)', color: 'var(--rr-text-primary)' } as CSSProperties,
 	button: { ...commonStyles.buttonSecondary, padding: '1px 8px', fontSize: 11 } as CSSProperties,
 	run: { ...commonStyles.buttonPrimary, minWidth: '9em' } as CSSProperties,
 	off: { opacity: 0.55, cursor: 'not-allowed' } as CSSProperties,
 	chip: { display: 'inline-flex', alignItems: 'center', gap: 4, padding: '1px 8px', border: '1px solid var(--rr-border)', borderRadius: 10, overflowWrap: 'anywhere' } as CSSProperties,
-	error: { margin: 0, fontSize: 12, color: 'var(--rr-color-error)' } as CSSProperties,
 	scroll: { overflowX: 'auto' } as CSSProperties,
 	table: { width: '100%', borderCollapse: 'collapse', marginTop: 4 } as CSSProperties,
-	caption: { textAlign: 'left', color: 'var(--rr-text-secondary)', padding: '2px 0' } as CSSProperties,
-	th: { textAlign: 'left', fontWeight: 600, color: 'var(--rr-text-secondary)', padding: '2px 4px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'bottom' } as CSSProperties,
+	caption: { textAlign: 'left', color: 'var(--rr-text-primary)', padding: '2px 0' } as CSSProperties,
+	th: { textAlign: 'left', fontWeight: 600, color: 'var(--rr-text-primary)', padding: '2px 4px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'bottom' } as CSSProperties,
 	td: { padding: '3px 4px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'top' } as CSSProperties,
 	nowrap: { whiteSpace: 'nowrap' } as CSSProperties,
 	path: { display: 'block', maxWidth: 260, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
 	text: { display: 'block', maxWidth: 360, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as CSSProperties,
-	muted: { color: 'var(--rr-text-secondary)' } as CSSProperties,
-	meta: { display: 'block', fontWeight: 400, color: 'var(--rr-text-secondary)' } as CSSProperties,
+	meta: { display: 'block', fontWeight: 400, color: 'var(--rr-text-primary)' } as CSSProperties,
 	actions: { display: 'flex', gap: 4, flexWrap: 'nowrap' } as CSSProperties,
 	barTrack: { display: 'block', width: 64, height: 6, marginTop: 2 } as CSSProperties,
 	bar: { display: 'block', height: '100%', minWidth: 2, background: `var(${DATA_BAR_TOKEN})`, boxShadow: 'inset 0 0 0 1px var(--rr-text-primary)' } as CSSProperties,
@@ -307,7 +305,7 @@ export function SearchResults({ run, view, score, range, onThreshold, onCommit, 
 									const from = fusedFrom(row);
 									const bar = scoreBar(score, row.score);
 									return (
-										<tr key={rowKey(row.key, index)} data-status={row.status} data-key={`${row.objectId}#${row.chunkId}`} style={row.status === 'used' || row.status === 'keyword' ? undefined : S.muted}>
+										<tr key={rowKey(row.key, index)} data-status={row.status} data-key={`${row.objectId}#${row.chunkId}`}>
 											<td style={S.td}>{row.rank}</td>
 											<td style={S.td} title={path}>
 												<span style={S.path}>{path}</span>
@@ -732,11 +730,7 @@ export function SearchPanel({ model, channels, selection, actions, comparing = f
 					{rateLimitSentence(secondsLeft(limitedUntil as number, now))}
 				</p>
 			)}
-			{phase.kind === 'error' && !limited && (
-				<p style={S.error} role="alert">
-					{comparing ? `${phase.side}: ${phase.message}` : phase.message}
-				</p>
-			)}
+			{phase.kind === 'error' && !limited && <Banner variant="error">{comparing ? `${phase.side}: ${phase.message}` : phase.message}</Banner>}
 			{!comparing && runs.a !== null && viewA !== null && (
 				<SearchResults
 					run={runs.a}

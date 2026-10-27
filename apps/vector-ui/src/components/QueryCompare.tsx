@@ -76,11 +76,10 @@ const S = {
 	columns: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8, alignItems: 'start' } as CSSProperties,
 	side: { border: '1px solid var(--rr-border)', borderRadius: 6, padding: '6px 8px', minWidth: 0 } as CSSProperties,
 	title: { margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--rr-text-primary)', overflowWrap: 'anywhere' } as CSSProperties,
-	line: { margin: '2px 0', fontSize: 12, color: 'var(--rr-text-secondary)' } as CSSProperties,
+	line: { margin: '2px 0', fontSize: 12, color: 'var(--rr-text-primary)' } as CSSProperties,
 	table: { width: '100%', borderCollapse: 'collapse', fontSize: 12 } as CSSProperties,
-	th: { textAlign: 'left', fontWeight: 600, color: 'var(--rr-text-secondary)', padding: '2px 4px', borderBottom: '1px solid var(--rr-border)' } as CSSProperties,
+	th: { textAlign: 'left', fontWeight: 600, color: 'var(--rr-text-primary)', padding: '2px 4px', borderBottom: '1px solid var(--rr-border)' } as CSSProperties,
 	td: { padding: '2px 4px', borderBottom: '1px solid var(--rr-border)', verticalAlign: 'top', overflowWrap: 'anywhere' } as CSSProperties,
-	muted: { color: 'var(--rr-text-secondary)' } as CSSProperties,
 	button: { ...commonStyles.buttonSecondary, padding: '1px 8px', fontSize: 11 } as CSSProperties,
 	link: { background: 'none', border: 'none', padding: 0, margin: 0, font: 'inherit', color: 'inherit', textAlign: 'left', textDecoration: 'underline', cursor: 'pointer', overflowWrap: 'anywhere' } as CSSProperties,
 };
@@ -140,7 +139,7 @@ function Column({ letter, side, summary, score, onOpen, scopeOn }: SideProps): R
 							const where = sideOf(summary, row.key, letter);
 							const path = row.path || row.objectId;
 							return (
-								<tr key={rowKey(row.key, index)} data-status={row.status} data-side={where} style={row.status === 'used' || row.status === 'keyword' ? undefined : S.muted}>
+								<tr key={rowKey(row.key, index)} data-status={row.status} data-side={where}>
 									<td style={S.td}>{row.rank}</td>
 									<td style={S.td} title={row.preview}>
 										<button type="button" style={S.link} aria-label={`Open ${path} at chunk ${row.chunkId}`} onClick={() => onOpen(row)}>

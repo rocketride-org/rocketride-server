@@ -55,7 +55,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { EmptyState, commonStyles } from 'shell';
+import { Banner, EmptyState, commonStyles } from 'shell';
 import type { ChatPanelProps as ContractChatPanelProps, IChatSource } from '../contract/types';
 import { useVectorChat } from '../chat/useVectorChat';
 import { threadScrollKey } from '../chat/chatSession';
@@ -94,20 +94,19 @@ const COUNTER_FROM = CHAT_MAX_CHARS - 500;
 const S = {
 	root: { display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%', padding: '8px 10px', gap: 6 } as CSSProperties,
 	head: { display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } as CSSProperties,
-	heading: { margin: 0, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--rr-text-secondary)' } as CSSProperties,
-	llm: { fontSize: 12, color: 'var(--rr-text-secondary)' } as CSSProperties,
+	heading: { margin: 0, fontSize: 11, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--rr-text-primary)' } as CSSProperties,
+	llm: { fontSize: 12, color: 'var(--rr-text-primary)' } as CSSProperties,
 	thread: { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 } as CSSProperties,
 	question: { fontSize: 13, color: 'var(--rr-text-primary)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin: 0 } as CSSProperties,
 	who: { fontWeight: 600, marginRight: 4 } as CSSProperties,
 	answer: { borderLeft: '2px solid var(--rr-border-focus)', paddingLeft: 8 } as CSSProperties,
-	line: { fontSize: 12, color: 'var(--rr-text-secondary)', margin: '4px 0 0', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } as CSSProperties,
-	error: { fontSize: 12, color: 'var(--rr-color-error)', margin: '4px 0 0' } as CSSProperties,
+	line: { fontSize: 12, color: 'var(--rr-text-primary)', margin: '4px 0 0', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } as CSSProperties,
 	badge: { fontSize: 11, padding: '0 6px', borderRadius: 8, border: '1px solid var(--rr-border)', color: 'var(--rr-text-primary)' } as CSSProperties,
 	link: { ...commonStyles.buttonSecondary, padding: '1px 8px', fontSize: 11 } as CSSProperties,
 	scope: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--rr-text-primary)' } as CSSProperties,
 	composer: { display: 'flex', gap: 6, alignItems: 'flex-end' } as CSSProperties,
 	textarea: { flex: '1 1 auto', minHeight: 34, maxHeight: 120, resize: 'vertical', fontSize: 13, padding: '6px 8px', borderRadius: 4, border: '1px solid var(--rr-border-input)', background: 'var(--rr-bg-input)', color: 'var(--rr-text-primary)', fontFamily: 'inherit' } as CSSProperties,
-	notice: { fontSize: 12, color: 'var(--rr-text-secondary)', margin: 0 } as CSSProperties,
+	notice: { fontSize: 12, color: 'var(--rr-text-primary)', margin: 0 } as CSSProperties,
 };
 
 /** Props of one turn. */
@@ -147,7 +146,7 @@ function TurnView({ turn, model, channels, selection, actions, debugging, onDebu
 			)}
 			{turn.error !== null && (
 				<div>
-					<p style={turn.status === 'failed' ? S.error : S.line}>{turn.error.message}</p>
+					{turn.status === 'failed' ? <Banner variant="error">{turn.error.message}</Banner> : <p style={S.line}>{turn.error.message}</p>}
 					{turn.error.detail && (
 						<details style={S.line}>
 							<summary>Details</summary>
