@@ -72,6 +72,21 @@ editors (or windows) can dev-serve the same app concurrently; previews
 launched from an editor carry its `rrsession` nonce and resolve that
 editor's server, and shells without a nonce take the newest registration.
 
+The dev-loop primitives live in the SDK, `rocketride/app-dev`
+(`packages/client-typescript/src/app-dev/`), shared with `rocketride app
+dev`: the session nonce and `devPreviewUrl`, `resolveRsbuildInvocation`, the
+rsbuild output classifier (`splitCompleteLines`, `classifyDevOutput`), the
+guarded spawn and stop (`spawnDevServer`, `stopDevServer`), the overlay calls
+(`registerDevOverlay`, `unregisterDevOverlay`), and the guard program itself
+(`DEV_SERVER_GUARD_SOURCE`, written to a private temp file by
+`materializeDevServerGuard` — no host ships it as a separate file). The
+extension's `WatchManager` keeps only the panel orchestration (op chains,
+linger, panel-gated respawn, the install badge); `DevSession` composes the
+same primitives into the single-app foreground loop the CLI runs. Any page
+that loaded a dev bundle — the panel or a plain browser tab — updates on save
+through rsbuild's own HMR/live-reload client (`ws://localhost:<port>`), so no
+server push is involved.
+
 ## `appdev:call` — the app-control message
 
 The webview drives all app lifecycle actions through one correlated message:

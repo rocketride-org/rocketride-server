@@ -23,7 +23,7 @@ import { preflightApp } from 'rocketride/app-pack';
 import { ConnectionManager } from '../connection/connection';
 import { GenericEvent } from '../shared/types';
 import { appIconDataUri, MAX_README_IMAGE_BYTES, scanWorkspaceApps } from '../appdev/appScan';
-import { DEV_SESSION_NONCE } from '../appdev/devSession';
+import { devPreviewUrl } from 'rocketride/app-dev';
 import type { ScannedApp } from '../appdev/appScan';
 import { ensureAppTrigger, ensureProjectId, readAppListing, saveAppListing } from '../appdev/appMarker';
 import type { AppListing } from '../appdev/appMarker';
@@ -777,7 +777,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		// in the html, and a stale copy silently serves the wrong shell flavor.
 		// rrsession routes the preview to THIS editor's dev-overlay entry when
 		// several editors dev-serve the same app.
-		return `${base.replace(/\/$/, '')}/?appid=${encodeURIComponent(appId)}&rrdev=1&rrsession=${DEV_SESSION_NONCE}&_ts=${Date.now()}`;
+		return `${devPreviewUrl(base, appId)}&_ts=${Date.now()}`;
 	}
 
 	// =========================================================================

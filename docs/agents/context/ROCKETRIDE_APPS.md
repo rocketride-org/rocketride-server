@@ -1787,6 +1787,7 @@ same verbs (TypeScript camelCase / Python snake_case):
 
 | Action | TypeScript verb | CLI |
 |---|---|---|
+| Live preview (dev loop) | `rocketride/app-dev` (`DevSession`, `devPreviewUrl`) | `rocketride app dev [app] --open` |
 | List versions | `client.listDeployments(appId)` | `rocketride app versions [app]` |
 | Deploy the app's source | `client.deploy.addApp(appFolder, { comment })` | `rocketride app deploy [app]` |
 | Wait for the server build | `client.waitForAppBuild(appId, version)` | (built into `app publish` / `app deploy --publish`) |

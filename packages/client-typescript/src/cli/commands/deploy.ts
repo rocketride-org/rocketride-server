@@ -163,7 +163,25 @@ export async function executeDeploySourceConfig(project: string, source: string,
  * @param program - The root commander program.
  */
 export function registerDeployCommands(program: Command): void {
-	const deployCmd = program.command('deploy').description('Deploy lifecycle operations (deployment target)');
+	const deployCmd = program
+		.command('deploy')
+		.description('Deploy, publish, run, and schedule pipelines on the deployment target (apps: rocketride app)')
+		.addHelpText(
+			'after',
+			`
+Every verb uses the deployment target (ROCKETRIDE_DEPLOY_URI / ROCKETRIDE_DEPLOY_APIKEY)
+and never falls back to the development connection.
+
+--team and --deploy-to take @me (your personal space), a team name, or a team id.
+Output names teams ('Me', team names); --json keeps teamId and adds teamName.
+
+Examples:
+  rocketride deploy add pipelines/ingest.pipe --deploy-to @me      deploy and point your space at it
+  rocketride deploy list --team QA                                 deployments for one team
+  rocketride deploy publish <project> 3 --team QA                  point a team at version 3 (rollback too)
+  rocketride deploy source-config <project> <source> --team @me --trace-level summary --debug-out
+  rocketride deploy schedule set <project> <source> "0 9 * * 1-5" --team QA`,
+		);
 
 	// ── deploy add ───────────────────────────────────────────────────────
 	const addCmd = deployCmd

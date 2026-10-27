@@ -32,7 +32,7 @@ a non-zero exit. Deploy verbs (`deploy *`, `app deploy`) use the
 | Read run logs and traces | No CLI verb — use the SDK (`client.log`, API doc §Templates & Run Logs) or ROCKETRIDE_OBSERVABILITY.md |
 | Files in the account store | `rocketride store dir|type|write|rm|mkdir|stat` |
 | Deploy, publish, schedule | `rocketride deploy …` (deployment target) |
-| Apps | `rocketride app create|verify|deploy|publish|versions|where|…` (lifecycle verbs use the deployment target) |
+| Apps | `rocketride app create|dev|verify|deploy|publish|versions|where|…` (`dev` uses the development connection; lifecycle verbs use the deployment target) |
 | Find what is slow | `rocketride profile run --token TOKEN --duration 30`, then `rocketride profile tree --token TOKEN` |
 
 Two things the table cannot hide: component discovery is file-based, and
@@ -129,6 +129,15 @@ directory is the app. A lone number is read as the version, so
   stderr. SDK equivalent: `client.deploy.createApp(slug, options)` /
   `client.deploy.create_app` (same developer-id default). Scaffolding
   only — nothing deploys.
+- `rocketride app dev [app] [--open] [--no-install] [--workspace <dir>]` —
+  live preview from the terminal, the App Builder's dev loop: runs `rsbuild
+  dev` for the app, points your personal dev overlay at it (development
+  connection), and prints the preview URL (`--open` opens it). The preview
+  updates on every save — edit in any editor. Ctrl+C stops the server and
+  drops the overlay; the server is tethered to the command, so it never
+  outlives it. Several editors and terminals can serve the same app at once:
+  each preview URL carries its host's `rrsession` and resolves that host's
+  server.
 - `rocketride app verify [app] [--store] [--workspace <dir>]` — the
   no-side-effect precheck: manifest shape, id grammar, declared assets,
   include entries, and a pack dry run against the caps; `--store` adds the
@@ -167,6 +176,7 @@ directory is the app. A lone number is read as the version, so
 # The whole loop, from a fresh workspace
 rocketride login
 rocketride app create clock
+rocketride app dev clock --open                # live preview; edit, save, watch it update; Ctrl+C to stop
 rocketride app deploy clock --publish @me      # waits for the server build, then publishes
 rocketride app versions clock
 rocketride app where clock

@@ -41,7 +41,8 @@
 import { Command } from 'commander';
 import type { RocketRideClient } from '../../client/client';
 import { parseRegistryVersion, pickPublishVersion } from '../../client/deploy-helpers';
-import { addConnectionOptions, addDeployConnectionOptions, connectClient, connectDeploy, disconnectAll, formatWhen, runCliCommand } from '../common';
+import { addConnectionOptions, addDeployConnectionOptions, connectClient, connectDeploy, disconnectAll, formatWhen, onInterrupt, runCliCommand } from '../common';
+import { openBrowser } from './auth';
 import type { ConnectionOptions } from '../common';
 import type { Output } from '../output';
 import { toHttpBase } from '../../../../client-common/typescript/src/provision';
@@ -480,6 +481,73 @@ export async function executeAppVerify(ref: string | undefined, options: AppVerb
 	return ok ? 0 : 1;
 }
 
+/** Parsed `app dev` options. */
+export interface AppDevOptions extends AppVerbOptions {
+	open?: boolean;
+	install?: boolean;
+}
+
+/**
+ * `app dev`: the App Builder's dev loop in the foreground — serve the app
+ * with `rsbuild dev`, point your personal dev overlay at it, and print the
+ * preview URL. The preview updates on every save (rsbuild HMR/live reload).
+ * Ctrl+C stops the server and drops the overlay. Uses the DEVELOPMENT
+ * connection — dev bundles never touch the deployment target.
+ *
+ * @param ref - The `[app]` argument.
+ * @param options - Parsed command options.
+ * @param out - Command output.
+ * @returns The exit code.
+ */
+export async function executeAppDev(ref: string | undefined, options: AppDevOptions, out: Output): Promise<number> {
+	const { findApp } = await import('../../app-pack/index.js');
+	const { DevSession, devPreviewUrl } = await import('../../app-dev/index.js');
+	const workspaceRoot = options.workspace ?? process.cwd();
+	const { app } = await findApp(workspaceRoot, ref);
+	if (!app) return out.fail(`"${ref}" has no working copy here to serve`, 'pass the app folder');
+
+	// step: one connection for the whole session — the overlay registration
+	// lives as long as it, and a reconnect re-registers the running server
+	let session: InstanceType<typeof DevSession> | null = null;
+	const client = await connectClient(options, undefined, {
+		persist: true,
+		onConnected: async () => {
+			await session?.reregister();
+		},
+	});
+
+	const previewUrl = devPreviewUrl(toHttpBase(String(options.uri)), app.id);
+	session = new DevSession({
+		app,
+		workspaceRoot,
+		client,
+		install: options.install !== false,
+		onLine: (line) => out.line(`  ${line}`),
+		onState: (state, detail) => {
+			if (state === 'installing') out.line('Installing workspace dependencies (pnpm install)...');
+			else if (state === 'ok') out.line(`Built${detail?.durationMs !== undefined ? ` in ${(detail.durationMs / 1000).toFixed(1)}s` : ''} — preview updates live.`);
+			else if (state === 'error' && detail?.reason) out.warn(detail.reason);
+		},
+	});
+
+	out.line(`Starting the dev server for ${app.id} (${app.folder})...`);
+	const origin = await session.start();
+	out.line(`Dev server: ${origin}`);
+	out.line(`Preview:    ${previewUrl}`);
+	out.line('Edit and save to update the preview. Press Ctrl+C to stop.');
+	out.result({ appId: app.id, devOrigin: origin, previewUrl });
+	if (options.open) openBrowser(previewUrl);
+
+	// step: run until Ctrl+C, then stop the tree and drop the overlay
+	await new Promise<void>((resolve) => {
+		onInterrupt(() => {
+			out.line('Stopping the dev server...');
+			void session?.stop().finally(resolve);
+		});
+	});
+	return 0;
+}
+
 // =============================================================================
 // REGISTRATION
 // =============================================================================
@@ -490,7 +558,34 @@ export async function executeAppVerify(ref: string | undefined, options: AppVerb
  * @param program - The root commander program.
  */
 export function registerAppCommands(program: Command): void {
-	const appCmd = program.command('app').description('App lifecycle operations');
+	const appCmd = program
+		.command('app')
+		.description('Build, preview, deploy, and publish apps (the App Builder from the terminal)')
+		.addHelpText(
+			'after',
+			`
+[app] is an app folder (apps/clock-ui), an app id (personal.clock), its name
+(clock), its folder name (clock-ui), or nothing (the current folder). A lone
+number is read as the version: 'rocketride app publish 3'.
+
+Connections: create and dev use the development connection (ROCKETRIDE_URI);
+every other verb except verify uses the deployment target
+(ROCKETRIDE_DEPLOY_URI) and never falls back to the development connection.
+
+Examples:
+  rocketride app create clock                        new app in ./apps/clock-ui
+  rocketride app dev clock --open                    live preview; Ctrl+C stops
+  rocketride app verify clock --store                local checks, incl. the store bar
+  rocketride app deploy clock --publish @me          deploy, wait for the build, publish
+  rocketride app versions clock                      version rail and where each is live
+  rocketride app publish clock 2 --to @team/QA       publish a version to a team
+  rocketride app unpublish clock --from @me          take it off your desktop
+  rocketride app developer status                    your org's developer id
+
+Removing an app: there is no hard delete; unpublish removes an audience binding
+and keeps every version and its history. 'app where' lists each audience still
+serving the app; a team or @public binding can keep it on your desktop.`,
+		);
 	const workspaceOption = '--workspace <dir>';
 	const workspaceHelp = 'Workspace root apps are found in and the deploy zip is rooted at (default: current directory)';
 
@@ -513,6 +608,20 @@ export function registerAppCommands(program: Command): void {
 			await runCliCommand(options, (out) => executeAppCreate(slug, options, out));
 		});
 	addConnectionOptions(createCmd);
+
+	// ── app dev ──────────────────────────────────────────────────────────
+	// The dev loop on the DEVELOPMENT connection (your personal overlay):
+	// serve, register, print the preview URL, stop on Ctrl+C.
+	const devCmd = appCmd
+		.command('dev [app]')
+		.description('Serve an app with live preview: rsbuild dev + your personal dev overlay (Ctrl+C stops)')
+		.option('--open', 'Open the preview in your browser')
+		.option('--no-install', 'Skip the workspace pnpm install')
+		.option(workspaceOption, 'Workspace root the app is found in and pnpm install runs at (default: current directory)')
+		.action(async (app, options) => {
+			await runCliCommand(options, (out) => executeAppDev(app, options, out));
+		});
+	addConnectionOptions(devCmd);
 
 	// ── app verify ───────────────────────────────────────────────────────
 	// The no-side-effect precheck: everything `app deploy` needs, verified
@@ -555,8 +664,8 @@ export function registerAppCommands(program: Command): void {
 
 	// ── app unpublish / disable ──────────────────────────────────────────
 	for (const [verb, description] of [
-		['unpublish', 'Stop serving an app to an audience (versions and history survive)'],
-		['disable', "Switch off an audience's binding but keep it listed (publishing again re-enables it)"],
+		['unpublish', 'Remove an app from an audience; --from @me takes it off your desktop (versions and history survive; publish again to restore)'],
+		['disable', "Switch an audience off but keep it listed as disabled (publish again to re-enable)"],
 	] as const) {
 		const cmd = appCmd
 			.command(`${verb} [app]`)

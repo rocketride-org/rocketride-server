@@ -145,6 +145,10 @@ A deploy packs the app folder plus any folders listed under
 rocketride app deploy ./apps/reports-ui --comment "first version"
 ```
 
+To preview from the terminal instead of the App Builder, run `rocketride app
+dev reports --open`: it serves the app, opens the preview, and updates it on
+every save, whichever editor you use. Ctrl+C stops it.
+
 Publishing happens on the Deploy tab, or from the terminal:
 
 ```bash

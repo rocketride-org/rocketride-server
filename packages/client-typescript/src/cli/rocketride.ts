@@ -61,6 +61,7 @@ import { registerAppCommands } from './commands/app';
 import { registerDeployCommands } from './commands/deploy';
 import { registerProfileCommands } from './commands/profile';
 import { disconnectAll, takeInterrupt } from './common';
+import { SDK_VERSION } from '../client/constants';
 
 // The workspace .env must be in process.env before the command groups
 // REGISTER (their option defaults read it) — registration happens inside
@@ -106,7 +107,28 @@ function setupSignalHandlers(): void {
  */
 function createProgram(): Command {
 	const program = new Command();
-	program.name('rocketride').description('RocketRide Unified Pipeline and File Management CLI').version('1.3.0');
+	program
+		.name('rocketride')
+		.description('RocketRide CLI: build, run, preview, deploy, and publish pipelines and apps')
+		// SDK_VERSION is stamped from package.json at build time
+		.version(SDK_VERSION)
+		.addHelpText(
+			'after',
+			`
+Getting started:
+  rocketride init --uri https://api.rocketride.ai   sign in and set up this workspace
+  rocketride app create clock                      new app in ./apps/clock-ui
+  rocketride app dev clock --open                  live preview; updates on save
+  rocketride app deploy clock --publish @me        deploy and put it on your desktop
+
+Connections (.env, written by 'rocketride login' / 'init'):
+  ROCKETRIDE_URI / ROCKETRIDE_APIKEY                 development: start, upload, validate,
+                                                     store, profile, app create, app dev
+  ROCKETRIDE_DEPLOY_URI / ROCKETRIDE_DEPLOY_APIKEY   deployment target: deploy *, app deploy,
+                                                     publish, versions, and other lifecycle verbs
+
+Run 'rocketride <command> --help' for details, e.g. 'rocketride app --help'.`,
+		);
 	registerAuthCommands(program);
 	registerTaskCommands(program);
 	registerValidateCommands(program);
