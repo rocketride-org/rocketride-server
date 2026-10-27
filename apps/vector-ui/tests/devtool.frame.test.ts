@@ -328,7 +328,7 @@ describe('the document frame: its focus, the console\'s query and median, and wr
 	it('a chunk focus for its document is taken once; one for another document is not; the console\'s query becomes its own', async () => {
 		const run = await connected((key) => documentUri(key, ID));
 		const entry = entryOf(run);
-		const focused: number[] = [];
+		const focused: Array<number | null> = [];
 		const versions: IDocVersion[] = [];
 		const unbind = run.frame.bindDocument(entry, ID, { focus: (chunkId) => focused.push(chunkId), version: (v) => versions.push(v) });
 		const console = mountFrame(run.h, consoleUri(run.key), { hintDelayMs: 0 });
@@ -343,6 +343,11 @@ describe('the document frame: its focus, the console\'s query and median, and wr
 		await settle();
 		await settle();
 		assert.deepEqual(focused, [3], 'a focus for another document is not taken');
+		// B5: a row's "open" (no chunk) is the press's arrival: taken once, with no chunk, and the chunk shown stays.
+		console.frame.env(true).openDocument(run.endpoint, ID, 'a.md');
+		await until(() => focused.length === 2, 'the arrival');
+		assert.deepEqual(focused, [3, null]);
+		assert.deepEqual(entry.selection.getState().chunk, [ID, 3]);
 		consoleEntry.selection.setQuery('radio check-in');
 		await until(() => entry.selection.getState().query === 'radio check-in', 'the console\'s query, for the heat strip');
 		assert.equal(run.frame.summaries.get()[run.key]?.medianChunks, undefined, 'no summary until the console listed');

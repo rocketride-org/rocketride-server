@@ -504,11 +504,13 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 			const chunkId = field(params, 'chunkId');
 			const route = routeDocKey(typeof docKey === 'string' ? docKey : null);
 			if (route.kind !== 'document' || route.key !== key) throw invalid(OP.requestFocus, 'A focus names one of this connection\'s documents.');
-			if (!Number.isInteger(chunkId) || (chunkId as number) < 0) throw invalid(OP.requestFocus, 'A focus names a chunk by its number.');
+			// No chunk (null, or left out): only the arrival, the frame takes the focus.
+			const chunk = chunkId === null || chunkId === undefined ? null : chunkId;
+			if (chunk !== null && (!Number.isInteger(chunk) || (chunk as number) < 0)) throw invalid(OP.requestFocus, 'A focus names a chunk by its number, or none.');
 			const nonce = mountNonce();
-			touch(focus, key, { nonce, docKey: docKey as string, chunkId: chunkId as number });
+			touch(focus, key, { nonce, docKey: docKey as string, chunkId: chunk as number | null });
 			publishFocus();
-			attached.channel.sendEvent(EVENT.focusChunk, { docKey, chunkId, nonce });
+			attached.channel.sendEvent(EVENT.focusChunk, { docKey, chunkId: chunk, nonce });
 			expire(focus, key, nonce, publishFocus);
 			return replyOk(null);
 		},

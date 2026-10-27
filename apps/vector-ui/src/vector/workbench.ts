@@ -246,6 +246,24 @@ export function bottomSlot(input: IBottomSlotInput): BottomSlot {
 	return input.write === 'failure' || input.fresh ? 'write' : 'pending';
 }
 
+/** What a document surface's bottom slot shows: its own write's line, or nothing (the same height). */
+export type DocumentSlot = 'write' | 'empty';
+
+/**
+ * The one line of a document surface's bottom slot, by the hub's rules without a pending bar: a running write, and a
+ * failure or a write that did not do all it was asked, until the next write; a success for a few seconds; and never
+ * taken away while the focus or the pointer is in it.
+ *
+ * @param input - The write's line, whether its result landed less than {@link RESULT_FIRST_MS} ago, whether the focus
+ * or the pointer is in the slot, and what the slot shows now.
+ * @returns What the slot shows.
+ */
+export function documentSlot(input: { write: SlotWrite; fresh: boolean; held: boolean; showing: DocumentSlot }): DocumentSlot {
+	if (input.write === null) return 'empty';
+	if (input.write === 'running' || input.write === 'failure' || input.fresh) return 'write';
+	return input.held && input.showing === 'write' ? 'write' : 'empty';
+}
+
 /**
  * Whether a console or document takes the focus as it shows (B5): a press elsewhere brought it forward, or opened it,
  * and that press's own page is hidden, so nothing shown has the focus. Never on a mount nobody pressed for (restored,

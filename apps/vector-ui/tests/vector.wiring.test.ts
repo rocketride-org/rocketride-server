@@ -287,11 +287,14 @@ test('every removal is confirmed inline in the document that shows it, in both m
 	assert.match(code('views/ConsoleView.tsx'), /<InlineRemoveConfirm entry=\{entry\} probe=\{probe\} origin=\{CONSOLE_ORIGIN\} returnFocus=\{returnFocus\} \/>/, 'the workbench confirms its own requests inline, on every tab');
 	assert.match(code('views/ConsoleView.tsx'), /firstFocusable\(\[inShown\('\[data-return-focus\]'\), inShown\('\[data-grid-focus\] \[data-grid-row\]\[tabindex="0"\]'\), inShown\('\[data-grid-focus\]'\), currentTab\(\)\]\)/, "a lost focus goes to the shown panel's marked row, else its grid, else the current tab");
 	assert.match(code('components/InlineRemoveConfirm.tsx'), /firstFocusable\(\[how\.current === 'cancel' \? back : null, closing\.current\.returnFocus\?\.\(back\), surfaceTarget\(surface\)\]\)/, "after Cancel, back to the opener first; the caller's fallback hears the opener; with none named, the surface's own (R1-I1)");
-	assert.match(app, /<DocumentView [^>]*beforeBody=\{\s*<>\s*<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} origin=\{documentOrigin\(payload\.objectId\)\} returnFocus=\{returnFocus\} \/>\s*(\{\}\s*)?<DocumentWriteLine entry=\{entry\} origin=\{documentOrigin\(payload\.objectId\)\} \/>\s*<\/>\s*\}/, "and the full app's document tab its own (it shares the console's controller)");
+	assert.match(app, /<DocumentView [^>]*beforeBody=\{<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} origin=\{documentOrigin\(payload\.objectId\)\} returnFocus=\{returnFocus\} \/>\}/, "and the full app's document tab its own (it shares the console's controller)");
+	// Its own write's line: a fixed slot under the document, while writes are possible (live B10, the hub's rules).
+	assert.match(app, /<div style=\{styles\.documentBody\}>\s*<DocumentView [\s\S]*?<\/div>\s*(\{\}\s*)?\{model\.writes\.enabled && <DocumentWriteLine entry=\{entry\} origin=\{documentOrigin\(payload\.objectId\)\} returnFocus=\{\(\) => returnFocus\(null\)\} \/>\}\s*<\/div>/);
 	// R1-I1: after Confirm on a document surface the focus stays in the document: the opener while shown, its tabs, then its first control.
 	assert.match(app, /const returnFocus = \(opener: HTMLElement \| null\): HTMLElement \| null => documentFocus\(root\.current, opener\) as HTMLElement \| null;/);
 	const devFrame = code('VectorDevTool.tsx');
-	assert.match(devFrame, /<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[live\.key\]\} returnFocus=\{returnFocus\} \/>\s*<DocumentWriteLine entry=\{entry\} origin=\{CONSOLE_ORIGIN\} \/>/, "and its own write's line under it (its own controller: every write is the frame's)");
+	assert.match(devFrame, /const confirm = <InlineRemoveConfirm entry=\{entry\} probe=\{probes\[live\.key\]\} returnFocus=\{returnFocus\} \/>;/);
+	assert.match(devFrame, /<div style=\{styles\.documentBody\}>[\s\S]*?<\/div>\s*(\{\}\s*)?\{model\.writes\.enabled && <DocumentWriteLine entry=\{entry\} origin=\{CONSOLE_ORIGIN\} returnFocus=\{\(\) => returnFocus\(null\)\} \/>\}\s*<\/div>/, "and its own write's line in a fixed slot under the document (its own controller: every write is the frame's)");
 	assert.match(devFrame, /if \(typeof document === 'undefined' \|\| !focusLost\(document\.activeElement, document\.body, null\)\) return;\s*returnFocus\(null\)\?\.focus\(\);/, 'and after a read again or the document going');
 	assert.match(devFrame, /<div tabIndex=\{-1\} style=\{styles\.gone\} data-document-gone="">/, 'the gone state can hold the focus');
 	assert.match(devFrame, /const seen = useRef\(\{ version, gone \}\);\s*useEffect\(\(\) => \{\s*if \(seen\.current\.version === version && seen\.current\.gone === gone\) return;\s*seen\.current = \{ version, gone \};\s*if \(typeof document === 'undefined' \|\| !focusLost/, 'a read again or the document going acts only on a change, never as the frame mounts');
@@ -538,6 +541,19 @@ test('B5: a press whose own page or panel is hidden never leaves the focus on th
 	const app = code('VectorApp.tsx');
 	assert.match(app, /if \(typeof document === 'undefined' \|\| !takeArrival\(uri\)\) return undefined;[\s\S]*?returnFocus\(null\)\?\.focus\(\);/);
 	const devFrame = code('VectorDevTool.tsx');
-	assert.match(devFrame, /if \(typeof document === 'undefined' \|\| !frame\.visible\.get\(\)\) return;\s*if \(focusAdrift\(document\.activeElement as HTMLElement \| null, document\.body\)\) returnFocus\(null\)\?\.focus\(\);/, 'a frame that opens in front; one opening behind leaves the focus');
+	// The dev tool: only on a press's arrival (the controller's focus request, taken once, short-lived); never on mount alone.
+	assert.match(devFrame, /focus: \(id\) => \{\s*if \(id !== null\) setChunkId\(id\);\s*if \(typeof document !== 'undefined' && focusAdrift\(document\.activeElement as HTMLElement \| null, document\.body\)\) returnFocus\(null\)\?\.focus\(\);\s*\},/);
+	assert.doesNotMatch(devFrame, /frame\.visible\.get\(\)\) return;/, 'visibility alone never takes the focus (a frame restored in front at load)');
+	assert.match(code('devtool/frame.ts'), /caller\.callReply\(OP\.requestFocus, \{ key: endpoint\.key, docKey: target, chunkId: chunkId \?\? null \}/, 'every open sends its arrival');
+});
+
+test("live B10: a document's write slot is the hub's: one height, the same style, under the document", () => {
+	const hubSlot = /slot: \{ flexShrink: 0, boxSizing: 'border-box', height: PENDING_BAR_HEIGHT, margin: '0 12px 8px', display: 'flex', alignItems: 'stretch', minWidth: 0 \} as CSSProperties,/;
+	assert.match(code('views/ConsoleView.tsx'), hubSlot);
+	const slot = code('components/DocumentWriteLine.tsx');
+	assert.match(slot, hubSlot, "exactly the hub's slot");
+	assert.equal(slot.match(/<div\s+ref=\{slotRef\}\s+style=\{styles\.slot\}\s+data-document-write-slot=""/g)?.length, 1, 'one style in every state');
+	assert.match(slot, /const slot = documentSlot\(\{ write, fresh, held: inSlot\.focus \|\| inSlot\.pointer, showing: showing\.current \}\);/);
+	assert.match(slot, /\(removal\.status === 'done' \|\| removal\.status === 'error'\) && <WriteAuditDetails message=\{removal\.message\} audit=\{removal\.audit\} \/>/, 'Write details, opening above the line');
 });
 

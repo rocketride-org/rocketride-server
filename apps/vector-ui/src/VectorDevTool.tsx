@@ -42,7 +42,7 @@
 // window-wide overlay.
 // =============================================================================
 
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Banner, EmptyState } from 'shell';
 import type { DevToolProps } from 'shell';
@@ -72,6 +72,8 @@ const styles = {
 	center: { display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center' } as CSSProperties,
 	notice: { padding: '8px 24px 0' } as CSSProperties,
 	document: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 } as CSSProperties,
+	/** The document (or what says it is gone) above its write slot: the room the slot leaves. */
+	documentBody: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, minWidth: 0 } as CSSProperties,
 	gone: { display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', outline: 'none' } as CSSProperties,
 };
 
@@ -240,7 +242,13 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 	useEffect(
 		() =>
 			frame.bindDocument(entry, objectId, {
-				focus: (id) => setChunkId(id),
+				// A press opened or fronted this frame (its arrival, taken once): the focus comes to its Reader | Chunks tabs
+				// when nothing shown has it, never the page. A frame nobody pressed for (restored at load, opened behind)
+				// gets no arrival, and leaves the focus where it is, in the host or another frame.
+				focus: (id) => {
+					if (id !== null) setChunkId(id);
+					if (typeof document !== 'undefined' && focusAdrift(document.activeElement as HTMLElement | null, document.body)) returnFocus(null)?.focus();
+				},
 				// Read again, in place (DocumentView's refreshKey), only for a write that may have changed THIS document: another
 				// document's write leaves the view as it is.
 				version: (written) => {
@@ -264,30 +272,13 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 		// After a read again or the document going; returnFocus reads the root when it runs.
 		returnFocus(null)?.focus();
 	}, [version, gone]);
-	// A frame that opens in front was opened by a press in another frame (a row's "open"): the focus comes to its
-	// Reader | Chunks tabs, never the page. A frame that opens behind (restored, or opened elsewhere) leaves the focus
-	// where it is, in the host or another frame. A frame cannot tell a press from the host restoring it in front at
-	// load (no signal crosses the frames for that, and a new frame never has the page's focus yet), so that one takes
-	// the focus too.
-	useLayoutEffect(() => {
-		if (typeof document === 'undefined' || !frame.visible.get()) return;
-		if (focusAdrift(document.activeElement as HTMLElement | null, document.body)) returnFocus(null)?.focus();
-		// Once, as the frame mounts.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
 	// Removing from a document needs the console model's write switch (its own controller confirms and sends).
 	useEffect(() => {
 		entry.controller.setWritesEnabled(model.writes.enabled);
 	}, [model.writes.enabled, entry]);
 	const actions = useMemo(() => frame.documentActions(entry), [frame, entry]);
 	const median = summaries[live.key]?.medianChunks ?? null;
-	// Its own controller: every write of it is this frame's, said under its confirmation.
-	const confirm = (
-		<>
-			<InlineRemoveConfirm entry={entry} probe={probes[live.key]} returnFocus={returnFocus} />
-			<DocumentWriteLine entry={entry} origin={CONSOLE_ORIGIN} />
-		</>
-	);
+	const confirm = <InlineRemoveConfirm entry={entry} probe={probes[live.key]} returnFocus={returnFocus} />;
 	return (
 		<div ref={root} style={styles.document}>
 			{live.state === 'stopped' && (
@@ -295,16 +286,20 @@ const DocumentFrame: React.FC<{ frame: IVectorFrame; endpoint: IExplorerEndpoint
 					<Banner variant="info">{live.stateDetail ?? STOPPED_DETAIL}</Banner>
 				</div>
 			)}
-			{gone ? (
-				<>
-					{confirm}
-					<div tabIndex={-1} style={styles.gone} data-document-gone="">
-						<EmptyState icon={<VectorIcon />} title={DOCUMENT_GONE_TITLE} description={CODE_SENTENCES.NOT_FOUND} />
-					</div>
-				</>
-			) : (
-				<DocumentView refreshKey={version} model={model} channels={channels} selection={entry.selection} actions={actions} objectId={objectId} path={null} active={visible} consoleMedian={median} onDocument={(row) => setGone(row === null)} beforeBody={confirm} {...(chunkId === undefined ? {} : { chunkId })} />
-			)}
+			<div style={styles.documentBody}>
+				{gone ? (
+					<>
+						{confirm}
+						<div tabIndex={-1} style={styles.gone} data-document-gone="">
+							<EmptyState icon={<VectorIcon />} title={DOCUMENT_GONE_TITLE} description={CODE_SENTENCES.NOT_FOUND} />
+						</div>
+					</>
+				) : (
+					<DocumentView refreshKey={version} model={model} channels={channels} selection={entry.selection} actions={actions} objectId={objectId} path={null} active={visible} consoleMedian={median} onDocument={(row) => setGone(row === null)} beforeBody={confirm} {...(chunkId === undefined ? {} : { chunkId })} />
+				)}
+			</div>
+			{/* Its own controller: every write of it is this frame's, in a fixed slot under the document. */}
+			{model.writes.enabled && <DocumentWriteLine entry={entry} origin={CONSOLE_ORIGIN} returnFocus={() => returnFocus(null)} />}
 		</div>
 	);
 };

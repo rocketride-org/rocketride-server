@@ -132,8 +132,11 @@ export interface IVectorFrameOptions {
 
 /** What a document frame is told. */
 export interface IDocumentBinding {
-	/** Show this chunk (a focus request for this document, taken once). */
-	focus(chunkId: number): void;
+	/**
+	 * A press opened or fronted this document (its arrival, taken once): take the focus when nothing shown has it, and
+	 * show the chunk when one is named (null: none).
+	 */
+	focus(chunkId: number | null): void;
 	/** A write ran on the connection (any frame's): read the document again. */
 	version(version: IDocVersion): void;
 }
@@ -336,7 +339,7 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 	let sentSummary = '';
 	let hintTimer: (() => void) | null = null;
 	// Requests for this frame: who takes them, and the last one an event brought.
-	let focusListener: ((chunkId: number) => void) | null = null;
+	let focusListener: ((chunkId: number | null) => void) | null = null;
 	let mapListener: ((request: { keys: VectorKey[]; source: HighlightSource }) => void) | null = null;
 	let eventFocus: IFocusRequest | null = null;
 	let eventMap: (IMapRequest & { docKey: string }) | null = null;
@@ -487,8 +490,8 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 		const nonce = field(payload, 'nonce');
 		const target = field(payload, 'docKey');
 		const chunkId = field(payload, 'chunkId');
-		if (typeof nonce !== 'string' || typeof target !== 'string' || !Number.isInteger(chunkId)) return;
-		eventFocus = { nonce, docKey: target, chunkId: chunkId as number };
+		if (typeof nonce !== 'string' || typeof target !== 'string' || !(chunkId === null || Number.isInteger(chunkId))) return;
+		eventFocus = { nonce, docKey: target, chunkId: chunkId as number | null };
 		offerFocus();
 	}));
 	offs.push(channel.onEvent(EVENT.showOnMap, (payload) => {
@@ -555,9 +558,9 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 	const openDocument = (endpoint: IExplorerEndpoint, objectId: string, path: string | null, chunkId?: number): void => {
 		const target = documentUri(endpoint.key, objectId);
 		opts.documents?.open(target, documentTitle(objectId, path));
-		if (chunkId === undefined) return;
-		// The document frame may not exist yet: the focus waits for it as retained state, taken once.
-		caller.callReply(OP.requestFocus, { key: endpoint.key, docKey: target, chunkId }, { timeoutMs: frameTimeoutFor(OP.requestFocus) }).catch(report);
+		// The press's arrival (and its chunk, if any): the document frame may not exist yet, so it waits for it as retained
+		// state, taken once and dropped after FOCUS_MAX_AGE_MS. A frame nobody pressed for (restored at load) gets none.
+		caller.callReply(OP.requestFocus, { key: endpoint.key, docKey: target, chunkId: chunkId ?? null }, { timeoutMs: frameTimeoutFor(OP.requestFocus) }).catch(report);
 	};
 	const activeConnection: IReadable<string | null> = { get: () => frameKey, subscribe: () => () => undefined };
 	const envs = new Map<boolean, IVectorEnv>();
@@ -685,8 +688,8 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 			unbind.push(queries.subscribe(onQueries));
 			onQueries();
 			unbind.push(followVersions(key, (version) => on.version(version)));
-			const listener = (chunkId: number): void => {
-				entry.selection.focusChunk([objectId, chunkId]);
+			const listener = (chunkId: number | null): void => {
+				if (chunkId !== null) entry.selection.focusChunk([objectId, chunkId]);
 				on.focus(chunkId);
 			};
 			focusListener = listener;

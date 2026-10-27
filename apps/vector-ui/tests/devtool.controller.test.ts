@@ -203,6 +203,13 @@ describe('the relays: a document focus and a map request cross as ops, are retai
 		timers.advance(FOCUS_MAX_AGE_MS);
 		await until(() => stateOf<Record<string, IFocusRequest>>(mounted.h, STATE.focusRequests)?.[key] === undefined, 'the age limit');
 		await assert.rejects(frame.caller.callReply(OP.requestFocus, { key, docKey: documentUri('k1|another', 'doc-1'), chunkId: 1 }, { timeoutMs: 10_000 }), (e: unknown) => e instanceof ExplorerToolError && e.kind === 'invalid', 'a focus for another connection\'s document is refused');
+		// B5: a press's arrival with no chunk (a row's "open") is a request too, retained and dropped at the same age.
+		await frame.caller.callReply(OP.requestFocus, { key, docKey, chunkId: null }, { timeoutMs: 10_000 });
+		await until(() => stateOf<Record<string, IFocusRequest>>(mounted.h, STATE.focusRequests)?.[key]?.chunkId === null, 'the arrival');
+		await until(() => heard.some((event) => (event as { chunkId?: unknown }).chunkId === null), 'its event');
+		timers.advance(FOCUS_MAX_AGE_MS);
+		await until(() => stateOf<Record<string, IFocusRequest>>(mounted.h, STATE.focusRequests)?.[key] === undefined, 'a short life: a frame restored later finds none');
+		await assert.rejects(frame.caller.callReply(OP.requestFocus, { key, docKey, chunkId: 1.5 }, { timeoutMs: 10_000 }), (e: unknown) => e instanceof ExplorerToolError && e.kind === 'invalid', 'a chunk is still a whole number');
 		frame.caller.dispose();
 		mounted.controller.dispose();
 	});
