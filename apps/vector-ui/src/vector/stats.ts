@@ -181,12 +181,24 @@ export function statsChips(input: { dialect: IDialectResult | null; stats: IStat
 	if (dialect?.health.control_record === false) chips.push({ key: 'repair', label: 'Repair needed', tone: 'error', tooltip: 'This collection has no control record, so its embedding model and dimension are not recorded.' });
 	// Fresh stats win: the dialect is read at discovery (and again after a write), so a store found empty would
 	// otherwise stay "Empty collection" beside the documents an upload just added.
-	const missing = stats ? stats.collectionExists === false : dialect?.health.collection_exists === false;
-	if (missing) chips.push({ key: 'empty', label: 'Empty collection', tone: 'muted', tooltip: CODE_SENTENCES.COLLECTION_MISSING });
+	if (collectionMissing(dialect, stats)) chips.push({ key: 'empty', label: 'Empty collection', tone: 'muted', tooltip: CODE_SENTENCES.COLLECTION_MISSING });
 	const orphans = stats?.withoutFirstChunk ?? 0;
 	if (health !== null && health.flagged > 0) chips.push(attentionChip(health, stats?.withoutFirstChunk ?? null));
 	else if (orphans > 0) chips.push({ key: 'orphans', label: `${formatCount(orphans)} without first chunk`, tone: 'warning', tooltip: `${formatCount(orphans)} ${orphans === 1 ? 'document has' : 'documents have'} lost its first chunk; the directory lists ${orphans === 1 ? 'it' : 'them'} under "Needs attention".` });
 	return chips;
+}
+
+/**
+ * Whether the collection is missing ("Empty collection"): fresh stats win over the dialect, which is read at discovery
+ * (and again after a write), so a store found empty would otherwise stay "Empty collection" beside the documents an
+ * upload just added. The strip's chip and the connection card's flag share this rule.
+ *
+ * @param dialect - The node's dialect, or null.
+ * @param stats - The console's last stats, or null.
+ * @returns True when the collection does not exist.
+ */
+export function collectionMissing(dialect: IDialectResult | null, stats: IStatsView | null): boolean {
+	return stats ? stats.collectionExists === false : dialect?.health.collection_exists === false;
 }
 
 /**

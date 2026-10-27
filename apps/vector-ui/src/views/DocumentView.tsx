@@ -39,17 +39,22 @@
 // connection's anchor channel (Tools, or Chat on a read-only connection).
 // =============================================================================
 
-import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { Banner, Button, BxTrash, ContentHeader } from 'shell';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { Banner, Button, BxTrash, ContentHeader, ToggleGroup } from 'shell';
 import type { DocumentViewProps as ContractDocumentViewProps, IChunkItem, IDocumentItem, VectorKey } from '../contract/types';
 import { fetchChunks, fetchDocument, scoreChunks } from '../adapters/actions';
 import type { IVectorCaller } from '../adapters/actions';
 import { existingEntry } from '../adapters/connections';
+import ChunkDrawer from '../components/ChunkDrawer';
+import ChunksGrid from '../components/ChunksGrid';
 import HealthPanel from '../components/HealthPanel';
 import type { IHealthProbe } from '../components/HealthPanel';
+import type { IVectorGridHandle } from '../components/VectorGrid';
 import HeatStrip from '../components/HeatStrip';
 import SupportBadge from '../components/SupportBadge';
 import { CHUNKS_PAGE } from '../vector/budgets';
+import { chunkRows } from '../vector/chunkRows';
+import type { IChunkRow } from '../vector/chunkRows';
 import { fileTypeOf, formatSize } from '../vector/fileType';
 import { deletedFromTotals, medianChunks } from '../vector/health';
 import { HEAT_NO_EMBED, HEAT_NO_QUERY, HEAT_SCORING, heatCaption, heatKeys } from '../vector/heat';
@@ -84,6 +89,21 @@ interface IChunkState {
 	loading: boolean;
 	error: IFailureText | null;
 }
+
+/** The document's two sub-tabs: the reading view, and the chunks as a grid with a drawer. */
+type DocumentSubTab = 'reader' | 'chunks';
+const SUB_TABS: ReadonlyArray<{ id: DocumentSubTab; label: string }> = [
+	{ id: 'reader', label: 'Reader' },
+	{ id: 'chunks', label: 'Chunks' },
+];
+
+const layout = {
+	subTabs: { flexShrink: 0, display: 'flex', alignItems: 'center', padding: '8px 24px 0' } as React.CSSProperties,
+	chunksPanel: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex' } as React.CSSProperties,
+	chunksMain: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '12px 24px 0' } as React.CSSProperties,
+	chunksBar: { flexShrink: 0, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', paddingBottom: 8 } as React.CSSProperties,
+	chunksFooter: { flexShrink: 0, display: 'flex', gap: 12, alignItems: 'center', padding: '8px 0 12px' } as React.CSSProperties,
+};
 
 const NO_CHUNKS: IChunkState = { items: [], hasMore: false, nextAfter: -1, total: null, loading: false, error: null };
 
@@ -220,6 +240,57 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 	}, [active, query, embedReady, caller, embedCaller, embedNode, store, objectId, chunkCount, scopeMax]);
 	const heatNow = heat !== null && heat.query === query ? heat : null;
 
+	// The Chunks sub-tab: mounted when first shown, then kept (a hidden panel keeps its grid and its drawer).
+	const [view, setView] = useState<DocumentSubTab>('reader');
+	const [chunksShown, setChunksShown] = useState(false);
+	const [openChunk, setOpenChunk] = useState<number | null>(null);
+	const [readerFocus, setReaderFocus] = useState<number | null>(null);
+	const gridRef = useRef<IVectorGridHandle>(null);
+	const refocusAfterMore = useRef(false);
+	const lastChunk = useRef<IChunkItem | null>(null);
+	const scores = heatNow !== null && 'scores' in heatNow ? heatNow.scores : null;
+	// Copies of the listing for the grid, rebuilt only when the listing or the scores change.
+	const rows: IChunkRow[] = useMemo(() => chunkRows(chunks.items, scores), [chunks.items, scores]);
+	const drawerChunk = chunks.items.find((c) => c.chunkId === openChunk) ?? (chunks.loading ? lastChunk.current : null);
+	if (drawerChunk !== null && drawerChunk.chunkId === openChunk) lastChunk.current = drawerChunk;
+	const showView = (next: DocumentSubTab): void => {
+		setView(next);
+		if (next === 'chunks') setChunksShown(true);
+	};
+	// Closing the drawer puts the focus back on its row (else the grid) before it unmounts.
+	const closeChunk = (): void => {
+		if (openChunk !== null && !gridRef.current?.focusRow(String(openChunk))) gridRef.current?.focusGrid();
+		setOpenChunk(null);
+	};
+	const openInReader = (id: number): void => {
+		setOpenChunk(null);
+		setReaderFocus(id);
+		setView('reader');
+	};
+	// "Open in reader": the chunk is scrolled to and takes the focus once the Reader is back in view.
+	useEffect(() => {
+		if (readerFocus === null || view !== 'reader') return;
+		const el = listRef.current?.querySelector<HTMLElement>(`[data-chunk="${readerFocus}"]`);
+		if (el) {
+			el.focus({ preventScroll: true });
+			if ('scrollIntoView' in el) el.scrollIntoView({ block: 'center' });
+		}
+		setReaderFocus(null);
+	}, [readerFocus, view]);
+	// "More chunks" is gone once the last page lands: the focus goes to the list, not the page.
+	useEffect(() => {
+		if (!refocusAfterMore.current || chunks.loading) return;
+		refocusAfterMore.current = false;
+		const fell = document.activeElement === null || document.activeElement === document.body;
+		if (!fell) return;
+		if (view === 'chunks') gridRef.current?.focusGrid();
+		else listRef.current?.focus();
+	}, [chunks.loading, view]);
+	const loadMore = (): void => {
+		refocusAfterMore.current = true;
+		void load(chunks.nextAfter);
+	};
+
 	// "Count deleted chunks": the document's chunk totals with and without soft-deleted rows (one row each).
 	const countDeleted = useCallback(async () => {
 		if (caller === null) return;
@@ -256,7 +327,10 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 				}
 			/>
 			{beforeBody}
-			<div style={styles.content}>
+			<div style={layout.subTabs} data-document-tabs="">
+				<ToggleGroup options={SUB_TABS.map((tab) => ({ id: tab.id, label: tab.label }))} value={view} onChange={showView} />
+			</div>
+			<div style={{ ...styles.content, display: view === 'reader' ? undefined : 'none' }} data-document-panel="reader">
 				{caller === null && <Banner variant="warning">No source of this pipeline is running, so the document cannot be read.</Banner>}
 				{infoError && <Banner variant="error">{infoError.headline}</Banner>}
 				<dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 16px', margin: '0 0 12px', ...styles.small }}>
@@ -308,9 +382,9 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 					</p>
 				)}
 				{chunks.error && <Banner variant="error">{chunks.error.headline}</Banner>}
-				<ol ref={listRef} aria-label="Chunks in reading order" style={{ listStyle: 'none', margin: '12px 0 0', padding: 0 }}>
+				<ol ref={listRef} tabIndex={-1} aria-label="Chunks in reading order" style={{ listStyle: 'none', margin: '12px 0 0', padding: 0, outline: 'none' }}>
 					{chunks.items.map((chunk) => (
-						<li key={chunk.chunkId} data-chunk={chunk.chunkId} style={{ padding: '10px 0', borderTop: '1px solid var(--rr-border)', borderLeft: chunk.chunkId === chunkId ? '3px solid var(--rr-border-focus)' : '3px solid transparent', paddingLeft: 10 }}>
+						<li key={chunk.chunkId} data-chunk={chunk.chunkId} tabIndex={-1} style={{ outline: 'none', padding: '10px 0', borderTop: '1px solid var(--rr-border)', borderLeft: chunk.chunkId === chunkId ? '3px solid var(--rr-border-focus)' : '3px solid transparent', paddingLeft: 10 }}>
 							<div style={{ display: 'flex', gap: 8, alignItems: 'center', ...styles.small }}>
 								<strong>{`#${chunk.chunkId}`}</strong>
 								<span>{`${formatCount(chunk.length)} chars`}</span>
@@ -325,12 +399,38 @@ export function DocumentView({ model, channels, selection, actions, objectId, pa
 					))}
 				</ol>
 				{chunks.loading && <div style={styles.small}>Loading chunks…</div>}
-				{chunks.hasMore && !chunks.loading && (
-					<Button variant="secondary" onClick={() => void load(chunks.nextAfter)}>
+				{chunks.hasMore && (
+					<Button variant="secondary" aria-disabled={chunks.loading} onClick={() => !chunks.loading && loadMore()}>
 						More chunks
 					</Button>
 				)}
 			</div>
+			{chunksShown && (
+				<div style={{ ...layout.chunksPanel, display: view === 'chunks' ? 'flex' : 'none' }} data-document-panel="chunks">
+					<div style={layout.chunksMain}>
+						<div style={layout.chunksBar}>
+							<label style={{ display: 'flex', gap: 6, alignItems: 'center', ...styles.small }}>
+								<input type="checkbox" checked={withDeleted} onChange={(event) => setWithDeleted(event.target.checked)} />
+								Include deleted chunks
+							</label>
+							{scores === null && <span style={styles.small}>Score appears when a query on the Map has scored this document's chunks.</span>}
+						</div>
+						{chunks.error && <Banner variant="error">{chunks.error.headline}</Banner>}
+						<ChunksGrid ref={gridRef} rows={rows} selectedId={openChunk === null ? null : String(openChunk)} withScore={scores !== null} hold={chunks.loading} onOpen={(row) => setOpenChunk(row.chunkId)} />
+						<div style={layout.chunksFooter}>
+							<span role="status" style={styles.small}>
+								{chunks.loading ? 'Loading chunks…' : `Showing ${formatCount(chunks.items.length)}${chunks.total !== null ? ` of ${formatCount(chunks.total)}` : ''} ${chunks.items.length === 1 ? 'chunk' : 'chunks'}; sorting reorders only these.`}
+							</span>
+							{chunks.hasMore && (
+								<Button variant="secondary" aria-disabled={chunks.loading} onClick={() => !chunks.loading && loadMore()}>
+									More chunks
+								</Button>
+							)}
+						</div>
+					</div>
+					{openChunk !== null && <ChunkDrawer objectId={objectId} path={shownPath} chunk={drawerChunk} caller={caller} store={store} documentChunks={info?.chunks ?? chunks.total} maxNeighbours={model.limits.neighbors_k_max} actions={actions} writes={model.writes} onClose={closeChunk} onOpenInReader={openInReader} onCopy={(text) => copyText(text, actions.announce)} {...(actions.useAsQuery ? { onUseAsQuery: actions.useAsQuery } : {})} />}
+				</div>
+			)}
 		</div>
 	);
 }

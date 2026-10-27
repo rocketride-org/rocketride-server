@@ -255,7 +255,7 @@ describe('F14 - no window-wide overlay in a frame: confirmations and details are
 		assert.equal(frame.match(/<InlineRemoveConfirm entry=\{entry\} probe=\{/g)?.length, 1, 'the document');
 		const details = code(read('components/ConnectionDetailsPanel.tsx'));
 		assert.match(details, /onKeyDown=\{\(event\) => \{\s*if \(event\.key === 'Escape'\)/);
-		assert.match(details, /<ConnectionDrawerDetails drawer=\{drawerView\(endpoint, probe, stats\)\} \/>/);
+		assert.match(details, /<ConnectionDrawerDetails drawer=\{drawerView\(endpoint, probe, stats\)\} fields=\{fields\} sample=\{sample\}/);
 		assert.match(details, /testResultText\(await onTest\(endpoint\)\)/);
 	});
 });

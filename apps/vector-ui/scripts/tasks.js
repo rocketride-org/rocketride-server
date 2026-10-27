@@ -139,6 +139,8 @@ const FEATURE_TESTS = {
 	'export.test.ts': 'src/vector/export.ts',
 	'exportPng.test.ts': 'src/map/exportPng.ts',
 	'savedViews.test.ts': 'src/vector/savedViews.ts',
+	// The grid of the Documents and Trash tabs and the document tab's chunks.
+	'vector.grid.test.tsx': 'src/vector/grid.ts',
 };
 
 /**
