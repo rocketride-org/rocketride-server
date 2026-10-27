@@ -1182,6 +1182,13 @@ tree = await client.cprofile_report_tree(target=token)  # call tree
 - `cprofile_threads(target=None)` — the threads of the last session,
   busiest first: `id` (the `thread` to pass above), `name`, system thread id `tid`,
   `ttot`, `functions` and `calls`. Names are not unique; `tid` is.
+- Session failures come back as data, not exceptions: `cprofile_start` while
+  a session is active, and `cprofile_stop` with no session (or on a
+  server-process session another connection started), return
+  `{'status': 'error', 'message': ...}`. With no completed session,
+  `cprofile_report` returns a placeholder text, and `cprofile_report_tree`
+  and `cprofile_threads` return an `error` key. A missing `task.control`
+  permission, or a `target` you may not control, raises `RuntimeError`.
 
 ## 17. Exceptions & Error Handling
 

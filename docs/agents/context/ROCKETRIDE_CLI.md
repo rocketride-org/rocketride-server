@@ -248,9 +248,13 @@ rocketride profile tree [--token TOKEN] [--thread ID] [--min-pct 0.1] [--max-dep
   connection until Ctrl+C or `--duration` and then stops the session.
 - `report`, `threads` and `tree` read the last completed session, so run
   them after `stop` or `run`. `--thread` takes an ID from `threads`; without
-  it the tree covers every thread.
+  it the tree covers every thread. With no completed session, `report`
+  prints `No profiling data available. Run a session first.` and exits 0,
+  while `threads` and `tree` fail with the same message, exit 1.
 - `tree` hides calls below `--min-pct` percent of the total time
-  (`--min-pct 0` keeps them all, useful on short runs), and
+  (`--min-pct 0` keeps them all; keep that to a few seconds of a quiet
+  process: on a busy pipeline task the unpruned tree takes the task minutes
+  and gigabytes to build, and the task answers nothing meanwhile), and
   `--no-include-system` drops stdlib code while keeping the project code it
   calls. A function can appear under several callers; the profiler records
   caller → callee totals, not paths, so each copy shows its share of them
