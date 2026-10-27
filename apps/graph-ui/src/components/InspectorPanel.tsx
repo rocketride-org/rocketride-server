@@ -233,6 +233,7 @@ export const InspectorPanel: React.FC<IInspectorPanelProps> = ({ state, session,
 					</>
 				)}
 				{canQuery && <Button variant="ghost" small onClick={newQuery}>New query from here</Button>}
+				{state.path && <Button variant="ghost" small title="Stop showing the found path" onClick={() => session.clearPath()}>Clear path</Button>}
 				<Button variant="ghost" small onClick={() => void copy()}>Copy JSON</Button>
 			</div>
 			{blocked !== null && blocked === json && <CopyBlocked text={blocked} />}

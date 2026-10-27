@@ -513,3 +513,13 @@ test('in a dev-tool frame the write console offers Test connection where it is u
 	assert.ok(view.indexOf('<ConnectionDetailsPanel') < view.indexOf('{gate.mounted ?'), 'part of the document\'s layout, above its body');
 	assert.ok(/onOpen=\{\(target\) => \{\s*panel\('close'\);\s*env\.openDocument\(\{ kind: 'workbench', endpoint: target \}\);\s*\}\}/.test(view), 'Open workbench closes the panel first');
 });
+
+// A found path stays on screen while a node or relationship is inspected, and Clear path must stay reachable then:
+// on the toolbar (whatever the inspector shows) and in the inspector's own actions.
+test('Clear path is offered whenever a path is shown, on the toolbar and beside a node or relationship in the inspector', () => {
+	const view = code(read('components', 'GraphView.tsx'));
+	assert.match(view, /\.\.\.\(state\.path \? \[\{ id: 'clear-path', label: 'Clear path'[^\]]*session\.clearPath\(\)/);
+	const inspector = code(read('components', 'InspectorPanel.tsx'));
+	const nodeView = inspector.slice(inspector.indexOf('New query from here'));
+	assert.match(nodeView, /\{state\.path && <Button[^>]*onClick=\{\(\) => session\.clearPath\(\)\}>Clear path<\/Button>\}/);
+});
