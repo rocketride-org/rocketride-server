@@ -118,13 +118,15 @@ cmd_launch() {
 	(
 		cd "$SERVER_DIR"
 		if [ "$mock" = 1 ]; then
-			exec env ROCKETRIDE_APIKEY="$APIKEY" ROCKETRIDE_MOCK="$MOCKS" \
+			exec env -u ROCKETRIDE_URI ROCKETRIDE_APIKEY="$APIKEY" ROCKETRIDE_MOCK="$MOCKS" \
 				ROCKETRIDE_OPENAI_KEY="${ROCKETRIDE_OPENAI_KEY:-sk-mock-placeholder}" "${engine_cmd[@]}"
 		else
-			exec env -u ROCKETRIDE_MOCK ROCKETRIDE_APIKEY="$APIKEY" "${engine_cmd[@]}"
+			exec env -u ROCKETRIDE_MOCK -u ROCKETRIDE_URI ROCKETRIDE_APIKEY="$APIKEY" "${engine_cmd[@]}"
 		fi
 	) >"$log" 2>&1 </dev/null &
 	local pid=$!
+	# Until engine.env exists, `stop` cannot find this engine, so an interrupted launch ends it here.
+	trap 'kill -TERM -- "-$pid" 2>/dev/null; exit 130' INT TERM HUP
 
 	local waited=0 port=""
 	while :; do
@@ -154,6 +156,7 @@ ENGINE_LOG=$log
 ROCKETRIDE_URI=http://127.0.0.1:$port
 ROCKETRIDE_APIKEY=$APIKEY
 EOF
+	trap - INT TERM HUP
 	ln -sfn "$RUN_ID" "$VERIFY_ROOT/latest"
 	echo "run:      $RUN_ID"
 	echo "engine:   http://127.0.0.1:$port (pid $pid, mock=$mock, ready in ${waited}s)"

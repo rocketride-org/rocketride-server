@@ -54,7 +54,11 @@ def judge(run_dir: Path, question: str, reference: str, defects: list, use_model
 
 def outcome(case: dict, result: dict, run_dir: Path, use_model: bool) -> tuple[str, str]:
     verdict = result.get('verdict')
-    if verdict is None:
+    if (
+        not isinstance(verdict, dict)
+        or not isinstance(verdict.get('defect_found'), bool)
+        or not isinstance(verdict.get('defects'), list)
+    ):
         return 'no-verdict', 'the agent did not finish with a JSON verdict'
     defects = verdict.get('defects') or []
     found = bool(verdict.get('defect_found')) and bool(defects)
