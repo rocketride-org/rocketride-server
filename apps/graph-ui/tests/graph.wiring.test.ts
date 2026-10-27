@@ -215,6 +215,9 @@ test('Stop waiting takes the Run / Run all slot while a run is out, and the focu
 	assert.ok(/const runOut = runner\.running \|\| runner\.canStop;/.test(hold));
 	assert.ok(/if \(runOut \|\| !runSlot\.current \|\| !viewsGroup\.current\) return;/.test(hold), 'measured only while no run is out');
 	assert.ok(/slot: runSlot\.current\.getBoundingClientRect\(\)\.width, views: viewsGroup\.current\.getBoundingClientRect\(\)\.width/.test(hold));
+	// Review 4g: a run that ends while its document is hidden (rocket-ui) or its panel is not visible (VS Code) measures
+	// inside display: none, where every width is 0; those are not kept, so the next run holds what was measured shown.
+	assert.ok(/if \(next\.slot === 0 \|\| next\.views === 0\) return;\s*setHeld\(/.test(hold), 'a width measured hidden (0) is not kept');
 	assert.ok(/\}, \[runOut, views, mode, inRow, active, barHost\]\);/.test(hold), 'measured again when the labels, the size or the bar change');
 	assert.ok(/<span ref=\{viewsGroup\} role="group" aria-label="Show the result as" style=\{styles\.views\(runOut \? held\?\.views : undefined\)\}>/.test(bar), 'the result switch keeps its width too');
 	// Review 4d: a focus lost with the button that went goes to the slot's button when it can be pressed, otherwise to

@@ -49,7 +49,9 @@
 // The tabs have a row of their own, and the shown tab's controls the row under
 // it: its run bar (each surface portals its bar there) or Overview's actions.
 // Sharing one row moved the tabs whenever the bar's width changed, and a run
-// changes it, so nothing beside the tabs can move them. Every read of every tab, and Ask, goes through one request gate
+// changes it, so nothing beside the tabs can move them.
+//
+// Every read of every tab, and Ask, goes through one request gate
 // (graph/requestGate.ts), so the workbench sends one request at a time (Refresh
 // schema is the connection's, for every document, and is not counted). While a
 // tab's graph fills the document, the document hides what it covers.
