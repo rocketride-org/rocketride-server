@@ -72,7 +72,7 @@ export function entrySummary(entry: IHistoryEntry<'cypher'>): string {
 		case 'rows':
 			return `${(entry.rows ?? 0).toLocaleString('en-US')} ${entry.rows === 1 ? 'row' : 'rows'}${entry.limit !== undefined ? ` (limit ${entry.limit.toLocaleString('en-US')})` : ''}`;
 		case 'affected':
-			return entry.affected === undefined ? 'affected count not reported' : changesText(entry.affected);
+			return entry.affected === undefined ? 'change count not reported' : changesText(entry.affected);
 		case 'abandoned':
 			return 'stopped waiting; the database may have finished it';
 		default:

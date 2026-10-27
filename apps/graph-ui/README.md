@@ -237,8 +237,9 @@ Every query tab has an editor, a row limit, and three views of its result
   unlimited, and nothing above that maximum is ever sent. The limit travels as an
   input to the node, not as text added to your Cypher, so your statement is sent
   exactly as written.
-- **Stop waiting** stops the app from waiting. The query may still be running on
-  the database and cannot be cancelled from here; a late answer is ignored.
+- **Stop waiting** takes the place of **Run** and **Run all** while a statement
+  runs, and stops the app from waiting. The query may still be running on the
+  database and cannot be cancelled from here; a late answer is ignored.
 - **When the connection is checked again** (any pipeline restarts, the shell
   reconnects, or you press **Test connection**), or its pipeline stops, an open
   workbench keeps its editor, results, graph and inspector on screen. Running and
@@ -820,9 +821,9 @@ and it always says what it is:
   property reads "3 changes", not three nodes, and the result line says what
   the count adds up. Apache AGE's node reports the number of rows the statement
   returned there instead (0 for a write with no `RETURN`), so on Apache AGE the
-  result line says **Affected count not reported by Apache AGE**, and the strip
-  and History show the rows returned. There is no row-limit choice here: `execute` returns at most the
-  node's own maximum.
+  result line says **Change count not reported by Apache AGE**, and the strip
+  and History show the rows returned. There is no row-limit choice here:
+  `execute` returns at most the node's own maximum.
 - History opens beside the editor here too. **Load into editor** and **Run
   again** only put the statement in the editor; nothing is sent until you press
   Execute.

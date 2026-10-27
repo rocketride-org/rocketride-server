@@ -68,7 +68,7 @@
 // in every mount.
 // =============================================================================
 
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { Banner, Button, EmptyState, StatusBadge, ToggleGroup, isInVSCode } from 'shell';
@@ -178,6 +178,8 @@ const styles = {
 	// In the tab row: the same controls, right of the tabs, wrapping only when the row is too narrow.
 	runBarInRow: { display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center', justifyContent: 'flex-end', minWidth: 0 } as CSSProperties,
 	firstLine: { maxWidth: '40%', minWidth: 60, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'var(--rr-font-mono, monospace)', fontSize: 12, padding: '4px 8px', border: '1px solid var(--rr-border)', borderRadius: 4, background: 'var(--rr-bg-paper)', color: 'var(--rr-text-primary)', cursor: 'pointer', textAlign: 'left' } as CSSProperties,
+	// Run and Run all, or Stop waiting in their place: one slot, so the run bar keeps its width while a run is out.
+	runSlot: { display: 'contents' } as CSSProperties,
 	willRun: { flex: '0 1 auto', maxWidth: 260, fontSize: 12, color: 'var(--rr-text-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } as CSSProperties,
 	notices: { padding: '6px 24px 0', display: 'flex', flexDirection: 'column', gap: 6 } as CSSProperties,
 	resultsRow: { flex: 1, minHeight: 0, display: 'flex' } as CSSProperties,
@@ -570,6 +572,9 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 	// would send a truncated statement.
 	// While the graph fills the document the editor is hidden: a run key that still reaches it sends nothing.
 	const fullScreenNow = useRef(false);
+	// The run bar's Run / Run all slot, and whether the focus is in it (see the layout effect by the run bar).
+	const runSlot = useRef<HTMLSpanElement | null>(null);
+	const runSlotFocused = useRef(false);
 	const run = useCallback((all: boolean) => {
 		if (fullScreenNow.current) return;
 		const handle = editor.current;
@@ -711,6 +716,12 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 		changeSplit(splitToggled(split));
 	};
 
+	// The focus was on Run or Run all when the run started (or on Stop waiting when it ended): the button it was on is
+	// gone, so the one now in the slot takes it, rather than the page.
+	useLayoutEffect(() => {
+		const focused = document.activeElement;
+		if (runSlotFocused.current && (focused === null || focused === document.body || !focused.isConnected)) runSlot.current?.querySelector<HTMLElement>('button')?.focus();
+	}, [runner.canStop]);
 	const runBar = (
 		<div style={barHost === undefined ? styles.runBar : styles.runBarInRow}>
 			{split.collapsed && (
@@ -718,19 +729,37 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 					{firstLineOf(text) || '(empty)'}
 				</button>
 			)}
-			<Button variant="primary" disabled={runner.running || blocked !== null || gateBusy !== null} onClick={() => run(false)} small={inRow} title={waiting ? gateWaitingTitle(mode === 'read' ? 'Run' : 'Execute') : 'Run the selection or the statement at the caret (Ctrl/Cmd+Enter)'}>
-				{mode === 'read' ? 'Run' : 'Execute'}
-			</Button>
-			<Button variant="ghost" disabled={runner.running || blocked !== null || gateBusy !== null} onClick={() => run(true)} small={inRow} title={waiting ? gateWaitingTitle(mode === 'read' ? 'Run all' : 'Execute all') : 'Run every statement in order (Ctrl/Cmd+Shift+Enter)'}>
-				{mode === 'read' ? 'Run all' : 'Execute all'}
-			</Button>
+			<span
+				ref={runSlot}
+				style={styles.runSlot}
+				onFocus={() => {
+					runSlotFocused.current = true;
+				}}
+				onBlur={(event) => {
+					if (!event.currentTarget.contains(event.relatedTarget as Node | null)) runSlotFocused.current = false;
+				}}
+			>
+				{runner.canStop ? (
+					<Button variant="ghost" small={inRow} title={STOP_WAITING_NOTE} onClick={() => runner.stopWaiting()}>
+						Stop waiting
+					</Button>
+				) : (
+					<>
+						<Button variant="primary" disabled={runner.running || blocked !== null || gateBusy !== null} onClick={() => run(false)} small={inRow} title={waiting ? gateWaitingTitle(mode === 'read' ? 'Run' : 'Execute') : 'Run the selection or the statement at the caret (Ctrl/Cmd+Enter)'}>
+							{mode === 'read' ? 'Run' : 'Execute'}
+						</Button>
+						<Button variant="ghost" disabled={runner.running || blocked !== null || gateBusy !== null} onClick={() => run(true)} small={inRow} title={waiting ? gateWaitingTitle(mode === 'read' ? 'Run all' : 'Execute all') : 'Run every statement in order (Ctrl/Cmd+Shift+Enter)'}>
+							{mode === 'read' ? 'Run all' : 'Execute all'}
+						</Button>
+					</>
+				)}
+			</span>
 			{mode === 'read' && (
 				// The shell's ToggleGroup drops aria-label, so the group's name is on a wrapper.
 				<span role="group" aria-label="Row limit">
 					<ToggleGroup options={LIMIT_OPTIONS} value={limitId} onChange={(id) => setLimitId(id)} />
 				</span>
 			)}
-			{runner.canStop && <Button variant="ghost" small={inRow} title={STOP_WAITING_NOTE} onClick={() => runner.stopWaiting()}>Stop waiting</Button>}
 			{onOpenHistory && <Button variant="ghost" small={inRow} ariaExpanded={historyOpen === true} onClick={onOpenHistory}>History</Button>}
 			{onOpenSaved && <Button variant="ghost" small={inRow} ariaExpanded={savedOpen === true} onClick={onOpenSaved}>Saved</Button>}
 			{onAsk && (
@@ -763,7 +792,9 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 				{barHost === undefined && runBar}
 			</div>
 			{/* Mounted while the editor is hidden too, so Home keeps the focus here and End shows the editor again. */}
-			<SplitDivider split={{ height: editorHeight, collapsed: split.collapsed }} available={available} onChange={changeSplit} label="Editor and results" controls={editorId} />
+			{/* With the editor hidden in the workbench, the bar sits 3 px over the tab row's bottom borders (each tab's 2 px
+			    border and the row's 1 px; no control reaches them), so the hidden editor costs 6 px, not 11. */}
+			<SplitDivider split={{ height: editorHeight, collapsed: split.collapsed }} available={available} onChange={changeSplit} label="Editor and results" controls={editorId} overlap={split.collapsed && barHost !== undefined ? 3 : 0} />
 
 			{showNotices && (
 				<div style={styles.notices}>

@@ -97,13 +97,14 @@ export function rowsMeta(result: Pick<ReadQueryResult, 'rows' | 'row_limit' | 't
 export const FULL_SCREEN_TEXT = 'Full screen; the inspector stays open. Escape leaves it once no menu or search is open and nothing is selected.';
 
 /** What the write console's result line says on Apache AGE, whose node reports result rows, not a count of changes. */
-export const AGE_AFFECTED_NOT_REPORTED = 'Affected count not reported by Apache AGE';
+export const AGE_AFFECTED_NOT_REPORTED = 'Change count not reported by Apache AGE';
 
 /**
  * What the write console's count adds up. Neo4j's and FalkorDB's nodes report their change counters summed (a CREATE
- * of one node with a label and one property is 3), so the count is said as changes, never as nodes.
+ * of one node with a label and one property is 3; FalkorDB also counts indexes created), so the count is said as
+ * changes, never as nodes.
  */
-export const CHANGES_NOTE = 'nodes, relationships, labels and properties counted together';
+export const CHANGES_NOTE = 'nodes, relationships, labels, properties and indexes counted together';
 
 /**
  * A count of changes, in words.
@@ -122,7 +123,7 @@ export function changesText(n: number): string {
  * @param run - The run shown (its outcome, count and round trip).
  * @param result - Its answer.
  * @param affectedNotReported - True for a write on Apache AGE (runConfig affectedNotReported): the line says so first.
- * @returns Text such as `3 changes (nodes, relationships, labels and properties counted together) · 0 rows returned (limit 25,000) · 0.4 s round trip`.
+ * @returns Text such as `3 changes (nodes, relationships, labels, properties and indexes counted together) · 0 rows returned (limit 25,000) · 0.4 s round trip`.
  */
 export function resultMeta(run: { outcome: string; affected?: number; ms?: number } | null, result: Pick<ReadQueryResult, 'rows' | 'row_limit' | 'truncated'>, affectedNotReported = false): string {
 	const rows = rowsMeta(result, run?.ms);
