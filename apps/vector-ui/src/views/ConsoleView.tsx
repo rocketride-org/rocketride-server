@@ -36,8 +36,10 @@
 // hidden, so it keeps its state (the map gets `visible` so its canvas sleeps
 // while hidden). Under the panels, the pending bar, so staging never moves a
 // row above it. Add documents is an aside beside the panels, kept mounted
-// once opened. A confirmation that closes with the focus inside it gives the
-// focus to the tab row's current tab when nothing nearer takes it.
+// once opened. A confirmation that closes with the focus inside it (and,
+// after Cancel, cannot give it back to its opener) gives it to the row the
+// shown panel marks `data-return-focus` (the row after the ones written),
+// else to that panel's grid, else to the tab row's current tab.
 //
 // The console's calls and their pacing live in its controller
 // (vector/consoleStore.ts); this view renders the controller's snapshot and
@@ -79,6 +81,7 @@ import WorkbenchTabs from '../components/WorkbenchTabs';
 import type { IWorkbenchPanelProps } from '../components/workbenchProps';
 import { CONSOLE_ORIGIN } from '../vector/confirm';
 import { consoleScope, mapScopeFor } from '../vector/consoleModel';
+import { firstFocusable } from '../vector/focus';
 import { CONDITION_KINDS, checkScope, conditionAvailability, listingFilter, resolveScope, scopeStripText, scopeView, scopeWith } from '../vector/filters';
 import type { ConditionKind } from '../vector/filters';
 import { healthSummary, medianChunks } from '../vector/health';
@@ -237,9 +240,13 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 	const [adding, setAdding] = useState(false);
 	const [addingMounted, setAddingMounted] = useState(false);
 	const panel = (id: WorkbenchTab): IWorkbenchPanelProps => ({ entry, model, channels, actions, console: state, selection, visible: active && tab === id });
-	// Where the focus goes when nothing nearer takes it: the tab row's current tab.
+	// Where the focus goes after a confirmation closes: the shown panel's marked row, else its grid, else the current tab.
 	const root = useRef<HTMLDivElement>(null);
-	const currentTab = (): HTMLElement | null => root.current?.querySelector<HTMLElement>('[data-workbench-tabs] button[aria-pressed="true"]') ?? null;
+	const returnFocus = (): HTMLElement | null => {
+		const shown = root.current?.querySelector<HTMLElement>(`[data-workbench-panel="${tab}"]`) ?? null;
+		const currentTab = root.current?.querySelector<HTMLElement>('[data-workbench-tabs] button[aria-pressed="true"]') ?? null;
+		return firstFocusable([shown?.querySelector<HTMLElement>('[data-return-focus]'), shown?.querySelector<HTMLElement>('[role="grid"]'), currentTab]);
+	};
 
 	const title = `${providerTitle(endpoint.provider)}${model.collection ? ` · ${model.collection}` : ''}`;
 	const subtitle = `"${endpoint.pipelineName}" · ${endpoint.nodeName || endpoint.nodeId} · ${roleLine(endpoint)}`;
@@ -277,7 +284,7 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 					<Banner variant={endpoint.state === 'ready' ? 'warning' : 'info'}>{card.blocked}</Banner>
 				</div>
 			)}
-			<InlineRemoveConfirm entry={entry} probe={probe} origin={CONSOLE_ORIGIN} returnFocus={currentTab} />
+			<InlineRemoveConfirm entry={entry} probe={probe} origin={CONSOLE_ORIGIN} returnFocus={returnFocus} />
 			{details && <ConnectionDetailsPanel key={endpoint.key} endpoint={endpoint} probe={probe} stats={state.stats.view} onTest={(target) => env.probe(target.key)} onClose={() => setDetails(false)} />}
 			{(state.removal.status === 'running' || state.removal.message) && (
 				<div role={state.removal.status === 'error' ? 'alert' : 'status'} style={layout.status}>
@@ -287,32 +294,32 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 			<div style={layout.body}>
 				<div style={layout.panels}>
 					{mounted.has('overview') && (
-						<div style={layout.panel(tab === 'overview', 0)}>
+						<div style={layout.panel(tab === 'overview', 0)} data-workbench-panel="overview">
 							<OverviewPanel {...panel('overview')} scopeLine={scopeLine} health={health} onChartScope={scopeFromChart} />
 						</div>
 					)}
 					{mounted.has('documents') && (
-						<div style={layout.panel(tab === 'documents', 12)}>
+						<div style={layout.panel(tab === 'documents', 12)} data-workbench-panel="documents">
 							<DocumentsTab {...panel('documents')} scope={scope} onScope={setScope} cap={cap} available={available} saved={saved} onSave={saveFilter} onDeleteSaved={deleteFilter} scopeLine={scopeLine} health={health} />
 						</div>
 					)}
 					{mounted.has('query') && (
-						<div style={layout.panel(tab === 'query', 12)}>
+						<div style={layout.panel(tab === 'query', 12)} data-workbench-panel="query">
 							<QueryTab {...panel('query')} surfaceModel={surfaceModel} chatDocuments={chatDocuments} chatNotice={wiring.chatNotice} onClearChatScope={clearChatScope} />
 						</div>
 					)}
 					{mounted.has('map') && (
-						<div style={layout.panel(tab === 'map', 12)}>
+						<div style={layout.panel(tab === 'map', 12)} data-workbench-panel="map">
 							<MapView model={mapModel} channels={channels} selection={entry.selection} actions={actions} visible={active && tab === 'map'} documents={entry.documents} writes={entry.writes} />
 						</div>
 					)}
 					{mounted.has('collection') && (
-						<div style={layout.panel(tab === 'collection', 12)}>
+						<div style={layout.panel(tab === 'collection', 12)} data-workbench-panel="collection">
 							<CollectionPanel {...panel('collection')} endpoint={endpoint} probe={probe} />
 						</div>
 					)}
 					{mounted.has('trash') && (
-						<div style={layout.panel(tab === 'trash', 12)}>
+						<div style={layout.panel(tab === 'trash', 12)} data-workbench-panel="trash">
 							<TrashTab {...panel('trash')} />
 						</div>
 					)}

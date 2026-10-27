@@ -75,7 +75,7 @@ test('delete permanently, one document: path, short objectId, chunk count, where
 	assert.equal(c.cancelLabel, REMOVE_CANCEL_LABEL);
 	assert.equal(REMOVE_CANCEL_LABEL, 'Cancel');
 	assert.deepEqual(c.typed, { expected: 'kestrel_field_guide.md', prompt: "Type the file name 'kestrel_field_guide.md' to confirm." }, 'a permanent delete of one document types its file name (DA-R0 C1)');
-	assert.equal(removeConfirmation({ ...KESTREL, path: '' }, PG).typed?.expected, KESTREL.objectId, 'no path: its objectId');
+	assert.deepEqual(removeConfirmation({ ...KESTREL, path: '' }, PG).typed, { expected: '1', prompt: 'Type 1 to confirm.' }, 'no path: the count, 1');
 	assert.equal(removeConfirmation({ ...KESTREL, chunks: null }, PG).sentence, 'Deletes this document and all its chunks from vx_demo_docs. If it still has chunks outside the trash, it is kept whole. This cannot be undone; add the file again to restore it.', 'no invented count');
 	assert.equal(removeConfirmation({ ...KESTREL, chunks: 1 }, PG).sentence.includes('its 1 chunk from'), true);
 });

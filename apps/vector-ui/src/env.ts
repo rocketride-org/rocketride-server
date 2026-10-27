@@ -84,6 +84,8 @@ export interface IQueryHistoryEntry {
 	error?: string;
 	pinned?: boolean;
 	note?: string;
+	/** The question was longer than the history keeps (QUERY_HISTORY_TEXT_MAX): `question` is its start. */
+	truncated?: boolean;
 	/**
 	 * A Compare's question B. Held in memory only, in both mounts: the full app's saved entry keeps question A alone,
 	 * so after a reload a Compare entry has none.
@@ -102,8 +104,13 @@ export interface IQueryHistorySource {
 	note: string;
 	/** One connection's entries, newest first (the same readable for the same key). */
 	entries(key: string): IReadable<readonly IQueryHistoryEntry[]>;
-	/** Record one finished run (nothing while recording is off for the connection). */
-	record(key: string, entry: Omit<IQueryHistoryEntry, 'id'>): void;
+	/**
+	 * Record one finished run (nothing while recording is off for the connection). Hand it the whole question: the
+	 * history keeps its first QUERY_HISTORY_TEXT_MAX characters and marks it `truncated`. A run whose question is
+	 * the newest entry's (the same full text) is that entry run again: the entry keeps its id, pin and note and takes
+	 * the run's kind, top-k, results, time and question B; no entry is added.
+	 */
+	record(key: string, entry: Omit<IQueryHistoryEntry, 'id' | 'truncated'>): void;
 	togglePin(key: string, id: string): void;
 	/** Set (or clear, with '') an entry's note. */
 	setNote(key: string, id: string, note: string): void;
@@ -116,7 +123,7 @@ export interface IQueryHistorySource {
 }
 
 /** The full app's History note: what the workspace preferences keep of a run, and what they do not. */
-export const APP_HISTORY_NOTE = 'Saved with your workspace preferences while recording is on: the question, mode, top-k, result count, pin and note of each run. The threshold and the scope are not saved.';
+export const APP_HISTORY_NOTE = "Questions are kept in your workspace file (first 200 characters) while recording is on, with each run's mode, top-k, result count or error, pin and note; never the answers or results. The threshold, the scope, the table filter and a Compare's question B are not saved.";
 
 /** A dev-tool mount's History note. */
 export const DEVTOOL_HISTORY_NOTE = 'Kept only while this document is open; nothing is saved.';

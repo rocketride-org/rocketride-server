@@ -40,9 +40,10 @@
 // controller). Elsewhere it shows nothing, except to a surface that asked
 // meanwhile: one line saying where the open one is.
 //
-// When it closes with the focus inside it, the focus goes to `onClosed`'s
-// choice, else to `returnFocus` (the surface's fallback), and never stays on
-// `<body>`.
+// When it closes with the focus inside it (or lost), the focus goes where
+// `onClosed` put it; else, after Cancel, back to what had it when the panel
+// opened; else to `returnFocus` (the surface's fallback). Never `<body>`, and
+// never an element of a hidden panel.
 // =============================================================================
 
 import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -97,7 +98,10 @@ export interface IInlineRemoveConfirmProps {
 	probe: IProbeResult | undefined;
 	/** The surface this renders on: it shows only the confirmations asked for here (default the console). */
 	origin?: ConfirmOrigin;
-	/** Where the focus goes when the panel closes with the focus inside it, if `onClosed` did not move it. */
+	/**
+	 * Where the focus goes when the panel closes with the focus inside it, if `onClosed` did not move it (and, after
+	 * Cancel, the opener cannot take it back).
+	 */
 	returnFocus?: () => HTMLElement | null;
 	/** Told when the panel closes, before the focus falls back to `returnFocus`. */
 	onClosed?: (how: ConfirmClose) => void;
@@ -129,6 +133,8 @@ export function InlineRemoveConfirm({ entry, probe, origin = CONSOLE_ORIGIN, ret
 const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCancel(): void; returnFocus?: () => HTMLElement | null; onClosed?: (how: ConfirmClose) => void }> = ({ view, onConfirm: sendWrite, onCancel: dropWrite, returnFocus, onClosed }) => {
 	const region = useRef<HTMLElement>(null);
 	const actions = useRef<HTMLDivElement>(null);
+	// What had the focus when the confirmation opened (before Cancel takes it): Cancel gives it back.
+	const opener = useRef<HTMLElement | null>(typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null);
 	const [typed, setTyped] = useState('');
 	const content = view.content;
 	const ready = confirmReady(content.typed, typed);
@@ -146,10 +152,11 @@ const ConfirmPanel: React.FC<{ view: ConfirmationView; onConfirm(): void; onCanc
 	// Closed: the surface hears how; a focus left inside (or on the body) goes to the surface's fallback.
 	useEffect(() => {
 		const node = region.current;
+		const back = opener.current;
 		return () => {
 			closing.current.onClosed?.(how.current);
 			if (typeof document === 'undefined' || !focusLost(document.activeElement, document.body, node)) return;
-			firstFocusable([closing.current.returnFocus?.()])?.focus();
+			firstFocusable([how.current === 'cancel' ? back : null, closing.current.returnFocus?.()])?.focus();
 		};
 	}, []);
 	const onConfirm = (): void => {

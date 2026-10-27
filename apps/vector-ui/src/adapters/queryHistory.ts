@@ -42,11 +42,26 @@
 // and not shown. A Compare's question B (`compareWith`) is never handed to
 // the shared store, whose saved entries would carry it to the workspace
 // file: it is held beside it, in memory, for the page's life.
+//
+// Both stores keep the first QUERY_HISTORY_TEXT_MAX (200) characters of a
+// question and mark a longer one `truncated` (I8: no more of a chunk's text
+// than that reaches the workspace file). The store compares a new run with
+// the newest entry on the FULL text before it cuts, so two long questions
+// that share their start stay two entries, and an entry already cut is
+// never merged. A run that repeats the newest entry's question is that
+// entry run again: the shared store keeps the older entry (its id, pin and
+// note) with the new run's facts, and question B follows that run here.
 // =============================================================================
 
-import { createHistoryStore } from 'shared/explorer';
-import type { IHistoryEntry, IHistoryStore } from 'shared/explorer';
+import { DEFAULT_HISTORY_LIMITS, createHistoryStore } from 'shared/explorer';
+import type { IHistoryEntry, IHistoryLimits, IHistoryStore } from 'shared/explorer';
 import type { IQueryHistoryEntry, IQueryHistorySource, IReadable, QueryHistoryKind } from '../env';
+
+/** The longest question the history keeps: the first 200 characters (a longer one is marked `truncated`). */
+export const QUERY_HISTORY_TEXT_MAX = 200;
+
+/** The bounds of both mounts' Query history stores. */
+export const QUERY_HISTORY_LIMITS: IHistoryLimits = { ...DEFAULT_HISTORY_LIMITS, maxTextChars: QUERY_HISTORY_TEXT_MAX };
 
 /** The kinds a Query tab run is recorded under. */
 const KINDS: ReadonlySet<string> = new Set<QueryHistoryKind>(['semantic', 'keyword', 'hybrid', 'auto', 'ask', 'compare']);
@@ -71,6 +86,7 @@ export function queryEntryOf(entry: IHistoryEntry<'question'>): IQueryHistoryEnt
 		...(entry.error === undefined ? {} : { error: entry.error }),
 		...(entry.pinned ? { pinned: true } : {}),
 		...(entry.note === undefined ? {} : { note: entry.note }),
+		...(entry.truncated ? { truncated: true } : {}),
 	};
 }
 
@@ -81,7 +97,7 @@ export function queryEntryOf(entry: IHistoryEntry<'question'>): IQueryHistoryEnt
  * @param entry - The run.
  * @returns The stored entry.
  */
-export function storedEntryOf(id: string, entry: Omit<IQueryHistoryEntry, 'id'>): IHistoryEntry<'question'> {
+export function storedEntryOf(id: string, entry: Omit<IQueryHistoryEntry, 'id' | 'truncated'>): IHistoryEntry<'question'> {
 	return {
 		id,
 		question: entry.question,
@@ -159,9 +175,18 @@ function sourceOver(holder: IStoreHolder, info: { persisted: boolean; note: stri
 		},
 		record(key, entry) {
 			const id = newId(entry.at);
-			// Known before the store tells its listeners, so the first snapshot already carries it.
-			if (entry.compareWith !== undefined) compared.set(id, entry.compareWith);
-			holder.current().runs.emitRun(key, storedEntryOf(id, entry));
+			const store = holder.current();
+			// The entry this run lands on: its own, or the newest one when it repeats that one's full question (the store
+			// merges the two, keeping the older id). Question B is set for it before the store tells its listeners, so
+			// the first snapshot carries it; a run without one clears the B of the entry it lands on.
+			// While recording is off the store keeps nothing, and nothing changes here either.
+			if (store.getRecording(key)) {
+				const newest = store.getHistory(key)[0];
+				const lands = newest !== undefined && !newest.truncated && newest.question === entry.question ? newest.id : id;
+				if (entry.compareWith !== undefined) compared.set(lands, entry.compareWith);
+				else compared.delete(lands);
+			}
+			store.runs.emitRun(key, storedEntryOf(id, entry));
 		},
 		togglePin: (key, id) => holder.current().togglePin(key, id),
 		setNote: (key, id, note) => holder.current().setNote(key, id, note),
@@ -214,7 +239,7 @@ export interface ISessionQueryHistory extends IQueryHistorySource {
  * @returns The store.
  */
 function memoryStore(): IHistoryStore<'question'> {
-	const store = createHistoryStore({ historyKey: 'vector.history', recordingKey: 'vector.historyRecording', textField: 'question' });
+	const store = createHistoryStore({ historyKey: 'vector.history', recordingKey: 'vector.historyRecording', textField: 'question', limits: QUERY_HISTORY_LIMITS });
 	store.attachPrefs({ getPref: () => undefined, setPref: () => undefined });
 	return store;
 }

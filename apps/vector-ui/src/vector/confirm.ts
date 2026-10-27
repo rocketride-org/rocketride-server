@@ -248,7 +248,8 @@ export function multiTrashConfirmation(targets: readonly IRemoveTarget[], ctx: I
 export function removeConfirmation(target: IRemoveTarget, ctx: IRemoveContext): IRemoveConfirmation {
 	const collection = collectionName(ctx);
 	const shared = sharedTyped(ctx);
-	const name = target.path === '' ? target.objectId : splitPath(target.path).name;
+	// The file name; with no path, the count (1), as several documents are confirmed.
+	const typed = target.path === '' ? { expected: '1', prompt: 'Type 1 to confirm.' } : { expected: splitPath(target.path).name, prompt: `Type the file name '${splitPath(target.path).name}' to confirm.` };
 	return {
 		title: 'Delete this document permanently?',
 		lines: targetLines(target, ctx),
@@ -256,7 +257,7 @@ export function removeConfirmation(target: IRemoveTarget, ctx: IRemoveContext): 
 		extra: shared ? [sharedTableSentence(collection)] : [],
 		confirmLabel: 'Delete permanently',
 		cancelLabel: REMOVE_CANCEL_LABEL,
-		typed: shared ?? { expected: name, prompt: `Type the file name '${name}' to confirm.` },
+		typed: shared ?? typed,
 		destructive: true,
 	};
 }

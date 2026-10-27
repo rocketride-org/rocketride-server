@@ -60,7 +60,7 @@ import { APP_HISTORY_NOTE } from '../env';
 import type { IQueryHistorySource } from '../env';
 import { createCacheRegistry } from '../vector/identityChange';
 import type { ICacheRegistry } from '../vector/identityChange';
-import { persistedQueryHistory } from './queryHistory';
+import { QUERY_HISTORY_LIMITS, persistedQueryHistory } from './queryHistory';
 
 // =============================================================================
 // PROVIDERS, TOOLS
@@ -210,13 +210,14 @@ export const vectorEndpoints: IEndpointStore = makeVectorEndpointStore();
 
 /**
  * Make the Query history store (`vector.history`, text field `question`):
- * questions only, never answers, documents or tokens.
+ * questions only (their first 200 characters), never answers, documents or
+ * tokens.
  *
  * @param persistDelayMs - Debounce before a write (tests shorten it).
  * @returns The store.
  */
 export function makeVectorHistory(persistDelayMs?: number): IHistoryStore<'question'> {
-	return createHistoryStore({ historyKey: 'vector.history', recordingKey: 'vector.historyRecording', textField: 'question', ...(persistDelayMs === undefined ? {} : { persistDelayMs }) });
+	return createHistoryStore({ historyKey: 'vector.history', recordingKey: 'vector.historyRecording', textField: 'question', limits: QUERY_HISTORY_LIMITS, ...(persistDelayMs === undefined ? {} : { persistDelayMs }) });
 }
 
 /** Query history: `vector.history` / `vector.historyRecording`, entry text field `question`. */

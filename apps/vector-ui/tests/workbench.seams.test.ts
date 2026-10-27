@@ -36,7 +36,7 @@ import { makeConsoleActions, stageTargets } from '../src/adapters/consoleActions
 import { createConnectionRegistry } from '../src/adapters/connections';
 import type { IConnectionLink } from '../src/adapters/connections';
 import { makeVectorHistory, vectorQueryHistory } from '../src/adapters/explorer';
-import { persistedQueryHistory, queryEntryOf, sessionQueryHistory, storedEntryOf } from '../src/adapters/queryHistory';
+import { QUERY_HISTORY_TEXT_MAX, persistedQueryHistory, queryEntryOf, sessionQueryHistory, storedEntryOf } from '../src/adapters/queryHistory';
 import type { IDocumentItem } from '../src/contract/types';
 import { APP_HISTORY_NOTE, DEVTOOL_HISTORY_NOTE } from '../src/env';
 import type { IQueryHistoryEntry } from '../src/env';
@@ -269,6 +269,43 @@ test('a Compare entry keeps question B in memory only: never handed to the share
 	history.forget();
 	history.record('k', { ...RUN, kind: 'compare' });
 	assert.equal(history.entries('k').get()[0].compareWith, undefined);
+});
+
+test('the history keeps the first 200 characters of a question and says so; it compares runs on the whole question, so only a true repeat is one entry', () => {
+	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+	const entries = history.entries('k');
+	const start = 'q'.repeat(199);
+	history.record('k', { ...RUN, question: `${start}A and more`, at: 1 });
+	history.record('k', { ...RUN, question: `${start}B and more`, at: 2 });
+	assert.equal(entries.get().length, 2, 'two long questions that share their start stay two entries');
+	for (const entry of entries.get()) {
+		assert.equal(entry.question.length, QUERY_HISTORY_TEXT_MAX);
+		assert.equal(entry.truncated, true);
+	}
+	history.record('k', { ...RUN, question: `${start}B and more`, at: 3 });
+	assert.equal(entries.get().length, 3, 'an entry already cut is never merged');
+	history.clear('k');
+	history.record('k', { ...RUN, question: 'water', at: 1, results: 7 });
+	const first = entries.get()[0];
+	history.togglePin('k', first.id);
+	history.record('k', { ...RUN, question: 'water', kind: 'keyword', at: 2, results: 3 });
+	assert.equal(entries.get().length, 1, 'the same question run again is the same entry, run again');
+	assert.deepEqual([entries.get()[0].id, entries.get()[0].pinned, entries.get()[0].kind, entries.get()[0].results, entries.get()[0].at], [first.id, true, 'keyword', 3, 2], 'it keeps its id and pin and takes the new run');
+	assert.equal(entries.get()[0].truncated, undefined, 'a short question is whole');
+});
+
+test("a Compare that repeats the newest entry's question lands on it with its question B; a later Search of it clears B; nothing changes while recording is off", () => {
+	const history = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
+	const entries = history.entries('k');
+	history.record('k', { ...RUN, question: 'water', at: 1 });
+	history.record('k', { ...RUN, question: 'water', kind: 'compare', at: 2, compareWith: 'wells' });
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith]), [['compare', 'wells']]);
+	history.record('k', { ...RUN, question: 'water', at: 3 });
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith]), [['semantic', undefined]], 'run again as a Search: no question B');
+	history.record('k', { ...RUN, question: 'water', kind: 'compare', at: 4, compareWith: 'rivers' });
+	history.setRecording('k', false);
+	history.record('k', { ...RUN, question: 'water', at: 5 });
+	assert.deepEqual(entries.get().map((e) => [e.kind, e.compareWith, e.at]), [['compare', 'rivers', 4]], 'a run not recorded changes nothing');
 });
 
 test('Query history entries map onto the shared store: mode as kind, top-k as limit, results as rows; another kind is not shown', () => {

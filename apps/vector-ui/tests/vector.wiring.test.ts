@@ -128,7 +128,7 @@ test('the Map is a tab of the workbench: every panel mounts the first time its t
 	assert.match(view, /if \(!mounted\.has\(tab\)\) setMounted\(new Set\(\[\.\.\.mounted, tab\]\)\);/, 'a tab shown once keeps its panel');
 	assert.match(view, /panel: \(shown: boolean, gutter: number\): CSSProperties => \(\{[^}]*display: shown \? 'flex' : 'none'/, 'hidden, never unmounted');
 	for (const id of ['overview', 'documents', 'query', 'map', 'collection', 'trash']) {
-		assert.match(view, new RegExp(`\\{mounted\\.has\\('${id}'\\) && \\(\\s*<div style=\\{layout\\.panel\\(tab === '${id}', \\d+\\)\\}>`), id);
+		assert.match(view, new RegExp(`\\{mounted\\.has\\('${id}'\\) && \\(\\s*<div style=\\{layout\\.panel\\(tab === '${id}', \\d+\\)\\} data-workbench-panel="${id}">`), id);
 	}
 	assert.match(view, /<MapView model=\{mapModel\} channels=\{channels\} selection=\{entry\.selection\} actions=\{actions\} visible=\{active && tab === 'map'\} documents=\{entry\.documents\} writes=\{entry\.writes\} \/>/);
 	assert.match(view, /const nextMapScope = mapScopeFor\(mapScope, wiring\);\s*if \(nextMapScope !== mapScope\) setMapScope\(nextMapScope\);/, 'the map keeps the scope it drew with while a new one finds its documents');
@@ -219,7 +219,9 @@ test("a document's health: the tab compares with the console's loaded documents 
 test('every removal is confirmed inline in the document that shows it, in both mounts (no app-level dialog); the dialogs keep Cancel focused by their own mount effect', () => {
 	const app = code('VectorApp.tsx');
 	assert.doesNotMatch(app, /RemoveDialogHost/, 'the full app mounts no modal confirmation');
-	assert.match(code('views/ConsoleView.tsx'), /<InlineRemoveConfirm entry=\{entry\} probe=\{probe\} origin=\{CONSOLE_ORIGIN\} returnFocus=\{currentTab\} \/>/, "the workbench confirms its own requests inline, on every tab; a lost focus goes to the current tab");
+	assert.match(code('views/ConsoleView.tsx'), /<InlineRemoveConfirm entry=\{entry\} probe=\{probe\} origin=\{CONSOLE_ORIGIN\} returnFocus=\{returnFocus\} \/>/, 'the workbench confirms its own requests inline, on every tab');
+	assert.match(code('views/ConsoleView.tsx'), /firstFocusable\(\[shown\?\.querySelector<HTMLElement>\('\[data-return-focus\]'\), shown\?\.querySelector<HTMLElement>\('\[role="grid"\]'\), currentTab\]\)/, "a lost focus goes to the shown panel's marked row, else its grid, else the current tab");
+	assert.match(code('components/InlineRemoveConfirm.tsx'), /firstFocusable\(\[how\.current === 'cancel' \? back : null, closing\.current\.returnFocus\?\.\(\)\]\)/, 'after Cancel, back to the opener first');
 	assert.match(app, /<DocumentView [^>]*beforeBody=\{<InlineRemoveConfirm entry=\{entry\} probe=\{probes\[endpoint\.key\]\} origin=\{documentOrigin\(payload\.objectId\)\} \/>\}/, "and the full app's document tab its own (it shares the console's controller)");
 	assert.match(app, /origin: documentOrigin\(payload\.objectId\),/, "the tab's actions ask under its origin");
 	for (const file of ['components/RemoveConfirmDialog.tsx', 'components/MultiRemoveConfirmDialog.tsx']) {
