@@ -21,31 +21,46 @@
 // SOFTWARE.
 
 // =============================================================================
-// VECTOR-UI — MapToolbar (sample, layout, colour, query, lasso, fit, table)
+// VECTOR-UI — MapToolbar (sample, layout, colour, query; Advanced, Export, Views)
 // =============================================================================
 //
-// Sample: how many points and which mode (Detailed up to the node's sample_max,
-// Light up to sample_max_light), and "New sample" draws another with the next
-// seed. Layout: PCA (the node's own), Neighbour graph (seeded force layout over
-// the kNN graph), t-SNE (at most 1,000 points; disabled with its reason above
-// that). A running layout shows "Laying out…" and Cancel. Edges: None, each
-// point's strongest Neighbours (3, 5 or 10 per point; 3 only on light samples
-// above 3,000 points) or the spanning Tree, and "Expand selected" (adds the
-// selected point's own kNN edges); all computed from the sample, no call.
-// Colour by, grouped Content / Document / Analysis, each mode without its data
-// disabled with the reason as its title. The text query (disabled with its
-// reason when the embedding node is unreachable), and the Lasso, Fit and Table
-// toggles; `extras` holds the view's menus (Export, Views). Native controls
-// with labels; no key listeners of its own.
+// One row: Points, Layout, Colour by, the text query, then Advanced, the
+// view's menus (`extras`: Export, Views) and a status slot that is always
+// there, so nothing that appears when a run starts or a sample lands (the busy
+// words, Cancel, a reason) can push the row onto a second line.
+//
+// Points: how many and which mode (Detailed up to the node's sample_max, Light
+// up to sample_max_light). Layout: PCA (the node's own), Neighbour graph
+// (seeded force layout over the kNN graph), t-SNE (at most 1,000 points;
+// disabled with its reason in the status slot). A running layout shows
+// "Laying out…" and Cancel in the slot. Colour by, grouped Content / Document /
+// Analysis, each mode without its data disabled with the reason as its title.
+// The text query (disabled with its reason when the embedding node is
+// unreachable).
+//
+// Advanced (components/AdvancedPopover.tsx) holds the rest in groups:
+//   - Graph: Edges (None, each point's strongest Neighbours, 3, 5 or 10 per
+//     point, 3 only on light samples above 3,000 points, or the spanning
+//     Tree), Expand selected (adds the selected point's own kNN edges); all
+//     computed from the sample, no call;
+//   - Select and view: the Lasso, Fit, Table and 3D toggles;
+//   - Sample: the seed shown and New sample (the next seed), which closes the
+//     panel (drawing disables its controls) and puts the focus on Advanced.
+//
+// Native controls with labels; no key listeners of its own. While a sample is
+// drawn or laid out the controls are disabled; a focused control that becomes
+// disabled hands the focus to the toolbar itself (never to the page) and gets
+// it back when it is enabled again.
 // =============================================================================
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { EdgeMode, EdgesPerPoint, MapLayout, MapToolbarProps as ContractMapToolbarProps, SampleMode } from '../contract/types';
 import { COLOUR_MODES } from '../map/colours';
 import type { IColourMode, MapColourBy } from '../map/colours';
 import { MAP_STYLES } from '../map/styles';
 import { num } from '../map/wording';
+import { AdvancedPopover } from './AdvancedPopover';
 
 /** Props: the frozen ones (Colour by widened to the document-detail modes) plus map extras. */
 export interface MapToolbarProps extends Omit<ContractMapToolbarProps, 'colourBy' | 'onColourBy'> {
@@ -72,8 +87,10 @@ export interface MapToolbarProps extends Omit<ContractMapToolbarProps, 'colourBy
 	onExpandSelected?(): void;
 	/** Why Expand selected is unavailable (no point selected), or null. */
 	expandReason?: string | null;
-	/** The view's menus, after the toggles (Export, Views). */
+	/** The view's menus, after Advanced (Export, Views). */
 	extras?: ReactNode;
+	/** Open Advanced at first (only its starting state; the tests render it open). */
+	initialAdvanced?: boolean;
 }
 
 /** The edge modes. */
@@ -102,6 +119,71 @@ const LAYOUTS: Array<{ id: MapLayout; label: string }> = [
 	{ id: 'tsne', label: 't-SNE (≤1,000)' },
 ];
 
+const S = {
+	// Always present and never wider than the room left: the row keeps its height whatever it says.
+	status: { ...MAP_STYLES.small, flex: '1 1 160px', minWidth: 120, display: 'inline-flex', alignItems: 'center', gap: 6, overflow: 'hidden', whiteSpace: 'nowrap' } as React.CSSProperties,
+	words: { overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 } as React.CSSProperties,
+	fieldset: { border: 'none', margin: 0, padding: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 } as React.CSSProperties,
+	legend: { ...MAP_STYLES.label, padding: 0, marginBottom: 4, width: '100%' } as React.CSSProperties,
+};
+
+/**
+ * Keep the focus in the toolbar when the control holding it is disabled (a
+ * sample being drawn disables them) or goes away (Cancel when the layout ends,
+ * the Advanced panel closing): the toolbar takes it, never the page. A
+ * disabled control gets it back once it is enabled again.
+ *
+ * @param root - The toolbar (tabIndex -1).
+ */
+function useFocusHold(root: React.RefObject<HTMLDivElement | null>): void {
+	const last = useRef<HTMLElement | null>(null);
+	const held = useRef<HTMLElement | null>(null);
+	useEffect(() => {
+		const el = root.current;
+		if (!el) return undefined;
+		const onFocusIn = (event: FocusEvent): void => {
+			if (event.target instanceof HTMLElement && event.target !== el) last.current = event.target;
+		};
+		// Moved on to something outside the toolbar, or pressed a pointer there: nothing to keep.
+		const onFocusOut = (event: FocusEvent): void => {
+			if (event.relatedTarget instanceof Node && !el.contains(event.relatedTarget)) last.current = null;
+		};
+		const onDown = (event: PointerEvent): void => {
+			if (!(event.target instanceof Node) || !el.contains(event.target)) last.current = null;
+		};
+		el.addEventListener('focusin', onFocusIn);
+		el.addEventListener('focusout', onFocusOut);
+		document.addEventListener('pointerdown', onDown);
+		return () => {
+			el.removeEventListener('focusin', onFocusIn);
+			el.removeEventListener('focusout', onFocusOut);
+			document.removeEventListener('pointerdown', onDown);
+		};
+	}, [root]);
+	// After every render: a control that lost the focus by being disabled or removed hands it to the toolbar.
+	useEffect(() => {
+		const el = root.current;
+		if (!el || typeof document === 'undefined') return;
+		const active = document.activeElement;
+		const control = last.current as (HTMLElement & { disabled?: boolean }) | null;
+		if (held.current !== null) {
+			const back = held.current as HTMLElement & { disabled?: boolean };
+			if (active !== el || !el.contains(back)) held.current = null;
+			else if (!back.disabled) {
+				held.current = null;
+				back.focus();
+			}
+			return;
+		}
+		if (control === null || !(active === control || active === document.body || active === null)) return;
+		const gone = !el.contains(control);
+		if (!gone && !control.disabled) return;
+		last.current = null;
+		if (!gone) held.current = control;
+		el.focus();
+	});
+}
+
 /**
  * The map toolbar.
  *
@@ -110,6 +192,8 @@ const LAYOUTS: Array<{ id: MapLayout; label: string }> = [
  */
 export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 	const [text, setText] = useState('');
+	const root = useRef<HTMLDivElement>(null);
+	useFocusHold(root);
 	const sample = props.sample;
 	const mode: SampleMode = sample?.mode ?? 'detailed';
 	const n = sample?.result.n_requested ?? Math.min(props.limits.sample_default, props.limits.sample_max);
@@ -122,8 +206,9 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 	const cap: EdgesPerPoint = props.edgesMCap ?? 10;
 	const capReason = `Light samples above ${num(3000)} points draw at most ${cap} edges per point`;
 	const toggle = (pressed: boolean): React.CSSProperties => ({ ...MAP_STYLES.button, ...(pressed ? MAP_STYLES.buttonPressed : {}) });
+	const reasons = [!props.query.enabled ? props.query.reason : null, props.tsneReason ?? null].filter((r): r is string => !!r);
 	return (
-		<div role="toolbar" aria-label="Map controls" style={MAP_STYLES.toolbar}>
+		<div ref={root} role="toolbar" aria-label="Map controls" tabIndex={-1} style={MAP_STYLES.toolbar}>
 			<label style={MAP_STYLES.group}>
 				<span style={MAP_STYLES.label}>Points</span>
 				<select
@@ -143,14 +228,6 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 					))}
 				</select>
 			</label>
-			{sample ? (
-				<span style={MAP_STYLES.small}>
-					of {sample.result.of.chunks === null ? '—' : num(sample.result.of.chunks)} chunks · {sample.result.of.documents === null ? '—' : num(sample.result.of.documents)} docs · seed {seed}
-				</span>
-			) : null}
-			<button type="button" style={MAP_STYLES.button} disabled={busy} onClick={() => props.onSample({ n, mode, seed: seed + 1 })}>
-				New sample
-			</button>
 			<label style={MAP_STYLES.group}>
 				<span style={MAP_STYLES.label}>Layout</span>
 				<select aria-label="Layout" style={MAP_STYLES.select} value={props.layout} disabled={busy || !sample} onChange={(event) => props.onLayout(event.target.value as MapLayout)}>
@@ -161,39 +238,6 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 					))}
 				</select>
 			</label>
-			{props.canCancel ? (
-				<button type="button" style={MAP_STYLES.button} onClick={props.onCancel}>
-					Cancel
-				</button>
-			) : null}
-			<label style={MAP_STYLES.group}>
-				<span style={MAP_STYLES.label}>Edges</span>
-				<select aria-label="Edges" style={MAP_STYLES.select} value={edges} disabled={busy || !sample} onChange={(event) => props.onEdges?.(event.target.value as EdgeMode)}>
-					{EDGES.map((e) => (
-						<option key={e.id} value={e.id}>
-							{e.label}
-						</option>
-					))}
-				</select>
-			</label>
-			{edges === 'neighbours' ? (
-				<label style={MAP_STYLES.group}>
-					<span style={MAP_STYLES.label}>Per point</span>
-					<select aria-label="Edges per point" style={MAP_STYLES.select} value={String(Math.min(props.edgesM ?? 5, cap))} disabled={busy || !sample} onChange={(event) => props.onEdgesM?.(Number(event.target.value) as EdgesPerPoint)}>
-						{EDGES_PER_POINT.map((m) => (
-							<option key={m} value={String(m)} disabled={m > cap} title={m > cap ? capReason : undefined}>
-								{m}
-							</option>
-						))}
-					</select>
-				</label>
-			) : null}
-			{props.onExpandSelected ? (
-				<button type="button" style={MAP_STYLES.button} disabled={busy || !sample || !!props.expandReason} title={props.expandReason ?? 'Add the selected point\'s neighbour edges'} onClick={props.onExpandSelected}>
-					Expand selected
-				</button>
-			) : null}
-			{edges === 'tree' && props.layout !== 'neighbour-graph' ? <span style={MAP_STYLES.small}>{TREE_HINT}</span> : null}
 			<label style={MAP_STYLES.group}>
 				<span style={MAP_STYLES.label}>Colour by</span>
 				<select aria-label="Colour by" style={MAP_STYLES.select} value={props.colourBy} onChange={(event) => props.onColourBy(event.target.value as MapColourBy)}>
@@ -224,22 +268,85 @@ export function MapToolbar(props: MapToolbarProps): React.ReactElement {
 				</label>
 				<button type="submit" style={MAP_STYLES.button} disabled={!props.query.enabled || busy || text.trim() === ''}>Run</button>
 			</form>
-			<button type="button" style={toggle(props.lasso)} aria-pressed={props.lasso} onClick={props.onToggleLasso} disabled={!sample}>Lasso</button>
-			<button type="button" style={MAP_STYLES.button} onClick={props.onFit} disabled={!sample}>
-				Fit
-			</button>
-			<button type="button" style={toggle(props.table)} aria-pressed={props.table} onClick={props.onToggleTable} disabled={!sample}>Table</button>
-			{props.onToggle3D ? (
-				<button type="button" style={toggle(!!props.threeD)} aria-pressed={!!props.threeD} onClick={props.onToggle3D} disabled={!sample || props.layout !== 'pca'}>3D</button>
-			) : null}
+			<AdvancedPopover label="Advanced" panelLabel="Advanced map controls" initialOpen={props.initialAdvanced}>
+				{(close) => (
+					<>
+						<fieldset style={S.fieldset}>
+							<legend style={S.legend}>Graph</legend>
+							<label style={MAP_STYLES.group}>
+								<span style={MAP_STYLES.label}>Edges</span>
+								<select aria-label="Edges" style={MAP_STYLES.select} value={edges} disabled={busy || !sample} onChange={(event) => props.onEdges?.(event.target.value as EdgeMode)}>
+									{EDGES.map((e) => (
+										<option key={e.id} value={e.id}>
+											{e.label}
+										</option>
+									))}
+								</select>
+							</label>
+							{edges === 'neighbours' ? (
+								<label style={MAP_STYLES.group}>
+									<span style={MAP_STYLES.label}>Per point</span>
+									<select aria-label="Edges per point" style={MAP_STYLES.select} value={String(Math.min(props.edgesM ?? 5, cap))} disabled={busy || !sample} onChange={(event) => props.onEdgesM?.(Number(event.target.value) as EdgesPerPoint)}>
+										{EDGES_PER_POINT.map((m) => (
+											<option key={m} value={String(m)} disabled={m > cap} title={m > cap ? capReason : undefined}>
+												{m}
+											</option>
+										))}
+									</select>
+								</label>
+							) : null}
+							{props.onExpandSelected ? (
+								<button type="button" style={MAP_STYLES.button} disabled={busy || !sample || !!props.expandReason} title={props.expandReason ?? 'Add the selected point\'s neighbour edges'} onClick={props.onExpandSelected}>
+									Expand selected
+								</button>
+							) : null}
+							{edges === 'tree' && props.layout !== 'neighbour-graph' ? <span style={MAP_STYLES.small}>{TREE_HINT}</span> : null}
+						</fieldset>
+						<fieldset style={S.fieldset}>
+							<legend style={S.legend}>Select and view</legend>
+							<button type="button" style={toggle(props.lasso)} aria-pressed={props.lasso} onClick={props.onToggleLasso} disabled={!sample}>Lasso</button>
+							<button type="button" style={MAP_STYLES.button} onClick={props.onFit} disabled={!sample}>
+								Fit
+							</button>
+							<button type="button" style={toggle(props.table)} aria-pressed={props.table} onClick={props.onToggleTable} disabled={!sample}>Table</button>
+							{props.onToggle3D ? (
+								<button type="button" style={toggle(!!props.threeD)} aria-pressed={!!props.threeD} onClick={props.onToggle3D} disabled={!sample || props.layout !== 'pca'}>3D</button>
+							) : null}
+						</fieldset>
+						<fieldset style={S.fieldset}>
+							<legend style={S.legend}>Sample</legend>
+							{sample ? <span style={MAP_STYLES.small}>This sample: seed {seed}</span> : null}
+							<button
+								type="button"
+								style={MAP_STYLES.button}
+								disabled={busy}
+								onClick={() => {
+									close(true);
+									props.onSample({ n, mode, seed: seed + 1 });
+								}}
+							>
+								New sample (seed {seed + 1})
+							</button>
+						</fieldset>
+					</>
+				)}
+			</AdvancedPopover>
 			{props.extras ?? null}
-			{props.busy ? (
-				<span role="status" style={MAP_STYLES.small}>
-					{props.busy}
+			<span style={S.status} data-map-status="">
+				<span role="status" style={S.words}>
+					{props.busy ?? ''}
 				</span>
-			) : null}
-			{!props.query.enabled && props.query.reason ? <span style={MAP_STYLES.small}>{props.query.reason}</span> : null}
-			{props.tsneReason ? <span style={MAP_STYLES.small}>{props.tsneReason}</span> : null}
+				{props.busy && props.canCancel ? (
+					<button type="button" style={MAP_STYLES.button} onClick={props.onCancel}>
+						Cancel
+					</button>
+				) : null}
+				{!props.busy && reasons.length > 0 ? (
+					<span style={S.words} title={reasons.join(' ')}>
+						{reasons.join(' ')}
+					</span>
+				) : null}
+			</span>
 		</div>
 	);
 }

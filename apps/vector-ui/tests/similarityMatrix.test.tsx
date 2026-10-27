@@ -21,7 +21,7 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { IRoleChannel } from 'shared/explorer';
-import { MatrixBody, SimilarityMatrix, loadMatrix, paintHeatmap } from '../src/components/SimilarityMatrix';
+import { CELL_LABEL_PX, LABELLED_MAX, MatrixBody, SHADE_MIN, SimilarityMatrix, loadMatrix, paintHeatmap } from '../src/components/SimilarityMatrix';
 import type { MatrixBodyProps, MatrixState } from '../src/components/SimilarityMatrix';
 import { createSelectionStore } from '../src/contract/bridge';
 import type { IExportItem, ISimilarityMatrixResult, IVectorLimits, VectorKey } from '../src/contract/types';
@@ -222,7 +222,7 @@ test('the heatmap: one cell per pair with its value in the cell (small matrices)
 	assert.equal((out.match(/data-cell="/g) ?? []).length, 9);
 	assert.match(out, /title="75b89d86-a64e-5143-bf50-55d4a7fd8cd2 #0 ↔ 75b89d86-a64e-5143-bf50-55d4a7fd8cd2 #3: 0\.91"/);
 	assert.match(out, />0\.91</);
-	assert.match(out, /Lighter: less similar \(0\.08\) · darker: more similar \(0\.91 and above\)/);
+	assert.match(out, /Fainter: less similar \(0\.08\) · stronger: more similar \(0\.91 and above\)/);
 	assert.match(out, /Computed by the store node from the map&#x27;s sample\./);
 	assert.match(out, /3 chunks compared by cosine similarity; similar chunks are placed next to each other\./);
 	assert.match(out, /aria-expanded="false"[^>]*>Show as a table</);
@@ -331,7 +331,7 @@ test('budget: the heatmap at the cap is one canvas, a bounded handful of element
 		assert.equal((out.match(/data-picked=/g) ?? []).length, selected ? 2 : 0, 'the pair and its mirror outlined');
 	}
 	const small = renderToStaticMarkup(body({ state: bigState(20), labelOf: bigLabel, selected: null }));
-	assert.equal((small.match(/data-cell="/g) ?? []).length, 400, 'up to 20 × 20 the cells stay elements, values printed in them');
+	assert.equal((small.match(/data-cell="/g) ?? []).length, 400, 'up to 20 × 20 the cells stay elements, each value in its title');
 	assert.doesNotMatch(small, /<canvas/);
 });
 
@@ -389,10 +389,10 @@ test('the canvas heatmap paints every cell: the surface first, then the ramp at 
 	const ramp = rects.slice(25);
 	assert.ok(ramp.every((r) => r.style === '#4263eb' && r.w === 3 && r.h === 3));
 	const at = (i: number, j: number) => ramp.find((r) => r.x === j * 4 && r.y === i * 4)!;
-	assert.equal(at(1, 3).alpha, 0.9, 'the most similar pair is darkest');
-	assert.equal(at(0, 1).alpha, 0.06, 'the least similar pair is lightest');
-	assert.equal(at(2, 2).alpha, 0.9, 'the diagonal, above the range, as dark as the darkest');
-	assert.ok(at(0, 2).alpha > at(0, 4).alpha, '0.9 is darker than 0.85');
+	assert.equal(at(1, 3).alpha, 0.9, 'the most similar pair is strongest');
+	assert.equal(at(0, 1).alpha, 0.15, 'the least similar pair is faintest, and still 15 % of the ramp colour (an empty cell is 0)');
+	assert.equal(at(2, 2).alpha, 0.9, 'the diagonal, above the range, as strong as the strongest');
+	assert.ok(at(0, 2).alpha > at(0, 4).alpha, '0.9 is stronger than 0.85');
 	assert.equal(ctx.globalAlpha, 1, 'the context is left opaque');
 });
 
@@ -428,4 +428,20 @@ test('a cell the node could not compute (null for a non-finite value) is shown a
 	const exported = matrixRows(answer.keys, holes, label);
 	const firstName = exported.columns[3 + 2] as string;
 	assert.equal(exported.rows[0]?.[firstName], null, 'exported as an empty cell');
+});
+
+test('values are printed in the cells at 11 px up to 12 x 12; above that each value is in its cell\'s title and the table, and the cells shrink', () => {
+	assert.equal(CELL_LABEL_PX, 11);
+	assert.equal(LABELLED_MAX, 12);
+	assert.equal(SHADE_MIN, 0.15);
+	const twelve = renderToStaticMarkup(body({ state: bigState(12), labelOf: bigLabel, selected: null }));
+	assert.equal((twelve.match(/data-cell="/g) ?? []).length, 144);
+	assert.equal((twelve.match(/font-size:11px/g) ?? []).length, 144, 'one 11 px value per cell');
+	assert.doesNotMatch(twelve, /font-size:8\.5px/);
+	assert.match(twelve, /grid-template-columns:repeat\(12, 28px\)/);
+	const thirteen = renderToStaticMarkup(body({ state: bigState(13), labelOf: bigLabel, selected: null }));
+	assert.equal((thirteen.match(/data-cell="/g) ?? []).length, 169);
+	assert.equal((thirteen.match(/font-size:11px/g) ?? []).length, 0, 'no value printed');
+	assert.equal((thirteen.match(/<div[^>]*data-cell="[^"]*"[^>]*title="[^"]+: [0-9.]+"/g) ?? []).length + (thirteen.match(/<div[^>]*title="[^"]+: [0-9.]+"[^>]*data-cell=/g) ?? []).length, 169, 'each value in its title');
+	assert.match(thirteen, /grid-template-columns:repeat\(13, 23px\)/, 'floor(300 / 13) px');
 });

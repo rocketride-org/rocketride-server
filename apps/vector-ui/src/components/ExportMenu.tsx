@@ -36,7 +36,11 @@
 // opening it (click, Enter, Space, Arrow Down/Up) moves focus to the first
 // choice; the arrow keys, Home and End move between choices, Escape closes
 // and returns focus to the button, Tab closes. One group per item, one menu
-// item per format (CSV and JSON for rows, PNG for the picture).
+// item per format (CSV and JSON for rows, PNG for the picture). The panel is
+// placed before it is painted, inside the viewport (AdvancedPopover.tsx
+// usePopover), and closes on a window resize (focus back on the button) or a
+// pointer pressed outside it. Escape is marked handled (preventDefault), never
+// stopped.
 //
 // States: nothing to export (the button is disabled with "Nothing to
 // export"); an item the host disabled (its reason, e.g. "Nothing selected" or
@@ -56,6 +60,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { ExportMenuProps, IExportItem } from '../contract/types';
 import { MAP_STYLES } from '../map/styles';
+import { POPOVER_PANEL, usePopover } from './AdvancedPopover';
 import { COPY_BLOCKED_SENTENCE, copyLabel, outcomeSentence, progressSentence, runExport } from '../vector/export';
 import type { ExportFormat, ExportOutcome } from '../vector/export';
 
@@ -179,8 +184,12 @@ export interface ExportMenuPanelProps {
 	onClose?(refocus: boolean): void;
 	/** The menu element, for moving focus into it when it opens. */
 	menuRef?: React.Ref<HTMLDivElement>;
-	/** Which edge of the button the panel hangs from (default 'right'). */
+	/** Which edge of the button the panel hangs from (default 'right'), until it is placed. */
 	side?: 'left' | 'right';
+	/** Where it was placed (usePopover), merged last. */
+	placement?: React.CSSProperties;
+	/** The panel element, for measuring it. */
+	panelRef?: React.Ref<HTMLDivElement>;
 	/** A refused download of rows: copy it instead (its button's words, and the copy). */
 	fallback?: { label: string; onCopy(): void } | null;
 	/** The clipboard was refused too: the export to select by hand. */
@@ -216,7 +225,7 @@ function enabledChoices(menu: HTMLElement | null): HTMLElement[] {
 
 const S = {
 	root: { position: 'relative', display: 'inline-flex', alignItems: 'center' } as React.CSSProperties,
-	panel: { position: 'absolute', top: 'calc(100% + 4px)', zIndex: 20, minWidth: 300, width: EXPORT_PANEL_WIDTH, boxSizing: 'border-box', padding: 8, borderRadius: 8, border: '1px solid var(--rr-border)', background: 'var(--rr-bg-paper)', color: 'var(--rr-text-primary)', boxShadow: '0 4px 16px rgba(0,0,0,0.25)' } as React.CSSProperties,
+	panel: { ...POPOVER_PANEL, top: 'calc(100% + 4px)', minWidth: 300, width: EXPORT_PANEL_WIDTH, padding: 8, border: `1px solid var(--rr-text-primary)` } as React.CSSProperties,
 	entry: { display: 'flex', alignItems: 'center', gap: 6, padding: '5px 2px', borderBottom: '1px solid var(--rr-border)' } as React.CSSProperties,
 	label: { ...MAP_STYLES.small, flex: 1, minWidth: 0 } as React.CSSProperties,
 	reason: { ...MAP_STYLES.small, display: 'block', fontStyle: 'italic' } as React.CSSProperties,
@@ -235,11 +244,9 @@ const S = {
  */
 export function ExportMenuPanel(props: ExportMenuPanelProps): React.ReactElement {
 	const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+		if (event.defaultPrevented) return;
 		if (event.key === 'Escape' || event.key === 'Tab') {
-			if (event.key === 'Escape') {
-				event.preventDefault();
-				event.stopPropagation();
-			}
+			if (event.key === 'Escape') event.preventDefault();
 			// Focus goes back to the button either way: Escape stays there, Tab moves on from it.
 			props.onClose?.(true);
 			return;
@@ -252,7 +259,7 @@ export function ExportMenuPanel(props: ExportMenuPanelProps): React.ReactElement
 		choices[next]?.focus();
 	};
 	return (
-		<div id={props.id} style={{ ...S.panel, ...sideStyle(props.side ?? 'right') }} data-export-panel="">
+		<div ref={props.panelRef} id={props.id} style={{ ...S.panel, ...sideStyle(props.side ?? 'right'), ...props.placement }} data-export-panel="">
 			<div ref={props.menuRef} role="menu" aria-label="Export choices" aria-busy={props.busy || undefined} tabIndex={-1} onKeyDown={onKeyDown}>
 				{props.items.map((item, index) => {
 					const labelId = `${props.id}-item-${index}`;
@@ -341,18 +348,9 @@ export function ExportMenu(props: ExportMenuProps): React.ReactElement {
 	const root = useRef<HTMLSpanElement>(null);
 	const button = useRef<HTMLButtonElement>(null);
 	const menu = useRef<HTMLDivElement>(null);
+	const panel = useRef<HTMLDivElement>(null);
 	const live = useRef(true);
 	const empty = props.items.length === 0;
-
-	// Close on a click outside while open.
-	useEffect(() => {
-		if (!open) return undefined;
-		const onDown = (event: MouseEvent): void => {
-			if (root.current && event.target instanceof Node && !root.current.contains(event.target)) setOpen(false);
-		};
-		document.addEventListener('mousedown', onDown);
-		return () => document.removeEventListener('mousedown', onDown);
-	}, [open]);
 
 	// Opening moves focus to the first choice (or the menu when every choice is disabled).
 	useEffect(() => {
@@ -398,6 +396,8 @@ export function ExportMenu(props: ExportMenuProps): React.ReactElement {
 		setOpen(false);
 		if (refocus) button.current?.focus();
 	}, []);
+	// Placed inside the viewport before paint; a resize or a press outside closes it.
+	const placement = usePopover(open && !empty, { root, trigger: button, panel }, close);
 
 	const choose = useCallback(
 		(item: IExportItem, format: ExportFormat): void => {
@@ -437,12 +437,13 @@ export function ExportMenu(props: ExportMenuProps): React.ReactElement {
 					setOpen((v) => !v);
 				}}
 				onKeyDown={(event) => {
+					if (event.defaultPrevented) return;
 					if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && !open) {
 						event.preventDefault();
 						setSide(sideFor(root.current, EXPORT_PANEL_WIDTH));
 						setOpen(true);
 					} else if (event.key === 'Escape' && open) {
-						event.stopPropagation();
+						event.preventDefault();
 						setOpen(false);
 					}
 				}}
@@ -453,6 +454,8 @@ export function ExportMenu(props: ExportMenuProps): React.ReactElement {
 				<ExportMenuPanel
 					id={panelId}
 					menuRef={menu}
+					panelRef={panel}
+					placement={placement}
 					side={side}
 					items={props.items}
 					busy={busy}

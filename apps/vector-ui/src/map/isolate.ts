@@ -30,6 +30,12 @@
 // these too: the layouts, picking, the keyboard path, the lasso, the counts.
 // "Expand by neighbours" adds one ring from the node's kNN graph (no call) and
 // never brings back a removed document's point. "Show all" drops the isolation.
+//
+// Dimming is the soft form of it: every point outside the set the map is
+// showing is drawn faded (dimMask), the most specific set winning: a selected
+// point with its neighbours, else a highlighted set (a lasso selection, a
+// document, Find similar or a duplicate group, an answer's sources), else a
+// placed query's true top-k. Nothing to light, nothing faded.
 // =============================================================================
 
 import type { IKnnBlock } from '../contract/types';
@@ -46,6 +52,31 @@ export function isolateMask(n: number, keep: Iterable<number>): Uint8Array {
 	const mask = new Uint8Array(n).fill(1);
 	for (const i of keep) if (Number.isInteger(i) && i >= 0 && i < n) mask[i] = 0;
 	return mask;
+}
+
+/** The sets the map can light (indices into the sample). */
+export interface ILitSets {
+	/** The selected point, or null. */
+	selected: number | null;
+	/** Its neighbours in the sample. */
+	neighbours: readonly number[];
+	/** A highlighted set's points, or null for none. */
+	highlight: readonly number[] | null;
+	/** A placed query's true top-k in the sample. */
+	queryTop: readonly number[];
+}
+
+/**
+ * The points to draw faded: all but the most specific set shown.
+ *
+ * @param n - Points in the sample.
+ * @param sets - What is shown.
+ * @returns 1 per faded point, or null when nothing is lit (then nothing is faded).
+ */
+export function dimMask(n: number, sets: ILitSets): Uint8Array | null {
+	const lit = sets.selected !== null ? [sets.selected, ...sets.neighbours] : sets.highlight !== null && sets.highlight.length > 0 ? sets.highlight : sets.queryTop;
+	const keep = lit.filter((i) => Number.isInteger(i) && i >= 0 && i < n);
+	return keep.length === 0 ? null : isolateMask(n, keep);
 }
 
 /**

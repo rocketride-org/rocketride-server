@@ -25,23 +25,43 @@
 // =============================================================================
 //
 // Names every colour (colour is never the only carrier), states the sample line
-// and the point cap of the mode, who computed the neighbour graph ("neighbour
-// graph computed by Qdrant" when the store did it natively) and the caveat that
-// 2D distances are approximate while ranks and scores are exact. Coloured by
-// cluster it lists the largest groups and says how many more the Clusters tab
-// lists; the view adds its lines (what a cluster is, the edges drawn, how the
-// sample's listing ended, the scope, an isolation) as notes, and the draw again
-// when the store refused to draw the sample for the console's scope.
+// (what it is drawn from, the documents and the seed) and the point cap of the
+// mode, who computed the neighbour graph ("neighbour graph computed by Qdrant"
+// when the store did it natively) and the caveat that 2D distances are
+// approximate while ranks and scores are exact. Coloured by cluster it lists
+// the largest groups and says how many more the Clusters tab lists. Under the
+// colours, a row of the marks drawn now, each a small picture in the canvas's
+// own colours with its words: similarity edges, the selected point's links,
+// outlier rings, the query's star and rays, near-duplicate pairs; a mark not
+// drawn is not listed. The view adds its lines (what a cluster is, the edges
+// drawn, how the sample's listing ended, the scope, an isolation) as notes,
+// and the draw again when the store refused to draw the sample for the
+// console's scope.
 // =============================================================================
 
 import React from 'react';
 import type { LegendProps as ContractLegendProps } from '../contract/types';
 import type { IColouring, MapColourBy } from '../map/colours';
 import { MAP_STYLES } from '../map/styles';
+import { ACCENT_TOKEN, OUTLINE_TOKEN } from '../map/tokens';
 import { DISTANCE_CAVEAT, biasedNote, knnSourceLine, num, pointCapLine, sampleLabel } from '../map/wording';
 
 /** Groups listed by name when coloured by cluster (the Clusters tab lists every one). */
 export const LEGEND_CLUSTERS = 12;
+
+/** The marks the map draws now, for the glyph row (a mark absent or 0 is not drawn, so not listed). */
+export interface ILegendMarks {
+	/** The edge colours (weakest and strongest bucket) while similarity edges are drawn. */
+	edges?: { weakest: string; strongest: string } | null;
+	/** The selected point's links to its nearest chunks are drawn. */
+	links?: boolean;
+	/** Outlier rings drawn. */
+	outliers?: number;
+	/** The query's star is drawn, with rays to its true top N. */
+	query?: { top: number } | null;
+	/** Near-duplicate pairs drawn. */
+	duplicates?: number;
+}
 
 /** Legend props: the frozen ones (Colour by widened) plus what the map computed. */
 export interface LegendProps extends Omit<ContractLegendProps, 'colourBy'> {
@@ -52,6 +72,104 @@ export interface LegendProps extends Omit<ContractLegendProps, 'colourBy'> {
 	notes?: readonly string[];
 	/** Offered under the lines when the store refused to draw the sample for the console's scope. */
 	scopeRetry?: { label: string; onClick(): void } | null;
+	/** The marks drawn now (the glyph row). */
+	marks?: ILegendMarks | null;
+}
+
+/** The canvas's colours, as the glyphs draw them. */
+const ACCENT = `var(${ACCENT_TOKEN})`;
+const OUTLINE = `var(${OUTLINE_TOKEN})`;
+const SURFACE = 'var(--rr-bg-default)';
+
+/**
+ * A mark's picture: a small tile of the map's surface with the mark drawn as the canvas draws it.
+ *
+ * @param children - SVG shapes in a 22 x 12 box.
+ * @returns The glyph (hidden from assistive tech: the words carry it).
+ */
+function glyph(children: React.ReactNode): React.ReactElement {
+	return (
+		<svg aria-hidden="true" width={22} height={12} viewBox="0 0 22 12" style={{ flex: 'none', marginRight: 6, verticalAlign: 'middle' }}>
+			<rect x={0} y={0} width={22} height={12} rx={2} style={{ fill: SURFACE }} />
+			{children}
+		</svg>
+	);
+}
+
+/** A five-pointed star's points around (cx, cy). */
+function starPoints(cx: number, cy: number, outer: number, inner: number): string {
+	return Array.from({ length: 10 }, (_, v) => {
+		const angle = -Math.PI / 2 + (v * Math.PI) / 5;
+		const r = v % 2 === 0 ? outer : inner;
+		return `${(cx + r * Math.cos(angle)).toFixed(2)},${(cy + r * Math.sin(angle)).toFixed(2)}`;
+	}).join(' ');
+}
+
+/**
+ * The glyph row: one entry per mark drawn now.
+ *
+ * @param marks - What the map draws.
+ * @returns The entries.
+ */
+export function markRows(marks: ILegendMarks | null | undefined): Array<{ key: string; picture: React.ReactElement; words: string }> {
+	if (!marks) return [];
+	const rows: Array<{ key: string; picture: React.ReactElement; words: string }> = [];
+	if (marks.edges) {
+		rows.push({
+			key: 'edges',
+			words: 'similarity edge (fainter: less similar)',
+			picture: glyph(
+				<>
+					<line x1={2} y1={6} x2={10} y2={6} style={{ stroke: marks.edges.weakest, strokeWidth: 1.5 }} />
+					<line x1={12} y1={6} x2={20} y2={6} style={{ stroke: marks.edges.strongest, strokeWidth: 1.5 }} />
+				</>,
+			),
+		});
+	}
+	if (marks.links) {
+		rows.push({
+			key: 'links',
+			words: 'link from the selected point to a nearest chunk',
+			picture: glyph(
+				<>
+					<line x1={7} y1={6} x2={20} y2={6} style={{ stroke: ACCENT, strokeWidth: 1.5 }} />
+					<circle cx={5} cy={6} r={3} style={{ fill: 'none', stroke: ACCENT, strokeWidth: 1.5 }} />
+				</>,
+			),
+		});
+	}
+	if (marks.outliers && marks.outliers > 0) {
+		rows.push({
+			key: 'outliers',
+			words: `outlier (${num(marks.outliers)})`,
+			picture: glyph(
+				<>
+					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: SURFACE, strokeWidth: 3 }} />
+					<circle cx={11} cy={6} r={4} style={{ fill: 'none', stroke: OUTLINE, strokeWidth: 1.5 }} />
+				</>,
+			),
+		});
+	}
+	if (marks.query) {
+		rows.push({
+			key: 'query',
+			words: `query, rays to its true top ${num(marks.query.top)}`,
+			picture: glyph(
+				<>
+					<line x1={8} y1={6} x2={21} y2={6} style={{ stroke: ACCENT, strokeWidth: 1.25 }} />
+					<polygon points={starPoints(6, 6, 5, 2.2)} style={{ fill: ACCENT, stroke: SURFACE, strokeWidth: 1 }} />
+				</>,
+			),
+		});
+	}
+	if (marks.duplicates && marks.duplicates > 0) {
+		rows.push({
+			key: 'duplicates',
+			words: `near-duplicate pair (${num(marks.duplicates)})`,
+			picture: glyph(<line x1={3} y1={6} x2={19} y2={6} style={{ stroke: OUTLINE, strokeWidth: 1.5, strokeDasharray: '4 3' }} />),
+		});
+	}
+	return rows;
 }
 
 /**
@@ -70,9 +188,13 @@ export function Legend(props: LegendProps): React.ReactElement {
 	const groups = props.colourBy === 'cluster' ? all.filter((e) => e.key !== 'noise') : all;
 	const rows = props.colourBy === 'cluster' ? [...groups.slice(0, LEGEND_CLUSTERS), ...all.filter((e) => e.key === 'noise')] : all;
 	const more = props.colourBy === 'cluster' ? Math.max(0, groups.length - LEGEND_CLUSTERS) : 0;
+	const marks = markRows(props.marks);
+	const docs = sample.of.documents === null || sample.of.documents === undefined ? '—' : num(sample.of.documents);
 	return (
 		<section aria-label="Map legend" style={MAP_STYLES.legend} data-knn-source={sample.knn_source} data-colour-by={props.colourBy}>
-			<p style={MAP_STYLES.note}>{sampleLabel(sample)}</p>
+			<p style={MAP_STYLES.note}>
+				{sampleLabel(sample)} · {docs} docs · seed {props.sample.seed}
+			</p>
 			{bias ? <p style={MAP_STYLES.note}>{bias}</p> : null}
 			{rows.length > 0 ? (
 				<ul aria-label="Colours" style={{ ...MAP_STYLES.list, display: 'flex', flexWrap: 'wrap', gap: '2px 14px', margin: '4px 0' }}>
@@ -96,6 +218,19 @@ export function Legend(props: LegendProps): React.ReactElement {
 				</div>
 			) : null}
 			{colouring?.note ? <p style={MAP_STYLES.note}>{colouring.note}</p> : null}
+			{/* The row keeps its line while nothing is marked, so selecting a point does not resize the map. */}
+			<div style={{ minHeight: 18, margin: '4px 0' }} data-legend-marks={marks.map((m) => m.key).join(' ')}>
+				{marks.length > 0 ? (
+					<ul aria-label="Marks" style={{ ...MAP_STYLES.list, display: 'flex', flexWrap: 'wrap', gap: '2px 14px' }}>
+						{marks.map((mark) => (
+							<li key={mark.key} style={{ ...MAP_STYLES.small, display: 'inline-flex', alignItems: 'center' }}>
+								{mark.picture}
+								<span>{mark.words}</span>
+							</li>
+						))}
+					</ul>
+				) : null}
+			</div>
 			<p style={MAP_STYLES.note}>
 				{pointCapLine(sample.mode, props.pointCap)} · {knnSourceLine(sample, props.backend)} · {DISTANCE_CAVEAT}
 			</p>

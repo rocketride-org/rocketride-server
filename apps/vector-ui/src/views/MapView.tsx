@@ -83,7 +83,7 @@ import { RecommendPanel } from '../components/RecommendPanel';
 import { SavedViewsMenu } from '../components/SavedViewsMenu';
 import { SimilarityMatrix } from '../components/SimilarityMatrix';
 import { recommendExamples } from '../adapters/connections';
-import type { Availability, ClusterMinSize, ColourBy, EdgeMode, EdgesPerPoint, ExamplePolarity, IChunksResult, IDocumentItem, IDocumentRowsSource, IEmbedResult, IExportItem, INeighborsResult, INeighborsScopeResult, IProjectItem, IProjectResult, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleInput, ISampleResult, ISavedView, ISavedViewRestore, ISavedViewState, ISearchResult, MapLayout, MapViewProps as ContractMapViewProps, SampleMode, ToolOutcome, VectorKey } from '../contract/types';
+import type { Availability, ClusterMinSize, ColourBy, EdgeMode, EdgesPerPoint, ExamplePolarity, IChunksResult, IDocumentItem, IDocumentRowsSource, IEmbedResult, IExportItem, INeighborsResult, INeighborsScopeResult, IProjectItem, IProjectResult, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleInput, ISampleResult, ISavedView, ISavedViewRestore, ISavedViewState, ISearchResult, MapLayout, MapViewProps as ContractMapViewProps, SampleMode, SelectionState, ToolOutcome, VectorKey } from '../contract/types';
 import { TSNE_MAX_POINTS } from '../map/budgets';
 import { callRecommend, callTool, isExpired } from '../map/calls';
 import type { ToolAnswer } from '../map/calls';
@@ -96,17 +96,18 @@ import { groupOf, groups, pairsAt } from '../map/dedupe';
 import { NO_EDGES, edgeStats, edgesOf, mergeEdges, spanningTree, topEdges, treeNeighbours } from '../map/graph';
 import { tweenPositions } from '../map/interaction';
 import type { KeyAction } from '../map/interaction';
-import { combineMasks, expandByNeighbours, isolateMask, isolationLine, shownCount } from '../map/isolate';
+import { combineMasks, dimMask, expandByNeighbours, isolateMask, isolationLine, shownCount } from '../map/isolate';
 import { UNSCOPED, applyTransform, chunkPath, clusterExportRows, ditherRounded, documentOf, drawnScope, duplicateExportRows, hiddenMask, keyIndex, keyString, mapScopeState, neighboursOf, normaliseLayout, pcaPositions, pointExportRows, pointKey, scopeDrawDue } from '../map/model';
 import type { ISampleScope, IScopeAttempt } from '../map/model';
 import { createLatestQueue } from '../map/neighbours';
-import type { IClusterLabel, IOverlayEnd, IPlace } from '../map/overlay';
+import { EDGE_BUCKETS, edgeColours } from '../map/overlay';
+import type { IClusterLabel, IDuplicateRing, IOverlayEnd, IPlace } from '../map/overlay';
 import { centroidStar, chatQueryPlan, comparePlan, placeProjected, queryBlocker, querySims, raysFromSearch, resolveKeys, starFromProject, withSampleRetry } from '../map/queryProjection';
 import type { IStar } from '../map/queryProjection';
 import { polarityOf } from '../map/recommend';
 import { spawnLayoutWorker } from '../map/spawnWorker';
 import { MAP_STYLES } from '../map/styles';
-import { readPalette } from '../map/tokens';
+import { FALLBACK_PALETTE, readPalette } from '../map/tokens';
 import type { IMapPalette } from '../map/tokens';
 import { createLayoutClient } from '../map/workerClient';
 import type { ILayoutClient } from '../map/workerClient';
@@ -454,6 +455,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 	const [centreOn, setCentreOn] = useState<{ index: number; seq: number } | null>(null);
 	const [pulse, setPulse] = useState(0);
 	const [rendererKind, setRendererKind] = useState<'webgl' | 'canvas2d' | 'none'>('none');
+	/** The highlight the Duplicates tab's "Show group" set (its pairs are ringed while it is the one shown). */
+	const [duplicateHighlight, setDuplicateHighlight] = useState<SelectionState['highlight']>(null);
 
 	// The one query vector (from `embed`), kept here and sent only to project / search / neighbors / recommend.
 	const queryVector = useRef<number[] | null>(null);
@@ -656,6 +659,40 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		});
 	}, [neighbours, selected, sampleModel, neighbourPins, keyIdx, place, layout, raw, dims]);
 
+	// The shown duplicate group: its pairs (both ends shown) get rings and their similarity, while the Duplicates tab
+	// shows it and its highlight is still the one on the map.
+	const duplicateRings: IDuplicateRing[] = useMemo(() => {
+		if (!sample || tab !== 'duplicates' || highlight === null || highlight !== duplicateHighlight) return [];
+		const group = new Set(resolveKeys(highlight.keys, keyIdx, []).points);
+		return sample.duplicates.filter((d) => group.has(d.a) && group.has(d.b) && !(hidden && (hidden[d.a] || hidden[d.b]))).slice(0, MAX_DRAWN_DUPLICATES).map((d) => ({ a: d.a, b: d.b, sim: d.sim }));
+	}, [sample, tab, highlight, duplicateHighlight, keyIdx, hidden]);
+
+	// Everything outside the set the map is showing is drawn faded: a selection with its neighbours, else a
+	// highlighted set, else a placed query's top-k.
+	const dimmed = useMemo(() => {
+		if (!sample) return null;
+		return dimMask(sample.n, {
+			selected,
+			neighbours: neighbourEnds.flatMap((e) => (e.index !== undefined ? [e.index] : [])),
+			highlight: highlight ? resolveKeys(highlight.keys, keyIdx, []).points : null,
+			queryTop: rays.flatMap((e) => (e.index !== undefined ? [e.index] : [])),
+		});
+	}, [sample, selected, neighbourEnds, highlight, keyIdx, rays]);
+
+	// What the legend's glyph row lists: only the marks drawn now.
+	const edgePalette = useMemo(() => edgeColours(palette ?? FALLBACK_PALETTE), [palette]);
+	const legendMarks = useMemo(() => {
+		if (!sample) return null;
+		const shownPair = (d: { a: number; b: number }): boolean => !(hidden && (hidden[d.a] || hidden[d.b]));
+		return {
+			edges: edgeSet ? { weakest: edgePalette[0] as string, strongest: edgePalette[EDGE_BUCKETS - 1] as string } : null,
+			links: selected !== null && neighbourEnds.length > 0,
+			outliers: sample.outliers.filter((i) => !(hidden && hidden[i])).length,
+			query: star && query?.search ? { top: query.search.results.length } : null,
+			duplicates: sample.duplicates.slice(0, MAX_DRAWN_DUPLICATES).filter(shownPair).length,
+		};
+	}, [sample, hidden, edgeSet, edgePalette, selected, neighbourEnds, star, query]);
+
 	const overlay = useMemo(
 		() => ({
 			selected,
@@ -667,10 +704,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			rays,
 			chunkPath: documentPath,
 			duplicates: (sample?.duplicates ?? []).slice(0, MAX_DRAWN_DUPLICATES).map((d): [number, number] => [d.a, d.b]),
+			duplicateRings,
 			outliers: sample?.outliers ?? [],
 			pulse,
 		}),
-		[selected, focused, ringPoints, neighbourEnds, pinnedPlaces, star, rays, documentPath, sample, pulse],
+		[selected, focused, ringPoints, neighbourEnds, pinnedPlaces, star, rays, documentPath, sample, duplicateRings, pulse],
 	);
 
 	// -------------------------------------------------------------------------
@@ -1420,11 +1458,12 @@ export function MapView(props: MapViewProps): React.ReactElement {
 		out.height = Math.max(1, Math.round(source.height * scale)) + Math.round(lineH * (lines.length + 1));
 		const octx = out.getContext('2d');
 		if (!octx) return null;
-		const style = getComputedStyle(document.documentElement);
-		octx.fillStyle = style.getPropertyValue('--rr-bg-default').trim() || '#ffffff';
+		// The theme the map is drawn in (its own fallbacks, by mode, in an unthemed host).
+		const theme = palette ?? FALLBACK_PALETTE;
+		octx.fillStyle = theme.surfaces.default;
 		octx.fillRect(0, 0, out.width, out.height);
 		octx.drawImage(source, 0, 0, out.width, Math.round(source.height * scale));
-		octx.fillStyle = style.getPropertyValue('--rr-text-primary').trim() || '#1a1a1a';
+		octx.fillStyle = theme.text;
 		octx.font = `${12 * ratio}px system-ui, sans-serif`;
 		const top = Math.round(source.height * scale);
 		lines.forEach((line, n) => {
@@ -1433,11 +1472,11 @@ export function MapView(props: MapViewProps): React.ReactElement {
 				octx.fillStyle = line.colour;
 				octx.fillRect(8 * ratio, y - 9 * ratio, 9 * ratio, 9 * ratio);
 			}
-			octx.fillStyle = style.getPropertyValue('--rr-text-primary').trim() || '#1a1a1a';
+			octx.fillStyle = theme.text;
 			octx.fillText(line.text, (line.colour ? 22 : 8) * ratio, y);
 		});
 		return new Promise<Blob | null>((resolve) => out.toBlob((blob) => resolve(blob), 'image/png'));
-	}, [sample, colouring, model.collection, shownPoints, layout, colourBy]);
+	}, [sample, colouring, model.collection, shownPoints, layout, colourBy, palette]);
 
 	/** The toolbar's export items: the sample, the selection, the points shown, the clusters, the duplicates, the outliers, the PNG. */
 	const exportItems: IExportItem[] = useMemo(() => {
@@ -1722,6 +1761,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 								outlined={colouring?.outlined ?? null}
 								hidden={hidden}
 								emphasised={emphasised}
+								dimmed={dimmed}
+								dimOnHover={clusters !== null && (colourBy === 'cluster' || tab === 'clusters')}
 								overlay={overlay}
 								palette={palette}
 								pointSizePx={sample.mode === 'light' ? 3.5 : 5.5}
@@ -1752,7 +1793,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 								cameraOverride={cameraOverride}
 							/>
 						</div>
-						<Legend sample={sampleModel!} colourBy={colourBy} pointCap={pointCap} backend={backend} colouring={colouring} notes={legendNotes} scopeRetry={scopeState === 'failed' && busy === null ? { label: SCOPE_RETRY, onClick: retryScope } : null} />
+						<Legend sample={sampleModel!} colourBy={colourBy} pointCap={pointCap} backend={backend} colouring={colouring} notes={legendNotes} marks={legendMarks} scopeRetry={scopeState === 'failed' && busy === null ? { label: SCOPE_RETRY, onClick: retryScope } : null} />
 					</div>
 					<aside style={MAP_STYLES.side} aria-label="Map details">
 						<div role="tablist" aria-label="Map details" style={MAP_STYLES.tabs}>
@@ -1809,7 +1850,10 @@ export function MapView(props: MapViewProps): React.ReactElement {
 								<DuplicatesPanel
 									sample={sampleModel!}
 									writes={model.writes}
-									onSelect={(indices) => selection.setHighlight({ source: 'neighbors', keys: indices.map((i) => pointKey(sample, i)) })}
+									onSelect={(indices) => {
+										selection.setHighlight({ source: 'neighbors', keys: indices.map((i) => pointKey(sample, i)) });
+										setDuplicateHighlight(selection.getState().highlight);
+									}}
 									onRemoveDocument={(objectId) => actions.requestRemove([objectId])}
 									connectionKey={model.connectionKey}
 									documents={props.documents ?? null}

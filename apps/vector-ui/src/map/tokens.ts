@@ -73,9 +73,19 @@ export interface IMapPalette {
 	chart: string[];
 }
 
-/** Fallbacks when a token is missing (an unthemed host). */
+/** Fallbacks when a token is missing (an unthemed host), by mode: the Dark and Light themes' values. */
 const FALLBACK = { dark: { bg: '#161616', paper: '#242424', accent: '#2f81f7', text: '#e6e6e6', other: '#a8a8a8' }, light: { bg: '#ffffff', paper: '#ffffff', accent: '#0078d4', text: '#1a1a1a', other: '#666666' } } as const;
-const FALLBACK_CHART = ['#4263eb', '#2b8a3e', '#c92a2a', '#e67a2e', '#7048e8', '#e67700'];
+const FALLBACK_CHART = { dark: ['#748ffc', '#69db7c', '#ff8787', '#ffa94d', '#b197fc', '#ffd43b'], light: ['#4263eb', '#2b8a3e', '#c92a2a', '#e67a2e', '#7048e8', '#e67700'] } as const;
+
+/**
+ * The map's surface when the host sets no token.
+ *
+ * @param mode - The palette's mode.
+ * @returns A CSS colour.
+ */
+export function fallbackSurface(mode: 'dark' | 'light'): string {
+	return FALLBACK[mode].bg;
+}
 
 /**
  * Read the palette through a token reader.
@@ -89,11 +99,14 @@ export function readPalette(read: (token: string) => string): IMapPalette {
 	const fb = FALLBACK[mode];
 	return {
 		mode,
-		surfaces: { default: get('--rr-bg-default') || fb.bg, paper: get('--rr-bg-paper') || fb.paper },
+		surfaces: { default: get('--rr-bg-default') || fallbackSurface(mode), paper: get('--rr-bg-paper') || fb.paper },
 		accent: get(ACCENT_TOKEN) || fb.accent,
 		outline: get(OUTLINE_TOKEN) || fb.text,
 		other: get(OTHER_TOKEN) || fb.other,
 		text: get(TEXT_TOKEN) || fb.text,
-		chart: CHART_COLOR_VARS.map((token, i) => get(token) || (FALLBACK_CHART[i] as string)),
+		chart: CHART_COLOR_VARS.map((token, i) => get(token) || (FALLBACK_CHART[mode][i] as string)),
 	};
 }
+
+/** The palette of a host with no tokens at all (no theme, or no browser): the light fallbacks. */
+export const FALLBACK_PALETTE: IMapPalette = readPalette(() => '');

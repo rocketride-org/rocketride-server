@@ -31,6 +31,7 @@ import { recommendExamples } from '../src/adapters/connections';
 import { createSelectionStore } from '../src/contract/bridge';
 import { EXPORT_COLUMNS } from '../src/contract/types';
 import type { ConsoleActions, ConsoleModel, IDialectResult, IExportItem, IRecommendExamples, IRecommendRequest, IRecommendResult, ISampleModel, ISampleResult, ISavedView, ISavedViewRestore, ISavedViewState, IScopeState, ToolOutcome, VectorChannels, VectorKey } from '../src/contract/types';
+import { MapToolbar } from '../src/components/MapToolbar';
 import { PointCanvas } from '../src/components/PointCanvas';
 import { clusterLabel, clusterRows, clusterView } from '../src/map/clusters';
 import { spanningTree } from '../src/map/graph';
@@ -86,6 +87,9 @@ loader._load = function (request: string, parent: { filename?: string } | null, 
 	return spy;
 };
 const { MapView } = require('../src/views/MapView') as typeof import('../src/views/MapView');
+
+/** A static render. */
+const html = (el: React.ReactElement): string => renderToStaticMarkup(el);
 
 /** The props of the last render of a child. */
 function last<T = Record<string, unknown>>(name: string): T {
@@ -182,9 +186,9 @@ test('with sample_demo_1000.json drawn: the canvas has data-points 1000 on PCA, 
 	assert.equal(attrOf(out, 'vector-map-canvas', 'data-layout'), 'pca');
 	assert.equal(attrOf(out, 'vector-map-canvas', 'data-selection'), '');
 	assert.match(out, /role="toolbar" aria-label="Map controls"/);
-	assert.match(out, /of 1,318 chunks · 42 docs · seed 7/);
 	assert.match(out, /aria-label="Map legend"/);
-	assert.match(out, /Showing 1,000 of 1,318 chunks/);
+	// The sample line is the legend's first line (it left the toolbar, which keeps one row).
+	assert.match(out, /aria-label="Map legend"[^>]*><p[^>]*>Showing 1,000 of 1,318 chunks \(random sample\) · 42 docs · seed 7<\/p>/);
 	assert.match(out, /role="tab" aria-selected="true"[^>]*>Point</);
 	assert.match(out, /Click a point or use the arrow keys/);
 });
@@ -202,7 +206,9 @@ test('with the Table on, the canvas stays mounted but hidden: data-points and da
 	const sample = modelOf(loadSample('sample_demo_1000.json'));
 	const out = render({ sample, initialTable: true });
 	assert.match(out, /<caption[^>]*>Points of the sample \(the map as a table\)<\/caption>/);
-	assert.match(out, /aria-pressed="true"[^>]*>Table<\/button>/);
+	// The Table toggle is in Advanced: pressed there.
+	assert.equal(last<{ table: boolean }>('MapToolbar').table, true);
+	assert.match(html(<MapToolbar {...last<React.ComponentProps<typeof MapToolbar>>('MapToolbar')} initialAdvanced />), /aria-pressed="true"[^>]*>Table<\/button>/);
 	// The lanes read the canvas root while the table shows (lane_vector_map.cjs polls data-selected after "Inspect point 1").
 	assert.equal(attrOf(out, 'vector-map-canvas', 'data-points'), '1000');
 	assert.equal(attrOf(out, 'vector-map-canvas', 'data-selected'), '');
@@ -233,8 +239,11 @@ test('the Clusters tab holds the ClustersPanel, and the toolbar offers Edges: No
 	const at = out.search(/<[a-z]+[^>]*data-component="ClustersPanel"/);
 	assert.ok(at >= 0, 'the panel is mounted in its tab');
 	assert.doesNotMatch(out.slice(at, out.indexOf('>', at)), /data-placeholder/, 'the panel is built');
-	assert.match(out, /<select aria-label="Edges"[^>]*>/);
-	assert.match(out, /<option value="none" selected="">None<\/option><option value="neighbours">Neighbours<\/option><option value="tree">Tree<\/option>/);
+	// Edges are in the toolbar's Advanced panel (closed until it is opened).
+	assert.match(out, /<button[^>]*aria-expanded="false"[^>]*>Advanced ▾<\/button>/);
+	const advanced = html(<MapToolbar {...last<React.ComponentProps<typeof MapToolbar>>('MapToolbar')} initialAdvanced />);
+	assert.match(advanced, /<select aria-label="Edges"[^>]*>/);
+	assert.match(advanced, /<option value="none" selected="">None<\/option><option value="neighbours">Neighbours<\/option><option value="tree">Tree<\/option>/);
 });
 
 // -----------------------------------------------------------------------------
@@ -325,7 +334,7 @@ test('edges: Tree draws the spanning tree (n-1 edges on a connected graph), Neig
 	const light = render({ channels: counted, sample: modelOf(loadSample('sample_light_5000.json')), extra: { edges: 'neighbours', edgesM: 10 } });
 	assert.equal(attr(light, 'data-edges-per-point'), '3');
 	assert.ok(light.includes(EDGES_LIGHT_NOTE));
-	assert.match(light, /<option value="10" disabled="" title="Light samples above 3,000 points draw at most 3 edges per point">10<\/option>/);
+	assert.match(html(<MapToolbar {...last<React.ComponentProps<typeof MapToolbar>>('MapToolbar')} initialAdvanced />), /<option value="10" disabled="" title="Light samples above 3,000 points draw at most 3 edges per point">10<\/option>/);
 	// The toolbar's edge controls, as the view wired them: nothing is sent.
 	render({ channels: counted, sample: demo });
 	const toolbar = last<{ onEdges(m: string): void; onEdgesM(m: number): void; onExpandSelected(): void; expandReason: string | null }>('MapToolbar');

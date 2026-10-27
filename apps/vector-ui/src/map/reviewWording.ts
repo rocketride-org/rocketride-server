@@ -423,7 +423,9 @@ export function matrixCaption(n: number, metric: VectorMetric): string {
 }
 
 /**
- * The ramp's legend in words.
+ * The ramp's legend in words. "Fainter" and "stronger", not lighter and
+ * darker: the cells are the chart blue over the surface, so a weak cell is
+ * light in the light themes and dark in the dark ones.
  *
  * @param min - The lowest value between two chunks.
  * @param max - The highest value between two chunks.
@@ -431,7 +433,7 @@ export function matrixCaption(n: number, metric: VectorMetric): string {
  * @returns The legend.
  */
 export function matrixLegend(min: number, max: number, dp: number): string {
-	return `Lighter: less similar (${min.toFixed(dp)}) · darker: more similar (${max.toFixed(dp)} and above)`;
+	return `Fainter: less similar (${min.toFixed(dp)}) · stronger: more similar (${max.toFixed(dp)} and above)`;
 }
 
 /**
