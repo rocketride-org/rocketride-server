@@ -72,7 +72,7 @@ import { callTool, toolChannelFor } from '../chat/toolCalls';
 import { showCompareOnMap } from '../adapters/consoleActions';
 import { DATA_BAR_TOKEN } from '../vector/colors';
 import { compareRuns, compareSentence, rowKey } from '../vector/compare';
-import { CALL_TIMEOUT_MS, DEFAULT_TOP_K, KEYWORD_FALLBACK_SENTENCE, MODEL_MISMATCH_SENTENCE, MODE_HINTS, NODE_SETTING_FIELD, NODE_SETTING_NOTE, NODE_SETTING_RANGE, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, STATUS_WORDS, TABLE_FILTERS, TABLE_FILTER_LABELS, applyHandoff, classifyAt, createCommitAnnouncer, defaultMode, fromChatLine, initialThreshold, isCommitKey, isTableOf, keywordCaption, modeLabel, modeOptions, noResultsSentence, nodeSettingText, onGrid, questionEscape, rateLimitSentence, runCaption, runWorkbench, scopeChipText, scoreBar, scoreHeading, scoreTitle, searchExportItems, searchScope, secondsLeft, showSearchOnMap, sliderRange, sliderValueText, thresholdSentence, topKChoices, topKOptions, willRunText } from '../vector/searchWorkbench';
+import { CALL_TIMEOUT_MS, DEFAULT_TOP_K, KEYWORD_FALLBACK_SENTENCE, MODEL_MISMATCH_SENTENCE, MODE_HINTS, NODE_SETTING_FIELD, NODE_SETTING_NOTE, NODE_SETTING_RANGE, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, STATUS_WORDS, TABLE_FILTERS, TABLE_FILTER_LABELS, applyHandoff, classifyAt, createCommitAnnouncer, defaultMode, fromChatLine, initialThreshold, isTableOf, keywordCaption, modeLabel, modeOptions, noResultsSentence, nodeSettingText, onGrid, questionEscape, rateLimitSentence, runCaption, runWorkbench, scopeChipText, scoreBar, scoreHeading, scoreTitle, searchExportItems, searchScope, secondsLeft, showSearchOnMap, sliderRange, sliderValueText, thresholdSentence, topKChoices, topKOptions, willRunText } from '../vector/searchWorkbench';
 import type { ChatPrefill, Classification, ModeOption, SearchHandoff, SearchMode, SliderRange, TableFilter, WorkbenchDeps, WorkbenchOutcome, WorkbenchRow, WorkbenchRun } from '../vector/searchWorkbench';
 import { compareRecord, searchRecord } from '../vector/queryHistory';
 import type { QueryRunRecord } from '../vector/queryHistory';
@@ -138,7 +138,7 @@ interface ThresholdControlsProps {
 	score: IScoreInfo | null;
 	range: SliderRange;
 	onThreshold(at: number): void;
-	/** The slider was let go (pointer up, a key that moves it up): its count is announced once. */
+	/** The slider was let go (its native change event): its count is announced once. */
 	onCommit?(): void;
 	onCopySetting(text: string): void;
 	/** The text last copied, or null. */
@@ -157,26 +157,23 @@ interface ThresholdControlsProps {
 function ThresholdControls({ lead = '', rows, view, score, range, onThreshold, onCommit, onCopySetting, copied }: ThresholdControlsProps): React.ReactElement {
 	const setting = nodeSettingText(view.at);
 	const scores = view.rows.map((row) => row.score).filter((value): value is number => value !== null);
+	const slider = useRef<HTMLInputElement>(null);
+	const commit = useRef(onCommit);
+	commit.current = onCommit;
+	// React's onChange is every step of a drag; the slider's own change event is its commit: the pointer or the
+	// finger let go anywhere, or a key that moved it (the announcer folds a held key into one announcement).
+	useEffect(() => {
+		const element = slider.current;
+		if (element === null) return undefined;
+		const committed = (): void => commit.current?.();
+		element.addEventListener('change', committed);
+		return () => element.removeEventListener('change', committed);
+	}, []);
 	return (
 		<div data-threshold="" style={S.threshold}>
 			<div style={S.thresholdLeft}>
 				<div style={S.row}>
-					<input
-						type="range"
-						aria-label="Threshold"
-						min={range.min}
-						max={range.max}
-						step={range.step}
-						value={view.at}
-						aria-valuetext={sliderValueText(view)}
-						style={S.slider}
-						onChange={(event) => onThreshold(onGrid(Number(event.currentTarget.value)))}
-						onPointerUp={() => onCommit?.()}
-						onTouchEnd={() => onCommit?.()}
-						onKeyUp={(event) => {
-							if (isCommitKey(event.key)) onCommit?.();
-						}}
-					/>
+					<input ref={slider} type="range" aria-label="Threshold" min={range.min} max={range.max} step={range.step} value={view.at} aria-valuetext={sliderValueText(view)} style={S.slider} onChange={(event) => onThreshold(onGrid(Number(event.currentTarget.value)))} />
 				</div>
 				<p style={S.note} data-threshold-line="">
 					{`${lead}${thresholdSentence(rows, view.at, score)}`}

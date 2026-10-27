@@ -43,7 +43,7 @@ import { EXPORT_COLUMNS } from '../src/contract/types';
 import type { CallOutcome } from '../src/chat/toolCalls';
 import { classifyRetrieval, debuggerSearchInput, withScope } from '../src/vector/retrieval';
 import { QUERY_NEEDS_EMBED } from '../src/map/wording';
-import { COMMIT_ANNOUNCE_MS, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, applyHandoff, capSearchQuestion, createCommitAnnouncer, isCommitKey, isTableOf, modeLabel, questionEscape, scopeChipText, scoreBar, scoreHeading, takePrefill, willRunText } from '../src/vector/searchWorkbench';
+import { COMMIT_ANNOUNCE_MS, QUESTION_CUT_SENTENCE, SEARCH_QUESTION_MAX_CHARS, applyHandoff, capSearchQuestion, createCommitAnnouncer, isTableOf, modeLabel, questionEscape, scopeChipText, scoreBar, scoreHeading, takePrefill, willRunText } from '../src/vector/searchWorkbench';
 import { HYBRID_LABEL, HYBRID_NEEDS_KEYWORD, KEYWORD_UNSUPPORTED, NODE_SETTING_NOTE, RRF_K, SEARCH_MODES, STATUS_WORDS, TOP_K_OPTIONS, VECTOR_UNSUPPORTED, classifyAt, defaultMode, fromChatLine, fuse, initialThreshold, keywordCaption, keywordSearchInput, modeOptions, nodeSettingText, openInSearchPrefill, plan, prefillRun, previewOf, rateLimitSentence, retrievalExportRows, retryAfterSeconds, rowsFromSearch, runWorkbench, scoreTitle, searchExportItems, searchScope, secondsLeft, semanticSearchInput, showSearchOnMap, sliderRange, sliderValueText, thresholdSentence, topKChoices, topKOptions, workbenchExportRows } from '../src/vector/searchWorkbench';
 import type { ChatPrefill, RunFromChat, SearchHandoff, SearchMode, WorkbenchDeps, WorkbenchRow, WorkbenchRun } from '../src/vector/searchWorkbench';
 
@@ -913,7 +913,7 @@ test('createCommitAnnouncer: moving the slider says nothing; each release waits,
 	assert.deepEqual(said, [], 'not before the delay');
 	timers.advance(1);
 	assert.deepEqual(said, ['At 0.42: 7 of 20 would pass']);
-	// A held arrow key: many key-ups inside the delay, one announcement, the last position.
+	// A held arrow key: a change event per step inside the delay, one announcement, the last position.
 	let at = 0.42;
 	for (let i = 0; i < 10; i++) {
 		at += 0.01;
@@ -928,8 +928,6 @@ test('createCommitAnnouncer: moving the slider says nothing; each release waits,
 	timers.advance(1000);
 	assert.equal(said.length, 2, 'the panel went away: nothing is said');
 	assert.equal(timers.pending(), 0);
-	assert.deepEqual(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].map(isCommitKey), Array(8).fill(true));
-	assert.deepEqual(['Tab', 'Enter', 'a', 'Shift'].map(isCommitKey), [false, false, false, false]);
 });
 
 test("wiring: the slider never searches again — it sets the position, the rows are re-classified in memory, and only Run, a handoff or a Rerun call run()", () => {
@@ -939,9 +937,9 @@ test("wiring: the slider never searches again — it sets the position, the rows
 	assert.match(panel, /const viewA = useMemo\(\(\) => \(runs\.a !== null \? classifyAt\(runs\.a\.rows, at, score\) : null\), \[runs\.a, at, score\]\);/);
 	for (const deps of panel.matchAll(/\}, \[([^\]]*)\]\);/g)) assert.doesNotMatch(deps[1], /\b(at|chosenAt)\b/, `an effect re-runs on the slider: [${deps[1]}]`);
 	assert.equal((panel.match(/void run\(/g) ?? []).length, 2, 'Run (the form) and a handoff');
-	// The count is announced on release only, through the one announcer.
-	assert.match(panel, /onPointerUp=\{\(\) => onCommit\?\.\(\)\}/);
-	assert.match(panel, /if \(isCommitKey\(event\.key\)\) onCommit\?\.\(\);/);
+	// The count is announced when the slider is let go (its own change event, not React's every-step onChange), through the one announcer.
+	assert.match(panel, /element\.addEventListener\('change', committed\);\s*return \(\) => element\.removeEventListener\('change', committed\);/);
+	assert.match(panel, /<input ref=\{slider\} type="range"/);
 	assert.match(panel, /const commitThreshold = \(\): void => announcer\.commit\(\(\) => sentence\.current\);/);
 	assert.doesNotMatch(panel, /<output/, 'the line is no live region');
 });

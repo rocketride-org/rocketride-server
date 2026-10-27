@@ -654,22 +654,9 @@ export function scoreTitle(row: WorkbenchRow, score: IScoreInfo | null): string 
 /** How long after the last release of the slider its count is announced. */
 export const COMMIT_ANNOUNCE_MS = 400;
 
-/** The keys that move a slider, so their release commits it. */
-const COMMIT_KEYS: ReadonlySet<string> = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End']);
-
-/**
- * Whether releasing this key commits the slider's position.
- *
- * @param key - KeyboardEvent.key.
- * @returns True for the keys that move a slider.
- */
-export function isCommitKey(key: string): boolean {
-	return COMMIT_KEYS.has(key);
-}
-
 /** Announces the slider's count once per release, never on every step of a drag. */
 export interface CommitAnnouncer {
-	/** The slider was released (pointer up, a key that moves it went up): announce the text after the delay, replacing a pending one. */
+	/** The slider was let go (its change event: a pointer or finger up, a key step): announce the text after the delay, replacing a pending one. */
 	commit(text: string | (() => string)): void;
 	/** Drop a pending announcement (the panel went away). */
 	cancel(): void;
@@ -685,10 +672,10 @@ export interface CommitAnnouncerDeps {
 }
 
 /**
- * The slider's announcer: moving the slider says nothing; each release waits
- * the delay, and a release inside it (a held arrow key, a pointer-up then a
- * key-up) replaces the pending one, so a burst is announced once, with the
- * position it ended on.
+ * The slider's announcer: moving the slider says nothing; each time it is
+ * let go (its change event) waits the delay, and another inside it (each step
+ * of a held arrow key) replaces the pending one, so a burst is announced once,
+ * with the position it ended on.
  *
  * @param deps - The announcement and the timers.
  * @returns The announcer.
