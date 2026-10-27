@@ -38,7 +38,8 @@
 // requests and the connection's Details (both inline in both mounts:
 // rocket-ui keeps hidden documents mounted, so nothing here is a window-wide
 // overlay) and the write status line (an alert when the write failed, with
-// the store's audit of each batch behind a Details disclosure). Each
+// the store's audit of each batch behind a "Write details" disclosure beside
+// it, outside the announced text). Each
 // tab's panel is mounted the first time it shows, then stays mounted and
 // hidden, so it keeps its state (the map gets `visible` so its canvas sleeps
 // while hidden). Under the panels, the pending bar, so staging never moves a
@@ -113,7 +114,9 @@ const layout = {
 	/** Two labels in one cell: the button keeps the width of the longer one, whichever shows. */
 	held: { display: 'inline-grid' } as CSSProperties,
 	heldLabel: (shown: boolean): CSSProperties => ({ gridArea: '1 / 1', visibility: shown ? 'visible' : 'hidden' }),
-	status: { ...styles.small, padding: '6px 24px' } as CSSProperties,
+	/** The write line: its sentence (announced), then the audit disclosure beside it (not announced). */
+	statusRow: { display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', padding: '6px 24px' } as CSSProperties,
+	status: { ...styles.small, minWidth: 0 } as CSSProperties,
 	/** The panels beside the Add documents aside. */
 	body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'row' } as CSSProperties,
 	panels: { flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column' } as CSSProperties,
@@ -401,8 +404,11 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 			<InlineRemoveConfirm entry={entry} probe={probe} origin={CONSOLE_ORIGIN} returnFocus={returnFocus} />
 			{details && <ConnectionDetailsPanel key={endpoint.key} endpoint={endpoint} probe={probe} stats={state.stats.view} onTest={(target) => env.probe(target.key)} onClose={() => setDetails(false)} />}
 			{(state.removal.status === 'running' || state.removal.message) && (
-				<div role={state.removal.status === 'error' ? 'alert' : 'status'} style={layout.status}>
-					{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
+				<div style={layout.statusRow}>
+					<div role={state.removal.status === 'error' ? 'alert' : 'status'} style={layout.status}>
+						{state.removal.status === 'running' ? (state.removal.message ?? BUSY.removing) : state.removal.message}
+					</div>
+					{/* Outside the live element: opening it does not announce the line again. */}
 					{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails audit={state.removal.audit} />}
 				</div>
 			)}
