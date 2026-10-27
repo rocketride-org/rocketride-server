@@ -690,8 +690,8 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			queryTop,
 		});
 	}, [sample, selected, neighbourEnds, highlight, keyIdx, queryTop]);
-	// A new query fades the rest again.
-	useEffect(() => setQueryDims(true), [query]);
+	// A new question fades the rest again (its text: the search landing on the same query does not undo a Clear).
+	useEffect(() => setQueryDims(true), [query?.text]);
 
 	// What the legend's glyph row lists: only the marks drawn now.
 	const edgePalette = useMemo(() => edgeColours(palette ?? FALLBACK_PALETTE), [palette]);
@@ -1280,17 +1280,19 @@ export function MapView(props: MapViewProps): React.ReactElement {
 
 	// What Escape and the toolbar's Clear clear next, in order: the lasso, then a highlight (or a query's fading),
 	// then the selected point; one step each (map/isolate.ts clearStep).
-	const lassoActive = lasso || (state.highlight?.source === 'lasso' ? state.highlight.keys.length > 0 : state.keys.length > 0);
+	// This connection's selection only (the store holds another connection's until it is reset).
+	const ownKeys = state.connectionKey === model.connectionKey ? state.keys : [];
+	const lassoActive = lasso || (highlight?.source === 'lasso' ? highlight.keys.length > 0 : ownKeys.length > 0);
 	const highlightActive = (highlight !== null && highlight.source !== 'lasso') || queryTop.length > 0;
 	const nextClear = clearStep({ lasso: lassoActive, highlight: highlightActive, selection: selected !== null || focused !== null });
 	const clearOnce = useCallback((): void => {
 		if (nextClear === 'lasso') {
 			setLasso(false);
 			selection.setKeys([]);
-			if (state.highlight?.source === 'lasso') selection.setHighlight(null);
+			if (highlight?.source === 'lasso') selection.setHighlight(null);
 			actions.announce('Lasso selection cleared.');
 		} else if (nextClear === 'highlight') {
-			if (state.highlight !== null && state.highlight.source !== 'lasso') selection.setHighlight(null);
+			if (highlight !== null && highlight.source !== 'lasso') selection.setHighlight(null);
 			setQueryDims(false);
 			actions.announce('Highlight cleared.');
 		} else if (nextClear === 'selection') {
@@ -1299,7 +1301,7 @@ export function MapView(props: MapViewProps): React.ReactElement {
 			setNeighbours(null);
 			actions.announce('Selection cleared.');
 		}
-	}, [nextClear, selection, state.highlight, actions]);
+	}, [nextClear, selection, highlight, actions]);
 
 	const onKeyAction = useCallback(
 		(action: KeyAction): void => {
