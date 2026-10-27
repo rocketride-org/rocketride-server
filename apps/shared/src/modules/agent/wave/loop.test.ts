@@ -1000,25 +1000,25 @@ test("the notes option adds this wave's notes to its question, and keeps them on
 test("a call's time limit stands still while the user answers its question", async () => {
 	const userTime = new UserTime();
 	const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-	// step: 40 ms in a dialog under a 15 ms limit, with a little work before and after it
+	// step: 300 ms in a dialog under a 100 ms limit, with 2 ms of work before and after it. The limit leaves room for late timers on a busy machine, and the dialog is three times the limit.
 	const asking = stub('edit_file', async () => {
 		await sleep(2);
-		await userTime.during(sleep(40));
+		await userTime.during(sleep(300));
 		await sleep(2);
 		return 'edited';
 	});
 	const model = scriptedModel([plan([['edit_file', { path: 'a.ts' }]]), done('ok')]);
-	await setup(model, [asking], { timeoutMs: () => 15, userTime }).run();
+	await setup(model, [asking], { timeoutMs: () => 100, userTime }).run();
 	assert.equal(entriesByKey(model.questions[1]).get('wave-0.r0')?.error, undefined, 'no timeout while the user decides');
 
 	// step: the same wait outside a question still times out
 	const slow = stub('edit_file', async () => {
-		await sleep(40);
+		await sleep(300);
 		return 'edited';
 	});
 	const control = scriptedModel([plan([['edit_file', { path: 'a.ts' }]]), done('ok')]);
-	await setup(control, [slow], { timeoutMs: () => 15, userTime }).run();
-	assert.match(String(entriesByKey(control.questions[1]).get('wave-0.r0')?.error), /^TimeoutError: no result after 0\.015 s/);
+	await setup(control, [slow], { timeoutMs: () => 100, userTime }).run();
+	assert.match(String(entriesByKey(control.questions[1]).get('wave-0.r0')?.error), /^TimeoutError: no result after 0\.1 s/);
 });
 
 test('Stop cuts a call loose while its clock stands still for a question', async () => {
