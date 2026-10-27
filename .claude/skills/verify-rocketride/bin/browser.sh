@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Browser commands for rr-verify: browse, docs, and the browser part of stop.
+# Browser commands for rr-verify: browse, docs, the browser part of stop, and the UI part of doctor.
 # bin/rr-verify sources this file. It uses rr-verify's SKILL_DIR, REPO, RUN_DIR, RUN_ID, LABEL,
 # ARGS, die, and load_run.
 
@@ -102,4 +102,9 @@ browser_stop() {
 		rm -f "$RUN_DIR/docs.env"
 	fi
 	return 0
+}
+
+# Warn when a UI's source is newer than the build output this run serves. Called by cmd_doctor.
+ui_doctor() {
+	python3 -I "$SKILL_DIR/bin/ui_doctor.py" "$REPO" "$RUN_DIR" || true
 }

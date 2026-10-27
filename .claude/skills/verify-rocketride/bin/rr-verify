@@ -248,6 +248,7 @@ cmd_doctor() {
 			echo "WARN $newer Python SDK source file(s) are newer than the wheel, so the SDK and CLI may not match this checkout. Rebuild: ./builder --sequential client-python:sync-source client-python:wheel-source client-python:copy-readme client-python:wheel-build client-python:sync"
 		fi
 	fi
+	ui_doctor
 	echo "info mock mode: $([ "$ENGINE_MOCK" = 1 ] && echo on || echo off)"
 	echo "info log: $ENGINE_LOG"
 	return $fail
