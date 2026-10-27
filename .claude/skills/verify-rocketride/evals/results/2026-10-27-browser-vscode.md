@@ -1,6 +1,6 @@
 # Eval run, 2026-10-27: browser and VS Code surfaces
 
-Branch `feat/verification-e2e-tests`, the same engine build as the headless run (`ada02aec`), with the UIs (`ui:build`, `docs:build`) and the VS Code extension (`vscode:build`) built by `prepare` for each case. 13 new cases (3 planted bugs, 3 replayed real bugs, 7 clean controls), each run once per variant: Claude Code (`sonnet`) and Codex (`gpt-6.1-sol`, medium effort), each with and without this skill. 52 runs. Scored by `score.py`; Claude Haiku judged matches.
+Branch `feat/verification-e2e-tests`, the same engine build as the headless run (`ada02aec`), with the UIs (`ui:build`), the docs site (`docs:build`), and the VS Code extension (`vscode:build`) built in each eval checkout before the run. `prepare` rebuilds the UIs for every case and the docs site and the extension only when a case needs them. 13 new cases (4 planted bugs, 2 replayed real bugs, 7 clean controls), each run once per variant: Claude Code (`sonnet`) and Codex (`gpt-6.1-sol`, medium effort), each with and without this skill. 52 runs. Scored by `score.py`; Claude Haiku judged matches.
 
 ## Results
 
