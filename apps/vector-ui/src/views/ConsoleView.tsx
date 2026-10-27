@@ -523,7 +523,7 @@ export const ConsoleView: React.FC<IConsoleViewProps> = ({ opened, active }) => 
 								)}
 								{/* Outside the live element: opening it does not announce the line again. Always there for a finished
 								    write: the line is cut to one line, and Write details has the whole sentence. */}
-								{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails result={state.removal.message ?? undefined} audit={state.removal.audit} />}
+								{(state.removal.status === 'done' || state.removal.status === 'error') && <WriteAuditDetails message={state.removal.message} audit={state.removal.audit} />}
 								{write === 'failure' && staged.size > 0 && (
 									<Button small variant="ghost" onClick={() => setDismissed(removal)}>
 										Show pending

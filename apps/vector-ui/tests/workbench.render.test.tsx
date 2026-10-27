@@ -35,7 +35,7 @@ import type { IExplorerEndpoint } from 'shared/explorer';
 import type { IVectorEnv } from '../src/env';
 import type { WorkbenchTab } from '../src/vector/workbench';
 import { NO_STAGED, stage } from '../src/vector/staged';
-import { vectorWorld } from './support/vectorWorld';
+import { pgvectorNode, vectorWorld } from './support/vectorWorld';
 
 // The shell's building blocks exist only inside a running shell: a stand-in for each that renders its text.
 const shellStandIn = new Proxy({} as Record<string, unknown>, {
@@ -72,8 +72,8 @@ const { DEFAULT_LIMITS, readDialect } = require('../src/vector/results') as type
 const { ConsoleView } = require('../src/views/ConsoleView') as typeof import('../src/views/ConsoleView');
 
 /** A LOCAL env over a fake pgvector engine, discovered and probed once. */
-async function discovered(): Promise<{ env: IVectorEnv; endpoint: IExplorerEndpoint }> {
-	const world = vectorWorld();
+async function discovered(over: Parameters<typeof vectorWorld>[0] = {}): Promise<{ env: IVectorEnv; endpoint: IExplorerEndpoint }> {
+	const world = vectorWorld(over);
 	const clock = manualClock();
 	const store = makeVectorEndpointStore({ clock, debounceMs: 0 });
 	const env = createLocalVectorEnv({ ready: true, client: world.client, store, registry: createConnectionRegistry(), queryHistory: sessionQueryHistory(DEVTOOL_HISTORY_NOTE), activeConnection: { get: () => null, subscribe: () => () => undefined }, openConsole: () => undefined, openDocument: () => undefined });
@@ -152,5 +152,41 @@ test('the bottom slot is one line of the same height whatever it holds: nothing,
 	assert.equal(slotOf(staged), slotOf(empty), 'and with the pending bar');
 	assert.match(slotOf(empty), /height:32px/, "the pending bar's height");
 	entry.controller.dispose();
+});
+
+test('R2-I1: every finished write line offers Write details with its whole sentence, even with no audit', async () => {
+	const inTrash = (call: { input?: unknown }): boolean => JSON.stringify(call.input ?? {}).includes('deleted');
+	const lineOf = (html: string): string => html.slice(html.indexOf('data-bottom-slot=""'));
+	// The markup escapes an apostrophe.
+	const sentenceIn = (line: string, message: string | null): boolean => message !== null && /<summary[^>]*>Write details<\/summary>/.test(line) && line.includes(`<p style="margin:0">${message.replace(/'/g, '&#x27;')}</p>`);
+	// A done write that sent no audit: Empty trash over an empty trash.
+	{
+		const { env, endpoint } = await discovered({ list_documents: (call) => (inTrash(call) ? { success: true, items: [], next_cursor: null, total: 0, counts_exact: true, distinct: true, sorted: true, caveats: [] } : pgvectorNode(call)) });
+		const probe = env.endpoints.get().probes[endpoint.key];
+		const entry = env.connection(endpoint, (probe?.ok ? readDialect(probe.info)?.limits : null) ?? DEFAULT_LIMITS);
+		entry.controller.setWritesEnabled(true);
+		await entry.controller.requestEmptyTrash();
+		const state = entry.controller.getState().removal;
+		assert.equal(state.status, 'done', 'the premise: done');
+		assert.equal(state.audit, undefined, 'the premise: no audit');
+		const line = lineOf(render(env, endpoint, 'trash'));
+		assert.ok(sentenceIn(line, state.message), 'Write details, with the whole sentence first');
+		entry.controller.dispose();
+	}
+	// A failure before any batch: the trash could not be listed.
+	{
+		const { env, endpoint } = await discovered({ list_documents: (call) => (inTrash(call) ? { success: false, code: 'INTERNAL', error: 'boom' } : pgvectorNode(call)) });
+		const probe = env.endpoints.get().probes[endpoint.key];
+		const entry = env.connection(endpoint, (probe?.ok ? readDialect(probe.info)?.limits : null) ?? DEFAULT_LIMITS);
+		entry.controller.setWritesEnabled(true);
+		await entry.controller.requestEmptyTrash();
+		const state = entry.controller.getState().removal;
+		assert.equal(state.status, 'error', 'the premise: failed before any batch');
+		assert.ok(!state.audit || state.audit.length === 0);
+		const line = lineOf(render(env, endpoint, 'trash'));
+		assert.match(line, /<div role="alert"/);
+		assert.ok(sentenceIn(line, state.message), 'Write details, with the whole sentence first');
+		entry.controller.dispose();
+	}
 });
 

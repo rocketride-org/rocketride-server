@@ -60,7 +60,7 @@ const styles = {
 	summary: { cursor: 'pointer', whiteSpace: 'nowrap' } as CSSProperties,
 	/** Over what is above the line: the line it sits on keeps its height. Before it is placed: up, ending at the summary. */
 	list: { position: 'absolute', zIndex: 20, boxSizing: 'border-box', width: 'max-content', maxWidth: LIST_MAX.width, maxHeight: LIST_MAX.height, overflowY: 'auto', margin: 0, padding: '6px 10px', border: '1px solid var(--rr-border)', borderRadius: 6, background: 'var(--rr-bg-paper)', boxShadow: 'var(--rr-shadow-widget)', whiteSpace: 'normal', overflowWrap: 'anywhere' } as CSSProperties,
-	result: { margin: 0 } as CSSProperties,
+	sentence: { margin: 0 } as CSSProperties,
 	lines: { margin: '4px 0 0', paddingLeft: 16 } as CSSProperties,
 	unplaced: { bottom: `calc(100% + ${POPOVER_GAP}px)`, right: 0 } as CSSProperties,
 };
@@ -94,8 +94,8 @@ function clippingRects(el: HTMLElement): IPopoverAnchor[] {
 export interface IWriteAuditDetailsProps {
 	/** The last write's audit blocks (IConsoleState.removal.audit). */
 	audit: readonly IWriteAudit[] | undefined;
-	/** The result's whole sentence, shown first (the line it sits on may cut it). */
-	result?: string;
+	/** The write's whole result sentence (IConsoleState.removal.message), shown first: the line it sits on may cut it. */
+	message?: string | null;
 	/** The disclosure's summary (default {@link WRITE_DETAILS_LABEL}). */
 	label?: string;
 }
@@ -109,13 +109,14 @@ export const WRITE_DETAILS_LABEL = 'Write details';
  * @param props - {@link IWriteAuditDetailsProps}.
  * @returns The disclosure, or nothing without an audit.
  */
-export function WriteAuditDetails({ audit, result, label = WRITE_DETAILS_LABEL }: IWriteAuditDetailsProps): React.ReactElement | null {
-	if ((!audit || audit.length === 0) && !result) return null;
-	return <AuditDisclosure audit={audit ?? []} result={result} label={label} />;
+export function WriteAuditDetails({ audit, message, label = WRITE_DETAILS_LABEL }: IWriteAuditDetailsProps): React.ReactElement | null {
+	// Offered with either: a write that sent no audit (or failed before its first batch) still has its sentence.
+	if ((!audit || audit.length === 0) && !message) return null;
+	return <AuditDisclosure audit={audit ?? []} message={message ?? null} label={label} />;
 }
 
 /** The disclosure itself: open over the panel, closed by Escape, a press outside it or a resize. */
-const AuditDisclosure: React.FC<{ audit: readonly IWriteAudit[]; result: string | undefined; label: string }> = ({ audit, result, label }) => {
+const AuditDisclosure: React.FC<{ audit: readonly IWriteAudit[]; message: string | null; label: string }> = ({ audit, message, label }) => {
 	const details = useRef<HTMLDetailsElement>(null);
 	const summary = useRef<HTMLElement>(null);
 	const list = useRef<HTMLDivElement>(null);
@@ -201,9 +202,9 @@ const AuditDisclosure: React.FC<{ audit: readonly IWriteAudit[]; result: string 
 				{label}
 			</summary>
 			<div ref={list} style={{ ...styles.list, ...(place === null ? styles.unplaced : place) }} data-write-audit-list="">
-				{result && <p style={styles.result}>{result}</p>}
+				{message && <p style={styles.sentence}>{message}</p>}
 				{audit.length > 0 && (
-					<ul aria-label="What the store recorded for this write" style={result ? styles.lines : { ...styles.lines, marginTop: 0 }}>
+					<ul aria-label="What the store recorded for this write" style={message ? styles.lines : { ...styles.lines, marginTop: 0 }}>
 						{auditLines(audit).map((line, i) => (
 							<li key={`${i}:${line}`}>{line}</li>
 						))}
