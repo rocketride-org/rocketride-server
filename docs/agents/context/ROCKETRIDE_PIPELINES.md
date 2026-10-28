@@ -679,12 +679,15 @@ no database connection settings in the pipeline. Their classType also includes `
 an agent can control a graph store as a tool instead.
 
 **Writing to a graph store** goes through its `execute` tool (node config
-`allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. On `rocketride_graph`
-(Apache AGE 1.5.0):
+`allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. A write whose result
+passes the node's row cap fails with nothing saved on `rocketride_graph` and `graph_neo4j`
+(except Neo4j's batched `CALL { ... } IN TRANSACTIONS`, whose earlier batches stay saved);
+`graph_falkordb` cannot roll back, so it saves the write and returns the first rows with
+`truncated: true`. On `rocketride_graph` (Apache AGE 1.5.0):
 
 - Bind values as named `params` (`{ "rows": [...] }` for `$rows`) — never paste them into the
   Cypher text: no escaping, and bound values do not count toward the 10,000-character query
-  limit. `graph_neo4j` accepts `params` too; `graph_falkordb` rejects them.
+  limit. `graph_neo4j` and `graph_falkordb` accept `params` too.
 - A bulk upsert is TWO calls. AGE applies SET / REMOVE / DELETE only to the first node or edge a
   MERGE creates in a statement, so `UNWIND ... MERGE ... SET` in one call is rejected:
 
