@@ -1315,7 +1315,7 @@ Event catalog (`out` = the shell emits it; `in` = an app emits it):
 | `shell:servicesUpdated` | `{ services, icons?, servicesError? }` | out | Service catalog fetched or refreshed. |
 | `shell:appsUpdated` | `{ apps: ShellAppEntry[] }` | out | App catalog changed (full replacement). |
 | `shell:login` / `shell:logout` | `{ user: ConnectResult }` / `void` | out | Authenticated / identity cleared. |
-| `shell:loginRequest` / `shell:logoutRequest` | `{ appId?, register? }` / `void` | in | UI-initiated sign-in / sign-out. |
+| `shell:loginRequest` / `shell:logoutRequest` | `{ appId?, register?, auto? }` / `void` | in | UI-initiated sign-in / sign-out; `auto` is set only by the shell's auth gate. |
 | `shell:switchApp` | `{ appId }` | in | Switch the active app. |
 | `shell:openOverlay` | `{ id: 'account' \| 'settings' \| 'environment' }` | in | Open a shell overlay (guarded allowlist). |
 | `shell:subscribe` / `shell:unsubscribe` | `{ app, plan?, promo? }` / `{ appId }` | in | Open checkout for a paid app / subscription cancelled. |
@@ -1323,6 +1323,7 @@ Event catalog (`out` = the shell emits it; `in` = an app emits it):
 | `shell:themeChange` | `{ tokens: Record<string, string> }` | out | Theme tokens changed — canvases repaint from these. |
 | `shell:viewActivated` / `shell:sidebarCollapsing` | `{ viewId }` / `void` | out | View became active / sidebar starting to collapse. |
 | `shell:manifestRefresh` | `{ source }` | out | Server-side app manifest changed (dev overlay, publish, expiry). |
+| `shell:telemetry` | `{ event, props, ts, id }` | out | Telemetry fact (`auth:start`, `auth:complete`) for the active app to forward; facts held while nobody listened come from `ConnectionManager.getInstance().drainTelemetry()`, drained once at analytics init. On the waitlist screen the shell calls the home app's `./telemetry` entry once per page load to do that. |
 | `app:statusChanged` | `{ appId, status, notes? }` | out | Marketplace review status changed. |
 | `store:changed` | `{ prefix, paths }` | out | Files changed under a watched store prefix. |
 

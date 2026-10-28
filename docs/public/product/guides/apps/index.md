@@ -473,7 +473,7 @@ useEffect(() => {
 | `shell:disconnected` | `{ reason: string; hasError: boolean }` | Shell → Apps | WebSocket connection lost |
 | `shell:login` | `{ user: ConnectResult }` | Shell → Apps | User authenticated |
 | `shell:logout` | `{}` | Shell → Apps | User logged out |
-| `shell:loginRequest` | `{ appId?: string }` | Apps → Shell | Request OAuth login (optionally targeting an app) |
+| `shell:loginRequest` | `{ appId?: string; register?: boolean; auto?: boolean }` | Apps → Shell | Request OAuth login (optionally targeting an app); `register` marks a sign-up intent; `auto` is set only by the shell's own auth gate, apps leave it unset |
 | `shell:logoutRequest` | `{}` | Apps → Shell | Request logout |
 | `shell:switchApp` | `{ appId: string }` | Apps → Shell | Switch the active app |
 | `shell:subscribe` | `{ app: AppManifestEntry, plan?: CheckoutPlan }` | Apps → Shell | Open subscription checkout for an app; optional `plan` preselects a tier and skips the picker (straight to payment) |
@@ -483,6 +483,7 @@ useEffect(() => {
 | `shell:themeChange` | `{ tokens: Record<string, string> }` | Shell → Apps | Theme CSS tokens changed |
 | `shell:statusChange` | `{ message: string \| null }` | Shell → Apps | Transient status bar text changed |
 | `shell:event` | `{ event: unknown }` | Server → Apps | Raw server event forwarded from WebSocket |
+| `shell:telemetry` | `TelemetryFact` (`{ event: string; props: Record<string, unknown>; ts: number; id: string }`) | Shell → Apps | A product-telemetry fact the shell observed (`auth:start`, `auth:complete`), for the active app to forward to its analytics; facts raised while no app listened come from `drainTelemetry()` (see [Telemetry facts](#telemetry-facts)) |
 | `shell:appsUpdated` | `{ apps: ShellAppEntry[] }` | Shell-internal | App list updated |
 | `shell:manifestRefresh` | `{ source: string }` | Shell-internal | App manifest re-fetched |
 | `shell:openOverlay` | `{ id: 'account' \| 'settings' \| 'environment' }` | Shell-internal | Open a shell overlay |
@@ -490,6 +491,25 @@ useEffect(() => {
 | `shell:viewActivated` | `{ viewId: string }` | Shell-internal | A shell view became active |
 
 The events marked **Shell-internal** exist only in the shell package's internal event map — they are not part of the `ShellEventMap` exported from `rocketride/app-sdk`, so external apps cannot emit or subscribe to them type-safely.
+
+### Telemetry facts
+
+The shell has no analytics SDK. It observes a few product facts itself (`auth:start` when it starts the OAuth redirect, `auth:complete` when the callback resolves an identity, with the account's new-user flag and waitlist state) and hands them to the active app, which forwards them to its own analytics. A fact raised while no app is subscribed to `shell:telemetry` (the callback resolves before the app mounts) is held: up to 32 facts, for 30 minutes, kept in the tab's sessionStorage so it survives a page load that never mounts the forwarding app (an embedded App Builder preview keeps them in memory only). A sign-out or a rejected credential drops the held facts.
+
+An app that forwards them drains the held facts once at its analytics init, then subscribes for the rest. Forward each fact once, keyed by its `id`, with `ts` as its event time, and only the properties your own event contract defines:
+
+```typescript
+import { connectionManager, type TelemetryFact } from 'rocketride/app-sdk';
+
+const forward = (fact: TelemetryFact) => analytics.capture(fact.event, fact.props, { timestamp: new Date(fact.ts) });
+
+for (const fact of connectionManager.drainTelemetry()) forward(fact);
+connectionManager.on('shell:telemetry', forward);
+```
+
+`drainTelemetry()` hands each held fact over once and clears the hold; a fact delivered live through `shell:telemetry` is not held.
+
+**The home app's `./telemetry` entry.** On the shell's own waitlist screen no app renders, so nothing would drain the facts (the waitlisted sign-up's `auth:complete` among them). There the shell loads the home app's exposed `./telemetry` module and calls its default export with no arguments, once per page load. The function must not render anything; it starts the home app's analytics, which drain and subscribe as above. A throw is ignored, and a home build without the entry is skipped. Only the home app exposes it; other apps keep `./AppDescriptor` as their single entry.
 
 ### Extending the event map
 
@@ -906,7 +926,7 @@ See the [Getting Started](#getting-started) section for the complete `rsbuild.co
 
 Key points:
 - The MF container `name` is derived automatically from `appManifest.id` in `package.json`
-- Always expose `./AppDescriptor` as the single MF entry point
+- Always expose `./AppDescriptor` as the single MF entry point (the home app also exposes `./telemetry`, see [Telemetry facts](#telemetry-facts))
 - `rocketride/app-sdk` must be a shared singleton so your app and the shell agree on one instance
 - React and react-dom must be shared singletons to avoid duplicate instances
 

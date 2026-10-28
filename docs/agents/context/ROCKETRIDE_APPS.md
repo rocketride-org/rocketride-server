@@ -747,7 +747,7 @@ from `'shell'`). The full set:
 | `shell:appsUpdated` | `{ apps }` | App catalog changed — complete replacement set. |
 | `shell:login` | `{ user: ConnectResult }` | Authentication succeeded. |
 | `shell:logout` | `{}` | User signed out. |
-| `shell:loginRequest` | `{ appId?, register? }` | UI requests sign-in. |
+| `shell:loginRequest` | `{ appId?, register?, auto? }` | UI requests sign-in; `auto` is set only by the shell's auth gate. |
 | `shell:logoutRequest` | `{}` | UI requests sign-out. |
 | `shell:switchApp` | `{ appId }` | Switch the active app. |
 | `shell:subscribe` | `{ app, plan?, promo? }` | Open subscription checkout; `plan` skips the picker. |
@@ -758,12 +758,24 @@ from `'shell'`). The full set:
 | `shell:themeChange` | `{ tokens }` | Theme changed; `tokens` is the full `--rr-*` map. |
 | `shell:viewActivated` | `{ viewId }` | A view/tab became active — lazy panels init here. |
 | `shell:manifestRefresh` | `{ source }` | Server-side app manifest changed (dev overlay, publish, expiry). |
+| `shell:telemetry` | `{ event, props, ts, id }` | A telemetry fact the shell observed (`auth:start`, `auth:complete`) for the active app to forward; held facts come from `cm.drainTelemetry()`. |
 | `app:statusChanged` | `{ appId, version?, status, notes? }` | Store review status changed. |
 | `store:changed` | `{ prefix, paths }` | Files changed under a watched store prefix. |
 
 The event map is the platform's shared vocabulary — it carries platform
 events only. For your app's internal communication, use ordinary React
 state or your own emitter; do not overload the shell bus.
+
+**Telemetry facts.** The shell has no analytics SDK: it raises `auth:start`
+and `auth:complete` as `shell:telemetry` for the active app to forward to its
+own analytics. A fact raised while no app listens is held (32 facts, 30
+minutes, in the tab's sessionStorage) until the app calls
+`cm.drainTelemetry()`: drain once at analytics init, then subscribe, and
+forward each fact once by its `id` with `ts` as its time. On the waitlist
+screen, where no app renders, the shell loads the home app's exposed
+`./telemetry` module and calls its no-argument default export once per page
+load; it starts the home analytics and must not render. Only the home app
+exposes it.
 
 ### Debug log
 
