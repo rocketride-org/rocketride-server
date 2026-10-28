@@ -33,8 +33,7 @@
  * "How the loop works" carries Wave's planning mechanics word for word
  * (`nodes/src/nodes/agent_rocketride/planner.py`), with Python's common
  * eight-space indent removed, except the check rule, which names no tool
- * because each toolkit's instructions name its own check, and one line added
- * to Response Format (see WAVE_RESPONSE_FORMAT). The core is
+ * because each toolkit's instructions name its own check. The core is
  * generic: it names no app, pipeline or tool, and anything specific belongs
  * in a toolkit's instructions or the host app's prompts. The rest is short
  * imperatives, each with its reason; every "don't" says what to do instead,
@@ -95,13 +94,7 @@ running.
   {"tool": "<name>", "args": {"data": "{{memory.ref:wave-1.r0}}"}}
   {"tool": "<name>", "args": {"content": "{{memory.ref:wave-1.r0:text:content}}"}}`;
 
-/**
- * The two reply shapes and their fields: Wave's "Response Format" instruction
- * (planner.py:317-352), plus the line asking for exactly one block. GPT-5.5
- * often wrote its plan, then more fenced blocks guessing at later steps. The
- * plan question is sent without expectJson, so the engine adds no JSON
- * instruction of its own ("No additional text"), and this line takes its place.
- */
+/** The two reply shapes and their fields: Wave's "Response Format" instruction (planner.py:317-352). */
 const WAVE_RESPONSE_FORMAT = `Respond with one of these shapes (valid fenced JSON only):
 
 Invoke tools:
@@ -116,8 +109,6 @@ Final answer:
 
 Every response must either invoke at least one tool OR set done=true with an
 answer. An empty tool_calls list with no done/answer is never valid.
-Write exactly one fenced JSON block and nothing after it, because you see this step's
-tool results before you plan the next.
 
 Fields:
 - thought: one sentence — what you are doing this turn and why
