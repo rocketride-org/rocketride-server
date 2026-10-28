@@ -2816,6 +2816,11 @@ class Task(DAPBase):
             self.debug_message(f'Task started successfully with PID {self._engine_process.pid}')
 
         except Exception as e:
+            # A start that fails ends the run, restart or not. Left set, the
+            # flag makes _terminated report "Restarting" for a dead task and
+            # skip the end event and the run log's end. restart_task's
+            # finally clears it too.
+            self._is_restarting = False
             await self._terminated()
             self.debug_message(f'Task startup failed: {e}')
             raise

@@ -18,10 +18,12 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { randomBytes } from 'crypto';
+import { parseRegistryVersion } from 'rocketride';
+import { preflightApp } from 'rocketride/app-pack';
 import { ConnectionManager } from '../connection/connection';
 import { GenericEvent } from '../shared/types';
 import { appIconDataUri, MAX_README_IMAGE_BYTES, scanWorkspaceApps } from '../appdev/appScan';
-import { DEV_SESSION_NONCE } from '../appdev/devSession';
+import { devPreviewUrl } from 'rocketride/app-dev';
 import type { ScannedApp } from '../appdev/appScan';
 import { ensureAppTrigger, ensureProjectId, readAppListing, saveAppListing } from '../appdev/appMarker';
 import type { AppListing } from '../appdev/appMarker';
@@ -378,7 +380,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 								case 'developerStatus':
 									// The org's developer registration + Stripe status.
 									if (!client) throw new Error('Not connected');
-									value = await client.call('rrext_deploy_app', { subcommand: 'developer_status' });
+									value = await client.developerStatus();
 									break;
 								case 'loadListing': {
 									// The listing IS the appManifest — read it from disk.
@@ -400,80 +402,21 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 								case 'registerDeveloper':
 									// Claim the org's developerId slug (org.admin, self-service).
 									if (!client) throw new Error('Not connected');
-									value = await client.call('rrext_deploy_app', { subcommand: 'developer_register', developerId: String(callArgs?.[0] ?? '') });
+									value = await client.registerDeveloper(String(callArgs?.[0] ?? ''));
 									break;
 								case 'preflight': {
-									// Real, client-side readiness checks over the app's manifest
-									// (no server round-trip), TIERED: 'package' rows are the
-									// complete-and-buildable bar (the PACKAGE tab's readiness box
-									// — all green means a personal @me/@team publish just works);
-									// 'store' rows are the ADDITIONAL public-submission bar the
-									// STORE tab gates its Submit button on.
+									// TIERED client-side readiness (no server round-trip) — the
+									// SDK's preflightApp, shared with `rocketride app verify`:
+									// 'package' rows feed the PACKAGE tab's readiness box,
+									// 'store' rows gate the STORE tab's Submit button.
 									const apps = await scanWorkspaceApps();
 									const scanned = apps.find((a) => a.id === appId);
-									const checks: Array<{ id: string; state: 'pass' | 'warn' | 'fail'; label: string; note?: string; tier?: 'package' | 'store' }> = [];
 									if (!scanned) {
-										checks.push({ id: 'manifest', state: 'fail', label: 'App manifest', note: 'No package.json appManifest found for this app.', tier: 'package' });
-										value = checks;
+										value = [{ id: 'manifest', state: 'fail', label: 'App manifest', note: 'No package.json appManifest found for this app.', tier: 'package' }];
 										break;
 									}
-									const listing = await readAppListing(scanned.folder);
-									/** Whether an app-folder-relative file exists. */
-									const fileExists = async (rel: string): Promise<boolean> => {
-										try {
-											await vscode.workspace.fs.stat(vscode.Uri.joinPath(vscode.Uri.file(scanned.folder), ...rel.replace(/^\.\//, '').split('/')));
-											return true;
-										} catch {
-											return false;
-										}
-									};
-									// ── package tier — the personal-publish bar ──────────
-									checks.push(scanned.id.includes('.') ? { id: 'appid', state: 'pass', label: 'App id namespaced', note: scanned.id, tier: 'package' } : { id: 'appid', state: 'fail', label: 'App id namespaced', note: `"${scanned.id}" must be <developerId>.<name>`, tier: 'package' });
-									checks.push(scanned.name ? { id: 'name', state: 'pass', label: 'Display name', note: scanned.name, tier: 'package' } : { id: 'name', state: 'fail', label: 'Display name', note: 'appManifest.name is required.', tier: 'package' });
-									// Icon/readme: a DECLARED path that does not resolve is a
-									// fail (the manifest lies); undeclared is only a warn.
-									if (listing.icon) {
-										checks.push((await fileExists(listing.icon)) ? { id: 'icon', state: 'pass', label: 'Icon', note: listing.icon, tier: 'package' } : { id: 'icon', state: 'fail', label: 'Icon', note: `${listing.icon} does not exist in the app folder.`, tier: 'package' });
-									} else {
-										checks.push({ id: 'icon', state: 'warn', label: 'Icon', note: 'No icon declared, so tiles show a generic glyph.', tier: 'package' });
-									}
-									if (listing.readme) {
-										checks.push((await fileExists(listing.readme)) ? { id: 'readme', state: 'pass', label: 'README', note: listing.readme, tier: 'package' } : { id: 'readme', state: 'fail', label: 'README', note: `${listing.readme} does not exist in the app folder.`, tier: 'package' });
-									} else {
-										checks.push({ id: 'readme', state: 'warn', label: 'README', note: 'No README declared. Recommended so users know what the app does.', tier: 'package' });
-									}
-									// Include paths are WORKSPACE-relative; a missing one fails
-									// the deploy pack, so it fails here first, by name.
-									const includeEntries = listing.include ?? [];
-									if (includeEntries.length > 0) {
-										const wsRoot = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(scanned.folder))?.uri;
-										const missing: string[] = [];
-										for (const entry of includeEntries) {
-											try {
-												if (!wsRoot) throw new Error('no workspace');
-												await vscode.workspace.fs.stat(vscode.Uri.joinPath(wsRoot, ...entry.split('/')));
-											} catch {
-												missing.push(entry);
-											}
-										}
-										checks.push(missing.length === 0 ? { id: 'include', state: 'pass', label: 'Include paths', note: `${includeEntries.length} path${includeEntries.length === 1 ? '' : 's'} resolve`, tier: 'package' } : { id: 'include', state: 'fail', label: 'Include paths', note: `Missing in the workspace: ${missing.join(', ')}`, tier: 'package' });
-									}
-									// The typecheck waiver is always VISIBLE, never silent —
-									// a deploy that skips verification should read as a choice.
-									if (listing.typecheck === false) {
-										checks.push({ id: 'typecheck', state: 'warn', label: 'Strict type checking', note: 'Off, so the server builds without verifying types.', tier: 'package' });
-									}
-									// ── store tier — the additional public-submission bar ─
-									checks.push(scanned.description ? { id: 'desc', state: 'pass', label: 'Description', tier: 'store' } : { id: 'desc', state: 'fail', label: 'Description', note: 'A store listing needs a description.', tier: 'store' });
-									if (listing.mode !== 'free') {
-										checks.push(listing.plans.length > 0 ? { id: 'pricing', state: 'pass', label: 'Pricing plans', note: `${listing.plans.length} plan${listing.plans.length === 1 ? '' : 's'}`, tier: 'store' } : { id: 'pricing', state: 'fail', label: 'Pricing plans', note: `Mode "${listing.mode}" needs at least one plan.`, tier: 'store' });
-									}
-									// No dist/ check: deployment packs SOURCE (packFilter's
-									// BASELINE_PATTERNS excludes dist/ unconditionally) and the
-									// server builds the client bundle itself, so a local build
-									// is never read or uploaded — failing on a missing dist/
-									// would block a submission the deploy would have accepted.
-									value = checks;
+									const wsRoot = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(scanned.folder))?.uri.fsPath;
+									value = await preflightApp(scanned.folder, wsRoot);
 									break;
 								}
 								case 'pickFile': {
@@ -785,18 +728,8 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	 * @returns The validated integer registry version.
 	 */
 	private requireRegistryVersion(arg: unknown): number {
-		// Number(null) and Number('') both coerce to 0, which would pass a
-		// bare isInteger check and reach submit/publish/withdraw as version
-		// 0 — the "unspecified version" this guard exists to reject.
-		// Registry versions are positive integers (v1 is the first).
-		if (typeof arg !== 'number' && typeof arg !== 'string') {
-			throw new Error(`Invalid registry version: ${JSON.stringify(arg)}`);
-		}
-		const version = Number(arg);
-		if (!Number.isSafeInteger(version) || version <= 0) {
-			throw new Error(`Invalid registry version: ${JSON.stringify(arg)}`);
-		}
-		return version;
+		// The SDK's rule, shared with the `rocketride app` verbs
+		return parseRegistryVersion(arg);
 	}
 
 	/**
@@ -844,7 +777,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		// in the html, and a stale copy silently serves the wrong shell flavor.
 		// rrsession routes the preview to THIS editor's dev-overlay entry when
 		// several editors dev-serve the same app.
-		return `${base.replace(/\/$/, '')}/?appid=${encodeURIComponent(appId)}&rrdev=1&rrsession=${DEV_SESSION_NONCE}&_ts=${Date.now()}`;
+		return `${devPreviewUrl(base, appId)}&_ts=${Date.now()}`;
 	}
 
 	// =========================================================================

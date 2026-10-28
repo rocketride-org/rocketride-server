@@ -1785,6 +1785,46 @@ async def test_a_stop_during_the_first_start_load_ends_the_start(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_start_that_fails_inside_a_restart_ends_the_run(monkeypatch):
+    """A stop that lands during a restart's start fails that start. The task
+    is dead, so _terminated() must see _is_restarting cleared and report it
+    stopped, not "Restarting".
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools', 'config': {'k': '${ROCKETRIDE_KEY}'}}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'v'})
+    t._restart_env = {'ROCKETRIDE_KEY': 'v'}  # loaded by restart_task before it stopped the old run
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = True
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+
+    async def write_while_stopping(*_):
+        t._stop_requested = True  # what stop_task sets when it arrives now
+        return '/tmp/task.json'
+
+    t._write_task_file = write_while_stopping
+    t._send_status_update = AsyncMock()
+    seen = []
+
+    async def terminated():
+        seen.append(t._is_restarting)
+
+    t._terminated = terminated
+    spawn = AsyncMock()
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+
+    with pytest.raises(RuntimeError, match='stopped before it started'):
+        await Task.start_task(t)
+    spawn.assert_not_awaited()
+    assert seen == [False]
+
+
+@pytest.mark.asyncio
 async def test_a_second_restart_while_one_runs_is_refused():
     """Two restarts of one task would share _restart_env: the second is refused
     before it loads anything, the first starts with its own values, and a later
