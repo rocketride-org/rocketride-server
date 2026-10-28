@@ -24,8 +24,9 @@ from .base import is_model_server_enabled
 # Calls inside one GPU at once, whatever memory is left
 MAX_CONCURRENT = 4
 
-# Calls inside one CPU (or another non-CUDA device) at once
-CPU_SLOTS = 1
+# Calls inside one CPU (or another non-CUDA device) at once; EasyOCR on CPU scales almost
+# linearly up to 4 and needs about 1 GB of RAM per call
+CPU_SLOTS = 4
 
 # Memory left for the desktop and for estimate errors
 MARGIN_MB = 512
