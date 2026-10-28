@@ -34,6 +34,12 @@
  * record. A stopped run sends no `content` chunk. It resolves with the turn's
  * TurnResult (turn.ts).
  *
+ * The host's limits hold for the turn: the loop pauses at the step limit,
+ * and the usage meter (usage.ts) refuses a model request that could pass
+ * the cost limit. Either way the turn ends as needs_input, with a Continue
+ * request. The file toolkit's Undo record goes to `options.undo` when the
+ * run ends; it never goes into the result.
+ *
  * Everything that only works in the browser (the model pipeline, Monaco's
  * markers) has a default here and comes in through `deps` otherwise, so tests
  * run a whole run without a browser or an engine.
@@ -48,7 +54,7 @@ import type { ChatMessage } from 'shell';
 import type { ChatAskCard, ChatAsking } from 'shell/src/components/chat/types';
 
 import { isReferencePath } from '../vfs/referenceTree';
-import { findAgentHost, type AgentHost } from './host';
+import { DEFAULT_LIMITS, findAgentHost, type AgentHost } from './host';
 import { CORE_PROMPT } from './prompts';
 import { APP_CHECK_TOOL, AppCheckToolkit, monacoMarkerSource, reportPassed, typesNote } from './toolkits/appCheck';
 import type { CheckReport, MarkerSource } from './toolkits/appCheck';
@@ -62,8 +68,10 @@ import { findApp, InventoryToolkit, readApps } from './toolkits/inventory';
 import { RocketRideClientToolkit } from './toolkits/rocketrideClient';
 import { RunLedger } from './toolkits/runs';
 import { validateNote, validateSaved, type SaveValidation } from './toolkits/saveValidation';
+import { UNDO_ROW, type UndoRecord } from './toolkits/undo';
 import { composeToolkits, UserTime } from './tools';
-import { outcomeOf, redactDeep, TurnError, type NeedsInputRequest, type RunRecord, type TurnCheck, type TurnResult } from './turn';
+import { outcomeOf, redactDeep, TurnError, type NeedsInputRequest, type RunRecord, type TurnCheck, type TurnResult, type TurnUsage } from './turn';
+import { CostLimitError, dollars, UsageMeter } from './usage';
 import { runLoop, TOOL_TIMEOUT_MS, type FinishRule, type LoopResult, type RanCall } from './wave/loop';
 import { buildPrefix } from './wave/plan';
 import type { AppPrompts, HistoryTurn, ModelCall, QuestionSpec } from './wave/plan';
@@ -125,6 +133,10 @@ export interface AgentRunOptions {
 	conversationId?: string;
 	/** The runs the conversation started. The run adds the ones it starts to this array (default: none, kept nowhere). */
 	runs?: RunRecord[];
+	/** The model the pipeline behind `token` runs, as the price table names it; unset when unknown, so nothing is priced. */
+	model?: string;
+	/** Takes the run's Undo record when the run ends, however it ends. It holds file content, so it stays in memory. */
+	undo?: (record: UndoRecord) => void;
 }
 
 /** What one run needs from its host. The optional parts have browser defaults; tests always pass them. */
@@ -450,12 +462,14 @@ function within(path: string, root: string): boolean {
 /**
  * Turns the chat's messages into the model's history: what the user said and
  * the answers the agent gave. Thinking rows (bot rows with a result key),
- * error banners, and system and status rows are not part of the conversation.
- * A turn's request and the messages it took mid-run, or a request whose
- * answer was an error, are consecutive user rows; they merge into one user
- * turn, so the roles alternate. Each row passes through redactText: the live
- * chat still shows a key the user pasted, and a session saved before rows
- * were redacted may still hold one.
+ * error banners, and system and status rows are not part of the conversation,
+ * except the row that says an Undo changed files: the model reads it as the
+ * user's, since the files are no longer as its last answer left them. A
+ * turn's request and the messages it took mid-run, or a request whose answer
+ * was an error, are consecutive user rows; they merge into one user turn, so
+ * the roles alternate. Each row passes through redactText: the live chat
+ * still shows a key the user pasted, and a session saved before rows were
+ * redacted may still hold one.
  *
  * @param messages - The chat's messages, oldest first.
  * @returns The history turns, oldest first.
@@ -465,8 +479,9 @@ function toHistory(messages: ChatMessage[]): HistoryTurn[] {
 	for (const m of messages) {
 		const last = turns.at(-1);
 		const text = redactText(m.text);
-		if (m.sender === 'user' && last?.role === 'user') last.content = `${last.content}\n\n${text}`;
-		else if (m.sender === 'user') turns.push({ role: 'user', content: text });
+		const users = m.sender === 'user' || (m.sender === 'system' && m.text.startsWith(UNDO_ROW));
+		if (users && last?.role === 'user') last.content = `${last.content}\n\n${text}`;
+		else if (users) turns.push({ role: 'user', content: text });
 		else if (m.sender === 'bot' && !m.isError && !m.resultKey) turns.push({ role: 'assistant', content: text });
 	}
 	return turns;
@@ -633,20 +648,25 @@ export interface ChatModelOptions {
 	onPipelineError?: () => Promise<void>;
 	/** Aborted when the user stops the run: a call that fails after it neither restarts the pipeline nor retries. */
 	signal?: AbortSignal;
-	/** Hears each chat request as it is sent, the retry included. */
-	onRequest?: () => void;
+	/** Reserves each request before it is sent, the retry after a restart included, and takes what it used. */
+	meter?: UsageMeter;
 }
 
 /**
  * Builds the model call the Wave loop uses.
  *
  * The call resolves with the model's text, or rejects: a missing client with a
- * plain Error, anything else with a ModelError. A pipeline failure gets one
- * restart (`onPipelineError`) and one retry; a second failure is final. Once
- * the run is stopped the loop has walked away from the call, so a failure then
- * gets no restart: it would end the pipeline the next turn is about to use.
+ * plain Error, a request the cost limit refused with CostLimitError, anything
+ * else with a ModelError. A pipeline failure gets one restart
+ * (`onPipelineError`) and one retry; a second failure is final. Once the run
+ * is stopped the loop has walked away from the call, so a failure then gets
+ * no restart: it would end the pipeline the next turn is about to use.
  *
- * @param o - The client, token and hooks the host supplies.
+ * Each request, the retry included, is reserved on the meter just before it
+ * is sent, and settled with its reply. A request that failed, or whose
+ * provider failed, keeps its reservation.
+ *
+ * @param o - The client, token, hooks and meter the host supplies.
  * @returns The model call.
  */
 export function createChatModel(o: ChatModelOptions): ModelCall {
@@ -657,8 +677,17 @@ export function createChatModel(o: ChatModelOptions): ModelCall {
 
 		const ask = async (): Promise<{ answers?: unknown[] }> => {
 			const token = await o.token();
-			o.onRequest?.();
-			return client.chat({ token, question });
+			const held = o.meter?.reserve(q);
+			try {
+				const result = await client.chat({ token, question });
+				const text = replyText(result);
+				if (text.startsWith(LLM_ERROR_PREFIX)) held?.keep();
+				else held?.settle(text.length);
+				return result;
+			} catch (error) {
+				held?.keep();
+				throw error;
+			}
 		};
 
 		const started = performance.now();
@@ -667,12 +696,14 @@ export function createChatModel(o: ChatModelOptions): ModelCall {
 			try {
 				result = await ask();
 			} catch (first) {
+				// step: a request the cost limit refused was never sent, so there is nothing to restart
+				if (first instanceof CostLimitError) throw first;
 				if (!o.onPipelineError || o.signal?.aborted) throw pipelineError(first);
 				try {
 					await o.onPipelineError();
 					result = await ask();
 				} catch (second) {
-					throw pipelineError(second);
+					throw second instanceof CostLimitError ? second : pipelineError(second);
 				}
 			}
 			return answerText(result);
@@ -689,10 +720,15 @@ function pipelineError(cause: unknown): ModelError {
 	return new ModelError(`The model pipeline stopped responding: ${reason}`, 'pipeline');
 }
 
+/** The text a pipeline result answers with; '' for none. */
+function replyText(result: { answers?: unknown[] }): string {
+	const first = result.answers?.[0];
+	return typeof first === 'string' ? first : first == null ? '' : JSON.stringify(first);
+}
+
 /** Pulls the model's text out of a pipeline result, or throws the error it stands for. */
 function answerText(result: { answers?: unknown[] }): string {
-	const first = result.answers?.[0];
-	const text = typeof first === 'string' ? first : first == null ? '' : JSON.stringify(first);
+	const text = replyText(result);
 	if (text.trim() === '') throw new ModelError('The model returned no answer.', 'empty');
 	if (text.startsWith(LLM_ERROR_PREFIX)) {
 		throw new ModelError(`The model provider failed: ${text.slice(LLM_ERROR_PREFIX.length)}`, 'provider');
@@ -722,6 +758,28 @@ function toRocketRideQuestion(q: QuestionSpec): Question {
 	return question;
 }
 
+/**
+ * A model call that feeds the meter, for a model a test passes:
+ * createChatModel feeds it itself, once per request.
+ *
+ * @param call - The model call.
+ * @param meter - The turn's meter.
+ * @returns The call, reserved before each request and settled with its reply.
+ */
+function metered(call: ModelCall, meter: UsageMeter): ModelCall {
+	return async (q) => {
+		const held = meter.reserve(q);
+		try {
+			const text = await call(q);
+			held.settle(text.length);
+			return text;
+		} catch (error) {
+			held.keep();
+			throw error;
+		}
+	};
+}
+
 // =============================================================================
 // RUN
 // =============================================================================
@@ -742,19 +800,10 @@ function toRocketRideQuestion(q: QuestionSpec): Question {
 export async function runAgent(request: string, callback: (type: string, content: string) => void, options: AgentRunOptions, deps: AgentDeps): Promise<TurnResult> {
 	const { host, client } = deps;
 	const turnId = options.turnId ?? crypto.randomUUID();
-	// step: every model request counts, a pipeline retry included, so a turn that throws still reports how many it sent;
-	// a model a test gives sends one request per call
-	let modelRequests = 0;
-	const sent = (): void => {
-		modelRequests++;
-	};
-	const given = deps.model;
-	const model: ModelCall = given
-		? (q) => {
-				sent();
-				return given(q);
-			}
-		: createChatModel({ client, token: options.token, toQuestion: toRocketRideQuestion, onPipelineError: options.onPipelineError, signal: options.signal, onRequest: sent });
+	// step: the turn's limits, read once; the meter counts every model request sent, so a turn that throws still reports them
+	const limits = host.limits?.read() ?? DEFAULT_LIMITS;
+	const meter = new UsageMeter({ model: options.model, limitUsd: limits.costUsd });
+	const model: ModelCall = deps.model ? metered(deps.model, meter) : createChatModel({ client, token: options.token, toQuestion: toRocketRideQuestion, onPipelineError: options.onPipelineError, signal: options.signal, meter });
 	const choose = deps.choose ?? shellChoice();
 	const markers = deps.markers ?? editorMarkers;
 
@@ -807,7 +856,8 @@ export async function runAgent(request: string, callback: (type: string, content
 		files,
 		new InventoryToolkit(vfs, (id) => host.devSession(id) !== null),
 		new RocketRideClientToolkit(approvals.client, vfs, hide, ledger),
-		new AppToolkit(approvals.client, host, { signal: options.signal, hide, created: (path) => files.tracker.created(path) }),
+		// a scaffold writes files the Undo record does not hold, so a turn that creates an app cannot be undone
+		new AppToolkit(approvals.client, host, { signal: options.signal, hide, created: (path) => files.tracker.created(path), onScaffold: () => files.undo.unavailable('this turn created an app') }),
 		// check_app hands each report to the record
 		new AppCheckToolkit(host, markers, (folder, report) => checks.appChecked(folder, report), { signal: options.signal, hide }),
 		askUser,
@@ -817,18 +867,33 @@ export async function runAgent(request: string, callback: (type: string, content
 	const shown = (text: string): string => redactText(hide(text));
 
 	// step: what the turn did, read when it ends, however it ends
-	const turnOf = (outcome: Pick<TurnResult, 'outcome' | 'reason' | 'finalText' | 'error'>, waves: number, toolCalls: number): TurnResult =>
-		redactDeep({
+	let paused: NeedsInputRequest | undefined;
+	const usageOf = (waves: number, toolCalls: number): TurnUsage => {
+		const used = meter.snapshot();
+		return {
+			waves,
+			modelRequests: used.requests,
+			toolCalls,
+			...(used.requests > 0 ? { tokens: { input: used.inputTokens, output: used.outputTokens, estimated: true } } : {}),
+			...(used.usd !== undefined ? { cost: { usd: used.usd, estimated: true } } : {}),
+		};
+	};
+	const turnOf = (outcome: Pick<TurnResult, 'outcome' | 'reason' | 'finalText' | 'error'>, waves: number, toolCalls: number): TurnResult => {
+		const undo = files.undo.state();
+		// a Stopped card never shows the question, so only a needs-you turn has a request to answer
+		const request = outcome.outcome === 'needs_input' ? (askUser.request ?? paused) : undefined;
+		return redactDeep({
 			turnId,
 			...(host.scopeKey !== undefined ? { scopeKey: host.scopeKey } : {}),
 			...outcome,
 			files: files.tracker.changes(),
 			checks: checks.results(),
-			usage: { waves, modelRequests, toolCalls },
-			// a Stopped card never shows the question, so only a needs-you turn has a request to answer
-			...(outcome.outcome === 'needs_input' && askUser.request ? { request: hideRequest(askUser.request, hide) } : {}),
+			usage: usageOf(waves, toolCalls),
+			...(request ? { request: hideRequest(request, hide) } : {}),
 			...(ledger.started.length ? { runsStarted: [...ledger.started] } : {}),
+			...(undo === 'none' ? {} : { undoAvailable: typeof undo !== 'object' }),
 		});
+	};
 
 	let result: LoopResult;
 	try {
@@ -852,6 +917,7 @@ export async function runAgent(request: string, callback: (type: string, content
 			withdrawAsk: () => {
 				askUser.request = null;
 			},
+			maxWaves: limits.steps,
 		});
 	} catch (error) {
 		// step: nothing was gathered, so the chat shows the model's error; the result says what the turn got to
@@ -860,6 +926,13 @@ export async function runAgent(request: string, callback: (type: string, content
 	} finally {
 		options.signal.removeEventListener('abort', endOnStop);
 		runEnded.abort();
+		options.undo?.(files.undo);
+	}
+
+	// step: a limit paused the turn: it asks the user to continue, in a new turn with a fresh budget
+	if (result.stopReason === 'limited' || result.stopReason === 'cost_limit') {
+		const question = result.stopReason === 'limited' ? `Paused after ${result.waves} ${result.waves === 1 ? 'step' : 'steps'}` : `Paused at the cost limit of ${dollars(meter.limitUsd)}`;
+		paused = { id: crypto.randomUUID().slice(0, 8), kind: 'continue', question };
 	}
 
 	// step: a stopped run writes no answer: the chat closes the turn with its stop row, and this adds the one fact that row can't know

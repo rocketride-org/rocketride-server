@@ -244,15 +244,17 @@ export class AppToolkit extends AgentToolkit {
 	private readonly hide: (text: string) => string;
 	/** Hears each file a scaffold wrote. */
 	private readonly created?: (path: string) => void;
+	/** Told just before a scaffold writes the new app's files. */
+	private readonly onScaffold?: () => void;
 
 	/**
 	 * Builds the toolkit.
 	 *
 	 * @param client - The host's client getter.
 	 * @param host - The agent host.
-	 * @param opts - Timing: how often to read the build's progress (default 3 s) and how long to wait for it (default 540 s); the run's stop signal; what hides the values the run's file tools hid before a build log is cut; and what hears each file create_app wrote.
+	 * @param opts - Timing: how often to read the build's progress (default 3 s) and how long to wait for it (default 540 s); the run's stop signal; what hides the values the run's file tools hid before a build log is cut; what hears each file create_app wrote; and who to tell before a scaffold writes files.
 	 */
-	constructor(client: ClientGetter, host: AgentHost, opts: { pollMs?: number; buildWaitMs?: number; signal?: AbortSignal; hide?: (text: string) => string; created?: (path: string) => void } = {}) {
+	constructor(client: ClientGetter, host: AgentHost, opts: { pollMs?: number; buildWaitMs?: number; signal?: AbortSignal; hide?: (text: string) => string; created?: (path: string) => void; onScaffold?: () => void } = {}) {
 		super();
 		this.client = client;
 		this.host = host;
@@ -261,6 +263,7 @@ export class AppToolkit extends AgentToolkit {
 		this.signal = opts.signal;
 		this.hide = opts.hide ?? ((text) => text);
 		this.created = opts.created;
+		this.onScaffold = opts.onScaffold;
 	}
 
 	/**
@@ -284,6 +287,7 @@ export class AppToolkit extends AgentToolkit {
 		const path = `apps/${appName}-ui`;
 		if ((await this.host.vfs.stat(path)) !== null) throw new Error(`${path} already exists. Pick another appName, or edit that app instead.`);
 
+		this.onScaffold?.();
 		let folder = `${appName}-ui`;
 		try {
 			const made = await this.host.scaffoldApp({ appName, displayName, template: template as (typeof TEMPLATES)[number] });

@@ -39,15 +39,16 @@
 import { getClient } from 'shell';
 import type { ChatMessage, TextResult } from 'shell';
 import type { ChatTurn } from 'shell/src/components/chat/types';
-import { getAgentHost } from './host';
+import { findAgentHost, getAgentHost } from './host';
 import { BUILDER_PROMPTS } from './prompts';
 import { runAgent } from './run';
 import { configureSessions, deleteSession as deleteStoredSession, getAgentSessions, getContext, isNotFound, saveSession } from './sessions';
 import type { AgentSessionFile, AgentSessionMeta } from './sessions';
 // TEMPORARY (spec §11): delete when Rod's wiring lands
-import { StandinPipelines } from './standin';
+import { StandinPipelines, STANDIN_MODEL } from './standin';
 import { looksLikeCredential, redactText } from './toolkits/common';
-import { choiceAction, CONTINUE, CONTINUE_TEXT, failedTurn, OPEN_VARIABLES, redactDeep, TurnError, turnCard, type RunRecord, type TurnCardAction, type TurnRecord, type TurnResult } from './turn';
+import type { UndoOutcome, UndoRecord } from './toolkits/undo';
+import { choiceAction, CONTINUE, CONTINUE_TEXT, failedTurn, OPEN_VARIABLES, redactDeep, TurnError, turnCard, UNDO, undoParts, usageMeta, type RunRecord, type TurnCard, type TurnCardAction, type TurnRecord, type TurnResult } from './turn';
 import type { AppPrompts } from './wave/plan';
 
 export type { AgentSessionFile, AgentSessionMeta } from './sessions';
@@ -74,6 +75,8 @@ export interface AgentOptions {
 	turnId?: string;
 	/** The runs the conversation started; the request adds the ones it starts. */
 	runs?: RunRecord[];
+	/** Takes the request's Undo record when its run ends. */
+	undo?: (record: UndoRecord) => void;
 }
 
 // TEMPORARY (spec §11): delete when Rod's wiring lands
@@ -91,7 +94,7 @@ const standin = new StandinPipelines(getClient);
  * @throws A TurnError when the model fails before the run gathered anything.
  */
 export async function agent(request: string, callback: AgentCallback, options: AgentOptions): Promise<TurnResult> {
-	const { turn, prompts = BUILDER_PROMPTS, token: given, conversationId = crypto.randomUUID(), turnId, runs } = options;
+	const { turn, prompts = BUILDER_PROMPTS, token: given, conversationId = crypto.randomUUID(), turnId, runs, undo } = options;
 	// TEMPORARY (spec §11): delete when Rod's wiring lands
 	// step: a given token is used as is; without one, the conversation's stand-in pipeline answers (and restarts on a failure)
 	const token = given ? async () => given : () => standin.token(conversationId);
@@ -100,7 +103,9 @@ export async function agent(request: string, callback: AgentCallback, options: A
 		: async () => {
 				await standin.restart(conversationId);
 			};
-	return runAgent(request, callback, { history: [...turn.history], prompts, token, onPipelineError, signal: turn.signal, takeQueued: () => turn.takeQueued(), ask: (card) => turn.ask(card), turnId, conversationId, runs }, { host: getAgentHost(), client: getClient });
+	// step: the stand-in's model has a price; a given token's model is not known, so nothing is priced
+	const model = given ? undefined : STANDIN_MODEL;
+	return runAgent(request, callback, { history: [...turn.history], prompts, token, onPipelineError, signal: turn.signal, takeQueued: () => turn.takeQueued(), ask: (card) => turn.ask(card), turnId, conversationId, runs, model, undo }, { host: getAgentHost(), client: getClient });
 }
 
 // =============================================================================
@@ -133,6 +138,18 @@ function routeChunks(onStatus?: AgentCallback): { callback: AgentCallback; resul
 // =============================================================================
 // AGENT SESSION
 // =============================================================================
+
+/**
+ * A turn's card with what it says about Undo added.
+ *
+ * @param card - The card.
+ * @param state - The Undo state of the turn.
+ * @returns The card with the Undo button or the line.
+ */
+function withUndo(card: TurnCard, state: 'ready' | 'waiting' | { unavailable: string }): TurnCard {
+	const { lines = [], actions = [] } = undoParts(state);
+	return { ...card, ...(lines.length ? { lines: [...(card.lines ?? []), ...lines] } : {}), ...(actions.length ? { actions: [...(card.actions ?? []), ...actions] } : {}) };
+}
 
 /** Display-title cap — the first request truncated for the catalog row. */
 const TITLE_MAX = 60;
@@ -190,7 +207,10 @@ function answeringNote(id: string): string {
 /** The start of the row that closes a turn the Agent tab closed on; the model reads it as a stop by the user. */
 const CLOSED_TAB = 'Stopped by you: the Agent tab closed.';
 
-/** What a card press may do outside the session: open a file, open Variables, or send a message. */
+/** Each conversation's running Undo, by session id, until its note row is added. Every instance of the conversation sees it, so one reopened while Undo runs waits for it. */
+const undoing = new Map<string, Promise<void>>();
+
+/** What a card press may do outside the session: open a file, open Variables, send a message, or add a note. */
 export interface CardActionHandlers {
 	/** Opens a workspace file in its editor. */
 	openFile(path: string): void;
@@ -198,6 +218,8 @@ export interface CardActionHandlers {
 	openVariables(): void;
 	/** Sends a message as the user, as the composer does. */
 	send(text: string): void;
+	/** Adds a note row to the chat (what an Undo did). */
+	note?(text: string): void;
 }
 
 /**
@@ -205,7 +227,7 @@ export interface CardActionHandlers {
  * Documents keeps open tabs mounted, so switching tabs never unmounts a
  * conversation, and reopening a closed tab reloads from disk via
  * getSession(). (No instance registry — revisit when real agent runs can
- * outlive their tab.)
+ * outlive their tab. Only a running Undo is shared, by session id.)
  */
 export class AgentSession {
 	/** The session's GUID. */
@@ -238,6 +260,12 @@ export class AgentSession {
 	private claimed: string | null = null;
 	/** The last save, so saves land in order. */
 	private saving: Promise<void> = Promise.resolve();
+	/** The latest turn that ran, with its Undo record. In memory only: a reload starts with none. */
+	private latest: { turnId: string; record: UndoRecord } | null = null;
+	/** Counts the Agent tab's mounts and unmounts, so a send held for an Undo goes only to the tab that held it, and an Undo whose tab closed keeps its note itself. */
+	private mounts = 0;
+	/** Called when what the cards show changes outside the chat's rows (Undo became ready, or ran). */
+	private readonly listeners = new Set<() => void>();
 
 	/**
 	 * Builds an in-memory session; private — hosts go through the statics.
@@ -291,12 +319,15 @@ export class AgentSession {
 	 * message was never sent) yields an empty conversation. Every OTHER
 	 * failure (transport drop, store timeout, corrupt JSON) propagates: an
 	 * empty session under the same id would get saved over the stored
-	 * history on the next send.
+	 * history on the next send. A conversation whose Undo runs loads once
+	 * Undo has added its note.
 	 *
 	 * @param sessionId - The session GUID.
 	 * @returns The hydrated session.
 	 */
 	static async getSession(sessionId: string): Promise<AgentSession> {
+		// step: a tab reopened while Undo runs loads after Undo saved its note, so its rows and its next turn have the note
+		await undoing.get(sessionId)?.catch(() => undefined);
 		let raw: string;
 		try {
 			raw = await getContext(sessionId);
@@ -372,11 +403,23 @@ export class AgentSession {
 		const opening = turn.history.length;
 		let result: TurnResult | undefined;
 		let started = false;
+		let record: UndoRecord | null = null;
 		this.running++;
+		// step: only the latest turn can be undone, so one that starts ends the earlier turn's Undo
+		this.latest = null;
 		try {
-			const { results, turn: ended } = await this.run(text, onStatus, turn, turnId, () => {
-				started = true;
-			});
+			const { results, turn: ended } = await this.run(
+				text,
+				onStatus,
+				turn,
+				turnId,
+				() => {
+					started = true;
+				},
+				(undo) => {
+					record = undo;
+				}
+			);
 			result = ended;
 			return { results, turn: ended };
 		} catch (err) {
@@ -384,8 +427,28 @@ export class AgentSession {
 			throw err;
 		} finally {
 			this.running--;
+			this.keepUndo(turnId, record);
 			if (result) this.ended(result, opening);
 		}
+	}
+
+	/**
+	 * Keeps the Undo record of the turn that just ended. While one of its
+	 * changes is still on its way, the card's Undo waits, and the card is
+	 * drawn again once the last one ends.
+	 *
+	 * @param turnId - The turn.
+	 * @param record - Its record, or null for a turn that never ran.
+	 */
+	private keepUndo(turnId: string, record: UndoRecord | null): void {
+		if (!record || !record.changed) return;
+		const latest = { turnId, record };
+		this.latest = latest;
+		if (record.settled) return;
+		const stop = record.onSettled(() => {
+			stop();
+			if (this.latest === latest) this.changed();
+		});
 	}
 
 	/**
@@ -396,9 +459,10 @@ export class AgentSession {
 	 * @param turn - The running chat turn.
 	 * @param turnId - The turn's id.
 	 * @param starting - Called once the message passed every check, just before the run.
+	 * @param undo - Takes the run's Undo record when it ends.
 	 * @returns The collected rows and the turn's result.
 	 */
-	private async run(text: string, onStatus: AgentCallback | undefined, turn: ChatTurn, turnId: string, starting: () => void): Promise<{ results: TextResult[]; turn: TurnResult }> {
+	private async run(text: string, onStatus: AgentCallback | undefined, turn: ChatTurn, turnId: string, starting: () => void, undo: (record: UndoRecord) => void): Promise<{ results: TextResult[]; turn: TurnResult }> {
 		// step: a conversation runs in the scope it started in; the chat shows the refusal as an error
 		const host = getAgentHost();
 		const scopeKey = host.scopeKey;
@@ -431,7 +495,7 @@ export class AgentSession {
 		// step: thinking streams live to the sink; the rest is collected into renderable rows
 		const { callback, results } = routeChunks(onStatus);
 		// TEMPORARY (spec §11): delete when Rod's wiring lands
-		const ended = await agent(answering ? `${text}\n\n${answeringNote(answering)}` : text, callback, { turn, conversationId: this.sessionId, turnId, runs: this.runsStarted });
+		const ended = await agent(answering ? `${text}\n\n${answeringNote(answering)}` : text, callback, { turn, conversationId: this.sessionId, turnId, runs: this.runsStarted, undo });
 		return { results, turn: ended };
 	}
 
@@ -520,6 +584,7 @@ export class AgentSession {
 	 */
 	attach(): void {
 		this.detached = false;
+		this.mounts++;
 	}
 
 	/**
@@ -533,6 +598,7 @@ export class AgentSession {
 	detach(messages: ChatMessage[]): void {
 		if (this.detached) return;
 		this.detached = true;
+		this.mounts++;
 		const last = this.messages.at(-1);
 		const unchanged = messages.length === this.messages.length && messages.at(-1)?.id === last?.id;
 		if (this.running === 0 && this.pending.length === 0 && unchanged) return;
@@ -544,24 +610,138 @@ export class AgentSession {
 	}
 
 	/**
-	 * The rows with each linked turn's card under its row. Error rows show
-	 * their own banner, so they get none. Turns that ended since the last call
-	 * are linked first.
+	 * Hears when what the cards show changes outside the chat's rows: the
+	 * latest turn's Undo became ready, or an Undo ran.
+	 *
+	 * @param listener - Called with no arguments.
+	 * @returns The unsubscribe.
+	 */
+	subscribe(listener: () => void): () => void {
+		this.listeners.add(listener);
+		return () => {
+			this.listeners.delete(listener);
+		};
+	}
+
+	/** Tells the listeners. */
+	private changed(): void {
+		for (const listener of [...this.listeners]) listener();
+	}
+
+	/**
+	 * The rows with each linked turn's card under its row, and the turn's
+	 * estimated usage in the row's meta line. Error rows show their own
+	 * banner, so they get none. The latest turn's card has Undo: a button,
+	 * enabled only while the chat is idle and every change of the turn has
+	 * ended, or a line saying why Undo is unavailable. Turns that ended since
+	 * the last call are linked first.
 	 *
 	 * @param messages - The chat's rows.
-	 * @returns The rows to show and save; the same array when no row has a turn.
+	 * @returns The rows to show; the same array when no row has a turn.
 	 */
 	decorate(messages: ChatMessage[]): ChatMessage[] {
+		return this.withCards(messages, true);
+	}
+
+	/**
+	 * The rows with their cards, with or without Undo (a saved card has none:
+	 * Undo does not outlive the page).
+	 *
+	 * @param messages - The chat's rows.
+	 * @param undo - Whether the latest turn's card shows Undo.
+	 * @returns The rows; the same array when no row has a turn.
+	 */
+	private withCards(messages: ChatMessage[], undo: boolean): ChatMessage[] {
 		this.link(messages);
 		if (this.turns.length === 0) return messages;
 		const byRow = new Map(this.turns.map((t) => [t.messageId, t]));
+		const latest = undo ? this.undoState() : null;
 		return messages.map((m) => {
 			const turn = byRow.get(m.id);
 			if (!turn || m.isError) return m;
 			// a request a card button already answered shows its buttons disabled while the reply is on its way
 			const shown = turn.request && turn.request.id === this.claimed ? { ...turn, request: { ...turn.request, answeredBy: '' } } : turn;
-			return { ...m, card: turnCard(shown) };
+			const card = latest && latest.turnId === turn.turnId ? withUndo(turnCard(shown), latest.state) : turnCard(shown);
+			const meta = usageMeta(turn.usage);
+			return { ...m, card, ...(meta ? { meta } : {}) };
 		});
+	}
+
+	/**
+	 * What the latest turn's card says about Undo: nothing for a turn that
+	 * changed no file, or after a team switch (the record belongs to the
+	 * workspace the turn ran in); why it is unavailable; a waiting button
+	 * while the chat runs a turn, an Undo runs, or a change is on its way;
+	 * else the button.
+	 *
+	 * @returns The turn and its Undo state, or null when the card says nothing.
+	 */
+	private undoState(): { turnId: string; state: 'ready' | 'waiting' | { unavailable: string } } | null {
+		const latest = this.latest;
+		if (!latest || findAgentHost()?.vfs !== latest.record.vfs) return null;
+		const state = latest.record.state();
+		if (state === 'none') return null;
+		if (state === 'ready' && (this.running > 0 || undoing.has(this.sessionId))) return { turnId: latest.turnId, state: 'waiting' };
+		return { turnId: latest.turnId, state };
+	}
+
+	/**
+	 * Undoes the latest turn's file changes from its card. The note row says
+	 * what happened; one that says files changed is also what the model reads.
+	 * One level: after an Undo that changed files there is nothing more to undo.
+	 * When the tab closed before Undo ended, the session adds the note to its
+	 * own rows and saves them, so the reopened conversation shows it and the
+	 * next turn reads it.
+	 *
+	 * @param messageId - The row the card is under.
+	 * @param handlers - Adds the note row.
+	 * @returns Whether the press started an Undo.
+	 */
+	private undoFrom(messageId: number, handlers: CardActionHandlers): boolean {
+		const latest = this.latest;
+		const state = this.undoState();
+		if (!latest || state?.state !== 'ready' || this.turns.find((t) => t.messageId === messageId)?.turnId !== latest.turnId) return false;
+		const mount = this.mounts;
+		const running = latest.record
+			.undo()
+			.catch((error: unknown): UndoOutcome => ({ kind: 'refused', text: `Undo refused, nothing was changed: ${error instanceof Error ? error.message : String(error)}.` }))
+			.then(async (outcome) => {
+				if (outcome.kind !== 'refused' && this.latest === latest) this.latest = null;
+				// step: the tab closed while Undo ran and its chat went with it, so the note goes in the session's own rows, saved for a reopened tab and the next turn
+				if (this.detached || this.mounts !== mount) {
+					const row: ChatMessage = { id: this.messages.reduce((max, m) => Math.max(max, m.id), 0) + 1, text: outcome.text, sender: 'system', timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+					await this.persist([...this.messages, row]).catch((err) => {
+						console.log('[AgentSession] could not save the Undo note', err);
+					});
+				}
+				undoing.delete(this.sessionId);
+				handlers.note?.(outcome.text);
+				this.changed();
+			});
+		undoing.set(this.sessionId, running);
+		this.changed();
+		return true;
+	}
+
+	/**
+	 * Sends a message once no Undo of this conversation runs, whichever
+	 * instance started it. A message sent while an Undo checks, reverses or
+	 * adds its note waits for it, so the turn it opens starts
+	 * after the note row and reads it, and the note's "the turn before" is
+	 * still the turn Undo reversed. A message held by a tab that closed before
+	 * Undo ended is dropped with that tab.
+	 *
+	 * @param send - Sends the message, as the composer does.
+	 */
+	afterUndo(send: () => void): void {
+		const running = undoing.get(this.sessionId);
+		if (!running) return send();
+		// step: a tab closed while Undo ran took its chat with it, so the held message goes nowhere
+		const mount = this.mounts;
+		const go = (): void => {
+			if (!this.detached && this.mounts === mount) send();
+		};
+		void running.then(go, go);
 	}
 
 	/**
@@ -585,6 +765,7 @@ export class AgentSession {
 			handlers.openVariables();
 			return true;
 		}
+		if (action.id === UNDO) return this.undoFrom(messageId, handlers);
 		const request = this.turns.find((t) => t.messageId === messageId)?.request;
 		if (!request || request.answeredBy !== undefined || this.claimed === request.id) return false;
 		const reply = request.kind === 'continue' ? (action.id === CONTINUE ? CONTINUE_TEXT : undefined) : request.choices?.find((_, i) => choiceAction(i) === action.id);
@@ -615,7 +796,7 @@ export class AgentSession {
 	 * @param messages - The rows to keep.
 	 */
 	private async persist(messages: ChatMessage[]): Promise<void> {
-		const rows = this.decorate(messages).map((m) => ({ ...m, text: redactText(m.text), ...(m.card ? { card: redactDeep(m.card) } : {}) }));
+		const rows = this.withCards(messages, false).map((m) => ({ ...m, text: redactText(m.text), ...(m.card ? { card: redactDeep(m.card) } : {}) }));
 		this.messages = rows;
 		const file: AgentSessionFile = {
 			version: 2,
