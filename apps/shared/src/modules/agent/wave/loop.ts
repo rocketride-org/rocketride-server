@@ -134,6 +134,8 @@ export interface LoopOptions {
 	approve: (act: ToolAct, run: () => Promise<string>) => Promise<() => Promise<string>>;
 	/** The values the file tools hid this run; any other result that quotes one shows its marker. */
 	secrets?: SecretMarkers;
+	/** Notes for each wave's question (files someone else changed); they go in its context, so the cached start stays the same. */
+	notes?: () => string[];
 }
 
 /** How a run ended. */
@@ -738,13 +740,14 @@ class WaveRun {
 	 * unless the retry writes new ones.
 	 */
 	async plan(): Promise<PlanReply> {
-		const state = { request: this.o.request, scratch: this.scratch, results: this.results, notes: [], heard: this.heard };
+		const notes = this.o.notes?.() ?? [];
+		const state = { request: this.o.request, scratch: this.scratch, results: this.results, notes, heard: this.heard };
 		const firstText = await this.ask(buildWaveQuestion(this.o.prefix, this.o.history, state));
 		let reply = parseReply(firstText);
 		if (!reply.toolCalls.length && !reply.done) {
 			const first = reply.scratch;
 			try {
-				const retryText = await this.ask(buildWaveQuestion(this.o.prefix, this.o.history, { ...state, notes: [retryNote(reply.problems)] }));
+				const retryText = await this.ask(buildWaveQuestion(this.o.prefix, this.o.history, { ...state, notes: [...notes, retryNote(reply.problems)] }));
 				reply = parseReply(retryText);
 			} catch (error) {
 				// The first reply's notes are all this wave produced; keep them for the best-effort answer.

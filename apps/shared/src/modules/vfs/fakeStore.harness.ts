@@ -29,7 +29,8 @@
  * (scripts/stub-shell.cjs). A read or write of a watched path waits in `held`
  * until the test releases it, and sees the store as it is at the release. A
  * read of a path in `heldAnswers` is answered at once, and the answer waits
- * in `held`.
+ * in `held`. While `holdsPersists` is set, every JSON write (the staging
+ * store's manifest) waits in `held` too.
  */
 
 export interface Held {
@@ -49,6 +50,7 @@ export class FakeStore {
 	readonly held: Held[] = [];
 	readonly watched = new Set<string>();
 	readonly heldAnswers = new Set<string>();
+	holdsPersists = false;
 	private readonly waiting: Array<() => void> = [];
 
 	constructor(files: Record<string, string> = {}) {
@@ -107,6 +109,7 @@ export class FakeStore {
 		},
 		fsReadJson: async (path: string): Promise<unknown> => JSON.parse(this.read(path)),
 		fsWriteJson: async (path: string, value: unknown): Promise<void> => {
+			if (this.holdsPersists) await this.hold('persist', path);
 			this.files.set(path, JSON.stringify(value));
 		},
 		fsReadMany: async (paths: string[]) => paths.map((path) => (this.files.has(path) ? { ok: true, data: new TextEncoder().encode(this.files.get(path)) } : { ok: false, error: 'File not found' })),
