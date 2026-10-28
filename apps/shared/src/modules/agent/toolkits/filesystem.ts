@@ -41,10 +41,11 @@
  * provides: whole-and-partial reads served from the cache, anchored
  * edit_file updates, dirty-overlay protection (reads see unsaved editor
  * buffers; mutations refuse paths the user holds dirty), read-before-edit
- * (an edit or overwrite is refused unless the file was read this run and has
- * not changed since), content search, and generic path hygiene (traversal
- * and store-illegal characters are refused here with LLM-readable errors —
- * backends still validate again).
+ * (an edit or overwrite is refused unless the file was read this run; an
+ * overwrite of a file that changed since is refused, and an edit of one
+ * applies only when its anchor still matches once), content search, and
+ * generic path hygiene (traversal and store-illegal characters are refused
+ * here with LLM-readable errors — backends still validate again).
  *
  * Reads and searches show a `«secret:<id>»` marker in place of each secret
  * value, and writes and edits put the value back (./secretMarkers.ts). The
@@ -56,9 +57,11 @@
 
 import { sha256Hex } from '../../vfs/hash';
 import { ROCKETRIDE_ROOT, isReferencePath } from '../../vfs/referenceTree';
+import { StaleVersionError, StaleWriteError } from '../../vfs/stagedFileSystem';
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import { AgentTool, AgentToolkit, type ToolStep } from '../tools';
 import { replaceSpans } from './common';
+import { FileTracker, type TrackedFile } from './fileTracker';
 import { SecretMarkers } from './secretMarkers';
 
 // =============================================================================
@@ -114,7 +117,7 @@ function hasInvalidPathChar(p: string): boolean {
 
 /** The default group instructions — generic file-tool doctrine only. */
 const FILESYSTEM_INSTRUCTIONS = `File tools operate on the workspace virtual filesystem. Paths are workspace-relative and always use forward slashes.
-- Read a file before editing or overwriting it. edit_file and write_file refuse a file you have not read, or one that changed since you read it; read it again, then redo the edit.
+- Read a file before editing or overwriting it. edit_file and write_file refuse a file you have not read. write_file refuses a file that changed since you read it; edit_file then applies your anchor to the current content only when it still matches once. Either way, read the file again before your next change to it.
 - Prefer edit_file (exact-anchor find/replace) for changes; write_file replaces a whole file.
 - Reads see the user's unsaved editor buffers; mutations are refused while the user has unsaved changes to the file - relay that to the user instead of retrying.
 - Truncated reads are always labeled; use offset/limit to window large files cheaply.`;
@@ -167,8 +170,8 @@ export class FilesystemTools extends AgentToolkit {
 	/** The host's virtual tree — all I/O goes through it. */
 	private readonly vfs: IWorkspaceFileSystem;
 
-	/** SHA-256 of each file's full content as this run last read or wrote it, by path. */
-	private readonly readHashes = new Map<string, string>();
+	/** Each file this run read or wrote, with its version and hash then. */
+	readonly tracker = new FileTracker();
 
 	/** The secret values this run's reads hid, each with its marker; writes put them back. */
 	readonly secrets = new SecretMarkers();
@@ -218,23 +221,43 @@ export class FilesystemTools extends AgentToolkit {
 		}
 	}
 
-	/**
-	 * Refuses an edit or overwrite of a file the agent has not read this run,
-	 * or one whose content differs from what it read — the edit would start
-	 * from text the agent never saw.
-	 *
-	 * @param path - Canonical path.
-	 * @param op - Tool name for the refusal message.
-	 * @param current - The file's current full content.
-	 */
-	private async guardRead(path: string, op: string, current: string): Promise<void> {
-		const seen = this.readHashes.get(path);
+	/** Refuses an edit or overwrite of a file the agent has not read this run. */
+	private requireRead(path: string, op: string): TrackedFile {
+		const seen = this.tracker.get(path);
 		if (seen === undefined) {
 			throw new Error(`${op} refused: read ${path} first — edits must start from its current content.`);
 		}
-		if (seen !== (await sha256Hex(current))) {
-			throw new Error(`${op} refused: ${path} changed since you read it. Read it again, then redo the edit.`);
+		return seen;
+	}
+
+	/** The refusal for a file that changed since the run last saw it. */
+	private staleRefusal(op: string, path: string, seen: number, now: number): Error {
+		const writer = this.vfs.lastWriter(path);
+		const versions = seen !== now ? ` (version ${seen}, now ${now}${writer ? `; last writer: ${writer}` : ''})` : '';
+		return new Error(`${op} refused: ${path} changed since you read it${versions}. Read it again, then redo the change from the current content.`);
+	}
+
+	/**
+	 * Writes a file at the version it was computed from. The dirty check and
+	 * the view's version check run in one synchronous block. When the server's
+	 * copy moved on since the page read it (another tab, a teammate), the
+	 * cached copy is dropped, so the agent's next read gets the server's copy.
+	 */
+	private async writeAt(path: string, content: string, expect: number, op: string): Promise<void> {
+		this.guardDirty(path, op);
+		const writing = this.vfs.write(path, content, AGENT_ORIGIN, expect);
+		const mine = this.vfs.version(path);
+		try {
+			await writing;
+		} catch (err) {
+			if (err instanceof StaleVersionError) throw this.staleRefusal(op, path, err.expected, err.actual);
+			if (err instanceof StaleWriteError) {
+				this.vfs.invalidate(path);
+				throw new Error(`${op} refused: ${path} changed on the server since you read it (another tab or a teammate). Read it again, then redo the change from the current content.`);
+			}
+			throw err;
 		}
+		this.tracker.saw(path, mine, await sha256Hex(content));
 	}
 
 	/**
@@ -323,9 +346,10 @@ export class FilesystemTools extends AgentToolkit {
 	private async readFile(rawPath: unknown, maxBytes?: number, offset?: number, limit?: number): Promise<string> {
 		const path = normalizePath(rawPath);
 		const cap = Math.min(Math.max(1, maxBytes ?? READ_DEFAULT_BYTES), READ_MAX_BYTES);
-		let text = String(await this.vfs.read(path));
-		// step: record the whole file's hash, windowed or not — it is what edits are checked against
-		this.readHashes.set(path, await sha256Hex(text));
+		const read = await this.vfs.readVersioned(path);
+		let text = String(read.content);
+		// step: record the whole file's version and hash, windowed or not — they are what edits are checked against
+		this.tracker.saw(path, read.version, await sha256Hex(text));
 		// step: hide secret values before any window — a window could cut one in half, and half a key no longer matches
 		const hidden = this.shown(path, text);
 		text = hidden.text;
@@ -352,7 +376,8 @@ export class FilesystemTools extends AgentToolkit {
 
 	/**
 	 * write_file: whole-file replacement through the VFS. A new file needs no
-	 * read; replacing an existing one follows the read-before-edit rule.
+	 * read; replacing an existing one follows the read-before-edit rule, and
+	 * is refused when the file changed since the run last saw it.
 	 *
 	 * @param rawPath - Agent-supplied path.
 	 * @param content - The complete new file content.
@@ -366,19 +391,23 @@ export class FilesystemTools extends AgentToolkit {
 		if (size > WRITE_MAX_BYTES) {
 			throw new Error(`write_file caps at ${WRITE_MAX_BYTES} bytes per file (got ${size}).`);
 		}
-		this.guardDirty(path, 'write_file');
 		// step: a new file needs no read; replacing an existing one must start from what was read
-		if ((await this.entryType(path)) === 'file') await this.guardRead(path, 'write_file', String(await this.vfs.read(path)));
-		await this.vfs.write(path, content, AGENT_ORIGIN);
-		this.readHashes.set(path, await sha256Hex(content));
+		let expect = this.vfs.version(path);
+		if ((await this.entryType(path)) === 'file') {
+			const seen = this.requireRead(path, 'write_file');
+			const current = await this.vfs.readVersioned(path);
+			if (seen.readHash !== (await sha256Hex(String(current.content)))) throw this.staleRefusal('write_file', path, seen.readVersion, current.version);
+			expect = current.version;
+		}
+		await this.writeAt(path, content, expect, 'write_file');
 		return `Wrote ${size} bytes to ${path}.${await this.noteAfterSave(path)}`;
 	}
 
 	/**
 	 * edit_file: anchored find/replace against the cached content — the
-	 * partial-update surface. Refused when the file was not read this run or
-	 * changed since, and when the anchor is missing or ambiguous, with
-	 * recovery guidance in the error.
+	 * partial-update surface. Refused when the file was not read this run,
+	 * and when the anchor is missing or ambiguous, with recovery guidance in
+	 * the error.
 	 *
 	 * @param rawPath - Agent-supplied path.
 	 * @param oldString - Exact text to replace.
@@ -395,15 +424,18 @@ export class FilesystemTools extends AgentToolkit {
 		// step: refuse a marker this run did not make; the replacement's markers become the values they stand for
 		this.secrets.reveal(oldString, 'edit_file');
 		const replacement = this.secrets.reveal(newString, 'edit_file');
-		this.guardDirty(path, 'edit_file');
-		const text = String(await this.vfs.read(path));
-		await this.guardRead(path, 'edit_file', text);
+		const seen = this.requireRead(path, 'edit_file');
+		const { content, version } = await this.vfs.readVersioned(path);
+		const text = String(content);
+		const stale = seen.readHash !== (await sha256Hex(text));
 
 		// step: match the anchor against the file as the model sees it, markers in place, so an anchor cannot test a guess at a hidden value
 		const found = this.secrets.anchors(path, text, oldString);
 
-		// step: count anchors — zero is a miss, several without replaceAll is ambiguous
+		// step: count anchors — zero is a miss, several without replaceAll is ambiguous. On a
+		// file that changed since the read, only an anchor that names one place still applies
 		const occurrences = found.length;
+		if (stale && occurrences !== 1) throw this.staleRefusal('edit_file', path, seen.readVersion, version);
 		if (occurrences === 0) {
 			throw new Error(`edit_file: oldString not found in ${path}. Re-read the file — the anchor must match exactly, including whitespace.`);
 		}
@@ -417,9 +449,10 @@ export class FilesystemTools extends AgentToolkit {
 		if (size > WRITE_MAX_BYTES) {
 			throw new Error(`edit_file result exceeds the ${WRITE_MAX_BYTES}-byte file cap.`);
 		}
-		await this.vfs.write(path, updated, AGENT_ORIGIN);
-		this.readHashes.set(path, await sha256Hex(updated));
-		return `Replaced ${occurrences} occurrence(s) in ${path}.${await this.noteAfterSave(path)}`;
+		const writer = this.vfs.lastWriter(path);
+		await this.writeAt(path, updated, version, 'edit_file');
+		const note = stale ? ` The file had changed since you read it${writer ? ` (last writer: ${writer})` : ''}; your anchor still matched once, so the edit was applied to the current content. Read it again before further edits.` : '';
+		return `Replaced ${occurrences} occurrence(s) in ${path}.${note}${await this.noteAfterSave(path)}`;
 	}
 
 	/**
@@ -524,6 +557,7 @@ export class FilesystemTools extends AgentToolkit {
 		this.guardDirty(oldPath, 'rename');
 		this.guardDirty(newPath, 'rename');
 		await this.vfs.rename(oldPath, newPath, AGENT_ORIGIN);
+		this.tracker.renamed(oldPath, newPath, (p) => this.vfs.version(p));
 		return `Renamed ${oldPath} to ${newPath}.`;
 	}
 
@@ -566,6 +600,7 @@ export class FilesystemTools extends AgentToolkit {
 				// the user may have edited it while the card waited
 				this.guardDirty(path, 'delete_file');
 				await this.vfs.delete(path, AGENT_ORIGIN);
+				this.tracker.deleted(path);
 				return `Deleted ${path}.`;
 			},
 		};
@@ -579,7 +614,7 @@ export class FilesystemTools extends AgentToolkit {
 	 * @returns Canonical paths, in the order first seen.
 	 */
 	pathsSeen(): string[] {
-		return [...this.readHashes.keys()];
+		return this.tracker.seen();
 	}
 
 	/**
@@ -650,7 +685,7 @@ export class FilesystemTools extends AgentToolkit {
 			}),
 			new AgentTool({
 				name: 'edit_file',
-				description: 'PREFERRED way to change an existing file: replace an exact text anchor. oldString must match the file exactly (including whitespace) and be unique unless replaceAll is true. Refused unless you read the file this run and it has not changed since (the error says to read it again), and when the user has unsaved editor changes to it.',
+				description: 'PREFERRED way to change an existing file: replace an exact text anchor. oldString must match the file exactly (including whitespace) and be unique unless replaceAll is true. Refused unless you read the file this run. If the file changed since, the edit applies only when oldString matches exactly one place in the current content. Also refused when the user has unsaved editor changes to it.',
 				parameters: {
 					type: 'object',
 					properties: {

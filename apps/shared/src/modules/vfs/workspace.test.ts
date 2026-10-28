@@ -27,7 +27,8 @@
 /**
  * What the ordering explorations (ordering.test.ts) cannot reach: going back
  * to a team, another tab, the change announcements, the cache, the scaffold,
- * the preview and the dev session's models.
+ * the preview, the dev session's models, and the versions a teammate's change
+ * moves.
  */
 
 import assert from 'node:assert/strict';
@@ -37,13 +38,34 @@ import { appPath, scaffoldApp } from '../../../../rocket-ui/src/surfaces/preview
 import { createWebAppBuilderHost } from '../../../../rocket-ui/src/surfaces/preview/session/webHost';
 import { createWorkspace, type Workspace } from '../../../../rocket-ui/src/surfaces/workspace/vfs/workspace';
 import { CachedVfs } from 'shell/src/modules/explorer/CachedVfs';
+import { FilesystemTools } from '../agent/toolkits/filesystem';
+import type { AgentTool } from '../agent/tools';
 import { FakeStore } from './fakeStore.harness';
-import { StagedFileSystem } from './stagedFileSystem';
+import { StagedFileSystem, StaleVersionError, StaleWriteError } from './stagedFileSystem';
 import { StagingStore } from './staging';
 
 // =============================================================================
 // HARNESS
 // =============================================================================
+
+/**
+ * Calls a tool the way the loop does when it lets every act through: it gets
+ * the call ready, then runs its step.
+ *
+ * @param tool - The tool.
+ * @param args - The call's arguments.
+ * @returns The tool result.
+ */
+async function callTool(tool: AgentTool, args: Record<string, unknown>): Promise<string> {
+	return (await tool.prepare(args)).run();
+}
+
+/** A promise and the function that settles it. */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+	let resolve!: () => void;
+	const promise = new Promise<void>((r) => (resolve = r));
+	return { promise, resolve };
+}
 
 /** Counts workspaces, so each test roots its own in teams no other test used. */
 let teams = 0;
@@ -174,7 +196,8 @@ test('a read still on its way when the user leaves a team cannot bring back an o
 	assert.equal(await back.view.read('apps/probe.txt'), 'const probe = 1;');
 	await back.view.write('apps/probe.txt', 'const probe = 2;', 'editor');
 	answer.release();
-	assert.equal(await pending, 'const probe = 1;', 'the old read returns what it read');
+	// step: the return dropped the cache while the old read was on its way, so the view takes the file again
+	assert.equal(await pending, 'const probe = 2;', 'the old read returns the saved file');
 	assert.equal(s.store.files.get(s.a), 'const probe = 2;');
 	assert.equal(await back.view.read('apps/probe.txt'), 'const probe = 2;', 'the saved file, not the old read, is what the cache serves');
 });
@@ -426,4 +449,152 @@ test("an emit still on its way when its file is deleted and made again does not 
 	} finally {
 		session.dispose();
 	}
+});
+
+// =============================================================================
+// THE SAVE RACE — reads a change overtook, and a teammate's change
+// =============================================================================
+
+test("the agent's write refused for a teammate's change drops the cached copy, so its next read gets the server's copy and its edit keeps the change", async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'apps/probe.txt';
+	const files = new FilesystemTools(ws.view);
+	const tool = (name: string, args: Record<string, unknown>) => callTool(files.tools().find((t) => t.name === name)!, args);
+
+	// step: the agent reads the file; a teammate changes it; the agent's edit is refused
+	await tool('read_file', { path });
+	s.store.files.set(s.a, 'const probe = 1; // teammate');
+	await assert.rejects(tool('edit_file', { path, oldString: 'const probe = 1;', newString: 'const probe = 2;' }), /^Error: edit_file refused: apps\/probe\.txt changed on the server since you read it \(another tab or a teammate\)\. Read it again, then redo the change from the current content\.$/);
+	assert.equal(s.store.files.get(s.a), 'const probe = 1; // teammate');
+
+	// step: the agent reads it again and gets the server's copy; its edit then lands on it
+	assert.equal(await tool('read_file', { path }), 'const probe = 1; // teammate');
+	await tool('edit_file', { path, oldString: 'const probe = 1;', newString: 'const probe = 2;' });
+	assert.equal(s.store.files.get(s.a), 'const probe = 2; // teammate');
+});
+
+/** An editor tab as the text tabs keep one: it loads the file at a version, and saves its text at that version. */
+async function editorTab(view: Workspace['view'], path: string): Promise<{ text: string; version: number; save: () => Promise<void> }> {
+	const loaded = await view.readVersioned(path);
+	const tab = { text: String(loaded.content), version: loaded.version, save: () => view.write(path, tab.text, 'editor', loaded.version) };
+	return tab;
+}
+
+test("a teammate's change that a read takes in after the cached copy was dropped moves the version, so a tab that loaded before it cannot save over it", async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'apps/probe.txt';
+	const tab = await editorTab(ws.view, path);
+	tab.text = 'const probe = 1; // mine';
+	// step: a teammate changes the file; the cached copy is dropped (a Reload), and two tabs read the server's copy at once
+	s.store.files.set(s.a, 'const probe = 2; // teammate');
+	ws.view.invalidate(path);
+	const [second, third] = await Promise.all([editorTab(ws.view, path), editorTab(ws.view, path)]);
+	assert.deepEqual([second.version, third.version], [ws.view.version(path), ws.view.version(path)], 'both reads count the copy one of them took in');
+	await assert.rejects(tab.save(), StaleVersionError);
+	assert.equal(s.store.files.get(s.a), 'const probe = 2; // teammate');
+	// step: a Reload that takes the same copy in moves nothing; the tab whose read took the teammate's change in saves at the version it got
+	ws.view.invalidate(path);
+	await ws.view.readVersioned(path);
+	second.text = 'const probe = 3; // after the teammate';
+	await second.save();
+	assert.equal(s.store.files.get(s.a), 'const probe = 3; // after the teammate');
+});
+
+test("after a switch away and back, a file nobody changed saves at once, and a teammate's change that the preview's batch read takes in moves the version", async () => {
+	const s = storage();
+	const other = `@/Team/=${s.alpha}/.projects/.appdev/other.txt`;
+	s.store.files.set(other, 'const other = 1;');
+	const ws = await workspace(s.alpha);
+	const [path, otherPath] = ['apps/probe.txt', 'apps/other.txt'];
+	const [tab, untouched] = [await editorTab(ws.view, path), await editorTab(ws.view, otherPath)];
+	tab.text = 'const probe = 1; // mine';
+	untouched.text = 'const other = 1; // mine';
+	await workspace(s.beta);
+	s.store.files.set(s.a, 'const probe = 2; // teammate');
+	const back = await workspace(s.alpha);
+	await untouched.save();
+	assert.equal(s.store.files.get(other), 'const other = 1; // mine');
+	assert.deepEqual(await back.view.readMany([path]), { [path]: 'const probe = 2; // teammate' });
+	await assert.rejects(tab.save(), StaleVersionError);
+	assert.equal(s.store.files.get(s.a), 'const probe = 2; // teammate');
+});
+
+test("a read that finds the teammate's copy a batch read cached and has not counted yet reports the version the batch counts", async () => {
+	const files = new Map(Object.entries({ 'a.ts': 'A0', 'b.ts': 'B0' }));
+	const slow = deferred();
+	const view = new StagedFileSystem(
+		new CachedVfs({
+			list: async () => [],
+			read: async (path) => {
+				if (path === 'b.ts') await slow.promise;
+				return files.get(path);
+			},
+			write: async (path, content) => void files.set(path, String(content)),
+			rename: async () => undefined,
+			delete: async () => undefined,
+			mkdir: async () => undefined,
+		}),
+		null,
+		{ writeThrough: true }
+	);
+	await view.read('a.ts');
+	// step: a teammate changes a.ts and a Reload drops the cached copy; a batch read caches the new a.ts while b.ts is slow, and a tab opens a.ts
+	files.set('a.ts', 'A1');
+	view.invalidate('a.ts');
+	const batch = view.readMany(['a.ts', 'b.ts']);
+	await new Promise((resolve) => setImmediate(resolve));
+	const tab = await view.readVersioned('a.ts');
+	slow.resolve();
+	await batch;
+	assert.deepEqual(tab, { content: 'A1', version: view.version('a.ts') });
+	await view.write('a.ts', 'A1 + mine', 'editor', tab.version);
+	assert.equal(files.get('a.ts'), 'A1 + mine');
+});
+
+test("after a switch away and back, a teammate's delete refuses a tab's save once; a save after the refusal makes the file again", async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'apps/probe.txt';
+	const tab = await editorTab(ws.view, path);
+	tab.text = 'const probe = 1; // mine';
+	await workspace(s.beta);
+	s.store.files.delete(s.a);
+	const back = await workspace(s.alpha);
+	await assert.rejects(tab.save(), StaleWriteError);
+	assert.equal(s.store.files.has(s.a), false);
+	// step: the tab reloads, finds the file gone, and saves its text as a new file
+	await assert.rejects(back.view.readVersioned(path), /File not found/);
+	await back.view.write(path, tab.text, 'editor', back.view.version(path));
+	assert.equal(s.store.files.get(s.a), 'const probe = 1; // mine');
+});
+
+test('a batch read on its way when the cached copy is dropped does not put the older copy back', async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'apps/probe.txt';
+
+	// step: a batch read of the file (the preview opening) is slow, and holds the copy it read
+	const [held, landing] = [deferred(), deferred()];
+	const readMany = s.store.client.fsReadMany;
+	s.store.client.fsReadMany = async (paths: string[]) => {
+		s.store.client.fsReadMany = readMany;
+		const found = await readMany(paths);
+		held.resolve();
+		await landing.promise;
+		return found;
+	};
+	const batch = ws.view.readMany([path]);
+	await held.promise;
+
+	// step: a teammate changes the file; a Reload drops the cached copy and reads the server's; then the batch lands
+	s.store.files.set(s.a, 'const probe = 2; // teammate');
+	ws.view.invalidate(path);
+	assert.equal(String((await ws.view.readVersioned(path)).content), 'const probe = 2; // teammate');
+	landing.resolve();
+	assert.deepEqual(await batch, { [path]: 'const probe = 2; // teammate' }, 'the batch reads the file again');
+	assert.equal(ws.view.cachedContent(path), 'const probe = 2; // teammate', 'the cache keeps the newer copy');
+	await ws.view.write(path, 'const probe = 3;', 'editor');
+	assert.equal(s.store.files.get(s.a), 'const probe = 3;', 'so a save checked against it lands');
 });

@@ -21,293 +21,38 @@
 // SOFTWARE.
 
 // =============================================================================
-// ORDERING TESTS — every order of agent edits, team switch, tool timeout and approval on one file
+// ORDERING TESTS — every order of agent, editors, Commit all, discards, team switch, tool timeout and approvals
 // =============================================================================
 
-/**
- * A generated-input check. It runs the real pieces: rocket-ui's workspace (its
- * store backend, CachedVfs and StagedFileSystem) over an in-memory store, and
- * the agent's file tools inside the real Wave loop. The store holds every read
- * and write of the file until the test releases it, so each run is one order
- * of events. The test tries every order of up to MAX_DEPTH steps. A step
- * starts the agent, releases one held store call, switches the team, or times
- * out the agent's running tool call. In the second check every edit asks for
- * the user's OK first, as a delete does, and one more step gives the OK.
- *
- * Every file content is a set of tokens joined by '+', and every writer adds
- * its own token to what it read. A write that lands without a token the stored
- * file already holds was computed from an older version than the one current
- * when it was meant, or landed in a team it was not meant for, so it erased
- * someone's work. The test collects every such write and names the steps that
- * led to it. It also collects every OK asked while an edit's work is still on
- * its way: a card must never ask for a call that could land under it.
- */
+/** The ordering explorations; ordering.harness.ts holds the actors, the runs and every rule they check. */
 
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
 
-import { createWorkspace, type Workspace } from '../../../../rocket-ui/src/surfaces/workspace/vfs/workspace';
-import { CheckRecord } from '../agent/run';
-import { FilesystemTools } from '../agent/toolkits/filesystem';
-import { AgentTool } from '../agent/tools';
-import { runLoop } from '../agent/wave/loop';
-import { FakeStore } from './fakeStore.harness';
-import type { IWorkspaceFileSystem } from './vfsTypes';
-
-// =============================================================================
-// FIXTURES
-// =============================================================================
-
-/** The file every actor works on, as a workspace path. */
-const FILE = 'apps/a.ts';
-
-/** What the file holds before anyone writes. */
-const ORIGINAL = 'BASE';
-
-/** What the same path holds in the team the user switches to. */
-const OTHER_TEAM = 'BETA';
-
-/** The longest order of steps tried; after it, every held call is released in turn. */
-const MAX_DEPTH = 6;
-
-/** The tool time limit; the timeout step moves the mocked clock past it. */
-const LIMIT_MS = 1000;
-
-/** The store path of the file in a team. */
-function storePath(team: string): string {
-	return `@/Team/=${team}/.projects/.appdev/${FILE.slice('apps/'.length)}`;
-}
-
-/** The tokens of a content. */
-function tokens(content: string): Set<string> {
-	return new Set(content.split('+'));
-}
-
-/** Each write that landed on a watched file without a token the file held. */
-function erasures(store: FakeStore): string[] {
-	return store.landed.flatMap(({ path, before, content }) => {
-		if (!store.watched.has(path)) return [];
-		const after = tokens(content);
-		const missing = [...tokens(before ?? '')].filter((t) => !after.has(t));
-		return missing.length > 0 ? [`'${content}' landed on ${path} and erased ${missing.join(', ')}`] : [];
-	});
-}
-
-// =============================================================================
-// ONE RUN — the agent, and one order of steps
-// =============================================================================
-
-/** A step of an order. */
-type Step = 'start' | 'switch' | 'timeout' | 'approve' | `release ${number}`;
-
-/** What one run saw. */
-interface Outcome {
-	/** The steps that were possible after the last step of the order. */
-	next: Step[];
-	/** Each write that erased a token, and each OK asked while an edit's work was on its way. */
-	erased: string[];
-	/** What the file held at the end, in the first team. */
-	final: string;
-}
-
-/**
- * Hashes finish off the event loop (crypto.subtle), so a run is only still
- * when none is pending. The count is all this wrapper adds; the hash is real.
- */
-let hashing = 0;
-const realDigest = crypto.subtle.digest.bind(crypto.subtle);
-crypto.subtle.digest = async (...args: Parameters<SubtleCrypto['digest']>): Promise<ArrayBuffer> => {
-	hashing += 1;
-	try {
-		return await realDigest(...args);
-	} finally {
-		hashing -= 1;
-	}
-};
-
-/** Lets every promise that can move, move, until nothing changes for a while and no hash is pending. */
-async function settle(store: FakeStore, waiting: () => number = () => 0): Promise<void> {
-	let quiet = 0;
-	let seen = -1;
-	while (quiet < 4) {
-		await new Promise((resolve) => setImmediate(resolve));
-		const now = store.held.length + waiting();
-		quiet = now === seen && hashing === 0 ? quiet + 1 : 0;
-		seen = now;
-	}
-}
-
-/** A wave reply that asks for tool calls. */
-function plan(calls: Array<[string, Record<string, unknown>]>): string {
-	return JSON.stringify({ thought: 'working', tool_calls: calls.map(([tool, args]) => ({ tool, args })) });
-}
-
-/** Counts runs, so each one roots its workspace in teams of its own. */
-let runs = 0;
-
-/**
- * The agent's file tools, with edit_file asking for an OK first when `asking`:
- * its step names an act, as delete_file's does. `work` counts edits whose work
- * has started and not ended.
- */
-function agentTools(view: IWorkspaceFileSystem, asking: boolean, work: { running: number }): AgentTool[] {
-	const tools = new FilesystemTools(view).tools();
-	if (!asking) return tools;
-	return tools.map((tool) =>
-		tool.name !== 'edit_file'
-			? tool
-			: new AgentTool({
-					name: tool.name,
-					description: tool.description,
-					parameters: tool.parameters,
-					prepare: async (args) => {
-						const step = await tool.prepare(args);
-						return {
-							act: { name: 'edit_file', params: [args.path] },
-							run: async () => {
-								work.running += 1;
-								try {
-									return await step.run();
-								} finally {
-									work.running -= 1;
-								}
-							},
-						};
-					},
-				})
-	);
-}
-
-/**
- * Runs one order of steps, then gives every OK and releases every held call
- * in turn until all of them have finished.
- *
- * @param order - The steps, in order.
- * @param asking - Whether every edit asks for an OK first.
- * @returns What the run saw.
- */
-async function runOrder(order: Step[], asking = false): Promise<Outcome> {
-	runs += 1;
-	const [first, second] = [`alpha${runs}`, `beta${runs}`];
-	const store = new FakeStore({ [storePath(first)]: ORIGINAL, [storePath(second)]: OTHER_TEAM }).install();
-	for (const path of store.files.keys()) store.watched.add(path);
-	const ws: Workspace = await createWorkspace({ hostAppId: 'ordering.test', autoCommit: true, scope: { kind: 'team', teamId: first } });
-	const view: IWorkspaceFileSystem = ws.view;
-
-	// step: the agent reads the file, then edits it twice in one wave; the
-	// model then says it is done, and stops answering after a few tries
-	const replies = [
-		plan([['read_file', { path: FILE }]]),
-		plan([
-			['edit_file', { path: FILE, oldString: ORIGINAL, newString: `${ORIGINAL}+agent` }],
-			['edit_file', { path: FILE, oldString: ORIGINAL, newString: `${ORIGINAL}+agent2` }],
-		]),
-	];
-	for (let i = 0; i < 3; i++) replies.push(JSON.stringify({ thought: 'finishing', done: true, answer: 'Edited.' }));
-	let agent: Promise<unknown> | null = null;
-	let agentDone = false;
-	let switched = false;
-	let timedOut = false;
-	// step: each OK the agent waits for, oldest first; asking while an edit's work runs is a failure
-	const asks: Array<() => void> = [];
-	const work = { running: 0 };
-	const askedOver: string[] = [];
-	const quiet = () => settle(store, () => asks.length);
-	const startAgent = () =>
-		runLoop({
-			request: 'Edit apps/a.ts.',
-			history: [],
-			prefix: { role: 'You are Wave.', instructions: [] },
-			tools: agentTools(view, asking, work),
-			model: async () => {
-				const next = replies.shift();
-				if (next === undefined) throw new Error('The scripted model has no reply left.');
-				return next;
-			},
-			finish: new CheckRecord(async () => null),
-			emit: () => undefined,
-			timeoutMs: () => LIMIT_MS,
-			signal: new AbortController().signal,
-			takeQueued: () => [],
-			approve: (act, run) => {
-				if (work.running > 0) askedOver.push(`an OK for ${act.name} was asked while an edit's work was on its way`);
-				return new Promise((resolve) => asks.push(() => resolve(run)));
-			},
-		})
-			.catch(() => undefined)
-			.finally(() => {
-				agentDone = true;
-			});
-
-	/** The steps possible now. */
-	const possible = (): Step[] => {
-		if (!agent) return ['start'];
-		const steps: Step[] = store.held.map((_, i) => `release ${i}` as const);
-		if (asks.length > 0) steps.push('approve');
-		if (!switched) steps.push('switch');
-		// time can pass while a call runs or while the user is asked
-		if (!timedOut && (store.held.length > 0 || asks.length > 0)) steps.push('timeout');
-		return steps;
-	};
-
-	for (const step of order) {
-		if (!possible().includes(step)) throw new Error(`Step ${step} is not possible after ${order.join(', ')}`);
-		if (step === 'start') agent = startAgent();
-		else if (step === 'switch') {
-			switched = true;
-			void createWorkspace({ hostAppId: 'ordering.test', autoCommit: true, scope: { kind: 'team', teamId: second } });
-		} else if (step === 'timeout') {
-			timedOut = true;
-			mock.timers.tick(LIMIT_MS);
-		} else if (step === 'approve') {
-			asks.shift()?.();
-		} else {
-			store.held.splice(Number(step.slice('release '.length)), 1)[0].release();
-		}
-		await quiet();
-	}
-	const next = possible();
-
-	// step: give every OK and release everything in turn until the agent has finished and nothing is held
-	if (!agent) agent = startAgent();
-	await quiet();
-	while (store.held.length > 0 || asks.length > 0 || !agentDone) {
-		const ask = asks.shift();
-		if (ask) {
-			ask();
-			await quiet();
-			continue;
-		}
-		const held = store.held.shift();
-		if (!held) throw new Error(`The run is stuck after ${order.join(', ') || 'no steps'}: the agent waits on nothing the store holds.`);
-		held.release();
-		await quiet();
-	}
-	return { next, erased: [...erasures(store), ...askedOver], final: store.files.get(storePath(first)) ?? '' };
-}
+import { exploreManual, FILE, MAX_DEPTH, ORIGINAL, report, runManual, runOrder, runSwitchOrder, tokens, type Step, type SwitchStep } from './ordering.harness';
 
 // =============================================================================
 // THE CHECK
 // =============================================================================
 
 /**
- * Tries every order of up to MAX_DEPTH steps, depth first, after checking that
- * both agent edits land when nothing interferes.
+ * Tries every team switch order of up to MAX_DEPTH steps, depth first, after
+ * checking that both agent edits land when nothing interferes.
  *
  * @param asking - Whether every edit asks for an OK first.
  * @returns How many orders were tried, the kinds of step tried, and each failure with its order.
  */
-async function exploreAll(asking: boolean): Promise<{ tried: number; kinds: string[]; failures: string[] }> {
+async function exploreSwitch(asking: boolean): Promise<{ tried: number; kinds: string[]; failures: string[] }> {
 	// step: with nothing in the way, both agent edits land
-	const plain = await runOrder(['start'], asking);
+	const plain = await runSwitchOrder(['start'], asking);
 	assert.deepEqual(plain.erased, []);
 	assert.deepEqual(tokens(plain.final), new Set([ORIGINAL, 'agent', 'agent2']), 'the agent edits land when nothing interferes');
 
 	const failures: string[] = [];
 	const kinds = new Set<string>();
 	let tried = 0;
-	const explore = async (order: Step[]): Promise<void> => {
-		const outcome = await runOrder(order, asking);
+	const explore = async (order: SwitchStep[]): Promise<void> => {
+		const outcome = await runSwitchOrder(order, asking);
 		tried += 1;
 		for (const step of order) kinds.add(step.split(' ')[0]);
 		for (const erased of outcome.erased) failures.push(`${order.join(' > ')}: ${erased}`);
@@ -317,11 +62,39 @@ async function exploreAll(asking: boolean): Promise<{ tried: number; kinds: stri
 	return { tried, kinds: [...kinds].sort(), failures };
 }
 
+test("no order of agent edits, an editor save, a teammate's change and a Reload erases a write", async () => {
+	mock.timers.enable({ apis: ['setTimeout'] });
+	try {
+		// step: with nothing in the way, both agent edits land
+		const plain = await runOrder(['start']);
+		assert.deepEqual(plain.erased, []);
+		assert.deepEqual(tokens(plain.final), new Set([ORIGINAL, 'agent', 'agent2']), 'the agent edits land when nothing interferes');
+
+		// step: depth-first over every order of up to MAX_DEPTH steps
+		const failures: string[] = [];
+		const kinds = new Set<string>();
+		let tried = 0;
+		const explore = async (order: Step[]): Promise<void> => {
+			const outcome = await runOrder(order);
+			tried += 1;
+			for (const step of order) kinds.add(step.split(' ')[0]);
+			for (const erased of outcome.erased) failures.push(`${order.join(' > ')}: ${erased}`);
+			if (order.length < MAX_DEPTH) for (const step of outcome.next) await explore([...order, step]);
+		};
+		await explore([]);
+		console.log(`ordering: ${tried} orders tried, ${failures.length} erased a write`);
+		assert.deepEqual([...kinds].sort(), ['release', 'reload', 'save', 'start', 'teammate'], 'every kind of step was tried');
+		assert.deepEqual(failures.slice(0, 10), [], `${failures.length} of ${tried} orders erased a write`);
+	} finally {
+		mock.timers.reset();
+	}
+});
+
 test('no order of agent edits, team switch and tool timeout erases a write', async () => {
 	mock.timers.enable({ apis: ['setTimeout'] });
 	try {
-		const { tried, kinds, failures } = await exploreAll(false);
-		console.log(`ordering: ${tried} orders tried, ${failures.length} erased a write`);
+		const { tried, kinds, failures } = await exploreSwitch(false);
+		console.log(`ordering (team switch): ${tried} orders tried, ${failures.length} erased a write`);
 		assert.deepEqual(kinds, ['release', 'start', 'switch', 'timeout'], 'every kind of step was tried');
 		assert.deepEqual(failures.slice(0, 10), [], `${failures.length} of ${tried} orders erased a write`);
 	} finally {
@@ -332,10 +105,64 @@ test('no order of agent edits, team switch and tool timeout erases a write', asy
 test('no order of approvals, agent edits, team switch and tool timeout erases a write or asks over one', async () => {
 	mock.timers.enable({ apis: ['setTimeout'] });
 	try {
-		const { tried, kinds, failures } = await exploreAll(true);
-		console.log(`ordering with approvals: ${tried} orders tried, ${failures.length} erased a write or asked over one`);
+		const { tried, kinds, failures } = await exploreSwitch(true);
+		console.log(`ordering (team switch) with approvals: ${tried} orders tried, ${failures.length} erased a write or asked over one`);
 		assert.deepEqual(kinds, ['approve', 'release', 'start', 'switch', 'timeout'], 'every kind of step was tried');
 		assert.deepEqual(failures.slice(0, 10), [], `${failures.length} of ${tried} orders erased a write or asked over one`);
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test('no order of agent edits, editor saves, Commit all, the discards and a rollback in manual mode loses or erases a write', async () => {
+	mock.timers.enable({ apis: ['setTimeout'] });
+	try {
+		// step: the user saves the first file, then the agent edits it; Commit all stores both changes
+		const plain = await runManual(['save', 'start', 'commit']);
+		assert.deepEqual(plain.failures, []);
+		assert.deepEqual(tokens(plain.final.get(FILE) ?? ''), new Set([ORIGINAL, 'ed1', 'agent']));
+
+		// step: depth-first over every order of up to MANUAL_DEPTH steps
+		const found = await exploreManual();
+		report('manual', found);
+		assert.deepEqual([...found.kinds].sort(), ['commit', 'discard', 'discard-file', 'release', 'rollback', 'save', 'start', 'type'], 'every kind of step was tried');
+		assert.deepEqual(found.failures.slice(0, 10), [], `${found.failures.length} of ${found.tried} orders broke a rule`);
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test('from a working layer the page restored, no order of the same steps in manual mode loses or erases a write', async () => {
+	mock.timers.enable({ apis: ['setTimeout'] });
+	try {
+		// step: with the first file saved, the restored change, the user's and the agent's work all land
+		const plain = await runManual(['save', 'start'], { restored: true });
+		assert.deepEqual(plain.failures, []);
+		assert.deepEqual(tokens(plain.final.get(FILE) ?? ''), new Set([ORIGINAL, 'saved', 'ed1', 'agent']));
+
+		// step: depth-first over every order of up to MANUAL_DEPTH steps
+		const found = await exploreManual({ restored: true });
+		report('manual, from a restored working layer', found);
+		assert.deepEqual([...found.kinds].sort(), ['commit', 'discard', 'discard-file', 'release', 'rollback', 'save', 'start', 'type'], 'every kind of step was tried');
+		assert.deepEqual(found.failures.slice(0, 10), [], `${found.failures.length} of ${found.tried} orders broke a rule`);
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("with an editor's first read slow, no order of the same steps in manual mode loses or erases a write", async () => {
+	mock.timers.enable({ apis: ['setTimeout'] });
+	try {
+		// step: with nothing in the way, the slow read lands and so does the agent's edit
+		const plain = await runManual(['start'], { slowRead: true });
+		assert.deepEqual(plain.failures, []);
+		assert.deepEqual(tokens(plain.final.get(FILE) ?? ''), new Set([ORIGINAL, 'agent']));
+
+		// step: depth-first over every order of up to MANUAL_DEPTH steps
+		const found = await exploreManual({ slowRead: true });
+		report('manual, with a slow first read', found);
+		assert.deepEqual([...found.kinds].sort(), ['commit', 'discard', 'discard-file', 'release', 'rollback', 'save', 'start', 'type'], 'every kind of step was tried');
+		assert.deepEqual(found.failures.slice(0, 10), [], `${found.failures.length} of ${found.tried} orders broke a rule`);
 	} finally {
 		mock.timers.reset();
 	}

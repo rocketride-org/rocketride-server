@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// WAVE LOOP TESTS — the done rule, reading replies, same-file order, stop and steering, no key past a tool, and timed-out calls
+// WAVE LOOP TESTS — the done rule, reading replies, same-file order, stop and steering, no key past a tool, timed-out calls and notes
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -722,4 +722,21 @@ test('a call whose prepare timed out holds nothing back, since its work never be
 	assert.match(String(entries.get('wave-0.r0')?.error), /^TimeoutError/);
 	assert.equal(entries.get('wave-0.r1')?.error, undefined);
 	assert.deepEqual(events, ['start 1', 'write 1']);
+});
+
+// =============================================================================
+// NOTES — what the run tells the model at the top of each wave
+// =============================================================================
+
+test("the notes option adds this wave's notes to its question, and keeps them on a retry", async () => {
+	let wave = 0;
+	const model = scriptedModel(['not json', plan([['read', {}]]), done('ok')]);
+	await setup(model, [stub('read')], { notes: () => [`note ${wave++}`] }).run();
+	const seen = model.questions.map((q) => q.context.filter((c) => c.startsWith('note') || c.startsWith('Your previous reply')));
+	assert.deepEqual(
+		seen.map((notes) => notes.length),
+		[1, 2, 1]
+	);
+	assert.deepEqual([seen[0][0], seen[1][0], seen[2][0]], ['note 0', 'note 0', 'note 1']);
+	assert.match(seen[1][1], /^Your previous reply was not usable/);
 });
