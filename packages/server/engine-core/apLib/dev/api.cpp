@@ -36,6 +36,19 @@ file::Path &actualCrashDumpLocation() noexcept {
 
 namespace ap::dev {
 
+// Crash dumps hold process memory, so the engine writes them only when asked
+application::Opt Dumps{"--dumps"};
+
+// A bare --dumps reaches the engine as "true"; application::init() clears the
+// option when it refuses a value
+bool dumpsEnabled() noexcept { return Dumps.val() == "true"; }
+
+Opt<Text> dumpsValueArg(const std::vector<Text> &args) noexcept {
+    for (const auto &arg : args)
+        if (string::startsWith(arg, "--dumps=", false)) return arg;
+    return {};
+}
+
 size_t g_nextSlot = 1;
 std::map<size_t, FatalityHandler> g_fatalityHandlers;
 

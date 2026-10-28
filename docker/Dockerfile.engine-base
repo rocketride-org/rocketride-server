@@ -19,8 +19,8 @@
 # installs a run makes. First-run wheel installs write headers into include/.
 FROM ubuntu:jammy-20240808@sha256:adbb90115a21969d2fe6fa7f9af4253e16d45f8d4c1e930182610c4731962658 AS tree
 COPY dist/server/ /opt/rocketride/
-# The engine starts crashpad_handler on every run, the build's own runs included;
-# once root owns it, uid 1000 needs the execute bit, which the source may lack.
+# The engine starts crashpad_handler when run with --dumps; once root
+# owns it, uid 1000 needs the execute bit, which the source may lack.
 RUN chown -R 1000:1000 /opt/rocketride \
  && find /opt/rocketride -maxdepth 1 -type f -exec chown 0:0 {} + \
  && chmod 0711 /opt/rocketride/crashpad_handler \

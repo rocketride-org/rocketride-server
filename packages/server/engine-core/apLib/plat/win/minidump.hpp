@@ -64,7 +64,10 @@ inline Error createMinidump(::PEXCEPTION_POINTERS pExceptionInfo,
     return {};
 }
 
+// Every dump on Windows comes through here; written only with --dumps
 inline Error createMinidump(::PEXCEPTION_POINTERS pExceptionInfo) noexcept {
+    if (!dev::dumpsEnabled()) return {};
+
     return createMinidump(pExceptionInfo, dev::createCrashDumpPath("mdmp"_tv));
 }
 

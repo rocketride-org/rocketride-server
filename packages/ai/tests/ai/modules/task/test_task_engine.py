@@ -1277,6 +1277,54 @@ async def test_start_passes_the_hosting_flags(monkeypatch, saas, flags):
     assert checked == ([True] if saas else [])
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('startup', 'user', 'passed'),
+    [
+        ([], [], []),
+        (['--dumps'], [], ['--dumps']),
+        (['--DUMPS'], [], ['--DUMPS']),
+        (['--dumps=/var/dumps'], [], ['--dumps=/var/dumps']),
+        ([], ['--dumps'], []),
+        ([], ['--trace=debugOut --Dumps=/tmp'], []),
+        (['--dumps'], ['--dumps'], ['--dumps']),
+        (['--dumps=/var/dumps'], ['--dumps=/tmp'], ['--dumps=/var/dumps']),
+    ],
+)
+async def test_start_passes_dumps_only_from_the_operator(monkeypatch, startup, user, passed):
+    """A task writes crash dumps only when the operator started the engine with
+    --dumps; a pipeline caller's args cannot turn them on. The option goes on
+    as given, value included, so the task reads it the same way.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
+    monkeypatch.setattr(engine, 'startup_args', lambda: startup)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={})
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {'args': user}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    spawn = AsyncMock(side_effect=Launched)
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+    with pytest.raises(Launched):
+        await Task.start_task(t)
+
+    assert [a for a in spawn.call_args.args if a.split('=', 1)[0].lower() == '--dumps'] == passed
+
+
 # ---------------------------------------------------------------------------
 # filter_subprocess_env — the child inherits an allowlist, never the whole env
 # ---------------------------------------------------------------------------

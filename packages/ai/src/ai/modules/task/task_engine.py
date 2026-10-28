@@ -336,6 +336,15 @@ CONST_MCP_CLIENT_NODE_PATH = 'nodes.tool_mcp_client'
 CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
 CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
 
+# Crash dumps hold process memory, so they are the operator's call: a task gets
+# this engine's own --dumps, as given, never one from pipeline-supplied args.
+CONST_DUMPS_FLAG = '--dumps'
+
+
+def _is_dumps(arg: str) -> bool:
+    """True for any spelling the engine takes as --dumps: any case, with or without '=value'."""
+    return arg.split('=', 1)[0].lower() == CONST_DUMPS_FLAG
+
 
 def _service_capabilities(service: Any) -> List[str]:
     """Capability names of a service definition, lower-cased."""
@@ -2625,6 +2634,9 @@ class Task(DAPBase):
                 else:
                     child_args.append(arg)
 
+            # A caller cannot turn crash dumps on (see CONST_DUMPS_FLAG)
+            child_args = [a for a in child_args if not _is_dumps(a)]
+
             # Inherit parent engine's --trace setting if not explicitly provided
             if not any(a.startswith('--trace=') for a in child_args):
                 for arg in startup_args():
@@ -2639,6 +2651,13 @@ class Task(DAPBase):
                     if arg.startswith('--node_path='):
                         child_args.append(arg)
                         break
+
+            # Inherit parent engine's --dumps as given, so the task reads any
+            # value the same way; the engine takes the first
+            for arg in startup_args():
+                if _is_dumps(arg):
+                    child_args.append(arg)
+                    break
 
             await self._send_status_update()
 

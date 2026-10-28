@@ -1,12 +1,20 @@
 # Crash reporting
 
-When the engine crashes it writes a **minidump** -- a compact snapshot of the
+When the engine crashes it can write a **minidump** -- a compact snapshot of the
 process state at the moment of the fault. Minidumps use the same format on every
 platform, so one symbolication workflow covers all of them.
 
+Dumps are **opt-in**: a minidump holds process memory, so the engine writes one
+only when started with `--dumps`. Without it a crash is still logged, but the
+engine starts no `crashpad_handler`, writes no dump and recovers none.
+`--dumps=<value>` will choose where dumps go (#2892); until then the engine
+refuses to start when given any value, even `true` or an empty one. `eaas.py` passes its own `--dumps` on to
+the task processes it starts, as given; a pipeline's own task arguments cannot
+turn it on.
+
 - **Linux & macOS:** [Crashpad](https://chromium.googlesource.com/crashpad/crashpad/)
   runs its handler (`crashpad_handler`) out-of-process. It ships next to the
-  engine binary and is started automatically at engine startup.
+  engine binary and is started at engine startup.
 - **Windows:** the engine writes the dump in-process via the native DbgHelp
   `MiniDumpWriteDump` API. The handler is installed inside `engine.dll`, the
   shared module `engine.exe` loads and hands off to immediately -- so a crash
