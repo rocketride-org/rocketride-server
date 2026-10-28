@@ -1651,8 +1651,9 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 		const withoutTeammate = [...finalTokens].filter((t) => t !== 'teammate').join('+');
 		// step: the view counts versions for a write that failed, and tells no editor: an editor at a version from that write's
 		// call to its failure, with the file at the version of its failure and no other write landed meanwhile, is behind for
-		// that alone (a known limit)
-		const behindFailed = failedWrites.some((w) => w.before <= editor.version() && editor.version() < w.after && w.after === staged.version(path) && !landedVersions.some((v) => v > w.before && v <= w.after));
+		// that alone (a known limit). So is one a single count behind after a read took a copy in since: that read counted the
+		// copy for the editor too, but not the failure, which landed while the read waited for the write
+		const behindFailed = failedWrites.some((w) => w.before <= editor.version() && editor.version() < w.after && w.after === staged.version(path) && !landedVersions.some((v) => v > w.before && v <= w.after)) || (failedWrites.length === 1 && staged.version(path) - editor.version() === 1 && !landedVersions.some((v) => v > failedWrites[0].before));
 		if (!editor.dirty() && (buffer !== final || editor.version() !== staged.version(path))) {
 			// step: the view counts a version when a write is refused for a teammate's change, and tells no editor: one that
 			// holds what the view stores, or the file without the teammate's change, is behind for that alone
