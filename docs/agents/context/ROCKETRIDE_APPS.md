@@ -768,8 +768,9 @@ events only. For your app's internal communication, use ordinary React
 state or your own emitter; do not overload the shell bus.
 
 **Telemetry facts.** The shell has no analytics SDK: it raises `auth:start`
-and `auth:complete` as `shell:telemetry` for the active app to forward to its
-own analytics. A fact raised while no app listens is held (32 facts, 30
+and `auth:complete` (with `is_new`, `waitlisted` and `duration_ms`, the round
+trip since `auth:start`, null when unknown) as `shell:telemetry` for the
+active app to forward to its own analytics. A fact raised while no app listens is held (32 facts, 30
 minutes, in the tab's sessionStorage) until the app calls
 `cm.drainTelemetry?.()` (optional: older shells lack it): drain once at
 analytics init, then subscribe, and forward each fact once by its `id` with
