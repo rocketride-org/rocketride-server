@@ -46,6 +46,7 @@ import { configureSessions, deleteSession as deleteStoredSession, getAgentSessio
 import type { AgentSessionFile, AgentSessionMeta } from './sessions';
 // TEMPORARY (spec §11): delete when Rod's wiring lands
 import { StandinPipelines } from './standin';
+import { looksLikeCredential, redactText } from './toolkits/common';
 import type { AppPrompts } from './wave/plan';
 
 export type { AgentSessionFile, AgentSessionMeta } from './sessions';
@@ -133,6 +134,29 @@ const TITLE_MAX = 60;
 const UNTITLED = 'New session';
 
 /**
+ * The error row for a message that looks like it holds a key. The model is
+ * not called, so the key goes nowhere; the user row, live and saved, has it
+ * redacted.
+ *
+ * @param kind - What the key looks like, as looksLikeCredential names it.
+ * @returns The message the chat shows as an error.
+ */
+function pastedKeyMessage(kind: string): string {
+	return `That message looks like it contains a key (${kind}). I did not send it to the model. Put it in Variables and refer to it as \${ROCKETRIDE_<NAME>}.`;
+}
+
+/**
+ * The note for a key sent while a turn runs. The chat shows it as markdown,
+ * so the placeholder sits in a code span.
+ *
+ * @param kind - What the key looks like, as looksLikeCredential names it.
+ * @returns The note.
+ */
+function removedKeyNote(kind: string): string {
+	return `I removed a key (${kind}) from your message, so it was not sent. Put it in Variables and refer to it as \`\${ROCKETRIDE_<NAME>}\`.`;
+}
+
+/**
  * One agent conversation. The mounted tab provider owns its instance:
  * Documents keeps open tabs mounted, so switching tabs never unmounts a
  * conversation, and reopening a closed tab reloads from disk via
@@ -150,6 +174,8 @@ export class AgentSession {
 	contextRefs: string[];
 	/** The persisted conversation, hydrated for useChatMessages initialMessages. */
 	messages: ChatMessage[];
+	/** What screen() sent in place of a message with a key, each with what the key looked like. */
+	private readonly withheld = new Map<string, string>();
 
 	/**
 	 * Builds an in-memory session; private — hosts go through the statics.
@@ -238,6 +264,24 @@ export class AgentSession {
 	// ── Instance — one conversation ──────────────────────────────────────
 
 	/**
+	 * Readies what the user typed before the chat makes it a row. A message
+	 * that looks like it holds a key comes back with each key as `[redacted]`,
+	 * so no row shows the key, live or queued. A turn that opens on it is
+	 * refused like the message itself (execute); a running turn that takes it
+	 * reads it without the key.
+	 *
+	 * @param text - What the user typed.
+	 * @returns The text to send, and the note to show when it is sent during a turn ('' when it held no key).
+	 */
+	screen(text: string): { text: string; note: string } {
+		const kind = looksLikeCredential(text);
+		if (!kind) return { text, note: '' };
+		const sent = redactText(text);
+		this.withheld.set(sent, kind);
+		return { text: sent, note: removedKeyNote(kind) };
+	}
+
+	/**
 	 * Runs one request through the agent transport. This is the `request`
 	 * function injected into useChatMessages: the hook renders each returned
 	 * TextResult as a bot message (and owns the user-message append).
@@ -246,15 +290,20 @@ export class AgentSession {
 	 * @param onStatus - The chat's live status sink (the hook's second `request` argument). With it, each `thinking` chunk goes to it as it arrives and is not returned; without it, every chunk is returned.
 	 * @param turn - The running chat turn (the hook's third `request` argument). The hook always passes it; it is optional only because the shell's v0 `request` type is frozen.
 	 * @returns One TextResult per agent output chunk that was not sent to the sink.
-	 * @throws When no turn is passed.
+	 * @throws When no turn is passed, or when the request looks like it holds a key; the hook shows the message as an error row, and the model is never called.
 	 */
 	async execute(text: string, onStatus?: AgentCallback, turn?: ChatTurn): Promise<TextResult[]> {
 		// queued turns can chain with no idle save between them, so this.messages may miss the turn before; the turn's history never does
 		if (!turn) throw new Error('AgentSession.execute runs inside a chat turn: pass the turn useChatMessages hands its request.');
-		// step: the first request names the session for the catalog row
+		// step: the first request names the session for the catalog row; a key is
+		// redacted before the cut, so no part of one lands in the title
 		if (this.title === UNTITLED) {
-			this.title = text.length > TITLE_MAX ? `${text.slice(0, TITLE_MAX - 1)}…` : text;
+			const title = redactText(text);
+			this.title = title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title;
 		}
+		// step: a request that looks like it holds a key, or that screen() sent without one, never reaches the model
+		const kind = looksLikeCredential(text) ?? this.withheld.get(text);
+		if (kind) throw new Error(pastedKeyMessage(kind));
 		// step: thinking streams live to the sink; the rest is collected into renderable rows
 		const { callback, results } = routeChunks(onStatus);
 		// TEMPORARY (spec §11): delete when Rod's wiring lands
@@ -265,18 +314,22 @@ export class AgentSession {
 	/**
 	 * Persists the conversation (session file + catalog row). Called by the
 	 * provider after each completed exchange with the hook's message list.
+	 * Every row and the title pass through redactText, so a key the user
+	 * pasted is stored, and shown again when the session reopens, only as
+	 * `[redacted]`. The history a turn sends is redacted in run.ts (toHistory).
 	 *
 	 * @param messages - The full conversation as rendered by the chat hook.
 	 */
 	async save(messages: ChatMessage[]): Promise<void> {
-		this.messages = messages;
+		const rows = messages.map((m) => ({ ...m, text: redactText(m.text) }));
+		this.messages = rows;
 		await saveSession({
 			version: 1,
 			sessionId: this.sessionId,
-			title: this.title,
+			title: redactText(this.title),
 			date: this.date,
 			contextRefs: this.contextRefs,
-			messages,
+			messages: rows,
 		});
 	}
 }

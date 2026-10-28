@@ -242,7 +242,7 @@ export function heardText(heard: string[]): string {
  * @param prefix - The run's fixed start (see buildPrefix).
  * @param history - Earlier conversation turns, oldest first; it only grows at the end.
  * @param state - This wave's request, scratch notes, results, the user's mid-run messages and loop notes.
- * @returns The question, asking for JSON and for the start to be cached.
+ * @returns The question, asking for the start to be cached.
  */
 export function buildWaveQuestion(prefix: PromptPrefix, history: HistoryTurn[], state: WaveState): QuestionSpec {
 	const context: string[] = [];
@@ -257,7 +257,8 @@ export function buildWaveQuestion(prefix: PromptPrefix, history: HistoryTurn[], 
 		goals: [state.request],
 		context,
 		question: WAVE_QUESTION,
-		expectJson: true,
+		// parseReply reads the reply, because the engine's JSON check ends the turn when more blocks follow the plan.
+		expectJson: false,
 		cachePrefix: true,
 	};
 }

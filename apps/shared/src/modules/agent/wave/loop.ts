@@ -46,6 +46,8 @@
  * instructions, so the cached start stays identical on every call.
  */
 
+import { redactText } from '../toolkits/common';
+import type { SecretMarkers } from '../toolkits/secretMarkers';
 import type { AgentTool, ToolAct, ToolStep } from '../tools';
 import { MEMORY_PEEK_TOOL, peek, resolveAnswerRefs, resolveArgRefs, resultKey, RunMemory } from './memory';
 import { buildWaveQuestion, heardText, parseReply, type PromptPrefix } from './plan';
@@ -130,6 +132,8 @@ export interface LoopOptions {
 	 * reaches it.
 	 */
 	approve: (act: ToolAct, run: () => Promise<string>) => Promise<() => Promise<string>>;
+	/** The values the file tools hid this run; any other result that quotes one shows its marker. */
+	secrets?: SecretMarkers;
 }
 
 /** How a run ended. */
@@ -361,6 +365,18 @@ function partialReport(cause: string, lines: string[], scratch: string): string 
  */
 export type CallOutcome = { ok: true; result: string; ms: number } | { ok: false; error: string; ms: number; timedOut: boolean; unstarted?: true };
 
+/**
+ * An outcome with each value the file tools hid shown as its marker, then
+ * passed through redactText. Every outcome goes through it before anything
+ * reads it, so no credential in a tool's result, its prepare error or its
+ * refusal reaches the stored result, the next question, a thinking line or
+ * the finish rule.
+ */
+function redactOutcome(outcome: CallOutcome, secrets?: SecretMarkers): CallOutcome {
+	const hide = (text: string): string => redactText(secrets ? secrets.hideKnown(text) : text);
+	return outcome.ok ? { ...outcome, result: hide(outcome.result) } : { ...outcome, error: hide(outcome.error) };
+}
+
 // =============================================================================
 // WRITE PATHS — what a call changes
 // =============================================================================
@@ -527,17 +543,18 @@ function timed<T>(work: () => Promise<T>, limitMs: number, signal: AbortSignal, 
 /**
  * Tracks a call the wave stopped waiting for in `late` until it settles. The
  * tracker never rejects, so a late failure is not an unhandled rejection; it
- * notes how the call ended, then leaves `late`.
+ * notes how the call ended, passed through redactText as an outcome is, then
+ * leaves `late`.
  */
 function trackLate(late: Map<Promise<unknown>, LateCall>, call: ToolCall, running: Promise<string>): void {
 	const lateCall: LateCall = { call };
 	const tracked: Promise<void> = running
 		.then(
 			(result) => {
-				lateCall.ended = { result };
+				lateCall.ended = { result: redactText(result) };
 			},
 			(error: unknown) => {
-				lateCall.ended = { error: messageOf(error) };
+				lateCall.ended = { error: redactText(messageOf(error)) };
 			}
 		)
 		.then(() => {
@@ -642,10 +659,15 @@ class WaveRun {
 		return this.results.length > 0 || this.scratch.length > 0;
 	}
 
-	/** Takes the messages the user sent since the last take into `heard`, and returns how many came. */
+	/**
+	 * Takes the messages the user sent since the last take into `heard`, and
+	 * returns how many came. Each passes through redactText first: a mid-run
+	 * message never goes through AgentSession.execute, so a key pasted into
+	 * one would otherwise reach every later question.
+	 */
 	hear(): number {
 		const taken = this.o.takeQueued();
-		this.heard.push(...taken);
+		this.heard.push(...taken.map(redactText));
 		return taken.length;
 	}
 
@@ -711,7 +733,7 @@ class WaveRun {
 
 		const runnable = prepared.flatMap((p) => ('args' in p ? [{ tool: p.call.tool, args: p.args }] : []));
 		const steps: CallSteps = { prepare: (call) => this.prepare(call), approve: this.o.approve };
-		const outcomes = await runWave(runnable, steps, { timeoutMs: (tool) => this.limit(tool), late: this.late, signal: this.o.signal });
+		const outcomes = (await runWave(runnable, steps, { timeoutMs: (tool) => this.limit(tool), late: this.late, signal: this.o.signal })).map((outcome) => redactOutcome(outcome, this.o.secrets));
 
 		let next = 0;
 		const ran: RanCall[] = [];
