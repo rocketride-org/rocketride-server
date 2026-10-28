@@ -35,6 +35,7 @@
 import type { ConnectResult, DAPMessage } from 'rocketride';
 import type { ConnectionStatus } from './connection';
 import type { CheckoutPlan, PromoValidation } from '../modules/checkout/types';
+import type { TelemetryFact } from '../util/telemetryChannel';
 
 // =============================================================================
 // APP ENTRY — minimal shape for app catalog events
@@ -221,11 +222,9 @@ export interface ShellConnectionEventMap {
 	 * The shell has no analytics transport; the active app forwards these to its
 	 * own. Facts raised before any app subscribed, or whose last listener left
 	 * before their dispatch, are kept in the connection manager's buffer and
-	 * handed over by `drainTelemetry()`. `ts` is the
-	 * wall-clock time the fact was observed (ms), the forwarder's event time;
-	 * `id` is unique within the tab, the forwarder's once-per-fact key.
+	 * handed over by `drainTelemetry()`.
 	 */
-	'shell:telemetry': { event: string; props: Record<string, unknown>; ts: number; id: string };
+	'shell:telemetry': TelemetryFact;
 
 	/**
 	 * Request the shell open a built-in overlay (e.g. from a guest app's

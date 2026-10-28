@@ -22,7 +22,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { TelemetryChannel, TELEMETRY_BUFFER_MAX, TELEMETRY_STORAGE_KEY, TELEMETRY_TTL_MS, type FactStorage } from './telemetryChannel';
+import { TelemetryChannel, TELEMETRY_BUFFER_MAX, TELEMETRY_STORAGE_KEY, TELEMETRY_TTL_MS, type FactStorage, type TelemetryFact } from './telemetryChannel';
 
 /** An in-memory sessionStorage stand-in shared by several channel instances (page loads of one tab). */
 function fakeStorage(): FactStorage & { data: Map<string, string> } {
@@ -39,14 +39,29 @@ test('facts are held in order, get distinct ids, and are drained once', () => {
 	const ch = new TelemetryChannel({ storage: null, now: () => 1000 });
 	ch.report('auth:start', { register: true, from_path: '/' });
 	ch.report('auth:complete', { is_new: true, source: 'shell' });
-	assert.equal(ch.size, 2);
 	const drained = ch.drain();
 	assert.deepEqual(drained.map((f) => f.event), ['auth:start', 'auth:complete']);
 	assert.deepEqual(drained[1].props, { is_new: true, source: 'shell' });
 	assert.deepEqual(drained.map((f) => f.ts), [1000, 1000]);
 	assert.notEqual(drained[0].id, drained[1].id, 'two facts in one millisecond are two facts');
-	assert.equal(ch.size, 0);
-	assert.deepEqual(ch.drain(), []);
+	assert.deepEqual(ch.drain(), [], 'drained once');
+});
+
+test('hold keeps a fact exactly as given, id included, in order with reported facts, bounded and mirrored', () => {
+	const storage = fakeStorage();
+	const ch = new TelemetryChannel({ storage, now: () => 1000 });
+	const live: TelemetryFact = { event: 'auth:complete', props: { is_new: false }, ts: 900, id: 'x-l0' };
+	const reported = ch.report('auth:start', { register: false });
+	ch.hold(live);
+	const mirrored = JSON.parse(storage.data.get(TELEMETRY_STORAGE_KEY) ?? '[]') as TelemetryFact[];
+	assert.deepEqual(mirrored.map((f) => f.id), [reported?.id, 'x-l0'], 'mirrored, in order, with its own id');
+	assert.deepEqual(ch.drain().map((f) => f.id), [reported?.id, 'x-l0']);
+
+	for (let i = 0; i < TELEMETRY_BUFFER_MAX + 3; i++) ch.hold({ ...live, id: `x-l${i}` });
+	const drained = ch.drain();
+	assert.equal(drained.length, TELEMETRY_BUFFER_MAX, 'bounded like report()');
+	assert.equal(drained[0].id, 'x-l3', 'the oldest went first');
+	assert.deepEqual(drained.at(-1), { ...live, id: `x-l${TELEMETRY_BUFFER_MAX + 2}` }, 'held as given');
 });
 
 test('props are copied, so later mutation of the caller object does not change the fact', () => {

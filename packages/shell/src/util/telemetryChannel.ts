@@ -101,11 +101,19 @@ export class TelemetryChannel {
 	report(event: string, props: Record<string, unknown>, ts?: number): TelemetryFact | null {
 		if (typeof event !== 'string' || event === '') return null;
 		const when = typeof ts === 'number' && Number.isFinite(ts) && ts > 0 ? ts : this.now();
-		const fact: TelemetryFact = { event, props: { ...(props ?? {}) }, ts: when, id: `${when.toString(36)}-${(this.seq++).toString(36)}` };
+		const fact: TelemetryFact = { event, props: { ...props }, ts: when, id: `${when.toString(36)}-${(this.seq++).toString(36)}` };
+		this.hold(fact);
+		return fact;
+	}
+
+	/**
+	 * Hold a fact exactly as given, id included: a fact the caller already numbered (and logged)
+	 * whose live delivery did not happen. Bounded like report(): the oldest go first.
+	 */
+	hold(fact: TelemetryFact): void {
 		this.facts.push(fact);
 		if (this.facts.length > TELEMETRY_BUFFER_MAX) this.facts.splice(0, this.facts.length - TELEMETRY_BUFFER_MAX);
 		this.persist();
-		return fact;
 	}
 
 	/**
@@ -136,11 +144,6 @@ export class TelemetryChannel {
 		this.inherited = [];
 		this.facts = [];
 		this.clearMirror();
-	}
-
-	/** Facts held in memory by this page load (the inherited ones are not counted). */
-	get size(): number {
-		return this.facts.length;
 	}
 
 	/** Mirror the held facts (inherited first, bounded) to storage. Never throws. */

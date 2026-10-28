@@ -66,8 +66,13 @@ import {
 	SERVICES_REFRESH_JITTER_MS,
 } from '../constants';
 
-/** sessionStorage stamp of the last OAuth start (ms); the forwarding app times the round trip to auth:complete from it. */
-const SS_AUTH_START_TS = 'rr:auth:start_ts';
+/**
+ * sessionStorage stamp of the last OAuth start (ms). Shell-internal: startOAuth writes it, and the callback that
+ * completes the sign-in reads and removes it to report the round trip on auth:complete as `duration_ms`.
+ */
+const SS_AUTH_START_TS = 'rr:shell:auth_start_ts';
+/** A stamp further than this from the completion is not this round trip: auth:complete then reports no duration. */
+const AUTH_ROUND_TRIP_MAX_MS = 60 * 60 * 1000;
 
 // =============================================================================
 // TYPES
@@ -593,7 +598,7 @@ export class ConnectionManager implements IConnectionManager {
 			// instead of lost, unless the held facts were dropped meanwhile (a sign-out, a rejected credential).
 			const seq = this.telemetrySeq++;
 			const id = `${ts.toString(36)}-l${seq.toString(36)}`;
-			const fact: TelemetryFact = { event, props: { ...(props ?? {}) }, ts, id };
+			const fact: TelemetryFact = { event, props: { ...props }, ts, id };
 			const drops = this.telemetryDrops;
 			this.logDebug('shell:telemetry', fact);
 			this.telemetryInFlight++;
@@ -603,7 +608,8 @@ export class ConnectionManager implements IConnectionManager {
 					if (live && live.size > 0) {
 						this.dispatch(live, 'shell:telemetry', fact);
 					} else if (drops === this.telemetryDrops) {
-						this.telemetry.report(event, fact.props, ts);
+						// held as logged above, id included, so the debug log and the drain agree
+						this.telemetry.hold(fact);
 					}
 				} catch { /* telemetry must never break the shell */ } finally {
 					this.telemetryInFlight--;
@@ -650,7 +656,7 @@ export class ConnectionManager implements IConnectionManager {
 		// embedded (iframe) flow signs in through the auth popup, whose facts stay in the
 		// popup's own sessionStorage and are discarded when it closes: embedded sign-ins are
 		// not reported. CloudAuthProvider.signIn(), also on the shell API, does not raise it.
-		// The stamp lets the forwarding app time the round trip.
+		// The stamp times the round trip to auth:complete (takeAuthRoundTripMs).
 		if (!isEmbeddedDevShell()) {
 			try { sessionStorage.setItem(SS_AUTH_START_TS, String(Date.now())); } catch { /* storage unavailable */ }
 		}
@@ -804,7 +810,7 @@ export class ConnectionManager implements IConnectionManager {
 				if (completed) {
 					const isNew = completed.result.isNewUser ?? null;
 					const waitlisted = completed.result.waitlisted === true;
-					this.reportTelemetry('auth:complete', { is_new: isNew, waitlisted, source: 'shell' });
+					this.reportTelemetry('auth:complete', { is_new: isNew, waitlisted, source: 'shell', duration_ms: this.takeAuthRoundTripMs() });
 				}
 				return completed;
 			} catch (error) {
@@ -1432,6 +1438,31 @@ export class ConnectionManager implements IConnectionManager {
 		if (!isEmbeddedDevShell()) {
 			try { sessionStorage.removeItem(SS_AUTH_START_TS); } catch { /* storage unavailable */ }
 		}
+	}
+
+	/**
+	 * The OAuth round trip that just completed: milliseconds since startOAuth's stamp. The stamp is
+	 * removed here, so a later completion is never timed from it. Never throws.
+	 *
+	 * @returns The duration, or null without a stamp (an embedded preview, a sign-in that did not
+	 *          start in this tab) or with one that is not a plausible round trip.
+	 */
+	private takeAuthRoundTripMs(): number | null {
+		if (isEmbeddedDevShell()) {
+			return null;
+		}
+		let raw: string | null;
+		try {
+			raw = sessionStorage.getItem(SS_AUTH_START_TS);
+			sessionStorage.removeItem(SS_AUTH_START_TS);
+		} catch {
+			return null; // storage unavailable
+		}
+		const elapsed = Date.now() - Number(raw);
+		if (!raw || !Number.isFinite(elapsed) || elapsed < 0 || elapsed > AUTH_ROUND_TRIP_MAX_MS) {
+			return null;
+		}
+		return elapsed;
 	}
 
 	/**
