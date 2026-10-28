@@ -35,14 +35,22 @@
 // most. No DOM: unit-tested under node:test with an injected storage.
 // =============================================================================
 
-export interface TelemetryFact {
+/**
+ * A product-telemetry fact the shell observed: the payload of `shell:telemetry` and an item of
+ * `drainTelemetry()`. Mirrors `TelemetryFact` in packages/client-typescript/src/app-sdk/types.ts,
+ * the copy apps import from `rocketride/app-sdk`; a change here must be made there too
+ * (telemetryChannel.test.ts fails to type-check while the two differ).
+ */
+export type TelemetryFact = {
+	/** Event name from the app's telemetry contract (e.g. 'auth:start'). */
 	event: string;
+	/** Flat properties of the fact; the forwarding app adds its own super properties. */
 	props: Record<string, unknown>;
 	/** Wall-clock milliseconds when the fact was observed: the forwarding app's event time. */
 	ts: number;
 	/** Unique within the tab: the forwarding app's once-per-fact key. */
 	id: string;
-}
+};
 
 /** Oldest facts are dropped first once the hold is full. */
 export const TELEMETRY_BUFFER_MAX = 32;
@@ -52,11 +60,11 @@ export const TELEMETRY_TTL_MS = 30 * 60 * 1000;
 export const TELEMETRY_STORAGE_KEY = 'rr:shell:telemetry';
 
 /** The slice of the Web Storage interface the channel uses; injectable for tests. */
-export interface FactStorage {
+export type FactStorage = {
 	getItem(key: string): string | null;
 	setItem(key: string, value: string): void;
 	removeItem(key: string): void;
-}
+};
 
 /** The tab's sessionStorage, or null where there is none or its accessor throws (storage disabled). */
 function defaultStorage(): FactStorage | null {

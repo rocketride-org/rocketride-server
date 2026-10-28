@@ -501,6 +501,7 @@ export interface CheckoutPlan {
  * A product-telemetry fact the shell observed (`auth:start`, `auth:complete`),
  * the payload of `shell:telemetry` and an item of `drainTelemetry()`. The shell
  * has no analytics transport: the active app forwards facts to its own.
+ * Mirrors the shell's `TelemetryFact` (shell/src/util/telemetryChannel.ts).
  */
 export interface TelemetryFact {
 	/** Event name from the app's telemetry contract (e.g. 'auth:start'). */

@@ -22,7 +22,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { TelemetryFact as SdkTelemetryFact } from 'rocketride/app-sdk';
 import { TelemetryChannel, TELEMETRY_BUFFER_MAX, TELEMETRY_STORAGE_KEY, TELEMETRY_TTL_MS, type FactStorage, type TelemetryFact } from './telemetryChannel';
+
+/** True only when A and B are the same type (the identical-type check), so tsc rejects a `true` for two copies that drifted. */
+type IsSameType<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 /** An in-memory sessionStorage stand-in shared by several channel instances (page loads of one tab). */
 function fakeStorage(): FactStorage & { data: Map<string, string> } {
@@ -34,6 +38,11 @@ function fakeStorage(): FactStorage & { data: Map<string, string> } {
 		removeItem: (k) => { data.delete(k); },
 	};
 }
+
+test('TelemetryFact is the same type as the SDK copy apps import (checked by tsc)', () => {
+	const isSameType: IsSameType<TelemetryFact, SdkTelemetryFact> = true;
+	assert.equal(isSameType, true);
+});
 
 test('facts are held in order, get distinct ids, and are drained once', () => {
 	const ch = new TelemetryChannel({ storage: null, now: () => 1000 });
