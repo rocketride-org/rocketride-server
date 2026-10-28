@@ -36,7 +36,7 @@ import { test } from 'node:test';
 
 import { Documents } from 'shell/src/components/docs/Documents';
 
-import { registerEditor, saveDocumentEditor } from '../../../../rocket-ui/src/agent/editorControls';
+import { editorControl, registerEditor, saveDocumentEditor } from '../../../../rocket-ui/src/agent/editorControls';
 import { canvasDocument } from '../../../../rocket-ui/src/surfaces/pipelines/canvasDocument';
 import { appPath, scaffoldApp } from '../../../../rocket-ui/src/surfaces/preview/session/appStore';
 import { createWebAppBuilderHost } from '../../../../rocket-ui/src/surfaces/preview/session/webHost';
@@ -47,7 +47,7 @@ import { createWorkspace, type Workspace } from '../../../../rocket-ui/src/surfa
 import { CachedVfs } from 'shell/src/modules/explorer/CachedVfs';
 import { SaveDroppedError } from '../agent/host';
 import { FilesystemTools } from '../agent/toolkits/filesystem';
-import type { AgentTool } from '../agent/tools';
+import { RefusedError, type AgentTool } from '../agent/tools';
 import { FakeStore } from './fakeStore.harness';
 import { StagedFileSystem, StaleVersionError, StaleWriteError } from './stagedFileSystem';
 import { StagingStore } from './staging';
@@ -527,7 +527,7 @@ test("the agent's write refused for a teammate's change drops the cached copy, s
 	// step: the agent reads the file; a teammate changes it; the agent's edit is refused
 	await tool('read_file', { path });
 	s.store.files.set(s.a, 'const probe = 1; // teammate');
-	await assert.rejects(tool('edit_file', { path, oldString: 'const probe = 1;', newString: 'const probe = 2;' }), /^Error: edit_file refused: apps\/probe\.txt changed on the server since you read it \(another tab or a teammate\)\. Read it again, then redo the change from the current content\.$/);
+	await assert.rejects(tool('edit_file', { path, oldString: 'const probe = 1;', newString: 'const probe = 2;' }), /^RefusedError: edit_file refused: apps\/probe\.txt changed on the server since you read it \(another tab or a teammate\)\. Read it again, then redo the change from the current content\.$/);
 	assert.equal(s.store.files.get(s.a), 'const probe = 1; // teammate');
 
 	// step: the agent reads it again and gets the server's copy; its edit then lands on it
@@ -746,15 +746,21 @@ test('a canvas reload that cannot read the stored pipeline keeps its version, so
 	assert.equal(docs.getState().documents['chat.pipe'].dirty, false);
 });
 
-test('two editors of one path both guard it, and closing one keeps the other', async () => {
+test('two editors of one path both guard it: closing one keeps the other, and save and discard act on the dirty ones', async () => {
 	const s = storage();
 	const ws = await workspace(s.alpha);
 	const path = 'pipelines/chat.pipe';
+	const did: string[] = [];
 	const editor = (name: string, dirty: { on: boolean }) => ({
 		uri: `${name}.pipe`,
 		getContent: () => `${name} canvas`,
 		isDirty: () => dirty.on,
 		save: async () => {
+			did.push(`save ${name}`);
+			dirty.on = false;
+		},
+		discard: async () => {
+			did.push(`discard ${name}`);
 			dirty.on = false;
 		},
 	});
@@ -770,9 +776,21 @@ test('two editors of one path both guard it, and closing one keeps the other', a
 	assert.equal(ws.view.isDirty(path), true);
 	assert.equal(await ws.view.read(path), 'left canvas');
 
-	// step: the last one closes; nothing guards the file
+	// step: both dirty; save reaches each, discard none once they are clean
+	const closeAgain = registerEditor(ws.view, path, editor('right', right));
+	right.on = true;
+	await editorControl(ws.view, path)?.save(() => undefined);
+	assert.deepEqual(did, ['save left', 'save right']);
+	await editorControl(ws.view, path)?.discard();
+	assert.deepEqual(did, ['save left', 'save right']);
+
+	// step: the last one closes; nothing guards the file, and another workspace never had it
+	closeAgain();
 	closeLeft();
 	assert.equal(ws.view.isDirty(path), false);
+	assert.equal(editorControl(ws.view, path), null);
+	const other = await workspace(s.beta);
+	assert.equal(editorControl(other.view, path), null);
 });
 
 // =============================================================================
@@ -1724,3 +1742,129 @@ test("a team switch while a canvas's second save waits its turn keeps that save 
 // =============================================================================
 // WHAT WAITS ON A SAVE: Save & Run, publish, Save mine first and the close dialog's Save stop when it is dropped
 // =============================================================================
+
+// =============================================================================
+// THE AGENT'S SAVE MINE FIRST AND DISCARD MINE — on the editor documents
+// =============================================================================
+
+/**
+ * The agent's file tools over a workspace, with a dialog that gives one answer.
+ *
+ * @param ws - The workspace.
+ * @param answer - What the user answers.
+ */
+function agentTools(ws: Workspace, answer: 'save' | 'discard') {
+	const files = new FilesystemTools(ws.view, undefined, undefined, { choose: async () => answer, editor: (p) => editorControl(ws.view, p) });
+	return (name: string, args: Record<string, unknown>) => callTool(files.tools().find((t) => t.name === name)!, args);
+}
+
+test("the agent's Save mine first that waits its turn, and that the user's Don't Save close drops before it writes, refuses the edit as a call that changed nothing and says the changes were not saved", { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const { docs, pipePath, failures, leave, landed } = await openCanvas(s, ws, { name: 'Original', components: [] });
+	const path = 'pipelines/chat.pipe';
+	const tool = agentTools(ws, 'save');
+	await tool('read_file', { path });
+	docs.updateContent('chat.pipe', { name: 'First', components: [] });
+	const write = holdWrite(s, pipePath);
+	const first = outcome(editorControl(ws.view, path)?.save(() => undefined));
+	await write.held;
+	docs.updateContent('chat.pipe', { name: 'Mine', components: [] });
+
+	// step: the agent edits and the user answers Save mine first, whose save waits its turn. Then the user closes the tab
+	// and answers the shell's dirty-close dialog Don't Save
+	const editing = outcome(tool('edit_file', { path, oldString: '"components": []', newString: '"components": [], "agent": true' }));
+	await flush();
+	docs.closeEditor(Object.keys(docs.getState().editors)[0]);
+	leave();
+	write.release();
+	assert.equal(await first, 'saved');
+	const result = await editing;
+	await flush();
+	assert.deepEqual(names(landed), ['First'], 'neither the pipeline the user did not save nor an edit on top of it is written');
+	assert.ok(result instanceof RefusedError && /were not saved/.test(result.message), `the agent is told the changes were not saved, and the call changed nothing (got ${String(result)})`);
+	assert.deepEqual(failures, []);
+});
+
+test("the agent's Save mine first that joins a text tab's Ctrl+S on its way and then fails on a canvas of the same pipeline refuses the edit as a change", { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'pipelines/chat.pipe';
+	s.store.files.set(`@/Team/=${s.alpha}/.projects/chat.pipe`, JSON.stringify({ name: 'Original', components: [] }, null, 2));
+	const text = fileDocument(ws.view, path);
+	const closeText = text.open();
+	await text.load();
+	const { docs, pipePath, failures, leave, landed } = await openCanvas(s, ws, { name: 'Original', components: [] });
+	const tool = agentTools(ws, 'save');
+	await tool('read_file', { path });
+	// step: the text tab saves first; the canvas then holds a version the text tab's save moved on from
+	text.type(JSON.stringify({ name: 'Typed', components: [] }));
+	docs.updateContent('chat.pipe', { name: 'Canvas', components: [] });
+	// step: the text tab's Ctrl+S is on its way when the user answers, so its write was counted before the versions are taken
+	const write = holdWrite(s, pipePath);
+	const typed = outcome(text.save());
+	await write.held;
+	const editing = outcome(tool('edit_file', { path, oldString: '"components": []', newString: '"components": [], "agent": true' }));
+	await flush();
+	write.release();
+	const result = await editing;
+	assert.equal(await typed, 'saved');
+	assert.deepEqual(names(landed), ['Typed'], "the text tab's save landed and the canvas's did not");
+	assert.equal(failures.length, 1, "the canvas's save failed");
+	assert.ok(result instanceof Error && !(result instanceof RefusedError), `the edit is refused as a call that changed the file (got ${String(result)})`);
+	closeText();
+	leave();
+});
+
+test("the agent's Save mine first whose write lands but whose reply fails refuses the edit as a change, whether the write lands before the failure or after it", { timeout: 10_000 }, async () => {
+	for (const late of [false, true]) {
+		const s = storage();
+		const ws = await workspace(s.alpha);
+		const path = 'apps/probe.txt';
+		const doc = fileDocument(ws.view, path);
+		const close = doc.open();
+		await doc.load();
+		const tool = agentTools(ws, 'save');
+		await tool('read_file', { path });
+		doc.type('const probe = 1; // mine');
+		const write = s.store.client.fsWriteString;
+		s.store.client.fsWriteString = async (p: string, value: string) => {
+			if (p !== s.a) return write(p, value);
+			if (late) setImmediate(() => void write(p, value));
+			else await write(p, value);
+			throw new Error('the connection closed before the reply');
+		};
+		const result = await outcome(tool('edit_file', { path, oldString: 'probe = 1', newString: 'probe = 2' }));
+		await flush();
+		assert.equal(s.store.files.get(s.a), 'const probe = 1; // mine', `the user's text landed (late: ${late})`);
+		assert.ok(result instanceof Error && !(result instanceof RefusedError), `the edit is refused as a call that changed the file (late: ${late}, got ${String(result)})`);
+		close();
+	}
+});
+
+test("the agent's Save mine first on a folder move whose first file's save joins a Ctrl+S on its way and lands, and whose second file's save fails, refuses the move as a change", { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const store = (name: string) => `@/Team/=${s.alpha}/.projects/.appdev/demo/${name}`;
+	const docs = [];
+	for (const name of ['a.txt', 'b.txt']) {
+		s.store.files.set(store(name), `${name} stored`);
+		const doc = fileDocument(ws.view, `apps/demo/${name}`);
+		doc.open();
+		await doc.load();
+		doc.type(`${name} mine`);
+		docs.push(doc);
+	}
+	// step: b.txt moved on since its tab loaded it, so its save is refused before it writes
+	await ws.view.write('apps/demo/b.txt', 'b.txt teammate', 'agent');
+	const write = holdWrite(s, store('a.txt'));
+	const typed = outcome(docs[0].save());
+	await write.held;
+	const moving = outcome(agentTools(ws, 'save')('rename', { oldPath: 'apps/demo', newPath: 'apps/moved' }));
+	await flush();
+	write.release();
+	const result = await moving;
+	assert.equal(await typed, 'saved');
+	assert.deepEqual([s.store.files.get(store('a.txt')), s.store.files.get(store('b.txt'))], ['a.txt mine', 'b.txt teammate'], "a.txt's save landed and b.txt's did not");
+	assert.ok(result instanceof Error && !(result instanceof RefusedError) && /^rename refused: saving the unsaved changes in apps\/demo\/a\.txt and apps\/demo\/b\.txt failed/.test(result.message), `the move is refused as a call that changed a file (got ${String(result)})`);
+});

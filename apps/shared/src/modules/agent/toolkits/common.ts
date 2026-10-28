@@ -57,6 +57,25 @@ export function requireClient(get: ClientGetter): RocketRideClient {
 }
 
 // =============================================================================
+// UNSAVED CHANGES — asking the user what to do with their unsaved typing
+// =============================================================================
+
+/** What the user chose; 'unasked' means the question never showed, because another dialog was open. */
+export type UnsavedChoice = 'save' | 'discard' | 'keep' | 'unasked';
+
+/**
+ * Asks the user what to do with their unsaved changes. Escape means 'keep',
+ * and so does `signal` aborting (the run ended), which also takes the dialog
+ * down. The host passes it in, so tests answer without a browser.
+ */
+export type ChoiceFn = (title: string, message: string, signal?: AbortSignal) => Promise<UnsavedChoice>;
+
+/** The three-button dialog in ../choice.tsx, loaded on the first question so the test runner never loads React DOM. */
+export function shellChoice(): ChoiceFn {
+	return async (title, message, signal) => (await import('../choice')).showChoice(title, message, signal);
+}
+
+// =============================================================================
 // TOOL RESULTS — clipping, secret stripping and the text a tool returns
 // =============================================================================
 

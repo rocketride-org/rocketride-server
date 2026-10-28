@@ -23,7 +23,7 @@
 // =============================================================================
 // TOOLKIT TESTS — read before edit, no overwriting unsaved editor changes, the save race,
 // the file tracker, read-only guides, the user says yes first, the RocketRide client tool,
-// secrets stay out of the model, deploy_app keeps its version, check_app
+// secrets stay out of the model, deploy_app keeps its version, check_app, and a run that deletes a file
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -45,15 +45,17 @@ import { docsPathFor, isReferencePath } from '../../vfs/referenceTree';
 import { StaleVersionError, StagedFileSystem } from '../../vfs/stagedFileSystem';
 import type { IWorkspaceFileSystem, VfsEntry } from '../../vfs/vfsTypes';
 import { AgentSession } from '../agent';
-import { setAgentHost, type AgentDevSession, type AgentHost, type ApprovalPrefs, type ApprovalSettings, type Grant } from '../host';
+import { otherDialogOpen, queueChoices } from '../choice';
+import { setAgentHost, type AgentDevSession, type AgentHost, type ApprovalPrefs, type ApprovalSettings, type EditorControl, type Grant } from '../host';
 import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
+import { TOOL_TIMEOUT_MS } from '../wave/loop';
 import type { ModelCall, QuestionSpec } from '../wave/plan';
-import { AppCheckToolkit, type AppCheckOptions, type CheckReport, type MarkerInfo } from './appCheck';
+import { AppCheckToolkit, type AppCheckOptions, type CheckReport, type MarkerInfo, type MarkerSource } from './appCheck';
 import { Approvals } from './approval';
 import { AppToolkit } from './appTools';
-import { clip, isSecretName, looksLikeCredential, NOT_CONNECTED_MESSAGE, redactText, RESULT_MAX_CHARS, toolText, type ClientGetter } from './common';
+import { clip, isSecretName, looksLikeCredential, NOT_CONNECTED_MESSAGE, redactText, RESULT_MAX_CHARS, toolText, type ChoiceFn, type ClientGetter, type UnsavedChoice } from './common';
 import { FileTracker } from './fileTracker';
 import { FilesystemTools } from './filesystem';
 import { SecretMarkers } from './secretMarkers';
@@ -87,6 +89,10 @@ interface MemoryWorkspace extends IWorkspaceFileSystem {
 	files: Map<string, string>;
 	/** Every write, rename, delete and mkdir, in order. */
 	log: MemoryWorkspaceLogEntry[];
+	/** Counts one mutation of a path without changing it, as a write elsewhere in the page would. */
+	bump(path: string, origin?: string): void;
+	/** Marks a path dirty (with the buffer reads then see) or clean. */
+	setDirty(path: string, dirty: boolean, buffer?: string): void;
 }
 
 /** The workspace class; callers get it through createMemoryWorkspace(). */
@@ -96,6 +102,11 @@ class InMemoryWorkspace implements MemoryWorkspace {
 	/** Folders made with mkdir(); folders that hold files are implied by their paths. */
 	private readonly dirs = new Set<string>();
 	private readonly dirty: Set<string>;
+	/** The unsaved editor buffer of a dirty path, which reads see. */
+	private readonly buffers = new Map<string, string>();
+	/** Each path's version and last writer. */
+	private readonly versions = new Map<string, number>();
+	private readonly writers = new Map<string, string>();
 
 	/**
 	 * @param files - Starting files, path to content.
@@ -124,6 +135,7 @@ class InMemoryWorkspace implements MemoryWorkspace {
 	}
 
 	async read(path: string): Promise<unknown> {
+		if (this.dirty.has(path) && this.buffers.has(path)) return this.buffers.get(path);
 		const content = this.files.get(path);
 		if (content === undefined) throw new Error(`No such file: ${path}`);
 		return content;
@@ -168,9 +180,6 @@ class InMemoryWorkspace implements MemoryWorkspace {
 
 	// ---- path versions ----
 
-	private readonly versions = new Map<string, number>();
-	private readonly writers = new Map<string, string>();
-
 	version(path: string): number {
 		return this.versions.get(path) ?? 0;
 	}
@@ -184,7 +193,8 @@ class InMemoryWorkspace implements MemoryWorkspace {
 		return this.writers.get(path);
 	}
 
-	private bump(path: string, origin?: string): void {
+	/** Counts one mutation of a path. */
+	bump(path: string, origin?: string): void {
 		this.versions.set(path, this.version(path) + 1);
 		if (origin) this.writers.set(path, origin);
 	}
@@ -232,6 +242,14 @@ class InMemoryWorkspace implements MemoryWorkspace {
 
 	isDirty(path: string): boolean {
 		return this.dirty.has(path);
+	}
+
+	/** Marks a path dirty (with the buffer reads then see) or clean, the way an editor overlay flips. */
+	setDirty(path: string, dirty: boolean, buffer?: string): void {
+		if (dirty) this.dirty.add(path);
+		else this.dirty.delete(path);
+		if (dirty && buffer !== undefined) this.buffers.set(path, buffer);
+		else this.buffers.delete(path);
 	}
 
 	dirtyPaths(): Set<string> {
@@ -344,7 +362,10 @@ async function run(ws: MemoryWorkspace, tool: string, args: Record<string, unkno
 	try {
 		return redactText(await callable(found).execute(args));
 	} catch (error) {
-		throw new Error(redactText((error as Error).message));
+		// step: the error keeps its name, since a RefusedError tells the loop the call changed nothing
+		const redacted = new Error(redactText((error as Error).message));
+		redacted.name = (error as Error).name;
+		throw redacted;
 	}
 }
 
@@ -429,10 +450,10 @@ test('edit_file and write_file refuse a file not read; write_file refuses one ch
 	const edit = { path: 'a.ts', oldString: 'a', newString: 'b' };
 	const write = { path: 'a.ts', content: 'new' };
 	const rows: Array<[name: string, tool: string, args: Record<string, unknown>, changed: boolean, message: RegExp]> = [
-		['edit, unread', 'edit_file', edit, false, /^Error: edit_file refused: read a\.ts first — edits must start from its current content\.$/],
-		['write, unread', 'write_file', write, false, /^Error: write_file refused: read a\.ts first — edits must start from its current content\.$/],
-		['write, changed since read', 'write_file', write, true, /^Error: write_file refused: a\.ts changed since you read it\. Read it again, then redo the change from the current content\.$/],
-		['edit, changed since read, anchor gone', 'edit_file', { path: 'a.ts', oldString: '1', newString: '3' }, true, /^Error: edit_file refused: a\.ts changed since you read it\. Read it again, then redo the change from the current content\.$/],
+		['edit, unread', 'edit_file', edit, false, /^RefusedError: edit_file refused: read a\.ts first — edits must start from its current content\.$/],
+		['write, unread', 'write_file', write, false, /^RefusedError: write_file refused: read a\.ts first — edits must start from its current content\.$/],
+		['write, changed since read', 'write_file', write, true, /^RefusedError: write_file refused: a\.ts changed since you read it\. Read it again, then redo the change from the current content\.$/],
+		['edit, changed since read, anchor gone', 'edit_file', { path: 'a.ts', oldString: '1', newString: '3' }, true, /^RefusedError: edit_file refused: a\.ts changed since you read it\. Read it again, then redo the change from the current content\.$/],
 	];
 	for (const [name, tool, args, changed, message] of rows) {
 		const ws = createMemoryWorkspace({ 'a.ts': 'a = 1' });
@@ -466,6 +487,177 @@ test('edit_file and write_file refuse a dirty file, even after reading it', asyn
 	await assert.rejects(run(ws, 'write_file', { path: 'a.ts', content: 'b' }), /write_file refused: a\.ts has unsaved editor changes/);
 	assert.deepEqual(ws.log, []);
 	assert.equal(ws.files.get('a.ts'), 'a = 1');
+});
+
+/**
+ * A choice function that records each message it was asked and answers in turn.
+ *
+ * @param answers - What the user picks, one per question; the last repeats.
+ * @returns The function and the messages it was asked.
+ */
+function fakeChoice(...answers: UnsavedChoice[]): { choose: ChoiceFn; asked: string[] } {
+	const asked: string[] = [];
+	return {
+		choose: async (_title, message) => {
+			asked.push(message);
+			return answers[Math.min(asked.length - 1, answers.length - 1)];
+		},
+		asked,
+	};
+}
+
+/**
+ * Opens an editor with unsaved typing in a memory workspace. Its save writes the
+ * buffer at the version it loaded, as the Monaco tab does; its discard drops it.
+ *
+ * @param ws - The workspace.
+ * @param path - The file.
+ * @param buffer - What the user typed.
+ * @returns The editor, and what the agent asked it to do.
+ */
+function dirtyEditor(ws: MemoryWorkspace, path: string, buffer: string): EditorControl & { did: string[] } {
+	const loaded = ws.version(path);
+	ws.setDirty(path, true, buffer);
+	const did: string[] = [];
+	return {
+		did,
+		save: async () => {
+			did.push('save');
+			await ws.write(path, buffer, 'editor', loaded);
+			ws.setDirty(path, false);
+		},
+		discard: async () => {
+			did.push('discard');
+			ws.setDirty(path, false);
+		},
+	};
+}
+
+/**
+ * The file tools over a workspace whose dirty files ask the user.
+ *
+ * @param ws - The workspace.
+ * @param choose - The user's answers.
+ * @param editors - The open editors, by path.
+ * @returns A function that runs one tool by name.
+ */
+function promptingTools(ws: MemoryWorkspace, choose: ChoiceFn, editors: Record<string, EditorControl>): (tool: string, args: Record<string, unknown>) => Promise<string> {
+	const tools = new FilesystemTools(ws, undefined, undefined, { choose, editor: (path) => editors[path] ?? null }).tools();
+	return (tool, args) => toolOf({ tools: () => tools }, tool).execute(args);
+}
+
+// =============================================================================
+// UNSAVED CHANGES ASK THE USER — save mine first, discard mine, keep mine
+// =============================================================================
+
+test('Save mine first: the editor saves, then the edit lands on top of the saved text', async () => {
+	const ws = createMemoryWorkspace({ 'a.ts': 'title = 1;\n' });
+	const { choose, asked } = fakeChoice('save');
+	const editor = dirtyEditor(ws, 'a.ts', 'title = 1;\nmine = 2;\n');
+	const tool = promptingTools(ws, choose, { 'a.ts': editor });
+	await tool('read_file', { path: 'a.ts' });
+	const result = await tool('edit_file', { path: 'a.ts', oldString: 'title = 1', newString: 'title = 3' });
+	assert.deepEqual(asked, ['The agent wants to change a.ts, which has unsaved changes.']);
+	assert.deepEqual(editor.did, ['save']);
+	assert.equal(ws.files.get('a.ts'), 'title = 3;\nmine = 2;\n', 'both the user and the agent kept their change');
+	assert.match(result, /The user saved their unsaved changes first; your anchor still matched once in the saved text/);
+});
+
+test('Save mine first on a delete or a rename saves the text, then refuses with a plain error so the agent reads again and asks', async () => {
+	const ws = createMemoryWorkspace({ 'a.ts': 'a = 1', 'b.ts': 'b = 1' });
+	const editors = { 'a.ts': dirtyEditor(ws, 'a.ts', 'a = 1 // mine'), 'b.ts': dirtyEditor(ws, 'b.ts', 'b = 1 // mine') };
+	const tool = promptingTools(ws, fakeChoice('save').choose, editors);
+	await assert.rejects(tool('delete_file', { path: 'a.ts' }), /^Error: delete_file refused: the user saved their unsaved changes in a\.ts first, so a\.ts changed since you decided to delete it\. Read it again, then ask the user whether to delete it\.$/);
+	await assert.rejects(tool('rename', { oldPath: 'b.ts', newPath: 'c.ts' }), /^Error: rename refused: the user saved their unsaved changes in b\.ts first, so the files changed since you planned the move\. Read b\.ts again, then ask the user whether to move b\.ts to c\.ts\.$/);
+	assert.deepEqual([ws.files.get('a.ts'), ws.files.get('b.ts'), ws.files.has('c.ts')], ['a = 1 // mine', 'b = 1 // mine', false]);
+	assert.deepEqual([editors['a.ts'].did, editors['b.ts'].did], [['save'], ['save']]);
+});
+
+test('a delete of a file with unsaved changes asks for the OK first, then about the changes, and a denied delete leaves the typing alone', async () => {
+	const order: string[] = [];
+	const ws = createMemoryWorkspace({ 'a.ts': 'a = 1' });
+	const editor = dirtyEditor(ws, 'a.ts', 'a = 1 // mine');
+	const choose: ChoiceFn = async (_title, message) => {
+		order.push(`question: ${message}`);
+		return 'discard';
+	};
+	const tools = new FilesystemTools(ws, undefined, undefined, { choose, editor: (path) => (path === 'a.ts' ? editor : null) });
+	const deleteWith = (answer: ChatAskAnswer) => {
+		const asked = fakeAsk([answer]);
+		const ask = (card: ChatAskCard): ChatAsking => {
+			order.push(`card: ${card.title}`);
+			return asked.ask(card);
+		};
+		return toolOf(tools, 'delete_file', approvalsFor(null, ask)).execute({ path: 'a.ts' });
+	};
+
+	// step: the user denies the delete: nothing asks about the changes, and the typing stays
+	await assert.rejects(deleteWith('deny'), /^Error: The user declined: Delete a\.ts\./);
+	assert.deepEqual(order, ['card: Delete a.ts']);
+	assert.deepEqual([editor.did, ws.log, ws.isDirty('a.ts')], [[], [], true]);
+
+	// step: the user approves it, then answers Discard mine: the typing goes, then the file
+	order.length = 0;
+	assert.equal(await deleteWith('approve'), 'Deleted a.ts.');
+	assert.deepEqual(order, ['card: Delete a.ts', 'question: The agent wants to delete a.ts, which has unsaved changes.']);
+	assert.deepEqual(editor.did, ['discard']);
+	assert.equal(ws.files.has('a.ts'), false);
+});
+
+test('a question that cannot show because another dialog is open says so, and is not a Keep mine', async () => {
+	const ws = createMemoryWorkspace({ 'a.ts': 'a = 1' });
+	const editors = { 'a.ts': dirtyEditor(ws, 'a.ts', 'a = 1 // mine') };
+	let otherOpen = true;
+	const shown: string[] = [];
+	const choose = queueChoices(
+		(_title, message) => {
+			shown.push(message);
+			return { answer: Promise.resolve<UnsavedChoice>('discard'), close: () => undefined };
+		},
+		() => otherOpen
+	);
+	const tool = promptingTools(ws, choose, editors);
+	await tool('read_file', { path: 'a.ts' });
+	await assert.rejects(tool('edit_file', { path: 'a.ts', oldString: '1', newString: '2' }), /^RefusedError: The user was not asked about a\.ts because another dialog was open\. Try again after they close it\.$/);
+	assert.deepEqual(shown, []);
+	otherOpen = false;
+	await tool('edit_file', { path: 'a.ts', oldString: '1', newString: '2' });
+	assert.equal(shown.length, 1);
+	assert.equal(ws.files.get('a.ts'), 'a = 2');
+});
+
+test('our own last dialog, still in the page before its deferred unmount, does not block the next question', () => {
+	const dialog = (own: boolean) => ({ closest: (selector: string) => (own && selector === '[data-agent-choice]' ? {} : null) });
+	const page = (...dialogs: Array<ReturnType<typeof dialog>>) => ({ querySelectorAll: () => dialogs }) as unknown as ParentNode;
+	assert.equal(otherDialogOpen(page(dialog(true))), false);
+	assert.equal(otherDialogOpen(page(dialog(true), dialog(false))), true);
+	assert.equal(otherDialogOpen(page()), false);
+});
+
+test('a run that ends answers its open and waiting questions Keep mine, and takes the open dialog down', async () => {
+	const shown: string[] = [];
+	const closed: string[] = [];
+	const choose = queueChoices((_title, message) => {
+		shown.push(message);
+		return { answer: new Promise<UnsavedChoice>(() => undefined), close: () => closed.push(message) };
+	});
+	const ended = new AbortController();
+	const open = choose('Unsaved changes', 'a', ended.signal);
+	const waiting = choose('Unsaved changes', 'b', ended.signal);
+	await new Promise((resolve) => setImmediate(resolve));
+	ended.abort();
+	assert.deepEqual(await Promise.all([open, waiting]), ['keep', 'keep']);
+	assert.deepEqual(shown, ['a'], 'the waiting question was never shown');
+	assert.deepEqual(closed, ['a']);
+});
+
+test('a dirty file with no editor that can save or discard it is refused without asking', async () => {
+	const ws = createMemoryWorkspace({ 'a.ts': 'a = 1' }, { dirty: ['a.ts'] });
+	const { choose, asked } = fakeChoice('save');
+	const tool = promptingTools(ws, choose, {});
+	await tool('read_file', { path: 'a.ts' });
+	await assert.rejects(tool('edit_file', { path: 'a.ts', oldString: 'a', newString: 'b' }), /edit_file refused: a\.ts has unsaved editor changes\. Ask the user to save or discard them first\./);
+	assert.deepEqual(asked, []);
 });
 
 // =============================================================================
@@ -535,7 +727,7 @@ test("a user's save that lands while the agent edits is kept, and the agent is t
 	await entered;
 	await vfs.write('apps/a.ts', 'const a = 100;', 'editor');
 	release();
-	await assert.rejects(editing, /^Error: edit_file refused: apps\/a\.ts changed since you read it \(version 0, now 1; last writer: editor\)\. Read it again, then redo the change from the current content\.$/);
+	await assert.rejects(editing, /^RefusedError: edit_file refused: apps\/a\.ts changed since you read it \(version 0, now 1; last writer: editor\)\. Read it again, then redo the change from the current content\.$/);
 	assert.equal(backend.files.get('apps/a.ts'), 'const a = 100;');
 });
 
@@ -553,7 +745,7 @@ test('an edit whose anchor still matches once lands on the current content and s
 });
 
 // =============================================================================
-// FILE TRACKER — what a run read and wrote, and what moved on since
+// FILE TRACKER — what a run read and changed, and what moved on since
 // =============================================================================
 
 test('the tracker lists the files changed since the run saw them, not the ones it deleted or moved itself', () => {
@@ -2025,6 +2217,44 @@ test('type errors of a deleted file are ignored and named, matching each file to
 // THE RUN — a whole run over the memory workspace
 // =============================================================================
 
+/**
+ * Runs the agent once over a workspace with a scripted model, with the
+ * unsaved-changes prompt and the open editors, and the run's stop signal.
+ * agentTurn covers the chat's cards; this covers the editors' dialog.
+ *
+ * @param ws - The workspace.
+ * @param replies - The model's replies; a function runs when its turn comes and returns the reply.
+ * @param markers - Monaco's markers as the run sees them.
+ * @param prompt - The user's answers to the unsaved-changes prompt, and the open editors.
+ * @param signal - The run's stop signal (the user's Stop).
+ * @returns Every question asked, and the answer.
+ */
+async function runScripted(ws: MemoryWorkspace, replies: Array<string | (() => Promise<string>)>, markers: MarkerSource | null = null, prompt?: { choose: ChoiceFn; editors: Record<string, EditorControl> }, signal: AbortSignal = new AbortController().signal): Promise<{ questions: QuestionSpec[]; answer: string }> {
+	const questions: QuestionSpec[] = [];
+	let answer = '';
+	const host: AgentHost = { vfs: ws, scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }), packApp: async () => new Uint8Array(), devSession: () => null, ...(prompt ? { editor: (path: string) => prompt.editors[path] ?? null } : {}) };
+	await runAgent(
+		'Do it.',
+		(type, text) => {
+			if (type === 'content') answer = text;
+		},
+		{ history: [], prompts: BUILDER_PROMPTS, token: async () => '', signal, takeQueued: () => [] },
+		{
+			host,
+			client: () => null,
+			markers: async () => markers,
+			...(prompt ? { choose: prompt.choose } : {}),
+			model: async (q) => {
+				questions.push(q);
+				const next = replies.shift();
+				if (next === undefined) throw new Error('The scripted model has no reply left.');
+				return typeof next === 'string' ? next : next();
+			},
+		}
+	);
+	return { questions, answer };
+}
+
 test('each wave names the files someone else changed since the agent read them, once', async () => {
 	const ws = createMemoryWorkspace({ 'a.ts': 'a = 1', 'b.ts': 'b = 1' });
 	const notes = (q: QuestionSpec) => q.context.filter((c) => c.startsWith('Files changed since'));
@@ -2040,4 +2270,93 @@ test('each wave names the files someone else changed since the agent read them, 
 	await agentTurn(ws, model);
 	assert.deepEqual(model.questions.map(notes), [[], [], ['Files changed since you last read them: a.ts (editor). Read them again before editing.'], []]);
 	assert.equal(model.questions[0].instructions, model.questions[2].instructions, 'the cached start is unchanged');
+});
+
+test('after Keep mine the model can ask the user at once: a refused change needs no check', async () => {
+	const ws = createMemoryWorkspace({ 'apps/a-ui/package.json': JSON.stringify({ appManifest: { id: 'a', name: 'A' } }), 'apps/a-ui/src/App.tsx': 'export default () => null;' });
+	const editor = dirtyEditor(ws, 'apps/a-ui/src/App.tsx', 'export default () => null; // mine');
+	const { questions, answer } = await runScripted(ws, [plan(['read_file', { path: 'apps/a-ui/src/App.tsx' }]), plan(['edit_file', { path: 'apps/a-ui/src/App.tsx', oldString: 'null', newString: '1' }]), done('You have unsaved changes in App.tsx. Shall I wait?')], null, { choose: fakeChoice('keep').choose, editors: { 'apps/a-ui/src/App.tsx': editor } });
+	assert.match(questions[2].context.join('\n'), /The user kept their unsaved changes in apps\/a-ui\/src\/App\.tsx/);
+	assert.equal(questions.length, 3, 'the answer was accepted without a check_app');
+	assert.match(answer, /^You have unsaved changes in App\.tsx\. Shall I wait\?/);
+	assert.doesNotMatch(answer, /Not checked/);
+	assert.deepEqual(ws.log, []);
+});
+
+test('after Save mine first a stale write_file still counts as a change: the app needs its check', async () => {
+	const ws = createMemoryWorkspace({ 'apps/a-ui/package.json': JSON.stringify({ appManifest: { id: 'a', name: 'A' } }), 'apps/a-ui/src/App.tsx': 'export default () => null;' });
+	const editor = dirtyEditor(ws, 'apps/a-ui/src/App.tsx', 'export default () => null; // mine');
+	const { questions } = await runScripted(ws, [plan(['read_file', { path: 'apps/a-ui/src/App.tsx' }]), plan(['write_file', { path: 'apps/a-ui/src/App.tsx', content: 'export default () => 1;' }]), done('Done.'), done('Done.')], null, { choose: fakeChoice('save').choose, editors: { 'apps/a-ui/src/App.tsx': editor } });
+	assert.match(questions[2].context.join('\n'), /the user saved their unsaved changes in apps\/a-ui\/src\/App\.tsx first/);
+	assert.match(questions[3].context.join('\n'), /check_app/, 'the done was sent back for a check, since the file changed');
+	assert.equal(ws.files.get('apps/a-ui/src/App.tsx'), 'export default () => null; // mine');
+});
+
+test('the run hands each question a signal that aborts when the run ends', async () => {
+	const ws = createMemoryWorkspace({ 'a.ts': 'a = 1' });
+	const editor = dirtyEditor(ws, 'a.ts', 'a = 1 // mine');
+	const signals: Array<AbortSignal | undefined> = [];
+	const choose: ChoiceFn = async (_title, _message, signal) => {
+		signals.push(signal);
+		assert.equal(signal?.aborted, false, 'the run is still on when it asks');
+		return 'keep';
+	};
+	await runScripted(ws, [plan(['read_file', { path: 'a.ts' }]), plan(['edit_file', { path: 'a.ts', oldString: '1', newString: '2' }]), done('Kept.')], null, { choose, editors: { 'a.ts': editor } });
+	assert.equal(signals.length, 1);
+	assert.equal(signals[0]?.aborted, true);
+});
+
+test('a run the user stops closes its open question as Keep mine at once', async () => {
+	const ws = createMemoryWorkspace({ 'a.ts': 'a = 1' });
+	const editor = dirtyEditor(ws, 'a.ts', 'a = 1 // mine');
+	const stop = new AbortController();
+	let closed = false;
+	let closedAtStop = false;
+	const choose: ChoiceFn = (_title, _message, signal) =>
+		new Promise((resolve) => {
+			signal?.addEventListener(
+				'abort',
+				() => {
+					closed = true;
+					resolve('keep');
+				},
+				{ once: true }
+			);
+			// step: the user presses Stop while the dialog is open; the dialog closes then, not once the loop has wound down
+			stop.abort();
+			closedAtStop = closed;
+		});
+	await runScripted(ws, [plan(['read_file', { path: 'a.ts' }]), plan(['edit_file', { path: 'a.ts', oldString: '1', newString: '2' }]), done('never asked')], null, { choose, editors: { 'a.ts': editor } }, stop.signal);
+	assert.equal(closedAtStop, true, 'the question closed as Keep mine the moment the run was stopped');
+	assert.equal(ws.files.get('a.ts'), 'a = 1', 'nothing was written');
+});
+
+test("a run's question about unsaved changes holds the call's time limit, so an answer given after the limit still lands", async (t) => {
+	t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+	t.mock.method(performance, 'now', () => Date.now());
+	const idle = async (): Promise<void> => {
+		for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+	};
+	const ws = createMemoryWorkspace({ 'a.ts': 'a = 1' });
+	const editor = dirtyEditor(ws, 'a.ts', 'a = 1 // mine');
+	let answer: (choice: UnsavedChoice) => void = () => undefined;
+	let asked: () => void = () => undefined;
+	const open = new Promise<void>((resolve) => (asked = resolve));
+	let closed = false;
+	const choose: ChoiceFn = (_title, _message, signal) =>
+		new Promise((resolve) => {
+			answer = resolve;
+			signal?.addEventListener('abort', () => (closed = true), { once: true });
+			asked();
+		});
+	const running = runScripted(ws, [plan(['read_file', { path: 'a.ts' }]), plan(['edit_file', { path: 'a.ts', oldString: 'a = 1', newString: 'a = 2' }]), done('Edited.')], null, { choose, editors: { 'a.ts': editor } });
+	// step: the user takes longer than the limit to answer; the clock moves only once the question is open, since the read's hash takes real time
+	await open;
+	t.mock.timers.tick(TOOL_TIMEOUT_MS + 1000);
+	await idle();
+	assert.equal(closed, false, 'the question is still open');
+	answer('save');
+	const { questions } = await running;
+	assert.match(questions[2].context.join('\n'), /Replaced 1 occurrence/);
+	assert.equal(ws.files.get('a.ts'), 'a = 2 // mine');
 });

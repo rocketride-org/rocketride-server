@@ -53,13 +53,13 @@ import { APP_CHECK_TOOL, AppCheckToolkit, monacoMarkerSource, reportPassed, type
 import type { CheckReport, MarkerSource } from './toolkits/appCheck';
 import { Approvals } from './toolkits/approval';
 import { AppToolkit, DEPLOY_APP_TIMEOUT_MS } from './toolkits/appTools';
-import { NOT_CONNECTED_MESSAGE, redactText, type ClientGetter } from './toolkits/common';
+import { NOT_CONNECTED_MESSAGE, redactText, shellChoice, type ChoiceFn, type ClientGetter } from './toolkits/common';
 import type { FileTracker } from './toolkits/fileTracker';
 import { FilesystemTools, normalizePath } from './toolkits/filesystem';
 import { findApp, InventoryToolkit, readApps } from './toolkits/inventory';
 import { RocketRideClientToolkit } from './toolkits/rocketrideClient';
 import { validateNote, validateSaved, type SaveValidation } from './toolkits/saveValidation';
-import { composeToolkits } from './tools';
+import { composeToolkits, UserTime } from './tools';
 import { runLoop, TOOL_TIMEOUT_MS, type FinishRule, type LoopResult, type RanCall } from './wave/loop';
 import { buildPrefix } from './wave/plan';
 import type { AppPrompts, HistoryTurn, ModelCall, QuestionSpec } from './wave/plan';
@@ -125,6 +125,8 @@ export interface AgentDeps {
 	client: ClientGetter;
 	/** Asks the model one question (default: the LLM pipeline behind `options.token`). */
 	model?: ModelCall;
+	/** Asks the user what to do with unsaved changes the agent wants to change (default: the three-button dialog). */
+	choose?: ChoiceFn;
 	/** Gets Monaco's marker source, or null when there is none (default: the editor's, loaded once). */
 	markers?: () => Promise<MarkerSource | null>;
 }
@@ -187,10 +189,13 @@ const editorMarkers = guardedMarkerSource(monacoMarkerSource);
  * - A change to anything else (`nodes/`, other files) needs nothing.
  *
  * A change is a call to one of CHANGE_TOOLS, even one that failed, since a
- * write may land before its error: a path inside `apps/<folder>/` changes that
- * app, and create_app changes the app its result names. Deleting an app's whole
- * folder drops the app's record (there is nothing left to check); renaming the
- * folder moves the record to the new folder, as a change.
+ * write may land before its error. The loop does not hand over a call it
+ * never started or one its tool refused before changing anything (see
+ * `unstarted` in wave/loop.ts), since nothing of it landed. A path inside
+ * `apps/<folder>/` changes that app, and create_app changes the app its
+ * result names. Deleting an app's whole folder drops the app's record (there
+ * is nothing left to check); renaming the folder moves the record to the new
+ * folder, as a change.
  */
 export class CheckRecord implements FinishRule {
 	readonly checkTool = APP_CHECK_TOOL;
@@ -679,6 +684,7 @@ function toRocketRideQuestion(q: QuestionSpec): Question {
 export async function runAgent(request: string, callback: (type: string, content: string) => void, options: AgentRunOptions, deps: AgentDeps): Promise<void> {
 	const { host, client } = deps;
 	const model = deps.model ?? createChatModel({ client, token: options.token, toQuestion: toRocketRideQuestion, onPipelineError: options.onPipelineError, signal: options.signal });
+	const choose = deps.choose ?? shellChoice();
 	const markers = deps.markers ?? editorMarkers;
 
 	// step: the record of check results, which is also the loop's finish rule; it names an app the way check_app does
@@ -706,9 +712,18 @@ export async function runAgent(request: string, callback: (type: string, content
 		return validateNote(validation, hide);
 	};
 
-	// step: the toolkits in mount order; one file toolkit per run, so reads never carry over,
-	// and its saves run the hook above
-	const files = new FilesystemTools(vfs, undefined, afterSave);
+	// step: the toolkits in mount order; one file toolkit per run, so reads never carry
+	// over, and its saves run the hook above. A question about unsaved changes holds every
+	// tool's time limit, and closes as Keep mine when the run ends or the user stops it,
+	// so a late answer never lands after the run
+	const editor = host.editor?.bind(host);
+	const userTime = new UserTime();
+	const runEnded = new AbortController();
+	const endOnStop = (): void => runEnded.abort();
+	options.signal.addEventListener('abort', endOnStop, { once: true });
+	if (options.signal.aborted) runEnded.abort();
+	const askUnsaved: ChoiceFn = (title, message) => userTime.during(choose(title, message, runEnded.signal));
+	const files = new FilesystemTools(vfs, undefined, afterSave, editor ? { choose: askUnsaved, editor } : undefined);
 	// step: a toolkit cuts a long text before the loop sees it, and a cut value no longer matches,
 	// so each one, and the save hook above, hides the values the file tools hid before it cuts
 	const hide = (text: string): string => files.secrets.hideKnown(text);
@@ -724,22 +739,29 @@ export async function runAgent(request: string, callback: (type: string, content
 	// so each value the file tools hid shows as its marker there too; a card asks only once the loop runs
 	const shown = (text: string): string => redactText(hide(text));
 
-	const result = await runLoop({
-		// execute holds back only a sure key shape, so a bearer token or a secret field still reaches here
-		request: redactText(request),
-		history: toHistory(options.history),
-		prefix: buildPrefix(CORE_PROMPT, options.prompts, composed),
-		tools: composed.tools,
-		model,
-		finish: checks,
-		emit: (type, text) => callback(type, text),
-		timeoutMs: (tool) => (tool === 'deploy_app' ? DEPLOY_APP_TIMEOUT_MS : TOOL_TIMEOUT_MS),
-		signal: options.signal,
-		takeQueued: options.takeQueued,
-		approve: (act, run) => approvals.approve(act, run),
-		secrets: files.secrets,
-		notes: changedFilesNote(files.tracker, vfs),
-	});
+	let result: LoopResult;
+	try {
+		result = await runLoop({
+			// execute holds back only a sure key shape, so a bearer token or a secret field still reaches here
+			request: redactText(request),
+			history: toHistory(options.history),
+			prefix: buildPrefix(CORE_PROMPT, options.prompts, composed),
+			tools: composed.tools,
+			model,
+			finish: checks,
+			emit: (type, text) => callback(type, text),
+			timeoutMs: (tool) => (tool === 'deploy_app' ? DEPLOY_APP_TIMEOUT_MS : TOOL_TIMEOUT_MS),
+			signal: options.signal,
+			takeQueued: options.takeQueued,
+			approve: (act, run) => approvals.approve(act, run),
+			secrets: files.secrets,
+			notes: changedFilesNote(files.tracker, vfs),
+			userTime,
+		});
+	} finally {
+		options.signal.removeEventListener('abort', endOnStop);
+		runEnded.abort();
+	}
 
 	// step: a stopped run writes no answer: the chat closes the turn with its stop row, and this adds the one fact that row can't know
 	if (result.stopReason !== 'stopped') callback('content', finalText(result, checks, shown));

@@ -74,16 +74,30 @@ export interface AgentDevSession {
 
 /**
  * The rejection of an editor's save that wrote nothing because the user
- * dropped or replaced its text while it waited its turn (Reload, Overwrite,
- * closing with Don't Save). What waits on it stops: Save & Run runs nothing,
- * and a publish publishes nothing. It is the user's own doing, so no editor
- * shows it as a failure.
+ * dropped or replaced its text while it waited its turn (Reload, Discard
+ * mine, Overwrite, closing with Don't Save). What waits on it stops: Save &
+ * Run runs nothing, a publish publishes nothing, and the agent's edit after
+ * Save mine first is refused. It is the user's own doing, so no editor shows
+ * it as a failure.
  */
 export class SaveDroppedError extends Error {
 	constructor(path: string) {
 		super(`${path} was not saved: its changes were dropped or replaced while the save waited its turn.`);
 		this.name = 'SaveDroppedError';
 	}
+}
+
+/** The open editors of a path with unsaved changes, as the agent's question about them drives them. */
+export interface EditorControl {
+	/**
+	 * Saves each dirty editor in turn and calls `stored` as each one lands, so a
+	 * later one's failure still counts as a change. Rejects when a save fails,
+	 * and with SaveDroppedError when the user dropped the buffer while the save
+	 * waited its turn.
+	 */
+	save(stored: () => void): Promise<void>;
+	/** Drops the editor's buffer and shows the stored file again. */
+	discard(): Promise<void>;
 }
 
 /** What the mounting app provides to the agent. */
@@ -103,6 +117,8 @@ export interface AgentHost {
 	 * @returns The name, or undefined to name the scope by its id.
 	 */
 	scopeName?(scopeKey: string): string | undefined;
+	/** The open editor that holds a path, for the agent's question about unsaved changes; without it a dirty file is refused. */
+	editor?(path: string): EditorControl | null;
 	/**
 	 * Creates a new app from a template.
 	 *

@@ -21,16 +21,16 @@
 // SOFTWARE.
 
 // =============================================================================
-// WAVE LOOP TESTS — the done rule, reading replies, same-file order, stop and steering, no key past a tool, timed-out calls and notes
+// WAVE LOOP TESTS — the done rule, reading replies, same-file order, stop and steering, no key past a tool, timed-out calls, notes and user time
 // =============================================================================
 
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test, type TestContext } from 'node:test';
 
 import { CheckRecord, createChatModel } from '../run';
 import type { CheckStatus } from '../toolkits/appCheck';
 import { SecretMarkers } from '../toolkits/secretMarkers';
-import { AgentTool } from '../tools';
+import { AgentTool, UserTime } from '../tools';
 import { runLoop, type FinishRule, type LoopOptions, type RanCall } from './loop';
 import type { ModelCall, PromptPrefix, QuestionSpec } from './plan';
 
@@ -725,7 +725,7 @@ test('a call whose prepare timed out holds nothing back, since its work never be
 });
 
 // =============================================================================
-// NOTES — what the run tells the model at the top of each wave
+// NOTES AND USER TIME — the wave's notes, and no time limit while the user decides
 // =============================================================================
 
 test("the notes option adds this wave's notes to its question, and keeps them on a retry", async () => {
@@ -739,4 +739,68 @@ test("the notes option adds this wave's notes to its question, and keeps them on
 	);
 	assert.deepEqual([seen[0][0], seen[1][0], seen[2][0]], ['note 0', 'note 0', 'note 1']);
 	assert.match(seen[1][1], /^Your previous reply was not usable/);
+});
+
+/**
+ * Fakes setTimeout and performance.now together, so only the test moves the
+ * clock and a late timer on a busy machine changes nothing.
+ *
+ * @param t - The test.
+ * @returns Moves the clock on, once the loop has done all it can at the time it is at.
+ */
+function fakeClock(t: TestContext): (ms: number) => Promise<void> {
+	t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+	t.mock.method(performance, 'now', () => Date.now());
+	const idle = async (): Promise<void> => {
+		for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+	};
+	return async (ms) => {
+		await idle();
+		t.mock.timers.tick(ms);
+		await idle();
+	};
+}
+
+test("a call's time limit stands still while the user answers its question", async (t) => {
+	const advance = fakeClock(t);
+	const userTime = new UserTime();
+	const answered = deferred();
+	// step: 50 ms of work, then a second in a dialog, under a 100 ms limit
+	const asking = stub('edit_file', async () => {
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		await userTime.during(answered.promise);
+		return 'edited';
+	});
+	const model = scriptedModel([plan([['edit_file', { path: 'a.ts' }]]), done('ok')]);
+	const running = setup(model, [asking], { timeoutMs: () => 100, userTime }).run();
+	await advance(50);
+	await advance(1000);
+	answered.resolve();
+	await running;
+	assert.equal(entriesByKey(model.questions[1]).get('wave-0.r0')?.error, undefined, 'no timeout while the user decides');
+});
+
+test("a question during a call's prepare stands its clock still, so its run still gets the limit", async (t) => {
+	const advance = fakeClock(t);
+	const userTime = new UserTime();
+	const answered = deferred();
+	// step: 20 ms of getting ready, a second in a dialog, then 60 ms of work, under a 100 ms limit
+	const asking = new AgentTool({
+		name: 'edit_file',
+		description: 'edit_file',
+		parameters: { type: 'object' },
+		prepare: async () => {
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			await userTime.during(answered.promise);
+			return { run: () => new Promise<string>((resolve) => setTimeout(() => resolve('edited'), 60)) };
+		},
+	});
+	const model = scriptedModel([plan([['edit_file', { path: 'a.ts' }]]), done('ok')]);
+	const running = setup(model, [asking], { timeoutMs: () => 100, userTime }).run();
+	await advance(20);
+	await advance(1000);
+	answered.resolve();
+	await advance(60);
+	await running;
+	assert.equal(entriesByKey(model.questions[1]).get('wave-0.r0')?.error, undefined, 'the time in the dialog was not taken from the run');
 });
