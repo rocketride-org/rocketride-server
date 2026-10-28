@@ -823,16 +823,16 @@ function done(answer: string): string {
 
 /**
  * Runs one agent turn with a scripted model, the way the Agent tab does
- * minus the browser: no Monaco, and the chat's "Needs your OK" cards go to
- * `opts.ask`. With no ask there is no chat to ask in, so nothing that asks
- * runs.
+ * minus the browser: Monaco only as `opts.markers`, and the chat's "Needs
+ * your OK" cards go to `opts.ask`. With no ask there is no chat to ask in, so
+ * nothing that asks runs.
  *
  * @param ws - The workspace.
  * @param model - The scripted model.
- * @param opts - The client, the conversation so far, a dev session for check_app, messages the user sends during the turn, and the chat's ask.
+ * @param opts - The client, the conversation so far, a dev session for check_app, messages the user sends during the turn, the chat's ask, and the markers Monaco holds for daybook's App.tsx.
  * @returns Every chunk the turn streamed, in order.
  */
-async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; request?: string } = {}): Promise<Array<{ type: string; text: string }>> {
+async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; request?: string; markers?: MarkerInfo[] } = {}): Promise<Array<{ type: string; text: string }>> {
 	const host: AgentHost = {
 		vfs: ws,
 		scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }),
@@ -842,7 +842,9 @@ async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?:
 	const chunks: Array<{ type: string; text: string }> = [];
 	const queued = [...(opts.queued ?? [])];
 	const options = { history: opts.history ?? [], prompts: BUILDER_PROMPTS, token: async () => '', signal: new AbortController().signal, takeQueued: () => queued.splice(0), ask: opts.ask };
-	await runAgent(opts.request ?? 'Describe and tidy the leak pipeline.', (type, text) => chunks.push({ type, text }), options, { host, client: () => opts.client ?? null, model, markers: async () => null });
+	const { markers } = opts;
+	const source = markers && { modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => markers, onChange: () => () => undefined };
+	await runAgent(opts.request ?? 'Describe and tidy the leak pipeline.', (type, text) => chunks.push({ type, text }), options, { host, client: () => opts.client ?? null, model, markers: async () => source ?? null });
 	return chunks;
 }
 
@@ -931,14 +933,6 @@ test('a .pipe read shows a marker and a note, and the marker writes the real val
 	const again = await run(ws, 'read_file', { path: 'pipelines/a.pipe' });
 	await run(ws, 'write_file', { path: 'pipelines/a.pipe', content: again.slice(0, again.lastIndexOf('\n[')).replace('gpt-5', 'gpt-5-mini') });
 	assert.deepEqual(config(), { apikey: key, model: 'gpt-5-mini', fallback: '${ROCKETRIDE_OPENAI_KEY}' });
-
-	// a save's note that quotes the value shows the marker instead
-	const tools = new FilesystemTools(createMemoryWorkspace({ 'pipelines/a.pipe': inlineKeyPipe(key) }), '', async () => `\n\nvalidate: 1 error:\n- llm_1: the key ${key} was rejected`);
-	const tool = (name: string) => toolOf(tools, name);
-	const shown = markerIn(await tool('read_file').execute({ path: 'pipelines/a.pipe' }));
-	const saved = await tool('edit_file').execute({ path: 'pipelines/a.pipe', oldString: '"llm_openai"', newString: '"llm_anthropic"' });
-	assert.ok(!saved.includes(key), saved);
-	assert.match(saved, new RegExp(`the key ${shown} was rejected`));
 });
 
 test('a marker this run did not make is refused, and nothing is written', async () => {
@@ -1052,6 +1046,12 @@ test('redactText hides each credential shape and keeps placeholders, markers and
 		[`sk_live_${'s'.repeat(24)}`, '[redacted]', 'Stripe-style'],
 		[`rk_live_${'r'.repeat(24)}`, '[redacted]', 'Stripe-style'],
 		[`xoxb-${'1'.repeat(10)}-${'e'.repeat(12)}`, '[redacted]', 'Slack-style'],
+		[`AIza${'g'.repeat(35)}`, '[redacted]', 'Google-style'],
+		[`xai-${'x'.repeat(80)}`, '[redacted]', 'xAI-style'],
+		[`pplx-${'p'.repeat(48)}`, '[redacted]', 'Perplexity-style'],
+		[`tvly-dev-${'t'.repeat(32)}`, '[redacted]', 'Tavily-style'],
+		[`pcsk_${'k'.repeat(6)}_${'K'.repeat(63)}`, '[redacted]', 'Pinecone-style'],
+		[`fc-${'0f'.repeat(16)}`, '[redacted]', 'Firecrawl-style'],
 		['postgres://admin:hunter2@db.example.invalid/x', 'postgres://admin:[redacted]@db.example.invalid/x', 'a password in a URL'],
 		['-----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJB\n-----END RSA PRIVATE KEY-----', '[redacted]', 'a private key'], // gitleaks:allow, made-up test value
 		// hidden, but not sure enough to hold a message back: a bearer word and a field name
@@ -1070,6 +1070,13 @@ test('redactText hides each credential shape and keeps placeholders, markers and
 		['apps/task-manager-dashboard-ui/src/App.tsx', 'apps/task-manager-dashboard-ui/src/App.tsx', null],
 		['interface Options { token: string; apiKey?: string }', 'interface Options { token: string; apiKey?: string }', null],
 		['ssh://git@github.com/acme/app.git', 'ssh://git@github.com/acme/app.git', null],
+		// a key's prefix in ordinary text, or a key one character short
+		[`AIza${'g'.repeat(34)}`, `AIza${'g'.repeat(34)}`, null],
+		['xai-grok-4-fast-reasoning', 'xai-grok-4-fast-reasoning', null],
+		['pplx-70b-online', 'pplx-70b-online', null],
+		['tvly-YOUR_API_KEY', 'tvly-YOUR_API_KEY', null],
+		[`pcsk_${'k'.repeat(6)}_${'K'.repeat(62)}`, `pcsk_${'k'.repeat(6)}_${'K'.repeat(62)}`, null],
+		['<div class="fc-daygrid-day-frame">', '<div class="fc-daygrid-day-frame">', null],
 	];
 	for (const [text, expected, blocks] of rows) {
 		assert.equal(redactText(text), expected, text);
@@ -1154,10 +1161,10 @@ test('writing a whole read back keeps each URL password, after the redaction eve
 });
 
 test('a quoted YAML value is hidden up to its real closing quote', async () => {
-	const text = "db:\n  password: \"abc\\\"defSECRETTAIL\"\nsmtp:\n  password: 'it''sSECRETTAIL' # the smtp login\n";
+	const text = "db:\n  password: \"pqr\\\"defSECRETTAIL\"\nsmtp:\n  password: 'it''sSECRETTAIL' # the smtp login\nldap:\n  password: '''a''''SECRETTAIL'''\n";
 	const ws = createMemoryWorkspace({ 'config/app.yaml': text });
 	const read = await run(ws, 'read_file', { path: 'config/app.yaml' });
-	assert.ok(!read.includes('SECRETTAIL') && !read.includes('abc') && !read.includes("it'"), read);
+	assert.ok(!read.includes('SECRETTAIL') && !read.includes('pqr') && !read.includes("it'"), read);
 	assert.match(read, /password: "«secret:[0-9a-f]{8}»"\n/);
 	assert.match(read, /password: '«secret:[0-9a-f]{8}»' # the smtp login\n/, 'the comment after the quote stays');
 	await run(ws, 'write_file', { path: 'config/app.yaml', content: withoutNote(read) });
@@ -1175,6 +1182,39 @@ test('a YAML value after a tag or an anchor is hidden, and a count under a token
 	assert.match(read, /token: 4096\n {2}max_tokens: 4096\n/, 'a count under a token name stays');
 	await run(ws, 'write_file', { path: 'config/app.yml', content: withoutNote(read) });
 	assert.equal(ws.files.get('config/app.yml'), text);
+});
+
+test('a .env-style file hides the value of each secret-named NAME=value line', async () => {
+	// Each row: the files it is read as, the text, and the start of the read with each marker as «M».
+	const rows: Array<[paths: string[], text: string, shown: string]> = [
+		[['.env', '.env.local', 'docker/app.env', 'config.toml', 'app.ini', 'app.properties', 'scripts/deploy.sh'], `AWS_ACCESS_KEY_ID=AKIA${'Q'.repeat(16)}\nexport AWS_SECRET_ACCESS_KEY = ${'w'.repeat(40)}\nCOHERE_API_KEY = "${'c'.repeat(40)}"\nOPENAI_API_KEY=\${ROCKETRIDE_OPENAI_KEY}\nANTHROPIC_API_KEY=\n`, 'AWS_ACCESS_KEY_ID=«M»\nexport AWS_SECRET_ACCESS_KEY = «M»\nCOHERE_API_KEY = "«M»"\nOPENAI_API_KEY=${ROCKETRIDE_OPENAI_KEY}\nANTHROPIC_API_KEY=\n\n[3 secret values hidden (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, COHERE_API_KEY).'],
+		// TOML strings in triple quotes: the literal one holds a quote, and in the basic one a backslash escapes a quote
+		[['config.toml'], `COHERE_API_KEY = """${'c'.repeat(40)}"""\nDB_PASSWORD = '''it's-${'p'.repeat(12)}'''\nSMTP_PASSWORD = """a\\"""${'s'.repeat(12)}"""\n`, `COHERE_API_KEY = """«M»"""\nDB_PASSWORD = '''«M»'''\nSMTP_PASSWORD = """«M»"""\n\n[3 secret values hidden (COHERE_API_KEY, DB_PASSWORD, SMTP_PASSWORD).`],
+		// in .properties, # starts a comment only at the start of a line, $ is text, and ''' is not a TOML string
+		[['app.properties'], `db.password=correct horse #${'b'.repeat(12)}\nmail.password=$${'e'.repeat(12)}\nldap.password='''a''''${'q'.repeat(12)}'''\nsmtp.password= #${'s'.repeat(12)}\n`, "db.password=«M»\nmail.password=«M»\nldap.password='«M»'\nsmtp.password= «M»\n\n[4 secret values hidden (db.password, mail.password, ldap.password, smtp.password)."],
+		// each assignment of an export, and $NAME names a variable unless single quotes make it text
+		[['.env.local', 'docker/app.env', 'scripts/deploy.sh'], `  export COHERE_API_KEY=${'c'.repeat(40)} OPENAI_API_KEY="\${ROCKETRIDE_OPENAI_KEY}" MISTRAL_API_KEY="${'m'.repeat(32)}" JWT_SECRET='${'j'.repeat(16)}'\nexport API_KEY=$ROCKETRIDE_OPENAI_KEY\nDB_PASSWORD='$${'p'.repeat(12)}'\n`, `  export COHERE_API_KEY=«M» OPENAI_API_KEY="\${ROCKETRIDE_OPENAI_KEY}" MISTRAL_API_KEY="«M»" JWT_SECRET='«M»'\nexport API_KEY=$ROCKETRIDE_OPENAI_KEY\nDB_PASSWORD='«M»'\n\n[4 secret values hidden (COHERE_API_KEY, MISTRAL_API_KEY, JWT_SECRET, DB_PASSWORD).`],
+		// a space after = in an export, which dotenv reads: a word after it that sets a name is its own, and one that ends in = is a base64 value
+		[['.env'], `export COHERE_API_KEY= ${'c'.repeat(40)}\nexport DEBUG= JWT_SECRET=${'j'.repeat(16)}\nexport DEBUG= SMTP_PASSWORD = ${'s'.repeat(16)}\nexport API_KEY= ${'z'.repeat(30)}== # old key\nexport AUTH_TOKEN= ${'x'.repeat(30)}=\n`, 'export COHERE_API_KEY= «M»\nexport DEBUG= JWT_SECRET=«M»\nexport DEBUG= SMTP_PASSWORD = «M»\nexport API_KEY= «M» # old key\nexport AUTH_TOKEN= «M»\n\n[5 secret values hidden (COHERE_API_KEY, JWT_SECRET, SMTP_PASSWORD, API_KEY, AUTH_TOKEN).'],
+		// an export value is the whole shell word, so an escaped quote or '' does not end it
+		[['.env'], `export DB_PASSWORD="correct\\"${'h'.repeat(12)}"\nexport SMTP_PASSWORD='it''s-${'p'.repeat(12)}'\n`, `export DB_PASSWORD="«M»"\nexport SMTP_PASSWORD='«M»'\n\n[2 secret values hidden (DB_PASSWORD, SMTP_PASSWORD).`],
+		// in an export, a quote left open, unquoted words up to the next name, and a quoted name
+		[['.env'], `export API_KEY="${'k'.repeat(20)}\nexport JWT_SECRET='${'j'.repeat(16)}\nexport DB_PASSWORD=correct horse ${'b'.repeat(12)}\nexport "MISTRAL_API_KEY"=${'m'.repeat(32)}\n`, `export API_KEY="«M»\nexport JWT_SECRET='«M»\nexport DB_PASSWORD=«M»\nexport "MISTRAL_API_KEY"=«M»\n\n[4 secret values hidden (API_KEY, JWT_SECRET, DB_PASSWORD, MISTRAL_API_KEY).`],
+		// NAME = value after another assignment is its own
+		[['.env'], `export FOO=bar API_KEY = ${'k'.repeat(20)}\n`, 'export FOO=bar API_KEY = «M»\n\n[1 secret value hidden (API_KEY).'],
+		// dotenv reads a word that sets a name after `NAME= ` as NAME's value, up to the next such word
+		[['.env'], `export API_KEY = HOST=${'h'.repeat(16)}\nexport AUTH_TOKEN= HOST=${'t'.repeat(16)} FOO=bar\n`, 'export API_KEY = «M»\nexport AUTH_TOKEN= «M» FOO=bar\n\n[2 secret values hidden (API_KEY, AUTH_TOKEN).'],
+		// where that word's own value is hidden too, it stays its own
+		[['.env'], `export API_KEY = JWT_SECRET=${'j'.repeat(16)}\n`, 'export API_KEY = JWT_SECRET=«M»\n\n[1 secret value hidden (JWT_SECRET).'],
+		// `NAME= # note` is an empty NAME and a comment, and `NAME=#x` sets `#x`
+		[['.env', 'scripts/deploy.sh'], `export API_KEY= # optional; leave blank\nAUTH_TOKEN= # unused\nJWT_SECRET=#${'j'.repeat(16)}\n`, 'export API_KEY= # optional; leave blank\nAUTH_TOKEN= # unused\nJWT_SECRET=«M»\n\n[1 secret value hidden (JWT_SECRET).'],
+	];
+	for (const [paths, text, shown] of rows) {
+		for (const path of paths) {
+			const read = await run(createMemoryWorkspace({ [path]: text }), 'read_file', { path });
+			assert.equal(read.replace(/«secret:[0-9a-f]{8}»/g, '«M»').slice(0, shown.length), shown, path);
+		}
+	}
 });
 
 test('a .pipe mid-edit, missing a comma or a closing quote, still hides each secret', async () => {
@@ -1422,9 +1462,10 @@ test('a key the user sends never shows in their own row, live or queued, and the
 });
 
 test('leak test: no canary reaches a question, a thinking chunk, an approval card, the answer, the saved session or the catalog', async () => {
-	// One canary per way in. pipeField has no key shape, so only its field name gives it away.
+	// One canary per way in. pipeField and quotedField have no key shape, so only a field name gives them away.
 	const canaries = {
 		pipeField: 'canary-pipe-field-7c2e',
+		quotedField: 'canary-quoted-field-8d3f',
 		freeText: `sk-canary-free-text-${'1'.repeat(8)}`,
 		toolError: `ghp_${'2'.repeat(36)}`,
 		runResult: `sk-canary-run-result-${'3'.repeat(8)}`,
@@ -1440,6 +1481,7 @@ test('leak test: no canary reaches a question, a thinking chunk, an approval car
 	const ws = withReadOnlyReference(
 		createMemoryWorkspace({
 			'pipelines/leak.pipe': inlineKeyPipe(canaries.pipeField),
+			'pipelines/quoted.pipe': inlineKeyPipe(canaries.quotedField),
 			'notes/setup.md': `Set OPENAI_API_KEY=${canaries.freeText} before you run it.`,
 			'apps/daybook-ui/package.json': JSON.stringify({ appManifest: { id: 'daybook', name: 'Daybook' } }),
 			'apps/daybook-ui/src/App.tsx': 'export default function App() { return null; }',
@@ -1452,8 +1494,8 @@ test('leak test: no canary reaches a question, a thinking chunk, an approval car
 		if (path === 'pipelines/broken.pipe') throw new Error(`the store refused the read: postgres://admin:${canaries.prepareError}@db.example.invalid/store`);
 		return read(path);
 	};
-	// The deployment's name, as the server holds it, goes on the schedule card.
-	const { client } = scriptedClient({ use: { token: 'tk_run_0001', output: `the run printed ${canaries.runResult}` }, getServices: { services: { chat: {}, llm_openai: {} } }, validate: { errors: [], warnings: [] }, 'deploy.get': { pipelineName: `Nightly digest ${canaries.cardName}` }, 'deploy.setSchedule': {} });
+	// The run prints a key a read hid. The deployment's name, as the server holds it, goes on the schedule card.
+	const { client } = scriptedClient({ use: { token: 'tk_run_0001', output: `the run printed ${canaries.runResult} and ${canaries.quotedField}` }, getServices: { services: { chat: {}, llm_openai: {} } }, validate: { errors: [], warnings: [] }, 'deploy.get': { pipelineName: `Nightly digest ${canaries.cardName}` }, 'deploy.setSchedule': {} });
 	(client as unknown as Record<string, unknown>).getTaskStatus = async () => {
 		throw new Error(`token rejected: ${canaries.toolError}`);
 	};
@@ -1462,7 +1504,7 @@ test('leak test: no canary reaches a question, a thinking chunk, an approval car
 		{ id: 2, sender: 'bot', text: 'Noted.', timestamp: '' },
 	];
 	const model = scriptedModel([
-		plan(['read_file', { path: 'pipelines/leak.pipe' }], ['read_file', { path: 'notes/setup.md' }], ['search_files', { pattern: 'OPENAI_API_KEY' }], ['rocketride_client', { method: 'getTaskStatus', params: ['tk_run_0001'] }], ['rocketride_client', { method: 'use', params: [{ filepath: 'pipelines/leak.pipe' }] }], ['read_file', { path: '.rocketride/docs/ROCKETRIDE_SETUP.md' }], ['search_files', { pattern: 'OPENAI_API_KEY', path: '.rocketride/docs' }], ['rocketride_client', { method: 'deploy.setSchedule', params: ['p1', 'webhook_1', '0 9 * * *', 't1'] }], ['rocketride_client', { method: 'use', params: [{ filepath: 'pipelines/broken.pipe' }] }]),
+		plan(['read_file', { path: 'pipelines/leak.pipe' }], ['read_file', { path: 'pipelines/quoted.pipe' }], ['read_file', { path: 'notes/setup.md' }], ['search_files', { pattern: 'OPENAI_API_KEY' }], ['rocketride_client', { method: 'getTaskStatus', params: ['tk_run_0001'] }], ['rocketride_client', { method: 'use', params: [{ filepath: 'pipelines/leak.pipe' }] }], ['read_file', { path: '.rocketride/docs/ROCKETRIDE_SETUP.md' }], ['search_files', { pattern: 'OPENAI_API_KEY', path: '.rocketride/docs' }], ['rocketride_client', { method: 'deploy.setSchedule', params: ['p1', 'webhook_1', '0 9 * * *', 't1'] }], ['rocketride_client', { method: 'use', params: [{ filepath: 'pipelines/broken.pipe' }] }]),
 		(q) => {
 			// the first marker is leak.pipe's: its read is the wave's first result
 			const marker = markerIn(JSON.stringify(q));
@@ -1516,6 +1558,71 @@ test('leak test: no canary reaches a question, a thinking chunk, an approval car
 	assert.ok(seen.questions.includes('.rocketride/ is read-only reference.'), 'the write to the guide was refused');
 	assert.deepEqual(JSON.parse(ws.files.get('pipelines/leak.pipe') ?? '').components[1].config, { apikey: canaries.pipeField, model: 'gpt-5', fallback: '${ROCKETRIDE_OPENAI_KEY}' }, 'the file keeps the real key');
 	assert.equal(ws.files.get('.rocketride/docs/ROCKETRIDE_SETUP.md'), `An example config:\n\n    OPENAI_API_KEY=${canaries.guide}\n`, 'the guide is unchanged');
+});
+
+test('a value a read hid shows as its marker on an approval card, in the Checked line and where a tool cuts a long text', async () => {
+	// No key shape: only the .pipe field name gives it away. Each long text repeats it, so every cut lands in a copy, and § shows any part left.
+	const key = '§canary-card-and-check-5e1a§';
+	const long = key.repeat(2_000);
+	const ws = createMemoryWorkspace({
+		'pipelines/a.pipe': inlineKeyPipe(key),
+		'apps/daybook-ui/package.json': JSON.stringify({ appManifest: { id: 'daybook', name: 'Daybook' } }),
+		'apps/daybook-ui/src/App.tsx': 'export default function App() { return null; }',
+	});
+	// The deployment's name, as the server holds it, and the build error quote the key; the run, the task, the type errors and the build log quote it past their cuts.
+	const { client } = scriptedClient({ 'deploy.get': { pipelineName: `Nightly digest ${key}` }, 'deploy.setSchedule': {}, use: { token: 'tk_run_0001', output: long }, getTaskStatus: { log: long }, 'deploy.add': { artifact: { registryVersion: 2 } }, listDeployments: [row(2, 'failed')], buildLog: { log: long } });
+	const model = scriptedModel([
+		plan(['read_file', { path: 'pipelines/a.pipe' }]),
+		plan(['check_app', { app: 'daybook-ui' }], ['rocketride_client', { method: 'deploy.setSchedule', params: ['p1', 'webhook_1', '0 9 * * *', 't1'] }], ['rocketride_client', { method: 'use', params: [{ filepath: 'pipelines/a.pipe' }] }], ['rocketride_client', { method: 'getTaskStatus', params: ['tk_run_0001'] }], ['deploy_app', { app: 'daybook-ui', message: 'Fix the build' }]),
+		// the model may write out a value it saw before the read that hid it
+		done(`Done. The run printed ${key}.`),
+	]);
+	const asked = fakeAsk(['deny']);
+	const chunks = await agentTurn(ws, model, { client, dev: session({ state: 'error', reason: `config rejected: apikey ${key} ${key.repeat(10)}` }), ask: asked.ask, markers: [{ ...TYPE_ERROR, message: long }] });
+	const marker = markerIn(JSON.stringify(model.questions));
+	assert.deepEqual(
+		asked.cards.map((card) => card.title),
+		[`Schedule Nightly digest ${marker} (webhook_1) on team t1 to run 0 9 * * *`]
+	);
+	assert.ok(chunks.at(-1)?.text.includes(`build failed: config rejected: apikey ${marker}`), chunks.at(-1)?.text);
+	const seen = JSON.stringify([model.questions, chunks]);
+	assert.ok(!seen.includes('§'), seen.slice(seen.indexOf('§') - 100, seen.indexOf('§') + 20));
+});
+
+test('a save note or a console list cut to fit shows no part of a value a read hid', async () => {
+	// As above: each long text repeats the key, and § shows any part a cut left.
+	const key = '§canary-save-note-7d1c§';
+	const long = key.repeat(2_000);
+	const ws = createMemoryWorkspace({ 'pipelines/a.pipe': inlineKeyPipe(key), 'apps/daybook-ui/package.json': APP_FILES['apps/daybook-ui/package.json'], 'apps/daybook-ui/src/App.tsx': APP_FILES['apps/daybook-ui/src/App.tsx'] });
+	// The first saves' validate and type errors quote the key at length; then both clear, so the run can finish.
+	const validation = { errors: [{ message: long }], warnings: [] };
+	const markers = [{ ...TYPE_ERROR, message: long }];
+	const model = scriptedModel([
+		plan(['read_file', { path: 'pipelines/a.pipe' }], ['read_file', { path: 'apps/daybook-ui/src/App.tsx' }]),
+		plan(['edit_file', { path: 'pipelines/a.pipe', oldString: '"llm_openai"', newString: '"llm_anthropic"' }], ['write_file', { path: 'apps/daybook-ui/src/App.tsx', content: 'export default function App() { return 1; }' }]),
+		() => {
+			validation.errors = [];
+			markers.length = 0;
+			return plan(['edit_file', { path: 'pipelines/a.pipe', oldString: '"llm_anthropic"', newString: '"llm_openai"' }], ['check_app', { app: 'daybook-ui' }]);
+		},
+		done('Done.'),
+	]);
+	const chunks = await agentTurn(ws, model, { client: scriptedClient({ getServices: { services: {} }, validate: validation }).client, dev: session({ state: 'ok' }, long), markers });
+	assert.match(chunks.at(-1)?.text ?? '', /^Done\./);
+	const seen = JSON.stringify(model.questions);
+	assert.ok(!seen.includes('§'), seen.slice(seen.indexOf('§') - 100, seen.indexOf('§') + 20));
+});
+
+test('a rebuild that cannot run shows no part of a value a read hid in its summary', async () => {
+	const key = '§canary-rebuild-2c4e§';
+	const fail = (): never => {
+		throw new Error(`no build: ${key.repeat(20)}`);
+	};
+	const hide = (text: string): string => text.replaceAll(key, '«M»');
+	for (const dev of [Object.assign(session(), { rebuild: fail }), Object.assign(session(), { subscribeWatch: fail })]) {
+		const { report } = await runCheck(appCheck(dev, [], hide), 'daybook');
+		assert.equal(report.evidence.at(-1)?.summary, `build not run: no build: ${'«M»'.repeat(20)}`);
+	}
 });
 
 test('known limit: a base64-encoded key reaches the model', { todo: 'redaction matches key shapes and secret-named fields, not encodings' }, async () => {
@@ -1618,9 +1725,10 @@ function session(end: WatchStatus = { state: 'ok' }, consoleError?: string): Age
  *
  * @param dev - The app's dev session.
  * @param markers - The markers Monaco holds.
+ * @param hide - Hides the values the run's file tools hid.
  * @returns The toolkit and the reports it has reported.
  */
-function appCheck(dev: AgentDevSession, markers: MarkerInfo[] = []): { toolkit: AppCheckToolkit; heard: CheckReport[] } {
+function appCheck(dev: AgentDevSession, markers: MarkerInfo[] = [], hide?: (text: string) => string): { toolkit: AppCheckToolkit; heard: CheckReport[] } {
 	const host: AgentHost = {
 		vfs: createMemoryWorkspace(APP_FILES),
 		scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }),
@@ -1632,7 +1740,7 @@ function appCheck(dev: AgentDevSession, markers: MarkerInfo[] = []): { toolkit: 
 		host,
 		async () => ({ modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => markers, onChange: () => () => undefined }),
 		(_folder, report) => heard.push(report),
-		APP_FAST
+		{ ...APP_FAST, hide }
 	);
 	return { toolkit, heard };
 }

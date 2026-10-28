@@ -40,13 +40,18 @@
  *   secret-named key (`secretKind`), the way `redactSecrets` decides for
  *   structured results, unless it holds no secret (`holdsNoSecret`). A number
  *   counts too under a password or secret name, not under a token name.
+ * - In `.env*`, `.toml`, `.ini`, `.properties` and `.sh` files, the value of
+ *   each secret-named `NAME=value`, one per line or each one an `export`
+ *   sets, unless it holds no secret. In a shell or `.env` file, a `$NAME`
+ *   value names another variable, so it holds none.
  * - In any file, what `findSecrets` finds: key shapes, bearer tokens, URL
  *   passwords, private key blocks and JSON secret fields. Every tool result
  *   passes through `redactText`, which hides the same things as `[redacted]`;
  *   a marker first means a read never shows `[redacted]`, which a write would
  *   then save over the user's key.
- * - In any file and in a save's note, a value this run already hid, when it is
- *   8 characters or longer.
+ * - In any file, in every tool result (wave/loop.ts), and on cards and in the
+ *   answer (run.ts), a value this run already hid, when it is 8 characters
+ *   or longer.
  *
  * An edit anchor is matched against the file as the model sees it, markers in
  * place: matched against the real text, it would tell the model whether a
@@ -54,8 +59,9 @@
  *
  * Not seen: a key encoded (base64) or split across lines, YAML block scalars,
  * a quoted YAML value that runs onto the next line, YAML values nested under a
- * secret-named key, and a JSON value after an unclosed quote earlier on the
- * same line.
+ * secret-named key, a JSON value after an unclosed quote earlier on the
+ * same line, a `NAME=value` value that runs onto the next line, and a TOML
+ * inline table.
  */
 
 import { findSecrets, holdsNoSecret, mergeSpans, replaceSpans, secretKind, unescapeJson, type SecretKind } from './common';
@@ -84,6 +90,42 @@ const YAML_FIELD = /^[ \t]*(?:-[ \t]+)?(["']?)([\w.-]+)\1[ \t]*:[ \t]+(\S.*?)[ \
 
 /** Tags (`!!str`, `!secret`) and anchors (`&pw`) before a YAML value, each with the space after it. */
 const YAML_PROPERTIES = /^(?:[!&]\S*[ \t]+)+/;
+
+/** Files whose secret-named `NAME=value` lines are hidden. */
+const KEY_VALUE_FILE = /(?:^|\/)\.env[^/]*$|\.(?:env|toml|ini|properties|sh)$/i;
+
+/** `NAME=value` files a shell reads, where `$NAME` names another variable. */
+const SHELL_FILE = /(?:^|\/)\.env[^/]*$|\.(?:env|sh)$/i;
+
+/** `.properties` files, where `#` starts a comment only at the start of a line. */
+const PROPERTIES_FILE = /\.properties$/i;
+
+/** TOML files, where a string may sit in triple quotes. */
+const TOML_FILE = /\.toml$/i;
+
+/** A `NAME=value` line, the name bare or quoted: group 2 is the name, group 3 the value and any comment. */
+const KEY_VALUE_FIELD = /^[ \t]*(["']?)([\w.-]+)\1[ \t]*=[ \t]*(\S.*?)[ \t]*$/gm;
+
+/** An `export` line: group 1 is everything after `export`. */
+const EXPORT_LINE = /^[ \t]*export[ \t]+(.*)$/gm;
+
+/** The start of an `export` word that sets a name: `NAME=` or `NAME =`. */
+const EXPORT_SETS_NAME = /[\w.-]+[ \t]*=/;
+
+/** `EXPORT_SETS_NAME` for the word right after `NAME= `, where a word that ends in `=` is a base64 value, not an empty assignment. */
+const EXPORT_SETS_NAME_AFTER_SPACE = /[\w.-]+(?:[ \t]+=|=(?!=*(?:[ \t]|$)))/;
+
+/** One shell word: quoted and unquoted parts with nothing between them. Read whole, it lets `plainOrQuoted` find the real closing quote past a `\"` or a `''`. A quote left open runs to the end of the line, as in a shell. */
+const SHELL_WORD = /(?:"[^"]*"?|'[^']*'?|[^\s"']\S*)+/;
+
+/** A `NAME=value` among an `export` line's words, the name bare or quoted: group 2 is the name, group 3 the value. Dotenv reads the rest of the line as the value, spaces after `=` too, and a shell reads each `NAME=value` word as its own assignment, so the value runs up to the next word that sets a name. Group 3 is empty when that word follows `NAME= ` (see `lineFields`). */
+const EXPORT_FIELD = new RegExp(String.raw`(?<![^ \t])(["']?)([\w.-]+)\1[ \t]*=(?:[ \t]+(?!${EXPORT_SETS_NAME_AFTER_SPACE.source}))?((?:${SHELL_WORD.source}(?:[ \t]+(?!${EXPORT_SETS_NAME.source})${SHELL_WORD.source})*)?)`, 'g');
+
+/** A value that only names a shell variable. */
+const SHELL_REFERENCE = /^\$[A-Za-z_]\w*$/;
+
+/** A TOML string in triple quotes that closes on the same line: group 1 is a basic string, where a backslash escapes the next character, group 2 a literal one. */
+const TRIPLE_QUOTED = /^(?:"""((?:\\.|[^\\])*?)"""|'''(.*?)''')/;
 
 /** How a YAML value starts when it is not one plain or quoted string: a block, a flow, an anchor, an alias, a tag or a comment. */
 const YAML_NOT_SCALAR = /^[|>{[&*!#]/;
@@ -236,6 +278,23 @@ function yamlClose(rest: string): number {
 }
 
 /**
+ * The string a plain or quoted value holds.
+ *
+ * @param value - The value and anything after it on the line.
+ * @param comments - Whether ` #` starts a comment after an unquoted value.
+ * @param toml - Whether a string may sit in triple quotes.
+ * @returns The string and where it starts in `value`.
+ */
+function plainOrQuoted(value: string, comments = true, toml = false): { text: string; offset: number } {
+	const triple = toml ? TRIPLE_QUOTED.exec(value) : null;
+	if (triple) return { text: triple[1] ?? triple[2], offset: 3 };
+	if (value[0] === '"' || value[0] === "'") return { text: value.slice(1, yamlClose(value)), offset: 1 };
+	// step: an unquoted value ends where a comment starts
+	const comment = comments ? value.search(/\s#/) : -1;
+	return { text: (comment < 0 ? value : value.slice(0, comment)).trimEnd(), offset: 0 };
+}
+
+/**
  * The plain or quoted string a YAML value holds, after any tag or anchor.
  *
  * @param rest - Everything after `key: ` on the line.
@@ -245,28 +304,63 @@ function yamlScalar(rest: string): { text: string; offset: number } | null {
 	const skip = YAML_PROPERTIES.exec(rest)?.[0].length ?? 0;
 	const value = rest.slice(skip);
 	if (YAML_NOT_SCALAR.test(value)) return null;
-	if (value[0] === '"' || value[0] === "'") return { text: value.slice(1, yamlClose(value)), offset: skip + 1 };
-	// step: an unquoted value ends where a comment starts
-	const comment = value.search(/\s#/);
-	return { text: (comment < 0 ? value : value.slice(0, comment)).trimEnd(), offset: skip };
+	const scalar = plainOrQuoted(value);
+	return { text: scalar.text, offset: skip + scalar.offset };
 }
 
 /**
- * The secret values in YAML text: the plain or quoted value of each line
- * whose key is secret-named.
+ * The secret values in text made of `key: value` (YAML) or `NAME=value`
+ * lines: the value of each line whose key is secret-named.
  *
  * @param text - The file's text.
+ * @param field - The line pattern: group 2 is the key, group 3 the value and any comment, empty for an `export` name a word that sets a name follows.
+ * @param scalar - Reads the string a value holds, told whether white space comes before it; null when it holds none.
  * @returns Each value's span, named by its key.
  */
-function yamlFields(text: string): Found[] {
+function lineFields(text: string, field: RegExp, scalar: (rest: string, spaced: boolean) => { text: string; offset: number } | null): Found[] {
 	const found: Found[] = [];
-	for (const m of text.matchAll(YAML_FIELD)) {
+	let open = -1;
+	for (const m of text.matchAll(field)) {
 		const [line, , key, rest] = m;
 		const secret = secretKind(key);
-		const value = secret ? yamlScalar(rest) : null;
-		if (!secret || !value || holdsNoSecret(value.text, secret)) continue;
+		// step: `A= B=x` is an empty A and B=x to a shell, and A=`B=x` to dotenv. A's value counts where B's hides nothing, so B's stays its own.
+		if (!rest) {
+			if (secret) open = m.index;
+			continue;
+		}
+		const from = open;
+		open = -1;
+		const value = secret ? scalar(rest, /[ \t]/.test(line[line.lastIndexOf(rest) - 1])) : null;
+		if (!secret || !value || holdsNoSecret(value.text, secret)) {
+			if (from >= 0) found.push(...lineFields(text.slice(from, m.index + line.length), KEY_VALUE_FIELD, scalar).map((span) => ({ ...span, start: from + span.start, end: from + span.end })));
+			continue;
+		}
 		const start = m.index + line.lastIndexOf(rest) + value.offset;
 		found.push({ start, end: start + value.text.length, where: key });
+	}
+	return found;
+}
+
+/**
+ * The secret values in a `NAME=value` file: the value of each line whose name
+ * is secret-named, and of each name an `export` line sets.
+ *
+ * @param path - The file's path; its name decides how `#` and `$NAME` read.
+ * @param text - The file's text.
+ * @returns Each value's span, named by its name.
+ */
+function keyValueFields(path: string, text: string): Found[] {
+	const scalar = (rest: string, spaced: boolean): { text: string; offset: number } | null => {
+		// step: `NAME= # note` is an empty NAME and a comment, while `NAME=#x` sets `#x`
+		if (spaced && rest[0] === '#' && !PROPERTIES_FILE.test(path)) return null;
+		const value = plainOrQuoted(rest, !PROPERTIES_FILE.test(path), TOML_FILE.test(path));
+		// step: in single quotes `$NAME` is text
+		return SHELL_FILE.test(path) && rest[0] !== "'" && SHELL_REFERENCE.test(value.text) ? null : value;
+	};
+	const found = lineFields(text, KEY_VALUE_FIELD, scalar);
+	for (const line of text.matchAll(EXPORT_LINE)) {
+		const at = line.index + line[0].length - line[1].length;
+		for (const field of lineFields(line[1], EXPORT_FIELD, scalar)) found.push({ ...field, start: at + field.start, end: at + field.end });
 	}
 	return found;
 }
@@ -327,7 +421,7 @@ export class SecretMarkers {
 	 * before any window: a window could cut a value in half, and half a key
 	 * no longer matches.
 	 *
-	 * @param path - The file's path; its extension decides whether fields are read as JSON or YAML.
+	 * @param path - The file's path; its name decides whether fields are read as JSON, YAML or `NAME=value` lines.
 	 * @param text - The file's full text.
 	 * @returns The text with markers, and the note for the end of a read ('' when nothing was hidden).
 	 */
@@ -385,10 +479,11 @@ export class SecretMarkers {
 	}
 
 	/**
-	 * Hides the values this run already hid, wherever they appear: in a save's
-	 * note, the engine may quote the config it just validated.
+	 * Hides the values this run already hid, wherever they appear: a save's
+	 * note may quote the config the engine just validated, and a run's output
+	 * or an error may quote a value too.
 	 *
-	 * @param text - Any text the file tools return.
+	 * @param text - A tool result, an error, or a card or answer the chat shows.
 	 * @returns The text with each known value replaced by its marker.
 	 */
 	hideKnown(text: string): string {
@@ -436,12 +531,12 @@ export class SecretMarkers {
 	 * found here are learned first, so a second copy of one, where no field
 	 * name or shape gives it away, is hidden on the first read too.
 	 *
-	 * @param path - The file's path; its extension decides whether fields are read as JSON or YAML.
+	 * @param path - The file's path; its name decides whether fields are read as JSON, YAML or `NAME=value` lines.
 	 * @param text - The file's full text.
 	 * @returns The spans, in order, none overlapping.
 	 */
 	private spans(path: string, text: string): Found[] {
-		const fields = JSON_FILE.test(path) ? jsonFields(text) : YAML_FILE.test(path) ? yamlFields(text) : [];
+		const fields = JSON_FILE.test(path) ? jsonFields(text) : YAML_FILE.test(path) ? lineFields(text, YAML_FIELD, yamlScalar) : KEY_VALUE_FILE.test(path) ? keyValueFields(path, text) : [];
 		const shapes = findSecrets(text).map(({ start, end }) => ({ start, end, where: '' }));
 		const found = mergeSpans([...fields, ...shapes]);
 		for (const span of found) this.markerFor(text.slice(span.start, span.end));

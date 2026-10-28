@@ -171,7 +171,7 @@ export class FilesystemTools extends AgentToolkit {
 	private readonly readHashes = new Map<string, string>();
 
 	/** The secret values this run's reads hid, each with its marker; writes put them back. */
-	private readonly secrets = new SecretMarkers();
+	readonly secrets = new SecretMarkers();
 
 	/** The host's after-save hook, if any. */
 	private readonly afterSave?: (path: string) => Promise<string>;
@@ -261,8 +261,7 @@ export class FilesystemTools extends AgentToolkit {
 	private async noteAfterSave(path: string): Promise<string> {
 		if (!this.afterSave) return '';
 		try {
-			// step: the engine's validate may quote the config, values included
-			return this.secrets.hideKnown(await this.afterSave(path));
+			return await this.afterSave(path);
 		} catch {
 			return '';
 		}

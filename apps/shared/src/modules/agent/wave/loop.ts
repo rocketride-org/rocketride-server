@@ -47,6 +47,7 @@
  */
 
 import { redactText } from '../toolkits/common';
+import type { SecretMarkers } from '../toolkits/secretMarkers';
 import type { AgentTool, ToolAct, ToolStep } from '../tools';
 import { MEMORY_PEEK_TOOL, peek, resolveAnswerRefs, resolveArgRefs, resultKey, RunMemory } from './memory';
 import { buildWaveQuestion, heardText, parseReply, type PromptPrefix } from './plan';
@@ -131,6 +132,8 @@ export interface LoopOptions {
 	 * reaches it.
 	 */
 	approve: (act: ToolAct, run: () => Promise<string>) => Promise<() => Promise<string>>;
+	/** The values the file tools hid this run; any other result that quotes one shows its marker. */
+	secrets?: SecretMarkers;
 }
 
 /** How a run ended. */
@@ -363,13 +366,15 @@ function partialReport(cause: string, lines: string[], scratch: string): string 
 export type CallOutcome = { ok: true; result: string; ms: number } | { ok: false; error: string; ms: number; timedOut: boolean; unstarted?: true };
 
 /**
- * An outcome with its result or error passed through redactText. Every
- * outcome goes through it before anything reads it, so no credential in a
- * tool's result, its prepare error or its refusal reaches the stored result,
- * the next question, a thinking line or the finish rule.
+ * An outcome with each value the file tools hid shown as its marker, then
+ * passed through redactText. Every outcome goes through it before anything
+ * reads it, so no credential in a tool's result, its prepare error or its
+ * refusal reaches the stored result, the next question, a thinking line or
+ * the finish rule.
  */
-function redactOutcome(outcome: CallOutcome): CallOutcome {
-	return outcome.ok ? { ...outcome, result: redactText(outcome.result) } : { ...outcome, error: redactText(outcome.error) };
+function redactOutcome(outcome: CallOutcome, secrets?: SecretMarkers): CallOutcome {
+	const hide = (text: string): string => redactText(secrets ? secrets.hideKnown(text) : text);
+	return outcome.ok ? { ...outcome, result: hide(outcome.result) } : { ...outcome, error: hide(outcome.error) };
 }
 
 // =============================================================================
@@ -728,7 +733,7 @@ class WaveRun {
 
 		const runnable = prepared.flatMap((p) => ('args' in p ? [{ tool: p.call.tool, args: p.args }] : []));
 		const steps: CallSteps = { prepare: (call) => this.prepare(call), approve: this.o.approve };
-		const outcomes = (await runWave(runnable, steps, { timeoutMs: (tool) => this.limit(tool), late: this.late, signal: this.o.signal })).map(redactOutcome);
+		const outcomes = (await runWave(runnable, steps, { timeoutMs: (tool) => this.limit(tool), late: this.late, signal: this.o.signal })).map((outcome) => redactOutcome(outcome, this.o.secrets));
 
 		let next = 0;
 		const ran: RanCall[] = [];

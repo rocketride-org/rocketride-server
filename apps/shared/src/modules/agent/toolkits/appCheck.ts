@@ -397,13 +397,14 @@ function appModelPaths(src: MarkerSource, appId: string): string[] {
  * @param src - The marker source; settle it first (`settleMarkers`) if files just changed.
  * @param app - The app being checked; its `id` is the id its models are keyed by.
  * @param tsFiles - The app's TypeScript files, as paths inside the app (for example `src/App.tsx`).
+ * @param hide - Hides the values the run's file tools hid, before the cut.
  * @returns `not_run` when the app has no models, or has TypeScript files and
  *   none of them is loaded (the models are only json, css and the like);
  *   otherwise `fail` with one `${relPath}:${line} ${message}` line per error, or
  *   `pass`. TypeScript files with no model are named in the output and counted
  *   in a passing summary.
  */
-async function appTypeEvidence(src: MarkerSource, app: AppEntry, tsFiles: string[]): Promise<CheckEvidence> {
+async function appTypeEvidence(src: MarkerSource, app: AppEntry, tsFiles: string[], hide: (text: string) => string): Promise<CheckEvidence> {
 	const prefix = app.id ? prefixOf(app.id) : undefined;
 	const models = new Set(prefix ? src.modelUris().filter((uri) => uri.startsWith(prefix)) : []);
 	if (!prefix || models.size === 0) return { step: TYPES_STEP, ran: TYPES_RAN, output: NOT_OPEN_OUTPUT, status: 'not_run', summary: NOT_OPEN_SUMMARY };
@@ -422,7 +423,7 @@ async function appTypeEvidence(src: MarkerSource, app: AppEntry, tsFiles: string
 	// step: only the error list is cut; the note on unchecked files comes after it so a long list cannot hide it
 	const errorText = errors.length > 0 ? errors.map((e) => `${e.relPath}:${e.line} ${e.message}`).join('\n') : `no TypeScript errors in ${checked.length} files`;
 	const note = unchecked.length > 0 ? `\nNot type-checked (not loaded in the editor): ${unchecked.join(', ')}` : '';
-	const output = `${clip(errorText, 'fix the first errors and check again to see the rest')}${note}`;
+	const output = `${clip(hide(errorText), 'fix the first errors and check again to see the rest')}${note}`;
 
 	if (errors.length > 0) return { step: TYPES_STEP, ran: TYPES_RAN, output, status: 'fail', summary: `types: ${errors.length} errors` };
 	const summary = unchecked.length > 0 ? `types clean (${unchecked.length} files not type-checked)` : 'types clean';
@@ -457,9 +458,10 @@ const SAVE_CLIP_HINT = 'fix the first errors and save again to see the rest';
  * @param markers - Gets Monaco's marker source; resolves null when there is none (outside a browser, or before the editor loads).
  * @param folder - The app's folder under `apps/`.
  * @param relPath - The file's path inside the app (for example `src/App.tsx`).
+ * @param hide - Hides the values the run's file tools hid, before the cut.
  * @returns The text to append: the file's errors and the app total, or why types were not checked.
  */
-export async function typesNote(vfs: IWorkspaceFileSystem, markers: () => Promise<MarkerSource | null>, folder: string, relPath: string): Promise<string> {
+export async function typesNote(vfs: IWorkspaceFileSystem, markers: () => Promise<MarkerSource | null>, folder: string, relPath: string, hide: (text: string) => string): Promise<string> {
 	try {
 		const app = (await readApps(vfs, () => false)).find((a) => a.folder === folder);
 		if (!app?.id) return `\n\nTypes not checked: apps/${folder} has no manifest id, so its editor models cannot be found.`;
@@ -482,7 +484,7 @@ export async function typesNote(vfs: IWorkspaceFileSystem, markers: () => Promis
 		const total = appTypeErrors(src, app.id).length;
 		if (errors.length === 0) return `\n\nType errors in this file: none. App total: ${total}.`;
 		const lines = errors.map((e) => `- line ${e.line}: ${e.message.replace(/\s*\n\s*/g, ' ')}`).join('\n');
-		return `\n\nType errors in this file (${errors.length}):\n${clip(lines, SAVE_CLIP_HINT)}\nApp total: ${total}.`;
+		return `\n\nType errors in this file (${errors.length}):\n${clip(hide(lines), SAVE_CLIP_HINT)}\nApp total: ${total}.`;
 	} catch (err) {
 		return `\n\nTypes not checked: ${messageOf(err)}.`;
 	}
@@ -539,6 +541,8 @@ export interface AppCheckOptions {
 	types?: { quietMs?: number; maxMs?: number };
 	/** Aborted when the user stops the run: the marker settle and the build wait end at once. */
 	signal?: AbortSignal;
+	/** Hides the values the run's file tools hid; each text goes through it before it is cut. */
+	hide?: (text: string) => string;
 }
 
 // =============================================================================
@@ -577,18 +581,19 @@ async function typeScriptFiles(vfs: IWorkspaceFileSystem, dir: string, base = ''
  * @param markers - The host's marker source getter.
  * @param settle - How long to let Monaco's markers settle.
  * @param files - The app's TypeScript files.
+ * @param hide - Hides the values the run's file tools hid.
  * @returns The evidence; `not_run` when the editor is not there, did not load, or holds none of the app's files.
  */
-async function typesStep(app: AppEntry, markers: () => Promise<MarkerSource | null>, settle: { quietMs?: number; maxMs?: number; signal?: AbortSignal } | undefined, files: string[]): Promise<CheckEvidence> {
+async function typesStep(app: AppEntry, markers: () => Promise<MarkerSource | null>, settle: { quietMs?: number; maxMs?: number; signal?: AbortSignal } | undefined, files: string[], hide: (text: string) => string): Promise<CheckEvidence> {
 	let src: MarkerSource | null;
 	try {
 		src = await markers();
 	} catch (err) {
 		return { step: TYPES_STEP, ran: TYPES_RAN, output: `The editor's type service could not be loaded: ${messageOf(err)}`, status: 'not_run', summary: 'types not checked: the editor could not be loaded' };
 	}
-	if (!src) return appTypeEvidence(NO_MARKERS, app, files);
+	if (!src) return appTypeEvidence(NO_MARKERS, app, files, hide);
 	await settleMarkers(src, settle);
-	return appTypeEvidence(src, app, files);
+	return appTypeEvidence(src, app, files, hide);
 }
 
 /**
@@ -625,9 +630,10 @@ async function checkApp(host: AgentHost, markers: () => Promise<MarkerSource | n
 	if (app.unreadable) throw new Error(`Cannot check ${app.folder} (${app.error}), so nothing was checked. Run check_app again; if it keeps failing, tell the user this app was not checked.`);
 	if (!app.id) return noIdEvidence(app);
 
+	const hide = opts.hide ?? ((text: string) => text);
 	const files = await typeScriptFiles(host.vfs, app.path);
-	const types = await typesStep(app, markers, { ...opts.types, signal: opts.signal }, files);
-	const build = await appBuildEvidence(host.devSession(app.id), { ...opts.build, signal: opts.signal });
+	const types = await typesStep(app, markers, { ...opts.types, signal: opts.signal }, files, hide);
+	const build = await appBuildEvidence(host.devSession(app.id), { ...opts.build, signal: opts.signal }, hide);
 	return [types, ...build];
 }
 
@@ -769,10 +775,11 @@ function errorLines(rows: AppErrorRow[]): string[] {
  * Cuts a list of lines that is too long.
  *
  * @param lines - The lines.
+ * @param hide - Hides the values the run's file tools hid, before the cut.
  * @returns The lines as text, cut with a note on how to see less.
  */
-function listText(lines: string[]): string {
-	return clip(lines.join('\n'), 'fix the first errors and check again to see the rest');
+function listText(lines: string[], hide: (text: string) => string): string {
+	return clip(hide(lines.join('\n')), 'fix the first errors and check again to see the rest');
 }
 
 // =============================================================================
@@ -784,6 +791,7 @@ function listText(lines: string[]): string {
  *
  * @param session - The app's dev session, or null when none is running.
  * @param opts - The timings; tests pass short ones.
+ * @param hide - Hides the values the run's file tools hid, before a summary or an output is cut.
  * @returns With no session or no preview attached, one `not_run` item
  *   (`preview closed: build not checked`). Otherwise `build` (`build OK` or
  *   `build failed: ${reason}`) and, when the build is OK, `runtime` (`runtime
@@ -792,7 +800,7 @@ function listText(lines: string[]): string {
  *   build that does not start or settle in time, or a rebuild that cannot run, is
  *   a single `not_run` item. It never throws.
  */
-async function appBuildEvidence(session: AgentDevSession | null, opts: AppBuildOptions = {}): Promise<CheckEvidence[]> {
+async function appBuildEvidence(session: AgentDevSession | null, opts: AppBuildOptions, hide: (text: string) => string): Promise<CheckEvidence[]> {
 	if (!session || !session.previewAttached) return [notRun('build', 'rebuild the app in its Design preview', PREVIEW_CLOSED_OUTPUT, 'preview closed: build not checked')];
 
 	const buildWaitMs = opts.buildWaitMs ?? DEFAULT_BUILD_WAIT_MS;
@@ -857,11 +865,11 @@ async function appBuildEvidence(session: AgentDevSession | null, opts: AppBuildO
 			if (!outcome.started) return [notRun('build', BUILD_RAN, `No build started within ${wait} of the rebuild request, so nothing was built or checked. The preview may be paused or closed; ${OPEN_PREVIEW}.`, `no build started within ${wait}`)];
 			return [notRun('build', BUILD_RAN, `The build did not finish within ${wait}, so it was not seen to pass or fail. It may still be running; check again in a moment.`, `build still running after ${wait}`)];
 		}
-		if (outcome.kind === 'unstarted') return [notRun('build', BUILD_RAN, `The rebuild could not run: ${outcome.message}`, `build not run: ${brief(outcome.message)}`)];
+		if (outcome.kind === 'unstarted') return [notRun('build', BUILD_RAN, `The rebuild could not run: ${outcome.message}`, `build not run: ${brief(hide(outcome.message))}`)];
 
 		if (outcome.status.state === 'error') {
-			const reason = outcome.status.reason?.trim() || 'no reason reported';
-			const raised = errorRows.length > 0 ? `\nErrors the build raised:\n${listText(errorLines(errorRows))}` : '';
+			const reason = hide(outcome.status.reason?.trim() || 'no reason reported');
+			const raised = errorRows.length > 0 ? `\nErrors the build raised:\n${listText(errorLines(errorRows), hide)}` : '';
 			const output = `${clip(`Build failed: ${reason}`, 'the reason is long; fix the first problem and check again')}${raised}\nRuntime and console were not checked because the build failed.`;
 			return [{ step: 'build', ran: BUILD_RAN, output, status: 'fail', summary: `build failed: ${brief(reason)}` }];
 		}
@@ -871,17 +879,18 @@ async function appBuildEvidence(session: AgentDevSession | null, opts: AppBuildO
 		const took = outcome.status.durationMs !== undefined ? ` in ${outcome.status.durationMs} ms` : '';
 		const evidence: CheckEvidence[] = [{ step: 'build', ran: BUILD_RAN, output: `Build finished OK${took}.`, status: 'pass', summary: 'build OK' }];
 		if (errorRows.length > 0) {
-			evidence.push({ step: 'runtime', ran: RUNTIME_RAN, output: listText(errorLines(errorRows)), status: 'fail', summary: `runtime: ${errorRows.length} errors` });
+			evidence.push({ step: 'runtime', ran: RUNTIME_RAN, output: listText(errorLines(errorRows), hide), status: 'fail', summary: `runtime: ${errorRows.length} errors` });
 		} else {
 			evidence.push({ step: 'runtime', ran: RUNTIME_RAN, output: `No runtime errors arrived from the rebuild until ${describeWait(runtimeGraceMs)} after the build settled.`, status: 'pass', summary: 'runtime clean' });
 		}
 		if (consoleRows.length > 0) {
-			evidence.push({ step: 'console', ran: CONSOLE_RAN, output: listText(consoleRows.map((row) => row.text.replace(/\s*\n\s*/g, ' '))), status: 'pass', summary: `console: ${consoleRows.length} errors` });
+			const lines = consoleRows.map((row) => row.text.replace(/\s*\n\s*/g, ' '));
+			evidence.push({ step: 'console', ran: CONSOLE_RAN, output: listText(lines, hide), status: 'pass', summary: `console: ${consoleRows.length} errors` });
 		}
 		return evidence;
 	} catch (err) {
 		// step: subscribing to a session that is gone throws; that is a check that could not run, not an app that failed
-		return [notRun('build', BUILD_RAN, `The rebuild could not run: ${messageOf(err)}`, `build not run: ${brief(messageOf(err))}`)];
+		return [notRun('build', BUILD_RAN, `The rebuild could not run: ${messageOf(err)}`, `build not run: ${brief(hide(messageOf(err)))}`)];
 	} finally {
 		clearTimeout(capTimer);
 		clearTimeout(quietTimer);

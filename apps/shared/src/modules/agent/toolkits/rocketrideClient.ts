@@ -274,10 +274,11 @@ function catalogOf(result: unknown): unknown {
  *
  * @param method - The checked method name.
  * @param result - What the method returned.
+ * @param hide - Hides the values the run's file tools hid, before the cut.
  * @returns The result as JSON, secrets stripped and clipped, with the exceptions in the module comment.
  * @throws When the result is a live object, which cannot be shown as JSON.
  */
-function resultText(method: string, result: unknown): string {
+function resultText(method: string, result: unknown, hide: (text: string) => string): string {
 	if (result === undefined) return `${method} finished with no result.`;
 	if (!isPlainData(result)) throw new Error(`${method} returned a live object, which can't be shown as JSON. Call a method that returns data; ${GUIDE} lists them.`);
 
@@ -288,9 +289,9 @@ function resultText(method: string, result: unknown): string {
 
 	if (RUN_TOKEN_METHODS.has(method) && isJsonObject(result) && typeof result.token === 'string') {
 		const { token, ...rest } = result;
-		return clip(JSON.stringify({ token, ...redactSecrets(rest) }, null, 1), RESULT_HINT);
+		return clip(hide(JSON.stringify({ token, ...redactSecrets(rest) }, null, 1)), RESULT_HINT);
 	}
-	return toolText(result, RESULT_HINT);
+	return toolText(result, RESULT_HINT, hide);
 }
 
 // =============================================================================
@@ -306,17 +307,21 @@ export class RocketRideClientToolkit extends AgentToolkit {
 	private readonly client: ClientGetter;
 	/** The workspace view a `filepath` is read from. */
 	private readonly vfs: IWorkspaceFileSystem;
+	/** Hides the values the run's file tools hid. */
+	private readonly hide: (text: string) => string;
 
 	/**
 	 * Builds the toolkit.
 	 *
 	 * @param client - The host's client getter.
 	 * @param vfs - The workspace view.
+	 * @param hide - Hides the values the run's file tools hid, before a result is cut.
 	 */
-	constructor(client: ClientGetter, vfs: IWorkspaceFileSystem) {
+	constructor(client: ClientGetter, vfs: IWorkspaceFileSystem, hide = (text: string): string => text) {
 		super();
 		this.client = client;
 		this.vfs = vfs;
+		this.hide = hide;
 	}
 
 	/**
@@ -366,7 +371,7 @@ export class RocketRideClientToolkit extends AgentToolkit {
 				} catch (err) {
 					throw new Error(`${method} failed: ${messageOf(err)}.`);
 				}
-				return resultText(method, result);
+				return resultText(method, result, this.hide);
 			},
 		};
 	}

@@ -246,8 +246,9 @@ export function redactSecrets<T>(value: T): T {
  * back; `redactText` leaves every marker as it is, since `[redacted]` in its
  * place would be written over the value.
  *
- * Bare `key: value` lines are left to the file markers, which apply them to
- * YAML files only: in code, `token: string` is a type, not a secret.
+ * Bare `key: value` and `NAME=value` lines are left to the file markers, which
+ * apply them to YAML and `.env`-style files only: in code, `token: string` is
+ * a type, not a secret.
  */
 
 /** One credential found in text. */
@@ -275,7 +276,9 @@ const MARKERS = /«secret:[^»\s]{1,64}»/g;
  * matches, so `Bearer` and the user and host stay readable. A bearer token is
  * not sure: `Bearer` may be followed by an ordinary word. A URL password stops
  * at `?` and `#`, which a URL cannot hold before its host, and at `«`, which
- * starts a marker.
+ * starts a marker. A prefix that ordinary text also starts with (FullCalendar's
+ * `fc-` classes, the model name `pplx-70b-online`) matches only when as many
+ * key characters follow it as a real key has.
  */
 const SHAPES: ReadonlyArray<{ kind: string; sure: boolean; pattern: RegExp }> = [
 	// An unclosed block (a read window cut it) runs to the end of the text.
@@ -286,6 +289,13 @@ const SHAPES: ReadonlyArray<{ kind: string; sure: boolean; pattern: RegExp }> = 
 	{ kind: 'AWS-style', sure: true, pattern: /(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![A-Za-z0-9])/g },
 	{ kind: 'GitHub-style', sure: true, pattern: /(?<![\w-])(?:gh[oprsu]_[A-Za-z0-9]{30,}|github_pat_\w{22,})/g },
 	{ kind: 'Slack-style', sure: true, pattern: /(?<![\w-])xox[abp]-[A-Za-z0-9-]{20,}/g },
+	{ kind: 'Google-style', sure: true, pattern: /(?<![\w-])AIza[\w-]{35,}/g },
+	{ kind: 'xAI-style', sure: true, pattern: /(?<![\w-])xai-[A-Za-z0-9_]{80,}/g },
+	{ kind: 'Perplexity-style', sure: true, pattern: /(?<![\w-])pplx-[A-Za-z0-9]{48,}/g },
+	{ kind: 'Tavily-style', sure: true, pattern: /(?<![\w-])tvly-[\w-]{20,}/g },
+	{ kind: 'Pinecone-style', sure: true, pattern: /(?<![\w-])pcsk_[A-Za-z0-9]{5,6}_[A-Za-z0-9]{63,}/g },
+	// `fc-` and a UUID without its dashes
+	{ kind: 'Firecrawl-style', sure: true, pattern: /(?<![\w-])fc-[0-9a-f]{32}(?![A-Za-z0-9])/g },
 	{ kind: 'a bearer token', sure: false, pattern: /(?<=\bBearer )[\w.~+/-]{20,}=*/g },
 	{ kind: 'a password in a URL', sure: true, pattern: /(?<=\b[a-z][\w+.-]*:\/\/[^\s/:@?#«»]*:)[^\s/@?#«»]+(?=@)/gi },
 ];
@@ -442,10 +452,11 @@ export function looksLikeCredential(text: string): string | null {
  *
  * @param value - The client's result.
  * @param hint - How the model can see less or see the rest if the text is cut.
+ * @param hide - Hides the values the run's file tools hid, before the cut.
  * @returns The tool's result string.
  */
-export function toolText(value: unknown, hint: string): string {
-	return clip(JSON.stringify(redactSecrets(value), null, 1) ?? 'null', hint);
+export function toolText(value: unknown, hint: string, hide = (text: string): string => text): string {
+	return clip(hide(JSON.stringify(redactSecrets(value), null, 1) ?? 'null'), hint);
 }
 
 // =============================================================================
