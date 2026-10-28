@@ -28,12 +28,23 @@
 import assert from 'node:assert/strict';
 import test, { afterEach, mock } from 'node:test';
 import { init } from '@module-federation/runtime';
-import { devPreviewHoldRemainingMs, isDevPreviewPending, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, runAppEntryOnce, setDescriptorInvalidator, setRemoteLoaderForTests } from './appLoader';
+import { devPreviewHoldRemainingMs, isDevPreviewPending, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, runAppEntryOnce, setDescriptorInvalidator } from './appLoader';
 import type { AppDescriptor } from '../components/workspace/types';
 
 // In the browser the rsbuild MF plugin creates the host instance; stand one
-// up so registerDevRemote's registerRemotes has a runtime to register into.
-init({ name: 'shell_test', remotes: [] });
+// up so registerDevRemote's registerRemotes has a runtime to register into,
+// and so a test can stand in for its module loads (stubLoader).
+const federation = init({ name: 'shell_test', remotes: [] });
+
+/**
+ * Routes the shell's module loads (Module Federation's loadRemote, which calls
+ * the host instance's) to `load` for the current test; afterEach restores it.
+ *
+ * @param load - Receives the module id (`container/module`) and returns the load.
+ */
+function stubLoader(load: (id: string) => unknown): void {
+	mock.method(federation, 'loadRemote', load);
+}
 
 /**
  * Points the loader at a shell page: its query string and whether it is
@@ -58,13 +69,12 @@ function stubClock(ms: number): void {
 afterEach(() => {
 	mock.restoreAll();
 	setDescriptorInvalidator(null);
-	setRemoteLoaderForTests(null);
 });
 
 /** A module loader whose loads stay open until the test settles them, one handle per module id. */
 function heldLoader(): Map<string, { resolve: (v: unknown) => void; reject: (e: unknown) => void }> {
 	const held = new Map<string, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>();
-	setRemoteLoaderForTests((id) => new Promise((resolve, reject) => { held.set(id, { resolve, reject }); }));
+	stubLoader((id) => new Promise((resolve, reject) => { held.set(id, { resolve, reject }); }));
 	return held;
 }
 
@@ -103,7 +113,7 @@ test('the other order: the app load ends first and the module load keeps the mar
 
 test('a loader that throws before returning a promise leaves no pending mark (app load and module load)', async () => {
 	stubPage('', false);
-	setRemoteLoaderForTests(() => { throw new Error('no federation instance'); });
+	stubLoader(() => { throw new Error('no federation instance'); });
 	const [entry] = registerAndMapApps([{ id: 'org.sync', moduleId: 'sync_mod', name: 'Sync', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
 	assert.throws(() => entry.load(), /no federation instance/);
 	assert.equal(isRemotePending('sync_mod'), false, 'the app load released its mark');
@@ -114,7 +124,7 @@ test('a loader that throws before returning a promise leaves no pending mark (ap
 test('an app entry runs once per flag (the waitlist screen re-entered, the default app id changed), and one that throws stays contained', async () => {
 	stubPage('', false);
 	let runs = 0;
-	setRemoteLoaderForTests(async () => ({ default: () => { runs++; throw new Error('entry failed'); } }));
+	stubLoader(async () => ({ default: () => { runs++; throw new Error('entry failed'); } }));
 	registerAndMapApps([{ id: 'org.once', moduleId: 'once_mod', name: 'Once', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
 	registerAndMapApps([{ id: 'org.once2', moduleId: 'once_mod2', name: 'Once 2', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
 	const ran = { current: false };
@@ -131,7 +141,7 @@ test('an app entry runs once per flag (the waitlist screen re-entered, the defau
 
 test('a later registration batch (the apps a sign-in adds) keeps the earlier batch loadable', async () => {
 	stubPage('', false);
-	setRemoteLoaderForTests(async (id) => ({ default: id }));
+	stubLoader(async (id: string) => ({ default: id }));
 	registerAndMapApps([{ id: 'org.probe', moduleId: 'probe_mod', name: 'Probe', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
 	registerAndMapApps([{ id: 'org.gated', moduleId: 'gated_mod', name: 'Gated', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
 	assert.deepEqual(await loadAppModule('org.probe', 'telemetry'), { default: 'probe_mod/telemetry' }, 'the probe catalog app still resolves');

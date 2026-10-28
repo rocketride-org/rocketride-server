@@ -143,18 +143,6 @@ export function isRemotePending(moduleId: string): boolean {
 	return (pendingModules.get(moduleId) ?? 0) > 0;
 }
 
-// The module loader the shell's loads go through: Module Federation's
-// loadRemote; tests substitute a controllable one (setRemoteLoaderForTests).
-let loadRemoteModule: (id: string) => Promise<unknown> = (id) => loadRemote(id) as Promise<unknown>;
-
-/**
- * Tests only: substitute the module loader (null restores loadRemote), so a
- * test can hold one load open while another finishes.
- */
-export function setRemoteLoaderForTests(fn: ((id: string) => Promise<unknown>) | null): void {
-	loadRemoteModule = fn ?? ((id) => loadRemote(id) as Promise<unknown>);
-}
-
 /**
  * Whether an MF container's remote has successfully loaded this document.
  *
@@ -586,7 +574,7 @@ export async function loadAppModule<T = unknown>(appId: string, modulePath: stri
 	if (!moduleId) return null;
 	markPending(moduleId);
 	try {
-		const mod = (await loadRemoteModule(`${moduleId}/${modulePath}`)) as T;
+		const mod = (await loadRemote(`${moduleId}/${modulePath}`)) as T;
 		loadedModules.add(moduleId);
 		return mod;
 	} catch {
@@ -824,7 +812,7 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 			markPending(a.moduleId);
 			let loading: Promise<{ default: AppDescriptor }>;
 			try {
-				loading = loadRemoteModule(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>;
+				loading = loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>;
 			} catch (err) {
 				// a loader that throws before it returns a promise must not leave the mark behind
 				releasePending(a.moduleId);
