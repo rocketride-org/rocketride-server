@@ -81,6 +81,14 @@ template <typename... DebugInfo>
 #endif
 }
 
+// True when the engine was started with a bare --dumps
+bool dumpsEnabled() noexcept;
+
+// The argument that gives --dumps a value, even "true" or an empty one, which
+// the option's own value cannot tell from a bare --dumps or from none. A value
+// will choose where dumps go (#2892); until then the engine refuses it
+Opt<Text> dumpsValueArg(const std::vector<Text> &args) noexcept;
+
 const file::Path &crashDumpLocation() noexcept;
 void crashDumpLocation(const file::Path &path) noexcept;
 

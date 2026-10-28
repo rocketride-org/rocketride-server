@@ -23,6 +23,8 @@
 
 #include "test.h"
 #include <csignal>
+#include <filesystem>
+#include <set>
 
 TEST_CASE("plat::createMinidump") {
     // Set the crash dump location to our test path (and restore it when done)
@@ -44,10 +46,60 @@ TEST_CASE("plat::createMinidump") {
         minidumpPath = path;
     };
 
-    // Create the crash dump
-    ap::plat::createMinidump(SIGABRT);
+    // Dumps are opt-in (and restore the flag when done)
+    auto oldDumps = ap::dev::Dumps.val();
+    util::Guard restoreDumps = [&] { ap::dev::Dumps.setValue(oldDumps); };
 
-    // Verify results
-    REQUIRE(crashDumpCreated);
-    REQUIRE(file::exists(minidumpPath));
+    // A bare --dumps reaches the engine as "true"
+    SECTION("--dumps writes a dump") {
+        ap::dev::Dumps.setValue("true");
+
+        // Create the crash dump
+        ap::plat::createMinidump(SIGABRT);
+
+        // Verify results
+        REQUIRE(crashDumpCreated);
+        REQUIRE(file::exists(minidumpPath));
+    }
+
+    SECTION("without --dumps no dump is written") {
+        // The .mdmp files in the test path
+        auto dumps = [] {
+            std::set<std::filesystem::path> out;
+            for (const auto &e :
+                 std::filesystem::directory_iterator(testPath().stdPath()))
+                if (e.path().extension() == ".mdmp") out.insert(e.path());
+            return out;
+        };
+
+        // Unset, or a value: the engine refuses one at startup, and none turns
+        // dumps on
+        for (const char *value : {"", "false", "1", "C:\\dumps"}) {
+            CAPTURE(value);
+            ap::dev::Dumps.setValue(value);
+            auto before = dumps();
+
+            ap::plat::createMinidump(SIGABRT);
+
+            REQUIRE(!crashDumpCreated);
+            REQUIRE(dumps() == before);
+        }
+    }
+}
+
+// What application::init() refuses at startup. Linux and macOS check that end
+// to end in the "crashpad" test, with a real child process.
+TEST_CASE("dev::dumpsValueArg") {
+    // No --dumps, a bare one in any case, or another option
+    REQUIRE(!ap::dev::dumpsValueArg({"aptest"}));
+    REQUIRE(!ap::dev::dumpsValueArg({"aptest", "--dumps"}));
+    REQUIRE(!ap::dev::dumpsValueArg({"aptest", "--DUMPS"}));
+    REQUIRE(!ap::dev::dumpsValueArg({"aptest", "--dumpster=1"}));
+
+    // Any value, even "true" or an empty one
+    for (const char *arg : {"--dumps=", "--dumps=true", "--Dumps=C:\\dumps"}) {
+        CAPTURE(arg);
+        REQUIRE(ap::dev::dumpsValueArg({"aptest", "--stream", arg}) ==
+                Text{arg});
+    }
 }
