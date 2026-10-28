@@ -170,6 +170,95 @@ function ctrlS(view: Workspace['view'], path: string): Promise<void> | undefined
 // TEAM SWITCH
 // =============================================================================
 
+/**
+ * The agent's file tools over a team's workspace. A file with unsaved typing
+ * asks, and the user answers Discard mine.
+ */
+async function deleteTools(s: ReturnType<typeof storage>, autoCommit = false) {
+	const ws = await workspace(s.alpha, autoCommit);
+	const tools = new FilesystemTools(ws.view, undefined, undefined, { choose: async () => 'discard', editor: (p) => editorControl(ws.view, p) }).tools();
+	return { ws, tool: (name: string) => tools.find((t) => t.name === name) as AgentTool };
+}
+
+test('in manual mode, a delete of a file the agent read before a switch away and back is refused when a teammate changed it meanwhile, so Commit all keeps their change', async () => {
+	for (const prepared of ['before the switch', 'after it'] as const) {
+		const s = storage();
+		const { ws, tool } = await deleteTools(s);
+		await callTool(tool('read_file'), { path: 'apps/probe.txt' });
+		// step: the delete's card waits across the switch, or the agent plans the delete after it
+		let step = prepared === 'before the switch' ? await tool('delete_file').prepare({ path: 'apps/probe.txt' }) : null;
+		await manualWorkspace(s.beta);
+		s.store.files.set(s.a, 'const probe = 1; // teammate');
+		await manualWorkspace(s.alpha);
+		step ??= await tool('delete_file').prepare({ path: 'apps/probe.txt' });
+		await assert.rejects(step.run(), /^RefusedError: delete_file refused: apps\/probe\.txt changed since you read it\./, prepared);
+		await ws.view.commit();
+		assert.equal(s.store.files.get(s.a), 'const probe = 1; // teammate', prepared);
+	}
+});
+
+test("in manual mode, a switch away and back and a teammate's change while a delete hashes the file it checks leave the change on the server after Commit all", async () => {
+	const s = storage();
+	const { ws, tool } = await deleteTools(s);
+	await callTool(tool('read_file'), { path: 'apps/probe.txt' });
+	const step = await tool('delete_file').prepare({ path: 'apps/probe.txt' });
+	// step: hold the delete's first digest, of the copy it checks
+	const [held, finish] = [deferred(), deferred()];
+	const subtle = crypto.subtle;
+	const digest = subtle.digest.bind(subtle);
+	subtle.digest = async (algorithm, data) => {
+		delete (subtle as { digest?: unknown }).digest;
+		held.resolve();
+		await finish.promise;
+		return digest(algorithm, data);
+	};
+	const running = step.run().catch(() => undefined);
+	await held.promise;
+	await manualWorkspace(s.beta);
+	s.store.files.set(s.a, 'const probe = 1; // teammate');
+	await manualWorkspace(s.alpha);
+	finish.resolve();
+	await running;
+	await ws.view.commit();
+	assert.equal(s.store.files.get(s.a), 'const probe = 1; // teammate');
+});
+
+test("in manual mode, Discard mine on a delete after the user discards their saved change keeps a teammate's change, and deletes the file when nothing changed", async () => {
+	for (const meanwhile of ['a teammate changes the file and the user discards their saved change', 'nothing'] as const) {
+		const s = storage();
+		const { ws, tool } = await deleteTools(s);
+		const path = 'apps/probe.txt';
+		// step: the user saves, which stages the text, and types more; the agent reads the typing
+		const doc = fileDocument(ws.view, path);
+		const close = doc.open();
+		await doc.load();
+		doc.type('const probe = 1; // saved');
+		await doc.save();
+		doc.type('const probe = 1; // saved // typing');
+		await callTool(tool('read_file'), { path });
+		const step = await tool('delete_file').prepare({ path });
+		if (meanwhile !== 'nothing') {
+			s.store.files.set(s.a, 'const probe = 1; // teammate');
+			await ws.view.discard(path);
+		}
+		// step: the user approves the delete, then answers Discard mine
+		await step.run().catch(() => undefined);
+		await ws.view.commit();
+		close();
+		assert.equal(s.store.files.get(s.a), meanwhile === 'nothing' ? undefined : 'const probe = 1; // teammate', meanwhile);
+	}
+});
+
+test("in auto mode, a delete of a file a teammate changed since the agent read it is refused, and the agent's next read gets their change", async () => {
+	const s = storage();
+	const { tool } = await deleteTools(s, true);
+	await callTool(tool('read_file'), { path: 'apps/probe.txt' });
+	s.store.files.set(s.a, 'const probe = 1; // teammate');
+	await assert.rejects(callTool(tool('delete_file'), { path: 'apps/probe.txt' }), /^RefusedError: delete_file refused: apps\/probe\.txt changed since you read it\./);
+	assert.match(await callTool(tool('read_file'), { path: 'apps/probe.txt' }), /teammate/);
+	assert.equal(s.store.files.get(s.a), 'const probe = 1; // teammate');
+});
+
 test("a change staged in the old team's workspace after the switch is announced under the old team's path", async () => {
 	const s = storage();
 	const old = await workspace(s.alpha);

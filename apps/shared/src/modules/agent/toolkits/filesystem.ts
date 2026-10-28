@@ -427,10 +427,13 @@ export class FilesystemTools extends AgentToolkit {
 	private async readFile(rawPath: unknown, maxBytes?: number, offset?: number, limit?: number): Promise<string> {
 		const path = normalizePath(rawPath);
 		const cap = Math.min(Math.max(1, maxBytes ?? READ_DEFAULT_BYTES), READ_MAX_BYTES);
-		const read = await this.vfs.readVersioned(path);
+		// step: under unsaved typing, also the stored copy a delete is based on. Both reads start together, so no save lands between them
+		const dirty = this.vfs.isDirty(path);
+		const [read, stored] = await Promise.all([this.vfs.readVersioned(path), dirty ? this.vfs.readVersioned(path, { stored: true }).catch(() => null) : null]);
 		let text = String(read.content);
 		// step: record the whole file's version and hash, windowed or not — they are what edits are checked against
-		this.tracker.saw(path, read.version, await sha256Hex(text));
+		const hash = await sha256Hex(text);
+		this.tracker.saw(path, read.version, hash, stored ? await sha256Hex(String(stored.content)) : hash);
 		// step: hide secret values before any window — a window could cut one in half, and half a key no longer matches
 		const hidden = this.shown(path, text);
 		text = hidden.text;
@@ -699,7 +702,12 @@ export class FilesystemTools extends AgentToolkit {
 				// step: the user's text landed, so the delete the agent planned is out of date
 				if (settled?.choice === 'save') throw new Error(`delete_file refused: the user saved their unsaved changes in ${listPaths(settled.dirty)} first, so ${path} changed since you decided to delete it. Read it again, then ask the user whether to delete it.`);
 				this.refuseDirty([path], 'delete_file');
-				await this.vfs.delete(path, AGENT_ORIGIN);
+				try {
+					await this.vfs.delete(path, AGENT_ORIGIN, this.tracker.get(path)?.storedHash);
+				} catch (err) {
+					if (err instanceof StaleWriteError) throw new RefusedError(`delete_file refused: ${path} changed since you read it. Read it again, then ask the user whether to delete it.`);
+					throw err;
+				}
 				this.tracker.deleted(path);
 				return `Deleted ${path}.`;
 			},

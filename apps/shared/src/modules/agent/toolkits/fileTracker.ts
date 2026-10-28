@@ -29,6 +29,8 @@ export interface TrackedFile {
 	path: string;
 	readVersion: number;
 	readHash: string;
+	/** The SHA-256 of the stored copy at that moment, which a delete is based on. Under unsaved typing it is the copy Discard mine brings back. */
+	storedHash: string;
 }
 
 /** The files one run read or wrote. It keeps no file content. */
@@ -46,10 +48,10 @@ export class FileTracker {
 	}
 
 	/** The run read or wrote a file at `version`. */
-	saw(path: string, version: number, hash: string): void {
+	saw(path: string, version: number, hash: string, stored = hash): void {
 		const file = this.files.get(path);
-		if (file) Object.assign(file, { readVersion: version, readHash: hash });
-		else this.files.set(path, { path, readVersion: version, readHash: hash });
+		if (file) Object.assign(file, { readVersion: version, readHash: hash, storedHash: stored });
+		else this.files.set(path, { path, readVersion: version, readHash: hash, storedHash: stored });
 	}
 
 	/** The run deleted a file or a folder: what it held needs a read again before an edit. */
@@ -65,7 +67,7 @@ export class FileTracker {
 		for (const file of this.within(from)) {
 			const target = to + file.path.slice(from.length);
 			this.files.delete(file.path);
-			this.files.set(target, { path: target, readVersion: version(target), readHash: file.readHash });
+			this.files.set(target, { ...file, path: target, readVersion: version(target) });
 		}
 	}
 

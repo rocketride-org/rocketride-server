@@ -184,3 +184,22 @@ test('in manual mode run as runAgent runs it, no question times out its call, an
 		mock.timers.reset();
 	}
 });
+
+test("with the preview opening and a teammate's change to the server copy, no order of the same steps in manual mode loses, erases or caches what the server never held", async () => {
+	mock.timers.enable({ apis: ['setTimeout'] });
+	try {
+		// step: the preview opens over the unsaved typing, and the user answers Discard mine for the first file:
+		// the cache keeps the stored file, and the agent's edit lands on it
+		const plain = await runManual(['preview', 'start', 'answer discard'], { outside: true });
+		assert.deepEqual(plain.failures, []);
+		assert.deepEqual(tokens(plain.final.get(FILE) ?? ''), new Set([ORIGINAL, 'agent']));
+
+		// step: depth-first over every order of up to MANUAL_DEPTH steps
+		const found = await exploreManual({ outside: true });
+		report('manual, with the preview and a teammate', found);
+		assert.deepEqual([...found.kinds].sort(), ['answer', 'commit', 'discard', 'discard-file', 'preview', 'release', 'rollback', 'save', 'start', 'teammate', 'type'], 'every kind of step was tried');
+		assert.deepEqual(found.failures.slice(0, 10), [], `${found.failures.length} of ${found.tried} orders broke a rule`);
+	} finally {
+		mock.timers.reset();
+	}
+});

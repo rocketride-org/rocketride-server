@@ -67,6 +67,11 @@
  *   - An invalidate keeps the copy it drops: a read that then takes in a
  *     different server copy counts a version, and until a read does, the
  *     dropped copy guards the next write-through save.
+ *   - The base's cache holds only the server's copy: prime() takes no
+ *     content, since a caller's content may be an editor's buffer or staged
+ *     content. A staged entry's conflict anchor is the cached copy the page
+ *     read, so a commit over a server copy that moved on since then (another
+ *     tab, a teammate) meets a conflict.
  *
  * Staged content is text-only (the cloud workspace tools are text-only);
  * binary paths flow through untouched in write-through mode only.
@@ -490,10 +495,11 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		if (eff && eff.kind === 'write') return eff.content;
 		if (eff && eff.kind === 'mkdir') return null;
 		try {
-			// step: base TRUTH, never a dirty overlay — the base view serves
-			// an open editor's buffer from read(), and capturing that as
-			// "before" would make staging the same buffer a silent no-op
-			const content = await this.base.peekBase(path);
+			// step: the server's copy this page read, else the server's copy now; never a dirty overlay
+			// (capturing an editor's buffer would make staging it a no-op). A commit over a server copy
+			// that moved on since the page read it then meets a conflict
+			const cached = this.base.cachedContent(path);
+			const content = cached !== undefined ? cached : await this.base.peekBase(path);
 			return typeof content === 'string' ? content : null;
 		} catch {
 			return null;
@@ -1085,18 +1091,25 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * The content below the working layer and its hash, for new entries. A
 	 * freeze, checkpoint or drop while it waits moves the working layer, and
 	 * so does a commit called or started, so it captures again; the caller
-	 * sets its entries in the same synchronous block.
+	 * sets its entries in the same synchronous block. With `anchor` (see
+	 * delete(), one path), what reads serve (a staged write, else the
+	 * capture) must hash to it.
 	 */
-	private async captureBelow(paths: string[], seq = 0): Promise<Array<{ before: string | null; baseHash: string | null }>> {
+	private async captureBelow(paths: string[], seq = 0, anchor?: string): Promise<Array<{ before: string | null; baseHash: string | null }>> {
 		for (;;) {
 			const shape = this.shape;
+			const staged = this.effective(paths[0]);
 			const captures = await Promise.all(
 				paths.map(async (p) => {
 					const before = await this.effectiveBefore(p, seq);
 					return { before, baseHash: before === null ? null : await sha256Hex(before) };
 				})
 			);
-			if (shape === this.shape) return captures;
+			const served = anchor !== undefined && staged && staged !== 'gone' && staged.kind === 'write' ? await sha256Hex(staged.content) : captures[0].baseHash;
+			if (shape !== this.shape) continue;
+			// step: checked against the capture the entry records, so no copy read later can become its anchor
+			if (anchor !== undefined && served !== anchor) throw new StaleWriteError(paths[0]);
+			return captures;
 		}
 	}
 
@@ -1107,18 +1120,30 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * @param originOrRecursive - A string = the vfs-layer write ORIGIN (echo
 	 *   suppression); a boolean = the WorkspaceFs contract recursive flag,
 	 *   which a staged delete does not need (subtrees are shadowed anyway).
+	 * @param anchor - The SHA-256 of the stored copy the delete is based on.
+	 *   The delete is refused with StaleWriteError when the path holds another
+	 *   copy in its turn (the server's copy, in write-through mode).
 	 */
-	delete(path: string, originOrRecursive?: string | boolean): Promise<void> {
+	delete(path: string, originOrRecursive?: string | boolean, anchor?: string): Promise<void> {
 		const refused = this.refuseUnwritable(path);
 		if (refused) return refused;
 		const origin = typeof originOrRecursive === 'string' ? originOrRecursive : undefined;
 		const p = this.norm(path);
-		return this.mutate([p], origin, (seq) => this.deleteNow(p, origin, seq), { removed: [p], stages: true });
+		return this.mutate([p], origin, (seq) => this.deleteNow(p, origin, seq, anchor), { removed: [p], stages: true });
 	}
 
-	private async deleteNow(p: string, origin?: string, seq?: number): Promise<void> {
+	private async deleteNow(p: string, origin?: string, seq?: number, anchor?: string): Promise<void> {
 		await this.ready;
-		if (this.writeThrough) return this.changeBase([p], () => this.base.delete(p, origin));
+		if (this.writeThrough) {
+			// step: the delete reaches the server now, so it checks the server's copy. On a refusal the cached
+			// copy is older than the server's, so it goes, and the agent's next read gets the server's
+			const server = anchor === undefined ? undefined : await this.base.peekBase(p).catch(() => undefined);
+			if (anchor !== undefined && (server === undefined || (await sha256Hex(String(server))) !== anchor)) {
+				this.invalidate(p);
+				throw new StaleWriteError(p);
+			}
+			return this.changeBase([p], () => this.base.delete(p, origin));
+		}
 		if (!p) throw new Error('Refusing to delete the workspace root.');
 		// step: rule on the path's KIND first — a missing path is an error,
 		// not an invisible forever-pending entry. The dir flag records that
@@ -1127,7 +1152,7 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		const kind = await this.statNow(p);
 		if (kind === null) throw new Error(`No such path: ${p}`);
 		const baseKind = kind === 'dir' ? await this.base.stat(p) : null;
-		const [{ before: keepBefore, baseHash }] = await this.captureBelow([p], seq);
+		const [{ before: keepBefore, baseHash }] = await this.captureBelow([p], seq, anchor);
 		// step: nothing awaits from the capture to the entry (see writeNow)
 		const layer = this.workingLayer(seq);
 		// step: staged entries under a deleted directory are swallowed by it
@@ -1264,9 +1289,15 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		this.base.upsert(path, type);
 	}
 
-	/** Content-cache seed — delegates to the base. */
-	prime(path: string, content: unknown): void {
-		this.base.prime(path, content);
+	/**
+	 * Content-cache seed, declined: the base's cache holds only the server's
+	 * copy, and what a caller hands back came through this view, so it may be
+	 * an editor's buffer or staged content (the dev preview primes its batch
+	 * read). Only the inventory takes the path.
+	 */
+	prime(path: string, _content: unknown): void {
+		const p = this.norm(path);
+		if (this.entryType(p) === null) this.base.upsert(p, 'file');
 	}
 
 	/** Content-cache eviction. A server read on its way may come back with the dropped copy, so it counts as a change to the base. */
@@ -1570,10 +1601,10 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	/**
-	 * Evicts dropped layers' paths from the base content cache: a consumer
-	 * (bulk loader, dev session) may have primed the base with content that
-	 * REFLECTED the staged state — after a rollback/discard those entries
-	 * would keep serving rolled-back content forever.
+	 * Evicts dropped layers' paths from the base content cache, so the next
+	 * read of each takes the server's copy as it is now: another tab or a
+	 * teammate may have changed it, and a commit that met a conflict for it
+	 * is resolved by dropping the change and starting from that copy.
 	 *
 	 * @param dropped - The layers removed from the stack.
 	 */

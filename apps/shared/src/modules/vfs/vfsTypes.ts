@@ -111,7 +111,8 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 	upsert(path: string, type: 'file' | 'dir'): void;
 
 	/**
-	 * Seeds the content cache without a backend read. Does not notify.
+	 * Seeds the content cache without a backend read. Does not notify. The
+	 * staged view records the path only (see StagedFileSystem.prime).
 	 *
 	 * @param path - The path to seed.
 	 * @param content - The content to cache.
@@ -187,6 +188,9 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 
 	/** Writes one file; with `expect`, refused with StaleWriteError unless the path is at that version at the call. */
 	write(path: string, content: unknown, origin?: string, expect?: number): Promise<void>;
+
+	/** Deletes a path. With `anchor` (the SHA-256 of the stored copy the delete is based on), refused with StaleWriteError unless the path holds that copy in the delete's turn. */
+	delete(path: string, origin?: string, anchor?: string): Promise<void>;
 
 	/**
 	 * The path's version in this view. A mutation counts when it is called,

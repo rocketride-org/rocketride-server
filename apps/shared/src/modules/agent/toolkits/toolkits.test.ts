@@ -41,8 +41,9 @@ import { CachedVfs } from 'shell/src/modules/explorer/CachedVfs';
 import type { IVirtualFileSystem } from 'shell/src/modules/explorer/types';
 
 import type { ConsoleRow, WatchStatus } from '../../../tools/appdev/types';
+import { sha256Hex } from '../../vfs/hash';
 import { docsPathFor, isReferencePath } from '../../vfs/referenceTree';
-import { StaleVersionError, StagedFileSystem } from '../../vfs/stagedFileSystem';
+import { StaleVersionError, StaleWriteError, StagedFileSystem } from '../../vfs/stagedFileSystem';
 import type { IWorkspaceFileSystem, VfsEntry } from '../../vfs/vfsTypes';
 import { AgentSession } from '../agent';
 import { otherDialogOpen, queueChoices } from '../choice';
@@ -184,9 +185,9 @@ class InMemoryWorkspace implements MemoryWorkspace {
 		return this.versions.get(path) ?? 0;
 	}
 
-	async readVersioned(path: string): Promise<{ content: unknown; version: number }> {
+	async readVersioned(path: string, opts: { stored?: boolean } = {}): Promise<{ content: unknown; version: number }> {
 		const version = this.version(path);
-		return { content: await this.read(path), version };
+		return { content: opts.stored ? this.files.get(path) : await this.read(path), version };
 	}
 
 	lastWriter(path: string): string | undefined {
@@ -225,8 +226,9 @@ class InMemoryWorkspace implements MemoryWorkspace {
 		this.record('rename', oldPath);
 	}
 
-	async delete(path: string, origin?: string): Promise<void> {
+	async delete(path: string, origin?: string, anchor?: string): Promise<void> {
 		if (this.entryType(path) === null) throw new Error(`No such file or directory: ${path}`);
+		if (anchor !== undefined && (await sha256Hex(this.files.get(path) ?? '')) !== anchor) throw new StaleWriteError(path);
 		this.bump(path, origin);
 		for (const file of this.under(path, this.files.keys())) this.files.delete(file);
 		for (const dir of this.under(path, this.dirs)) this.dirs.delete(dir);
@@ -601,6 +603,14 @@ test('a delete of a file with unsaved changes asks for the OK first, then about 
 	assert.equal(await deleteWith('approve'), 'Deleted a.ts.');
 	assert.deepEqual(order, ['card: Delete a.ts', 'question: The agent wants to delete a.ts, which has unsaved changes.']);
 	assert.deepEqual(editor.did, ['discard']);
+	assert.equal(ws.files.has('a.ts'), false);
+});
+
+test('Discard mine on a delete of a file whose unsaved typing the agent read still deletes it', async () => {
+	const ws = createMemoryWorkspace({ 'a.ts': 'a = 1' });
+	const tool = promptingTools(ws, fakeChoice('discard').choose, { 'a.ts': dirtyEditor(ws, 'a.ts', 'a = 1 // mine') });
+	await tool('read_file', { path: 'a.ts' });
+	await tool('delete_file', { path: 'a.ts' });
 	assert.equal(ws.files.has('a.ts'), false);
 });
 
