@@ -28,6 +28,12 @@
  *   shared:test — runs node:test against script helpers and TSX component
  *                    smoke tests. Test files are co-located with their subject
  *                    and discovered recursively.
+ *   shared:eval runs the browser agent's eval runner
+ *                    (src/modules/agent/eval). By default it validates every
+ *                    scenario and replays the recorded trials (L1), which needs
+ *                    no key and no engine. EVAL_ARGS runs anything else, e.g.
+ *                    EVAL_ARGS="run --layer L2 --scenarios build-01-chat-claude".
+ *                    --pattern=<id> picks scenarios.
  *
  * Builds run shared:check-gallery-tokens, which is SELF-HEALING locally:
  * a stale token map is regenerated in place and the build continues — a
@@ -91,6 +97,24 @@ function makeTestAction() {
 }
 
 /**
+ * Runs the eval runner. shared:test runs its L1 replay too (eval/replay.test.ts).
+ *
+ * @returns {object} Action with run function.
+ */
+function makeEvalAction() {
+	return {
+		description: 'Running the browser agent evals',
+		run: async (ctx, task) => {
+			const argv = (process.env.EVAL_ARGS || 'run --layer L1').split(/\s+/).filter(Boolean);
+			const pattern = ctx.options?.pattern ?? [];
+			if (pattern.length && !argv.includes('--scenarios')) argv.push('--scenarios', pattern.join(','));
+			const runner = 'src/modules/agent/eval/run.ts';
+			await execCommand('node', ['--import', 'tsx', runner, ...argv], { task, cwd: APP_ROOT });
+		},
+	};
+}
+
+/**
  * Regenerates the gallery token-usage map (write mode), or verifies the
  * committed map matches a fresh generation.
  *
@@ -121,6 +145,7 @@ module.exports = {
 	description: 'RocketRide shared source library',
 	actions: [
 		{ name: 'shared:test', action: makeTestAction },
+		{ name: 'shared:eval', action: makeEvalAction },
 		{ name: 'shared:gen-gallery-tokens', action: () => makeGenGalleryTokensAction(false) },
 		{ name: 'shared:check-gallery-tokens', action: () => makeGenGalleryTokensAction(true) },
 	],
