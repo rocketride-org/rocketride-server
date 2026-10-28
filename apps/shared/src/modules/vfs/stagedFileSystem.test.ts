@@ -968,3 +968,78 @@ test('a save called after Discard all is refused when the Commit all before the 
 	assert.equal(base.files.get('a.ts'), 'A-teammate');
 	assert.equal(await fs.read('a.ts'), 'A-teammate', 'nothing of the dropped save comes back');
 });
+
+test('a rename is refused while an editor holds unsaved changes at or under its source, staged or write-through', async () => {
+	for (const writeThrough of [false, true]) {
+		const base = new MockBase();
+		base.files.set('apps/x/a.ts', 'stored');
+		const fs = new StagedFileSystem(base, null, { writeThrough });
+		let dirty = true;
+		base.registerOverlay('apps/x/a.ts', { getContent: () => 'unsaved typing', isDirty: () => dirty });
+		const before = fs.version('apps/x/a.ts');
+
+		await assert.rejects(fs.rename('apps/x/a.ts', 'apps/x/b.ts', 'workspace'), /^Error: Save or discard the unsaved changes in apps\/x\/a\.ts first\.$/);
+		await assert.rejects(fs.rename('apps/x', 'apps/y', 'workspace'), /unsaved changes in apps\/x\/a\.ts/, 'a folder above the file too');
+		assert.equal(fs.version('apps/x/a.ts'), before, 'a refused rename counts nothing');
+		assert.equal(fs.hasPendingChanges(), false, 'the unsaved typing was not staged as a new file');
+		assert.deepEqual([...base.files.keys()], ['apps/x/a.ts']);
+		assert.equal(await fs.read('apps/x/a.ts'), 'unsaved typing', 'the editor keeps its path');
+
+		// step: once the editor is clean, the rename goes ahead
+		dirty = false;
+		await fs.rename('apps/x/a.ts', 'apps/x/b.ts', 'workspace');
+		assert.equal(await fs.read('apps/x/b.ts'), 'stored', writeThrough ? 'write-through' : 'staged');
+	}
+});
+
+test('a rename stores no unsaved typing: typing while it waits behind a save or Commit all refuses it, and typing while it runs stays in the editor', async () => {
+	for (const writeThrough of [false, true]) {
+		for (const behind of ['save', 'commit'] as const) {
+			if (writeThrough && behind === 'commit') continue;
+			const base = new MockBase();
+			base.files.set('apps/a.ts', 'stored');
+			const fs = new StagedFileSystem(base, null, { writeThrough });
+			let typing: string | null = null;
+			base.registerOverlay('apps/a.ts', { getContent: () => typing, isDirty: () => typing !== null });
+			if (behind === 'commit') await fs.write('apps/a.ts', 'saved', 'editor');
+			// step: hold the save's capture (the page holds no copy, so it asks the server) or freshness check, or the commit's verify read
+			const holding = deferred();
+			const peek = base.peekBase.bind(base);
+			base.peekBase = async (path) => {
+				await holding.promise;
+				return peek(path);
+			};
+			if (!writeThrough) base.uncached.add('apps/a.ts');
+			const ahead = behind === 'save' ? fs.write('apps/a.ts', 'saved', 'editor') : fs.commit();
+			const renaming = fs.rename('apps/a.ts', 'apps/b.ts', 'workspace');
+			typing = 'unsaved typing';
+			holding.resolve();
+			await ahead;
+			await assert.rejects(renaming, /^Error: Save or discard the unsaved changes in apps\/a\.ts first\.$/, `${behind}, ${writeThrough ? 'write-through' : 'staged'}`);
+			assert.equal(await fs.stat('apps/b.ts'), null, 'the typing was not stored as the new file');
+			base.uncached.delete('apps/a.ts');
+			typing = null;
+			assert.equal(await fs.read('apps/a.ts'), 'saved');
+		}
+	}
+
+	// step: typing that starts while the rename runs (its stat asks the server) stays in its editor; the rename moves what is stored
+	const base = new MockBase();
+	base.files.set('apps/a.ts', 'stored');
+	const fs = new StagedFileSystem(base, null);
+	let typing: string | null = null;
+	base.registerOverlay('apps/a.ts', { getContent: () => typing, isDirty: () => typing !== null });
+	const statting = deferred();
+	const entryType = base.entryType.bind(base);
+	base.entryType = (path) => (path === 'apps/a.ts' ? null : entryType(path));
+	base.stat = async (path) => {
+		await statting.promise;
+		return entryType(path);
+	};
+	const renaming = fs.rename('apps/a.ts', 'apps/b.ts', 'workspace');
+	await new Promise((resolve) => setImmediate(resolve));
+	typing = 'unsaved typing';
+	statting.resolve();
+	await renaming;
+	assert.equal(await fs.read('apps/b.ts'), 'stored');
+});

@@ -30,12 +30,14 @@
  * until the test releases it, and sees the store as it is at the release. A
  * read of a path in `heldAnswers` is answered at once, and the answer waits
  * in `held`. While `holdsPersists` is set, every JSON write (the staging
- * store's manifest) waits in `held` too.
+ * store's manifest) waits in `held` too. A held call's `fail` makes it fail
+ * with a network error instead.
  */
 
 export interface Held {
 	label: string;
 	release: () => void;
+	fail: () => void;
 }
 
 export interface Landed {
@@ -68,8 +70,8 @@ export class FakeStore {
 	}
 
 	private hold(label: string, path: string): Promise<void> {
-		return new Promise((release) => {
-			this.held.push({ label: `${label} ${path}`, release });
+		return new Promise((release, reject) => {
+			this.held.push({ label: `${label} ${path}`, release, fail: () => reject(new Error('network failure')) });
 			for (const wake of this.waiting.splice(0)) wake();
 		});
 	}
@@ -117,6 +119,12 @@ export class FakeStore {
 		fsStat: async (path: string) => ({ type: this.files.has(path) ? 'file' : 'dir' }),
 		fsDelete: async (path: string): Promise<void> => {
 			this.files.delete(path);
+		},
+		fsRename: async (from: string, to: string): Promise<void> => {
+			const content = this.read(from);
+			this.landed.push({ path: to, before: this.files.get(to), content });
+			this.files.set(to, content);
+			this.files.delete(from);
 		},
 		fsRmdir: async (): Promise<void> => undefined,
 		fsMkdir: async (): Promise<void> => undefined,
