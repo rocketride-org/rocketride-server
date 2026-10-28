@@ -2766,6 +2766,17 @@ test('Ask mode asks before terminate and restart, on a run this conversation sta
 	assert.equal(ledger.records.length, 1);
 });
 
+test('an Ask card says the conversation started the run only after a fresh status read, so a token that now holds a later run is not claimed', async () => {
+	const engine = runsEngine();
+	const asked = fakeAsk(['deny']);
+	const { tool } = ownedTool(engine.client, { ask: asked.ask, settings: fakeSettings() });
+	await tool.execute({ method: 'use', params: [{ pipeline: {} }] });
+	// step: the user's own use of the same project and source after the conversation's run ended: same token, later start
+	engine.runs.set(MINE, { project_id: 'p1', source: 'chat_1', startTime: 99_999, name: 'chat_1' });
+	await assert.rejects(tool.execute({ method: 'terminate', params: [MINE] }), /declined/);
+	assert.equal(asked.cards[0].detail, "Not confirmed as this conversation's run: a different run holds its token now.");
+});
+
 test("Auto stops the conversation's own run after a fresh status read, and refuses a run it did not start, naming it and telling the model to ask the user", async () => {
 	const engine = runsEngine();
 	engine.runs.set(OTHER, { project_id: 'p9', source: 'webhook_1', startTime: 7, name: 'Daily digest' });

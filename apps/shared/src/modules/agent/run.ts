@@ -825,7 +825,8 @@ export async function runAgent(request: string, callback: (type: string, content
 			files: files.tracker.changes(),
 			checks: checks.results(),
 			usage: { waves, modelRequests, toolCalls },
-			...(askUser.request ? { request: hideRequest(askUser.request, hide) } : {}),
+			// a Stopped card never shows the question, so only a needs-you turn has a request to answer
+			...(outcome.outcome === 'needs_input' && askUser.request ? { request: hideRequest(askUser.request, hide) } : {}),
 			...(ledger.started.length ? { runsStarted: [...ledger.started] } : {}),
 		});
 
@@ -848,6 +849,9 @@ export async function runAgent(request: string, callback: (type: string, content
 			notes: changedFilesNote(files.tracker, vfs),
 			userTime,
 			endTurn: () => askUser.request?.question ?? null,
+			withdrawAsk: () => {
+				askUser.request = null;
+			},
 		});
 	} catch (error) {
 		// step: nothing was gathered, so the chat shows the model's error; the result says what the turn got to

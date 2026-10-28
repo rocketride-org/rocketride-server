@@ -665,7 +665,7 @@ export class Approvals {
 		if (target && allowed(rule, this.prefs())) return refuseForeign();
 
 		const built = await rule.card(act.params, this.names);
-		const card = target ? { ...built, detail: [built.detail, own() ? 'This conversation started it.' : 'This conversation did not start it.'].filter(Boolean).join(' ') } : built;
+		const card = target ? { ...built, detail: [built.detail, await this.startedBy(target)].filter(Boolean).join(' ') } : built;
 		if (this.o.signal.aborted) throw new Error(notAnswered(card.title));
 		// the settings may have changed while the names were looked up
 		const later = unasked();
@@ -712,6 +712,23 @@ export class Approvals {
 			if (why !== null) throw new RefusedError(noLongerOwned(name, await this.names.run(target), why));
 			return run();
 		};
+	}
+
+	/**
+	 * Who started the run, for an Ask card, after the status read Auto's run
+	 * step makes: the engine gives a later run on the same project and source
+	 * the same token.
+	 */
+	private startedBy(target: RunTarget): Promise<string> {
+		const { runs } = this.o;
+		const record = runs?.owned(target);
+		if (!runs || !record) return Promise.resolve('This conversation did not start it.');
+		const unconfirmed = (why: string): string => `Not confirmed as this conversation's run: ${why}.`;
+		const check = async (): Promise<string> => {
+			const why = await runs.recheck(record);
+			return why === null ? 'This conversation started it.' : unconfirmed(why);
+		};
+		return capped(check, unconfirmed('its status took too long to read'), this.o.signal);
 	}
 
 	/** The user's settings now. */

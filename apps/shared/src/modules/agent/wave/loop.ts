@@ -144,6 +144,8 @@ export interface LoopOptions {
 	 * is its answer.
 	 */
 	endTurn?: () => string | null;
+	/** Drops the question endTurn gave, so the model can ask again. */
+	withdrawAsk?: () => void;
 }
 
 /** How a run ended. */
@@ -192,6 +194,9 @@ const STILL_RUNNING = 'Still running when you stopped (these may still finish an
 
 /** Why a done is sent back while a message the user sent during the run is unread. */
 const READ_THE_USER = 'Not finished: the user wrote to you while you worked. Read "Messages from the user during this run" before done=true.';
+
+/** Why a question to the user is dropped when they wrote during its wave: they had not seen it. */
+const ASKED_UNSEEN = 'Not asked: the user wrote to you before they saw your question. Read "Messages from the user during this run", then call ask_user again if you still need to.';
 
 /** The role of the best-effort question: a plain answer, not a plan. */
 const FALLBACK_ROLE = 'You are a helpful assistant.';
@@ -1069,7 +1074,8 @@ class WaveRun {
 
 /**
  * Runs waves until the model's answer is accepted, a call asks the user
- * (`needs_input`, with the question as the answer), a reply stays unusable
+ * (`needs_input`, with the question as the answer, unless the user wrote
+ * during that wave: the model reads that first), a reply stays unusable
  * after one retry (`empty_plan`), the model cannot be reached (`error`), or
  * the run is stopped (`stopped`, with no answer).
  * Each wave plans, runs its calls, tells the finish rule what ran, and records
@@ -1148,12 +1154,17 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 			return run.stopped(wave + 1);
 		}
 
-		// step: a call asked the user, so the turn ends here with the question as its answer
+		// step: a call asked the user, so the turn ends here with the question as its answer. A message
+		// sent during this wave was written before the question showed, so it can't answer it.
 		const asked = o.endTurn?.() ?? null;
-		if (asked !== null) {
+		if (asked !== null && !run.hear()) {
 			run.record(entries);
 			run.think(reply.thought, lines);
 			return run.finish('needs_input', asked, wave + 1);
+		}
+		if (asked !== null) {
+			o.withdrawAsk?.();
+			entries.push(refusal(wave, ASKED_UNSEEN));
 		}
 
 		// step: done with calls — the answer stands only if every call worked, the

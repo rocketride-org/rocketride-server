@@ -465,6 +465,62 @@ test('only the next reply answers a needs-you request: a second press, a press a
 	}
 });
 
+test('a turn stopped in the wave that asked the user answers nothing: the next message is not a reply to the question', async () => {
+	let chat: TurnController | undefined;
+	store(
+		scripted([planReply(['ask_user', { kind: 'variable', variable: 'ROCKETRIDE_OPENAI_KEY', question: 'Add your OpenAI key.' }]), doneReply('Done.')], {
+			// step: the user presses Stop after the model asked, while the tool reads the Variable names
+			account: {
+				getEnvironmentKeys: async () => {
+					chat?.stop();
+					return [];
+				},
+			},
+		})
+	);
+	const questions = recordQuestions();
+	try {
+		AgentSession.configure('agent.test');
+		setAgentHost(hostIn('team-a'));
+		chat = chatOver(AgentSession.newSession(), 60_000);
+		chat.send('Build it.');
+		await until(() => answered(chat!, 1));
+		chat.send('Use Claude instead.');
+		await until(() => answered(chat!, 2));
+		assert.equal(questions.goals.at(-1), 'Use Claude instead.');
+	} finally {
+		questions.restore();
+	}
+});
+
+test('a message sent while the model asks the user is read in the same turn, and the model can ask again', async () => {
+	let chat: TurnController | undefined;
+	// step: the first reply also says done, as a model may when it asks
+	const asking = JSON.stringify({ thought: 'asking', done: true, answer: 'Which model?', tool_calls: [{ tool: 'ask_user', args: { question: 'Which model?' } }] });
+	const replies = [asking, planReply(['ask_user', { question: 'Which region?' }])];
+	store({
+		use: async () => ({ token: 'tk_standin' }),
+		chat: async () => {
+			// step: the user writes while the model asks its first question
+			if (replies.length === 2) chat?.send('Use Claude.');
+			return { answers: [replies.shift()] };
+		},
+	});
+	const questions = recordQuestions();
+	try {
+		AgentSession.configure('agent.test');
+		setAgentHost(hostIn('team-a'));
+		chat = chatOver(AgentSession.newSession());
+		chat.send('Build it.');
+		await until(() => chat!.snapshot().phase === 'idle' && replies.length === 0);
+		assert.deepEqual(questions.goals, ['Build it.', 'Build it.'], 'no turn of its own answered the first question');
+		const answers = chat.snapshot().messages.filter((m) => m.sender === 'bot');
+		assert.equal(answers.at(-1)?.text, 'Which region?');
+	} finally {
+		questions.restore();
+	}
+});
+
 test('a card press opens a file, opens Variables, or sends Continue once, and the reloaded card shows its state', async () => {
 	const paused: TurnRecord = {
 		turnId: 't1',
