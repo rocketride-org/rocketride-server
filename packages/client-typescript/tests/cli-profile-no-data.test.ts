@@ -74,23 +74,26 @@ describe('profile without a completed session', () => {
 	});
 
 	it('should print the placeholder report and exit 0', async () => {
-		const { code, out } = await runProfile('report');
+		const { code, out, err } = await runProfile('report');
 
 		expect(code).toBe(0);
 		expect(out).toContain(NO_DATA);
+		expect(err).not.toContain(NO_DATA);
 	});
 
 	it('should fail threads with exit 1', async () => {
-		const { code, err } = await runProfile('threads');
+		const { code, out, err } = await runProfile('threads');
 
 		expect(code).toBe(1);
 		expect(err).toContain(NO_DATA);
+		expect(out).not.toContain(NO_DATA);
 	});
 
 	it('should fail tree with exit 1', async () => {
-		const { code, err } = await runProfile('tree');
+		const { code, out, err } = await runProfile('tree');
 
 		expect(code).toBe(1);
 		expect(err).toContain(NO_DATA);
+		expect(out).not.toContain(NO_DATA);
 	});
 });

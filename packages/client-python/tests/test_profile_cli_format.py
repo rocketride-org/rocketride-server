@@ -290,9 +290,10 @@ class TestNoData:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        'subcommand, code, stream', [('report', 0, 'out'), ('threads', 1, 'err'), ('tree', 1, 'err')]
+        'subcommand, code, stream, other',
+        [('report', 0, 'out', 'err'), ('threads', 1, 'err', 'out'), ('tree', 1, 'err', 'out')],
     )
-    async def test_exit_code_without_a_completed_session(self, subcommand, code, stream, monkeypatch, capsys):
+    async def test_exit_code_without_a_completed_session(self, subcommand, code, stream, other, monkeypatch, capsys):
         async def connect(uri, apikey):
             return _NoDataClient()
 
@@ -300,4 +301,6 @@ class TestNoData:
         args = setup_parser().parse_args(['profile', subcommand, '--uri', 'http://127.0.0.1:9'])
 
         assert await run_profile(args) == code
-        assert NO_DATA in getattr(capsys.readouterr(), stream)
+        captured = capsys.readouterr()
+        assert NO_DATA in getattr(captured, stream)
+        assert NO_DATA not in getattr(captured, other)
