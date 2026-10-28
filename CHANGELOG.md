@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — since 2026-10-16
 
 ### Added
+
+- **nodes**: Added Manufact MCP Client preset for MCP servers hosted on Manufact Cloud. (#2808)
 - **nodes**: add tool_tenki - disposable Tenki Sandbox Linux VM for agents: run commands and code, edit files, work in git repositories, private ones through Tenki secret policies (#2302)
 
 ### Fixed

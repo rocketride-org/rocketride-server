@@ -1,0 +1,125 @@
+{
+	//
+	// Required:
+	//		The displayable name of this node
+	//
+	"title": "Manufact MCP Client",
+	//
+	// Required:
+	//		The protocol is the endpoint protocol
+	//
+	"protocol": "tool_manufact://",
+	//
+	// Required:
+	//		Class type of the node - what it does
+	//
+	"classType": ["tool"],
+	//
+	// Required:
+	//		Capabilities are flags that change the behavior of the underlying engine
+	//
+	"capabilities": ["invoke"],
+	//
+	// Optional:
+	//		Register is either filter, endpoint or ignored if not specified
+	//
+	"register": "filter",
+	//
+	// Optional:
+	//		The node is the actual physical node to instantiate
+	//
+	"node": "python",
+	//
+	// Optional:
+	//		Reuses the generic MCP client implementation, this is a branded preset,
+	//		not a separate node (no duplicated code).
+	//
+	"path": "nodes.tool_mcp_client",
+	//
+	// Required:
+	//		The prefix map when converting URLs <=> paths (tools surface as <prefix>.<tool>)
+	//
+	"prefix": "manufact",
+	//
+	// Optional:
+	//		The icon to display in the UI for this node (a URL renders via <img>)
+	//
+	"icon": "manufact.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_mcp_client",
+	//
+	// Optional:
+	//		Description of this node shown in the pipeline builder
+	//
+	"description": [
+		"Connects RocketRide agents to MCP servers deployed on Manufact Cloud and exposes their tools for agent tool-calling.",
+		"Copy your deployed MCP server's URL from the Manufact dashboard and enter it in the Endpoint field. Discovered tools are namespaced as <serverName>.<toolName>.",
+		"This preset uses the generic MCP Client with Streamable HTTP. The Manufact management MCP server requires OAuth and cannot be accessed directly using a Manufact Cloud API key."
+	],
+	//
+	// Optional:
+	//		Rendering hints for the UI: which config fields to surface on the node tile
+	//
+	"tile": ["Server: ${parameters.mcp_client.serverName}"],
+	//
+	// Optional:
+	//		As a pipe component, define what this component takes and produces.
+	//		This is a control-plane tool node (no data lanes).
+	//
+	"lanes": {},
+	//
+	// Optional:
+	//		Profile section - configuration options used by the driver itself.
+	//		The default profile configures a Manufact Streamable HTTP connection.
+	//      The endpoint is left empty because the management MCP server requires OAuth.
+	"preconfig": {
+		"default": "manufact",
+		"profiles": {
+			"manufact": {
+				"title": "Manufact MCP server",
+				"serverName": "manufact",
+				"transport": "streamable-http",
+				"endpoint": ""
+			}
+		}
+	},
+	//
+	// Optional:
+	//		Local field definitions. These define the config fields exposed in the UI.
+	//		"secure: true" fields are encrypted at rest and masked in the UI.
+	//
+	"fields": {
+		"mcp_client.bearer": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Optional API key or bearer token for your deployed MCP server, if required. Find your server's connection details in the <b>Manufact dashboard</b>: <a href='https://manufact.com/cloud' target='_blank'>manufact.com/cloud</a>. Authentication depends on the deployed server.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"mcp_client.endpoint": {
+			"type": "string",
+			"title": "Endpoint",
+			"description": "Streamable HTTP endpoint of an MCP server deployed on Manufact Cloud. Copy the URL from your Manufact dashboard.",
+			"default": ""
+		},
+		"mcp_client.serverName": {
+			"type": "string",
+			"title": "Server name",
+			"description": "Namespace for discovered tools, for example manufact.<toolName>.",
+			"default": "manufact"
+		}
+	},
+	//
+	// Required:
+	//		Defines the fields (shape) shown in the pipeline builder side panel.
+	//
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Manufact MCP Client",
+			"properties": ["type", "mcp_client.bearer", "mcp_client.endpoint", "mcp_client.serverName"]
+		}
+	]
+}

@@ -32,10 +32,11 @@ The implementation is pure Python standard library (`subprocess`, `urllib`, JSON
 
 ## Profiles
 
-The directory registers two services and each keeps its own default: MCP Client
-defaults to **RocketRide MCP server (stdio)** (`RocketRide`), and the Butterbase
-MCP Client preset to **Butterbase MCP server** (`butterbase`). Both are marked
-below; which one applies depends on the service you added to the pipeline.
+The directory registers three services and each keeps its own default: MCP Client
+defaults to **RocketRide MCP server (stdio)** (`RocketRide`), the Butterbase MCP
+Client preset to **Butterbase MCP server** (`butterbase`), and the Manufact MCP
+Client preset to **Manufact MCP server** (`manufact`). All are marked below;
+which one applies depends on the service you added to the pipeline.
 
 | Profile | Transport | Notes |
 |---|---|---|
@@ -43,6 +44,7 @@ below; which one applies depends on the service you added to the pipeline.
 | Generic MCP server (Streamable HTTP) | `streamable-http` | Enter endpoint URL |
 | Generic MCP server (legacy HTTP+SSE) | `sse` | Enter SSE endpoint URL |
 | Butterbase MCP server **(default)** | `streamable-http` | Branded Butterbase preset |
+| Manufact MCP server **(default)** | `streamable-http` | Enter a deployed Manufact Cloud MCP server URL |
 
 ## Configuration
 
@@ -91,6 +93,24 @@ The STDIO transport has no authentication fields: the subprocess runs locally wi
 
 ---
 
+### Manufact preset
+
+`services.manufact.json` defines **Manufact MCP Client**, a branded preset that
+reuses this node's implementation. It uses Streamable HTTP and namespaces
+discovered tools as `manufact.<tool>`. Copy the URL of a deployed MCP server
+from the Manufact dashboard into **Endpoint**; do not construct the URL from a
+hostname pattern. The bearer token is optional because deployed servers choose
+their own authentication.
+
+Manufact's management MCP server requires an interactive OAuth flow. This
+non-interactive client cannot complete OAuth for either the management server or
+a deployed endpoint. A deployed endpoint must allow unauthenticated access or
+accept the bearer token configured in **API Key**; OAuth-only endpoints are not
+supported. The preset therefore intentionally leaves its endpoint empty and
+does not connect to the management server.
+
+---
+
 ### Runtime behavior
 
 - Protocol versions advertised during `initialize`: `2024-11-05` for STDIO, `2025-11-25` for Streamable HTTP and SSE.
@@ -109,6 +129,7 @@ Some MCP tools take no arguments (their input schema is empty). Strict reasoning
 
 - [Model Context Protocol specification](https://modelcontextprotocol.io/)
 - [Butterbase documentation](https://docs.butterbase.ai)
+- [Manufact documentation](https://docs.manufact.com)
 
 ---
 
@@ -136,6 +157,14 @@ Some MCP tools take no arguments (their input schema is empty). Strict reasoning
 | `mcp_client.serverName` | `string` | **Server name**<br/>Namespace prefix for tools: <serverName>.<toolName> (example: local.echo) | `"mcp"` |
 | `mcp_client.sse_endpoint` | `string` | **SSE endpoint (legacy)**<br/>Legacy MCP SSE URL (old transport). Example: http://127.0.0.1:8000/sse | `""` |
 | `mcp_client.transport` | `string` | **Transport**<br/>How to connect to the MCP server | `"streamable-http"` |
+
+### Manufact MCP Client (`services.manufact.json`)
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `mcp_client.bearer` | `string` | **API Key**<br/>Optional API key or bearer token for your deployed MCP server, if required. Find your server's connection details in the <b>Manufact dashboard</b>: <a href='https://manufact.com/cloud' target='_blank'>manufact.com/cloud</a>. Authentication depends on the deployed server. | `""` |
+| `mcp_client.endpoint` | `string` | **Endpoint**<br/>Streamable HTTP endpoint of an MCP server deployed on Manufact Cloud. Copy the URL from your Manufact dashboard. | `""` |
+| `mcp_client.serverName` | `string` | **Server name**<br/>Namespace for discovered tools, for example manufact.<toolName>. | `"manufact"` |
 
 ## Source
 
