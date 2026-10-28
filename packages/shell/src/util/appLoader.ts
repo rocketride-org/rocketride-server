@@ -99,6 +99,9 @@ export interface ServerAppEntry {
 // having to thread the entry URL through.
 const registeredEntries = new Map<string, string>();
 // Server-provided apps by APP id -> their MF container name, for loadAppModule().
+// Added to, never rebuilt, like registeredEntries: registerAndMapApps receives one
+// batch per call (the probe catalog at boot, then only the apps a sign-in adds),
+// so a rebuild would drop the probe's apps, the home app among them.
 const serverAppModules = new Map<string, string>();
 
 // MF containers whose remote has successfully LOADED this document. A loaded
@@ -590,6 +593,27 @@ export async function loadAppModule<T = unknown>(appId: string, modulePath: stri
 		return null; // an older build of the app without that entry, or the container failed to load
 	} finally {
 		releasePending(moduleId);
+	}
+}
+
+/**
+ * Run an app's exposed no-argument entry (the home remote's `telemetry` module
+ * on the waitlist screen) once per `ran` flag: the caller keeps the flag, a
+ * React ref for once per page load. A missing app or entry is skipped, and an
+ * entry that throws never breaks the screen that runs it.
+ *
+ * @param appId - The app id (not the container name).
+ * @param modulePath - The exposed module path without the leading `./`.
+ * @param ran - Set on the first call; later calls with it set do nothing.
+ */
+export async function runAppEntryOnce(appId: string, modulePath: string, ran: { current: boolean }): Promise<void> {
+	if (ran.current) return;
+	ran.current = true;
+	const mod = await loadAppModule<{ default?: () => void }>(appId, modulePath);
+	try {
+		mod?.default?.();
+	} catch {
+		// the entry's own failure stays inside it
 	}
 }
 

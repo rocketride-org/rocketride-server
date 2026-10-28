@@ -50,7 +50,7 @@ import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
-import { registerAndMapApps, loadAppModule, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
+import { registerAndMapApps, runAppEntryOnce, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
 import { getAppVersionOverrides, setAppVersionOverride, versionedEntryUrl } from '../../util/versionOverride';
 import type { ServerAppEntry } from '../../util/appLoader';
 import { waitForEmbeddedSession } from '../../util/devMode';
@@ -505,12 +505,12 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// facts the connection manager holds (auth:complete for a waitlisted sign-up,
 	// the one most likely to end with the tab closed). The home remote's
 	// `telemetry` entry initialises its analytics and forwards them; an older
-	// home build without the entry resolves null and nothing happens.
+	// home build without the entry resolves null and nothing happens. Once per
+	// page load: from then on the home analytics receive every later fact live.
+	const telemetryEntryRanRef = useRef(false);
 	useEffect(() => {
 		if (renderPhase !== 'waitlisted') return;
-		void loadAppModule<{ default?: () => void }>(defaultAppId, 'telemetry').then((mod) => {
-			try { mod?.default?.(); } catch { /* telemetry never breaks the screen */ }
-		});
+		void runAppEntryOnce(defaultAppId, 'telemetry', telemetryEntryRanRef);
 	}, [renderPhase, defaultAppId]);
 
 	// Refresh identity on account update
