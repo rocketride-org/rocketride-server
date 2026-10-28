@@ -1466,9 +1466,17 @@ export class ConnectionManager implements IConnectionManager {
 	 */
 	private dropHeldTelemetry(): void {
 		this.telemetryDrops++;
-		try { this.telemetry.clear(); } catch { /* telemetry must never break the shell */ }
+		try {
+			this.telemetry.clear();
+		} catch {
+			// telemetry must never break the shell
+		}
 		if (!isEmbeddedDevShell()) {
-			try { sessionStorage.removeItem(AUTH_START_STAMP_KEY); } catch { /* storage unavailable */ }
+			try {
+				sessionStorage.removeItem(AUTH_START_STAMP_KEY);
+			} catch {
+				// storage unavailable
+			}
 		}
 	}
 
@@ -1490,8 +1498,11 @@ export class ConnectionManager implements IConnectionManager {
 		} catch {
 			return null; // storage unavailable
 		}
+		if (!raw) {
+			return null;
+		}
 		const elapsed = Date.now() - Number(raw);
-		if (!raw || !Number.isFinite(elapsed) || elapsed < 0 || elapsed > AUTH_ROUND_TRIP_MAX_MS) {
+		if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > AUTH_ROUND_TRIP_MAX_MS) {
 			return null;
 		}
 		return elapsed;
