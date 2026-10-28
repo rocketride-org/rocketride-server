@@ -142,6 +142,13 @@ def test_determine_lane_question_without_questions_listener_does_not_become_text
     assert conn._determine_lane('application/rocketride-question+json', pipe) == 'raw'
 
 
+def test_determine_lane_structured_text_keeps_raw_when_tags_is_read():
+    """A tags reader (e.g. parse) keeps getting JSON on raw, even when text is read too."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['text', 'tags'])
+    assert conn._determine_lane('application/json', pipe) == 'raw'
+
+
 def test_determine_lane_structured_text_without_text_listener_falls_back_to_raw():
     """Without a text reader, XML still falls back to raw."""
     conn = _make_conn()
@@ -362,6 +369,40 @@ def test_end_raw_writes_tag_end_stream_and_object():
     conn._end(pipe_conn)
     pipe_conn.pipe.writeTagEndStream.assert_called_once_with()
     pipe_conn.pipe.writeTagEndObject.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# _write_text — UTF-8 across chunks
+# ---------------------------------------------------------------------------
+
+
+def test_write_text_keeps_a_character_split_between_chunks():
+    """A multi-byte character cut by the chunk boundary arrives whole."""
+    conn = _make_conn()
+    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None)
+    body = '{"name": "Zoë"}'.encode('utf-8')
+    cut = body.index('ë'.encode('utf-8')) + 1  # inside the two-byte ë
+    conn._write_text(pipe_conn, body[:cut])
+    conn._write_text(pipe_conn, body[cut:])
+    written = ''.join(c.args[0] for c in pipe_conn.pipe.writeText.call_args_list)
+    assert written == '{"name": "Zoë"}'
+
+
+def test_end_text_flushes_and_rejects_a_truncated_character():
+    """A body that ends inside a character is invalid UTF-8 and raises at the end."""
+    conn = _make_conn()
+    pipe_conn = SimpleNamespace(pipe=MagicMock(), lane='text', mime_type='text/plain', text_decoder=None)
+    conn._write_text(pipe_conn, 'ë'.encode('utf-8')[:1])
+    with pytest.raises(UnicodeDecodeError):
+        conn._end(pipe_conn)
+
+
+def test_end_text_without_writes_is_noop():
+    """A text pipe that never wrote has no decoder and nothing to flush."""
+    conn = _make_conn()
+    pipe_conn = _make_pipe_conn('text')
+    conn._end(pipe_conn)
+    pipe_conn.pipe.writeText.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

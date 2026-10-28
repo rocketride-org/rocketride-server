@@ -193,9 +193,9 @@ reads that lane; anything unmatched falls through to the raw/tags lane.
 | --- | --- |
 | `application/json` | `json` |
 | `text/*` | `text` |
-| `application/json`, `application/xml`, `application/x-ndjson`, `application/yaml`, `application/*+json`, `application/*+xml`, when nothing reads their own lane | `text` |
+| `application/json`, `application/xml`, `application/x-ndjson`, `application/yaml`, `application/*+json`, `application/*+xml`, when nothing reads their own lane or raw (`tags`) | `text` |
 | `image/*`, `video/*`, `audio/*` | `image`, `video`, `audio` |
-| `application/rocketride-question+json` | `questions` |
+| `application/rocketride-question+json` | `questions`; with no `questions` reader it goes to raw, never `text` |
 | `application/rocketlib-tag` | `tags` |
 | anything else, or no reader above | raw, delivered on `tags` |
 

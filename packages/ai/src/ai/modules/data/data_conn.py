@@ -19,6 +19,7 @@ processing operations, enabling remote data pipeline control and monitoring.
 """
 
 import asyncio
+import codecs
 import json
 import time
 from dataclasses import dataclass, field
@@ -140,6 +141,7 @@ class DataConnPipe:
     created_time: float = field(default_factory=time.time)  # Track when pipe was created
     last_activity_time: float = field(default_factory=time.time)  # Track last write/close activity
     in_use: bool = False  # True while a sync operation (write) is actively running in a thread
+    text_decoder: Any = None  # Incremental UTF-8 decoder for the text lane, created on the first write
 
 
 class DataConn(DAPConn):
@@ -363,12 +365,14 @@ class DataConn(DAPConn):
         elif mime_type.startswith('text/') and 'text' in listeners:
             return 'text'
 
-        # If this is structured text (JSON, XML, ...) that nothing reads on its
-        # own lane, and we have a text listener. A question keeps its own path.
+        # If this is structured text (JSON, XML, ...) that would otherwise reach
+        # nobody: no reader on its own lane and none on raw (tags, e.g. parse),
+        # but a text listener. A question keeps its own path.
         elif (
             _is_text_format(mime_base)
             and not mime_base.startswith('application/rocketride-question')
             and 'text' in listeners
+            and 'tags' not in listeners
         ):
             return 'text'
 
@@ -482,9 +486,32 @@ class DataConn(DAPConn):
             pipe.writeTagEndStream()
             pipe.writeTagEndObject()
 
+        elif lane == 'text':
+            # Flush the UTF-8 decoder. A character still incomplete at the end
+            # of the body is invalid input and raises here.
+            decoder = getattr(pipe_conn, 'text_decoder', None)
+            if decoder is not None:
+                text = decoder.decode(b'', final=True)
+                if text:
+                    pipe.writeText(text)
+
         else:
             # Other lanes don't need framing
             pass
+
+    def _write_text(self, conn_pipe: DataConnPipe, data: bytes) -> None:
+        """
+        Write one chunk on the text lane, keeping a UTF-8 character that is split between chunks intact.
+
+        Args:
+            conn_pipe: The pipe being written. Holds the decoder between chunks.
+            data: The raw bytes of this chunk.
+        """
+        if conn_pipe.text_decoder is None:
+            conn_pipe.text_decoder = codecs.getincrementaldecoder('utf-8')()
+        text = conn_pipe.text_decoder.decode(data)
+        if text:
+            conn_pipe.pipe.writeText(text)
 
     def _cleanup_pipe(self, conn_pipe: DataConnPipe) -> None:
         """
@@ -790,8 +817,7 @@ class DataConn(DAPConn):
 
                 # Handle different lane types with appropriate data writing
                 if lane == 'text':
-                    string_data = data.decode('utf-8')
-                    pipe.writeText(string_data)
+                    self._write_text(conn_pipe, data)
 
                 elif lane == 'json':
                     try:
