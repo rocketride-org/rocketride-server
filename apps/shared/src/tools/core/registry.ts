@@ -46,7 +46,9 @@
 // =============================================================================
 
 import type { AppDescriptor, AppManifestEntry } from 'shell';
+import { registerSettings } from 'shell';
 import { BUILTIN_PIN_PREFIX } from 'shell/src/workspace/devToolPins';
+import { TOOL_SETTINGS_GROUP, TOOL_SETTINGS_OWNER } from '../toolSettings';
 
 /** A builtin's manifest row: a real `AppManifestEntry` minus the loader —
  *  the one thing a builtin genuinely does not have (nothing to fetch). */
@@ -93,10 +95,25 @@ function toolIdOf(tool: BuiltinTool): string {
 export function registerBuiltinTool(tool: BuiltinToolRegistration): void {
 	if (builtins.some((t) => toolIdOf(t) === tool.descriptor.id)) return;
 	const id = `${BUILTIN_PIN_PREFIX}${tool.descriptor.id}`;
-	builtins.push({
-		manifest: { ...tool.manifest, id, moduleId: id.replace(/[^A-Za-z0-9_]/g, '_') },
-		descriptor: tool.descriptor,
-	});
+	const manifest = { ...tool.manifest, id, moduleId: id.replace(/[^A-Za-z0-9_]/g, '_') };
+	builtins.push({ manifest, descriptor: tool.descriptor });
+	// Registering the tool IS registering its settings: a manifest that
+	// declares `configuration` contributes a section (grouped under the
+	// Rocket Builder nav parent). Builtins register for the host's lifetime —
+	// their machinery is resident in the bundle (pipeline runs honor TTL,
+	// autoCommit governs saves) even while the strip tab is disabled, so the
+	// disposer is deliberately dropped.
+	if (manifest.configuration) {
+		registerSettings({
+			appId: manifest.id,
+			name: manifest.name,
+			...(manifest.shells ? { shells: manifest.shells } : {}),
+			group: TOOL_SETTINGS_GROUP,
+			// Builtins store into the PRODUCT partition — no per-builtin files.
+			storageAppId: TOOL_SETTINGS_OWNER,
+			configuration: manifest.configuration,
+		});
+	}
 }
 
 /**

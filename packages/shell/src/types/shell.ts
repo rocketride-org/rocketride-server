@@ -280,7 +280,12 @@ export interface ShellConnectionEventMap {
 	 * profile/account menu, which can't render the shell's overlays directly).
 	 * The `id` selects which overlay to show.
 	 */
-	'shell:openOverlay': { id: 'account' | 'settings' | 'environment' };
+	'shell:openOverlay': {
+		id: 'account' | 'settings' | 'environment';
+		/** Optional deep link: the settings nav section to open at (a registry
+		 *  section id or a rich-section id). Ignored by other overlays. */
+		section?: string;
+	};
 
 	/** Sidebar is starting to collapse — dependent UI can prepare. */
 	'shell:sidebarCollapsing': Record<string, never>;

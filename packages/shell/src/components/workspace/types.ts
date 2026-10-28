@@ -84,6 +84,13 @@ export interface AppWorkspaceState {
 	prefs: WorkspacePrefs;
 	/** Opaque app-owned state. Used by the Documents library to persist open docs, editors, groups, etc. */
 	appState: Record<string, unknown>;
+	/**
+	 * Setting OVERRIDES this partition OWNS (deltas only — a value equal to
+	 * the schema default is deleted, never stored). Settings live in their
+	 * owning contributor's partition file; the shell partition's live in
+	 * global.json. There is no shared settings file.
+	 */
+	settings?: Record<string, SettingValue>;
 }
 
 // =============================================================================
@@ -109,6 +116,20 @@ export interface WorkspaceState {
 
 /** Value types a setting may hold — mirrors the JSON primitive types. */
 export type SettingValue = string | number | boolean;
+
+/**
+ * Where a setting's VALUE lives — a partition-routing axis, not new storage:
+ *
+ * - `'workspace'` (the default when absent) — the contributing owner's
+ *   partition file in the current workspace (`<owner>.workspace.json`):
+ *   app/project settings.
+ * - `'user'` — the shell partition (`global.json`): the person's own
+ *   settings within the workspace (theme, appearance).
+ * - `'host'` — the running HOST's own store. A VS Code concept only (the
+ *   extension's configuration store, for connection/machine settings); the
+ *   cloud has no host store, and host-scoped entries never render there.
+ */
+export type SettingStore = 'host' | 'workspace' | 'user';
 
 /**
  * JSON-Schema-style declaration of a single setting.
@@ -163,6 +184,20 @@ export interface SettingSchema {
 	required?: boolean;
 	/** Extension keyword: placeholder text for empty string inputs. */
 	placeholder?: string;
+	/**
+	 * Extension keyword: which store holds the value (see {@link SettingStore}).
+	 * Absent = `'workspace'`. `'host'`-scoped settings must ALSO be declared in
+	 * the VS Code extension's package.json `contributes.configuration` — the
+	 * host store is VS Code configuration, and VS Code only stores declared keys.
+	 */
+	store?: SettingStore;
+	/**
+	 * Extension keyword: shell editions this setting applies to
+	 * ('saas' | 'oss' | 'vscode' — the AppManifestEntry.shells vocabulary).
+	 * Absent = every shell. The registry drops entries whose list excludes
+	 * the running edition, so host-inapplicable settings never render.
+	 */
+	shells?: string[];
 }
 
 /**
@@ -252,6 +287,14 @@ export interface AppManifestEntry {
 	 * Defaults to true — most apps require the user to be logged in.
 	 */
 	authenticated?: boolean;
+	/**
+	 * The app's MONETIZATION MODEL: 'free' | 'paywall' | 'subscription'
+	 * (absent = free). Declared in the app's manifest and passed through the
+	 * wire. Distinct from {@link appStatus}, which is THIS account's current
+	 * relationship to it — a free app never has subscription state, and a
+	 * paid app's status varies per account.
+	 */
+	mode?: string;
 	/** App lifecycle status: auth | free | unsubscribed | subscribed | trialing | past_due | canceled. */
 	appStatus?: string;
 	/** Whether this app is on the user's desktop. */

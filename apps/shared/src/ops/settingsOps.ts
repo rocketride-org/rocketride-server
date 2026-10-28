@@ -66,27 +66,6 @@ export interface ConnectionGroupSettings {
 export interface SettingsData {
 	development: ConnectionGroupSettings;
 	deployment: ConnectionGroupSettings;
-	/** Workspace-relative path where pipeline files are stored. */
-	defaultPipelinePath: string;
-	/** How pipelines behave after file changes. */
-	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
-	/** Default idle-timeout (seconds) for runs without a per-pipeline override; 0 = none. */
-	pipelineTtl: number;
-	/** Default trace verbosity for runs without a per-pipeline override. */
-	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
-	/** Additional command-line arguments passed to each pipeline task via `.use`. */
-	taskArguments: string;
-	/** Enable full debug output for pipeline tasks. */
-	pipelineDebugOutput: boolean;
-	envVars?: Record<string, string>;
-	/** Auto-install RocketRide docs for detected coding agents. */
-	autoAgentIntegration: boolean;
-	integrationCopilot: boolean;
-	integrationClaudeCode: boolean;
-	integrationCursor: boolean;
-	integrationWindsurf: boolean;
-	integrationClaudeMd: boolean;
-	integrationAgentsMd: boolean;
 }
 
 /** `host.settings.get` result — also the `host.settings.changed` push payload. */
@@ -97,14 +76,19 @@ export interface SettingsPayload {
 }
 
 /** Why the Settings page was opened — `host.settings.getOpenArgs` result and
- *  the `host.settings.openArgs` push (the env.prefill pull+push pattern:
+ *  the `host.settings.openArgs` push (the pull+push pattern:
  *  pull covers open-with-args racing the realm attach, push covers an
  *  already-open page). */
 export interface SettingsOpenArgs {
-	/** Settings section to activate (e.g. 'deployment'). */
+	/** Settings section to activate (e.g. 'deployment', 'environment'). */
 	focus?: string;
 	/** Auth-failure banner text, when opened because a connection was rejected. */
 	authError?: string;
+	/** The pre-run env gate's missing variable keys — the Environment
+	 *  Variables section seeds them as empty required rows. Replaced on
+	 *  EVERY open (an absent value clears any previous gate — the old
+	 *  standalone page's never-cleared prefill bug is gone by construction). */
+	envPrefill?: string[];
 }
 
 // =============================================================================

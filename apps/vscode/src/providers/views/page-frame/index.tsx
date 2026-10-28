@@ -27,18 +27,15 @@ import '../../styles/root.css';
 import React from 'react';
 import { mountComponent } from '../../../shared/util/mount';
 import { attachBusRealm } from '../hooks/busRealm';
-import AccountPage from '../account/AccountWebview';
-import EnvironmentPage from '../environment/EnvironmentWebview';
 import WelcomePage from '../welcome/WelcomeWebview';
 import SettingsPage from '../settings/SettingsWebview';
 import DevToolReadmePage from '../devtool-readme/DevToolReadmeWebview';
 
 // Every framework page this host can serve — THE allowlist of what mounts.
 // (No `newapp` page: the New App wizard is the UNBOUND App Builder's body —
-// page-app with no app stamp — not a framework page.)
+// page-app with no app stamp — not a framework page. No `environment` or
+// `account` pages: both are Settings sections.)
 const PAGES: Record<string, React.ComponentType> = {
-	account: AccountPage,
-	environment: EnvironmentPage,
 	welcome: WelcomePage,
 	settings: SettingsPage,
 	'devtool-readme': DevToolReadmePage,

@@ -437,6 +437,11 @@ const PreviewFrame: React.FC<{ url: string; reloadSeq: number; app: AppSummary |
 type Registry<T> = Set<(row: T) => void>;
 
 const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) => {
+	// The realm's bus — declared FIRST: hooks below (the prefs useMemo)
+	// execute their callbacks synchronously during render, so a later
+	// declaration is a temporal-dead-zone crash, not a captured closure.
+	const cm = ConnectionManager.getInstance();
+
 	// ── Init payload from the extension host ────────────────────────────
 	const [app, setApp] = useState<AppSummary | null>(null);
 	const [previewUrl, setPreviewUrl] = useState('');
@@ -571,7 +576,7 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 	const [accountSeq, setAccountSeq] = useState(0);
 
 	// ── The bus: boot state + topics + realm-local event derivations ─────
-	const cm = ConnectionManager.getInstance();
+	// (`cm` is declared at the top of the component — see the TDZ note.)
 	useEffect(() => {
 		const appId = stampedAppId;
 

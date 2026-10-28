@@ -818,30 +818,38 @@ const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfi
 
 				{/* ================================================================
 				    PANEL — header, active container title, body, platform foot
+				    Display-hidden (never unmounted) while closed: the panel hosts
+				    the tool CONTROLLERS and the host.mountToolSidebar summon
+				    handler — a restored tool document (an agent conversation tab)
+				    must reach its controller even when the panel has never been
+				    opened. Same keep-mounted doctrine as the panel's own tabs.
 				    ================================================================ */}
-				{open && (
-					<div style={styles.panel(width, isResizing)}>
-						{header}
-						{/* A single declared view would just repeat the header's app
-						    name — the title row earns its space only when there is
-						    a choice of views. */}
-						{activeView && views.length > 1 && <div style={styles.viewTitle}>{activeView.title}</div>}
-						<div style={styles.body}>{panelBody}</div>
-						{/* The platform's channel at the panel's foot: announcements
-						    ticker + Documentation row. The account row stays on the
-						    rail — this is everything else the classic footer held. */}
-						<SidebarFooterExtras padded onOpenDocs={openPlatformDocs} />
-					</div>
-				)}
+				<div style={{ ...styles.panel(width, isResizing), ...(open ? null : { display: 'none' }) }}>
+					{header}
+					{/* A single declared view would just repeat the header's app
+					    name — the title row earns its space only when there is
+					    a choice of views. */}
+					{activeView && views.length > 1 && <div style={styles.viewTitle}>{activeView.title}</div>}
+					<div style={styles.body}>{panelBody}</div>
+					{/* The platform's channel at the panel's foot: announcements
+					    ticker + Documentation row. The account row stays on the
+					    rail — this is everything else the classic footer held. */}
+					<SidebarFooterExtras padded onOpenDocs={openPlatformDocs} />
+				</div>
 				{sash}
 			</div>
 		);
 	}
 
 	// --- 'cursor' variant: tab strip over the panel, slim reopen strip closed ---
-	if (!open) {
-		return (
-			<div id="rr-shell-sidebar" style={{ ...styles.frame }}>
+	// Single return: the panel stays MOUNTED (display-hidden) while closed, for
+	// the same reason as the 'vscode' variant — the tool controllers and the
+	// host.mountToolSidebar summon handler live in it, and a restored tool
+	// document needs them with the panel closed. Two separate return branches
+	// would also remount the body on every open/close toggle.
+	return (
+		<div id="rr-shell-sidebar" style={styles.frame}>
+			{!open && (
 				<div style={styles.reopenStrip}>
 					{/* The classic collapsed-header gesture: the APP'S icon at rest,
 					    swapping to the expand glyph on hover/focus (same 40×40 box,
@@ -869,13 +877,8 @@ const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfi
 						onOpenDocs={openPlatformDocs}
 					/>
 				</div>
-			</div>
-		);
-	}
-
-	return (
-		<div id="rr-shell-sidebar" style={styles.frame}>
-			<div style={styles.panel(width, isResizing)}>
+			)}
+			<div style={{ ...styles.panel(width, isResizing), ...(open ? null : { display: 'none' }) }}>
 				{header}
 				{/* The container switcher as a horizontal ICON strip — one glyph
 				    per container, the title as its hover hint; the active view's

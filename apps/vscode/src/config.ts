@@ -63,6 +63,19 @@ export interface ConnectionGroupConfig {
 	};
 }
 
+/** The pipeline-family values — sourced from the SHARED WORKSPACE SETTINGS
+ *  (the `rocketride.pipeBuilder.*` keys in the server-side workspace), pushed
+ *  into the sync cache by the workspace-settings bridge. They are NOT VS Code
+ *  configuration anymore; the old flat keys sit unread. */
+export interface WorkspaceSettingsValues {
+	defaultPipelinePath: string;
+	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+	pipelineTtl: number;
+	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
+	taskArguments: string;
+	pipelineDebugOutput: boolean;
+}
+
 /** Top-level cached config with nested per-group settings. */
 export interface ConfigManagerInfo {
 	/** Development connection settings */
@@ -110,19 +123,6 @@ export interface ConnectionGroupSnapshot {
 export interface SettingsSnapshot {
 	development: ConnectionGroupSnapshot;
 	deployment: ConnectionGroupSnapshot;
-	defaultPipelinePath: string;
-	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
-	pipelineTtl: number;
-	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
-	taskArguments: string;
-	pipelineDebugOutput: boolean;
-	autoAgentIntegration: boolean;
-	integrationCopilot: boolean;
-	integrationClaudeCode: boolean;
-	integrationCursor: boolean;
-	integrationWindsurf: boolean;
-	integrationClaudeMd: boolean;
-	integrationAgentsMd: boolean;
 }
 
 /**
@@ -173,11 +173,12 @@ export class ConfigManager {
 		local: { engineVersion: 'latest' },
 	};
 
-	// Cached configuration
+	// Cached configuration. The pipeline-family fields hold their declared
+	// defaults until the workspace-settings bridge's first push.
 	private config: ConfigManagerInfo = {
 		development: { ...ConfigManager.DEFAULT_GROUP, connectionMode: 'local' },
 		deployment: { ...ConfigManager.DEFAULT_GROUP, connectionMode: null },
-		defaultPipelinePath: '',
+		defaultPipelinePath: 'pipelines',
 		pipelineRestartBehavior: 'prompt',
 		pipelineTtl: 900,
 		pipelineTraceLevel: 'full',
@@ -276,18 +277,24 @@ export class ConfigManager {
 	 * EngineRegistry can force a cache refresh after external writes.
 	 */
 	public async refreshConfig(): Promise<void> {
-		const config = vscode.workspace.getConfiguration(this.configSection);
-
+		// Pipeline-family values are NOT re-read here: they come from the
+		// shared workspace settings via setWorkspaceSettings() (the bridge),
+		// so a config refresh keeps whatever the bridge last pushed.
 		this.config = {
+			...this.config,
 			development: await this.refreshGroupConfig('development'),
 			deployment: await this.refreshGroupConfig('deployment'),
-			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
-			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
-			pipelineTtl: config.get('pipelineTTL', 900),
-			pipelineTraceLevel: config.get('pipelineTraceLevel', 'full'),
-			taskArguments: config.get('taskArguments', ''),
-			pipelineDebugOutput: config.get('pipelineDebugOutput', false),
 		};
+	}
+
+	/**
+	 * Pushes the pipeline-family values from the shared workspace settings
+	 * into the sync cache — called by the workspace-settings bridge on load
+	 * and on every workspace-settings change. Synchronous on purpose: every
+	 * consumer reads `getConfig()` synchronously.
+	 */
+	public setWorkspaceSettings(values: WorkspaceSettingsValues): void {
+		this.config = { ...this.config, ...values };
 	}
 
 	/**
@@ -532,24 +539,9 @@ export class ConfigManager {
 			await wc.update('deployment.cloudUrl', s.deployment.cloudUrl, vscode.ConfigurationTarget.Global);
 			await wc.update('deployment.local.engineVersion', s.deployment.local.engineVersion, vscode.ConfigurationTarget.Global);
 
-			// --- Global settings ---
-			await wc.update('defaultPipelinePath', s.defaultPipelinePath, vscode.ConfigurationTarget.Global);
-			await wc.update('pipelineRestartBehavior', s.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
-
-			// --- Pipeline execution defaults ---
-			await wc.update('pipelineTTL', s.pipelineTtl, vscode.ConfigurationTarget.Global);
-			await wc.update('pipelineTraceLevel', s.pipelineTraceLevel, vscode.ConfigurationTarget.Global);
-			await wc.update('taskArguments', s.taskArguments, vscode.ConfigurationTarget.Global);
-			await wc.update('pipelineDebugOutput', s.pipelineDebugOutput, vscode.ConfigurationTarget.Global);
-
-			// --- Integration settings ---
-			await wc.update('integrations.autoAgentIntegration', s.autoAgentIntegration, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.copilot', s.integrationCopilot, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.claudeCode', s.integrationClaudeCode, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.cursor', s.integrationCursor, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.windsurf', s.integrationWindsurf, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.claudeMd', s.integrationClaudeMd, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.agentsMd', s.integrationAgentsMd, vscode.ConfigurationTarget.Global);
+			// (Pipeline-family values ride the shared workspace settings and
+			// integration toggles ride the host-settings mirror — neither is
+			// part of the connection snapshot anymore.)
 
 			// --- Secure storage (per-group API keys) ---
 			await this.setApiKey('development', s.development.apiKey);

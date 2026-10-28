@@ -27,8 +27,10 @@
 import React, { createContext, useContext, useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { useWorkspaceState } from '../../hooks/useWorkspaceState';
-import { buildSettingsRegistry, effectiveSettings } from './settingsRegistry';
-import type { SettingsRegistry } from './settingsRegistry';
+import { buildSettingsRegistry, effectiveSettings, settingStoreOf, SHELL_SECTION_ID } from './settingsRegistry';
+import type { RegistryEntry, SettingsRegistry } from './settingsRegistry';
+import { getSettingsContributions, onSettingsContributionsChanged } from './settingsContributions';
+import { appPartition, SHELL_PARTITION } from '../../workspace/workspaceStore';
 import type { WorkspacePrefs, AppDescriptor, AppManifestEntry, SettingValue } from './types';
 import type { ShellConnectionEventMap } from '../../types/shell';
 import { GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from '../data-grid/gridConfigChannel';
@@ -252,7 +254,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	// Destructure all state and mutation helpers from the persistence hook
 	const {
 		loaded, seeded, activeAppId, prefs, appState, settings: settingsOverrides,
-		switchApp, updatePrefs, updateAppState, flushWorkspaceNow, updateSetting: writeSettingOverride,
+		switchApp, updatePrefs, updateAppState, flushWorkspaceNow, updateSetting: writeSettingOverride, ensurePartition,
 	} = useWorkspaceState(client, isConnected, defaultAppId, workspaceDir, startupAppId);
 
 	// ── Settings registry + effective values ───────────────────────────────
@@ -260,7 +262,17 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	// contributes.configuration shape) into one declaration index.  It rebuilds
 	// whenever the manifest changes (connect / shell:accountUpdate deliver a new
 	// `apps` array).  Effective settings = declared defaults + stored overrides.
-	const settingsRegistry = useMemo(() => buildSettingsRegistry(apps), [apps]);
+	// Registered contributions (builtin tools, pinned dev tools, host blocks)
+	// join the registry and re-trigger the build on register/unregister.
+	const [settingsContributions, setSettingsContributions] = useState(() => getSettingsContributions());
+	useEffect(() => onSettingsContributionsChanged(() => setSettingsContributions(getSettingsContributions())), []);
+	// This provider only ever runs in the cloud shells (VS Code has no
+	// WorkspaceProvider); 'saas' and 'oss' carry identical shells lists on
+	// every declaration today, so one edition name serves both.
+	const settingsRegistry = useMemo(
+		() => buildSettingsRegistry(apps, { shell: 'saas', contributions: settingsContributions }),
+		[apps, settingsContributions],
+	);
 	// Effective values keep their declared JSON type (string | number | boolean).
 	// The settings page reads settingsOverrides + registry defaults for its
 	// controls; every other app reads this merged effective map.
@@ -269,19 +281,59 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		[settingsRegistry, settingsOverrides],
 	);
 
+	// Key → registry entry, for partition routing (owner + store).
+	const settingEntries = useMemo(() => {
+		const map = new Map<string, RegistryEntry>();
+		for (const section of settingsRegistry.sections) {
+			for (const entry of section.entries) map.set(entry.key, entry);
+		}
+		return map;
+	}, [settingsRegistry]);
+
+	// Every owner partition with declared settings must be LOADED for its
+	// deltas to join the merged view (partitions load lazily; the active app's
+	// is the only one the store reads on its own). Owners are few — the shell,
+	// the builtins, a handful of apps.
+	useEffect(() => {
+		if (!loaded) return;
+		const owners = new Set<string>();
+		for (const entry of settingEntries.values()) {
+			if (entry.owner !== SHELL_SECTION_ID) owners.add(entry.owner);
+		}
+		for (const owner of owners) void ensurePartition(appPartition(owner));
+	}, [loaded, settingEntries, ensurePartition]);
+
 	/**
-	 * Persists a setting change with deltas-only semantics: a value equal to
-	 * the schema default deletes the override instead of storing it, so
-	 * settings.json only ever contains deviations from the defaults.
+	 * Persists a setting change with deltas-only semantics, routed to the
+	 * OWNING partition: a value equal to the schema default deletes the
+	 * override instead of storing it, so partition files only ever contain
+	 * deviations from the defaults.
+	 *
+	 * 'user'-store keys and shell-owned keys land in the shell partition
+	 * (global.json); everything else lands in the owner's partition file.
+	 * 'host'-store keys never reach the workspace — the settings page writes
+	 * those through its host adapter.
 	 *
 	 * @param key   - The dotted setting key.
 	 * @param value - The new value, or undefined to reset to default.
 	 */
 	const updateSetting = useCallback((key: string, value: SettingValue | undefined) => {
+		const entry = settingEntries.get(key);
+		if (!entry) {
+			// No declaration, no owner, nowhere to write — a stale caller.
+			console.warn(`[Workspace] updateSetting: unknown setting key '${key}' (no registry entry — not persisted)`);
+			return;
+		}
+		const store = settingStoreOf(entry.schema);
+		if (store === 'host') {
+			console.warn(`[Workspace] updateSetting: '${key}' is host-scoped — the host adapter owns it, not the workspace`);
+			return;
+		}
+		const partition = store === 'user' || entry.owner === SHELL_SECTION_ID ? SHELL_PARTITION : appPartition(entry.owner);
 		const def = settingsRegistry.defaults[key];
 		// Equal to the declared default → remove the override entirely
-		writeSettingOverride(key, value !== undefined && value === def ? undefined : value);
-	}, [settingsRegistry, writeSettingOverride]);
+		writeSettingOverride(partition, key, value !== undefined && value === def ? undefined : value);
+	}, [settingEntries, settingsRegistry, writeSettingOverride]);
 
 	// ── Grid config channel bridge (web host) ──────────────────────────────
 	// Answers shared DataGrid persistence over the document CustomEvent

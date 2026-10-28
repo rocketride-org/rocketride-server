@@ -44,7 +44,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { ChatView, useChatMessages, useShellConnection, commonStyles } from 'shell';
+import { ChatView, useChatMessages, useShellConnection, useWorkspace, commonStyles } from 'shell';
 import type { DevToolProps } from 'shell';
 import type { TextResult } from 'shell';
 import { AgentSession } from '../../modules/agent/agent';
@@ -179,17 +179,29 @@ export const AgentConversationTool: React.FC<DevToolProps> = ({ docKey }) => {
 	const sessionId = docKey ?? '';
 	const { isConnected } = useShellConnection();
 
+	// Session storage is namespaced by the HOSTING APP — a workspace fact,
+	// not a sidebar fact. Stamp it from this document too, so a restored
+	// conversation loads even when the controller (which also stamps it)
+	// has not mounted yet. configureSessions is idempotent for one app id.
+	const { activeAppId } = useWorkspace();
+	useEffect(() => {
+		AgentSession.configure(activeAppId);
+	}, [activeAppId]);
+
 	// step: load the session once per mount (reopen = re-read from disk)
 	const [session, setSession] = useState<AgentSession | null>(null);
+	const [loadError, setLoadError] = useState<string | null>(null);
 	useEffect(() => {
 		if (!sessionId) return;
 		let disposed = false;
+		setLoadError(null);
 		AgentSession.getSession(sessionId)
 			.then((loaded) => {
 				if (!disposed) setSession(loaded);
 			})
 			.catch((err) => {
 				console.log('[AgentConversation] session load failed', err);
+				if (!disposed) setLoadError(err instanceof Error ? err.message : String(err));
 			});
 		return () => {
 			disposed = true;
@@ -197,7 +209,12 @@ export const AgentConversationTool: React.FC<DevToolProps> = ({ docKey }) => {
 	}, [sessionId]);
 
 	if (!sessionId) return <div style={styles.root}><div style={styles.loading}>No session selected.</div></div>;
-	return session ? <AgentConversation session={session} isConnected={isConnected} /> : <div style={styles.root}><div style={styles.loading}>Loading session…</div></div>;
+	if (session) return <AgentConversation session={session} isConnected={isConnected} />;
+	// A failed load must say so — an eternal "Loading…" over a rejected read
+	// hides real faults (and would silently overwrite history if sends were
+	// allowed against an empty session).
+	if (loadError) return <div style={styles.root}><div style={styles.loading}>Could not load this session: {loadError}</div></div>;
+	return <div style={styles.root}><div style={styles.loading}>Loading session…</div></div>;
 };
 
 /**

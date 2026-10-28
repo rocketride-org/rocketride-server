@@ -55,6 +55,9 @@ import agentIconUrl from './agent/icon.svg?url';
 import appsIconUrl from './appdev/icon.svg?url';
 import nodesIconUrl from './nodes/icon.svg?url';
 import pipelinesIconUrl from './pipelines/icon.svg?url';
+// Setting declarations live in the PURE toolSettings leaf (the ext host and
+// settings surfaces import that, never this asset-bearing module).
+import { APPS_TOOL_SETTINGS, PIPELINES_TOOL_SETTINGS } from './toolSettings';
 
 const PUBLISHER = 'Aparavi Software AG';
 
@@ -86,6 +89,7 @@ export function registerBuiltinTools(): void {
 			description: 'Build, package, and deploy apps (App Builder).',
 			icon: appsIconUrl,
 			categories: ['devTool'],
+			configuration: APPS_TOOL_SETTINGS,
 		},
 		descriptor: {
 			id: 'apps',
@@ -117,6 +121,7 @@ export function registerBuiltinTools(): void {
 			description: 'Discover, open, and run pipelines.',
 			icon: pipelinesIconUrl,
 			categories: ['devTool'],
+			configuration: PIPELINES_TOOL_SETTINGS,
 		},
 		descriptor: {
 			id: 'pipelines',

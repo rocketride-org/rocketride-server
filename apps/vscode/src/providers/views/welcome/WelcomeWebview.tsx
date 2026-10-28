@@ -26,6 +26,8 @@ import { commonStyles } from 'shell';
 import { ConnectionConfig } from '../components/ConnectionConfig';
 import { MessageDisplay } from '../settings/MessageDisplay';
 import type { SettingsData, ConnectionMode, EngineVersionItem, MessageData } from '../settings/SettingsWebview';
+import { appPartition } from 'shell/src/workspace/workspaceStore';
+import { INTEGRATIONS_APP_ID } from '../../../shared/integrationsSettings';
 import type { SettingsPayload, CloudAuthStatus, EngineVersionsPayload, EngineStatusPayload, EngineControlResult, EngineProgress, ServerProbeResult } from 'shared/ops/settingsOps';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 import logoDark from '../../../../rocketride-dark-icon.png';
@@ -126,20 +128,6 @@ const DEFAULT_SETTINGS: SettingsData = {
 		apiKey: '',
 		local: { engineVersion: 'latest' },
 	},
-	defaultPipelinePath: 'pipelines',
-	pipelineRestartBehavior: 'prompt',
-	pipelineTtl: 900,
-	pipelineTraceLevel: 'summary',
-	taskArguments: '',
-	pipelineDebugOutput: false,
-	envVars: {},
-	autoAgentIntegration: true,
-	integrationCopilot: false,
-	integrationClaudeCode: false,
-	integrationCursor: false,
-	integrationWindsurf: false,
-	integrationClaudeMd: false,
-	integrationAgentsMd: false,
 };
 
 // =============================================================================
@@ -153,6 +141,12 @@ export const Welcome: React.FC = () => {
 
 	// Settings state
 	const [settings, setSettings] = useState<SettingsData>(DEFAULT_SETTINGS);
+
+	// The agent-integration toggle is a WORKSPACE setting (server-side, in the
+	// integrations partition), not part of the connection blob. It is staged
+	// locally and committed AFTER Save & Connect succeeds — before that there
+	// is no server to store it on.
+	const [autoAgentIntegration, setAutoAgentIntegration] = useState(true);
 
 	// Messages
 	const [message, setMessage] = useState<MessageData | null>(null);
@@ -330,7 +324,15 @@ export const Welcome: React.FC = () => {
 	 */
 	const handleSaveAndConnect = () => {
 		req<void>('host.settings.save', { settings, connect: true }).then(
-			() => cm.emitOp('host.closePage', { page: 'welcome' }),
+			() => {
+				// The connection is up — the workspace store can hold the
+				// toggle now. Deltas only: the default (true) writes nothing;
+				// unchecked stages an explicit false.
+				if (!autoAgentIntegration) {
+					cm.emitOp('shell.updateSetting', { partition: appPartition(INTEGRATIONS_APP_ID), key: 'rocketride.integrations.autoAgentIntegration', value: false });
+				}
+				cm.emitOp('host.closePage', { page: 'welcome' });
+			},
 			(error: unknown) => setMessage({ level: 'error', message: `Failed to save settings: ${error instanceof Error ? error.message : String(error)}` })
 		);
 	};
@@ -566,7 +568,7 @@ export const Welcome: React.FC = () => {
 
 					{/* Agent integration */}
 					<div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 20, marginBottom: 4 }}>
-						<input type="checkbox" id="autoAgentIntegration" checked={settings.autoAgentIntegration} style={{ width: 'auto', margin: 0 }} onChange={(e) => handleSettingsChange({ autoAgentIntegration: e.target.checked })} />
+						<input type="checkbox" id="autoAgentIntegration" checked={autoAgentIntegration} style={{ width: 'auto', margin: 0 }} onChange={(e) => setAutoAgentIntegration(e.target.checked)} />
 						<label htmlFor="autoAgentIntegration" style={{ fontWeight: 600, marginBottom: 0, fontSize: 13, color: 'var(--rr-text-primary)', cursor: 'pointer' }}>
 							Automatic Agent Integration
 						</label>

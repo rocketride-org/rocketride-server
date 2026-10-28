@@ -27,9 +27,9 @@ import type { SettingsHostOpMap, SettingsData, SettingsPayload, SettingsOpenArgs
 import { EngineInstaller } from '../engine/shared/engine-installer';
 import { IMAGE_BASE } from '../engine/docker/docker-manager';
 import { ConnectionManager, commitStagedCloudCredentials } from '../connection/connection';
+import { DeployManager } from '../connection/deploy-manager';
 import { ConfigManager, type SettingsSnapshot } from '../config';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
-import { AgentManager } from '../agents/agent-manager';
 import { getConnectionManager, getEngineRegistry, setCachedEngineVersions, setCachedDockerTags } from '../extension';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { PIPE_BUILDER_APP_ID } from '../shared/types';
@@ -70,7 +70,10 @@ const MAX_FETCH_ATTEMPTS = 2;
 /** How long (ms) to keep cached version results before refetching. */
 const VERSION_CACHE_TTL_MS = 5 * 60 * 1000;
 
-const WELCOME_DISMISSED_KEY = 'welcomeDismissed';
+/** globalState key marking Welcome as dismissed (NOT a setting — Welcome is
+ *  derived: it shows only while no connection is configured and this flag is
+ *  unset; the old `rocketride.welcomeDismissed` config key sits unread). */
+const WELCOME_DISMISSED_KEY = 'rocketride.welcomeDismissed';
 
 // =============================================================================
 // REGISTRATION
@@ -101,9 +104,10 @@ export function registerVscodeSettingsOps(bus: IOpBus, deps: ISettingsOpsDeps): 
 	context.subscriptions.push({ dispose: () => cloudAuth.onDidChange.removeListener('changed', onAuthChanged) });
 
 	// ── Settings payload (the one copy of what used to be loadAllSettings).
+	// Connection groups ONLY: pipeline values ride the shared workspace
+	// settings and integration toggles ride the host-settings mirror.
 	const buildSettingsPayload = (): SettingsPayload => {
 		const config = configManager.getConfig();
-		const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
 		const hasApiKey = configManager.hasApiKey();
 
 		// The cloudUrl settings' package.json defaults — HOST-ONLY knowledge
@@ -132,19 +136,6 @@ export function registerVscodeSettingsOps(bus: IOpBus, deps: ISettingsOpsDeps): 
 				apiKey: config.deployment.apiKey || '',
 				local: { engineVersion: config.deployment.local.engineVersion },
 			},
-			defaultPipelinePath: config.defaultPipelinePath,
-			pipelineRestartBehavior: config.pipelineRestartBehavior,
-			pipelineTtl: config.pipelineTtl,
-			pipelineTraceLevel: config.pipelineTraceLevel,
-			taskArguments: config.taskArguments,
-			pipelineDebugOutput: config.pipelineDebugOutput,
-			autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),
-			integrationCopilot: workspaceConfig.get('integrations.copilot', false),
-			integrationClaudeCode: workspaceConfig.get('integrations.claudeCode', false),
-			integrationCursor: workspaceConfig.get('integrations.cursor', false),
-			integrationWindsurf: workspaceConfig.get('integrations.windsurf', false),
-			integrationClaudeMd: workspaceConfig.get('integrations.claudeMd', false),
-			integrationAgentsMd: workspaceConfig.get('integrations.agentsMd', false),
 		};
 
 		return { settings, isSubscribed: isSubscribed(getConnectionManager()?.getClient(), PIPE_BUILDER_APP_ID) };
@@ -169,7 +160,9 @@ export function registerVscodeSettingsOps(bus: IOpBus, deps: ISettingsOpsDeps): 
 		try {
 			await configManager.applyAllSettings(params.settings as unknown as SettingsSnapshot);
 			await commitStagedCloudCredentials();
-			await vscode.workspace.getConfiguration('rocketride').update(WELCOME_DISMISSED_KEY, true, vscode.ConfigurationTarget.Global);
+			// Saving a connection IS configuring the product — Welcome never
+			// shows again (globalState, not a setting).
+			await context.globalState.update(WELCOME_DISMISSED_KEY, true);
 		} finally {
 			isSaving = false;
 		}
@@ -178,34 +171,41 @@ export function registerVscodeSettingsOps(bus: IOpBus, deps: ISettingsOpsDeps): 
 		broadcast('host.settings.changed', buildSettingsPayload());
 
 		const connectionManager = getConnectionManager();
-		// The welcomeDismissed write fires a config-change event AFTER the
-		// batch flag clears — cancel it so it doesn't race the reconcile.
+		// Cancel any debounced config-change handler the batch write queued —
+		// it would race the explicit reconcile below.
 		connectionManager?.cancelPendingConfigChange();
+
+		// The batched apply SUPPRESSES config-change events, so the deploy
+		// manager's shared↔independent transition never fires on its own —
+		// drive it explicitly, and BEFORE the reconcile: an independent→shared
+		// switch must disconnect the deploy client before reconcile stops its
+		// engine, or the client reconnect-loops against the dead port.
+		const deployManager = DeployManager.getDeployInstance();
 
 		if (params.connect) {
 			// Welcome flow: initialize CMs then reconcile — same order as a
 			// normal activation (the welcome gate skipped all of it until now).
 			if (connectionManager) await connectionManager.initialize();
+			await deployManager.applyConfigurationChange();
 			await getEngineRegistry()?.reconcile();
 			return;
 		}
 
-		// Plain save: engines reconcile and agent stubs install in the
-		// background — failures surface as notifications, never as a rejected
-		// save (the settings themselves are already persisted).
+		// Plain save: engines reconcile in the background — failures surface as
+		// notifications, never as a rejected save (the settings themselves are
+		// already persisted). Agent stubs no longer install here: integration
+		// toggles are workspace settings, applied by the bridge's change
+		// callback and the connect-time autoInstall pass.
 		void (async () => {
+			try {
+				await deployManager.applyConfigurationChange();
+			} catch (err) {
+				getLogger().error(`[settingsOps] Post-save deploy transition failed: ${String(err)}`);
+			}
 			try {
 				await getEngineRegistry()?.reconcile();
 			} catch (err) {
 				getLogger().error(`[settingsOps] Post-save engine reconcile failed: ${String(err)}`);
-			}
-			const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-			if (workspaceFolder) {
-				try {
-					await new AgentManager().installFromSettings(workspaceFolder.uri);
-				} catch (agentErr) {
-					vscode.window.showWarningMessage(`Agent documentation install failed: ${agentErr}`);
-				}
 			}
 		})();
 	};
@@ -311,10 +311,7 @@ export function registerVscodeSettingsOps(bus: IOpBus, deps: ISettingsOpsDeps): 
 			// Settings, Save & Connect) counts as dismissal — it never nags
 			// again. Host shutdown is not a user exit. Best-effort write.
 			if (page === 'welcome' && userClosed) {
-				vscode.workspace
-					.getConfiguration('rocketride')
-					.update(WELCOME_DISMISSED_KEY, true, vscode.ConfigurationTarget.Global)
-					.then(undefined, () => { /* best effort */ });
+				void Promise.resolve(context.globalState.update(WELCOME_DISMISSED_KEY, true)).catch(() => { /* best effort */ });
 			}
 		},
 	};

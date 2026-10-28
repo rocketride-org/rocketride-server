@@ -30,6 +30,7 @@ import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, 
 import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../billing/types';
 import type { ActiveTask } from '../billing/components/BillingDashboard';
 import { ProfilePanel } from './components/ProfilePanel';
+import { ProfileSection } from './components/ProfileSection';
 // EnvScopeCard removed — env management is now in the standalone Environment page
 import { BillingPanel } from './components/BillingPanel';
 import { ApiKeysPanel } from './components/ApiKeysPanel';
@@ -66,6 +67,49 @@ const styles = {
 		flex: 1,
 		minWidth: 0,
 		minHeight: 0,
+	} as CSSProperties,
+};
+
+/** Embedded-mode extras: the live workspace chip row on Billing / API Keys. */
+const embeddedStyles = {
+	/** Embedded pane root: UNLIKE styles.root this must NOT clamp height or
+	 *  clip — the Settings page's content pane owns the scroll, so this
+	 *  container just grows with its content (the EnvironmentView pattern).
+	 *  Deliberately NOT position:relative: the record drawers (`contained`
+	 *  DetailPanels) anchor to the nearest positioned ancestor, which must be
+	 *  the settings dialog/viewport — not this scrolling pane, or the drawer
+	 *  scrolls away with the content. */
+	root: {
+		width: '100%',
+		fontFamily: 'var(--rr-font-family, Roboto, sans-serif)',
+		fontSize: 13,
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+	chipRow: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		gap: 6,
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+		marginBottom: 12,
+	} as CSSProperties,
+	chip: {
+		display: 'inline-block',
+		padding: '1px 8px',
+		borderRadius: 10,
+		background: 'var(--rr-bg-surface-alt)',
+		border: '1px solid var(--rr-border)',
+		fontWeight: 600,
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+	chipLink: {
+		background: 'none',
+		border: 'none',
+		padding: 0,
+		cursor: 'pointer',
+		color: 'var(--rr-text-link)',
+		fontSize: 12,
+		fontFamily: 'inherit',
 	} as CSSProperties,
 };
 
@@ -159,6 +203,18 @@ export interface IAccountViewProps {
 	/** Called when the user drills into / backs out of a team. */
 	onActiveTeamIdChange: (id: string | null) => void;
 
+	// -- Embedded mode (the Settings page's Account group) ----------------------
+	/** Render ONE pane with no tab strip: the collapsed 3-section IA inside
+	 *  the Settings nav — 'profile' (identity + workspace master card,
+	 *  absorbing the old Organization/Teams/Members tabs), 'billing', or
+	 *  'api-keys'. Absent = the classic 6-tab view (unchanged). */
+	embeddedSection?: 'profile' | 'billing' | 'api-keys';
+	/** Settings-nav navigation for embedded cross-links (the Billing / API
+	 *  Keys workspace chip's "change…" jumps to the Profile section). */
+	onNavigateSection?: (sectionId: string) => void;
+	/** Renames ANY workspace by id (the manage-workspaces drawer). */
+	onRenameWorkspace?: (orgId: string, name: string) => Promise<void>;
+
 	// -- Callbacks (async, host handles actual server calls) --------------------
 	/** Persists updated profile fields. */
 	onSaveProfile: (fields: ProfileUpdate) => Promise<void>;
@@ -222,7 +278,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, embeddedSection, onNavigateSection, onRenameWorkspace, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -378,7 +434,84 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	);
 
 	// =========================================================================
-	// RENDER
+	// RENDER — EMBEDDED MODE (one pane, no tab strip)
+	// =========================================================================
+
+	if (embeddedSection) {
+		/** The live workspace chip + "change…" link shown on the Billing and
+		 *  API Keys panes — the one committed switcher lives on Profile. */
+		const workspaceName = profile?.organization?.name ?? authUser?.organization?.name ?? '';
+		const chip = workspaceName ? (
+			<span style={embeddedStyles.chipRow}>
+				for <span style={embeddedStyles.chip}>{workspaceName}</span>
+				{onNavigateSection && (
+					<button style={embeddedStyles.chipLink} onClick={() => onNavigateSection('account:profile')}>
+						change…
+					</button>
+				)}
+			</span>
+		) : null;
+
+		return (
+			<div style={embeddedStyles.root}>
+				{embeddedSection === 'profile' && (
+					<>
+						<ContentHeader title="Profile" subtitle="Who you are, and the workspace you're working in." />
+						<div style={commonStyles.tabContent}>
+							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
+							<ProfileSection
+								profile={profile}
+								authUser={authUser}
+								members={members}
+								teams={teams}
+								teamDetail={teamDetail}
+								activeTeamId={activeTeamId}
+								isOrgAdmin={isOrgAdmin}
+								isActiveTeamAdmin={isActiveTeamAdmin}
+								onActiveTeamIdChange={onActiveTeamIdChange}
+								onLoadTeamDetail={onLoadTeamDetail}
+								onSaveProfile={onSaveProfile}
+								onSetDevTeam={async (id) => onSetDevTeam(id)}
+								onSetDefaultOrg={async (id) => onSetDefaultOrg(id)}
+								onRenameWorkspace={onRenameWorkspace ?? (async (_orgId, name) => onSaveOrgName(name))}
+								onInviteMember={onInviteMember}
+								onUpdateMemberRole={onUpdateMemberRole}
+								onRemoveMember={onRemoveMember}
+								onResendInvite={onResendInvite}
+								onCreateTeam={onCreateTeam}
+								onDeleteTeam={onDeleteTeam}
+								onAddTeamMember={onAddTeamMember}
+								onEditTeamMemberPerms={onEditTeamMemberPerms}
+								onRemoveTeamMember={onRemoveTeamMember}
+							/>
+						</div>
+					</>
+				)}
+				{embeddedSection === 'billing' && (
+					<>
+						<ContentHeader title="Billing" subtitle="Subscriptions, account balance, and payment methods." />
+						<div style={commonStyles.tabContent}>
+							{chip}
+							<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={onCancelSubscription} onOpenPortal={handlePortal} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} onUpgradeSubscription={onUpgradeSubscription} />
+						</div>
+					</>
+				)}
+				{embeddedSection === 'api-keys' && (
+					<>
+						<ContentHeader title="API Keys" subtitle="Create and revoke keys for programmatic access." />
+						<div style={commonStyles.tabContent}>
+							{chip}
+							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
+							<ApiKeysPanel keys={keys} teams={teams} onCreateKey={onCreateKey} onRevokeKey={onRevokeKey} />
+						</div>
+					</>
+				)}
+			</div>
+		);
+	}
+
+	// =========================================================================
+	// RENDER — CLASSIC TAB VIEW
 	// =========================================================================
 
 	return (

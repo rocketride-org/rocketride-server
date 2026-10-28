@@ -179,7 +179,20 @@ import { BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl, BxSt
 // =============================================================================
 
 // Shell component prop contracts + workspace/config types
-export type { ShellAppProps, AppDescriptor, DevToolProps, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
+export type { ShellAppProps, AppDescriptor, DevToolProps, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, SettingStore, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
+
+// Settings — contributions are REGISTERED (builtin/dev tools, host blocks;
+// registration, not discovery) and the registry flattens them with the app
+// manifest. settingStoreOf normalizes a schema's store declaration.
+export { registerSettings, getSettingsContributions, onSettingsContributionsChanged } from './components/workspace/settingsContributions';
+export type { SettingsContribution } from './components/workspace/settingsContributions';
+export { buildSettingsRegistry, effectiveSettings, settingStoreOf, labelFromKey, SHELL_SECTION_ID } from './components/workspace/settingsRegistry';
+export type { SettingsRegistry, RegistrySection, RegistryEntry, RegistryBuildOptions, ShellKind } from './components/workspace/settingsRegistry';
+// The ONE settings surface: the cloud overlay wraps it (SettingsProvider);
+// VS Code renders it as an editor tab over its mirrored stores, with its
+// Connections sections injected as self-managed rich sections.
+export { SettingsPage } from './providers/SettingsProvider';
+export type { SettingsPageProps, SettingsRichSection, SettingsHostStore, ISettingsProviderProps, ISettingsRichContext } from './providers/SettingsProvider';
 
 // Tool channel — the typed state/event surface between a tool's controller
 // (devToolSidebar) and its document views (devToolFrame). Hosts construct it

@@ -162,6 +162,13 @@ export function prefsTopic(partition: string): string {
 	return `shell:prefs:${partition}`;
 }
 
+/** The retained topic carrying ONE partition's setting OVERRIDES (the
+ *  `settings` section of its file — deltas the partition OWNS, never the
+ *  merged view). Published by the same hosts that publish prefsTopic. */
+export function settingsTopic(partition: string): string {
+	return `shell:settings:${partition}`;
+}
+
 /** The minimal bus surface a mirrored prefs store needs. */
 export interface IPrefsBus {
 	/** Subscribe to a retained topic (replays the current snapshot). */

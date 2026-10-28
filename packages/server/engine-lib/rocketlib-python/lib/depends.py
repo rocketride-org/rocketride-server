@@ -553,9 +553,30 @@ def _ensure_uv():
         error(f'Failed to install uv: {result.stderr}')
         raise RuntimeError('Failed to install uv')
 
-    # Verify installation
+    # Verify installation. pip can report success WITHOUT producing the
+    # executable: after a dirty upgrade (a locked `lib` surviving an engine
+    # replacement) a stale uv dist-info sits in site-packages, pip says
+    # "requirement already satisfied", and Scripts/uv(.exe) never appears.
+    # Force-reinstall regenerates the console script — self-healing the
+    # tree instead of dying on it.
     if not _uv_available():
-        raise RuntimeError('uv installed but not found')
+        updateProgress('Repairing uv...')
+        result = _run(
+            [
+                sys.executable,
+                '-m',
+                'pip',
+                'install',
+                '--force-reinstall',
+                '--no-deps',
+                _tool_spec('uv'),
+                '--quiet',
+                '--disable-pip-version-check',
+            ],
+            check=False,
+        )
+        if result.returncode != 0 or not _uv_available():
+            raise RuntimeError('uv installed but not found')
 
 
 def pip(*args) -> bool:

@@ -244,7 +244,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 			void getDevSessionManager()?.stop(appId);
 		});
 
-		// Start the inner loop (setting-gated by rocketride.appdev.autoWatch)
+		// Start the inner loop (always — auto-watch is the only behavior)
 		if (app) {
 			// Vendor the platform package FIRST, then start the watch: the
 			// watch's workspace install resolves .rocketride/shell/shell.tgz,

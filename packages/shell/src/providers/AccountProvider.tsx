@@ -66,6 +66,15 @@ export interface IAccountProviderProps {
 	/** Starts a subscription flow (e.g. emit shell:subscribe toward a mounted
 	 *  CheckoutFlow). Absent = no subscribe CTA, matching prior behavior. */
 	onSubscribe?: () => void;
+	/** Render ONE collapsed pane (the Settings page's Account group) instead
+	 *  of the classic 6-tab view, and load only that pane's data. */
+	embeddedSection?: 'profile' | 'billing' | 'api-keys';
+	/** Settings-nav navigation for embedded cross-links (workspace chip). */
+	onNavigateSection?: (sectionId: string) => void;
+	/** Pre-switch guard: a false return aborts a workspace switch (the
+	 *  Settings page uses it so a dirty draft is never saved into the wrong
+	 *  workspace — confirm-and-discard before the switch commits). */
+	confirmWorkspaceSwitch?: () => boolean;
 }
 
 /**
@@ -76,7 +85,7 @@ export interface IAccountProviderProps {
  * `shell:accountUpdate` events to keep the profile in sync with
  * server-pushed updates (socket-fed at a root; mirror-fed in a spoke realm).
  */
-const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe }) => {
+const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embeddedSection, onNavigateSection, confirmWorkspaceSwitch }) => {
 	// The realm's own client — null until connected AND (off-root) mirrored.
 	const { client: shellClient, isConnected } = useShellConnection();
 	const client = isConnected ? shellClient : null;
@@ -85,7 +94,9 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe }) => {
 	const appManifest = useOptionalWorkspace()?.appManifest ?? [];
 
 	// ── Navigation state ────────────────────────────────────────────────────
-	const [section, setSection] = useState<AccountSection>('profile');
+	// Embedded mode pins the section (the Settings nav owns navigation), which
+	// also keys the per-section refresh map and the billing event monitor.
+	const [section, setSection] = useState<AccountSection>(embeddedSection ?? 'profile');
 	const [activeTeamId, setActiveTeamId] = useState<string | null>(null);
 
 	// ── Data ────────────────────────────────────────────────────────────────
@@ -314,16 +325,36 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe }) => {
 		[client, orgId, loadBilling]
 	);
 
-	// ── Load ALL data upfront on connect (badges, counts, billing) ──────────
+	// ── Load data upfront on connect ─────────────────────────────────────────
+	// Classic view loads EVERYTHING (tab badges need the counts); an embedded
+	// pane has no badges, so it loads only what it renders.
 	useEffect(() => {
 		if (!client) return;
+		if (embeddedSection === 'profile') {
+			loadProfile();
+			loadOrg();
+			loadMembers();
+			loadTeams();
+			return;
+		}
+		if (embeddedSection === 'billing') {
+			loadProfile();
+			loadBilling();
+			return;
+		}
+		if (embeddedSection === 'api-keys') {
+			loadProfile();
+			loadKeys();
+			loadTeams();
+			return;
+		}
 		loadProfile();
 		loadKeys();
 		loadOrg();
 		loadMembers();
 		loadTeams();
 		loadBilling();
-	}, [client, orgId]);
+	}, [client, orgId, embeddedSection]);
 
 	// ── Subscribe to billing events when billing tab is active ──────────────
 	useEffect(() => {
@@ -391,13 +422,28 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe }) => {
 		[client]
 	);
 
-	/** Switches the user's active organization. */
+	/** Switches the user's active organization. The guard runs FIRST — a
+	 *  dirty settings draft must be confirmed-and-discarded before the switch
+	 *  commits (a workspace-A draft must never save into workspace B). */
 	const handleSetDefaultOrg = useCallback(
 		async (orgId: string) => {
 			if (!client) return;
+			if (confirmWorkspaceSwitch && !confirmWorkspaceSwitch()) return;
 			await client.account.setDefaultOrg(orgId);
 		},
-		[client]
+		[client, confirmWorkspaceSwitch]
+	);
+
+	/** Renames ANY workspace the user administers (manage-workspaces drawer).
+	 *  Re-fetches the profile so the memberships list reflects the new name. */
+	const handleRenameWorkspace = useCallback(
+		async (targetOrgId: string, name: string) => {
+			if (!client) return;
+			await client.account.updateOrgName(targetOrgId, name);
+			if (targetOrgId === orgId) setOrg((c) => (c ? { ...c, name } : c));
+			await loadProfile();
+		},
+		[client, orgId, loadProfile]
 	);
 
 	/** Deletes the user account. */
@@ -603,6 +649,9 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe }) => {
 				onSectionChange={setSection}
 				activeTeamId={activeTeamId}
 				onActiveTeamIdChange={setActiveTeamId}
+				{...(embeddedSection !== undefined ? { embeddedSection } : {})}
+				{...(onNavigateSection !== undefined ? { onNavigateSection } : {})}
+				onRenameWorkspace={handleRenameWorkspace}
 				onSaveProfile={handleSaveProfile}
 				onSetDevTeam={handleSetDevTeam}
 				onSetDefaultOrg={handleSetDefaultOrg}

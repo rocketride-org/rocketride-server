@@ -76,12 +76,12 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 
 	/**
 	 * Builds the preview URL: the Development Mode engine's shell with the
-	 * app locked + dev hooks on. `rocketride.appdev.shellUrl` overrides the
-	 * base for monorepo devs running the shell dev server.
+	 * app locked + dev hooks on. (The old `rocketride.appdev.shellUrl`
+	 * override was deleted 2026-10-26 — the shell dev loop deploys the
+	 * rebuilt shell to the connected server instead.)
 	 */
 	const buildPreviewUrl = (appId: string): string => {
-		const override = vscode.workspace.getConfiguration('rocketride.appdev').get<string>('shellUrl', '');
-		const base = override || connectionManager.getHttpUrl?.() || 'http://localhost:5565';
+		const base = connectionManager.getHttpUrl?.() || 'http://localhost:5565';
 		// _ts busts the browser's cached index.html — the flavor picker lives
 		// in the html, and a stale copy silently serves the wrong shell flavor.
 		return `${base.replace(/\/$/, '')}/?appid=${encodeURIComponent(appId)}&rrdev=1&_ts=${Date.now()}`;

@@ -72,14 +72,22 @@ registerBuiltinTools();
  * registered sidebar content even while the sidebar is collapsed to its icon
  * rail; this free-form Explorer content has no icon-rail form (a future
  * per-app design task), so the gate reads the shell-provided collapsed flag
- * and renders nothing while collapsed — preserving the previous
- * hide-when-collapsed look. The confirm/error dialogs mount OUTSIDE this gate
- * so they stay up (and their promises resolve) across a collapse.
+ * and HIDES it while collapsed — preserving the previous hide-when-collapsed
+ * look. Hidden, never unmounted: the content hosts the tool CONTROLLERS and
+ * the host.mountToolSidebar summon handler, and a restored tool document (an
+ * agent conversation tab) must reach its controller while collapsed — an
+ * invisible sidebar is still a loaded sidebar. The confirm/error dialogs
+ * mount OUTSIDE this gate so they stay up (and their promises resolve)
+ * across a collapse.
  */
 const SidebarCollapsedGate: React.FC<{ children: ReactNode }> = ({ children }) => {
 	// Collapsed flag provided by the shell around the sidebar slot.
 	const collapsed = useSidebarCollapsed();
-	return collapsed ? null : <>{children}</>;
+	return (
+		<div style={{ display: collapsed ? 'none' : 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+			{children}
+		</div>
+	);
 };
 
 // =============================================================================
@@ -336,6 +344,10 @@ const SidebarProvider: React.FC = () => {
 	// Action error state — shown as a dialog when run/stop fails
 	const [actionError, setActionError] = useState<string | null>(null);
 
+	// The run call honors the pipeline settings (it hard-coded 'full' before
+	// the settings unification — the one reader that bypassed the setting).
+	const { settings: workspaceSettings } = useWorkspace();
+
 	/**
 	 * Handles run/stop actions on source components.
 	 */
@@ -352,7 +364,9 @@ const SidebarProvider: React.FC = () => {
 							.split('/')
 							.pop()
 							?.replace(/\.pipe$/, '') ?? filePath;
-					await client.use({ pipeline, source: sourceId, name, pipelineTraceLevel: 'full' });
+					const rawTrace = workspaceSettings['rocketride.pipeBuilder.pipelineTraceLevel'];
+					const traceLevel = rawTrace === 'none' || rawTrace === 'metadata' || rawTrace === 'summary' || rawTrace === 'full' ? rawTrace : 'full';
+					await client.use({ pipeline, source: sourceId, name, pipelineTraceLevel: traceLevel });
 				} catch (err) {
 					setActionError(err instanceof Error ? err.message : String(err));
 				}
@@ -365,7 +379,7 @@ const SidebarProvider: React.FC = () => {
 				}
 			}
 		},
-		[client, isConnected]
+		[client, isConnected, projectVfs, workspaceSettings]
 	);
 
 	/**

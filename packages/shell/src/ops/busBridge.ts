@@ -106,7 +106,12 @@ interface IBusEmitOpMessage {
  * @returns True when the op is fanned out to all realms.
  */
 function isBroadcastOp(op: string): boolean {
-	return op.startsWith('mirror.');
+	// 'client.event' is the brokered client's event fan-out (clientOps
+	// CLIENT_EVENT_OP — a literal here to keep this module dependency-free):
+	// every realm handles its own copy, so announcing it made the first
+	// realm the "owner" and every later preview page a spurious ownership
+	// ERR in the console, while broadcastEmitOp delivered to all regardless.
+	return op.startsWith('mirror.') || op === 'client.event';
 }
 
 /** Registration announcements (realm → root only). */

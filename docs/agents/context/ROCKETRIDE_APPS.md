@@ -265,8 +265,8 @@ sharing one `node_modules`.
 
 ### Watch
 
-Opening an App Builder panel starts the watch for that app (gated by the
-`rocketride.appdev.autoWatch` setting):
+Opening an App Builder panel starts the watch for that app (always — there
+is no opt-out setting):
 
 1. **Install** — one `pnpm install` at the workspace root, shared and
    single-flight across all apps. Editing your app's `package.json`

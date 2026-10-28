@@ -16,9 +16,8 @@
  * in-place updates — there is no separate reload push). The server holds NO
  * dev state — registration lives in preview pages and dies with them.
  *
- * Lifecycle: started when an App Builder panel opens (setting-gated by
- * `rocketride.appdev.autoWatch`), stopped when the panel closes or the
- * extension deactivates.
+ * Lifecycle: started when an App Builder panel opens, stopped when the
+ * panel closes or the extension deactivates.
  */
 
 import * as vscode from 'vscode';
@@ -1051,16 +1050,12 @@ export function getDevSessionManager(): DevSessionManager | null {
 
 /**
  * Ensures the watch session for an app is running (used by the App Screen
- * open path and F5). Honors the `rocketride.appdev.autoWatch` setting when
- * `force` is false.
+ * open path and F5). Auto-watch is the ONLY behavior — the old
+ * `rocketride.appdev.autoWatch` opt-out was deleted (opening the builder
+ * without its watch session gave a stale preview and no build feedback).
  *
  * @param app - The app to watch.
- * @param force - True to start regardless of the autoWatch setting (F5).
  */
-export async function ensureDevSession(app: ScannedApp, force = false): Promise<void> {
-	const manager = instance;
-	if (!manager) return;
-	const autoWatch = vscode.workspace.getConfiguration('rocketride.appdev').get<boolean>('autoWatch', true);
-	if (!force && !autoWatch) return;
-	await manager.start(app);
+export async function ensureDevSession(app: ScannedApp): Promise<void> {
+	await instance?.start(app);
 }

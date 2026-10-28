@@ -599,10 +599,27 @@ export class ConnectionManager extends EventEmitter {
 	 * Cancels any pending debounced config-change handler.
 	 *
 	 * Called by the settings save op (ops/settingsOps.ts) after
-	 * applyAllSettings() but before reconcile, so the debounced handler
-	 * (which fires from the welcomeDismissed write) doesn't race with the
-	 * reconciler's engine restart and CM reconnection sequence.
+	 * applyAllSettings() but before reconcile, so any debounced handler a
+	 * config write queued doesn't race with the reconciler's engine restart
+	 * and CM reconnection sequence.
 	 */
+	/**
+	 * Applies a configuration change NOW: cancels any debounced handler and
+	 * runs the transition directly.
+	 *
+	 * The Settings save path MUST call this (on the DeployManager): its
+	 * batched write suppresses every config-change event, so the debounced
+	 * handler never schedules and the shared↔independent deploy transition
+	 * would silently not happen. (It historically rode the post-batch
+	 * `welcomeDismissed` config write — gone since Welcome dismissal moved
+	 * to globalState — leaving a disconnected engine's client reconnecting
+	 * to a dead port forever.)
+	 */
+	public async applyConfigurationChange(): Promise<void> {
+		this.cancelPendingConfigChange();
+		await this.handleConfigurationChanged();
+	}
+
 	public cancelPendingConfigChange(): void {
 		if (this.configChangeTimeout) {
 			clearTimeout(this.configChangeTimeout);
