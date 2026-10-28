@@ -222,9 +222,11 @@ export declare const connectionManager: {
 	/**
 	 * Hand over the telemetry facts the shell held because no app was
 	 * subscribed to `shell:telemetry`, oldest first, and clear the hold. Call it
-	 * once at the app's analytics init, then subscribe for the rest.
+	 * once at the app's analytics init, then subscribe for the rest. Absent on
+	 * shells that predate the telemetry channel (an app can be served by an
+	 * older shell), so call it as `connectionManager.drainTelemetry?.() ?? []`.
 	 */
-	drainTelemetry(): TelemetryFact[];
+	drainTelemetry?(): TelemetryFact[];
 	/** Returns the RocketRide client singleton, or null if not initialised. */
 	getClient(): import('../client/index').RocketRideClient | null;
 	/** Returns true when the WebSocket is authenticated and connected. */

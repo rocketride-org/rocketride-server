@@ -771,8 +771,9 @@ state or your own emitter; do not overload the shell bus.
 and `auth:complete` as `shell:telemetry` for the active app to forward to its
 own analytics. A fact raised while no app listens is held (32 facts, 30
 minutes, in the tab's sessionStorage) until the app calls
-`cm.drainTelemetry()`: drain once at analytics init, then subscribe, and
-forward each fact once by its `id` with `ts` as its time. On the waitlist
+`cm.drainTelemetry?.()` (optional: older shells lack it): drain once at
+analytics init, then subscribe, and forward each fact once by its `id` with
+`ts` as its time. On the waitlist
 screen, where no app renders, the shell loads the home app's exposed
 `./telemetry` module and calls its no-argument default export once per page
 load; it starts the home analytics and must not render. Only the home app

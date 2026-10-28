@@ -503,11 +503,11 @@ import { connectionManager, type TelemetryFact } from 'rocketride/app-sdk';
 
 const forward = (fact: TelemetryFact) => analytics.capture(fact.event, fact.props, { timestamp: new Date(fact.ts) });
 
-for (const fact of connectionManager.drainTelemetry()) forward(fact);
+for (const fact of connectionManager.drainTelemetry?.() ?? []) forward(fact);
 connectionManager.on('shell:telemetry', forward);
 ```
 
-`drainTelemetry()` hands each held fact over once and clears the hold; a fact delivered live through `shell:telemetry` is not held.
+`drainTelemetry()` hands each held fact over once and clears the hold; a fact delivered live through `shell:telemetry` is not held. Shells that predate the channel have no `drainTelemetry` (an app can be served by an older shell), hence the optional call.
 
 **The home app's `./telemetry` entry.** On the shell's own waitlist screen no app renders, so nothing would drain the facts (the waitlisted sign-up's `auth:complete` among them). There the shell loads the home app's exposed `./telemetry` module and calls its default export with no arguments, once per page load. The function must not render anything; it starts the home app's analytics, which drain and subscribe as above. A throw is ignored, and a home build without the entry is skipped. Only the home app exposes it; other apps keep `./AppDescriptor` as their single entry.
 
