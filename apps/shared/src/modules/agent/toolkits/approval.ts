@@ -43,6 +43,13 @@
  *          the run; Deny and Stop refuse it, as the call's error.
  * - never: refused in every mode, as the call's error.
  *
+ * terminate and restart are asks that name a pipeline run. Ask mode asks for
+ * them whoever started the run. Auto runs one only on a run this conversation
+ * started (`runs.ts`), and reads the run's status again right before the call;
+ * on any other run it refuses and tells the model to ask the user. Switching
+ * to Auto while such a card waits approves it only for the conversation's own
+ * run.
+ *
  * The client the toolkits get is a checked view of the real one
  * (`Approvals.client`). It refuses never methods, and refuses an ask method
  * unless the running call announced exactly that call (method and arguments)
@@ -59,9 +66,11 @@ import type { ChatAskAnswer, ChatAskCard, ChatAsking } from 'shell/src/component
 
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import type { ApprovalPrefs, ApprovalSettings, Grant } from '../host';
-import type { ToolAct } from '../tools';
+import { RefusedError, type ToolAct } from '../tools';
+import type { RunRecord } from '../turn';
 import { brief, isJsonObject, requireClient, type ClientGetter } from './common';
 import { readApps } from './inventory';
+import type { RunOwnership, RunTarget } from './runs';
 
 // =============================================================================
 // TYPES
@@ -92,6 +101,8 @@ interface Names {
 	deployment(projectId: unknown, teamId: unknown): Promise<string>;
 	/** A schedule's next few runs, as dates, or '' when the server can't say. */
 	nextRuns(schedule: string): Promise<string>;
+	/** A pipeline run: `chat_1 (tk_3f1c09ab…)` from its status, or its token, project and source. */
+	run(target: RunTarget): Promise<string>;
 }
 
 /** What a card shows before the shell adds its buttons. */
@@ -116,6 +127,8 @@ interface AskRule {
 	readonly grant?: Grant;
 	/** True for arguments that make the call free (deploy.add with no deployTo points no team at the version). */
 	readonly freeWhen?: (params: readonly unknown[]) => boolean;
+	/** The pipeline run the call acts on. Auto lets it through only for a run this conversation started. */
+	readonly target?: (params: readonly unknown[]) => RunTarget;
 }
 
 /** How the list rates one name. */
@@ -139,6 +152,8 @@ export interface ApprovalsOptions {
 	settings?: ApprovalSettings;
 	/** The run's stop signal: once aborted no card waits and no asked method runs. */
 	signal: AbortSignal;
+	/** Which pipeline runs this conversation started. Absent: none, so Auto refuses every terminate and restart. */
+	runs?: RunOwnership;
 }
 
 // =============================================================================
@@ -205,6 +220,21 @@ function afterStop(name: string): string {
 	return `Not done: the run was stopped, so ${name} was not called.`;
 }
 
+/** What Auto does to a run, in words, per method. */
+function verbOf(name: string): string {
+	return name === 'restart' ? 'restart' : 'stop';
+}
+
+/** Auto met a terminate or restart on a run this conversation did not start. */
+function notOwned(name: string, run: string): string {
+	return `Not done: this conversation did not start the pipeline run ${run}, and in Auto mode the agent only stops or restarts its own runs. Call ask_user to ask the user whether to ${verbOf(name)} it: they can do it themselves, or switch to Ask first and approve it.`;
+}
+
+/** Auto's recheck found the run is no longer the one this conversation started. */
+function noLongerOwned(name: string, run: string, why: string): string {
+	return `Not done: the pipeline run ${run} is no longer the one this conversation started (${why}), so Auto mode does not ${verbOf(name)} it. Call ask_user to ask the user whether to ${verbOf(name)} it.`;
+}
+
 // =============================================================================
 // THE LIST
 // =============================================================================
@@ -218,7 +248,7 @@ function never(why: string): NeverRule {
 }
 
 /** An ask row. */
-function ask(card: CardBuilder, extra: Pick<AskRule, 'grant' | 'freeWhen'> = {}): AskRule {
+function ask(card: CardBuilder, extra: Pick<AskRule, 'grant' | 'freeWhen' | 'target'> = {}): AskRule {
 	return { tier: 'ask', card, ...extra };
 }
 
@@ -277,8 +307,8 @@ const CLIENT_POLICY: ClientPolicy = {
 	getTaskPipeline: FREE,
 	addMonitor: FREE,
 	setEvents: FREE,
-	terminate: FREE,
-	restart: FREE,
+	terminate: ask(async ([token], n) => ({ title: `Stop the pipeline run ${await n.run({ token: text(token) })}` }), { target: ([token]) => ({ token: typeof token === 'string' ? token : undefined }) }),
+	restart: ask(async ([o], n) => ({ title: `Restart the pipeline run ${await n.run(restartTarget(o))}`, detail: 'It stops and starts again with the pipeline sent.' }), { target: ([o]) => restartTarget(o) }),
 	removeMonitor: never(MONITORS),
 	clearAllMonitors: never(MONITORS),
 
@@ -493,6 +523,18 @@ function field(options: unknown, name: string): string {
 	return text(isJsonObject(options) ? options[name] : undefined);
 }
 
+/** The run restart({ token, projectId, source, teamId }) names. */
+function restartTarget(o: unknown): RunTarget {
+	if (!isJsonObject(o)) return {};
+	const pick = (value: unknown): string | undefined => (typeof value === 'string' && value ? value : undefined);
+	return { token: pick(o.token), projectId: pick(o.projectId), source: pick(o.source), teamId: pick(o.teamId) };
+}
+
+/** A run token cut short for a card: its prefix and first 8 characters. */
+function shortToken(token: string): string {
+	return token.length > 11 ? `${token.slice(0, 11)}…` : token;
+}
+
 /** A message as a quoted, short card detail. */
 function quoted(message: unknown): string {
 	return `"${brief(text(message))}"`;
@@ -552,6 +594,12 @@ function cardNames(client: ClientGetter, vfs: IWorkspaceFileSystem, signal: Abor
 				'',
 				signal
 			),
+		run: (target) => {
+			const where = [target.source, target.projectId && `in project ${target.projectId}`, target.teamId && `on team ${target.teamId}`].filter(Boolean).join(' ');
+			if (!target.token) return Promise.resolve(where || 'with no token or project');
+			const token = target.token;
+			return capped(async () => `${(await requireClient(client).getTaskStatus(token)).name || where} (${shortToken(token)})`, where ? `${where} (${shortToken(token)})` : shortToken(token), signal);
+		},
 	};
 }
 
@@ -600,18 +648,43 @@ export class Approvals {
 		const rule = rate(act.name, act.params, true);
 		if (rule === FREE) return run;
 		if (rule.tier === 'never') throw new Error(blocked(act.name, rule.why));
-		if (allowed(rule, this.prefs())) return this.withPass(act, run);
+		// step: Auto, or a grant, lets an ask through; on a pipeline run only when this conversation started it
+		const target = rule.target?.(act.params);
+		const own = (): RunRecord | undefined => (target ? this.o.runs?.owned(target) : undefined);
+		const unasked = (): (() => Promise<string>) | null => {
+			if (!allowed(rule, this.prefs())) return null;
+			if (!target) return this.withPass(act, run);
+			const record = own();
+			return record ? this.withPass(act, this.rechecked(act.name, target, record, run)) : null;
+		};
+		const refuseForeign = async (): Promise<never> => {
+			throw new Error(notOwned(act.name, await this.names.run(target ?? {})));
+		};
+		const now = unasked();
+		if (now) return now;
+		if (target && allowed(rule, this.prefs())) return refuseForeign();
 
-		const card = await rule.card(act.params, this.names);
+		const built = await rule.card(act.params, this.names);
+		const card = target ? { ...built, detail: [built.detail, own() ? 'This conversation started it.' : 'This conversation did not start it.'].filter(Boolean).join(' ') } : built;
 		if (this.o.signal.aborted) throw new Error(notAnswered(card.title));
 		// the settings may have changed while the names were looked up
-		if (allowed(rule, this.prefs())) return this.withPass(act, run);
+		const later = unasked();
+		if (later) return later;
+		if (target && allowed(rule, this.prefs())) return refuseForeign();
 		if (!this.o.ask) throw new Error(noChat(card.title));
 
 		// without settings an Always click would save nothing
 		const asking = this.o.ask(rule.grant && this.o.settings ? { ...card, alwaysLabel: ALWAYS_LABELS[rule.grant] } : card);
+		// a switch to Auto decides again: it approves the card, except for a run this conversation did not start, whose card waits for the user
+		let viaAuto: RunRecord | null = null;
 		const off = this.o.settings?.subscribe(() => {
-			if (allowed(rule, this.prefs())) asking.approve();
+			if (!allowed(rule, this.prefs())) return;
+			if (target) {
+				const record = own();
+				if (!record) return;
+				viaAuto = record;
+			}
+			asking.approve();
 		});
 		let answer: ChatAskAnswer;
 		try {
@@ -624,7 +697,21 @@ export class Approvals {
 		if (answer === 'deny') throw new Error(declined(card.title));
 		// a click that raced Stop runs nothing
 		if (answer === 'stopped' || this.o.signal.aborted) throw new Error(notAnswered(card.title));
-		return this.withPass(act, run);
+		// the user's own click runs as asked; Auto's approval rechecks the run first
+		return this.withPass(act, viaAuto && target ? this.rechecked(act.name, target, viaAuto, run) : run);
+	}
+
+	/**
+	 * Wraps an Auto-approved terminate or restart so it reads the run's status
+	 * again right before it calls the client, and refuses when the run is no
+	 * longer the one this conversation started.
+	 */
+	private rechecked(name: string, target: RunTarget, record: RunRecord, run: () => Promise<string>): () => Promise<string> {
+		return async () => {
+			const why = this.o.runs ? await this.o.runs.recheck(record) : "nothing records which runs are this conversation's";
+			if (why !== null) throw new RefusedError(noLongerOwned(name, await this.names.run(target), why));
+			return run();
+		};
 	}
 
 	/** The user's settings now. */

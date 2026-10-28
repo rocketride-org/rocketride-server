@@ -31,7 +31,8 @@
  * changed), the model, and the record of check results, which is also the
  * loop's finish rule. It streams each wave's progress as `thinking` chunks and sends the
  * answer as one `content` chunk, with the checks line the code builds from the
- * record. A stopped run sends no `content` chunk.
+ * record. A stopped run sends no `content` chunk. It resolves with the turn's
+ * TurnResult (turn.ts).
  *
  * Everything that only works in the browser (the model pipeline, Monaco's
  * markers) has a default here and comes in through `deps` otherwise, so tests
@@ -47,19 +48,22 @@ import type { ChatMessage } from 'shell';
 import type { ChatAskCard, ChatAsking } from 'shell/src/components/chat/types';
 
 import { isReferencePath } from '../vfs/referenceTree';
-import type { AgentHost } from './host';
+import { findAgentHost, type AgentHost } from './host';
 import { CORE_PROMPT } from './prompts';
 import { APP_CHECK_TOOL, AppCheckToolkit, monacoMarkerSource, reportPassed, typesNote } from './toolkits/appCheck';
 import type { CheckReport, MarkerSource } from './toolkits/appCheck';
 import { Approvals } from './toolkits/approval';
 import { AppToolkit, DEPLOY_APP_TIMEOUT_MS } from './toolkits/appTools';
+import { AskUserToolkit } from './toolkits/askUser';
 import { NOT_CONNECTED_MESSAGE, redactText, shellChoice, type ChoiceFn, type ClientGetter } from './toolkits/common';
 import type { FileTracker } from './toolkits/fileTracker';
 import { FilesystemTools, normalizePath } from './toolkits/filesystem';
 import { findApp, InventoryToolkit, readApps } from './toolkits/inventory';
 import { RocketRideClientToolkit } from './toolkits/rocketrideClient';
+import { RunLedger } from './toolkits/runs';
 import { validateNote, validateSaved, type SaveValidation } from './toolkits/saveValidation';
 import { composeToolkits, UserTime } from './tools';
+import { outcomeOf, redactDeep, TurnError, type NeedsInputRequest, type RunRecord, type TurnCheck, type TurnResult } from './turn';
 import { runLoop, TOOL_TIMEOUT_MS, type FinishRule, type LoopResult, type RanCall } from './wave/loop';
 import { buildPrefix } from './wave/plan';
 import type { AppPrompts, HistoryTurn, ModelCall, QuestionSpec } from './wave/plan';
@@ -115,6 +119,12 @@ export interface AgentRunOptions {
 	takeQueued: () => string[];
 	/** Shows a "Needs your OK" card in the chat and waits for the answer (the turn's ask). Absent: an act that asks is refused in Ask mode. */
 	ask?: (card: ChatAskCard) => ChatAsking;
+	/** The turn's id (default: a new one). */
+	turnId?: string;
+	/** The conversation the turn belongs to (its session id), for the runs it starts. */
+	conversationId?: string;
+	/** The runs the conversation started. The run adds the ones it starts to this array (default: none, kept nowhere). */
+	runs?: RunRecord[];
 }
 
 /** What one run needs from its host. The optional parts have browser defaults; tests always pass them. */
@@ -129,6 +139,8 @@ export interface AgentDeps {
 	choose?: ChoiceFn;
 	/** Gets Monaco's marker source, or null when there is none (default: the editor's, loaded once). */
 	markers?: () => Promise<MarkerSource | null>;
+	/** The installed host's scope now, which a team switch changes (default: the installed host's). */
+	currentScope?: () => string | undefined;
 }
 
 // =============================================================================
@@ -309,6 +321,28 @@ export class CheckRecord implements FinishRule {
 		return `Checked: ${said.map((g) => `${g.target}: ${g.text}`).join('; ')}`;
 	}
 
+	/**
+	 * The newest result per target and step, for the turn result. An app the
+	 * run changed and never checked has one check_app entry that did not run.
+	 *
+	 * @returns The checks, apps first.
+	 */
+	results(): TurnCheck[] {
+		const out: TurnCheck[] = [];
+		for (const [folder, app] of this.apps) {
+			if (!app.report) {
+				if (app.changed >= 0) out.push({ target: folder, step: APP_CHECK_TOOL, status: 'not_run', summary: 'not checked' });
+				continue;
+			}
+			for (const e of app.report.evidence) out.push({ target: app.report.target, step: e.step, status: e.status, summary: e.summary });
+		}
+		for (const [path, v] of this.pipelines) {
+			if ('failed' in v) out.push({ target: path, step: 'validate', status: 'not_run', summary: 'validate not run' });
+			else out.push({ target: path, step: 'validate', status: v.errors.length === 0 ? 'pass' : 'fail', summary: v.errors.length === 0 ? 'validate OK' : `validate: ${v.errors.length} ${v.errors.length === 1 ? 'error' : 'errors'}` });
+		}
+		return out;
+	}
+
 	/** The record of an app, made on first use. */
 	private app(folder: string): { changed: number; passed: number; report?: CheckReport } {
 		let app = this.apps.get(folder);
@@ -451,7 +485,8 @@ function isChecksLine(line: string): boolean {
 /**
  * The text the user reads: the model's answer, then the checks line built from
  * the record, then a warning when the run changed the work and stopped before
- * finishing. Lines in the answer that start with "Checked:" or "Not checked:",
+ * finishing. A turn that asks the user may have checked all it changed, so it
+ * gets the warning only when something is still unchecked. Lines in the answer that start with "Checked:" or "Not checked:",
  * markdown-wrapped or not, are dropped, because only the code writes those.
  * The whole text passes through `shown` on its way to the chat and the saved
  * session.
@@ -468,7 +503,8 @@ function finalText(result: LoopResult, checks: CheckRecord, shown: (text: string
 		.join('\n')
 		.trim();
 	const parts = [answer, checks.checksLine()];
-	if (checks.changed && result.stopReason !== 'done') parts.push(NOT_CHECKED);
+	const unchecked = result.stopReason === 'needs_input' ? checks.unchecked() !== null : result.stopReason !== 'done';
+	if (checks.changed && unchecked) parts.push(NOT_CHECKED);
 	return shown(parts.filter((part) => part.length > 0).join('\n\n'));
 }
 
@@ -485,6 +521,21 @@ function finalText(result: LoopResult, checks: CheckRecord, shown: (text: string
  */
 function redactCard(card: ChatAskCard, shown: (text: string) => string): ChatAskCard {
 	return { ...card, title: shown(card.title), detail: card.detail === undefined ? undefined : shown(card.detail) };
+}
+
+/**
+ * A needs-you request with its question and choices passed through `hide`.
+ * The card and the saved session quote the model's ask_user arguments, so a
+ * value the file tools hid shows as its marker there, as in the answer. The
+ * kind, the id and a Variable's name stay as they are: the card and the
+ * session act on them, and a hidden value can be any word.
+ *
+ * @param request - What the turn asks.
+ * @param hide - Hides the values the run's file tools hid.
+ * @returns The request the turn keeps.
+ */
+function hideRequest(request: NeedsInputRequest, hide: (text: string) => string): NeedsInputRequest {
+	return { ...request, question: hide(request.question), ...(request.choices ? { choices: request.choices.map((choice) => hide(choice)) } : {}) };
 }
 
 /**
@@ -582,6 +633,8 @@ export interface ChatModelOptions {
 	onPipelineError?: () => Promise<void>;
 	/** Aborted when the user stops the run: a call that fails after it neither restarts the pipeline nor retries. */
 	signal?: AbortSignal;
+	/** Hears each chat request as it is sent, the retry included. */
+	onRequest?: () => void;
 }
 
 /**
@@ -602,7 +655,11 @@ export function createChatModel(o: ChatModelOptions): ModelCall {
 		if (!client) throw new Error(NOT_CONNECTED_MESSAGE);
 		const question = o.toQuestion(q);
 
-		const ask = async (): Promise<{ answers?: unknown[] }> => client.chat({ token: await o.token(), question });
+		const ask = async (): Promise<{ answers?: unknown[] }> => {
+			const token = await o.token();
+			o.onRequest?.();
+			return client.chat({ token, question });
+		};
 
 		const started = performance.now();
 		try {
@@ -679,11 +736,25 @@ function toRocketRideQuestion(q: QuestionSpec): Question {
  * @param callback - Receives each chunk as (type, content).
  * @param options - The conversation so far, the app's prompts and the model pipeline's token.
  * @param deps - The host, the client getter, and the parts tests replace.
- * @throws The model's error when it fails before the run gathered anything.
+ * @returns How the turn ended.
+ * @throws A TurnError with the model's error and the failed result when the model fails before the run gathered anything.
  */
-export async function runAgent(request: string, callback: (type: string, content: string) => void, options: AgentRunOptions, deps: AgentDeps): Promise<void> {
+export async function runAgent(request: string, callback: (type: string, content: string) => void, options: AgentRunOptions, deps: AgentDeps): Promise<TurnResult> {
 	const { host, client } = deps;
-	const model = deps.model ?? createChatModel({ client, token: options.token, toQuestion: toRocketRideQuestion, onPipelineError: options.onPipelineError, signal: options.signal });
+	const turnId = options.turnId ?? crypto.randomUUID();
+	// step: every model request counts, a pipeline retry included, so a turn that throws still reports how many it sent;
+	// a model a test gives sends one request per call
+	let modelRequests = 0;
+	const sent = (): void => {
+		modelRequests++;
+	};
+	const given = deps.model;
+	const model: ModelCall = given
+		? (q) => {
+				sent();
+				return given(q);
+			}
+		: createChatModel({ client, token: options.token, toQuestion: toRocketRideQuestion, onPipelineError: options.onPipelineError, signal: options.signal, onRequest: sent });
 	const choose = deps.choose ?? shellChoice();
 	const markers = deps.markers ?? editorMarkers;
 
@@ -699,10 +770,14 @@ export async function runAgent(request: string, callback: (type: string, content
 	// step: the workspace; every save that works returns the types of an app's TypeScript file
 	// or the validate of a pipeline, and the validate is recorded for the finish rule
 	const { vfs } = host;
+	// step: the runs the conversation started; a fresh use adds one, and Auto stops or restarts only those
+	const scopeKey = host.scopeKey ?? '';
+	const currentScope = deps.currentScope ?? (() => findAgentHost()?.scopeKey);
+	const ledger = new RunLedger(options.runs ?? [], { client, scopeKey, currentScope: () => currentScope() ?? '', conversationId: options.conversationId ?? '' });
 	// step: the run's approvals; the toolkits and the save hook below get its checked client,
 	// and every card it shows is redacted on its way to the chat
 	const { ask } = options;
-	const approvals = new Approvals({ client, vfs, ask: ask && ((card) => ask(redactCard(card, shown))), settings: host.approvals?.run, signal: options.signal });
+	const approvals = new Approvals({ client, vfs, ask: ask && ((card) => ask(redactCard(card, shown))), settings: host.approvals?.run, signal: options.signal, runs: ledger });
 	const afterSave = async (path: string): Promise<string> => {
 		const appFile = APP_TYPESCRIPT_FILE.exec(path);
 		if (appFile) return typesNote(vfs, markers, appFile[1], appFile[2], hide);
@@ -727,17 +802,32 @@ export async function runAgent(request: string, callback: (type: string, content
 	// step: a toolkit cuts a long text before the loop sees it, and a cut value no longer matches,
 	// so each one, and the save hook above, hides the values the file tools hid before it cuts
 	const hide = (text: string): string => files.secrets.hideKnown(text);
+	const askUser = new AskUserToolkit(approvals.client);
 	const composed = composeToolkits([
 		files,
 		new InventoryToolkit(vfs, (id) => host.devSession(id) !== null),
-		new RocketRideClientToolkit(approvals.client, vfs, hide),
-		new AppToolkit(approvals.client, host, { signal: options.signal, hide }),
+		new RocketRideClientToolkit(approvals.client, vfs, hide, ledger),
+		new AppToolkit(approvals.client, host, { signal: options.signal, hide, created: (path) => files.tracker.created(path) }),
 		// check_app hands each report to the record
 		new AppCheckToolkit(host, markers, (folder, report) => checks.appChecked(folder, report), { signal: options.signal, hide }),
+		askUser,
 	]);
 	// step: cards and the answer hold text the loop never saw (a server's names, check_app's summaries),
 	// so each value the file tools hid shows as its marker there too; a card asks only once the loop runs
 	const shown = (text: string): string => redactText(hide(text));
+
+	// step: what the turn did, read when it ends, however it ends
+	const turnOf = (outcome: Pick<TurnResult, 'outcome' | 'reason' | 'finalText' | 'error'>, waves: number, toolCalls: number): TurnResult =>
+		redactDeep({
+			turnId,
+			...(host.scopeKey !== undefined ? { scopeKey: host.scopeKey } : {}),
+			...outcome,
+			files: files.tracker.changes(),
+			checks: checks.results(),
+			usage: { waves, modelRequests, toolCalls },
+			...(askUser.request ? { request: hideRequest(askUser.request, hide) } : {}),
+			...(ledger.started.length ? { runsStarted: [...ledger.started] } : {}),
+		});
 
 	let result: LoopResult;
 	try {
@@ -757,14 +847,21 @@ export async function runAgent(request: string, callback: (type: string, content
 			secrets: files.secrets,
 			notes: changedFilesNote(files.tracker, vfs),
 			userTime,
+			endTurn: () => askUser.request?.question ?? null,
 		});
+	} catch (error) {
+		// step: nothing was gathered, so the chat shows the model's error; the result says what the turn got to
+		const message = error instanceof Error ? error.message : String(error);
+		throw new TurnError(message, turnOf({ outcome: 'failed', reason: 'error', finalText: '', error: message }, 1, 0));
 	} finally {
 		options.signal.removeEventListener('abort', endOnStop);
 		runEnded.abort();
 	}
 
 	// step: a stopped run writes no answer: the chat closes the turn with its stop row, and this adds the one fact that row can't know
-	if (result.stopReason !== 'stopped') callback('content', finalText(result, checks, shown));
+	const text = result.stopReason === 'stopped' ? '' : finalText(result, checks, shown);
+	if (result.stopReason !== 'stopped') callback('content', text);
 	else if (checks.changed) callback('thinking', NOT_CHECKED);
 	console.log(`[agent] stop=${result.stopReason} waves=${result.waves} modelCalls=${result.modelMs.length} medianMs=${median(result.modelMs)} guides=[${files.pathsSeen().filter(isReferencePath).join(',')}]`);
+	return turnOf({ outcome: outcomeOf(result.stopReason), reason: result.stopReason, finalText: text }, result.waves, result.toolCalls);
 }

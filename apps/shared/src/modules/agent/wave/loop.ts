@@ -138,6 +138,12 @@ export interface LoopOptions {
 	notes?: () => string[];
 	/** The time the user spends answering tool questions; no call's time limit runs while one is open. */
 	userTime?: UserTime;
+	/**
+	 * Asked after each wave's calls. Text means a call ended the turn to wait
+	 * for the user (ask_user): the run stops with 'needs_input', and the text
+	 * is its answer.
+	 */
+	endTurn?: () => string | null;
 }
 
 /** How a run ended. */
@@ -150,6 +156,8 @@ export interface LoopResult {
 	waves: number;
 	/** How long each model call took, in milliseconds, in call order. */
 	modelMs: number[];
+	/** How many tool calls the model planned, memory.peek and skipped calls included. */
+	toolCalls: number;
 }
 
 /** The time limit for a tool call when the options set none: 5 minutes, Wave's default. */
@@ -716,6 +724,8 @@ class WaveRun {
 	readonly memory = new RunMemory();
 	/** How long each model call took. */
 	readonly modelMs: number[] = [];
+	/** How many tool calls the model planned. */
+	toolCalls = 0;
 	/** The model's working notes, carried from wave to wave. */
 	scratch = '';
 	/** Every message the user sent during this run, oldest first; each later question shows them in its context. */
@@ -1005,7 +1015,7 @@ class WaveRun {
 
 	/** The run's result. */
 	finish(stopReason: StopReason, answer: string, waves: number): LoopResult {
-		return { answer, stopReason, waves, modelMs: this.modelMs };
+		return { answer, stopReason, waves, modelMs: this.modelMs, toolCalls: this.toolCalls };
 	}
 
 	/**
@@ -1058,7 +1068,8 @@ class WaveRun {
 // =============================================================================
 
 /**
- * Runs waves until the model's answer is accepted, a reply stays unusable
+ * Runs waves until the model's answer is accepted, a call asks the user
+ * (`needs_input`, with the question as the answer), a reply stays unusable
  * after one retry (`empty_plan`), the model cannot be reached (`error`), or
  * the run is stopped (`stopped`, with no answer).
  * Each wave plans, runs its calls, tells the finish rule what ran, and records
@@ -1119,6 +1130,7 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 		const earlier = run.earlierKeys();
 		const removing = reply.askedDone ? [] : reply.remove.filter((key) => earlier.has(key));
 		run.forget(removing);
+		run.toolCalls += toolCalls.length;
 		const { entries, ran } = await run.act(wave, toolCalls);
 		const lines = toolCalls.map((call, i) => thinkingLine(call, entries[i]));
 		entries.push(...problemEntries(wave, reply.problems));
@@ -1134,6 +1146,14 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 		if (o.signal.aborted) {
 			run.think(reply.thought, lines);
 			return run.stopped(wave + 1);
+		}
+
+		// step: a call asked the user, so the turn ends here with the question as its answer
+		const asked = o.endTurn?.() ?? null;
+		if (asked !== null) {
+			run.record(entries);
+			run.think(reply.thought, lines);
+			return run.finish('needs_input', asked, wave + 1);
 		}
 
 		// step: done with calls — the answer stands only if every call worked, the

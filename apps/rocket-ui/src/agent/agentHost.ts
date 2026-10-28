@@ -29,7 +29,8 @@
  * builds its AgentHost here and installs it right after the workspace is
  * created: the workspace view (whose read-only .rocketride/ holds the
  * guides), the New App scaffold, the deploy packer, the open apps' dev
- * sessions, the user's approval settings and the open editors.
+ * sessions, the user's approval settings, the open editors, and the opener
+ * a turn card's file links use.
  */
 
 import type { RocketRideClient } from 'shell';
@@ -38,6 +39,7 @@ import type { FrameOptions } from 'shared/tools/appdev';
 import { scaffoldApp } from '../surfaces/preview/session/appStore';
 import { findDevSession, type WebDevSession } from '../surfaces/preview/session/devSession';
 import { packAppSource } from '../surfaces/preview/session/pack';
+import { openWorkspaceFile } from '../surfaces/workspace/vfs/openWorkspaceFile';
 import { getWorkspace, type Workspace } from '../surfaces/workspace/vfs/workspace';
 import { editorControl } from './editorControls';
 
@@ -218,5 +220,7 @@ export function createRocketAgentHost(client: RocketRideClient, ws: Workspace): 
 			};
 			return { save: (stored) => whileCurrent(() => control.save(stored)), discard: () => whileCurrent(control.discard) };
 		},
+		// step: a file link on a turn's card opens the file the way the Explorer does, in this host's team only
+		openFile: async (path) => current() && openWorkspaceFile(path),
 	};
 }

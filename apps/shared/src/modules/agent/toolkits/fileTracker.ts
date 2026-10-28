@@ -64,6 +64,7 @@ export class FileTracker {
 
 	/** The run wrote a file at `version`; `existed` is whether it was there before. */
 	wrote(path: string, version: number, hash: string, existed: boolean): void {
+		this.folderBack(path);
 		const file = this.entry(path);
 		file.readVersion = version;
 		file.readHash = hash;
@@ -73,13 +74,29 @@ export class FileTracker {
 		else if (file.change === 'deleted') file.change = 'modified';
 	}
 
-	/** The run deleted a file or a folder at `version`; every tracked file under it goes too. */
-	deleted(path: string, version: number): void {
+	/**
+	 * Another tool of the run created a file, as create_app's scaffold does.
+	 * The run has not read it, so an edit still needs a read first.
+	 *
+	 * @param path - Canonical path.
+	 */
+	created(path: string): void {
+		this.folderBack(path);
+		const file = this.entry(path);
+		// step: as for a write, a file the run deleted and made again is modified
+		if (file.change === undefined) file.change = 'added';
+		else if (file.change === 'deleted') file.change = 'modified';
+	}
+
+	/** The run deleted a file or a folder at `version`; every tracked file under it goes too. `held` lists every file a folder held, read or not. */
+	deleted(path: string, version: number, held: readonly string[] = []): void {
 		let existed = true;
+		const created = new Set<string>();
 		for (const file of this.within(path)) {
 			// step: a file the run created and then deleted was never a change
 			if (file.change === 'added') {
 				this.files.delete(file.path);
+				created.add(file.path);
 				if (file.path === path) existed = false;
 				continue;
 			}
@@ -89,6 +106,8 @@ export class FileTracker {
 			file.storedHash = undefined;
 			file.from = undefined;
 		}
+		// step: a file the folder held that the run never read is deleted too, with a row of its own, so the folder coming back does not hide it
+		for (const file of held) if (!this.files.has(file) && !created.has(file)) this.files.set(file, { path: file, change: 'deleted', readVersion: version });
 		if (existed && !this.files.has(path)) this.files.set(path, { path, change: 'deleted', readVersion: version });
 	}
 
@@ -101,6 +120,8 @@ export class FileTracker {
 		if (moving.length === 0) moving.push({ path: from });
 		for (const file of moving) {
 			const target = to + file.path.slice(from.length);
+			// step: a file renamed into a folder the run deleted brings the folder back, as a write does
+			this.folderBack(target);
 			this.files.delete(file.path);
 			const origin = file.change === 'renamed' ? file.from : file.path;
 			this.files.set(target, {
@@ -125,6 +146,19 @@ export class FileTracker {
 			if (change !== undefined) out.push(from === undefined ? { path, change } : { path, change, from });
 		}
 		return out;
+	}
+
+	/**
+	 * A file now exists under a folder the run deleted, so the folder is back:
+	 * its own deleted row goes. Rows of files under it that stay deleted are kept.
+	 *
+	 * @param path - Canonical path of the file written or created.
+	 */
+	private folderBack(path: string): void {
+		for (let cut = path.lastIndexOf('/'); cut > 0; cut = path.lastIndexOf('/', cut - 1)) {
+			const folder = path.slice(0, cut);
+			if (this.files.get(folder)?.change === 'deleted') this.files.delete(folder);
+		}
 	}
 
 	/** The record of a path, made on first use. */

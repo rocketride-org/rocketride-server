@@ -146,6 +146,14 @@ export interface AgentHost {
 	 * and the chat shows no mode switch.
 	 */
 	approvals?: HostApprovals;
+	/**
+	 * Opens a workspace file in its editor, for a file link on a turn's card.
+	 * Hosts without editors leave it out, and the link does nothing.
+	 *
+	 * @param path - The workspace path.
+	 * @returns Whether an editor opened.
+	 */
+	openFile?(path: string): Promise<boolean>;
 }
 
 // =============================================================================

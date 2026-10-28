@@ -804,3 +804,42 @@ test("a question during a call's prepare stands its clock still, so its run stil
 	await running;
 	assert.equal(entriesByKey(model.questions[1]).get('wave-0.r0')?.error, undefined, 'the time in the dialog was not taken from the run');
 });
+
+// =============================================================================
+// ENDING THE TURN FOR THE USER — needs_input
+// =============================================================================
+
+test('a call that asks the user ends the turn as needs_input with the question as the answer, even in a reply that says done', async () => {
+	let asked: string | null = null;
+	const ask = stub('ask_user', (args) => {
+		asked = String(args.question);
+		return 'asked';
+	});
+	// one reply only: a second question would throw, so the run must end in this wave
+	const model = scriptedModel([
+		plan(
+			[
+				['read_file', { path: 'a.ts' }],
+				['ask_user', { question: 'Which model?' }],
+			],
+			'all done'
+		),
+	]);
+	const thinking: string[] = [];
+	const result = await setup(model, [stub('read_file'), ask], { endTurn: () => asked, emit: (_type, text) => thinking.push(text) }).run();
+	assert.deepEqual({ answer: result.answer, stopReason: result.stopReason, waves: result.waves, toolCalls: result.toolCalls }, { answer: 'Which model?', stopReason: 'needs_input', waves: 1, toolCalls: 2 });
+	assert.match(thinking.join('\n'), /- ask_user — ok/, 'the wave that asked still shows its calls');
+});
+
+test('the result counts every tool call the model planned, across waves', async () => {
+	const model = scriptedModel([
+		plan([
+			['read_file', { path: 'a.ts' }],
+			['read_file', { path: 'b.ts' }],
+		]),
+		plan([['memory.peek', { key: 'wave-0.r0' }]]),
+		done('read'),
+	]);
+	const result = await setup(model, [stub('read_file')], { endTurn: () => null }).run();
+	assert.deepEqual({ stopReason: result.stopReason, waves: result.waves, toolCalls: result.toolCalls, modelRequests: result.modelMs.length }, { stopReason: 'done', waves: 3, toolCalls: 3, modelRequests: 3 });
+});

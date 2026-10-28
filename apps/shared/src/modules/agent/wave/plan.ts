@@ -91,8 +91,8 @@ export interface ResultEntry {
 	deduplicated?: boolean;
 }
 
-/** Why the loop stopped. */
-export type StopReason = 'done' | 'empty_plan' | 'error' | 'stopped';
+/** Why the loop stopped. 'needs_input': a tool ended the turn to wait for the user (ask_user). */
+export type StopReason = 'done' | 'needs_input' | 'empty_plan' | 'error' | 'stopped';
 
 // =============================================================================
 // MODEL CALL — the one seam to the language model

@@ -94,10 +94,7 @@ const SEARCH_MAX_RESULTS = 200;
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git']);
 
 /** Extensions treated as text for search (everything else is skipped). */
-const TEXT_EXTENSIONS = new Set([
-	'ts', 'tsx', 'js', 'jsx', 'json', 'pipe', 'md', 'txt', 'css', 'html', 'svg',
-	'py', 'yaml', 'yml', 'toml', 'env', 'sh', 'cmd', 'sql', 'csv',
-]);
+const TEXT_EXTENSIONS = new Set(['ts', 'tsx', 'js', 'jsx', 'json', 'pipe', 'md', 'txt', 'css', 'html', 'svg', 'py', 'yaml', 'yml', 'toml', 'env', 'sh', 'cmd', 'sql', 'csv']);
 
 /** Printable characters the platform store refuses in paths (client-side mirror). */
 const INVALID_PRINTABLE_CHARS = /[*?<>|"]/;
@@ -143,7 +140,9 @@ const UNSAVED_TITLE = 'Unsaved changes';
  */
 export function normalizePath(raw: unknown, allowRoot = false): string {
 	// step: normalize separators and trim the edges
-	const cleaned = String(raw ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+	const cleaned = String(raw ?? '')
+		.replace(/\\/g, '/')
+		.replace(/^\/+|\/+$/g, '');
 	if (!cleaned) {
 		if (allowRoot) return '';
 		throw new Error('A file or directory path is required.');
@@ -241,9 +240,7 @@ export class FilesystemTools extends AgentToolkit {
 		this.afterSave = afterSave;
 		this.unsaved = unsaved;
 		// step: mechanics first, then the host's map of its own tree
-		this.instructions = instructions.trim().length > 0
-			? `${FILESYSTEM_INSTRUCTIONS}\n\n${instructions.trim()}`
-			: FILESYSTEM_INSTRUCTIONS;
+		this.instructions = instructions.trim().length > 0 ? `${FILESYSTEM_INSTRUCTIONS}\n\n${instructions.trim()}` : FILESYSTEM_INSTRUCTIONS;
 	}
 
 	// ── Internals ────────────────────────────────────────────────────────
@@ -632,9 +629,7 @@ export class FilesystemTools extends AgentToolkit {
 		}
 
 		if (matches.length === 0) return `No matches for '${pattern}' in ${files.length} files searched.`;
-		const header = matches.length >= cap
-			? `Showing first ${cap} matches (cap reached — narrow the pattern or path):`
-			: `${matches.length} match(es):`;
+		const header = matches.length >= cap ? `Showing first ${cap} matches (cap reached — narrow the pattern or path):` : `${matches.length} match(es):`;
 		return `${header}\n${matches.join('\n')}`;
 	}
 
@@ -702,6 +697,8 @@ export class FilesystemTools extends AgentToolkit {
 				// step: the user's text landed, so the delete the agent planned is out of date
 				if (settled?.choice === 'save') throw new Error(`delete_file refused: the user saved their unsaved changes in ${listPaths(settled.dirty)} first, so ${path} changed since you decided to delete it. Read it again, then ask the user whether to delete it.`);
 				this.refuseDirty([path], 'delete_file');
+				// step: the files a folder holds go with it, read or not, so each is a deletion of its own
+				const held = type === 'dir' ? this.vfs.listEntries().flatMap((entry) => (entry.type === 'file' && entry.path.startsWith(`${path}/`) ? [entry.path] : [])) : [];
 				const deleting = this.vfs.delete(path, AGENT_ORIGIN, this.tracker.get(path)?.storedHash);
 				const mine = this.vfs.version(path);
 				try {
@@ -710,7 +707,7 @@ export class FilesystemTools extends AgentToolkit {
 					if (err instanceof StaleWriteError) throw new RefusedError(`delete_file refused: ${path} changed since you read it. Read it again, then ask the user whether to delete it.`);
 					throw err;
 				}
-				this.tracker.deleted(path, mine);
+				this.tracker.deleted(path, mine, held);
 				return `Deleted ${path}.`;
 			},
 		};
@@ -749,12 +746,7 @@ export class FilesystemTools extends AgentToolkit {
 					required: ['path'],
 					additionalProperties: false,
 				},
-				execute: (a) => this.readFile(
-					a.path,
-					a.maxBytes === undefined ? undefined : Number(a.maxBytes),
-					a.offset === undefined ? undefined : Number(a.offset),
-					a.limit === undefined ? undefined : Number(a.limit),
-				),
+				execute: (a) => this.readFile(a.path, a.maxBytes === undefined ? undefined : Number(a.maxBytes), a.offset === undefined ? undefined : Number(a.offset), a.limit === undefined ? undefined : Number(a.limit)),
 			}),
 			new AgentTool({
 				name: 'list_directory',
