@@ -1825,6 +1825,102 @@ async def test_a_start_that_fails_inside_a_restart_ends_the_run(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_a_restart_teardown_keeps_the_restart_meaning_it_started_with():
+    """restart_task moves on once the old run's state turns terminal, so a new
+    start can clear _is_restarting while the old teardown still broadcasts.
+    That teardown must stay a restart: no terminated/end events, and the run
+    log gets a restart note, not an end.
+    """
+    t = _task()
+    t._terminated_called = False
+    t._is_restarting = True
+    t._stop_requested = True
+    t._stop_reason = 'user'
+    t._final_events_sent = False
+    t._status = SimpleNamespace(
+        status='', state=0, completed=False, endTime=None, exitCode=0, exitMessage='', name='n', debuggerAttached=False
+    )
+    for name in (
+        '_debug_stdio',
+        '_data_client',
+        '_task_metrics',
+        '_tmpfile',
+        '_data_port',
+        '_status_update_task',
+        '_debugger',
+    ):
+        setattr(t, name, None)
+    t._send_status_update = AsyncMock()
+    t._process_exit_code = AsyncMock(return_value=0)
+    t._apply_process_exit_code = lambda code: None
+    t.debug_message = lambda *a, **k: None
+    t.debug_task_message = lambda *a, **k: None
+    t.build_event = lambda event, *, id=None, body=None, **k: {'event': event, 'body': body or {}}
+    t._server = MagicMock()
+    t._run_log = MagicMock(end_run=AsyncMock())
+    sent = []
+
+    async def forward(kind, event):
+        sent.append(event['event'])
+        t._is_restarting = False  # the new start cleared it mid-teardown
+
+    t._forward_task_event = forward
+
+    await Task._terminated(t)
+
+    assert sent == ['exited']
+    t._run_log.note_restart.assert_called_once()
+    t._run_log.end_run.assert_not_awaited()
+    assert t._status.status == 'Restarting'
+
+
+@pytest.mark.asyncio
+async def test_an_engine_that_exits_during_a_restarts_start_ends_the_new_run(monkeypatch):
+    """Once the new engine is spawned, a termination is the new run's end: an
+    engine that exits while start_task still awaits (its stdio disconnect runs
+    _terminated) must find _is_restarting cleared. start_task then leaves the
+    dead task alone: no INITIALIZING, no status loop, no restart event.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools', 'config': {'k': '${ROCKETRIDE_KEY}'}}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={'ROCKETRIDE_KEY': 'v'})
+    t._restart_env = {'ROCKETRIDE_KEY': 'v'}
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = True
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._forward_task_event = AsyncMock()
+    t._status_update_task = None
+    seen = []
+
+    class EngineExitsOnConnect:
+        def __init__(self, **kwargs):
+            pass
+
+        async def connect(self):
+            seen.append(t._is_restarting)  # what the disconnect's _terminated() reads
+            t._terminated_called = True  # the engine exited and _terminated() ran,
+            t._status.state = engine.TASK_STATE.CANCELLED.value  # leaving a final state
+
+    monkeypatch.setattr(engine.Task, 'TaskDbgStdio', EngineExitsOnConnect)
+    monkeypatch.setattr(engine, 'TaskMetrics', MagicMock())
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', AsyncMock(return_value=SimpleNamespace(pid=123)))
+
+    await Task.start_task(t)
+
+    assert seen == [False]
+    assert t._status.state == engine.TASK_STATE.CANCELLED.value  # not put back to INITIALIZING
+    assert t._status_update_task is None
+    t._forward_task_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_a_second_restart_while_one_runs_is_refused():
     """Two restarts of one task would share _restart_env: the second is refused
     before it loads anything, the first starts with its own values, and a later
