@@ -28,6 +28,12 @@ import { EngineBackend, type StatusEmitter, type EngineInfo, type EngineBackendS
 import type { ConnectionMode } from '../../config';
 import { getUserConfigDir } from '../config/config-migration';
 import { EngineInstaller } from '../shared/engine-installer';
+import {
+	DARWIN_X64_UNSUPPORTED_MESSAGE,
+	isArchMismatchSpawnError,
+	isUnsupportedDarwinX64,
+	promptDarwinX64DockerFallback,
+} from '../shared/darwinX64Fallback';
 import type { ConnectionGroupConfig } from '../../config';
 import { getLogger } from '../../shared/util/output';
 import { icons } from '../../shared/util/icons';
@@ -92,6 +98,8 @@ export class EngineLocal extends EngineBackend {
 	 * Emits progress events during download.
 	 */
 	async install(versionSpec: string, _config: ConnectionGroupConfig, token?: vscode.CancellationToken): Promise<void> {
+		await this.rejectIfDarwinX64Unsupported();
+
 		this.emitStatus({ phase: 'working', message: 'Checking for updates...' });
 
 		const githubToken = await this.getGitHubToken();
@@ -125,6 +133,8 @@ export class EngineLocal extends EngineBackend {
 	 * Emits 'ready' with the URI when the engine is accepting connections.
 	 */
 	async start(config: ConnectionGroupConfig, token?: vscode.CancellationToken): Promise<void> {
+		// rejectIfDarwinX64Unsupported runs inside install() (always called first) so
+		// Intel Mac users fail before "Starting server…" without a double modal.
 		const versionSpec = config.local.engineVersion || 'latest';
 
 		// --- Phase 1: Download/Install ---
@@ -156,7 +166,20 @@ export class EngineLocal extends EngineBackend {
 			'--port=0',          // Dynamic port assignment
 		];
 
-		await this.spawnProcess(executablePath, args);
+		try {
+			await this.spawnProcess(executablePath, args);
+		} catch (error: unknown) {
+			if (isArchMismatchSpawnError(error)) {
+				this.emitStatus({
+					phase: 'error',
+					message: DARWIN_X64_UNSUPPORTED_MESSAGE,
+					error: DARWIN_X64_UNSUPPORTED_MESSAGE,
+				});
+				await promptDarwinX64DockerFallback();
+				throw new Error(DARWIN_X64_UNSUPPORTED_MESSAGE);
+			}
+			throw error;
+		}
 		this.logger.output(`${icons.success} Local server started on port ${this.actualPort}`);
 
 		const installed = this.installer.getInstalledVersion();
@@ -260,6 +283,10 @@ export class EngineLocal extends EngineBackend {
 		try {
 			switch (command) {
 				case 'install': {
+					if (isUnsupportedDarwinX64()) {
+						await promptDarwinX64DockerFallback();
+						return { success: false, error: DARWIN_X64_UNSUPPORTED_MESSAGE };
+					}
 					const parentDir = getUserConfigDir();
 					const installer = new EngineInstaller(parentDir, 'version.local.json');
 					const version = (params?.version as string) || 'latest';
@@ -326,7 +353,12 @@ export class EngineLocal extends EngineBackend {
 					processErrored = true;
 					this.logger.output(`${icons.error} Engine exited during startup (code=${code}, signal=${signal})`);
 					if (this.child === child) this.cleanupProcess();
-					reject(new Error(`Process exited during startup: code=${code}, signal=${signal}`));
+					// Exit code 126 often means the OS refused to execute the binary (wrong arch).
+					const exitErr = new Error(`Process exited during startup: code=${code}, signal=${signal}`);
+					if (code === 126) {
+						(exitErr as NodeJS.ErrnoException).code = 'ENOEXEC';
+					}
+					reject(exitErr);
 					return;
 				}
 
@@ -429,6 +461,19 @@ export class EngineLocal extends EngineBackend {
 	// =========================================================================
 	// HELPERS
 	// =========================================================================
+
+	/** Blocks local engine on Intel Macs and offers a Docker fallback. */
+	private async rejectIfDarwinX64Unsupported(): Promise<void> {
+		if (!isUnsupportedDarwinX64()) return;
+		this.emitStatus({
+			phase: 'error',
+			message: DARWIN_X64_UNSUPPORTED_MESSAGE,
+			error: DARWIN_X64_UNSUPPORTED_MESSAGE,
+		});
+		this.logger.output(`${icons.error} ${DARWIN_X64_UNSUPPORTED_MESSAGE}`);
+		await promptDarwinX64DockerFallback();
+		throw new Error(DARWIN_X64_UNSUPPORTED_MESSAGE);
+	}
 
 	/** Gets existing GitHub session token (no prompt). */
 	private async getGitHubToken(): Promise<string | undefined> {
