@@ -101,12 +101,9 @@ export type WorkspaceScope = { kind: 'user' } | { kind: 'team'; teamId: string }
 /**
  * The active scope. Set by createWorkspace() before the first path
  * translation; 'user' until then so pre-bootstrap translations (none are
- * expected) fail safe into the caller's own tree rather than a team's. The
- * workspace backend never reads it: each backend, and the announcements of
- * its staged view, keep the scope they were built for, so a call still
- * running when the team changes lands in its own team. Only the raw binary
- * reads (toScopedStorePath without a scope) and bus adoption
- * (storePathToVirtual) follow it.
+ * expected) fail safe into the caller's own tree rather than a team's. Only
+ * the raw binary reads and bus adoption follow it; a workspace backend keeps
+ * the scope it was built for.
  */
 let activeScope: WorkspaceScope = { kind: 'user' };
 
@@ -535,14 +532,9 @@ let workspaceBuild: Promise<Workspace> | null = null;
 let builtScopeKey: string | null = null;
 /**
  * Every workspace built in this document, by scope key, with its staging
- * store. A call that started before a team switch can still stage into its
- * workspace after it, so going back to that scope reuses the same
- * workspace: the late change shows as pending there, and the next staged
- * write persists it. A second workspace over the same staging namespace
- * would never see the late change and would rewrite the staging manifest
- * without it. The workspace is reused only while its store's manifest is
- * the one it last loaded or wrote; when another tab changed it meanwhile,
- * a fresh build loads it, as on a first visit.
+ * store. Going back to a scope reuses its workspace, since a call from before
+ * the switch can still stage into it; a second workspace over the same
+ * staging namespace would rewrite the manifest without that change.
  */
 const builtByScope = new Map<string, { ws: Workspace; staging: StagingStore }>();
 
@@ -581,13 +573,9 @@ async function stashForScopeSwitch(outgoing: Workspace): Promise<void> {
 }
 
 /**
- * Reopens the workspace of a scope the user switched away from and back to.
- * Its staged layers are the live ones, late writes included, and the caller
- * has checked that no other tab changed the persisted ones since, so nothing
- * rehydrates. Its base cache is dropped and its tree walked again, since
- * nothing kept them current while another scope was active; a read still on
- * its way from before cannot refill the cache (CachedVfs.fill). The mode is
- * decided again the way a fresh build decides it.
+ * Reopens the workspace of a scope the user switched away from and back to,
+ * keeping its staged layers. Its cache is dropped and its tree walked again,
+ * since nothing kept them current while another scope was active.
  *
  * @param kept - The scope's workspace from before.
  * @param autoCommit - The host's autoCommit setting value.
@@ -633,10 +621,9 @@ export function createWorkspace(options: { hostAppId: string; autoCommit: boolea
 
 	// A DIFFERENT scope: park the outgoing workspace (stage dirty buffers
 	// into ITS namespace while ITS translation is still active), then build
-	// fresh against the new tree, or reopen the workspace built for it
-	// before. Chained through workspaceBuild so a
-	// consumer arriving mid-switch awaits the finished switch, never a
-	// half-torn-down view.
+	// fresh against the new tree or reopen the one built before. Chained
+	// through workspaceBuild so a consumer arriving mid-switch awaits the
+	// finished switch, never a half-torn-down view.
 	const outgoing = workspaceBuild;
 	builtScopeKey = scopeKey;
 	workspaceBuild = (async () => {
@@ -647,13 +634,11 @@ export function createWorkspace(options: { hostAppId: string; autoCommit: boolea
 		// step: the scope roots EVERY path translation — set only after the
 		// outgoing workspace is parked, before the first read fires.
 		activeScope = scope;
-		// step: a scope built before keeps its workspace; calls that outlived
-		// the switch may still stage into it. Not when another tab changed
-		// the scope's staged state meanwhile: the kept layers would erase it.
+		// step: not when another tab changed the scope's staged state
+		// meanwhile; the kept layers would erase it
 		const kept = builtByScope.get(scopeKey);
 		if (kept && (await kept.staging.isCurrent())) {
 			workspace = await reopenWorkspace(kept.ws, options.autoCommit);
-			builtByScope.set(scopeKey, { ...kept, ws: workspace });
 			return workspace;
 		}
 		const base = new CachedVfs(createWorkspaceBackend(scope), { skipDirs: SKIP_DIRS });
@@ -671,8 +656,8 @@ export function createWorkspace(options: { hostAppId: string; autoCommit: boolea
 			// writes — manual mode's saves reach every onFsChange consumer
 			// (dev preview, rescans) exactly like write-through saves do.
 			// Write-through delegates to the backend, which announces itself.
-			// Either way the path is named in this workspace's scope, even
-			// after a team switch.
+			// Either way the path is in this workspace's scope, even after a
+			// team switch.
 			onMutate: (p, origin) => emitFsChange(toStorePath(writablePath(p), scope), origin ?? DEFAULT_WRITE_ORIGIN),
 		});
 		await view.whenReady();

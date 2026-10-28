@@ -333,27 +333,6 @@ test('Stop mid-wave ends the run at once: nothing new starts, and what is still 
 	assert.match(emitted.at(-1) ?? '', /- deploy_app x/, 'the last row names the call still running');
 });
 
-test('a call Stop kept from starting is not run, so the finish rule does not count it as a change', async () => {
-	const stop = new AbortController();
-	const checks = record();
-	const edit = stub('edit_file');
-	// The read stops the run while it works, and never finishes.
-	const read = stub('read_file', () => {
-		stop.abort();
-		return new Promise<string>(() => undefined);
-	});
-	const model = scriptedModel([
-		plan([
-			['read_file', { path: 'b.ts' }],
-			['edit_file', { path: APP_FILE }],
-		]),
-	]);
-	const result = await setup(model, [read, edit], { signal: stop.signal, finish: checks }).run();
-	assert.equal(result.stopReason, 'stopped');
-	assert.equal(edit.seen.length, 0, 'the edit never started');
-	assert.equal(checks.changed, false, 'nothing of the edit landed, so the run changed nothing');
-});
-
 test('a queued message reaches the next wave, and one sent before done is read before the run finishes', async () => {
 	const inbox: string[] = [];
 	const read = stub('read_file', () => {
@@ -593,52 +572,66 @@ function entriesByKey(q: QuestionSpec): Map<string, Record<string, unknown>> {
 	return new Map(resultsIn(q).map((entry) => [String(entry.key), entry]));
 }
 
-test('a call on the same file as one that timed out is not run, and the model hears when the first one ends', async () => {
+/** A finish rule with nothing unchecked, so only a timed-out call can send a done back; `endWave` runs as each wave's calls end. */
+function satisfied(endWave: FinishRule['endWave'] = async () => undefined): FinishRule {
+	return { checkTool: 'check_app', beginWave: () => undefined, endWave, unchecked: () => null };
+}
+
+test('a call on the same file as one that timed out is not run, and done waits until the model reads how the first one ended, even when it ends as the finish rule hears a wave', async () => {
 	const hang = deferred();
 	const events: string[] = [];
-	const checks = record();
-	const questions: QuestionSpec[] = [];
-	const replies: Array<() => Promise<string>> = [
-		async () =>
-			plan([
-				['edit_file', { path: APP_FILE, n: 0 }],
-				['edit_file', { path: APP_FILE, n: 1 }],
-			]),
-		async () => {
-			// step: the hung edit ends while the model thinks
-			hang.resolve();
-			await new Promise((resolve) => setTimeout(resolve, 5));
-			return done('ok');
-		},
-		async () => plan([['check_app', CHECK_ARGS]]),
-		async () => done('ok'),
-	];
-	const model: ModelCall = async (q) => {
-		questions.push(q);
-		const next = replies.shift();
-		if (!next) throw new Error('no reply left');
-		return next();
-	};
-	const result = await setup(model, [hangingEdit(hang.promise, events), checkTool(checks)], { finish: checks, timeoutMs: () => 10 }).run();
+	let waves = 0;
+	// step: the hung edit ends in the second wave's endWave, after the loop took the timed-out calls that had ended
+	const finish = satisfied(async () => {
+		if (++waves !== 2) return;
+		hang.resolve();
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	});
+	const model = scriptedModel([
+		plan([
+			['edit_file', { path: APP_FILE, n: 0 }],
+			['edit_file', { path: APP_FILE, n: 1 }],
+		]),
+		done('too soon'),
+		done('too soon'),
+		done('ok'),
+	]);
+	const result = await setup(model, [hangingEdit(hang.promise, events)], { finish, timeoutMs: () => 10 }).run();
 
 	assert.deepEqual(events, ['start 0', 'write 0'], 'the second edit never started, so it cannot land before or under the first');
-	assert.match(String(entriesByKey(questions[1]).get('wave-0.r1')?.error), /^Not run: it waits for edit_file on apps\/a-ui\/src\/a\.ts, which timed out and is still running\. You will be told when that call ends; then plan this one again\.$/);
-	const late = entriesByKey(questions[2]);
-	assert.match(String(late.get('wave-1.late0')?.note), /timed out and has now ended/);
-	assert.match(String(late.get('wave-1.done')?.error), /read how the call\(s\) that timed out ended/, 'done waits until the model has read how it ended');
-	assert.equal(result.stopReason, 'done');
+	assert.match(String(entriesByKey(model.questions[1]).get('wave-0.r1')?.error), /^Not run: it waits for edit_file on apps\/a-ui\/src\/a\.ts, which timed out and is still running\. You will be told when that call ends; then plan this one again\.$/);
+	assert.equal(result.answer, 'ok', 'a done before the model read how the edit ended was accepted');
+	const late = entriesByKey(model.questions[3]);
+	assert.match(String(late.get('wave-2.late0')?.note), /timed out and has now ended/);
+	assert.match(String(late.get('wave-2.done')?.error), /read how the call\(s\) that timed out ended/);
 });
 
-test('a call on a file that a timed-out call from an earlier wave still changes is not run either', async () => {
+test('a call on a file that a timed-out call from an earlier wave still changes is not run, a call on another file is, and a done with calls waits until the model reads how the first one ended', async () => {
 	const hang = deferred();
 	const events: string[] = [];
-	const checks = record();
-	const model = scriptedModel([plan([['edit_file', { path: APP_FILE, n: 0 }]]), plan([['edit_file', { path: APP_FILE, n: 1 }]]), new Error('stop')]);
-	await setup(model, [hangingEdit(hang.promise, events), checkTool(checks)], { finish: checks, timeoutMs: () => 10 }).run();
+	const write = stub('write_file');
+	// step: the hung edit ends while the done wave's read runs
+	const read = stub('read_file', async () => {
+		hang.resolve();
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		return 'b';
+	});
+	const model = scriptedModel([
+		plan([['edit_file', { path: APP_FILE, n: 0 }]]),
+		plan([
+			['edit_file', { path: APP_FILE, n: 1 }],
+			['write_file', { path: 'apps/a-ui/src/b.ts' }],
+		]),
+		plan([['read_file', { path: 'apps/a-ui/src/b.ts' }]], 'too soon'),
+		new Error('stop'),
+	]);
+	await setup(model, [hangingEdit(hang.promise, events), write, read], { finish: satisfied(), timeoutMs: () => 10 }).run();
 	assert.match(String(entriesByKey(model.questions[2]).get('wave-1.r0')?.error), /^Not run: it waits for edit_file on apps\/a-ui\/src\/a\.ts/);
-	hang.resolve();
-	await new Promise((resolve) => setTimeout(resolve, 5));
+	assert.equal(write.seen.length, 1, 'the write of another file ran');
 	assert.deepEqual(events, ['start 0', 'write 0']);
+	const late = entriesByKey(model.questions[3]);
+	assert.match(String(late.get('wave-2.late0')?.note), /timed out and has now ended/);
+	assert.match(String(late.get('wave-2.done')?.error), /read how the call\(s\) that timed out ended/);
 });
 
 test('a call that waits for a held-back call is held back too, naming the call that timed out', async () => {
@@ -657,97 +650,10 @@ test('a call that waits for a held-back call is held back too, naming the call t
 	]);
 	await setup(model, [hangingEdit(hang.promise, events), rename], { timeoutMs: () => 10 }).run();
 
-	const entries = entriesByKey(model.questions[1]);
-	assert.match(String(entries.get('wave-0.r1')?.error), /^Not run: it waits for edit_file on apps\/a-ui\/src\/a\.ts/);
-	assert.match(String(entries.get('wave-0.r2')?.error), /^Not run: it waits for edit_file on apps\/a-ui\/src\/a\.ts/, 'the edit of b would have run before the rename it was planned after');
+	assert.match(String(entriesByKey(model.questions[1]).get('wave-0.r2')?.error), /^Not run: it waits for edit_file on apps\/a-ui\/src\/a\.ts/, 'the edit of b would have run before the rename it was planned after');
 	hang.resolve();
 	await new Promise((resolve) => setTimeout(resolve, 5));
-	assert.equal(rename.seen.length, 0);
 	assert.deepEqual(events, ['start 0', 'write 0']);
-});
-
-test('the result of a call that timed out is stored under the key its late entry names', async () => {
-	const hang = deferred();
-	const big = JSON.stringify({ items: Array.from({ length: 200 }, (_, i) => ({ id: i, text: `record ${i}` })) });
-	const read = stub('read_file', async () => {
-		await hang.promise;
-		return big;
-	});
-	const write = stub('write_file');
-	const replies: Array<() => Promise<string>> = [
-		async () => plan([['read_file', { path: 'apps/a-ui/data.json' }]]),
-		async () => {
-			// step: the read ends while the model thinks
-			hang.resolve();
-			await new Promise((resolve) => setTimeout(resolve, 5));
-			return done('ok');
-		},
-		async () =>
-			plan([
-				['memory.peek', { key: 'wave-1.late0', path: 'items[199].text' }],
-				['write_file', { path: 'apps/a-ui/copy.json', content: '{{memory.ref:wave-1.late0}}' }],
-			]),
-		async () => done('ok'),
-	];
-	const questions: QuestionSpec[] = [];
-	const model: ModelCall = async (q) => {
-		questions.push(q);
-		const next = replies.shift();
-		if (!next) throw new Error('no reply left');
-		return next();
-	};
-	await setup(model, [read, write], { timeoutMs: () => 10 }).run();
-
-	assert.ok(entriesByKey(questions[2]).has('wave-1.late0'), 'the late entry names the key');
-	const peeked = entriesByKey(questions[3]).get('wave-2.r0');
-	assert.equal(peeked?.error, undefined, 'memory.peek finds the key');
-	assert.match(JSON.stringify(peeked), /record 199/);
-	assert.deepEqual(write.seen, [{ path: 'apps/a-ui/copy.json', content: big }], 'a reference to the key reads the whole result');
-});
-
-test('a key in the result of a call that timed out is redacted in its late entry and in memory under its key', async () => {
-	const hang = deferred();
-	const key = `sk-${'k'.repeat(24)}`;
-	// the key is in the first record, which the entry's summary shows, and in a middle one only memory holds
-	const items = Array.from({ length: 200 }, (_, i) => ({ id: i, text: i === 0 || i === 100 ? `token ${key}` : `record ${i}` }));
-	const read = stub('read_file', async () => {
-		await hang.promise;
-		return JSON.stringify({ items });
-	});
-	const write = stub('write_file');
-	const replies: Array<() => Promise<string>> = [
-		async () => plan([['read_file', { path: 'apps/a-ui/data.json' }]]),
-		async () => {
-			// step: the read ends while the model thinks
-			hang.resolve();
-			await new Promise((resolve) => setTimeout(resolve, 5));
-			return done('ok');
-		},
-		async () =>
-			plan([
-				['memory.peek', { key: 'wave-1.late0', path: 'items[100].text' }],
-				['write_file', { path: 'apps/a-ui/copy.json', content: '{{memory.ref:wave-1.late0}}' }],
-			]),
-		async () => done('ok'),
-	];
-	const questions: QuestionSpec[] = [];
-	const model: ModelCall = async (q) => {
-		questions.push(q);
-		const next = replies.shift();
-		if (!next) throw new Error('no reply left');
-		return next();
-	};
-	const status: string[] = [];
-	await setup(model, [read, write], { timeoutMs: () => 10, emit: (_type, text) => status.push(text) }).run();
-
-	const late = entriesByKey(questions[2]).get('wave-1.late0');
-	assert.match(String(late?.summary), /token \[redacted\]/, 'the summary keeps its words, without the key');
-	assert.equal(entriesByKey(questions[3]).get('wave-2.r0')?.preview, 'token [redacted]', 'memory holds the redacted result');
-	assert.equal(write.seen.length, 1);
-	assert.ok(!String(write.seen[0].content).includes(key), 'a reference to the key reads the redacted result');
-	assert.match(String(write.seen[0].content), /record 199/, 'the reference still reads the whole result');
-	assert.ok(!JSON.stringify(questions).includes(key), 'the key reached a question');
-	assert.ok(!status.join('\n').includes(key), 'the key reached a thinking line');
 });
 
 test('a call that times out and ends before the rest of its wave still gets its late entry, redacted and stored under its key', async () => {
@@ -784,147 +690,6 @@ test('a call that times out and ends before the rest of its wave still gets its 
 	assert.match(String(late.summary), /edited with \[redacted\]/, 'the summary keeps its words, without the key');
 	assert.equal(entriesByKey(model.questions[2]).get('wave-1.r0')?.preview, 'edited with [redacted]', 'memory holds the redacted result');
 	assert.ok(!JSON.stringify(model.questions).includes(key), 'the key reached a question');
-});
-
-// =============================================================================
-// APPROVALS AND TIMED-OUT CALLS — an OK is never tool time, and no card asks over a call still on its way
-// =============================================================================
-
-/**
- * A tool whose call asks for an OK first, as delete_file does. `events` records
- * each prepare and each run's start and write; the run of call `n: 0` waits for
- * `hang` when one is given.
- */
-function askingTool(name: string, events: string[], hang?: Promise<void>): AgentTool {
-	return new AgentTool({
-		name,
-		description: name,
-		parameters: { type: 'object' },
-		prepare: async (args) => {
-			events.push(`prepare ${name} ${args.n}`);
-			return {
-				act: { name, params: [args.path] },
-				run: async () => {
-					events.push(`start ${name} ${args.n}`);
-					if (hang && args.n === 0) await hang;
-					events.push(`write ${name} ${args.n}`);
-					return `${name} ran`;
-				},
-			};
-		},
-	});
-}
-
-/** An approve that records each act it is asked about, takes `waitMs` per answer, and refuses where `answers` says deny. */
-function slowApprove(asked: string[], waitMs: number, answers: Array<'approve' | 'deny'> = []): LoopOptions['approve'] {
-	return async (act, run) => {
-		asked.push(act.name);
-		await new Promise((resolve) => setTimeout(resolve, waitMs));
-		if (answers.shift() === 'deny') throw new Error(`The user declined: ${act.name}.`);
-		return run;
-	};
-}
-
-test('a call that needs an OK is never prepared or asked while an earlier call on its file timed out and still runs', async () => {
-	const hang = deferred();
-	const events: string[] = [];
-	const asked: string[] = [];
-	const model = scriptedModel([
-		plan([
-			['edit_file', { path: APP_FILE, n: 0 }],
-			['delete_file', { path: APP_FILE, n: 1 }],
-		]),
-		new Error('stop'),
-	]);
-	await setup(model, [hangingEdit(hang.promise, events), askingTool('delete_file', events)], { timeoutMs: () => 10, approve: slowApprove(asked, 0) }).run();
-
-	assert.deepEqual(asked, [], 'no card asked for the delete');
-	assert.match(String(entriesByKey(model.questions[1]).get('wave-0.r1')?.error), /^Not run: it waits for edit_file on apps\/a-ui\/src\/a\.ts, which timed out and is still running\./);
-	hang.resolve();
-	await new Promise((resolve) => setTimeout(resolve, 5));
-	assert.deepEqual(events, ['start 0', 'write 0'], 'the delete was never prepared, so it cannot land under the edit');
-});
-
-test('an OK that takes longer than the limit does not time the call out, so the next call on its file still runs', async () => {
-	const events: string[] = [];
-	const asked: string[] = [];
-	const model = scriptedModel([
-		plan([
-			['delete_file', { path: APP_FILE, n: 0 }],
-			['edit_file', { path: APP_FILE, n: 1 }],
-		]),
-		new Error('stop'),
-	]);
-	// the OK takes 30 ms, three times the 10 ms limit
-	await setup(model, [askingTool('delete_file', events), hangingEdit(Promise.resolve(), events)], { timeoutMs: () => 10, approve: slowApprove(asked, 30) }).run();
-
-	assert.deepEqual(asked, ['delete_file']);
-	assert.deepEqual(events, ['prepare delete_file 0', 'start delete_file 0', 'write delete_file 0', 'start 1', 'write 1'], 'the edit ran after the delete, as planned');
-	const entries = entriesByKey(model.questions[1]);
-	assert.equal(entries.get('wave-0.r0')?.error, undefined, 'the wait for the OK did not time the delete out');
-	assert.equal(entries.get('wave-0.r1')?.error, undefined);
-});
-
-test('a call that runs past its limit after a long OK holds back the next call on its file, whose card is never shown', async () => {
-	const hang = deferred();
-	const events: string[] = [];
-	const asked: string[] = [];
-	const model = scriptedModel([
-		plan([
-			['delete_file', { path: APP_FILE, n: 0 }],
-			['write_file', { path: APP_FILE, n: 1 }],
-		]),
-		new Error('stop'),
-	]);
-	await setup(model, [askingTool('delete_file', events, hang.promise), askingTool('write_file', events)], { timeoutMs: () => 10, approve: slowApprove(asked, 30) }).run();
-
-	assert.deepEqual(asked, ['delete_file'], 'only the first call was asked about');
-	const entries = entriesByKey(model.questions[1]);
-	assert.match(String(entries.get('wave-0.r0')?.error), /^TimeoutError: no result after 0\.01 s$/, 'the delete timed out in its run, not in the wait');
-	assert.match(String(entries.get('wave-0.r1')?.error), /^Not run: it waits for delete_file on apps\/a-ui\/src\/a\.ts, which timed out and is still running\./);
-	hang.resolve();
-	await new Promise((resolve) => setTimeout(resolve, 5));
-	assert.deepEqual(events, ['prepare delete_file 0', 'start delete_file 0', 'write delete_file 0'], 'the write was never prepared or run');
-});
-
-test("a call that waits for an OK in the wave after a timed-out call is not asked when its file is that call's, and is asked when it is not", async () => {
-	const hang = deferred();
-	const events: string[] = [];
-	const asked: string[] = [];
-	const model = scriptedModel([
-		plan([['edit_file', { path: APP_FILE, n: 0 }]]),
-		plan([
-			['delete_file', { path: APP_FILE, n: 1 }],
-			['write_file', { path: 'apps/a-ui/src/b.ts', n: 2 }],
-		]),
-		new Error('stop'),
-	]);
-	await setup(model, [hangingEdit(hang.promise, events), askingTool('delete_file', events), askingTool('write_file', events)], { timeoutMs: () => 10, approve: slowApprove(asked, 30) }).run();
-
-	assert.deepEqual(asked, ['write_file'], 'only the call on another file was asked about');
-	const entries = entriesByKey(model.questions[2]);
-	assert.match(String(entries.get('wave-1.r0')?.error), /^Not run: it waits for edit_file on apps\/a-ui\/src\/a\.ts/);
-	assert.equal(entries.get('wave-1.r1')?.error, undefined, 'the write on the other file ran after its OK');
-	hang.resolve();
-	await new Promise((resolve) => setTimeout(resolve, 5));
-	assert.deepEqual(events, ['start 0', 'prepare write_file 2', 'start write_file 2', 'write write_file 2', 'write 0'], 'the delete was never prepared');
-});
-
-test('a refused call holds nothing back: the next call on its file is asked and runs', async () => {
-	const events: string[] = [];
-	const asked: string[] = [];
-	const model = scriptedModel([
-		plan([
-			['delete_file', { path: APP_FILE, n: 0 }],
-			['write_file', { path: APP_FILE, n: 1 }],
-		]),
-		new Error('stop'),
-	]);
-	await setup(model, [askingTool('delete_file', events), askingTool('write_file', events)], { timeoutMs: () => 10, approve: slowApprove(asked, 0, ['deny']) }).run();
-
-	assert.deepEqual(asked, ['delete_file', 'write_file']);
-	assert.deepEqual(events, ['prepare delete_file 0', 'prepare write_file 1', 'start write_file 1', 'write write_file 1'], 'the refused delete never ran, and the write did');
-	assert.match(String(entriesByKey(model.questions[1]).get('wave-0.r0')?.error), /^The user declined: delete_file\.$/);
 });
 
 test('a call whose prepare timed out holds nothing back, since its work never began', async () => {

@@ -16,11 +16,10 @@
  * export undefined, matching what the tests already tolerate. Loaded via
  * `--require` before tsx starts resolving test files.
  *
- * Three more exports let a test run rocket-ui's workspace (workspace.ts) end to
- * end: the real CachedVfs, a getClient() that returns the fake client a test
- * puts on `globalThis.__shellTestClient` (undefined otherwise), and a
- * ConnectionManager whose bus hands every event to `globalThis.__shellTestEmit`
- * when a test sets it, and drops it otherwise.
+ * Three more exports let a test run rocket-ui's workspace (workspace.ts): the
+ * real CachedVfs, a getClient() that returns `globalThis.__shellTestClient`,
+ * and a ConnectionManager whose bus hands each event to
+ * `globalThis.__shellTestEmit` when a test sets it.
  */
 
 const Module = require('module');

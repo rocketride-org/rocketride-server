@@ -46,7 +46,7 @@ import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
 import type { ModelCall, QuestionSpec } from '../wave/plan';
-import { AppCheckToolkit, type AppCheckOptions, type CheckReport, type MarkerInfo, type MarkerSource } from './appCheck';
+import { AppCheckToolkit, type AppCheckOptions, type CheckReport, type MarkerInfo } from './appCheck';
 import { Approvals } from './approval';
 import { AppToolkit } from './appTools';
 import { clip, isSecretName, looksLikeCredential, NOT_CONNECTED_MESSAGE, redactText, RESULT_MAX_CHARS, toolText, type ClientGetter } from './common';
@@ -829,10 +829,10 @@ function done(answer: string): string {
  *
  * @param ws - The workspace.
  * @param model - The scripted model.
- * @param opts - The client, the conversation so far, a dev session for check_app, messages the user sends during the turn, the chat's ask, and Monaco's markers: a source as the run sees it, or a list Monaco holds for daybook's App.tsx.
+ * @param opts - The client, the conversation so far, a dev session for check_app, messages the user sends during the turn, the chat's ask, and the markers Monaco holds for daybook's App.tsx.
  * @returns Every chunk the turn streamed, in order.
  */
-async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; request?: string; markers?: MarkerSource | MarkerInfo[] } = {}): Promise<Array<{ type: string; text: string }>> {
+async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?: RocketRideClient; history?: ChatMessage[]; dev?: AgentDevSession; queued?: string[]; ask?: (card: ChatAskCard) => ChatAsking; request?: string; markers?: MarkerInfo[] } = {}): Promise<Array<{ type: string; text: string }>> {
 	const host: AgentHost = {
 		vfs: ws,
 		scaffoldApp: async () => ({ appId: 'x', folder: 'x-ui' }),
@@ -843,7 +843,7 @@ async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?:
 	const queued = [...(opts.queued ?? [])];
 	const options = { history: opts.history ?? [], prompts: BUILDER_PROMPTS, token: async () => '', signal: new AbortController().signal, takeQueued: () => queued.splice(0), ask: opts.ask };
 	const { markers } = opts;
-	const source = Array.isArray(markers) ? { modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => markers, onChange: () => () => undefined } : markers;
+	const source = markers && { modelUris: () => ['file:///daybook/src/App.tsx'], markers: () => markers, onChange: () => () => undefined };
 	await runAgent(opts.request ?? 'Describe and tidy the leak pipeline.', (type, text) => chunks.push({ type, text }), options, { host, client: () => opts.client ?? null, model, markers: async () => source ?? null });
 	return chunks;
 }
@@ -1855,57 +1855,22 @@ test('a broken manifest fails the app check', async () => {
 	}
 });
 
-test('type errors of a file that no longer exists are ignored, and the output says so', async () => {
-	const gone: MarkerInfo = { ...TYPE_ERROR, uri: 'file:///daybook/src/gone.ts' };
-	const { text, report } = await runCheck(appCheck(session(), [gone]), 'daybook-ui');
-	assert.match(text, /^CHECK PASSED: daybook/);
-	assert.deepEqual(steps(report), ['types pass', 'build pass', 'runtime pass']);
-	assert.match(report.evidence[0].output, /Ignored 1 marker for a file that no longer exists: src\/gone\.ts\./);
-});
-
-test('type errors of a file whose name the editor decodes are kept', async () => {
-	// step: the dev session names a model with Uri.parse, which decodes each %XX; the file list keeps the stored name
+test('type errors of a deleted file are ignored and named, matching each file to its model by the name the editor gives it', async () => {
+	// step: the dev session names a model with Uri.parse, which decodes each %XX once; the file list keeps the stored name
 	const cases = [
 		{ stored: 'src/foo%20bar.ts', model: 'src/foo bar.ts' },
-		// Uri.parse decodes once, so a `%` can be left in the model's name
 		{ stored: 'src/a%2520b.ts', model: 'src/a%20b.ts' },
 	];
 	for (const { stored, model } of cases) {
 		const error: MarkerInfo = { ...TYPE_ERROR, uri: `file:///daybook/${model}` };
+		const models = ['file:///daybook/src/App.tsx', error.uri];
 		const files = { ...APP_FILES, [`apps/daybook-ui/${stored}`]: 'export const x: number = "wrong";' };
-		const { text, report } = await runCheck(appCheck(session(), [error], files, ['file:///daybook/src/App.tsx', error.uri]), 'daybook-ui');
-		assert.match(text, /^CHECK FAILED: daybook/, stored);
-		assert.deepEqual(steps(report), ['types fail', 'build pass', 'runtime pass'], stored);
-		assert.ok(report.evidence[0].output.startsWith(`${model}:3 Type 'string'`), stored);
-		assert.doesNotMatch(report.evidence[0].output, /Ignored/, stored);
+		const kept = await runCheck(appCheck(session(), [error], files, models), 'daybook-ui');
+		assert.match(kept.text, /^CHECK FAILED: daybook/, stored);
+		assert.ok(kept.report.evidence[0].output.startsWith(`${model}:3 Type 'string'`), `${stored}: the error counts while the file exists`);
+		const gone = await runCheck(appCheck(session(), [error], APP_FILES, models), 'daybook-ui');
+		assert.match(gone.text, /^CHECK PASSED: daybook/, `${stored}: a run that deleted the file can finish`);
+		assert.deepEqual(steps(gone.report), ['types pass', 'build pass', 'runtime pass'], stored);
+		assert.ok(gone.report.evidence[0].output.endsWith(`\nIgnored 1 marker for a file that no longer exists: ${model}.`), `${stored}: the error is ignored once the file is deleted`);
 	}
-});
-
-test('type errors of a deleted file are ignored under the name the editor gives it', async () => {
-	// step: src/old%20file.ts and src/foo%2520bar.ts were deleted; their models keep the names Uri.parse gave them
-	for (const model of ['src/old file.ts', 'src/foo%20bar.ts']) {
-		const gone: MarkerInfo = { ...TYPE_ERROR, uri: `file:///daybook/${model}` };
-		const { text, report } = await runCheck(appCheck(session(), [gone], APP_FILES, ['file:///daybook/src/App.tsx', gone.uri]), 'daybook-ui');
-		assert.match(text, /^CHECK PASSED: daybook/, model);
-		assert.ok(report.evidence[0].output.endsWith(`\nIgnored 1 marker for a file that no longer exists: ${model}.`), model);
-	}
-});
-
-// =============================================================================
-// THE RUN — a whole run over the memory workspace
-// =============================================================================
-
-test('a run that deletes a source file with stale editor errors can still finish', async () => {
-	const ws = createMemoryWorkspace({ 'apps/a-ui/package.json': JSON.stringify({ appManifest: { id: 'a', name: 'A' } }), 'apps/a-ui/src/App.tsx': 'export default () => null;', 'apps/a-ui/src/unused.ts': 'export const unused = 1;' });
-	// step: the editor keeps the deleted file's model and its error, as devSession does
-	const markers: MarkerSource = { modelUris: () => ['file:///a/src/App.tsx', 'file:///a/src/unused.ts'], markers: () => [{ uri: 'file:///a/src/unused.ts', line: 1, message: 'stale type error', severity: 8, owner: 'typescript' }], onChange: () => () => undefined };
-	const model = scriptedModel([plan(['delete_file', { path: 'apps/a-ui/src/unused.ts' }]), plan(['check_app', { app: 'a' }]), done('Deleted.')]);
-	const chunks = await agentTurn(ws, model, { markers, ask: approveAll });
-	const answer = chunks.filter((c) => c.type === 'content').at(-1)?.text ?? '';
-	const questions = model.questions;
-	assert.equal(ws.files.has('apps/a-ui/src/unused.ts'), false);
-	assert.match(questions[2].context.join('\n'), /Ignored 1 marker for a file that no longer exists: src\/unused\.ts/);
-	assert.match(answer, /^Deleted\./);
-	assert.doesNotMatch(answer, /Not checked/);
-	assert.equal(questions.length, 3);
 });

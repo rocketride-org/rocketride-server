@@ -122,7 +122,7 @@ export class StagingStore implements IStagingStore {
 	/**
 	 * The `rev` of the manifest this store last loaded or wrote: null when
 	 * there was no manifest, undefined when unknown (not loaded yet, or a
-	 * manifest without one). See isCurrent().
+	 * manifest without one).
 	 */
 	private seenRev: string | null | undefined = undefined;
 

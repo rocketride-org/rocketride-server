@@ -139,9 +139,7 @@ export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 			}
 		},
 		saveListing: async (draft) => {
-			// step: read and write in the workspace the save started in. A read
-			// that ends after a team switch must not write this team's package
-			// into the new team's workspace.
+			// step: a read that ends after a team switch still writes in the workspace the save started in
 			const view = getWorkspace().view;
 			const pkg = await readAppPackage(folder, view);
 			applyListing(pkg, draft);

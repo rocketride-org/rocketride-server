@@ -51,6 +51,7 @@ import { CheckRecord } from '../agent/run';
 import { FilesystemTools } from '../agent/toolkits/filesystem';
 import { AgentTool } from '../agent/tools';
 import { runLoop } from '../agent/wave/loop';
+import { FakeStore } from './fakeStore.harness';
 import type { IWorkspaceFileSystem } from './vfsTypes';
 
 // =============================================================================
@@ -82,93 +83,14 @@ function tokens(content: string): Set<string> {
 	return new Set(content.split('+'));
 }
 
-// =============================================================================
-// STORE — an in-memory store client that holds the file's reads and writes
-// =============================================================================
-
-/** One held store call. */
-interface Held {
-	/** What the call does, for the report. */
-	label: string;
-	/** Lets the call go on. */
-	release: () => void;
-}
-
-/**
- * The fake client the workspace backend and its staging store talk to. Calls
- * on the watched paths wait in `held` until released; a read sees the store as
- * it is when it is released. Every other path answers at once.
- */
-class Store {
-	readonly files = new Map<string, string>();
-	readonly held: Held[] = [];
-	/** Each landed write that erased a token, described. */
-	readonly erased: string[] = [];
-	private readonly watched: Set<string>;
-
-	/** @param seed - The watched files and what they hold. */
-	constructor(seed: Record<string, string>) {
-		for (const [path, content] of Object.entries(seed)) this.files.set(path, content);
-		this.watched = new Set(Object.keys(seed));
-	}
-
-	/** Waits until the call is released, when the path is watched. */
-	private gate(label: string, path: string): Promise<void> {
-		if (!this.watched.has(path)) return Promise.resolve();
-		return new Promise((release) => this.held.push({ label: `${label} ${path}`, release }));
-	}
-
-	/** Stores a write, noting any token it erased from a watched file. */
-	private land(path: string, content: string): void {
-		if (this.watched.has(path)) {
-			const after = tokens(content);
-			const missing = [...tokens(this.files.get(path) ?? '')].filter((t) => !after.has(t));
-			if (missing.length > 0) this.erased.push(`'${content}' landed on ${path} and erased ${missing.join(', ')}`);
-		}
-		this.files.set(path, content);
-	}
-
-	/** The children of a store folder. */
-	private children(dir: string): Array<{ name: string; type: 'file' | 'dir' }> {
-		const prefix = `${dir.replace(/\/+$/, '')}/`;
-		const names = new Map<string, 'file' | 'dir'>();
-		for (const path of this.files.keys()) {
-			if (!path.startsWith(prefix)) continue;
-			const rest = path.slice(prefix.length);
-			const slash = rest.indexOf('/');
-			names.set(slash < 0 ? rest : rest.slice(0, slash), slash < 0 ? 'file' : 'dir');
-		}
-		return [...names].map(([name, type]) => ({ name, type }));
-	}
-
-	readonly client = {
-		fsReadString: async (path: string): Promise<string> => {
-			await this.gate('read', path);
-			const content = this.files.get(path);
-			if (content === undefined) throw new Error(`not found: ${path}`);
-			return content;
-		},
-		fsWriteString: async (path: string, content: string): Promise<void> => {
-			await this.gate('write', path);
-			this.land(path, content);
-		},
-		fsReadMany: async (paths: string[]) => paths.map((path) => (this.files.has(path) ? { ok: true, data: new TextEncoder().encode(this.files.get(path)) } : { ok: false, error: 'not found' })),
-		fsReadJson: async (path: string): Promise<unknown> => {
-			const content = this.files.get(path);
-			if (content === undefined) throw new Error(`not found: ${path}`);
-			return JSON.parse(content);
-		},
-		fsWriteJson: async (path: string, value: unknown): Promise<void> => {
-			this.files.set(path, JSON.stringify(value));
-		},
-		fsListDir: async (path: string) => ({ entries: this.children(path) }),
-		fsStat: async (path: string) => ({ type: this.files.has(path) ? 'file' : 'dir' }),
-		fsDelete: async (path: string): Promise<void> => {
-			this.files.delete(path);
-		},
-		fsRmdir: async (): Promise<void> => {},
-		fsMkdir: async (): Promise<void> => {},
-	};
+/** Each write that landed on a watched file without a token the file held. */
+function erasures(store: FakeStore): string[] {
+	return store.landed.flatMap(({ path, before, content }) => {
+		if (!store.watched.has(path)) return [];
+		const after = tokens(content);
+		const missing = [...tokens(before ?? '')].filter((t) => !after.has(t));
+		return missing.length > 0 ? [`'${content}' landed on ${path} and erased ${missing.join(', ')}`] : [];
+	});
 }
 
 // =============================================================================
@@ -204,7 +126,7 @@ crypto.subtle.digest = async (...args: Parameters<SubtleCrypto['digest']>): Prom
 };
 
 /** Lets every promise that can move, move, until nothing changes for a while and no hash is pending. */
-async function settle(store: Store, waiting: () => number = () => 0): Promise<void> {
+async function settle(store: FakeStore, waiting: () => number = () => 0): Promise<void> {
 	let quiet = 0;
 	let seen = -1;
 	while (quiet < 4) {
@@ -267,8 +189,8 @@ function agentTools(view: IWorkspaceFileSystem, asking: boolean, work: { running
 async function runOrder(order: Step[], asking = false): Promise<Outcome> {
 	runs += 1;
 	const [first, second] = [`alpha${runs}`, `beta${runs}`];
-	const store = new Store({ [storePath(first)]: ORIGINAL, [storePath(second)]: OTHER_TEAM });
-	(globalThis as { __shellTestClient?: unknown }).__shellTestClient = store.client;
+	const store = new FakeStore({ [storePath(first)]: ORIGINAL, [storePath(second)]: OTHER_TEAM }).install();
+	for (const path of store.files.keys()) store.watched.add(path);
 	const ws: Workspace = await createWorkspace({ hostAppId: 'ordering.test', autoCommit: true, scope: { kind: 'team', teamId: first } });
 	const view: IWorkspaceFileSystem = ws.view;
 
@@ -361,7 +283,7 @@ async function runOrder(order: Step[], asking = false): Promise<Outcome> {
 		held.release();
 		await quiet();
 	}
-	return { next, erased: [...store.erased, ...askedOver], final: store.files.get(storePath(first)) ?? '' };
+	return { next, erased: [...erasures(store), ...askedOver], final: store.files.get(storePath(first)) ?? '' };
 }
 
 // =============================================================================
