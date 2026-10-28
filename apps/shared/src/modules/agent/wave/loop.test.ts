@@ -29,6 +29,7 @@ import { test } from 'node:test';
 
 import { CheckRecord, createChatModel } from '../run';
 import type { CheckStatus } from '../toolkits/appCheck';
+import { SecretMarkers } from '../toolkits/secretMarkers';
 import { AgentTool } from '../tools';
 import { runLoop, type FinishRule, type LoopOptions, type RanCall } from './loop';
 import type { ModelCall, PromptPrefix, QuestionSpec } from './plan';
@@ -658,13 +659,17 @@ test('a call that waits for a held-back call is held back too, naming the call t
 
 test('a call that times out and ends before the rest of its wave still gets its late entry, redacted and stored under its key', async () => {
 	const key = `sk-${'k'.repeat(24)}`;
+	// no key shape: only the file tools' read of the .env line hides it
+	const known = '§late-known-3f9a§';
+	const secrets = new SecretMarkers();
+	const marker = secrets.hide('.env', `API_TOKEN=${known}`).text.slice('API_TOKEN='.length);
 	const events: string[] = [];
 	// the edit times out at 10 ms and ends at 25 ms; an unrelated read with no limit keeps the wave going to 50 ms
 	const edit = stub('edit_file', async (args) => {
 		events.push(`start ${args.n}`);
 		await new Promise((resolve) => setTimeout(resolve, 25));
 		events.push(`write ${args.n}`);
-		return JSON.stringify({ text: `edited with ${key}` });
+		return JSON.stringify({ text: `edited with ${key} ${known}` });
 	});
 	const read = stub('read_file', async () => {
 		await new Promise((resolve) => setTimeout(resolve, 50));
@@ -679,7 +684,7 @@ test('a call that times out and ends before the rest of its wave still gets its 
 		plan([['memory.peek', { key: 'wave-0.late0', path: 'text' }]]),
 		new Error('stop'),
 	]);
-	await setup(model, [edit, read], { timeoutMs: (tool) => (tool === 'edit_file' ? 10 : 0) }).run();
+	await setup(model, [edit, read], { timeoutMs: (tool) => (tool === 'edit_file' ? 10 : 0), secrets }).run();
 
 	assert.deepEqual(events, ['start 0', 'write 0'], 'the held-back edit never started');
 	const entries = entriesByKey(model.questions[1]);
@@ -687,9 +692,10 @@ test('a call that times out and ends before the rest of its wave still gets its 
 	const late = entries.get('wave-0.late0');
 	assert.ok(late, 'the model hears that the timed-out edit ended, so it can plan the held-back one again');
 	assert.match(String(late.note), /timed out and has now ended/);
-	assert.match(String(late.summary), /edited with \[redacted\]/, 'the summary keeps its words, without the key');
-	assert.equal(entriesByKey(model.questions[2]).get('wave-1.r0')?.preview, 'edited with [redacted]', 'memory holds the redacted result');
+	assert.ok(String(late.summary).includes(`edited with [redacted] ${marker}`), 'the summary keeps its words, without the key or the hidden value');
+	assert.equal(entriesByKey(model.questions[2]).get('wave-1.r0')?.preview, `edited with [redacted] ${marker}`, 'memory holds the redacted result');
 	assert.ok(!JSON.stringify(model.questions).includes(key), 'the key reached a question');
+	assert.ok(!JSON.stringify(model.questions).includes(known), 'the hidden value reached a question');
 });
 
 test('a call whose prepare timed out holds nothing back, since its work never began', async () => {
