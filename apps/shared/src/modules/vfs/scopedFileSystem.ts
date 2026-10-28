@@ -114,7 +114,7 @@ export function scopedFileSystem(root: IWorkspaceFileSystem, prefix: string): IW
 
 		// ── Path versions ───────────────────────────────────────────────
 		version: (path) => root.version(toRoot(path)),
-		readVersioned: (path) => root.readVersioned(toRoot(path)),
+		readVersioned: (path, opts) => root.readVersioned(toRoot(path), opts),
 		lastWriter: (path) => root.lastWriter(toRoot(path)),
 	};
 }

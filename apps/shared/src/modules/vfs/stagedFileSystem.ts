@@ -59,6 +59,8 @@
  *     a write meanwhile opens a working layer above them, and only the frozen
  *     layers are swept. It counts no version and holds no read, since what
  *     the view serves does not change.
+ *   - A rename is refused while an editor holds unsaved changes at or under
+ *     its source.
  *   - A server read that one of the view's own changes to the base overtook
  *     may hold the file as it was before the change, so the view reads it
  *     again. An invalidate counts the same way.
@@ -789,23 +791,23 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		return (await this.readVersioned(path)).content;
 	}
 
-	/** read() plus its version, taken at the call, and moved on by each changed copy taken in before its read lands (see takeIn). */
-	readVersioned(path: string): Promise<{ content: unknown; version: number }> {
+	/** read() plus its version, taken at the call, and moved on by each changed copy taken in before its read lands (see takeIn). With `stored`, no editor's unsaved buffer answers it. */
+	readVersioned(path: string, opts: { stored?: boolean } = {}): Promise<{ content: unknown; version: number }> {
 		const p = this.norm(path);
 		const version = this.version(p);
 		const from = this.takenIn.get(p) ?? 0;
 		const took = { at: from };
 		return this.waitToRead([p]).then(async () => {
-			const content = await this.readNow(p, took);
+			const content = await this.readNow(p, opts.stored === true, took);
 			return { content, version: version + took.at - from };
 		});
 	}
 
-	/** Reads one file now: dirty overlay, then staged layers, then base. */
-	private async readNow(p: string, took?: { at: number }): Promise<unknown> {
+	/** Reads one file now: dirty overlay (unless `stored`), then staged layers, then base. */
+	private async readNow(p: string, stored = false, took?: { at: number }): Promise<unknown> {
 		await this.ready;
 		// step: a dirty editor buffer is the user's live truth — it wins
-		if (this.base.isDirty(p)) return this.base.read(p);
+		if (!stored && this.base.isDirty(p)) return this.base.read(p);
 		const eff = this.effective(p);
 		if (eff === 'gone') throw new Error(`No such file: ${p}`);
 		if (eff && eff.kind === 'write') return eff.content;
@@ -1138,17 +1140,32 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		this.onMutate?.(p, origin);
 	}
 
-	/** Stages a file rename as tombstone + write (dirs: commit first). */
+	/**
+	 * Stages a file rename as tombstone + write (dirs: commit first). Refused
+	 * while an editor holds unsaved changes at or under its source: the editor
+	 * stays on the old path, and a staged rename would store the unsaved text.
+	 */
 	rename(oldPath: string, newPath: string, origin?: string): Promise<void> {
 		const refused = this.refuseUnwritable(oldPath, newPath);
 		if (refused) return refused;
 		const from = this.norm(oldPath);
 		const to = this.norm(newPath);
+		const unsaved = this.refuseUnsaved(from);
+		if (unsaved) return Promise.reject(unsaved);
 		return this.mutate([from, to], origin, (seq) => this.renameNow(from, to, origin, seq), { removed: [from, to], stages: true });
+	}
+
+	/** The refusal of a rename while an editor holds unsaved changes at or under its source, or null. */
+	private refuseUnsaved(from: string): Error | null {
+		const unsaved = [...this.base.dirtyPaths()].find((p) => holds(from, p));
+		return unsaved === undefined ? null : new Error(`Save or discard the unsaved changes in ${unsaved} first.`);
 	}
 
 	private async renameNow(from: string, to: string, origin?: string, seq?: number): Promise<void> {
 		await this.ready;
+		// step: the user may have typed while the rename waited its turn
+		const unsaved = this.refuseUnsaved(from);
+		if (unsaved) throw unsaved;
 		if (this.writeThrough) return this.changeBase([from, to], () => this.base.rename(from, to, origin));
 		// step: a definitive ruling — stat consults the base backend when
 		// the inventory has not been walked, so the guard actually holds
@@ -1156,7 +1173,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		if (type === 'dir') {
 			throw new Error(`Staged directory renames are not supported yet — commit first, then rename ${from}.`);
 		}
-		const content = await this.readNow(from);
+		// step: typing that starts while the rename runs stays in its editor
+		const content = await this.readNow(from, true);
 		if (typeof content !== 'string') throw new Error(`Staged renames are text-only: ${from}`);
 		// step: refused before either half is staged, so a refused rename stages nothing
 		if ((await this.statNow(to)) === 'dir') throw new Error(`Not a file: ${to}`);

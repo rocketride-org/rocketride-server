@@ -201,8 +201,10 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 	 * the one after when the read itself took in a changed server copy. The
 	 * read waits for the path's pending mutations, so the content is never
 	 * older than the version.
+	 *
+	 * @param opts.stored - Never an editor's unsaved buffer: what an editor reloads.
 	 */
-	readVersioned(path: string): Promise<{ content: unknown; version: number }>;
+	readVersioned(path: string, opts?: { stored?: boolean }): Promise<{ content: unknown; version: number }>;
 
 	/** The origin of the last mutation of a path ('editor', 'agent', ...), when known. */
 	lastWriter(path: string): string | undefined;

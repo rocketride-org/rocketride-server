@@ -40,6 +40,8 @@
 //                         store browser with real viewers)
 // =============================================================================
 
+import type { Documents } from 'shell';
+import type { IWorkspaceFileSystem } from 'shared/modules/vfs/vfsTypes';
 import { getDocs } from '../../../docs';
 import { isPipelineFile } from '../projectStore';
 import { readAppPackage } from '../../preview/session/appStore';
@@ -117,4 +119,45 @@ export async function openWorkspaceFile(path: string): Promise<boolean> {
 
 	// Binary/media: no in-workspace editor; explorer-ui owns rich viewers.
 	return false;
+}
+
+// =============================================================================
+// RENAME
+// =============================================================================
+
+/** The workspace path a tab shows: a text tab's file, or a canvas's pipeline. Null for any other tab, since a page's key can read like a pipeline folder. */
+function tabPath(uri: string, isStatic: boolean | undefined): string | null {
+	if (uri.startsWith('file:')) return uri.slice('file:'.length);
+	return isStatic ? null : `pipelines/${uri}`;
+}
+
+/**
+ * Renames a workspace file or folder and moves the open tabs at or under it.
+ * The view refuses a rename over unsaved changes at or under it at the call,
+ * and then the tabs stay. Otherwise they close before the rename awaits
+ * anything, so no typing can land on an old path while it runs, and open
+ * again once it ends: on the new paths, or on the old ones when the rename
+ * failed.
+ */
+export async function renameWithTabs(view: IWorkspaceFileSystem, docs: Documents | null, from: string, to: string): Promise<void> {
+	const under = (path: string) => path === from || path.startsWith(`${from}/`);
+	if (!docs || [...view.dirtyPaths()].some(under)) return view.rename(from, to);
+	const { editors, documents } = docs.getState();
+	const open = new Map<string, string>();
+	for (const { documentUri: uri } of Object.values(editors)) {
+		const path = tabPath(uri, documents[uri]?.static);
+		if (path !== null && under(path)) open.set(uri, path);
+	}
+	for (const [id, ed] of Object.entries(editors)) if (open.has(ed.documentUri)) docs.closeEditor(id);
+	let moved = false;
+	try {
+		await view.rename(from, to);
+		moved = true;
+	} finally {
+		for (const [uri, path] of open) {
+			const at = moved ? to + path.slice(from.length) : path;
+			if (uri.startsWith('file:')) docs.openStaticDocument(`file:${at}`, at.split('/').pop() ?? at);
+			else await docs.openDocument(at.slice('pipelines/'.length));
+		}
+	}
 }

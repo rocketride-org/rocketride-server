@@ -32,7 +32,6 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import type { ShellAppProps } from 'shell';
-import type { IVirtualFileSystem } from 'shell';
 import { commonStyles , parseToolDocUri } from 'shell';
 import { useShellConnection, useAuthUser, useWorkspace, DocTabs, DocSplitLayout, AppLayout, ConfirmDialog } from 'shell';
 import { AgentIcon } from 'shared/tools/agent/AgentIcon';
@@ -42,7 +41,7 @@ import { AppsIcon } from 'shared/components/icons/AppsIcon';
 import { createDocs, destroyDocs, getDocs } from './docs';
 import { createWorkspace, getWorkspace, resolveWorkspaceScope } from './surfaces/workspace/vfs/workspace';
 import { ModeSwitchBlockedError } from 'shared/modules/vfs/commitPolicy';
-import { createProjectVfs } from './surfaces/workspace/projectVfs';
+import { createDocumentsVfs } from './surfaces/workspace/projectVfs';
 import PipelineProvider from './surfaces/pipelines/PipelineProvider';
 import WebviewProvider from './surfaces/pages/WebviewProvider';
 import SidebarProvider from './surfaces/sidebar/SidebarProvider';
@@ -61,8 +60,9 @@ import { ToolGlyph } from './surfaces/devtools/ToolGlyph';
 import { useDevToolPins } from './surfaces/devtools/devToolPins';
 import { CodiconExtensions } from 'shared/components/icons/Codicon';
 import { AgentSession } from 'shared/modules/agent/agent';
-import { setAgentHost } from 'shared/modules/agent/host';
+import { SaveDroppedError, setAgentHost } from 'shared/modules/agent/host';
 import { createRocketAgentHost, feedApprovalSettings } from './agent/agentHost';
+import { saveDocumentEditor } from './agent/editorControls';
 import { registerRocketHostOps } from './ops/hostOps';
 import { registerRocketFsOps } from './ops/fsOps';
 import { registerRocketAppDevOps } from './ops/appdevOps';
@@ -275,43 +275,8 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 		// step: restored pending changes refuse auto mode — prompt the user
 		if (ws.pendingBlocksAuto) setModeSwitchBlocked(true);
 
-		/**
-		 * Content adapter for pipeline documents: the shared project VFS
-		 * (the staged workspace view's pipelines mount), with the Documents
-		 * singleton's lenient error contract preserved — listing/read
-		 * failures degrade to empty/null, save failures log and surface via
-		 * the save paths that re-save explicitly. Routing through the VIEW
-		 * is what makes staged (uncommitted) pipeline edits visible in tabs
-		 * and keeps tab saves from clobbering staged layers.
-		 */
-		const projectVfs = createProjectVfs(client);
-		const vfs: IVirtualFileSystem = {
-			list: async (dir: string) => {
-				try {
-					return await projectVfs.list(dir);
-				} catch {
-					return [];
-				}
-			},
-			read: async (uri: string) => {
-				try {
-					return await projectVfs.read(uri);
-				} catch {
-					return null;
-				}
-			},
-			write: async (uri: string, content: unknown) => {
-				if (!content) return;
-				try {
-					await projectVfs.write(uri, content);
-				} catch (err) {
-					console.error('[RocketApp] Failed to save:', err);
-				}
-			},
-			rename: (oldPath: string, newPath: string) => projectVfs.rename(oldPath, newPath),
-			delete: (path: string) => projectVfs.delete(path),
-			mkdir: (path: string) => projectVfs.mkdir(path),
-		};
+		// Content adapter for pipeline documents (see createDocumentsVfs)
+		const vfs = createDocumentsVfs(client);
 
 		// Create the instance — both App and Sidebar will use it
 		const docs = createDocs(vfs, { appState, updateAppState, flushNow: flushWorkspaceNow });
@@ -478,10 +443,23 @@ const RocketAppReady: React.FC<{ docs: import('shell').Documents }> = ({ docs })
 	useEffect(() => {
 		/**
 		 * Listens for the shell's tab:save custom event and saves the active
-		 * document. Documents resolves "active" at call time, so there is no
-		 * stale state to close over.
+		 * document. Reads state at call time, so there is no stale state to
+		 * close over.
 		 */
-		const handler = () => { void docs.saveActiveDocument(); };
+		const handler = () => {
+			const s = docs.getState();
+			const group = s.groups[s.activeGroupId];
+			const editorId = group?.editorIds[group.activeEditorIndex];
+			const uri = editorId ? s.editors[editorId]?.documentUri : undefined;
+			if (!uri) return;
+			// step: the active document's editor saves itself, at the version it loaded, and shows its
+			// own failure. Anything else is Documents' own save
+			const saving = saveDocumentEditor(getWorkspace().view, uri) ?? docs.saveActiveDocument();
+			// step: a save the user dropped while it waited its turn is their own doing, not a failure
+			saving.catch((err: unknown) => {
+				if (!(err instanceof SaveDroppedError)) console.warn(`[RocketApp] Saving ${uri} failed:`, err);
+			});
+		};
 		window.addEventListener('tab:save', handler);
 		return () => window.removeEventListener('tab:save', handler);
 	}, []);

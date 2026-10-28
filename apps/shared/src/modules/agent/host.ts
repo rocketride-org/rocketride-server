@@ -72,6 +72,20 @@ export interface AgentDevSession {
 	subscribeWatch(l: (s: WatchStatus) => void): () => void;
 }
 
+/**
+ * The rejection of an editor's save that wrote nothing because the user
+ * dropped or replaced its text while it waited its turn (Reload, Overwrite,
+ * closing with Don't Save). What waits on it stops: Save & Run runs nothing,
+ * and a publish publishes nothing. It is the user's own doing, so no editor
+ * shows it as a failure.
+ */
+export class SaveDroppedError extends Error {
+	constructor(path: string) {
+		super(`${path} was not saved: its changes were dropped or replaced while the save waited its turn.`);
+		this.name = 'SaveDroppedError';
+	}
+}
+
 /** What the mounting app provides to the agent. */
 export interface AgentHost {
 	/** The workspace the agent reads and edits; its read-only `.rocketride/` holds the guides. */

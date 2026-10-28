@@ -25,19 +25,27 @@
 // =============================================================================
 
 /**
- * What the ordering explorations (ordering.test.ts) cannot reach: going back
+ * What the ordering explorations (ordering*.test.ts) cannot reach: going back
  * to a team, another tab, the change announcements, the cache, the scaffold,
- * the preview, the dev session's models, and the versions a teammate's change
- * moves.
+ * the preview, the dev session's models, the versions a teammate's change
+ * moves, and the editor documents' splits, closed tabs and renames.
  */
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
+import { Documents } from 'shell/src/components/docs/Documents';
+
+import { registerEditor, saveDocumentEditor } from '../../../../rocket-ui/src/agent/editorControls';
+import { canvasDocument } from '../../../../rocket-ui/src/surfaces/pipelines/canvasDocument';
 import { appPath, scaffoldApp } from '../../../../rocket-ui/src/surfaces/preview/session/appStore';
 import { createWebAppBuilderHost } from '../../../../rocket-ui/src/surfaces/preview/session/webHost';
+import { fileDocument } from '../../../../rocket-ui/src/surfaces/workspace/fileDocument';
+import { renameWithTabs } from '../../../../rocket-ui/src/surfaces/workspace/vfs/openWorkspaceFile';
+import { createDocumentsVfs, createProjectVfs, reloadPipeline, savePipeline } from '../../../../rocket-ui/src/surfaces/workspace/projectVfs';
 import { createWorkspace, type Workspace } from '../../../../rocket-ui/src/surfaces/workspace/vfs/workspace';
 import { CachedVfs } from 'shell/src/modules/explorer/CachedVfs';
+import { SaveDroppedError } from '../agent/host';
 import { FilesystemTools } from '../agent/toolkits/filesystem';
 import type { AgentTool } from '../agent/tools';
 import { FakeStore } from './fakeStore.harness';
@@ -98,10 +106,64 @@ function workspace(teamId: string, autoCommit = true): Promise<Workspace> {
 	return createWorkspace({ hostAppId: 'workspace.test', autoCommit, scope: { kind: 'team', teamId } });
 }
 
+/** The same in manual mode: changes stay staged until Commit all. */
+function manualWorkspace(teamId: string): Promise<Workspace> {
+	return workspace(teamId, false);
+}
+
 /** The paths a team's staging manifest names, which is what a reload restores. */
 function manifestPaths(store: FakeStore, teamId: string): string[] {
 	const manifest = JSON.parse(store.files.get(`.staging/workspace.test/team-${teamId}/manifest.json`) as string) as { layers: Array<{ entries: Record<string, unknown> }> };
 	return manifest.layers.flatMap((layer) => Object.keys(layer.entries)).sort();
+}
+
+/**
+ * Holds the store's next read of a path once it has the content, so the read
+ * comes back with the file as it was when it was made.
+ *
+ * @param s - The fake store.
+ * @param path - The store path.
+ * @returns Settles once the read is held, and lets it come back.
+ */
+function holdRead(s: ReturnType<typeof storage>, path: string): { held: Promise<void>; release: () => void } {
+	const [held, landing] = [deferred(), deferred()];
+	const read = s.store.client.fsReadString;
+	s.store.client.fsReadString = async (p: string) => {
+		const content = await read(p);
+		if (p === path) {
+			s.store.client.fsReadString = read;
+			held.resolve();
+			await landing.promise;
+		}
+		return content;
+	};
+	return { held: held.promise, release: landing.resolve };
+}
+
+/**
+ * Holds the store's next write of a path until the test lets it land.
+ *
+ * @param s - The fake store.
+ * @param path - The store path.
+ * @returns Settles once the write is held, and lets it land.
+ */
+function holdWrite(s: ReturnType<typeof storage>, path: string): { held: Promise<void>; release: () => void } {
+	const [held, landing] = [deferred(), deferred()];
+	const write = s.store.client.fsWriteString;
+	s.store.client.fsWriteString = async (p: string, value: string) => {
+		if (p === path) {
+			s.store.client.fsWriteString = write;
+			held.resolve();
+			await landing.promise;
+		}
+		return write(p, value);
+	};
+	return { held: held.promise, release: landing.resolve };
+}
+
+/** Ctrl+S in the editor of a document: a text tab (`apps/...`) or a canvas (`pipelines/...`); undefined when no editor holds it. */
+function ctrlS(view: Workspace['view'], path: string): Promise<void> | undefined {
+	return saveDocumentEditor(view, path.startsWith('pipelines/') ? path.slice('pipelines/'.length) : `file:${path}`) ?? undefined;
 }
 
 // =============================================================================
@@ -647,3 +709,1018 @@ test('a batch read on its way when the cached copy is dropped does not put the o
 	await ws.view.write(path, 'const probe = 3;', 'editor');
 	assert.equal(s.store.files.get(s.a), 'const probe = 3;', 'so a save checked against it lands');
 });
+
+// =============================================================================
+// CANVAS SAVES
+// =============================================================================
+
+test('a canvas reload that cannot read the stored pipeline keeps its version, so the next save is refused', async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const pipePath = `@/Team/=${s.alpha}/.projects/chat.pipe`;
+	s.store.files.set(pipePath, JSON.stringify({ name: 'Chat', components: [] }, null, 2));
+	const docs = new Documents(createDocumentsVfs(s.store.client as never));
+	await docs.openDocument('chat.pipe');
+	const projectVfs = createProjectVfs(s.store.client as never);
+	const content = () => docs.getState().documents['chat.pipe'].content as { name: string };
+	const loaded = ws.view.version('pipelines/chat.pipe');
+
+	// step: the agent writes a pipeline that is not valid JSON; the clean canvas cannot reload it
+	await ws.view.write('pipelines/chat.pipe', '{ not json', 'agent');
+	assert.equal(await reloadPipeline(docs, 'chat.pipe'), null);
+	assert.equal(content().name, 'Chat', 'the canvas keeps what it showed');
+
+	// step: so a save from the version the canvas really holds is refused, and the agent's write stays
+	docs.updateContent('chat.pipe', { name: 'Mine', components: [] });
+	await assert.rejects(savePipeline(projectVfs, docs, 'chat.pipe', 'chat.pipe', content(), loaded), StaleWriteError);
+	assert.equal(s.store.files.get(pipePath), '{ not json');
+
+	// step: a deleted pipeline does not reload either
+	await ws.view.delete('pipelines/chat.pipe', 'agent');
+	assert.equal(await reloadPipeline(docs, 'chat.pipe'), null);
+
+	// step: a readable pipeline reloads, at the version it belongs to
+	await ws.view.write('pipelines/chat.pipe', JSON.stringify({ name: 'Agent', components: [] }, null, 2), 'agent');
+	assert.equal(await reloadPipeline(docs, 'chat.pipe'), ws.view.version('pipelines/chat.pipe'));
+	assert.equal(content().name, 'Agent');
+	assert.equal(docs.getState().documents['chat.pipe'].dirty, false);
+});
+
+test('two editors of one path both guard it, and closing one keeps the other', async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'pipelines/chat.pipe';
+	const editor = (name: string, dirty: { on: boolean }) => ({
+		uri: `${name}.pipe`,
+		getContent: () => `${name} canvas`,
+		isDirty: () => dirty.on,
+		save: async () => {
+			dirty.on = false;
+		},
+	});
+	const left = { on: true };
+	const right = { on: false };
+	const closeLeft = registerEditor(ws.view, path, editor('left', left));
+	const closeRight = registerEditor(ws.view, path, editor('right', right));
+	assert.equal(ws.view.isDirty(path), true, 'dirty while any editor is');
+	assert.equal(await ws.view.read(path), 'left canvas', 'readers get the dirty buffer');
+
+	// step: the newer split closes; the older one, still dirty, still guards the file
+	closeRight();
+	assert.equal(ws.view.isDirty(path), true);
+	assert.equal(await ws.view.read(path), 'left canvas');
+
+	// step: the last one closes; nothing guards the file
+	closeLeft();
+	assert.equal(ws.view.isDirty(path), false);
+});
+
+// =============================================================================
+// EDITOR DOCUMENTS — Ctrl+S, splits, and unsaved text that outlives its tab
+// =============================================================================
+
+/** Lets every promise that can move, move. */
+async function flush(): Promise<void> {
+	for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+}
+
+test('Ctrl+S in a canvas saves the canvas only, not a text tab of the same pipeline, and a failed save is not swallowed', async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'pipelines/chat.pipe';
+	const ctrlS = (uri: string) => saveDocumentEditor(ws.view, uri);
+	const did: string[] = [];
+	const editor = (name: string, uri: string, failing: boolean) => {
+		const state = { dirty: true };
+		return {
+			uri,
+			getContent: () => name,
+			isDirty: () => state.dirty,
+			save: async () => {
+				did.push(name);
+				if (failing) throw new Error(`the ${name} could not be saved`);
+				state.dirty = false;
+			},
+			discard: async () => undefined,
+		};
+	};
+	registerEditor(ws.view, path, editor('text tab', 'file:pipelines/chat.pipe', true));
+	registerEditor(ws.view, path, editor('canvas', 'chat.pipe', false));
+
+	// step: both have typing; Ctrl+S in the canvas
+	await ctrlS('chat.pipe');
+	assert.deepEqual(did, ['canvas'], 'only the canvas saved');
+	assert.equal(ws.view.isDirty(path), true, "the text tab's typing stays unsaved");
+
+	// step: Ctrl+S in the text tab, whose save fails: the failure reaches the caller
+	await assert.rejects(Promise.resolve(ctrlS('file:pipelines/chat.pipe')), /the text tab could not be saved/);
+	assert.equal(saveDocumentEditor(ws.view, 'other.pipe'), null, 'a document no editor holds is left to its caller');
+});
+
+test('a text tab closed with unsaved typing keeps its loaded version: the file stays dirty, and its save after reopening is refused when the file moved on', async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'apps/probe.txt';
+
+	// step: the tab loads the file, the user types, then closes the tab (Monaco keeps the text)
+	const doc = fileDocument(ws.view, path);
+	const close = doc.open();
+	await doc.load();
+	const loaded = doc.version;
+	doc.type('const probe = 1; // mine');
+	close();
+	assert.equal(ws.view.isDirty(path), true, 'the unsaved text survives the close, so the file is still dirty');
+	assert.equal(await ws.view.read(path), 'const probe = 1; // mine', 'readers get the unsaved text');
+	assert.equal(ws.view.isDirty(path), true, 'the unsaved text still guards the file');
+
+	// step: the file changes meanwhile, by a write that asks nobody
+	await ws.view.write(path, 'const probe = 2;', 'agent');
+
+	// step: the tab opens again on the same document: the typing, the old version, the banner
+	const again = fileDocument(ws.view, path);
+	assert.equal(again, doc);
+	const closeAgain = again.open();
+	await again.load();
+	assert.deepEqual([again.text, again.version, again.dirty, again.stale], ['const probe = 1; // mine', loaded, true, true]);
+	await assert.rejects(again.save(), StaleWriteError);
+	assert.equal(s.store.files.get(s.a), 'const probe = 2;', 'the other change stays');
+
+	// step: Reload shows the stored file; once clean and closed, the document goes
+	await again.discard();
+	assert.deepEqual([again.text, again.dirty, again.stale], ['const probe = 2;', false, false]);
+	closeAgain();
+	assert.equal(ws.view.isDirty(path), false);
+	assert.equal(ctrlS(ws.view, path), undefined);
+	assert.notEqual(fileDocument(ws.view, path), doc, 'the next tab loads the stored file afresh');
+});
+
+test('two tabs of one text file share its text, version and save: a save from one leaves the other clean at the new version', async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'apps/probe.txt';
+	const left = fileDocument(ws.view, path);
+	const closeLeft = left.open();
+	const right = fileDocument(ws.view, path);
+	const closeRight = right.open();
+	assert.equal(right, left, 'the splits share one document');
+	// step: both editors are bound to one model; setting it echoes back as a change from the other split
+	let model = '';
+	left.sync = (text) => {
+		model = text;
+		left.type(text);
+	};
+	await left.load();
+	assert.deepEqual([model, left.dirty], ['const probe = 1;', false], "the document's own change is not typing");
+
+	left.type('const probe = 1; // mine');
+	assert.equal(right.dirty, true);
+	await left.save();
+	assert.deepEqual([right.dirty, right.stale, right.version], [false, false, ws.view.version(path)]);
+
+	// step: nothing is dirty, so another writer goes ahead; the clean tabs follow it
+	assert.equal(ws.view.isDirty(path), false);
+	await ws.view.write(path, 'const probe = 3;', 'agent');
+	await right.load();
+	assert.deepEqual([right.text, right.stale, model], ['const probe = 3;', false, 'const probe = 3;']);
+	closeLeft();
+	assert.ok(ctrlS(ws.view, path), 'the other split still holds the file');
+	closeRight();
+	assert.equal(ctrlS(ws.view, path), undefined);
+});
+
+test("a load of the old team's text tab that lands after a team switch leaves the Monaco model alone, so typing in the new team's tab of the same path stays", { timeout: 10_000 }, async () => {
+	type Doc = ReturnType<typeof fileDocument>;
+	const s = storage();
+	const path = 'apps/probe.txt';
+	// step: Monaco keeps one model per URI for the page, and the URI names the path, not the team. Each mounted
+	// editor reports a change of the model as typing
+	const model = { value: '', editors: new Set<Doc>() };
+	const setModel = (text: string): void => {
+		if (model.value === text) return;
+		model.value = text;
+		for (const doc of [...model.editors]) doc.type(text);
+	};
+	// step: a tab as FileProvider mounts it: it joins the document and loads it, then the editor's beforeMount binds the document to the model
+	const mount = async (doc: Doc): Promise<() => void> => {
+		const close = doc.open();
+		await doc.load();
+		doc.sync = setModel;
+		doc.syncModel();
+		model.editors.add(doc);
+		return () => {
+			model.editors.delete(doc);
+			close();
+		};
+	};
+
+	const old = await workspace(s.alpha);
+	const oldDoc = fileDocument(old.view, path);
+	const closeOld = await mount(oldDoc);
+	assert.equal(model.value, 'const probe = 1;');
+	// step: a teammate's change drops the cached copy, and the clean tab's load of it is held
+	s.store.files.set(s.a, 'const probe = 2;');
+	old.view.invalidate(path);
+	const reading = holdRead(s, s.a);
+	const lateLoad = oldDoc.load();
+	await reading.held;
+
+	// step: the user switches team, which unmounts the old tab, opens the same path there and types
+	closeOld();
+	const fresh = await workspace(s.beta);
+	const freshDoc = fileDocument(fresh.view, path);
+	assert.notEqual(freshDoc, oldDoc);
+	const closeFresh = await mount(freshDoc);
+	assert.equal(model.value, 'const probe = 900;');
+	setModel('const probe = 900; // mine');
+
+	reading.release();
+	await lateLoad;
+	await flush();
+	assert.equal(oldDoc.text, 'const probe = 2;', 'the old document took its load');
+	assert.deepEqual([freshDoc.text, freshDoc.dirty, model.value], ['const probe = 900; // mine', true, 'const probe = 900; // mine'], "the new team's typing is kept");
+	assert.equal(await fresh.view.read(path), 'const probe = 900; // mine');
+	closeFresh();
+});
+
+test('an older load that fails after a newer one worked leaves the editor showing the newer text', async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'apps/probe.txt';
+	// step: the first read of the file is held, then fails
+	const reading = deferred();
+	const read = s.store.client.fsReadString;
+	let held = false;
+	s.store.client.fsReadString = async (p: string) => {
+		if (p === s.a && !held) {
+			held = true;
+			await reading.promise;
+			throw new Error('the store did not answer');
+		}
+		return read(p);
+	};
+	const doc = fileDocument(ws.view, path);
+	const close = doc.open();
+	const oldLoad = doc.load();
+	await flush();
+
+	// step: the agent reads the file and changes it; the tab follows the change with a newer load
+	await ws.view.read(path);
+	await ws.view.write(path, 'const probe = 2;', 'agent');
+	await flush();
+	assert.equal(doc.text, 'const probe = 2;');
+
+	// step: the old load fails late
+	reading.resolve();
+	await oldLoad;
+	assert.deepEqual([doc.text, doc.error, doc.version], ['const probe = 2;', null, ws.view.version(path)], 'the newer load stands');
+	close();
+});
+
+test("closing the last tab of a dirty canvas drops the pipeline, and its document and the agent's guard go with it", async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const pipePath = `@/Team/=${s.alpha}/.projects/chat.pipe`;
+	s.store.files.set(pipePath, JSON.stringify({ name: 'Chat', components: [] }, null, 2));
+	const docs = new Documents(createDocumentsVfs(s.store.client as never));
+	const path = 'pipelines/chat.pipe';
+
+	// step: the canvas opens and the user changes a node; the agent now asks before it changes the file
+	await docs.openDocument('chat.pipe');
+	const doc = canvasDocument(ws.view, docs, path, 'chat.pipe');
+	doc.projectVfs = createProjectVfs(s.store.client as never);
+	const leave = doc.open(async () => undefined);
+	docs.updateContent('chat.pipe', { name: 'Mine', components: [] });
+	assert.equal(ws.view.isDirty(path), true);
+	assert.equal(ws.view.isDirty(path), true);
+
+	// step: the user closes the tab (the shell's dirty-close dialog asked first, and the user chose Don't Save)
+	docs.closeEditor(Object.keys(docs.getState().editors)[0]);
+	leave();
+	assert.equal(docs.getState().documents['chat.pipe'], undefined, 'Documents drops the pipeline with its last view');
+	assert.equal(ws.view.isDirty(path), false, 'nothing guards a pipeline nobody holds');
+	assert.equal(ctrlS(ws.view, path), undefined);
+	assert.notEqual(canvasDocument(ws.view, docs, path, 'chat.pipe'), doc, 'the next canvas loads the stored pipeline afresh');
+});
+
+test('a rename from the sidebar closes the tabs of the file while it runs and opens them on the new path, so no typing stays on the old path', async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const { docs, leave } = await openCanvas(s, ws, { name: 'Original', components: [] });
+	docs.openStaticDocument('file:apps/probe.txt', 'probe.txt');
+	const text = fileDocument(ws.view, 'apps/probe.txt');
+	const close = text.open();
+	await text.load();
+	const tabs = () =>
+		Object.values(docs.getState().editors)
+			.map((ed) => ed.documentUri)
+			.sort();
+	// step: a file with unsaved changes keeps its tabs and the typing, and the rename is refused
+	docs.updateContent('chat.pipe', { name: 'Mine', components: [] });
+	await assert.rejects(renameWithTabs(ws.view, docs, 'pipelines/chat.pipe', 'pipelines/renamed.pipe'), /unsaved changes/);
+	assert.deepEqual([tabs(), docs.getState().documents['chat.pipe']?.dirty], [['chat.pipe', 'file:apps/probe.txt'], true]);
+	await ctrlS(ws.view, 'pipelines/chat.pipe');
+	const renames = [
+		{ from: 'pipelines/chat.pipe', to: 'pipelines/renamed.pipe', uri: 'chat.pipe', type: () => docs.updateContent('chat.pipe', { name: 'Typed', components: [] }) },
+		{ from: 'apps/probe.txt', to: 'apps/renamed.txt', uri: 'file:apps/probe.txt', type: () => text.type('const probe = 1; // mine') },
+	];
+	for (const { from, to, uri, type } of renames) {
+		// step: the store holds the rename, and the user types in the file's tab while one is open
+		const [held, landing] = [deferred(), deferred()];
+		const rename = s.store.client.fsRename;
+		s.store.client.fsRename = async (a: string, b: string) => {
+			s.store.client.fsRename = rename;
+			held.resolve();
+			await landing.promise;
+			return rename(a, b);
+		};
+		const renaming = renameWithTabs(ws.view, docs, from, to);
+		await held.promise;
+		const typed = tabs().includes(uri);
+		if (typed) type();
+		landing.resolve();
+		await renaming;
+		assert.equal(typed, false, `no tab of ${from} is open to type in while the rename runs`);
+		assert.equal(ws.view.isDirty(from), false);
+	}
+	assert.deepEqual(tabs(), ['file:apps/renamed.txt', 'renamed.pipe'], 'the tabs are on the new paths');
+	assert.equal((docs.getState().documents['renamed.pipe']?.content as { name: string }).name, 'Mine');
+	leave();
+	close();
+});
+
+test('a folder rename moves the tabs of the files under it, and unsaved changes in one of them refuse it with every tab left open', async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const folder = `@/Team/=${s.alpha}/.projects/.appdev/src`;
+	s.store.files.set(`${folder}/probe.txt`, 'const probe = 1;');
+	s.store.files.set(`${folder}/draft.txt`, 'const draft = 1;');
+	s.store.client.fsRename = async (from: string, to: string) => {
+		for (const [p, content] of [...s.store.files]) {
+			if (!p.startsWith(`${from}/`)) continue;
+			s.store.files.set(to + p.slice(from.length), content);
+			s.store.files.delete(p);
+		}
+	};
+	const docs = new Documents(createDocumentsVfs(s.store.client as never));
+	docs.openStaticDocument('file:apps/src/probe.txt', 'probe.txt');
+	docs.openStaticDocument('file:apps/src/draft.txt', 'draft.txt');
+	const draft = fileDocument(ws.view, 'apps/src/draft.txt');
+	const close = draft.open();
+	await draft.load();
+	// step: the user types in one file under the folder; the rename is refused and no tab closes
+	draft.type('const draft = 2; // mine');
+	const editors = Object.keys(docs.getState().editors);
+	await assert.rejects(renameWithTabs(ws.view, docs, 'apps/src', 'apps/lib'), /unsaved changes/);
+	assert.deepEqual(Object.keys(docs.getState().editors), editors);
+	// step: once that file is saved, the rename moves both tabs to the new folder
+	await ctrlS(ws.view, 'apps/src/draft.txt');
+	await renameWithTabs(ws.view, docs, 'apps/src', 'apps/lib');
+	const tabs = Object.values(docs.getState().editors).map((ed) => ed.documentUri);
+	assert.deepEqual(tabs.sort(), ['file:apps/lib/draft.txt', 'file:apps/lib/probe.txt']);
+	close();
+});
+
+/** A pipeline open on a canvas, in Documents whose dirty-close dialog answers Save, as the shell's close dialog drives it. */
+async function canvasForClose(alpha: string, s: ReturnType<typeof storage>, ws: Workspace) {
+	const pipePath = `@/Team/=${alpha}/.projects/chat.pipe`;
+	s.store.files.set(pipePath, JSON.stringify({ name: 'Chat', components: [] }, null, 2));
+	const docs = new Documents({ vfs: createDocumentsVfs(s.store.client as never), ui: { confirmDirtyClose: async () => 'save' } });
+	await docs.openDocument('chat.pipe');
+	const doc = canvasDocument(ws.view, docs, 'pipelines/chat.pipe', 'chat.pipe');
+	doc.projectVfs = createProjectVfs(s.store.client as never);
+	// step: the canvas's save, as PipelineProvider's performSave makes it: it shows its own failure (a dropped save is none) and rethrows
+	const failures: unknown[] = [];
+	const leave = doc.open(async () => {
+		try {
+			await doc.save(docs.getState().documents['chat.pipe']?.content);
+		} catch (err) {
+			if (!(err instanceof SaveDroppedError)) failures.push(err);
+			throw err;
+		}
+	});
+	const close = () => docs.requestCloseEditor(Object.keys(docs.getState().editors)[0]);
+	return { docs, doc, pipePath, failures, leave, close };
+}
+
+test('in manual mode, a kept save counts at its own version, not one a discard and a write queued behind it gave the path', { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await manualWorkspace(s.alpha);
+	const { docs, leave, close } = await canvasForClose(s.alpha, s, ws);
+	const mine = { name: 'Mine', components: [] };
+	const manifest = `.staging/workspace.test/team-${s.alpha}/manifest.json`;
+	// step: hold the next manifest write that keeps the pipeline; fail it if asked
+	type Hold = { entered: ReturnType<typeof deferred>; gate: ReturnType<typeof deferred>; fail: boolean };
+	let hold: Hold | null = null;
+	const write = s.store.client.fsWriteJson;
+	s.store.client.fsWriteJson = async (p: string, value: unknown) => {
+		if (p === manifest && hold && JSON.stringify(value).includes('pipelines/chat.pipe')) {
+			const held = hold;
+			hold = null;
+			held.entered.resolve();
+			await held.gate.promise;
+			if (held.fail) throw new Error('the store did not answer');
+		}
+		return write(p, value);
+	};
+	// step: the canvas saves Mine, and the staging store holds its manifest write
+	const first: Hold = { entered: deferred(), gate: deferred(), fail: false };
+	hold = first;
+	docs.updateContent('chat.pipe', mine);
+	const saving = outcome(saveDocumentEditor(ws.view, 'chat.pipe') ?? undefined);
+	await first.entered.promise;
+	// step: the user types, and a discard and a write of the same text queue behind the save
+	docs.updateContent('chat.pipe', { name: 'Typed', components: [] });
+	const discarding = ws.view.discard('pipelines/chat.pipe');
+	const rewriting = ws.view.write('pipelines/chat.pipe', JSON.stringify(mine, null, 2), 'editor').catch(() => undefined);
+	const second: Hold = { entered: deferred(), gate: deferred(), fail: true };
+	hold = second;
+	first.gate.resolve();
+	await saving;
+	await discarding;
+	await second.entered.promise;
+	// step: while the staging store holds the rewrite, the user puts Mine back on the canvas and closes it with Save
+	docs.updateContent('chat.pipe', { ...mine });
+	const closing = close();
+	await flush();
+	second.gate.resolve();
+	await rewriting;
+	const closed = await closing;
+	assert.ok(!closed || manifestPaths(s.store, s.alpha).includes('pipelines/chat.pipe'), 'a closed tab means a reload brings the pipeline back');
+	assert.equal(closed, false, 'nothing kept the pipeline, so the close is abandoned');
+	assert.equal(docs.getState().documents['chat.pipe']?.dirty, true);
+	leave();
+});
+
+test('in manual mode, a canvas save that a discard and a write queued behind it overtake still finishes, and the tab stays dirty', { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await manualWorkspace(s.alpha);
+	const { docs, leave } = await canvasForClose(s.alpha, s, ws);
+	const mine = { name: 'Mine', components: [] };
+	const manifest = `.staging/workspace.test/team-${s.alpha}/manifest.json`;
+	// step: hold the manifest write that keeps the canvas's save
+	const [entered, gate] = [deferred(), deferred()];
+	let held = false;
+	const write = s.store.client.fsWriteJson;
+	s.store.client.fsWriteJson = async (p: string, value: unknown) => {
+		if (p === manifest && !held && JSON.stringify(value).includes('pipelines/chat.pipe')) {
+			held = true;
+			entered.resolve();
+			await gate.promise;
+		}
+		return write(p, value);
+	};
+	docs.updateContent('chat.pipe', mine);
+	const saving = outcome(saveDocumentEditor(ws.view, 'chat.pipe') ?? undefined);
+	await entered.promise;
+	// step: a discard and a write of the same text queue behind the save, with no typing
+	const discarding = ws.view.discard('pipelines/chat.pipe');
+	const rewriting = ws.view.write('pipelines/chat.pipe', JSON.stringify(mine, null, 2), 'editor');
+	gate.resolve();
+	await discarding;
+	await rewriting;
+	const within = (promise: Promise<unknown>) => Promise.race([promise.then(() => 'settled'), new Promise((resolve) => setTimeout(() => resolve('stuck'), 2_000))]);
+	assert.equal(await within(saving), 'settled', 'the save does not wait on itself');
+	assert.equal(docs.getState().documents['chat.pipe']?.dirty, true, 'the path moved on after the save, so the tab is not marked clean');
+	assert.equal(await within(outcome(saveDocumentEditor(ws.view, 'chat.pipe') ?? undefined)), 'settled', 'the next save is not blocked');
+	leave();
+});
+
+test("the close dialog's Save checks the version as Ctrl+S does, also for the pipeline the canvas saved last", async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const { docs, pipePath, failures, leave, close } = await canvasForClose(s.alpha, s, ws);
+	// step: the user saves A, then edits it and undoes back to A
+	docs.updateContent('chat.pipe', { name: 'A', components: [] });
+	await ctrlS(ws.view, 'pipelines/chat.pipe');
+	docs.updateContent('chat.pipe', { name: 'X', components: [] });
+	docs.updateContent('chat.pipe', { name: 'A', components: [] });
+	// step: a teammate stores B, which the page has not heard of
+	s.store.files.set(pipePath, JSON.stringify({ name: 'B', components: [] }, null, 2));
+	// step: the close dialog's Save is refused, so the canvas shows its stale dialog and the tab stays open
+	assert.equal(await close(), false);
+	assert.ok(failures[0] instanceof StaleWriteError, 'the canvas got the refusal Ctrl+S gets');
+	assert.equal(JSON.parse(s.store.files.get(pipePath) as string).name, 'B');
+	leave();
+});
+
+test('a canvas that opens on a pipeline Documents restored with unsaved changes asks before its first save', async () => {
+	const s = storage();
+	const pipePath = `@/Team/=${s.alpha}/.projects/chat.pipe`;
+	// step: the page reloads with a dirty pipeline in its saved state; the stored file changed while it was closed
+	s.store.files.set(pipePath, JSON.stringify({ name: 'Changed while closed', components: [] }, null, 2));
+	const ws = await workspace(s.alpha);
+	const restored = {
+		documents: { 'chat.pipe': { uri: 'chat.pipe', content: { name: 'Mine', components: [] }, dirty: true, version: 4, editorCount: 1, isNew: false } },
+		editors: { 'editor-1': { id: 'editor-1', documentUri: 'chat.pipe', scrollTop: 0, scrollLeft: 0, cursorLine: 1, cursorColumn: 1, label: 'chat.pipe' } },
+		groups: { 'group-1': { id: 'group-1', editorIds: ['editor-1'], activeEditorIndex: 0 } },
+		rootNode: { type: 'leaf', id: 'group-1', groupId: 'group-1' },
+		activeGroupId: 'group-1',
+	};
+	const docs = new Documents({ vfs: createDocumentsVfs(s.store.client as never), workspace: { appState: { documents: restored }, updateAppState: () => {} } });
+	assert.equal(docs.getState().documents['chat.pipe']?.dirty, true);
+
+	// step: its canvas mounts at boot; something in the page has read the stored pipeline (the agent's read_file, say), so the server's freshness check passes
+	await ws.view.read('pipelines/chat.pipe');
+	const doc = canvasDocument(ws.view, docs, 'pipelines/chat.pipe', 'chat.pipe');
+	doc.projectVfs = createProjectVfs(s.store.client as never);
+	const leave = doc.open(() => doc.save(docs.getState().documents['chat.pipe']?.content));
+	await assert.rejects(ctrlS(ws.view, 'pipelines/chat.pipe')!, StaleWriteError, 'the first save asks Reload or Overwrite');
+	assert.equal(JSON.parse(s.store.files.get(pipePath) as string).name, 'Changed while closed');
+
+	// step: Overwrite saves the restored pipeline on purpose
+	await doc.save(docs.getState().documents['chat.pipe']?.content, { overwrite: true });
+	assert.equal(JSON.parse(s.store.files.get(pipePath) as string).name, 'Mine');
+	assert.equal(docs.getState().documents['chat.pipe']?.dirty, false);
+	leave();
+	docs.destroy();
+});
+
+test("a canvas reloading a pipeline leaves a text tab's unsaved typing on it guarding the file, and reads the stored pipeline, not the typing", async () => {
+	const s = storage();
+	const ws = await manualWorkspace(s.alpha);
+	const pipePath = `@/Team/=${s.alpha}/.projects/chat.pipe`;
+	s.store.files.set(pipePath, JSON.stringify({ name: 'Chat', components: [] }, null, 2));
+	const path = 'pipelines/chat.pipe';
+	await ws.view.write(path, JSON.stringify({ name: 'Agent', components: [] }, null, 2), 'agent');
+	const docs = new Documents(createDocumentsVfs(s.store.client as never));
+	await docs.openDocument('chat.pipe');
+	const doc = canvasDocument(ws.view, docs, path, 'chat.pipe');
+	doc.projectVfs = createProjectVfs(s.store.client as never);
+	const leave = doc.open(() => doc.save(docs.getState().documents['chat.pipe']?.content));
+	// step: the same pipeline is open in a text tab too, with unsaved typing
+	const text = fileDocument(ws.view, path);
+	const closeText = text.open();
+	await text.load();
+	const typed = JSON.stringify({ name: 'Typed in the text tab', components: [] });
+	text.type(typed);
+
+	// step: the user discards the agent's change; the clean canvas reloads, and its read is slow
+	const read = holdRead(s, pipePath);
+	await ws.view.discardPath(path);
+	await read.held;
+	const reloading = doc.reload;
+	assert.equal(ws.view.isDirty(path), true, "the text tab's typing still guards the pipeline");
+	assert.equal(await ws.view.read(path), typed, 'other readers still get the typing');
+	await assert.rejects(ws.view.rename(path, 'pipelines/renamed.pipe', 'workspace'), /Save or discard the unsaved changes in pipelines\/chat\.pipe first/);
+	read.release();
+
+	assert.equal(await reloading, true);
+	assert.equal((docs.getState().documents['chat.pipe']?.content as { name: string }).name, 'Chat', 'the canvas shows the stored pipeline');
+	assert.equal(text.text, typed, 'the text tab keeps its typing');
+	closeText();
+	leave();
+});
+
+// =============================================================================
+// SLOW READS AND SECOND EDITORS — what an editor loads, and under which version
+// =============================================================================
+
+test("a text tab opened over a canvas's unsaved pipeline shows the stored file, so after the canvas discards it the pipeline does not come back through the tab", async () => {
+	const s = storage();
+	const ws = await manualWorkspace(s.alpha);
+	const pipePath = `@/Team/=${s.alpha}/.projects/chat.pipe`;
+	s.store.files.set(pipePath, JSON.stringify({ name: 'Chat', components: [] }, null, 2));
+	const path = 'pipelines/chat.pipe';
+
+	// step: the canvas has unsaved changes, then the user opens the pipeline as text
+	const docs = new Documents(createDocumentsVfs(s.store.client as never));
+	await docs.openDocument('chat.pipe');
+	const doc = canvasDocument(ws.view, docs, path, 'chat.pipe');
+	doc.projectVfs = createProjectVfs(s.store.client as never);
+	const leave = doc.open(() => doc.save(docs.getState().documents['chat.pipe']?.content));
+	docs.updateContent('chat.pipe', { name: 'Unsaved on the canvas', components: [] });
+	const text = fileDocument(ws.view, path);
+	const closeText = text.open();
+	await text.load();
+	assert.deepEqual([JSON.parse(text.text as string).name, text.dirty], ['Chat', false], 'the text tab shows the stored pipeline, not the canvas changes');
+
+	// step: the canvas drops its changes (Discard mine), then the user edits the text tab and saves
+	assert.equal(await doc.reloadStored(), true);
+	await flush();
+	text.type(JSON.stringify({ name: 'Chat', components: [], note: 'mine' }, null, 2));
+	await text.save();
+	await ws.policy.commitAll();
+	assert.deepEqual(JSON.parse(s.store.files.get(pipePath) as string), { name: 'Chat', components: [], note: 'mine' }, 'the discarded canvas changes are not stored');
+	closeText();
+	leave();
+});
+
+test("a canvas's Overwrite asks again about a change that lands while it reads the stored pipeline", async () => {
+	const s = storage();
+	const ws = await manualWorkspace(s.alpha);
+	const pipePath = `@/Team/=${s.alpha}/.projects/chat.pipe`;
+	s.store.files.set(pipePath, JSON.stringify({ name: 'Chat', components: [] }, null, 2));
+	const path = 'pipelines/chat.pipe';
+	const docs = new Documents(createDocumentsVfs(s.store.client as never));
+	await docs.openDocument('chat.pipe');
+	const doc = canvasDocument(ws.view, docs, path, 'chat.pipe');
+	doc.projectVfs = createProjectVfs(s.store.client as never);
+	const leave = doc.open(() => doc.save(docs.getState().documents['chat.pipe']?.content));
+	docs.updateContent('chat.pipe', { name: 'Mine', components: [] });
+
+	// step: the agent changes the pipeline and Commit all stores it, so the canvas's save asks Reload or Overwrite
+	await ws.view.write(path, JSON.stringify({ name: 'Agent', components: [] }, null, 2), 'agent');
+	await ws.policy.commitAll();
+	const mine = () => docs.getState().documents['chat.pipe']?.content;
+	await assert.rejects(doc.save(mine()), StaleWriteError);
+
+	// step: the user picks Overwrite; its read of the stored pipeline is slow, and the agent changes it again meanwhile
+	const read = holdRead(s, pipePath);
+	const overwriting = doc.save(mine(), { overwrite: true });
+	await read.held;
+	await ws.view.write(path, JSON.stringify({ name: 'Agent again', components: [] }, null, 2), 'agent');
+	read.release();
+	await assert.rejects(overwriting, StaleWriteError, 'the save asks again');
+	assert.equal(JSON.parse(String((await ws.view.readVersioned(path, { stored: true })).content)).name, 'Agent again', "the agent's later change stays");
+	assert.equal((mine() as { name: string }).name, 'Mine', 'so does the canvas change');
+	leave();
+});
+
+// =============================================================================
+// THE SERVER'S COPY — the dev preview's reads, Reload, and a teammate's change
+// =============================================================================
+
+test("a text tab's Reload after a save refused for a teammate's change shows the server's copy, and the next save keeps the change", async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'apps/probe.txt';
+	const doc = fileDocument(ws.view, path);
+	const close = doc.open();
+	await doc.load();
+
+	// step: a teammate changes the file; the user types and saves, and the save is refused
+	s.store.files.set(s.a, 'const probe = 2; // teammate');
+	doc.type('const probe = 1; // mine');
+	await assert.rejects(doc.save(), StaleWriteError);
+	assert.equal(doc.stale, true);
+
+	// step: Reload shows the server's copy, clean; a save on top of it lands and keeps the teammate's change
+	await doc.discard();
+	assert.deepEqual([doc.text, doc.dirty, doc.stale], ['const probe = 2; // teammate', false, false]);
+	doc.type('const probe = 2; // teammate, then mine');
+	await doc.save();
+	assert.equal(s.store.files.get(s.a), 'const probe = 2; // teammate, then mine');
+	close();
+});
+
+test("the first Overwrite after a save refused for a teammate's change writes, in a text tab and on a canvas", async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	// step: Overwrite's own read takes the teammate's copy in, which moves the version once more
+	const doc = fileDocument(ws.view, 'apps/probe.txt');
+	const close = doc.open();
+	await doc.load();
+	s.store.files.set(s.a, 'const probe = 2; // teammate');
+	doc.type('const probe = 1; // mine');
+	await assert.rejects(doc.save(), StaleWriteError);
+	await doc.save(true);
+	assert.equal(s.store.files.get(s.a), 'const probe = 1; // mine');
+	close();
+
+	const pipePath = `@/Team/=${s.alpha}/.projects/chat.pipe`;
+	s.store.files.set(pipePath, JSON.stringify({ name: 'Chat', components: [] }, null, 2));
+	const docs = new Documents(createDocumentsVfs(s.store.client as never));
+	await docs.openDocument('chat.pipe');
+	const canvas = canvasDocument(ws.view, docs, 'pipelines/chat.pipe', 'chat.pipe');
+	canvas.projectVfs = createProjectVfs(s.store.client as never);
+	const content = () => docs.getState().documents['chat.pipe']?.content;
+	const leave = canvas.open(() => canvas.save(content()));
+	s.store.files.set(pipePath, JSON.stringify({ name: 'Teammate', components: [] }, null, 2));
+	docs.updateContent('chat.pipe', { name: 'Mine', components: [] });
+	await assert.rejects(canvas.save(content()), StaleWriteError);
+	await canvas.save(content(), { overwrite: true });
+	assert.equal(JSON.parse(s.store.files.get(pipePath) as string).name, 'Mine');
+	leave();
+});
+
+test("editing a canvas during its Reload keeps the edit, and a save of it is refused, so the teammate's change stays", { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const pipePath = `@/Team/=${s.alpha}/.projects/chat.pipe`;
+	s.store.files.set(pipePath, JSON.stringify({ name: 'Chat', components: [] }, null, 2));
+	const path = 'pipelines/chat.pipe';
+	const docs = new Documents(createDocumentsVfs(s.store.client as never));
+	await docs.openDocument('chat.pipe');
+	const doc = canvasDocument(ws.view, docs, path, 'chat.pipe');
+	doc.projectVfs = createProjectVfs(s.store.client as never);
+	const content = () => docs.getState().documents['chat.pipe']?.content as { name: string };
+	const leave = doc.open(() => doc.save(content()));
+	s.store.files.set(pipePath, JSON.stringify({ name: 'Teammate', components: [] }, null, 2));
+	docs.updateContent('chat.pipe', { name: 'Mine', components: [] });
+	await assert.rejects(doc.save(content()), StaleWriteError);
+
+	// step: the user clicks Reload; its read of the server's pipeline is slow, and the user edits the canvas meanwhile
+	const read = holdRead(s, pipePath);
+	const reloading = doc.reloadStored();
+	await read.held;
+	docs.updateContent('chat.pipe', { name: 'Edited during the reload', components: [] });
+	read.release();
+	assert.equal(await reloading, false, 'the edit stays');
+	assert.equal(content().name, 'Edited during the reload');
+	await assert.rejects(doc.save(content()), StaleWriteError);
+	assert.equal(JSON.parse(s.store.files.get(pipePath) as string).name, 'Teammate');
+
+	// step: Reload again, with nothing edited meanwhile, shows the change
+	assert.equal(await doc.reloadStored(), true);
+	assert.deepEqual([content().name, docs.getState().documents['chat.pipe']?.dirty], ['Teammate', false]);
+	leave();
+});
+
+// =============================================================================
+// A SAVE CALLED WHILE A SAVE RUNS — Ctrl+S again, and the agent's Save mine first
+// =============================================================================
+
+test('Ctrl+S on a canvas again while its save is on its way waits for that save, and is not refused as a change from outside this editor', { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const { docs, doc, pipePath, failures, leave } = await canvasForClose(s.alpha, s, ws);
+	const path = 'pipelines/chat.pipe';
+	docs.updateContent('chat.pipe', { name: 'Mine', components: [] });
+	const write = holdWrite(s, pipePath);
+	const first = ctrlS(ws.view, path);
+	await write.held;
+
+	// step: the second Ctrl+S saves the same pipeline: it is the first save, and the document stays saving
+	const second = ctrlS(ws.view, path);
+	await flush();
+	assert.equal(doc.saving, true, 'still saving: the first write has not landed');
+	write.release();
+	await first;
+	await second;
+	assert.deepEqual(failures, []);
+	assert.equal(JSON.parse(s.store.files.get(pipePath) as string).name, 'Mine');
+	assert.equal(s.store.landed.filter((w) => w.path === pipePath).length, 1, 'one store write');
+	assert.deepEqual([docs.getState().documents['chat.pipe']?.dirty, doc.saving, doc.version], [false, false, ws.view.version(path)]);
+	leave();
+});
+
+// =============================================================================
+// A SAVE THE USER DROPPED — Discard mine, Reload, Overwrite and close while a save waits its turn
+// =============================================================================
+
+/**
+ * Records every content the store is given for a path. Set it up before any
+ * holdWrite of the path, so a held write is recorded when it lands.
+ *
+ * @param s - The fake store.
+ * @param path - The store path.
+ * @returns The contents, in the order they landed.
+ */
+function storeWrites(s: ReturnType<typeof storage>, path: string): string[] {
+	const landed: string[] = [];
+	const write = s.store.client.fsWriteString;
+	s.store.client.fsWriteString = async (p: string, value: string) => {
+		await write(p, value);
+		if (p === path) landed.push(value);
+	};
+	return landed;
+}
+
+/**
+ * A pipeline open on a canvas whose save is PipelineProvider's: it saves
+ * what Documents holds, records its failure and rethrows. A save the user
+ * dropped is no failure (performSave shows nothing for it), but it rethrows
+ * too.
+ *
+ * @param s - The fake store.
+ * @param ws - The workspace.
+ * @param pipeline - What the stored pipeline holds.
+ */
+async function openCanvas(s: ReturnType<typeof storage>, ws: Workspace, pipeline: unknown) {
+	const pipePath = `@/Team/=${s.alpha}/.projects/chat.pipe`;
+	s.store.files.set(pipePath, JSON.stringify(pipeline, null, 2));
+	const docs = new Documents(createDocumentsVfs(s.store.client as never));
+	await docs.openDocument('chat.pipe');
+	const doc = canvasDocument(ws.view, docs, 'pipelines/chat.pipe', 'chat.pipe');
+	doc.projectVfs = createProjectVfs(s.store.client as never);
+	const content = () => docs.getState().documents['chat.pipe']?.content;
+	const dirty = () => docs.getState().documents['chat.pipe']?.dirty;
+	const failures: unknown[] = [];
+	const leave = doc.open(async () => {
+		try {
+			await doc.save(content());
+		} catch (err) {
+			if (!(err instanceof SaveDroppedError)) failures.push(err);
+			throw err;
+		}
+	});
+	return { docs, doc, pipePath, content, dirty, failures, leave, landed: storeWrites(s, pipePath) };
+}
+
+/** The names of the pipelines the store was given, in order. */
+function names(landed: string[]): string[] {
+	return landed.map((content) => (JSON.parse(content) as { name: string }).name);
+}
+
+test('a canvas Reload while a second save waits its turn drops that save, and a save of the same pipeline after the Reload is a new save that writes it', { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const { docs, doc, pipePath, content, dirty, failures, leave, landed } = await openCanvas(s, ws, { name: 'Chat', components: [] });
+	const path = 'pipelines/chat.pipe';
+	docs.updateContent('chat.pipe', { name: 'Saved', components: [] });
+	const write = holdWrite(s, pipePath);
+	const first = ctrlS(ws.view, path);
+	await write.held;
+	docs.updateContent('chat.pipe', { name: 'Dropped', components: [] });
+	const queued = ctrlS(ws.view, path);
+
+	// step: the user clicks Reload before the first write lands; the reload reads the pipeline once the write is done
+	const reloading = doc.reloadStored();
+	write.release();
+	await first;
+	await assert.rejects(queued!, SaveDroppedError);
+	assert.equal(await reloading, true);
+	assert.deepEqual(names(landed), ['Saved'], 'the dropped pipeline is never written');
+	assert.deepEqual([(content() as { name: string }).name, dirty(), doc.saving], ['Saved', false, false]);
+
+	// step: the user saves, and while the write is on its way changes the pipeline, presses Ctrl+S and clicks Reload. During the
+	// reload's read they make the same change again, which Documents keeps over the read, and save it: a new save, at the version the write left
+	docs.updateContent('chat.pipe', { name: 'Saved, then more', components: [] });
+	const again = holdWrite(s, pipePath);
+	const third = ctrlS(ws.view, path);
+	await again.held;
+	docs.updateContent('chat.pipe', { name: 'Dropped', components: [] });
+	const fourth = ctrlS(ws.view, path);
+	const dropping = doc.reloadStored();
+	docs.updateContent('chat.pipe', { name: 'Dropped', components: [] });
+	const fifth = ctrlS(ws.view, path);
+	again.release();
+	await third;
+	await assert.rejects(fourth!, SaveDroppedError);
+	assert.equal(await dropping, false, 'the typing during the reload stays');
+	await fifth;
+	assert.deepEqual(names(landed), ['Saved', 'Saved, then more', 'Dropped'], 'the save after the Reload wrote the pipeline, at the version the save before it left');
+	assert.deepEqual([dirty(), doc.saving, doc.version], [false, false, ws.view.version(path)]);
+	assert.deepEqual(failures, []);
+	leave();
+});
+
+test("a canvas's Overwrite drops the saves waiting their turn, so an older pipeline is not written and shows no failure", { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const { docs, doc, pipePath, content, dirty, failures, leave, landed } = await openCanvas(s, ws, { name: 'Chat', components: [] });
+	const path = 'pipelines/chat.pipe';
+	docs.updateContent('chat.pipe', { name: 'Saved', components: [] });
+	const write = holdWrite(s, pipePath);
+	const first = ctrlS(ws.view, path);
+	await write.held;
+	docs.updateContent('chat.pipe', { name: 'Older', components: [] });
+	const queued = ctrlS(ws.view, path);
+
+	// step: the user changes the canvas again and picks Overwrite before the first write lands
+	docs.updateContent('chat.pipe', { name: 'Overwritten', components: [] });
+	const overwriting = doc.save(content(), { overwrite: true });
+	write.release();
+	await first;
+	await assert.rejects(queued!, SaveDroppedError);
+	await overwriting;
+	assert.deepEqual(names(landed), ['Saved', 'Overwritten'], 'the older pipeline is never written');
+	assert.deepEqual([dirty(), doc.saving, doc.version], [false, false, ws.view.version(path)]);
+	assert.deepEqual(failures, []);
+	leave();
+});
+
+test("a Reload while a text tab's second save waits its turn drops that save, so typing after it is not saved over the first save, and the tab asks", { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'apps/probe.txt';
+	const landed = storeWrites(s, s.a);
+	const doc = fileDocument(ws.view, path);
+	const close = doc.open();
+	await doc.load();
+
+	// step: the user types and saves; while the write is on its way they type more and press Ctrl+S again, and that save waits its turn
+	doc.type('const probe = 1; // saved');
+	const write = holdWrite(s, s.a);
+	const first = doc.save();
+	await write.held;
+	doc.type('const probe = 1; // saved, then dropped');
+	const queued = doc.save();
+
+	// step: the user clicks Reload, then types on the stored text the tab shows
+	await doc.discard();
+	assert.equal(doc.text, 'const probe = 1;');
+	doc.type('const probe = 1; // typed after the discard');
+	write.release();
+	await first;
+	await assert.rejects(queued, SaveDroppedError);
+	await flush();
+	assert.deepEqual(landed, ['const probe = 1; // saved'], 'neither the dropped text nor the typing after the discard is written');
+	assert.deepEqual([doc.text, doc.dirty, doc.stale, doc.saving], ['const probe = 1; // typed after the discard', true, true, false], 'the typing stays, and the tab asks Reload or Overwrite: it does not hold the first save');
+	await assert.rejects(doc.save(), StaleWriteError);
+	assert.equal(s.store.files.get(s.a), 'const probe = 1; // saved');
+	close();
+});
+
+test("a text tab's second Overwrite drops the first one and the save waiting its turn, so only the text at the second click is written", { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'apps/probe.txt';
+	const doc = fileDocument(ws.view, path);
+	const close = doc.open();
+	await doc.load();
+	s.store.files.set(s.a, 'const probe = 2; // teammate');
+	doc.type('const probe = 1; // mine');
+	await assert.rejects(doc.save(), StaleWriteError);
+	const landed = storeWrites(s, s.a);
+
+	// step: the user picks Overwrite and its read of the server's copy is slow; they type, press Ctrl+S, and pick Overwrite again
+	const read = holdRead(s, s.a);
+	const first = doc.save(true);
+	await read.held;
+	doc.type('const probe = 1; // mine, then more');
+	const queued = doc.save();
+	const second = doc.save(true);
+	read.release();
+	await assert.rejects(first, SaveDroppedError);
+	await assert.rejects(queued, SaveDroppedError);
+	await second;
+	assert.deepEqual(landed, ['const probe = 1; // mine, then more'], 'the text at the first click is never written');
+	assert.deepEqual([doc.dirty, doc.stale, doc.saving, doc.saveError], [false, false, false, null]);
+	close();
+});
+
+// =============================================================================
+// A SAVE THAT OUTLIVES ITS CANVAS: a move, a split, a layout change and a team switch keep it
+// =============================================================================
+
+/** How a promise settled: 'saved' when it resolved, else what it rejected with. */
+function outcome(work: Promise<unknown> | undefined): Promise<unknown> {
+	return (work ?? Promise.resolve()).then(
+		() => 'saved',
+		(err: unknown) => err
+	);
+}
+
+/**
+ * Saves a pipeline, then, while that write is held, changes it and saves
+ * again, so the second save waits its turn (Ctrl+S twice).
+ *
+ * @param s - The fake store.
+ * @param ws - The workspace.
+ * @param docs - The Documents that holds the pipeline.
+ * @param pipePath - The pipeline's store path.
+ * @returns The two saves, and lets the first write land.
+ */
+async function twoSaves(s: ReturnType<typeof storage>, ws: Workspace, docs: Documents, pipePath: string) {
+	docs.updateContent('chat.pipe', { name: 'First', components: [] });
+	const write = holdWrite(s, pipePath);
+	const first = outcome(ctrlS(ws.view, 'pipelines/chat.pipe'));
+	await write.held;
+	docs.updateContent('chat.pipe', { name: 'Second', components: [] });
+	const second = outcome(ctrlS(ws.view, 'pipelines/chat.pipe'));
+	return { first, second, release: write.release };
+}
+
+test("two canvases of one pipeline share its document: a save from each split waits its turn, and closing one split keeps the other's save", { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const { docs, doc: left, pipePath, content, dirty, failures, leave, landed } = await openCanvas(s, ws, { name: 'Original', components: [] });
+	// step: the user splits the group, and a second canvas of the pipeline mounts beside the first
+	docs.splitGroupWithDocument(docs.getState().activeGroupId, 'horizontal');
+	const right = canvasDocument(ws.view, docs, 'pipelines/chat.pipe', 'chat.pipe');
+	right.projectVfs = left.projectVfs;
+	const leaveRight = right.open(() => right.save(content()));
+	// step: Ctrl+S in the left canvas, whose write the store holds, then typing and Ctrl+S in the right one
+	docs.updateContent('chat.pipe', { name: 'First', components: [] });
+	const write = holdWrite(s, pipePath);
+	const first = outcome(left.save(content()));
+	await write.held;
+	docs.updateContent('chat.pipe', { name: 'Second', components: [] });
+	const second = outcome(right.save(content()));
+	// step: the user closes the left split while the right one's save waits its turn
+	docs.closeEditor(Object.keys(docs.getState().editors)[0]);
+	leave();
+	write.release();
+	assert.deepEqual([await first, await second], ['saved', 'saved']);
+	await flush();
+	assert.deepEqual(names(landed), ['First', 'Second'], "the right split's save is written after the left one's");
+	assert.deepEqual([dirty(), right.version, failures], [false, ws.view.version('pipelines/chat.pipe'), []]);
+	leaveRight();
+});
+
+test("a team switch while a canvas's second save waits its turn keeps that save in the team it was called in", { timeout: 10_000 }, async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const { docs, doc, pipePath, failures, leave, landed } = await openCanvas(s, ws, { name: 'Original', components: [] });
+	const path = 'pipelines/chat.pipe';
+	const { first, second, release } = await twoSaves(s, ws, docs, pipePath);
+
+	// step: the user switches team. RocketApp tears Documents down, which unmounts every canvas, and builds the new
+	// team's workspace, which parks the old one: a write that starts after it stays staged there
+	docs.destroy();
+	leave();
+	await workspace(s.beta);
+	release();
+	assert.deepEqual([await first, await second], ['saved', 'saved']);
+	await flush();
+	assert.deepEqual(names(landed), ['First'], 'the first save had reached the store');
+	assert.equal(JSON.parse(String(await ws.view.read(path))).name, 'Second', "the second is staged in the old team's workspace, which a return to the team brings back");
+	assert.equal(s.store.files.get(`@/Team/=${s.beta}/.projects/chat.pipe`), undefined, 'the new team is untouched');
+	assert.deepEqual([doc.saving, failures], [false, []]);
+	assert.equal(ws.view.isDirty(path), false, "no canvas shows the old team's pipeline, so it guards nothing");
+});
+
+// =============================================================================
+// WHAT WAITS ON A SAVE: Save & Run, publish, Save mine first and the close dialog's Save stop when it is dropped
+// =============================================================================

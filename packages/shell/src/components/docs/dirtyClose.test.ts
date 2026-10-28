@@ -236,3 +236,75 @@ test('restore prunes documents and editors nothing can reach', () => {
 	assert.ok(s.documents['live.txt'], 'reachable document kept');
 	assert.equal(s.documents['live.txt']?.editorCount, 1, 'count rebuilt from real references');
 });
+
+test('a save that throws abandons the close: the document stays open and dirty', async () => {
+	const { docs, vfs, asked } = withPolicy('save', { 'a.txt': 'original' });
+	await openDirty(docs, 'a.txt');
+	// The app's adapter rejects a save it could not land (a refused or failed write).
+	vfs.write = async () => {
+		throw new Error('the file changed on the server');
+	};
+
+	const closed = await docs.requestCloseEditor(editorIds(docs)[0]!);
+
+	assert.equal(asked.length, 1);
+	assert.equal(closed, false, 'the close is abandoned, not rejected');
+	assert.equal(docs.getState().documents['a.txt']?.dirty, true, 'the unsaved content is still there');
+	assert.equal(editorIds(docs).length, 1, 'the tab stays open');
+});
+
+test('revertDocument does not land on a document closed and opened again while its read was in flight', async () => {
+	const { docs, vfs } = withPolicy('discard', { 'a.txt': 'original' });
+	await docs.openDocument('a.txt');
+	await docs.revertDocument('a.txt');
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	const read = vfs.read;
+	vfs.read = async () => {
+		await gate;
+		return 'read for the closed document';
+	};
+
+	const reverting = docs.revertDocument('a.txt');
+	// The user closes the last tab, opens the file again and types once.
+	docs.closeEditor(editorIds(docs)[0]!);
+	vfs.read = read;
+	await docs.openDocument('a.txt');
+	docs.updateContent('a.txt', 'typed in the new tab');
+	assert.equal(docs.getState().documents['a.txt']?.version, 2, 'the new document is at the version the revert started at');
+	release();
+	await reverting;
+
+	const doc = docs.getState().documents['a.txt'];
+	assert.equal(doc?.content, 'typed in the new tab', 'the old read is not applied to the new document');
+	assert.equal(doc?.dirty, true);
+});
+
+test('saveDocument leaves typing that lands while its write is in flight unsaved, and a document opened again meanwhile too', async () => {
+	for (const reopen of [false, true]) {
+		const { docs, vfs } = withPolicy('save', { 'a.txt': 'original' });
+		await openDirty(docs, 'a.txt');
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		const write = vfs.write;
+		vfs.write = async (path: string, content: unknown) => {
+			await gate;
+			return write(path, content);
+		};
+
+		const saving = docs.saveDocument('a.txt');
+		if (reopen) {
+			// The user closes the last tab, opens the file again and types once.
+			docs.closeEditor(editorIds(docs)[0]!);
+			await docs.openDocument('a.txt');
+		}
+		docs.updateContent('a.txt', 'typed during the write');
+		release();
+		await saving;
+
+		const doc = docs.getState().documents['a.txt'];
+		assert.equal(vfs.files['a.txt'], 'edited', 'the write landed');
+		assert.equal(doc?.content, 'typed during the write');
+		assert.equal(doc?.dirty, true, reopen ? 'the new document keeps its typing unsaved' : 'the typing was not written');
+	}
+});

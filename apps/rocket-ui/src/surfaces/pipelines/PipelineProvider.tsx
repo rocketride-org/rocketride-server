@@ -30,7 +30,9 @@
 // owns and no other host does:
 //
 //   - the Documents-store document: save / save-as (SaveFileDialog over the
-//     project VFS), dirty-run choreography, tab re-pointing after save-as;
+//     project VFS), dirty-run choreography, tab re-pointing after save-as. A
+//     save names the version the canvas loaded (canvasDocument.ts), so a
+//     pipeline that changed outside this editor offers Reload or Overwrite;
 //   - run settings resolution (the pipeline-builder settings) and the
 //     client.use/terminate/restart verbs;
 //   - the subscription prompt (shell:subscribe toward the shell's
@@ -49,7 +51,11 @@ import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
 import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
 import type { TraceLevel, ViewState } from 'shared/tools/pipelines';
 import { displayName as projectDisplayName } from '../workspace/projectStore';
-import { createProjectVfs } from '../workspace/projectVfs';
+import { createProjectVfs, pipelineViewPath } from '../workspace/projectVfs';
+import { getWorkspaceVfs } from '../workspace/vfs/workspace';
+import { RESTORED, useCanvasDocument, type CanvasDocs } from './canvasDocument';
+import { StaleVersionError, StaleWriteError } from 'shared/modules/vfs/stagedFileSystem';
+import { SaveDroppedError } from 'shared/modules/agent/host';
 import { downloadJson } from '../../utils/downloadFile';
 
 // =============================================================================
@@ -135,6 +141,8 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	// cleared to dismiss the ConfirmDialog, but the ref survives)
 	const deferredRunRef = useRef<{ action: string; source?: string } | null>(null);
 	const [pipelineError, setPipelineError] = useState<string | null>(null);
+	// True when pipelineError is a save refused because the file changed outside this editor.
+	const [staleSave, setStaleSave] = useState(false);
 
 	const projectId = pipeline?.project_id ?? '';
 	const filename = uri;
@@ -142,6 +150,20 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	// Project-store VFS for the stock SaveFileDialog — the dialog loads its own
 	// folder tree and drives its own overwrite confirm through this adapter.
 	const projectVfs = useMemo(() => createProjectVfs(client), [client]);
+
+	// --- The canvas document: the loaded version and the overlay -------------
+
+	const viewPath = pipelineViewPath(uri);
+	// Only a saved, editable file has a version to check and changes the agent could hit.
+	const tracked = !isReadonly && !isNew;
+	// The latest pipeline, and this canvas's save (set below), for the document's registration.
+	const pipelineRef = useRef(pipeline);
+	pipelineRef.current = pipeline;
+	const saveRef = useRef<() => Promise<void>>(async () => undefined);
+	const canvasSave = useCallback(() => saveRef.current(), []);
+	// Shared with every split of this document.
+	const doc = useCanvasDocument(getWorkspaceVfs(), getDocs() as CanvasDocs, viewPath, uri, canvasSave, tracked);
+	doc.projectVfs = projectVfs;
 
 	// --- Viewport restore on view activation ----------------------------------
 
@@ -161,26 +183,55 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	 * @param project      - The pipeline configuration to save.
 	 * @param opts         - When `rethrow` is set, a save failure re-throws
 	 *   after surfacing the error (the save-and-publish path awaits the save,
-	 *   so a swallowed failure would publish an unsaved pipeline).
+	 *   so a swallowed failure would publish an unsaved pipeline). A save the
+	 *   user dropped meanwhile shows nothing (with `rethrow` it rejects with
+	 *   SaveDroppedError). `overwrite` saves over a newer pipeline (the stale
+	 *   dialog's Overwrite).
 	 */
 	const performSave = useCallback(
-		async (saveFilename: string, project: PipelineConfig, opts?: { rethrow?: boolean }) => {
-			if (!client || !isConnected) return;
+		async (saveFilename: string, project: PipelineConfig, opts?: { rethrow?: boolean; overwrite?: boolean }) => {
+			if (!client || !isConnected) {
+				// step: a caller that waits on the save (the close dialog's Save) must not take this for one that landed
+				if (opts?.rethrow) throw new Error('Not connected');
+				return;
+			}
 			try {
-				await projectVfs.write(saveFilename, project);
-				// Mark clean in Documents model
-				await getDocs()?.saveDocument(uri);
+				await doc.save(project, { overwrite: opts?.overwrite, filename: saveFilename });
+				setStaleSave(false);
 				window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId } }));
 			} catch (err) {
+				// step: the user dropped this pipeline while the save waited: nothing to show, but it did not land
+				if (err instanceof SaveDroppedError) {
+					if (opts?.rethrow) throw err;
+					return;
+				}
 				console.error('[PipelineProvider] Save failed:', err);
 				// Surface the failure — a silent catch leaves the user believing
 				// the document was saved.
-				setPipelineError(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+				const stale = err instanceof StaleWriteError;
+				const restored = err instanceof StaleVersionError && err.expected === RESTORED;
+				setStaleSave(stale);
+				setPipelineError(restored ? 'These unsaved changes were restored from before the page reloaded, so the stored pipeline may have changed since. Reload it to see the stored pipeline, or overwrite it with your version.' : stale ? 'This pipeline changed outside this editor since it was loaded. Reload it to see the change, or overwrite it with your version.' : `Save failed: ${err instanceof Error ? err.message : String(err)}`);
 				if (opts?.rethrow) throw err;
 			}
 		},
-		[client, isConnected, projectId, uri, projectVfs]
+		[client, isConnected, projectId, doc]
 	);
+
+	/** The stale dialog's Reload (see CanvasDocument.reloadStored); true when the stored pipeline was loaded. */
+	const reloadStored = useCallback(async (): Promise<boolean> => {
+		const reloaded = await doc.reloadStored();
+		if (reloaded) setStaleSave(false);
+		return reloaded;
+	}, [doc]);
+
+	// The document saves through the newest canvas, which shows a failure.
+	saveRef.current = () => performSave(filename, pipelineRef.current, { rethrow: true });
+
+	// The view hears each dirty flip: the agent reads the overlay.
+	useEffect(() => {
+		if (tracked) getWorkspaceVfs().notify();
+	}, [isDirty, tracked]);
 
 	// --- Pipeline run/stop/restart -------------------------------------------
 
@@ -340,13 +391,12 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		const run = pendingRun;
 		setPendingRun(null);
 		if (!client || !isConnected) return;
-		projectVfs.write(filename, pipeline)
-			.then(() => {
-				getDocs()?.saveDocument(uri);
-				executePipelineAction(run.action, run.source);
-			})
-			.catch((err) => setPipelineError(err instanceof Error ? err.message : String(err)));
-	}, [pendingRun, isNew, filename, pipeline, client, isConnected, uri, executePipelineAction, projectVfs]);
+		// step: performSave shows its own failure; the run only follows a save that landed, so a save the
+		// user dropped meanwhile (it rejects with SaveDroppedError) runs nothing
+		performSave(filename, pipeline, { rethrow: true })
+			.then(() => executePipelineAction(run.action, run.source))
+			.catch(() => undefined);
+	}, [pendingRun, isNew, filename, pipeline, client, isConnected, executePipelineAction, performSave]);
 
 	// --- Publish (client.deploy.add of the saved snapshot) --------------------
 
@@ -389,7 +439,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			onViewStateChange: (viewState: ViewState) => onViewStateChangeProp?.({ ...viewState }),
 			onContentChanged,
 			save: handleSave,
-			// The publish flow awaits the save; a failed save MUST abort it.
+			// The publish flow awaits the save; a failed or dropped save MUST abort it.
 			saveDocument: () => performSave(filename, pipeline, { rethrow: true }),
 			publish: handlePublish,
 			runAction,
@@ -410,7 +460,28 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			    folder, so it opens at root with its "Untitled-N" placeholder). */}
 			{saveDialogOpen && <SaveFileDialog title="Save Pipeline As" vfs={projectVfs} fileTypes={[{ label: 'RocketRide Pipeline', extension: '.pipe' }]} defaultDir={filename.includes('/') ? filename.slice(0, filename.lastIndexOf('/')) : ''} initialName={projectDisplayName(filename)} onConfirm={handleSaveDialogConfirm} onCancel={() => setSaveDialogOpen(false)} />}
 			{pendingRun && <ConfirmDialog title="Unsaved Changes" message="The pipeline has unsaved changes. Save before running?" confirmLabel="Save & Run" cancelLabel="Cancel" onConfirm={handleSaveAndRun} onCancel={() => setPendingRun(null)} />}
-			{pipelineError && <ConfirmDialog title="Pipeline Error" message={pipelineError} confirmLabel="OK" onConfirm={() => setPipelineError(null)} onCancel={() => setPipelineError(null)} />}
+			{pipelineError && !staleSave && <ConfirmDialog title="Pipeline Error" message={pipelineError} confirmLabel="OK" onConfirm={() => setPipelineError(null)} onCancel={() => setPipelineError(null)} />}
+			{pipelineError && staleSave && (
+				<ConfirmDialog
+					title="Pipeline changed"
+					message={pipelineError}
+					confirmLabel="Reload"
+					secondaryLabel="Overwrite"
+					cancelLabel="Cancel"
+					onConfirm={() => {
+						setPipelineError(null);
+						// step: a reload that fails keeps the dialog, so Overwrite stays the only way past the change
+						void reloadStored().then((reloaded) => {
+							if (!reloaded) setPipelineError('This pipeline could not be loaded again: the stored file is gone, is not valid JSON, or could not be read. Overwrite saves your version over it.');
+						});
+					}}
+					onSecondary={() => {
+						setPipelineError(null);
+						void performSave(filename, pipeline, { overwrite: true });
+					}}
+					onCancel={() => setPipelineError(null)}
+				/>
+			)}
 		</div>
 	);
 };
