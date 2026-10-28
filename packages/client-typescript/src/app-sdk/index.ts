@@ -76,6 +76,7 @@ export type {
 
 	// Event map
 	ShellEventMap,
+	TelemetryFact,
 } from './types';
 
 // =============================================================================
@@ -83,7 +84,7 @@ export type {
 // =============================================================================
 
 import type { RocketRideClient } from '../client/index';
-import type { IWorkspaceContext, ShellApiConfig, ConnectResult, DocumentsState, Document, ShellEventMap } from './types';
+import type { IWorkspaceContext, ShellApiConfig, ConnectResult, DocumentsState, Document, ShellEventMap, TelemetryFact } from './types';
 
 // =============================================================================
 // CONNECTION HOOKS
@@ -218,6 +219,12 @@ export declare const connectionManager: {
 	emit<K extends keyof ShellEventMap>(event: K, payload: ShellEventMap[K]): void;
 	/** Subscribe to a typed shell event. Returns an unsubscribe function. */
 	on<K extends keyof ShellEventMap>(event: K, handler: (payload: ShellEventMap[K]) => void): () => void;
+	/**
+	 * Hand over the telemetry facts the shell held because no app was
+	 * subscribed to `shell:telemetry`, oldest first, and clear the hold. Call it
+	 * once at the app's analytics init, then subscribe for the rest.
+	 */
+	drainTelemetry(): TelemetryFact[];
 	/** Returns the RocketRide client singleton, or null if not initialised. */
 	getClient(): import('../client/index').RocketRideClient | null;
 	/** Returns true when the WebSocket is authenticated and connected. */
