@@ -193,6 +193,7 @@ reads that lane; anything unmatched falls through to the raw/tags lane.
 | --- | --- |
 | `application/json` | `json` |
 | `text/*` | `text` |
+| `application/json`, `application/xml`, `application/x-ndjson`, `application/yaml`, `application/*+json`, `application/*+xml`, when nothing reads their own lane | `text` |
 | `image/*`, `video/*`, `audio/*` | `image`, `video`, `audio` |
 | `application/rocketride-question+json` | `questions` |
 | `application/rocketlib-tag` | `tags` |

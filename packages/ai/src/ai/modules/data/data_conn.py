@@ -73,6 +73,30 @@ LANE_BINDER_METHODS = {'tag': 'tags', 'raw': 'tags'}
 # out of any "lanes you could send to" list.
 LANE_LIFECYCLE_METHODS = frozenset({'open', 'closing', 'close'})
 
+# Structured formats that are still plain text. When no component reads the
+# format's own lane, a body in one of these goes to the text lane if some
+# component reads text, instead of falling through to raw where an agent behind
+# a text lane never sees it. `+json` and `+xml` suffix types count too.
+TEXT_LANE_FALLBACK_TYPES = frozenset(
+    {'application/json', 'application/xml', 'application/x-ndjson', 'application/yaml', 'application/x-yaml'}
+)
+
+
+def _is_text_format(mime_base: str) -> bool:
+    """
+    Tell whether a MIME type without parameters is a structured text format.
+
+    Args:
+        mime_base: Lower-case MIME type with any ``;`` parameters removed.
+
+    Returns:
+        bool: True for the types in ``TEXT_LANE_FALLBACK_TYPES`` and any
+        ``application/*+json`` or ``application/*+xml`` type.
+    """
+    if mime_base in TEXT_LANE_FALLBACK_TYPES:
+        return True
+    return mime_base.startswith('application/') and mime_base.endswith(('+json', '+xml'))
+
 
 def _trim_tool_data(value: Any) -> Any:
     """
@@ -320,6 +344,9 @@ class DataConn(DAPConn):
         # Get the listeners on this pipe
         listeners = pipe_instance.getListeners()
 
+        # The MIME type without parameters such as charset
+        mime_base = mime_type.split(';', 1)[0].strip().lower()
+
         # If this is rocketlib tag data, we can send it out directly on the tag lane
         if mime_type == 'application/rocketlib-tag':
             return 'tag'
@@ -329,11 +356,20 @@ class DataConn(DAPConn):
             return 'questions'
 
         # If this is json content and we have a json listener
-        elif mime_type.split(';', 1)[0].strip() == 'application/json' and 'json' in listeners:
+        elif mime_base == 'application/json' and 'json' in listeners:
             return 'json'
 
         # If this is text content and we have a text listener
         elif mime_type.startswith('text/') and 'text' in listeners:
+            return 'text'
+
+        # If this is structured text (JSON, XML, ...) that nothing reads on its
+        # own lane, and we have a text listener. A question keeps its own path.
+        elif (
+            _is_text_format(mime_base)
+            and not mime_base.startswith('application/rocketride-question')
+            and 'text' in listeners
+        ):
             return 'text'
 
         # If this is image content and we have an image listener

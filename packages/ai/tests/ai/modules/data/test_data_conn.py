@@ -109,6 +109,47 @@ def test_determine_lane_json_tolerates_charset_parameter():
 
 
 @pytest.mark.parametrize(
+    'mime',
+    [
+        'application/json',
+        'application/json; charset=utf-8',
+        'Application/JSON',
+        'application/vnd.github+json',
+        'application/xml',
+        'application/atom+xml',
+        'application/x-ndjson',
+        'application/yaml',
+    ],
+)
+def test_determine_lane_structured_text_goes_to_text_when_only_text_is_read(mime):
+    """JSON, XML and similar bodies reach a text reader instead of falling to raw."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['text'])
+    assert conn._determine_lane(mime, pipe) == 'text'
+
+
+def test_determine_lane_json_prefers_json_lane_over_text():
+    """With both readers present, JSON keeps going to the json lane."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['json', 'text'])
+    assert conn._determine_lane('application/json', pipe) == 'json'
+
+
+def test_determine_lane_question_without_questions_listener_does_not_become_text():
+    """A question body never turns into plain text, even when text is read."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['text'])
+    assert conn._determine_lane('application/rocketride-question+json', pipe) == 'raw'
+
+
+def test_determine_lane_structured_text_without_text_listener_falls_back_to_raw():
+    """Without a text reader, XML still falls back to raw."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['image'])
+    assert conn._determine_lane('application/xml', pipe) == 'raw'
+
+
+@pytest.mark.parametrize(
     'mime, listener, expected',
     [
         ('text/plain', 'text', 'text'),
