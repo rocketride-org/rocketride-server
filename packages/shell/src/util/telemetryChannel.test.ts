@@ -59,12 +59,13 @@ test('props are copied, so later mutation of the caller object does not change t
 
 test('invalid event names are ignored, missing props become an empty bag, a bad ts falls back to now', () => {
 	const ch = new TelemetryChannel({ storage: null, now: () => 5 });
-	ch.report('', { a: 1 });
-	ch.report(undefined as unknown as string, { a: 1 });
-	ch.report('x', undefined as unknown as Record<string, unknown>, Number.NaN);
+	assert.equal(ch.report('', { a: 1 }), null, 'an ignored fact is reported as null');
+	assert.equal(ch.report(undefined as unknown as string, { a: 1 }), null);
+	const held = ch.report('x', undefined as unknown as Record<string, unknown>, Number.NaN);
 	const out = ch.drain();
 	assert.equal(out.length, 1);
 	assert.deepEqual(out[0], { event: 'x', props: {}, ts: 5, id: '5-0' });
+	assert.deepEqual(held, out[0], 'report returns the fact as held');
 });
 
 test('the hold is bounded; the oldest facts are dropped first', () => {
@@ -74,6 +75,22 @@ test('the hold is bounded; the oldest facts are dropped first', () => {
 	assert.equal(out.length, TELEMETRY_BUFFER_MAX);
 	assert.equal(out[0].props.i, 5);
 	assert.equal(out[out.length - 1].props.i, TELEMETRY_BUFFER_MAX + 4);
+});
+
+test('the mirror defaults to the tab\'s sessionStorage; a storage passed as null or undefined keeps the hold in memory', () => {
+	const tab = fakeStorage();
+	const before = Object.getOwnPropertyDescriptor(globalThis, 'sessionStorage');
+	Reflect.set(globalThis, 'sessionStorage', tab);
+	try {
+		new TelemetryChannel({ storage: null }).report('a', {});
+		new TelemetryChannel({ storage: undefined }).report('b', {});
+		assert.equal(tab.data.has(TELEMETRY_STORAGE_KEY), false, 'an explicit null or undefined storage mirrors nothing');
+		new TelemetryChannel({ now: () => 1000 }).report('c', {});
+		assert.deepEqual(JSON.parse(tab.data.get(TELEMETRY_STORAGE_KEY)!).map((f: { event: string }) => f.event), ['c'], 'no storage option: the tab\'s sessionStorage');
+	} finally {
+		if (before) Object.defineProperty(globalThis, 'sessionStorage', before);
+		else Reflect.deleteProperty(globalThis, 'sessionStorage');
+	}
 });
 
 test('a held fact is mirrored to storage and drained once by a later page load', () => {

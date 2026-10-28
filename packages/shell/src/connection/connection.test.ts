@@ -498,6 +498,44 @@ test('reportTelemetry delivers a fact live to a shell:telemetry listener and hol
 	assert.deepEqual(internals.drainTelemetry(), [], 'a drain hands each fact over only once');
 });
 
+test('a listener that throws is logged and the next one still runs, for emit and for a telemetry fact alike', async () => {
+	const { manager } = createTestManager();
+	const internals = manager as unknown as TelemetryBus & { emit(event: 'shell:myApps', payload: Record<string, never>): void; on(event: 'shell:myApps', handler: () => void): () => void };
+	delete (manager as { emit?: unknown }).emit; // the shell's own event bus
+	internals.listeners = new Map();
+	const reached: string[] = [];
+	internals.on('shell:telemetry', () => { throw new Error('boom'); });
+	internals.on('shell:telemetry', (fact) => reached.push(fact.event));
+	internals.on('shell:myApps', () => { throw new Error('boom'); });
+	internals.on('shell:myApps', () => reached.push('shell:myApps'));
+	const logged: unknown[] = [];
+	const originalError = console.error;
+	console.error = (...args: unknown[]) => { logged.push(args[0]); };
+	try {
+		internals.reportTelemetry('auth:start', { register: false, auto: false });
+		internals.emit('shell:myApps', {});
+		await Promise.resolve();
+	} finally {
+		console.error = originalError;
+	}
+	assert.deepEqual(reached, ['auth:start', 'shell:myApps'], 'the second listener of each event ran');
+	assert.deepEqual(logged, ["[ConnectionManager] Handler for 'shell:telemetry' threw:", "[ConnectionManager] Handler for 'shell:myApps' threw:"]);
+});
+
+test('a fact held because nobody listens is in the debug log too, so the ALT+D panel shows every fact', () => {
+	const { manager } = createTestManager();
+	const internals = manager as unknown as TelemetryBus;
+	internals.listeners = new Map();
+	internals.reportTelemetry('auth:complete', { is_new: true, waitlisted: true, source: 'shell' });
+	const [held] = internals.drainTelemetry();
+	assert.ok(held, 'held for the next drain');
+	assert.deepEqual(
+		internals.getDebugLog().filter((e) => e.event === 'shell:telemetry').map((e) => (e.payload as TelemetryFact).id),
+		[held.id],
+		'logged once, as the fact the drain hands over',
+	);
+});
+
 test('a fact whose listener leaves before the dispatch is held for the next drain, unless the held facts are dropped first', async () => {
 	const { manager } = createTestManager();
 	const internals = manager as unknown as TelemetryBus;

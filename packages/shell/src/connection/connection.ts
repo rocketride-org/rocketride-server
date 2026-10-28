@@ -582,30 +582,28 @@ export class ConnectionManager implements IConnectionManager {
 			// so it survives a page load that never mounts the forwarding app). While an earlier fact is
 			// still on its way (it may yet be held), this one queues behind it instead, so the order holds.
 			if (this.telemetryInFlight === 0 && (this.listeners.get('shell:telemetry')?.size ?? 0) === 0) {
-				this.telemetry.report(event, props, ts);
+				// In the debug log like a delivered fact, so the ALT+D panel shows every fact raised.
+				const held = this.telemetry.report(event, props, ts);
+				if (held) this.logDebug('shell:telemetry', held);
 				return;
 			}
 			// A delivered fact is not held: the listener forwards it at once and a later drain must not
 			// replay it. Dispatched like emit(), on a microtask, but to the listeners subscribed then: if
 			// the last one left in between (an app switch or unmount in the same tick), the fact is held
 			// instead of lost, unless the held facts were dropped meanwhile (a sign-out, a rejected credential).
-			const fact: TelemetryFact = { event, props: { ...(props ?? {}) }, ts, id: `${ts.toString(36)}-l${(this.telemetrySeq++).toString(36)}` };
+			const seq = this.telemetrySeq++;
+			const id = `${ts.toString(36)}-l${seq.toString(36)}`;
+			const fact: TelemetryFact = { event, props: { ...(props ?? {}) }, ts, id };
 			const drops = this.telemetryDrops;
 			this.logDebug('shell:telemetry', fact);
 			this.telemetryInFlight++;
 			void Promise.resolve().then(() => {
 				try {
 					const live = this.listeners.get('shell:telemetry');
-					if (!live || live.size === 0) {
-						if (drops === this.telemetryDrops) this.telemetry.report(event, fact.props, ts);
-						return;
-					}
-					for (const fn of live) {
-						try {
-							fn(fact);
-						} catch (err) {
-							console.error("[ConnectionManager] Handler for 'shell:telemetry' threw:", err);
-						}
+					if (live && live.size > 0) {
+						this.dispatch(live, 'shell:telemetry', fact);
+					} else if (drops === this.telemetryDrops) {
+						this.telemetry.report(event, fact.props, ts);
 					}
 				} catch { /* telemetry must never break the shell */ } finally {
 					this.telemetryInFlight--;
@@ -656,8 +654,14 @@ export class ConnectionManager implements IConnectionManager {
 		if (!isEmbeddedDevShell()) {
 			try { sessionStorage.setItem(SS_AUTH_START_TS, String(Date.now())); } catch { /* storage unavailable */ }
 		}
+		const startProps: Record<string, unknown> = { register: !!register };
 		const appId = context?.appId || this.getPendingAppId();
-		this.reportTelemetry('auth:start', { register: !!register, ...(appId ? { app_id: appId } : {}), from_path: window.location.pathname, auto: context?.auto === true });
+		if (appId) {
+			startProps.app_id = appId;
+		}
+		startProps.from_path = window.location.pathname;
+		startProps.auto = context?.auto === true;
+		this.reportTelemetry('auth:start', startProps);
 		try {
 			if (this.authProvider) {
 				await this.authProvider.signIn(undefined, register);
@@ -797,7 +801,11 @@ export class ConnectionManager implements IConnectionManager {
 				const completed = await this.connectForBootstrap({ code, verifier, redirectUri: window.location.origin }, sessionAppId, config);
 				// The identity provider's round trip ended in an identity: the one place a
 				// sign-up or sign-in is known to have completed (token restores never pass here).
-				if (completed) this.reportTelemetry('auth:complete', { is_new: completed.result.isNewUser ?? null, waitlisted: completed.result.waitlisted === true, source: 'shell' });
+				if (completed) {
+					const isNew = completed.result.isNewUser ?? null;
+					const waitlisted = completed.result.waitlisted === true;
+					this.reportTelemetry('auth:complete', { is_new: isNew, waitlisted, source: 'shell' });
+				}
 				return completed;
 			} catch (error) {
 				// The code is single-use and already stripped from the URL, so
@@ -1420,7 +1428,7 @@ export class ConnectionManager implements IConnectionManager {
 	 */
 	private dropHeldTelemetry(): void {
 		this.telemetryDrops++;
-		try { this.telemetry?.clear(); } catch { /* telemetry must never break the shell */ }
+		try { this.telemetry.clear(); } catch { /* telemetry must never break the shell */ }
 		if (!isEmbeddedDevShell()) {
 			try { sessionStorage.removeItem(SS_AUTH_START_TS); } catch { /* storage unavailable */ }
 		}
@@ -1588,15 +1596,7 @@ export class ConnectionManager implements IConnectionManager {
 		// leaves an empty Set behind, so check size — not just presence.
 		const handlers = this.listeners.get(event as string);
 		if (handlers && handlers.size > 0) {
-			Promise.resolve().then(() => {
-				for (const fn of handlers) {
-					try {
-						fn(payload);
-					} catch (err) {
-						console.error(`[ConnectionManager] Handler for '${event as string}' threw:`, err);
-					}
-				}
-			});
+			Promise.resolve().then(() => this.dispatch(handlers, event as string, payload));
 			return;
 		}
 
@@ -1609,6 +1609,25 @@ export class ConnectionManager implements IConnectionManager {
 			console.warn(
 				`[ConnectionManager] '${event as string}' emitted with no listener — buffered for replay.`,
 			);
+		}
+	}
+
+	/**
+	 * Call each handler with the payload, in subscription order. A handler that
+	 * throws is logged and the rest still run. Callers schedule the microtask:
+	 * emit() and reportTelemetry() both dispatch through here.
+	 *
+	 * @param handlers - The listeners to call.
+	 * @param event    - The event name, for the error log.
+	 * @param payload  - The event payload.
+	 */
+	private dispatch(handlers: Iterable<Handler>, event: string, payload: unknown): void {
+		for (const fn of handlers) {
+			try {
+				fn(payload);
+			} catch (err) {
+				console.error(`[ConnectionManager] Handler for '${event}' threw:`, err);
+			}
 		}
 	}
 

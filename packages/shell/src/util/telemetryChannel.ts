@@ -83,18 +83,29 @@ export class TelemetryChannel {
 	 *                  null keeps it in memory only); `now`: the clock (tests inject one).
 	 */
 	constructor(options?: { storage?: FactStorage | null; now?: () => number }) {
-		this.storage = options && 'storage' in options ? (options.storage ?? null) : defaultStorage();
+		if (options && 'storage' in options) {
+			// passed explicitly: a storage to mirror to, or null (or undefined) for memory only
+			this.storage = options.storage || null;
+		} else {
+			this.storage = defaultStorage();
+		}
 		this.now = options?.now ?? (() => Date.now());
 		this.inherited = this.readMirror();
 	}
 
-	/** Hold a fact. Non-string or empty event names are ignored; props are copied; `ts` defaults to now. */
-	report(event: string, props: Record<string, unknown>, ts?: number): void {
-		if (typeof event !== 'string' || event === '') return;
+	/**
+	 * Hold a fact. Non-string or empty event names are ignored; props are copied; `ts` defaults to now.
+	 *
+	 * @returns The fact as held, or null when the event name was ignored.
+	 */
+	report(event: string, props: Record<string, unknown>, ts?: number): TelemetryFact | null {
+		if (typeof event !== 'string' || event === '') return null;
 		const when = typeof ts === 'number' && Number.isFinite(ts) && ts > 0 ? ts : this.now();
-		this.facts.push({ event, props: { ...(props ?? {}) }, ts: when, id: `${when.toString(36)}-${(this.seq++).toString(36)}` });
+		const fact: TelemetryFact = { event, props: { ...(props ?? {}) }, ts: when, id: `${when.toString(36)}-${(this.seq++).toString(36)}` };
+		this.facts.push(fact);
 		if (this.facts.length > TELEMETRY_BUFFER_MAX) this.facts.splice(0, this.facts.length - TELEMETRY_BUFFER_MAX);
 		this.persist();
+		return fact;
 	}
 
 	/**
@@ -104,7 +115,12 @@ export class TelemetryChannel {
 	 */
 	drain(): TelemetryFact[] {
 		const now = this.now();
-		const out = [...this.inherited, ...this.facts].filter((f) => now - f.ts <= TELEMETRY_TTL_MS).slice(-TELEMETRY_BUFFER_MAX);
+		const out: TelemetryFact[] = [];
+		for (const fact of this.inherited.concat(this.facts)) {
+			if (now - fact.ts <= TELEMETRY_TTL_MS) out.push(fact);
+		}
+		// bounded as a whole: the oldest go first, as in report()
+		if (out.length > TELEMETRY_BUFFER_MAX) out.splice(0, out.length - TELEMETRY_BUFFER_MAX);
 		this.inherited = [];
 		this.facts = [];
 		this.clearMirror();
