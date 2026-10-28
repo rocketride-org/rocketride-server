@@ -553,6 +553,55 @@ test("a read that finds the teammate's copy a batch read cached and has not coun
 	assert.equal(files.get('a.ts'), 'A1 + mine');
 });
 
+test("a tab's save on its way when the cached copy is dropped counts once, so the tab's next save lands", async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha);
+	const path = 'apps/probe.txt';
+	const tab = await editorTab(ws.view, path);
+	// step: the cached copy is dropped (going back to the team, the agent's refused write) while the store holds the tab's write
+	s.store.watched.add(s.a);
+	tab.text = 'const probe = 2; // mine';
+	const saving = tab.save();
+	let held = await s.store.next();
+	while (!held.label.startsWith('write ')) {
+		held.release();
+		held = await s.store.next();
+	}
+	ws.view.invalidate(path);
+	s.store.watched.delete(s.a);
+	held.release();
+	await saving;
+	const after = ws.view.version(path);
+	assert.equal((await ws.view.readVersioned(path)).version, after, "the tab's own write is no teammate's change");
+	await ws.view.write(path, 'const probe = 3; // mine again', 'editor', after);
+	assert.equal(s.store.files.get(s.a), 'const probe = 3; // mine again');
+});
+
+test("Commit all's write on its way when the cached copy is dropped counts once, so the tab's next save is staged", async () => {
+	const s = storage();
+	const ws = await workspace(s.alpha, false);
+	const path = 'apps/probe.txt';
+	const tab = await editorTab(ws.view, path);
+	tab.text = 'const probe = 2; // mine';
+	await tab.save();
+	const staged = ws.view.version(path);
+	// step: the cached copy is dropped while the store holds Commit all's write
+	s.store.watched.add(s.a);
+	const committing = ws.view.commit();
+	let held = await s.store.next();
+	while (!held.label.startsWith('write ')) {
+		held.release();
+		held = await s.store.next();
+	}
+	ws.view.invalidate(path);
+	s.store.watched.delete(s.a);
+	held.release();
+	await committing;
+	assert.equal((await ws.view.readVersioned(path)).version, staged, "Commit all's own write is no teammate's change");
+	await ws.view.write(path, 'const probe = 3; // mine again', 'editor', staged);
+	assert.equal(await ws.view.read(path), 'const probe = 3; // mine again');
+});
+
 test("after a switch away and back, a teammate's delete refuses a tab's save once; a save after the refusal makes the file again", async () => {
 	const s = storage();
 	const ws = await workspace(s.alpha);

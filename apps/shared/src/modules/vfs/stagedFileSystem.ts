@@ -874,6 +874,18 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		}
 	}
 
+	/**
+	 * Writes a file on the base, counted in baseChanges. A copy an invalidate
+	 * dropped while the write was on its way is older than the write, so a
+	 * read that takes the write in counts nothing.
+	 */
+	private writeBase(p: string, content: unknown, origin?: string): Promise<void> {
+		return this.changeBase([p], async () => {
+			await this.base.write(p, content, origin);
+			if (this.dropped.has(p)) this.dropped.set(p, content);
+		});
+	}
+
 	/** This view's changes to the base at a path and above it: a stamp that moves when one starts or finishes. */
 	private baseStamp(p: string): number {
 		let [started, finished] = [0, 0];
@@ -1038,7 +1050,7 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 			// step: write-through IS the commit for this path — same freshness
 			// discipline commit() applies to staged layers, at save time.
 			await this.guardFreshBase(p);
-			return this.changeBase([p], () => this.base.write(p, content, origin));
+			return this.writeBase(p, content, origin);
 		}
 		if (typeof content !== 'string') {
 			throw new Error(`Staged writes are text-only: ${p}`);
@@ -1778,7 +1790,7 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		}
 		for (const p of paths.filter((x) => net.get(x)!.kind === 'write')) {
 			const entry = net.get(p)! as Extract<LayerEntry, { kind: 'write' }>;
-			await this.changeBase([p], () => this.base.write(p, entry.content));
+			await this.writeBase(p, entry.content);
 		}
 		for (const p of paths.filter((x) => net.get(x)!.kind === 'tombstone' && !converged.has(x)).sort((a, b) => depth(b) - depth(a))) {
 			await this.changeBase([p], () => this.base.delete(p));
