@@ -585,27 +585,6 @@ export async function loadAppModule<T = unknown>(appId: string, modulePath: stri
 }
 
 /**
- * Run an app's exposed no-argument entry (the home remote's `telemetry` module
- * on the waitlist screen) once per `ran` flag: the caller keeps the flag, a
- * React ref for once per page load. A missing app or entry is skipped, and an
- * entry that throws never breaks the screen that runs it.
- *
- * @param appId - The app id (not the container name).
- * @param modulePath - The exposed module path without the leading `./`.
- * @param ran - Set on the first call; later calls with it set do nothing.
- */
-export async function runAppEntryOnce(appId: string, modulePath: string, ran: { current: boolean }): Promise<void> {
-	if (ran.current) return;
-	ran.current = true;
-	const mod = await loadAppModule<{ default?: () => void }>(appId, modulePath);
-	try {
-		mod?.default?.();
-	} catch {
-		// the entry's own failure stays inside it
-	}
-}
-
-/**
  * Returns the entry URL currently registered for an MF remote, or undefined
  * when the module has never been registered. Used by Shell to detect apps
  * whose entry URL changed (dev overlay repoint, new published version) and

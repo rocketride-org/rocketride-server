@@ -28,7 +28,7 @@
 import assert from 'node:assert/strict';
 import test, { afterEach, mock } from 'node:test';
 import { init } from '@module-federation/runtime';
-import { devPreviewHoldRemainingMs, isDevPreviewPending, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, runAppEntryOnce, setDescriptorInvalidator } from './appLoader';
+import { devPreviewHoldRemainingMs, isDevPreviewPending, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
 import type { AppDescriptor } from '../components/workspace/types';
 
 // In the browser the rsbuild MF plugin creates the host instance; stand one
@@ -119,24 +119,6 @@ test('a loader that throws before returning a promise leaves no pending mark (ap
 	assert.equal(isRemotePending('sync_mod'), false, 'the app load released its mark');
 	assert.equal(await loadAppModule('org.sync', 'telemetry'), null);
 	assert.equal(isRemotePending('sync_mod'), false, 'the module load released its mark');
-});
-
-test('an app entry runs once per flag (the waitlist screen re-entered, the default app id changed), and one that throws stays contained', async () => {
-	stubPage('', false);
-	let runs = 0;
-	stubLoader(async () => ({ default: () => { runs++; throw new Error('entry failed'); } }));
-	registerAndMapApps([{ id: 'org.once', moduleId: 'once_mod', name: 'Once', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
-	registerAndMapApps([{ id: 'org.once2', moduleId: 'once_mod2', name: 'Once 2', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
-	const ran = { current: false };
-	await runAppEntryOnce('org.once', 'telemetry', ran);
-	await runAppEntryOnce('org.once', 'telemetry', ran); // the phase re-enters waitlisted
-	await runAppEntryOnce('org.once2', 'telemetry', ran); // the default app id changed
-	assert.equal(runs, 1, 'one call per page load, whatever re-runs the effect');
-	assert.equal(ran.current, true);
-	await runAppEntryOnce('org.once', 'telemetry', { current: false });
-	assert.equal(runs, 2, 'a new flag (a new page load) runs it again');
-	await runAppEntryOnce('org.unknown', 'telemetry', { current: false });
-	assert.equal(runs, 2, 'an unknown app is skipped');
 });
 
 test('a later registration batch (the apps a sign-in adds) keeps the earlier batch loadable', async () => {

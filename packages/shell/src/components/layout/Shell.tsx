@@ -50,7 +50,7 @@ import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
 import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
-import { registerAndMapApps, runAppEntryOnce, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
+import { registerAndMapApps, loadAppModule, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
 import { getAppVersionOverrides, setAppVersionOverride, versionedEntryUrl } from '../../util/versionOverride';
 import type { ServerAppEntry } from '../../util/appLoader';
 import { waitForEmbeddedSession } from '../../util/devMode';
@@ -506,11 +506,20 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// the one most likely to end with the tab closed). The home remote's
 	// `telemetry` entry initialises its analytics and forwards them; an older
 	// home build without the entry resolves null and nothing happens. Once per
-	// page load: from then on the home analytics receive every later fact live.
+	// page load: the entry drains the held facts once and subscribes for the rest.
 	const telemetryEntryRanRef = useRef(false);
 	useEffect(() => {
-		if (renderPhase !== 'waitlisted') return;
-		void runAppEntryOnce(defaultAppId, 'telemetry', telemetryEntryRanRef);
+		if (renderPhase !== 'waitlisted' || telemetryEntryRanRef.current) {
+			return;
+		}
+		telemetryEntryRanRef.current = true;
+		void loadAppModule<{ default?: () => void }>(defaultAppId, 'telemetry')
+			.then((entry) => {
+				entry?.default?.();
+			})
+			.catch(() => {
+				// the entry's own failure stays inside it
+			});
 	}, [renderPhase, defaultAppId]);
 
 	// Refresh identity on account update
