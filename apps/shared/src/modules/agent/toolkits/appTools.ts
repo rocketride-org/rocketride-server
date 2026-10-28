@@ -49,7 +49,7 @@ import type { RocketRideClient } from 'rocketride';
 
 import type { AgentHost } from '../host';
 import { AgentTool, AgentToolkit, type ToolStep } from '../tools';
-import { messageOf, numberArg, requireClient, sleep, textArg, type ClientGetter } from './common';
+import { messageOf, numberArg, redactText, requireClient, sleep, textArg, type ClientGetter } from './common';
 import { findApp, readApps, type AppEntry } from './inventory';
 
 // =============================================================================
@@ -240,21 +240,24 @@ export class AppToolkit extends AgentToolkit {
 	private readonly buildWaitMs: number;
 	/** Aborted when the user stops the run; the build wait ends. */
 	private readonly signal?: AbortSignal;
+	/** Hides the values the run's file tools hid. */
+	private readonly hide: (text: string) => string;
 
 	/**
 	 * Builds the toolkit.
 	 *
 	 * @param client - The host's client getter.
 	 * @param host - The agent host.
-	 * @param opts - Timing: how often to read the build's progress (default 3 s) and how long to wait for it (default 540 s); and the run's stop signal.
+	 * @param opts - Timing: how often to read the build's progress (default 3 s) and how long to wait for it (default 540 s); the run's stop signal; and what hides the values the run's file tools hid before a build log is cut.
 	 */
-	constructor(client: ClientGetter, host: AgentHost, opts: { pollMs?: number; buildWaitMs?: number; signal?: AbortSignal } = {}) {
+	constructor(client: ClientGetter, host: AgentHost, opts: { pollMs?: number; buildWaitMs?: number; signal?: AbortSignal; hide?: (text: string) => string } = {}) {
 		super();
 		this.client = client;
 		this.host = host;
 		this.pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
 		this.buildWaitMs = opts.buildWaitMs ?? DEFAULT_BUILD_WAIT_MS;
 		this.signal = opts.signal;
+		this.hide = opts.hide ?? ((text) => text);
 	}
 
 	/**
@@ -341,7 +344,8 @@ export class AppToolkit extends AgentToolkit {
 				if (state === 'ok') return `Deployed v${version.registryVersion}; server build OK.`;
 				if (state === 'failed') {
 					const { log } = await client.buildLog(appId, version.registryVersion);
-					return `Deployed v${version.registryVersion}; server build FAILED:\n${log.slice(-BUILD_LOG_TAIL_CHARS) || '(the build recorded no log)'}`;
+					// hide and redact before the cut: a cut inside a value leaves a part nothing matches
+					return `Deployed v${version.registryVersion}; server build FAILED:\n${redactText(this.hide(log)).slice(-BUILD_LOG_TAIL_CHARS) || '(the build recorded no log)'}`;
 				}
 			}
 			if (Date.now() >= deadline || this.signal?.aborted) break;

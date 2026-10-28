@@ -53,7 +53,7 @@ import { APP_CHECK_TOOL, AppCheckToolkit, monacoMarkerSource, reportPassed, type
 import type { CheckReport, MarkerSource } from './toolkits/appCheck';
 import { Approvals } from './toolkits/approval';
 import { AppToolkit, DEPLOY_APP_TIMEOUT_MS } from './toolkits/appTools';
-import { NOT_CONNECTED_MESSAGE, type ClientGetter } from './toolkits/common';
+import { NOT_CONNECTED_MESSAGE, redactText, type ClientGetter } from './toolkits/common';
 import { FilesystemTools, normalizePath } from './toolkits/filesystem';
 import { findApp, InventoryToolkit, readApps } from './toolkits/inventory';
 import { RocketRideClientToolkit } from './toolkits/rocketrideClient';
@@ -413,7 +413,9 @@ function within(path: string, root: string): boolean {
  * error banners, and system and status rows are not part of the conversation.
  * A turn's request and the messages it took mid-run, or a request whose
  * answer was an error, are consecutive user rows; they merge into one user
- * turn, so the roles alternate.
+ * turn, so the roles alternate. Each row passes through redactText: the live
+ * chat still shows a key the user pasted, and a session saved before rows
+ * were redacted may still hold one.
  *
  * @param messages - The chat's messages, oldest first.
  * @returns The history turns, oldest first.
@@ -422,9 +424,10 @@ function toHistory(messages: ChatMessage[]): HistoryTurn[] {
 	const turns: HistoryTurn[] = [];
 	for (const m of messages) {
 		const last = turns.at(-1);
-		if (m.sender === 'user' && last?.role === 'user') last.content = `${last.content}\n\n${m.text}`;
-		else if (m.sender === 'user') turns.push({ role: 'user', content: m.text });
-		else if (m.sender === 'bot' && !m.isError && !m.resultKey) turns.push({ role: 'assistant', content: m.text });
+		const text = redactText(m.text);
+		if (m.sender === 'user' && last?.role === 'user') last.content = `${last.content}\n\n${text}`;
+		else if (m.sender === 'user') turns.push({ role: 'user', content: text });
+		else if (m.sender === 'bot' && !m.isError && !m.resultKey) turns.push({ role: 'assistant', content: text });
 	}
 	return turns;
 }
@@ -444,12 +447,15 @@ function isChecksLine(line: string): boolean {
  * the record, then a warning when the run changed the work and stopped before
  * finishing. Lines in the answer that start with "Checked:" or "Not checked:",
  * markdown-wrapped or not, are dropped, because only the code writes those.
+ * The whole text passes through `shown` on its way to the chat and the saved
+ * session.
  *
  * @param result - How the loop ended.
  * @param checks - Every check result the run recorded.
+ * @param shown - Hides the secrets in text the chat shows.
  * @returns The answer, its checks line and any warning, separated by blank lines.
  */
-function finalText(result: LoopResult, checks: CheckRecord): string {
+function finalText(result: LoopResult, checks: CheckRecord, shown: (text: string) => string): string {
 	const answer = result.answer
 		.split('\n')
 		.filter((line) => !isChecksLine(line))
@@ -457,7 +463,22 @@ function finalText(result: LoopResult, checks: CheckRecord): string {
 		.trim();
 	const parts = [answer, checks.checksLine()];
 	if (checks.changed && result.stopReason !== 'done') parts.push(NOT_CHECKED);
-	return parts.filter((part) => part.length > 0).join('\n\n');
+	return shown(parts.filter((part) => part.length > 0).join('\n\n'));
+}
+
+/**
+ * A "Needs your OK" card with its title and detail passed through
+ * `shown`. Card text comes from the model's arguments and from names the
+ * workspace and the server hold. The chat shows it, and the answered card's
+ * status row repeats the title into the thread, the saved session and the
+ * history of later turns.
+ *
+ * @param card - The card the run's approvals built.
+ * @param shown - Hides the secrets in text the chat shows.
+ * @returns The card the chat shows.
+ */
+function redactCard(card: ChatAskCard, shown: (text: string) => string): ChatAskCard {
+	return { ...card, title: shown(card.title), detail: card.detail === undefined ? undefined : shown(card.detail) };
 }
 
 /**
@@ -653,31 +674,40 @@ export async function runAgent(request: string, callback: (type: string, content
 	// step: the workspace; every save that works returns the types of an app's TypeScript file
 	// or the validate of a pipeline, and the validate is recorded for the finish rule
 	const { vfs } = host;
-	// step: the run's approvals; the toolkits and the save hook below get its checked client
-	const approvals = new Approvals({ client, vfs, ask: options.ask, settings: host.approvals?.run, signal: options.signal });
+	// step: the run's approvals; the toolkits and the save hook below get its checked client,
+	// and every card it shows is redacted on its way to the chat
+	const { ask } = options;
+	const approvals = new Approvals({ client, vfs, ask: ask && ((card) => ask(redactCard(card, shown))), settings: host.approvals?.run, signal: options.signal });
 	const afterSave = async (path: string): Promise<string> => {
 		const appFile = APP_TYPESCRIPT_FILE.exec(path);
-		if (appFile) return typesNote(vfs, markers, appFile[1], appFile[2]);
+		if (appFile) return typesNote(vfs, markers, appFile[1], appFile[2], hide);
 		if (!path.endsWith('.pipe')) return '';
 		const validation = await validateSaved(approvals.client, vfs, path);
 		checks.pipelineSaved(path, validation);
-		return validateNote(validation);
+		return validateNote(validation, hide);
 	};
 
 	// step: the toolkits in mount order; one file toolkit per run, so reads never carry over,
 	// and its saves run the hook above
 	const files = new FilesystemTools(vfs, undefined, afterSave);
+	// step: a toolkit cuts a long text before the loop sees it, and a cut value no longer matches,
+	// so each one, and the save hook above, hides the values the file tools hid before it cuts
+	const hide = (text: string): string => files.secrets.hideKnown(text);
 	const composed = composeToolkits([
 		files,
 		new InventoryToolkit(vfs, (id) => host.devSession(id) !== null),
-		new RocketRideClientToolkit(approvals.client, vfs),
-		new AppToolkit(approvals.client, host, { signal: options.signal }),
+		new RocketRideClientToolkit(approvals.client, vfs, hide),
+		new AppToolkit(approvals.client, host, { signal: options.signal, hide }),
 		// check_app hands each report to the record
-		new AppCheckToolkit(host, markers, (folder, report) => checks.appChecked(folder, report), { signal: options.signal }),
+		new AppCheckToolkit(host, markers, (folder, report) => checks.appChecked(folder, report), { signal: options.signal, hide }),
 	]);
+	// step: cards and the answer hold text the loop never saw (a server's names, check_app's summaries),
+	// so each value the file tools hid shows as its marker there too; a card asks only once the loop runs
+	const shown = (text: string): string => redactText(hide(text));
 
 	const result = await runLoop({
-		request,
+		// execute holds back only a sure key shape, so a bearer token or a secret field still reaches here
+		request: redactText(request),
 		history: toHistory(options.history),
 		prefix: buildPrefix(CORE_PROMPT, options.prompts, composed),
 		tools: composed.tools,
@@ -688,10 +718,11 @@ export async function runAgent(request: string, callback: (type: string, content
 		signal: options.signal,
 		takeQueued: options.takeQueued,
 		approve: (act, run) => approvals.approve(act, run),
+		secrets: files.secrets,
 	});
 
 	// step: a stopped run writes no answer: the chat closes the turn with its stop row, and this adds the one fact that row can't know
-	if (result.stopReason !== 'stopped') callback('content', finalText(result, checks));
+	if (result.stopReason !== 'stopped') callback('content', finalText(result, checks, shown));
 	else if (checks.changed) callback('thinking', NOT_CHECKED);
 	console.log(`[agent] stop=${result.stopReason} waves=${result.waves} modelCalls=${result.modelMs.length} medianMs=${median(result.modelMs)} guides=[${files.pathsSeen().filter(isReferencePath).join(',')}]`);
 }

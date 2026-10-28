@@ -267,7 +267,7 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 	/** The injected chat transport: one request through the agent session. The hook's status sink carries the thinking rows live. */
 	const request = useCallback((text: string, onStatus?: AgentCallback, turn?: ChatTurn): Promise<TextResult[]> => session.execute(text, onStatus, turn), [session]);
 
-	const { messages, isTyping, sendMessage, turn: controls } = useChatMessages({ initialMessages: session.messages, request });
+	const { messages, isTyping, sendMessage, addSystemMessage, turn: controls } = useChatMessages({ initialMessages: session.messages, request });
 	// a host that serves no approval settings gets no switch
 	const approvals = findAgentHost()?.approvals?.controls;
 
@@ -282,12 +282,18 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 		});
 	}, [isTyping, messages, session]);
 
-	/** Composer submit — the hook's built-in API path is bypassed by `request`. */
+	/**
+	 * Composer submit — the hook's built-in API path is bypassed by `request`.
+	 * A key is redacted before the row is made. Idle, the turn it opens shows
+	 * the error row; during a turn, the note says the key was not sent.
+	 */
 	const handleSend = useCallback(
 		(text: string) => {
-			void sendMessage(text, null, '');
+			const screened = session.screen(text);
+			void sendMessage(screened.text, null, '');
+			if (screened.note && isTyping) addSystemMessage(screened.note);
 		},
-		[sendMessage]
+		[session, sendMessage, addSystemMessage, isTyping]
 	);
 
 	// The welcome panel shown in place of an empty thread: what the agent is

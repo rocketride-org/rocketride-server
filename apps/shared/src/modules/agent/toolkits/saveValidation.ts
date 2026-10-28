@@ -124,12 +124,13 @@ export async function validateSaved(client: ClientGetter, vfs: IWorkspaceFileSys
  * The validate note for a saved pipeline file.
  *
  * @param validation - What the validate on save found.
+ * @param hide - Hides the values the run's file tools hid, before the cut.
  * @returns The text to append: `validate: OK`, the errors as lines, or why validate could not run.
  */
-export function validateNote(validation: SaveValidation): string {
+export function validateNote(validation: SaveValidation, hide: (text: string) => string): string {
 	if ('failed' in validation) return `\n\nvalidate: could not run (${validation.failed})`;
 	const { errors } = validation;
 	if (errors.length === 0) return '\n\nvalidate: OK';
 	const lines = errors.map((e) => `- ${e}`).join('\n');
-	return `\n\nvalidate: ${errors.length} ${errors.length === 1 ? 'error' : 'errors'}:\n${clip(lines, SAVE_CLIP_HINT)}`;
+	return `\n\nvalidate: ${errors.length} ${errors.length === 1 ? 'error' : 'errors'}:\n${clip(hide(lines), SAVE_CLIP_HINT)}`;
 }
