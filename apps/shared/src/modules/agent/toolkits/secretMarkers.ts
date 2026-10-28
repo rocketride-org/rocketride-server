@@ -50,8 +50,8 @@
  *   a marker first means a read never shows `[redacted]`, which a write would
  *   then save over the user's key.
  * - In any file, in every tool result (wave/loop.ts), and on cards and in the
- *   answer (run.ts), a value this run already hid, when it is 8 characters
- *   or longer.
+ *   answer (run.ts), a value this run already hid, when it is 16 characters
+ *   or longer, or 8 or longer with a character that is not a letter.
  *
  * An edit anchor is matched against the file as the model sees it, markers in
  * place: matched against the real text, it would tell the model whether a
@@ -75,6 +75,12 @@ const MARKER_PATTERN = /«secret:[^»\s]{1,64}»/g;
 
 /** The shortest value hidden wherever it appears; a shorter one could be an ordinary word. */
 const KNOWN_MIN_CHARS = 8;
+
+/** The shortest all-letter value hidden wherever it appears. Dev passwords such as `postgres` and `changeme` are also words in node names, guides and answers. */
+const KNOWN_MIN_WORD_CHARS = 16;
+
+/** A character that is not a letter. A key has one; a word does not. */
+const NOT_A_LETTER = /\P{L}/u;
 
 /** The most places a note names before it says how many more there are. */
 const NOTE_MAX_PLACES = 5;
@@ -479,9 +485,9 @@ export class SecretMarkers {
 	}
 
 	/**
-	 * Hides the values this run already hid, wherever they appear: a save's
-	 * note may quote the config the engine just validated, and a run's output
-	 * or an error may quote a value too.
+	 * Hides the values this run already hid that look like a key, wherever
+	 * they appear: a save's note may quote the config the engine just
+	 * validated, and a run's output or an error may quote a value too.
 	 *
 	 * @param text - A tool result, an error, or a card or answer the chat shows.
 	 * @returns The text with each known value replaced by its marker.
@@ -528,8 +534,9 @@ export class SecretMarkers {
 	/**
 	 * Where a file's text holds a secret value: its secret fields, what
 	 * `findSecrets` finds, and the values this run already hid. The values
-	 * found here are learned first, so a second copy of one, where no field
-	 * name or shape gives it away, is hidden on the first read too.
+	 * found here are learned first, so a second copy of one that looks like a
+	 * key, where no field name or shape gives it away, is hidden on the first
+	 * read too.
 	 *
 	 * @param path - The file's path; its name decides whether fields are read as JSON, YAML or `NAME=value` lines.
 	 * @param text - The file's full text.
@@ -547,12 +554,12 @@ export class SecretMarkers {
 	 * Where a text holds a value this run already hid.
 	 *
 	 * @param text - Any text.
-	 * @returns The spans of every known value of 8 characters or more, in order, none overlapping.
+	 * @returns The spans of every known value of 16 characters or more, or of 8 or more with a character that is not a letter, in order, none overlapping.
 	 */
 	private known(text: string): Found[] {
 		const found: Found[] = [];
 		for (const value of this.markers.keys()) {
-			if (value.length < KNOWN_MIN_CHARS) continue;
+			if (value.length < KNOWN_MIN_CHARS || (value.length < KNOWN_MIN_WORD_CHARS && !NOT_A_LETTER.test(value))) continue;
 			for (let at = text.indexOf(value); at >= 0; at = text.indexOf(value, at + value.length)) found.push({ start: at, end: at + value.length, where: '' });
 		}
 		return mergeSpans(found);

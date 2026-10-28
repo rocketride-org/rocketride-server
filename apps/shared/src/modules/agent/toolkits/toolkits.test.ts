@@ -988,6 +988,27 @@ test("the pipelines guide's Pitfall 6 example reaches the model whole, and a key
 	assert.ok(!JSON.stringify(model.questions).includes(key), 'the key reached no question');
 });
 
+test('a dev password that is a short word is hidden in its own field, and the guide, service names and the answer stay readable', async () => {
+	const path = '.rocketride/docs/ROCKETRIDE_PIPELINES.md';
+	const lines = readFileSync(resolve(__dirname, '../../../../../../docs/agents/context/ROCKETRIDE_PIPELINES.md'), 'utf8').split('\n');
+	const at = lines.findIndex((line) => line.startsWith('### Pattern 28'));
+	const pipe = JSON.stringify({ components: [{ provider: 'db_postgres', config: { 'postgresdb.password': 'postgres' } }] }, null, 1);
+	const ws = withReadOnlyReference(createMemoryWorkspace({ [path]: lines.join('\n'), 'pipelines/local.pipe': pipe, '.env': 'DB_PASSWORD=password\nADMIN_TOKEN=changeme\n' }));
+	const { client } = scriptedClient({ getServices: { services: { db_postgres: {}, postgres: {} } }, getService: { fields: { 'postgresdb.password': {} } } });
+	const answer = 'I added a db_postgres node that reads your local postgres database. Change the default changeme token.';
+	const model = scriptedModel([plan(['read_file', { path: 'pipelines/local.pipe' }], ['read_file', { path: '.env' }]), plan(['read_file', { path, offset: at + 1, limit: 1 }], ['rocketride_client', { method: 'getServices' }], ['rocketride_client', { method: 'getService', params: ['db_postgres'] }]), done(answer)]);
+	const chunks = await agentTurn(ws, model, { client });
+
+	const context = model.questions[2].context.find((item) => item.startsWith('Previous tool results:\n')) ?? '';
+	const [pipeRead, envRead, guideRead, services, service] = (JSON.parse(context.slice('Previous tool results:\n'.length)) as Array<{ summary?: string }>).map((entry) => entry.summary ?? '');
+	assert.match(pipeRead, /"provider": "db_postgres",\n.*\n.*"postgresdb\.password": "«secret:[0-9a-f]{8}»"\n/);
+	assert.match(envRead, /^DB_PASSWORD=«secret:[0-9a-f]{8}»\nADMIN_TOKEN=«secret:[0-9a-f]{8}»\n/);
+	assert.equal(guideRead.split('\n')[1], lines[at]);
+	assert.equal(services, 'services:\n  db_postgres: {}\n  postgres: {}');
+	assert.equal(service, 'fields:   postgresdb.password: {}');
+	assert.equal(chunks.at(-1)?.text, answer);
+});
+
 test('search_files searches one file when its path names a file, in the workspace or under .rocketride/', async () => {
 	const ws = createMemoryWorkspace({ 'pipelines/a.pipe': '{\n  "name": "chat"\n}\n', 'pipelines/b.pipe': '{ "name": "chat too" }', '.rocketride/docs/ROCKETRIDE_APPS.md': '# Apps\n\nAn app has a chat.\n' });
 	assert.equal(await run(ws, 'search_files', { pattern: 'chat', path: 'pipelines/a.pipe' }), '1 match(es):\npipelines/a.pipe:2: "name": "chat"');
@@ -1276,6 +1297,20 @@ test('a second copy of a hidden value in the same file is hidden on the first re
 	const read = await run(ws, 'read_file', { path: 'pipelines/a.pipe' });
 	assert.ok(!read.includes(value), read);
 	assert.match(read, /"description": "backup login («secret:[0-9a-f]{8}»)",[\s\S]*"apikey": "\1"/, 'both copies show the one marker');
+});
+
+test('a hidden value shows as its marker outside its field only when it has 16 characters, or 8 and one that is not a letter', () => {
+	const rows: Array<[value: string, outside: boolean]> = [
+		['abcdefghijklmno', false],
+		['abcdefghijklmnop', true],
+		['passw0rd', true],
+		['contraseña', false],
+	];
+	for (const [value, outside] of rows) {
+		const markers = new SecretMarkers();
+		markers.hide('.env', `DB_PASSWORD=${value}\n`);
+		assert.equal(markers.hideKnown(`the ${value} node`) !== `the ${value} node`, outside, value);
+	}
 });
 
 test('generated files: a read writes back whole, passes redactText unchanged, and takes edits where the model saw them', () => {
