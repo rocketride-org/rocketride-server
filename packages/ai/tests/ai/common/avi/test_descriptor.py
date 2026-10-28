@@ -392,6 +392,34 @@ def test_image_dims_reads_header_else_none():
     assert D.image_dims(b'') == (None, None)
 
 
+def test_image_dims_transposes_exif_orientation():
+    """image_dims returns transposed (w, h) when EXIF orientation tag swaps dimensions."""
+    import io
+    from PIL import Image
+
+    buf = io.BytesIO()
+    img = Image.new('RGB', (20, 10), (10, 20, 30))
+    exif = img.getexif()
+    exif[0x0112] = 6  # Rotate 90 CW (transposes to 10, 20)
+    img.save(buf, format='JPEG', exif=exif)
+
+    assert D.image_dims(buf.getvalue()) == (10, 20)
+
+
+def test_image_dims_decodes_heif():
+    """image_dims reads dimensions of HEIF image when decoder is available."""
+    pytest.importorskip('pillow_heif', reason='pillow-heif not installed')
+    import io
+    from PIL import Image
+    import pillow_heif
+
+    pillow_heif.register_heif_opener()
+
+    buf = io.BytesIO()
+    Image.new('RGB', (16, 8), (10, 20, 30)).save(buf, format='HEIF')
+    assert D.image_dims(buf.getvalue()) == (16, 8)
+
+
 def test_inherited_or_derived_name():
     """One-to-one name inherits the input's name, else derives <stem>.<ext>; None-safe."""
     assert D.inherited_or_derived_name(_image_descriptor(), ext='png') == 'BBC.frame0.png'  # inherited
