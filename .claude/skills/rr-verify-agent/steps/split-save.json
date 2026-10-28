@@ -1,0 +1,18 @@
+[
+	{ "do": "engine", "args": ["write", "apps/verify-notes/src/App.tsx", "fixtures/App.tsx"], "label": "seed" },
+	{ "do": "open" },
+	{ "do": "openFile", "path": "apps/verify-notes/src/App.tsx" },
+	{ "do": "click", "css": "div[draggable=\"true\"] > span:text-is(\"App.tsx\")", "label": "focus-tab" },
+	{ "do": "press", "key": "Control+Backslash", "label": "split-right" },
+	{ "do": "wait", "ms": 3000 },
+	{ "do": "expectEditors", "count": 2, "label": "two-editors" },
+	{ "do": "click", "css": ".monaco-editor .view-lines", "nth": 0 },
+	{ "do": "press", "key": "Control+End" },
+	{ "do": "type", "value": "\n// RRVERIFY user edit, saved" },
+	{ "do": "shot", "label": "typed-in-left-split" },
+	{ "do": "press", "key": "Control+s" },
+	{ "do": "wait", "ms": 2000 },
+	{ "do": "shot", "label": "after-ctrl-s" },
+	{ "do": "expectEngine", "args": ["cat", "apps/verify-notes/src/App.tsx"], "contains": "RRVERIFY user edit, saved", "label": "saved" },
+	{ "do": "expectEditors", "count": 2, "contains": "RRVERIFY user edit, saved", "clean": true, "label": "both-splits-clean" }
+]

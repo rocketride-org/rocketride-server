@@ -166,6 +166,13 @@ export default tseslint.config(
 			'prefer-const': 'error',
 		},
 	},
+	// The verify skill's own scripts/package.json installs Playwright on first launch; CI never installs it.
+	{
+		files: ['.claude/skills/rr-verify-agent/scripts/**'],
+		rules: {
+			'n/no-missing-import': ['error', { allowModules: ['playwright'] }],
+		},
+	},
 	// node:test registers test()/describe() without awaiting them
 	{
 		files: ['**/scripts/**/*.test.{js,cjs,mjs}'],

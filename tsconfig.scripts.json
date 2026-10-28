@@ -16,7 +16,10 @@
   "include": [
     "**/scripts/**/*.js",
     "**/scripts/**/*.cjs",
-    "**/scripts/**/*.mjs"
+    "**/scripts/**/*.mjs",
+    // "**" skips dot folders, so the verify skill's scripts are listed by name.
+    ".claude/skills/rr-verify-agent/scripts/**/*.cjs",
+    ".claude/skills/rr-verify-agent/scripts/**/*.mjs"
   ],
   "exclude": [
     "scripts/assets",

@@ -1,0 +1,23 @@
+# Steps files
+
+`rr-verify-agent drive steps <file.json or a name in this folder>` runs a list of user actions in one browser session, with the same recording as the scripted journeys (screenshots, console, WebSocket frames, `result.json`).
+
+Each step is an object with `do` and an optional `label` (used in file names and checks):
+
+| `do`            | Fields                                | What it does                                                                                                                                                                                                                       |
+| --------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `open`          |                                       | Shell home, Sign In with the local key, open Rocket Builder                                                                                                                                                                        |
+| `openFile`      | `path`                                | `Explorer`, then the folders and file of a workspace path (folders already open stay open), then wait for the Monaco editor                                                                                                        |
+| `newSession`    |                                       | `Agent` tab, `New session`, wait for the composer                                                                                                                                                                                  |
+| `send`          | `text`                                | Type into the visible composer and press Send                                                                                                                                                                                      |
+| `waitTurn`      | optional `answer`                     | Wait for the typing dots to appear and go away, and check that the turn ended. With `answer` (a button name such as `Save mine first`), every "Unsaved changes" dialog during the turn gets that button, with a screenshot of each |
+| `click`         | `css`, optional `nth`                 | Click the `nth` (default 0) visible element that matches                                                                                                                                                                           |
+| `press`         | `key`                                 | Press a key, for example `Control+s`. Letters are case-sensitive: `Control+S` sends a capital S, which the editors do not treat as save                                                                                            |
+| `type`          | `value`                               | Type at the current focus                                                                                                                                                                                                          |
+| `wait`          | `ms`                                  | Wait that long                                                                                                                                                                                                                     |
+| `shot`          |                                       | Screenshot and ARIA snapshot                                                                                                                                                                                                       |
+| `engine`        | `args`                                | Run `engine-read.cjs` with these arguments and log the output. An argument that starts with `fixtures/` names a file in this folder's `fixtures/`, so steps files work from any checkout                                           |
+| `expectEditors` | optional `count`, `contains`, `clean` | Check the visible Monaco editors: at least one, exactly `count` when given, each showing `contains` when given, and with `clean` no ● (unsaved) anywhere on the page                                                               |
+| `expectEngine`  | `args`, `contains`                    | Check: the engine command's output contains the string                                                                                                                                                                             |
+
+The two steps files here are journeys for #2840; `journeys.md` lists what they check.

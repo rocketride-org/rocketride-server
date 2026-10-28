@@ -1,0 +1,8 @@
+{
+	"name": "local-verify-notes",
+	"private": true,
+	"appManifest": {
+		"id": "local.verify-notes",
+		"name": "Verify notes"
+	}
+}

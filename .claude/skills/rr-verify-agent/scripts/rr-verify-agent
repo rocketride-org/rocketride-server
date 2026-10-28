@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Entry point for the rr-verify-agent skill.
+#   rr-verify-agent run [--engine source|image] <journey>...   lock, launch, drive each journey, clean up
+#   rr-verify-agent build-engine [--release <tag>|nearest]     fill dist/server for --engine source
+#   rr-verify-agent launch [--engine source|image]             start engine + rocket-ui remote + shell (fresh, empty data)
+#   rr-verify-agent doctor                                     read-only health check
+#   rr-verify-agent drive <journey> [...]                      drive the Agent tab and record proof (see drive.mjs)
+#   rr-verify-agent engine <cmd> [...]                         read the workspace through the engine (see engine-read.cjs)
+#   rr-verify-agent cleanup                                    stop what launch started; evidence stays
+source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
+cmd="${1:-}"; shift || true
+case "$cmd" in
+	launch) exec "$SKILL_DIR/scripts/launch.sh" "$@" ;;
+	doctor) exec "$SKILL_DIR/scripts/doctor.sh" "$@" ;;
+	cleanup) exec "$SKILL_DIR/scripts/cleanup.sh" "$@" ;;
+	build-engine) exec "$SKILL_DIR/scripts/build-engine.sh" "$@" ;;
+	drive|engine)
+		# Never drive or write to an engine this skill did not start.
+		engine_is_ours || die "no rr-verify-agent engine from this checkout is running (or 5565 belongs to someone else). Run 'rr-verify-agent launch' first."
+		if [[ "$cmd" == drive ]]; then exec node "$SKILL_DIR/scripts/drive.mjs" "$@"; else exec node "$SKILL_DIR/scripts/engine-read.cjs" "$@"; fi ;;
+	run)
+		# Each journey is one argument; quote one that has flags:
+		#   rr-verify-agent run build-pipeline "unsaved-edits --choice save" "steps closed-dirty-tab"
+		launch_args=()
+		while [[ "${1:-}" == --engine* ]]; do
+			if [[ "$1" == --engine ]]; then launch_args+=("$1" "${2:?--engine needs source or image}"); shift 2; else launch_args+=("$1"); shift; fi
+		done
+		[[ $# -gt 0 ]] || die "run: name at least one journey"
+		# The lock covers launch to cleanup. Children get fd 9 closed, so a
+		# process that outlives cleanup cannot keep the lock.
+		if [[ -z "${RR_VERIFY_LOCK_HELD:-}" ]]; then
+			exec 9>"$LOCK_FILE"
+			if ! flock -n 9; then log "waiting for $LOCK_FILE (another run holds ports 5565, 3000 and 3010)"; flock 9; fi
+		fi
+		# launch refuses when this checkout's engine already runs, and leaves its
+		# records, so cleanup would stop that engine. Each start records a new id.
+		records() { cat "$STATE_DIR/engine.run" "$STATE_DIR/engine.container" 2>/dev/null || true; }
+		before="$(records)"
+		trap '[[ "$(records)" == "$before" ]] || "$SKILL_DIR/scripts/cleanup.sh" 9>&- || true' EXIT
+		"$SKILL_DIR/scripts/launch.sh" "${launch_args[@]}" 9>&- || exit 2
+		worst=0
+		summary=()
+		for j in "$@"; do
+			read -r -a words <<<"$j"
+			set +e
+			node "$SKILL_DIR/scripts/drive.mjs" "${words[@]}" 9>&-
+			code=$?
+			set -e
+			summary+=("$code  $j")
+			# 1 (fail) and 2 (could not run) outrank 3 (not verifiable here), which outranks 0.
+			if (( code == 1 || code == 2 )); then (( worst == 1 || worst == 2 )) || worst=$code; elif (( code == 3 && worst == 0 )); then worst=3; fi
+		done
+		log "results (exit codes: 0 pass, 1 fail, 2 could not run, 3 passed what this engine can verify):"
+		printf '  %s\n' "${summary[@]}" >&2
+		[[ -s "$STATE_DIR/fallback.txt" ]] && log "these ran on the published image, not this checkout's engine: $(cat "$STATE_DIR/fallback.txt")"
+		exit "$worst" ;;
+	*) sed -n '2,9p' "$0"; exit 2 ;;
+esac

@@ -27,6 +27,7 @@ Read the doc for your task before writing code. Paths are repo-relative.
 | WebSocket (5565) protocol | `docs/public/product/connect/websocket/` |
 | Crash reporting / minidumps | `docs/development/engine/crash-reporting.md` |
 | Shell apps | `docs/public/product/guides/apps/index.md` (app API), `docs/development/apps/index.md` (monorepo setup) |
+| Verify the browser agent (Rocket Builder's Agent tab) in the real app | `.claude/skills/rr-verify-agent/SKILL.md` |
 | Document a shipped app | `apps/<app>/` only (`README.md`, `docs/`, `assets/`); never a site page or spine entry. Exceptions: VS Code (`docs/docusaurus/apps/vscode/`) and App Builder (`docs/public/product/guides/apps/app-builder.md`) |
 | Builder / hooks | `docs/development/builder/reference.md` (run builds), `docs/development/builder/authoring.md` (write tasks.js), `docs/development/builder/pre-commit-hooks.md` |
 | Product docs (site spine) | `docs/public/product/` |

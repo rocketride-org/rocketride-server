@@ -23,6 +23,10 @@ out/
 # -----------------------------------------------------------------------------
 .claude/*
 !.claude/CLAUDE.md
+# Shared project skills are tracked one by one, so personal skills stay ignored.
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/rr-verify-agent/
 .cursor/
 .windsurf/
 # Agent stubs planted by the RocketRide VS Code extension's agent installer
@@ -237,3 +241,6 @@ packages/ai/src/ai/modules/mcp/apps/dist/
 !packages/n8n-nodes/credentials/**
 **/node_modules/
 **/dist/
+
+# Verification runs (evidence, state, engine runs) from .claude/skills/rr-verify-agent
+.verify/
