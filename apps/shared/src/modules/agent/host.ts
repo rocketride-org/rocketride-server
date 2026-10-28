@@ -147,6 +147,11 @@ export interface AgentHost {
 	 */
 	approvals?: HostApprovals;
 	/**
+	 * The user's limits for one turn, read when a turn starts. Without it a
+	 * turn gets DEFAULT_LIMITS.
+	 */
+	limits?: { read(): AgentLimits };
+	/**
 	 * Opens a workspace file in its editor, for a file link on a turn's card.
 	 * Hosts without editors leave it out, and the link does nothing.
 	 *
@@ -155,6 +160,21 @@ export interface AgentHost {
 	 */
 	openFile?(path: string): Promise<boolean>;
 }
+
+// =============================================================================
+// LIMITS — how far one turn goes before it pauses
+// =============================================================================
+
+/** A turn's limits. 0 turns a limit off. */
+export interface AgentLimits {
+	/** The most steps (waves) a turn takes; then it pauses with Continue. */
+	readonly steps: number;
+	/** The most a turn's estimated model cost may reach, in USD; then it pauses with Continue. The approval mode never raises it. */
+	readonly costUsd: number;
+}
+
+/** The limits of a turn whose host sets none: 60 steps and $2. */
+export const DEFAULT_LIMITS: AgentLimits = { steps: 60, costUsd: 2 };
 
 // =============================================================================
 // APPROVAL SETTINGS — the user's mode and grants, as the agent reads them

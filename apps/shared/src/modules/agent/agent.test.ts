@@ -30,11 +30,15 @@ import { test } from 'node:test';
 import type { ChatMessage } from 'shell';
 import { TurnController } from 'shell/src/components/chat/turns/turnController';
 import type { ChatTurn } from 'shell/src/components/chat/types';
+import { CachedVfs } from 'shell/src/modules/explorer/CachedVfs';
+import type { IVirtualFileSystem } from 'shell/src/modules/explorer/types';
 
+import { StagedFileSystem } from '../vfs/stagedFileSystem';
 import { AgentSession, type CardActionHandlers } from './agent';
-import { setAgentHost, type AgentHost, type ApprovalPrefs, type ApprovalSettings } from './host';
+import { setAgentHost, type AgentHost, type AgentLimits, type ApprovalPrefs, type ApprovalSettings } from './host';
 import type { AgentSessionFile } from './sessions';
-import { choiceAction, CONTINUE, OPEN_VARIABLES, type RunRecord, type TurnRecord } from './turn';
+import { UNDO_ROW } from './toolkits/undo';
+import { choiceAction, CONTINUE, OPEN_VARIABLES, UNDO, type RunRecord, type TurnRecord } from './turn';
 
 /** Session ids for the stored conversations. */
 const TEAM_A_SESSION = '11111111-1111-4111-8111-111111111111';
@@ -140,24 +144,28 @@ function doneReply(answer: string): string {
 
 /**
  * Puts a Question stub on the 'rocketride' stub, which the run builds one of
- * for each model call, recording each question's goals (the request).
+ * for each model call, recording each question's goals (the request) and context items.
  *
- * @returns The goals, in call order, and the undo.
+ * @returns The goals and the context items, in call order, and the undo.
  */
-function recordQuestions(): { goals: string[]; restore(): void } {
+function recordQuestions(): { goals: string[]; contexts: string[]; restore(): void } {
 	const rocketride = require('rocketride') as { Question?: unknown };
 	const goals: string[] = [];
+	const contexts: string[] = [];
 	rocketride.Question = class {
 		addInstruction(): void {}
 		addHistory(): void {}
 		addGoal(goal: string): void {
 			goals.push(goal);
 		}
-		addContext(): void {}
+		addContext(item: string): void {
+			contexts.push(item);
+		}
 		addQuestion(): void {}
 	};
 	return {
 		goals,
+		contexts,
 		restore: () => {
 			delete rocketride.Question;
 		},
@@ -633,7 +641,7 @@ test("a chat request the stand-in pipeline retries after a restart counts as two
 		const session = await AgentSession.getSession(TEAM_A_SESSION);
 		const { turn: ended } = await session.execute('Say hello.', undefined, turn());
 		assert.equal(chats, 2, 'the failed request was sent again');
-		assert.deepEqual({ outcome: ended.outcome, usage: ended.usage }, { outcome: 'done', usage: { waves: 1, modelRequests: 2, toolCalls: 0 } });
+		assert.deepEqual({ outcome: ended.outcome, waves: ended.usage.waves, modelRequests: ended.usage.modelRequests, toolCalls: ended.usage.toolCalls }, { outcome: 'done', waves: 1, modelRequests: 2, toolCalls: 0 });
 	} finally {
 		questions.restore();
 	}
@@ -675,4 +683,398 @@ test('a key in a stored turn, its card or a run record is redacted when the sess
 	assert.ok(!JSON.stringify(file).includes(key), 'the file holds the key');
 	assert.equal(file?.messages[1].card?.actions?.[0].label, 'Yes, [redacted]');
 	assert.equal(file?.runsStarted?.[0].token, OWNED.token, 'the run token stays readable');
+});
+
+// =============================================================================
+// LIMITS AND UNDO — through the session and the chat
+// =============================================================================
+
+/**
+ * A host in team a over a real view of an in-memory server, writing
+ * through, with the given limits.
+ *
+ * @param seed - The server's files.
+ * @param limits - The turn limits.
+ * @returns The host and the server's files.
+ */
+function viewHost(seed: Record<string, string>, limits: AgentLimits = { steps: 60, costUsd: 2 }): { host: AgentHost; files: Map<string, string> } {
+	const files = new Map(Object.entries(seed));
+	const backend: IVirtualFileSystem = {
+		list: async () => [...files.keys()].map((name) => ({ name, type: 'file' as const })),
+		read: async (path) => {
+			if (!files.has(path)) throw new Error(`No such file: ${path}`);
+			return files.get(path);
+		},
+		write: async (path, content) => {
+			files.set(path, String(content));
+		},
+		rename: async () => undefined,
+		delete: async (path) => {
+			files.delete(path);
+		},
+		mkdir: async () => undefined,
+	};
+	const vfs = new StagedFileSystem(new CachedVfs(backend), null, { writeThrough: true });
+	return { host: { ...hostIn('team-a'), vfs, limits: { read: () => limits } }, files };
+}
+
+/**
+ * Puts a Question stub on the 'rocketride' stub that records each question's history.
+ *
+ * @returns Each question's history, in call order, and the undo.
+ */
+function recordHistories(): { histories: Array<Array<{ role: string; content: string }>>; restore(): void } {
+	const rocketride = require('rocketride') as { Question?: unknown };
+	const histories: Array<Array<{ role: string; content: string }>> = [];
+	rocketride.Question = class {
+		private readonly history: Array<{ role: string; content: string }> = [];
+		constructor() {
+			histories.push(this.history);
+		}
+		addInstruction(): void {}
+		addHistory(turn: { role: string; content: string }): void {
+			this.history.push(turn);
+		}
+		addGoal(): void {}
+		addContext(): void {}
+		addQuestion(): void {}
+	};
+	return {
+		histories,
+		restore: () => {
+			delete rocketride.Question;
+		},
+	};
+}
+
+/** The bot rows that close turns, as the chat shows them with their cards. */
+function closingRows(session: AgentSession, chat: TurnController): ChatMessage[] {
+	return session.decorate(chat.snapshot().messages).filter((m) => m.card);
+}
+
+test('the step limit pauses a turn with Continue, and Continue starts a new turn with a fresh budget', async () => {
+	const read = planReply(['read_file', { path: 'a.txt' }]);
+	store(scripted([read, read, 'First part done.', read, read, 'Second part done.']));
+	const questions = recordQuestions();
+	try {
+		AgentSession.configure('agent.test');
+		const { host } = viewHost({ 'a.txt': 'alpha' }, { steps: 2, costUsd: 0 });
+		setAgentHost(host);
+		const session = AgentSession.newSession();
+		const chat = chatOver(session);
+		chat.send('Read a lot.');
+		await until(() => answered(chat, 1));
+		const [paused] = closingRows(session, chat);
+		assert.deepEqual({ title: paused.card?.title, actions: paused.card?.actions }, { title: 'Paused after 2 steps', actions: [{ id: CONTINUE, label: 'Continue' }] });
+		assert.equal(
+			session.cardAction(
+				paused.id,
+				{ kind: 'action', id: CONTINUE },
+				handlers((text) => chat.send(text))
+			),
+			true
+		);
+		await until(() => answered(chat, 2));
+		assert.deepEqual(
+			closingRows(session, chat).map((m) => m.card?.title),
+			['Paused after 2 steps', 'Paused after 2 steps']
+		);
+		assert.deepEqual(
+			session.turns.map((t) => ({ reason: t.reason, waves: t.usage.waves })),
+			[
+				{ reason: 'limited', waves: 2 },
+				{ reason: 'limited', waves: 2 },
+			],
+			'the second turn took two steps of its own'
+		);
+		assert.match(questions.goals.at(-1) ?? '', /^Continue\.\n\n\(answering request [0-9a-f]{8}\)$/);
+	} finally {
+		questions.restore();
+	}
+});
+
+test('a message sent in the last step or during the summary is heard by the paused turn, so no turn starts before Continue', async () => {
+	// step: each model request answers only when the test lets it
+	const replies = [planReply(['read_file', { path: 'a.txt' }]), 'Paused here.'];
+	const waiting: Array<() => void> = [];
+	store({
+		use: async () => ({ token: 'tk_standin' }),
+		chat: async () => {
+			await new Promise<void>((resolve) => waiting.push(resolve));
+			const next = replies.shift();
+			return next === undefined ? new Promise(() => undefined) : { answers: [next] };
+		},
+	});
+	const questions = recordQuestions();
+	try {
+		AgentSession.configure('agent.test');
+		const { host } = viewHost({ 'a.txt': 'alpha' }, { steps: 1, costUsd: 0 });
+		setAgentHost(host);
+		const session = AgentSession.newSession();
+		const chat = chatOver(session);
+		chat.send('Read a lot.');
+		// step: one message while the only step plans, one while the summary is written
+		await until(() => waiting.length === 1);
+		chat.send('Also read b.txt.');
+		waiting[0]();
+		await until(() => waiting.length === 2);
+		chat.send('And c.txt.');
+		waiting[1]();
+		await until(() => chat.snapshot().messages.some((m) => m.sender === 'bot' && !m.resultKey));
+		const { phase, messages } = chat.snapshot();
+		assert.equal(phase, 'idle', 'no turn started for a message the paused turn left queued');
+		assert.deepEqual(
+			messages.filter((m) => m.sender === 'user').map((m) => [m.text, m.queued === true]),
+			[
+				['Read a lot.', false],
+				['Also read b.txt.', false],
+				['And c.txt.', false],
+			]
+		);
+		assert.ok(messages.findIndex((m) => m.text === 'And c.txt.') < messages.findIndex((m) => m.sender === 'bot' && !m.resultKey), 'both messages are rows of the paused turn');
+		assert.ok(
+			questions.contexts.some((item) => item.includes('1. Also read b.txt.')),
+			'the summary read the message sent in the last step'
+		);
+		assert.equal(waiting.length, 2, 'two model requests: the plan and the summary');
+	} finally {
+		questions.restore();
+	}
+});
+
+test("the latest turn's card offers Undo, and its row shows the estimated cost; a reload or another team's workspace has no Undo", async () => {
+	const written = store(scripted([planReply(['read_file', { path: 'a.txt' }]), planReply(['edit_file', { path: 'a.txt', oldString: 'alpha', newString: 'ALPHA' }]), doneReply('Changed a.txt.')]));
+	const questions = recordQuestions();
+	try {
+		AgentSession.configure('agent.test');
+		const { host, files } = viewHost({ 'a.txt': 'alpha' });
+		setAgentHost(host);
+		const session = AgentSession.newSession();
+		const chat = chatOver(session);
+		chat.send('Change a.txt.');
+		await until(() => answered(chat, 1));
+		assert.equal(files.get('a.txt'), 'ALPHA');
+		const [row] = closingRows(session, chat);
+		assert.deepEqual(row.card?.actions, [{ id: UNDO, label: 'Undo' }]);
+		assert.match(row.meta ?? '', /^(~\$\d+\.\d\d|<\$0\.01) est\.$/, 'the stand-in has a price, so the row shows a cost');
+		// step: the saved card has no Undo, and the reloaded conversation has none
+		await session.save(chat.snapshot().messages);
+		assert.ok(!JSON.stringify(savedFile(written, session.sessionId)).includes(`"${UNDO}"`), 'the saved file offers Undo');
+		const reloaded = await AgentSession.getSession(session.sessionId);
+		assert.deepEqual(reloaded.decorate(reloaded.messages).find((m) => m.card)?.card?.actions, undefined);
+		// step: after a team switch the host has another workspace, and the turn's changes are not in it
+		setAgentHost({ ...hostIn('team-a'), vfs: new StagedFileSystem(new CachedVfs({ list: async () => [], read: async () => '', write: async () => undefined, rename: async () => undefined, delete: async () => undefined, mkdir: async () => undefined }), null, { writeThrough: true }) });
+		assert.deepEqual(closingRows(session, chat)[0].card?.actions, undefined);
+		assert.equal(session.cardAction(row.id, { kind: 'action', id: UNDO }, handlers()), false);
+	} finally {
+		questions.restore();
+	}
+});
+
+test('Undo puts the file back, says so in a row the next turn reads, and is gone after; a turn that starts first takes it away', async () => {
+	store(scripted([planReply(['read_file', { path: 'a.txt' }]), planReply(['edit_file', { path: 'a.txt', oldString: 'alpha', newString: 'ALPHA' }]), doneReply('Changed a.txt.'), doneReply('Noted.')]));
+	const histories = recordHistories();
+	try {
+		AgentSession.configure('agent.test');
+		const { host, files } = viewHost({ 'a.txt': 'alpha' });
+		setAgentHost(host);
+		const session = AgentSession.newSession();
+		const chat = chatOver(session);
+		chat.send('Change a.txt.');
+		await until(() => answered(chat, 1));
+		const [row] = closingRows(session, chat);
+		const notes: string[] = [];
+		let redraws = 0;
+		session.subscribe(() => redraws++);
+		const press: CardActionHandlers = { ...handlers(), note: (text) => (notes.push(text), chat.addSystemMessage(text)) };
+		assert.equal(session.cardAction(row.id, { kind: 'action', id: UNDO }, press), true);
+		assert.deepEqual(closingRows(session, chat)[0].card?.actions, [{ id: UNDO, label: 'Undo', disabled: true }], 'disabled while it runs');
+		assert.equal(session.cardAction(row.id, { kind: 'action', id: UNDO }, press), false, 'a second press does nothing');
+		await until(() => notes.length === 1);
+		assert.equal(notes[0], `${UNDO_ROW}the user reversed the file changes of the turn before, so these files are back as they were before it: a.txt.`);
+		assert.equal(files.get('a.txt'), 'alpha');
+		assert.ok(redraws >= 2, 'the tab is told to draw the cards again');
+		assert.deepEqual({ actions: closingRows(session, chat)[0].card?.actions, lines: closingRows(session, chat)[0].card?.lines }, { actions: undefined, lines: undefined }, 'one level: Undo is gone');
+		chat.send('What changed?');
+		await until(() => answered(chat, 2));
+		assert.deepEqual(histories.histories.at(-1)?.slice(-1), [{ role: 'user', content: notes[0] }], 'the model reads the Undo row');
+	} finally {
+		histories.restore();
+	}
+
+	// step: a second conversation whose next turn starts before Undo is pressed
+	store(scripted([planReply(['read_file', { path: 'a.txt' }]), planReply(['edit_file', { path: 'a.txt', oldString: 'alpha', newString: 'ALPHA' }]), doneReply('Changed a.txt.')]));
+	const questions = recordQuestions();
+	try {
+		const { host } = viewHost({ 'a.txt': 'alpha' });
+		setAgentHost(host);
+		const session = AgentSession.newSession();
+		const chat = chatOver(session);
+		chat.send('Change a.txt.');
+		await until(() => answered(chat, 1));
+		const [row] = closingRows(session, chat);
+		// the script has run out, so this turn's model call never returns
+		chat.send('And more.');
+		await until(() => chat.snapshot().phase !== 'idle');
+		assert.deepEqual(closingRows(session, chat)[0].card?.actions, undefined, 'no Undo while a turn runs, and only the latest turn has it');
+		assert.equal(session.cardAction(row.id, { kind: 'action', id: UNDO }, handlers()), false);
+		chat.stop();
+	} finally {
+		questions.restore();
+	}
+});
+
+test('a message held while Undo runs is dropped when the tab closes before Undo ends, so no turn starts unseen', async () => {
+	store(scripted([planReply(['read_file', { path: 'a.txt' }]), planReply(['edit_file', { path: 'a.txt', oldString: 'alpha', newString: 'ALPHA' }]), doneReply('Changed a.txt.'), doneReply('Noted.')]));
+	const histories = recordHistories();
+	try {
+		AgentSession.configure('agent.test');
+		const { host, files } = viewHost({ 'a.txt': 'alpha' });
+		setAgentHost(host);
+		const session = AgentSession.newSession();
+		const chat = chatOver(session);
+		chat.send('Change a.txt.');
+		await until(() => answered(chat, 1));
+		const [row] = closingRows(session, chat);
+		// step: Undo's check read of the server answers only when the test lets it
+		let release = (): void => undefined;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		const peek = host.vfs.peekBase.bind(host.vfs);
+		host.vfs.peekBase = async (path) => (await held, peek(path));
+		let noted = (): void => undefined;
+		const done = new Promise<void>((resolve) => (noted = resolve));
+		assert.equal(session.cardAction(row.id, { kind: 'action', id: UNDO }, { ...handlers(), note: (text) => (chat.addSystemMessage(text), noted()) }), true);
+		let sent = 0;
+		session.afterUndo(() => {
+			sent++;
+			chat.send('What changed?');
+		});
+		// step: the user closes the tab while Undo still waits on the server
+		session.detach(chat.snapshot().messages);
+		release();
+		// step: Undo ends with its note; a held message would go in the same burst of promise callbacks, so one macrotask later it has gone or never will
+		await done;
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(files.get('a.txt'), 'alpha', 'the Undo itself still finished');
+		assert.equal(sent, 0, 'the held message went with the closed tab');
+	} finally {
+		histories.restore();
+	}
+});
+
+test('a message sent while Undo runs waits for it: the turn it opens starts after the note row and reads it', async () => {
+	store(scripted([planReply(['read_file', { path: 'a.txt' }]), planReply(['edit_file', { path: 'a.txt', oldString: 'alpha', newString: 'ALPHA' }]), doneReply('Changed a.txt.'), doneReply('Noted.')]));
+	const histories = recordHistories();
+	try {
+		AgentSession.configure('agent.test');
+		const { host, files } = viewHost({ 'a.txt': 'alpha' });
+		setAgentHost(host);
+		const session = AgentSession.newSession();
+		const chat = chatOver(session);
+		chat.send('Change a.txt.');
+		await until(() => answered(chat, 1));
+		const [row] = closingRows(session, chat);
+		// step: Undo's check read of the server answers only when the test lets it
+		let release = (): void => undefined;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		const peek = host.vfs.peekBase.bind(host.vfs);
+		host.vfs.peekBase = async (path) => (await held, peek(path));
+		const notes: string[] = [];
+		assert.equal(session.cardAction(row.id, { kind: 'action', id: UNDO }, { ...handlers(), note: (text) => (notes.push(text), chat.addSystemMessage(text)) }), true);
+		// step: the tab sends what the user typed through afterUndo
+		session.afterUndo(() => chat.send('What changed?'));
+		for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve));
+		assert.deepEqual({ phase: chat.snapshot().phase, rows: chat.snapshot().messages.filter((m) => m.text === 'What changed?').length }, { phase: 'idle', rows: 0 }, 'the message waits while Undo runs');
+		release();
+		await until(() => answered(chat, 2));
+		assert.equal(files.get('a.txt'), 'alpha');
+		const texts = chat.snapshot().messages.map((m) => m.text);
+		assert.ok(texts.indexOf(notes[0]) >= 0 && texts.indexOf(notes[0]) < texts.indexOf('What changed?'), 'the note row comes before the message');
+		assert.deepEqual(histories.histories.at(-1)?.slice(-1), [{ role: 'user', content: notes[0] }], 'the turn the message opened reads the note');
+	} finally {
+		histories.restore();
+	}
+});
+
+test('an Undo that ends after its tab closed saves its note row, so the reopened conversation shows it and the next turn reads it', async () => {
+	const written = store(scripted([planReply(['read_file', { path: 'a.txt' }]), planReply(['edit_file', { path: 'a.txt', oldString: 'alpha', newString: 'ALPHA' }]), doneReply('Changed a.txt.'), doneReply('Noted.')]));
+	const histories = recordHistories();
+	try {
+		AgentSession.configure('agent.test');
+		const { host, files } = viewHost({ 'a.txt': 'alpha' });
+		setAgentHost(host);
+		const session = AgentSession.newSession();
+		const chat = chatOver(session);
+		chat.send('Change a.txt.');
+		await until(() => answered(chat, 1));
+		const [row] = closingRows(session, chat);
+		// step: Undo's check read of the server answers only when the test lets it
+		let release = (): void => undefined;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		const peek = host.vfs.peekBase.bind(host.vfs);
+		host.vfs.peekBase = async (path) => (await held, peek(path));
+		let noted = (): void => undefined;
+		const done = new Promise<void>((resolve) => (noted = resolve));
+		assert.equal(session.cardAction(row.id, { kind: 'action', id: UNDO }, { ...handlers(), note: (text) => (chat.addSystemMessage(text), noted()) }), true);
+		// step: the user closes the tab while Undo still waits on the server
+		session.detach(chat.snapshot().messages);
+		release();
+		await done;
+		assert.equal(files.get('a.txt'), 'alpha');
+		const note = `${UNDO_ROW}the user reversed the file changes of the turn before, so these files are back as they were before it: a.txt.`;
+		assert.equal(savedFile(written, session.sessionId)?.messages.at(-1)?.text, note, 'the saved conversation ends with the note');
+		// step: the user reopens the conversation and asks
+		const reopened = await AgentSession.getSession(session.sessionId);
+		const again = chatOver(reopened);
+		again.send('What changed?');
+		await until(() => answered(again, 2));
+		assert.deepEqual(histories.histories.at(-1)?.slice(-1), [{ role: 'user', content: note }], 'the next turn reads the note');
+	} finally {
+		histories.restore();
+	}
+});
+
+test('a conversation reopened while Undo runs loads after it: nothing is sent before Undo ends, and the first turn reads the note', async () => {
+	store(scripted([planReply(['read_file', { path: 'a.txt' }]), planReply(['edit_file', { path: 'a.txt', oldString: 'alpha', newString: 'ALPHA' }]), doneReply('Changed a.txt.'), doneReply('Noted.')]));
+	const histories = recordHistories();
+	try {
+		AgentSession.configure('agent.test');
+		const { host, files } = viewHost({ 'a.txt': 'alpha' });
+		setAgentHost(host);
+		const session = AgentSession.newSession();
+		const chat = chatOver(session);
+		chat.send('Change a.txt.');
+		await until(() => answered(chat, 1));
+		const [row] = closingRows(session, chat);
+		// step: Undo's check read of the server answers only when the test lets it
+		let release = (): void => undefined;
+		const held = new Promise<void>((resolve) => (release = resolve));
+		const peek = host.vfs.peekBase.bind(host.vfs);
+		host.vfs.peekBase = async (path) => (await held, peek(path));
+		assert.equal(session.cardAction(row.id, { kind: 'action', id: UNDO }, { ...handlers(), note: (text) => chat.addSystemMessage(text) }), true);
+		// step: the user closes the tab while Undo waits on the server, reopens the conversation and sends, through afterUndo as the tab does
+		session.detach(chat.snapshot().messages);
+		let sent = 0;
+		const reopening = AgentSession.getSession(session.sessionId).then((reopened) => {
+			reopened.attach();
+			const again = chatOver(reopened);
+			reopened.afterUndo(() => {
+				sent++;
+				again.send('What changed?');
+			});
+			return again;
+		});
+		for (let i = 0; i < 50; i++) await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(sent, 0, 'the reopened tab sends nothing while Undo waits on the server');
+		release();
+		const again = await reopening;
+		const note = `${UNDO_ROW}the user reversed the file changes of the turn before, so these files are back as they were before it: a.txt.`;
+		const texts = again.snapshot().messages.map((m) => m.text);
+		assert.ok(texts.indexOf(note) >= 0 && texts.indexOf(note) < texts.indexOf('What changed?'), 'the reopened tab opens with the note, and the message goes after it');
+		await until(() => answered(again, 2));
+		assert.equal(files.get('a.txt'), 'alpha');
+		assert.deepEqual(histories.histories.at(-1)?.slice(-1), [{ role: 'user', content: note }], 'the turn reads the note');
+	} finally {
+		histories.restore();
+	}
 });

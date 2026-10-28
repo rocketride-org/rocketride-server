@@ -51,6 +51,10 @@ import { requireClient, type ClientGetter } from './toolkits/common';
 const STANDIN_PROFILE = 'claude-sonnet-5';
 
 // TEMPORARY (spec §11): delete when Rod's wiring lands
+/** The model that profile runs (the node's services.json gives it the same name), as the price table names it. */
+export const STANDIN_MODEL = STANDIN_PROFILE;
+
+// TEMPORARY (spec §11): delete when Rod's wiring lands
 /**
  * The stand-in pipeline for one conversation: webhook → Anthropic → answers.
  * The shape follows `nodes/src/nodes/llm_anthropic/example.pipe`, with a

@@ -2437,8 +2437,12 @@ test('a turn the finish rule accepts is done, with the files it changed, the che
 	const { client } = scriptedClient({ validate: { errors: [], warnings: [] } });
 	const model = scriptedModel([plan(['write_file', { path: 'pipelines/chat.pipe', content: PIPE }], ['read_file', { path: 'pipelines/old.pipe' }]), plan(['rename', { oldPath: 'pipelines/old.pipe', newPath: 'pipelines/older.pipe' }]), done('Wrote chat.pipe.')]);
 	const { turn } = await turnResult(ws, model, { client });
+	// step: a test's model has no price, so the turn counts estimated tokens and no cost
+	const { tokens, ...counts } = turn.usage;
+	assert.equal(tokens?.estimated, true);
+	assert.equal(turn.usage.cost, undefined);
 	assert.deepEqual(
-		{ outcome: turn.outcome, reason: turn.reason, finalText: turn.finalText, files: turn.files, usage: turn.usage },
+		{ outcome: turn.outcome, reason: turn.reason, finalText: turn.finalText, files: turn.files, usage: counts },
 		{
 			outcome: 'done',
 			reason: 'done',
@@ -2595,7 +2599,8 @@ test('a stopped turn is stopped, with no answer, and says what it changed and th
 test('a model that fails after the turn gathered something leaves a failed turn with its best-effort answer; one that fails at once throws a failed result', async () => {
 	const model = scriptedModel([plan(['read_file', { path: 'a.txt' }]), () => Promise.reject(new Error('The model provider failed: overloaded')), 'From what I read, a.txt says hi.']);
 	const { turn } = await turnResult(createMemoryWorkspace({ 'a.txt': 'hi' }), model);
-	assert.deepEqual({ outcome: turn.outcome, reason: turn.reason, finalText: turn.finalText, usage: turn.usage }, { outcome: 'failed', reason: 'error', finalText: 'From what I read, a.txt says hi.', usage: { waves: 2, modelRequests: 3, toolCalls: 1 } });
+	const { tokens: _tokens, ...counts } = turn.usage;
+	assert.deepEqual({ outcome: turn.outcome, reason: turn.reason, finalText: turn.finalText, usage: counts }, { outcome: 'failed', reason: 'error', finalText: 'From what I read, a.txt says hi.', usage: { waves: 2, modelRequests: 3, toolCalls: 1 } });
 
 	const dead = scriptedModel([() => Promise.reject(new Error('The model pipeline stopped responding: gone'))]);
 	await assert.rejects(turnResult(createMemoryWorkspace({}), dead), (err: unknown) => {

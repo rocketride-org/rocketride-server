@@ -37,6 +37,7 @@
 import type { ChatMessage } from 'shell';
 
 import { redactText } from './toolkits/common';
+import { costText, tokensText } from './usage';
 
 // =============================================================================
 // TYPES
@@ -47,10 +48,11 @@ export type TurnOutcome = 'done' | 'needs_input' | 'stopped' | 'failed' | 'incom
 
 /**
  * Why, in one word: the loop's stop reason ('done', 'needs_input',
- * 'empty_plan', 'error', 'stopped'), 'unmounted' for a turn the Agent tab
- * closed on, or 'refused' for a message the session would not run.
+ * 'empty_plan', 'error', 'stopped', 'limited' at the step limit, 'cost_limit'
+ * when the cost limit refused a model request), 'unmounted' for a turn the
+ * Agent tab closed on, or 'refused' for a message the session would not run.
  */
-export type TurnReason = 'done' | 'needs_input' | 'empty_plan' | 'error' | 'stopped' | 'unmounted' | 'refused';
+export type TurnReason = 'done' | 'needs_input' | 'empty_plan' | 'error' | 'stopped' | 'limited' | 'cost_limit' | 'unmounted' | 'refused';
 
 /** One file the turn changed. */
 export interface TurnFile {
@@ -74,7 +76,7 @@ export interface TurnCheck {
 	summary: string;
 }
 
-/** What the turn used. Nothing stops a turn because of it. */
+/** What the turn used. The step limit counts waves, and the cost limit the cost; the rest is for diagnostics. */
 export interface TurnUsage {
 	/** Waves run, counting the one the turn ended in. */
 	waves: number;
@@ -82,7 +84,9 @@ export interface TurnUsage {
 	modelRequests: number;
 	/** Tool calls the model planned. */
 	toolCalls: number;
-	/** The cost, when something measures it; `estimated` when it comes from character counts rather than the provider. */
+	/** The tokens, when something counts them; `estimated` when they come from character counts rather than the provider. */
+	tokens?: { input: number; output: number; estimated: boolean };
+	/** The cost, when the model has a price; `estimated` when it comes from character counts rather than the provider. */
 	cost?: { usd: number; estimated: boolean };
 }
 
@@ -149,7 +153,7 @@ export interface TurnResult {
 	request?: NeedsInputRequest;
 	/** The runs this turn started that the conversation owns. */
 	runsStarted?: RunRecord[];
-	/** Whether the turn's file changes can be undone. Unset until something offers Undo. */
+	/** Whether the turn's file changes could be undone when it ended; unset for a turn that changed no file. */
 	undoAvailable?: boolean;
 }
 
@@ -170,13 +174,15 @@ export type TurnCardAction = { kind: 'file'; path: string } | { kind: 'action'; 
  * The outcome a loop stop reason stands for.
  *
  * @param reason - How the loop ended.
- * @returns done when the finish rule accepted the answer; needs_input when ask_user ended the turn; stopped for Stop; failed when the model could not be reached; incomplete when its replies stayed unusable.
+ * @returns done when the finish rule accepted the answer; needs_input when ask_user ended the turn or a limit paused it; stopped for Stop; failed when the model could not be reached; incomplete when its replies stayed unusable.
  */
-export function outcomeOf(reason: 'done' | 'needs_input' | 'empty_plan' | 'error' | 'stopped'): TurnOutcome {
+export function outcomeOf(reason: 'done' | 'needs_input' | 'empty_plan' | 'error' | 'stopped' | 'limited' | 'cost_limit'): TurnOutcome {
 	switch (reason) {
 		case 'done':
 			return 'done';
 		case 'needs_input':
+		case 'limited':
+		case 'cost_limit':
 			return 'needs_input';
 		case 'stopped':
 			return 'stopped';
@@ -255,6 +261,12 @@ export const CONTINUE = 'continue';
 /** The text the Continue button sends. */
 export const CONTINUE_TEXT = 'Continue.';
 
+/** The button that undoes the latest turn's file changes. */
+export const UNDO = 'undo';
+
+/** The card line under a paused turn: what Continue does. */
+const FRESH_BUDGET = 'Continue starts a new turn with a fresh budget.';
+
 /** The id of the button for a question's choice. */
 export function choiceAction(index: number): string {
 	return `choice:${index}`;
@@ -266,10 +278,12 @@ export function choiceAction(index: number): string {
  * - done: "Done", the changed files and every check.
  * - failed and incomplete: "Not finished", the failing checks or the error.
  * - needs_input: "Needs you", with a button per choice, Open Variables for a
- *   variable, or Continue. An answered request's buttons are disabled.
+ *   variable, or Continue. An answered request's buttons are disabled. A turn
+ *   a limit paused says so in its title ("Paused after 60 steps").
  * - stopped: "Stopped", the files changed so far.
  *
- * Files the turn left in place are links; deleted ones are lines.
+ * Files the turn left in place are links; deleted ones are lines. A turn
+ * whose model has no price says so, since the cost limit does not apply.
  *
  * @param turn - The turn.
  * @returns The card.
@@ -278,8 +292,9 @@ export function turnCard(turn: TurnResult): TurnCard {
 	const files = turn.files.filter((f) => f.change !== 'deleted').map((f) => f.path);
 	const deleted = turn.files.filter((f) => f.change === 'deleted').map((f) => `Deleted ${f.path}`);
 	const checkLine = (c: TurnCheck): string => `${c.target}: ${c.summary || c.status.replace('_', ' ')}`;
+	const unpriced = turn.usage.tokens && !turn.usage.cost ? [`No price for this model, so the cost limit does not apply (${tokensText(turn.usage.tokens.input + turn.usage.tokens.output)}).`] : [];
 	const withFiles = ({ lines: own = [], ...card }: TurnCard): TurnCard => {
-		const lines = [...own, ...deleted];
+		const lines = [...own, ...deleted, ...unpriced];
 		return { ...card, ...(lines.length ? { lines } : {}), ...(files.length ? { files } : {}) };
 	};
 	switch (turn.outcome) {
@@ -293,8 +308,35 @@ export function turnCard(turn: TurnResult): TurnCard {
 			return withFiles({ tone: 'danger', title: 'Not finished', lines: turn.error ? [turn.error, ...failing] : failing });
 		}
 		case 'needs_input':
+			if (turn.reason === 'limited' || turn.reason === 'cost_limit') {
+				const spent = turn.reason === 'cost_limit' && turn.usage.cost ? [`${costText(turn.usage.cost.usd)} so far.`] : [];
+				return withFiles({ tone: 'info', title: turn.request?.question ?? 'Paused', lines: [...spent, FRESH_BUDGET], ...requestParts(turn.request) });
+			}
 			return withFiles({ tone: 'info', title: 'Needs you', ...requestParts(turn.request) });
 	}
+}
+
+/**
+ * What a turn's usage shows in its row's meta line.
+ *
+ * @param usage - The turn's usage.
+ * @returns "~$0.42 est.", or the tokens for a model with no price; '' when nothing was counted.
+ */
+export function usageMeta(usage: TurnUsage): string {
+	if (usage.cost) return costText(usage.cost.usd);
+	if (usage.tokens) return tokensText(usage.tokens.input + usage.tokens.output);
+	return '';
+}
+
+/**
+ * What a card says about Undo, for the latest turn of a conversation.
+ *
+ * @param state - 'ready' with the button enabled, 'waiting' with it disabled (the chat is busy, or a call of the turn is still running), or why Undo is unavailable.
+ * @returns The button, or the line.
+ */
+export function undoParts(state: 'ready' | 'waiting' | { unavailable: string }): Pick<TurnCard, 'lines' | 'actions'> {
+	if (typeof state === 'object') return { lines: [`Undo is unavailable: ${state.unavailable}.`] };
+	return { actions: [{ id: UNDO, label: 'Undo', ...(state === 'waiting' ? { disabled: true } : {}) }] };
 }
 
 /** A request's lines and buttons. */
