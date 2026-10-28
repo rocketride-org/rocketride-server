@@ -320,10 +320,10 @@ export function turnCard(turn: TurnResult): TurnCard {
  * What a turn's usage shows in its row's meta line.
  *
  * @param usage - The turn's usage.
- * @returns "~$0.42 est.", or the tokens for a model with no price; '' when nothing was counted.
+ * @returns "~$0.42 est., not counting thinking", or the tokens for a model with no price; '' when nothing was counted.
  */
 export function usageMeta(usage: TurnUsage): string {
-	if (usage.cost) return costText(usage.cost.usd);
+	if (usage.cost) return `${costText(usage.cost.usd)}, not counting thinking`;
 	if (usage.tokens) return tokensText(usage.tokens.input + usage.tokens.output);
 	return '';
 }

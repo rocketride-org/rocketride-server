@@ -856,7 +856,7 @@ test("the latest turn's card offers Undo, and its row shows the estimated cost; 
 		assert.equal(files.get('a.txt'), 'ALPHA');
 		const [row] = closingRows(session, chat);
 		assert.deepEqual(row.card?.actions, [{ id: UNDO, label: 'Undo' }]);
-		assert.match(row.meta ?? '', /^(~\$\d+\.\d\d|<\$0\.01) est\.$/, 'the stand-in has a price, so the row shows a cost');
+		assert.match(row.meta ?? '', /^(~\$\d+\.\d\d|<\$0\.01) est\., not counting thinking$/, 'the stand-in has a price, so the row shows a cost');
 		// step: the saved card has no Undo, and the reloaded conversation has none
 		await session.save(chat.snapshot().messages);
 		assert.ok(!JSON.stringify(savedFile(written, session.sessionId)).includes(`"${UNDO}"`), 'the saved file offers Undo');

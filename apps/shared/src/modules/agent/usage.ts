@@ -32,6 +32,10 @@
  * checks. The meter takes characters now; a reply that reports its tokens
  * can feed it later without a change to ModelCall.
  *
+ * The estimate leaves out thinking. The stand-in sends no thinking param, so
+ * Sonnet 5 thinks by default and bills it as output the browser never sees.
+ * The estimate, and the cost a turn pauses at, are lower bounds.
+ *
  * createChatModel feeds the meter once per model request, the retry after a
  * pipeline restart included, and runAgent feeds it for a model a test
  * passes. Before each request the meter reserves the request's input

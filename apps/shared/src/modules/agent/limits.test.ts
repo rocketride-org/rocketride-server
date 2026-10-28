@@ -275,7 +275,7 @@ test('a turn under its cost limit runs, and its estimate is what the row shows',
 	const turn = await turnWith(model, { limits: { steps: 60, costUsd: 2 }, modelName: SONNET });
 	assert.equal(turn.outcome, 'done');
 	assert.ok(turn.usage.cost && turn.usage.cost.usd > 0 && turn.usage.cost.estimated, 'the turn has an estimated cost');
-	assert.equal(usageMeta(turn.usage), `~$${(turn.usage.cost?.usd ?? 0).toFixed(2)} est.`);
+	assert.equal(usageMeta(turn.usage), `~$${(turn.usage.cost?.usd ?? 0).toFixed(2)} est., not counting thinking`);
 });
 
 test('a model with no price shows tokens and no cost, and the cost limit does not apply; the card says so', async () => {

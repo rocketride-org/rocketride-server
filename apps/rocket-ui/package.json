@@ -118,7 +118,7 @@
 						"default": 2,
 						"minimum": 0,
 						"order": 9,
-						"description": "The most one agent turn's estimated model cost may reach, in US dollars. At the limit it pauses and asks; Continue starts a new turn with a fresh budget. The estimate counts 4 characters as a token. 0 means no limit, and a model with no known price has none."
+						"description": "The most one agent turn's estimated model cost may reach, in US dollars. At the limit it pauses and asks; Continue starts a new turn with a fresh budget. The estimate counts 4 characters as a token and leaves out the model's thinking, so a turn can cost more than the limit. 0 means no limit, and a model with no known price has none."
 					},
 					"rocketride.pipeBuilder.agentAllowScheduleChanges": {
 						"type": "boolean",
