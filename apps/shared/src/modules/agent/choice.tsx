@@ -99,10 +99,14 @@ export function queueChoices(show: (title: string, message: string) => ShownChoi
 /**
  * Whether a modal dialog that is not one of ours is open. Ours are passed
  * over: the last one stays in the page until its deferred unmount, and must
- * not block the next question.
+ * not block the next question. Hidden ones are too: below 1024 px the shell's
+ * closed navigation drawer stays in the page as a modal dialog with
+ * `visibility: hidden`. Chrome 105 to 120 know that option only by its old
+ * name, checkVisibilityCSS. A browser without checkVisibility counts every
+ * dialog, so a question never opens over another.
  */
 export function otherDialogOpen(root: ParentNode = document): boolean {
-	return [...root.querySelectorAll(OPEN_DIALOG)].some((dialog) => !dialog.closest(`[${OWN_DIALOG}]`));
+	return [...root.querySelectorAll(OPEN_DIALOG)].some((dialog) => !dialog.closest(`[${OWN_DIALOG}]`) && dialog.checkVisibility?.({ visibilityProperty: true, checkVisibilityCSS: true }) !== false);
 }
 
 // =============================================================================

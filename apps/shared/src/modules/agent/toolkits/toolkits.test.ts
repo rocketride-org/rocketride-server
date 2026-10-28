@@ -626,12 +626,32 @@ test('a question that cannot show because another dialog is open says so, and is
 	assert.equal(ws.files.get('a.ts'), 'a = 2');
 });
 
+// `shown` false answers false only when asked about the visibility property, as the closed drawer does:
+// it is hidden by `visibility: hidden` and still has a box. With no `shown`, there is no checkVisibility.
+const dialog = (own: boolean, shown?: boolean) => ({
+	closest: (selector: string) => (own && selector === '[data-agent-choice]' ? {} : null),
+	...(shown === undefined ? {} : { checkVisibility: (options?: CheckVisibilityOptions) => shown || !options?.visibilityProperty }),
+});
+const page = (...dialogs: Array<ReturnType<typeof dialog>>) => ({ querySelectorAll: () => dialogs }) as unknown as ParentNode;
+
 test('our own last dialog, still in the page before its deferred unmount, does not block the next question', () => {
-	const dialog = (own: boolean) => ({ closest: (selector: string) => (own && selector === '[data-agent-choice]' ? {} : null) });
-	const page = (...dialogs: Array<ReturnType<typeof dialog>>) => ({ querySelectorAll: () => dialogs }) as unknown as ParentNode;
 	assert.equal(otherDialogOpen(page(dialog(true))), false);
-	assert.equal(otherDialogOpen(page(dialog(true), dialog(false))), true);
+	assert.equal(otherDialogOpen(page(dialog(true), dialog(false, true))), true);
 	assert.equal(otherDialogOpen(page()), false);
+});
+
+test('a dialog in the page but hidden, as the closed navigation drawer is below 1024 px, does not block the question', () => {
+	assert.equal(otherDialogOpen(page(dialog(false, false))), false);
+});
+
+test('the closed drawer does not block the question in Chrome 105 to 120, which know the option only as checkVisibilityCSS', () => {
+	const drawer = { closest: () => null, checkVisibility: (options?: CheckVisibilityOptions) => !options?.checkVisibilityCSS };
+	assert.equal(otherDialogOpen(page(drawer)), false);
+});
+
+test('a visible dialog still blocks the question, as does one in a browser without checkVisibility', () => {
+	assert.equal(otherDialogOpen(page(dialog(false, true))), true);
+	assert.equal(otherDialogOpen(page(dialog(false))), true);
 });
 
 test('a run that ends answers its open and waiting questions Keep mine, and takes the open dialog down', async () => {
