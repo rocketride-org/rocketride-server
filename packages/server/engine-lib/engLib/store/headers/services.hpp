@@ -160,6 +160,32 @@ public:
     //-----------------------------------------------------------------
     ///	Public API
     //-----------------------------------------------------------------
+    class CustomServicesScope {
+    public:
+        CustomServicesScope(CustomServicesScope &&other) noexcept
+            : m_services(_mv(other.m_services)), m_outer(other.m_outer) {
+            if (m_outer) t_custom = &m_services;
+            other.m_outer = std::nullopt;
+        }
+        CustomServicesScope(const CustomServicesScope &) = delete;
+        ~CustomServicesScope() noexcept {
+            if (m_outer) t_custom = *m_outer;
+        }
+
+    private:
+        friend class IServices;
+
+        CustomServicesScope() noexcept = default;
+
+        explicit CustomServicesScope(ServiceDefinitions services) noexcept
+            : m_services(_mv(services)), m_outer(t_custom) {
+            t_custom = &m_services;
+        }
+
+        ServiceDefinitions m_services;
+        std::optional<ServiceDefinitions *> m_outer;
+    };
+
     static Error init() noexcept;
     static Error deinit() noexcept;
     static ErrorOr<IServices::ServiceDefinitionPtr> getServiceDefinition(
@@ -168,20 +194,8 @@ public:
     getServiceDefinitionFromService(const json::Value &service) noexcept;
     static ErrorOr<json::Value> getServiceSchemas() noexcept;
 
-    //-----------------------------------------------------------------
-    ///	@details
-    ///		Runs call with the caller's custom services: definitions passed
-    ///		as JSON, parsed and resolved on top of the registered ones and
-    ///		seen by every lookup this thread makes until call returns. The
-    ///		registry itself never changes
-    ///	@param[in]	custom
-    ///		An array of service definitions; a logical type that is already
-    ///		registered, or listed twice, is refused
-    ///	@param[in]	call
-    ///		The work that should see them
-    //-----------------------------------------------------------------
-    static Error withCustomServices(const json::Value &custom,
-                                    const std::function<Error()> &call) noexcept;
+    static ErrorOr<CustomServicesScope> withCustomServices(
+        const json::Value &custom) noexcept;
 
 private:
     //-----------------------------------------------------------------
