@@ -47,6 +47,7 @@ import { registerServiceIcons } from 'shared/components/canvas/util/Icon';
 import { foldProjectDeployRuns } from 'shared/modules/sidebar/taskFold';
 import type { DeploySnapshot, TeamDeployment } from 'shared/components/deploy-panel';
 import type { DeployArtifact } from 'shell';
+import { wireTeamIdOf } from 'rocketride';
 import { useDeployments } from '../hooks/useDeployments';
 import { PrefsProvider } from 'shell';
 import type { TaskEventMessage, TaskEventSession, TaskStatus, TaskTimeline, TraceLevel, ViewState } from 'shared/modules/project';
@@ -797,8 +798,7 @@ const ProjectProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, i
 	    addressable at all. */
 	const wireOwnTeam = useCallback(
 		(teamId: string): string => {
-			const uid = client?.getAccountInfo?.()?.userId ?? '';
-			return uid && teamId === `user~${uid}` ? '@me' : teamId;
+			return wireTeamIdOf(teamId, client?.getAccountInfo?.()?.userId ?? '');
 		},
 		[client]
 	);

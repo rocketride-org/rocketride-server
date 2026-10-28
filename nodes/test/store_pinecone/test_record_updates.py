@@ -111,7 +111,7 @@ def _make_obj_vectors(object_id: str, count: int, *, is_deleted: bool) -> list[d
         {
             'id': f'{object_id}-{i}',
             'values': [1.0] * _DIMENSION,
-            'metadata': {'objectId': object_id, 'isDeleted': is_deleted},
+            'metadata': {'objectId': object_id, 'isDeleted': is_deleted, 'chunkId': i, 'parent': f'/{object_id}'},
         }
         for i in range(count)
     ]
@@ -203,6 +203,22 @@ def test_update_records_noop_for_empty_objectids() -> None:
     records = _get_records(index)
     assert len(records) == 1
     assert records['obj-1-0']['metadata']['isDeleted'] is False
+
+
+def test_trash_round_trip_filters_paths_before_paging() -> None:
+    vectors = _make_obj_vectors('a', 2, is_deleted=False)
+    vectors += _make_obj_vectors('b', 1, is_deleted=False)
+    vectors += _make_obj_vectors('schema', 1, is_deleted=True)
+    store, _ = _make_store(vectors)
+
+    store.markDeleted(['a'])
+    assert store.getPaths(limit=1) == {'/b': 'b'}
+    assert store.getPaths(parent='/a') == {}
+    assert store.getPaths(offset=1, limit=1) == {}
+
+    store.markActive(['a'])
+    assert store.getPaths(parent='/a') == {'/a': 'a'}
+    assert store.getPaths() == {'/a': 'a', '/b': 'b'}
 
 
 # ---------------------------------------------------------------------------

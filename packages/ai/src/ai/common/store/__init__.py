@@ -35,6 +35,7 @@ package.
 """
 
 from .document_store import (
+    CONTROL_OBJECT_ID,
     DocumentStoreBase,
     VectorStoreToolMixin,
     getStore,
@@ -43,6 +44,7 @@ from .store_global_base import StoreGlobalBase
 from .store_instance_base import StoreInstanceBase
 
 __all__ = [
+    'CONTROL_OBJECT_ID',
     'DocumentStoreBase',
     'StoreGlobalBase',
     'StoreInstanceBase',

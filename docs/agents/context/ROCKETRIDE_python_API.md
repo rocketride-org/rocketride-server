@@ -873,9 +873,10 @@ If you omit `ttl`, each scheduled run executes until the pipeline finishes on it
 The app methods are the **automation layer under the App Builder UI** — everything the UI does to move an app from source to store, scriptable. The flow: pack and upload source (`deploy.add_app`), watch the build (`list_deployments`, `build_log`), bind versions to audiences (`publish_app`), and go through store review (`submit_app`, `withdraw_app`, `reply_app`).
 
 **Scaffolding:** `await client.deploy.create_app(slug, template='Blank', display_name=..., ...)`
-scaffolds a new app under `./apps/<slug>`, the same templates as
+scaffolds a new app under `./apps/<slug>-ui`, the same templates as
 `rocketride app create <slug>` and the App Builder wizard (mirrors the TypeScript
-`deploy.createApp`). Everything below (pack, deploy, publish, review) has full
+`deploy.createApp`). `developer_id` defaults to the connected org's developer
+id, else `'local'`. Everything below (pack, deploy, publish, review) has full
 Python parity.
 
 **Packing and uploading:** `deploy.add_app` packs an app folder exactly as
@@ -890,12 +891,12 @@ shape, id grammar, declared assets, include entries, pack size.
 ```python
 # Run from the workspace root (or pass workspace_root=...); use the
 # DEPLOY pair when the deploy target is a different server.
-report = await client.deploy.verify_app('apps/reports')
+report = await client.deploy.verify_app('apps/reports-ui')
 if not report.ok:
     for check in report.checks:
         print(f'{"OK " if check.ok else "FAIL"} {check.id}: {check.note}')
     raise SystemExit(1)
-result = await client.deploy.add_app('apps/reports', comment='v3: new settings panel')
+result = await client.deploy.add_app('apps/reports-ui', comment='v3: new settings panel')
 ```
 
 The raw rail door remains for a zip you packed yourself:
@@ -913,6 +914,10 @@ The zip contains the app's SOURCE (the server owns the build and never trusts cl
 - `async remove_app_publish(app_id: str, target: str) -> Dict[str, Any]` — remove an audience binding; the app stops serving to that audience. SOFT: registry versions and audit history survive; publishing again revives it.
 - `async disable_app_publish(app_id: str, target: str) -> Dict[str, Any]` — disable an audience binding: serving stops, but the row STAYS in the where-live listing marked `'disabled'` (a visible off switch), unlike remove which hides it. Publishing any version to that audience re-enables it. Returns the `publish` binding row.
 - `async where_app(app_id: str) -> List[Dict[str, Any]]` — the reverse index: which audiences serve which version. Returns pin rows (`{'rung', 'handle', 'version', 'appVersion', 'state', 'deployedAt'}`).
+- `async wait_for_app_build(app_id: str, registry_version: int, *, timeout=600.0, interval=3.0, on_status=None) -> Dict[str, Any]` — wait for a version's server build to finish (deploys return at once with `buildStatus: 'queued'`; publish needs `'ok'`). Raises on a failed build, an unknown version, or the timeout
+- Pure helpers exported from `rocketride` (twins of the TypeScript `deploy-helpers`): `parse_registry_version(value)` (positive int; accepts `3`, `'3'`, `'v3'`), `pick_publish_version(rail)` (newest non-failed version), `resolve_deploy_teams(client, deployments)`, `team_name_of(teams, team_id, own_user_id)`, `wire_team_id_of(team_id, own_user_id)`, `resolve_team_arg(value, teams)` ('@me' / name / id → wire id), `pipeline_name_from_path(path)`
+- `async developer_status() -> Dict[str, Any]` — the caller org's developer namespace (the `<developerId>` half of its app ids): `{'developerId', 'stripeAccountId', 'stripeAccountStatus'}`, `developerId` None until an org admin registers one
+- `async register_developer(developer_id: str) -> Dict[str, Any]` — claim the org's developer id slug (org.admin, SaaS only)
 - `async submit_app(app_id: str, registry_version: int) -> Dict[str, Any]` — submit a deployed version for store review: flips the deployment `'private'` to `'submit'` (it enters the review queue). Developer-org and developer-namespace gated. Returns the refreshed `artifact` rail entry.
 - `async withdraw_app(app_id: str, registry_version: int) -> Dict[str, Any]` — withdraw a pending review (the developer's own cancel): flips `'submit'` back to `'private'`; history records the withdrawal. Only a version in `'submit'` withdraws.
 - `async reply_app(app_id: str, message: str, registry_version: Optional[int] = None) -> Dict[str, Any]` — append a developer message to the app's review thread (the same history stream `deploy.history()` reads). Returns `{'replied': True, 'appId': app_id}`.

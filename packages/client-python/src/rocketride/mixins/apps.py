@@ -32,7 +32,9 @@ Uploading is the generic rail door — see :meth:`DeployApi.add` (``client.deplo
 Mirrors the TypeScript client's listDeployments / publishApp / whereApp / replyApp.
 """
 
-from typing import Any, Dict, List, Optional
+import asyncio
+import time
+from typing import Any, Callable, Dict, List, Optional
 
 from ..core import DAPClient
 
@@ -229,6 +231,84 @@ class AppsMixin(DAPClient):
         """
         body = await self.call('rrext_deploy_app', subcommand='where', appId=app_id)
         return body.get('pins', [])
+
+    async def wait_for_app_build(
+        self,
+        app_id: str,
+        registry_version: int,
+        *,
+        timeout: float = 600.0,
+        interval: float = 3.0,
+        on_status: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Wait for one app version's server build to finish — deploying returns
+        at once with ``buildStatus: 'queued'``, and publish/submit/serve all
+        gate on a finished ('ok') build. Polls the version rail.
+
+        Args:
+            app_id: App id.
+            registry_version: Registry version number from the rail.
+            timeout: Give up after this many seconds (default 10 minutes).
+            interval: Poll interval in seconds (default 3).
+            on_status: Called whenever the build status changes.
+
+        Returns:
+            The version's rail entry once its build is 'ok'.
+
+        Raises:
+            RuntimeError: When the build failed, the version is unknown, or
+                the wait timed out.
+        """
+        deadline = time.monotonic() + timeout
+        last_status = None
+        while True:
+            rows = await self.list_deployments(app_id)
+            row = next((r for r in rows if r.get('registryVersion') == registry_version), None)
+            if row is None:
+                raise RuntimeError(f'Version {registry_version} of {app_id} not found')
+            status = row.get('buildStatus') or ''
+            if status != last_status:
+                last_status = status
+                if on_status:
+                    on_status(status)
+            if status == 'ok':
+                return row
+            if status == 'failed' or row.get('state') == 'failed':
+                raise RuntimeError(
+                    f'Version {registry_version} of {app_id} failed its server build — read it with build_log({app_id!r}, {registry_version})'
+                )
+            if time.monotonic() >= deadline:
+                raise RuntimeError(
+                    f"Timed out waiting for version {registry_version} of {app_id} to build (status '{status or 'unknown'}')"
+                )
+            await asyncio.sleep(interval)
+
+    async def developer_status(self) -> Dict[str, Any]:
+        """
+        The caller org's developer namespace — the ``<developerId>`` half of
+        every app id it owns. Readable on both editions (OSS answers the
+        fixed namespace its sessions carry; there is no Stripe Connect there).
+
+        Returns:
+            ``{developerId, stripeAccountId, stripeAccountStatus}``;
+            ``developerId`` is None until an org admin registers one.
+        """
+        return await self.call('rrext_deploy_app', subcommand='developer_status')
+
+    async def register_developer(self, developer_id: str) -> Dict[str, Any]:
+        """
+        Claim the caller org's developer id slug (org.admin, self-service,
+        SaaS only). Apps are then created as ``<developerId>.<name>`` and can
+        publish beyond the workspace.
+
+        Args:
+            developer_id: The slug to claim (lowercase letters/underscores).
+
+        Returns:
+            The server's registration record.
+        """
+        return await self.call('rrext_deploy_app', subcommand='developer_register', developerId=developer_id)
 
     # (app_entry is RETIRED: versions serve from stable constructed URLs —
     # /apps/<appId>/v<N>/remoteEntry.js — with entitlement enforced per

@@ -27,7 +27,8 @@
 
 Covers the shared connection seam (``ai.common.rocketride_db``), the OSS
 ``Account.resolve_db_dsn`` stub, the ``rocketride_sql`` connection override,
-and the ``rocketride_vector`` HNSW default-index logic. Real base classes are
+the ``rocketride_vector`` HNSW default-index logic, and the trash row counts
+of ``rocketride_vector`` and ``store_postgres``, which share their SQL. Real base classes are
 loaded from disk with ``rocketlib`` and heavy drivers stubbed, mirroring
 ``test_graph_neo4j.py``.
 """
@@ -457,9 +458,11 @@ class TestSqlEnginePoolSize:
 
 
 class _FakeCursor:
-    def __init__(self, executed, fetch_batches):
+    def __init__(self, executed, fetch_batches, rowcount=-1):
         self._executed = executed
         self._fetch_batches = fetch_batches
+        # What psycopg2 reports after a statement; -1 when it does not know.
+        self.rowcount = rowcount
 
     def execute(self, sql, params=None):
         self._executed.append(sql)
@@ -484,9 +487,11 @@ class _FakeClient:
         self.commits = 0
         # Queue of row batches returned by successive fetchall() calls.
         self.fetch_batches: list[list] = []
+        # The row count every cursor reports after its statement.
+        self.rowcount = -1
 
     def cursor(self):
-        return _FakeCursor(self.executed, self.fetch_batches)
+        return _FakeCursor(self.executed, self.fetch_batches, self.rowcount)
 
     def commit(self):
         self.commits += 1
@@ -544,6 +549,7 @@ def _vector_store_cls(monkeypatch):
     bases = store_base_stubs()
     store_mod.StoreGlobalBase = bases.StoreGlobalBase
     store_mod.StoreInstanceBase = bases.StoreInstanceBase
+    store_mod.CONTROL_OBJECT_ID = bases.CONTROL_OBJECT_ID
     config = types.ModuleType('ai.common.config')
     config.Config = types.SimpleNamespace(getNodeConfig=lambda provider, connConfig: dict(connConfig))
     transform = types.ModuleType('ai.common.transform')
@@ -725,6 +731,39 @@ class TestRocketrideVectorStore:
         store._createCollection(vectorSize=2000)
         assert any('USING hnsw' in sql for sql in store.client.executed)
         assert not warnings
+
+
+# ---------------------------------------------------------------------------
+# rocketride_vector and store_postgres: trash row counts
+# ---------------------------------------------------------------------------
+
+_PG_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'store_postgres'
+
+
+def _trash_store(monkeypatch, node):
+    """One of the two Postgres drivers on a fake client, with the stubs of _vector_store_cls."""
+    cls, _ = _vector_store_cls(monkeypatch)
+    if node == 'rocketride_vector':
+        return _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine'})
+    pkg = types.ModuleType('nodes.store_postgres')
+    pkg.__path__ = [str(_PG_NODE_DIR)]
+    monkeypatch.setitem(sys.modules, 'nodes.store_postgres', pkg)
+    iglobal = _load_from_path('nodes.store_postgres.IGlobal', _PG_NODE_DIR / 'IGlobal.py')
+    monkeypatch.setitem(sys.modules, 'nodes.store_postgres.IGlobal', iglobal)
+    driver = _load_from_path('nodes.store_postgres.postgres', _PG_NODE_DIR / 'postgres.py')
+    return driver.Store('postgres', {'collection': 'pg_vec', 'host': 'localhost', 'similarity': 'cosine'}, {})
+
+
+@pytest.mark.parametrize('node', ['rocketride_vector', 'store_postgres'])
+@pytest.mark.parametrize('method', ['markDeleted', 'markActive'])
+@pytest.mark.parametrize('rowcount, matched', [(3, 3), (0, 0), (-1, None)])
+def test_trash_reports_the_row_count_and_none_when_it_is_unknown(monkeypatch, node, method, rowcount, matched):
+    """The UPDATE's row count is matched_chunks; psycopg2's -1 (not known) is None, never a claimed 0."""
+    store = _trash_store(monkeypatch, node)
+    store.client.rowcount = rowcount
+
+    assert getattr(store, method)(['a']) == matched
+    assert any(sql.startswith(f'UPDATE {store.collection} SET isDeleted') for sql in store.client.executed)
 
 
 # ---------------------------------------------------------------------------

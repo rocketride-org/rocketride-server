@@ -42,6 +42,7 @@ def store_base_stubs(document_store_base=None) -> types.ModuleType:
     module = types.ModuleType('ai.common.store')
     module.StoreGlobalBase = StoreGlobalBase
     module.StoreInstanceBase = StoreInstanceBase
+    module.CONTROL_OBJECT_ID = 'schema'
     if document_store_base is not None:
         module.DocumentStoreBase = document_store_base
     return module

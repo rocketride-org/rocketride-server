@@ -58,7 +58,8 @@ const {
 const PACKAGE_DIR = path.join(__dirname, '..');
 const SRC_DIR = path.join(PACKAGE_DIR, 'src', 'rocketride');
 const TESTS_DIR = path.join(PACKAGE_DIR, 'tests');
-// Test-only deps of THIS package (the otel-bridge tests' top-level imports),
+// Test-only deps of THIS package (the otel-bridge tests' top-level imports,
+// plus runtime deps like pathspec that the engine interpreter lacks),
 // installed into the engine interpreter by client-python:setup-test-deps.
 const TEST_REQUIREMENTS = path.join(TESTS_DIR, 'requirements.txt');
 const BUILD_DIR = path.join(BUILD_ROOT, 'clients', 'python');

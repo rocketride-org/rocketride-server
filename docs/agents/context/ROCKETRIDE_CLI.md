@@ -32,7 +32,7 @@ a non-zero exit. Deploy verbs (`deploy *`, `app deploy`) use the
 | Read run logs and traces | No CLI verb — use the SDK (`client.log`, API doc §Templates & Run Logs) or ROCKETRIDE_OBSERVABILITY.md |
 | Files in the account store | `rocketride store dir|type|write|rm|mkdir|stat` |
 | Deploy, publish, schedule | `rocketride deploy …` (deployment target) |
-| Apps | `rocketride app create|verify|deploy` (deployment target) |
+| Apps | `rocketride app create|dev|verify|deploy|publish|versions|where|…` (`dev` uses the development connection; lifecycle verbs use the deployment target) |
 | Find what is slow | `rocketride profile run --token TOKEN --duration 30`, then `rocketride profile tree --token TOKEN` |
 
 Two things the table cannot hide: component discovery is file-based, and
@@ -50,7 +50,13 @@ loop is a command.
 - `rocketride login [--deploy] [--apikey <key>]` — (re)authenticate and
   save credentials to `.env` (and make `.env` git-ignored in the same
   step). OSS servers take an API key; saas servers open the browser to
-  sign in and mint a durable personal API key. Run it whenever a command
+  sign in and mint a durable personal API key. The browser tab waits
+  until the key is minted, then closes itself where the browser allows it (Chrome, Edge); elsewhere
+  (Firefox only lets scripts close windows scripts opened) it shows a
+  RocketRide-branded "You're signed in" page, in your light/dark setting,
+  with a link to the web app. A waitlisted account sees its access-queue
+  notice there, and a failed sign-in (including a failed key exchange)
+  shows the reason there and in the terminal. Run it whenever a command
   reports rejected credentials. `--deploy` targets the
   `ROCKETRIDE_DEPLOY_*` pair.
 
@@ -102,42 +108,98 @@ All store subcommands take the common `--uri`/`--apikey` options.
 
 ## App commands (`rocketride app ...`)
 
-`app deploy` is a **deployment-target** verb: it defaults to the
-`ROCKETRIDE_DEPLOY_URI` / `ROCKETRIDE_DEPLOY_APIKEY` pair and refuses to
-run when no deployment target is configured. `app create` reads the
-development connection (`ROCKETRIDE_URI`) for vendoring; `app verify`
-needs no connection.
+The terminal twin of the App Builder. Every lifecycle verb (`deploy`,
+`publish`, `unpublish`, `disable`, `versions`, `where`, `log`, `submit`,
+`withdraw`, `reply`, `developer`) is a **deployment-target** verb: it
+defaults to the `ROCKETRIDE_DEPLOY_URI` / `ROCKETRIDE_DEPLOY_APIKEY` pair
+(`rocketride login` writes it) and refuses to run when no deployment target
+is configured. `app create` reads the development connection
+(`ROCKETRIDE_URI` / `ROCKETRIDE_APIKEY`) for vendoring and for the
+developer id; `app verify` needs no connection.
+
+`[app]` takes an app folder, an app id (`personal.clock`), its name part
+(`clock`), its folder name (`clock-ui`), or nothing — the current
+directory is the app. A lone number is read as the version, so
+`rocketride app publish 3` works from inside an app folder.
 
 - `rocketride app create <slug> [--template Blank|Dashboard] [--name <text>]
   [--developer <id>] [--sidebar] [--no-status-footer] [--doc-tabs]
   [--workspace <dir>] [--no-install]` — scaffold a new app under
-  `./apps/<slug>` with the same
-  templates as the App Builder wizard, vendoring the platform packages
-  from the development server (`ROCKETRIDE_URI`). SDK equivalent:
-  `client.deploy.createApp(slug, options)` / `client.deploy.create_app`.
-  Scaffolding only — nothing deploys.
-- `rocketride app verify <folder> [--workspace <dir>]` — the
+  `./apps/<slug>-ui` with the same scaffold as the App Builder wizard (one
+  SDK implementation serves both), vendoring the platform packages from
+  the development server. The app id is `<developerId>.<slug>`: without
+  `--developer`, the developer id comes from the account the development
+  credentials sign in as (run `rocketride login` or `rocketride init`
+  first); with no credentials, no reachable server, or an org that has
+  not registered one, it falls back to `local` and prints a warning to
+  stderr. SDK equivalent: `client.deploy.createApp(slug, options)` /
+  `client.deploy.create_app` (same developer-id default). Scaffolding
+  only — nothing deploys.
+- `rocketride app dev [app] [--open] [--no-install] [--workspace <dir>]` —
+  live preview from the terminal, the App Builder's dev loop: runs `rsbuild
+  dev` for the app, points your personal dev overlay at it (development
+  connection), and prints the preview URL (`--open` opens it). The preview
+  updates on every save — edit in any editor. Ctrl+C stops the server and
+  drops the overlay; the server is tethered to the command, so it never
+  outlives it. Several editors and terminals can serve the same app at once:
+  each preview URL carries its host's `rrsession` and resolves that host's
+  server.
+- `rocketride app verify [app] [--store] [--workspace <dir>]` — the
   no-side-effect precheck: manifest shape, id grammar, declared assets,
-  include entries, and a pack dry run against the caps. Exit 0 when ready,
-  1 with FAIL lines when not. Needs no server connection at all.
-- `rocketride app deploy <folder> [--workspace <dir>] [--comment <text>]
-  [--verbose]` — pack the app folder's source (App Builder rules:
-  workspace-rooted layout, `appManifest.include`, gitignore + baseline
-  filtering, size caps) and deploy it as the next registry version;
-  `--verbose` narrates every pack step. Deploying activates nothing —
-  publish a rung to serve it.
+  include entries, and a pack dry run against the caps; `--store` adds the
+  public store-submission bar (description, pricing plans). Exit 0 when
+  ready, 1 with FAIL lines when not. Needs no server connection at all.
+- `rocketride app deploy [app] [--comment <text>] [--publish <target>]
+  [--verbose] [--workspace <dir>]` — pack the app's source (App Builder
+  rules: workspace-rooted layout, `appManifest.include`, gitignore +
+  baseline filtering, size caps) and deploy it as the next registry
+  version; the server then builds it. `--publish @me|@team/<name>|@public`
+  waits for that build and publishes the new version in the same command.
+  Without it, deploying activates nothing.
+- `rocketride app publish [app] [version] [--to <target>]` — bind a
+  version to an audience: `@me` (default), `@team/<name>`, or `@public`
+  (`@public` needs an approved version on a reviewing server). Without a
+  version, the newest version that has not failed; it waits for that
+  version's build first.
+- `rocketride app unpublish [app] --from <target>` / `app disable [app]
+  --from <target>` — stop serving to an audience (unpublish hides the
+  binding; disable keeps it listed, switched off — publishing again
+  re-enables it). Versions and history survive both.
+- `rocketride app versions [app]` — the version rail, newest first:
+  version, app version, review state, build status, and live audiences.
+- `rocketride app where [app]` — which audiences serve which version.
+- `rocketride app log [app] [version]` — a version's server build log
+  (default: the newest version).
+- `rocketride app submit [app] [version]` / `app withdraw [app] [version]`
+  — enter or leave public store review (submit waits for the version's
+  server build first); `rocketride app reply [app] [version] -m
+  <text>` posts on the review thread.
+- `rocketride app developer status` / `app developer register <id>` —
+  your organization's developer id (the `<developerId>` in every app id);
+  registering is an org-admin step.
 
 ```bash
+# The whole loop, from a fresh workspace
+rocketride login
+rocketride app create clock
+rocketride app dev clock --open                # live preview; edit, save, watch it update; Ctrl+C to stop
+rocketride app deploy clock --publish @me      # waits for the server build, then publishes
+rocketride app versions clock
+rocketride app where clock
+
 # CI: precheck, then deploy the packed source as the next registry version
-rocketride app verify ./apps/reports
-rocketride app deploy ./apps/reports --comment "ci: $GITHUB_SHA"
+rocketride app verify ./apps/reports-ui
+rocketride app deploy ./apps/reports-ui --comment "ci: $GITHUB_SHA"
 ```
 
 ## Deploy commands (`rocketride deploy ...`)
 
 Deployment-target verbs (the `ROCKETRIDE_DEPLOY_*` pair), following the
 platform vocabulary — **deploy** = version to the server's registry,
-**publish** = bind a rung to a version:
+**publish** = bind a rung to a version. Every `--team` / `--deploy-to`
+takes `@me` (your personal space), a team name, or a team id, and output
+names teams instead of printing raw ids (`--json` keeps `teamId` and adds
+`teamName`). An unnamed pipeline deploys under its file name.
 
 ```bash
 rocketride deploy add pipelines/ingest.pipe --comment "v2 parse" [--deploy-to <teamId>]   # next registry version (--kind pipe|node; --deploy-to also points a team at it in the same call)
@@ -152,7 +214,8 @@ rocketride deploy schedule set <projectId> <sourceId> "0 9 * * 1-5" --team <team
 rocketride deploy schedule pause <projectId> <sourceId> --team <teamId>
 rocketride deploy schedule resume <projectId> <sourceId> --team <teamId>
 rocketride deploy schedule preview "0 9 * * 1-5"                    # validate a cron + next firings
-rocketride deploy log <appId> <version>                             # read an app version's build log
+rocketride deploy source-config <projectId> <sourceId> --team <teamId> --trace-level summary --debug-out   # per-source run settings (none|metadata|summary|full); a flag left out keeps its current value
+rocketride deploy log <appId> <version>                             # read an app version's build log (or: rocketride app log)
 rocketride deploy enable|disable|remove <projectId> --team <teamId>
 ```
 

@@ -36,6 +36,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShellConnection, useAuthUser, ConnectionManager } from 'shell';
 import type { Deployment } from 'shell';
 import type { DeployTeamRef } from 'shared/components/deploy-panel';
+import { resolveDeployTeams, teamNameOf } from 'rocketride';
+import type { ConnectResult } from 'rocketride';
 
 /** Return shape of {@link useDeployments}. */
 export interface UseDeploymentsResult {
@@ -68,60 +70,16 @@ export function useDeployments(): UseDeploymentsResult {
 
 	// --- Team roster from the identity ---------------------------------------
 
-	const teams = useMemo<DeployTeamRef[]>(() => {
-		const org = authUser?.organization as
-			| {
-					permissions?: string[];
-					teams?: Array<{ id?: string; name?: string; permissions?: string[] }>;
-			  }
-			| undefined;
-		// The personal (@me) target — every authenticated user can point
-		// their own space (no team permission applies; the @me PUBLISH
-		// stamps the dev team or refuses). Listed first: it exists even
-		// for a user with zero team memberships.
-		const me: DeployTeamRef[] = authUser?.userId ? [{ id: '@me', name: 'Me', canControl: true }] : [];
-		// Mirror the server resolver's documented expansion: org.admin (and
-		// sys.admin) implies the FULL team permission set — per-team rows
-		// only carry explicit task.* grants for regular members.
-		const isAdmin = (org?.permissions ?? []).includes('org.admin') || ((authUser as { sysPermissions?: string[] } | null)?.sysPermissions ?? []).includes('sys.admin');
-		const orgTeams = org?.teams;
-		if (Array.isArray(orgTeams) && orgTeams.length > 0) {
-			return [
-				...me,
-				...orgTeams
-					.filter((t) => t.id)
-					.map((t) => ({
-						id: t.id as string,
-						name: t.name || (t.id as string),
-						canControl: isAdmin || (t.permissions ?? []).includes('task.control'),
-					})),
-			];
-		}
-		// OSS / rosterless identity: derive refs from the deployment rows so
-		// the tree still renders; the server enforces real permissions.
-		// Personal (user~) rows never become roster targets — '@me' covers
-		// the caller's own space; foreign spaces are not addressable.
-		const seen = new Map<string, DeployTeamRef>();
-		for (const dep of deployments) {
-			if (dep.teamId && !dep.teamId.startsWith('user~') && !seen.has(dep.teamId))
-				seen.set(dep.teamId, {
-					id: dep.teamId,
-					name: dep.teamId,
-					canControl: true,
-				});
-		}
-		return [...me, ...seen.values()];
-	}, [authUser, deployments]);
+	// The SDK's team resolution (rocketride deploy-helpers), shared with the
+	// VS Code deploy panels and the `rocketride` CLI: '@me' first, the
+	// identity's roster with org/sys-admin expansion, or — for a rosterless
+	// (OSS) identity — teams derived from the rows.
+	const teams = useMemo<DeployTeamRef[]>(() => resolveDeployTeams({ getAccountInfo: () => (authUser ?? undefined) as ConnectResult | undefined }, deployments), [authUser, deployments]);
 
 	const teamName = useCallback(
-		(teamId: string): string => {
-			// Personal owner keys never render raw: the caller's own space is
-			// "Me", another user's (admin visibility) is "Personal".
-			if (teamId.startsWith('user~')) {
-				return authUser?.userId && teamId === `user~${authUser.userId}` ? 'Me' : 'Personal';
-			}
-			return teams.find((t) => t.id === teamId)?.name ?? teamId;
-		},
+		// Personal owner keys never render raw: the caller's own space is
+		// "Me", another user's (admin visibility) is "Personal".
+		(teamId: string): string => teamNameOf(teams, teamId, authUser?.userId ?? ''),
 		[teams, authUser],
 	);
 
