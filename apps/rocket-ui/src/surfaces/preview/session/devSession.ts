@@ -508,10 +508,8 @@ export class WebDevSession {
 	}
 
 	/**
-	 * Lets go of one file's model: drops this session's listener and its
-	 * reference, and disposes the model when no other session holds one.
-	 * Monaco's TypeScript worker then forgets the file and its markers, and
-	 * the shared emit cache forgets its output.
+	 * Lets go of one file's model. The last session to let go disposes it, so
+	 * Monaco's TypeScript worker drops its markers.
 	 *
 	 * @param path - The project-relative file path.
 	 */
@@ -533,9 +531,8 @@ export class WebDevSession {
 	}
 
 	/**
-	 * Whether a file is confirmed deleted: the view says the path does not
-	 * exist. A read that failed for another reason, such as a store error,
-	 * leaves the path in the view, and a failed check counts as not deleted.
+	 * Whether the view confirms a file is gone. A failed check counts as not
+	 * deleted.
 	 *
 	 * @param path - The project-relative file path.
 	 * @returns True only when the view reports no such path.
@@ -614,9 +611,8 @@ export class WebDevSession {
 			}
 		} catch {
 			// Unreadable: deleted, or a transient store error. Only a confirmed
-			// deletion lets go of the file's model, so check_app stops reporting
-			// its type errors; otherwise the rebuild below still runs from the
-			// models we have.
+			// deletion lets go of the model; otherwise the rebuild below still
+			// runs from the models we have.
 			if (await this.isDeleted(path)) this.releaseModel(path);
 		}
 

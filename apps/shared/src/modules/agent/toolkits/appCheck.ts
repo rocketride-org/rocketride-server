@@ -201,9 +201,8 @@ export interface MarkerSource {
 	/** The uri of every model that is loaded. */
 	modelUris(): string[];
 	/**
-	 * The uri the model of a file in an app gets, spelled the way
-	 * `modelUris()` and the markers spell it. A source without it spells the
-	 * path as it is.
+	 * The uri the model of a file in an app gets, spelled as `modelUris()` and
+	 * the markers spell it. Without it, the path is used as it is.
 	 *
 	 * @param appId - The app id.
 	 * @param relPath - The file's path inside the app, as the app's file list names it.
@@ -415,9 +414,8 @@ function appModelPaths(src: MarkerSource, appId: string): string[] {
  *   otherwise `fail` with one `${relPath}:${line} ${message}` line per error, or
  *   `pass`. TypeScript files with no model are named in the output and counted
  *   in a passing summary. Errors in a TypeScript file that is no longer in the
- *   app (the editor can keep a deleted file's model and its errors) are left
- *   out, and the output says how many were. A file and a model or marker
- *   match when the file's model would get that uri (`MarkerSource.modelUri`).
+ *   app are left out, and the output says how many were: the editor can keep
+ *   a deleted file's model and its errors.
  */
 async function appTypeEvidence(src: MarkerSource, app: AppEntry, tsFiles: string[], hide: (text: string) => string): Promise<CheckEvidence> {
 	const appId = app.id;

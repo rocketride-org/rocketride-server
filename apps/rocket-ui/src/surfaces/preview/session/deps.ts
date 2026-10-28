@@ -205,7 +205,7 @@ async function linkDependencyGraph(entryUrl: string, shims: Map<string, string>)
  * @param appId - The app id (shim registry key).
  * @param pkg - The parsed package.json.
  * @param scope - The preview realm's share scope (for the external shims).
- * @param view - The workspace view the lock map is read from and settled into (default: the current one; a dev session passes its own, so a version fetch that ends after a team switch locks the app in the team it started in).
+ * @param view - The workspace view the lock map is read from and settled into (default: the current one; a dev session passes its own, so a fetch that ends after a team switch locks the app in its own team).
  * @returns The dependency set for the linker.
  */
 export async function prepareDependencies(folder: string, appId: string, pkg: PackageJsonLike, scope: Record<string, unknown>, view: IWorkspaceFileSystem = getWorkspaceVfs()): Promise<DependencySet> {

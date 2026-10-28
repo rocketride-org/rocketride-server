@@ -14,9 +14,6 @@
  *    the whole inventory synchronously. `list()` answers from the cache.
  *  - CONTENT CACHE: `read()` results are retained per path, so re-reads are
  *    free; `prime()` fills the cache from bulk loads that bypass `read()`.
- *    A read keeps its result only if neither the path nor a directory above
- *    it was written, primed, invalidated, deleted or moved while it was on
- *    its way (see `fill()`).
  *  - OVERLAYS: a live producer (e.g. an open editor buffer) registers per
  *    path; while its `isDirty()` is true, `read()` serves the overlay's
  *    content — every consumer sees the CURRENT truth through one seam

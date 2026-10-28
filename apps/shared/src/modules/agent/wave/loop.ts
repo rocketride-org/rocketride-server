@@ -592,15 +592,11 @@ function trackLate(late: Map<Promise<unknown>, LateCall>, call: ToolCall, runnin
  * that outlives its limit is reported as `timedOut` and sits in `opts.late`
  * until the run reads how it ended.
  *
- * A call is not started when one of those earlier calls ran past its limit
- * (its work may still land), or was itself held back that way, or when a
- * call that timed out in an earlier wave still runs on its files: it would
- * land before or under a change still on its way. It is never prepared, so
- * it asks the user nothing. It is reported `unstarted`, like a call a stop
- * kept from starting, and the late entry tells the model when to plan it
- * again. A call whose prepare failed or timed out, or whose act was
- * refused, holds nothing back: its work never began, so nothing of it can
- * land.
+ * A call is not started, or prepared, when one of those earlier calls ran
+ * past its limit or was held back that way, or when a call that timed out in
+ * an earlier wave still runs on its files: it would land before or under a
+ * change still on its way. A call whose prepare failed or timed out, or whose
+ * act was refused, holds nothing back, since nothing of it can land.
  *
  * @param calls - The wave's tool calls, in the order the model planned them.
  * @param steps - Gets each call ready and lets it start; a throw becomes an `ok: false` outcome.
@@ -923,11 +919,6 @@ class WaveRun {
 		return returned;
 	}
 
-	/** The timed-out calls still running. */
-	private stillRunning(): LateCall[] {
-		return [...this.late.values()].filter((lateCall) => !lateCall.ended);
-	}
-
 	/**
 	 * The entries that tell the model how timed-out calls ended, one per call
 	 * the last lateReturns() found. A result is stored under its entry's key,
@@ -952,13 +943,13 @@ class WaveRun {
 
 	/**
 	 * Why the run may not finish yet, or null if it may. A timed-out call still
-	 * running may still change the work, so no check covers it. Otherwise the
-	 * finish rule decides.
+	 * running may still change the work, so no check covers it. A call that
+	 * ended after the wave's lateReturns(), while endWave ran, counts too: the
+	 * model has not read how it ended. Otherwise the finish rule decides.
 	 */
 	unfinished(): string | null {
-		const running = this.stillRunning();
-		if (running.length) {
-			return `Not finished: ${running.length} call(s) that timed out are still running and may still change the work. A check cannot cover them yet; call ${this.o.finish.checkTool} again after they end.`;
+		if (this.late.size) {
+			return `Not finished: ${this.late.size} call(s) that timed out are still running and may still change the work. A check cannot cover them yet; call ${this.o.finish.checkTool} again after they end.`;
 		}
 		return this.o.finish.unchecked();
 	}
@@ -983,7 +974,7 @@ class WaveRun {
 	 * the work.
 	 */
 	stopped(waves: number): LoopResult {
-		const running = this.stillRunning();
+		const running = [...this.late.values()].filter((lateCall) => !lateCall.ended);
 		if (running.length) this.o.emit('thinking', [STILL_RUNNING, ...running.map(({ call }) => `- ${callName(call)}`)].join('\n'));
 		return this.finish('stopped', '', waves);
 	}
