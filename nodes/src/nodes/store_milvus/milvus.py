@@ -421,7 +421,7 @@ class Store(DocumentStoreBase):
             return {}
 
         # Base filter: Only chunk 0
-        filter_expr = "meta['chunkId'] == 0"
+        filter_expr = "meta['chunkId'] == 0 and meta['isDeleted'] == false"
 
         # If parent specified, add condition
         if parent is not None:

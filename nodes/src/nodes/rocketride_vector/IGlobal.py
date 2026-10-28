@@ -31,9 +31,9 @@
 # transform key) and, through StoreInstanceBase, the agent tools.
 #
 # The table is the team's managed database, so the whole tool surface is
-# opt-in through the expose_tools setting (off by default), and the upsert and
-# delete tools also need the allow_write setting (off by default). The data
-# lanes are always available.
+# opt-in through the expose_tools setting (off by default), and the write tools
+# (upsert, delete, soft_delete, restore) also need the allow_write setting (off
+# by default). The data lanes are always available.
 # ------------------------------------------------------------------------------
 import os
 import re
@@ -58,7 +58,7 @@ class IGlobal(StoreGlobalBase):
     # database to any caller of the pipeline's tool path.
     expose_tools: bool = False
 
-    # Read by VectorStoreToolMixin before upsert/delete run. The base resolves
+    # Read by VectorStoreToolMixin before a write tool runs. The base resolves
     # the rrvector.allow_write setting at start; this class default keeps
     # writes off when nothing is configured.
     allow_write: bool = False
