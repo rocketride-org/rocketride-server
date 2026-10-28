@@ -45,6 +45,7 @@
 
 import { init as initLexer, parse as parseModule } from 'es-module-lexer';
 import type { PackageJsonLike } from 'shared/tools/appdev';
+import type { IWorkspaceFileSystem } from 'shared/modules/vfs/vfsTypes';
 import { getWorkspaceVfs } from '../../workspace/vfs/workspace';
 import { cacheGet, cachePut } from './idbCache';
 import { mintBlob, mintShareShim } from './linker';
@@ -82,10 +83,11 @@ const LOCK_FILE = 'rr-lock.json';
  * so a staged (uncommitted) lock file resolves exactly like a saved one.
  *
  * @param folder - The app's .appdev folder name.
+ * @param view - The workspace view the app lives in.
  */
-async function readLockMap(folder: string): Promise<Record<string, string>> {
+async function readLockMap(folder: string, view: IWorkspaceFileSystem): Promise<Record<string, string>> {
 	try {
-		return JSON.parse(String(await getWorkspaceVfs().read(`apps/${folder}/${LOCK_FILE}`))) as Record<string, string>;
+		return JSON.parse(String(await view.read(`apps/${folder}/${LOCK_FILE}`))) as Record<string, string>;
 	} catch {
 		return {};
 	}
@@ -102,9 +104,10 @@ async function readLockMap(folder: string): Promise<Record<string, string>> {
  * @param name - Package name.
  * @param range - The declared range.
  * @param lock - The current lock map (mutated + persisted on change).
+ * @param view - The workspace view the lock map is persisted to.
  * @returns The exact version.
  */
-async function settleVersion(folder: string, name: string, range: string, lock: Record<string, string>): Promise<string> {
+async function settleVersion(folder: string, name: string, range: string, lock: Record<string, string>, view: IWorkspaceFileSystem): Promise<string> {
 	const existing = lock[name];
 	const rangeKey = `${name}#range`;
 	if (existing && lock[rangeKey] === (range || 'latest')) return existing;
@@ -114,7 +117,7 @@ async function settleVersion(folder: string, name: string, range: string, lock: 
 	if (!pkg.version) throw new Error(`Cannot resolve ${name}@${range || 'latest'}: no version in its package.json.`);
 	lock[name] = pkg.version;
 	lock[rangeKey] = range || 'latest';
-	await getWorkspaceVfs().write(`apps/${folder}/${LOCK_FILE}`, `${JSON.stringify(lock, null, '\t')}\n`);
+	await view.write(`apps/${folder}/${LOCK_FILE}`, `${JSON.stringify(lock, null, '\t')}\n`);
 	return pkg.version;
 }
 
@@ -202,9 +205,10 @@ async function linkDependencyGraph(entryUrl: string, shims: Map<string, string>)
  * @param appId - The app id (shim registry key).
  * @param pkg - The parsed package.json.
  * @param scope - The preview realm's share scope (for the external shims).
+ * @param view - The workspace view the lock map is read from and settled into (default: the current one; a dev session passes its own, so a version fetch that ends after a team switch locks the app in the team it started in).
  * @returns The dependency set for the linker.
  */
-export async function prepareDependencies(folder: string, appId: string, pkg: PackageJsonLike, scope: Record<string, unknown>): Promise<DependencySet> {
+export async function prepareDependencies(folder: string, appId: string, pkg: PackageJsonLike, scope: Record<string, unknown>, view: IWorkspaceFileSystem = getWorkspaceVfs()): Promise<DependencySet> {
 	const problems: string[] = [];
 	const resolved = new Map<string, string>();
 
@@ -221,10 +225,10 @@ export async function prepareDependencies(folder: string, appId: string, pkg: Pa
 		if (moduleObject) shims.set(name, mintShareShim(appId, name, moduleObject));
 	}
 
-	const lock = await readLockMap(folder);
+	const lock = await readLockMap(folder, view);
 	for (const [name, range] of declared) {
 		try {
-			const version = await settleVersion(folder, name, range, lock);
+			const version = await settleVersion(folder, name, range, lock, view);
 			const entryUrl = `${BASE_URL}/${name}@${version}?external=react,react-dom`;
 			const blob = await linkDependencyGraph(entryUrl, shims);
 			resolved.set(name, blob);

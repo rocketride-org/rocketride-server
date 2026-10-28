@@ -77,6 +77,20 @@ export interface AgentHost {
 	/** The workspace the agent reads and edits; its read-only `.rocketride/` holds the guides. */
 	vfs: IWorkspaceFileSystem;
 	/**
+	 * The workspace's scope ('' for the user's own files, 'team-<id>' for a
+	 * team's): a conversation belongs to the scope it started in. Hosts with
+	 * one scope leave it out.
+	 */
+	readonly scopeKey?: string;
+	/**
+	 * The name of a scope the user knows it by (a team's name), when the host
+	 * has it. A conversation from another scope is refused by this name.
+	 *
+	 * @param scopeKey - The scope key.
+	 * @returns The name, or undefined to name the scope by its id.
+	 */
+	scopeName?(scopeKey: string): string | undefined;
+	/**
 	 * Creates a new app from a template.
 	 *
 	 * @param req - The app's name, display name and optional template.

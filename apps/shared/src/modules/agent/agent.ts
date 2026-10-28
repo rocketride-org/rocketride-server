@@ -157,6 +157,19 @@ function removedKeyNote(kind: string): string {
 }
 
 /**
+ * Names a workspace scope for the user.
+ *
+ * @param scopeKey - The scope key ('' for the user's own files, 'team-<id>' for a team's).
+ * @param name - The team's name, when the host has it; otherwise the team is named by its id.
+ * @returns The scope as a phrase.
+ */
+function scopeName(scopeKey: string, name?: string): string {
+	if (scopeKey === '') return 'your personal workspace';
+	if (!scopeKey.startsWith('team-')) return scopeKey;
+	return `team ${name || scopeKey.slice('team-'.length)}`;
+}
+
+/**
  * One agent conversation. The mounted tab provider owns its instance:
  * Documents keeps open tabs mounted, so switching tabs never unmounts a
  * conversation, and reopening a closed tab reloads from disk via
@@ -174,6 +187,10 @@ export class AgentSession {
 	contextRefs: string[];
 	/** The persisted conversation, hydrated for useChatMessages initialMessages. */
 	messages: ChatMessage[];
+	/** The workspace scope the conversation runs in; set by its first request, unset in sessions saved before scopes. */
+	scopeKey?: string;
+	/** Whether the conversation has a session file (loaded from one, or saved since). */
+	private stored = false;
 	/** What screen() sent in place of a message with a key, each with what the key looked like. */
 	private readonly withheld = new Map<string, string>();
 
@@ -185,13 +202,15 @@ export class AgentSession {
 	 * @param date - Epoch-ms creation stamp.
 	 * @param contextRefs - Workspace-relative context paths.
 	 * @param messages - The stored conversation.
+	 * @param scopeKey - The workspace scope it runs in, when known.
 	 */
-	private constructor(sessionId: string, title: string, date: number, contextRefs: string[], messages: ChatMessage[]) {
+	private constructor(sessionId: string, title: string, date: number, contextRefs: string[], messages: ChatMessage[], scopeKey?: string) {
 		this.sessionId = sessionId;
 		this.title = title;
 		this.date = date;
 		this.contextRefs = contextRefs;
 		this.messages = messages;
+		this.scopeKey = scopeKey;
 	}
 
 	// ── Statics — session management ─────────────────────────────────────
@@ -238,7 +257,9 @@ export class AgentSession {
 			throw err;
 		}
 		const stored = JSON.parse(raw) as AgentSessionFile;
-		return new AgentSession(sessionId, stored.title ?? UNTITLED, stored.date ?? Date.now(), stored.contextRefs ?? [], stored.messages ?? []);
+		const session = new AgentSession(sessionId, stored.title ?? UNTITLED, stored.date ?? Date.now(), stored.contextRefs ?? [], stored.messages ?? [], stored.scopeKey);
+		session.stored = true;
+		return session;
 	}
 
 	/**
@@ -290,16 +311,33 @@ export class AgentSession {
 	 * @param onStatus - The chat's live status sink (the hook's second `request` argument). With it, each `thinking` chunk goes to it as it arrives and is not returned; without it, every chunk is returned.
 	 * @param turn - The running chat turn (the hook's third `request` argument). The hook always passes it; it is optional only because the shell's v0 `request` type is frozen.
 	 * @returns One TextResult per agent output chunk that was not sent to the sink.
-	 * @throws When no turn is passed, or when the request looks like it holds a key; the hook shows the message as an error row, and the model is never called.
+	 * @throws When no turn is passed, when the conversation belongs to another scope than the host's, or when the request looks like it holds a key; the hook shows the message as an error row, and the model is never called.
 	 */
 	async execute(text: string, onStatus?: AgentCallback, turn?: ChatTurn): Promise<TextResult[]> {
 		// queued turns can chain with no idle save between them, so this.messages may miss the turn before; the turn's history never does
 		if (!turn) throw new Error('AgentSession.execute runs inside a chat turn: pass the turn useChatMessages hands its request.');
+		// step: a conversation runs in the scope it started in; the chat shows the refusal as an error
+		const host = getAgentHost();
+		const scopeKey = host.scopeKey;
+		const stamped = scopeKey !== undefined && this.scopeKey === undefined;
+		if (scopeKey !== undefined) {
+			if (this.scopeKey !== undefined && this.scopeKey !== scopeKey) {
+				throw new Error(`This conversation belongs to ${scopeName(this.scopeKey, host.scopeName?.(this.scopeKey))}; switch back to continue it.`);
+			}
+			this.scopeKey = scopeKey;
+		}
 		// step: the first request names the session for the catalog row; a key is
 		// redacted before the cut, so no part of one lands in the title
 		if (this.title === UNTITLED) {
 			const title = redactText(text);
 			this.title = title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title;
+		}
+		// step: a stored conversation saved before scopes records its scope before the model is called. A turn
+		// that ends by unmount (a team switch) misses the idle save, and the catalog is shared by every team.
+		if (stamped && this.stored) {
+			await this.save(this.messages).catch((err) => {
+				console.log("[AgentSession] could not record the conversation's scope", err);
+			});
 		}
 		// step: a request that looks like it holds a key, or that screen() sent without one, never reaches the model
 		const kind = looksLikeCredential(text) ?? this.withheld.get(text);
@@ -330,6 +368,8 @@ export class AgentSession {
 			date: this.date,
 			contextRefs: this.contextRefs,
 			messages: rows,
+			...(this.scopeKey !== undefined ? { scopeKey: this.scopeKey } : {}),
 		});
+		this.stored = true;
 	}
 }
