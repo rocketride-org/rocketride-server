@@ -778,26 +778,35 @@ test('an edit whose anchor still matches once lands on the current content and s
 // FILE TRACKER — what a run read and changed, and what moved on since
 // =============================================================================
 
-test('the tracker lists the files changed since the run saw them, not the ones it deleted or moved itself', () => {
+test('the tracker records reads and changes, and lists files changed since', () => {
 	const versions = new Map<string, number>();
 	const vfs = { version: (path: string) => versions.get(path) ?? 0 };
 	const tracker = new FileTracker();
-	tracker.saw('a.ts', 0, 'h0');
-	tracker.saw('gone.ts', 0, 'h1');
-	tracker.deleted('gone.ts');
-	tracker.saw('old.ts', 0, 'h2');
+	tracker.read('a.ts', 0, 'h0');
+	tracker.wrote('new.ts', 1, 'h1', false);
+	tracker.wrote('a.ts', 1, 'h2', true);
+	tracker.read('gone.ts', 0, 'h3');
+	tracker.deleted('gone.ts', 1);
+	tracker.wrote('tmp.ts', 1, 'h4', false);
+	tracker.deleted('tmp.ts', 2);
+	tracker.renamed('new.ts', 'moved.ts', () => 1);
+	tracker.read('old.ts', 0, 'h5');
 	tracker.renamed('old.ts', 'renamed.ts', () => 1);
-	assert.deepEqual(tracker.seen(), ['a.ts', 'renamed.ts']);
+	assert.deepEqual(tracker.changes(), [
+		{ path: 'a.ts', change: 'modified' },
+		{ path: 'gone.ts', change: 'deleted' },
+		{ path: 'moved.ts', change: 'added' },
+		{ path: 'renamed.ts', change: 'renamed', from: 'old.ts' },
+	]);
 
-	// step: someone else writes a.ts; the deleted file is never listed, and the moved one only when it moves on
+	// step: someone else writes a.ts; the deleted file is never listed
 	versions.set('a.ts', 2);
 	versions.set('gone.ts', 5);
-	versions.set('renamed.ts', 1);
 	assert.deepEqual(
 		tracker.changedSince(vfs).map((f) => f.path),
 		['a.ts']
 	);
-	tracker.saw('a.ts', 2, 'h3');
+	tracker.read('a.ts', 2, 'h6');
 	assert.deepEqual(tracker.changedSince(vfs), []);
 });
 

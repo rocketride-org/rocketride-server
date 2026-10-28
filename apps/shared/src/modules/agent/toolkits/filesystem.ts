@@ -63,7 +63,7 @@ import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import { SaveDroppedError, type EditorControl } from '../host';
 import { AgentTool, AgentToolkit, RefusedError, type ToolStep } from '../tools';
 import { replaceSpans, type ChoiceFn } from './common';
-import { FileTracker, type TrackedFile } from './fileTracker';
+import { FileTracker } from './fileTracker';
 import { SecretMarkers } from './secretMarkers';
 
 // =============================================================================
@@ -209,7 +209,7 @@ export class FilesystemTools extends AgentToolkit {
 	/** The host's virtual tree — all I/O goes through it. */
 	private readonly vfs: IWorkspaceFileSystem;
 
-	/** Each file this run read or wrote, with its version and hash then. */
+	/** Each file this run read or changed: its version and hash then, and what the run did to it. */
 	readonly tracker = new FileTracker();
 
 	/** The secret values this run's reads hid, each with its marker; writes put them back. */
@@ -302,18 +302,18 @@ export class FilesystemTools extends AgentToolkit {
 	}
 
 	/** Refuses an edit or overwrite of a file the agent has not read this run. */
-	private requireRead(path: string, op: string): TrackedFile {
+	private requireRead(path: string, op: string): { readVersion?: number; readHash: string } {
 		const seen = this.tracker.get(path);
-		if (seen === undefined) {
+		if (seen?.readHash === undefined) {
 			throw new RefusedError(`${op} refused: read ${path} first — edits must start from its current content.`);
 		}
-		return seen;
+		return { readVersion: seen.readVersion, readHash: seen.readHash };
 	}
 
 	/** The refusal for a file that changed since the run last saw it; `saved` when the user's save in this call changed it. */
-	private staleRefusal(op: string, path: string, seen: number, now: number, saved = false): Error {
+	private staleRefusal(op: string, path: string, seen: number | undefined, now: number, saved = false): Error {
 		const writer = this.vfs.lastWriter(path);
-		const versions = seen !== now ? ` (version ${seen}, now ${now}${writer ? `; last writer: ${writer}` : ''})` : '';
+		const versions = seen !== undefined && seen !== now ? ` (version ${seen}, now ${now}${writer ? `; last writer: ${writer}` : ''})` : '';
 		const why = saved ? `the user saved their unsaved changes in ${path} first, so it changed since you read it` : `${path} changed since you read it`;
 		return refusal(`${op} refused: ${why}${versions}. Read it again, then redo the change from the current content.`, saved);
 	}
@@ -324,7 +324,7 @@ export class FilesystemTools extends AgentToolkit {
 	 * copy moved on since the page read it (another tab, a teammate), the
 	 * cached copy is dropped, so the agent's next read gets the server's copy.
 	 */
-	private async writeAt(path: string, content: string, expect: number, op: string, saved = false): Promise<void> {
+	private async writeAt(path: string, content: string, expect: number, op: string, existed: boolean, saved = false): Promise<void> {
 		this.refuseDirty([path], op, saved);
 		const writing = this.vfs.write(path, content, AGENT_ORIGIN, expect);
 		const mine = this.vfs.version(path);
@@ -338,7 +338,7 @@ export class FilesystemTools extends AgentToolkit {
 			}
 			throw err;
 		}
-		this.tracker.saw(path, mine, await sha256Hex(content));
+		this.tracker.wrote(path, mine, await sha256Hex(content), existed);
 	}
 
 	/**
@@ -433,7 +433,7 @@ export class FilesystemTools extends AgentToolkit {
 		let text = String(read.content);
 		// step: record the whole file's version and hash, windowed or not — they are what edits are checked against
 		const hash = await sha256Hex(text);
-		this.tracker.saw(path, read.version, hash, stored ? await sha256Hex(String(stored.content)) : hash);
+		this.tracker.read(path, read.version, hash, stored ? await sha256Hex(String(stored.content)) : hash);
 		// step: hide secret values before any window — a window could cut one in half, and half a key no longer matches
 		const hidden = this.shown(path, text);
 		text = hidden.text;
@@ -486,7 +486,7 @@ export class FilesystemTools extends AgentToolkit {
 			if (seen.readVersion !== current.version || seen.readHash !== (await sha256Hex(String(current.content)))) throw this.staleRefusal('write_file', path, seen.readVersion, current.version, saved);
 			expect = current.version;
 		}
-		await this.writeAt(path, content, expect, 'write_file', saved);
+		await this.writeAt(path, content, expect, 'write_file', existed, saved);
 		return `Wrote ${size} bytes to ${path}.${await this.noteAfterSave(path)}`;
 	}
 
@@ -539,7 +539,7 @@ export class FilesystemTools extends AgentToolkit {
 			throw new Error(`edit_file result exceeds the ${WRITE_MAX_BYTES}-byte file cap.`);
 		}
 		const writer = this.vfs.lastWriter(path);
-		await this.writeAt(path, updated, version, 'edit_file', saved);
+		await this.writeAt(path, updated, version, 'edit_file', true, saved);
 		const note = stale ? ` ${this.appliedNote(choice, writer, path)}` : '';
 		return `Replaced ${occurrences} occurrence(s) in ${path}.${note}${await this.noteAfterSave(path)}`;
 	}
@@ -702,13 +702,15 @@ export class FilesystemTools extends AgentToolkit {
 				// step: the user's text landed, so the delete the agent planned is out of date
 				if (settled?.choice === 'save') throw new Error(`delete_file refused: the user saved their unsaved changes in ${listPaths(settled.dirty)} first, so ${path} changed since you decided to delete it. Read it again, then ask the user whether to delete it.`);
 				this.refuseDirty([path], 'delete_file');
+				const deleting = this.vfs.delete(path, AGENT_ORIGIN, this.tracker.get(path)?.storedHash);
+				const mine = this.vfs.version(path);
 				try {
-					await this.vfs.delete(path, AGENT_ORIGIN, this.tracker.get(path)?.storedHash);
+					await deleting;
 				} catch (err) {
 					if (err instanceof StaleWriteError) throw new RefusedError(`delete_file refused: ${path} changed since you read it. Read it again, then ask the user whether to delete it.`);
 					throw err;
 				}
-				this.tracker.deleted(path);
+				this.tracker.deleted(path, mine);
 				return `Deleted ${path}.`;
 			},
 		};
