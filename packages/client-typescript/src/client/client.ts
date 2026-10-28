@@ -1361,7 +1361,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
 	 * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
 	 * @param options.source - Override pipeline source
-	 * @param options.threads - Number of threads for execution (default: 1)
+	 * @param options.threads - Number of threads for execution (omit to let the server decide)
 	 * @param options.useExisting - Use existing pipeline instance
 	 * @param options.args - Command line arguments to pass to pipeline
 	 * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
@@ -3112,7 +3112,10 @@ export class RocketRideClient extends DAPClient {
 	 * @param target  - Task token to profile a pipeline subprocess, or
 	 *                  undefined/null to profile the server process itself.
 	 * @param session - Optional human-readable session name.
-	 * @returns Status object with session info and start time.
+	 * @returns Status object with session info and start time. If a session is
+	 *          already active, status is 'error' with a message instead.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileStart(target?: string | null, session?: string): Promise<CProfileStatusResponse> {
 		const args: Record<string, unknown> = {};
@@ -3125,7 +3128,11 @@ export class RocketRideClient extends DAPClient {
 	 * Stop the active cProfile profiling session.
 	 *
 	 * @param target - Task token if profiling a pipeline, or undefined for server.
-	 * @returns Result with session name and runtime.
+	 * @returns Result with session name and runtime. With no active session, or a
+	 *          server-process session another connection started, status is
+	 *          'error' with a message instead.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileStop(target?: string | null): Promise<CProfileStopResponse> {
 		const args: Record<string, unknown> = {};
@@ -3138,6 +3145,8 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @param target - Task token if querying a pipeline, or undefined for server.
 	 * @returns Status indicating active/inactive, owner, runtime.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileStatus(target?: string | null): Promise<CProfileStatusResponse> {
 		const args: Record<string, unknown> = {};
@@ -3149,7 +3158,10 @@ export class RocketRideClient extends DAPClient {
 	 * Get the full cProfile report from the last completed session.
 	 *
 	 * @param target - Task token if querying a pipeline, or undefined for server.
-	 * @returns Object containing the full pstats text report.
+	 * @returns Object containing the full pstats text report, or a placeholder
+	 *          message when no session has completed.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileReport(target?: string | null): Promise<CProfileReportResponse> {
 		const args: Record<string, unknown> = {};
@@ -3172,6 +3184,9 @@ export class RocketRideClient extends DAPClient {
 	 *                   all threads merged when omitted.
 	 * @returns Object containing the tree root, functions (exact per-function
 	 *          totals; absent from older servers), total_time, and total_calls.
+	 *          With no completed session, tree is null and error holds the message.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number, includeSystem?: boolean, thread?: number | null): Promise<CProfileReportTreeResponse> {
 		const args: Record<string, unknown> = {};
@@ -3188,7 +3203,10 @@ export class RocketRideClient extends DAPClient {
 	 * List the threads profiled in the last completed session.
 	 *
 	 * @param target - Task token if querying a pipeline, or undefined for server.
-	 * @returns Object containing the threads, busiest first.
+	 * @returns Object containing the threads, busiest first. With no completed
+	 *          session, threads is empty and error holds the message.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileThreads(target?: string | null): Promise<CProfileThreadsResponse> {
 		const args: Record<string, unknown> = {};

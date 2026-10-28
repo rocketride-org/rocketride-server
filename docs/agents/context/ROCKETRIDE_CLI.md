@@ -248,14 +248,18 @@ rocketride profile tree [--token TOKEN] [--thread ID] [--min-pct 0.1] [--max-dep
   connection until Ctrl+C or `--duration` and then stops the session.
 - `report`, `threads` and `tree` read the last completed session, so run
   them after `stop` or `run`. `--thread` takes an ID from `threads`; without
-  it the tree covers every thread.
-- `tree` hides calls below `--min-pct` percent of the total time
-  (`--min-pct 0` keeps them all, useful on short runs), and
-  `--no-include-system` drops stdlib code while keeping the project code it
-  calls. A function can appear under several callers; the profiler records
-  caller → callee totals, not paths, so each copy shows its share of them
-  and the copies add up to the function's totals. `report` has the exact
-  per-function numbers.
+  it the tree covers every thread. With no completed session, `report`
+  prints `No profiling data available. Run a session first.` and exits 0,
+  while `threads` and `tree` fail with the same message, exit 1.
+- `tree` hides calls below `--min-pct` percent of the total time.
+  `--min-pct 0` prunes nothing down to `--max-depth`, and the task answers
+  nothing else while it builds the tree, so keep it to a few seconds of a
+  quiet process: on one 27 s document-processing session, `--max-depth 80`
+  took minutes and 8.9 GB. `--no-include-system` drops stdlib code while
+  keeping the project code it calls. A function can appear under several
+  callers; the profiler records caller → callee totals, not paths, so each
+  copy shows its share of them and the copies add up to the function's
+  totals. `report` has the exact per-function numbers.
 - `--session` only names the session in the report
   (default `session_<timestamp>`).
 - A task's session belongs to the server's link to that task, not to your
