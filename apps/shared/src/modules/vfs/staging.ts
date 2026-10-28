@@ -61,6 +61,17 @@ export const STAGING_DIR = '.staging';
 /** Characters forbidden in an app id used as a path segment (store rules). */
 const INVALID_APPID_CHARS = new Set(['/', '\\', '*', '?', '<', '>', '|', '"']);
 
+/**
+ * Whether a store error proves the file is absent. The store raises
+ * 'File not found: …'; any other error may be transient.
+ *
+ * @param err - What the store call threw.
+ * @returns True only for the store's not-found error.
+ */
+function provenAbsent(err: unknown): boolean {
+	return err instanceof Error && /file not found/i.test(err.message);
+}
+
 /** One serialized entry: content rides in blobs, identified by hash. */
 interface ManifestEntry {
 	kind: 'write' | 'tombstone' | 'mkdir';
@@ -85,6 +96,8 @@ interface ManifestLayer {
 /** The manifest file envelope. */
 interface ManifestFile {
 	version: 1;
+	/** A new random id on every write, so a store can tell whether another writer changed the manifest since it last loaded or wrote it. */
+	rev?: string;
 	layers: ManifestLayer[];
 }
 
@@ -106,6 +119,12 @@ export class StagingStore implements IStagingStore {
 	private chain: Promise<void> = Promise.resolve();
 	/** Blob hashes known to exist on the server (skip rewrites). */
 	private readonly knownBlobs = new Set<string>();
+	/**
+	 * The `rev` of the manifest this store last loaded or wrote: null when
+	 * there was no manifest, undefined when unknown (not loaded yet, or a
+	 * manifest without one).
+	 */
+	private seenRev: string | null | undefined = undefined;
 
 	/**
 	 * Builds the store for one hosting app.
@@ -167,9 +186,13 @@ export class StagingStore implements IStagingStore {
 		try {
 			manifest = await client.fsReadJson<ManifestFile>(this.manifestPath());
 		} catch {
+			this.seenRev = null;
 			return null;
 		}
-		if (!Array.isArray(manifest?.layers) || manifest.layers.length === 0) return null;
+		if (!Array.isArray(manifest?.layers) || manifest.layers.length === 0) {
+			this.seenRev = manifest?.rev;
+			return null;
+		}
 
 		// step: collect every referenced blob hash, then bulk-read them
 		const hashes = new Set<string>();
@@ -215,6 +238,7 @@ export class StagingStore implements IStagingStore {
 			}
 			layers.push({ id: ml.id, label: ml.label, sessionId: ml.sessionId, committed: ml.committed, entries });
 		}
+		this.seenRev = manifest.rev;
 
 		// step: authoritative orphan sweep — the GC backstop on every boot
 		await this.gc().catch(() => { /* orphans are harmless */ });
@@ -272,7 +296,9 @@ export class StagingStore implements IStagingStore {
 
 		// step: manifest last — the atomic point; a crash before this line
 		// leaves only orphan blobs
-		await client.fsWriteJson(this.manifestPath(), { version: 1, layers: manifestLayers } satisfies ManifestFile);
+		const rev = crypto.randomUUID();
+		await client.fsWriteJson(this.manifestPath(), { version: 1, rev, layers: manifestLayers } satisfies ManifestFile);
+		this.seenRev = rev;
 	}
 
 	/** Writes a blob unless this session already knows it exists. */
@@ -299,6 +325,7 @@ export class StagingStore implements IStagingStore {
 			} catch {
 				/* already gone */
 			}
+			this.seenRev = null;
 			try {
 				await client.fsRmdir(`${this.root()}/blobs`, true);
 			} catch {
@@ -307,6 +334,32 @@ export class StagingStore implements IStagingStore {
 			this.knownBlobs.clear();
 		});
 		this.chain = run.catch(() => undefined);
+		return run;
+	}
+
+	/**
+	 * Whether the manifest is still the one this store last loaded or wrote,
+	 * once this store's own pending writes are done. False when another
+	 * writer (a second tab, or a second store over the same namespace)
+	 * changed or deleted it since, and when that cannot be told.
+	 *
+	 * @returns True when no other writer changed the manifest.
+	 */
+	isCurrent(): Promise<boolean> {
+		const run = this.chain.then(async () => {
+			let rev: string | null | undefined;
+			try {
+				rev = (await this.client().fsReadJson<ManifestFile>(this.manifestPath()))?.rev;
+			} catch (err) {
+				if (!provenAbsent(err)) return false;
+				rev = null;
+			}
+			return rev !== undefined && rev === this.seenRev;
+		});
+		this.chain = run.then(
+			() => undefined,
+			() => undefined
+		);
 		return run;
 	}
 
@@ -343,8 +396,7 @@ export class StagingStore implements IStagingStore {
 			// orphan; a transient read failure must not empty the referenced
 			// set and delete blobs the manifest still names (load() would
 			// then drop those staged writes)
-			const absent = err instanceof Error && /file not found/i.test(err.message);
-			if (!absent) return;
+			if (!provenAbsent(err)) return;
 		}
 
 		// step: list blobs and delete the unreferenced remainder

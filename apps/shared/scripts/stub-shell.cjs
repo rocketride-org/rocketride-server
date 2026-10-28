@@ -15,6 +15,11 @@
  * hands back an empty style fragment for any name and leaves every other
  * export undefined, matching what the tests already tolerate. Loaded via
  * `--require` before tsx starts resolving test files.
+ *
+ * Three more exports let a test run rocket-ui's workspace (workspace.ts): the
+ * real CachedVfs, a getClient() that returns `globalThis.__shellTestClient`,
+ * and a ConnectionManager whose bus hands each event to
+ * `globalThis.__shellTestEmit` when a test sets it.
  */
 
 const Module = require('module');
@@ -22,6 +27,12 @@ const Module = require('module');
 const stub = {
 	// Any style-fragment lookup yields an empty, spreadable object.
 	commonStyles: new Proxy({}, { get: () => ({}) }),
+	// Loaded on first use, once tsx can compile TypeScript.
+	get CachedVfs() {
+		return require('../../../packages/shell/src/modules/explorer/CachedVfs.ts').CachedVfs;
+	},
+	getClient: () => globalThis.__shellTestClient,
+	ConnectionManager: { getInstance: () => ({ emit: (...args) => globalThis.__shellTestEmit?.(...args) }) },
 };
 
 // step: intercept CJS loads of the platform specifiers before tsx resolves them

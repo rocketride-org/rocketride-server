@@ -38,7 +38,7 @@ import type { FrameOptions } from 'shared/tools/appdev';
 import { scaffoldApp } from '../surfaces/preview/session/appStore';
 import { findDevSession, type WebDevSession } from '../surfaces/preview/session/devSession';
 import { packAppSource } from '../surfaces/preview/session/pack';
-import { getWorkspaceVfs } from '../surfaces/workspace/vfs/workspace';
+import { getWorkspace, type Workspace } from '../surfaces/workspace/vfs/workspace';
 
 // =============================================================================
 // SCAFFOLD DEFAULTS
@@ -165,26 +165,42 @@ export function feedApprovalSettings(settings: Readonly<Record<string, unknown>>
 // =============================================================================
 
 /**
- * Builds the agent host over rocket-ui's workspace. Call after
- * createWorkspace() settles, since the host captures the workspace view.
+ * Builds the agent host over one of rocket-ui's workspaces. Call after
+ * createWorkspace() settles. A run keeps the host it started with, so after a
+ * team switch its reads, writes, scaffolds and deploys stay in its own team.
  *
  * @param client - The connected client; it supplies the publisher and packs deploys.
+ * @param ws - The workspace the host is bound to: its view and its scope.
  * @returns The host to install with setAgentHost().
  */
-export function createRocketAgentHost(client: RocketRideClient): AgentHost {
+export function createRocketAgentHost(client: RocketRideClient, ws: Workspace): AgentHost {
+	// step: after a team switch, a run must not reach the new team's dev sessions, even where app ids match
+	const current = (): boolean => {
+		try {
+			return getWorkspace().view === ws.view;
+		} catch {
+			return false;
+		}
+	};
 	return {
-		vfs: getWorkspaceVfs(),
+		vfs: ws.view,
+		scopeKey: ws.scopeKey,
+		scopeName: (scopeKey) => (scopeKey.startsWith('team-') ? client.getAccountInfo()?.organization?.teams?.find((team) => team.id === scopeKey.slice('team-'.length))?.name : undefined),
 		// step: the New App wizard's publisher and starting frame
 		scaffoldApp: ({ appName, displayName, template }) =>
-			scaffoldApp({
-				appName,
-				displayName,
-				publisher: client.getAccountInfo()?.organization?.developerId || 'local',
-				frame: WIZARD_FRAME,
-				template,
-			}),
-		packApp: (folder) => packAppSource(client, folder),
+			scaffoldApp(
+				{
+					appName,
+					displayName,
+					publisher: client.getAccountInfo()?.organization?.developerId || 'local',
+					frame: WIZARD_FRAME,
+					template,
+				},
+				ws
+			),
+		packApp: (folder) => packAppSource(client, folder, ws),
 		devSession: (appId) => {
+			if (!current()) return null;
 			const session = findDevSession(appId);
 			return session ? agentDevSession(session) : null;
 		},

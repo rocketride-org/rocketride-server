@@ -200,6 +200,15 @@ export interface MarkerInfo {
 export interface MarkerSource {
 	/** The uri of every model that is loaded. */
 	modelUris(): string[];
+	/**
+	 * The uri the model of a file in an app gets, spelled as `modelUris()` and
+	 * the markers spell it. Without it, the path is used as it is.
+	 *
+	 * @param appId - The app id.
+	 * @param relPath - The file's path inside the app, as the app's file list names it.
+	 * @returns The model's uri.
+	 */
+	modelUri?(appId: string, relPath: string): string;
 	/** Every marker Monaco holds, for every model. */
 	markers(): MarkerInfo[];
 	/**
@@ -245,6 +254,8 @@ export async function monacoMarkerSource(): Promise<MarkerSource> {
 	return {
 		// step: skipEncoding keeps the uri as `file:///${appId}/${relPath}`, even for names that need escaping
 		modelUris: () => monaco.editor.getModels().map((model) => model.uri.toString(true)),
+		// step: the dev session names a model with Uri.parse (devSession.ts), which decodes each %XX: src/foo%20bar.ts is src/foo bar.ts
+		modelUri: (appId, relPath) => monaco.Uri.parse(`${prefixOf(appId)}${relPath}`).toString(true),
 		markers: () =>
 			monaco.editor.getModelMarkers({}).map((m) => ({
 				uri: m.resource.toString(true),
@@ -402,20 +413,27 @@ function appModelPaths(src: MarkerSource, appId: string): string[] {
  *   none of them is loaded (the models are only json, css and the like);
  *   otherwise `fail` with one `${relPath}:${line} ${message}` line per error, or
  *   `pass`. TypeScript files with no model are named in the output and counted
- *   in a passing summary.
+ *   in a passing summary. Errors in a TypeScript file that is no longer in the
+ *   app are left out, and the output says how many were: the editor can keep
+ *   a deleted file's model and its errors.
  */
 async function appTypeEvidence(src: MarkerSource, app: AppEntry, tsFiles: string[], hide: (text: string) => string): Promise<CheckEvidence> {
-	const prefix = app.id ? prefixOf(app.id) : undefined;
+	const appId = app.id;
+	const prefix = appId ? prefixOf(appId) : undefined;
 	const models = new Set(prefix ? src.modelUris().filter((uri) => uri.startsWith(prefix)) : []);
-	if (!prefix || models.size === 0) return { step: TYPES_STEP, ran: TYPES_RAN, output: NOT_OPEN_OUTPUT, status: 'not_run', summary: NOT_OPEN_SUMMARY };
+	if (!appId || !prefix || models.size === 0) return { step: TYPES_STEP, ran: TYPES_RAN, output: NOT_OPEN_OUTPUT, status: 'not_run', summary: NOT_OPEN_SUMMARY };
 
-	const errors = src
+	// step: a TypeScript file whose model no live file would get was deleted; its stale errors prove nothing
+	const uriOf = (file: string): string => src.modelUri?.(appId, file) ?? `${prefix}${file}`;
+	const live = new Set(tsFiles.map(uriOf));
+	const all = src
 		.markers()
 		.filter((m) => m.uri.startsWith(prefix) && isTypeError(m))
-		.map((m) => ({ relPath: m.uri.slice(prefix.length), line: m.line, message: m.message.replace(/\s*\n\s*/g, ' ') }))
-		.sort((a, b) => (a.relPath === b.relPath ? a.line - b.line : a.relPath < b.relPath ? -1 : 1));
-	const checked = tsFiles.filter((file) => models.has(`${prefix}${file}`));
-	const unchecked = tsFiles.filter((file) => !models.has(`${prefix}${file}`));
+		.map((m) => ({ uri: m.uri, relPath: m.uri.slice(prefix.length), line: m.line, message: m.message.replace(/\s*\n\s*/g, ' ') }));
+	const gone = all.filter((e) => TYPESCRIPT_FILE.test(e.relPath) && !live.has(e.uri));
+	const errors = all.filter((e) => !gone.includes(e)).sort((a, b) => (a.relPath === b.relPath ? a.line - b.line : a.relPath < b.relPath ? -1 : 1));
+	const checked = tsFiles.filter((file) => models.has(uriOf(file)));
+	const unchecked = tsFiles.filter((file) => !models.has(uriOf(file)));
 
 	// step: models of json, css and the like prove nothing about types; with TypeScript files and none of them loaded, nothing was checked
 	if (errors.length === 0 && checked.length === 0 && tsFiles.length > 0) return { step: TYPES_STEP, ran: TYPES_RAN, output: NOT_OPEN_OUTPUT, status: 'not_run', summary: NOT_OPEN_SUMMARY };
@@ -423,7 +441,9 @@ async function appTypeEvidence(src: MarkerSource, app: AppEntry, tsFiles: string
 	// step: only the error list is cut; the note on unchecked files comes after it so a long list cannot hide it
 	const errorText = errors.length > 0 ? errors.map((e) => `${e.relPath}:${e.line} ${e.message}`).join('\n') : `no TypeScript errors in ${checked.length} files`;
 	const note = unchecked.length > 0 ? `\nNot type-checked (not loaded in the editor): ${unchecked.join(', ')}` : '';
-	const output = `${clip(hide(errorText), 'fix the first errors and check again to see the rest')}${note}`;
+	const goneFiles = [...new Set(gone.map((e) => e.relPath))];
+	const ignored = gone.length > 0 ? `\nIgnored ${gone.length} ${gone.length === 1 ? 'marker' : 'markers'} for ${goneFiles.length === 1 ? 'a file that no longer exists' : 'files that no longer exist'}: ${goneFiles.join(', ')}.` : '';
+	const output = `${clip(hide(errorText), 'fix the first errors and check again to see the rest')}${note}${ignored}`;
 
 	if (errors.length > 0) return { step: TYPES_STEP, ran: TYPES_RAN, output, status: 'fail', summary: `types: ${errors.length} errors` };
 	const summary = unchecked.length > 0 ? `types clean (${unchecked.length} files not type-checked)` : 'types clean';

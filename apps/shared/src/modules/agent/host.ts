@@ -72,10 +72,37 @@ export interface AgentDevSession {
 	subscribeWatch(l: (s: WatchStatus) => void): () => void;
 }
 
+/**
+ * The rejection of an editor's save that wrote nothing because the user
+ * dropped or replaced its text while it waited its turn (Reload, Overwrite,
+ * closing with Don't Save). What waits on it stops: Save & Run runs nothing,
+ * and a publish publishes nothing. It is the user's own doing, so no editor
+ * shows it as a failure.
+ */
+export class SaveDroppedError extends Error {
+	constructor(path: string) {
+		super(`${path} was not saved: its changes were dropped or replaced while the save waited its turn.`);
+		this.name = 'SaveDroppedError';
+	}
+}
+
 /** What the mounting app provides to the agent. */
 export interface AgentHost {
 	/** The workspace the agent reads and edits; its read-only `.rocketride/` holds the guides. */
 	vfs: IWorkspaceFileSystem;
+	/**
+	 * The workspace's scope ('' for the user's own files, 'team-<id>' for a
+	 * team's); a conversation runs only in the scope it started in. Hosts with
+	 * one scope leave it out.
+	 */
+	readonly scopeKey?: string;
+	/**
+	 * A scope's name for the user (a team's name), when the host has it.
+	 *
+	 * @param scopeKey - The scope key.
+	 * @returns The name, or undefined to name the scope by its id.
+	 */
+	scopeName?(scopeKey: string): string | undefined;
 	/**
 	 * Creates a new app from a template.
 	 *

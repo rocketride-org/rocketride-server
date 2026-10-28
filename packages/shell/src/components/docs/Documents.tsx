@@ -220,7 +220,8 @@ export type LayoutNode = LayoutLeaf | LayoutSplit;
 export type Public<T> = { [K in keyof T]: T[K] };
 
 /**
- * Methods added to {@link Documents} AFTER the shell-api contract froze.
+ * Methods (and the `destroyed` flag) added to {@link Documents} AFTER the
+ * shell-api contract froze.
  *
  * Keep this list current when adding a method: `Public<Documents>` sits in
  * contravariant (React FC prop) positions of the frozen contract, so a new
@@ -228,7 +229,7 @@ export type Public<T> = { [K in keyof T]: T[K] };
  * v5-era app's Documents instance would stop type-checking against the live
  * components. Listing it here makes it optional where that matters.
  */
-export type LateDocumentsVerbs = 'requestCloseEditor' | 'requestCloseGroup' | 'saveActiveDocument' | 'flushPersistence';
+export type LateDocumentsVerbs = 'requestCloseEditor' | 'requestCloseGroup' | 'saveActiveDocument' | 'flushPersistence' | 'destroyed';
 
 /**
  * A Documents instance as components must ACCEPT one: everything the frozen
@@ -623,6 +624,9 @@ export class Documents {
 	private _editorCounter = 0;
 	private _groupCounter = 1;
 	private _splitCounter = 0;
+	/** Per URI, how many times openDocument created its document: a read or write that outlives a closed document must not land on the one opened after it. */
+	private _generations = new Map<string, number>();
+	private _destroyed = false;
 
 	/**
 	 * Creates a new Documents instance.
@@ -750,6 +754,15 @@ export class Documents {
 	}
 
 	/**
+	 * True once destroy() ran: the app tore this instance down (a team
+	 * switch, signing out). Its documents leave the state then, but none was
+	 * closed, so an editor's save still on its way is kept.
+	 */
+	get destroyed(): boolean {
+		return this._destroyed;
+	}
+
+	/**
 	 * Returns a single document by URI, or undefined.
 	 *
 	 * @param uri - The document URI.
@@ -858,6 +871,7 @@ export class Documents {
 			const updatedDoc = { ...(prev.documents[uri] ?? finalDoc), editorCount: (prev.documents[uri]?.editorCount ?? 0) + 1 };
 			const group = prev.groups[targetGroup];
 			if (!group) return prev;
+			if (!prev.documents[uri]) this._generations.set(uri, (this._generations.get(uri) ?? 0) + 1);
 			const newEditorIds = [...group.editorIds, editorId];
 			return {
 				...prev,
@@ -1211,7 +1225,12 @@ export class Documents {
 		if (!doc || doc.static) return false;
 
 		if (!doc.isNew) {
-			await this.saveDocument(uri);
+			// A save that throws did not land, so the close is abandoned.
+			try {
+				await this.saveDocument(uri);
+			} catch {
+				return false;
+			}
 			return this._state.documents[uri]?.dirty !== true;
 		}
 
@@ -1301,12 +1320,16 @@ export class Documents {
 		// New (untitled) documents should not be written to disk — the caller
 		// must provide a real filename via save-as before any disk write.
 		if (doc.isNew) return;
+		// Typing that lands while the write is in flight was not written, and a
+		// document closed and opened again meanwhile is another one.
+		const generationAtCall = this._generations.get(uri);
 		if (this._vfs) {
 			await this._vfs.write(uri, doc.content);
 		}
 		this._update((prev) => {
 			const d = prev.documents[uri];
 			if (!d) return prev;
+			if (d.version !== doc.version || this._generations.get(uri) !== generationAtCall) return prev;
 			return { ...prev, documents: { ...prev.documents, [uri]: { ...d, dirty: false, isNew: false } } };
 		});
 	}
@@ -1320,6 +1343,10 @@ export class Documents {
 	async revertDocument(uri: string): Promise<void> {
 		const existingDoc = this._state.documents[uri];
 		if (existingDoc?.static) return;
+		// Typing that lands while the read is in flight is newer than the read,
+		// and a document closed and opened again meanwhile is another one.
+		const versionAtCall = existingDoc?.version;
+		const generationAtCall = this._generations.get(uri);
 		let newContent: unknown = null;
 		if (this._vfs) {
 			try {
@@ -1332,6 +1359,7 @@ export class Documents {
 		this._update((prev) => {
 			const doc = prev.documents[uri];
 			if (!doc) return prev;
+			if (doc.version !== versionAtCall || this._generations.get(uri) !== generationAtCall) return prev;
 			return {
 				...prev,
 				documents: { ...prev.documents, [uri]: { ...doc, content: newContent!, dirty: false, version: doc.version + 1 } },
@@ -1633,6 +1661,7 @@ export class Documents {
 	 * Destroys this instance — clears state and listeners.
 	 */
 	destroy(): void {
+		this._destroyed = true;
 		// Flush any pending persistence write before destroying
 		this.flushPersistence();
 		this._vfs = null;
