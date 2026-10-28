@@ -4,15 +4,16 @@
 # =============================================================================
 
 """
-Tests for the OCR node's reader guard (``IGlobal.readerLock``).
+Tests for concurrency in the OCR node.
 
-The guard follows the run mode, as in the other vision nodes: a real lock for
-in-process inference, a no-op with ``--modelserver`` so concurrent worker threads
-reach the model server's batcher instead of queueing one image at a time.
+The node holds no lock around the reader: in-process inference waits for device
+memory inside the OCR engine (``ai.common.models.device_budget``), and with
+``--modelserver`` concurrent worker threads reach the model server's batcher. The
+table engine is created lazily, once, however many pages arrive together.
 
 ``IGlobal.py`` and ``IInstance.py`` are loaded by file path under a synthetic
 package. Their heavy imports (``depends``, OpenCV, img2table, the OCR engines) are
-stubbed; ``ai.common.models.base.make_device_lock`` is the real one.
+stubbed.
 
 Usage:
     ./builder.cmd nodes:test --pytest-pattern=ocr --verbose
@@ -197,43 +198,41 @@ def _run_threads(n: int, glb: IGlobal) -> list:
     return results
 
 
-def test_local_guard_is_a_lock(make_global) -> None:
-    glb = make_global(model_server=False)
-    assert isinstance(glb.readerLock, type(threading.Lock()))
-
-
-def test_model_server_guard_is_a_no_op(make_global) -> None:
-    glb = make_global(model_server=True)
-    assert isinstance(glb.readerLock, contextlib.nullcontext)
-
-
-def test_local_reads_do_not_overlap(make_global, monkeypatch) -> None:
-    """In-process inference: one ``read`` at a time, whatever the number of worker threads."""
-    glb = make_global(model_server=False)
-    state = {'active': 0, 'peak': 0}
-    guard = threading.Lock()
-
-    def on_read() -> None:
-        with guard:
-            state['active'] += 1
-            state['peak'] = max(state['peak'], state['active'])
-        time.sleep(0.05)
-        with guard:
-            state['active'] -= 1
-
-    monkeypatch.setattr(_StubReader, 'on_read', staticmethod(on_read))
-    results = _run_threads(4, glb)
-
-    assert results == [['text']] * 4
-    assert state['peak'] == 1
-
-
-def test_model_server_reads_run_concurrently(make_global, monkeypatch) -> None:
-    """Proxy mode: worker threads are inside ``read`` at the same time (a node lock would break the barrier)."""
-    glb = make_global(model_server=True)
+@pytest.mark.parametrize('model_server', [False, True], ids=['local', 'model-server'])
+def test_reads_run_concurrently(make_global, monkeypatch, model_server: bool) -> None:
+    """Worker threads are inside ``read`` at the same time (a node lock would break the barrier)."""
+    glb = make_global(model_server=model_server)
     barrier = threading.Barrier(4, timeout=10)
     monkeypatch.setattr(_StubReader, 'on_read', staticmethod(barrier.wait))
 
     results = _run_threads(4, glb)
 
     assert results == [['text']] * 4
+
+
+def test_table_engine_is_loaded_once(monkeypatch) -> None:
+    """The first pages of several worker threads arrive together: one engine is loaded, not one each."""
+    adapter = _iglobal_mod.ModelServerOCR(engine='doctr')
+    loads: list = []
+
+    def slow_load() -> object:
+        loads.append(1)
+        time.sleep(0.05)
+        return object()
+
+    monkeypatch.setattr(adapter, '_load', slow_load)
+    barrier = threading.Barrier(4, timeout=10)
+    engines: list = []
+
+    def first_page() -> None:
+        barrier.wait()
+        engines.append(adapter.ocr)
+
+    threads = [threading.Thread(target=first_page) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    assert len(loads) == 1
+    assert len(engines) == 4 and all(e is engines[0] for e in engines)

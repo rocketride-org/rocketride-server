@@ -17,7 +17,7 @@ _WRAPPERS = [
 def _local(monkeypatch, mod, cls, loader, item):
     """Build the wrapper in local mode with a loader whose inference returns ``item`` per image."""
     monkeypatch.setattr(mod, 'get_model_server_address', lambda: None)
-    monkeypatch.setattr(loader, 'load', staticmethod(lambda **kw: ({}, {}, None)))
+    monkeypatch.setattr(loader, 'load', staticmethod(lambda **kw: ({'device': 'cpu'}, {}, None)))
     monkeypatch.setattr(loader, 'preprocess', staticmethod(lambda model, images, metadata=None: {'images': images}))
     monkeypatch.setattr(
         loader, 'inference', staticmethod(lambda model, pre, metadata=None: [dict(item) for _ in pre['images']])

@@ -150,8 +150,7 @@ class IInstance(IInstanceBase):
                     while True:
                         frame = gif.convert('RGB')
                         frame_np = np.array(frame)
-                        with self.IGlobal.readerLock:
-                            frame_text = self.IGlobal.reader.read(frame_np)
+                        frame_text = self.IGlobal.reader.read(frame_np)
                         if isinstance(frame_text, list):
                             frame_text = ' '.join(frame_text)
                         text_list.append(frame_text)
@@ -161,9 +160,7 @@ class IInstance(IInstanceBase):
 
                 text = '\n'.join(text_list)
             else:
-                # Acquire the lock before starting the OCR process
-                with self.IGlobal.readerLock:
-                    text = self.IGlobal.reader.read(self.image_data)
+                text = self.IGlobal.reader.read(self.image_data)
 
             # Read the tables by OCR model , invoke writeTable
             self.extract_tables_from_image(self.image_data, self.instance.writeTable)
@@ -189,8 +186,7 @@ class IInstance(IInstanceBase):
             image_data = base64.b64decode(doc.page_content)
 
             # Read the text by OCR model
-            with self.IGlobal.readerLock:
-                text = self.IGlobal.reader.read(image_data)
+            text = self.IGlobal.reader.read(image_data)
 
             if isinstance(text, list):
                 text = ' '.join(text)

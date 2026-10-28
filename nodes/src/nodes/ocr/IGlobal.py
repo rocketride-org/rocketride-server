@@ -23,6 +23,7 @@
 
 import os
 import io
+import threading
 from typing import List, Tuple, Any
 from rocketlib import IGlobalBase, debug, warning
 from ai.common.config import Config
@@ -74,27 +75,33 @@ class ModelServerOCR(OCRInstance):
         self.engine = engine.lower()
         self.languages = languages or ['en']
         self._ocr = None
+        self._ocr_lock = threading.Lock()
 
     @property
     def ocr(self):
         """Lazy-load the OCR engine from model server (or local fallback)."""
         if self._ocr is None:
-            if self.engine == 'doctr':
-                from ai.common.models import DocTR
-
-                self._ocr = DocTR()
-            elif self.engine == 'easyocr':
-                from ai.common.models import EasyOCR
-
-                self._ocr = EasyOCR(languages=self.languages)
-            elif self.engine == 'surya':
-                from ai.common.models import Surya
-
-                self._ocr = Surya()
-            else:
-                raise ValueError(f'Unknown OCR engine: {self.engine}')
-            debug(f'ModelServerOCR: Initialized {self.engine} engine')
+            # pages of several worker threads arrive together; load one engine, not one each
+            with self._ocr_lock:
+                if self._ocr is None:
+                    self._ocr = self._load()
+                    debug(f'ModelServerOCR: Initialized {self.engine} engine')
         return self._ocr
+
+    def _load(self):
+        if self.engine == 'doctr':
+            from ai.common.models import DocTR
+
+            return DocTR()
+        if self.engine == 'easyocr':
+            from ai.common.models import EasyOCR
+
+            return EasyOCR(languages=self.languages)
+        if self.engine == 'surya':
+            from ai.common.models import Surya
+
+            return Surya()
+        raise ValueError(f'Unknown OCR engine: {self.engine}')
 
     def content(self, document) -> List[List[Tuple]]:
         """
@@ -371,11 +378,8 @@ class IGlobal(IGlobalBase):
         # Get this node's config
         config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
 
-        # Local inference must serialize GPU access; with --modelserver this is a
-        # no-op so concurrent requests reach the model server's batcher
-        from ai.common.models.base import make_device_lock
-
-        self.readerLock = make_device_lock()
+        # No node-side lock: in-process inference waits for device memory inside the OCR
+        # engine (ai.common.models.device_budget); with --modelserver the server batches
 
         # Initialize the OCR reader
         self.reader = Reader(self.glb.logicalType, config, bag)
