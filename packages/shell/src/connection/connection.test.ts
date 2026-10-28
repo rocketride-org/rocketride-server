@@ -38,6 +38,7 @@ import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { CONNECT_TIMEOUT_MS, LS_TOKEN } from '../constants';
 import { resetDevGateForTests } from '../util/devGate';
 import { TELEMETRY_STORAGE_KEY, type TelemetryFact } from '../util/telemetryChannel';
+import { generatePkce } from '../util/pkce';
 
 type EmittedEvent = { event: string; payload: unknown };
 
@@ -584,7 +585,7 @@ test('facts on their way to a listener keep their order and are delivered or hel
 	assert.deepEqual(manager.drainTelemetry(), [], 'nothing held');
 });
 
-test('startOAuth raises auth:start once per page load, past its one-shot guard, and stamps the round trip', async () => {
+test('startOAuth raises auth:start once per page load, past its one-shot guard', async () => {
 	const session = recordingSession();
 	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/pricing' } }), sessionStorage: session.storage }, async () => {
 		const { manager } = createTestManager();
@@ -598,7 +599,19 @@ test('startOAuth raises auth:start once per page load, past its one-shot guard, 
 			[['auth:start', { register: true, app_id: 'rocketride.home', from_path: '/pricing', auto: false }]],
 			'one auth:start, raised past the guard',
 		);
-		assert.ok(Number(session.data.get(AUTH_START_STAMP)) > 0, 'the round-trip stamp is set');
+	});
+});
+
+test("a sign-in's redirect stamps the round trip with its PKCE verifier, replacing an abandoned start's stamp", async () => {
+	const session = recordingSession([[AUTH_START_STAMP, '1']]);
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		// as CloudAuthProvider.signIn() does before it redirects
+		manager.authProvider = { signIn: async () => { await generatePkce(); } };
+		const before = Date.now();
+		await manager.startOAuth(false);
+		assert.ok(session.data.get('rr:pkce_verifier'), 'the verifier is stored');
+		assert.ok(Number(session.data.get(AUTH_START_STAMP)) >= before, 'stamped by this redirect, not the abandoned one');
 	});
 });
 

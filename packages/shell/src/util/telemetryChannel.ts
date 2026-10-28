@@ -109,6 +109,8 @@ export class TelemetryChannel {
 	/**
 	 * Hold a fact exactly as given, id included: a fact the caller already numbered (and logged)
 	 * whose live delivery did not happen. Bounded like report(): the oldest go first.
+	 *
+	 * @param fact - The fact to hold.
 	 */
 	hold(fact: TelemetryFact): void {
 		this.facts.push(fact);

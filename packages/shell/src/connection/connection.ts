@@ -53,7 +53,7 @@ import { AUTH_REJECTED_MESSAGE, ConnectionFailure } from './errors';
 import { shouldReloadForTokenStorageUpdate } from './tokenStorageUpdate';
 import { isEmbeddedDevShell, tokenStore } from '../util/devGate';
 import { TelemetryChannel, type TelemetryFact } from '../util/telemetryChannel';
-import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
+import { AUTH_START_STAMP_KEY, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
 	LS_TOKEN,
 	SS_APP_ID,
@@ -66,11 +66,6 @@ import {
 	SERVICES_REFRESH_JITTER_MS,
 } from '../constants';
 
-/**
- * sessionStorage stamp of the last OAuth start (ms). Shell-internal: startOAuth writes it, and the callback that
- * completes the sign-in reads and removes it to report the round trip on auth:complete as `duration_ms`.
- */
-const SS_AUTH_START_TS = 'rr:shell:auth_start_ts';
 /** A stamp further than this from the completion is not this round trip: auth:complete then reports no duration. */
 const AUTH_ROUND_TRIP_MAX_MS = 60 * 60 * 1000;
 
@@ -655,11 +650,8 @@ export class ConnectionManager implements IConnectionManager {
 		// initiation releases the guard, so a retry raises it again, as a new attempt. The
 		// embedded (iframe) flow signs in through the auth popup, whose facts stay in the
 		// popup's own sessionStorage and are discarded when it closes: embedded sign-ins are
-		// not reported. CloudAuthProvider.signIn(), also on the shell API, does not raise it.
-		// The stamp times the round trip to auth:complete (takeAuthRoundTripMs).
-		if (!isEmbeddedDevShell()) {
-			try { sessionStorage.setItem(SS_AUTH_START_TS, String(Date.now())); } catch { /* storage unavailable */ }
-		}
+		// not reported. CloudAuthProvider.signIn(), also on the shell API, does not raise it. The
+		// round-trip stamp is written with the PKCE verifier (generatePkce), on every redirect.
 		const startProps: Record<string, unknown> = { register: !!register };
 		const appId = context?.appId || this.getPendingAppId();
 		if (appId) {
@@ -1436,13 +1428,13 @@ export class ConnectionManager implements IConnectionManager {
 		this.telemetryDrops++;
 		try { this.telemetry.clear(); } catch { /* telemetry must never break the shell */ }
 		if (!isEmbeddedDevShell()) {
-			try { sessionStorage.removeItem(SS_AUTH_START_TS); } catch { /* storage unavailable */ }
+			try { sessionStorage.removeItem(AUTH_START_STAMP_KEY); } catch { /* storage unavailable */ }
 		}
 	}
 
 	/**
-	 * The OAuth round trip that just completed: milliseconds since startOAuth's stamp. The stamp is
-	 * removed here, so a later completion is never timed from it. Never throws.
+	 * The OAuth round trip that just completed: milliseconds since its redirect's stamp (written with the
+	 * PKCE verifier). The stamp is removed here, so a later completion is never timed from it. Never throws.
 	 *
 	 * @returns The duration, or null without a stamp (an embedded preview, a sign-in that did not
 	 *          start in this tab) or with one that is not a plausible round trip.
@@ -1453,8 +1445,8 @@ export class ConnectionManager implements IConnectionManager {
 		}
 		let raw: string | null;
 		try {
-			raw = sessionStorage.getItem(SS_AUTH_START_TS);
-			sessionStorage.removeItem(SS_AUTH_START_TS);
+			raw = sessionStorage.getItem(AUTH_START_STAMP_KEY);
+			sessionStorage.removeItem(AUTH_START_STAMP_KEY);
 		} catch {
 			return null; // storage unavailable
 		}
