@@ -29,7 +29,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
-from .utils import preprocess_image_transparency
+from .utils import preprocess_image_transparency, raise_on_error, with_error_field
 
 logger = logging.getLogger('rocketlib.models.doctr')
 
@@ -286,7 +286,7 @@ class DocTR:
 
         # Postprocess phase — extract text and bounding boxes
         t0 = time.perf_counter()
-        results = DocTRLoader.postprocess(self._model, raw_output, len(images), self.output_fields)
+        results = DocTRLoader.postprocess(self._model, raw_output, len(images), with_error_field(self.output_fields))
         t_post = (time.perf_counter() - t0) * 1000
 
         # Report all perf counters — same keys as model server response
@@ -310,7 +310,7 @@ class DocTR:
             result = self._client.send_command(
                 'rrext_ms_inference',
                 {
-                    'output_fields': self.output_fields,
+                    'output_fields': with_error_field(self.output_fields),
                     'data': image_bytes,
                 },
             )
@@ -320,6 +320,7 @@ class DocTR:
 
     def _format_result(self, result: Dict) -> Dict:
         """Format result to consistent output."""
+        raise_on_error('docTR', result)
         return {
             'text': result.get('$text') or result.get('text', ''),
             'boxes': result.get('$boxes') or result.get('boxes', []),

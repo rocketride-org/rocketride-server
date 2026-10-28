@@ -38,7 +38,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
-from .utils import preprocess_image_transparency, group_words_into_lines
+from .utils import preprocess_image_transparency, group_words_into_lines, raise_on_error, with_error_field
 
 logger = logging.getLogger('rocketlib.models.easyocr')
 
@@ -438,7 +438,7 @@ class EasyOCR:
 
         # Postprocess phase — extract text and bounding boxes
         t0 = time.perf_counter()
-        results = EasyOCRLoader.postprocess(self._model, raw_output, len(images), self.output_fields)
+        results = EasyOCRLoader.postprocess(self._model, raw_output, len(images), with_error_field(self.output_fields))
         t_post = (time.perf_counter() - t0) * 1000
 
         # Report all perf counters — same keys as model server response
@@ -464,7 +464,7 @@ class EasyOCR:
             result = self._client.send_command(
                 'rrext_ms_inference',
                 {
-                    'output_fields': self.output_fields,
+                    'output_fields': with_error_field(self.output_fields),
                     'data': image_bytes,  # Binary transfer via DAP data field
                 },
             )
@@ -476,6 +476,7 @@ class EasyOCR:
 
     def _format_result(self, result: Dict) -> Dict:
         """Format result to consistent output."""
+        raise_on_error('EasyOCR', result)
         return {
             'text': result.get('$text') or result.get('text', ''),
             'boxes': result.get('$boxes') or result.get('boxes', []),
