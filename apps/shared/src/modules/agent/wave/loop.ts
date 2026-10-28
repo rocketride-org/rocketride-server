@@ -390,8 +390,12 @@ export type CallOutcome = { ok: true; result: string; ms: number } | { ok: false
  * the finish rule.
  */
 function redactOutcome(outcome: CallOutcome, secrets?: SecretMarkers): CallOutcome {
-	const hide = (text: string): string => redactText(secrets ? secrets.hideKnown(text) : text);
-	return outcome.ok ? { ...outcome, result: hide(outcome.result) } : { ...outcome, error: hide(outcome.error) };
+	return outcome.ok ? { ...outcome, result: hideSecrets(outcome.result, secrets) } : { ...outcome, error: hideSecrets(outcome.error, secrets) };
+}
+
+/** A tool's text with each value the file tools hid shown as its marker, then passed through redactText. */
+function hideSecrets(text: string, secrets?: SecretMarkers): string {
+	return redactText(secrets ? secrets.hideKnown(text) : text);
 }
 
 // =============================================================================
@@ -562,16 +566,16 @@ function timed<T>(work: () => Promise<T>, limitMs: number, signal: AbortSignal, 
  * cut loose until lateReturns() hands over how it ended, so a call that ends
  * before the rest of its wave is still reported. The tracker never rejects,
  * so a late failure is not an unhandled rejection; it notes how the call
- * ended, passed through redactText as an outcome is.
+ * ended, and lateReturns() hides its secrets as redactOutcome does.
  */
 function trackLate(late: Map<Promise<unknown>, LateCall>, call: ToolCall, running: Promise<string>): void {
 	const lateCall: LateCall = { call };
 	const tracked: Promise<void> = running.then(
 		(result) => {
-			lateCall.ended = { result: redactText(result) };
+			lateCall.ended = { result };
 		},
 		(error: unknown) => {
-			lateCall.ended = { error: redactText(messageOf(error)) };
+			lateCall.ended = { error: messageOf(error) };
 		}
 	);
 	late.set(tracked, lateCall);
@@ -914,7 +918,8 @@ class WaveRun {
 		for (const [tracked, { call, ended }] of this.late) {
 			if (!ended) continue;
 			this.late.delete(tracked);
-			returned.push({ tool: call.tool, args: call.args, ...ended, late: true });
+			const shown = 'result' in ended ? { result: hideSecrets(ended.result, this.o.secrets) } : { error: hideSecrets(ended.error, this.o.secrets) };
+			returned.push({ tool: call.tool, args: call.args, ...shown, late: true });
 		}
 		return returned;
 	}
