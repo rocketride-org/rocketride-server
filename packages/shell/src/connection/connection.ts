@@ -561,7 +561,7 @@ export class ConnectionManager implements IConnectionManager {
 	private telemetrySeq = 0;
 	/** Counts the drops of held facts (dropHeldTelemetry), so a fact raised before a drop is never held after it. */
 	private telemetryDrops = 0;
-	/** Facts on their way to a listener (see reportTelemetry); a later fact queues behind them, so the hold keeps their order. */
+	/** Facts on their way to a listener (see deliverTelemetryLive); a later fact queues behind them, so the hold keeps their order. */
 	private telemetryInFlight = 0;
 
 	/**
@@ -577,40 +577,82 @@ export class ConnectionManager implements IConnectionManager {
 	 */
 	public reportTelemetry(event: string, props: Record<string, unknown>): void {
 		try {
-			const ts = Date.now();
-			// With nobody listening the fact waits in the channel (in a tab, mirrored to sessionStorage,
-			// so it survives a page load that never mounts the forwarding app). While an earlier fact is
-			// still on its way (it may yet be held), this one queues behind it instead, so the order holds.
-			if (this.telemetryInFlight === 0 && (this.listeners.get('shell:telemetry')?.size ?? 0) === 0) {
-				// In the debug log like a delivered fact, so the ALT+D panel shows every fact raised.
-				const held = this.telemetry.report(event, props, ts);
-				if (held) this.logDebug('shell:telemetry', held);
+			// While an earlier fact is still on its way (it may yet be held), this one queues behind it, so the order holds.
+			if (this.telemetryInFlight > 0 || this.hasTelemetryListener()) {
+				this.deliverTelemetryLive(event, props);
 				return;
 			}
-			// A delivered fact is not held: the listener forwards it at once and a later drain must not
-			// replay it. Dispatched like emit(), on a microtask, but to the listeners subscribed then: if
-			// the last one left in between (an app switch or unmount in the same tick), the fact is held
-			// instead of lost, unless the held facts were dropped meanwhile (a sign-out, a rejected credential).
-			const seq = this.telemetrySeq++;
-			const id = `${ts.toString(36)}-l${seq.toString(36)}`;
-			const fact: TelemetryFact = { event, props: { ...props }, ts, id };
-			const drops = this.telemetryDrops;
-			this.logDebug('shell:telemetry', fact);
-			this.telemetryInFlight++;
-			void Promise.resolve().then(() => {
-				try {
-					const live = this.listeners.get('shell:telemetry');
-					if (live && live.size > 0) {
-						this.dispatch(live, 'shell:telemetry', fact);
-					} else if (drops === this.telemetryDrops) {
-						// held as logged above, id included, so the debug log and the drain agree
-						this.telemetry.hold(fact);
-					}
-				} catch { /* telemetry must never break the shell */ } finally {
-					this.telemetryInFlight--;
-				}
-			});
-		} catch { /* telemetry must never break the shell */ }
+			this.holdTelemetry(event, props);
+		} catch {
+			// telemetry must never break the shell
+		}
+	}
+
+	/**
+	 * Whether an app is subscribed to `shell:telemetry` right now.
+	 *
+	 * @returns True when at least one listener is registered.
+	 */
+	private hasTelemetryListener(): boolean {
+		return (this.listeners.get('shell:telemetry')?.size ?? 0) > 0;
+	}
+
+	/**
+	 * Hold a fact until the next drainTelemetry(). In a tab the hold is mirrored to sessionStorage,
+	 * so the fact survives a page load that never mounts the forwarding app. Logged like a delivered
+	 * fact, so the ALT+D panel shows every fact raised.
+	 *
+	 * @param event - Event name from the app's telemetry contract.
+	 * @param props - Flat properties of the fact.
+	 */
+	private holdTelemetry(event: string, props: Record<string, unknown>): void {
+		const held = this.telemetry.report(event, props, Date.now());
+		if (held) {
+			this.logDebug('shell:telemetry', held);
+		}
+	}
+
+	/**
+	 * Deliver a fact to the `shell:telemetry` listeners on a microtask, like emit(). A delivered fact
+	 * is not held: the listener forwards it at once and a later drain must not replay it.
+	 *
+	 * @param event - Event name from the app's telemetry contract.
+	 * @param props - Flat properties of the fact.
+	 */
+	private deliverTelemetryLive(event: string, props: Record<string, unknown>): void {
+		const ts = Date.now();
+		const id = `${ts.toString(36)}-l${(this.telemetrySeq++).toString(36)}`;
+		const fact: TelemetryFact = { event, props: { ...props }, ts, id };
+		const drops = this.telemetryDrops;
+		this.logDebug('shell:telemetry', fact);
+		this.telemetryInFlight++;
+		void Promise.resolve().then(() => {
+			this.settleLiveTelemetry(fact, drops);
+		});
+	}
+
+	/**
+	 * Dispatch a fact on its way to the listeners subscribed now. If the last one left since it was
+	 * raised (an app switch or unmount in the same tick), hold it as logged, id included, so it is
+	 * not lost, unless the held facts were dropped meanwhile (a sign-out, a rejected credential).
+	 * Never throws.
+	 *
+	 * @param fact - The fact deliverTelemetryLive numbered and logged.
+	 * @param drops - The drop count when the fact was raised.
+	 */
+	private settleLiveTelemetry(fact: TelemetryFact, drops: number): void {
+		try {
+			const live = this.listeners.get('shell:telemetry');
+			if (live && live.size > 0) {
+				this.dispatch(live, 'shell:telemetry', fact);
+			} else if (drops === this.telemetryDrops) {
+				this.telemetry.hold(fact);
+			}
+		} catch {
+			// telemetry must never break the shell
+		} finally {
+			this.telemetryInFlight--;
+		}
 	}
 
 	/**
