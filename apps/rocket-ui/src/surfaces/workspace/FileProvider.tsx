@@ -40,16 +40,18 @@
 // for relative imports — the same surface the App Builder Code pane runs.
 //
 // External changes (an agent write, a discard, a commit) refresh the buffer
-// only while it is CLEAN — never clobbering unsaved typing; a dirty buffer
-// shows a "file changed underneath" notice instead.
+// only while it is CLEAN — never clobbering unsaved typing. A save names the
+// version the buffer was loaded at, so a file that moved on offers Reload and
+// Overwrite. The buffer belongs to the file, not the tab (fileDocument.ts).
 // =============================================================================
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles, Button } from 'shell';
 import { MonacoEditor, detectLanguage } from 'shared/components/monaco';
 import type { Monaco } from 'shared/components/monaco';
 import { WORKSPACE_URI_PREFIX, ensureWorkspaceEditorTs, getWorkspaceEditorTs, primeProjectSources, releaseProjectSource } from '../preview/session/editorTypes';
+import { fileDocument } from './fileDocument';
 import { getWorkspaceVfs, isWritable } from './vfs/workspace';
 
 // =============================================================================
@@ -121,46 +123,31 @@ interface FileProviderProps {
  * @param props - See {@link FileProviderProps}.
  */
 const FileProvider: React.FC<FileProviderProps> = ({ path }) => {
-	const [content, setContent] = useState<string | null>(null);
-	const [dirty, setDirty] = useState(false);
-	const [stale, setStale] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-	const [saving, setSaving] = useState(false);
-
-	// The live buffer rides a ref so save/guard logic never closes over a
-	// stale render's content.
-	const bufferRef = useRef<string>('');
-	const dirtyRef = useRef(false);
+	// The file's shared document; a change to it renders every tab of the path.
+	const [doc, setDoc] = useState(() => fileDocument(getWorkspaceVfs(), path));
+	const [, render] = useReducer((n: number) => n + 1, 0);
 
 	// A path the workspace refuses to change opens read-only, with no Save.
 	const readOnly = !isWritable(path);
 
-	const load = useCallback(async () => {
-		try {
-			const raw = await getWorkspaceVfs().read(path);
-			const text = typeof raw === 'string' ? raw : JSON.stringify(raw, null, 2);
-			if (dirtyRef.current) {
-				// step: never clobber unsaved typing — flag the divergence instead
-				if (text !== bufferRef.current) setStale(true);
-				return;
-			}
-			bufferRef.current = text;
-			setContent(text);
-			setStale(false);
-			setError(null);
-		} catch (err) {
-			if (!dirtyRef.current) {
-				setContent(null);
-				setError(err instanceof Error ? err.message : String(err));
-			}
-		}
+	// The tab joins the document while mounted, and loads it (a document with unsaved text keeps it).
+	useEffect(() => {
+		const current = fileDocument(getWorkspaceVfs(), path);
+		setDoc(current);
+		const close = current.open();
+		const unsubscribe = current.subscribe(render);
+		void current.load();
+		return () => {
+			unsubscribe();
+			close();
+		};
 	}, [path]);
 
-	// Load on mount; external ticks refresh only a CLEAN buffer (see load).
-	useEffect(() => {
-		void load();
-		return getWorkspaceVfs().subscribe(() => void load());
-	}, [load]);
+	/** Saves from the UI; failures show in the banner. A read-only tab saves nothing. */
+	const handleSave = useCallback(() => {
+		if (readOnly) return;
+		void doc.save().catch(() => undefined);
+	}, [doc, readOnly]);
 
 	// TS surface wiring (ts/tsx files only): the language service is the
 	// SAME one the Code pane runs — scaffold compiler options + React libs +
@@ -168,53 +155,42 @@ const FileProvider: React.FC<FileProviderProps> = ({ path }) => {
 	const isTsSurface = /\.(ts|tsx|js|jsx)$/.test(path);
 	const isSource = /\.(ts|tsx)$/.test(path);
 
-	/** Pre-create setup: page TS service up, no shadow lib under our model. */
+	/** Pre-create setup: the model at the document's text, page TS service up, no shadow lib under our model. */
 	const handleBeforeMount = useCallback(
 		(monaco: Monaco) => {
+			// step: the model is keyed by its URI and outlives every tab, so it may hold older text
+			// (a file deleted and created again, or a document dropped since). It takes the
+			// document's text before the editor binds to it, so the editor does not report it as typing
+			doc.sync = (text) => {
+				const model = monaco.editor.getModel(monaco.Uri.parse(`${WORKSPACE_URI_PREFIX}${path}`));
+				if (model && model.getValue() !== text) model.setValue(text);
+			};
+			doc.syncModel();
 			if (!isTsSurface) return;
 			ensureWorkspaceEditorTs(monaco);
 			// step: this tab's URI gets a LIVE model — a project-source lib at
 			// the same path would shadow-duplicate it
 			releaseProjectSource(path);
 		},
-		[path, isTsSurface]
+		[doc, path, isTsSurface]
 	);
 
 	/** Post-create setup: acquire package types + feed sibling sources. */
 	const handleMount = useCallback(() => {
 		if (!isSource) return;
-		getWorkspaceEditorTs()?.ata.enqueue(path, () => bufferRef.current);
+		getWorkspaceEditorTs()?.ata.enqueue(path, () => doc.text ?? '');
 		void primeProjectSources(path);
-	}, [path, isSource]);
+	}, [doc, path, isSource]);
 
-	/** Tracks typing into the local buffer. */
+	/** Tracks typing into the document. */
 	const handleChange = useCallback(
 		(value: string) => {
-			bufferRef.current = value;
-			dirtyRef.current = true;
-			setDirty(true);
+			doc.type(value);
 			// step: acquisition follows the keystrokes (debounced in the engine)
-			if (isSource) getWorkspaceEditorTs()?.ata.enqueue(path, () => bufferRef.current);
+			if (isSource) getWorkspaceEditorTs()?.ata.enqueue(path, () => doc.text ?? '');
 		},
-		[path, isSource]
+		[doc, path, isSource]
 	);
-
-	/** Saves the buffer through the view — a staged write like any other. */
-	const handleSave = useCallback(async () => {
-		if (readOnly || !dirtyRef.current || saving) return;
-		setSaving(true);
-		try {
-			await getWorkspaceVfs().write(path, bufferRef.current, 'editor');
-			dirtyRef.current = false;
-			setDirty(false);
-			setStale(false);
-			setError(null);
-		} catch (err) {
-			setError(err instanceof Error ? err.message : String(err));
-		} finally {
-			setSaving(false);
-		}
-	}, [path, saving, readOnly]);
 
 	// Ctrl+S / Cmd+S inside this tab. Capture phase beats the shell's global
 	// tab:save forwarding only while focus is inside this editor's subtree;
@@ -227,7 +203,7 @@ const FileProvider: React.FC<FileProviderProps> = ({ path }) => {
 			if ((e.ctrlKey || e.metaKey) && e.key === 's') {
 				e.preventDefault();
 				e.stopPropagation();
-				void handleSave();
+				handleSave();
 			}
 		};
 		root.addEventListener('keydown', onKey, true);
@@ -238,19 +214,30 @@ const FileProvider: React.FC<FileProviderProps> = ({ path }) => {
 		<div ref={rootRef} style={S.container}>
 			<div style={S.banner}>
 				<span style={S.bannerPath}>{path}</span>
-				{stale && <span style={S.staleNotice}>changed outside this editor — saving overwrites</span>}
-				{dirty && <span style={S.dirtyMark}>●</span>}
+				{doc.stale && (
+					<>
+						<span style={S.staleNotice}>This file changed outside this editor</span>
+						<Button small variant="secondary" onClick={() => void doc.discard()} disabled={doc.saving} title="Drop your unsaved changes and show the stored file">
+							Reload
+						</Button>
+						<Button small variant="secondary" onClick={() => void doc.save(true).catch(() => undefined)} disabled={doc.saving} title="Save your version over the newer file">
+							Overwrite
+						</Button>
+					</>
+				)}
+				{!doc.stale && doc.saveError && <span style={S.staleNotice}>Save failed: {doc.saveError}</span>}
+				{doc.dirty && <span style={S.dirtyMark}>●</span>}
 				{!readOnly && (
-					<Button small variant="secondary" onClick={() => void handleSave()} disabled={!dirty || saving} title="Save (Ctrl+S) — stages the change in Source Control">
-						{saving ? 'Saving...' : 'Save'}
+					<Button small variant="secondary" onClick={handleSave} disabled={!doc.dirty || doc.saving} title="Save (Ctrl+S) — stages the change in Source Control">
+						{doc.saving ? 'Saving...' : 'Save'}
 					</Button>
 				)}
 			</div>
-			{error && <div style={S.empty}>Could not read this file: {error}</div>}
-			{!error && content === null && <div style={S.empty}>Loading...</div>}
-			{!error && content !== null && (
+			{doc.error && <div style={S.empty}>Could not read this file: {doc.error}</div>}
+			{!doc.error && doc.text === null && <div style={S.empty}>Loading...</div>}
+			{!doc.error && doc.text !== null && (
 				<div style={S.editor}>
-					<MonacoEditor value={content} language={detectLanguage(path)} uri={`${WORKSPACE_URI_PREFIX}${path}`} beforeMount={handleBeforeMount} onMount={handleMount} onChange={handleChange} options={readOnly ? READ_ONLY_OPTIONS : undefined} />
+					<MonacoEditor value={doc.text} language={detectLanguage(path)} uri={`${WORKSPACE_URI_PREFIX}${path}`} beforeMount={handleBeforeMount} onMount={handleMount} onChange={handleChange} options={readOnly ? READ_ONLY_OPTIONS : undefined} />
 				</div>
 			)}
 		</div>

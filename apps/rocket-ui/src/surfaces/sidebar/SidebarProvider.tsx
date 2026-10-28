@@ -52,8 +52,9 @@ import { useDevToolPins } from '../devtools/devToolPins';
 import { getSidebarPeer, getToolChannel } from '../devtools/peer';
 import DevToolMount from '../devtools/DevToolMount';
 import { isPipelineFile, pipelineExtension } from '../workspace/projectStore';
-import { createProjectVfs } from '../workspace/projectVfs';
+import { createProjectVfs, pipelineViewPath } from '../workspace/projectVfs';
 import { getWorkspaceVfs, storePathToVirtual } from '../workspace/vfs/workspace';
+import { renameWithTabs } from '../workspace/vfs/openWorkspaceFile';
 import { downloadJson } from '../../utils/downloadFile';
 import { scanApps } from '../preview/session/appStore';
 import { INTRO_PAGES } from 'shared/tools/introCatalog';
@@ -123,6 +124,9 @@ const SidebarProvider: React.FC = () => {
 			setConfirmState({ title, message, confirmLabel });
 		});
 	}, []);
+
+	/** A refused or failed file action's message, shown as a dismissable notice. */
+	const [notice, setNotice] = useState<string | null>(null);
 
 	/** Dismiss the dialog and resolve the promise. */
 	const handleConfirmResult = useCallback((confirmed: boolean) => {
@@ -267,19 +271,7 @@ const SidebarProvider: React.FC = () => {
 						const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
 						const ext = pipelineExtension(path);
 						const newPath = dir ? `${dir}/${newName}${ext}` : `${newName}${ext}`;
-						if (newPath !== path) {
-							await projectVfs.rename(path, newPath);
-							// Update open editor tabs: close old, reopen at new path
-							const docs = getDocs();
-							if (docs) {
-								const st = docs.getState();
-								const editorIds = Object.entries(st.editors)
-									.filter(([, ed]) => ed.documentUri === path)
-									.map(([id]) => id);
-								for (const eid of editorIds) docs.closeEditor(eid);
-								if (editorIds.length > 0) await docs.openDocument(newPath);
-							}
-						}
+						if (newPath !== path) await renameWithTabs(getWorkspaceVfs(), getDocs(), pipelineViewPath(path), pipelineViewPath(newPath));
 						break;
 					}
 					case 'delete': {
@@ -308,6 +300,8 @@ const SidebarProvider: React.FC = () => {
 			} catch (err) {
 				// Constant format string (SAST rule): the action rides as an arg.
 				console.error('[SidebarProvider] action failed:', action, err);
+				// step: the user sees a refusal (a rename over unsaved changes, say); the tree alone would just not change
+				setNotice(`Could not ${action === 'createFolder' ? 'create the folder' : action === 'createFile' ? 'create the file' : action} "${path}": ${err instanceof Error ? err.message : String(err)}`);
 			}
 		},
 		[client, refresh, projectVfs]
@@ -689,6 +683,7 @@ const SidebarProvider: React.FC = () => {
 			</SidebarCollapsedGate>
 			{confirmState && <ConfirmDialog title={confirmState.title} message={confirmState.message} confirmLabel={confirmState.confirmLabel} cancelLabel="Cancel" onConfirm={() => handleConfirmResult(true)} onCancel={() => handleConfirmResult(false)} />}
 			{actionError && <ConfirmDialog title="Pipeline Error" message={actionError} confirmLabel="OK" onConfirm={() => setActionError(null)} onCancel={() => setActionError(null)} />}
+			{notice && <ConfirmDialog title="Pipelines" message={notice} confirmLabel="OK" cancelLabel="Close" onConfirm={() => setNotice(null)} onCancel={() => setNotice(null)} />}
 		</>
 	);
 };

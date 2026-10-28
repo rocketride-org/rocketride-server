@@ -54,6 +54,7 @@ import type { CheckReport, MarkerSource } from './toolkits/appCheck';
 import { Approvals } from './toolkits/approval';
 import { AppToolkit, DEPLOY_APP_TIMEOUT_MS } from './toolkits/appTools';
 import { NOT_CONNECTED_MESSAGE, redactText, type ClientGetter } from './toolkits/common';
+import type { FileTracker } from './toolkits/fileTracker';
 import { FilesystemTools, normalizePath } from './toolkits/filesystem';
 import { findApp, InventoryToolkit, readApps } from './toolkits/inventory';
 import { RocketRideClientToolkit } from './toolkits/rocketrideClient';
@@ -482,6 +483,24 @@ function redactCard(card: ChatAskCard, shown: (text: string) => string): ChatAsk
 }
 
 /**
+ * The note that tells the model, at the top of a wave, which files it read
+ * or wrote someone else changed since. Each change is named once.
+ */
+function changedFilesNote(tracker: FileTracker, vfs: { version(path: string): number; lastWriter(path: string): string | undefined }): () => string[] {
+	const named = new Map<string, number>();
+	return () => {
+		const changed = tracker.changedSince(vfs).filter((file) => named.get(file.path) !== vfs.version(file.path));
+		if (changed.length === 0) return [];
+		for (const file of changed) named.set(file.path, vfs.version(file.path));
+		const files = changed.map((file) => {
+			const writer = vfs.lastWriter(file.path);
+			return writer ? `${file.path} (${writer})` : file.path;
+		});
+		return [`Files changed since you last read them: ${files.join(', ')}. Read them again before editing.`];
+	};
+}
+
+/**
  * The median of some timings.
  *
  * @param values - The timings, in milliseconds.
@@ -719,6 +738,7 @@ export async function runAgent(request: string, callback: (type: string, content
 		takeQueued: options.takeQueued,
 		approve: (act, run) => approvals.approve(act, run),
 		secrets: files.secrets,
+		notes: changedFilesNote(files.tracker, vfs),
 	});
 
 	// step: a stopped run writes no answer: the chat closes the turn with its stop row, and this adds the one fact that row can't know

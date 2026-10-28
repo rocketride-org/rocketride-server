@@ -21,9 +21,9 @@
 // SOFTWARE.
 
 // =============================================================================
-// TOOLKIT TESTS — read before edit, no overwriting unsaved editor changes, read-only guides,
-// the user says yes first, the RocketRide client tool, secrets stay out of the model,
-// deploy_app keeps its version, check_app
+// TOOLKIT TESTS — read before edit, no overwriting unsaved editor changes, the save race,
+// the file tracker, read-only guides, the user says yes first, the RocketRide client tool,
+// secrets stay out of the model, deploy_app keeps its version, check_app
 // =============================================================================
 
 import assert from 'node:assert/strict';
@@ -37,8 +37,12 @@ import type { ChatMessage } from 'shell';
 import { TurnController } from 'shell/src/components/chat/turns/turnController';
 import type { ChatAskAnswer, ChatAskCard, ChatAsking, ChatTurn, TextResult } from 'shell/src/components/chat/types';
 
+import { CachedVfs } from 'shell/src/modules/explorer/CachedVfs';
+import type { IVirtualFileSystem } from 'shell/src/modules/explorer/types';
+
 import type { ConsoleRow, WatchStatus } from '../../../tools/appdev/types';
 import { docsPathFor, isReferencePath } from '../../vfs/referenceTree';
+import { StaleVersionError, StagedFileSystem } from '../../vfs/stagedFileSystem';
 import type { IWorkspaceFileSystem, VfsEntry } from '../../vfs/vfsTypes';
 import { AgentSession } from '../agent';
 import { setAgentHost, type AgentDevSession, type AgentHost, type ApprovalPrefs, type ApprovalSettings, type Grant } from '../host';
@@ -50,6 +54,7 @@ import { AppCheckToolkit, type AppCheckOptions, type CheckReport, type MarkerInf
 import { Approvals } from './approval';
 import { AppToolkit } from './appTools';
 import { clip, isSecretName, looksLikeCredential, NOT_CONNECTED_MESSAGE, redactText, RESULT_MAX_CHARS, toolText, type ClientGetter } from './common';
+import { FileTracker } from './fileTracker';
 import { FilesystemTools } from './filesystem';
 import { SecretMarkers } from './secretMarkers';
 import { RocketRideClientToolkit } from './rocketrideClient';
@@ -63,7 +68,9 @@ import { RocketRideClientToolkit } from './rocketrideClient';
  * IWorkspaceFileSystem view contract so tools and checks run against it
  * unchanged, and it records every mutation in `log` for a test to assert on.
  * The cache and subscription methods do nothing, because an in-memory map has
- * no cache to keep warm.
+ * no cache to keep warm. Each mutation counts one version of its path, as the
+ * staged view's do; a test that edits `files` directly changes content
+ * without a version, the way another browser tab would.
  */
 
 /** One recorded mutation. For a rename, `path` is the old path. */
@@ -159,16 +166,43 @@ class InMemoryWorkspace implements MemoryWorkspace {
 		return this.read(path);
 	}
 
+	// ---- path versions ----
+
+	private readonly versions = new Map<string, number>();
+	private readonly writers = new Map<string, string>();
+
+	version(path: string): number {
+		return this.versions.get(path) ?? 0;
+	}
+
+	async readVersioned(path: string): Promise<{ content: unknown; version: number }> {
+		const version = this.version(path);
+		return { content: await this.read(path), version };
+	}
+
+	lastWriter(path: string): string | undefined {
+		return this.writers.get(path);
+	}
+
+	private bump(path: string, origin?: string): void {
+		this.versions.set(path, this.version(path) + 1);
+		if (origin) this.writers.set(path, origin);
+	}
+
 	// ---- mutations ----
 
-	async write(path: string, content: unknown): Promise<void> {
+	async write(path: string, content: unknown, origin?: string, expect?: number): Promise<void> {
+		if (expect !== undefined && expect !== this.version(path)) throw new StaleVersionError(path, { expected: expect, actual: this.version(path), lastWriter: this.lastWriter(path) });
 		if (typeof content !== 'string') throw new Error(`The memory workspace holds text only: ${path}`);
+		this.bump(path, origin);
 		this.files.set(path, content);
 		this.record('write', path);
 	}
 
-	async rename(oldPath: string, newPath: string): Promise<void> {
+	async rename(oldPath: string, newPath: string, origin?: string): Promise<void> {
 		if (this.entryType(oldPath) === null) throw new Error(`No such file or directory: ${oldPath}`);
+		this.bump(oldPath, origin);
+		this.bump(newPath, origin);
 		const move = (path: string) => (path === oldPath ? newPath : `${newPath}${path.slice(oldPath.length)}`);
 		for (const path of this.under(oldPath, this.files.keys())) {
 			this.files.set(move(path), this.files.get(path) as string);
@@ -181,8 +215,9 @@ class InMemoryWorkspace implements MemoryWorkspace {
 		this.record('rename', oldPath);
 	}
 
-	async delete(path: string): Promise<void> {
+	async delete(path: string, origin?: string): Promise<void> {
 		if (this.entryType(path) === null) throw new Error(`No such file or directory: ${path}`);
+		this.bump(path, origin);
 		for (const file of this.under(path, this.files.keys())) this.files.delete(file);
 		for (const dir of this.under(path, this.dirs)) this.dirs.delete(dir);
 		this.record('delete', path);
@@ -390,14 +425,14 @@ function appTools(client: ClientGetter): AppToolkit {
 // READ BEFORE EDIT
 // =============================================================================
 
-test('edit_file and write_file refuse a file not read, or changed since it was read', async () => {
+test('edit_file and write_file refuse a file not read; write_file refuses one changed since it was read', async () => {
 	const edit = { path: 'a.ts', oldString: 'a', newString: 'b' };
 	const write = { path: 'a.ts', content: 'new' };
 	const rows: Array<[name: string, tool: string, args: Record<string, unknown>, changed: boolean, message: RegExp]> = [
 		['edit, unread', 'edit_file', edit, false, /^Error: edit_file refused: read a\.ts first — edits must start from its current content\.$/],
 		['write, unread', 'write_file', write, false, /^Error: write_file refused: read a\.ts first — edits must start from its current content\.$/],
-		['edit, changed since read', 'edit_file', edit, true, /^Error: edit_file refused: a\.ts changed since you read it\. Read it again, then redo the edit\.$/],
-		['write, changed since read', 'write_file', write, true, /^Error: write_file refused: a\.ts changed since you read it\. Read it again, then redo the edit\.$/],
+		['write, changed since read', 'write_file', write, true, /^Error: write_file refused: a\.ts changed since you read it\. Read it again, then redo the change from the current content\.$/],
+		['edit, changed since read, anchor gone', 'edit_file', { path: 'a.ts', oldString: '1', newString: '3' }, true, /^Error: edit_file refused: a\.ts changed since you read it\. Read it again, then redo the change from the current content\.$/],
 	];
 	for (const [name, tool, args, changed, message] of rows) {
 		const ws = createMemoryWorkspace({ 'a.ts': 'a = 1' });
@@ -431,6 +466,117 @@ test('edit_file and write_file refuse a dirty file, even after reading it', asyn
 	await assert.rejects(run(ws, 'write_file', { path: 'a.ts', content: 'b' }), /write_file refused: a\.ts has unsaved editor changes/);
 	assert.deepEqual(ws.log, []);
 	assert.equal(ws.files.get('a.ts'), 'a = 1');
+});
+
+// =============================================================================
+// THE SAVE RACE — the real staged view over CachedVfs
+// =============================================================================
+
+/** An in-memory store backend for CachedVfs. */
+function memoryBackend(seed: Record<string, string>): IVirtualFileSystem & { files: Map<string, string> } {
+	const files = new Map(Object.entries(seed));
+	return {
+		files,
+		list: async (dir) => {
+			const prefix = dir ? `${dir}/` : '';
+			const names = new Map<string, 'file' | 'dir'>();
+			for (const path of files.keys()) {
+				if (!path.startsWith(prefix)) continue;
+				const rest = path.slice(prefix.length);
+				names.set(rest.split('/')[0], rest.includes('/') ? 'dir' : 'file');
+			}
+			return [...names].map(([name, type]) => ({ name, type }));
+		},
+		read: async (path) => {
+			if (!files.has(path)) throw new Error(`No such file: ${path}`);
+			return files.get(path);
+		},
+		write: async (path, content) => {
+			files.set(path, String(content));
+		},
+		rename: async () => {},
+		delete: async (path) => {
+			files.delete(path);
+		},
+		mkdir: async () => {},
+	};
+}
+
+/**
+ * The agent's file tools over the real view, after the agent read apps/a.ts.
+ * The next readVersioned of the view holds once its content is read, so a test
+ * can act in the gap between the agent's read and its write.
+ */
+async function racyWorkspace(): Promise<{ backend: ReturnType<typeof memoryBackend>; cached: CachedVfs; vfs: StagedFileSystem; tool: (name: string, args: Record<string, unknown>) => Promise<string>; entered: Promise<void>; release: () => void }> {
+	const backend = memoryBackend({ 'apps/a.ts': 'const a = 1;' });
+	const cached = new CachedVfs(backend);
+	const vfs = new StagedFileSystem(cached, null, { writeThrough: true });
+	const tools = new FilesystemTools(vfs).tools();
+	const tool = (name: string, args: Record<string, unknown>) => toolOf({ tools: () => tools }, name).execute(args);
+	await tool('read_file', { path: 'apps/a.ts' });
+	let entered!: () => void;
+	let release!: () => void;
+	const gate = new Promise<void>((r) => (release = r));
+	const enteredPromise = new Promise<void>((r) => (entered = r));
+	const original = vfs.readVersioned.bind(vfs);
+	vfs.readVersioned = async (path) => {
+		const value = await original(path);
+		vfs.readVersioned = original;
+		entered();
+		await gate;
+		return value;
+	};
+	return { backend, cached, vfs, tool, entered: enteredPromise, release };
+}
+
+test("a user's save that lands while the agent edits is kept, and the agent is told to read again", async () => {
+	const { backend, vfs, tool, entered, release } = await racyWorkspace();
+	const editing = tool('edit_file', { path: 'apps/a.ts', oldString: '1', newString: '2' });
+	await entered;
+	await vfs.write('apps/a.ts', 'const a = 100;', 'editor');
+	release();
+	await assert.rejects(editing, /^Error: edit_file refused: apps\/a\.ts changed since you read it \(version 0, now 1; last writer: editor\)\. Read it again, then redo the change from the current content\.$/);
+	assert.equal(backend.files.get('apps/a.ts'), 'const a = 100;');
+});
+
+test('an edit whose anchor still matches once lands on the current content and says so', async () => {
+	const ws = createMemoryWorkspace({ 'a.ts': 'one = 1;\ntwo = 2;\n' });
+	await run(ws, 'read_file', { path: 'a.ts' });
+	await ws.write('a.ts', 'one = 1;\ntwo = 2;\nthree = 3;\n', 'editor');
+	const result = await run(ws, 'edit_file', { path: 'a.ts', oldString: 'two = 2', newString: 'two = 22' });
+	assert.equal(ws.files.get('a.ts'), 'one = 1;\ntwo = 22;\nthree = 3;\n');
+	assert.match(result, /The file had changed since you read it \(last writer: editor\); your anchor still matched once/);
+	// step: a stale anchor that names two places is refused, and nothing is written
+	await ws.write('a.ts', 'x\nx\n', 'editor');
+	await assert.rejects(run(ws, 'edit_file', { path: 'a.ts', oldString: 'x', newString: 'y', replaceAll: true }), /changed since you read it \(version 2, now 3; last writer: editor\)/);
+	assert.equal(ws.files.get('a.ts'), 'x\nx\n');
+});
+
+// =============================================================================
+// FILE TRACKER — what a run read and wrote, and what moved on since
+// =============================================================================
+
+test('the tracker lists the files changed since the run saw them, not the ones it deleted or moved itself', () => {
+	const versions = new Map<string, number>();
+	const vfs = { version: (path: string) => versions.get(path) ?? 0 };
+	const tracker = new FileTracker();
+	tracker.saw('a.ts', 0, 'h0');
+	tracker.saw('gone.ts', 0, 'h1');
+	tracker.deleted('gone.ts');
+	tracker.saw('old.ts', 0, 'h2');
+	tracker.renamed('old.ts', 'renamed.ts', () => 1);
+	assert.deepEqual(tracker.seen(), ['a.ts', 'renamed.ts']);
+
+	// step: someone else writes a.ts; the deleted file is never listed, and the moved one only when it moves on
+	versions.set('a.ts', 2);
+	versions.set('gone.ts', 5);
+	versions.set('renamed.ts', 1);
+	assert.deepEqual(
+		tracker.changedSince(vfs).map((f) => f.path),
+		['a.ts']
+	);
+	tracker.saw('a.ts', 2, 'h3');
+	assert.deepEqual(tracker.changedSince(vfs), []);
 });
 
 // =============================================================================
@@ -791,7 +937,7 @@ function markerIn(text: string): string {
 }
 
 /** A model reply: text, or made from the question it answers. */
-type Reply = string | ((q: QuestionSpec) => string);
+type Reply = string | ((q: QuestionSpec) => string | Promise<string>);
 
 /**
  * A fake model that answers from a script and keeps every question it was asked.
@@ -862,9 +1008,9 @@ function withReadOnlyReference(ws: MemoryWorkspace): MemoryWorkspace {
 	};
 	const write = ws.write.bind(ws);
 	ws.assertWritable = refuse;
-	ws.write = async (path, content) => {
+	ws.write = async (path, content, origin, expect) => {
 		refuse(path);
-		await write(path, content);
+		await write(path, content, origin, expect);
 	};
 	return ws;
 }
@@ -1873,4 +2019,25 @@ test('type errors of a deleted file are ignored and named, matching each file to
 		assert.deepEqual(steps(gone.report), ['types pass', 'build pass', 'runtime pass'], stored);
 		assert.ok(gone.report.evidence[0].output.endsWith(`\nIgnored 1 marker for a file that no longer exists: ${model}.`), `${stored}: the error is ignored once the file is deleted`);
 	}
+});
+
+// =============================================================================
+// THE RUN — a whole run over the memory workspace
+// =============================================================================
+
+test('each wave names the files someone else changed since the agent read them, once', async () => {
+	const ws = createMemoryWorkspace({ 'a.ts': 'a = 1', 'b.ts': 'b = 1' });
+	const notes = (q: QuestionSpec) => q.context.filter((c) => c.startsWith('Files changed since'));
+	const model = scriptedModel([
+		plan(['read_file', { path: 'a.ts' }]),
+		async () => {
+			await ws.write('a.ts', 'a = 2', 'editor');
+			return plan(['read_file', { path: 'b.ts' }]);
+		},
+		plan(['stat_file', { path: 'b.ts' }]),
+		done('Read.'),
+	]);
+	await agentTurn(ws, model);
+	assert.deepEqual(model.questions.map(notes), [[], [], ['Files changed since you last read them: a.ts (editor). Read them again before editing.'], []]);
+	assert.equal(model.questions[0].instructions, model.questions[2].instructions, 'the cached start is unchanged');
 });

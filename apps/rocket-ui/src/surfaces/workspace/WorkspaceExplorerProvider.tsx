@@ -41,7 +41,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Explorer, NOOP_VFS, ConfirmDialog } from 'shell';
 import type { ExplorerEntry, ExplorerConfig } from 'shell';
 import { getWorkspaceVfs, getStagedWorkspace } from './vfs/workspace';
-import { openWorkspaceFile } from './vfs/openWorkspaceFile';
+import { openWorkspaceFile, renameWithTabs } from './vfs/openWorkspaceFile';
 import { getDocs } from '../../docs';
 import type { ChangeKind } from 'shared/modules/vfs/stagedFileSystem';
 
@@ -139,21 +139,7 @@ const WorkspaceExplorerProvider: React.FC = () => {
 						const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
 						const newPath = dir ? `${dir}/${newName}` : newName;
 						if (newPath === path) break;
-						await view.rename(path, newPath);
-						// Re-home any open editor tab (pipeline docs key on
-						// mount-relative paths).
-						if (path.startsWith('pipelines/')) {
-							const docs = getDocs();
-							const docPath = path.slice('pipelines/'.length);
-							if (docs) {
-								const st = docs.getState();
-								const editorIds = Object.entries(st.editors)
-									.filter(([, ed]) => ed.documentUri === docPath)
-									.map(([id]) => id);
-								for (const eid of editorIds) docs.closeEditor(eid);
-								if (editorIds.length > 0) await docs.openDocument(newPath.slice('pipelines/'.length));
-							}
-						}
+						await renameWithTabs(view, getDocs(), path, newPath);
 						break;
 					}
 					case 'delete': {

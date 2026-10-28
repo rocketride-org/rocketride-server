@@ -29,12 +29,15 @@
  * (scripts/stub-shell.cjs). A read or write of a watched path waits in `held`
  * until the test releases it, and sees the store as it is at the release. A
  * read of a path in `heldAnswers` is answered at once, and the answer waits
- * in `held`.
+ * in `held`. While `holdsPersists` is set, every JSON write (the staging
+ * store's manifest) waits in `held` too. A held call's `fail` makes it fail
+ * with a network error instead.
  */
 
 export interface Held {
 	label: string;
 	release: () => void;
+	fail: () => void;
 }
 
 export interface Landed {
@@ -49,6 +52,7 @@ export class FakeStore {
 	readonly held: Held[] = [];
 	readonly watched = new Set<string>();
 	readonly heldAnswers = new Set<string>();
+	holdsPersists = false;
 	private readonly waiting: Array<() => void> = [];
 
 	constructor(files: Record<string, string> = {}) {
@@ -66,8 +70,8 @@ export class FakeStore {
 	}
 
 	private hold(label: string, path: string): Promise<void> {
-		return new Promise((release) => {
-			this.held.push({ label: `${label} ${path}`, release });
+		return new Promise((release, reject) => {
+			this.held.push({ label: `${label} ${path}`, release, fail: () => reject(new Error('network failure')) });
 			for (const wake of this.waiting.splice(0)) wake();
 		});
 	}
@@ -107,6 +111,7 @@ export class FakeStore {
 		},
 		fsReadJson: async (path: string): Promise<unknown> => JSON.parse(this.read(path)),
 		fsWriteJson: async (path: string, value: unknown): Promise<void> => {
+			if (this.holdsPersists) await this.hold('persist', path);
 			this.files.set(path, JSON.stringify(value));
 		},
 		fsReadMany: async (paths: string[]) => paths.map((path) => (this.files.has(path) ? { ok: true, data: new TextEncoder().encode(this.files.get(path)) } : { ok: false, error: 'File not found' })),
@@ -114,6 +119,12 @@ export class FakeStore {
 		fsStat: async (path: string) => ({ type: this.files.has(path) ? 'file' : 'dir' }),
 		fsDelete: async (path: string): Promise<void> => {
 			this.files.delete(path);
+		},
+		fsRename: async (from: string, to: string): Promise<void> => {
+			const content = this.read(from);
+			this.landed.push({ path: to, before: this.files.get(to), content });
+			this.files.set(to, content);
+			this.files.delete(from);
 		},
 		fsRmdir: async (): Promise<void> => undefined,
 		fsMkdir: async (): Promise<void> => undefined,
