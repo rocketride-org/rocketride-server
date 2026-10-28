@@ -531,21 +531,22 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         getServiceDefinitions,
         [](py::list custom) -> py::object {
             // Get the service type, with the caller's custom services
-            std::optional<json::Value> schemas;
-            if (auto ccode = IServices::withCustomServices(
-                    pyjson::dictToJson(custom), [&]() -> Error {
-                        auto res = IServices::getServiceSchemas();
-                        if (!res) return res.ccode();
-                        schemas = _mv(*res);
-                        return {};
-                    })) {
+            auto scope =
+                IServices::withCustomServices(pyjson::dictToJson(custom));
+            if (!scope) {
                 // A custom service that does not parse is the caller's to fix
-                if (custom.size()) throw ccode;
+                if (custom.size()) throw scope.ccode();
+                return py::none();
+            }
+
+            auto result = IServices::getServiceSchemas();
+            if (!result) {
+                if (custom.size()) throw result.ccode();
                 return py::none();
             }
 
             // Return it
-            return pyjson::jsonToDict(*schemas);
+            return pyjson::jsonToDict(*result);
         },
         py::arg("custom") = py::list());
 
@@ -669,17 +670,14 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         [](py::dict config, py::list custom) -> py::dict {
             // Validated with the caller's custom services
             auto root = pyjson::dictToJson(config);
-            std::optional<json::Value> validated;
-            if (auto ccode = IServices::withCustomServices(
-                    pyjson::dictToJson(custom), [&]() -> Error {
-                        auto res = store::pipeline::validatePipelineOrComponent(
-                            _mv(root));
-                        if (!res) return res.ccode();
-                        validated = _mv(*res);
-                        return {};
-                    }))
-                throw ccode;
-            return pyjson::jsonToDict(*validated);
+            auto scope =
+                IServices::withCustomServices(pyjson::dictToJson(custom));
+            if (!scope) throw scope.ccode();
+
+            auto result =
+                store::pipeline::validatePipelineOrComponent(_mv(root));
+            if (!result) throw result.ccode();
+            return pyjson::jsonToDict(*result);
         },
         py::arg("config"), py::arg("custom") = py::list());
 
@@ -1193,22 +1191,11 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .def_static(
             "getPipeStack",
             [](const py::dict &pipes, py::list custom) -> py::dict {
-                // Built with the caller's custom services. getPipeStack
-                // throws, so it is caught here and rethrown once they are gone
-                py::dict stack;
-                std::exception_ptr failed;
-                if (auto ccode = IServices::withCustomServices(
-                        pyjson::dictToJson(custom), [&]() -> Error {
-                            try {
-                                stack = ILoader::getPipeStack(pipes);
-                            } catch (...) {
-                                failed = std::current_exception();
-                            }
-                            return {};
-                        }))
-                    throw ccode;
-                if (failed) std::rethrow_exception(failed);
-                return stack;
+                // Built with the caller's custom services
+                auto scope =
+                    IServices::withCustomServices(pyjson::dictToJson(custom));
+                if (!scope) throw scope.ccode();
+                return ILoader::getPipeStack(pipes);
             },
             py::arg("pipes") = py::dict(), py::arg("custom") = py::list());
 

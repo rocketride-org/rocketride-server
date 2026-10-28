@@ -2090,12 +2090,13 @@ Error IServices::init() noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
-///		Parses and resolves the caller's custom services, then runs call
-///		with them visible to this thread's lookups
+///		Parses and resolves the caller's custom services and returns a
+///		scope that puts them in front of every lookup this thread makes
+///		until the scope is destroyed
 //-------------------------------------------------------------------------
-Error IServices::withCustomServices(const json::Value &custom,
-                                    const std::function<Error()> &call) noexcept {
-    if (!custom || custom.empty()) return call();
+ErrorOr<IServices::CustomServicesScope> IServices::withCustomServices(
+    const json::Value &custom) noexcept {
+    if (!custom || custom.empty()) return CustomServicesScope{};
     if (!custom.isArray())
         return APERR(Ec::InvalidParam, "Custom services must be an array");
 
@@ -2122,11 +2123,7 @@ Error IServices::withCustomServices(const json::Value &custom,
     }
     if (auto ccode = updateDefinitions(services)) return ccode;
 
-    // Restored on every exit, so a nested call puts the outer one's back
-    const auto outer = t_custom;
-    t_custom = &services;
-    util::Guard restore{[&] { t_custom = outer; }};
-    return call();
+    return CustomServicesScope{_mv(services)};
 }
 
 //-------------------------------------------------------------------------
