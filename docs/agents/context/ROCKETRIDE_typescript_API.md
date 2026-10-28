@@ -211,8 +211,15 @@ that drive deploy/publish decisions:
 - `userId` / `displayName` / `email` — who authenticated
 - `devTeam` — id of the team used by default when an operation names no
   team; dev-mode runs bill to it
-- `organization` — `null` without an org membership, else:
+- `organization` — `null` without an org membership, else the ACTIVE
+  org (a user may belong to several; `account.getProfile()` lists them
+  as `memberships`, `account.setDefaultOrg(id)` switches, and
+  `account.leaveOrg(id)` leaves one):
   - `id`, `name`
+  - `defaultDevTeamId` — id of the org's default development team (the
+    team invites pre-select), or null when it has none
+  - `isLastAdmin` — true when the user is the org's only active admin
+    (`leaveOrg` is refused until another member is promoted)
   - `permissions` — ORG-level grants (e.g. `'org.admin'`)
   - `developerId` — the org's publisher slug, the first segment of every
     app id; `null` until the org registers as a developer, always absent
@@ -892,7 +899,7 @@ Typed wrapper for profile, organization, API keys, members, teams, and environme
 
 **Profile:** `getProfile(): Promise<ConnectResult>` (includes `memberships` and `defaultOrgId`, which the auth handshake omits) · `updateProfile(fields)` · `setDevTeam(teamId)` (the team dev-mode runs bill to and whose environment layer applies) · `setDefaultOrg(orgId)` (switches the active org; the server resets the default team and refreshes all your connections) · `deleteAccount()`
 
-**Organization:** `getOrg(orgId?): Promise<OrgDetail>` (id, name, plan, memberCount, teamCount) · `updateOrgName(orgId, name)`
+**Organization:** `getOrg(orgId?): Promise<OrgDetail>` (id, name, plan, memberCount, teamCount) · `updateOrgName(orgId, name)` · `leaveOrg(orgId)` (removes the caller from that organization; refused for its last admin; leaving the active org switches you to another membership and refreshes all your connections)
 
 **API keys:** `listKeys(): Promise<ApiKeyRecord[]>` · `createKey(params): Promise<{ key: string }>` (raw key string, shown once) · `revokeKey(keyId)`
 
@@ -910,7 +917,7 @@ Typed wrapper for profile, organization, API keys, members, teams, and environme
 
 Every operation above is role-checked server-side; an unauthorized call is refused with an explicit error (`'Admin role required ...'`) — nothing fails silently. The split for the documented operations:
 
-- **Any org member**: their own profile (`getProfile`, `updateProfile`, `setDevTeam`, `setDefaultOrg`); their OWN API keys (`listKeys`, `createKey`, revoking their own); reading the org (`getOrg`); listing members and teams and reading a team's detail; USER-scope environment (`getEnv('user')` / `setEnv('user')`) and the merged key names (`getEnvironmentKeys`); billing reads (`getDetails`, `getCreditBalance`, `getProductPrices`) and promo codes (`validatePromoCode`, `redeemPromoCode`).
+- **Any org member**: their own profile (`getProfile`, `updateProfile`, `setDevTeam`, `setDefaultOrg`); leaving an organization they belong to (`leaveOrg` — refused for its last admin); their OWN API keys (`listKeys`, `createKey`, revoking their own); reading the org (`getOrg`); listing members and teams and reading a team's detail; USER-scope environment (`getEnv('user')` / `setEnv('user')`) and the merged key names (`getEnvironmentKeys`); billing reads (`getDetails`, `getCreditBalance`, `getProductPrices`) and promo codes (`validatePromoCode`, `redeemPromoCode`).
 - **Org admin only**: renaming the org (`updateOrgName`); member management (`inviteMember`, `updateMemberRole`, `removeMember`, `resendInvite`); revoking ANOTHER member's key (own-org keys only); creating teams (`createTeam`); ORG-scope environment — both `getEnv('org', ...)` and `setEnv('org', ...)` (reads too: the org layer holds shared secrets); and every billing operation that moves money or reads the org's ledger — checkout/subscribe, portal, cancel, upgrade, credit purchases and top-ups, `getUsageByUser`/`getUsageByTeam`, `getTransactions`, `getTransactionDistinct`.
 - **Team admin** (the `team.admin` permission on that team; org admins pass implicitly): `deleteTeam`, `addTeamMember`, `updateTeamMemberPerms`, `removeTeamMember`, and TEAM-scope `getEnv`/`setEnv` — both read and write.
 
