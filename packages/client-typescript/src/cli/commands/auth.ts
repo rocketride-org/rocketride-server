@@ -109,7 +109,7 @@ async function resolveServerUri(options: ConnectionOptions, out: Output, envKey:
  *
  * @param url - The URL to open.
  */
-function openBrowser(url: string): void {
+export function openBrowser(url: string): void {
 	// step: pick the platform opener. rundll32 takes the URL as a direct
 	// argument — no cmd.exe in the path, so `&` in the query string
 	// survives (cmd's `start` treats `&` as a command separator and

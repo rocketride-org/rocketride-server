@@ -20,7 +20,7 @@ import * as vscode from 'vscode';
 import { ConnectionManager } from '../connection/connection';
 import { scanWorkspaceApps } from './appScan';
 import { resolveBrowserDebugTarget } from './browser';
-import { DEV_SESSION_NONCE } from './devSession';
+import { devPreviewUrl } from 'rocketride/app-dev';
 import { ensureWatch } from './watchManager';
 
 // =============================================================================
@@ -56,7 +56,7 @@ export async function debugApp(appId: string): Promise<void> {
 		request: 'launch',
 		// rrsession routes the browser preview to THIS editor's dev-overlay
 		// entry when several editors dev-serve the same app.
-		url: `${base}/?appid=${encodeURIComponent(appId)}&rrdev=1&rrsession=${DEV_SESSION_NONCE}`,
+		url: devPreviewUrl(base, appId),
 		// The app bundles' sourcemaps carry sources RELATIVE to the build
 		// root's parent (the workspace root), e.g.
 		// "../../../../../../apps/home-ui/src/HomeApp.tsx" — the browser

@@ -21,13 +21,11 @@
  */
 
 import * as vscode from 'vscode';
-import * as path from 'path';
-import { existsSync } from 'fs';
 import { spawn, ChildProcess } from 'child_process';
+import { classifyDevOutput, registerDevOverlay, resolveRsbuildInvocation, spawnDevServer, splitCompleteLines, stopDevServer, unregisterDevOverlay } from 'rocketride/app-dev';
 import { ConnectionManager } from '../connection/connection';
 import { extractInstallCause, isTransientLockError, setWorkspaceInstallDelegate } from './appTypes';
 import { getLogger } from '../shared/util/output';
-import { DEV_SESSION_NONCE } from './devSession';
 import { appIconDataUri } from './appScan';
 import type { ScannedApp } from './appScan';
 import type { AppScreenProvider, AppWatchStatus } from '../providers/AppScreenProvider';
@@ -119,7 +117,7 @@ export class WatchManager {
 
 	constructor(
 		private readonly appScreen: AppScreenProvider,
-		/** Absolute path to the shipped devServerGuard.cjs (see doStart). */
+		/** Absolute path to the dev-server guard script (the SDK's materializeDevServerGuard). */
 		private readonly guardPath: string,
 	) {
 		// The dev overlay registration lives server-side and EXPIRES on
@@ -316,29 +314,16 @@ export class WatchManager {
 
 		// Resolve the app-local rsbuild binary; the scaffolder pins it as a
 		// devDependency. Falling back to `pnpm exec` covers hoisted setups.
-		const spawnArgs = this.resolveRsbuild(app.folder);
+		const spawnArgs = resolveRsbuildInvocation(app.folder);
 		this.logger.output(`[appdev] watch start: ${app.id} (${spawnArgs.cmd} ${spawnArgs.args.join(' ')})`);
 		this.console(app.id, 'log', '$ rsbuild dev');
 
 		// The server runs under the GUARD wrapper — a liveness tether to this
-		// extension host. The guard's stdin is a pipe from this process; any
-		// death of the host (crash, window reload, EDH stop, hard kill)
-		// closes it and the guard fells its own tree, so dev-server orphans
-		// are structurally impossible. The guard passes rsbuild's output
-		// through verbatim and mirrors its exit code, so parsing and crash
-		// detection below see the server as before.
-		const proc = spawn(process.execPath, [this.guardPath, String(process.pid), spawnArgs.shell ? '1' : '0', spawnArgs.cmd, ...spawnArgs.args, 'dev'], {
-			cwd: app.folder,
-			env: { ...process.env, NO_COLOR: '1' },
-			// Never allocate a console window for the guard or its tree.
-			windowsHide: true,
-			// POSIX: make the guard its own process GROUP (rsbuild joins it)
-			// so the guard's die() can fell the whole tree with one group
-			// signal. On Windows the guard kills its subtree itself via
-			// direct syscalls (see devServerGuard.cjs) — stop() only closes
-			// the guard's stdin, on both platforms.
-			detached: process.platform !== 'win32',
-		});
+		// extension host (the SDK's spawnDevServer, shared with `rocketride
+		// app dev`): any death of the host closes the guard's stdin and the
+		// guard fells its own tree, so dev-server orphans are structurally
+		// impossible. Output and exit code pass through unchanged.
+		const proc = spawnDevServer(app.folder, { guardPath: this.guardPath });
 
 		const session: WatchSession = { app, proc, startedAt: Date.now(), buildStart: Date.now() };
 		this.sessions.set(app.id, session);
@@ -489,54 +474,20 @@ export class WatchManager {
 		if (session.pkgTimer) clearTimeout(session.pkgTimer);
 		session.pkgWatcher?.dispose();
 		try {
-			// The tether IS the stop verb: closing the guard's stdin tells it
-			// to fell its own tree — the guard owns every process below
-			// itself, and this watcher performs NO tree logic (Windows tree
-			// walks from out here were exactly what leaked orphans). AWAITED:
+			// The tether IS the stop verb (the SDK's stopDevServer): closing
+			// the guard's stdin tells it to fell its own tree. AWAITED:
 			// restart() runs stop()→start() back-to-back, and the guard's
 			// verified cleanup must release the port before the new spawn
 			// probes it — otherwise rsbuild silently bumps to the next free
-			// port and the preview's registration points at a zombie (the
-			// unkillable reload loop).
-			if (session.proc.pid) {
-				const exited = new Promise<boolean>((resolve) => {
-					session.proc.once('exit', () => resolve(true));
-				});
-				try {
-					session.proc.stdin?.destroy();
-				} catch { /* pipe already closed — the guard is reacting */ }
-				const finished = await Promise.race([
-					exited,
-					new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 5000)),
-				]);
-				if (!finished) {
-					// A wedged guard is the ONLY case the watcher touches the
-					// tree, and only as a last resort (best-effort by nature).
-					this.logger.output(`[appdev] watch stop: guard for ${appId} ignored stdin close — escalating`);
-					const pid = session.proc.pid;
-					if (process.platform === 'win32') {
-						await new Promise<void>((resolve) => {
-							const killer = spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true });
-							killer.on('exit', () => resolve());
-							killer.on('error', () => resolve());
-							setTimeout(resolve, 3000);
-						});
-					} else {
-						try {
-							process.kill(-pid, 'SIGKILL');
-						} catch { /* group already gone */ }
-					}
-				}
-			} else {
-				session.proc.kill();
-			}
+			// port and the preview's registration points at a zombie.
+			await stopDevServer(session.proc);
 		} catch { /* already gone */ }
 
 		// Drop the overlay entry so the shell returns to the published bundle
 		try {
 			const client = this.connectionManager.getClient();
 			if (client && this.connectionManager.isConnected()) {
-				await client.call('rrext_deploy_app', { subcommand: 'register_dev', moduleId: session.app.moduleId, unregister: true });
+				await unregisterDevOverlay(client, session.app.moduleId);
 			}
 		} catch { /* engine gone — the overlay's disconnect expiry covers it */ }
 		this.notify(appId, { state: 'idle' });
@@ -822,9 +773,8 @@ export class WatchManager {
 		// carry spliced fragments across streams) and only emit/parse
 		// COMPLETE lines.
 		const key = stream === 'stdout' ? 'pendingOut' : 'pendingErr';
-		const buffered = (session[key] ?? '') + chunk;
-		const lines = buffered.split(/\r?\n/);
-		session[key] = lines.pop() ?? '';
+		const { lines, rest } = splitCompleteLines(session[key] ?? '', chunk);
+		session[key] = rest;
 		if (lines.length === 0) return;
 		const text = lines.join('\n');
 
@@ -833,29 +783,23 @@ export class WatchManager {
 		// with the exit-time flush (which writes carried partials as warn).
 		this.consoleLines(session.app.id, stream === 'stderr' ? 'warn' : 'log', text);
 
-		// Dev origin: "  ➜ Local:    http://localhost:3013/" (rsbuild banner)
-		if (!session.devOrigin) {
-			const m = /Local:\s+(http:\/\/[\w.-]+:\d+)/.exec(text);
-			if (m) {
-				session.devOrigin = m[1];
-				this.logger.output(`[appdev] ${session.app.id} dev server at ${session.devOrigin}`);
-				this.resolveReadiness(session.app.id, session.devOrigin);
-				// The panel injects this entry straight into the preview shell
-				// (postMessage — no server dependency); the overlay below only
-				// serves embedder-less shells (F5's external browser).
-				this.notifyDevEntry(session);
-				void this.registerOverlay(session);
-			}
+		// The SDK's classifier (shared with `rocketride app dev`): the dev
+		// origin from rsbuild's banner, and build edges from compiler lines
+		// only — "[browser]" relays of the PAGE's runtime errors never flip
+		// the panel to "build failed".
+		const signal = classifyDevOutput(lines);
+		if (!session.devOrigin && signal.origin) {
+			session.devOrigin = signal.origin;
+			this.logger.output(`[appdev] ${session.app.id} dev server at ${session.devOrigin}`);
+			this.resolveReadiness(session.app.id, session.devOrigin);
+			// The panel injects this entry straight into the preview shell
+			// (postMessage — no server dependency); the overlay below only
+			// serves embedder-less shells (F5's external browser).
+			this.notifyDevEntry(session);
+			void this.registerOverlay(session);
 		}
 
-		// Build results: rsbuild prints "built in 1.24 s" / "build failed".
-		// Lines tagged "[browser]" are dev.browserLogs relays of the PAGE's
-		// runtime errors, dressed in rsbuild's own "error   ..." format — app
-		// traffic, not compiler state. Classify from untagged lines only: an
-		// app-side error must never flip the panel to "build failed" (nothing
-		// failed to compile, so the Console would carry no explanation).
-		const compilerText = lines.filter((line) => !/^\s*\w+\s+\[browser\]/.test(line)).join('\n');
-		if (/built in\s+[\d.]+/i.test(compilerText)) {
+		if (signal.event === 'built') {
 			const durationMs = session.buildStart ? Date.now() - session.buildStart : undefined;
 			session.buildStart = undefined;
 			this.notify(session.app.id, { state: 'ok', durationMs, target: session.devOrigin?.replace(/^https?:\/\//, '') });
@@ -865,11 +809,11 @@ export class WatchManager {
 			this.notifyDevEntry(session);
 			void this.registerOverlay(session);
 			this.scheduleReload(session);
-		} else if (/build failed|error {3}/i.test(compilerText)) {
+		} else if (signal.event === 'failed') {
 			session.buildStart = undefined;
 			this.appScreen.notifyError(session.app.id, 'rsbuild build failed; see the Console pane for compiler output', 'rsbuild');
 			this.notify(session.app.id, { state: 'error', target: session.devOrigin?.replace(/^https?:\/\//, ''), reason: 'The app failed to compile. The Console pane carries the compiler output.' });
-		} else if (/building|compiling/i.test(compilerText) && session.buildStart === undefined) {
+		} else if (signal.event === 'building' && session.buildStart === undefined) {
 			session.buildStart = Date.now();
 			this.notify(session.app.id, { state: 'building', target: session.devOrigin?.replace(/^https?:\/\//, '') });
 		}
@@ -913,18 +857,17 @@ export class WatchManager {
 			if (session.iconUri === undefined) {
 				session.iconUri = (await appIconDataUri(session.app.icon)) ?? '';
 			}
-			await client.call('rrext_deploy_app', {
-				subcommand: 'register_dev',
+			// The SDK registration (shared with `rocketride app dev`) keys the
+			// entry to this host's session nonce, so previews launched from
+			// THIS editor resolve THIS dev server even when another editor
+			// serves the same app.
+			await registerDevOverlay(client, {
 				moduleId: session.app.moduleId,
-				url: `${session.devOrigin}/remoteEntry.js?t=${Date.now()}`,
 				appId: session.app.id,
-				// This host's overlay entry is keyed to its session nonce, so
-				// previews launched from THIS editor resolve THIS dev server
-				// even when another editor serves the same app.
-				session: DEV_SESSION_NONCE,
+				origin: session.devOrigin,
 				name: session.app.name,
-				description: session.app.description ?? '',
-				appVersion: session.app.version ?? '',
+				description: session.app.description,
+				appVersion: session.app.version,
 				icon: session.iconUri,
 			});
 		} catch (err) {
@@ -945,48 +888,10 @@ export class WatchManager {
 		this.appScreen.notifyWatch(appId, status);
 	}
 
-	// =========================================================================
-	// BINARY RESOLUTION
-	// =========================================================================
-
-	/** See {@link resolveRsbuildInvocation}. */
-	private resolveRsbuild(appRoot: string): { cmd: string; args: string[]; shell: boolean } {
-		return resolveRsbuildInvocation(appRoot);
-	}
 }
 
-/**
- * Resolves how to invoke rsbuild for an app folder: the app-local bin
- * first (deterministic), `pnpm exec` as the fallback for hoisted trees.
- * Shared by the watch loop (`rsbuild dev`) and the publish flow's one-shot
- * `rsbuild build`.
- *
- * @param appRoot - The app's absolute folder path.
- */
-export function resolveRsbuildInvocation(appRoot: string): { cmd: string; args: string[]; shell: boolean } {
-	// HAND-ROLLED resolution, never require.resolve: inside the esbuild-
-	// bundled extension the bundler's require shim cannot do real
-	// filesystem resolution, so the resolve always threw and silently
-	// forced EVERY dev server onto the pnpm-exec fallback — a
-	// guard->cmd->pnpm->cmd->rsbuild chain whose depth is exactly what let
-	// kills leak orphans on Windows (no parent-death cascade there). The
-	// walk mirrors Node's own: the app's node_modules first, then hoisted
-	// parents up the tree.
-	let current = appRoot;
-	for (let hop = 0; hop < 6; hop++) {
-		const candidate = path.join(current, 'node_modules', '@rsbuild', 'core', 'bin', 'rsbuild.js');
-		if (existsSync(candidate)) {
-			return { cmd: process.execPath, args: [candidate], shell: false };
-		}
-		const parent = path.dirname(current);
-		if (parent === current) break;
-		current = parent;
-	}
-	// --ignore-workspace keeps the exec scoped to the app folder — inside
-	// an enclosing pnpm workspace a bare exec goes recursive across ITS
-	// projects (ERR_PNPM_RECURSIVE_EXEC) instead of running the app's bin.
-	return { cmd: 'pnpm', args: ['--ignore-workspace', 'exec', 'rsbuild'], shell: process.platform === 'win32' };
-}
+// rsbuild resolution is the SDK's (shared with `rocketride app dev`)
+export { resolveRsbuildInvocation } from 'rocketride/app-dev';
 
 /** Module-level accessor wiring (set once in extension activation). */
 let instance: WatchManager | null = null;
@@ -995,7 +900,7 @@ let instance: WatchManager | null = null;
  * Installs the singleton WatchManager (called from extension activation).
  *
  * @param appScreen - The App Builder panel provider (status/console sink).
- * @param guardPath - Absolute path to the shipped devServerGuard.cjs.
+ * @param guardPath - Absolute path to the dev-server guard script.
  */
 export function initWatchManager(appScreen: AppScreenProvider, guardPath: string): WatchManager {
 	instance = new WatchManager(appScreen, guardPath);

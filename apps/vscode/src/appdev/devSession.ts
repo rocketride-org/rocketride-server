@@ -31,9 +31,9 @@
  * URL this host launches (`?rrsession=`), so a preview opened FROM this
  * editor resolves THIS editor's dev server rather than whichever editor
  * registered last.
+ *
+ * The nonce is the SDK's (`rocketride/app-dev`, one per process), so the
+ * overlay registrations and preview URLs built there carry the same one.
  */
 
-import { randomUUID } from 'crypto';
-
-/** This extension host's dev-session nonce (stable for the host's lifetime). */
-export const DEV_SESSION_NONCE = randomUUID();
+export { DEV_SESSION_NONCE } from 'rocketride/app-dev';

@@ -492,13 +492,15 @@ def setup_parser() -> argparse.ArgumentParser:
     app_deploy_parser.add_argument('--verbose', action='store_true', help='Narrate every pack step')
 
     app_create_parser = app_subparsers.add_parser(
-        'create', help='Scaffold a new app under ./apps/<slug> (same templates as the App Builder wizard)'
+        'create', help='Scaffold a new app under ./apps/<slug>-ui (same templates as the App Builder wizard)'
     )
     _add_connection_args(app_create_parser)
     app_create_parser.add_argument('slug', help='App slug')
     app_create_parser.add_argument('--template', default='Blank', help='Template: Blank or Dashboard')
     app_create_parser.add_argument('--name', help='Display name (default: title-cased slug)')
-    app_create_parser.add_argument('--developer', help="Developer id for <developerId>.<slug> (default: 'local')")
+    app_create_parser.add_argument(
+        '--developer', help="Developer id for <developerId>.<slug> (default: the connected account's, else 'local')"
+    )
     app_create_parser.add_argument('--sidebar', action='store_true', help='Two-column layout with a navigation sidebar')
     app_create_parser.add_argument(
         '--no-status-footer', dest='status_footer', action='store_false', help='Omit the bottom status bar'

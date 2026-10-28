@@ -1,4 +1,43 @@
+// =============================================================================
 // MIT License
+// Copyright (c) 2026 Aparavi Software AG
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+// =============================================================================
+
+/**
+ * The dev-server GUARD — a tiny Node program every `rsbuild dev` runs under,
+ * tethered to its host (the VS Code extension host, or a `rocketride app
+ * dev` process) so a dev server can never outlive it.
+ *
+ * Kept as source text and written to a private temp file at first use
+ * (see materializeDevServerGuard): a standalone script must run as its own
+ * Node process, and no SDK build layout (CJS, ESM, the CLI, a host's
+ * bundle) gives it a dependable on-disk path otherwise.
+ */
+
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+/** The guard program (CommonJS). argv: [ownerPid, useShell(0|1), cmd, ...args]. */
+export const DEV_SERVER_GUARD_SOURCE = String.raw`// MIT License
 //
 // Copyright (c) 2026 Aparavi Software AG
 //
@@ -87,7 +126,7 @@ let dying = false;
 // leaking the pnpm->cmd->rsbuild chain).
 
 /**
- * Snapshots the descendant pids of `rootPid`, LEAF-FIRST, via one CIM query.
+ * Snapshots the descendant pids of 'rootPid', LEAF-FIRST, via one CIM query.
  * Calls back [] on any failure — by then the caller's direct child kill has
  * already covered the flattened primary spawn (node -> rsbuild.js).
  *
@@ -232,3 +271,24 @@ child.on('exit', (code) => {
 child.on('error', () => {
 	if (!dying) process.exit(1);
 });
+`;
+
+/** The materialized guard path for this process (written once). */
+let guardPath: string | null = null;
+
+/**
+ * Writes the guard program to a fresh, owner-only temp directory (once per
+ * process) and returns its path. A per-process mkdtemp directory means no
+ * other local user can plant or swap the script between write and spawn.
+ *
+ * @returns Absolute path of the guard script.
+ */
+export function materializeDevServerGuard(): string {
+	if (guardPath && fs.existsSync(guardPath)) return guardPath;
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rocketride-dev-'));
+	fs.chmodSync(dir, 0o700);
+	const file = path.join(dir, 'devServerGuard.cjs');
+	fs.writeFileSync(file, DEV_SERVER_GUARD_SOURCE, { mode: 0o600 });
+	guardPath = file;
+	return file;
+}
