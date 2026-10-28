@@ -759,7 +759,7 @@ from `'shell'`). The full set:
 | `shell:themeChange` | `{ tokens }` | Theme changed; `tokens` is the full `--rr-*` map. |
 | `shell:viewActivated` | `{ viewId }` | A view/tab became active — lazy panels init here. |
 | `shell:manifestRefresh` | `{ source }` | Server-side app manifest changed (dev overlay, publish, expiry). |
-| `shell:telemetry` | `{ event, props, ts, id }` | A telemetry fact the shell observed (`auth:start`, `auth:complete`) for the active app to forward; held facts come from `cm.drainTelemetry()`. |
+| `shell:telemetry` | `{ event, props, ts, id }` | A telemetry fact the shell observed (`auth:complete`) for the active app to forward; `auth:start` and other held facts come from `cm.drainTelemetry()`. |
 | `app:statusChanged` | `{ appId, version?, status, notes? }` | Store review status changed. |
 | `store:changed` | `{ prefix, paths }` | Files changed under a watched store prefix. |
 
@@ -770,8 +770,9 @@ state or your own emitter; do not overload the shell bus.
 **Telemetry facts.** The shell has no analytics SDK: it raises `auth:start`
 and `auth:complete` (with `is_new`, `waitlisted` and `duration_ms`, the OAuth
 round trip from the redirect, null when unknown) as `shell:telemetry` for the
-active app to forward to its own analytics. A fact raised while no app listens is held (32 facts, 30
-minutes, in the tab's sessionStorage) until the app calls
+active app to forward to its own analytics. `auth:start` is always held (the
+OAuth redirect follows at once), and so is a fact raised while no app listens
+(32 facts, 30 minutes, in the tab's sessionStorage), until the app calls
 `cm.drainTelemetry?.()` (optional: older shells lack it): drain once at
 analytics init, then subscribe, and forward each fact once by its `id` with
 `ts` as its time. On the waitlist

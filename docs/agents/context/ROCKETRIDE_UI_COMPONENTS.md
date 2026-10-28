@@ -1323,7 +1323,7 @@ Event catalog (`out` = the shell emits it; `in` = an app emits it):
 | `shell:themeChange` | `{ tokens: Record<string, string> }` | out | Theme tokens changed — canvases repaint from these. |
 | `shell:viewActivated` / `shell:sidebarCollapsing` | `{ viewId }` / `void` | out | View became active / sidebar starting to collapse. |
 | `shell:manifestRefresh` | `{ source }` | out | Server-side app manifest changed (dev overlay, publish, expiry). |
-| `shell:telemetry` | `{ event, props, ts, id }` | out | Telemetry fact (`auth:start`, `auth:complete`) for the active app to forward; facts held while nobody listened come from `ConnectionManager.getInstance().drainTelemetry()`, drained once at analytics init. On the waitlist screen the shell calls the home app's `./telemetry` entry once per page load to do that. |
+| `shell:telemetry` | `{ event, props, ts, id }` | out | Telemetry fact (`auth:complete`) for the active app to forward; `auth:start`, always held, and facts held while nobody listened come from `ConnectionManager.getInstance().drainTelemetry()`, drained once at analytics init. On the waitlist screen the shell calls the home app's `./telemetry` entry once per page load to do that. |
 | `app:statusChanged` | `{ appId, status, notes? }` | out | Marketplace review status changed. |
 | `store:changed` | `{ prefix, paths }` | out | Files changed under a watched store prefix. |
 

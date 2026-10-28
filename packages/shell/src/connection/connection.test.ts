@@ -602,6 +602,37 @@ test('startOAuth raises auth:start once per page load, past its one-shot guard',
 	});
 });
 
+test('auth:start is held even with an app listening, and the callback page drains it once, before auth:complete', async () => {
+	const tab = recordingSession();
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/pricing' } }), sessionStorage: tab.storage }, async () => {
+		const { manager } = createTestManager();
+		const received: TelemetryFact[] = [];
+		manager.on('shell:telemetry', (fact) => received.push(fact));
+		manager.authProvider = { signIn: async () => {} };
+		await manager.startOAuth(true, { appId: 'rocketride.home' });
+		await Promise.resolve();
+		assert.deepEqual(received, [], 'not delivered live: the redirect may unload the page before the app forwards it');
+		assert.ok(tab.data.has(TELEMETRY_STORAGE_KEY), 'mirrored to the tab, so it survives the redirect');
+	});
+
+	// The callback page load of the same tab: the identity resolves before the home app mounts and drains.
+	const page = callbackPage([...tab.data.entries()]);
+	await withGlobals(page.globals, async () => {
+		const { manager } = callbackManager();
+		await manager.bootstrap();
+		assert.deepEqual(
+			manager.drainTelemetry().map((f) => [f.event, f.props]),
+			[
+				['auth:start', { register: true, app_id: 'rocketride.home', from_path: '/pricing', auto: false }],
+				['auth:complete', { is_new: null, waitlisted: false, source: 'shell', duration_ms: null }],
+			],
+			'the start, then the completion',
+		);
+		assert.deepEqual(manager.drainTelemetry(), [], 'handed over once');
+		assert.equal(page.session.data.has(TELEMETRY_STORAGE_KEY), false, 'the mirror is cleared by the drain');
+	});
+});
+
 test("a sign-in's redirect stamps the round trip with its PKCE verifier, replacing an abandoned start's stamp", async () => {
 	const session = recordingSession([[AUTH_START_STAMP, '1']]);
 	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {

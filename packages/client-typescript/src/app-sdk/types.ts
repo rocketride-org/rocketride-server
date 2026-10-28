@@ -525,8 +525,10 @@ export interface ShellEventMap {
 	 */
 	'shell:loginRequest': { appId?: string; register?: boolean; auto?: boolean };
 	/**
-	 * A telemetry fact the shell observed. Facts raised before the app
-	 * subscribed are handed over by `connectionManager.drainTelemetry()`.
+	 * A telemetry fact the shell observed. `auth:start` is never delivered
+	 * here (the OAuth redirect follows at once): it is held, and handed over
+	 * with the facts raised before the app subscribed by
+	 * `connectionManager.drainTelemetry()`.
 	 */
 	'shell:telemetry': TelemetryFact;
 	'shell:logoutRequest': Record<string, never>;

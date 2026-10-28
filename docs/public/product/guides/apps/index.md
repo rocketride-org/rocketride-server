@@ -483,7 +483,7 @@ useEffect(() => {
 | `shell:themeChange` | `{ tokens: Record<string, string> }` | Shell → Apps | Theme CSS tokens changed |
 | `shell:statusChange` | `{ message: string \| null }` | Shell → Apps | Transient status bar text changed |
 | `shell:event` | `{ event: unknown }` | Server → Apps | Raw server event forwarded from WebSocket |
-| `shell:telemetry` | `TelemetryFact` (`{ event: string; props: Record<string, unknown>; ts: number; id: string }`) | Shell → Apps | A product-telemetry fact the shell observed (`auth:start`, `auth:complete`), for the active app to forward to its analytics; facts raised while no app listened come from `drainTelemetry()` (see [Telemetry facts](#telemetry-facts)) |
+| `shell:telemetry` | `TelemetryFact` (`{ event: string; props: Record<string, unknown>; ts: number; id: string }`) | Shell → Apps | A product-telemetry fact the shell observed (`auth:complete`), for the active app to forward to its analytics; `auth:start` and facts raised while no app listened come from `drainTelemetry()` (see [Telemetry facts](#telemetry-facts)) |
 | `shell:appsUpdated` | `{ apps: ShellAppEntry[] }` | Shell-internal | App list updated |
 | `shell:manifestRefresh` | `{ source: string }` | Shell-internal | App manifest re-fetched |
 | `shell:openOverlay` | `{ id: 'account' \| 'settings' \| 'environment' }` | Shell-internal | Open a shell overlay |
@@ -494,7 +494,7 @@ The events marked **Shell-internal** exist only in the shell package's internal 
 
 ### Telemetry facts
 
-The shell has no analytics SDK. It observes a few product facts itself (`auth:start` when it starts the OAuth redirect; `auth:complete` when the callback resolves an identity, with the account's new-user flag `is_new`, its waitlist state `waitlisted`, and `duration_ms`, the OAuth round trip in milliseconds from the redirect to the callback, null when it is not known) and hands them to the active app, which forwards them to its own analytics. A fact raised while no app is subscribed to `shell:telemetry` (the callback resolves before the app mounts) is held: up to 32 facts, for 30 minutes, kept in the tab's sessionStorage so it survives a page load that never mounts the forwarding app (an embedded App Builder preview keeps them in memory only). A sign-out or a rejected credential drops the held facts.
+The shell has no analytics SDK. It observes a few product facts itself (`auth:start` when it starts the OAuth redirect; `auth:complete` when the callback resolves an identity, with the account's new-user flag `is_new`, its waitlist state `waitlisted`, and `duration_ms`, the OAuth round trip in milliseconds from the redirect to the callback, null when it is not known) and hands them to the active app, which forwards them to its own analytics. `auth:start` is always held, never delivered live: the full-page redirect follows at once, so the app's drain on the callback page hands it over. Any other fact raised while no app is subscribed to `shell:telemetry` (the callback resolves before the app mounts) is held too: up to 32 facts, for 30 minutes, kept in the tab's sessionStorage so it survives a page load that never mounts the forwarding app (an embedded App Builder preview keeps them in memory only). A sign-out or a rejected credential drops the held facts.
 
 An app that forwards them drains the held facts once at its analytics init, then subscribes for the rest. Forward each fact once, keyed by its `id`, with `ts` as its event time, and only the properties your own event contract defines:
 

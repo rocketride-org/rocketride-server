@@ -218,10 +218,11 @@ export interface ShellConnectionEventMap {
 	'shell:myApps': Record<string, never>;
 
 	/**
-	 * A product-telemetry fact the shell observed (`auth:start`, `auth:complete`).
-	 * The shell has no analytics transport; the active app forwards these to its
-	 * own. Facts raised before any app subscribed, or whose last listener left
-	 * before their dispatch, are kept in the connection manager's buffer and
+	 * A product-telemetry fact the shell observed (`auth:complete`). The shell
+	 * has no analytics transport; the active app forwards these to its own.
+	 * `auth:start` is never delivered here (the OAuth redirect follows at once):
+	 * it is kept in the connection manager's buffer, as are facts raised before
+	 * any app subscribed or whose last listener left before their dispatch, and
 	 * handed over by `drainTelemetry()`.
 	 */
 	'shell:telemetry': TelemetryFact;

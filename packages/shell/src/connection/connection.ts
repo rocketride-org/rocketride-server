@@ -687,13 +687,8 @@ export class ConnectionManager implements IConnectionManager {
 		// failed initiation can still be retried within the same page load.
 		if (this.oauthStarted) return;
 		this.oauthStarted = true;
-		// auth:start is observed here, after the guard: every sign-in and sign-up entry of the
-		// shell comes through (the login handler, the goodbye and error screens); a failed
-		// initiation releases the guard, so a retry raises it again, as a new attempt. The
-		// embedded (iframe) flow signs in through the auth popup, whose facts stay in the
-		// popup's own sessionStorage and are discarded when it closes: embedded sign-ins are
-		// not reported. CloudAuthProvider.signIn(), also on the shell API, does not raise it. The
-		// round-trip stamp is written with the PKCE verifier (generatePkce), on every redirect.
+		// auth:start is raised after the guard, so a failed start that releases it is reported
+		// again on retry. The embedded flow signs in through the auth popup and is not reported.
 		const startProps: Record<string, unknown> = { register: !!register };
 		const appId = context?.appId || this.getPendingAppId();
 		if (appId) {
@@ -701,7 +696,10 @@ export class ConnectionManager implements IConnectionManager {
 		}
 		startProps.from_path = window.location.pathname;
 		startProps.auto = context?.auto === true;
-		this.reportTelemetry('auth:start', startProps);
+		// Held even with an app listening: delivered live, it would depend on the app's analytics
+		// flushing before the redirect unloads the page; the hold's sessionStorage mirror reaches the
+		// callback page, whose drain hands it over.
+		this.holdTelemetry('auth:start', startProps);
 		try {
 			if (this.authProvider) {
 				await this.authProvider.signIn(undefined, register);

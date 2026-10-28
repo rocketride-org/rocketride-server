@@ -24,11 +24,11 @@
 // TelemetryChannel - product-telemetry facts the shell observed while no app
 // was listening.
 //
-// The shell carries no analytics SDK. Facts such as auth:start (raised when the
-// OAuth redirect starts) and auth:complete (raised when the callback resolves
-// an identity, BEFORE the home remote mounts) are broadcast as `shell:telemetry`
-// while an app is subscribed; otherwise they are held here until an app drains
-// the channel at its analytics init. The hold is bounded and mirrored to
+// The shell carries no analytics SDK. A fact such as auth:complete (raised when
+// the callback resolves an identity, BEFORE the home remote mounts) is broadcast
+// as `shell:telemetry` while an app is subscribed; otherwise it is held here
+// until an app drains the channel at its analytics init. auth:start (raised when
+// the OAuth redirect starts) is always held: the callback page drains it. The hold is bounded and mirrored to
 // sessionStorage, so a fact raised on a page load that never mounts the
 // forwarding app (a sign-in that lands in a product app, the goodbye screen's
 // sign-in) reaches the next page load of the same tab, for TELEMETRY_TTL_MS at
