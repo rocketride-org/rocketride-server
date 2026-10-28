@@ -445,6 +445,35 @@ async def test_sse_message_bad_json_is_silently_dropped():
 
 
 # ---------------------------------------------------------------------------
+# >DUMP — crash dump written
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_dump_message_names_the_file_and_tells_the_console():
+    """DUMP yields apaevt_dump with the file name, and a console line rather than 'Unknown control'."""
+    events, disconnects = await _drive('>DUMP*engine.3.4.0.9999.20261010T072223Z.7.dmp')
+    assert [event['event'] for event in events] == ['apaevt_dump', 'output']
+    assert events[0]['body'] == {'file': 'engine.3.4.0.9999.20261010T072223Z.7.dmp'}
+    assert events[1]['body'] == {
+        'category': 'console',
+        'output': 'Crash dump: engine.3.4.0.9999.20261010T072223Z.7.dmp\n',
+    }
+    # The engine's >EXIT follows; the dump alone ends nothing
+    assert disconnects == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('line', ['>DUMP*', '>DUMP'])
+async def test_dump_message_without_a_name_announces_nothing(line):
+    """No file name, no dump to fetch: the line is an unknown control like any other."""
+    events, _ = await _drive(line)
+    event = _single_event(events)
+    assert event['event'] == 'output'
+    assert 'Unknown control' in event['body']['output']
+
+
+# ---------------------------------------------------------------------------
 # Unknown control + regular console output
 # ---------------------------------------------------------------------------
 

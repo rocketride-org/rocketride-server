@@ -141,9 +141,35 @@ which is how the node tests use them for their mocks.
 Task output always reaches the engine and its clients as it does today. With
 the default log driver, `docker logs` shows nothing.
 
-Each container is removed when its task ends. When the engine starts, it
-removes containers labelled with its `RR_DOCKER_INSTANCE` that an earlier run
-left behind.
+The engine removes each container when its task ends. If the engine stops
+first, its tasks end on their own and their containers stay on the daemon,
+stopped. When the engine starts again, it removes the containers labelled with
+its `RR_DOCKER_INSTANCE` that an earlier run left behind.
+
+## Crash dumps
+
+A task whose process crashes writes a minidump, as a child process does. In a
+container the dump is written inside it, so the engine copies the dump out
+before it removes the container of a crashed task: into
+`data/logs/<task id>~<hash>/` beside the engine's own directory, next to the
+dumps of child processes, one directory per task. The hash keeps apart two ids
+that the directory name would otherwise make alike. A container left by an
+engine that stopped first is treated the same way when the engine starts again.
+
+The copy comes through the Docker daemon as a stream, so it works with a
+daemon that does not see the engine's files too. Only minidumps are taken
+from the container's own files; what a task writes into a store mount is on
+the host already (see [Files and storage](#files-and-storage)). The
+container's files are the task's own doing, so a copy is given up past 60
+seconds or 1 GiB, and dumps stop being kept once those under `data/logs`
+reach 4 GiB in all: delete old ones to make room.
+
+A dump holds part of the task's memory at the moment it crashed, which can
+include the data and the keys it was working with. On Linux and macOS the
+files are readable by the engine's user alone; on Windows they take the
+permissions of the directory. Treat that directory accordingly. The engine
+never deletes a dump: once those it keeps reach 4 GiB, it stops copying new
+ones out of containers, so removing old ones is up to you.
 
 ## Known limits
 

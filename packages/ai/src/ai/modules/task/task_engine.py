@@ -2034,6 +2034,11 @@ class Task(DAPBase):
             # Send out a status update when needed
             self._status_updated = True
 
+        # The task crashed and wrote a dump; a container runtime fetches it before the container goes
+        elif event_type == 'apaevt_dump':
+            if self._launch:
+                self._launch.crash_dump_announced(str(body.get('file', '')))
+
         # Handle pipeline trace events to build summary and flow events
         elif event_type == 'apaevt_trace':
             operation = body.get('op', '')

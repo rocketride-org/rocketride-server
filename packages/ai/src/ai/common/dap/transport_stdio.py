@@ -34,6 +34,7 @@ The transport recognizes and parses various message types:
 - SVC: Service status ('>SVC*1_or_0')
 - JOB: Job status ('>JOB*status_message')
 - DBG: Debug commands ('>DBG*operation*id*total_pipes*pipe_id')
+- DUMP: Crash dump written ('>DUMP*file_name')
 - EXIT: Process exit ('>EXIT*exit_code_hex*exit_message')
 
 Usage Patterns:
@@ -567,6 +568,7 @@ class TransportStdio(TransportBase):
         - '>DL*json_data' - pip install info
         - '>USR**json' - User data for prompting
         - '>SSE*json' - Real-time node-to-UI message (pipe_id + message + optional data)
+        - '>DUMP*file_name' - Crash dump written (the name only; the directory is the task's log path)
         - '>EXIT*exit_code_hex*exit_message' - Process exit
         """
         if message is None:
@@ -956,6 +958,15 @@ class TransportStdio(TransportBase):
                 )
             except Exception as e:
                 self._debug_message(f'Malformed SSE message: {message}, error: {e}')
+
+        # Parse crash dump messages: '>DUMP*file_name'. The engine sends it once
+        # the dump is written, before it exits. Without a name it announces nothing
+        elif message.startswith('>DUMP*') and message != '>DUMP*':
+            name = message.split('*', 1)[1]
+            await self._transport_receive({'type': 'event', 'event': 'apaevt_dump', 'body': {'file': name}})
+            await self._transport_receive(
+                {'type': 'event', 'event': 'output', 'body': {'category': 'console', 'output': f'Crash dump: {name}\n'}}
+            )
 
         # Handle unknown control messages starting with '>'
         elif message.startswith('>'):

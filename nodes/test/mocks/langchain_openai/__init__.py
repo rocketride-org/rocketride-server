@@ -11,10 +11,15 @@ without real API keys (test_should_handle_json_response_questions,
 test_should_handle_chat_workflow_with_multiple_interactions).
 """
 
+import ctypes
 import json
 
 # Stub response returned by ChatOpenAI.invoke() - mirrors LangChain AIMessage
 MOCK_LLM_RESPONSE = 'Mock LLM response. This stub is used when ROCKETRIDE_MOCK is set so tests run without API keys or external services.'
+
+# A prompt carrying this crashes the task's process: no node crashes on demand, and the
+# tests of what a crashed task leaves behind need one that does
+CRASH_PHRASE = 'rocketride-mock: crash this task'
 
 # Mock embedding dimension (OpenAI text-embedding-3-small default)
 MOCK_EMBEDDING_DIM = 1536
@@ -90,6 +95,11 @@ class ChatOpenAI:
         self.base_url = base_url
 
     def invoke(self, prompt) -> _MockMessage:
+        """The fixed reply; a prompt with CRASH_PHRASE crashes the task instead, for the crash-dump tests."""
+        if CRASH_PHRASE in _extract_prompt_text(prompt):
+            # A read through a bad pointer outside any ctypes call: ctypes.string_at(0)
+            # comes back as an OSError on Windows
+            _ = ctypes.cast(1, ctypes.py_object).value
         return _MockMessage(MOCK_LLM_RESPONSE)
 
     def get_num_tokens(self, text: str) -> int:
