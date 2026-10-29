@@ -47,6 +47,7 @@
  */
 
 import type { IVirtualFileSystem, VfsEntry, VfsOverlay } from 'shell';
+import type { ChangeKind } from 'shell/src/workspace/workspaceFs';
 
 export type { IVirtualFileSystem, VfsEntry, VfsOverlay } from 'shell';
 
@@ -111,7 +112,8 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 	upsert(path: string, type: 'file' | 'dir'): void;
 
 	/**
-	 * Seeds the content cache without a backend read. Does not notify.
+	 * Seeds the content cache without a backend read. Does not notify. The
+	 * staged view records the path only (see StagedFileSystem.prime).
 	 *
 	 * @param path - The path to seed.
 	 * @param content - The content to cache.
@@ -188,6 +190,9 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 	/** Writes one file; with `expect`, refused with StaleWriteError unless the path is at that version at the call. */
 	write(path: string, content: unknown, origin?: string, expect?: number): Promise<void>;
 
+	/** Deletes a path. With `anchor` (the SHA-256 of the stored copy the delete is based on), refused with StaleWriteError unless the path holds that copy in the delete's turn. */
+	delete(path: string, origin?: string, anchor?: string): Promise<void>;
+
 	/**
 	 * The path's version in this view. A mutation counts when it is called,
 	 * not when it lands, so a writer that read before it is already stale. So
@@ -208,6 +213,24 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 
 	/** The origin of the last mutation of a path ('editor', 'agent', ...), when known. */
 	lastWriter(path: string): string | undefined;
+
+	// ── Staged changes (views that stage; others omit them) ─────────────
+
+	/**
+	 * How each staged path differs from what the server stores. A view that
+	 * writes through stages nothing, so its map is empty.
+	 *
+	 * @returns Map of canonical path to change kind.
+	 */
+	changedPaths?(): Map<string, ChangeKind>;
+
+	/**
+	 * Drops one path's staged changes, so the next read sees the server's
+	 * copy again. The server is not touched.
+	 *
+	 * @param path - The path to revert.
+	 */
+	discardPath?(path: string): Promise<void>;
 }
 
 /** The view a StagedFileSystem decorates: the contract without the path versions. CachedVfs satisfies it. */

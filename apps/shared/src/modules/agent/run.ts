@@ -31,7 +31,14 @@
  * changed), the model, and the record of check results, which is also the
  * loop's finish rule. It streams each wave's progress as `thinking` chunks and sends the
  * answer as one `content` chunk, with the checks line the code builds from the
- * record. A stopped run sends no `content` chunk.
+ * record. A stopped run sends no `content` chunk. It resolves with the turn's
+ * TurnResult (turn.ts).
+ *
+ * The host's limits hold for the turn: the loop pauses at the step limit,
+ * and the usage meter (usage.ts) refuses a model request that could pass
+ * the cost limit. Either way the turn ends as needs_input, with a Continue
+ * request. The file toolkit's Undo record goes to `options.undo` when the
+ * run ends; it never goes into the result.
  *
  * Everything that only works in the browser (the model pipeline, Monaco's
  * markers) has a default here and comes in through `deps` otherwise, so tests
@@ -47,19 +54,24 @@ import type { ChatMessage } from 'shell';
 import type { ChatAskCard, ChatAsking } from 'shell/src/components/chat/types';
 
 import { isReferencePath } from '../vfs/referenceTree';
-import type { AgentHost } from './host';
+import { DEFAULT_LIMITS, findAgentHost, type AgentHost } from './host';
 import { CORE_PROMPT } from './prompts';
 import { APP_CHECK_TOOL, AppCheckToolkit, monacoMarkerSource, reportPassed, typesNote } from './toolkits/appCheck';
 import type { CheckReport, MarkerSource } from './toolkits/appCheck';
 import { Approvals } from './toolkits/approval';
 import { AppToolkit, DEPLOY_APP_TIMEOUT_MS } from './toolkits/appTools';
-import { NOT_CONNECTED_MESSAGE, redactText, type ClientGetter } from './toolkits/common';
+import { AskUserToolkit } from './toolkits/askUser';
+import { NOT_CONNECTED_MESSAGE, redactText, shellChoice, type ChoiceFn, type ClientGetter } from './toolkits/common';
 import type { FileTracker } from './toolkits/fileTracker';
 import { FilesystemTools, normalizePath } from './toolkits/filesystem';
 import { findApp, InventoryToolkit, readApps } from './toolkits/inventory';
 import { RocketRideClientToolkit } from './toolkits/rocketrideClient';
+import { RunLedger } from './toolkits/runs';
 import { validateNote, validateSaved, type SaveValidation } from './toolkits/saveValidation';
-import { composeToolkits } from './tools';
+import { UNDO_ROW, type UndoRecord } from './toolkits/undo';
+import { composeToolkits, UserTime } from './tools';
+import { outcomeOf, redactDeep, TurnError, type NeedsInputRequest, type RunRecord, type TurnCheck, type TurnResult, type TurnUsage } from './turn';
+import { CostLimitError, dollars, UsageMeter } from './usage';
 import { runLoop, TOOL_TIMEOUT_MS, type FinishRule, type LoopResult, type RanCall } from './wave/loop';
 import { buildPrefix } from './wave/plan';
 import type { AppPrompts, HistoryTurn, ModelCall, QuestionSpec } from './wave/plan';
@@ -115,6 +127,16 @@ export interface AgentRunOptions {
 	takeQueued: () => string[];
 	/** Shows a "Needs your OK" card in the chat and waits for the answer (the turn's ask). Absent: an act that asks is refused in Ask mode. */
 	ask?: (card: ChatAskCard) => ChatAsking;
+	/** The turn's id (default: a new one). */
+	turnId?: string;
+	/** The conversation the turn belongs to (its session id), for the runs it starts. */
+	conversationId?: string;
+	/** The runs the conversation started. The run adds the ones it starts to this array (default: none, kept nowhere). */
+	runs?: RunRecord[];
+	/** The model the pipeline behind `token` runs, as the price table names it; unset when unknown, so nothing is priced. */
+	model?: string;
+	/** Takes the run's Undo record when the run ends, however it ends. It holds file content, so it stays in memory. */
+	undo?: (record: UndoRecord) => void;
 }
 
 /** What one run needs from its host. The optional parts have browser defaults; tests always pass them. */
@@ -125,8 +147,12 @@ export interface AgentDeps {
 	client: ClientGetter;
 	/** Asks the model one question (default: the LLM pipeline behind `options.token`). */
 	model?: ModelCall;
+	/** Asks the user what to do with unsaved changes the agent wants to change (default: the three-button dialog). */
+	choose?: ChoiceFn;
 	/** Gets Monaco's marker source, or null when there is none (default: the editor's, loaded once). */
 	markers?: () => Promise<MarkerSource | null>;
+	/** The installed host's scope now, which a team switch changes (default: the installed host's). */
+	currentScope?: () => string | undefined;
 }
 
 // =============================================================================
@@ -187,10 +213,13 @@ const editorMarkers = guardedMarkerSource(monacoMarkerSource);
  * - A change to anything else (`nodes/`, other files) needs nothing.
  *
  * A change is a call to one of CHANGE_TOOLS, even one that failed, since a
- * write may land before its error: a path inside `apps/<folder>/` changes that
- * app, and create_app changes the app its result names. Deleting an app's whole
- * folder drops the app's record (there is nothing left to check); renaming the
- * folder moves the record to the new folder, as a change.
+ * write may land before its error. The loop does not hand over a call it
+ * never started or one its tool refused before changing anything (see
+ * `unstarted` in wave/loop.ts), since nothing of it landed. A path inside
+ * `apps/<folder>/` changes that app, and create_app changes the app its
+ * result names. Deleting an app's whole folder drops the app's record (there
+ * is nothing left to check); renaming the folder moves the record to the new
+ * folder, as a change.
  */
 export class CheckRecord implements FinishRule {
 	readonly checkTool = APP_CHECK_TOOL;
@@ -304,6 +333,28 @@ export class CheckRecord implements FinishRule {
 		return `Checked: ${said.map((g) => `${g.target}: ${g.text}`).join('; ')}`;
 	}
 
+	/**
+	 * The newest result per target and step, for the turn result. An app the
+	 * run changed and never checked has one check_app entry that did not run.
+	 *
+	 * @returns The checks, apps first.
+	 */
+	results(): TurnCheck[] {
+		const out: TurnCheck[] = [];
+		for (const [folder, app] of this.apps) {
+			if (!app.report) {
+				if (app.changed >= 0) out.push({ target: folder, step: APP_CHECK_TOOL, status: 'not_run', summary: 'not checked' });
+				continue;
+			}
+			for (const e of app.report.evidence) out.push({ target: app.report.target, step: e.step, status: e.status, summary: e.summary });
+		}
+		for (const [path, v] of this.pipelines) {
+			if ('failed' in v) out.push({ target: path, step: 'validate', status: 'not_run', summary: 'validate not run' });
+			else out.push({ target: path, step: 'validate', status: v.errors.length === 0 ? 'pass' : 'fail', summary: v.errors.length === 0 ? 'validate OK' : `validate: ${v.errors.length} ${v.errors.length === 1 ? 'error' : 'errors'}` });
+		}
+		return out;
+	}
+
 	/** The record of an app, made on first use. */
 	private app(folder: string): { changed: number; passed: number; report?: CheckReport } {
 		let app = this.apps.get(folder);
@@ -411,12 +462,14 @@ function within(path: string, root: string): boolean {
 /**
  * Turns the chat's messages into the model's history: what the user said and
  * the answers the agent gave. Thinking rows (bot rows with a result key),
- * error banners, and system and status rows are not part of the conversation.
- * A turn's request and the messages it took mid-run, or a request whose
- * answer was an error, are consecutive user rows; they merge into one user
- * turn, so the roles alternate. Each row passes through redactText: the live
- * chat still shows a key the user pasted, and a session saved before rows
- * were redacted may still hold one.
+ * error banners, and system and status rows are not part of the conversation,
+ * except the row that says an Undo changed files: the model reads it as the
+ * user's, since the files are no longer as its last answer left them. A
+ * turn's request and the messages it took mid-run, or a request whose answer
+ * was an error, are consecutive user rows; they merge into one user turn, so
+ * the roles alternate. Each row passes through redactText: the live chat
+ * still shows a key the user pasted, and a session saved before rows were
+ * redacted may still hold one.
  *
  * @param messages - The chat's messages, oldest first.
  * @returns The history turns, oldest first.
@@ -426,8 +479,9 @@ function toHistory(messages: ChatMessage[]): HistoryTurn[] {
 	for (const m of messages) {
 		const last = turns.at(-1);
 		const text = redactText(m.text);
-		if (m.sender === 'user' && last?.role === 'user') last.content = `${last.content}\n\n${text}`;
-		else if (m.sender === 'user') turns.push({ role: 'user', content: text });
+		const users = m.sender === 'user' || (m.sender === 'system' && m.text.startsWith(UNDO_ROW));
+		if (users && last?.role === 'user') last.content = `${last.content}\n\n${text}`;
+		else if (users) turns.push({ role: 'user', content: text });
 		else if (m.sender === 'bot' && !m.isError && !m.resultKey) turns.push({ role: 'assistant', content: text });
 	}
 	return turns;
@@ -446,7 +500,8 @@ function isChecksLine(line: string): boolean {
 /**
  * The text the user reads: the model's answer, then the checks line built from
  * the record, then a warning when the run changed the work and stopped before
- * finishing. Lines in the answer that start with "Checked:" or "Not checked:",
+ * finishing. A turn that asks the user may have checked all it changed, so it
+ * gets the warning only when something is still unchecked. Lines in the answer that start with "Checked:" or "Not checked:",
  * markdown-wrapped or not, are dropped, because only the code writes those.
  * The whole text passes through `shown` on its way to the chat and the saved
  * session.
@@ -463,7 +518,8 @@ function finalText(result: LoopResult, checks: CheckRecord, shown: (text: string
 		.join('\n')
 		.trim();
 	const parts = [answer, checks.checksLine()];
-	if (checks.changed && result.stopReason !== 'done') parts.push(NOT_CHECKED);
+	const unchecked = result.stopReason === 'needs_input' ? checks.unchecked() !== null : result.stopReason !== 'done';
+	if (checks.changed && unchecked) parts.push(NOT_CHECKED);
 	return shown(parts.filter((part) => part.length > 0).join('\n\n'));
 }
 
@@ -480,6 +536,21 @@ function finalText(result: LoopResult, checks: CheckRecord, shown: (text: string
  */
 function redactCard(card: ChatAskCard, shown: (text: string) => string): ChatAskCard {
 	return { ...card, title: shown(card.title), detail: card.detail === undefined ? undefined : shown(card.detail) };
+}
+
+/**
+ * A needs-you request with its question and choices passed through `hide`.
+ * The card and the saved session quote the model's ask_user arguments, so a
+ * value the file tools hid shows as its marker there, as in the answer. The
+ * kind, the id and a Variable's name stay as they are: the card and the
+ * session act on them, and a hidden value can be any word.
+ *
+ * @param request - What the turn asks.
+ * @param hide - Hides the values the run's file tools hid.
+ * @returns The request the turn keeps.
+ */
+function hideRequest(request: NeedsInputRequest, hide: (text: string) => string): NeedsInputRequest {
+	return { ...request, question: hide(request.question), ...(request.choices ? { choices: request.choices.map((choice) => hide(choice)) } : {}) };
 }
 
 /**
@@ -577,18 +648,25 @@ export interface ChatModelOptions {
 	onPipelineError?: () => Promise<void>;
 	/** Aborted when the user stops the run: a call that fails after it neither restarts the pipeline nor retries. */
 	signal?: AbortSignal;
+	/** Reserves each request before it is sent, the retry after a restart included, and takes what it used. */
+	meter?: UsageMeter;
 }
 
 /**
  * Builds the model call the Wave loop uses.
  *
  * The call resolves with the model's text, or rejects: a missing client with a
- * plain Error, anything else with a ModelError. A pipeline failure gets one
- * restart (`onPipelineError`) and one retry; a second failure is final. Once
- * the run is stopped the loop has walked away from the call, so a failure then
- * gets no restart: it would end the pipeline the next turn is about to use.
+ * plain Error, a request the cost limit refused with CostLimitError, anything
+ * else with a ModelError. A pipeline failure gets one restart
+ * (`onPipelineError`) and one retry; a second failure is final. Once the run
+ * is stopped the loop has walked away from the call, so a failure then gets
+ * no restart: it would end the pipeline the next turn is about to use.
  *
- * @param o - The client, token and hooks the host supplies.
+ * Each request, the retry included, is reserved on the meter just before it
+ * is sent, and settled with its reply. A request that failed, or whose
+ * provider failed, keeps its reservation.
+ *
+ * @param o - The client, token, hooks and meter the host supplies.
  * @returns The model call.
  */
 export function createChatModel(o: ChatModelOptions): ModelCall {
@@ -597,7 +675,20 @@ export function createChatModel(o: ChatModelOptions): ModelCall {
 		if (!client) throw new Error(NOT_CONNECTED_MESSAGE);
 		const question = o.toQuestion(q);
 
-		const ask = async (): Promise<{ answers?: unknown[] }> => client.chat({ token: await o.token(), question });
+		const ask = async (): Promise<{ answers?: unknown[] }> => {
+			const token = await o.token();
+			const held = o.meter?.reserve(q);
+			try {
+				const result = await client.chat({ token, question });
+				const text = replyText(result);
+				if (text.startsWith(LLM_ERROR_PREFIX)) held?.keep();
+				else held?.settle(text.length);
+				return result;
+			} catch (error) {
+				held?.keep();
+				throw error;
+			}
+		};
 
 		const started = performance.now();
 		try {
@@ -605,12 +696,14 @@ export function createChatModel(o: ChatModelOptions): ModelCall {
 			try {
 				result = await ask();
 			} catch (first) {
+				// step: a request the cost limit refused was never sent, so there is nothing to restart
+				if (first instanceof CostLimitError) throw first;
 				if (!o.onPipelineError || o.signal?.aborted) throw pipelineError(first);
 				try {
 					await o.onPipelineError();
 					result = await ask();
 				} catch (second) {
-					throw pipelineError(second);
+					throw second instanceof CostLimitError ? second : pipelineError(second);
 				}
 			}
 			return answerText(result);
@@ -627,10 +720,15 @@ function pipelineError(cause: unknown): ModelError {
 	return new ModelError(`The model pipeline stopped responding: ${reason}`, 'pipeline');
 }
 
+/** The text a pipeline result answers with; '' for none. */
+function replyText(result: { answers?: unknown[] }): string {
+	const first = result.answers?.[0];
+	return typeof first === 'string' ? first : first == null ? '' : JSON.stringify(first);
+}
+
 /** Pulls the model's text out of a pipeline result, or throws the error it stands for. */
 function answerText(result: { answers?: unknown[] }): string {
-	const first = result.answers?.[0];
-	const text = typeof first === 'string' ? first : first == null ? '' : JSON.stringify(first);
+	const text = replyText(result);
 	if (text.trim() === '') throw new ModelError('The model returned no answer.', 'empty');
 	if (text.startsWith(LLM_ERROR_PREFIX)) {
 		throw new ModelError(`The model provider failed: ${text.slice(LLM_ERROR_PREFIX.length)}`, 'provider');
@@ -660,6 +758,28 @@ function toRocketRideQuestion(q: QuestionSpec): Question {
 	return question;
 }
 
+/**
+ * A model call that feeds the meter, for a model a test passes:
+ * createChatModel feeds it itself, once per request.
+ *
+ * @param call - The model call.
+ * @param meter - The turn's meter.
+ * @returns The call, reserved before each request and settled with its reply.
+ */
+function metered(call: ModelCall, meter: UsageMeter): ModelCall {
+	return async (q) => {
+		const held = meter.reserve(q);
+		try {
+			const text = await call(q);
+			held.settle(text.length);
+			return text;
+		} catch (error) {
+			held.keep();
+			throw error;
+		}
+	};
+}
+
 // =============================================================================
 // RUN
 // =============================================================================
@@ -674,11 +794,17 @@ function toRocketRideQuestion(q: QuestionSpec): Question {
  * @param callback - Receives each chunk as (type, content).
  * @param options - The conversation so far, the app's prompts and the model pipeline's token.
  * @param deps - The host, the client getter, and the parts tests replace.
- * @throws The model's error when it fails before the run gathered anything.
+ * @returns How the turn ended.
+ * @throws A TurnError with the model's error and the failed result when the model fails before the run gathered anything.
  */
-export async function runAgent(request: string, callback: (type: string, content: string) => void, options: AgentRunOptions, deps: AgentDeps): Promise<void> {
+export async function runAgent(request: string, callback: (type: string, content: string) => void, options: AgentRunOptions, deps: AgentDeps): Promise<TurnResult> {
 	const { host, client } = deps;
-	const model = deps.model ?? createChatModel({ client, token: options.token, toQuestion: toRocketRideQuestion, onPipelineError: options.onPipelineError, signal: options.signal });
+	const turnId = options.turnId ?? crypto.randomUUID();
+	// step: the turn's limits, read once; the meter counts every model request sent, so a turn that throws still reports them
+	const limits = host.limits?.read() ?? DEFAULT_LIMITS;
+	const meter = new UsageMeter({ model: options.model, limitUsd: limits.costUsd });
+	const model: ModelCall = deps.model ? metered(deps.model, meter) : createChatModel({ client, token: options.token, toQuestion: toRocketRideQuestion, onPipelineError: options.onPipelineError, signal: options.signal, meter });
+	const choose = deps.choose ?? shellChoice();
 	const markers = deps.markers ?? editorMarkers;
 
 	// step: the record of check results, which is also the loop's finish rule; it names an app the way check_app does
@@ -693,10 +819,14 @@ export async function runAgent(request: string, callback: (type: string, content
 	// step: the workspace; every save that works returns the types of an app's TypeScript file
 	// or the validate of a pipeline, and the validate is recorded for the finish rule
 	const { vfs } = host;
+	// step: the runs the conversation started; a fresh use adds one, and Auto stops or restarts only those
+	const scopeKey = host.scopeKey ?? '';
+	const currentScope = deps.currentScope ?? (() => findAgentHost()?.scopeKey);
+	const ledger = new RunLedger(options.runs ?? [], { client, scopeKey, currentScope: () => currentScope() ?? '', conversationId: options.conversationId ?? '' });
 	// step: the run's approvals; the toolkits and the save hook below get its checked client,
 	// and every card it shows is redacted on its way to the chat
 	const { ask } = options;
-	const approvals = new Approvals({ client, vfs, ask: ask && ((card) => ask(redactCard(card, shown))), settings: host.approvals?.run, signal: options.signal });
+	const approvals = new Approvals({ client, vfs, ask: ask && ((card) => ask(redactCard(card, shown))), settings: host.approvals?.run, signal: options.signal, runs: ledger });
 	const afterSave = async (path: string): Promise<string> => {
 		const appFile = APP_TYPESCRIPT_FILE.exec(path);
 		if (appFile) return typesNote(vfs, markers, appFile[1], appFile[2], hide);
@@ -706,43 +836,109 @@ export async function runAgent(request: string, callback: (type: string, content
 		return validateNote(validation, hide);
 	};
 
-	// step: the toolkits in mount order; one file toolkit per run, so reads never carry over,
-	// and its saves run the hook above
-	const files = new FilesystemTools(vfs, undefined, afterSave);
+	// step: the toolkits in mount order; one file toolkit per run, so reads never carry
+	// over, and its saves run the hook above. A question about unsaved changes holds every
+	// tool's time limit, and closes as Keep mine when the run ends or the user stops it,
+	// so a late answer never lands after the run
+	const editor = host.editor?.bind(host);
+	const userTime = new UserTime();
+	const runEnded = new AbortController();
+	const endOnStop = (): void => runEnded.abort();
+	options.signal.addEventListener('abort', endOnStop, { once: true });
+	if (options.signal.aborted) runEnded.abort();
+	const askUnsaved: ChoiceFn = (title, message) => userTime.during(choose(title, message, runEnded.signal));
+	const files = new FilesystemTools(vfs, undefined, afterSave, editor ? { choose: askUnsaved, editor } : undefined);
 	// step: a toolkit cuts a long text before the loop sees it, and a cut value no longer matches,
 	// so each one, and the save hook above, hides the values the file tools hid before it cuts
 	const hide = (text: string): string => files.secrets.hideKnown(text);
+	const askUser = new AskUserToolkit(approvals.client);
 	const composed = composeToolkits([
 		files,
 		new InventoryToolkit(vfs, (id) => host.devSession(id) !== null),
-		new RocketRideClientToolkit(approvals.client, vfs, hide),
-		new AppToolkit(approvals.client, host, { signal: options.signal, hide }),
+		new RocketRideClientToolkit(approvals.client, vfs, hide, ledger),
+		// a scaffold writes files the Undo record does not hold, so a turn that creates an app cannot be undone
+		new AppToolkit(approvals.client, host, { signal: options.signal, hide, created: (path) => files.tracker.created(path), onScaffold: () => files.undo.unavailable('this turn created an app') }),
 		// check_app hands each report to the record
 		new AppCheckToolkit(host, markers, (folder, report) => checks.appChecked(folder, report), { signal: options.signal, hide }),
+		askUser,
 	]);
 	// step: cards and the answer hold text the loop never saw (a server's names, check_app's summaries),
 	// so each value the file tools hid shows as its marker there too; a card asks only once the loop runs
 	const shown = (text: string): string => redactText(hide(text));
 
-	const result = await runLoop({
-		// execute holds back only a sure key shape, so a bearer token or a secret field still reaches here
-		request: redactText(request),
-		history: toHistory(options.history),
-		prefix: buildPrefix(CORE_PROMPT, options.prompts, composed),
-		tools: composed.tools,
-		model,
-		finish: checks,
-		emit: (type, text) => callback(type, text),
-		timeoutMs: (tool) => (tool === 'deploy_app' ? DEPLOY_APP_TIMEOUT_MS : TOOL_TIMEOUT_MS),
-		signal: options.signal,
-		takeQueued: options.takeQueued,
-		approve: (act, run) => approvals.approve(act, run),
-		secrets: files.secrets,
-		notes: changedFilesNote(files.tracker, vfs),
-	});
+	// step: what the turn did, read when it ends, however it ends
+	let paused: NeedsInputRequest | undefined;
+	const usageOf = (waves: number, toolCalls: number): TurnUsage => {
+		const used = meter.snapshot();
+		return {
+			waves,
+			modelRequests: used.requests,
+			toolCalls,
+			...(used.requests > 0 ? { tokens: { input: used.inputTokens, output: used.outputTokens, estimated: true } } : {}),
+			...(used.usd !== undefined ? { cost: { usd: used.usd, estimated: true } } : {}),
+		};
+	};
+	const turnOf = (outcome: Pick<TurnResult, 'outcome' | 'reason' | 'finalText' | 'error'>, waves: number, toolCalls: number): TurnResult => {
+		const undo = files.undo.state();
+		// a Stopped card never shows the question, so only a needs-you turn has a request to answer
+		const request = outcome.outcome === 'needs_input' ? (askUser.request ?? paused) : undefined;
+		return redactDeep({
+			turnId,
+			...(host.scopeKey !== undefined ? { scopeKey: host.scopeKey } : {}),
+			...outcome,
+			files: files.tracker.changes(),
+			checks: checks.results(),
+			usage: usageOf(waves, toolCalls),
+			...(request ? { request: hideRequest(request, hide) } : {}),
+			...(ledger.started.length ? { runsStarted: [...ledger.started] } : {}),
+			...(undo === 'none' ? {} : { undoAvailable: typeof undo !== 'object' }),
+		});
+	};
+
+	let result: LoopResult;
+	try {
+		result = await runLoop({
+			// execute holds back only a sure key shape, so a bearer token or a secret field still reaches here
+			request: redactText(request),
+			history: toHistory(options.history),
+			prefix: buildPrefix(CORE_PROMPT, options.prompts, composed),
+			tools: composed.tools,
+			model,
+			finish: checks,
+			emit: (type, text) => callback(type, text),
+			timeoutMs: (tool) => (tool === 'deploy_app' ? DEPLOY_APP_TIMEOUT_MS : TOOL_TIMEOUT_MS),
+			signal: options.signal,
+			takeQueued: options.takeQueued,
+			approve: (act, run) => approvals.approve(act, run),
+			secrets: files.secrets,
+			notes: changedFilesNote(files.tracker, vfs),
+			userTime,
+			endTurn: () => askUser.request?.question ?? null,
+			withdrawAsk: () => {
+				askUser.request = null;
+			},
+			maxWaves: limits.steps,
+		});
+	} catch (error) {
+		// step: nothing was gathered, so the chat shows the model's error; the result says what the turn got to
+		const message = error instanceof Error ? error.message : String(error);
+		throw new TurnError(message, turnOf({ outcome: 'failed', reason: 'error', finalText: '', error: message }, 1, 0));
+	} finally {
+		options.signal.removeEventListener('abort', endOnStop);
+		runEnded.abort();
+		options.undo?.(files.undo);
+	}
+
+	// step: a limit paused the turn: it asks the user to continue, in a new turn with a fresh budget
+	if (result.stopReason === 'limited' || result.stopReason === 'cost_limit') {
+		const question = result.stopReason === 'limited' ? `Paused after ${result.waves} ${result.waves === 1 ? 'step' : 'steps'}` : `Paused at the cost limit of ${dollars(meter.limitUsd)}`;
+		paused = { id: crypto.randomUUID().slice(0, 8), kind: 'continue', question };
+	}
 
 	// step: a stopped run writes no answer: the chat closes the turn with its stop row, and this adds the one fact that row can't know
-	if (result.stopReason !== 'stopped') callback('content', finalText(result, checks, shown));
+	const text = result.stopReason === 'stopped' ? '' : finalText(result, checks, shown);
+	if (result.stopReason !== 'stopped') callback('content', text);
 	else if (checks.changed) callback('thinking', NOT_CHECKED);
 	console.log(`[agent] stop=${result.stopReason} waves=${result.waves} modelCalls=${result.modelMs.length} medianMs=${median(result.modelMs)} guides=[${files.pathsSeen().filter(isReferencePath).join(',')}]`);
+	return turnOf({ outcome: outcomeOf(result.stopReason), reason: result.stopReason, finalText: text }, result.waves, result.toolCalls);
 }

@@ -69,6 +69,55 @@ export interface ToolStep {
 	run(): Promise<string>;
 }
 
+/**
+ * Thrown by a tool that refuses a call before it changes anything (the user
+ * kept their unsaved changes, the file moved on since it was read). The loop
+ * marks the call unstarted, so the finish rule does not ask for a check.
+ */
+export class RefusedError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'RefusedError';
+	}
+}
+
+/**
+ * The time the user spends answering a tool's question (the unsaved-changes
+ * dialog). While one is open, no running call's time limit runs.
+ */
+export class UserTime {
+	/** How many questions are open now. */
+	private open = 0;
+	private readonly listeners = new Set<() => void>();
+
+	/** True while at least one question is open. */
+	get asking(): boolean {
+		return this.open > 0;
+	}
+
+	/** Holds the clocks until the question settles. */
+	async during<T>(question: Promise<T>): Promise<T> {
+		this.change(1);
+		try {
+			return await question;
+		} finally {
+			this.change(-1);
+		}
+	}
+
+	/** Hears each time `asking` turns on or off. */
+	subscribe(listener: () => void): () => void {
+		this.listeners.add(listener);
+		return () => this.listeners.delete(listener);
+	}
+
+	private change(by: number): void {
+		const was = this.asking;
+		this.open += by;
+		if (was !== this.asking) for (const listener of [...this.listeners]) listener();
+	}
+}
+
 /** What every tool spec has. */
 interface ToolSpecBase {
 	/** Tool name as the LLM calls it. */

@@ -32,11 +32,12 @@
  * tab opens again is refused when the file moved on. A document lives while a
  * tab shows it or its text is unsaved.
  *
- * Each save waits for the one before it. Reload and Overwrite move the
- * document's generation before they await anything, and a save called in an
- * earlier generation writes nothing and rejects with SaveDroppedError. Reload
- * shows the stored text it had at once, so text on screen that differs from
- * what a write wrote does not take its version.
+ * Each save waits for the one before it. Discard mine, Reload and Overwrite
+ * move the document's generation before they await anything, and a save
+ * called in an earlier generation writes nothing and rejects with
+ * SaveDroppedError. Discard mine and Reload show the stored text they had at
+ * once, so text on screen that differs from what a write wrote does not take
+ * its version.
  */
 
 import { SaveDroppedError } from 'shared/modules/agent/host';
@@ -79,7 +80,7 @@ export class FileDocument {
 	private base: string | null = null;
 	/** The newest save called; a save called while it runs follows it. */
 	private lastSave: { text: string; overwrite: boolean; generation: number; done: Promise<void> } | null = null;
-	/** Moves on Reload and Overwrite; a save called before the move writes nothing. */
+	/** Moves on Discard mine, Reload and Overwrite; a save called before the move writes nothing. */
 	private generation = 0;
 	/** Puts text into this path's Monaco model; each tab's editor sets it as it mounts, and it goes with the last tab. */
 	sync?: (text: string) => void;
@@ -102,6 +103,7 @@ export class FileDocument {
 			getContent: () => this.text ?? undefined,
 			isDirty: () => this.dirty,
 			save: () => this.save(),
+			discard: () => this.discard(),
 		});
 		this.tabs += 1;
 		this.unwatch ??= this.view.subscribe(() => void this.load());
@@ -196,7 +198,7 @@ export class FileDocument {
 			try {
 				// step: the save before it lands first, or fails; either way this one names the version it left
 				if (ahead) await ahead.done.catch(() => undefined);
-				// step: Reload or Overwrite since the call dropped this text
+				// step: Discard mine, Reload or Overwrite since the call dropped this text
 				if (generation !== this.generation) throw new SaveDroppedError(this.path);
 				await this.write(overwrite, generation);
 			} catch (err) {
@@ -232,7 +234,7 @@ export class FileDocument {
 				} catch {
 					/* not on the server yet: nothing to adopt */
 				}
-				// step: a Reload during the read dropped this text
+				// step: Discard mine or Reload during the read dropped this text
 				if (generation !== this.generation) throw new SaveDroppedError(this.path);
 				this.version = version;
 			}
@@ -256,10 +258,11 @@ export class FileDocument {
 	}
 
 	/**
-	 * Drops the unsaved text (the banner's Reload). With a tab open it shows
-	 * the stored text it had at once, so typing during the load starts from
-	 * it. A stale document reads the server's copy, not the view's cached
-	 * copy, which is older when another tab or a teammate changed the file.
+	 * Drops the unsaved text (the banner's Reload, or Discard mine). With a
+	 * tab open it shows the stored text it had at once, so typing during the
+	 * load starts from it. A stale document reads the server's copy, not the
+	 * view's cached copy, which is older when another tab or a teammate
+	 * changed the file.
 	 */
 	async discard(): Promise<void> {
 		// step: before anything awaits

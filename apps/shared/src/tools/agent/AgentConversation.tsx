@@ -38,6 +38,13 @@
 //   after → session.save(hook messages) persists the conversation and the
 //           catalog row (announced on the shell bus; the sidebar re-lists)
 //
+// Each turn's bot row carries the card of how it ended (session.decorate),
+// and the card's links and buttons come back through onCardAction. The
+// latest turn's card has Undo; what an Undo did shows as a note row, and a
+// message sent while Undo runs waits for that row. When the tab unmounts
+// (closed, or a team switch), the session keeps the rows it showed last and
+// saves them (session.detach).
+//
 // A brand-new conversation renders a welcome panel of example prompts in
 // place of the empty thread — clicking one sends it as the first request.
 //
@@ -50,12 +57,12 @@
 // so switching tabs never reloads, and reopening a closed tab re-reads disk.
 // =============================================================================
 
-import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
-import { Button, ChatView, useChatMessages, useShellConnection, commonStyles } from 'shell';
+import { Button, ChatView, ConnectionManager, useChatMessages, useShellConnection, commonStyles } from 'shell';
 import type { DevToolProps } from 'shell';
 import type { TextResult } from 'shell';
-import type { ChatTurn } from 'shell/src/components/chat/types';
+import type { ChatCardAction, ChatTurn } from 'shell/src/components/chat/types';
 import { AgentSession } from '../../modules/agent/agent';
 import type { AgentCallback } from '../../modules/agent/agent';
 import { findAgentHost, type ApprovalControls, type ApprovalMode } from '../../modules/agent/host';
@@ -264,12 +271,36 @@ const ExampleCard: React.FC<{ heading: string; prompt: string; onPick: (prompt: 
  * @param props.isConnected - Shell connection state (gates the composer).
  */
 const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean }> = ({ session, isConnected }) => {
+	// step: a turn's card shows once it ends, which can come after the chat closed the turn (Stop's grace), so each end redraws
+	const [ends, setEnds] = useState(0);
 	/** The injected chat transport: one request through the agent session. The hook's status sink carries the thinking rows live. */
-	const request = useCallback((text: string, onStatus?: AgentCallback, turn?: ChatTurn): Promise<TextResult[]> => session.execute(text, onStatus, turn), [session]);
+	const request = useCallback(
+		(text: string, onStatus?: AgentCallback, turn?: ChatTurn): Promise<TextResult[]> =>
+			session
+				.execute(text, onStatus, turn)
+				.then(({ results }) => results)
+				.finally(() => setEnds((n) => n + 1)),
+		[session]
+	);
 
 	const { messages, isTyping, sendMessage, addSystemMessage, turn: controls } = useChatMessages({ initialMessages: session.messages, request });
 	// a host that serves no approval settings gets no switch
 	const approvals = findAgentHost()?.approvals?.controls;
+	// step: each turn's bot row with the card of how it ended; a turn that ends or a card press changes the session, not the rows, so `ends` redraws
+	const shown = useMemo(() => {
+		void ends;
+		return session.decorate(messages);
+	}, [session, messages, ends]);
+	// step: Undo becoming ready or running changes the cards, not the rows
+	useEffect(() => session.subscribe(() => setEnds((n) => n + 1)), [session]);
+
+	// step: unmounting (closing the tab, a team switch) stops the turn and takes the chat's rows along, so the session saves the rows it showed last
+	const rowsRef = useRef(messages);
+	rowsRef.current = messages;
+	useEffect(() => {
+		session.attach();
+		return () => session.detach(rowsRef.current);
+	}, [session]);
 
 	// step: persist after each completed exchange (bot reply landed). The
 	// ref dodges saving on mount when a restored conversation ends idle.
@@ -285,15 +316,35 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 	/**
 	 * Composer submit — the hook's built-in API path is bypassed by `request`.
 	 * A key is redacted before the row is made. Idle, the turn it opens shows
-	 * the error row; during a turn, the note says the key was not sent.
+	 * the error row; during a turn, the note says the key was not sent. While
+	 * an Undo runs, the message waits for it, so the turn it opens reads
+	 * Undo's note.
 	 */
 	const handleSend = useCallback(
 		(text: string) => {
 			const screened = session.screen(text);
-			void sendMessage(screened.text, null, '');
-			if (screened.note && isTyping) addSystemMessage(screened.note);
+			session.afterUndo(() => {
+				void sendMessage(screened.text, null, '');
+				if (screened.note && isTyping) addSystemMessage(screened.note);
+			});
 		},
 		[session, sendMessage, addSystemMessage, isTyping]
+	);
+
+	/** A press on a turn's card: a file opens in its editor, Open Variables opens the overlay, a choice or Continue is sent as the reply, and Undo adds a note row saying what it did. */
+	const handleCardAction = useCallback(
+		(messageId: number, action: ChatCardAction) => {
+			const done = session.cardAction(messageId, action, {
+				openFile: (path) => {
+					void findAgentHost()?.openFile?.(path);
+				},
+				openVariables: () => ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'environment' }),
+				send: handleSend,
+				note: addSystemMessage,
+			});
+			if (done) setEnds((n) => n + 1);
+		},
+		[session, handleSend, addSystemMessage]
 	);
 
 	// The welcome panel shown in place of an empty thread: what the agent is
@@ -317,7 +368,7 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 
 	return (
 		<div style={styles.root}>
-			<ChatView messages={messages} isTyping={isTyping} isConnected={isConnected} onSend={handleSend} placeholder="Reply to the agent..." emptySlot={welcome} leadingInputSlot={approvals && <ApprovalModeSwitch controls={approvals} />} turn={controls} />
+			<ChatView messages={shown} isTyping={isTyping} isConnected={isConnected} onSend={handleSend} placeholder="Reply to the agent..." emptySlot={welcome} leadingInputSlot={approvals && <ApprovalModeSwitch controls={approvals} />} turn={controls} onCardAction={handleCardAction} />
 		</div>
 	);
 };

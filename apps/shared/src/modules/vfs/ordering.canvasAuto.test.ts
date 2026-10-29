@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// ORDERING TESTS — a canvas in auto mode: typing, queued saves, Reload, Overwrite, close and a tab move
+// ORDERING TESTS — a canvas in auto mode: typing, queued saves, the dialog, Reload, Overwrite, close and a tab move
 // =============================================================================
 
 /**
@@ -35,4 +35,4 @@ import { test } from 'node:test';
 
 import { checkDocumentOrders } from './ordering.harness';
 
-test('with a canvas in auto mode, no order of typing, saves that queue, Reload, Overwrite, close, a tab move, Save & Run, a failed write drops, erases or keeps from the file what the user chose, or runs what the file does not hold', () => checkDocumentOrders('canvas', true));
+test('with a canvas in auto mode, no order of typing, saves that queue, Discard mine, Reload, Overwrite, close, a tab move, Save & Run, a failed write drops, erases or keeps from the file what the user chose, or runs what the file does not hold', () => checkDocumentOrders('canvas', true));

@@ -21,10 +21,10 @@
 // SOFTWARE.
 
 // =============================================================================
-// ORDERING TESTS — every order of agent, editors, Commit all, discards, team switch, tool timeout and approvals
+// ORDERING TESTS — every order of agent, editors, Commit all, discards, dialog answers, team switch, tool timeout and approvals
 // =============================================================================
 
-/** The ordering explorations; ordering.harness.ts holds the actors, the runs and every rule they check. */
+/** The ordering explorations; ordering.harness.ts holds the actors, the runs and every rule they check. The editor documents' are in ordering.<editor><Mode>.test.ts. */
 
 import assert from 'node:assert/strict';
 import { mock, test } from 'node:test';
@@ -114,18 +114,17 @@ test('no order of approvals, agent edits, team switch and tool timeout erases a 
 	}
 });
 
-test('no order of agent edits, editor saves, Commit all, the discards and a rollback in manual mode loses or erases a write', async () => {
+test('no order of agent edits, editor saves, Commit all, the discards, a rollback and dialog answers in manual mode loses or erases a write', async () => {
 	mock.timers.enable({ apis: ['setTimeout'] });
 	try {
-		// step: the user saves the first file, then the agent edits it; Commit all stores both changes
-		const plain = await runManual(['save', 'start', 'commit']);
-		assert.deepEqual(plain.failures, []);
-		assert.deepEqual(tokens(plain.final.get(FILE) ?? ''), new Set([ORIGINAL, 'ed1', 'agent']));
+		// step: with Save mine first for the first file, the user's and the agent's work both land
+		const plain = await runManual(['start', 'answer save']);
+		assert.deepEqual(tokens(plain.final.get(FILE) ?? ''), new Set([ORIGINAL, 'ed1', 'agent']), 'Save mine first keeps both changes');
 
 		// step: depth-first over every order of up to MANUAL_DEPTH steps
 		const found = await exploreManual();
 		report('manual', found);
-		assert.deepEqual([...found.kinds].sort(), ['commit', 'discard', 'discard-file', 'release', 'rollback', 'save', 'start', 'type'], 'every kind of step was tried');
+		assert.deepEqual([...found.kinds].sort(), ['answer', 'commit', 'discard', 'discard-file', 'release', 'rollback', 'save', 'start', 'type'], 'every kind of step was tried');
 		assert.deepEqual(found.failures.slice(0, 10), [], `${found.failures.length} of ${found.tried} orders broke a rule`);
 	} finally {
 		mock.timers.reset();
@@ -135,15 +134,15 @@ test('no order of agent edits, editor saves, Commit all, the discards and a roll
 test('from a working layer the page restored, no order of the same steps in manual mode loses or erases a write', async () => {
 	mock.timers.enable({ apis: ['setTimeout'] });
 	try {
-		// step: with the first file saved, the restored change, the user's and the agent's work all land
-		const plain = await runManual(['save', 'start'], { restored: true });
+		// step: with Save mine first for the first file, the restored change, the user's and the agent's work all land
+		const plain = await runManual(['start', 'answer save'], { restored: true });
 		assert.deepEqual(plain.failures, []);
 		assert.deepEqual(tokens(plain.final.get(FILE) ?? ''), new Set([ORIGINAL, 'saved', 'ed1', 'agent']));
 
 		// step: depth-first over every order of up to MANUAL_DEPTH steps
 		const found = await exploreManual({ restored: true });
 		report('manual, from a restored working layer', found);
-		assert.deepEqual([...found.kinds].sort(), ['commit', 'discard', 'discard-file', 'release', 'rollback', 'save', 'start', 'type'], 'every kind of step was tried');
+		assert.deepEqual([...found.kinds].sort(), ['answer', 'commit', 'discard', 'discard-file', 'release', 'rollback', 'save', 'start', 'type'], 'every kind of step was tried');
 		assert.deepEqual(found.failures.slice(0, 10), [], `${found.failures.length} of ${found.tried} orders broke a rule`);
 	} finally {
 		mock.timers.reset();
@@ -161,7 +160,44 @@ test("with an editor's first read slow, no order of the same steps in manual mod
 		// step: depth-first over every order of up to MANUAL_DEPTH steps
 		const found = await exploreManual({ slowRead: true });
 		report('manual, with a slow first read', found);
-		assert.deepEqual([...found.kinds].sort(), ['commit', 'discard', 'discard-file', 'release', 'rollback', 'save', 'start', 'type'], 'every kind of step was tried');
+		assert.deepEqual([...found.kinds].sort(), ['answer', 'commit', 'discard', 'discard-file', 'release', 'rollback', 'save', 'start', 'type'], 'every kind of step was tried');
+		assert.deepEqual(found.failures.slice(0, 10), [], `${found.failures.length} of ${found.tried} orders broke a rule`);
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test('in manual mode run as runAgent runs it, no question times out its call, and none outlives the run', async () => {
+	mock.timers.enable({ apis: ['setTimeout'] });
+	try {
+		// step: the clock moves past the limit while the first question is open: the call waits for the answer
+		const paused = await runManual(['start', 'timeout', 'answer save'], { userTime: true });
+		assert.deepEqual(paused.failures, []);
+		assert.deepEqual(tokens(paused.final.get(FILE) ?? ''), new Set([ORIGINAL, 'ed1', 'agent']));
+
+		// step: depth-first over every order of up to MANUAL_DEPTH steps, with the clock as a step
+		const found = await exploreManual({ userTime: true });
+		report('manual, as runAgent runs it', found);
+		assert.deepEqual([...found.kinds].sort(), ['answer', 'commit', 'discard', 'discard-file', 'release', 'rollback', 'save', 'start', 'timeout', 'type'], 'every kind of step was tried');
+		assert.deepEqual(found.failures.slice(0, 10), [], `${found.failures.length} of ${found.tried} orders broke a rule`);
+	} finally {
+		mock.timers.reset();
+	}
+});
+
+test("with the preview opening and a teammate's change to the server copy, no order of the same steps in manual mode loses, erases or caches what the server never held", async () => {
+	mock.timers.enable({ apis: ['setTimeout'] });
+	try {
+		// step: the preview opens over the unsaved typing, and the user answers Discard mine for the first file:
+		// the cache keeps the stored file, and the agent's edit lands on it
+		const plain = await runManual(['preview', 'start', 'answer discard'], { outside: true });
+		assert.deepEqual(plain.failures, []);
+		assert.deepEqual(tokens(plain.final.get(FILE) ?? ''), new Set([ORIGINAL, 'agent']));
+
+		// step: depth-first over every order of up to MANUAL_DEPTH steps
+		const found = await exploreManual({ outside: true });
+		report('manual, with the preview and a teammate', found);
+		assert.deepEqual([...found.kinds].sort(), ['answer', 'commit', 'discard', 'discard-file', 'preview', 'release', 'rollback', 'save', 'start', 'teammate', 'type'], 'every kind of step was tried');
 		assert.deepEqual(found.failures.slice(0, 10), [], `${found.failures.length} of ${found.tried} orders broke a rule`);
 	} finally {
 		mock.timers.reset();

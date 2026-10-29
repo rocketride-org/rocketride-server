@@ -50,11 +50,11 @@
  *     With OKs it also collects every OK asked while an edit's work is still
  *     on its way.
  *   - Manual mode, two files, each open in an editor with unsaved typing, so
- *     the agent's edit of a file is refused until the user saves it. A step
- *     starts the agent, releases a held store call, saves or types in the
- *     first editor, or runs Commit all, Discard all, a discard of one file, or
- *     a rollback to the checkpoint an earlier turn left. Beyond erased writes
- *     it checks four things. A write that worked and was not discarded
+ *     the agent's edits of both in one wave ask the user. A step starts the
+ *     agent, releases a held store call, saves or types in the first editor,
+ *     runs Commit all, Discard all, a discard of one file, or a rollback to
+ *     the checkpoint an earlier turn left, or answers the dialog on screen.
+ *     Beyond erased writes it checks five things. A write that worked and was not discarded
  *     reaches the store after a last commit. A Commit all that met no
  *     conflict carried every write that worked and was called before it,
  *     unless a discard called between the two took it out. A write called
@@ -62,16 +62,32 @@
  *     view after it. And an editor's save is refused as stale, or an editor's
  *     version falls behind its file's, only after a change to the file landed
  *     since the editor loaded or saved it (an agent write that worked, or a
- *     discard or rollback that took the file out).
- *   - The same, from a working layer the page restored after a reload, and
- *     with the first editor's first read slow (see ManualOptions).
+ *     discard or rollback that took the file out). And the model is told the
+ *     user kept their changes only after a dialog for that file that the user
+ *     answered Keep mine.
+ *   - The same, from a working layer the page restored after a reload, with
+ *     the first editor's first read slow, and with the loop run the way
+ *     runAgent runs it: the tool time limits stand still while a question is
+ *     open, each question hears when the run ends, and a step moves the clock
+ *     past the limit (see ManualOptions).
+ *   - The same manual mode, with two more steps: the dev preview opens (one
+ *     batch read of both files through the view, then it primes each file it
+ *     got, as devSession.ts does), and a teammate changes the first file's
+ *     server copy. A commit over that change may meet a conflict; it then
+ *     stores nothing, so every write that worked must still be in the view.
+ *     A staged file's conflict anchor is the copy the page read, so a commit
+ *     over a teammate's change no writer here saw meets a conflict, and a
+ *     write that erases the teammate's change breaks the erased rule like any
+ *     other. Every manual run also checks that the base's cached copy of a
+ *     file is always one the server held: no editor buffer and no staged
+ *     change.
  *   - The real editor documents, four times: a text tab (fileDocument.ts)
  *     and a canvas (canvasDocument.ts with the shell's Documents), each in
  *     auto and manual mode, each in a test file of its own so the test
  *     runner runs them in parallel. The document opens and loads, the user
  *     types, and the agent reads the file. A step types, presses Ctrl+S (a
  *     save can start while another waits its turn), lets the agent edit (it
- *     is refused while the file is unsaved), clicks the banner's or the
+ *     asks when the file is unsaved), answers the dialog, clicks the banner's or the
  *     stale dialog's Reload or Overwrite, closes the tab (the canvas's close
  *     answers the shell's dialog Don't Save), moves the tab to another group,
  *     releases a held call, or, in auto mode, changes the server copy as a
@@ -79,9 +95,10 @@
  *     canvas a step also picks Save & Run. In manual mode the staging store's
  *     persists are held, so a staged save waits too. The checks: no write
  *     erases a token the file held (an Overwrite may save over what was in
- *     the file or called before its click). After a Reload or the canvas's
- *     Don't Save, no write called later lands with typing that choice
- *     dropped. An open editor with nothing unsaved ends with the stored file
+ *     the file or called before its click). After Discard mine, Reload or the
+ *     canvas's Don't Save, no write called later lands with typing that
+ *     choice dropped, and the agent's edit after Save mine first lands on the
+ *     typing that save saved. An open editor with nothing unsaved ends with the stored file
  *     at its version, and a text tab with unsaved typing behind the file
  *     shows the banner. A save with no Reload, Overwrite or close after it is
  *     not dropped and leaves its typing in the file, and a save called before
@@ -103,12 +120,15 @@ import { mock } from 'node:test';
 
 import { Documents } from 'shell/src/components/docs/Documents';
 
+import { editorControl } from '../../../../rocket-ui/src/agent/editorControls';
 import { fileDocument } from '../../../../rocket-ui/src/surfaces/workspace/fileDocument';
 import { stagingScopeKey, type Workspace } from '../../../../rocket-ui/src/surfaces/workspace/vfs/workspace';
-import { SaveDroppedError } from '../agent/host';
+import { queueChoices } from '../agent/choice';
+import { SaveDroppedError, type EditorControl } from '../agent/host';
 import { CheckRecord } from '../agent/run';
-import { FilesystemTools } from '../agent/toolkits/filesystem';
-import { AgentTool } from '../agent/tools';
+import type { ChoiceFn, UnsavedChoice } from '../agent/toolkits/common';
+import { AGENT_ORIGIN, FilesystemTools } from '../agent/toolkits/filesystem';
+import { AgentTool, UserTime } from '../agent/tools';
 import { runLoop } from '../agent/wave/loop';
 import { FakeStore } from './fakeStore.harness';
 import { sha256Hex } from './hash';
@@ -523,7 +543,7 @@ export async function runSwitchOrder(order: SwitchStep[], asking = false): Promi
 }
 
 // =============================================================================
-// MANUAL MODE — Commit all, the discards and a rollback, with editors that hold unsaved typing
+// MANUAL MODE — Commit all, the discards and a rollback, with editors whose unsaved typing the agent asks about
 // =============================================================================
 
 /** The third file: an earlier turn staged it and was sealed as a checkpoint, which the rollback step returns to. */
@@ -552,11 +572,14 @@ async function persistRestored(team: string): Promise<void> {
 	]);
 }
 
+/** The answers a dialog step can give. */
+const ANSWERS = ['save', 'discard', 'keep'] as const;
+
 /** A step of a manual-mode order. */
-type ManualStep = 'start' | 'save' | 'type' | 'commit' | 'discard' | 'discard-file' | 'rollback' | `release ${number}`;
+type ManualStep = 'start' | 'save' | 'type' | 'commit' | 'discard' | 'discard-file' | 'rollback' | 'timeout' | 'preview' | 'teammate' | `answer ${(typeof ANSWERS)[number]}` | `release ${number}`;
 
 /** The rules the manual exploration checks (see the file header). */
-type FailureKind = 'erased' | 'lost' | 'not-committed' | 'left-after-discard' | 'false-stale' | 'stuck';
+type FailureKind = 'erased' | 'lost' | 'not-committed' | 'left-after-discard' | 'false-stale' | 'keep-unasked' | 'asked-past-limit' | 'open-after-run' | 'poisoned' | 'stuck';
 
 /** What one manual run saw. */
 interface ManualOutcome {
@@ -569,6 +592,12 @@ interface ManualOutcome {
 
 /** How a manual run is set up. */
 interface ManualOptions {
+	/**
+	 * Run the loop the way runAgent does: the tool time limits stand still
+	 * while a question is open (UserTime), each question gets a signal that
+	 * aborts when the run ends, and a step moves the clock past the limit.
+	 */
+	userTime?: boolean;
 	/**
 	 * Start from a working layer the page restored, as after a reload: saved
 	 * changes to both files wait in it, above the earlier turn's checkpoint.
@@ -584,6 +613,13 @@ interface ManualOptions {
 	 * follows its file.
 	 */
 	slowRead?: boolean;
+	/**
+	 * Two more steps, once each, possible while a dialog is open too: the dev
+	 * preview opens (one batch read of both files through the view, then it
+	 * primes each file it got), and a teammate changes the first file's
+	 * server copy.
+	 */
+	outside?: boolean;
 }
 
 /** A write through the view: the token it adds, when it was called, and whether it worked. */
@@ -608,14 +644,30 @@ interface Tab {
 	token: string;
 	/** False until its first load has landed. */
 	ready?: boolean;
+	/** The stored text it loaded or last saved; its typing starts from it. */
+	base: string;
+	/** True after a save was refused as stale. */
+	stale?: boolean;
+	/** The save on its way and the text it writes. */
+	running?: { content: string; done: Promise<void> };
+}
+
+/** A dialog the agent showed, and what became of it. */
+interface Shown {
+	message: string;
+	resolve: (choice: UnsavedChoice) => void;
+	/** The user's answer. */
+	answer?: UnsavedChoice;
+	/** True once the dialog was taken away unanswered (the run ended). */
+	closed?: boolean;
 }
 
 /** The view's private drop step, which the checks watch to learn what each discard really took out (see runManual). */
 type DropInTurn = (paths: string[], foreseen: Map<string, boolean>, drop: () => { dropped: Map<string, boolean>; settle: () => Promise<void> }, ...rest: unknown[]) => Promise<void>;
 
 /**
- * Runs one manual-mode order, then releases every held call until all is
- * done, then checks the rules.
+ * Runs one manual-mode order, then answers any open dialog Keep mine and
+ * releases every held call until all is done, then checks the rules.
  */
 export async function runManual(order: ManualStep[], opts: ManualOptions = {}): Promise<ManualOutcome> {
 	runs += 1;
@@ -623,6 +675,9 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 	const store = new FakeStore({ [storePath(team)]: ORIGINAL, [storePath(team, FILE_B)]: ORIGINAL_B }).install();
 	for (const path of store.files.keys()) store.watched.add(path);
 	const seeded = new Set(store.watched);
+	// step: each content a file has held on the server: its seed and the teammate's change here, and each write in store.landed
+	const history = new Map([...store.files].map(([path, content]) => [path, new Set([content])]));
+	const serverHeld = (path: string, content: string): boolean => history.get(path)?.has(content) === true || store.landed.some((w) => w.path === path && w.content === content);
 	if (opts.restored) await persistRestored(team);
 	const ws: Workspace = await buildWorkspace({ hostAppId: 'ordering.test', autoCommit: false, scope: { kind: 'team', teamId: team } });
 	const staged = ws.view as StagedFileSystem;
@@ -694,6 +749,18 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 		);
 	};
 
+	// step: a commit's check and its write are not one call on the store, so a teammate's change between them is out of
+	// the page's reach: the teammate step waits while a commit replays (the view's private replay step)
+	let replaying = 0;
+	const replays = staged as unknown as { replay: (...args: unknown[]) => Promise<unknown> };
+	const realReplay = replays.replay.bind(staged);
+	if (opts.outside) {
+		replays.replay = (...args) => {
+			replaying += 1;
+			return realReplay(...args).finally(() => (replaying -= 1));
+		};
+	}
+
 	// step: an earlier turn staged apps/c.ts and was sealed as a checkpoint. A restored start
 	// has the two saved changes above it, staged before any step, and holds the persists from here
 	let checkpoint: string | null = EARLIER_TURN;
@@ -706,18 +773,21 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 	}
 	const discardsFile = opts.restored ? FILE_B : FILE;
 
-	// step: the editors: a load and a save at the loaded version (a version is taken when its
-	// call is made, so the clock is too)
+	// step: the editors: a load, a save at the loaded version, and a discard that loads again
+	// (a version is taken when its call is made, so the clock is too)
 	const load = async (tab: Tab): Promise<void> => {
 		const since = ++clock;
 		const read = await view.readVersioned(tab.path);
+		const stored = String(read.content);
 		// step: typing that landed during the read stays
 		if (tab.dirty) return;
-		tab.buffer = String(read.content);
+		tab.buffer = stored;
+		tab.base = stored;
 		tab.loaded = read.version;
 		tab.since = since;
+		tab.stale = false;
 	};
-	const save = async (tab: Tab): Promise<void> => {
+	const saveNow = async (tab: Tab): Promise<void> => {
 		tab.saving = true;
 		const content = tab.buffer;
 		const since = tab.since;
@@ -727,21 +797,42 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 			const mine = view.version(tab.path);
 			await writing;
 			tab.loaded = mine;
+			tab.base = content;
+			tab.stale = false;
 			tab.dirty = false;
 			tab.since = at;
 		} catch (err) {
-			if (err instanceof StaleWriteError) refusedSaves.push({ path: tab.path, at, since, content });
+			if (err instanceof StaleWriteError) {
+				refusedSaves.push({ path: tab.path, at, since, content });
+				tab.stale = true;
+			}
 			throw err;
 		} finally {
 			tab.saving = false;
 		}
 	};
+	// step: a save called while one of the same text runs is that save, as fileDocument's is
+	const save = (tab: Tab): Promise<void> => {
+		if (tab.saving && tab.running?.content === tab.buffer) return tab.running.done;
+		tab.running = { content: tab.buffer, done: saveNow(tab) };
+		return tab.running.done;
+	};
+	const discardTab = async (tab: Tab): Promise<void> => {
+		const fresh = tab.stale === true;
+		tab.stale = false;
+		if (fresh) ws.view.invalidate(tab.path);
+		tab.dirty = false;
+		tab.buffer = tab.base;
+		ws.view.notify();
+		await load(tab);
+	};
+	const control = (tab: Tab): EditorControl => ({ save: () => save(tab), discard: () => discardTab(tab) });
 
 	// step: both editors load their file (the loads are released at once), then the user types in each.
 	// With opts.slowRead the first editor's load is the slow read, which a step releases: until it lands
 	// that editor holds nothing, and the user types in the second only
 	const opened = (path: string): Tab => {
-		const tab: Tab = { path, buffer: '', dirty: false, saving: false, loaded: 0, since: 0, token: '' };
+		const tab: Tab = { path, buffer: '', base: '', dirty: false, saving: false, loaded: 0, since: 0, token: '' };
 		tabs.set(path, tab);
 		return tab;
 	};
@@ -766,7 +857,40 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 	ws.view.notify();
 	const tabA = tabs.get(FILE) as Tab;
 
-	// step: the agent reads both files, then edits both in one wave; a file with unsaved typing refuses its edit
+	// step: the dialog: questions as the app queues them, answered by steps.
+	// With opts.userTime, as in runAgent, each question holds the tool clocks and gets a signal that
+	// aborts when the run ends; the model hears an answer only while the run is still going
+	const userTime = opts.userTime ? new UserTime() : undefined;
+	const runEnded = new AbortController();
+	const shown: Shown[] = [];
+	const told: Array<{ message: string; choice: UnsavedChoice }> = [];
+	const show = (_title: string, message: string) => {
+		const dialog: Shown = { message, resolve: () => undefined };
+		const answer = new Promise<UnsavedChoice>((r) => (dialog.resolve = r));
+		shown.push(dialog);
+		return {
+			answer,
+			close: () => {
+				if (dialog.answer === undefined) dialog.closed = true;
+			},
+		};
+	};
+	const asked = queueChoices(show);
+	const choose: ChoiceFn = async (title, message) => {
+		const question = asked(title, message, opts.userTime ? runEnded.signal : undefined);
+		const answer = await (userTime ? userTime.during(question) : question);
+		if (!runEnded.signal.aborted) told.push({ message, choice: answer });
+		return answer;
+	};
+	const open = () => shown.find((dialog) => dialog.answer === undefined && !dialog.closed);
+	const answer = (choice: UnsavedChoice): void => {
+		const dialog = open() as Shown;
+		dialog.answer = choice;
+		dialog.resolve(choice);
+	};
+	const progress = (): string => `${shown.length} ${shown.filter((d) => d.answer || d.closed).length}`;
+
+	// step: the agent reads both files, then edits both in one wave
 	const replies = [
 		plan([
 			['read_file', { path: FILE }],
@@ -779,13 +903,39 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 	];
 	for (let i = 0; i < 3; i++) replies.push(JSON.stringify({ thought: 'finishing', done: true, answer: 'Edited.' }));
 	let agent: Promise<unknown> | null = null;
+	// The dialog that was open when the clock moved past the limit: its call must not time out while it is open.
+	let tickedWhileAsking: Shown | undefined;
+	// The tool calls still running, a call that timed out among them: the run may end before they do.
+	const calls = new Set<Promise<unknown>>();
+	const tools = new FilesystemTools(view, undefined, undefined, { choose, editor: (path) => (tabs.has(path) ? control(tabs.get(path) as Tab) : null) }).tools().map(
+		(tool) =>
+			new AgentTool({
+				name: tool.name,
+				description: tool.description,
+				parameters: tool.parameters,
+				prepare: async (args) => {
+					const step = await tool.prepare(args);
+					return {
+						...(step.act ? { act: step.act } : {}),
+						run: () => {
+							const running = step.run();
+							const settled = running.catch(() => undefined);
+							calls.add(settled);
+							void settled.then(() => calls.delete(settled));
+							return running;
+						},
+					};
+				},
+			})
+	);
 	const startAgent = () =>
 		runLoop({
 			request: 'Edit both files.',
 			history: [],
 			prefix: { role: 'You are Wave.', instructions: [] },
-			tools: new FilesystemTools(view).tools(),
+			tools,
 			model: async () => {
+				if (tickedWhileAsking && tickedWhileAsking.answer === undefined && !tickedWhileAsking.closed) fail('asked-past-limit', `the loop went on to the model while the user was still answering "${tickedWhileAsking.message}": its call timed out during the question`);
 				const next = replies.shift();
 				if (next === undefined) throw new Error('The scripted model has no reply left.');
 				return next;
@@ -796,16 +946,34 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 			signal: new AbortController().signal,
 			takeQueued: () => [],
 			approve: async (_act, run) => run,
-		}).catch(() => undefined);
+			...(userTime ? { userTime } : {}),
+		})
+			.catch(() => undefined)
+			.finally(() => {
+				runEnded.abort();
+				// step: the run is over: no dialog of it may stay on screen for an answer that would land after it
+				if (opts.userTime) for (const dialog of shown) if (dialog.answer === undefined && !dialog.closed) fail('open-after-run', `the dialog "${dialog.message}" stayed open after the run ended`);
+			});
 
-	// step: the user's steps
+	// step: the user's steps; while a dialog is up the page behind it takes none (the clock still moves)
 	let saves = 0;
 	let typed = false;
 	let committed = false;
 	let discarded = false;
 	let discardedFile = false;
 	let rolledBack = false;
+	let timedOut = false;
+	let previewed = false;
+	let teammateChanged = false;
 	const inflight = new Set<Promise<unknown>>();
+	// step: the base's cached copy of a file is always one the server held, never an editor buffer or a staged change
+	const checkCache = (): void => {
+		for (const path of [FILE, FILE_B]) {
+			const cached = staged.cachedContent(path);
+			const text = `the cache holds '${String(cached)}' for ${path}, which the server never held`;
+			if (cached !== undefined && !serverHeld(storePath(team, path), String(cached)) && !failures.some((f) => f.text === text)) fail('poisoned', text);
+		}
+	};
 	const track = (work: Promise<unknown>): void => {
 		const settled = work.catch(() => undefined);
 		inflight.add(settled);
@@ -821,11 +989,15 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 			tab.ready = true;
 		};
 		track(follow(slowLoad));
-		await settle(store);
+		await settle(store, progress);
 		store.heldAnswers.delete(storePath(team));
 	}
 	const possible = (): ManualStep[] => {
 		const steps: ManualStep[] = store.held.map((_, i) => `release ${i}` as const);
+		if (opts.userTime && agent && !timedOut) steps.push('timeout');
+		if (opts.outside && !previewed) steps.push('preview');
+		if (opts.outside && !teammateChanged && replaying === 0) steps.push('teammate');
+		if (open()) return [...steps, ...ANSWERS.map((a) => `answer ${a}` as const)];
 		if (!agent) steps.push('start');
 		if (tabA.dirty && !tabA.saving && saves < 2) steps.push('save');
 		if (!typed && tabA.ready && !tabA.dirty && !tabA.saving) steps.push('type');
@@ -871,29 +1043,54 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 		} else if (step === 'rollback') {
 			rolledBack = true;
 			track(staged.rollback(checkpoint as string));
+		} else if (step === 'timeout') {
+			timedOut = true;
+			tickedWhileAsking = open();
+			mock.timers.tick(LIMIT_MS);
+		} else if (step === 'preview') {
+			previewed = true;
+			track(
+				view.readMany([FILE, FILE_B]).then((found) => {
+					for (const [path, content] of Object.entries(found)) view.prime(path, String(content));
+				})
+			);
+		} else if (step === 'teammate') {
+			teammateChanged = true;
+			const content = `${store.files.get(storePath(team)) ?? ''}+teammate`;
+			store.files.set(storePath(team), content);
+			history.get(storePath(team))?.add(content);
+			changes.get(FILE)?.push(++clock);
+		} else if (step.startsWith('answer ')) {
+			answer(step.slice('answer '.length) as UnsavedChoice);
 		} else {
 			store.held.splice(Number(step.slice('release '.length)), 1)[0].release();
 		}
-		await settle(store);
+		await settle(store, progress);
+		checkCache();
 	}
 	const next = possible();
 
-	// step: finish the run: release what is held
+	// step: finish the run: answer what is open Keep mine, release what is held
 	const drive = async <T>(work: Promise<T>, what: string): Promise<T | undefined> => {
 		let done = false;
 		void work.then(
 			() => (done = true),
 			() => (done = true)
 		);
-		await settle(store);
+		await settle(store, progress);
 		while (!done) {
-			const held = store.held.shift();
-			if (!held) {
-				fail('stuck', `${what} waits on nothing the store holds`);
-				return undefined;
+			const dialog = open();
+			if (dialog) answer('keep');
+			else {
+				const held = store.held.shift();
+				if (!held) {
+					fail('stuck', `${what} waits on nothing the store holds`);
+					return undefined;
+				}
+				held.release();
 			}
-			held.release();
-			await settle(store);
+			await settle(store, progress);
+			checkCache();
 		}
 		return work;
 	};
@@ -924,6 +1121,10 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 		Promise.all([agent, ...inflight]).then(() => undefined),
 		'the run'
 	);
+	await drive(
+		Promise.all([...inflight, ...calls]).then(() => undefined),
+		'the steps and the calls still running'
+	);
 	if (failures.some((f) => f.kind === 'stuck')) return { next, failures, final: new Map() };
 	checkEditors();
 
@@ -940,12 +1141,27 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 		}
 	}
 	const last = await drive(staged.commit(), 'the last commit');
-	if (last && last.conflicts.length > 0) fail('lost', `the last commit met conflicts: ${last.conflicts.map((c) => `${c.path} ${c.reason}`).join(', ')}`);
+	checkCache();
+	// step: a commit over the teammate's change may meet a conflict on the first file; it then stores nothing,
+	// so every write that worked must still be in the view, and the teammate's change stays on the server
+	const overTeammate = last !== undefined && teammateChanged && last.conflicts.length > 0 && last.conflicts.every((c) => c.path === FILE && c.reason === 'changed');
+	if (last && last.conflicts.length > 0 && !overTeammate) fail('lost', `the last commit met conflicts: ${last.conflicts.map((c) => `${c.path} ${c.reason}`).join(', ')}`);
 	const finalStore = new Map([FILE, FILE_B].map((path) => [path, store.files.get(storePath(team, path)) ?? '']));
+	const kept = new Map(finalStore);
+	if (overTeammate) for (const path of [FILE, FILE_B]) kept.set(path, String((await drive(view.read(path), `reading ${path}`).catch(() => '')) ?? ''));
 	for (const w of writes) {
-		if (w.ok && w.at > (lastDrop.get(w.path) ?? 0) && !tokens(finalStore.get(w.path) ?? '').has(w.token)) fail('lost', `'${w.token}' was written to ${w.path} and never reached the store`);
+		if (w.ok && w.at > (lastDrop.get(w.path) ?? 0) && !tokens(kept.get(w.path) ?? '').has(w.token)) fail('lost', `'${w.token}' was written to ${w.path} and ${overTeammate ? 'is neither stored nor still in the view' : 'never reached the store'}`);
 	}
 	for (const erased of erasures(store, seeded)) fail('erased', erased);
+
+	// step: every Keep mine the model heard follows a dialog for it that the user answered Keep mine
+	const keeps = shown.filter((d) => d.answer === 'keep').map((d) => d.message);
+	for (const heard of told) {
+		if (heard.choice !== 'keep') continue;
+		const at = keeps.indexOf(heard.message);
+		if (at < 0) fail('keep-unasked', `the model heard the user kept their changes ("${heard.message}") without a dialog answered Keep mine`);
+		else keeps.splice(at, 1);
+	}
 	return { next, failures, final: finalStore };
 }
 
@@ -1035,10 +1251,10 @@ function boundModules(): { project: ProjectVfsModule; canvas: CanvasDocumentModu
 }
 
 /** A step of a document order. */
-type DocumentStep = 'type' | 'save' | 'edit' | 'reload' | 'overwrite' | 'close' | 'move' | 'run' | 'teammate' | `release ${number}` | `fail ${number}`;
+type DocumentStep = 'type' | 'save' | 'edit' | 'reload' | 'overwrite' | 'close' | 'move' | 'run' | 'teammate' | `answer ${(typeof ANSWERS)[number]}` | `release ${number}` | `fail ${number}`;
 
 /** The rules the document explorations check (see the file header). */
-type DocumentFailure = 'erased' | 'dropped-written' | 'not-stored' | 'unflagged' | 'unsaved' | 'move-dropped' | 'ran-unstored' | 'error-after-choice' | 'stuck';
+type DocumentFailure = 'erased' | 'dropped-written' | 'not-stored' | 'unflagged' | 'unsaved' | 'move-dropped' | 'ran-unstored' | 'edit-unsaved' | 'error-after-choice' | 'stuck';
 
 /** What one document run saw. */
 interface DocumentOutcome {
@@ -1081,8 +1297,9 @@ interface DocumentEditor {
 }
 
 /**
- * Runs one order of the document exploration, then releases every held call
- * until all is done, then checks the rules.
+ * Runs one order of the document exploration, then answers any open dialog
+ * Keep mine and releases every held call until all is done, then checks the
+ * rules.
  *
  * @param order - The steps, in order.
  * @param kind - The text tab (fileDocument.ts) or the canvas (canvasDocument.ts).
@@ -1165,8 +1382,9 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 		);
 		return saving;
 	};
-	// step: when the editor moved
+	// step: when the editor moved, and the typing each Save mine first saved
 	const moves: number[] = [];
+	const savedFirst: Array<{ at: number; tokens: Set<string> }> = [];
 	// step: the choices that drop or save over the user's buffer. The dropped tokens are the buffer's that are neither in the file
 	// nor in a write already called. A text tab drops its text at once; a canvas drops its pipeline only when its reload puts the
 	// stored one on screen (typing during the read keeps the pipeline), and its close drops it at once
@@ -1338,6 +1556,21 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 	// step: in manual mode a save stays staged, so the staging store's persist is what a step releases
 	if (!auto) store.holdsPersists = true;
 
+	// step: the agent's dialog, answered by steps
+	const shown: Shown[] = [];
+	const ask: ChoiceFn = async (_title, message) => {
+		const dialog: Shown = { message, resolve: () => undefined };
+		const answer = new Promise<UnsavedChoice>((r) => (dialog.resolve = r));
+		shown.push(dialog);
+		return answer;
+	};
+	const open = () => shown.find((dialog) => dialog.answer === undefined);
+	const answer = (choice: UnsavedChoice): void => {
+		const dialog = open() as Shown;
+		dialog.answer = choice;
+		dialog.resolve(choice);
+	};
+
 	// step: the agent reads the file now, and edits it in its next wave, which waits for the 'edit' step
 	let edit!: () => void;
 	const editing = new Promise<void>((resolve) => (edit = resolve));
@@ -1349,7 +1582,7 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 		request: `Edit ${path}.`,
 		history: [],
 		prefix: { role: 'You are Wave.', instructions: [] },
-		tools: new FilesystemTools(ws.view).tools(),
+		tools: new FilesystemTools(ws.view, undefined, undefined, { choose: ask, editor: (p) => editorControl(ws.view, p) }).tools(),
 		model: async () => {
 			if (++calls === 2) await editing;
 			const next = replies.shift();
@@ -1365,7 +1598,7 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 	}).catch(() => undefined);
 	await settle(store, () => `${calls}`);
 
-	// step: the user's steps
+	// step: the user's steps; while the agent's dialog is up the page behind it takes none
 	let saved = 0;
 	let reloaded = false;
 	let overwritten = false;
@@ -1380,6 +1613,7 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 		// step: a teammate's change between a write's freshness check and its store write is out of the page's reach (the store
 		// has no conditional write), so it waits while a write is held past its check
 		if (auto && !teammateChanged && !store.held.some((h) => h.label.startsWith('write '))) steps.push('teammate');
+		if (open()) return [...steps, ...ANSWERS.map((a) => `answer ${a}` as const)];
 		if (!edited) steps.push('edit');
 		if (closed || editor.buffer() === null) return steps;
 		if (typed < 3) steps.push('type');
@@ -1391,7 +1625,7 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 		steps.push('close');
 		return steps;
 	};
-	const progress = (): string => `${calls} ${inflight.size}`;
+	const progress = (): string => `${calls} ${shown.length} ${inflight.size}`;
 
 	for (const step of order) {
 		if (!possible().includes(step)) throw new Error(`Step ${step} is not possible after ${order.join(', ')}`);
@@ -1432,6 +1666,11 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 			const next = kind === 'text' ? `${content}+teammate` : pipeline(`${(JSON.parse(content) as { t: string }).t}+teammate`);
 			store.files.set(stored, next);
 			current = next;
+		} else if (step.startsWith('answer ')) {
+			const choice = step.slice('answer '.length) as UnsavedChoice;
+			if (choice === 'discard' && editor.dirty()) choose('Discard mine', editor.buffer(), true, kind === 'text');
+			if (choice === 'save' && editor.dirty()) savedFirst.push({ at: clock, tokens: userTokens(editor.buffer()) });
+			answer(choice);
 		} else if (step.startsWith('fail ')) {
 			failed = true;
 			store.held.splice(Number(step.slice('fail '.length)), 1)[0].fail();
@@ -1442,7 +1681,7 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 	}
 	const next = possible();
 
-	// step: finish the run: release what is held, and let the agent edit if no step did
+	// step: finish the run: answer what is open Keep mine, release what is held, and let the agent edit if no step did
 	if (!edited) edit();
 	const drive = async (work: Promise<unknown>, what: string): Promise<boolean> => {
 		let done = false;
@@ -1452,12 +1691,15 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 		);
 		await settle(store, progress);
 		while (!done) {
-			const held = store.held.shift();
-			if (!held) {
-				fail('stuck', `${what} waits on nothing the store holds`);
-				return false;
+			if (open()) answer('keep');
+			else {
+				const held = store.held.shift();
+				if (!held) {
+					fail('stuck', `${what} waits on nothing the store holds`);
+					return false;
+				}
+				held.release();
 			}
-			held.release();
 			await settle(store, progress);
 		}
 		return true;
@@ -1483,8 +1725,9 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 		const withoutTeammate = [...finalTokens].filter((t) => t !== 'teammate').join('+');
 		// step: the view counts versions for a write that failed, and tells no editor: an editor at a version from that write's
 		// call to its failure, with the file at the version of its failure and no other write landed meanwhile, is behind for
-		// that alone (a known limit)
-		const behindFailed = failedWrites.some((w) => w.before <= editor.version() && editor.version() < w.after && w.after === staged.version(path) && !landedVersions.some((v) => v > w.before && v <= w.after));
+		// that alone (a known limit). So is one a single count behind after a read took a copy in since: that read counted the
+		// copy for the editor too, but not the failure, which landed while the read waited for the write
+		const behindFailed = failedWrites.some((w) => w.before <= editor.version() && editor.version() < w.after && w.after === staged.version(path) && !landedVersions.some((v) => v > w.before && v <= w.after)) || (failedWrites.length === 1 && staged.version(path) - editor.version() === 1 && !landedVersions.some((v) => v > failedWrites[0].before));
 		if (!editor.dirty() && (buffer !== final || editor.version() !== staged.version(path))) {
 			// step: the view counts a version when a write is refused for a teammate's change, and tells no editor: one that
 			// holds what the view stores, or the file without the teammate's change, is behind for that alone
@@ -1500,7 +1743,7 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 		}
 	}
 
-	// step: after a Reload or the canvas's Don't Save, no write called later carries what that choice dropped
+	// step: after Discard mine, Reload or the canvas's Don't Save, no write called later carries what that choice dropped
 	for (const choice of choices.filter((c) => c.applied && c.dropped.size > 0)) {
 		for (const write of landed) {
 			const carried = [...write.tokens].filter((t) => choice.dropped.has(t));
@@ -1508,8 +1751,9 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 		}
 	}
 
-	// step: a save with no Reload, Overwrite or close after its call is not dropped, and when it settled it left its typing in
-	// the file (a canvas's Reload counts from its click and from when it put the stored pipeline on screen). When the editor moved between its call and its end, a break is the move's. A save called before one of those
+	// step: a save with no Discard mine, Reload, Overwrite or close after its call is not dropped, and when it settled it left
+	// its typing in the file (a canvas's Reload or Discard mine counts from its click and from when it put the stored pipeline
+	// on screen). When the editor moved between its call and its end, a break is the move's. A save called before one of those
 	// choices shows no failure after it
 	for (const save of saves) {
 		const after = choices.find((c) => c.at > save.at && save.settled !== undefined && save.settled > c.at);
@@ -1524,6 +1768,13 @@ async function runDocument(order: DocumentStep[], kind: DocumentKind, auto: bool
 		if (missing.length > 0) fail(rule, `${save.what} of ${[...save.tokens].join('+')} worked, and the file at the end lacks ${missing.join(', ')}`);
 	}
 
+	// step: the agent's edit after Save mine first lands on the typing that save saved; a save that did not land refuses the edit
+	for (const first of savedFirst) {
+		for (const write of landed.filter((w) => w.origin === AGENT_ORIGIN && w.at > first.at)) {
+			const missing = [...first.tokens].filter((t) => !write.tokens.has(t));
+			if (missing.length > 0) fail('edit-unsaved', `after Save mine first of ${[...first.tokens].join('+')}, the agent's edit '${[...write.tokens].join('+')}' landed without ${missing.join(', ')}`);
+		}
+	}
 	return { next, failures, untold, failedUntold, final };
 }
 
@@ -1588,15 +1839,32 @@ export async function checkDocumentOrders(kind: DocumentKind, auto: boolean): Pr
 	const mode = auto ? 'auto' : 'manual';
 	mock.timers.enable({ apis: ['setTimeout'] });
 	try {
+		// step: the user saves, types and saves again while the first write is held, the agent edits and the user answers
+		// Discard mine before the first write lands: the second save writes nothing
+		const discarded = await runDocument(['save', 'type', 'save', 'edit', 'answer discard', 'release 0'], kind, auto);
 		// step: the second save waits its turn and the tab moves to another group: the save is kept
 		const movedSave = await runDocument(['save', 'type', 'save', 'move', 'release 0'], kind, auto);
+		// step: Save & Run's write is held, the agent edits, the user answers Discard mine, and the write fails: nothing runs
+		const discardRun = kind === 'canvas' && auto ? await runDocument(['run', 'release 0', 'edit', 'answer discard', 'fail 0'], kind, auto) : null;
 
 		// step: depth-first over every order of up to DOCUMENT_DEPTH steps
 		const found = await exploreDocument(kind, auto);
 		reportDocument(`${kind === 'text' ? 'text tab' : 'canvas'}, ${mode}`, found);
+		for (const [name, order] of [
+			['the move order', movedSave],
+			['the Save & Run order', discardRun],
+		] as const) {
+			if (order) console.log(`  ${name}: ${order.failures.map((f) => `[${f.kind}] ${f.text}`).join('; ') || 'no rule broken'}; the file ends '${order.final}'`);
+		}
+		assert.deepEqual(discarded.failures, []);
+		assert.deepEqual(tokens(discarded.final), new Set([ORIGINAL, 'ed1', 'agent']));
 		assert.deepEqual(movedSave.failures, []);
 		assert.deepEqual(tokens(movedSave.final), new Set([ORIGINAL, 'ed1', 'ed2']));
-		const kinds = ['close', 'edit', 'move', 'overwrite', 'release', 'reload', 'save', 'type', ...(kind === 'canvas' ? ['run'] : []), ...(auto ? ['fail', 'teammate'] : [])];
+		if (discardRun) {
+			assert.deepEqual(discardRun.failures, []);
+			assert.deepEqual(tokens(discardRun.final), new Set([ORIGINAL, 'agent']));
+		}
+		const kinds = ['answer', 'close', 'edit', 'move', 'overwrite', 'release', 'reload', 'save', 'type', ...(kind === 'canvas' ? ['run'] : []), ...(auto ? ['fail', 'teammate'] : [])];
 		assert.deepEqual([...found.kinds].sort(), kinds.sort(), 'every kind of step was tried');
 		assert.deepEqual(found.failures.slice(0, 10), [], `${found.failures.length} of ${found.tried} orders broke a rule`);
 	} finally {

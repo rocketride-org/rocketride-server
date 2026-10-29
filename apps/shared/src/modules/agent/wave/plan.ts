@@ -91,8 +91,12 @@ export interface ResultEntry {
 	deduplicated?: boolean;
 }
 
-/** Why the loop stopped. */
-export type StopReason = 'done' | 'empty_plan' | 'error' | 'stopped';
+/**
+ * Why the loop stopped. 'needs_input': a tool ended the turn to wait for the
+ * user (ask_user). 'limited': the turn reached its step limit. 'cost_limit':
+ * the cost limit refused a model request.
+ */
+export type StopReason = 'done' | 'needs_input' | 'empty_plan' | 'error' | 'stopped' | 'limited' | 'cost_limit';
 
 // =============================================================================
 // MODEL CALL — the one seam to the language model

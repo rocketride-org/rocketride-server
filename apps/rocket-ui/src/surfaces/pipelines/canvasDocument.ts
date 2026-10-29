@@ -124,6 +124,9 @@ export class CanvasDocument {
 			isDirty: () => this.documentDirty(),
 			// step: the newest canvas saves, and shows a failure; while a moved canvas mounts again the document saves itself
 			save: () => this.canvasSaves[this.canvasSaves.length - 1]?.() ?? this.save(this.docs.getState().documents[this.uri]?.content),
+			discard: async () => {
+				if (!(await this.reloadStored(false))) throw new Error(`${this.path} could not be loaded again: the stored pipeline is gone, is not valid JSON, or could not be read`);
+			},
 		});
 		this.unwatchDocs ??= this.docs.subscribe(() => this.settle());
 		this.canvasSaves.push(save);
@@ -215,7 +218,7 @@ export class CanvasDocument {
 	 * loaded leaves both, so the next save is refused instead of overwriting
 	 * that change unseen.
 	 *
-	 * @param fresh - Read the server's copy, past the view's cache, which is older after a refused save (the stale dialog's Reload). False when following a change in this page.
+	 * @param fresh - Read the server's copy, past the view's cache, which is older after a refused save (the stale dialog's Reload). False when following a change in this page, and for Discard mine.
 	 * @returns True when the stored pipeline was loaded.
 	 */
 	reloadStored(fresh = true): Promise<boolean> {

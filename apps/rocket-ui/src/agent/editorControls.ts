@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// EDITOR CONTROLS — the open editors, as the workspace view sees them
+// EDITOR CONTROLS — the open editors, as the workspace view and the agent see them
 // =============================================================================
 
 /**
@@ -33,14 +33,17 @@
  * every buffer, so it never takes another editor's typing for clean content.
  */
 
+import type { EditorControl } from 'shared/modules/agent/host';
 import type { IWorkspaceFileSystem, VfsOverlay } from 'shared/modules/vfs/vfsTypes';
 
-/** One open document of a path: its buffer for readers, and its save. */
+/** One open document of a path: its buffer for readers, and its save and discard. */
 export interface EditorRegistration extends VfsOverlay {
 	/** The document it holds: `file:<path>` for a text file, the pipeline's URI for a canvas. */
 	uri: string;
 	/** Rejects when the save fails, and with SaveDroppedError when the user dropped the buffer while the save waited its turn. */
 	save(): Promise<void>;
+	/** Drops the buffer and shows the stored file again. */
+	discard(): Promise<void>;
 }
 
 interface PathEditors {
@@ -76,6 +79,23 @@ export function registerEditor(view: IWorkspaceFileSystem, path: string, editor:
 		if (mine.editors.length > 0 || paths.get(path) !== mine) return;
 		mine.unregister();
 		paths.delete(path);
+	};
+}
+
+/** The editors that hold a path, as one control for the agent's question: save and discard act on each editor that is dirty when its turn comes. */
+export function editorControl(view: IWorkspaceFileSystem, path: string): EditorControl | null {
+	const editors = views.get(view)?.get(path)?.editors;
+	if (!editors || editors.length === 0) return null;
+	const each = async (act: (editor: EditorRegistration) => Promise<void>): Promise<void> => {
+		for (const editor of editors.filter((e) => e.isDirty())) if (editor.isDirty()) await act(editor);
+	};
+	return {
+		save: (stored) =>
+			each(async (editor) => {
+				await editor.save();
+				stored();
+			}),
+		discard: () => each((editor) => editor.discard()),
 	};
 }
 
