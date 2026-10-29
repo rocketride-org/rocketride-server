@@ -59,7 +59,7 @@ def _fake_definitions(tmp_path):
 @pytest.mark.asyncio
 async def test_summary_dedups_icons_by_content(monkeypatch, tmp_path):
     raw = _fake_definitions(tmp_path)
-    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda: raw)
+    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda custom: raw)
 
     summary = await services_catalog.get_summary()
     svcs, icons = summary['services'], summary['icons']
@@ -78,7 +78,7 @@ async def test_summary_dedups_icons_by_content(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_summary_drops_schema_and_paths(monkeypatch, tmp_path):
     raw = _fake_definitions(tmp_path)
-    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda: raw)
+    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda custom: raw)
 
     summary = await services_catalog.get_summary()
     ocr = summary['services']['ocr']
@@ -93,7 +93,7 @@ async def test_summary_drops_schema_and_paths(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_get_service_returns_full_entry_without_icon(monkeypatch, tmp_path):
     raw = _fake_definitions(tmp_path)
-    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda: raw)
+    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda custom: raw)
 
     entry = await services_catalog.get_service('ocr')
 
@@ -108,7 +108,7 @@ async def test_get_service_returns_full_entry_without_icon(monkeypatch, tmp_path
 @pytest.mark.asyncio
 async def test_missing_icon_file_is_tolerated(monkeypatch, tmp_path):
     raw = _fake_definitions(tmp_path)
-    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda: raw)
+    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda custom: raw)
 
     summary = await services_catalog.get_summary()
 
@@ -118,7 +118,7 @@ async def test_missing_icon_file_is_tolerated(monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_unknown_service_returns_none(monkeypatch, tmp_path):
     raw = _fake_definitions(tmp_path)
-    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda: raw)
+    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda custom: raw)
 
     assert await services_catalog.get_service('nope') is None
 
@@ -128,7 +128,7 @@ async def test_build_runs_once_until_invalidated(monkeypatch, tmp_path):
     raw = _fake_definitions(tmp_path)
     calls = {'n': 0}
 
-    def counting():
+    def counting(custom):
         calls['n'] += 1
         return raw
 
@@ -142,3 +142,22 @@ async def test_build_runs_once_until_invalidated(monkeypatch, tmp_path):
     services_catalog.invalidate()
     await services_catalog.get_summary()
     assert calls['n'] == 2
+
+
+@pytest.mark.asyncio
+async def test_the_nodes_eaas_serves_join_the_catalogue_with_their_inline_icon(monkeypatch, tmp_path):
+    served = [{'protocol': 'provider_x://'}]
+    monkeypatch.setattr(services_catalog.node_store, 'custom', lambda: served)
+    raw = _fake_definitions(tmp_path)
+    raw['services']['provider_x'] = {
+        'title': 'X',
+        'protocol': 'p',
+        'icon': 'data:image/svg+xml;base64,PHN2ZyBpZD0ieCIvPg==',
+    }
+    asked = []
+    monkeypatch.setattr(services_catalog, 'getServiceDefinitions', lambda custom: asked.append(custom) or raw)
+
+    summary = await services_catalog.get_summary()
+
+    assert asked == [served]
+    assert summary['icons'][summary['services']['provider_x']['icon']] == '<svg id="x"/>'
