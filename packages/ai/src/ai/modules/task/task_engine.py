@@ -1057,8 +1057,12 @@ class Task(DAPBase):
             from rocketlib import getServiceDefinition
             from ai.common.config import Config
 
+            # A node EaaS serves is not in the engine's registry, and the gate must see it too
             problem = saas_pipeline_violation(
-                pipeline, getServiceDefinition, Config.getNodeConfig, shared_host=self._shares_host()
+                pipeline,
+                lambda provider: getServiceDefinition(provider) or node_store.served(provider),
+                lambda provider, config: Config.getNodeConfig(provider, config, node_store.served(provider)),
+                shared_host=self._shares_host(),
             )
             if problem:
                 raise ValueError(problem)
@@ -2809,6 +2813,12 @@ class Task(DAPBase):
 
             # Write it out, then let `resolved` go out of scope
             self._tmpfile = await self._write_task_file(resolved)
+
+            # The nodes it names that the server does not carry go on disk first: the run's start-up scan loads them
+            try:
+                await asyncio.to_thread(node_store.place, resolved)
+            except Exception as e:
+                raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
             del resolved
 
             # Setup the first part of the command line args
@@ -2905,12 +2915,6 @@ class Task(DAPBase):
             # A stop that arrived during the awaits above (loading the
             # placeholder values, writing the task file) found no process to
             # end: honour it here instead of starting one
-            # The nodes it names that the server does not carry go on disk first: the run's start-up scan loads them
-            try:
-                await asyncio.to_thread(node_store.place, self._pipeline)
-            except Exception as e:
-                raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
-
             if self._stop_requested:
                 raise RuntimeError('the task was stopped before it started')
 

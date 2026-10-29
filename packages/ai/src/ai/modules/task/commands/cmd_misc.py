@@ -343,7 +343,7 @@ class MiscCommands(DAPConn):
             if not isinstance(config, dict):
                 raise ValueError('config must be an object')
 
-            resolved = Config.getNodeConfig(provider, config)
+            resolved = Config.getNodeConfig(provider, config, node_store.served(provider))
             profile = config.get('profile')
 
             # Report the keys the resolver discarded rather than leaving the author

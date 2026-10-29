@@ -7,6 +7,8 @@
 
 import base64
 import json
+import pathlib
+import re
 
 import pytest
 
@@ -164,3 +166,27 @@ def test_a_provider_two_nodes_claim_is_served_by_the_first_and_warned_about(serv
     assert node_store._providers['provider_x'] == 'llm_x'
     assert node_store.custom() == [{**PACKAGED, 'icon': X_ICON}]
     assert len(server['warnings']) == 1 and 'provider_x' in server['warnings'][0]
+
+
+def test_a_read_only_install_serves_nothing_and_says_so_once(server, monkeypatch, tmp_path):
+    parent = tmp_path / 'readonly'
+    (parent / 'nodes').mkdir(parents=True)
+    parent.chmod(0o555)
+    (parent / 'nodes').chmod(0o555)
+    monkeypatch.setattr(node_store.node_release, 'nodes_dir', lambda: str(parent / 'nodes'))
+    try:
+        node_store.start()
+    finally:
+        (parent / 'nodes').chmod(0o755)
+        parent.chmod(0o755)
+
+    assert node_store.custom() == [] and node_store.place({'components': [{'provider': 'provider_x'}]}) == []
+    assert len(server['warnings']) == 1
+    assert 'not writable' in server['warnings'][0] and 'llm_x' in server['warnings'][0]
+
+
+def test_the_autopipe_filters_are_the_ones_autopipe_inserts():
+    source = pathlib.Path(__file__).resolve().parents[6] / 'nodes' / 'src' / 'nodes' / 'autopipe' / 'IGlobal.py'
+    inserted = set(re.findall(r"getFilter\('[^']+', '([^']+)'", source.read_text(encoding='utf-8')))
+
+    assert inserted and inserted == set(node_store._AUTOPIPE_FILTERS)

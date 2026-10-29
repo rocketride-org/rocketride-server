@@ -1288,7 +1288,8 @@ async def test_start_passes_the_hosting_flags(monkeypatch, saas, flags):
 async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypatch, available):
     """The nodes a pipeline names that the server lacks are unpacked before the
     engine starts, so its start-up scan loads them; one that cannot be had
-    refuses the launch and nothing is spawned.
+    refuses the launch and nothing is spawned. The pipeline placed is the
+    resolved one: ${...} can name the provider.
     """
     import ai.modules.task.task_engine as engine
 
@@ -1302,9 +1303,9 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
             raise FileNotFoundError('llm_x.rrnode is not in releases server-v1')
 
     monkeypatch.setattr(engine.node_store, 'place', place)
-    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'llm_x'}]})
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': '${ROCKETRIDE_NODE}'}]})
     t.source = 'src'
-    t._env_source = AsyncMock(return_value={})
+    t._env_source = AsyncMock(return_value={'ROCKETRIDE_NODE': 'llm_x'})
     t._restart_env = None
     t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
     t._is_restarting = False
@@ -2271,6 +2272,24 @@ def test_saas_gate_refuses_stdio_mcp(config):
 def test_saas_gate_matches_the_node_not_the_provider_name(component):
     problem = _violation(component)
     assert problem and 'stdio MCP transport' in problem
+
+
+def test_saas_gate_sees_a_nosaas_node_that_only_eaas_serves(monkeypatch):
+    """A node EaaS serves is not in the engine's registry; the hosted gate
+    still reads its capabilities and refuses it.
+    """
+    import rocketlib
+
+    import ai.modules.task.task_engine as engine
+
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: True)
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda provider: None)
+    monkeypatch.setattr(engine.node_store, '_definitions', {'text_output': {'capabilities': ['nosaas']}})
+    t = _task(source='src')
+    t._shares_host = lambda: True
+
+    with pytest.raises(ValueError, match='not available on RocketRide Cloud'):
+        Task._check_pipeline(t, {'components': [{'id': 'src', 'provider': 'text_output'}]})
 
 
 def test_saas_gate_off_the_engine_host_allows_stdio_mcp_but_not_nosaas():
