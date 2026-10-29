@@ -570,6 +570,30 @@ import { MarkdownRenderer } from 'shell';
 <MarkdownRenderer content={readmeText} />
 ```
 
+### Checkbox / Switch
+
+Native checkbox and on/off switch with a clickable label and optional
+description. Checkbox supports the mixed (indeterminate) state. Use a Switch
+for a setting that applies at once, a Checkbox for a choice applied on submit.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `checked` | `boolean` | in (req) | Whether it is on. |
+| `label` | `ReactNode` | in | Visible label. Omit only with `ariaLabel`. |
+| `description` | `ReactNode` | in | Secondary line, linked with `aria-describedby`. |
+| `indeterminate` | `boolean` | in | Checkbox only — mixed state for select-all. |
+| `disabled` | `boolean` | in | Disable the control. |
+| `ariaLabel` | `string` | in | Accessible name when there is no visible label. |
+| `name / value / id` | `string` | in | Native form attributes. |
+| `onChange` | `(checked: boolean, event) => void` | out (req) | Fired with the new state. |
+
+```tsx
+import { Checkbox, Switch } from 'shell';
+
+<Checkbox label="Embed" description="Runs after ingest" checked={embed} onChange={setEmbed} />
+<Switch label="Run on save" checked={runOnSave} onChange={setRunOnSave} />
+```
+
 ### Chip / ChipAdd
 
 Removable tag pill plus the matching add affordance — permissions, labels,
@@ -586,6 +610,33 @@ import { Chip, ChipAdd } from 'shell';
 
 <Chip label="deploy" onRemove={() => removeTag('deploy')} />
 <ChipAdd label="Add permission" onClick={openPicker} />
+```
+
+### Combobox
+
+Text input with a filtered suggestion list. Pick mode (default) for
+searchable pickers; free-text mode (`allowCustomValue`) for suggest-as-you-type
+fields such as env-var names. Prefix matches rank first. Arrow keys open and
+move, Enter chooses, Escape closes (or, already closed, restores the committed
+text). Field-aware.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `options` | `ISelectOption[]` | in (req) | Options (pick mode) or suggestions (free-text mode). |
+| `value` | `string \| null` | in (req) | The committed value. |
+| `allowCustomValue` | `boolean` | in | Accept text that matches no option; commits on Enter or blur. |
+| `clearable` | `boolean` | in | Clear button while there is a value. |
+| `emptyText` | `string` | in | Shown when nothing matches (pick mode). |
+| `mono / small / placeholder / disabled / invalid / name / ariaLabel / id` | `…` | in | As Select / InputField. |
+| `onChange` | `(value: string \| null) => void` | out (req) | Committed value; null when cleared. |
+| `onInputChange` | `(text: string) => void` | out | Every keystroke — e.g. fetch suggestions. |
+
+```tsx
+import { Combobox, Field } from 'shell';
+
+<Field label="API key variable">
+	<Combobox options={envVars.map((name) => ({ value: name, label: name }))} value={variable} onChange={setVariable} allowCustomValue mono />
+</Field>
 ```
 
 ### ConfirmDialog
@@ -956,6 +1007,33 @@ import { EmptyState, Button } from 'shell';
 />
 ```
 
+### Field / useField
+
+Labelled form row. Shares the control id, help/error description ids, and
+invalid / required / disabled state through context, so InputField,
+TextArea, Select, Combobox, Slider and RadioGroup inside it are labelled,
+described and marked invalid with no manual aria wiring. Passing `error`
+marks the control invalid and replaces the help text. `useField()` returns
+the context (or null) for custom controls.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `label` | `ReactNode` | in (req) | Visible label. |
+| `children` | `ReactNode` | in (req) | The control. |
+| `help` | `ReactNode` | in | Hint under the control; hidden while an error shows. |
+| `error` | `ReactNode` | in | Error message; present = invalid. |
+| `required` | `boolean` | in | Asterisk plus `required` / `aria-required`. |
+| `disabled` | `boolean` | in | Disables the control. |
+| `id` | `string` | in | Control id; generated when omitted. |
+
+```tsx
+import { Field, InputField } from 'shell';
+
+<Field label="Endpoint" help="The full URL." error={endpointError} required>
+	<InputField value={endpoint} onChange={(e) => setEndpoint(e.target.value)} />
+</Field>
+```
+
 ### FilterStrip
 
 The DataGrid's built-in filter row: one labelled control per definition —
@@ -995,12 +1073,36 @@ const filters: IGridFilterDef[] = [
 <DataGrid title="Pipelines" columns={columns} filters={filters} fetchPage={fetchPipelines} />
 ```
 
+### IconButton
+
+Square icon-only button for toolbars and row actions. `label` is required:
+it is the accessible name and, unless `tooltip={false}`, the tooltip.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `label` | `string` | in (req) | Accessible name and tooltip text. |
+| `children` | `ReactNode` | in (req) | The icon. |
+| `small` | `boolean` | in | Compact 26px size. |
+| `pressed` | `boolean` | in | Toggle state (`aria-pressed`). |
+| `tooltip` | `boolean` | in | Show `label` as a tooltip. Default true. |
+| `tooltipPlacement` | `OverlayPlacement` | in | Default `'top'`. |
+| `disabled / type / className` | `…` | in | Native button attributes. |
+| `onClick` | `(event) => void` | out | Click handler. |
+
+```tsx
+import { IconButton } from 'shell';
+
+<IconButton label="Refresh" onClick={reload}><RefreshIcon /></IconButton>
+```
+
 ### InputField
 
 The stock text-input base — a styled native input carrying the full
 `InputHTMLAttributes<HTMLInputElement>` surface. No custom props: `value`,
 `placeholder`, `type` (`text` / `password` / `number` / ...), `disabled`,
 `onChange`, and every other native input attribute pass straight through.
+Inside a `Field` it takes the Field's id, description and invalid/required
+state automatically.
 
 ```tsx
 import { InputField } from 'shell';
@@ -1009,6 +1111,34 @@ import { InputField } from 'shell';
 	value={name} onChange={(e) => setName(e.target.value)} />
 <InputField type="password" placeholder="API key"
 	value={key} onChange={(e) => setKey(e.target.value)} />
+```
+
+### Menu / MenuButton
+
+Anchored action menu built from a data array. `MenuButton` wires a trigger
+button to it; the controlled `Menu` takes your own anchor (context menus).
+WAI-ARIA menu pattern: arrows move and wrap, Home/End jump, typing jumps,
+Enter/Space activate, Escape closes and returns focus, Tab closes.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `items` | `MenuEntry[]` | in (req) | Actions `{ id, label, icon?, shortcut?, disabled?, danger?, checked? }`, `{ type: 'divider' }`, `{ type: 'label', label }`. |
+| `label / icon` | `ReactNode` | in | MenuButton trigger content; icon-only needs `ariaLabel`. |
+| `variant / small / disabled / title` | `…` | in | MenuButton trigger styling (Button variants). |
+| `open / anchorRef` | `boolean / RefObject` | in | Menu (controlled) only. |
+| `placement` | `OverlayPlacement` | in | Default `'bottom-start'`. |
+| `initialFocus` | `'first' \| 'last'` | in | Menu only — item focused on open. |
+| `onSelect` | `(id: string) => void` | out (req) | Chosen action id; the menu then closes. |
+| `onClose` | `() => void` | out | Menu (controlled) only. |
+
+```tsx
+import { MenuButton } from 'shell';
+
+<MenuButton
+	label="Actions"
+	items={[{ id: 'open', label: 'Open', shortcut: '⌘O' }, { type: 'divider' }, { id: 'delete', label: 'Delete', danger: true }]}
+	onSelect={handleAction}
+/>
 ```
 
 ### MiniCard / MiniContainer
@@ -1114,6 +1244,34 @@ import { SaveFileDialog } from 'shell';
 )}
 ```
 
+### Popover
+
+Floating panel anchored to an element — filter panels, pickers. Controlled:
+`onClose` fires on Escape (top overlay layer only) and on a press outside the
+panel and its anchor. Joins the same layer stack as Modal and DetailPanel, so
+Escape inside a Modal closes the popover first. Flips and shifts to stay on
+screen; focus moves in on open and back to the anchor on close.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `open` | `boolean` | in (req) | Whether the panel is open. |
+| `anchorRef` | `RefObject<HTMLElement>` | in (req) | The element the panel attaches to. |
+| `children` | `ReactNode` | in (req) | Panel content. |
+| `placement` | `OverlayPlacement` | in | `'bottom-start'` (default), `'top'`, `'right-start'`, … |
+| `offset` | `number` | in | Gap to the anchor. Default 4. |
+| `matchWidth` | `boolean` | in | At least as wide as the anchor. |
+| `ariaLabel / ariaLabelledBy / role / id` | `string` | in | Naming and role. Default role `'dialog'`. |
+| `autoFocus / restoreFocus / closeOnOutsidePress` | `boolean` | in | Focus and dismissal. All default true. |
+| `className / style` | `…` | in | Extra classes / inline style for the panel. |
+| `onClose` | `() => void` | out (req) | The panel asks to close. |
+
+```tsx
+import { Popover } from 'shell';
+
+<button ref={anchorRef} onClick={() => setOpen(!open)} aria-expanded={open}>Filters</button>
+<Popover open={open} anchorRef={anchorRef} onClose={() => setOpen(false)} ariaLabel="Run filters">…</Popover>
+```
+
 ### PopupRow
 
 A single clickable item inside a popup menu: the hover-highlighted flex row
@@ -1129,6 +1287,30 @@ import { PopupRow, BxCog, BxTrash } from 'shell';
 	<PopupRow onClick={openSettings}><BxCog size={16} /> Settings</PopupRow>
 	<PopupRow onClick={remove}><BxTrash size={16} /> Delete</PopupRow>
 </div>
+```
+
+### RadioGroup
+
+One choice from a short, always-visible set (2–5 options); use Select for
+longer lists. Native radios: arrow keys move the selection. Inside a Field it
+is labelled by the Field label.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `options` | `{ value: T; label; description?; disabled? }[]` | in (req) | Options, in display order. |
+| `value` | `T \| null` | in (req) | The selected value. |
+| `horizontal` | `boolean` | in | Lay options out in a row. |
+| `disabled` | `boolean` | in | Disable every option. |
+| `name` | `string` | in | Form name; generated when omitted. |
+| `ariaLabel` | `string` | in | Accessible name outside a Field. |
+| `onChange` | `(value: T) => void` | out (req) | Newly selected value. |
+
+```tsx
+import { Field, RadioGroup } from 'shell';
+
+<Field label="Region">
+	<RadioGroup options={[{ value: 'us', label: 'US' }, { value: 'eu', label: 'EU' }]} value={region} onChange={setRegion} />
+</Field>
 ```
 
 ### RocketRideMark
@@ -1164,6 +1346,57 @@ import { Section, LabelValue, StatusBadge } from 'shell';
 	<LabelValue label="Task id" mono>rod.demo.chat</LabelValue>
 	<LabelValue label="Status"><StatusBadge variant="success">Running</StatusBadge></LabelValue>
 </Section>
+```
+
+### Select
+
+Themed single-select dropdown with option descriptions and icons. WAI-ARIA
+select-only combobox: focus stays on the trigger; arrows, Home/End and
+typeahead move; Enter/Space choose; Escape and Tab close. Typing while closed
+changes the value like a native select. Field-aware; `name` submits the
+value with a native form.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `options` | `ISelectOption<T>[]` | in (req) | `{ value, label, description?, icon?, disabled? }`. |
+| `value` | `T \| null` | in (req) | The selected value. |
+| `placeholder` | `string` | in | Shown while nothing is selected. |
+| `small` | `boolean` | in | Compact 26px trigger. |
+| `invalid` | `boolean` | in | Mark invalid (a Field error does this). |
+| `disabled` | `boolean` | in | Disable the control. |
+| `name` | `string` | in | Hidden input carrying the value. |
+| `ariaLabel / id / className` | `string` | in | Naming outside a Field; extra classes. |
+| `onChange` | `(value: T) => void` | out (req) | Newly chosen value. |
+
+```tsx
+import { Field, Select } from 'shell';
+
+<Field label="Model">
+	<Select options={models} value={model} onChange={setModel} placeholder="Choose a model" />
+</Field>
+```
+
+### Slider
+
+Number from a bounded range — temperature, top-k, overlap. Native range
+input (keyboard, touch, screen readers) with an optional value readout.
+Field-aware.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `value` | `number` | in (req) | Current value. |
+| `min / max / step` | `number` | in | Defaults 0 / 100 / 1. |
+| `showValue` | `boolean` | in | Readout beside the track. Default true. |
+| `formatValue` | `(value: number) => string` | in | Formats the readout and `aria-valuetext`. |
+| `disabled / ariaLabel / id / name` | `…` | in | State, naming and form attributes. |
+| `onChange` | `(value: number) => void` | out (req) | Fired while dragging and on key presses. |
+
+```tsx
+import { Field, Slider } from 'shell';
+
+<Field label="Temperature">
+	<Slider value={temperature} onChange={setTemperature} min={0} max={2} step={0.1} formatValue={(v) => v.toFixed(1)} />
+</Field>
 ```
 
 ### StatusBadge / StatusDot
@@ -1214,6 +1447,52 @@ const menu = { entries: [
 }} />
 ```
 
+### TextArea
+
+Multi-line text input — prompts, JSON, descriptions. Optionally grows with
+its content between `minRows` and `maxRows`, then scrolls. Field-aware.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `...textarea props` | `TextareaHTMLAttributes` | in | Every native `<textarea>` prop passes through. |
+| `autoResize` | `boolean` | in | Grow with the content. |
+| `minRows / maxRows` | `number` | in | Default 3 / 12. |
+| `mono` | `boolean` | in | Monospace text for code and JSON. |
+
+```tsx
+import { Field, TextArea } from 'shell';
+
+<Field label="System prompt">
+	<TextArea value={prompt} onChange={(e) => setPrompt(e.target.value)} autoResize />
+</Field>
+```
+
+### showToast / dismissToast / ToastViewport
+
+Brief, non-blocking notification in the bottom-right stack. Call
+`showToast()` from anywhere — no provider; the shell mounts the viewport
+(outside the shell, the first call mounts one). Auto-dismisses, pauses on
+hover/focus, announces politely (errors assertively). At most 4 show. Things
+the user must act on belong in a Modal or Banner.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `message` | `string` | in (req) | Main text, one line. |
+| `title` | `string` | in | Optional bold first line. |
+| `variant` | `'info' \| 'success' \| 'warning' \| 'error'` | in | Default `'info'`. |
+| `duration` | `number` | in | Auto-dismiss ms; 0 keeps it. Default 5000 (8000 for errors). |
+| `action` | `{ label; onClick }` | in | One action such as Undo or Retry; also dismisses. |
+
+`showToast(options)` returns the toast id; `dismissToast(id)` removes it early;
+render `<ToastViewport />` only to place the stack yourself.
+
+```tsx
+import { showToast } from 'shell';
+
+showToast({ message: 'Pipeline saved', variant: 'success' });
+showToast({ message: 'Deploy failed', variant: 'error', action: { label: 'Retry', onClick: redeploy } });
+```
+
 ### ToggleGroup
 
 Segmented control for time ranges and mode switches — single-select by
@@ -1245,6 +1524,26 @@ import { ToggleGroup } from 'shell';
 		prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id])} />
 ```
 
+
+### Tooltip
+
+Short hint on hover (after a delay) and keyboard focus (at once), dismissed by
+Escape and linked as the element's description. The child must accept a ref.
+Plain text only — use a Popover for anything interactive.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `content` | `ReactNode` | in (req) | The hint text. |
+| `children` | `ReactElement` | in (req) | The single element described; must accept a ref. |
+| `placement` | `OverlayPlacement` | in | Default `'top'`. |
+| `delay` | `number` | in | Hover delay in ms. Default 400. |
+| `disabled` | `boolean` | in | Render the child untouched. |
+
+```tsx
+import { Tooltip } from 'shell';
+
+<Tooltip content="Run the pipeline (⌘R)"><button type="button">Run</button></Tooltip>
+```
 ---
 
 ## Hooks & context

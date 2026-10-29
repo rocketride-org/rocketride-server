@@ -265,6 +265,19 @@ import { ConnectionManagerView } from './components/connection-manager/Connectio
 import { useDebouncedValue } from './hooks/useDebouncedValue';
 import { useAnnouncements } from './hooks/useAnnouncements';
 import { formatBytes, formatDate, formatDuration } from './util/format';
+// Phase 2 stock library: form controls and anchored overlays.
+import { Field, useField } from './components/field/Field';
+import { TextArea } from './components/form/TextArea';
+import { Checkbox, Switch } from './components/form/Checkbox';
+import { RadioGroup } from './components/form/RadioGroup';
+import { Select } from './components/form/Select';
+import { Combobox } from './components/form/Combobox';
+import { Slider } from './components/form/Slider';
+import { IconButton } from './components/icon-button/IconButton';
+import { Popover } from './components/overlay/Popover';
+import { Menu, MenuButton } from './components/overlay/Menu';
+import { Tooltip } from './components/overlay/Tooltip';
+import { showToast, dismissToast, ToastViewport } from './components/toast/Toast';
 // (commonStyles is imported at the very top of this file — cycle-order
 // constraint — and re-exported from the export block below.)
 // Values graduated from deep shell/src imports when the package exports map
@@ -294,6 +307,9 @@ export {
 	formatDuration, formatDateValue,
 	ChatView, MessageList, MarkdownRenderer, useChatMessages,
 	ConnectionCard, ConnectionCardAdd, ConnectionManagerView,
+	Field, useField, TextArea, Checkbox, Switch, RadioGroup, Select,
+	Combobox, Slider, IconButton, Popover, Menu, MenuButton, Tooltip,
+	showToast, dismissToast, ToastViewport,
 	commonStyles,
 	applyTheme, isInVSCode, OAUTH_ROOT_URL,
 	ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE,
@@ -309,6 +325,20 @@ export type { IConnectionManagerViewProps, IConnectionCardDisplay, IConnectionFo
 export type { IEmptyStateProps } from './components/empty-state/EmptyState';
 export type { IBannerProps, BannerVariant } from './components/banner/Banner';
 export type { IInputFieldProps } from './components/input-field/InputField';
+export type { IFieldProps, IFieldContext } from './components/field/Field';
+export type { ITextAreaProps } from './components/form/TextArea';
+export type { IChoiceProps, ICheckboxProps, ISwitchProps } from './components/form/Checkbox';
+export type { IRadioGroupProps, IRadioOption } from './components/form/RadioGroup';
+export type { ISelectProps } from './components/form/Select';
+export type { ISelectOption } from './components/form/OptionList';
+export type { IComboboxProps } from './components/form/Combobox';
+export type { ISliderProps } from './components/form/Slider';
+export type { IIconButtonProps } from './components/icon-button/IconButton';
+export type { IPopoverProps } from './components/overlay/Popover';
+export type { IMenuProps, IMenuButtonProps, MenuEntry, IMenuAction, IMenuDivider, IMenuLabel } from './components/overlay/Menu';
+export type { ITooltipProps } from './components/overlay/Tooltip';
+export type { OverlayPlacement, OverlaySide, OverlayAlign } from './components/overlay/placement';
+export type { IToastOptions, ToastVariant } from './components/toast/toastStore';
 export type { IToggleGroupProps, IToggleGroupOption } from './components/toggle-group/ToggleGroup';
 export type { IChipProps, IChipAddProps } from './components/chip/Chip';
 export type { IDropZoneProps } from './components/drop-zone/DropZone';
@@ -454,6 +484,23 @@ export const shellApi = {
 	get formatBytes() { return formatBytes; },
 	get formatDate() { return formatDate; },
 	get formatDuration() { return formatDuration; },
+	get Field() { return Field; },
+	get useField() { return useField; },
+	get TextArea() { return TextArea; },
+	get Checkbox() { return Checkbox; },
+	get Switch() { return Switch; },
+	get RadioGroup() { return RadioGroup; },
+	get Select() { return Select; },
+	get Combobox() { return Combobox; },
+	get Slider() { return Slider; },
+	get IconButton() { return IconButton; },
+	get Popover() { return Popover; },
+	get Menu() { return Menu; },
+	get MenuButton() { return MenuButton; },
+	get Tooltip() { return Tooltip; },
+	get showToast() { return showToast; },
+	get dismissToast() { return dismissToast; },
+	get ToastViewport() { return ToastViewport; },
 	get commonStyles() { return commonStyles; },
 	get useShellConnection() { return useShellConnection; },
 	get useAuthUser() { return useAuthUser; },

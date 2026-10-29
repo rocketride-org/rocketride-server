@@ -80,6 +80,18 @@ import { sectionEntry } from './entries/section.entry';
 import { statusBadgeEntry } from './entries/status-badge.entry';
 import { tabControlEntry } from './entries/tab-control.entry';
 import { toggleGroupEntry } from './entries/toggle-group.entry';
+import { checkboxEntry } from './entries/checkbox.entry';
+import { comboboxEntry } from './entries/combobox.entry';
+import { fieldEntry } from './entries/field.entry';
+import { iconButtonEntry } from './entries/icon-button.entry';
+import { menuEntry } from './entries/menu.entry';
+import { popoverEntry } from './entries/popover.entry';
+import { radioGroupEntry } from './entries/radio-group.entry';
+import { selectEntry } from './entries/select.entry';
+import { sliderEntry } from './entries/slider.entry';
+import { textAreaEntry } from './entries/text-area.entry';
+import { toastEntry } from './entries/toast.entry';
+import { tooltipEntry } from './entries/tooltip.entry';
 
 // --- Hooks & context ---------------------------------------------------------
 import { connectionClientEntry } from './entries/connection-client.entry';
@@ -137,7 +149,9 @@ export const GALLERY_ENTRIES: IGalleryEntry[] = [
 	buttonEntry,
 	cardEntry,
 	chatViewEntry,
+	checkboxEntry,
 	chipEntry,
+	comboboxEntry,
 	confirmDialogEntry,
 	connectionCardEntry,
 	contentHeaderEntry,
@@ -146,16 +160,26 @@ export const GALLERY_ENTRIES: IGalleryEntry[] = [
 	detailPanelEntry,
 	dropZoneEntry,
 	emptyStateEntry,
+	fieldEntry,
 	filterStripEntry,
+	iconButtonEntry,
 	inputFieldEntry,
+	menuEntry,
 	miniCardEntry,
 	modalEntry,
+	popoverEntry,
 	popupRowEntry,
+	radioGroupEntry,
 	rocketRideMarkEntry,
 	sectionEntry,
+	selectEntry,
+	sliderEntry,
 	statusBadgeEntry,
 	tabControlEntry,
+	textAreaEntry,
+	toastEntry,
 	toggleGroupEntry,
+	tooltipEntry,
 	// Hooks & context - the platform API
 	connectionClientEntry,
 	shellEventsEntry,

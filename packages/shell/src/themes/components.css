@@ -25,6 +25,34 @@
  * ========================================================================== */
 
 /* ===================================================================== */
+/* Box model                                                             */
+/* ===================================================================== */
+
+/* global.css resets box-sizing inside the shell; webviews that load only
+   the tokens and this file need it on every sized block too. */
+.rr-input,
+.rr-select,
+.rr-btn,
+.rr-icon-btn,
+.rr-switch,
+.rr-slider,
+.rr-field,
+.rr-paper,
+.rr-popover,
+.rr-dialog,
+.rr-tooltip,
+.rr-toast,
+.rr-option,
+.rr-menu__item,
+.rr-list__item,
+.rr-chip,
+.rr-badge,
+.rr-alert,
+.rr-avatar {
+	box-sizing: border-box;
+}
+
+/* ===================================================================== */
 /* Focus                                                                 */
 /* ===================================================================== */
 
@@ -37,6 +65,7 @@
 .rr-switch:focus-visible,
 .rr-chip__remove:focus-visible,
 .rr-menu__item:focus-visible,
+.rr-select:focus-visible,
 .rr-list__item:focus-visible,
 .rr-link:focus-visible {
 	outline: none;
@@ -401,7 +430,7 @@ select.rr-input {
 .rr-field__label {
 	font-size: 12px;
 	font-weight: var(--rr-font-weight-semibold);
-	color: var(--rr-text-secondary);
+	color: var(--rr-text-primary);
 }
 .rr-field__label--required::after {
 	content: ' *';
@@ -996,6 +1025,273 @@ select.rr-input {
 }
 
 /* ===================================================================== */
+/* Select, listbox, option — Select and Combobox                          */
+/* ===================================================================== */
+
+/** Select trigger — an .rr-input button with a chevron. */
+.rr-select {
+	display: flex;
+	align-items: center;
+	gap: var(--rr-space-2);
+	padding-right: 32px;
+	text-align: left;
+	cursor: pointer;
+	background-image: linear-gradient(45deg, transparent 50%, var(--rr-text-secondary) 50%), linear-gradient(135deg, var(--rr-text-secondary) 50%, transparent 50%);
+	background-position:
+		calc(100% - 16px) 50%,
+		calc(100% - 11px) 50%;
+	background-size: 5px 5px;
+	background-repeat: no-repeat;
+}
+.rr-select[aria-expanded='true'] {
+	border-color: var(--rr-border-focus);
+}
+.rr-select__value {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	gap: var(--rr-space-2);
+	min-width: 0;
+}
+.rr-select__placeholder {
+	color: var(--rr-text-disabled);
+}
+
+/** Listbox panel — a .rr-popover holding .rr-option rows. */
+.rr-listbox {
+	display: flex;
+	flex-direction: column;
+	max-height: 280px;
+	padding: var(--rr-space-1);
+	overflow-y: auto;
+}
+.rr-listbox__empty {
+	padding: var(--rr-space-2) var(--rr-space-2-5);
+	font-size: 13px;
+	color: var(--rr-text-secondary);
+}
+
+.rr-option {
+	position: relative;
+	display: flex;
+	flex-shrink: 0;
+	align-items: center;
+	gap: var(--rr-space-2);
+	padding: 6px 28px 6px var(--rr-space-2-5);
+	font-size: 13px;
+	color: var(--rr-text-primary);
+	border-radius: var(--rr-radius-md);
+	cursor: pointer;
+	user-select: none;
+}
+.rr-option[data-active='true'] {
+	background: var(--rr-bg-list-hover);
+}
+.rr-option[aria-selected='true'] {
+	font-weight: var(--rr-font-weight-semibold);
+}
+.rr-option[aria-selected='true']::after {
+	content: '';
+	position: absolute;
+	top: 50%;
+	right: 10px;
+	width: 4px;
+	height: 8px;
+	border: solid var(--rr-accent);
+	border-width: 0 2px 2px 0;
+	transform: translateY(-60%) rotate(45deg);
+}
+.rr-option[aria-disabled='true'] {
+	opacity: 0.5;
+	cursor: default;
+}
+.rr-option__text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+.rr-option__description {
+	font-size: var(--rr-font-size-dense);
+	font-weight: var(--rr-font-weight-regular);
+	color: var(--rr-text-secondary);
+}
+
+/** A clickable end adornment (e.g. Combobox clear). */
+.rr-input-group__action {
+	position: absolute;
+	top: 50%;
+	right: var(--rr-space-1);
+	transform: translateY(-50%);
+}
+
+/* ===================================================================== */
+/* Choice text, radio group                                              */
+/* ===================================================================== */
+
+.rr-choice--described {
+	align-items: flex-start;
+}
+.rr-choice--described > .rr-checkbox,
+.rr-choice--described > .rr-radio,
+.rr-choice--described > .rr-switch {
+	margin-top: 2px;
+}
+.rr-choice__text {
+	display: flex;
+	flex-direction: column;
+	gap: 1px;
+}
+.rr-choice__description {
+	font-size: var(--rr-font-size-dense);
+	color: var(--rr-text-secondary);
+}
+
+.rr-radio-group {
+	display: flex;
+	flex-direction: column;
+	gap: var(--rr-space-2);
+}
+.rr-radio-group--horizontal {
+	flex-direction: row;
+	flex-wrap: wrap;
+	gap: var(--rr-space-2) var(--rr-space-4);
+}
+
+/* ===================================================================== */
+/* Slider — native range; Slider sets --rr-slider-fill inline            */
+/* ===================================================================== */
+
+.rr-slider-row {
+	display: flex;
+	align-items: center;
+	gap: var(--rr-space-3);
+}
+.rr-slider-row__value {
+	min-width: 3ch;
+	font-size: 12px;
+	text-align: right;
+	color: var(--rr-text-secondary);
+}
+
+.rr-slider {
+	--rr-slider-fill: 0%;
+	flex: 1;
+	height: 18px;
+	margin: 0;
+	background: transparent;
+	appearance: none;
+	cursor: pointer;
+}
+.rr-slider:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+.rr-slider::-webkit-slider-runnable-track {
+	height: 4px;
+	background: linear-gradient(to right, var(--rr-accent) var(--rr-slider-fill), var(--rr-grey-200) var(--rr-slider-fill));
+	border-radius: var(--rr-radius-pill);
+}
+.rr-slider::-moz-range-track {
+	height: 4px;
+	background: var(--rr-grey-200);
+	border-radius: var(--rr-radius-pill);
+}
+.rr-slider::-moz-range-progress {
+	height: 4px;
+	background: var(--rr-accent);
+	border-radius: var(--rr-radius-pill);
+}
+.rr-slider::-webkit-slider-thumb {
+	width: 14px;
+	height: 14px;
+	margin-top: -5px;
+	background: #ffffff;
+	border: 2px solid var(--rr-accent);
+	border-radius: 50%;
+	box-shadow: var(--rr-elevation-1);
+	appearance: none;
+}
+.rr-slider::-moz-range-thumb {
+	width: 10px;
+	height: 10px;
+	background: #ffffff;
+	border: 2px solid var(--rr-accent);
+	border-radius: 50%;
+	box-shadow: var(--rr-elevation-1);
+}
+.rr-slider:focus-visible {
+	outline: none;
+}
+.rr-slider:focus-visible::-webkit-slider-thumb {
+	box-shadow: var(--rr-focus-ring);
+}
+.rr-slider:focus-visible::-moz-range-thumb {
+	box-shadow: var(--rr-focus-ring);
+}
+
+/* ===================================================================== */
+/* Toast                                                                 */
+/* ===================================================================== */
+
+.rr-toast-viewport {
+	position: fixed;
+	right: var(--rr-space-4);
+	bottom: var(--rr-space-4);
+	z-index: var(--rr-z-toast);
+	display: flex;
+	flex-direction: column;
+	gap: var(--rr-space-2);
+	width: min(380px, calc(100vw - 32px));
+	pointer-events: none;
+}
+
+.rr-toast {
+	--rr-toast-tone: var(--rr-color-info);
+	display: flex;
+	align-items: flex-start;
+	gap: var(--rr-space-2-5);
+	padding: var(--rr-space-3) var(--rr-space-2) var(--rr-space-3) var(--rr-space-3);
+	font-size: 13px;
+	line-height: var(--rr-line-height-normal);
+	color: var(--rr-text-primary);
+	background: var(--rr-bg-paper);
+	border: 1px solid var(--rr-border);
+	border-radius: var(--rr-radius-lg);
+	box-shadow: var(--rr-elevation-2);
+	pointer-events: auto;
+	animation: rr-rise-in var(--rr-duration-base) var(--rr-ease-out);
+}
+.rr-toast--success {
+	--rr-toast-tone: var(--rr-color-success);
+}
+.rr-toast--warning {
+	--rr-toast-tone: var(--rr-color-warning);
+}
+.rr-toast--error {
+	--rr-toast-tone: var(--rr-color-error);
+}
+.rr-toast__icon {
+	flex-shrink: 0;
+	width: 8px;
+	height: 8px;
+	margin-top: 6px;
+	background: var(--rr-toast-tone);
+	border-radius: 50%;
+}
+.rr-toast__body {
+	flex: 1;
+	min-width: 0;
+	padding-top: 1px;
+}
+.rr-toast__title {
+	font-weight: var(--rr-font-weight-semibold);
+}
+.rr-toast > .rr-btn,
+.rr-toast > .rr-icon-btn {
+	flex-shrink: 0;
+}
+
+/* ===================================================================== */
 /* Utilities                                                             */
 /* ===================================================================== */
 
@@ -1035,7 +1331,8 @@ select.rr-input {
 	.rr-scrim,
 	.rr-dialog,
 	.rr-popover,
-	.rr-tooltip {
+	.rr-tooltip,
+	.rr-toast {
 		animation: none !important;
 		transition: none !important;
 	}

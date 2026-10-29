@@ -16,6 +16,7 @@
 
 import React, { CSSProperties, InputHTMLAttributes } from 'react';
 import { commonStyles } from '../../themes/styles';
+import { useFieldControl } from '../field/Field';
 
 // =============================================================================
 // TYPES
@@ -83,8 +84,17 @@ const styles = {
  * @returns The input element.
  */
 export function InputField({ className, style, ...rest }: IInputFieldProps): React.ReactElement {
+	// Inside a Field, take its id, description and invalid/required state.
+	const fieldProps = useFieldControl(rest);
+
 	// Merge our scoped class with any caller-supplied class.
 	const mergedClassName = className ? `${INPUT_CLASS} ${className}` : INPUT_CLASS;
 
-	return <input {...rest} className={mergedClassName} style={{ ...styles.input, ...style }} />;
+	// An invalid field gets the error border (inline styles cannot read aria-invalid).
+	let invalidStyle: CSSProperties | undefined;
+	if (fieldProps['aria-invalid'] === true || fieldProps['aria-invalid'] === 'true') {
+		invalidStyle = { borderColor: 'var(--rr-color-error)' };
+	}
+
+	return <input {...fieldProps} className={mergedClassName} style={{ ...styles.input, ...invalidStyle, ...style }} />;
 }

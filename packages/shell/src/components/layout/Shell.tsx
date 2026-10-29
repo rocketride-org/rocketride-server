@@ -54,6 +54,7 @@ import { registerAndMapApps, resolveServerEntry, getRegisteredEntry, invalidateA
 import { getAppVersionOverrides, setAppVersionOverride, versionedEntryUrl } from '../../util/versionOverride';
 import type { ServerAppEntry } from '../../util/appLoader';
 import { waitForEmbeddedSession } from '../../util/devMode';
+import { ToastViewport } from '../toast/Toast';
 
 // =============================================================================
 // STYLES
@@ -832,6 +833,10 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 			{/* Checkout overlay — renders outside the shell layout */}
 			<CheckoutFlow stripeKey={stripeKey} orgId={orgId} />
+
+			{/* Toast stack — mounted up front so its live region exists before
+			    the first showToast() and the first message is announced */}
+			<ToastViewport />
 		</ShellIdentityContext.Provider>
 	);
 };

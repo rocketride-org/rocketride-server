@@ -92,8 +92,10 @@ const ENTRY_SOURCES = {
 	'drop-zone': ['components/drop-zone'],
 	'empty-state': ['components/empty-state'],
 	explorer: ['modules/explorer'],
+	field: ['components/field'],
 	'filter-strip': ['components/data-grid'],
 	'grid-helpers': ['components/data-grid'],
+	'icon-button': ['components/icon-button'],
 	'input-field': ['components/input-field'],
 	'mini-card': ['components/mini-card'],
 	modal: ['components/modal'],
@@ -102,6 +104,7 @@ const ENTRY_SOURCES = {
 	'sidebar-menu': ['components/sidebar-menu'],
 	'status-badge': ['components/status-badge'],
 	'tab-control': ['components/tab-control', 'components/tab-panel'],
+	toast: ['components/toast'],
 	'toggle-group': ['components/toggle-group'],
 };
 

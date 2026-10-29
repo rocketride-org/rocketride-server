@@ -119,6 +119,10 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 			textMuted: ['--rr-text-secondary'],
 		},
 	},
+	'field': {
+		direct: [],
+		commonStyles: {},
+	},
 	'filter-strip': {
 		direct: ['--rr-bg-default', '--rr-bg-input', '--rr-bg-list-hover', '--rr-bg-paper', '--rr-bg-surface-alt', '--rr-border', '--rr-border-hover', '--rr-border-input', '--rr-brand', '--rr-chart-', '--rr-color-error', '--rr-color-info', '--rr-color-success', '--rr-color-warning', '--rr-fg-button', '--rr-font-family', '--rr-font-mono', '--rr-palette-mode', '--rr-shadow-widget', '--rr-text-disabled', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {
@@ -139,8 +143,12 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 			tableCell: ['--rr-border'],
 		},
 	},
+	'icon-button': {
+		direct: [],
+		commonStyles: {},
+	},
 	'input-field': {
-		direct: ['--rr-bg-default', '--rr-text-disabled'],
+		direct: ['--rr-bg-default', '--rr-color-error', '--rr-text-disabled'],
 		commonStyles: {
 			inputField: ['--rr-bg-input', '--rr-border-input', '--rr-text-primary'],
 		},
@@ -181,6 +189,10 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 	},
 	'tab-control': {
 		direct: ['--rr-bg-scrollbar-thumb', '--rr-bg-widget-header', '--rr-border', '--rr-brand', '--rr-color-error', '--rr-fg-button', '--rr-scrollbar-thumb', '--rr-text-primary', '--rr-text-secondary'],
+		commonStyles: {},
+	},
+	'toast': {
+		direct: [],
 		commonStyles: {},
 	},
 	'toggle-group': {
