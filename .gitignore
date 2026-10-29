@@ -237,3 +237,6 @@ packages/ai/src/ai/modules/mcp/apps/dist/
 !packages/n8n-nodes/credentials/**
 **/node_modules/
 **/dist/
+
+# Eval runner output (apps/shared/src/modules/agent/eval)
+.verify/

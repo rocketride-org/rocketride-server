@@ -1,0 +1,5 @@
+{
+	"files": {
+		"pipelines/support-chat.pipe": "{\n\t\"components\": [\n\t\t{\n\t\t\t\"id\": \"chat_1\",\n\t\t\t\"provider\": \"chat\",\n\t\t\t\"config\": {\n\t\t\t\t\"hideForm\": true,\n\t\t\t\t\"mode\": \"Source\",\n\t\t\t\t\"parameters\": {},\n\t\t\t\t\"type\": \"chat\"\n\t\t\t}\n\t\t},\n\t\t{\n\t\t\t\"id\": \"llm_anthropic_1\",\n\t\t\t\"provider\": \"llm_anthropic\",\n\t\t\t\"config\": {\n\t\t\t\t\"profile\": \"claude-sonnet-4-6\",\n\t\t\t\t\"claude-sonnet-4-6\": {\n\t\t\t\t\t\"apikey\": \"${ROCKETRIDE_ANTHROPIC_KEY}\"\n\t\t\t\t},\n\t\t\t\t\"parameters\": {}\n\t\t\t},\n\t\t\t\"input\": [\n\t\t\t\t{\n\t\t\t\t\t\"lane\": \"questions\",\n\t\t\t\t\t\"from\": \"chat_1\"\n\t\t\t\t}\n\t\t\t]\n\t\t},\n\t\t{\n\t\t\t\"id\": \"response_answers_1\",\n\t\t\t\"provider\": \"response_answers\",\n\t\t\t\"config\": {\n\t\t\t\t\"laneName\": \"answers\"\n\t\t\t},\n\t\t\t\"input\": [\n\t\t\t\t{\n\t\t\t\t\t\"lane\": \"answers\",\n\t\t\t\t\t\"from\": \"llm_anthropic_1\"\n\t\t\t\t}\n\t\t\t]\n\t\t}\n\t],\n\t\"project_id\": \"1660c185-c2db-5345-88a0-6dc35873f510\",\n\t\"version\": 1\n}"
+	}
+}
