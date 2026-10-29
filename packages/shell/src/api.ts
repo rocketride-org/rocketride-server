@@ -265,6 +265,7 @@ import { ConnectionManagerView } from './components/connection-manager/Connectio
 import { useDebouncedValue } from './hooks/useDebouncedValue';
 import { useAnnouncements } from './hooks/useAnnouncements';
 import { formatBytes, formatDate, formatDuration } from './util/format';
+import { getSessionStorageItem, removeSessionStorageItem, setSessionStorageItem } from './util/sessionStorage';
 // (commonStyles is imported at the very top of this file — cycle-order
 // constraint — and re-exported from the export block below.)
 // Values graduated from deep shell/src imports when the package exports map
@@ -292,6 +293,7 @@ export {
 	GRID_CONFIG_CLEAR,
 	useDebouncedValue, useAnnouncements, formatBytes, formatDate,
 	formatDuration, formatDateValue,
+	getSessionStorageItem, removeSessionStorageItem, setSessionStorageItem,
 	ChatView, MessageList, MarkdownRenderer, useChatMessages,
 	ConnectionCard, ConnectionCardAdd, ConnectionManagerView,
 	commonStyles,
@@ -454,6 +456,9 @@ export const shellApi = {
 	get formatBytes() { return formatBytes; },
 	get formatDate() { return formatDate; },
 	get formatDuration() { return formatDuration; },
+	get getSessionStorageItem() { return getSessionStorageItem; },
+	get setSessionStorageItem() { return setSessionStorageItem; },
+	get removeSessionStorageItem() { return removeSessionStorageItem; },
 	get commonStyles() { return commonStyles; },
 	get useShellConnection() { return useShellConnection; },
 	get useAuthUser() { return useAuthUser; },
