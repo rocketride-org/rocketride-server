@@ -1,6 +1,9 @@
 faster-whisper
 
-ctranslate2
+# Floor shared with packages/ai/src/ai/common/models/audio/requirements_whisper.txt:
+# 4.7.x with the CUDA 12.8 runtime is refused by the loader's GPU probe, and a stale
+# engine cache kept resolving it (#2498). The two files must agree.
+ctranslate2>=4.8,<5
 av
 tokenizers
 huggingface-hub

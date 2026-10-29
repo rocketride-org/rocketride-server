@@ -219,13 +219,14 @@ Two rules before anything else:
   	displayName: 'Reports',
   	statusFooter: true,
   });
-  // created.appId = 'local.reports', created.folder = 'apps/reports'
+  // created.appId = '<your developer id>.reports', created.folder = 'apps/reports-ui'
   ```
 
-  The scaffold defaults the id to `local.<slug>` (pass `developerId` once
-  your org's id is registered) and is scaffolding only — nothing deploys
-  until the normal lifecycle (`verifyApp` → `addApp` → `publishApp`)
-  runs.
+  The scaffold namespaces the id with the connected org's developer id
+  (falling back to `local.<slug>` when the org has not registered one;
+  pass `developerId` to override) and is scaffolding only — nothing
+  deploys until the normal lifecycle (`verifyApp` → `addApp` →
+  `publishApp`) runs.
 
 The New App wizard collects an app-name slug, a display name, a template
 (**Blank** or **Dashboard**), and three frame options that each toggle a
@@ -358,7 +359,7 @@ by hand.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | `string` | required | Stable unique identity, `<developerId>.<name>` (e.g. `acme.brandy`). The prefix must be your org's claimed namespace to deploy or publish. Renaming the id makes it a different app. |
-| `projectId` | `string` | auto | Working-copy GUID the App Builder manages — tells one checkout apart from another; rides deploys only as provenance. Leave it alone. |
+| `projectId` | `string` | auto | Working-copy GUID stamped when the app is created (New App wizard, `rocketride app create`, `createApp`/`create_app`) or first opened in the App Builder — tells one checkout apart from another. Deploys forward it as provenance and never write it. Leave it alone. |
 | `publisher` | `string` | — | Publisher display name in the app store. |
 | `name` | `string` | required | Display name (app switcher, store tile). |
 | `description` | `string` | — | Short description for the store listing. |
@@ -1784,17 +1785,19 @@ Mechanics worth knowing:
 Everything the Deploy tab does is scriptable — the UI and the SDKs call the
 same verbs (TypeScript camelCase / Python snake_case):
 
-| Action | TypeScript verb |
-|---|---|
-| List versions | `client.listDeployments(appId)` |
-| Deploy a source zip | `client.deploy.add({ kind: 'app', data, metadata })` |
-| Publish to a rung | `client.publishApp(appId, version, target)` |
-| Remove a binding | `client.removeAppPublish(appId, target)` |
-| Disable a binding | `client.disableAppPublish(appId, target)` |
-| Where live | `client.whereApp(appId)` |
-| Submit / withdraw review | `client.submitApp(...)` / `client.withdrawApp(...)` |
-| Review thread reply | `client.replyApp(appId, message)` |
-| Build log | `client.buildLog(appId, version)` |
+| Action | TypeScript verb | CLI |
+|---|---|---|
+| Live preview (dev loop) | `rocketride/app-dev` (`DevSession`, `devPreviewUrl`) | `rocketride app dev [app] --open` |
+| List versions | `client.listDeployments(appId)` | `rocketride app versions [app]` |
+| Deploy the app's source | `client.deploy.addApp(appFolder, { comment })` | `rocketride app deploy [app]` |
+| Wait for the server build | `client.waitForAppBuild(appId, version)` | (built into `app publish` / `app deploy --publish`) |
+| Publish to a rung | `client.publishApp(appId, version, target)` | `rocketride app publish [app] [version] --to <target>` |
+| Remove a binding | `client.removeAppPublish(appId, target)` | `rocketride app unpublish [app] --from <target>` |
+| Disable a binding | `client.disableAppPublish(appId, target)` | `rocketride app disable [app] --from <target>` |
+| Where live | `client.whereApp(appId)` | `rocketride app where [app]` |
+| Submit / withdraw review | `client.submitApp(...)` / `client.withdrawApp(...)` | `rocketride app submit|withdraw [app] [version]` |
+| Review thread reply | `client.replyApp(appId, message)` | `rocketride app reply [app] -m <text>` |
+| Build log | `client.buildLog(appId, version)` | `rocketride app log [app] [version]` |
 
 The Python client mirrors every verb (`publish_app`, `submit_app`,
 `where_app`, ...). See `ROCKETRIDE_typescript_API.md` and

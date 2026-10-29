@@ -316,6 +316,19 @@ export interface OrgInfo {
 	 * Each entry includes team-scoped permissions.
 	 */
 	teams: TeamInfo[];
+
+	/**
+	 * Id of the organisation's default development team — the team invites
+	 * pre-select for new members. Null/absent when the organisation has none.
+	 */
+	defaultDevTeamId?: string | null;
+
+	/**
+	 * True when the authenticated user is the organisation's only active
+	 * admin. Leaving is refused until another member is promoted. Absent on
+	 * OSS servers and on task-scoped synthetic organisations.
+	 */
+	isLastAdmin?: boolean;
 }
 
 /**

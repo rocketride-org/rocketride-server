@@ -24,12 +24,12 @@
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
 from typing import Any, Dict
 
 from rocketlib import debug, expand
 from ai.common.config import Config
 from ai.common.models import GLiNER
+from ai.common.models.base import make_device_lock
 from .Ruleparser import RuleParser
 from .anonymize import (
     anonymize as _anonymize,
@@ -71,11 +71,15 @@ class GliNERRecognizer:
         # Use ai.common.models.GLiNER - auto-detects local vs model server mode
         self.model = GLiNER(self.model_name)
 
-        # GLiNER wraps a single torch module, which cannot run concurrent forward
-        # passes: doing so corrupts the CUDA heap and aborts the worker. predict()
-        # holds this around the predict_entities call only, so chunking, offset
-        # arithmetic and the overlap filter still run concurrently.
-        self._predict_lock = Lock()
+        # In-process GLiNER wraps a single torch module, which cannot run concurrent
+        # forward passes: doing so corrupts the CUDA heap and aborts the worker. With
+        # --modelserver the forward pass runs in the model server, which has its own
+        # workers, so a node-side lock would only hold the chunk workers
+        # below to one request in flight: make_device_lock() is that lock in-process
+        # and a no-op in proxy mode. predict() holds it around the predict_entities
+        # call only, so chunking, offset arithmetic and the overlap filter still run
+        # concurrently.
+        self._predict_lock = make_device_lock()
 
     def extract_keywords_from_xml(self, data):
         """

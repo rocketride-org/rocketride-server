@@ -22,10 +22,13 @@
 
 """Regression tests for the scaffolded rsbuild config (#2455)."""
 
+import json
+import os
 import re
+import tempfile
 import unittest
 
-from rocketride._app_scaffold import TEMPLATE_NAMES, TemplateVars, render_template
+from rocketride._app_scaffold import TEMPLATE_NAMES, TemplateVars, create_app_workspace, render_template
 
 VARS = TemplateVars(
     app_id='acme.brandy',
@@ -52,3 +55,24 @@ class TestScaffoldRsbuildConfig(unittest.TestCase):
                 re.compile(r'rspack: \{[^}]*optimization: \{ emitOnErrors: false \}'),
                 template,
             )
+
+
+class TestCreateAppWorkspaceFolder(unittest.TestCase):
+    def test_scaffolds_under_apps_slug_ui(self) -> None:
+        """The folder rule matches the TypeScript scaffold and the VS Code wizard: apps/<slug>-ui."""
+        with tempfile.TemporaryDirectory() as ws:
+            created = create_app_workspace(ws, 'clock', install=False)
+
+            self.assertEqual(created['folder'], 'apps/clock-ui')
+            self.assertEqual(created['appId'], 'local.clock')
+            self.assertTrue(os.path.isfile(os.path.join(ws, 'apps', 'clock-ui', 'clock.rrapp')))
+            self.assertFalse(os.path.exists(os.path.join(ws, 'apps', 'clock')))
+
+    def test_stamps_a_working_copy_project_id_at_creation(self) -> None:
+        """Like the TypeScript scaffold, the appManifest carries a projectId from creation."""
+        with tempfile.TemporaryDirectory() as ws:
+            create_app_workspace(ws, 'clock', install=False)
+
+            with open(os.path.join(ws, 'apps', 'clock-ui', 'package.json'), encoding='utf-8') as f:
+                pkg = json.load(f)
+            self.assertRegex(pkg['appManifest']['projectId'], r'^[0-9a-f-]{36}$')
