@@ -37,14 +37,11 @@
  * values, and TOML inline tables.
  */
 
-import { findSecrets, holdsNoSecret, mergeSpans, replaceSpans, secretKind, unescapeJson, type SecretKind } from './common';
+import { findSecrets, holdsNoSecret, MARKERS, mergeSpans, replaceSpans, secretKind, unescapeJson, type SecretKind } from './common';
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
-
-/** Any marker-shaped text, known to this run or not. */
-const MARKER_PATTERN = /«secret:[^»\s]{1,64}»/g;
 
 /** The shortest value hidden wherever it appears; a shorter one could be an ordinary word. */
 const KNOWN_MIN_CHARS = 8;
@@ -427,7 +424,7 @@ export class SecretMarkers {
 	 * @throws When a marker is not one this run made.
 	 */
 	reveal(text: string, op: string): string {
-		return text.replace(MARKER_PATTERN, (marker) => {
+		return text.replace(MARKERS, (marker) => {
 			const value = this.values.get(marker);
 			if (value === undefined) throw new Error(`${op} refused: ${marker} is not a marker from this run. Read the file again and keep its markers as they are.`);
 			return value;

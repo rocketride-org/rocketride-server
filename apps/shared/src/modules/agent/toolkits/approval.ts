@@ -47,7 +47,7 @@ import { RefusedError, type ToolAct } from '../tools';
 import type { RunRecord } from '../turn';
 import { brief, isJsonObject, requireClient, type ClientGetter } from './common';
 import { readApps } from './inventory';
-import type { RunOwnership, RunTarget } from './runs';
+import type { RunOwnership, RunTarget } from './rocketrideClient';
 
 // =============================================================================
 // TYPES
@@ -161,6 +161,8 @@ const ACCOUNT = 'ask the user to make account, team and member changes themselve
 const BILLING = 'ask the user to go through billing themselves';
 const ACCOUNT_DETAILS = 'use getOrgId, account.getOrg or account.listTeams for account details';
 const MONITORS = 'monitors belong to the open app; poll getTaskStatus(token) instead';
+/** The methods rocketride_client refuses before this list runs (its NOT_JSON). */
+const NOT_JSON = "it can't work over JSON; rocketride_client's refusal names the JSON way to do the job";
 
 // =============================================================================
 // TEXTS — what the model reads as the call's error
@@ -266,15 +268,15 @@ const CLIENT_POLICY: ClientPolicy = {
 	validate: FREE,
 	use: FREE,
 	send: FREE,
-	sendFiles: FREE,
-	pipe: FREE,
-	chat: FREE,
+	sendFiles: never(NOT_JSON),
+	pipe: never(NOT_JSON),
+	chat: never(NOT_JSON),
 	tool: FREE,
 	getTasks: FREE,
 	getTaskStatus: FREE,
 	getTaskToken: FREE,
 	getTaskPipeline: FREE,
-	addMonitor: FREE,
+	addMonitor: never(MONITORS),
 	setEvents: FREE,
 	terminate: ask(async ([token], n) => ({ title: `Stop the pipeline run ${await n.run({ token: text(token) })}` }), { target: ([token]) => ({ token: typeof token === 'string' ? token : undefined }) }),
 	restart: ask(async ([o], n) => ({ title: `Restart the pipeline run ${await n.run(restartTarget(o))}`, detail: 'It stops and starts again with the pipeline sent.' }), { target: ([o]) => restartTarget(o) }),
@@ -382,7 +384,7 @@ const CLIENT_POLICY: ClientPolicy = {
 	'database.commit': FREE,
 	'database.rollback': FREE,
 	'database.dialect': FREE,
-	'database.sequelize': FREE,
+	'database.sequelize': never(NOT_JSON),
 
 	'deploy.add': ask(deployToCard, { freeWhen: ([o]) => !isJsonObject(o) || o.deployTo === undefined }),
 	'deploy.addApp': FREE,
@@ -404,7 +406,7 @@ const CLIENT_POLICY: ClientPolicy = {
 	'deploy.run': ask(async ([projectId, sourceId, teamId], n) => ({ title: `Run ${await n.deployment(projectId, teamId)} (${text(sourceId)}) on team ${await n.team(teamId)} now` })),
 	'deploy.setSourceConfig': ask(async ([projectId, sourceId, teamId], n) => ({ title: `Change tracing for ${await n.deployment(projectId, teamId)} (${text(sourceId)}) on team ${await n.team(teamId)}` })),
 
-	'log.openEventStream': FREE,
+	'log.openEventStream': never(NOT_JSON),
 	'log.chapters': FREE,
 	'log.streams': FREE,
 	'log.read': FREE,

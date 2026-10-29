@@ -217,7 +217,8 @@ export interface SecretSpan {
 /** A marker the file tools show in place of a secret value: `«secret:<id>»`. */
 const MARKER = /^«secret:[^»\s]{1,64}»$/;
 
-const MARKERS = /«secret:[^»\s]{1,64}»/g;
+/** Any marker-shaped text, known to this run or not. */
+export const MARKERS = /«secret:[^»\s]{1,64}»/g;
 
 /**
  * Credential shapes, most specific first. A lookbehind keeps a shape from starting inside a word
@@ -351,6 +352,20 @@ export function replaceSpans<T extends { start: number; end: number }>(text: str
 export function redactText(text: string): string {
 	const spans = findSecrets(text);
 	return spans.length === 0 ? text : replaceSpans(text, spans, () => REDACTED);
+}
+
+/**
+ * A copy of a value with every string passed through redactText. Unlike
+ * redactSecrets it goes by text, not by field name, so a run token stays
+ * readable for the ownership check.
+ *
+ * @param value - A turn result, card or run record.
+ */
+export function redactDeep<T>(value: T): T {
+	if (typeof value === 'string') return redactText(value) as T;
+	if (Array.isArray(value)) return value.map((item) => redactDeep(item)) as T;
+	if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactDeep(item)])) as T;
+	return value;
 }
 
 /**

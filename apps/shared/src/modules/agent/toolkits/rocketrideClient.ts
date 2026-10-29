@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// ROCKETRIDE CLIENT TOOL — rocketride_client calls any client method by the guide's name
+// ROCKETRIDE CLIENT TOOL — rocketride_client, which calls any client method by the guide's name, and the runs it started
 // =============================================================================
 
 /**
@@ -39,8 +39,8 @@ import type { RocketRideClient } from 'rocketride';
 
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import { AgentTool, AgentToolkit, type ToolStep } from '../tools';
+import type { RunRecord } from '../turn';
 import { clip, isJsonObject, isWalkable, messageOf, pipelineArg, redactSecrets, requireClient, RESULT_MAX_CHARS, toolText, type ClientGetter, type JsonObject } from './common';
-import type { RunLedger } from './runs';
 
 // =============================================================================
 // CONSTANTS
@@ -350,4 +350,152 @@ export class RocketRideClientToolkit extends AgentToolkit {
 			},
 		};
 	}
+}
+
+// =============================================================================
+// RUNS — the pipeline runs this conversation started, and whether a run is one
+// =============================================================================
+
+/**
+ * Says which runs this conversation started, so terminate and restart act on them without asking in
+ * Auto mode (approval.ts).
+ * - A `use` the engine answers with `reused: false` started a run; its status is read at once and
+ *   recorded (token, project_id, source, startTime, scope, conversation). A `deploy.run` is never
+ *   recorded: a token and a later start time don't prove who started it.
+ * - Right before an Auto terminate or restart, `recheck` reads the status again; start time,
+ *   project_id, source and scope must match, since the engine reuses a token for a project and source.
+ * Records live in the session file, so a reloaded conversation still owns its runs. The run can still
+ * change between the recheck and the call; that window is a known limit.
+ */
+
+// =============================================================================
+// TYPES
+// =============================================================================
+
+/** The run a terminate or restart call names: its token, or for restart, its project and source (and a team for a team's deployed run). */
+export interface RunTarget {
+	token?: string;
+	projectId?: string;
+	source?: string;
+	teamId?: string;
+}
+
+/** What the approvals ask about runs. */
+export interface RunOwnership {
+	/**
+	 * The record of the run a call targets, when this conversation started it.
+	 *
+	 * @returns The record, or undefined for a run started elsewhere or not verified.
+	 */
+	owned(target: RunTarget): RunRecord | undefined;
+	/**
+	 * Reads the run's status again, right before an Auto terminate or restart.
+	 *
+	 * @param record - The record approve() found.
+	 * @returns null when the run is still the one recorded, else why not.
+	 */
+	recheck(record: RunRecord): Promise<string | null>;
+}
+
+/** What the ledger needs from its run. */
+export interface RunLedgerOptions {
+	/** The real client, for status reads. */
+	client: ClientGetter;
+	/** The scope the run started in ('' for the user's own files). */
+	scopeKey: string;
+	/** The host's scope now: a team switch changes it. */
+	currentScope: () => string;
+	/** The conversation (session id). */
+	conversationId: string;
+}
+
+// =============================================================================
+// THE LEDGER
+// =============================================================================
+
+/** One run's view of the conversation's runs. */
+export class RunLedger implements RunOwnership {
+	/** The records this run added, in order. */
+	readonly started: RunRecord[] = [];
+
+	/**
+	 * @param records - The conversation's records; the ledger adds to and refreshes this array in place.
+	 * @param o - The client, the scopes and the conversation.
+	 */
+	constructor(
+		readonly records: RunRecord[],
+		private readonly o: RunLedgerOptions
+	) {}
+
+	owned(target: RunTarget): RunRecord | undefined {
+		// a team's deployed run is never one this conversation started with use
+		if (target.teamId) return undefined;
+		if (target.token) return this.records.find((r) => r.token === target.token);
+		if (target.projectId && target.source) return this.records.find((r) => r.projectId === target.projectId && r.source === target.source);
+		return undefined;
+	}
+
+	async recheck(record: RunRecord): Promise<string | null> {
+		if (this.o.currentScope() !== record.scopeKey) return 'the workspace switched to another team since it started';
+		let status: Awaited<ReturnType<RocketRideClient['getTaskStatus']>>;
+		try {
+			status = await this.status(record.token);
+		} catch (err) {
+			return `its status could not be read (${messageOf(err)})`;
+		}
+		if (status.startTime !== record.startTime) return 'a different run holds its token now';
+		if (status.project_id !== record.projectId || status.source !== record.source) return 'its project or source changed';
+		return null;
+	}
+
+	/**
+	 * Hears a rocketride_client call that worked: a fresh `use` is recorded,
+	 * and a restart refreshes the record of the run it named.
+	 */
+	async afterCall(method: string, params: readonly unknown[], result: unknown): Promise<void> {
+		if (method === 'use') await this.recordUse(result);
+		else if (method === 'restart' && isJsonObject(params[0])) {
+			const o = params[0];
+			const record = this.owned({ token: text(o.token), projectId: text(o.projectId), source: text(o.source), teamId: text(o.teamId) });
+			if (record) await this.refresh(record);
+		}
+	}
+
+	/** Records a run that `use` started fresh, from a status read. */
+	private async recordUse(result: unknown): Promise<void> {
+		if (!isJsonObject(result) || result.reused !== false || typeof result.token !== 'string') return;
+		const { token } = result;
+		try {
+			const status = await this.status(token);
+			const record: RunRecord = { token, projectId: status.project_id, source: status.source, startTime: status.startTime, scopeKey: this.o.scopeKey, conversationId: this.o.conversationId };
+			// a token the engine reused for a new run replaces its old record
+			const at = this.records.findIndex((r) => r.token === token);
+			if (at >= 0) this.records.splice(at, 1);
+			this.records.push(record);
+			this.started.push(record);
+		} catch (err) {
+			console.log(`[agent] run ${token.slice(0, 11)}… started, but its status could not be read, so it is not recorded as this conversation's: ${messageOf(err)}`);
+		}
+	}
+
+	/** Refreshes a record after a restart; one whose status cannot be read stays as it was, and its recheck then fails. */
+	private async refresh(record: RunRecord): Promise<void> {
+		try {
+			const status = await this.status(record.token);
+			Object.assign(record, { projectId: status.project_id, source: status.source, startTime: status.startTime });
+		} catch (err) {
+			console.log(`[agent] run ${record.token.slice(0, 11)}… restarted, but its status could not be read: ${messageOf(err)}`);
+		}
+	}
+
+	/** The run's status, from the real client. */
+	private status(token: string): ReturnType<RocketRideClient['getTaskStatus']> {
+		const client = this.o.client();
+		if (!client) return Promise.reject(new Error('not connected'));
+		return client.getTaskStatus(token);
+	}
+}
+
+function text(value: unknown): string | undefined {
+	return typeof value === 'string' && value ? value : undefined;
 }

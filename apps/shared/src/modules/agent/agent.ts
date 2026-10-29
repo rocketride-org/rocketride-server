@@ -38,7 +38,7 @@
 
 import { getClient } from 'shell';
 import type { ChatMessage, TextResult } from 'shell';
-import type { ChatTurn } from 'shell/src/components/chat/types';
+import type { ChatCard, ChatCardAction, ChatTurn } from 'shell/src/components/chat/types';
 import { findAgentHost, getAgentHost } from './host';
 import { BUILDER_PROMPTS } from './prompts';
 import { runAgent } from './run';
@@ -46,9 +46,9 @@ import { configureSessions, deleteSession as deleteStoredSession, getAgentSessio
 import type { AgentSessionFile, AgentSessionMeta } from './sessions';
 // TEMPORARY (spec §11): delete when Rod's wiring lands
 import { StandinPipelines, STANDIN_MODEL } from './standin';
-import { looksLikeCredential, redactText } from './toolkits/common';
+import { looksLikeCredential, redactDeep, redactText } from './toolkits/common';
 import type { UndoOutcome, UndoRecord } from './toolkits/undo';
-import { choiceAction, CONTINUE, CONTINUE_TEXT, failedTurn, OPEN_VARIABLES, redactDeep, TurnError, turnCard, UNDO, undoParts, usageMeta, type RunRecord, type TurnCard, type TurnCardAction, type TurnRecord, type TurnResult } from './turn';
+import { choiceAction, CONTINUE, CONTINUE_TEXT, failedTurn, OPEN_VARIABLES, TurnError, turnCard, UNDO, undoParts, usageMeta, type RunRecord, type TurnRecord, type TurnResult } from './turn';
 import type { AppPrompts } from './wave/plan';
 
 export type { AgentSessionFile, AgentSessionMeta } from './sessions';
@@ -124,7 +124,7 @@ function routeChunks(onStatus?: AgentCallback): { callback: AgentCallback; resul
 // AGENT SESSION
 // =============================================================================
 
-function withUndo(card: TurnCard, state: 'ready' | 'waiting' | { unavailable: string }): TurnCard {
+function withUndo(card: ChatCard, state: 'ready' | 'waiting' | { unavailable: string }): ChatCard {
 	const { lines = [], actions = [] } = undoParts(state);
 	return { ...card, ...(lines.length ? { lines: [...(card.lines ?? []), ...lines] } : {}), ...(actions.length ? { actions: [...(card.actions ?? []), ...actions] } : {}) };
 }
@@ -628,7 +628,7 @@ export class AgentSession {
 	 *
 	 * @returns Whether the press did anything.
 	 */
-	cardAction(messageId: number, action: TurnCardAction, handlers: CardActionHandlers): boolean {
+	cardAction(messageId: number, action: ChatCardAction, handlers: CardActionHandlers): boolean {
 		if (action.kind === 'file') {
 			handlers.openFile(action.path);
 			return true;

@@ -30,7 +30,7 @@
  * through `redactDeep`.
  */
 
-import type { ChatMessage } from 'shell';
+import type { ChatCard } from 'shell/src/components/chat/types';
 
 import { redactText } from './toolkits/common';
 import { costText, tokensText } from './usage';
@@ -151,12 +151,6 @@ export interface TurnResult {
 /** A turn as the session file keeps it: always linked to its row. */
 export type TurnRecord = TurnResult & { messageId: number };
 
-/** The card under a bot row: the shell's type. */
-export type TurnCard = NonNullable<ChatMessage['card']>;
-
-/** A press on a card: a file link, or a button by its id. */
-export type TurnCardAction = { kind: 'file'; path: string } | { kind: 'action'; id: string };
-
 // =============================================================================
 // OUTCOMES
 // =============================================================================
@@ -216,20 +210,6 @@ export class TurnError extends Error {
 	}
 }
 
-/**
- * A copy of a value with every string passed through redactText. Unlike
- * redactSecrets it goes by text, not by field name, so a run token stays
- * readable for the ownership check.
- *
- * @param value - A turn result, card or run record.
- */
-export function redactDeep<T>(value: T): T {
-	if (typeof value === 'string') return redactText(value) as T;
-	if (Array.isArray(value)) return value.map((item) => redactDeep(item)) as T;
-	if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, redactDeep(item)])) as T;
-	return value;
-}
-
 // =============================================================================
 // THE CARD
 // =============================================================================
@@ -267,12 +247,12 @@ export function choiceAction(index: number): string {
  * Files the turn left in place are links; deleted ones are lines. A turn
  * whose model has no price says so, since the cost limit does not apply.
  */
-export function turnCard(turn: TurnResult): TurnCard {
+export function turnCard(turn: TurnResult): ChatCard {
 	const files = turn.files.filter((f) => f.change !== 'deleted').map((f) => f.path);
 	const deleted = turn.files.filter((f) => f.change === 'deleted').map((f) => `Deleted ${f.path}`);
 	const checkLine = (c: TurnCheck): string => `${c.target}: ${c.summary || c.status.replace('_', ' ')}`;
 	const unpriced = turn.usage.tokens && !turn.usage.cost ? [`No price for this model, so the cost limit does not apply (${tokensText(turn.usage.tokens.input + turn.usage.tokens.output)}).`] : [];
-	const withFiles = ({ lines: own = [], ...card }: TurnCard): TurnCard => {
+	const withFiles = ({ lines: own = [], ...card }: ChatCard): ChatCard => {
 		const lines = [...own, ...deleted, ...unpriced];
 		return { ...card, ...(lines.length ? { lines } : {}), ...(files.length ? { files } : {}) };
 	};
@@ -312,13 +292,13 @@ export function usageMeta(usage: TurnUsage): string {
  * @param state - 'ready' with the button enabled, 'waiting' with it disabled (the chat is busy, or a call of the turn is still running), or why Undo is unavailable.
  * @returns The button, or the line.
  */
-export function undoParts(state: 'ready' | 'waiting' | { unavailable: string }): Pick<TurnCard, 'lines' | 'actions'> {
+export function undoParts(state: 'ready' | 'waiting' | { unavailable: string }): Pick<ChatCard, 'lines' | 'actions'> {
 	if (typeof state === 'object') return { lines: [`Undo is unavailable: ${state.unavailable}.`] };
 	return { actions: [{ id: UNDO, label: 'Undo', ...(state === 'waiting' ? { disabled: true } : {}) }] };
 }
 
 /** A request's lines and buttons. */
-function requestParts(request: NeedsInputRequest | undefined): Pick<TurnCard, 'lines' | 'actions'> {
+function requestParts(request: NeedsInputRequest | undefined): Pick<ChatCard, 'lines' | 'actions'> {
 	if (!request) return {};
 	const disabled = request.answeredBy !== undefined;
 	switch (request.kind) {
