@@ -46,6 +46,9 @@
  *   stays readable so the model can follow its run. `getServices` drops its
  *   SVG icon table, and when it still does not fit, each service is cut to its
  *   category and a one-line summary.
+ * - A `use` that started a run, and a restart, are reported to the run
+ *   ledger (`runs.ts`), which records the runs this conversation owns.
+ * - A `use` refused with "Pipeline is already running" gets RERUN_GUIDANCE.
  */
 
 import type { RocketRideClient } from 'rocketride';
@@ -53,6 +56,7 @@ import type { RocketRideClient } from 'rocketride';
 import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 import { AgentTool, AgentToolkit, type ToolStep } from '../tools';
 import { clip, isJsonObject, isWalkable, messageOf, pipelineArg, redactSecrets, requireClient, RESULT_MAX_CHARS, toolText, type ClientGetter, type JsonObject } from './common';
+import type { RunLedger } from './runs';
 
 // =============================================================================
 // CONSTANTS
@@ -77,6 +81,12 @@ const PIPELINE_METHODS = new Set(['use', 'validate', 'deploy.add']);
 
 /** The methods whose top-level `token` is the run token, kept readable. */
 const RUN_TOKEN_METHODS = new Set(['use', 'deploy.run']);
+
+/** The engine's refusal of a second run of a pipeline that is still running. */
+const ALREADY_RUNNING = /already running/i;
+
+/** How to run an edited pipeline whose earlier run still holds it (the engine never applies a new pipeline to a running task). */
+const RERUN_GUIDANCE = 'Your edits are not in the running task. To run them, terminate that run (getTaskToken({ "projectId": ..., "source": ... }) gives its token) and call use again; if this conversation did not start it, ask the user first.';
 
 /** The longest a service's summary runs in a trimmed catalog, in characters. */
 const SUMMARY_MAX_CHARS = 100;
@@ -309,6 +319,8 @@ export class RocketRideClientToolkit extends AgentToolkit {
 	private readonly vfs: IWorkspaceFileSystem;
 	/** Hides the values the run's file tools hid. */
 	private readonly hide: (text: string) => string;
+	/** Hears each call that worked, to record the runs this conversation starts. */
+	private readonly runs?: Pick<RunLedger, 'afterCall'>;
 
 	/**
 	 * Builds the toolkit.
@@ -316,12 +328,14 @@ export class RocketRideClientToolkit extends AgentToolkit {
 	 * @param client - The host's client getter.
 	 * @param vfs - The workspace view.
 	 * @param hide - Hides the values the run's file tools hid, before a result is cut.
+	 * @param runs - The run ledger, when the run keeps one.
 	 */
-	constructor(client: ClientGetter, vfs: IWorkspaceFileSystem, hide = (text: string): string => text) {
+	constructor(client: ClientGetter, vfs: IWorkspaceFileSystem, hide = (text: string): string => text, runs?: Pick<RunLedger, 'afterCall'>) {
 		super();
 		this.client = client;
 		this.vfs = vfs;
 		this.hide = hide;
+		this.runs = runs;
 	}
 
 	/**
@@ -369,8 +383,10 @@ export class RocketRideClientToolkit extends AgentToolkit {
 				try {
 					result = await fn.apply(owner, params);
 				} catch (err) {
-					throw new Error(`${method} failed: ${messageOf(err)}.`);
+					const reason = messageOf(err);
+					throw new Error(`${method} failed: ${reason}.${method === 'use' && ALREADY_RUNNING.test(reason) ? ` ${RERUN_GUIDANCE}` : ''}`);
 				}
+				await this.runs?.afterCall(method, params, result);
 				return resultText(method, result, this.hide);
 			},
 		};

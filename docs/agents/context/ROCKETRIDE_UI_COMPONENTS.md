@@ -500,7 +500,7 @@ markdown rendering, typing indicator, in-thread error banners. The host owns
 the message state and transport (via `useChatMessages`); ChatView only
 renders and collects input. The composer is disabled while `isConnected` is
 false. `MessageList` (the scrollable thread with scroll-locked autoscroll;
-props `{ messages, isTyping, emptyTitle?, emptyDescription?, turn? }`) is exported
+props `{ messages, isTyping, emptyTitle?, emptyDescription?, turn?, onCardAction? }`) is exported
 for custom layouts.
 
 | Prop | Type | Dir | Note |
@@ -513,13 +513,17 @@ for custom layouts.
 | `leadingInputSlot` | `ReactNode` | in | Node before the input (reserved for attachments). |
 | `turn` | `ChatTurnView` | in | From `useChatMessages().turn`: a Stop button (and Esc in the composer) while a turn runs, and Edit and Remove on queued messages. Leave it out for a plain chat. |
 | `onSend` | `(text: string) => void` | out (req) | User submitted a message. |
+| `onCardAction` | `(messageId: number, action: { kind: 'file', path: string } \| { kind: 'action', id: string }) => void` | out | User pressed a file link or a button on a row's `card`. Without it the card's links and buttons show disabled. |
 
 `ChatMessage`: `{ id: number, text (markdown ok), sender: 'user' | 'bot' |
 'system' | 'status', timestamp: string, resultKey? (pipeline result key
 label under bot bubbles), sseType?, meta? (e.g. "2,340 tokens - 1.8s"),
 isError? (renders as an in-thread error Banner instead of a bubble),
 queued? (true on a user message sent while a turn was running and not yet
-taken by it; queued messages are always the last rows) }`.
+taken by it; queued messages are always the last rows), card? (on a bot row,
+a card under the bubble: { tone: 'success' | 'danger' | 'info' | 'neutral',
+title, lines?, files? (workspace paths, shown as links), actions? ({ id,
+label, disabled? }[]) }; presses go to onCardAction) }`.
 `'status'` messages are SSE progress lines grouped as a thinking group.
 
 **Wiring ChatView to a chat pipeline** — the verified recipe.
