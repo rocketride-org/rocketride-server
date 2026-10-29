@@ -108,7 +108,7 @@ inline std::filesystem::path computeCrashDbDir() noexcept {
 
         // Scoped by uid so another user cannot pre-empt or read the database,
         // and by the executable so two installs on one box stay apart. Never by
-        // pid: the next startup has to find the previous run's dumps.
+        // pid: an unreported dump stays here, in one place per install.
         //
         // Read /proc/self/exe rather than application::execPath(): we run from
         // plat::init(), and bootstrap only resolves the real exec path *after*
@@ -254,15 +254,17 @@ inline bool ownerRunning(const DumpOwner &owner) noexcept {
 
 // Move a dump out of the DB into crashDumpLocation() with the app's canonical
 // name, then notify. rename() with copy+remove fallback for cross-filesystem.
-inline void relocateAndNotify(const std::filesystem::path &src) noexcept {
+// Returns the new path, or an empty one if the dump was not moved.
+inline file::Path relocateAndNotify(const std::filesystem::path &src) noexcept {
     auto target = dev::createCrashDumpPath("dmp"_tv);
     std::filesystem::path targetFs{_ts(target).c_str()};
 
     std::error_code ec;
     std::filesystem::rename(src, targetFs, ec);
     if (ec) {
-        // Another engine's sweep got here first and is reporting it.
-        if (!std::filesystem::exists(src, ec)) return;
+        // Gone already: nothing left to report.
+        if (!std::filesystem::exists(src, ec))
+            return {};
 
         ec.clear();
         std::filesystem::copy_file(
@@ -271,23 +273,23 @@ inline void relocateAndNotify(const std::filesystem::path &src) noexcept {
         if (ec) {
             LOG(Error, "Failed to relocate minidump", src.string(),
                 ec.message());
-            return;
+            return {};
         }
         std::filesystem::remove(src, ec);
     }
 
     LOG(Error, "Minidump recovered:", target);
     if (dev::crashDumpCreatedCallback()) dev::crashDumpCreatedCallback()(target);
+    return target;
 }
 
-// Relocate dumps out of the DB. With ownOnly, just this process's dump (the
-// crash-time path); otherwise every dump whose process is gone (the per-task
-// path), leaving a running sibling's dump for its own crash handler to report.
-// Returns how many dumps it took.
-inline size_t sweepDumps(const std::filesystem::path &dbDir,
-                         bool ownOnly = false) noexcept {
-    size_t taken{};
-    if (dbDir.empty()) return taken;  // crash reporting is off
+// Relocate this process's own dump, the crash being reported, out of the DB.
+// Any other dump stays there: engines share the DB, and nothing ties a dead
+// process's dump to the task now running. True if it took one.
+inline bool takeOwnDump(const std::filesystem::path &dbDir) noexcept {
+    bool taken{};
+    if (dbDir.empty())
+        return taken;  // crash reporting is off
 
     for (const char *sub : {"pending", "completed"}) {
         auto dir = dbDir / sub;
@@ -299,27 +301,25 @@ inline size_t sweepDumps(const std::filesystem::path &dbDir,
             const auto &p = it->path();
             if (p.extension() != ".dmp") continue;
 
-            // Own: this very process (pid and start time), i.e. the crash
-            // being reported. Otherwise leave a running owner's dump to it.
+            // Own: this very process, by pid and start time
             auto owner = dumpOwner(p);
-            bool running = ownerRunning(owner);
-            bool own = running && owner.pid == ::getpid();
-            if (ownOnly ? !own : running && !own) continue;
-            relocateAndNotify(p);
-            ++taken;
+            if (!ownerRunning(owner) || owner.pid != ::getpid()) continue;
+            if (auto target = relocateAndNotify(p))
+                dev::crashDump() = _mv(target);
+            taken = true;
         }
     }
     return taken;
 }
 
 // Crash-time reporting, so crashDumpCreatedCallback reaches the caller before
-// the process dies (as Breakpad's in-process callback did) instead of on the
-// next run. It runs from a signal handler once the dump is written: Crashpad's
-// last-chance handler on Linux, our own handler on macOS. Neither may do the
-// sweep itself: it is not async-signal-safe, and on Linux the handler runs on
-// Crashpad's ~SIGSTKSZ alternate stack, which the sweep overflows. So the
-// handler only wakes this thread over a pipe and waits for it, bounded in case
-// the sweep deadlocks on a lock the crashed thread held.
+// the process dies (as Breakpad's in-process callback did). It runs from a
+// signal handler once the dump is written: Crashpad's last-chance handler on
+// Linux, our own handler on macOS. Neither may run takeOwnDump() itself: it is
+// not async-signal-safe, and on Linux the handler runs on Crashpad's ~SIGSTKSZ
+// alternate stack, which takeOwnDump() overflows. So the handler only wakes
+// this thread over a pipe and waits for it, bounded in case takeOwnDump()
+// deadlocks on a lock the crashed thread held.
 // A fork without exec inherits the pipes and handlers but not the thread, so a
 // forked child must not use them: its request would consume this process's
 // single-shot reporter. Only the process that started the reporter reports.
@@ -351,7 +351,7 @@ inline void startCrashReporter() noexcept {
         }
         if (n != 1) return;
 
-        c = sweepDumps(crashDbDir(), /*ownOnly=*/true) ? 1 : 0;
+        c = takeOwnDump(crashDbDir()) ? 1 : 0;
         [[maybe_unused]] auto _ = ::write(g_reportDone[1], &c, 1);
     }}.detach();
 }
@@ -390,7 +390,7 @@ inline bool onCrashDumped(int, siginfo_t *, ucontext_t *) noexcept {
 // SimulateCrash(), which returns once the dump is written. The dump records
 // Crashpad's simulated exception, but the faulting thread's real registers.
 // Crashes that raise no signal (EXC_GUARD, a resource kill) still dump on
-// EXC_CRASH and are reported by the next task run's sweep.
+// EXC_CRASH; that dump stays in the database, unreported.
 inline constexpr int FatalSignals[] = {SIGABRT, SIGBUS, SIGFPE, SIGILL,
                                        SIGSEGV, SIGSYS, SIGTRAP};
 inline struct sigaction g_prevActions[NSIG]{};
@@ -418,7 +418,7 @@ inline void onFatalSignal(int sig, siginfo_t *, void *context) noexcept {
         crashpad::SimulateCrash(cpu);
 
         // Reported: stop Crashpad writing a second dump on EXC_CRASH. If not,
-        // keep it as the fallback for the next task run's sweep.
+        // keep that one as the fallback, left in the database.
         if (reportOwnDump())
             ::task_set_exception_ports(::mach_task_self(), EXC_MASK_CRASH,
                                        MACH_PORT_NULL, EXCEPTION_DEFAULT,

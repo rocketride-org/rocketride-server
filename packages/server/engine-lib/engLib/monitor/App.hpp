@@ -37,6 +37,7 @@ class App : public Monitor {
     ///		Define the constant types we need to output
     //-----------------------------------------------------------------
     _const auto CountsTag = ">CNT"_tv;
+    _const auto CrashTag = ">CRASH"_tv;
     _const auto DumpTag = ">DUMP"_tv;
     _const auto ErrorTag = ">ERR"_tv;
     _const auto ExitTag = ">EXIT"_tv;
@@ -136,6 +137,41 @@ public:
 
         // Only report the dump name-- the directory is configured by the app
         outputTag(DumpTag, path.fileName());
+    }
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Output the crash report
+    ///	@param[in]	location
+    ///		Location where the call occured
+    ///	@param[in]	code
+    ///		Signal or exception code
+    ///	@param[in]	description
+    ///		What happened
+    ///	@param[in]	dump
+    ///		This crash's dump, empty without one
+    //-----------------------------------------------------------------
+    virtual void onCrash(Location location, TextView code, TextView description,
+                         const file::Path &dump) noexcept override {
+        Monitor::onCrash(location, code, description, dump);
+
+        outputTag(CrashTag, crashMessage(code, description, dump.fileName()));
+    }
+
+    //-----------------------------------------------------------------
+    ///	@details
+    ///		Format the >CRASH fields: code*description*dump. Joined by hand,
+    ///		as the '*' formatter drops an empty field, and the description
+    ///		loses any '*' so the dump stays the last field
+    //-----------------------------------------------------------------
+    static Text crashMessage(TextView code, TextView description,
+                             TextView dump) noexcept {
+        Text text{code};
+        text += '*';
+        for (auto ch : description) text += ch == '*' ? ' ' : ch;
+        text += '*';
+        text += dump;
+        return text;
     }
 
     //-----------------------------------------------------------------

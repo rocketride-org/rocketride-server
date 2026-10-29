@@ -423,6 +423,56 @@ async def test_exit_message_too_short_dispatches_incomplete_event_and_disconnect
 
 
 # ---------------------------------------------------------------------------
+# >CRASH / >DUMP — crash reports
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_crash_message_dispatches_crash_event_and_console_line():
+    events, disconnects = await _drive('>CRASH*11*SIGSEGV: Invalid access to storage*engine.dmp')
+    assert [e['event'] for e in events] == ['apaevt_crash', 'output']
+    assert events[0]['body'] == {
+        'code': '11',
+        'description': 'SIGSEGV: Invalid access to storage',
+        'file': 'engine.dmp',
+    }
+    assert events[1]['body']['output'] == 'Crash: SIGSEGV: Invalid access to storage (code 11), dump engine.dmp\n'
+    assert disconnects == []
+
+
+@pytest.mark.asyncio
+async def test_crash_message_without_a_dump_has_no_file():
+    """No dump: the engine still sends the last field, empty."""
+    events, _ = await _drive('>CRASH*0xc0000005*SEH exception 0xc0000005*')
+    assert events[0]['body'] == {'code': '0xc0000005', 'description': 'SEH exception 0xc0000005', 'file': None}
+    assert events[1]['body']['output'].endswith(', no dump\n')
+
+
+@pytest.mark.asyncio
+async def test_crash_message_dump_file_keeps_its_stars():
+    """The dump file is the last field, so a '*' in it stays in the file."""
+    events, _ = await _drive('>CRASH*11*SIGSEGV: Invalid access to storage*engine.a*b.dmp')
+    assert events[0]['body']['file'] == 'engine.a*b.dmp'
+
+
+@pytest.mark.asyncio
+async def test_short_crash_message_still_reports_the_crash():
+    events, _ = await _drive('>CRASH*6')
+    assert events[0]['event'] == 'apaevt_crash'
+    assert events[0]['body'] == {'code': '6', 'description': '', 'file': None}
+
+
+@pytest.mark.asyncio
+async def test_dump_message_dispatches_dump_event_and_console_line():
+    events, disconnects = await _drive('>DUMP*engine.dmp')
+    assert [e['event'] for e in events] == ['apaevt_dump', 'output']
+    assert events[0]['body'] == {'file': 'engine.dmp'}
+    assert events[1]['body']['output'] == 'Crash dump: engine.dmp\n'
+    assert 'Unknown control' not in events[1]['body']['output']
+    assert disconnects == []
+
+
+# ---------------------------------------------------------------------------
 # >SSE — server-sent event JSON
 # ---------------------------------------------------------------------------
 

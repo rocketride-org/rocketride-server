@@ -57,6 +57,8 @@ inline Error createMinidump(::PEXCEPTION_POINTERS pExceptionInfo,
     // Always log the minidump path
     LOG(Always, "Created minidump: ", path);
 
+    dev::crashDump() = path;
+
     // Notify via the callback if configured (e.g. to send the path to the
     // monitor)
     if (dev::crashDumpCreatedCallback()) dev::crashDumpCreatedCallback()(path);

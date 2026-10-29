@@ -84,6 +84,13 @@ Error init() noexcept {
         if (config::monitor()) MONITOR(onCrashDumpCreated, _location, dumpPath);
     };
 
+    // And of the crash itself
+    dev::crashCallback() = [](TextView code, TextView description,
+                              const file::Path &dump) noexcept {
+        if (config::monitor())
+            MONITOR(onCrash, _location, code, description, dump);
+    };
+
     // Init the monitor
     MONITOR(startMonitor);
     return {};

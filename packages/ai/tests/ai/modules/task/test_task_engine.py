@@ -2288,6 +2288,8 @@ def _exit_task(exit_event_seen=False):
     t = _task(status=TASK_STATUS())  # a first run: exitCode starts at 0
     t._exit_event_seen = exit_event_seen
     t._stop_requested = False
+    t._crash = None
+    t._process_killed = False
     return t
 
 
@@ -2381,6 +2383,124 @@ async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
     t._engine_process = _LingeringProcess()
     assert await Task._process_exit_code(t) == -9
     assert t._engine_process.killed
+
+    # The server's own kill is not a crash
+    Task._apply_process_exit_code(t, -9)
+    assert t._crash is None
+
+
+# ---------------------------------------------------------------------------
+# Crash reports: >CRASH, >DUMP and a death by signal with no report
+# ---------------------------------------------------------------------------
+
+_SEGV = {'code': '11', 'description': 'SIGSEGV: Invalid access to storage', 'file': 'own.dmp'}
+
+
+def _ending_task(process_exit_code):
+    """A task whose output has closed, for running the real _terminated()."""
+    t = _exit_task()
+    t._terminated_called = False
+    t._is_restarting = False
+    t._debug_stdio = t._data_client = t._task_metrics = t._tmpfile = t._data_port = None
+    t._status_update_task = None
+    t._final_events_sent = True
+    t._stop_reason = None
+    t._run_trigger = None
+    t._send_status_update = AsyncMock()
+    t._forward_task_event = AsyncMock()
+    t._process_exit_code = AsyncMock(return_value=process_exit_code)
+    return t
+
+
+async def _event(t, name, body):
+    await Task.on_event(t, {'type': 'event', 'event': name, 'body': body})
+
+
+@pytest.mark.asyncio
+async def test_crash_event_records_the_crash():
+    t = _exit_task()
+    await _event(t, 'apaevt_crash', dict(_SEGV))
+    assert t._crash == _SEGV
+
+
+@pytest.mark.asyncio
+async def test_a_reported_crash_ends_the_task_as_crashed():
+    """The crash text replaces both 'Stopped' and the engine's own exit message."""
+    from rocketride import TASK_STATE
+
+    t = _ending_task(-6)
+    await _event(t, 'apaevt_dump', {'file': 'own.dmp'})
+    await _event(t, 'apaevt_crash', dict(_SEGV))
+    await _event(t, 'apaevt_exit', {'exitCode': 1, 'message': 'Received terminal system signal'})
+    await Task._terminated(t)
+    assert t._status.status == 'Crashed (SIGSEGV: Invalid access to storage)'
+    assert t._status.exitMessage == 'Crashed (SIGSEGV: Invalid access to storage)'
+    assert t._status.exitCode == 1
+    assert t._status.state == TASK_STATE.CANCELLED.value
+
+
+@pytest.mark.asyncio
+async def test_a_failure_without_a_crash_still_ends_as_stopped():
+    t = _ending_task(1)
+    await _event(t, 'apaevt_exit', {'exitCode': 1, 'message': 'boom'})
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitMessage) == ('Stopped', 'boom')
+
+
+@pytest.mark.asyncio
+async def test_a_crash_without_an_exit_event_keeps_its_report():
+    t = _ending_task(-6)
+    await _event(t, 'apaevt_crash', dict(_SEGV))
+    await Task._terminated(t)
+    assert t._status.status == 'Crashed (SIGSEGV: Invalid access to storage)'
+    assert t._status.exitCode == -6
+
+
+@pytest.mark.asyncio
+async def test_a_crash_during_a_requested_stop_ends_as_stopped():
+    t = _ending_task(-6)
+    t._stop_requested = True
+    await _event(t, 'apaevt_crash', dict(_SEGV))
+    await Task._terminated(t)
+    assert t._status.status == 'Stopped'
+
+
+@pytest.mark.asyncio
+async def test_a_dump_alone_does_not_make_a_crash():
+    """Only >CRASH marks a crash; a dump is an artifact."""
+    t = _ending_task(0)
+    await _event(t, 'apaevt_dump', {'file': 'own.dmp'})
+    await _event(t, 'apaevt_exit', {'exitCode': 0, 'message': 'Completed'})
+    await Task._terminated(t)
+    assert t._status.status == 'Completed'
+
+
+@pytest.mark.asyncio
+async def test_a_death_by_signal_with_no_report_is_a_crash():
+    t = _ending_task(-11)
+    await Task._terminated(t)
+    assert t._status.status == 'Crashed (signal 11)'
+    assert t._status.exitMessage == 'Crashed (signal 11)'
+    assert t._status.exitCode == -11
+
+
+@pytest.mark.parametrize(
+    'case, exit_code',
+    [
+        ('stop requested', -15),
+        ('exit event seen', -6),
+        ('killed by the server', -9),
+        ('positive code, as on Windows', 0xC00000FD),
+        ('refused to start', 40),
+        ('code unknown', None),
+    ],
+)
+def test_no_signal_crash_without_its_conditions(case, exit_code):
+    t = _exit_task(exit_event_seen=case == 'exit event seen')
+    t._stop_requested = case == 'stop requested'
+    t._process_killed = case == 'killed by the server'
+    Task._apply_process_exit_code(t, exit_code)
+    assert t._crash is None
 
 
 # ---------------------------------------------------------------------------

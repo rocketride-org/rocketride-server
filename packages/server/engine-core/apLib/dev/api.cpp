@@ -90,6 +90,25 @@ void crashDumpLocation(const file::Path &path) noexcept {
     actualCrashDumpLocation() = path;
 }
 
+CrashCallback &crashCallback() noexcept {
+    static CrashCallback callback;
+    return callback;
+}
+
+file::Path &crashDump() noexcept {
+    static file::Path dump;
+    return dump;
+}
+
+void onCrash(TextView code, TextView description) noexcept {
+    // Two threads may crash at once: report only the first
+    static std::atomic_flag reported = ATOMIC_FLAG_INIT;
+    if (reported.test_and_set())
+        return;
+
+    if (crashCallback()) crashCallback()(code, description, crashDump());
+}
+
 Text createCrashDumpName(TextView extension) noexcept {
     StackTextVector components;
 

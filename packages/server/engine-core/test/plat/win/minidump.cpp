@@ -50,6 +50,11 @@ TEST_CASE("plat::createMinidump") {
     auto oldDumps = ap::dev::Dumps.val();
     util::Guard restoreDumps = [&] { ap::dev::Dumps.setValue(oldDumps); };
 
+    // The crash report names the dump this records (and restore it when done)
+    auto oldCrashDump = ap::dev::crashDump();
+    util::Guard restoreCrashDump = [&] { ap::dev::crashDump() = oldCrashDump; };
+    ap::dev::crashDump() = {};
+
     // A bare --dumps reaches the engine as "true"
     SECTION("--dumps writes a dump") {
         ap::dev::Dumps.setValue("true");
@@ -60,6 +65,7 @@ TEST_CASE("plat::createMinidump") {
         // Verify results
         REQUIRE(crashDumpCreated);
         REQUIRE(file::exists(minidumpPath));
+        REQUIRE(ap::dev::crashDump() == minidumpPath);
     }
 
     SECTION("without --dumps no dump is written") {
@@ -83,6 +89,7 @@ TEST_CASE("plat::createMinidump") {
 
             REQUIRE(!crashDumpCreated);
             REQUIRE(dumps() == before);
+            REQUIRE(!ap::dev::crashDump());
         }
     }
 }

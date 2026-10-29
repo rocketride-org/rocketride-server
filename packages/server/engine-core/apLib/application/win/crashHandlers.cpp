@@ -50,6 +50,10 @@ unhandledExceptionFilter(::PEXCEPTION_POINTERS pExceptionInfo) noexcept {
     // info is available)
     plat::createMinidump(pExceptionInfo);
 
+    const Text code =
+        _fmt("{,x,8}", pExceptionInfo->ExceptionRecord->ExceptionCode);
+    dev::onCrash(code, "SEH exception " + code);
+
     // Report the error and exit
     dev::fatality(_location, APERR(Ec::Fatality, errorStr));
 }
@@ -72,6 +76,9 @@ void abortHandler(int signal) noexcept {
 
     // Create a minidump of the program state
     plat::createMinidump(signal);
+
+    dev::onCrash(_ts(signal), _fmt("{}: {}", plat::renderSignal(signal),
+                                   plat::renderSignalDescription(signal)));
 
     // Report the error and exit
     dev::fatality(_location, APERR(Ec::Fatality, errorStr));

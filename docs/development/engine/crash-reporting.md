@@ -6,7 +6,7 @@ platform, so one symbolication workflow covers all of them.
 
 Dumps are **opt-in**: a minidump holds process memory, so the engine writes one
 only when started with `--dumps`. Without it a crash is still logged, but the
-engine starts no `crashpad_handler`, writes no dump and recovers none.
+engine starts no `crashpad_handler` and writes no dump.
 `--dumps=<value>` will choose where dumps go (#2892); until then the engine
 refuses to start when given any value, even `true` or an empty one. `eaas.py` passes its own `--dumps` on to
 the task processes it starts, as given; a pipeline's own task arguments cannot
@@ -41,18 +41,16 @@ learns of the crash at crash time, as on Windows.
   simulated exception rather than `EXC_BAD_ACCESS`, but the crashing thread's
   real registers, so it symbolizes to the faulting frame. Crashes that raise no
   signal (for example `EXC_GUARD`, or the process being killed for exceeding a
-  resource limit) are still dumped on `EXC_CRASH` and reported on the **next
-  task run**.
+  resource limit) are still dumped on `EXC_CRASH`, and that dump stays in the
+  database.
 
 A process forked from the engine without `exec` (for example a Python
 multiprocessing worker) is still dumped by Crashpad, but only the engine process
-itself reports at crash time. The forked process's dump is reported on the next
-task run.
+itself reports at crash time. The forked process's dump stays in the database.
 
-Each task run also sweeps the database for dumps nobody reported (for example,
-the process was killed while reporting). It waits until the monitor has
-installed its callback and the crash-dump location points at the task's log
-directory, and it skips dumps whose process is still running.
+A dump that no process reported at crash time (those above, or a process killed
+while reporting) stays in the database: no task run takes it, because nothing
+ties it to that task or to its user. Get it by hand, as below.
 
 The database directory is created `0700` and re-checked on every start. If it
 already exists but is a symlink, is owned by another user, or grants group or
@@ -62,13 +60,29 @@ read them.
 
 The uid and the executable hash keep separate users and separate installs apart.
 Two instances of the *same* install running as the *same* user still share one
-database, and whichever starts first recovers both sets of dumps. Give each
-instance its own `ROCKETRIDE_CRASHDB_DIR` in that setup.
+database, which then holds the unreported dumps of both. Give each instance its
+own `ROCKETRIDE_CRASHDB_DIR` to keep them apart.
 
 | Variable | Purpose |
 | --- | --- |
 | `ROCKETRIDE_CRASHPAD_HANDLER` | Override the handler path (relocated installs, containers). |
 | `ROCKETRIDE_CRASHDB_DIR` | Override the crash database directory. The same ownership and mode checks apply, so let the engine create it -- a directory you pre-create with the usual `0755` umask is rejected. `chmod 700` it if it must exist first. |
+
+## What the server learns
+
+A crashing engine tells its monitor, in this order, before it exits:
+
+- `>DUMP*<file>` -- its own dump, when it wrote one.
+- `>CRASH*<code>*<description>*<file>` -- the crash, with or without a dump: the
+  signal number (Linux, macOS), the exception code (Windows, e.g. `0xc0000005`)
+  or `jvm` (the JVM's abort and exit hooks), what happened, and this crash's dump
+  file, empty without one. The file is the last field.
+- `>EXIT*...` -- as for any fatal error.
+
+`eaas.py` marks the task crashed: its status and exit message read
+`Crashed (<description>)`. A task process killed by a signal
+that sent neither `>CRASH` nor `>EXIT`, with no stop requested, reads
+`Crashed (signal N)`.
 
 ## Getting a dump by hand
 
@@ -196,8 +210,8 @@ Core file '/tmp/aptest.3.3.0.9999.tiger.20260729T163801Z.1642339.dmp' (x86_64) w
 ```
 
 Frame #0 lands on the deliberate null-deref the crash-child test performs, which
-confirms the full loop end to end: `crashpad_handler` wrote the dump, the next run
-swept it into place, and LLDB symbolized it back to the exact source line.
+confirms the full loop end to end: `crashpad_handler` wrote the dump, the crashing
+process moved it into place, and LLDB symbolized it back to the exact source line.
 
 ### GDB -- via a converted core
 

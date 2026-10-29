@@ -115,4 +115,15 @@ inline CrashDumpCreatedCallback &crashDumpCreatedCallback() noexcept {
     return callback;
 }
 
+// Signal or exception code, what happened, and this crash's dump (empty
+// without one)
+using CrashCallback = Function<void(TextView, TextView, const file::Path &)>;
+CrashCallback &crashCallback() noexcept;
+
+// This process's own crash dump, set where it is written at crash time
+file::Path &crashDump() noexcept;
+
+// Report this process's crash, once, before the fatal exit
+void onCrash(TextView code, TextView description) noexcept;
+
 }  // namespace ap::dev
