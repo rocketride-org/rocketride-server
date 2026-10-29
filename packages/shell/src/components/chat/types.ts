@@ -100,20 +100,15 @@ export interface UseChatMessagesOptions {
 	/**
 	 * Injected transport: when provided, sendMessage awaits this instead of the
 	 * built-in chat API (the `client`/`authToken` arguments are then unused).
-	 * Each returned TextResult renders as one bot message. The hook passes a
-	 * status sink as the second argument: rows sent to it show up at once,
-	 * while the request is still pending (see {@link ChatStatusSink}). The hook
-	 * always passes the running turn as the third argument; it is typed optional
-	 * only because v0 is frozen.
+	 * Each returned TextResult renders as one bot message. The hook always passes a status sink
+	 * ({@link ChatStatusSink}) and the running turn; both are typed optional only because v0 is frozen.
 	 */
 	request?: (text: string, onStatus?: ChatStatusSink, turn?: ChatTurn) => Promise<TextResult[]>;
 }
 
 /**
- * Live status sink handed to an injected `request` transport. Each call
- * appends a status row to the thread immediately, the same row the built-in
- * chat path appends for a server-sent event. Rows with type `thinking` fold
- * into the thread's collapsible "Thinking…" group.
+ * Live status sink for an injected `request`: each call appends a status row at once, the same row a
+ * server-sent event appends. `thinking` rows fold into the thread's "Thinking…" group.
  *
  * @param type - The row's event type (stored as `sseType`).
  * @param text - The row's text; line breaks are kept.
@@ -153,7 +148,6 @@ export interface ChatAsking {
 export interface ChatAskView {
 	/** The card's id, for `answerAsk`. */
 	readonly id: number;
-	/** What it asks. */
 	readonly card: ChatAskCard;
 }
 
@@ -183,9 +177,6 @@ export interface ChatTurn {
 	 * and ends with the turn. Once answered, one status row records it
 	 * ("Approved: …", "Denied: …", "Not answered: …"). Asked on a turn that is
 	 * stopping or settled, it shows nothing and answers 'stopped' at once.
-	 *
-	 * @param card - What to ask.
-	 * @returns The waiting card.
 	 */
 	ask(card: ChatAskCard): ChatAsking;
 }

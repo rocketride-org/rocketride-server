@@ -4,18 +4,11 @@
 // =============================================================================
 
 /**
- * The turn controller: the only writer of a chat's rows and of its one turn.
- *
- * It has no React, so tests drive it directly; `useChatMessages` is a
- * `useSyncExternalStore` adapter over it. The request is called only from
- * `begin()`, and `begin()` runs only from an idle slot, so one turn runs at a
- * time. A send during a turn becomes a queued row at the end of the list: the
- * running request may take it, and otherwise it opens the next turn.
- *
- * It also owns the turn's "Needs your OK" cards (`ChatTurn.ask`). A card is
- * not a row: it waits on the turn, is never saved, and Stop, the turn
- * settling and a clear all end it as not answered, so no card outlives its
- * turn. An answered card leaves one status row.
+ * The only writer of a chat's rows and of its one turn. It has no React, so tests drive it directly;
+ * `useChatMessages` is a `useSyncExternalStore` adapter over it. One turn runs at a time; a send
+ * during a turn becomes a queued row the running request may take, else it opens the next turn.
+ * It also owns the turn's "Needs your OK" cards (`ChatTurn.ask`): not rows, never saved, and ended
+ * as not answered by Stop, the turn settling or a clear, so no card outlives its turn.
  */
 
 import type { ChatAskAnswer, ChatAskCard, ChatAsking, ChatAskView, ChatMessage, ChatStatusSink, ChatTurn, ChatTurnPhase, ChatTurnView, TextResult } from '../types';
@@ -94,9 +87,6 @@ export class TurnController {
 	private readonly now: () => string;
 	private readonly listeners = new Set<() => void>();
 
-	/**
-	 * @param o - The saved rows, the request source, and the clock and grace overrides.
-	 */
 	constructor(private readonly o: TurnControllerOptions) {
 		const initial = o.initialMessages ?? [];
 		// aparavi saves user rows as they are, so a row queued at save time comes back flagged
@@ -298,7 +288,6 @@ export class TurnController {
 		this.begin(opening);
 	}
 
-	/** Whether this turn still holds the slot. */
 	private holds(turn: LiveTurn): boolean {
 		return this.slot.phase !== 'idle' && this.slot.turn === turn;
 	}
@@ -334,12 +323,10 @@ export class TurnController {
 		return this.nextId++;
 	}
 
-	/** A user row, as v0 built it. */
 	private userRow(text: string): ChatMessage {
 		return { id: this.mint(), text, sender: 'user', timestamp: this.now() };
 	}
 
-	/** A system row, as v0 built it. */
 	private systemRow(text: string): ChatMessage {
 		return { id: this.mint(), text, sender: 'system', timestamp: this.now() };
 	}

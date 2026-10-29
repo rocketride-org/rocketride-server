@@ -156,9 +156,7 @@ const styles = {
 		fontStyle: 'italic',
 	} as CSSProperties,
 
-	// A multi-line status row (a sentence, then a list of what ran): the line
-	// breaks show, and the dot sits level with the first line instead of the
-	// middle of the block. Single-line rows keep the styles above unchanged.
+	// A multi-line status row keeps its line breaks, with the dot level with the first line, not the middle.
 	statusRowMulti: {
 		alignItems: 'flex-start',
 	} as CSSProperties,

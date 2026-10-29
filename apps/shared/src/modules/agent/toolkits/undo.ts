@@ -25,42 +25,17 @@
 // =============================================================================
 
 /**
- * The file toolkit keeps one UndoRecord per run. At each path's first touch
- * in the turn it records the content before (null for a file that did not
- * exist). After each of the agent's changes it records the version that
- * change left and the hash of the content or the absence it left. A rename
- * records both ends. The record lives in memory only: no content goes into
- * the session file, a prompt or the chat, so after a reload or a team switch
- * there is nothing to undo. Above UNDO_MAX_BYTES of content a turn cannot be
- * undone, and neither can one that deleted or moved a folder or created an
- * app, since the record does not hold what those changed.
+ * One UndoRecord per run, in memory only: at each path's first touch in the turn it keeps the content
+ * before, and after each agent change the version and hash that change left. No content reaches the
+ * session file, a prompt or the chat, so a reload or team switch leaves nothing to undo. A turn over
+ * UNDO_MAX_BYTES, or one that deleted or moved a folder or created an app, cannot be undone.
  *
- * Undo reverses only the file changes of one turn: never a run, a deploy, a
- * publish, a schedule or a Variable. It first checks every path, and
- * refuses the whole Undo, naming the paths, when any of them fails:
- *
- * - no editor holds unsaved changes there;
- * - the path is at the version the agent's last change left;
- * - nothing else changed it between two of the agent's changes: each later
- *   change started from the version, and replaced the content, that the
- *   agent's last change left;
- * - what stores it still matches the hash of what the agent left. For a path
- *   whose change is still staged (manual mode), that is the staged content.
- *   Otherwise (auto mode, or a path committed since) it is a fresh read of
- *   the server's copy, so a teammate's change on the server is seen. Only a
- *   missing file reads as an absence; any other failed read refuses.
- *
- * Then every inverse starts in one synchronous block, after the versions and
- * editors are checked once more: the content before is written back at the
- * version the agent left (`expect`), and a file the agent created is
- * removed. A rename is reversed at both ends: its old path gets its content
- * back and its new path goes. In manual mode the write-back of a staged
- * file drops its staged entry, and a file the agent created that was never
- * committed has its staged entry dropped rather than a delete staged, so
- * nothing is left pending. In auto mode the store has no conditional write,
- * so a change that lands between the check and the write is lost (known
- * bug 3). A failure part way is reported as it is: what was reversed, and
- * what was not.
+ * Undo reverses one turn's file changes only (never a run, deploy, publish, schedule or Variable).
+ * It refuses the whole Undo, naming the paths, unless every path has no unsaved editor, sits at the
+ * version the agent left, was changed by no one between the agent's changes, and still hashes to
+ * what the agent left where it is stored (the staged content, else a fresh server read, so a
+ * teammate's change is seen). Then every inverse starts in one synchronous block. Auto mode has no
+ * conditional write, so a change landing between the check and the write is lost.
  */
 
 import { sha256Hex } from '../../vfs/hash';
@@ -85,7 +60,6 @@ export const UNDO_ROW = 'Undo: ';
 
 /** One path the turn changed. */
 interface UndoPath {
-	/** The workspace path. */
 	path: string;
 	/** The content before the turn's first change to it; null when it did not exist. */
 	before: string | null;
@@ -117,19 +91,14 @@ function listed(paths: string[]): string {
 	return paths.length === 1 ? paths[0] : `${paths.slice(0, -1).join(', ')} and ${paths[paths.length - 1]}`;
 }
 
-/** An error's message. */
 function messageOf(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
 }
 
 /**
- * Whether a read failed because nothing is stored at the path: the store's
- * 'File not found: …', or the view's 'No such file: …' for a path whose
- * delete is staged. Any other failure, such as a dropped connection, proves
- * nothing.
- *
- * @param error - What the read threw.
- * @returns True only for a missing file.
+ * Whether a read failed because nothing is stored at the path: the store's 'File not found: …', or
+ * the view's 'No such file: …' for a staged delete. Any other failure, such as a dropped connection,
+ * proves nothing.
  */
 function provenAbsent(error: unknown): boolean {
 	return error instanceof Error && /file not found|no such file/i.test(error.message);
@@ -179,7 +148,6 @@ export class UndoRecord {
 	/**
 	 * Hears when the last change on its way ends.
 	 *
-	 * @param listener - Called with no arguments.
 	 * @returns The unsubscribe.
 	 */
 	onSettled(listener: () => void): () => void {
@@ -192,7 +160,6 @@ export class UndoRecord {
 	/**
 	 * Counts one of the agent's file changes as on its way until it ends.
 	 *
-	 * @param work - The change.
 	 * @returns The same promise.
 	 */
 	track<T>(work: Promise<T>): Promise<T> {
@@ -324,10 +291,6 @@ export class UndoRecord {
 	 * Why what stores a path no longer matches what the agent left, or
 	 * undefined when it does. A read that fails for any reason but a missing
 	 * file leaves the path unchecked, which is a problem too.
-	 *
-	 * @param entry - The path.
-	 * @param staged - Whether its change is still staged: then the staged content counts, not the server's copy.
-	 * @returns The problem, or undefined.
 	 */
 	private async storedProblem(entry: UndoPath, staged: boolean): Promise<string | undefined> {
 		let hash: string | null;
@@ -362,10 +325,6 @@ export class UndoRecord {
 	/**
 	 * Starts the change that puts one path back. It is called in the
 	 * synchronous block after the checks, so its version check runs there.
-	 *
-	 * @param entry - The path.
-	 * @param staged - How its change is staged, when it is.
-	 * @returns The change.
 	 */
 	private inverse(entry: UndoPath, staged: string | undefined): Promise<void> {
 		if (entry.before !== null) return this.vfs.write(entry.path, entry.before, UNDO_ORIGIN, entry.version);

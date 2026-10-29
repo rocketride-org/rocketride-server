@@ -169,15 +169,7 @@ const ThinkingGroup: React.FC<{ messages: ChatMessage[] }> = ({ messages }) => {
 // ASK CARD
 // =============================================================================
 
-/**
- * A "Needs your OK" card: what the request wants to do, Approve and Deny,
- * and "Always allow" when the request offers it. Once answered it leaves the
- * list, and the controller puts its one row in the thread.
- *
- * @param props.ask - The waiting card.
- * @param props.onAnswer - Called with the button pressed.
- * @returns The card.
- */
+/** A "Needs your OK" card. Once answered it leaves the list, and the controller puts its one row in the thread. */
 const AskCard: React.FC<{ ask: ChatAskView; onAnswer: (answer: Exclude<ChatAskAnswer, 'stopped'>) => void }> = ({ ask, onAnswer }) => (
 	<div style={styles.askCard} role="group" aria-label="Needs your OK">
 		<div style={styles.askHeading}>Needs your OK</div>
@@ -203,16 +195,7 @@ const AskCard: React.FC<{ ask: ChatAskView; onAnswer: (answer: Exclude<ChatAskAn
 // ROW CARD
 // =============================================================================
 
-/**
- * The card a bot row carries, drawn like a "Needs your OK" card: its heading
- * in the tone's colour, its lines, its files as links and its buttons. With
- * no handler, or for a disabled button, nothing can be pressed.
- *
- * @param props.card - The row's card.
- * @param props.messageId - The row's id, passed to the handler.
- * @param props.onAction - The host's handler, if any.
- * @returns The card.
- */
+/** The card a bot row carries, drawn like a "Needs your OK" card. */
 const RowCard: React.FC<{ card: ChatCard; messageId: number; onAction?: (messageId: number, action: ChatCardAction) => void }> = ({ card, messageId, onAction }) => (
 	<div style={styles.askCard} role="group" aria-label={`Turn result: ${card.title}`}>
 		<div style={styles.cardHeading(card.tone)}>{card.title}</div>
@@ -262,7 +245,6 @@ export interface MessageListProps {
 	emptySlot?: React.ReactNode;
 	/** Turn controls, for the queued messages' Edit and Remove and the typing label. */
 	turn?: ChatTurnView;
-	/** Handles a press on a row's card. */
 	onCardAction?: (messageId: number, action: ChatCardAction) => void;
 }
 

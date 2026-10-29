@@ -25,21 +25,13 @@
 // =============================================================================
 
 /**
- * The agent's core instructions, the same in every app (spec section 5, "The
- * core"). buildPrefix renders the role line, then each section as its own
- * instruction under its title, so this text is part of the cached start and
- * never changes during a run.
- *
- * "How the loop works" carries Wave's planning mechanics word for word
- * (`nodes/src/nodes/agent_rocketride/planner.py`), with Python's common
- * eight-space indent removed, except the check rule, which names no tool
- * because each toolkit's instructions name its own check. The core is
- * generic: it names no app, pipeline or tool, and anything specific belongs
- * in a toolkit's instructions or the host app's prompts. The rest is short
- * imperatives, each with its reason; every "don't" says what to do instead,
- * and MUST appears only for checking, secrets and confirming.
- * Add a line only when a task fails without it, and note which failure the
- * line fixes.
+ * The agent's core instructions, the same in every app. buildPrefix renders them
+ * into the cached prompt start, so they never change during a run. "How the loop
+ * works" copies Wave's planning mechanics from
+ * `nodes/src/nodes/agent_rocketride/planner.py`, except the check rule, which names
+ * no tool because each toolkit names its own check. The core names no app,
+ * pipeline or tool. Every "don't" says what to do instead; MUST appears only for
+ * checking, secrets and confirming. Add a line only when a task fails without it.
  */
 
 import type { AppPrompts, CorePrompt } from './wave/plan';
@@ -151,7 +143,6 @@ carry transient peek results forward into subsequent steps.`;
 // SECTIONS — spec section 5, in order
 // =============================================================================
 
-/** 1. Who the agent is and what its job covers. */
 const ROLE = `Do the work yourself with your tools instead of telling the user how, and ask them only for what no tool can do.`;
 
 /** 2. Where the agent runs and what the user sees. */
@@ -172,12 +163,10 @@ ${WAVE_RESPONSE_FORMAT}
 Rules:
 ${WAVE_RULES}`;
 
-/** 4. How to approach a task. */
 const DOING_THE_TASK = `- Get oriented first: look around with your tools, then read the guide the Guides section names for the task, because the guides hold rules you would otherwise guess. Skip this for a question you can already answer.
 - Plan, then make small changes, so each one is easy to check and fix.
 - Stay in scope: do what was asked, and mention other problems instead of fixing them, except what a check reports, because the run can't finish until the checks pass. Finish the whole task, though, because a half-done change leaves the user's work broken.`;
 
-/** 5. How work is proven done. */
 const CHECKING = `- After your last change, you MUST run the check that covers each thing you changed, because the run can't finish until each one passes.
 - Only tool results count as evidence. A file you write, such as a test log, proves nothing, so run the check instead.
 - When a check fails, fix the cause and run it again; keep going past the first failure.
@@ -191,7 +180,6 @@ const ACTING_WITH_CARE = `- Publishing, deployment and schedule changes, and del
 - You have no undo, so delete or overwrite only what the task needs. Make ordinary edits without asking.
 - Secrets MUST always be placeholders, because real values are filled in at run time. Never write, print or repeat a key value, even a pasted one; use its placeholder.`;
 
-/** 7. What the answer says. */
 const FINAL_ANSWER = `- Say briefly what changed and what is left for the user, if anything.
 - Don't write a "Checked:" or "Not checked:" line: the code adds one from the real results and removes yours. Describe anything unchecked in a sentence instead.`;
 
@@ -218,18 +206,10 @@ export const CORE_PROMPT: CorePrompt = {
 // =============================================================================
 
 /**
- * The builder app's router (spec section 5, "The router and the guides"):
- * one line per job, in a fixed order, each naming the guides to read first.
- * Adapted from the docs index in `docs/agents/context/stubs/AGENTS.md`, minus
- * what only applies to local agents (`.env` connections, the client tarball,
- * the `rocketride` command) and minus the docs that don't apply in the tab
- * (the CLI and Python API docs, and the README, whose task router this
- * replaces).
- *
- * Every path is a `.rocketride/docs/` file the agent can read:
- * `.rocketride/docs/<file>` is `docs/agents/context/<file>`. Each line stays
- * within 200 characters and the whole router within 3,000, so the prompt's
- * start stays small and cacheable.
+ * The builder app's router: one line per job, in a fixed order, each naming the
+ * guides to read first. Every path is a `.rocketride/docs/` file
+ * (`docs/agents/context/<file>`). Each line stays within 200 characters and the
+ * router within 3,000, so the prompt's start stays small and cacheable.
  */
 
 // =============================================================================
@@ -250,13 +230,11 @@ const ROUTER_ENTRIES: Array<{ when: string; paths: string[] }> = [
 // THE ROUTER
 // =============================================================================
 
-/** The instruction that opens the router: read first, then act. */
 const OPENING = 'Before acting, you must read the guide that matches the task.';
 
 /** Closing note: the guides were written for local agents, so say what replaces their commands and scripts (wrapped to keep each line short). */
 const CLOSING = ['These guides were written for local agents. Where one says to run a `rocketride` command, read `.rocketride/schema/` or `services-catalog.json`,', 'or run a Python script, call the matching TypeScript client method with rocketride_client instead.'].join('\n');
 
-/** The router text: the opening, one line per entry, then the closing note. */
 const ROUTER = [OPENING, '', ...ROUTER_ENTRIES.map((e) => `- ${e.when}: ${e.paths.join(' + ')}`), '', CLOSING].join('\n');
 
 // =============================================================================
@@ -264,14 +242,9 @@ const ROUTER = [OPENING, '', ...ROUTER_ENTRIES.map((e) => `- ${e.when}: ${e.path
 // =============================================================================
 
 /**
- * The builder app's map of the user's workspace (spec section 5, "The builder
- * app's prompts"): what the three top-level directories hold, so the agent
- * knows where a file belongs before it opens a guide. Adapted from Rod's
- * deleted WORKSPACE_GUIDE, keeping only what is true in the tab: a new app
- * comes from create_app, not by hand, and nothing here points at a local
- * environment. The core already carries secrets and checking, so they are not
- * repeated. It also carries the builder's job line and the placeholder form
- * secrets take here, since the core names neither.
+ * The builder app's map of the user's workspace: what the three top-level
+ * directories hold, so the agent knows where a file belongs before it opens a
+ * guide. Secrets and checking live in the core, so they are not repeated here.
  */
 const WORKSPACE_MAP = `In this workspace you build and edit apps; build, run and debug pipelines; and deploy them.
 
@@ -315,5 +288,5 @@ Workspace rules:
 // BUILDER PROMPTS — the builder app's workspace map and router
 // =============================================================================
 
-/** The prompt text the builder app adds on top of the core (spec section 5, item 2). */
+/** The prompt text the builder app adds on top of the core. */
 export const BUILDER_PROMPTS: AppPrompts = { workspaceMap: WORKSPACE_MAP, router: ROUTER };

@@ -25,19 +25,10 @@
 // =============================================================================
 
 /**
- * The `show_view` tool: the model asks the builder to open or focus, pause,
- * resume or close one of three views, named by kind and name. It is for the
- * moments the model is changing something visual, so the user can watch it
- * happen. Deploy, publish and schedule reply in text and switch no view.
- *
- * The toolkit is written against `ViewChannel`, one `send` that carries a
- * `ViewEvent` to the builder UI and resolves with the UI's reply text. How
- * the events travel (a callback chunk type or a shell bus event) is open
- * question #1; the channel is the seam, so the toolkit does not change with it.
- *
- * The toolkit remembers the views the model paused. `resumeAll()` resumes each
- * one still paused, so a run that ends (or fails) between a pause and its
- * resume never leaves a frozen view behind.
+ * The `show_view` tool: the model opens or focuses, pauses, resumes or closes one of three builder views, so
+ * the user can watch a visual change happen. It reaches the UI only through `ViewChannel`. The toolkit
+ * remembers the views the model paused, and `resumeAll()` resumes them, so a run that ends between a pause
+ * and its resume never leaves a frozen view.
  */
 
 import { AgentTool, AgentToolkit } from '../tools';
@@ -54,9 +45,7 @@ export type ViewAction = 'open' | 'pause' | 'resume' | 'close';
 
 /** One request to the builder UI: do `action` to the view of this kind and name. */
 export interface ViewEvent {
-	/** What to do. */
 	action: ViewAction;
-	/** Which kind of view. */
 	kind: ViewKind;
 	/** The app, node or pipeline the view shows, as the builder names it. */
 	name: string;
@@ -67,7 +56,6 @@ export interface ViewChannel {
 	/**
 	 * Sends one event to the UI.
 	 *
-	 * @param event - The request.
 	 * @returns The UI's reply text, which becomes the tool result.
 	 */
 	send(event: ViewEvent): Promise<string>;
@@ -77,10 +65,8 @@ export interface ViewChannel {
 // CONSTANTS
 // =============================================================================
 
-/** The kinds `show_view` takes. */
 const VIEW_KINDS: readonly ViewKind[] = ['app_preview', 'node_preview', 'pipeline_canvas'];
 
-/** The actions `show_view` takes. */
 const VIEW_ACTIONS: readonly ViewAction[] = ['open', 'pause', 'resume', 'close'];
 
 /** The group's instructions, joined into the system prompt when the group is mounted. */
@@ -111,27 +97,13 @@ Example: show_view { "action": "open", "kind": "app_preview", "name": "home" } b
 // ARGUMENTS
 // =============================================================================
 
-/**
- * A text argument, trimmed.
- *
- * @param args - The tool arguments.
- * @param key - The argument name.
- * @returns The text; empty when the argument is absent or not text.
- */
+/** A trimmed text argument; empty when absent or not text. */
 function textArg(args: Record<string, unknown>, key: string): string {
 	const raw = args[key];
 	return typeof raw === 'string' ? raw.trim() : '';
 }
 
-/**
- * An argument that must be one of a fixed list.
- *
- * @param args - The tool arguments.
- * @param key - The argument name.
- * @param allowed - The valid values.
- * @returns The value.
- * @throws When it is missing or not in the list; the message lists the valid values.
- */
+/** An argument that must be one of `allowed`; otherwise throws a message listing the valid values. */
 function choiceArg<T extends string>(args: Record<string, unknown>, key: string, allowed: readonly T[]): T {
 	const value = textArg(args, key);
 	const found = allowed.find((a) => a === value);
@@ -148,15 +120,12 @@ export class ShowViewToolkit extends AgentToolkit {
 	readonly name = 'view';
 	readonly instructions = INSTRUCTIONS;
 
-	/** Carries each event to the builder UI. */
 	private readonly channel: ViewChannel;
 	/** The views the model paused and has not resumed or closed, by kind and name, in the order they were paused. */
 	private readonly paused = new Map<string, ViewEvent>();
 
 	/**
 	 * Builds the toolkit.
-	 *
-	 * @param channel - How events reach the builder UI.
 	 */
 	constructor(channel: ViewChannel) {
 		super();
@@ -166,8 +135,6 @@ export class ShowViewToolkit extends AgentToolkit {
 	/**
 	 * Sends one event and keeps the paused set in step with it.
 	 *
-	 * @param args - The `show_view` arguments.
-	 * @returns The UI's reply text.
 	 * @throws When an argument is wrong, or when the channel fails; the message says what to do instead.
 	 */
 	private async show(args: Record<string, unknown>): Promise<string> {
@@ -208,11 +175,6 @@ export class ShowViewToolkit extends AgentToolkit {
 		}
 	}
 
-	/**
-	 * The one view tool.
-	 *
-	 * @returns The group's tools.
-	 */
 	tools(): AgentTool[] {
 		return [
 			new AgentTool({

@@ -25,19 +25,12 @@
 // =============================================================================
 
 /**
- * A pipeline's version and save state belong to its document, not to one
- * canvas: a save from one split must leave the other at the new version.
- * The document lives while Documents holds the pipeline, so a canvas that
- * mounts again (a tab move, a split) finds it with its saves on their way.
- * When the app tears Documents down (a team switch) it goes with its last
- * canvas, and its saves still land.
- *
- * Each save waits for the one before it. A reload, Overwrite and closing the
- * last tab move the document's generation before they await anything, and a
- * save called in an earlier generation writes nothing and rejects with
- * SaveDroppedError. A reload moves it again when it puts the stored pipeline
- * on screen, since a save called during its read holds the pipeline it
- * replaced, so a save waits for a reload on its way.
+ * A pipeline's version and save state belong to its document, not one canvas: a save from one split
+ * must leave the other at the new version. The document lives while Documents holds the pipeline, so
+ * a remounted canvas (tab move, split) finds its saves still on their way.
+ * Saves run one after another. A reload, Overwrite or closing the last tab moves the document's
+ * generation before awaiting anything; a save called in an earlier generation writes nothing and
+ * rejects with SaveDroppedError.
  */
 
 import { useEffect, useState } from 'react';
@@ -149,11 +142,8 @@ export class CanvasDocument {
 	}
 
 	/**
-	 * Saves a pipeline at the version the document was loaded at. A save
-	 * called while another runs is that save when it writes the same pipeline
-	 * to the same file in the same generation; another pipeline saves once it
-	 * is done, at the version it wrote.
-	 *
+	 * Saves a pipeline at the version the document was loaded at, after the save before it. A save of
+	 * the same pipeline to the same file in the same generation joins the one running.
 	 * @returns Rejects with StaleWriteError for a pipeline that moved on, and SaveDroppedError for one the user dropped meanwhile.
 	 */
 	async save(content: unknown, opts: { overwrite?: boolean; filename?: string } = {}): Promise<void> {
@@ -213,12 +203,9 @@ export class CanvasDocument {
 	}
 
 	/**
-	 * Drops the unsaved changes and reloads the stored pipeline. The loaded
-	 * version moves only when the content did: a pipeline that could not be
-	 * loaded leaves both, so the next save is refused instead of overwriting
-	 * that change unseen.
-	 *
-	 * @param fresh - Read the server's copy, past the view's cache, which is older after a refused save (the stale dialog's Reload). False when following a change in this page, and for Discard mine.
+	 * Drops the unsaved changes and reloads the stored pipeline. A pipeline that could not be loaded
+	 * keeps the old version, so the next save is refused instead of overwriting unseen.
+	 * @param fresh - Read past the view's cache (the stale dialog's Reload); false when following a change in this page, and for Discard mine.
 	 * @returns True when the stored pipeline was loaded.
 	 */
 	reloadStored(fresh = true): Promise<boolean> {
@@ -264,10 +251,8 @@ export class CanvasDocument {
 	}
 
 	/**
-	 * The document goes when Documents drops the pipeline (its last tab
-	 * closed), with the saves waiting their turn. When the app tore Documents
-	 * down instead (a team switch), it goes with its last canvas, and its
-	 * saves still land.
+	 * The document goes, with its waiting saves, when Documents drops the pipeline. When the app tore
+	 * Documents down (a team switch), it goes with its last canvas and its saves still land.
 	 */
 	private settle(): void {
 		if (this.released) return;

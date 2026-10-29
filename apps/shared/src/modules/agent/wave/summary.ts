@@ -25,51 +25,33 @@
 // =============================================================================
 
 /**
- * Every planning wave resends every earlier result's summary, so a summary
- * shows the shape of a result (field names, lengths, sample values) in a
- * bounded number of characters, and the model peeks the key for the rest.
- * This is a port of Wave's `_describe` and its helpers
- * (`nodes/src/nodes/agent_rocketride/executor.py`); the constants and the
- * texts match it, since the prompt teaches the model to read them.
+ * Every planning wave resends every earlier result's summary, so a summary shows a result's shape
+ * (field names, lengths, sample values) in bounded characters, and the model peeks the key for the
+ * rest. A port of Wave's `_describe` (`nodes/src/nodes/agent_rocketride/executor.py`); constants
+ * and texts match it, since the prompt teaches the model to read them.
  *
- * A summary is built in two passes over each container. cost sizes its
- * fields exactly (keys, separators, notes, headers, row labels) without
- * rendering them; render then gives each field a room and renders it within
- * that room. Every container keeps to its room by leaving out whole fields or
- * whole rows, never by cutting a rendered string, so no parent cuts a child
- * again and a list's header counts the rows under it. Whatever a container
- * leaves out is recorded by path, and the short fields among them are listed
- * on the summary's last line. The one cut of a rendered string is describe's
- * backstop at the hard cap.
- *
- * previewArgs is Wave's other renderer: the short form of a call's arguments
- * shown beside its result (`_with_call` and `_render`'s `text_cap`), where
- * every text is capped and nothing is left out.
+ * Two passes per container: `cost` sizes its fields exactly, then `render` gives each a room. A
+ * container keeps to its room by leaving out whole fields or rows, never by cutting a rendered
+ * string; left-out short fields are listed on the last line. `previewArgs` renders a call's
+ * arguments beside its result, every text capped.
  */
 
 // =============================================================================
 // CONSTANTS — Wave's, unchanged
 // =============================================================================
 
-/** Indentation of nested structures. */
 const INDENT = '  ';
 
 /** Nesting depth past which a summary stops descending; past a few levels it stops informing the model. */
 const SUMMARY_MAX_DEPTH = 6;
 
 /**
- * Longest list of dicts shown whole: its rows split its room like a dict's
- * fields, so an MCP tool's one or two content blocks show their text. A longer
- * list is a sample of as many whole rows as fit, and a list inside a sampled
- * row shows this many rows at most.
+ * Longest list of dicts shown whole, so an MCP tool's one or two content blocks show their text. A
+ * longer list shows as many whole rows as fit; a list inside a sampled row shows at most this many.
  */
 const SUMMARY_SHORT_LIST = 2;
 
-/**
- * Character budget for a whole summary. A dict splits its room between the
- * fields that can spend it (long texts, lists, dicts), so a result with many
- * lists cannot cost more than a result with one.
- */
+/** Summary budget; a dict splits it among fields that can spend it, so many lists cost no more than one. */
 const SUMMARY_BUDGET = 4000;
 
 /**
@@ -103,11 +85,7 @@ const SUMMARY_MISSING_FIELDS = 5000;
 /** A key that stands bare in a path on that line; any other is quoted, so a key with a dot reads as one key. */
 const PLAIN_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-/**
- * Character budget the texts in one call's arguments share, wherever they sit:
- * enough for a path, a query, or the start and end of written content. Paid in
- * every later prompt, like the summaries.
- */
+/** Characters the texts in one call's arguments share; paid in every later prompt, like the summaries. */
 const ARGS_BUDGET = 600;
 
 /**
@@ -130,7 +108,6 @@ type Cost = [least: number, floor: number, want: number];
 /** One field or row of a container: its label's cost, then its value's (see allocate). */
 type Item = [fixed: number, least: number, floor: number, want: number];
 
-/** Whether a value is a JSON object (not null, not an array). */
 function isObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -143,7 +120,6 @@ const UNPRINTABLE = /^[\p{C}\p{Z}]$/u;
  * and keys in its texts: single quotes unless the text has one and no double
  * quote, with the quote, backslashes and unprintable characters escaped.
  *
- * @param text - The string to quote.
  * @returns The quoted string, e.g. `'id'` or `"it's"`.
  */
 export function pyRepr(text: string): string {
@@ -167,7 +143,6 @@ export function pyRepr(text: string): string {
  * A whole number as Python's `{:,}` writes it, which is how Wave writes the
  * character counts in its texts.
  *
- * @param n - The number.
  * @returns The number with commas between thousands, e.g. `3,629`.
  */
 export function withCommas(n: number): string {
@@ -179,17 +154,14 @@ function pyList(items: string[]): string {
 	return `[${items.map(pyRepr).join(', ')}]`;
 }
 
-/** The indexes 0 to n - 1. */
 function range(n: number): number[] {
 	return Array.from({ length: n }, (_, i) => i);
 }
 
-/** Whether a UTF-16 code unit is the first half of a surrogate pair. */
 function isHighSurrogate(unit: number): boolean {
 	return unit >= 0xd800 && unit <= 0xdbff;
 }
 
-/** Whether a UTF-16 code unit is the second half of a surrogate pair. */
 function isLowSurrogate(unit: number): boolean {
 	return unit >= 0xdc00 && unit <= 0xdfff;
 }
@@ -221,7 +193,6 @@ class Omitted {
 	/** Whether more were left out than are recorded. */
 	more = false;
 
-	/** Records a field, or notes that there were more. */
 	add(path: Path, shown: string): void {
 		if (this.fields.length < SUMMARY_MISSING_FIELDS) this.fields.push([path, shown]);
 		else this.more = true;
@@ -233,9 +204,6 @@ class Omitted {
  * (field names, array lengths, sample values) within 6000 characters. Other
  * text comes back whole when it fits the 4000-character budget; past that it
  * keeps its start and end, the start taking two thirds, and says its length.
- *
- * @param result - The tool output text.
- * @returns The summary.
  */
 export function summarize(result: string): string {
 	let value: unknown;
@@ -423,15 +391,11 @@ function rowKeys(value: unknown[]): string[] {
 }
 
 /**
- * How long a value renders at a depth, exactly, as `[least, floor, want]`.
- * least is the fewest characters it can be shown in: a scalar as it is, a list
- * its header, a dict its notice of fields left out. floor is what it shows with
- * no budget to spend: its short fields, a length note for each long text, and
- * the floors of what it nests. want is all of it. A container that wants no
- * more than ROW_TEXT_CHARS is a short field: its three are equal, and it is
- * shown whole or not at all. Counting stops past `limit`, so a huge value costs
- * a bounded walk. Inside a sampled row everything is whole, so the three are
- * equal there too.
+ * How long a value renders at a depth, exactly, as `[least, floor, want]`. least: the fewest
+ * characters it can show in (a scalar, a list's header, a dict's notice). floor: what it shows with
+ * no budget (short fields, a length note per long text, nested floors). want: all of it. A short
+ * field (want <= ROW_TEXT_CHARS) has all three equal, as does everything inside a sampled row.
+ * Counting stops past `limit`, so a huge value costs a bounded walk.
  */
 function cost(value: unknown, depth: number, inRow: boolean, limit: number): Cost {
 	if (depth > SUMMARY_MAX_DEPTH) return [3, 3, 3];
@@ -614,11 +578,9 @@ function render(value: unknown, depth: number, room: number, inRow = false, omit
 }
 
 /**
- * A list of dicts: its field names, then its rows. Up to SUMMARY_SHORT_LIST
- * rows (an MCP tool's content blocks) are shown whole, splitting the room like
- * a dict's fields. A longer list is a sample: its rows are shown whole, in
- * order, while they fit, and the header counts the ones shown. A later row can
- * be a scalar; it is rendered like any value.
+ * A list of dicts: its field names, then its rows. Past SUMMARY_SHORT_LIST rows it is a sample:
+ * whole rows, in order, while they fit, with the header counting the ones shown. A later row can be
+ * a scalar; it is rendered like any value.
  */
 function renderRows(value: unknown[], depth: number, room: number, inRow: boolean, omitted: Omitted | undefined, path: Path): string {
 	const n = value.length;
@@ -645,9 +607,7 @@ function renderRows(value: unknown[], depth: number, room: number, inRow: boolea
 			rows.push(text);
 			used += text.length;
 		}
-		// Some rows are left out: give up shown ones until the header's notice fits as
-		// well. Reserving it for each row instead hid rows that fit whenever the last
-		// row was shorter than the notice.
+		// Some rows are left out: give up shown ones until the header's notice fits as well.
 		while (rows.length > 0 && rows.length < n && used + ` (showing ${rows.length} of ${n})`.length > room) {
 			used -= (rows.pop() as string).length;
 		}
@@ -715,12 +675,10 @@ function renderFilled(value: unknown[], depth: number, room: number, omitted: Om
 }
 
 /**
- * A dict as indented `key: value` lines. When all of it fits its room, every
- * field is shown whole. Otherwise the room is allocated once: every key, short
- * field and length note is paid for first, and what is left is split between
- * the fields that can spend it, so a command's stdout cannot crowd out its
- * stderr or exit code. Fields that do not fit even so are left out whole,
- * short fields named like a status last, and a final line says how many.
+ * A dict as indented `key: value` lines, every field whole when it all fits. Otherwise keys, short
+ * fields and length notes are paid first and the rest is split among fields that can spend it, so a
+ * command's stdout cannot crowd out its stderr or exit code. Fields that still do not fit are left
+ * out whole, status-named ones last, and a final line counts them.
  */
 function describeDict(d: Record<string, unknown>, depth: number, room: number, inRow: boolean, omitted: Omitted | undefined, path: Path): string {
 	const pad = INDENT.repeat(depth);
@@ -758,15 +716,9 @@ function describeDict(d: Record<string, unknown>, depth: number, room: number, i
 // =============================================================================
 
 /**
- * The short form of a call's arguments that sits beside its result, so the
- * model sees what it asked for (the code it ran, the content it wrote) and can
- * tell a retry from a repeat. Wave's `_with_call` preview: the texts share a
- * 600-character budget, those that fit are shown whole and the longer ones
- * keep their start and end; a preview still past 1200 characters is cut there
- * and says so.
- *
- * @param args - The arguments as the model wrote them.
- * @returns The preview, laid out like a summary.
+ * The short form of a call's arguments shown beside its result, so the model sees what it asked for
+ * and can tell a retry from a repeat (Wave's `_with_call`). Texts share ARGS_BUDGET: those that fit
+ * show whole, longer ones keep their start and end, and a preview past ARGS_HARD_CAP is cut.
  */
 export function previewArgs(args: Record<string, unknown>): string {
 	const text = renderCapped(args, 0, ARGS_BUDGET, false, argsTextCap(args));

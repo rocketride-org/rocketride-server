@@ -120,7 +120,6 @@ function emitKey(uri: string, version: number): string {
 	return `${uri}@${version}`;
 }
 
-/** Drops every cached emit of one model URI. */
 function dropEmits(uri: string): void {
 	for (const k of sharedEmitCache.keys()) {
 		if (k.startsWith(`${uri}@`)) sharedEmitCache.delete(k);
@@ -165,11 +164,8 @@ function releaseTsSetup(): void {
 // OPEN SESSIONS — the open apps' dev sessions, found by app id
 // =============================================================================
 
-// Every session joins this set when it is created and leaves it when it is
-// disposed, so code outside the App Builder document (the agent) can reach
-// the running session for an app. Split panels of one app each hold a
-// session; lookups prefer the one with a preview attached, since only that
-// one builds into a live preview.
+// Every open session is in this set, so code outside the App Builder document (the agent) can reach an
+// app's session. Split panels each hold one; lookups prefer the one with a preview attached.
 
 /** The open sessions, in creation order. */
 const sessions = new Set<WebDevSession>();
@@ -177,7 +173,6 @@ const sessions = new Set<WebDevSession>();
 /**
  * The open session for an app, preferring one with a preview attached.
  *
- * @param appId - The app to look up.
  * @returns The session, or null when no session for the app is open.
  */
 export function findDevSession(appId: string): WebDevSession | null {
@@ -535,7 +530,6 @@ export class WebDevSession {
 	 * deleted.
 	 *
 	 * @param path - The project-relative file path.
-	 * @returns True only when the view reports no such path.
 	 */
 	private async isDeleted(path: string): Promise<boolean> {
 		try {
@@ -610,9 +604,8 @@ export class WebDevSession {
 				this.vfs.notify();
 			}
 		} catch {
-			// Unreadable: deleted, or a transient store error. Only a confirmed
-			// deletion lets go of the model; otherwise the rebuild below still
-			// runs from the models we have.
+			// Unreadable: deleted, or a transient store error. Only a confirmed deletion lets go of the model;
+			// otherwise the rebuild below runs from the models we have.
 			if (await this.isDeleted(path)) this.releaseModel(path);
 		}
 

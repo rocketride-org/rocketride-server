@@ -152,16 +152,12 @@ export function loadedVersion(content: unknown): number | undefined {
 }
 
 /**
- * The content adapter Documents reads and writes pipeline tabs through: the
- * project VFS, with Documents' lenient error contract for listing and reads.
- * Reads are of the stored pipeline, past every editor's unsaved buffer, and
- * note their version (see loadedVersion).
- *
- * A canvas saves through savePipeline, then asks Documents to mark the tab
- * clean, which lands here with the content it just wrote: that write is
- * skipped. Any other write is a save Documents asks for itself (the close
- * dialog's Save); the pipeline's canvas makes it, at the version it loaded. A
- * save that did not land rejects, so Documents keeps the tab open.
+ * The content adapter Documents reads and writes pipeline tabs through: the project VFS with
+ * Documents' lenient error contract. Reads take the stored pipeline past every unsaved buffer and
+ * note its version (loadedVersion). A canvas saves through savePipeline, then asks Documents to
+ * mark the tab clean, which lands here with the content just written and is skipped. Any other
+ * write (the close dialog's Save) is made by the pipeline's canvas at its loaded version, and
+ * rejects when it did not land so Documents keeps the tab open.
  */
 export function createDocumentsVfs(client: RocketRideClient | null): IVirtualFileSystem {
 	const projectVfs = createProjectVfs(client);

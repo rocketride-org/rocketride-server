@@ -25,14 +25,9 @@
 // =============================================================================
 
 /**
- * `check_app` runs the full check on one app and reports what it saw, step by
- * step, to the model and, through the listener its host passes in, to the run.
- * It is the only check tool: saving a pipeline validates it, and the model
- * tests a pipeline by running it.
- *
- * In order, this file holds the report a check leaves behind, the type reader
- * (Monaco's markers), the types note a save of an app file appends, the app
- * checker (types, then a rebuild in the Design preview), and the tool.
+ * `check_app` runs the full check on one app (types, then a Design-preview rebuild) and reports each step to
+ * the model and the run. It is the only check tool: a pipeline save validates it, and the model tests a
+ * pipeline by running it.
  */
 
 import type { AppErrorRow, ConsoleRow, WatchStatus } from '../../../tools/appdev/types';
@@ -58,7 +53,6 @@ export interface CheckEvidence {
 	ran: string;
 	/** The raw output the step produced. */
 	output: string;
-	/** How the step ended. */
 	status: CheckStatus;
 	/** One line the model can act on. */
 	summary: string;
@@ -75,20 +69,11 @@ export interface CheckReport {
 /**
  * Whether a report counts as passing. A step that did not run is not a
  * failure; only a step that ran and failed is.
- *
- * @param report - The report to judge.
- * @returns True when no evidence has status 'fail'.
  */
 export function reportPassed(report: CheckReport): boolean {
 	return report.evidence.every((e) => e.status !== 'fail');
 }
 
-/**
- * Indents every line of a block by two spaces.
- *
- * @param text - The block to indent.
- * @returns The indented block.
- */
 function indent(text: string): string {
 	return text
 		.split(/\r?\n/)
@@ -97,12 +82,8 @@ function indent(text: string): string {
 }
 
 /**
- * Writes a report as the tool result: a verdict line, then each step with
- * its output indented below. A step with no output shows its summary there,
- * so a step that did not run still says why.
- *
- * @param report - The report to write out.
- * @returns The result text.
+ * Writes a report as the tool result. A step with no output shows its summary instead, so a step that
+ * did not run still says why.
  */
 function formatReport(report: CheckReport): string {
 	const lines = [`CHECK ${reportPassed(report) ? 'PASSED' : 'FAILED'}: ${report.target}`];
@@ -119,63 +100,35 @@ function formatReport(report: CheckReport): string {
 // =============================================================================
 
 /**
- * The type half of an app check. An open app's dev session loads every file of
- * the app as a Monaco model at `file:///${appId}/${relPath}`, and Monaco's
- * TypeScript service keeps its type errors for each model as markers. This
- * reads those markers, so it costs no build and no extra compiler.
- *
- * What counts as what, because a check that wrongly passes lets the agent claim
- * the app is typed and one that cannot pass leaves it stuck:
- *
- * - Only markers with owner `typescript` and severity Error count. Warnings
- *   are not failures, and the `rr-appdev` markers are link errors a build sets,
- *   which the build evidence reports.
- * - An app with no models (it is not open) is `not_run`: no models means no
- *   markers, and that is not the same as no errors.
- * - A file with no model is named in the output and the summary counts it, so
- *   a clean result never hides a file nobody looked at.
- *
- * Monaco validates a model some time after it changes (a 500 ms debounce, then
- * a round trip to the TypeScript worker, with no "done" signal), so
- * `settleMarkers` first waits for the worker to be up and hold the models, then
- * for the markers to go quiet, before a caller reads them. A model with no
- * markers yet looks exactly like a model with no errors; reading too early is
- * the false pass this reader exists to avoid.
- *
- * `monacoMarkerSource` is the only browser-only code here; everything else runs
- * against a `MarkerSource`, so tests pass a fake and never load Monaco.
+ * The type half of an app check. It reads the TypeScript errors Monaco keeps as markers on each app file's
+ * model (`file:///${appId}/${relPath}`), so it costs no build. Only `typescript` Error markers count; the
+ * `rr-appdev` link errors belong to the build evidence. An app with no models is `not_run` (no models means
+ * no markers, not no errors), and a file with no model is named so a clean result never hides it. A model
+ * with no markers yet looks clean, so callers wait on `settleMarkers` first. Only `monacoMarkerSource` needs
+ * a browser; tests pass a fake `MarkerSource`.
  */
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
-/** The owner of Monaco's TypeScript diagnostics. */
 const TYPESCRIPT_OWNER = 'typescript';
 
 /** Monaco's `MarkerSeverity.Error`, kept here so the tests need no Monaco. */
 const SEVERITY_ERROR = 8;
 
-/**
- * How long the markers must be quiet before they count as settled, in milliseconds.
- * Longer than Monaco's 500 ms validation debounce, so a quiet window that opens
- * just after an edit still outlasts the validation that edit starts.
- */
+/** Quiet window before markers count as settled; longer than Monaco's 500 ms validation debounce. */
 const DEFAULT_QUIET_MS = 1500;
 
 /** The longest `settleMarkers` waits, in milliseconds, however often the markers change or the worker is slow. */
 const DEFAULT_MAX_MS = 10_000;
 
-/** The step name in the evidence. */
 const TYPES_STEP = 'types';
 
-/** What the types step does, as a short phrase. */
 const TYPES_RAN = "read the TypeScript errors Monaco keeps for the app's open files";
 
-/** The summary for an app that has no models. */
 const NOT_OPEN_SUMMARY = 'types not checked until the app is open or deployed';
 
-/** What the output says for an app that has no models. */
 const NOT_OPEN_OUTPUT = "None of the app's TypeScript files are loaded in the editor, so there are no TypeScript errors to read. Open the app, or deploy it, to check its types.";
 
 // =============================================================================
@@ -188,7 +141,6 @@ export interface MarkerInfo {
 	uri: string;
 	/** The 1-based line the diagnostic starts on. */
 	line: number;
-	/** The diagnostic text. */
 	message: string;
 	/** Monaco's `MarkerSeverity` (8 is an error). */
 	severity: number;
@@ -201,12 +153,8 @@ export interface MarkerSource {
 	/** The uri of every model that is loaded. */
 	modelUris(): string[];
 	/**
-	 * The uri the model of a file in an app gets, spelled as `modelUris()` and
-	 * the markers spell it. Without it, the path is used as it is.
-	 *
-	 * @param appId - The app id.
-	 * @param relPath - The file's path inside the app, as the app's file list names it.
-	 * @returns The model's uri.
+	 * The model uri of an app file, spelled the way `modelUris()` and the markers spell it. Absent, the
+	 * path is used as it is.
 	 */
 	modelUri?(appId: string, relPath: string): string;
 	/** Every marker Monaco holds, for every model. */
@@ -214,15 +162,12 @@ export interface MarkerSource {
 	/**
 	 * Calls a listener whenever any marker changes.
 	 *
-	 * @param listener - Called on each change.
 	 * @returns A function that stops the calls.
 	 */
 	onChange(listener: () => void): () => void;
 	/**
 	 * Resolves once validation can start: the TypeScript worker is up and holds
 	 * the models. A source with nothing to wait for leaves it out.
-	 *
-	 * @returns A promise that resolves when the markers can begin to arrive.
 	 */
 	ready?(): Promise<void>;
 }
@@ -237,16 +182,10 @@ interface MonacoTypescriptWorkers {
 }
 
 /**
- * The marker source backed by the real Monaco. Browser only: it loads Monaco
- * (and wires its workers) the first time, so it is imported lazily and the
- * rest of this file stays loadable under the test runner.
- *
- * `ready()` asks the TypeScript worker for every TypeScript model. Asking is
- * what starts the worker on a cold page and copies those models into it, and
- * Monaco validates a model only once the worker has it. It covers every open
- * app's TypeScript models, not only the one being checked.
- *
- * @returns A marker source over every model and marker Monaco holds.
+ * The marker source backed by the real Monaco. Browser only: it loads Monaco on first use, so import it
+ * lazily to keep this file loadable under the test runner. `ready()` asks the TypeScript worker for every
+ * TypeScript model; asking starts a cold worker and copies the models in, and Monaco validates a model
+ * only once the worker has it. That covers every open app, not only the one being checked.
  */
 export async function monacoMarkerSource(): Promise<MarkerSource> {
 	const { loadMonaco } = await import('../../../components/monaco/loader');
@@ -284,16 +223,8 @@ export async function monacoMarkerSource(): Promise<MarkerSource> {
 // =============================================================================
 
 /**
- * Waits for Monaco to finish validating. Validation starts after a debounce and
- * a trip to the TypeScript worker, and gives no "done" signal. So this waits for
- * the source to be `ready` (the worker is up and holds the models), then counts
- * the markers as settled once none has changed for `quietMs`. A slow worker or a
- * file that keeps changing is cut off at `maxMs`, and a `ready` that fails is
- * skipped: the quiet window still applies.
- *
- * @param src - The marker source.
- * @param opts - `quietMs` (default 1500), `maxMs` (default 10 000, for the whole wait), and the run's stop signal, which ends the wait at once.
- * @returns A promise that resolves when the markers are quiet, the cap is reached, or the run is stopped.
+ * Waits for Monaco to finish validating, which gives no "done" signal: first for `ready` (skipped if it
+ * fails), then until no marker has changed for `quietMs`. Capped at `maxMs`; the stop signal ends it at once.
  */
 function settleMarkers(src: MarkerSource, opts: { quietMs?: number; maxMs?: number; signal?: AbortSignal } = {}): Promise<void> {
 	const quietMs = opts.quietMs ?? DEFAULT_QUIET_MS;
@@ -338,58 +269,26 @@ function settleMarkers(src: MarkerSource, opts: { quietMs?: number; maxMs?: numb
 // READING
 // =============================================================================
 
-/**
- * The uri prefix of an app's models.
- *
- * @param appId - The app id.
- * @returns `file:///${appId}/`; the closing slash keeps `app` apart from `app-two`.
- */
+/** The uri prefix of an app's models; the closing slash keeps `app` apart from `app-two`. */
 function prefixOf(appId: string): string {
 	return `file:///${appId}/`;
 }
 
-/**
- * Whether a marker is a TypeScript error.
- *
- * @param marker - The marker.
- * @returns True for owner `typescript` at severity Error.
- */
 function isTypeError(marker: MarkerInfo): boolean {
 	return marker.owner === TYPESCRIPT_OWNER && marker.severity === SEVERITY_ERROR;
 }
 
-/**
- * The TypeScript errors in one file.
- *
- * @param src - The marker source.
- * @param appId - The app id.
- * @param relPath - The file path inside the app (for example `src/App.tsx`).
- * @returns The file's TypeScript errors, in the order Monaco holds them.
- */
 function fileTypeErrors(src: MarkerSource, appId: string, relPath: string): MarkerInfo[] {
 	const uri = `${prefixOf(appId)}${relPath}`;
 	return src.markers().filter((m) => m.uri === uri && isTypeError(m));
 }
 
-/**
- * The TypeScript errors across every model of an app.
- *
- * @param src - The marker source.
- * @param appId - The app id.
- * @returns The app's TypeScript errors, in the order Monaco holds them.
- */
 function appTypeErrors(src: MarkerSource, appId: string): MarkerInfo[] {
 	const prefix = prefixOf(appId);
 	return src.markers().filter((m) => m.uri.startsWith(prefix) && isTypeError(m));
 }
 
-/**
- * The files of an app that have a model loaded.
- *
- * @param src - The marker source.
- * @param appId - The app id.
- * @returns Each loaded model as a path inside the app (for example `src/App.tsx`); empty when the app is not open.
- */
+/** The app's loaded models as paths inside the app (e.g. `src/App.tsx`); empty when the app is not open. */
 function appModelPaths(src: MarkerSource, appId: string): string[] {
 	const prefix = prefixOf(appId);
 	return src
@@ -403,19 +302,10 @@ function appModelPaths(src: MarkerSource, appId: string): string[] {
 // =============================================================================
 
 /**
- * Reads an app's type errors into check evidence.
- *
- * @param src - The marker source; settle it first (`settleMarkers`) if files just changed.
- * @param app - The app being checked; its `id` is the id its models are keyed by.
- * @param tsFiles - The app's TypeScript files, as paths inside the app (for example `src/App.tsx`).
- * @param hide - Hides the values the run's file tools hid, before the cut.
- * @returns `not_run` when the app has no models, or has TypeScript files and
- *   none of them is loaded (the models are only json, css and the like);
- *   otherwise `fail` with one `${relPath}:${line} ${message}` line per error, or
- *   `pass`. TypeScript files with no model are named in the output and counted
- *   in a passing summary. Errors in a TypeScript file that is no longer in the
- *   app are left out, and the output says how many were: the editor can keep
- *   a deleted file's model and its errors.
+ * Reads an app's type errors into check evidence; settle `src` first if files just changed. `not_run` when no
+ * TypeScript file of the app has a model; otherwise `fail` with one `relPath:line message` per error, or
+ * `pass`. Unloaded TypeScript files are named. Errors in files no longer in the app are dropped and counted,
+ * because the editor keeps a deleted file's model.
  */
 async function appTypeEvidence(src: MarkerSource, app: AppEntry, tsFiles: string[], hide: (text: string) => string): Promise<CheckEvidence> {
 	const appId = app.id;
@@ -455,20 +345,13 @@ async function appTypeEvidence(src: MarkerSource, app: AppEntry, tsFiles: string
 // =============================================================================
 
 /**
- * Saving an app's TypeScript file returns that file's type errors and the app's
- * total, so the model sees the result of its own edit at once and fixes it
- * without asking. The host's after-save hook calls `typesNote` (see run.ts).
- *
- * This is information only: it never counts toward the finish rule (only
- * `check_app` does), because it reads markers that may not have settled and
- * covers one file, not the app. A note that cannot be read says why and never
- * fails the save.
+ * A save of an app's TypeScript file appends that file's type errors and the app total, so the model fixes
+ * its own edit at once. Information only: it never counts toward the finish rule, because the markers may
+ * not have settled and it covers one file. A note that cannot be read says why and never fails the save.
  */
 
-/** What a save says when it cannot read the file's types because the app is not loaded in the editor. */
 const NOT_OPEN = "\n\nTypes not checked: the app isn't open.";
 
-/** What a cut error list in a save's note tells the model to do. */
 const SAVE_CLIP_HINT = 'fix the first errors and save again to see the rest';
 
 /**
@@ -515,25 +398,12 @@ export async function typesNote(vfs: IWorkspaceFileSystem, markers: () => Promis
 // =============================================================================
 
 /**
- * An app check leaves the evidence of two halves, in this order:
- *
- * 1. `types`: the TypeScript errors Monaco keeps for the app's files (see TYPE
- *    READER above). Monaco validates some time after a file changes, so the
- *    markers are settled first.
- * 2. `build`, `runtime` and `console`: a rebuild in the Design preview and what
- *    it raised (see APP BUILD below). With no preview, one `not_run` item says so.
- *
- * Both halves always run, so a failed type check does not hide a failed build.
- * Anything that cannot run is `not_run` and named, never a pass and never a
- * failure: an editor whose type service did not load, a closed preview. An app
- * whose manifest is missing, broken or has no id is a `fail` (`manifest`), because
- * the agent can fix its `package.json` and a broken one must not pass. A
- * `package.json` that cannot be read at all throws instead: the manifest may be
- * fine, so the check records nothing rather than tell the agent to fix it.
- *
- * The report is filed under the app's manifest id (its folder when it has none),
- * whichever of the folder, id or name the model passed, so the checks line has
- * one entry per app.
+ * An app check records two halves, in order: `types` (Monaco's settled TypeScript markers), then `build`,
+ * `runtime` and `console` (a rebuild in the Design preview; with no preview, one `not_run` item). Both always
+ * run, so a failed type check does not hide a failed build. Anything that cannot run is a named `not_run`,
+ * never a pass or a failure. A missing, broken or id-less manifest is a `manifest` fail because the agent can
+ * fix it; an unreadable `package.json` throws instead, since the manifest may be fine. Reports are filed under
+ * the manifest id (else the folder), so the checks line has one entry per app.
  */
 
 // =============================================================================
@@ -569,14 +439,7 @@ export interface AppCheckOptions {
 // FILES
 // =============================================================================
 
-/**
- * Lists an app's TypeScript files.
- *
- * @param vfs - The workspace view.
- * @param dir - The folder to walk, from the workspace root.
- * @param base - The path of `dir` inside the app ('' for the app folder itself).
- * @returns Every `.ts` and `.tsx` file under `dir` as a path inside the app (for example `src/App.tsx`), skipping `node_modules`, `dist` and `build`; in path order.
- */
+/** Every `.ts`/`.tsx` file under `dir` as a path inside the app (`base` is `dir`'s own), in path order. */
 async function typeScriptFiles(vfs: IWorkspaceFileSystem, dir: string, base = ''): Promise<string[]> {
 	const found: string[] = [];
 	for (const entry of await vfs.list(dir)) {
@@ -594,16 +457,7 @@ async function typeScriptFiles(vfs: IWorkspaceFileSystem, dir: string, base = ''
 // STEPS
 // =============================================================================
 
-/**
- * The type evidence for an app.
- *
- * @param app - The app, with an id.
- * @param markers - The host's marker source getter.
- * @param settle - How long to let Monaco's markers settle.
- * @param files - The app's TypeScript files.
- * @param hide - Hides the values the run's file tools hid.
- * @returns The evidence; `not_run` when the editor is not there, did not load, or holds none of the app's files.
- */
+/** The app's type evidence; `not_run` when the editor is missing, did not load, or holds none of its files. */
 async function typesStep(app: AppEntry, markers: () => Promise<MarkerSource | null>, settle: { quietMs?: number; maxMs?: number; signal?: AbortSignal } | undefined, files: string[], hide: (text: string) => string): Promise<CheckEvidence> {
 	let src: MarkerSource | null;
 	try {
@@ -617,12 +471,8 @@ async function typesStep(app: AppEntry, markers: () => Promise<MarkerSource | nu
 }
 
 /**
- * The evidence for an app whose manifest has no usable id. This fails, because
- * the agent can always fix it, and a `package.json` it broke while editing would
- * otherwise read as an app with nothing to check.
- *
- * @param app - The app.
- * @returns A failing `manifest` item that says how to fix it, then a `not_run` item for each half it blocked.
+ * Evidence for an app whose manifest has no usable id: a `manifest` fail (the agent can fix it, and a
+ * `package.json` it broke must not read as nothing to check), then `not_run` for each half it blocked.
  */
 function noIdEvidence(app: AppEntry): CheckEvidence[] {
 	const why = app.error ?? 'appManifest has no id';
@@ -636,14 +486,8 @@ function noIdEvidence(app: AppEntry): CheckEvidence[] {
 }
 
 /**
- * Checks one app: its types, then a rebuild in its Design preview.
- *
- * @param host - The agent host: its workspace holds the app's files, and it finds the app's running dev session.
- * @param markers - Gets Monaco's marker source; resolves null when there is none (outside a browser, or before the editor loads).
- * @param app - The app to check, as `findApp` found it.
- * @param opts - Timings (tests pass short ones) and the run's stop signal.
- * @returns The evidence from every step, in the order they ran.
- * @throws When the app's package.json cannot be read, with the read error; nothing was checked then.
+ * Checks one app: its types, then a rebuild in its Design preview. Returns every step's evidence in run order.
+ * @throws When the app's package.json cannot be read; nothing was checked then.
  */
 async function checkApp(host: AgentHost, markers: () => Promise<MarkerSource | null>, app: AppEntry, opts: AppCheckOptions): Promise<CheckEvidence[]> {
 	// step: a read that failed says nothing about the manifest, so there is no evidence to record either way
@@ -662,56 +506,28 @@ async function checkApp(host: AgentHost, markers: () => Promise<MarkerSource | n
 // =============================================================================
 
 /**
- * The build half of an app check. It rebuilds the app in its Design preview and
- * reports what the build, the running app and the console say. Rod's dev session
- * builds only while a preview is attached (`devSession.ts:599`), so with no
- * preview the evidence says so and nothing is built.
- *
- * What counts as what, because a check that wrongly passes lets the agent claim
- * the app runs and one that cannot pass on a healthy app leaves it stuck:
- *
- * - `rebuild()` queues and coalesces: while a build runs it sets a flag and
- *   returns at once, and the running build is followed by another. So the wait
- *   is on the watch state, not on the promise: the result is the last `ok` or
- *   `error` that no `building` or `installing` follows within `settleMs`.
- * - Every feed replays its backlog on subscribe, including the watch state. The
- *   replay is dropped, so a stale `ok` or an error from an earlier build is never
- *   this rebuild's result. A rebuild that never starts a build therefore times
- *   out as `not_run`: nothing new happened, so nothing is proven.
- * - A hot refresh (`target: 'hot refresh'`) swaps one module into a mounted app
- *   and reports `ok` with no `building` before it. It can land while the full
- *   build is still running, so it is never this rebuild's result.
- * - A build that does not settle in `buildWaitMs` is `not_run`, not `fail`: the
- *   app may be fine. The summary says whether no build started or one was seen
- *   running that did not finish.
- * - Runtime errors are the error rows that arrive after this rebuild's first
- *   `building` or `installing` until `runtimeGraceMs` after the build settles,
- *   which is when the app mounts and throws. The old app can still raise errors
- *   until the new build begins, and those are not this rebuild's. The shell's
- *   harmless `ResizeObserver loop` window errors are not counted: a healthy app
- *   raises them and would never pass. A clean result means none arrived in that
- *   window, and the output says so.
- * - Console errors are reported but never fail the check: the preview shell wraps
- *   the whole window's `console.error`, so shell code, libraries and React's dev
- *   warnings land there on a healthy app. Uncaught errors (runtime) block; console
- *   errors inform.
- * - A failed build mounts nothing, so runtime and console are not read; the build
- *   evidence carries the error rows the build raised and says what was skipped.
- *
- * Output goes through `clip`, so a long list is cut and says how to see the rest.
+ * The build half of an app check: rebuild the app in its Design preview and report the build, runtime and
+ * console. The dev session builds only while a preview is attached, so with none nothing is built.
+ * - `rebuild()` queues and coalesces, so the wait is on the watch state: the result is the last `ok` or
+ *   `error` that no `building`/`installing` follows within `settleMs`.
+ * - Every feed replays its backlog on subscribe; the replay is dropped so an earlier build is never this
+ *   result. A rebuild that never starts a build times out as `not_run`.
+ * - A hot refresh reports `ok` with no `building` and can land mid-build, so it is never the result.
+ * - No settle within `buildWaitMs` is `not_run`, not `fail`: the app may be fine.
+ * - Runtime errors are error rows from this rebuild's first `building` until `runtimeGraceMs` after it
+ *   settles. The shell's benign `ResizeObserver loop` errors are ignored.
+ * - Console errors inform but never fail: the shell wraps `console.error`, so a healthy app logs there too.
+ * - A failed build mounts nothing, so runtime and console are skipped.
  */
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
-/** How long the build may take to settle before it is called still running, in milliseconds. */
 const DEFAULT_BUILD_WAIT_MS = 60_000;
 
-/** How long after an `ok` or `error` no new build may start for the result to stand, in milliseconds. */
 const DEFAULT_SETTLE_MS = 300;
 
-/** How long after the build settles the preview is watched for mount errors, in milliseconds. */
 const DEFAULT_RUNTIME_GRACE_MS = 1500;
 
 /** The watch `target` of a hot refresh, which swaps one module into a mounted app without a build. */
@@ -720,19 +536,14 @@ const HOT_REFRESH_TARGET = 'hot refresh';
 /** Window errors the shell forwards that a healthy app raises (the browser's ResizeObserver notices), which are not failures. */
 const BENIGN_ERROR = /ResizeObserver loop (?:completed with undelivered notifications|limit exceeded)/;
 
-/** What the build step does, as a short phrase. */
 const BUILD_RAN = 'rebuild the app in its Design preview and wait for the build to settle';
 
-/** What the runtime step does, as a short phrase. */
 const RUNTIME_RAN = 'watch the preview for runtime errors from the rebuild until just after the app mounts';
 
-/** What the console step does, as a short phrase. */
 const CONSOLE_RAN = "read the preview's console errors from the rebuild";
 
-/** How the model gets the preview open. Only the user can, until the run mounts a view tool (open question 1). */
 const OPEN_PREVIEW = "ask the user to open the app's Design preview in the App Builder, then run check_app again";
 
-/** What the output says when the preview is closed. */
 const PREVIEW_CLOSED_OUTPUT = `The app's Design preview is not open, and the app is built only while it is, so nothing was built and no runtime or console errors were read. To include them, ${OPEN_PREVIEW}.`;
 
 // =============================================================================
@@ -758,46 +569,22 @@ type BuildOutcome = { kind: 'settled'; status: WatchStatus } | { kind: 'timeout'
 // EVIDENCE
 // =============================================================================
 
-/**
- * A piece of build evidence for a step that did not run.
- *
- * @param step - The step name.
- * @param ran - What would have run.
- * @param output - What the output says.
- * @param summary - Why it did not, and what was not checked.
- * @returns The evidence.
- */
+/** Evidence for a step that did not run; `summary` says why and what went unchecked. */
 function notRun(step: string, ran: string, output: string, summary: string): CheckEvidence {
 	return { step, ran, output, status: 'not_run', summary };
 }
 
-/**
- * Writes a wait as a person would.
- *
- * @param ms - The wait in milliseconds.
- * @returns For example `60 s`, or `150 ms` for a wait under a second.
- */
+/** Writes a wait as a person would: `60 s`, or `150 ms` under a second. */
 function describeWait(ms: number): string {
 	return ms >= 1000 ? `${Math.round(ms / 1000)} s` : `${ms} ms`;
 }
 
-/**
- * Writes error rows as one line each.
- *
- * @param rows - The preview's error rows.
- * @returns `source: message` per row (just the message when there is no source), with a multi-line message on one line.
- */
+/** One `source: message` line per error row (the message alone without a source), multi-line messages joined. */
 function errorLines(rows: AppErrorRow[]): string[] {
 	return rows.map((row) => `${row.source ? `${row.source}: ` : ''}${row.message.replace(/\s*\n\s*/g, ' ')}`);
 }
 
-/**
- * Cuts a list of lines that is too long.
- *
- * @param lines - The lines.
- * @param hide - Hides the values the run's file tools hid, before the cut.
- * @returns The lines as text, cut with a note on how to see less.
- */
+/** Joins lines into text, hides the run's hidden values, then cuts it with a note on how to see less. */
 function listText(lines: string[], hide: (text: string) => string): string {
 	return clip(hide(lines.join('\n')), 'fix the first errors and check again to see the rest');
 }
@@ -807,18 +594,9 @@ function listText(lines: string[], hide: (text: string) => string): string {
 // =============================================================================
 
 /**
- * Rebuilds the app in its Design preview and reports what it saw.
- *
- * @param session - The app's dev session, or null when none is running.
- * @param opts - The timings; tests pass short ones.
- * @param hide - Hides the values the run's file tools hid, before a summary or an output is cut.
- * @returns With no session or no preview attached, one `not_run` item
- *   (`preview closed: build not checked`). Otherwise `build` (`build OK` or
- *   `build failed: ${reason}`) and, when the build is OK, `runtime` (`runtime
- *   clean` or `runtime: ${n} errors`) and, only when there are some, `console`
- *   (`console: ${n} errors`, which is reported but does not fail the check). A
- *   build that does not start or settle in time, or a rebuild that cannot run, is
- *   a single `not_run` item. It never throws.
+ * Rebuilds the app in its Design preview and reports `build`, then `runtime` when the build is OK, then
+ * `console` only when it has errors (reported, never failing). No preview, or a build that does not start or
+ * settle, is one `not_run` item. Never throws.
  */
 async function appBuildEvidence(session: AgentDevSession | null, opts: AppBuildOptions, hide: (text: string) => string): Promise<CheckEvidence[]> {
 	if (!session || !session.previewAttached) return [notRun('build', 'rebuild the app in its Design preview', PREVIEW_CLOSED_OUTPUT, 'preview closed: build not checked')];
@@ -954,7 +732,6 @@ Example: after editing the app "daybook-ui", call check_app { "app": "daybook-ui
  * listener never hears it; the run learns of it from the call's error.
  *
  * @param folder - The checked app's folder under `apps/`.
- * @param report - What the check saw.
  */
 export type AppCheckListener = (folder: string, report: CheckReport) => void;
 
@@ -972,15 +749,12 @@ export class AppCheckToolkit extends AgentToolkit {
 	private readonly host: AgentHost;
 	/** Gets Monaco's marker source. */
 	private readonly markers: () => Promise<MarkerSource | null>;
-	/** Hears every result. */
 	private readonly onResult: AppCheckListener;
-	/** The checker's timings. */
 	private readonly opts: AppCheckOptions;
 
 	/**
 	 * Builds the toolkit for one agent.
 	 *
-	 * @param host - The agent host.
 	 * @param markers - Gets Monaco's marker source; resolves null when there is none (outside a browser, or before the editor loads).
 	 * @param onResult - Hears each result; the run keeps the record, not this toolkit.
 	 * @param opts - Timings (tests pass short ones) and the run's stop signal.
@@ -1006,17 +780,11 @@ export class AppCheckToolkit extends AgentToolkit {
 		if (!ref) throw new Error('app is required: pass the app id or its folder under apps/ to check.');
 		const app = findApp(await readApps(this.host.vfs, (id) => this.host.devSession(id) !== null), ref);
 
-		// step: run it, then hand the report on as evidence
 		const report: CheckReport = { target: app.id ?? app.folder, evidence: await checkApp(this.host, this.markers, app, this.opts) };
 		this.onResult(app.folder, report);
 		return formatReport(report);
 	}
 
-	/**
-	 * The member tools.
-	 *
-	 * @returns The single `check_app` tool.
-	 */
 	tools(): AgentTool[] {
 		return [
 			new AgentTool({

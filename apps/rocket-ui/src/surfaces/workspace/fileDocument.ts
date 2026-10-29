@@ -25,19 +25,12 @@
 // =============================================================================
 
 /**
- * Every Monaco tab of one path binds to the same Monaco model, which outlives
- * the tab. So the text, the view version it was loaded at and whether it is
- * unsaved belong to the file, not to a tab: splits share them, and unsaved
- * text that outlives its last tab keeps its version, so its save after the
- * tab opens again is refused when the file moved on. A document lives while a
- * tab shows it or its text is unsaved.
- *
- * Each save waits for the one before it. Discard mine, Reload and Overwrite
- * move the document's generation before they await anything, and a save
- * called in an earlier generation writes nothing and rejects with
- * SaveDroppedError. Discard mine and Reload show the stored text they had at
- * once, so text on screen that differs from what a write wrote does not take
- * its version.
+ * Every Monaco tab of one path binds to the same Monaco model, which outlives the tab, so the text,
+ * its loaded view version and its unsaved flag belong to the file: splits share them, and unsaved
+ * text that outlives its last tab keeps its version, so a later save is refused if the file moved
+ * on. A document lives while a tab shows it or its text is unsaved. Saves run one after another.
+ * Discard mine, Reload and Overwrite move the generation before awaiting anything; a save from an
+ * earlier generation writes nothing and rejects with SaveDroppedError.
  */
 
 import { SaveDroppedError } from 'shared/modules/agent/host';
@@ -122,7 +115,6 @@ export class FileDocument {
 		};
 	}
 
-	/** Hears each change to the document. */
 	subscribe(listener: () => void): () => void {
 		this.listeners.add(listener);
 		return () => this.listeners.delete(listener);

@@ -25,27 +25,13 @@
 // =============================================================================
 
 /**
- * One run of the agent. Each wave asks the model for a plan, runs the plan's
- * tool calls, and feeds their summaries into the next wave's question. The
- * run ends when the model's answer is accepted, on a reply that stays unusable,
- * when the model cannot be reached, when the user stops it, at the step limit
- * (`maxWaves`), or when the cost limit refuses a model request. Messages the
- * user sends during the run reach the next question; they never reset the
- * step count.
- *
- * An answer is accepted only when the host's finish rule (`FinishRule`) finds
- * nothing left unchecked, so the model cannot skip checking. The loop knows
- * nothing of what is checked or how: it tells the rule what each wave ran and
- * asks it. A reply that cannot be used is sent back once, saying why. When the
- * run ends without an accepted answer, the loop asks for a best-effort answer
- * from what was gathered, and failing that writes one itself.
- *
- * This is a port of Wave's driver (`nodes/src/nodes/agent_rocketride/
- * rocketride_agent.py`) and the result bookkeeping of its executor
- * (`executor.py`). The texts the model reads match Wave's word for word, as
- * Wave's prompt teaches the model to read them. One change: the note that
- * sends a bad reply back goes in the question's context, not its
- * instructions, so the cached start stays identical on every call.
+ * One run of the agent: each wave asks the model for a plan, runs its tool calls, and feeds their
+ * summaries into the next question. An answer is accepted only when the host's `FinishRule` finds
+ * nothing unchecked; the loop only tells it what each wave ran. A port of Wave's driver
+ * (`nodes/src/nodes/agent_rocketride/rocketride_agent.py`) and its executor's bookkeeping. The
+ * texts the model reads match Wave's word for word, because Wave's prompt teaches the model to read
+ * them. One deviation: the bad-reply note goes in the question's context, not its instructions, so
+ * the cached start stays identical.
  */
 
 import { redactText } from '../toolkits/common';
@@ -63,7 +49,6 @@ import { previewArgs, summarize, withCommas } from './summary';
 
 /** One call as the finish rule hears it: what ran, with what, and how it ended. */
 export interface RanCall {
-	/** The tool. */
 	tool: string;
 	/** The arguments it ran with (references filled in), or as written when they could not be filled in. */
 	args: Record<string, unknown>;
@@ -84,11 +69,7 @@ export interface RanCall {
 export interface FinishRule {
 	/** The tool that checks the work: done=true waits a wave after a call to it, and calling it again is never a repeat. */
 	readonly checkTool: string;
-	/**
-	 * A wave starts.
-	 *
-	 * @param wave - The wave number, from 0.
-	 */
+	/** A wave starts; `wave` counts from 0. */
 	beginWave(wave: number): void;
 	/**
 	 * A wave's calls have ended.
@@ -116,7 +97,6 @@ export interface LoopOptions {
 	tools: AgentTool[];
 	/** Asks the model one question. */
 	model: ModelCall;
-	/** Decides when the work is checked; the loop asks it before accepting a done=true. */
 	finish: FinishRule;
 	/** Sends one chunk of progress text to the user. */
 	emit: (type: 'thinking', text: string) => void;
@@ -127,12 +107,9 @@ export interface LoopOptions {
 	/** Takes the messages the user sent since the last take, oldest first. */
 	takeQueued: () => string[];
 	/**
-	 * Lets a prepared call whose step names an act start, or refuses it.
-	 * Resolves with the work to start; rejects with the refusal the model
-	 * reads (blocked, declined, not answered). The loop calls it between the
-	 * call's prepare and its run with the call's clock stopped, so the user's
-	 * think time never counts against a limit. A step with no act never
-	 * reaches it.
+	 * Lets a prepared call whose step names an act start: resolves with the work to start, or
+	 * rejects with the refusal the model reads. Called between prepare and run with the call's
+	 * clock stopped, so the user's think time never counts against a limit.
 	 */
 	approve: (act: ToolAct, run: () => Promise<string>) => Promise<() => Promise<string>>;
 	/** The values the file tools hid this run; any other result that quotes one shows its marker. */
@@ -161,7 +138,6 @@ export interface LoopOptions {
 export interface LoopResult {
 	/** The answer for the user, with its memory references filled in ('' for a stopped run). */
 	answer: string;
-	/** Why the run stopped. */
 	stopReason: StopReason;
 	/** How many waves ran, counting the one the run stopped in. */
 	waves: number;
@@ -186,47 +162,33 @@ function readTheCheck(checkTool: string): string {
 	return `Not finished: read the result of ${checkTool} before done=true.`;
 }
 
-/** What a call still running when the run was stopped leaves behind. */
 const STOPPED_WHILE_RUNNING = 'Still running when the run was stopped; it may still finish.';
 
-/** What a call the stop kept from starting leaves behind. */
 const STOPPED_BEFORE_START = 'Not run: the run was stopped first.';
 
-/** Why a done is sent back in the wave a timed-out call is found to have ended: the model has not read how. */
 const READ_THE_LATE = 'Not finished: read how the call(s) that timed out ended (the entries marked late) before done=true.';
 
-/** What a late entry tells the model. */
 const LATE_NOTE = 'This call timed out and has now ended; this is how it ended. Plan again any call that was not run while it was still running.';
 
-/** The heading of a stopped run's last row, over the calls still running. */
 const STILL_RUNNING = 'Still running when you stopped (these may still finish and change the work):';
 
-/** Why a done is sent back while a message the user sent during the run is unread. */
 const READ_THE_USER = 'Not finished: the user wrote to you while you worked. Read "Messages from the user during this run" before done=true.';
 
-/** Why a question to the user is dropped when they wrote during its wave: they had not seen it. */
 const ASKED_UNSEEN = 'Not asked: the user wrote to you before they saw your question. Read "Messages from the user during this run", then call ask_user again if you still need to.';
 
 /** The role of the best-effort question: a plain answer, not a plan. */
 const FALLBACK_ROLE = 'You are a helpful assistant.';
 
-/** The best-effort question. */
 const FALLBACK_QUESTION = 'Based on the above, provide a complete and accurate final answer. The work stopped before it was finished: if something the goal needs is still unknown, say what is missing rather than guessing.';
 
-/** Most characters of a peek's data the best-effort question shows. */
 const FALLBACK_PREVIEW_CHARS = 2000;
 
-/** Most characters of a call's error a thinking line shows. */
 const THINKING_ERROR_CHARS = 200;
 
 /** The arguments that name what a call works on, in the order a thinking line looks for them. */
 const PRIMARY_ARGS = ['path', 'oldPath', 'target', 'app', 'name', 'task_token', 'project_id', 'method'];
 
-/**
- * The error of a call that was not started because an earlier call on the same files timed out and still runs.
- *
- * @param waitsFor - The call that timed out.
- */
+/** The error of a call held back because an earlier call on its files timed out and still runs. */
 function heldBackMessage(waitsFor: ToolCall): string {
 	const target = primaryArg(waitsFor.args);
 	return `Not run: it waits for ${waitsFor.tool}${target ? ` on ${target}` : ''}, which timed out and is still running. You will be told when that call ends; then plan this one again.`;
@@ -280,7 +242,6 @@ interface Entry extends ResultEntry {
 	offset?: number;
 	/** How many characters a chunk peek returned. */
 	length?: number;
-	/** How long the stored text is. */
 	total_chars?: number;
 }
 
@@ -297,7 +258,6 @@ interface Acted {
 
 /** A call that timed out: what it was, and how it ended once it did. */
 interface LateCall {
-	/** The call as it ran. */
 	call: ToolCall;
 	/** How it ended; unset while it runs. */
 	ended?: { result: string } | { error: string };
@@ -385,19 +345,11 @@ function pauses(reason: StopReason): boolean {
 // =============================================================================
 
 /**
- * Wave's Python loop starts every call in a wave at once. That is wrong for
- * calls that change the same file: two edits of one file, or an edit under a
- * folder that an earlier call renames, must run in the order the model planned
- * them. This section keeps the parallelism and adds that order. A call starts as
- * soon as every EARLIER call in the wave whose write paths overlap its own has
- * finished or timed out. A call with no write paths (a read, a check, a deploy
- * query) never waits and never holds anything back.
- *
- * Each call also has a time limit, set per tool. A call over its limit is
- * reported as timed out and the wave moves on; the tool itself cannot be
- * cancelled, so its promise goes into `late`, beside a record of the call that
- * also keeps how it ended, until the loop reads that. A call in `late` with no
- * ending yet may still be changing things.
+ * Wave starts every call in a wave at once, which is wrong for calls that change the same file.
+ * Here a call starts once every earlier call in the wave whose write paths overlap its own has
+ * finished or timed out; a call with no write paths never waits. A call over its per-tool limit is
+ * reported as timed out and the wave moves on. The tool cannot be cancelled, so its promise goes
+ * into `late` until the loop reads how it ended.
  */
 
 // =============================================================================
@@ -405,22 +357,16 @@ function pauses(reason: StopReason): boolean {
 // =============================================================================
 
 /**
- * How one call ended: its result, or the error that stopped it (with whether
- * the time limit did). `unstarted` marks a call whose work never began
- * (prepare failed or timed out, its act was refused, a stop came first, or
- * it waits for a timed-out call on its files), or whose tool refused it
- * before changing anything (a RefusedError: the user kept their unsaved
- * changes, or the file moved on since it was read). It changed nothing, so
- * the finish rule does not hear of it.
+ * How one call ended. `unstarted` marks a call that changed nothing: its work never began (prepare
+ * failed, act refused, stopped first, or held back behind a timed-out call), or its tool refused it
+ * with a RefusedError. The finish rule does not hear of it.
  */
 export type CallOutcome = { ok: true; result: string; ms: number } | { ok: false; error: string; ms: number; timedOut: boolean; unstarted?: true };
 
 /**
- * An outcome with each value the file tools hid shown as its marker, then
- * passed through redactText. Every outcome goes through it before anything
- * reads it, so no credential in a tool's result, its prepare error or its
- * refusal reaches the stored result, the next question, a thinking line or
- * the finish rule.
+ * Shows each value the file tools hid as its marker, then runs redactText. Every outcome passes
+ * here before anything reads it, so no credential reaches the stored result, the next question, a
+ * thinking line or the finish rule.
  */
 function redactOutcome(outcome: CallOutcome, secrets?: SecretMarkers): CallOutcome {
 	return outcome.ok ? { ...outcome, result: hideSecrets(outcome.result, secrets) } : { ...outcome, error: hideSecrets(outcome.error, secrets) };
@@ -436,11 +382,9 @@ function hideSecrets(text: string, secrets?: SecretMarkers): string {
 // =============================================================================
 
 /**
- * Spells a path argument the way the file tools do, so two spellings of one file compare equal.
- * This mirrors the first steps of `normalizePath` in `../toolkits/filesystem.ts`: the argument becomes text
- * (`path: 7` is the file `7`), `\` becomes `/`, and empty segments go (`apps//x/` is `apps/x`).
- * It does not refuse `.` or `..`; the tool does that when it runs. A path that is empty after
- * this gives no path.
+ * Spells a path argument as the file tools do (the first steps of `normalizePath` in
+ * `../toolkits/filesystem.ts`), so two spellings of one file compare equal. `.` and `..` are left
+ * for the tool to refuse.
  */
 function cleanPath(value: unknown): string[] {
 	const path = String(value ?? '')
@@ -491,7 +435,6 @@ function overlaps(a: string[], b: string[]): boolean {
 interface CallSteps {
 	/** Gets the call's tool ready with its arguments; throws for a tool the run does not have. */
 	prepare: (call: ToolCall) => Promise<ToolStep>;
-	/** The loop option. */
 	approve: LoopOptions['approve'];
 }
 
@@ -504,21 +447,11 @@ function notStarted(ms: number): CallOutcome {
 }
 
 /**
- * Runs one call and settles with its outcome; never rejects. Three steps:
- *
- * 1. prepare: the tool reads what it needs and says what it is about to do,
- *    timed against the call's limit. A failure or timeout is `unstarted`, and
- *    a prepare still going is dropped, since it only reads.
- * 2. approve: only when the step names an act, with the clock stopped. A
- *    refusal is the outcome (`unstarted`), and the run never starts.
- * 3. run: the work, timed with what the limit has left. A timeout or a stop
- *    cuts it loose into `late`.
- *
- * A limit that is not a positive finite number means no limit. A stop before
- * step 3 means the run never starts. `ms` counts steps 1 and 3, not the wait.
- * While the user answers a tool question (`userTime.asking`), the clock of
- * steps 1 and 3 stands still too. A run its tool refuses before changing
- * anything (a RefusedError) is `unstarted`.
+ * Runs one call and settles with its outcome; never rejects. prepare is timed, and a failure,
+ * timeout or stop there is `unstarted`. approve runs only when the step names an act, with the
+ * clock stopped; a refusal is `unstarted`. run gets what the limit has left, and a timeout or stop
+ * cuts it loose into `late`. `ms` counts prepare and run, never the approval wait or an open tool
+ * question. A RefusedError from the run is `unstarted`.
  */
 async function runOne(call: ToolCall, steps: CallSteps, limitMs: number, late: Map<Promise<unknown>, LateCall>, signal: AbortSignal, userTime?: UserTime): Promise<CallOutcome> {
 	// a call that waited on an overlapping write starts after a stop through here
@@ -544,14 +477,9 @@ async function runOne(call: ToolCall, steps: CallSteps, limitMs: number, late: M
 }
 
 /**
- * Runs `work` against a limit and settles with how it ended; never rejects.
- * A limit that is not a positive finite number means no limit. A stop cuts
- * the work loose like a timeout does. The work itself cannot be cancelled, so
- * once cut loose it is handed to `cutLoose` (or dropped without one).
- * `spentMs` of the limit is already used, so the work gets what is left, and
- * a timeout still names the whole limit. While `userTime` has a question
- * open, the clock stands still, so `spentMs` is the clock time an earlier
- * step used, not its wall time.
+ * Runs `work` against a limit; never rejects. The work cannot be cancelled, so a timeout or stop
+ * hands it to `cutLoose`. `spentMs` of the limit is already used, and the clock stands still while
+ * `userTime` has a question open.
  */
 function timed<T>(work: () => Promise<T>, limitMs: number, signal: AbortSignal, cutLoose?: (running: Promise<T>) => void, spentMs = 0, userTime?: UserTime): Promise<Timed<T>> {
 	const began = performance.now();
@@ -622,11 +550,9 @@ function timed<T>(work: () => Promise<T>, limitMs: number, signal: AbortSignal, 
 }
 
 /**
- * Tracks a call the wave stopped waiting for in `late`, from the moment it is
- * cut loose until lateReturns() hands over how it ended, so a call that ends
- * before the rest of its wave is still reported. The tracker never rejects,
- * so a late failure is not an unhandled rejection; it notes how the call
- * ended, and lateReturns() hides its secrets as redactOutcome does.
+ * Tracks a call cut loose into `late` until lateReturns() hands over how it ended, so a call that
+ * ends before the rest of its wave is still reported. Never rejects, so a late failure is not an
+ * unhandled rejection.
  */
 function trackLate(late: Map<Promise<unknown>, LateCall>, call: ToolCall, running: Promise<string>): void {
 	const lateCall: LateCall = { call };
@@ -646,28 +572,11 @@ function trackLate(late: Map<Promise<unknown>, LateCall>, call: ToolCall, runnin
 // =============================================================================
 
 /**
- * Runs a wave's calls and returns their outcomes in call order.
- *
- * A call starts once every earlier call in the wave with overlapping write
- * paths has settled or timed out, so calls on different files run together and
- * calls on the same file run as planned. The call's clock starts when it
- * starts, not while it waits, and stops while the user is asked for an OK; a
- * call waiting for an OK holds back only later calls on its own paths. A call
- * that outlives its limit is reported as `timedOut` and sits in `opts.late`
- * until the run reads how it ended.
- *
- * A call is not started, or prepared, when one of those earlier calls ran
- * past its limit or was held back that way, or when a call that timed out in
- * an earlier wave still runs on its files: it would land before or under a
- * change still on its way. A call whose prepare failed or timed out, or whose
- * act was refused, holds nothing back, since nothing of it can land.
- *
- * @param calls - The wave's tool calls, in the order the model planned them.
- * @param steps - Gets each call ready and lets it start; a throw becomes an `ok: false` outcome.
- * @param opts.timeoutMs - The time limit in milliseconds for a tool; zero or infinity means none.
- * @param opts.late - Collects each timed-out call by the promise that tracks it, with how it ended once it does.
- * @param opts.signal - The run's stop signal: running calls are cut loose and waiting ones never start.
- * @param opts.userTime - The time the user spends answering tool questions, left out of every limit.
+ * Runs a wave's calls and returns their outcomes in call order. A call starts once every earlier
+ * call with overlapping write paths has settled, so calls on different files overlap and calls on
+ * one file run as planned. A call is not started when an earlier overlapping call ran past its
+ * limit or was held back, or when a timed-out call from an earlier wave still runs on its files: it
+ * would land under a change still on its way. A failed prepare or refused act holds nothing back.
  */
 async function runWave(calls: ToolCall[], steps: CallSteps, opts: { timeoutMs: (tool: string) => number; late: Map<Promise<unknown>, LateCall>; signal: AbortSignal; userTime?: UserTime }): Promise<CallOutcome[]> {
 	const held = calls.map(writePaths);
@@ -757,12 +666,9 @@ class WaveRun {
 	private readonly seenCalls = new Map<string, string>();
 	/** Each stored result's text by the key that first held it. */
 	private readonly seenResults = new Map<string, string>();
-	/** The keys the model removed. */
 	private readonly removed = new Set<string>();
-	/** The tools by name. */
 	private readonly tools: Map<string, AgentTool>;
 
-	/** Starts a run. */
 	constructor(private readonly o: LoopOptions) {
 		this.tools = new Map(o.tools.map((tool) => [tool.name, tool]));
 	}
@@ -823,14 +729,10 @@ class WaveRun {
 	}
 
 	/**
-	 * Runs a wave's calls and returns their entries, in call order. A call
-	 * missing a required argument is skipped, with an error telling the model
-	 * where arguments go. Arguments are resolved next, and a call whose
-	 * reference names nothing does not run. memory.peek reads memory here,
-	 * before this wave's results are stored; every other call goes through the
-	 * scheduler. Every call but memory.peek, the skipped ones and those whose
-	 * work never started (refused, stopped first, or held back by a timed-out
-	 * call) is also handed back as the finish rule hears it.
+	 * Runs a wave's calls and returns their entries in call order. A call missing a required
+	 * argument is skipped with an error, and a call whose reference names nothing does not run.
+	 * memory.peek reads memory before this wave's results are stored. Calls that ran (not peek,
+	 * skipped or unstarted) are also returned as the finish rule hears them.
 	 */
 	async act(wave: number, calls: ToolCall[]): Promise<Acted> {
 		const prepared = calls.map((call, i): Prepared => {
@@ -880,7 +782,6 @@ class WaveRun {
 		return required.filter((name): name is string => typeof name === 'string' && (call.args[name] === undefined || call.args[name] === null));
 	}
 
-	/** Gets one call ready on its tool. */
 	private prepare(call: ToolCall): Promise<ToolStep> {
 		const tool = this.tools.get(call.tool);
 		if (!tool) throw new Error(`Unknown tool '${call.tool}'. Use only the tools in Available Tools.`);
@@ -1032,7 +933,6 @@ class WaveRun {
 		if (text) this.o.emit('thinking', text);
 	}
 
-	/** The run's result. */
 	finish(stopReason: StopReason, answer: string, waves: number): LoopResult {
 		return { answer, stopReason, waves, modelMs: this.modelMs, toolCalls: this.toolCalls };
 	}
@@ -1049,18 +949,10 @@ class WaveRun {
 	}
 
 	/**
-	 * Ends the run with the best effort from what was gathered. When the cost
-	 * limit refuses that question too, the run ends at the cost limit, however
-	 * it was ending. A run that pauses at a limit takes the messages the user
-	 * sent before the question, so the answer reads them, and again after it,
-	 * so one sent while the model answered is this turn's too. A message left
-	 * queued would start a turn of its own, with a fresh budget, before the
-	 * user pressed Continue. A run the user stopped while the model answered
-	 * ends stopped, however it was ending, so it offers no Continue.
-	 *
-	 * @param reason - Why the run ends.
-	 * @param waves - How many waves ran.
-	 * @returns The run's result.
+	 * Ends the run with a best effort from what was gathered; a cost-limit refusal of that question
+	 * ends it at `cost_limit`, and a stop during it ends it stopped. A pausing run takes the user's
+	 * queued messages before and after the question, so none starts its own turn with a fresh
+	 * budget before Continue.
 	 */
 	async answerFromGathered(reason: StopReason, waves: number): Promise<LoopResult> {
 		if (pauses(reason)) this.hear();
@@ -1115,28 +1007,13 @@ class WaveRun {
 // =============================================================================
 
 /**
- * Runs waves until the model's answer is accepted, a call asks the user
- * (`needs_input`, with the question as the answer, unless the user wrote
- * during that wave: the model reads that first), a reply stays unusable
- * after one retry (`empty_plan`), the model cannot be reached (`error`), the
- * run is stopped (`stopped`, with no answer), the step limit is reached
- * (`limited`), or the cost limit refuses a model request (`cost_limit`). The
- * last two answer with the best effort from what was gathered, and take the
- * messages the user sent before and after it. A best effort the cost limit
- * refuses ends the run as `cost_limit`, however it was ending.
- * Each wave plans, runs its calls, tells the finish rule what ran, and records
- * their entries for the next question. A done=true is sent back, with the
- * reason in an entry, while a timed-out call still runs, in the wave the check
- * tool is called, in the wave a timed-out call is found to have ended (each
- * such call gets an entry saying how it ended), while the finish rule finds
- * something unchecked, and while a message the user sent during the run is
- * unread. Every
- * wave sends one thinking chunk except the one whose answer is accepted, which
- * goes out as the answer instead.
- *
- * @param o - The run's request, prompt start, tools, model and hooks.
- * @returns The answer and how the run ended.
- * @throws The model's error when it fails before anything was gathered.
+ * Runs waves until the answer is accepted, a call asks the user (`needs_input`), a reply stays
+ * unusable after one retry (`empty_plan`), the model cannot be reached (`error`), the run is
+ * stopped (`stopped`), the step limit is reached (`limited`), or the cost limit refuses a request
+ * (`cost_limit`); the last two answer with a best effort. A done=true is sent back while a timed-
+ * out call runs or ended unread, in the wave the check tool is called, while the finish rule finds
+ * something unchecked, or while a mid-run user message is unread. @throws The model's error when it
+ * fails before anything was gathered.
  */
 export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 	const run = new WaveRun(o);
@@ -1191,11 +1068,8 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 		const lines = toolCalls.map((call, i) => thinkingLine(call, entries[i]));
 		entries.push(...problemEntries(wave, reply.problems));
 
-		// step: tell the finish rule what ran this wave, failed calls included (a
-		// write may have landed before its error), then any timed-out call that has
-		// ended since: what it did may have landed after a check read the work. A
-		// call skipped for missing arguments never touched the work or a check, so
-		// the rule never hears of it.
+		// step: tell the finish rule what ran, failed calls included (a write may land before its error),
+		// then timed-out calls that ended since; a skipped call never touched the work
 		const late = run.lateReturns();
 		await o.finish.endWave([...ran, ...late]);
 		entries.push(...run.lateEntries(wave, late));

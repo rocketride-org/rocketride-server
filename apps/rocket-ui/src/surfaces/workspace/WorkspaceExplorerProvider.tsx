@@ -128,9 +128,8 @@ const WorkspaceExplorerProvider: React.FC = () => {
 		async (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string) => {
 			const view = getWorkspaceVfs();
 			try {
-				// The view refuses changes to .rocketride/ (and outside the
-				// roots) before anything stages, so rename and create need no
-				// check here; delete asks the same rule before its confirm.
+				// The view refuses changes to .rocketride/ and outside the roots before anything stages,
+				// so rename and create need no check; delete checks the same rule before its confirm.
 				switch (action) {
 					case 'rename': {
 						// `newName` is the full new leaf (no extension magic here —

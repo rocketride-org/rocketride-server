@@ -25,24 +25,12 @@
 // =============================================================================
 
 /**
- * The tools the model takes an app from nothing to live with. `create_app`
- * scaffolds a new app through the host, `deploy_app` packs the app and uploads
- * it as the next version, and `publish_app` puts a built version in front of
- * you, a team, or everyone.
- *
- * Risk tiers (spec section 6): creating an app and deploying a version are
- * free. `publish_app` prepares: it checks the arguments, picks the version and
- * names the one client call it will make (`publishApp` or `submitApp`) as its
- * act, and the approval list (`approval.ts`) decides whether the user is asked
- * first. A "no" is the call's error, and the client is not called. Prepare
- * throws on anything that cannot run, so the user is never asked about it.
- *
- * Deploying waits for the server build (spec section 7) and returns its
- * errors, because an upload that fails to build serves nothing. The publish
- * ladder is `packages/ai/src/ai/account/app_deploy.py:24-54`: an @me or @team
- * binding serves any version whose build is OK; a @public binding serves only
- * a `ready` one, and a version gets there by being submitted (private to
- * submit) and then approved by an admin.
+ * The tools that take an app from nothing to live: `create_app` scaffolds an app through the host,
+ * `deploy_app` packs and uploads it as the next version and waits for the server build (an upload
+ * that fails to build serves nothing), and `publish_app` puts a built version in front of you, a team,
+ * or everyone. Creating and deploying are free; `publish_app` names the one client call it will make
+ * (`publishApp` or `submitApp`) and the approval list decides whether the user is asked. A @public
+ * binding serves only a `ready` version: submitted, then approved by an admin.
  */
 
 import type { RocketRideClient } from 'rocketride';
@@ -59,7 +47,6 @@ import { findApp, readApps, type AppEntry } from './inventory';
 /** One version on an app's rail, as the client returns it. */
 type Version = Awaited<ReturnType<RocketRideClient['listDeployments']>>[number];
 
-/** How a version's server build stands. */
 type BuildState = 'ok' | 'failed' | 'running';
 
 /** An app that has the id deploy and publish need. */
@@ -72,16 +59,12 @@ type Target = 'me' | 'team' | 'public';
 // CONSTANTS
 // =============================================================================
 
-/**
- * What an app name looks like. Copied from `apps/shared/src/tools/appdev/NewAppForm.tsx:80` (`APP_NAME_RE`):
- * starts with a lowercase letter, then any mix of letters, digits, underscores and hyphens.
- */
+/** Same rule as `APP_NAME_RE` in `apps/shared/src/tools/appdev/NewAppForm.tsx`. */
 const APP_NAME_RE = /^[a-z][a-zA-Z0-9_-]*$/;
 
 /** The templates the scaffold offers. */
 const TEMPLATES = ['Blank', 'Dashboard'] as const;
 
-/** The audiences `publish_app` takes. */
 const TARGETS: readonly Target[] = ['me', 'team', 'public'];
 
 /** How much of a failed build's log the model reads: the end, where the error is. */
@@ -145,12 +128,7 @@ Example: publish_app { "app": "daybook-ui", "target": "team", "team": "Staging" 
 // =============================================================================
 
 /**
- * The app a call names, with its manifest id.
- *
- * @param host - The host (for the workspace and the open dev sessions).
- * @param args - The tool arguments.
- * @param verb - What the tool does to the app, for the message ("deployed").
- * @returns The app.
+ * The app a call names, with its manifest id; `verb` names the action in errors ("deployed").
  * @throws When `app` is missing, matches no app, or the app has no manifest id.
  */
 async function appArg(host: AgentHost, args: Record<string, unknown>, verb: string): Promise<IdentifiedApp> {
@@ -164,13 +142,6 @@ async function appArg(host: AgentHost, args: Record<string, unknown>, verb: stri
 	return { ...app, id: app.id };
 }
 
-/**
- * How the audience reads in the tool's result.
- *
- * @param target - The audience.
- * @param team - The team, for a team audience.
- * @returns The words.
- */
 function audienceWords(target: Target, team: string): string {
 	if (target === 'me') return 'you';
 	return target === 'team' ? `team ${team}` : 'everyone';
@@ -181,12 +152,8 @@ function audienceWords(target: Target, team: string): string {
 // =============================================================================
 
 /**
- * How a build stands, read as the dashboard reads it (`apps/shared/src/tools/appdev/DashboardView.tsx:447-452`):
- * an empty status (an older version, which carries none) and `ok` mean the build is OK, `failed` means it failed,
- * and any other word is a step still going.
- *
- * @param version - A version from the rail.
- * @returns Whether the build is OK, failed or running.
+ * How a build stands, read as the dashboard reads it: an empty status (older versions carry none)
+ * or `ok` is OK, `failed` failed, and any other word is a step still going.
  */
 function buildStateOf(version: Version): BuildState {
 	const word = version.buildStatus ?? '';
@@ -194,24 +161,14 @@ function buildStateOf(version: Version): BuildState {
 	return word === 'failed' ? 'failed' : 'running';
 }
 
-/**
- * A rail ordered newest first (the server sends it that way; this does not rely on it).
- *
- * @param rail - An app's versions.
- * @returns A sorted copy.
- */
+/** A sorted copy, newest first (the server sends it that way; this does not rely on it). */
 function newestFirst(rail: Version[]): Version[] {
 	return [...rail].sort((a, b) => b.registryVersion - a.registryVersion);
 }
 
 /**
- * The version number the server's reply to an app upload names. The reply is
- * `{ artifact: <rail entry> }` (`packages/ai/src/ai/account/app_deploy.py:554`), and the rail
- * entry carries `registryVersion`; the client types the artifact as a pipeline's, which has no
- * such field, so it is read here without trusting the type.
- *
- * @param reply - What `client.deploy.add` returned.
- * @returns The version the upload was registered as; undefined when the reply doesn't say.
+ * The version number in the server's reply to an app upload (`{ artifact: <rail entry> }`). The client
+ * types the artifact as a pipeline's, which has no `registryVersion`, so it is read untyped.
  */
 function uploadedVersion(reply: unknown): number | undefined {
 	if (typeof reply !== 'object' || reply === null) return undefined;
@@ -250,8 +207,6 @@ export class AppToolkit extends AgentToolkit {
 	/**
 	 * Builds the toolkit.
 	 *
-	 * @param client - The host's client getter.
-	 * @param host - The agent host.
 	 * @param opts - Timing: how often to read the build's progress (default 3 s) and how long to wait for it (default 540 s); the run's stop signal; what hides the values the run's file tools hid before a build log is cut; what hears each file create_app wrote; and who to tell before a scaffold writes files.
 	 */
 	constructor(client: ClientGetter, host: AgentHost, opts: { pollMs?: number; buildWaitMs?: number; signal?: AbortSignal; hide?: (text: string) => string; created?: (path: string) => void; onScaffold?: () => void } = {}) {
@@ -269,7 +224,6 @@ export class AppToolkit extends AgentToolkit {
 	/**
 	 * Scaffolds a new app. Free.
 	 *
-	 * @param args - The `create_app` arguments.
 	 * @returns The new app's id and folder.
 	 * @throws When a name is wrong, the folder is taken, or the scaffold fails.
 	 */
@@ -305,7 +259,6 @@ export class AppToolkit extends AgentToolkit {
 	/**
 	 * Uploads an app as its next version and waits for the server build. Free.
 	 *
-	 * @param args - The `deploy_app` arguments.
 	 * @returns Whether the server build is OK, failed (with its log) or still running.
 	 * @throws When the app cannot be packed or uploaded; packing errors pass through unchanged.
 	 */
@@ -333,17 +286,9 @@ export class AppToolkit extends AgentToolkit {
 	}
 
 	/**
-	 * Watches the version just uploaded until its build finishes or the wait runs out.
-	 *
-	 * The rail is open to the whole org, so a teammate's deploy can land beside ours. The
-	 * version is therefore fixed once and never changed: the one the upload's reply names, or,
-	 * when the reply doesn't say, the first version to appear above `before`.
-	 *
-	 * @param client - The connected client.
-	 * @param appId - The app's manifest id.
-	 * @param before - The highest version before the upload.
-	 * @param uploaded - The version the upload's reply names, if it does.
-	 * @returns The build's outcome, as the tool reports it.
+	 * Watches the version just uploaded until its build finishes or the wait runs out. A teammate's
+	 * deploy can land beside ours, so the version is fixed once: the one the upload's reply names,
+	 * else the first to appear above `before`.
 	 */
 	private async waitForBuild(client: RocketRideClient, appId: string, before: number, uploaded: number | undefined): Promise<string> {
 		const deadline = Date.now() + this.buildWaitMs;
@@ -378,7 +323,6 @@ export class AppToolkit extends AgentToolkit {
 	 * Gets a publish ready: checks the arguments, picks the version, and names
 	 * the client call that publishes or submits it. Only reads.
 	 *
-	 * @param args - The `publish_app` arguments.
 	 * @returns The step: its act and run, or a run that only reports when there is nothing to do.
 	 * @throws When an argument is wrong or the version cannot serve yet.
 	 */
@@ -400,8 +344,6 @@ export class AppToolkit extends AgentToolkit {
 	/**
 	 * Picks the version to publish and checks it can serve.
 	 *
-	 * @param app - The app.
-	 * @param rail - The app's versions.
 	 * @param requested - The version the call named, if any.
 	 * @returns The version: the one named, or the newest whose build is OK.
 	 * @throws When the version is missing, or its build failed or is still running.
@@ -430,11 +372,6 @@ export class AppToolkit extends AgentToolkit {
 	 * review ladder by the version's state: private is submitted for review, one
 	 * already waiting is left alone, and an approved one is bound.
 	 *
-	 * @param client - The connected client.
-	 * @param app - The app.
-	 * @param version - The version to publish.
-	 * @param target - The audience.
-	 * @param team - The team, for a team audience.
 	 * @returns The client call to make, as act and run; or the final text, when there is nothing to do.
 	 * @throws When the version's state cannot be published to everyone.
 	 */
@@ -469,11 +406,6 @@ export class AppToolkit extends AgentToolkit {
 		}
 	}
 
-	/**
-	 * The three app tools.
-	 *
-	 * @returns The group's tools.
-	 */
 	tools(): AgentTool[] {
 		return [
 			new AgentTool({

@@ -129,11 +129,9 @@ interface ToolSpecBase {
 }
 
 /**
- * The defining spec of one tool: contract plus executor. Most tools give
- * `execute`. A tool whose call may need the user's OK gives `prepare`
- * instead: it reads what it needs and says what it is about to do, and the
- * loop asks before it calls the step's `run`. `prepare` only reads, because
- * the call may be refused after it.
+ * The defining spec of one tool. Most give `execute`; a tool whose call may need
+ * the user's OK gives `prepare`, which only reads (the call may still be refused)
+ * and returns the act the loop asks about before it calls the step's `run`.
  */
 export type AgentToolSpec =
 	| (ToolSpecBase & {
@@ -180,7 +178,6 @@ export class AgentTool {
 	 * Gets one call ready. Only the loop calls it.
 	 *
 	 * @param args - The LLM-supplied arguments object.
-	 * @returns What the call is about to do, and its work.
 	 */
 	prepare(args: Record<string, unknown>): Promise<ToolStep> {
 		return this.preparer(args);

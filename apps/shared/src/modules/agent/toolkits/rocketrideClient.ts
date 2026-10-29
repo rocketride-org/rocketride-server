@@ -25,30 +25,14 @@
 // =============================================================================
 
 /**
- * One tool reaches RocketRide: `rocketride_client` takes a client method as
- * `ROCKETRIDE_typescript_API.md` names it (`validate`, `use`, `deploy.add`,
- * `log.read`) and its arguments in order, calls it on the connected client and
- * returns the result as JSON. The guide is the manual, so nothing here repeats it.
- *
- * - The tool prepares each call: it checks the name, reads the arguments and
- *   names the exact call as its act, so the approval list (`approval.ts`)
- *   rates it before the client is touched. That list blocks the methods that
- *   hand the model a credential, the raw `call` and `request`, and the `fs*`
- *   store methods, and asks the user first for outward ones. Methods that
- *   need a callback, bytes or a live object are refused here. Each refusal
- *   says what to call instead.
- * - For `use`, `validate` and `deploy.add`, `{ "filepath": "pipelines/x.pipe" }`
- *   is read from the run's workspace view, unsaved edits included, and passed as
- *   `pipeline`, the way the guide's `filepath` works locally.
- * - Results go through `toolText`, which strips secrets and clips. Two
- *   exceptions: `getService` and `getServices` are static schemas and are not
- *   redacted, and the run token at the top of a `use` or `deploy.run` result
- *   stays readable so the model can follow its run. `getServices` drops its
- *   SVG icon table, and when it still does not fit, each service is cut to its
- *   category and a one-line summary.
- * - A `use` that started a run, and a restart, are reported to the run
- *   ledger (`runs.ts`), which records the runs this conversation owns.
- * - A `use` refused with "Pipeline is already running" gets RERUN_GUIDANCE.
+ * `rocketride_client` calls one client method by the name `ROCKETRIDE_typescript_API.md` gives it, with
+ * its arguments in order, and returns the result as JSON; the guide is the manual.
+ * - Each call is prepared first and named as its act, so the approval list (`approval.ts`) rates it
+ *   before the client is touched. Methods that need a callback, bytes or a live object are refused.
+ * - `{ "filepath": ... }` for `use`, `validate` and `deploy.add` is read from the run's workspace view,
+ *   unsaved edits included, and passed as `pipeline`.
+ * - Results go through `toolText`, except `getService(s)` (static schemas, not redacted) and the run
+ *   token of a `use` or `deploy.run` result, which stays readable.
  */
 
 import type { RocketRideClient } from 'rocketride';
@@ -129,7 +113,6 @@ Example: rocketride_client { "method": "use", "params": [{ "filepath": "pipeline
 /**
  * The method a call names, checked before the client is touched.
  *
- * @param raw - The call's `method` argument.
  * @returns The method as the tool calls it: trimmed, with one leading `client.` dropped.
  * @throws When the name is empty, private, not a method's shape, or cannot work over JSON; the message says what to call instead.
  */
@@ -151,7 +134,6 @@ function methodName(raw: unknown): string {
 /**
  * Finds the function a checked name points at, and the object it must be called on.
  *
- * @param client - The connected client.
  * @param method - A name `methodName` passed.
  * @returns The object that holds the method (the client or a sub-client) and the method.
  * @throws When the name does not resolve to a client method.
@@ -189,10 +171,6 @@ function paramsOf(raw: unknown): unknown[] {
  * so the user's unsaved edits are what runs. For `deploy.add`, a pipe without
  * a name or project id is refused here, before the registry sees it.
  *
- * @param method - The checked method name.
- * @param params - The method's arguments.
- * @param vfs - The run's workspace view.
- * @returns The arguments to call the method with.
  * @throws When the file cannot be read, or `deploy.add`'s pipeline has no name or project id; the message says how to fix it.
  */
 async function withPipelineFile(method: string, params: unknown[], vfs: IWorkspaceFileSystem): Promise<unknown[]> {
@@ -224,7 +202,6 @@ async function withPipelineFile(method: string, params: unknown[], vfs: IWorkspa
  * instances. A class instance such as a data pipe holds the client, and
  * printing it would print the client's key.
  *
- * @param value - Any value.
  * @returns True for primitives, null, undefined, and arrays and plain objects of those.
  */
 function isPlainData(value: unknown): boolean {
@@ -258,14 +235,9 @@ function serviceLine(service: JsonObject): string {
 }
 
 /**
- * The engine's catalog made fit to read. The SVG icon table alone is far over
- * the result limit, so it goes. When the rest still does not fit, which is the
- * usual case, each service is cut to one line: its category and a summary. One
- * line each keeps the whole list well inside the limit, so no service drops
- * off the end.
- *
- * @param result - What `getServices()` returned.
- * @returns The catalog without icons, or the trimmed catalog.
+ * The engine's catalog made fit to read: the SVG icon table goes (it alone is far over the result
+ * limit), and when the rest still does not fit, each service is cut to its category and summary so
+ * no service drops off the end.
  */
 function catalogOf(result: unknown): unknown {
 	if (!isJsonObject(result)) return result;
@@ -282,8 +254,6 @@ function catalogOf(result: unknown): unknown {
 /**
  * Turns a method's result into the text the tool returns.
  *
- * @param method - The checked method name.
- * @param result - What the method returned.
  * @param hide - Hides the values the run's file tools hid, before the cut.
  * @returns The result as JSON, secrets stripped and clipped, with the exceptions in the module comment.
  * @throws When the result is a live object, which cannot be shown as JSON.
@@ -325,9 +295,6 @@ export class RocketRideClientToolkit extends AgentToolkit {
 	/**
 	 * Builds the toolkit.
 	 *
-	 * @param client - The host's client getter.
-	 * @param vfs - The workspace view.
-	 * @param hide - Hides the values the run's file tools hid, before a result is cut.
 	 * @param runs - The run ledger, when the run keeps one.
 	 */
 	constructor(client: ClientGetter, vfs: IWorkspaceFileSystem, hide = (text: string): string => text, runs?: Pick<RunLedger, 'afterCall'>) {
@@ -338,11 +305,6 @@ export class RocketRideClientToolkit extends AgentToolkit {
 		this.runs = runs;
 	}
 
-	/**
-	 * The one client tool.
-	 *
-	 * @returns The group's tools.
-	 */
 	tools(): AgentTool[] {
 		return [
 			new AgentTool({
@@ -363,12 +325,9 @@ export class RocketRideClientToolkit extends AgentToolkit {
 	}
 
 	/**
-	 * Gets a call ready: checks the name, reads the arguments, and names the
-	 * exact call as the act, so the approval list rates it before the client
-	 * is touched. The run makes the call and shapes its result.
-	 *
-	 * @param args - The tool arguments: `method`, and `params` when the method takes any.
-	 * @returns The step: the method and its final arguments, and the run that calls it.
+	 * Gets a call ready and names the exact call as the act, so the approval list rates it before the
+	 * client is touched; the run makes the call.
+	 * @param args - `method`, and `params` when the method takes any.
 	 * @throws When the call can't be made; the message says how to fix it.
 	 */
 	private async prepareCall(args: Record<string, unknown>): Promise<ToolStep> {

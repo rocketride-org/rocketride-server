@@ -25,40 +25,13 @@
 // =============================================================================
 
 /**
- * The agent's filesystem toolkit, host-agnostic by construction. The HOST
- * creates it with:
- *
- *   - the workspace view (IWorkspaceFileSystem) the agent works on (the host's
- *     backend defines the namespace, performs any path translation to real
- *     storage, announces changes, and enforces structural rules such as
- *     protected roots), and
- *   - the instructions that teach the LLM what that tree contains and how
- *     to work in it (layout, entity kinds, conventions).
- *
- * This file knows NOTHING about any particular workspace layout, beyond
- * leaving the read-only .rocketride/ guides out of a whole-workspace search
- * (a search that starts inside it still reaches them). What it
- * provides: whole-and-partial reads served from the cache, anchored
- * edit_file updates, dirty-overlay protection (reads see unsaved editor
- * buffers; a mutation of a path the user holds dirty asks the user first
- * and is refused when they keep their changes), read-before-edit (an edit
- * or overwrite is refused unless the file was read this run; an overwrite of
- * a file that changed since is refused, and an edit of one applies only
- * when its anchor still matches once), content search, and generic path
- * hygiene (traversal and store-illegal characters are refused here with
- * LLM-readable errors — backends still validate again).
- *
- * Each change also goes into the run's Undo record (./undo.ts): the content
- * at the path's first touch, and what the change left. A delete or a rename
- * reads the content first, for it; a delete of a path with nothing staged
- * reads the server's copy afresh.
- *
- * Reads and searches show a `«secret:<id>»` marker in place of each secret
- * value, and writes and edits put the value back (./secretMarkers.ts). The
- * server's guides under .rocketride/ show as served.
- *
- * Tool results are strings fed straight back to the LLM; structured
- * results are JSON.
+ * The agent's file tools over a host-supplied workspace view. The host's backend
+ * owns the namespace, path translation, change announcements and layout rules;
+ * this file knows no layout beyond skipping the read-only .rocketride/ guides in
+ * a whole-workspace search. A mutation of a path the user holds dirty asks first;
+ * an edit or overwrite needs a read this run. Each change goes into the run's Undo
+ * record (./undo.ts); reads show `«secret:<id>»` markers that writes put back
+ * (./secretMarkers.ts).
  */
 
 import { sha256Hex } from '../../vfs/hash';
@@ -76,9 +49,7 @@ import { UndoRecord } from './undo';
 // CONSTANTS — caps and hygiene
 // =============================================================================
 
-/** Default read cap in bytes. */
 const READ_DEFAULT_BYTES = 256 * 1024;
-/** Hard read cap in bytes. */
 const READ_MAX_BYTES = 4 * 1024 * 1024;
 /** Hard write cap in bytes — one whole-file write per call. */
 const WRITE_MAX_BYTES = 4 * 1024 * 1024;
@@ -90,7 +61,6 @@ export const AGENT_ORIGIN = 'agent';
 const SEARCH_MAX_FILES = 2000;
 /** search_files: per-file content ceiling (longer content is skipped). */
 const SEARCH_MAX_FILE_CHARS = 256 * 1024;
-/** search_files: files fetched per batched read. */
 const SEARCH_READ_BATCH = 50;
 /** search_files: default and hard caps on returned matches. */
 const SEARCH_DEFAULT_RESULTS = 50;
@@ -105,13 +75,7 @@ const TEXT_EXTENSIONS = new Set(['ts', 'tsx', 'js', 'jsx', 'json', 'pipe', 'md',
 /** Printable characters the platform store refuses in paths (client-side mirror). */
 const INVALID_PRINTABLE_CHARS = /[*?<>|"]/;
 
-/**
- * Whether a path holds a store-illegal character. C0 controls are checked by
- * char code — a control range inside a regex trips eslint's no-control-regex.
- *
- * @param p - The cleaned path.
- * @returns True when the store would refuse it.
- */
+/** C0 controls are checked by char code: a control-range regex trips eslint's no-control-regex. */
 function hasInvalidPathChar(p: string): boolean {
 	if (INVALID_PRINTABLE_CHARS.test(p)) return true;
 	for (let i = 0; i < p.length; i += 1) {
@@ -127,7 +91,6 @@ const FILESYSTEM_INSTRUCTIONS = `File tools operate on the workspace virtual fil
 - Reads see the user's unsaved editor buffers. Changing a file with unsaved changes asks the user first; if they keep their changes, the call is refused: ask them how to proceed instead of retrying.
 - Truncated reads are always labeled; use offset/limit to window large files cheaply.`;
 
-/** The title of the dialog that asks about unsaved changes. */
 const UNSAVED_TITLE = 'Unsaved changes';
 
 // =============================================================================
@@ -140,7 +103,6 @@ const UNSAVED_TITLE = 'Unsaved changes';
  * layer only refuses what no backend could accept, with messages the LLM
  * can act on.
  *
- * @param raw - The path exactly as the LLM supplied it.
  * @param allowRoot - Whether '' (the tree root) is acceptable.
  * @returns The canonical path ('' only when allowRoot).
  */
@@ -189,10 +151,8 @@ function unasked(dirty: string[]): string {
 }
 
 /**
- * A call that changed nothing throws RefusedError, so the finish rule does
- * not count it. One in which the user's own save landed or sent a write,
- * even when it or a later save then failed, throws a plain Error: the file
- * may have changed during the run, so it still needs its check.
+ * A call that changed nothing throws RefusedError, which the finish rule skips. One where a user
+ * save landed or sent a write throws a plain Error: the file may have changed, so it needs its check.
  */
 function refusal(message: string, changed: boolean): Error {
 	return changed ? new Error(message) : new RefusedError(message);
@@ -202,11 +162,7 @@ function refusal(message: string, changed: boolean): Error {
 // FILESYSTEM TOOLKIT
 // =============================================================================
 
-/**
- * Generic file tools over a host-supplied workspace view. The host passes the
- * instructions that describe ITS tree; they are appended to the built-in
- * file-tool doctrine so the LLM gets both the mechanics and the map.
- */
+/** File tools over a host-supplied workspace view, plus the host's instructions for its tree. */
 export class FilesystemTools extends AgentToolkit {
 	readonly name = 'filesystem';
 	readonly instructions: string;
@@ -223,24 +179,16 @@ export class FilesystemTools extends AgentToolkit {
 	/** The secret values this run's reads hid, each with its marker; writes put them back. */
 	readonly secrets = new SecretMarkers();
 
-	/** The host's after-save hook, if any. */
 	private readonly afterSave?: (path: string) => Promise<string>;
 
 	private readonly unsaved?: UnsavedOptions;
 
 	/**
-	 * Builds the toolkit for one agent.
-	 *
-	 * @param vfs - The host's workspace view. Pass the SAME instance the host's
-	 *   editors register overlays on, so agent reads see unsaved buffers
-	 *   and the dirty guard protects them.
-	 * @param instructions - Host guidance for the LLM: what the tree
-	 *   contains, layout conventions, entity anatomy. Appended to the
-	 *   generic file-tool doctrine.
-	 * @param afterSave - Optional host hook, called with the canonical path
-	 *   after each write_file or edit_file save that worked; the text it
-	 *   returns is appended to the tool result. What it does with the path is
-	 *   the host's business: this toolkit stays layout-agnostic.
+	 * @param vfs - The host's workspace view: the SAME instance its editors register
+	 *   overlays on, so agent reads see unsaved buffers and the dirty guard protects them.
+	 * @param instructions - Host guidance on what the tree holds.
+	 * @param afterSave - Called with the canonical path after each save that worked;
+	 *   its text is appended to the tool result.
 	 * @param unsaved - How to ask about unsaved changes; without it a dirty path is refused.
 	 */
 	constructor(vfs: IWorkspaceFileSystem, instructions = '', afterSave?: (path: string) => Promise<string>, unsaved?: UnsavedOptions) {
@@ -276,11 +224,8 @@ export class FilesystemTools extends AgentToolkit {
 	}
 
 	/**
-	 * Settles the user's unsaved changes before a mutation: their editors save
-	 * first or drop their changes, or the call is refused. With no way to ask,
-	 * or no editor for a dirty path, it is refused with no question.
-	 *
-	 * @returns What the user chose and the dirty paths it covered, or null when nothing was dirty.
+	 * Settles the user's unsaved changes before a mutation: their editors save or drop them, or the call is
+	 * refused (always, with no way to ask or no editor). Returns null when nothing was dirty.
 	 */
 	private async settleUnsaved(paths: string[], op: string, action: string): Promise<{ choice: 'save' | 'discard'; dirty: string[] } | null> {
 		const dirty = this.dirtyUnder(paths);
@@ -326,11 +271,9 @@ export class FilesystemTools extends AgentToolkit {
 	}
 
 	/**
-	 * Writes a file at the version it was computed from. The dirty check and
-	 * the view's version check run in one synchronous block. When the server's
-	 * copy moved on since the page read it (another tab, a teammate), the
-	 * cached copy is dropped, so the agent's next read gets the server's copy.
-	 * `before` is what the file held at `expect` (null for no file), for Undo.
+	 * Writes a file at the version it was computed from; the dirty and version checks share one synchronous
+	 * block. If the server's copy moved on, the cache is dropped so the next read gets it. `before` is the
+	 * content at `expect` (null for no file), for Undo.
 	 */
 	private async writeAt(path: string, content: string, expect: number, before: string | null, op: string, existed: boolean, saved = false): Promise<number> {
 		this.refuseDirty([path], op, saved);
@@ -354,14 +297,9 @@ export class FilesystemTools extends AgentToolkit {
 	}
 
 	/**
-	 * A file's content as Undo keeps it. Undo puts back text only, so a file
-	 * that is not text makes the turn one that cannot be undone. The store
-	 * decodes every file as UTF-8, so such a file still reads as a string,
-	 * with U+FFFD where its bytes were not UTF-8, or with NUL characters.
-	 * Written back, that string would not be the file's bytes.
-	 *
-	 * @param content - What a read returned.
-	 * @returns The text, or null when it is not text.
+	 * Undo puts back text only. The store decodes every file as UTF-8, so a binary file still reads as a
+	 * string (U+FFFD or NUL characters) that would not write back as its bytes; null marks it, and the turn
+	 * cannot be undone.
 	 */
 	private undoText(content: unknown): string | null {
 		if (typeof content === 'string' && !content.includes('\0') && !content.includes('\uFFFD')) return content;
@@ -369,27 +307,13 @@ export class FilesystemTools extends AgentToolkit {
 		return null;
 	}
 
-	/**
-	 * The entry kind of a path, forcing the lazy tree load first so a null
-	 * answer reliably means "does not exist".
-	 *
-	 * @param path - Canonical path.
-	 * @returns 'file' | 'dir' | null.
-	 */
+	/** The entry kind of a path from `vfs.stat`, which forces no tree load. */
 	private async entryType(path: string): Promise<'file' | 'dir' | null> {
-		// step: stat() is the view contract's definitive answer — it consults
-		// the backend when the cached inventory can't; entryType() alone only
-		// reads the cache, which scoped/staged views don't promise to fill
+		// step: stat() asks the backend when the cache can't; scoped/staged views don't promise to fill the cache
 		return this.vfs.stat(path);
 	}
 
-	/**
-	 * The host's note for a save that worked. A hook that throws adds
-	 * nothing: the save already happened, so it must never fail the save.
-	 *
-	 * @param path - Canonical path of the saved file.
-	 * @returns The text to append to the save's result ('' without a hook).
-	 */
+	/** The host's note for a save that worked; a throwing hook adds nothing, since the save already happened. */
 	private async noteAfterSave(path: string): Promise<string> {
 		if (!this.afterSave) return '';
 		try {
@@ -400,28 +324,17 @@ export class FilesystemTools extends AgentToolkit {
 	}
 
 	/**
-	 * A file's text as the model sees it: each secret value as its marker, and
-	 * the note a read ends with. A guide under .rocketride/ is the server's
-	 * text, not the user's, and no editor or tool can change it, so it shows
-	 * as served: its examples stay whole, with no note to move them to
-	 * Variables. Every tool result still passes through redactText
-	 * (wave/loop.ts).
-	 *
-	 * @param path - Canonical path.
-	 * @param text - The file's full content.
-	 * @returns The text to show, and the note ('' when nothing was hidden).
+	 * A file's text as the model sees it: secret values as markers, plus the read's note. Guides under
+	 * .rocketride/ are server text no tool can change, so they show as served. Every tool result still
+	 * passes through redactText.
 	 */
 	private shown(path: string, text: string): { text: string; note: string } {
 		return isReferencePath(path) ? { text, note: '' } : this.secrets.hide(path, text);
 	}
 
 	/**
-	 * Recursively collects searchable files under a directory, honoring the
-	 * skip list, the text-extension filter, and the file budget. A search of
-	 * the whole workspace skips the root's .rocketride/ guides.
-	 *
-	 * @param dir - Canonical directory ('' for the root).
-	 * @param out - Accumulator of file paths.
+	 * Collects searchable files under a directory ('' for the root) within the skip list, text-extension
+	 * filter and file budget. A whole-workspace search skips the root's .rocketride/ guides.
 	 */
 	private async collectSearchFiles(dir: string, out: string[]): Promise<void> {
 		if (out.length >= SEARCH_MAX_FILES) return;
@@ -446,7 +359,6 @@ export class FilesystemTools extends AgentToolkit {
 	 * nothing after the first read; overlays win over the cache so unsaved
 	 * buffers are what the agent sees.
 	 *
-	 * @param rawPath - Agent-supplied path.
 	 * @param maxBytes - Optional byte cap (clamped to READ_MAX_BYTES).
 	 * @param offset - Optional 1-based first line of a partial read.
 	 * @param limit - Optional line count of a partial read.
@@ -490,10 +402,6 @@ export class FilesystemTools extends AgentToolkit {
 	 * write_file: whole-file replacement through the VFS. A new file needs no
 	 * read; replacing an existing one follows the read-before-edit rule, and
 	 * is refused when the file changed since the run last saw it.
-	 *
-	 * @param rawPath - Agent-supplied path.
-	 * @param content - The complete new file content.
-	 * @returns A confirmation the LLM can act on.
 	 */
 	private async writeFile(rawPath: unknown, content: string): Promise<string> {
 		const path = normalizePath(rawPath);
@@ -526,9 +434,7 @@ export class FilesystemTools extends AgentToolkit {
 	 * and when the anchor is missing or ambiguous, with recovery guidance in
 	 * the error.
 	 *
-	 * @param rawPath - Agent-supplied path.
 	 * @param oldString - Exact text to replace.
-	 * @param newString - The replacement text.
 	 * @param replaceAll - Replace every occurrence instead of requiring uniqueness.
 	 * @returns A confirmation naming the occurrence count.
 	 */
@@ -595,7 +501,6 @@ export class FilesystemTools extends AgentToolkit {
 	/**
 	 * stat_file: existence and kind from the cached inventory.
 	 *
-	 * @param rawPath - Agent-supplied path.
 	 * @returns JSON {exists, type?}.
 	 */
 	private async statFile(rawPath: unknown): Promise<string> {
@@ -669,10 +574,6 @@ export class FilesystemTools extends AgentToolkit {
 	/**
 	 * rename: move within the tree; the backend enforces any structural
 	 * rules about what may move where.
-	 *
-	 * @param rawOld - Current agent-supplied path.
-	 * @param rawNew - Target agent-supplied path.
-	 * @returns A confirmation line.
 	 */
 	private async rename(rawOld: unknown, rawNew: unknown): Promise<string> {
 		const oldPath = normalizePath(rawOld);
@@ -708,8 +609,6 @@ export class FilesystemTools extends AgentToolkit {
 	 * What both ends of a rename hold before it, for Undo. A folder's move
 	 * cannot be undone, and neither can a move onto a folder.
 	 *
-	 * @param oldPath - Canonical source.
-	 * @param newPath - Canonical target.
 	 * @returns Each end's content (null for no file) and the version it was read at; null when Undo cannot cover the rename.
 	 */
 	private async undoEnds(oldPath: string, newPath: string): Promise<{ old: { content: string; version: number }; new: { content: string | null; version: number } } | null> {
@@ -724,12 +623,6 @@ export class FilesystemTools extends AgentToolkit {
 		return { old: { content, version: source.version }, new: { content: replaced, version: target.version } };
 	}
 
-	/**
-	 * create_directory: mkdir through the VFS.
-	 *
-	 * @param rawPath - Agent-supplied directory path.
-	 * @returns A confirmation line.
-	 */
 	private async createDirectory(rawPath: unknown): Promise<string> {
 		const path = normalizePath(rawPath);
 		await this.vfs.mkdir(path, AGENT_ORIGIN);
@@ -737,18 +630,10 @@ export class FilesystemTools extends AgentToolkit {
 	}
 
 	/**
-	 * delete_file, made ready: remove a file, or a directory when recursive is
-	 * true. The checks run here, and the act names the target for the approval
-	 * list, since a delete does not go through the client. The tree root and
-	 * paths the view refuses, such as the read-only .rocketride/, are refused
-	 * here, before the user is asked; protected roots inside the tree are the
-	 * backend's rule to enforce. Unsaved changes are asked about in the run,
-	 * after the card, since a prepare only reads and Save mine first or
-	 * Discard mine changes the file.
-	 *
-	 * @param rawPath - Agent-supplied path.
+	 * delete_file, made ready. The act names the target for the approval list, since a delete does not go
+	 * through the client. The root and paths the view refuses are refused before the user is asked; unsaved
+	 * changes are asked about in the run, after the card, because a prepare only reads.
 	 * @param recursive - Required true to remove a directory and its contents.
-	 * @returns The step: the act `delete_file [path, type]`, and the run that deletes and returns a confirmation line.
 	 */
 	private async prepareDelete(rawPath: unknown, recursive: boolean): Promise<ToolStep> {
 		const path = normalizePath(rawPath);
@@ -768,9 +653,7 @@ export class FilesystemTools extends AgentToolkit {
 	/**
 	 * delete_file's run, once its act is let through.
 	 *
-	 * @param path - Canonical path.
 	 * @param type - What the prepare found there.
-	 * @returns A confirmation line.
 	 */
 	private async deleteNow(path: string, type: 'file' | 'dir'): Promise<string> {
 		// step: the user may have typed while the card waited
@@ -801,14 +684,8 @@ export class FilesystemTools extends AgentToolkit {
 	}
 
 	/**
-	 * What a delete of a file replaces, for Undo. A path whose change is
-	 * still staged replaces its staged content. Any other path is read afresh
-	 * from the server, as the cached copy may be older than a teammate's
-	 * change, which a delete in auto mode removes too. The Undo record
-	 * compares it with what the agent's last change of the path left.
-	 *
-	 * @param path - Canonical path of a file.
-	 * @returns The content and the version it was read at.
+	 * What a delete of a file replaces, for Undo: the staged content while the change is staged, otherwise
+	 * the server's copy read afresh, since the cache may predate a teammate's change.
 	 */
 	private async deletedContent(path: string): Promise<{ content: unknown; version: number }> {
 		const staged = this.vfs.changedPaths?.().has(path) === true;
@@ -828,12 +705,6 @@ export class FilesystemTools extends AgentToolkit {
 		return this.tracker.seen();
 	}
 
-	/**
-	 * The filesystem tool set — all tools, full access to the tree the
-	 * host's VFS presents.
-	 *
-	 * @returns The group's tools.
-	 */
 	tools(): AgentTool[] {
 		return [
 			new AgentTool({

@@ -49,10 +49,8 @@ function extractTextFromResult(result: PIPELINE_RESULT): TextResult[] {
 type Transport = { client: any; authToken: string };
 
 /**
- * The built-in chat call, used when the host injects no `request`. It sends
- * the question with the last six non-system, non-status rows as history and
- * adds one status row per server-sent event. It does not race the turn's
- * signal: the stop grace closes a stopped built-in turn.
+ * The built-in chat call, used when the host injects no `request`. It does not race the turn's signal: the
+ * stop grace closes a stopped built-in turn.
  */
 function builtInRequest(transport: { current: Transport }): ChatRequest {
 	return async (text, onStatus, turn) => {

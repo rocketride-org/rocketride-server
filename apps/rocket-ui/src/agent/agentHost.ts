@@ -25,12 +25,8 @@
 // =============================================================================
 
 /**
- * The agent lives in shared code and cannot import rocket-ui, so rocket-ui
- * builds its AgentHost here and installs it right after the workspace is
- * created: the workspace view (whose read-only .rocketride/ holds the
- * guides), the New App scaffold, the deploy packer, the open apps' dev
- * sessions, the user's approval settings and turn limits, the open editors,
- * and the opener a turn card's file links use.
+ * The agent lives in shared code and cannot import rocket-ui, so rocket-ui builds its AgentHost
+ * here and installs it right after the workspace is created.
  */
 
 import type { RocketRideClient } from 'shell';
@@ -54,12 +50,7 @@ const WIZARD_FRAME: FrameOptions = { sidebar: false, statusFooter: false, docTab
 // DEV SESSIONS
 // =============================================================================
 
-/**
- * Narrows a dev session to what the agent may use.
- *
- * @param session - The open session.
- * @returns The agent's view of it.
- */
+/** Narrows a dev session to what the agent may use. */
 function agentDevSession(session: WebDevSession): AgentDevSession {
 	return {
 		appId: session.appId,
@@ -88,12 +79,8 @@ const APPROVAL_KEYS: Readonly<Record<'mode' | Grant, string>> = {
 type SettingWriter = (key: string, value: string | boolean) => void;
 
 /**
- * The agent's approval settings in the effective settings. Anything but
- * 'auto' reads as Ask, and anything but true as no grant, so a missing or
- * garbled value fails safe.
- *
- * @param settings - The effective workspace settings.
- * @returns The mode and grants.
+ * The agent's approval settings: anything but 'auto' reads as Ask, and anything but true as no
+ * grant, so a missing or garbled value fails safe.
  */
 function approvalPrefsOf(settings: Readonly<Record<string, unknown>>): ApprovalPrefs {
 	return {
@@ -102,16 +89,13 @@ function approvalPrefsOf(settings: Readonly<Record<string, unknown>>): ApprovalP
 	};
 }
 
-/** Whether two sets of prefs say the same. */
 function samePrefs(a: ApprovalPrefs, b: ApprovalPrefs): boolean {
 	return a.mode === b.mode && a.grants.schedules === b.grants.schedules && a.grants.deploymentToggles === b.grants.deploymentToggles;
 }
 
 /**
- * The user's approval settings for every agent chat in the page. RocketApp
- * pushes the workspace settings in on every change, as it does autoCommit,
- * and a write goes out to the settings file and comes back through the next
- * push, so the settings file is the one source.
+ * The user's approval settings for every agent chat in the page. A write goes to the settings file
+ * and comes back through RocketApp's next push, so the file is the one source.
  */
 class ApprovalFeed {
 	private prefs: ApprovalPrefs = approvalPrefsOf({});
@@ -133,13 +117,7 @@ class ApprovalFeed {
 	/** What the chat's mode switch gets. */
 	readonly controls: ApprovalControls = { ...this.run, setMode: (mode) => this.write?.(APPROVAL_KEYS.mode, mode) };
 
-	/**
-	 * Takes the settings as they now stand. Settings that say the same change
-	 * nothing and tell no one, so RocketApp may push on every settings change.
-	 *
-	 * @param settings - The effective workspace settings.
-	 * @param write - Writes one setting.
-	 */
+	/** Takes the settings as they now stand; unchanged settings tell no one, so RocketApp may push on every change. */
 	push(settings: Readonly<Record<string, unknown>>, write: SettingWriter): void {
 		this.write = write;
 		const next = approvalPrefsOf(settings);
@@ -162,14 +140,7 @@ const LIMIT_KEYS: Readonly<Record<keyof AgentLimits, string>> = {
 	costUsd: 'rocketride.pipeBuilder.agentCostLimit',
 };
 
-/**
- * One limit in the effective settings. A missing, negative or garbled value
- * reads as the default, so the limit fails safe.
- *
- * @param settings - The effective workspace settings.
- * @param key - Which limit.
- * @returns The limit; 0 means off.
- */
+/** One limit (0 means off); a missing, negative or garbled value reads as the default, so it fails safe. */
 function limitOf(settings: Readonly<Record<string, unknown>>, key: keyof AgentLimits): number {
 	const value = settings[LIMIT_KEYS[key]];
 	return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : DEFAULT_LIMITS[key];
@@ -181,9 +152,6 @@ let limits: AgentLimits = DEFAULT_LIMITS;
 /**
  * Pushes the workspace settings into the agent's approvals and limits.
  * RocketApp calls it on every settings change.
- *
- * @param settings - The effective workspace settings.
- * @param write - Writes one setting (the workspace's updateSetting).
  */
 export function feedApprovalSettings(settings: Readonly<Record<string, unknown>>, write: SettingWriter): void {
 	approvalFeed.push(settings, write);

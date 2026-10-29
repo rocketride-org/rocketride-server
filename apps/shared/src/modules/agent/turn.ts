@@ -25,13 +25,9 @@
 // =============================================================================
 
 /**
- * Every turn ends with one TurnResult: runAgent builds it, agent() and
- * AgentSession.execute hand it back, and the session file keeps it (version
- * 2), linked to the turn's bot row. The chat shows it as the card under that
- * row (`turnCard`), so a reload shows the same card.
- *
- * Text in a result has passed through redactText (`redactDeep`), like the
- * rows of the session file.
+ * Every turn ends with one TurnResult. The session file keeps it linked to the turn's bot row, and the chat
+ * shows it as the card under that row (`turnCard`), so a reload shows the same card. Its text has passed
+ * through `redactDeep`.
  */
 
 import type { ChatMessage } from 'shell';
@@ -58,7 +54,6 @@ export type TurnReason = 'done' | 'needs_input' | 'empty_plan' | 'error' | 'stop
 export interface TurnFile {
 	/** The workspace path; for a rename, where the file is now. */
 	path: string;
-	/** What the turn did to it. */
 	change: 'added' | 'modified' | 'deleted' | 'renamed';
 	/** Where a renamed file came from. */
 	from?: string;
@@ -116,11 +111,8 @@ export interface NeedsInputRequest {
  * runs are the conversation's own.
  */
 export interface RunRecord {
-	/** The run token. */
 	token: string;
-	/** The engine's project_id for it. */
 	projectId: string;
-	/** The engine's source for it. */
 	source: string;
 	/** The engine's startTime for it (Unix seconds). A later run on the same token starts at another time. */
 	startTime: number;
@@ -132,7 +124,6 @@ export interface RunRecord {
 
 /** How one turn ended. */
 export interface TurnResult {
-	/** This turn's id. */
 	turnId: string;
 	/** The id of the chat row that closes the turn (its answer, its error, or the stop row), once the session has linked it. */
 	messageId?: number;
@@ -173,7 +164,6 @@ export type TurnCardAction = { kind: 'file'; path: string } | { kind: 'action'; 
 /**
  * The outcome a loop stop reason stands for.
  *
- * @param reason - How the loop ended.
  * @returns done when the finish rule accepted the answer; needs_input when ask_user ended the turn or a limit paused it; stopped for Stop; failed when the model could not be reached; incomplete when its replies stayed unusable.
  */
 export function outcomeOf(reason: 'done' | 'needs_input' | 'empty_plan' | 'error' | 'stopped' | 'limited' | 'cost_limit'): TurnOutcome {
@@ -196,12 +186,6 @@ export function outcomeOf(reason: 'done' | 'needs_input' | 'empty_plan' | 'error
 /**
  * The result of a turn that threw before it could build its own: a refused
  * message, or a model that failed before the run gathered anything.
- *
- * @param turnId - The turn's id.
- * @param error - What was thrown.
- * @param refused - Whether the session refused the message before any run started.
- * @param scopeKey - The scope the turn was in.
- * @returns The failed result.
  */
 export function failedTurn(turnId: string, error: unknown, refused: boolean, scopeKey?: string): TurnResult {
 	const message = error instanceof Error ? error.message : String(error);
@@ -222,7 +206,6 @@ export function failedTurn(turnId: string, error: unknown, refused: boolean, sco
 export class TurnError extends Error {
 	/**
 	 * @param message - What the chat shows.
-	 * @param turn - The turn's result.
 	 */
 	constructor(
 		message: string,
@@ -239,7 +222,6 @@ export class TurnError extends Error {
  * readable for the ownership check.
  *
  * @param value - A turn result, card or run record.
- * @returns The copy.
  */
 export function redactDeep<T>(value: T): T {
 	if (typeof value === 'string') return redactText(value) as T;
@@ -284,9 +266,6 @@ export function choiceAction(index: number): string {
  *
  * Files the turn left in place are links; deleted ones are lines. A turn
  * whose model has no price says so, since the cost limit does not apply.
- *
- * @param turn - The turn.
- * @returns The card.
  */
 export function turnCard(turn: TurnResult): TurnCard {
 	const files = turn.files.filter((f) => f.change !== 'deleted').map((f) => f.path);
@@ -319,7 +298,6 @@ export function turnCard(turn: TurnResult): TurnCard {
 /**
  * What a turn's usage shows in its row's meta line.
  *
- * @param usage - The turn's usage.
  * @returns "~$0.42 est., not counting thinking", or the tokens for a model with no price; '' when nothing was counted.
  */
 export function usageMeta(usage: TurnUsage): string {

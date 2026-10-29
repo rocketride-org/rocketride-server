@@ -275,7 +275,6 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 		// step: restored pending changes refuse auto mode — prompt the user
 		if (ws.pendingBlocksAuto) setModeSwitchBlocked(true);
 
-		// Content adapter for pipeline documents (see createDocumentsVfs)
 		const vfs = createDocumentsVfs(client);
 
 		// Create the instance — both App and Sidebar will use it

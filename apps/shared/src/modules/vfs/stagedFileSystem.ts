@@ -47,31 +47,14 @@
  *   - An optional staging store persists layers (content-addressed blobs +
  *     manifest); persistence completes before the change tick fires —
  *     persistence IS the save.
- *   - Every path has a version (see version()). A mutation counts when it
- *     is called, then waits its turn behind the path's pending mutations;
- *     reads wait for them too, up to a time limit. A write that names an
- *     older version (`expect`) is refused. So is one that names a version
- *     when a discard called before it drops its path only once it runs (a
- *     commit before the discard met a conflict, so it did not carry the path).
- *   - commit(), undoTurn(), discard(), rollback() and discardPath() run in
- *     call order, each after every mutation called before it. A commit
- *     carries what was staged before it was called: it freezes those layers,
- *     a write meanwhile opens a working layer above them, and only the frozen
- *     layers are swept. It counts no version and holds no read, since what
- *     the view serves does not change.
- *   - A rename is refused while an editor holds unsaved changes at or under
- *     its source.
- *   - A server read that one of the view's own changes to the base overtook
- *     may hold the file as it was before the change, so the view reads it
- *     again. An invalidate counts the same way.
- *   - An invalidate keeps the copy it drops: a read that then takes in a
- *     different server copy counts a version, and until a read does, the
- *     dropped copy guards the next write-through save.
- *   - The base's cache holds only the server's copy: prime() takes no
- *     content, since a caller's content may be an editor's buffer or staged
- *     content. A staged entry's conflict anchor is the cached copy the page
- *     read, so a commit over a server copy that moved on since then (another
- *     tab, a teammate) meets a conflict.
+ *   - Every path has a version (see version()). Mutations count at their call
+ *     and run in call order per path; reads wait for them, up to a time limit.
+ *     A write whose `expect` names an older version is refused.
+ *   - commit(), undoTurn(), discard(), rollback() and discardPath() run in call
+ *     order, after every mutation called before them. A commit carries only what
+ *     was staged before its call; a write meanwhile lands in a layer above.
+ *   - The base's cache holds only the server's copy, so a staged entry's
+ *     conflict anchor is the copy this page read.
  *
  * Staged content is text-only (the cloud workspace tools are text-only);
  * binary paths flow through untouched in write-through mode only.
@@ -140,10 +123,8 @@ export interface Layer {
 }
 
 /**
- * A write refused because its `expect` names an older version than the
- * path's: something in this page changed the file after the writer read it.
- * It is a StaleWriteError, so a caller that handles the server's refusal
- * handles this one too.
+ * A write refused because its `expect` names an older version than the path's:
+ * something in this page changed the file after the writer read it.
  */
 export class StaleVersionError extends StaleWriteError {
 	readonly expected: number;
@@ -184,10 +165,8 @@ export interface StagedFileSystemOptions {
 	 */
 	writeThrough?: boolean;
 	/**
-	 * How long a read waits for the pending mutations of its paths, and a
-	 * commit, undo, discard or rollback for the calls before it, in ms
-	 * (default WAIT_MS). A backend write that never answers then fails them
-	 * with a clear error instead of holding them forever.
+	 * Max ms a read or staging operation waits for the calls before it (default
+	 * WAIT_MS), so a backend write that never answers fails instead of hanging.
 	 */
 	waitMs?: number;
 	/**
@@ -199,10 +178,8 @@ export interface StagedFileSystemOptions {
 	 */
 	onMutate?: (path: string, origin?: string) => void;
 	/**
-	 * The paths the view refuses to change: throws for one. Runs first in
-	 * write, delete, mkdir and both ends of rename, in both modes, before
-	 * anything is staged. Manual mode stages without asking the backend, so
-	 * a backend-only rule would let a write stage and then fail at commit.
+	 * Throws for a path the view refuses to change. Runs before anything is staged, in
+	 * both modes: manual mode never asks the backend, so a backend rule would fail at commit.
 	 */
 	assertWritable?: (path: string) => void;
 }
@@ -395,10 +372,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	private effectiveCache = new Map<string, LayerEntry | 'gone' | null>();
 
 	/**
-	 * The working layer for staged mutation `seq` (0 for the top layer as it
-	 * stands): the top layer, unless it is committed or frozen, or holds what
-	 * a commit called before `seq` will carry. Then the mutation opens one
-	 * above, so the commit carries those entries whole (see holdBack).
+	 * The working layer for staged mutation `seq`: the top layer, unless it is committed,
+	 * frozen, or holds what an earlier-called commit carries; then a new one above (see holdBack).
 	 */
 	private openLayer(seq = 0): Layer | null {
 		const last = this.layerStack[this.layerStack.length - 1];
@@ -581,11 +556,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	/**
-	 * Runs one mutation in its turn. Its paths are counted now, in the
-	 * caller's synchronous block, so whoever read them before is stale from
-	 * this moment; the work starts once the pending mutations of its paths
-	 * (or `opts.after`) settle, and gets its staging number (0 for others). A
-	 * mutation that fails counts again, since what it left behind is unknown.
+	 * Runs one mutation in its turn. Its paths count now, in the caller's synchronous block,
+	 * so earlier readers are stale at once; a mutation that fails counts again (its effect is unknown).
 	 */
 	private mutate<T>(paths: string[], origin: string | undefined, work: (seq: number) => Promise<T>, opts: MutateOptions = {}): Promise<T> {
 		const own = [...new Set(paths)];
@@ -621,11 +593,7 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		});
 	}
 
-	/**
-	 * Waits for some pending calls (a path, or null for the staging operation
-	 * before it) up to the time limit, so a backend call that never answers
-	 * fails the waiting operation with a clear error.
-	 */
+	/** Waits for some pending calls (a path, or null for the staging operation before it), up to the time limit. */
 	private async waitInTurn(what: string, waits: Array<[string | null, Promise<unknown>]>): Promise<void> {
 		const open = new Set(waits);
 		for (const wait of waits) void wait[1].then(() => open.delete(wait));
@@ -655,12 +623,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	/**
-	 * Drops staged changes in their turn, as a mutation of `paths` (the root
-	 * for every path): after the staging operation and the mutations of those
-	 * paths called before it, and before every later mutation and read of
-	 * them. What it foresees dropping is counted now; a path it drops that was
-	 * not foreseen (a commit before it failed, so the commit's layers stayed)
-	 * is counted when it is dropped.
+	 * Drops staged changes in their turn, as a mutation of `paths` (the root for every path).
+	 * Foreseen drops count now; a path a failed commit left behind counts when it is dropped.
 	 */
 	private dropInTurn(paths: string[], foreseen: Map<string, boolean>, drop: () => { dropped: Map<string, boolean>; settle: () => Promise<void> }, what: string): Promise<void> {
 		for (const [p, removal] of foreseen) this.count(p, 'discard', removal);
@@ -725,11 +689,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	/**
-	 * Waits for the pending mutations of some paths before a read, up to the
-	 * time limit, but not for a commit: the view serves the same content
-	 * during it. A discard ahead that still waits for its turn gives up within
-	 * its own limit, so the read's limit starts after that wait: a write
-	 * queued behind a discard that gave up lands before the read gives up.
+	 * Waits for the pending mutations of some paths before a read, up to the time limit, but not
+	 * for a commit (it changes nothing the view serves). The limit starts after a discard ahead gives up.
 	 */
 	private async waitToRead(paths: string[]): Promise<void> {
 		const waiting = paths.filter((p) => this.pendingOn(p, false, true).length > 0);
@@ -822,10 +783,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	/**
-	 * What the base stores for a file: its cached copy, else the server's,
-	 * which becomes the cached copy. A server read that one of this view's
-	 * changes to the base overtook may hold the file as it was before the
-	 * change, so it is taken again.
+	 * What the base stores for a file (cached copy, else the server's). Read again when one
+	 * of this view's changes to the base overtook the server read, which may hold the older file.
 	 */
 	private async readStored(p: string, took?: { at: number }): Promise<unknown> {
 		for (;;) {
@@ -853,10 +812,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	/**
-	 * A server copy a read took in after an invalidate dropped the cached
-	 * one. A different copy counts a version: an editor that read the dropped
-	 * copy would otherwise save over it, since its freshness check now
-	 * compares against the copy taken in.
+	 * A server copy a read took in after an invalidate dropped the cached one. A different copy
+	 * counts a version, or an editor that read the dropped copy would save over it.
 	 */
 	private takeIn(p: string, content: unknown): void {
 		if (!this.dropped.has(p)) return;
@@ -980,8 +937,6 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	/**
 	 * Throws when the view refuses changes to a path — the same rule every
 	 * mutation runs first, so a caller can refuse before it asks the user.
-	 *
-	 * @param path - The path a change would touch.
 	 */
 	assertWritable(path: string): void {
 		this.writableRule?.(this.norm(path));
@@ -1088,12 +1043,9 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	/**
-	 * The content below the working layer and its hash, for new entries. A
-	 * freeze, checkpoint or drop while it waits moves the working layer, and
-	 * so does a commit called or started, so it captures again; the caller
-	 * sets its entries in the same synchronous block. With `anchor` (see
-	 * delete(), one path), what reads serve (a staged write, else the
-	 * capture) must hash to it.
+	 * The content below the working layer and its hash, for new entries. Captures again if the
+	 * working layer moved while it waited; the caller sets its entries in the same synchronous block.
+	 * With `anchor` (see delete()), what reads serve must hash to it.
 	 */
 	private async captureBelow(paths: string[], seq = 0, anchor?: string): Promise<Array<{ before: string | null; baseHash: string | null }>> {
 		for (;;) {
@@ -1290,10 +1242,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	/**
-	 * Content-cache seed, declined: the base's cache holds only the server's
-	 * copy, and what a caller hands back came through this view, so it may be
-	 * an editor's buffer or staged content (the dev preview primes its batch
-	 * read). Only the inventory takes the path.
+	 * Declined: the base's cache holds only the server's copy, and content handed back through
+	 * this view may be an editor's buffer or staged. Only the inventory takes the path.
 	 */
 	prime(path: string, _content: unknown): void {
 		const p = this.norm(path);
@@ -1724,11 +1674,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * intent, so re-running commit() finishes the job. There is no server
 	 * transaction to lean on; this is the honest contract.
 	 *
-	 * It runs in its turn, after every mutation and staging operation called
-	 * before it, and carries what was staged before it was called (see
-	 * holdBack). A write while it runs lands in a working layer above the
-	 * frozen ones, which it does not sweep. It counts no version: the view
-	 * serves the same content before, during and after it.
+	 * It runs in its turn and carries only what was staged before its call (see holdBack);
+	 * a write meanwhile lands in a layer above, which it does not sweep. It counts no version.
 	 *
 	 * @param options.retain - Keep the layers as inert history (auto mode
 	 *   undo); otherwise layers and staging are swept.
@@ -1764,12 +1711,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	/**
-	 * Holds back what mutations called after a commit staged, so the commit
-	 * carries only what was staged before it was called. Such entries sit in
-	 * layers above what the commit carries (see openLayer), except where a
-	 * mutation called before the commit landed late in a layer that held
-	 * them: there they move to a new layer just above it.
-	 *
+	 * Holds back entries staged by mutations called after a commit, so the commit carries only
+	 * what was staged before its call; entries that landed in a carried layer move to a new layer above it.
 	 * @returns The layers the commit carries.
 	 */
 	private holdBack(upTo: number): Set<Layer> {
@@ -1875,11 +1818,8 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * any affected file changed on the base since its commit, nothing is
 	 * undone and the conflicts are returned.
 	 *
-	 * It runs in its turn, like commit(). The paths it restores are counted
-	 * and held from its call, so a write called after it lands after it, and
-	 * one computed before it is refused. So are the paths a commit called
-	 * before it may still retain: what is staged above the checkpoint, and
-	 * the staged mutations on their way that a waiting commit carries.
+	 * It runs in its turn, like commit(). The paths it restores, and those a commit called before
+	 * it may still retain, are held from its call: later writes land after it, earlier-computed ones are refused.
 	 *
 	 * @param layerId - The oldest checkpoint to undo.
 	 * @returns Undone path count, or blocking conflicts.

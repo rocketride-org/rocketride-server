@@ -132,12 +132,9 @@ function tabPath(uri: string, isStatic: boolean | undefined): string | null {
 }
 
 /**
- * Renames a workspace file or folder and moves the open tabs at or under it.
- * The view refuses a rename over unsaved changes at or under it at the call,
- * and then the tabs stay. Otherwise they close before the rename awaits
- * anything, so no typing can land on an old path while it runs, and open
- * again once it ends: on the new paths, or on the old ones when the rename
- * failed.
+ * Renames a workspace file or folder and moves the open tabs at or under it. Unless the view refuses
+ * (unsaved changes), the tabs close before the rename awaits anything, so no typing lands on an old
+ * path, and reopen afterward on the new paths, or the old ones if the rename failed.
  */
 export async function renameWithTabs(view: IWorkspaceFileSystem, docs: Documents | null, from: string, to: string): Promise<void> {
 	const under = (path: string) => path === from || path.startsWith(`${from}/`);

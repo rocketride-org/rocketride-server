@@ -25,13 +25,9 @@
 // =============================================================================
 
 /**
- * RocketRide's reference files appear in the workspace as a read-only
- * top-level folder, `.rocketride/`, next to the folders the user owns. Its
- * files come from the connected server, never from the user's store; the host
- * fetches them and hands the file set to a ReferenceTree, which lists and
- * reads it. This file owns the layout: where a server docs-bundle entry is
- * served, and which entries are not served. It is pure, so every host and the
- * tests can share it.
+ * RocketRide's reference files appear as the read-only top-level `.rocketride/` folder, served from
+ * the connected server, never the user's store. This file owns the layout (where a docs-bundle entry
+ * is served, and which are not) and is pure, so every host and the tests share it.
  */
 
 // =============================================================================
@@ -49,12 +45,8 @@ export const ROCKETRIDE_ROOT = '.rocketride';
 const HIDDEN_GUIDES = new Set(['ROCKETRIDE_README.md', 'ROCKETRIDE_CLI.md', 'ROCKETRIDE_python_API.md']);
 
 /**
- * Where a docs.zip entry is served below ROCKETRIDE_ROOT: a root-level .md
- * becomes 'docs/<name>'. stubs/, manifest.json and the hidden guides (README,
- * CLI, python_API) are not served.
- *
- * @param entry - An entry name in the server's docs bundle, e.g. 'ROCKETRIDE_APPS.md'.
- * @returns The path below ROCKETRIDE_ROOT (e.g. 'docs/ROCKETRIDE_APPS.md'), or null when the entry is not served.
+ * Where a docs.zip entry is served below ROCKETRIDE_ROOT: a root-level .md becomes 'docs/<name>';
+ * stubs/, manifest.json and HIDDEN_GUIDES are not served (null).
  */
 export function docsPathFor(entry: string): string | null {
 	if (entry.includes('/') || !entry.endsWith('.md') || HIDDEN_GUIDES.has(entry)) return null;
@@ -65,7 +57,6 @@ export function docsPathFor(entry: string): string | null {
  * Whether a workspace path is ROCKETRIDE_ROOT or under it.
  *
  * @param path - A canonical workspace path.
- * @returns True for the reference folder and everything in it.
  */
 export function isReferencePath(path: string): boolean {
 	return path === ROCKETRIDE_ROOT || path.startsWith(`${ROCKETRIDE_ROOT}/`);
@@ -84,10 +75,6 @@ export class ReferenceTree {
 	/** Every folder the file paths imply, '' (the root) included. */
 	private readonly dirs = new Set<string>(['']);
 
-	/**
-	 * @param root - The folder it is served under (for messages).
-	 * @param files - Text by path below it, e.g. 'docs/ROCKETRIDE_APPS.md'.
-	 */
 	constructor(root: string, files: ReadonlyMap<string, string>) {
 		this.root = root;
 		this.files = files;
@@ -121,7 +108,6 @@ export class ReferenceTree {
 	 * Reads one file.
 	 *
 	 * @param rel - The file below the root.
-	 * @returns Its text.
 	 * @throws For a folder, or for a miss, naming every file that exists.
 	 */
 	read(rel: string): string {
@@ -132,7 +118,6 @@ export class ReferenceTree {
 		throw new Error(`No file at ${this.workspacePath(rel)}.${files.length > 0 ? ` Files: ${files.join(', ')}` : ''}`);
 	}
 
-	/** The workspace path of a path below the root. */
 	private workspacePath(rel: string): string {
 		return rel ? `${this.root}/${rel}` : this.root;
 	}

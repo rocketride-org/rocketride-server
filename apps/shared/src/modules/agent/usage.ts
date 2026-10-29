@@ -25,32 +25,17 @@
 // =============================================================================
 
 /**
- * The browser never sees token counts: the model pipeline answers with text
- * only (known bug 15). So a turn's usage is estimated from characters, 4 to
- * a token, input and output apart, and priced from one dated table. The same
- * estimate is what the chat shows ("~$0.42 est.") and what the cost limit
- * checks. The meter takes characters now; a reply that reports its tokens
- * can feed it later without a change to ModelCall.
- *
- * The estimate leaves out thinking. The stand-in sends no thinking param, so
- * Sonnet 5 thinks by default and bills it as output the browser never sees.
- * The estimate, and the cost a turn pauses at, are lower bounds.
- *
- * createChatModel feeds the meter once per model request, the retry after a
- * pipeline restart included, and runAgent feeds it for a model a test
- * passes. Before each request the meter reserves the request's input
- * estimate and an output allowance. A request that would take the turn past
- * its limit is not sent (CostLimitError). After the reply, the allowance
- * becomes the reply's own estimate. A request that failed keeps its whole
- * reservation, since what the provider billed for it is unknown.
- *
- * The prompt start that a question marks with cachePrefix (role,
- * instructions and history) gets the provider's cache rates only when its
- * row says the provider caches it. The first request of a turn writes it.
- * Later requests read it, until more than five minutes pass after the last
- * request that wrote or read it; the next one then writes it again. The rest
- * of a question is always at the full input rate. The browser cannot see
- * whether the provider hit its cache, so the cost is an estimate.
+ * The browser never sees token counts (the model pipeline answers with text
+ * only), so a turn's usage is estimated at 4 characters a token, input and
+ * output apart, and priced from one dated table. The chat's "~$0.42 est." and
+ * the cost limit use the same estimate. It leaves out thinking, which the
+ * provider bills as output the browser never sees, so it is a lower bound.
+ * Before each request the meter reserves its input estimate plus an output
+ * allowance, and refuses a request that would pass the limit (CostLimitError).
+ * A reply replaces the allowance with its own estimate; a failed request keeps
+ * its whole reservation, since what the provider billed is unknown. The
+ * cachePrefix start gets cache rates only when its row says the provider caches
+ * it: the first request writes it, later ones read it until 5 idle minutes.
  */
 
 import type { QuestionSpec } from './wave/plan';
@@ -63,13 +48,10 @@ import type { QuestionSpec } from './wave/plan';
 export interface PriceRow {
 	/** The model, as its model node's profile names it. */
 	model: string;
-	/** Input tokens. */
 	input: number;
 	/** Input tokens written to the prompt cache (5-minute entries). */
 	cacheWrite: number;
-	/** Input tokens read from the prompt cache. */
 	cacheRead: number;
-	/** Output tokens. */
 	output: number;
 	/** Whether the provider's model node caches the prompt start a question marks with cachePrefix. */
 	cachesPrefix: boolean;
@@ -105,7 +87,6 @@ export const CACHE_LIFE_MS = 5 * 60_000;
 export class CostLimitError extends Error {
 	/**
 	 * @param spentUsd - The turn's estimate before this request.
-	 * @param limitUsd - The turn's limit.
 	 */
 	constructor(
 		readonly spentUsd: number,
@@ -123,7 +104,6 @@ export class CostLimitError extends Error {
 /**
  * An amount in dollars, to the cent.
  *
- * @param usd - The amount.
  * @returns "$2.00".
  */
 export function dollars(usd: number): string {
@@ -133,7 +113,6 @@ export function dollars(usd: number): string {
 /**
  * An estimated cost as the chat shows it.
  *
- * @param usd - The estimate.
  * @returns "~$0.42 est.", or "<$0.01 est." below a cent.
  */
 export function costText(usd: number): string {
@@ -143,7 +122,6 @@ export function costText(usd: number): string {
 /**
  * Estimated tokens as the chat shows them.
  *
- * @param tokens - The estimate.
  * @returns "~12,345 tokens est.".
  */
 export function tokensText(tokens: number): string {
@@ -164,7 +142,6 @@ export interface Reservation {
 
 /** What a turn's model requests used so far. */
 export interface UsageSnapshot {
-	/** Requests sent. */
 	requests: number;
 	/** Estimated input tokens. */
 	inputTokens: number;
@@ -188,7 +165,6 @@ export interface MeterOptions {
 	prices?: readonly PriceRow[];
 }
 
-/** The estimated tokens in some characters. */
 function tokensIn(chars: number): number {
 	return Math.ceil(chars / CHARS_PER_TOKEN);
 }
@@ -217,7 +193,6 @@ export class UsageMeter {
 	/** Each request sent: settled at its reply's estimate, the rest at their reservation. */
 	private readonly requests: Array<{ input: number; output: number; usd: number }> = [];
 
-	/** @param o - The model, the limit, the output maximum and the clock. */
 	constructor(o: MeterOptions = {}) {
 		this.row = (o.prices ?? PRICES).find((row) => row.model === o.model);
 		this.limitUsd = this.row && o.limitUsd && o.limitUsd > 0 ? o.limitUsd : 0;
@@ -234,7 +209,6 @@ export class UsageMeter {
 	 * Reserves a request before it is sent: its input estimate, priced with
 	 * the cache rates where they apply, and the output allowance.
 	 *
-	 * @param q - The question about to be sent.
 	 * @returns The reservation, to settle or keep when the request ends.
 	 * @throws CostLimitError when the estimate so far plus this reservation passes the limit; nothing is reserved.
 	 */
@@ -270,8 +244,6 @@ export class UsageMeter {
 
 	/**
 	 * What the requests used so far.
-	 *
-	 * @returns The requests sent, the tokens, and the cost for a model with a price.
 	 */
 	snapshot(): UsageSnapshot {
 		const sum = (pick: (r: { input: number; output: number }) => number): number => this.requests.reduce((n, r) => n + pick(r), 0);

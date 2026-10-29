@@ -25,40 +25,17 @@
 // =============================================================================
 
 /**
- * One list rates every action an agent tool can take outside its workspace
- * edits: each RocketRide client method by the name the guide uses
- * (`publishApp`, `deploy.setSchedule`), plus the one tool whose work bypasses
- * the client (`delete_file`). Each entry is free, ask or never. A name the list
- * lacks asks. The model never rates its own risk: the list is ours, and its
- * type is built from the client's own type, so tsc refuses a client method
- * with no row, a row for a method the client lacks, and an ask on a sync
- * method (it can't wait for a card).
- *
- * The loop calls `Approvals.approve` between a call's prepare and its run,
- * with the call's clock stopped:
- *
- * - free:  the run starts at once.
- * - ask:   in Auto mode, or with the entry's grant on, the run starts at once.
- *          Otherwise a "Needs your OK" card waits in the chat. Approve starts
- *          the run; Deny and Stop refuse it, as the call's error.
- * - never: refused in every mode, as the call's error.
- *
- * terminate and restart are asks that name a pipeline run. Ask mode asks for
- * them whoever started the run. Auto runs one only on a run this conversation
- * started (`runs.ts`), and reads the run's status again right before the call;
- * on any other run it refuses and tells the model to ask the user. Switching
- * to Auto while such a card waits approves it only for the conversation's own
- * run.
- *
- * The client the toolkits get is a checked view of the real one
- * (`Approvals.client`). It refuses never methods, and refuses an ask method
- * unless the running call announced exactly that call (method and arguments)
- * and it was let through. That backstop keeps the rule fail closed for a tool
- * that forgets to say what it will do. The model's own `chat` keeps the real
- * client.
- *
- * This is a check on the agent's own tool calls, not a security boundary: the
- * app preview holds the user's token and can call anything.
+ * One list rates every action an agent tool can take outside its workspace edits:
+ * each RocketRide client method by the guide's name (`publishApp`,
+ * `deploy.setSchedule`) plus `delete_file`. Each entry is free, ask or never; a
+ * name the list lacks asks. The model never rates its own risk, and the list's
+ * type comes from the client's type, so tsc refuses a missing or extra method and
+ * an ask on a sync method (it can't wait for a card). An ask shows a "Needs your
+ * OK" card unless Auto or the entry's grant is on; Auto runs terminate/restart
+ * only on a run this conversation started, rechecked right before the call. The
+ * checked client (`Approvals.client`) refuses an ask method the running call did
+ * not announce, so a tool that forgets stays fail closed. This checks the agent's
+ * own calls, not a security boundary: the app preview holds the user's token.
  */
 
 import type { RocketRideClient } from 'rocketride';
@@ -118,7 +95,6 @@ interface NeverRule {
 	readonly why: string;
 }
 
-/** An entry that asks. */
 interface AskRule {
 	readonly tier: 'ask';
 	/** The card, in the user's words, from the call's own arguments. */
@@ -175,7 +151,7 @@ const LOOKUP_LIMIT_MS = 2_000;
 /** How many upcoming runs a schedule card shows. */
 const NEXT_RUNS = 3;
 
-/** The tails of the never refusals; the credential ones are rocketride_client's old words. */
+/** The tails of the never refusals. */
 const CONNECTION = "the client is the user's own connection, already signed in; leave it as it is";
 const SIGNED_IN = 'the client is already connected and signed in as the user';
 const PLUMBING = "it is the client's protocol plumbing, not part of its API";
@@ -190,12 +166,10 @@ const MONITORS = 'monitors belong to the open app; poll getTaskStatus(token) ins
 // TEXTS — what the model reads as the call's error
 // =============================================================================
 
-/** A never entry. */
 function blocked(name: string, why: string): string {
 	return `${name} is blocked: ${why}.`;
 }
 
-/** The user said no. */
 function declined(title: string): string {
 	return `The user declined: ${title}. Don't retry it; ask the user what they want instead.`;
 }
@@ -205,7 +179,6 @@ function notAnswered(title: string): string {
 	return `Not done: the user stopped the run before answering: ${title}.`;
 }
 
-/** Nowhere to show the card. */
 function noChat(title: string): string {
 	return `Not done: ${title} needs the user's OK, and there is no chat to ask in.`;
 }
@@ -215,7 +188,6 @@ function unannounced(name: string): string {
 	return `${name} needs the user's OK, and the call that reached it didn't say it would make it, so it was refused. Call it with rocketride_client, which asks.`;
 }
 
-/** The backstop after Stop. */
 function afterStop(name: string): string {
 	return `Not done: the run was stopped, so ${name} was not called.`;
 }
@@ -239,15 +211,12 @@ function noLongerOwned(name: string, run: string, why: string): string {
 // THE LIST
 // =============================================================================
 
-/** A free row. */
 const FREE = 'free';
 
-/** A never row. */
 function never(why: string): NeverRule {
 	return { tier: 'never', why };
 }
 
-/** An ask row. */
 function ask(card: CardBuilder, extra: Pick<AskRule, 'grant' | 'freeWhen' | 'target'> = {}): AskRule {
 	return { tier: 'ask', card, ...extra };
 }
@@ -364,7 +333,6 @@ const CLIENT_POLICY: ClientPolicy = {
 	removeAppPublish: ask(async ([appId, target], n) => ({ title: `Unpublish ${await n.app(appId)} from ${(await audience(target, n)).words}`, detail: 'People there can no longer open it.' })),
 	disableAppPublish: ask(async ([appId, target], n) => ({ title: `Turn off ${await n.app(appId)} for ${(await audience(target, n)).words}` })),
 
-	// account
 	'account.getOrg': FREE,
 	'account.listKeys': FREE,
 	'account.listMembers': FREE,
@@ -391,7 +359,6 @@ const CLIENT_POLICY: ClientPolicy = {
 	'account.removeTeamMember': never(ACCOUNT),
 	'account.setEnv': never(ACCOUNT),
 
-	// billing
 	'billing.getDetails': FREE,
 	'billing.getProductPrices': FREE,
 	'billing.validatePromoCode': FREE,
@@ -417,7 +384,6 @@ const CLIENT_POLICY: ClientPolicy = {
 	'database.dialect': FREE,
 	'database.sequelize': FREE,
 
-	// deploy
 	'deploy.add': ask(deployToCard, { freeWhen: ([o]) => !isJsonObject(o) || o.deployTo === undefined }),
 	'deploy.addApp': FREE,
 	'deploy.createApp': FREE,
@@ -438,7 +404,6 @@ const CLIENT_POLICY: ClientPolicy = {
 	'deploy.run': ask(async ([projectId, sourceId, teamId], n) => ({ title: `Run ${await n.deployment(projectId, teamId)} (${text(sourceId)}) on team ${await n.team(teamId)} now` })),
 	'deploy.setSourceConfig': ask(async ([projectId, sourceId, teamId], n) => ({ title: `Change tracing for ${await n.deployment(projectId, teamId)} (${text(sourceId)}) on team ${await n.team(teamId)}` })),
 
-	// log
 	'log.openEventStream': FREE,
 	'log.chapters': FREE,
 	'log.streams': FREE,
@@ -464,7 +429,6 @@ function unlisted(name: string): AskRule {
  * How one call is rated.
  *
  * @param name - The client method, or the tool act when `acts` is set.
- * @param params - The call's arguments.
  * @param acts - Whether a tool act may match (the approve step); the checked client only rates client methods.
  * @returns Its rule for these arguments; an ask whose arguments make it free is free.
  */
@@ -620,12 +584,8 @@ export class Approvals {
 	private readonly passes = new Map<string, Set<object>>();
 	/** The checked view of each client object, so identity holds within a run. */
 	private readonly views = new WeakMap<object, object>();
-	/** The names cards use. */
 	private readonly names: Names;
 
-	/**
-	 * @param o - The real client, the workspace, the turn's ask, the settings and the stop signal.
-	 */
 	constructor(private readonly o: ApprovalsOptions) {
 		this.names = cardNames(o.client, o.vfs, o.signal);
 		this.client = () => {
@@ -639,8 +599,6 @@ export class Approvals {
 	 * call's clock stopped. While a card waits, every settings change decides
 	 * it again, so switching to Auto, or turning its grant on, approves it.
 	 *
-	 * @param act - What the call is about to do.
-	 * @param run - The call's work.
 	 * @returns The work to start: `run` itself for a free act, or `run` holding a pass for an asked one.
 	 * @throws The refusal the model reads: blocked, declined, or not answered.
 	 */
@@ -731,7 +689,6 @@ export class Approvals {
 		return capped(check, unconfirmed('its status took too long to read'), this.o.signal);
 	}
 
-	/** The user's settings now. */
 	private prefs(): ApprovalPrefs {
 		return this.o.settings?.read() ?? DEFAULT_PREFS;
 	}
@@ -766,16 +723,11 @@ export class Approvals {
 	}
 
 	/**
-	 * The checked view of one client object. Every function it holds is
-	 * checked by its dotted name, and every object it holds gets a view of its
-	 * own, so a sub-client the list has never heard of is still checked.
-	 * Methods run on the real object, so `this` holds, a sync method stays
-	 * sync, and a method's own inner calls (publishApp calls this.call) are not
-	 * checked again.
-	 *
-	 * @param target - The real client, or an object it holds.
+	 * The checked view of one client object. Every function is checked by its dotted
+	 * name and every object gets its own view, so an unlisted sub-client is still
+	 * checked. Methods run on the real object, so `this` holds, sync stays sync, and
+	 * a method's own inner calls (publishApp calls this.call) are not checked again.
 	 * @param prefix - '' for the client, `deploy.` for its `deploy`.
-	 * @returns The view.
 	 */
 	private view(target: object, prefix: string): object {
 		const known = this.views.get(target);

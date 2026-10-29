@@ -25,13 +25,10 @@
 // =============================================================================
 
 /**
- * Every tool result of a run is stored under a key, and the model sees only
- * a summary of it (see summary.ts). memory.peek is how the model reads the
- * rest: a path into a JSON result, or a chunk of the stored text. This is a
- * port of Wave's peek (`nodes/src/nodes/agent_rocketride/executor.py`) and
- * its descriptor (`planner.py`). The one change: Wave evaluates JMESPath,
- * and this evaluates the subset of it a peek needs (fields, `[n]`, `[a:b]`,
- * `[*]`), with JMESPath's semantics, so there is no library to load.
+ * memory.peek: the model sees only a summary of each stored tool result (see summary.ts) and reads the rest
+ * with a path into a JSON result or a chunk of the text. Ported from Wave's peek
+ * (`nodes/src/nodes/agent_rocketride/executor.py`); paths are the JMESPath subset a peek needs (fields, `[n]`,
+ * `[a:b]`, `[*]`) with JMESPath semantics, so there is no library to load.
  */
 
 import { pyRepr } from './summary';
@@ -46,13 +43,7 @@ const PEEK_MAX_ARRAY_ITEMS = 50;
 /** Characters a chunk peek returns by default: most single-record API responses in one read. */
 const PEEK_DEFAULT_LENGTH = 8000;
 
-/**
- * The memory key of a tool result: wave `wave` (counting from 0), call `index`.
- *
- * @param wave - The wave's number, from 0.
- * @param index - The call's position in the wave, from 0.
- * @returns The key, e.g. `wave-0.r2`.
- */
+/** The memory key of a tool result, e.g. `wave-0.r2` for wave 0, call 2 (both counted from 0). */
 export function resultKey(wave: number, index: number): string {
 	return `wave-${wave}.r${index}`;
 }
@@ -64,9 +55,6 @@ export class RunMemory {
 
 	/**
 	 * Stores a result, replacing any under the same key.
-	 *
-	 * @param key - The result's key (see resultKey).
-	 * @param value - The tool output text.
 	 */
 	put(key: string, value: string): void {
 		this.values.set(key, value);
@@ -74,9 +62,6 @@ export class RunMemory {
 
 	/**
 	 * Reads a result.
-	 *
-	 * @param key - The result's key.
-	 * @returns The stored text, or undefined when nothing is stored under the key.
 	 */
 	get(key: string): string | undefined {
 		return this.values.get(key);
@@ -84,8 +69,6 @@ export class RunMemory {
 
 	/**
 	 * Whether a result is stored under a key.
-	 *
-	 * @param key - The result's key.
 	 */
 	has(key: string): boolean {
 		return this.values.has(key);
@@ -93,8 +76,6 @@ export class RunMemory {
 
 	/**
 	 * Drops results. Keys that hold nothing are ignored.
-	 *
-	 * @param keys - The keys to drop.
 	 */
 	clear(keys: string[]): void {
 		for (const key of keys) this.values.delete(key);
@@ -112,7 +93,6 @@ export class RunMemory {
 
 /** Thrown for a path outside the supported subset; the message says what the subset is. */
 class PathError extends Error {
-	/** Builds the error with the one message every unsupported path gets. */
 	constructor() {
 		super('Paths support field names, [n], [a:b] and [*] only.');
 		this.name = 'PathError';
@@ -128,18 +108,15 @@ const FIELD = /[A-Za-z_][A-Za-z0-9_]*|"(?:[^"\\]|\\.)*"/y;
 /** A bracket: `[*]`, `[n]` or `[a:b]`, either bound optional, negatives allowed. */
 const BRACKET = /\[\s*(?:(\*)|(-?\d+)|(-?\d+)?\s*:\s*(-?\d+)?)\s*\]/y;
 
-/** Whether a value is a JSON object (not null, not an array). */
 function isObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Matches a sticky pattern at `pos`, or returns null. */
 function matchAt(pattern: RegExp, text: string, pos: number): RegExpExecArray | null {
 	pattern.lastIndex = pos;
 	return pattern.exec(text);
 }
 
-/** Reads a field name token into a step. */
 function fieldStep(token: string): Step {
 	if (!token.startsWith('"')) return { kind: 'field', name: token };
 	try {
@@ -149,7 +126,6 @@ function fieldStep(token: string): Step {
 	}
 }
 
-/** Reads a bracket match into a step. */
 function bracketStep(match: RegExpExecArray): Step {
 	const [, star, index, start, end] = match;
 	if (star) return { kind: 'all' };
@@ -204,17 +180,8 @@ function applySteps(value: unknown, steps: Step[], from: number): unknown {
 }
 
 /**
- * Evaluates a path into a JSON value: field names (an identifier, or a JSON
- * string for any other key), `[n]` (negative counts from the end), `[a:b]`
- * (either bound optional) and `[*]`. A slice or `[*]` projects the rest of
- * the path over each item. Follows JMESPath: a field of a non-object, an
- * index out of range or a bracket on a non-array is null, and a projection
- * drops the items whose result is null.
- *
- * @param value - The parsed JSON to read.
- * @param path - The path, e.g. `rows[0:5].city`.
- * @returns What the path selects; null when it selects nothing.
- * @throws PathError for any other syntax (filters, functions, pipes, `.*`, steps).
+ * Evaluates a path (fields, `[n]`, `[a:b]`, `[*]`) into a JSON value with JMESPath semantics: a miss is null,
+ * and a projection drops null items. Throws PathError for other syntax (filters, functions, pipes, `.*`).
  */
 function evalPath(value: unknown, path: string): unknown {
 	return applySteps(value, parsePath(path), 0);
@@ -224,7 +191,6 @@ function evalPath(value: unknown, path: string): unknown {
 // PEEK — reading a stored result
 // =============================================================================
 
-/** Reads JSON text, or reports that it is not JSON. */
 function tryParse(text: string): { ok: true; value: unknown } | { ok: false } {
 	try {
 		return { ok: true, value: JSON.parse(text) };
@@ -248,7 +214,6 @@ function wholeNumber(args: Record<string, unknown>, name: string, fallback: numb
  * returns a chunk of the stored text, as stored, from `offset` (default 0)
  * for `length` characters (default 8000).
  *
- * @param memory - The run's stored results.
  * @param args - The call's arguments: `key`, and `path` or `offset`/`length`.
  * @returns JSON text of Wave's peek result, without its tool and key: `{path, preview}`,
  *   `{path, preview, truncated, returned_items, total_items}` when an array was capped,
@@ -291,11 +256,7 @@ export function peek(memory: RunMemory, args: Record<string, unknown>): string {
 // DESCRIPTOR — what the model reads about memory.peek
 // =============================================================================
 
-/**
- * memory.peek as the model sees it, listed after the other tools. It runs in
- * the loop, not through a toolkit, so it is a descriptor rather than an
- * AgentTool. Wave's text, with "a JMESPath expression" now "a path".
- */
+/** memory.peek's descriptor: it runs in the loop, not through a toolkit, so it is not an AgentTool. */
 export const MEMORY_PEEK_TOOL: { name: 'memory.peek'; description: string; parameters: Record<string, unknown> } = {
 	name: 'memory.peek',
 	description: 'Extract data from a stored result using a path (field names, [n], [a:b], [*]), or page through a large value in text chunks. Use the structural summary in Previous tool results to identify the path you need.',
@@ -319,16 +280,10 @@ export const MEMORY_PEEK_TOOL: { name: 'memory.peek'; description: string; param
 // =============================================================================
 
 /**
- * The model never carries a large result in its reply. It writes a tag naming
- * the stored result instead: `{{memory.ref:key}}`, `{{memory.ref:key:format}}`
- * or `{{memory.ref:key:format:path}}`. The loop resolves tags in a call's
- * arguments before the call runs, and in the final answer before it is
- * delivered. This is a port of Wave's resolution
- * (`nodes/src/nodes/agent_rocketride/executor.py`). The path applies first, so a
- * format sees only the part the path selects. Stored results are text, so
- * JSON text is parsed before a path or a table format reads it, and a tag
- * always becomes text. (Wave hands a tool the stored object itself when an
- * argument is a bare tag; here the stored value already is text.)
+ * Memory tags: the model writes `{{memory.ref:key[:format[:path]]}}` instead of carrying a large result. The
+ * loop resolves them in a call's arguments before it runs and in the final answer before delivery (ported from
+ * Wave's `executor.py`). The path applies before the format; stored results are text, so JSON is parsed before
+ * a path or table format reads it, and a tag always becomes text.
  */
 
 // =============================================================================
@@ -342,12 +297,10 @@ export const MEMORY_PEEK_TOOL: { name: 'memory.peek'; description: string; param
  */
 const REF_PATTERN = /\{\{memory\.ref:([^}:]+)(?::([^}:]+))?(?::([^}]+))?\}\}/g;
 
-/** A string that is exactly one tag. */
 const WHOLE_TAG = new RegExp(`^${REF_PATTERN.source}$`);
 
 /** Thrown for a tool argument that is one whole tag naming a key nothing is stored under; the message says the call did not run. */
 class MissingRefError extends Error {
-	/** Builds the error with the message the loop reports to the model. */
 	constructor(message: string) {
 		super(message);
 		this.name = 'MissingRefError';
@@ -412,8 +365,6 @@ function resolveValue(value: unknown, memory: RunMemory): unknown {
  * longer text reads `[missing data: key]` instead, so the text still goes
  * through.
  *
- * @param args - The call's arguments, as the model wrote them.
- * @param memory - The run's stored results.
  * @returns The arguments with their tags resolved; the input is not changed.
  * @throws MissingRefError when an argument that is one whole tag names a key nothing is stored under.
  */
@@ -430,8 +381,6 @@ export function resolveArgRefs(args: Record<string, unknown>, memory: RunMemory)
  * text, narrowed by its path and rendered in its format; a tag whose key is
  * not stored reads `[missing data: key]`, so the user sees what is absent.
  *
- * @param answer - The answer, as the model wrote it.
- * @param memory - The run's stored results.
  * @returns The answer text with no tags left.
  */
 export function resolveAnswerRefs(answer: string, memory: RunMemory): string {
@@ -443,13 +392,9 @@ export function resolveAnswerRefs(answer: string, memory: RunMemory): string {
 // =============================================================================
 
 /**
- * The model can write `{{memory.ref:key:format}}` in its answer, and the
- * stored data is rendered in that format without passing through the model.
- * This is a port of Wave's formatters (`nodes/src/nodes/agent_rocketride/formatters.py`)
- * and keeps their output shapes. Two changes, both because the engine's last
- * resort, asking the model to render the data, is not ported: an unknown
- * format name renders as `json`, and so does data that is not a table when a
- * table format is asked for. The prompt only offers the five formats.
+ * `{{memory.ref:key:format}}` renders stored data without passing it through the model, in the output shapes
+ * of Wave's formatters (`formatters.py`). Wave's last resort (asking the model) is not ported, so an unknown
+ * format, or non-table data asked for in a table format, renders as `json`.
  */
 
 // =============================================================================
@@ -484,7 +429,6 @@ function escapeHtml(text: string): string {
 	return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
 }
 
-/** Pretty-printed JSON, two-space indent. */
 function prettyJson(value: unknown): string {
 	return JSON.stringify(value, null, 2);
 }
@@ -494,14 +438,9 @@ function prettyJson(value: unknown): string {
 // =============================================================================
 
 /**
- * Reads data as table rows, accepting the shapes tool results come in: JSON
- * text (parsed first); `{rows: [...]}`; an object with exactly one non-empty
- * list of records under any key; a single record (a one-row table); or a list
- * of records. A list whose items are not all records is not a table, where
- * Wave would fail on the first item that is not.
- *
- * @param data - The data to read, parsed or as JSON text.
- * @returns The rows, or null when the data is not a table.
+ * Reads data as table rows: JSON text (parsed first), `{rows: [...]}`, an object with exactly one non-empty list
+ * of records under any key, a single record, or a list of records. Null when it is not a table; a list with any
+ * non-record item is not one (Wave would fail there instead).
  */
 function toRows(data: unknown): Array<Record<string, unknown>> | null {
 	let current = data;
@@ -595,15 +534,7 @@ function text(data: unknown): string {
 // FORMAT — one entry point
 // =============================================================================
 
-/**
- * Renders data in one of the five formats a memory tag can name:
- * `markdown_table`, `html_table`, `csv`, `json` and `text`. Anything else,
- * and data a table format cannot lay out, renders as `json`.
- *
- * @param value - The data: parsed JSON, or text (JSON text is parsed).
- * @param format - The format name from the tag.
- * @returns The rendered text.
- */
+/** Renders data in a tag's format; unknown formats, and non-table data for a table format, render as `json`. */
 function formatValue(value: unknown, format: string): string {
 	switch (format) {
 		case 'markdown_table':

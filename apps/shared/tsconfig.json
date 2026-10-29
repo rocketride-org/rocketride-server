@@ -34,7 +34,6 @@
 	"exclude": [
 		"node_modules",
 		"**/*.test.ts",
-		"**/*.test.tsx",
-		"**/*.harness.ts"
+		"**/*.test.tsx"
 	]
 }

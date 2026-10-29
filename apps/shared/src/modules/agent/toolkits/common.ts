@@ -32,11 +32,7 @@ import type { IWorkspaceFileSystem } from '../../vfs/vfsTypes';
 // ROCKETRIDE CLIENT — how agent code reaches the connected client
 // =============================================================================
 
-/**
- * Agent code never calls the shell's getClient() itself (it is undefined
- * under the test runner). The host passes in a getter, and this section turns a
- * missing client into an error the model can read.
- */
+/** getClient() is undefined under the test runner, so the host passes in a getter. */
 
 /** The error message when there is no connected client. */
 export const NOT_CONNECTED_MESSAGE = 'Not connected to RocketRide — reconnect and try again.';
@@ -46,9 +42,6 @@ export type ClientGetter = () => RocketRideClient | null;
 
 /**
  * The connected client, or an error that says how to recover.
- *
- * @param get - The host's client getter.
- * @returns The connected client.
  */
 export function requireClient(get: ClientGetter): RocketRideClient {
 	const client = get();
@@ -79,14 +72,6 @@ export function shellChoice(): ChoiceFn {
 // TOOL RESULTS — clipping, secret stripping and the text a tool returns
 // =============================================================================
 
-/**
- * Every RocketRide tool returns a string, and the model reads all of it. These
- * helpers keep that string short enough to be useful and free of secrets:
- * `clip` cuts long text and says how to see the rest, `redactSecrets` strips
- * secret values from anything a RocketRide tool shows the model, and `toolText`
- * does both for a client result.
- */
-
 // =============================================================================
 // CONSTANTS
 // =============================================================================
@@ -94,35 +79,21 @@ export function shellChoice(): ChoiceFn {
 /** The most characters a tool returns before its text is cut. */
 export const RESULT_MAX_CHARS = 32_000;
 
-/** What a secret value is replaced with. */
 const REDACTED = '[redacted]';
 
 /**
- * Field names that hold secrets: api keys, secrets, passwords and passphrases,
- * credentials, private keys, access/account/ssh keys (including
- * `serviceAccountKey`), bearer values, auth and header values, webhook URLs and
- * connection strings. A name is read as words (`secretKind`), and this is
- * tested against the words joined, up to the end of each word in turn: so
- * `client_secret`, `secretKey` and `apikey` match, and `secretary` and
- * `passwordless` do not.
- *
- * A bare `url` is not matched: it is too common a field name to hide. The one
- * secure field that goes by it (graph_falkordb.url) is a known gap.
+ * Secret field names, tested against a name's words (`secretKind`) joined up to the end of
+ * each word: `client_secret`, `secretKey` and `apikey` match; `secretary` and `passwordless`
+ * do not. A bare `url` is too common a field name to hide, so graph_falkordb.url is a known gap.
  */
 const SECRET_WORD = /(?:apikey|secret|passw(?:or)?d|passphrase|credential|privatekey|(?:access|account|ssh)key|bearer|auth(?:orization)?value|headervalue|webhookurl|connectionstring)s?$/;
 
-/**
- * A token field: the name's last word is `token` (`token`, `auth_token`,
- * `refreshToken`). With other words after it, `token` names a setting
- * (`token_limit`, `token_count`); `tokens` and `tokenizer` are other words.
- */
+/** The name's last word is `token` (`auth_token`, `refreshToken`); `token_limit`, `tokens` and `tokenizer` are not. */
 const TOKEN_WORD = /token$/;
 
 /**
- * A variable reference: `${NAME}` names a value without holding it. The server
- * fills in only `${ROCKETRIDE_*}`, and any other name arrives as written, so
- * neither holds a key. The guide's wrong-prefix example, `"apikey":
- * "${OPENAI_KEY}"`, must reach the model whole.
+ * `${NAME}` names a value without holding it (the server fills only `${ROCKETRIDE_*}`), so the
+ * guide's wrong-prefix example `"apikey": "${OPENAI_KEY}"` reaches the model whole.
  */
 const PLACEHOLDER = /^\$\{[A-Za-z_]\w*\}$/;
 
@@ -133,11 +104,6 @@ const PLACEHOLDER = /^\$\{[A-Za-z_]\w*\}$/;
 /**
  * Redacts text, then cuts it when it is too long and says how much was cut
  * and what to do about it.
- *
- * @param text - The text to return.
- * @param hint - How the model can see less or see the rest (shown in the cut notice).
- * @param max - The most characters to keep.
- * @returns The redacted text when it fits, otherwise its first `max` characters and a notice.
  */
 export function clip(text: string, hint: string, max: number = RESULT_MAX_CHARS): string {
 	// redact before the cut: a cut inside a credential leaves a part no pattern matches
@@ -152,9 +118,6 @@ export function clip(text: string, hint: string, max: number = RESULT_MAX_CHARS)
 
 /**
  * Whether a value is something to copy and walk into: an array or a plain object.
- *
- * @param value - Any value.
- * @returns True for arrays and plain objects.
  */
 export function isWalkable(value: unknown): value is Record<string, unknown> | unknown[] {
 	if (Array.isArray(value)) return true;
@@ -167,12 +130,8 @@ export function isWalkable(value: unknown): value is Record<string, unknown> | u
 export type SecretKind = 'token' | 'secret';
 
 /**
- * The words of a field name, lower-cased. `_`, `-`, `.`, spaces, digits and
- * camelCase all split words: `OPENAI_API_KEY`, `openaiApiKey` and
- * `openai.api-key` all give `openai`, `api`, `key`.
- *
- * @param name - A JSON or YAML key.
- * @returns Its words, in order.
+ * The lower-cased words of a field name. `_`, `-`, `.`, spaces, digits and camelCase split words:
+ * `OPENAI_API_KEY`, `openaiApiKey` and `openai.api-key` all give `openai`, `api`, `key`.
  */
 function nameWords(name: string): string[] {
 	return name
@@ -204,19 +163,12 @@ export function secretKind(name: string): SecretKind | null {
  * Whether a field name holds secrets (see `secretKind`).
  *
  * @param name - A JSON or YAML key.
- * @returns True for api keys, secrets, passwords, tokens and the rest of `SECRET_WORD`.
  */
 export function isSecretName(name: string): boolean {
 	return secretKind(name) !== null;
 }
 
-/**
- * Copies a value, hiding strings that are secrets.
- *
- * @param value - The value to copy.
- * @param secret - True when a secret-named key sits above this value.
- * @returns The copy.
- */
+/** Copies a value, hiding its strings when `secret` (a secret-named key sits above it). */
 function redactValue(value: unknown, secret: boolean): unknown {
 	if (typeof value === 'string') return secret && !PLACEHOLDER.test(value) ? REDACTED : value;
 	if (Array.isArray(value)) return value.map((item) => redactValue(item, secret));
@@ -231,18 +183,9 @@ function redactValue(value: unknown, secret: boolean): unknown {
 }
 
 /**
- * Copies a value with every secret string replaced by `[redacted]`.
- *
- * A string is a secret when its key looks like one (see `secretKind`: api key,
- * secret, password, token, credential, private/access/account/ssh key, bearer,
- * auth or header value, webhook URL, connection string), or when a key like that
- * sits above it. That includes a field named `token`: node configs use it for
- * real secrets. A bare `url` is not hidden, so graph_falkordb.url (a secure
- * field) is a known gap. `${NAME}` placeholders stay, since they name a
- * secret without holding it. Numbers, booleans and null are never changed.
- *
- * @param value - The value a tool is about to show the model.
- * @returns A deep copy; the input is not changed.
+ * Copies a value with every string under a secret-named key (see `secretKind`) replaced by
+ * `[redacted]`. That includes `token`: node configs use it for real secrets. `${NAME}`
+ * placeholders stay. Returns a deep copy; the input is not changed.
  */
 export function redactSecrets<T>(value: T): T {
 	return redactValue(value, false) as T;
@@ -253,26 +196,15 @@ export function redactSecrets<T>(value: T): T {
 // =============================================================================
 
 /**
- * `redactSecrets` works on structured results, by field name. Text has no
- * fields, so `findSecrets` looks for what a credential looks like: a known key
- * shape, a bearer token, a password in a URL, a private key block, or a JSON
- * string or number under a secret-named key (`"apikey": "..."`). `redactText`
- * hides what it finds; every tool result passes through it on its way to the
- * model (wave/loop.ts), and so do the answer, the session rows and the title.
- * `looksLikeCredential` runs the same search on what the user types, and
- * counts only what is sure to be a key. The file tools put markers in place
- * of these instead (`./secretMarkers.ts`), so an edit can put the real value
- * back; `redactText` leaves every marker as it is, since `[redacted]` in its
- * place would be written over the value.
- *
- * Bare `key: value` and `NAME=value` lines are left to the file markers, which
- * apply them to YAML and `.env`-style files only: in code, `token: string` is
- * a type, not a secret.
+ * Text has no fields, so `findSecrets` looks for what a credential looks like: a key shape, a bearer
+ * token, a URL password, a private key block, or a JSON value under a secret-named key. Every tool
+ * result reaches the model through `redactText`, which leaves file markers (`./secretMarkers.ts`)
+ * alone: `[redacted]` in their place would be written over the value. Bare `key: value` lines are
+ * left to the file markers, because in code `token: string` is a type, not a secret.
  */
 
 /** One credential found in text. */
 export interface SecretSpan {
-	/** Where it starts. */
 	start: number;
 	/** Where it ends (exclusive). */
 	end: number;
@@ -285,19 +217,13 @@ export interface SecretSpan {
 /** A marker the file tools show in place of a secret value: `«secret:<id>»`. */
 const MARKER = /^«secret:[^»\s]{1,64}»$/;
 
-/** Every marker in a text. */
 const MARKERS = /«secret:[^»\s]{1,64}»/g;
 
 /**
- * Credential shapes, most specific first, each with the kind it is reported
- * as. A lookbehind keeps a shape from starting inside a longer word (`task-…`
- * holds `sk-`). For bearer tokens and URL passwords only the secret part
- * matches, so `Bearer` and the user and host stay readable. A bearer token is
- * not sure: `Bearer` may be followed by an ordinary word. A URL password stops
- * at `?` and `#`, which a URL cannot hold before its host, and at `«`, which
- * starts a marker. A prefix that ordinary text also starts with (FullCalendar's
- * `fc-` classes, the model name `pplx-70b-online`) matches only when as many
- * key characters follow it as a real key has.
+ * Credential shapes, most specific first. A lookbehind keeps a shape from starting inside a word
+ * (`task-…` holds `sk-`). Bearer tokens and URL passwords match only the secret part; a bearer
+ * token is not sure, since `Bearer` may precede an ordinary word. A URL password stops at `?`, `#`
+ * and `«` (a marker). A prefix ordinary text shares (`fc-`, `pplx-70b-online`) needs a key's length.
  */
 const SHAPES: ReadonlyArray<{ kind: string; sure: boolean; pattern: RegExp }> = [
 	// An unclosed block (a read window cut it) runs to the end of the text.
@@ -335,7 +261,6 @@ const RUN_TOKEN_PREFIX = 'tk_';
  *
  * @param value - The field's value, unescaped.
  * @param kind - What the field is named for; a password or secret field holds a number as a secret.
- * @returns True when there is nothing to hide.
  */
 export function holdsNoSecret(value: string, kind: SecretKind = 'secret'): boolean {
 	return value === '' || value === REDACTED || PLACEHOLDER.test(value) || MARKER.test(value) || (kind === 'token' && NUMBER.test(value));
@@ -356,16 +281,9 @@ export function unescapeJson(raw: string): string {
 }
 
 /**
- * Every credential in a text, in order of where it starts, overlaps kept. A
- * file marker already stands for a value, so a span that touches one is left
- * out. Each marker is read as a run of digits: part of a word, as the value
- * it hides was, and the start of no shape or URL scheme. So a shape next to a
- * marker matches only where it matched before the value was hidden:
- * `-----END PRIVATE KEY-----sk-…` holds no `sk-` key, and hiding the block
- * must not make one.
- *
- * @param text - Any text.
- * @returns Each one's place, kind and sureness.
+ * Every credential in a text, in start order, overlaps kept. A span touching a file marker is left
+ * out, and a marker reads as a run of digits, so a shape next to one matches only where it matched
+ * before the value was hidden (`-----END PRIVATE KEY-----sk-…` holds no `sk-` key).
  */
 function credentials(text: string): SecretSpan[] {
 	const markers = [...text.matchAll(MARKERS)].map((m) => ({ start: m.index, end: m.index + m[0].length }));
@@ -392,9 +310,6 @@ function credentials(text: string): SecretSpan[] {
 
 /**
  * Every credential in a text, in order, overlaps merged.
- *
- * @param text - Any text.
- * @returns Where each one is and what kind it is; empty when there is none.
  */
 export function findSecrets(text: string): SecretSpan[] {
 	return mergeSpans(credentials(text));
@@ -403,9 +318,6 @@ export function findSecrets(text: string): SecretSpan[] {
 /**
  * Sorts spans and merges the ones that overlap; a merged span keeps the kind
  * of the one that starts first.
- *
- * @param spans - Spans in any order.
- * @returns Spans in order, none overlapping.
  */
 export function mergeSpans<T extends { start: number; end: number }>(spans: T[]): T[] {
 	const merged: T[] = [];
@@ -419,11 +331,6 @@ export function mergeSpans<T extends { start: number; end: number }>(spans: T[])
 
 /**
  * Replaces each span of a text.
- *
- * @param text - The text.
- * @param spans - Spans in order, none overlapping (see `mergeSpans`).
- * @param replace - The replacement for a span, given its text.
- * @returns The text with every span replaced.
  */
 export function replaceSpans<T extends { start: number; end: number }>(text: string, spans: T[], replace: (found: string, span: T) => string): string {
 	let out = '';
@@ -440,7 +347,6 @@ export function replaceSpans<T extends { start: number; end: number }>(text: str
  * `${NAME}` placeholders, file markers and the run token stay.
  *
  * @param text - Text on its way to the model, the chat or the session file.
- * @returns The text with each credential replaced; the same text when there is none.
  */
 export function redactText(text: string): string {
 	const spans = findSecrets(text);
@@ -448,13 +354,10 @@ export function redactText(text: string): string {
 }
 
 /**
- * Whether a text holds something sure to be a credential: a key shape, a
- * private key or a password in a URL. Used on what the user types, before
- * anything is sent. A secret-named field or a `Bearer` word is not enough:
- * `"max_token": "4096"` and "the API wants Bearer token_from_login" are not
- * keys, and holding them back would stop the user.
+ * Whether the user's message holds something sure to be a credential (a key shape, a private key
+ * or a URL password), checked before it is sent. A secret-named field or a `Bearer` word is not
+ * enough: holding back `"max_token": "4096"` would stop the user.
  *
- * @param text - The user's message.
  * @returns The kind of the first one found ("OpenAI-style"), or null.
  */
 export function looksLikeCredential(text: string): string | null {
@@ -468,11 +371,6 @@ export function looksLikeCredential(text: string): string | null {
 /**
  * Turns a client result into the string a tool returns: secrets stripped,
  * pretty-printed, and clipped.
- *
- * @param value - The client's result.
- * @param hint - How the model can see less or see the rest if the text is cut.
- * @param hide - Hides the values the run's file tools hid, before the cut.
- * @returns The tool's result string.
  */
 export function toolText(value: unknown, hint: string, hide = (text: string): string => text): string {
 	return clip(hide(JSON.stringify(redactSecrets(value), null, 1) ?? 'null'), hint);
@@ -485,8 +383,6 @@ export function toolText(value: unknown, hint: string, hide = (text: string): st
 /**
  * A number argument, given as a number or numeric text.
  *
- * @param args - The tool arguments.
- * @param key - The argument name.
  * @param whole - True when only whole numbers are valid.
  * @returns The number; undefined when the argument is absent.
  * @throws When the argument is not a number.
@@ -504,8 +400,6 @@ export function numberArg(args: Record<string, unknown>, key: string, whole = fa
 /**
  * A text argument, trimmed.
  *
- * @param args - The tool arguments.
- * @param key - The argument name.
  * @returns The text; empty when the argument is absent or not text.
  */
 export function textArg(args: Record<string, unknown>, key: string): string {
@@ -523,9 +417,6 @@ const SUMMARY_DETAIL_MAX_CHARS = 200;
 /**
  * Error text made fit for a summary: the text redacted, on one line, cut
  * short. The step output keeps the full text.
- *
- * @param text - The raw error text.
- * @returns At most about 200 characters on one line.
  */
 export function brief(text: string): string {
 	// redact before the cut: a cut inside a credential leaves a part no pattern matches
@@ -535,10 +426,6 @@ export function brief(text: string): string {
 
 /**
  * Waits.
- *
- * @param ms - Milliseconds.
- * @param signal - Ends the wait at once when it aborts (immediately if it already has).
- * @returns Resolves after the wait, or when the signal aborts.
  */
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 	return new Promise((resolve) => {
@@ -558,12 +445,9 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 // =============================================================================
 
 /**
- * `pipelineArg` serves the validate every `.pipe` save runs and the client
- * tool's `filepath`. It takes a pipeline two ways: `path` (a `.pipe` file in the
- * workspace) or `pipeline` (the object itself). Either may be wrapped as
- * `{ "pipeline": { ... } }`, the way a saved `.pipe` file often is. The client's
- * `use()` and `validate()` want the flat config (`components`, `source` and
- * `project_id` at the top level), so `pipelineArg` hands back that shape.
+ * `pipelineArg` takes a pipeline as `path` (a `.pipe` file) or `pipeline` (the object), either one
+ * possibly wrapped as `{ "pipeline": { ... } }` like a saved file. The client's `use()` and
+ * `validate()` want the flat config, so it hands that back.
  */
 
 // =============================================================================
@@ -577,10 +461,8 @@ export type JsonObject = Record<string, unknown>;
 // CONSTANTS
 // =============================================================================
 
-/** The message when neither argument is given. */
 const NEED_ONE = 'Pass path (a .pipe file in the workspace) or pipeline (the pipeline object).';
 
-/** How to write a path that a path refusal asks for. */
 const FROM_ROOT = 'Pass the path from the workspace root, for example pipelines/chat.pipe.';
 
 // =============================================================================
@@ -589,20 +471,14 @@ const FROM_ROOT = 'Pass the path from the workspace root, for example pipelines/
 
 /**
  * Whether a value is a JSON object.
- *
- * @param value - Any value.
- * @returns True for a non-null, non-array object.
  */
 export function isJsonObject(value: unknown): value is JsonObject {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /**
- * Strips the `{ "pipeline": { ... } }` wrapper. The engine reads a missing
- * version as legacy, so a version written beside the wrapper moves inside.
- *
- * @param file - A pipeline object, wrapped or flat.
- * @returns The flat config.
+ * Strips the `{ "pipeline": { ... } }` wrapper. The engine reads a missing version as legacy, so a
+ * version written beside the wrapper moves inside.
  */
 function unwrap(file: JsonObject): JsonObject {
 	const inner = file.pipeline;
@@ -613,7 +489,6 @@ function unwrap(file: JsonObject): JsonObject {
 /**
  * The text of a failure, ready to sit inside a longer message.
  *
- * @param err - Whatever was thrown.
  * @returns Its message without a closing period, so a sentence can follow.
  */
 export function messageOf(err: unknown): string {
@@ -627,7 +502,6 @@ export function messageOf(err: unknown): string {
  * this drops it, because a leading `./` is how people write a relative path.
  *
  * @param raw - The path as the model passed it.
- * @returns The path with `/` separators and no empty or `.` segments.
  * @throws When a segment is `..`, or no segment is left; the message says what to pass instead.
  */
 export function workspacePath(raw: string): string {
@@ -640,14 +514,7 @@ export function workspacePath(raw: string): string {
 	return segments.join('/');
 }
 
-/**
- * Reads and parses one pipeline file.
- *
- * @param vfs - The workspace view.
- * @param path - The workspace path of the file.
- * @returns The file's JSON object, wrapped or flat.
- * @throws When the file is missing, is not JSON, or is not an object.
- */
+/** Reads and parses one pipeline file; throws when it is missing, not JSON, or not an object. */
 async function readPipeFile(vfs: IWorkspaceFileSystem, path: string): Promise<JsonObject> {
 	let raw: unknown;
 	try {
@@ -679,7 +546,6 @@ async function readPipeFile(vfs: IWorkspaceFileSystem, path: string): Promise<Js
  * Resolves a tool call's `path` or `pipeline` argument to a flat pipeline config.
  *
  * @param args - The tool arguments; exactly one of `path` and `pipeline`.
- * @param vfs - The workspace view a `path` is read from.
  * @returns The flat config, and the `path` (spelled as `workspacePath` spells it) when that is where it came from.
  * @throws When both or neither argument is given, the path holds `..` or no file, or the pipeline cannot be read; the message says how to fix it.
  */

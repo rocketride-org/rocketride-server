@@ -25,26 +25,15 @@
 // =============================================================================
 
 /**
- * terminate and restart ask the user in Ask mode, and in Auto mode act only
- * on a run this conversation started (approval.ts). This ledger says which
- * runs those are.
- *
- * - A `use` the engine answers with `reused: false` started a run. `use`
- *   returns no start time, so the ledger reads `getTaskStatus(token)` at once
- *   and records the token, project_id, source and startTime from it, with the
- *   scope and the conversation. A reused run, or one whose status could not be
- *   read, is not recorded.
- * - A `deploy.run` start is never recorded: a token and a later start time
- *   don't prove this conversation started it.
- * - Right before an Auto terminate or restart, `recheck` reads the status
- *   again. The start time, project_id and source must match the record, and
- *   the host's scope must be the one recorded. The engine reuses a token for
- *   the same project and source, so a later run on it has another start time.
- * - After a restart, the record is refreshed from a status read.
- *
- * The records live in the session file (version 2), so a reloaded
- * conversation still owns its runs. Between the recheck and the call the run
- * could still change; that window is a known limit.
+ * Says which runs this conversation started, so terminate and restart act on them without asking in
+ * Auto mode (approval.ts).
+ * - A `use` the engine answers with `reused: false` started a run; its status is read at once and
+ *   recorded (token, project_id, source, startTime, scope, conversation). A `deploy.run` is never
+ *   recorded: a token and a later start time don't prove who started it.
+ * - Right before an Auto terminate or restart, `recheck` reads the status again; start time,
+ *   project_id, source and scope must match, since the engine reuses a token for a project and source.
+ * Records live in the session file, so a reloaded conversation still owns its runs. The run can still
+ * change between the recheck and the call; that window is a known limit.
  */
 
 import type { RocketRideClient } from 'rocketride';
@@ -69,7 +58,6 @@ export interface RunOwnership {
 	/**
 	 * The record of the run a call targets, when this conversation started it.
 	 *
-	 * @param target - The run the call names.
 	 * @returns The record, or undefined for a run started elsewhere or not verified.
 	 */
 	owned(target: RunTarget): RunRecord | undefined;
@@ -136,10 +124,6 @@ export class RunLedger implements RunOwnership {
 	/**
 	 * Hears a rocketride_client call that worked: a fresh `use` is recorded,
 	 * and a restart refreshes the record of the run it named.
-	 *
-	 * @param method - The client method.
-	 * @param params - Its arguments.
-	 * @param result - What it returned.
 	 */
 	async afterCall(method: string, params: readonly unknown[], result: unknown): Promise<void> {
 		if (method === 'use') await this.recordUse(result);
@@ -185,7 +169,6 @@ export class RunLedger implements RunOwnership {
 	}
 }
 
-/** A field as text, or undefined. */
 function text(value: unknown): string | undefined {
 	return typeof value === 'string' && value ? value : undefined;
 }

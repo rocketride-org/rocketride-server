@@ -148,8 +148,6 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 	/**
 	 * Throws when the view refuses changes to a path. Views without a rule
 	 * omit it.
-	 *
-	 * @param path - The path a change would touch.
 	 */
 	assertWritable?(path: string): void;
 
@@ -219,16 +217,12 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 	/**
 	 * How each staged path differs from what the server stores. A view that
 	 * writes through stages nothing, so its map is empty.
-	 *
-	 * @returns Map of canonical path to change kind.
 	 */
 	changedPaths?(): Map<string, ChangeKind>;
 
 	/**
 	 * Drops one path's staged changes, so the next read sees the server's
 	 * copy again. The server is not touched.
-	 *
-	 * @param path - The path to revert.
 	 */
 	discardPath?(path: string): Promise<void>;
 }

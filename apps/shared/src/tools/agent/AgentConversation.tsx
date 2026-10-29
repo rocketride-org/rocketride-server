@@ -32,26 +32,16 @@
 //
 //   send  → useChatMessages → session.execute (the injected request
 //           transport, wrapping the agent() stub) → bot rows render
-//
-// The hook runs one turn at a time: a send during a turn queues, and the
-// agent reads it at its next step. ChatView's Stop ends the turn.
 //   after → session.save(hook messages) persists the conversation and the
 //           catalog row (announced on the shell bus; the sidebar re-lists)
 //
-// Each turn's bot row carries the card of how it ended (session.decorate),
-// and the card's links and buttons come back through onCardAction. The
-// latest turn's card has Undo; what an Undo did shows as a note row, and a
-// message sent while Undo runs waits for that row. When the tab unmounts
-// (closed, or a team switch), the session keeps the rows it showed last and
-// saves them (session.detach).
+// Each turn's bot row carries the card of how it ended (session.decorate); its links and buttons, Undo
+// included, come back through onCardAction. On unmount the session saves the rows it showed last.
 //
 // A brand-new conversation renders a welcome panel of example prompts in
 // place of the empty thread — clicking one sends it as the first request.
 //
-// Beside the composer, a switch sets the agent's approval mode for every
-// agent chat at once: Ask first, or Don't ask. It goes through the host's
-// approval handle, so it writes the same setting the Settings page shows.
-// Cards that need the user's OK show in the thread itself (ChatTurn.ask).
+// Beside the composer, ApprovalModeSwitch sets the approval mode for every agent chat (the Settings setting).
 //
 // The session is loaded once per mount; Documents keeps open tabs mounted,
 // so switching tabs never reloads, and reopening a closed tab re-reads disk.
@@ -194,7 +184,6 @@ const MODES: Readonly<Record<ApprovalMode, { label: string; hint: string }>> = {
  * card, since the run hears the setting change.
  *
  * @param props.controls - The host's approval handle for UI code.
- * @returns The switch.
  */
 const ApprovalModeSwitch: React.FC<{ controls: ApprovalControls }> = ({ controls }) => {
 	const { mode } = useSyncExternalStore(controls.subscribe, controls.read);
@@ -314,11 +303,8 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 	}, [isTyping, messages, session]);
 
 	/**
-	 * Composer submit — the hook's built-in API path is bypassed by `request`.
-	 * A key is redacted before the row is made. Idle, the turn it opens shows
-	 * the error row; during a turn, the note says the key was not sent. While
-	 * an Undo runs, the message waits for it, so the turn it opens reads
-	 * Undo's note.
+	 * Composer submit. A key is redacted before the row is made; while an Undo runs, the message waits for it,
+	 * so the turn it opens reads Undo's note.
 	 */
 	const handleSend = useCallback(
 		(text: string) => {

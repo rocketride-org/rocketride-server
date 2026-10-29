@@ -127,7 +127,6 @@ const FileProvider: React.FC<FileProviderProps> = ({ path }) => {
 	const [doc, setDoc] = useState(() => fileDocument(getWorkspaceVfs(), path));
 	const [, render] = useReducer((n: number) => n + 1, 0);
 
-	// A path the workspace refuses to change opens read-only, with no Save.
 	const readOnly = !isWritable(path);
 
 	// The tab joins the document while mounted, and loads it (a document with unsaved text keeps it).

@@ -27,15 +27,11 @@
 // TEMPORARY (spec §11): delete when Rod's wiring lands
 
 /**
- * Until Rod's backend lands, a run asks its model questions on a small
- * pipeline it starts itself: a webhook source, an Anthropic model, and the
- * answers lane. The model's key is never in the code: the pipeline names the
- * `${ROCKETRIDE_ANTHROPIC_KEY}` placeholder, and the engine fills it from the
- * tester's Variables.
- *
- * Each conversation gets its own pipeline: the engine names a running task by
- * its owner, project and source, so two conversations sharing one pipeline
- * would fail with "Pipeline is already running" (spec §12).
+ * Until Rod's backend lands, a run asks its model on a small pipeline it starts itself: webhook
+ * source, Anthropic model, answers lane. The key is never in code: the pipeline names
+ * `${ROCKETRIDE_ANTHROPIC_KEY}` and the engine fills it from the tester's Variables. Each
+ * conversation gets its own pipeline: the engine names a running task by owner, project and source,
+ * so two conversations on one pipeline fail with "Pipeline is already running".
  */
 
 import type { PipelineConfig } from 'rocketride';
@@ -96,14 +92,10 @@ function standinPipeline(projectId: string): Record<string, unknown> {
 // TEMPORARY (spec §11): delete when Rod's wiring lands
 /** The stand-in pipelines of the open conversations, one each, started on the first question. */
 export class StandinPipelines {
-	/** The host's client getter. */
 	private readonly client: ClientGetter;
 	/** The token of each conversation's pipeline, as a promise so two asks at once start one. */
 	private readonly tokens = new Map<string, Promise<string>>();
 
-	/**
-	 * @param client - The host's client getter.
-	 */
 	constructor(client: ClientGetter) {
 		this.client = client;
 	}
@@ -111,7 +103,6 @@ export class StandinPipelines {
 	/**
 	 * The token of a conversation's pipeline, starting the pipeline on the first ask.
 	 *
-	 * @param conversationId - The conversation the model calls belong to.
 	 * @returns The pipeline token. A failed start is not kept, so the next ask tries again.
 	 */
 	token(conversationId: string): Promise<string> {
@@ -128,9 +119,6 @@ export class StandinPipelines {
 	/**
 	 * Replaces a conversation's pipeline: ends the old one and starts a new one.
 	 * It covers a pipeline that failed or ended after 15 idle minutes.
-	 *
-	 * @param conversationId - The conversation whose pipeline to replace.
-	 * @returns The new pipeline's token.
 	 */
 	async restart(conversationId: string): Promise<string> {
 		const old = this.tokens.get(conversationId);
@@ -145,12 +133,6 @@ export class StandinPipelines {
 		return this.token(conversationId);
 	}
 
-	/**
-	 * Starts the conversation's pipeline.
-	 *
-	 * @param conversationId - The conversation the pipeline serves.
-	 * @returns The pipeline token.
-	 */
 	private async start(conversationId: string): Promise<string> {
 		const started = await requireClient(this.client).use({ pipeline: standinPipeline(conversationId) as unknown as PipelineConfig, useExisting: true });
 		if (!started.token) throw new Error('The engine returned no token for the model pipeline.');

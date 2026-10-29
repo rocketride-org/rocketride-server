@@ -25,43 +25,16 @@
 // =============================================================================
 
 /**
- * A file the agent reads may hold a secret: an inline key in a `.pipe`, a
- * token in a config file. The model must never see it, but it must be able to
- * edit the file without losing it. So read_file and search_files show
- * `«secret:<id>»` in place of each secret value, and write_file and edit_file
- * put the value back before they write. The id is 8 random hex characters, not
- * derived from the value. One value keeps one marker for the whole run, so a
- * re-read shows the same marker and edit anchors keep matching. The map lives
- * in a `SecretMarkers`, one per run (`FilesystemTools` owns it), and never
- * leaves the page.
- *
- * What counts as a secret value:
- * - In `.pipe`, `.json`, `.yaml` and `.yml` files, every string under a
- *   secret-named key (`secretKind`), the way `redactSecrets` decides for
- *   structured results, unless it holds no secret (`holdsNoSecret`). A number
- *   counts too under a password or secret name, not under a token name.
- * - In `.env*`, `.toml`, `.ini`, `.properties` and `.sh` files, the value of
- *   each secret-named `NAME=value`, one per line or each one an `export`
- *   sets, unless it holds no secret. In a shell or `.env` file, a `$NAME`
- *   value names another variable, so it holds none.
- * - In any file, what `findSecrets` finds: key shapes, bearer tokens, URL
- *   passwords, private key blocks and JSON secret fields. Every tool result
- *   passes through `redactText`, which hides the same things as `[redacted]`;
- *   a marker first means a read never shows `[redacted]`, which a write would
- *   then save over the user's key.
- * - In any file, in every tool result (wave/loop.ts), and on cards and in the
- *   answer (run.ts), a value this run already hid, when it is 16 characters
- *   or longer, or 8 or longer with a character that is not a letter.
- *
- * An edit anchor is matched against the file as the model sees it, markers in
- * place: matched against the real text, it would tell the model whether a
- * guess at part of a value is right.
- *
- * Not seen: a key encoded (base64) or split across lines, YAML block scalars,
- * a quoted YAML value that runs onto the next line, YAML values nested under a
- * secret-named key, a JSON value after an unclosed quote earlier on the
- * same line, a `NAME=value` value that runs onto the next line, and a TOML
- * inline table.
+ * read_file and search_files show `«secret:<id>»` in place of each secret value, and write_file and
+ * edit_file put the value back, so the model can edit a file without ever seeing its keys. The id is
+ * random, not derived from the value, and one value keeps one marker for the run so edit anchors keep
+ * matching. The map lives in one `SecretMarkers` per run and never leaves the page.
+ * Hidden: secret-named fields in JSON, YAML and `NAME=value` files, whatever `findSecrets` finds, and any
+ * value this run already hid. A marker comes first so a read never shows `[redacted]`, which a write
+ * would then save over the user's key.
+ * Not seen: base64 or split keys, YAML block scalars, multi-line quoted YAML values, YAML values nested
+ * under a secret-named key, JSON after an unclosed quote on the same line, multi-line `NAME=value`
+ * values, and TOML inline tables.
  */
 
 import { findSecrets, holdsNoSecret, mergeSpans, replaceSpans, secretKind, unescapeJson, type SecretKind } from './common';
@@ -145,7 +118,6 @@ const JSON_NUMBER = /-?\d[\d.eE+-]*/y;
 
 /** One secret value in a text: where it is, and where the note says it sits. */
 interface Found {
-	/** Where the value starts. */
 	start: number;
 	/** Where it ends (exclusive). */
 	end: number;
@@ -155,7 +127,6 @@ interface Found {
 
 /** One open object or array while JSON text is scanned. */
 interface Frame {
-	/** True for an array. */
 	array: boolean;
 	/** Its path from the root; '' for the root. */
 	path: string;
@@ -173,36 +144,18 @@ interface Frame {
 // FINDING SECRET FIELDS
 // =============================================================================
 
-/**
- * The path of the value a frame is reading now.
- *
- * @param frame - The innermost open object or array.
- * @returns For example `components[1].config.apikey`.
- */
+/** The path of the value a frame is reading now, such as `components[1].config.apikey`. */
 function childPath(frame: Frame): string {
 	if (frame.array) return `${frame.path}[${frame.index}]`;
 	return frame.path ? `${frame.path}.${frame.key}` : frame.key;
 }
 
-/**
- * What the value a frame is reading now is a secret for, from its own key
- * and the keys above it. A secret name above a token name wins.
- *
- * @param frame - The innermost open object or array.
- * @returns 'secret', 'token', or null when no key above it is secret-named.
- */
+/** The frame's current value's SecretKind, from its key and those above; a secret name beats a token name. */
 function childSecret(frame: Frame): SecretKind | null {
 	const own = frame.key ? secretKind(frame.key) : null;
 	return frame.secret === 'secret' || own === 'secret' ? 'secret' : (frame.secret ?? own);
 }
 
-/**
- * The first character at or after a position that is not white space.
- *
- * @param text - The text.
- * @param from - Where to start looking.
- * @returns The character; '' at the end of the text.
- */
 function nextNonSpace(text: string, from: number): string {
 	for (let i = from; i < text.length; i++) {
 		if (!/\s/.test(text[i])) return text[i];
@@ -211,15 +164,9 @@ function nextNonSpace(text: string, from: number): string {
 }
 
 /**
- * The secret values in JSON text: every string, and every number, under a
- * secret-named key. The text is scanned, not parsed, so a file mid-edit that
- * is not valid JSON is still covered, and each span points into the text as
- * written. A string followed by `:` is a key whatever came before it, so a
- * missing comma or an unclosed string on the line above does not turn the
- * next key into a value.
- *
- * @param text - The file's text.
- * @returns Each value's span (inside its quotes, for a string), with its JSON path.
+ * The secret values under secret-named keys in JSON text. The text is scanned, not parsed, so a file
+ * mid-edit still counts and spans point into the text as written. A string followed by `:` is a key
+ * whatever came before, so a missing comma above does not turn the next key into a value.
  */
 function jsonFields(text: string): Found[] {
 	const found: Found[] = [];
@@ -265,11 +212,8 @@ function jsonFields(text: string): Found[] {
 }
 
 /**
- * Where a quoted YAML value closes: in double quotes a backslash escapes the
- * next character, and in single quotes `''` is a quote, not the end.
- *
- * @param rest - The value, starting with its opening quote.
- * @returns The position of the closing quote; the length of `rest` when it does not close on this line.
+ * Where a quoted YAML value closes (`rest.length` when it stays open). In double quotes a backslash
+ * escapes the next character; in single quotes `''` is a quote.
  */
 function yamlClose(rest: string): number {
 	const quote = rest[0];
@@ -318,7 +262,6 @@ function yamlScalar(rest: string): { text: string; offset: number } | null {
  * The secret values in text made of `key: value` (YAML) or `NAME=value`
  * lines: the value of each line whose key is secret-named.
  *
- * @param text - The file's text.
  * @param field - The line pattern: group 2 is the key, group 3 the value and any comment, empty for an `export` name a word that sets a name follows.
  * @param scalar - Reads the string a value holds, told whether white space comes before it; null when it holds none.
  * @returns Each value's span, named by its key.
@@ -352,8 +295,6 @@ function lineFields(text: string, field: RegExp, scalar: (rest: string, spaced: 
  * is secret-named, and of each name an `export` line sets.
  *
  * @param path - The file's path; its name decides how `#` and `$NAME` read.
- * @param text - The file's text.
- * @returns Each value's span, named by its name.
  */
 function keyValueFields(path: string, text: string): Found[] {
 	const scalar = (rest: string, spaced: boolean): { text: string; offset: number } | null => {
@@ -371,13 +312,7 @@ function keyValueFields(path: string, text: string): Found[] {
 	return found;
 }
 
-/**
- * The line a position falls on.
- *
- * @param text - The text.
- * @param at - A position in it.
- * @returns `line N`, counted from 1.
- */
+/** The line a position falls on, as `line N` counted from 1. */
 function lineOf(text: string, at: number): string {
 	let line = 1;
 	for (let i = text.indexOf('\n'); i >= 0 && i < at; i = text.indexOf('\n', i + 1)) line += 1;
@@ -385,12 +320,9 @@ function lineOf(text: string, at: number): string {
 }
 
 /**
- * The note a read ends with when it hid anything. It says the file holds the
- * value in plain text: told only that a marker stands in, the model took the
- * marker for a stored secret and stopped telling the user to move the key.
- *
- * @param places - Where each hidden value sits.
- * @returns The note: how many values were hidden, where, that the file holds them in plain text, and where they should go.
+ * The note a read ends with when it hid anything. It says the file holds the value in plain text: told
+ * only that a marker stands in, the model took it for a stored secret and stopped telling the user to
+ * move the key.
  */
 function hiddenNote(places: string[]): string {
 	const one = places.length === 1;
@@ -402,11 +334,7 @@ function hiddenNote(places: string[]): string {
 	return `${hidden} ${plain} ${keep} ${move}`;
 }
 
-/**
- * A new marker id: 8 random hex characters.
- *
- * @returns The id.
- */
+/** A new marker id: 8 random hex characters. */
 function randomId(): string {
 	return [...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
@@ -441,14 +369,9 @@ export class SecretMarkers {
 	}
 
 	/**
-	 * Where an edit anchor matches a file as the model sees it, each secret
-	 * value hidden behind its marker. Matched against the real text instead,
-	 * an anchor holding a guess at part of a value would tell the model
-	 * whether the guess is right. An anchor that holds part of a marker
-	 * matches nothing.
-	 *
-	 * @param path - The file's path.
-	 * @param text - The file's full text.
+	 * Where an edit anchor matches the file as the model sees it. Matched against the real text, an anchor
+	 * holding a guess at part of a value would tell the model if the guess is right. An anchor holding
+	 * part of a marker matches nothing.
 	 * @param anchor - The model's anchor, markers and all.
 	 * @returns Each match as a span of `text`, in order, none overlapping.
 	 */
@@ -490,7 +413,6 @@ export class SecretMarkers {
 	 * validated, and a run's output or an error may quote a value too.
 	 *
 	 * @param text - A tool result, an error, or a card or answer the chat shows.
-	 * @returns The text with each known value replaced by its marker.
 	 */
 	hideKnown(text: string): string {
 		const spans = this.known(text);
@@ -502,7 +424,6 @@ export class SecretMarkers {
 	 *
 	 * @param text - Content or an edit anchor from the model.
 	 * @param op - The tool name, for the refusal.
-	 * @returns The text with every marker replaced by its value.
 	 * @throws When a marker is not one this run made.
 	 */
 	reveal(text: string, op: string): string {
@@ -513,12 +434,7 @@ export class SecretMarkers {
 		});
 	}
 
-	/**
-	 * The marker of a value, made the first time the value is hidden.
-	 *
-	 * @param value - The value as the file holds it.
-	 * @returns Its marker.
-	 */
+	/** The marker of a value, made the first time the value is hidden. */
 	private markerFor(value: string): string {
 		let marker = this.markers.get(value);
 		if (marker === undefined) {
@@ -532,14 +448,9 @@ export class SecretMarkers {
 	}
 
 	/**
-	 * Where a file's text holds a secret value: its secret fields, what
-	 * `findSecrets` finds, and the values this run already hid. The values
-	 * found here are learned first, so a second copy of one that looks like a
-	 * key, where no field name or shape gives it away, is hidden on the first
-	 * read too.
-	 *
-	 * @param path - The file's path; its name decides whether fields are read as JSON, YAML or `NAME=value` lines.
-	 * @param text - The file's full text.
+	 * Where a file's text holds a secret value: its secret fields, what `findSecrets` finds, and values
+	 * this run already hid. Found values are learned first, so a second copy of a key-like value with no
+	 * field name or shape to give it away is hidden on the first read too.
 	 * @returns The spans, in order, none overlapping.
 	 */
 	private spans(path: string, text: string): Found[] {
@@ -550,12 +461,7 @@ export class SecretMarkers {
 		return mergeSpans([...found, ...this.known(text)]);
 	}
 
-	/**
-	 * Where a text holds a value this run already hid.
-	 *
-	 * @param text - Any text.
-	 * @returns The spans of every known value of 16 characters or more, or of 8 or more with a character that is not a letter, in order, none overlapping.
-	 */
+	/** Spans of every value this run already hid that looks like a key (see KNOWN_MIN_CHARS), in order. */
 	private known(text: string): Found[] {
 		const found: Found[] = [];
 		for (const value of this.markers.keys()) {

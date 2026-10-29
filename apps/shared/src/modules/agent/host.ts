@@ -40,7 +40,6 @@ import type { IWorkspaceFileSystem } from '../vfs/vfsTypes';
 
 /** A running dev session for one app: rebuilds and live console, error and build feeds. */
 export interface AgentDevSession {
-	/** The app this session serves. */
 	readonly appId: string;
 	/** Whether a preview is attached, so console and errors are live. */
 	readonly previewAttached: boolean;
@@ -52,33 +51,27 @@ export interface AgentDevSession {
 	/**
 	 * Listens to the preview's console output.
 	 *
-	 * @param l - Called once per console row.
 	 * @returns Unsubscribe function.
 	 */
 	subscribeConsole(l: (row: ConsoleRow) => void): () => void;
 	/**
 	 * Listens to the preview's runtime errors.
 	 *
-	 * @param l - Called once per error row.
 	 * @returns Unsubscribe function.
 	 */
 	subscribeErrors(l: (row: AppErrorRow) => void): () => void;
 	/**
 	 * Listens to build state changes.
 	 *
-	 * @param l - Called on every watch status change.
 	 * @returns Unsubscribe function.
 	 */
 	subscribeWatch(l: (s: WatchStatus) => void): () => void;
 }
 
 /**
- * The rejection of an editor's save that wrote nothing because the user
- * dropped or replaced its text while it waited its turn (Reload, Discard
- * mine, Overwrite, closing with Don't Save). What waits on it stops: Save &
- * Run runs nothing, a publish publishes nothing, and the agent's edit after
- * Save mine first is refused. It is the user's own doing, so no editor shows
- * it as a failure.
+ * A save that wrote nothing because the user dropped or replaced the editor's
+ * text while it waited (Reload, Discard mine, Overwrite, Don't Save). Whatever
+ * waits on it stops, and no editor shows it as a failure: the user did it.
  */
 export class SaveDroppedError extends Error {
 	constructor(path: string) {
@@ -113,7 +106,6 @@ export interface AgentHost {
 	/**
 	 * A scope's name for the user (a team's name), when the host has it.
 	 *
-	 * @param scopeKey - The scope key.
 	 * @returns The name, or undefined to name the scope by its id.
 	 */
 	scopeName?(scopeKey: string): string | undefined;
@@ -122,7 +114,6 @@ export interface AgentHost {
 	/**
 	 * Creates a new app from a template.
 	 *
-	 * @param req - The app's name, display name and optional template.
 	 * @returns The new app's id and its bare folder name under apps/ (e.g. 'daybook-ui', not 'apps/daybook-ui').
 	 */
 	scaffoldApp(req: { appName: string; displayName: string; template?: 'Blank' | 'Dashboard' }): Promise<{ appId: string; folder: string }>;
@@ -130,13 +121,11 @@ export interface AgentHost {
 	 * Packs an app folder into a deployable bundle.
 	 *
 	 * @param folder - The app's bare folder name under apps/ (e.g. 'daybook-ui').
-	 * @returns The packed bytes.
 	 */
 	packApp(folder: string): Promise<Uint8Array>;
 	/**
 	 * The running dev session for an app.
 	 *
-	 * @param appId - The app to look up.
 	 * @returns The session, or null when none is running.
 	 */
 	devSession(appId: string): AgentDevSession | null;
@@ -155,7 +144,6 @@ export interface AgentHost {
 	 * Opens a workspace file in its editor, for a file link on a turn's card.
 	 * Hosts without editors leave it out, and the link does nothing.
 	 *
-	 * @param path - The workspace path.
 	 * @returns Whether an editor opened.
 	 */
 	openFile?(path: string): Promise<boolean>;
@@ -192,7 +180,6 @@ export type Grant = 'schedules' | 'deploymentToggles';
 
 /** The user's approval settings at one moment. */
 export interface ApprovalPrefs {
-	/** Ask first, or don't ask. */
 	readonly mode: ApprovalMode;
 	/** The kinds the user has always allowed. */
 	readonly grants: Readonly<Record<Grant, boolean>>;
@@ -206,8 +193,6 @@ export interface ApprovalPrefs {
 export interface ApprovalSettings {
 	/**
 	 * The settings now.
-	 *
-	 * @returns The mode and grants.
 	 */
 	read(): ApprovalPrefs;
 	/**
@@ -229,8 +214,6 @@ export interface ApprovalSettings {
 export interface ApprovalControls extends ApprovalSettings {
 	/**
 	 * Sets the mode for every agent chat at once.
-	 *
-	 * @param mode - Ask first, or don't ask.
 	 */
 	setMode(mode: ApprovalMode): void;
 }
@@ -265,8 +248,6 @@ export function setAgentHost(host: AgentHost): void {
 
 /**
  * The installed host, or a loud failure when startup never set one.
- *
- * @returns The installed host.
  */
 export function getAgentHost(): AgentHost {
 	if (!current) throw new Error('The agent host is not configured — rocket-ui sets it at startup.');
@@ -276,8 +257,6 @@ export function getAgentHost(): AgentHost {
 /**
  * The installed host, or null when none is set. For UI that renders in hosts
  * that may not serve the agent; agent code uses getAgentHost().
- *
- * @returns The installed host, or null.
  */
 export function findAgentHost(): AgentHost | null {
 	return current;

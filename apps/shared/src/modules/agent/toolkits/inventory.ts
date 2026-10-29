@@ -25,13 +25,9 @@
 // =============================================================================
 
 /**
- * The agent's first call in a session. `list_workspace` answers "what is
- * here?" so the model never has to walk `apps/`, `nodes/` and `pipelines/`
- * itself: each app with its manifest id and name, each node package with its
- * service manifests, each pipeline file. Rod wrote this tool and deleted it on
- * 2026-10-17; this port adds whether each app is open. `readApps` and
- * `findApp` are shared with the app tools and check_app, so every tool
- * resolves "which app?" the same way.
+ * `list_workspace` answers "what is here?" so the model never walks `apps/`, `nodes/` and `pipelines/`
+ * itself. `readApps` and `findApp` are shared with the app tools and check_app, so every tool resolves
+ * "which app?" the same way.
  */
 
 import { AgentTool, AgentToolkit } from '../tools';
@@ -52,7 +48,6 @@ export interface AppEntry {
 	id?: string;
 	/** The manifest display name. */
 	name?: string;
-	/** The manifest description. */
 	description?: string;
 	/** The manifest mode (managed or manual). */
 	mode?: string;
@@ -90,25 +85,14 @@ interface PipelineEntry {
 const NO_MANIFEST = 'package.json has no readable appManifest';
 
 /**
- * Lists a folder's entries, treating a missing folder as empty. A workspace
- * with no apps, nodes or pipelines yet has none of the three roots, and the
+ * Lists a folder's entries, a missing folder as empty: a new workspace lacks the three roots, and the
  * memory workspace throws on a missing folder where the real view does not.
- *
- * @param vfs - The workspace view.
- * @param dir - The folder to list.
- * @returns Its entries, or none when it does not exist.
  */
 async function entriesOf(vfs: IWorkspaceFileSystem, dir: string): Promise<{ name: string; type: 'file' | 'dir' }[]> {
 	return (await vfs.stat(dir)) === 'dir' ? vfs.list(dir) : [];
 }
 
-/**
- * Narrows a manifest field to text. A manifest is user-written JSON, so a
- * field of the wrong type reads as absent rather than leaking into the result.
- *
- * @param value - The raw field.
- * @returns The text, or undefined when it is not a string.
- */
+/** A manifest field as text; a wrong-typed field in user-written JSON reads as absent. */
 function text(value: unknown): string | undefined {
 	return typeof value === 'string' ? value : undefined;
 }
@@ -138,10 +122,7 @@ function manifestOf(raw: unknown): Record<string, unknown> | undefined {
  * package.json, JSON that does not parse, or no appManifest object gives an
  * entry with the manifest `error`, because the agent can fix those.
  *
- * @param vfs - The workspace view.
  * @param folder - The folder name under `apps/`.
- * @param isOpen - Whether an app id has a running dev session.
- * @returns The app's entry.
  * @throws When package.json exists but cannot be read: that says nothing about its manifest.
  */
 async function readApp(vfs: IWorkspaceFileSystem, folder: string, isOpen: (appId: string) => boolean): Promise<AppEntry> {
@@ -198,7 +179,6 @@ export function findApp(apps: AppEntry[], ref: string): AppEntry {
 /**
  * Reads every node package under `nodes/`: the `services.*.json` manifests in each folder.
  *
- * @param vfs - The workspace view.
  * @returns One entry per folder, in folder order; empty when `nodes/` does not exist.
  */
 async function readNodes(vfs: IWorkspaceFileSystem): Promise<NodeEntry[]> {
@@ -217,7 +197,6 @@ async function readNodes(vfs: IWorkspaceFileSystem): Promise<NodeEntry[]> {
 /**
  * Reads every pipeline file on the `pipelines/` mount.
  *
- * @param vfs - The workspace view.
  * @returns One entry per `.pipe` file; empty when `pipelines/` does not exist.
  */
 async function readPipelines(vfs: IWorkspaceFileSystem): Promise<PipelineEntry[]> {
@@ -242,7 +221,6 @@ export class InventoryToolkit extends AgentToolkit {
 	 * Builds the toolkit.
 	 *
 	 * @param vfs - The workspace view (the staged one, so unsaved entities list too).
-	 * @param isOpen - Whether an app id has a running dev session.
 	 */
 	constructor(vfs: IWorkspaceFileSystem, isOpen: (appId: string) => boolean) {
 		super();
@@ -250,11 +228,6 @@ export class InventoryToolkit extends AgentToolkit {
 		this.isOpen = isOpen;
 	}
 
-	/**
-	 * The `list_workspace` tool.
-	 *
-	 * @returns The group's tools.
-	 */
 	tools(): AgentTool[] {
 		return [
 			new AgentTool({

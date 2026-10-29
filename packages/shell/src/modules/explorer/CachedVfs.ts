@@ -227,14 +227,9 @@ export class CachedVfs implements IVirtualFileSystem {
 	}
 
 	/**
-	 * Caches what a backend read returned, unless the path, a directory
-	 * above it, or the whole cache changed after the read started: the read
-	 * may hold an older copy than a write that landed meanwhile, the copy an
-	 * invalidate dropped, or a file a delete or rename of its directory took
-	 * away.
-	 *
-	 * @param path - The relative file path.
-	 * @param content - What the read returned.
+	 * Caches what a backend read returned, unless the path, a directory above it, or the whole cache
+	 * changed after the read started: the read may then be older than a write, invalidate, delete or
+	 * rename that landed meanwhile.
 	 * @param since - The change count when the read started.
 	 */
 	private fill(path: string, content: unknown, since: number): void {

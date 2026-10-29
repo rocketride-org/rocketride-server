@@ -8,9 +8,7 @@
  * for future attachments), an auto-growing textarea, and the stock primary Send
  * Button. Enter sends; Shift+Enter inserts a newline. The whole row is disabled
  * (input + Send) when `disabled` is true — callers pass the global connection
- * state; this component never imports shell. With `turn`, a Stop button shows
- * while a turn runs, Esc stops it, and text that Stop or Edit hands back lands
- * in the box. Send stays enabled during a turn: a send then queues.
+ * state; this component never imports shell. Send stays enabled during a turn: a send then queues.
  *
  * The textarea (rather than the stock single-line InputField) is required so
  * Shift+Enter can insert a newline; it is styled from the same

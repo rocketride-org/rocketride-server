@@ -25,14 +25,10 @@
 // =============================================================================
 
 /**
- * One tool, `ask_user`: the model asks the user something no tool can answer
- * (a decision, a missing Variable). The loop ends the turn after that wave
- * (`endTurn` in wave/loop.ts), the question is the turn's answer, and the
- * turn's outcome is needs_input. The user's next message answers it.
- *
- * For a Variable the tool reads the account's Variable names
- * (`account.getEnvironmentKeys`, names only) to say whether the name is set.
- * It never says whether a key works.
+ * `ask_user`: the model asks the user something no tool can answer (a decision, a missing Variable). The turn
+ * ends after that wave with the question as its answer and outcome needs_input; the user's next message
+ * answers it. For a Variable it reads the account's Variable names (names only) to say whether it is set,
+ * never whether a key works.
  */
 
 import { AgentTool, AgentToolkit } from '../tools';
@@ -69,7 +65,6 @@ const DESCRIPTION = `Ask the user a question and end the turn. Their reply comes
 
 Call it alone or last in a step, because nothing after it in the turn runs.`;
 
-/** What the tool returns. */
 const ASKED = 'Asked the user. The turn ends here; their reply comes as the next message.';
 
 // =============================================================================
@@ -91,11 +86,6 @@ export class AskUserToolkit extends AgentToolkit {
 		super();
 	}
 
-	/**
-	 * The one tool.
-	 *
-	 * @returns The group's tools.
-	 */
 	tools(): AgentTool[] {
 		return [
 			new AgentTool({
@@ -120,8 +110,6 @@ export class AskUserToolkit extends AgentToolkit {
 	/**
 	 * Keeps the question, which ends the turn after this wave.
 	 *
-	 * @param args - The tool arguments.
-	 * @returns What the model reads.
 	 * @throws When the arguments are wrong, or the run already asked; the message says how to fix it.
 	 */
 	private async ask(args: Record<string, unknown>): Promise<string> {
@@ -146,12 +134,7 @@ export class AskUserToolkit extends AgentToolkit {
 		return ASKED;
 	}
 
-	/**
-	 * Whether a Variable's name is among the account's Variables.
-	 *
-	 * @param name - The Variable's name.
-	 * @returns True or false, or undefined when the names could not be read.
-	 */
+	/** Whether a Variable's name is among the account's Variables; undefined when the names cannot be read. */
 	private async isSet(name: string): Promise<boolean | undefined> {
 		try {
 			return (await requireClient(this.client).account.getEnvironmentKeys()).includes(name);

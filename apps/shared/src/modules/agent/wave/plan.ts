@@ -32,9 +32,8 @@ import { MEMORY_PEEK_TOOL } from './memory';
 // =============================================================================
 
 /**
- * The Wave loop asks the model for a plan each round, runs the plan's tool
- * calls, and feeds the results back. These are the plain-data shapes that
- * cross those steps; nothing here holds behavior.
+ * Plain-data shapes that cross the Wave loop's steps (ask for a plan, run its calls, feed results
+ * back); no behavior.
  */
 
 // =============================================================================
@@ -75,7 +74,6 @@ export interface PlanReply {
 
 /** What one tool call left behind. */
 export interface ResultEntry {
-	/** Tool name. */
 	tool: string;
 	/** Stable key for the call, used to spot repeats. */
 	key: string;
@@ -104,9 +102,7 @@ export type StopReason = 'done' | 'needs_input' | 'empty_plan' | 'error' | 'stop
 
 /** One earlier turn of the conversation. */
 export interface HistoryTurn {
-	/** Who spoke. */
 	role: 'user' | 'assistant';
-	/** What was said. */
 	content: string;
 }
 
@@ -126,9 +122,7 @@ export interface QuestionSpec {
 	goals: string[];
 	/** Per-wave context: results, memory, check state. */
 	context: string[];
-	/** The question itself. */
 	question: string;
-	/** Whether the reply must be JSON. */
 	expectJson: boolean;
 	/** Whether the host should cache the stable prefix. */
 	cachePrefix: boolean;
@@ -162,11 +156,9 @@ export interface AppPrompts {
 // =============================================================================
 
 /**
- * Each wave asks the model one question. The start of that question (role,
- * instruction sections, history) is the same on every call, so the host can
- * cache it; whatever changes per wave (the request, scratch notes, tool
- * results, loop notes) is appended after it as goals and context. Never edit
- * the start to carry per-wave text: that breaks the cache.
+ * The start of each question (role, instructions, history) is identical on every call so the host
+ * can cache it; per-wave text (request, scratch, results, loop notes) goes after it as goals and
+ * context. Never put per-wave text in the start: that breaks the cache.
  */
 
 // =============================================================================
@@ -199,7 +191,6 @@ export interface WaveState {
 // PREFIX — built once per run
 // =============================================================================
 
-/** The question asked on every wave. */
 const WAVE_QUESTION = 'Plan the next set of tool calls, or set done=true if the goal is already met.';
 
 /** Writes the tool catalog: one compact JSON line per tool, then memory.peek, which the loop runs itself. */
@@ -212,8 +203,6 @@ function toolCatalog(composed: ComposedTools): string {
  * for every wave, so the text is byte-identical each time.
  *
  * @param core - The shared role line and sections; each section becomes one instruction.
- * @param app - The app's workspace map and guide router.
- * @param composed - The mounted tools and their usage instructions.
  * @returns The role and the instructions: core sections, Workspace map, Guides, Available Tools, Tool Instructions.
  */
 export function buildPrefix(core: CorePrompt, app: AppPrompts, composed: ComposedTools): PromptPrefix {
@@ -242,9 +231,7 @@ export function heardText(heard: string[]): string {
  * Builds one wave's question: the fixed start, the history, then this wave's
  * request and context. Context items are always strings, because the client
  * turns any object into "[object Object]".
- *
  * @param prefix - The run's fixed start (see buildPrefix).
- * @param history - Earlier conversation turns, oldest first; it only grows at the end.
  * @param state - This wave's request, scratch notes, results, the user's mid-run messages and loop notes.
  * @returns The question, asking for the start to be cached.
  */
@@ -297,7 +284,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Parses JSON text without throwing. */
 function tryParse(source: string): Parsed {
 	try {
 		return { ok: true, value: JSON.parse(source) };
@@ -358,12 +344,9 @@ function readDone(value: unknown): boolean {
 const CALL_KEYS = new Set(['tool', 'name', 'function', 'args', 'arguments', 'input', 'parameters', 'id', 'type']);
 
 /**
- * The flat shape: an entry's keys that are not call keys are its arguments,
- * values untouched. Three call keys can also be real argument names (`name`
- * of show_view, or an `input` a tool takes as text), so they are arguments
- * where they cannot be anything else:
- * `name` whenever `tool` is given, since it then names nothing, and `input`
- * and `parameters` when `plainText` says they hold plain text.
+ * An entry's non-call keys are its arguments, values untouched. `name` is an argument whenever
+ * `tool` is given, and `input`/`parameters` are when `plainText` says they hold plain text, since
+ * tools take arguments by those names (show_view's `name`).
  */
 function flatArgs(entry: Record<string, unknown>, plainText: boolean): Record<string, unknown> {
 	const named = typeof entry.tool === 'string' && entry.tool !== '';
@@ -377,28 +360,13 @@ function flatArgs(entry: Record<string, unknown>, plainText: boolean): Record<st
 }
 
 /**
- * Reads one entry of `tool_calls`, taking OpenAI's `{name, arguments}` and
- * `{function: {name, arguments}}` shapes (arguments as JSON text) as
- * `{tool, args}`. Returns null, with a problem recorded, for an entry that
- * cannot be run.
- *
- * This departs from Python Wave, which reads arguments only from `args` and
- * OpenAI's `arguments` and otherwise runs the call with `{}`. Claude writes
- * `{"name": ..., "input": {...}}` (Anthropic's tool_use) and sometimes puts
- * the arguments flat beside `tool`, so a call then ran with nothing and failed
- * in a way the model could not trace. The arguments are taken from the first of
- * `entry.args`, `fn.arguments`, `entry.input`, `fn.input`, `entry.parameters`
- * and `fn.parameters` that is not undefined or null, where `fn` is the
- * `function` object, or the entry itself without one. JSON text in the one
- * taken is parsed. With none of them, the entry's other keys are the
- * arguments (see flatArgs).
- *
- * One exception keeps `input` usable as an argument: when the one taken is the
- * entry's own `input` or `parameters`, it is text that is not a JSON object,
- * and other keys sit beside it, the text is an argument of that name and the
- * entry is read as flat. `{"tool": "<name>", "token": ..., "input": "hello"}`
- * is that, not arguments that failed to parse. With nothing beside it, such
- * text is still reported.
+ * Reads one `tool_calls` entry as `{tool, args}`, or returns null with a problem recorded. Unlike
+ * Python Wave, which reads only `args` and OpenAI's `arguments`, it takes the first non-null of
+ * `entry.args`, `fn.arguments`, `entry.input`, `fn.input`, `entry.parameters`, `fn.parameters`
+ * (`fn` = the `function` object), parsing JSON text: Claude writes Anthropic's `{name, input}` and
+ * sometimes flat arguments, which otherwise ran as `{}` and failed untraceably. With none, the
+ * entry's other keys are the arguments (flatArgs). Non-JSON text in the entry's own
+ * `input`/`parameters` with other keys beside it is an argument of that name, read flat.
  */
 function readCall(entry: unknown, index: number, problems: string[]): ToolCall | null {
 	if (!isObject(entry)) {
@@ -495,17 +463,10 @@ function unusable(problem: string): PlanReply {
 // =============================================================================
 
 /**
- * Turns the model's text reply into a PlanReply, repairing what can be
- * repaired safely and naming, in words the model can act on, each thing that
- * had to be dropped.
- *
- * `done` is true only when the reply asked to finish with a non-blank answer
- * and none of its calls were dropped, since the work it described did not all
- * happen otherwise. `askedDone` keeps what the model asked for, so the loop
- * can keep the results of a reply whose finish was refused.
- *
- * @param text - The raw reply: bare JSON, or JSON in a fence or among prose.
- * @returns The plan, with `problems` empty when nothing needed fixing.
+ * Turns the model's text reply into a PlanReply, repairing what is safe and naming each dropped
+ * thing in words the model can act on. `done` holds only when the reply asked to finish with a non-
+ * blank answer and no call was dropped; `askedDone` keeps the request so the loop can keep a
+ * refused finish's results. @param text - Bare JSON, or JSON in a fence or among prose.
  */
 export function parseReply(text: string): PlanReply {
 	const parsed = extractJson(text);

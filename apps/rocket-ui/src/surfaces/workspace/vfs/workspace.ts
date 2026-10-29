@@ -115,7 +115,6 @@ const SAFE_TEAM_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
  * spelling (resolved and authorized server-side by team membership), or ''
  * for the caller's own tree.
  *
- * @param scope - The scope to translate into.
  * @returns The prefix every physical path translation applies.
  */
 function scopePrefix(scope: WorkspaceScope): string {
@@ -177,11 +176,9 @@ export function resolveWorkspaceScope(auth: { devTeam?: string; organization?: {
 type RootSpec = { readonly kind: 'store'; readonly dir: string } | { readonly kind: 'reference'; readonly load: () => Promise<ReferenceTree> };
 
 /**
- * The workspace's top-level folders, in display order: the three store roots,
- * each a scope-relative physical directory, then the read-only reference
- * root, whose files come from the server and never touch the store. Listing
- * the root, path parsing, store translation, bus-event mapping and every
- * refusal message derive from this table.
+ * The workspace's top-level folders in display order: three store roots (scope-relative physical
+ * directories), then the read-only reference root served from the server. Listing, parsing, store
+ * translation, bus mapping and refusal messages all derive from this table.
  */
 const ROOTS = {
 	apps: { kind: 'store', dir: `${PROJECTS_DIR}/${APPDEV_DIR}` },
@@ -190,7 +187,6 @@ const ROOTS = {
 	[ROCKETRIDE_ROOT]: { kind: 'reference', load: loadRocketRideReference },
 } as const satisfies Record<string, RootSpec>;
 
-/** A top-level folder's name. */
 type RootName = keyof typeof ROOTS;
 /** A top-level folder backed by the store. */
 type StoreRoot = { [K in RootName]: (typeof ROOTS)[K]['kind'] extends 'store' ? K : never }[RootName];
@@ -203,12 +199,6 @@ type ReferencePath = { readonly kind: 'reference'; readonly root: Exclude<RootNa
 /** Every root name, in display order. */
 const ROOT_NAMES = Object.keys(ROOTS) as RootName[];
 
-/**
- * Whether a root is backed by the store.
- *
- * @param name - A root name.
- * @returns True for the store roots.
- */
 function isStoreRoot(name: RootName): name is StoreRoot {
 	return ROOTS[name].kind === 'store';
 }
@@ -219,13 +209,7 @@ const STORE_ROOTS = ROOT_NAMES.filter(isStoreRoot);
 /** The store roots, deepest directory first, so a nested root wins over the one that holds it. */
 const STORE_ROOTS_DEEPEST_FIRST = [...STORE_ROOTS].sort((a, b) => ROOTS[b].dir.length - ROOTS[a].dir.length);
 
-/**
- * Names folders for a message, e.g. 'apps/, nodes/ or pipelines/'.
- *
- * @param names - The folder names.
- * @param last - The word before the last folder.
- * @returns The joined list.
- */
+/** Names folders for a message, e.g. 'apps/, nodes/ or pipelines/'. */
 function folderList(names: readonly string[], last: 'and' | 'or'): string {
 	const folders = names.map((name) => `${name}/`);
 	return folders.length > 1 ? `${folders.slice(0, -1).join(', ')} ${last} ${folders[folders.length - 1]}` : folders.join('');
@@ -273,7 +257,6 @@ function parsePath(raw: string, allowRoot = false): WritablePath | ReferencePath
  * before every mutation as its read-only rule.
  *
  * @param path - A normalized workspace path.
- * @returns The parsed store path.
  * @throws "<root>/ is read-only reference. Write under apps/, nodes/ or pipelines/." for a reference root, and parsePath's errors.
  */
 function writablePath(path: string): WritablePath {
@@ -286,7 +269,6 @@ function writablePath(path: string): WritablePath {
  * Whether the workspace accepts changes to a path: writablePath's rule as a
  * yes or no.
  *
- * @param path - A workspace path.
  * @returns False for the read-only reference root and paths outside the roots.
  */
 export function isWritable(path: string): boolean {
@@ -301,8 +283,6 @@ export function isWritable(path: string): boolean {
 /**
  * Maps a store path to its physical store path in a scope.
  *
- * @param wp - The parsed store path.
- * @param scope - The scope the path lives in.
  * @returns The store-relative physical path.
  */
 function toStorePath(wp: WritablePath, scope: WorkspaceScope): string {
@@ -366,7 +346,6 @@ function requireClient(): RocketRideClient {
  *
  * @param client - The connected client.
  * @param wp - The store directory being listed.
- * @param scope - The scope the directory lives in.
  * @returns Entries with name and type.
  */
 async function listPhysicalDir(client: RocketRideClient, wp: WritablePath, scope: WorkspaceScope): Promise<Array<{ name: string; type: 'file' | 'dir' }>> {
@@ -393,7 +372,6 @@ async function listPhysicalDir(client: RocketRideClient, wp: WritablePath, scope
  * Every store path translates into the scope the backend was built for, so
  * a call that outlives a team switch still lands in its own team's tree.
  *
- * @param scope - The scope every store path translates into.
  * @returns The workspace backend for a CachedVfs.
  */
 function createWorkspaceBackend(scope: WorkspaceScope): IVirtualFileSystem {
@@ -510,7 +488,6 @@ function createWorkspaceBackend(scope: WorkspaceScope): IVirtualFileSystem {
 export interface Workspace {
 	/** The staged view — all reads/writes go through it. */
 	view: StagedFileSystem;
-	/** The scope the view is rooted in. */
 	scope: WorkspaceScope;
 	/** The scope's key: '' for the user's own tree, 'team-<id>' for a team's. */
 	scopeKey: string;
@@ -578,7 +555,6 @@ async function stashForScopeSwitch(outgoing: Workspace): Promise<void> {
  * since nothing kept them current while another scope was active.
  *
  * @param kept - The scope's workspace from before.
- * @param autoCommit - The host's autoCommit setting value.
  * @returns The workspace service, ready for its first read.
  */
 async function reopenWorkspace(kept: Workspace, autoCommit: boolean): Promise<Workspace> {

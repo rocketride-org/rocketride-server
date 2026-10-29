@@ -60,7 +60,6 @@ let loading: Promise<ReferenceTree> | null = null;
  * memory. Loaded once per page; a failed load is not kept, so the next call
  * retries.
  *
- * @returns The reference tree.
  * @throws "The server's guide bundle couldn't be loaded (GET /client/docs: <reason>). Refresh the workspace to try again."
  */
 export function loadRocketRideReference(): Promise<ReferenceTree> {
@@ -75,7 +74,6 @@ export function loadRocketRideReference(): Promise<ReferenceTree> {
 /**
  * Fetches and unzips the bundle, keeping only the entries docsPathFor serves.
  *
- * @returns The reference tree.
  * @throws With the bare reason: the HTTP status, a body that is not a zip, or the network or unzip error.
  */
 async function fetchReference(): Promise<ReferenceTree> {

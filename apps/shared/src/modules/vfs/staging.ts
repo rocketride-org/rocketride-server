@@ -61,13 +61,7 @@ export const STAGING_DIR = '.staging';
 /** Characters forbidden in an app id used as a path segment (store rules). */
 const INVALID_APPID_CHARS = new Set(['/', '\\', '*', '?', '<', '>', '|', '"']);
 
-/**
- * Whether a store error proves the file is absent. The store raises
- * 'File not found: …'; any other error may be transient.
- *
- * @param err - What the store call threw.
- * @returns True only for the store's not-found error.
- */
+/** Whether a store error proves the file is absent: only 'File not found: …'; any other error may be transient. */
 function provenAbsent(err: unknown): boolean {
 	return err instanceof Error && /file not found/i.test(err.message);
 }
@@ -342,8 +336,6 @@ export class StagingStore implements IStagingStore {
 	 * once this store's own pending writes are done. False when another
 	 * writer (a second tab, or a second store over the same namespace)
 	 * changed or deleted it since, and when that cannot be told.
-	 *
-	 * @returns True when no other writer changed the manifest.
 	 */
 	isCurrent(): Promise<boolean> {
 		const run = this.chain.then(async () => {

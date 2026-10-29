@@ -77,8 +77,6 @@ export class FileTracker {
 	/**
 	 * Another tool of the run created a file, as create_app's scaffold does.
 	 * The run has not read it, so an edit still needs a read first.
-	 *
-	 * @param path - Canonical path.
 	 */
 	created(path: string): void {
 		this.folderBack(path);
