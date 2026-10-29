@@ -346,7 +346,7 @@ export class AccountApi {
 	 * A name with a value is set, a name with `null` is deleted, and a name
 	 * whose value is the mask from `getEnv` keeps its stored value. Names not
 	 * in `env` are left as they are. A name outside `ROCKETRIDE_*` rejects the
-	 * whole write.
+	 * whole write, and so does a server too old to merge.
 	 *
 	 * @param scope   - One of 'org', 'team', 'user'.
 	 * @param env     - Names to set, delete (`null`) or keep (mask).
@@ -354,15 +354,15 @@ export class AccountApi {
 	 */
 	async setEnv(scope: 'org' | 'team' | 'user', env: Record<string, string | null>, scopeId?: string): Promise<void> {
 		const command = scope === 'org' ? 'rrext_account_org' : scope === 'team' ? 'rrext_account_teams' : 'rrext_account_me';
-		// Deletions travel as a list: a server with the old full-replacement
-		// contract ignores it instead of storing null as a value.
+		// update_env merges; a server with only the old full-replacement set_env
+		// refuses it as unknown instead of wiping the names it was not sent.
 		const set: Record<string, string> = {};
 		const del: string[] = [];
 		for (const [name, value] of Object.entries(env)) {
 			if (value === null) del.push(name);
 			else set[name] = value;
 		}
-		const args: Record<string, unknown> = { subcommand: 'set_env', env: set, delete: del };
+		const args: Record<string, unknown> = { subcommand: 'update_env', env: set, delete: del };
 		if (scope === 'org' && scopeId) args.orgId = scopeId;
 		if (scope === 'team' && scopeId) args.teamId = scopeId;
 		await this.client.call(command, args);

@@ -476,29 +476,30 @@ class AccountApi:
         A name with a value is set, a name with ``None`` is deleted, and a
         name whose value is the mask from ``get_env`` keeps its stored value.
         Names not in ``env`` are left as they are. A name outside
-        ``ROCKETRIDE_*`` rejects the whole write.
+        ``ROCKETRIDE_*`` rejects the whole write, and so does a server too old
+        to merge.
 
         Args:
             scope: One of 'org', 'team', 'user'.
             env: Names to set, delete (``None``) or keep (mask).
             scope_id: For org: orgId. For team: teamId. For user: omit.
         """
-        # Deletions travel as a list: a server with the old full-replacement
-        # contract ignores it instead of storing None as a value.
+        # update_env merges; a server with only the old full-replacement set_env
+        # refuses it as unknown instead of wiping the names it was not sent.
         to_set = {name: value for name, value in env.items() if value is not None}
         to_delete = [name for name, value in env.items() if value is None]
         if scope == 'org':
             command = 'rrext_account_org'
-            kwargs = {'subcommand': 'set_env', 'env': to_set, 'delete': to_delete}
+            kwargs = {'subcommand': 'update_env', 'env': to_set, 'delete': to_delete}
             if scope_id:
                 kwargs['orgId'] = scope_id
         elif scope == 'team':
             command = 'rrext_account_teams'
-            kwargs = {'subcommand': 'set_env', 'env': to_set, 'delete': to_delete}
+            kwargs = {'subcommand': 'update_env', 'env': to_set, 'delete': to_delete}
             if scope_id:
                 kwargs['teamId'] = scope_id
         else:
             command = 'rrext_account_me'
-            kwargs = {'subcommand': 'set_env', 'env': to_set, 'delete': to_delete}
+            kwargs = {'subcommand': 'update_env', 'env': to_set, 'delete': to_delete}
 
         await self._client.call(command, **kwargs)

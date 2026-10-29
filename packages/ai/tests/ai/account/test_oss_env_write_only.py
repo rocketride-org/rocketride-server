@@ -3,10 +3,10 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""The OSS account's environment verbs are write-only (saas#809).
+"""The OSS account's environment verbs are write-only (saas#827).
 
 ``get_env`` lists the ROCKETRIDE_* names in os.environ with every value
-replaced by ENV_MASK. ``set_env`` merges: a value is set, None deletes, the
+replaced by ENV_MASK. ``update_env``, and ``set_env`` for older clients, merge: a value is set, None deletes, the
 mask keeps what is stored, and the mask itself can never be stored. The
 SaaS handlers follow the same contract, so a client sees one behaviour.
 """
@@ -153,3 +153,42 @@ def test_other_commands_still_require_saas():
     account = Account.__new__(Account)
     with pytest.raises(NotImplementedError):
         asyncio.run(account.handle_account(_Conn(), {'command': 'rrext_account_org', 'arguments': {}}))
+
+
+def test_update_env_is_the_merge_the_sdks_send(env_file, monkeypatch):
+    monkeypatch.setenv('ROCKETRIDE_A', 'old-a')
+    monkeypatch.setenv('ROCKETRIDE_B', 'old-b')
+
+    resp = _call('update_env', env={'ROCKETRIDE_A': 'new-a'}, delete=['ROCKETRIDE_B'])
+
+    assert resp == {'ok': True, 'body': {'updated': True}}
+    assert os.environ['ROCKETRIDE_A'] == 'new-a' and 'ROCKETRIDE_B' not in os.environ
+    assert _env_file_dict(env_file) == {'ROCKETRIDE_A': 'new-a'}
+
+
+@pytest.mark.parametrize(
+    'args',
+    [
+        {'env': {'ROCKETRIDE_A': 42}},
+        {'env': {'ROCKETRIDE_A': {'nested': 'x'}}},
+        {'env': ['ROCKETRIDE_A']},
+        {'env': {}, 'delete': 'ROCKETRIDE_A'},
+    ],
+)
+def test_a_value_that_is_not_a_string_writes_nothing(env_file, monkeypatch, args):
+    monkeypatch.setenv('ROCKETRIDE_A', 'kept')
+
+    resp = _call('update_env', **args)
+
+    assert resp['ok'] is False and 'nothing was saved' in resp['message']
+    assert os.environ['ROCKETRIDE_A'] == 'kept' and not env_file.exists()
+
+
+def test_a_env_file_that_cannot_be_read_leaves_memory_as_it_was(env_file, monkeypatch):
+    monkeypatch.setenv('ROCKETRIDE_A', 'kept')
+    env_file.write_bytes(b'ROCKETRIDE_A=\xff\xfe legacy\n')
+
+    resp = _call('update_env', env={'ROCKETRIDE_B': 'new'})
+
+    assert resp['ok'] is False and 'nothing was saved' in resp['message']
+    assert os.environ['ROCKETRIDE_A'] == 'kept' and 'ROCKETRIDE_B' not in os.environ
