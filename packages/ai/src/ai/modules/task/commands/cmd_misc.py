@@ -47,7 +47,7 @@ Architecture:
 import time
 from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 from rocketride import EVENT_TYPE
-from rocketlib import validatePipeline
+from rocketlib import getServiceDefinition, validatePipeline
 from ai.common.config import Config
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
@@ -81,7 +81,7 @@ def _service_profile_names(provider: str) -> frozenset:
         unavailable, which leaves the caller reporting the key rather than hiding it.
     """
     try:
-        service = node_store.definition(provider)
+        service = getServiceDefinition(provider) or node_store.served(provider)
         return frozenset((service or {}).get('preconfig', {}).get('profiles', {}) or {})
     except Exception:
         return frozenset()

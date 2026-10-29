@@ -37,7 +37,7 @@ async def test_pipe_validate_uses_explicit_source_param(monkeypatch):
     """An explicit ``source`` param wins over both the field and the implied source."""
     captured = {}
 
-    def fake_validate(payload):
+    def fake_validate(payload, custom):
         """Record the payload that the C++ binding receives."""
         captured['payload'] = payload
         return {'ok': True}
@@ -60,7 +60,7 @@ async def test_pipe_validate_uses_pipeline_field_source(monkeypatch):
     monkeypatch.setattr(
         pipe_validate_mod,
         'validatePipeline',
-        lambda payload: captured.setdefault('payload', payload) or {'ok': True},
+        lambda payload, custom: captured.setdefault('payload', payload) or {'ok': True},
     )
 
     pipeline = {'source': 'field-src', 'components': []}
@@ -75,7 +75,7 @@ async def test_pipe_validate_resolves_implied_source(monkeypatch):
     monkeypatch.setattr(
         pipe_validate_mod,
         'validatePipeline',
-        lambda payload: captured.setdefault('payload', payload) or {'ok': True},
+        lambda payload, custom: captured.setdefault('payload', payload) or {'ok': True},
     )
 
     pipeline = {
@@ -91,7 +91,7 @@ async def test_pipe_validate_resolves_implied_source(monkeypatch):
 @pytest.mark.asyncio
 async def test_pipe_validate_rejects_multiple_implied_sources(monkeypatch):
     """Two Source-mode components without an explicit choice raise ValueError."""
-    monkeypatch.setattr(pipe_validate_mod, 'validatePipeline', lambda payload: {'ok': True})
+    monkeypatch.setattr(pipe_validate_mod, 'validatePipeline', lambda payload, custom: {'ok': True})
 
     pipeline = {
         'components': [
@@ -113,7 +113,7 @@ async def test_pipe_validate_preserves_explicit_version(monkeypatch):
     monkeypatch.setattr(
         pipe_validate_mod,
         'validatePipeline',
-        lambda payload: captured.setdefault('payload', payload) or {'ok': True},
+        lambda payload, custom: captured.setdefault('payload', payload) or {'ok': True},
     )
 
     pipeline = {'version': 3, 'components': [], 'source': 'src'}
@@ -132,7 +132,7 @@ async def test_pipe_validate_does_not_wrap_single_component_payload(monkeypatch)
     monkeypatch.setattr(
         pipe_validate_mod,
         'validatePipeline',
-        lambda payload: captured.setdefault('payload', payload) or {'ok': True},
+        lambda payload, custom: captured.setdefault('payload', payload) or {'ok': True},
     )
 
     component = {'id': 'llm_openai_1', 'provider': 'llm_openai', 'config': {}}
@@ -147,7 +147,7 @@ async def test_pipe_validate_does_not_wrap_single_component_payload(monkeypatch)
 async def test_pipe_validate_wraps_validate_pipeline_errors(monkeypatch):
     """A validatePipeline RuntimeError comes back as an error envelope."""
 
-    def boom(payload):
+    def boom(payload, custom):
         """Always raise — exercises the except branch in pipe_Validate."""
         raise RuntimeError('bad config')
 
@@ -171,7 +171,7 @@ import ai.modules.services.services as services_mod
 async def test_services_get_returns_all_when_no_filter(monkeypatch):
     """No ``service`` query param -> getServiceDefinitions() is called for the full list."""
     all_defs = {'svc-a': {'name': 'A'}, 'svc-b': {'name': 'B'}}
-    monkeypatch.setattr(services_mod, 'getServiceDefinitions', lambda: all_defs)
+    monkeypatch.setattr(services_mod, 'getServiceDefinitions', lambda custom: all_defs)
 
     # Pass service=None explicitly — outside FastAPI, the Query(None) default
     # is the Query *object*, which is truthy. Inside FastAPI the resolver
