@@ -505,6 +505,7 @@ async function main(): Promise<number> {
 		case 'validate':
 			return cmdValidate();
 		case 'run':
+			if ((a.layer ?? '').toUpperCase() === 'L3' && !fs.existsSync(SKILL)) throw new Error('L3 starts its engine with the rr-verify-agent skill, which this checkout does not have (.claude/skills/rr-verify-agent)');
 			if ((a.layer ?? '').toUpperCase() === 'L3' && !proc.env.EVAL_LOCK_HELD) return underLock();
 			return cmdRun(a);
 		case 'record':
