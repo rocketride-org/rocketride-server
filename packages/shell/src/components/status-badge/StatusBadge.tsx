@@ -63,22 +63,22 @@ interface IBadgePalette {
 
 const BADGE_PALETTES: Record<StatusVariant, IBadgePalette> = {
 	success: {
-		text: 'var(--rr-color-success)',
+		text: 'var(--rr-text-success)',
 		border: 'color-mix(in srgb, var(--rr-color-success) 40%, transparent)',
 		background: 'color-mix(in srgb, var(--rr-color-success) 7%, transparent)',
 	},
 	info: {
-		text: 'var(--rr-color-info)',
+		text: 'var(--rr-text-info)',
 		border: 'color-mix(in srgb, var(--rr-color-info) 40%, transparent)',
 		background: 'color-mix(in srgb, var(--rr-color-info) 6%, transparent)',
 	},
 	warning: {
-		text: 'var(--rr-color-warning)',
+		text: 'var(--rr-text-warning)',
 		border: 'color-mix(in srgb, var(--rr-color-warning) 55%, transparent)',
 		background: 'color-mix(in srgb, var(--rr-color-warning) 10%, transparent)',
 	},
 	error: {
-		text: 'var(--rr-color-error)',
+		text: 'var(--rr-text-error)',
 		border: 'color-mix(in srgb, var(--rr-color-error) 40%, transparent)',
 		background: 'color-mix(in srgb, var(--rr-color-error) 6%, transparent)',
 	},
@@ -101,15 +101,21 @@ const styles = {
 		flexShrink: 0,
 	} as CSSProperties,
 
+	// The micro-label tag: mono, uppercase, tracked, square-ish corners
+	// (same look as .rr-badge).
 	badge: {
 		display: 'inline-flex',
 		alignItems: 'center',
-		gap: 7,
+		gap: 6,
 		height: 22,
-		padding: '0 10px',
-		borderRadius: 20,
-		fontSize: 11.5,
+		padding: '0 8px',
+		borderRadius: 'var(--rr-radius-xs)',
+		fontFamily: 'var(--rr-font-family-mono)',
+		fontSize: 'var(--rr-font-size-label)',
 		fontWeight: 600,
+		letterSpacing: 'var(--rr-letter-spacing-label)',
+		textTransform: 'uppercase',
+		whiteSpace: 'nowrap',
 		borderWidth: 1,
 		borderStyle: 'solid',
 	} as CSSProperties,

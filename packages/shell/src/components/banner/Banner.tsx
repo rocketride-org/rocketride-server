@@ -45,12 +45,15 @@ const VARIANT_TOKENS: Record<BannerVariant, string> = {
 // =============================================================================
 
 const styles = {
+	// The note look: hairline border, a 3px tone bar on the left, a faint
+	// tone tint, primary text (status colours are too light for body text
+	// on some themes; the bar and tint carry the tone).
 	banner: {
 		borderRadius: 8,
 		padding: '12px 16px',
 		fontSize: 13.5,
-		borderWidth: 1,
-		borderStyle: 'solid',
+		lineHeight: 1.5,
+		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
 };
 
@@ -76,8 +79,8 @@ export function Banner({ variant, children }: IBannerProps): React.ReactElement 
 			aria-live={variant === 'error' ? 'assertive' : 'polite'}
 			style={{
 				...styles.banner,
-				borderColor: token,
-				color: token,
+				border: `1px solid color-mix(in srgb, ${token} 25%, var(--rr-border))`,
+				borderLeft: `3px solid ${token}`,
 				background: `color-mix(in srgb, ${token} 6%, transparent)`,
 			}}
 		>

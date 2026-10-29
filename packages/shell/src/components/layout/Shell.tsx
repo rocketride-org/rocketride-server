@@ -78,8 +78,9 @@ const styles = {
 		fontSize: 13,
 		cursor: 'pointer',
 	} as CSSProperties,
-	// Matches the landing page's "elevated" 3D button — brand fill with a colored
-	// bottom shadow that presses down on hover (see LandingNav.tsx).
+	// The brand's primary call to action (rocketride-org/branding v2): an ink
+	// fill with a hard-edged accent block offset down-left, carrying no text.
+	// The block presses in on hover. Accent-filled would fail AA (3.74:1).
 	elevatedButton: {
 		display: 'inline-flex',
 		alignItems: 'center',
@@ -87,14 +88,14 @@ const styles = {
 		padding: '7px 18px',
 		borderRadius: 6,
 		border: 'none',
-		backgroundColor: '#00b9ec',
-		color: '#ffffff',
+		backgroundColor: 'var(--rr-bg-button)',
+		color: 'var(--rr-fg-button)',
 		fontSize: 14,
 		fontWeight: 600,
 		cursor: 'pointer',
-		boxShadow: '0 3px 0 0 #00708f',
-		transform: 'translateY(0)',
-		transition: 'background-color 0.1s ease, box-shadow 0.1s ease, transform 0.1s ease',
+		boxShadow: '-4px 4px 0 0 var(--rr-btn-block)',
+		transform: 'translate(0, 0)',
+		transition: 'box-shadow 0.1s ease, transform 0.1s ease',
 	} as CSSProperties,
 	goodbyeContainer: {
 		display: 'flex',
@@ -771,14 +772,12 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 						onClick={handleBackToHome}
 						style={styles.elevatedButton}
 						onMouseEnter={(e) => {
-							e.currentTarget.style.backgroundColor = '#0099cc';
-							e.currentTarget.style.transform       = 'translateY(3px)';
-							e.currentTarget.style.boxShadow        = '0 1px 0 0 #00708f';
+							e.currentTarget.style.transform = 'translate(-2px, 2px)';
+							e.currentTarget.style.boxShadow = '-2px 2px 0 0 var(--rr-btn-block)';
 						}}
 						onMouseLeave={(e) => {
-							e.currentTarget.style.backgroundColor = '#00b9ec';
-							e.currentTarget.style.transform       = 'translateY(0)';
-							e.currentTarget.style.boxShadow        = '0 3px 0 0 #00708f';
+							e.currentTarget.style.transform = 'translate(0, 0)';
+							e.currentTarget.style.boxShadow = '-4px 4px 0 0 var(--rr-btn-block)';
 						}}
 					>
 						Back to Home

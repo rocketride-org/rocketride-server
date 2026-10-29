@@ -17,6 +17,14 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { capturePrerenderedContent } from './util/prerenderFallback';
 import '@fontsource-variable/figtree';
+// IBM Plex: the RocketRide brand themes' sans and the shell-wide mono.
+import '@fontsource/ibm-plex-sans/400.css';
+import '@fontsource/ibm-plex-sans/500.css';
+import '@fontsource/ibm-plex-sans/600.css';
+import '@fontsource/ibm-plex-sans/700.css';
+import '@fontsource/ibm-plex-mono/400.css';
+import '@fontsource/ibm-plex-mono/500.css';
+import '@fontsource/ibm-plex-mono/600.css';
 import './themes/global.css';
 import './themes/components.css';
 import { RocketRideClient } from 'rocketride';

@@ -2490,19 +2490,21 @@ state classes: `:disabled`, `aria-invalid="true"`, `aria-selected`,
 
 | Block | Elements / modifiers | Notes |
 |---|---|---|
-| `.rr-btn` | `--primary` `--secondary` `--ghost` `--danger`, `--sm` `--mini` `--block` | Same geometry as `Button`. One `--primary` per view. |
+| `.rr-btn` | `--primary` `--secondary` `--ghost` `--danger`, `--sm` `--mini` `--block`, `--hero` | Same geometry as `Button`. One `--primary` per view. Primary is ink on the light brand theme. `--hero` adds the brand's hard accent block offset down-left (marketing-weight CTAs only). |
 | `.rr-icon-btn` | `--sm` | Icon-only; always set `aria-label`. |
 | `.rr-input` | `--sm`; works on `input`, `textarea`, `select` | Same geometry as `InputField`. `aria-invalid="true"` for errors. |
 | `.rr-input-group` | `--start` `--end`, `__start` `__end` | Leading/trailing icon inside an input. |
 | `.rr-field` | `__label` (`--required`), `__help`, `__error` | Label + control + help/error stack. |
 | `.rr-choice` | wraps `.rr-checkbox`, `.rr-radio`, `.rr-switch` | Switch is `<input type="checkbox" role="switch">`. |
 | `.rr-chip` | `--outline` `--accent`, `__remove` | Same look as `Chip` / `ChipAdd`. |
-| `.rr-badge` | `--success` `--info` `--warning` `--error` | Same look as `StatusBadge`; pair with `.rr-dot`. |
+| `.rr-badge` | `--success` `--info` `--warning` `--error` | Same look as `StatusBadge` (mono, uppercase, 4px corners); pair with `.rr-dot`. |
+| `.rr-tag` | `--accent` `--info` `--success` `--warning` `--error` | Mono uppercase label chip: requirements, durations, plan names. |
 | `.rr-dot` | `--success` `--info` `--warning` `--error` `--pulse` | Same as `StatusDot`. |
 | `.rr-count` | | Numeric count on tabs and icons. |
 | `.rr-avatar` | `--sm` `--lg` `--square`; `.rr-avatar-group` | Initials or an `<img>` child. |
-| `.rr-alert` | `--info` `--success` `--warning` `--error`, `__icon` `__body` `__title` | Body text stays primary; status colour on border and icon. Use `Banner` for live-region messages. |
-| `.rr-paper` | `--raised` `--padded`, `__header` `__body` | Card surface (`commonStyles.card`). |
+| `.rr-alert` | `--accent` `--info` `--success` `--warning` `--error`, `__icon` `__body` `__title` | The note: a 3px tone bar on the left, a faint tint, primary body text, and a mono uppercase `__title` label. Use `Banner` for live-region messages. |
+| `.rr-paper` | `--raised` `--padded` `--interactive`, `__header` `__body` | Card surface (`commonStyles.card`). `--interactive` firms the border and lifts on hover. |
+| `.rr-code`, `.rr-code-block` | `__bar` `__label` `__copy`, `pre` | Inline code; an ink code block with a labelled bar and a copy button. |
 | `.rr-divider` | `--vertical` | |
 | `.rr-progress` | `--indeterminate`, `__bar` | Set the bar width inline. |
 | `.rr-spinner` | `--sm` `--lg` | |
@@ -2514,7 +2516,9 @@ state classes: `:disabled`, `aria-invalid="true"`, `aria-selected`,
 | `.rr-tooltip` | | Inverse surface, `role="tooltip"`. |
 | `.rr-list__item` | | Tree/list row (`commonStyles.listRow`); `aria-selected` or `aria-current` for the active row. |
 | `.rr-table` | `--hover` | Small static tables. Use `DataGrid` for sortable or paged data. |
-| `.rr-text-*` | `h1`-`h5`, `subtitle`, `body`, `secondary`, `caption`, `label`, `mono` | Type styles from the theme tokens. |
+| `.rr-text-*` | `h1`-`h5`, `subtitle`, `body`, `secondary`, `caption`, `label`, `mono` | Type styles from the theme tokens. `label` is the mono uppercase micro label. |
+| `.rr-eyebrow` | `__muted` | Mono uppercase kicker above a title, in `--rr-text-accent`. |
+| `.rr-section-title` | | Section heading with a 3px accent bar. |
 | `.rr-link`, `.rr-kbd` | | |
 | utilities | `.rr-focusable`, `.rr-sr-only`, `.rr-truncate` | |
 

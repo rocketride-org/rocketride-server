@@ -105,6 +105,8 @@
 	color: var(--rr-text-primary);
 	line-height: var(--rr-line-height-tight);
 	font-weight: var(--rr-font-weight-semibold);
+	letter-spacing: var(--rr-letter-spacing-heading);
+	text-wrap: balance;
 }
 .rr-text-h1 {
 	font-size: var(--rr-font-size-h1);
@@ -145,23 +147,68 @@
 	font-family: var(--rr-font-family-mono);
 }
 
-/** Uppercase micro label — table headers, section eyebrows. */
+/** Micro label: mono, uppercase, tracked. Table headers, note labels,
+    menu group labels, day headings. */
 .rr-text-label {
+	font-family: var(--rr-font-family-mono);
 	font-size: var(--rr-font-size-label);
 	font-weight: var(--rr-font-weight-semibold);
-	letter-spacing: 0.6px;
+	letter-spacing: var(--rr-letter-spacing-label);
 	text-transform: uppercase;
-	color: var(--rr-text-disabled);
+	color: var(--rr-text-secondary);
+}
+
+/** Eyebrow (kicker) above a page or section title, in accent ink. */
+.rr-eyebrow {
+	display: block;
+	margin: 0 0 var(--rr-space-2-5);
+	font-family: var(--rr-font-family-mono);
+	font-size: var(--rr-font-size-eyebrow);
+	font-weight: var(--rr-font-weight-medium);
+	letter-spacing: var(--rr-letter-spacing-eyebrow);
+	text-transform: uppercase;
+	color: var(--rr-text-accent);
+}
+.rr-eyebrow__muted {
+	letter-spacing: var(--rr-letter-spacing-label);
+	color: var(--rr-text-secondary);
+}
+
+/** Section heading with the accent bar on its left edge. */
+.rr-section-title {
+	position: relative;
+	margin: 0 0 var(--rr-space-3);
+	padding-left: 15px;
+	font-size: 20px;
+	font-weight: var(--rr-font-weight-semibold);
+	line-height: 1.25;
+	letter-spacing: var(--rr-letter-spacing-heading);
+	color: var(--rr-text-primary);
+	text-wrap: balance;
+}
+.rr-section-title::before {
+	content: '';
+	position: absolute;
+	top: 0.2em;
+	bottom: 0.2em;
+	left: 0;
+	width: 3px;
+	background: var(--rr-accent);
+	border-radius: 2px;
 }
 
 .rr-link {
 	color: var(--rr-text-link);
 	text-decoration: none;
-	border-radius: var(--rr-radius-xs);
+	border-bottom: 1px solid color-mix(in srgb, var(--rr-text-link) 30%, transparent);
 	cursor: pointer;
+	transition:
+		color var(--rr-duration-fast) var(--rr-ease-standard),
+		border-color var(--rr-duration-fast) var(--rr-ease-standard);
 }
 .rr-link:hover {
-	text-decoration: underline;
+	color: var(--rr-text-accent);
+	border-bottom-color: var(--rr-accent);
 }
 
 .rr-kbd {
@@ -196,6 +243,16 @@
 }
 .rr-paper--padded {
 	padding: var(--rr-space-4);
+}
+/** Clickable card: the border firms up and it lifts on hover. */
+.rr-paper--interactive {
+	transition:
+		border-color var(--rr-duration-fast) var(--rr-ease-standard),
+		box-shadow var(--rr-duration-fast) var(--rr-ease-standard);
+}
+.rr-paper--interactive:hover {
+	border-color: var(--rr-border-hover);
+	box-shadow: var(--rr-elevation-1);
 }
 
 /** Card header bar — mirrors commonStyles.cardHeader. */
@@ -260,8 +317,8 @@
 	color: var(--rr-fg-button);
 }
 .rr-btn--secondary {
-	border-color: var(--rr-brand);
-	color: var(--rr-brand);
+	border-color: var(--rr-accent);
+	color: var(--rr-text-accent);
 }
 .rr-btn--ghost {
 	border-color: var(--rr-border);
@@ -281,8 +338,22 @@
 	background: var(--rr-bg-accent-soft);
 }
 .rr-btn--ghost:hover {
-	background: var(--rr-bg-toolbar-hover);
-	border-color: var(--rr-border-hover);
+	border-color: var(--rr-accent);
+	color: var(--rr-text-accent);
+}
+
+/** The brand call to action: ink fill with a hard accent block offset
+    down-left that carries no text; it presses in on hover. One per view. */
+.rr-btn--hero {
+	box-shadow: -4px 4px 0 0 var(--rr-btn-block);
+	transition:
+		transform var(--rr-duration-fast) var(--rr-ease-standard),
+		box-shadow var(--rr-duration-fast) var(--rr-ease-standard);
+}
+.rr-btn--hero:hover {
+	filter: none;
+	box-shadow: -2px 2px 0 0 var(--rr-btn-block);
+	transform: translate(-2px, 2px);
 }
 
 .rr-btn--sm {
@@ -582,34 +653,37 @@ select.rr-input {
 .rr-badge {
 	display: inline-flex;
 	align-items: center;
-	gap: 7px;
+	gap: 6px;
 	height: 22px;
-	padding: 0 var(--rr-space-2-5);
-	font-size: var(--rr-font-size-dense);
+	padding: 0 var(--rr-space-2);
+	font-family: var(--rr-font-family-mono);
+	font-size: var(--rr-font-size-label);
 	font-weight: var(--rr-font-weight-semibold);
+	letter-spacing: var(--rr-letter-spacing-label);
+	text-transform: uppercase;
 	white-space: nowrap;
 	color: var(--rr-text-secondary);
 	background: transparent;
 	border: 1px solid var(--rr-border);
-	border-radius: 20px;
+	border-radius: var(--rr-radius-xs);
 }
 .rr-badge--success {
-	color: var(--rr-color-success);
+	color: var(--rr-text-success);
 	background: var(--rr-bg-success-soft);
 	border-color: var(--rr-border-success-soft);
 }
 .rr-badge--info {
-	color: var(--rr-color-info);
+	color: var(--rr-text-info);
 	background: var(--rr-bg-info-soft);
 	border-color: var(--rr-border-info-soft);
 }
 .rr-badge--warning {
-	color: var(--rr-color-warning);
+	color: var(--rr-text-warning);
 	background: var(--rr-bg-warning-soft);
 	border-color: var(--rr-border-warning-soft);
 }
 .rr-badge--error {
-	color: var(--rr-color-error);
+	color: var(--rr-text-error);
 	background: var(--rr-bg-error-soft);
 	border-color: var(--rr-border-error-soft);
 }
@@ -718,7 +792,7 @@ select.rr-input {
    3:1 as text on light themes. The status colour lives on the border and
    the icon, which only need 3:1 as non-text. */
 .rr-alert {
-	--rr-alert-tone: var(--rr-text-secondary);
+	--rr-alert-tone: var(--rr-border-input);
 	display: flex;
 	align-items: flex-start;
 	gap: var(--rr-space-2-5);
@@ -727,23 +801,33 @@ select.rr-input {
 	line-height: var(--rr-line-height-normal);
 	color: var(--rr-text-primary);
 	background: var(--rr-bg-surface-alt);
-	border: 1px solid var(--rr-alert-tone);
+	border: 1px solid color-mix(in srgb, var(--rr-alert-tone) 25%, var(--rr-border));
+	border-left: 3px solid var(--rr-alert-tone);
 	border-radius: var(--rr-radius-lg);
+}
+.rr-alert--accent {
+	--rr-alert-tone: var(--rr-accent);
+	--rr-alert-ink: var(--rr-text-accent);
+	background: var(--rr-bg-accent-soft);
 }
 .rr-alert--info {
 	--rr-alert-tone: var(--rr-color-info);
+	--rr-alert-ink: var(--rr-text-info);
 	background: var(--rr-bg-info-soft);
 }
 .rr-alert--success {
 	--rr-alert-tone: var(--rr-color-success);
+	--rr-alert-ink: var(--rr-text-success);
 	background: var(--rr-bg-success-soft);
 }
 .rr-alert--warning {
 	--rr-alert-tone: var(--rr-color-warning);
+	--rr-alert-ink: var(--rr-text-warning);
 	background: var(--rr-bg-warning-soft);
 }
 .rr-alert--error {
 	--rr-alert-tone: var(--rr-color-error);
+	--rr-alert-ink: var(--rr-text-error);
 	background: var(--rr-bg-error-soft);
 }
 .rr-alert__icon {
@@ -757,7 +841,14 @@ select.rr-input {
 	min-width: 0;
 }
 .rr-alert__title {
+	display: block;
+	margin-bottom: var(--rr-space-1-5);
+	font-family: var(--rr-font-family-mono);
+	font-size: var(--rr-font-size-label);
 	font-weight: var(--rr-font-weight-semibold);
+	letter-spacing: var(--rr-letter-spacing-label);
+	text-transform: uppercase;
+	color: var(--rr-alert-ink, var(--rr-text-secondary));
 }
 
 /* ===================================================================== */
@@ -1027,12 +1118,14 @@ select.rr-input {
 }
 .rr-table th {
 	padding: var(--rr-space-2) 14px;
+	font-family: var(--rr-font-family-mono);
 	font-size: var(--rr-font-size-label);
 	font-weight: var(--rr-font-weight-semibold);
-	letter-spacing: 0.6px;
+	letter-spacing: var(--rr-letter-spacing-label);
 	text-align: left;
 	text-transform: uppercase;
 	color: var(--rr-text-secondary);
+	background: var(--rr-bg-surface-alt);
 	border-bottom: 1px solid var(--rr-border);
 }
 .rr-table td {
@@ -1835,7 +1928,8 @@ button.rr-stepper__button:hover {
 	place-items: center;
 	width: 24px;
 	height: 24px;
-	font-size: 12px;
+	font-family: var(--rr-font-family-mono);
+	font-size: 11.5px;
 	font-weight: var(--rr-font-weight-semibold);
 	color: var(--rr-text-secondary);
 	background: var(--rr-bg-paper);
@@ -2621,9 +2715,10 @@ button.rr-stepper__button:hover {
 }
 .rr-activity__day {
 	margin: 0 0 var(--rr-space-2);
+	font-family: var(--rr-font-family-mono);
 	font-size: var(--rr-font-size-label);
 	font-weight: var(--rr-font-weight-semibold);
-	letter-spacing: 0.06em;
+	letter-spacing: var(--rr-letter-spacing-label);
 	text-transform: uppercase;
 	color: var(--rr-text-secondary);
 }
@@ -2794,6 +2889,121 @@ button.rr-stepper__button:hover {
 }
 
 /* ===================================================================== */
+/* Brand conventions: tags, inline code, code blocks                     */
+/* ===================================================================== */
+
+/** Tag: a mono, uppercase label chip (requirements, durations, plan
+    names). Tones tint the background and darken the text toward ink. */
+.rr-tag {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--rr-space-1);
+	padding: 3px var(--rr-space-2);
+	font-family: var(--rr-font-family-mono);
+	font-size: var(--rr-font-size-label);
+	font-weight: var(--rr-font-weight-medium);
+	line-height: 1.4;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	white-space: nowrap;
+	color: var(--rr-text-secondary);
+	background: var(--rr-bg-widget);
+	border-radius: var(--rr-radius-xs);
+}
+.rr-tag--accent,
+.rr-tag--info,
+.rr-tag--success,
+.rr-tag--warning,
+.rr-tag--error {
+	color: var(--rr-tag-ink);
+	background: color-mix(in srgb, var(--rr-tag-tone) 10%, var(--rr-bg-paper));
+}
+.rr-tag--accent {
+	--rr-tag-tone: var(--rr-accent);
+	--rr-tag-ink: var(--rr-text-accent);
+}
+.rr-tag--info {
+	--rr-tag-tone: var(--rr-color-info);
+	--rr-tag-ink: var(--rr-text-info);
+}
+.rr-tag--success {
+	--rr-tag-tone: var(--rr-color-success);
+	--rr-tag-ink: var(--rr-text-success);
+}
+.rr-tag--warning {
+	--rr-tag-tone: var(--rr-color-warning);
+	--rr-tag-ink: var(--rr-text-warning);
+}
+.rr-tag--error {
+	--rr-tag-tone: var(--rr-color-error);
+	--rr-tag-ink: var(--rr-text-error);
+}
+
+/** Inline code: file names, commands, keys. */
+.rr-code {
+	padding: 1.5px 5px;
+	font-family: var(--rr-font-family-mono);
+	font-size: 0.855em;
+	color: var(--rr-text-primary);
+	word-break: break-word;
+	background: var(--rr-bg-widget);
+	border-radius: var(--rr-radius-xs);
+}
+
+/** Code block: dark on every theme, a labelled bar with a copy button. */
+.rr-code-block {
+	overflow: hidden;
+	background: var(--rr-bg-code);
+	border: 1px solid color-mix(in srgb, var(--rr-fg-code) 10%, transparent);
+	border-radius: var(--rr-radius-lg);
+	box-shadow: var(--rr-elevation-1);
+}
+.rr-code-block__bar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--rr-space-2-5);
+	padding: var(--rr-space-2) 14px;
+	background: var(--rr-bg-code-bar);
+}
+.rr-code-block__label {
+	font-family: var(--rr-font-family-mono);
+	font-size: var(--rr-font-size-label);
+	letter-spacing: 0.1em;
+	text-transform: uppercase;
+	color: var(--rr-fg-code-muted);
+}
+.rr-code-block__copy {
+	padding: var(--rr-space-1) var(--rr-space-2-5);
+	font-family: var(--rr-font-family-mono);
+	font-size: var(--rr-font-size-label);
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--rr-fg-code);
+	background: color-mix(in srgb, var(--rr-fg-code) 10%, transparent);
+	border: 0;
+	border-radius: var(--rr-radius-xs);
+	cursor: pointer;
+	transition: background-color var(--rr-duration-fast) var(--rr-ease-standard);
+}
+.rr-code-block__copy:hover {
+	background: color-mix(in srgb, var(--rr-fg-code) 20%, transparent);
+}
+.rr-code-block__copy:focus-visible {
+	outline: 2px solid var(--rr-accent);
+	outline-offset: 2px;
+}
+.rr-code-block pre {
+	margin: 0;
+	padding: var(--rr-space-4) 18px;
+	overflow-x: auto;
+	font-family: var(--rr-font-family-mono);
+	font-size: 12.5px;
+	line-height: 1.7;
+	color: var(--rr-fg-code);
+}
+
+/* ===================================================================== */
 /* Utilities                                                             */
 /* ===================================================================== */
 
@@ -2839,7 +3049,10 @@ button.rr-stepper__button:hover {
 	.rr-tree__chevron::before,
 	.rr-page-layout__sidebar,
 	.rr-page-layout__scrim,
-	.rr-meter__fill {
+	.rr-meter__fill,
+	.rr-btn--hero,
+	.rr-paper--interactive,
+	.rr-link {
 		animation: none !important;
 		transition: none !important;
 	}

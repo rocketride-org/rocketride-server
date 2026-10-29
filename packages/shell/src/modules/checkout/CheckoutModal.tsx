@@ -625,7 +625,7 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 		return {
 			theme: 'stripe' as const,
 			variables: {
-				colorPrimary: '#f7901f',
+				colorPrimary: '#f93822', // brand.brand (rocketride-org/branding v2); Stripe needs a literal
 				colorBackground: resolve('--rr-bg-paper', '#ffffff'),
 				colorText: resolve('--rr-text-primary', '#111'),
 				colorDanger: '#dc2626',

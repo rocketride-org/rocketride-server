@@ -1310,6 +1310,12 @@ importers:
       '@fontsource-variable/figtree':
         specifier: ^5.2.10
         version: 5.2.10
+      '@fontsource/ibm-plex-mono':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource/ibm-plex-sans':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@module-federation/runtime':
         specifier: ^2.5.1
         version: 2.5.1(node-fetch@2.7.0(encoding@0.1.13))
@@ -3316,6 +3322,12 @@ packages:
 
   '@fontsource-variable/figtree@5.2.10':
     resolution: {integrity: sha512-a5Gumbpy3mdd+Yg31g6Qb7CmjYbrfyutJa3bWfP5q8A4GclIOwX7mI+ZuSHsJnw/mHvW6r9oh1AHJcJTIxK4JA==}
+
+  '@fontsource/ibm-plex-mono@5.3.0':
+    resolution: {integrity: sha512-eTgnZjZEGk1QtD3ZstF+Vclo2HLAni8YMy34/DxllwZvyz1lR/1RF/xTiAquOBO7MvqBx8D2Ig2WCPMVfdZu7Q==}
+
+  '@fontsource/ibm-plex-sans@5.3.0':
+    resolution: {integrity: sha512-CbE4CbbEEZJX860XyUiRpsksXIQR8Rp2XDva2VO53NJox9tVNtusrysd2x5YkUEY3ErQ66W1IiiQL8/wihhw5w==}
 
   '@fontsource/quicksand@5.0.20':
     resolution: {integrity: sha512-IVNXvnpoJ8AM3vOhlJeRfqYikN+SPicnsTm9mCI/RkLRGti4sdSzkWjrbHsEnr9xkaQ6NSCK+6UhcZySxxPDUw==}
@@ -16176,6 +16188,10 @@ snapshots:
       levn: 0.4.1
 
   '@fontsource-variable/figtree@5.2.10': {}
+
+  '@fontsource/ibm-plex-mono@5.3.0': {}
+
+  '@fontsource/ibm-plex-sans@5.3.0': {}
 
   '@fontsource/quicksand@5.0.20': {}
 

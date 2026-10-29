@@ -884,9 +884,18 @@ The shell manages themes via CSS custom properties. Your app should use `--rr-*`
 | `--rr-font-family` | Primary font |
 | `--rr-font-family-mono` | Monospace font |
 | `--rr-color-success` | Success green |
-| `--rr-color-warning` | Warning orange |
+| `--rr-color-warning` | Warning amber |
 | `--rr-color-error` | Error red |
 | `--rr-chart-series-1` … `-6` | Ordered chart series colors (assign in order, never cycle; see below) |
+
+### Brand themes
+
+The two RocketRide themes, `rocketride-light` (the default) and `rocketride`, follow the brand repo, [rocketride-org/branding](https://github.com/rocketride-org/branding) v2: red `#f93822` as the brand and accent, white surfaces, `#1a1a1a` text, the branding status colors, IBM Plex Sans for text and IBM Plex Mono for code and micro labels. Two rules carry over from the brand repo:
+
+- The primary button is ink-filled (`#12111a`), not red. White on the brand red is 3.74:1 and fails AA for a normal-size label. On the dark theme the button is red with an ink label.
+- The raw accent is for fills, bars and large text only. Small accent text uses `--rr-text-accent`.
+
+The other themes (Light, Dark, Gray, Visual Studio) keep their own colors and pick up the same fonts, radii, labels and components.
 
 ### Foundation tokens
 
@@ -894,11 +903,14 @@ Scale and derived tokens defined once in `rocketride-default.css`. They are not 
 
 | Group | Variables | Notes |
 |-------|-----------|-------|
-| Radius | `--rr-radius-xs` `-sm` `-md` `-lg` `-xl` `-pill` | 3, 5, 6, 8, 10, 999px |
+| Radius | `--rr-radius-xs` `-sm` `-md` `-lg` `-xl` `-pill` | 4, 5, 6, 8, 10, 999px |
 | Spacing | `--rr-space-0-5` `-1` `-1-5` `-2` `-2-5` `-3` `-4` `-5` `-6` `-8` `-10` | 4px grid: 2 to 40px |
-| Controls | `--rr-control-height` `-height-sm` `-height-mini` `--rr-control-radius` | 34, 26, 16px; 7px radius |
-| Type | `--rr-font-family-mono`, `--rr-font-weight-regular` `-medium` `-semibold` `-bold`, `--rr-line-height-tight` `-normal`, `--rr-font-size-label` `-dense` | Mono maps to the editor font in VS Code |
-| Elevation | `--rr-elevation-1` `-2` `-3`, `--rr-focus-ring` | Raised card, menu/popover, dialog; keyboard focus |
+| Controls | `--rr-control-height` `-height-sm` `-height-mini` `--rr-control-radius` | 34, 26, 16px; 6px radius |
+| Type | `--rr-font-family-mono` (IBM Plex Mono first), `--rr-font-weight-regular` `-medium` `-semibold` `-bold`, `--rr-line-height-tight` `-normal`, `--rr-font-size-label` `-eyebrow` `-dense`, `--rr-letter-spacing-label` `-eyebrow` `-heading` | Micro labels are mono, uppercase, 10.5px at 0.12em; eyebrows 11px at 0.16em; headings tighten by 0.02em. Mono maps to the editor font in VS Code |
+| Elevation | `--rr-elevation-1` `-2` `-3`, `--rr-focus-ring` | Card lift (contact shadow plus soft drop), menu/popover, dialog; focus is a 2px halo then a 2px ring |
+| Text-safe color | `--rr-text-accent`, `--rr-text-{success,info,warning,error}` | Accent and status colors for small text: derived toward the text color so they pass AA on any theme; the RocketRide themes set the exact branding values |
+| Code | `--rr-bg-code` `-code-bar`, `--rr-fg-code` `-code-muted` | Code blocks are ink on every theme |
+| Hero button | `--rr-btn-block` | The hard block behind `.rr-btn--hero`: the accent, or the ground color on the dark brand theme |
 | Tints | `--rr-bg-accent-soft`, `--rr-bg-{success,info,warning,error}-soft`, `--rr-border-{success,info,warning,error}-soft`, `--rr-border-subtle` | Derived with `color-mix()` |
 | Overlays | `--rr-bg-overlay`, `--rr-bg-tooltip`, `--rr-fg-tooltip` | Scrim; inverse tooltip |
 | Motion | `--rr-duration-fast` `-base` `-slow`, `--rr-ease-standard` `-out` | 120, 200, 350ms |
@@ -910,7 +922,7 @@ Scale and derived tokens defined once in `rocketride-default.css`. They are not 
 
 ### Component stylesheet
 
-`shell/themes/components.css` is a class layer over these tokens: buttons, inputs, fields, checkbox/radio/switch, chips, badges, avatars, alerts, progress, skeletons, dialogs, menus, tooltips, lists and tables, all as `rr-` classes. The shell loads it, so apps rendered inside the shell use the classes directly with no import. VS Code webviews, which do not run inside the shell, import both stylesheets themselves:
+`shell/themes/components.css` is a class layer over these tokens: buttons, inputs, fields, checkbox/radio/switch, chips, tags, badges, avatars, notes (alerts), code, progress, skeletons, dialogs, menus, tooltips, lists and tables, all as `rr-` classes. The look follows the RocketRide workshops site: mono uppercase micro labels for table headers, tags, badges and note labels; a mono eyebrow in accent ink above titles; section titles with a 3px accent bar; notes with a 3px tone bar on the left; ink code blocks; cards that firm up and lift on hover. The shell loads it, so apps rendered inside the shell use the classes directly with no import. VS Code webviews, which do not run inside the shell, import both stylesheets themselves:
 
 ```typescript
 import 'shell/themes/rocketride-default.css';
@@ -920,6 +932,11 @@ import 'shell/themes/components.css';
 ```html
 <button class="rr-btn rr-btn--primary">Run</button>
 <span class="rr-badge rr-badge--success"><span class="rr-dot rr-dot--success"></span>Running</span>
+
+<p class="rr-eyebrow">Project 1 <span class="rr-eyebrow__muted">/ 15 min</span></p>
+<h2 class="rr-section-title">Build the brain</h2>
+<div class="rr-alert rr-alert--warning"><div class="rr-alert__body"><span class="rr-alert__title">Heads up</span>Idle pipelines pause after an hour.</div></div>
+<span class="rr-tag rr-tag--info">Cloud</span> <code class="rr-code">policy.ts</code>
 ```
 
 See `ROCKETRIDE_UI_COMPONENTS.md` (Stylesheet classes) for the full class list.

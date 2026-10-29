@@ -60,7 +60,7 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		commonStyles: {},
 	},
 	'banner': {
-		direct: ['--rr-color-error', '--rr-color-info', '--rr-color-warning'],
+		direct: ['--rr-border', '--rr-color-error', '--rr-color-info', '--rr-color-warning', '--rr-text-primary'],
 		commonStyles: {},
 	},
 	'bar-chart': {
@@ -72,7 +72,7 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		commonStyles: {},
 	},
 	'button': {
-		direct: ['--rr-bg-button', '--rr-border', '--rr-brand', '--rr-color-error', '--rr-fg-button', '--rr-text-primary'],
+		direct: ['--rr-accent', '--rr-bg-button', '--rr-border', '--rr-color-error', '--rr-control-radius', '--rr-fg-button', '--rr-text-accent', '--rr-text-primary'],
 		commonStyles: {},
 	},
 	'card': {
@@ -151,7 +151,7 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 	'explorer': {
 		direct: ['--rr-bg-input', '--rr-bg-list-active', '--rr-bg-list-hover', '--rr-bg-paper', '--rr-bg-surface-alt', '--rr-bg-toolbar-hover', '--rr-border', '--rr-brand', '--rr-color-error', '--rr-color-success', '--rr-color-warning', '--rr-fg-list-active', '--rr-font-family', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {
-			labelUppercase: ['--rr-text-secondary'],
+			labelUppercase: ['--rr-font-family-mono', '--rr-font-size-label', '--rr-letter-spacing-label', '--rr-text-secondary'],
 			textMuted: ['--rr-text-secondary'],
 		},
 	},
@@ -256,7 +256,7 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		commonStyles: {},
 	},
 	'status-badge': {
-		direct: ['--rr-bg-surface-alt', '--rr-border', '--rr-color-error', '--rr-color-info', '--rr-color-success', '--rr-color-warning', '--rr-text-disabled', '--rr-text-secondary'],
+		direct: ['--rr-bg-surface-alt', '--rr-border', '--rr-color-error', '--rr-color-info', '--rr-color-success', '--rr-color-warning', '--rr-font-family-mono', '--rr-font-size-label', '--rr-letter-spacing-label', '--rr-radius-xs', '--rr-text-disabled', '--rr-text-error', '--rr-text-info', '--rr-text-secondary', '--rr-text-success', '--rr-text-warning'],
 		commonStyles: {},
 	},
 	'status-page': {

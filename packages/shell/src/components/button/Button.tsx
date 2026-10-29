@@ -71,7 +71,7 @@ const styles = {
 		fontFamily: 'inherit',
 		fontSize: 13,
 		fontWeight: 600,
-		borderRadius: 7,
+		borderRadius: 'var(--rr-control-radius)',
 		cursor: 'pointer',
 		border: '1px solid transparent',
 		whiteSpace: 'nowrap',
@@ -112,10 +112,12 @@ const styles = {
 		borderColor: 'var(--rr-bg-button)',
 		color: 'var(--rr-fg-button)',
 	} as CSSProperties,
+	// Accent outline; the label uses the text-safe accent (the raw brand red
+	// is 3.74:1 on white, too low for a 13px label).
 	secondary: {
 		background: 'transparent',
-		borderColor: 'var(--rr-brand)',
-		color: 'var(--rr-brand)',
+		borderColor: 'var(--rr-accent)',
+		color: 'var(--rr-text-accent)',
 	} as CSSProperties,
 	ghost: {
 		background: 'transparent',

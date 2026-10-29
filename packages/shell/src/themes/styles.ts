@@ -443,17 +443,20 @@ const textMuted: CSSProperties = {
 // =============================================================================
 
 /**
- * Table header cell (<th>) — uppercase, spaced, 10px, disabled colour.
+ * Table header cell (<th>) — the micro label: mono, uppercase, tracked,
+ * secondary colour on the alternate surface.
  * Apply directly to <th> elements.  Has a bottom border that acts as the
  * column-header separator.
  */
 const tableHeader: CSSProperties = {
 	textAlign: 'left',
 	padding: '8px 14px',
-	fontSize: 10,
+	fontFamily: 'var(--rr-font-family-mono)',
+	fontSize: 'var(--rr-font-size-label)',
 	textTransform: 'uppercase',
-	letterSpacing: '0.6px',
-	color: 'var(--rr-text-disabled)',
+	letterSpacing: 'var(--rr-letter-spacing-label)',
+	color: 'var(--rr-text-secondary)',
+	background: 'var(--rr-bg-surface-alt)',
 	borderBottom: '1px solid var(--rr-border)',
 	fontWeight: 600,
 };
@@ -556,16 +559,18 @@ const fontMono: CSSProperties = {
 };
 
 /**
- * Uppercase section/field label — 11px bold, spaced, secondary colour.
+ * Uppercase section/field label — the micro label: mono, tracked,
+ * secondary colour (same as .rr-text-label).
  * Use for small metadata labels, column group headings, or form field labels
  * that should visually recede relative to their values.
  * Similar appearance to `tableHeader` but used inline rather than in a <th>.
  */
 const labelUppercase: CSSProperties = {
-	fontSize: 11,
+	fontFamily: 'var(--rr-font-family-mono)',
+	fontSize: 'var(--rr-font-size-label)',
 	fontWeight: 600,
 	textTransform: 'uppercase',
-	letterSpacing: '0.5px',
+	letterSpacing: 'var(--rr-letter-spacing-label)',
 	color: 'var(--rr-text-secondary)',
 };
 

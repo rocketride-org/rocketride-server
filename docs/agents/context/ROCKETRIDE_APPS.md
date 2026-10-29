@@ -1471,6 +1471,7 @@ tokens needs no theme-specific code.
 | `--rr-font-family`, `--rr-font-size` / `-sm` / `-xs` | Primary font and sizes |
 | `--rr-icon-color` | Default icon tint |
 | `--rr-chart-blue` … `--rr-chart-red` | Hue tokens for lanes and avatars (blue, green, yellow, purple, orange, red) |
+| `--rr-text-accent`, `--rr-text-success` / `-info` / `-warning` / `-error` | Accent and status colors that are safe as small text (the raw accent is fills and large text only) |
 | `--rr-chart-series-1` … `-6` | Ordered chart series palette: assign by series position, never cycle; fold extras into "Other" |
 
 There is no monospace token — use a fallback stack:

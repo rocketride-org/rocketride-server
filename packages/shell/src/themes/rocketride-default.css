@@ -38,8 +38,10 @@
 	/* Brand                                                               */
 	/* ================================================================== */
 
-	/** Primary brand colour — RocketRide orange. */
-	--rr-brand: #f7901f;
+	/** Primary brand colour: RocketRide red (rocketride-org/branding v2,
+	    brand.brand). Orange #f7901f is retired. Large text and fills only:
+	    3.74:1 on white, so small accent text uses --rr-text-accent. */
+	--rr-brand: #f93822;
 
 	/* ================================================================== */
 	/* Palette mode                                                        */
@@ -177,17 +179,18 @@
 	/* ================================================================== */
 
 	/** Primary accent — connected handles, active indicators. */
-	--rr-accent: #f7901f;
+	--rr-accent: #f93822;
 
 	/** Faded accent — resize-handle borders, subtle highlights. */
-	--rr-accent-faded: rgba(247, 144, 31, 0.5);
+	--rr-accent-faded: rgba(249, 56, 34, 0.5);
 
 	/* ================================================================== */
 	/* Buttons                                                             */
 	/* ================================================================== */
 
-	/** Primary button background. */
-	--rr-bg-button: #f7901f;
+	/** Primary button background. Ink, not accent: white on the brand red
+	    is 3.74:1 and fails AA for a normal-size label (branding v2). */
+	--rr-bg-button: #12111a;
 
 	/** Primary button foreground. */
 	--rr-fg-button: #ffffff;
@@ -372,8 +375,8 @@
 	/* Radius                                                              */
 	/* ================================================================== */
 
-	/** Micro chrome — mini buttons, canvas-node controls. */
-	--rr-radius-xs: 3px;
+	/** Tags, inline code, kbd, mini buttons. */
+	--rr-radius-xs: 4px;
 
 	/** List rows, legacy input fields. */
 	--rr-radius-sm: 5px;
@@ -420,14 +423,15 @@
 	--rr-control-height-mini: 16px;
 
 	/** Default control radius — Button, InputField. */
-	--rr-control-radius: 7px;
+	--rr-control-radius: 6px;
 
 	/* ================================================================== */
 	/* Typography                                                          */
 	/* ================================================================== */
 
-	/** Monospace family — code, IDs, keys, numeric cells. */
-	--rr-font-family-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+	/** Monospace family: code, IDs, keys, and the uppercase micro labels
+	    (eyebrows, table headers, tags). IBM Plex Mono ships with the shell. */
+	--rr-font-family-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
 
 	/** Alias kept for existing call sites that read --rr-font-mono. */
 	--rr-font-mono: var(--rr-font-family-mono);
@@ -440,8 +444,17 @@
 	--rr-line-height-tight: 1.2;
 	--rr-line-height-normal: 1.5;
 
-	/** Label / table-header text (uppercase micro labels). */
-	--rr-font-size-label: 10px;
+	/** Micro label: mono, uppercase, tracked (table headers, tags, note
+	    labels, day headings). */
+	--rr-font-size-label: 10.5px;
+	--rr-letter-spacing-label: 0.12em;
+
+	/** Eyebrow / kicker above a title: mono, uppercase, accent ink. */
+	--rr-font-size-eyebrow: 11px;
+	--rr-letter-spacing-eyebrow: 0.16em;
+
+	/** Headings tighten as they grow. */
+	--rr-letter-spacing-heading: -0.02em;
 
 	/** Dense UI text — badges, chips, small buttons. */
 	--rr-font-size-dense: 11.5px;
@@ -450,8 +463,9 @@
 	/* Elevation — shadow geometry over the per-theme shadow colour         */
 	/* ================================================================== */
 
-	/** Resting raised surface — cards that float over content. */
-	--rr-elevation-1: 0 1px 3px var(--rr-shadow-widget);
+	/** Resting raised surface and card hover: a hairline contact shadow plus
+	    a soft drop pulled in at the edges. */
+	--rr-elevation-1: 0 1px 2px color-mix(in srgb, var(--rr-shadow-widget) 35%, transparent), 0 8px 24px -12px var(--rr-shadow-widget);
 
 	/** Menus, popovers, dropdowns. */
 	--rr-elevation-2: 0 4px 12px var(--rr-shadow-widget);
@@ -459,12 +473,38 @@
 	/** Dialogs and drawers. */
 	--rr-elevation-3: 0 12px 40px var(--rr-shadow-widget);
 
-	/** Keyboard focus ring — a gap in the page colour, then the focus colour. */
-	--rr-focus-ring: 0 0 0 1px var(--rr-bg-default), 0 0 0 3px var(--rr-border-focus);
+	/** Keyboard focus ring: a 2px halo in the page colour, then a 2px ring in
+	    the focus colour, so one construction reads on light and dark (branding v2). */
+	--rr-focus-ring: 0 0 0 2px var(--rr-bg-default), 0 0 0 4px var(--rr-border-focus);
 
 	/* ================================================================== */
 	/* Derived colour                                                      */
 	/* ================================================================== */
+
+	/** The accent as small text (eyebrows, accent links, secondary buttons).
+	    Mixed toward the text colour so it clears 4.5:1 on light and dark
+	    themes alike; the raw accent is for fills and large text only. */
+	--rr-text-accent: color-mix(in srgb, var(--rr-accent) 65%, var(--rr-text-primary));
+
+	/** Status colours as small text (badges, tags, note labels): pulled toward
+	    the text colour so a light status hue (a yellow warning) still reads.
+	    A theme whose status colours already pass as text (the RocketRide
+	    themes) sets these keys to the plain status colours instead. */
+	--rr-text-success: color-mix(in srgb, var(--rr-color-success) 50%, var(--rr-text-primary));
+	--rr-text-info: color-mix(in srgb, var(--rr-color-info) 50%, var(--rr-text-primary));
+	--rr-text-warning: color-mix(in srgb, var(--rr-color-warning) 50%, var(--rr-text-primary));
+	--rr-text-error: color-mix(in srgb, var(--rr-color-error) 50%, var(--rr-text-primary));
+
+	/** The hard block behind the hero call to action (.rr-btn--hero). The
+	    accent on light themes; a dark theme whose button is accent-filled
+	    sets its own (the RocketRide dark theme uses the ground colour). */
+	--rr-btn-block: var(--rr-accent);
+
+	/** Code blocks stay dark on every theme: branding ink, ground text. */
+	--rr-bg-code: #12111a;
+	--rr-bg-code-bar: #1a1924;
+	--rr-fg-code: #eeede7;
+	--rr-fg-code-muted: #a3a0ad;
 
 	/** Accent-tinted fill — selected rows, active nav, accent hover. */
 	--rr-bg-accent-soft: color-mix(in srgb, var(--rr-accent) 12%, transparent);
