@@ -18,7 +18,7 @@ Classes:
     Task: Main pipeline task execution and lifecycle management
 
 Constants:
-    CONST_DEFAULT_MAX_THREADS: Default thread pool size (4)
+    CONST_DEFAULT_MAX_THREADS: Default thread pool size (64)
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS: Graceful termination timeout (5s)
     CONST_STATUS_UPDATE_FREQ: Status update frequency (100ms)
     CONST_MAX_READY_TIME: Maximum time to wait for task readiness (30s)

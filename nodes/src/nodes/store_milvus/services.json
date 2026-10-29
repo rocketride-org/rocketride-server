@@ -176,7 +176,7 @@
 		"milvus.serverName": {
 			"type": "string",
 			"title": "Tool Server Name",
-			"description": "Namespace for agent-facing tool names, e.g. 'milvus' exposes tools as milvus.search / milvus.upsert / milvus.delete. Change this when running multiple Milvus nodes in the same pipeline so their tool names do not collide.",
+			"description": "Label for this store in tool-response messages (for example, a refused write names milvus.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "milvus",
 			"minLength": 1
 		},

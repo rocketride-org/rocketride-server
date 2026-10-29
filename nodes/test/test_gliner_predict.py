@@ -58,9 +58,13 @@ def _load_recognizer_module():
             Config=types.SimpleNamespace(getNodeConfig=lambda *a, **k: {}),
         ),
         'ai.common.models': types.SimpleNamespace(GLiNER=lambda *a, **k: None),
+        # glinerRecognizer imports make_device_lock from here; a plain lock stands in
+        # for it, since these tests set _predict_lock themselves.
+        'ai.common.models.base': types.SimpleNamespace(make_device_lock=threading.Lock),
     }
     stubs[package_name].__path__ = [os.path.abspath(_ANON_DIR)]
     stubs['ai'].common = stubs['ai.common']
+    stubs['ai.common.models'].base = stubs['ai.common.models.base']
 
     path = os.path.join(_ANON_DIR, 'glinerRecognizer.py')
     spec = importlib.util.spec_from_file_location(f'{package_name}.glinerRecognizer', path)

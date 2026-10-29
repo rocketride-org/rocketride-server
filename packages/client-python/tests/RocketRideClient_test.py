@@ -2421,6 +2421,20 @@ def test_get_websocket_uri_normalization(input_uri: str, expected_uri: str) -> N
     assert ConnectionMixin._get_websocket_uri(input_uri) == expected_uri
 
 
+@pytest.mark.parametrize(
+    ('input_uri', 'expected_uri'),
+    [
+        ('5590', 'ws://localhost:5590/models'),
+        ('localhost:5590', 'ws://localhost:5590/models'),
+        ('192.168.1.100:5590', 'ws://192.168.1.100:5590/models'),
+        ('wss://model.rocketride.dev:443', 'wss://model.rocketride.dev:443/models'),
+    ],
+)
+def test_get_websocket_uri_model_server_address(input_uri: str, expected_uri: str) -> None:
+    """Verify every --modelserver form, a bare port included, reaches the model server."""
+    assert ConnectionMixin._get_websocket_uri(input_uri, '/models') == expected_uri
+
+
 # ============================================================================
 # File Store Operations
 # ============================================================================
