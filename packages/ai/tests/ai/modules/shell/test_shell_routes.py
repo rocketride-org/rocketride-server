@@ -139,11 +139,12 @@ LEGAL_PAGES = (
     '/legal/acceptable-use',
     '/legal/subprocessors',
     '/legal/trademark-policy',
+    '/legal/cookie-policy',
 )
 
 
 def test_legal_pages_are_public_routes_and_listed():
-    # The legal index and the six published documents serve the SPA on a hard
+    # The legal index and the published documents serve the SPA on a hard
     # reload and are advertised like the other pages.
     for route in LEGAL_PAGES:
         assert route in PUBLIC_ROUTES

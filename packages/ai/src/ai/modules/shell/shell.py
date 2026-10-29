@@ -227,6 +227,12 @@ PUBLIC_ROUTE_MANIFEST = [
         'Trademark & Brand Usage Policy',
         'How the RocketRide name, logo, and brand assets may and may not be used.',
     ),
+    (
+        '/legal/cookie-policy',
+        'Cookie Policy',
+        'How RocketRide uses cookies, similar technologies, and website analytics on its websites and '
+        'RocketRide Cloud, and the choices you have.',
+    ),
 ]
 
 # Bare route list — kept as the module's public surface for route
