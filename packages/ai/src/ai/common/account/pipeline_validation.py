@@ -23,6 +23,7 @@
 from typing import Any, Dict, List
 from collections import deque
 from ai.web import AccountInfo
+from rocketlib import getServiceDefinition
 
 
 class AccountPipelineValidation:
@@ -89,7 +90,7 @@ class AccountPipelineValidation:
             node = nodes.get(id)
             if node is None:
                 continue
-            schema = node_store.definition(node.get('provider'))
+            schema = getServiceDefinition(node.get('provider')) or node_store.served(node.get('provider'))
             if schema is None:
                 continue
             plans = schema.get('plans', [])

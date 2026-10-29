@@ -1,6 +1,6 @@
 from typing import Optional
 from fastapi import Query
-from rocketlib import getServiceDefinitions
+from rocketlib import getServiceDefinitions, getServiceDefinition
 from ai.web import response, error, Result
 
 
@@ -20,7 +20,7 @@ async def services_get(service: Optional[str] = Query(None)) -> Result:
     # If a specific service name is provided via the query string (e.g. ?service=xyz)
     if service:
         # Check if the requested service exists in the definitions
-        schema = node_store.definition(service)
+        schema = getServiceDefinition(service) or node_store.served(service)
 
         # If we couldn't find it, return an error message
         if not schema:

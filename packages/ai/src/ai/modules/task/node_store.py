@@ -108,9 +108,9 @@ def custom() -> List[Dict[str, Any]]:
     return list(_definitions.values())
 
 
-def definition(provider: str) -> Optional[Dict[str, Any]]:
-    """A service's definition: the engine's, else the one of a node EaaS serves."""
-    return getServiceDefinition(provider) or _definitions.get(provider)
+def served(provider: str) -> Optional[Dict[str, Any]]:
+    """The definition of a node EaaS serves, for a lookup the engine cannot answer."""
+    return _definitions.get(provider)
 
 
 def _providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
