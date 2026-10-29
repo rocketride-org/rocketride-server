@@ -296,6 +296,17 @@ import { PageLayout, PageSidebarToggle, usePageLayout } from './components/page-
 import { SettingsSection } from './components/settings/SettingsSection';
 import { ThemeSwitcher } from './components/settings/ThemeSwitcher';
 import { StatusPage } from './components/status-page/StatusPage';
+// Phase 5 stock library: dashboard widgets.
+import { LineChart } from './components/chart/LineChart';
+import { BarChart } from './components/chart/BarChart';
+import { Sparkline } from './components/chart/Sparkline';
+import { ChartCard, ChartTable } from './components/chart/ChartCard';
+import { computeDelta, formatCompact, formatDelta } from './components/chart/chartFormat';
+import { StatCard, DeltaPill } from './components/stat-card/StatCard';
+import { Meter } from './components/meter/Meter';
+import { ActivityFeed } from './components/activity-feed/ActivityFeed';
+import { formatRelativeTime } from './components/activity-feed/activityTime';
+import { DashboardGrid, DashboardGridItem } from './components/dashboard-grid/DashboardGrid';
 // (commonStyles is imported at the very top of this file — cycle-order
 // constraint — and re-exported from the export block below.)
 // Values graduated from deep shell/src imports when the package exports map
@@ -332,6 +343,9 @@ export {
 	Accordion, List, Table, Tree, Breadcrumbs, Pagination, Stepper,
 	PageLayout, PageSidebarToggle, usePageLayout, SettingsSection,
 	ThemeSwitcher, StatusPage,
+	LineChart, BarChart, Sparkline, ChartCard, ChartTable, StatCard, DeltaPill,
+	Meter, ActivityFeed, DashboardGrid, DashboardGridItem,
+	computeDelta, formatCompact, formatDelta, formatRelativeTime,
 	commonStyles,
 	applyTheme, isInVSCode, OAUTH_ROOT_URL,
 	ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE,
@@ -378,6 +392,17 @@ export type { SidebarMode } from './components/page-layout/pageLayoutState';
 export type { ISettingsSectionProps } from './components/settings/SettingsSection';
 export type { IThemeSwitcherProps, IThemeChoice } from './components/settings/ThemeSwitcher';
 export type { IStatusPageProps, StatusPageKind, IStatusPreset } from './components/status-page/StatusPage';
+export type { ILineChartProps } from './components/chart/LineChart';
+export type { IBarChartProps } from './components/chart/BarChart';
+export type { ISparklineProps } from './components/chart/Sparkline';
+export type { IChartCardProps, IChartTableProps, ChartCardView } from './components/chart/ChartCard';
+export type { IChartData, IChartSeries } from './components/chart/chartMath';
+export type { DeltaTone, DeltaDirection } from './components/chart/chartFormat';
+export type { IStatCardProps, IDeltaPillProps } from './components/stat-card/StatCard';
+export type { IMeterProps, MeterLevel } from './components/meter/Meter';
+export type { IActivityFeedProps, IActivityItem, ActivityTone } from './components/activity-feed/ActivityFeed';
+export type { TimestampInput } from './components/activity-feed/activityTime';
+export type { IDashboardGridProps, IDashboardGridItemProps, DashboardSpan } from './components/dashboard-grid/DashboardGrid';
 export type { IToggleGroupProps, IToggleGroupOption } from './components/toggle-group/ToggleGroup';
 export type { IChipProps, IChipAddProps } from './components/chip/Chip';
 export type { IDropZoneProps } from './components/drop-zone/DropZone';
@@ -560,6 +585,21 @@ export const shellApi = {
 	get SettingsSection() { return SettingsSection; },
 	get ThemeSwitcher() { return ThemeSwitcher; },
 	get StatusPage() { return StatusPage; },
+	get LineChart() { return LineChart; },
+	get BarChart() { return BarChart; },
+	get Sparkline() { return Sparkline; },
+	get ChartCard() { return ChartCard; },
+	get ChartTable() { return ChartTable; },
+	get StatCard() { return StatCard; },
+	get DeltaPill() { return DeltaPill; },
+	get Meter() { return Meter; },
+	get ActivityFeed() { return ActivityFeed; },
+	get DashboardGrid() { return DashboardGrid; },
+	get DashboardGridItem() { return DashboardGridItem; },
+	get computeDelta() { return computeDelta; },
+	get formatCompact() { return formatCompact; },
+	get formatDelta() { return formatDelta; },
+	get formatRelativeTime() { return formatRelativeTime; },
 	get commonStyles() { return commonStyles; },
 	get useShellConnection() { return useShellConnection; },
 	get useAuthUser() { return useAuthUser; },

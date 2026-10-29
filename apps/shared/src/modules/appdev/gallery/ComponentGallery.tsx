@@ -249,6 +249,7 @@ const GROUP_CHIP: Record<IGalleryEntry['group'], string> = {
 	sidebar: 'Sidebar content',
 	documents: 'Document system',
 	layouts: 'Page layout',
+	dashboards: 'Dashboard widget',
 	content: 'Content component',
 	hooks: 'Hooks & context',
 	utils: 'Utilities',

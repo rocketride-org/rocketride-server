@@ -328,6 +328,19 @@
 	--rr-chart-orange: #e67a2e;
 	--rr-chart-red: #c92a2a;
 
+	/** Ordered categorical series palette for dashboard charts (Sparkline,
+	    LineChart, BarChart). Assign in order, never cycle: series 7+ fold into
+	    "Other". The ORDER is the colour-blind safety mechanism (adjacent pairs
+	    validated for protan/deutan/tritan separation, light and dark steps
+	    validated separately against each theme's paper). The hue tokens above
+	    stay for lanes and avatars; they cannot be ordered into a safe set. */
+	--rr-chart-series-1: #2a78d6; /* blue */
+	--rr-chart-series-2: #eb6834; /* orange */
+	--rr-chart-series-3: #1baf7a; /* aqua */
+	--rr-chart-series-4: #eda100; /* yellow */
+	--rr-chart-series-5: #e87ba4; /* magenta */
+	--rr-chart-series-6: #008300; /* green */
+
 	/* ================================================================== */
 	/* Annotations                                                         */
 	/* ================================================================== */

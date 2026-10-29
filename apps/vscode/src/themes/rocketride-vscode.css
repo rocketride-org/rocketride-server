@@ -180,6 +180,14 @@
 	--rr-chart-orange: #e67a2e;
 	--rr-chart-red: #c92a2a;
 
+	/* Ordered series palette (see rocketride-default.css); dark steps below. */
+	--rr-chart-series-1: #2a78d6;
+	--rr-chart-series-2: #eb6834;
+	--rr-chart-series-3: #1baf7a;
+	--rr-chart-series-4: #eda100;
+	--rr-chart-series-5: #e87ba4;
+	--rr-chart-series-6: #008300;
+
 	/* ================================================================== */
 	/* Annotations                                                         */
 	/* ================================================================== */
@@ -204,6 +212,12 @@ body[data-vscode-theme-kind='vscode-dark'],
 body[data-vscode-theme-kind='vscode-high-contrast'] {
 	--rr-icon-color: #ffffff;
 	--icon-color: #ffffff;
+	--rr-chart-series-1: #3987e5;
+	--rr-chart-series-2: #d95926;
+	--rr-chart-series-3: #199e70;
+	--rr-chart-series-4: #c98500;
+	--rr-chart-series-5: #d55181;
+	--rr-chart-series-6: #008300;
 }
 
 body[data-vscode-theme-kind='vscode-light'],

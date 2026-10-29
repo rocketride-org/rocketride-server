@@ -47,6 +47,10 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		direct: [],
 		commonStyles: {},
 	},
+	'activity-feed': {
+		direct: [],
+		commonStyles: {},
+	},
 	'avatar': {
 		direct: ['--rr-avatar-tone', '--rr-chart-blue', '--rr-chart-green', '--rr-chart-orange', '--rr-chart-purple', '--rr-chart-red', '--rr-chart-yellow'],
 		commonStyles: {},
@@ -57,6 +61,10 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 	},
 	'banner': {
 		direct: ['--rr-color-error', '--rr-color-info', '--rr-color-warning'],
+		commonStyles: {},
+	},
+	'bar-chart': {
+		direct: ['--rr-chart-series-1', '--rr-chart-series-2', '--rr-chart-series-3', '--rr-chart-series-4', '--rr-chart-series-5', '--rr-chart-series-6'],
 		commonStyles: {},
 	},
 	'breadcrumbs': {
@@ -73,6 +81,10 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 			card: ['--rr-bg-paper', '--rr-border'],
 			cardHeader: ['--rr-bg-title', '--rr-text-primary'],
 		},
+	},
+	'chart-card': {
+		direct: ['--rr-chart-series-1', '--rr-chart-series-2', '--rr-chart-series-3', '--rr-chart-series-4', '--rr-chart-series-5', '--rr-chart-series-6'],
+		commonStyles: {},
 	},
 	'chat-view': {
 		direct: ['--rr-bg-default', '--rr-bg-paper', '--rr-bg-scrollbar-thumb', '--rr-bg-widget', '--rr-border', '--rr-border-focus', '--rr-border-input', '--rr-brand', '--rr-color-error', '--rr-fg-button', '--rr-font-family', '--rr-font-family-widget', '--rr-font-mono', '--rr-font-size-widget', '--rr-text-caption', '--rr-text-disabled', '--rr-text-link', '--rr-text-primary', '--rr-text-secondary'],
@@ -102,6 +114,10 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 	},
 	'content-header': {
 		direct: ['--rr-text-primary', '--rr-text-secondary'],
+		commonStyles: {},
+	},
+	'dashboard-grid': {
+		direct: ['--rr-dashboard-min'],
 		commonStyles: {},
 	},
 	'data-grid': {
@@ -173,7 +189,15 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 			inputField: ['--rr-bg-input', '--rr-border-input', '--rr-text-primary'],
 		},
 	},
+	'line-chart': {
+		direct: ['--rr-chart-series-1', '--rr-chart-series-2', '--rr-chart-series-3', '--rr-chart-series-4', '--rr-chart-series-5', '--rr-chart-series-6'],
+		commonStyles: {},
+	},
 	'list': {
+		direct: [],
+		commonStyles: {},
+	},
+	'meter': {
 		direct: [],
 		commonStyles: {},
 	},
@@ -221,6 +245,14 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 	},
 	'skeleton': {
 		direct: [],
+		commonStyles: {},
+	},
+	'sparkline': {
+		direct: ['--rr-chart-series-1', '--rr-chart-series-2', '--rr-chart-series-3', '--rr-chart-series-4', '--rr-chart-series-5', '--rr-chart-series-6'],
+		commonStyles: {},
+	},
+	'stat-card': {
+		direct: ['--rr-chart-series-1', '--rr-chart-series-2', '--rr-chart-series-3', '--rr-chart-series-4', '--rr-chart-series-5', '--rr-chart-series-6'],
 		commonStyles: {},
 	},
 	'status-badge': {

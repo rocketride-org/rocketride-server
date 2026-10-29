@@ -76,5 +76,11 @@
 	"--rr-chart-yellow": "#ffd43b",
 	"--rr-chart-purple": "#b197fc",
 	"--rr-chart-orange": "#ffa94d",
-	"--rr-chart-red": "#ff8787"
+	"--rr-chart-red": "#ff8787",
+	"--rr-chart-series-1": "#3987e5",
+	"--rr-chart-series-2": "#d95926",
+	"--rr-chart-series-3": "#199e70",
+	"--rr-chart-series-4": "#c98500",
+	"--rr-chart-series-5": "#d55181",
+	"--rr-chart-series-6": "#008300"
 }

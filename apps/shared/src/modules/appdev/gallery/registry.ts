@@ -110,6 +110,15 @@ import { settingsSectionEntry } from './entries/settings-section.entry';
 import { themeSwitcherEntry } from './entries/theme-switcher.entry';
 import { statusPageEntry } from './entries/status-page.entry';
 
+import { dashboardGridEntry } from './entries/dashboard-grid.entry';
+import { statCardEntry } from './entries/stat-card.entry';
+import { chartCardEntry } from './entries/chart-card.entry';
+import { lineChartEntry } from './entries/line-chart.entry';
+import { barChartEntry } from './entries/bar-chart.entry';
+import { sparklineEntry } from './entries/sparkline.entry';
+import { meterEntry } from './entries/meter.entry';
+import { activityFeedEntry } from './entries/activity-feed.entry';
+
 // --- Hooks & context ---------------------------------------------------------
 import { connectionClientEntry } from './entries/connection-client.entry';
 import { shellEventsEntry } from './entries/shell-events.entry';
@@ -134,6 +143,7 @@ export const GALLERY_GROUPS: Array<{ id: GalleryGroup; label: string }> = [
 	{ id: 'sidebar', label: 'Sidebar content' },
 	{ id: 'documents', label: 'Document system' },
 	{ id: 'layouts', label: 'Page layouts' },
+	{ id: 'dashboards', label: 'Dashboard widgets' },
 	{ id: 'content', label: 'Content components' },
 	{ id: 'hooks', label: 'Hooks & context' },
 	{ id: 'utils', label: 'Utilities' },
@@ -167,6 +177,15 @@ export const GALLERY_ENTRIES: IGalleryEntry[] = [
 	settingsSectionEntry,
 	themeSwitcherEntry,
 	statusPageEntry,
+	// Dashboard widgets - the grid first, then tiles, chart panel, charts, feed
+	dashboardGridEntry,
+	statCardEntry,
+	chartCardEntry,
+	lineChartEntry,
+	barChartEntry,
+	sparklineEntry,
+	meterEntry,
+	activityFeedEntry,
 	// Content components - alphabetical
 	accordionEntry,
 	avatarEntry,

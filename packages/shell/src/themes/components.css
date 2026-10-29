@@ -58,7 +58,11 @@
 .rr-page-layout,
 .rr-page-layout__sidebar,
 .rr-settings-section,
-.rr-status-page {
+.rr-status-page,
+.rr-stat,
+.rr-chart-card,
+.rr-dashboard-grid,
+.rr-chart__tooltip {
 	box-sizing: border-box;
 }
 
@@ -2211,6 +2215,585 @@ button.rr-stepper__button:hover {
 }
 
 /* ===================================================================== */
+/* Phase 5 — dashboard widgets: charts, sparkline, stat, meter,          */
+/* chart card, activity feed, dashboard grid                             */
+/* ===================================================================== */
+
+/* ---- Charts (LineChart, BarChart) ---- */
+/* Marks wear --rr-chart-series-N (set inline by the component); text and
+   legend labels wear text tokens only. Gridlines are solid hairlines one
+   step off the surface. */
+.rr-chart {
+	--rr-chart-grid: color-mix(in srgb, var(--rr-border) 70%, transparent);
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	gap: var(--rr-space-2);
+	min-width: 0;
+}
+.rr-chart__legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--rr-space-1) var(--rr-space-4);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	font-size: 12px;
+	color: var(--rr-text-primary);
+}
+.rr-chart__legend-item {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--rr-space-1-5);
+}
+.rr-chart__key {
+	display: inline-block;
+	flex: none;
+}
+.rr-chart__key--line {
+	width: 12px;
+	height: 2px;
+	border-radius: 1px;
+}
+.rr-chart__key--square {
+	width: 8px;
+	height: 8px;
+	border-radius: 2px;
+}
+.rr-chart__plot {
+	position: relative;
+	width: 100%;
+	min-width: 0;
+	border-radius: var(--rr-radius-sm);
+	outline: none;
+	touch-action: pan-y;
+}
+.rr-chart__plot:focus-visible {
+	box-shadow: var(--rr-focus-ring);
+}
+.rr-chart__svg {
+	display: block;
+	overflow: visible;
+}
+.rr-chart__grid line {
+	stroke: var(--rr-chart-grid);
+	stroke-width: 1;
+	shape-rendering: crispEdges;
+}
+.rr-chart__tick {
+	font-family: var(--rr-font-family-widget);
+	font-size: 11px;
+	font-variant-numeric: tabular-nums;
+	fill: var(--rr-text-secondary);
+}
+.rr-chart__crosshair {
+	stroke: var(--rr-border-hover);
+	stroke-width: 1;
+	shape-rendering: crispEdges;
+}
+.rr-chart__band-highlight {
+	fill: var(--rr-bg-widget-hover);
+}
+.rr-chart__line {
+	fill: none;
+	stroke-width: 2;
+	stroke-linejoin: round;
+	stroke-linecap: round;
+}
+.rr-chart__area {
+	fill-opacity: 0.1;
+	stroke: none;
+}
+.rr-chart__dot {
+	stroke: var(--rr-bg-paper);
+	stroke-width: 2;
+}
+.rr-chart__tooltip {
+	position: absolute;
+	z-index: var(--rr-z-raised);
+	min-width: 140px;
+	max-width: 240px;
+	padding: var(--rr-space-2) var(--rr-space-2-5);
+	font-size: 12px;
+	color: var(--rr-text-primary);
+	background: var(--rr-bg-paper);
+	border: 1px solid var(--rr-border);
+	border-radius: var(--rr-radius-md);
+	box-shadow: var(--rr-elevation-2);
+	pointer-events: none;
+}
+.rr-chart__tooltip-title {
+	margin-bottom: var(--rr-space-1);
+	font-weight: var(--rr-font-weight-semibold);
+}
+.rr-chart__tooltip-row {
+	display: flex;
+	align-items: center;
+	gap: var(--rr-space-1-5);
+	line-height: 1.6;
+}
+.rr-chart__tooltip-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.rr-chart__tooltip-value {
+	font-weight: var(--rr-font-weight-medium);
+	font-variant-numeric: tabular-nums;
+}
+.rr-chart__no-data {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	font-size: 12px;
+	color: var(--rr-text-secondary);
+}
+
+/* ---- Sparkline ---- */
+/* De-emphasized line; only the latest point wears the accent series. */
+.rr-sparkline {
+	position: relative;
+	display: block;
+	width: 100%;
+}
+.rr-sparkline__svg {
+	display: block;
+	overflow: visible;
+}
+.rr-sparkline__line {
+	fill: none;
+	stroke: color-mix(in srgb, var(--rr-text-secondary) 75%, transparent);
+	stroke-width: 1.5;
+	stroke-linejoin: round;
+	stroke-linecap: round;
+}
+.rr-sparkline__area {
+	fill: var(--rr-chart-series-1);
+	fill-opacity: 0.1;
+}
+.rr-sparkline__dot {
+	position: absolute;
+	width: 8px;
+	height: 8px;
+	margin: -4px 0 0 -4px;
+	border-radius: 50%;
+	background: var(--rr-chart-series-1);
+	box-shadow: 0 0 0 2px var(--rr-bg-paper);
+}
+
+/* ---- StatCard and DeltaPill ---- */
+.rr-stat {
+	display: flex;
+	flex-direction: column;
+	gap: var(--rr-space-2);
+	min-width: 0;
+	padding: var(--rr-space-4);
+}
+.rr-stat__label {
+	display: flex;
+	align-items: center;
+	gap: var(--rr-space-1-5);
+	font-size: 12px;
+	font-weight: var(--rr-font-weight-medium);
+	color: var(--rr-text-primary);
+}
+.rr-stat__icon {
+	display: inline-flex;
+	color: var(--rr-icon-color, var(--rr-text-secondary));
+}
+/* Proportional figures at display sizes; tabular only in columns. */
+.rr-stat__value {
+	font-size: 24px;
+	font-weight: var(--rr-font-weight-semibold);
+	line-height: var(--rr-line-height-tight);
+	color: var(--rr-text-primary);
+	overflow-wrap: anywhere;
+}
+.rr-stat--hero .rr-stat__value {
+	font-size: 48px;
+}
+.rr-stat__unit {
+	margin-left: var(--rr-space-1);
+	font-size: 13px;
+	font-weight: var(--rr-font-weight-regular);
+	color: var(--rr-text-secondary);
+}
+.rr-stat__delta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--rr-space-2);
+	font-size: 12px;
+}
+.rr-stat__delta-label {
+	color: var(--rr-text-secondary);
+}
+.rr-stat__trend {
+	margin-top: auto;
+	padding-top: var(--rr-space-1);
+}
+.rr-stat__footer {
+	padding-top: var(--rr-space-2);
+	font-size: 12px;
+	border-top: 1px solid var(--rr-border-subtle);
+}
+
+/* The number stays primary ink; the tint and arrow carry good / bad. */
+.rr-delta {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--rr-space-1);
+	padding: 1px var(--rr-space-1-5);
+	font-size: 12px;
+	font-weight: var(--rr-font-weight-medium);
+	font-variant-numeric: tabular-nums;
+	color: var(--rr-text-primary);
+	background: color-mix(in srgb, var(--rr-text-primary) 6%, transparent);
+	border-radius: var(--rr-radius-pill);
+}
+.rr-delta__arrow {
+	font-size: 9px;
+	color: var(--rr-text-secondary);
+}
+.rr-delta--good {
+	background: var(--rr-bg-success-soft);
+}
+.rr-delta--good .rr-delta__arrow {
+	color: var(--rr-color-success);
+}
+.rr-delta--bad {
+	background: var(--rr-bg-error-soft);
+}
+.rr-delta--bad .rr-delta__arrow {
+	color: var(--rr-color-error);
+}
+
+/* ---- Meter ---- */
+/* The fill carries severity; the track is a tint of the same color. */
+.rr-meter {
+	--rr-meter-color: var(--rr-accent);
+	display: flex;
+	flex-direction: column;
+	gap: var(--rr-space-1-5);
+	min-width: 0;
+}
+.rr-meter--warning {
+	--rr-meter-color: var(--rr-color-warning);
+}
+.rr-meter--danger {
+	--rr-meter-color: var(--rr-color-error);
+}
+.rr-meter__header {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--rr-space-2);
+	font-size: 12px;
+	color: var(--rr-text-primary);
+}
+.rr-meter__amount {
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+.rr-meter__track {
+	height: 8px;
+	overflow: hidden;
+	background: color-mix(in srgb, var(--rr-meter-color) 20%, var(--rr-bg-paper));
+	border-radius: var(--rr-radius-pill);
+}
+.rr-meter__fill {
+	height: 100%;
+	background: var(--rr-meter-color);
+	border-radius: inherit;
+	transition: width var(--rr-duration-base) var(--rr-ease-standard);
+}
+.rr-meter__footer {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: var(--rr-space-2);
+	font-size: 12px;
+	color: var(--rr-text-secondary);
+}
+.rr-meter__status {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--rr-space-1-5);
+	font-weight: var(--rr-font-weight-medium);
+	color: var(--rr-text-primary);
+}
+.rr-meter__status-icon {
+	display: inline-grid;
+	place-items: center;
+	width: 14px;
+	height: 14px;
+	font-size: 10px;
+	font-weight: var(--rr-font-weight-bold);
+	color: var(--rr-text-primary);
+	background: color-mix(in srgb, var(--rr-meter-color) 25%, var(--rr-bg-paper));
+	border: 1px solid var(--rr-meter-color);
+	border-radius: 50%;
+}
+
+/* ---- ChartCard ---- */
+.rr-chart-card {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+.rr-chart-card__header {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: var(--rr-space-3);
+	padding: var(--rr-space-4) var(--rr-space-4) 0;
+}
+.rr-chart-card__titles {
+	min-width: 0;
+}
+.rr-chart-card__title {
+	margin: 0;
+	font-size: 14px;
+	font-weight: var(--rr-font-weight-semibold);
+	line-height: var(--rr-line-height-tight);
+	color: var(--rr-text-primary);
+}
+.rr-chart-card__subtitle {
+	margin: 2px 0 0;
+	font-size: 12px;
+	color: var(--rr-text-secondary);
+}
+.rr-chart-card__actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--rr-space-2);
+}
+.rr-chart-card__headline {
+	padding: var(--rr-space-2) var(--rr-space-4) 0;
+	font-size: 24px;
+	font-weight: var(--rr-font-weight-semibold);
+	line-height: var(--rr-line-height-tight);
+	color: var(--rr-text-primary);
+}
+.rr-chart-card__body {
+	flex: 1;
+	min-width: 0;
+	padding: var(--rr-space-3) var(--rr-space-4) var(--rr-space-4);
+}
+.rr-chart-card__state {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: var(--rr-space-2);
+	font-size: 13px;
+	text-align: center;
+	color: var(--rr-text-primary);
+}
+.rr-chart-card__state[aria-busy='true'] {
+	align-items: stretch;
+}
+.rr-chart-card__table {
+	max-height: 320px;
+	overflow: auto;
+	border-radius: var(--rr-radius-sm);
+	outline: none;
+}
+.rr-chart-card__table:focus-visible {
+	box-shadow: var(--rr-focus-ring);
+}
+.rr-chart-card__footer {
+	padding: var(--rr-space-3) var(--rr-space-4);
+	font-size: 12px;
+	border-top: 1px solid var(--rr-border-subtle);
+}
+
+/* ---- ActivityFeed ---- */
+.rr-activity {
+	display: flex;
+	flex-direction: column;
+	gap: var(--rr-space-4);
+	min-width: 0;
+}
+.rr-activity__day {
+	margin: 0 0 var(--rr-space-2);
+	font-size: var(--rr-font-size-label);
+	font-weight: var(--rr-font-weight-semibold);
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--rr-text-secondary);
+}
+.rr-activity__list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+.rr-activity__item {
+	position: relative;
+	display: flex;
+	gap: var(--rr-space-3);
+	padding-bottom: var(--rr-space-4);
+}
+.rr-activity__item:last-child {
+	padding-bottom: 0;
+}
+/* The rail between markers. */
+.rr-activity__item:not(:last-child)::before {
+	content: '';
+	position: absolute;
+	top: 28px;
+	bottom: 4px;
+	left: 11px;
+	width: 2px;
+	background: var(--rr-border-subtle);
+	border-radius: 1px;
+}
+.rr-activity__marker {
+	position: relative;
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+}
+.rr-activity__marker--icon {
+	font-size: 12px;
+	color: var(--rr-text-primary);
+	background: var(--rr-bg-surface-alt);
+	border-radius: 50%;
+	box-shadow: inset 0 0 0 1px var(--rr-border);
+}
+.rr-activity__marker--icon.rr-activity__marker--info {
+	background: var(--rr-bg-info-soft);
+	box-shadow: inset 0 0 0 1px var(--rr-border-info-soft);
+}
+.rr-activity__marker--icon.rr-activity__marker--success {
+	background: var(--rr-bg-success-soft);
+	box-shadow: inset 0 0 0 1px var(--rr-border-success-soft);
+}
+.rr-activity__marker--icon.rr-activity__marker--warning {
+	background: var(--rr-bg-warning-soft);
+	box-shadow: inset 0 0 0 1px var(--rr-border-warning-soft);
+}
+.rr-activity__marker--icon.rr-activity__marker--error {
+	background: var(--rr-bg-error-soft);
+	box-shadow: inset 0 0 0 1px var(--rr-border-error-soft);
+}
+.rr-activity__dot {
+	width: 10px;
+	height: 10px;
+	background: var(--rr-text-disabled);
+	border-radius: 50%;
+	box-shadow: 0 0 0 3px var(--rr-bg-paper);
+}
+.rr-activity__marker--info .rr-activity__dot {
+	background: var(--rr-color-info);
+}
+.rr-activity__marker--success .rr-activity__dot {
+	background: var(--rr-color-success);
+}
+.rr-activity__marker--warning .rr-activity__dot {
+	background: var(--rr-color-warning);
+}
+.rr-activity__marker--error .rr-activity__dot {
+	background: var(--rr-color-error);
+}
+.rr-activity__body {
+	flex: 1;
+	min-width: 0;
+	padding-top: 2px;
+}
+.rr-activity__title {
+	font-size: 13px;
+	line-height: 1.4;
+	color: var(--rr-text-primary);
+	overflow-wrap: anywhere;
+}
+.rr-activity__actor {
+	font-weight: var(--rr-font-weight-semibold);
+}
+.rr-activity__description {
+	margin-top: 2px;
+	font-size: 12px;
+	color: var(--rr-text-secondary);
+}
+.rr-activity__meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--rr-space-2);
+	margin-top: var(--rr-space-1);
+	font-size: var(--rr-font-size-dense);
+	color: var(--rr-text-secondary);
+}
+.rr-activity__empty {
+	margin: 0;
+	padding: var(--rr-space-4) 0;
+	font-size: 13px;
+	text-align: center;
+	color: var(--rr-text-secondary);
+}
+.rr-activity__more {
+	display: flex;
+	justify-content: center;
+}
+
+/* ---- DashboardGrid ---- */
+/* Breakpoints are container queries on the grid, never the viewport. */
+.rr-dashboard-grid {
+	container: rr-dashboard / inline-size;
+	display: grid;
+	grid-template-columns: repeat(12, minmax(0, 1fr));
+	gap: var(--rr-space-4);
+}
+.rr-dashboard-grid--auto {
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--rr-dashboard-min, 220px)), 1fr));
+}
+.rr-dashboard-grid__item {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+.rr-dashboard-grid__item > *,
+.rr-dashboard-grid--auto > * {
+	flex: 1;
+}
+.rr-dashboard-grid__item--span-3 {
+	grid-column: span 3;
+}
+.rr-dashboard-grid__item--span-4 {
+	grid-column: span 4;
+}
+.rr-dashboard-grid__item--span-6 {
+	grid-column: span 6;
+}
+.rr-dashboard-grid__item--span-8 {
+	grid-column: span 8;
+}
+.rr-dashboard-grid__item--span-12 {
+	grid-column: span 12;
+}
+@container rr-dashboard (max-width: 959px) {
+	.rr-dashboard-grid__item--span-3,
+	.rr-dashboard-grid__item--span-4 {
+		grid-column: span 6;
+	}
+	.rr-dashboard-grid__item--span-8 {
+		grid-column: span 12;
+	}
+}
+@container rr-dashboard (max-width: 599px) {
+	.rr-dashboard-grid .rr-dashboard-grid__item {
+		grid-column: span 12;
+	}
+}
+
+/* ===================================================================== */
 /* Utilities                                                             */
 /* ===================================================================== */
 
@@ -2255,7 +2838,8 @@ button.rr-stepper__button:hover {
 	.rr-accordion__chevron,
 	.rr-tree__chevron::before,
 	.rr-page-layout__sidebar,
-	.rr-page-layout__scrim {
+	.rr-page-layout__scrim,
+	.rr-meter__fill {
 		animation: none !important;
 		transition: none !important;
 	}

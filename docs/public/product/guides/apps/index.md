@@ -886,6 +886,7 @@ The shell manages themes via CSS custom properties. Your app should use `--rr-*`
 | `--rr-color-success` | Success green |
 | `--rr-color-warning` | Warning orange |
 | `--rr-color-error` | Error red |
+| `--rr-chart-series-1` … `-6` | Ordered chart series colors (assign in order, never cycle; see below) |
 
 ### Foundation tokens
 
@@ -902,6 +903,10 @@ Scale and derived tokens defined once in `rocketride-default.css`. They are not 
 | Overlays | `--rr-bg-overlay`, `--rr-bg-tooltip`, `--rr-fg-tooltip` | Scrim; inverse tooltip |
 | Motion | `--rr-duration-fast` `-base` `-slow`, `--rr-ease-standard` `-out` | 120, 200, 350ms |
 | Layers | `--rr-z-raised` `-sticky` `-overlay` `-banner` `-drawer` `-panel` `-modal` `-popover` `-menu` `-toast` `-tooltip` | The z-index values the shell already uses |
+
+### Chart series palette
+
+`--rr-chart-series-1` through `-6` are the colors for chart series, in a fixed order: blue, orange, aqua, yellow, magenta, green. They are theme keys with a light and a dark step per hue. The order is what keeps adjacent series distinguishable for color-blind readers (validated for protan, deutan and tritan separation on every theme's paper), so assign them in order by series position and never cycle: past six series, fold the rest into "Other" (LineChart and BarChart do this for you). Keep a series' position stable when filtering so its color does not change. Several light-mode slots sit below 3:1 against the surface, so a chart that uses them needs visible labels or a table view; ChartCard's table view covers this. The older `--rr-chart-blue` … `--rr-chart-red` hue tokens remain for lanes and avatars.
 
 ### Component stylesheet
 

@@ -98,7 +98,7 @@ export interface IGalleryPropRow {
  * the document system, platform hooks/context, and the utility layer
  * (formatters, icons, theme vocabulary).
  */
-export type GalleryGroup = 'chrome' | 'sidebar' | 'documents' | 'layouts' | 'content' | 'hooks' | 'utils';
+export type GalleryGroup = 'chrome' | 'sidebar' | 'documents' | 'layouts' | 'dashboards' | 'content' | 'hooks' | 'utils';
 
 /**
  * One labeled API table beyond the main props table — hooks a chrome zone

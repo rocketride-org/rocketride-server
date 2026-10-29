@@ -15,7 +15,7 @@ In prop tables, Dir is the direction — `in` = data the component consumes,
 `out` = a callback it fires — and `(req)` marks a required prop. Groups
 match the gallery's own: [Host chrome](#host-chrome),
 [Sidebar content](#sidebar-content), [Document system](#document-system),
-[Page layouts](#page-layouts), [Content components](#content-components), [Hooks & context](#hooks--context),
+[Page layouts](#page-layouts), [Dashboard widgets](#dashboard-widgets), [Content components](#content-components), [Hooks & context](#hooks--context),
 [Utilities](#utilities), [Stylesheet classes](#stylesheet-classes).
 
 ---
@@ -460,7 +460,7 @@ settings. Stack inside `PageLayout contentWidth="narrow"`.
 | `children` | `ReactNode` | in (req) | The controls. |
 | `description` | `ReactNode` | in | What the settings do. |
 | `footer` | `ReactNode` | in | Right-aligned actions. |
-| `danger` | `boolean` | in | Red title and border. |
+| `danger` | `boolean` | in | Error-colored outline; the title stays primary. |
 | `headingLevel / id` | `2 \| 3 \| 4 / string` | in | Heading level (default 2); id for deep links. |
 
 ```tsx
@@ -513,6 +513,204 @@ import { Button, StatusPage } from 'shell';
 
 <StatusPage kind="error" actions={<Button onClick={retry}>Try again</Button>} details={error.requestId} />
 ```
+
+---
+
+## Dashboard widgets
+
+Tiles, charts and feeds for overview pages. Charts are token-colored SVG
+with no chart library: they re-theme with the shell, size to their
+container, and are readable by keyboard. Series colors come from the
+ordered `--rr-chart-series-1..6` palette by position (more than six fold
+into "Other"); text always wears text tokens. Lay a dashboard out with
+DashboardGrid inside a PageLayout.
+
+### DashboardGrid / DashboardGridItem
+
+A 12-column grid of `DashboardGridItem`s (`span` 3, 4, 6, 8 or 12), or
+auto-fit columns for a row of StatCards (`minItemWidth`). Spans of 3 and 4
+widen to 6 (8 to 12) when the grid is narrower than 960px; under 600px
+every item takes the full row. Container queries on the grid, never the
+viewport. Items stretch their widget to the row height.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `children` | `ReactNode` | in (req) | Items, or widgets in auto-fit mode. |
+| `minItemWidth` | `number` | in | Auto-fit mode: narrowest column (px). |
+| `label` | `string` | in | Makes the grid a labelled region. |
+| `span` (item) | `3 \| 4 \| 6 \| 8 \| 12` | in | Columns out of 12. Default 12. |
+| `rowSpan` (item) | `number` | in | Rows to span. Default 1. |
+
+```tsx
+import { DashboardGrid, DashboardGridItem, StatCard, ChartCard, LineChart } from 'shell';
+
+<DashboardGrid minItemWidth={180}>
+	<StatCard label="Pipeline runs" value={runs} delta={12.4} deltaLabel="vs last week" />
+	<StatCard label="p95 latency" value={504} unit="ms" delta={-8.2} isIncreaseGood={false} />
+</DashboardGrid>
+<DashboardGrid>
+	<DashboardGridItem span={8}><ChartCard title="Runs per day" data={data}><LineChart data={data} label="Runs per day" /></ChartCard></DashboardGridItem>
+	<DashboardGridItem span={4} rowSpan={2}><ActivityFeed items={events} /></DashboardGridItem>
+</DashboardGrid>
+```
+
+### StatCard / DeltaPill
+
+One KPI tile: label, value (numbers formatted compactly: 1,284 / 12.9K /
+4.2M), percent change against a named period, optional sparkline. Set
+`isIncreaseGood={false}` for latency, cost and error rate. The number stays
+primary text; a tinted pill and arrow carry the tone and the direction is
+spoken ("down 8.2%"). `hero` for the one headline metric on a view.
+`DeltaPill` renders the delta alone.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `label` | `string` | in (req) | Sentence case, no colon. |
+| `value` | `number \| string` | in (req) | Numbers go through `formatValue` (default `formatCompact`). |
+| `unit` | `string` | in | After the value. |
+| `delta / deltaLabel` | `number \| null / string` | in | Percent change (see `computeDelta`) and its period. |
+| `isIncreaseGood` | `boolean` | in | Default true. |
+| `trend` | `number[]` | in | Sparkline values, oldest first. |
+| `icon / footer` | `ReactNode` | in | Beside the label / under the tile. |
+| `isLoading / hero` | `boolean` | in | Skeletons / 48px value. |
+
+```tsx
+import { computeDelta, StatCard } from 'shell';
+
+<StatCard label="Pipeline runs" value={thisWeek} delta={computeDelta(thisWeek, lastWeek)} deltaLabel="vs last week" trend={daily} />
+```
+
+### ChartCard / ChartTable
+
+The panel around a chart: title, subtitle, headline, header actions, footer,
+and the states (loading, then error with optional Retry, then empty). With
+`data` it adds a Chart / Table switch; the table lists every value, which is
+the accessible and copyable form of the chart. `ChartTable` renders that
+table alone.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `title` | `ReactNode` | in (req) | Card heading (`headingLevel`, default 2). |
+| `children` | `ReactNode` | in (req) | The chart. |
+| `subtitle / headline / actions / footer` | `ReactNode` | in | Header and footer slots. |
+| `data` | `IChartData` | in | Enables the table view. |
+| `formatValue / categoryHeader` | `fn / string` | in | Table values / first column header. |
+| `isLoading / error / onRetry / isEmpty / emptyText` | state | in | Replace the chart. |
+| `height` | `number` | in | State placeholder height. Default 220. |
+
+```tsx
+import { ChartCard, LineChart, ToggleGroup } from 'shell';
+
+<ChartCard title="Pipeline runs" subtitle="Last 14 days" actions={<ToggleGroup options={RANGES} value={range} onChange={setRange} />} data={data} isLoading={isLoading} error={error} onRetry={refetch}>
+	<LineChart data={data} label="Pipeline runs per day" />
+</ChartCard>
+```
+
+### LineChart
+
+Change over time for one to six series; `area` adds a 10% wash. 2px lines,
+an end dot on the latest point, `null` values are gaps. Hover, or focus the
+plot and use the arrow keys / Home / End, to read every series at a
+category; the reading is announced. One y axis: chart measures of
+different scale separately.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `data` | `IChartData` | in (req) | `{ categories: string[]; series: { id, label, values: (number \| null)[] }[] }`. |
+| `label` | `string` | in (req) | Accessible name. |
+| `height` | `number` | in | Default 220. |
+| `area / includeZero` | `boolean` | in | Area wash / zero baseline (default true). |
+| `showLegend` | `boolean` | in | Default: two or more series. |
+| `formatValue / formatTick` | `(value: number) => string` | in | Tooltip values / y ticks. |
+
+```tsx
+import { LineChart } from 'shell';
+
+<LineChart data={{ categories: days, series: [{ id: 'runs', label: 'Runs', values: runs }] }} label="Runs per day" area />
+```
+
+### BarChart
+
+Magnitudes across categories, grouped or `stacked` (positive values).
+Columns at most 24px with a rounded data end and a 2px gap between touching
+bars. Same data, palette and reading rules as LineChart.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `data / label` | `IChartData / string` | in (req) | As LineChart. |
+| `stacked` | `boolean` | in | One column per category. |
+| `height / showLegend / formatValue / formatTick` | | in | As LineChart. |
+
+```tsx
+import { BarChart } from 'shell';
+
+<BarChart data={tokensByModel} label="Tokens per day by model" stacked />
+```
+
+### Sparkline
+
+A word-sized trend with no axes for tiles, table cells and list rows. It
+stretches to its container; only the latest point is accented. One image
+to screen readers, named by `label` plus a summary ("10 to 14, low 10,
+high 14").
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `values` | `number[]` | in (req) | Oldest first. |
+| `label` | `string` | in (req) | What the trend is of. |
+| `height / area / formatValue` | `number / boolean / fn` | in | Default 32px. |
+
+```tsx
+import { Sparkline } from 'shell';
+
+<Sparkline values={dailyRuns} label="rag-pipeline, last 14 days" />
+```
+
+### Meter
+
+An amount against a limit (quota, seats, tokens this month). The fill turns
+warning at `warningAt` (0.8) and error at `dangerAt` (0.95) of `max`, with
+a status line ("Near limit", "At limit") so severity is never color alone.
+`role="meter"`. Use ProgressBar for work that completes.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `label` | `string` | in (req) | What is measured. |
+| `value / max` | `number` | in (req) | Amount and limit. |
+| `formatValue` | `(value: number) => string` | in | Default `formatCompact`. |
+| `warningAt / dangerAt` | `number` | in | Fractions of max. |
+| `hint` | `ReactNode` | in | Line under the bar. |
+
+```tsx
+import { Meter } from 'shell';
+
+<Meter label="Tokens this month" value={8_200_000} max={10_000_000} hint="Resets Nov 1" />
+```
+
+### ActivityFeed
+
+A timeline of events under day headings (Today, Yesterday, Mon, Oct 26).
+Marker: `icon`, else the actor's Avatar, else a status dot in `tone`; the
+title must say what happened. Relative times refresh every minute and each
+is a `<time>` with the full date as its tooltip. Pass items newest first.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `items` | `IActivityItem[]` | in (req) | `{ id, title, timestamp, actor?, actorImage?, icon?, tone?, description?, meta? }`. |
+| `label` | `string` | in | Region name. Default `'Activity'`. |
+| `groupByDay / headingLevel` | `boolean / 2 \| 3 \| 4` | in | Default true / 3. |
+| `now` | `Date` | in | Fixed reference time. |
+| `emptyText` | `ReactNode` | in | Default `'No activity yet'`. |
+| `hasMore / onLoadMore / isLoadingMore` | `boolean / fn / boolean` | in / out | Pagination; the button keeps focus while loading. |
+
+```tsx
+import { ActivityFeed } from 'shell';
+
+<ActivityFeed items={events} hasMore={page.hasMore} onLoadMore={fetchNextPage} isLoadingMore={isFetching} />
+```
+
+Formatting helpers exported with these: `formatCompact`, `formatDelta`,
+`computeDelta`, `formatRelativeTime`.
 
 ---
 

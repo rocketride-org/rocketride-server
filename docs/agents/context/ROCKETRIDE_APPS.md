@@ -1470,7 +1470,8 @@ tokens needs no theme-specific code.
 | `--rr-color-success` / `-warning` / `-error` / `-info` | Semantic status colors |
 | `--rr-font-family`, `--rr-font-size` / `-sm` / `-xs` | Primary font and sizes |
 | `--rr-icon-color` | Default icon tint |
-| `--rr-chart-blue` … `--rr-chart-red` | Categorical chart palette (blue, green, yellow, purple, orange, red) |
+| `--rr-chart-blue` … `--rr-chart-red` | Hue tokens for lanes and avatars (blue, green, yellow, purple, orange, red) |
+| `--rr-chart-series-1` … `-6` | Ordered chart series palette: assign by series position, never cycle; fold extras into "Other" |
 
 There is no monospace token — use a fallback stack:
 `fontFamily: 'var(--rr-font-mono, Consolas, monospace)'`.

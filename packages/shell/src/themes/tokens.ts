@@ -85,5 +85,12 @@ export type ThemeTokens = {
 	'--rr-chart-purple': string;
 	'--rr-chart-orange': string;
 	'--rr-chart-red': string;
+	// Ordered series palette for dashboard charts (validated order; never cycled).
+	'--rr-chart-series-1': string;
+	'--rr-chart-series-2': string;
+	'--rr-chart-series-3': string;
+	'--rr-chart-series-4': string;
+	'--rr-chart-series-5': string;
+	'--rr-chart-series-6': string;
 	[key: string]: string;
 };
