@@ -70,6 +70,17 @@
  *     runAgent runs it: the tool time limits stand still while a question is
  *     open, each question hears when the run ends, and a step moves the clock
  *     past the limit (see ManualOptions).
+ *   - The same manual mode, with two more steps: the dev preview opens (one
+ *     batch read of both files through the view, then it primes each file it
+ *     got, as devSession.ts does), and a teammate changes the first file's
+ *     server copy. A commit over that change may meet a conflict; it then
+ *     stores nothing, so every write that worked must still be in the view.
+ *     A staged file's conflict anchor is the copy the page read, so a commit
+ *     over a teammate's change no writer here saw meets a conflict, and a
+ *     write that erases the teammate's change breaks the erased rule like any
+ *     other. Every manual run also checks that the base's cached copy of a
+ *     file is always one the server held: no editor buffer and no staged
+ *     change.
  *   - The real editor documents, four times: a text tab (fileDocument.ts)
  *     and a canvas (canvasDocument.ts with the shell's Documents), each in
  *     auto and manual mode, each in a test file of its own so the test
@@ -565,10 +576,10 @@ async function persistRestored(team: string): Promise<void> {
 const ANSWERS = ['save', 'discard', 'keep'] as const;
 
 /** A step of a manual-mode order. */
-type ManualStep = 'start' | 'save' | 'type' | 'commit' | 'discard' | 'discard-file' | 'rollback' | 'timeout' | `answer ${(typeof ANSWERS)[number]}` | `release ${number}`;
+type ManualStep = 'start' | 'save' | 'type' | 'commit' | 'discard' | 'discard-file' | 'rollback' | 'timeout' | 'preview' | 'teammate' | `answer ${(typeof ANSWERS)[number]}` | `release ${number}`;
 
 /** The rules the manual exploration checks (see the file header). */
-type FailureKind = 'erased' | 'lost' | 'not-committed' | 'left-after-discard' | 'false-stale' | 'keep-unasked' | 'asked-past-limit' | 'open-after-run' | 'stuck';
+type FailureKind = 'erased' | 'lost' | 'not-committed' | 'left-after-discard' | 'false-stale' | 'keep-unasked' | 'asked-past-limit' | 'open-after-run' | 'poisoned' | 'stuck';
 
 /** What one manual run saw. */
 interface ManualOutcome {
@@ -602,6 +613,13 @@ interface ManualOptions {
 	 * follows its file.
 	 */
 	slowRead?: boolean;
+	/**
+	 * Two more steps, once each, possible while a dialog is open too: the dev
+	 * preview opens (one batch read of both files through the view, then it
+	 * primes each file it got), and a teammate changes the first file's
+	 * server copy.
+	 */
+	outside?: boolean;
 }
 
 /** A write through the view: the token it adds, when it was called, and whether it worked. */
@@ -630,6 +648,8 @@ interface Tab {
 	base: string;
 	/** True after a save was refused as stale. */
 	stale?: boolean;
+	/** The save on its way and the text it writes. */
+	running?: { content: string; done: Promise<void> };
 }
 
 /** A dialog the agent showed, and what became of it. */
@@ -655,6 +675,9 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 	const store = new FakeStore({ [storePath(team)]: ORIGINAL, [storePath(team, FILE_B)]: ORIGINAL_B }).install();
 	for (const path of store.files.keys()) store.watched.add(path);
 	const seeded = new Set(store.watched);
+	// step: each content a file has held on the server: its seed and the teammate's change here, and each write in store.landed
+	const history = new Map([...store.files].map(([path, content]) => [path, new Set([content])]));
+	const serverHeld = (path: string, content: string): boolean => history.get(path)?.has(content) === true || store.landed.some((w) => w.path === path && w.content === content);
 	if (opts.restored) await persistRestored(team);
 	const ws: Workspace = await buildWorkspace({ hostAppId: 'ordering.test', autoCommit: false, scope: { kind: 'team', teamId: team } });
 	const staged = ws.view as StagedFileSystem;
@@ -726,6 +749,18 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 		);
 	};
 
+	// step: a commit's check and its write are not one call on the store, so a teammate's change between them is out of
+	// the page's reach: the teammate step waits while a commit replays (the view's private replay step)
+	let replaying = 0;
+	const replays = staged as unknown as { replay: (...args: unknown[]) => Promise<unknown> };
+	const realReplay = replays.replay.bind(staged);
+	if (opts.outside) {
+		replays.replay = (...args) => {
+			replaying += 1;
+			return realReplay(...args).finally(() => (replaying -= 1));
+		};
+	}
+
 	// step: an earlier turn staged apps/c.ts and was sealed as a checkpoint. A restored start
 	// has the two saved changes above it, staged before any step, and holds the persists from here
 	let checkpoint: string | null = EARLIER_TURN;
@@ -752,7 +787,7 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 		tab.since = since;
 		tab.stale = false;
 	};
-	const save = async (tab: Tab): Promise<void> => {
+	const saveNow = async (tab: Tab): Promise<void> => {
 		tab.saving = true;
 		const content = tab.buffer;
 		const since = tab.since;
@@ -775,6 +810,12 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 		} finally {
 			tab.saving = false;
 		}
+	};
+	// step: a save called while one of the same text runs is that save, as fileDocument's is
+	const save = (tab: Tab): Promise<void> => {
+		if (tab.saving && tab.running?.content === tab.buffer) return tab.running.done;
+		tab.running = { content: tab.buffer, done: saveNow(tab) };
+		return tab.running.done;
 	};
 	const discardTab = async (tab: Tab): Promise<void> => {
 		const fresh = tab.stale === true;
@@ -922,7 +963,17 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 	let discardedFile = false;
 	let rolledBack = false;
 	let timedOut = false;
+	let previewed = false;
+	let teammateChanged = false;
 	const inflight = new Set<Promise<unknown>>();
+	// step: the base's cached copy of a file is always one the server held, never an editor buffer or a staged change
+	const checkCache = (): void => {
+		for (const path of [FILE, FILE_B]) {
+			const cached = staged.cachedContent(path);
+			const text = `the cache holds '${String(cached)}' for ${path}, which the server never held`;
+			if (cached !== undefined && !serverHeld(storePath(team, path), String(cached)) && !failures.some((f) => f.text === text)) fail('poisoned', text);
+		}
+	};
 	const track = (work: Promise<unknown>): void => {
 		const settled = work.catch(() => undefined);
 		inflight.add(settled);
@@ -944,6 +995,8 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 	const possible = (): ManualStep[] => {
 		const steps: ManualStep[] = store.held.map((_, i) => `release ${i}` as const);
 		if (opts.userTime && agent && !timedOut) steps.push('timeout');
+		if (opts.outside && !previewed) steps.push('preview');
+		if (opts.outside && !teammateChanged && replaying === 0) steps.push('teammate');
 		if (open()) return [...steps, ...ANSWERS.map((a) => `answer ${a}` as const)];
 		if (!agent) steps.push('start');
 		if (tabA.dirty && !tabA.saving && saves < 2) steps.push('save');
@@ -994,12 +1047,26 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 			timedOut = true;
 			tickedWhileAsking = open();
 			mock.timers.tick(LIMIT_MS);
+		} else if (step === 'preview') {
+			previewed = true;
+			track(
+				view.readMany([FILE, FILE_B]).then((found) => {
+					for (const [path, content] of Object.entries(found)) view.prime(path, String(content));
+				})
+			);
+		} else if (step === 'teammate') {
+			teammateChanged = true;
+			const content = `${store.files.get(storePath(team)) ?? ''}+teammate`;
+			store.files.set(storePath(team), content);
+			history.get(storePath(team))?.add(content);
+			changes.get(FILE)?.push(++clock);
 		} else if (step.startsWith('answer ')) {
 			answer(step.slice('answer '.length) as UnsavedChoice);
 		} else {
 			store.held.splice(Number(step.slice('release '.length)), 1)[0].release();
 		}
 		await settle(store, progress);
+		checkCache();
 	}
 	const next = possible();
 
@@ -1023,6 +1090,7 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 				held.release();
 			}
 			await settle(store, progress);
+			checkCache();
 		}
 		return work;
 	};
@@ -1073,10 +1141,16 @@ export async function runManual(order: ManualStep[], opts: ManualOptions = {}): 
 		}
 	}
 	const last = await drive(staged.commit(), 'the last commit');
-	if (last && last.conflicts.length > 0) fail('lost', `the last commit met conflicts: ${last.conflicts.map((c) => `${c.path} ${c.reason}`).join(', ')}`);
+	checkCache();
+	// step: a commit over the teammate's change may meet a conflict on the first file; it then stores nothing,
+	// so every write that worked must still be in the view, and the teammate's change stays on the server
+	const overTeammate = last !== undefined && teammateChanged && last.conflicts.length > 0 && last.conflicts.every((c) => c.path === FILE && c.reason === 'changed');
+	if (last && last.conflicts.length > 0 && !overTeammate) fail('lost', `the last commit met conflicts: ${last.conflicts.map((c) => `${c.path} ${c.reason}`).join(', ')}`);
 	const finalStore = new Map([FILE, FILE_B].map((path) => [path, store.files.get(storePath(team, path)) ?? '']));
+	const kept = new Map(finalStore);
+	if (overTeammate) for (const path of [FILE, FILE_B]) kept.set(path, String((await drive(view.read(path), `reading ${path}`).catch(() => '')) ?? ''));
 	for (const w of writes) {
-		if (w.ok && w.at > (lastDrop.get(w.path) ?? 0) && !tokens(finalStore.get(w.path) ?? '').has(w.token)) fail('lost', `'${w.token}' was written to ${w.path} and never reached the store`);
+		if (w.ok && w.at > (lastDrop.get(w.path) ?? 0) && !tokens(kept.get(w.path) ?? '').has(w.token)) fail('lost', `'${w.token}' was written to ${w.path} and ${overTeammate ? 'is neither stored nor still in the view' : 'never reached the store'}`);
 	}
 	for (const erased of erasures(store, seeded)) fail('erased', erased);
 

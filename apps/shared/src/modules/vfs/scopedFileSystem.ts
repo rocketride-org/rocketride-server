@@ -68,7 +68,7 @@ export function scopedFileSystem(root: IWorkspaceFileSystem, prefix: string): IW
 		read: (path) => root.read(toRoot(path)),
 		write: (path, content, origin, expect) => root.write(toRoot(path), content, origin, expect),
 		rename: (oldPath, newPath, origin) => root.rename(toRoot(oldPath), toRoot(newPath), origin),
-		delete: (path, origin) => root.delete(toRoot(path), origin),
+		delete: (path, origin, anchor) => root.delete(toRoot(path), origin, anchor),
 		mkdir: (path, origin) => root.mkdir(toRoot(path), origin),
 
 		// ── View surface ────────────────────────────────────────────────

@@ -28,8 +28,10 @@
  * One run of the agent. Each wave asks the model for a plan, runs the plan's
  * tool calls, and feeds their summaries into the next wave's question. The
  * run ends when the model's answer is accepted, on a reply that stays unusable,
- * when the model cannot be reached, or when the user stops it; there is no
- * wave limit. Messages the user sends during the run reach the next question.
+ * when the model cannot be reached, when the user stops it, at the step limit
+ * (`maxWaves`), or when the cost limit refuses a model request. Messages the
+ * user sends during the run reach the next question; they never reset the
+ * step count.
  *
  * An answer is accepted only when the host's finish rule (`FinishRule`) finds
  * nothing left unchecked, so the model cannot skip checking. The loop knows
@@ -49,6 +51,7 @@
 import { redactText } from '../toolkits/common';
 import type { SecretMarkers } from '../toolkits/secretMarkers';
 import { RefusedError, type AgentTool, type ToolAct, type ToolStep, type UserTime } from '../tools';
+import { CostLimitError } from '../usage';
 import { MEMORY_PEEK_TOOL, peek, resolveAnswerRefs, resolveArgRefs, resultKey, RunMemory } from './memory';
 import { buildWaveQuestion, heardText, parseReply, type PromptPrefix } from './plan';
 import type { HistoryTurn, ModelCall, PlanReply, QuestionSpec, ResultEntry, StopReason, ToolCall } from './plan';
@@ -138,6 +141,20 @@ export interface LoopOptions {
 	notes?: () => string[];
 	/** The time the user spends answering tool questions; no call's time limit runs while one is open. */
 	userTime?: UserTime;
+	/**
+	 * Asked after each wave's calls. Text means a call ended the turn to wait
+	 * for the user (ask_user): the run stops with 'needs_input', and the text
+	 * is its answer.
+	 */
+	endTurn?: () => string | null;
+	/** Drops the question endTurn gave, so the model can ask again. */
+	withdrawAsk?: () => void;
+	/**
+	 * The step limit: the most waves the run takes. Once that many have run,
+	 * it plans no more, answers from what it gathered, and stops with
+	 * 'limited'. 0 or unset means no limit.
+	 */
+	maxWaves?: number;
 }
 
 /** How a run ended. */
@@ -150,6 +167,8 @@ export interface LoopResult {
 	waves: number;
 	/** How long each model call took, in milliseconds, in call order. */
 	modelMs: number[];
+	/** How many tool calls the model planned, memory.peek and skipped calls included. */
+	toolCalls: number;
 }
 
 /** The time limit for a tool call when the options set none: 5 minutes, Wave's default. */
@@ -184,6 +203,9 @@ const STILL_RUNNING = 'Still running when you stopped (these may still finish an
 
 /** Why a done is sent back while a message the user sent during the run is unread. */
 const READ_THE_USER = 'Not finished: the user wrote to you while you worked. Read "Messages from the user during this run" before done=true.';
+
+/** Why a question to the user is dropped when they wrote during its wave: they had not seen it. */
+const ASKED_UNSEEN = 'Not asked: the user wrote to you before they saw your question. Read "Messages from the user during this run", then call ask_user again if you still need to.';
 
 /** The role of the best-effort question: a plain answer, not a plan. */
 const FALLBACK_ROLE = 'You are a helpful assistant.';
@@ -351,6 +373,11 @@ function partialReport(cause: string, lines: string[], scratch: string): string 
 	if (scratch) parts.push('', 'My working notes:', scratch);
 	if (lines.length) parts.push('', 'What I gathered:', ...lines);
 	return parts.join('\n');
+}
+
+/** Whether a run that ends this way pauses at a limit, for Continue. */
+function pauses(reason: StopReason): boolean {
+	return reason === 'limited' || reason === 'cost_limit';
 }
 
 // =============================================================================
@@ -716,6 +743,8 @@ class WaveRun {
 	readonly memory = new RunMemory();
 	/** How long each model call took. */
 	readonly modelMs: number[] = [];
+	/** How many tool calls the model planned. */
+	toolCalls = 0;
 	/** The model's working notes, carried from wave to wave. */
 	scratch = '';
 	/** Every message the user sent during this run, oldest first; each later question shows them in its context. */
@@ -1005,7 +1034,7 @@ class WaveRun {
 
 	/** The run's result. */
 	finish(stopReason: StopReason, answer: string, waves: number): LoopResult {
-		return { answer, stopReason, waves, modelMs: this.modelMs };
+		return { answer, stopReason, waves, modelMs: this.modelMs, toolCalls: this.toolCalls };
 	}
 
 	/**
@@ -1020,12 +1049,38 @@ class WaveRun {
 	}
 
 	/**
+	 * Ends the run with the best effort from what was gathered. When the cost
+	 * limit refuses that question too, the run ends at the cost limit, however
+	 * it was ending. A run that pauses at a limit takes the messages the user
+	 * sent before the question, so the answer reads them, and again after it,
+	 * so one sent while the model answered is this turn's too. A message left
+	 * queued would start a turn of its own, with a fresh budget, before the
+	 * user pressed Continue. A run the user stopped while the model answered
+	 * ends stopped, however it was ending, so it offers no Continue.
+	 *
+	 * @param reason - Why the run ends.
+	 * @param waves - How many waves ran.
+	 * @returns The run's result.
+	 */
+	async answerFromGathered(reason: StopReason, waves: number): Promise<LoopResult> {
+		if (pauses(reason)) this.hear();
+		const { answer, costLimited } = await this.bestEffort();
+		// step: the user stopped the run while the model answered; bestEffort took the stop as a failed call
+		if (this.o.signal.aborted) return this.stopped(waves);
+		const stopReason = costLimited ? 'cost_limit' : reason;
+		if (pauses(stopReason)) this.hear();
+		return this.finish(stopReason, answer, waves);
+	}
+
+	/**
 	 * Asks for a best-effort answer from what was gathered (Wave's
 	 * `_synthesize`): a plain question, not a plan, with the results as lines
 	 * and the model's notes. If that call fails or returns nothing, the answer
 	 * is the gathered facts as they stand.
+	 *
+	 * @returns The answer, and whether the cost limit refused the question.
 	 */
-	async bestEffort(): Promise<string> {
+	private async bestEffort(): Promise<{ answer: string; costLimited: boolean }> {
 		const lines = this.results.map(gatheredLine);
 		const context = [`Information gathered:\n${lines.length ? lines.join('\n') : '(no results gathered)'}`];
 		// The notes hold what the model worked out (counts, names, conclusions).
@@ -1045,11 +1100,13 @@ class WaveRun {
 		try {
 			answer = await this.ask(q);
 		} catch (error) {
+			// step: the cost limit refused this request too, so it was never sent
+			if (error instanceof CostLimitError) return { answer: partialReport(error.message, lines, this.scratch), costLimited: true };
 			const name = error instanceof Error ? error.name : 'Error';
-			return partialReport(`the model call failed (${name}: ${messageOf(error)})`, lines, this.scratch);
+			return { answer: partialReport(`the model call failed (${name}: ${messageOf(error)})`, lines, this.scratch), costLimited: false };
 		}
-		if (!answer.trim()) return partialReport('the model returned no text', lines, this.scratch);
-		return answer;
+		if (!answer.trim()) return { answer: partialReport('the model returned no text', lines, this.scratch), costLimited: false };
+		return { answer, costLimited: false };
 	}
 }
 
@@ -1058,9 +1115,15 @@ class WaveRun {
 // =============================================================================
 
 /**
- * Runs waves until the model's answer is accepted, a reply stays unusable
- * after one retry (`empty_plan`), the model cannot be reached (`error`), or
- * the run is stopped (`stopped`, with no answer).
+ * Runs waves until the model's answer is accepted, a call asks the user
+ * (`needs_input`, with the question as the answer, unless the user wrote
+ * during that wave: the model reads that first), a reply stays unusable
+ * after one retry (`empty_plan`), the model cannot be reached (`error`), the
+ * run is stopped (`stopped`, with no answer), the step limit is reached
+ * (`limited`), or the cost limit refuses a model request (`cost_limit`). The
+ * last two answer with the best effort from what was gathered, and take the
+ * messages the user sent before and after it. A best effort the cost limit
+ * refuses ends the run as `cost_limit`, however it was ending.
  * Each wave plans, runs its calls, tells the finish rule what ran, and records
  * their entries for the next question. A done=true is sent back, with the
  * reason in an entry, while a timed-out call still runs, in the wave the check
@@ -1079,6 +1142,8 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 	const run = new WaveRun(o);
 	for (let wave = 0; ; wave++) {
 		if (o.signal.aborted) return run.stopped(wave);
+		// step: the step limit: no next plan; the answer is the best effort from what was gathered
+		if (o.maxWaves !== undefined && o.maxWaves > 0 && wave >= o.maxWaves) return run.answerFromGathered('limited', wave);
 		o.finish.beginWave(wave);
 		run.hear();
 		let reply: PlanReply;
@@ -1086,9 +1151,11 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 			reply = await run.plan();
 		} catch (error) {
 			if (error instanceof RunStopped) return run.stopped(wave + 1);
+			// step: the cost limit refused the plan, so it was never sent; the best effort reserves too, and may be refused
+			if (error instanceof CostLimitError) return run.answerFromGathered('cost_limit', wave + 1);
 			// Nothing gathered: the cause (a bad key, a stopped pipeline) is the useful part.
 			if (!run.gathered) throw error;
-			return run.finish('error', await run.bestEffort(), wave + 1);
+			return run.answerFromGathered('error', wave + 1);
 		}
 		const { toolCalls } = reply;
 
@@ -1111,7 +1178,7 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 		if (!toolCalls.length) {
 			run.record(reply.problems.map((problem, i) => ({ tool: 'reply-check', key: `wave-${wave}.check${i}`, error: `Skipped: ${problem}` })));
 			run.think(reply.thought, []);
-			return run.finish('empty_plan', await run.bestEffort(), wave + 1);
+			return run.answerFromGathered('empty_plan', wave + 1);
 		}
 
 		// step: run the calls. Only earlier waves' keys can be removed, and a reply
@@ -1119,6 +1186,7 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 		const earlier = run.earlierKeys();
 		const removing = reply.askedDone ? [] : reply.remove.filter((key) => earlier.has(key));
 		run.forget(removing);
+		run.toolCalls += toolCalls.length;
 		const { entries, ran } = await run.act(wave, toolCalls);
 		const lines = toolCalls.map((call, i) => thinkingLine(call, entries[i]));
 		entries.push(...problemEntries(wave, reply.problems));
@@ -1134,6 +1202,19 @@ export async function runLoop(o: LoopOptions): Promise<LoopResult> {
 		if (o.signal.aborted) {
 			run.think(reply.thought, lines);
 			return run.stopped(wave + 1);
+		}
+
+		// step: a call asked the user, so the turn ends here with the question as its answer. A message
+		// sent during this wave was written before the question showed, so it can't answer it.
+		const asked = o.endTurn?.() ?? null;
+		if (asked !== null && !run.hear()) {
+			run.record(entries);
+			run.think(reply.thought, lines);
+			return run.finish('needs_input', asked, wave + 1);
+		}
+		if (asked !== null) {
+			o.withdrawAsk?.();
+			entries.push(refusal(wave, ASKED_UNSEEN));
 		}
 
 		// step: done with calls — the answer stands only if every call worked, the

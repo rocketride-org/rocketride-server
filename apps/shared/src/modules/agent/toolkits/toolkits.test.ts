@@ -41,8 +41,9 @@ import { CachedVfs } from 'shell/src/modules/explorer/CachedVfs';
 import type { IVirtualFileSystem } from 'shell/src/modules/explorer/types';
 
 import type { ConsoleRow, WatchStatus } from '../../../tools/appdev/types';
+import { sha256Hex } from '../../vfs/hash';
 import { docsPathFor, isReferencePath } from '../../vfs/referenceTree';
-import { StaleVersionError, StagedFileSystem } from '../../vfs/stagedFileSystem';
+import { StaleVersionError, StaleWriteError, StagedFileSystem } from '../../vfs/stagedFileSystem';
 import type { IWorkspaceFileSystem, VfsEntry } from '../../vfs/vfsTypes';
 import { AgentSession } from '../agent';
 import { otherDialogOpen, queueChoices } from '../choice';
@@ -50,6 +51,7 @@ import { setAgentHost, type AgentDevSession, type AgentHost, type ApprovalPrefs,
 import { BUILDER_PROMPTS } from '../prompts';
 import { runAgent } from '../run';
 import type { AgentTool } from '../tools';
+import { choiceAction, TurnError, turnCard, type RunRecord, type TurnResult } from '../turn';
 import { TOOL_TIMEOUT_MS } from '../wave/loop';
 import type { ModelCall, QuestionSpec } from '../wave/plan';
 import { AppCheckToolkit, type AppCheckOptions, type CheckReport, type MarkerInfo, type MarkerSource } from './appCheck';
@@ -60,6 +62,7 @@ import { FileTracker } from './fileTracker';
 import { FilesystemTools } from './filesystem';
 import { SecretMarkers } from './secretMarkers';
 import { RocketRideClientToolkit } from './rocketrideClient';
+import { RunLedger } from './runs';
 
 // =============================================================================
 // MEMORY WORKSPACE — an in-memory IWorkspaceFileSystem for these tests
@@ -184,9 +187,9 @@ class InMemoryWorkspace implements MemoryWorkspace {
 		return this.versions.get(path) ?? 0;
 	}
 
-	async readVersioned(path: string): Promise<{ content: unknown; version: number }> {
+	async readVersioned(path: string, opts: { stored?: boolean } = {}): Promise<{ content: unknown; version: number }> {
 		const version = this.version(path);
-		return { content: await this.read(path), version };
+		return { content: opts.stored ? this.files.get(path) : await this.read(path), version };
 	}
 
 	lastWriter(path: string): string | undefined {
@@ -225,8 +228,9 @@ class InMemoryWorkspace implements MemoryWorkspace {
 		this.record('rename', oldPath);
 	}
 
-	async delete(path: string, origin?: string): Promise<void> {
+	async delete(path: string, origin?: string, anchor?: string): Promise<void> {
 		if (this.entryType(path) === null) throw new Error(`No such file or directory: ${path}`);
+		if (anchor !== undefined && (await sha256Hex(this.files.get(path) ?? '')) !== anchor) throw new StaleWriteError(path);
 		this.bump(path, origin);
 		for (const file of this.under(path, this.files.keys())) this.files.delete(file);
 		for (const dir of this.under(path, this.dirs)) this.dirs.delete(dir);
@@ -604,6 +608,14 @@ test('a delete of a file with unsaved changes asks for the OK first, then about 
 	assert.equal(ws.files.has('a.ts'), false);
 });
 
+test('Discard mine on a delete of a file whose unsaved typing the agent read still deletes it', async () => {
+	const ws = createMemoryWorkspace({ 'a.ts': 'a = 1' });
+	const tool = promptingTools(ws, fakeChoice('discard').choose, { 'a.ts': dirtyEditor(ws, 'a.ts', 'a = 1 // mine') });
+	await tool('read_file', { path: 'a.ts' });
+	await tool('delete_file', { path: 'a.ts' });
+	assert.equal(ws.files.has('a.ts'), false);
+});
+
 test('a question that cannot show because another dialog is open says so, and is not a Keep mine', async () => {
 	const ws = createMemoryWorkspace({ 'a.ts': 'a = 1' });
 	const editors = { 'a.ts': dirtyEditor(ws, 'a.ts', 'a = 1 // mine') };
@@ -768,26 +780,35 @@ test('an edit whose anchor still matches once lands on the current content and s
 // FILE TRACKER — what a run read and changed, and what moved on since
 // =============================================================================
 
-test('the tracker lists the files changed since the run saw them, not the ones it deleted or moved itself', () => {
+test('the tracker records reads and changes, and lists files changed since', () => {
 	const versions = new Map<string, number>();
 	const vfs = { version: (path: string) => versions.get(path) ?? 0 };
 	const tracker = new FileTracker();
-	tracker.saw('a.ts', 0, 'h0');
-	tracker.saw('gone.ts', 0, 'h1');
-	tracker.deleted('gone.ts');
-	tracker.saw('old.ts', 0, 'h2');
+	tracker.read('a.ts', 0, 'h0');
+	tracker.wrote('new.ts', 1, 'h1', false);
+	tracker.wrote('a.ts', 1, 'h2', true);
+	tracker.read('gone.ts', 0, 'h3');
+	tracker.deleted('gone.ts', 1);
+	tracker.wrote('tmp.ts', 1, 'h4', false);
+	tracker.deleted('tmp.ts', 2);
+	tracker.renamed('new.ts', 'moved.ts', () => 1);
+	tracker.read('old.ts', 0, 'h5');
 	tracker.renamed('old.ts', 'renamed.ts', () => 1);
-	assert.deepEqual(tracker.seen(), ['a.ts', 'renamed.ts']);
+	assert.deepEqual(tracker.changes(), [
+		{ path: 'a.ts', change: 'modified' },
+		{ path: 'gone.ts', change: 'deleted' },
+		{ path: 'moved.ts', change: 'added' },
+		{ path: 'renamed.ts', change: 'renamed', from: 'old.ts' },
+	]);
 
-	// step: someone else writes a.ts; the deleted file is never listed, and the moved one only when it moves on
+	// step: someone else writes a.ts; the deleted file is never listed
 	versions.set('a.ts', 2);
 	versions.set('gone.ts', 5);
-	versions.set('renamed.ts', 1);
 	assert.deepEqual(
 		tracker.changedSince(vfs).map((f) => f.path),
 		['a.ts']
 	);
-	tracker.saw('a.ts', 2, 'h3');
+	tracker.read('a.ts', 2, 'h6');
 	assert.deepEqual(tracker.changedSince(vfs), []);
 });
 
@@ -1148,7 +1169,7 @@ function markerIn(text: string): string {
 	return marker;
 }
 
-/** A model reply: text, or made from the question it answers. */
+/** A model reply: text, or made (at once or later) from the question it answers. */
 type Reply = string | ((q: QuestionSpec) => string | Promise<string>);
 
 /**
@@ -1760,7 +1781,7 @@ test('a queued message with a key that opens its own turn never reaches the mode
 	let turns = 0;
 	const chat = new TurnController({
 		request: () => async (text, sink, turn) => {
-			if (++turns > 1) return session.execute(text, sink, turn);
+			if (++turns > 1) return (await session.execute(text, sink, turn)).results;
 			await held;
 			return [{ text: 'Done.', key: '' }] as TextResult[];
 		},
@@ -1799,7 +1820,7 @@ test('a key the user sends never shows in their own row, live or queued, and the
 	let turns = 0;
 	const chat = new TurnController({
 		request: () => async (text, sink, turn) => {
-			if (++turns > 1) return session.execute(text, sink, turn);
+			if (++turns > 1) return (await session.execute(text, sink, turn)).results;
 			await held;
 			heard.push(turn.takeQueued());
 			return [{ text: 'Done.', key: '' }] as TextResult[];
@@ -2379,4 +2400,477 @@ test("a run's question about unsaved changes holds the call's time limit, so an 
 	const { questions } = await running;
 	assert.match(questions[2].context.join('\n'), /Replaced 1 occurrence/);
 	assert.equal(ws.files.get('a.ts'), 'a = 2 // mine');
+});
+
+// =============================================================================
+// TURN RESULT — how each turn ended, what it changed and checked, what it used
+// =============================================================================
+
+/** A pipeline file the engine's validate accepts in these tests. */
+const PIPE = JSON.stringify({ pipeline: { project_id: 'p1', source: 'chat_1', components: [] } });
+
+/**
+ * Runs one agent turn, as agentTurn does, and returns its result.
+ *
+ * @param ws - The workspace.
+ * @param model - The scripted model.
+ * @param opts - The client, the stop signal, the chat's ask, the approval settings, the conversation's runs, and the host's scaffold.
+ * @returns The turn's result and every chunk it streamed.
+ */
+async function turnResult(ws: MemoryWorkspace, model: ModelCall, opts: { client?: RocketRideClient; signal?: AbortSignal; ask?: (card: ChatAskCard) => ChatAsking; settings?: ApprovalSettings; runs?: RunRecord[]; request?: string; scaffoldApp?: AgentHost['scaffoldApp'] } = {}): Promise<{ turn: TurnResult; chunks: Array<{ type: string; text: string }> }> {
+	const { settings } = opts;
+	const host: AgentHost = {
+		vfs: ws,
+		scaffoldApp: opts.scaffoldApp ?? (async () => ({ appId: 'x', folder: 'x-ui' })),
+		packApp: async () => new Uint8Array(),
+		devSession: () => null,
+		...(settings ? { approvals: { run: settings, controls: { ...settings, setMode: () => undefined } } } : {}),
+	};
+	const chunks: Array<{ type: string; text: string }> = [];
+	const options = { history: [], prompts: BUILDER_PROMPTS, token: async () => '', signal: opts.signal ?? new AbortController().signal, takeQueued: () => [], ask: opts.ask, conversationId: 'conv-1', runs: opts.runs };
+	const turn = await runAgent(opts.request ?? 'Do the task.', (type, text) => chunks.push({ type, text }), options, { host, client: () => opts.client ?? null, model, markers: async () => null, currentScope: () => '' });
+	return { turn, chunks };
+}
+
+test('a turn the finish rule accepts is done, with the files it changed, the checks that ran, and what it used', async () => {
+	const ws = createMemoryWorkspace({ 'pipelines/old.pipe': PIPE });
+	const { client } = scriptedClient({ validate: { errors: [], warnings: [] } });
+	const model = scriptedModel([plan(['write_file', { path: 'pipelines/chat.pipe', content: PIPE }], ['read_file', { path: 'pipelines/old.pipe' }]), plan(['rename', { oldPath: 'pipelines/old.pipe', newPath: 'pipelines/older.pipe' }]), done('Wrote chat.pipe.')]);
+	const { turn } = await turnResult(ws, model, { client });
+	// step: a test's model has no price, so the turn counts estimated tokens and no cost
+	const { tokens, ...counts } = turn.usage;
+	assert.equal(tokens?.estimated, true);
+	assert.equal(turn.usage.cost, undefined);
+	assert.deepEqual(
+		{ outcome: turn.outcome, reason: turn.reason, finalText: turn.finalText, files: turn.files, usage: counts },
+		{
+			outcome: 'done',
+			reason: 'done',
+			finalText: 'Wrote chat.pipe.\n\nChecked: validate OK',
+			files: [
+				{ path: 'pipelines/chat.pipe', change: 'added' },
+				{ path: 'pipelines/older.pipe', change: 'renamed', from: 'pipelines/old.pipe' },
+			],
+			usage: { waves: 3, modelRequests: 3, toolCalls: 3 },
+		}
+	);
+	assert.deepEqual(turn.checks, [{ target: 'pipelines/chat.pipe', step: 'validate', status: 'pass', summary: 'validate OK' }]);
+	assert.equal(turn.request, undefined);
+});
+
+test('ask_user ends the turn as needs_input, its question the answer, and a Variable says only whether its name is set', async () => {
+	const { client, calls } = scriptedClient({ 'account.getEnvironmentKeys': ['ROCKETRIDE_ANTHROPIC_KEY'] });
+	// one reply only: the turn must end in the wave that asked
+	const model = scriptedModel([plan(['ask_user', { kind: 'variable', variable: 'ROCKETRIDE_OPENAI_KEY', question: 'Add your OpenAI key to Variables as ROCKETRIDE_OPENAI_KEY, then tell me.' }])]);
+	const { turn, chunks } = await turnResult(createMemoryWorkspace({}), model, { client });
+	assert.deepEqual({ outcome: turn.outcome, reason: turn.reason, finalText: turn.finalText }, { outcome: 'needs_input', reason: 'needs_input', finalText: 'Add your OpenAI key to Variables as ROCKETRIDE_OPENAI_KEY, then tell me.' });
+	assert.deepEqual({ ...turn.request, id: 'id' }, { id: 'id', kind: 'variable', question: 'Add your OpenAI key to Variables as ROCKETRIDE_OPENAI_KEY, then tell me.', variable: 'ROCKETRIDE_OPENAI_KEY', variableSet: false });
+	assert.match(turn.request?.id ?? '', /^[0-9a-f]{8}$/);
+	assert.deepEqual(chunks.at(-1), { type: 'content', text: turn.finalText });
+	assert.deepEqual(calls, [['account.getEnvironmentKeys', []]], 'only the names were read');
+
+	const choice = scriptedModel([plan(['ask_user', { question: 'Which model?', choices: ['Claude', 'GPT-5'] }])]);
+	const asked = await turnResult(createMemoryWorkspace({}), choice);
+	assert.deepEqual({ kind: asked.turn.request?.kind, choices: asked.turn.request?.choices }, { kind: 'question', choices: ['Claude', 'GPT-5'] });
+	// step: a Variable name the server does not fill in is refused, so the model fixes it and asks again
+	const bad = scriptedModel([plan(['ask_user', { kind: 'variable', variable: 'OPENAI_KEY', question: 'Add it.' }]), plan(['ask_user', { kind: 'variable', variable: 'ROCKETRIDE_OPENAI_KEY', question: 'Add it.' }])]);
+	const fixed = await turnResult(createMemoryWorkspace({}), bad, { client });
+	assert.match(JSON.stringify(resultsOf(bad.questions[1])), /Only ROCKETRIDE_ names are filled in/);
+	assert.deepEqual({ outcome: fixed.turn.outcome, variable: fixed.turn.request?.variable }, { outcome: 'needs_input', variable: 'ROCKETRIDE_OPENAI_KEY' });
+});
+
+test("a value a read hid shows as its marker in the turn's question and choices, and the card keeps its outcome, kind and buttons", async () => {
+	// the model may write out a value it saw before the read that hid it, and a hidden value can be a word the card acts on
+	const value = 'needs_input';
+	const ws = createMemoryWorkspace({ '.env': `PASSWORD=${value}\n` });
+	const model = scriptedModel([plan(['read_file', { path: '.env' }]), plan(['ask_user', { question: `Keep ${value}?`, choices: [`Keep ${value}`, 'Replace it'] }])]);
+	const { turn } = await turnResult(ws, model);
+	const marker = markerIn(JSON.stringify(model.questions));
+	assert.deepEqual({ outcome: turn.outcome, reason: turn.reason, kind: turn.request?.kind, question: turn.request?.question }, { outcome: 'needs_input', reason: 'needs_input', kind: 'question', question: `Keep ${marker}?` });
+	const card = turnCard(turn);
+	assert.deepEqual(
+		{ title: card.title, actions: card.actions },
+		{
+			title: 'Needs you',
+			actions: [
+				{ id: choiceAction(0), label: `Keep ${marker}` },
+				{ id: choiceAction(1), label: 'Replace it' },
+			],
+		}
+	);
+});
+
+test('a needs-you answer says "Not checked" only when something it changed is still unchecked', async () => {
+	const { client } = scriptedClient({ validate: { errors: [], warnings: [] } });
+	const ask = ['ask_user', { question: 'Which model?' }] as [string, Record<string, unknown>];
+	const checked = await turnResult(createMemoryWorkspace({}), scriptedModel([plan(['write_file', { path: 'pipelines/chat.pipe', content: PIPE }]), plan(ask)]), { client });
+	assert.equal(checked.turn.finalText, 'Which model?\n\nChecked: validate OK');
+	const unchecked = await turnResult(createMemoryWorkspace({}), scriptedModel([plan(['write_file', { path: 'apps/a-ui/src/a.ts', content: 'export const a = 1;' }]), plan(ask)]));
+	assert.equal(unchecked.turn.finalText, 'Which model?\n\nNot checked: the run stopped before a check passed after the last change.');
+});
+
+test('the files create_app scaffolds are in the turn result as added, though the scaffold writes past the file toolkit', async () => {
+	const ws = createMemoryWorkspace({ 'apps/old-ui/manifest.json': '{}' });
+	const scaffoldApp: AgentHost['scaffoldApp'] = async ({ appName }) => {
+		await ws.write(`apps/${appName}-ui/manifest.json`, '{}', 'scaffold');
+		await ws.write(`apps/${appName}-ui/src/index.ts`, 'export {};', 'scaffold');
+		return { appId: `local.${appName}`, folder: `${appName}-ui` };
+	};
+	const model = scriptedModel([plan(['create_app', { appName: 'daybook', displayName: 'Daybook' }]), plan(['ask_user', { question: 'Which page first?' }])]);
+	const { turn } = await turnResult(ws, model, { scaffoldApp });
+	assert.deepEqual(turn.files, [
+		{ path: 'apps/daybook-ui/manifest.json', change: 'added' },
+		{ path: 'apps/daybook-ui/src/index.ts', change: 'added' },
+	]);
+});
+
+test('the files a create_app scaffold wrote before it failed are in the turn result as added', async () => {
+	const ws = createMemoryWorkspace({});
+	const scaffoldApp: AgentHost['scaffoldApp'] = async ({ appName }) => {
+		await ws.write(`apps/${appName}-ui/manifest.json`, '{}', 'scaffold');
+		throw new Error('the template server did not answer');
+	};
+	const model = scriptedModel([plan(['create_app', { appName: 'daybook', displayName: 'Daybook' }]), plan(['ask_user', { question: 'Try again?' }])]);
+	const { turn } = await turnResult(ws, model, { scaffoldApp });
+	assert.deepEqual(turn.files, [{ path: 'apps/daybook-ui/manifest.json', change: 'added' }]);
+});
+
+test('a file the run deleted with its app folder and a create_app scaffold made again is modified in the turn result', async () => {
+	const ws = createMemoryWorkspace({ 'apps/daybook-ui/src/index.ts': 'export const old = 1;' });
+	const scaffoldApp: AgentHost['scaffoldApp'] = async ({ appName }) => {
+		await ws.write(`apps/${appName}-ui/src/index.ts`, 'export {};', 'scaffold');
+		return { appId: `local.${appName}`, folder: `${appName}-ui` };
+	};
+	const model = scriptedModel([plan(['read_file', { path: 'apps/daybook-ui/src/index.ts' }]), plan(['delete_file', { path: 'apps/daybook-ui', recursive: true }]), plan(['create_app', { appName: 'daybook', displayName: 'Daybook' }]), plan(['ask_user', { question: 'Which page first?' }])]);
+	// step: the user approves the folder delete
+	const { turn } = await turnResult(ws, model, { scaffoldApp, ask: approveAll });
+	assert.deepEqual(turn.files, [{ path: 'apps/daybook-ui/src/index.ts', change: 'modified' }], 'the file and its folder exist again: nothing reads as deleted');
+});
+
+test('a file a deleted folder held that the run never read stays listed as deleted when the folder comes back', async () => {
+	const ws = createMemoryWorkspace({ 'notes/a.md': 'a', 'notes/b.md': 'b' });
+	const model = scriptedModel([plan(['read_file', { path: 'notes/a.md' }]), plan(['delete_file', { path: 'notes', recursive: true }]), plan(['write_file', { path: 'notes/a.md', content: 'a again' }]), plan(['ask_user', { question: 'Anything else?' }])]);
+	// step: the user approves the folder delete
+	const { turn } = await turnResult(ws, model, { ask: approveAll });
+	assert.deepEqual(turn.files, [
+		{ path: 'notes/a.md', change: 'modified' },
+		{ path: 'notes/b.md', change: 'deleted' },
+	]);
+});
+
+test("a file renamed into a folder the run deleted and made again brings the folder back, and the folder's old file stays deleted", async () => {
+	const ws = createMemoryWorkspace({ 'notes/a.md': 'a', 'inbox/c.md': 'c' });
+	const model = scriptedModel([plan(['delete_file', { path: 'notes', recursive: true }]), plan(['create_directory', { path: 'notes' }]), plan(['rename', { oldPath: 'inbox/c.md', newPath: 'notes/c.md' }]), plan(['ask_user', { question: 'Anything else?' }])]);
+	// step: the user approves the folder delete
+	const { turn } = await turnResult(ws, model, { ask: approveAll });
+	assert.deepEqual(turn.files, [
+		{ path: 'notes/a.md', change: 'deleted' },
+		{ path: 'notes/c.md', change: 'renamed', from: 'inbox/c.md' },
+	]);
+});
+
+test('a write into a folder the run deleted brings the folder back, and a file under it that stays deleted is still listed', async () => {
+	const ws = createMemoryWorkspace({ 'notes/a.md': 'a', 'notes/b.md': 'b' });
+	const model = scriptedModel([plan(['read_file', { path: 'notes/a.md' }], ['read_file', { path: 'notes/b.md' }]), plan(['delete_file', { path: 'notes', recursive: true }]), plan(['write_file', { path: 'notes/a.md', content: 'a again' }]), plan(['ask_user', { question: 'Anything else?' }])]);
+	// step: the user approves the folder delete
+	const { turn } = await turnResult(ws, model, { ask: approveAll });
+	assert.deepEqual(turn.files, [
+		{ path: 'notes/a.md', change: 'modified' },
+		{ path: 'notes/b.md', change: 'deleted' },
+	]);
+});
+
+test('a stopped turn is stopped, with no answer, and says what it changed and that it was not checked', async () => {
+	const ws = createMemoryWorkspace({});
+	const stop = new AbortController();
+	const model = scriptedModel([
+		plan(['write_file', { path: 'apps/a-ui/src/a.ts', content: 'export const a = 1;' }]),
+		async () => {
+			stop.abort();
+			return new Promise<string>(() => undefined);
+		},
+	]);
+	const { turn, chunks } = await turnResult(ws, model, { signal: stop.signal });
+	assert.deepEqual({ outcome: turn.outcome, reason: turn.reason, finalText: turn.finalText, files: turn.files }, { outcome: 'stopped', reason: 'stopped', finalText: '', files: [{ path: 'apps/a-ui/src/a.ts', change: 'added' }] });
+	assert.deepEqual(turn.checks, [{ target: 'a-ui', step: 'check_app', status: 'not_run', summary: 'not checked' }]);
+	assert.ok(!chunks.some((c) => c.type === 'content'), 'a stopped turn writes no answer');
+});
+
+test('a model that fails after the turn gathered something leaves a failed turn with its best-effort answer; one that fails at once throws a failed result', async () => {
+	const model = scriptedModel([plan(['read_file', { path: 'a.txt' }]), () => Promise.reject(new Error('The model provider failed: overloaded')), 'From what I read, a.txt says hi.']);
+	const { turn } = await turnResult(createMemoryWorkspace({ 'a.txt': 'hi' }), model);
+	const { tokens: _tokens, ...counts } = turn.usage;
+	assert.deepEqual({ outcome: turn.outcome, reason: turn.reason, finalText: turn.finalText, usage: counts }, { outcome: 'failed', reason: 'error', finalText: 'From what I read, a.txt says hi.', usage: { waves: 2, modelRequests: 3, toolCalls: 1 } });
+
+	const dead = scriptedModel([() => Promise.reject(new Error('The model pipeline stopped responding: gone'))]);
+	await assert.rejects(turnResult(createMemoryWorkspace({}), dead), (err: unknown) => {
+		assert.ok(err instanceof TurnError);
+		assert.equal(err.message, 'The model pipeline stopped responding: gone');
+		assert.deepEqual({ outcome: err.turn.outcome, reason: err.turn.reason, error: err.turn.error, modelRequests: err.turn.usage.modelRequests }, { outcome: 'failed', reason: 'error', error: 'The model pipeline stopped responding: gone', modelRequests: 1 });
+		return true;
+	});
+});
+
+test('a turn whose replies stay unusable is incomplete', async () => {
+	const model = scriptedModel(['no json here', 'still none', 'Here is what I can say.']);
+	const { turn } = await turnResult(createMemoryWorkspace({}), model);
+	assert.deepEqual({ outcome: turn.outcome, reason: turn.reason, finalText: turn.finalText, modelRequests: turn.usage.modelRequests }, { outcome: 'incomplete', reason: 'empty_plan', finalText: 'Here is what I can say.', modelRequests: 3 });
+});
+
+test('a key in a turn result is redacted wherever it sits: the question, the answer and the error', async () => {
+	const key = `sk-proj-${'q'.repeat(40)}`;
+	const model = scriptedModel([plan(['ask_user', { question: `Is ${key} the key to use?`, choices: [`yes, ${key}`] }])]);
+	const { turn } = await turnResult(createMemoryWorkspace({}), model);
+	assert.ok(!JSON.stringify(turn).includes(key), 'the result holds the key');
+	assert.equal(turn.request?.question, 'Is [redacted] the key to use?');
+});
+
+/** The result entries a question shows the model. */
+function resultsOf(q: QuestionSpec): unknown[] {
+	const head = 'Previous tool results:\n';
+	const block = q.context.find((c) => c.startsWith(head));
+	return block ? JSON.parse(block.slice(head.length)) : [];
+}
+
+// =============================================================================
+// RERUN — an edited pipeline whose earlier run still holds it
+// =============================================================================
+
+test('a use refused because the pipeline is already running tells the model how to run its edited version', async () => {
+	const client = {
+		use: async () => {
+			throw new Error('Pipeline is already running.');
+		},
+	} as unknown as RocketRideClient;
+	await assert.rejects(clientTool(client).execute({ method: 'use', params: [{ pipeline: { project_id: 'p1', source: 'chat_1', components: [] } }] }), /^Error: use failed: Pipeline is already running\. Your edits are not in the running task\. To run them, terminate that run .*getTaskToken.* and call use again; if this conversation did not start it, ask the user first\.$/);
+	const other = { use: async () => Promise.reject(new Error('Pipeline validation failed')) } as unknown as RocketRideClient;
+	await assert.rejects(clientTool(other).execute({ method: 'use', params: [{ pipeline: {} }] }), /^Error: use failed: Pipeline validation failed\.$/);
+});
+
+// =============================================================================
+// RUN OWNERSHIP — terminate and restart in Ask and Auto
+// =============================================================================
+
+/** A run as the engine's status reports it. */
+interface FakeRun {
+	project_id: string;
+	source: string;
+	startTime: number;
+	name: string;
+}
+
+/**
+ * An engine with runs the test controls. `use` starts `tk_mine…` (or reports
+ * it reused), `deploy.run` starts a team's run, and getTaskStatus reports
+ * each live run. Every call is recorded, status reads included.
+ *
+ * @returns The client, the calls, the live runs by token, and the switch for the next use's `reused`.
+ */
+function runsEngine(): { client: RocketRideClient; calls: string[]; runs: Map<string, FakeRun>; next: { reused?: boolean } } {
+	const calls: string[] = [];
+	const runs = new Map<string, FakeRun>();
+	const next: { reused?: boolean } = { reused: false };
+	let clock = 1000;
+	const client = {
+		use: async () => {
+			calls.push('use');
+			if (!next.reused) runs.set(MINE, { project_id: 'p1', source: 'chat_1', startTime: ++clock, name: 'chat_1' });
+			return { token: MINE, projectId: 'p1', source: 'chat_1', ...(next.reused === undefined ? {} : { reused: next.reused }) };
+		},
+		getTaskStatus: async (token: string) => {
+			calls.push(`status ${token}`);
+			const run = runs.get(token);
+			if (!run) throw new Error(`Task ${token} not found`);
+			return { ...run, completed: false, state: 2 };
+		},
+		terminate: async (token: string) => {
+			calls.push(`terminate ${token}`);
+			runs.delete(token);
+		},
+		restart: async (o: { token?: string }) => {
+			calls.push(`restart ${o.token}`);
+			const run = o.token ? runs.get(o.token) : undefined;
+			if (run) run.startTime = ++clock;
+		},
+		deploy: {
+			run: async () => {
+				calls.push('deploy.run');
+				runs.set(TEAMS, { project_id: 'p1', source: 'chat_1', startTime: ++clock, name: 'chat_1' });
+				return { token: TEAMS };
+			},
+		},
+	} as unknown as RocketRideClient;
+	return { client, calls, runs, next };
+}
+
+/** The token `use` starts in runsEngine. */
+const MINE = 'tk_mine0123456789';
+
+/** The token `deploy.run` starts in runsEngine. */
+const TEAMS = 'tk_team0123456789';
+
+/** A run another tab started. */
+const OTHER = 'tk_other123456789';
+
+/**
+ * rocketride_client with the run ledger, as one run mounts it: the
+ * conversation's records, the scope now, the chat's ask and the settings.
+ *
+ * @param client - The engine.
+ * @param opts - The records, the scope now (a box the test changes), the ask and the settings.
+ * @returns The callable tool and the ledger.
+ */
+function ownedTool(client: RocketRideClient, opts: { records?: RunRecord[]; scope?: { now: string }; ask?: (card: ChatAskCard) => ChatAsking; settings?: ApprovalSettings } = {}): { tool: Callable; ledger: RunLedger } {
+	const scope = opts.scope ?? { now: '' };
+	const ledger = new RunLedger(opts.records ?? [], { client: () => client, scopeKey: '', currentScope: () => scope.now, conversationId: 'conv-1' });
+	const vfs = createMemoryWorkspace({});
+	const approvals = new Approvals({ client: () => client, vfs, ask: opts.ask ?? fakeAsk([]).ask, settings: opts.settings, signal: new AbortController().signal, runs: ledger });
+	return { tool: toolOf(new RocketRideClientToolkit(approvals.client, vfs, undefined, ledger), 'rocketride_client', approvals), ledger };
+}
+
+/** Settings in Auto mode. */
+function autoSettings(): ReturnType<typeof fakeSettings> {
+	const settings = fakeSettings();
+	settings.set({ mode: 'auto' });
+	return settings;
+}
+
+test('a fresh use records the run from a status read; a reused run, or one the engine does not mark, is not recorded', async () => {
+	const engine = runsEngine();
+	const { tool, ledger } = ownedTool(engine.client);
+	await tool.execute({ method: 'use', params: [{ pipeline: {} }] });
+	assert.deepEqual(engine.calls, ['use', `status ${MINE}`], 'the status was read right after use');
+	assert.deepEqual(ledger.records, [{ token: MINE, projectId: 'p1', source: 'chat_1', startTime: 1001, scopeKey: '', conversationId: 'conv-1' }]);
+	assert.deepEqual(ledger.started, ledger.records);
+
+	for (const reused of [true, undefined]) {
+		const other = runsEngine();
+		other.runs.set(MINE, { project_id: 'p1', source: 'chat_1', startTime: 5, name: 'chat_1' });
+		other.next.reused = reused;
+		const fresh = ownedTool(other.client);
+		await fresh.tool.execute({ method: 'use', params: [{ pipeline: {} }] });
+		assert.deepEqual(fresh.ledger.records, [], `use with reused ${reused} recorded the run`);
+	}
+});
+
+test('Ask mode asks before terminate and restart, on a run this conversation started and on one it did not', async () => {
+	const engine = runsEngine();
+	engine.runs.set(OTHER, { project_id: 'p9', source: 'webhook_1', startTime: 7, name: 'Daily digest' });
+	const asked = fakeAsk(['approve', 'deny', 'approve']);
+	const { tool, ledger } = ownedTool(engine.client, { ask: asked.ask, settings: fakeSettings() });
+	await tool.execute({ method: 'use', params: [{ pipeline: {} }] });
+	await tool.execute({ method: 'restart', params: [{ token: MINE, projectId: 'p1', source: 'chat_1', pipeline: {} }] });
+	await assert.rejects(tool.execute({ method: 'terminate', params: [OTHER] }), /^Error: The user declined: Stop the pipeline run Daily digest \(tk_other123…\)\. /);
+	await tool.execute({ method: 'terminate', params: [MINE] });
+	assert.deepEqual(asked.cards, [
+		{ title: 'Restart the pipeline run chat_1 (tk_mine0123…)', detail: 'It stops and starts again with the pipeline sent. This conversation started it.' },
+		{ title: 'Stop the pipeline run Daily digest (tk_other123…)', detail: 'This conversation did not start it.' },
+		{ title: 'Stop the pipeline run chat_1 (tk_mine0123…)', detail: 'This conversation started it.' },
+	]);
+	assert.ok(engine.calls.includes(`restart ${MINE}`) && engine.calls.includes(`terminate ${MINE}`) && !engine.calls.includes(`terminate ${OTHER}`));
+	assert.equal(ledger.records.length, 1);
+});
+
+test('an Ask card says the conversation started the run only after a fresh status read, so a token that now holds a later run is not claimed', async () => {
+	const engine = runsEngine();
+	const asked = fakeAsk(['deny']);
+	const { tool } = ownedTool(engine.client, { ask: asked.ask, settings: fakeSettings() });
+	await tool.execute({ method: 'use', params: [{ pipeline: {} }] });
+	// step: the user's own use of the same project and source after the conversation's run ended: same token, later start
+	engine.runs.set(MINE, { project_id: 'p1', source: 'chat_1', startTime: 99_999, name: 'chat_1' });
+	await assert.rejects(tool.execute({ method: 'terminate', params: [MINE] }), /declined/);
+	assert.equal(asked.cards[0].detail, "Not confirmed as this conversation's run: a different run holds its token now.");
+});
+
+test("Auto stops the conversation's own run after a fresh status read, and refuses a run it did not start, naming it and telling the model to ask the user", async () => {
+	const engine = runsEngine();
+	engine.runs.set(OTHER, { project_id: 'p9', source: 'webhook_1', startTime: 7, name: 'Daily digest' });
+	const asked = fakeAsk([]);
+	const { tool } = ownedTool(engine.client, { ask: asked.ask, settings: autoSettings() });
+	await tool.execute({ method: 'use', params: [{ pipeline: {} }] });
+	await assert.rejects(tool.execute({ method: 'terminate', params: [OTHER] }), /^Error: Not done: this conversation did not start the pipeline run Daily digest \(tk_other123…\), and in Auto mode the agent only stops or restarts its own runs\. Call ask_user to ask the user whether to stop it/);
+	await assert.rejects(tool.execute({ method: 'restart', params: [{ projectId: 'p9', source: 'webhook_1', teamId: 'team-1', pipeline: {} }] }), /did not start the pipeline run webhook_1 in project p9 on team team-1.*Call ask_user to ask the user whether to restart it/);
+	engine.calls.length = 0;
+	await tool.execute({ method: 'terminate', params: [MINE] });
+	assert.deepEqual(engine.calls, [`status ${MINE}`, `terminate ${MINE}`], 'the status was read again right before the call');
+	assert.equal(asked.cards.length, 0, 'Auto showed no card');
+});
+
+test("Auto refuses the conversation's run once its token holds a different run, its status is gone, or the workspace switched teams", async () => {
+	const engine = runsEngine();
+	const scope = { now: '' };
+	const { tool, ledger } = ownedTool(engine.client, { scope, settings: autoSettings() });
+	await tool.execute({ method: 'use', params: [{ pipeline: {} }] });
+	// step: another use of the same project and source after the old run ended: same token, later start
+	engine.runs.set(MINE, { project_id: 'p1', source: 'chat_1', startTime: 99_999, name: 'chat_1' });
+	await assert.rejects(tool.execute({ method: 'terminate', params: [MINE] }), (err: Error) => err.name === 'RefusedError' && /no longer the one this conversation started \(a different run holds its token now\)/.test(err.message));
+	engine.runs.delete(MINE);
+	await assert.rejects(tool.execute({ method: 'terminate', params: [MINE] }), /no longer the one this conversation started \(its status could not be read/);
+	engine.runs.set(MINE, { project_id: 'p1', source: 'chat_1', startTime: ledger.records[0].startTime, name: 'chat_1' });
+	scope.now = 'team-b';
+	await assert.rejects(tool.execute({ method: 'terminate', params: [MINE] }), /\(the workspace switched to another team since it started\)/);
+	assert.ok(!engine.calls.some((c) => c.startsWith('terminate')), 'nothing was terminated');
+});
+
+test("a run started with deploy.run is never the conversation's own, so Auto refuses to stop it", async () => {
+	const engine = runsEngine();
+	const { tool, ledger } = ownedTool(engine.client, { settings: autoSettings() });
+	await tool.execute({ method: 'deploy.run', params: ['p1', 'chat_1', 'team-1'] });
+	assert.deepEqual(ledger.records, []);
+	await assert.rejects(tool.execute({ method: 'terminate', params: [TEAMS] }), /did not start the pipeline run chat_1 \(tk_team0123…\)/);
+	assert.ok(!engine.calls.includes(`terminate ${TEAMS}`));
+});
+
+test("switching to Auto approves a waiting terminate of the conversation's own run after a status read, and leaves a waiting foreign one for the user", async () => {
+	const engine = runsEngine();
+	engine.runs.set(OTHER, { project_id: 'p9', source: 'webhook_1', startTime: 7, name: 'Daily digest' });
+	const settings = fakeSettings();
+	const asked = fakeAsk(['wait', 'wait']);
+	const { tool } = ownedTool(engine.client, { ask: asked.ask, settings });
+	await tool.execute({ method: 'use', params: [{ pipeline: {} }] });
+	const foreign = tool.execute({ method: 'terminate', params: [OTHER] });
+	const own = tool.execute({ method: 'terminate', params: [MINE] });
+	await until(() => asked.cards.length === 2);
+	engine.calls.length = 0;
+	settings.set({ mode: 'auto' });
+	await own;
+	assert.deepEqual(engine.calls, [`status ${MINE}`, `terminate ${MINE}`], 'the own run was rechecked, then stopped');
+	let settled = false;
+	void foreign.then(
+		() => (settled = true),
+		() => (settled = true)
+	);
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	assert.equal(settled, false, 'the foreign card still waits for the user');
+	assert.ok(!engine.calls.includes(`terminate ${OTHER}`));
+});
+
+test('a restart refreshes the record from a status read, so a later Auto terminate still finds its run', async () => {
+	const engine = runsEngine();
+	const { tool, ledger } = ownedTool(engine.client, { settings: autoSettings() });
+	await tool.execute({ method: 'use', params: [{ pipeline: {} }] });
+	const before = ledger.records[0].startTime;
+	await tool.execute({ method: 'restart', params: [{ token: MINE, projectId: 'p1', source: 'chat_1', pipeline: {} }] });
+	assert.notEqual(ledger.records[0].startTime, before, 'the record took the start time after the restart');
+	await tool.execute({ method: 'terminate', params: [MINE] });
+	assert.ok(engine.calls.includes(`terminate ${MINE}`));
+});
+
+test("runAgent hands the conversation's runs to the turn: a run started earlier can be stopped in Auto, and the new one is in runsStarted", async () => {
+	const engine = runsEngine();
+	engine.runs.set(OTHER, { project_id: 'p9', source: 'webhook_1', startTime: 7, name: 'Daily digest' });
+	const earlier: RunRecord = { token: OTHER, projectId: 'p9', source: 'webhook_1', startTime: 7, scopeKey: '', conversationId: 'conv-1' };
+	const runs = [earlier];
+	const model = scriptedModel([plan(['rocketride_client', { method: 'terminate', params: [OTHER] }], ['rocketride_client', { method: 'use', params: [{ pipeline: {} }] }]), done('Stopped it and started chat_1.')]);
+	const { turn } = await turnResult(createMemoryWorkspace({}), model, { client: engine.client, settings: autoSettings(), runs });
+	assert.ok(engine.calls.includes(`terminate ${OTHER}`));
+	assert.deepEqual(
+		turn.runsStarted?.map((r) => r.token),
+		[MINE]
+	);
+	assert.deepEqual(
+		runs.map((r) => r.token),
+		[OTHER, MINE],
+		'the conversation keeps every run it started'
+	);
 });
