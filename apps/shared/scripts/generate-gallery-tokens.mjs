@@ -79,7 +79,11 @@ const OUTPUT_FILE = path.join(SRC_DIR, 'modules', 'appdev', 'gallery', 'tokenUsa
  * popup-row, rocketride-mark live in multi-purpose locations).
  */
 const ENTRY_SOURCES = {
+	accordion: ['components/accordion'],
+	avatar: ['components/avatar'],
+	badge: ['components/badge'],
 	banner: ['components/banner'],
+	breadcrumbs: ['components/breadcrumbs'],
 	button: ['components/button'],
 	card: ['components/card'],
 	'chat-view': ['components/chat'],
@@ -89,6 +93,7 @@ const ENTRY_SOURCES = {
 	'content-header': ['components/content-header'],
 	'data-grid': ['components/data-grid'],
 	'detail-panel': ['components/detail-panel'],
+	divider: ['components/divider'],
 	'drop-zone': ['components/drop-zone'],
 	'empty-state': ['components/empty-state'],
 	explorer: ['modules/explorer'],
@@ -97,15 +102,22 @@ const ENTRY_SOURCES = {
 	'grid-helpers': ['components/data-grid'],
 	'icon-button': ['components/icon-button'],
 	'input-field': ['components/input-field'],
+	list: ['components/list'],
 	'mini-card': ['components/mini-card'],
 	modal: ['components/modal'],
+	pagination: ['components/pagination'],
+	progress: ['components/progress'],
 	section: ['components/section'],
 	'sidebar-footer': ['components/sidebar-footer'],
 	'sidebar-menu': ['components/sidebar-menu'],
+	skeleton: ['components/skeleton'],
 	'status-badge': ['components/status-badge'],
+	stepper: ['components/stepper'],
 	'tab-control': ['components/tab-control', 'components/tab-panel'],
+	table: ['components/table'],
 	toast: ['components/toast'],
 	'toggle-group': ['components/toggle-group'],
+	tree: ['components/tree'],
 };
 
 // =============================================================================

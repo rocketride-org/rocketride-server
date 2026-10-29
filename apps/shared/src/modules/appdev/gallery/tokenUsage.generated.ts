@@ -43,8 +43,24 @@ export interface IGalleryTokenUsage {
 
 /** Token usage keyed by gallery entry id (doc-only entries absent). */
 export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
+	'accordion': {
+		direct: [],
+		commonStyles: {},
+	},
+	'avatar': {
+		direct: ['--rr-avatar-tone', '--rr-chart-blue', '--rr-chart-green', '--rr-chart-orange', '--rr-chart-purple', '--rr-chart-red', '--rr-chart-yellow'],
+		commonStyles: {},
+	},
+	'badge': {
+		direct: [],
+		commonStyles: {},
+	},
 	'banner': {
 		direct: ['--rr-color-error', '--rr-color-info', '--rr-color-warning'],
+		commonStyles: {},
+	},
+	'breadcrumbs': {
+		direct: [],
 		commonStyles: {},
 	},
 	'button': {
@@ -104,6 +120,10 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 			modalDialog: ['--rr-bg-widget', '--rr-border', '--rr-shadow-widget'],
 		},
 	},
+	'divider': {
+		direct: [],
+		commonStyles: {},
+	},
 	'drop-zone': {
 		direct: ['--rr-border-hover', '--rr-brand', '--rr-text-disabled', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {},
@@ -153,6 +173,10 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 			inputField: ['--rr-bg-input', '--rr-border-input', '--rr-text-primary'],
 		},
 	},
+	'list': {
+		direct: [],
+		commonStyles: {},
+	},
 	'mini-card': {
 		direct: ['--rr-bg-paper', '--rr-border', '--rr-color-success', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {},
@@ -167,6 +191,14 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 			modalFooter: ['--rr-border'],
 			modalHeader: ['--rr-bg-title', '--rr-text-primary'],
 		},
+	},
+	'pagination': {
+		direct: [],
+		commonStyles: {},
+	},
+	'progress': {
+		direct: [],
+		commonStyles: {},
 	},
 	'section': {
 		direct: ['--rr-border', '--rr-text-primary', '--rr-text-secondary'],
@@ -183,12 +215,24 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		direct: ['--rr-bg-list-active', '--rr-bg-list-hover', '--rr-fg-list-active', '--rr-text-disabled', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {},
 	},
+	'skeleton': {
+		direct: [],
+		commonStyles: {},
+	},
 	'status-badge': {
 		direct: ['--rr-bg-surface-alt', '--rr-border', '--rr-color-error', '--rr-color-info', '--rr-color-success', '--rr-color-warning', '--rr-text-disabled', '--rr-text-secondary'],
 		commonStyles: {},
 	},
+	'stepper': {
+		direct: [],
+		commonStyles: {},
+	},
 	'tab-control': {
 		direct: ['--rr-bg-scrollbar-thumb', '--rr-bg-widget-header', '--rr-border', '--rr-brand', '--rr-color-error', '--rr-fg-button', '--rr-scrollbar-thumb', '--rr-text-primary', '--rr-text-secondary'],
+		commonStyles: {},
+	},
+	'table': {
+		direct: [],
 		commonStyles: {},
 	},
 	'toast': {
@@ -200,5 +244,9 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		commonStyles: {
 			toggleButton: ['--rr-border', '--rr-brand', '--rr-fg-button', '--rr-text-secondary'],
 		},
+	},
+	'tree': {
+		direct: ['--rr-tree-level'],
+		commonStyles: {},
 	},
 };

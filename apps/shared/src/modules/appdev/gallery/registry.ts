@@ -92,6 +92,18 @@ import { sliderEntry } from './entries/slider.entry';
 import { textAreaEntry } from './entries/text-area.entry';
 import { toastEntry } from './entries/toast.entry';
 import { tooltipEntry } from './entries/tooltip.entry';
+import { accordionEntry } from './entries/accordion.entry';
+import { avatarEntry } from './entries/avatar.entry';
+import { badgeEntry } from './entries/badge.entry';
+import { breadcrumbsEntry } from './entries/breadcrumbs.entry';
+import { dividerEntry } from './entries/divider.entry';
+import { listEntry } from './entries/list.entry';
+import { paginationEntry } from './entries/pagination.entry';
+import { progressEntry } from './entries/progress.entry';
+import { skeletonEntry } from './entries/skeleton.entry';
+import { stepperEntry } from './entries/stepper.entry';
+import { tableEntry } from './entries/table.entry';
+import { treeEntry } from './entries/tree.entry';
 
 // --- Hooks & context ---------------------------------------------------------
 import { connectionClientEntry } from './entries/connection-client.entry';
@@ -145,7 +157,11 @@ export const GALLERY_ENTRIES: IGalleryEntry[] = [
 	docSplitLayoutEntry,
 	docExplorerEntry,
 	// Content components - alphabetical
+	accordionEntry,
+	avatarEntry,
+	badgeEntry,
 	bannerEntry,
+	breadcrumbsEntry,
 	buttonEntry,
 	cardEntry,
 	chatViewEntry,
@@ -158,28 +174,36 @@ export const GALLERY_ENTRIES: IGalleryEntry[] = [
 	dataGridEntry,
 	gridHelpersEntry,
 	detailPanelEntry,
+	dividerEntry,
 	dropZoneEntry,
 	emptyStateEntry,
 	fieldEntry,
 	filterStripEntry,
 	iconButtonEntry,
 	inputFieldEntry,
+	listEntry,
 	menuEntry,
 	miniCardEntry,
 	modalEntry,
+	paginationEntry,
 	popoverEntry,
 	popupRowEntry,
+	progressEntry,
 	radioGroupEntry,
 	rocketRideMarkEntry,
 	sectionEntry,
 	selectEntry,
+	skeletonEntry,
 	sliderEntry,
 	statusBadgeEntry,
+	stepperEntry,
 	tabControlEntry,
+	tableEntry,
 	textAreaEntry,
 	toastEntry,
 	toggleGroupEntry,
 	tooltipEntry,
+	treeEntry,
 	// Hooks & context - the platform API
 	connectionClientEntry,
 	shellEventsEntry,

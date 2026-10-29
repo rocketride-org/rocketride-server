@@ -278,6 +278,19 @@ import { Popover } from './components/overlay/Popover';
 import { Menu, MenuButton } from './components/overlay/Menu';
 import { Tooltip } from './components/overlay/Tooltip';
 import { showToast, dismissToast, ToastViewport } from './components/toast/Toast';
+// Phase 3 stock library: display and navigation.
+import { Avatar, AvatarGroup } from './components/avatar/Avatar';
+import { Badge } from './components/badge/Badge';
+import { ProgressBar, Spinner } from './components/progress/Progress';
+import { Skeleton } from './components/skeleton/Skeleton';
+import { Divider } from './components/divider/Divider';
+import { Accordion } from './components/accordion/Accordion';
+import { List } from './components/list/List';
+import { Table } from './components/table/Table';
+import { Tree } from './components/tree/Tree';
+import { Breadcrumbs } from './components/breadcrumbs/Breadcrumbs';
+import { Pagination } from './components/pagination/Pagination';
+import { Stepper } from './components/stepper/Stepper';
 // (commonStyles is imported at the very top of this file — cycle-order
 // constraint — and re-exported from the export block below.)
 // Values graduated from deep shell/src imports when the package exports map
@@ -310,6 +323,8 @@ export {
 	Field, useField, TextArea, Checkbox, Switch, RadioGroup, Select,
 	Combobox, Slider, IconButton, Popover, Menu, MenuButton, Tooltip,
 	showToast, dismissToast, ToastViewport,
+	Avatar, AvatarGroup, Badge, ProgressBar, Spinner, Skeleton, Divider,
+	Accordion, List, Table, Tree, Breadcrumbs, Pagination, Stepper,
 	commonStyles,
 	applyTheme, isInVSCode, OAUTH_ROOT_URL,
 	ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE,
@@ -339,6 +354,18 @@ export type { IMenuProps, IMenuButtonProps, MenuEntry, IMenuAction, IMenuDivider
 export type { ITooltipProps } from './components/overlay/Tooltip';
 export type { OverlayPlacement, OverlaySide, OverlayAlign } from './components/overlay/placement';
 export type { IToastOptions, ToastVariant } from './components/toast/toastStore';
+export type { IAvatarProps, IAvatarGroupProps, AvatarSize } from './components/avatar/Avatar';
+export type { IBadgeProps, BadgeTone } from './components/badge/Badge';
+export type { IProgressBarProps, ISpinnerProps } from './components/progress/Progress';
+export type { ISkeletonProps } from './components/skeleton/Skeleton';
+export type { IDividerProps } from './components/divider/Divider';
+export type { IAccordionProps, IAccordionItem } from './components/accordion/Accordion';
+export type { IListProps, IListItem } from './components/list/List';
+export type { ITableProps, ITableColumn, ITableSort, SortDirection, SortValue } from './components/table/Table';
+export type { ITreeProps, ITreeNode } from './components/tree/Tree';
+export type { IBreadcrumbsProps, IBreadcrumb } from './components/breadcrumbs/Breadcrumbs';
+export type { IPaginationProps } from './components/pagination/Pagination';
+export type { IStepperProps, IStep, StepState } from './components/stepper/Stepper';
 export type { IToggleGroupProps, IToggleGroupOption } from './components/toggle-group/ToggleGroup';
 export type { IChipProps, IChipAddProps } from './components/chip/Chip';
 export type { IDropZoneProps } from './components/drop-zone/DropZone';
@@ -501,6 +528,20 @@ export const shellApi = {
 	get showToast() { return showToast; },
 	get dismissToast() { return dismissToast; },
 	get ToastViewport() { return ToastViewport; },
+	get Avatar() { return Avatar; },
+	get AvatarGroup() { return AvatarGroup; },
+	get Badge() { return Badge; },
+	get ProgressBar() { return ProgressBar; },
+	get Spinner() { return Spinner; },
+	get Skeleton() { return Skeleton; },
+	get Divider() { return Divider; },
+	get Accordion() { return Accordion; },
+	get List() { return List; },
+	get Table() { return Table; },
+	get Tree() { return Tree; },
+	get Breadcrumbs() { return Breadcrumbs; },
+	get Pagination() { return Pagination; },
+	get Stepper() { return Stepper; },
 	get commonStyles() { return commonStyles; },
 	get useShellConnection() { return useShellConnection; },
 	get useAuthUser() { return useAuthUser; },

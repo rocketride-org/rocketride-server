@@ -399,6 +399,75 @@ identical component with `Doc*` type aliases (`DocExplorerProps` =
 
 The stock building blocks apps compose inside the client area.
 
+### Accordion
+
+Stacked expandable sections — settings groups, advanced options, run
+details; a one-item Accordion is a disclosure. WAI-ARIA accordion: headers
+are headings holding buttons with `aria-expanded`; panels are labelled
+regions. Arrow Up/Down and Home/End move between headers. Single-expand by
+default; collapsed panels stay mounted so form state survives.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `items` | `{ id; title; meta?; content; disabled? }[]` | in (req) | Sections in order. |
+| `expanded / defaultExpanded` | `string[]` | in | Open ids, controlled / uncontrolled. |
+| `multiple` | `boolean` | in | Allow several open at once. |
+| `headingLevel` | `2 \| 3 \| 4 \| 5 \| 6` | in | Header heading level. Default 3. |
+| `flush` | `boolean` | in | No outer border (nested in a card). |
+| `onChange` | `(expanded: string[]) => void` | out | New open ids. |
+
+```tsx
+import { Accordion } from 'shell';
+
+<Accordion items={[{ id: 'general', title: 'General', content: <GeneralSettings /> }, { id: 'runtime', title: 'Runtime', meta: '3 settings', content: <RuntimeSettings /> }]} defaultExpanded={['general']} />
+```
+
+### Avatar / AvatarGroup
+
+A person, org or agent as an image or initials. Initials sit on a stable
+per-name tint drawn from the theme chart palette; a broken image falls back
+to initials. Pass `decorative` when the name is visible beside it.
+AvatarGroup overlaps avatars and collapses the overflow into "+N".
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `name` | `string` | in (req) | Accessible name, initials and color seed. |
+| `src` | `string` | in | Image URL. |
+| `size` | `'sm' \| 'md' \| 'lg'` | in | 22 / 28 / 40px. Default md. |
+| `square` | `boolean` | in | Rounded square (orgs, apps, agents). |
+| `decorative` | `boolean` | in | Hide from screen readers. |
+| `avatars / max` | `{ name; src? }[] / number` | in | AvatarGroup — people and the cap before "+N" (default 4). |
+
+```tsx
+import { Avatar, AvatarGroup } from 'shell';
+
+<Avatar name="Avery Chen" src={photoUrl} />
+<AvatarGroup avatars={members.map((m) => ({ name: m.name, src: m.photoUrl }))} max={4} />
+```
+
+### Badge
+
+A count or dot pinned to the corner of an icon, avatar or tab. Counts cap
+at "99+"; zero hides unless `showZero`. `label` tells screen readers what the
+number means ("3 unread notifications"). For a standalone status pill use
+StatusBadge.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `children` | `ReactNode` | in (req) | The element the badge is pinned to. |
+| `count` | `number` | in | The number; ignored with `dot`. |
+| `max` | `number` | in | Cap before "max+". Default 99. |
+| `dot` | `boolean` | in | Plain dot instead of a number. |
+| `showZero` | `boolean` | in | Keep visible at zero. |
+| `tone` | `'accent' \| 'error'` | in | Default accent. |
+| `label` | `string` | in | Meaning for screen readers. |
+
+```tsx
+import { Badge, IconButton } from 'shell';
+
+<Badge count={unread} label="unread notifications"><IconButton label="Notifications"><BellIcon /></IconButton></Badge>
+```
+
 ### Banner
 
 Info / warning / error callout strip — a tinted, bordered message row for
@@ -412,6 +481,25 @@ inline notices inside a view.
 ```tsx
 import { Banner } from 'shell';
 <Banner variant="info">Deploys are paused while the pipeline rebuilds.</Banner>
+```
+
+### Breadcrumbs
+
+Where the view sits in a hierarchy, inside a labelled nav landmark. The
+last crumb is the current page (`aria-current="page"`); long trails collapse
+their middle into an expandable "…". Crumbs navigate through `href` or
+`onClick`.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `items` | `{ id; label; href?; onClick?; icon? }[]` | in (req) | Root first; the last is the current page. |
+| `maxItems` | `number` | in | Collapse the middle beyond this. Default 4. |
+| `ariaLabel` | `string` | in | Landmark name. Default `'Breadcrumb'`. |
+
+```tsx
+import { Breadcrumbs } from 'shell';
+
+<Breadcrumbs items={[{ id: 'org', label: 'Acme', onClick: goHome }, { id: 'pipe', label: 'rag-pipeline', href: '/pipelines/rag' }, { id: 'run', label: 'Run 42' }]} />
 ```
 
 ### Button
@@ -954,6 +1042,23 @@ import { DetailPanel, Section, LabelValue, Button } from 'shell';
 </DetailPanel>
 ```
 
+### Divider
+
+Hairline between groups of content: horizontal, vertical, or with a short
+centered label ("or").
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `vertical` | `boolean` | in | Vertical rule between inline items. |
+| `label` | `ReactNode` | in | Centered label (horizontal only). |
+| `decorative` | `boolean` | in | Hide from screen readers. |
+
+```tsx
+import { Divider } from 'shell';
+
+<Divider label="or" />
+```
+
 ### DropZone
 
 Dashed file-drop target — fires `onFiles` with the dropped FileList.
@@ -1113,6 +1218,28 @@ import { InputField } from 'shell';
 	value={key} onChange={(e) => setKey(e.target.value)} />
 ```
 
+### List
+
+Rows with a primary and secondary line, a leading icon or avatar and
+trailing meta. Static by default; `onSelect` makes it a single-select
+listbox with one Tab stop (Arrow Up/Down, Home/End, typeahead, Enter/Space).
+Use Tree for nested data and Table for columns.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `items` | `{ id; primary; secondary?; leading?; trailing?; disabled? }[]` | in (req) | Rows in order. |
+| `selectedId` | `string \| null` | in | Selected row (selectable lists). |
+| `dividers / dense` | `boolean` | in | Row separators / tighter rows. |
+| `ariaLabel` | `string` | in | Accessible name (required when selectable). |
+| `emptyText` | `ReactNode` | in | Shown with no rows. |
+| `onSelect` | `(id: string) => void` | out | Makes the list selectable. |
+
+```tsx
+import { Avatar, List } from 'shell';
+
+<List ariaLabel="Members" items={members.map((m) => ({ id: m.id, primary: m.name, secondary: m.email, leading: <Avatar name={m.name} decorative />, trailing: m.role }))} onSelect={openMember} selectedId={selected} />
+```
+
 ### Menu / MenuButton
 
 Anchored action menu built from a data array. `MenuButton` wires a trigger
@@ -1202,6 +1329,29 @@ import { Modal, Button } from 'shell';
 )}
 ```
 
+### Pagination
+
+Page controls for lists and card grids outside DataGrid (which keeps its
+own footer), inside a labelled nav landmark. Constant width: first and last
+pages, the current page with `siblingCount` neighbours, "…" for gaps.
+Optional "21–40 of 134" range and page-size picker.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `page / pageCount` | `number` | in (req) | Current page (1-based) and total pages. |
+| `siblingCount` | `number` | in | Neighbours each side. Default 1. |
+| `totalItems / pageSize` | `number` | in | Show the range text. |
+| `pageSizes` | `number[]` | in | Page-size choices (with `onPageSizeChange`). |
+| `ariaLabel` | `string` | in | Default `'Pagination'`. |
+| `onChange` | `(page: number) => void` | out (req) | New page. |
+| `onPageSizeChange` | `(pageSize: number) => void` | out | New page size. |
+
+```tsx
+import { Pagination } from 'shell';
+
+<Pagination page={page} pageCount={Math.ceil(total / pageSize)} onChange={setPage} totalItems={total} pageSize={pageSize} pageSizes={[10, 25, 50]} onPageSizeChange={setPageSize} />
+```
+
 ### SaveFileDialog
 
 (Shell surface export; opened from code, not browsed in the gallery.) The
@@ -1287,6 +1437,29 @@ import { PopupRow, BxCog, BxTrash } from 'shell';
 	<PopupRow onClick={openSettings}><BxCog size={16} /> Settings</PopupRow>
 	<PopupRow onClick={remove}><BxTrash size={16} /> Delete</PopupRow>
 </div>
+```
+
+### ProgressBar / Spinner
+
+Work in progress. ProgressBar is determinate with a `value` and
+indeterminate without; Spinner is for short, unmeasured waits. Both are
+named progressbars — give a meaningful `label`.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `label` | `string` | in (req) | Accessible name; shown with `showLabel`. |
+| `value` | `number` | in | Progress; omit for indeterminate. |
+| `min / max` | `number` | in | Default 0 / 100. |
+| `showLabel` | `boolean` | in | Label and value above the bar. |
+| `formatValue` | `(value, percent) => string` | in | Shown and spoken value. |
+| `tone` | `'accent' \| 'success' \| 'warning' \| 'error'` | in | Bar color. |
+| `Spinner: label / size` | `string / 'sm' \| 'md' \| 'lg'` | in | Default `'Loading'` / md. |
+
+```tsx
+import { ProgressBar, Spinner } from 'shell';
+
+<ProgressBar label="Uploading dataset.csv" value={uploaded} max={size} showLabel />
+<Spinner label="Loading runs" />
 ```
 
 ### RadioGroup
@@ -1376,6 +1549,24 @@ import { Field, Select } from 'shell';
 </Field>
 ```
 
+### Skeleton
+
+Shimmering placeholder in the shape of loading content, so the layout does
+not jump. Hidden from screen readers; mark the loading region with
+`aria-busy="true"`. Use a Spinner for short in-place waits.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `width / height` | `number \| string` | in | Default `'100%'` × 12. |
+| `circle` | `boolean` | in | Circle; `width` is the diameter. |
+| `lines` | `number` | in | Paragraph of this many lines. |
+
+```tsx
+import { Skeleton } from 'shell';
+
+<div aria-busy="true"><Skeleton circle width={32} /><Skeleton lines={3} /></div>
+```
+
 ### Slider
 
 Number from a bounded range — temperature, top-k, overlap. Native range
@@ -1415,6 +1606,30 @@ import { StatusBadge, StatusDot } from 'shell';
 <StatusDot variant="warning" />
 ```
 
+### Stepper
+
+Progress through a multi-step flow. Steps are complete, current, upcoming
+or in error; the current step has `aria-current="step"` and each step
+announces "step N of M, state". `onStepClick` lets users go back to
+completed steps (`isNonLinear` unlocks upcoming ones). Horizontal or
+vertical; in narrow containers prefer vertical (horizontal labels of
+non-current steps truncate when space runs out).
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `steps` | `{ id; label; description?; error?; optional? }[]` | in (req) | Steps in order. |
+| `activeStep` | `number` | in (req) | Current index; `steps.length` = all complete. |
+| `vertical` | `boolean` | in | Top-to-bottom with descriptions. |
+| `isNonLinear` | `boolean` | in | Allow clicking upcoming steps. |
+| `ariaLabel` | `string` | in | Default `'Progress'`. |
+| `onStepClick` | `(index: number) => void` | out | Makes completed steps clickable. |
+
+```tsx
+import { Stepper } from 'shell';
+
+<Stepper steps={[{ id: 'connect', label: 'Connect source' }, { id: 'configure', label: 'Configure' }, { id: 'deploy', label: 'Deploy' }]} activeStep={step} onStepClick={setStep} />
+```
+
 ### TabControl + TabPanel
 
 The page-tabs pattern: TabControl renders the strip at the very top of a
@@ -1445,6 +1660,29 @@ const menu = { entries: [
 	events: { content: <EventsPanel /> },
 	settings: { content: <SettingsPanel /> },
 }} />
+```
+
+### Table
+
+Small, static table with sortable columns (`<th aria-sort>`) and optional
+clickable rows. Sorts in memory: strings naturally, empty values always
+last. For large, remote, paged or configurable data use DataGrid.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `columns` | `ITableColumn<T>[]` | in (req) | `{ id, header, value?, render?, sortable?, align?, mono?, width? }`. |
+| `rows / getRowId` | `T[] / (row) => string` | in (req) | Data and stable keys. |
+| `sort / defaultSort` | `ITableSort \| null` | in | Controlled / uncontrolled sort. |
+| `caption` | `string` | in | Accessible name (visually hidden caption). |
+| `emptyText / dense` | `ReactNode / boolean` | in | Empty state; tighter cells. |
+| `onSortChange` | `(sort: ITableSort) => void` | out | New sort. |
+| `onRowClick` | `(row: T) => void` | out | Clickable, Enter-activatable rows. |
+
+```tsx
+import { Table } from 'shell';
+
+<Table caption="Run stages" rows={stages} getRowId={(row) => row.id} defaultSort={{ columnId: 'tokens', direction: 'desc' }}
+	columns={[{ id: 'stage', header: 'Stage', value: (row) => row.stage, sortable: true }, { id: 'tokens', header: 'Tokens', value: (row) => row.tokens, sortable: true, align: 'right', mono: true }]} />
 ```
 
 ### TextArea
@@ -1543,6 +1781,30 @@ Plain text only — use a Popover for anything interactive.
 import { Tooltip } from 'shell';
 
 <Tooltip content="Run the pipeline (⌘R)"><button type="button">Run</button></Tooltip>
+```
+
+### Tree
+
+Generic expandable outline (Explorer and DocExplorer stay the file trees).
+WAI-ARIA tree with one Tab stop: Up/Down move, Right expands or enters,
+Left collapses or goes to the parent, Home/End, Enter/Space select, `*`
+expands siblings, typeahead. Clicking a parent selects and toggles it. Rows
+render flat with `aria-level` / `aria-setsize` / `aria-posinset`.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `nodes` | `ITreeNode[]` | in (req) | `{ id, label, icon?, meta?, children?, disabled? }`; `children` present = expandable. |
+| `ariaLabel` | `string` | in (req) | A tree must be named. |
+| `expanded / defaultExpanded` | `string[]` | in | Open ids, controlled / uncontrolled. |
+| `selectedId` | `string \| null` | in | Selected node. |
+| `dense` | `boolean` | in | Tighter rows. |
+| `onSelect` | `(id: string) => void` | out | Chosen node. |
+| `onExpandedChange` | `(expanded: string[]) => void` | out | New open ids. |
+
+```tsx
+import { Tree } from 'shell';
+
+<Tree ariaLabel="Pipeline components" nodes={componentTree} selectedId={selected} onSelect={setSelected} />
 ```
 ---
 
