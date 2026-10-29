@@ -37,7 +37,7 @@
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import type { ConnectResult } from 'rocketride';
+import type { ConnectResult, SignupProperties } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { ConnectionManager } from '../../connection/connection';
 import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
@@ -549,7 +549,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	// Sign-in request from marketplace
 	useEffect(() => {
-		return cm.on('shell:loginRequest', ({ appId, register, auto }: { appId?: string; register?: boolean; auto?: boolean }) => {
+		return cm.on('shell:loginRequest', ({ appId, register, auto, signupProperties }: { appId?: string; register?: boolean; auto?: boolean; signupProperties?: SignupProperties }) => {
 			if (appId) {
 				cm.setPendingAppId(appId);
 				loginTargetRef.current = appId;
@@ -566,7 +566,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				// flow lands on the IdP login page, which offers Register). The auth:start
 				// fact and the round-trip stamp are raised inside startOAuth, behind its
 				// one-shot guard, for this and every other entry.
-				cm.startOAuth(register, { appId, auto });
+				cm.startOAuth(register, { appId, auto, signupProperties });
 			} else {
 				if (mountedRef.current) setShowApiKeyLogin(true);
 			}

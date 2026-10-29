@@ -40,7 +40,8 @@
 //   - Browser-specific session storage for auth phase tracking
 // =============================================================================
 
-import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError } from 'rocketride';
+import { stashSignupProperties, takeSignupProperties, currentSignupProperties, clearSignupProperties } from '../util/signupAttribution';
+import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError, type PkceCredential, type SignupProperties } from 'rocketride';
 import type { ShellConnectionEventMap, IConnectionManager } from '../types/shell';
 import type { IAuthProvider } from '../types/connection';
 // ConnectionState is the one runtime value; the rest are type-only so
@@ -115,7 +116,7 @@ type Handler<T = unknown> = (payload: T) => void;
 /** Handler type for wildcard listeners (debug panel). */
 type WildcardHandler = (event: string, payload: unknown) => void;
 
-type ConnectionCredential = string | { code: string; verifier: string; redirectUri: string };
+type ConnectionCredential = string | PkceCredential;
 
 interface ShellConnectionOperation {
 	key: string;
@@ -680,7 +681,7 @@ export class ConnectionManager implements IConnectionManager {
 	 *                  auth gate raised it rather than a click (`auto`). Reported
 	 *                  on the auth:start telemetry fact.
 	 */
-	public async startOAuth(register?: boolean, context?: { appId?: string; auto?: boolean }): Promise<void> {
+	public async startOAuth(register?: boolean, context?: { appId?: string; auto?: boolean; signupProperties?: SignupProperties }): Promise<void> {
 		// One-shot: a redirect is coming; never start a second authorize in the
 		// same page load (that invalidates the first code and 400s the exchange).
 		// The guard is released on any path that does NOT actually navigate, so a
@@ -696,15 +697,24 @@ export class ConnectionManager implements IConnectionManager {
 		}
 		startProps.from_path = window.location.pathname;
 		startProps.auto = context?.auto === true;
+		let signupValue: unknown;
+		try {
+			if (register) signupValue = context?.signupProperties;
+		} catch {
+			// Optional context getters cannot prevent navigation or latch the one-shot guard.
+		}
+		const signup = currentSignupProperties(signupValue);
 		// Held even with an app listening: delivered live, it would depend on the app's analytics
 		// flushing before the redirect unloads the page; the hold's sessionStorage mirror reaches the
 		// callback page, whose drain hands it over.
 		this.holdTelemetry('auth:start', startProps);
 		try {
 			if (this.authProvider) {
-				await this.authProvider.signIn(undefined, register);
+				await this.authProvider.signIn(undefined, register, signup);
 				return;
 			}
+			// The provider owns pending context; the legacy path has no provider.
+			stashSignupProperties(signup);
 			// Legacy fallback — remove once all callers pass authProvider
 			if (!this.zitadelUrl || !this.zitadelClientId) {
 				console.error('[ConnectionManager] Zitadel not configured');
@@ -788,6 +798,7 @@ export class ConnectionManager implements IConnectionManager {
 		const errorDescription = params.get('auth_error');
 
 		if (errorDescription) {
+			clearSignupProperties();
 			if (this.connectionGeneration !== bootstrapGeneration) return null;
 			// Strip the query string but keep any existing history state (e.g. the
 			// rrHome snapshot / appId) so an OAuth failure does not lose navigation.
@@ -807,6 +818,7 @@ export class ConnectionManager implements IConnectionManager {
 
 		// ── OAuth callback — exchange authorization code for a session ────
 		if (code) {
+			const signup = takeSignupProperties();
 			const verifier = getStoredVerifier();
 			clearStoredVerifier();
 			// Strip the ?code= from the URL so refreshes don't re-exchange.
@@ -836,7 +848,7 @@ export class ConnectionManager implements IConnectionManager {
 			}
 
 			try {
-				const completed = await this.connectForBootstrap({ code, verifier, redirectUri: window.location.origin }, sessionAppId, config);
+				const completed = await this.connectForBootstrap({ code, verifier, redirectUri: window.location.origin, ...(signup ? { signupProperties: () => currentSignupProperties(signup) } : {}) }, sessionAppId, config);
 				// The identity provider's round trip ended in an identity: the one place a
 				// sign-up or sign-in is known to have completed (token restores never pass here).
 				if (completed) {

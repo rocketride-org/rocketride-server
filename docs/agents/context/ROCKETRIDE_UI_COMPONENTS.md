@@ -1315,7 +1315,7 @@ Event catalog (`out` = the shell emits it; `in` = an app emits it):
 | `shell:servicesUpdated` | `{ services, icons?, servicesError? }` | out | Service catalog fetched or refreshed. |
 | `shell:appsUpdated` | `{ apps: ShellAppEntry[] }` | out | App catalog changed (full replacement). |
 | `shell:login` / `shell:logout` | `{ user: ConnectResult }` / `void` | out | Authenticated / identity cleared. |
-| `shell:loginRequest` / `shell:logoutRequest` | `{ appId?, register?, auto? }` / `void` | in | UI-initiated sign-in / sign-out; `auto` is set only by the shell's auth gate. |
+| `shell:loginRequest` / `shell:logoutRequest` | `{ appId?, register?, auto?, signupProperties?: SignupProperties }` / `void` | in | UI-initiated sign-in / sign-out; `auto` is set only by the shell's auth gate; `signupProperties` is optional consent-gated sign-up credential context. |
 | `shell:switchApp` | `{ appId }` | in | Switch the active app. |
 | `shell:openOverlay` | `{ id: 'account' \| 'settings' \| 'environment' }` | in | Open a shell overlay (guarded allowlist). |
 | `shell:subscribe` / `shell:unsubscribe` | `{ app, plan?, promo? }` / `{ appId }` | in | Open checkout for a paid app / subscription cancelled. |
