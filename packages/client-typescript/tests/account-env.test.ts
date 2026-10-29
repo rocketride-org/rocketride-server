@@ -4,9 +4,9 @@
 // =============================================================================
 
 /**
- * account.setEnv wire shape (saas#809): values go in `env`, deletions in a
- * `delete` list. A server with the old full-replacement contract ignores the
- * list instead of storing null as a value; the write-only server applies it.
+ * account.setEnv wire shape (saas#827): it sends update_env, values in `env`
+ * and deletions in a `delete` list. A server with only the old full-replacement
+ * set_env refuses update_env as unknown instead of wiping what it was not sent.
  */
 
 import { describe, it, expect, jest } from '@jest/globals';
@@ -27,7 +27,7 @@ describe('AccountApi.setEnv', () => {
 		expect(call).toHaveBeenCalledTimes(1);
 		expect(call.mock.calls[0][0]).toBe('rrext_account_me');
 		expect(call.mock.calls[0][1]).toEqual({
-			subcommand: 'set_env',
+			subcommand: 'update_env',
 			env: { ROCKETRIDE_A: 'a', ROCKETRIDE_C: '••••••••' },
 			delete: ['ROCKETRIDE_B'],
 		});
@@ -38,6 +38,6 @@ describe('AccountApi.setEnv', () => {
 		await new AccountApi(client).setEnv('team', { ROCKETRIDE_A: 'a' }, 'team-1');
 
 		expect(call.mock.calls[0][0]).toBe('rrext_account_teams');
-		expect(call.mock.calls[0][1]).toEqual({ subcommand: 'set_env', env: { ROCKETRIDE_A: 'a' }, delete: [], teamId: 'team-1' });
+		expect(call.mock.calls[0][1]).toEqual({ subcommand: 'update_env', env: { ROCKETRIDE_A: 'a' }, delete: [], teamId: 'team-1' });
 	});
 });
