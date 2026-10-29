@@ -748,7 +748,7 @@ from `'shell'`). The full set:
 | `shell:appsUpdated` | `{ apps }` | App catalog changed — complete replacement set. |
 | `shell:login` | `{ user: ConnectResult }` | Authentication succeeded. |
 | `shell:logout` | `{}` | User signed out. |
-| `shell:loginRequest` | `{ appId?, register?, auto? }` | UI requests sign-in; `auto` is set only by the shell's auth gate. |
+| `shell:loginRequest` | `{ appId?, register?, auto?, signupProperties?: SignupProperties }` | UI requests sign-in; `auto` is set only by the shell's auth gate. |
 | `shell:logoutRequest` | `{}` | UI requests sign-out. |
 | `shell:switchApp` | `{ appId }` | Switch the active app. |
 | `shell:subscribe` | `{ app, plan?, promo? }` | Open subscription checkout; `plan` skips the picker. |
@@ -766,6 +766,10 @@ from `'shell'`). The full set:
 The event map is the platform's shared vocabulary — it carries platform
 events only. For your app's internal communication, use ordinary React
 state or your own emitter; do not overload the shell bus.
+
+Optional `signupProperties` is consent-gated PKCE credential context for sign-up requests.
+The native auth telemetry facts contain no signup attribution; the encoded credential alone
+uses the snake_case `signup_properties` key. See the public Shell API signup attribution guide.
 
 **Telemetry facts.** The shell has no analytics SDK: it raises `auth:start`
 and `auth:complete` (with `is_new`, `waitlisted` and `duration_ms`, the OAuth

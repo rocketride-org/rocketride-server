@@ -18,10 +18,10 @@ exceptions on [Error Handling](/clients/typescript/errors).
 | `attach` | `attach(uri?: string, options?: { timeout?: number }): Promise<void>` | `Promise<void>` | Opens an anonymous WebSocket attachment without authenticating. Public `rrext_public_*` requests are available. A URI override becomes the current endpoint. |
 | `detach` | `detach(): Promise<void>` | `Promise<void>` | Cancels pending login and reconnect work, closes a CONNECTING or OPEN transport, and leaves the client detached. An in-flight login rejects with cancellation reason `detached`. |
 | `isAttached` | `isAttached(): boolean` | `boolean` | Whether the WebSocket transport is open, regardless of authentication. |
-| `login` | `login(credential?: string \| { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult>` | `Promise<ConnectResult>` | Attaches if needed, authenticates, restores monitor subscriptions, and returns account data. The credential and URI may override construction-time values. |
+| `login` | `login(credential?: string \| PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult>` | `Promise<ConnectResult>` | Attaches if needed, authenticates, restores monitor subscriptions, and returns account data. The credential and URI may override construction-time values. |
 | `logout` | `logout(): Promise<void>` | `Promise<void>` | Clears authentication while retaining an anonymous attachment. During an in-flight login it cancels all joined waiters with reason `logout` and establishes a fresh anonymous attachment. |
 | `isAuthenticated` | `isAuthenticated(): boolean` | `boolean` | Whether authentication succeeded for the current attachment. |
-| `connect` | `connect(credential?: string \| { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult>` | `Promise<ConnectResult>` | Compatibility method that performs attach and login as one foreground operation. |
+| `connect` | `connect(credential?: string \| PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult>` | `Promise<ConnectResult>` | Compatibility method that performs attach and login as one foreground operation. |
 | `disconnect` | `disconnect(): Promise<void>` | `Promise<void>` | Best-effort logout/deauthentication, then cancels pending work and detaches. |
 | `isConnected` | `isConnected(): boolean` | `boolean` | Compatibility **alias for `isAttached()`**; it does not imply authentication. |
 | `setEnv` | `setEnv(env: Record<string, string>): void` | `void` | Replaces the client's environment map. `use()` uses it for `ROCKETRIDE_*` substitution; `login()` consults `ROCKETRIDE_APIKEY` when no explicit credential is supplied. |
@@ -308,6 +308,9 @@ constructor(expectJson?: boolean)  // default false
 - **PIPELINE_RESULT**: `{ name, path, objectId, result_types?, [key: string]: any }`.
 - **PipelineConfig**: Pipeline definition with `name`, `description`, `version`, `components`, `source`, `project_id`.
 - **UPLOAD_RESULT**: Per-file result with e.g. `action` (`'complete'` \| `'error'`), `filepath`, `error?`, `result?`, `upload_time?`.
+- **SignupProperties**: Version 1 analytics context with experiment, variant, UUID assignment/exposure, message revision and a 30-minute exposure window; never an authorization claim. <!-- language-specific -->
+- **normalizeSignupProperties(value, now?)**: Validates untrusted context and returns a copy or `null`; the account service validates its experiment/catalog separately. <!-- language-specific -->
+- **PkceCredential**: PKCE code, verifier and redirect URI, plus optional consent-aware `signupProperties` [signup attribution](/clients/typescript/connection#optional-signup-attribution).
 - **ConnectResult**: Identity payload returned by `connect()`/`login()` — user, organizations, apps, teams.
 - **QuestionHistory**: `{ role: string, content: string }` · **QuestionExample**: `{ given: string, result: string }` · **QuestionType**/**QuestionText**.
 - **Deploy types**: `DeployArtifact`, `Deployment`, `DeploymentSchedule`, `DeployActor`, `DeployHistoryEntry`, `PublishResult`, `DeployListEnvelope<T>` (the generic list/versions/history envelope), `DeployListParams`, `SchedulePreview`, `AppVerifyReport`, `AppVerifyCheck` (from `rocketride`).

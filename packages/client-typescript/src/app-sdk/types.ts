@@ -33,6 +33,7 @@
 // =============================================================================
 
 import type * as React from 'react';
+import type { SignupProperties } from '../client/types/signup';
 
 // =============================================================================
 // SHELL COMPONENT PROP CONTRACTS
@@ -524,7 +525,7 @@ export interface ShellEventMap {
 	 * `register` marks a sign-up intent ("Get Started"); `auto` is set by the
 	 * shell's own auth gate, so apps leave it unset.
 	 */
-	'shell:loginRequest': { appId?: string; register?: boolean; auto?: boolean };
+	'shell:loginRequest': { appId?: string; register?: boolean; auto?: boolean; signupProperties?: SignupProperties };
 	/**
 	 * A telemetry fact the shell observed. `auth:start` is never delivered
 	 * here (the OAuth redirect follows at once): it is held, and handed over

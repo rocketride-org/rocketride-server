@@ -32,7 +32,7 @@
 // defines canonical event names and payload types that both hosts agree on.
 // =============================================================================
 
-import type { ConnectResult, DAPMessage } from 'rocketride';
+import type { ConnectResult, DAPMessage, SignupProperties } from 'rocketride';
 import type { ConnectionStatus } from './connection';
 import type { CheckoutPlan, PromoValidation } from '../modules/checkout/types';
 import type { TelemetryFact } from '../util/telemetryChannel';
@@ -187,7 +187,7 @@ export interface ShellConnectionEventMap {
 	 * the shell raised itself (the auth gate of an app that requires sign-in)
 	 * rather than a click; it is reported on the auth:start telemetry fact.
 	 */
-	'shell:loginRequest': { appId?: string; register?: boolean; auto?: boolean };
+	'shell:loginRequest': { appId?: string; register?: boolean; auto?: boolean; signupProperties?: SignupProperties };
 
 	/** Sign-out request initiated by the UI (e.g. "Sign Out" button). */
 	'shell:logoutRequest': Record<string, never>;
