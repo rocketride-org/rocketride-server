@@ -47,13 +47,13 @@ Architecture:
 import time
 from typing import TYPE_CHECKING, Dict, Any, List, Tuple
 from rocketride import EVENT_TYPE
-from rocketlib import getServiceDefinition, validatePipeline
+from rocketlib import validatePipeline
 from ai.common.config import Config
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 from ai.account.models import resolve_run_permissions
 from ..pipeline import resolve_implied_source, resolve_pipeline_env
-from .. import services_catalog
+from .. import node_store, services_catalog
 from .cmd_monitor import owner_key, owner_wildcard_key
 
 # Only import for type checking to avoid circular import errors
@@ -81,7 +81,7 @@ def _service_profile_names(provider: str) -> frozenset:
         unavailable, which leaves the caller reporting the key rather than hiding it.
     """
     try:
-        service = getServiceDefinition(provider)
+        service = node_store.definition(provider)
         return frozenset((service or {}).get('preconfig', {}).get('profiles', {}) or {})
     except Exception:
         return frozenset()
@@ -274,7 +274,7 @@ class MiscCommands(DAPConn):
             # can produce, so `components` wins and the stray `component` is
             # wrapped as a full pipeline rather than passed through.
             if 'component' in pipeline and 'components' not in pipeline:
-                data = validatePipeline(pipeline)
+                data = validatePipeline(pipeline, node_store.custom())
             else:
                 # Resolve source: explicit arg > pipeline field > implied from components
                 source = args.get('source', None) or pipeline.get('source', None)
@@ -293,7 +293,7 @@ class MiscCommands(DAPConn):
 
                 # Same envelope pipe_Validate (modules/pipe) builds — the version
                 # rides INSIDE the wrapped config (see the FILE-form note above).
-                data = validatePipeline({'pipeline': inner})
+                data = validatePipeline({'pipeline': inner}, node_store.custom())
 
             # Return the results
             return self.build_response(request, body=data)

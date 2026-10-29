@@ -3,11 +3,10 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""EaaS registers the nodes the server does not carry, and serves them to tasks."""
+"""EaaS keeps the nodes the server does not carry: their definitions for the engine's calls, their packages for a run."""
 
+import base64
 import json
-import os
-import sys
 
 import pytest
 
@@ -16,6 +15,7 @@ from ai.modules.task import node_store
 
 ON_DISK = {'protocol': 'webhook://', 'icon': 'webhook.svg'}
 PACKAGED = {'protocol': 'provider_x://', 'icon': 'x.svg', 'maximum': 1.0}
+X_ICON = 'data:image/svg+xml;base64,' + base64.b64encode(b'<svg id="x"/>').decode()
 
 
 def _index(contract=CONST_NODES_CONTRACT):
@@ -38,34 +38,53 @@ def _index(contract=CONST_NODES_CONTRACT):
 
 @pytest.fixture
 def server(tmp_path, monkeypatch):
-    calls = {'registered': [], 'commands': [], 'warnings': [], 'cache': str(tmp_path)}
-    monkeypatch.setattr(node_store, 'engine_cache_dir', lambda create=False: str(tmp_path))
-    monkeypatch.setattr(node_store.node_packages, 'serve', lambda source: calls.setdefault('served', []).append(source))
+    calls = {'parsed': [], 'unpacked': [], 'warnings': [], 'nodes': str(tmp_path)}
     monkeypatch.setattr(node_store, '_nodes', {})
     monkeypatch.setattr(node_store, '_providers', {})
-    monkeypatch.setattr(sys, 'path', list(sys.path))
-    monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
-    monkeypatch.setattr(node_store, 'getServiceDefinition', lambda p: {} if p == 'webhook' else None)
-    monkeypatch.setattr(node_store.engLib, 'registerServices', calls['registered'].append, raising=False)
-    monkeypatch.setattr(node_store, 'register_channel_command', lambda name, handler: calls['commands'].append(name))
+    monkeypatch.setattr(node_store, '_definitions', {})
+    monkeypatch.setattr(node_store, 'getServiceDefinition', lambda p: {'on': 'disk'} if p == 'webhook' else None)
+    monkeypatch.setattr(node_store, 'getServiceDefinitions', calls['parsed'].append)
     monkeypatch.setattr(node_store, 'warning', calls['warnings'].append)
     monkeypatch.setattr(node_store.account, 'node_index', lambda: _index())
     monkeypatch.setattr(node_store.account, 'node_package', lambda name, sha256: f'{name}:{sha256}'.encode())
+    monkeypatch.setattr(node_store.node_release, 'nodes_dir', lambda: str(tmp_path))
+    monkeypatch.setattr(
+        node_store.node_packages, 'unpack', lambda *args: calls['unpacked'].append(args) or f'{args[3]}/{args[0]}'
+    )
     return calls
 
 
-def test_only_the_nodes_not_on_disk_are_registered_with_their_icons(server):
+def test_only_the_nodes_not_on_disk_are_kept_with_their_icon_inline(server):
     node_store.start()
 
-    icon_dir = os.path.join(server['cache'], 'node-icons', 'x', 'llm_x')
-    assert server['registered'] == [[(PACKAGED, os.path.join(icon_dir, 'services.json'))]]
-    assert isinstance(server['registered'][0][0][0]['maximum'], float)
-    assert open(os.path.join(icon_dir, 'x.svg')).read() == '<svg id="x"/>'
-    assert server['commands'] == ['node.fetch'] and server['served'] == [node_store._package]
+    expected = {**PACKAGED, 'icon': X_ICON}
+    assert node_store.custom() == [expected]
+    assert isinstance(node_store.custom()[0]['maximum'], float)
+    # The engine parsed them once, at start
+    assert server['parsed'] == [[expected]]
+    assert server['warnings'] == []
+
+
+def test_a_definition_is_the_engines_else_the_one_eaas_serves(server):
+    node_store.start()
+
+    assert node_store.definition('webhook') == {'on': 'disk'}
+    assert node_store.definition('provider_x') == {**PACKAGED, 'icon': X_ICON}
+    assert node_store.definition('filesys') is None
+
+
+def test_an_icon_the_index_does_not_hold_is_dropped(server, monkeypatch):
+    index = _index()
+    index['nodes']['llm_x']['icons'] = {}
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+
+    node_store.start()
+
+    assert node_store.custom() == [{'protocol': 'provider_x://', 'maximum': 1.0}]
 
 
 @pytest.mark.parametrize('broken', ['contract', 'unavailable', 'malformed', 'refused'])
-def test_an_index_it_cannot_use_registers_nothing(server, monkeypatch, broken):
+def test_an_index_it_cannot_use_serves_nothing(server, monkeypatch, broken):
     if broken == 'contract':
         monkeypatch.setattr(node_store.account, 'node_index', lambda: _index(CONST_NODES_CONTRACT + 1))
     elif broken == 'unavailable':
@@ -81,42 +100,59 @@ def test_an_index_it_cannot_use_registers_nothing(server, monkeypatch, broken):
     else:
 
         def refuse(definitions):
-            raise RuntimeError('Protocol missing or invalid')
+            raise RuntimeError('The icon of provider_x must be inline (a data: URL)')
 
-        monkeypatch.setattr(node_store.engLib, 'registerServices', refuse, raising=False)
+        monkeypatch.setattr(node_store, 'getServiceDefinitions', refuse)
 
     node_store.start()
 
-    assert server['registered'] == [] and server['commands'] == [] and 'served' not in server
+    assert node_store.custom() == [] and node_store.place({'components': [{'provider': 'provider_x'}]}) == []
     assert len(server['warnings']) == 1
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('asked', ['llm_x', 'provider_x'])
-async def test_a_task_gets_a_package_by_node_or_provider_name(server, asked):
+def test_a_run_gets_on_disk_only_the_nodes_its_pipeline_names_that_the_server_lacks(server):
     node_store.start()
 
-    reply = await node_store._fetch(None, {'name': asked}, None)
+    placed = node_store.place({'components': [{'provider': 'webhook'}, {'provider': 'provider_x'}]})
 
-    assert reply.body == {'name': 'llm_x', 'sha256': 'x', 'services': {'services.json': PACKAGED}}
-    assert reply.data == b'llm_x:x'
+    assert placed == ['llm_x']
+    assert server['unpacked'] == [('llm_x', b'llm_x:x', 'x', server['nodes'])]
 
 
-@pytest.mark.asyncio
-async def test_a_name_this_server_does_not_serve_gets_an_empty_answer(server):
+def test_a_pipeline_that_names_no_served_node_unpacks_nothing(server):
     node_store.start()
 
-    reply = await node_store._fetch(None, {'name': 'filesys'}, None)
+    assert node_store.place({'components': [{'provider': 'webhook'}, {'provider': 'filesys'}]}) == []
+    assert server['unpacked'] == []
 
-    assert reply.body == {} and reply.data is None
 
-
-def test_the_source_serves_a_node_by_node_or_provider_name_and_nothing_else(server):
+def test_the_filters_autopipe_inserts_are_on_disk_before_the_run(server, monkeypatch):
+    index = _index()
+    for provider in ('ocr', 'embedding_y'):
+        index['nodes'][provider] = {
+            'sha256': provider,
+            'services': {'services.json': json.dumps({'protocol': f'{provider}://'})},
+            'icons': {},
+        }
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
     node_store.start()
 
-    assert node_store._package('provider_x') == ('llm_x', b'llm_x:x', 'x', {'services.json': PACKAGED})
-    assert node_store._package('llm_x') == node_store._package('provider_x')
-    assert node_store._package('filesys') is None
+    autopipe = {'provider': 'autopipe', 'config': {'embedding': {'provider': 'embedding_y'}}}
+    placed = node_store.place({'components': [autopipe]})
+
+    assert placed == ['embedding_y', 'ocr']
+
+
+def test_a_package_that_cannot_be_read_fails_the_launch(server, monkeypatch):
+    node_store.start()
+
+    def offline(name, sha256):
+        raise FileNotFoundError('llm_x.rrnode is not in releases server-v1')
+
+    monkeypatch.setattr(node_store.account, 'node_package', offline)
+
+    with pytest.raises(FileNotFoundError):
+        node_store.place({'components': [{'provider': 'provider_x'}]})
 
 
 def test_a_provider_two_nodes_claim_is_served_by_the_first_and_warned_about(server, monkeypatch):
@@ -127,4 +163,5 @@ def test_a_provider_two_nodes_claim_is_served_by_the_first_and_warned_about(serv
     node_store.start()
 
     assert node_store._providers['provider_x'] == 'llm_x'
+    assert node_store.custom() == [{**PACKAGED, 'icon': X_ICON}]
     assert len(server['warnings']) == 1 and 'provider_x' in server['warnings'][0]

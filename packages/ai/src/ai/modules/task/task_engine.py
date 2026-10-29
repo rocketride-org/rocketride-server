@@ -68,6 +68,7 @@ from ai.account.base import OutOfCreditsError
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
+from ai.modules.task import node_store
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
 from ai.modules.task.task_channel import (
@@ -2904,6 +2905,12 @@ class Task(DAPBase):
             # A stop that arrived during the awaits above (loading the
             # placeholder values, writing the task file) found no process to
             # end: honour it here instead of starting one
+            # The nodes it names that the server does not carry go on disk first: the run's start-up scan loads them
+            try:
+                await asyncio.to_thread(node_store.place, self._pipeline)
+            except Exception as e:
+                raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
+
             if self._stop_requested:
                 raise RuntimeError('the task was stopped before it started')
 

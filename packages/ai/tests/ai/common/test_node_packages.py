@@ -3,13 +3,12 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""A .rrnode unpacks once under the engine cache, by digest, and imports on demand."""
+"""A .rrnode unpacks into a nodes/ folder whole, once per digest, and never over a node the server carries."""
 
 import hashlib
-import importlib
 import io
 import os
-import sys
+import time
 import zipfile
 
 import pytest
@@ -17,198 +16,105 @@ import pytest
 from ai.common import node_packages
 from ai.common.node_packages import NodePackageInvalid
 
-DEFINITION = {'protocol': 'railnode://', 'path': 'nodes.railnode'}
 
-
-def _package(name='railnode', value=42):
+def _package(name='railnode', value=42, extra=None):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w') as package:
         package.writestr(f'{name}/__init__.py', f'VALUE = {value}\n')
-        package.writestr(f'{name}/.rrnode', '{}')
+        package.writestr(f'{name}/services.json', '{"protocol": "railnode://"}')
+        if extra:
+            package.writestr(extra, '')
     data = buffer.getvalue()
     return data, hashlib.sha256(data).hexdigest()
 
 
+def _read(path):
+    with open(path) as f:
+        return f.read()
+
+
 @pytest.fixture
-def cache(tmp_path, monkeypatch):
-    calls = {'registered': [], 'asked': []}
-    monkeypatch.setattr(node_packages, 'engine_cache_dir', lambda create=False: str(tmp_path))
-    monkeypatch.setattr(node_packages.engLib, 'registerServices', calls['registered'].append, raising=False)
-    monkeypatch.setattr(node_packages, '_source', None)
-    monkeypatch.setattr(sys, 'path', list(sys.path))
-    monkeypatch.setattr(sys, 'meta_path', list(sys.meta_path))
-    for name in [m for m in sys.modules if m == 'nodes' or m.startswith('nodes.')]:
-        monkeypatch.delitem(sys.modules, name)
-    return tmp_path, calls
+def nodes(tmp_path):
+    path = tmp_path / 'server' / 'nodes'
+    path.mkdir(parents=True)
+    return str(path)
 
 
-def _serve(calls):
-    def source(name):
-        calls['asked'].append(name)
-        if name != 'railnode':
-            return None
-        data, sha256 = _package()
-        return 'railnode', data, sha256, {'services.json': DEFINITION}
-
-    node_packages.serve(source)
-
-
-def test_a_package_unpacks_once_under_its_digest(cache):
-    tmp, _ = cache
+def test_a_package_unpacks_into_nodes_with_its_digest(nodes):
     data, sha256 = _package()
 
-    first = node_packages.unpack('railnode', data, sha256)
-    second = node_packages.unpack('railnode', b'not read again', sha256)
+    node_dir = node_packages.unpack('railnode', data, sha256, nodes)
 
-    assert first == second == os.path.join(tmp, 'node-packages', sha256, 'nodes', 'railnode')
-    assert os.path.isfile(os.path.join(first, '__init__.py'))
-    assert [n for n in os.listdir(tmp) if n != 'node-packages'] == []
+    assert node_dir == os.path.join(nodes, 'railnode')
+    assert _read(os.path.join(node_dir, '__init__.py')) == 'VALUE = 42\n'
+    assert node_packages.digest_of(node_dir) == sha256
+    # Nothing is left beside nodes/, and nodes/ holds only the node
+    assert os.listdir(os.path.dirname(nodes)) == ['nodes']
+    assert os.listdir(nodes) == ['railnode']
 
 
-def test_a_folder_that_only_shares_a_digest_prefix_is_not_reused(cache):
-    tmp, _ = cache
+def test_the_same_digest_is_not_unpacked_again(nodes):
     data, sha256 = _package()
-    planted = os.path.join(tmp, 'node-packages', sha256[:16], 'nodes', 'railnode')
-    os.makedirs(planted)
-    with open(os.path.join(planted, '__init__.py'), 'w') as f:
-        f.write('VALUE = "planted"')
+    node_packages.unpack('railnode', data, sha256, nodes)
 
-    node_dir = node_packages.unpack('railnode', data, sha256)
+    node_packages.unpack('railnode', b'not read again', sha256, nodes)
 
-    with open(os.path.join(node_dir, '__init__.py')) as f:
-        assert f.read() == 'VALUE = 42\n'
+    assert _read(os.path.join(nodes, 'railnode', '__init__.py')) == 'VALUE = 42\n'
 
 
-def test_a_package_that_does_not_match_its_digest_is_refused(cache):
-    tmp, _ = cache
+def test_another_digest_replaces_the_copy_a_package_left(nodes):
+    old, old_sha = _package(value=1)
+    new, new_sha = _package(value=2)
+    node_packages.unpack('railnode', old, old_sha, nodes)
+
+    node_packages.unpack('railnode', new, new_sha, nodes)
+
+    assert _read(os.path.join(nodes, 'railnode', '__init__.py')) == 'VALUE = 2\n'
+    assert node_packages.digest_of(os.path.join(nodes, 'railnode')) == new_sha
+    assert os.listdir(os.path.dirname(nodes)) == ['nodes']
+
+
+def test_a_node_the_server_carries_is_never_replaced(nodes):
+    os.makedirs(os.path.join(nodes, 'railnode'))
+    with open(os.path.join(nodes, 'railnode', '__init__.py'), 'w') as f:
+        f.write('VALUE = "server"')
+    data, sha256 = _package()
+
+    node_packages.unpack('railnode', data, sha256, nodes)
+
+    assert _read(os.path.join(nodes, 'railnode', '__init__.py')) == 'VALUE = "server"'
+
+
+def test_a_package_that_does_not_match_its_digest_is_refused(nodes):
     data, _ = _package()
 
-    with pytest.raises(NodePackageInvalid) as refused:
-        node_packages.unpack('railnode', data, '0' * 64)
+    with pytest.raises(NodePackageInvalid):
+        node_packages.unpack('railnode', data, '0' * 64, nodes)
 
-    assert refused.value.code == 'NODE_PACKAGE_INVALID'
-    assert not os.path.exists(os.path.join(tmp, 'node-packages'))
-
-
-def test_another_process_unpacking_the_same_digest_first_is_kept(cache, monkeypatch):
-    tmp, _ = cache
-    data, sha256 = _package()
-    root = os.path.join(tmp, 'node-packages', sha256)
-    real_replace = os.replace
-
-    def lose_the_race(src, dst):
-        os.makedirs(os.path.join(dst, 'nodes', 'railnode'))
-        real_replace(src, dst)
-
-    monkeypatch.setattr(node_packages.os, 'replace', lose_the_race)
-
-    assert node_packages.unpack('railnode', data, sha256) == os.path.join(root, 'nodes', 'railnode')
-    assert [n for n in os.listdir(tmp) if n != 'node-packages'] == []
+    assert not os.path.exists(os.path.join(nodes, 'railnode'))
 
 
-def test_ensure_fetches_and_registers_a_node_the_engine_does_not_know(cache, monkeypatch):
-    _, calls = cache
-    monkeypatch.setattr(node_packages, 'getServiceDefinition', lambda name: None)
-    _serve(calls)
+def test_a_package_with_files_outside_its_node_is_refused(nodes):
+    data, sha256 = _package(extra='other/__init__.py')
 
-    node_packages.ensure('railnode')
+    with pytest.raises(NodePackageInvalid):
+        node_packages.unpack('railnode', data, sha256, nodes)
 
-    ((definition, path),) = calls['registered'][0]
-    assert definition == DEFINITION and path.endswith(os.path.join('nodes', 'railnode', 'services.json'))
-
-
-def test_ensure_leaves_a_node_the_engine_knows(cache, monkeypatch):
-    _, calls = cache
-    monkeypatch.setattr(node_packages, 'getServiceDefinition', lambda name: {})
-    _serve(calls)
-
-    node_packages.ensure('railnode')
-
-    assert calls['asked'] == [] and calls['registered'] == []
+    assert not os.path.exists(os.path.join(nodes, 'railnode'))
+    assert not os.path.exists(os.path.join(nodes, 'other'))
+    assert os.listdir(os.path.dirname(nodes)) == ['nodes']
 
 
-def test_an_import_unpacks_the_node_without_registering_it_again(cache):
-    _, calls = cache
-    _serve(calls)
-
-    assert importlib.import_module('nodes.railnode').VALUE == 42
-    importlib.import_module('nodes.railnode')
-
-    assert calls['asked'] == ['railnode'] and calls['registered'] == []
-
-
-def test_a_name_that_is_no_node_is_left_to_the_usual_error(cache):
-    _, calls = cache
-    _serve(calls)
-
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module('nodes.nosuchnode')
-    with pytest.raises(ModuleNotFoundError):
-        importlib.import_module('railmissing.thing')
-
-    assert calls['asked'] == ['nosuchnode']
-
-
-def test_a_node_that_cannot_be_fetched_fails_the_import_as_an_import_error(cache):
-    def broken(name):
-        raise NodePackageInvalid('The package of railnode does not match its digest')
-
-    node_packages.serve(broken)
-
-    with pytest.raises(ImportError, match='does not match its digest'):
-        importlib.import_module('nodes.railnode')
-
-
-def test_the_nodes_a_pipeline_names_are_registered_together(cache, monkeypatch):
-    _, calls = cache
-    monkeypatch.setattr(node_packages, 'getServiceDefinition', lambda name: None)
-
-    def source(name):
-        data, sha256 = _package(name)
-        return name, data, sha256, {'services.json': {'protocol': f'{name}://'}}
-
-    node_packages.serve(source)
-
-    node_packages.ensure('railnode', 'othernode')
-
-    (batch,) = calls['registered']
-    assert sorted(definition['protocol'] for definition, _ in batch) == ['othernode://', 'railnode://']
-
-
-def test_a_rename_that_fails_for_another_reason_is_reported(cache, monkeypatch):
+def test_an_unpack_that_was_killed_is_swept_once_it_is_old(nodes):
+    parent = os.path.dirname(nodes)
+    old = os.path.join(parent, '.rrnode-staging-old')
+    fresh = os.path.join(parent, '.rrnode-staging-fresh')
+    os.makedirs(old)
+    os.makedirs(fresh)
+    hour_ago = time.time() - 3700
+    os.utime(old, (hour_ago, hour_ago))
     data, sha256 = _package()
 
-    def locked(src, dst):
-        raise PermissionError('in use by another process')
+    node_packages.unpack('railnode', data, sha256, nodes)
 
-    monkeypatch.setattr(node_packages.os, 'replace', locked)
-
-    with pytest.raises(PermissionError):
-        node_packages.unpack('railnode', data, sha256)
-
-
-def test_an_unpack_that_was_killed_is_swept_once_it_is_old(cache):
-    tmp, _ = cache
-    old = tmp / 'staging-abandoned'
-    fresh = tmp / 'staging-in-progress'
-    old.mkdir()
-    fresh.mkdir()
-    os.utime(old, (0, 0))
-    data, sha256 = _package()
-
-    node_packages.unpack('railnode', data, sha256)
-
-    assert not old.exists() and fresh.exists()
-
-
-def test_a_package_with_files_outside_its_node_is_refused(cache):
-    tmp, _ = cache
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, 'w') as package:
-        package.writestr('railnode/__init__.py', '')
-        package.writestr('core/__init__.py', 'SHADOWED = True')
-    data = buffer.getvalue()
-
-    with pytest.raises(NodePackageInvalid, match='outside railnode/'):
-        node_packages.unpack('railnode', data, hashlib.sha256(data).hexdigest())
-    assert not os.path.exists(os.path.join(tmp, 'node-packages'))
+    assert not os.path.exists(old) and os.path.exists(fresh)
