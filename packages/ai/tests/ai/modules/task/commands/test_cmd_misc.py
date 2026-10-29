@@ -206,12 +206,14 @@ async def test_on_rrext_validate_uses_explicit_source(monkeypatch):
     monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: 'never-used')
     captured = {}
 
-    def _fake_validate(payload):
+    def _fake_validate(payload, custom):
         """Capture the payload so the test can assert on it."""
         captured['payload'] = payload
+        captured['custom'] = custom
         return {'ok': True}
 
     monkeypatch.setattr(cmd_misc, 'validatePipeline', _fake_validate)
+    monkeypatch.setattr(cmd_misc.node_store, 'custom', lambda: [{'protocol': 'provider_x://'}])
 
     conn = _make_conn()
     request = {
@@ -226,6 +228,8 @@ async def test_on_rrext_validate_uses_explicit_source(monkeypatch):
     # payload['pipeline'] — the same envelope pipe_Validate builds.
     assert captured['payload']['pipeline']['source'] == 'explicit-source'
     assert captured['payload']['pipeline']['version'] == 1  # default
+    # The nodes EaaS serves are validated with the pipeline
+    assert captured['custom'] == [{'protocol': 'provider_x://'}]
     assert result == {'type': 'response', 'body': {'ok': True}}
 
 
@@ -236,7 +240,7 @@ async def test_on_rrext_validate_falls_back_to_pipeline_source(monkeypatch):
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -253,7 +257,7 @@ async def test_on_rrext_validate_falls_back_to_implied_source(monkeypatch):
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -269,7 +273,7 @@ async def test_on_rrext_validate_no_source_anywhere_omits_field(monkeypatch):
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -290,7 +294,7 @@ async def test_on_rrext_validate_wraps_config_in_pipeline_envelope(monkeypatch):
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -317,7 +321,7 @@ async def test_on_rrext_validate_does_not_double_wrap_enveloped_config(monkeypat
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -345,7 +349,7 @@ async def test_on_rrext_validate_does_not_wrap_single_component_payload(monkeypa
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -367,7 +371,7 @@ async def test_on_rrext_validate_does_not_infer_source_for_a_single_component(mo
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -387,7 +391,7 @@ async def test_on_rrext_validate_leaves_a_full_pipeline_alone(monkeypatch):
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
