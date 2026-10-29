@@ -18,6 +18,7 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
+import { envChanges } from './envChanges';
 
 // =============================================================================
 // STYLES
@@ -172,16 +173,7 @@ export const EnvScopeCard: React.FC<{
 		setSaving(true);
 		setError(null);
 		try {
-			// Build dict, skip empty keys
-			const result: Record<string, string | null> = {};
-			for (const [k, v] of draft) {
-				const key = k.trim();
-				if (key) result[key] = v;
-			}
-			for (const key of Object.keys(env ?? {})) {
-				if (!(key in result)) result[key] = null;
-			}
-			await onSave(result);
+			await onSave(envChanges(draft, env));
 			setDirty(false);
 			setSaved(true);
 			setTimeout(() => setSaved(false), 5000);
