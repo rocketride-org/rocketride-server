@@ -225,6 +225,10 @@ export interface ProfilePanelProps {
 	onSetDevTeam: (teamId: string) => void;
 	/** Switches the user's active organization by its ID. */
 	onSetDefaultOrg: (orgId: string) => void;
+	/** Render ONLY the identity card (+ its edit panel) — the collapsed
+	 *  Profile section (ProfileSection) renders the workspace machinery
+	 *  itself, so the legacy memberships card would be a duplicate. */
+	identityOnly?: boolean;
 }
 
 // =============================================================================
@@ -245,7 +249,7 @@ const VerifiedBadge: React.FC = () => <span style={styles.verifiedPill}>{'✓'} 
  * a list of their organizations and team memberships with a development-team
  * assignment action per team, and an inline Edit Profile modal.
  */
-export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDevTeam, onSetDefaultOrg }) => {
+export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDevTeam, onSetDefaultOrg, identityOnly }) => {
 	/**
 	 * Builds a ProfileUpdate snapshot from the current profile/authUser props.
 	 * Called exactly when the edit panel OPENS — the concurrent-edit ruling
@@ -363,7 +367,7 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 			</Card>
 
 			{/* Organizations / workspaces card with team memberships. */}
-			{memberships.length > 0 && (
+			{!identityOnly && memberships.length > 0 && (
 				<Card header="Organizations / Workspaces" noBodyPadding>
 					<div style={S.rowList}>
 						{memberships.map((o, oi) => {

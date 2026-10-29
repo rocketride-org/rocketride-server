@@ -68,7 +68,7 @@ function agentDevSession(session: WebDevSession): AgentDevSession {
 // APPROVALS — the user's settings behind the agent's approvals
 // =============================================================================
 
-/** The settings behind the agent's approvals, as package.json declares them. Typed by Grant, so a new kind doesn't compile until it has a key. */
+/** The settings behind the agent's approvals, as shared/tools/toolSettings.ts declares them. Typed by Grant, so a new kind doesn't compile until it has a key. */
 const APPROVAL_KEYS: Readonly<Record<'mode' | Grant, string>> = {
 	mode: 'rocketride.pipeBuilder.agentApproval',
 	schedules: 'rocketride.pipeBuilder.agentAllowScheduleChanges',
@@ -94,8 +94,8 @@ function samePrefs(a: ApprovalPrefs, b: ApprovalPrefs): boolean {
 }
 
 /**
- * The user's approval settings for every agent chat in the page. A write goes to the settings file
- * and comes back through RocketApp's next push, so the file is the one source.
+ * The user's approval settings for every agent chat in the page. A write goes to the workspace's
+ * settings and comes back through RocketApp's next push, so the workspace is the one source.
  */
 class ApprovalFeed {
 	private prefs: ApprovalPrefs = approvalPrefsOf({});
@@ -134,7 +134,7 @@ const approvalFeed = new ApprovalFeed();
 // LIMITS — how far one agent turn goes before it pauses
 // =============================================================================
 
-/** The settings behind a turn's limits, as package.json declares them. */
+/** The settings behind a turn's limits, as shared/tools/toolSettings.ts declares them. */
 const LIMIT_KEYS: Readonly<Record<keyof AgentLimits, string>> = {
 	steps: 'rocketride.pipeBuilder.agentStepLimit',
 	costUsd: 'rocketride.pipeBuilder.agentCostLimit',

@@ -544,10 +544,13 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 															marginTop: i === 0 ? 2 : 0,
 															cursor: isTeamLine ? 'pointer' : 'default',
 															display: 'flex',
-															alignItems: 'center',
+															alignItems: isTeamLine ? 'center' : 'flex-start',
 															overflow: 'hidden',
 															textOverflow: 'ellipsis',
-															whiteSpace: 'nowrap',
+															// Status + progress lines WRAP (phase banners carry long
+															// version names/paths); only the Team selector row stays
+															// one-line (it is a button with a trailing chevron).
+															whiteSpace: isTeamLine ? 'nowrap' : 'normal',
 														}}
 													>
 														{/* Colored dot on the connection status line: green when
@@ -566,7 +569,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 																}}
 															/>
 														)}
-														<span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{line}</span>
+														<span style={isTeamLine ? { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : { flex: 1, overflowWrap: 'anywhere' }}>{line}</span>
 														{isTeamLine && <BxChevronRight size={12} />}
 													</div>
 												);

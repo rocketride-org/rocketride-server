@@ -94,7 +94,10 @@ export function useWorkspaceState(
 		updatePrefs: store.updatePrefs,
 		updateAppState: store.updateAppState,
 		flushWorkspaceNow: store.flushNow,
+		/** Partition-routed (the context resolves the owner from the registry). */
 		updateSetting: store.updateSetting,
+		/** Loads an owner partition so its settings section joins the merged view. */
+		ensurePartition: store.ensurePartition.bind(store),
 	};
 }
 

@@ -33,7 +33,7 @@
 
 import React, { useCallback, useMemo } from 'react';
 import {
-	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxHome,
+	BxCog, BxPalette, BxExport, BxGridAlt, BxHome,
 } from '../BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
 import { getHomeAppId } from '../../constants';
@@ -147,11 +147,12 @@ export function useSidebarFooterMenu({ account, hideAppSwitcher, onOverlay, isSa
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
 		const items: SidebarFooterMenuItem[] = [
 			{ id: 'home', label: 'Home', icon: BxHome, onClick: () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: homeAppId }) },
-			...(isSaas ? [{ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => onOverlay('account') } satisfies SidebarFooterMenuItem] : []),
-			{ id: 'environment', label: 'Variables', icon: BxLock, dividerBefore: !isSaas, onClick: () => onOverlay('environment') },
 			// Settings is a global workspace view (shell "General" plus any installed app's
 			// settings), so it's always available. Per-app gating lives in SettingsProvider.
-			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
+			// Account and Environment Variables are Settings SECTIONS (no footer
+			// entries of their own since 2026-10-26; the legacy 'account' /
+			// 'environment' overlay ids deep-link into the Settings overlay).
+			{ id: 'settings', label: 'Settings', icon: BxCog, dividerBefore: true, onClick: () => onOverlay('settings') },
 			{
 				id: 'theme', label: 'Theme', icon: BxPalette, dividerBefore: true,
 				submenu: themeOptions.map((t) => ({

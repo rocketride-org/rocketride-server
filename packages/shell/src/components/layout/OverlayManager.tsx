@@ -28,15 +28,16 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
 import { ConnectionManager } from '../../connection/connection';
-import AccountProvider from '../../providers/AccountProvider';
 import SettingsProvider from '../../providers/SettingsProvider';
-import EnvironmentProvider from '../../providers/EnvironmentProvider';
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-/** Shell overlay pages that render as modal dialogs over the client area. */
+/** Shell overlay pages that render as modal dialogs over the client area.
+ *  'environment' is LEGACY: Environment Variables is a Settings section now,
+ *  so the id stays accepted (frozen `shell:openOverlay` vocabulary) but maps
+ *  to the settings overlay at that section. */
 export type ShellOverlay = 'account' | 'settings' | 'environment' | null;
 
 /** Opaque overlay ids a guest app is allowed to request via `shell:openOverlay`. */
@@ -44,6 +45,12 @@ const OPENABLE_OVERLAYS = ['account', 'settings', 'environment'] as const;
 
 /** Type guard: is `id` a valid openable overlay id (not null/unknown)? */
 const isOpenableOverlay = (id: unknown): id is Exclude<ShellOverlay, null> => typeof id === 'string' && (OPENABLE_OVERLAYS as readonly string[]).includes(id);
+
+/** The Settings section id the legacy 'environment' overlay maps to. */
+const ENVIRONMENT_SECTION_ID = 'environment';
+
+/** The Settings section id the legacy 'account' overlay maps to. */
+const ACCOUNT_SECTION_ID = 'account:profile';
 
 // =============================================================================
 // STYLES
@@ -108,22 +115,47 @@ export interface OverlayManagerProps {
  */
 export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 	// --- Overlay state -------------------------------------------------------
-	const [overlay, setOverlay] = useState<ShellOverlay>(null);
+	const [overlay, setOverlayState] = useState<ShellOverlay>(null);
+	/** Settings deep link: the nav section the NEXT settings open lands on. */
+	const [settingsSection, setSettingsSection] = useState<string | undefined>(undefined);
+
+	/** Overlay setter with the legacy mappings: 'environment' and 'account'
+	 *  open Settings at their sections (their own modals are gone). */
+	const setOverlay = useCallback((id: ShellOverlay) => {
+		if (id === 'environment') {
+			setOverlayState('settings');
+			setSettingsSection(ENVIRONMENT_SECTION_ID);
+		} else if (id === 'account') {
+			setOverlayState('settings');
+			setSettingsSection(ACCOUNT_SECTION_ID);
+		} else {
+			// Clear any stale deep link; the openOverlay listener re-sets it
+			// right after when the request carries a section.
+			setSettingsSection(undefined);
+			setOverlayState(id);
+		}
+	}, []);
 
 	/** Closes the currently open overlay. */
-	const closeOverlay = useCallback(() => setOverlay(null), []);
+	const closeOverlay = useCallback(() => {
+		setOverlayState(null);
+		setSettingsSection(undefined);
+	}, []);
 
 	// --- Open-overlay requests from guest apps -------------------------------
 	// Guest apps (e.g. home-ui's profile menu) can't reach `setOverlay`
 	// directly, so they emit `shell:openOverlay` over the event bus and the
 	// shell routes it into the same overlay state the sidebar uses.
 	useEffect(() => {
-		return ConnectionManager.getInstance().on('shell:openOverlay', ({ id }: { id: ShellOverlay }) => {
+		return ConnectionManager.getInstance().on('shell:openOverlay', ({ id, section }: { id: ShellOverlay; section?: string }) => {
 			// Gate to the contracted ids so a stray runtime value can't open a
 			// blank modal shell with no page content.
-			if (isOpenableOverlay(id)) setOverlay(id);
+			if (isOpenableOverlay(id)) {
+				setOverlay(id);
+				if (id === 'settings') setSettingsSection(section);
+			}
 		});
-	}, []);
+	}, [setOverlay]);
 
 	// --- Escape key handler --------------------------------------------------
 	useEffect(() => {
@@ -155,9 +187,7 @@ export const OverlayManager: React.FC<OverlayManagerProps> = ({ children }) => {
 						<button style={styles.dialogClose} onClick={closeOverlay} aria-label="Close" title="Close">
 							✕
 						</button>
-						{overlay === 'account' && <AccountProvider />}
-						{overlay === 'settings' && <SettingsProvider />}
-						{overlay === 'environment' && <EnvironmentProvider />}
+						{overlay === 'settings' && <SettingsProvider initialSectionId={settingsSection} />}
 					</div>
 				</div>
 			)}

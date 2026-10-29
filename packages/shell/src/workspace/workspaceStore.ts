@@ -28,6 +28,11 @@
 //   app:<id>      -> <dir>/<id>.workspace.json
 //   preview:<id>  -> <dir>/<id>.preview.json
 //
+// Setting OVERRIDES live in their OWNING partition's file (a `settings`
+// section beside prefs/appState; the shell partition's inside global.json).
+// There is NO shared settings file — a legacy flat `settings.json` is never
+// read nor written.
+//
 // =============================================================================
 
 import { RocketRideClient } from 'rocketride';
@@ -76,6 +81,8 @@ interface GlobalFile {
 	version: 3;
 	activeAppId: string;
 	shellPrefs?: Record<string, unknown>;
+	/** Setting overrides the SHELL partition owns (store 'user' keys; deltas only). */
+	settings?: Record<string, SettingValue>;
 }
 
 /**
@@ -125,11 +132,6 @@ export function partitionPath(dir: string, partition: Partition): string {
 	return kind === 'preview' ? `${dir}/${id}.preview.json` : `${dir}/${id}.workspace.json`;
 }
 
-/** The shared settings-override file (deltas only; defaults live in manifests). */
-function settingsPath(dir: string): string {
-	return `${dir}/settings.json`;
-}
-
 // =============================================================================
 // SNAPSHOT
 // =============================================================================
@@ -145,7 +147,8 @@ export interface WorkspaceSnapshot {
 	prefs: WorkspacePrefs;
 	/** The active partition's opaque app-owned blob. */
 	appState: Record<string, unknown>;
-	/** Setting OVERRIDES (deltas only). */
+	/** Setting OVERRIDES (deltas only) — the MERGED view across the shell
+	 *  partition and every loaded partition's own `settings` section. */
 	settings: Record<string, SettingValue>;
 }
 
@@ -180,7 +183,8 @@ export class WorkspaceStore {
 	/** In-memory state, keyed by PARTITION (not by app id). */
 	private partitions: Record<Partition, AppWorkspaceState> = {};
 	private activeAppId: string;
-	private settings: Record<string, SettingValue> = {};
+	/** The shell partition's setting overrides (persisted in global.json). */
+	private shellSettings: Record<string, SettingValue> = {};
 	/** The `shell` partition's bag (persisted in global.json). */
 	private shellPrefs: Record<string, unknown> = {};
 
@@ -195,7 +199,6 @@ export class WorkspaceStore {
 	 *  writes its own). */
 	private appSaveTimers = new Map<Partition, ReturnType<typeof setTimeout>>();
 	private globalSaveTimer: ReturnType<typeof setTimeout> | undefined;
-	private settingsSaveTimer: ReturnType<typeof setTimeout> | undefined;
 
 	private listeners = new Set<() => void>();
 	private snapshot: WorkspaceSnapshot;
@@ -237,20 +240,8 @@ export class WorkspaceStore {
 			this.globalSaveTimer = undefined;
 			if (this.canSave()) {
 				this.client!
-					.fsWriteJson(partitionPath(this.workspaceDir, SHELL_PARTITION), {
-						version: 3,
-						activeAppId: this.activeAppId,
-						shellPrefs: this.shellPrefs,
-					})
+					.fsWriteJson(partitionPath(this.workspaceDir, SHELL_PARTITION), this.globalFileBody())
 					.catch(() => {});
-			}
-		}
-
-		if (this.settingsSaveTimer !== undefined) {
-			clearTimeout(this.settingsSaveTimer);
-			this.settingsSaveTimer = undefined;
-			if (this.canSave()) {
-				this.client!.fsWriteJson(settingsPath(this.workspaceDir), this.settings).catch(() => {});
 			}
 		}
 	};
@@ -293,7 +284,7 @@ export class WorkspaceStore {
 			activeAppId: this.activeAppId,
 			prefs: slice.prefs,
 			appState: slice.appState,
-			settings: this.settings,
+			settings: this.mergedSettings(),
 		};
 	}
 
@@ -361,14 +352,12 @@ export class WorkspaceStore {
 		}
 
 		try {
-			const [globalFile, savedSettings] = await Promise.all([
-				client.fsReadJson<GlobalFile>(partitionPath(this.workspaceDir, SHELL_PARTITION)).catch(() => null),
-				client.fsReadJson<Record<string, SettingValue>>(settingsPath(this.workspaceDir)).catch(() => null),
-			]);
+			const globalFile = await client.fsReadJson<GlobalFile>(partitionPath(this.workspaceDir, SHELL_PARTITION)).catch(() => null);
 
 			// Active app: URL deep-link or built-in default.
 			this.activeAppId = this.startupAppId ?? this.defaultAppId;
 			if (globalFile?.shellPrefs) this.shellPrefs = globalFile.shellPrefs;
+			if (globalFile?.settings && typeof globalFile.settings === 'object') this.shellSettings = globalFile.settings;
 
 			let slice: AppWorkspaceState | undefined;
 			try {
@@ -380,7 +369,6 @@ export class WorkspaceStore {
 			}
 
 			this.partitions = { [this.activePartition]: this.withShellPrefs(slice ?? makeDefaultAppState()) };
-			if (savedSettings && typeof savedSettings === 'object') this.settings = savedSettings;
 			this.notifyPrefs(SHELL_PARTITION);
 			this.notifyPrefs(this.activePartition);
 			this.seeded = true;
@@ -433,25 +421,21 @@ export class WorkspaceStore {
 		if (slice) this.client!.fsWriteJson(partitionPath(this.workspaceDir, partition), slice).catch(() => {});
 	}
 
+	/** The global.json body: active app + shell prefs + shell-owned settings. */
+	private globalFileBody(): GlobalFile {
+		return {
+			version: 3,
+			activeAppId: this.activeAppId,
+			shellPrefs: this.shellPrefs,
+			settings: this.shellSettings,
+		};
+	}
+
 	private scheduleGlobalWrite(): void {
 		if (!this.canSave()) return;
 		clearTimeout(this.globalSaveTimer);
 		this.globalSaveTimer = setTimeout(() => {
-			this.client!
-				.fsWriteJson(partitionPath(this.workspaceDir, SHELL_PARTITION), {
-					version: 3,
-					activeAppId: this.activeAppId,
-					shellPrefs: this.shellPrefs,
-				})
-				.catch(() => {});
-		}, SAVE_DEBOUNCE_MS);
-	}
-
-	private scheduleSettingsWrite(): void {
-		if (!this.canSave()) return;
-		clearTimeout(this.settingsSaveTimer);
-		this.settingsSaveTimer = setTimeout(() => {
-			this.client!.fsWriteJson(settingsPath(this.workspaceDir), this.settings).catch(() => {});
+			this.client!.fsWriteJson(partitionPath(this.workspaceDir, SHELL_PARTITION), this.globalFileBody()).catch(() => {});
 		}, SAVE_DEBOUNCE_MS);
 	}
 
@@ -544,21 +528,61 @@ export class WorkspaceStore {
 	};
 
 	/**
-	 * Sets or clears one setting override. `undefined` DELETES the key —
-	 * settings.json stores deltas only, so "reset to default" and "set to the
-	 * default value" both remove the entry rather than writing the default.
+	 * Sets or clears one setting override in its OWNING partition. `undefined`
+	 * DELETES the key — overrides are deltas only, so "reset to default" and
+	 * "set to the default value" both remove the entry rather than writing it.
 	 *
+	 * The caller resolves the partition from the registry (the entry's owner;
+	 * SHELL_PARTITION for 'user'-store and shell-owned keys) — the store stays
+	 * registry-blind and writes where it is told.
+	 *
+	 * @param partition - The owning partition.
 	 * @param key - The dotted setting key.
 	 * @param value - The override, or undefined to delete it.
 	 */
-	public updateSetting = (key: string, value: SettingValue | undefined): void => {
-		const next = { ...this.settings };
-		if (value === undefined) delete next[key];
-		else next[key] = value;
-		this.settings = next;
+	public updateSetting = (partition: Partition, key: string, value: SettingValue | undefined): void => {
+		if (partition === SHELL_PARTITION) {
+			const next = { ...this.shellSettings };
+			if (value === undefined) delete next[key];
+			else next[key] = value;
+			this.shellSettings = next;
+			this.scheduleGlobalWrite();
+		} else {
+			const current = this.partitions[partition] ?? makeDefaultAppState();
+			const next = { ...(current.settings ?? {}) };
+			if (value === undefined) delete next[key];
+			else next[key] = value;
+			this.partitions = { ...this.partitions, [partition]: { ...current, settings: next } };
+			this.scheduleAppWrite(partition);
+		}
 		this.commit();
-		this.scheduleSettingsWrite();
+		this.notifyPrefs(partition);
 	};
+
+	/**
+	 * The merged override view: the shell partition's settings overlaid with
+	 * every loaded partition's own section. Owners are disjoint by the
+	 * registry's first-wins rule, so merge order cannot matter.
+	 */
+	private mergedSettings(): Record<string, SettingValue> {
+		const merged: Record<string, SettingValue> = { ...this.shellSettings };
+		for (const slice of Object.values(this.partitions)) {
+			if (slice.settings) Object.assign(merged, slice.settings);
+		}
+		return merged;
+	}
+
+	/**
+	 * One partition's OWN setting overrides (not the merged view) — what the
+	 * hosts publish on the partition's settings topic.
+	 *
+	 * @param partition - The partition name.
+	 * @returns The partition's deltas (empty object when it owns none).
+	 */
+	public settingsFor(partition: Partition): Record<string, SettingValue> {
+		if (partition === SHELL_PARTITION) return this.shellSettings;
+		return this.partitions[partition]?.settings ?? {};
+	}
 
 	// =========================================================================
 	// THE PREFS MIRROR SURFACE — partition-addressed, for the bus
@@ -660,6 +684,9 @@ export class WorkspaceStore {
 		// land somewhere, and re-reading on every attach would be a round-trip
 		// per realm.
 		this.partitions = { ...this.partitions, [partition]: slice ?? makeDefaultAppState() };
+		// Commit too: the loaded slice may carry a `settings` section, and the
+		// merged snapshot view must reflect it.
+		this.commit();
 		this.notifyPrefs(partition);
 	}
 
@@ -688,6 +715,5 @@ export class WorkspaceStore {
 		for (const timer of this.appSaveTimers.values()) clearTimeout(timer);
 		this.appSaveTimers.clear();
 		clearTimeout(this.globalSaveTimer);
-		clearTimeout(this.settingsSaveTimer);
 	}
 }

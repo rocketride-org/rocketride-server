@@ -125,6 +125,9 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	const settingTaskArguments = String(settings['rocketride.pipeBuilder.taskArguments'] ?? '').trim();
 	// Full task debug output; adds --trace=debugOut to the task args when enabled
 	const settingDebugOutput = settings['rocketride.pipeBuilder.pipelineDebugOutput'] === true;
+	// Workspace-relative directory preselected when saving an untitled pipeline;
+	// SaveFileDialog renders it even before it exists and mkdirs it on confirm
+	const settingDefaultDir = String(settings['rocketride.pipeBuilder.defaultPipelinePath'] ?? '').replace(/^\/+|\/+$/g, '') || 'pipelines';
 
 	// Rocket Builder is a paywalled app. Running requires an active sub —
 	// gate the run controls (lock icon) and the run action on this. Reactive:
@@ -457,8 +460,9 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		<div style={styles.container}>
 			<PipelineEditor project={pipeline} host={editorHost} />
 			{/* Preselect the document's own folder/name (an untitled doc has no
-			    folder, so it opens at root with its "Untitled-N" placeholder). */}
-			{saveDialogOpen && <SaveFileDialog title="Save Pipeline As" vfs={projectVfs} fileTypes={[{ label: 'RocketRide Pipeline', extension: '.pipe' }]} defaultDir={filename.includes('/') ? filename.slice(0, filename.lastIndexOf('/')) : ''} initialName={projectDisplayName(filename)} onConfirm={handleSaveDialogConfirm} onCancel={() => setSaveDialogOpen(false)} />}
+			    folder, so it opens at the workspace's default pipeline directory
+			    with its "Untitled-N" placeholder). */}
+			{saveDialogOpen && <SaveFileDialog title="Save Pipeline As" vfs={projectVfs} fileTypes={[{ label: 'RocketRide Pipeline', extension: '.pipe' }]} defaultDir={filename.includes('/') ? filename.slice(0, filename.lastIndexOf('/')) : settingDefaultDir} initialName={projectDisplayName(filename)} onConfirm={handleSaveDialogConfirm} onCancel={() => setSaveDialogOpen(false)} />}
 			{pendingRun && <ConfirmDialog title="Unsaved Changes" message="The pipeline has unsaved changes. Save before running?" confirmLabel="Save & Run" cancelLabel="Cancel" onConfirm={handleSaveAndRun} onCancel={() => setPendingRun(null)} />}
 			{pipelineError && !staleSave && <ConfirmDialog title="Pipeline Error" message={pipelineError} confirmLabel="OK" onConfirm={() => setPipelineError(null)} onCancel={() => setPipelineError(null)} />}
 			{pipelineError && staleSave && (

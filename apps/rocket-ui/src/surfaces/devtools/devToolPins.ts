@@ -44,8 +44,9 @@
 // it (the same tolerance VS Code's bare-row fallback gives).
 // =============================================================================
 
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
-import { ConnectionManager, realmPrefsHub, useWorkspace } from 'shell';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
+import { ConnectionManager, realmPrefsHub, registerSettings, useWorkspace } from 'shell';
+import { TOOL_SETTINGS_GROUP } from 'shared/tools/toolSettings';
 import type { AppManifestEntry, PrefsStore } from 'shell';
 import { applyContainerOrder, containerIdOf, readDevToolPins, storeToolIds, DEV_TOOL_PINS_KEY } from 'shell/src/workspace/devToolPins';
 import { builtinServesHost, getBuiltinTools } from 'shared/tools/core';
@@ -175,6 +176,27 @@ export function useDevToolPins(): DevToolPins {
 	const pinnedTools = useMemo<ToolTab[]>(() => {
 		const byId = new Map(appManifest.map((a) => [a.id, a]));
 		return pins.map((id) => byId.get(id)).filter((a): a is AppManifestEntry => !!a).map(toToolTab);
+	}, [pins, appManifest]);
+
+	// A pinned STORE tool with `configuration` contributes a settings section
+	// WHILE pinned (builtins register their own at startup, for the host's
+	// lifetime — registration follows the functionality's lifetime). Unpinning
+	// disposes the registration, removing the section live; the tool's deltas
+	// stay in its partition file and revive on re-pin.
+	useEffect(() => {
+		const offs = pins
+			.map((id) => appManifest.find((a) => a.id === id))
+			.filter((a): a is AppManifestEntry => !!a && !!a.configuration)
+			.map((a) =>
+				registerSettings({
+					appId: a.id,
+					name: a.name,
+					...(a.shells ? { shells: a.shells } : {}),
+					group: TOOL_SETTINGS_GROUP,
+					configuration: a.configuration!,
+				}),
+			);
+		return () => offs.forEach((off) => off());
 	}, [pins, appManifest]);
 
 	const pin = useCallback((appId: string) => {

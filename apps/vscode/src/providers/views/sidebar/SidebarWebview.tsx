@@ -100,6 +100,12 @@ const SidebarViewWebview: React.FC = () => {
 	const MAX_PROGRESS_LINES = 15;
 	const [devProgressLog, setDevProgressLog] = useState<string[]>([]);
 	const [deployProgressLog, setDeployProgressLog] = useState<string[]>([]);
+	// The current lifecycle PHASE per half (the progressMessage banner —
+	// "Downloading v3.5.0…", "Installing uv…"). A NEW phase clears the log so
+	// a previous attempt's lines (install warnings, a startup traceback)
+	// never linger under the fresh attempt's banner.
+	const devPhaseRef = useRef<string | undefined>(undefined);
+	const deployPhaseRef = useRef<string | undefined>(undefined);
 
 	// ── Shared auth + identity ──────────────────────────────────────────────
 	const [userName, setUserName] = useState<string | undefined>();
@@ -189,8 +195,13 @@ const SidebarViewWebview: React.FC = () => {
 				setConnection({ state: st.state as ConnectionInfo['state'], mode });
 				if (mode) setDevelopmentMode(mode);
 				setDevProgressMessage(st.progressMessage);
-				// Accumulate engine log lines; clear on connect. Publishes are
-				// per status tick (nothing coalesces), so every line arrives.
+				// Accumulate engine log lines; clear on connect AND whenever a
+				// NEW phase banner starts. Publishes are per status tick
+				// (nothing coalesces), so every line arrives.
+				if (st.progressMessage && st.progressMessage !== devPhaseRef.current) {
+					devPhaseRef.current = st.progressMessage;
+					setDevProgressLog([]);
+				}
 				if (st.state === 'connected') setDevProgressLog([]);
 				else if (st.progressLogLine) setDevProgressLog((prev) => (prev[prev.length - 1] === st.progressLogLine ? prev : [...prev.slice(-(MAX_PROGRESS_LINES - 1)), st.progressLogLine!]));
 			}),
@@ -202,6 +213,10 @@ const SidebarViewWebview: React.FC = () => {
 				if (st.state) setDeployConnectionState(st.state);
 				setDeployTargetMode(s?.configMode ?? null);
 				setDeployProgressMessage(st.progressMessage);
+				if (st.progressMessage && st.progressMessage !== deployPhaseRef.current) {
+					deployPhaseRef.current = st.progressMessage;
+					setDeployProgressLog([]);
+				}
 				if (st.state === 'connected') setDeployProgressLog([]);
 				else if (st.progressLogLine) setDeployProgressLog((prev) => (prev[prev.length - 1] === st.progressLogLine ? prev : [...prev.slice(-(MAX_PROGRESS_LINES - 1)), st.progressLogLine!]));
 			}),

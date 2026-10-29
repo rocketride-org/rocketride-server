@@ -95,6 +95,15 @@ export interface HostOpMap extends ShellOpMap {
 	 *  unloaded partition has no snapshot to replay. Idempotent; always
 	 *  publishes, even for an empty partition, so `ready` resolves. */
 	'shell.prefs.attach': ShellOpSpec<{ partition: string }, void>;
+	/** Setting-override write into the OWNING partition's `settings` section
+	 *  (deltas only — an absent `value` resets the key to its default). The
+	 *  caller resolves the owner from the settings registry; the manager
+	 *  writes where it is told and republishes the partition's settings
+	 *  topic (`shell:settings:<partition>`). */
+	'shell.updateSetting': ShellOpSpec<{ partition: string; key: string; value?: string | number | boolean }, void>;
+	/** The settings twin of `shell.prefs.attach`: declare a partition so its
+	 *  settings topic gets its first publish (empty bag included). */
+	'shell.settings.attach': ShellOpSpec<{ partition: string }, void>;
 	/** Connection-slot state for the Environment page — served by
 	 *  multi-connection hosts (dev/deploy). */
 	'host.envSlots': ShellOpSpec<Record<string, never>, EnvSlotsPayload>;

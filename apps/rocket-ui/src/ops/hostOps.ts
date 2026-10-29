@@ -54,6 +54,19 @@ export function registerRocketHostOps(): () => void {
 			if (!['account', 'settings', 'environment'].includes(p.page)) {
 				throw new Error(`Unknown framework page: ${p.page}`);
 			}
+			// 'environment' and 'account' are legacy vocabulary: both are
+			// Settings sections now — deep-link instead of standalone overlays.
+			// An 'account' open's first arg may name a sub-page ('billing').
+			if (p.page === 'environment') {
+				ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'settings', section: 'environment' } as never);
+				return;
+			}
+			if (p.page === 'account') {
+				const sub = p.args?.[0];
+				const section = sub === 'billing' ? 'account:billing' : sub === 'api-keys' ? 'account:keys' : 'account:profile';
+				ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'settings', section } as never);
+				return;
+			}
 			ConnectionManager.getInstance().emit('shell:openOverlay', { id: p.page } as never);
 		},
 		// NOT here: the prefs ops. The WORKSPACE MANAGER serves those (shell

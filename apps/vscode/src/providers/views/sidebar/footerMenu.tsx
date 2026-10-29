@@ -15,7 +15,7 @@
 //   - Cloud signed in: + Account/Billing CTA/Log out
 // =============================================================================
 
-import { BxUser, BxCog, BxExport, BxLock, BxRocket } from 'shell';
+import { BxCog, BxExport, BxRocket } from 'shell';
 import type { SidebarFooterMenuItem } from 'shell';
 
 /** A mode display label like "Local" or "Cloud". */
@@ -103,25 +103,14 @@ export function buildFooterMenuItems(facts: FooterMenuFacts, runCommand: (comman
 		});
 	}
 
-	// ── Account / Subscribe / Variables / Settings / Log out ────────────────
-	if (facts.cloudConnected) {
-		items.push({ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => runCommand('rocketride.page.account.open') });
-	}
-
-	// Subscribe CTA — only when cloud-signed-in but not subscribed
+	// ── Subscribe / Settings / Log out ──────────────────────────────────────
+	// Account and Variables are Settings SECTIONS (no footer entries of their
+	// own since 2026-10-26); the Subscribe CTA deep-links to Account▸Billing.
 	if (facts.cloudConnected && !facts.subscribed) {
-		items.push({ id: 'subscribe', label: 'Subscribe', icon: BxRocket, onClick: () => runCommand('rocketride.page.account.open', ['billing']) });
+		items.push({ id: 'subscribe', label: 'Subscribe', icon: BxRocket, dividerBefore: true, onClick: () => runCommand('rocketride.page.settings.open', ['account:billing']) });
 	}
 
-	// Variables is visible whenever at least one connection is active,
-	// regardless of whether the server is OSS or SaaS.
-	if (anyConnected) {
-		items.push({ id: 'environment', label: 'Variables', icon: BxLock, dividerBefore: !facts.cloudConnected, onClick: () => runCommand('rocketride.page.environment.open') });
-	}
-
-	// Settings is always shown. Divider only when neither Account nor
-	// Variables was shown above (i.e. not connected and not cloud).
-	items.push({ id: 'settings', label: 'Settings', icon: BxCog, dividerBefore: !facts.cloudConnected && !anyConnected, onClick: () => runCommand('rocketride.page.settings.open') });
+	items.push({ id: 'settings', label: 'Settings', icon: BxCog, dividerBefore: !(facts.cloudConnected && !facts.subscribed), onClick: () => runCommand('rocketride.page.settings.open') });
 
 	if (facts.cloudConnected) {
 		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => runCommand('rocketride.cloud.logout') });

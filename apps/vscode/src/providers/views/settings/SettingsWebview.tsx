@@ -21,19 +21,24 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo, useCallback, CSSProperties } from 'react';
-import { ConnectionManager } from 'shell';
+import { ConnectionManager, SettingsPage, buildSettingsRegistry, registerSettings, getSettingsContributions, onSettingsContributionsChanged, AccountProvider, CheckoutFlow, createMirroredPrefsStore, useGridConfigAnswering } from 'shell';
+import type { SettingsRichSection, ISettingsRichContext, AppManifestEntry } from 'shell';
+import { SHELL_PARTITION } from 'shell/src/workspace/workspaceStore';
+import { CheckoutUnavailableNotice } from '../components/CheckoutUnavailableNotice';
+import type { StripeKeyReason } from 'shared/ops/hostOps';
+import type { ConnectResult } from 'rocketride';
 import { ConnectionSettings } from './ConnectionSettings';
-import { PipelineSettings } from './PipelineSettings';
-import { IntegrationSettings } from './IntegrationSettings';
 import { DeploySettings } from './DeploySettings';
 import { MessageDisplay } from './MessageDisplay';
 import { commonStyles } from 'shell';
 import type { CheckoutPlan } from 'shell';
-import type { ViewMenu } from 'shell';
-import { TabPanel } from 'shell';
-import type { ITabPanelPanel } from 'shell';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 import { PIPE_BUILDER_APP_ID } from '../../../shared/types';
+import { TOOL_SETTINGS_CONTRIBUTIONS } from 'shared/tools/toolSettings';
+import { INTEGRATIONS_SETTINGS, INTEGRATIONS_APP_ID } from '../../../shared/integrationsSettings';
+import { useMirroredWorkspaceSettings } from './settingsMirror';
+import { EnvironmentSection } from './EnvironmentSection';
+import type { EnvSlotsPayload } from 'shared/ops/hostOps';
 import type { SettingsData as SharedSettingsData, SettingsConnectionMode, SettingsPayload, SettingsOpenArgs, CloudAuthStatus, EngineVersionItem as SharedEngineVersionItem, EngineVersionsPayload, EngineStatusPayload, EngineControlResult, EngineProgress, ServerProbeResult } from 'shared/ops/settingsOps';
 
 import 'shell/themes/rocketride-default.css';
@@ -57,12 +62,61 @@ export type SettingsData = SharedSettingsData;
 /** A version entry returned from the GitHub releases API. */
 export type EngineVersionItem = SharedEngineVersionItem;
 
-const SETTINGS_TAB_IDS = ['development', 'deployment', 'pipeline', 'integrations'] as const;
-type SettingsTabId = typeof SETTINGS_TAB_IDS[number];
+// ============================================================================
+// SETTINGS CONTRIBUTIONS — this realm's registered sections
+// ============================================================================
+// The settings realm registers what IT serves, like every realm: the builtin
+// tools' sections ride the shared leaf (the SAME rows the cloud derives from
+// the manifests — same ids, same Rocket Builder group, same product storage
+// partition), and the Integrations section is the VS Code host's own block
+// (workspace-scoped; deltas in `vscode.integrations.workspace.json`). Module
+// scope, never unregistered — builtins' machinery is resident for the host's
+// lifetime.
+// NOTE: pinned STORE tools do not contribute here yet — their manifests live
+// in other realms; a cross-realm contribution feed is a follow-up.
+for (const contribution of TOOL_SETTINGS_CONTRIBUTIONS) registerSettings(contribution);
+registerSettings({
+	appId: INTEGRATIONS_APP_ID,
+	name: 'Integrations',
+	shells: ['vscode'],
+	// Nav order (product rule): Account 10, Environment Variables 20,
+	// Integrations 30, Connections 40, every other category 100.
+	order: 30,
+	configuration: INTEGRATIONS_SETTINGS,
+});
 
-function isSettingsTabId(value: unknown): value is SettingsTabId {
-	return typeof value === 'string' && (SETTINGS_TAB_IDS as readonly string[]).includes(value);
-}
+/** Rich-section nav group: the two connection pages fold under one parent. */
+const CONNECTIONS_GROUP = { id: 'connections', label: 'Connections' };
+
+/** Env nav group — used only when dev and deploy have DISTINCT connections
+ *  (the nav is the server selector; shared mode renders one flat entry). */
+const ENVIRONMENT_GROUP = { id: 'environment-group', label: 'Environment Variables' };
+
+/** The Account group's nav identity (Profile / Billing / API Keys children). */
+const ACCOUNT_GROUP = { id: 'account', label: 'Account' };
+
+/** The one subscribable app this host offers (the identity the old Account
+ *  page hardcoded into its CheckoutModal). */
+const PIPE_BUILDER_APP = {
+	id: 'rocketride.pipeBuilder',
+	name: 'Pipe Builder',
+	description: 'Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud.',
+};
+
+/** Legacy open-args focus ids → the new nav section ids. The development
+ *  slot's env section always carries the id 'environment', so the env deep
+ *  link is static regardless of shared/split mode. */
+const FOCUS_TO_SECTION: Record<string, string> = {
+	development: 'host:development',
+	deployment: 'host:deployment',
+	pipeline: 'builtin.pipelines',
+	integrations: 'vscode.integrations',
+	environment: 'environment',
+	account: 'account:profile',
+	'account:profile': 'account:profile',
+	'account:billing': 'account:billing',
+	'account:keys': 'account:keys',
+};
 
 /** Message displayed in the status banner (inline or global). */
 export interface MessageData {
@@ -177,97 +231,14 @@ export const settingsStyles = {
 };
 
 // ============================================================================
-// PAGE BODY STYLE
-// ============================================================================
-
-/**
- * Fills the space to the right of the left settings nav; TabPanel's
- * 100%-height wrapper resolves against this definite flex box.
- */
-const pageBodyStyle: CSSProperties = {
-	display: 'flex',
-	flexDirection: 'column',
-	flex: 1,
-	minWidth: 0,
-	minHeight: 0,
-};
-
-// ============================================================================
-// SETTINGS NAV STYLES — left-hand section menu (replaces the top pill strip)
-// ============================================================================
-
-/**
- * Left-hand settings navigation, matching the browser settings page
- * (shell SettingsProvider): a fixed-width rail of `listRow` pills, one per
- * section, with the page bodies rendered to its right. The pages themselves
- * are unchanged — only the section selector moved from a top strip to here.
- */
-const settingsNavStyles = {
-	// Horizontal split: fixed nav column on the left, page bodies on the right.
-	body: {
-		display: 'flex',
-		flex: 1,
-		minWidth: 0,
-		minHeight: 0,
-		overflow: 'hidden',
-	} as CSSProperties,
-	// Fixed-width nav rail with its own scroll and a right divider.
-	sidebar: {
-		width: 200,
-		flexShrink: 0,
-		borderRight: '1px solid var(--rr-border)',
-		overflowY: 'auto',
-		padding: '12px 8px',
-		backgroundColor: 'var(--rr-bg-surface-alt)',
-	} as CSSProperties,
-	// One nav row — the shared listRow pill plus the button reset + active weight.
-	navItem: (active: boolean): CSSProperties => ({
-		...commonStyles.listRow(active),
-		width: '100%',
-		margin: '1px 0',
-		border: 'none',
-		textAlign: 'left',
-		fontWeight: active ? 600 : 400,
-		fontFamily: 'var(--rr-font-family)',
-	}),
-};
-
-// ============================================================================
-// TITLE BAR STYLES — page title + one-line description at the very top
-// ============================================================================
-
-/**
- * Top-of-page title bar, mirroring the browser settings page's ContentHeader
- * (24px title + 14px muted subtitle). Fixed height above the nav/body split.
- */
-const settingsHeaderStyles = {
-	container: {
-		flex: 'none',
-		padding: '24px 24px 16px',
-	} as CSSProperties,
-	title: {
-		margin: 0,
-		fontSize: 24,
-		fontWeight: 700,
-		letterSpacing: '-0.01em',
-		color: 'var(--rr-text-primary)',
-	} as CSSProperties,
-	subtitle: {
-		marginTop: 4,
-		fontSize: 14,
-		fontWeight: 400,
-		color: 'var(--rr-text-secondary)',
-	} as CSSProperties,
-};
-
-// ============================================================================
 // FOOTER STYLES — Save/Cancel action row (mirrors DetailPanel's footer)
 // ============================================================================
 
 /**
- * Bottom action row, matching DetailPanel's footer: a top-divided, right-
- * aligned Save/Cancel pair. Rendered only while there are unsaved edits — the
- * settings surface is "always editing", so the footer is the change affordance.
+ * Connection-pane action row: a top-divided, right-aligned Save & Reconnect /
+ * Cancel pair, rendered at the end of each Connections rich section while the
+ * connection blob has unsaved edits (rich sections own their footers — the
+ * schema sections' Save/Cancel is SettingsPage's own).
  */
 const settingsFooterStyles = {
 	bar: {
@@ -276,9 +247,9 @@ const settingsFooterStyles = {
 		alignItems: 'center',
 		justifyContent: 'flex-end',
 		gap: 8,
-		padding: '12px 20px',
+		padding: '12px 0 0',
+		marginTop: 16,
 		borderTop: '1px solid var(--rr-border)',
-		background: 'var(--rr-bg-default)',
 	} as CSSProperties,
 	cancel: { ...commonStyles.buttonSecondary } as CSSProperties,
 	save: { ...commonStyles.buttonPrimary } as CSSProperties,
@@ -336,21 +307,6 @@ const DEFAULT_SETTINGS: SettingsData = {
 		apiKey: '',
 		local: { engineVersion: 'latest' },
 	},
-	defaultPipelinePath: 'pipelines',
-	pipelineRestartBehavior: 'prompt',
-	pipelineTtl: 900,
-	// Must match package.json's rocketride.pipelineTraceLevel default.
-	pipelineTraceLevel: 'full',
-	taskArguments: '',
-	pipelineDebugOutput: false,
-	envVars: {},
-	autoAgentIntegration: true,
-	integrationCopilot: false,
-	integrationClaudeCode: false,
-	integrationCursor: false,
-	integrationWindsurf: false,
-	integrationClaudeMd: false,
-	integrationAgentsMd: false,
 };
 
 // ============================================================================
@@ -420,8 +376,58 @@ export const Settings: React.FC = () => {
 	// Auth error banner — shown when the settings page opens due to an auth failure
 	const [authError, setAuthError] = useState<string | null>(null);
 
-	// Active settings tab
-	const [activeTab, setActiveTab] = useState('development');
+	// Deep-link target — the nav section the page opens (or re-focuses) on.
+	// SettingsPage follows changes live, so a re-fired open command retargets
+	// the nav without a remount (an unsaved draft survives).
+	const [initialSection, setInitialSection] = useState<string | undefined>(undefined);
+
+	// The pre-run env gate's missing keys (from the open args) — seeded as
+	// empty required rows in the DEVELOPMENT env section's user scope.
+	const [envPrefill, setEnvPrefill] = useState<string[]>([]);
+
+	// Env connection slots (shared vs distinct + per-slot state) — drives how
+	// many Environment Variables sections the nav shows.
+	const [envSlots, setEnvSlots] = useState<EnvSlotsPayload | null>(null);
+	useEffect(() => {
+		const off = cm.handle('host.envSlotsChanged', (p) => setEnvSlots(p as EnvSlotsPayload));
+		void cm.request('host.envSlots', {}).then(
+			(p) => setEnvSlots(p as EnvSlotsPayload),
+			() => { /* host not ready — the first push will seed us */ }
+		);
+		return off;
+	}, [cm]);
+
+	// ── Account group plumbing (the old Account page's host seams) ──────────
+	// Mirrored prefs (SHELL partition) answer DataGrid layout persistence for
+	// the billing dashboard and member grids, exactly as the old page did.
+	const gridPrefs = useMemo(() => createMirroredPrefsStore(cm, SHELL_PARTITION), [cm]);
+	useGridConfigAnswering(gridPrefs.store);
+	useEffect(() => gridPrefs.dispose, [gridPrefs]);
+
+	// The Stripe publishable key (host-probed; matches the CONNECTED server).
+	const [stripe, setStripe] = useState<{ key: string | null; reason?: StripeKeyReason } | null>(null);
+	useEffect(() => {
+		void cm.request('host.stripeKey', {}).then(
+			(r) => setStripe(r as { key: string | null; reason?: StripeKeyReason }),
+			() => setStripe({ key: null, reason: 'probe-failed' })
+		);
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+
+	// Mirrored account info — gates the Account group (no account, no group).
+	const [account, setAccount] = useState<ConnectResult | null>(() => (cm.getAccountInfo() as ConnectResult | undefined) ?? null);
+	useEffect(() => cm.on('shell:accountUpdate', (data) => setAccount(data as ConnectResult)), [cm]);
+	const checkoutOrgId = account?.organization?.id ?? '';
+
+	// Subscribe entry point: hand off to CheckoutFlow, or explain why not.
+	const [showUnavailable, setShowUnavailable] = useState(false);
+	const handleAccountSubscribe = useCallback(() => {
+		if (!stripe?.key) {
+			setShowUnavailable(true);
+			return;
+		}
+		cm.emit('shell:subscribe', { app: PIPE_BUILDER_APP } as never);
+	}, [cm, stripe]);
 
 	// Dirty-state tracking — the footer Save/Cancel appear only when the user has edited something
 	const [dirty, setDirty] = useState(false);
@@ -470,8 +476,15 @@ export const Settings: React.FC = () => {
 	}, []);
 
 	const applyOpenArgs = useCallback((args: SettingsOpenArgs): void => {
-		if (isSettingsTabId(args.focus)) setActiveTab(args.focus);
+		// Focus ids are the LEGACY tab names (the open command's public
+		// vocabulary — commands and the auth-failure flow still speak them);
+		// they map onto the unified page's section ids.
+		const section = typeof args.focus === 'string' ? FOCUS_TO_SECTION[args.focus] : undefined;
+		if (section) setInitialSection(section);
 		if (args.authError) setAuthError(args.authError);
+		// The env gate's keys REPLACE on every open — an argless open clears
+		// any previous gate (the old page's stale-prefill bug, fixed here).
+		setEnvPrefill(Array.isArray(args.envPrefill) ? args.envPrefill : []);
 	}, []);
 
 	useEffect(() => {
@@ -741,21 +754,27 @@ export const Settings: React.FC = () => {
 	const makeServiceHandler = (actionType: 'install' | 'update' | 'remove' | 'start' | 'stop') => makeEngineHandler('service', actionType);
 
 	// ========================================================================
-	// TAB DEFINITIONS
+	// SETTINGS REGISTRY + MIRRORED VALUE STORES
 	// ========================================================================
 
-	// ViewMenu declaration — rendered as this view's left-hand section nav.
-	const settingsMenu = useMemo<ViewMenu>(
-		() => ({
-			entries: [
-				{ id: 'development', label: 'Development' },
-				{ id: 'deployment', label: 'Deployment' },
-				{ id: 'pipeline', label: 'Pipeline' },
-				{ id: 'integrations', label: 'Integrations' },
-			],
-		}),
-		[]
+	// This realm's registered contributions (the module-scope registrations
+	// above; a live feed so a future cross-realm source slots in unchanged).
+	const [contributions, setContributions] = useState(() => getSettingsContributions());
+	useEffect(() => onSettingsContributionsChanged(() => setContributions(getSettingsContributions())), []);
+
+	// Account-mirrored apps — desktop apps with `contributes.configuration`
+	// surface their sections here exactly as on the cloud.
+	const [accountApps, setAccountApps] = useState<AppManifestEntry[]>(() => (cm.getAccountInfo()?.apps ?? []) as AppManifestEntry[]);
+	useEffect(() => cm.on('shell:accountUpdate', () => setAccountApps((cm.getAccountInfo()?.apps ?? []) as AppManifestEntry[])), [cm]);
+
+	const settingsRegistry = useMemo(
+		() => buildSettingsRegistry(accountApps, { shell: 'vscode', contributions }),
+		[accountApps, contributions],
 	);
+
+	// Values: workspace/user overrides over the per-partition mirror topics;
+	// writes route to the owner partition the same way the cloud routes them.
+	const { overrides, updateSetting } = useMirroredWorkspaceSettings(cm, settingsRegistry);
 
 	// ── Checkout callbacks (passed to CloudPanel) — the realm client ─────────
 	const needClient = useCallback(() => {
@@ -805,10 +824,30 @@ export const Settings: React.FC = () => {
 	// RENDER
 	// ========================================================================
 
-	const panels: Record<string, ITabPanelPanel> = useMemo(
-		() => ({
-			development: {
-				content: (
+	// The connection pages' shared footer — Save & Reconnect applies the whole
+	// connection blob (atomic persist + staged cloud-auth commit + engine
+	// reconcile), exactly the old page-level footer's semantics, now rendered
+	// inside whichever Connections section is open while the blob is dirty.
+	const connectionsFooter = dirty ? (
+		<div style={settingsFooterStyles.bar}>
+			<button style={settingsFooterStyles.cancel} onClick={handleCancelSettings}>
+				Cancel
+			</button>
+			<button style={settingsFooterStyles.save} onClick={handleSaveSettings}>
+				Save &amp; Reconnect
+			</button>
+		</div>
+	) : null;
+
+	// The two Connections rich sections — self-managed panes beside the schema
+	// sections, rebuilt from the same state the old tabs rendered.
+	const extraSections = useMemo<SettingsRichSection[]>(
+		() => [
+			{
+				id: 'host:development',
+				title: 'Development',
+				group: CONNECTIONS_GROUP,
+				render: () => (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
 						<ConnectionSettings
@@ -867,11 +906,15 @@ export const Settings: React.FC = () => {
 							onConfirmPending={handleConfirmPending}
 							onCheckoutSuccess={handleCheckoutSuccess}
 						/>
+						{connectionsFooter}
 					</div>
 				),
 			},
-			deployment: {
-				content: (
+			{
+				id: 'host:deployment',
+				title: 'Deployment',
+				group: CONNECTIONS_GROUP,
+				render: () => (
 					<div style={commonStyles.tabContent}>
 						<MessageDisplay message={message} />
 						<DeploySettings
@@ -930,38 +973,67 @@ export const Settings: React.FC = () => {
 							onConfirmPending={handleConfirmPending}
 							onCheckoutSuccess={handleCheckoutSuccess}
 						/>
+						{connectionsFooter}
 					</div>
 				),
 			},
-			pipeline: {
-				content: (
-					<div style={commonStyles.tabContent}>
-						<MessageDisplay message={message} />
-						<PipelineSettings settings={settings} onSettingsChange={handleSettingsChange} />
-					</div>
-				),
-			},
-			integrations: {
-				content: (
-					<div style={commonStyles.tabContent}>
-						<MessageDisplay message={message} />
-						<IntegrationSettings settings={settings} onSettingsChange={handleSettingsChange} />
-					</div>
-				),
-			},
-		}),
+		],
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[settings, message, testMessage, engineVersions, engineVersionsLoading, devProbe, deployProbe, cloudSignedIn, cloudUserName, cloudSignedInUrl, cloudWaitlisted, cloudWaitlistedName, cloudPending, subscribed, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceSelectedVersion, dockerTags, sudoPromptVisible, sudoPasswordInput]
+		[settings, dirty, message, testMessage, engineVersions, engineVersionsLoading, devProbe, deployProbe, cloudSignedIn, cloudUserName, cloudSignedInUrl, cloudWaitlisted, cloudWaitlistedName, cloudPending, subscribed, dockerStatus, dockerProgress, dockerError, dockerBusy, dockerAction, dockerSelectedVersion, serviceStatus, serviceProgress, serviceError, serviceBusy, serviceAction, serviceSelectedVersion, dockerTags, sudoPromptVisible, sudoPasswordInput]
 	);
+
+	// Environment Variables sections — one flat entry when dev and deploy
+	// share a connection, else an accordion with the two slots as children
+	// (the nav IS the server selector). The dev section always carries the
+	// id 'environment' (the deep-link vocabulary) and receives the gate's
+	// prefill keys; runs execute against the dev connection.
+	const envSections = useMemo<SettingsRichSection[]>(() => {
+		if (!envSlots) return [];
+		const bySlot = new Map(envSlots.slots.map((s) => [s.slot, s]));
+		const dev = bySlot.get('development');
+		if (!dev) return [];
+		const deploy = envSlots.shared ? undefined : bySlot.get('deployment');
+		if (!deploy) {
+			return [{ id: 'environment', title: 'Environment Variables', order: 20, render: () => <EnvironmentSection slot={dev} label="Environment" requiredKeys={envPrefill} /> }];
+		}
+		return [
+			{ id: 'environment', title: 'Development', group: ENVIRONMENT_GROUP, order: 20, render: () => <EnvironmentSection slot={dev} label="Development" requiredKeys={envPrefill} /> },
+			{ id: 'environment:deployment', title: 'Deployment', group: ENVIRONMENT_GROUP, order: 20, render: () => <EnvironmentSection slot={deploy} label="Deployment" /> },
+		];
+	}, [envSlots, envPrefill]);
+
+	// Account group — Profile (identity + workspace master card, absorbing the
+	// old Organization/Teams/Members tabs), Billing, API Keys. Only with a
+	// signed-in account (the old page was gated on the cloud connection too).
+	// The workspace-switch guard auto-discards a dirty schema draft: webviews
+	// have no window.confirm, and a workspace-A draft must never save into
+	// workspace B (the switch triggers a full reconnect anyway).
+	const accountSections = useMemo<SettingsRichSection[]>(() => {
+		if (!account?.organization) return [];
+		const guardOf = (ctx?: ISettingsRichContext) => () => {
+			if (ctx?.isDirty()) ctx.discardDraft();
+			return true;
+		};
+		return [
+			{
+				id: 'account:profile', title: 'Profile', group: ACCOUNT_GROUP, order: 10,
+				render: (ctx) => <AccountProvider embeddedSection="profile" confirmWorkspaceSwitch={guardOf(ctx)} {...(ctx ? { onNavigateSection: ctx.navigate } : {})} />,
+			},
+			{
+				id: 'account:billing', title: 'Billing', group: ACCOUNT_GROUP, order: 10,
+				render: (ctx) => <AccountProvider embeddedSection="billing" onSubscribe={handleAccountSubscribe} {...(ctx ? { onNavigateSection: ctx.navigate } : {})} />,
+			},
+			{
+				id: 'account:keys', title: 'API Keys', group: ACCOUNT_GROUP, order: 10,
+				render: (ctx) => <AccountProvider embeddedSection="api-keys" {...(ctx ? { onNavigateSection: ctx.navigate } : {})} />,
+			},
+		];
+	}, [account?.organization, handleAccountSubscribe]);
+
+	const allSections = useMemo<SettingsRichSection[]>(() => [...extraSections, ...accountSections, ...envSections], [extraSections, accountSections, envSections]);
 
 	return (
 		<div style={commonStyles.columnFill}>
-			{/* ── Title bar — names the page + one-line description ── */}
-			<div style={settingsHeaderStyles.container}>
-				<h1 style={settingsHeaderStyles.title}>Settings</h1>
-				<div style={settingsHeaderStyles.subtitle}>Configure connections, pipelines, and integrations for the RocketRide extension.</div>
-			</div>
-
 			{/* ── Auth error banner (shown when opened due to auth failure) ── */}
 			{authError && (
 				<div style={authErrorBannerStyles.container}>
@@ -974,38 +1046,22 @@ export const Settings: React.FC = () => {
 					</div>
 				</div>
 			)}
-			{/* ── Body: left section nav (was the top pill strip) + page bodies ── */}
-			<div style={settingsNavStyles.body}>
-				{/* Left nav — one pill per settings section, driving the same activeTab. */}
-				<nav style={settingsNavStyles.sidebar} role="tablist" aria-orientation="vertical">
-					{settingsMenu.entries.map((entry) => {
-						// The selected section is highlighted and rendered by TabPanel.
-						const isActive = entry.id === activeTab;
-						return (
-							<button key={entry.id} role="tab" aria-selected={isActive} style={settingsNavStyles.navItem(isActive)} onClick={() => setActiveTab(entry.id)}>
-								{entry.label}
-							</button>
-						);
-					})}
-				</nav>
 
-				{/* Page bodies fill the space to the right of the nav. */}
-				<div style={pageBodyStyle}>
-					<TabPanel panels={panels} activeId={activeTab} />
-				</div>
+			{/* ── The unified settings page: schema sections (Rocket Builder,
+			     Integrations, desktop apps) + the Connections rich sections. ── */}
+			<div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+				<SettingsPage
+					registry={settingsRegistry}
+					overrides={overrides}
+					updateSetting={updateSetting}
+					extraSections={allSections}
+					{...(initialSection !== undefined ? { initialSectionId: initialSection } : {})}
+				/>
 			</div>
 
-			{/* ── Footer — Save/Cancel appear once there are unsaved edits (DetailPanel pattern) ── */}
-			{dirty && (
-				<div style={settingsFooterStyles.bar}>
-					<button style={settingsFooterStyles.cancel} onClick={handleCancelSettings}>
-						Cancel
-					</button>
-					<button style={settingsFooterStyles.save} onClick={handleSaveSettings}>
-						Save
-					</button>
-				</div>
-			)}
+			{/* ── Checkout (the Billing section's Subscribe → shell:subscribe) ── */}
+			<CheckoutFlow stripeKey={stripe?.key ?? ''} orgId={checkoutOrgId} />
+			{showUnavailable && <CheckoutUnavailableNotice reason={stripe?.reason} onClose={() => setShowUnavailable(false)} />}
 		</div>
 	);
 };

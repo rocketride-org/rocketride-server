@@ -58,6 +58,24 @@ export function registerVscodeHostOps(bus: IOpBus, deps: IVscodeHostOpsDeps): vo
 		// `popup` is meaningless here — VS Code has no window-modal surface,
 		// so an overlay request degrades to the page (by design).
 		'host.openPage': async (p) => {
+			// 'environment' and 'account' are legacy vocabulary: both are
+			// Settings sections now — deep-link, carrying any env prefill keys
+			// through the settings open args (focus, authError, envPrefill).
+			if (p.page === 'environment') {
+				const keys = Array.isArray(p.args?.[0]) ? p.args[0] : undefined;
+				if (!FrameworkProvider.openPage('settings', ['environment', undefined, keys])) {
+					throw new Error('Settings page unavailable');
+				}
+				return;
+			}
+			if (p.page === 'account') {
+				const sub = typeof p.args?.[0] === 'string' ? p.args[0] : '';
+				const focus = sub === 'billing' ? 'account:billing' : sub === 'api-keys' ? 'account:keys' : 'account';
+				if (!FrameworkProvider.openPage('settings', [focus])) {
+					throw new Error('Settings page unavailable');
+				}
+				return;
+			}
 			if (!FrameworkProvider.openPage(p.page, p.args ?? [])) {
 				throw new Error(`Unknown framework page: ${p.page}`);
 			}
