@@ -291,6 +291,11 @@ import { Tree } from './components/tree/Tree';
 import { Breadcrumbs } from './components/breadcrumbs/Breadcrumbs';
 import { Pagination } from './components/pagination/Pagination';
 import { Stepper } from './components/stepper/Stepper';
+// Phase 4 stock library: page layouts.
+import { PageLayout, PageSidebarToggle, usePageLayout } from './components/page-layout/PageLayout';
+import { SettingsSection } from './components/settings/SettingsSection';
+import { ThemeSwitcher } from './components/settings/ThemeSwitcher';
+import { StatusPage } from './components/status-page/StatusPage';
 // (commonStyles is imported at the very top of this file — cycle-order
 // constraint — and re-exported from the export block below.)
 // Values graduated from deep shell/src imports when the package exports map
@@ -325,6 +330,8 @@ export {
 	showToast, dismissToast, ToastViewport,
 	Avatar, AvatarGroup, Badge, ProgressBar, Spinner, Skeleton, Divider,
 	Accordion, List, Table, Tree, Breadcrumbs, Pagination, Stepper,
+	PageLayout, PageSidebarToggle, usePageLayout, SettingsSection,
+	ThemeSwitcher, StatusPage,
 	commonStyles,
 	applyTheme, isInVSCode, OAUTH_ROOT_URL,
 	ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE,
@@ -366,6 +373,11 @@ export type { ITreeProps, ITreeNode } from './components/tree/Tree';
 export type { IBreadcrumbsProps, IBreadcrumb } from './components/breadcrumbs/Breadcrumbs';
 export type { IPaginationProps } from './components/pagination/Pagination';
 export type { IStepperProps, IStep, StepState } from './components/stepper/Stepper';
+export type { IPageLayoutProps, IPageSidebar, IPageLayoutContext, IPageSidebarControl, IPageSidebarToggleProps, PageSidebarSide } from './components/page-layout/PageLayout';
+export type { SidebarMode } from './components/page-layout/pageLayoutState';
+export type { ISettingsSectionProps } from './components/settings/SettingsSection';
+export type { IThemeSwitcherProps, IThemeChoice } from './components/settings/ThemeSwitcher';
+export type { IStatusPageProps, StatusPageKind, IStatusPreset } from './components/status-page/StatusPage';
 export type { IToggleGroupProps, IToggleGroupOption } from './components/toggle-group/ToggleGroup';
 export type { IChipProps, IChipAddProps } from './components/chip/Chip';
 export type { IDropZoneProps } from './components/drop-zone/DropZone';
@@ -542,6 +554,12 @@ export const shellApi = {
 	get Breadcrumbs() { return Breadcrumbs; },
 	get Pagination() { return Pagination; },
 	get Stepper() { return Stepper; },
+	get PageLayout() { return PageLayout; },
+	get PageSidebarToggle() { return PageSidebarToggle; },
+	get usePageLayout() { return usePageLayout; },
+	get SettingsSection() { return SettingsSection; },
+	get ThemeSwitcher() { return ThemeSwitcher; },
+	get StatusPage() { return StatusPage; },
 	get commonStyles() { return commonStyles; },
 	get useShellConnection() { return useShellConnection; },
 	get useAuthUser() { return useAuthUser; },

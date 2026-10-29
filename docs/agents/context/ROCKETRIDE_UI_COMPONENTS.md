@@ -15,7 +15,7 @@ In prop tables, Dir is the direction — `in` = data the component consumes,
 `out` = a callback it fires — and `(req)` marks a required prop. Groups
 match the gallery's own: [Host chrome](#host-chrome),
 [Sidebar content](#sidebar-content), [Document system](#document-system),
-[Content components](#content-components), [Hooks & context](#hooks--context),
+[Page layouts](#page-layouts), [Content components](#content-components), [Hooks & context](#hooks--context),
 [Utilities](#utilities), [Stylesheet classes](#stylesheet-classes).
 
 ---
@@ -392,6 +392,127 @@ identical component with `Doc*` type aliases (`DocExplorerProps` =
 `ExplorerEntry`, `DocEntryChild` = `ExplorerChild`, `DocEntryStatus` =
 `ExplorerStatus`). See **Explorer** for the prop table. Typical wiring:
 `onOpenFile={(path) => docs.openDocument(path)}`.
+
+---
+
+## Page layouts
+
+Scaffolds for whole app views. They fill the client area AppLayout grants
+and respond to the PAGE's own width, never the window: the shell owns the
+one viewport breakpoint (its own sidebar), and an app can be narrow on a
+wide screen.
+
+### PageLayout / PageSidebarToggle / usePageLayout
+
+The view scaffold: header (title, subtitle, breadcrumbs, actions), optional
+toolbar row, content, and optional left/right sidebars. `variant="carded"`
+puts toolbar and content in a raised card under a tinted header band.
+Sidebars are columns while the page is wider than `collapseBelow` (default
+900px) and focus-trapped drawers below it; drawers start closed, close on
+Escape (one overlay layer at a time, shared with Modal) or the scrim, and
+return focus. The built-in header renders a toggle per sidebar; with a
+custom `header`, place `<PageSidebarToggle side="left" />` or call
+`usePageLayout()`. `scroll="content"` (default) scrolls content and
+sidebars separately; `scroll="page"` scrolls everything under a sticky
+header. `contentWidth="narrow"` caps content at 880px (forms, settings).
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `children` | `ReactNode` | in (req) | Page content. |
+| `title / subtitle / actions / breadcrumbs` | `…` | in | The built-in header. |
+| `headingLevel` | `1 \| 2 \| 3` | in | Title heading level. Default 1. |
+| `header` | `ReactNode` | in | Replace the built-in header. |
+| `toolbar` | `ReactNode` | in | Row under the header. |
+| `leftSidebar / rightSidebar` | `IPageSidebar` | in | `{ content, label, width?, defaultOpen?, open?, onOpenChange?, showToggle? }`. Left defaults open, right closed. |
+| `variant` | `'simple' \| 'carded'` | in | Default simple. |
+| `contentWidth` | `'full' \| 'narrow'` | in | Narrow caps content at 880px. |
+| `scroll` | `'content' \| 'page'` | in | Default content. |
+| `collapseBelow` | `number` | in | Page width where sidebars become drawers. Default 900. |
+
+`usePageLayout()` returns `{ mode: 'column' | 'drawer', left, right }`; each
+side has `exists`, `isOpen`, `open()`, `close()`, `toggle()`, `id` and `label`.
+
+```tsx
+import { Button, PageLayout } from 'shell';
+
+<PageLayout
+	title="Runs"
+	breadcrumbs={[{ id: 'p', label: 'rag-pipeline', onClick: openPipeline }, { id: 'r', label: 'Runs' }]}
+	actions={<Button small onClick={newRun}>New run</Button>}
+	toolbar={<RunFilters />}
+	leftSidebar={{ label: 'Filters', content: <Filters /> }}
+	rightSidebar={{ label: 'Details', content: <RunDetails />, open: Boolean(selected), onOpenChange: (isOpen) => !isOpen && setSelected(null) }}
+>
+	<RunList />
+</PageLayout>
+```
+
+### SettingsSection
+
+One settings group: title and description left, controls right, footer
+actions below; one column when the section is narrow (a CSS container query
+on the section). A region labelled by its heading. `danger` for destructive
+settings. Stack inside `PageLayout contentWidth="narrow"`.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `title` | `ReactNode` | in (req) | Section heading. |
+| `children` | `ReactNode` | in (req) | The controls. |
+| `description` | `ReactNode` | in | What the settings do. |
+| `footer` | `ReactNode` | in | Right-aligned actions. |
+| `danger` | `boolean` | in | Red title and border. |
+| `headingLevel / id` | `2 \| 3 \| 4 / string` | in | Heading level (default 2); id for deep links. |
+
+```tsx
+import { Field, InputField, SettingsSection } from 'shell';
+
+<SettingsSection title="General" description="How this pipeline appears in the Console." footer={<Button small onClick={save}>Save</Button>}>
+	<Field label="Name"><InputField value={name} onChange={(e) => setName(e.target.value)} /></Field>
+</SettingsSection>
+```
+
+### ThemeSwitcher
+
+Theme picker for settings pages. Inside the shell it needs no props (the
+workspace theme list and `setTheme`, as the sidebar footer uses). Outside
+the shell pass `options`, `value`, `onChange`; with no source it renders
+nothing.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `variant` | `'select' \| 'radio'` | in | Default select. |
+| `options` | `{ id; name }[]` | in | Default: the shell's list. |
+| `value` | `string` | in | Default: the shell's current theme. |
+| `ariaLabel` | `string` | in | Default `'Theme'`. |
+| `onChange` | `(themeId: string) => void` | out | Default: the shell's `setTheme`. |
+
+```tsx
+import { Field, ThemeSwitcher } from 'shell';
+
+<Field label="Theme"><ThemeSwitcher /></Field>
+```
+
+### StatusPage
+
+A whole view replaced by a status (`not-found`, `forbidden`, `error`,
+`maintenance`, `offline`) with preset copy, recovery actions and collapsed
+technical details. Errors and offline use `role="alert"`. Use EmptyState
+for an empty list or panel inside a page.
+
+| Prop | Type | Dir | Note |
+| --- | --- | --- | --- |
+| `kind` | `'not-found' \| 'forbidden' \| 'error' \| 'maintenance' \| 'offline'` | in (req) | Preset code, title, description. |
+| `title / description` | `ReactNode` | in | Override the preset copy. |
+| `code` | `string` | in | Override the big code; `''` hides it. |
+| `actions` | `ReactNode` | in | Recovery actions. |
+| `details` | `ReactNode` | in | Technical details, collapsed. |
+| `headingLevel` | `1 \| 2` | in | Default 1. |
+
+```tsx
+import { Button, StatusPage } from 'shell';
+
+<StatusPage kind="error" actions={<Button onClick={retry}>Try again</Button>} details={error.requestId} />
+```
 
 ---
 

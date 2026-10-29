@@ -248,6 +248,7 @@ const GROUP_CHIP: Record<IGalleryEntry['group'], string> = {
 	chrome: 'Host chrome',
 	sidebar: 'Sidebar content',
 	documents: 'Document system',
+	layouts: 'Page layout',
 	content: 'Content component',
 	hooks: 'Hooks & context',
 	utils: 'Utilities',

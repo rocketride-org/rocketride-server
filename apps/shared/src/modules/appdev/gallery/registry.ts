@@ -105,6 +105,11 @@ import { stepperEntry } from './entries/stepper.entry';
 import { tableEntry } from './entries/table.entry';
 import { treeEntry } from './entries/tree.entry';
 
+import { pageLayoutEntry } from './entries/page-layout.entry';
+import { settingsSectionEntry } from './entries/settings-section.entry';
+import { themeSwitcherEntry } from './entries/theme-switcher.entry';
+import { statusPageEntry } from './entries/status-page.entry';
+
 // --- Hooks & context ---------------------------------------------------------
 import { connectionClientEntry } from './entries/connection-client.entry';
 import { shellEventsEntry } from './entries/shell-events.entry';
@@ -128,6 +133,7 @@ export const GALLERY_GROUPS: Array<{ id: GalleryGroup; label: string }> = [
 	{ id: 'chrome', label: 'Host chrome' },
 	{ id: 'sidebar', label: 'Sidebar content' },
 	{ id: 'documents', label: 'Document system' },
+	{ id: 'layouts', label: 'Page layouts' },
 	{ id: 'content', label: 'Content components' },
 	{ id: 'hooks', label: 'Hooks & context' },
 	{ id: 'utils', label: 'Utilities' },
@@ -156,6 +162,11 @@ export const GALLERY_ENTRIES: IGalleryEntry[] = [
 	docTabsEntry,
 	docSplitLayoutEntry,
 	docExplorerEntry,
+	// Page layouts - the page scaffold first, then its building blocks
+	pageLayoutEntry,
+	settingsSectionEntry,
+	themeSwitcherEntry,
+	statusPageEntry,
 	// Content components - alphabetical
 	accordionEntry,
 	avatarEntry,

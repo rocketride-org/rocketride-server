@@ -35,6 +35,10 @@ export interface IIconButtonProps {
 	small?: boolean;
 	/** Toggle state; renders `aria-pressed`. */
 	pressed?: boolean;
+	/** Disclosure state for buttons that open a panel; renders `aria-expanded`. */
+	ariaExpanded?: boolean;
+	/** Id of the panel this button controls; renders `aria-controls`. */
+	ariaControls?: string;
 	/** Disable the button. */
 	disabled?: boolean;
 	/** Show `label` as a tooltip. Defaults to true. */
@@ -57,13 +61,13 @@ export interface IIconButtonProps {
  * @param props - {@link IIconButtonProps}.
  * @returns The button, wrapped in a Tooltip unless disabled.
  */
-export const IconButton: ForwardRefExoticComponent<IIconButtonProps & RefAttributes<HTMLButtonElement>> = forwardRef<HTMLButtonElement, IIconButtonProps>(function IconButton({ label, children, onClick, small = false, pressed, disabled, tooltip = true, tooltipPlacement = 'top', type = 'button', className }, ref) {
+export const IconButton: ForwardRefExoticComponent<IIconButtonProps & RefAttributes<HTMLButtonElement>> = forwardRef<HTMLButtonElement, IIconButtonProps>(function IconButton({ label, children, onClick, small = false, pressed, ariaExpanded, ariaControls, disabled, tooltip = true, tooltipPlacement = 'top', type = 'button', className }, ref) {
 	let classes = 'rr-icon-btn';
 	if (small) classes += ' rr-icon-btn--sm';
 	if (className) classes += ` ${className}`;
 
 	const button = (
-		<button ref={ref} type={type} className={classes} aria-label={label} aria-pressed={pressed} disabled={disabled} onClick={onClick}>
+		<button ref={ref} type={type} className={classes} aria-label={label} aria-pressed={pressed} aria-expanded={ariaExpanded} aria-controls={ariaControls} disabled={disabled} onClick={onClick}>
 			{children}
 		</button>
 	);

@@ -192,6 +192,10 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 			modalHeader: ['--rr-bg-title', '--rr-text-primary'],
 		},
 	},
+	'page-layout': {
+		direct: [],
+		commonStyles: {},
+	},
 	'pagination': {
 		direct: [],
 		commonStyles: {},
@@ -221,6 +225,10 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 	},
 	'status-badge': {
 		direct: ['--rr-bg-surface-alt', '--rr-border', '--rr-color-error', '--rr-color-info', '--rr-color-success', '--rr-color-warning', '--rr-text-disabled', '--rr-text-secondary'],
+		commonStyles: {},
+	},
+	'status-page': {
+		direct: [],
 		commonStyles: {},
 	},
 	'stepper': {
