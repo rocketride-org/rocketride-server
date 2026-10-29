@@ -1,5 +1,4 @@
 import argparse
-import json
 import sys
 import asyncio
 import threading
@@ -28,10 +27,6 @@ from engLib import debug, warning
 
 class TaskNotPrivateError(RuntimeError):
     """The task should be private and is not; __main__ exits non-zero on it."""
-
-
-class TaskNodesError(RuntimeError):
-    """A node the pipeline names could not be fetched, so the task does not start."""
 
 
 # Total budget for the shared WebServer to come up: the startup callback plus
@@ -312,46 +307,17 @@ def _is_listening(server: Optional[Any]) -> bool:
 def _announce_channel(server: Optional[Any]) -> None:
     """Tell the engine the listener is up, then that startup requests are over.
 
-    Startup-only requests to the engine belong between the two signals:
-    that is where the task fetches the nodes its pipeline names. A server
-    that never bound gets no signal: the engine would dial a port nobody holds,
-    and a pipeline that needs a node the server does not carry refuses to run.
+    Startup-only requests to the engine belong between the two signals;
+    there are none yet, so the startup phase closes at once. A server that
+    never bound gets no signal: the engine would dial a port nobody holds.
 
     Args:
         server: The WebServer from ``_setup_shared_web_server``, or ``None``.
     """
-    listening = _is_listening(server)
-    if listening:
-        _channel_signal('1')
-    _fetch_pipeline_nodes()
-    if listening:
-        _channel_signal('2')
-
-
-def _fetch_pipeline_nodes() -> None:
-    """Fetch each node the pipeline names that this process does not carry, before the engine loads it."""
-    from ai.common import node_packages
-
-    try:
-        with open(sys.argv[1], encoding='utf-8') as file:
-            components = json.load(file)['config']['pipeline'].get('components', [])
-        node_packages.serve(_fetch_from_eaas)
-        node_packages.ensure(*{component['provider'] for component in components})
-    except Exception as e:
-        message = f"Refusing to run: could not get the pipeline's nodes ({e})"
-        warning(message)
-        raise TaskNodesError(message) from e
-
-
-def _fetch_from_eaas(name: str):
-    """Ask EaaS for a node over the channel; None when EaaS serves no such node."""
-    from ai.constants import CONST_CHANNEL_HANDLER_TIMEOUT
-    from ai.modules.data.channel import task_channel
-
-    reply = task_channel.request_sync('node.fetch', {'name': name}, timeout=CONST_CHANNEL_HANDLER_TIMEOUT)
-    if not reply.body:
-        return None
-    return reply.body['name'], reply.data, reply.body['sha256'], reply.body['services']
+    if not _is_listening(server):
+        return
+    _channel_signal('1')
+    _channel_signal('2')
 
 
 def require_shared_web_server(node_name: str) -> Any:
@@ -517,7 +483,7 @@ if __name__ == '__main__':
     try:
         run()
 
-    except (TaskNotPrivateError, TaskNodesError):
+    except TaskNotPrivateError:
         # Non-zero exit with no >EXIT event: the engine records the task as
         # ended abnormally rather than completed.
         sys.exit(1)
