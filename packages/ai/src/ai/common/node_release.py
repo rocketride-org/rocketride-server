@@ -98,9 +98,14 @@ def _read(path: str) -> bytes:
         return file.read()
 
 
+def nodes_dir() -> str:
+    """The server's nodes/ folder: what the engine scans at start-up, and where its index sits."""
+    return os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'nodes')
+
+
 def read_index() -> bytes:
     """The server's nodes/index.json: written by the build that made this engine, so it lists its nodes."""
-    return _read(os.path.join(os.path.dirname(os.path.abspath(sys.executable)), 'nodes', 'index.json'))
+    return _read(os.path.join(nodes_dir(), 'index.json'))
 
 
 def read_package(name: str, sha256: str) -> bytes:

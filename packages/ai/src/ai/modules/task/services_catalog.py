@@ -62,9 +62,13 @@ Call :func:`invalidate`; the next request rebuilds.
 """
 
 import asyncio
+import base64
+import contextlib
 from typing import Any, Dict, Optional, Tuple
 
 from rocketlib import debug, getServiceDefinitions, warning
+
+from . import node_store
 
 # Display fields that form a service summary. Everything else on a bulk
 # entry is configuration schema, served only by the single-service view.
@@ -122,6 +126,11 @@ def _read_icon(icon_path: Any) -> Optional[str]:
     """
     if not icon_path or not isinstance(icon_path, str):
         return None
+    if icon_path.startswith('data:'):
+        # A node EaaS serves carries its icon inline
+        with contextlib.suppress(ValueError):
+            return base64.b64decode(icon_path.partition(',')[2]).decode('utf-8-sig')
+        return None
     try:
         with open(icon_path, 'r', encoding='utf-8-sig') as fh:
             return fh.read()
@@ -142,7 +151,7 @@ def _build() -> Tuple[Dict[str, Any], Dict[str, Any]]:
     Returns:
         (master, summary) — see module docstring for shapes.
     """
-    raw = getServiceDefinitions() or {}
+    raw = getServiceDefinitions(node_store.custom()) or {}
     services = raw.get('services', {}) or {}
 
     master: Dict[str, Any] = {}

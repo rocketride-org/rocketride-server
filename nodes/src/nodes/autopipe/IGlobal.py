@@ -23,7 +23,6 @@
 
 from rocketlib import IGlobalBase, debug, OPEN_MODE
 from typing import Dict, Any, Optional
-from ai.common import node_packages
 from ai.common.config import Config
 
 
@@ -179,7 +178,6 @@ class IGlobal(IGlobalBase):
         # Now, add all the filters we figured out
         for pipe in pipeline:
             provider, config = Config.getProviderConfig(pipe)
-            node_packages.ensure(provider)
             self.IEndpoint.endpoint.insertFilter(provider, config)
         return
 
