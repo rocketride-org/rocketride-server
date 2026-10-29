@@ -31,6 +31,8 @@ scan loads them.
 import base64
 import copy
 import json
+import os
+import tempfile
 import threading
 from typing import Any, Dict, Iterable, List, Optional, Set
 
@@ -45,7 +47,8 @@ _nodes: Dict[str, Dict[str, Any]] = {}
 _providers: Dict[str, str] = {}
 _definitions: Dict[str, Dict[str, Any]] = {}
 
-# Filters autopipe inserts while it runs, besides the providers its own config names
+# Filters autopipe inserts while it runs (nodes/src/nodes/autopipe/IGlobal.py, getFilter), besides the
+# providers its own config names; a test keeps the two in step
 _AUTOPIPE_FILTERS = ('parse', 'ocr', 'indexer')
 
 # Two runs naming the same node must not unpack it at once
@@ -87,9 +90,26 @@ def start() -> None:
             f'NODE_REGISTRY_UNAVAILABLE: the node index could not be used ({e}); only the nodes the server carries are available'
         )
         return
+    problem = _unwritable(node_release.nodes_dir()) if nodes else None
+    if problem:
+        # A read-only install: say so once, rather than refuse every run that names one
+        warning(f'NODE_REGISTRY_UNAVAILABLE: {problem}; not available: {", ".join(sorted(nodes))}')
+        return
     _nodes.update(nodes)
     _providers.update(providers)
     _definitions.update(definitions)
+
+
+def _unwritable(nodes_dir: str) -> Optional[str]:
+    """Why a node cannot be unpacked into nodes_dir, or None: it is staged beside nodes/ and moved in."""
+    for path in (os.path.dirname(os.path.abspath(nodes_dir)), nodes_dir):
+        try:
+            # A real write: os.access does not see read-only mounts
+            with tempfile.NamedTemporaryFile(dir=path):
+                pass
+        except OSError as e:
+            return f'{path} is not writable ({e})'
+    return None
 
 
 def _inline_icon(service: Dict[str, Any], icons: Dict[str, str]) -> Dict[str, Any]:
