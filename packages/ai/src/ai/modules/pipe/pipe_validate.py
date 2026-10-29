@@ -24,12 +24,14 @@ async def pipe_Validate(request: Request, pipeline: Dict[str, Any], source: Opti
     Returns:
         ResultBase: A standardized response indicating success or failure.
     """
+    from ai.modules.task import node_store
+
     try:
         # Single-component form (node config panel / IComponentValidatePayload).
         # The engine dispatches on a root-level 'component'; wrapping it hides
         # that key and the engine answers "'pipeline.components' must be an array".
         if 'component' in pipeline and 'components' not in pipeline:
-            data = validatePipeline(pipeline)
+            data = validatePipeline(pipeline, node_store.custom())
             return response(data)
 
         # Resolve source: explicit param > pipeline field > implied from components
@@ -47,7 +49,7 @@ async def pipe_Validate(request: Request, pipeline: Dict[str, Any], source: Opti
         if resolved_source:
             inner['source'] = resolved_source
 
-        data = validatePipeline({'pipeline': inner})
+        data = validatePipeline({'pipeline': inner}, node_store.custom())
         return response(data)
 
     except Exception as e:

@@ -22,34 +22,20 @@
 
 """
 Node packages: a node shipped on its own as <name>.rrnode, a zip rooted at
-<name>/. A package is unpacked once under the engine cache, in a folder named by
-its digest, and that folder joins the `nodes` package; a process that serves
-packages (EaaS) or fetches them (a task) installs a source with serve().
+<name>/. A package is unpacked into a nodes/ folder the engine scans at
+start-up, so a run started afterwards loads it like any other node.
 """
 
 import contextlib
 import glob
 import hashlib
-import importlib
-import importlib.abc
-import importlib.machinery
 import io
 import os
 import shutil
-import sys
 import tempfile
 import time
 import zipfile
-from typing import Any, Callable, Dict, List, Optional, Tuple
-
-import engLib
-from depends import engine_cache_dir
-from rocketlib import getServiceDefinition
-
-# name -> (node name, package bytes, sha256, {services file: definition}), or None when there is no such node
-Source = Callable[[str], Optional[Tuple[str, bytes, str, Dict[str, Dict[str, Any]]]]]
-
-_source: Optional[Source] = None
+from typing import Optional
 
 
 class NodePackageInvalid(RuntimeError):
@@ -58,86 +44,57 @@ class NodePackageInvalid(RuntimeError):
     code = 'NODE_PACKAGE_INVALID'
 
 
-# Prefix of the folders a package is unpacked into before it takes its digest's name
-_STAGING = 'staging-'
+# Prefix of the folders a package is unpacked into before it takes its node's name
+_STAGING = '.rrnode-staging-'
+
+# Written into an unpacked node: the digest of the package it came from
+DIGEST_FILE = '.rrnode.sha256'
 
 
-def _sweep(cache: str) -> None:
+def _sweep(parent: str) -> None:
     """Drop the staging folders an unpack that was killed left behind an hour ago or more."""
-    for path in glob.glob(os.path.join(cache, f'{_STAGING}*')):
+    for path in glob.glob(os.path.join(parent, f'{_STAGING}*')):
         with contextlib.suppress(OSError):
             if time.time() - os.path.getmtime(path) > 3600:
                 shutil.rmtree(path, ignore_errors=True)
 
 
-def unpack(name: str, data: bytes, sha256: str) -> str:
-    """Unpack a package once, make it importable, and return the node's folder."""
-    cache = engine_cache_dir(create=True)
-    root = os.path.join(cache, 'node-packages', sha256)
-    if not os.path.isdir(root):
-        if hashlib.sha256(data).hexdigest() != sha256:
-            raise NodePackageInvalid(f'The package of {name} does not match its digest')
-        _sweep(cache)
-        staging = tempfile.mkdtemp(prefix=_STAGING, dir=cache)
-        with zipfile.ZipFile(io.BytesIO(data)) as package:
-            # Its root goes first on sys.path: a stray folder would shadow another node
-            if any(not entry.startswith(f'{name}/') for entry in package.namelist()):
-                shutil.rmtree(staging, ignore_errors=True)
-                raise NodePackageInvalid(f'The package of {name} holds files outside {name}/')
-            package.extractall(os.path.join(staging, 'nodes'))
-        os.makedirs(os.path.dirname(root), exist_ok=True)
-        try:
-            os.replace(staging, root)
-        except OSError:
-            shutil.rmtree(staging, ignore_errors=True)
-            # Only another process unpacking the same digest first is not a failure
-            if not os.path.isdir(root):
-                raise
-    if root not in sys.path:
-        sys.path.insert(0, root)
-        importlib.invalidate_caches()
-    return os.path.join(root, 'nodes', name)
-
-
-def fetch(name: str) -> Optional[List[Tuple[Dict[str, Any], str]]]:
-    """Get a node from the source and unpack it; its (definition, path) pairs, or None when there is no such node."""
-    package = _source(name) if _source else None
-    if package is None:
+def digest_of(node_dir: str) -> Optional[str]:
+    """The digest of the package a node folder was unpacked from; None for a node that came with the server."""
+    try:
+        with open(os.path.join(node_dir, DIGEST_FILE), encoding='utf-8') as file:
+            return file.read().strip()
+    except OSError:
         return None
-    node, data, sha256, definitions = package
-    node_dir = unpack(node, data, sha256)
-    return [(definition, os.path.join(node_dir, file)) for file, definition in definitions.items()]
 
 
-def ensure(*names: str) -> None:
-    """Make sure the engine knows these nodes or providers, registering the missing ones in one batch."""
-    batch = []
-    for name in names:
-        if getServiceDefinition(name) is None:
-            batch += fetch(name) or []
-    if batch:
-        # Together, so a definition that lists other services sees all of them
-        engLib.registerServices(batch)
+def unpack(name: str, data: bytes, sha256: str, nodes_dir: str) -> str:
+    """Unpack a package into nodes_dir/<name>, replacing another digest's copy, and return the node's folder."""
+    node_dir = os.path.join(nodes_dir, name)
+    if digest_of(node_dir) == sha256:
+        return node_dir
+    if os.path.isdir(node_dir) and digest_of(node_dir) is None:
+        # A node the server carries is never replaced by a package
+        return node_dir
+    if hashlib.sha256(data).hexdigest() != sha256:
+        raise NodePackageInvalid(f'The package of {name} does not match its digest')
 
-
-def serve(source: Source) -> None:
-    """Fetch missing nodes from source, and their code whenever something imports one."""
-    global _source
-    _source = source
-    sys.meta_path.append(NodeFinder())
-
-
-class NodeFinder(importlib.abc.MetaPathFinder):
-    """Unpack `nodes.<name>` when it is imported and not on disk yet."""
-
-    def find_spec(self, fullname, path, target=None):
-        """Unpack the missing node, then let the path finder import it."""
-        parent, _, name = fullname.partition('.')
-        if parent != 'nodes' or '.' in name:
-            return None
-        try:
-            found = fetch(name) is not None
-        except Exception as e:
-            # Code that catches ImportError for an optional node keeps working
-            raise ImportError(f'Could not fetch {fullname}: {e}', name=fullname) from e
-        return importlib.machinery.PathFinder.find_spec(fullname, path) if found else None
+    # Staged beside nodes/, not in it: the start-up scan must never see a half-written node
+    parent = os.path.dirname(os.path.abspath(nodes_dir))
+    _sweep(parent)
+    staging = tempfile.mkdtemp(prefix=_STAGING, dir=parent)
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as package:
+            if any(not entry.startswith(f'{name}/') for entry in package.namelist()):
+                raise NodePackageInvalid(f'The package of {name} holds files outside {name}/')
+            package.extractall(staging)
+        with open(os.path.join(staging, name, DIGEST_FILE), 'w', encoding='utf-8') as file:
+            file.write(sha256)
+        os.makedirs(nodes_dir, exist_ok=True)
+        if os.path.isdir(node_dir):
+            # Another digest's copy: move it out of nodes/ first, a folder cannot be replaced in one step
+            os.replace(node_dir, os.path.join(staging, 'replaced'))
+        os.replace(os.path.join(staging, name), node_dir)
+    finally:
+        shutil.rmtree(staging, ignore_errors=True)
+    return node_dir

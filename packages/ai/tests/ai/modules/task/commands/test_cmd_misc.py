@@ -446,7 +446,7 @@ async def test_on_rrext_validate_unwraps_the_mcp_tools_component_envelope(monkey
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -553,7 +553,7 @@ def _llm(component_id, provider):
     }
 
 
-def _fake_validator(payload):
+def _fake_validator(payload, custom=()):
     """Stand in for the engine's validator, returning a new root.
 
     For ``llm_openai`` each ``apikey`` moves into ``secureParameters`` under a
@@ -599,7 +599,9 @@ async def test_on_rrext_validate_returns_submitted_config_when_env_expanded(monk
     and the errors and warnings.
     """
     calls = []
-    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: calls.append(payload) or _fake_validator(payload))
+    monkeypatch.setattr(
+        cmd_misc, 'validatePipeline', lambda payload, custom: calls.append(payload) or _fake_validator(payload)
+    )
     conn = _validate_conn(monkeypatch)
     config = {'components': [_llm('llm_1', 'llm_openai'), _llm('llm_2', 'llm_opnai')], 'source': 'llm_1'}
     request = {'arguments': {'pipeline': {'pipeline': config} if enveloped else config}}
@@ -623,7 +625,9 @@ async def test_on_rrext_validate_returns_submitted_config_when_env_expanded(monk
 async def test_on_rrext_validate_single_component_returns_submitted_config(monkeypatch):
     """The node panel's {version, component} form: validated expanded, echoed as submitted."""
     calls = []
-    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: calls.append(payload) or _fake_validator(payload))
+    monkeypatch.setattr(
+        cmd_misc, 'validatePipeline', lambda payload, custom: calls.append(payload) or _fake_validator(payload)
+    )
     conn = _validate_conn(monkeypatch)
     component = _llm('llm_1', 'llm_openai')
     request = {'arguments': {'pipeline': {'version': 1, 'component': component, 'extra': CUSTOM_MODEL_REF}}}
@@ -681,7 +685,7 @@ async def test_on_rrext_validate_drops_diagnostics_the_caller_sends(monkeypatch)
     """Errors and warnings in a {version, component} payload are not passed to the validator."""
     calls = []
 
-    def _validator(payload):
+    def _validator(payload, custom):
         """Append to the root's errors, as the engine does."""
         calls.append(payload)
         root = copy.deepcopy(payload)
@@ -706,7 +710,7 @@ async def test_on_rrext_validate_drops_diagnostics_the_caller_sends(monkeypatch)
 async def test_on_rrext_validate_without_substitution_validates_once(monkeypatch):
     """Nothing expanded, no second pass: the reply is the validator's result as before."""
     calls = []
-    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload: calls.append(payload) or {'ok': True})
+    monkeypatch.setattr(cmd_misc, 'validatePipeline', lambda payload, custom: calls.append(payload) or {'ok': True})
     conn = _validate_conn(monkeypatch, env={})
     request = {'arguments': {'pipeline': {'source': 'llm_1', 'components': [_llm('llm_1', 'llm_opnai')]}}}
 
@@ -747,7 +751,7 @@ async def test_on_rrext_validate_multiple_sources_keeps_fixed_reason(monkeypatch
 async def test_on_rrext_validate_error_keeps_template_references(monkeypatch):
     """An exception that quotes expanded values reaches the log and the error reply with the references."""
 
-    def _raise(payload):
+    def _raise(payload, custom):
         raise RuntimeError(f'engine rejected {json.dumps(payload)} and {SERVICE_TOKEN_VALUE}')
 
     monkeypatch.setattr(cmd_misc, 'validatePipeline', _raise)
@@ -785,7 +789,7 @@ async def test_on_rrext_validate_transformed_messages_use_template_references(
     conn = _validate_conn(monkeypatch, env=env)
     calls = 0
 
-    def validator(payload):
+    def validator(payload, custom):
         nonlocal calls
         calls += 1
         if kind == 'exception':
@@ -893,7 +897,7 @@ async def test_on_rrext_validate_second_pass_error_uses_template_references(monk
     conn = _validate_conn(monkeypatch)
     calls = 0
 
-    def validator(payload):
+    def validator(payload, custom):
         nonlocal calls
         calls += 1
         if calls == 2:
@@ -935,9 +939,9 @@ def _spy_validator(monkeypatch):
     calls = []
     native = cmd_misc.validatePipeline
 
-    def _spy(payload):
+    def _spy(payload, custom=()):
         sent = copy.deepcopy(payload)
-        result = native(payload)
+        result = native(payload, custom)
         calls.append((sent, result))
         return result
 
