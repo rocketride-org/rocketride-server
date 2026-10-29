@@ -65,12 +65,11 @@ def test_only_the_nodes_not_on_disk_are_kept_with_their_icon_inline(server):
     assert server['warnings'] == []
 
 
-def test_a_definition_is_the_engines_else_the_one_eaas_serves(server):
+def test_only_a_node_eaas_serves_has_a_served_definition(server):
     node_store.start()
 
-    assert node_store.definition('webhook') == {'on': 'disk'}
-    assert node_store.definition('provider_x') == {**PACKAGED, 'icon': X_ICON}
-    assert node_store.definition('filesys') is None
+    assert node_store.served('provider_x') == {**PACKAGED, 'icon': X_ICON}
+    assert node_store.served('webhook') is None and node_store.served('filesys') is None
 
 
 def test_an_icon_the_index_does_not_hold_is_dropped(server, monkeypatch):
