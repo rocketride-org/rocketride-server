@@ -233,6 +233,12 @@ PUBLIC_ROUTE_MANIFEST = [
         'How RocketRide uses cookies, similar technologies, and website analytics on its websites and '
         'RocketRide Cloud, and the choices you have.',
     ),
+    (
+        '/legal/marketplace-terms',
+        'Marketplace Publisher Terms',
+        'The terms for publishing apps on the RocketRide Marketplace, including eligibility, revenue share, '
+        'payouts, and taxes.',
+    ),
 ]
 
 # Bare route list — kept as the module's public surface for route

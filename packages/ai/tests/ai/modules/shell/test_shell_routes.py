@@ -140,6 +140,7 @@ LEGAL_PAGES = (
     '/legal/subprocessors',
     '/legal/trademark-policy',
     '/legal/cookie-policy',
+    '/legal/marketplace-terms',
 )
 
 
