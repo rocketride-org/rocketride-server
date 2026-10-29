@@ -30,7 +30,9 @@ Output Format:
 """
 
 import io
+import itertools
 import logging
+import math
 import os
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -67,6 +69,42 @@ class EasyOCRLoader(BaseLoader):
     _DEFAULTS = {
         'languages': ['en'],
     }
+
+    # Text boxes recognized per GPU call. EasyOCR pads every crop of one call to the widest, so
+    # readtext(batch_size>1) on a whole page did ~4x the work on dense pages and changed the text;
+    # a call here holds crops of one padded width only, the width each crop gets alone anyway
+    _RECOGNITION_BATCH = 16
+
+    @staticmethod
+    def _readtext(reader: Any, img_np: Any) -> List[Any]:
+        """``reader.readtext(img_np)``, recognizing crops of equal padded width together.
+
+        Each crop gets the input that readtext's default ``batch_size=1`` gives it; only the order of
+        the results differs, and ``group_words_into_lines`` sorts them by position.
+        """
+        from easyocr.utils import reformat_input
+
+        img, grey = reformat_input(img_np)
+        horizontal, free = reader.detect(img, reformat=False)
+        horizontal, free = horizontal[0], free[0]
+        max_y, max_x = grey.shape
+
+        def padded_width(box):
+            # in model heights, as easyocr's get_image_list sizes the crop
+            width = min(box[1], max_x) - max(0, box[0])
+            height = min(box[3], max_y) - max(0, box[2])
+            return math.ceil(max(width, height) / min(width, height)) if width > 0 and height > 0 else 1
+
+        batch = EasyOCRLoader._RECOGNITION_BATCH
+        result = []
+        for _, same in itertools.groupby(sorted(horizontal, key=padded_width), key=padded_width):
+            same = list(same)
+            for i in range(0, len(same), batch):
+                result += reader.recognize(grey, same[i : i + batch], [], batch_size=batch, reformat=False)
+        # rotated boxes: one per call, as batch_size=1 reads them
+        for box in free:
+            result += reader.recognize(grey, [], [box], batch_size=batch, reformat=False)
+        return result
 
     @staticmethod
     def load(
@@ -278,7 +316,7 @@ class EasyOCRLoader(BaseLoader):
         for idx, img_np in enumerate(images):
             try:
                 with cuda_ctx:
-                    raw_results = reader.readtext(img_np)
+                    raw_results = EasyOCRLoader._readtext(reader, img_np)
 
                 # Convert EasyOCR format to standard box format
                 boxes = []
