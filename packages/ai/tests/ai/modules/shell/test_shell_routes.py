@@ -355,6 +355,16 @@ def test_sitemap_and_llms_list_the_legal_and_superfans_pages(app_url):
             'Trademark & Brand Usage Policy',
             'How the RocketRide name, logo, and brand assets may and may not be used.',
         ),
+        '/legal/cookie-policy': (
+            'Cookie Policy',
+            'How RocketRide uses cookies, similar technologies, and website analytics on its websites and '
+            'RocketRide Cloud, and the choices you have.',
+        ),
+        '/legal/marketplace-terms': (
+            'Marketplace Publisher Terms',
+            'The terms for publishing apps on the RocketRide Marketplace, including eligibility, revenue share, '
+            'payouts, and taxes.',
+        ),
         '/superfans': (
             'Superfans',
             'The developers who build with RocketRide and tell us the truth. Earn early builds, a hand on the '
