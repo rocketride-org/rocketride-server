@@ -270,7 +270,7 @@ class Config:
                 )
 
     @staticmethod
-    def getNodeConfig(logicalType: str, connConfig: Dict):
+    def getNodeConfig(logicalType: str, connConfig: Dict, service: Optional[Dict[str, Any]] = None):
         """
         Get the configuration for a connector.
 
@@ -299,6 +299,9 @@ class Config:
         preconfig.profiles[profile]. The defaults are then merged into the
         connConfig that is provided. If keys are in connConfig, they will not
         be overriden by the defaults
+
+        * service is the definition to use when the engine does not know
+        logicalType: a node EaaS serves and has not unpacked
         """
 
         def merge(userConfig: Dict[str, Any], defaultConfig: Dict[str, Any]) -> Dict[str, Any]:
@@ -369,8 +372,8 @@ class Config:
 
             return combined
 
-        # Output the requested configuration
-        service = getServiceDefinition(logicalType)
+        # Output the requested configuration; the caller's definition only when the engine has none
+        service = getServiceDefinition(logicalType) or service
 
         # If we couldn't get it, error out
         if service is None:

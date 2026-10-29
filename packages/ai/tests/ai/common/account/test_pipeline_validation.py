@@ -121,6 +121,18 @@ def test_validate_rejects_when_missing_required_plan(patch_service_definitions):
     assert validator.validate(_account(['pro']), pipeline) is False
 
 
+def test_validate_reads_the_plans_of_a_node_that_only_eaas_serves(patch_service_definitions, monkeypatch):
+    """A node EaaS serves is not in the engine's registry; its plans still count."""
+    from ai.modules.task import node_store
+
+    monkeypatch.setattr(node_store, '_definitions', {'providerS': {'plans': ['enterprise']}})
+    pipeline = {'source': 'a', 'components': [{'id': 'a', 'provider': 'providerS', 'input': []}]}
+
+    validator = pv.AccountPipelineValidation()
+    assert validator.validate(_account(['pro']), pipeline) is False
+    assert validator.validate(_account(['enterprise']), pipeline) is True
+
+
 def test_validate_rejects_when_account_has_no_plans(patch_service_definitions):
     """An empty account.plans list cannot satisfy any required plan."""
     patch_service_definitions['providerA'] = {'plans': ['pro']}

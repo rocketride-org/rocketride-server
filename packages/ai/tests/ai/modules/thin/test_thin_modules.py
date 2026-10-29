@@ -204,6 +204,20 @@ async def test_services_get_returns_error_when_filter_misses(monkeypatch):
     assert 'ghost' in body
 
 
+@pytest.mark.asyncio
+async def test_services_get_answers_a_node_that_only_eaas_serves(monkeypatch):
+    """A node EaaS serves is not in the engine's registry; its definition still answers."""
+    from ai.modules.task import node_store
+
+    monkeypatch.setattr(services_mod, 'getServiceDefinition', lambda name: None)
+    monkeypatch.setattr(node_store, '_definitions', {'svc-served': {'protocol': 'svc-served://'}})
+
+    result = await services_mod.services_get(service='svc-served')
+    body = result.body.decode() if hasattr(result, 'body') else str(result)
+    assert 'OK' in body
+    assert 'svc-served://' in body
+
+
 # ---------------------------------------------------------------------------
 # clients._find_latest_file (pure logic)
 # ---------------------------------------------------------------------------
