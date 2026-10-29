@@ -32,6 +32,14 @@ def _no_libraries(monkeypatch):
     package.__path__ = []
     utils = types.ModuleType('easyocr.utils')
     utils.reformat_input = lambda image: (image, types.SimpleNamespace(shape=(1000, 2000)))
+
+    def calculate_ratio(width, height):  # easyocr 1.7.2
+        ratio = width / height
+        if ratio < 1.0:
+            ratio = 1.0 / ratio
+        return ratio
+
+    utils.calculate_ratio = calculate_ratio
     monkeypatch.setitem(sys.modules, 'ai.common.torch', torch_shim)
     monkeypatch.setitem(sys.modules, 'easyocr', package)
     monkeypatch.setitem(sys.modules, 'easyocr.utils', utils)
@@ -57,6 +65,27 @@ def test_a_width_group_is_cut_into_batches_of_16():
     EasyOCRLoader._readtext(reader, object())
 
     assert [len(h) for h, _, _ in reader.calls] == [16, 4]
+
+
+def test_wide_crops_share_a_call_up_to_256_model_heights():
+    """Width 400 at height 10 pads to 40 model heights: 6 crops per call; 1500 pads to 150: one per call."""
+    reader = _Reader(
+        [_box(0, 400, y0=y, height=10) for y in range(0, 160, 20)]
+        + [_box(0, 1500, y0=y, height=10) for y in (200, 300)]
+    )
+
+    EasyOCRLoader._readtext(reader, object())
+
+    assert [(len(h), batch) for h, _, batch in reader.calls] == [(6, 6), (2, 6), (1, 1), (1, 1)]
+
+
+def test_tall_crops_are_keyed_as_easyocr_pads_them():
+    """EasyOCR pads 10x490 to 50 model heights (1/(10/490) rounds up past 49) and 10x489 to 49."""
+    reader = _Reader([_box(0, 10, height=490), _box(100, 10, height=489)])
+
+    EasyOCRLoader._readtext(reader, object())
+
+    assert [[b[0] for b in h] for h, _, _ in reader.calls] == [[100], [0]]
 
 
 def test_rotated_boxes_are_read_one_per_call():

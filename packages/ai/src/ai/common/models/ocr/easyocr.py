@@ -72,8 +72,11 @@ class EasyOCRLoader(BaseLoader):
 
     # Text boxes recognized per GPU call. EasyOCR pads every crop of one call to the widest, so
     # readtext(batch_size>1) on a whole page did ~4x the work on dense pages and changed the text;
-    # a call here holds crops of one padded width only, the width each crop gets alone anyway
+    # a call here holds crops of one padded width only, the width each crop gets alone anyway.
+    # A call's memory grows with crops x padded width (~1 MB per model height on english_g2), so it
+    # also stops at _RECOGNITION_WIDTH model heights, unless a single crop is wider
     _RECOGNITION_BATCH = 16
+    _RECOGNITION_WIDTH = 256
 
     @staticmethod
     def _readtext(reader: Any, img_np: Any) -> List[Any]:
@@ -82,7 +85,7 @@ class EasyOCRLoader(BaseLoader):
         Each crop gets the input that readtext's default ``batch_size=1`` gives it; only the order of
         the results differs, and ``group_words_into_lines`` sorts them by position.
         """
-        from easyocr.utils import reformat_input
+        from easyocr.utils import calculate_ratio, reformat_input
 
         img, grey = reformat_input(img_np)
         horizontal, free = reader.detect(img, reformat=False)
@@ -90,20 +93,21 @@ class EasyOCRLoader(BaseLoader):
         max_y, max_x = grey.shape
 
         def padded_width(box):
-            # in model heights, as easyocr's get_image_list sizes the crop
+            # in model heights, as easyocr's get_image_list sizes the crop; its own ratio, since
+            # 1/(w/h) can round up past an integer h/w
             width = min(box[1], max_x) - max(0, box[0])
             height = min(box[3], max_y) - max(0, box[2])
-            return math.ceil(max(width, height) / min(width, height)) if width > 0 and height > 0 else 1
+            return math.ceil(calculate_ratio(width, height)) if width > 0 and height > 0 else 1
 
-        batch = EasyOCRLoader._RECOGNITION_BATCH
         result = []
-        for _, same in itertools.groupby(sorted(horizontal, key=padded_width), key=padded_width):
+        for width, same in itertools.groupby(sorted(horizontal, key=padded_width), key=padded_width):
             same = list(same)
+            batch = max(1, min(EasyOCRLoader._RECOGNITION_BATCH, EasyOCRLoader._RECOGNITION_WIDTH // width))
             for i in range(0, len(same), batch):
                 result += reader.recognize(grey, same[i : i + batch], [], batch_size=batch, reformat=False)
         # rotated boxes: one per call, as batch_size=1 reads them
         for box in free:
-            result += reader.recognize(grey, [], [box], batch_size=batch, reformat=False)
+            result += reader.recognize(grey, [], [box], batch_size=EasyOCRLoader._RECOGNITION_BATCH, reformat=False)
         return result
 
     @staticmethod
