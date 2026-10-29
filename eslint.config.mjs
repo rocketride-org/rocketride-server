@@ -264,7 +264,7 @@ export default tseslint.config(
 					// gitignore semantics: a file under an excluded dir cannot be
 					// re-included, so un-ignore shell/themes first, then re-ban its
 					// contents except the one exported stylesheet.
-					{ group: ['shell/*', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css'], message: "The shell surface is barrel-only: import the name from 'shell' (the theme stylesheet is the one exported subpath; SDK values/types come from 'rocketride')." },
+					{ group: ['shell/*', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css', '!shell/themes/components.css'], message: "The shell surface is barrel-only: import the name from 'shell' (the theme stylesheets are the only exported subpaths; SDK values/types come from 'rocketride')." },
 				],
 			}],
 		},

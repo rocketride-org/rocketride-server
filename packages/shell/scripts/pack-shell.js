@@ -226,6 +226,7 @@ async function packShell(options = {}) {
 		exports: {
 			'.': { types: './shell.d.ts', default: './dist/index.js' },
 			'./themes/rocketride-default.css': './dist/themes/rocketride-default.css',
+			'./themes/components.css': './dist/themes/components.css',
 			'./tokens.css': './tokens.css',
 			'./package.json': './package.json',
 		},

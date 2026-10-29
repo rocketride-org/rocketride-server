@@ -8,6 +8,7 @@
 	"exports": {
 		".": { "types": "./shell.d.ts", "default": "./index.js" },
 		"./themes/rocketride-default.css": "./themes/rocketride-default.css",
+		"./themes/components.css": "./themes/components.css",
 		"./tokens.css": "./tokens.css",
 		"./package.json": "./package.json"
 	}

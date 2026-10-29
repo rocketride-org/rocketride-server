@@ -887,6 +887,38 @@ The shell manages themes via CSS custom properties. Your app should use `--rr-*`
 | `--rr-color-warning` | Warning orange |
 | `--rr-color-error` | Error red |
 
+### Foundation tokens
+
+Scale and derived tokens defined once in `rocketride-default.css`. They are not theme keys: each is either theme-independent or computed from the active theme's colors, so they follow every theme and the VS Code editor theme automatically. Prefer them over literal values.
+
+| Group | Variables | Notes |
+|-------|-----------|-------|
+| Radius | `--rr-radius-xs` `-sm` `-md` `-lg` `-xl` `-pill` | 3, 5, 6, 8, 10, 999px |
+| Spacing | `--rr-space-0-5` `-1` `-1-5` `-2` `-2-5` `-3` `-4` `-5` `-6` `-8` `-10` | 4px grid: 2 to 40px |
+| Controls | `--rr-control-height` `-height-sm` `-height-mini` `--rr-control-radius` | 34, 26, 16px; 7px radius |
+| Type | `--rr-font-family-mono`, `--rr-font-weight-regular` `-medium` `-semibold` `-bold`, `--rr-line-height-tight` `-normal`, `--rr-font-size-label` `-dense` | Mono maps to the editor font in VS Code |
+| Elevation | `--rr-elevation-1` `-2` `-3`, `--rr-focus-ring` | Raised card, menu/popover, dialog; keyboard focus |
+| Tints | `--rr-bg-accent-soft`, `--rr-bg-{success,info,warning,error}-soft`, `--rr-border-{success,info,warning,error}-soft`, `--rr-border-subtle` | Derived with `color-mix()` |
+| Overlays | `--rr-bg-overlay`, `--rr-bg-tooltip`, `--rr-fg-tooltip` | Scrim; inverse tooltip |
+| Motion | `--rr-duration-fast` `-base` `-slow`, `--rr-ease-standard` `-out` | 120, 200, 350ms |
+| Layers | `--rr-z-raised` `-sticky` `-overlay` `-banner` `-drawer` `-panel` `-modal` `-popover` `-menu` `-toast` `-tooltip` | The z-index values the shell already uses |
+
+### Component stylesheet
+
+`shell/themes/components.css` is a class layer over these tokens: buttons, inputs, fields, checkbox/radio/switch, chips, badges, avatars, alerts, progress, skeletons, dialogs, menus, tooltips, lists and tables, all as `rr-` classes. The shell loads it, so apps rendered inside the shell use the classes directly with no import. VS Code webviews, which do not run inside the shell, import both stylesheets themselves:
+
+```typescript
+import 'shell/themes/rocketride-default.css';
+import 'shell/themes/components.css';
+```
+
+```html
+<button class="rr-btn rr-btn--primary">Run</button>
+<span class="rr-badge rr-badge--success"><span class="rr-dot rr-dot--success"></span>Running</span>
+```
+
+See `ROCKETRIDE_UI_COMPONENTS.md` (Stylesheet classes) for the full class list.
+
 ### Responding to theme changes
 
 ```typescript

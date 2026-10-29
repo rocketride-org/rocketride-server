@@ -18,6 +18,7 @@ import ReactDOM from 'react-dom/client';
 import { capturePrerenderedContent } from './util/prerenderFallback';
 import '@fontsource-variable/figtree';
 import './themes/global.css';
+import './themes/components.css';
 import { RocketRideClient } from 'rocketride';
 // Import directly from local source — NOT from 'shell'. MF intercepts bare
 // 'shell' imports and tries to load from the share scope, but this IS the

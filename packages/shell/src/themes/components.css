@@ -1,0 +1,1042 @@
+/* =============================================================================
+ * MIT License
+ * Copyright (c) 2026 Aparavi Software AG
+ * =============================================================================
+ *
+ * RocketRide component stylesheet — the class layer of the shell UI library.
+ *
+ * Every rule reads --rr-* tokens only (rocketride-default.css: theme tokens
+ * plus the foundation block). Nothing here hardcodes a colour, so each class
+ * follows the active theme JSON and the VS Code map automatically.
+ *
+ * Load order: rocketride-default.css (tokens) → global.css (reset) → this file.
+ * The shell imports it in bootstrap.tsx, so apps rendered in the shell
+ * document get it for free. VS Code webviews (outside the shell) import
+ * 'shell/themes/components.css' themselves.
+ *
+ * NAMING: BEM on the rr- prefix, matching the existing rr-cell-* / rr-grid-*
+ * classes. Block .rr-btn, element .rr-field__label, modifier .rr-btn--danger.
+ * State comes from ARIA / native attributes ([aria-invalid], :disabled,
+ * [aria-selected]) rather than state classes wherever an attribute exists.
+ *
+ * Where a stock React component already exists (Button, InputField, Chip,
+ * StatusBadge, Banner, menus), the class reproduces its current geometry so
+ * the component can move onto the class with no visual change.
+ * ========================================================================== */
+
+/* ===================================================================== */
+/* Focus                                                                 */
+/* ===================================================================== */
+
+.rr-focusable:focus-visible,
+.rr-btn:focus-visible,
+.rr-icon-btn:focus-visible,
+.rr-input:focus-visible,
+.rr-checkbox:focus-visible,
+.rr-radio:focus-visible,
+.rr-switch:focus-visible,
+.rr-chip__remove:focus-visible,
+.rr-menu__item:focus-visible,
+.rr-list__item:focus-visible,
+.rr-link:focus-visible {
+	outline: none;
+	box-shadow: var(--rr-focus-ring);
+}
+
+/* ===================================================================== */
+/* Typography                                                            */
+/* ===================================================================== */
+
+.rr-text-h1,
+.rr-text-h2,
+.rr-text-h3,
+.rr-text-h4,
+.rr-text-h5 {
+	margin: 0;
+	color: var(--rr-text-primary);
+	line-height: var(--rr-line-height-tight);
+	font-weight: var(--rr-font-weight-semibold);
+}
+.rr-text-h1 {
+	font-size: var(--rr-font-size-h1);
+	font-weight: var(--rr-font-weight-bold);
+}
+.rr-text-h2 {
+	font-size: var(--rr-font-size-h2);
+}
+.rr-text-h3 {
+	font-size: var(--rr-font-size-h3);
+}
+.rr-text-h4 {
+	font-size: var(--rr-font-size-h4);
+}
+.rr-text-h5 {
+	font-size: var(--rr-font-size-h5);
+	font-weight: var(--rr-font-weight-h5);
+}
+
+.rr-text-subtitle {
+	font-size: var(--rr-font-size-subtitle);
+	font-weight: var(--rr-font-weight-semibold);
+	color: var(--rr-text-primary);
+}
+.rr-text-body {
+	font-size: var(--rr-font-size-widget);
+	line-height: var(--rr-line-height-normal);
+	color: var(--rr-text-primary);
+}
+.rr-text-secondary {
+	color: var(--rr-text-secondary);
+}
+.rr-text-caption {
+	font-size: var(--rr-font-size-dense);
+	color: var(--rr-text-caption);
+}
+.rr-text-mono {
+	font-family: var(--rr-font-family-mono);
+}
+
+/** Uppercase micro label — table headers, section eyebrows. */
+.rr-text-label {
+	font-size: var(--rr-font-size-label);
+	font-weight: var(--rr-font-weight-semibold);
+	letter-spacing: 0.6px;
+	text-transform: uppercase;
+	color: var(--rr-text-disabled);
+}
+
+.rr-link {
+	color: var(--rr-text-link);
+	text-decoration: none;
+	border-radius: var(--rr-radius-xs);
+	cursor: pointer;
+}
+.rr-link:hover {
+	text-decoration: underline;
+}
+
+.rr-kbd {
+	display: inline-flex;
+	align-items: center;
+	min-width: 18px;
+	height: 18px;
+	padding: 0 var(--rr-space-1);
+	font-family: var(--rr-font-family-mono);
+	font-size: var(--rr-font-size-label);
+	color: var(--rr-text-secondary);
+	background: var(--rr-bg-surface-alt);
+	border: 1px solid var(--rr-border);
+	border-bottom-width: 2px;
+	border-radius: var(--rr-radius-xs);
+}
+
+/* ===================================================================== */
+/* Surfaces                                                              */
+/* ===================================================================== */
+
+/** Card shell — mirrors commonStyles.card. */
+.rr-paper {
+	background: var(--rr-bg-paper);
+	border: 1px solid var(--rr-border);
+	border-radius: var(--rr-radius-lg);
+	overflow: hidden;
+	color: var(--rr-text-primary);
+}
+.rr-paper--raised {
+	box-shadow: var(--rr-elevation-1);
+}
+.rr-paper--padded {
+	padding: var(--rr-space-4);
+}
+
+/** Card header bar — mirrors commonStyles.cardHeader. */
+.rr-paper__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--rr-space-2);
+	padding: var(--rr-space-3) var(--rr-space-4);
+	background: var(--rr-bg-titleBar-inactive);
+	font-size: var(--rr-font-size-widget);
+	font-weight: var(--rr-font-weight-semibold);
+}
+.rr-paper__body {
+	padding: var(--rr-space-4);
+}
+
+.rr-divider {
+	height: 1px;
+	margin: var(--rr-space-2) 0;
+	border: 0;
+	background: var(--rr-border);
+}
+.rr-divider--vertical {
+	width: 1px;
+	height: auto;
+	align-self: stretch;
+	margin: 0 var(--rr-space-2);
+}
+
+/* ===================================================================== */
+/* Button — mirrors components/button/Button.tsx                         */
+/* ===================================================================== */
+
+.rr-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 7px;
+	height: var(--rr-control-height);
+	padding: 0 var(--rr-space-4);
+	font-family: inherit;
+	font-size: 13px;
+	font-weight: var(--rr-font-weight-semibold);
+	line-height: 1;
+	white-space: nowrap;
+	color: var(--rr-text-primary);
+	background: transparent;
+	border: 1px solid transparent;
+	border-radius: var(--rr-control-radius);
+	cursor: pointer;
+	user-select: none;
+	transition:
+		background-color var(--rr-duration-fast) var(--rr-ease-standard),
+		border-color var(--rr-duration-fast) var(--rr-ease-standard),
+		filter var(--rr-duration-fast) var(--rr-ease-standard);
+}
+
+.rr-btn--primary {
+	background: var(--rr-bg-button);
+	border-color: var(--rr-bg-button);
+	color: var(--rr-fg-button);
+}
+.rr-btn--secondary {
+	border-color: var(--rr-brand);
+	color: var(--rr-brand);
+}
+.rr-btn--ghost {
+	border-color: var(--rr-border);
+	color: var(--rr-text-primary);
+}
+.rr-btn--danger {
+	background: var(--rr-color-error);
+	border-color: var(--rr-color-error);
+	color: var(--rr-fg-button);
+}
+
+.rr-btn--primary:hover,
+.rr-btn--danger:hover {
+	filter: brightness(1.08);
+}
+.rr-btn--secondary:hover {
+	background: var(--rr-bg-accent-soft);
+}
+.rr-btn--ghost:hover {
+	background: var(--rr-bg-toolbar-hover);
+	border-color: var(--rr-border-hover);
+}
+
+.rr-btn--sm {
+	height: var(--rr-control-height-sm);
+	padding: 0 11px;
+	font-size: 11px;
+	border-radius: var(--rr-radius-md);
+}
+.rr-btn--ghost.rr-btn--sm {
+	font-weight: var(--rr-font-weight-regular);
+}
+
+.rr-btn--mini {
+	height: var(--rr-control-height-mini);
+	gap: var(--rr-space-1);
+	padding: 0 var(--rr-space-1-5);
+	font-size: 9px;
+	font-weight: var(--rr-font-weight-medium);
+	border-radius: var(--rr-radius-xs);
+}
+
+.rr-btn--block {
+	display: flex;
+	width: 100%;
+}
+
+.rr-btn:disabled,
+.rr-btn[aria-disabled='true'],
+.rr-icon-btn:disabled,
+.rr-icon-btn[aria-disabled='true'] {
+	opacity: 0.5;
+	cursor: default;
+	pointer-events: none;
+}
+
+/** Square icon-only button — toolbars, row actions. Always give it aria-label. */
+.rr-icon-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: var(--rr-control-height);
+	height: var(--rr-control-height);
+	padding: 0;
+	color: var(--rr-icon-color);
+	background: transparent;
+	border: 0;
+	border-radius: var(--rr-radius-md);
+	cursor: pointer;
+	transition: background-color var(--rr-duration-fast) var(--rr-ease-standard);
+}
+.rr-icon-btn:hover,
+.rr-icon-btn[aria-pressed='true'],
+.rr-icon-btn[aria-expanded='true'] {
+	background: var(--rr-bg-toolbar-hover);
+}
+.rr-icon-btn--sm {
+	width: var(--rr-control-height-sm);
+	height: var(--rr-control-height-sm);
+}
+
+/* ===================================================================== */
+/* Inputs — mirrors components/input-field/InputField.tsx                */
+/* ===================================================================== */
+
+.rr-input {
+	display: block;
+	width: 100%;
+	height: var(--rr-control-height);
+	padding: 0 var(--rr-space-3);
+	font-family: inherit;
+	font-size: 13px;
+	color: var(--rr-text-primary);
+	background: var(--rr-bg-default);
+	border: 1px solid var(--rr-border-input);
+	border-radius: var(--rr-control-radius);
+	outline: none;
+	transition: border-color var(--rr-duration-fast) var(--rr-ease-standard);
+}
+.rr-input::placeholder {
+	color: var(--rr-text-disabled);
+}
+.rr-input:hover {
+	border-color: var(--rr-border-hover);
+}
+.rr-input:focus {
+	border-color: var(--rr-border-focus);
+}
+.rr-input[aria-invalid='true'] {
+	border-color: var(--rr-color-error);
+}
+.rr-input:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+.rr-input[readonly] {
+	background: var(--rr-bg-surface-alt);
+}
+.rr-input--sm {
+	height: var(--rr-control-height-sm);
+	padding: 0 var(--rr-space-2-5);
+	font-size: 12px;
+	border-radius: var(--rr-radius-md);
+}
+
+textarea.rr-input {
+	height: auto;
+	min-height: 80px;
+	padding: var(--rr-space-2) var(--rr-space-3);
+	line-height: var(--rr-line-height-normal);
+	resize: vertical;
+}
+
+/** Native select with a token-coloured chevron drawn from two gradients. */
+select.rr-input {
+	appearance: none;
+	padding-right: 32px;
+	cursor: pointer;
+	background-image: linear-gradient(45deg, transparent 50%, var(--rr-text-secondary) 50%), linear-gradient(135deg, var(--rr-text-secondary) 50%, transparent 50%);
+	background-position:
+		calc(100% - 16px) 50%,
+		calc(100% - 11px) 50%;
+	background-size: 5px 5px;
+	background-repeat: no-repeat;
+}
+
+/** Input with a leading or trailing icon/adornment. */
+.rr-input-group {
+	position: relative;
+	display: flex;
+	align-items: center;
+}
+.rr-input-group > .rr-input {
+	flex: 1;
+}
+.rr-input-group__start,
+.rr-input-group__end {
+	position: absolute;
+	top: 50%;
+	display: inline-flex;
+	color: var(--rr-text-secondary);
+	transform: translateY(-50%);
+	pointer-events: none;
+}
+.rr-input-group__start {
+	left: var(--rr-space-3);
+}
+.rr-input-group__end {
+	right: var(--rr-space-3);
+}
+.rr-input-group--start > .rr-input {
+	padding-left: 34px;
+}
+.rr-input-group--end > .rr-input {
+	padding-right: 34px;
+}
+
+/** Field wrapper — label, control, help or error text. */
+.rr-field {
+	display: flex;
+	flex-direction: column;
+	gap: var(--rr-space-1-5);
+	min-width: 0;
+}
+.rr-field__label {
+	font-size: 12px;
+	font-weight: var(--rr-font-weight-semibold);
+	color: var(--rr-text-secondary);
+}
+.rr-field__label--required::after {
+	content: ' *';
+	color: var(--rr-color-error);
+}
+.rr-field__help {
+	font-size: var(--rr-font-size-dense);
+	color: var(--rr-text-caption);
+}
+.rr-field__error {
+	font-size: var(--rr-font-size-dense);
+	color: var(--rr-color-error);
+}
+
+/* ===================================================================== */
+/* Checkbox, radio, switch                                               */
+/* ===================================================================== */
+
+/** Label wrapper for a checkbox, radio or switch and its text. */
+.rr-choice {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--rr-space-2);
+	font-size: 13px;
+	color: var(--rr-text-primary);
+	cursor: pointer;
+	user-select: none;
+}
+.rr-choice:has(:disabled) {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+.rr-checkbox,
+.rr-radio {
+	flex-shrink: 0;
+	width: 15px;
+	height: 15px;
+	margin: 0;
+	accent-color: var(--rr-accent);
+	cursor: inherit;
+}
+.rr-radio {
+	border-radius: 50%;
+}
+
+/** Switch — <input type="checkbox" role="switch" class="rr-switch">. */
+.rr-switch {
+	position: relative;
+	flex-shrink: 0;
+	width: 30px;
+	height: 18px;
+	margin: 0;
+	appearance: none;
+	background: var(--rr-grey-400);
+	border-radius: var(--rr-radius-pill);
+	cursor: inherit;
+	transition: background-color var(--rr-duration-base) var(--rr-ease-standard);
+}
+.rr-switch::before {
+	content: '';
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 14px;
+	height: 14px;
+	background: #ffffff;
+	border-radius: 50%;
+	box-shadow: var(--rr-elevation-1);
+	transition: transform var(--rr-duration-base) var(--rr-ease-standard);
+}
+.rr-switch:checked {
+	background: var(--rr-accent);
+}
+.rr-switch:checked::before {
+	transform: translateX(12px);
+}
+
+/* ===================================================================== */
+/* Chip — mirrors components/chip/Chip.tsx                               */
+/* ===================================================================== */
+
+.rr-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	padding: 5px 11px;
+	font-size: 12px;
+	font-weight: var(--rr-font-weight-semibold);
+	line-height: 1.2;
+	color: var(--rr-color-info);
+	background: var(--rr-bg-info-soft);
+	border: 1px solid transparent;
+	border-radius: 14px;
+	white-space: nowrap;
+}
+.rr-chip--outline {
+	color: var(--rr-text-primary);
+	background: transparent;
+	border-color: var(--rr-border);
+	cursor: pointer;
+}
+.rr-chip--outline:hover {
+	background: var(--rr-bg-widget-hover);
+}
+.rr-chip--accent {
+	color: var(--rr-accent);
+	background: var(--rr-bg-accent-soft);
+}
+.rr-chip__remove {
+	display: inline-flex;
+	padding: 0;
+	font: inherit;
+	color: inherit;
+	background: none;
+	border: 0;
+	border-radius: var(--rr-radius-xs);
+	opacity: 0.65;
+	cursor: pointer;
+}
+.rr-chip__remove:hover {
+	opacity: 1;
+}
+
+/* ===================================================================== */
+/* Badge + dot — mirrors components/status-badge/StatusBadge.tsx         */
+/* ===================================================================== */
+
+.rr-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
+	height: 22px;
+	padding: 0 var(--rr-space-2-5);
+	font-size: var(--rr-font-size-dense);
+	font-weight: var(--rr-font-weight-semibold);
+	white-space: nowrap;
+	color: var(--rr-text-secondary);
+	background: transparent;
+	border: 1px solid var(--rr-border);
+	border-radius: 20px;
+}
+.rr-badge--success {
+	color: var(--rr-color-success);
+	background: var(--rr-bg-success-soft);
+	border-color: var(--rr-border-success-soft);
+}
+.rr-badge--info {
+	color: var(--rr-color-info);
+	background: var(--rr-bg-info-soft);
+	border-color: var(--rr-border-info-soft);
+}
+.rr-badge--warning {
+	color: var(--rr-color-warning);
+	background: var(--rr-bg-warning-soft);
+	border-color: var(--rr-border-warning-soft);
+}
+.rr-badge--error {
+	color: var(--rr-color-error);
+	background: var(--rr-bg-error-soft);
+	border-color: var(--rr-border-error-soft);
+}
+
+/** Count badge — notification counts on icons and tabs. */
+.rr-count {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 16px;
+	height: 16px;
+	padding: 0 var(--rr-space-1);
+	font-size: 10px;
+	font-weight: var(--rr-font-weight-bold);
+	color: var(--rr-fg-button);
+	background: var(--rr-bg-button);
+	border-radius: var(--rr-radius-pill);
+}
+
+.rr-dot {
+	display: inline-block;
+	flex-shrink: 0;
+	width: 7px;
+	height: 7px;
+	background: var(--rr-text-disabled);
+	border-radius: 50%;
+}
+.rr-dot--success {
+	background: var(--rr-color-success);
+}
+.rr-dot--info {
+	background: var(--rr-color-info);
+}
+.rr-dot--warning {
+	background: var(--rr-color-warning);
+}
+.rr-dot--error {
+	background: var(--rr-color-error);
+}
+.rr-dot--pulse {
+	animation: rr-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes rr-pulse {
+	50% {
+		opacity: 0.35;
+		transform: scale(1.6);
+	}
+}
+
+/* ===================================================================== */
+/* Avatar                                                                */
+/* ===================================================================== */
+
+.rr-avatar {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-shrink: 0;
+	width: 28px;
+	height: 28px;
+	overflow: hidden;
+	font-size: 11px;
+	font-weight: var(--rr-font-weight-semibold);
+	color: var(--rr-text-primary);
+	background: var(--rr-bg-accent-soft);
+	border-radius: 50%;
+	user-select: none;
+}
+.rr-avatar > img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+}
+.rr-avatar--sm {
+	width: 22px;
+	height: 22px;
+	font-size: 9px;
+}
+.rr-avatar--lg {
+	width: 40px;
+	height: 40px;
+	font-size: 14px;
+}
+.rr-avatar--square {
+	border-radius: var(--rr-radius-md);
+}
+
+/** Overlapping avatar stack. */
+.rr-avatar-group {
+	display: inline-flex;
+}
+.rr-avatar-group > .rr-avatar {
+	box-shadow: 0 0 0 2px var(--rr-bg-paper);
+}
+.rr-avatar-group > .rr-avatar + .rr-avatar {
+	margin-left: -6px;
+}
+
+/* ===================================================================== */
+/* Alert — mirrors components/banner/Banner.tsx                          */
+/* ===================================================================== */
+
+/* Same tinted fill and status border as Banner, but the body text stays
+   --rr-text-primary: status colours (warning yellow above all) fall under
+   3:1 as text on light themes. The status colour lives on the border and
+   the icon, which only need 3:1 as non-text. */
+.rr-alert {
+	--rr-alert-tone: var(--rr-text-secondary);
+	display: flex;
+	align-items: flex-start;
+	gap: var(--rr-space-2-5);
+	padding: var(--rr-space-3) var(--rr-space-4);
+	font-size: 13.5px;
+	line-height: var(--rr-line-height-normal);
+	color: var(--rr-text-primary);
+	background: var(--rr-bg-surface-alt);
+	border: 1px solid var(--rr-alert-tone);
+	border-radius: var(--rr-radius-lg);
+}
+.rr-alert--info {
+	--rr-alert-tone: var(--rr-color-info);
+	background: var(--rr-bg-info-soft);
+}
+.rr-alert--success {
+	--rr-alert-tone: var(--rr-color-success);
+	background: var(--rr-bg-success-soft);
+}
+.rr-alert--warning {
+	--rr-alert-tone: var(--rr-color-warning);
+	background: var(--rr-bg-warning-soft);
+}
+.rr-alert--error {
+	--rr-alert-tone: var(--rr-color-error);
+	background: var(--rr-bg-error-soft);
+}
+.rr-alert__icon {
+	display: inline-flex;
+	flex-shrink: 0;
+	padding-top: 2px;
+	color: var(--rr-alert-tone);
+}
+.rr-alert__body {
+	flex: 1;
+	min-width: 0;
+}
+.rr-alert__title {
+	font-weight: var(--rr-font-weight-semibold);
+}
+
+/* ===================================================================== */
+/* Progress, spinner, skeleton                                           */
+/* ===================================================================== */
+
+/** Linear progress — set the bar width inline (style="width: 40%"). */
+.rr-progress {
+	position: relative;
+	width: 100%;
+	height: 4px;
+	overflow: hidden;
+	background: var(--rr-grey-200);
+	border-radius: var(--rr-radius-pill);
+}
+.rr-progress__bar {
+	height: 100%;
+	background: var(--rr-accent);
+	border-radius: inherit;
+	transition: width var(--rr-duration-slow) var(--rr-ease-standard);
+}
+.rr-progress--indeterminate .rr-progress__bar {
+	position: absolute;
+	width: 40%;
+	animation: rr-indeterminate 1.2s var(--rr-ease-standard) infinite;
+}
+
+@keyframes rr-indeterminate {
+	from {
+		left: -40%;
+	}
+	to {
+		left: 100%;
+	}
+}
+
+.rr-spinner {
+	display: inline-block;
+	flex-shrink: 0;
+	width: 16px;
+	height: 16px;
+	border: 2px solid var(--rr-grey-200);
+	border-top-color: var(--rr-accent);
+	border-radius: 50%;
+	animation: rr-spin 0.8s linear infinite;
+}
+.rr-spinner--sm {
+	width: 12px;
+	height: 12px;
+	border-width: 1.5px;
+}
+.rr-spinner--lg {
+	width: 28px;
+	height: 28px;
+	border-width: 3px;
+}
+
+@keyframes rr-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.rr-skeleton {
+	display: block;
+	height: 12px;
+	background: linear-gradient(90deg, var(--rr-grey-200) 0%, var(--rr-bg-surface-alt) 50%, var(--rr-grey-200) 100%);
+	background-size: 200% 100%;
+	border-radius: var(--rr-radius-sm);
+	animation: rr-shimmer 1.4s ease-in-out infinite;
+}
+.rr-skeleton--circle {
+	border-radius: 50%;
+}
+
+@keyframes rr-shimmer {
+	from {
+		background-position: 100% 0;
+	}
+	to {
+		background-position: -100% 0;
+	}
+}
+
+/* ===================================================================== */
+/* Overlays — scrim, dialog, popover, menu, tooltip                       */
+/* Positioning is the component's job; these are the surfaces.           */
+/* ===================================================================== */
+
+.rr-scrim {
+	position: fixed;
+	inset: 0;
+	z-index: var(--rr-z-modal);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--rr-bg-overlay);
+	animation: rr-fade-in var(--rr-duration-base) var(--rr-ease-out);
+}
+
+/** Dialog surface — mirrors commonStyles.dialog. */
+.rr-dialog {
+	display: flex;
+	flex-direction: column;
+	max-width: calc(100vw - 32px);
+	max-height: calc(100vh - 32px);
+	color: var(--rr-text-primary);
+	background: var(--rr-bg-widget);
+	border: 1px solid var(--rr-border);
+	border-radius: var(--rr-radius-xl);
+	box-shadow: var(--rr-elevation-3);
+	animation: rr-rise-in var(--rr-duration-base) var(--rr-ease-out);
+}
+.rr-dialog__header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--rr-space-3);
+	padding: var(--rr-space-4) var(--rr-space-5) var(--rr-space-2);
+	font-size: var(--rr-font-size-subtitle);
+	font-weight: var(--rr-font-weight-semibold);
+}
+.rr-dialog__body {
+	flex: 1;
+	min-height: 0;
+	padding: var(--rr-space-2) var(--rr-space-5);
+	overflow: auto;
+}
+.rr-dialog__footer {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--rr-space-2);
+	padding: var(--rr-space-4) var(--rr-space-5);
+}
+
+/** Floating surface — popovers, dropdown panels. Mirrors commonStyles.popupMenu. */
+.rr-popover {
+	z-index: var(--rr-z-menu);
+	color: var(--rr-text-primary);
+	background: var(--rr-bg-paper);
+	border: 1px solid var(--rr-border);
+	border-radius: var(--rr-radius-lg);
+	box-shadow: var(--rr-elevation-2);
+	animation: rr-fade-in var(--rr-duration-fast) var(--rr-ease-out);
+}
+
+/** Menu — a popover holding menu rows. role="menu" / role="listbox". */
+.rr-menu {
+	display: flex;
+	flex-direction: column;
+	min-width: 160px;
+	padding: var(--rr-space-1);
+}
+
+/** Menu row — mirrors commonStyles.menuRow. */
+.rr-menu__item {
+	display: flex;
+	align-items: center;
+	gap: var(--rr-space-2);
+	width: 100%;
+	padding: 5px var(--rr-space-2-5);
+	font: inherit;
+	font-size: 13px;
+	text-align: left;
+	white-space: nowrap;
+	color: var(--rr-text-primary);
+	background: transparent;
+	border: 0;
+	border-radius: var(--rr-radius-md);
+	cursor: pointer;
+}
+.rr-menu__item:hover,
+.rr-menu__item[data-active='true'] {
+	background: var(--rr-bg-list-hover);
+}
+.rr-menu__item[aria-checked='true'],
+.rr-menu__item[aria-selected='true'] {
+	background: var(--rr-bg-accent-soft);
+}
+.rr-menu__item[aria-disabled='true'] {
+	opacity: 0.5;
+	cursor: default;
+	pointer-events: none;
+}
+.rr-menu__item--danger {
+	color: var(--rr-color-error);
+}
+.rr-menu__shortcut {
+	margin-left: auto;
+	padding-left: var(--rr-space-4);
+	font-size: var(--rr-font-size-dense);
+	color: var(--rr-text-disabled);
+}
+.rr-menu__label {
+	padding: var(--rr-space-1-5) var(--rr-space-2-5) var(--rr-space-1);
+}
+.rr-menu__divider {
+	height: 1px;
+	margin: var(--rr-space-1) 0;
+	background: var(--rr-border);
+}
+
+.rr-tooltip {
+	z-index: var(--rr-z-tooltip);
+	max-width: 280px;
+	padding: var(--rr-space-1) var(--rr-space-2);
+	font-size: var(--rr-font-size-dense);
+	line-height: 1.4;
+	color: var(--rr-fg-tooltip);
+	background: var(--rr-bg-tooltip);
+	border-radius: var(--rr-radius-md);
+	pointer-events: none;
+	animation: rr-fade-in var(--rr-duration-fast) var(--rr-ease-out);
+}
+
+@keyframes rr-fade-in {
+	from {
+		opacity: 0;
+	}
+}
+
+@keyframes rr-rise-in {
+	from {
+		opacity: 0;
+		transform: translateY(6px) scale(0.98);
+	}
+}
+
+/* ===================================================================== */
+/* List and table                                                        */
+/* ===================================================================== */
+
+/** List / tree row — mirrors commonStyles.listRow. */
+.rr-list__item {
+	display: flex;
+	align-items: center;
+	gap: var(--rr-space-1-5);
+	width: 100%;
+	padding: var(--rr-space-1) var(--rr-space-2);
+	font: inherit;
+	font-size: 13px;
+	text-align: left;
+	color: var(--rr-text-primary);
+	background: transparent;
+	border: 0;
+	border-radius: var(--rr-radius-sm);
+	cursor: pointer;
+	user-select: none;
+}
+.rr-list__item:hover {
+	background: var(--rr-bg-list-hover);
+}
+.rr-list__item[aria-selected='true'],
+.rr-list__item[aria-current='true'],
+.rr-list__item[aria-current='page'] {
+	color: var(--rr-fg-list-active);
+	background: var(--rr-bg-list-active);
+}
+
+/** Plain data table — mirrors commonStyles.tableHeader / tableCell. For
+    large, sortable or paged data use the DataGrid component instead. */
+.rr-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+	color: var(--rr-text-primary);
+}
+.rr-table th {
+	padding: var(--rr-space-2) 14px;
+	font-size: var(--rr-font-size-label);
+	font-weight: var(--rr-font-weight-semibold);
+	letter-spacing: 0.6px;
+	text-align: left;
+	text-transform: uppercase;
+	color: var(--rr-text-disabled);
+	border-bottom: 1px solid var(--rr-border);
+}
+.rr-table td {
+	padding: var(--rr-space-2-5) 14px;
+	vertical-align: middle;
+	border-bottom: 1px solid var(--rr-border-subtle);
+}
+.rr-table--hover tbody tr:hover {
+	background: var(--rr-bg-list-hover);
+}
+
+/* ===================================================================== */
+/* Utilities                                                             */
+/* ===================================================================== */
+
+.rr-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+.rr-truncate {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+/* ===================================================================== */
+/* Reduced motion                                                        */
+/* ===================================================================== */
+
+/* Scoped to this file's classes so existing rr-grid / rr-chat motion is
+   untouched. The spinner keeps turning: it is the only signal of work. */
+@media (prefers-reduced-motion: reduce) {
+	.rr-btn,
+	.rr-icon-btn,
+	.rr-input,
+	.rr-switch,
+	.rr-switch::before,
+	.rr-dot--pulse,
+	.rr-progress__bar,
+	.rr-skeleton,
+	.rr-scrim,
+	.rr-dialog,
+	.rr-popover,
+	.rr-tooltip {
+		animation: none !important;
+		transition: none !important;
+	}
+}

@@ -151,6 +151,7 @@
 	/* ================================================================== */
 
 	--rr-font-family: var(--vscode-font-family, Roboto, -apple-system, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif);
+	--rr-font-family-mono: var(--vscode-editor-font-family, ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace);
 	--rr-font-size: var(--vscode-font-size, 0.75rem);
 	--rr-font-size-sm: 0.6rem;
 	--rr-font-size-xs: 0.5rem;

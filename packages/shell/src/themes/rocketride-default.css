@@ -337,6 +337,174 @@
 }
 
 /* ===================================================================== */
+/* Foundation tokens                                                     */
+/* ===================================================================== */
+/*
+ * Structural and derived tokens for the component stylesheet
+ * (themes/components.css) and for any component that needs a scale step.
+ *
+ * NONE of these are theme keys. Theme JSONs never define them and they
+ * are not part of ThemeTokens: each one is either theme-independent
+ * (radius, spacing, motion, z-index) or DERIVED from the per-theme
+ * tokens above with var() / color-mix(). applyTheme() sets the per-theme
+ * tokens inline on <html>; these resolve against those values, so every
+ * theme JSON and the VS Code map (rocketride-vscode.css) pick them up
+ * with no extra entries.
+ *
+ * The scales mirror values the stock components already use, so a
+ * component can swap a literal for its token with no visual change.
+ */
+:root {
+	/* ================================================================== */
+	/* Radius                                                              */
+	/* ================================================================== */
+
+	/** Micro chrome — mini buttons, canvas-node controls. */
+	--rr-radius-xs: 3px;
+
+	/** List rows, legacy input fields. */
+	--rr-radius-sm: 5px;
+
+	/** Menu rows, small buttons. */
+	--rr-radius-md: 6px;
+
+	/** Cards, menus, popovers. */
+	--rr-radius-lg: 8px;
+
+	/** Dialogs, badges, icon boxes. */
+	--rr-radius-xl: 10px;
+
+	/** Pills — chips, status badges, switches, avatars. */
+	--rr-radius-pill: 999px;
+
+	/* ================================================================== */
+	/* Spacing (4px grid, with the 2/6/10 half-steps the shell uses)       */
+	/* ================================================================== */
+
+	--rr-space-0-5: 2px;
+	--rr-space-1: 4px;
+	--rr-space-1-5: 6px;
+	--rr-space-2: 8px;
+	--rr-space-2-5: 10px;
+	--rr-space-3: 12px;
+	--rr-space-4: 16px;
+	--rr-space-5: 20px;
+	--rr-space-6: 24px;
+	--rr-space-8: 32px;
+	--rr-space-10: 40px;
+
+	/* ================================================================== */
+	/* Controls                                                            */
+	/* ================================================================== */
+
+	/** Default control height — Button, InputField. */
+	--rr-control-height: 34px;
+
+	/** Compact control height — card and grid header chrome. */
+	--rr-control-height-sm: 26px;
+
+	/** Micro control height — canvas-node chrome. */
+	--rr-control-height-mini: 16px;
+
+	/** Default control radius — Button, InputField. */
+	--rr-control-radius: 7px;
+
+	/* ================================================================== */
+	/* Typography                                                          */
+	/* ================================================================== */
+
+	/** Monospace family — code, IDs, keys, numeric cells. */
+	--rr-font-family-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, 'Courier New', monospace;
+
+	/** Alias kept for existing call sites that read --rr-font-mono. */
+	--rr-font-mono: var(--rr-font-family-mono);
+
+	--rr-font-weight-regular: 400;
+	--rr-font-weight-medium: 500;
+	--rr-font-weight-semibold: 600;
+	--rr-font-weight-bold: 700;
+
+	--rr-line-height-tight: 1.2;
+	--rr-line-height-normal: 1.5;
+
+	/** Label / table-header text (uppercase micro labels). */
+	--rr-font-size-label: 10px;
+
+	/** Dense UI text — badges, chips, small buttons. */
+	--rr-font-size-dense: 11.5px;
+
+	/* ================================================================== */
+	/* Elevation — shadow geometry over the per-theme shadow colour         */
+	/* ================================================================== */
+
+	/** Resting raised surface — cards that float over content. */
+	--rr-elevation-1: 0 1px 3px var(--rr-shadow-widget);
+
+	/** Menus, popovers, dropdowns. */
+	--rr-elevation-2: 0 4px 12px var(--rr-shadow-widget);
+
+	/** Dialogs and drawers. */
+	--rr-elevation-3: 0 12px 40px var(--rr-shadow-widget);
+
+	/** Keyboard focus ring — a gap in the page colour, then the focus colour. */
+	--rr-focus-ring: 0 0 0 1px var(--rr-bg-default), 0 0 0 3px var(--rr-border-focus);
+
+	/* ================================================================== */
+	/* Derived colour                                                      */
+	/* ================================================================== */
+
+	/** Accent-tinted fill — selected rows, active nav, accent hover. */
+	--rr-bg-accent-soft: color-mix(in srgb, var(--rr-accent) 12%, transparent);
+
+	/** Status-tinted fills and borders — badges, alerts, banners. Same
+	    strengths StatusBadge uses, so both read identically. */
+	--rr-bg-success-soft: color-mix(in srgb, var(--rr-color-success) 7%, transparent);
+	--rr-bg-info-soft: color-mix(in srgb, var(--rr-color-info) 6%, transparent);
+	--rr-bg-warning-soft: color-mix(in srgb, var(--rr-color-warning) 10%, transparent);
+	--rr-bg-error-soft: color-mix(in srgb, var(--rr-color-error) 6%, transparent);
+	--rr-border-success-soft: color-mix(in srgb, var(--rr-color-success) 40%, transparent);
+	--rr-border-info-soft: color-mix(in srgb, var(--rr-color-info) 40%, transparent);
+	--rr-border-warning-soft: color-mix(in srgb, var(--rr-color-warning) 55%, transparent);
+	--rr-border-error-soft: color-mix(in srgb, var(--rr-color-error) 40%, transparent);
+
+	/** Faint divider — table cell rules, list separators. */
+	--rr-border-subtle: color-mix(in srgb, var(--rr-border) 30%, transparent);
+
+	/** Modal / drawer scrim. */
+	--rr-bg-overlay: rgba(0, 0, 0, 0.45);
+
+	/** Tooltip — inverse of the page so it reads on any surface. */
+	--rr-bg-tooltip: var(--rr-text-primary);
+	--rr-fg-tooltip: var(--rr-bg-default);
+
+	/* ================================================================== */
+	/* Motion                                                              */
+	/* ================================================================== */
+
+	--rr-duration-fast: 120ms;
+	--rr-duration-base: 200ms;
+	--rr-duration-slow: 350ms;
+	--rr-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+	--rr-ease-out: cubic-bezier(0, 0, 0.2, 1);
+
+	/* ================================================================== */
+	/* Z-index — the layers the shell already uses, named                  */
+	/* ================================================================== */
+
+	--rr-z-raised: 10;
+	--rr-z-sticky: 100;
+	--rr-z-overlay: 200;
+	--rr-z-banner: 1000;
+	--rr-z-drawer: 1200;
+	--rr-z-panel: 1500;
+	--rr-z-modal: 2000;
+	--rr-z-popover: 2100;
+	--rr-z-menu: 10000;
+	--rr-z-toast: 10500;
+	--rr-z-tooltip: 11000;
+}
+
+/* ===================================================================== */
 /* Dark-theme overrides                                                  */
 /* ===================================================================== */
 /*

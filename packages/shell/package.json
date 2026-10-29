@@ -7,7 +7,8 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./src/*": "./src/*",
-		"./themes/rocketride-default.css": "./src/themes/rocketride-default.css"
+		"./themes/rocketride-default.css": "./src/themes/rocketride-default.css",
+		"./themes/components.css": "./src/themes/components.css"
 	},
 	"description": "RocketRide Shell \u2014 Module Federation host with dynamic app loading",
 	"license": "MIT",

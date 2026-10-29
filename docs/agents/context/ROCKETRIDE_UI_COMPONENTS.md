@@ -16,7 +16,7 @@ In prop tables, Dir is the direction — `in` = data the component consumes,
 match the gallery's own: [Host chrome](#host-chrome),
 [Sidebar content](#sidebar-content), [Document system](#document-system),
 [Content components](#content-components), [Hooks & context](#hooks--context),
-[Utilities](#utilities).
+[Utilities](#utilities), [Stylesheet classes](#stylesheet-classes).
 
 ---
 
@@ -1588,3 +1588,56 @@ const styles: Record<string, React.CSSProperties> = {
 	callout: { border: '1px solid var(--rr-border)', background: 'var(--rr-bg-surface-alt)' },
 };
 ```
+
+---
+
+## Stylesheet classes
+
+`shell/themes/components.css` — token-only `rr-` classes for markup that has
+no stock component yet (and the surfaces the stock components are built on).
+The shell loads it, so apps inside the shell need no import. VS Code webviews
+(outside the shell) import it after the tokens:
+
+```tsx
+import 'shell/themes/rocketride-default.css';
+import 'shell/themes/components.css';
+```
+
+Naming is BEM on the `rr-` prefix: block `.rr-btn`, element `.rr-field__label`,
+modifier `.rr-btn--danger`. State comes from native and ARIA attributes, not
+state classes: `:disabled`, `aria-invalid="true"`, `aria-selected`,
+`aria-checked`, `aria-pressed`, `aria-expanded`, `aria-disabled`.
+
+| Block | Elements / modifiers | Notes |
+|---|---|---|
+| `.rr-btn` | `--primary` `--secondary` `--ghost` `--danger`, `--sm` `--mini` `--block` | Same geometry as `Button`. One `--primary` per view. |
+| `.rr-icon-btn` | `--sm` | Icon-only; always set `aria-label`. |
+| `.rr-input` | `--sm`; works on `input`, `textarea`, `select` | Same geometry as `InputField`. `aria-invalid="true"` for errors. |
+| `.rr-input-group` | `--start` `--end`, `__start` `__end` | Leading/trailing icon inside an input. |
+| `.rr-field` | `__label` (`--required`), `__help`, `__error` | Label + control + help/error stack. |
+| `.rr-choice` | wraps `.rr-checkbox`, `.rr-radio`, `.rr-switch` | Switch is `<input type="checkbox" role="switch">`. |
+| `.rr-chip` | `--outline` `--accent`, `__remove` | Same look as `Chip` / `ChipAdd`. |
+| `.rr-badge` | `--success` `--info` `--warning` `--error` | Same look as `StatusBadge`; pair with `.rr-dot`. |
+| `.rr-dot` | `--success` `--info` `--warning` `--error` `--pulse` | Same as `StatusDot`. |
+| `.rr-count` | | Numeric count on tabs and icons. |
+| `.rr-avatar` | `--sm` `--lg` `--square`; `.rr-avatar-group` | Initials or an `<img>` child. |
+| `.rr-alert` | `--info` `--success` `--warning` `--error`, `__icon` `__body` `__title` | Body text stays primary; status colour on border and icon. Use `Banner` for live-region messages. |
+| `.rr-paper` | `--raised` `--padded`, `__header` `__body` | Card surface (`commonStyles.card`). |
+| `.rr-divider` | `--vertical` | |
+| `.rr-progress` | `--indeterminate`, `__bar` | Set the bar width inline. |
+| `.rr-spinner` | `--sm` `--lg` | |
+| `.rr-skeleton` | `--circle` | Size it inline. |
+| `.rr-scrim` | | Fixed full-screen modal backdrop. |
+| `.rr-dialog` | `__header` `__body` `__footer` | Surface only; focus trapping is the component's job. |
+| `.rr-popover` | | Floating surface; position it yourself. |
+| `.rr-menu` | `__item` (`--danger`), `__shortcut`, `__label`, `__divider` | Put on a `.rr-popover`. `data-active="true"` marks the keyboard-highlighted row. |
+| `.rr-tooltip` | | Inverse surface, `role="tooltip"`. |
+| `.rr-list__item` | | Tree/list row (`commonStyles.listRow`); `aria-selected` or `aria-current` for the active row. |
+| `.rr-table` | `--hover` | Small static tables. Use `DataGrid` for sortable or paged data. |
+| `.rr-text-*` | `h1`-`h5`, `subtitle`, `body`, `secondary`, `caption`, `label`, `mono` | Type styles from the theme tokens. |
+| `.rr-link`, `.rr-kbd` | | |
+| utilities | `.rr-focusable`, `.rr-sr-only`, `.rr-truncate` | |
+
+**Rule:** Prefer a stock component when one exists. Use the classes for
+markup the stock set does not cover yet; never restyle a class with literal
+colours, use the tokens.
