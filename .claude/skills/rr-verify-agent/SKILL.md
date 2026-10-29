@@ -23,6 +23,7 @@ $S/rr-verify-agent doctor                           # read-only health check; ru
 $S/rr-verify-agent drive <journey>                  # see journeys.md
 $S/rr-verify-agent engine <cmd>                     # read the workspace through the engine (ls, cat, validate, probe, snapshot)
 $S/rr-verify-agent cleanup                          # stop only what launch started; evidence stays
+$S/rr-verify-agent keys <cmd> [...]                 # run a command with the model keys, found the way launch finds them
 ```
 
 ## One run per machine
@@ -104,6 +105,8 @@ verify-rocketride's doctor (shown by `doctor` and kept in `engine.json`) warns a
    - `packages/shell/.rocketride/verify.rsbuild.config.mts` adds one proxy rule first, sending that prefix to the rocket-ui dev server.
 7. Starts both dev servers in their own process groups. `.verify/agent-state/*.pgid` records each leader's pid and start time, and `engine.pid` does the same for a source engine, so a pid the kernel reused later is never taken for one of them. Ready means `http://127.0.0.1:3000/apps/rocketride.pipeBuilder/dev/package.json` comes back through the shell with `"id": "rocketride.pipeBuilder"`.
 8. Runs `doctor`.
+
+`rr-verify-agent launch --engine-only` starts the engine alone, with its provenance, and no browser or dev servers. The eval runner's L3 (apps/shared/src/modules/agent/eval/README.md) starts its engine this way, under the same lock, and stops it with `cleanup`.
 
 The page to drive is `http://127.0.0.1:3000/?appid=rocketride.pipeBuilder&rrdev=1`. `rrdev=1` makes the shell self-register the branch's rocket-ui from the dev prefix instead of the engine's published bundle. `drive` and `engine` refuse to run unless the engine on 5565 is this checkout's.
 
