@@ -168,17 +168,14 @@ def test_a_provider_two_nodes_claim_is_served_by_the_first_and_warned_about(serv
     assert len(server['warnings']) == 1 and 'provider_x' in server['warnings'][0]
 
 
-def test_a_read_only_install_serves_nothing_and_says_so_once(server, monkeypatch, tmp_path):
-    parent = tmp_path / 'readonly'
-    (parent / 'nodes').mkdir(parents=True)
-    parent.chmod(0o555)
-    (parent / 'nodes').chmod(0o555)
-    monkeypatch.setattr(node_store.node_release, 'nodes_dir', lambda: str(parent / 'nodes'))
-    try:
-        node_store.start()
-    finally:
-        (parent / 'nodes').chmod(0o755)
-        parent.chmod(0o755)
+def test_a_read_only_install_serves_nothing_and_says_so_once(server, monkeypatch):
+    def read_only(dir=None, **kwargs):
+        # What a read-only mount answers; a chmod cannot make a folder read-only on Windows
+        raise OSError(30, 'Read-only file system', dir)
+
+    monkeypatch.setattr(node_store.tempfile, 'NamedTemporaryFile', read_only)
+
+    node_store.start()
 
     assert node_store.custom() == [] and node_store.place({'components': [{'provider': 'provider_x'}]}) == []
     assert len(server['warnings']) == 1
