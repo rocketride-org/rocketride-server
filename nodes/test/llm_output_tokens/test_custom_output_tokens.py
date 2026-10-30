@@ -98,6 +98,7 @@ def test_the_services_are_found():
         'llm_bedrock/services.json',
         'llm_ollama/services.json',
         'llm_xai/services.json',
+        'llm_gemini/services.json',
     ):
         assert service_file in services
 
@@ -257,3 +258,128 @@ def test_a_stale_block_of_another_profile_is_not_reported(monkeypatch):
     _start_openai_node(monkeypatch, conn, warnings)
 
     assert warnings == []
+
+
+class _RecordingGenaiClient:
+    """Stand-in for google.genai.Client that records each generate_content call."""
+
+    def __init__(self, **kwargs):
+        """Accept the real constructor's arguments (api_key, ...) and start an empty call log."""
+        self.calls = []
+        client = self
+
+        class _Models:
+            def generate_content(self, **call):
+                """Record the call's arguments and answer with a text-only response."""
+                client.calls.append(call)
+                return types.SimpleNamespace(text='ok', usage_metadata=None)
+
+        self.models = _Models()
+
+
+def _start_gemini_node(monkeypatch, conn_config: dict, warnings: list | None = None):
+    """Start the Gemini node the way its IGlobal does, with the client stubbed.
+
+    IGlobal.beginGlobal hands the raw settings to Chat, and both Chat and ChatBase
+    resolve them with the real getNodeConfig.
+    """
+    from ai.common.config import Config
+
+    get_node_config = _real_get_node_config(_service('llm_gemini/services.json'), warnings)
+    genai = types.ModuleType('google.genai')
+    genai.Client = _RecordingGenaiClient
+    google = types.ModuleType('google')
+    google.genai = genai
+    monkeypatch.setitem(sys.modules, 'google', google)
+    monkeypatch.setitem(sys.modules, 'google.genai', genai)
+    monkeypatch.setattr(Config, 'getNodeConfig', staticmethod(get_node_config))
+    spec = importlib.util.spec_from_file_location('_llm_gemini_output', _NODES / 'llm_gemini' / 'gemini.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.Chat('llm_gemini', conn_config, {})
+
+
+def _gemini_sent_limit(chat) -> int | None:
+    """The max_output_tokens the node sent to Google on one request, or None when it sent none."""
+    chat._chat('hi')
+    config = chat._client.calls[-1]['config']
+    return config['max_output_tokens'] if config else None
+
+
+_GEMINI_CUSTOM = {'model': 'models/my-model', 'apikey': 'k', 'modelTotalTokens': 1000000}
+
+
+def test_gemini_a_value_from_the_form_reaches_google(monkeypatch):
+    """Custom Gemini model, output limit 8,192 typed in the form: ChatBase uses it and Google receives it."""
+    chat = _start_gemini_node(
+        monkeypatch, {'profile': 'custom', 'custom': {**_GEMINI_CUSTOM, 'modelOutputTokens': 8192}}
+    )
+
+    assert chat.getOutputTokens() == 8192
+    assert _gemini_sent_limit(chat) == 8192
+
+
+def test_gemini_a_catalogue_profile_sends_its_limit(monkeypatch):
+    """Every profile now sends its limit, not only Custom: Google applied its own default before."""
+    service = _service('llm_gemini/services.json')
+    profile = 'gemini-2_5-flash'
+    expected = service['preconfig']['profiles'][profile]['modelOutputTokens']
+
+    chat = _start_gemini_node(monkeypatch, {'profile': profile, profile: {'apikey': 'k'}})
+
+    assert _gemini_sent_limit(chat) == expected
+
+
+@pytest.mark.parametrize(
+    ('profile', 'google_limit'),
+    [
+        ('gemini-2_0-flash', 8192),
+        ('gemini-2_0-flash-lite', 8192),
+        ('gemini-3_1-flash-image-preview', 32768),
+        ('models-gemini-3-1-flash-lite-image', 4096),
+    ],
+)
+def test_gemini_profiles_send_no_more_than_google_allows(monkeypatch, profile, google_limit):
+    """These profiles declared more than Google's documented output limit.
+
+    Gemini 2.0 Flash and Flash Lite carried 65,535 and 65,536 by hand; the two image
+    models carried OpenRouter's 58,982. That did no harm while the limit was never
+    sent. Now that it is, a value above the model's maximum fails the request, so
+    the expected values are Google's (https://ai.google.dev/gemini-api/docs/models),
+    fixed here rather than read from the file. They are pinned in
+    sync_models.config.json so the model sync keeps them.
+    """
+    chat = _start_gemini_node(monkeypatch, {'profile': profile, profile: {'apikey': 'k'}})
+
+    assert _gemini_sent_limit(chat) == google_limit
+
+
+def test_gemini_a_custom_model_with_no_output_limit_sends_none(monkeypatch):
+    """Output Tokens left empty on a Custom model: Google gets no limit and uses the model's own maximum.
+
+    The Custom profile's default, 65,536, is only inherited. Sending it would fail every
+    Custom model whose cap is lower, such as models/gemini-2.5-flash-image (32,768),
+    which worked before the node sent a limit. ChatBase still plans with the default.
+    """
+    custom_default = _service('llm_gemini/services.json')['preconfig']['profiles']['custom']['modelOutputTokens']
+
+    chat = _start_gemini_node(monkeypatch, {'profile': 'custom', 'custom': dict(_GEMINI_CUSTOM)})
+
+    assert chat.getOutputTokens() == custom_default
+    assert _gemini_sent_limit(chat) is None
+
+
+def test_gemini_the_old_output_tokens_key_is_named_not_used(monkeypatch):
+    """A pipeline saved with the old "outputTokens" key runs as it did, and is told the fix.
+
+    The value was never read, so honouring it now would change those pipelines'
+    behaviour without anyone asking: as before, Google receives no limit. The
+    misnamed-key warning names the real key.
+    """
+    warnings = []
+    conn = {'profile': 'custom', 'custom': {**_GEMINI_CUSTOM, 'outputTokens': 8192}}
+
+    chat = _start_gemini_node(monkeypatch, conn, warnings)
+
+    assert _gemini_sent_limit(chat) is None
+    assert any('"outputTokens"' in w and 'did you mean "modelOutputTokens"' in w for w in warnings)
