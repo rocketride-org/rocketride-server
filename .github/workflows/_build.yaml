@@ -111,6 +111,13 @@ jobs:
         # ubuntu image, so macOS only.
         if: matrix.platform == 'macos'
         run: brew install mono
+      - name: Install Python build tools / macOS
+        # compiler-unix.sh requires build + wheel for the python3 on PATH, and
+        # its --autoinstall only covers apt. The macos-15 image's Homebrew
+        # python3 (3.15 since late Oct 2026) ships without wheel, and it is
+        # PEP 668 managed, hence --break-system-packages. macOS only.
+        if: matrix.platform == 'macos'
+        run: python3 -m pip install --break-system-packages build wheel
       - name: Set up vcpkg nuget / Linux/macOS
         if: matrix.platform != 'windows'
         run: |
