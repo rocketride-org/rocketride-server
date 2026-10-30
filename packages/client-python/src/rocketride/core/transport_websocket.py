@@ -77,6 +77,18 @@ except ImportError:
 from .transport import TransportBase
 
 
+def _headers_keyword() -> str:
+    """
+    Return the websockets.connect keyword that carries extra handshake headers.
+
+    Returns:
+        str: ``additional_headers`` for websockets 14 and later, ``extra_headers`` before.
+    """
+    # websockets 14 replaced the legacy client and renamed the keyword
+    major = int(websockets.__version__.split('.')[0])
+    return 'additional_headers' if major >= 14 else 'extra_headers'
+
+
 class TransportWebSocket(TransportBase):
     """
     WebSocket transport implementation for DAP protocol communication.
@@ -120,12 +132,19 @@ class TransportWebSocket(TransportBase):
     propagates exceptions. The caller (accept or _run_receive_task) owns cleanup.
     """
 
-    def __init__(self, uri: str = CONST_DEFAULT_SERVICE, **kwargs) -> None:
+    def __init__(
+        self,
+        uri: str = CONST_DEFAULT_SERVICE,
+        *,
+        headers: Optional[Dict[str, str]] = None,
+        **kwargs,
+    ) -> None:
         """
         Initialize WebSocket transport.
 
         Args:
             uri: WebSocket URI for client connections (e.g., "http://localhost:8080")
+            headers: Extra HTTP headers sent on the client handshake, e.g. ``Authorization``
             **kwargs: Additional configuration including authentication
         """
         super().__init__()
@@ -133,6 +152,7 @@ class TransportWebSocket(TransportBase):
         self._websocket: Union[object, None] = None
         self._receive_task = None
         self._uri = uri
+        self._headers = headers
         self._message_tasks: set = set()
         self._draining: bool = False
 
@@ -264,48 +284,52 @@ class TransportWebSocket(TransportBase):
         so recv() does not block disconnect() from closing the socket.
 
         Exceptions propagate to the caller (accept or _run_receive_task)
-        which owns cleanup.
+        which owns cleanup; on the way out it reports ``on_closing``.
         """
-        while self._connected:
-            if self._is_fastapi_websocket():
-                # FastAPI WebSocket receiving
-                message = await self._websocket.receive()
+        try:
+            while self._connected:
+                if self._is_fastapi_websocket():
+                    # FastAPI WebSocket receiving
+                    message = await self._websocket.receive()
 
-                if message['type'] == 'websocket.disconnect':
-                    if fastapi and WebSocketDisconnect:
-                        raise WebSocketDisconnect('Connection closed')
-                    else:
-                        raise ConnectionError('Connection closed')
+                    if message['type'] == 'websocket.disconnect':
+                        if fastapi and WebSocketDisconnect:
+                            raise WebSocketDisconnect('Connection closed')
+                        else:
+                            raise ConnectionError('Connection closed')
 
-                elif message['type'] == 'websocket.ping':
-                    await self._websocket.pong(message.get('bytes', b''))
-                    self._debug_message('Responded to client ping')
-                    continue
-
-                elif message['type'] == 'websocket.pong':
-                    self._debug_message('Received pong from client')
-                    continue
-
-                elif message['type'] == 'websocket.receive':
-                    if 'text' in message:
-                        data = message['text']
-                    elif 'bytes' in message:
-                        data = message['bytes']
-                    else:
+                    elif message['type'] == 'websocket.ping':
+                        await self._websocket.pong(message.get('bytes', b''))
+                        self._debug_message('Responded to client ping')
                         continue
 
-            else:
-                # websockets library receiving
-                data = await self._websocket.recv()
+                    elif message['type'] == 'websocket.pong':
+                        self._debug_message('Received pong from client')
+                        continue
 
-            # While draining, discard incoming packets — don't create new tasks
-            if self._draining:
-                continue
+                    elif message['type'] == 'websocket.receive':
+                        if 'text' in message:
+                            data = message['text']
+                        elif 'bytes' in message:
+                            data = message['bytes']
+                        else:
+                            continue
 
-            # Dispatch each message in its own task for concurrent processing
-            task = asyncio.create_task(self._receive_data(data))
-            self._message_tasks.add(task)
-            task.add_done_callback(self._on_message_task_done)
+                else:
+                    # websockets library receiving
+                    data = await self._websocket.recv()
+
+                # While draining, discard incoming packets — don't create new tasks
+                if self._draining:
+                    continue
+
+                # Dispatch each message in its own task for concurrent processing
+                task = asyncio.create_task(self._receive_data(data))
+                self._message_tasks.add(task)
+                task.add_done_callback(self._on_message_task_done)
+        finally:
+            # Before the caller drains in-flight handlers, which can take as long as they run
+            await self._transport_closing()
 
     async def _run_receive_task(self) -> None:
         """
@@ -374,7 +398,10 @@ class TransportWebSocket(TransportBase):
             # Convert ms to seconds for websockets library, or use default
             effective_open_timeout = timeout / 1000.0 if timeout is not None else CONST_SOCKET_TIMEOUT
 
-            # Connect without auth on upgrade; first DAP message must be auth
+            # Only callers that set headers pass the keyword
+            header_kwargs = {_headers_keyword(): self._headers} if self._headers else {}
+
+            # Auth rides the first DAP message unless the caller set handshake headers
             self._websocket = await websockets.connect(
                 self._uri,
                 ping_interval=CONST_WS_PING_INTERVAL,
@@ -383,6 +410,7 @@ class TransportWebSocket(TransportBase):
                 open_timeout=effective_open_timeout,
                 max_size=250 * 1024 * 1024,  # 250MB max message size
                 compression=None,
+                **header_kwargs,
             )
 
             self._connected = True
