@@ -407,11 +407,11 @@ export interface PlanPickerProps {
 	uniformCardHeight?: boolean;
 
 	/**
-	 * Overrides the feature-line font size (in px). When set, feature lines are
-	 * also forced onto a single line (``white-space: nowrap``) so the larger
-	 * size does not wrap inside the card. Default undefined → the base 11px with
-	 * wrapping allowed (checkout/upgrade modals). The pricing page passes a
-	 * larger value for bigger, single-line bullets.
+	 * Overrides the feature-line font size (in px). Default undefined → the base
+	 * 11px (checkout/upgrade modals). The pricing page passes a larger value for
+	 * bigger bullets. Lines wrap in a card too narrow for them: the card clips
+	 * (overflow: hidden), so a single-line rule cut them off mid-word on phones,
+	 * tablets and 1024 px laptops.
 	 */
 	featureFontSize?: number;
 }
@@ -658,7 +658,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 									{(desc ?? []).map((line, i) => (
 										<div key={i} style={featureFontSize ? { ...S.featureLine, fontSize: featureFontSize } : S.featureLine}>
 											<span style={S.featureCheck}>&#10003;</span>
-											<span style={featureFontSize ? { whiteSpace: 'nowrap' as const } : undefined}>{line}</span>
+											<span>{line}</span>
 										</div>
 									))}
 									{uniformCardHeight && Array.from({ length: Math.max(0, maxDescLines - (desc?.length ?? 0)) }).map((_, i) => (
