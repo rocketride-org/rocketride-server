@@ -45,14 +45,6 @@ void minidumpRegister() noexcept {
     if (!internal::minidumpLifetime()) internal::minidumpLifetime().emplace();
 }
 
-void minidumpSweep() noexcept {
-    // Nor relocate what an earlier run with dumps on left in the database
-    if (!dev::dumpsEnabled())
-        return;
-
-    internal::sweepDumps(internal::crashDbDir());
-}
-
 void minidumpDeregister() noexcept { internal::minidumpLifetime().reset(); }
 
 }  // namespace ap::plat
