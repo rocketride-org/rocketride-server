@@ -230,8 +230,9 @@ def group_words_into_lines(
     updated_boxes = []
 
     for line_idx, line in enumerate(lines):
-        # Sort by x-coordinate (left edge)
-        line.sort(key=lambda b: b['bbox'][0])
+        # Sort by x-coordinate (left edge); right and top edges break ties, so the order does not
+        # depend on the order the engine returned the boxes in
+        line.sort(key=lambda b: (b['bbox'][0], b['bbox'][2], b['bbox'][1]))
 
         # Build line text
         line_text = ' '.join(b['text'] for b in line)
