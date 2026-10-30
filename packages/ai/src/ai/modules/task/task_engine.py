@@ -336,15 +336,6 @@ CONST_MCP_CLIENT_NODE_PATH = 'nodes.tool_mcp_client'
 CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
 CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
 
-# Crash dumps hold process memory, so they are the operator's call: a task gets
-# this engine's own --dumps, as given, never one from pipeline-supplied args.
-CONST_DUMPS_FLAG = '--dumps'
-
-
-def _is_dumps(arg: str) -> bool:
-    """True for any spelling the engine takes as --dumps: any case, with or without '=value'."""
-    return arg.split('=', 1)[0].lower() == CONST_DUMPS_FLAG
-
 
 def _service_capabilities(service: Any) -> List[str]:
     """Capability names of a service definition, lower-cased."""
@@ -2623,41 +2614,27 @@ class Task(DAPBase):
             if modelserver:
                 child_args.append(f'--modelserver={modelserver}')
 
-            user_args = self._launch_args.get('args', [])
-            for arg in user_args:
-                if ' ' in arg:
+            def _user_args():
+                """A pipeline's own arguments, a quoted string split as a shell would split it."""
+                for arg in self._launch_args.get('args', []):
                     try:
-                        child_args.extend(shlex.split(arg))
+                        yield from shlex.split(arg) if ' ' in arg else [arg]
                     except ValueError as e:
                         self.debug_message(f'Failed to parse engine arg {arg!r}: {e}, using as-is')
-                        child_args.append(arg)
-                else:
+                        yield arg
+
+            for arg in _user_args():
+                # Crash dumps are the operator's call, so a pipeline's own --dumps is skipped
+                if arg.split('=', 1)[0].lower() != '--dumps':
                     child_args.append(arg)
 
-            # A caller cannot turn crash dumps on (see CONST_DUMPS_FLAG)
-            child_args = [a for a in child_args if not _is_dumps(a)]
-
-            # Inherit parent engine's --trace setting if not explicitly provided
-            if not any(a.startswith('--trace=') for a in child_args):
-                for arg in startup_args():
-                    if arg.startswith('--trace='):
-                        child_args.append(arg)
-                        break
-
-            # Inherit parent engine's --node_path so workspace-local nodes load
-            # in the task subprocess too (Opt reads argv only, not the env).
-            if not any(a.startswith('--node_path=') for a in child_args):
-                for arg in startup_args():
-                    if arg.startswith('--node_path='):
-                        child_args.append(arg)
-                        break
-
-            # Inherit parent engine's --dumps as given, so the task reads any
-            # value the same way; the engine takes the first
+            # The engine's own options: --dumps always, trace and node path unless the caller set one
             for arg in startup_args():
-                if _is_dumps(arg):
+                option = arg.split('=', 1)[0] + '='
+                if option == '--dumps=':
                     child_args.append(arg)
-                    break
+                elif option in ('--trace=', '--node_path=') and not any(a.startswith(option) for a in child_args):
+                    child_args.append(arg)
 
             await self._send_status_update()
 

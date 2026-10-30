@@ -1241,71 +1241,38 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, e
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(('saas', 'flags'), [(True, ['--hosted', '--shared-host']), (False, [])])
-async def test_start_passes_the_hosting_flags(monkeypatch, saas, flags):
-    """A hosted engine's spawn task gets --hosted and --shared-host, a local one
-    neither; the pre-launch check is told the same about the shared host.
+@pytest.mark.parametrize(
+    ('saas', 'startup', 'user', 'passed'),
+    [
+        # The hosting flags come from the engine itself, not from its arguments
+        (True, [], [], ['--hosted', '--shared-host']),
+        (False, [], [], []),
+        # Crash dumps follow the engine's own --dumps
+        (False, ['--dumps'], [], ['--dumps']),
+        # A pipeline's own is dropped, whatever spelling it used
+        (False, [], ['--dumps'], []),
+        (False, [], ['--DUMPS'], []),
+        (False, [], ['--trace=debugOut --Dumps=yes'], ['--trace=debugOut']),
+        (False, ['--dumps'], ['--dumps=false'], ['--dumps']),
+        # The trace level is the caller's if it set one, the engine's otherwise
+        (False, ['--trace=a'], [], ['--trace=a']),
+        (False, ['--trace=a'], ['--trace=b'], ['--trace=b']),
+    ],
+)
+async def test_start_passes_only_the_operators_options(monkeypatch, saas, startup, user, passed):
+    """The task's command line carries what the operator chose: --hosted and
+    --shared-host for a hosted engine, and --dumps as the engine itself was
+    started. The engine reads the first --dumps, and the operator's is written
+    before a pipeline's own arguments, so a pipeline cannot turn dumps on. The
+    pre-launch check is told the same about the shared host.
     """
     import ai.modules.task.task_engine as engine
 
     _fake_db_account(monkeypatch)
     monkeypatch.setattr(engine, '_is_saas_engine', lambda: saas)
+    monkeypatch.setattr(engine, 'startup_args', lambda: startup)
     checked = []
     monkeypatch.setattr(engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']))
-    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
-    t.source = 'src'
-    t._env_source = AsyncMock(return_value={})
-    t._restart_env = None
-    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
-    t._is_restarting = False
-    t._launch_args = {}
-    t._server = MagicMock(_config={})
-    t._is_debugging = lambda: False
-    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
-    t._send_status_update = AsyncMock()
-    t._terminated = AsyncMock()
-
-    class Launched(Exception):
-        pass
-
-    spawn = AsyncMock(side_effect=Launched)
-    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
-    with pytest.raises(Launched):
-        await Task.start_task(t)
-
-    assert [a for a in spawn.call_args.args if a in ('--hosted', '--shared-host')] == flags
-    assert checked == ([True] if saas else [])
-
-
-# Every spelling of --dumps the cases below use
-_DUMPS_SPELLINGS = {'--dumps', '--DUMPS', '--dumps=false', '--Dumps=yes', '--dumps=1'}
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ('startup', 'user', 'passed'),
-    [
-        ([], [], []),
-        (['--dumps'], [], ['--dumps']),
-        (['--DUMPS'], [], ['--DUMPS']),
-        (['--dumps=false'], [], ['--dumps=false']),
-        ([], ['--dumps'], []),
-        ([], ['--trace=debugOut --Dumps=yes'], []),
-        (['--dumps'], ['--dumps'], ['--dumps']),
-        (['--dumps=false'], ['--dumps=1'], ['--dumps=false']),
-    ],
-)
-async def test_start_passes_dumps_only_from_the_operator(monkeypatch, startup, user, passed):
-    """A task writes crash dumps only when the operator started the engine with
-    --dumps; a pipeline caller's args cannot turn them on, in any spelling the
-    engine accepts. The option goes on as given, so the task reads its value
-    (=false included) the same way.
-    """
-    import ai.modules.task.task_engine as engine
-
-    _fake_db_account(monkeypatch)
-    monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
-    monkeypatch.setattr(engine, 'startup_args', lambda: startup)
     t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
     t.source = 'src'
     t._env_source = AsyncMock(return_value={})
@@ -1327,7 +1294,12 @@ async def test_start_passes_dumps_only_from_the_operator(monkeypatch, startup, u
     with pytest.raises(Launched):
         await Task.start_task(t)
 
-    assert [a for a in spawn.call_args.args if a in _DUMPS_SPELLINGS] == passed
+    # Lower-cased: the engine matches options without regard to case, so the test must too
+    options = [
+        a for a in spawn.call_args.args if a.lower().startswith(('--hosted', '--shared-host', '--dumps', '--trace='))
+    ]
+    assert options == passed
+    assert checked == ([True] if saas else [])
 
 
 # ---------------------------------------------------------------------------
