@@ -6,6 +6,7 @@ import types
 import pytest
 
 from ai.common.models.ocr.easyocr import EasyOCRLoader
+from ai.common.models.ocr.utils import group_words_into_lines
 
 
 class _Reader:
@@ -106,3 +107,11 @@ def test_inference_keeps_reading_order():
     )
 
     assert out[0]['text'] == 'w0 w100 w300'
+
+
+def test_boxes_sharing_a_left_edge_read_in_one_order():
+    """_readtext returns boxes in width order, readtext in detection order; the line follows neither."""
+    wide = {'text': 'wide', 'bbox': [0, 0, 100, 20], 'confidence': 0.9}
+    square = {'text': 'square', 'bbox': [0, 0, 20, 20], 'confidence': 0.9}
+
+    assert group_words_into_lines([wide, square])[0] == group_words_into_lines([square, wide])[0] == 'square wide'

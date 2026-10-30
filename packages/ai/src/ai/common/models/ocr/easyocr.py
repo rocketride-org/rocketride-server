@@ -82,8 +82,9 @@ class EasyOCRLoader(BaseLoader):
     def _readtext(reader: Any, img_np: Any) -> List[Any]:
         """``reader.readtext(img_np)``, recognizing crops of equal padded width together.
 
-        Each crop gets the input that readtext's default ``batch_size=1`` gives it; only the order of
-        the results differs, and ``group_words_into_lines`` sorts them by position.
+        Each crop gets the input that readtext's default ``batch_size=1`` gives it, but batched GPU
+        kernels are not bit-identical to batch 1, so a low-confidence character can still differ.
+        The results come back in width order; ``group_words_into_lines`` sorts them by position.
         """
         from easyocr.utils import calculate_ratio, reformat_input
 
@@ -93,8 +94,8 @@ class EasyOCRLoader(BaseLoader):
         max_y, max_x = grey.shape
 
         def padded_width(box):
-            # in model heights, as easyocr's get_image_list sizes the crop; its own ratio, since
-            # 1/(w/h) can round up past an integer h/w
+            # in model heights, as get_image_list of easyocr 1.7.2 sizes the crop; its own ratio,
+            # since 1/(w/h) can round up past an integer h/w
             width = min(box[1], max_x) - max(0, box[0])
             height = min(box[3], max_y) - max(0, box[2])
             return math.ceil(calculate_ratio(width, height)) if width > 0 and height > 0 else 1
@@ -303,7 +304,7 @@ class EasyOCRLoader(BaseLoader):
         dimensions = preprocessed.get('dimensions', [])
         device = models.get('device', 'cpu')
 
-        # Set the active CUDA device so tensors created inside readtext
+        # Set the active CUDA device so tensors created inside detect and recognize
         # (e.g. input preprocessing, workspace buffers) land on the same GPU
         # as the model weights that were pinned during load.
         import contextlib
