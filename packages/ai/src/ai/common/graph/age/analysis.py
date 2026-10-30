@@ -378,24 +378,42 @@ def _project_steps(items_ctx, steps: Dict[str, Set[int]]) -> Dict[str, Set[int]]
 
 
 def _path_elements(part) -> Tuple[list, list]:
-    """Node patterns and relationship details of a pattern part, in path order.
+    """Node patterns and relationship patterns of a pattern part, in path order.
 
     Args:
         part: An ``oC_PatternPart``.
 
     Returns:
-        ``(nodes, details)``: ``details[i]`` joins ``nodes[i]`` and
-        ``nodes[i + 1]``; a detail is None for ``-->`` without brackets.
+        ``(nodes, relationships)``: ``relationships[i]`` (an
+        ``oC_RelationshipPattern``) joins ``nodes[i]`` and ``nodes[i + 1]``.
     """
     element = part.oC_AnonymousPatternPart().oC_PatternElement()
     while element.oC_NodePattern() is None:
         element = element.oC_PatternElement()
     nodes = [element.oC_NodePattern()]
-    details = []
+    relationships = []
     for chain in element.oC_PatternElementChain():
-        details.append(chain.oC_RelationshipPattern().oC_RelationshipDetail())
+        relationships.append(chain.oC_RelationshipPattern())
         nodes.append(chain.oC_NodePattern())
-    return nodes, details
+    return nodes, relationships
+
+
+def _one_edge_per_row(relationship) -> bool:
+    """True when a MATCH on this relationship alone yields each edge on one row.
+
+    An undirected pattern (no arrowhead, or both) matches an edge from each
+    end, so every edge comes twice; a variable-length one puts an edge on
+    every path through it.
+
+    Args:
+        relationship: An ``oC_RelationshipPattern``.
+
+    Returns:
+        True for a directed, fixed-length relationship.
+    """
+    directed = (relationship.oC_LeftArrowHead() is None) != (relationship.oC_RightArrowHead() is None)
+    detail = relationship.oC_RelationshipDetail()
+    return directed and (detail is None or detail.oC_RangeLiteral() is None)
 
 
 def _element_name(ctx) -> Optional[str]:
@@ -413,9 +431,11 @@ def _pattern_steps(
     ``{name: 'acme'}`` reaches the same node on every row. A relationship
     changes with the steps of both its end nodes and of its own properties.
     The rows of a MATCH part are distinct matches of it, so the variable of a
-    single-node part, or of the one relationship of a single-hop part, also
-    changes with the part's step; the nodes of a longer path repeat (one node,
-    many edges) and do not. A path variable changes with its MATCH step, or,
+    single-node part, or of the one directed, fixed-length relationship of a
+    single-hop part, also changes with the part's step; the nodes of a longer
+    path repeat (one node, many edges) and do not, nor does an edge that an
+    undirected or variable-length pattern puts on several rows. A path
+    variable changes with its MATCH step, or,
     in a MERGE, with the steps every element shares. Variables bound before
     the part keep their steps.
 
@@ -428,10 +448,14 @@ def _pattern_steps(
     Returns:
         Steps of each variable the part introduces.
     """
-    nodes, details = _path_elements(part)
+    nodes, relationships = _path_elements(part)
+    details = [relationship.oC_RelationshipDetail() for relationship in relationships]
     distinct = None
     if match_step is not None:
-        distinct = nodes[0] if not details else (details[0] if len(details) == 1 else None)
+        if not details:
+            distinct = nodes[0]
+        elif len(details) == 1 and _one_edge_per_row(relationships[0]):
+            distinct = details[0]
 
     def own(ctx) -> Set[int]:
         name = _element_name(ctx)
@@ -515,8 +539,8 @@ def _unsafe_write_after_merge(single_query, writes_reach_every_merge: bool = Fal
             fresh = set()
         if isinstance(clause, CypherParser.OC_MatchContext):
             for part in clause.oC_Pattern().oC_PatternPart():
-                nodes, details = _path_elements(part)
-                if not details and _element_name(nodes[0]) in bound:
+                nodes, relationships = _path_elements(part)
+                if not relationships and _element_name(nodes[0]) in bound:
                     # A lone node bound earlier only filters rows.
                     continue
                 step = len(all_steps)

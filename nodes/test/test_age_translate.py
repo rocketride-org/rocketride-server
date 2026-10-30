@@ -462,6 +462,9 @@ _WRITES_EACH_ROW = [
     'MATCH (p:P) UNWIND p.tags AS t MERGE (p)-[r:TAGGED]->(n:Tag {name: t}) SET r.at = 1',
     'UNWIND [1, 2] AS x UNWIND [3, 4] AS y MERGE (n:N {id: x})-[r:R]->(m:M {id: y}) SET r.v = 1',
     'UNWIND $rows AS row CREATE (n:N {id: row.id}) MERGE (n)-[r:R]->(m:M {id: 1}) SET r.x = 1',
+    # A directed single-hop MATCH yields each edge once, in either direction.
+    'MATCH (a:P)-[k:KNOWS]->(b:P) MERGE (x:Link {id: k.id}) SET x.n = 1',
+    'MATCH (a:P)<-[k:KNOWS]-(b:P) MERGE (x:Link {id: k.id}) SET x.n = 1',
 ]
 
 # One MERGE-created entity written from several rows: AGE 1.6.0 keeps one write.
@@ -487,6 +490,10 @@ _WRITES_SAME_ENTITY_PER_ROW = [
     'MATCH (p:P) UNWIND p.tags AS t MERGE (n:Tag {name: t}) SET n.c = 1',
     # A path MATCH repeats its nodes: one row per edge.
     'MATCH (p:P)-[:KNOWS]->(f) MERGE (q:Q {name: p.name}) SET q.seen = true',
+    # An undirected MATCH yields each edge from both ends; a variable-length one, on every path through it.
+    'MATCH (a:P)-[k:KNOWS]-(b:P) MERGE (x:Link {id: k.id}) SET x.n = coalesce(x.n, 0) + 1',
+    'MATCH (a:P)<-[k:KNOWS]->(b:P) MERGE (x:Link {id: k.id}) SET x.n = 1',
+    'MATCH (a:P)-[k:KNOWS*1..2]->(b:P) MERGE (x:Link {id: k[0].id}) SET x.n = 1',
 ]
 
 
