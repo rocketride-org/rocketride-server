@@ -887,7 +887,7 @@ class TestModelCatalog:
         """Discovery goes index -> every registered type -> raw definition, by content.
 
         This is the review's ask: no globbing relative to ``__file__``, so an
-        installed or ``--node_path``-materialised node with no sibling
+        installed or run-materialised node with no sibling
         directories still sees the catalog the engine loaded. Which nodes
         contribute is decided by what their definition publishes, not by a
         name or class convention (the vision nodes register as
