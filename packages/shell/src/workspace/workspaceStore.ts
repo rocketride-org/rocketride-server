@@ -162,6 +162,12 @@ export interface WorkspaceStoreOptions {
 	/** True when this host is an App Builder preview — every partition it
 	 *  writes becomes `preview:<id>`, sealing it from the real app's files. */
 	preview?: boolean;
+	/** True for a host with NO app surface (the VS Code extension host):
+	 *  `defaultAppId` is then only a constructor-required placeholder, so the
+	 *  store never reads the "active" partition's file — `.workspace/` holds
+	 *  one `<appId>.workspace.json` per real app, and a placeholder must
+	 *  never probe for (or ever materialize) one. */
+	headless?: boolean;
 }
 
 // =============================================================================
@@ -176,6 +182,7 @@ export class WorkspaceStore {
 	private readonly workspaceDir: string;
 	private readonly startupAppId: string | undefined;
 	private readonly preview: boolean;
+	private readonly headless: boolean;
 
 	private client: RocketRideClient | null = null;
 	private isConnected = false;
@@ -211,6 +218,7 @@ export class WorkspaceStore {
 		this.workspaceDir = options.workspaceDir ?? '.workspace';
 		this.startupAppId = options.startupAppId;
 		this.preview = options.preview === true;
+		this.headless = options.headless === true;
 		this.activeAppId = options.defaultAppId;
 		this.snapshot = this.buildSnapshot();
 	}
@@ -360,12 +368,17 @@ export class WorkspaceStore {
 			if (globalFile?.settings && typeof globalFile.settings === 'object') this.shellSettings = globalFile.settings;
 
 			let slice: AppWorkspaceState | undefined;
-			try {
-				const raw = await client.fsReadJson<AppWorkspaceState>(partitionPath(this.workspaceDir, this.activePartition));
-				// Accept the file only with the minimum required shape.
-				if (raw?.prefs) slice = raw;
-			} catch {
-				/* no saved state */
+			// A headless host's "active" partition is a placeholder, not an app —
+			// probing the store for its file would be a read that can never find
+			// anything legitimate (and logs a miss server-side on every connect).
+			if (!this.headless) {
+				try {
+					const raw = await client.fsReadJson<AppWorkspaceState>(partitionPath(this.workspaceDir, this.activePartition));
+					// Accept the file only with the minimum required shape.
+					if (raw?.prefs) slice = raw;
+				} catch {
+					/* no saved state */
+				}
 			}
 
 			this.partitions = { [this.activePartition]: this.withShellPrefs(slice ?? makeDefaultAppState()) };

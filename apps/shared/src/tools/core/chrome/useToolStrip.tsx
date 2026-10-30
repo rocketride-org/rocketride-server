@@ -207,10 +207,15 @@ export function useToolStrip(config: ToolStripConfig): ToolStrip {
 						label: t.manifest.name,
 						...(t.descriptor.icon !== undefined ? { icon: t.descriptor.icon } : {}),
 						// Nested provider: this tool's services carry ITS prefs
-						// partition — a tool's handle cannot address another
-						// app's keys (isolation by construction).
+						// partition, keyed by the tool's MAIN APP (manifest
+						// storageAppId — the pipelines tool stores under
+						// rocketride.pipeBuilder) so preferences follow the person
+						// across the tool and app surfaces of the same product.
+						// `.workspace/` holds only `<appId>.workspace.json` files;
+						// bare descriptor ids are container/channel spellings,
+						// never storage identities.
 						render: () => (
-							<ToolHostProvider value={{ ...services, prefs: prefsHub.partition(appPartition(toolId)) }}>
+							<ToolHostProvider value={{ ...services, prefs: prefsHub.partition(appPartition(t.manifest.storageAppId ?? t.manifest.id)) }}>
 								<Sidebar channel={channel} {...(documents !== undefined ? { documents } : {})} />
 							</ToolHostProvider>
 						),

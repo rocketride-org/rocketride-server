@@ -57,7 +57,7 @@ import nodesIconUrl from './nodes/icon.svg?url';
 import pipelinesIconUrl from './pipelines/icon.svg?url';
 // Setting declarations live in the PURE toolSettings leaf (the ext host and
 // settings surfaces import that, never this asset-bearing module).
-import { APPS_TOOL_SETTINGS, PIPELINES_TOOL_SETTINGS } from './toolSettings';
+import { APPS_TOOL_SETTINGS, PIPELINES_TOOL_SETTINGS, TOOL_SETTINGS_OWNER } from './toolSettings';
 
 const PUBLISHER = 'Aparavi Software AG';
 
@@ -67,6 +67,10 @@ export function registerBuiltinTools(): void {
 		manifest: {
 			name: 'Agent',
 			publisher: PUBLISHER,
+			// All builtin tools are Rocket Builder's tools — their prefs and
+			// setting deltas store under the product's app partition so they
+			// follow the person across the tool and app surfaces.
+			storageAppId: TOOL_SETTINGS_OWNER,
 			description: 'Agent sessions against the connected engine.',
 			icon: agentIconUrl,
 			categories: ['devTool'],
@@ -86,6 +90,10 @@ export function registerBuiltinTools(): void {
 		manifest: {
 			name: 'Apps',
 			publisher: PUBLISHER,
+			// All builtin tools are Rocket Builder's tools — their prefs and
+			// setting deltas store under the product's app partition so they
+			// follow the person across the tool and app surfaces.
+			storageAppId: TOOL_SETTINGS_OWNER,
 			description: 'Build, package, and deploy apps (App Builder).',
 			icon: appsIconUrl,
 			categories: ['devTool'],
@@ -103,6 +111,10 @@ export function registerBuiltinTools(): void {
 		manifest: {
 			name: 'Nodes',
 			publisher: PUBLISHER,
+			// All builtin tools are Rocket Builder's tools — their prefs and
+			// setting deltas store under the product's app partition so they
+			// follow the person across the tool and app surfaces.
+			storageAppId: TOOL_SETTINGS_OWNER,
 			description: 'Browse and scaffold pipeline nodes.',
 			icon: nodesIconUrl,
 			categories: ['devTool'],
@@ -118,6 +130,10 @@ export function registerBuiltinTools(): void {
 		manifest: {
 			name: 'Pipelines',
 			publisher: PUBLISHER,
+			// All builtin tools are Rocket Builder's tools — their prefs and
+			// setting deltas store under the product's app partition so they
+			// follow the person across the tool and app surfaces.
+			storageAppId: TOOL_SETTINGS_OWNER,
 			description: 'Discover, open, and run pipelines.',
 			icon: pipelinesIconUrl,
 			categories: ['devTool'],

@@ -26,7 +26,7 @@
 // =============================================================================
 //
 // The agent-integration toggles are WORKSPACE settings (deltas in
-// `vscode.integrations.workspace.json`, per-user by construction — the
+// `rocketride.vscode.workspace.json`, per-user by construction — the
 // `.workspace/` tree lives in the user's server-side store): nothing about
 // them is needed to REACH a server, and the docs they install come from the
 // connected server's catalog, so pre-connect values couldn't act anyway.
@@ -41,8 +41,12 @@
 import type { AppConfiguration } from 'shell/src/components/workspace/types';
 
 /** The contribution's identity: the section id AND the owner whose partition
- *  file (`vscode.integrations.workspace.json`) holds the deltas. */
-export const INTEGRATIONS_APP_ID = 'vscode.integrations';
+ *  file (`rocketride.vscode.workspace.json`) holds the deltas. The owner is
+ *  the EXTENSION itself, named like any other app ("RocketRide for VS Code"
+ *  is a product surface) — the one partition for everything extension-owned
+ *  and server-side, with room beyond integrations. `.workspace/` holds only
+ *  `<appId>.workspace.json` files. */
+export const INTEGRATIONS_APP_ID = 'rocketride.vscode';
 
 /** The Integrations section's schema (workspace-scoped, vscode-only). */
 export const INTEGRATIONS_SETTINGS: AppConfiguration = {

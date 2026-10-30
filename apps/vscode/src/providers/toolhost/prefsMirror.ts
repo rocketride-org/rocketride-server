@@ -52,9 +52,12 @@ export function startPrefsMirror(deps: IPrefsMirrorDeps): { store: WorkspaceStor
 
 	// `defaultAppId` names the active partition, which only matters to a
 	// shell with an app surface — the extension host has none, and never
-	// mutates that partition. (global.json's `activeAppId` is written but
-	// read by nobody, so the two hosts cannot fight over it.)
-	const store = new WorkspaceStore({ defaultAppId: 'vscode' });
+	// mutates that partition. `headless` keeps the placeholder purely
+	// in-memory: no read probe at load, no file ever materialized —
+	// `.workspace/` holds one `<appId>.workspace.json` per REAL app only.
+	// (global.json's `activeAppId` is written but read by nobody, so the
+	// two hosts cannot fight over it.)
+	const store = new WorkspaceStore({ defaultAppId: 'vscode', headless: true });
 
 	// One change signal republishes BOTH of a partition's topics — the store
 	// notifies on pref AND settings changes through the same seam.

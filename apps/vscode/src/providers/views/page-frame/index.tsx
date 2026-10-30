@@ -51,5 +51,15 @@ const PageNotFound: React.FC = () => (
 // The realm's ONE bus attachment, before anything renders.
 attachBusRealm();
 
+// The webview's #root IS the document surface: declare it as the overlay
+// root so every `contained` DetailPanel opened anywhere in a page (a
+// settings drawer, a record panel) slides over and dims the WHOLE page —
+// never just whichever inner pane happens to be positioned.
+const rootElement = document.getElementById('root');
+if (rootElement) {
+	rootElement.dataset.rrOverlayRoot = '1';
+	rootElement.style.position = 'relative';
+}
+
 const page = document.body.dataset.rrPage ?? '';
 mountComponent(PAGES[page] ?? PageNotFound, page || 'page-frame');

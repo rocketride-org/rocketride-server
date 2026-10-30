@@ -69,7 +69,8 @@ export type EngineVersionItem = SharedEngineVersionItem;
 // tools' sections ride the shared leaf (the SAME rows the cloud derives from
 // the manifests — same ids, same Rocket Builder group, same product storage
 // partition), and the Integrations section is the VS Code host's own block
-// (workspace-scoped; deltas in `vscode.integrations.workspace.json`). Module
+// (workspace-scoped; deltas in `rocketride.vscode.workspace.json` — the
+// extension's one app partition). Module
 // scope, never unregistered — builtins' machinery is resident for the host's
 // lifetime.
 // NOTE: pinned STORE tools do not contribute here yet — their manifests live
@@ -110,7 +111,7 @@ const FOCUS_TO_SECTION: Record<string, string> = {
 	development: 'host:development',
 	deployment: 'host:deployment',
 	pipeline: 'builtin.pipelines',
-	integrations: 'vscode.integrations',
+	integrations: INTEGRATIONS_APP_ID,
 	environment: 'environment',
 	account: 'account:profile',
 	'account:profile': 'account:profile',

@@ -94,6 +94,11 @@ const styles = {
 		height: '100%',
 		backgroundColor: 'var(--rr-bg-default)',
 		fontFamily: 'var(--rr-font-family)',
+		// The positioned ancestor for every `contained` DetailPanel opened from
+		// a settings pane (manage-workspaces, environment drawers): the drawer
+		// and its scrim must cover the WHOLE settings surface — nav sidebar
+		// included — not whichever inner pane happens to be positioned.
+		position: 'relative',
 	} as CSSProperties,
 	searchRow: {
 		display: 'flex',
