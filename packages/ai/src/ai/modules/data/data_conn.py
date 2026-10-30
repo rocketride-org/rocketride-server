@@ -142,6 +142,7 @@ class DataConnPipe:
     last_activity_time: float = field(default_factory=time.time)  # Track last write/close activity
     in_use: bool = False  # True while a sync operation (write) is actively running in a thread
     text_decoder: Any = None  # Incremental UTF-8 decoder for the text lane, created on the first write
+    text_parts: Any = None  # Text-lane body decoded so far, written as one text when the pipe closes
 
 
 class DataConn(DAPConn):
@@ -354,7 +355,7 @@ class DataConn(DAPConn):
             return 'tag'
 
         # If this is question and we have a question listener
-        elif mime_type.startswith('application/rocketride-question') and 'questions' in listeners:
+        elif mime_base.startswith('application/rocketride-question') and 'questions' in listeners:
             return 'questions'
 
         # If this is json content and we have a json listener
@@ -362,7 +363,7 @@ class DataConn(DAPConn):
             return 'json'
 
         # If this is text content and we have a text listener
-        elif mime_type.startswith('text/') and 'text' in listeners:
+        elif mime_base.startswith('text/') and 'text' in listeners:
             return 'text'
 
         # If this is structured text (JSON, XML, ...) that would otherwise reach
@@ -487,13 +488,9 @@ class DataConn(DAPConn):
             pipe.writeTagEndObject()
 
         elif lane == 'text':
-            # Flush the UTF-8 decoder. A character still incomplete at the end
-            # of the body is invalid input and raises here.
-            decoder = getattr(pipe_conn, 'text_decoder', None)
-            if decoder is not None:
-                text = decoder.decode(b'', final=True)
-                if text:
-                    pipe.writeText(text)
+            # _close has normally written the text already; this covers any
+            # other path that ends a text pipe. Idempotent.
+            self._flush_text(pipe_conn)
 
         else:
             # Other lanes don't need framing
@@ -501,15 +498,43 @@ class DataConn(DAPConn):
 
     def _write_text(self, conn_pipe: DataConnPipe, data: bytes) -> None:
         """
-        Write one chunk on the text lane, keeping a UTF-8 character that is split between chunks intact.
+        Decode one text-lane chunk and keep it until the body is complete.
+
+        The text lane gets the body as ONE text (see _flush_text): a node such as
+        `question` turns every writeText into its own question, so a body that
+        arrives in two chunks would otherwise become two half-questions. The
+        decoder keeps a UTF-8 character split between chunks intact, and invalid
+        bytes still fail this write.
 
         Args:
-            conn_pipe: The pipe being written. Holds the decoder between chunks.
+            conn_pipe: The pipe being written. Holds the decoder and the text so far.
             data: The raw bytes of this chunk.
         """
         if conn_pipe.text_decoder is None:
             conn_pipe.text_decoder = codecs.getincrementaldecoder('utf-8')()
+            conn_pipe.text_parts = []
         text = conn_pipe.text_decoder.decode(data)
+        if text:
+            conn_pipe.text_parts.append(text)
+
+    def _flush_text(self, conn_pipe: DataConnPipe) -> None:
+        """
+        Write the whole text-lane body as one text. Idempotent.
+
+        Raises:
+            ValueError: The body ends inside a UTF-8 character.
+        """
+        decoder = getattr(conn_pipe, 'text_decoder', None)
+        if decoder is None:
+            return
+        parts = conn_pipe.text_parts or []
+        conn_pipe.text_decoder = None
+        conn_pipe.text_parts = None
+        try:
+            parts.append(decoder.decode(b'', final=True))
+        except UnicodeDecodeError as e:
+            raise ValueError(f'The text body is not valid UTF-8: it ends inside a character ({e.reason})') from e
+        text = ''.join(parts)
         if text:
             conn_pipe.pipe.writeText(text)
 
@@ -923,6 +948,13 @@ class DataConn(DAPConn):
         try:
             # Reset activity timer since close is considered activity
             self._reset_pipe_activity(conn_pipe)
+
+            # Write the text lane's body as one text now, outside close_sync's
+            # catch-all, so a body that ends inside a UTF-8 character reaches
+            # the client as an error, as it did when each write decoded its own
+            # chunk.
+            if conn_pipe.lane == 'text':
+                await asyncio.to_thread(self._flush_text, conn_pipe)
 
             def close_sync():
                 # End the pipe and close it.  If either step throws (e.g. a

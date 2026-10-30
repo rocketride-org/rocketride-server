@@ -201,6 +201,12 @@ reads that lane; anything unmatched falls through to the raw/tags lane.
 
 The prefix `lane/<name>` bypasses detection and targets a lane directly.
 
+On the `text` lane the body is decoded as UTF-8 and delivered as **one** text when
+the pipe closes, however many `write` calls carried it. A node such as `question`
+makes one question per text, so a webhook body that arrives in two chunks still
+makes one question. Invalid UTF-8, including a body that ends inside a character,
+fails the request.
+
 ### When nothing reads the chosen lane
 
 The write still succeeds. The object is accepted, counted as completed and
