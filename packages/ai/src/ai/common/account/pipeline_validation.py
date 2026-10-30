@@ -56,6 +56,8 @@ class AccountPipelineValidation:
         """
         Get all required plans for pipeline.
         """
+        from ai.modules.task import node_store
+
         required_plans = set()
 
         source = pipeline.get('source')
@@ -88,7 +90,7 @@ class AccountPipelineValidation:
             node = nodes.get(id)
             if node is None:
                 continue
-            schema = getServiceDefinition(node.get('provider'))
+            schema = getServiceDefinition(node.get('provider')) or node_store.served(node.get('provider'))
             if schema is None:
                 continue
             plans = schema.get('plans', [])

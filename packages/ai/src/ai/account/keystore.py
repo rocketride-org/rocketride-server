@@ -47,8 +47,10 @@ class KeyStore:
         Returns:
             Tuple[str, str]: A tuple of (pool name, WebSocket endpoint URI).
         """
+        from ai.modules.task import node_store
+
         # Compute the pipeline configuration stack (including metadata like usesGPU)
-        config = ILoader.getPipeStack(pipeline)
+        config = ILoader.getPipeStack(pipeline, node_store.custom())
 
         # Redirect based on resource requirement
         if config['usesGPU']:

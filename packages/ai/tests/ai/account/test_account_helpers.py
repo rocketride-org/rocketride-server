@@ -14,6 +14,7 @@ Covers three files that are too small for their own test modules:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -163,6 +164,26 @@ def test_keystore_uses_supplied_config_dict():
     cfg = {'region': 'eu-west-1'}
     ks = KeyStore(config=cfg)
     assert ks.config is cfg
+
+
+@pytest.mark.asyncio
+async def test_assign_node_builds_the_stack_with_the_nodes_eaas_serves(monkeypatch):
+    """The launch's stack sees the nodes EaaS serves, as the catalogue does."""
+    from ai.account import keystore
+    from ai.modules.task import node_store
+
+    served = [{'protocol': 'provider_x://'}]
+    monkeypatch.setattr(node_store, 'custom', lambda: served)
+    asked = []
+
+    def stack(pipeline, custom):
+        asked.append(custom)
+        return {'usesGPU': False}
+
+    monkeypatch.setattr(keystore, 'ILoader', SimpleNamespace(getPipeStack=stack))
+
+    assert await KeyStore().assign_node('ak_1', 'pipe') == ('cpu', 'ws://localhost:5566/task/service')
+    assert asked == [served]
 
 
 @pytest.mark.asyncio

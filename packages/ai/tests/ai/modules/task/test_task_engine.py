@@ -1283,6 +1283,53 @@ async def test_start_passes_the_hosting_flags(monkeypatch, saas, flags):
     assert checked == ([True] if saas else [])
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('available', [True, False])
+async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypatch, available):
+    """The nodes a pipeline names that the server lacks are unpacked before the
+    engine starts, so its start-up scan loads them; one that cannot be had
+    refuses the launch and nothing is spawned. The pipeline placed is the
+    resolved one: ${...} can name the provider.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
+    order = []
+
+    def place(pipeline):
+        order.append(('place', [c['provider'] for c in pipeline['components']]))
+        if not available:
+            raise FileNotFoundError('llm_x.rrnode is not in releases server-v1')
+
+    monkeypatch.setattr(engine.node_store, 'place', place)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': '${ROCKETRIDE_NODE}'}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={'ROCKETRIDE_NODE': 'llm_x'})
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    async def spawn(*args, **kwargs):
+        order.append(('spawn',))
+        raise Launched()
+
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+    with pytest.raises(Launched if available else RuntimeError, match=None if available else "pipeline's nodes"):
+        await Task.start_task(t)
+
+    assert order == ([('place', ['llm_x']), ('spawn',)] if available else [('place', ['llm_x'])])
+
+
 # ---------------------------------------------------------------------------
 # filter_subprocess_env — the child inherits an allowlist, never the whole env
 # ---------------------------------------------------------------------------
@@ -2225,6 +2272,24 @@ def test_saas_gate_refuses_stdio_mcp(config):
 def test_saas_gate_matches_the_node_not_the_provider_name(component):
     problem = _violation(component)
     assert problem and 'stdio MCP transport' in problem
+
+
+def test_saas_gate_sees_a_nosaas_node_that_only_eaas_serves(monkeypatch):
+    """A node EaaS serves is not in the engine's registry; the hosted gate
+    still reads its capabilities and refuses it.
+    """
+    import rocketlib
+
+    import ai.modules.task.task_engine as engine
+
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: True)
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda provider: None)
+    monkeypatch.setattr(engine.node_store, '_definitions', {'text_output': {'capabilities': ['nosaas']}})
+    t = _task(source='src')
+    t._shares_host = lambda: True
+
+    with pytest.raises(ValueError, match='not available on RocketRide Cloud'):
+        Task._check_pipeline(t, {'components': [{'id': 'src', 'provider': 'text_output'}]})
 
 
 def test_saas_gate_off_the_engine_host_allows_stdio_mcp_but_not_nosaas():

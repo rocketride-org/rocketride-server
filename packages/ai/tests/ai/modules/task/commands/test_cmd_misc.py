@@ -206,12 +206,14 @@ async def test_on_rrext_validate_uses_explicit_source(monkeypatch):
     monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: 'never-used')
     captured = {}
 
-    def _fake_validate(payload):
+    def _fake_validate(payload, custom):
         """Capture the payload so the test can assert on it."""
         captured['payload'] = payload
+        captured['custom'] = custom
         return {'ok': True}
 
     monkeypatch.setattr(cmd_misc, 'validatePipeline', _fake_validate)
+    monkeypatch.setattr(cmd_misc.node_store, 'custom', lambda: [{'protocol': 'provider_x://'}])
 
     conn = _make_conn()
     request = {
@@ -226,6 +228,8 @@ async def test_on_rrext_validate_uses_explicit_source(monkeypatch):
     # payload['pipeline'] — the same envelope pipe_Validate builds.
     assert captured['payload']['pipeline']['source'] == 'explicit-source'
     assert captured['payload']['pipeline']['version'] == 1  # default
+    # The nodes EaaS serves are validated with the pipeline
+    assert captured['custom'] == [{'protocol': 'provider_x://'}]
     assert result == {'type': 'response', 'body': {'ok': True}}
 
 
@@ -236,7 +240,7 @@ async def test_on_rrext_validate_falls_back_to_pipeline_source(monkeypatch):
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -253,7 +257,7 @@ async def test_on_rrext_validate_falls_back_to_implied_source(monkeypatch):
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -269,7 +273,7 @@ async def test_on_rrext_validate_no_source_anywhere_omits_field(monkeypatch):
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -290,7 +294,7 @@ async def test_on_rrext_validate_wraps_config_in_pipeline_envelope(monkeypatch):
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -317,7 +321,7 @@ async def test_on_rrext_validate_does_not_double_wrap_enveloped_config(monkeypat
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -345,7 +349,7 @@ async def test_on_rrext_validate_does_not_wrap_single_component_payload(monkeypa
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -367,7 +371,7 @@ async def test_on_rrext_validate_does_not_infer_source_for_a_single_component(mo
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -387,7 +391,7 @@ async def test_on_rrext_validate_leaves_a_full_pipeline_alone(monkeypatch):
     monkeypatch.setattr(
         cmd_misc,
         'validatePipeline',
-        lambda payload: captured.update(payload) or {'ok': True},
+        lambda payload, custom: captured.update(payload) or {'ok': True},
     )
 
     conn = _make_conn()
@@ -979,7 +983,9 @@ def test_misc_commands_init_is_noop():
 @pytest.mark.asyncio
 async def test_on_rrext_resolve_config_returns_what_the_node_receives(monkeypatch):
     """Resolution runs through the engine's own getNodeConfig, not a reimplementation."""
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'gpt-4o', 'temp': 0}))
+    monkeypatch.setattr(
+        cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c, service=None: {'model': 'gpt-4o', 'temp': 0})
+    )
 
     conn = _make_conn()
     request = {'arguments': {'provider': 'llm_openai', 'config': {'model': 'gpt-4o'}}}
@@ -1000,7 +1006,9 @@ async def test_on_rrext_resolve_config_reports_keys_a_profile_discards(monkeypat
     Reporting them is the point of the tool. Inferring it from an absence is what
     cost the issue author a day.
     """
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'host': 'localhost'}))
+    monkeypatch.setattr(
+        cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c, service=None: {'host': 'localhost'})
+    )
 
     conn = _make_conn()
     request = {
@@ -1024,7 +1032,9 @@ async def test_on_rrext_resolve_config_reports_a_key_the_profile_overwrote(monke
     catalog: nearly every profile declares apikey, so an apikey written beside
     'profile' is silently replaced rather than dropped from the result.
     """
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'apikey': '', 'model': 'gpt-5'}))
+    monkeypatch.setattr(
+        cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c, service=None: {'apikey': '', 'model': 'gpt-5'})
+    )
 
     conn = _make_conn()
     request = {
@@ -1047,7 +1057,7 @@ async def test_on_rrext_resolve_config_reports_a_sibling_that_matches_the_profil
     Comparing values would stay quiet here and leave the author believing the
     line is in effect, when the same key inside the profile is what applied.
     """
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'gpt-5.4'}))
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c, service=None: {'model': 'gpt-5.4'}))
 
     conn = _make_conn()
     request = {
@@ -1064,7 +1074,7 @@ async def test_on_rrext_resolve_config_reports_a_sibling_that_matches_the_profil
 @pytest.mark.asyncio
 async def test_on_rrext_resolve_config_reports_nothing_without_a_profile(monkeypatch):
     """Without a profile the user layer is read from the top level, so nothing is lost."""
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'gpt-5.4'}))
+    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c, service=None: {'model': 'gpt-5.4'}))
 
     conn = _make_conn()
     request = {'arguments': {'provider': 'llm_openai', 'config': {'model': 'gpt-5.4'}}}
@@ -1082,7 +1092,9 @@ async def test_on_rrext_resolve_config_ignores_structural_and_unselected_profile
     is user configuration the resolver threw away, and telling an author to move
     `parameters` inside the profile would break the component.
     """
-    monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c: {'model': 'claude-sonnet-4-6'}))
+    monkeypatch.setattr(
+        cmd_misc.Config, 'getNodeConfig', staticmethod(lambda p, c, service=None: {'model': 'claude-sonnet-4-6'})
+    )
     monkeypatch.setattr(
         cmd_misc,
         '_service_profile_names',
@@ -1125,10 +1137,30 @@ async def test_on_rrext_resolve_config_rejects_a_non_object_config():
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_resolve_config_resolves_a_node_that_only_eaas_serves(monkeypatch):
+    """A node EaaS serves is not in the engine's registry; its profiles still resolve and name the discarded keys."""
+    from ai.common import config as config_module
+    from ai.modules.task import node_store
+
+    monkeypatch.setattr(config_module, 'getServiceDefinition', lambda provider: None)
+    monkeypatch.setattr(cmd_misc, 'getServiceDefinition', lambda provider: None)
+    served = {'preconfig': {'default': 'local', 'profiles': {'local': {'host': 'localhost'}, 'cloud': {'host': 'x'}}}}
+    monkeypatch.setattr(node_store, '_definitions', {'store_x': served})
+
+    conn = _make_conn()
+    request = {'arguments': {'provider': 'store_x', 'config': {'profile': 'local', 'apikey': 'k', 'cloud': {}}}}
+    result = await MiscCommands.on_rrext_resolve_config(conn, request)
+
+    body = result['body']
+    assert body['resolved']['host'] == 'localhost'
+    assert body['dropped'] == ['apikey'], 'the unselected profile is known from the served definition'
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_resolve_config_propagates_an_unknown_service(monkeypatch):
     """An unknown service raises out of getNodeConfig; the caller should see that, not a blank."""
 
-    def _raise(provider, config):
+    def _raise(provider, config, service=None):
         raise Exception(f'The service {provider} was not found')
 
     monkeypatch.setattr(cmd_misc.Config, 'getNodeConfig', staticmethod(_raise))
