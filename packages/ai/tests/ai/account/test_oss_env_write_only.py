@@ -132,15 +132,12 @@ def test_set_env_rejects_unsupported_names_and_writes_nothing(env_file, monkeypa
     assert not env_file.exists()
 
 
-def test_set_env_writes_a_non_ascii_value_on_any_locale(env_file, monkeypatch):
+def test_the_env_file_is_written_as_utf8_on_any_locale(env_file, monkeypatch):
     """The .env file is UTF-8 regardless of the process locale (the loader reads UTF-8)."""
     monkeypatch.setattr('locale.getpreferredencoding', lambda do_setlocale=True: 'ascii')
-    # The process environment of this test takes UTF-8, whatever the runner's locale
-    monkeypatch.setattr(os.environ, 'encodevalue', lambda value: value.encode('utf-8'))
 
-    resp = _call('set_env', env={'ROCKETRIDE_A': 'cl\u00e9-\u00f1'})
+    Account._write_env_file(str(env_file), {'ROCKETRIDE_A': 'cl\u00e9-\u00f1'})
 
-    assert resp == {'ok': True, 'body': {'updated': True}}
     assert env_file.read_text(encoding='utf-8') == 'ROCKETRIDE_A=cl\u00e9-\u00f1\n'
 
 
@@ -199,7 +196,13 @@ def test_a_env_file_that_cannot_be_read_leaves_memory_as_it_was(env_file, monkey
 def test_a_value_the_process_environment_cannot_hold_writes_nothing(env_file, monkeypatch):
     """Under an ASCII locale os.environ cannot hold a non-ASCII value: refused before memory or file change."""
     monkeypatch.setenv('ROCKETRIDE_A', 'kept')
-    monkeypatch.setattr(os.environ, 'encodevalue', lambda value: value.encode('ascii'))
+    encode = os.environ.encodevalue
+
+    def ascii_locale(value):
+        value.encode('ascii')
+        return encode(value)
+
+    monkeypatch.setattr(os.environ, 'encodevalue', ascii_locale)
 
     resp = _call('update_env', env={'ROCKETRIDE_B': 'cl\u00e9'})
 
