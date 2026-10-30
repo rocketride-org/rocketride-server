@@ -35,7 +35,7 @@ from __future__ import annotations
 import base64
 import re
 
-from rocketlib import IInstanceBase, tool_function
+from rocketlib import IInstanceBase, tool_function, warning
 
 from ai.common.utils import normalize_tool_input, require_int, require_str
 
@@ -52,6 +52,7 @@ from .github_client import (
     clean_workflow,
 )
 from .IGlobal import IGlobal
+from . import github_client, repository_reads
 
 # ---------------------------------------------------------------------------
 # Shared parameter descriptions
@@ -170,8 +171,12 @@ class IInstance(IInstanceBase):
     def _token(self) -> str:
         return self.IGlobal.get_token()
 
-    def _repo(self, args: dict) -> str:
-        repo = (args.get('repo') or self.IGlobal.default_repo or '').strip()
+    def _repo(self, args: dict, tool_name: str = '') -> str:
+        repo = args.get('repo') or self.IGlobal.default_repo or ''
+        if not isinstance(repo, str):
+            prefix = f'{tool_name}: ' if tool_name else ''
+            raise ValueError(f'{prefix}repo must be in owner/repo format')
+        repo = repo.strip()
         if not repo:
             raise ValueError('repo is required (or configure a default repo in the node settings)')
         return repo
@@ -179,6 +184,31 @@ class IInstance(IInstanceBase):
     def _require_write(self) -> None:
         if self.IGlobal.read_only:
             raise ValueError('This operation is not permitted: the node is configured in read-only mode')
+
+    def _get(self, path: str, *, params: dict | None = None, app_identity: bool = False) -> dict:
+        """GET with server-held credentials and the result envelope; credentials never reach the result."""
+        try:
+            # GET /app wants the App JWT, not an installation access token.
+            token = (
+                github_client.sign_app_jwt(self.IGlobal.app_id, self.IGlobal.private_key_pem)
+                if app_identity
+                else self._token()
+            )
+        except Exception as exc:
+            # Auth errors can carry the token endpoint's response or PEM parser details;
+            # neither belongs in a result an agent or a browser can see. Leave the
+            # operator a trace with the exception class only.
+            warning(
+                f'tool_github: GitHub authentication failed ({type(exc).__name__}); the read returned a generic error'
+            )
+            return github_client.failure_result(
+                'GitHub authentication failed. Check the node credentials and installation access.'
+            )
+        # The call token, the configured PAT and the App private key: redacted from the
+        # whole result, and from an error message before its cap.
+        return github_client.get_result(
+            token, path, params=params, secrets=(self.IGlobal.token, self.IGlobal.private_key_pem)
+        )
 
     # =======================================================================
     # FILES
@@ -747,6 +777,74 @@ class IInstance(IInstanceBase):
         repo = self._repo(args)
         data = call(self._token(), 'GET', f'/repos/{repo}')
         return clean_repo(data)
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'repo': {'type': 'string', 'description': _REPO_DESC},
+                'page': {'type': 'integer', 'minimum': 1, 'description': _PAGE_DESC},
+                'per_page': {'type': 'integer', 'minimum': 1, 'maximum': 100, 'description': _PER_PAGE_DESC},
+            },
+        },
+        description='List repository contributors with login, contributions and type. Returns data, next_page and rate_limit.',
+    )
+    def repo_contributors(self, args):
+        """Read one page of contributors without exposing private profile fields."""
+        args = normalize_tool_input(args, tool_name='repo_contributors')
+        path = repository_reads.repository_path(self._repo(args, 'repo_contributors'), 'repo_contributors')
+        params = repository_reads.page_params(args, 'repo_contributors')
+        return repository_reads.pick_items(
+            self._get(f'{path}/contributors', params=params), ('login', 'contributions', 'type')
+        )
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {'repo': {'type': 'string', 'description': _REPO_DESC}},
+        },
+        description='Get a repository language-to-byte-count map in data, with rate_limit metadata.',
+    )
+    def repo_languages(self, args):
+        """Read language byte counts, including an empty map for an empty repository."""
+        args = normalize_tool_input(args, tool_name='repo_languages')
+        path = repository_reads.repository_path(self._repo(args, 'repo_languages'), 'repo_languages')
+        return repository_reads.expect_object(self._get(f'{path}/languages'))
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'repo': {'type': 'string', 'description': _REPO_DESC},
+                'page': {'type': 'integer', 'minimum': 1, 'description': _PAGE_DESC},
+                'per_page': {'type': 'integer', 'minimum': 1, 'maximum': 100, 'description': _PER_PAGE_DESC},
+            },
+        },
+        description='List repository labels with name, color and description. Returns data, next_page and rate_limit.',
+    )
+    def label_list(self, args):
+        """Read one page of labels without changing any issue's labels."""
+        args = normalize_tool_input(args, tool_name='label_list')
+        path = repository_reads.repository_path(self._repo(args, 'label_list'), 'label_list')
+        params = repository_reads.page_params(args, 'label_list')
+        return repository_reads.pick_items(self._get(f'{path}/labels', params=params), ('name', 'color', 'description'))
+
+    @tool_function(
+        input_schema={'type': 'object', 'properties': {}},
+        description='Identify the configured credential: PAT user login/type, or GitHub App slug with type App. Returns data and rate_limit.',
+    )
+    def user_get(self, args):
+        """Identify a PAT user or the App itself without returning credentials."""
+        normalize_tool_input(args, tool_name='user_get')
+        is_app = self.IGlobal.auth_type == 'app'
+        result = repository_reads.expect_object(self._get('/app' if is_app else '/user', app_identity=is_app))
+        if 'data' in result:
+            data = result['data']
+            result['data'] = {
+                'login': data.get('slug') if is_app else data.get('login'),
+                'type': 'App' if is_app else data.get('type'),
+            }
+        return result
 
     # =======================================================================
     # RELEASES

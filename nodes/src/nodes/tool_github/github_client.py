@@ -32,7 +32,9 @@ and response normalisation. All tool methods in IInstance call through here.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 import datetime
 import time
 
@@ -42,12 +44,25 @@ from tenacity import RetryCallState, Retrying, retry_if_exception_type, stop_aft
 
 
 class GitHubAPIError(ValueError):
-    """Raised when the GitHub API returns an error response."""
+    """Raised when the GitHub API returns an error response.
 
-    def __init__(self, status_code: int, message: str):
+    Carries the status, the response headers and the parsed JSON body (``None`` when
+    the body is not JSON). It keeps no response or request object as an attribute;
+    those carry the Authorization header that was sent.
+    """
+
+    def __init__(
+        self,
+        status_code: int,
+        message: str,
+        headers: Mapping[str, str] | None = None,
+        body: Any = None,
+    ):
         super().__init__(f'GitHub API {status_code}: {message}')
         self.status_code = status_code
         self.message = message
+        self.headers = headers if headers is not None else {}
+        self.body = body
 
 
 class RateLimitError(Exception):
@@ -74,9 +89,13 @@ def _rate_limit_hint(headers) -> str:
 
 def _raise_github_error(resp: requests.Response) -> None:
     """Parse GitHub error response and raise GitHubAPIError."""
+    body = None
     try:
         err = resp.json()
+        body = err
         msg = err.get('message', resp.text)
+        if not isinstance(msg, str):
+            msg = resp.text or resp.reason or 'unknown error'
         errors = err.get('errors')
         if errors:
             msg += ' — ' + '; '.join(e.get('message', str(e)) if isinstance(e, dict) else str(e) for e in errors)
@@ -85,7 +104,7 @@ def _raise_github_error(resp: requests.Response) -> None:
     hint = _rate_limit_hint(resp.headers)
     if hint:
         msg += f' ({hint})'
-    raise GitHubAPIError(resp.status_code, msg)
+    raise GitHubAPIError(resp.status_code, msg, headers=resp.headers, body=body)
 
 
 BASE_URL = 'https://api.github.com'
@@ -109,7 +128,7 @@ def load_app_private_key(pem_text: str):
     return key
 
 
-def _sign_app_jwt(app_id: str, private_key_pem: str) -> str:
+def sign_app_jwt(app_id: str, private_key_pem: str) -> str:
     """Build and RS256-sign a short-lived JWT per GitHub App auth spec (iss=app_id)."""
     key = load_app_private_key(private_key_pem)
     now = int(time.time())
@@ -124,7 +143,7 @@ def mint_installation_token(app_id: str, private_key_pem: str, installation_id: 
     POSTs to ``/app/installations/{installation_id}/access_tokens`` authenticated
     with a freshly-signed App JWT. Returns ``(token, expiry_epoch_seconds)``.
     """
-    jwt_token = _sign_app_jwt(app_id, private_key_pem)
+    jwt_token = sign_app_jwt(app_id, private_key_pem)
     headers = {
         'Authorization': f'Bearer {jwt_token}',
         'Accept': 'application/vnd.github+json',
@@ -168,11 +187,14 @@ def call(
     *,
     params: dict | None = None,
     body: dict | None = None,
+    include_metadata: bool = False,
 ) -> Any:
     """Make an authenticated GitHub API call and return parsed JSON.
 
     Raises ``ValueError`` with a human-readable message on HTTP errors.
-    Returns an empty dict for 204 No Content responses.
+    Returns an empty dict for 204 No Content responses. ``include_metadata``
+    opts into the response envelope used by the repository-read tools; existing
+    callers continue to receive only the parsed body.
     """
     headers = {
         'Authorization': f'Bearer {token}',
@@ -196,7 +218,7 @@ def call(
             raise ValueError(f'GitHub request failed: {exc}') from exc
 
         if resp.status_code == 204:
-            return {}
+            return envelope(resp.status_code, resp.headers, {}) if include_metadata else {}
 
         if not resp.ok:
             is_rate_limit = resp.status_code == 429 or (
@@ -212,7 +234,8 @@ def call(
 
             _raise_github_error(resp)
 
-        return resp.json()
+        data = resp.json()
+        return envelope(resp.status_code, resp.headers, data) if include_metadata else data
 
     def github_rate_limit_wait(retry_state: RetryCallState) -> float:
         exc = retry_state.outcome.exception()
@@ -254,7 +277,120 @@ def call(
             reraise=True,
         )(_attempt)
     except RateLimitError as exc:
-        _raise_github_error(exc.response)
+        exhausted = exc.response
+    # Raised outside the handler, so the error has no __context__ that holds the response.
+    _raise_github_error(exhausted)
+
+
+# ---------------------------------------------------------------------------
+# Result envelope for the repository-read tools: status, data, rate-limit
+# counters and the next page, with HTTP errors returned as results and
+# credentials redacted. The pre-existing tools keep returning bare bodies.
+# ---------------------------------------------------------------------------
+
+MAX_MESSAGE_LENGTH = 2000
+
+
+def envelope(status: int | None, headers, data: Any) -> dict:
+    """Build a result from public response facts: status, rate-limit counters, next page."""
+    headers = headers if headers is not None else {}
+
+    def counter(name):
+        try:
+            return int(headers[name])
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    next_page = None
+    for link in requests.utils.parse_header_links(headers.get('Link') or ''):
+        if link.get('rel') == 'next':
+            try:
+                page = int(parse_qs(urlsplit(link['url']).query)['page'][0])
+                next_page = page if page > 0 else None
+            except (KeyError, ValueError, IndexError):
+                pass
+    return {
+        'status': status,
+        'data': data,
+        'rate_limit': {
+            'remaining': counter('X-RateLimit-Remaining'),
+            'limit': counter('X-RateLimit-Limit'),
+            'reset': counter('X-RateLimit-Reset'),
+            'resource': headers.get('X-RateLimit-Resource'),
+        },
+        'next_page': next_page,
+    }
+
+
+def failure_result(message: str, status: int | None = None, headers=None) -> dict:
+    """Describe a failure as a result without data; counters are null when no response exists."""
+    result = envelope(status, headers, None)
+    del result['data']
+    result['message'] = message
+    result['documentation_url'] = None
+    return result
+
+
+def shape_failure(result: dict, expected: str) -> dict:
+    """Turn a 2xx result whose body is not the expected shape into a failure result."""
+    failure = {key: value for key, value in result.items() if key != 'data'}
+    failure['message'] = f'GitHub returned an unexpected response body; expected {expected}.'
+    failure['documentation_url'] = None
+    return failure
+
+
+def _error_message(exc: GitHubAPIError, secrets: tuple[str, ...] = ()) -> str:
+    """Compose a public message from the parsed error body, never from raw response text.
+
+    The secrets are redacted before the cap, so a credential GitHub echoed across the
+    cut cannot leave a prefix behind.
+    """
+    body = exc.body
+    if not isinstance(body, dict) or not isinstance(body.get('message'), str):
+        return f'GitHub returned HTTP {exc.status_code} without a JSON error body.'
+    message = body['message']
+    errors = body.get('errors')
+    if isinstance(errors, list) and errors:
+        message = f'{message}: ' + '; '.join(_error_detail(error) for error in errors)
+    return redact_result(message, secrets)[:MAX_MESSAGE_LENGTH]
+
+
+def _error_detail(error) -> str:
+    detail = error.get('message') if isinstance(error, dict) else None
+    return detail if isinstance(detail, str) else str(error)
+
+
+def redact_result(value: Any, secrets: tuple[str, ...]) -> Any:
+    """Remove configured credentials from public read results, including errors."""
+    if isinstance(value, str):
+        for secret in sorted((s for s in secrets if s), key=len, reverse=True):
+            value = value.replace(secret, '[REDACTED]')
+        return value
+    if isinstance(value, dict):
+        return {redact_result(k, secrets): redact_result(v, secrets) for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact_result(v, secrets) for v in value]
+    return value
+
+
+def get_result(token: str, path: str, *, params: dict | None = None, secrets: tuple[str, ...] = ()) -> dict:
+    """GET with the result envelope: HTTP errors become results and credentials are redacted.
+
+    ``token`` and ``secrets`` (the node's other credentials) are redacted from the whole
+    result, and from an error message before it is capped. Transport and JSON failures
+    have ``status: None`` and a fixed message, so exception text never reaches a client.
+    Retries follow ``call`` (at most three attempts with bounded waits).
+    """
+    secrets = (token, *secrets)
+    try:
+        result = call(token, 'GET', path, params=params, include_metadata=True)
+    except GitHubAPIError as exc:
+        result = failure_result(_error_message(exc, secrets), exc.status_code, exc.headers)
+        if isinstance(exc.body, dict) and isinstance(exc.body.get('documentation_url'), str):
+            result['documentation_url'] = exc.body['documentation_url']
+    except (ValueError, requests.RequestException):
+        result = failure_result('GitHub request failed or returned invalid JSON. Check connectivity and retry.')
+    return redact_result(result, secrets)
 
 
 # ---------------------------------------------------------------------------
