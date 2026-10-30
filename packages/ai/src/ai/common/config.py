@@ -50,7 +50,7 @@ def check_credential_resolved(logicalType: str, field: str, value: Any, connConf
         name = unresolved.group(1)
         written = None
         if connConfig is not None:
-            written = _written_value(logicalType, connConfig, field)
+            written = written_value(logicalType, connConfig, field)
         if written is not None and unresolved.group(0) not in written:
             raise UnresolvedCredentialError(
                 f'{logicalType}: {field} is the profile default {unresolved.group(0)}, and a profile default '
@@ -83,7 +83,7 @@ def warn_if_credential_unresolved(logicalType: str, field: str, value: Any, conn
     return False
 
 
-def _written_value(logicalType: str, connConfig: Any, field: str) -> Optional[str]:
+def written_value(logicalType: str, connConfig: Any, field: str) -> Optional[str]:
     """What the pipeline wrote for ``field`` where getNodeConfig reads it, as text.
 
     A top-level value wins over the active profile's block, and the active profile is

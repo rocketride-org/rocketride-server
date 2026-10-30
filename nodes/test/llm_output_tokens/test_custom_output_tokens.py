@@ -369,6 +369,32 @@ def test_gemini_a_custom_model_with_no_output_limit_sends_none(monkeypatch):
     assert _gemini_sent_limit(chat) is None
 
 
+def test_gemini_another_profiles_leftover_block_does_not_turn_the_limit_on(monkeypatch):
+    """Only the active profile's block counts, as in getNodeConfig.
+
+    A hand-written block of another profile that carries an output limit is not the
+    one in use, so a Custom model with Output Tokens empty still sends no limit.
+    """
+    conn = {
+        'profile': 'custom',
+        'custom': dict(_GEMINI_CUSTOM),
+        'gemini-2_5-pro': {'modelOutputTokens': 65536},
+    }
+
+    chat = _start_gemini_node(monkeypatch, conn)
+
+    assert _gemini_sent_limit(chat) is None
+
+
+def test_gemini_an_output_limit_above_the_window_is_lowered_to_it(monkeypatch):
+    """The field description promises it: Output Tokens above Total Tokens is lowered to Total Tokens."""
+    custom = {'model': 'models/my-model', 'apikey': 'k', 'modelTotalTokens': 8000, 'modelOutputTokens': 20000}
+
+    chat = _start_gemini_node(monkeypatch, {'profile': 'custom', 'custom': custom})
+
+    assert _gemini_sent_limit(chat) == 8000
+
+
 def test_gemini_the_old_output_tokens_key_is_named_not_used(monkeypatch):
     """A pipeline saved with the old "outputTokens" key runs as it did, and is told the fix.
 
