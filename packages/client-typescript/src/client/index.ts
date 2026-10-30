@@ -45,6 +45,10 @@ export * from './constants.js';
 
 // Export the main client and utilities
 export * from './client.js';
+export { normalizeSignupProperties } from './signup.js';
+
+// Pure deploy/publish helpers shared by every host (teams, versions, names)
+export * from './deploy-helpers.js';
 
 // Export the database API namespace (DatabaseApi class, DatabaseDialect enum)
 export * from './database.js';

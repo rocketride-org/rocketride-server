@@ -33,7 +33,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { RocketRideClient } from 'shell';
-import type { ISqlEndpoint } from '../src/connect';
+import type { SqlEndpoint } from '../src/connect';
 import { createSqlSession } from '../src/connect/session';
 
 // =============================================================================
@@ -61,7 +61,7 @@ interface IFakeClient {
 }
 
 /** The endpoint every session in this suite binds to. */
-const ENDPOINT: ISqlEndpoint = {
+const ENDPOINT: SqlEndpoint = {
 	key: 'p1:s1:db_1',
 	projectId: 'p1',
 	pipelineName: 'Pipeline A',

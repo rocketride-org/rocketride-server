@@ -64,7 +64,9 @@ error context, plus `code` and `hint`:
 - `code` is the server's machine-readable classification, or `None`. Task
   failures carry one: `TASK_NOT_REGISTERED` (the token names no live task —
   never started, terminated, replaced, or the engine restarted),
-  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`. **Classify on `code`, not
+  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`; a refused pipe raises
+  `PipeException` with `OUT_OF_CREDITS` (the org is out of credit; clears when
+  it tops up). **Classify on `code`, not
   on the message text**, which is written for people and may be reworded.
 - `hint` is troubleshooting text the SDK attached for a developer, or `None`.
   It is kept out of `str(e)` so an application can show the message to an end

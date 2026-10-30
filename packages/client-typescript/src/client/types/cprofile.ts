@@ -77,7 +77,13 @@ export interface CProfileReportResponse {
 // CPROFILE TREE TYPES (for flame graph / sunburst / icicle visualisations)
 // =============================================================================
 
-/** A single node in the hierarchical call tree returned by rrext_cprofile_report_tree. */
+/**
+ * A single node in the hierarchical call tree returned by rrext_cprofile_report_tree.
+ *
+ * Below the first level the numbers are this path's share of the caller → callee
+ * totals (the profiler records pairs, not paths), so copies of one function add up
+ * to its totals. The exact per-function totals are in CProfileReportTreeResponse.functions.
+ */
 export interface CProfileTreeNode {
 	/** Function name. */
 	name: string;
@@ -85,7 +91,7 @@ export interface CProfileTreeNode {
 	file: string;
 	/** Source line number. */
 	line: number;
-	/** Number of calls from the parent context. */
+	/** Number of calls from the parent context (this path's share, rounded). */
 	ncalls: number;
 	/** Total time spent in this function (excluding sub-calls). */
 	tottime: number;
@@ -95,10 +101,31 @@ export interface CProfileTreeNode {
 	children: CProfileTreeNode[];
 }
 
+/** One function's totals over the whole session (or thread), as the text report prints them. */
+export interface CProfileFunctionStats {
+	/** Function name. */
+	name: string;
+	/** Source filename. */
+	file: string;
+	/** Source line number. */
+	line: number;
+	/** Total number of calls. */
+	ncalls: number;
+	/** Self time (excluding sub-calls), in seconds. */
+	tottime: number;
+	/** Cumulative time (including sub-calls), in seconds. */
+	cumtime: number;
+}
+
 /** Response from rrext_cprofile_report_tree. */
 export interface CProfileReportTreeResponse {
 	/** Root node of the call tree (synthetic '<root>' wrapper). */
 	tree: CProfileTreeNode | null;
+	/**
+	 * Per-function totals, filtered like the tree by includeSystem but never pruned.
+	 * Absent from servers that predate it.
+	 */
+	functions?: CProfileFunctionStats[];
 	/** How long the profiled threads ran — the selected thread, or all of them summed. */
 	total_time: number;
 	/** Total number of function calls recorded. */

@@ -29,12 +29,14 @@
 //
 // Row click = re-root the visualisation (not just cross-highlight).
 // Table always shows ALL functions regardless of current viz root.
+// Rows are the server's per-function totals, the numbers the text report
+// prints; an older server sends none, and the tree's nodes are summed instead.
 // =============================================================================
 
 import React, { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import type { CSSProperties } from 'react';
 import { commonStyles } from 'shell';
-import type { ProfileTreeNode, ProfileTreeResponse, OnRootChange } from './types';
+import type { ProfileFunctionStats, ProfileTreeNode, ProfileTreeResponse, OnRootChange } from './types';
 
 // =============================================================================
 // TYPES
@@ -60,8 +62,8 @@ interface FlatRow {
 	cumpercall: number;
 	/** Combined pstats-style location string. */
 	location: string;
-	/** Reference to the original tree node (for re-rooting). */
-	refNode: ProfileTreeNode;
+	/** A tree node of this function (for re-rooting); null when the tree pruned it. */
+	refNode: ProfileTreeNode | null;
 }
 
 /** Sortable column identifiers. */
@@ -183,9 +185,68 @@ const styles = {
 // TREE FLATTENING
 // =============================================================================
 
+/** Identity of a function across the tree and the per-function totals. */
+function functionKey(f: { file: string; line: number; name: string }): string {
+	return `${f.file}:${f.line}:${f.name}`;
+}
+
 /**
- * Flatten a call tree into a deduplicated list of unique functions.
- * Matches snakeviz's behaviour: aggregate all occurrences of the same function.
+ * Rows from the server's per-function totals, each linked to the shallowest
+ * tree node of its function so a row click re-roots there.
+ *
+ * @param functions - Per-function totals from the server.
+ * @param tree - Root of the call tree.
+ * @returns Array of flat rows.
+ */
+function rowsFromFunctions(functions: ProfileFunctionStats[], tree: ProfileTreeNode): FlatRow[] {
+	// Breadth-first, so the first node seen of a function is its shallowest
+	const nodes = new Map<string, ProfileTreeNode>();
+	const queue: ProfileTreeNode[] = [tree];
+	for (let i = 0; i < queue.length; i++) {
+		const node = queue[i];
+		const key = functionKey(node);
+		if (!nodes.has(key)) nodes.set(key, node);
+		queue.push(...node.children);
+	}
+
+	// Entries the server cannot tell apart share one row: paths outside the
+	// project and stdlib all read './<system>', so two such functions on the
+	// same line with the same name arrive as separate entries with one key
+	const rows = new Map<string, FlatRow>();
+	for (const f of functions) {
+		const key = functionKey(f);
+		const row = rows.get(key);
+		if (row) {
+			row.ncalls += f.ncalls;
+			row.tottime += f.tottime;
+			row.cumtime += f.cumtime;
+		} else {
+			rows.set(key, {
+				name: f.name,
+				file: f.file,
+				line: f.line,
+				ncalls: f.ncalls,
+				tottime: f.tottime,
+				cumtime: f.cumtime,
+				percall: 0,
+				cumpercall: 0,
+				location: `${f.file}:${f.line}(${f.name})`,
+				refNode: nodes.get(key) ?? null,
+			});
+		}
+	}
+	for (const row of rows.values()) {
+		row.percall = row.ncalls > 0 ? row.tottime / row.ncalls : 0;
+		row.cumpercall = row.ncalls > 0 ? row.cumtime / row.ncalls : 0;
+	}
+	return Array.from(rows.values());
+}
+
+/**
+ * Flatten a call tree into a deduplicated list of unique functions, for a
+ * server that sends no per-function totals.  Sums every occurrence of a
+ * function, as snakeviz does; the tree of such a server repeats a function's
+ * callees under each copy, so these sums can overstate.
  *
  * @param tree - Root of the call tree.
  * @returns Array of aggregated flat rows.
@@ -196,7 +257,7 @@ function flattenTree(tree: ProfileTreeNode): FlatRow[] {
 	/** Recursively walk the tree, aggregating stats by function identity. */
 	function walk(node: ProfileTreeNode): void {
 		if (node.name !== '<root>') {
-			const key = `${node.file}:${node.line}:${node.name}`;
+			const key = functionKey(node);
 			const existing = map.get(key);
 			if (existing) {
 				// Aggregate calls and times across all call sites
@@ -280,10 +341,12 @@ const StatsTable: React.FC<{
 	// DATA PROCESSING
 	// =========================================================================
 
-	/** Flatten tree into deduplicated function list, optionally filtering system calls. */
+	/** One row per function, optionally filtering system calls. */
 	const allRows = useMemo(() => {
 		if (!treeData?.tree) return [];
-		const rows = flattenTree(treeData.tree);
+		const rows = treeData.functions
+			? rowsFromFunctions(treeData.functions, treeData.tree)
+			: flattenTree(treeData.tree);
 		if (showSystemCalls) return rows;
 		// Filter to only project code when system calls is unchecked
 		return rows.filter((r) => isProjectCode(r.file));
@@ -342,9 +405,9 @@ const StatsTable: React.FC<{
 		}
 	}, [sortCol]);
 
-	/** Row click — re-root the visualisation (snakeviz behaviour). */
+	/** Row click — re-root the visualisation (snakeviz behaviour); a function the tree pruned has no node. */
 	const handleRowClick = useCallback((row: FlatRow) => {
-		onRootChange(row.refNode);
+		if (row.refNode) onRootChange(row.refNode);
 	}, [onRootChange]);
 
 	/** Handle keyboard activation on a sortable column header. */

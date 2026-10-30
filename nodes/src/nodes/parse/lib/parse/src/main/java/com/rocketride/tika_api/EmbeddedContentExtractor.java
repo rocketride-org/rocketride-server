@@ -47,12 +47,21 @@ public class EmbeddedContentExtractor {
      */
     public static class EmbeddedContentProcessor implements EmbeddedDocumentExtractor {
         private final long nativeHandle;
-        private final String mimeType;     
-        private static TikaConfig tikaConfig;
-        
+        private final String mimeType;
+        private final long flags;
+
         public EmbeddedContentProcessor(long nativeHandle, String mimeType) {
+            this(nativeHandle, mimeType, 0);
+        }
+
+        /**
+         * @param flags the flags the engine passed for the document; its SKIP_*
+         *              bits name the embedded media nothing listens for
+         */
+        public EmbeddedContentProcessor(long nativeHandle, String mimeType, long flags) {
             this.nativeHandle = nativeHandle;
             this.mimeType = mimeType;
+            this.flags = flags;
         }
 
         public void processEmbeddedMediaStream(InputStream stream, String mimeType) throws IOException {
@@ -61,6 +70,12 @@ public class EmbeddedContentExtractor {
 
         public void processEmbeddedMediaStream(InputStream stream, String mimeType, byte[] beginPayload)
                 throws IOException {
+            // Nothing listens for this kind of media: the native side would drop
+            // every buffer. parseEmbedded returns earlier still; this also covers
+            // parsers that call in directly, such as the Aspose PDF parser.
+            if (!TikaApi.wantsMedia(flags, mimeType))
+                return;
+
             try {
                 // Determine which native callback to invoke
                 // Based on MIME type, choose the corresponding function.
@@ -130,7 +145,7 @@ public class EmbeddedContentExtractor {
         private void processStream(InputStream stream, ContentHandler handler, Metadata metadata,
                 boolean outputHtml) throws SAXException, IOException, ParserConfigurationException {
             try {
-                tikaConfig = ConfigBuilder.getConfig();
+                TikaConfig tikaConfig = TikaApi.getTikaConfig();
                 AutoDetectParser parser = new AutoDetectParser(tikaConfig);
                 Detector detector = parser.getDetector();
                 MediaType mediaType = detector.detect(stream, metadata);
@@ -139,10 +154,10 @@ public class EmbeddedContentExtractor {
                 StructureContentHandler filter = new StructureContentHandler(handler, metadata);
                 ParseContext context = new ParseContext();
                 context.set(Parser.class, parser);
-                context.set(PDFParserConfig.class, TikaApi.getPdfConfig());
+                context.set(PDFParserConfig.class, TikaApi.getPdfConfig(this.flags));
 
                 // if embedded doc exist, then process it
-                EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(this.nativeHandle, currentMimeType);
+                EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(this.nativeHandle, currentMimeType, this.flags);
                 context.set(EmbeddedDocumentExtractor.class, extractor);
                 parser.parse(stream, filter, metadata, context);
 
@@ -166,7 +181,7 @@ public class EmbeddedContentExtractor {
         public void parseEmbedded(InputStream stream, ContentHandler handler, Metadata metadata,
                 boolean outputHtml) throws SAXException, IOException {
             try {
-                tikaConfig = ConfigBuilder.getConfig();
+                TikaConfig tikaConfig = TikaApi.getTikaConfig();
                 AutoDetectParser parser = new AutoDetectParser(tikaConfig);
                 Detector detector = parser.getDetector();
 			    MediaType mediaType = detector.detect(stream, metadata);
@@ -175,6 +190,11 @@ public class EmbeddedContentExtractor {
                 // Determine the type of embedded resource based on the MIME type.
                 if (mimeType.startsWith(MIME_TYPE_IMAGE) || mimeType.startsWith(MIME_TYPE_AUDIO)
                         || mimeType.startsWith(MIME_TYPE_VIDEO)) {
+                    // Nothing listens for this kind of media: the native side would
+                    // drop every buffer, so skip the copy, the parse and the send
+                    if (!TikaApi.wantsMedia(flags, mimeType))
+                        return;
+
                     // The container hands us only bytes, so parse the embedded media
                     // ourselves (via a duplicate) for its own detail; best-effort.
                     Util.StreamDuplicator dup = new Util.StreamDuplicator(stream);

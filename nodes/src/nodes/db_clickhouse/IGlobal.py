@@ -21,10 +21,57 @@
 # SOFTWARE.
 # =============================================================================
 
+import re
 import urllib.parse
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from ai.common.database import DatabaseGlobalBase
+
+# clickhouse-driver inlines bind values client-side, so wherever ClickHouse repeats the statement or its
+# input it repeats the caller's values. The message is cut at the first of these.
+_CLICKHOUSE_DETAIL = re.compile(
+    r"""
+        Stack\ trace:
+      | failed\ at\ position
+      | while\ processing\ query:
+      | ,\ required\ columns:
+      | while\ processing:\ '
+      | :\ While\ processing\s
+      | :\ while\ executing\ 'FUNCTION[ ]
+      | [Ii]n\ scope\s
+      | [Ii]n\ query\s
+      | \ here:\s
+      | \ before:\ '
+      | (?<=')\ at:\s
+      | (?<=deduce\ template\ of\ expression):\s
+      | (?<=\(result\ column\ not\ found\)):\s
+      | (?:\n:\ ?)?\nRow\ \d+:\nColumn\ \d+,
+    """,
+    re.VERBOSE,
+)
+# clickhouse-driver puts a subclass name in front of the server text (`DB::ParsingException. DB::ParsingException: ...`).
+_DRIVER_PREFIX = re.compile(r'\ADB::\w*Exception\.\ (?=DB::\w*Exception:)')
+_CLASS_ONLY = re.compile(r'DB::\w*Exception:?\.?')
+_THROW_IF = 395
+_RUNTIME_CONTEXT = ": while executing 'FUNCTION "
+
+
+def _server_exception(exc: Exception) -> Optional[BaseException]:
+    """Return the driver's ``ServerException`` inside ``exc``, or None.
+
+    clickhouse-sqlalchemy keeps it in ``.orig``; ``clickhouse_driver.dbapi`` raises an error whose only
+    argument is the ``ServerException``.
+    """
+    orig = getattr(exc, 'orig', None)
+    if orig is None:
+        orig = exc
+    args = getattr(orig, 'args', ())
+    inner = args[0] if isinstance(args, (list, tuple)) and len(args) == 1 else None
+    for candidate in (orig, inner):
+        message = getattr(candidate, 'message', None)
+        if isinstance(getattr(candidate, 'code', None), int) and isinstance(message, str) and message.strip():
+            return candidate
+    return None
 
 
 class IGlobal(DatabaseGlobalBase):
@@ -122,3 +169,22 @@ class IGlobal(DatabaseGlobalBase):
         # A stored null (or non-string) must not violate the -> str contract.
         value = config.get('db_description')
         return value if isinstance(value, str) else ''
+
+    def _format_db_error(self, exc: Exception) -> str:
+        """Return ``Error <code>: <class>: <sentence>`` for a ClickHouse server error.
+
+        Everything ClickHouse repeats from the statement or its input is removed, because it carries the bound
+        values. A ``throwIf`` message is the caller's own text and comes back whole. An error without a
+        driver ``.code`` and ``.message`` goes to the shared formatter.
+        """
+        server = _server_exception(exc)
+        if server is None:
+            return super()._format_db_error(exc)
+        code, text = server.code, _DRIVER_PREFIX.sub('', server.message, count=1)
+        if code == _THROW_IF and _RUNTIME_CONTEXT in text:
+            return f'Error {code}: {text.partition(_RUNTIME_CONTEXT)[0]}'.strip()
+        cut = _CLICKHOUSE_DETAIL.search(text)
+        text = (text[: cut.start()] if cut else text).strip()
+        if _CLASS_ONLY.fullmatch(text):
+            text += " (the server's message only repeated the statement)"
+        return f'Error {code}: {text}'

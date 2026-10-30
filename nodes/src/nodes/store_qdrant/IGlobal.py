@@ -38,6 +38,7 @@ QDRANT_COLLECTION_RE = re.compile(r'^[A-Za-z0-9._-]{1,255}$')
 
 class IGlobal(StoreGlobalBase):
     serverName: str = 'qdrant'
+    credential_fields = ('apikey',)
 
     def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
         """Return the driver's Store, imported lazily so config mode never loads the driver."""

@@ -38,6 +38,7 @@
 	//		engine
 	//
 	"capabilities": [
+		"internal",
 		"network"
 	],
 	//

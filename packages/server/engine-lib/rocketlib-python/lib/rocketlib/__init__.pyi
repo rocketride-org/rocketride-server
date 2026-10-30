@@ -838,6 +838,10 @@ def processArguments(args: List[str]) -> None:
     """Process engine command-line arguments."""
     ...
 
+def setPipeGate(gate: Callable[[], None]) -> None:
+    """Set the callable run before every getPipe(); raising refuses the pipe. Call once, before any pipe is taken."""
+    ...
+
 def isCancelled() -> bool:
     """Return whether the engine or the calling engine thread is cancelled."""
     ...

@@ -7,11 +7,7 @@ from depends import load_depends
 # sys.modules because importing gpu_guard here pulls in ai.node and the SDK.
 _guard = sys.modules.get('ai.common.models.gpu_guard')
 if _guard is not None and _guard.is_installed():
-    raise ImportError(
-        'Direct import of "torch" is blocked in model server mode. '
-        'GPU inference runs on the model server via ai.common.models. '
-        'Do not import GPU libraries directly in nodes.'
-    )
+    raise ImportError(_guard.blocked_message('torch'))
 
 load_depends(__file__)
 

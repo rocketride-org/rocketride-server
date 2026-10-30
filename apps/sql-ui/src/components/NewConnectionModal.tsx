@@ -410,7 +410,7 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 							<div style={styles.listEmpty}>
 								{status === 'loading' || status === 'idle'
 									? 'Searching running pipelines…'
-									: 'No database nodes found. Start a pipeline containing a database node (MySQL, PostgreSQL, or ClickHouse), then reopen this dialog.'}
+									: 'No database nodes found. Start a pipeline containing a database node (MySQL, PostgreSQL, ClickHouse, or RocketRide SQL), then reopen this dialog.'}
 							</div>
 						)}
 						{endpoints.map((endpoint: SqlEndpoint) => (

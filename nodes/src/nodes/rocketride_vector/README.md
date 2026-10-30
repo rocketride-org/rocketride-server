@@ -9,9 +9,11 @@ over the SQL and graph nodes for retrieval-augmented document search.
 The node writes documents from the documents lane into a pgvector-backed table,
 replacing existing chunks for the same object IDs. Questions can produce
 matching documents, answers, or enriched questions through the three configured
-question outputs. Use it when retrieval should flow through a pipeline; unlike
-the tool-capable sibling stores, this node registers no agent tools or raw-SQL
-execution surface.
+question outputs. Use it when retrieval should flow through a pipeline. The
+same store can be offered to an agent or app as tools once Expose as tools is
+on; the write tools also need Allow writes through tools. Both are off by
+default because the table lives in the team's managed database. There is no
+raw-SQL execution surface.
 
 ## Lanes
 
@@ -21,6 +23,53 @@ execution surface.
 | questions | documents | Returns matching documents. |
 | questions | answers | Returns matching documents as answers. |
 | questions | questions | Enriches a question with matching documents. |
+
+## As a tool
+
+An agent node in the same pipeline sees each function as
+`<node id>.<function>`, where the node id is this node's id in the pipeline
+(for example `rrvector_1.search`). An app calls `client.tool` with the bare
+function name and this node's id (`tool='search', node_id='rrvector_1'`); with
+no node id the call goes to the first node in the pipeline that owns a tool of
+that name. The functions are offered only while Expose as tools is on, which
+is off by default because the table lives in the team's managed database and
+`list_documents` and `get` together return all of it. `upsert`, `delete`,
+`soft_delete`, and `restore` are offered only while Allow writes through tools
+is also on, because they change that table. While a switch is off the affected
+functions are left out of the tool list: an agent's call fails with "not found
+in tool catalog", an app's `client.tool` call fails with the engine's "No
+handler found for tool" error, and a direct call returns a failure object
+naming the switch. Both switches are node-wide: every caller who may invoke
+tools on the pipeline gets the same functions, and the node applies no
+per-user access control of its own. `examples/rocketride-vector-agent.pipe` in
+the repository is a chat agent wired to this node's tools.
+
+| Function | Description |
+| --- | --- |
+| `search` | Searches the store for a non-empty `query`; accepts optional `top_k` and a metadata `filter` (`objectId`, `nodeId`, `parent`) and returns matching content, metadata, and scores. Needs the node's Embedding setting (the embedding sub-block under Parameters) configured; without it the tool returns a failure object naming the node. |
+| `objdir` | Lists the distinct parent paths in the table as a map of parent path to one object ID each; accepts optional `parent`, `offset`, and `limit`, and pages count paths. Documents that share a parent path appear as one entry; `list_documents` lists them all. Deleted documents are not listed. Neither listing has an index to use, so every `objdir` and `list_documents` page scans the whole table (`list_documents` a second time for `total`); ask for large pages. |
+| `list_documents` | Lists the documents one by one, ordered by object ID, each with `object_id`, `parent`, and `chunk_count`; accepts optional `parent` (exact match), `deleted` (true lists the trash), `offset`, and `limit`. The reply carries `total` (documents matching the filter), `offset`, and `has_more`. |
+| `get` | Returns up to `limit` chunks of one document by `object_id`, sorted by chunk ID; use `offset` to retrieve subsequent pages. Each call reads at most 10,000 chunks. The reply carries `total` (the number of chunks fetched), `has_more` (whether another page exists within that fetched set), and `truncated`. When `truncated=true`, the read ceiling was reached: `total` may be incomplete, and even `has_more=false` does not guarantee the whole document was retrieved. The tool pages the document itself, ordering chunks by chunk ID and then content, so `offset` behaves the same on every store. An object ID the table does not hold returns a failure object, and so does a document in the trash: the message says that `restore` makes it readable again while writes through tools are allowed, and that this node does not offer `restore` while they are off. |
+| `stats` | Returns the row (chunk) count of the whole table, including the store's one internal schema row and soft-deleted documents, the number of active documents (`document_count`), the embedding model name, and the vector size. |
+| `upsert` | Adds or replaces a non-empty `documents` array (content, object ID, optional metadata, optional embedding and model). The chunks sent for one object ID in a call are numbered 0, 1, 2 ... in the order given unless each carries its own `chunkId`, which may not repeat within the call; a later call for the same object ID replaces all of its chunks. Offered only while writes are allowed. |
+| `delete` | Deletes the chunks of a non-empty `object_ids` array for good. The reply echoes the distinct IDs and `deleted_count`, their number, not the number of documents found. Offered only while writes are allowed. |
+| `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash: their chunks stay stored but leave `search`, `objdir`, `list_documents`, and `get` until restored. The reply echoes the distinct IDs and `matched_chunks`, the number of chunk rows the table held for them (0 when none exists). Offered only while writes are allowed. |
+| `restore` | Takes the documents of a non-empty `object_ids` array out of the trash, with the same reply as `soft_delete`. A document removed with `delete` cannot be restored. Offered only while writes are allowed. |
+
+The functions return `{"success": false, "error": "..."}` for a missing or
+invalid input, a missing embedding provider, a refused write, or an object ID
+`get` does not find. `upsert` reports database errors the same way. `search`
+falls back to a keyword search when the semantic search fails and reports a
+failure object only if that fails too; `delete`, `soft_delete`, `restore`,
+`objdir`, `list_documents`, `get`, and `stats` raise database errors. `get`,
+`objdir`, and `list_documents` require integer pagination values (integer
+strings are accepted; booleans and floats are rejected), with `offset` at
+least 0 and `limit` at least 1. Invalid values return a failure object without
+querying the store. Missing or null values use the defaults: offset 0, limit
+100 for `get` and `list_documents`, and limit 1000 for `objdir`. Larger limits
+are capped at 100 chunks for `get`, 1000 documents for `list_documents`, and
+1000 paths for `objdir`. The object ID `schema` names the store's own control
+row and is refused by every function that takes object IDs.
 
 ## Configuration
 
@@ -70,6 +119,66 @@ supported ranges (m 2–100 and ef_construction 4–1,000), and ef_construction 
 raised to at least twice m. These values do not rebuild an index that already
 exists.
 
+### Tool Server Name
+
+The tool-server name defaults to `rrvector`. It labels this node in the
+messages the tool functions return (for example a refused write names
+`rrvector.delete`); agents and apps address the functions by the node's
+pipeline id, which already keeps several vector stores apart.
+
+### Expose as tools
+
+Off by default. When off, the node offers no tool functions: an agent's call
+fails with "not found in tool catalog", an app's with the engine's "No handler
+found for tool" error, and a direct call returns a failure object. The
+documents and questions lanes are unaffected. Turn it on only for a pipeline
+whose agent or app is meant to read this table through tools. These reads are
+not restricted to the matches above the questions lane's score threshold;
+`list_documents` lists every document, `objdir` one object ID per distinct
+parent path.
+
+### Allow writes through tools
+
+Off by default, and read only while Expose as tools is on. When off, `upsert`,
+`delete`, `soft_delete`, and `restore` are not offered: an agent's call fails
+with "not found in tool catalog", an app's with the engine's "No handler found
+for tool" error. `search`, `objdir`, `list_documents`, `get`, and `stats` keep
+working, and the documents lane still writes. Turn it on only for a pipeline
+whose agent or app is meant to manage the documents in this table.
+
+### Database
+
+Database picks which RocketRide cloud database the node uses. It defaults to
+Organization, so existing pipelines keep using the database they already had.
+
+- **Organization**: the database shared by everyone in the organization the
+  pipeline runs in. Data from before this choice existed lives here.
+- **Team**: the database of the run's team. A run from the builder uses your
+  current dev team and needs run rights (task.control) on it; a deployed
+  pipeline uses the team it is billed to.
+- **Personal**: your own database in this organization. It works only when you
+  are the person running the pipeline: builder runs, store apps you run, and
+  pipelines you deploy for yourself (@me). A pipeline deployed for a team has
+  no person behind it, so it fails at start with an error that says so.
+  Organization admins can reach members' personal databases, and that access
+  is logged.
+
+Each choice is a separate database. Switching does not move or copy data, and
+a database you have not used yet is created empty on the first run that needs
+it. Documents indexed into one database are not searchable from another; after
+switching, send your documents through again to index them into the new one.
+
+A pipeline exposed through a public link (a chat, dropper, webhook, Discord or
+Telegram source) runs as you, so visitors' requests use your team or personal
+database, not their own.
+
+Access is checked when the run starts. If the run may not use the chosen
+database, it does not start, and the error says which database and why. A
+self-hosted engine supports only Organization; Team and Personal fail at start
+because they need RocketRide cloud. Access is approved for the whole run, not
+each node: every node in a run can reach every database the run was approved
+for.
+
 ## Notes
 
 ### Storage and retrieval behavior
@@ -84,7 +193,9 @@ produce empty search results rather than an error.
 Deleted objects are excluded by default, while document rendering reassembles
 stored chunks by chunkId. The store removes all existing chunks for incoming
 object IDs before inserting the replacement chunks, preventing duplicate data
-for a re-ingested object.
+for a re-ingested object. The deleted mark is the same one the `soft_delete`
+tool sets and `restore` clears: a document in the trash keeps its rows and its
+chunk IDs, and the `delete` tool removes rows for good.
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- Generated by nodes:docs-generate. Do not edit by hand. -->
@@ -93,13 +204,18 @@ for a re-ingested object.
 
 | Field | Type | Description | Default |
 |---|---|---|---|
+| `rrvector.allow_write` | `boolean` | **Allow writes through tools**<br/>Permit the upsert, delete, soft_delete and restore tool functions to change this table in your RocketRide cloud database. Applies only while Expose as tools is on. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, list_documents, get, stats) are unaffected. | `false` |
 | `rrvector.collection` | `string` | **Table**<br/>Name of the table to store vectors in your RocketRide cloud database. | `"rocketride"` |
+| `rrvector.expose_tools` | `boolean` | **Expose as tools**<br/>Offer this table to agents and apps as tool functions: search, objdir, list_documents, get and stats, plus upsert, delete, soft_delete and restore when writes through tools are allowed. Leave OFF unless a trusted application or agent in this pipeline is meant to read the table through tools; objdir and get together return the whole table, not only the matches the questions lane returns. The documents and questions lanes are unaffected. | `false` |
 | `rrvector.hnsw_ef_construction` | `integer` | **HNSW ef_construction**<br/>HNSW build-time candidate list size used when the index is first created. | `64` |
 | `rrvector.hnsw_m` | `integer` | **HNSW m**<br/>HNSW graph degree (max connections per layer) used when the index is first created. | `16` |
 | `rrvector.profile` | `string` | **RocketRide cloud database**<br/>Connect to... | `"cloud"` |
 | `rrvector.provider` | `string` |  | const: `"rocketride_vector"` |
+| `rrvector.scope` | `string` | **Database**<br/>Organization (default): shared by everyone in the organization. Team: the run's team (your current dev team, or the team a deploy is billed to). Personal: your own, for runs you start yourself. Each is a separate database: switching doesn't move data, and a new one starts empty. | `"org"` |
 | `rrvector.score` | `number` | **Score threshold**<br/>Minimum similarity score for a document to be returned by search. | `0.5` |
+| `rrvector.serverName` | `string` | **Tool Server Name**<br/>Label for this store in tool-response messages (for example, a refused write names rrvector.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings. | `"rrvector"` |
 | `rrvector.similarity` | `string` | **Similarity Metric**<br/>The similarity metric to use for vector search. Also selects the HNSW index operator class. | `"cosine"` |
+| `rrvector.target` | `string` | **Team or user**<br/>Another team's or user's database (admins only). Leave empty to use your own team's or your own | `""` |
 
 ## Dependencies
 

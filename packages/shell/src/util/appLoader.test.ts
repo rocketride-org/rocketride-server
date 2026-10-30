@@ -28,12 +28,23 @@
 import assert from 'node:assert/strict';
 import test, { afterEach, mock } from 'node:test';
 import { init } from '@module-federation/runtime';
-import { devPreviewHoldRemainingMs, isDevPreviewPending, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
+import { devPreviewHoldRemainingMs, isDevPreviewPending, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
 import type { AppDescriptor } from '../components/workspace/types';
 
 // In the browser the rsbuild MF plugin creates the host instance; stand one
-// up so registerDevRemote's registerRemotes has a runtime to register into.
-init({ name: 'shell_test', remotes: [] });
+// up so registerDevRemote's registerRemotes has a runtime to register into,
+// and so a test can stand in for its module loads (stubLoader).
+const federation = init({ name: 'shell_test', remotes: [] });
+
+/**
+ * Routes the shell's module loads (Module Federation's loadRemote, which calls
+ * the host instance's) to `load` for the current test; afterEach restores it.
+ *
+ * @param load - Receives the module id (`container/module`) and returns the load.
+ */
+function stubLoader(load: (id: string) => unknown): void {
+	mock.method(federation, 'loadRemote', load);
+}
 
 /**
  * Points the loader at a shell page: its query string and whether it is
@@ -58,6 +69,72 @@ function stubClock(ms: number): void {
 afterEach(() => {
 	mock.restoreAll();
 	setDescriptorInvalidator(null);
+});
+
+/** A module loader whose loads stay open until the test settles them, one handle per module id. */
+function heldLoader(): Map<string, { resolve: (v: unknown) => void; reject: (e: unknown) => void }> {
+	const held = new Map<string, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>();
+	stubLoader((id) => new Promise((resolve, reject) => { held.set(id, { resolve, reject }); }));
+	return held;
+}
+
+test('a module load that ends first (the waitlist screen\'s telemetry entry) never clears the pending mark of the app load still in flight', async () => {
+	stubPage('', false);
+	const held = heldLoader();
+	const [entry] = registerAndMapApps([{ id: 'org.race', moduleId: 'race_mod', name: 'Race', registryVersion: 1 }]);
+	const appLoad = entry.load();
+	assert.equal(isRemotePending('race_mod'), true, 'the app load marks the container');
+	const telemetry = loadAppModule('org.race', 'telemetry');
+	assert.equal(isRemotePending('race_mod'), true);
+	// the telemetry entry is missing in this build of the app: its load ends first
+	held.get('race_mod/telemetry')!.reject(new Error('no telemetry entry'));
+	assert.equal(await telemetry, null);
+	assert.equal(isRemotePending('race_mod'), true, 'the app load is still in flight: the container stays committed');
+	assert.equal(isRemoteLoaded('race_mod'), false);
+	held.get('race_mod/AppDescriptor')!.resolve({ default: { id: 'org.race' } });
+	await appLoad;
+	assert.equal(isRemotePending('race_mod'), false, 'no load in flight once both ended');
+	assert.equal(isRemoteLoaded('race_mod'), true);
+});
+
+test('the other order: the app load ends first and the module load keeps the mark until it ends', async () => {
+	stubPage('', false);
+	const held = heldLoader();
+	const [entry] = registerAndMapApps([{ id: 'org.race2', moduleId: 'race_mod2', name: 'Race 2', registryVersion: 1 }]);
+	const telemetry = loadAppModule('org.race2', 'telemetry');
+	const appLoad = entry.load();
+	held.get('race_mod2/AppDescriptor')!.resolve({ default: { id: 'org.race2' } });
+	await appLoad;
+	assert.equal(isRemotePending('race_mod2'), true, 'the module load is still in flight');
+	held.get('race_mod2/telemetry')!.resolve({ default: () => undefined });
+	assert.notEqual(await telemetry, null);
+	assert.equal(isRemotePending('race_mod2'), false);
+});
+
+test('a loader that throws before returning a promise leaves no pending mark (app load and module load)', async () => {
+	stubPage('', false);
+	stubLoader(() => { throw new Error('no federation instance'); });
+	const [entry] = registerAndMapApps([{ id: 'org.sync', moduleId: 'sync_mod', name: 'Sync', registryVersion: 1 }]);
+	assert.throws(() => entry.load(), /no federation instance/);
+	assert.equal(isRemotePending('sync_mod'), false, 'the app load released its mark');
+	assert.equal(await loadAppModule('org.sync', 'telemetry'), null);
+	assert.equal(isRemotePending('sync_mod'), false, 'the module load released its mark');
+});
+
+test('a later registration batch (the apps a sign-in adds) keeps the earlier batch loadable', async () => {
+	stubPage('', false);
+	stubLoader(async (id: string) => ({ default: id }));
+	registerAndMapApps([{ id: 'org.probe', moduleId: 'probe_mod', name: 'Probe', registryVersion: 1 }]);
+	registerAndMapApps([{ id: 'org.gated', moduleId: 'gated_mod', name: 'Gated', registryVersion: 1 }]);
+	assert.deepEqual(await loadAppModule('org.probe', 'telemetry'), { default: 'probe_mod/telemetry' }, 'the probe catalog app still resolves');
+	assert.deepEqual(await loadAppModule('org.gated', 'telemetry'), { default: 'gated_mod/telemetry' });
+});
+
+test('a module load of an unknown app resolves null and marks nothing', async () => {
+	stubPage('', false);
+	heldLoader();
+	assert.equal(await loadAppModule('org.unknown', 'telemetry'), null);
+	assert.equal(isRemotePending('org.unknown'), false);
 });
 
 test('an embedded dev preview holds its locked app while the registration is pending', () => {

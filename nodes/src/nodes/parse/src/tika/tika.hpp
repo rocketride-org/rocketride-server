@@ -35,6 +35,26 @@ namespace engine::store::filter::parse::Tika {
 
 //-------------------------------------------------------------------------
 /// @details
+///		Added to the entry flags passed to tika, per document, for each
+///		media lane the parse node has no listener on, so tika does not
+///		extract that media. They sit above the entry flags
+///		(apLib/entry.hpp), which must never grow into them; TikaApi.java
+///		declares the same bits.
+//-------------------------------------------------------------------------
+_const uint32_t SKIP_IMAGES = BIT(24);
+_const uint32_t SKIP_AUDIO = BIT(25);
+_const uint32_t SKIP_VIDEO = BIT(26);
+_const uint32_t SKIP_MEDIA = SKIP_IMAGES | SKIP_AUDIO | SKIP_VIDEO;
+static_assert((SKIP_MEDIA &
+               (ap::flags::ENTRY_FLAGS::INDEX | ap::flags::ENTRY_FLAGS::CLASSIFY |
+                ap::flags::ENTRY_FLAGS::OCR | ap::flags::ENTRY_FLAGS::MAGICK |
+                ap::flags::ENTRY_FLAGS::SIGNING | ap::flags::ENTRY_FLAGS::OCR_DONE |
+                ap::flags::ENTRY_FLAGS::PERMISSIONS |
+                ap::flags::ENTRY_FLAGS::VECTORIZE)) == 0,
+              "the tika skip bits overlap an entry flag");
+
+//-------------------------------------------------------------------------
+/// @details
 ///		This class is the extraction context handler passed when
 ///     extracting text to notify of parsing events
 //-------------------------------------------------------------------------

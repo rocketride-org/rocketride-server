@@ -447,6 +447,112 @@ class TestSatisfiedVerdict:
         assert len(env.resolves) == 1
 
 
+class TestPreinstallHooks:
+    @pytest.fixture
+    def plan(self, exe_dir, monkeypatch):
+        """A requirements file whose resolved plan is whatever the test sets."""
+        monkeypatch.setattr(depends, '_get_site_packages', lambda: str(exe_dir / 'site-packages'))
+        monkeypatch.setattr(depends, 'updateProgress', lambda message: None)
+        monkeypatch.setattr(depends, '_start_heartbeat', lambda: None)
+        monkeypatch.setattr(depends, '_stop_heartbeat', lambda: None)
+        monkeypatch.setattr(depends, 'error', lambda message: None)
+        pending = []
+        monkeypatch.setattr(depends, '_install_dry_run', lambda *a: list(pending))
+        return SimpleNamespace(
+            req=_write(exe_dir / 'nodes' / 'demo' / 'requirements.txt', 'sentence-transformers\n'),
+            constraints=_write(exe_dir / 'cache' / 'constraints.txt', ''),
+            pending=pending,
+        )
+
+    def test_finds_hooks_anywhere_the_globs_reach(self, exe_dir):
+        _write(exe_dir / '_depends_hooks.py', 'def excludes(packages): pass\n')
+        _write(exe_dir / 'nodes' / 'demo' / '_depends_hooks.py', 'def excludes(packages): pass\n')
+        _write(exe_dir / 'ai' / 'common' / 'torch' / '_depends_hooks.py', 'def excludes(packages): pass\n')
+        _write(exe_dir / 'ai' / 'common' / 'torch' / 'requirements.txt')  # not a hook: wrong name, ignored
+
+        found = {os.path.relpath(f, exe_dir) for f in depends._find_hook_files()}
+
+        assert found == {
+            '_depends_hooks.py',
+            os.path.join('nodes', 'demo', '_depends_hooks.py'),
+            os.path.join('ai', 'common', 'torch', '_depends_hooks.py'),
+        }
+
+    def test_a_hook_that_refuses_blocks_before_anything_is_installed(self, plan, monkeypatch):
+        """The hook lives under ai/, unrelated to the requirements file's own nodes/demo/ directory."""
+        _write(
+            plan.req.parents[2] / 'ai' / 'common' / 'torch' / '_depends_hooks.py',
+            'def excludes(packages):\n'
+            '    if "torch" in packages:\n'
+            '        raise RuntimeError("never installed on a hosted engine")\n',
+        )
+        monkeypatch.setattr(depends.subprocess, 'Popen', lambda *a, **k: pytest.fail('nothing may be installed'))
+        plan.pending[:] = ['sentence-transformers', 'torch', 'nvidia-cublas-cu12']
+
+        with pytest.raises(RuntimeError, match='never installed on a hosted engine'):
+            depends._install_requirements(str(plan.req), str(plan.constraints))
+
+    def test_excludes_from_multiple_hooks_are_merged_into_the_real_install(self, plan, monkeypatch):
+        """The dry run is not the install: excludes a hook returns bind the real uv call too.
+
+        The two hooks live in unrelated directories — neither is an ancestor
+        of the requirements file being installed, nor of each other.
+        """
+        monkeypatch.setattr(depends, '_uv_abs_path', lambda: 'uv')
+        _write(plan.req.parents[1] / '_depends_hooks.py', 'def excludes(packages): return ["torch"]\n')
+        _write(
+            plan.req.parents[2] / 'ai' / 'common' / 'torch' / '_depends_hooks.py',
+            'def excludes(packages): return ["torchvision", "torchaudio"]\n',
+        )
+        plan.pending[:] = ['numpy']
+        calls = []
+
+        class FakeInstall:
+            returncode = 0
+            stdout = iter(())
+
+            def __init__(self, args, **kwargs):
+                calls.append(args)
+
+            def wait(self):
+                return 0
+
+        monkeypatch.setattr(depends.subprocess, 'Popen', FakeInstall)
+
+        depends._install_requirements(str(plan.req), str(plan.constraints))
+
+        (args,) = calls
+        excludes = [args[i + 1] for i, a in enumerate(args) if a == '--excludes']
+        hook_excludes = [x for x in excludes if x.endswith('excludes-combined.txt')]
+        assert hook_excludes, f'no hook excludes in {args}'
+        path = os.path.join(depends._get_executable_dir(), hook_excludes[0])
+        with open(path, encoding='utf-8') as f:
+            assert set(f.read().split()) == {'torch', 'torchvision', 'torchaudio'}
+
+    def test_no_hooks_means_no_extra_excludes(self, plan, monkeypatch):
+        monkeypatch.setattr(depends, '_uv_abs_path', lambda: 'uv')
+        plan.pending[:] = ['numpy']
+        calls = []
+
+        class FakeInstall:
+            returncode = 0
+            stdout = iter(())
+
+            def __init__(self, args, **kwargs):
+                calls.append(args)
+
+            def wait(self):
+                return 0
+
+        monkeypatch.setattr(depends.subprocess, 'Popen', FakeInstall)
+
+        depends._install_requirements(str(plan.req), str(plan.constraints))
+
+        (args,) = calls
+        excludes = [args[i + 1] for i, a in enumerate(args) if a == '--excludes']
+        assert not [x for x in excludes if x.endswith('excludes-combined.txt')]
+
+
 class TestDepends:
     def test_missing_requirements_file_returns_before_bootstrapping(self, tmp_path, monkeypatch):
         monkeypatch.setattr(depends, 'bootstrap', lambda: pytest.fail('bootstrap must not run'))

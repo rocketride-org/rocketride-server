@@ -17,7 +17,7 @@ import contextvars
 from typing import Dict, Any, Callable, Optional
 from rocketlib import debug, warning
 from ai.common.schema import Answer, Question
-from ai.common.config import Config
+from ai.common.config import Config, check_credential_resolved
 from ai.common.util import EmptyResponseError, ThinkTruncatedError, parseJson
 from ai.common.validation import (
     validate_model_name,
@@ -115,6 +115,10 @@ class ChatBase:
         # Load the provider-specific configuration using the Config utility
         # This will merge default settings with provider-specific overrides
         config = Config.getNodeConfig(provider, connConfig)
+
+        # A key still written as ${ROCKETRIDE_...} would go to the provider as the key,
+        # and the user would see an "invalid API key" reply instead of the missing name.
+        check_credential_resolved(provider, 'apikey', config.get('apikey'), connConfig)
 
         # Extract model configuration - these are the core settings that control
         # how the chat driver behaves with respect to token limits

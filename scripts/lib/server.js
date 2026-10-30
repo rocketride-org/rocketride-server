@@ -26,6 +26,14 @@ const { DIST_ROOT } = require('./paths');
 const SERVER_DIR = path.join(DIST_ROOT, 'server');
 const READY_MESSAGE = 'Application startup complete.';
 
+// Runtime output, so it lives in the server's own working directory, next to
+// test_files/ and htmlcov/. Packaging takes an explicit file list, so the logs
+// never reach a release archive.
+const TEST_LOG_DIR = path.join(SERVER_DIR, 'test-logs');
+
+// The level a server writing a log file traces at when no --trace is given.
+const LOG_FILE_TRACE = ['debugOut'];
+
 // How many trailing output lines to retain from the server process. The server's
 // output is otherwise only forwarded to the optional onOutput callback, which
 // callers typically stop consuming once startup completes - so when the process
@@ -139,6 +147,46 @@ function describeExit(code, signal) {
 }
 
 /**
+ * Open the file that receives everything a test server prints.
+ *
+ * Callers stop consuming onOutput once the server is ready and outputTail keeps
+ * only the last lines, so this file is the only complete record of the server's
+ * side of a test run. There is one file per suite and every run replaces it:
+ * it holds the latest run only.
+ *
+ * A log that cannot be written must not take the test run down with it, so a
+ * failure is reported and the server runs without the file. diagnostics.logFile
+ * names the file only while it can be written, and diagnostics.logDone settles
+ * once the file is closed.
+ *
+ * @param {string} logName - Suite name; the file is dist/server/test-logs/<logName>-server.log
+ * @param {object} diagnostics - The server's diagnostics; logFile and logDone are set here
+ * @returns {fs.WriteStream|null} Stream to write the server's output to, or null
+ */
+function openServerLog(logName, diagnostics) {
+	const logFile = path.join(TEST_LOG_DIR, `${logName}-server.log`);
+	const report = (err) => console.error(`[server] cannot write ${logFile}: ${err.message}`);
+
+	let stream;
+	try {
+		fs.mkdirSync(TEST_LOG_DIR, { recursive: true });
+		stream = fs.createWriteStream(logFile, { flags: 'w' });
+	} catch (err) {
+		report(err);
+		return null;
+	}
+
+	diagnostics.logFile = logFile;
+	diagnostics.logDone = new Promise((resolve) => stream.once('close', resolve));
+	// An open failure arrives here, after the stream was handed out.
+	stream.on('error', (err) => {
+		report(err);
+		diagnostics.logFile = null;
+	});
+	return stream;
+}
+
+/**
  * Start a Python server using the engine executable
  *
  * Waits indefinitely for the server to emit "Application startup complete."
@@ -150,9 +198,14 @@ function describeExit(code, signal) {
  * @param {string} options.script - Python script to run (relative to dist/server), e.g. 'ai/eaas.py'
  * @param {number} [options.port] - Use existing server on this port (skip starting)
  * @param {Function} [options.onOutput] - Callback for server output (for logging)
- * @param {string[]} [options.trace] - Trace categories to enable (passed as --trace=a,b,c)
+ * @param {string[]} [options.trace] - Trace categories to enable (passed as --trace=a,b,c);
+ *   debugOut when omitted and the server log is written (see options.logName)
  * @param {number} [options.basePort] - Base port for task allocation
  * @param {string[]} [options.args] - Additional arguments to pass to the script
+ * @param {string} [options.logName] - Suite name. With options.verbose or in CI (process.env.CI),
+ *   all of the server's stdout and stderr until it exits goes to
+ *   dist/server/test-logs/<logName>-server.log, replaced on every run
+ * @param {boolean} [options.verbose] - The builder's --verbose
  * @returns {Promise<{server: ChildProcess|null, port: number, diagnostics?: object}>}
  *   `diagnostics` (also reachable as `server.rocketrideDiagnostics`) carries the
  *   retained output tail and, once it exits, the exit code/signal. If the server
@@ -160,7 +213,7 @@ function describeExit(code, signal) {
  *   to stderr at the moment of death.
  */
 async function startServer(options) {
-	const { script, port: existingPort, onOutput, trace, basePort, args = [], env = {} } = options;
+	const { script, port: existingPort, onOutput, trace, basePort, args = [], env = {}, logName, verbose } = options;
 
 	if (!script) {
 		throw new Error('startServer: script is required');
@@ -170,6 +223,9 @@ async function startServer(options) {
 	if (existingPort) {
 		return { server: null, port: existingPort };
 	}
+
+	// The builder's convention for detailed output: --verbose, or always in CI.
+	const writeLog = Boolean(logName && (verbose || process.env.CI));
 
 	const serverExe = path.join(SERVER_DIR, process.platform === 'win32' ? 'engine.exe' : 'engine');
 
@@ -194,8 +250,11 @@ async function startServer(options) {
 	if (basePort) {
 		serverArgs.push(`--base_port=${basePort}`);
 	}
-	if (trace?.length) {
-		serverArgs.push(`--trace=${trace.join(',')}`);
+	// A server writing a log traces debugOut unless told otherwise: the output
+	// goes only to that file, and debugOut shows task and data-channel events.
+	const traceLevels = trace?.length ? trace : writeLog ? LOG_FILE_TRACE : [];
+	if (traceLevels.length) {
+		serverArgs.push(`--trace=${traceLevels.join(',')}`);
 	}
 
 	return new Promise((resolve, reject) => {
@@ -219,8 +278,12 @@ async function startServer(options) {
 			stopRequested: false,
 			outputTail: [],
 			port: null,
+			logFile: null,
+			logDone: Promise.resolve(),
 		};
 		serverProcess.rocketrideDiagnostics = diagnostics;
+
+		const logStream = writeLog ? openServerLog(logName, diagnostics) : null;
 
 		const recordOutput = (text) => {
 			for (const line of text.split('\n')) {
@@ -237,6 +300,8 @@ async function startServer(options) {
 		const checkReady = (data) => {
 			const text = data.toString();
 			outputBuffer += text;
+
+			if (logStream) logStream.write(data);
 
 			// Retain the tail unconditionally. Callers typically stop consuming
 			// onOutput once the server is ready, so this is the only thing that
@@ -307,7 +372,11 @@ async function startServer(options) {
 		serverProcess.stdout.on('data', checkReady);
 		serverProcess.stderr.on('data', checkReady);
 
+		// 'close' follows the last byte of both streams; 'exit' can come before it.
+		serverProcess.on('close', () => logStream?.end());
+
 		serverProcess.on('error', (err) => {
+			logStream?.end();
 			if (!resolved) {
 				resolved = true;
 				reject(err);
@@ -354,6 +423,8 @@ async function startServer(options) {
 				detail.push('  Server produced no output before dying.');
 			}
 
+			if (diagnostics.logFile) detail.push(`  Full server output: ${diagnostics.logFile}`);
+
 			detail.push('='.repeat(78), '');
 			console.error(detail.join('\n'));
 		});
@@ -370,9 +441,13 @@ async function startServer(options) {
  * Waits for the process to actually exit before resolving, ensuring clean
  * lifecycle and preventing callbacks from firing after teardown completes.
  *
+ * Then waits for the server's log file to be written out, so its last lines are
+ * on disk before the builder moves on and possibly exits.
+ *
  * @param {{server: ChildProcess|null}} serverObj - Server object from startServer
- * @param {number} [timeout=5000] - Timeout in ms to wait for graceful shutdown before force kill
- * @returns {Promise<void>} Resolves when the server has exited
+ * @param {number} [timeout=5000] - Timeout in ms to wait for graceful shutdown before force kill,
+ *   and again for the log file
+ * @returns {Promise<void>} Resolves when the server has exited and its log is written
  */
 async function stopServer(serverObj, timeout = 5000) {
 	// Skip if no server object or if server is null (using existing server)
@@ -385,6 +460,9 @@ async function stopServer(serverObj, timeout = 5000) {
 	// as a requested shutdown rather than a death.
 	if (diagnostics) diagnostics.stopRequested = true;
 
+	const logWritten = () =>
+		Promise.race([diagnostics?.logDone, new Promise((resolve) => setTimeout(resolve, timeout).unref())]);
+
 	// If already exited, nothing to do - but if it exited without us asking, say
 	// so here too: teardown is where a caller that missed the live report looks.
 	if (serverProcess.killed || serverProcess.exitCode !== null) {
@@ -394,10 +472,11 @@ async function stopServer(serverObj, timeout = 5000) {
 					`${describeExit(diagnostics.code, diagnostics.signal)}`
 			);
 		}
+		await logWritten();
 		return;
 	}
 
-	return new Promise((resolve) => {
+	await new Promise((resolve) => {
 		let resolved = false;
 
 		// Resolve when process exits
@@ -439,6 +518,8 @@ async function stopServer(serverObj, timeout = 5000) {
 			}
 		}, timeout);
 	});
+
+	await logWritten();
 }
 
 /**

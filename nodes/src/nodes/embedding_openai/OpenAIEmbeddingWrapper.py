@@ -38,7 +38,7 @@ from rocketlib import debug
 from typing import List, Dict, Any
 
 from langchain_openai import OpenAIEmbeddings
-from ai.common.config import Config
+from ai.common.config import Config, check_credential_resolved
 from ai.common.embedding import EmbeddingBase
 from ai.common.schema import Doc, Question
 
@@ -65,6 +65,7 @@ class OpenAIEmbeddingWrapper(EmbeddingBase):
 
         # Get the model from our section
         openai_api_key = config.get('apikey')
+        check_credential_resolved(provider, 'apikey', openai_api_key, connConfig)
         self._model = config.get('model')
 
         self._embedding = OpenAIEmbeddings(openai_api_key=openai_api_key, model=self._model)

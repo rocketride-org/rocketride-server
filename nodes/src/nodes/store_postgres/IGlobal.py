@@ -37,6 +37,7 @@ VALID_TABLE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
 
 class IGlobal(StoreGlobalBase):
     serverName: str = 'postgres'
+    credential_fields = ('password',)
 
     def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
         """Return the driver's Store, imported lazily so config mode never loads the driver."""

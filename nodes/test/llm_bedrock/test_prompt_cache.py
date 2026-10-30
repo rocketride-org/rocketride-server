@@ -13,9 +13,11 @@ The Anthropic driver places one (ChatBase publishes the prefix); the Bedrock dri
 did not.
 
 Bedrock also counts input differently from LangChain: its input count leaves out
-cached tokens, and langchain-aws passes it on as is for InvokeModel. The token meter
-subtracts the cache detail from input_tokens, so a call that read 1,800 tokens from
-the cache and 200 fresh was metered as 0 fresh input.
+cached tokens. For InvokeModel, langchain-aws passes it on as is before 1.9.0 and adds
+the cached tokens from 1.9.0 on. The token meter subtracts the cache detail from
+input_tokens, so a call that read 1,800 tokens from the cache and 200 fresh is metered
+as 0 fresh input when the cache is left out, and as 2,000 when it is added twice. The
+driver must count it once with either version.
 
 These tests run the real node driver and the real langchain-aws client against a
 local HTTP server that plays Bedrock and records each request, so they check what
@@ -326,3 +328,49 @@ def test_nova_is_not_counted_twice(monkeypatch, server):
     assert server[0]['action'] == 'converse'
     assert 'cachePoint' not in json.dumps(server[0]['body'])
     assert (usage['input'], usage['cache_read'], usage['output']) == (_FRESH, _CACHE_READ, _OUTPUT)
+
+
+# The usage_metadata langchain-aws builds for the server's reply: before 1.9.0 its
+# input_tokens is Bedrock's fresh count, from 1.9.0 on the whole prompt. The tests
+# above run whichever version is installed; these cover both shapes on either.
+_WHOLE_PROMPT = _FRESH + _CACHE_READ
+_SHAPES = ['before-1.9', '1.9-and-later']
+
+
+def _usage(input_tokens: int) -> dict:
+    return {
+        'input_tokens': input_tokens,
+        'output_tokens': _OUTPUT,
+        'total_tokens': input_tokens + _OUTPUT,
+        'input_token_details': {'cache_read': _CACHE_READ, 'cache_creation': 0},
+    }
+
+
+@pytest.mark.parametrize('reported', [_FRESH, _WHOLE_PROMPT], ids=_SHAPES)
+def test_an_invoke_reply_counts_the_cache_once_with_either_version(reported):
+    """An invoke reply keeps Bedrock's fresh count, so input_tokens is rebuilt from it."""
+    usage = _usage(reported)
+
+    _load_driver()._count_cache_as_input(usage, fresh=_FRESH)
+
+    assert (usage['input_tokens'], usage['total_tokens']) == (_WHOLE_PROMPT, _WHOLE_PROMPT + _OUTPUT)
+
+
+@pytest.mark.parametrize('adds_cache, reported', [(False, _FRESH), (True, _WHOLE_PROMPT)], ids=_SHAPES)
+def test_a_streamed_reply_counts_the_cache_once_with_either_version(monkeypatch, adds_cache, reported):
+    """A streamed reply keeps no fresh count, so the cache is added only when langchain-aws left it out."""
+    driver = _load_driver()
+    monkeypatch.setattr(driver, '_LANGCHAIN_ADDS_CACHE', adds_cache)
+    usage = _usage(reported)
+
+    driver._count_cache_as_input(usage)
+
+    assert (usage['input_tokens'], usage['total_tokens']) == (_WHOLE_PROMPT, _WHOLE_PROMPT + _OUTPUT)
+
+
+@pytest.mark.parametrize(
+    'installed, adds_cache',
+    [('1.8.2', False), ('1.9.0', True), ('1.10.0', True), ('2.0.0rc1', True), ('not-a-version', True)],
+)
+def test_which_langchain_aws_versions_add_the_cache_themselves(installed, adds_cache):
+    assert _load_driver()._langchain_adds_cache(installed) is adds_cache

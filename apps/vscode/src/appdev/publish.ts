@@ -31,8 +31,8 @@ import 'rocketride/app-pack';
 import { ConnectionManager } from '../connection/connection';
 import { scanWorkspaceApps } from 'shared/tools/appdev';
 import { hostWorkspaceFs } from '../providers/toolhost/hostWorkspaceFs';
-import { ensureProjectId, readAppListing } from './appMarker';
-import type { AppListing } from './appMarker';
+import { ensureProjectId, readAppListing } from 'rocketride/app-pack';
+import type { AppListing } from 'rocketride/app-pack';
 import { getLogger } from '../shared/util/output';
 
 // =============================================================================

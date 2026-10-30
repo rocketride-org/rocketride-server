@@ -137,6 +137,11 @@ separately.
 > declares both wants both, and leaving one side unconnected is what produces a
 > pipeline that does not run — not the combination itself.
 
+The vector-store nodes are one example of "both": their lanes and their tool
+functions come from the shared store base, so a new store driver gets the whole
+tool surface for free. [Vector-store tools](vector-store-tools.md) has the
+contract a driver implements and the optional capabilities it can opt into.
+
 ---
 
 ## Core module

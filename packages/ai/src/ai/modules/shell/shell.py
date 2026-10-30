@@ -179,6 +179,66 @@ PUBLIC_ROUTE_MANIFEST = [
         'Contact',
         'Get in touch with the RocketRide team — sales, support, and partnership inquiries.',
     ),
+    (
+        '/superfans',
+        'Superfans',
+        'The developers who build with RocketRide and tell us the truth. Earn early builds, a hand on the '
+        'roadmap, and artifacts you can only be given.',
+    ),
+    # The legal pages: the index (routes.ts) and one entry per published
+    # document, mirroring the title and description in the document's front
+    # matter (apps/home-ui/content/legal/<slug>.md). Exact paths only, like every
+    # entry here: a /legal/{path} pattern would make every legal sub-path public
+    # to the auth middleware, including slugs that are not documents. A new
+    # document adds its path here.
+    (
+        '/legal',
+        'Legal',
+        'The policies and terms that govern RocketRide Cloud - each document with its version, '
+        'effective date, and latest change.',
+    ),
+    (
+        '/legal/terms',
+        'RocketRide Cloud Terms of Service',
+        'The agreement governing use of RocketRide Cloud, including accounts, payments, and acceptable service use.',
+    ),
+    (
+        '/legal/privacy-policy',
+        'Privacy Policy',
+        'How RocketRide collects, uses, and shares personal information across its websites and RocketRide Cloud.',
+    ),
+    (
+        '/legal/dpa',
+        'Data Processing Agreement',
+        'The data processing terms that apply when RocketRide processes personal data on behalf of business customers.',
+    ),
+    (
+        '/legal/acceptable-use',
+        'Acceptable Use Policy',
+        'The rules for what may and may not be done with RocketRide Cloud and its services.',
+    ),
+    (
+        '/legal/subprocessors',
+        'RocketRide Cloud Sub-processors',
+        'The third-party sub-processors RocketRide uses to provide RocketRide Cloud, and how the list changes.',
+    ),
+    (
+        '/legal/trademark-policy',
+        'Trademark & Brand Usage Policy',
+        'How the RocketRide name, logo, and brand assets may and may not be used.',
+    ),
+    (
+        '/legal/cookie-policy',
+        'Cookie Policy',
+        'How RocketRide uses cookies, similar technologies, and website analytics on its websites and '
+        'RocketRide Cloud, and the choices you have.',
+    ),
+    (
+        '/legal/marketplace-terms',
+        'Marketplace Publisher Terms',
+        'The terms for publishing apps on the RocketRide Marketplace, including eligibility, revenue share, '
+        'payouts, and taxes.',
+    ),
 ]
 
 # Bare route list — kept as the module's public surface for route

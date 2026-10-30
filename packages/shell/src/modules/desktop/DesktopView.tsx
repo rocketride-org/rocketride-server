@@ -167,7 +167,10 @@ export const DesktopView: React.FC<DesktopViewProps> = ({
 			{showHeader && (
 			<div style={S.headerRow}>
 				<div style={S.headerLeft}>
-					<h1 style={S.greetingTitle}>
+					{/* data-rr-private: the greeting carries the user's real first name —
+			    session replay masks it and click capture ignores it (home-ui
+			    telemetry selectors; see replay.ts maskTextSelector). */}
+			<h1 data-rr-private="" style={S.greetingTitle}>
 						<RevealText key={greeting} text={greeting} />
 					</h1>
 					<p style={S.greetingSub}>

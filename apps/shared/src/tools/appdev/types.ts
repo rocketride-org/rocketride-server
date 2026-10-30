@@ -18,7 +18,8 @@
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// SOFTWARE.import type { AppListing } from 'rocketride/app-pack';
+
 
 // =============================================================================
 // APP BUILDER — SHARED TYPES + THE HOST CONTRACT
@@ -146,27 +147,9 @@ export interface RungPin {
 // STORE — listing, pre-flight, review
 // =============================================================================
 
-/**
- * One billing plan of the manifest's `appManifest.billing.plans` — the
- * Stripe-shaped pricing proposal that rides every deploy (the packed
- * package.json is the listing truth) and goes live on store approval.
- */
-export interface BillingPlan {
-	/** Plan display name ("Starter", "Pro"). */
-	nickname: string;
-	/** Price in cents. */
-	amountCents: number;
-	/** ISO currency code. */
-	currency: string;
-	/** Billing interval ("month", "year", "one_time"). */
-	interval: string;
-	/**
-	 * Opaque plan metadata (credits, seats, features, ordering, display
-	 * overrides) — preserved verbatim on the save round-trip, never edited
-	 * by the listing form.
-	 */
-	metadata?: Record<string, unknown>;
-}
+// BillingPlan is the SDK's (rocketride/app-pack): the appManifest shape has
+// ONE owner, and the extension/CLI read listings through the same type.
+export type { BillingPlan } from 'rocketride/app-pack';
 
 /**
  * The editable app-manifest draft — a direct projection of the app's
@@ -175,30 +158,10 @@ export interface BillingPlan {
  * fields (name, description, icon, readme, include); the STORE tab edits
  * the commerce fields (mode, billing.plans) — one draft, disjoint editors.
  */
-export interface ListingDraft {
-	/** App id — read-only projection. */
-	appId: string;
-	/** Billing mode (appManifest.mode). */
-	mode: 'free' | 'subscription' | 'paywall';
-	/** Display name (appManifest.name). */
-	name: string;
-	/** Listing description (appManifest.description). */
-	description: string;
-	/** Pricing plans (appManifest.billing.plans; empty for free mode). */
-	plans: BillingPlan[];
-	/** App-folder-relative icon path (appManifest.icon), '' = undeclared. */
-	icon?: string;
-	/** App-folder-relative README path (appManifest.readme), '' = undeclared. */
-	readme?: string;
-	/** Extra WORKSPACE-relative roots packed with the app and installed by
-	 * the server build (appManifest.include) — the directories the app's
-	 * imports need beyond its own folder. */
-	include?: string[];
-	/** Whether the server build verifies the app with its own tsconfig
-	 * before bundling (appManifest.typecheck; absent = true). Off = the
-	 * app deploys even with type errors — a visible waiver, not a default. */
-	typecheck?: boolean;
-}
+// The editable app-manifest draft IS the SDK's listing projection — one
+// shape, one owner (rocketride/app-pack reads and writes package.json's
+// appManifest). The tool-side name survives for its many consumers.
+export type ListingDraft = AppListing;
 
 /** One pre-flight readiness check row. */
 export interface PreflightCheck {

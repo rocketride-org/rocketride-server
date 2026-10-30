@@ -22,3 +22,12 @@ class IInstance(DatabaseInstanceBase):
     def _db_dialect(self) -> str:
         """Return the machine-readable dialect identifier surfaced by the `dialect` tool function."""
         return 'clickhouse'
+
+    def _sessionsAreTransactions(self) -> bool:
+        """Return False: a ClickHouse session reserves a connection but holds no transaction.
+
+        clickhouse-sqlalchemy's native connector makes `commit` and `rollback`
+        no-ops, and ClickHouse has no savepoints, so every statement sent on a
+        session is executed when it is sent and nothing can undo it.
+        """
+        return False

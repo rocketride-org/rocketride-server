@@ -284,7 +284,21 @@ async function copyFile(src, dest, mode) {
  */
 async function copyFileEnsure(src, dest) {
 	await fsp.mkdir(path.dirname(dest), { recursive: true });
-	return retryTransientLock(() => fsp.copyFile(src, dest));
+
+	return retryTransientLock(async () => {
+		try {
+			return await fsp.copyFile(src, dest);
+		} catch (err) {
+			// RO dest (e.g. part of JDK/JRE files) - force-remove RO dest and copy src in its place
+			if (err.code === 'EACCES' || err.code === 'EPERM') {
+				await fsp.access(src, fs.constants.R_OK);
+				await fsp.rm(dest, { force: true });
+				return await fsp.copyFile(src, dest);
+			}
+
+			throw err;
+		}
+	});
 }
 
 /**
@@ -590,78 +604,22 @@ function parseJson(text) {
 // =============================================================================
 
 /**
- * Generate a fingerprint for a directory based on file sizes and modification times.
- * This is fast (no file content reads) and catches most changes.
+ * Never part of a directory's identity: caches and VCS bookkeeping.
  *
- * @param {string} dirPath - Directory to fingerprint
- * @param {Object} [options] - Options
- * @param {string[]} [options.exclude] - Patterns to exclude (e.g., ['node_modules', '.git'])
- * @returns {Promise<string|null>} MD5 hash of the directory's fingerprint, or null if directory doesn't exist
- *
- * @example
- * const hash = await fingerprint('src/');
- * if (hash !== savedHash) {
- *   // Source changed, need to rebuild
- * }
+ * Permanent - `options.exclude` adds to this, it does not replace it. What a
+ * build generates into its own sources goes there, being its own to know.
  */
-async function fingerprint(dirPath, options = {}) {
-	const { exclude = ['node_modules', '.git', '__pycache__', '.pyc'] } = options;
-	const entries = [];
-
-	// Check if directory exists
-	try {
-		await fsp.access(dirPath);
-	} catch {
-		return null; // Directory doesn't exist
-	}
-
-	async function walk(dir, relativePath = '') {
-		const items = await fsp.readdir(dir, { withFileTypes: true });
-
-		for (const item of items) {
-			// Skip excluded patterns
-			if (exclude.some((pattern) => item.name === pattern || item.name.endsWith(pattern))) {
-				continue;
-			}
-
-			const fullPath = path.join(dir, item.name);
-			const relPath = path.join(relativePath, item.name);
-
-			if (item.isDirectory()) {
-				await walk(fullPath, relPath);
-			} else if (item.isFile()) {
-				const stats = await fsp.stat(fullPath);
-				// Use forward slashes for consistency across platforms
-				entries.push(`${relPath.replace(/\\/g, '/')}:${stats.size}:${stats.mtimeMs}`);
-			}
-		}
-	}
-
-	await walk(dirPath);
-
-	// Sort for consistent ordering
-	entries.sort();
-
-	// Hash the combined entries
-	const content = entries.join('\n');
-	return crypto.createHash('md5').update(content).digest('hex');
-}
+const EXCLUDE_ALWAYS = ['node_modules', '.git', '__pycache__', '.pyc'];
 
 /**
- * Compute a SHA-256 content hash of all files in a directory tree.
+ * Every file under dirPath, sorted, with the path each hash is keyed by.
  *
- * Uses the same exclusion patterns as fingerprint() but hashes actual
- * file contents rather than metadata, making it fully deterministic
- * across machines and git clones.
- *
- * @param {string} dirPath - Directory to hash
- * @param {Object} [options] - Options
- * @param {string[]} [options.exclude] - Patterns to exclude
- * @param {function} [options.log] - Optional callback for status messages (e.g., task.output assignment)
- * @returns {Promise<string|null>} Hex hash string, or null if directory doesn't exist
+ * @param {string} dirPath - Directory to walk
+ * @param {string[]} [exclude] - Patterns to exclude on top of EXCLUDE_ALWAYS
+ * @returns {Promise<{rel: string, full: string}[]|null>} null if dirPath is not there
  */
-async function contentHash(dirPath, options = {}) {
-	const { exclude = ['node_modules', '.git', '__pycache__', '.pyc', 'version.h'], log } = options;
+async function walkFiles(dirPath, exclude = []) {
+	const skip = [...EXCLUDE_ALWAYS, ...exclude];
 	const files = [];
 
 	try {
@@ -674,32 +632,125 @@ async function contentHash(dirPath, options = {}) {
 		const items = await fsp.readdir(dir, { withFileTypes: true });
 
 		for (const item of items) {
-			if (exclude.some((pattern) => item.name === pattern || item.name.endsWith(pattern))) {
+			if (skip.some((pattern) => item.name === pattern || item.name.endsWith(pattern))) {
 				continue;
 			}
 
 			const fullPath = path.join(dir, item.name);
 			const relPath = path.join(relativePath, item.name);
 
-			if (item.isDirectory()) {
-				await walk(fullPath, relPath);
-			} else if (item.isFile()) {
-				files.push({ rel: relPath.replace(/\\/g, '/'), full: fullPath });
-			}
+			if (item.isDirectory()) await walk(fullPath, relPath);
+			// Forward slashes, so a hash means the same on either platform
+			else if (item.isFile()) files.push({ rel: relPath.replace(/\\/g, '/'), full: fullPath });
 		}
 	}
 
 	await walk(dirPath);
 	files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
 
+	return files;
+}
+
+/**
+ * Generate a fingerprint for a directory based on file sizes and modification times.
+ * This is fast (no file content reads) and catches most changes.
+ *
+ * Metadata, so the value is this machine's - compare it with one this machine
+ * stored, never with one from elsewhere. contentHash is the portable one.
+ *
+ * @param {string} dirPath - Directory to fingerprint
+ * @param {Object} [options] - Options
+ * @param {string[]} [options.exclude] - Patterns to exclude on top of the permanent ones
+ * @returns {Promise<string|null>} MD5 hash of the directory's fingerprint, or null if directory doesn't exist
+ *
+ * @example
+ * const hash = await fingerprint('src/');
+ * if (hash !== savedHash) {
+ *   // Source changed, need to rebuild
+ * }
+ */
+async function fingerprint(dirPath, options = {}) {
+	const files = await walkFiles(dirPath, options.exclude);
+	if (!files) return null;
+
+	const entries = await Promise.all(
+		files.map(async (file) => {
+			const stats = await fsp.stat(file.full);
+			return `${file.rel}:${stats.size}:${stats.mtimeMs}`;
+		})
+	);
+
+	return crypto.createHash('md5').update(entries.join('\n')).digest('hex');
+}
+
+/**
+ * Compute a SHA-256 content hash of all files in a directory tree.
+ *
+ * Uses the same exclusion patterns as fingerprint() but hashes actual
+ * file contents rather than metadata, making it fully deterministic
+ * across machines and git clones.
+ *
+ * Every file is read, so this is the slow one - cachedContentHash below is the
+ * same value for the price of a fingerprint when nothing has moved.
+ *
+ * @param {string} dirPath - Directory to hash
+ * @param {Object} [options] - Options
+ * @param {string[]} [options.exclude] - Patterns to exclude on top of the permanent ones
+ * @param {Object} [options.task] - Task to report progress on, as execCommand takes one
+ * @returns {Promise<string|null>} Hex hash string, or null if directory doesn't exist
+ */
+async function contentHash(dirPath, options = {}) {
+	const files = await walkFiles(dirPath, options.exclude);
+	if (!files) return null;
+
 	const hash = crypto.createHash('sha256');
-	for (const f of files) {
-		const content = (await fsp.readFile(f.full, 'utf8')).replace(/\r/g, '');
-		hash.update(f.rel);
+	for (const file of files) {
+		// CR stripped, so a CRLF checkout hashes as the LF one it came from
+		const content = (await fsp.readFile(file.full, 'utf8')).replace(/\r/g, '');
+		hash.update(file.rel);
 		hash.update(content);
 	}
+
 	const digest = hash.digest('hex');
-	if (log) log(`contentHash: ${path.basename(dirPath)} (${files.length} files) -> ${digest}`);
+	if (options.task) {
+		options.task.output = `contentHash: ${path.basename(dirPath)} (${files.length} files) -> ${digest}`;
+	}
+
+	return digest;
+}
+
+/**
+ * The content hash of a directory, read from the cache when its fingerprint
+ * says nothing has moved.
+ *
+ * Reading every file to learn that a tree is unchanged is the expensive way to
+ * find out; file sizes and timestamps answer it in a fraction of the time. The
+ * value is the same content hash either way, so a caller can still compare it
+ * with one from another machine - only the work of arriving at it is skipped.
+ *
+ * @param {string} dirPath - Directory to hash
+ * @param {string} stateKey - Where the fingerprint and the hash it belongs to are kept
+ * @param {Object} [options] - Options, as contentHash takes them
+ * @returns {Promise<string|null>} Hex hash string, or null if directory doesn't exist
+ */
+async function cachedContentHash(dirPath, stateKey, options = {}) {
+	const { getState, setState } = require('./state');
+
+	const current = await fingerprint(dirPath, options);
+	if (current === null) return null;
+
+	const cached = await getState(stateKey);
+	if (cached?.fingerprint === current && cached.digest) {
+		if (options.task) {
+			options.task.output = `contentHash: ${path.basename(dirPath)} (cached) -> ${cached.digest}`;
+		}
+
+		return cached.digest;
+	}
+
+	const digest = await contentHash(dirPath, options);
+	await setState(stateKey, { fingerprint: current, digest });
+
 	return digest;
 }
 
@@ -868,6 +919,7 @@ module.exports = {
 	// Fingerprinting
 	fingerprint,
 	contentHash,
+	cachedContentHash,
 	hasSourceChanged,
 	saveSourceHash,
 	buildInputHash,

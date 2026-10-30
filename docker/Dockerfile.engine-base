@@ -95,17 +95,61 @@ USER rocketride
 # are libraries that resolve libengine.so and libc++ through the engine's
 # directory, so they are checked too. ldd reports names, not whether the loader
 # brings the process up, so the engine is also run.
+#
+# The natives inside java/lib/*.jar (JNA, sqlite-jdbc, 7-Zip-JBinding) are
+# extracted and checked the same way: the JVM loads them in a task, and a jar
+# bump can bring a build that needs a library the image lacks. Only the x86-64
+# builds linked against glibc (NEEDED libc.so.6) are what this image runs; the
+# jars also carry musl, Android, BSD and Solaris builds, which ldd cannot read
+# here. ldd says whether a binary's dependencies resolve, not whether its symbols
+# collide with another runtime's (#2676: clean dependencies, a bundled libstdc++
+# that crashed the task); that is a different check.
 RUN set -eu; \
-    for elf in ./engine ./libengine.so $(find nodes -name '*.so' -type f); do \
-      deps=$(ldd "$elf"); \
+    natives=$(mktemp -d); \
+    ./engine -c "$(printf '%s\n' \
+      'import glob, os, struct, sys, zipfile' \
+      'def needed(data):' \
+      '    """DT_NEEDED names of a little-endian ELF64 image, or None when it is not one."""' \
+      '    if data[0] != 127 or data[1:4] != b"ELF" or data[4] != 2 or data[5] != 1:' \
+      '        return None' \
+      '    shoff, (shentsize, shnum) = struct.unpack_from("<Q", data, 40)[0], struct.unpack_from("<HH", data, 58)' \
+      '    secs = [struct.unpack_from("<IIQQQQIIQQ", data, shoff + i * shentsize) for i in range(shnum)]' \
+      '    names = []' \
+      '    for sec in secs:' \
+      '        if sec[1] == 6:  # SHT_DYNAMIC; sec[6] links the string table' \
+      '            strtab = secs[sec[6]][4]' \
+      '            for pos in range(sec[4], sec[4] + sec[5], 16):' \
+      '                tag, val = struct.unpack_from("<qQ", data, pos)' \
+      '                if tag == 1:  # DT_NEEDED' \
+      '                    names.append(data[strtab + val:data.index(0, strtab + val)])' \
+      '    return names' \
+      'out, n = sys.argv[1], 0' \
+      'for jar in sorted(glob.glob("java/lib/*.jar")):' \
+      '    with zipfile.ZipFile(jar) as z:' \
+      '        for name in z.namelist():' \
+      '            if not name.endswith(".so"):' \
+      '                continue' \
+      '            data = z.read(name)' \
+      '            libs = needed(data)' \
+      '            if libs is None or struct.unpack_from("<H", data, 18)[0] != 62 or b"libc.so.6" not in libs:' \
+      '                continue  # not an x86-64 glibc build' \
+      '            dest = os.path.join(out, os.path.basename(jar), name)' \
+      '            os.makedirs(os.path.dirname(dest), exist_ok=True)' \
+      '            open(dest, "wb").write(data)' \
+      '            n += 1' \
+      'print(n, "x86-64 glibc natives extracted from the jars")' \
+    )" "$natives"; \
+    for elf in ./engine ./libengine.so $(find nodes "$natives" -name '*.so' -type f); do \
+      deps=$(ldd "$elf") || { echo "FATAL: ldd failed on $elf"; exit 1; }; \
       missing=$(echo "$deps" | grep 'not found' || true); \
       if [ -n "$missing" ]; then \
         echo "FATAL: $elf has unresolved shared libraries:"; \
         echo "$missing"; \
-        echo "The prebuilt engine shipped without its runtime libs."; \
+        echo "The prebuilt engine shipped without its runtime libs, or a jar's native library needs one the image lacks."; \
         exit 1; \
       fi; \
     done; \
+    rm -rf "$natives"; \
     ./engine -c 'print("engine loads")'
 
 # The backend baseline, installed rather than cached: nodes/requirements.txt

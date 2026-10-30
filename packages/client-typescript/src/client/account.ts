@@ -138,10 +138,14 @@ export class AccountApi {
 	}
 
 	/**
-	 * Leaves an organization the caller is a member of. The server rejects —
-	 * with a user-presentable message — when the caller is the org's last
-	 * admin or when it is their last workspace. Leaving the CURRENT org makes
-	 * the server re-point the default and push `apaext_org_changed`.
+	 * Removes the current user from an organization.
+	 *
+	 * The server refuses — with a user-presentable message — to let the
+	 * organization's last admin leave. Leaving the user's ACTIVE organization
+	 * switches them to another membership and pushes a refreshed identity
+	 * (`apaext_org_changed`) to all of the user's connections; leaving a
+	 * non-active organization pushes nothing, so callers that show
+	 * memberships should re-read the profile afterwards.
 	 *
 	 * @param orgId - Organisation UUID to leave.
 	 */
@@ -228,7 +232,8 @@ export class AccountApi {
 	 * Sends an invitation to a new organization member.
 	 *
 	 * @param orgId  - Organisation UUID.
-	 * @param params - Invitation parameters (email, givenName, familyName, role).
+	 * @param params - Invitation parameters (email, givenName, familyName, role,
+	 *                 optional teamAssignments).
 	 */
 	async inviteMember(orgId: string, params: InviteMemberParams): Promise<void> {
 		await this.client.call('rrext_account_members', { subcommand: 'invite', orgId, ...params });

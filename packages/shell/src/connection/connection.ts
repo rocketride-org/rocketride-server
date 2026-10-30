@@ -40,7 +40,8 @@
 //   - Browser-specific session storage for auth phase tracking
 // =============================================================================
 
-import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError } from 'rocketride';
+import { takeSignupProperties, currentSignupProperties, clearSignupProperties } from '../util/signupAttribution';
+import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError, type PkceCredential, type SignupProperties } from 'rocketride';
 import type { DAPMessage } from 'rocketride';
 import type { ShellConnectionEventMap, IConnectionManager } from '../types/shell';
 import type { IAuthProvider } from '../types/connection';
@@ -59,7 +60,8 @@ import type { IOpBus, IBusRequestOptions, BusOpHandler } from '../ops/busOps';
 import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
 import type { IRetainedPort, RetainedSubscriber } from '../ops/retained';
 import { isEmbeddedDevShell, isSameOriginEmbed, tokenStore, sessionScopedStore } from '../util/devGate';
-import { getStoredVerifier, clearStoredVerifier } from '../util/pkce';
+import { TelemetryChannel, type TelemetryFact } from '../util/telemetryChannel';
+import { AUTH_START_STAMP_KEY, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
 	LS_TOKEN,
 	SS_APP_ID,
@@ -71,6 +73,9 @@ import {
 	SERVICES_CHANGED_EVENT,
 	SERVICES_REFRESH_JITTER_MS,
 } from '../constants';
+
+/** A stamp further than this from the completion is not this round trip: auth:complete then reports no duration. */
+const AUTH_ROUND_TRIP_MAX_MS = 60 * 60 * 1000;
 
 // =============================================================================
 // TYPES
@@ -118,7 +123,7 @@ type Handler<T = unknown> = (payload: T) => void;
 /** Handler type for wildcard listeners (debug panel). */
 type WildcardHandler = (event: string, payload: unknown) => void;
 
-type ConnectionCredential = string | { code: string; verifier: string; redirectUri: string };
+type ConnectionCredential = string | PkceCredential;
 
 interface ShellConnectionOperation {
 	key: string;
@@ -460,7 +465,7 @@ export class ConnectionManager implements IConnectionManager {
 				// here, a token revoked mid-session leaves the UI showing
 				// "Reconnecting\u2026" forever with a dead token still stored.
 				if (error instanceof AuthenticationException) {
-					if (this.handleStoredTokenFailure(error)) this.clearToken();
+					if (this.handleStoredTokenFailure(error)) this.dropRejectedCredential();
 					this.accountInfo = undefined;
 					this.emit('shell:statusMessage', { message: null });
 					return;
@@ -510,6 +515,7 @@ export class ConnectionManager implements IConnectionManager {
 						this.clearToken();
 						this.accountInfo = undefined;
 						this.pendingEvents.clear();
+						this.dropHeldTelemetry();
 						this.clearServicesCache();
 						this.updateConnectionStatus({
 							state: ConnectionState.DISCONNECTED,
@@ -573,6 +579,159 @@ export class ConnectionManager implements IConnectionManager {
 	 *  never run twice in one page load (double authorize → Zitadel invalidates the
 	 *  first code → PKCE 400 → re-auth loop). */
 	private oauthStarted = false;
+	/** Telemetry facts raised before the active app subscribed (see reportTelemetry). */
+	private telemetry = ConnectionManager.newTelemetryChannel();
+	/** True once this realm was bridged to the root (setRetainedPort) — its
+	 *  telemetry is a MIRROR of the root's; the root owns the channel. */
+	private bridgedRealm = false;
+	/** Fact ids already emitted to this realm's listeners (the retained
+	 *  mirror re-delivers snapshots; ids keep the fan-out exactly-once). */
+	private seenTelemetryFactIds = new Set<string>();
+	/** The root's held facts, mirrored via the retained lane — what a bridged
+	 *  realm's drainTelemetry() answers with, synchronously. */
+	private mirroredHeldFacts: TelemetryFact[] = [];
+	/** Ids of the facts delivered live (the channel numbers the held ones). */
+	private telemetrySeq = 0;
+	/** Counts the drops of held facts (dropHeldTelemetry), so a fact raised before a drop is never held after it. */
+	private telemetryDrops = 0;
+	/** Facts on their way to a listener (see deliverTelemetryLive); a later fact queues behind them, so the hold keeps their order. */
+	private telemetryInFlight = 0;
+
+	/**
+	 * Record a product-telemetry fact the shell observed and broadcast it as
+	 * `shell:telemetry`. The shell carries no analytics SDK: the active app
+	 * forwards these to its own transport. Facts raised before any app subscribed
+	 * (the OAuth callback resolves identity before the home remote mounts) wait
+	 * in a bounded buffer until `drainTelemetry()` hands them over; so does a fact
+	 * whose last listener left before its dispatch. Never throws.
+	 *
+	 * @param event - Event name from the app's telemetry contract (e.g. 'auth:start').
+	 * @param props - Flat properties; the forwarding app adds its own super properties.
+	 */
+	public reportTelemetry(event: string, props: Record<string, unknown>): void {
+		try {
+			// While an earlier fact is still on its way (it may yet be held), this one queues behind it, so the order holds.
+			if (this.telemetryInFlight > 0 || this.hasTelemetryListener()) {
+				this.deliverTelemetryLive(event, props);
+				return;
+			}
+			this.holdTelemetry(event, props);
+		} catch {
+			// telemetry must never break the shell
+		}
+	}
+
+	/**
+	 * Whether an app is subscribed to `shell:telemetry` right now.
+	 *
+	 * @returns True when at least one listener is registered.
+	 */
+	private hasTelemetryListener(): boolean {
+		return (this.listeners.get('shell:telemetry')?.size ?? 0) > 0;
+	}
+
+	/**
+	 * Hold a fact until the next drainTelemetry(). In a tab the hold is mirrored to sessionStorage,
+	 * so the fact survives a page load that never mounts the forwarding app. Logged like a delivered
+	 * fact, so the ALT+D panel shows every fact raised.
+	 *
+	 * @param event - Event name from the app's telemetry contract.
+	 * @param props - Flat properties of the fact.
+	 */
+	private holdTelemetry(event: string, props: Record<string, unknown>): void {
+		const held = this.telemetry.report(event, props, Date.now());
+		if (held) {
+			this.logDebug('shell:telemetry', held);
+			this.publishTelemetrySnapshot(null);
+		}
+	}
+
+	/**
+	 * Deliver a fact to the `shell:telemetry` listeners on a microtask, like emit(). A delivered fact
+	 * is not held: the listener forwards it at once and a later drain must not replay it.
+	 *
+	 * @param event - Event name from the app's telemetry contract.
+	 * @param props - Flat properties of the fact.
+	 */
+	private deliverTelemetryLive(event: string, props: Record<string, unknown>): void {
+		const ts = Date.now();
+		const id = `${ts.toString(36)}-l${(this.telemetrySeq++).toString(36)}`;
+		const fact: TelemetryFact = { event, props: { ...props }, ts, id };
+		const drops = this.telemetryDrops;
+		this.logDebug('shell:telemetry', fact);
+		this.telemetryInFlight++;
+		void Promise.resolve().then(() => {
+			this.settleLiveTelemetry(fact, drops);
+		});
+	}
+
+	/**
+	 * Dispatch a fact on its way to the listeners subscribed now. If the last one left since it was
+	 * raised (an app switch or unmount in the same tick), hold it as logged, id included, so it is
+	 * not lost, unless the held facts were dropped meanwhile (a sign-out, a rejected credential).
+	 * Never throws.
+	 *
+	 * @param fact - The fact deliverTelemetryLive numbered and logged.
+	 * @param drops - The drop count when the fact was raised.
+	 */
+	private settleLiveTelemetry(fact: TelemetryFact, drops: number): void {
+		try {
+			const live = this.listeners.get('shell:telemetry');
+			if (live && live.size > 0) {
+				this.seenTelemetryFactIds.add(fact.id);
+				this.dispatch(live, 'shell:telemetry', fact);
+				this.publishTelemetrySnapshot(fact);
+			} else if (drops === this.telemetryDrops) {
+				this.telemetry.hold(fact);
+				this.publishTelemetrySnapshot(null);
+			}
+		} catch {
+			// telemetry must never break the shell
+		} finally {
+			this.telemetryInFlight--;
+		}
+	}
+
+	/**
+	 * Publish the telemetry mirror on the retained lane. Events are realm-local
+	 * on the bus BY DESIGN (busBridge), so the root fans facts to other realms
+	 * here instead: `live` is re-emitted by each realm's mirror subscription
+	 * (deduped on fact id), and `held` keeps every realm's drainTelemetry()
+	 * answer current. Published on every mutation of the channel.
+	 *
+	 * @param live - A fact delivered live just now, or null (hold/drain/drop).
+	 */
+	private publishTelemetrySnapshot(live: TelemetryFact | null): void {
+		try {
+			this.publish('shell:telemetry', { live, held: this.telemetry.peek() });
+		} catch {
+			// telemetry must never break the shell
+		}
+	}
+
+	/**
+	 * Hand over every buffered telemetry fact, oldest first, and clear the buffer.
+	 * Call once from the app's analytics init, then subscribe to `shell:telemetry`
+	 * for the rest.
+	 *
+	 * @returns The buffered facts in the order they were raised.
+	 */
+	public drainTelemetry(): TelemetryFact[] {
+		if (this.bridgedRealm) {
+			// The root owns the channel; this realm answers from the retained
+			// mirror and asks the root to consume. Two realms draining at once
+			// can duplicate a fact — ids make that harmless downstream, and
+			// one forwarding app per tab is the contract.
+			const facts = this.mirroredHeldFacts;
+			this.mirroredHeldFacts = [];
+			for (const f of facts) this.seenTelemetryFactIds.add(f.id);
+			if (facts.length > 0) this.emitOp('telemetry.drained', {});
+			return facts;
+		}
+		const facts = this.telemetry.drain();
+		this.publishTelemetrySnapshot(null);
+		return facts;
+	}
 
 	/**
 	 * Redirect the browser to the OAuth provider for authorization.
@@ -582,14 +741,38 @@ export class ConnectionManager implements IConnectionManager {
 	 * @param register - Retained for compatibility; no longer changes the
 	 *                   destination. All flows land on Zitadel's login page
 	 *                   (prompt=login), which offers a Register link.
+	 * @param context - What raised the request: the app the visitor was opening
+	 *                  (`appId`, else the pending app id) and whether the shell's
+	 *                  auth gate raised it rather than a click (`auto`). Reported
+	 *                  on the auth:start telemetry fact.
 	 */
-	public async startOAuth(register?: boolean): Promise<void> {
+	public async startOAuth(register?: boolean, context?: { appId?: string; auto?: boolean; signupProperties?: SignupProperties }): Promise<void> {
 		// One-shot: a redirect is coming; never start a second authorize in the
 		// same page load (that invalidates the first code and 400s the exchange).
 		// The guard is released on any path that does NOT actually navigate, so a
 		// failed initiation can still be retried within the same page load.
 		if (this.oauthStarted) return;
 		this.oauthStarted = true;
+		// auth:start is raised after the guard, so a failed start that releases it is reported
+		// again on retry. The embedded flow signs in through the auth popup and is not reported.
+		const startProps: Record<string, unknown> = { register: !!register };
+		const appId = context?.appId || this.getPendingAppId();
+		if (appId) {
+			startProps.app_id = appId;
+		}
+		startProps.from_path = window.location.pathname;
+		startProps.auto = context?.auto === true;
+		let signupValue: unknown;
+		try {
+			if (register) signupValue = context?.signupProperties;
+		} catch {
+			// Optional context getters cannot prevent navigation or latch the one-shot guard.
+		}
+		const signup = currentSignupProperties(signupValue);
+		// Held even with an app listening: delivered live, it would depend on the app's analytics
+		// flushing before the redirect unloads the page; the hold's sessionStorage mirror reaches the
+		// callback page, whose drain hands it over.
+		this.holdTelemetry('auth:start', startProps);
 		try {
 			if (!this.authProvider) {
 				console.error('[ConnectionManager] No auth provider configured');
@@ -597,7 +780,10 @@ export class ConnectionManager implements IConnectionManager {
 				this.oauthStarted = false; // no redirect happened — allow a retry
 				return;
 			}
-			await this.authProvider.signIn(undefined, register);
+			// The provider owns pending signup context (CloudAuthProvider stashes
+			// it); the providerless legacy Zitadel path was removed with the bus
+			// rework, so attribution has exactly one entry point.
+			await this.authProvider.signIn(undefined, register, signup);
 		} catch (err) {
 			// Initiation threw before any redirect (signIn rejected, PKCE/crypto
 			// failure, etc.) — release the guard so a later attempt can retry.
@@ -668,6 +854,7 @@ export class ConnectionManager implements IConnectionManager {
 		const errorDescription = params.get('auth_error');
 
 		if (errorDescription) {
+			clearSignupProperties();
 			if (this.connectionGeneration !== bootstrapGeneration) return null;
 			// Strip the query string but keep any existing history state (e.g. the
 			// rrHome snapshot / appId) so an OAuth failure does not lose navigation.
@@ -687,6 +874,7 @@ export class ConnectionManager implements IConnectionManager {
 
 		// ── OAuth callback — exchange authorization code for a session ────
 		if (code) {
+			const signup = takeSignupProperties();
 			const verifier = getStoredVerifier();
 			clearStoredVerifier();
 			// Strip the ?code= from the URL so refreshes don't re-exchange.
@@ -705,7 +893,7 @@ export class ConnectionManager implements IConnectionManager {
 					try {
 						return await this.connectForBootstrap(staleToken, sessionAppId, config);
 					} catch (error) {
-						if (this.handleStoredTokenFailure(error)) this.clearToken();
+						if (this.handleStoredTokenFailure(error)) this.dropRejectedCredential();
 						else return null;
 					}
 				}
@@ -716,7 +904,15 @@ export class ConnectionManager implements IConnectionManager {
 			}
 
 			try {
-				return await this.connectForBootstrap({ code, verifier, redirectUri: window.location.origin }, sessionAppId, config);
+				const completed = await this.connectForBootstrap({ code, verifier, redirectUri: window.location.origin, ...(signup ? { signupProperties: () => currentSignupProperties(signup) } : {}) }, sessionAppId, config);
+				// The identity provider's round trip ended in an identity: the one place a
+				// sign-up or sign-in is known to have completed (token restores never pass here).
+				if (completed) {
+					const isNew = completed.result.isNewUser ?? null;
+					const waitlisted = completed.result.waitlisted === true;
+					this.reportTelemetry('auth:complete', { is_new: isNew, waitlisted, source: 'shell', duration_ms: this.takeAuthRoundTripMs() });
+				}
+				return completed;
 			} catch (error) {
 				// The code is single-use and already stripped from the URL, so
 				// recovery always goes through a fresh flow — classify and latch
@@ -753,7 +949,7 @@ export class ConnectionManager implements IConnectionManager {
 					// owns starting a login flow, edition-aware). A network
 					// failure keeps the token so the recovery banner can retry
 					// with it once the server is reachable again.
-					if (this.handleStoredTokenFailure(error)) this.clearToken();
+					if (this.handleStoredTokenFailure(error)) this.dropRejectedCredential();
 				}
 			}
 			// Unauthenticated session-locked visit: bootstrap deliberately does
@@ -777,7 +973,7 @@ export class ConnectionManager implements IConnectionManager {
 				return await this.connectForBootstrap(token, '', config);
 			} catch (err) {
 				// Connect failed — retain the token when the server is unreachable.
-				if (this.handleStoredTokenFailure(err)) this.clearToken();
+				if (this.handleStoredTokenFailure(err)) this.dropRejectedCredential();
 				return null;
 			}
 		}
@@ -1030,7 +1226,7 @@ export class ConnectionManager implements IConnectionManager {
 			const state = this.getConnectionFailureState(error);
 			const isAuthFailure = state === ConnectionState.AUTH_FAILED;
 			if (isAuthFailure) {
-				this.clearToken();
+				this.dropRejectedCredential();
 				this.accountInfo = undefined;
 			}
 
@@ -1192,6 +1388,9 @@ export class ConnectionManager implements IConnectionManager {
 		// Drop any buffered user-intent events so a stale shell:subscribe /
 		// shell:loginRequest can't replay into the next session.
 		this.pendingEvents.clear();
+		// Telemetry facts held for this session, and the round-trip stamp, must not be
+		// forwarded under the next account that signs in on this tab.
+		this.dropHeldTelemetry();
 
 		// Emit logout before disconnecting so listeners can clean up
 		this.emit('shell:logout', {});
@@ -1339,6 +1538,79 @@ export class ConnectionManager implements IConnectionManager {
 		try { tokenStore().removeItem(LS_TOKEN); } catch (e) {
 			console.error('[ConnectionManager] Failed to clear token:', e);
 		}
+	}
+
+	/**
+	 * A credential the server rejected (a stored token that no longer validates, a failed
+	 * callback connect): drop it, and with it the telemetry facts held for that session and
+	 * the round-trip stamp, so none of them is forwarded under the next account that signs
+	 * in on this tab. Sign-out (logout) and another tab's sign-out do the same on their own paths.
+	 */
+	private dropRejectedCredential(): void {
+		this.clearToken();
+		this.dropHeldTelemetry();
+	}
+
+	/**
+	 * Drop the held telemetry facts and, in a tab, their sessionStorage mirror and the round-trip
+	 * stamp (an embedded dev preview holds neither there; see newTelemetryChannel). Never throws.
+	 */
+	private dropHeldTelemetry(): void {
+		this.telemetryDrops++;
+		try {
+			this.telemetry.clear();
+			this.mirroredHeldFacts = [];
+			this.publishTelemetrySnapshot(null);
+		} catch {
+			// telemetry must never break the shell
+		}
+		if (!isEmbeddedDevShell()) {
+			try {
+				sessionStorage.removeItem(AUTH_START_STAMP_KEY);
+			} catch {
+				// storage unavailable
+			}
+		}
+	}
+
+	/**
+	 * The OAuth round trip that just completed: milliseconds since its redirect's stamp (written with the
+	 * PKCE verifier). The stamp is removed here, so a later completion is never timed from it. Never throws.
+	 *
+	 * @returns The duration, or null without a stamp (an embedded preview, a sign-in that did not
+	 *          start in this tab) or with one that is not a plausible round trip.
+	 */
+	private takeAuthRoundTripMs(): number | null {
+		if (isEmbeddedDevShell()) {
+			return null;
+		}
+		let raw: string | null;
+		try {
+			raw = sessionStorage.getItem(AUTH_START_STAMP_KEY);
+			sessionStorage.removeItem(AUTH_START_STAMP_KEY);
+		} catch {
+			return null; // storage unavailable
+		}
+		if (!raw) {
+			return null;
+		}
+		const elapsed = Date.now() - Number(raw);
+		if (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > AUTH_ROUND_TRIP_MAX_MS) {
+			return null;
+		}
+		return elapsed;
+	}
+
+	/**
+	 * The telemetry hold for this shell. A tab mirrors it to sessionStorage, so held facts
+	 * survive a page load that never mounts the forwarding app. An embedded dev preview
+	 * keeps it in memory only: same-origin frames share sessionStorage, so a mirror there
+	 * would inherit, or clear, the host tab's facts (the frame-local rule tokenStore follows
+	 * for the token). For the same reason startOAuth and dropHeldTelemetry leave the
+	 * round-trip stamp alone in a preview.
+	 */
+	private static newTelemetryChannel(): TelemetryChannel {
+		return new TelemetryChannel(isEmbeddedDevShell() ? { storage: null } : undefined);
 	}
 
 	/** Update the hasCredentials flag based on token availability. */
@@ -1497,15 +1769,7 @@ export class ConnectionManager implements IConnectionManager {
 		// leaves an empty Set behind, so check size — not just presence.
 		const handlers = this.listeners.get(event as string);
 		if (handlers && handlers.size > 0) {
-			Promise.resolve().then(() => {
-				for (const fn of handlers) {
-					try {
-						fn(payload);
-					} catch (err) {
-						console.error(`[ConnectionManager] Handler for '${event as string}' threw:`, err);
-					}
-				}
-			});
+			Promise.resolve().then(() => this.dispatch(handlers, event as string, payload));
 			return;
 		}
 
@@ -1518,6 +1782,25 @@ export class ConnectionManager implements IConnectionManager {
 			console.warn(
 				`[ConnectionManager] '${event as string}' emitted with no listener — buffered for replay.`,
 			);
+		}
+	}
+
+	/**
+	 * Call each handler with the payload, in subscription order. A handler that
+	 * throws is logged and the rest still run. Callers schedule the microtask:
+	 * emit() and reportTelemetry() both dispatch through here.
+	 *
+	 * @param handlers - The listeners to call.
+	 * @param event    - The event name, for the error log.
+	 * @param payload  - The event payload.
+	 */
+	private dispatch(handlers: Iterable<Handler>, event: string, payload: unknown): void {
+		for (const fn of handlers) {
+			try {
+				fn(payload);
+			} catch (err) {
+				console.error(`[ConnectionManager] Handler for '${event}' threw:`, err);
+			}
 		}
 	}
 
@@ -1736,6 +2019,7 @@ export class ConnectionManager implements IConnectionManager {
 	 * @param port - The wire-backed port.
 	 */
 	public setRetainedPort(port: IRetainedPort): void {
+		this.bridgedRealm = true;
 		this.retainedPort = port;
 		for (const [topic, entry] of this.topicSubs) {
 			entry.off();
@@ -1773,6 +2057,30 @@ export class ConnectionManager implements IConnectionManager {
 	 * the subscriptions simply never fire.
 	 */
 	private installMirrorSubscriptions(): void {
+		// Telemetry mirror: the root (or any raising realm) publishes facts on
+		// the retained lane; every realm re-emits NEW live facts to its own
+		// 'shell:telemetry' listeners (events are realm-local on the bus) and
+		// keeps the held list for a synchronous drainTelemetry().
+		this.subscribe('shell:telemetry', (snapshot) => {
+			const snap = snapshot as { live: TelemetryFact | null; held: TelemetryFact[] } | undefined;
+			if (!snap || !Array.isArray(snap.held)) return;
+			this.mirroredHeldFacts = snap.held;
+			// Bound the dedupe set — ids are tab-unique, a long session must not grow it forever.
+			if (this.seenTelemetryFactIds.size > 1024) this.seenTelemetryFactIds.clear();
+			const live = snap.live;
+			if (live && typeof live.id === 'string' && !this.seenTelemetryFactIds.has(live.id)) {
+				this.seenTelemetryFactIds.add(live.id);
+				const subs = this.listeners.get('shell:telemetry');
+				if (subs && subs.size > 0) this.dispatch(subs, 'shell:telemetry', live);
+			}
+		});
+		// Root side of a bridged realm's drain: consume the channel so a held
+		// fact is handed over exactly once per tab.
+		this.handle('telemetry.drained', () => {
+			this.telemetry.drain();
+			this.publishTelemetrySnapshot(null);
+			return {};
+		});
 		this.subscribe('shell:status', (snapshot) => {
 			const mirror = snapshot as { connected: boolean; status: ConnectionStatus; engineHttpUrl?: string } | undefined;
 			if (!mirror || mirror.connected === undefined || mirror.status === undefined) return;

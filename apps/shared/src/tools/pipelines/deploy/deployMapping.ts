@@ -15,11 +15,9 @@
 
 import type { Deployment, DeployArtifact, DeployHistoryEntry } from 'rocketride';
 import type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeployHistoryRowDTO, DeployScheduleRowDTO, DeploymentInfoDTO } from './deployTypes';
-// Team resolution is the ONE shared implementation (both hosts ran
-// line-for-line copies before) — re-exported here so this module stays the
-// deploy layer's single import.
-import { teamNameOf } from '../panels/deploy/teams';
-export { resolveDeployTeams, teamNameOf, wireTeamIdOf } from '../panels/deploy/teams';
+// Team resolution (roster, display names, '@me' addressing) is the SDK's —
+// one implementation shared with the `rocketride` CLI and every host.
+import { teamNameOf } from 'rocketride';
 
 // =============================================================================
 // REGISTRY MAPPERS

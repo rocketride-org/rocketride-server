@@ -162,8 +162,11 @@ inline auto __call(Location location, Call &&call, Args &&...args) noexcept {
         }
 
         // Create a new location indicator pointing to the python code and using
-        // the full path
-        Location pyloc{excPath, excLineno, excFunction, true};
+        // the full path. Location holds string_views and excPath/excFunction
+        // are overwritten by the next exception, so view interned copies that
+        // live for the process instead
+        Location pyloc{internLocationText(excPath), excLineno,
+                       internLocationText(excFunction), true};
 
         // Create the error and return it
         auto result = Error{errorCode, pyloc, errorMessage};

@@ -99,8 +99,8 @@ function task(over: Partial<IFakeTask> = {}): IFakeTask {
 // =============================================================================
 
 describe('DATABASE_PROVIDERS', () => {
-	it('covers exactly the three relational node providers', () => {
-		assert.deepEqual([...DATABASE_PROVIDERS].sort(), ['db_clickhouse', 'db_mysql', 'db_postgres']);
+	it('covers exactly the four relational node providers', () => {
+		assert.deepEqual([...DATABASE_PROVIDERS].sort(), ['db_clickhouse', 'db_mysql', 'db_postgres', 'rocketride_sql']);
 	});
 });
 
@@ -184,6 +184,20 @@ describe('discoverSqlEndpoints component selection', () => {
 		});
 		// A component without a display name falls back to its id.
 		assert.equal(endpoints.find((e) => e.nodeId === 'ch_1')!.nodeName, 'ch_1');
+	});
+
+	it('keeps a RocketRide SQL node but not its vector or graph siblings', async () => {
+		const { client } = fakeClient([task()], {
+			'p1:s1': {
+				components: [
+					{ id: 'rrsql_1', provider: 'rocketride_sql', name: 'Tenant DB' },
+					{ id: 'rrvec_1', provider: 'rocketride_vector' },
+					{ id: 'rrgraph_1', provider: 'rocketride_graph' },
+				],
+			},
+		});
+		const endpoints = await discoverSqlEndpoints(client);
+		assert.deepEqual(endpoints.map((e) => [e.nodeId, e.provider]), [['rrsql_1', 'rocketride_sql']]);
 	});
 
 	it('ignores components missing an id or a provider', async () => {

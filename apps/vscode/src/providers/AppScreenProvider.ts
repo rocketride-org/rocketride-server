@@ -30,7 +30,7 @@ import { renderWebviewHtml } from './toolhost/frameworkProvider';
 import { ConnectionManager } from '../connection/connection';
 import { scanWorkspaceApps } from 'shared/tools/appdev';
 import { hostWorkspaceFs } from './toolhost/hostWorkspaceFs';
-import { ensureAppTrigger, ensureProjectId } from '../appdev/appMarker';
+import { ensureAppTrigger, ensureProjectId } from 'rocketride/app-pack';
 import { ensureDevSession, getDevSessionManager } from '../appdev/devSessionManager';
 import { vendorAppTypes } from '../appdev/appTypes';
 import type { BusHost } from './toolhost/busHost';
@@ -98,8 +98,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		// The document: <folder>/<name>.rrapp — a contentless trigger created
 		// on demand. The working-copy projectId is ensured in the appManifest
 		// (package.json is the single home of app facts).
-		await ensureProjectId(app.folder);
-		const trigger = await ensureAppTrigger(app.folder, appId);
+		ensureProjectId(app.folder);
+		// SDK ensureAppTrigger returns the path; the editor open needs a Uri.
+		const trigger = vscode.Uri.file(ensureAppTrigger(app.folder, appId));
 		await vscode.commands.executeCommand('vscode.openWith', trigger, 'rocketride.appBuilder');
 	}
 

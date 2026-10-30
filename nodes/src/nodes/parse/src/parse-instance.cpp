@@ -254,6 +254,39 @@ Error IFilterInstance::onDocumentComplete() noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
+///		Builds the flags passed to tika: the entry flags plus a skip bit
+///		for each media lane with no listener. onImage, onAudio and onVideo
+///		drop everything sent to such a lane, so tika is told not to
+///		extract that media at all
+///	@param[in] entryFlags
+///		The flags of the entry being parsed
+///	@returns
+///		The flags to pass to tika
+//-------------------------------------------------------------------------
+uint32_t IFilterInstance::tikaFlags(uint32_t entryFlags) noexcept {
+    // Only the listener check decides the skip bits: an entry carries
+    // whatever its JSON said, so drop anything it already had there
+    auto flags = entryFlags & ~Tika::SKIP_MEDIA;
+
+    // Set the bit for each lane without a listener, naming it for the trace
+    Text skipped;
+    const auto skip = [&](const char *lane, uint32_t bit) {
+        if (binder.hasListener(lane)) return;
+        flags |= bit;
+        if (!skipped.empty()) skipped += ", ";
+        skipped += lane;
+    };
+    skip("image", Tika::SKIP_IMAGES);
+    skip("audio", Tika::SKIP_AUDIO);
+    skip("video", Tika::SKIP_VIDEO);
+    if (!skipped.empty())
+        LOGT("Tika will not extract media for lanes without a listener:",
+             skipped);
+    return flags;
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Tika thread procedure. Starts tika, sends incoming enties to tika,
 /// 	ends tika when pipe completed.
 //-------------------------------------------------------------------------
@@ -289,7 +322,7 @@ Error IFilterInstance::tikaThreadProc() noexcept {
 
             // Extract the text
             auto ccode = m_tika.extractTextFromBuffer(
-                filename, m_buffer, currentEntry->flags(), context);
+                filename, m_buffer, tikaFlags(currentEntry->flags()), context);
 
             // Push error code to callback queue always to process in instance
             // thread

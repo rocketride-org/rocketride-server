@@ -68,3 +68,19 @@ TEST_CASE("python::isCancelled observes native cancellation") {
     REQUIRE_NO_ERROR(callPython(python));
     REQUIRE_FALSE(ap::async::cancelled());
 }
+
+TEST_CASE("python::an error keeps its location after the next exception") {
+    // Same-length names: a location that views the shared exception
+    // buffers would read the second name in place of the first
+    const auto first = callPython(localfcn()->Error {
+        py::exec("def first_fn():\n    raise ValueError('a')\nfirst_fn()\n");
+        return {};
+    });
+    const auto second = callPython(localfcn()->Error {
+        py::exec("def other_fn():\n    raise ValueError('b')\nother_fn()\n");
+        return {};
+    });
+
+    REQUIRE(first.location().function() == "first_fn");
+    REQUIRE(second.location().function() == "other_fn");
+}

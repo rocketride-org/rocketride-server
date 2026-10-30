@@ -306,6 +306,14 @@ function makeStageFilesAction() {
 				throw new Error(`devServerGuard.cjs missing at ${guardSrc} — the dev-server tether cannot ship`);
 			}
 			await copyFile(guardSrc, path.join(BUILD_DIR, 'devServerGuard.cjs'));
+			const dockerSvg = path.join(APP_ROOT, 'docker.svg');
+			const onpremSvg = path.join(APP_ROOT, 'onprem.svg');
+			if (await exists(dockerSvg)) {
+				await copyFile(dockerSvg, path.join(BUILD_DIR, 'docker.svg'));
+			}
+			if (await exists(onpremSvg)) {
+				await copyFile(onpremSvg, path.join(BUILD_DIR, 'onprem.svg'));
+			}
 			await copyFile(path.join(PROJECT_ROOT, 'LICENSE'), path.join(BUILD_DIR, 'LICENSE'));
 			if (!(await exists(README_DEST))) {
 				throw new Error(

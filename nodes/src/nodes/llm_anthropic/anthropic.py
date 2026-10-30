@@ -31,7 +31,7 @@ Extended-thinking streaming is handled globally via
 from typing import Any, Dict
 
 from ai.common.chat import ChatBase
-from ai.common.config import Config
+from ai.common.config import Config, check_credential_resolved
 from ai.common.llm_native_stream import (
     PROMPT_CACHE_PREFIX_VAR,
     apply_prompt_cache_breakpoint,
@@ -83,6 +83,9 @@ class Chat(ChatBase):
 
         # Get the API key, don't save it
         apikey = (config.get('apikey') or '').strip()
+
+        # A key left as ${ROCKETRIDE_...} names the missing variable, not a bad key format.
+        check_credential_resolved(provider, 'apikey', apikey, connConfig)
 
         # API key validation: must be non-empty and look like an Anthropic key
         # Formats: sk-ant-... (standard), sk-ant-api03-... (newer keys)

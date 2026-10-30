@@ -27,8 +27,9 @@ connection list follows you between them.
 
 - **A reachable database.** The supported engines are the ones with database
   nodes: [`db_mysql`](../../nodes/src/nodes/db_mysql/README.md),
-  [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md) and
-  [`db_clickhouse`](../../nodes/src/nodes/db_clickhouse/README.md). You
+  [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md),
+  [`db_clickhouse`](../../nodes/src/nodes/db_clickhouse/README.md) and
+  [`rocketride_sql`](../../nodes/src/nodes/rocketride_sql/README.md). You
   either point the app at a database node already running in one of your
   pipelines, or give it the connection details directly — both under
   [Connections](#connections).
@@ -518,8 +519,9 @@ statements ran either way; only the app's picture of the schema is behind.
 
 ## Next steps
 
-- [`db_mysql`](../../nodes/src/nodes/db_mysql/README.md), [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md) and
-  [`db_clickhouse`](../../nodes/src/nodes/db_clickhouse/README.md): the nodes behind every
+- [`db_mysql`](../../nodes/src/nodes/db_mysql/README.md), [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md),
+  [`db_clickhouse`](../../nodes/src/nodes/db_clickhouse/README.md) and
+  [`rocketride_sql`](../../nodes/src/nodes/rocketride_sql/README.md): the nodes behind every
   connection, including the tool surface and the direct-execution setting.
 - [Apps](../../docs/public/product/concepts/apps.md): what an app is and how it reaches your engine.
 - [Shell API](../../docs/public/product/guides/apps/index.md): the framework SQL Explorer is built on, when

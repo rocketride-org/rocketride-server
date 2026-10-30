@@ -71,6 +71,8 @@ def _load_iglobal(monkeypatch, error_name: str | None = None, config_overrides: 
 
     chat_module.ChatBase = ChatBase
     config_module.Config = Config
+    config_module.check_credential_resolved = lambda *args, **kwargs: None
+    config_module.warn_if_credential_unresolved = lambda *args, **kwargs: False
     rocketlib_module.IGlobalBase = IGlobalBase
     rocketlib_module.OPEN_MODE = OPEN_MODE
     rocketlib_module.warning = warnings.append

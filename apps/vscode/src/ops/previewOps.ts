@@ -22,7 +22,7 @@ import { ConnectionManager } from '../connection/connection';
 import { appIconDataUri, MAX_README_IMAGE_BYTES, scanWorkspaceApps } from 'shared/tools/appdev';
 import type { IScannedWorkspaceApp as ScannedApp } from 'shared/tools/appdev';
 import { hostWorkspaceFs } from '../providers/toolhost/hostWorkspaceFs';
-import { readAppListing, saveAppListing } from '../appdev/appMarker';
+import { readAppListing, saveAppListing } from 'rocketride/app-pack';
 // Deep file imports (never the barrel — it drags the React view layer into
 // the extension-host bundle).
 import { runListingPreflight } from 'shared/tools/appdev/preflight';
@@ -189,14 +189,14 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 			// The listing IS the appManifest — read it from disk.
 			const apps = await scanWorkspaceApps(hostWorkspaceFs);
 			const scanned = apps.find((a) => a.id === p.app);
-			return scanned ? await readAppListing(scanned.folder) : null;
+			return scanned ? readAppListing(scanned.folder) : null;
 		},
 
 		'host.preview.saveListing': async (p) => {
 			// Persist the listing back into package.json (files are truth; the
 			// next deploy packs it as metadata.manifest).
 			const app = await resolveApp(p.app);
-			await saveAppListing(app.folder, p.draft);
+			saveAppListing(app.folder, p.draft);
 		},
 
 		'host.preview.preflight': async (p) => {
@@ -209,7 +209,7 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 			if (!scanned) {
 				return runListingPreflight(null, { fileExists: async () => false });
 			}
-			const listing = await readAppListing(scanned.folder);
+			const listing = readAppListing(scanned.folder);
 			const wsRoot = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(scanned.folder))?.uri;
 			// Declared runtime deps for the compat rows.
 			let dependencies: Record<string, string> = {};

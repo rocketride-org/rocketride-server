@@ -26,11 +26,14 @@ import java.util.logging.ConsoleHandler;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
+import javax.xml.parsers.ParserConfigurationException;
+import org.xml.sax.SAXException;
 
 import org.apache.tika.parser.Parser;
 import org.apache.tika.mime.MediaType;
 import org.apache.tika.detect.Detector;
 import org.apache.tika.config.TikaConfig;
+import org.apache.tika.exception.TikaException;
 import org.apache.tika.metadata.Metadata;
 import org.apache.tika.io.TikaInputStream;
 import org.apache.tika.parser.ParseContext;
@@ -59,6 +62,15 @@ public final class TikaApi {
 	public static final int MAGICK = 1 << 3; // Use MagicK image enhancement
 	public static final int SIGNING = 1 << 6; // Sign the file
 
+	/**
+	 * Added to the entry flags by the parse node, per document, for each media
+	 * lane it has no listener on. The node drops whatever reaches such a lane,
+	 * so that kind of media is not extracted at all. These sit above the entry
+	 * flags (apLib/entry.hpp) and match the parse node's tika.hpp.
+	 */
+	public static final int SKIP_IMAGES = 1 << 24; // No listener on the image lane
+	public static final int SKIP_AUDIO = 1 << 25; // No listener on the audio lane
+	public static final int SKIP_VIDEO = 1 << 26; // No listener on the video lane
 
 	/**
 	 * Common MIME type string constants used throughout TikaApi.
@@ -319,7 +331,7 @@ public final class TikaApi {
 	 */
 	// synchronized so the initialized check and assignment below are one atomic
 	// step. Two threads could otherwise both pass the guard and race into
-	// SevenZip.initSevenZipFromPlatformJAR().
+	// SevenZipLoader.load().
 	public static synchronized void init() throws Exception {
 		// Get the root path
 		logger.log(Level.INFO, "Tika.rootPath (Before set): " + TikaApi.rootPath);
@@ -334,12 +346,13 @@ public final class TikaApi {
 		logger.log(Level.INFO, "Aspose parsers available: " + asposeAvailable);
 
 		// Initialize 7-Zip-JBinding once for the JVM. Required by RarSevenZipParser;
-		// the call extracts the platform-specific native lib from the bundled jar
-		// and loads it. Failures are logged but not fatal: non-RAR parsing still
-		// works, and ConfigBuilder keeps Tika's RAR4 parser when this did not load.
+		// SevenZipLoader extracts the platform-specific native lib from the bundled
+		// jar, safely against other tasks doing the same, and loads it. Failures are
+		// logged but not fatal: non-RAR parsing still works, and ConfigBuilder keeps
+		// Tika's RAR4 parser when this did not load.
 		try {
 			if (!SevenZip.isInitializedSuccessfully()) {
-				SevenZip.initSevenZipFromPlatformJAR();
+				SevenZipLoader.load();
 				logger.log(Level.INFO, "7-Zip-JBinding initialized: " + SevenZip.getSevenZipVersion().version);
 			}
 			sevenZipReady = true;
@@ -376,6 +389,22 @@ public final class TikaApi {
 	}
 
 	/**
+	 * The Tika configuration init() built, shared by every document and every
+	 * embedded object in it. Building one re-reads tika-config.xml and launches
+	 * the external tools it probes for, which costs more than parsing a small
+	 * embedded image, so embedded objects never rebuild it.
+	 *
+	 * @return the shared configuration, or a new one when init() has not run
+	 */
+	static TikaConfig getTikaConfig() throws TikaException, ParserConfigurationException, SAXException, IOException {
+		// initialized is volatile and set after tikaConfig, so reading it first
+		// makes tikaConfig visible to the calling thread
+		if (initialized)
+			return tikaConfig;
+		return ConfigBuilder.getConfig();
+	}
+
+	/**
 	 * If this is not called, the JVM will refuse to exit
 	 */
 	public static void deinit() {
@@ -394,18 +423,41 @@ public final class TikaApi {
 	}
 
 	/**
+	 * Whether media of a given type is wanted for this document.
+	 *
+	 * @param flags    the flags the engine passed for the document
+	 * @param mimeType the detected MIME type of the media
+	 * @return false when the parse node has no listener for that kind of media
+	 */
+	public static boolean wantsMedia(long flags, String mimeType) {
+		if (mimeType == null)
+			return true;
+		if (mimeType.startsWith(MIME_TYPE_IMAGE))
+			return (flags & SKIP_IMAGES) == 0;
+		if (mimeType.startsWith(MIME_TYPE_AUDIO))
+			return (flags & SKIP_AUDIO) == 0;
+		if (mimeType.startsWith(MIME_TYPE_VIDEO))
+			return (flags & SKIP_VIDEO) == 0;
+		return true;
+	}
+
+	/**
 	 * Returns a PDFParserConfig object with customized configuration options.
-	 * 
+	 *
 	 * The returned configuration object has been modified to disable the use of
-	 * Tesseract OCR and set the maximum memory usage to 512Mb.
-	 * 
+	 * Tesseract OCR and set the maximum memory usage to 512Mb. Inline images are
+	 * extracted only when the image lane is wanted.
+	 *
+	 * @param flags the flags the engine passed for the document
 	 * @return a PDFParserConfig object with custom configuration options.
 	 */
-	public static PDFParserConfig getPdfConfig() {
-		// We're not going to use Tesseract OCR, so we disable the options for inline
-		// image extraction and OCR strategy in PDFParserConfig.
+	public static PDFParserConfig getPdfConfig(long flags) {
 		PDFParserConfig config = new PDFParserConfig();
-		config.setExtractInlineImages(true);
+
+		// Every inline image is decoded, re-encoded and parsed on its own, and
+		// some PDFs draw their pages as tens of thousands of tiny ones, so only
+		// extract them when something listens on the image lane
+		config.setExtractInlineImages(wantsMedia(flags, MIME_TYPE_IMAGE));
 		config.setExtractUniqueInlineImagesOnly(true);
 
 		// Maximum usage is 512Mb
@@ -419,6 +471,17 @@ public final class TikaApi {
 
 		// Return the customized PDFParserConfig object
 		return config;
+	}
+
+	/**
+	 * The configuration with every media lane wanted. Kept for parsers compiled
+	 * against the previous signature, such as the Aspose PDF parser, which are
+	 * loaded by reflection and not built with this library.
+	 *
+	 * @return a PDFParserConfig object with custom configuration options.
+	 */
+	public static PDFParserConfig getPdfConfig() {
+		return getPdfConfig(0);
 	}
 
 	/**
@@ -436,7 +499,7 @@ public final class TikaApi {
 	 *                    in recognizing the file
 	 * @param writer      tika will output to this SAX writer
 	 * @param metadata    Sends/receives the tika metadata
-	 * @param flags       OCR/MAGICK enabled or not
+	 * @param flags       The entry flags (apLib/entry.hpp) plus the SKIP_* media bits
 	 * @throws Exception
 	 */
 
@@ -490,10 +553,23 @@ public final class TikaApi {
 
 			} else if (asposeAvailable && mimeType.startsWith(MIME_TYPE_PDF)) {
 				// Use Aspose PDFParser via reflection
-				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, MIME_TYPE_IMAGE);
+				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, MIME_TYPE_IMAGE, flags);
 				Parser docParser = createAsposePDFParser(extractor, extractPath, mediaType);
 				context.set(Parser.class, docParser);
 				docParser.parse(stream, filter, metadata, context);
+
+			} else if (!wantsMedia(flags, mimeType)) {
+				// A standalone image, audio or video file (wantsMedia is false only for
+				// those) whose lane has no listener: the native side would drop every
+				// buffer, so parse it for its metadata straight from the stream, without
+				// the copy to the heap and the send. Best-effort, as below.
+				logger.log(Level.INFO, "No listener for standalone " + mimeType + ": metadata only");
+				try {
+					parser.parse(stream, filter, metadata, context);
+				} catch (Exception e) {
+					logger.log(Level.WARNING, "Metadata extraction failed for standalone " + mimeType + ": "
+							+ e.getMessage());
+				}
 
 			} else if (mimeType.startsWith(MIME_TYPE_IMAGE) || mimeType.startsWith(MIME_TYPE_AUDIO) || mimeType.startsWith(MIME_TYPE_VIDEO)) {
 				logger.log(Level.INFO, "Current processing media type is : " + mimeType);
@@ -518,7 +594,7 @@ public final class TikaApi {
 							+ " (continuing to stream media): " + e.getMessage());
 				}
 
-				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, mimeType);
+				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, mimeType, flags);
 				// Standalone media: the dropped file IS the source (origin=ingested); the
 				// BEGIN carries the descriptor enrichment (source_mime + media detail).
 				byte[] beginPayload = EmbeddedContentExtractor.buildMediaDescriptorPayload(metadata, "ingested", mimeType, null);
@@ -527,9 +603,9 @@ public final class TikaApi {
 			} else {
 				// Configure the parse context and encoding config
 				context.set(Parser.class, parser);
-				context.set(PDFParserConfig.class, getPdfConfig());
+				context.set(PDFParserConfig.class, getPdfConfig(flags));
 
-				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, mimeType);
+				EmbeddedContentProcessor extractor = new EmbeddedContentProcessor(nativeHandle, mimeType, flags);
 				context.set(EmbeddedDocumentExtractor.class, extractor);
 
 				logger.log(Level.INFO, "\nInvoke parse() method (on doc type)\n");
@@ -588,7 +664,7 @@ public final class TikaApi {
 	 *                     to be real, but the file extension is passed to assist
 	 *                     tika in recognizing the file
 	 * @param metadata     Sends/receives the tika metadata
-	 * @param flags        OCR/MAGICK enabled or not
+	 * @param flags        The entry flags (apLib/entry.hpp) plus the SKIP_* media bits
 	 * @param nativeHandle The handle to the context in the native interface
 	 */
 	private static boolean extractTextForNative(TikaInputStream stream, String extractPath, Metadata metadata,
@@ -604,7 +680,7 @@ public final class TikaApi {
 	 * Extract text by file path (invoked from main)
 	 * 
 	 * @param extractPath  The actual pathname to extract from
-	 * @param flags        OCR/MAGICK enabled or not
+	 * @param flags        The entry flags (apLib/entry.hpp) plus the SKIP_* media bits
 	 * @param nativeHandle The handle to the context in the native interface
 	 */
 	public static boolean extractTextFromPath(String extractPath, long flags, long nativeHandle) throws Exception {
@@ -625,7 +701,7 @@ public final class TikaApi {
 	 *                     to be real, but the file extension is passed to assist
 	 *                     tika in recognizing the file
 	 * @param length       The overall length of the stream (if unknown, set to 0)
-	 * @param flags        OCR/MAGICK enabled or not
+	 * @param flags        The entry flags (apLib/entry.hpp) plus the SKIP_* media bits
 	 * @param nativeHandle The handle to the context in the native interface
 	 * @throws Exception
 	 */

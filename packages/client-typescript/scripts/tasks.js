@@ -255,11 +255,15 @@ function makeStartTestServerAction(options = {}) {
 		run: async (ctx, task) => {
 			// Check for --taskserver from CLI options or direct options
 			const taskserver = options.taskserver || ctx.options?.taskserver;
+			// The key the SERVER authenticates — the live suites must present
+			// this exact credential, so it rides the bracket to run-jest (the
+			// URI already does; a workspace .env's key must never outrank it).
+			const apikey = process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
 			if (taskserver) {
 				const parsed = parseServerAddress(taskserver);
 				ctx.port = parsed.port;
 				task.output = `Using existing server at ${parsed.uri}`;
-				return { port: parsed.port, server: null, serverUri: parsed.uri };
+				return { port: parsed.port, server: null, serverUri: parsed.uri, apikey };
 			}
 
 			task.output = 'Starting server...';
@@ -267,12 +271,14 @@ function makeStartTestServerAction(options = {}) {
 			const result = await startServer({
 				script: 'ai/eaas.py',
 				trace: options.trace,
+				logName: 'client-typescript',
+				verbose: ctx.options?.verbose,
 				basePort: 30000,
 				// CI for fork PRs doesn't have repo secrets; the integration tests
 				// expect a shared API key between server and client. Default to the
 				// same local-dev key used by tests when ROCKETRIDE_APIKEY is unset.
 				env: {
-					ROCKETRIDE_APIKEY: process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
+					ROCKETRIDE_APIKEY: apikey,
 				},
 				onOutput: (text) => {
 					if (taskComplete) return;
@@ -286,7 +292,7 @@ function makeStartTestServerAction(options = {}) {
 			ctx.port = result.port;
 			task.output = `Server ready on port ${ctx.port}`;
 			taskComplete = true;
-			return { port: result.port, server: result.server };
+			return { port: result.port, server: result.server, apikey };
 		},
 	};
 }
@@ -319,6 +325,12 @@ function makeRunJestAction(options = {}) {
 			const testEnv = {
 				...process.env,
 				ROCKETRIDE_URI: serverUri,
+				// The server under test OWNS the credential pair. The dotenv
+				// load above may have filled ROCKETRIDE_APIKEY from the
+				// workspace .env (a developer's real connection) — the live
+				// suites must use the key the bracket's server was started
+				// with, exactly like the URI.
+				ROCKETRIDE_APIKEY: bracket.apikey || process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
 			};
 
 			const jestArgs = ['jest', '--verbose', '--colors'];
@@ -408,7 +420,7 @@ module.exports = {
 		},
 		{
 			name: 'client-typescript:test',
-			action: () => ({
+			action: (options) => ({
 				description: 'Testing client-typescript',
 				steps: [
 					'server:build',
@@ -418,7 +430,7 @@ module.exports = {
 					),
 					bracket({
 						name: 'ts-test-server',
-						setup: makeStartTestServerAction(),
+						setup: makeStartTestServerAction(options),
 						teardown: makeStopTestServerAction(),
 						steps: ['client-typescript:run-jest'],
 					}),

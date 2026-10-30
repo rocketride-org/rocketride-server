@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV9 — never edit by hand
 // =============================================================================
-// Generated:     2026-10-27T03:03:39.042Z
-// Source commit: 8bc477cc91494ff00dac86a1a1ba6c5abf815269
+// Generated:     2026-10-30T16:47:23.738Z
+// Source commit: d9d9a002f71427705d9df4f5a0201d99090d1565
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -728,6 +728,15 @@ export interface OrgDetail {
     memberCount: number;
     /** Total number of teams within the organization. */
     teamCount: number;
+}
+/** The `deleteOrgPrecheck` dry-run result: what deleting the org involves —
+ *  the confirm dialog names the member count and the billing blocker before
+ *  anything is destroyed. */
+export interface DeleteOrgPrecheck {
+    /** How many members lose the workspace (and all of its data). */
+    members: number;
+    /** True when an active subscription blocks deletion (cancel billing first). */
+    subscriptionActive: boolean;
 }
 /** A single organization member record returned from the server. */
 export interface MemberRecord {
@@ -1790,6 +1799,17 @@ export interface OrgInfo {
      * Each entry includes team-scoped permissions.
      */
     teams: TeamInfo[];
+    /**
+     * Id of the organisation's default development team — the team invites
+     * pre-select for new members. Null/absent when the organisation has none.
+     */
+    defaultDevTeamId?: string | null;
+    /**
+     * True when the authenticated user is the organisation's only active
+     * admin. Leaving is refused until another member is promoted. Absent on
+     * OSS servers and on task-scoped synthetic organisations.
+     */
+    isLastAdmin?: boolean;
 }
 /**
  * Full identity and authorisation payload returned by the server after a
@@ -1867,6 +1887,12 @@ export interface ConnectResult {
      * The shell should show a waitlist page instead of the main workspace.
      */
     waitlisted?: boolean;
+    /**
+     * Whether this authentication created the account: true or false when the
+     * server's account provider knows (its upsert reported it), null when it
+     * does not, absent on servers that predate the field.
+     */
+    isNewUser?: boolean | null;
     /**
      * All org memberships the user has (for the org switcher UI).
      * Only present in profile responses, not in the auth handshake.
@@ -2057,7 +2083,13 @@ export interface CProfileReportResponse {
     /** Full pstats-formatted text report. */
     report: string;
 }
-/** A single node in the hierarchical call tree returned by rrext_cprofile_report_tree. */
+/**
+ * A single node in the hierarchical call tree returned by rrext_cprofile_report_tree.
+ *
+ * Below the first level the numbers are this path's share of the caller → callee
+ * totals (the profiler records pairs, not paths), so copies of one function add up
+ * to its totals. The exact per-function totals are in CProfileReportTreeResponse.functions.
+ */
 export interface CProfileTreeNode {
     /** Function name. */
     name: string;
@@ -2065,7 +2097,7 @@ export interface CProfileTreeNode {
     file: string;
     /** Source line number. */
     line: number;
-    /** Number of calls from the parent context. */
+    /** Number of calls from the parent context (this path's share, rounded). */
     ncalls: number;
     /** Total time spent in this function (excluding sub-calls). */
     tottime: number;
@@ -2074,10 +2106,30 @@ export interface CProfileTreeNode {
     /** Child function calls. */
     children: CProfileTreeNode[];
 }
+/** One function's totals over the whole session (or thread), as the text report prints them. */
+export interface CProfileFunctionStats {
+    /** Function name. */
+    name: string;
+    /** Source filename. */
+    file: string;
+    /** Source line number. */
+    line: number;
+    /** Total number of calls. */
+    ncalls: number;
+    /** Self time (excluding sub-calls), in seconds. */
+    tottime: number;
+    /** Cumulative time (including sub-calls), in seconds. */
+    cumtime: number;
+}
 /** Response from rrext_cprofile_report_tree. */
 export interface CProfileReportTreeResponse {
     /** Root node of the call tree (synthetic '<root>' wrapper). */
     tree: CProfileTreeNode | null;
+    /**
+     * Per-function totals, filtered like the tree by includeSystem but never pruned.
+     * Absent from servers that predate it.
+     */
+    functions?: CProfileFunctionStats[];
     /** How long the profiled threads ran — the selected thread, or all of them summed. */
     total_time: number;
     /** Total number of function calls recorded. */
@@ -3214,10 +3266,62 @@ export interface TASK_METRICS {
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+/** Optional analytics context only; never used for authorization or account identity. */
+export type SignupProperties = {
+    schema_version: 1;
+    experiment: string;
+    experiment_revision: string;
+    variant_id: string;
+    assignment_id: string;
+    exposure_id: string;
+    landing_message_revision: string;
+    exposed_at: number;
+    expires_at: number;
+    consent_version: 1;
+};
+/** PKCE exchange credentials with optional, consent-aware signup analytics context. */
+export type PkceCredential = {
+    code: string;
+    verifier: string;
+    redirectUri: string;
+    /**
+     * The Zitadel client that MINTED the code (VS Code native app, CLI, ...).
+     * Zitadel binds codes to their client — exchanging with any other id fails
+     * with invalid_client. Omitted = the server's default (web) client. Unlike
+     * {@link PkceCredential.signupProperties}, this IS credential identity and
+     * stays in the reconnect key.
+     */
+    clientId?: string;
+    /** Evaluated immediately before auth is sent; null or a thrown error omits attribution. */
+    signupProperties?: SignupProperties | (() => SignupProperties | null);
+};
+/**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
 /**
  * SDK version — automatically synced from package.json during build.
  */
-export declare const SDK_VERSION = "1.4.0";
+export declare const SDK_VERSION = "1.5.0";
 /**
  * Default protocol for connections when none is specified.
  */
@@ -3519,6 +3623,49 @@ declare class AccountApi {
      */
     updateOrgName(orgId: string, name: string): Promise<void>;
     /**
+     * Creates a new organization (workspace); the caller becomes its admin.
+     *
+     * On success the server switches the caller's default org to the new one
+     * and pushes `apaext_org_changed` — clients rescope through their normal
+     * org-switch path.
+     *
+     * @param name - The new organization's name (non-empty; normal org-name rules).
+     */
+    createOrg(name: string): Promise<void>;
+    /**
+     * Removes the current user from an organization.
+     *
+     * The server refuses — with a user-presentable message — to let the
+     * organization's last admin leave. Leaving the user's ACTIVE organization
+     * switches them to another membership and pushes a refreshed identity
+     * (`apaext_org_changed`) to all of the user's connections; leaving a
+     * non-active organization pushes nothing, so callers that show
+     * memberships should re-read the profile afterwards.
+     *
+     * @param orgId - Organisation UUID to leave.
+     */
+    leaveOrg(orgId: string): Promise<void>;
+    /**
+     * Dry-run of {@link deleteOrg}: what WOULD deletion involve. Lets the
+     * confirm dialog name the member count and the billing blocker before
+     * anything is destroyed.
+     *
+     * @param orgId - Organisation UUID.
+     * @returns The org's member count and whether a subscription is active.
+     */
+    deleteOrgPrecheck(orgId: string): Promise<DeleteOrgPrecheck>;
+    /**
+     * Permanently deletes an organization and ALL of its data (pipelines,
+     * deployments, apps, environment variables, API keys) for every member.
+     * Admin-gated; the server rejects on the caller's last workspace or an
+     * active subscription. Deleting the CURRENT org re-points the default and
+     * pushes `apaext_org_changed` (other members are re-pointed on their next
+     * touch).
+     *
+     * @param orgId - Organisation UUID to delete.
+     */
+    deleteOrg(orgId: string): Promise<void>;
+    /**
      * Fetches the list of API keys for the current user.
      *
      * @returns Array of API key records.
@@ -3550,7 +3697,8 @@ declare class AccountApi {
      * Sends an invitation to a new organization member.
      *
      * @param orgId  - Organisation UUID.
-     * @param params - Invitation parameters (email, givenName, familyName, role).
+     * @param params - Invitation parameters (email, givenName, familyName, role,
+     *                 optional teamAssignments).
      */
     inviteMember(orgId: string, params: InviteMemberParams): Promise<void>;
     /**
@@ -4289,8 +4437,10 @@ declare class DeployApi {
      *   (default: `process.cwd()`).
      * @param options.comment - "What changed" note kept in the registry.
      * @param options.metadata - Extra metadata merged over the packed
-     *   defaults (e.g. projectId provenance); `appRoot` is always set from
-     *   the pack.
+     *   defaults; `appRoot` is always set from the pack, and `projectId`
+     *   provenance defaults to the working copy's appManifest projectId.
+     *   Deploying never writes it — the id is stamped at creation and by
+     *   the editor, so CI and read-only checkouts deploy unchanged.
      * @param options.onProgress - Receives one line per pack step (include
      *   checks, per-file adds, totals) for hosts that surface progress.
      * @returns The artifact entry for the new version.
@@ -4304,7 +4454,7 @@ declare class DeployApi {
     /**
      * Scaffolds a new app in the workspace — the programmatic twin of the
      * App Builder's New App wizard, rendering the identical templates
-     * (Node.js only). Writes `./apps/<slug>`, ensures the pnpm workspace
+     * (Node.js only). Writes `./apps/<slug>-ui`, ensures the pnpm workspace
      * file and ignore hygiene, vendors the connected server's shell +
      * client packages, and runs the workspace install. Scaffolding only —
      * nothing is deployed; the normal lifecycle (edit → `verifyApp` →
@@ -4312,8 +4462,10 @@ declare class DeployApi {
      *
      * @param slug - The app-name slug (lowercase; digits/-/_ after the
      *   first character). The id becomes `<developerId>.<slug>`.
-     * @param options - Template, display name, developer id (default
-     *   'local'), frame options, install toggle, `onProgress`, and
+     * @param options - Template, display name, developer id (default: this
+     *   client's organization developer id, else 'local' — the same
+     *   resolution as the New App wizard and `rocketride app create`),
+     *   frame options, install toggle, `onProgress`, and
      *   `workspaceRoot` (default `process.cwd()`). The server base URL for
      *   vendoring defaults to this client's own connection.
      * @returns The created app's identity and a report of what ran.
@@ -4978,12 +5130,7 @@ export declare class RocketRideClient extends DAPClient {
      * resolution checks the argument, configured environment, and stored client state
      * (initialized by `config.auth` and updated after authentication). The transport stays attached.
      */
-    login(credential?: string | {
-        code: string;
-        verifier: string;
-        redirectUri: string;
-        clientId?: string;
-    }, options?: {
+    login(credential?: string | PkceCredential, options?: {
         uri?: string;
         timeout?: number;
     }): Promise<ConnectResult>;
@@ -5014,12 +5161,7 @@ export declare class RocketRideClient extends DAPClient {
      * resolution checks the argument, configured environment, and stored client state
      * (initialized by `config.auth` and updated after authentication).
      */
-    connect(credential?: string | {
-        code: string;
-        verifier: string;
-        redirectUri: string;
-        clientId?: string;
-    }, options?: {
+    connect(credential?: string | PkceCredential, options?: {
         uri?: string;
         timeout?: number;
     }): Promise<ConnectResult>;
@@ -5112,7 +5254,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
      * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
      * @param options.source - Override pipeline source
-     * @param options.threads - Number of threads for execution (default: 1)
+     * @param options.threads - Number of threads for execution (omit to let the server decide)
      * @param options.useExisting - Use existing pipeline instance
      * @param options.args - Command line arguments to pass to pipeline
      * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
@@ -5722,6 +5864,46 @@ export declare class RocketRideClient extends DAPClient {
         state: string;
         deployedAt?: number;
     }>>;
+    /**
+     * Wait for one app version's server build to finish — deploying returns
+     * at once with `buildStatus: 'queued'`, and publish/submit/serve all
+     * gate on a finished ('ok') build. Polls the version rail.
+     *
+     * @param appId - App id
+     * @param registryVersion - Registry version number from the rail
+     * @param options.timeoutMs - Give up after this long (default 10 minutes)
+     * @param options.intervalMs - Poll interval (default 3 seconds)
+     * @param options.onStatus - Called whenever the build status changes
+     * @returns The version's rail entry once its build is 'ok'
+     * @throws Error when the build failed, the version is unknown, or the wait timed out
+     */
+    waitForAppBuild(appId: string, registryVersion: number, options?: {
+        timeoutMs?: number;
+        intervalMs?: number;
+        onStatus?: (status: string) => void;
+    }): Promise<Awaited<ReturnType<RocketRideClient["listDeployments"]>>[number]>;
+    /**
+     * The caller org's developer namespace — the `<developerId>` half of
+     * every app id it owns. Readable on both editions (OSS answers the
+     * fixed namespace its sessions carry; there is no Stripe Connect there).
+     *
+     * @returns `{developerId, stripeAccountId, stripeAccountStatus}`;
+     *   `developerId` is null until an org admin registers one
+     */
+    developerStatus(): Promise<{
+        developerId: string | null;
+        stripeAccountId: string | null;
+        stripeAccountStatus: string;
+    }>;
+    /**
+     * Claim the caller org's developer id slug (org.admin, self-service,
+     * SaaS only). Apps are then created as `<developerId>.<name>` and can
+     * publish beyond the workspace.
+     *
+     * @param developerId - The slug to claim (lowercase letters/underscores)
+     * @returns The server's registration record
+     */
+    registerDeveloper(developerId: string): Promise<Record<string, unknown>>;
     /** Read a file as a UTF-8 string. */
     fsReadString(path: string): Promise<string>;
     /** Write a UTF-8 string to a file. */
@@ -5791,14 +5973,21 @@ export declare class RocketRideClient extends DAPClient {
      * @param target  - Task token to profile a pipeline subprocess, or
      *                  undefined/null to profile the server process itself.
      * @param session - Optional human-readable session name.
-     * @returns Status object with session info and start time.
+     * @returns Status object with session info and start time. If a session is
+     *          already active, status is 'error' with a message instead.
+     * @throws Error if the caller lacks task.control, or the target is not a
+     *         task the caller may control.
      */
     cprofileStart(target?: string | null, session?: string): Promise<CProfileStatusResponse>;
     /**
      * Stop the active cProfile profiling session.
      *
      * @param target - Task token if profiling a pipeline, or undefined for server.
-     * @returns Result with session name and runtime.
+     * @returns Result with session name and runtime. With no active session, or a
+     *          server-process session another connection started, status is
+     *          'error' with a message instead.
+     * @throws Error if the caller lacks task.control, or the target is not a
+     *         task the caller may control.
      */
     cprofileStop(target?: string | null): Promise<CProfileStopResponse>;
     /**
@@ -5806,13 +5995,18 @@ export declare class RocketRideClient extends DAPClient {
      *
      * @param target - Task token if querying a pipeline, or undefined for server.
      * @returns Status indicating active/inactive, owner, runtime.
+     * @throws Error if the caller lacks task.control, or the target is not a
+     *         task the caller may control.
      */
     cprofileStatus(target?: string | null): Promise<CProfileStatusResponse>;
     /**
      * Get the full cProfile report from the last completed session.
      *
      * @param target - Task token if querying a pipeline, or undefined for server.
-     * @returns Object containing the full pstats text report.
+     * @returns Object containing the full pstats text report, or a placeholder
+     *          message when no session has completed.
+     * @throws Error if the caller lacks task.control, or the target is not a
+     *         task the caller may control.
      */
     cprofileReport(target?: string | null): Promise<CProfileReportResponse>;
     /**
@@ -5828,14 +6022,21 @@ export declare class RocketRideClient extends DAPClient {
      * @param includeSystem - Keep stdlib/system functions in the tree (server default true).
      * @param thread   - Thread id from cprofileThreads() for that thread alone;
      *                   all threads merged when omitted.
-     * @returns Object containing the tree root, total_time, and total_calls.
+     * @returns Object containing the tree root, functions (exact per-function
+     *          totals; absent from older servers), total_time, and total_calls.
+     *          With no completed session, tree is null and error holds the message.
+     * @throws Error if the caller lacks task.control, or the target is not a
+     *         task the caller may control.
      */
     cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number, includeSystem?: boolean, thread?: number | null): Promise<CProfileReportTreeResponse>;
     /**
      * List the threads profiled in the last completed session.
      *
      * @param target - Task token if querying a pipeline, or undefined for server.
-     * @returns Object containing the threads, busiest first.
+     * @returns Object containing the threads, busiest first. With no completed
+     *          session, threads is empty and error holds the message.
+     * @throws Error if the caller lacks task.control, or the target is not a
+     *         task the caller may control.
      */
     cprofileThreads(target?: string | null): Promise<CProfileThreadsResponse>;
     /**
@@ -6019,6 +6220,112 @@ export declare class RocketRideClient extends DAPClient {
         timeout?: number;
     }): Promise<T>;
 }
+/**
+ * Validate transport context; the account service additionally checks its experiment/catalog.
+ *
+ * @param value - Untrusted signup properties to validate.
+ * @param now - Current time in milliseconds since epoch, used for exposure expiry.
+ * @returns A copy of the valid context, or null when its schema or exposure is invalid.
+ */
+export declare function normalizeSignupProperties(value: unknown, now?: number): SignupProperties | null;
+/**
+ * Parses a registry version argument, rejecting anything that is not a
+ * positive integer. A missing or non-numeric value would otherwise become
+ * NaN (null over JSON) or 0 — silently changing deployment state against an
+ * unspecified version.
+ *
+ * @param value - The raw version (number or numeric string).
+ * @returns The validated registry version (v1 is the first).
+ * @throws Error when the value is not a positive integer.
+ */
+export declare function parseRegistryVersion(value: unknown): number;
+/** The version-rail fields version picking reads. */
+export interface AppRailVersion {
+    registryVersion: number;
+    state: string;
+    buildStatus: string;
+}
+/**
+ * Picks the version a bare "publish this app" means: the NEWEST version that
+ * has not failed (review state or build). A newer version that is still
+ * building is the pick — callers wait for its build rather than silently
+ * publishing an older one.
+ *
+ * @param rows - The app's version rail (`listDeployments`), any order.
+ * @returns The picked row, or null when every version failed or none exist.
+ */
+export declare function pickPublishVersion<T extends AppRailVersion>(rows: T[]): T | null;
+/** One deploy target the caller can address. */
+export interface DeployTeamRef {
+    /** Team id, or '@me' for the caller's personal space. */
+    id: string;
+    /** Display name. */
+    name: string;
+    /** Caller holds task.control on this team (may deploy/pause/schedule). */
+    canControl: boolean;
+}
+/**
+ * Resolves the caller's deploy targets (names + control rights) from the
+ * authenticated identity:
+ *
+ * - '@me' (the personal space) comes first for any signed-in user — it
+ *   exists even with zero team memberships.
+ * - org.admin (and sys.admin) implies the FULL team permission set — the
+ *   server resolver's documented expansion; per-team rows only carry
+ *   explicit task.* grants for regular members.
+ * - Rosterless identities (the OSS single-team server) derive refs from the
+ *   deployment rows with control assumed — the server enforces the real
+ *   permission on every call. Personal (`user~`) rows never become targets.
+ *
+ * @param client - A connected client (its cached ConnectResult is read), or none.
+ * @param deployments - Deployment rows used as the rosterless fallback.
+ * @returns The addressable team refs.
+ */
+export declare function resolveDeployTeams(client: {
+    getAccountInfo(): ConnectResult | undefined;
+} | null | undefined, deployments: Deployment[]): DeployTeamRef[];
+/**
+ * Resolves a team id to its display name, falling back to the id. Personal
+ * (`user~`) owner keys render as "Me" for the caller's own space and
+ * "Personal" for another user's (admin visibility) — the raw guid never
+ * reaches a label.
+ *
+ * @param teams - The resolved team refs.
+ * @param teamId - The team id (or owner key) to resolve.
+ * @param ownUserId - The caller's user id ('' when unknown).
+ * @returns The display name, or the id when unknown.
+ */
+export declare function teamNameOf(teams: DeployTeamRef[], teamId: string, ownUserId?: string): string;
+/**
+ * Translates a row's owner key into the ADDRESSABLE team ref for API calls:
+ * the caller's own `user~{uid}` row is addressed as '@me' (the server never
+ * accepts raw owner keys); everything else passes through.
+ *
+ * @param teamId - The row's team id / owner key.
+ * @param ownUserId - The caller's user id ('' when unknown).
+ * @returns The team id to put on the wire.
+ */
+export declare function wireTeamIdOf(teamId: string, ownUserId: string): string;
+/**
+ * Resolves what a person typed as a team — '@me', a team id, or a team
+ * display name (case-insensitive) — to the id to send. An unknown value
+ * passes through unchanged (the server validates it; an admin may address
+ * a team outside their own roster).
+ *
+ * @param input - The typed team ('' = unscoped/default).
+ * @param teams - The caller's resolved team refs.
+ * @returns The team id to put on the wire.
+ * @throws Error when a name matches more than one team.
+ */
+export declare function resolveTeamArg(input: string, teams: DeployTeamRef[]): string;
+/**
+ * The registry name for a pipeline file whose JSON carries none — `.pipe`
+ * names live in FILENAMES, and every deploy surface renders pipelineName.
+ *
+ * @param filePath - The pipeline file path (either separator).
+ * @returns The basename without its `.pipe` / `.pipe.json` extension.
+ */
+export declare function pipelineNameFromPath(filePath: string): string;
 interface ShellConnectionState {
     /**
      * The realm's RocketRideClient, or `null` while the realm has none yet.
@@ -6968,6 +7275,8 @@ export interface SettingsContribution {
      * are host-resident and deliberately mint no partition files of their own.
      */
     storageAppId?: string;
+    /** Top-level nav position (default 100; lower = higher). */
+    order?: number;
     /** The contributed settings (contributes.configuration shape). */
     configuration: AppConfiguration;
 }
@@ -7028,6 +7337,8 @@ export interface RegistrySection {
         id: string;
         label: string;
     };
+    /** Top-level nav position (default 100; lower = higher). */
+    order?: number;
 }
 /** The flattened settings registry consumed by the settings page and context. */
 export interface SettingsRegistry {
@@ -7366,6 +7677,16 @@ interface CheckoutModalBaseProps {
     onActionClick?: (plan: CheckoutPlan, action: PlanAction) => void;
 }
 type CheckoutModalProps = CheckoutModalBaseProps & CheckoutModalPromoProps;
+type TelemetryFact = {
+    /** Event name from the app's telemetry contract (e.g. 'auth:start'). */
+    event: string;
+    /** Flat properties of the fact; the forwarding app adds its own super properties. */
+    props: Record<string, unknown>;
+    /** Wall-clock milliseconds when the fact was observed: the forwarding app's event time. */
+    ts: number;
+    /** Unique within the tab: the forwarding app's once-per-fact key. */
+    id: string;
+};
 interface ShellAppEntry {
     /** Unique app identifier (e.g. 'rocketride.home'). */
     id: string;
@@ -7475,6 +7796,25 @@ interface ShellConnectionEventMap {
         orgId: string;
     };
     /**
+     * The shell is about to RESCOPE to a different workspace in-process (the
+     * browser shell's reaction to `shell:orgChanged` — reconnect + remount
+     * instead of a page reload). Subscribers holding per-workspace work (dev
+     * sessions, running previews, retained per-workspace topics) should stop
+     * and release it now: the workspace subtree unmounts right after.
+     */
+    "shell:workspaceWillChange": {
+        orgId: string;
+    };
+    /**
+     * The in-process workspace rescope finished: the connection is
+     * re-authenticated under the new default org and the workspace subtree
+     * has remounted against its stores. Counterpart of
+     * `shell:workspaceWillChange`.
+     */
+    "shell:workspaceChanged": {
+        orgId: string;
+    };
+    /**
      * Emitted when the service catalog is fetched or refreshed.
      *
      * Contains the full services map, the summary's deduplicated icon
@@ -7547,12 +7887,16 @@ interface ShellConnectionEventMap {
      * Sign-in request initiated by the UI (e.g. "Get Started" button).
      *
      * Optional `appId` specifies which app to navigate to after auth completes.
-     * Optional `register` requests Zitadel's sign-up form instead of sign-in
-     * (used by "Get Started" CTAs vs. "Sign In" controls).
+     * Optional `register` marks a sign-up intent ("Get Started" CTAs vs. "Sign In"
+     * controls); it no longer changes the destination. `auto` marks a request
+     * the shell raised itself (the auth gate of an app that requires sign-in)
+     * rather than a click; it is reported on the auth:start telemetry fact.
      */
     "shell:loginRequest": {
         appId?: string;
         register?: boolean;
+        auto?: boolean;
+        signupProperties?: SignupProperties;
     };
     /** Sign-out request initiated by the UI (e.g. "Sign Out" button). */
     "shell:logoutRequest": Record<string, never>;
@@ -7583,6 +7927,15 @@ interface ShellConnectionEventMap {
     };
     /** Navigate back to the My Apps launcher screen. */
     "shell:myApps": Record<string, never>;
+    /**
+     * A product-telemetry fact the shell observed (`auth:complete`). The shell
+     * has no analytics transport; the active app forwards these to its own.
+     * `auth:start` is never delivered here (the OAuth redirect follows at once):
+     * it is kept in the connection manager's buffer, as are facts raised before
+     * any app subscribed or whose last listener left before their dispatch, and
+     * handed over by `drainTelemetry()`.
+     */
+    "shell:telemetry": TelemetryFact;
     /**
      * Request the shell open a built-in overlay (e.g. from a guest app's
      * profile/account menu, which can't render the shell's overlays directly).
@@ -7796,6 +8149,22 @@ on(event: 'shell:orgChanged', handler: (payload: ShellConnectionEventMap['shell:
  * @param handler - Callback invoked when the event fires.
  * @returns An unsubscribe function — call it to remove the handler.
  */
+on(event: 'shell:workspaceWillChange', handler: (payload: ShellConnectionEventMap['shell:workspaceWillChange']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:workspaceChanged', handler: (payload: ShellConnectionEventMap['shell:workspaceChanged']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
 on(event: 'shell:servicesUpdated', handler: (payload: ShellConnectionEventMap['shell:servicesUpdated']) => void): () => void;
 /**
  * Registers a handler for a typed shell event.
@@ -7893,6 +8262,14 @@ on(event: 'shell:unsubscribe', handler: (payload: ShellConnectionEventMap['shell
  * @returns An unsubscribe function — call it to remove the handler.
  */
 on(event: 'shell:myApps', handler: (payload: ShellConnectionEventMap['shell:myApps']) => void): () => void;
+/**
+ * Registers a handler for a typed shell event.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function — call it to remove the handler.
+ */
+on(event: 'shell:telemetry', handler: (payload: ShellConnectionEventMap['shell:telemetry']) => void): () => void;
 /**
  * Registers a handler for a typed shell event.
  *
@@ -8055,6 +8432,26 @@ emit(event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChang
  * @param event   - The event name from `ShellConnectionEventMap`.
  * @param payload - The payload matching the event's type.
  */
+emit(event: 'shell:workspaceWillChange', payload: ShellConnectionEventMap['shell:workspaceWillChange']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:workspaceChanged', payload: ShellConnectionEventMap['shell:workspaceChanged']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
 emit(event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']): void;
 /**
  * Emits a typed shell event, dispatching to all registered handlers.
@@ -8176,6 +8573,16 @@ emit(event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubsc
  * @param payload - The payload matching the event's type.
  */
 emit(event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']): void;
+/**
+ * Emits a typed shell event, dispatching to all registered handlers.
+ *
+ * Public so that any code (sidebar, home app, plugins) can fire UI
+ * coordination events through the connection manager.
+ *
+ * @param event   - The event name from `ShellConnectionEventMap`.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:telemetry', payload: ShellConnectionEventMap['shell:telemetry']): void;
 /**
  * Emits a typed shell event, dispatching to all registered handlers.
  *
@@ -8353,7 +8760,7 @@ export interface IWorkspaceContext {
     }) => void;
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
     /** Emit a named event to all subscribers. Does NOT mutate workspace state. */
-emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:notify', payload: ShellConnectionEventMap['shell:notify']) => void) & ((event: 'shell:toolSidebarActivated', payload: ShellConnectionEventMap['shell:toolSidebarActivated']) => void) & ((event: 'shell:toolSidebarDeactivated', payload: ShellConnectionEventMap['shell:toolSidebarDeactivated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:setSidebarCollapsed', payload: ShellConnectionEventMap['shell:setSidebarCollapsed']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
+emit: ((event: 'shell:connected', payload: ShellConnectionEventMap['shell:connected']) => void) & ((event: 'shell:disconnected', payload: ShellConnectionEventMap['shell:disconnected']) => void) & ((event: 'shell:statusMessage', payload: ShellConnectionEventMap['shell:statusMessage']) => void) & ((event: 'shell:statusChange', payload: ShellConnectionEventMap['shell:statusChange']) => void) & ((event: 'shell:error', payload: ShellConnectionEventMap['shell:error']) => void) & ((event: 'shell:event', payload: ShellConnectionEventMap['shell:event']) => void) & ((event: 'shell:accountUpdate', payload: ShellConnectionEventMap['shell:accountUpdate']) => void) & ((event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChanged']) => void) & ((event: 'shell:workspaceWillChange', payload: ShellConnectionEventMap['shell:workspaceWillChange']) => void) & ((event: 'shell:workspaceChanged', payload: ShellConnectionEventMap['shell:workspaceChanged']) => void) & ((event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']) => void) & ((event: 'shell:appsUpdated', payload: ShellConnectionEventMap['shell:appsUpdated']) => void) & ((event: 'shell:notify', payload: ShellConnectionEventMap['shell:notify']) => void) & ((event: 'shell:toolSidebarActivated', payload: ShellConnectionEventMap['shell:toolSidebarActivated']) => void) & ((event: 'shell:toolSidebarDeactivated', payload: ShellConnectionEventMap['shell:toolSidebarDeactivated']) => void) & ((event: 'shell:login', payload: ShellConnectionEventMap['shell:login']) => void) & ((event: 'shell:logout', payload: ShellConnectionEventMap['shell:logout']) => void) & ((event: 'shell:loginRequest', payload: ShellConnectionEventMap['shell:loginRequest']) => void) & ((event: 'shell:logoutRequest', payload: ShellConnectionEventMap['shell:logoutRequest']) => void) & ((event: 'shell:switchApp', payload: ShellConnectionEventMap['shell:switchApp']) => void) & ((event: 'shell:subscribe', payload: ShellConnectionEventMap['shell:subscribe']) => void) & ((event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubscribe']) => void) & ((event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']) => void) & ((event: 'shell:telemetry', payload: ShellConnectionEventMap['shell:telemetry']) => void) & ((event: 'shell:openOverlay', payload: ShellConnectionEventMap['shell:openOverlay']) => void) & ((event: 'shell:sidebarCollapsing', payload: ShellConnectionEventMap['shell:sidebarCollapsing']) => void) & ((event: 'shell:setSidebarCollapsed', payload: ShellConnectionEventMap['shell:setSidebarCollapsed']) => void) & ((event: 'shell:themeChange', payload: ShellConnectionEventMap['shell:themeChange']) => void) & ((event: 'shell:viewActivated', payload: ShellConnectionEventMap['shell:viewActivated']) => void) & ((event: 'shell:manifestRefresh', payload: ShellConnectionEventMap['shell:manifestRefresh']) => void) & ((event: 'app:statusChanged', payload: ShellConnectionEventMap['app:statusChanged']) => void) & ((event: 'store:changed', payload: ShellConnectionEventMap['store:changed']) => void);
     /** Subscribe to a named event. Returns an unsubscribe function. */
     /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:connected', handler: (payload: ShellConnectionEventMap['shell:connected']) => void): () => void;
@@ -8371,6 +8778,10 @@ on(event: 'shell:event', handler: (payload: ShellConnectionEventMap['shell:event
 on(event: 'shell:accountUpdate', handler: (payload: ShellConnectionEventMap['shell:accountUpdate']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:orgChanged', handler: (payload: ShellConnectionEventMap['shell:orgChanged']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:workspaceWillChange', handler: (payload: ShellConnectionEventMap['shell:workspaceWillChange']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:workspaceChanged', handler: (payload: ShellConnectionEventMap['shell:workspaceChanged']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:servicesUpdated', handler: (payload: ShellConnectionEventMap['shell:servicesUpdated']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
@@ -8397,6 +8808,8 @@ on(event: 'shell:subscribe', handler: (payload: ShellConnectionEventMap['shell:s
 on(event: 'shell:unsubscribe', handler: (payload: ShellConnectionEventMap['shell:unsubscribe']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:myApps', handler: (payload: ShellConnectionEventMap['shell:myApps']) => void): () => void;
+/** Subscribe to a named event. Returns an unsubscribe function. */
+on(event: 'shell:telemetry', handler: (payload: ShellConnectionEventMap['shell:telemetry']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
 on(event: 'shell:openOverlay', handler: (payload: ShellConnectionEventMap['shell:openOverlay']) => void): () => void;
 /** Subscribe to a named event. Returns an unsubscribe function. */
@@ -8801,6 +9214,26 @@ export declare class ConnectionManager implements IConnectionManager {
      */
     init(options?: InitOptions): void;
     /**
+     * Record a product-telemetry fact the shell observed and broadcast it as
+     * `shell:telemetry`. The shell carries no analytics SDK: the active app
+     * forwards these to its own transport. Facts raised before any app subscribed
+     * (the OAuth callback resolves identity before the home remote mounts) wait
+     * in a bounded buffer until `drainTelemetry()` hands them over; so does a fact
+     * whose last listener left before its dispatch. Never throws.
+     *
+     * @param event - Event name from the app's telemetry contract (e.g. 'auth:start').
+     * @param props - Flat properties; the forwarding app adds its own super properties.
+     */
+    reportTelemetry(event: string, props: Record<string, unknown>): void;
+    /**
+     * Hand over every buffered telemetry fact, oldest first, and clear the buffer.
+     * Call once from the app's analytics init, then subscribe to `shell:telemetry`
+     * for the rest.
+     *
+     * @returns The buffered facts in the order they were raised.
+     */
+    drainTelemetry(): TelemetryFact[];
+    /**
      * Redirect the browser to the OAuth provider for authorization.
      *
      * Delegates to the auth provider's ``signIn()`` method.
@@ -8808,8 +9241,16 @@ export declare class ConnectionManager implements IConnectionManager {
      * @param register - Retained for compatibility; no longer changes the
      *                   destination. All flows land on Zitadel's login page
      *                   (prompt=login), which offers a Register link.
+     * @param context - What raised the request: the app the visitor was opening
+     *                  (`appId`, else the pending app id) and whether the shell's
+     *                  auth gate raised it rather than a click (`auto`). Reported
+     *                  on the auth:start telemetry fact.
      */
-    startOAuth(register?: boolean): Promise<void>;
+    startOAuth(register?: boolean, context?: {
+        appId?: string;
+        auto?: boolean;
+        signupProperties?: SignupProperties;
+    }): Promise<void>;
     /**
      * Run the one-time auth bootstrap sequence.
      *
@@ -8997,6 +9438,22 @@ emit(event: 'shell:orgChanged', payload: ShellConnectionEventMap['shell:orgChang
  * @param event   - The event name from ShellConnectionEventMap.
  * @param payload - The payload matching the event's type.
  */
+emit(event: 'shell:workspaceWillChange', payload: ShellConnectionEventMap['shell:workspaceWillChange']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:workspaceChanged', payload: ShellConnectionEventMap['shell:workspaceChanged']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
 emit(event: 'shell:servicesUpdated', payload: ShellConnectionEventMap['shell:servicesUpdated']): void;
 /**
  * Emit a typed shell event, dispatching to all registered handlers.
@@ -9094,6 +9551,14 @@ emit(event: 'shell:unsubscribe', payload: ShellConnectionEventMap['shell:unsubsc
  * @param payload - The payload matching the event's type.
  */
 emit(event: 'shell:myApps', payload: ShellConnectionEventMap['shell:myApps']): void;
+/**
+ * Emit a typed shell event, dispatching to all registered handlers.
+ * Also pushes to the debug log for the ALT+D panel.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param payload - The payload matching the event's type.
+ */
+emit(event: 'shell:telemetry', payload: ShellConnectionEventMap['shell:telemetry']): void;
 /**
  * Emit a typed shell event, dispatching to all registered handlers.
  * Also pushes to the debug log for the ALT+D panel.
@@ -9236,6 +9701,22 @@ on(event: 'shell:orgChanged', handler: (payload: ShellConnectionEventMap['shell:
  * @param handler - Callback invoked when the event fires.
  * @returns An unsubscribe function.
  */
+on(event: 'shell:workspaceWillChange', handler: (payload: ShellConnectionEventMap['shell:workspaceWillChange']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:workspaceChanged', handler: (payload: ShellConnectionEventMap['shell:workspaceChanged']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
 on(event: 'shell:servicesUpdated', handler: (payload: ShellConnectionEventMap['shell:servicesUpdated']) => void): () => void;
 /**
  * Register a typed handler for a shell event.
@@ -9333,6 +9814,14 @@ on(event: 'shell:unsubscribe', handler: (payload: ShellConnectionEventMap['shell
  * @returns An unsubscribe function.
  */
 on(event: 'shell:myApps', handler: (payload: ShellConnectionEventMap['shell:myApps']) => void): () => void;
+/**
+ * Register a typed handler for a shell event.
+ *
+ * @param event   - The event name from ShellConnectionEventMap.
+ * @param handler - Callback invoked when the event fires.
+ * @returns An unsubscribe function.
+ */
+on(event: 'shell:telemetry', handler: (payload: ShellConnectionEventMap['shell:telemetry']) => void): () => void;
 /**
  * Register a typed handler for a shell event.
  *
@@ -10403,8 +10892,9 @@ export declare class CloudAuthProvider implements IAuthProvider {
      * @param register - Retained for compatibility; no longer changes the
      *                   destination. All flows land on Zitadel's login page,
      *                   which offers a Register link for new users.
+     * @param signup - Optional signup analytics; retained only for registration with active consent.
      */
-    signIn(appId?: string, register?: boolean): Promise<void>;
+    signIn(appId?: string, register?: boolean, signup?: SignupProperties | null): Promise<void>;
     /**
      * Handle the OAuth callback after Zitadel redirects back with ?code=.
      *
@@ -10415,11 +10905,7 @@ export declare class CloudAuthProvider implements IAuthProvider {
      * @returns The PKCE exchange object for client.connect(), or null if
      *          the verifier is missing (stale/expired session).
      */
-    handleCallback(code: string): {
-        code: string;
-        verifier: string;
-        redirectUri: string;
-    } | null;
+    handleCallback(code: string): PkceCredential | null;
     /**
      * Store an authentication token.
      *
@@ -11808,6 +12294,9 @@ export interface SettingsRichSection {
         id: string;
         label: string;
     };
+    /** Top-level nav position (default 100; lower = higher). A group sits at
+     *  its lowest member's order. */
+    order?: number;
     /** Renders the section's whole pane. */
     render: (ctx?: ISettingsRichContext) => React$1.ReactNode;
 }
@@ -14231,6 +14720,17 @@ interface IAccountViewProps {
     onNavigateSection?: (sectionId: string) => void;
     /** Renames ANY workspace by id (the manage-workspaces drawer). */
     onRenameWorkspace?: (orgId: string, name: string) => Promise<void>;
+    /** Creates a new workspace; the server switches the caller into it. */
+    onCreateWorkspace?: (name: string) => Promise<void>;
+    /** Leaves a workspace the user belongs to (server enforces the rules). */
+    onLeaveWorkspace?: (orgId: string) => Promise<void>;
+    /** Deletes a workspace the user administers (destroys its data). */
+    onDeleteWorkspace?: (orgId: string) => Promise<void>;
+    /** Dry-run for the delete confirm: member count + billing blocker. */
+    onDeleteWorkspacePrecheck?: (orgId: string) => Promise<{
+        members: number;
+        subscriptionActive: boolean;
+    }>;
     /** Persists updated profile fields. */
     onSaveProfile: (fields: ProfileUpdate) => Promise<void>;
     /** Sets the user's dev team (dev-run billing + env layer). */

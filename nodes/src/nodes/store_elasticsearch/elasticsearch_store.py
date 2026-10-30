@@ -37,7 +37,7 @@ from elasticsearch.helpers import bulk, scan, BulkIndexError
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
-from ai.common.config import Config
+from ai.common.config import Config, check_credential_resolved
 
 from .constants import (
     CONTENT_FIELD,
@@ -97,6 +97,8 @@ class Store(DocumentStoreBase):
         self.port = config.get('port', ELASTICSEARCH_DEFAULT_PORT)
 
         self.apikey = (config.get('apikey') or '').strip() or None
+        # An unfilled key names the missing variable instead of reaching the server.
+        check_credential_resolved(provider, 'apikey', self.apikey, connConfig)
         self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
         self.payload_limit = config.get('payloadLimit', self.payload_limit)
         self.threshold_search = config.get('score', 0.5)

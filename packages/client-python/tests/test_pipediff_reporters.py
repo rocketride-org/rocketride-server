@@ -40,16 +40,16 @@ Coverage:
 import html as html_mod
 import json
 import re
+import unicodedata
 import unittest
+from html.parser import HTMLParser
 from typing import Optional, Tuple
 
 from rocketride.pipediff import EdgeChange, FieldChange, NodeChange, PipeDiff
-from rocketride.pipediff.reporters import _md_cell, render_human, render_json, render_markdown
+from rocketride.pipediff.reporters import render_human, render_json, render_markdown
 
-# CI installs cmarkgfm into the engine interpreter from tests/requirements.txt
-# (the client-python:setup-test-deps step), so the renderer cross-check below
-# runs there. The import stays guarded only so the rest of the module still
-# collects on a local interpreter without it.
+# cmarkgfm is the Markdown renderer GitHub uses; the tests that render through it
+# are skipped where it is not installed.
 try:  # pragma: no cover - guarded for interpreters without the renderer
     import cmarkgfm
     from cmarkgfm.cmark import Options as CmarkOptions
@@ -101,6 +101,34 @@ def _render_gfm_row(table_markdown: str) -> Tuple[int, Optional[str]]:
     return len(cells), (html_mod.unescape(code.group(1)) if code else None)
 
 
+class _GfmListItems(HTMLParser):
+    """Read the visible list text and nesting from actual cmark-gfm output."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.items = []
+        self._items = []
+        self._depth = 0
+        self.max_depth = 0
+
+    def handle_starttag(self, tag, attrs) -> None:
+        if tag == 'ul':
+            self._depth += 1
+            self.max_depth = max(self.max_depth, self._depth)
+        elif tag == 'li':
+            self._items.append([])
+
+    def handle_data(self, data) -> None:
+        if self._items:
+            self._items[-1].append(data)
+
+    def handle_endtag(self, tag) -> None:
+        if tag == 'ul':
+            self._depth -= 1
+        elif tag == 'li':
+            self.items.append(''.join(self._items.pop()).strip())
+
+
 # Values whose escaping the two tests below both check: Windows paths and regex
 # escapes (backslashes that must survive untouched), bare and pre-escaped pipes,
 # and a run of both together.
@@ -120,18 +148,10 @@ def _split_gfm_row(row: str) -> list:
     """
     Split a GFM table row into cells the way cmark-gfm's table scanner does.
 
-    This is the library-free counterpart to ``_render_gfm_row``: it answers the
-    only question ``_md_cell`` is responsible for -- does the row still have its
-    columns, and does unescaping give the value back -- without needing a C
-    extension that is not installed in CI.
-
-    The rule, confirmed against cmark-gfm itself: a ``|`` splits the row only
-    when no backslash immediately precedes it, and a ``|`` preceded by a run of
-    *n* backslashes (*n* >= 1) is escaped and loses exactly one of them. Every
-    other backslash is left alone, which is what makes a value like
-    ``C:\\Users\\alice`` come through untouched. Cross-checked against
-    ``cmarkgfm`` over several thousand random values built from the punctuation
-    that appears in pipeline config: the two agree on every one.
+    The library-free counterpart to ``_render_gfm_row``: a ``|`` splits the row only
+    when no backslash immediately precedes it, and a ``|`` preceded by a run of *n*
+    backslashes (*n* >= 1) is escaped and loses exactly one of them. Every other
+    backslash is left alone.
     """
     row = row.strip()
     if row.startswith('|'):
@@ -172,8 +192,7 @@ def _table_body_rows(markdown: str) -> list:
     Return the data rows of every Markdown table in ``markdown``.
 
     Header rows and the ``| --- |`` separators are dropped, so a row count is a
-    count of rendered changes. A row that a stray newline split in two shows up
-    here as two rows, which is exactly what the escaping tests assert against.
+    count of rendered changes (a row split by a stray newline counts twice).
     """
     rows = []
     in_body = False
@@ -187,6 +206,19 @@ def _table_body_rows(markdown: str) -> list:
         if in_body:
             rows.append(line)
     return rows
+
+
+def _added_value_report(value) -> str:
+    """The Markdown report of one config value added to a node: a ``Node | Field | Change`` table."""
+    return render_markdown(
+        PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n1', kind='config', field_changes=[FieldChange(path='config.v', kind='added', new=value)]
+                )
+            ]
+        )
+    )
 
 
 class TestRenderHuman(unittest.TestCase):
@@ -241,7 +273,9 @@ class TestRenderHuman(unittest.TestCase):
         out = render_human(diff, use_color=False)
         self.assertNotIn('\x1b', out)
         self.assertNotIn('\r', out)
-        self.assertIn('\\x1b', out)
+        # A value holding an escaped character is JSON-quoted, so its ESC reads as
+        # JSON's escape; an id is not a JSON value and gets the terminal escape.
+        self.assertIn('"\\u001b[31mred\\u001b[0m"', out)
         self.assertIn('\\x0d\\x0afake line', out)
 
     def test_control_characters_escaped_in_ids_lanes_and_version(self) -> None:
@@ -264,6 +298,160 @@ class TestRenderHuman(unittest.TestCase):
         self.assertIn('viewport', out)
         self.assertIn('~ viewport.x: 0 -> 120', out)
         self.assertIn('1 viewport field changed', out)
+
+    def test_c1_and_bidi_controls_are_escaped(self) -> None:
+        # C1 controls (U+009B is an 8-bit CSI on terminals that honor C1) and the
+        # Unicode bidi/isolate controls can reorder or spoof what the reviewer
+        # reads, so they are escaped like the C0 controls.
+        unsafe = ['\u009b', '\u0085', '\u061c', '\u200e', '\u200f', '\u2028', '\u2029']
+        unsafe += [chr(code) for code in range(0x202A, 0x202F)] + [chr(code) for code in range(0x2066, 0x206A)]
+        value = 'safe ' + ''.join(unsafe) + ' evil'
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n1',
+                    kind='config',
+                    field_changes=[FieldChange(path='config.note', kind='changed', old='a', new=value)],
+                )
+            ],
+            edge_changes=[EdgeChange(from_id='f\u202e', lane='l\u2066', to_id='t\u009b', kind='added')],
+        )
+        out = render_human(diff, use_color=False)
+        for char in unsafe:
+            self.assertNotIn(char, out)
+        self.assertIn('\\x9b', out)
+        self.assertIn('\\x85', out)
+        self.assertIn('\\u202e', out)
+        self.assertIn('\\u2066', out)
+        self.assertIn('f\\u202e --l\\u2066--> t\\x9b', out)
+
+    def test_escaped_control_and_literal_escape_text_stay_distinguishable(self) -> None:
+        # U+202E and the six characters `\u202e` would both print as `\u202e` once
+        # the control is escaped, so a value holding an escaped character is
+        # JSON-quoted; so is a value holding text that reads like an escape, and JSON
+        # quoting doubles its backslash, so the pair differs by more than quotes.
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n1',
+                    kind='config',
+                    field_changes=[
+                        FieldChange(path='config.bidi', kind='changed', old='\u202e', new='\\u202e'),
+                        FieldChange(path='config.esc', kind='changed', old='\\x1b', new='\x1b'),
+                    ],
+                )
+            ]
+        )
+        out = render_human(diff, use_color=False)
+        self.assertIn('~ config.bidi: "\\u202e" -> "\\\\u202e"', out)
+        self.assertIn('~ config.esc: "\\\\x1b" -> "\\u001b"', out)
+        self.assertNotIn('\u202e', out)
+        self.assertNotIn('\x1b', out)
+
+    def test_one_sided_values_that_read_as_other_json_are_quoted(self) -> None:
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n1',
+                    kind='config',
+                    field_changes=[
+                        FieldChange(path='config.a', kind='added', new='true'),
+                        FieldChange(path='config.b', kind='added', new=True),
+                        FieldChange(path='config.c', kind='added', new='""'),
+                        FieldChange(path='config.d', kind='added', new=''),
+                        FieldChange(path='config.e', kind='removed', old='512'),
+                        FieldChange(path='config.f', kind='added', new='gpt-4 '),
+                        FieldChange(path='config.g', kind='added', new='gpt-4'),
+                    ],
+                )
+            ]
+        )
+        out = render_human(diff, use_color=False)
+        self.assertIn('+ config.a = "true"', out)
+        self.assertIn('+ config.b = true', out)
+        self.assertIn('+ config.c = "\\"\\""', out)
+        self.assertIn('+ config.d = ""', out)
+        self.assertIn('- config.e = "512"', out)
+        self.assertIn('+ config.f = "gpt-4 "', out)
+        self.assertIn('+ config.g = gpt-4', out)
+
+    def test_whitespace_only_changes_stay_visible(self) -> None:
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n1',
+                    kind='config',
+                    field_changes=[
+                        FieldChange(path='config.tab', kind='changed', old='a\tb', new='a b'),
+                        FieldChange(path='config.pad', kind='changed', old='gpt-4', new=' gpt-4 '),
+                    ],
+                )
+            ]
+        )
+        out = render_human(diff, use_color=False)
+        self.assertIn('~ config.tab: "a\\tb" -> "a b"', out)
+        # The padded side is quoted on its own, which already makes the edit visible.
+        self.assertIn('~ config.pad: gpt-4 -> " gpt-4 "', out)
+
+    def test_printable_non_ascii_is_left_alone(self) -> None:
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n1',
+                    kind='config',
+                    field_changes=[FieldChange(path='config.note', kind='changed', old='café', new='日本 → ok')],
+                )
+            ]
+        )
+        self.assertIn('~ config.note: café -> 日本 → ok', render_human(diff, use_color=False))
+
+    def test_type_only_changes_render_distinguishably(self) -> None:
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n1',
+                    kind='config',
+                    field_changes=[
+                        FieldChange(path='config.n', kind='changed', old=512, new='512'),
+                        FieldChange(path='config.flag', kind='changed', old=True, new='true'),
+                        FieldChange(path='config.z', kind='changed', old=None, new='null'),
+                        FieldChange(path='config.s', kind='changed', old='a', new='b'),
+                        FieldChange(path='config.q', kind='changed', old='""', new=''),
+                    ],
+                )
+            ],
+            version_change=(1, '1'),
+        )
+        out = render_human(diff, use_color=False)
+        self.assertIn('~ config.n: 512 -> "512"', out)
+        self.assertIn('~ config.flag: true -> "true"', out)
+        self.assertIn('~ config.z: null -> "null"', out)
+        # Same-type string changes keep the compact bare rendering.
+        self.assertIn('~ config.s: a -> b', out)
+        self.assertIn('~ config.q: "\\"\\"" -> ""', out)
+        self.assertIn('Version: 1 -> "1"', out)
+        self.assertIn('version 1 → "1"', out.splitlines()[0])
+
+    def test_empty_string_value_is_visible(self) -> None:
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n1',
+                    kind='config',
+                    field_changes=[
+                        FieldChange(path='config.note', kind='changed', old='', new='x'),
+                        FieldChange(path='config.extra', kind='added', new=''),
+                    ],
+                )
+            ]
+        )
+        out = render_human(diff, use_color=False)
+        self.assertIn('~ config.note: "" -> x', out)
+        self.assertIn('+ config.extra = ""', out)
+
+    def test_provider_type_change_uses_json_spelling(self) -> None:
+        diff = PipeDiff(node_changes=[NodeChange(id='n1', kind='provider', provider_old=0, provider_new=False)])
+        self.assertIn('~ n1 provider: 0 -> false', render_human(diff, use_color=False))
 
 
 class TestRenderJson(unittest.TestCase):
@@ -362,6 +550,226 @@ class TestRenderJson(unittest.TestCase):
 
 
 class TestRenderMarkdown(unittest.TestCase):
+    @unittest.skipIf(cmarkgfm is None, 'cmarkgfm is not installed')
+    def test_node_add_remove_markers_survive_gfm_rendering(self) -> None:
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(id='new_node', kind='added', provider_new='prompt'),
+                NodeChange(id='old_node', kind='removed', provider_old='webhook'),
+            ]
+        )
+        parsed = _GfmListItems()
+        parsed.feed(cmarkgfm.github_flavored_markdown_to_html(render_markdown(diff)))
+        self.assertEqual(parsed.items, ['+ new_node (prompt)', '- old_node (webhook)'])
+        self.assertEqual(parsed.max_depth, 1)
+
+    @unittest.skipIf(cmarkgfm is None, 'cmarkgfm is not installed')
+    def test_edge_add_remove_markers_survive_gfm_rendering(self) -> None:
+        diff = PipeDiff(
+            edge_changes=[
+                EdgeChange(from_id='new_source', lane='text', to_id='target', kind='added'),
+                EdgeChange(from_id='old_source', lane='control', to_id='target', kind='removed'),
+            ]
+        )
+        parsed = _GfmListItems()
+        parsed.feed(cmarkgfm.github_flavored_markdown_to_html(render_markdown(diff)))
+        self.assertEqual(parsed.items, ['+ new_source --text--> target', '- old_source --control--> target'])
+        self.assertEqual(parsed.max_depth, 1)
+
+    @unittest.skipIf(cmarkgfm is None, 'cmarkgfm is not installed')
+    def test_empty_string_value_cannot_break_out_of_its_code_span(self) -> None:
+        # An empty value must not render as a bare double backtick: GFM pairs it with
+        # the next value's two-backtick fence and the rest of the untrusted value
+        # would render as live Markdown.
+        hostile = 'x` [click](https://example.invalid/p) @someone ![i](https://example.invalid/i.png) **bold**'
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n1',
+                    kind='config',
+                    field_changes=[FieldChange(path='config.note', kind='changed', old='', new=hostile)],
+                ),
+                NodeChange(id='n2', kind='provider', provider_old='', provider_new=hostile),
+            ],
+            version_change=('', hostile),
+        )
+        out = render_markdown(diff)
+        html = cmarkgfm.github_flavored_markdown_to_html(out)
+        for tag in ('<a ', '<img', '<strong>bold'):
+            self.assertNotIn(tag, html)
+        # The empty side is shown as a visible JSON empty string.
+        self.assertIn('<code>&quot;&quot;</code> → <code>x` [click]', html)
+        self.assertIn('**Version:** `""` →', out)
+
+    def test_values_that_render_alike_in_markdown_stay_distinguishable(self) -> None:
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n1',
+                    kind='config',
+                    field_changes=[FieldChange(path='config.s', kind='changed', old='a' + chr(10) + 'b', new='a b')],
+                ),
+                NodeChange(id='n2', kind='provider', provider_old='p' + chr(10) + 'q', provider_new='p q'),
+            ],
+            version_change=('1' + chr(10) + '2', '1 2'),
+        )
+        out = render_markdown(diff)
+        # A value holding a line break must not read like the same text with a space,
+        # in a table cell, a bullet, or the version line.
+        for marker in ('`config.s`', '`n2` provider', '**Version:**'):
+            (line,) = [line for line in out.splitlines() if marker in line]
+            before, after = re.findall(r'`([^`]*)`', line)[-2:]
+            self.assertNotEqual(_reader_view(before), _reader_view(after), line)
+
+    # Each value differs from the plain one only by a character a reader cannot see:
+    # a zero-width space or joiner, a word joiner, a BOM, a soft hyphen, a tag
+    # character, or a space other than U+0020.
+    _LOOKALIKES = [
+        ('openai', 'open\u200bai'),
+        ('ab', 'a\u200db'),
+        ('ab', 'a\u2060b'),
+        ('ab', 'a\ufeffb'),
+        ('ab', 'a\u00adb'),
+        ('ab', 'a\U000e0041b'),
+        ('a b', 'a\u00a0b'),
+        ('a b', 'a\u3000b'),
+        # Just as invisible, but not format characters or spaces by category.
+        ('ab', 'a\u034fb'),
+        ('ab', 'a\ufe0fb'),
+        ('ab', 'a\U000e0100b'),
+        ('ab', 'a\u180bb'),
+        ('ab', 'a\u3164b'),
+        ('ab', 'a\u2800b'),
+    ]
+
+    def test_invisible_and_lookalike_characters_are_escaped(self) -> None:
+        """A change hidden in an invisible character must show in both reports."""
+        for old, new in self._LOOKALIKES:
+            with self.subTest(new=new.encode('unicode_escape').decode()):
+                diff = PipeDiff(
+                    node_changes=[
+                        NodeChange(
+                            id='n1',
+                            kind='config',
+                            field_changes=[FieldChange(path='config.v', kind='changed', old=old, new=new)],
+                        ),
+                        NodeChange(id=new, kind='added', provider_new=new),
+                    ]
+                )
+                (hidden,) = [char for char in new if char not in old]
+                code = ord(hidden)
+                escape = (
+                    f'\\x{code:02x}' if code <= 0xFF else (f'\\u{code:04x}' if code <= 0xFFFF else f'\\U{code:08x}')
+                )
+                for out in (render_markdown(diff), render_human(diff, use_color=False)):
+                    self.assertNotIn(hidden, out)
+                    self.assertIn(escape, out)
+
+    @unittest.skipIf(cmarkgfm is None, 'cmarkgfm is not installed')
+    def test_invisible_characters_render_differently_on_github(self) -> None:
+        """Checked through cmark-gfm: the two sides of each change render as different text."""
+        for old, new in self._LOOKALIKES:
+            with self.subTest(new=new.encode('unicode_escape').decode()):
+                diff = PipeDiff(
+                    node_changes=[
+                        NodeChange(
+                            id='n1',
+                            kind='config',
+                            field_changes=[FieldChange(path='config.v', kind='changed', old=old, new=new)],
+                        )
+                    ]
+                )
+                html = cmarkgfm.github_flavored_markdown_to_html(render_markdown(diff))
+                spans = re.findall(r'<code>(.*?)</code>', html)
+                change = spans[-2:]
+                self.assertEqual(len(change), 2, html)
+                self.assertNotEqual(' '.join(change[0].split()), ' '.join(change[1].split()), html)
+
+    def test_a_lone_surrogate_is_escaped_rather_than_breaking_output(self) -> None:
+        """JSON's ``"\\ud800"`` decodes to a lone surrogate, which no UTF-8 stream can carry."""
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n\ud800',
+                    kind='config',
+                    field_changes=[FieldChange(path='config.v', kind='changed', old='a', new='\udfff')],
+                )
+            ]
+        )
+        for out in (render_markdown(diff), render_human(diff, use_color=False)):
+            out.encode('utf-8')
+            self.assertIn('\\ud800', out)
+            self.assertIn('\\udfff', out)
+
+    def test_control_and_bidi_characters_are_escaped_in_markdown(self) -> None:
+        # The Markdown report is auto-posted as a PR comment; a bidi override in a
+        # value or id would visually reorder the diff a reviewer reads there.
+        unsafe = ['\u202e', '\u2066', '\u200f', '\u2028', '\u009b', '\x1b']
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(id='n\u202e1', kind='added', provider_new='p\u2066'),
+                NodeChange(
+                    id='n2',
+                    kind='config',
+                    field_changes=[
+                        FieldChange(path='config.v', kind='changed', old='a', new='safe ' + ''.join(unsafe) + ' evil')
+                    ],
+                ),
+            ],
+            version_change=('1', '2\u200f'),
+        )
+        out = render_markdown(diff, title='flow\u202e.pipe')
+        for char in unsafe:
+            self.assertNotIn(char, out)
+        self.assertIn('`n\\u202e1`', out)
+        self.assertIn('\\u2066', out)
+        self.assertIn('\\u001b', out)
+        self.assertIn('\\x9b', out)
+
+    def test_markdown_pairs_compare_what_github_renders(self) -> None:
+        # A code span drops one leading and trailing space, so `gpt-4` and
+        # ` gpt-4 ` render alike unless the pair is quoted.
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n1',
+                    kind='config',
+                    field_changes=[FieldChange(path='config.m', kind='changed', old='gpt-4', new=' gpt-4 ')],
+                )
+            ]
+        )
+        self.assertIn('| `n1` | `config.m` | `gpt-4` → `" gpt-4 "` |', render_markdown(diff))
+
+    def test_empty_strings_are_shown_as_visible_empty_strings(self) -> None:
+        self.assertIn('| `n1` | `config.v` | + `""` |', _added_value_report(''))
+        out = render_markdown(PipeDiff(node_changes=[NodeChange(id='', kind='added', provider_new='p')]))
+        self.assertIn('- `+` `""` (`p`)', out)
+
+    def test_values_use_json_spelling(self) -> None:
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n1',
+                    kind='config',
+                    field_changes=[
+                        FieldChange(path='config.flag', kind='changed', old=True, new='true'),
+                        FieldChange(path='config.n', kind='changed', old=512, new='512'),
+                        FieldChange(path='config.z', kind='removed', old=None),
+                        FieldChange(path='config.claude', kind='added', new={'apikey': 'x'}),
+                        FieldChange(path='config.on', kind='changed', old=True, new=False),
+                    ],
+                )
+            ]
+        )
+        out = render_markdown(diff)
+        self.assertIn('| `config.flag` | `true` → `"true"` |', out)
+        self.assertIn('| `config.n` | `512` → `"512"` |', out)
+        self.assertIn('| `config.z` | - `null` |', out)
+        self.assertIn('| `config.claude` | + `{"apikey": "x"}` |', out)
+        self.assertIn('| `config.on` | `true` → `false` |', out)
+        self.assertNotIn('True', out)
+        self.assertNotIn('None', out)
+
     def test_empty_diff_summary(self) -> None:
         out = render_markdown(PipeDiff())
         self.assertIn('no semantic changes', out)
@@ -476,19 +884,13 @@ class TestRenderMarkdown(unittest.TestCase):
 
     def test_table_does_not_double_backslashes_in_code_spans(self) -> None:
         """
-        Backslashes inside a table cell must survive verbatim.
+        Backslashes inside a table cell survive verbatim.
 
-        Every value reaching a cell is already wrapped in a code span, and a
-        code span does no backslash unescaping — so the cell escaper used to
-        double them and ``C:\\Users\\alice`` rendered as ``C:\\\\Users\\\\alice``.
-        Only ``\\|`` is meaningful to GitHub's table parser, and that escape
-        stays.
-
-        A backslash sitting immediately before a pipe is **not** a special case:
-        the value ``\\d+\\|x`` is emitted as ``\\d+\\\\|x``, one added backslash
-        and no more. See
-        :meth:`test_md_cell_adds_exactly_one_backslash_per_pipe` for the full
-        matrix and the cmark-gfm round-trip that pins why.
+        Every value reaching a cell is already in a code span, which does no
+        backslash unescaping, so a Windows path reads back as it was written. Only
+        a backslash-escaped pipe is meaningful to GitHub's table parser, and that
+        escape stays. A backslash immediately before a pipe is not a special case:
+        one backslash is added and no more.
         """
         windows_path = r'C:\Users\alice'
         regex_value = r'\d+\|x'
@@ -519,77 +921,29 @@ class TestRenderMarkdown(unittest.TestCase):
             # Pipes from the values are escaped, so only the 4 delimiters remain.
             self.assertEqual(row.replace('\\|', '').count('|'), 4, row)
 
-    def test_md_cell_adds_exactly_one_backslash_per_pipe(self) -> None:
-        """
-        Pin the exact bytes ``_md_cell`` emits, including backslash-before-pipe.
-
-        cmark-gfm's table-cell scanner accepts either a lone backslash or a
-        backslash-escaped punctuation pair and takes the longest match, so a run
-        of *n* backslashes before a pipe parses as *n - 1* lone backslashes plus
-        the escaped pair ``\\|``: the pipe is escaped for every *n* >= 1 and the
-        row never splits. Unescaping strips exactly that one backslash. Adding
-        one is therefore both necessary and sufficient — doubling the run would
-        render a spurious extra backslash rather than protect anything.
-        """
-        cases = [
-            # (value, exact text _md_cell must emit)
-            (r'C:\Users\alice', r'C:\Users\alice'),  # no pipe -> untouched
-            ('a|b', r'a\|b'),
-            (r'a\|b', r'a\\|b'),
-            (r'a\\|b', r'a\\\|b'),
-            (r'\d+\|x', r'\d+\\|x'),
-            ('a||b', r'a\|\|b'),
-            ('trailing-backslash\\', 'trailing-backslash\\'),  # no pipe -> untouched
-            ('a\nb', 'a b'),
-            ('a\nb|c', r'a b\|c'),
-        ]
-        for value, expected in cases:
-            with self.subTest(value=value):
-                self.assertEqual(_md_cell(value), expected)
-
     def test_escaped_cells_survive_gfm_row_splitting(self) -> None:
         """
-        Every escaped value must keep the row at three columns and unescape back
-        to itself.
+        Every value keeps its row at three columns and reads back as itself.
 
-        Same corpus as the ``cmarkgfm`` cross-check below, but resolved with
-        ``_split_gfm_row`` so it runs everywhere -- including on an interpreter
-        that has no ``cmarkgfm`` at all. CI installs the renderer into the engine
-        interpreter from tests/requirements.txt, so both checks run there; this
-        one is the fallback for a local interpreter, not the one that settles the
-        rule. A row that split shows up here as more than three cells.
+        The row is split with ``_split_gfm_row``, so this runs on an interpreter
+        without ``cmarkgfm``; the test below renders the same corpus through it.
         """
         for value in _GFM_ESCAPING_CORPUS:
             with self.subTest(value=value):
-                row = f'| n1 | `config.v` | `{_md_cell(value)}` |'
+                (row,) = _table_body_rows(_added_value_report(value))
                 cells = _split_gfm_row(row)
                 self.assertEqual(len(cells), 3, f'row split by GFM: {row!r}')
-                self.assertEqual(cells[2].strip(), f'`{value}`', f'cell does not unescape to the value: {row!r}')
+                self.assertEqual(cells[2].strip(), f'+ `{value}`', f'cell does not unescape to the value: {row!r}')
 
-    @unittest.skipIf(
-        cmarkgfm is None,
-        'cmarkgfm is not installed; CI installs it from tests/requirements.txt so this runs there, '
-        'and a local interpreter can get it with `pip install .[test]` -- the library-free check above '
-        'covers the same corpus meanwhile',
-    )
+    @unittest.skipIf(cmarkgfm is None, 'cmarkgfm is not installed')
     def test_gfm_renders_escaped_cells_back_to_the_original_value(self) -> None:
-        """
-        Render the escaped cells through GFM and check what a reader actually sees.
-
-        This is the test that decides the backslash question rather than arguing
-        it: for each value, the emitted row must keep its three columns and the
-        code span must contain the original value, byte for byte. It is not
-        optional in CI -- tests/requirements.txt installs ``cmarkgfm`` into the
-        engine interpreter the suite runs on, so this executes rather than skips.
-        """
+        """What GitHub renders for each value: three columns, and a code span holding the value byte for byte."""
         for value in _GFM_ESCAPING_CORPUS:
             with self.subTest(value=value):
-                row = f'| n1 | `config.v` | `{_md_cell(value)}` |'
-                table = '| Node | Field | Change |\n| --- | --- | --- |\n' + row + '\n'
-                cells, code = _render_gfm_row(table)
-                self.assertEqual(cells, 3, f'unexpected column count: {row!r}')
-                self.assertIsNotNone(code, f'row split by GFM (code span truncated): {row!r}')
-                self.assertEqual(code, value, f'rendered cell differs from the value: {row!r}')
+                cells, code = _render_gfm_row(_added_value_report(value))
+                self.assertEqual(cells, 3, f'unexpected column count for {value!r}')
+                self.assertIsNotNone(code, f'row split by GFM (code span truncated) for {value!r}')
+                self.assertEqual(code, value, f'rendered cell differs from the value: {value!r}')
 
     def test_table_cell_neutralizes_newlines_without_touching_backslashes(self) -> None:
         """A newline in a value must not break the row, and must not cost a backslash."""
@@ -614,11 +968,447 @@ class TestRenderMarkdown(unittest.TestCase):
         rows = _table_body_rows(out)
         self.assertEqual(len(rows), 1, out)
         row = rows[0]
-        # One row means the embedded newlines were folded, not passed through.
-        self.assertIn('a b', row)
-        self.assertIn('C:\\tmp next\\|line', row)
-        self.assertNotIn('C:\\\\tmp', row)
+        # One row means the embedded newlines were neutralized, not passed through:
+        # each value holds a newline, so it is JSON-quoted and the newline reads as
+        # JSON's `\n`. The only doubled backslash is JSON's own; the cell adds none.
+        self.assertIn('`"a\\nb"`', row)
+        self.assertIn('`"C:\\\\tmp\\nnext\\|line"`', row)
+        self.assertNotIn('C:\\\\\\tmp', row)
         self.assertEqual(row.replace('\\|', '').count('|'), 4, row)
+
+
+# Pairs of spellings that Unicode treats as the same text, written by name because a
+# literal would be rewritten by any editor that normalises. Each pair prints alike
+# unless the unnormalised side is spelled out: ``(label, composed, unnormalised)``.
+_EQUIVALENT_SPELLINGS = [
+    ('accent', 'caf\N{LATIN SMALL LETTER E WITH ACUTE}', 'cafe\N{COMBINING ACUTE ACCENT}'),
+    ('ring', '\N{LATIN CAPITAL LETTER A WITH RING ABOVE}', 'A\N{COMBINING RING ABOVE}'),
+    (
+        'stacked marks',
+        '\N{LATIN SMALL LETTER A WITH CIRCUMFLEX AND ACUTE}',
+        'a\N{COMBINING CIRCUMFLEX ACCENT}\N{COMBINING ACUTE ACCENT}',
+    ),
+    ('angstrom sign', '\N{LATIN CAPITAL LETTER A WITH RING ABOVE}', '\N{ANGSTROM SIGN}'),
+    ('ohm sign', '\N{GREEK CAPITAL LETTER OMEGA}', '\N{OHM SIGN}'),
+    ('hangul', '\N{HANGUL SYLLABLE GA}', '\N{HANGUL CHOSEONG KIYEOK}\N{HANGUL JUNGSEONG A}'),
+    ('kana', '\N{HIRAGANA LETTER GA}', '\N{HIRAGANA LETTER KA}\N{COMBINING KATAKANA-HIRAGANA VOICED SOUND MARK}'),
+]
+
+# Compatibility look-alikes: not rewritten by NFC, so they stay readable where a value
+# is shown alone, and are separated only where both sides of a change are shown.
+_COMPATIBILITY_LOOKALIKES = [
+    ('full-width digit', 'gpt-4', 'gpt-\N{FULLWIDTH DIGIT FOUR}'),
+    ('ligature', 'fi', '\N{LATIN SMALL LIGATURE FI}'),
+    ('superscript', 'x2', 'x\N{SUPERSCRIPT TWO}'),
+]
+
+
+def _reader_view(text: str) -> str:
+    """What a reader can tell apart: compatibility forms folded, whitespace runs collapsed."""
+    return ' '.join(unicodedata.normalize('NFKC', text).split())
+
+
+def _github_code_spans(markdown: str) -> list:
+    """The text of every code span cmark-gfm renders from ``markdown``, in order."""
+    html = cmarkgfm.github_flavored_markdown_to_html(markdown, options=CmarkOptions.CMARK_OPT_UNSAFE)
+    return [html_mod.unescape(span) for span in re.findall(r'<code>(.*?)</code>', html, re.S)]
+
+
+# Where one piece of text can appear on its own in a report, each as a diff holding only that text.
+_ALONE = {
+    'added node id': lambda t: PipeDiff(node_changes=[NodeChange(id=t, kind='added', provider_new='p')]),
+    'removed node id': lambda t: PipeDiff(node_changes=[NodeChange(id=t, kind='removed', provider_old='p')]),
+    'node provider': lambda t: PipeDiff(node_changes=[NodeChange(id='n', kind='added', provider_new=t)]),
+    'edge endpoints and lane': lambda t: PipeDiff(edge_changes=[EdgeChange(from_id=t, lane=t, to_id=t, kind='added')]),
+    'config path': lambda t: PipeDiff(
+        node_changes=[
+            NodeChange(id='n', kind='config', field_changes=[FieldChange(path='config.' + t, kind='added', new=1)])
+        ]
+    ),
+    'added value': lambda t: PipeDiff(
+        node_changes=[
+            NodeChange(id='n', kind='config', field_changes=[FieldChange(path='config.v', kind='added', new=t)])
+        ]
+    ),
+    'removed value': lambda t: PipeDiff(
+        node_changes=[
+            NodeChange(id='n', kind='config', field_changes=[FieldChange(path='config.v', kind='removed', old=t)])
+        ]
+    ),
+    'viewport path': lambda t: PipeDiff(
+        viewport_changes=[FieldChange(path='viewport.' + t, kind='added', new=1)], layout_changed=True
+    ),
+}
+
+
+def _id_as_printed(text: str) -> str:
+    """How the terminal report prints ``text`` as the id of an added node."""
+    report = render_human(_ALONE['added node id'](text), use_color=False)
+    (line,) = [line for line in report.splitlines() if line.startswith('  + ')]
+    return line[len('  + ') : -len(' (p)')]
+
+
+# Where both sides of a change are shown together: ``(diff of a -> b, pattern for the human line)``.
+_PAIRED = {
+    'changed value': (
+        lambda a, b: PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n', kind='config', field_changes=[FieldChange(path='config.v', kind='changed', old=a, new=b)]
+                )
+            ]
+        ),
+        r'^    ~ config\.v: (.*) -> (.*)$',
+    ),
+    'provider change': (
+        lambda a, b: PipeDiff(node_changes=[NodeChange(id='n', kind='provider', provider_old=a, provider_new=b)]),
+        r'^  ~ n provider: (.*) -> (.*)$',
+    ),
+    'version': (lambda a, b: PipeDiff(version_change=(a, b)), r'^Version: (.*) -> (.*)$'),
+}
+
+
+class TestEquivalentSpellings(unittest.TestCase):
+    """Text that Unicode treats as equal, but that differs in the file, must differ in the report."""
+
+    def test_unnormalised_text_is_spelled_out_wherever_it_can_appear(self) -> None:
+        for label, composed, unnormalised in _EQUIVALENT_SPELLINGS:
+            for place, build in _ALONE.items():
+                with self.subTest(spelling=label, place=place):
+                    composed_human = render_human(build(composed), use_color=False)
+                    plain_human = render_human(build(unnormalised), use_color=False)
+                    # The composed spelling is ordinary printable text and stays readable.
+                    self.assertIn(composed, composed_human)
+                    self.assertIn(composed, render_markdown(build(composed)))
+                    # The other one never reaches the page raw, so the two cannot read alike.
+                    for report in (plain_human, render_markdown(build(unnormalised))):
+                        self.assertNotIn(unnormalised, report)
+                        self.assertIn('\\u', report)
+                    self.assertNotEqual(_reader_view(composed_human), _reader_view(plain_human))
+
+    @unittest.skipIf(cmarkgfm is None, 'cmarkgfm is not installed')
+    def test_unnormalised_text_differs_in_the_markdown_github_renders(self) -> None:
+        for label, composed, unnormalised in _EQUIVALENT_SPELLINGS:
+            for place, build in _ALONE.items():
+                with self.subTest(spelling=label, place=place):
+                    shown = _github_code_spans(render_markdown(build(composed)))
+                    other = _github_code_spans(render_markdown(build(unnormalised)))
+                    self.assertEqual(len(shown), len(other))
+                    self.assertNotEqual([_reader_view(s) for s in shown], [_reader_view(s) for s in other])
+            with self.subTest(spelling=label, place='title'):
+                title = _github_code_spans(render_markdown(PipeDiff(), title=composed))[0]
+                other = _github_code_spans(render_markdown(PipeDiff(), title=unnormalised))[0]
+                self.assertNotEqual(_reader_view(title), _reader_view(other))
+
+    def test_both_sides_of_a_change_never_read_alike_in_the_terminal(self) -> None:
+        for label, composed, unnormalised in _EQUIVALENT_SPELLINGS + _COMPATIBILITY_LOOKALIKES:
+            for place, (build, pattern) in _PAIRED.items():
+                for old, new in ((composed, unnormalised), (unnormalised, composed)):
+                    with self.subTest(spelling=label, place=place, old=old.encode('unicode_escape')):
+                        match = re.search(pattern, render_human(build(old, new), use_color=False), re.M)
+                        self.assertIsNotNone(match)
+                        self.assertNotEqual(_reader_view(match.group(1)), _reader_view(match.group(2)))
+
+    @unittest.skipIf(cmarkgfm is None, 'cmarkgfm is not installed')
+    def test_both_sides_of_a_change_never_read_alike_in_the_markdown_github_renders(self) -> None:
+        for label, composed, unnormalised in _EQUIVALENT_SPELLINGS + _COMPATIBILITY_LOOKALIKES:
+            for place, (build, _pattern) in _PAIRED.items():
+                for old, new in ((composed, unnormalised), (unnormalised, composed)):
+                    with self.subTest(spelling=label, place=place, old=old.encode('unicode_escape')):
+                        # The last two code spans of the report are the old and the new side.
+                        before, after = _github_code_spans(render_markdown(build(old, new)))[-2:]
+                        self.assertNotEqual(_reader_view(before), _reader_view(after))
+
+    def test_compatibility_lookalikes_are_spelled_out_only_when_they_collide(self) -> None:
+        for label, plain, lookalike in _COMPATIBILITY_LOOKALIKES:
+            with self.subTest(spelling=label):
+                changed = PipeDiff(
+                    node_changes=[
+                        NodeChange(
+                            id='n',
+                            kind='config',
+                            field_changes=[
+                                FieldChange(path='config.v', kind='changed', old=plain, new=lookalike),
+                                FieldChange(path='config.w', kind='changed', old='a', new=lookalike),
+                            ],
+                        )
+                    ]
+                )
+                human = render_human(changed, use_color=False)
+                # Alike to a reader: both quoted, the look-alike written as an escape.
+                self.assertIn(f'~ config.v: "{plain}" -> "', human)
+                self.assertNotIn(lookalike, human.split('config.w')[0])
+                # Not alike: compact and readable.
+                self.assertIn(f'~ config.w: a -> {lookalike}', human)
+
+    def test_normalised_non_ascii_text_is_left_readable(self) -> None:
+        text = (
+            'caf\N{LATIN SMALL LETTER E WITH ACUTE} \N{HIRAGANA LETTER GA}\N{HIRAGANA LETTER KI} \N{HANGUL SYLLABLE GA}'
+        )
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(id=text, kind='added', provider_new=text),
+                NodeChange(id='n', kind='config', field_changes=[FieldChange(path='config.v', kind='added', new=text)]),
+            ]
+        )
+        for report in (render_human(diff, use_color=False), render_markdown(diff)):
+            self.assertNotIn('\\u', report)
+            self.assertIn(text, report)
+
+    def test_one_unnormalised_word_does_not_hide_the_rest_of_an_ascii_sentence(self) -> None:
+        text = 'use the cafe\N{COMBINING ACUTE ACCENT} model, not the cafe model'
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(id='n', kind='config', field_changes=[FieldChange(path='config.v', kind='added', new=text)])
+            ]
+        )
+        self.assertIn('"use the cafe\\u0301 model, not the cafe model"', render_human(diff, use_color=False))
+
+    def test_a_real_combining_mark_and_the_text_of_its_escape_stay_apart(self) -> None:
+        diff = PipeDiff(
+            node_changes=[
+                NodeChange(
+                    id='n',
+                    kind='config',
+                    field_changes=[
+                        FieldChange(
+                            path='config.v',
+                            kind='changed',
+                            old='e\N{COMBINING ACUTE ACCENT}',
+                            new='e' + chr(92) + 'u0301',
+                        )
+                    ],
+                )
+            ]
+        )
+        self.assertIn(
+            '~ config.v: "e' + chr(92) + 'u0301" -> "e' + chr(92) * 2 + 'u0301"', render_human(diff, use_color=False)
+        )
+
+
+_BS = chr(92)  # one backslash, spelled so that no escape in this file is read as a character
+
+
+def _on_an_ascii_console(text: str) -> str:
+    """What the CLI prints on a stream that cannot encode ``text`` (``diff._show_unprintable``)."""
+    return text.encode('ascii', errors='backslashreplace').decode('ascii')
+
+
+# A hidden or unprintable character, and the text of the escape that names it. Both the
+# reporters and an ASCII console write the first as the second.
+_CHARACTER_AND_ITS_ESCAPE = [
+    ('bidi override', 'a\N{RIGHT-TO-LEFT OVERRIDE}', 'a' + _BS + 'u202e'),
+    ('escape control', 'a\x1b', 'a' + _BS + 'x1b'),
+    ('CJK on an ASCII console', '\N{CJK UNIFIED IDEOGRAPH-65E5}', _BS + 'u65e5'),
+    ('latin-1 on an ASCII console', '\N{LATIN SMALL LETTER E WITH ACUTE}', _BS + 'xe9'),
+    ('astral on an ASCII console', '\N{GRINNING FACE}', _BS + 'U0001f600'),
+]
+
+
+class TestEscapeLookalikes(unittest.TestCase):
+    """A character and the text of its escape must print apart, whatever the console."""
+
+    def test_identifiers_and_values_print_apart_from_the_text_of_their_escape(self) -> None:
+        for label, character, escape_text in _CHARACTER_AND_ITS_ESCAPE:
+            for place, build in _ALONE.items():
+                with self.subTest(case=label, place=place):
+                    real, literal = build(character), build(escape_text)
+                    for render in (lambda d: render_human(d, use_color=False), render_markdown):
+                        self.assertNotEqual(render(real), render(literal))
+                        # Nor does the console make them alike: what it writes for the
+                        # character must not be what the text already was.
+                        self.assertNotEqual(_on_an_ascii_console(render(real)), _on_an_ascii_console(render(literal)))
+
+    def test_both_sides_of_a_change_print_apart_on_an_ascii_console(self) -> None:
+        for label, character, escape_text in _CHARACTER_AND_ITS_ESCAPE:
+            for place, (build, pattern) in _PAIRED.items():
+                for old, new in ((character, escape_text), (escape_text, character)):
+                    with self.subTest(case=label, place=place, old=old.encode('unicode_escape')):
+                        human = _on_an_ascii_console(render_human(build(old, new), use_color=False))
+                        match = re.search(pattern, human, re.M)
+                        self.assertIsNotNone(match)
+                        self.assertNotEqual(match.group(1), match.group(2))
+                        spans = re.findall(r'`([^`]*)`', _on_an_ascii_console(render_markdown(build(old, new))))
+                        self.assertNotEqual(spans[-2], spans[-1])
+
+    @unittest.skipIf(cmarkgfm is None, 'cmarkgfm is not installed')
+    def test_identifiers_print_apart_in_the_markdown_github_renders(self) -> None:
+        for label, character, escape_text in _CHARACTER_AND_ITS_ESCAPE:
+            for place, build in _ALONE.items():
+                with self.subTest(case=label, place=place):
+                    self.assertNotEqual(
+                        _github_code_spans(render_markdown(build(character))),
+                        _github_code_spans(render_markdown(build(escape_text))),
+                    )
+
+    def test_ordinary_text_is_not_quoted_for_holding_a_backslash(self) -> None:
+        # Windows paths and regular expressions are common in configs; only text that
+        # is spelled exactly like one of our escapes is touched.
+        for text in (
+            'C:' + _BS + 'Users' + _BS + 'alice',
+            _BS + 'd+' + _BS + 's*',
+            _BS + 'xyz',
+            _BS + 'u12',
+            _BS + 'U00ff',
+            'a' + _BS * 2 + 'b',
+            _BS,
+        ):
+            with self.subTest(text=text):
+                value_report = render_human(_ALONE['added value'](text), use_color=False)
+                self.assertIn('    + config.v = ' + text, value_report.splitlines())
+                self.assertEqual(_id_as_printed(text), text)
+        self.assertEqual(_id_as_printed('chunker_1'), 'chunker_1')
+        # An id holding a real escaped character is shown with its escape, unquoted.
+        self.assertEqual(_id_as_printed('a' + chr(0x202E)), 'a' + _BS + 'u202e')
+
+    def test_a_value_starting_with_a_quote_is_quoted(self) -> None:
+        # A console that writes a character as an escape can turn text that is not valid JSON
+        # into text that is, so a bare value never starts with a quote.
+        report = render_human(_ALONE['added value']('"abc'), use_color=False)
+        self.assertIn('    + config.v = "' + _BS + '"abc"', report.splitlines())
+        mark = chr(0x301)
+        bare, literal = '"' + _BS + mark + mark + ' "', _BS + 'u0301' + mark + ' '
+        for render in (lambda diff: render_human(diff, use_color=False), render_markdown):
+            printed = [_on_an_ascii_console(render(_ALONE['added value'](text))) for text in (bare, literal)]
+            self.assertNotEqual(printed[0], printed[1])
+
+    def test_no_two_strings_print_alike(self) -> None:
+        tokens = [
+            _BS + 'u202e',
+            '\N{RIGHT-TO-LEFT OVERRIDE}',
+            _BS + 'u65e5',
+            '\N{CJK UNIFIED IDEOGRAPH-65E5}',
+            _BS + 'x1b',
+            '\x1b',
+            _BS + 'xe9',
+            '\N{LATIN SMALL LETTER E WITH ACUTE}',
+            _BS,
+            '"',
+            'a',
+            ' ',
+            'e\N{COMBINING ACUTE ACCENT}',
+            '\t',
+            '\N{NO-BREAK SPACE}',
+        ]
+        strings = {''}
+        frontier = {''}
+        for _ in range(3):
+            frontier = {prefix + token for prefix in frontier for token in tokens}
+            strings |= frontier
+        reports = {
+            'value, terminal': lambda t: render_human(_ALONE['added value'](t), use_color=False),
+            'value, Markdown': lambda t: render_markdown(_ALONE['added value'](t)),
+            'identifier, terminal': lambda t: render_human(_ALONE['added node id'](t), use_color=False),
+            'identifier, Markdown': lambda t: render_markdown(_ALONE['added node id'](t)),
+        }
+        for name, report in reports.items():
+            seen = {'as written': {}, 'on an ASCII console': {}}
+            for text in sorted(strings):
+                rendered = report(text)
+                for console, printed in zip((lambda t: t, _on_an_ascii_console), seen.values()):
+                    shown = console(rendered)
+                    other = printed.setdefault(shown, text)
+                    self.assertEqual(other, text, f'{name}: {other!a} and {text!a} both print as {shown!a}')
+
+
+# Identifiers that differ only in whitespace, which a reader (or a Markdown code span, which
+# trims one space from each end) cannot tell apart bare.
+_WHITESPACE_PAIRS = [
+    ('llm_1', 'llm_1 '),
+    (' llm_1', 'llm_1'),
+    (' llm_1 ', 'llm_1'),
+    ('a b', 'a' + chr(9) + 'b'),
+    ('a b', 'a  b'),
+    ('a' + chr(9) + 'b', 'a  b'),
+    ('a ', 'a' + chr(9)),
+    ('a', 'a' + chr(9)),
+]
+_IDENTIFIER_PLACES = ['added node id', 'removed node id', 'edge endpoints and lane', 'config path', 'viewport path']
+
+
+class TestIdentifierWhitespace(unittest.TestCase):
+    """Ids, endpoints, lanes and paths that differ only in whitespace must not print alike."""
+
+    def test_the_two_spellings_print_apart_in_the_terminal(self) -> None:
+        for place in _IDENTIFIER_PLACES:
+            for first, second in _WHITESPACE_PAIRS:
+                with self.subTest(place=place, first=first, second=second):
+                    shown = [render_human(_ALONE[place](text), use_color=False) for text in (first, second)]
+                    self.assertNotEqual(shown[0], shown[1])
+                    # Nor after a reader folds the whitespace the way a browser would.
+                    self.assertNotEqual(_reader_view(shown[0]), _reader_view(shown[1]))
+
+    def test_the_two_spellings_print_apart_in_the_markdown_source(self) -> None:
+        for place in _IDENTIFIER_PLACES:
+            for first, second in _WHITESPACE_PAIRS:
+                with self.subTest(place=place, first=first, second=second):
+                    shown = [render_markdown(_ALONE[place](text)) for text in (first, second)]
+                    self.assertNotEqual(shown[0], shown[1])
+                    self.assertNotEqual(_reader_view(shown[0]), _reader_view(shown[1]))
+
+    @unittest.skipIf(cmarkgfm is None, 'cmarkgfm is not installed')
+    def test_the_two_spellings_print_apart_in_the_markdown_github_renders(self) -> None:
+        for place in _IDENTIFIER_PLACES:
+            for first, second in _WHITESPACE_PAIRS:
+                with self.subTest(place=place, first=first, second=second):
+                    rendered = [_github_code_spans(render_markdown(_ALONE[place](text))) for text in (first, second)]
+                    self.assertNotEqual(rendered[0], rendered[1])
+                    # What GitHub renders, folded: code spans keep their spaces on GitHub
+                    # (`white-space: break-spaces`), but other renderers fold them.
+                    self.assertNotEqual(
+                        [_reader_view(span) for span in rendered[0]], [_reader_view(span) for span in rendered[1]]
+                    )
+
+    def test_padded_identifiers_are_quoted_and_ordinary_ones_are_not(self) -> None:
+        quoted = {
+            'llm_1 ': '"llm_1 "',
+            ' llm_1': '" llm_1"',
+            ' ': '" "',
+            'a  b': '"a  b"',
+            'a' + chr(9) + 'b': '"a' + _BS + 'tb"',
+            'config.a' + chr(9): '"config.a' + _BS + 't"',
+            'x' + chr(0xA0): '"x' + _BS + 'xa0"',
+        }
+        for text, expected in quoted.items():
+            with self.subTest(text=text):
+                self.assertEqual(_id_as_printed(text), expected)
+        for text in (
+            'llm_1',
+            'a b',
+            'a-b',
+            'a.b',
+            'chunker_1',
+            'config.default.strlen',
+            'config.instructions[0]',
+            'config. leading-space-key',
+            'a' + _BS + 'b',
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(_id_as_printed(text), text)
+        # A no-break space inside a word is escaped like any invisible character, not quoted
+        self.assertEqual(_id_as_printed('x' + chr(0xA0) + 'y'), 'x' + _BS + 'xa0y')
+
+    def test_a_bare_identifier_survives_whitespace_folding(self) -> None:
+        # The rule behind the quoting: whatever prints bare has no padding, tab or run of
+        # spaces, so folding whitespace cannot change it, and it can never read like a quoted
+        # one. Only identifiers that differ in how much whitespace they hold can still fold
+        # together, and then only inside quotes.
+        pieces = ['a', ' ', '  ', chr(9), '\N{NO-BREAK SPACE}', '"', _BS + 'u0301', '\n']
+        strings = {''}
+        frontier = {''}
+        for _ in range(4):
+            frontier = {prefix + piece for prefix in frontier for piece in pieces}
+            strings |= frontier
+        folded = {}
+        for text in sorted(strings):
+            shown = _id_as_printed(text)
+            if not shown.startswith('"'):
+                self.assertEqual(' '.join(shown.split()), shown, f'{text!a} prints as {shown!a}')
+            folded.setdefault(' '.join(shown.split()), []).append(text)
+        for members in folded.values():
+            if len(members) > 1:
+                self.assertEqual({' '.join(text.split()) for text in members}, {' '.join(members[0].split())})
+                self.assertTrue(all(_id_as_printed(text).startswith('"') for text in members), members)
 
 
 class TestDeterminism(unittest.TestCase):

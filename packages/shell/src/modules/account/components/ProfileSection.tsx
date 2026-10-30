@@ -17,8 +17,10 @@
  *     workspace by construction,
  *   - "Manage workspaces…" opens the standard right record-drawer: per-row
  *     Rename (admins, the old Organization tab), plus Leave / Delete / New
- *     workspace — GATED until the server ships the `rrext_account_org`
- *     create/leave/delete verbs (see docs/development/engine/rrext-account-org.md).
+ *     workspace — each action renders only when its callback prop is wired
+ *     (the VS Code host omits them). Leave is disabled for a workspace's
+ *     last admin, confirmed via the stock ConfirmDialog, and a server
+ *     refusal lands in the drawer's error Banner.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -27,6 +29,7 @@ import { commonStyles } from '../../../themes/styles';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
 import { DetailPanel } from '../../../components/detail-panel/DetailPanel';
+import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
 import { Banner } from '../../../components/banner/Banner';
 import type { ConnectResult, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate } from '../types';
 import { ProfilePanel } from './ProfilePanel';
@@ -50,7 +53,16 @@ const styles = {
 	drawerActions: { display: 'flex', gap: 6 } as CSSProperties,
 	drawerFoot: { paddingTop: 12 } as CSSProperties,
 	renameInput: { ...commonStyles.inputField, flex: 1, minWidth: 0 } as CSSProperties,
+	/** Muted hint beside a disabled Leave button (the workspace's last admin). */
+	leaveHint: { ...commonStyles.textMuted, fontSize: 11, maxWidth: 220, textAlign: 'right' } as CSSProperties,
 };
+
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+/** Why Leave is disabled for the workspace's last admin (tooltip + inline hint). */
+const LAST_ADMIN_HINT = "You are this workspace's only admin — promote another member to admin first.";
 
 // =============================================================================
 // PROPS
@@ -119,6 +131,10 @@ const ManageWorkspacesDrawer: React.FC<{
 	const [createValue, setCreateValue] = useState('');
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
+	// The workspace awaiting leave confirmation (stock ConfirmDialog), or null.
+	const [confirmLeave, setConfirmLeave] = useState<{ id: string; name: string } | null>(null);
+	// Leave in flight — disables the rows' buttons until the server answers.
+	const [leaving, setLeaving] = useState(false);
 
 	/** One failure surface for every drawer verb: run it, banner its error. */
 	const run = async (label: string, action: () => Promise<void>): Promise<void> => {
@@ -151,10 +167,22 @@ const ManageWorkspacesDrawer: React.FC<{
 		});
 	};
 
-	const leaveWorkspace = async (orgId: string, name: string): Promise<void> => {
-		if (!onLeave) return;
-		if (!window.confirm(`Leave "${name}"? Anything you deployed stays with the workspace.`)) return;
-		await run('Leave', () => onLeave(orgId));
+	/** Leaves the confirmed workspace. A server refusal (e.g. its own
+	 *  last-admin guard) closes the confirm and banners the server's message. */
+	const commitLeave = async (): Promise<void> => {
+		if (!onLeave || !confirmLeave) return;
+		const target = confirmLeave;
+		setLeaving(true);
+		setError(null);
+		try {
+			await onLeave(target.id);
+			setConfirmLeave(null);
+		} catch (e) {
+			setConfirmLeave(null);
+			setError(e instanceof Error ? e.message : 'Leave failed');
+		} finally {
+			setLeaving(false);
+		}
 	};
 
 	const deleteWorkspace = async (orgId: string, name: string): Promise<void> => {
@@ -201,13 +229,15 @@ const ManageWorkspacesDrawer: React.FC<{
 								</div>
 								<div style={styles.drawerActions}>
 									{isAdmin && (
-										<Button variant="ghost" small disabled={busy} onClick={() => { setRenamingId(o.id); setRenameValue(o.name); }}>Rename</Button>
+										<Button variant="ghost" small disabled={busy || leaving} onClick={() => { setRenamingId(o.id); setRenameValue(o.name); }}>Rename</Button>
 									)}
+									{/* Last admin can't leave — the hint says what unblocks it. */}
+									{onLeave && o.isLastAdmin && <span style={styles.leaveHint}>{LAST_ADMIN_HINT}</span>}
 									{onLeave && (
-										<Button variant="ghost" small disabled={busy} onClick={() => void leaveWorkspace(o.id, o.name)}>Leave</Button>
+										<Button variant="ghost" small disabled={busy || leaving || !!o.isLastAdmin} title={o.isLastAdmin ? LAST_ADMIN_HINT : undefined} onClick={() => { setError(null); setConfirmLeave({ id: o.id, name: o.name }); }}>Leave</Button>
 									)}
 									{isAdmin && onDelete && (
-										<Button variant="ghost" small disabled={busy} onClick={() => void deleteWorkspace(o.id, o.name)}>Delete</Button>
+										<Button variant="ghost" small disabled={busy || leaving} onClick={() => void deleteWorkspace(o.id, o.name)}>Delete</Button>
 									)}
 								</div>
 							</>
@@ -224,11 +254,27 @@ const ManageWorkspacesDrawer: React.FC<{
 							<Button variant="ghost" small disabled={busy} onClick={() => { setCreating(false); setCreateValue(''); }}>Cancel</Button>
 						</div>
 					) : (
-						<Button variant="ghost" small disabled={busy} onClick={() => setCreating(true)}>
+						<Button variant="ghost" small disabled={busy || leaving} onClick={() => setCreating(true)}>
 							New workspace…
 						</Button>
 					)}
 				</div>
+			)}
+
+			{/* -- Leave confirmation (stock dialog). Leaving the ONLY workspace is
+			      allowed, but the confirm says what that means. -- */}
+			{confirmLeave && (
+				<ConfirmDialog
+					title="Leave workspace"
+					message={`Leave ${confirmLeave.name}? You will lose access to its teams and runs; anything you deployed stays with the workspace.${memberships.length === 1 ? ' This is your only workspace: you will have no workspace until you create or are invited to one.' : ''}`}
+					confirmLabel={leaving ? 'Leaving…' : 'Leave'}
+					confirmDisabled={leaving}
+					destructive
+					onConfirm={() => void commitLeave()}
+					onCancel={() => {
+						if (!leaving) setConfirmLeave(null);
+					}}
+				/>
 			)}
 		</DetailPanel>
 	);

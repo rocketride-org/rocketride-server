@@ -267,3 +267,40 @@ class TestOptionChecks:
 
         assert await run_profile(args) == 1
         assert message in capsys.readouterr().err
+
+
+NO_DATA = 'No profiling data available. Run a session first.'
+
+
+class _NoDataClient:
+    """Answers as the server does before any session has completed."""
+
+    async def cprofile_report(self, target=None):
+        return {'report': NO_DATA}
+
+    async def cprofile_threads(self, target=None):
+        return {'threads': [], 'error': NO_DATA}
+
+    async def cprofile_report_tree(self, target=None, **kwargs):
+        return {'tree': None, 'functions': [], 'total_time': 0, 'total_calls': 0, 'error': NO_DATA}
+
+
+class TestNoData:
+    """Exit codes documented in ROCKETRIDE_CLI.md, the same in the TypeScript CLI."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        'subcommand, code, stream, other',
+        [('report', 0, 'out', 'err'), ('threads', 1, 'err', 'out'), ('tree', 1, 'err', 'out')],
+    )
+    async def test_exit_code_without_a_completed_session(self, subcommand, code, stream, other, monkeypatch, capsys):
+        async def connect(uri, apikey):
+            return _NoDataClient()
+
+        monkeypatch.setattr('rocketride.cli.commands.profile.connect_client', connect)
+        args = setup_parser().parse_args(['profile', subcommand, '--uri', 'http://127.0.0.1:9'])
+
+        assert await run_profile(args) == code
+        captured = capsys.readouterr()
+        assert NO_DATA in getattr(captured, stream)
+        assert NO_DATA not in getattr(captured, other)

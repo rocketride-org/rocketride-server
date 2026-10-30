@@ -37,6 +37,8 @@
 // decoupled from connection, same as VSCode.
 // =============================================================================
 
+import { stashSignupProperties, takeSignupProperties, currentSignupProperties } from '../util/signupAttribution';
+import type { PkceCredential, SignupProperties } from 'rocketride';
 import type { IAuthProvider } from '../types/connection';
 import { generatePkce, buildAuthUrl, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import { LS_TOKEN, SS_PENDING_APP_ID } from '../constants';
@@ -108,8 +110,9 @@ export class CloudAuthProvider implements IAuthProvider {
 	 * @param register - Retained for compatibility; no longer changes the
 	 *                   destination. All flows land on Zitadel's login page,
 	 *                   which offers a Register link for new users.
+	 * @param signup - Optional signup analytics; retained only for registration with active consent.
 	 */
-	public async signIn(appId?: string, register?: boolean): Promise<void> {
+	public async signIn(appId?: string, register?: boolean, signup?: SignupProperties | null): Promise<void> {
 		if (!this.zitadelUrl || !this.clientId) {
 			throw new Error('CloudAuthProvider not initialized — call initialize() first.');
 		}
@@ -122,6 +125,8 @@ export class CloudAuthProvider implements IAuthProvider {
 				console.error('[CloudAuthProvider] Failed to store pending app ID:', e);
 			}
 		}
+
+		stashSignupProperties(register ? signup : null);
 
 		// Generate PKCE challenge (stores verifier in sessionStorage automatically)
 		const { challenge } = await generatePkce();
@@ -157,8 +162,9 @@ export class CloudAuthProvider implements IAuthProvider {
 	 * @returns The PKCE exchange object for client.connect(), or null if
 	 *          the verifier is missing (stale/expired session).
 	 */
-	public handleCallback(code: string): { code: string; verifier: string; redirectUri: string } | null {
+	public handleCallback(code: string): PkceCredential | null {
 		// Retrieve and clear the stored verifier
+		const signup = takeSignupProperties();
 		const verifier = getStoredVerifier();
 		clearStoredVerifier();
 
@@ -177,6 +183,7 @@ export class CloudAuthProvider implements IAuthProvider {
 			code,
 			verifier,
 			redirectUri: window.location.origin,
+			...(signup ? { signupProperties: () => currentSignupProperties(signup) } : {}),
 		};
 	}
 

@@ -219,13 +219,14 @@ Two rules before anything else:
   	displayName: 'Reports',
   	statusFooter: true,
   });
-  // created.appId = 'local.reports', created.folder = 'apps/reports'
+  // created.appId = '<your developer id>.reports', created.folder = 'apps/reports-ui'
   ```
 
-  The scaffold defaults the id to `local.<slug>` (pass `developerId` once
-  your org's id is registered) and is scaffolding only — nothing deploys
-  until the normal lifecycle (`verifyApp` → `addApp` → `publishApp`)
-  runs.
+  The scaffold namespaces the id with the connected org's developer id
+  (falling back to `local.<slug>` when the org has not registered one;
+  pass `developerId` to override) and is scaffolding only — nothing
+  deploys until the normal lifecycle (`verifyApp` → `addApp` →
+  `publishApp`) runs.
 
 The New App wizard is the App Builder's empty state: "New app" opens an
 **Untitled** builder document whose body is the wizard (the same pattern as
@@ -296,7 +297,9 @@ reason telling you what to fix.
   tablet, phone), each with five common CSS viewports; the iframe gets those
   exact dimensions so responsive breakpoints fire exactly as on the device.
   Orientation, zoom, fit-to-window; all preview preferences persist per
-  workspace and app.
+  workspace and app. The app's own `prefs`/`appState` are not preview
+  preferences: they are saved in the connected server's file store under
+  the app id; see [State & Persistence](#state--persistence).
 - **Code** — file tree + editor (web App Builder only; in VS Code files are
   native and a strip links to them).
 - **Components** — the stock UI component gallery: live examples of
@@ -363,7 +366,7 @@ by hand.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | `string` | required | Stable unique identity, `<developerId>.<name>` (e.g. `acme.brandy`). The prefix must be your org's claimed namespace to deploy or publish. Renaming the id makes it a different app. |
-| `projectId` | `string` | auto | Working-copy GUID the App Builder manages — tells one checkout apart from another; rides deploys only as provenance. Leave it alone. |
+| `projectId` | `string` | auto | Working-copy GUID stamped when the app is created (New App wizard, `rocketride app create`, `createApp`/`create_app`) or first opened in the App Builder — tells one checkout apart from another. Deploys forward it as provenance and never write it. Leave it alone. |
 | `publisher` | `string` | — | Publisher display name in the app store. |
 | `name` | `string` | required | Display name (app switcher, store tile). |
 | `description` | `string` | — | Short description for the store listing. |
@@ -777,7 +780,7 @@ from `'shell'`). The full set:
 | `shell:appsUpdated` | `{ apps }` | App catalog changed — complete replacement set. |
 | `shell:login` | `{ user: ConnectResult }` | Authentication succeeded. |
 | `shell:logout` | `{}` | User signed out. |
-| `shell:loginRequest` | `{ appId?, register? }` | UI requests sign-in. |
+| `shell:loginRequest` | `{ appId?, register?, auto?, signupProperties?: SignupProperties }` | UI requests sign-in; `auto` is set only by the shell's auth gate. |
 | `shell:logoutRequest` | `{}` | UI requests sign-out. |
 | `shell:switchApp` | `{ appId }` | Switch the active app. |
 | `shell:subscribe` | `{ app, plan?, promo? }` | Open subscription checkout; `plan` skips the picker. |
@@ -788,12 +791,31 @@ from `'shell'`). The full set:
 | `shell:themeChange` | `{ tokens }` | Theme changed; `tokens` is the full `--rr-*` map. |
 | `shell:viewActivated` | `{ viewId }` | A view/tab became active — lazy panels init here. |
 | `shell:manifestRefresh` | `{ source }` | Server-side app manifest changed (publish, expiry). |
+| `shell:telemetry` | `{ event, props, ts, id }` | A telemetry fact the shell observed (`auth:complete`) for the active app to forward; `auth:start` and other held facts come from `cm.drainTelemetry()`. |
 | `app:statusChanged` | `{ appId, version?, status, notes? }` | Store review status changed. |
 | `store:changed` | `{ prefix, paths }` | Files changed under a watched store prefix. |
 
 The event map is the platform's shared vocabulary — it carries platform
 events only. For your app's internal communication, use ordinary React
 state or your own emitter; do not overload the shell bus.
+
+Optional `signupProperties` is consent-gated PKCE credential context for sign-up requests.
+The native auth telemetry facts contain no signup attribution; the encoded credential alone
+uses the snake_case `signup_properties` key. See the public Shell API signup attribution guide.
+
+**Telemetry facts.** The shell has no analytics SDK: it raises `auth:start`
+and `auth:complete` (with `is_new`, `waitlisted` and `duration_ms`, the OAuth
+round trip from the redirect, null when unknown) as `shell:telemetry` for the
+active app to forward to its own analytics. `auth:start` is always held (the
+OAuth redirect follows at once), and so is a fact raised while no app listens
+(32 facts, 30 minutes, in the tab's sessionStorage), until the app calls
+`cm.drainTelemetry?.()` (optional: older shells lack it): drain once at
+analytics init, then subscribe, and forward each fact once by its `id` with
+`ts` as its time. On the waitlist
+screen, where no app renders, the shell loads the home app's exposed
+`./telemetry` module and calls its no-argument default export once per page
+load; it starts the home analytics and must not render. Only the home app
+exposes it.
 
 ### Debug log
 
@@ -819,6 +841,40 @@ The shell persists your app's state per user in `.workspace/` on the server:
 | `.workspace/global.json` | Active app + globally-mirrored prefs (theme, sidebar open) |
 | `.workspace/<appId>.workspace.json` | Your app's `{ prefs, appState }` |
 | `.workspace/settings.json` | User setting overrides (deltas only — defaults live in your schema) |
+
+**"On the server" means the server the page is connected to**, in the
+signed-in user's file store, and the file is named after the app id, not
+the version. A page therefore sees the state another page saved only when
+both are on the same server, signed in as the same user, under the same
+app id:
+
+- **A new version** keeps the state: every deployed version of an app reads
+  and writes the same file.
+- **The App Builder preview** runs against the connected development
+  server (`ROCKETRIDE_URI`), so the `prefs` and `appState` it saves live in
+  that server's file store; the published `@me` app lives on the deployment
+  target. When those are different servers, each copy keeps its own file,
+  and edits in one never show up in the other: not data loss, two files.
+- **A working copy under a different app id** than the published app (one
+  scaffolded as `local.<slug>`, or renamed after the org registered its
+  developer id) keeps its own file even on the same server.
+- **Same server, user and app id** (the deployment target is the
+  development server): the preview and the published copy read one file
+  but nothing syncs. Each page keeps the copy it loaded and writes it back
+  whole, so the last save wins: finish in one, close it, then reload the
+  other before editing there.
+
+Which user the preview is signed in as is set by **Inherit Auth**: on (the
+default), the preview is signed in as the App Builder is; off, as whoever
+signs in inside the preview (signed out until then).
+
+Files your app writes itself through the shell connection's file calls (for
+example `client.fsWriteJson('reports/q3.json', data)`) follow a different
+rule: a plain path is stored under the signed-in user's own root in that
+server's file store, with no app id or version in it. A development build
+and the published version on the same server and user therefore read
+and write the same files, and a file both pages write follows the same
+last-save-wins rule.
 
 ### Prefs — small UI preferences
 
@@ -1783,17 +1839,19 @@ Mechanics worth knowing:
 Everything the Deploy tab does is scriptable — the UI and the SDKs call the
 same verbs (TypeScript camelCase / Python snake_case):
 
-| Action | TypeScript verb |
-|---|---|
-| List versions | `client.listDeployments(appId)` |
-| Deploy a source zip | `client.deploy.add({ kind: 'app', data, metadata })` |
-| Publish to a rung | `client.publishApp(appId, version, target)` |
-| Remove a binding | `client.removeAppPublish(appId, target)` |
-| Disable a binding | `client.disableAppPublish(appId, target)` |
-| Where live | `client.whereApp(appId)` |
-| Submit / withdraw review | `client.submitApp(...)` / `client.withdrawApp(...)` |
-| Review thread reply | `client.replyApp(appId, message)` |
-| Build log | `client.buildLog(appId, version)` |
+| Action | TypeScript verb | CLI |
+|---|---|---|
+| Live preview (dev loop) | `rocketride/app-dev` (`DevSession`, `devPreviewUrl`) | `rocketride app dev [app] --open` |
+| List versions | `client.listDeployments(appId)` | `rocketride app versions [app]` |
+| Deploy the app's source | `client.deploy.addApp(appFolder, { comment })` | `rocketride app deploy [app]` |
+| Wait for the server build | `client.waitForAppBuild(appId, version)` | (built into `app publish` / `app deploy --publish`) |
+| Publish to a rung | `client.publishApp(appId, version, target)` | `rocketride app publish [app] [version] --to <target>` |
+| Remove a binding | `client.removeAppPublish(appId, target)` | `rocketride app unpublish [app] --from <target>` |
+| Disable a binding | `client.disableAppPublish(appId, target)` | `rocketride app disable [app] --from <target>` |
+| Where live | `client.whereApp(appId)` | `rocketride app where [app]` |
+| Submit / withdraw review | `client.submitApp(...)` / `client.withdrawApp(...)` | `rocketride app submit|withdraw [app] [version]` |
+| Review thread reply | `client.replyApp(appId, message)` | `rocketride app reply [app] -m <text>` |
+| Build log | `client.buildLog(appId, version)` | `rocketride app log [app] [version]` |
 
 The Python client mirrors every verb (`publish_app`, `submit_app`,
 `where_app`, ...). See `ROCKETRIDE_typescript_API.md` and

@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.20 FATAL_ERROR)
 
+project(hash LANGUAGES CXX C)
+
 # Everything a C++ node needs to build - see rocketride_add_node for what the
 # target gets wired up with
 include(${ROCKETRIDE_PACKAGES_DIR}/server/cmake/rocketride-node.cmake)

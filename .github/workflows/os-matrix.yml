@@ -151,6 +151,24 @@ jobs:
         shell: bash
         run: ./builder test --verbose --sequential
 
+      # The test servers' side of a failure. Printed rather than uploaded:
+      # storage-cleanup.yml deletes artifacts after 3 days, the job log stays.
+      # Workflow commands are stopped around each file so log lines stay inert.
+      - name: Show test server logs
+        if: failure()
+        shell: bash
+        run: |
+          shopt -s nullglob
+          stop="stop-$(date +%s%N)-$$"
+          for log in dist/server/test-logs/*.log; do
+            echo "::group::$log"
+            echo "::stop-commands::$stop"
+            cat "$log"
+            echo
+            echo "::$stop::"
+            echo "::endgroup::"
+          done
+
       # Runs only when the tests failed. memory.events.oom_kill is a cumulative
       # counter that survives the killed process, so a non-zero value here is
       # positive proof the cgroup OOM killer fired during this job - the one

@@ -13,13 +13,13 @@
 	// Required:
 	//		Class type of the node - what it does
 	//
-	"classType": ["store"],
+	"classType": ["store", "tool"],
 	//
 	// Required:
 	//     Capabilities are flags that change the behavior of the underlying
 	//     engine
 	//
-	"capabilities": [],
+	"capabilities": ["invoke"],
 	//
 	// Optional:
 	//		Register is either filter, endpoint or ignored if not specified. If the
@@ -47,7 +47,7 @@
 	// Optional:
 	//		Description to of this driver
 	//
-	"description": ["A RocketRide-managed vector store backed by PostgreSQL + pgvector. Stores ", "and semantically searches high-dimensional embeddings in your own provisioned ", "RocketRide cloud database with zero setup — no host, user, or password to enter; ", "the connection is resolved automatically from your signed-in RocketRide identity. ", "An HNSW index is created on first write so semantic search is fast from the start."],
+	"description": ["A RocketRide-managed vector store backed by PostgreSQL + pgvector. Stores ", "and semantically searches high-dimensional embeddings in your own provisioned ", "RocketRide cloud database with zero setup — no host, user, or password to enter; ", "the connection is resolved automatically from your signed-in RocketRide identity. ", "An HNSW index is created on first write so semantic search is fast from the start. ", "When Expose as tools is on, agents and apps can also use the store as tools: search, objdir, get and stats, ", "plus upsert and delete when writes through tools are allowed."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -84,7 +84,10 @@
 				"score": 0.5,
 				"similarity": "cosine",
 				"hnsw_m": 16,
-				"hnsw_ef_construction": 64
+				"hnsw_ef_construction": 64,
+				"serverName": "rrvector",
+				"expose_tools": false,
+				"allow_write": false
 			}
 		}
 	},
@@ -130,9 +133,42 @@
 			"minimum": 4,
 			"maximum": 1000
 		},
+		"rrvector.serverName": {
+			"type": "string",
+			"title": "Tool Server Name",
+			"description": "Label for this store in tool-response messages (for example, a refused write names rrvector.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
+			"default": "rrvector",
+			"minLength": 1
+		},
+		"rrvector.expose_tools": {
+			"type": "boolean",
+			"title": "Expose as tools",
+			"default": false,
+			"description": "Offer this table to agents and apps as tool functions: search, objdir, list_documents, get and stats, plus upsert, delete, soft_delete and restore when writes through tools are allowed. Leave OFF unless a trusted application or agent in this pipeline is meant to read the table through tools; objdir and get together return the whole table, not only the matches the questions lane returns. The documents and questions lanes are unaffected."
+		},
+		"rrvector.allow_write": {
+			"type": "boolean",
+			"title": "Allow writes through tools",
+			"default": false,
+			"description": "Permit the upsert, delete, soft_delete and restore tool functions to change this table in your RocketRide cloud database. Applies only while Expose as tools is on. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, list_documents, get, stats) are unaffected."
+		},
+		"rrvector.scope": {
+			"type": "string",
+			"title": "Database",
+			"default": "org",
+			"enum": [["org", "Organization"], ["team", "Team"], ["user", "Personal"]],
+			"description": "Organization (default): shared by everyone in the organization. Team: the run's team (your current dev team, or the team a deploy is billed to). Personal: your own, for runs you start yourself. Each is a separate database: switching doesn't move data, and a new one starts empty."
+		},
+		"rrvector.target": {
+			"hidden": true,
+			"type": "string",
+			"title": "Team or user",
+			"default": "",
+			"description": "Another team's or user's database (admins only). Leave empty to use your own team's or your own"
+		},
 		"rrvector.cloud": {
 			"object": "cloud",
-			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction"]
+			"properties": ["rrvector.collection", "rrvector.score", "rrvector.similarity", "rrvector.hnsw_m", "rrvector.hnsw_ef_construction", "rrvector.scope", "rrvector.target", "rrvector.serverName", "rrvector.expose_tools", "rrvector.allow_write"]
 		},
 		"rrvector.profile": {
 			"hidden": true,
@@ -182,7 +218,12 @@
 		{
 			"section": "Pipe",
 			"title": "RocketRide Vector Store",
-			"properties": ["rrvector.profile"]
+			"properties": ["rrvector.profile"],
+			"ui": {
+				"ui:options": {
+					"compactDescriptions": true
+				}
+			}
 		},
 		{
 			"section": "Transform",

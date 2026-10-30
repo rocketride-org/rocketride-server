@@ -295,6 +295,17 @@
     }
   },
   {
+    "name": "aws",
+    "classType": [
+      "source"
+    ],
+    "lanes": {
+      "_source": [
+        "tags"
+      ]
+    }
+  },
+  {
     "name": "background_removal",
     "classType": [
       "image"
@@ -340,6 +351,17 @@
     "lanes": {
       "documents": [
         "documents"
+      ]
+    }
+  },
+  {
+    "name": "context_optimizer",
+    "classType": [
+      "text"
+    ],
+    "lanes": {
+      "questions": [
+        "questions"
       ]
     }
   },
@@ -539,6 +561,26 @@
     "invoke": {
       "llm": {
         "min": 1
+      }
+    }
+  },
+  {
+    "name": "discord",
+    "classType": [
+      "source"
+    ],
+    "lanes": {
+      "_source": [
+        "text",
+        "image",
+        "audio",
+        "video",
+        "tags"
+      ]
+    },
+    "invoke": {
+      "tool": {
+        "min": 0
       }
     }
   },
@@ -1114,6 +1156,24 @@
     "lanes": {}
   },
   {
+    "name": "media_inspect",
+    "classType": [
+      "video"
+    ],
+    "lanes": {
+      "audio": [
+        "text",
+        "answers",
+        "image"
+      ],
+      "video": [
+        "text",
+        "answers",
+        "image"
+      ]
+    }
+  },
+  {
     "name": "memory_internal",
     "classType": [
       "memory"
@@ -1186,6 +1246,17 @@
     "lanes": {
       "answers": [
         "answers"
+      ]
+    }
+  },
+  {
+    "name": "objstore",
+    "classType": [
+      "source"
+    ],
+    "lanes": {
+      "_source": [
+        "tags"
       ]
     }
   },
@@ -1419,6 +1490,15 @@
     }
   },
   {
+    "name": "response_hash",
+    "classType": [
+      "infrastructure"
+    ],
+    "lanes": {
+      "tags": []
+    }
+  },
+  {
     "name": "response_image",
     "classType": [
       "infrastructure"
@@ -1514,7 +1594,8 @@
   {
     "name": "rocketride_vector",
     "classType": [
-      "store"
+      "store",
+      "tool"
     ],
     "lanes": {
       "documents": [],
