@@ -132,6 +132,7 @@ import { PopupRow } from './components/PopupRow';
 // Shell-owned overlay pages
 import AccountProvider from './providers/AccountProvider';
 import SettingsProvider from './providers/SettingsProvider';
+import EnvironmentProvider from './providers/EnvironmentProvider';
 
 // Icons — a DELIBERATE subset of ./icons/BoxIcon: only the glyphs shell chrome
 // itself renders are part of the frozen contract. Apps needing other icons take
@@ -154,7 +155,7 @@ import { BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl, BxSt
 // =============================================================================
 
 // Shell component prop contracts + workspace/config types
-export type { ShellAppProps, AppDescriptor, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
+export type { ShellAppProps, AppDescriptor, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellSidebarTone, ShellSidebarDensity, ShellSidebarFooter, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
 
 // Top-level shell + sidebar component prop types
 export type { ShellProps } from './components/layout/Shell';
@@ -639,6 +640,7 @@ export const shellApi = {
 	get PopupRow() { return PopupRow; },
 	get AccountProvider() { return AccountProvider; },
 	get SettingsProvider() { return SettingsProvider; },
+	get EnvironmentProvider() { return EnvironmentProvider; },
 	get BxPlus() { return BxPlus; },
 	get BxEditAlt() { return BxEditAlt; },
 	get BxTrash() { return BxTrash; },
@@ -697,7 +699,7 @@ export {
 	// Layout building blocks
 	NavButton, ConfirmDialog, PopupRow,
 	// Shell-owned overlay pages
-	AccountProvider, SettingsProvider,
+	AccountProvider, SettingsProvider, EnvironmentProvider,
 	// Icons
 	BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl,
 	BxStop, BxPlay, BxHome, BxNote, BxComponent, BxUser, BxRocket,

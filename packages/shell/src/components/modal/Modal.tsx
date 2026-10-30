@@ -11,7 +11,8 @@
  * padding, and an optional footer action row — all from `commonStyles.modal*`.
  *
  * Dismissal policy (design-owner decision 2026-07-08, refined):
- *  - The backdrop is INERT: clicking outside the box never closes it.
+ *  - The backdrop is INERT: clicking outside the box never closes it, unless
+ *    the caller opts in with `closeOnBackdropClick`.
  *  - Escape closes it (unless `closeOnEscape={false}`).
  *  - The top-right ✕ appears ONLY when the dialog has no other explicit dismiss
  *    control. The default is therefore "show ✕ only when there is no footer"
@@ -203,6 +204,18 @@ export interface IModalProps {
 	noBodyPadding?: boolean;
 	/** Accessible label when `title` is not a plain string. */
 	ariaLabel?: string;
+	/**
+	 * Blur the page behind the dimmed backdrop, for a focused multi-step flow
+	 * (an onboarding walk-through) where the page underneath is a distraction.
+	 */
+	blurBackdrop?: boolean;
+	/**
+	 * Close when the person clicks the backdrop outside the box. Off by
+	 * default (the backdrop is inert); an app whose dialogs hold nothing that
+	 * would be lost can opt in. A press that starts inside the box and ends
+	 * on the backdrop (a text selection drag) never counts.
+	 */
+	closeOnBackdropClick?: boolean;
 }
 
 // =============================================================================
@@ -210,6 +223,11 @@ export interface IModalProps {
 // =============================================================================
 
 const styles = {
+	// Added to the dimmed overlay when the caller asks for a blurred page.
+	blurredOverlay: {
+		backdropFilter: 'blur(6px)',
+		WebkitBackdropFilter: 'blur(6px)',
+	} as CSSProperties,
 	// Borderless glyph close button, right-aligned in the header row. Matches the
 	// account Modal idiom; the header's flex pushes it to the trailing edge.
 	close: {
@@ -245,6 +263,8 @@ export function Modal({
 	width,
 	noBodyPadding,
 	ariaLabel,
+	blurBackdrop = false,
+	closeOnBackdropClick = false,
 }: IModalProps): React.ReactElement {
 	// Resolve the ✕: explicit prop wins; otherwise show it only when there is no
 	// footer (a footer carries the dismiss control, making a corner ✕ redundant).
@@ -258,6 +278,9 @@ export function Modal({
 
 	// Ref to the dialog box, for focus placement and the Tab focus trap.
 	const dialogRef = useRef<HTMLDivElement>(null);
+	// Whether the current press began on the backdrop itself, so a drag that
+	// starts inside the box and ends outside it does not close the dialog.
+	const pressStartedOnBackdropRef = useRef(false);
 	// Latest onClose / closeOnEscape kept in refs so the open effect runs ONCE:
 	// depending on them would re-run it and re-steal focus on every parent render.
 	const onCloseRef = useRef(onClose);
@@ -306,7 +329,17 @@ export function Modal({
 
 	return (
 		// Backdrop is inert: no onClick — clicking outside must NOT close (policy).
-		<div style={commonStyles.modalOverlay}>
+		<div
+			style={blurBackdrop ? { ...commonStyles.modalOverlay, ...styles.blurredOverlay } : commonStyles.modalOverlay}
+			onMouseDown={(event) => {
+				pressStartedOnBackdropRef.current = event.target === event.currentTarget;
+			}}
+			onClick={(event) => {
+				const isBackdropClick = event.target === event.currentTarget && pressStartedOnBackdropRef.current;
+				pressStartedOnBackdropRef.current = false;
+				if (closeOnBackdropClick && isBackdropClick) onCloseRef.current();
+			}}
+		>
 			<div
 				ref={dialogRef}
 				role="dialog"

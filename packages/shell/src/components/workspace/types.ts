@@ -354,7 +354,52 @@ export interface ShellBrandingConfig {
 	welcomeTitle?: string;
 	/** Subtitle text on the welcome/loading screen. */
 	welcomeSubtitle?: string;
+	/**
+	 * The sidebar's colour.
+	 *
+	 * 'ink' draws the whole sidebar in the theme's dark ink, so an app whose
+	 * nav is its main way around can set it apart from the page. Omitted, or
+	 * 'paper', keeps the sidebar the page's own colour. A theme without the ink
+	 * tokens keeps the paper sidebar.
+	 */
+	sidebarTone?: ShellSidebarTone;
+	/**
+	 * The size of the rows in the sidebar's menus.
+	 *
+	 * 'comfortable' draws taller rows with larger text, for an app with a short
+	 * nav that people read rather than scan. Omitted, or 'compact', keeps the
+	 * dense rows that sit alongside the Explorer.
+	 */
+	sidebarDensity?: ShellSidebarDensity;
+	/**
+	 * What the sidebar's footer holds.
+	 *
+	 * 'account' keeps only the account row: no announcements ticker and no
+	 * settings glyph. The row itself still opens the account menu, so nothing
+	 * in that menu is lost. 'none' hides the footer entirely, for an app that
+	 * offers account, settings and sign-out in its own pages. Omitted, or
+	 * 'full', keeps the footer as it is.
+	 */
+	sidebarFooter?: ShellSidebarFooter;
 }
+
+/**
+ * The sidebar's colour, asked for through {@link ShellBrandingConfig.sidebarTone}:
+ * the page's own paper, or the theme's dark ink.
+ */
+export type ShellSidebarTone = 'paper' | 'ink';
+
+/**
+ * The size of the sidebar menus' rows, asked for through
+ * {@link ShellBrandingConfig.sidebarDensity}.
+ */
+export type ShellSidebarDensity = 'compact' | 'comfortable';
+
+/**
+ * What the sidebar's footer holds, asked for through
+ * {@link ShellBrandingConfig.sidebarFooter}.
+ */
+export type ShellSidebarFooter = 'full' | 'account' | 'none';
 
 // =============================================================================
 // SHELL THEME CONFIG

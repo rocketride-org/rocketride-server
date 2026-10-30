@@ -36,6 +36,7 @@ import { ViewMenu, ViewMenuEntry } from '../../types/viewMenu';
 import { ViewMenuBadge } from '../tab-control/ViewMenuBadge';
 import { BxChevronDown, BxChevronRight } from '../BoxIcon';
 import { useSidebarCollapsed } from './SidebarCollapsedContext';
+import { useSidebarDensity } from './SidebarDensityContext';
 
 // =============================================================================
 // TYPES
@@ -69,6 +70,20 @@ export interface ISidebarMenuProps {
 // STYLES
 // =============================================================================
 
+/**
+ * Row geometry for each density. Compact mirrors the Explorer's rows;
+ * comfortable is the taller, larger-text row an app with a short, read-not-
+ * scanned nav asks for through `branding.sidebarDensity` (36px with its
+ * border, against compact's 26px).
+ */
+const ROW_METRICS = {
+	compact: { fontSize: 13, lineHeight: '22px', padY: 1, padX: 8, gap: 6, icon: 17, radius: 5 },
+	comfortable: { fontSize: 14, lineHeight: '24px', padY: 5, padX: 10, gap: 10, icon: 18, radius: 6 },
+};
+
+/** One density's row geometry. */
+type RowMetrics = (typeof ROW_METRICS)['compact'];
+
 const styles = {
 	// Outer container padding around the item list (Explorer tree-list padding).
 	container: {
@@ -78,26 +93,26 @@ const styles = {
 	// Optional uppercase section header naming the owning document — the
 	// Explorer's section-header font treatment, horizontally aligned with the
 	// base row text (indent 0) so its 10px-nested rows read as members.
-	sectionLabel: {
-		padding: '6px 8px 4px',
+	sectionLabel: (m: RowMetrics): CSSProperties => ({
+		padding: `${m.padY + 5}px ${m.padX}px 4px`,
 		fontSize: 11,
 		fontWeight: 600,
 		textTransform: 'uppercase',
 		letterSpacing: '0.5px',
 		color: 'var(--rr-text-secondary)',
-	} as CSSProperties,
+	}),
 
 	// Base row — active and hover treatments are layered on top. Geometry
 	// mirrors the Explorer's compact file rows so stacked SidebarMenu +
 	// Explorer sections read as one list family.
-	item: (active: boolean, hovered: boolean, disabled: boolean): CSSProperties => ({
+	item: (active: boolean, hovered: boolean, disabled: boolean, m: RowMetrics): CSSProperties => ({
 		display: 'flex',
 		alignItems: 'center',
-		gap: 6,
-		padding: '1px 8px',
-		borderRadius: 5,
-		fontSize: 13,
-		lineHeight: '22px',
+		gap: m.gap,
+		padding: `${m.padY}px ${m.padX}px`,
+		borderRadius: m.radius,
+		fontSize: m.fontSize,
+		lineHeight: m.lineHeight,
 		// Disabled rows render muted with a default cursor and receive no hover
 		// or active treatment (both are skipped below); otherwise the standard
 		// primary tone with a pointer cursor.
@@ -133,12 +148,12 @@ const styles = {
 	// Leading icon slot on expanded rows (17px box matching the shell nav icons).
 	// Active rows inherit the selection foreground so the glyph stays legible
 	// on the highlight fill; inactive rows use the quiet secondary tone.
-	itemIcon: (active: boolean, disabled: boolean): CSSProperties => ({
+	itemIcon: (active: boolean, disabled: boolean, m: RowMetrics): CSSProperties => ({
 		display: 'inline-flex',
 		alignItems: 'center',
 		justifyContent: 'center',
-		width: 17,
-		height: 17,
+		width: m.icon,
+		height: m.icon,
 		flexShrink: 0,
 		// Disabled and active rows let the glyph inherit the row colour (the
 		// muted disabled tone / the selection foreground); inactive rows use
@@ -180,14 +195,14 @@ const styles = {
 	// item geometry with a bolder label and a right-aligned chevron. Never
 	// takes the active highlight (sections do not navigate), only the hover
 	// fill.
-	sectionRow: (hovered: boolean): CSSProperties => ({
+	sectionRow: (hovered: boolean, m: RowMetrics): CSSProperties => ({
 		display: 'flex',
 		alignItems: 'center',
-		gap: 6,
-		padding: '1px 8px',
-		borderRadius: 5,
-		fontSize: 13,
-		lineHeight: '22px',
+		gap: m.gap,
+		padding: `${m.padY}px ${m.padX}px`,
+		borderRadius: m.radius,
+		fontSize: m.fontSize,
+		lineHeight: m.lineHeight,
 		fontWeight: 600,
 		color: 'var(--rr-text-primary)',
 		cursor: 'pointer',
@@ -210,11 +225,11 @@ const styles = {
 	// Left padding for a row's nesting position, composed over the base row
 	// padding (8px). A labeled menu nests EVERY row 10px under its header
 	// (the header itself stays flush at indent 0). Section children add the
-	// parent's icon column (17px) + gap (6px) so a child's icon lines up
+	// parent's icon column + gap (per density) so a child's icon lines up
 	// with its section's label. Extra padding rather than margin so the
 	// hover/active pill still spans the full menu width.
-	rowIndent: (grouped: boolean, child: boolean): CSSProperties => ({
-		paddingLeft: 8 + (grouped ? 10 : 0) + (child ? 23 : 0),
+	rowIndent: (grouped: boolean, child: boolean, m: RowMetrics): CSSProperties => ({
+		paddingLeft: m.padX + (grouped ? 10 : 0) + (child ? m.icon + m.gap : 0),
 	}),
 
 	// First-letter fallback glyph for entries that declare no icon.
@@ -253,6 +268,10 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 	// shell-provided context (false outside a provider).
 	const ctxCollapsed = useSidebarCollapsed();
 	const isCollapsed = collapsed ?? ctxCollapsed;
+
+	// Row geometry from the density the active app asked for ('compact'
+	// outside a shell sidebar).
+	const m = ROW_METRICS[useSidebarDensity()];
 
 	// Group flag: a labeled menu nests every row 10px under its header.
 	const grouped = Boolean(sectionLabel);
@@ -337,14 +356,14 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 				aria-current={isActive || undefined}
 				aria-disabled={isDisabled || undefined}
 				tabIndex={isDisabled ? -1 : 0}
-				style={{ ...styles.item(isActive, isHovered, isDisabled), ...styles.rowIndent(grouped, indented) }}
+				style={{ ...styles.item(isActive, isHovered, isDisabled, m), ...styles.rowIndent(grouped, indented, m) }}
 				onClick={() => { if (!isDisabled) onSelect(entry.id); }}
 				onKeyDown={(e) => onItemKeyDown(e, entry.id, isDisabled)}
 				onMouseEnter={() => setHoveredId(entry.id)}
 				onMouseLeave={() => setHoveredId(null)}
 			>
 				{/* Optional leading icon — same glyph the collapsed rail shows. */}
-				{entry.icon && <span style={styles.itemIcon(isActive, isDisabled)}>{entry.icon}</span>}
+				{entry.icon && <span style={styles.itemIcon(isActive, isDisabled, m)}>{entry.icon}</span>}
 				<span style={styles.label}>{entry.label}</span>
 				{/* Right-aligned count badge when the entry declares a count. */}
 				{entry.count != null && <ViewMenuBadge count={entry.count} severity={entry.severity} />}
@@ -395,7 +414,7 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 	return (
 		<div style={styles.container}>
 			{/* Optional section header naming the owning section (expanded only). */}
-			{sectionLabel && <div style={styles.sectionLabel}>{sectionLabel}</div>}
+			{sectionLabel && <div style={styles.sectionLabel(m)}>{sectionLabel}</div>}
 			{menu.entries.map((entry) => {
 				// Plain entries render as navigable rows; entries with children
 				// render as an accordion section row plus, while open, their
@@ -409,14 +428,14 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 							role="button"
 							aria-expanded={isOpen}
 							tabIndex={0}
-							style={{ ...styles.sectionRow(isHovered), ...styles.rowIndent(grouped, false) }}
+							style={{ ...styles.sectionRow(isHovered, m), ...styles.rowIndent(grouped, false, m) }}
 							onClick={() => toggleSection(entry.id)}
 							onKeyDown={(e) => onSectionKeyDown(e, entry.id)}
 							onMouseEnter={() => setHoveredId(entry.id)}
 							onMouseLeave={() => setHoveredId(null)}
 						>
 							{/* Section icon shares the item icon slot (never active-tinted). */}
-							{entry.icon && <span style={styles.itemIcon(false, false)}>{entry.icon}</span>}
+							{entry.icon && <span style={styles.itemIcon(false, false, m)}>{entry.icon}</span>}
 							<span style={styles.label}>{entry.label}</span>
 							{/* Open/closed chevron at the trailing edge. */}
 							<span style={styles.sectionChevron}>

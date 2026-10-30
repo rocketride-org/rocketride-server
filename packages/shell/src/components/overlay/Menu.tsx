@@ -85,6 +85,8 @@ export interface IMenuProps {
 	ariaLabel?: string;
 	/** Element id, for `aria-controls` on the trigger. */
 	id?: string;
+	/** Size the menu to the anchor's width, e.g. a switcher spanning a sidebar. */
+	matchWidth?: boolean;
 }
 
 /** Props for the {@link MenuButton} component. */
@@ -146,7 +148,7 @@ function toLabels(items: MenuEntry[]): string[] {
  * @param props - {@link IMenuProps}.
  * @returns The portaled menu while open, otherwise nothing.
  */
-export function Menu({ open, anchorRef, onClose, items, onSelect, placement = 'bottom-start', initialFocus = 'first', ariaLabel, id }: IMenuProps): React.ReactElement | null {
+export function Menu({ open, anchorRef, onClose, items, onSelect, placement = 'bottom-start', initialFocus = 'first', ariaLabel, id, matchWidth }: IMenuProps): React.ReactElement | null {
 	const [activeIndex, setActiveIndex] = useState(-1);
 	const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 	const typeahead = useTypeahead();
@@ -213,7 +215,7 @@ export function Menu({ open, anchorRef, onClose, items, onSelect, placement = 'b
 	}
 
 	return (
-		<Popover open={open} anchorRef={anchorRef} onClose={onClose} placement={placement} role="menu" ariaLabel={ariaLabel} id={id} autoFocus={false} className="rr-menu">
+		<Popover open={open} anchorRef={anchorRef} onClose={onClose} placement={placement} matchWidth={matchWidth} role="menu" ariaLabel={ariaLabel} id={id} autoFocus={false} className="rr-menu">
 			<div onKeyDown={handleKeyDown} style={{ display: 'contents' }}>
 				{items.map((entry, index) => {
 					if (entry.type === 'divider') {

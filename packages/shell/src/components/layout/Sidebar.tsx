@@ -25,15 +25,14 @@
 //
 // Layout (top to bottom):
 //   Header (AppSwitcherButton + dock toggle)
+//   Back to the app the user came from (only while there is one)
 //   App Sidebar Content slot (the app's AppLayout `sidebar` declaration)
 //   Footer (SidebarFooter — shared component with popup menu)
 // =============================================================================
 
 import React, { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
-import {
-	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft, BxHome, BxX,
-} from '../BoxIcon';
+import { BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxDockLeft, BxHome, BxX, BxChevronLeft } from '../BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
 import { getHomeAppId } from '../../constants';
 import type { IconComponent } from '../BoxIcon';
@@ -48,6 +47,10 @@ import RocketRideWordmark from '../../assets/icons/RocketRideWordmark';
 import { useHostChromeState } from './HostChromeContext';
 import { useCompactNav } from './CompactNavContext';
 import { FOCUSABLE_SELECTOR, trapFocus } from '../modal/Modal';
+import { getReturnAppId, recordAppVisit } from './appTrail';
+import { getSidebarToneStyle, INK_PROBE_TOKEN, isInkSidebar } from './sidebarTone';
+import { SidebarDensityProvider, useSidebarDensity } from '../sidebar-menu/SidebarDensityContext';
+import type { AppTrail } from './appTrail';
 
 // =============================================================================
 // CONSTANTS
@@ -125,6 +128,16 @@ const SCRIM_Z = 100;
 const DRAWER_Z = 101;
 const ICON_SIZE = 20;
 const COLLAPSED_BTN = 40;
+
+/**
+ * NavButton row geometry per density. Comfortable matches SidebarMenu's
+ * comfortable row (14px text, 18px icon, 36px tall), so an app whose nav is
+ * built from NavButtons sizes the same as one built from SidebarMenu.
+ */
+const NAV_BUTTON_METRICS = {
+	compact: { height: 30, fontSize: 13, icon: ICON_SIZE, radius: 8 },
+	comfortable: { height: 36, fontSize: 14, icon: 18, radius: 6 },
+} as const;
 
 // =============================================================================
 // TYPES
@@ -207,6 +220,9 @@ export interface NavButtonProps {
  */
 export const NavButton: React.FC<NavButtonProps> = ({ icon: Icon, label, isActive = false, collapsed, iconColor, onClick, title }) => {
 	const [hovered, setHovered] = useState(false);
+	// Rows in the app's sidebar slot take the density the app asked for;
+	// shell-owned rows outside the slot stay compact.
+	const m = NAV_BUTTON_METRICS[useSidebarDensity()];
 	return (
 		<button
 			title={title ?? label}
@@ -214,10 +230,18 @@ export const NavButton: React.FC<NavButtonProps> = ({ icon: Icon, label, isActiv
 			onMouseEnter={() => setHovered(true)}
 			onMouseLeave={() => setHovered(false)}
 			style={{
-				display: 'flex', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start',
-				gap: 10, width: collapsed ? COLLAPSED_BTN : '100%', height: collapsed ? COLLAPSED_BTN : 30,
-				padding: collapsed ? 0 : '0 10px', margin: collapsed ? '0 auto' : 0,
-				borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13,
+				display: 'flex',
+				alignItems: 'center',
+				justifyContent: collapsed ? 'center' : 'flex-start',
+				gap: 10,
+				width: collapsed ? COLLAPSED_BTN : '100%',
+				height: collapsed ? COLLAPSED_BTN : m.height,
+				padding: collapsed ? 0 : '0 10px',
+				margin: collapsed ? '0 auto' : 0,
+				borderRadius: m.radius,
+				border: 'none',
+				cursor: 'pointer',
+				fontSize: m.fontSize,
 				fontWeight: isActive ? 600 : 400,
 				// Active rows use the theme's standard list highlight
 				// (--rr-bg-list-active / --rr-fg-list-active): every theme maps it
@@ -229,10 +253,8 @@ export const NavButton: React.FC<NavButtonProps> = ({ icon: Icon, label, isActiv
 				transition: 'background 100ms ease, color 100ms ease', overflow: 'hidden',
 			}}
 		>
-			<Icon size={ICON_SIZE} />
-			{!collapsed && (
-				<span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-			)}
+			<Icon size={m.icon} />
+			{!collapsed && <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>}
 		</button>
 	);
 };
@@ -242,19 +264,30 @@ export const NavButton: React.FC<NavButtonProps> = ({ icon: Icon, label, isActiv
 // =============================================================================
 
 /**
+ * Reads a theme token from :root and re-reads it on theme changes.
+ *
+ * @param token - The custom property to read, e.g. '--rr-palette-mode'.
+ * @returns Its trimmed value; empty when the active theme does not define it.
+ */
+const useRootToken = (token: string): string => {
+	const read = () => getComputedStyle(document.documentElement).getPropertyValue(token).trim();
+	const [value, setValue] = useState(read);
+	useEffect(() => {
+		// Re-read whenever the shell applies a new theme (CSS vars change)
+		const obs = new MutationObserver(() => setValue(read()));
+		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
+		return () => obs.disconnect();
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- `read` only closes over `token`
+	}, [token]);
+	return value;
+};
+
+/**
  * Reads --rr-palette-mode from :root and re-reads on theme changes.
  * Returns 'dark' or 'light'.
  */
 const usePaletteMode = (): 'dark' | 'light' => {
-	const read = () => getComputedStyle(document.documentElement).getPropertyValue('--rr-palette-mode').trim() as 'dark' | 'light' || 'light';
-	const [mode, setMode] = useState(read);
-	useEffect(() => {
-		// Re-read whenever the shell applies a new theme (CSS vars change)
-		const obs = new MutationObserver(() => setMode(read()));
-		obs.observe(document.documentElement, { attributes: true, attributeFilter: ['style', 'class'] });
-		return () => obs.disconnect();
-	}, []);
-	return mode;
+	return (useRootToken('--rr-palette-mode') as 'dark' | 'light') || 'light';
 };
 
 /**
@@ -263,9 +296,11 @@ const usePaletteMode = (): 'dark' | 'light' => {
  * Priority: branding.iconDark/iconLight (theme-aware) → branding.icon →
  * manifest icon (URL) → 2-letter monogram fallback.
  */
-const AppSwitcherButton: React.FC<{ collapsed: boolean }> = ({ collapsed }) => {
+const AppSwitcherButton: React.FC<{ collapsed: boolean; isInk: boolean }> = ({ collapsed, isInk }) => {
 	const { activeAppId, appManifest, loadedApps } = useWorkspace();
-	const paletteMode = usePaletteMode();
+	// An ink sidebar is dark whatever the theme, so its logo takes the dark variant.
+	const themePaletteMode = usePaletteMode();
+	const paletteMode = isInk ? 'dark' : themePaletteMode;
 	const isHome = activeAppId === 'rocketride.home';
 	const activeManifest = appManifest.find((a) => a.id === activeAppId) ?? null;
 	const branding = loadedApps[activeAppId]?.branding;
@@ -437,6 +472,15 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	// responsive path, so crossing back to desktop restores exactly the rail the
 	// user had.
 	const effectiveCollapsed = isCompact ? false : collapsed;
+
+	// --- The active app's sidebar tone and density ----------------------------
+	// Asked for through `branding`; see `sidebarTone` and SidebarDensityContext.
+	// Ink only when the theme defines the ink tokens, or every surface token
+	// would point at nothing.
+	const branding = loadedApps[activeAppId]?.branding;
+	const hasInkTokens = useRootToken(INK_PROBE_TOKEN) !== '';
+	const isInk = isInkSidebar(branding?.sidebarTone, hasInkTokens);
+	const density = branding?.sidebarDensity ?? 'compact';
 
 	// --- The active app's own preference -------------------------------------
 
@@ -646,6 +690,24 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 	// rocketride.home, OSS on rocketride.hello (must match Shell's defaultAppId).
 	const homeAppId = getHomeAppId(!!isSaas);
 
+	// --- Back to the app the user came from ----------------------------------
+	// An app that opens another (a console's "Files" entry opens the Files app)
+	// is otherwise reachable from there only through the footer's app switcher.
+	// The sidebar is always mounted, so it sees every switch. See `appTrail`.
+	const [trail, setTrail] = useState<AppTrail>(() => recordAppVisit([], activeAppId, homeAppId));
+	useEffect(() => {
+		setTrail((current) => recordAppVisit(current, activeAppId, homeAppId));
+	}, [activeAppId, homeAppId]);
+	const returnAppId = getReturnAppId(trail, homeAppId);
+	const returnAppName = appManifest.find((a) => a.id === returnAppId)?.name ?? returnAppId;
+
+	/** Switches back to the previous app; in the drawer, also closes it. */
+	const goBack = useCallback(() => {
+		if (!returnAppId) return;
+		if (isCompact) requestClose();
+		ConnectionManager.getInstance().emit('shell:switchApp', { appId: returnAppId });
+	}, [returnAppId, isCompact, requestClose]);
+
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
 		const items: SidebarFooterMenuItem[] = [
 			{ id: 'home', label: 'Home', icon: BxHome, onClick: () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: homeAppId }) },
@@ -742,82 +804,83 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 		<>
 		{/* The page behind the drawer, dimmed and tappable. Rendered even when
 		    closed so it can fade rather than blink, and inert while it is. */}
-		{isCompact && (
-			<div
-				aria-hidden="true"
-				onPointerDown={requestClose}
-				style={{
-					position: 'fixed', inset: 0, zIndex: SCRIM_Z,
-					background: 'rgba(0, 0, 0, 0.45)',
-					opacity: drawerOpen ? 1 : 0,
-					pointerEvents: drawerOpen ? 'auto' : 'none',
-					transition: `opacity ${DRAWER_TRANSITION_MS}ms ease`,
-				}}
-			/>
-		)}
-		<div
-			id="rr-shell-sidebar"
-			ref={frameRef}
-			tabIndex={isCompact ? -1 : undefined}
-			role={isCompact ? 'dialog' : undefined}
-			aria-modal={isCompact ? true : undefined}
-			aria-label={isCompact ? 'Navigation' : undefined}
-			style={frame}
-		>
-			{/* ================================================================
+			{isCompact && (
+				<div
+					aria-hidden="true"
+					onPointerDown={requestClose}
+					style={{
+						position: 'fixed',
+						inset: 0,
+						zIndex: SCRIM_Z,
+						background: 'rgba(0, 0, 0, 0.45)',
+						opacity: drawerOpen ? 1 : 0,
+						pointerEvents: drawerOpen ? 'auto' : 'none',
+						transition: `opacity ${DRAWER_TRANSITION_MS}ms ease`,
+					}}
+				/>
+			)}
+			<div id="rr-shell-sidebar" ref={frameRef} tabIndex={isCompact ? -1 : undefined} role={isCompact ? 'dialog' : undefined} aria-modal={isCompact ? true : undefined} aria-label={isCompact ? 'Navigation' : undefined} style={{ ...frame, ...getSidebarToneStyle(isInk) }}>
+				{/* ================================================================
 			    HEADER — AppSwitcherButton + collapse toggle
 			    ================================================================ */}
-			<div
-				style={{ display: 'flex', alignItems: 'center', justifyContent: effectiveCollapsed ? 'center' : undefined, height: 52, padding: effectiveCollapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0, marginBottom: 10 }}
-				onMouseEnter={() => setHeaderHover(true)}
-				onMouseLeave={() => setHeaderHover(false)}
-			>
-				{effectiveCollapsed ? (
-					// Collapsed: a single always-rendered, focusable button toggles
-					// expansion. It shows the brand mark by default and swaps to the
-					// collapse-sidebar icon on hover/focus (same 40×40 box, so no layout
-					// shift). Always mounted — and focus-reveals the icon — so keyboard
-					// and touch users can expand without hovering.
-					<button
-						title="Expand sidebar"
-						aria-label="Expand sidebar"
-						onClick={toggleCollapse}
-						onFocus={() => setHeaderHover(true)}
-						onBlur={() => setHeaderHover(false)}
-						style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: COLLAPSED_BTN, height: COLLAPSED_BTN, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, padding: 0 }}
-					>
-						{headerHover ? <BxDockLeft size={20} /> : <AppSwitcherButton collapsed={effectiveCollapsed} />}
-					</button>
-				) : (
-					<>
-						<button
-							title="Go to home"
-							aria-label="Go to home"
-							onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: homeAppId })}
-							onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
-							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-							style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px', borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', transition: 'background 120ms ease' }}
-						>
-							<AppSwitcherButton collapsed={effectiveCollapsed} />
+				<div style={{ display: 'flex', alignItems: 'center', justifyContent: effectiveCollapsed ? 'center' : undefined, height: 52, padding: effectiveCollapsed ? '8px 8px 0' : '8px 12px 0', flexShrink: 0, marginBottom: 10 }} onMouseEnter={() => setHeaderHover(true)} onMouseLeave={() => setHeaderHover(false)}>
+					{effectiveCollapsed ? (
+						// Collapsed: a single always-rendered, focusable button toggles
+						// expansion. It shows the brand mark by default and swaps to the
+						// collapse-sidebar icon on hover/focus (same 40×40 box, so no layout
+						// shift). Always mounted — and focus-reveals the icon — so keyboard
+						// and touch users can expand without hovering.
+						<button title="Expand sidebar" aria-label="Expand sidebar" onClick={toggleCollapse} onFocus={() => setHeaderHover(true)} onBlur={() => setHeaderHover(false)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: COLLAPSED_BTN, height: COLLAPSED_BTN, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, padding: 0 }}>
+							{headerHover ? <BxDockLeft size={20} /> : <AppSwitcherButton collapsed={effectiveCollapsed} isInk={isInk} />}
 						</button>
-						<button
-							title={isCompact ? 'Close navigation' : 'Collapse sidebar'}
-							aria-label={isCompact ? 'Close navigation' : 'Collapse sidebar'}
-							onClick={isCompact ? requestClose : toggleCollapse}
-							onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
-							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-							/* 28px suits a mouse in the desktop header; the same button in the
+					) : (
+						<>
+							<button
+								title="Go to home"
+								aria-label="Go to home"
+								onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: homeAppId })}
+								onMouseEnter={(e) => {
+									e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))';
+								}}
+								onMouseLeave={(e) => {
+									e.currentTarget.style.background = 'transparent';
+								}}
+								style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px', borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', transition: 'background 120ms ease' }}
+							>
+								<AppSwitcherButton collapsed={effectiveCollapsed} isInk={isInk} />
+							</button>
+							<button
+								title={isCompact ? 'Close navigation' : 'Collapse sidebar'}
+								aria-label={isCompact ? 'Close navigation' : 'Collapse sidebar'}
+								onClick={isCompact ? requestClose : toggleCollapse}
+								onMouseEnter={(e) => {
+									e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))';
+								}}
+								onMouseLeave={(e) => {
+									e.currentTarget.style.background = 'transparent';
+								}}
+								/* 28px suits a mouse in the desktop header; the same button in the
 							   drawer is the one a thumb reaches for, and 28 is well under
 							   the 44 the rest of the compact chrome keeps to. */
-							style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: isCompact ? 44 : 28, height: isCompact ? 44 : 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, transition: 'background 120ms ease' }}
-						>
-							{isCompact ? <BxX size={20} /> : <BxDockLeft size={18} />}
-						</button>
-					</>
-				)}
-			</div>
+								style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: isCompact ? 44 : 28, height: isCompact ? 44 : 28, borderRadius: 6, border: 'none', cursor: 'pointer', background: 'transparent', color: 'var(--rr-text-secondary)', flexShrink: 0, transition: 'background 120ms ease' }}
+							>
+								{isCompact ? <BxX size={20} /> : <BxDockLeft size={18} />}
+							</button>
+						</>
+					)}
+				</div>
 
-			{/* ================================================================
+				{/* ================================================================
+			    BACK — to the app that opened this one. Fixed above the slot and
+			    divided from it: it belongs to the shell, not to the app's nav.
+			    ================================================================ */}
+				{returnAppId && (
+					<div style={{ padding: effectiveCollapsed ? '0 8px 8px' : '0 12px 8px', marginBottom: 8, borderBottom: '1px solid var(--rr-border)', flexShrink: 0 }}>
+						<NavButton icon={BxChevronLeft} label={`Back to ${returnAppName}`} collapsed={effectiveCollapsed} onClick={goBack} />
+					</div>
+				)}
+
+				{/* ================================================================
 			    APP SIDEBAR CONTENT SLOT — scrolls between fixed header/footer
 			    ================================================================ */}
 			<div
@@ -829,15 +892,15 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 				    collapsed flag; each component inside decides its collapsed form
 				    (SidebarMenu iconifies, free-form content returns null; the
 				    legacy bridge reads it back into the `collapsed` prop). */}
-				<SidebarCollapsedProvider value={effectiveCollapsed}>
-					{sidebarContent}
-				</SidebarCollapsedProvider>
-			</div>
+					<SidebarCollapsedProvider value={effectiveCollapsed}>
+						<SidebarDensityProvider value={density}>{sidebarContent}</SidebarDensityProvider>
+					</SidebarCollapsedProvider>
+				</div>
 
 			{/* ================================================================
-			    FOOTER — hidden when logged out
+			    FOOTER — hidden when logged out, or when the app asks for none
 			    ================================================================ */}
-			{identity && (
+			{identity && branding?.sidebarFooter !== 'none' && (
 				<SidebarFooter
 					collapsed={effectiveCollapsed}
 					userName={account.userName}

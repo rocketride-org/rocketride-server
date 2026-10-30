@@ -61,6 +61,21 @@ const styles = {
 		textAlign: 'right',
 	} as CSSProperties,
 
+	// The opt-in stacked user row: timestamp under the bubble, mirroring the
+	// assistant row.
+	userRowStacked: {
+		display: 'flex',
+		flexDirection: 'column',
+		alignItems: 'flex-end',
+		marginBottom: 12,
+	} as CSSProperties,
+
+	userTimestampOutside: {
+		fontSize: 10,
+		color: 'var(--rr-text-caption)',
+		marginTop: 4,
+	} as CSSProperties,
+
 	// ── Assistant bubble (bot / system) ──────────────────────────────────────────
 	botRow: {
 		display: 'flex',
@@ -143,6 +158,8 @@ const styles = {
 
 export interface MessageBubbleProps {
 	message: ChatMessage;
+	/** Draw a user message's timestamp under the bubble, right-aligned. */
+	isTimestampOutside?: boolean;
 }
 
 /**
@@ -151,7 +168,7 @@ export interface MessageBubbleProps {
  * @param props - the {@link ChatMessage} to render.
  * @returns The message element.
  */
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, isTimestampOutside = false }) => {
 	// Failed sends/responses surface in-thread as an error Banner (stock component).
 	if (message.isError) {
 		return (
@@ -172,6 +189,17 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 	}
 
 	// User messages render as a filled, right-aligned brand bubble.
+	if (message.sender === 'user' && isTimestampOutside) {
+		return (
+			<div style={styles.userRowStacked}>
+				<div style={styles.userBubble}>
+					<p style={styles.userText}>{message.text}</p>
+					{message.meta && <div style={styles.userMeta}>{message.meta}</div>}
+				</div>
+				<div style={styles.userTimestampOutside}>{message.timestamp}</div>
+			</div>
+		);
+	}
 	if (message.sender === 'user') {
 		return (
 			<div style={styles.userRow}>

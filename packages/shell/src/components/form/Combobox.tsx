@@ -23,6 +23,7 @@
  */
 
 import React, { useEffect, useId, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { Popover } from '../overlay/Popover';
 import { filterOptions, getFirstIndex, getLastIndex, getNextIndex } from '../overlay/listNavigation';
 import { useField, useFieldControl } from '../field/Field';
@@ -65,6 +66,8 @@ export interface IComboboxProps {
 	id?: string;
 	/** Form field name. */
 	name?: string;
+	/** Decorative icon drawn inside the input's start edge, e.g. a search glyph. */
+	leadingIcon?: ReactNode;
 }
 
 // =============================================================================
@@ -96,7 +99,7 @@ export function displayTextFor(options: readonly ISelectOption[], value: string 
  * @param props - {@link IComboboxProps}.
  * @returns The input, its clear button, and the suggestion list.
  */
-export function Combobox({ options, value, onChange, allowCustomValue = false, onInputChange, placeholder, emptyText = 'No matches', clearable = false, disabled, invalid, small = false, mono = false, ariaLabel, id, name }: IComboboxProps): React.ReactElement {
+export function Combobox({ options, value, onChange, allowCustomValue = false, onInputChange, placeholder, emptyText = 'No matches', clearable = false, disabled, invalid, small = false, mono = false, ariaLabel, id, name, leadingIcon }: IComboboxProps): React.ReactElement {
 	const [text, setText] = useState(() => displayTextFor(options, value));
 	const [isOpen, setIsOpen] = useState(false);
 	const [isFiltering, setIsFiltering] = useState(false);
@@ -222,6 +225,7 @@ export function Combobox({ options, value, onChange, allowCustomValue = false, o
 	if (mono) inputClassName += ' rr-text-mono';
 
 	let groupClassName = 'rr-input-group';
+	if (leadingIcon) groupClassName += ' rr-input-group--start';
 	const showClear = clearable && value !== null && !fieldProps.disabled;
 	if (showClear) groupClassName += ' rr-input-group--end';
 
@@ -235,6 +239,11 @@ export function Combobox({ options, value, onChange, allowCustomValue = false, o
 	return (
 		<>
 			<div ref={anchorRef} className={groupClassName}>
+				{leadingIcon && (
+					<span className="rr-input-group__start" aria-hidden="true">
+						{leadingIcon}
+					</span>
+				)}
 				<input
 					ref={inputRef}
 					type="text"

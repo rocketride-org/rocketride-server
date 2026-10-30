@@ -12,7 +12,7 @@
  * new messages while the user is already at/near the bottom.
  */
 
-import React, { useEffect, useRef, useMemo, useState, type CSSProperties } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useMemo, useState, type CSSProperties } from 'react';
 import { ChatMessage, CHAT_COLUMN_MAX_WIDTH } from '../types';
 import { MessageBubble } from './MessageBubble';
 import { TypingIndicator } from './TypingIndicator';
@@ -127,6 +127,10 @@ export interface MessageListProps {
 	emptyTitle?: string;
 	/** Description for the EmptyState shown when there are no messages. */
 	emptyDescription?: string;
+	/** Jump straight to the latest message the first time the thread renders. */
+	startAtLatest?: boolean;
+	/** Draw the person's timestamps under their bubbles. */
+	userTimestampOutside?: boolean;
 }
 
 /**
@@ -135,7 +139,7 @@ export interface MessageListProps {
  * @param props - {@link MessageListProps}.
  * @returns The thread element (or an EmptyState when empty).
  */
-export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, emptyTitle, emptyDescription }) => {
+export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, emptyTitle, emptyDescription, startAtLatest = false, userTimestampOutside = false }) => {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const endRef = useRef<HTMLDivElement>(null);
 	// Whether the user is pinned to the bottom (within 40px). Starts true so the
@@ -148,6 +152,16 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, em
 		if (!el) return;
 		atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= 40;
 	};
+
+	// With startAtLatest, the first render of the thread lands on the newest
+	// message before paint, so a saved thread never visibly scrolls down.
+	const hasLandedRef = useRef(!startAtLatest);
+	useLayoutEffect(() => {
+		const el = scrollRef.current;
+		if (hasLandedRef.current || !el) return;
+		el.scrollTop = el.scrollHeight;
+		hasLandedRef.current = true;
+	}, [messages, isTyping]);
 
 	// Autoscroll to the newest message only while pinned to the bottom; if the
 	// user scrolled up to read history, leave their position untouched.
@@ -188,7 +202,7 @@ export const MessageList: React.FC<MessageListProps> = ({ messages, isTyping, em
 		<div style={styles.scroll} ref={scrollRef} onScroll={handleScroll}>
 			{/* Inner column mirrors the entry bar width so thread and input align. */}
 			<div style={styles.column}>
-				{items.map((item) => (item.kind === 'thinking-group' ? <ThinkingGroup key={`tg-${item.id}`} messages={item.messages} /> : <MessageBubble key={item.message.id} message={item.message} />))}
+				{items.map((item) => (item.kind === 'thinking-group' ? <ThinkingGroup key={`tg-${item.id}`} messages={item.messages} /> : <MessageBubble key={item.message.id} message={item.message} isTimestampOutside={userTimestampOutside} />))}
 				{isTyping && <TypingIndicator />}
 				<div ref={endRef} />
 			</div>

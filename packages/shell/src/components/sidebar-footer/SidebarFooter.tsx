@@ -340,7 +340,11 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 	// it. No workspace means no app branding to read, which is the same answer
 	// as an app that asked for nothing.
 	const workspace = useOptionalWorkspace();
-	const hideAnnouncements = !!workspace?.loadedApps[workspace.activeAppId]?.branding?.hideAnnouncements;
+	const branding = workspace?.loadedApps[workspace.activeAppId]?.branding;
+	// An app that asked for an account-only footer gets neither the ticker nor
+	// the settings glyph; the account row still opens the same menu.
+	const isAccountOnly = branding?.sidebarFooter === 'account';
+	const hideAnnouncements = !!branding?.hideAnnouncements || isAccountOnly;
 	const announcements = useAnnouncements();
 	const [tickerIndex, setTickerIndex] = useState(0);
 	const [tickerFade, setTickerFade] = useState(true);
@@ -431,7 +435,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 						)}
 					</>
 				)}
-				{!collapsed && <BxCog size={16} color="var(--rr-text-secondary)" />}
+				{!collapsed && !isAccountOnly && <BxCog size={16} color="var(--rr-text-secondary)" />}
 			</div>
 
 			{/* ── Popup menu (portalled to document.body to escape overflow:hidden) */}

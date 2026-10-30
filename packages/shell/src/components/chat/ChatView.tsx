@@ -48,9 +48,9 @@ const styles = {
  *   input (reserved for future attachments).
  * @returns The chat view element.
  */
-export const ChatView: React.FC<IChatViewProps> = ({ messages, isTyping, isConnected, onSend, placeholder, emptyTitle, emptyDescription, leadingInputSlot }) => (
+export const ChatView: React.FC<IChatViewProps> = ({ messages, isTyping, isConnected, onSend, placeholder, emptyTitle, emptyDescription, leadingInputSlot, startAtLatest, userTimestampOutside }) => (
 	<div style={styles.root}>
-		<MessageList messages={messages} isTyping={isTyping} emptyTitle={emptyTitle} emptyDescription={emptyDescription} />
+		<MessageList messages={messages} isTyping={isTyping} emptyTitle={emptyTitle} emptyDescription={emptyDescription} startAtLatest={startAtLatest} userTimestampOutside={userTimestampOutside} />
 		<ChatInputField onSend={onSend} disabled={!isConnected} placeholder={placeholder} leadingInputSlot={leadingInputSlot} />
 	</div>
 );

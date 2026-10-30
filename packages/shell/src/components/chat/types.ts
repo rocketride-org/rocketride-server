@@ -55,6 +55,16 @@ export interface IChatViewProps {
 	emptyDescription?: string;
 	/** Optional node rendered before the input field (reserved for future attachments). */
 	leadingInputSlot?: ReactNode;
+	/**
+	 * Open already scrolled to the latest message, instead of scrolling down to
+	 * it, when a saved thread arrives all at once. Off by default.
+	 */
+	startAtLatest?: boolean;
+	/**
+	 * Draw the person's timestamps under their bubbles, right-aligned, mirroring
+	 * the assistant's. Off by default: they sit inside the bubble.
+	 */
+	userTimestampOutside?: boolean;
 }
 
 // =============================================================================

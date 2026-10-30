@@ -26,6 +26,7 @@ import type { ShellApiV8 } from '../contract/versions/v8';
 import type { ShellApiV9 } from '../contract/versions/v9';
 import type { ShellApiV10 } from '../contract/versions/v10';
 import type { ShellApiV11 } from '../contract/versions/v11';
+import type { ShellApiV12 } from '../contract/versions/v12';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -800,6 +801,12 @@ import type { IDashboardGridProps as Frozen_IDashboardGridProps } from '../contr
 import type { IDashboardGridProps as Current_IDashboardGridProps } from './api';
 import type { IDashboardGridItemProps as Frozen_IDashboardGridItemProps } from '../contract/versions/v11';
 import type { IDashboardGridItemProps as Current_IDashboardGridItemProps } from './api';
+import type { ShellSidebarTone as Frozen_ShellSidebarTone } from '../contract/versions/v12';
+import type { ShellSidebarTone as Current_ShellSidebarTone } from './api';
+import type { ShellSidebarDensity as Frozen_ShellSidebarDensity } from '../contract/versions/v12';
+import type { ShellSidebarDensity as Current_ShellSidebarDensity } from './api';
+import type { ShellSidebarFooter as Frozen_ShellSidebarFooter } from '../contract/versions/v12';
+import type { ShellSidebarFooter as Current_ShellSidebarFooter } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -826,6 +833,8 @@ const _floor_v10: ShellApiV10 = {} as ShellApiShape;
 void _floor_v10;
 const _floor_v11: ShellApiV11 = {} as ShellApiShape;
 void _floor_v11;
+const _floor_v12: ShellApiV12 = {} as ShellApiShape;
+void _floor_v12;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1604,3 +1613,9 @@ const _t_IDashboardGridProps: Frozen_IDashboardGridProps = {} as Current_IDashbo
 void _t_IDashboardGridProps;
 const _t_IDashboardGridItemProps: Frozen_IDashboardGridItemProps = {} as Current_IDashboardGridItemProps;
 void _t_IDashboardGridItemProps;
+const _t_ShellSidebarTone: Frozen_ShellSidebarTone = {} as Current_ShellSidebarTone;
+void _t_ShellSidebarTone;
+const _t_ShellSidebarDensity: Frozen_ShellSidebarDensity = {} as Current_ShellSidebarDensity;
+void _t_ShellSidebarDensity;
+const _t_ShellSidebarFooter: Frozen_ShellSidebarFooter = {} as Current_ShellSidebarFooter;
+void _t_ShellSidebarFooter;
