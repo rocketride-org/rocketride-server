@@ -33,6 +33,7 @@
 // =============================================================================
 
 import type * as React from 'react';
+import type { SignupProperties } from '../client/types/signup';
 
 // =============================================================================
 // SHELL COMPONENT PROP CONTRACTS
@@ -497,13 +498,41 @@ export interface CheckoutPlan {
 	createdAt: string | null;
 }
 
+/**
+ * A product-telemetry fact the shell observed (`auth:start`, `auth:complete`),
+ * the payload of `shell:telemetry` and an item of `drainTelemetry()`. The shell
+ * has no analytics transport: the active app forwards facts to its own.
+ * Mirrors the shell's `TelemetryFact` (shell/src/util/telemetryChannel.ts).
+ */
+export interface TelemetryFact {
+	/** Event name from the app's telemetry contract (e.g. 'auth:start'). */
+	event: string;
+	/** Flat properties of the fact. */
+	props: Record<string, unknown>;
+	/** Wall-clock milliseconds when the shell observed the fact: the forwarder's event time. */
+	ts: number;
+	/** Unique within the tab: the forwarder's once-per-fact key. */
+	id: string;
+}
+
 // eslint-disable-next-line @typescript-eslint/no-empty-interface
 export interface ShellEventMap {
 	'shell:connected': Record<string, never>;
 	'shell:disconnected': { reason: string; hasError: boolean };
 	'shell:login': { user: ConnectResult };
 	'shell:logout': Record<string, never>;
-	'shell:loginRequest': { appId?: string };
+	/**
+	 * `register` marks a sign-up intent ("Get Started"); `auto` is set by the
+	 * shell's own auth gate, so apps leave it unset.
+	 */
+	'shell:loginRequest': { appId?: string; register?: boolean; auto?: boolean; signupProperties?: SignupProperties };
+	/**
+	 * A telemetry fact the shell observed. `auth:start` is never delivered
+	 * here (the OAuth redirect follows at once): it is held, and handed over
+	 * with the facts raised before the app subscribed by
+	 * `connectionManager.drainTelemetry()`.
+	 */
+	'shell:telemetry': TelemetryFact;
 	'shell:logoutRequest': Record<string, never>;
 	'shell:switchApp': { appId: string };
 	'shell:subscribe': { app: AppManifestEntry; plan?: CheckoutPlan };

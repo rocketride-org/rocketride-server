@@ -130,6 +130,12 @@ class AccountInfo(BaseModel):
     # True when the user is authenticated but not yet granted app access
     # (email did not match any allowed pattern in the user_grants table)
     waitlisted: bool = False
+    # Whether this authentication CREATED the user row: True or False when the
+    # account provider knows (its upsert reported it), None when it does not
+    # (this engine's own providers do not set it). Lets the shell distinguish a
+    # sign-up from a sign-in on the OAuth callback without mistaking "unknown"
+    # for "existing user"; never persisted.
+    isNewUser: Optional[bool] = None
 
     def to_connect_result(self) -> dict:
         """

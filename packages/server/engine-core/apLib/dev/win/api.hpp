@@ -25,6 +25,11 @@
 
 namespace ap::dev {
 
-inline Error dumpProcess() noexcept { return plat::createMinidump(); }
+inline Error dumpProcess() noexcept {
+    // Without --dumps there is nothing to write, as on Unix
+    if (!dumpsEnabled())
+        return APERR(Ec::NotSupported);
+    return plat::createMinidump();
+}
 
 }  // namespace ap::dev

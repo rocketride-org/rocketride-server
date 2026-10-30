@@ -429,6 +429,13 @@ export interface ConnectResult {
 	waitlisted?: boolean;
 
 	/**
+	 * Whether this authentication created the account: true or false when the
+	 * server's account provider knows (its upsert reported it), null when it
+	 * does not, absent on servers that predate the field.
+	 */
+	isNewUser?: boolean | null;
+
+	/**
 	 * All org memberships the user has (for the org switcher UI).
 	 * Only present in profile responses, not in the auth handshake.
 	 */
