@@ -465,6 +465,16 @@ class Account(AccountBase):
                     elif value != ENV_MASK:
                         env[name] = value
 
+                # A value the process environment cannot hold (a non-ASCII one under
+                # an ASCII locale) is refused before anything is written
+                try:
+                    for value in env.values():
+                        os.environ.encodevalue(value)
+                except UnicodeError:
+                    return conn.build_error(
+                        request, "A value cannot be held in this engine's environment (its locale); nothing was saved."
+                    )
+
                 # Step 1: Persist to the .env file first, so a file that cannot be
                 # read or written leaves memory as it was. Use sys.executable
                 # (engine.exe path) — must match the load_dotenv path in server.py.
