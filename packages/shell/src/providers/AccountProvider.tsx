@@ -429,6 +429,15 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		async (orgId: string) => {
 			if (!client) return;
 			if (confirmWorkspaceSwitch && !confirmWorkspaceSwitch()) return;
+			// The switch started HERE (the Profile picker), so after the rescope
+			// the shell should land back on the Profile section — in
+			// sessionStorage (not state) because the rescope remounts this whole
+			// tree, and its reload FALLBACK replaces the page outright. A
+			// push-initiated switch from another tab sets no flag and lands on
+			// the workbench as before. Key literal = OverlayManager's
+			// WORKSPACE_SWITCH_LAND_KEY (importing it would cycle:
+			// OverlayManager → SettingsProvider → AccountProvider).
+			try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable — land on the workbench */ }
 			await client.account.setDefaultOrg(orgId);
 		},
 		[client, confirmWorkspaceSwitch]
@@ -444,6 +453,83 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 			await loadProfile();
 		},
 		[client, orgId, loadProfile]
+	);
+
+	/** Creates a new workspace. The server makes the caller its admin, switches
+	 *  their default org, and pushes `apaext_org_changed` — the shell's rescope
+	 *  path takes over from there, so the only client work is the landing flag
+	 *  (the switch started here, so land back on Profile). */
+	const handleCreateWorkspace = useCallback(
+		async (name: string) => {
+			if (!client) return;
+			// Same literal as OverlayManager's WORKSPACE_SWITCH_LAND_KEY (an
+			// import would cycle; see handleSetDefaultOrg).
+			try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable — land on the workbench */ }
+			try {
+				await client.account.createOrg(name);
+			} catch (err) {
+				// The switch never happened — don't leave a stale landing flag
+				// to hijack the NEXT unrelated mount of the settings overlay.
+				try { window.sessionStorage.removeItem('rr:workspace-switch-land'); } catch { /* ignore */ }
+				throw err;
+			}
+		},
+		[client]
+	);
+
+	/** Leaves a workspace. Leaving the CURRENT one makes the server re-point
+	 *  the default and push `apaext_org_changed` (the rescope takes over);
+	 *  leaving another just needs the memberships list re-read. */
+	const handleLeaveWorkspace = useCallback(
+		async (targetOrgId: string) => {
+			if (!client) return;
+			const leavingCurrent = targetOrgId === authUser?.organization?.id;
+			if (leavingCurrent) {
+				try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable */ }
+			}
+			try {
+				await client.account.leaveOrg(targetOrgId);
+			} catch (err) {
+				if (leavingCurrent) {
+					try { window.sessionStorage.removeItem('rr:workspace-switch-land'); } catch { /* ignore */ }
+				}
+				throw err;
+			}
+			if (!leavingCurrent) await loadProfile();
+		},
+		[client, authUser, loadProfile]
+	);
+
+	/** Dry-run for the delete confirm dialog: member count + billing blocker. */
+	const handleDeleteWorkspacePrecheck = useCallback(
+		async (targetOrgId: string) => {
+			if (!client) throw new Error('Not connected');
+			return client.account.deleteOrgPrecheck(targetOrgId);
+		},
+		[client]
+	);
+
+	/** Deletes a workspace (admin-gated, destroys its data for all members).
+	 *  Same landing split as leave: current org → rescope path; another org →
+	 *  memberships re-read. */
+	const handleDeleteWorkspace = useCallback(
+		async (targetOrgId: string) => {
+			if (!client) return;
+			const deletingCurrent = targetOrgId === authUser?.organization?.id;
+			if (deletingCurrent) {
+				try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable */ }
+			}
+			try {
+				await client.account.deleteOrg(targetOrgId);
+			} catch (err) {
+				if (deletingCurrent) {
+					try { window.sessionStorage.removeItem('rr:workspace-switch-land'); } catch { /* ignore */ }
+				}
+				throw err;
+			}
+			if (!deletingCurrent) await loadProfile();
+		},
+		[client, authUser, loadProfile]
 	);
 
 	/** Deletes the user account. */
@@ -652,6 +738,10 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 				{...(embeddedSection !== undefined ? { embeddedSection } : {})}
 				{...(onNavigateSection !== undefined ? { onNavigateSection } : {})}
 				onRenameWorkspace={handleRenameWorkspace}
+				onCreateWorkspace={handleCreateWorkspace}
+				onLeaveWorkspace={handleLeaveWorkspace}
+				onDeleteWorkspace={handleDeleteWorkspace}
+				onDeleteWorkspacePrecheck={handleDeleteWorkspacePrecheck}
 				onSaveProfile={handleSaveProfile}
 				onSetDevTeam={handleSetDevTeam}
 				onSetDefaultOrg={handleSetDefaultOrg}

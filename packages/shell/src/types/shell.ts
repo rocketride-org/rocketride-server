@@ -169,6 +169,23 @@ export interface ShellConnectionEventMap {
 	'shell:orgChanged': { orgId: string };
 
 	/**
+	 * The shell is about to RESCOPE to a different workspace in-process (the
+	 * browser shell's reaction to `shell:orgChanged` — reconnect + remount
+	 * instead of a page reload). Subscribers holding per-workspace work (dev
+	 * sessions, running previews, retained per-workspace topics) should stop
+	 * and release it now: the workspace subtree unmounts right after.
+	 */
+	'shell:workspaceWillChange': { orgId: string };
+
+	/**
+	 * The in-process workspace rescope finished: the connection is
+	 * re-authenticated under the new default org and the workspace subtree
+	 * has remounted against its stores. Counterpart of
+	 * `shell:workspaceWillChange`.
+	 */
+	'shell:workspaceChanged': { orgId: string };
+
+	/**
 	 * Emitted when the service catalog is fetched or refreshed.
 	 *
 	 * Contains the full services map, the summary's deduplicated icon

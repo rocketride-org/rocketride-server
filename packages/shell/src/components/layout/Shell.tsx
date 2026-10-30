@@ -275,6 +275,15 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const loginTargetRef = useRef<string | null>(null);
 	const mountedRef = useRef(true);
 
+	// ── In-process workspace rescope ──────────────────────────────────────
+	// True while the shell is switching workspaces: the workspace subtree is
+	// unmounted (a loading screen holds its place) between the teardown and
+	// the re-authenticated remount. The epoch keys WorkspaceProvider so a
+	// completed rescope remounts every store against the new workspace.
+	const [rescoping, setRescoping] = useState(false);
+	const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
+	const rescopeRunningRef = useRef(false);
+
 	// ── Connection state ──────────────────────────────────────────────────
 	const { isConnected, statusMessage } = useShellConnection();
 
@@ -549,12 +558,51 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	// The user's default org changed (this tab or any other connection). The
 	// server only NOTIFIES — what to do is this client's choice. The shell's
-	// choice: reload, which re-authenticates and re-bootstraps under the
-	// user's current default org.
+	// choice: an IN-PROCESS rescope — announce, unmount the workspace subtree
+	// (its stores flush on the old connection), re-authenticate (the server
+	// resolves the new default org), then remount everything under a fresh
+	// epoch key. Any step failing falls back to the old full page reload —
+	// degraded, never stranded. Why not just reload: a reload tears down the
+	// whole JS world to change one scope; the rescope keeps the page, the MF
+	// containers, and the session, and lands the user back where the switch
+	// started (the Profile section re-opens via the sessionStorage flag the
+	// picker sets — a flag deliberately chosen so the reload FALLBACK lands
+	// there too).
 	useEffect(() => {
-		return cm.on('shell:orgChanged', () => {
-			console.warn('[shell] reloading: default org changed — re-authenticating under the new org');
-			window.location.reload();
+		return cm.on('shell:orgChanged', ({ orgId }: { orgId: string }) => {
+			if (rescopeRunningRef.current) return;
+			rescopeRunningRef.current = true;
+			void (async () => {
+				try {
+					cm.emit('shell:workspaceWillChange', { orgId });
+					// Unmount the workspace subtree FIRST: unmount cleanups flush
+					// pending workspace writes while the OLD connection is still
+					// up — flushing after reconnect would write workspace-A state
+					// into workspace B.
+					setRescoping(true);
+					// One macrotask so the unmount commit (and its synchronous
+					// cleanup effects) run before the connection drops.
+					await new Promise((resolve) => setTimeout(resolve, 0));
+					const token = cm.loadToken();
+					if (!token) throw new Error('no session token to re-authenticate with');
+					await cm.disconnect();
+					const result = await cm.connect(token);
+					if (!result) throw new Error('re-authentication under the new workspace returned no identity');
+					if (!mountedRef.current) return;
+					// Fresh identity = the new org's app manifest/entitlements;
+					// the epoch key remounts WorkspaceProvider so every store
+					// re-reads the new workspace's data.
+					setIdentity(result);
+					setWorkspaceEpoch((e) => e + 1);
+					setRescoping(false);
+					cm.emit('shell:workspaceChanged', { orgId });
+				} catch (err) {
+					console.warn('[shell] reloading: in-process workspace rescope failed — falling back to a full reload', err);
+					window.location.reload();
+				} finally {
+					rescopeRunningRef.current = false;
+				}
+			})();
 		});
 	}, [cm]);
 
@@ -850,22 +898,31 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	return (
 		<ShellIdentityContext.Provider value={identity}>
 			<ShellApiConfigProvider config={config.apiConfig}>
-				<WorkspaceProvider
-					apps={apps}
-					workspaceDir={config.workspaceDir}
-					startupAppId={activeAppId || sessionAppId || cm.getPendingAppId() || defaultAppId}
-					defaultAppId={defaultAppId}
-					themeOptions={config.themeConfig.options}
-					onThemeChange={config.themeConfig.onThemeChange}
-				>
-					<ShellLayout
-						config={resolvedConfig}
-						isConnected={isConnected}
-						statusMessage={statusMessage}
-						hideAppSwitcher={!!sessionAppId}
+				{/* Mid-rescope the workspace subtree is OUT of the tree (its
+				    unmount flushed the old workspace's stores on the old
+				    connection); the epoch key makes a finished rescope remount
+				    everything against the new workspace's data. */}
+				{rescoping ? (
+					<LoadingScreen />
+				) : (
+					<WorkspaceProvider
+						key={workspaceEpoch}
+						apps={apps}
+						workspaceDir={config.workspaceDir}
+						startupAppId={activeAppId || sessionAppId || cm.getPendingAppId() || defaultAppId}
 						defaultAppId={defaultAppId}
-					/>
-				</WorkspaceProvider>
+						themeOptions={config.themeConfig.options}
+						onThemeChange={config.themeConfig.onThemeChange}
+					>
+						<ShellLayout
+							config={resolvedConfig}
+							isConnected={isConnected}
+							statusMessage={statusMessage}
+							hideAppSwitcher={!!sessionAppId}
+							defaultAppId={defaultAppId}
+						/>
+					</WorkspaceProvider>
+				)}
 			</ShellApiConfigProvider>
 
 			{/* Checkout overlay — renders outside the shell layout */}

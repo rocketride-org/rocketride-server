@@ -24,6 +24,7 @@ import type { ShellApiV6 } from '../contract/versions/v6';
 import type { ShellApiV7 } from '../contract/versions/v7';
 import type { ShellApiV8 } from '../contract/versions/v8';
 import type { ShellApiV9 } from '../contract/versions/v9';
+import type { ShellApiV10 } from '../contract/versions/v10';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -810,6 +811,8 @@ import type { ISettingsProviderProps as Frozen_ISettingsProviderProps } from '..
 import type { ISettingsProviderProps as Current_ISettingsProviderProps } from './api';
 import type { ISettingsRichContext as Frozen_ISettingsRichContext } from '../contract/versions/v9';
 import type { ISettingsRichContext as Current_ISettingsRichContext } from './api';
+import type { DeleteOrgPrecheck as Frozen_DeleteOrgPrecheck } from '../contract/versions/v10';
+import type { DeleteOrgPrecheck as Current_DeleteOrgPrecheck } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -832,6 +835,8 @@ const _floor_v8: ShellApiV8 = {} as ShellApiShape;
 void _floor_v8;
 const _floor_v9: ShellApiV9 = {} as ShellApiShape;
 void _floor_v9;
+const _floor_v10: ShellApiV10 = {} as ShellApiShape;
+void _floor_v10;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1622,3 +1627,5 @@ const _t_ISettingsProviderProps: Frozen_ISettingsProviderProps = {} as Current_I
 void _t_ISettingsProviderProps;
 const _t_ISettingsRichContext: Frozen_ISettingsRichContext = {} as Current_ISettingsRichContext;
 void _t_ISettingsRichContext;
+const _t_DeleteOrgPrecheck: Frozen_DeleteOrgPrecheck = {} as Current_DeleteOrgPrecheck;
+void _t_DeleteOrgPrecheck;
