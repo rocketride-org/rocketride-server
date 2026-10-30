@@ -457,6 +457,11 @@ _WRITES_EACH_ROW = [
     'UNWIND $rows AS row MERGE (a:P {id: row.a})-[r:R]->(b:Q {id: row.b}) SET b.x = row.x, r.w = row.w',
     # An edge from a per-row node is per-row, even when its far node has a fixed key.
     "MATCH (p:P) MERGE (p)-[r:WORKS_AT]->(c:Company {name: 'acme'}) SET r.since = 2024",
+    # Keys that change with every multiplying step before the MERGE.
+    "UNWIND $rows AS row MATCH (c:C {id: row.id}) MERGE (c)-[r:HAS]->(d:D {name: 'eng'}) SET r.n = 1",
+    'MATCH (p:P) UNWIND p.tags AS t MERGE (p)-[r:TAGGED]->(n:Tag {name: t}) SET r.at = 1',
+    'UNWIND [1, 2] AS x UNWIND [3, 4] AS y MERGE (n:N {id: x})-[r:R]->(m:M {id: y}) SET r.v = 1',
+    'UNWIND $rows AS row CREATE (n:N {id: row.id}) MERGE (n)-[r:R]->(m:M {id: 1}) SET r.x = 1',
 ]
 
 # One MERGE-created entity written from several rows: AGE 1.6.0 keeps one write.
@@ -475,6 +480,13 @@ _WRITES_SAME_ENTITY_PER_ROW = [
     'UNWIND $rows AS row MERGE (a:A {id: row.id}) MERGE (a)-[r:R]->(b:B {id: 1}) SET b.x = 1',
     # No properties at all: the text cannot show whether rows share the node.
     'MATCH (p:P) MERGE (p)-[:HAS]->(x:Profile) SET x.v = p.name',
+    # The key misses a multiplying step: a fixed-key MATCH, an earlier step, a cross product.
+    "MATCH (a:P {name: 'alice'}), (b:P {name: 'bob'}) UNWIND [1, 2, 3] AS i MERGE (a)-[r:K]->(b) SET r.c = i",
+    "UNWIND $rows AS row MATCH (c:C {name: 'acme'}) MERGE (c)-[r:HAS]->(d:D {name: 'eng'}) SET r.n = 1",
+    'UNWIND [1, 2] AS x UNWIND [3, 4] AS y MERGE (n:N {id: x}) SET n.v = y',
+    'MATCH (p:P) UNWIND p.tags AS t MERGE (n:Tag {name: t}) SET n.c = 1',
+    # A path MATCH repeats its nodes: one row per edge.
+    'MATCH (p:P)-[:KNOWS]->(f) MERGE (q:Q {name: p.name}) SET q.seen = true',
 ]
 
 

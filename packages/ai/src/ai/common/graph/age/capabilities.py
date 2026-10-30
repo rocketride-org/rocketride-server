@@ -104,7 +104,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.REJECT,
             detect=_uses_function('datetime'),
             detail=(
-                'AGE 1.5.0 has no datetime() (function ag_catalog.age_datetime does not exist); '
+                'Apache AGE has no datetime() (function ag_catalog.age_datetime does not exist); '
                 'store timestamps as ISO-8601 strings or epoch numbers instead'
             ),
         ),
@@ -122,7 +122,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.REJECT,
             detect=lambda facts: facts.has_order_by_alias,
             detail=(
-                "AGE 1.5.0 cannot ORDER BY a projection alias ('could not find rte for <name>'); "
+                "Apache AGE cannot ORDER BY a projection alias ('could not find rte for <name>'); "
                 'order by the expression itself (e.g. ORDER BY r.since, not ORDER BY since)'
             ),
         ),
@@ -135,7 +135,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.REJECT,
             detect=lambda facts: facts.has_merge_action,
             detail=(
-                "AGE 1.5.0 does not parse MERGE ... ON CREATE/ON MATCH SET (syntax error at 'ON'); "
+                "Apache AGE does not parse MERGE ... ON CREATE/ON MATCH SET (syntax error at 'ON'); "
                 'use plain MERGE, then a separate SET clause (MERGE (n) ... SET n.prop = ...)'
             ),
         ),
@@ -144,7 +144,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.REJECT,
             detect=lambda facts: facts.has_where_label_check,
             detail=(
-                "AGE 1.5.0 does not parse label predicates in WHERE — 'WHERE n:Label' and "
+                "Apache AGE does not parse label predicates in WHERE — 'WHERE n:Label' and "
                 "'WHERE (n:Label)' both fail (syntax error at ':'); put the label in the "
                 'pattern instead (MATCH (n:Label))'
             ),
@@ -154,7 +154,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.REJECT,
             detect=lambda facts: facts.has_multi_label,
             detail=(
-                'AGE 1.5.0 does not parse multiple labels on one node — (n:A:B) fails in both '
+                'Apache AGE does not parse multiple labels on one node — (n:A:B) fails in both '
                 "CREATE and MATCH (syntax error at ':'); model the second label as a property "
                 'or an edge to a category node'
             ),
@@ -186,7 +186,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.EMULATE,
             detect=lambda facts: bool(facts.empty_in_spans),
             detail=(
-                "AGE 1.5.0 evaluates 'x IN []' as true for every row, and fails with 'cache lookup "
+                "Apache AGE evaluates 'x IN []' as true for every row, and fails with 'cache lookup "
                 "failed for type 0' under NOT / AND / RETURN; rewritten to 'false', its openCypher "
                 'value. An empty list passed as a $parameter is evaluated correctly.'
             ),
@@ -197,7 +197,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.REJECT,
             detect=_uses_function('shortestpath'),
             detail=(
-                'AGE 1.5.0 has no shortestPath() (syntax error); use a bounded variable-length '
+                'Apache AGE has no shortestPath() (syntax error); use a bounded variable-length '
                 'match (e.g. (a)-[*..3]-(b)) and rank by path length in the query'
             ),
         ),
@@ -221,9 +221,10 @@ AGE_1_6_0: Dict[str, Capability] = {
         detail=(
             'AGE 1.6.0 keeps only one of several SET/REMOVE/DELETE writes that one entity a '
             'MERGE created receives in a statement: here the same entity is written from '
-            'several rows (a MATCH/UNWIND/CALL after the MERGE, or a MERGE node whose own '
-            'properties use no per-row value, such as a fixed key, even next to a per-row '
-            'node). Make each row write its own entity, or run the write as a separate '
+            'several rows (a MATCH/UNWIND/CALL after the MERGE, or a MERGE entity whose key '
+            'does not change with every MATCH/UNWIND/CALL before it: a fixed key, a value '
+            'from an earlier step, one side of a cross product). Make each row write its own '
+            'entity, or run the write as a separate '
             'execute call (MATCH (n:L {key: ...}) SET n.prop = ...)'
         ),
     ),

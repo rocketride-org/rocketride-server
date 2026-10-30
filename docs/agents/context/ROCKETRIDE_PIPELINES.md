@@ -699,8 +699,9 @@ runs, so it keeps the 1.5.0 rules until then.
 
   On AGE 1.6.0 the one-call form `UNWIND $rows AS row MERGE (n:Item {id: row.id}) SET n.name =
   row.name` works. It is still rejected when a MATCH / UNWIND / CALL after the MERGE would write
-  the same node once per row, or when the written node has a fixed key (`{name: 'acme'}`) that
-  every row can reach. The two-call form works on both versions.
+  the same node once per row, or when the written node's key does not change with every MATCH /
+  UNWIND before the MERGE (a fixed key such as `{name: 'acme'}`, or a value from an earlier
+  UNWIND in a cross product). The two-call form works on both versions.
 - Keep keys unique within `$rows`: when two rows reach the same node or edge, AGE keeps only one of
   their writes (both versions), and on AGE 1.5.0 `UNWIND ... MERGE` also creates one node per row
   for a repeated key.

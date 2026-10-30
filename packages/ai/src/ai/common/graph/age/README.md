@@ -101,11 +101,12 @@ rocketride-saas#814) and `apache/age:release_PG16_1.6.0`:
   keeps the last). The same holds on 1.5.0, and for entities bound by `MATCH`
   or `CREATE`. → capability REJECT (`merge_write` in the 1.6.0 table) for the
   shapes the query text shows: a `MATCH`/`UNWIND`/`CALL` between a MERGE and a
-  write to what it introduced, or, after rows were multiplied, a write to a
-  MERGE node whose own properties use no per-row value: a fixed key such as
-  `{name: 'acme'}` can be the same node on every row, even next to a per-row
-  node. Repeated keys in the data cannot be seen in the text: keep keys unique
-  within one batch.
+  write to what it introduced, or a write to a MERGE entity whose key does not
+  change with every `MATCH`/`UNWIND`/`CALL` before the MERGE. A fixed key such
+  as `{name: 'acme'}`, a value from an earlier step, or one side of a cross
+  product repeats across the rows of a later step, so the same entity is
+  written several times. Repeated keys in the data cannot be seen in the text:
+  keep keys unique within one batch.
 - Unchanged from 1.5.0: `x IN []`, `ORDER BY` an alias, `datetime()`, and the
   syntax gaps (`ON CREATE SET`, `WHERE n:Label`, multi-label, `shortestPath`).
   AGE's PG16 branch fixes `x IN []` and `ORDER BY` an alias after 1.6.0, in no

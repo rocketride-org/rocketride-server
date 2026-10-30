@@ -726,6 +726,7 @@ class TestAgeDataGaps:
             'MERGE (n:U {id: 1}) WITH n MATCH (p:Person) SET n.x = p.name',
             'UNWIND [1, 2, 3] AS i MERGE (n:U {id: 1}) SET n.x = coalesce(n.x, 0) + 1',
             "MATCH (p:Person) MERGE (p)-[:WORKS_AT]->(n:U {name: 'acme'}) SET n.x = p.name",
+            'UNWIND [1, 2] AS x UNWIND [3, 4] AS y MERGE (n:U {id: x}) SET n.v = y',
         ],
     )
     def test_same_merge_entity_written_from_several_rows_rejected_before_db(self, rr_env, age_graph, query):

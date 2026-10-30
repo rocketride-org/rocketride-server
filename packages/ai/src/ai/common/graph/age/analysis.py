@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterator, List, Optional, Set, Tuple
 
 from antlr4 import CommonTokenStream, InputStream, ParserRuleContext
 from antlr4.error.ErrorListener import ErrorListener
@@ -337,44 +337,55 @@ def _referenced_variables(ctx) -> Set[str]:
     return names
 
 
-def _project_row_variables(items_ctx, row_vars: Set[str]) -> Set[str]:
-    """Per-row variables after a WITH: names whose expression uses a per-row variable.
+def _steps_of(ctx, steps: Dict[str, Set[int]]) -> Set[int]:
+    """Row-multiplying steps that the variables used under ``ctx`` change with.
 
-    ``WITH *`` keeps them all; ``WITH row.id AS k`` makes ``k`` per-row when
-    ``row`` is.
+    Args:
+        ctx: A parse-tree node (an expression or a property map), or None.
+        steps: For each variable bound so far, the steps it changes with.
+
+    Returns:
+        The union of the steps of every variable used under ``ctx``.
+    """
+    found: Set[int] = set()
+    if ctx is not None:
+        for name in _referenced_variables(ctx):
+            found |= steps.get(name, set())
+    return found
+
+
+def _project_steps(items_ctx, steps: Dict[str, Set[int]]) -> Dict[str, Set[int]]:
+    """Steps of each variable a WITH projects.
+
+    ``WITH *`` keeps every variable; ``WITH row.id AS k`` gives ``k`` the steps
+    of ``row``. A name the WITH does not project drops out.
+
+    Args:
+        items_ctx: The WITH's ``oC_ProjectionItems``.
+        steps: Steps of each variable bound before the WITH.
+
+    Returns:
+        Steps of each variable bound after the WITH.
     """
     star = items_ctx.getChild(0).getText() == '*'
-    out = set(row_vars) if star else set()
+    out = {name: set(found) for name, found in steps.items()} if star else {}
     for item in items_ctx.oC_ProjectionItem():
         alias = item.oC_Variable()
         name = _strip_backticks(alias.getText()) if alias is not None else _bare_variable(item.oC_Expression())
-        if name is None:
-            continue
-        if _referenced_variables(item.oC_Expression()) & row_vars:
-            out.add(name)
-        else:
-            out.discard(name)
+        if name is not None:
+            out[name] = _steps_of(item.oC_Expression(), steps)
     return out
 
 
-def _per_row_merge_variables(part, introduced: Set[str], row_vars: Set[str]) -> Set[str]:
-    """Variables a MERGE introduced that name a different entity on every row.
-
-    Decided per node and per relationship, not per pattern: a node differs per
-    row when its own properties use a per-row value. A fixed key such as
-    ``{name: 'acme'}`` can reach the same node from every row, even when the
-    node sits next to a per-row node. A relationship differs per row when a
-    node at either end does (a per-row variable bound earlier, or a node of
-    this MERGE), or when its own properties use a per-row value. A path
-    variable differs per row when every part of the path does.
+def _path_elements(part) -> Tuple[list, list]:
+    """Node patterns and relationship details of a pattern part, in path order.
 
     Args:
-        part: The MERGE's ``oC_PatternPart``.
-        introduced: Variables this MERGE introduces.
-        row_vars: Variables bound earlier whose value differs from row to row.
+        part: An ``oC_PatternPart``.
 
     Returns:
-        The introduced variables that differ from row to row.
+        ``(nodes, details)``: ``details[i]`` joins ``nodes[i]`` and
+        ``nodes[i + 1]``; a detail is None for ``-->`` without brackets.
     """
     element = part.oC_AnonymousPatternPart().oC_PatternElement()
     while element.oC_NodePattern() is None:
@@ -384,22 +395,64 @@ def _per_row_merge_variables(part, introduced: Set[str], row_vars: Set[str]) -> 
     for chain in element.oC_PatternElementChain():
         details.append(chain.oC_RelationshipPattern().oC_RelationshipDetail())
         nodes.append(chain.oC_NodePattern())
+    return nodes, details
 
-    def name(ctx) -> Optional[str]:
-        variable = ctx.oC_Variable() if ctx is not None else None
-        return _strip_backticks(variable.getText()) if variable is not None else None
 
-    def uses_row_value(ctx) -> bool:
-        properties = ctx.oC_Properties() if ctx is not None else None
-        return properties is not None and bool(_referenced_variables(properties) & row_vars)
+def _element_name(ctx) -> Optional[str]:
+    """Variable of a node pattern or relationship detail, or None when it has none."""
+    variable = ctx.oC_Variable() if ctx is not None else None
+    return _strip_backticks(variable.getText()) if variable is not None else None
 
-    node_rows = [(name(node) in row_vars) or uses_row_value(node) for node in nodes]
-    rel_rows = [node_rows[i] or node_rows[i + 1] or uses_row_value(detail) for i, detail in enumerate(details)]
-    per_row = {name(ctx) for ctx, row in zip(nodes + details, node_rows + rel_rows) if row}
-    path = part.oC_Variable()
-    if path is not None and all(node_rows + rel_rows):
-        per_row.add(_strip_backticks(path.getText()))
-    return per_row & introduced
+
+def _pattern_steps(
+    part, steps: Dict[str, Set[int]], bound: Set[str], match_step: Optional[int] = None
+) -> Dict[str, Set[int]]:
+    """Steps of the variables a MATCH or MERGE pattern part introduces.
+
+    A node changes with the steps its own properties use: a fixed key such as
+    ``{name: 'acme'}`` reaches the same node on every row. A relationship
+    changes with the steps of both its end nodes and of its own properties.
+    The rows of a MATCH part are distinct matches of it, so the variable of a
+    single-node part, or of the one relationship of a single-hop part, also
+    changes with the part's step; the nodes of a longer path repeat (one node,
+    many edges) and do not. A path variable changes with its MATCH step, or,
+    in a MERGE, with the steps every element shares. Variables bound before
+    the part keep their steps.
+
+    Args:
+        part: An ``oC_PatternPart`` of a MATCH or MERGE.
+        steps: Steps of each variable bound so far.
+        bound: Variables bound before this part.
+        match_step: The step of this MATCH part; None for a MERGE.
+
+    Returns:
+        Steps of each variable the part introduces.
+    """
+    nodes, details = _path_elements(part)
+    distinct = None
+    if match_step is not None:
+        distinct = nodes[0] if not details else (details[0] if len(details) == 1 else None)
+
+    def own(ctx) -> Set[int]:
+        name = _element_name(ctx)
+        if name is not None and name in bound:
+            return set(steps.get(name, set()))
+        found = _steps_of(ctx.oC_Properties() if ctx is not None else None, steps)
+        if distinct is not None and ctx is distinct:
+            found.add(match_step)
+        return found
+
+    node_steps = [own(node) for node in nodes]
+    rel_steps = [own(detail) | node_steps[i] | node_steps[i + 1] for i, detail in enumerate(details)]
+    found: Dict[str, Set[int]] = {}
+    for ctx, element_steps in zip(nodes + details, node_steps + rel_steps):
+        name = _element_name(ctx)
+        if name is not None and name not in bound:
+            found[name] = element_steps
+    path = _element_name(part)
+    if path is not None and path not in bound:
+        found[path] = {match_step} if match_step is not None else set.intersection(*(node_steps + rel_steps))
+    return found
 
 
 def _unsafe_write_after_merge(single_query, writes_reach_every_merge: bool = False) -> bool:
@@ -417,10 +470,12 @@ def _unsafe_write_after_merge(single_query, writes_reach_every_merge: bool = Fal
     - ``True`` (AGE 1.6.0): changes reach every entity a MERGE creates, but
       when one entity receives several writes in a statement, AGE keeps only
       one of them. A write may target a variable a MERGE introduced when every
-      row writes its own entity: the MERGE runs before any MATCH/UNWIND/CALL,
-      or that entity differs from row to row (``_per_row_merge_variables``).
-      After rows were multiplied, an entity with a fixed key can be the same
-      on every row, even next to a per-row node, so writes to it are unsafe.
+      row writes its own entity. Each row-multiplying step (an UNWIND, a CALL,
+      one comma-separated part of a MATCH) gets an id, each variable records
+      the steps it changes with (``_pattern_steps``), and a MERGE entity is
+      per-row only when it changes with every step before it. A fixed key, a
+      variable from an earlier step, or one side of a cross product repeats
+      across the rows of a later step, so writes to it are unsafe.
 
     In both modes a MATCH/UNWIND/CALL between the MERGE and the write repeats
     the write once per row on the same entity, so it makes the target unsafe;
@@ -432,10 +487,10 @@ def _unsafe_write_after_merge(single_query, writes_reach_every_merge: bool = Fal
     safe: Optional[Set[str]] = None
     # Variables a MERGE introduced that each row still writes once.
     fresh: Set[str] = set()
-    # Variables whose value can differ from row to row, and whether rows have
-    # been multiplied yet (both used in the 1.6.0 mode only).
-    row_vars: Set[str] = set()
-    multiplied = False
+    # The 1.6.0 mode only: the row-multiplying steps so far, and for each
+    # variable the steps it changes with.
+    all_steps: Set[int] = set()
+    steps: Dict[str, Set[int]] = {}
     for index, clause in enumerate(_clauses(single_query)):
         if isinstance(clause, _WRITE_CLAUSES):
             if safe is None:
@@ -450,34 +505,46 @@ def _unsafe_write_after_merge(single_query, writes_reach_every_merge: bool = Fal
                 safe = set(bound)
                 if not writes_reach_every_merge and index == 0 and not _has_relationship(part):
                     fresh = introduced
+            merged = _pattern_steps(part, steps, bound)
+            steps.update(merged)
             if writes_reach_every_merge:
-                if not multiplied:
-                    fresh |= introduced
-                else:
-                    per_row = _per_row_merge_variables(part, introduced, row_vars)
-                    fresh |= per_row
-                    row_vars |= per_row
+                fresh |= {name for name, changes_with in merged.items() if changes_with >= all_steps}
             bound |= introduced
             continue
         if isinstance(clause, _ROW_MULTIPLYING_CLAUSES):
             fresh = set()
-            multiplied = True
-        if isinstance(clause, (CypherParser.OC_MatchContext, CypherParser.OC_CreateContext)):
-            variables = _pattern_variables(clause.oC_Pattern())
-            bound |= variables
-            if multiplied:
-                row_vars |= variables
+        if isinstance(clause, CypherParser.OC_MatchContext):
+            for part in clause.oC_Pattern().oC_PatternPart():
+                nodes, details = _path_elements(part)
+                if not details and _element_name(nodes[0]) in bound:
+                    # A lone node bound earlier only filters rows.
+                    continue
+                step = len(all_steps)
+                all_steps.add(step)
+                steps.update(_pattern_steps(part, steps, bound, match_step=step))
+                bound |= _pattern_variables(part)
+        elif isinstance(clause, CypherParser.OC_CreateContext):
+            # CREATE makes a new entity on every row.
+            created = _pattern_variables(clause.oC_Pattern()) - bound
+            steps.update({name: set(all_steps) for name in created})
+            bound |= created
         elif isinstance(clause, CypherParser.OC_UnwindContext):
             variable = _strip_backticks(clause.oC_Variable().getText())
+            step = len(all_steps)
+            all_steps.add(step)
+            steps[variable] = {step}
             bound.add(variable)
-            row_vars.add(variable)
-        elif isinstance(clause, CypherParser.OC_InQueryCallContext) and clause.oC_YieldItems() is not None:
-            yielded = {_strip_backticks(y.oC_Variable().getText()) for y in clause.oC_YieldItems().oC_YieldItem()}
-            bound |= yielded
-            row_vars |= yielded
+        elif isinstance(clause, CypherParser.OC_InQueryCallContext):
+            step = len(all_steps)
+            all_steps.add(step)
+            if clause.oC_YieldItems() is not None:
+                for item in clause.oC_YieldItems().oC_YieldItem():
+                    variable = _strip_backticks(item.oC_Variable().getText())
+                    steps[variable] = {step}
+                    bound.add(variable)
         elif isinstance(clause, CypherParser.OC_WithContext):
             items = clause.oC_ProjectionBody().oC_ProjectionItems()
-            row_vars = _project_row_variables(items, row_vars)
+            steps = _project_steps(items, steps)
             if safe is None:
                 bound, _ = _project(items, bound, [])
             else:
