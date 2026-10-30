@@ -119,6 +119,13 @@ def test_the_elasticsearch_store_does_not_open_with_an_unfilled_key(monkeypatch)
     helpers.bulk, helpers.scan = MagicMock(), MagicMock()
     helpers.BulkIndexError = type('BulkIndexError', (Exception,), {})
 
+    import nodes.store_elasticsearch as package
+
+    # Importing the module below also binds it as an attribute of the package.
+    # patch.dict restores sys.modules but not that attribute, so restore it too,
+    # or a later test could get this stand-in-backed module from the package.
+    monkeypatch.setattr(package, 'elasticsearch_store', getattr(package, 'elasticsearch_store', None), raising=False)
+
     with patch.dict(sys.modules, {'elasticsearch': elasticsearch, 'elasticsearch.helpers': helpers}):
         sys.modules.pop('nodes.store_elasticsearch.elasticsearch_store', None)
         from nodes.store_elasticsearch.elasticsearch_store import Store
