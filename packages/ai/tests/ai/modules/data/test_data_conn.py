@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ai.modules.data import data_conn
 from ai.modules.data.data_conn import DataConn, DataConnPipe
 
 
@@ -398,6 +399,22 @@ def test_a_chunked_text_body_is_written_once_when_complete():
     conn._flush_text(pipe_conn)
     conn._flush_text(pipe_conn)  # idempotent: _end flushes again on other paths
     pipe_conn.pipe.writeText.assert_called_once_with('{"action": "opened", "number": 7}')
+
+
+def test_a_text_body_over_the_hold_limit_streams_instead_of_growing(monkeypatch):
+    """Past the limit the held text is written and later chunks go straight through, as before buffering."""
+    monkeypatch.setattr(data_conn, 'TEXT_LANE_HOLD_BYTES', 4)
+    conn = _make_conn()
+    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None)
+    conn._write_text(pipe_conn, b'ab')
+    conn._write_text(pipe_conn, b'cd')
+    pipe_conn.pipe.writeText.assert_not_called()  # at the limit, still one text
+
+    conn._write_text(pipe_conn, b'ef')
+    conn._write_text(pipe_conn, b'gh')
+    conn._flush_text(pipe_conn)
+
+    assert [c.args[0] for c in pipe_conn.pipe.writeText.call_args_list] == ['abcdef', 'gh']
 
 
 def test_end_text_flushes_and_rejects_a_truncated_character():

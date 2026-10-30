@@ -99,6 +99,13 @@ def _is_text_format(mime_base: str) -> bool:
     return mime_base.startswith('application/') and mime_base.endswith(('+json', '+xml'))
 
 
+# The text lane holds a body until the pipe closes so it arrives as one text.
+# Past this many bytes it stops holding: the text so far is written and the rest
+# goes through chunk by chunk, as every text body did before, so a large upload
+# costs no more memory than it used to.
+TEXT_LANE_HOLD_BYTES = 8 * 1024 * 1024
+
+
 def _trim_tool_data(value: Any) -> Any:
     """
     Bound a tool input/output payload for embedding in a trace event.
@@ -143,6 +150,7 @@ class DataConnPipe:
     in_use: bool = False  # True while a sync operation (write) is actively running in a thread
     text_decoder: Any = None  # Incremental UTF-8 decoder for the text lane, created on the first write
     text_parts: Any = None  # Text-lane body decoded so far, written as one text when the pipe closes
+    text_bytes: int = 0  # Text-lane bytes received so far, checked against TEXT_LANE_HOLD_BYTES
 
 
 class DataConn(DAPConn):
@@ -506,6 +514,10 @@ class DataConn(DAPConn):
         decoder keeps a UTF-8 character split between chunks intact, and invalid
         bytes still fail this write.
 
+        A body larger than TEXT_LANE_HOLD_BYTES is not held whole: the chunk that
+        crosses the limit writes everything held so far, and each later chunk is
+        written as it arrives.
+
         Args:
             conn_pipe: The pipe being written. Holds the decoder and the text so far.
             data: The raw bytes of this chunk.
@@ -513,8 +525,16 @@ class DataConn(DAPConn):
         if conn_pipe.text_decoder is None:
             conn_pipe.text_decoder = codecs.getincrementaldecoder('utf-8')()
             conn_pipe.text_parts = []
+            conn_pipe.text_bytes = 0
         text = conn_pipe.text_decoder.decode(data)
-        if text:
+        conn_pipe.text_bytes += len(data)
+        if conn_pipe.text_bytes > TEXT_LANE_HOLD_BYTES:
+            conn_pipe.text_parts.append(text)
+            text = ''.join(conn_pipe.text_parts)
+            conn_pipe.text_parts.clear()
+            if text:
+                conn_pipe.pipe.writeText(text)
+        elif text:
             conn_pipe.text_parts.append(text)
 
     def _flush_text(self, conn_pipe: DataConnPipe) -> None:
