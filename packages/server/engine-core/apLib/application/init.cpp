@@ -36,9 +36,7 @@ void engine() {
         "                 \"path\": \"local_nodes.<node>\".");
     LOGOUTPUT(
         "    --dumps      Write a crash dump (minidump) if the engine crashes");
-    LOGOUTPUT(
-        "                 Off by default: dumps hold process memory. A value");
-    LOGOUTPUT("                 (--dumps=<dir|url>) is not supported yet");
+    LOGOUTPUT("                 Off by default: dumps hold process memory");
     LOGOUTPUT("\n");
 }
 
@@ -142,14 +140,6 @@ Error init() noexcept {
         LOGOUTPUT("Version: {} hash: {} stamp: {}", projectVersion(),
                   buildHash(), buildStamp());
         quickExit();
-    }
-
-    if (auto arg = dev::dumpsValueArg(cmdline().args_original())) {
-        LOGOUTPUT("{}: a value is not supported yet", *arg);
-        // Nor start the crash handler on the way out
-        dev::Dumps.setValue({});
-        if (!ccode)
-            ccode = APERR(Ec::InvalidParam, "--dumps takes no value yet", *arg);
     }
 
 #if ROCKETRIDE_PLAT_UNX

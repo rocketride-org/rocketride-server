@@ -7,8 +7,8 @@ platform, so one symbolication workflow covers all of them.
 Dumps are **opt-in**: a minidump holds process memory, so the engine writes one
 only when started with `--dumps`. Without it a crash is still logged, but the
 engine starts no `crashpad_handler`, writes no dump and recovers none.
-`--dumps=<value>` will choose where dumps go (#2892); until then the engine
-refuses to start when given any value, even `true` or an empty one. `eaas.py` passes its own `--dumps` on to
+Like the `--log.*` switches it takes a boolean value: `--dumps=false` (or `0`,
+`no`) keeps dumps off, and so does a value that is not a boolean. `eaas.py` passes its own `--dumps` on to
 the task processes it starts, as given; a pipeline's own task arguments cannot
 turn it on.
 

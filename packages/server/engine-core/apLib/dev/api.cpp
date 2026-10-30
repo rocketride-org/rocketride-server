@@ -39,14 +39,13 @@ namespace ap::dev {
 // Crash dumps hold process memory, so the engine writes them only when asked
 application::Opt Dumps{"--dumps"};
 
-// A bare --dumps reaches the engine as "true"; application::init() clears the
-// option when it refuses a value
-bool dumpsEnabled() noexcept { return Dumps.val() == "true"; }
-
-Opt<Text> dumpsValueArg(const std::vector<Text> &args) noexcept {
-    for (const auto &arg : args)
-        if (string::startsWith(arg, "--dumps=", false)) return arg;
-    return {};
+bool dumpsEnabled() noexcept {
+    // Read like the --log.* switches, except that a value which is not a
+    // boolean leaves dumps off rather than ending the engine
+    if (!Dumps)
+        return false;
+    auto enabled = _fsc<bool>(*Dumps);
+    return enabled.hasValue() && enabled.value();
 }
 
 size_t g_nextSlot = 1;

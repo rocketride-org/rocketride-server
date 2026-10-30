@@ -38,7 +38,8 @@ auto &minidumpLifetime() noexcept {
 }  // namespace internal
 
 void minidumpRegister() noexcept {
-    if (!dev::dumpsEnabled()) return;
+    if (!dev::dumpsEnabled())
+        return;
 
     // Idempotent: restarting the handler per task would leak handler processes.
     if (!internal::minidumpLifetime()) internal::minidumpLifetime().emplace();
@@ -46,7 +47,8 @@ void minidumpRegister() noexcept {
 
 void minidumpSweep() noexcept {
     // Nor relocate what an earlier run with dumps on left in the database
-    if (!dev::dumpsEnabled()) return;
+    if (!dev::dumpsEnabled())
+        return;
 
     internal::sweepDumps(internal::crashDbDir());
 }

@@ -105,38 +105,21 @@ TEST_CASE("crashpad") {
         REQUIRE(dumpsIn(crashDir).size() > before.size());
     }
 
-    // Dumps are opt-in: without the flag the crash is still fatal, but no
-    // handler starts, so there is no crash DB and no dump.
+    // Dumps are opt-in: without the flag, or with it set false, the crash is
+    // still fatal, but no handler starts, so there is no crash DB and no dump.
     SECTION("without --dumps a crash writes no dump") {
-        auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-off";
-        std::error_code ec;
-        std::filesystem::remove_all(dir, ec);
-        auto before = dumpsIn(crashDir);
-
-        int status = runCrashChild("crash", dir.c_str(), nullptr);
-        REQUIRE(WIFSIGNALED(status));
-
-        ::usleep(1000 * 1000);  // let any stray dump land
-
-        REQUIRE(!std::filesystem::exists(dir, ec));
-        REQUIRE(dumpsIn(crashDir) == before);
-    }
-
-    // A value, even "true" or an empty one, is reserved for where dumps go: the
-    // engine refuses to start, so the child exits with an error before it can
-    // crash
-    SECTION("--dumps with a value is refused at startup") {
-        for (const char *flag : {"--dumps=/tmp", "--dumps=true", "--dumps="}) {
-            INFO(flag);
+        for (const char *flag : {(const char *)nullptr, "--dumps=false"}) {
+            INFO((flag ? flag : "no --dumps"));
             auto dir =
-                std::filesystem::temp_directory_path() / "rr-crashdb-value";
+                std::filesystem::temp_directory_path() / "rr-crashdb-off";
             std::error_code ec;
             std::filesystem::remove_all(dir, ec);
             auto before = dumpsIn(crashDir);
 
             int status = runCrashChild("crash", dir.c_str(), flag);
-            REQUIRE(WIFEXITED(status));
-            REQUIRE(WEXITSTATUS(status) != 0);
+            REQUIRE(WIFSIGNALED(status));
+
+            ::usleep(1000 * 1000);  // let any stray dump land
 
             REQUIRE(!std::filesystem::exists(dir, ec));
             REQUIRE(dumpsIn(crashDir) == before);

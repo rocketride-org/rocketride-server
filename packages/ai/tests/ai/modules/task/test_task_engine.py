@@ -1277,6 +1277,10 @@ async def test_start_passes_the_hosting_flags(monkeypatch, saas, flags):
     assert checked == ([True] if saas else [])
 
 
+# Every spelling of --dumps the cases below use
+_DUMPS_SPELLINGS = {'--dumps', '--DUMPS', '--dumps=false', '--Dumps=yes', '--dumps=1'}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ('startup', 'user', 'passed'),
@@ -1284,17 +1288,18 @@ async def test_start_passes_the_hosting_flags(monkeypatch, saas, flags):
         ([], [], []),
         (['--dumps'], [], ['--dumps']),
         (['--DUMPS'], [], ['--DUMPS']),
-        (['--dumps=/var/dumps'], [], ['--dumps=/var/dumps']),
+        (['--dumps=false'], [], ['--dumps=false']),
         ([], ['--dumps'], []),
-        ([], ['--trace=debugOut --Dumps=/tmp'], []),
+        ([], ['--trace=debugOut --Dumps=yes'], []),
         (['--dumps'], ['--dumps'], ['--dumps']),
-        (['--dumps=/var/dumps'], ['--dumps=/tmp'], ['--dumps=/var/dumps']),
+        (['--dumps=false'], ['--dumps=1'], ['--dumps=false']),
     ],
 )
 async def test_start_passes_dumps_only_from_the_operator(monkeypatch, startup, user, passed):
     """A task writes crash dumps only when the operator started the engine with
-    --dumps; a pipeline caller's args cannot turn them on. The option goes on
-    as given, value included, so the task reads it the same way.
+    --dumps; a pipeline caller's args cannot turn them on, in any spelling the
+    engine accepts. The option goes on as given, so the task reads its value
+    (=false included) the same way.
     """
     import ai.modules.task.task_engine as engine
 
@@ -1322,7 +1327,7 @@ async def test_start_passes_dumps_only_from_the_operator(monkeypatch, startup, u
     with pytest.raises(Launched):
         await Task.start_task(t)
 
-    assert [a for a in spawn.call_args.args if a.split('=', 1)[0].lower() == '--dumps'] == passed
+    assert [a for a in spawn.call_args.args if a in _DUMPS_SPELLINGS] == passed
 
 
 # ---------------------------------------------------------------------------
