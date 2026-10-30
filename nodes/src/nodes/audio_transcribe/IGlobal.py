@@ -21,7 +21,6 @@
 # SOFTWARE.
 # =============================================================================
 
-import threading
 from types import SimpleNamespace
 from typing import Any, List
 
@@ -29,6 +28,7 @@ import numpy as np
 from rocketlib import IGlobalBase, debug
 from ai.common.config import Config
 from ai.common.models import Whisper
+from ai.common.models.base import make_device_lock
 
 
 class IGlobal(IGlobalBase):
@@ -99,9 +99,14 @@ class IGlobal(IGlobalBase):
 
         - Reading configuration values
         - Loading the Whisper model via ai.common.models (model server or local)
-        - Preparing a thread-safe lock for transcription
+        - Preparing the transcription guard: a lock in-process, a no-op with --modelserver
         """
-        self.transcribe_lock = threading.Lock()
+        # Local inference serializes here: one in-process copy with one CTranslate2
+        # worker (WhisperLoader holds a per-model lock as well). With --modelserver the
+        # transcription runs in the model server, so a node-side lock held across the
+        # round trip would only hold the task to one request in flight:
+        # make_device_lock() is a no-op there.
+        self.transcribe_lock = make_device_lock()
 
         config = Config.getNodeConfig(
             self.glb.logicalType,
