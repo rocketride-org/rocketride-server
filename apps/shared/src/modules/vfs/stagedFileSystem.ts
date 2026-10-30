@@ -47,12 +47,20 @@
  *   - An optional staging store persists layers (content-addressed blobs +
  *     manifest); persistence completes before the change tick fires —
  *     persistence IS the save.
+ *   - Every path has a version (see version()). Mutations count at their call
+ *     and run in call order per path; reads wait for them, up to a time limit.
+ *     A write whose `expect` names an older version is refused.
+ *   - commit(), undoTurn(), discard(), rollback() and discardPath() run in call
+ *     order, after every mutation called before them. A commit carries only what
+ *     was staged before its call; a write meanwhile lands in a layer above.
+ *   - The base's cache holds only the server's copy, so a staged entry's
+ *     conflict anchor is the copy this page read.
  *
  * Staged content is text-only (the cloud workspace tools are text-only);
  * binary paths flow through untouched in write-through mode only.
  */
 
-import type { IWorkspaceFileSystem, VfsEntry, VfsOverlay } from './vfsTypes';
+import type { IWorkspaceBaseView, IWorkspaceFileSystem, VfsEntry, VfsOverlay } from './vfsTypes';
 import { sha256Hex } from './hash';
 // The wire-shaped change-management types are OWNED by the shell's
 // WorkspaceFs leaf (both hosts and the op layer type against them);
@@ -78,6 +86,8 @@ export type LayerEntry =
 		/** Hash of `before` (null = did not exist) — the conflict anchor. */
 		baseHash: string | null;
 		stamp: number;
+		/** The view mutation that staged it, in call order; absent for entries restored from the staging store. */
+		seq?: number;
 	}
 	| {
 		kind: 'tombstone';
@@ -90,10 +100,12 @@ export type LayerEntry =
 		 */
 		dir?: boolean;
 		stamp: number;
+		seq?: number;
 	}
 	| {
 		kind: 'mkdir';
 		stamp: number;
+		seq?: number;
 	};
 
 /** One checkpoint: a frozen (or working) set of staged operations. */
@@ -108,6 +120,24 @@ export interface Layer {
 	committed?: boolean;
 	/** Staged operations, keyed by canonical path. */
 	entries: Map<string, LayerEntry>;
+}
+
+/**
+ * A write refused because its `expect` names an older version than the path's:
+ * something in this page changed the file after the writer read it.
+ */
+export class StaleVersionError extends StaleWriteError {
+	readonly expected: number;
+	readonly actual: number;
+	readonly lastWriter?: string;
+
+	constructor(path: string, versions: { expected: number; actual: number; lastWriter?: string }) {
+		super(path);
+		this.message = `Refusing to save '${path}': it changed after it was read (version ${versions.expected}, now ${versions.actual}${versions.lastWriter ? `; last writer: ${versions.lastWriter}` : ''}). Read it again, then redo the change.`;
+		this.expected = versions.expected;
+		this.actual = versions.actual;
+		this.lastWriter = versions.lastWriter;
+	}
 }
 
 /** Persistence seam — implemented by the workspace StagingStore. */
@@ -135,6 +165,11 @@ export interface StagedFileSystemOptions {
 	 */
 	writeThrough?: boolean;
 	/**
+	 * Max ms a read or staging operation waits for the calls before it (default
+	 * WAIT_MS), so a backend write that never answers fails instead of hanging.
+	 */
+	waitMs?: number;
+	/**
 	 * Fired after a STAGED mutation persists (write/rename/delete/mkdir on
 	 * the staged branch only — write-through delegates to the base, whose
 	 * backend already announces). The composition root uses this to announce
@@ -142,6 +177,51 @@ export interface StagedFileSystemOptions {
 	 * reach the same consumers (dev preview, rescans) as physical writes.
 	 */
 	onMutate?: (path: string, origin?: string) => void;
+	/**
+	 * Throws for a path the view refuses to change. Runs before anything is staged, in
+	 * both modes: manual mode never asks the backend, so a backend rule would fail at commit.
+	 */
+	assertWritable?: (path: string) => void;
+}
+
+export const WAIT_MS = 60_000;
+
+/** The key of a mutation that holds every path (a discard or a rollback). */
+const ROOT = '';
+
+/** Whether a folder holds a path: the same path, a path below it, or any path when the folder is the root. */
+function holds(folder: string, path: string): boolean {
+	return folder === ROOT || path === folder || path.startsWith(`${folder}/`);
+}
+
+/** How a mutation counts and waits (see StagedFileSystem.mutate). */
+interface MutateOptions {
+	/** The paths it deletes or moves away, each with everything below it. */
+	removed?: readonly string[];
+	/** False for a commit, which does not change what the view serves. */
+	count?: boolean;
+	/** What it waits for, instead of the pending mutations of its paths. */
+	after?: Promise<unknown>[];
+	/** A write, delete, rename or mkdir: it lands in the working layer, so until it settles a discard counts its paths. */
+	stages?: boolean;
+	/** False for a commit: what the view serves is the same before, during and after it. */
+	holdsReads?: boolean;
+}
+
+/** One path an undo restores: the content before the undone turns, and the content the base must still hold. */
+interface UndoPath {
+	before: string | null;
+	expected: string | null;
+}
+
+/** The paths an undo deletes: the files the undone turns created. */
+function created(inverse: ReadonlyMap<string, UndoPath>): string[] {
+	return [...inverse].filter(([, { before }]) => before === null).map(([p]) => p);
+}
+
+/** A commit or Discard all called and not yet started, and the last staged mutation called before it. */
+interface Sweep {
+	upTo: number;
 }
 
 // =============================================================================
@@ -150,7 +230,7 @@ export interface StagedFileSystemOptions {
 
 export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	/** The base view — server truth (plus editor overlays). */
-	private readonly base: IWorkspaceFileSystem;
+	private readonly base: IWorkspaceBaseView;
 	/** Optional persistence; when present, mutations await it before notify. */
 	private readonly staging: IStagingStore | null;
 	/** Ordered layers, oldest first; last = the mutable working layer. */
@@ -161,8 +241,50 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	private readonly ready: Promise<void>;
 	/** Pass-through mode flag (see StagedFileSystemOptions). */
 	private writeThrough: boolean;
+	/** Mutations per path (see version()). */
+	private readonly changes = new Map<string, number>();
+	/** Deletes and renames per path; each also changes every path below it. */
+	private readonly removals = new Map<string, number>();
+	private readonly writers = new Map<string, string>();
+	/** Per path, how often a discard or rollback dropped it without counting it at its call (see write()). */
+	private readonly lateDrops = new Map<string, number>();
+	/**
+	 * This view's changes to the base (a replay, a write-through change, an
+	 * invalidate), started and finished, by path; a folder's count for every
+	 * path below it. A server read that one overlapped may hold the older file.
+	 */
+	private readonly baseChanges = new Map<string, { started: number; finished: number }>();
+	/** The cached copy an invalidate dropped, by path, until a read takes the server's copy in (see takeIn). */
+	private readonly dropped = new Map<string, unknown>();
+	/** Per path, how many copies taken in counted a version. */
+	private readonly takenIn = new Map<string, number>();
+	/** Each path's pending mutations, as one promise. */
+	private readonly chains = new Map<string, Promise<void>>();
+	/** The same without the paths a commit holds: what a read waits for. */
+	private readonly readChains = new Map<string, Promise<void>>();
+	/** How many staging mutations were called; each one's number is its place in that order. */
+	private mutations = 0;
+	/** The staging mutations still on their way, by number, with their paths. */
+	private readonly queued = new Map<number, string[]>();
+	/**
+	 * The commits and Discard alls called and not yet started. Each takes
+	 * every staged mutation called before it, so an operation called after
+	 * it leaves those out of what it expects to drop.
+	 */
+	private readonly sweeps = new Set<Sweep>();
+	/** The discards and rollbacks waiting for their turn, with the paths each holds. */
+	private readonly dropWaits = new Set<{ paths: string[]; waited: Promise<void> }>();
+	/** The layers a running commit replays and then sweeps. */
+	private frozen: ReadonlySet<Layer> | null = null;
+	/** Moves on each change to the layer stack, so a staged write can tell its working layer moved while it waited. */
+	private shape = 0;
+	/** Settles once the last commit, undo, discard, rollback or path discard has. */
+	private turns: Promise<void> = Promise.resolve();
+	private readonly waitMs: number;
 	/** Staged-mutation announcement hook (see StagedFileSystemOptions). */
 	private readonly onMutate: ((path: string, origin?: string) => void) | null;
+	/** The read-only rule (see StagedFileSystemOptions). */
+	private readonly writableRule: ((path: string) => void) | null;
 
 	/**
 	 * Builds the staged view over a base view.
@@ -171,11 +293,13 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * @param staging - Optional persistence store for the layers.
 	 * @param options - Behavior flags.
 	 */
-	constructor(base: IWorkspaceFileSystem, staging: IStagingStore | null = null, options: StagedFileSystemOptions = {}) {
+	constructor(base: IWorkspaceBaseView, staging: IStagingStore | null = null, options: StagedFileSystemOptions = {}) {
 		this.base = base;
 		this.staging = staging;
 		this.writeThrough = options.writeThrough === true;
+		this.waitMs = options.waitMs !== undefined && options.waitMs > 0 ? options.waitMs : WAIT_MS;
 		this.onMutate = options.onMutate ?? null;
+		this.writableRule = options.assertWritable ?? null;
 		// step: base ticks flow through our single subscription stream
 		this.base.subscribe(() => this.notify());
 		// step: rehydrate persisted layers; reads before this resolves see the
@@ -222,9 +346,9 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		this.writeThrough = on;
 	}
 
-	/** Whether any non-retained staged operation exists. */
+	/** Whether any non-retained staged operation exists, or a staged mutation is on its way, which may still stage one. */
 	hasPendingChanges(): boolean {
-		return this.pendingLayers().some((l) => l.entries.size > 0);
+		return (!this.writeThrough && this.queued.size > 0) || this.pendingLayers().some((l) => l.entries.size > 0);
 	}
 
 	// ── Internals ────────────────────────────────────────────────────────
@@ -247,10 +371,39 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 */
 	private effectiveCache = new Map<string, LayerEntry | 'gone' | null>();
 
-	/** The mutable working layer, created on first staged mutation. */
-	private workingLayer(): Layer {
+	/**
+	 * The working layer for staged mutation `seq`: the top layer, unless it is committed,
+	 * frozen, or holds what an earlier-called commit carries; then a new one above (see holdBack).
+	 */
+	private openLayer(seq = 0): Layer | null {
 		const last = this.layerStack[this.layerStack.length - 1];
-		if (last && !last.committed) return last;
+		if (!last || last.committed || this.frozen?.has(last)) return null;
+		const upTo = this.carriedBefore(seq);
+		return upTo !== null && [...last.entries.values()].some((entry) => (entry.seq ?? 0) <= upTo) ? null : last;
+	}
+
+	/**
+	 * The last staged mutation that the commits and Discard alls waiting to
+	 * start, called before `seq`, take along, or null when none waits. 0 still
+	 * takes the entries the page restored, which have no number.
+	 */
+	private carriedBefore(seq: number): number | null {
+		const upTos = [...this.sweeps].map((sweep) => sweep.upTo).filter((upTo) => upTo < seq);
+		return upTos.length > 0 ? Math.max(...upTos) : null;
+	}
+
+	/** Counts a commit or Discard all in among the ones waiting to start, or out; a staged write then captures again (see captureBelow). */
+	private waiting(sweep: Sweep, on: boolean): void {
+		if (on ? this.sweeps.has(sweep) : !this.sweeps.has(sweep)) return;
+		if (on) this.sweeps.add(sweep);
+		else this.sweeps.delete(sweep);
+		this.shape += 1;
+	}
+
+	/** The mutable working layer, created on first staged mutation (see openLayer). */
+	private workingLayer(seq = 0): Layer {
+		const open = this.openLayer(seq);
+		if (open) return open;
 		const layer: Layer = { id: crypto.randomUUID(), label: 'Working', entries: new Map() };
 		this.layerStack.push(layer);
 		return layer;
@@ -272,9 +425,9 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		return ruling;
 	}
 
-	/** effective()'s actual walk — only the memo above calls this. */
-	private effectiveUncached(path: string): LayerEntry | 'gone' | null {
-		const pending = this.pendingLayers();
+	/** effective()'s actual walk, over the pending layers or the ones given (a commit's frozen layers). */
+	private effectiveUncached(path: string, layers?: readonly Layer[]): LayerEntry | 'gone' | null {
+		const pending = layers ?? this.pendingLayers();
 		for (let i = pending.length - 1; i >= 0; i--) {
 			const layer = pending[i];
 			const exact = layer.entries.get(path);
@@ -306,10 +459,9 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * @param path - Canonical path.
 	 * @returns Content string, or null when the path has no file below.
 	 */
-	private async effectiveBefore(path: string): Promise<string | null> {
+	private async effectiveBefore(path: string, seq = 0): Promise<string | null> {
 		// step: an existing working-layer entry already carries the capture
-		const working = this.layerStack[this.layerStack.length - 1];
-		const own = working && !working.committed ? working.entries.get(path) : undefined;
+		const own = this.openLayer(seq)?.entries.get(path);
 		if (own && own.kind !== 'mkdir') return own.before;
 		if (own && own.kind === 'mkdir') return null;
 		// step: otherwise the current effective view IS the below-state
@@ -318,10 +470,11 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		if (eff && eff.kind === 'write') return eff.content;
 		if (eff && eff.kind === 'mkdir') return null;
 		try {
-			// step: base TRUTH, never a dirty overlay — the base view serves
-			// an open editor's buffer from read(), and capturing that as
-			// "before" would make staging the same buffer a silent no-op
-			const content = await this.base.peekBase(path);
+			// step: the server's copy this page read, else the server's copy now; never a dirty overlay
+			// (capturing an editor's buffer would make staging it a no-op). A commit over a server copy
+			// that moved on since the page read it then meets a conflict
+			const cached = this.base.cachedContent(path);
+			const content = cached !== undefined ? cached : await this.base.peekBase(path);
 			return typeof content === 'string' ? content : null;
 		} catch {
 			return null;
@@ -347,6 +500,213 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 			await this.staging.gc();
 		} catch {
 			/* orphans are harmless; load() sweeps authoritatively */
+		}
+	}
+
+	// ── Path versions ────────────────────────────────────────────────────
+
+	/** The path's version: its own mutations, plus every delete or rename of a folder above it. */
+	version(path: string): number {
+		const p = this.norm(path);
+		let version = this.changes.get(p) ?? 0;
+		for (let cut = p.lastIndexOf('/'); cut > 0; cut = p.lastIndexOf('/', cut - 1)) {
+			version += this.removals.get(p.slice(0, cut)) ?? 0;
+		}
+		return version;
+	}
+
+	/** Who changed the path last, or the folder above it that was deleted or renamed last. */
+	lastWriter(path: string): string | undefined {
+		const p = this.norm(path);
+		if (this.writers.has(p)) return this.writers.get(p);
+		for (let cut = p.lastIndexOf('/'); cut > 0; cut = p.lastIndexOf('/', cut - 1)) {
+			const folder = p.slice(0, cut);
+			if (this.removals.has(folder)) return this.writers.get(folder);
+		}
+		return undefined;
+	}
+
+	/** How many late drops (see lateDrops) a path has seen, its own and those of the folders above it. */
+	private lateDropsOf(p: string): number {
+		let late = this.lateDrops.get(p) ?? 0;
+		for (let cut = p.lastIndexOf('/'); cut > 0; cut = p.lastIndexOf('/', cut - 1)) late += this.lateDrops.get(p.slice(0, cut)) ?? 0;
+		return late;
+	}
+
+	/** Counts one mutation of a path and records who made it; no origin forgets the last one. */
+	private count(p: string, origin: string | undefined, removal = false): void {
+		this.changes.set(p, (this.changes.get(p) ?? 0) + 1);
+		if (removal) this.removals.set(p, (this.removals.get(p) ?? 0) + 1);
+		if (origin) this.writers.set(p, origin);
+		else this.writers.delete(p);
+	}
+
+	/**
+	 * The pending mutations a call on a path waits for: the path's own and
+	 * those of the folders above it (a discard holds the root), and with
+	 * `below` (a mutation) those of every path below. `read` leaves out the
+	 * paths a commit holds.
+	 */
+	private pendingOn(p: string, below: boolean, read = false): Array<[string, Promise<void>]> {
+		const out: Array<[string, Promise<void>]> = [];
+		for (const [chained, chain] of read ? this.readChains : this.chains) {
+			if (holds(chained, p) || (below && holds(p, chained))) out.push([chained, chain]);
+		}
+		return out;
+	}
+
+	/**
+	 * Runs one mutation in its turn. Its paths count now, in the caller's synchronous block,
+	 * so earlier readers are stale at once; a mutation that fails counts again (its effect is unknown).
+	 */
+	private mutate<T>(paths: string[], origin: string | undefined, work: (seq: number) => Promise<T>, opts: MutateOptions = {}): Promise<T> {
+		const own = [...new Set(paths)];
+		const removed = new Set(opts.removed);
+		const counts = opts.count !== false;
+		const before = opts.after ?? own.flatMap((p) => this.pendingOn(p, true).map(([, chain]) => chain));
+		if (counts) for (const p of own) this.count(p, origin, removed.has(p));
+		const id = opts.stages ? ++this.mutations : 0;
+		if (opts.stages) this.queued.set(id, own);
+		const run = Promise.all(before).then(() => work(id));
+		const tail = run.then(
+			() => undefined,
+			() => {
+				if (counts) for (const p of own) this.count(p, origin, removed.has(p));
+			}
+		);
+		const dequeue = () => this.queued.delete(id);
+		if (opts.stages) void run.then(dequeue, dequeue);
+		for (const p of own) {
+			this.chain(this.chains, p, tail, opts.after !== undefined);
+			if (opts.holdsReads !== false) this.chain(this.readChains, p, tail, opts.after !== undefined);
+		}
+		return run;
+	}
+
+	/** Puts a mutation at the end of a path's chain; `keep` (one that did not wait for the path's earlier ones) keeps them in it. */
+	private chain(chains: Map<string, Promise<void>>, p: string, tail: Promise<void>, keep: boolean): void {
+		const earlier = chains.get(p);
+		const chain = earlier && keep ? Promise.all([earlier, tail]).then(() => undefined) : tail;
+		chains.set(p, chain);
+		void chain.then(() => {
+			if (chains.get(p) === chain) chains.delete(p);
+		});
+	}
+
+	/** Waits for some pending calls (a path, or null for the staging operation before it), up to the time limit. */
+	private async waitInTurn(what: string, waits: Array<[string | null, Promise<unknown>]>): Promise<void> {
+		const open = new Set(waits);
+		for (const wait of waits) void wait[1].then(() => open.delete(wait));
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const limit = new Promise<never>((_, reject) => {
+			timer = setTimeout(() => {
+				const [path] = [...open][0] ?? [null];
+				const blocking = path === null ? 'a commit, undo or discard called before it is still running' : `a change to ${path} is still on its way to the server`;
+				reject(new Error(`Could not ${what}: ${blocking} after ${this.waitMs / 1000} s. Try again later; if this keeps happening, the server is not answering.`));
+			}, this.waitMs);
+		});
+		try {
+			await Promise.race([Promise.all(waits.map(([, wait]) => wait)), limit]);
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	/** Runs a commit or an undo after the staging operation and every mutation called before it. */
+	private inTurn<T>(what: string, work: () => Promise<T>): Promise<T> {
+		const run = this.waitInTurn(what, [[null, this.turns], ...this.chains]).then(work);
+		this.turns = run.then(
+			() => undefined,
+			() => undefined
+		);
+		return run;
+	}
+
+	/**
+	 * Drops staged changes in their turn, as a mutation of `paths` (the root for every path).
+	 * Foreseen drops count now; a path a failed commit left behind counts when it is dropped.
+	 */
+	private dropInTurn(paths: string[], foreseen: Map<string, boolean>, drop: () => { dropped: Map<string, boolean>; settle: () => Promise<void> }, what: string): Promise<void> {
+		for (const [p, removal] of foreseen) this.count(p, 'discard', removal);
+		const waited = this.waitInTurn(what, [[null, this.turns], ...paths.flatMap((p) => this.pendingOn(p, true))]);
+		const waiting = { paths, waited: waited.catch(() => undefined) };
+		this.dropWaits.add(waiting);
+		void waiting.waited.then(() => this.dropWaits.delete(waiting));
+		const run = this.mutate(
+			paths,
+			'discard',
+			async () => {
+				await this.ready;
+				const { dropped, settle } = drop();
+				this.shape += 1;
+				for (const [p, removal] of dropped) {
+					if (foreseen.has(p)) continue;
+					this.count(p, 'discard', removal);
+					this.lateDrops.set(p, (this.lateDrops.get(p) ?? 0) + 1);
+				}
+				await settle();
+			},
+			{ count: false, after: [waited] }
+		);
+		this.turns = run.then(
+			() => undefined,
+			() => undefined
+		);
+		return run;
+	}
+
+	/**
+	 * What dropping some layers would take out of the view: each staged path,
+	 * and whether it was staged as deleted. Left out: the layers a running
+	 * commit froze, and every staged mutation called before a commit or
+	 * Discard all waiting to start, which goes with it.
+	 *
+	 * @param queued - Also the paths of mutations still on their way, which land in the working layer first.
+	 */
+	private staged(layers: readonly Layer[], queued: boolean): Map<string, boolean> {
+		const out = new Map<string, boolean>();
+		const taken = Math.max(0, ...[...this.sweeps].map((sweep) => sweep.upTo));
+		for (const layer of layers) {
+			if (this.frozen?.has(layer)) continue;
+			for (const [p, entry] of layer.entries) {
+				if (this.sweeps.size > 0 && (entry.seq ?? 0) <= taken) continue;
+				out.set(p, out.get(p) === true || entry.kind === 'tombstone');
+			}
+		}
+		// step: a queued mutation may be a delete, so its path counts as one (that only reaches
+		// paths below it). A running commit's held paths are not queued: it carries them to the server
+		if (queued && !this.writeThrough) {
+			for (const [id, paths] of this.queued) if (id > taken) for (const p of paths) out.set(p, true);
+		}
+		return out;
+	}
+
+	/** Each staged path of some layers, and whether it was staged as deleted. */
+	private entriesOf(layers: readonly Layer[]): Map<string, boolean> {
+		const out = new Map<string, boolean>();
+		for (const layer of layers) for (const [p, entry] of layer.entries) out.set(p, out.get(p) === true || entry.kind === 'tombstone');
+		return out;
+	}
+
+	/**
+	 * Waits for the pending mutations of some paths before a read, up to the time limit, but not
+	 * for a commit (it changes nothing the view serves). The limit starts after a discard ahead gives up.
+	 */
+	private async waitToRead(paths: string[]): Promise<void> {
+		const waiting = paths.filter((p) => this.pendingOn(p, false, true).length > 0);
+		if (waiting.length === 0) return;
+		const pending = waiting.flatMap((p) => this.pendingOn(p, false, true).map(([, chain]) => chain));
+		const drops = [...this.dropWaits].filter((drop) => drop.paths.some((held) => waiting.some((p) => holds(held, p))));
+		if (drops.length > 0) await Promise.all(drops.map((drop) => drop.waited));
+		const name = waiting.length === 1 ? waiting[0] : `${waiting[0]} (and ${waiting.length - 1} more)`;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const limit = new Promise<never>((_, reject) => {
+			timer = setTimeout(() => reject(new Error(`Could not read ${name}: a change to it is still on its way to the server after ${this.waitMs / 1000} s. Try again later; if this keeps happening, the server is not answering.`)), this.waitMs);
+		});
+		try {
+			await Promise.race([Promise.all(pending), limit]);
+		} finally {
+			clearTimeout(timer);
 		}
 	}
 
@@ -393,17 +753,113 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		return out.sort((a, b) => a.name.localeCompare(b.name));
 	}
 
-	/** Reads one file: dirty overlay, then staged layers, then base. */
+	/** Reads one file once its pending mutations have settled. */
 	async read(path: string): Promise<unknown> {
-		await this.ready;
+		return (await this.readVersioned(path)).content;
+	}
+
+	/** read() plus its version, taken at the call, and moved on by each changed copy taken in before its read lands (see takeIn). With `stored`, no editor's unsaved buffer answers it. */
+	readVersioned(path: string, opts: { stored?: boolean } = {}): Promise<{ content: unknown; version: number }> {
 		const p = this.norm(path);
+		const version = this.version(p);
+		const from = this.takenIn.get(p) ?? 0;
+		const took = { at: from };
+		return this.waitToRead([p]).then(async () => {
+			const content = await this.readNow(p, opts.stored === true, took);
+			return { content, version: version + took.at - from };
+		});
+	}
+
+	/** Reads one file now: dirty overlay (unless `stored`), then staged layers, then base. */
+	private async readNow(p: string, stored = false, took?: { at: number }): Promise<unknown> {
+		await this.ready;
 		// step: a dirty editor buffer is the user's live truth — it wins
-		if (this.base.isDirty(p)) return this.base.read(p);
+		if (!stored && this.base.isDirty(p)) return this.base.read(p);
 		const eff = this.effective(p);
 		if (eff === 'gone') throw new Error(`No such file: ${p}`);
 		if (eff && eff.kind === 'write') return eff.content;
 		if (eff && eff.kind === 'mkdir') throw new Error(`Not a file: ${p}`);
-		return this.base.read(p);
+		return this.readStored(p, took);
+	}
+
+	/**
+	 * What the base stores for a file (cached copy, else the server's). Read again when one
+	 * of this view's changes to the base overtook the server read, which may hold the older file.
+	 */
+	private async readStored(p: string, took?: { at: number }): Promise<unknown> {
+		for (;;) {
+			const cached = this.base.cachedContent(p);
+			if (cached !== undefined) {
+				// step: a batch read caches its copy before it takes it in, so a read that finds the copy first takes it in
+				this.takeIn(p, cached);
+				if (took) took.at = this.takenIn.get(p) ?? 0;
+				return cached;
+			}
+			const before = this.baseStamp(p);
+			let content: unknown;
+			try {
+				content = await this.base.peekBase(p);
+			} catch (err) {
+				if (this.baseStamp(p) !== before) continue;
+				throw err;
+			}
+			if (this.baseStamp(p) !== before) continue;
+			this.takeIn(p, content);
+			if (took) took.at = this.takenIn.get(p) ?? 0;
+			this.base.prime(p, content);
+			return content;
+		}
+	}
+
+	/**
+	 * A server copy a read took in after an invalidate dropped the cached one. A different copy
+	 * counts a version, or an editor that read the dropped copy would save over it.
+	 */
+	private takeIn(p: string, content: unknown): void {
+		if (!this.dropped.has(p)) return;
+		const moved = this.dropped.get(p) !== content;
+		this.dropped.delete(p);
+		if (!moved) return;
+		this.count(p, undefined);
+		this.takenIn.set(p, (this.takenIn.get(p) ?? 0) + 1);
+	}
+
+	/** Changes some paths (and everything below them) on the base, counted in baseChanges. */
+	private async changeBase<T>(paths: string[], change: () => Promise<T>): Promise<T> {
+		const counts = paths.map((p) => {
+			let count = this.baseChanges.get(p);
+			if (!count) this.baseChanges.set(p, (count = { started: 0, finished: 0 }));
+			return count;
+		});
+		for (const count of counts) count.started += 1;
+		try {
+			return await change();
+		} finally {
+			for (const count of counts) count.finished += 1;
+		}
+	}
+
+	/**
+	 * Writes a file on the base, counted in baseChanges. A copy an invalidate
+	 * dropped while the write was on its way is older than the write, so a
+	 * read that takes the write in counts nothing.
+	 */
+	private writeBase(p: string, content: unknown, origin?: string): Promise<void> {
+		return this.changeBase([p], async () => {
+			await this.base.write(p, content, origin);
+			if (this.dropped.has(p)) this.dropped.set(p, content);
+		});
+	}
+
+	/** This view's changes to the base at a path and above it: a stamp that moves when one starts or finishes. */
+	private baseStamp(p: string): number {
+		let [started, finished] = [0, 0];
+		for (let at = p; ; at = at.slice(0, Math.max(0, at.lastIndexOf('/')))) {
+			const count = this.baseChanges.get(at);
+			if (count) [started, finished] = [started + count.started, finished + count.finished];
+			if (at === ROOT) break;
+		}
+		return started + finished;
 	}
 
 	/**
@@ -415,6 +871,7 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * @returns Map of path to content for every readable path.
 	 */
 	async readMany(paths: string[]): Promise<Record<string, unknown>> {
+		await this.waitToRead(paths.map((path) => this.norm(path)));
 		await this.ready;
 		const out: Record<string, unknown> = {};
 		const passthrough: string[] = [];
@@ -430,7 +887,24 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 			passthrough.push(path);
 		}
 		if (passthrough.length > 0) {
-			for (const [path, content] of Object.entries(await this.base.readMany(passthrough))) out[path] = content;
+			// step: a path that one of this view's changes to the base overtook may come back older than
+			// the change (the base does not cache it): read it again
+			const stamps = new Map(passthrough.map((path) => [path, this.baseStamp(this.norm(path))]));
+			const found = await this.base.readMany(passthrough);
+			for (const path of passthrough) {
+				if (this.baseStamp(this.norm(path)) === stamps.get(path)) {
+					if (Object.hasOwn(found, path)) {
+						out[path] = found[path];
+						this.takeIn(this.norm(path), found[path]);
+					}
+					continue;
+				}
+				try {
+					out[path] = await this.readStored(this.norm(path));
+				} catch {
+					/* unreadable: omitted, as from the batch */
+				}
+			}
 		}
 		return out;
 	}
@@ -443,8 +917,14 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * @returns 'file' | 'dir', or null when the path does not exist.
 	 */
 	async stat(path: string): Promise<'file' | 'dir' | null> {
-		await this.ready;
 		const p = this.norm(path);
+		await this.waitToRead([p]);
+		return this.statNow(p);
+	}
+
+	/** stat() now, for mutations that already hold their turn. */
+	private async statNow(p: string): Promise<'file' | 'dir' | null> {
+		await this.ready;
 		const known = this.entryType(p);
 		if (known) return known;
 		// step: a staged ruling of 'gone' is final — never ask the base
@@ -453,6 +933,24 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	// ── IVirtualFileSystem — mutations (staged) ──────────────────────────
+
+	/**
+	 * Throws when the view refuses changes to a path — the same rule every
+	 * mutation runs first, so a caller can refuse before it asks the user.
+	 */
+	assertWritable(path: string): void {
+		this.writableRule?.(this.norm(path));
+	}
+
+	/** assertWritable for a mutation that returns its promise: the refusal becomes a rejection, as an async method's throw would. */
+	private refuseUnwritable(...paths: string[]): Promise<never> | null {
+		try {
+			for (const path of paths) this.assertWritable(path);
+			return null;
+		} catch (err) {
+			return Promise.reject(err);
+		}
+	}
 
 	/**
 	 * Verifies the base has not moved under a path since it was read — the
@@ -467,7 +965,9 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * @param p - The normalized path about to be written.
 	 */
 	private async guardFreshBase(p: string): Promise<void> {
-		const baseline = this.base.cachedContent(p);
+		// step: a copy an invalidate dropped guards the next save in its place, then is spent
+		const baseline = this.base.cachedContent(p) ?? this.dropped.get(p);
+		this.dropped.delete(p);
 		let current: unknown;
 		try {
 			current = await this.base.peekBase(p);
@@ -482,24 +982,49 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		throw new StaleWriteError(p);
 	}
 
-	/** Stages a whole-file write (or passes through in write-through mode). */
-	async write(path: string, content: unknown, origin?: string): Promise<void> {
-		await this.ready;
+	/**
+	 * Stages a whole-file write (or passes through in write-through mode).
+	 * With `expect`, it is refused unless the path is still at that version.
+	 */
+	write(path: string, content: unknown, origin?: string, expect?: number): Promise<void> {
+		const refused = this.refuseUnwritable(path);
+		if (refused) return refused;
 		const p = this.norm(path);
+		// step: the check, the count and the queueing run in one synchronous block
+		if (expect !== undefined && expect !== this.version(p)) {
+			return Promise.reject(new StaleVersionError(p, { expected: expect, actual: this.version(p), lastWriter: this.lastWriter(p) }));
+		}
+		const late = this.lateDropsOf(p);
+		return this.mutate(
+			[p],
+			origin,
+			(seq) => {
+				// step: a discard called before it dropped the path after all, after the check above: the content may be computed from what it dropped
+				if (expect !== undefined && this.lateDropsOf(p) !== late) throw new StaleVersionError(p, { expected: expect, actual: this.version(p), lastWriter: this.lastWriter(p) });
+				return this.writeNow(p, content, origin, seq);
+			},
+			{ stages: true }
+		);
+	}
+
+	private async writeNow(p: string, content: unknown, origin?: string, seq?: number): Promise<void> {
+		await this.ready;
 		if (this.writeThrough) {
 			// step: write-through IS the commit for this path — same freshness
 			// discipline commit() applies to staged layers, at save time.
 			await this.guardFreshBase(p);
-			return this.base.write(p, content, origin);
+			return this.writeBase(p, content, origin);
 		}
 		if (typeof content !== 'string') {
 			throw new Error(`Staged writes are text-only: ${p}`);
 		}
-		const before = await this.effectiveBefore(p);
-		const layer = this.workingLayer();
-		const prior = layer.entries.get(p);
+		if ((await this.statNow(p)) === 'dir') throw new Error(`Not a file: ${p}`);
 		// step: first touch captures the conflict anchor; later touches keep it
-		const keepBefore = prior && prior.kind !== 'mkdir' ? prior.before : before;
+		const [{ before: keepBefore, baseHash }] = await this.captureBelow([p], seq);
+		// step: from the capture to the entry nothing awaits, so the layer
+		// chosen here is the one the capture was taken for
+		const layer = this.workingLayer(seq);
+		const prior = layer.entries.get(p);
 		// step: a write landing EXACTLY on the below-state is not a change —
 		// drop the round-trip entry (save, undo, save-again leaves no residue,
 		// exactly git's clean status after a revert). keepBefore IS what reads
@@ -512,10 +1037,32 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 			this.onMutate?.(p, origin);
 			return;
 		}
-		const baseHash = keepBefore === null ? null : await sha256Hex(keepBefore);
-		layer.entries.set(p, { kind: 'write', content, before: keepBefore, baseHash, stamp: Date.now() });
+		layer.entries.set(p, { kind: 'write', content, before: keepBefore, baseHash, stamp: Date.now(), seq });
 		await this.persistAndNotify();
 		this.onMutate?.(p, origin);
+	}
+
+	/**
+	 * The content below the working layer and its hash, for new entries. Captures again if the
+	 * working layer moved while it waited; the caller sets its entries in the same synchronous block.
+	 * With `anchor` (see delete()), what reads serve must hash to it.
+	 */
+	private async captureBelow(paths: string[], seq = 0, anchor?: string): Promise<Array<{ before: string | null; baseHash: string | null }>> {
+		for (;;) {
+			const shape = this.shape;
+			const staged = this.effective(paths[0]);
+			const captures = await Promise.all(
+				paths.map(async (p) => {
+					const before = await this.effectiveBefore(p, seq);
+					return { before, baseHash: before === null ? null : await sha256Hex(before) };
+				})
+			);
+			const served = anchor !== undefined && staged && staged !== 'gone' && staged.kind === 'write' ? await sha256Hex(staged.content) : captures[0].baseHash;
+			if (shape !== this.shape) continue;
+			// step: checked against the capture the entry records, so no copy read later can become its anchor
+			if (anchor !== undefined && served !== anchor) throw new StaleWriteError(paths[0]);
+			return captures;
+		}
 	}
 
 	/**
@@ -525,53 +1072,101 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * @param originOrRecursive - A string = the vfs-layer write ORIGIN (echo
 	 *   suppression); a boolean = the WorkspaceFs contract recursive flag,
 	 *   which a staged delete does not need (subtrees are shadowed anyway).
+	 * @param anchor - The SHA-256 of the stored copy the delete is based on.
+	 *   The delete is refused with StaleWriteError when the path holds another
+	 *   copy in its turn (the server's copy, in write-through mode).
 	 */
-	async delete(path: string, originOrRecursive?: string | boolean): Promise<void> {
+	delete(path: string, originOrRecursive?: string | boolean, anchor?: string): Promise<void> {
+		const refused = this.refuseUnwritable(path);
+		if (refused) return refused;
 		const origin = typeof originOrRecursive === 'string' ? originOrRecursive : undefined;
-		await this.ready;
 		const p = this.norm(path);
-		if (this.writeThrough) return this.base.delete(p, origin);
+		return this.mutate([p], origin, (seq) => this.deleteNow(p, origin, seq, anchor), { removed: [p], stages: true });
+	}
+
+	private async deleteNow(p: string, origin?: string, seq?: number, anchor?: string): Promise<void> {
+		await this.ready;
+		if (this.writeThrough) {
+			// step: the delete reaches the server now, so it checks the server's copy. On a refusal the cached
+			// copy is older than the server's, so it goes, and the agent's next read gets the server's
+			const server = anchor === undefined ? undefined : await this.base.peekBase(p).catch(() => undefined);
+			if (anchor !== undefined && (server === undefined || (await sha256Hex(String(server))) !== anchor)) {
+				this.invalidate(p);
+				throw new StaleWriteError(p);
+			}
+			return this.changeBase([p], () => this.base.delete(p, origin));
+		}
 		if (!p) throw new Error('Refusing to delete the workspace root.');
 		// step: rule on the path's KIND first — a missing path is an error,
 		// not an invisible forever-pending entry. The dir flag records that
 		// the BASE has the directory (a staged-only dir nets to nothing);
 		// dirs have no content capture, so existence is their commit anchor
-		const kind = await this.stat(p);
+		const kind = await this.statNow(p);
 		if (kind === null) throw new Error(`No such path: ${p}`);
 		const baseKind = kind === 'dir' ? await this.base.stat(p) : null;
-		const before = await this.effectiveBefore(p);
-		const layer = this.workingLayer();
+		const [{ before: keepBefore, baseHash }] = await this.captureBelow([p], seq, anchor);
+		// step: nothing awaits from the capture to the entry (see writeNow)
+		const layer = this.workingLayer(seq);
 		// step: staged entries under a deleted directory are swallowed by it
 		const prefix = `${p}/`;
 		for (const key of [...layer.entries.keys()]) {
 			if (key.startsWith(prefix)) layer.entries.delete(key);
 		}
-		const prior = layer.entries.get(p);
-		const keepBefore = prior && prior.kind !== 'mkdir' ? prior.before : before;
-		const baseHash = keepBefore === null ? null : await sha256Hex(keepBefore);
-		layer.entries.set(p, { kind: 'tombstone', before: keepBefore, baseHash, dir: baseKind === 'dir', stamp: Date.now() });
+		layer.entries.set(p, { kind: 'tombstone', before: keepBefore, baseHash, dir: baseKind === 'dir', stamp: Date.now(), seq });
 		await this.persistAndNotify();
 		this.onMutate?.(p, origin);
 	}
 
-	/** Stages a file rename as tombstone + write (dirs: commit first). */
-	async rename(oldPath: string, newPath: string, origin?: string): Promise<void> {
-		await this.ready;
+	/**
+	 * Stages a file rename as tombstone + write (dirs: commit first). Refused
+	 * while an editor holds unsaved changes at or under its source: the editor
+	 * stays on the old path, and a staged rename would store the unsaved text.
+	 */
+	rename(oldPath: string, newPath: string, origin?: string): Promise<void> {
+		const refused = this.refuseUnwritable(oldPath, newPath);
+		if (refused) return refused;
 		const from = this.norm(oldPath);
 		const to = this.norm(newPath);
-		if (this.writeThrough) return this.base.rename(from, to, origin);
+		const unsaved = this.refuseUnsaved(from);
+		if (unsaved) return Promise.reject(unsaved);
+		return this.mutate([from, to], origin, (seq) => this.renameNow(from, to, origin, seq), { removed: [from, to], stages: true });
+	}
+
+	/** The refusal of a rename while an editor holds unsaved changes at or under its source, or null. */
+	private refuseUnsaved(from: string): Error | null {
+		const unsaved = [...this.base.dirtyPaths()].find((p) => holds(from, p));
+		return unsaved === undefined ? null : new Error(`Save or discard the unsaved changes in ${unsaved} first.`);
+	}
+
+	private async renameNow(from: string, to: string, origin?: string, seq?: number): Promise<void> {
+		await this.ready;
+		// step: the user may have typed while the rename waited its turn
+		const unsaved = this.refuseUnsaved(from);
+		if (unsaved) throw unsaved;
+		if (this.writeThrough) return this.changeBase([from, to], () => this.base.rename(from, to, origin));
 		// step: a definitive ruling — stat consults the base backend when
 		// the inventory has not been walked, so the guard actually holds
-		const type = await this.stat(from);
+		const type = await this.statNow(from);
 		if (type === 'dir') {
 			throw new Error(`Staged directory renames are not supported yet — commit first, then rename ${from}.`);
 		}
-		const content = await this.read(from);
+		// step: typing that starts while the rename runs stays in its editor
+		const content = await this.readNow(from, true);
 		if (typeof content !== 'string') throw new Error(`Staged renames are text-only: ${from}`);
-		// step: origin rides both halves — each announces through onMutate,
-		// matching the backend's both-ends announcement for physical renames
-		await this.delete(from, origin);
-		await this.write(to, content, origin);
+		// step: refused before either half is staged, so a refused rename stages nothing
+		if ((await this.statNow(to)) === 'dir') throw new Error(`Not a file: ${to}`);
+		// step: both halves are staged in one synchronous block and saved by
+		// one store write, so the view never holds the delete without the write
+		const [source, target] = await this.captureBelow([from, to], seq);
+		const layer = this.workingLayer(seq);
+		layer.entries.set(from, { kind: 'tombstone', ...source, dir: false, stamp: Date.now(), seq });
+		if (target.before === content) layer.entries.delete(to);
+		else layer.entries.set(to, { kind: 'write', content, ...target, stamp: Date.now(), seq });
+		await this.persistAndNotify();
+		// step: origin rides both halves, matching the backend's both-ends
+		// announcement for physical renames
+		this.onMutate?.(from, origin);
+		this.onMutate?.(to, origin);
 	}
 
 	/**
@@ -580,15 +1175,21 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * changedPaths()/undo never report an "added" directory that was
 	 * actually there all along.
 	 */
-	async mkdir(path: string, origin?: string): Promise<void> {
-		await this.ready;
+	mkdir(path: string, origin?: string): Promise<void> {
+		const refused = this.refuseUnwritable(path);
+		if (refused) return refused;
 		const p = this.norm(path);
+		return this.mutate([p], origin, (seq) => this.mkdirNow(p, origin, seq), { stages: true });
+	}
+
+	private async mkdirNow(p: string, origin?: string, seq?: number): Promise<void> {
+		await this.ready;
 		if (this.writeThrough) return this.base.mkdir(p, origin);
 		if (!p) return;
-		const existing = await this.stat(p);
+		const existing = await this.statNow(p);
 		if (existing === 'dir') return;
 		if (existing === 'file') throw new Error(`Not a directory: ${p}`);
-		this.workingLayer().entries.set(p, { kind: 'mkdir', stamp: Date.now() });
+		this.workingLayer(seq).entries.set(p, { kind: 'mkdir', stamp: Date.now(), seq });
 		await this.persistAndNotify();
 		this.onMutate?.(p, origin);
 	}
@@ -640,14 +1241,27 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		this.base.upsert(path, type);
 	}
 
-	/** Content-cache seed — delegates to the base. */
-	prime(path: string, content: unknown): void {
-		this.base.prime(path, content);
+	/**
+	 * Declined: the base's cache holds only the server's copy, and content handed back through
+	 * this view may be an editor's buffer or staged. Only the inventory takes the path.
+	 */
+	prime(path: string, _content: unknown): void {
+		const p = this.norm(path);
+		if (this.entryType(p) === null) this.base.upsert(p, 'file');
 	}
 
-	/** Content-cache eviction — delegates to the base. */
+	/** Content-cache eviction. A server read on its way may come back with the dropped copy, so it counts as a change to the base. */
 	invalidate(path?: string): void {
-		this.base.invalidate(path);
+		const p = path === undefined ? ROOT : this.norm(path);
+		for (const q of p === ROOT ? this.base.listEntries().map((entry) => entry.path) : [p]) {
+			const held = this.base.cachedContent(q);
+			if (held !== undefined) this.dropped.set(q, held);
+		}
+		let count = this.baseChanges.get(p);
+		if (!count) this.baseChanges.set(p, (count = { started: 0, finished: 0 }));
+		count.started += 1;
+		count.finished += 1;
+		this.base.invalidate(path === undefined ? undefined : p);
 	}
 
 	/** Editor overlays live on the base (one registry for all views). */
@@ -770,38 +1384,68 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 
 	/**
 	 * Freezes the working layer as a checkpoint; subsequent mutations open
-	 * a fresh working layer.
+	 * a fresh working layer. It runs after the mutations called before it,
+	 * and the ones called after it wait for it, so each lands on its side.
 	 *
 	 * @param label - Display label (e.g. the turn title).
 	 * @param sessionId - The agent session that produced it, when any.
 	 * @returns The frozen layer's id, or null when nothing was staged.
 	 */
-	async checkpoint(label: string, sessionId?: string): Promise<string | null> {
-		const last = this.layerStack[this.layerStack.length - 1];
-		if (!last || last.committed || last.entries.size === 0) return null;
+	checkpoint(label: string, sessionId?: string): Promise<string | null> {
+		const waited = this.waitInTurn('take a checkpoint', [...this.chains]);
+		return this.mutate([ROOT], undefined, () => this.checkpointNow(label, sessionId), { count: false, after: [waited], holdsReads: false });
+	}
+
+	/** checkpoint() in its turn. */
+	private async checkpointNow(label: string, sessionId?: string): Promise<string | null> {
+		const last = this.openLayer();
+		if (!last || last.entries.size === 0) return null;
 		last.label = label;
 		if (sessionId) last.sessionId = sessionId;
 		// step: the next mutation creates a fresh working layer above this one
 		this.layerStack.push({ id: crypto.randomUUID(), label: 'Working', entries: new Map() });
+		this.shape += 1;
 		await this.persistAndNotify();
 		return last.id;
 	}
 
 	/**
 	 * Truncates the stack back to a checkpoint ("roll back to here"):
-	 * every layer above it is dropped. Server untouched.
+	 * every layer above it is dropped. Server untouched. It runs in its turn
+	 * (see dropInTurn), so a write called before it is dropped with the rest.
 	 *
 	 * @param layerId - The checkpoint to become the top of the stack.
 	 */
-	async rollback(layerId: string): Promise<void> {
+	rollback(layerId: string): Promise<void> {
 		const idx = this.layerStack.findIndex((l) => l.id === layerId);
-		if (idx < 0) throw new Error(`No such checkpoint: ${layerId}`);
-		const dropped = this.layerStack.slice(idx + 1);
-		this.layerStack = this.layerStack.slice(0, idx + 1);
-		this.evictDroppedFromBaseCache(dropped);
-		await this.persistAndNotify();
-		this.announceDropped(dropped);
-		await this.gcBestEffort();
+		if (idx < 0) return Promise.reject(new Error(`No such checkpoint: ${layerId}`));
+		// step: what it expects to drop. A commit or Discard all called before it takes the checkpoint
+		// along (unless all of it was staged after that commit was called), and a running commit sweeps
+		// it: then it expects nothing, and counts what it does drop when it drops it
+		const checkpoint = this.layerStack[idx];
+		const taken = this.carriedBefore(Infinity);
+		const goes = this.frozen?.has(checkpoint) === true || (taken !== null && (checkpoint.entries.size === 0 || [...checkpoint.entries.values()].some((entry) => (entry.seq ?? 0) <= taken)));
+		const foreseen = goes ? new Map<string, boolean>() : this.staged(this.layerStack.slice(idx + 1), idx < this.layerStack.length - 1);
+		return this.dropInTurn(
+			[ROOT],
+			foreseen,
+			() => {
+				const at = this.layerStack.findIndex((l) => l.id === layerId);
+				if (at < 0) throw new Error(`No such checkpoint: ${layerId}`);
+				const dropped = this.layerStack.slice(at + 1);
+				this.layerStack = this.layerStack.slice(0, at + 1);
+				this.evictDroppedFromBaseCache(dropped);
+				return {
+					dropped: this.entriesOf(dropped),
+					settle: async () => {
+						await this.persistAndNotify();
+						this.announceDropped(dropped);
+						await this.gcBestEffort();
+					},
+				};
+			},
+			'roll back'
+		);
 	}
 
 	/**
@@ -809,46 +1453,86 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * per-file "git checkout -- <path>": the next read sees the base again.
 	 * A rename's two paths are independent entries (write + tombstone), so
 	 * discarding one side leaves the other staged — per-path semantics,
-	 * exactly like git's. Server untouched.
+	 * exactly like git's. Server untouched. It runs in its turn (see
+	 * dropInTurn), so a write of the path called before it is dropped too.
 	 *
 	 * @param path - The path to revert.
 	 */
-	async discardPath(path: string): Promise<void> {
+	discardPath(path: string): Promise<void> {
 		const p = this.norm(path);
-		let touched = false;
-		for (const layer of this.pendingLayers()) {
-			if (layer.entries.delete(p)) touched = true;
-		}
-		if (!touched) return;
-		// A consumer may have primed the base with content reflecting the
-		// staged state — same eviction rule as rollback/discard.
-		this.base.invalidate(p);
-		await this.persistAndNotify();
-		// step: the path's effective content reverted to the base — announce,
-		// so per-path consumers (editor models) re-read instead of going stale
-		this.onMutate?.(p);
-		await this.gcBestEffort();
+		const layers = this.pendingLayers();
+		const foreseen = new Map([...this.staged(layers, true)].filter(([q]) => q === p));
+		// step: nothing staged, queued or being committed: nothing to drop, and no turn to wait for
+		if (foreseen.size === 0 && !layers.some((layer) => layer.entries.has(p))) return Promise.resolve();
+		return this.dropInTurn(
+			[p],
+			foreseen,
+			() => {
+				const dropped = new Map<string, boolean>();
+				for (const layer of this.pendingLayers()) {
+					const entry = layer.entries.get(p);
+					if (entry && layer.entries.delete(p)) dropped.set(p, dropped.get(p) === true || entry.kind === 'tombstone');
+				}
+				return {
+					dropped,
+					settle: async () => {
+						if (dropped.size === 0) return;
+						// step: the path shows the server's copy again, read afresh (see evictDroppedFromBaseCache)
+						this.base.invalidate(p);
+						await this.persistAndNotify();
+						// step: the path's effective content reverted to the base — announce,
+						// so per-path consumers (editor models) re-read instead of going stale
+						this.onMutate?.(p);
+						await this.gcBestEffort();
+					},
+				};
+			},
+			`discard the changes in ${p}`
+		);
 	}
 
 	/**
-	 * Drops pending changes. Server untouched.
+	 * Drops pending changes. Server untouched. It runs in its turn (see
+	 * dropInTurn), after a commit and every write called before it.
 	 *
-	 * @param path - One path only; omitted = everything pending.
+	 * @param path - One path only (see discardPath); omitted = everything pending.
 	 */
-	async discard(path?: string): Promise<void> {
+	discard(path?: string): Promise<void> {
 		if (path !== undefined) return this.discardPath(path);
-		const dropped = this.pendingLayers();
-		this.layerStack = this.layerStack.filter((l) => l.committed);
-		this.evictDroppedFromBaseCache(dropped);
-		if (this.layerStack.length === 0 && this.staging) {
-			await this.staging.sweep();
-			this.notify();
-			this.announceDropped(dropped);
-			return;
-		}
-		await this.persistAndNotify();
-		this.announceDropped(dropped);
-		await this.gcBestEffort();
+		const foreseen = this.staged(this.pendingLayers(), true);
+		const sweep: Sweep = { upTo: this.mutations };
+		this.waiting(sweep, true);
+		const run = this.dropInTurn(
+			[ROOT],
+			foreseen,
+			() => {
+				this.waiting(sweep, false);
+				const dropped = this.pendingLayers();
+				this.layerStack = this.layerStack.filter((l) => l.committed);
+				this.evictDroppedFromBaseCache(dropped);
+				return {
+					dropped: this.entriesOf(dropped),
+					settle: async () => {
+						if (this.layerStack.length === 0 && this.staging) {
+							await this.staging.sweep();
+							this.notify();
+							this.announceDropped(dropped);
+							return;
+						}
+						await this.persistAndNotify();
+						this.announceDropped(dropped);
+						await this.gcBestEffort();
+					},
+				};
+			},
+			'discard the changes'
+		);
+		// step: a discard that never started (its wait ran out) takes nothing
+		void run.then(
+			() => this.waiting(sweep, false),
+			() => this.waiting(sweep, false)
+		);
+		return run;
 	}
 
 	/**
@@ -867,10 +1551,10 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	}
 
 	/**
-	 * Evicts dropped layers' paths from the base content cache: a consumer
-	 * (bulk loader, dev session) may have primed the base with content that
-	 * REFLECTED the staged state — after a rollback/discard those entries
-	 * would keep serving rolled-back content forever.
+	 * Evicts dropped layers' paths from the base content cache, so the next
+	 * read of each takes the server's copy as it is now: another tab or a
+	 * teammate may have changed it, and a commit that met a conflict for it
+	 * is resolved by dropping the change and starting from that copy.
 	 *
 	 * @param dropped - The layers removed from the stack.
 	 */
@@ -935,24 +1619,24 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		return { before, after };
 	}
 
-	/** The OLDEST pending entry for a path (the original capture). */
-	private firstEntry(path: string): LayerEntry | null {
-		for (const layer of this.pendingLayers()) {
+	/** The OLDEST pending entry for a path (the original capture), among the pending layers or the ones given. */
+	private firstEntry(path: string, layers?: readonly Layer[]): LayerEntry | null {
+		for (const layer of layers ?? this.pendingLayers()) {
 			const entry = layer.entries.get(path);
 			if (entry) return entry;
 		}
 		return null;
 	}
 
-	/** The net effect per path across all pending layers (top-wins). */
-	private netOps(): Map<string, LayerEntry> {
+	/** The net effect per path across some layers, a commit's frozen ones (top-wins). */
+	private netOps(layers: readonly Layer[]): Map<string, LayerEntry> {
 		const net = new Map<string, LayerEntry>();
-		for (const layer of this.pendingLayers()) {
+		for (const layer of layers) {
 			for (const p of layer.entries.keys()) {
 				if (net.has(p)) continue;
-				const eff = this.effective(p);
+				const eff = this.effectiveUncached(p, layers);
 				if (eff === 'gone') {
-					const first = this.firstEntry(p);
+					const first = this.firstEntry(p, layers);
 					// deletes only matter when the base actually has the path —
 					// content capture for files, the dir flag for directories
 					if (first && first.kind === 'tombstone' && (first.before !== null || first.dir)) {
@@ -962,7 +1646,7 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 					}
 				} else if (eff) {
 					// carry the ORIGINAL capture so conflicts anchor to first touch
-					const first = this.firstEntry(p);
+					const first = this.firstEntry(p, layers);
 					if (eff.kind === 'write' && first && first.kind !== 'mkdir') {
 						// step: net-identity writes replay NOTHING — the content
 						// already equals the original capture (mirrors the
@@ -990,15 +1674,67 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * intent, so re-running commit() finishes the job. There is no server
 	 * transaction to lean on; this is the honest contract.
 	 *
+	 * It runs in its turn and carries only what was staged before its call (see holdBack);
+	 * a write meanwhile lands in a layer above, which it does not sweep. It counts no version.
+	 *
 	 * @param options.retain - Keep the layers as inert history (auto mode
 	 *   undo); otherwise layers and staging are swept.
 	 * @returns Committed count, or the conflicts that blocked it.
 	 */
-	async commit(options: { retain?: boolean } = {}): Promise<CommitResult> {
-		await this.ready;
-		const net = this.netOps();
-		if (net.size === 0) return { committed: 0, conflicts: [] };
+	commit(options: { retain?: boolean } = {}): Promise<CommitResult> {
+		const sweep: Sweep = { upTo: this.mutations };
+		this.waiting(sweep, true);
+		const run = this.inTurn('commit', () => this.commitNow(options, sweep));
+		// step: a commit that never started (its wait ran out) carries nothing
+		void run.then(
+			() => this.waiting(sweep, false),
+			() => this.waiting(sweep, false)
+		);
+		return run;
+	}
 
+	/** commit() in its turn: freeze, then verify, replay and sweep. */
+	private async commitNow(options: { retain?: boolean }, sweep: Sweep): Promise<CommitResult> {
+		await this.ready;
+		this.waiting(sweep, false);
+		const frozen = this.holdBack(sweep.upTo);
+		const net = this.netOps([...frozen]);
+		if (net.size === 0) return { committed: 0, conflicts: [] };
+		this.frozen = frozen;
+		this.shape += 1;
+		try {
+			return await this.mutate([...net.keys()], 'commit', () => this.replay(net, frozen, options), { count: false, after: [], holdsReads: false });
+		} finally {
+			this.frozen = null;
+			this.shape += 1;
+		}
+	}
+
+	/**
+	 * Holds back entries staged by mutations called after a commit, so the commit carries only
+	 * what was staged before its call; entries that landed in a carried layer move to a new layer above it.
+	 * @returns The layers the commit carries.
+	 */
+	private holdBack(upTo: number): Set<Layer> {
+		const carried = new Set<Layer>();
+		for (let i = 0; i < this.layerStack.length; i++) {
+			const layer = this.layerStack[i];
+			if (layer.committed) continue;
+			const later = [...layer.entries].filter(([, entry]) => (entry.seq ?? 0) > upTo);
+			if (later.length > 0 && later.length === layer.entries.size) continue;
+			carried.add(layer);
+			if (later.length === 0) continue;
+			for (const [p] of later) layer.entries.delete(p);
+			this.layerStack.splice(i + 1, 0, { id: crypto.randomUUID(), label: 'Working', entries: new Map(later) });
+			i += 1;
+		}
+		this.shape += 1;
+		this.effectiveCache.clear();
+		return carried;
+	}
+
+	/** A commit's verify, replay and sweep, over the net operations of the layers it froze. */
+	private async replay(net: Map<string, LayerEntry>, frozen: ReadonlySet<Layer>, options: { retain?: boolean }): Promise<CommitResult> {
 		// step: verify — the base must still match every first-touch capture.
 		// Tombstones whose outcome the base ALREADY holds are marked converged
 		// and excluded from the replay (deleting a gone path would throw).
@@ -1046,24 +1782,32 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 		}
 		for (const p of paths.filter((x) => net.get(x)!.kind === 'write')) {
 			const entry = net.get(p)! as Extract<LayerEntry, { kind: 'write' }>;
-			await this.base.write(p, entry.content);
+			await this.writeBase(p, entry.content);
 		}
 		for (const p of paths.filter((x) => net.get(x)!.kind === 'tombstone' && !converged.has(x)).sort((a, b) => depth(b) - depth(a))) {
-			await this.base.delete(p);
+			await this.changeBase([p], () => this.base.delete(p));
 		}
 
-		// step: sweep or retain
+		// step: sweep or retain the frozen layers; a working layer opened meanwhile stays
 		if (options.retain) {
-			for (const layer of this.layerStack) {
+			for (const layer of frozen) {
 				if (layer.entries.size > 0) layer.committed = true;
 			}
 			this.layerStack = this.layerStack.filter((l) => l.entries.size > 0);
+			this.shape += 1;
 			await this.persistAndNotify();
 			await this.gcBestEffort();
 		} else {
-			this.layerStack = [];
-			if (this.staging) await this.staging.sweep();
-			this.notify();
+			this.layerStack = this.layerStack.filter((l) => !frozen.has(l) && !l.committed);
+			this.shape += 1;
+			this.effectiveCache.clear();
+			if (this.layerStack.length > 0) {
+				await this.persistAndNotify();
+				await this.gcBestEffort();
+			} else {
+				if (this.staging) await this.staging.sweep();
+				this.notify();
+			}
 		}
 		return { committed: net.size, conflicts: [] };
 	}
@@ -1074,18 +1818,37 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 	 * any affected file changed on the base since its commit, nothing is
 	 * undone and the conflicts are returned.
 	 *
+	 * It runs in its turn, like commit(). The paths it restores, and those a commit called before
+	 * it may still retain, are held from its call: later writes land after it, earlier-computed ones are refused.
+	 *
 	 * @param layerId - The oldest checkpoint to undo.
 	 * @returns Undone path count, or blocking conflicts.
 	 */
-	async undoTurn(layerId: string): Promise<CommitResult> {
-		await this.ready;
+	undoTurn(layerId: string): Promise<CommitResult> {
+		const held = this.undoPlan(layerId, true).inverse;
+		const taken = this.carriedBefore(Infinity) ?? 0;
+		const queued = [...this.queued].filter(([id]) => id <= taken).flatMap(([, paths]) => paths);
+		const waited = this.waitInTurn('undo the turn', [[null, this.turns], ...this.chains]);
+		const run = this.mutate([...held.keys(), ...queued], 'undo', () => this.undoNow(layerId), { removed: created(held), after: [waited] });
+		this.turns = run.then(
+			() => undefined,
+			() => undefined
+		);
+		return run;
+	}
+
+	/**
+	 * The committed layers from a checkpoint up, and per path the content to
+	 * restore and the content the guard expects. With `uncommitted`, also the
+	 * layers not committed yet, which a commit called before the undo may retain.
+	 */
+	private undoPlan(layerId: string, uncommitted = false): { undoing: Layer[]; inverse: Map<string, UndoPath> } {
 		const idx = this.layerStack.findIndex((l) => l.id === layerId);
-		if (idx < 0 || !this.layerStack[idx].committed) throw new Error(`No such committed checkpoint: ${layerId}`);
-		const undoing = this.layerStack.slice(idx).filter((l) => l.committed);
+		const undoing = idx < 0 ? [] : this.layerStack.slice(idx).filter((l) => l.committed || uncommitted);
 
 		// step: inverse per path = the OLDEST capture among undone layers;
 		// expected current = the NEWEST write among them
-		const inverse = new Map<string, { before: string | null; expected: string | null }>();
+		const inverse = new Map<string, UndoPath>();
 		for (const layer of undoing) {
 			for (const [p, entry] of layer.entries) {
 				if (entry.kind === 'mkdir') continue;
@@ -1096,6 +1859,15 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 				else prior.expected = expected;
 			}
 		}
+		return { undoing, inverse };
+	}
+
+	/** undoTurn() in its turn: the guard, the inverse replay and the drop of the undone history. */
+	private async undoNow(layerId: string): Promise<CommitResult> {
+		await this.ready;
+		const idx = this.layerStack.findIndex((l) => l.id === layerId);
+		if (idx < 0 || !this.layerStack[idx].committed) throw new Error(`No such committed checkpoint: ${layerId}`);
+		const { undoing, inverse } = this.undoPlan(layerId);
 
 		// step: guard — the base must still hold what these turns wrote
 		const conflicts: StagedConflict[] = [];
@@ -1114,12 +1886,13 @@ export class StagedFileSystem implements IWorkspaceFileSystem, WorkspaceFs {
 
 		// step: inverse replay — restore before-content, delete creations
 		for (const [p, { before }] of inverse) {
-			if (before === null) await this.base.delete(p);
-			else await this.base.write(p, before);
+			if (before === null) await this.changeBase([p], () => this.base.delete(p));
+			else await this.changeBase([p], () => this.base.write(p, before));
 		}
 
 		// step: the undone history is spent
 		this.layerStack = this.layerStack.filter((l) => !undoing.includes(l));
+		this.shape += 1;
 		if (this.layerStack.length === 0 && this.staging) {
 			await this.staging.sweep();
 			this.notify();

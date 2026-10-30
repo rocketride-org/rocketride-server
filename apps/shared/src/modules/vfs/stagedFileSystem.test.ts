@@ -24,16 +24,17 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import type { IWorkspaceFileSystem, VfsEntry, VfsOverlay } from './vfsTypes';
-import { StagedFileSystem } from './stagedFileSystem';
+import type { IWorkspaceBaseView, VfsEntry, VfsOverlay } from './vfsTypes';
+import { sha256Hex } from './hash';
+import { StagedFileSystem, StaleVersionError, StaleWriteError } from './stagedFileSystem';
 import type { IStagingStore, Layer } from './stagedFileSystem';
 
 // =============================================================================
 // MOCKS — an in-memory base view and a recording staging store
 // =============================================================================
 
-/** In-memory IWorkspaceFileSystem used as the base (server truth). */
-class MockBase implements IWorkspaceFileSystem {
+/** In-memory base view (server truth). */
+class MockBase implements IWorkspaceBaseView {
 	files = new Map<string, string>();
 	dirs = new Set<string>();
 	overlays = new Map<string, VfsOverlay>();
@@ -504,6 +505,29 @@ test('write-through mode passes mutations to the base', async () => {
 	await assert.rejects(() => fs.setWriteThrough(true));
 });
 
+test('the writable rule refuses every mutation before anything is staged, in both modes', async () => {
+	const base = new MockBase();
+	base.files.set('.rocketride/docs/A.md', 'guide');
+	base.files.set('apps/x/a.ts', 'A');
+	const readOnly = /^Error: \.rocketride\/ is read-only reference\.$/;
+	const fs = new StagedFileSystem(base, null, {
+		assertWritable: (path) => {
+			if (path === '.rocketride' || path.startsWith('.rocketride/')) throw new Error('.rocketride/ is read-only reference.');
+		},
+	});
+
+	await assert.rejects(fs.write('.rocketride/docs/A.md', 'x'), readOnly);
+	await assert.rejects(fs.delete('.rocketride/docs/A.md'), readOnly);
+	await assert.rejects(fs.mkdir('.rocketride/mine'), readOnly);
+	await assert.rejects(fs.rename('.rocketride/docs/A.md', 'apps/x/A.md'), readOnly);
+	await assert.rejects(fs.rename('apps/x/a.ts', '.rocketride/a.ts'), readOnly);
+	assert.equal(fs.hasPendingChanges(), false, 'nothing was staged');
+
+	await fs.setWriteThrough(true);
+	await assert.rejects(fs.write('.rocketride/docs/A.md', 'x'), readOnly);
+	assert.deepEqual(Object.fromEntries(base.files), { '.rocketride/docs/A.md': 'guide', 'apps/x/a.ts': 'A' }, 'the base is unchanged');
+});
+
 test('onMutate announces staged mutations with their origin; write-through and no-ops stay silent', async () => {
 	const fired: Array<{ path: string; origin?: string }> = [];
 	const base = new MockBase();
@@ -629,4 +653,57 @@ test('delete of a missing path is refused up front', async () => {
 	const { fs } = makeStaged({});
 	await assert.rejects(() => fs.delete('nope.ts'), /No such path/);
 	assert.equal(fs.hasPendingChanges(), false);
+});
+
+// =============================================================================
+// VERSIONS AND ANCHORS — no writer erases a change it never saw
+// =============================================================================
+
+test("a save at the version an editor loaded is refused once the agent wrote the path, and the agent's write stays", async () => {
+	for (const writeThrough of [false, true]) {
+		const base = new MockBase();
+		base.files.set('f.ts', 'F0');
+		const fs = new StagedFileSystem(base, null, { writeThrough });
+		const loaded = await fs.readVersioned('f.ts');
+		await fs.write('f.ts', 'agent', 'agent', loaded.version);
+		await assert.rejects(fs.write('f.ts', 'editor', 'editor', loaded.version), StaleVersionError);
+		assert.equal(await fs.read('f.ts'), 'agent', writeThrough ? 'write-through' : 'staged');
+	}
+});
+
+test("Commit all meets a teammate's change made after the page read the file, before the first save staged it", async () => {
+	const { base, fs } = makeStaged({ 'f.ts': 'teammate' });
+	// step: the page read F0; the teammate's change landed before the user's first save
+	base.baselines.set('f.ts', 'F0');
+	await fs.write('f.ts', 'mine', 'editor');
+	assert.deepEqual((await fs.commit()).conflicts, [{ path: 'f.ts', reason: 'changed' }]);
+	assert.equal(base.files.get('f.ts'), 'teammate');
+});
+
+test('a delete based on a copy a teammate changed since is refused, so Commit all keeps their change', async () => {
+	const { base, fs } = makeStaged({ 'f.ts': 'teammate' });
+	// step: the agent read F0; a teammate changed the file before the agent's delete
+	await assert.rejects(fs.delete('f.ts', 'agent', await sha256Hex('F0')), StaleWriteError);
+	await fs.commit();
+	assert.equal(base.files.get('f.ts'), 'teammate');
+});
+
+test('a rename is refused while an editor holds unsaved changes at or under its source, staged or write-through', async () => {
+	for (const writeThrough of [false, true]) {
+		const base = new MockBase();
+		base.files.set('apps/x/a.ts', 'stored');
+		const fs = new StagedFileSystem(base, null, { writeThrough });
+		let dirty = true;
+		base.registerOverlay('apps/x/a.ts', { getContent: () => 'unsaved typing', isDirty: () => dirty });
+
+		await assert.rejects(fs.rename('apps/x/a.ts', 'apps/x/b.ts', 'workspace'), /^Error: Save or discard the unsaved changes in apps\/x\/a\.ts first\.$/);
+		await assert.rejects(fs.rename('apps/x', 'apps/y', 'workspace'), /unsaved changes in apps\/x\/a\.ts/, 'a folder above the file too');
+		assert.equal(fs.hasPendingChanges(), false, 'the unsaved typing was not staged as a new file');
+		assert.equal(await fs.read('apps/x/a.ts'), 'unsaved typing', 'the editor keeps its path');
+
+		// step: once the editor is clean, the rename goes ahead
+		dirty = false;
+		await fs.rename('apps/x/a.ts', 'apps/x/b.ts', 'workspace');
+		assert.equal(await fs.read('apps/x/b.ts'), 'stored', writeThrough ? 'write-through' : 'staged');
+	}
 });

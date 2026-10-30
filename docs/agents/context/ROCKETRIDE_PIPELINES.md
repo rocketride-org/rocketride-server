@@ -3,7 +3,10 @@
 The single reference for writing RocketRide `.pipe` files — format, wiring,
 configuration, patterns, and pitfalls in one place.
 
-Everything you need while authoring lives in your workspace:
+The connected server's catalog lists every pipeline component. The client's `getServices()`
+gives each one's name, classType, lanes, and invoke, and `getService(provider)` gives one
+component's full detail, config profiles included. A local checkout keeps everything you need
+while authoring in the workspace:
 
 ```text
 .rocketride/services-catalog.json   # ALL pipeline components: name, classType, lanes, invoke
@@ -15,7 +18,8 @@ Everything you need while authoring lives in your workspace:
 
 **The catalog is the source of truth.** It is generated from the connected server and may list
 pipeline components this document does not mention. Always confirm a provider name, its lanes,
-and its `invoke` requirements in `.rocketride/services-catalog.json` before wiring it. For
+and its `invoke` requirements in the catalog (`getServices()`, or `.rocketride/services-catalog.json`
+locally) before wiring it. For
 client SDK usage (`client.use()`, `client.chat()`, `client.send()`), read
 ROCKETRIDE_python_API.md or ROCKETRIDE_typescript_API.md.
 On RocketRide Cloud there are no custom nodes (its engine starts without `--node_path`),
@@ -87,7 +91,7 @@ components reference it in their `input`/`control` arrays.
 
 ### `provider` (string, required)
 
-The exact `name` of a pipeline component from `.rocketride/services-catalog.json`. A provider
+The exact `name` of a pipeline component from the catalog (`getServices()`). A provider
 not in the catalog does not exist — never guess provider names.
 
 ### `config` (object, required)
@@ -203,9 +207,9 @@ expect a media lane to deliver multiple items per input object.
 
 ### Discovering lanes
 
-`.rocketride/services-catalog.json` has every component's `lanes` map in one file;
-`.rocketride/schema/<provider>.json` adds one component's description, invoke requirements,
-and config detail.
+`getServices()` (local copy: `.rocketride/services-catalog.json`) has every component's `lanes`
+map in one result; `getService(provider)` (local copy: `.rocketride/schema/<provider>.json`) adds
+one component's description, invoke requirements, and config detail.
 
 ---
 
@@ -228,7 +232,8 @@ Most configurable components select a named **profile** and optionally override 
 - The section named after the profile is **optional**; when present it must be an object, and
   its fields override the preset's defaults. Typically you only supply `apikey`.
 - Include `"parameters": {}` in profile-based configs — all shipped examples carry it.
-- Discover a component's profiles in `.rocketride/schema/<provider>.json`.
+- Discover a component's profiles with `getService('<provider>')` (local copy:
+  `.rocketride/schema/<provider>.json`).
 
 ### LLM model selection (`llm_openai`)
 
@@ -246,7 +251,7 @@ not override `model`/`modelTotalTokens` except with the `custom` profile:
 | `openai-4o`, `openai-4o-mini` | gpt-4o / gpt-4o-mini | 128,000 / 16,384 |
 | `custom` | you supply `model` and `apikey` (see also `llm_openai_api` for OpenAI-compatible endpoints) | you supply `modelTotalTokens` |
 
-The schema lists more presets; check `.rocketride/schema/llm_openai.json` when you need one.
+The schema lists more presets; check `getService('llm_openai')` when you need one.
 Other LLM providers follow the same pattern — e.g. `llm_anthropic` defaults to profile
 `claude-sonnet-4-6` and takes `"claude-sonnet-4-6": { "apikey": "${ROCKETRIDE_ANTHROPIC_KEY}" }`.
 
@@ -267,9 +272,12 @@ server-side when the pipeline starts.
 1. **Only variables prefixed `ROCKETRIDE_` are substituted.** Any other `${VAR}` reference is
    replaced with `<REDACTED>` (anti-exfiltration guard) — it does NOT pass through.
 2. A `${ROCKETRIDE_*}` reference with no defined value stays as literal text.
-3. Values come from the merged environment: your workspace `.env` plus org/team/user secrets
-   configured server-side. The client forwards its `ROCKETRIDE_*` variables on `use()`.
+3. Values come from the merged environment: org/team/user secrets configured server-side, plus
+   the `ROCKETRIDE_*` variables the client forwards on `use()` (a local client reads them from
+   the workspace `.env`).
 4. `project_id` never takes a variable (Pitfall 3).
+
+A local checkout supplies its values through `.env`:
 
 ```env
 ROCKETRIDE_URI=http://localhost:54123   # auto-filled by the extension for self-hosted dev engines
@@ -280,8 +288,10 @@ ROCKETRIDE_COLLECTION_NAME=documents
 ```
 
 Keep `.env` gitignored; mirror variable names with placeholders in `.env.example`. When a
-pipeline references `${ROCKETRIDE_*}` variables, add them to `.env` in the same change so it
-can run immediately.
+pipeline references `${ROCKETRIDE_*}` variables, make sure each one has a value in the same
+change so it can run immediately. In a local checkout, add them to `.env`. For server-side
+variables, `account.getEnvironmentKeys()` lists the names already set; ask the user to add any
+that are missing.
 
 > **Pitfall 6 — wrong prefix.** `"apikey": "${OPENAI_KEY}"` does not substitute (it arrives as
 > `<REDACTED>`). Name it `ROCKETRIDE_OPENAI_KEY` and reference `${ROCKETRIDE_OPENAI_KEY}`.
@@ -1156,7 +1166,7 @@ For a no-RAG chat, drop `embedding_transformer_1`, `qdrant_1`, and `prompt_1` an
 - [ ] File named with `.pipe` extension
 - [ ] `components` is the FIRST field; `project_id`, `viewport`, `version` at the bottom
 - [ ] `project_id` is a fresh literal GUID (never a variable, never reused)
-- [ ] Every component `id` unique; every `provider` exists in `.rocketride/services-catalog.json`
+- [ ] Every component `id` unique; every `provider` exists in the catalog (`getServices()`)
 - [ ] Every component has a `config` object (even `{}`)
 - [ ] Source config has all of `hideForm`, `mode: "Source"`, `parameters`, `type`
 - [ ] More than one start? Top-level `source` names the entry component
@@ -1167,7 +1177,8 @@ For a no-RAG chat, drop `embedding_transformer_1`, `qdrant_1`, and `prompt_1` an
 - [ ] Sub-pipelines self-contained: no data input into `tool_pipe`, no node shared between two
       control roots, no merge back into the main flow; each branch ends in its own response node
 - [ ] `memory_internal` config includes `"type": "memory_internal"`; agent configs include `"parameters": {}`
-- [ ] Secrets via `${ROCKETRIDE_*}` only; variables present in `.env` (and named in `.env.example`)
+- [ ] Secrets via `${ROCKETRIDE_*}` only; every variable has a value (in a local checkout,
+      present in `.env` and named in `.env.example`)
 - [ ] Ingestion-only pipelines end in a store; response nodes only where results return to the client
 - [ ] Media-lane smoke tests use CONTENT-BEARING fixtures — an image with
       visible text, audio with speech. A blank/1×1 file proves the branch
@@ -1200,11 +1211,11 @@ Runtime errors:
 | `KeyError: 'answers'` | Custom `laneName` changed the response key — read keys via `result_types` |
 | `Pipeline already running` | `use()` while running — `use_existing=True`, `terminate()` first, or a distinct `token` per instance |
 | `Component not found` / `Lane not supported` | Provider or lane not in the catalog — check spelling and `lanes` |
-| `Connection refused` / `Invalid API key` | External service down, or wrong `.env` values — check hosts, ports, `${ROCKETRIDE_*}` names |
+| `Connection refused` / `Invalid API key` | External service down, or wrong variable values (server-side or `.env`) — check hosts, ports, `${ROCKETRIDE_*}` names |
 
 ---
 
 **Remember:** every `.pipe` file is a complete, self-contained pipeline definition. When in
-doubt: read `.rocketride/services-catalog.json` for what exists,
-`.rocketride/schema/<provider>.json` for how to configure it, start minimal
+doubt: check `getServices()` for what exists and `getService(provider)` for how to
+configure it (local copies under `.rocketride/`), start minimal
 (source → response), and add one pipeline component at a time.

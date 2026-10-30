@@ -14,14 +14,15 @@ person ──> app (React, shell UI) ──> pipeline (.pipe, runs on the server
                                           └──> pipeline components (catalog)
 ```
 
-- The **app ↔ pipeline seam** is the SDK: the app imports a `.pipe` file as
-  JSON, starts it with `client.use({ pipeline })`, holds the returned task
+- The **app ↔ pipeline seam** is the SDK: the app bundles the pipeline's
+  `.pipe` JSON, starts it with `client.use({ pipeline })`, holds the returned task
   token, and talks to the running task with `send` / `chat` / file uploads
   while streaming results back through events.
 - The **pipeline ↔ component seam** is the catalog: each component in a
-  `.pipe` names a `provider` from `.rocketride/services-catalog.json`, its
-  config obeys `.rocketride/schema/<provider>.json`, and connections are typed
-  lane matches.
+  `.pipe` names a `provider` from the server's catalog (`getServices()`), its
+  config obeys that provider's schema (`getService(provider)`), and
+  connections are typed lane matches. A local checkout also keeps copies in
+  `.rocketride/services-catalog.json` and `.rocketride/schema/<provider>.json`.
 - The **app ↔ platform seam** is the shell: apps import UI components, hooks,
   and the connection from the `'shell'` package and render inside an
   `AppLayout`.
@@ -31,9 +32,10 @@ person ──> app (React, shell UI) ──> pipeline (.pipe, runs on the server
 A RocketRide workspace has three project directories by convention — `./apps`
 (app projects), `./pipelines` (standalone `.pipe` files), and `./nodes`
 (reserved for future custom pipeline components) — plus the `.rocketride/`
-directory the platform maintains for you: this documentation, the component
-catalog and schemas, and the vendored `shell` package that apps build against.
-Treat `.rocketride/` as read-only; it is refreshed by the platform.
+directory the platform maintains for you: this documentation and, in a local
+checkout, copies of the component catalog and schemas and the vendored `shell`
+package that apps build against. Treat `.rocketride/` as read-only; it is
+refreshed by the platform.
 
 ## The connection
 
@@ -55,10 +57,12 @@ file-download URLs handed out by the platform are plain HTTP redirects.)
   pipelines resolve `${ROCKETRIDE_*}` substitutions against the merged set.
   A pipeline can therefore run with no local secrets at all.
 
-### Credentials come from `.env` — the two-pair contract
+### Credentials and the two-pair contract
 
-You never construct an auth flow. The platform maintains the workspace
-`.env` on every connection, and it can hold **two variable pairs**, one per
+You never construct an auth flow. A client your host hands you already
+signed in needs no credentials. In a local checkout,
+credentials come from `.env`. The platform maintains the workspace `.env` on
+every connection, and it can hold **two variable pairs**, one per
 connection the editor manages:
 
 | Pair | Connection | Use it for |
@@ -70,14 +74,17 @@ The rules:
 
 - **Build clients from the pair that matches the verb family** — the two
   servers can be different machines (local dev engine, cloud deploy target).
-- **The deploy pair's presence is the signal.** If `ROCKETRIDE_DEPLOY_*` is
-  absent, no deployment target is configured: stop and ask the user to pick
-  one — never deploy or publish to the development pair as a guess.
+- **Deploy only to a configured target.** A client your host hands you
+  already signed in deploys to the server it is connected to. With `.env`,
+  the deploy pair is the target. If `ROCKETRIDE_DEPLOY_*` is absent, `.env`
+  configures no deployment target, so never deploy or publish to the
+  development pair as a guess. Ask the user to pick a target only when none
+  is configured.
 - **Both credentials are ordinary keys to you.** A cloud connection's value
   is the same persistent key the editor itself connects with; usage is
   identical to a self-hosted key. On an authentication error, do not retry
-  or invent a flow — tell the user to reconnect (or sign in) in the editor,
-  which rewrites `.env`.
+  or invent a flow — tell the user to sign in again (in a local checkout,
+  reconnecting in the editor rewrites `.env`).
 - **Never copy `.env` credentials into CI or anything long-lived.** Headless
   automation (CI smoke tests, external schedulers, monitoring daemons) uses
   a key minted in Account → Keys, stored in that system's own secret store.

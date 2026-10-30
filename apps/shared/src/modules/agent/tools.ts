@@ -42,22 +42,115 @@
 // TOOL — one callable surface
 // =============================================================================
 
-/** The defining spec of one tool: contract plus executor. */
-export interface AgentToolSpec {
+/**
+ * What a prepared call is about to do, for the approval list to rate
+ * (`toolkits/approval.ts`). The tool names it before any of its work starts.
+ */
+export interface ToolAct {
+	/**
+	 * The list entry it falls under: a client method as the guide names it
+	 * (`publishApp`, `deploy.setSchedule`), or a tool whose work bypasses the
+	 * client (`delete_file`).
+	 */
+	readonly name: string;
+	/**
+	 * For a client method, its arguments exactly as `run` will pass them: the
+	 * checked client lets an asked method through only with these. For a tool,
+	 * its target. The card is built from them.
+	 */
+	readonly params: readonly unknown[];
+}
+
+/** A call made ready: what it is about to do, and the work itself. */
+export interface ToolStep {
+	/** What it is about to do, when the approval list rates it. Absent: nothing to rate, so the run starts at once. */
+	readonly act?: ToolAct;
+	/** Does the work. The loop calls it at most once, and only after the act (if any) was let through. */
+	run(): Promise<string>;
+}
+
+/**
+ * Thrown by a tool that refuses a call before it changes anything (the user
+ * kept their unsaved changes, the file moved on since it was read). The loop
+ * marks the call unstarted, so the finish rule does not ask for a check.
+ */
+export class RefusedError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'RefusedError';
+	}
+}
+
+/**
+ * The time the user spends answering a tool's question (the unsaved-changes
+ * dialog). While one is open, no running call's time limit runs.
+ */
+export class UserTime {
+	/** How many questions are open now. */
+	private open = 0;
+	private readonly listeners = new Set<() => void>();
+
+	/** True while at least one question is open. */
+	get asking(): boolean {
+		return this.open > 0;
+	}
+
+	/** Holds the clocks until the question settles. */
+	async during<T>(question: Promise<T>): Promise<T> {
+		this.change(1);
+		try {
+			return await question;
+		} finally {
+			this.change(-1);
+		}
+	}
+
+	/** Hears each time `asking` turns on or off. */
+	subscribe(listener: () => void): () => void {
+		this.listeners.add(listener);
+		return () => this.listeners.delete(listener);
+	}
+
+	private change(by: number): void {
+		const was = this.asking;
+		this.open += by;
+		if (was !== this.asking) for (const listener of [...this.listeners]) listener();
+	}
+}
+
+/** What every tool spec has. */
+interface ToolSpecBase {
 	/** Tool name as the LLM calls it. */
 	name: string;
 	/** Tool description shown to the LLM at discovery. */
 	description: string;
 	/** JSON Schema of the arguments object. */
 	parameters: Record<string, unknown>;
-	/** Runs the call; the resolved string is the tool result fed to the LLM. */
-	execute: (args: Record<string, unknown>) => Promise<string>;
 }
+
+/**
+ * The defining spec of one tool. Most give `execute`; a tool whose call may need
+ * the user's OK gives `prepare`, which only reads (the call may still be refused)
+ * and returns the act the loop asks about before it calls the step's `run`.
+ */
+export type AgentToolSpec =
+	| (ToolSpecBase & {
+			/** Runs the call; the resolved string is the tool result fed to the LLM. */
+			execute: (args: Record<string, unknown>) => Promise<string>;
+			prepare?: never;
+	  })
+	| (ToolSpecBase & {
+			/** Gets the call ready: its act and its work. Throws when the arguments are wrong. */
+			prepare: (args: Record<string, unknown>) => Promise<ToolStep>;
+			execute?: never;
+	  });
 
 /**
  * One tool as presented to the LLM. A concrete class built from a spec so
  * toolkits can define tools inline while still giving hosts one nominal
- * type to pass around and extend.
+ * type to pass around and extend. It has one way in, `prepare`, so no
+ * tool's work starts except through the loop's approve step; an `execute`
+ * spec prepares to a step with no act.
  */
 export class AgentTool {
 	/** Tool name as the LLM calls it. */
@@ -66,8 +159,8 @@ export class AgentTool {
 	readonly description: string;
 	/** JSON Schema of the arguments object. */
 	readonly parameters: Record<string, unknown>;
-	/** The bound executor. */
-	private readonly executor: AgentToolSpec['execute'];
+	/** The spec's executor, in its two-step form. */
+	private readonly preparer: (args: Record<string, unknown>) => Promise<ToolStep>;
 
 	/**
 	 * Builds a tool from its spec.
@@ -78,18 +171,25 @@ export class AgentTool {
 		this.name = spec.name;
 		this.description = spec.description;
 		this.parameters = spec.parameters;
-		this.executor = spec.execute;
+		this.preparer = spec.execute ? oneStep(spec.execute) : spec.prepare;
 	}
 
 	/**
-	 * Runs the tool.
+	 * Gets one call ready. Only the loop calls it.
 	 *
 	 * @param args - The LLM-supplied arguments object.
-	 * @returns The tool result text fed back to the LLM.
 	 */
-	execute(args: Record<string, unknown>): Promise<string> {
-		return this.executor(args);
+	prepare(args: Record<string, unknown>): Promise<ToolStep> {
+		return this.preparer(args);
 	}
+}
+
+/**
+ * An execute function as a one-step preparer. The work waits for `run()`, so
+ * it happens inside the call's clock.
+ */
+function oneStep(execute: (args: Record<string, unknown>) => Promise<string>): (args: Record<string, unknown>) => Promise<ToolStep> {
+	return async (args) => ({ run: () => execute(args) });
 }
 
 // =============================================================================

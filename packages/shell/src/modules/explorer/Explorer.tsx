@@ -397,6 +397,22 @@ function childTooltip(child: { id: string; name: string; provider?: string }, ta
 	return lines.join('\n');
 }
 
+/**
+ * Key handling for the inline rename and create inputs: Enter commits and
+ * Escape cancels. Enter's default action is suppressed, because the commit
+ * can open a dialog (a host's refusal notice) whose auto-focused button
+ * would otherwise take the same keypress as a click and close at once.
+ */
+function inlineInputKeys(commit: () => void, cancel: () => void): (e: React.KeyboardEvent<HTMLInputElement>) => void {
+	return (e) => {
+		if (e.key === 'Enter') {
+			e.preventDefault();
+			commit();
+		}
+		if (e.key === 'Escape') cancel();
+	};
+}
+
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -715,18 +731,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 							{isExpanded ? <BxChevronDown size={14} /> : <BxChevronRight size={14} />}
 							<BxFolderOpen size={16} color="var(--rr-text-secondary)" />
 							{isRenaming ? (
-								<input
-									style={S.inlineInput}
-									value={renameValue}
-									onChange={(e) => setRenameValue(e.target.value)}
-									onKeyDown={(e) => {
-										if (e.key === 'Enter') confirmRename();
-										if (e.key === 'Escape') cancelRename();
-									}}
-									onBlur={cancelRename}
-									autoFocus
-									onClick={(e) => e.stopPropagation()}
-								/>
+								<input style={S.inlineInput} value={renameValue} onChange={(e) => setRenameValue(e.target.value)} onKeyDown={inlineInputKeys(confirmRename, cancelRename)} onBlur={cancelRename} autoFocus onClick={(e) => e.stopPropagation()} />
 							) : (
 								/* SCM tint on the folder NAME whenever changes hide below
 								   it — selection foreground wins on the selected row. */
@@ -816,18 +821,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 							{hasChildren ? isFileExpanded ? <BxChevronDown size={14} /> : <BxChevronRight size={14} /> : <span style={{ width: 14 }} />}
 							<BxFile size={16} color="var(--rr-text-secondary)" />
 							{isRenaming ? (
-								<input
-									style={S.inlineInput}
-									value={renameValue}
-									onChange={(e) => setRenameValue(e.target.value)}
-									onKeyDown={(e) => {
-										if (e.key === 'Enter') confirmRename();
-										if (e.key === 'Escape') cancelRename();
-									}}
-									onBlur={cancelRename}
-									autoFocus
-									onClick={(e) => e.stopPropagation()}
-								/>
+								<input style={S.inlineInput} value={renameValue} onChange={(e) => setRenameValue(e.target.value)} onKeyDown={inlineInputKeys(confirmRename, cancelRename)} onBlur={cancelRename} autoFocus onClick={(e) => e.stopPropagation()} />
 							) : (
 								/* SCM tint on the filename; the selected row keeps the
 								   selection foreground and only the letter badge speaks. */
@@ -989,18 +983,7 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 				nodes.push(
 					<div key={createKey} style={{ ...S.row, paddingLeft: indent }}>
 						{createState.type === 'folder' ? <BxFolderOpen size={16} color="var(--rr-text-secondary)" /> : <BxFile size={16} color="var(--rr-text-secondary)" />}
-						<input
-							style={S.inlineInput}
-							value={createState.name}
-							onChange={(e) => setCreateState((prev) => (prev ? { ...prev, name: e.target.value } : null))}
-							onKeyDown={(e) => {
-								if (e.key === 'Enter') confirmCreate();
-								if (e.key === 'Escape') cancelCreate();
-							}}
-							onBlur={cancelCreate}
-							autoFocus
-							placeholder={createState.type === 'folder' ? 'folder name' : (config.createPlaceholder ?? 'file name')}
-						/>
+						<input style={S.inlineInput} value={createState.name} onChange={(e) => setCreateState((prev) => (prev ? { ...prev, name: e.target.value } : null))} onKeyDown={inlineInputKeys(confirmCreate, cancelCreate)} onBlur={cancelCreate} autoFocus placeholder={createState.type === 'folder' ? 'folder name' : (config.createPlaceholder ?? 'file name')} />
 					</div>
 				);
 			}

@@ -43,6 +43,7 @@
 import { getClient } from 'shell';
 import type { ChatMessage, RocketRideClient } from 'shell';
 import { emitFsChange } from '../../utils/fsNotify';
+import type { RunRecord, TurnRecord } from './turn';
 
 // =============================================================================
 // TYPES
@@ -64,9 +65,13 @@ interface CatalogFile {
 	sessions: AgentSessionMeta[];
 }
 
-/** One stored conversation — the session file envelope. */
+/**
+ * One stored conversation — the session file envelope. Version 2 adds the
+ * turns and the runs the conversation started. A version 1 file loads with
+ * no turns and no runs, so it owns no run.
+ */
 export interface AgentSessionFile {
-	version: 1;
+	version: 1 | 2;
 	sessionId: string;
 	title: string;
 	date: number;
@@ -74,6 +79,12 @@ export interface AgentSessionFile {
 	contextRefs: string[];
 	/** The shell chat message shape verbatim — restore = initialMessages seed. */
 	messages: ChatMessage[];
+	/** The workspace scope the conversation runs in ('' = the user's own files); unset in files saved before scopes. */
+	scopeKey?: string;
+	/** Version 2: how each turn ended, linked to the row that closes it, oldest first. */
+	turns?: TurnRecord[];
+	/** Version 2: the pipeline runs the conversation started, which Auto may stop or restart. */
+	runsStarted?: RunRecord[];
 }
 
 // =============================================================================

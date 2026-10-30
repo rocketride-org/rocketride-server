@@ -129,9 +129,11 @@ const result = await client.use({ pipeline });
 
 ### Credentials and the two `.env` pairs
 
-The platform maintains the workspace `.env`; you never construct an auth
-flow. Two variable pairs may exist, one per editor-managed connection —
-build each client from the pair that matches the verb family:
+You never construct an auth flow. A client your host hands you already
+signed in is both the development and the deployment connection, so use it
+for every verb family. In a local checkout the platform maintains the
+workspace `.env`, and two variable pairs may exist, one per editor-managed
+connection — build each client from the pair that matches the verb family:
 
 ```typescript
 // Development server — run, validate, iterate (use/send/chat/monitors)
@@ -141,7 +143,7 @@ const dev = new RocketRideClient({
 });
 
 // Deployment target — deploy.*, schedules, publishApp/submitApp, build logs.
-// Its ABSENCE means no deploy target is configured: stop and ask the user;
+// Its ABSENCE means .env configures no deploy target: stop and ask the user;
 // never run lifecycle verbs against the development pair as a guess.
 if (!process.env.ROCKETRIDE_DEPLOY_URI) {
 	throw new Error('No deployment target configured - pick one in the editor.');
@@ -154,8 +156,8 @@ const deploy = new RocketRideClient({
 
 A cloud connection's credential is the same persistent key the editor
 connects with — usage is identical to a self-hosted key. On
-`AuthenticationException`: do not retry or invent a flow; the user
-reconnects (or signs in) in the editor, which rewrites `.env`. For headless
+`AuthenticationException`: do not retry or invent a flow; the user signs in
+again (in a local checkout, reconnecting in the editor rewrites `.env`). For headless
 automation (CI, external schedulers, daemons), mint a key in Account → Keys
 and store it in that system's secret store — never copy `.env` values into
 anything long-lived.
@@ -854,7 +856,7 @@ Without the `ttl` the run would start at 08:00 and simply run until the pipeline
 
 ## 10. Apps — Publish Automation
 
-The automation layer under the App Builder UI: the same scaffold, version rail, review flow, and audience bindings, scriptable. Scaffold a new app with `client.deploy.createApp(slug, { template, displayName, developerId, ... })` (Node.js) — the wizard's exact templates, written under `./apps/<slug>`, platform packages vendored from this client's own server, workspace install included. Deploy an app version with `client.deploy.addApp(appFolder, { comment, onProgress? })` (Node.js) — it packs the source exactly as the App Builder does (workspace-rooted layout, `appManifest.include` honored, gitignore + baseline filtering, the 50MB zipped / 512MB uncompressed caps) and ships it through the registry rail, narrating each step through `onProgress` when given; `client.deploy.add({ kind: 'app', data })` (section 9) remains the raw door when you packed the zip yourself. Pre-check everything first with `client.deploy.verifyApp(appFolder)` — a purely local dry run (no server call) returning `{ ok, checks: [{ id, ok, note }], fileCount, uncompressedBytes }` covering the manifest shape, id grammar, declared assets, include entries, and pack size. In CI the same ship is two commands: `rocketride app verify ./apps/reports && rocketride app deploy ./apps/reports --comment 'v1.4'` — both read the `ROCKETRIDE_DEPLOY_*` pair, and deploy refuses to run without a configured deployment target. The methods below manage the deployed versions. For building apps themselves, see ROCKETRIDE_APPS.md.
+The automation layer under the App Builder UI: the same scaffold, version rail, review flow, and audience bindings, scriptable. `createApp`, `addApp`, and `verifyApp` read and pack local files, so they run only in Node.js (a local checkout, a script, or CI); where your host provides its own scaffold and deploy tools, use those instead. Scaffold a new app with `client.deploy.createApp(slug, { template, displayName, developerId, ... })` (Node.js) — the wizard's exact templates, written under `./apps/<slug>`, platform packages vendored from this client's own server, workspace install included. Deploy an app version with `client.deploy.addApp(appFolder, { comment, onProgress? })` (Node.js) — it packs the source exactly as the App Builder does (workspace-rooted layout, `appManifest.include` honored, gitignore + baseline filtering, the 50MB zipped / 512MB uncompressed caps) and ships it through the registry rail, narrating each step through `onProgress` when given; `client.deploy.add({ kind: 'app', data })` (section 9) remains the raw door when you packed the zip yourself. Pre-check everything first with `client.deploy.verifyApp(appFolder)` — a purely local dry run (no server call) returning `{ ok, checks: [{ id, ok, note }], fileCount, uncompressedBytes }` covering the manifest shape, id grammar, declared assets, include entries, and pack size. In CI the same ship is two commands: `rocketride app verify ./apps/reports && rocketride app deploy ./apps/reports --comment 'v1.4'` — both read the `ROCKETRIDE_DEPLOY_*` pair, and deploy refuses to run without a configured deployment target. The methods below manage the deployed versions. For building apps themselves, see ROCKETRIDE_APPS.md.
 
 - `listDeployments(appId): Promise<Array<{ registryVersion, appVersion, sha256, publishedAt, author, message, state, buildStatus, buildPhase, buildEndedAt?, rungs }>>` — the app's version rail, newest first. The developer org sees its FULL rail (published or not); other callers see only versions serving on rows visible to them. `buildStatus: 'ok'` means servable bytes exist; `buildPhase` is the build phase the version reached and `buildEndedAt` when its build finished (epoch seconds; `null` until it does); `rungs` names the audiences serving each version
 - `submitApp(appId, registryVersion): Promise<{ artifact }>` — submit a deployed version for store review: flips the deployment's state `'private'` → `'submit'` (it enters the review queue). Developer-org gated

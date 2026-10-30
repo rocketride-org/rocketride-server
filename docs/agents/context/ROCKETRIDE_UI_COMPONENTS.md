@@ -495,12 +495,12 @@ import { Card, Button } from 'shell';
 ### ChatView
 
 The single chat implementation, everywhere: message thread + input sharing
-one centered column (720px cap, exported as `CHAT_COLUMN_MAX_WIDTH`),
+one centered column (720px cap),
 markdown rendering, typing indicator, in-thread error banners. The host owns
 the message state and transport (via `useChatMessages`); ChatView only
 renders and collects input. The composer is disabled while `isConnected` is
 false. `MessageList` (the scrollable thread with scroll-locked autoscroll;
-props `{ messages, isTyping, emptyTitle?, emptyDescription? }`) is exported
+props `{ messages, isTyping, emptyTitle?, emptyDescription?, turn?, onCardAction? }`) is exported
 for custom layouts.
 
 | Prop | Type | Dir | Note |
@@ -511,12 +511,19 @@ for custom layouts.
 | `placeholder` | `string` | in | Input placeholder. Default "Ask anything...". |
 | `emptyTitle` / `emptyDescription` | `string` | in | EmptyState text when there are no messages. |
 | `leadingInputSlot` | `ReactNode` | in | Node before the input (reserved for attachments). |
+| `turn` | `ChatTurnView` | in | From `useChatMessages().turn`: a Stop button (and Esc in the composer) while a turn runs, and Edit and Remove on queued messages. Leave it out for a plain chat. |
 | `onSend` | `(text: string) => void` | out (req) | User submitted a message. |
+| `onCardAction` | `(messageId: number, action: { kind: 'file', path: string } \| { kind: 'action', id: string }) => void` | out | User pressed a file link or a button on a row's `card`. Without it the card's links and buttons show disabled. |
 
 `ChatMessage`: `{ id: number, text (markdown ok), sender: 'user' | 'bot' |
 'system' | 'status', timestamp: string, resultKey? (pipeline result key
 label under bot bubbles), sseType?, meta? (e.g. "2,340 tokens - 1.8s"),
-isError? (renders as an in-thread error Banner instead of a bubble) }`.
+isError? (renders as an in-thread error Banner instead of a bubble),
+queued? (true on a user message sent while a turn was running and not yet
+taken by it; queued messages are always the last rows), card? (on a bot row,
+a card under the bubble: { tone: 'success' | 'danger' | 'info' | 'neutral',
+title, lines?, files? (workspace paths, shown as links), actions? ({ id,
+label, disabled? }[]) }; presses go to onCardAction) }`.
 `'status'` messages are SSE progress lines grouped as a thinking group.
 
 **Wiring ChatView to a chat pipeline** — the verified recipe.
@@ -565,10 +572,18 @@ function PipelineChat({ pipeline }: { pipeline: object }) {
 }
 ```
 
-`useChatMessages(options?)` — options `{ welcomeMessage?, initialMessages? }`
-(`initialMessages` restores a saved conversation) — returns `{ messages,
+`useChatMessages(options?)` — options `{ welcomeMessage?, initialMessages?,
+request? }` (`initialMessages` restores a saved conversation).
+`request(text, onStatus, turn)` replaces the built-in chat call.
+`onStatus(type, text)` adds a live status row. `turn` carries `history` (the
+rows before this turn), `signal` (aborted when the user stops the turn or the
+chat unmounts) and `takeQueued()` (takes the messages sent since the turn
+began, so they never open a turn of their own). Returns `{ messages,
 isTyping, sendMessage(text, client, authToken), clearMessages,
-addSystemMessage }`. `clearMessages()` resets the thread to the welcome
+addSystemMessage, turn }`. One turn runs at a time: `sendMessage` during a
+turn adds a queued message, which the running request may take and which
+otherwise runs next. Pass `turn` to ChatView's `turn` prop.
+`clearMessages()` resets the thread to the welcome
 message; `addSystemMessage(text)` appends a system note. Persist only
 `user`/`bot` messages; `system`/`status` are ephemeral.
 
@@ -1439,30 +1454,26 @@ const { settings, updateSetting, appState, updateAppState, activeAppId } = useWo
   `interval` ms; by default only while the shell is connected
   (`options.gate: 'shell'`, the default; `'none'` polls unconditionally) —
   views never poll into a dead socket.
-- `useDashboardData(): { data, events, error, refresh }` — the ONE shared
-  dashboard feed: a module singleton where the FIRST consumer starts the 3s
-  poll plus the `shell:event` subscription and the LAST unmount stops it.
-  Data survives view switches; one request in flight regardless of
-  consumers. `data` = the current `DashboardResponse` (null until first
-  load); `events` = activity events newest-first.
+- Dashboard data comes from `client.getDashboard()`, which returns a
+  `DashboardResponse` (`overview`, `connections`, `tasks`). Poll it with
+  `usePolling`.
 
 Related exported types: `DashboardResponse`, `DashboardOverview`,
 `DashboardConnection`, `DashboardTask`, `DashboardEvent`, `TaskEvent`,
-`ActivityEvent`, plus `ListPageRequest` / `ListPageResponse` — the paged
+plus `ListPageRequest` / `ListPageResponse` — the paged
 contract of the server `list_*` APIs that feed `DataGrid.fetchPage`.
 
-**Rule:** Do not hand-roll a poll-every-N-seconds effect for dashboard data
-— the shared feed exists so N views cost one poll.
-
 ```tsx
-import { usePolling, useDashboardData, Banner, MiniContainer } from 'shell';
-
-usePolling(() => refreshRunList(), 5000);
+import { useState } from 'react';
+import { getClient, usePolling, MiniContainer, type DashboardResponse } from 'shell';
 
 function OverviewTiles() {
-	const { data, events, error, refresh } = useDashboardData();
-	if (error) return <Banner variant="error">{error}</Banner>;
-	return <MiniContainer>{/* tiles from data.overview */}</MiniContainer>;
+	const [data, setData] = useState<DashboardResponse | null>(null);
+	usePolling(async () => {
+		const client = getClient();
+		if (client) setData(await client.getDashboard());
+	}, 3000);
+	return <MiniContainer>{/* tiles from data?.overview */}</MiniContainer>;
 }
 ```
 

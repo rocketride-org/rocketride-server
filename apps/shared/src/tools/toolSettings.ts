@@ -116,6 +116,44 @@ export const PIPELINES_TOOL_SETTINGS: AppConfiguration = {
 			shells: ['saas', 'oss'],
 			description: 'Write saved changes straight to your workspace on the server. Turn this off to review, diff, and commit changes yourself - saves (yours and the agent\'s) stay local until you commit them. Cloud workspaces only.',
 		},
+		// The agent's settings: it runs in the cloud builder only (its tool's manifest `shells`).
+		'rocketride.pipeBuilder.agentApproval': {
+			type: 'string',
+			enum: ['ask', 'auto'],
+			enumDescriptions: ['Ask first: the agent waits for your OK before it publishes, submits for review, changes a deployment or a schedule, or deletes a file.', "Don't ask: the agent does those without asking. Nothing judges the risk for you in this mode; it simply doesn't ask. Account, team and billing changes stay blocked."],
+			default: 'ask',
+			order: 8,
+			shells: ['saas', 'oss'],
+			description: 'Whether the agent asks before outward actions and deletes, in every agent chat. Account, team, member and billing changes are refused in both modes.',
+		},
+		'rocketride.pipeBuilder.agentStepLimit': {
+			type: 'number',
+			default: 60,
+			order: 9,
+			shells: ['saas', 'oss'],
+			description: 'The most steps the agent takes in one turn. At the limit it pauses and asks; Continue starts a new turn with a fresh budget. 0 means no limit.',
+		},
+		'rocketride.pipeBuilder.agentCostLimit': {
+			type: 'number',
+			default: 2,
+			order: 10,
+			shells: ['saas', 'oss'],
+			description: "The most one agent turn's estimated model cost may reach, in US dollars. At the limit it pauses and asks; Continue starts a new turn with a fresh budget. The estimate counts 4 characters as a token and leaves out the model's thinking, so a turn can cost more than the limit. 0 means no limit, and a model with no known price has none.",
+		},
+		'rocketride.pipeBuilder.agentAllowScheduleChanges': {
+			type: 'boolean',
+			default: false,
+			order: 11,
+			shells: ['saas', 'oss'],
+			description: 'Let the agent set, pause and resume deployment schedules without asking. Always allow on a card turns this on.',
+		},
+		'rocketride.pipeBuilder.agentAllowDeploymentToggles': {
+			type: 'boolean',
+			default: false,
+			order: 12,
+			shells: ['saas', 'oss'],
+			description: 'Let the agent turn deployments on and off without asking. Always allow on a card turns this on. Removing a deployment always asks.',
+		},
 	},
 };
 

@@ -59,6 +59,8 @@ const { messages, isTyping, sendMessage } = useChatMessages({ welcomeMessage: 'H
 		{ name: 'emptyTitle', type: 'string', dir: 'in', note: 'EmptyState title when the conversation has no messages.' },
 		{ name: 'emptyDescription', type: 'string', dir: 'in', note: 'EmptyState description when the conversation has no messages.' },
 		{ name: 'leadingInputSlot', type: 'ReactNode', dir: 'in', note: 'Optional node rendered before the input field (reserved for attachments).' },
+		{ name: 'turn', type: 'ChatTurnView', dir: 'in', note: 'Turn controls from useChatMessages().turn: Stop (and Esc) while a turn runs, Edit and Remove on queued messages. Leave it out for a plain chat.' },
 		{ name: 'onSend', type: '(text: string) => void', dir: 'out', required: true, note: 'Called when the user submits a message.' },
+		{ name: 'onCardAction', type: '(messageId: number, action: ChatCardAction) => void', dir: 'out', note: "Called when the user presses a file link ({ kind: 'file', path }) or a button ({ kind: 'action', id }) on the card a bot row carries (ChatMessage.card: tone, title, lines, files, actions). Without it the card's links and buttons show disabled." },
 	],
 };

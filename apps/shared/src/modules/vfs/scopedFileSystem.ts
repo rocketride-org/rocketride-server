@@ -66,9 +66,9 @@ export function scopedFileSystem(root: IWorkspaceFileSystem, prefix: string): IW
 		// ── IVirtualFileSystem ──────────────────────────────────────────
 		list: (dir) => root.list(toRoot(dir)),
 		read: (path) => root.read(toRoot(path)),
-		write: (path, content, origin) => root.write(toRoot(path), content, origin),
+		write: (path, content, origin, expect) => root.write(toRoot(path), content, origin, expect),
 		rename: (oldPath, newPath, origin) => root.rename(toRoot(oldPath), toRoot(newPath), origin),
-		delete: (path, origin) => root.delete(toRoot(path), origin),
+		delete: (path, origin, anchor) => root.delete(toRoot(path), origin, anchor),
 		mkdir: (path, origin) => root.mkdir(toRoot(path), origin),
 
 		// ── View surface ────────────────────────────────────────────────
@@ -111,5 +111,10 @@ export function scopedFileSystem(root: IWorkspaceFileSystem, prefix: string): IW
 		},
 		subscribe: (listener) => root.subscribe(listener),
 		notify: () => root.notify(),
+
+		// ── Path versions ───────────────────────────────────────────────
+		version: (path) => root.version(toRoot(path)),
+		readVersioned: (path, opts) => root.readVersioned(toRoot(path), opts),
+		lastWriter: (path) => root.lastWriter(toRoot(path)),
 	};
 }

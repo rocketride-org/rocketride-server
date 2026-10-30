@@ -168,15 +168,16 @@ always allowed.
 
 Two rules before anything else:
 
-- **pnpm is required — not npm.** The entire app toolchain (the wizard's
-  dependency install, the dev loop's watch reinstalls, the workspace
-  linking of the vendored `shell` package) runs `pnpm`. Make sure it is
+- **In a local checkout, pnpm is required — not npm.** The local app
+  toolchain (the wizard's dependency install, the dev loop's watch
+  reinstalls, the workspace linking of the vendored `shell` package) runs
+  `pnpm`. Make sure it is
   installed and on PATH (`npm install -g pnpm` once) before creating or
   building an app; running `npm install` in an app folder is never
   correct and can corrupt the workspace layout.
 - **Both platform packages are server-vendored — never registry
-  versions.** The platform downloads the connected server's own `shell`
-  and `rocketride` packages into `.rocketride/shell/` and
+  versions.** In a local checkout the platform downloads the connected
+  server's own `shell` and `rocketride` packages into `.rocketride/shell/` and
   `.rocketride/client/`, and apps pin them by `file:` spec. The npm
   registry's `rocketride` can lag the server badly; never replace either
   pin with a registry install. The server build enforces the same rule on
@@ -190,13 +191,14 @@ Two rules before anything else:
   and the vendored platform-package pins.
   Hand-rolled app folders fail in ways whose symptoms (blank preview,
   frozen HMR, share-negotiation errors) appear far from the cause.
-  Two front doors render the identical templates: the App Builder's New
-  App wizard (humans), and `client.deploy.createApp` (agents and
-  scripts). A `rocketride app create` CLI form also exists for CI
-  pipelines — but as an agent, prefer the API for everything.
+  Every front door renders the identical templates: the App Builder's New
+  App wizard (humans), `client.deploy.createApp` (Node.js agents and
+  scripts), a `rocketride app create` CLI form for CI pipelines, and any
+  scaffold tool your agent host provides. As an agent, use your host's
+  scaffold tool when it has one, and the API otherwise.
 
-  **Agent bootstrap — the platform pre-stages everything you need.** In
-  any workspace the extension has opened, `.rocketride/client/
+  **Agent bootstrap in a local checkout — the platform pre-stages
+  everything you need.** In any workspace the extension has opened, `.rocketride/client/
   rocketride.tgz` and `.rocketride/shell/shell.tgz` are vendored at boot
   (server-matched when connected, packaged fallbacks offline). Install
   the client from the local tarball — never from the npm registry, which
@@ -239,9 +241,9 @@ DocSplitLayout + DocTabs).
 
 The wizard assembles the app id from your organization's developer id plus
 the slug, validates it, and writes the app folder under `./apps` in your
-workspace. Dependencies install automatically through one shared
-`pnpm install` at the workspace root — all apps are workspace members
-sharing one `node_modules`.
+workspace. In a local checkout, dependencies install automatically through
+one shared `pnpm install` at the workspace root — all apps are workspace
+members sharing one `node_modules`.
 
 ### The scaffolded files
 
@@ -883,8 +885,9 @@ connection manager).
 ## Embedding Pipelines
 
 Apps ship pipelines as data and run them through the shared client. A
-pipeline file is JSON with a `.pipe` extension; the scaffold configures your
-build to import it directly:
+pipeline file is JSON with a `.pipe` extension. The scaffold's rsbuild
+config (the local dev server's build) and the server's deploy build both
+import it directly:
 
 ```typescript
 // The rsbuild config treats .pipe as JSON, and src/global.d.ts declares the
@@ -895,6 +898,10 @@ import { useShellConnection } from 'shell';
 const { client } = useShellConnection();
 const { token } = await client.use({ pipeline: summarizer });
 ```
+
+A build without that `.pipe` rule reports `Cannot resolve` for the import.
+In that build, export the pipeline object from a `.ts` module in the app
+folder and import that instead; every build links `.ts` modules.
 
 The browser has no filesystem — always pass `pipeline:` (the imported
 object), never `filepath:` (Node-only). Read
@@ -1175,6 +1182,8 @@ fixed closing time because pipeline data requests extend it. The pieces:
   `{ projectId, source, teamId }`. The import is identity only — the app
   never calls `use()` on it. Listing the pipeline folder under
   `appManifest.include` packs the definition with the app as provenance.
+  Where the build has no `.pipe` rule or the packer skips `include`, keep
+  the `project_id` as a constant in a `.ts` module inside the app folder.
 - **Store the team NAME in settings, resolve the id at runtime** — names
   are portable across environments; a team GUID baked into a settings
   default dies on any other server. Resolve through the identity payload:
@@ -1814,7 +1823,7 @@ configs — are also re-exported type-only from `'shell'`, so
 `useSubscriptions()`, `useWorkspace()`, `usePrefs()`, `useShellEvent()`,
 `useAppComponent()`, `usePolling()`, `useDebouncedValue()`,
 `useAnnouncements()`, `useClickOutside()`, `useFixedPopupPosition()`,
-`useSidebarCollapsed()`, `useDashboardData()`, `useIframeBridge()`
+`useSidebarCollapsed()`, `useIframeBridge()`
 
 ### Client access & events
 
@@ -1840,7 +1849,7 @@ configs — are also re-exported type-only from `'shell'`, so
 `createActionsColumn`, `autoFormatter`, `badgeEl`, `buttonEl`, `avatarEl`,
 `monoEl`, `mutedEl`, `matchesSearch`, `formatDateValue`), `ChatView`,
 `MessageList`, `MarkdownRenderer`, `useChatMessages`, `ConnectionCard`,
-`ConnectionCardAdd`, `ConnectionManagerView`, `MonitorView`, `AccountView`,
+`ConnectionCardAdd`, `ConnectionManagerView`, `AccountView`,
 `EnvironmentView`, `CheckoutModal`, `PlanPicker`, `UpgradeModal`
 
 ### Styling, formatting, icons

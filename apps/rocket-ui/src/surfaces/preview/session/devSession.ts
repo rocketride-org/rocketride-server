@@ -60,7 +60,7 @@ import type { editor as MonacoEditorNs } from 'monaco-editor';
 import { ConnectionManager } from 'shell';
 import type { IWorkspaceFileSystem } from 'shared/modules/vfs/vfsTypes';
 import { scopedFileSystem } from 'shared/modules/vfs/scopedFileSystem';
-import { getWorkspaceVfs, storePathToVirtual } from '../../workspace/vfs/workspace';
+import { getWorkspace, storePathToVirtual, type Workspace } from '../../workspace/vfs/workspace';
 import type { RocketRideClient, ShellNotification } from 'shell';
 import type { ConsoleRow, AppErrorRow, WatchStatus } from 'shared/tools/appdev';
 import { loadMonaco, setupAppTypescript, emitModel, detectLanguage } from 'shared/components/monaco';
@@ -108,14 +108,22 @@ function feedTime(): string {
  *
  * Bounded by the number of distinct files opened this page-session (one
  * entry per URI+version; a new version overwrites via the versioned key,
- * and superseded entries are pruned in emitOne). The whole map dies with
- * the page.
+ * and superseded entries are pruned in emitOne). A URI's entries also go
+ * when its model is disposed: a new model at that URI starts again at
+ * version 1, and must not get the old content's output. The whole map dies
+ * with the page.
  */
 const sharedEmitCache = new Map<string, { js: string; map?: string }>();
 
 /** The shared-cache key for one model at one version. */
 function emitKey(uri: string, version: number): string {
 	return `${uri}@${version}`;
+}
+
+function dropEmits(uri: string): void {
+	for (const k of sharedEmitCache.keys()) {
+		if (k.startsWith(`${uri}@`)) sharedEmitCache.delete(k);
+	}
 }
 
 // =============================================================================
@@ -150,6 +158,31 @@ function releaseTsSetup(): void {
 		sharedTsSetup.handle.dispose();
 		sharedTsSetup = null;
 	}
+}
+
+// =============================================================================
+// OPEN SESSIONS — the open apps' dev sessions, found by app id
+// =============================================================================
+
+// Every open session is in this set, so code outside the App Builder document (the agent) can reach an
+// app's session. Split panels each hold one; lookups prefer the one with a preview attached.
+
+/** The open sessions, in creation order. */
+const sessions = new Set<WebDevSession>();
+
+/**
+ * The open session for an app, preferring one with a preview attached.
+ *
+ * @returns The session, or null when no session for the app is open.
+ */
+export function findDevSession(appId: string): WebDevSession | null {
+	let first: WebDevSession | null = null;
+	for (const session of sessions) {
+		if (session.appId !== appId) continue;
+		if (session.previewAttached) return session;
+		first ??= session;
+	}
+	return first;
 }
 
 // =============================================================================
@@ -211,11 +244,11 @@ export class WebDevSession {
 			try {
 				const rel = m.icon.replace(/^\.\//, '');
 				if (rel.toLowerCase().endsWith('.svg')) {
-					const svg = await readAppText(this.folder, rel);
+					const svg = await readAppText(this.folder, rel, this.workspace.view);
 					const uri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 					if (uri.length <= ICON_MAX_CHARS) meta.icon = uri;
 				} else {
-					const uri = await readAppImageDataUri(this.client, this.folder, rel);
+					const uri = await readAppImageDataUri(this.client, this.folder, rel, this.workspace.scope);
 					if (uri && uri.length <= ICON_MAX_CHARS) meta.icon = uri;
 				}
 			} catch {
@@ -226,10 +259,13 @@ export class WebDevSession {
 	}
 
 	private readonly client: RocketRideClient;
-	private readonly appId: string;
+	/** The app this session serves (findDevSession looks sessions up by it). */
+	public readonly appId: string;
 	private readonly folder: string;
 	private readonly appName: string;
 	private readonly moduleId: string;
+	/** The workspace the session opened in; reads and lock writes that end after a team switch stay in it. */
+	private readonly workspace: Workspace;
 
 	private monaco: Monaco | null = null;
 	private tsHandle: TypescriptSetupHandle | null = null;
@@ -244,8 +280,8 @@ export class WebDevSession {
 
 	// ── Models ───────────────────────────────────────────────────────────
 	private readonly models = new Map<string, MonacoEditorNs.ITextModel>();
-	/** THIS session's content listeners — an adopted model outlives the session. */
-	private readonly modelListeners: Array<{ dispose: () => void }> = [];
+	/** THIS session's content listener on each of its models — an adopted model outlives the session. */
+	private readonly modelListeners = new Map<string, { dispose: () => void }>();
 
 	// ── Build state ──────────────────────────────────────────────────────
 	private lastLink: LinkResult | null = null;
@@ -287,7 +323,10 @@ export class WebDevSession {
 		this.moduleId = appId.replace(/[^a-zA-Z0-9_$]/g, '_');
 		// step: a prefix lens over the ONE shared staged workspace view —
 		// editor overlays, staged state, and agent writes all converge there
-		this.vfs = scopedFileSystem(getWorkspaceVfs(), `apps/${folder}`);
+		this.workspace = getWorkspace();
+		this.vfs = scopedFileSystem(this.workspace.view, `apps/${folder}`);
+		// step: join the open sessions (findDevSession); dispose() leaves
+		sessions.add(this);
 	}
 
 	// =========================================================================
@@ -386,6 +425,12 @@ export class WebDevSession {
 		await this.rebuild();
 	}
 
+	/** Whether a preview realm is attached to a live session, so builds inject and the console and errors feeds are live. */
+	get previewAttached(): boolean {
+		// step: previewWindow is never cleared, so a removed iframe or closed debug tab shows only as .closed
+		return this.previewWindow !== null && !this.previewWindow.closed && !this.disposed;
+	}
+
 	/**
 	 * Routes a preview postMessage (console/error forwarding) into the feeds.
 	 *
@@ -404,27 +449,16 @@ export class WebDevSession {
 	/** Tears the session down (models, overlays, blobs, type libs, feeds). */
 	dispose(): void {
 		this.disposed = true;
+		sessions.delete(this);
 		this.unsubscribeNotify?.();
 		this.unsubscribeNotify = null;
 		if (this.lastLink) revokeLink(this.lastLink.blobUrls);
 		this.ata?.dispose();
 		this.ata = null;
-		for (const listener of this.modelListeners) listener.dispose();
-		this.modelListeners.length = 0;
 		// step: release — not dispose — the shared state; a model (and the TS
 		// setup) dies only with its LAST session, so a split panel of the same
 		// app keeps its editors and type libs when the other panel closes
-		for (const model of this.models.values()) {
-			const key = model.uri.toString();
-			const remaining = (modelRefs.get(key) ?? 1) - 1;
-			if (remaining <= 0) {
-				modelRefs.delete(key);
-				model.dispose();
-			} else {
-				modelRefs.set(key, remaining);
-			}
-		}
-		this.models.clear();
+		for (const path of [...this.models.keys()]) this.releaseModel(path);
 		if (this.tsHandle) {
 			releaseTsSetup();
 			this.tsHandle = null;
@@ -458,11 +492,51 @@ export class WebDevSession {
 		this.models.set(path, model);
 		const isSource = /\.(ts|tsx)$/.test(path);
 		if (isSource) this.ata?.enqueue(path, () => model.getValue());
-		this.modelListeners.push(model.onDidChangeContent(() => {
-			// step: acquisition follows the keystrokes (debounced in the engine)
-			if (isSource) this.ata?.enqueue(path, () => model.getValue());
-		}));
+		this.modelListeners.set(
+			path,
+			model.onDidChangeContent(() => {
+				// step: acquisition follows the keystrokes (debounced in the engine)
+				if (isSource) this.ata?.enqueue(path, () => model.getValue());
+			})
+		);
 		return model;
+	}
+
+	/**
+	 * Lets go of one file's model. The last session to let go disposes it, so
+	 * Monaco's TypeScript worker drops its markers.
+	 *
+	 * @param path - The project-relative file path.
+	 */
+	private releaseModel(path: string): void {
+		const model = this.models.get(path);
+		if (!model) return;
+		this.models.delete(path);
+		this.modelListeners.get(path)?.dispose();
+		this.modelListeners.delete(path);
+		const key = model.uri.toString();
+		const remaining = (modelRefs.get(key) ?? 1) - 1;
+		if (remaining <= 0) {
+			modelRefs.delete(key);
+			dropEmits(key);
+			model.dispose();
+		} else {
+			modelRefs.set(key, remaining);
+		}
+	}
+
+	/**
+	 * Whether the view confirms a file is gone. A failed check counts as not
+	 * deleted.
+	 *
+	 * @param path - The project-relative file path.
+	 */
+	private async isDeleted(path: string): Promise<boolean> {
+		try {
+			return (await this.vfs.stat(path)) === null;
+		} catch {
+			return false;
+		}
 	}
 
 	// =========================================================================
@@ -530,8 +604,9 @@ export class WebDevSession {
 				this.vfs.notify();
 			}
 		} catch {
-			// Unreadable (deleted mid-flight, transient store error) — the
-			// rebuild below still runs from the models we have.
+			// Unreadable: deleted, or a transient store error. Only a confirmed deletion lets go of the model;
+			// otherwise the rebuild below runs from the models we have.
+			if (await this.isDeleted(path)) this.releaseModel(path);
 		}
 
 		// step: re-render an attached preview from the updated truth. The hot
@@ -582,11 +657,12 @@ export class WebDevSession {
 		if (cached) return cached;
 		const output = await emitModel(monaco, model.uri);
 		if (!output.js) return null;
+		// a model released while its emit ran (its file deleted, maybe made again at
+		// the same path and version) must not put its output back in the cache
+		if (this.models.get(path) !== model) return { js: output.js, map: output.map };
 		// step: drop this URI's prior-version entry before storing the new one —
 		// the versioned key would otherwise leave the superseded emit resident
-		for (const k of sharedEmitCache.keys()) {
-			if (k.startsWith(`${uri}@`)) sharedEmitCache.delete(k);
-		}
+		dropEmits(uri);
 		const entry = { js: output.js, map: output.map };
 		sharedEmitCache.set(key, entry);
 		return entry;
@@ -627,8 +703,8 @@ export class WebDevSession {
 			// refresh the registration meta from the SAME fresh read: in dev
 			// the workspace manifest is the truth for name/icon/settings too
 			if (!this.deps) {
-				const pkg = await readAppPackage(this.folder).catch(() => ({}));
-				this.deps = await prepareDependencies(this.folder, this.appId, pkg, scope);
+				const pkg = await readAppPackage(this.folder, this.workspace.view).catch(() => ({}));
+				this.deps = await prepareDependencies(this.folder, this.appId, pkg, scope, this.workspace.view);
 				for (const problem of this.deps.problems) this.pushError(`[deps] ${problem}`);
 				await this.refreshRegistrationMeta(pkg as Record<string, unknown>);
 			}
