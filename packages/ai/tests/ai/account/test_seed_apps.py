@@ -28,6 +28,8 @@ orchestrator can re-seed only the apps whose build moved. The local static
 tree is a temp directory and the registry is a fake.
 """
 
+import os
+
 import pytest
 
 from ai.account import seed_apps
@@ -112,6 +114,21 @@ def test_an_unreadable_file_leaves_no_digest(static_apps, monkeypatch):
         raise PermissionError('denied')
 
     monkeypatch.setattr(seed_apps, 'open', unreadable, raising=False)
+
+    assert bundle_digest(APP_ID) is None
+
+
+def test_an_unreadable_directory_leaves_no_digest(static_apps, monkeypatch):
+    _write(static_apps / APP_ID, {'remoteEntry.js': b'a', 'static/js/index.js': b'b'})
+    locked = str(static_apps / APP_ID / 'static')
+    real_scandir = os.scandir
+
+    def scandir(path='.'):
+        if os.fspath(path) == locked:
+            raise PermissionError('denied')
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, 'scandir', scandir)
 
     assert bundle_digest(APP_ID) is None
 

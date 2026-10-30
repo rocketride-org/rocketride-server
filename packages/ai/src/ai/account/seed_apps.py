@@ -136,16 +136,23 @@ def bundle_digest(app_id: str) -> Optional[str]:
     it as ``metadata.build.bundleSha256``; ``bundle_changed`` compares against it.
 
     None means "no digest": no directory, an empty one (the copy would find no
-    files and fail the seed), or a file that can't be read. Callers then seed
-    without a digest rather than fail, which is how rows looked before the field.
+    files and fail the seed), or a file or directory that can't be read. Callers
+    then seed without a digest rather than fail, which is how rows looked before
+    the field.
     """
     root = _local_bundle_root(app_id)
     if not os.path.isdir(root):
         return None
     digest = hashlib.sha256()
     found = False
+
+    def unreadable_dir(exc: OSError) -> None:
+        # os.walk skips a directory it can't list unless told otherwise, which
+        # would digest only the readable part of the bundle.
+        raise exc
+
     try:
-        for dirpath, dirs, files in os.walk(root):
+        for dirpath, dirs, files in os.walk(root, onerror=unreadable_dir):
             dirs.sort()
             for filename in sorted(files):
                 abs_path = os.path.join(dirpath, filename)
