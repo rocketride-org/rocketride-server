@@ -262,5 +262,6 @@ def with_error_field(output_fields: List[str]) -> List[str]:
 def raise_on_error(engine: str, result: Dict[str, Any]) -> None:
     """Raise when the loader reported a failed inference for this image (e.g. CUDA out of memory)."""
     error = result.get('error')
-    if error:
-        raise RuntimeError(f'{engine} inference failed: {error}')
+    # a success carries None; str(e) is '' for some exceptions, e.g. AssertionError()
+    if error is not None:
+        raise RuntimeError(f'{engine} inference failed: {error or "no message"}')

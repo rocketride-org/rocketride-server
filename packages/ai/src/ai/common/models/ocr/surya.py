@@ -185,12 +185,12 @@ class SuryaLoader(BaseLoader):
         recognition_predictor = models['recognition_predictor']
         images = preprocessed['images']
 
-        results = []
+        def read(batch):
+            results = []
 
-        try:
             # New API: recognition_predictor accepts det_predictor parameter
             # and handles both detection and recognition in one call
-            predictions = recognition_predictor(images, det_predictor=detection_predictor)
+            predictions = recognition_predictor(batch, det_predictor=detection_predictor)
 
             # Format results - Surya returns line-level results
             for prediction in predictions:
@@ -216,12 +216,24 @@ class SuryaLoader(BaseLoader):
                         'boxes': boxes,
                     }
                 )
+            return results
 
+        try:
+            return read(images)
         except Exception as e:
-            logger.error(f'Surya inference failed: {e}')
-            for _ in images:
-                results.append({'text': '', 'boxes': [], 'error': str(e)})
+            if len(images) == 1:
+                logger.error(f'Surya inference failed: {e}')
+                return [{'text': '', 'boxes': [], 'error': str(e)}]
+            # a model-server batch mixes tasks: read each image alone so one failure stays with its image
+            logger.warning(f'Surya inference of {len(images)} images failed ({e}); reading each alone')
 
+        results = []
+        for image in images:
+            try:
+                results += read([image])
+            except Exception as e:
+                logger.error(f'Surya inference failed: {e}')
+                results.append({'text': '', 'boxes': [], 'error': str(e)})
         return results
 
     @staticmethod

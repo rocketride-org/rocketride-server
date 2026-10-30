@@ -1,8 +1,11 @@
 """A failed OCR inference raises instead of coming back as empty text (no torch/OCR libraries needed)."""
 
+import types
+
 import pytest
 
 from ai.common.models.ocr import doctr, easyocr, surya, trocr
+from ai.common.models.ocr.utils import raise_on_error
 
 _OOM = 'CUDA out of memory. Tried to allocate 932.00 MiB'
 
@@ -85,3 +88,27 @@ def test_proxy_success_keeps_the_callers_fields(monkeypatch, mod, cls, loader):
     assert ocr.read(b'png') == {'text': 'hello', 'boxes': []}
     assert ocr.output_fields == ['$text']
     assert _Client.sent == [['$text', 'error']]
+
+
+def test_an_empty_error_still_raises():
+    """``str(e)`` is empty for some exceptions, e.g. ``AssertionError()``."""
+    with pytest.raises(RuntimeError, match='inference failed: no message'):
+        raise_on_error('EasyOCR', {'text': '', 'boxes': [], 'error': ''})
+
+
+def test_surya_batch_failure_stays_with_the_failing_image():
+    """A model-server batch mixes tasks: one image that fails must not fail the others."""
+
+    def predictor(images, det_predictor=None):
+        if 'bad' in images:
+            raise RuntimeError(_OOM)
+        return [
+            types.SimpleNamespace(text_lines=[types.SimpleNamespace(text=i, bbox=[0, 0, 1, 1], confidence=0.9)])
+            for i in images
+        ]
+
+    out = surya.SuryaLoader.inference(
+        {'detection_predictor': None, 'recognition_predictor': predictor}, {'images': ['a', 'bad', 'b']}
+    )
+
+    assert [(r['text'], r.get('error')) for r in out] == [('a', None), ('', _OOM), ('b', None)]
