@@ -1241,15 +1241,36 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, e
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(('saas', 'flags'), [(True, ['--hosted', '--shared-host']), (False, [])])
-async def test_start_passes_the_hosting_flags(monkeypatch, saas, flags):
-    """A hosted engine's spawn task gets --hosted and --shared-host, a local one
-    neither; the pre-launch check is told the same about the shared host.
+@pytest.mark.parametrize(
+    ('saas', 'startup', 'user', 'passed'),
+    [
+        # The hosting flags come from the engine itself, not from its arguments
+        (True, [], [], ['--hosted', '--shared-host']),
+        (False, [], [], []),
+        # Crash dumps follow the engine's own --dumps
+        (False, ['--dumps'], [], ['--dumps']),
+        # A pipeline's own is dropped, whatever spelling it used
+        (False, [], ['--dumps'], []),
+        (False, [], ['--DUMPS'], []),
+        (False, [], ['--trace=debugOut --Dumps=yes'], ['--trace=debugOut']),
+        (False, ['--dumps'], ['--dumps=false'], ['--dumps']),
+        # The trace level is the caller's if it set one, the engine's otherwise
+        (False, ['--trace=a'], [], ['--trace=a']),
+        (False, ['--trace=a'], ['--trace=b'], ['--trace=b']),
+    ],
+)
+async def test_start_passes_only_the_operators_options(monkeypatch, saas, startup, user, passed):
+    """The task's command line carries what the operator chose: --hosted and
+    --shared-host for a hosted engine, and --dumps as the engine itself was
+    started. The engine reads the first --dumps, and the operator's is written
+    before a pipeline's own arguments, so a pipeline cannot turn dumps on. The
+    pre-launch check is told the same about the shared host.
     """
     import ai.modules.task.task_engine as engine
 
     _fake_db_account(monkeypatch)
     monkeypatch.setattr(engine, '_is_saas_engine', lambda: saas)
+    monkeypatch.setattr(engine, 'startup_args', lambda: startup)
     checked = []
     monkeypatch.setattr(engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']))
     t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
@@ -1258,7 +1279,7 @@ async def test_start_passes_the_hosting_flags(monkeypatch, saas, flags):
     t._restart_env = None
     t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
     t._is_restarting = False
-    t._launch_args = {}
+    t._launch_args = {'args': user}
     t._server = MagicMock(_config={})
     t._is_debugging = lambda: False
     t._write_task_file = AsyncMock(return_value='/tmp/task.json')
@@ -1273,7 +1294,11 @@ async def test_start_passes_the_hosting_flags(monkeypatch, saas, flags):
     with pytest.raises(Launched):
         await Task.start_task(t)
 
-    assert [a for a in spawn.call_args.args if a in ('--hosted', '--shared-host')] == flags
+    # Lower-cased: the engine matches options without regard to case, so the test must too
+    options = [
+        a for a in spawn.call_args.args if a.lower().startswith(('--hosted', '--shared-host', '--dumps', '--trace='))
+    ]
+    assert options == passed
     assert checked == ([True] if saas else [])
 
 

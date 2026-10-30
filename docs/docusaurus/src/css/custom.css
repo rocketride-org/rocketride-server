@@ -1008,8 +1008,13 @@ html.docs-doc-id-index .theme-doc-markdown .rr-kicker {
 	max-width: 22rem;
 }
 
+/* One column per icon, capped at the circle size: when the brand column is
+ * narrower than the row (769px to ~960px), every circle shrinks evenly and
+ * stays round instead of flexing into ovals. */
 .rr-footer__socials {
-	display: flex;
+	display: grid;
+	grid-auto-flow: column;
+	grid-auto-columns: minmax(0, 2rem);
 	gap: 0.6rem;
 }
 
@@ -1017,8 +1022,8 @@ html.docs-doc-id-index .theme-doc-markdown .rr-kicker {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 2rem;
-	height: 2rem;
+	width: 100%;
+	aspect-ratio: 1;
 	border-radius: 50%;
 	border: 1px solid var(--rr-panel-border);
 	color: var(--ifm-color-emphasis-700);

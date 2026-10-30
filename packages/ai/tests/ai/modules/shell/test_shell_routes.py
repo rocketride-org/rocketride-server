@@ -139,11 +139,13 @@ LEGAL_PAGES = (
     '/legal/acceptable-use',
     '/legal/subprocessors',
     '/legal/trademark-policy',
+    '/legal/cookie-policy',
+    '/legal/marketplace-terms',
 )
 
 
 def test_legal_pages_are_public_routes_and_listed():
-    # The legal index and the six published documents serve the SPA on a hard
+    # The legal index and the published documents serve the SPA on a hard
     # reload and are advertised like the other pages.
     for route in LEGAL_PAGES:
         assert route in PUBLIC_ROUTES
@@ -352,6 +354,16 @@ def test_sitemap_and_llms_list_the_legal_and_superfans_pages(app_url):
         '/legal/trademark-policy': (
             'Trademark & Brand Usage Policy',
             'How the RocketRide name, logo, and brand assets may and may not be used.',
+        ),
+        '/legal/cookie-policy': (
+            'Cookie Policy',
+            'How RocketRide uses cookies, similar technologies, and website analytics on its websites and '
+            'RocketRide Cloud, and the choices you have.',
+        ),
+        '/legal/marketplace-terms': (
+            'Marketplace Publisher Terms',
+            'The terms for publishing apps on the RocketRide Marketplace, including eligibility, revenue share, '
+            'payouts, and taxes.',
         ),
         '/superfans': (
             'Superfans',

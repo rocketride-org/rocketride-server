@@ -22,6 +22,7 @@ import type { ShellApiV4 } from '../contract/versions/v4';
 import type { ShellApiV5 } from '../contract/versions/v5';
 import type { ShellApiV6 } from '../contract/versions/v6';
 import type { ShellApiV7 } from '../contract/versions/v7';
+import type { ShellApiV8 } from '../contract/versions/v8';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -624,6 +625,10 @@ import type { AppRailVersion as Frozen_AppRailVersion } from '../contract/versio
 import type { AppRailVersion as Current_AppRailVersion } from './api';
 import type { DeployTeamRef as Frozen_DeployTeamRef } from '../contract/versions/v7';
 import type { DeployTeamRef as Current_DeployTeamRef } from './api';
+import type { SignupProperties as Frozen_SignupProperties } from '../contract/versions/v8';
+import type { SignupProperties as Current_SignupProperties } from './api';
+import type { PkceCredential as Frozen_PkceCredential } from '../contract/versions/v8';
+import type { PkceCredential as Current_PkceCredential } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -642,6 +647,8 @@ const _floor_v6: ShellApiV6 = {} as ShellApiShape;
 void _floor_v6;
 const _floor_v7: ShellApiV7 = {} as ShellApiShape;
 void _floor_v7;
+const _floor_v8: ShellApiV8 = {} as ShellApiShape;
+void _floor_v8;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -1248,3 +1255,7 @@ const _t_AppRailVersion: Frozen_AppRailVersion = {} as Current_AppRailVersion;
 void _t_AppRailVersion;
 const _t_DeployTeamRef: Frozen_DeployTeamRef = {} as Current_DeployTeamRef;
 void _t_DeployTeamRef;
+const _t_SignupProperties: Frozen_SignupProperties = {} as Current_SignupProperties;
+void _t_SignupProperties;
+const _t_PkceCredential: Frozen_PkceCredential = {} as Current_PkceCredential;
+void _t_PkceCredential;

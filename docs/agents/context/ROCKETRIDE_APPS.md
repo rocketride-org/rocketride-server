@@ -748,7 +748,7 @@ from `'shell'`). The full set:
 | `shell:appsUpdated` | `{ apps }` | App catalog changed — complete replacement set. |
 | `shell:login` | `{ user: ConnectResult }` | Authentication succeeded. |
 | `shell:logout` | `{}` | User signed out. |
-| `shell:loginRequest` | `{ appId?, register? }` | UI requests sign-in. |
+| `shell:loginRequest` | `{ appId?, register?, auto?, signupProperties?: SignupProperties }` | UI requests sign-in; `auto` is set only by the shell's auth gate. |
 | `shell:logoutRequest` | `{}` | UI requests sign-out. |
 | `shell:switchApp` | `{ appId }` | Switch the active app. |
 | `shell:subscribe` | `{ app, plan?, promo? }` | Open subscription checkout; `plan` skips the picker. |
@@ -759,12 +759,31 @@ from `'shell'`). The full set:
 | `shell:themeChange` | `{ tokens }` | Theme changed; `tokens` is the full `--rr-*` map. |
 | `shell:viewActivated` | `{ viewId }` | A view/tab became active — lazy panels init here. |
 | `shell:manifestRefresh` | `{ source }` | Server-side app manifest changed (dev overlay, publish, expiry). |
+| `shell:telemetry` | `{ event, props, ts, id }` | A telemetry fact the shell observed (`auth:complete`) for the active app to forward; `auth:start` and other held facts come from `cm.drainTelemetry()`. |
 | `app:statusChanged` | `{ appId, version?, status, notes? }` | Store review status changed. |
 | `store:changed` | `{ prefix, paths }` | Files changed under a watched store prefix. |
 
 The event map is the platform's shared vocabulary — it carries platform
 events only. For your app's internal communication, use ordinary React
 state or your own emitter; do not overload the shell bus.
+
+Optional `signupProperties` is consent-gated PKCE credential context for sign-up requests.
+The native auth telemetry facts contain no signup attribution; the encoded credential alone
+uses the snake_case `signup_properties` key. See the public Shell API signup attribution guide.
+
+**Telemetry facts.** The shell has no analytics SDK: it raises `auth:start`
+and `auth:complete` (with `is_new`, `waitlisted` and `duration_ms`, the OAuth
+round trip from the redirect, null when unknown) as `shell:telemetry` for the
+active app to forward to its own analytics. `auth:start` is always held (the
+OAuth redirect follows at once), and so is a fact raised while no app listens
+(32 facts, 30 minutes, in the tab's sessionStorage), until the app calls
+`cm.drainTelemetry?.()` (optional: older shells lack it): drain once at
+analytics init, then subscribe, and forward each fact once by its `id` with
+`ts` as its time. On the waitlist
+screen, where no app renders, the shell loads the home app's exposed
+`./telemetry` module and calls its no-argument default export once per page
+load; it starts the home analytics and must not render. Only the home app
+exposes it.
 
 ### Debug log
 

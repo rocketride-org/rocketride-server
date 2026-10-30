@@ -32,6 +32,7 @@ import type { ShellApiV4 } from './versions/v4';
 import type { ShellApiV5 } from './versions/v5';
 import type { ShellApiV6 } from './versions/v6';
 import type { ShellApiV7 } from './versions/v7';
+import type { ShellApiV8 } from './versions/v8';
 
 /** Registry mapping each frozen shell API version number to its type snapshot. */
 export interface ShellApiVersions {
@@ -43,6 +44,7 @@ export interface ShellApiVersions {
 	5: ShellApiV5;
 	6: ShellApiV6;
 	7: ShellApiV7;
+	8: ShellApiV8;
 }
 
 /**
@@ -54,6 +56,6 @@ export interface ShellApiVersions {
  * contract-check.generated.ts, which assert the live surface still satisfies
  * EACH frozen version separately.
  */
-export type ShellApiLatest = ShellApiVersions[7];
+export type ShellApiLatest = ShellApiVersions[8];
 
 export type * from './latest';

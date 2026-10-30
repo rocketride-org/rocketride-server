@@ -29,6 +29,7 @@ import re
 from typing import Any, Dict, List, Tuple
 
 from ai.common.store import StoreGlobalBase
+from nodes.store_milvus.mode import is_local
 from rocketlib import warning
 
 
@@ -39,7 +40,7 @@ class IGlobal(StoreGlobalBase):
 
     def _credentials(self, config: Dict[str, Any]) -> List[Tuple[str, Any]]:
         """The token goes to a cloud or remote server only, never to a local one."""
-        if config.get('mode') == 'local':
+        if is_local(config):
             return []
         return [('apikey', config.get('apikey'))]
 
@@ -72,7 +73,7 @@ class IGlobal(StoreGlobalBase):
             host_raw = config.get('host', '').strip()
             # The token goes to a cloud server only: a local server gets none, as in the running store.
             token = ''
-            if config.get('mode') != 'local':
+            if not is_local(config):
                 token = (config.get('apikey') or '').strip()
             # Use port exactly as provided by UI (let SDK validate)
             port = config.get('port')

@@ -34,6 +34,9 @@ void engine() {
         "                 nodes. Each node's services.json must use");
     LOGOUTPUT(
         "                 \"path\": \"local_nodes.<node>\".");
+    LOGOUTPUT(
+        "    --dumps      Write a crash dump (minidump) if the engine crashes");
+    LOGOUTPUT("                 Off by default: dumps hold process memory");
     LOGOUTPUT("\n");
 }
 

@@ -22,6 +22,8 @@
  * SOFTWARE.
  */
 
+import { normalizeSignupProperties } from './signup.js';
+import type { PkceCredential } from './types/signup.js';
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
@@ -347,6 +349,7 @@ interface LoginLifecycleOperation {
 	readonly generation: number;
 	readonly endpoint: string;
 	readonly credentialKey: string;
+	pkce?: PkceCredential;
 	readonly priority: LifecyclePriority;
 	readonly promise: Promise<ConnectResult>;
 	resolve: (result: ConnectResult) => void;
@@ -644,9 +647,17 @@ export class RocketRideClient extends DAPClient {
 	// INTERNAL CONNECTION HELPERS
 	// ============================================================================
 
-	private _resolveCredential(credential?: string | { code: string; verifier: string; redirectUri: string }): string {
+	private _resolveCredential(credential?: string | PkceCredential): string {
 		if (credential && typeof credential === 'object') {
-			// Keep the established deterministic PKCE wire encoding.
+			// No context retains the established deterministic PKCE wire encoding.
+			let signupValue: unknown;
+			try {
+				const value = credential.signupProperties;
+				signupValue = typeof value === 'function' ? value() : value;
+			} catch {
+				// Optional getters and resolvers cannot prevent authentication.
+			}
+			const signup = normalizeSignupProperties(signupValue);
 			return (
 				'cd_' +
 				btoa(
@@ -654,6 +665,7 @@ export class RocketRideClient extends DAPClient {
 						code: credential.code,
 						verifier: credential.verifier,
 						redirectUri: credential.redirectUri,
+						...(signup ? { signup_properties: signup } : {}),
 					})
 				)
 			);
@@ -823,7 +835,8 @@ export class RocketRideClient extends DAPClient {
 			await this._prepareOperationTransport(operation, timeout);
 			this._assertCurrentOperation(operation);
 
-			const authArguments: Record<string, unknown> = { auth: operation.credentialKey };
+			// Consent/expiry may change while transport is opening. No await between resolution and send.
+			const authArguments: Record<string, unknown> = { auth: operation.pkce ? this._resolveCredential(operation.pkce) : operation.credentialKey };
 			if (this._clientDisplayName) authArguments.clientName = this._clientDisplayName;
 			if (this._clientDisplayVersion) authArguments.clientVersion = this._clientDisplayVersion;
 
@@ -867,7 +880,7 @@ export class RocketRideClient extends DAPClient {
 		}
 	}
 
-	private _startLoginOperation(endpoint: string, credentialKey: string, priority: LifecyclePriority, timeout?: number): LoginLifecycleOperation | undefined {
+	private _startLoginOperation(endpoint: string, credentialKey: string, priority: LifecyclePriority, timeout?: number, pkce?: PkceCredential): LoginLifecycleOperation | undefined {
 		const current = this._lifecycleOperation;
 		if (priority === 'foreground') this._clearReconnectTimer();
 		if (priority === 'background' && current?.priority === 'foreground' && !current.settled) {
@@ -879,6 +892,7 @@ export class RocketRideClient extends DAPClient {
 
 		let priorCleanup = Promise.resolve();
 		const operation = this._createLifecycleOperation(endpoint, credentialKey, priority);
+		operation.pkce = pkce;
 		this._lifecycleOperation = operation;
 		this._uri = endpoint;
 		this._desiredState = 'authenticated';
@@ -903,9 +917,23 @@ export class RocketRideClient extends DAPClient {
 		return operation;
 	}
 
-	private _startForegroundLogin(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
+	private _startForegroundLogin(credential?: string | PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		const endpoint = options?.uri ? this._getWebsocketUri(options.uri) : this._uri;
-		const credentialKey = this._resolveCredential(credential);
+		let pkce: PkceCredential | undefined;
+		if (credential && typeof credential === 'object') {
+			pkce = {
+				code: credential.code,
+				verifier: credential.verifier,
+				redirectUri: credential.redirectUri,
+				// Defer even property access to the guarded send boundary.
+				signupProperties: () => {
+					const value = credential.signupProperties;
+					return typeof value === 'function' ? value() : value ?? null;
+				},
+			};
+		}
+		// Optional attribution is not credential identity and must not survive in the reconnect key.
+		const credentialKey = this._resolveCredential(pkce ? { ...pkce, signupProperties: undefined } : credential);
 		const current = this._lifecycleOperation;
 		if (current?.priority === 'foreground' && !current.settled && !current.cancellationReason && current.endpoint === endpoint && (current.credentialKey === credentialKey || (current.accepted && this._apikey === credentialKey))) {
 			return current.promise;
@@ -913,7 +941,7 @@ export class RocketRideClient extends DAPClient {
 		if (current?.accepted && current.settled && this._authenticated && current.endpoint === endpoint && (current.credentialKey === credentialKey || this._apikey === credentialKey)) {
 			return Promise.resolve(this._connectResult ?? ({} as ConnectResult));
 		}
-		const operation = this._startLoginOperation(endpoint, credentialKey, 'foreground', options?.timeout);
+		const operation = this._startLoginOperation(endpoint, credentialKey, 'foreground', options?.timeout, pkce);
 		if (!operation) throw new Error('Unable to start foreground login');
 		return operation.promise;
 	}
@@ -951,7 +979,7 @@ export class RocketRideClient extends DAPClient {
 			if (this._desiredState === 'authenticated') {
 				const lifecycleOperation = this._lifecycleOperation;
 				const credentialKey = lifecycleOperation && !lifecycleOperation.accepted ? lifecycleOperation.credentialKey : (this._apikey ?? lifecycleOperation?.credentialKey ?? '');
-				const operation = this._startLoginOperation(this._uri, credentialKey, 'background');
+				const operation = this._startLoginOperation(this._uri, credentialKey, 'background', undefined, !lifecycleOperation?.accepted ? lifecycleOperation?.pkce : undefined);
 				if (!operation) return;
 				void operation.promise.then(
 					() => {
@@ -1091,7 +1119,7 @@ export class RocketRideClient extends DAPClient {
 	 * resolution checks the argument, configured environment, and stored client state
 	 * (initialized by `config.auth` and updated after authentication). The transport stays attached.
 	 */
-	async login(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
+	async login(credential?: string | PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		return this._startForegroundLogin(credential, options);
 	}
 
@@ -1184,7 +1212,7 @@ export class RocketRideClient extends DAPClient {
 	 * resolution checks the argument, configured environment, and stored client state
 	 * (initialized by `config.auth` and updated after authentication).
 	 */
-	async connect(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
+	async connect(credential?: string | PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		return this._startForegroundLogin(credential, options);
 	}
 

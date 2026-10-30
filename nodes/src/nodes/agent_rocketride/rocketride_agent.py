@@ -33,7 +33,7 @@ import dataclasses
 import json
 from typing import Any, Dict, List, Optional
 
-from rocketlib import debug, error
+from rocketlib import debug, error, warning
 
 from ai.common.agent import AgentBase, AgentContext
 from ai.common.agent.types import AgentRunResult
@@ -158,7 +158,9 @@ class RocketRideDriver(AgentBase):
         finally:
             running = state.background.running()
             if running:
-                error(
+                # A warning, not an error: the timeout was handled and the run answers.
+                # An error here would mark a run that answered normally as failed.
+                warning(
                     f'rocketride wave: waiting for {running} timed-out tool call(s) to return before the run ends; '
                     'a call still inside the engine must not outlive the pipeline'
                 )

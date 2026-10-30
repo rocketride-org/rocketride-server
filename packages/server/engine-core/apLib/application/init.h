@@ -27,6 +27,10 @@ namespace ap::log {
 extern application::Opt Trace;
 }
 
+namespace ap::dev {
+extern application::Opt Dumps;
+}
+
 namespace ap::application {
 Error init() noexcept;
 void deinit() noexcept;

@@ -6,9 +6,10 @@
 /**
  * ProfilePanel — the Profile tab within AccountView.
  *
- * Displays the user's avatar card with identity information, organization
- * and team memberships with development-team assignment, and the Edit Profile
- * record panel — an edit-only form DetailPanel per the interaction standard
+ * Displays the user's avatar card with identity information, the active
+ * organization's teams with development-team assignment (a per-user setting;
+ * the org switcher lives on the Organization tab), and the Edit
+ * Profile record panel — an edit-only form DetailPanel per the interaction standard
  * (2026-07-18): [Save Changes] MATERIALIZES only while a field differs from
  * the seeded profile snapshot; Cancel / X / Escape on a dirty form raise the
  * stock "Discard changes?" confirm (the DetailPanel owns the X / Escape
@@ -29,7 +30,7 @@ import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
 import { Banner } from '../../../components/banner/Banner';
 import { Button } from '../../../components/button/Button';
 import type { ConnectResult, ProfileUpdate } from '../types';
-import { S, Badge, Avatar, initials, avatarColor } from './shared';
+import { S, initials, avatarColor } from './shared';
 
 // =============================================================================
 // STYLES
@@ -130,51 +131,21 @@ const styles = {
 		color: 'var(--rr-color-warning)',
 	} as CSSProperties,
 
-	/**
-	 * Membership org row: dimmed when the org is not the active one.
-	 *
-	 * @param active - Whether the org is the user's active organization.
-	 */
-	orgRow: (active: boolean): CSSProperties => ({
-		...S.rowItem,
-		borderBottom: 'none',
-		opacity: active ? 1 : 0.45,
-	}),
-
-	/** Green check label for the active org / development team. */
+	/** Green check label for the current development team. */
 	activeLabel: {
 		fontSize: 11,
 		color: 'var(--rr-color-success)',
 		fontWeight: 600,
 	} as CSSProperties,
 
-	/** Indented "Teams" caption above the active org's team rows. */
-	teamsCaption: {
-		paddingLeft: 40,
-		paddingTop: 4,
-		paddingBottom: 4,
-	} as CSSProperties,
-
-	/** Small caption text for the "Teams" label. */
-	teamsCaptionText: {
-		...commonStyles.labelUppercase,
-		fontSize: 9,
-	} as CSSProperties,
-
 	/**
-	 * Team row under the active org: indented, tight vertical padding, and a
-	 * divider only after the last team when another org row follows.
+	 * Team row in the Development team card: no divider after the last one.
 	 *
-	 * @param isLast    - Whether this is the last team in the org.
-	 * @param needsRule - Whether a divider should follow (another org is next).
+	 * @param isLast - Whether this is the last team in the active org.
 	 */
-	teamRow: (isLast: boolean, needsRule: boolean): CSSProperties => ({
+	teamRow: (isLast: boolean): CSSProperties => ({
 		...S.rowItem,
-		paddingLeft: 40,
-		paddingRight: 60,
-		paddingTop: 2,
-		paddingBottom: isLast ? 12 : 2,
-		borderBottom: isLast && needsRule ? '1px solid var(--rr-border)' : 'none',
+		borderBottom: isLast ? 'none' : S.rowItem.borderBottom,
 	}),
 
 	/**
@@ -201,6 +172,12 @@ const styles = {
 		marginBottom: 12,
 	} as CSSProperties,
 
+	/** Empty-state line in the Development team card when the active org has no teams. */
+	emptyTeams: {
+		...commonStyles.textMuted,
+		padding: '16px 20px',
+	} as CSSProperties,
+
 	/** Read-only input treatment (login name). */
 	inputReadOnly: {
 		...commonStyles.inputField,
@@ -223,8 +200,6 @@ export interface ProfilePanelProps {
 	onSave: (fields: ProfileUpdate) => Promise<void>;
 	/** Assigns the team the user's development runs execute under, by its ID. */
 	onSetDevTeam: (teamId: string) => void;
-	/** Switches the user's active organization by its ID. */
-	onSetDefaultOrg: (orgId: string) => void;
 }
 
 // =============================================================================
@@ -241,11 +216,11 @@ const VerifiedBadge: React.FC = () => <span style={styles.verifiedPill}>{'✓'} 
 /**
  * The Profile tab panel.
  *
- * Displays a large avatar card with the user's identity information,
- * a list of their organizations and team memberships with a development-team
- * assignment action per team, and an inline Edit Profile modal.
+ * Displays a large avatar card with the user's identity information, the
+ * active organization's teams with a development-team assignment action per
+ * team, and an inline Edit Profile modal.
  */
-export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDevTeam, onSetDefaultOrg }) => {
+export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, onSave, onSetDevTeam }) => {
 	/**
 	 * Builds a ProfileUpdate snapshot from the current profile/authUser props.
 	 * Called exactly when the edit panel OPENS — the concurrent-edit ruling
@@ -323,9 +298,12 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 	// Prefer the server-side profile value over the cached auth token value.
 	const displayName = profile?.displayName || authUser?.displayName || '—';
 	const email = profile?.email || authUser?.email || '';
+	// The active organization's teams drive the development-team picker. The
+	// org switcher lives on the Organization tab (OrganizationsCard).
 	const org = profile?.organization ?? authUser?.organization ?? null;
-	const memberships = profile?.memberships ?? (org ? [org] : []);
 	const defaultOrgId = profile?.defaultOrgId ?? org?.id;
+	const activeOrg = profile?.memberships?.find((o) => o.id === defaultOrgId) ?? org;
+	const teams = activeOrg?.teams ?? [];
 
 	return (
 		<section style={styles.stack}>
@@ -362,62 +340,32 @@ export const ProfilePanel: React.FC<ProfilePanelProps> = ({ profile, authUser, o
 				</div>
 			</Card>
 
-			{/* Organizations / workspaces card with team memberships. */}
-			{memberships.length > 0 && (
-				<Card header="Organizations / Workspaces" noBodyPadding>
-					<div style={S.rowList}>
-						{memberships.map((o, oi) => {
-							const isActive = o.id === defaultOrgId;
-							return (
-								<React.Fragment key={o.id}>
-									{/* Org row */}
-									<div style={styles.orgRow(isActive)}>
-										<Avatar name={o.name} size={24} square />
-										<div style={S.rowInfo}>
-											<div style={S.rowName}>{o.name}</div>
-										</div>
-										{o.permissions?.includes('org.admin') && <Badge variant="admin">Admin</Badge>}
-										{isActive ? (
-											<span style={styles.activeLabel}>{'✓'} Active</span>
-										) : (
-											<Button variant="ghost" small onClick={() => onSetDefaultOrg(o.id)}>
-												Switch to
-											</Button>
-										)}
-									</div>
-									{/* Teams — only shown for the active org */}
-									{isActive && o.teams.length > 0 && (
-										<>
-											<div style={styles.teamsCaption}>
-												<span style={styles.teamsCaptionText}>Teams</span>
-											</div>
-											{o.teams.map((t, i) => {
-												const isDevTeam = authUser?.devTeam === t.id;
-												const isLast = i === o.teams.length - 1;
-												return (
-													<div key={t.id} style={styles.teamRow(isLast, oi < memberships.length - 1)}>
-														<div style={styles.teamChip(t.name)}>{t.name[0]}</div>
-														<div style={S.rowInfo}>
-															<div style={S.rowName}>{t.name}</div>
-														</div>
-														{isDevTeam ? (
-															<span style={styles.activeLabel}>{'✓'} Development team</span>
-														) : (
-															<Button variant="ghost" small onClick={() => onSetDevTeam(t.id)}>
-																Set as development team
-															</Button>
-														)}
-													</div>
-												);
-											})}
-										</>
-									)}
-								</React.Fragment>
-							);
-						})}
-					</div>
-				</Card>
-			)}
+			{/* Development team card: the active org's teams with the per-user
+			    development-team assignment. Always rendered so the setting stays
+			    discoverable; empty state when the active org has no teams. */}
+			<Card header="Development team" noBodyPadding>
+				<div style={S.rowList}>
+					{teams.length === 0 && <div style={styles.emptyTeams}>{activeOrg ? 'Your organization has no teams yet.' : 'Join an organization to pick a development team.'}</div>}
+					{teams.map((t, i) => {
+						const isDevTeam = authUser?.devTeam === t.id;
+						return (
+							<div key={t.id} style={styles.teamRow(i === teams.length - 1)}>
+								<div style={styles.teamChip(t.name)}>{t.name[0]}</div>
+								<div style={S.rowInfo}>
+									<div style={S.rowName}>{t.name}</div>
+								</div>
+								{isDevTeam ? (
+									<span style={styles.activeLabel}>{'✓'} Development team</span>
+								) : (
+									<Button variant="ghost" small onClick={() => onSetDevTeam(t.id)}>
+										Set as development team
+									</Button>
+								)}
+							</div>
+						);
+					})}
+				</div>
+			</Card>
 
 			{/* -- Edit Profile record panel (record-panel standard 2026-07-17:
 			      the profile IS a record — editing slides out from the Account

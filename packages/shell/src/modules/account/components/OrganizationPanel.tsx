@@ -6,9 +6,10 @@
 /**
  * OrganizationPanel — the Organization tab within AccountView.
  *
- * Currently exposes a single "Organization" Card that lets an org admin rename
- * the organization. Additional settings (billing, SSO, etc.) can be added as
- * Cards beneath the existing one in future iterations.
+ * Stacks the user's Organizations / Workspaces card (switch between orgs or
+ * leave one) above the "Organization" Card that lets an org admin
+ * rename the active organization. Additional settings (billing, SSO, etc.)
+ * can be added as Cards beneath the existing ones in future iterations.
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -16,14 +17,22 @@ import type { CSSProperties } from 'react';
 import { commonStyles } from '../../../themes/styles';
 import { Card } from '../../../components/card/Card';
 import { Button } from '../../../components/button/Button';
-import type { OrgDetail } from '../types';
+import type { OrgDetail, OrgInfo } from '../types';
 import { S } from './shared';
+import { OrganizationsCard } from './OrganizationsCard';
 
 // =============================================================================
 // STYLES
 // =============================================================================
 
 const styles = {
+	/** Vertical stack of the panel's cards (standard 16px rhythm). */
+	stack: {
+		display: 'flex',
+		flexDirection: 'column',
+		gap: 16,
+	} as CSSProperties,
+
 	/** Cluster of status text + action buttons in the card header. */
 	headerCluster: {
 		display: 'flex',
@@ -68,6 +77,14 @@ export interface OrganizationPanelProps {
 	onSave: (name: string) => Promise<void>;
 	/** True when the current user has org.admin permissions. */
 	isOrgAdmin: boolean;
+	/** Every organization the user belongs to (the active org alone when the profile carries no membership list). */
+	memberships: OrgInfo[];
+	/** The ID of the user's active (default) organization, if any. */
+	defaultOrgId: string | undefined;
+	/** Switches the user's active organization by its ID. */
+	onSetDefaultOrg: (orgId: string) => void;
+	/** Removes the user from the organization with the given ID. Hosts that omit it (the VS Code account view) show no Leave button. */
+	onLeaveOrg?: (orgId: string) => Promise<void>;
 }
 
 // =============================================================================
@@ -77,11 +94,12 @@ export interface OrganizationPanelProps {
 /**
  * The Organization tab panel.
  *
- * Currently exposes a single "Organization" Card that lets an org admin rename
- * the organization. Additional settings (billing, SSO, etc.) can be added as
- * Cards beneath the existing one in future iterations.
+ * Renders the user's Organizations / Workspaces card (switch / leave) first,
+ * then the "Organization" Card that lets an org admin rename the active
+ * organization. Additional settings (billing, SSO, etc.) can be added as
+ * Cards beneath the existing ones in future iterations.
  */
-export const OrganizationPanel: React.FC<OrganizationPanelProps> = ({ org, onSave, isOrgAdmin }) => {
+export const OrganizationPanel: React.FC<OrganizationPanelProps> = ({ org, onSave, isOrgAdmin, memberships, defaultOrgId, onSetDefaultOrg, onLeaveOrg }) => {
 	const [editName, setEditName] = useState('');
 	const [dirty, setDirty] = useState(false);
 	const [saving, setSaving] = useState(false);
@@ -129,7 +147,11 @@ export const OrganizationPanel: React.FC<OrganizationPanelProps> = ({ org, onSav
 	}, [org?.name]);
 
 	return (
-		<section>
+		<section style={styles.stack}>
+			{/* Your organizations first: switch between them or leave one. */}
+			<OrganizationsCard memberships={memberships} defaultOrgId={defaultOrgId} onSetDefaultOrg={onSetDefaultOrg} onLeaveOrg={onLeaveOrg} />
+
+			{/* The active organization's details (rename for admins). */}
 			<Card
 				header="Organization"
 				headerActions={
