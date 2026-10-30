@@ -44,10 +44,32 @@ TEST_CASE("plat::createMinidump") {
         minidumpPath = path;
     };
 
-    // Create the crash dump
-    ap::plat::createMinidump(SIGABRT);
+    SECTION("writes a dump") {
+        // Create the crash dump
+        ap::plat::createMinidump(SIGABRT);
 
-    // Verify results
-    REQUIRE(crashDumpCreated);
-    REQUIRE(file::exists(minidumpPath));
+        // Verify results
+        REQUIRE(crashDumpCreated);
+        REQUIRE(file::exists(minidumpPath));
+    }
+
+    // The crash handlers ask dev::dumpsEnabled() the same way
+    SECTION("dev::dumpProcess() writes one only with --dumps") {
+        auto oldDumps = ap::dev::Dumps.val();
+        util::Guard restoreDumps = [&] { ap::dev::Dumps.setValue(oldDumps); };
+
+        // Unset, false, or a value that is not a boolean
+        for (const char *value : {"", "false", "C:\\dumps"}) {
+            CAPTURE(value);
+            ap::dev::Dumps.setValue(value);
+            REQUIRE(ap::dev::dumpProcess() == Ec::NotSupported);
+            REQUIRE(!crashDumpCreated);
+        }
+
+        // A bare --dumps reaches the engine as "true"
+        ap::dev::Dumps.setValue("true");
+        REQUIRE(!ap::dev::dumpProcess());
+        REQUIRE(crashDumpCreated);
+        REQUIRE(file::exists(minidumpPath));
+    }
 }
