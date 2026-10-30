@@ -31,7 +31,7 @@ tree is a temp directory and the registry is a fake.
 import pytest
 
 from ai.account import seed_apps
-from ai.account.seed_apps import SEED_COMMENT, bundle_changed, bundle_digest, seed_app
+from ai.account.seed_apps import SEED_COMMENT, bundle_changed, bundle_digest, seed_app, seed_manifest_app
 
 APP_ID = 'rocketride.home'
 ENTRY = {'id': APP_ID, 'name': 'Home', 'version': '1.0.0', 'entry': '/apps/rocketride.home/remoteEntry.js'}
@@ -57,6 +57,8 @@ class _Registry:
     def __init__(self, rows=None):
         self.rows = list(rows or [])
         self.published = []
+        self.build_stamps = []
+        self.bindings = []
 
     async def deployments_versions(self, org_id, app_id):
         return list(self.rows)
@@ -70,11 +72,19 @@ class _Registry:
         }
 
     async def deployments_set_build(self, org_id, app_id, version, build):
+        self.build_stamps.append(build)
+        return {}
+
+    async def publish_get(self, org_id, kind, app_id, audience):
+        return None
+
+    async def publish_set(self, org_id, kind, app_id, audience, version, snapshot, actor):
+        self.bindings.append(version)
         return {}
 
 
-def _seed_row(digest=None, comment=SEED_COMMENT):
-    build = {'status': 'ok', 'seeded': True}
+def _seed_row(digest=None, comment=SEED_COMMENT, status='ok'):
+    build = {'status': status, 'seeded': True}
     if digest is not None:
         build['bundleSha256'] = digest
     return {'version': 1, 'comment': comment, 'state': 'ready', 'metadata': {'build': build}}
@@ -86,6 +96,23 @@ def _seed_row(digest=None, comment=SEED_COMMENT):
 
 
 def test_no_local_bundle_has_no_digest(static_apps):
+    assert bundle_digest(APP_ID) is None
+
+
+def test_an_empty_bundle_directory_has_no_digest(static_apps):
+    (static_apps / APP_ID / 'static').mkdir(parents=True)
+
+    assert bundle_digest(APP_ID) is None
+
+
+def test_an_unreadable_file_leaves_no_digest(static_apps, monkeypatch):
+    _write(static_apps / APP_ID, {'remoteEntry.js': b'a'})
+
+    def unreadable(*args, **kwargs):
+        raise PermissionError('denied')
+
+    monkeypatch.setattr(seed_apps, 'open', unreadable, raising=False)
+
     assert bundle_digest(APP_ID) is None
 
 
@@ -141,6 +168,24 @@ async def test_a_seeded_version_records_its_bundle_digest(static_apps, monkeypat
     assert registry.published[0]['build']['bundleSha256'] == bundle_digest(APP_ID)
 
 
+@pytest.mark.asyncio
+async def test_a_self_healed_seed_row_records_its_bundle_digest(static_apps, monkeypatch):
+    _write(static_apps / APP_ID, {'remoteEntry.js': b'a'})
+
+    async def copied(app_id, artifact_path):
+        return 1
+
+    monkeypatch.setattr(seed_apps, 'copy_bundle_to_store', copied)
+    row = _seed_row(status='failed')
+    row['artifactPath'] = f'.deployments/{APP_ID}/v1-abcdef12.json'
+    registry = _Registry([row])
+
+    assert await seed_manifest_app(registry, 'org', ENTRY, seed_apps.SYSTEM_ACTOR) is True
+    assert registry.build_stamps[-1]['status'] == 'ok'
+    assert registry.build_stamps[-1]['bundleSha256'] == bundle_digest(APP_ID)
+    assert registry.bindings == [1]
+
+
 # =============================================================================
 # bundle_changed
 # =============================================================================
@@ -166,6 +211,14 @@ async def test_a_changed_bundle_is_reseeded(static_apps):
 async def test_a_seed_row_from_before_the_digest_counts_as_changed(static_apps):
     _write(static_apps / APP_ID, {'remoteEntry.js': b'a'})
     registry = _Registry([_seed_row()])
+
+    assert await bundle_changed(registry, 'org', ENTRY) is True
+
+
+@pytest.mark.asyncio
+async def test_a_failed_newest_seed_counts_as_changed_so_the_next_deploy_retries(static_apps):
+    _write(static_apps / APP_ID, {'remoteEntry.js': b'a'})
+    registry = _Registry([_seed_row(status='failed'), _seed_row(bundle_digest(APP_ID))])
 
     assert await bundle_changed(registry, 'org', ENTRY) is True
 

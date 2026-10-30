@@ -134,20 +134,30 @@ def bundle_digest(app_id: str) -> Optional[str]:
     in sorted order, so the same build gives the same digest on every pod and
     a changed, added, removed or renamed file changes it. Seeded rows record
     it as ``metadata.build.bundleSha256``; ``bundle_changed`` compares against it.
+
+    None means "no digest": no directory, an empty one (the copy would find no
+    files and fail the seed), or a file that can't be read. Callers then seed
+    without a digest rather than fail, which is how rows looked before the field.
     """
     root = _local_bundle_root(app_id)
     if not os.path.isdir(root):
         return None
     digest = hashlib.sha256()
-    for dirpath, dirs, files in os.walk(root):
-        dirs.sort()
-        for filename in sorted(files):
-            abs_path = os.path.join(dirpath, filename)
-            rel = os.path.relpath(abs_path, root).replace(os.sep, '/')
-            with open(abs_path, 'rb') as handle:
-                content = hashlib.sha256(handle.read()).digest()
-            digest.update(rel.encode('utf-8') + b'\0' + content)
-    return digest.hexdigest()
+    found = False
+    try:
+        for dirpath, dirs, files in os.walk(root):
+            dirs.sort()
+            for filename in sorted(files):
+                abs_path = os.path.join(dirpath, filename)
+                rel = os.path.relpath(abs_path, root).replace(os.sep, '/')
+                with open(abs_path, 'rb') as handle:
+                    content = hashlib.sha256(handle.read()).digest()
+                digest.update(rel.encode('utf-8') + b'\0' + content)
+                found = True
+    except OSError as exc:
+        debug(f'[seed_apps] {app_id}: bundle digest unavailable: {exc}')
+        return None
+    return digest.hexdigest() if found else None
 
 
 # =============================================================================
@@ -330,8 +340,9 @@ async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bo
     only when its build changed, so an unchanged app does not gain a version
     on every deploy. Compares the local bundle digest with ``bundleSha256``
     on the newest SEED row; user deploys of the same id are not seeds and
-    are ignored. A seed row without a digest predates the field, so it
-    counts as changed once, and that re-seed records one.
+    are ignored. A seed row without a digest counts as changed: either it
+    predates the field (one re-seed records a digest), or its build failed
+    and was stamped without one, so the next deploy retries the seed.
 
     Returns False when there is no local bundle (nothing to seed from), no
     rail rows (the plain seed handles a fresh app), or no seed rows (a user
