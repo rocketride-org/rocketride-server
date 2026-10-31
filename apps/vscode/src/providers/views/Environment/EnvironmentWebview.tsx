@@ -161,7 +161,7 @@ const EnvironmentWebview: React.FC = () => {
 	 * Resolves when env:data arrives for the same key (host re-fetches and
 	 * sends canonical data after a successful save). Rejects on env:error.
 	 */
-	const handleSaveEnv = useCallback(async (slotId: string, scope: EnvironmentScope, env: Record<string, string>, scopeId?: string) => {
+	const handleSaveEnv = useCallback(async (slotId: string, scope: EnvironmentScope, env: Record<string, string | null>, scopeId?: string) => {
 		const cacheKey = `${slotId}:${scope}:${scopeId ?? ''}`;
 		// Create a promise that resolves when the host confirms
 		const confirmation = new Promise<void>((resolve, reject) => {

@@ -54,6 +54,11 @@ from rocketlib import debug
 
 from ..base import AccountBase
 
+# What clients see in place of a stored environment value. A secret is
+# written once and never read back; sending the mask back keeps the value.
+# The SaaS service (extension/saas/account_service.py) uses the same string.
+ENV_MASK = '••••••••'
+
 
 class Account(AccountBase):
     """
@@ -409,8 +414,10 @@ class Account(AccountBase):
         """
         Handle ``rrext_account_me`` for env subcommands only.
 
-        OSS supports ``get_env`` (reads ROCKETRIDE_* from os.environ) and
-        ``set_env`` (writes to os.environ + persists to .env file).
+        OSS supports ``get_env`` (the ROCKETRIDE_* names in os.environ, values
+        masked) and ``update_env`` (merges into os.environ and the .env file: a
+        value is set, None deletes, the mask keeps what is stored). ``set_env``
+        is the same merge, for clients that predate ``update_env``.
         All other account commands raise NotImplementedError.
 
         Args:
@@ -423,30 +430,67 @@ class Account(AccountBase):
 
         if command == 'rrext_account_me':
             if sub == 'get_env':
-                env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+                env = {k: ENV_MASK for k in os.environ if k.startswith('ROCKETRIDE_')}
                 return conn.build_response(request, body={'env': env})
 
-            if sub == 'set_env':
-                # Only accept ROCKETRIDE_* keys — reject anything else
-                raw = args.get('env', {})
-                env = {k: v for k, v in raw.items() if k.startswith('ROCKETRIDE_')}
+            # The SDKs send update_env, which a server with the old full-replacement
+            # set_env refuses as unknown instead of wiping what it was not sent
+            if sub in ('set_env', 'update_env'):
+                raw, deleted = args.get('env', {}), args.get('delete', [])
+                if not isinstance(raw, dict) or not isinstance(deleted, list):
+                    return conn.build_error(request, '`env` must be an object and `delete` a list; nothing was saved.')
+                changes = dict(raw)
+                changes.update({name: None for name in deleted})
+                if not all(isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in changes.items()):
+                    return conn.build_error(request, 'Environment names and values must be strings; nothing was saved.')
+                rejected = sorted(k for k in changes if not k.startswith('ROCKETRIDE_'))
+                if rejected:
+                    # Names only: the values are secrets and must not reach the client.
+                    return conn.build_error(
+                        request,
+                        'Unsupported environment variable name(s): '
+                        + ', '.join(rejected)
+                        + ". Only names beginning with 'ROCKETRIDE_' are accepted; nothing was saved.",
+                    )
+                env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+                unmasked = sorted(k for k, v in changes.items() if v == ENV_MASK and k not in env)
+                if unmasked:
+                    return conn.build_error(
+                        request,
+                        'No stored value to keep for: ' + ', '.join(unmasked) + '. Send a value; nothing was saved.',
+                    )
+                for name, value in changes.items():
+                    if value is None:
+                        env.pop(name, None)
+                    elif value != ENV_MASK:
+                        env[name] = value
 
-                # Step 1: Remove existing ROCKETRIDE_* keys from os.environ
-                # so that deleted keys don't linger in memory.
-                for k in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
-                    del os.environ[k]
+                # A value the process environment cannot hold (a non-ASCII one under
+                # an ASCII locale) is refused before anything is written
+                try:
+                    for value in env.values():
+                        os.environ.encodevalue(value)
+                except UnicodeError:
+                    return conn.build_error(
+                        request, "A value cannot be held in this engine's environment (its locale); nothing was saved."
+                    )
 
-                # Step 2: Set the new values in os.environ so get_env
-                # reflects the change immediately without a restart.
-                os.environ.update(env)
-
-                # Step 3: Persist to .env file on disk.
-                # Use sys.executable (engine.exe path) — must match the
-                # load_dotenv path in server.py, which also uses sys.executable.
+                # Step 1: Persist to the .env file first, so a file that cannot be
+                # read or written leaves memory as it was. Use sys.executable
+                # (engine.exe path) — must match the load_dotenv path in server.py.
                 import sys
 
                 exec_dir = os.path.dirname(sys.executable)
-                self._write_env_file(os.path.join(exec_dir, '.env'), env)
+                try:
+                    self._write_env_file(os.path.join(exec_dir, '.env'), env)
+                except (OSError, UnicodeError) as e:
+                    return conn.build_error(request, f'The .env file could not be updated ({e}); nothing was saved.')
+
+                # Step 2: Replace the ROCKETRIDE_* keys in os.environ, so deleted
+                # keys don't linger and get_env reflects the change without a restart.
+                for k in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
+                    del os.environ[k]
+                os.environ.update(env)
                 return conn.build_response(request, body={'updated': True})
 
             if sub == 'env_keys':
@@ -470,7 +514,7 @@ class Account(AccountBase):
         lines: List[str] = []
         written_keys: set = set()
         try:
-            with open(path, 'r') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 for line in f:
                     stripped = line.strip()
                     if stripped and not stripped.startswith('#') and '=' in stripped:
@@ -488,7 +532,7 @@ class Account(AccountBase):
             if k not in written_keys:
                 lines.append(f'{k}={v}\n')
 
-        with open(path, 'w') as f:
+        with open(path, 'w', encoding='utf-8') as f:
             f.writelines(lines)
 
     # generate_token is inherited from AccountBase.
