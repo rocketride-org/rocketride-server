@@ -88,14 +88,25 @@ IInvokeTool = host.IInvokeTool
 class _FakeInstance:
     """Engine instance seam: one tool node whose catalog can change under the host."""
 
-    def __init__(self, tools_by_node: Dict[str, List[Dict[str, Any]]]) -> None:
+    def __init__(
+        self,
+        tools_by_node: Dict[str, List[Dict[str, Any]]],
+        ledger_nodes: List[str] | None = None,
+    ) -> None:
         self.tools_by_node = tools_by_node
+        self.ledger_nodes = ledger_nodes or []
         self.queries: List[str] = []
         self.invocations: List[tuple] = []
         self.validations: List[tuple] = []
 
     def getControllerNodeIds(self, kind: str) -> List[str]:
-        return list(self.tools_by_node) if kind == 'tool' else []
+        if kind == 'llm':
+            return ['llm_1']
+        if kind == 'tool':
+            return list(self.tools_by_node)
+        if kind == 'ledger':
+            return list(self.ledger_nodes)
+        return []
 
     def invoke(self, param, component_id: str):
         if isinstance(param, IInvokeTool.Query):
@@ -223,3 +234,30 @@ class TestMiss:
 
         assert instance.queries == ['n1', 'n2', 'n2']
         assert {d['name'] for d in tools.list} == {'n1.srv.a', 'n2.other.z', 'n2.other.late'}
+
+
+class TestLedgerHost:
+    def test_host_services_ledger_none_when_unconnected(self, instance):
+        services = host.AgentHostServices(_FakeInvoker(instance))
+        assert services.ledger is None
+
+    def test_host_services_ledger_ingest_and_recall_when_connected(self):
+        instance = _FakeInstance({'n1': [_descriptor('srv.a')]}, ledger_nodes=['ledger_1'])
+        services = host.AgentHostServices(_FakeInvoker(instance))
+        assert services.ledger is not None
+
+        ingest_out = services.ledger.ingest('payload', ['tag1'], 'intent-1')
+        assert ingest_out == {'called': 'smart_ingest'}
+        assert instance.invocations[-1] == (
+            'ledger_1',
+            'smart_ingest',
+            {'content': 'payload', 'tags': ['tag1'], 'intent_id': 'intent-1'},
+        )
+
+        recall_out = services.ledger.recall('hdl_123')
+        assert recall_out == {'called': 'recall'}
+        assert instance.invocations[-1] == (
+            'ledger_1',
+            'recall',
+            {'handle': 'hdl_123'},
+        )

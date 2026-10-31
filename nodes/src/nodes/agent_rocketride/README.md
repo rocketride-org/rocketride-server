@@ -15,6 +15,7 @@ It can also act as a specialist for a parent agent through its registered `<node
 | `llm` | yes | LLM used for planning and final-answer synthesis. |
 | `tool` | no | Tools the agent may call through the control plane. |
 | `memory` | yes | Keyed memory service used to store, retrieve, and clear tool results. |
+| `ledger` | no | Optional cognitive ledger service used to ingest and recall ledger entries through the control plane. |
 
 The node needs both an LLM and a memory connection to run. A `tool` connection is optional, but without one the agent has no connected external tools to call.
 
