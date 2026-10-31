@@ -61,7 +61,7 @@ void deinit() noexcept {
 //-------------------------------------------------------------------------
 Error init() noexcept {
     // Read the config string from the input
-    if (Stream) {
+    if (Stream.enabled()) {
         std::getline(std::cin, StreamCommand);
     }
 
@@ -71,7 +71,7 @@ Error init() noexcept {
     // Setup stdin monitoring (always enabled)
     // When stdin closes (parent dies), exit only if --autoterm specified
     application::setStdinCloseCallback([]() {
-        if (AutoTerm) {
+        if (AutoTerm.enabled()) {
             LOG(Always, "stdin closed - immediate exit");
             application::quickExit(0);
         }

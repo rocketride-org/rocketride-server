@@ -56,6 +56,8 @@ Reads JSON task configuration from stdin for interactive or debugger-driven exec
 
 ## Command-Line Options
 
+An on/off option such as `--stream` or `--log.includeFile` is on when given bare. Given a value, it takes `true`, `yes`, `on` or `1` for on and `false`, `no`, `off` or `0` for off, in any case; a value that is not a boolean leaves the option at its default.
+
 ### Core Control
 
 | Option       | Description                                  |

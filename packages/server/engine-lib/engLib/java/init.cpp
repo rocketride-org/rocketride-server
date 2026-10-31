@@ -527,7 +527,8 @@ bool isJava() noexcept {
     auto &cmds = application::cmdline();
 
     // If --java or --tika was specified, forces into java mode
-    if (ExecJava || ExecTika) return true;
+    if (ExecJava.enabled() || ExecTika.enabled())
+        return true;
 
     // Get the original arguments
     auto args = cmds.args_original();
@@ -625,7 +626,7 @@ Error execJava() noexcept {
         }
 
         // If we are execing tika, set the class
-        if (ExecTika) {
+        if (ExecTika.enabled()) {
             // Setup for tika
             execClass = "com.rocketride.tika_api.TikaApi";
         }

@@ -39,14 +39,7 @@ namespace ap::dev {
 // Crash dumps hold process memory, so the engine writes them only when asked
 application::Opt Dumps{"--dumps"};
 
-bool dumpsEnabled() noexcept {
-    // Read like the --log.* switches, except that a value which is not a
-    // boolean leaves dumps off rather than ending the engine
-    if (!Dumps)
-        return false;
-    auto enabled = _fsc<bool>(*Dumps);
-    return enabled.hasValue() && enabled.value();
-}
+bool dumpsEnabled() noexcept { return Dumps.enabled(); }
 
 size_t g_nextSlot = 1;
 std::map<size_t, FatalityHandler> g_fatalityHandlers;

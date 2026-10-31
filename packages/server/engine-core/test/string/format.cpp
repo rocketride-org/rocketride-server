@@ -163,6 +163,8 @@ TEST_CASE("string::format") {
             REQUIRE(_fs<bool>("false") == false);
             REQUIRE(_fs<bool>("TrUe") == true);
             REQUIRE(_fs<bool>("FaLse") == false);
+            REQUIRE(_fs<bool>("On") == true);
+            REQUIRE(_fs<bool>("oFF") == false);
 
             REQUIRE(_fs<bool>("FaLse0x0asd") == false);
         }
