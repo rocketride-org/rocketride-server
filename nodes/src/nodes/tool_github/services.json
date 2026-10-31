@@ -22,6 +22,7 @@
 				"appId": "",
 				"privateKey": "",
 				"installationId": "",
+				"credentialMap": {},
 				"defaultRepo": "",
 				"readOnly": false,
 				"tools": [],
@@ -78,9 +79,23 @@
 		"github.installationId": {
 			"type": "string",
 			"title": "Installation ID",
-			"description": "The installation ID for the org/account where the App is installed (found in the installation's settings URL).",
+			"description": "The installation ID for the org/account where the App is installed (found in the installation's settings URL). Leave empty to find the installation per repository (GET /repos/{owner}/{repo}/installation), so one pipeline can reach repositories in every organization where the App is installed.",
 			"default": "",
 			"optional": true
+		},
+		"github.credentialMap": {
+			"type": "object",
+			"additionalProperties": { "type": "string" },
+			"title": "Credential map",
+			"description": "Optional: a credential per repository or organization, as entries whose key is owner/repo, owner/* or * and whose value is a token, a ${ROCKETRIDE_...} placeholder, or the JSON text of a GitHub App credential {\"appId\", \"privateKey\", optional \"installationId\"}. Each call uses the most specific match for its repository: the exact owner/repo, then owner/*, then the * default; with no match and no default the call fails naming the repository. Keys are not case sensitive. The node's own credential serves the repositories no entry matches when the map has no * entry; a map with a * entry and a node credential together stop the pipeline at start. The whole map is checked at pipeline start. A hand-written pipeline may instead set the field to one ${ROCKETRIDE_...} placeholder holding the map's JSON text with literal values.",
+			"default": {},
+			"optional": true,
+			"secure": true,
+			"ui": {
+				"additionalProperties": {
+					"ui:widget": "ApiKeyWidget"
+				}
+			}
 		},
 		"github.defaultRepo": {
 			"type": "string",
@@ -178,7 +193,7 @@
 		"github.rateLimitBudgetSeconds": {
 			"type": "integer",
 			"title": "Rate-limit wait budget (seconds)",
-			"description": "Total time one call of graphql or a repository read (repo_tree, repo_contributors, repo_languages, label_list, user_get) may spend waiting out GitHub rate limits, across every request it makes: a repo_tree walk shares it among its subtree reads. A wait that does not fit is not started, and the call returns the rate-limit error with retry_after. When GitHub names no wait the waits are 60, 120, then 240 seconds, so the default allows one such retry; raise it to allow more. 0 never retries after a rate limit. The call blocks for the whole wait, so the maximum is 600 (ten minutes).",
+			"description": "Total time one call of graphql, a repository read (repo_tree, repo_contributors, repo_languages, label_list, user_get, installation_repos) or an envelope write (pr_request_reviewers, pr_remove_requested_reviewers, issue_add_labels) may spend waiting out GitHub rate limits, across every request it makes: a repo_tree walk shares it among its subtree reads. A wait that does not fit is not started, and the call returns the rate-limit error with retry_after. When GitHub names no wait the waits are 60, 120, then 240 seconds, so the default allows one such retry; raise it to allow more. 0 never retries after a rate limit. The call blocks for the whole wait, so the maximum is 600 (ten minutes).",
 			"default": 60,
 			"minimum": 0,
 			"maximum": 600,
@@ -187,7 +202,7 @@
 		"github.rateLimitMaxRetries": {
 			"type": "integer",
 			"title": "Rate-limit retries",
-			"description": "Retries of each request after its first attempt when GitHub answers it with a rate limit, within the call's wait budget: 3 retries means up to 4 attempts. 0 never retries.",
+			"description": "Retries of each request after its first attempt when GitHub answers it with a rate limit, within the call's wait budget: 3 retries means up to 4 attempts. 0 never retries. A write is retried only after a rate-limit answer, which GitHub sends instead of processing the request, never after a timeout or any other failure.",
 			"default": 3,
 			"minimum": 0,
 			"maximum": 10,
@@ -198,7 +213,7 @@
 		{
 			"section": "Pipe",
 			"title": "GitHub",
-			"properties": ["type", "github.authType", "github.defaultRepo", "github.readOnly", "github.tools", "github.graphqlAllowMutations", "github.graphqlMaxResponseBytes", "github.rateLimitBudgetSeconds", "github.rateLimitMaxRetries"]
+			"properties": ["type", "github.authType", "github.credentialMap", "github.defaultRepo", "github.readOnly", "github.tools", "github.graphqlAllowMutations", "github.graphqlMaxResponseBytes", "github.rateLimitBudgetSeconds", "github.rateLimitMaxRetries"]
 		}
 	]
 }

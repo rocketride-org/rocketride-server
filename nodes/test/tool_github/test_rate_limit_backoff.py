@@ -71,6 +71,7 @@ def node(monkeypatch):
             default_repo='owner/repo',
             read_only=True,
             get_token=Mock(return_value=TOKEN),
+            secrets=lambda: (TOKEN,),
             tools=frozenset(),
             graphql_max_bytes=github_client.DEFAULT_GRAPHQL_MAX_BYTES,
             graphql_allow_mutations=False,
@@ -422,7 +423,8 @@ def test_a_retry_after_a_long_wait_sends_a_freshly_minted_token(node, path):
     echoed = 'tok-before-wait and tok-after-wait'
     payload = {'data': {'echo': echoed}} if path == 'graphql' else {'echo': echoed}
     node.request.side_effect = [secondary_limit(retry_after='600'), response(payload)]
-    result = getattr(node.inst, tool)(args)
+    # Through the tool map: the tool wrapper redacts every token the call used.
+    result = node.inst._collect_tool_methods()[tool](args)
     assert node.slept == [600.0]
     sent = [call.kwargs['headers']['Authorization'] for call in node.request.call_args_list]
     assert sent == ['Bearer tok-before-wait', 'Bearer tok-after-wait']
@@ -431,17 +433,18 @@ def test_a_retry_after_a_long_wait_sends_a_freshly_minted_token(node, path):
     assert 'tok-after-wait' not in json.dumps(result)
 
 
-def test_the_node_layer_redacts_every_token_it_handed_out(node):
+def test_the_tool_wrapper_redacts_every_token_handed_out(node):
     node.inst.IGlobal.get_token = Mock(side_effect=['tok-one', 'tok-two'])
-    result = node.inst._with_credentials(lambda credential, secrets: {'sent': [credential(), credential()]})
-    assert result == {'sent': ['[REDACTED]', '[REDACTED]']}
+    run = node.inst._redacting(
+        lambda args: node.inst._with_credentials(lambda credential, secrets: {'sent': [credential(), credential()]})
+    )
+    assert run({}) == {'sent': ['[REDACTED]', '[REDACTED]']}
 
 
-def test_a_retry_signs_the_app_jwt_again(node, monkeypatch):
+def test_a_retry_signs_the_app_jwt_again(node):
     node.policy(budget_seconds=900)
-    node.inst.IGlobal.auth_type = 'app'
-    node.inst.IGlobal.app_id = '123'
-    monkeypatch.setattr(node.client, 'sign_app_jwt', Mock(side_effect=['jwt-one', 'jwt-two']))
+    node.inst.IGlobal.auth_type_for = lambda repo=None, owner=None: 'app'
+    node.inst.IGlobal.app_jwt = Mock(side_effect=['jwt-one', 'jwt-two'])
     node.request.side_effect = [secondary_limit(retry_after='600'), response({'slug': 'my-app', 'note': 'jwt-two'})]
     result = node.inst.user_get({})
     sent = [call.kwargs['headers']['Authorization'] for call in node.request.call_args_list]
