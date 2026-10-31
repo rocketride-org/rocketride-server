@@ -145,7 +145,9 @@ For VS Code extension development details, see [VS Code extension docs](../docus
 ```
 
 For information on writing and running node-level tests, see
-[Node Testing](nodes/testing.md).
+[Node Testing](nodes/testing.md). To test how the engine runs tasks — as child
+processes, containers or Kubernetes Jobs — see
+[Testing the Task Runtimes](engine/task-runtimes.md).
 
 ## Further Reading
 
