@@ -167,6 +167,7 @@ class DAPBase:
             on_receive=self.on_receive,
             on_connected=self.on_connected,
             on_disconnected=self.on_disconnected,
+            on_closing=self.on_closing,
         )
 
     async def _call_method(self, message: Dict[str, Any], method_name: str, default_name: str):
@@ -387,6 +388,15 @@ class DAPBase:
             async def on_connected(self, connection_info):
                 self.debug_message(f"Connected to {connection_info}")
                 await self.send_initialize_request()
+        """
+        pass
+
+    async def on_closing(self) -> None:
+        """
+        Handle the socket stopping, before in-flight handlers are drained.
+
+        Override this to react at once to a closed connection; ``on_disconnected``
+        follows only after every running handler has finished.
         """
         pass
 

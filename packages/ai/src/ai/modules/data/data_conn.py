@@ -23,6 +23,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, TYPE_CHECKING
+from starlette.websockets import WebSocketDisconnect
 from ai.constants import CONST_DATA_OPEN_TARGET_WAIT, CONST_DATA_PIPE_TIMEOUT, CONST_DATA_SHUTDOWN_TIMEOUT
 from ai.common.dap import DAPConn
 from ai.common.cprofile_manager import profiler
@@ -161,6 +162,8 @@ class DataConn(DAPConn):
         # `self._server` must be set before reading `self._target` — the
         # property delegates to `self._server._target`.
         self._server = server
+        # The engine's name for this connection, from the handshake
+        self.channel_id: Optional[str] = None
 
         # Deferred to first `_open` via `_ensure_pipe_sem` — `state.target`
         self._thread_count: Optional[int] = None
@@ -172,14 +175,14 @@ class DataConn(DAPConn):
         # Key: pipe_id (int), Value: DataConnPipe instance
         self._pipe_map: Dict[int, DataConnPipe] = {}
 
-        # Requests this connection sent to EaaS, by seq, waiting for its response
-        self._asked: Dict[int, asyncio.Future] = {}
-
         # Pipe timeout for zombie detection
         self._pipe_timeout = CONST_DATA_PIPE_TIMEOUT
 
         # Connection shutdown event
         self._shutdown_event = asyncio.Event()
+
+        # Requests this task sent to the engine, awaiting their response by seq
+        self._pending: Dict[int, asyncio.Future] = {}
 
         # Start cleanup task for zombie pipes
         self._monitor_task = asyncio.create_task(self._monitor_pipes())
@@ -188,6 +191,84 @@ class DataConn(DAPConn):
         self.debug_message(
             f'Initializing data connection (concurrency limit deferred, zombie timeout {self._pipe_timeout}s)...'
         )
+
+    async def on_connected(self, connection_info: Optional[str] = None) -> None:
+        """Hand this connection to ``task_channel`` once the socket is accepted.
+
+        Args:
+            connection_info: The peer, as the transport reports it.
+        """
+        await super().on_connected(connection_info)
+        from .channel import task_channel
+
+        task_channel.attach(self)
+
+    async def on_closing(self) -> None:
+        """Fail this task's pending requests and ask the engine to reconnect, before handlers are drained."""
+        await self._server._closing(self, self.channel_id)
+
+    async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
+        """Resolve a response to one of this task's requests; route anything else as before.
+
+        Args:
+            message: The parsed DAP message.
+        """
+        if message is not None and message.get('type') == 'response':
+            future = self._pending.pop(message.get('request_seq'), None)
+            if future is not None and not future.done():
+                future.set_result(message)
+            return
+        await super().on_receive(message)
+
+    async def send_request(
+        self,
+        command: str,
+        arguments: Optional[Dict[str, Any]] = None,
+        *,
+        data: Optional[bytes] = None,
+        timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Send a request to the engine and wait for its response.
+
+        Args:
+            command: The command name.
+            arguments: The command's arguments.
+            data: Binary payload, sent as a DAP binary frame.
+            timeout: Seconds to wait, or ``None`` for no limit.
+
+        Returns:
+            dict: The response message.
+
+        Raises:
+            ConnectionError: The socket is not open or closed while waiting.
+            asyncio.TimeoutError: No response within ``timeout``.
+        """
+        request = self.build_request(command, arguments=dict(arguments or {}))
+        if data is not None:
+            request['arguments']['data'] = data
+
+        future = asyncio.get_running_loop().create_future()
+        self._pending[request['seq']] = future
+        try:
+            try:
+                await self.send(request)
+            except (RuntimeError, WebSocketDisconnect) as e:
+                # The socket closed under the send
+                raise ConnectionError(f'the engine connection closed: {e}') from e
+            return await asyncio.wait_for(future, timeout)
+        finally:
+            self._pending.pop(request['seq'], None)
+
+    def fail_pending(self, error: Exception) -> None:
+        """Fail every request still waiting for a response.
+
+        Args:
+            error: The exception each waiter receives.
+        """
+        pending, self._pending = self._pending, {}
+        for future in pending.values():
+            if not future.done():
+                future.set_exception(error)
 
     async def _ensure_pipe_sem(self) -> asyncio.Semaphore:
         """Lazy-init `_thread_count` + `_pipe_sem` once `state.target` is bound.
@@ -224,36 +305,6 @@ class DataConn(DAPConn):
     def _target(self) -> Optional['IServiceEndpoint']:
         """Read the source target lazily — never snapshot at connection time."""
         return self._server._target
-
-    async def on_receive(self, message: Dict[str, Any]) -> None:
-        """Hand EaaS's answer to the ask_spend waiting for it; route the rest as usual."""
-        answer = self._asked.pop(message.get('request_seq'), None)
-        if answer and not answer.done():
-            answer.set_result(message)
-        else:
-            await super().on_receive(message)
-
-    async def on_disconnected(self, reason: Optional[str] = None, has_error: bool = False) -> None:
-        """Fail the questions still waiting for EaaS: no answer will come on this connection."""
-        for answer in self._asked.values():
-            if not answer.done():
-                answer.set_exception(ConnectionError(reason or 'EaaS disconnected'))
-        self._asked.clear()
-        await super().on_disconnected(reason, has_error)
-
-    async def ask_spend(self) -> Optional[str]:
-        """Ask EaaS whether this task's org may open a pipe: None, or the refusal."""
-        request = self.build_request('rrext_check_spend')
-        answer = asyncio.get_running_loop().create_future()
-        self._asked[request['seq']] = answer
-        try:
-            await self.send(request)
-            response = await answer
-        finally:
-            self._asked.pop(request['seq'], None)
-        if self.did_fail(response):
-            raise RuntimeError(response.get('message'))
-        return response['body']['refusal']
 
     def _require_target(self) -> 'IServiceEndpoint':
         """Return the registered source target, or raise a controlled error.
