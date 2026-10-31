@@ -1,0 +1,12 @@
+# depends() resolves this file relative to this node's own directory and
+# no-ops when it is missing, so the driver has to be declared here even though
+# dataset_cobalt declares the same one. The two are reconciled, not
+# deduplicated: lock-node-deps.yml compiles every
+# nodes/src/nodes/**/requirements.txt into nodes/src/nodes/constraints.lock and
+# fails the PR if they resolve to incompatible versions, and
+# ensure_constraints() applies that same solve with -c at install time.
+#
+# This file is the one the tests follow: nodes/test/cobalt/requirements.txt is
+# an -r include of it, so a bump here reaches the test harness with no second
+# edit. Keep the specifier in step with ../dataset_cobalt/requirements.txt.
+basalt-ai-cobalt>=0.1.0,<1.0.0
