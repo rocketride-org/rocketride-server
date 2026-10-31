@@ -86,7 +86,7 @@ class StoreMixin(DAPClient):
         )
         response = await self.request(request)
         if self.did_fail(response):
-            raise RuntimeError(response.get('message', 'Failed to read from handle'))
+            raise RuntimeError(response.get('message') or 'Failed to read from handle')
         return response.get('arguments', {}).get('data', b'')
 
     async def fs_write(self, handle: str, data: bytes) -> int:
@@ -271,7 +271,7 @@ class StoreMixin(DAPClient):
         )
         response = await self.request(request)
         if self.did_fail(response):
-            raise RuntimeError(response.get('message', 'fs_read_many failed'))
+            raise RuntimeError(response.get('message') or 'fs_read_many failed')
 
         entries = response.get('body', {}).get('entries', [])
         frame = response.get('arguments', {}).get('data', b'') or b''
@@ -506,4 +506,4 @@ class StoreMixin(DAPClient):
     def _check_response(self, response: Dict[str, Any]) -> None:
         """Raise RuntimeError if the response indicates failure."""
         if self.did_fail(response):
-            raise RuntimeError(response.get('message', 'Unknown storage error'))
+            raise RuntimeError(response.get('message') or 'Unknown storage error')

@@ -211,7 +211,7 @@ class DAPClient(DAPBase):
             self.raise_exception(RuntimeError("Request message must include a 'seq' field"))
 
         # Verify connection
-        if not self._transport.is_connected():
+        if not self.is_connected():
             self.raise_exception(RuntimeError('Server is not connected'))
 
         # Get sequence number for correlation
@@ -314,4 +314,5 @@ class DAPClient(DAPBase):
         remaining connection state or pending operations.
         """
         # Close transport connection
-        await self._transport.disconnect()
+        if self._transport is not None:
+            await self._transport.disconnect()

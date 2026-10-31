@@ -94,7 +94,7 @@ class DAPException(Exception):
                        and may include additional context like 'file', 'line', etc.
         """
         # Extract error message for the base exception
-        error_message = dap_result.get('message', 'Unknown DAP error')
+        error_message = (dap_result or {}).get('message') or 'Unknown DAP error'
         super().__init__(error_message)
 
         # Store complete DAP result for detailed error analysis

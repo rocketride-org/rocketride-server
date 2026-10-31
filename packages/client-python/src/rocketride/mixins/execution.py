@@ -393,7 +393,7 @@ class ExecutionMixin(DAPClient):
         )
         response = await self.request(request)
         if self.did_fail(response):
-            raise RuntimeError(response.get('message', 'Restart failed'))
+            raise RuntimeError(response.get('message') or 'Restart failed')
 
     async def get_task_status(self, token: str) -> TASK_STATUS:
         """
