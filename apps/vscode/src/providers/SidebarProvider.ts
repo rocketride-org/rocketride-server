@@ -22,6 +22,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import * as fs from 'fs';
 import { ConfigManager } from '../config';
 import { ConnectionManager, isCloudConnected } from '../connection/connection';
 import { DeployManager } from '../connection/deploy-manager';
@@ -32,8 +33,8 @@ import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from '../shared/util/runClassification';
 import { checkMissingEnvVars } from '../shared/util/envVarCheck';
 import { getLogger } from '../shared/util/output';
-import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId, EMPTY_FILE_SETTLE_MS } from '../shared/util/pipeFileDecision';
-import type { PipeFileEvent } from '../shared/util/pipeFileDecision';
+import { decidePipeFile, emptyPipelineSkeleton, firstDuplicate, otherFilesWithProjectId, readPipeProjectId, sameFileIdentity, withProjectId, EMPTY_FILE_SETTLE_MS } from '../shared/util/pipeFileDecision';
+import type { DuplicateCheck, PipeFileEvent } from '../shared/util/pipeFileDecision';
 import { SerialQueue } from '../shared/util/serialQueue';
 import { ReloadingCache, isUnderNodeModules } from '../shared/util/reloadingCache';
 import { getProjectProvider } from '../extension';
@@ -402,10 +403,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 		// Re-parse the changed file. Deleted meanwhile (a checkout, a temporary
 		// file): the delete handler already dropped it, and a parse of a missing
-		// path must not put it back as an invalid entry.
+		// path must not put it back as an invalid entry. Unreadable but still on
+		// disk (another program holds it: antivirus, a sync client): keep the
+		// last parse rather than drop the pipeline from the sidebar.
 		const text = await this.readPipeText(uri);
 		if (this.disposed) return;
 		if (text === undefined) {
+			if (!(await this.isFileMissing(uri)) || this.disposed) return;
 			this.cacheParsedFile(uri.fsPath, null);
 			this.sendEntriesUpdate();
 			return;
@@ -475,7 +479,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				// restart) must not wait for that. The prompt is marked as shown
 				// before it opens and both files are re-read before any write, so
 				// a detached, late answer is safe.
-				void this.offerNewProjectId(uri, decision.projectId, decision.otherPath).catch((error) => {
+				void this.offerNewProjectId(uri, decision.projectId, decision.otherPaths).catch((error) => {
 					this.logger.error(`Pipeline ${vscode.workspace.asRelativePath(uri)}: duplicate id prompt failed (${error instanceof Error ? error.message : String(error)}).`);
 				});
 				return;
@@ -499,16 +503,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	/**
 	 * A genuine duplicate: another file carries the same id. Nothing is written
 	 * unless the user asks for it. The clash is confirmed against the disk
-	 * first, because a rename delivers delete and create in no fixed order and
-	 * the cache can briefly still hold the file's previous path, and again
-	 * after the user answers, because the warning can stay open for a long
-	 * time and the clash may have been resolved meanwhile.
+	 * first (see findDuplicate), because a rename delivers delete and create
+	 * in no fixed order and the cache can briefly still hold the file's
+	 * previous path, and again after the user answers, because the warning
+	 * can stay open for a long time and the clash may have been resolved
+	 * meanwhile.
+	 *
+	 * @param otherPaths The cached files that carry the id, as decidePipeFile found them.
 	 */
-	private async offerNewProjectId(uri: vscode.Uri, projectId: string, otherPath: string): Promise<void> {
-		const other = await PipelineFileParser.parseFile(otherPath, this.getServiceClassInfoMap());
-		if (other.projectId !== projectId) return;
-
+	private async offerNewProjectId(uri: vscode.Uri, projectId: string, otherPaths: readonly string[]): Promise<void> {
 		const file = vscode.workspace.asRelativePath(uri);
+
+		// Nothing is asked unless the clash is confirmed: the safe side for a
+		// prompt that can rewrite an id is to stay quiet until the other file
+		// can be read.
+		const twin = await this.findDuplicate(uri, projectId, otherPaths);
+		if (twin.duplicate === undefined) {
+			if (twin.sameFile !== undefined) this.logger.info(`Pipeline ${file}: ${vscode.workspace.asRelativePath(twin.sameFile)} is the same file under another path. Nothing to ask.`);
+			else if (twin.unreadable !== undefined) this.logger.info(`Pipeline ${file}: could not read ${vscode.workspace.asRelativePath(twin.unreadable)} to tell whether it still shares project_id ${projectId}; nothing to ask until it can be read.`);
+			return;
+		}
+		const otherPath = twin.duplicate;
 		const otherFile = vscode.workspace.asRelativePath(otherPath);
 		this.logger.info(`Pipeline ${file}: project_id ${projectId} is also used by ${otherFile}. File left unchanged.`);
 
@@ -525,16 +540,85 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		const plain = (name: string): string => name.replace(/\]\(/g, '] (');
 		const choice = await vscode.window.showWarningMessage(`${plain(file)} has the same project_id as ${plain(otherFile)}. Pipelines with the same id cannot be told apart when they run. The file was not changed.`, assign);
 		if (choice !== assign) return;
-		// The warning can stay open for minutes: rewrite only while the clash still exists.
-		const stillOther = await PipelineFileParser.parseFile(otherPath, this.getServiceClassInfoMap());
-		if (stillOther.projectId !== projectId) return;
+		// The warning can stay open for minutes: rewrite only while the clash
+		// still exists, identity included, since the other path may have become
+		// a link to this file meanwhile and a new id would then change both.
+		if ((await this.confirmDuplicate(uri, projectId, otherPath)) !== 'duplicate') return;
 		await this.assignProjectId(uri, projectId, `duplicate of ${otherFile}, new id assigned at the user's request`);
 	}
 
-	/** The file's text, or undefined when it cannot be read (not there yet, or gone). */
+	/** The file's text, or undefined when it cannot be read (not there yet, gone, or held by another program). */
 	private async readPipeText(uri: vscode.Uri): Promise<string | undefined> {
 		try {
 			return Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+		} catch {
+			return undefined;
+		}
+	}
+
+	/**
+	 * Whether the file is gone from disk. Only a not-found error says so; a
+	 * stat refused for another reason (permissions, a file another program
+	 * holds, a provider that is briefly unavailable) proves nothing and must
+	 * not drop a pipeline from the sidebar.
+	 */
+	private async isFileMissing(uri: vscode.Uri): Promise<boolean> {
+		try {
+			await vscode.workspace.fs.stat(uri);
+			return false;
+		} catch (error) {
+			return error instanceof vscode.FileSystemError && error.code === 'FileNotFound';
+		}
+	}
+
+	/**
+	 * The first genuine duplicate among the cache's candidates, confirmed on
+	 * disk in cache order. The choice itself is firstDuplicate, pure and
+	 * tested; this supplies the on-disk check. Both the duplicate warning and
+	 * the restart guard decide on it, so they cannot disagree.
+	 */
+	private findDuplicate(uri: vscode.Uri, projectId: string, candidates: readonly string[]): Promise<{ duplicate?: string; sameFile?: string; unreadable?: string }> {
+		return firstDuplicate(candidates, (candidate) => this.confirmDuplicate(uri, projectId, candidate));
+	}
+
+	/**
+	 * Whether `otherPath`, which the cache says carries `projectId`, is a
+	 * genuine duplicate of the file on disk right now. The cache alone cannot
+	 * settle it: a rename delivers delete and create in no fixed order, so the
+	 * file's previous path can still be cached for a moment, and on a
+	 * case-insensitive volume (the macOS default) a case-only rename makes
+	 * "the other file" this very file. A hard link is the same file too: a new
+	 * id written through either path would change both.
+	 *
+	 * @returns 'duplicate' when another file carries the id, 'same-file' when
+	 * the two paths name one file, 'resolved' when the other path is gone or
+	 * no longer carries the id, 'unreadable' when the other file is on disk
+	 * but cannot be read or parsed just now (held by another program, or
+	 * mid-write), or when it carries the id and the identity check failed.
+	 * A clash is not resolved by a read that merely failed.
+	 */
+	private async confirmDuplicate(uri: vscode.Uri, projectId: string, otherPath: string): Promise<DuplicateCheck> {
+		const same = await this.sameFile(uri.fsPath, otherPath);
+		if (same) return 'same-file';
+		const otherUri = vscode.Uri.file(otherPath);
+		const text = await this.readPipeText(otherUri);
+		if (text === undefined) return (await this.isFileMissing(otherUri)) ? 'resolved' : 'unreadable';
+		const otherId = readPipeProjectId(text);
+		if (otherId === undefined) return 'unreadable';
+		if (otherId !== projectId) return 'resolved';
+		return same === undefined ? 'unreadable' : 'duplicate';
+	}
+
+	/**
+	 * Whether two paths name one file (same device and inode, compared as
+	 * bigints: NTFS file ids do not fit a double). Undefined when either
+	 * cannot be stat'ed: that does not prove they are different files, and
+	 * the caller's own read of the other path decides what follows.
+	 */
+	private async sameFile(a: string, b: string): Promise<boolean | undefined> {
+		try {
+			const [statA, statB] = await Promise.all([fs.promises.stat(a, { bigint: true }), fs.promises.stat(b, { bigint: true })]);
+			return sameFileIdentity(statA, statB);
 		} catch {
 			return undefined;
 		}
@@ -948,6 +1032,24 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		}
 
 		if (runningComponents.length === 0) return;
+
+		// The server knows a running task by project_id and source id only, so
+		// a task found here may belong to another file that carries the same
+		// id (a duplicate the user chose to keep), and a restart would replace
+		// it with this file's pipeline. Confirmed on disk, as the duplicate
+		// warning is, so a stale cache entry or a hard link skips nothing.
+		const twins = otherFilesWithProjectId(uri.fsPath, parsedFile.projectId, [...this.parsedFiles.values()]);
+		const twin = await this.findDuplicate(uri, parsedFile.projectId, twins);
+		if (twin.duplicate !== undefined) {
+			this.logger.info(`Pipeline ${vscode.workspace.asRelativePath(uri)}: project_id ${parsedFile.projectId} is also used by ${vscode.workspace.asRelativePath(twin.duplicate)}; its running task was not restarted.`);
+			return;
+		}
+		// A twin that cannot be read just now may still share the id: the safe
+		// side for a restart is to leave the task alone.
+		if (twin.unreadable !== undefined) {
+			this.logger.info(`Pipeline ${vscode.workspace.asRelativePath(uri)}: could not read ${vscode.workspace.asRelativePath(twin.unreadable)} to tell whether it still shares project_id ${parsedFile.projectId}; its running task was not restarted.`);
+			return;
+		}
 
 		const config = this.configManager.getConfig();
 		const restartBehavior = config?.pipelineRestartBehavior || 'prompt';

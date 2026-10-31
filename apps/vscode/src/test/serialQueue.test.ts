@@ -118,6 +118,6 @@ test('queued, the second of two files created together is judged against the fir
 	await Promise.all([queue.enqueue(() => handleCreated(FILE)), queue.enqueue(() => handleCreated(OTHER))]);
 	assert.deepEqual(decisions, [
 		{ kind: 'leave', reason: 'id-ok' },
-		{ kind: 'ask-duplicate', projectId: ID, otherPath: FILE },
+		{ kind: 'ask-duplicate', projectId: ID, otherPaths: [FILE] },
 	]);
 });
