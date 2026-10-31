@@ -53,7 +53,7 @@ class LaunchSpec:
     pipeline_args: List[str] = field(default_factory=list)
     # The model server address EAS was started with, if any
     modelserver: Optional[str] = None
-    # The engine is hosted (--saas): the subprocess runtime passes --hosted
+    # The engine is hosted (--saas): every runtime passes --hosted to the task
     hosted: bool = False
     # The task shares the engine's host: the subprocess runtime passes --shared-host
     shared_host: bool = False
@@ -67,6 +67,10 @@ class LaunchSpec:
     debug_attach: bool = False
     # Resource limits the pipeline asks for (none yet: runtime defaults apply)
     limits: Dict[str, Any] = field(default_factory=dict)
+    # A component opens the store from inside the task (tool_filesystem)
+    uses_store: bool = False
+    # The run's storage anchor (the task file's storage.root)
+    storage_root: str = ''
 
 
 class Launch(abc.ABC):
@@ -125,6 +129,12 @@ class Launcher(abc.ABC):
 
     # The runtime's name, as given to --runtime
     name: str = ''
+    # The task cannot see the engine's files, so Task says what it needs from them;
+    # nor does it share the engine's host, so it gets no --shared-host
+    isolated: bool = False
+
+    async def prepare(self) -> None:
+        """One-time work before the first task; ``TaskServer`` runs it at start."""
 
     @property
     @abc.abstractmethod

@@ -369,6 +369,33 @@ def saas_pipeline_violation(
     return None
 
 
+# The node that opens the store from inside the task (its tool, source and store services)
+CONST_STORE_NODE_PATH = 'nodes.tool_filesystem'
+
+
+def pipeline_opens_store(pipeline: Dict[str, Any], get_service: Callable[[str], Any]) -> bool:
+    """
+    Whether a component of the pipeline opens the store from inside the task.
+
+    ``tool_filesystem`` does (its tool, source and store services alike), so a
+    runtime that isolates the task's files has to give it the run's store or
+    refuse the pipeline.
+
+    Args:
+        pipeline: The resolved pipeline.
+        get_service: ``rocketlib.getServiceDefinition`` in production.
+
+    Returns:
+        True if any component is served by ``nodes.tool_filesystem``.
+    """
+    for component in pipeline.get('components', []) or []:
+        provider = str(component.get('provider') or '')
+        service = get_service(provider) if provider else None
+        if str((service or {}).get('path') or '').lower() == CONST_STORE_NODE_PATH:
+            return True
+    return False
+
+
 def _inherited_arg(prefix: str, pipeline_args: List[str]) -> Optional[str]:
     """
     The parent engine's own ``prefix...`` startup arg, when the pipeline set none.
@@ -983,13 +1010,15 @@ class Task(DAPBase):
         """
         Whether the task shares the engine's host, so it gets --shared-host.
 
-        A hosted engine's task does: spawn is the only runtime. The pre-launch
-        check and the task's command line both ask here, so they agree.
+        A hosted engine's task does under spawn. In a container or a pod it
+        does not: the container is the boundary, and the task keeps only the
+        hosted rules (--hosted). The pre-launch check and the task's command
+        line both ask here, so they agree.
 
         Returns:
-            True for a task of a hosted engine.
+            True for a task of a hosted engine whose runtime does not isolate it.
         """
-        return _is_saas_engine()
+        return _is_saas_engine() and not self._launcher.isolated
 
     def _check_pipeline(self, pipeline: Dict[str, Any]) -> None:
         """
@@ -2540,6 +2569,12 @@ class Task(DAPBase):
             # Serialize it for the runtime, then let `resolved` go out of scope
             task_file = self._task_file_bytes(resolved, self._launcher.task_data_path)
 
+            # A runtime that isolates the task's files needs to know whether it opens the store
+            uses_store = False
+            if self._launcher.isolated:
+                from rocketlib import getServiceDefinition
+
+                uses_store = pipeline_opens_store(resolved, getServiceDefinition)
             del resolved
 
             # VS Code subprocess debugging goes through the python shim (subprocess runtime)
@@ -2603,6 +2638,8 @@ class Task(DAPBase):
                     # Crash dumps follow the engine's own --dumps
                     dumps_arg=next((a for a in startup_args() if a.split('=', 1)[0] == '--dumps'), None),
                     debug_attach=debug_attach,
+                    uses_store=uses_store,
+                    storage_root=self._storage_root() if uses_store else '',
                 )
             )
             del task_file
