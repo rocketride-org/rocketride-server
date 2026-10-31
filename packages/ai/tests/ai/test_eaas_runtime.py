@@ -36,6 +36,8 @@ from ai.eaas import create_parser, runtime_of
         (['--saas', '--runtime=spawn'], 'spawn'),
         (['--runtime=docker'], 'docker'),
         (['--runtime=spawn'], 'spawn'),
+        (['--runtime=k8s'], 'k8s'),
+        (['--saas', '--runtime=k8s'], 'k8s'),
     ],
 )
 def test_runtime_defaults_to_docker_with_saas_and_spawn_without(argv, expected):
@@ -46,4 +48,4 @@ def test_runtime_defaults_to_docker_with_saas_and_spawn_without(argv, expected):
 def test_runtime_refuses_an_unknown_name():
     """--runtime takes only the runtimes that exist."""
     with pytest.raises(SystemExit):
-        create_parser().parse_args(['--runtime=k8s'])
+        create_parser().parse_args(['--runtime=podman'])
