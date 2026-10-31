@@ -56,6 +56,16 @@ export interface IStepperProps {
 	isNonLinear?: boolean;
 	/** Accessible name. Defaults to `'Progress'`. */
 	ariaLabel?: string;
+	/**
+	 * Pulse a soft accent shadow round the current step's marker, to say
+	 * "start here". Holds still under `prefers-reduced-motion`.
+	 */
+	pulseCurrent?: boolean;
+	/**
+	 * Shown at the right of the current step's row: the button that does the
+	 * step ("Start", "Continue").
+	 */
+	currentAction?: ReactNode;
 }
 
 // =============================================================================
@@ -95,9 +105,10 @@ const STATE_TEXT: Record<StepState, string> = {
  * @param props - {@link IStepperProps}.
  * @returns The stepper element.
  */
-export function Stepper({ steps, activeStep, vertical = false, onStepClick, isNonLinear = false, ariaLabel = 'Progress' }: IStepperProps): React.ReactElement {
+export function Stepper({ steps, activeStep, vertical = false, onStepClick, isNonLinear = false, ariaLabel = 'Progress', pulseCurrent = false, currentAction }: IStepperProps): React.ReactElement {
 	let rootClassName = 'rr-stepper';
 	if (vertical) rootClassName += ' rr-stepper--vertical';
+	if (pulseCurrent) rootClassName += ' rr-stepper--pulse';
 
 	return (
 		<ol className={rootClassName} aria-label={ariaLabel}>
@@ -126,14 +137,24 @@ export function Stepper({ steps, activeStep, vertical = false, onStepClick, isNo
 					</>
 				);
 
+				const button = isClickable ? (
+					<button type="button" className="rr-stepper__button" onClick={() => onStepClick?.(index)}>
+						{body}
+					</button>
+				) : (
+					<span className="rr-stepper__button">{body}</span>
+				);
+
 				return (
 					<li key={step.id} className="rr-stepper__step" data-state={state} aria-current={ariaCurrent}>
-						{isClickable && (
-							<button type="button" className="rr-stepper__button" onClick={() => onStepClick?.(index)}>
-								{body}
-							</button>
+						{state === 'current' && currentAction ? (
+							<div className="rr-stepper__row">
+								{button}
+								<span className="rr-stepper__action">{currentAction}</span>
+							</div>
+						) : (
+							button
 						)}
-						{!isClickable && <span className="rr-stepper__button">{body}</span>}
 					</li>
 				);
 			})}

@@ -807,6 +807,12 @@ import type { ShellSidebarDensity as Frozen_ShellSidebarDensity } from '../contr
 import type { ShellSidebarDensity as Current_ShellSidebarDensity } from './api';
 import type { ShellSidebarFooter as Frozen_ShellSidebarFooter } from '../contract/versions/v12';
 import type { ShellSidebarFooter as Current_ShellSidebarFooter } from './api';
+import type { IAttentionRingProps as Frozen_IAttentionRingProps } from '../contract/versions/v12';
+import type { IAttentionRingProps as Current_IAttentionRingProps } from './api';
+import type { ICoachMarkProps as Frozen_ICoachMarkProps } from '../contract/versions/v12';
+import type { ICoachMarkProps as Current_ICoachMarkProps } from './api';
+import type { IConfettiProps as Frozen_IConfettiProps } from '../contract/versions/v12';
+import type { IConfettiProps as Current_IConfettiProps } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -1619,3 +1625,9 @@ const _t_ShellSidebarDensity: Frozen_ShellSidebarDensity = {} as Current_ShellSi
 void _t_ShellSidebarDensity;
 const _t_ShellSidebarFooter: Frozen_ShellSidebarFooter = {} as Current_ShellSidebarFooter;
 void _t_ShellSidebarFooter;
+const _t_IAttentionRingProps: Frozen_IAttentionRingProps = {} as Current_IAttentionRingProps;
+void _t_IAttentionRingProps;
+const _t_ICoachMarkProps: Frozen_ICoachMarkProps = {} as Current_ICoachMarkProps;
+void _t_ICoachMarkProps;
+const _t_IConfettiProps: Frozen_IConfettiProps = {} as Current_IConfettiProps;
+void _t_IConfettiProps;

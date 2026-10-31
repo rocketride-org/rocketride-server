@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-10-30T20:49:39.635Z
-// Source commit: 5cfa8e64ea204602d6c7290ce17aa172c88164ef
+// Generated:     2026-10-31T22:28:06.126Z
+// Source commit: 42bdef0a56d59fa183056971a7e81dd9e05de483
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -9595,6 +9595,15 @@ export declare const BxTrash: IconComponent;
 export declare const BxSortAlt: IconComponent;
 export declare const BxHand: IconComponent;
 export declare const BxPurchaseTag: IconComponent;
+export declare const BxKey: IconComponent;
+export declare const BxData: IconComponent;
+export declare const BxTachometer: IconComponent;
+export declare const BxServer: IconComponent;
+export declare const BxBuildings: IconComponent;
+export declare const BxClipboard: IconComponent;
+export declare const BxCompass: IconComponent;
+export declare const BxPin: IconComponent;
+export declare const BxTrophy: IconComponent;
 /**
  * Props for the Sidebar component.
  */
@@ -10032,6 +10041,8 @@ export interface IChipAddProps {
     label: string;
     /** Fired when the add affordance is activated. */
     onClick: () => void;
+    /** Leading glyph in place of the plus ("pin" for a pin action, say). */
+    icon?: React$1.ReactNode;
 }
 /**
  * Renders a removable tag pill.
@@ -10046,7 +10057,7 @@ export declare function Chip({ label, onRemove }: IChipProps): React$1.ReactElem
  * @param props - {@link IChipAddProps}.
  * @returns The add-chip element.
  */
-export declare function ChipAdd({ label, onClick }: IChipAddProps): React$1.ReactElement;
+export declare function ChipAdd({ label, onClick, icon }: IChipAddProps): React$1.ReactElement;
 /** Props for the {@link DropZone} component. */
 export interface IDropZoneProps {
     /** Primary prompt, e.g. "Drop documents here to ingest". */
@@ -10093,6 +10104,14 @@ export interface ICardProps {
      * sizes to its content.
      */
     fill?: boolean;
+    /**
+     * Swap the border for a dashed accent line that marches slowly clockwise
+     * round the body, to draw the eye to a card that asks for action (a setup
+     * checklist, say). The line runs down both sides and along the bottom,
+     * ending at the header, which keeps its own band. It holds still under
+     * `prefers-reduced-motion`.
+     */
+    highlight?: boolean;
 }
 /**
  * Renders a bordered card with an optional header and a padded body.
@@ -10100,7 +10119,7 @@ export interface ICardProps {
  * @param props - {@link ICardProps}.
  * @returns The card element.
  */
-export declare function Card({ header, headerActions, children, noBodyPadding, toolbar, onClick, fill }: ICardProps): React$1.ReactElement;
+export declare function Card({ header, headerActions, children, noBodyPadding, toolbar, onClick, fill, highlight }: ICardProps): React$1.ReactElement;
 /** Props for the {@link MiniCard} component. */
 export interface IMiniCardProps {
     /**
@@ -12392,6 +12411,16 @@ export interface IStepperProps {
     isNonLinear?: boolean;
     /** Accessible name. Defaults to `'Progress'`. */
     ariaLabel?: string;
+    /**
+     * Pulse a soft accent shadow round the current step's marker, to say
+     * "start here". Holds still under `prefers-reduced-motion`.
+     */
+    pulseCurrent?: boolean;
+    /**
+     * Shown at the right of the current step's row: the button that does the
+     * step ("Start", "Continue").
+     */
+    currentAction?: React$1.ReactNode;
 }
 /**
  * Renders a step indicator.
@@ -12399,7 +12428,60 @@ export interface IStepperProps {
  * @param props - {@link IStepperProps}.
  * @returns The stepper element.
  */
-export declare function Stepper({ steps, activeStep, vertical, onStepClick, isNonLinear, ariaLabel }: IStepperProps): React$1.ReactElement;
+export declare function Stepper({ steps, activeStep, vertical, onStepClick, isNonLinear, ariaLabel, pulseCurrent, currentAction }: IStepperProps): React$1.ReactElement;
+/** Props for the {@link AttentionRing} component. */
+export interface IAttentionRingProps {
+    /** CSS selector of the element to ring; the first match is used. */
+    target: string;
+}
+/** Props for the {@link CoachMark} component. */
+export interface ICoachMarkProps {
+    /** CSS selector of the element to point at; the first match is used. */
+    target: string;
+    /** What to do, in a few words ("Open Pipelines"). */
+    title: string;
+    /** One or two sentences of help. */
+    children: React$1.ReactNode;
+    /** Where the person is in the tour ("Step 1 of 3"). */
+    progress?: string;
+    /** Fired by the Skip button and by Escape. */
+    onClose: () => void;
+    /** Label of the close button. Defaults to `'Skip tour'`. */
+    closeLabel?: string;
+    /**
+     * Moves the tour on, for a step the person reads rather than acts on.
+     * Without it the tour moves on when the person uses the element itself.
+     */
+    onNext?: () => void;
+    /** Label of the next button. Defaults to `'Next'`. */
+    nextLabel?: string;
+}
+/**
+ * Renders a pulsing ring over the target element, or nothing until it exists.
+ *
+ * @param props - {@link IAttentionRingProps}.
+ * @returns The ring, portalled to the body.
+ */
+export declare function AttentionRing({ target }: IAttentionRingProps): React$1.ReactElement | null;
+/**
+ * Renders one guided-tour step pointing at the target element.
+ *
+ * @param props - {@link ICoachMarkProps}.
+ * @returns The coach mark, portalled to the body, or nothing until the target exists.
+ */
+export declare function CoachMark({ target, title, children, progress, onClose, closeLabel, onNext, nextLabel }: ICoachMarkProps): React$1.ReactElement | null;
+/** Props for the {@link Confetti} component. */
+export interface IConfettiProps {
+    /** How many pieces fall. Defaults to 140. */
+    pieceCount?: number;
+}
+/**
+ * Renders the burst.
+ *
+ * @param props - {@link IConfettiProps}.
+ * @returns The confetti layer, or nothing under reduced motion.
+ */
+export declare function Confetti({ pieceCount }: IConfettiProps): React$1.ReactElement | null;
 /**
  * Pure rules behind PageLayout's sidebars, kept apart from React so they are
  * unit-testable: when a page counts as narrow, and what each sidebar's open
@@ -12805,6 +12887,11 @@ export interface IStatCardProps {
     isLoading?: boolean;
     /** Larger value for the one headline metric on a view. */
     hero?: boolean;
+    /**
+     * Makes the whole tile a button that opens the metric's source (the list
+     * it counts). Enter and Space activate it, like a native button.
+     */
+    onClick?: () => void;
 }
 /** Props for the {@link DeltaPill} component. */
 export interface IDeltaPillProps {
@@ -12829,7 +12916,7 @@ export declare function DeltaPill({ delta, isIncreaseGood, unit }: IDeltaPillPro
  * @param props - {@link IStatCardProps}.
  * @returns The tile.
  */
-export declare function StatCard({ label, value, formatValue, unit, delta, deltaLabel, isIncreaseGood, trend, icon, footer, isLoading, hero }: IStatCardProps): React$1.ReactElement;
+export declare function StatCard({ label, value, formatValue, unit, delta, deltaLabel, isIncreaseGood, trend, icon, footer, isLoading, hero, onClick }: IStatCardProps): React$1.ReactElement;
 /** Severity of a meter reading. */
 export type MeterLevel = "normal" | "warning" | "danger";
 /** Props for the {@link Meter} component. */
@@ -13940,6 +14027,9 @@ export declare const shellApi: {
     readonly Breadcrumbs: typeof Breadcrumbs;
     readonly Pagination: typeof Pagination;
     readonly Stepper: typeof Stepper;
+    readonly AttentionRing: typeof AttentionRing;
+    readonly CoachMark: typeof CoachMark;
+    readonly Confetti: typeof Confetti;
     readonly PageLayout: typeof PageLayout;
     readonly PageSidebarToggle: typeof PageSidebarToggle;
     readonly usePageLayout: typeof usePageLayout;
@@ -14119,6 +14209,15 @@ export declare const shellApi: {
     readonly BxDownload: IconComponent;
     readonly BxSortAlt: IconComponent;
     readonly BxHand: IconComponent;
+    readonly BxKey: IconComponent;
+    readonly BxData: IconComponent;
+    readonly BxTachometer: IconComponent;
+    readonly BxServer: IconComponent;
+    readonly BxBuildings: IconComponent;
+    readonly BxClipboard: IconComponent;
+    readonly BxCompass: IconComponent;
+    readonly BxPin: IconComponent;
+    readonly BxTrophy: IconComponent;
 };
 /**
  * The compile-time shape of the shell API surface.

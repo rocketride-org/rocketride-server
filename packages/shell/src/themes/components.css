@@ -87,6 +87,7 @@
 .rr-pagination__step:focus-visible,
 .rr-stepper__button:focus-visible,
 .rr-list__item:focus-visible,
+.rr-stat--interactive:focus-visible,
 .rr-link:focus-visible {
 	outline: none;
 	box-shadow: var(--rr-focus-ring);
@@ -725,6 +726,190 @@ select.rr-input {
 }
 .rr-dot--pulse {
 	animation: rr-pulse 1.4s ease-in-out infinite;
+}
+
+/* Card header band. Defaults reproduce the stock header; a host theme can
+   override them to give every Card header its own band. Declared on :root,
+   where the theme tokens live, so they resolve to the theme's values. */
+:root {
+	--rr-card-header-bg: var(--rr-bg-titleBar-inactive);
+	--rr-card-header-fg: var(--rr-text-primary);
+	--rr-card-header-fg-muted: var(--rr-text-secondary);
+	--rr-card-header-border: var(--rr-border);
+}
+
+/* Attention ring and coach mark: point at an element elsewhere on screen.
+   The ring never takes clicks, so the element under it stays usable; the
+   coach mark's scrim dims everything but the element the same way. */
+.rr-attention-ring {
+	position: fixed;
+	z-index: var(--rr-z-tooltip);
+	border: 2px solid var(--rr-accent);
+	border-radius: var(--rr-radius-lg);
+	pointer-events: none;
+	animation: rr-attention-pulse 1.6s var(--rr-ease-out) infinite;
+}
+@keyframes rr-attention-pulse {
+	0% {
+		box-shadow: 0 0 0 0 color-mix(in srgb, var(--rr-accent) 50%, transparent);
+	}
+	70% {
+		box-shadow: 0 0 0 12px color-mix(in srgb, var(--rr-accent) 0%, transparent);
+	}
+	100% {
+		box-shadow: 0 0 0 0 color-mix(in srgb, var(--rr-accent) 0%, transparent);
+	}
+}
+.rr-coach-mark__scrim {
+	position: fixed;
+	z-index: var(--rr-z-tooltip);
+	border-radius: var(--rr-radius-lg);
+	box-shadow: 0 0 0 100vmax var(--rr-bg-overlay);
+	pointer-events: none;
+	animation: rr-fade-in var(--rr-duration-base) var(--rr-ease-out);
+}
+/* The callout is ink with an accent edge, so it reads on any page. Buttons
+   take their colours from the text, accent-text and border tokens inline, so
+   those are re-pointed here for stock buttons to read on the ink. */
+.rr-coach-mark__callout {
+	--rr-coach-ink-fg: var(--rr-sidebar-ink-fg, var(--rr-bg-paper));
+	--rr-coach-ink-muted: var(--rr-sidebar-ink-fg-muted, var(--rr-bg-paper));
+	--rr-text-primary: var(--rr-coach-ink-fg);
+	--rr-text-secondary: var(--rr-coach-ink-muted);
+	--rr-text-accent: var(--rr-coach-ink-fg);
+	--rr-border: var(--rr-coach-ink-muted);
+	--rr-bg-accent-soft: color-mix(in srgb, var(--rr-accent) 25%, transparent);
+	position: fixed;
+	z-index: calc(var(--rr-z-tooltip) + 1);
+	display: flex;
+	flex-direction: column;
+	gap: var(--rr-space-1-5);
+	width: 300px;
+	padding: var(--rr-space-4);
+	color: var(--rr-coach-ink-fg);
+	background: var(--rr-sidebar-ink-bg, var(--rr-text-primary));
+	border: 0;
+	border-left: 4px solid var(--rr-accent);
+	border-radius: var(--rr-radius-lg);
+	animation: rr-fade-in var(--rr-duration-base) var(--rr-ease-out);
+}
+.rr-coach-mark__progress {
+	font-family: var(--rr-font-family-mono);
+	font-size: 11px;
+	color: var(--rr-coach-ink-muted);
+}
+.rr-coach-mark__title {
+	font-size: 15px;
+	font-weight: var(--rr-font-weight-semibold);
+	color: var(--rr-coach-ink-fg);
+}
+.rr-coach-mark__body {
+	font-size: 13px;
+	line-height: var(--rr-line-height-normal, 1.5);
+	color: var(--rr-coach-ink-muted);
+}
+.rr-coach-mark__actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: var(--rr-space-2);
+	margin-top: var(--rr-space-1);
+}
+
+/* Confetti: pieces fall once from above the window, drifting and spinning
+   by the custom properties each piece sets. */
+.rr-confetti {
+	position: fixed;
+	inset: 0;
+	z-index: calc(var(--rr-z-tooltip) + 2);
+	overflow: hidden;
+	pointer-events: none;
+}
+.rr-confetti__piece {
+	position: absolute;
+	top: -16px;
+	border-radius: 1px;
+	opacity: 0;
+	animation-name: rr-confetti-fall;
+	animation-timing-function: cubic-bezier(0.25, 0.6, 0.45, 1);
+	animation-fill-mode: forwards;
+}
+@keyframes rr-confetti-fall {
+	0% {
+		opacity: 1;
+		transform: translate3d(0, 0, 0) rotate(0deg);
+	}
+	85% {
+		opacity: 1;
+	}
+	100% {
+		opacity: 0;
+		transform: translate3d(var(--rr-confetti-drift), 105vh, 0) rotate(var(--rr-confetti-spin));
+	}
+}
+
+/* Stepper action: the current step's button, at the right of its row. */
+.rr-stepper__row {
+	display: flex;
+	align-items: center;
+	gap: var(--rr-space-2);
+}
+.rr-stepper__row > .rr-stepper__button {
+	flex: 1 1 auto;
+}
+.rr-stepper__action {
+	flex: none;
+	margin-left: auto;
+}
+
+/* Stepper pulse: a soft accent shadow round the current marker. */
+.rr-stepper--pulse .rr-stepper__step[data-state='current'] .rr-stepper__marker {
+	animation: rr-attention-pulse 1.6s var(--rr-ease-out) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.rr-attention-ring,
+	.rr-stepper--pulse .rr-stepper__step[data-state='current'] .rr-stepper__marker {
+		animation: none;
+	}
+}
+
+/* Card highlight: a dashed accent line round the card's body. The rect is
+   drawn clockwise from the top-left corner, so a falling dash offset moves
+   the dashes clockwise. Its top edge sits above the body and is clipped
+   away, so the line runs down the sides and along the bottom and ends at
+   the header. */
+.rr-card-highlight {
+	position: absolute;
+	inset: 0;
+	overflow: hidden;
+	pointer-events: none;
+}
+.rr-card-highlight__svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+}
+.rr-card-highlight__line {
+	x: 0.75px;
+	y: -12px;
+	width: calc(100% - 1.5px);
+	height: calc(100% + 11.25px);
+	rx: 6.5px;
+	fill: none;
+	stroke: var(--rr-accent);
+	stroke-width: 1.5px;
+	stroke-dasharray: 8 6;
+	animation: rr-card-march 1.6s linear infinite;
+}
+@keyframes rr-card-march {
+	to {
+		stroke-dashoffset: -14;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.rr-card-highlight__line {
+		animation: none;
+	}
 }
 
 @keyframes rr-pulse {
@@ -2505,6 +2690,13 @@ button.rr-stepper__button:hover {
 	line-height: var(--rr-line-height-tight);
 	color: var(--rr-text-primary);
 	overflow-wrap: anywhere;
+}
+.rr-stat--interactive {
+	cursor: pointer;
+	transition: border-color var(--rr-duration-fast) var(--rr-ease-standard);
+}
+.rr-stat--interactive:hover {
+	border-color: var(--rr-border-hover);
 }
 .rr-stat--hero .rr-stat__value {
 	font-size: 48px;

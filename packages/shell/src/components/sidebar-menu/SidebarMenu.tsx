@@ -352,6 +352,7 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 		return (
 			<div
 				key={entry.id}
+				data-menu-id={entry.id}
 				role="button"
 				aria-current={isActive || undefined}
 				aria-disabled={isDisabled || undefined}
@@ -385,6 +386,7 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 					return (
 						<div
 							key={entry.id}
+							data-menu-id={entry.id}
 							title={entry.label}
 							role="button"
 							aria-label={entry.label}

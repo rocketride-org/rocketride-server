@@ -292,6 +292,8 @@ import { Tree } from './components/tree/Tree';
 import { Breadcrumbs } from './components/breadcrumbs/Breadcrumbs';
 import { Pagination } from './components/pagination/Pagination';
 import { Stepper } from './components/stepper/Stepper';
+import { AttentionRing, CoachMark } from './components/coach-mark/CoachMark';
+import { Confetti } from './components/confetti/Confetti';
 // Phase 4 stock library: page layouts.
 import { PageLayout, PageSidebarToggle, usePageLayout } from './components/page-layout/PageLayout';
 import { SettingsSection } from './components/settings/SettingsSection';
@@ -342,6 +344,7 @@ export {
 	showToast, dismissToast, ToastViewport,
 	Avatar, AvatarGroup, Badge, ProgressBar, Spinner, Skeleton, Divider,
 	Accordion, List, Table, Tree, Breadcrumbs, Pagination, Stepper,
+	AttentionRing, CoachMark, Confetti,
 	PageLayout, PageSidebarToggle, usePageLayout, SettingsSection,
 	ThemeSwitcher, StatusPage,
 	LineChart, BarChart, Sparkline, ChartCard, ChartTable, StatCard, DeltaPill,
@@ -388,6 +391,8 @@ export type { ITreeProps, ITreeNode } from './components/tree/Tree';
 export type { IBreadcrumbsProps, IBreadcrumb } from './components/breadcrumbs/Breadcrumbs';
 export type { IPaginationProps } from './components/pagination/Pagination';
 export type { IStepperProps, IStep, StepState } from './components/stepper/Stepper';
+export type { IAttentionRingProps, ICoachMarkProps } from './components/coach-mark/CoachMark';
+export type { IConfettiProps } from './components/confetti/Confetti';
 export type { IPageLayoutProps, IPageSidebar, IPageLayoutContext, IPageSidebarControl, IPageSidebarToggleProps, PageSidebarSide } from './components/page-layout/PageLayout';
 export type { SidebarMode } from './components/page-layout/pageLayoutState';
 export type { ISettingsSectionProps } from './components/settings/SettingsSection';
@@ -580,6 +585,9 @@ export const shellApi = {
 	get Breadcrumbs() { return Breadcrumbs; },
 	get Pagination() { return Pagination; },
 	get Stepper() { return Stepper; },
+	get AttentionRing() { return AttentionRing; },
+	get CoachMark() { return CoachMark; },
+	get Confetti() { return Confetti; },
 	get PageLayout() { return PageLayout; },
 	get PageSidebarToggle() { return PageSidebarToggle; },
 	get usePageLayout() { return usePageLayout; },

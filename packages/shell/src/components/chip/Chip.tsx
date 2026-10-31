@@ -11,7 +11,7 @@
  * a plus. Used for permissions, labels, and similar small tag collections.
  */
 
-import React, { CSSProperties } from 'react';
+import React, { CSSProperties, ReactNode } from 'react';
 
 // =============================================================================
 // TYPES
@@ -31,6 +31,8 @@ export interface IChipAddProps {
 	label: string;
 	/** Fired when the add affordance is activated. */
 	onClick: () => void;
+	/** Leading glyph in place of the plus ("pin" for a pin action, say). */
+	icon?: ReactNode;
 }
 
 // =============================================================================
@@ -63,6 +65,11 @@ const styles = {
 		border: '1px solid var(--rr-border)',
 		color: 'var(--rr-text-primary)',
 		cursor: 'pointer',
+	} as CSSProperties,
+	// A leading glyph in place of the plus, a hair from the label.
+	addIcon: {
+		display: 'inline-flex',
+		marginRight: 4,
 	} as CSSProperties,
 };
 
@@ -108,7 +115,7 @@ export function Chip({ label, onRemove }: IChipProps): React.ReactElement {
  * @param props - {@link IChipAddProps}.
  * @returns The add-chip element.
  */
-export function ChipAdd({ label, onClick }: IChipAddProps): React.ReactElement {
+export function ChipAdd({ label, onClick, icon }: IChipAddProps): React.ReactElement {
 	return (
 		<span
 			role="button"
@@ -122,7 +129,13 @@ export function ChipAdd({ label, onClick }: IChipAddProps): React.ReactElement {
 				}
 			}}
 		>
-			{'+ '}
+			{icon ? (
+				<span style={styles.addIcon} aria-hidden="true">
+					{icon}
+				</span>
+			) : (
+				'+ '
+			)}
 			{label}
 		</span>
 	);

@@ -60,6 +60,14 @@ export interface ICardProps {
 	 * sizes to its content.
 	 */
 	fill?: boolean;
+	/**
+	 * Swap the border for a dashed accent line that marches slowly clockwise
+	 * round the body, to draw the eye to a card that asks for action (a setup
+	 * checklist, say). The line runs down both sides and along the bottom,
+	 * ending at the header, which keeps its own band. It holds still under
+	 * `prefers-reduced-motion`.
+	 */
+	highlight?: boolean;
 }
 
 // =============================================================================
@@ -74,12 +82,25 @@ const styles = {
 	// visible). Only the divergent properties are overridden to the approved
 	// spec: left-aligned title, a bottom divider, and a 13.5px/700 title
 	// (commonStyles ships 13/600).
+	//
+	// The fill, text and divider read the --rr-card-header-* tokens, which
+	// default (components.css) to exactly the values above, so a host can give
+	// every Card header its own band (an ink one, say) from its theme alone.
+	// The text, icon and border tokens are re-pointed inside the header so
+	// stock buttons and badges in headerActions follow the band.
 	header: {
 		...commonStyles.cardHeader,
 		justifyContent: 'flex-start',
-		borderBottom: '1px solid var(--rr-border)',
+		background: 'var(--rr-card-header-bg)',
+		color: 'var(--rr-card-header-fg)',
+		borderBottom: '1px solid var(--rr-card-header-border)',
 		fontSize: 13.5,
 		fontWeight: 700,
+		['--rr-text-primary' as string]: 'var(--rr-card-header-fg)',
+		['--rr-text-secondary' as string]: 'var(--rr-card-header-fg-muted)',
+		['--rr-text-accent' as string]: 'var(--rr-card-header-fg)',
+		['--rr-icon-color' as string]: 'var(--rr-card-header-fg)',
+		['--rr-border' as string]: 'var(--rr-card-header-border)',
 	} as CSSProperties,
 
 	// Push header actions to the right edge of the header row.
@@ -118,6 +139,19 @@ const styles = {
 		flexDirection: 'column',
 	} as CSSProperties,
 
+	// A highlighted card hides its own border; the marching dashed line,
+	// drawn round the body, takes its place.
+	highlight: {
+		borderWidth: 1,
+		borderStyle: 'solid',
+		borderColor: 'transparent',
+	} as CSSProperties,
+
+	// The highlighted body anchors the dashed line's overlay.
+	highlightBody: {
+		position: 'relative',
+	} as CSSProperties,
+
 	// Interactive surface layered onto commonStyles.card when the card is
 	// clickable: a pointer cursor plus a hover-driven border-color shift. The
 	// hover is mouse-state driven because inline styles cannot express :hover.
@@ -148,8 +182,18 @@ const styles = {
  * `<Button small>` — no special header sizing exists.
  */
 export const cardHeaderChrome = {
-	/** The header row itself: themed fill, bottom divider, 13.5/700 title. */
-	header: styles.header,
+	/**
+	 * The header row itself: themed fill, bottom divider, 13.5/700 title.
+	 * Always the stock --rr-bg-titleBar-inactive fill: grid title bars and tab
+	 * strips host inputs, so they do not follow the --rr-card-header-* band.
+	 */
+	header: {
+		...commonStyles.cardHeader,
+		justifyContent: 'flex-start',
+		borderBottom: '1px solid var(--rr-border)',
+		fontSize: 13.5,
+		fontWeight: 700,
+	} as CSSProperties,
 	/** Right-aligned actions cluster (pushed to the row's right edge). */
 	actions: styles.headerActions,
 } as const;
@@ -164,7 +208,7 @@ export const cardHeaderChrome = {
  * @param props - {@link ICardProps}.
  * @returns The card element.
  */
-export function Card({ header, headerActions, children, noBodyPadding, toolbar, onClick, fill }: ICardProps): React.ReactElement {
+export function Card({ header, headerActions, children, noBodyPadding, toolbar, onClick, fill, highlight }: ICardProps): React.ReactElement {
 	// Track hover so a clickable card can raise its border; stays false (and
 	// unused) for a static card, which attaches no mouse handlers.
 	const [hovered, setHovered] = useState(false);
@@ -194,12 +238,14 @@ export function Card({ header, headerActions, children, noBodyPadding, toolbar, 
 	const rootStyle: CSSProperties = {
 		...commonStyles.card,
 		...(fill ? styles.fillRoot : undefined),
+		...(highlight ? styles.highlight : undefined),
 		...(interactive ? styles.interactive(hovered) : undefined),
 	};
 	// Body style: padded or bare, plus the fill flex when the card fills.
 	const bodyStyle: CSSProperties = {
 		...(noBodyPadding ? styles.bodyNoPad : commonStyles.cardBody),
 		...(fill ? styles.fillBody : undefined),
+		...(highlight ? styles.highlightBody : undefined),
 	};
 
 	return (
@@ -220,7 +266,16 @@ export function Card({ header, headerActions, children, noBodyPadding, toolbar, 
 			)}
 			{/* Optional controls strip between the header and the body. */}
 			{toolbar != null && <div style={styles.toolbar}>{toolbar}</div>}
-			<div style={bodyStyle}>{children}</div>
+			<div style={bodyStyle}>
+				{children}
+				{highlight && (
+					<span className="rr-card-highlight" aria-hidden="true">
+						<svg className="rr-card-highlight__svg" focusable="false">
+							<rect className="rr-card-highlight__line" />
+						</svg>
+					</span>
+				)}
+			</div>
 		</div>
 	);
 }

@@ -99,5 +99,6 @@
 	"--rr-chart-series-3": "#ee46bc",
 	"--rr-chart-series-4": "#12b76a",
 	"--rr-chart-series-5": "#7a5af8",
-	"--rr-chart-series-6": "#06aed4"
+	"--rr-chart-series-6": "#06aed4",
+	"--rr-color-gold": "#d4a017"
 }

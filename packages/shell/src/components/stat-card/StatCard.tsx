@@ -22,7 +22,7 @@
  * Built on `.rr-paper` and `.rr-stat` from components.css.
  */
 
-import React, { ReactNode, useId } from 'react';
+import React, { KeyboardEvent, ReactNode, useId } from 'react';
 import { DeltaTone, formatCompact, formatDelta, getDeltaDirection, getDeltaTone } from '../chart/chartFormat';
 import { Sparkline } from '../chart/Sparkline';
 import { Skeleton } from '../skeleton/Skeleton';
@@ -57,6 +57,11 @@ export interface IStatCardProps {
 	isLoading?: boolean;
 	/** Larger value for the one headline metric on a view. */
 	hero?: boolean;
+	/**
+	 * Makes the whole tile a button that opens the metric's source (the list
+	 * it counts). Enter and Space activate it, like a native button.
+	 */
+	onClick?: () => void;
 }
 
 /** Props for the {@link DeltaPill} component. */
@@ -115,7 +120,7 @@ export function DeltaPill({ delta, isIncreaseGood = true, unit = '%' }: IDeltaPi
  * @param props - {@link IStatCardProps}.
  * @returns The tile.
  */
-export function StatCard({ label, value, formatValue = formatCompact, unit, delta, deltaLabel, isIncreaseGood = true, trend, icon, footer, isLoading = false, hero = false }: IStatCardProps): React.ReactElement {
+export function StatCard({ label, value, formatValue = formatCompact, unit, delta, deltaLabel, isIncreaseGood = true, trend, icon, footer, isLoading = false, hero = false, onClick }: IStatCardProps): React.ReactElement {
 	const labelId = useId();
 
 	let classes = 'rr-paper rr-stat';
@@ -123,6 +128,30 @@ export function StatCard({ label, value, formatValue = formatCompact, unit, delt
 	if (hero) {
 		classes += ' rr-stat--hero';
 		skeletonHeight = 44;
+	}
+	const isInteractive = onClick !== undefined;
+	if (isInteractive) {
+		classes += ' rr-stat--interactive';
+	}
+	let role = 'group';
+	if (isInteractive) {
+		role = 'button';
+	}
+
+	/**
+	 * Activates an interactive tile from the keyboard; Space's page scroll is suppressed.
+	 *
+	 * @param event - The key press on the tile.
+	 */
+	const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+		if (!onClick) return;
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		onClick();
+	};
+	let interaction: React.HTMLAttributes<HTMLDivElement> = {};
+	if (isInteractive) {
+		interaction = { onClick, onKeyDown: handleKeyDown, tabIndex: 0 };
 	}
 
 	let shown = String(value);
@@ -133,7 +162,7 @@ export function StatCard({ label, value, formatValue = formatCompact, unit, delt
 
 	if (isLoading) {
 		return (
-			<div className={classes} role="group" aria-labelledby={labelId} aria-busy="true">
+			<div className={classes} role={role} aria-labelledby={labelId} aria-busy="true" {...interaction}>
 				<div className="rr-stat__label">
 					{icon && <span className="rr-stat__icon">{icon}</span>}
 					<span id={labelId}>{label}</span>
@@ -145,7 +174,7 @@ export function StatCard({ label, value, formatValue = formatCompact, unit, delt
 	}
 
 	return (
-		<div className={classes} role="group" aria-labelledby={labelId}>
+		<div className={classes} role={role} aria-labelledby={labelId} {...interaction}>
 			<div className="rr-stat__label">
 				{icon && <span className="rr-stat__icon">{icon}</span>}
 				<span id={labelId}>{label}</span>
