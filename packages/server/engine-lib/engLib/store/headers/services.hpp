@@ -160,6 +160,32 @@ public:
     //-----------------------------------------------------------------
     ///	Public API
     //-----------------------------------------------------------------
+    class CustomServicesScope {
+    public:
+        CustomServicesScope(CustomServicesScope &&other) noexcept
+            : m_services(_mv(other.m_services)), m_outer(other.m_outer) {
+            if (m_outer) t_custom = &m_services;
+            other.m_outer = std::nullopt;
+        }
+        CustomServicesScope(const CustomServicesScope &) = delete;
+        ~CustomServicesScope() noexcept {
+            if (m_outer) t_custom = *m_outer;
+        }
+
+    private:
+        friend class IServices;
+
+        CustomServicesScope() noexcept = default;
+
+        explicit CustomServicesScope(ServiceDefinitions services) noexcept
+            : m_services(_mv(services)), m_outer(t_custom) {
+            t_custom = &m_services;
+        }
+
+        ServiceDefinitions m_services;
+        std::optional<ServiceDefinitions *> m_outer;
+    };
+
     static Error init() noexcept;
     static Error deinit() noexcept;
     static ErrorOr<IServices::ServiceDefinitionPtr> getServiceDefinition(
@@ -167,6 +193,9 @@ public:
     static ErrorOr<IServices::ServiceDefinitionPtr>
     getServiceDefinitionFromService(const json::Value &service) noexcept;
     static ErrorOr<json::Value> getServiceSchemas() noexcept;
+
+    static ErrorOr<CustomServicesScope> withCustomServices(
+        const json::Value &custom) noexcept;
 
 private:
     //-----------------------------------------------------------------
@@ -237,7 +266,10 @@ private:
         json::Value &field) noexcept;
     static ErrorOr<IServices::ServiceSchema> getFields(
         ServiceContext &context, json::Value &section) noexcept;
-    static Error updateDefinitions() noexcept;
+    static Error updateDefinitions(ServiceDefinitions &services) noexcept;
+    static ErrorOr<std::optional<ServiceDefinition>> parseDefinition(
+        json::Value serviceInfo, const Path &definitionPath) noexcept;
+    static Error registerFactories(const ServiceDefinition &def) noexcept;
     static void resolveString(json::Value &value) noexcept;
     static void resolveDescriptions(json::Value &value) noexcept;
     static std::list<Text> getFieldNames(const ServiceSchema &schema) noexcept;
@@ -255,6 +287,12 @@ private:
     ///		Our list of global field defintions
     //-----------------------------------------------------------------
     inline static ServiceFields m_fields{};
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The custom services of the call running on this thread, if any
+    //-----------------------------------------------------------------
+    inline static thread_local ServiceDefinitions *t_custom = nullptr;
 };
 
 }  // namespace engine::store
