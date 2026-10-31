@@ -1,0 +1,63 @@
+# =============================================================================
+# PR metrics
+#
+# Once a week, measures how PRs merged into develop follow "Show that it works"
+# in CONTRIBUTING.md: UI PRs with screenshots, filled-in Verification sections,
+# linked issues, change requests, reverts, and time to merge. It compares them
+# with the weeks before the rules. The numbers go to the job summary, and to
+# Discord when DISCORD_METRICS_WEBHOOK_URL is set.
+# =============================================================================
+
+name: PR metrics
+
+on:
+  schedule:
+    # 15:00 UTC on Mondays.
+    - cron: '0 15 * * 1'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Days to measure, ending today'
+        required: false
+        default: '7'
+      post:
+        description: 'Post to Discord'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  metrics:
+    name: Measure merged PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Measure
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DAYS: ${{ inputs.days || '7' }}
+        run: |
+          set -euo pipefail
+          script=.github/workflows/scripts/pr-metrics.py
+          python3 "$script" --repo "$GITHUB_REPOSITORY" --days "$DAYS" --format markdown >> "$GITHUB_STEP_SUMMARY"
+          python3 "$script" --repo "$GITHUB_REPOSITORY" --days "$DAYS" --format discord > "$RUNNER_TEMP/discord.json"
+
+      - name: Post to Discord
+        if: github.event_name == 'schedule' || inputs.post
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_METRICS_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "DISCORD_METRICS_WEBHOOK_URL secret is not set, so nothing was posted"
+            exit 0
+          fi
+          source "${GITHUB_WORKSPACE}/.github/workflows/scripts/discord-helper.sh"
+          discord_curl --no-retry-5xx -X POST -H 'Content-Type: application/json' \
+            --data-binary "@$RUNNER_TEMP/discord.json" "$DISCORD_WEBHOOK_URL" > /dev/null

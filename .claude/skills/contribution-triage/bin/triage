@@ -1,0 +1,1111 @@
+#!/usr/bin/env python3
+"""triage: the deterministic half of the contribution-triage skill.
+
+  triage facts PR [--repo R] [--rules-ref REF]
+      Print a JSON summary of a pull request: the deterministic checks, hints for the
+      checks that need judgment, CI and CodeRabbit status, maintainer activity, and labels.
+  triage attachments PR --dir DIR [--repo R]
+      Download the screenshots and recordings in the PR description and the author's
+      comments into DIR, a new or empty directory, and print what was saved.
+  triage act PR --verdict FILE [--repo R] [--rules-ref REF] [--apply]
+      Merge a verdict on the judged checks with fresh facts, then print the comment and
+      labels triage would apply. Nothing changes on GitHub without --apply. With --apply,
+      post or update the one triage comment and set labels, after rechecking the PR.
+
+Rules come from the PR's base branch on GitHub (develop for stacked PRs), resolved to one
+commit per run, never from the PR's head. --rules-ref reads them from a local git ref
+instead; --apply refuses to run with it. Only gh is used to talk to GitHub. The script
+never closes, approves, requests changes on, merges, or pushes to a PR.
+"""
+
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+SKILL_DIR = Path(__file__).resolve().parent.parent
+DEFAULT_REPO = 'rocketride-org/rocketride-server'
+MARKER = '<!-- contribution-triage -->'
+LABELS = ('needs-evidence', 'needs-issue', 'ready-for-review')
+RULE_FILES = ('CONTRIBUTING.md', 'AGENTS.md', '.coderabbit.yaml', '.github/PULL_REQUEST_TEMPLATE.md')
+MAINTAINER_ASSOCIATIONS = ('OWNER', 'MEMBER', 'COLLABORATOR')
+DETERMINISTIC = ('linked_issue', 'branch_name', 'title')
+JUDGED = ('verification', 'ui_evidence', 'one_problem', 'docs')
+CHECKS = DETERMINISTIC + JUDGED
+STATUSES = ('pass', 'fail', 'n/a', 'unclear')
+# Conventional Commits allows types beyond the ones CONTRIBUTING lists; accept the
+# commitlint config-conventional set too.
+EXTRA_TITLE_TYPES = ('build', 'ci', 'perf', 'revert')
+# Template lines that do not count as verification on their own.
+TEMPLATE_LINES = {'steps:', 'result:', '1.', '-', '*'}
+TEMPLATE_CHECKBOXES = {'tests added or updated', '`./builder test` passes', './builder test passes', 'tested locally'}
+CODERABBIT_SUMMARY = re.compile(
+    r'<!-- This is an auto-generated comment: release notes by coderabbit\.ai -->.*?'
+    r'<!-- end of auto-generated comment: release notes by coderabbit\.ai -->',
+    re.S,
+)
+NOT_UI = re.compile(
+    r'(^|/)(__tests__|__mocks__|tests?|e2e|fixtures?)/'
+    r'|\.(test|spec|stories)\.[cm]?[jt]sx?$'
+    r'|\.d\.ts$'
+    r'|(^|/)(README|CHANGELOG)\.md$'
+    r'|(^|/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$'
+    r'|(^|/)(tsconfig[^/]*\.json|[\w.-]*\.config\.[cm]?[jt]s|\.eslintrc[^/]*|\.prettierrc[^/]*)$'
+)
+TEST_PATH = re.compile(
+    r'(^|/)(__tests__|__mocks__|tests?|e2e|fixtures?)/|(^|/)test_[^/]*\.py$|\.(test|spec)\.[cm]?[jt]sx?$'
+)
+# A change to apps/vscode/package.json counts as UI when a changed line names a contribution
+# section, or adds or removes an entry field such as a command, title, or view id.
+CONTRIBUTES_KEYS = re.compile(
+    r'^[+-].*"(contributes|commands|menus|views|viewsContainers|configuration|keybindings|walkthroughs|customEditors'
+    r'|command|title|id|name|when|group|category|icon)"\s*:',
+    re.M,
+)
+IGNORED_IMAGE_HOSTS = re.compile(
+    r'shields\.io|badge|codecov\.io|coderabbit_public_assets|githubusercontent\.com/[^/]+/[^/]+/[^/]+/.*\.svg$', re.I
+)
+SECTION_LINKS = {
+    'linked_issue': ('CONTRIBUTING.md', 'pull-request-process', 'Pull Request Process'),
+    'title': ('CONTRIBUTING.md', 'commit-message-format', 'Commit Message Format'),
+    'branch_name': ('CONTRIBUTING.md', 'branching-strategy', 'Branching Strategy'),
+    'verification': ('CONTRIBUTING.md', 'show-that-it-works', 'Show that it works'),
+    'ui_evidence': ('CONTRIBUTING.md', 'show-that-it-works', 'Show that it works'),
+    'one_problem': ('CONTRIBUTING.md', 'making-changes', 'Making Changes'),
+    'docs': ('AGENTS.md', 'documentation-rules', 'Documentation rules'),
+}
+ITEM_TITLES = {
+    'linked_issue': 'Linked issue',
+    'title': 'PR title',
+    'verification': 'Verification',
+    'ui_evidence': 'Screenshots',
+    'one_problem': 'One problem per PR',
+    'docs': 'Docs',
+}
+DEFAULT_ASKS = {
+    'verification': 'In the Verification section, list what you ran and what happened, such as the test command and its output.',
+    'ui_evidence': 'This changes what users see. Add a screenshot of the change to the description, before and after if it changes something that already exists.',
+    'one_problem': 'This PR seems to solve more than one problem. Split the unrelated changes into their own PRs, each with its own issue.',
+    'docs': 'This changes a public contract. Update the matching doc in this PR.',
+}
+
+
+class TriageError(Exception):
+    pass
+
+
+def run(cmd: list, check: bool = True) -> subprocess.CompletedProcess:
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if check and proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout).strip().splitlines()
+        raise TriageError(f'{" ".join(cmd[:4])} ... failed: {detail[-1] if detail else proc.returncode}')
+    return proc
+
+
+def gh(*args: str, check: bool = True) -> str:
+    return run(['gh', *args], check=check).stdout
+
+
+def gh_json(*args: str):
+    return json.loads(gh(*args))
+
+
+def gh_lines(*args: str) -> list:
+    return [json.loads(line) for line in gh(*args).splitlines() if line.strip()]
+
+
+def git(*args: str) -> str:
+    return run(['git', '-C', str(SKILL_DIR), *args]).stdout
+
+
+# Rules
+
+
+def rules_branch(base: str) -> str:
+    if base in ('develop', 'main') or base.startswith('release/'):
+        return base
+    return 'develop'
+
+
+def load_rules(repo: str, base: str, rules_ref: str | None) -> dict:
+    if rules_ref:
+        sha = git('rev-parse', '--verify', f'{rules_ref}^{{commit}}').strip()
+        texts = {}
+        for path in RULE_FILES:
+            proc = run(['git', '-C', str(SKILL_DIR), 'show', f'{sha}:{path}'], check=False)
+            texts[path] = proc.stdout if proc.returncode == 0 else None
+        source, ref, link_ref = 'local', rules_ref, 'develop'
+    else:
+        ref = rules_branch(base)
+        sha = gh('api', f'repos/{repo}/commits/{urllib.parse.quote(ref, safe="")}', '--jq', '.sha').strip()
+        texts = {}
+        for path in RULE_FILES:
+            proc = run(
+                ['gh', 'api', f'repos/{repo}/contents/{path}?ref={sha}', '-H', 'Accept: application/vnd.github.raw'],
+                check=False,
+            )
+            texts[path] = proc.stdout if proc.returncode == 0 else None
+        source, link_ref = 'github', sha
+
+    rules_dir = Path(tempfile.gettempdir()) / 'contribution-triage' / f'rules-{sha[:12]}'
+    for path, text in texts.items():
+        if text is not None:
+            target = rules_dir / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(text)
+
+    problems = [f'{path} is missing' for path, text in texts.items() if text is None]
+    parsed = parse_rules(texts, problems)
+    links = {
+        name: f'https://github.com/{repo}/blob/{link_ref}/{doc}#{anchor}'
+        for name, (doc, anchor, _) in SECTION_LINKS.items()
+    }
+    return {
+        'source': source,
+        'ref': ref,
+        'sha': sha,
+        'dir': str(rules_dir),
+        'complete': not problems,
+        'problems': problems,
+        'links': links,
+        **parsed,
+    }
+
+
+def parse_rules(texts: dict, problems: list) -> dict:
+    contributing = texts.get('CONTRIBUTING.md') or ''
+    for heading in (
+        'Branching Strategy',
+        'Making Changes',
+        'Commit Message Format',
+        'Pull Request Process',
+        'Show that it works',
+    ):
+        if not re.search(rf'^#+\s+{re.escape(heading)}\s*$', contributing, re.M):
+            problems.append(f'CONTRIBUTING.md has no "{heading}" section')
+    if not re.search(r'^#+\s+Documentation rules\s*$', texts.get('AGENTS.md') or '', re.M):
+        problems.append('AGENTS.md has no "Documentation rules" section')
+    if not re.search(r'^##\s+Verification\s*$', texts.get('.github/PULL_REQUEST_TEMPLATE.md') or '', re.M):
+        problems.append('the PR template has no Verification section')
+
+    branch_types = re.findall(r'^\|\s*`([a-z]+)/`\s*\|', contributing, re.M)
+    title_types = re.findall(r'^-\s+`([a-z]+):`', contributing, re.M)
+    issue_keywords = re.findall(r'`([A-Z][a-z]+) #123`', contributing)
+    if not branch_types:
+        problems.append('no branch types found in CONTRIBUTING.md')
+    if not title_types:
+        problems.append('no commit types found in CONTRIBUTING.md')
+    if not issue_keywords:
+        problems.append('no linked-issue keywords found in CONTRIBUTING.md')
+    ui_paths = parse_ui_paths(texts.get('.coderabbit.yaml') or '')
+    if not ui_paths:
+        problems.append('no UI paths found in the "UI evidence" check of .coderabbit.yaml')
+    return {
+        'branch_pattern': rf'^({"|".join(branch_types)})/RR-[0-9]+-[a-z0-9-]*$',
+        'title_types': sorted(set(title_types) | set(EXTRA_TITLE_TYPES)),
+        'issue_keywords': issue_keywords,
+        'ui_paths': ui_paths,
+    }
+
+
+def parse_ui_paths(coderabbit: str) -> list:
+    block = re.search(r'-\s*name:\s*UI evidence\s*\n(.*?)(?=\n\s*-\s*name:|\n\S|\Z)', coderabbit, re.S)
+    if not block:
+        return []
+    text = ' '.join(block.group(1).split())
+    segment = re.search(r'under any of these paths:(.*?)(?=\.\s+[A-Z]|$)', text)
+    if not segment:
+        return []
+    paths = []
+    for new_page, path, contributes in re.findall(
+        r'(new page under\s+)?([\w*.-]+(?:/[\w*.-]*)+)(\s+"contributes")?', segment.group(1)
+    ):
+        regex = '^' + re.escape(path).replace(r'\*', '[^/]*') + ('' if path.endswith('/') else '$')
+        paths.append(
+            {'path': path, 'regex': regex, 'new_pages_only': bool(new_page), 'contributes_only': bool(contributes)}
+        )
+    return paths
+
+
+# Pull request data
+
+
+def clean_body(text: str | None) -> str:
+    text = (text or '').replace('\r\n', '\n')
+    text = CODERABBIT_SUMMARY.sub('', text)
+    return re.sub(r'<!--.*?(-->|\Z)', '', text, flags=re.S)
+
+
+def fetch_pr(repo: str, number: int) -> dict:
+    fields = (
+        'number,title,body,url,state,isDraft,author,baseRefName,headRefName,headRefOid,isCrossRepository,'
+        'labels,statusCheckRollup,closingIssuesReferences,mergedAt,closedAt,additions,deletions,changedFiles'
+    )
+    pr = gh_json('pr', 'view', str(number), '-R', repo, '--json', fields)
+    pr['files'] = gh_lines(
+        'api',
+        '--paginate',
+        f'repos/{repo}/pulls/{number}/files?per_page=100',
+        '--jq',
+        '.[] | {path: .filename, status, additions, deletions, previous: .previous_filename, '
+        'patch: (if .filename == "apps/vscode/package.json" then .patch else null end)}',
+    )
+    pr['issue_comments'] = gh_lines(
+        'api',
+        '--paginate',
+        f'repos/{repo}/issues/{number}/comments?per_page=100',
+        '--jq',
+        '.[] | {id, login: .user.login, type: .user.type, association: .author_association, body, url: .html_url, created: .created_at}',
+    )
+    pr['reviews_rest'] = gh_lines(
+        'api',
+        '--paginate',
+        f'repos/{repo}/pulls/{number}/reviews?per_page=100',
+        '--jq',
+        '.[] | {login: .user.login, type: .user.type, association: .author_association, state, body, submitted: .submitted_at}',
+    )
+    pr['commit_list'] = gh_lines(
+        'api',
+        '--paginate',
+        f'repos/{repo}/pulls/{number}/commits?per_page=100',
+        '--jq',
+        '.[] | {sha, subject: (.commit.message | split("\\n")[0]), login: .author.login}',
+    )
+    return pr
+
+
+def is_bot(login: str, user_type: str | None = None) -> bool:
+    return (
+        user_type == 'Bot'
+        or login.endswith('[bot]')
+        or login in ('coderabbitai', 'github-actions', 'dependabot', 'renovate')
+    )
+
+
+# Deterministic checks
+
+
+ISSUE_REF = re.compile(
+    r'\b(?P<kw>{kw})\b[*_]*\s*:?\s*'
+    r'(?P<ref>https://github\.com/(?P<o1>[\w.-]+)/(?P<r1>[\w.-]+)/issues/(?P<n1>\d+)'
+    r'|(?:(?P<o2>[\w.-]+)/(?P<r2>[\w.-]+))?#(?P<n2>\d+))'
+)
+
+
+def check_linked_issue(repo: str, body: str, rules: dict) -> dict:
+    pattern = re.compile(ISSUE_REF.pattern.replace('{kw}', '|'.join(rules['issue_keywords'])), re.I)
+    refs = []
+    for m in pattern.finditer(body):
+        owner = m.group('o1') or m.group('o2')
+        name = m.group('r1') or m.group('r2')
+        target = f'{owner}/{name}' if owner else repo
+        refs.append(
+            {
+                'keyword': m.group('kw'),
+                'text': m.group(0).strip(),
+                'repo': target,
+                'number': int(m.group('n1') or m.group('n2')),
+            }
+        )
+    if not refs:
+        loose = re.search(
+            r'\b(fix(?:e[sd])?|close[sd]?|resolve[sd]?|ref(?:s|erences)?|related to|part of)\b[*_:\s]*#\d+', body, re.I
+        )
+        hint = f' It has "{loose.group(0)}", which does not use Fixes, Closes, or Resolves.' if loose else ''
+        return {
+            'status': 'fail',
+            'reason': 'No Fixes, Closes, or Resolves followed by an issue reference.' + hint,
+            'refs': [],
+        }
+    problems = []
+    for ref in refs:
+        if ref['repo'].lower() != repo.lower():
+            ref['checked'] = False
+            continue
+        proc = run(
+            [
+                'gh',
+                'api',
+                f'repos/{repo}/issues/{ref["number"]}',
+                '--jq',
+                '{state, is_pr: (.pull_request != null), title}',
+            ],
+            check=False,
+        )
+        if proc.returncode != 0:
+            ref['exists'] = False
+            problems.append(f'#{ref["number"]} does not exist')
+            continue
+        info = json.loads(proc.stdout)
+        ref.update(exists=True, state=info['state'], is_pr=info['is_pr'], issue_title=info['title'])
+        if info['is_pr']:
+            problems.append(f'#{ref["number"]} is a pull request, not an issue')
+    good = [r for r in refs if r.get('checked') is False or (r.get('exists') and not r.get('is_pr'))]
+    if good:
+        return {'status': 'pass', 'reason': ', '.join(r['text'] for r in good), 'refs': refs}
+    return {'status': 'fail', 'reason': '; '.join(problems), 'refs': refs}
+
+
+def check_branch(head: str, fork: bool, rules: dict) -> dict:
+    if head in ('develop', 'main') or head.startswith('release/'):
+        return {'status': 'n/a', 'reason': f'{head} is a long-lived branch, which the naming rule exempts.'}
+    if re.match(rules['branch_pattern'], head):
+        return {'status': 'pass', 'reason': head}
+    where = ' in a fork' if fork else ''
+    return {
+        'status': 'fail',
+        'reason': f'{head}{where} does not match <type>/RR-<issue>-<short-description>.',
+        'fork': fork,
+    }
+
+
+def check_title(title: str, rules: dict) -> dict:
+    types = '|'.join(rules['title_types'])
+    if re.match(rf'^({types})(\([^()\s][^()]*\))?!?: \S', title):
+        return {'status': 'pass', 'reason': title}
+    return {
+        'status': 'fail',
+        'reason': f'"{title}" does not start with a conventional type such as fix: or feat(scope):.',
+    }
+
+
+# Hints for judged checks
+
+HEADING = re.compile(r'^(?:(#{1,6})\s+(.+?)\s*#*|\*\*([^*\n]+?)\*\*:?)\s*$')
+FALLBACK_HEADINGS = re.compile(
+    r'^(testing|tests?|test plan|test results|tested|how (this was |it was |was this |i |we )?tested|how to test|validation)\b',
+    re.I,
+)
+
+
+def find_section(body: str) -> tuple[str | None, str]:
+    lines = body.split('\n')
+    heads = []
+    for i, line in enumerate(lines):
+        m = HEADING.match(line.strip())
+        if m:
+            level = len(m.group(1)) if m.group(1) else 7
+            title = (m.group(2) or m.group(3) or '').strip().strip(':').strip()
+            title = re.sub(r'^[^\w`]+', '', title)
+            heads.append((i, level, title))
+    for matcher in (lambda t: re.search(r'\bverification\b', t, re.I), lambda t: FALLBACK_HEADINGS.match(t)):
+        for idx, (i, level, title) in enumerate(heads):
+            if matcher(title):
+                end = len(lines)
+                for j, lvl, _ in heads[idx + 1 :]:
+                    if lvl <= level or level == 7:
+                        end = j
+                        break
+                return title, '\n'.join(lines[i + 1 : end]).strip()
+    return None, ''
+
+
+def verification_hint(body: str) -> dict:
+    heading, text = find_section(body)
+    if heading is None:
+        return {'status': 'fail', 'reason': 'The description has no Verification section.', 'heading': None, 'text': ''}
+    meaningful, checkbox_only = [], True
+    for line in text.split('\n'):
+        stripped = line.strip()
+        if not stripped or stripped.lower() in TEMPLATE_LINES:
+            continue
+        box = re.match(r'^[-*]\s*\[\s*[xX]?\s*\]\s*(.*)$', stripped)
+        if box and box.group(1).strip().lower() in TEMPLATE_CHECKBOXES:
+            continue
+        if not box:
+            checkbox_only = False
+        meaningful.append(stripped)
+    if not meaningful:
+        return {
+            'status': 'fail',
+            'reason': f'The {heading} section holds only template placeholders or checkboxes.',
+            'heading': heading,
+            'text': text[:4000],
+        }
+    return {
+        'status': 'judge',
+        'reason': 'Judge whether it names what ran and what happened.',
+        'heading': heading,
+        'checkbox_only': checkbox_only,
+        'text': text[:4000],
+    }
+
+
+def ui_files(files: list, rules: dict) -> list:
+    found = []
+    for f in files:
+        path = f['path']
+        for entry in rules['ui_paths']:
+            if not re.match(entry['regex'], path):
+                continue
+            if entry['new_pages_only'] and not (f['status'] == 'added' and path.endswith(('.md', '.mdx'))):
+                continue
+            if entry['contributes_only'] and not CONTRIBUTES_KEYS.search(f.get('patch') or ''):
+                continue
+            if not entry['contributes_only'] and NOT_UI.search(path):
+                continue
+            found.append({'path': path, 'status': f['status'], 'rule': entry['path']})
+            break
+    return found
+
+
+def media_kind(url: str, tag: str) -> str:
+    lower = url.lower().split('?')[0]
+    if tag in ('video', 'source') or lower.endswith(('.mp4', '.mov', '.webm')):
+        return 'video'
+    if lower.endswith('.gif'):
+        return 'gif'
+    if tag in ('img', 'md') or lower.endswith(('.png', '.jpg', '.jpeg', '.webp')):
+        return 'image'
+    if '/user-attachments/files/' in lower:
+        return 'file'
+    return 'media'
+
+
+def find_attachments(text: str, source: str) -> list:
+    found = {}
+    for alt, url in re.findall(r'!\[([^\]]*)\]\(\s*<?([^)\s>]+)', text):
+        found.setdefault(url, {'url': url, 'kind': media_kind(url, 'md'), 'alt': alt, 'source': source})
+    for tag, url in re.findall(r'<(img|video|source)\b[^>]*?\bsrc\s*=\s*["\']([^"\']+)["\']', text, re.I):
+        alt = re.search(rf'<{tag}\b[^>]*?\balt\s*=\s*["\']([^"\']*)["\'][^>]*?{re.escape(url)}', text, re.I)
+        found.setdefault(
+            url,
+            {'url': url, 'kind': media_kind(url, tag.lower()), 'alt': alt.group(1) if alt else '', 'source': source},
+        )
+    bare = r'https://(?:github\.com/user-attachments/(?:assets|files)/[\w./%-]+|(?:private-)?user-images\.githubusercontent\.com/[^\s)"\'<>]+)'
+    for url in re.findall(bare, text):
+        found.setdefault(url, {'url': url, 'kind': media_kind(url, ''), 'alt': '', 'source': source})
+    for url in re.findall(
+        r'https?://[^\s)"\'<>]+?\.(?:png|jpe?g|gif|webp|mp4|mov|webm)(?:\?[^\s)"\'<>]*)?', text, re.I
+    ):
+        found.setdefault(url, {'url': url, 'kind': media_kind(url, ''), 'alt': '', 'source': source})
+    return [a for a in found.values() if not IGNORED_IMAGE_HOSTS.search(a['url'])]
+
+
+def evidence_attachments(pr: dict, body: str) -> list:
+    authors = {pr['author']['login']} | {c['login'] for c in pr['commit_list'] if c.get('login')}
+    found = find_attachments(body, 'description')
+    seen = {a['url'] for a in found}
+    for c in pr['issue_comments']:
+        if c['login'] in authors and not is_bot(c['login'], c.get('type')) and MARKER not in (c['body'] or ''):
+            for a in find_attachments(clean_body(c['body']), f'comment by {c["login"]} ({c["url"]})'):
+                if a['url'] not in seen:
+                    seen.add(a['url'])
+                    found.append(a)
+    return found
+
+
+def code_files(paths: list) -> list:
+    return [p for p in paths if not TEST_PATH.search(p) and not p.endswith('.md')]
+
+
+def doc_rules(files: list) -> list:
+    paths = [f['path'] for f in files]
+    changed = set(paths)
+
+    def docs_changed(prefixes: list) -> list:
+        return sorted(p for p in changed if any(p == d or (d.endswith('/') and p.startswith(d)) for d in prefixes))
+
+    rules = []
+    nodes = {}
+    for p in code_files(paths):
+        m = re.match(r'nodes/src/nodes/([^/]+)/', p)
+        if m:
+            nodes.setdefault(m.group(1), []).append(p)
+    for name, fs in sorted(nodes.items()):
+        docs = [f'nodes/src/nodes/{name}/README.md']
+        rules.append({'area': f'node {name}', 'changed': fs[:5], 'docs': docs, 'docs_changed': docs_changed(docs)})
+    table = (
+        ('TypeScript SDK', r'packages/client-typescript/src/', ['docs/public/typescript/']),
+        ('Python SDK', r'packages/client-python/src/', ['docs/public/python/']),
+        ('MCP', r'packages/client-mcp/|packages/ai/src/ai/modules/mcp/', ['docs/public/mcp/']),
+        ('engine or WebSocket protocol', r'packages/server/', ['docs/public/product/connect/websocket/']),
+        (
+            'VS Code extension',
+            r'apps/vscode/(src/|package\.json$)',
+            ['docs/docusaurus/apps/vscode/', 'apps/vscode/README.md'],
+        ),
+    )
+    for area, pattern, docs in table:
+        fs = [p for p in code_files(paths) if re.match(pattern, p)]
+        if fs:
+            rules.append({'area': area, 'changed': fs[:5], 'docs': docs, 'docs_changed': docs_changed(docs)})
+    apps = {}
+    for p in code_files(paths):
+        m = re.match(r'apps/([^/]+)/', p)
+        if m and m.group(1) not in ('vscode', 'shared'):
+            apps.setdefault(m.group(1), []).append(p)
+    for app, fs in sorted(apps.items()):
+        docs = [f'apps/{app}/README.md', f'apps/{app}/docs/']
+        rules.append({'area': f'app {app}', 'changed': fs[:5], 'docs': docs, 'docs_changed': docs_changed(docs)})
+    generated = (
+        'packages/client-typescript/README.md',
+        'packages/client-python/README.md',
+        'packages/client-mcp/README.md',
+    )
+    generated += ('packages/n8n-nodes/README.md', 'packages/chat-widget/README.md')
+    for p in paths:
+        if p in generated:
+            rules.append(
+                {
+                    'area': 'generated package README',
+                    'changed': [p],
+                    'docs': ['docs/public/<name>/README.md, then ./builder docs:export'],
+                    'docs_changed': docs_changed(['docs/public/']),
+                    'note': f'{p} is a generated copy. Edit the source under docs/public/ instead.',
+                }
+            )
+    return rules
+
+
+def areas(paths: list) -> dict:
+    out = {}
+    for p in paths:
+        parts = p.split('/')
+        if parts[0] in ('nodes', 'packages', 'apps') and len(parts) > 2:
+            depth = 4 if p.startswith('nodes/src/nodes/') else 2
+            key = '/'.join(parts[:depth])
+        elif parts[0] == 'docs' and len(parts) > 2:
+            key = '/'.join(parts[:2])
+        else:
+            key = parts[0] if len(parts) > 1 else '(root)'
+        out[key] = out.get(key, 0) + 1
+    return dict(sorted(out.items(), key=lambda kv: -kv[1]))
+
+
+# Status summaries
+
+
+def ci_summary(rollup: list) -> dict:
+    out = {'passed': 0, 'failed': 0, 'cancelled': 0, 'pending': 0, 'skipped': 0, 'failing': [], 'pending_names': []}
+    for c in rollup or []:
+        if c.get('__typename') == 'StatusContext':
+            name, state = c.get('context'), c.get('state')
+            kind = {'SUCCESS': 'passed', 'FAILURE': 'failed', 'ERROR': 'failed'}.get(state, 'pending')
+        else:
+            name = c.get('name')
+            if c.get('workflowName') and c.get('workflowName') != name:
+                name = f'{c["workflowName"]} / {name}'
+            if c.get('status') != 'COMPLETED':
+                kind = 'pending'
+            else:
+                kind = {'SUCCESS': 'passed', 'SKIPPED': 'skipped', 'NEUTRAL': 'skipped', 'CANCELLED': 'cancelled'}.get(
+                    c.get('conclusion'), 'failed'
+                )
+        out[kind] += 1
+        if kind == 'failed':
+            out['failing'].append(name)
+        elif kind == 'pending':
+            out['pending_names'].append(name)
+    return out
+
+
+def coderabbit_summary(comments: list, reviews: list) -> dict:
+    mine = [r for r in reviews if r['login'].startswith('coderabbitai')]
+    actionable = [int(m) for r in mine for m in re.findall(r'Actionable comments posted:\s*(\d+)', r.get('body') or '')]
+    out = {
+        'reviews': len(mine),
+        'last_review_state': mine[-1]['state'] if mine else None,
+        'actionable_comments_last_review': actionable[-1] if actionable else None,
+        'pre_merge_checks': [],
+        'note': None,
+    }
+    summary = [c for c in comments if c['login'].startswith('coderabbitai') and 'walkthrough' in (c['body'] or '')]
+    if not summary:
+        summary = [c for c in comments if c['login'].startswith('coderabbitai')]
+    if summary:
+        body = summary[-1]['body'] or ''
+        start = body.find('pre_merge_checks_walkthrough_start')
+        if start >= 0:
+            seen = set()
+            for name, status in re.findall(r'^\|\s*([^|\n]+?)\s*\|\s*!\[(\w+)\]\(', body[start:], re.M):
+                if name not in seen:
+                    seen.add(name)
+                    out['pre_merge_checks'].append({'name': name, 'status': status})
+        for phrase in ('Review skipped', 'Rate limit exceeded', 'rate limited', 'Review failed'):
+            if phrase.lower() in body.lower():
+                out['note'] = phrase
+                break
+    return out
+
+
+def maintainer_activity(pr: dict) -> list:
+    author = pr['author']['login']
+    found = []
+    for r in pr['reviews_rest']:
+        if (
+            r['association'] in MAINTAINER_ASSOCIATIONS
+            and r['login'] != author
+            and not is_bot(r['login'], r.get('type'))
+        ):
+            found.append({'login': r['login'], 'kind': f'review ({r["state"].lower()})', 'at': r['submitted']})
+    for c in pr['issue_comments']:
+        if (
+            c['association'] in MAINTAINER_ASSOCIATIONS
+            and c['login'] != author
+            and not is_bot(c['login'], c.get('type'))
+        ):
+            if MARKER not in (c['body'] or ''):
+                found.append({'login': c['login'], 'kind': 'comment', 'at': c['created'], 'url': c['url']})
+    return found
+
+
+# facts
+
+
+def gather(repo: str, number: int, rules_ref: str | None) -> dict:
+    pr = fetch_pr(repo, number)
+    rules = load_rules(repo, pr['baseRefName'], rules_ref)
+    body = clean_body(pr.get('body'))
+    files = pr['files']
+    author = pr['author']
+    # Only a maintainer's comment counts, so a contributor cannot plant the marker and have --apply edit theirs.
+    triage_comments = [
+        c
+        for c in pr['issue_comments']
+        if MARKER in (c['body'] or '') and c['association'] in MAINTAINER_ASSOCIATIONS
+    ]
+    repo_labels = {label['name'] for label in gh_json('label', 'list', '-R', repo, '--limit', '1000', '--json', 'name')}
+    facts = {
+        'pr': pr['number'],
+        'repo': repo,
+        'url': pr['url'],
+        'title': pr['title'],
+        'author': author['login'],
+        'author_is_bot': bool(author.get('is_bot')) or is_bot(author['login']),
+        'state': pr['state'],
+        'draft': pr['isDraft'],
+        'base': pr['baseRefName'],
+        'head_ref': pr['headRefName'],
+        'head_sha': pr['headRefOid'],
+        'fork': pr['isCrossRepository'],
+        'policy': {k: rules[k] for k in ('source', 'ref', 'sha', 'dir', 'complete', 'problems', 'links')},
+        'checks': {},
+        'size': {
+            'files': len(files),
+            'additions': pr['additions'],
+            'deletions': pr['deletions'],
+            'commits': len(pr['commit_list']),
+        },
+        'areas': areas([f['path'] for f in files]),
+        'commit_subjects': [c['subject'] for c in pr['commit_list']][:40],
+        'files': [
+            {'path': f['path'], 'status': f['status'], 'additions': f['additions'], 'deletions': f['deletions']}
+            for f in files
+        ][:300],
+        'description': body.strip()[:6000],
+        'ci': ci_summary(pr.get('statusCheckRollup')),
+        'coderabbit': coderabbit_summary(pr['issue_comments'], pr['reviews_rest']),
+        'maintainer_activity': maintainer_activity(pr),
+        'triage_comment': {
+            'id': triage_comments[-1]['id'],
+            'login': triage_comments[-1]['login'],
+            'url': triage_comments[-1]['url'],
+            'body': triage_comments[-1]['body'],
+        }
+        if triage_comments
+        else None,
+        'labels': {
+            'on_pr': [label['name'] for label in pr['labels']],
+            'missing_on_repo': [name for name in LABELS if name not in repo_labels],
+        },
+        'github_closing_issues': [i['number'] for i in pr.get('closingIssuesReferences') or []],
+    }
+    if not rules['complete']:
+        return facts
+    checks = facts['checks']
+    checks['linked_issue'] = check_linked_issue(repo, body, rules)
+    checks['branch_name'] = check_branch(pr['headRefName'], pr['isCrossRepository'], rules)
+    checks['title'] = check_title(pr['title'], rules)
+    checks['verification'] = verification_hint(body)
+    candidates = ui_files(files, rules)
+    if candidates:
+        checks['ui_evidence'] = {
+            'status': 'judge',
+            'reason': 'Decide whether these files change what users see, then whether the attachments show it.',
+            'ui_files': candidates[:60],
+            'attachments': evidence_attachments(pr, body),
+        }
+    else:
+        checks['ui_evidence'] = {
+            'status': 'n/a',
+            'reason': 'No changed file is under a UI path from the "UI evidence" check.',
+            'ui_files': [],
+            'attachments': [],
+        }
+    checks['one_problem'] = {'status': 'judge', 'reason': 'Judge whether every change serves the same problem.'}
+    rules_hit = doc_rules(files)
+    checks['docs'] = {
+        'status': 'judge',
+        'reason': 'Judge whether a public contract changed and, if so, whether its doc changed.',
+        'suggested': 'n/a' if not rules_hit else None,
+        'rules': rules_hit,
+    }
+    return facts
+
+
+# act
+
+
+def merge(facts: dict, verdict: dict) -> dict:
+    final = {}
+    given = verdict.get('checks') or {}
+    for name in CHECKS:
+        fact = facts['checks'][name]
+        mine = given.get(name) or {}
+        if name in DETERMINISTIC or fact['status'] in ('pass', 'fail', 'n/a'):
+            entry = {'status': fact['status'], 'reason': fact['reason'], 'by': 'script'}
+            if mine.get('status') and mine['status'] != fact['status']:
+                entry['note'] = f'verdict said {mine["status"]}; the script result stands'
+        elif mine.get('status') in STATUSES:
+            entry = {'status': mine['status'], 'reason': mine.get('reason', ''), 'by': 'judgment'}
+            if mine.get('ask'):
+                entry['ask'] = mine['ask']
+        else:
+            entry = {
+                'status': 'unclear',
+                'reason': 'The verdict gave no valid status for this check.',
+                'by': 'judgment',
+            }
+        final[name] = entry
+    return final
+
+
+def deterministic_ask(name: str, facts: dict) -> str:
+    check = facts['checks'][name]
+    if name == 'linked_issue':
+        if check['refs']:
+            return f'{check["reason"]}. Link the issue this PR fixes with `Fixes #<issue>`.'
+        return 'Add `Fixes #<issue>` (or `Closes` or `Resolves`) to the description. If there is no issue yet, open one that describes the problem.'
+    if name == 'title':
+        return f'`{facts["title"]}` is not a conventional commit title. Rename the PR to start with a type and an optional scope, such as `fix(nodes): <what changed>`.'
+    if name == 'verification':
+        if check['heading'] is None:
+            return 'The description has no Verification section. Add one that lists what you ran and what happened.'
+        return f'The {check["heading"]} section only holds the template placeholders. Replace them with what you ran and what happened.'
+    return ''
+
+
+def render_comment(facts: dict, checks: dict) -> tuple[str | None, bool]:
+    links = facts['policy']['links']
+    items = []
+    for name in ('linked_issue', 'verification', 'ui_evidence', 'docs', 'one_problem', 'title'):
+        check = checks[name]
+        if check['status'] != 'fail':
+            continue
+        ask = check.get('ask') or deterministic_ask(name, facts) or DEFAULT_ASKS.get(name, check['reason'])
+        ask = ask.strip()
+        if not ask.endswith(('.', '?', '!')):
+            ask += '.'
+        _, _, section = SECTION_LINKS[name]
+        items.append(f'**{ITEM_TITLES[name]}.** {ask} See [{section}]({links[name]}).')
+    sha = facts['policy']['sha'][:7]
+    if not items:
+        held = any(checks[n]['status'] in ('fail', 'unclear') for n in CHECKS if n != 'branch_name')
+        if facts['triage_comment'] and not held:
+            body = f'{MARKER}\nThanks for the updates. This PR now has what the contribution rules ask for, so it is ready for review.\n'
+            return body + f'\n<sub>Checked against the contribution rules at {sha}.</sub>\n', False
+        return None, False
+    lines = [MARKER, 'Thanks for the PR. Before a maintainer reviews it, please take care of the following:', '']
+    lines += [f'{i}. {item}' for i, item in enumerate(items, 1)]
+    branch = checks['branch_name']
+    if branch['status'] == 'fail':
+        lines += [
+            '',
+            f'One note for next time: the branch `{facts["head_ref"]}` does not follow `<type>/RR-<issue>-<short-description>` '
+            f'([Branching Strategy]({links["branch_name"]})). There is no need to rename it for this PR.',
+        ]
+    lines += [
+        '',
+        "Update the PR and we'll take another look.",
+        '',
+        f'<sub>Checked against the contribution rules at {sha}.</sub>',
+        '',
+    ]
+    return '\n'.join(lines), True
+
+
+def plan(facts: dict, verdict: dict) -> dict:
+    checks = merge(facts, verdict)
+    blocking = [n for n in CHECKS if n != 'branch_name' and checks[n]['status'] in ('fail', 'unclear')]
+    want = set()
+    if checks['linked_issue']['status'] == 'fail':
+        want.add('needs-issue')
+    if checks['verification']['status'] == 'fail' or checks['ui_evidence']['status'] == 'fail':
+        want.add('needs-evidence')
+    if not blocking:
+        want.add('ready-for-review')
+    on_pr = set(facts['labels']['on_pr'])
+    missing = set(facts['labels']['missing_on_repo'])
+    add = sorted(want - on_pr)
+    remove = sorted((set(LABELS) - want) & on_pr)
+    comment, asks = render_comment(facts, checks)
+    existing = facts['triage_comment']
+
+    if facts['author_is_bot']:
+        action, why = 'skip', 'The author is a bot.'
+    elif facts['state'] != 'OPEN':
+        action, why = 'report-only', f'The PR is {facts["state"].lower()}.'
+    elif facts['maintainer_activity']:
+        who = sorted({m['login'] for m in facts['maintainer_activity']})
+        action, why = 'report-only', f'A maintainer has already reviewed or commented: {", ".join(who)}.'
+    elif comment is None:
+        action, why = 'none', 'Nothing is missing, and there is no earlier triage comment to update.'
+    elif existing and (existing['body'] or '').strip() == comment.strip():
+        action, why = 'none', 'The earlier triage comment already says this.'
+    elif existing:
+        action, why = 'update', f'Update the earlier triage comment {existing["url"]}.'
+    else:
+        action, why = 'post', 'Post a new triage comment.'
+    if facts['policy']['source'] == 'local' and action in ('post', 'update'):
+        why += ' The rules come from a local ref, so this can only be a dry run.'
+    if unclear := [n for n in CHECKS if checks[n]['status'] == 'unclear']:
+        why += f' Unclear checks ({", ".join(unclear)}) hold back ready-for-review.'
+    writes = action in ('post', 'update', 'none')
+    return {
+        'pr': facts['pr'],
+        'url': facts['url'],
+        'head_sha': facts['head_sha'],
+        'state': facts['state'],
+        'draft': facts['draft'],
+        'policy': {k: facts['policy'][k] for k in ('source', 'ref', 'sha')},
+        'checks': checks,
+        'ci': facts['ci'],
+        'coderabbit': facts['coderabbit'],
+        'maintainer_activity': facts['maintainer_activity'],
+        'action': action,
+        'why': why,
+        'asks': asks,
+        'labels': {
+            'add': [x for x in add if x not in missing] if writes else [],
+            'remove': [x for x in remove if x not in missing] if writes else [],
+            'wanted': sorted(want),
+            'missing_on_repo': sorted(missing),
+        },
+        'comment': comment if action in ('post', 'update') else None,
+        'draft_comment': comment,
+    }
+
+
+def print_plan(p: dict, applied: list | None) -> None:
+    pol = p['policy']
+    print(f'PR #{p["pr"]} at {p["head_sha"][:7]} ({p["state"].lower()}{", draft" if p["draft"] else ""})')
+    origin = f'local ref {pol["ref"]}' if pol['source'] == 'local' else f'{pol["ref"]} on GitHub'
+    print(f'Rules: {pol["sha"][:12]} from {origin}')
+    print('Mode: ' + ('apply' if applied is not None else 'dry run. Nothing was changed on GitHub.'))
+    print('\nChecks')
+    for name, check in p['checks'].items():
+        print(f'  {name:<13} {check["status"]:<8} {check["reason"]}')
+    ci = p['ci']
+    failing = f' Failing: {", ".join(ci["failing"])}.' if ci['failing'] else ''
+    print(
+        f'\nCI: {ci["passed"]} passed, {ci["failed"]} failed, {ci["cancelled"]} cancelled, {ci["pending"]} pending, {ci["skipped"]} skipped.{failing}'
+    )
+    cr = p['coderabbit']
+    pre = ', '.join(f'{c["name"]}: {c["status"]}' for c in cr['pre_merge_checks']) or 'none found'
+    print(
+        f'CodeRabbit: {cr["reviews"]} review(s), last {cr["last_review_state"]}; pre-merge checks: {pre}.'
+        + (f' Note: {cr["note"]}.' if cr['note'] else '')
+    )
+    label = {'none': 'none (no comment)', 'post': 'post a comment', 'update': 'update the triage comment'}.get(
+        p['action'], p['action']
+    )
+    print(f'\nAction: {label}. {p["why"]}')
+    lab = p['labels']
+    print(f'Labels wanted: {", ".join(lab["wanted"]) or "none"}.')
+    print(f'Labels to change: add {", ".join(lab["add"]) or "none"}; remove {", ".join(lab["remove"]) or "none"}.')
+    if lab['missing_on_repo']:
+        print(
+            f'Labels missing on the repo (a maintainer must create them; triage never does): {", ".join(lab["missing_on_repo"])}.'
+        )
+    if p['draft_comment']:
+        heading = 'Comment' if p['comment'] else 'Comment (drafted, not to be posted)'
+        print(f'\n{heading}:\n-----\n{p["draft_comment"]}-----')
+    if applied is not None:
+        print('\nApplied:')
+        for line in applied or ['nothing']:
+            print(f'  {line}')
+    compact = {k: p[k] for k in ('pr', 'head_sha', 'action', 'labels')}
+    compact['policy_sha'] = pol['sha']
+    compact['checks'] = {n: {'status': c['status'], 'reason': c['reason']} for n, c in p['checks'].items()}
+    print('\n```json\n' + json.dumps(compact, indent=1) + '\n```')
+
+
+def apply_plan(repo: str, number: int, rules_ref: str | None, p: dict) -> list:
+    if rules_ref:
+        raise TriageError('--apply refuses to run with --rules-ref. Comments must cite rules that are on GitHub.')
+    if p['action'] in ('skip', 'report-only'):
+        return [f'nothing: {p["why"]}']
+    fresh = gather(repo, number, None)
+    if fresh['head_sha'] != p['head_sha'] or fresh['state'] != 'OPEN' or fresh['maintainer_activity']:
+        raise TriageError(
+            'The PR changed since the assessment (new commits, state, or maintainer activity). Run triage again.'
+        )
+    old, now = p.get('_existing') or {}, fresh['triage_comment'] or {}
+    if (old.get('id'), old.get('body')) != (now.get('id'), now.get('body')):
+        raise TriageError('The triage comment changed since the assessment. Run triage again.')
+    done = []
+    with tempfile.TemporaryDirectory() as tmp:
+        if p['action'] in ('post', 'update'):
+            payload = Path(tmp) / 'comment.json'
+            payload.write_text(json.dumps({'body': p['comment']}))
+            if p['action'] == 'update':
+                cid = p['_existing']['id']
+                gh(
+                    'api',
+                    '--method',
+                    'PATCH',
+                    f'repos/{repo}/issues/comments/{cid}',
+                    '--input',
+                    str(payload),
+                    '--jq',
+                    '.id',
+                )
+            else:
+                cid = gh(
+                    'api',
+                    '--method',
+                    'POST',
+                    f'repos/{repo}/issues/{number}/comments',
+                    '--input',
+                    str(payload),
+                    '--jq',
+                    '.id',
+                ).strip()
+            body = gh('api', f'repos/{repo}/issues/comments/{cid}', '--jq', '.body')
+            ok = body.strip() == p['comment'].strip()
+            done.append(f'{p["action"]} comment {cid}: {"verified" if ok else "posted, but the read-back differs"}')
+        if p['labels']['add']:
+            payload = Path(tmp) / 'labels.json'
+            payload.write_text(json.dumps({'labels': p['labels']['add']}))
+            gh(
+                'api',
+                '--method',
+                'POST',
+                f'repos/{repo}/issues/{number}/labels',
+                '--input',
+                str(payload),
+                '--jq',
+                '.[].name',
+            )
+        for name in p['labels']['remove']:
+            gh(
+                'api',
+                '--method',
+                'DELETE',
+                f'repos/{repo}/issues/{number}/labels/{urllib.parse.quote(name, safe="")}',
+                '--jq',
+                '.[].name',
+            )
+    now = {label['name'] for label in gh_json('pr', 'view', str(number), '-R', repo, '--json', 'labels')['labels']}
+    for name in p['labels']['add']:
+        done.append(f'label {name}: {"added" if name in now else "NOT present after adding"}')
+    for name in p['labels']['remove']:
+        done.append(f'label {name}: {"removed" if name not in now else "STILL present after removing"}')
+    return done
+
+
+# attachments
+
+
+def download(url: str, target_dir: Path, index: int) -> dict:
+    exts = {
+        'image/png': '.png',
+        'image/jpeg': '.jpg',
+        'image/gif': '.gif',
+        'image/webp': '.webp',
+        'video/mp4': '.mp4',
+        'video/quicktime': '.mov',
+        'video/webm': '.webm',
+    }
+    req = urllib.request.Request(url, headers={'User-Agent': 'contribution-triage'})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            ctype = (resp.headers.get('Content-Type') or '').split(';')[0].strip()
+            data = resp.read(25 * 1024 * 1024 + 1)
+    except Exception as exc:  # noqa: BLE001 - report any download failure and continue
+        return {'error': f'{type(exc).__name__}: {exc}'[:200]}
+    if len(data) > 25 * 1024 * 1024:
+        return {'error': 'larger than 25 MB; not saved', 'content_type': ctype}
+    path = target_dir / f'{index:02d}{exts.get(ctype, ".bin")}'
+    path.write_bytes(data)
+    out = {'path': str(path), 'content_type': ctype, 'bytes': len(data)}
+    if ctype.startswith('video/') and shutil.which('ffmpeg'):
+        frame = target_dir / f'{index:02d}-frame.png'
+        run(['ffmpeg', '-loglevel', 'error', '-ss', '1', '-i', str(path), '-frames:v', '1', str(frame)], check=False)
+        if frame.exists():
+            out['frame'] = str(frame)
+    return out
+
+
+def cmd_attachments(args: argparse.Namespace) -> int:
+    target = Path(args.dir)
+    if target.exists() and any(target.iterdir()):
+        raise TriageError(f'{target} is not empty. Use a new directory for downloads.')
+    target.mkdir(parents=True, exist_ok=True)
+    pr = fetch_pr(args.repo, args.pr)
+    found = evidence_attachments(pr, clean_body(pr.get('body')))[: args.limit]
+    for i, a in enumerate(found, 1):
+        a.update(download(a['url'], target, i))
+    print(json.dumps(found, indent=1))
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog='triage', description='Deterministic checks for contribution-triage.')
+    sub = parser.add_subparsers(dest='cmd', required=True)
+    for name in ('facts', 'attachments', 'act'):
+        p = sub.add_parser(name)
+        p.add_argument('pr', type=int)
+        p.add_argument('--repo', default=os.environ.get('TRIAGE_REPO', DEFAULT_REPO))
+        if name != 'attachments':
+            p.add_argument(
+                '--rules-ref', help='read the rules from this local git ref instead of the base branch on GitHub'
+            )
+    sub.choices['attachments'].add_argument('--dir', required=True)
+    sub.choices['attachments'].add_argument('--limit', type=int, default=12)
+    sub.choices['act'].add_argument('--verdict', required=True, help='JSON file with the judged checks')
+    sub.choices['act'].add_argument('--apply', action='store_true', help='post or update the comment and set labels')
+    sub.choices['act'].add_argument('--json', action='store_true', help='print only the full plan as JSON')
+    args = parser.parse_args()
+
+    try:
+        if args.cmd == 'attachments':
+            return cmd_attachments(args)
+        facts = gather(args.repo, args.pr, args.rules_ref)
+        if args.cmd == 'facts':
+            print(json.dumps(facts, indent=1))
+            if not facts['policy']['complete']:
+                print('triage: the rules are incomplete: ' + '; '.join(facts['policy']['problems']), file=sys.stderr)
+                return 2
+            return 0
+        if not facts['policy']['complete']:
+            raise TriageError('the rules are incomplete: ' + '; '.join(facts['policy']['problems']))
+        verdict = json.loads(Path(args.verdict).read_text())
+        if verdict.get('head_sha') and verdict['head_sha'] != facts['head_sha']:
+            raise TriageError(
+                f'the verdict is for {verdict["head_sha"][:7]}, but the PR head is now {facts["head_sha"][:7]}. Assess it again.'
+            )
+        p = plan(facts, verdict)
+        p['_existing'] = facts['triage_comment']
+        applied = apply_plan(args.repo, args.pr, args.rules_ref, p) if args.apply else None
+        p.pop('_existing')
+        if args.json:
+            print(json.dumps(p, indent=1))
+        else:
+            print_plan(p, applied)
+        return 0
+    except TriageError as exc:
+        print(f'triage: {exc}', file=sys.stderr)
+        return 2
+
+
+if __name__ == '__main__':
+    sys.exit(main())

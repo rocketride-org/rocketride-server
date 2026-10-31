@@ -53,6 +53,55 @@ reviews:
         explicitly marked language-specific. Package READMEs are generated
         from these sources via `builder docs:export` — never review edits to
         packages/client-*/README.md as hand-written files.
+  # These checks enforce "Show that it works" and the linked-issue rule in
+  # CONTRIBUTING.md. They start in warning mode, so they flag a PR without
+  # blocking it.
+  pre_merge_checks:
+    # Only a requested reviewer or a maintainer can override a failed check.
+    override_requested_reviewers_only: true
+    custom_checks:
+      - name: Verification
+        mode: warning
+        instructions: |
+          Read the "Verification" section of the PR description (the heading
+          comes from .github/PULL_REQUEST_TEMPLATE.md).
+          Pass if it names at least one concrete thing the author ran (a
+          command, a test file or test name, or a sequence of actions in the
+          product) and says what happened (output, a result, or an attached
+          screenshot or recording).
+          Fail if the section is missing, if it still holds only the
+          template's placeholders ("Steps:", "1.", "Result:", and HTML
+          comments), or if it only says that tests pass or that the change was
+          tested without naming what ran. Checked boxes alone do not count.
+      - name: UI evidence
+        mode: warning
+        instructions: |
+          First decide whether the PR changes what users see. It does when a
+          changed file renders UI or defines what users see under any of
+          these paths: packages/shell/src/, apps/*-ui/src/, apps/shared/,
+          apps/vscode/src/ (webviews, views, commands, menus, settings),
+          apps/vscode/package.json "contributes", packages/chat-widget/src/,
+          packages/ai/src/ai/modules/mcp/apps/, docs/docusaurus/src/, or a
+          new page under docs/public/. Tests, lockfiles, build configuration,
+          and type-only or comment-only edits do not count.
+          If the PR does not change what users see, pass.
+          Otherwise, pass only if the PR description embeds at least one
+          image (Markdown image syntax, an <img> tag, or a
+          github.com/user-attachments link) or video that shows the changed
+          UI. If the PR adds or changes a flow the user moves through (drag
+          and drop, moving between steps, animation, transitions, or timing),
+          it also needs a video or a GIF that shows the flow. A new or
+          changed button or link that only opens or runs something does not
+          need one.
+          When failing, name the changed UI files and say which evidence is
+          missing.
+      - name: Linked issue
+        mode: warning
+        instructions: |
+          Pass if the PR description contains Fixes, Closes, or Resolves (any
+          case) followed by an issue reference: #123, owner/repo#123, or a
+          full GitHub issue URL. The template's placeholder "Fixes #" with no
+          number does not count. Fail otherwise.
   tools:
     eslint:
       enabled: true

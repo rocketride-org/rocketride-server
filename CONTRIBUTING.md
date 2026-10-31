@@ -64,6 +64,7 @@ All other branches **must** follow the naming convention:
 
 3. Make your changes, ensuring:
 
+   - The PR solves one problem. Put unrelated changes in their own PRs, each with its own issue
    - Code follows the project style guidelines
    - All tests pass
    - New code has appropriate tests
@@ -97,13 +98,13 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 2. Open a Pull Request against the `develop` branch
 
-3. **Link the issue**: use `Fixes #123`, `Closes #123`, or `Resolves #123` in the PR description (required by CI)
+3. **Link the issue**: use `Fixes #123`, `Closes #123`, or `Resolves #123` in the PR description (CodeRabbit flags PRs without one)
 
 4. Fill out the PR template with:
 
    - Description of changes
    - Linked issue number
-   - Testing performed
+   - Verification: what you ran and what you saw (see [Show that it works](#show-that-it-works))
    - Breaking changes (if any)
 
 5. **Ensure all CI checks pass** before requesting a review. If you see unexpected failures (compilation errors, test failures unrelated to your changes), your branch is likely out of date with `develop`. Rebase before pushing:
@@ -118,6 +119,21 @@ We follow [Conventional Commits](https://www.conventionalcommits.org/):
    If compilation still fails after rebasing and there is no open issue tracking it, and the code compiles cleanly on your machine, you've found a bug in CI or the build itself. Please open an issue and feel free to follow up with a PR to fix it.
 
 6. Wait for code review and address feedback
+
+### Show that it works
+
+Every PR shows what you ran and what you saw. Reviewers read this before the code, and CodeRabbit flags PRs that leave it out.
+
+- **Every change.** In the Verification section of the PR template, list the steps you ran and what happened. "Tests pass" alone is not enough. Name the tests, or say what you checked by hand.
+- **UI changes.** If the PR changes what users see in `packages/shell`, `apps/*-ui`, `apps/shared`, `apps/vscode`, `packages/chat-widget`, or the docs site, add screenshots. When you change something that already exists, show it before and after.
+- **Flow changes.** If the PR adds or changes a flow the user moves through, such as drag and drop, several steps, animation, or timing, add a short recording or GIF. A button or link that only opens or runs something does not need one.
+- **Engine, SDK, CLI, MCP, and node changes.** Paste the command you ran and its output, or name the test that covers the change and show it passing.
+
+Drag screenshots and recordings into the PR description. Do not commit them.
+
+If you work with a coding agent, have it follow `.claude/skills/verify-rocketride/SKILL.md`. The skill launches an engine built from your checkout, uses the product the way a user does, and saves what happened under `.verify/<run-id>/`. Paste its report into the Verification section and attach the screenshots it saved. Its coverage table lists what it can check. For anything it does not cover, say what you checked by hand.
+
+Maintainers may run the contribution-triage skill (`.claude/skills/contribution-triage/SKILL.md`) on your PR. It checks the items above and, if something is missing, leaves one comment that says what to add.
 
 ## Code Style Guidelines
 

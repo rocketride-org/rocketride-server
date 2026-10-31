@@ -1,0 +1,12 @@
+--- a/packages/ai/src/ai/modules/mcp/tools/execution.py
++++ b/packages/ai/src/ai/modules/mcp/tools/execution.py
+@@ -260,7 +260,8 @@
+         return _bad('task_token is required', 'pass the token returned by run_pipeline')
+ 
+     try:
+-        await asyncio.wait_for(client.terminate(token), timeout=DEFAULT_TIMEOUT_SECONDS)
++        if tasks.get(token) is not None:
++            await asyncio.wait_for(client.terminate(token), timeout=DEFAULT_TIMEOUT_SECONDS)
+     except asyncio.TimeoutError:
+         return _timeout(
+             'terminate timed out waiting for the engine to tear down the task',

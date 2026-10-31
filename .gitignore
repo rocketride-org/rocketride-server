@@ -23,6 +23,11 @@ out/
 # -----------------------------------------------------------------------------
 .claude/*
 !.claude/CLAUDE.md
+# Shared project skills are tracked one by one, so personal skills stay ignored.
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/verify-rocketride/
+!.claude/skills/contribution-triage/
 .cursor/
 .windsurf/
 # Agent stubs planted by the RocketRide VS Code extension's agent installer
@@ -235,3 +240,9 @@ packages/ai/src/ai/modules/mcp/apps/dist/
 # no secrets); they must be tracked despite the global credentials/ ignore above.
 !packages/n8n-nodes/credentials/
 !packages/n8n-nodes/credentials/**
+
+# Verification runs (evidence, venv) from .claude/skills/verify-rocketride
+.verify/
+
+# Eval runs from .claude/skills/contribution-triage
+.triage/

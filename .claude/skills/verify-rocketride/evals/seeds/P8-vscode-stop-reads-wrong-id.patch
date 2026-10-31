@@ -1,0 +1,11 @@
+--- a/apps/vscode/src/providers/ProjectProvider.ts
++++ b/apps/vscode/src/providers/ProjectProvider.ts
+@@ -1704,7 +1704,7 @@ export class ProjectProvider implements vscode.CustomTextEditorProvider {
+ 			if (!client) throw new Error('Not connected to server');
+ 
+ 			const parsed = JSON.parse(document.getText());
+-			const projectId = parsed.project_id;
++			const projectId = parsed.projectId;
+ 
+ 			if (!projectId || !componentId) {
+ 				this.logger.error(`[ProjectProvider] Missing projectId or componentId`);
