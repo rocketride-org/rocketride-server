@@ -253,6 +253,9 @@ class _TreeWalk:
             status = subtree['status']
             self._result['status'] = status
             self._result['documentation_url'] = subtree.get('documentation_url')
+            if 'retry_after' in subtree:
+                # A rate limit stopped the walk: keep the wait the next attempt needs.
+                self._result['retry_after'] = subtree['retry_after']
             reason = subtree['message'].rstrip('.')
             if status is not None and not 200 <= status < 300:
                 reason = f'GitHub API {status}: {reason}'

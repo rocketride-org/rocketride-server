@@ -26,7 +26,8 @@
 """
 GitHub tool node - global (shared) state.
 
-Reads auth config (PAT or GitHub App), default_repo, and read_only flag from
+Reads auth config (PAT or GitHub App), default_repo, the read_only flag, the
+tool allowlist, the GraphQL response cap and the rate-limit retry policy from
 config. For App auth, mints and caches short-lived installation tokens,
 auto-refreshing them shortly before they expire.
 """
@@ -111,6 +112,63 @@ def _read_auth(cfg) -> dict:
     }
 
 
+# (config key, default, minimum, maximum) for the integer options.
+_GRAPHQL_MAX_BYTES = ('graphqlMaxResponseBytes', github_client.DEFAULT_GRAPHQL_MAX_BYTES, 1024, 100 * 1024 * 1024)
+_RETRY_BUDGET = ('rateLimitBudgetSeconds', github_client.DEFAULT_RETRY_BUDGET_SECONDS, 0, 3600)
+_MAX_RETRIES = ('rateLimitMaxRetries', github_client.DEFAULT_MAX_RETRIES, 0, 10)
+
+
+def _read_int(cfg, option: tuple) -> int:
+    """Read an integer option; blank means the default, anything else out of range fails."""
+    key, default, minimum, maximum = option
+    raw = cfg.get(key)
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return default
+    value = None
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        value = raw
+    elif isinstance(raw, float) and raw.is_integer():
+        value = int(raw)
+    elif isinstance(raw, str) and raw.strip().isdecimal():
+        value = int(raw.strip())
+    if value is None or not minimum <= value <= maximum:
+        raise ValueError(f'tool_github: {key} must be an integer from {minimum} to {maximum}')
+    return value
+
+
+def _read_tools(raw) -> frozenset:
+    """Parse the ``tools`` allowlist; empty means every tool. Unknown names fail."""
+    if raw is None:
+        return frozenset()
+    if isinstance(raw, str):
+        raw = raw.split(',')
+    if not isinstance(raw, (list, tuple)) or not all(isinstance(name, str) for name in raw):
+        raise ValueError('tool_github: tools must be a list of tool names')
+    names = frozenset(name.strip() for name in raw if name.strip())
+    if not names:
+        return frozenset()
+    # IInstance imports this module; read its tool names lazily to avoid a cycle.
+    from .IInstance import tool_names
+
+    valid = tool_names()
+    unknown = sorted(names - valid)
+    if unknown:
+        raise ValueError(
+            f'tool_github: unknown tool name(s) in tools: {", ".join(unknown)}. Valid names: {", ".join(sorted(valid))}'
+        )
+    return names
+
+
+def _read_options(cfg) -> dict:
+    """Parse the non-auth options; ``beginGlobal`` and ``validateConfig`` share it."""
+    return {
+        'tools': _read_tools(cfg.get('tools')),
+        'graphqlMaxResponseBytes': _read_int(cfg, _GRAPHQL_MAX_BYTES),
+        'rateLimitBudgetSeconds': _read_int(cfg, _RETRY_BUDGET),
+        'rateLimitMaxRetries': _read_int(cfg, _MAX_RETRIES),
+    }
+
+
 class IGlobal(IGlobalBase):
     """Global state for tool_github."""
 
@@ -121,6 +179,9 @@ class IGlobal(IGlobalBase):
     installation_id: str = ''
     default_repo: str = ''
     read_only: bool = False
+    tools: frozenset = frozenset()
+    graphql_max_bytes: int = github_client.DEFAULT_GRAPHQL_MAX_BYTES
+    retry_policy: github_client.RetryPolicy = github_client.RetryPolicy()
 
     _cached_token: str = ''
     _cached_expiry: float = 0.0
@@ -139,6 +200,14 @@ class IGlobal(IGlobalBase):
         self._refresh_failed_at = 0.0
         self._lock = threading.Lock()
 
+        options = _read_options(cfg)
+        self.tools = options['tools']
+        self.graphql_max_bytes = options['graphqlMaxResponseBytes']
+        self.retry_policy = github_client.RetryPolicy(
+            budget_seconds=options['rateLimitBudgetSeconds'],
+            max_retries=options['rateLimitMaxRetries'],
+        )
+
         auth = _read_auth(cfg)
         self.auth_type = auth['authType']
         if self.auth_type == 'app':
@@ -149,10 +218,11 @@ class IGlobal(IGlobalBase):
             self.token = auth['token']
 
     def validateConfig(self) -> None:
-        try:
-            _read_auth(Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig))
-        except Exception as e:
-            warning(str(e))
+        for read in (_read_auth, _read_options):
+            try:
+                read(Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig))
+            except Exception as e:
+                warning(str(e))
 
     def endGlobal(self) -> None:
         self.auth_type = 'pat'
@@ -162,6 +232,9 @@ class IGlobal(IGlobalBase):
         self.installation_id = ''
         self.default_repo = ''
         self.read_only = False
+        self.tools = frozenset()
+        self.graphql_max_bytes = github_client.DEFAULT_GRAPHQL_MAX_BYTES
+        self.retry_policy = github_client.RetryPolicy()
         self._cached_token = ''
         self._cached_expiry = 0.0
         self._refresh_failed_at = 0.0

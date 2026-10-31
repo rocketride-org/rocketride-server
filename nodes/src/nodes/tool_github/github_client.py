@@ -24,7 +24,7 @@
 # =============================================================================
 
 """
-GitHub REST API v3 client.
+GitHub REST API v3 and GraphQL client.
 
 Thin wrapper around requests — handles auth, headers, error parsing,
 and response normalisation. All tool methods in IInstance call through here.
@@ -33,9 +33,13 @@ and response normalisation. All tool methods in IInstance call through here.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable
+from email.utils import parsedate_to_datetime
 from urllib.parse import parse_qs, urlsplit
 import datetime
+import json
+import math
 import time
 
 import jwt
@@ -124,6 +128,15 @@ DEFAULT_TIMEOUT = 30
 APP_JWT_TTL_SECONDS = 570
 
 
+def _auth_headers(token: str) -> dict:
+    """The headers every GitHub API request sends: bearer auth, media type, API version."""
+    return {
+        'Authorization': f'Bearer {token}',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+    }
+
+
 def load_app_private_key(pem_text: str):
     """Parse a PEM RSA private key for a GitHub App. Raises ValueError on malformed or non-RSA input."""
     from cryptography.hazmat.primitives import serialization
@@ -153,12 +166,7 @@ def mint_installation_token(app_id: str, private_key_pem: str, installation_id: 
     POSTs to ``/app/installations/{installation_id}/access_tokens`` authenticated
     with a freshly-signed App JWT. Returns ``(token, expiry_epoch_seconds)``.
     """
-    jwt_token = sign_app_jwt(app_id, private_key_pem)
-    headers = {
-        'Authorization': f'Bearer {jwt_token}',
-        'Accept': 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-    }
+    headers = _auth_headers(sign_app_jwt(app_id, private_key_pem))
     try:
         resp = requests.request(
             'POST',
@@ -207,24 +215,6 @@ def call(
     return {} if resp.status_code == 204 else resp.json()
 
 
-def call_with_metadata(
-    token: str,
-    method: str,
-    path: str,
-    *,
-    params: dict | None = None,
-    body: dict | None = None,
-) -> dict:
-    """The same call, returned as the result envelope the repository-read tools use.
-
-    ``envelope`` of the status, the rate-limit counters, the next page and the parsed
-    body (an empty object for 204). HTTP errors raise as ``call`` raises them; the
-    caller turns them into failure results.
-    """
-    resp = _exchange(token, method, path, params=params, body=body)
-    return envelope(resp.status_code, resp.headers, {} if resp.status_code == 204 else resp.json())
-
-
 def _exchange(
     token: str,
     method: str,
@@ -235,15 +225,11 @@ def _exchange(
 ) -> requests.Response:
     """Send one authenticated request with the node's retry policy and return a 2xx response.
 
-    Shared by ``call`` and ``call_with_metadata``, which only differ in what they return.
+    Used by ``call``, which returns the body; the envelope tools use ``request_with_backoff``.
     A rate limit is retried (at most three attempts with bounded waits); any other
     non-2xx answer raises ``GitHubAPIError``, and a transport failure ``ValueError``.
     """
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Accept': 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-    }
+    headers = _auth_headers(token)
 
     url = BASE_URL + path
 
@@ -378,15 +364,14 @@ def shape_failure(result: dict, expected: str) -> dict:
     return failure
 
 
-def _error_message(exc: GitHubAPIError, secrets: tuple[str, ...] = ()) -> str:
+def _error_message(status: int | None, body: Any, secrets: tuple[str, ...] = ()) -> str:
     """Compose a public message from the parsed error body, never from raw response text.
 
     The secrets are redacted before the cap, so a credential GitHub echoed across the
     cut cannot leave a prefix behind.
     """
-    body = exc.body
     if not isinstance(body, dict) or not isinstance(body.get('message'), str):
-        return f'GitHub returned HTTP {exc.status_code} without a JSON error body.'
+        return f'GitHub returned HTTP {status} without a JSON error body.'
     message = body['message']
     errors = body.get('errors')
     if isinstance(errors, list) and errors:
@@ -422,24 +407,398 @@ def redact_result(value: Any, secrets: tuple[str, ...]) -> Any:
     return redact(value)
 
 
-def get_result(token: str, path: str, *, params: dict | None = None, secrets: tuple[str, ...] = ()) -> dict:
+# ---------------------------------------------------------------------------
+# Rate-limit backoff for the envelope tools (get_result and graphql_result).
+# The legacy tools keep call()'s tenacity policy and its return shapes.
+# ---------------------------------------------------------------------------
+
+# 4 MiB: the issue's review query (40 pull requests with files, reviews, threads and checks)
+# can pass 1 MiB.
+DEFAULT_GRAPHQL_MAX_BYTES = 4 * 1024 * 1024
+DEFAULT_RETRY_BUDGET_SECONDS = 60
+DEFAULT_MAX_RETRIES = 3
+# GitHub: with no retry-after and no exhausted x-ratelimit-remaining, "wait for at least
+# one minute before retrying", then "an exponentially increasing amount of time".
+UNNAMED_WAIT_SECONDS = 60.0
+# The shortest wait between attempts, so Retry-After: 0 or a past reset cannot spin.
+MIN_WAIT_SECONDS = 1.0
+_READ_CHUNK_BYTES = 64 * 1024
+_TRANSPORT_FAILURE = 'GitHub request failed or returned invalid JSON. Check connectivity and retry.'
+AUTH_FAILURE = 'GitHub authentication failed. Check the node credentials and installation access.'
+
+# A token, or a function that returns the token to send; a function is called before
+# every attempt, so a token refreshed (or a JWT signed again) during a wait is used.
+Credential = str | Callable[[], str]
+
+
+class AuthenticationFailed(Exception):
+    """A credential could not be minted for a retry; the result is the fixed authentication failure."""
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    """How long, and how often, an envelope call waits out a GitHub rate limit.
+
+    ``budget_seconds`` caps the total time one tool call spends waiting, across every
+    request it makes (see ``CallBudget``), and ``max_retries`` the retries of each
+    request after its first attempt, so 3 retries means up to 4 attempts. ``sleep`` and
+    ``clock`` are injectable for tests; ``None`` means ``time.sleep`` and ``time.time``,
+    looked up when the call runs.
+    """
+
+    budget_seconds: float = DEFAULT_RETRY_BUDGET_SECONDS
+    max_retries: int = DEFAULT_MAX_RETRIES
+    sleep: Callable[[float], None] | None = None
+    clock: Callable[[], float] | None = None
+
+
+class RateLimitExhausted(GitHubAPIError):
+    """A rate limit outlasted the retry budget or count.
+
+    Like ``GitHubAPIError`` it carries the status, headers and parsed body, never the
+    response. ``retry_after`` is the wait the next attempt needs, rounded up to whole
+    seconds: the one GitHub named, or at least a minute when it named none.
+    """
+
+    def __init__(self, status_code: int, headers, body, retry_after: int, reason: str):
+        super().__init__(status_code, 'GitHub rate limit.', headers=headers, body=body)
+        self.retry_after = retry_after
+        self.reason = reason
+
+
+class CallBudget:
+    """The wait budget of one tool call, shared by every request the call makes.
+
+    A ``repo_tree`` walk passes one to each of its subtree reads, so
+    ``rateLimitBudgetSeconds`` bounds the waiting of the whole call, not of each read.
+    """
+
+    def __init__(self) -> None:
+        self.waited = 0.0
+
+
+class _Handed:
+    """Calls a credential and remembers every token it returned, for redaction."""
+
+    def __init__(self, credential) -> None:
+        self._credential = credential
+        self.tokens: list[str] = []
+
+    def __call__(self) -> str:
+        token = self._credential() if callable(self._credential) else self._credential
+        self.tokens.append(token)
+        return token
+
+
+def request_with_backoff(
+    credential: Credential,
+    method: str,
+    path: str,
+    *,
+    params: dict | None = None,
+    body: dict | None = None,
+    retry: RetryPolicy | None = None,
+    max_bytes: int | None = None,
+    graphql: bool = False,
+    budget: CallBudget | None = None,
+) -> tuple[requests.Response, bytes | None]:
+    """Send a request, waiting out rate limits within ``retry``, and return ``(response, body)``.
+
+    See ``_rate_limit`` for what counts as a rate limit. A wait GitHub names
+    (``Retry-After``, or ``X-RateLimit-Reset`` once ``X-RateLimit-Remaining`` is 0;
+    the longer when both apply) is used as given, at least one second. With no named
+    wait the first is a minute and each later one doubles. A wait that does not fit
+    the budget left is never started, and neither is a retry past ``max_retries``:
+    the call raises ``RateLimitExhausted`` with that wait as ``retry_after``. The budget
+    is ``budget`` when given (one per tool call), else this request's own. A callable
+    ``credential`` is called before every attempt, so a retry after a long wait sends
+    a token minted for it. With
+    ``max_bytes`` the body is streamed and the returned body is ``None`` once it
+    exceeds the cap. Transport failures raise ``ValueError`` without the exception
+    text, which may include the request URL, and are never retried.
+    """
+    policy = retry or RetryPolicy()
+    sleep = policy.sleep or time.sleep
+    clock = policy.clock or time.time
+    budget = budget if budget is not None else CallBudget()
+    kwargs: dict = {
+        'params': {k: v for k, v in (params or {}).items() if v is not None},
+        'json': body,
+        'timeout': DEFAULT_TIMEOUT,
+    }
+    if max_bytes is not None:
+        kwargs['stream'] = True
+    retries = 0
+    unnamed = 0
+    while True:
+        token = credential() if callable(credential) else credential
+        try:
+            resp = requests.request(method.upper(), BASE_URL + path, headers=_auth_headers(token), **kwargs)
+            content = _read_body(resp, max_bytes)
+        except requests.RequestException:
+            raise ValueError('GitHub request failed') from None
+        if content is None:
+            return resp, None
+        now = clock()
+        limited, wait = _rate_limit(resp, content, now, graphql=graphql)
+        if not limited:
+            return resp, content
+        named = wait is not None
+        wait = max(MIN_WAIT_SECONDS, wait if named else UNNAMED_WAIT_SECONDS * 2**unnamed)
+        left = policy.budget_seconds - budget.waited
+        if retries >= policy.max_retries:
+            reason = f'Gave up after rateLimitMaxRetries ({policy.max_retries}) retries.'
+        elif wait > left:
+            asks = 'GitHub asks to wait' if named else 'GitHub names no wait, so the next wait is'
+            reason = (
+                f'Not retried: {asks} {math.ceil(wait)} s, more than the '
+                f'{max(0, math.floor(left))} s left of rateLimitBudgetSeconds.'
+            )
+        else:
+            sleep(wait)
+            budget.waited += wait
+            retries += 1
+            unnamed += 0 if named else 1
+            continue
+        raise RateLimitExhausted(resp.status_code, resp.headers, _parse_json(content), math.ceil(wait), reason)
+
+
+def _read_body(resp: requests.Response, max_bytes: int | None) -> bytes | None:
+    """Return the body, or ``None`` once it passes ``max_bytes``; the rest is never read."""
+    if max_bytes is None:
+        return resp.content
+    # Content-Length counts encoded bytes; trust it only for an unencoded body.
+    declared = resp.headers.get('Content-Length') or ''
+    encoded = (resp.headers.get('Content-Encoding') or 'identity').strip().lower() != 'identity'
+    if declared.isdecimal() and not encoded and int(declared) > max_bytes:
+        resp.close()
+        return None
+    body = bytearray()
+    for chunk in resp.iter_content(chunk_size=_READ_CHUNK_BYTES):
+        body += chunk
+        if len(body) > max_bytes:
+            resp.close()
+            return None
+    return bytes(body)
+
+
+def _seconds(value) -> float | None:
+    """Parse a header as a finite, non-negative number of seconds."""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    return seconds if math.isfinite(seconds) and seconds >= 0 else None
+
+
+def _retry_after(value, now: float) -> float | None:
+    """Read Retry-After as delta-seconds or as an HTTP date; ``None`` when it is neither."""
+    seconds = _seconds(value)
+    if seconds is not None or not isinstance(value, str):
+        return seconds
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.timezone.utc)
+    return max(0.0, when.timestamp() - now)
+
+
+def _graphql_rate_limited(resp: requests.Response, content: bytes, exhausted: bool) -> bool:
+    """Whether a GraphQL HTTP 200 is a rate limit GitHub answered without running anything.
+
+    Only an answer without ``data`` counts: one with partial data ran part of the
+    document, so it is returned, never retried. It counts when it carries
+    ``Retry-After``, an error of type ``RATE_LIMITED``, a message of GitHub's own that
+    names a rate limit (the top-level ``message`` of a secondary limit, or an error
+    without ``locations``), or, while ``X-RateLimit-Remaining`` is 0, an error without
+    ``locations``. Parse and validation errors carry ``locations`` and may quote the
+    document or its variables, so their text is never read as a rate limit.
+    """
+    hinted = b'RATE_LIMITED' in content or b'rate limit' in content.lower()
+    if not ('Retry-After' in resp.headers or exhausted or hinted):
+        return False
+    # Parsed only when a hint is present, so an ordinary answer is parsed once.
+    body = _parse_json(content)
+    if not isinstance(body, dict) or body.get('data') is not None:
+        return False
+    raw_errors = body.get('errors')
+    errors = [error for error in raw_errors if isinstance(error, dict)] if isinstance(raw_errors, list) else []
+    unlocated = [error for error in errors if not error.get('locations')]
+    own_words = [body.get('message')] + [error.get('message') for error in unlocated]
+    return (
+        'Retry-After' in resp.headers
+        or any(error.get('type') == 'RATE_LIMITED' for error in errors)
+        or any(isinstance(text, str) and 'rate limit' in text.lower() for text in own_words)
+        or (exhausted and bool(unlocated))
+    )
+
+
+def _rate_limit(resp: requests.Response, content: bytes, now: float, *, graphql: bool) -> tuple[bool, float | None]:
+    """Return whether the answer is a rate limit and the seconds GitHub names (``None``: none).
+
+    A 403 or 429 is one when GitHub marks it so (a 429, ``X-RateLimit-Remaining: 0``,
+    ``Retry-After``, or a body naming a rate limit). With ``graphql``, so is an HTTP
+    200 that ``_graphql_rate_limited`` accepts.
+    """
+    headers = resp.headers
+    exhausted = headers.get('X-RateLimit-Remaining') == '0'
+    if resp.status_code in (403, 429):
+        limited = resp.status_code == 429 or exhausted or 'Retry-After' in headers or b'rate limit' in content.lower()
+    else:
+        limited = graphql and resp.status_code == 200 and _graphql_rate_limited(resp, content, exhausted)
+    if not limited:
+        return False, None
+    waits = []
+    retry_after = _retry_after(headers.get('Retry-After'), now)
+    if retry_after is not None:
+        waits.append(retry_after)
+    reset = _seconds(headers.get('X-RateLimit-Reset')) if exhausted else None
+    if reset is not None:
+        waits.append(reset - now)
+    return True, (max(waits) if waits else None)
+
+
+def _parse_json(content: bytes) -> Any:
+    try:
+        return json.loads(content)
+    except ValueError:
+        return None
+
+
+def _with_retry_after(result: dict, exc: RateLimitExhausted) -> dict:
+    """Add why the node stopped and when to retry to a rate-limit failure."""
+    message = result['message'].rstrip()
+    separator = ' ' if message.endswith(('.', ')', '!', '?')) else '. '
+    result['message'] = f'{message}{separator}{exc.reason}'
+    result['retry_after'] = exc.retry_after
+    return result
+
+
+def _graphql_error(status: int, headers, body: Any, secrets: tuple[str, ...] = ()) -> dict:
+    """Shape a GraphQL failure from its parsed body, never from raw response text."""
+    body = body if isinstance(body, dict) else {}
+    errors = body.get('errors')
+    if isinstance(body.get('message'), str):
+        message = _error_message(status, body, secrets)
+    else:
+        details = '; '.join(_error_detail(error) for error in errors) if isinstance(errors, list) else ''
+        message = redact_result(details, secrets)[:MAX_MESSAGE_LENGTH]
+        message = message or f'GitHub returned HTTP {status} without a JSON error body.'
+    result = failure_result(message, status, headers)
+    result['next_page'] = None
+    documentation_url = body.get('documentation_url')
+    result['documentation_url'] = documentation_url if isinstance(documentation_url, str) else None
+    if errors is not None:
+        result['errors'] = errors
+    return result
+
+
+def get_result(
+    credential: Credential,
+    path: str,
+    *,
+    params: dict | None = None,
+    retry: RetryPolicy | None = None,
+    secrets: tuple[str, ...] = (),
+    budget: CallBudget | None = None,
+) -> dict:
     """GET with the result envelope: HTTP errors become results and credentials are redacted.
 
-    ``token`` and ``secrets`` (the node's other credentials) are redacted from the whole
-    result, and from an error message before it is capped. Transport and JSON failures
-    have ``status: None`` and a fixed message, so exception text never reaches a client.
-    Retries follow ``call`` (at most three attempts with bounded waits).
+    Every token sent and ``secrets`` (the node's other credentials) are redacted from
+    the whole result, and from an error message before it is capped. Transport and
+    JSON failures have ``status: None`` and a fixed message, so exception text never
+    reaches a client. Rate limits back off within ``retry`` and ``budget`` (see
+    ``request_with_backoff``); an exhausted budget or retry count returns the
+    rate-limit answer with ``retry_after``.
     """
-    secrets = (token, *secrets)
+    handed = _Handed(credential)
     try:
-        result = call_with_metadata(token, 'GET', path, params=params)
+        resp, _content = request_with_backoff(handed, 'GET', path, params=params, retry=retry, budget=budget)
+        if resp.status_code == 204:
+            result = envelope(resp.status_code, resp.headers, {})
+        elif not resp.ok:
+            _raise_github_error(resp)
+        else:
+            result = envelope(resp.status_code, resp.headers, resp.json())
     except GitHubAPIError as exc:
-        result = failure_result(_error_message(exc, secrets), exc.status_code, exc.headers)
+        message = _error_message(exc.status_code, exc.body, (*handed.tokens, *secrets))
+        result = failure_result(message, exc.status_code, exc.headers)
         if isinstance(exc.body, dict) and isinstance(exc.body.get('documentation_url'), str):
             result['documentation_url'] = exc.body['documentation_url']
+        if isinstance(exc, RateLimitExhausted):
+            _with_retry_after(result, exc)
+    except AuthenticationFailed:
+        result = failure_result(AUTH_FAILURE)
     except (ValueError, requests.RequestException):
-        result = failure_result('GitHub request failed or returned invalid JSON. Check connectivity and retry.')
-    return redact_result(result, secrets)
+        result = failure_result(_TRANSPORT_FAILURE)
+    return redact_result(result, (*handed.tokens, *secrets))
+
+
+def graphql_result(
+    credential: Credential,
+    query: str,
+    variables: dict | None = None,
+    operation_name: str | None = None,
+    *,
+    retry: RetryPolicy | None = None,
+    max_bytes: int = DEFAULT_GRAPHQL_MAX_BYTES,
+    secrets: tuple[str, ...] = (),
+) -> dict:
+    """POST a GraphQL document and return GitHub's ``data`` and ``errors`` in the envelope.
+
+    GraphQL errors arrive with HTTP 200 and are returned in ``data.errors``, never
+    raised. A non-2xx answer, or a rate limit that outlasts the retry policy, is a
+    failure result carrying any GraphQL ``errors`` GitHub sent. A JSON answer of
+    another shape keeps its status and counters; only a body that is not JSON has
+    ``status: None``. The body is streamed, and reading stops once it passes
+    ``max_bytes`` decoded bytes; that answer becomes an error naming the cap.
+    """
+    payload: dict = {'query': query}
+    if variables is not None:
+        payload['variables'] = variables
+    if operation_name is not None:
+        payload['operationName'] = operation_name
+    handed = _Handed(credential)
+    try:
+        resp, content = request_with_backoff(
+            handed, 'POST', '/graphql', body=payload, retry=retry, max_bytes=max_bytes, graphql=True
+        )
+    except RateLimitExhausted as exc:
+        error = _graphql_error(exc.status_code, exc.headers, exc.body, (*handed.tokens, *secrets))
+        result = _with_retry_after(error, exc)
+    except AuthenticationFailed:
+        result = failure_result(AUTH_FAILURE)
+    except (ValueError, requests.RequestException):
+        result = failure_result(_TRANSPORT_FAILURE)
+    else:
+        try:
+            body, is_json = (json.loads(content), True) if content is not None else (None, False)
+        except ValueError:
+            body, is_json = None, False
+        if content is None:
+            result = failure_result(
+                f'The GraphQL response is larger than graphqlMaxResponseBytes ({max_bytes} bytes). Select '
+                'fewer fields or a smaller page, or raise the cap in the node configuration.',
+                None,
+                resp.headers,
+            )
+        elif not resp.ok:
+            result = _graphql_error(resp.status_code, resp.headers, body, (*handed.tokens, *secrets))
+        elif isinstance(body, dict) and ('data' in body or 'errors' in body):
+            result = envelope(resp.status_code, resp.headers, {'data': body.get('data'), 'errors': body.get('errors')})
+            result['next_page'] = None
+        elif not is_json:
+            result = failure_result(_TRANSPORT_FAILURE)
+        else:
+            # JSON of the wrong shape: keep the status and counters, and GitHub's message if any.
+            result = shape_failure(envelope(resp.status_code, resp.headers, None), 'a JSON object with data or errors')
+            if isinstance(body, dict) and isinstance(body.get('message'), str):
+                result['message'] = _error_message(resp.status_code, body, (*handed.tokens, *secrets))
+                documentation_url = body.get('documentation_url')
+                result['documentation_url'] = documentation_url if isinstance(documentation_url, str) else None
+    return redact_result(result, (*handed.tokens, *secrets))
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ plain python, without ``engLib``, it is skipped.
 
 import base64
 import importlib.util
+import io
 import json
 import sys
 from pathlib import Path
@@ -24,6 +25,8 @@ import requests
 pytest.importorskip('engLib', reason='Run with engine -m pytest for native tool dispatch')
 from rocketlib import APERR, Ec
 
+_PACKAGE = '_github_reads_engine_test'
+
 
 def json_response(payload, status=200):
     resp = requests.Response()
@@ -35,7 +38,7 @@ def json_response(payload, status=200):
 @pytest.fixture
 def instance(monkeypatch):
     package = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'tool_github'
-    name = '_github_reads_engine_test'
+    name = _PACKAGE
     spec = importlib.util.spec_from_file_location(
         name, package / '__init__.py', submodule_search_locations=[str(package)]
     )
@@ -51,6 +54,9 @@ def instance(monkeypatch):
             get_token=lambda: 'test-token',
             default_repo='owner/repo',
             read_only=True,
+            tools=frozenset(),
+            graphql_max_bytes=module.github_client.DEFAULT_GRAPHQL_MAX_BYTES,
+            retry_policy=module.github_client.RetryPolicy(sleep=Mock()),
         )
         request = Mock()
         monkeypatch.setattr(requests, 'request', request)
@@ -74,6 +80,7 @@ def test_all_new_tools_are_discovered_with_real_schemas(instance):
         'repo_languages',
         'label_list',
         'user_get',
+        'graphql',
         'file_get',
         'repo_get',
         'pr_list',
@@ -191,3 +198,61 @@ def test_legacy_write_still_blocked_in_read_only_mode(instance):
     with pytest.raises(ValueError, match='read-only'):
         inst.invoke({'op': 'tool.invoke', 'tool_name': 'issue_create', 'input': {'title': 'must not be posted'}})
     request.assert_not_called()
+
+
+def _query_tools(inst) -> list[str]:
+    param = {'op': 'tool.query', 'tools': []}
+    with pytest.raises(APERR) as error:
+        inst.invoke(param)
+    assert error.value.ec == Ec.PreventDefault
+    return [tool['name'] for tool in param['tools']]
+
+
+def test_graphql_dispatches_with_json_input(instance):
+    inst, request = instance
+    resp = requests.Response()
+    resp.status_code = 200
+    resp.headers['X-RateLimit-Resource'] = 'graphql'
+    resp.raw = io.BytesIO(json.dumps({'data': {'viewer': {'login': 'reader'}}}).encode())
+    request.return_value = resp
+    args = {'query': 'query($n: Int) { viewer { login } }', 'variables': {'n': 1}}
+    param = {'op': 'tool.invoke', 'tool_name': 'graphql', 'input': json.dumps(args)}
+    inst.invoke(param)
+    assert param['output']['status'] == 200
+    assert param['output']['data'] == {'data': {'viewer': {'login': 'reader'}}, 'errors': None}
+    assert param['output']['rate_limit']['resource'] == 'graphql'
+    assert param['output']['next_page'] is None
+    assert request.call_args.args == ('POST', 'https://api.github.com/graphql')
+    assert request.call_args.kwargs['json'] == args
+
+
+def test_graphql_mutation_refused_in_read_only_mode_through_dispatch(instance):
+    inst, request = instance
+    param = {
+        'op': 'tool.invoke',
+        'tool_name': 'graphql',
+        'input': {'query': 'mutation { addStar { clientMutationId } }'},
+    }
+    inst.invoke(param)
+    assert param['output']['status'] is None
+    assert 'readOnly' in param['output']['message']
+    request.assert_not_called()
+
+
+def test_allowlist_limits_discovery_and_dispatch(instance):
+    inst, request = instance
+    inst.IGlobal.tools = frozenset({'graphql', 'repo_tree', 'label_list'})
+    assert sorted(_query_tools(inst)) == ['graphql', 'label_list', 'repo_tree']
+    # A tool left out of the allowlist is not this node's to run: the engine moves on.
+    with pytest.raises(APERR) as error:
+        inst.invoke({'op': 'tool.invoke', 'tool_name': 'repo_get', 'input': {}})
+    assert error.value.ec == Ec.PreventDefault
+    request.assert_not_called()
+
+
+def test_allowlist_validation_knows_every_discovered_tool(instance):
+    inst, _ = instance
+    discovered = _query_tools(inst)
+    assert len(discovered) == len(set(discovered))
+    # IGlobal checks the allowlist against tool_names(); it must be the engine's own list.
+    assert sys.modules[f'{_PACKAGE}.IInstance'].tool_names() == frozenset(discovered)

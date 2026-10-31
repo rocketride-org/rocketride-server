@@ -23,7 +23,11 @@
 				"privateKey": "",
 				"installationId": "",
 				"defaultRepo": "",
-				"readOnly": false
+				"readOnly": false,
+				"tools": [],
+				"graphqlMaxResponseBytes": 4194304,
+				"rateLimitBudgetSeconds": 60,
+				"rateLimitMaxRetries": 3
 			}
 		}
 	},
@@ -93,13 +97,49 @@
 				[true, "Yes: read only"],
 				[false, "No: allow writes"]
 			]
+		},
+		"github.tools": {
+			"type": "array",
+			"title": "Tools",
+			"description": "Tool names to register, for example graphql, repo_tree, label_list. Only these appear in the schema the agent sees and only these can be called. Leave empty to register every tool. An unknown name stops the pipeline at start with the list of valid names.",
+			"items": { "type": "string" },
+			"uniqueItems": true,
+			"default": [],
+			"optional": true
+		},
+		"github.graphqlMaxResponseBytes": {
+			"type": "integer",
+			"title": "GraphQL response cap (bytes)",
+			"description": "Largest graphql response body the node reads, in bytes after decompression. A larger response returns an error naming this cap instead of the data. Default 4194304 (4 MiB).",
+			"default": 4194304,
+			"minimum": 1024,
+			"maximum": 104857600,
+			"optional": true
+		},
+		"github.rateLimitBudgetSeconds": {
+			"type": "integer",
+			"title": "Rate-limit wait budget (seconds)",
+			"description": "Total time one call of graphql or a repository read (repo_tree, repo_contributors, repo_languages, label_list, user_get) may spend waiting out GitHub rate limits, across every request it makes: a repo_tree walk shares it among its subtree reads. A wait that does not fit is not started, and the call returns the rate-limit error with retry_after. When GitHub names no wait the waits are 60, 120, then 240 seconds, so the default allows one such retry; raise it to allow more. 0 never retries after a rate limit.",
+			"default": 60,
+			"minimum": 0,
+			"maximum": 3600,
+			"optional": true
+		},
+		"github.rateLimitMaxRetries": {
+			"type": "integer",
+			"title": "Rate-limit retries",
+			"description": "Retries of each request after its first attempt when GitHub answers it with a rate limit, within the call's wait budget: 3 retries means up to 4 attempts. 0 never retries.",
+			"default": 3,
+			"minimum": 0,
+			"maximum": 10,
+			"optional": true
 		}
 	},
 	"shape": [
 		{
 			"section": "Pipe",
 			"title": "GitHub",
-			"properties": ["type", "github.authType", "github.defaultRepo", "github.readOnly"]
+			"properties": ["type", "github.authType", "github.defaultRepo", "github.readOnly", "github.tools", "github.graphqlMaxResponseBytes", "github.rateLimitBudgetSeconds", "github.rateLimitMaxRetries"]
 		}
 	]
 }

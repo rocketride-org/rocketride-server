@@ -50,9 +50,14 @@ def node(monkeypatch):
             default_repo='owner/repo',
             read_only=True,
             get_token=Mock(return_value=TOKEN),
+            tools=frozenset(),
+            graphql_max_bytes=github_client.DEFAULT_GRAPHQL_MAX_BYTES,
+            retry_policy=github_client.RetryPolicy(),
         )
         request = Mock()
         monkeypatch.setattr(github_client.requests, 'request', request)
+        # Fail fast instead of sleeping for real; rate-limit tests patch sleep themselves.
+        monkeypatch.setattr(github_client.time, 'sleep', Mock(side_effect=AssertionError('unexpected real sleep')))
         yield inst, request, github_client
 
 
@@ -438,7 +443,10 @@ def test_exhausted_rate_limit_returns_structured_error(node, monkeypatch):
     result = inst.repo_languages({})
     assert result['status'] == 429
     assert 'data' not in result
-    assert request.call_count == 3
+    # The first request plus rateLimitMaxRetries (default 3) retries.
+    assert request.call_count == 4
+    assert result['retry_after'] == 1
+    assert result['rate_limit'] == RATE
 
 
 def test_an_exhausted_rate_limit_error_chains_to_nothing(node, monkeypatch):
@@ -459,10 +467,16 @@ def test_long_retry_after_fails_at_once_with_counters(node, monkeypatch):
     inst, request, client = node
     sleep = Mock()
     monkeypatch.setattr(client.time, 'sleep', sleep)
-    request.return_value = response({'message': 'secondary limit'}, 403, {**HEADERS, 'Retry-After': '60'})
+    # One second past the default rateLimitBudgetSeconds (60): never started.
+    request.return_value = response({'message': 'secondary limit'}, 403, {**HEADERS, 'Retry-After': '61'})
     result = inst.repo_languages({})
     assert result['status'] == 403
     assert result['rate_limit'] == RATE
+    assert result['retry_after'] == 61
+    # GitHub's message has no final period, so the reason is joined with one.
+    assert result['message'] == (
+        'secondary limit. Not retried: GitHub asks to wait 61 s, more than the 60 s left of rateLimitBudgetSeconds.'
+    )
     assert request.call_count == 1
     sleep.assert_not_called()
 
@@ -491,6 +505,9 @@ def routed(responses: dict):
         key = (url.rsplit('/', 1)[1], (kwargs.get('params') or {}).get('recursive') == '1')
         assert key in responses, f'unexpected request {key}'
         answer = responses[key]
+        if isinstance(answer, list):
+            # Successive answers for the same request, as a retry sees them.
+            answer = answer.pop(0)
         if isinstance(answer, Exception):
             raise answer
         return answer
@@ -846,6 +863,80 @@ def test_tree_walk_stopped_early_keeps_the_initial_listing(node):
     assert (
         result['message'] == 'Tree walk stopped at "src" after 3 requests: GitHub API 404: Not Found; data is partial.'
     )
+
+
+def test_tree_walk_stopped_by_a_rate_limit_keeps_retry_after_and_partial_data(node):
+    inst, request, _ = node
+    # One second past the default rateLimitBudgetSeconds (60): the wait is never started.
+    request.side_effect = routed(
+        {
+            ('main', True): tree([{'path': 'first-page.txt', 'type': 'blob'}], truncated=True),
+            ('root-sha', False): tree([{'path': 'src', 'type': 'tree', 'sha': 'subtree'}]),
+            ('subtree', True): response({'message': 'secondary limit'}, 403, {**HEADERS, 'Retry-After': '61'}),
+        }
+    )
+    result = inst.repo_tree({'ref': 'main', 'walk': True})
+    assert result['status'] == 403
+    assert result['retry_after'] == 61
+    assert result['message'].startswith('Tree walk stopped at "src" after 2 requests: GitHub API 403: secondary limit')
+    assert result['message'].endswith('; data is partial.')
+    assert result['data']['complete'] is False
+    assert [entry['path'] for entry in result['data']['tree']] == ['first-page.txt', 'src']
+    assert request.call_count == 3
+
+
+def test_tree_walk_waits_out_a_rate_limit_and_carries_on(node):
+    inst, request, client = node
+    slept = []
+    inst.IGlobal.retry_policy = client.RetryPolicy(sleep=slept.append, clock=lambda: 1_800_000_000.0)
+    request.side_effect = routed(
+        {
+            ('main', True): tree([], truncated=True),
+            ('root-sha', False): tree([{'path': 'src', 'type': 'tree', 'sha': 'subtree'}]),
+            ('subtree', True): [
+                response({'message': 'secondary limit'}, 403, {**HEADERS, 'Retry-After': '5'}),
+                tree([{'path': 'a.py', 'type': 'blob'}], sha='subtree'),
+            ],
+        }
+    )
+    result = inst.repo_tree({'ref': 'main', 'walk': True})
+    assert slept == [5.0]
+    assert result['status'] == 200
+    assert result['data']['complete'] is True
+    assert 'retry_after' not in result
+    assert 'message' not in result
+    assert [entry['path'] for entry in result['data']['tree']] == ['src', 'src/a.py']
+    assert requested(request) == [('main', True), ('root-sha', False), ('subtree', True), ('subtree', True)]
+
+
+def test_tree_walk_shares_one_wait_budget_among_its_reads(node):
+    inst, request, client = node
+    slept = []
+    inst.IGlobal.retry_policy = client.RetryPolicy(sleep=slept.append, clock=lambda: 1_800_000_000.0)
+
+    def limited_then(sha, path):
+        return [
+            response({'message': 'secondary limit'}, 403, {**HEADERS, 'Retry-After': '40'}),
+            tree([{'path': path, 'type': 'blob'}], sha=sha),
+        ]
+
+    request.side_effect = routed(
+        {
+            ('main', True): tree([], truncated=True),
+            ('root-sha', False): tree(
+                [{'path': 'a', 'type': 'tree', 'sha': 'a-sha'}, {'path': 'b', 'type': 'tree', 'sha': 'b-sha'}]
+            ),
+            ('a-sha', True): limited_then('a-sha', 'a.txt'),
+            ('b-sha', True): limited_then('b-sha', 'b.txt'),
+        }
+    )
+    result = inst.repo_tree({'ref': 'main', 'walk': True})
+    # The first read waits 40 s of the call's 60; the second read's 40 s no longer fit.
+    assert slept == [40.0]
+    assert result['status'] == 403
+    assert result['retry_after'] == 40
+    assert result['data']['complete'] is False
+    assert 'more than the 20 s left of rateLimitBudgetSeconds' in result['message']
 
 
 def test_tree_walk_failure_without_response_keeps_last_counters(node):
