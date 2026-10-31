@@ -102,6 +102,7 @@ test binaries, not of the engine executable.
 | `--trace LEVELS`          | Enable trace logging (e.g. `Job`, `Service`, `All`) |
 | `--log.file PATH`         | Log to file instead of stdout                       |
 | `--log.dateTimeFormat`    | Include datetime in log output                      |
+| `--log.decorationColor`   | `Green`, `Red`, `Blue`, `Cyan`, `Yellow` or `Reset` |
 | `--log.includeDateTime`   | Include date/time in log lines                      |
 | `--log.includeThreadId`   | Include thread ID in log lines                      |
 | `--log.includeThreadName` | Include thread name in log lines                    |

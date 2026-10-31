@@ -98,6 +98,19 @@ inline void __toString(Color color, BufferT &buff,
     if (!opts.noColors()) buff << colorCode(color);
 }
 
+// One of the colorName() names, in any case
+template <typename BufferT>
+inline Error __fromString(Color &color, const BufferT &buff) noexcept {
+    iText name = buff.toString();
+    for (auto c : Color{}) {
+        if (colorName(c) == name) {
+            color = c;
+            return {};
+        }
+    }
+    return APERR(Ec::StringParse, "Invalid color name", name);
+}
+
 template <typename JsonT>
 inline Error __fromJson(Color &color, const JsonT &val) noexcept {
     if (!val.isString())

@@ -27,4 +27,9 @@ TEST_CASE("log::Colors") {
     SECTION("LOG") {
         for (auto c : Color{}) LOG(Test, c, colorName(c));
     }
+
+    SECTION("fromString") {
+        REQUIRE(*_fsc<Color>("rEd") == Color::Red);
+        REQUIRE(_fsc<Color>("Magenta").hasCcode());
+    }
 }
