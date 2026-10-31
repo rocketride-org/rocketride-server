@@ -259,12 +259,40 @@ class AgentHostServices:
             self._invoker.instance.invoke(param, component_id=self._node_id)
             return getattr(param, 'output', None) or {}
 
+    class Ledger:
+        """Ledger host interface backed by IInvokeTool operations."""
+
+        def __init__(self, invoker, node_id: str) -> None:
+            """Create a Ledger host service wrapper bound to an engine invoker."""
+            self._invoker = invoker
+            self._node_id = node_id
+
+        def ingest(self, content: str, tags: List[str], intent_id: str) -> Dict[str, Any]:
+            param = IInvokeTool.Invoke(
+                tool_name='smart_ingest',
+                input={'content': content, 'tags': tags, 'intent_id': intent_id},
+            )
+            self._invoker.instance.invoke(param, component_id=self._node_id)
+            return getattr(param, 'output', None) or {}
+
+        def recall(self, handle: str) -> Dict[str, Any]:
+            param = IInvokeTool.Invoke(
+                tool_name='recall',
+                input={'handle': handle},
+            )
+            self._invoker.instance.invoke(param, component_id=self._node_id)
+            return getattr(param, 'output', None) or {}
+
     def __init__(self, invoker):
         """Create host service wrappers bound to an engine invoker."""
         self.llm = AgentHostServices.LLM(invoker)
         self.tools = AgentHostServices.Tools(invoker)
         nodes = invoker.instance.getControllerNodeIds('memory')
         self.memory: Optional[AgentHostServices.Memory] = AgentHostServices.Memory(invoker, nodes[0]) if nodes else None
+        ledger_nodes = invoker.instance.getControllerNodeIds('ledger')
+        self.ledger: Optional[AgentHostServices.Ledger] = (
+            AgentHostServices.Ledger(invoker, ledger_nodes[0]) if ledger_nodes else None
+        )
 
 
 # ============================================================================
@@ -347,3 +375,4 @@ class AgentContext:
     # compare=False keeps it out of the generated __eq__/__hash__ so the frozen
     # context stays hashable (a mutable list would otherwise make __hash__ raise).
     invoked_tools: List[str] = field(default_factory=list, compare=False)
+    ledger: Optional['AgentHostServices.Ledger'] = None
