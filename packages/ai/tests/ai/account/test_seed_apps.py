@@ -56,8 +56,9 @@ def _write(root, files):
 class _Registry:
     """Just enough of the account for the seeder: rows newest-first, publish captured."""
 
-    def __init__(self, rows=None):
+    def __init__(self, rows=None, public=None):
         self.rows = list(rows or [])
+        self.public = public
         self.published = []
         self.build_stamps = []
         self.bindings = []
@@ -78,18 +79,18 @@ class _Registry:
         return {}
 
     async def publish_get(self, org_id, kind, app_id, audience):
-        return None
+        return None if self.public is None else {'version': self.public, 'state': 'enabled'}
 
     async def publish_set(self, org_id, kind, app_id, audience, version, snapshot, actor):
         self.bindings.append(version)
         return {}
 
 
-def _seed_row(digest=None, comment=SEED_COMMENT, status='ok'):
+def _seed_row(digest=None, comment=SEED_COMMENT, status='ok', version=1):
     build = {'status': status, 'seeded': True}
     if digest is not None:
         build['bundleSha256'] = digest
-    return {'version': 1, 'comment': comment, 'state': 'ready', 'metadata': {'build': build}}
+    return {'version': version, 'comment': comment, 'state': 'ready', 'metadata': {'build': build}}
 
 
 # =============================================================================
@@ -253,6 +254,28 @@ async def test_only_the_newest_seed_row_counts_and_user_deploys_are_ignored(stat
     )
 
     assert await bundle_changed(registry, 'org', ENTRY) is False
+
+
+@pytest.mark.asyncio
+async def test_a_live_direct_deploy_is_not_replaced_by_a_changed_bundle(static_apps):
+    _write(static_apps / APP_ID, {'remoteEntry.js': b'new build'})
+    registry = _Registry(
+        [_seed_row(comment='deployed with rocketride app deploy', version=2), _seed_row('0' * 64, version=1)],
+        public=2,
+    )
+
+    assert await bundle_changed(registry, 'org', ENTRY) is False
+
+
+@pytest.mark.asyncio
+async def test_a_newer_direct_deploy_that_is_not_live_does_not_block_the_reseed(static_apps):
+    _write(static_apps / APP_ID, {'remoteEntry.js': b'new build'})
+    registry = _Registry(
+        [_seed_row(comment='deployed with rocketride app deploy', version=2), _seed_row('0' * 64, version=1)],
+        public=1,
+    )
+
+    assert await bundle_changed(registry, 'org', ENTRY) is True
 
 
 @pytest.mark.asyncio

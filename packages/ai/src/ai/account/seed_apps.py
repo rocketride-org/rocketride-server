@@ -352,8 +352,10 @@ async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bo
     and was stamped without one, so the next deploy retries the seed.
 
     Returns False when there is no local bundle (nothing to seed from), no
-    rail rows (the plain seed handles a fresh app), or no seed rows (a user
-    deployed the id first, and it is left alone).
+    rail rows (the plain seed handles a fresh app), no seed rows (a user
+    deployed the id first, and it is left alone), or when the public audience
+    serves a direct deploy rather than a seed: a release must not replace what
+    someone deployed on purpose. A manual ``--reseed`` still does.
     """
     app_id = str(entry['id'])
     local = bundle_digest(app_id)
@@ -364,6 +366,12 @@ async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bo
     seeds = [row for row in rows or [] if row.get('comment') == SEED_COMMENT]
     if not seeds:
         return False
+    public = await account.publish_get(org_id, 'app', app_id, PUBLIC_AUDIENCE)
+    if public is not None:
+        bound = int(public.get('version', 0))
+        live = next((row for row in rows if int(row.get('version', 0)) == bound), None)
+        if live is not None and live.get('comment') != SEED_COMMENT:
+            return False
     metadata = seeds[0].get('metadata') if isinstance(seeds[0].get('metadata'), dict) else {}
     build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
     return build.get('bundleSha256') != local
