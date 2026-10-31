@@ -484,7 +484,7 @@ class DAPBase:
             return response(body)
         else:
             # Get the specifics about the error
-            msg = message.get('message', 'Unknown error')
+            msg = message.get('message') or 'Unknown error'
             trace = message.get('trace', {})
             file = trace.get('file', None)
             lineno = trace.get('lineno', None)

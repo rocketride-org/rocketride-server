@@ -145,4 +145,4 @@ class PingMixin(DAPClient):
             - Failed pings may indicate network, server, or authentication issues
             - Regular pings can detect connection problems early
         """
-        await self.call('rrext_ping')
+        await self.call('rrext_ping', token=token)

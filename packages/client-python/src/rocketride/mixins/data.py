@@ -54,6 +54,7 @@ Usage:
 import os
 import time
 import asyncio
+import inspect
 import mimetypes
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -643,7 +644,7 @@ class DataMixin(DAPClient):
 
             # Validate file exists
             if not os.path.isfile(filepath):
-                raise ValueError(f'File not found: {filepath}')
+                raise FileNotFoundError(f'File not found: {filepath}')
 
             normalized_files.append((filepath, objinfo, mimetype))
 
@@ -660,7 +661,9 @@ class DataMixin(DAPClient):
                 }
 
                 if self._caller_on_event:
-                    await self._caller_on_event(event_message)
+                    result = self._caller_on_event(event_message)
+                    if inspect.isawaitable(result):
+                        await result
 
             except Exception as e:
                 self.debug_message(f'Error sending upload event: {e}')
