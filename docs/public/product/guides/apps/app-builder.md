@@ -26,8 +26,9 @@ the same loop runs from a terminal or CI.
   workspace root.
 - A developer id for your organization. Every app id is
   `<developerId>.<name>`. Your organization claims its developer id once,
-  on the Deploy tab (lowercase letters and underscores, starting with a
-  letter), and can then deploy
+  on the Deploy tab or with `rocketride app developer register <id>`
+  (lowercase letters and underscores, starting with a letter; an org
+  admin's step, and permanent), and can then deploy
   only apps inside that namespace. Until the prefix of your app's id
   matches, the Deploy tab is read-only with a banner; the fix is to rename
   the id in `package.json`. Design and Package always work.

@@ -115,7 +115,10 @@ defaults to the `ROCKETRIDE_DEPLOY_URI` / `ROCKETRIDE_DEPLOY_APIKEY` pair
 (`rocketride login` writes it) and refuses to run when no deployment target
 is configured. `app create` reads the development connection
 (`ROCKETRIDE_URI` / `ROCKETRIDE_APIKEY`) for vendoring and for the
-developer id; `app verify` needs no connection.
+developer id; `app verify` needs no connection. Only `create`, `deploy`
+and `verify` exist in both CLIs so far: the other app verbs, `app
+developer status` and `app developer register` among them, are in the npm
+`rocketride` only, so from a Python install use the SDK calls instead.
 
 `[app]` takes an app folder, an app id (`personal.clock`), its name part
 (`clock`), its folder name (`clock-ui`), or nothing — the current
