@@ -36,10 +36,13 @@ engine version follow the version the test database reports. Container:
     # image: apache/age:release_PG16_1.5.0 + pgvector v0.8.0 (see the layer README)
 
 Configuration via environment variables:
-    RR_TEST_AGE_DSN — libpq URL of the AGE test database
-                      (default: postgresql://rruser:rrpass@localhost:55433/rrtenant)
+    RR_TEST_AGE_DSN     — libpq URL of the AGE test database, for example
+                          postgresql://rruser:rrpass@localhost:55433/rrtenant
+    RR_REQUIRE_DB_TESTS — when set, a missing or unreachable database fails
+                          instead of skipping
 
-Skips cleanly when the database is unreachable.
+Runs in ``nodes:test``. Skips when RR_TEST_AGE_DSN is not set or the database
+is unreachable.
 """
 
 from __future__ import annotations
@@ -61,7 +64,9 @@ _UTILS_DIR = _AI_SRC / 'ai' / 'common' / 'utils'
 _RRDB_PATH = _AI_SRC / 'ai' / 'common' / 'rocketride_db.py'
 _NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_graph'
 
-TEST_DSN = os.environ.get('RR_TEST_AGE_DSN', 'postgresql://rruser:rrpass@localhost:55433/rrtenant')
+# No default address: a plain nodes:test run must not reach a database the
+# developer did not point it at.
+TEST_DSN = os.environ.get('RR_TEST_AGE_DSN', '')
 GRAPH = 'rr_graph_e2e'
 
 # RR_REQUIRE_DB_TESTS (set by CI once its DB containers are healthy) turns
@@ -78,6 +83,8 @@ else:
 
 
 def _db_reachable() -> bool:
+    if not TEST_DSN:
+        return False
     try:
         conn = psycopg2.connect(TEST_DSN, connect_timeout=3)
         conn.close()
@@ -86,14 +93,26 @@ def _db_reachable() -> bool:
         return False
 
 
-if _DB_TESTS_REQUIRED and not _db_reachable():
-    pytest.fail(f'RR_REQUIRE_DB_TESTS is set but the AGE test database is not reachable at {TEST_DSN}', pytrace=False)
+# Names the variable, never its value: the DSN may carry a password.
+_DB_MISSING = (
+    'RocketRide AGE test database in RR_TEST_AGE_DSN is not reachable' if TEST_DSN else 'RR_TEST_AGE_DSN is not set'
+)
 
-pytestmark = pytest.mark.skipif(not _db_reachable(), reason=f'RocketRide AGE test database not reachable at {TEST_DSN}')
+if _DB_TESTS_REQUIRED and not _db_reachable():
+    pytest.fail(f'RR_REQUIRE_DB_TESTS is set but: {_DB_MISSING}', pytrace=False)
+
+# Every test drops and recreates the same graph, so one xdist worker runs the
+# whole module (nodes:test passes --dist loadgroup).
+pytestmark = [
+    pytest.mark.skipif(not _db_reachable(), reason=_DB_MISSING),
+    pytest.mark.xdist_group('rocketride_graph_live'),
+]
 
 
 def _server_age_version() -> str | None:
     """The AGE version the test database reports, or None when it has no AGE."""
+    if not TEST_DSN:
+        return None
     try:
         conn = psycopg2.connect(TEST_DSN, connect_timeout=3)
     except Exception:
@@ -131,8 +150,35 @@ def _load_from_path(name: str, path: Path, *, is_package: bool = False):
     return module
 
 
+# Modules rr_env loads from the source tree against its stubs. Another test file
+# in the same process may already have imported the real ones, bound to the
+# engine's Config; the graph package's relative imports would reuse that copy.
+_OWN_MODULE_PREFIXES = ('ai.common.graph', 'nodes.rocketride_graph')
+_OWN_MODULES = ('ai.common.rocketride_db', 'ai.common.config_utils', 'ai.common.tool_args')
+
+
+def _own_module(name: str) -> bool:
+    return name in _OWN_MODULES or any(name == p or name.startswith(p + '.') for p in _OWN_MODULE_PREFIXES)
+
+
 @pytest.fixture()
-def rr_env(monkeypatch):
+def _own_modules_isolated():
+    """Hide cached copies of the modules rr_env loads; restore them after the test.
+
+    The test's own copies are dropped at teardown, so later tests in the same
+    process never get a module bound to these stubs.
+    """
+    saved = {name: module for name, module in sys.modules.items() if _own_module(name)}
+    for name in saved:
+        del sys.modules[name]
+    yield
+    for name in [name for name in sys.modules if _own_module(name)]:
+        del sys.modules[name]
+    sys.modules.update(saved)
+
+
+@pytest.fixture()
+def rr_env(_own_modules_isolated, monkeypatch):
     """Stub the engine surface, load real graph base + age layer + node."""
     warnings: list[str] = []
 
@@ -187,12 +233,12 @@ def rr_env(monkeypatch):
         setattr(utils, fn, getattr(tool_args, fn))
     monkeypatch.setitem(sys.modules, 'ai.common.utils', utils)
 
-    rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
-    monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
+    # The modules below are registered in sys.modules directly:
+    # _own_modules_isolated removes them after the test.
+    _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
 
     # Real graph base package (brings ai.common.graph.age with it).
-    graph_pkg = _load_from_path('ai.common.graph', _GRAPH_PKG / '__init__.py', is_package=True)
-    monkeypatch.setitem(sys.modules, 'ai.common.graph', graph_pkg)
+    _load_from_path('ai.common.graph', _GRAPH_PKG / '__init__.py', is_package=True)
 
     # Deliver the DSN the way the task engine does: nodes never resolve one.
     monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
@@ -201,8 +247,7 @@ def rr_env(monkeypatch):
     pkg = types.ModuleType('nodes.rocketride_graph')
     pkg.__path__ = [str(_NODE_DIR)]
     pkg.IGlobal = iglobal
-    monkeypatch.setitem(sys.modules, 'nodes.rocketride_graph', pkg)
-    monkeypatch.setitem(sys.modules, 'nodes.rocketride_graph.IGlobal', iglobal)
+    sys.modules['nodes.rocketride_graph'] = pkg
     iinstance = _load_from_path('nodes.rocketride_graph.IInstance', _NODE_DIR / 'IInstance.py')
 
     return types.SimpleNamespace(iglobal_cls=iglobal.IGlobal, iinstance_cls=iinstance.IInstance, warnings=warnings)
