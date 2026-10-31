@@ -25,6 +25,7 @@
 import { TransportBase } from './TransportBase.js';
 import { DAPMessage } from '../types/index.js';
 import { CONST_DEFAULT_SERVICE, CONST_SOCKET_TIMEOUT, CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT } from '../constants.js';
+import { ConnectionException } from '../exceptions/index.js';
 
 let NodeWebSocket: typeof import('ws') | undefined;
 let NodeWebSocketPromise: Promise<typeof import('ws') | undefined> | null = null;
@@ -101,7 +102,7 @@ export class TransportWebSocket extends TransportBase {
 
 		const epoch = this._epoch;
 		if (epoch) {
-			this._invalidateEpoch(epoch, new Error('Connection attempt superseded by URI change'));
+			this._invalidateEpoch(epoch, new ConnectionException({ message: 'Connection attempt superseded by URI change' }));
 			this._trackCleanup(this._cleanupEpoch(epoch));
 		}
 		this._uri = uri;
@@ -117,7 +118,7 @@ export class TransportWebSocket extends TransportBase {
 		}
 
 		if (current) {
-			this._invalidateEpoch(current, new Error('Connection attempt superseded'));
+			this._invalidateEpoch(current, new ConnectionException({ message: 'Connection attempt superseded' }));
 			this._trackCleanup(this._cleanupEpoch(current));
 		}
 
@@ -156,7 +157,7 @@ export class TransportWebSocket extends TransportBase {
 	private async _openEpoch(epoch: ConnectionEpoch, timeout?: number): Promise<void> {
 		const effectiveTimeout = timeout ?? CONST_SOCKET_TIMEOUT * 1000;
 		epoch.timeout = setTimeout(() => {
-			void this._handlePreOpenFailure(epoch, new Error(`Connection timeout after ${effectiveTimeout}ms`));
+			void this._handlePreOpenFailure(epoch, new ConnectionException({ message: `Connection timeout after ${effectiveTimeout}ms` }));
 		}, effectiveTimeout);
 		this._connectionTimeout = epoch.timeout;
 
@@ -186,7 +187,7 @@ export class TransportWebSocket extends TransportBase {
 			this._wireSocket(epoch, socket);
 		} catch (error) {
 			const setupError = error instanceof Error ? error : new Error(String(error));
-			await this._handlePreOpenFailure(epoch, new Error(`Connection setup failed: ${setupError.message}`));
+			await this._handlePreOpenFailure(epoch, new ConnectionException({ message: `Connection setup failed: ${setupError.message}`, cause: setupError }));
 		}
 	}
 
@@ -196,7 +197,7 @@ export class TransportWebSocket extends TransportBase {
 			browserSocket.onopen = () => this._handleOpen(epoch, socket);
 			browserSocket.onmessage = (event: MessageEvent) => this._handleMessage(epoch, socket, event.data);
 			browserSocket.onerror = () => {
-				void this._handleSocketFailure(epoch, socket, new Error(`Failed to connect to ${epoch.uri}`));
+				void this._handleSocketFailure(epoch, socket, new ConnectionException({ message: `Failed to connect to ${epoch.uri}` }));
 			};
 			browserSocket.onclose = (event: CloseEvent) => {
 				const wasClean = event.code === 1000;
@@ -302,9 +303,10 @@ export class TransportWebSocket extends TransportBase {
 		if (!this._ownsSocket(epoch, socket)) return;
 
 		if (!epoch.established) {
+			const message = epoch.isBrowser ? `Failed to connect to ${epoch.uri}` : `Failed to connect to ${epoch.uri}: ${error.message}`;
 			await this._handlePreOpenFailure(
 				epoch,
-				new Error(epoch.isBrowser ? `Failed to connect to ${epoch.uri}` : `Failed to connect to ${epoch.uri}: ${error.message}`),
+				new ConnectionException({ message, cause: error }),
 			);
 			return;
 		}
@@ -322,7 +324,7 @@ export class TransportWebSocket extends TransportBase {
 		if (!this._ownsSocket(epoch, socket)) return;
 
 		if (!epoch.established) {
-			await this._handlePreOpenFailure(epoch, new Error(`Connection failed: ${reason} (code: ${code})`));
+			await this._handlePreOpenFailure(epoch, new ConnectionException({ message: `Connection failed: ${reason} (code: ${code})` }));
 			return;
 		}
 
@@ -397,7 +399,7 @@ export class TransportWebSocket extends TransportBase {
 		epoch.draining = true;
 		this._clearTimeout(epoch);
 		this._stopPingInterval(epoch);
-		if (!epoch.established) this._rejectEpoch(epoch, error ?? new Error('Connection attempt cancelled'));
+		if (!epoch.established) this._rejectEpoch(epoch, error ?? new ConnectionException({ message: 'Connection attempt cancelled' }));
 
 		if (this._epoch === epoch) {
 			this._epoch = undefined;
@@ -563,7 +565,7 @@ export class TransportWebSocket extends TransportBase {
 		// is invalidated first, and DAP ownership checks suppress late publication.
 		const activeMessageTasks = new Set(epoch.messageTasks);
 
-		this._invalidateEpoch(epoch, new Error('Connection attempt cancelled by disconnect'));
+		this._invalidateEpoch(epoch, new ConnectionException({ message: 'Connection attempt cancelled by disconnect' }));
 		const operation = this._notifyAndCleanup(
 			epoch,
 			'Disconnected by request',

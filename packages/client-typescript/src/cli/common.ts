@@ -226,16 +226,44 @@ export function loadPipelineConfig(pipelineFile: string): PipelineConfig {
 		throw new Error(`Pipeline file not found: ${pipelineFile}`);
 	}
 	const content = fs.readFileSync(pipelineFile, 'utf-8');
-	let parsed: PipelineConfig & { pipeline?: PipelineConfig };
+	let parsed: unknown;
 	try {
 		parsed = JSON.parse(content);
 	} catch (error) {
 		throw new Error(`Invalid JSON format in ${pipelineFile}: ${error}`);
 	}
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+		throw new Error(`Invalid pipeline configuration in ${pipelineFile}: expected a JSON object`);
+	}
+	let config: PipelineConfig;
+	if ('pipeline' in (parsed as Record<string, unknown>)) {
+		const wrapperContent = (parsed as Record<string, unknown>).pipeline;
+		if (!wrapperContent || typeof wrapperContent !== 'object' || Array.isArray(wrapperContent)) {
+			throw new Error(`Invalid pipeline wrapper in ${pipelineFile}: wrapper contents are missing or invalid`);
+		}
+		config = wrapperContent as PipelineConfig;
+	} else {
+		config = parsed as PipelineConfig;
+	}
+	const rawConfig = config as unknown as Record<string, unknown>;
+	const components = Array.isArray(rawConfig.components) ? rawConfig.components : [];
+	const hasSourceProperty = typeof rawConfig.source === 'string' && rawConfig.source.trim().length > 0;
+	const sourceMatchesComponent = hasSourceProperty && components.some((c: unknown) => {
+		return c && typeof c === 'object' && (c as Record<string, unknown>).id === rawConfig.source;
+	});
+	const hasImpliedSource = components.some((c: unknown) => {
+		if (!c || typeof c !== 'object') return false;
+		const comp = c as Record<string, unknown>;
+		const compConfig = comp.config as Record<string, unknown> | undefined;
+		return compConfig?.mode === 'Source';
+	});
+	if (!sourceMatchesComponent && !hasImpliedSource) {
+		throw new Error(`Pipeline in ${pipelineFile} does not have a source component defined`);
+	}
 	// .pipe files wrap the config in { "pipeline": { ... } } — unwrap it so
 	// callers hand the server flat pipeline fields, exactly as
 	// RocketRideClient.use({ filepath }) does.
-	return parsed?.pipeline ?? parsed;
+	return config;
 }
 
 /**

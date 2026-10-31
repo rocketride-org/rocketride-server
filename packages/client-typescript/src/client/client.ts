@@ -702,12 +702,36 @@ export class RocketRideClient extends DAPClient {
 		return this._lifecycleOperation === operation && this._lifecycleGeneration === operation.generation;
 	}
 
+	/**
+	 * Resolves an operation failure to a terminal error, preserving specific
+	 * cancellation, authentication, and connection failure causes.
+	 *
+	 * When the operation already recorded an unexpected disconnect error without
+	 * a cause, the caught fallback error is preserved as its cause.
+	 *
+	 * @param operation - The lifecycle operation that failed.
+	 * @param fallback - The error caught during operation execution.
+	 * @returns The resolved terminal error.
+	 */
 	private _operationTerminalError(operation: LoginLifecycleOperation, fallback?: unknown): unknown {
 		if (operation.cancellationReason) {
 			return new LoginAttemptCancelledError(operation.cancellationReason);
 		}
-		if (operation.unexpectedDisconnectError) return operation.unexpectedDisconnectError;
-		return fallback instanceof Error ? fallback : new Error(String(fallback ?? 'Connection failed'));
+		if (operation.unexpectedDisconnectError) {
+			const recorded = operation.unexpectedDisconnectError;
+			if (recorded.cause === undefined && fallback !== undefined && fallback !== recorded) {
+				recorded.cause = fallback;
+			}
+			return recorded;
+		}
+		if (fallback instanceof LoginAttemptCancelledError || fallback instanceof AuthenticationException || fallback instanceof ConnectionException) {
+			return fallback;
+		}
+		if (fallback instanceof TypeError || fallback instanceof RangeError || fallback instanceof SyntaxError) {
+			return fallback;
+		}
+		const message = fallback instanceof Error ? fallback.message : String(fallback ?? 'Connection failed');
+		return new ConnectionException({ message, cause: fallback });
 	}
 
 	private _assertCurrentOperation(operation: LoginLifecycleOperation): void {
@@ -740,6 +764,13 @@ export class RocketRideClient extends DAPClient {
 		return true;
 	}
 
+	/**
+	 * Records an unexpected transport disconnection on an active login operation.
+	 *
+	 * @param operation - The lifecycle operation encountering the disconnection.
+	 * @param reason - Optional description of why the connection was lost.
+	 * @returns The recorded ConnectionException, or undefined if the operation already settled.
+	 */
 	private _recordUnexpectedDisconnect(operation: LoginLifecycleOperation, reason?: string): ConnectionException | undefined {
 		if (operation.settled || operation.cancellationReason || operation.unexpectedDisconnectError) {
 			return operation.unexpectedDisconnectError;
@@ -876,6 +907,18 @@ export class RocketRideClient extends DAPClient {
 			this._rejectLifecycleOperation(operation, error);
 			if (error instanceof AuthenticationException && operation.priority === 'background' && this._isCurrentOperation(operation)) {
 				await this.onConnectError(error);
+			} else if (operation.priority === 'foreground' && this._persist && !(error instanceof AuthenticationException) && !(error instanceof LoginAttemptCancelledError) && this._isCurrentOperation(operation) && !operation.cancellationReason) {
+				this._clearReconnectTimer();
+				try {
+					await this.onConnectError(error instanceof ConnectionException ? error : new ConnectionException({ message: (error as Error)?.message || String(error), cause: error }));
+				} catch (cbError) {
+					this.debugMessage(`onConnectError callback threw: ${cbError}`);
+				}
+				if (this._isCurrentOperation(operation) && !operation.cancellationReason && this._persist) {
+					this._clearReconnectTimer();
+					this._currentReconnectDelay = Math.min(this._currentReconnectDelay + 250, 15_000);
+					this._scheduleReconnect(operation.generation);
+				}
 			}
 		}
 	}
@@ -1380,14 +1423,14 @@ export class RocketRideClient extends DAPClient {
 	 * that use the `{ "pipeline": { ... } }` wrapper format. If the file contains a top-level
 	 * `pipeline` key, the inner object is extracted; otherwise the file content is used as-is.
 	 *
-	 * When passing a `pipeline` object directly, provide a flat `PipelineConfig` with
-	 * `components`, `source`, and `project_id` at the top level — do NOT wrap it in
-	 * `{ pipeline: { ... } }`.
+	 * When passing a `pipeline` object directly, provide a `PipelineConfig` or a wrapped
+	 * `{ pipeline: PipelineConfig }` object. If the object contains a top-level `pipeline`
+	 * key, the inner configuration is automatically extracted.
 	 *
 	 * @param options - Pipeline execution options
 	 * @param options.token - Custom token for the pipeline (auto-generated if not provided)
 	 * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
-	 * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
+	 * @param options.pipeline - PipelineConfig object or wrapped { pipeline: PipelineConfig } (alternative to filepath)
 	 * @param options.source - Override pipeline source
 	 * @param options.threads - Number of threads for execution (omit to let the server decide)
 	 * @param options.useExisting - Use existing pipeline instance
@@ -1416,7 +1459,7 @@ export class RocketRideClient extends DAPClient {
 		options: {
 			token?: string;
 			filepath?: string;
-			pipeline?: PipelineConfig;
+			pipeline?: PipelineConfig | { pipeline: PipelineConfig };
 			source?: string;
 			threads?: number;
 			useExisting?: boolean;
@@ -1451,9 +1494,14 @@ export class RocketRideClient extends DAPClient {
 			const fileContent = await fsPromises.readFile(filepath, 'utf-8');
 			const parsed = JSON.parse(fileContent);
 			// .pipe files wrap the config in { "pipeline": { ... } } — unwrap if present
-			pipelineConfig = parsed.pipeline ?? parsed;
+			pipelineConfig = (parsed && typeof parsed === 'object' && 'pipeline' in parsed && parsed.pipeline) ? parsed.pipeline : parsed;
 		} else {
-			pipelineConfig = pipeline!;
+			const rawPipeline = pipeline!;
+			if ('pipeline' in rawPipeline && rawPipeline.pipeline) {
+				pipelineConfig = rawPipeline.pipeline;
+			} else {
+				pipelineConfig = rawPipeline as PipelineConfig;
+			}
 		}
 
 		// Create a deep copy of the pipeline config to avoid modifying the original
@@ -2069,10 +2117,10 @@ export class RocketRideClient extends DAPClient {
 			this._desiredState = 'detached';
 			return;
 		}
-		// A failed background login is retried by its promise handler only after
+		// A failed login (foreground or background) is retried only after
 		// onConnectError completes and the backoff advances. Scheduling here as
 		// well would race that callback and duplicate the current delay.
-		if (operation?.priority === 'background' && !operation.accepted && operation.unexpectedDisconnectError) return;
+		if (operation && !operation.accepted && operation.unexpectedDisconnectError) return;
 		this._scheduleReconnect();
 	}
 
