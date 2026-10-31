@@ -1,0 +1,22 @@
+{
+	"title": "Bad",
+	"protocol": "fx_bad://",
+	"classType": [
+		"text"
+	],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.fx_bad",
+	"prefix": "fx_bad",
+	"description": [
+		"Test fixture: a named lane that outputs \"*\"."
+	],
+	"lanes": {
+		"text": [
+			"*"
+		]
+	},
+	"fields": {},
+	"shape": []
+}

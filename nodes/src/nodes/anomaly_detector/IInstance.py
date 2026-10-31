@@ -21,10 +21,36 @@
 # SOFTWARE.
 # =============================================================================
 
+import math
 from typing import List
-from rocketlib import Entry, IInstanceBase
-from ai.common.schema import Doc
+
+from rocketlib import IInstanceBase
+from ai.common.schema import Doc, DocMetadata
 from .IGlobal import IGlobal
+
+SEVERITY_LEVELS = ('normal', 'warning', 'critical')
+QUESTIONS = {
+    'is_anomalous': {'kind': 'yes_no', 'values': ['yes', 'no']},
+    'severity': {'kind': 'rubric', 'levels': list(SEVERITY_LEVELS), 'values': list(SEVERITY_LEVELS)},
+    'score': {'kind': 'number'},
+}
+
+
+def _has_usable_metric(metadata: dict, metric: str) -> bool:
+    """Return True when the metric is present in the metadata and converts to a finite float."""
+    try:
+        return math.isfinite(float(metadata.get(metric)))
+    except (ValueError, TypeError):
+        return False
+
+
+def _answers(result: dict) -> dict:
+    severity = result['severity']
+    return {
+        'is_anomalous': {'answer': 'yes' if result['is_anomalous'] else 'no'},
+        'severity': {'answer': severity, 'index': SEVERITY_LEVELS.index(severity)},
+        'score': {'answer': float(result['score'])},
+    }
 
 
 class IInstance(IInstanceBase):
@@ -36,10 +62,6 @@ class IInstance(IInstanceBase):
     """
 
     IGlobal: IGlobal
-
-    def open(self, obj: Entry):
-        """Initialize instance for a new object."""
-        pass
 
     def writeText(self, text: str):
         """
@@ -74,6 +96,8 @@ class IInstance(IInstanceBase):
         for doc in documents:
             enriched_doc = doc.model_copy(deep=True)
             if enriched_doc.metadata is None:
+                enriched_doc.metadata = DocMetadata(self, chunkId=0)
+                self.recordDecision(QUESTIONS, status='unsupported', doc=enriched_doc)
                 enriched_docs.append(enriched_doc)
                 continue
 
@@ -85,6 +109,11 @@ class IInstance(IInstanceBase):
             enriched_doc.metadata.anomaly_is_anomalous = result['is_anomalous']
             if result.get('details'):
                 enriched_doc.metadata.anomaly_details = result['details']
+            if _has_usable_metric(metadata_dict, self.IGlobal.detector.metric) and math.isfinite(result['score']):
+                self.recordDecision(QUESTIONS, _answers(result), doc=enriched_doc)
+            else:
+                # Not scored (no metric, not a number, or a score that overflowed): never a confident 'no'.
+                self.recordDecision(QUESTIONS, status='unsupported', doc=enriched_doc)
 
             enriched_docs.append(enriched_doc)
 

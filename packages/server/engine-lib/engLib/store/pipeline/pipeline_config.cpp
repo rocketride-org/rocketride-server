@@ -63,7 +63,7 @@ void PipelineConfig::setRoot(json::Value root) noexcept {
  *        - Must contain a string "from".
  *  11. The value of "pipeline.source" must reference a valid component id.
  *  12. The value of each "lane" in component inputs must match one of
- *      engine::store::Binder::MethodNames.
+ *      engine::store::Binder::MethodNames, or exactly "*" (any lane).
  *
  * @return Error
  */
@@ -159,8 +159,10 @@ Error PipelineConfig::validate(bool sourceRequired) noexcept {
                     return APERR(Ec::InvalidParam, "Component", id,
                                  "input 'lane' must be a non-empty string");
 
-                // [Rule 12] Ensure 'lane' is a valid method name
-                if (std::find(Binder::MethodNames.begin(),
+                // [Rule 12] Ensure 'lane' is a valid method name, or "*"
+                // (any lane, resolved when the pipeline is built)
+                if (lane != "*" &&
+                    std::find(Binder::MethodNames.begin(),
                               Binder::MethodNames.end(),
                               lane) == Binder::MethodNames.end())
                     return APERR(Ec::InvalidParam, "Component", id,

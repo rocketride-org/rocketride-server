@@ -1,0 +1,25 @@
+{
+	"title": "Relay",
+	"protocol": "fx_relay://",
+	"classType": [
+		"text"
+	],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.fx_relay",
+	"prefix": "fx_relay",
+	"description": [
+		"Test fixture: relay."
+	],
+	"lanes": {
+		"text": [
+			"text"
+		],
+		"documents": [
+			"documents"
+		]
+	},
+	"fields": {},
+	"shape": []
+}
