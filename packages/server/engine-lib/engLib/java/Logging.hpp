@@ -105,7 +105,7 @@ inline void logCallback(JNIEnv *env, jclass clazz, jstring string) noexcept {
         }
 
         // If we are executing --tika, always output
-        if (engine::java::ExecTika)
+        if (engine::java::ExecTika.enabled())
             LOG(Always, text);
         else
             LOG(Java, "JAVA:", text);

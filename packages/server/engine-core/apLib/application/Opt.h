@@ -34,6 +34,9 @@ public:
 
     explicit operator bool() const noexcept { return _cast<bool>(m_val); }
 
+    // The value read as a boolean; def when unset or not a boolean
+    bool enabled(bool def = false) const noexcept;
+
     auto &val() noexcept { return m_val; }
     auto &val() const noexcept { return m_val; }
 

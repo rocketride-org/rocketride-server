@@ -391,7 +391,7 @@ Error executeArguments(std::vector<Text> args) noexcept {
     Error ccode;
 
     // If we are in streaming mode
-    if (Stream) {
+    if (Stream.enabled()) {
         // Execute the task
         ccode = executeTaskString(StreamCommand);
         return ccode;
@@ -432,7 +432,7 @@ Error Main() noexcept {
     auto &cmds = application::cmdline();
 
     // If we need to output the arguments
-    if (OutputArgs) {
+    if (OutputArgs.enabled()) {
         auto args = cmds.args_original();
         LOG(Always, "Main arguments");
 

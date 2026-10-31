@@ -473,7 +473,8 @@ void setupProfiler() noexcept {
 //---------------------------------------------------------------------
 bool isPython() noexcept {
     // If --python was specified, forces into python mode
-    if (ExecPython) return true;
+    if (ExecPython.enabled())
+        return true;
 
     // Get the  arguments
     auto args = application::args();

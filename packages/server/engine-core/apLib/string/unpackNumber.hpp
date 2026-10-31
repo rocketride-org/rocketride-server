@@ -82,6 +82,21 @@ inline Error unpackBool(T &arg, const FormatOptions &opts,
         case 'N':
             arg = false;
             return {};
+
+        // On and off share their first letter
+        case 'O':
+        case 'o': {
+            auto input = buff.toString();
+            if (input.startsWith("on", false)) {
+                arg = true;
+                return {};
+            }
+            if (input.startsWith("off", false)) {
+                arg = false;
+                return {};
+            }
+            break;
+        }
     }
 
     return {Ec::StringParse, _location, "Failed to unpack boolean from string"};

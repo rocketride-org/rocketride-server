@@ -37,6 +37,13 @@ Options &Options::get() noexcept {
     return options;
 }
 
+bool Opt::enabled(bool def) const noexcept {
+    if (!*this)
+        return def;
+    auto enabled = _fsc<bool>(m_val);
+    return enabled.hasValue() ? enabled.value() : def;
+}
+
 
 // Exit quickly without deconstructing globals
 void quickExit(int code) noexcept {
