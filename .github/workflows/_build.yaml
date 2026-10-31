@@ -305,6 +305,15 @@ jobs:
             echo "RR_REQUIRE_DB_TESTS=1"
           } >> "$GITHUB_ENV"
 
+      # TLS-only PostgreSQL for the database TLS and isolation suites
+      # (nodes/test/test_rocketride_db_{tls,isolation}_full.py). The script mints a
+      # throwaway CA, starts the same pgvector image as above with ssl=on and every
+      # non-TLS connection rejected, creates two synthetic tenant databases, and
+      # exports RR_TEST_PG_TLS_PORT / RR_TEST_PG_TLS_CA. No key is committed.
+      - name: Start TLS PostgreSQL for tests / Linux
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false
+        run: nodes/test/db_harness/start-pg-tls.sh rr-pgtls 55434 "$RUNNER_TEMP/rr-pgtls"
+
       - name: Test
         if: inputs.codeql == false && inputs.test
         # Integration tests boot a local server on :5565 and connect a test
@@ -353,6 +362,20 @@ jobs:
             echo "::$stop::"
             echo "::endgroup::"
           done
+
+      # nodes:test skips every test_*_full.py (--ignore-glob in nodes/scripts/tasks.js), so the
+      # suites that need the Postgres containers above never ran in this job. Run them directly
+      # with the built engine. RR_REQUIRE_DB_TESTS=1 (exported above) turns any skip into a failure.
+      - name: Test cloud DB integration suites / Linux
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test
+        working-directory: nodes
+        run: |
+          ../dist/server/engine -m pytest -v --rootdir . \
+            test/test_rocketride_db_full.py \
+            test/test_rocketride_graph_full.py \
+            test/test_vector_store_writes_full.py \
+            test/test_rocketride_db_tls_full.py \
+            test/test_rocketride_db_isolation_full.py
 
       - name: Perform CodeQL Analysis
         if: inputs.codeql && matrix.platform == 'ubuntu'
