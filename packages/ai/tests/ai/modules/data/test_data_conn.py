@@ -18,7 +18,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from ai.modules.data.data_conn import DataConn
+from ai.modules.data import data_conn
+from ai.modules.data.data_conn import DataConn, DataConnPipe
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +107,54 @@ def test_determine_lane_json_tolerates_charset_parameter():
     conn = _make_conn()
     pipe = _make_pipe_with_listeners(['json'])
     assert conn._determine_lane('application/json; charset=utf-8', pipe) == 'json'
+
+
+@pytest.mark.parametrize(
+    'mime',
+    [
+        'application/json',
+        'application/json; charset=utf-8',
+        'Application/JSON',
+        'application/vnd.github+json',
+        'application/xml',
+        'application/atom+xml',
+        'application/x-ndjson',
+        'application/yaml',
+    ],
+)
+def test_determine_lane_structured_text_goes_to_text_when_only_text_is_read(mime):
+    """JSON, XML and similar bodies reach a text reader instead of falling to raw."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['text'])
+    assert conn._determine_lane(mime, pipe) == 'text'
+
+
+def test_determine_lane_json_prefers_json_lane_over_text():
+    """With both readers present, JSON keeps going to the json lane."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['json', 'text'])
+    assert conn._determine_lane('application/json', pipe) == 'json'
+
+
+def test_determine_lane_question_without_questions_listener_does_not_become_text():
+    """A question body never turns into plain text, even when text is read."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['text'])
+    assert conn._determine_lane('application/rocketride-question+json', pipe) == 'raw'
+
+
+def test_determine_lane_structured_text_keeps_raw_when_tags_is_read():
+    """A tags reader (e.g. parse) keeps getting JSON on raw, even when text is read too."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['text', 'tags'])
+    assert conn._determine_lane('application/json', pipe) == 'raw'
+
+
+def test_determine_lane_structured_text_without_text_listener_falls_back_to_raw():
+    """Without a text reader, XML still falls back to raw."""
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners(['image'])
+    assert conn._determine_lane('application/xml', pipe) == 'raw'
 
 
 @pytest.mark.parametrize(
@@ -321,6 +370,119 @@ def test_end_raw_writes_tag_end_stream_and_object():
     conn._end(pipe_conn)
     pipe_conn.pipe.writeTagEndStream.assert_called_once_with()
     pipe_conn.pipe.writeTagEndObject.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# _write_text — UTF-8 across chunks
+# ---------------------------------------------------------------------------
+
+
+def test_write_text_keeps_a_character_split_between_chunks():
+    """A multi-byte character cut by the chunk boundary arrives whole."""
+    conn = _make_conn()
+    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None)
+    body = '{"name": "Zoë"}'.encode('utf-8')
+    cut = body.index('ë'.encode('utf-8')) + 1  # inside the two-byte ë
+    conn._write_text(pipe_conn, body[:cut])
+    conn._write_text(pipe_conn, body[cut:])
+    conn._flush_text(pipe_conn)
+    pipe_conn.pipe.writeText.assert_called_once_with('{"name": "Zoë"}')
+
+
+def test_a_chunked_text_body_is_written_once_when_complete():
+    """Two chunks make one writeText, so a `question` node asks one question, not two halves."""
+    conn = _make_conn()
+    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None)
+    conn._write_text(pipe_conn, b'{"action": "opened", ')
+    conn._write_text(pipe_conn, b'"number": 7}')
+    pipe_conn.pipe.writeText.assert_not_called()
+    conn._flush_text(pipe_conn)
+    conn._flush_text(pipe_conn)  # idempotent: _end flushes again on other paths
+    pipe_conn.pipe.writeText.assert_called_once_with('{"action": "opened", "number": 7}')
+
+
+def test_a_text_body_over_the_hold_limit_streams_instead_of_growing(monkeypatch):
+    """Past the limit the held text is written and later chunks go straight through, as before buffering."""
+    monkeypatch.setattr(data_conn, 'TEXT_LANE_HOLD_BYTES', 4)
+    conn = _make_conn()
+    pipe_conn = SimpleNamespace(pipe=MagicMock(), text_decoder=None, text_parts=None)
+    conn._write_text(pipe_conn, b'ab')
+    conn._write_text(pipe_conn, b'cd')
+    pipe_conn.pipe.writeText.assert_not_called()  # at the limit, still one text
+
+    conn._write_text(pipe_conn, b'ef')
+    conn._write_text(pipe_conn, b'gh')
+    conn._flush_text(pipe_conn)
+
+    assert [c.args[0] for c in pipe_conn.pipe.writeText.call_args_list] == ['abcdef', 'gh']
+
+
+def test_end_text_flushes_and_rejects_a_truncated_character():
+    """A body that ends inside a character is invalid UTF-8 and raises at the end."""
+    conn = _make_conn()
+    pipe_conn = SimpleNamespace(
+        pipe=MagicMock(), lane='text', mime_type='text/plain', text_decoder=None, text_parts=None
+    )
+    conn._write_text(pipe_conn, 'ë'.encode('utf-8')[:1])
+    with pytest.raises(ValueError, match='ends inside a character'):
+        conn._end(pipe_conn)
+    pipe_conn.pipe.writeText.assert_not_called()
+
+
+def _text_pipe_on_conn(conn):
+    conn_pipe = DataConnPipe(
+        pipe_id=1, pipe=MagicMock(), mime_type='application/json', lane='text', is_open=True, entry=MagicMock()
+    )
+    conn._pipe_map = {1: conn_pipe}
+    conn._reset_pipe_activity = MagicMock()
+    conn._cleanup_pipe = MagicMock()
+    conn.build_response = MagicMock(return_value={'success': True})
+    return conn_pipe
+
+
+@pytest.mark.asyncio
+async def test_close_reports_a_text_body_that_ends_inside_a_character():
+    """The truncated body reaches the client as an error; it is not swallowed by close's catch-all."""
+    conn = _make_conn()
+    conn_pipe = _text_pipe_on_conn(conn)
+    conn._write_text(conn_pipe, '{"name": "Zoë"'.encode('utf-8')[:-2])
+
+    with pytest.raises(ValueError, match='ends inside a character'):
+        await conn._close({'command': 'rrext_process'}, {'pipe_id': 1})
+
+    assert conn_pipe.has_failed is True
+    conn_pipe.pipe.writeText.assert_not_called()
+    conn_pipe.pipe.close.assert_not_called()
+    conn._cleanup_pipe.assert_called_once_with(conn_pipe)
+
+
+@pytest.mark.asyncio
+async def test_close_writes_the_whole_text_body_once_before_closing_the_pipe():
+    conn = _make_conn()
+    conn_pipe = _text_pipe_on_conn(conn)
+    calls = []
+    conn_pipe.pipe.writeText.side_effect = lambda text: calls.append(('writeText', text))
+    conn_pipe.pipe.close.side_effect = lambda: calls.append(('close',))
+    conn._write_text(conn_pipe, b'{"a": ')
+    conn._write_text(conn_pipe, b'1}')
+
+    assert await conn._close({'command': 'rrext_process'}, {'pipe_id': 1}) == {'success': True}
+
+    assert calls == [('writeText', '{"a": 1}'), ('close',)]
+
+
+def test_determine_lane_text_check_ignores_mime_case():
+    conn = _make_conn()
+    pipe = _make_pipe_with_listeners({'text'})
+    assert conn._determine_lane('Text/Plain; charset=utf-8', pipe) == 'text'
+
+
+def test_end_text_without_writes_is_noop():
+    """A text pipe that never wrote has no decoder and nothing to flush."""
+    conn = _make_conn()
+    pipe_conn = _make_pipe_conn('text')
+    conn._end(pipe_conn)
+    pipe_conn.pipe.writeText.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

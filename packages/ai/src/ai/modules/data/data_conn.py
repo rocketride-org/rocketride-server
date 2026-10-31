@@ -19,6 +19,7 @@ processing operations, enabling remote data pipeline control and monitoring.
 """
 
 import asyncio
+import codecs
 import json
 import time
 from dataclasses import dataclass, field
@@ -73,6 +74,37 @@ LANE_BINDER_METHODS = {'tag': 'tags', 'raw': 'tags'}
 # out of any "lanes you could send to" list.
 LANE_LIFECYCLE_METHODS = frozenset({'open', 'closing', 'close'})
 
+# Structured formats that are still plain text. When no component reads the
+# format's own lane, a body in one of these goes to the text lane if some
+# component reads text, instead of falling through to raw where an agent behind
+# a text lane never sees it. `+json` and `+xml` suffix types count too.
+TEXT_LANE_FALLBACK_TYPES = frozenset(
+    {'application/json', 'application/xml', 'application/x-ndjson', 'application/yaml', 'application/x-yaml'}
+)
+
+
+def _is_text_format(mime_base: str) -> bool:
+    """
+    Tell whether a MIME type without parameters is a structured text format.
+
+    Args:
+        mime_base: Lower-case MIME type with any ``;`` parameters removed.
+
+    Returns:
+        bool: True for the types in ``TEXT_LANE_FALLBACK_TYPES`` and any
+        ``application/*+json`` or ``application/*+xml`` type.
+    """
+    if mime_base in TEXT_LANE_FALLBACK_TYPES:
+        return True
+    return mime_base.startswith('application/') and mime_base.endswith(('+json', '+xml'))
+
+
+# The text lane holds a body until the pipe closes so it arrives as one text.
+# Past this many bytes it stops holding: the text so far is written and the rest
+# goes through chunk by chunk, as every text body did before, so a large upload
+# costs no more memory than it used to.
+TEXT_LANE_HOLD_BYTES = 8 * 1024 * 1024
+
 
 def _trim_tool_data(value: Any) -> Any:
     """
@@ -116,6 +148,9 @@ class DataConnPipe:
     created_time: float = field(default_factory=time.time)  # Track when pipe was created
     last_activity_time: float = field(default_factory=time.time)  # Track last write/close activity
     in_use: bool = False  # True while a sync operation (write) is actively running in a thread
+    text_decoder: Any = None  # Incremental UTF-8 decoder for the text lane, created on the first write
+    text_parts: Any = None  # Text-lane body decoded so far, written as one text when the pipe closes
+    text_bytes: int = 0  # Text-lane bytes received so far, checked against TEXT_LANE_HOLD_BYTES
 
 
 class DataConn(DAPConn):
@@ -320,20 +355,34 @@ class DataConn(DAPConn):
         # Get the listeners on this pipe
         listeners = pipe_instance.getListeners()
 
+        # The MIME type without parameters such as charset
+        mime_base = mime_type.split(';', 1)[0].strip().lower()
+
         # If this is rocketlib tag data, we can send it out directly on the tag lane
         if mime_type == 'application/rocketlib-tag':
             return 'tag'
 
         # If this is question and we have a question listener
-        elif mime_type.startswith('application/rocketride-question') and 'questions' in listeners:
+        elif mime_base.startswith('application/rocketride-question') and 'questions' in listeners:
             return 'questions'
 
         # If this is json content and we have a json listener
-        elif mime_type.split(';', 1)[0].strip() == 'application/json' and 'json' in listeners:
+        elif mime_base == 'application/json' and 'json' in listeners:
             return 'json'
 
         # If this is text content and we have a text listener
-        elif mime_type.startswith('text/') and 'text' in listeners:
+        elif mime_base.startswith('text/') and 'text' in listeners:
+            return 'text'
+
+        # If this is structured text (JSON, XML, ...) that would otherwise reach
+        # nobody: no reader on its own lane and none on raw (tags, e.g. parse),
+        # but a text listener. A question keeps its own path.
+        elif (
+            _is_text_format(mime_base)
+            and not mime_base.startswith('application/rocketride-question')
+            and 'text' in listeners
+            and 'tags' not in listeners
+        ):
             return 'text'
 
         # If this is image content and we have an image listener
@@ -446,9 +495,68 @@ class DataConn(DAPConn):
             pipe.writeTagEndStream()
             pipe.writeTagEndObject()
 
+        elif lane == 'text':
+            # _close has normally written the text already; this covers any
+            # other path that ends a text pipe. Idempotent.
+            self._flush_text(pipe_conn)
+
         else:
             # Other lanes don't need framing
             pass
+
+    def _write_text(self, conn_pipe: DataConnPipe, data: bytes) -> None:
+        """
+        Decode one text-lane chunk and keep it until the body is complete.
+
+        The text lane gets the body as ONE text (see _flush_text): a node such as
+        `question` turns every writeText into its own question, so a body that
+        arrives in two chunks would otherwise become two half-questions. The
+        decoder keeps a UTF-8 character split between chunks intact, and invalid
+        bytes still fail this write.
+
+        A body larger than TEXT_LANE_HOLD_BYTES is not held whole: the chunk that
+        crosses the limit writes everything held so far, and each later chunk is
+        written as it arrives.
+
+        Args:
+            conn_pipe: The pipe being written. Holds the decoder and the text so far.
+            data: The raw bytes of this chunk.
+        """
+        if conn_pipe.text_decoder is None:
+            conn_pipe.text_decoder = codecs.getincrementaldecoder('utf-8')()
+            conn_pipe.text_parts = []
+            conn_pipe.text_bytes = 0
+        text = conn_pipe.text_decoder.decode(data)
+        conn_pipe.text_bytes += len(data)
+        if conn_pipe.text_bytes > TEXT_LANE_HOLD_BYTES:
+            conn_pipe.text_parts.append(text)
+            text = ''.join(conn_pipe.text_parts)
+            conn_pipe.text_parts.clear()
+            if text:
+                conn_pipe.pipe.writeText(text)
+        elif text:
+            conn_pipe.text_parts.append(text)
+
+    def _flush_text(self, conn_pipe: DataConnPipe) -> None:
+        """
+        Write the whole text-lane body as one text. Idempotent.
+
+        Raises:
+            ValueError: The body ends inside a UTF-8 character.
+        """
+        decoder = getattr(conn_pipe, 'text_decoder', None)
+        if decoder is None:
+            return
+        parts = conn_pipe.text_parts or []
+        conn_pipe.text_decoder = None
+        conn_pipe.text_parts = None
+        try:
+            parts.append(decoder.decode(b'', final=True))
+        except UnicodeDecodeError as e:
+            raise ValueError(f'The text body is not valid UTF-8: it ends inside a character ({e.reason})') from e
+        text = ''.join(parts)
+        if text:
+            conn_pipe.pipe.writeText(text)
 
     def _cleanup_pipe(self, conn_pipe: DataConnPipe) -> None:
         """
@@ -754,8 +862,7 @@ class DataConn(DAPConn):
 
                 # Handle different lane types with appropriate data writing
                 if lane == 'text':
-                    string_data = data.decode('utf-8')
-                    pipe.writeText(string_data)
+                    self._write_text(conn_pipe, data)
 
                 elif lane == 'json':
                     try:
@@ -861,6 +968,13 @@ class DataConn(DAPConn):
         try:
             # Reset activity timer since close is considered activity
             self._reset_pipe_activity(conn_pipe)
+
+            # Write the text lane's body as one text now, outside close_sync's
+            # catch-all, so a body that ends inside a UTF-8 character reaches
+            # the client as an error, as it did when each write decoded its own
+            # chunk.
+            if conn_pipe.lane == 'text':
+                await asyncio.to_thread(self._flush_text, conn_pipe)
 
             def close_sync():
                 # End the pipe and close it.  If either step throws (e.g. a
