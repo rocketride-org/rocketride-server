@@ -10,7 +10,7 @@
  * inspection always gets the panel's full real estate.
  */
 import React, { CSSProperties, useMemo, useState } from 'react';
-import type { TraceRow } from '../../modules/project/types';
+import type { TraceRow } from './types';
 import { commonStyles } from 'shell';
 import { EmptyState } from 'shell';
 

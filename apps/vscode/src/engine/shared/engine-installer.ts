@@ -170,11 +170,6 @@ export class EngineInstaller {
 	// PUBLIC API
 	// =========================================================================
 
-	/** Returns true if an engine executable exists on disk. */
-	public isInstalled(): boolean {
-		return fs.existsSync(this.getExecutablePath());
-	}
-
 	/**
 	 * Reads version file from the engine directory.
 	 * Returns null if no engine is installed or the file is missing/corrupt.
@@ -348,8 +343,9 @@ export class EngineInstaller {
 			await this.downloadAsset(asset, tmpPath, displayVersion, progress, token, githubToken);
 			this.throwIfCancelled(token);
 
-			// Clear existing engine contents (preserve lockfile and PID files)
-			this.clearEngineDir();
+			// Clear existing engine contents (preserve lockfile and PID files).
+			// FATAL on a locked survivor — never extract over a dirty tree.
+			await this.clearEngineDir();
 
 			// Extract into engine/
 			fs.mkdirSync(this.engineDir, { recursive: true });
@@ -392,8 +388,22 @@ export class EngineInstaller {
 	/**
 	 * Removes all files from engine/ except install.lock and PID files.
 	 * Called before extracting a new version.
+	 *
+	 * The removal is ASYNC (`fs.promises.rm`) — a synchronous recursive
+	 * delete of a ~40k-file tree blocks the extension host's event loop,
+	 * freezing the UI and even the error that would explain the failure.
+	 * Node's built-in `maxRetries`/`retryDelay` absorb Windows' transient
+	 * per-file noise (antivirus scans, delete-pending entries) WITHOUT
+	 * restarting the whole walk.
+	 *
+	 * A failure is FATAL, not a warning: extracting a new version over a
+	 * half-removed tree mixes site-packages across versions (the classic
+	 * symptom is pip seeing a stale `uv` dist-info, skipping the install,
+	 * and the bootstrap dying with "uv installed but not found"). The error
+	 * names the exact file and errno so a real lock can be diagnosed —
+	 * a stopped engine holds nothing, so this should never fire.
 	 */
-	private clearEngineDir(): void {
+	private async clearEngineDir(): Promise<void> {
 		if (!fs.existsSync(this.engineDir)) return;
 
 		for (const entry of fs.readdirSync(this.engineDir, { withFileTypes: true })) {
@@ -408,10 +418,15 @@ export class EngineInstaller {
 
 			const fullPath = path.join(this.engineDir, entry.name);
 			try {
-				fs.rmSync(fullPath, { recursive: true, force: true });
-			} catch {
-				// EBUSY on Windows — binary may be locked by a running process
-				this.logger.output(`${icons.warning} Could not remove ${entry.name} (may be in use)`);
+				await fs.promises.rm(fullPath, { recursive: true, force: true, maxRetries: 10, retryDelay: 1000 });
+			} catch (err) {
+				const e = err as NodeJS.ErrnoException;
+				const detail = `${e.code ?? 'unknown error'}${e.path ? ` on ${e.path}` : ''}`;
+				this.logger.output(`${icons.error} Failed to remove ${entry.name}: ${detail}`);
+				throw new Error(
+					`Cannot replace the installed server: failed to remove "${entry.name}" (${detail}). ` +
+					`A process may still be holding files under ${this.engineDir} — close it and retry the install.`
+				);
 			}
 		}
 	}
@@ -831,7 +846,7 @@ export class EngineInstaller {
  * Checks if a process with the given PID is currently running.
  * Uses signal 0 which doesn't actually send a signal — just checks existence.
  */
-export function isPidAlive(pid: number): boolean {
+function isPidAlive(pid: number): boolean {
 	try {
 		process.kill(pid, 0);
 		return true;

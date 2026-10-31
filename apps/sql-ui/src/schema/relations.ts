@@ -35,7 +35,7 @@
 //     empty graph too. That is an honest "unknown", not a bug.
 // =============================================================================
 
-import type { ISqlSchemaResponse, SqlDialect } from '../connect';
+import type { SqlSchemaResponse, SqlDialect } from '../connect';
 
 // =============================================================================
 // TYPES
@@ -46,7 +46,7 @@ import type { ISqlSchemaResponse, SqlDialect } from '../connect';
  * the REFERENCED (parent) table. `columns` and `refColumns` are positionally
  * paired, so a composite key carries every pair.
  */
-export interface IRelationEdge {
+export interface RelationEdge {
 	/** Stable index within the owning graph — distinguishes parallel keys. */
 	id: number;
 	/** The referencing (child) table. */
@@ -60,17 +60,17 @@ export interface IRelationEdge {
 }
 
 /** The declared-foreign-key graph of one schema snapshot. */
-export interface IRelationGraph {
+export interface RelationGraph {
 	/** Table names present in the snapshot (the only nodes a path may visit). */
 	tables: string[];
 	/** Every declared foreign key, including keys pointing outside `tables`. */
-	edges: IRelationEdge[];
+	edges: RelationEdge[];
 }
 
 /** One traversal of one edge while walking a join path. */
-export interface IJoinHop {
+export interface JoinHop {
 	/** The declared foreign key being traversed. */
-	edge: IRelationEdge;
+	edge: RelationEdge;
 	/** The table the walk arrived from. */
 	from: string;
 	/** The table the walk arrives at. */
@@ -83,13 +83,13 @@ export interface IJoinHop {
 }
 
 /** One complete path between two tables over declared foreign keys. */
-export interface IJoinPath {
+export interface JoinPath {
 	/** The starting table. */
 	from: string;
 	/** The destination table. */
 	to: string;
 	/** The hops in walk order (`hops.length` = number of joins). */
-	hops: IJoinHop[];
+	hops: JoinHop[];
 }
 
 /** Structural orientation of a schema, derived from inbound key counts. */
@@ -135,10 +135,10 @@ const DEFAULT_MAX_DEPTH = 4;
  * @param schema - The connection's schema snapshot.
  * @returns The relation graph (empty when the snapshot declares no keys).
  */
-export function buildRelationGraph(schema: ISqlSchemaResponse | null | undefined): IRelationGraph {
+export function buildRelationGraph(schema: SqlSchemaResponse | null | undefined): RelationGraph {
 	const tablesMap = schema?.tables ?? {};
 	const tables = Object.keys(tablesMap);
-	const edges: IRelationEdge[] = [];
+	const edges: RelationEdge[] = [];
 
 	for (const table of tables) {
 		const def = tablesMap[table];
@@ -171,7 +171,7 @@ export function buildRelationGraph(schema: ISqlSchemaResponse | null | undefined
  * @param table - The referenced table.
  * @returns The inbound edges, in graph order.
  */
-export function inboundReferences(graph: IRelationGraph, table: string): IRelationEdge[] {
+export function inboundReferences(graph: RelationGraph, table: string): RelationEdge[] {
 	return graph.edges.filter((edge) => edge.refTable === table);
 }
 
@@ -182,7 +182,7 @@ export function inboundReferences(graph: IRelationGraph, table: string): IRelati
  * @param table - The referencing table.
  * @returns The outbound edges, in graph order.
  */
-export function outboundReferences(graph: IRelationGraph, table: string): IRelationEdge[] {
+export function outboundReferences(graph: RelationGraph, table: string): RelationEdge[] {
 	return graph.edges.filter((edge) => edge.table === table);
 }
 
@@ -194,7 +194,7 @@ export function outboundReferences(graph: IRelationGraph, table: string): IRelat
  * @param graph - The relation graph.
  * @returns The orientation summary.
  */
-export function orientation(graph: IRelationGraph): IOrientation {
+export function orientation(graph: RelationGraph): IOrientation {
 	const inbound = new Map<string, Set<string>>();
 	const outbound = new Map<string, Set<string>>();
 	for (const table of graph.tables) {
@@ -234,7 +234,7 @@ export function orientation(graph: IRelationGraph): IOrientation {
 /** One undirected adjacency entry: the edge and the table it leads to. */
 interface IAdjacency {
 	/** The edge traversed. */
-	edge: IRelationEdge;
+	edge: RelationEdge;
 	/** The table reached. */
 	to: string;
 	/** True when the traversal runs parent -> child. */
@@ -249,7 +249,7 @@ interface IAdjacency {
  * @param graph - The relation graph.
  * @returns Adjacency lists keyed by table name.
  */
-function buildAdjacency(graph: IRelationGraph): Map<string, IAdjacency[]> {
+function buildAdjacency(graph: RelationGraph): Map<string, IAdjacency[]> {
 	const known = new Set(graph.tables);
 	const adjacency = new Map<string, IAdjacency[]>();
 	for (const table of graph.tables) adjacency.set(table, []);
@@ -283,11 +283,11 @@ function buildAdjacency(graph: IRelationGraph): Map<string, IAdjacency[]> {
  * @returns The shortest paths, or an empty array when none exists in range.
  */
 export function findJoinPaths(
-	graph: IRelationGraph,
+	graph: RelationGraph,
 	from: string,
 	to: string,
 	maxDepth: number = DEFAULT_MAX_DEPTH,
-): IJoinPath[] {
+): JoinPath[] {
 	const known = new Set(graph.tables);
 	if (from === to) return [];
 	if (!known.has(from) || !known.has(to)) return [];
@@ -316,8 +316,8 @@ export function findJoinPaths(
 	if (target === undefined || target > maxDepth) return [];
 
 	// ── Enumerate every path whose every hop descends one layer ──────────────
-	const paths: IJoinPath[] = [];
-	const hops: IJoinHop[] = [];
+	const paths: JoinPath[] = [];
+	const hops: JoinHop[] = [];
 
 	/**
 	 * Depth-first walk over the BFS layering, collecting complete paths.
@@ -399,7 +399,7 @@ function aliasesFor(tables: string[]): string[] {
  */
 export function generateJoinSql(
 	dialect: SqlDialect,
-	path: IJoinPath,
+	path: JoinPath,
 	quoteIdent: (dialect: SqlDialect, name: string) => string,
 ): string {
 	if (path.hops.length === 0) return '';
@@ -440,7 +440,7 @@ export function generateJoinSql(
  * @param hop - The hop to describe.
  * @returns The hop line.
  */
-export function describeHop(hop: IJoinHop): string {
+export function describeHop(hop: JoinHop): string {
 	const { edge } = hop;
 	const left = edge.columns.map((column) => `${edge.table}.${column}`).join(', ');
 	const right = edge.refColumns.map((column) => `${edge.refTable}.${column}`).join(', ');

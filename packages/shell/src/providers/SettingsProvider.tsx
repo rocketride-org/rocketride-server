@@ -30,8 +30,17 @@
 // in the schemas).
 //
 // Behaviour (per the approved design):
-// - Left nav: one entry per registry section (= app / shared title).
+// - Left nav: a SidebarMenu — one entry per registry section; sections (and
+//   host-injected RICH sections) that declare a `group` fold as children
+//   under one expandable parent (dev tools under "Rocket Builder").
 //   Selecting a section shows ONLY that section's settings.
+// - SettingsPage (exported) is host-feedable: the cloud's SettingsProvider
+//   wraps it over useWorkspace(); VS Code feeds it mirrored stores and
+//   injects its Connections sections. Rich sections are SELF-MANAGED
+//   (their own footer/apply semantics) and never touch the schema draft.
+// - store routing: 'host'-scoped entries read/write through the hostStore
+//   adapter (hidden entirely when the host provides none); everything else
+//   rides updateSetting into the workspace.
 // - Search: switches to a cross-app results view spanning all sections.
 // - Rows: "<Section>: <Derived Label>" — labels derive from the key, there is
 //   no label field.  Description carries a muted "Default: x" hint.
@@ -53,16 +62,26 @@ import { ContentHeader } from '../components/content-header/ContentHeader';
 import { useWorkspace } from '../components/workspace/WorkspaceContext';
 import { useShellConnection } from '../connection/ConnectionContext';
 import { ConnectionManager } from '../connection/connection';
-import { labelFromKey } from '../components/workspace/settingsRegistry';
-import type { RegistryEntry, RegistrySection } from '../components/workspace/settingsRegistry';
+import { labelFromKey, settingStoreOf } from '../components/workspace/settingsRegistry';
+import type { RegistryEntry, RegistrySection, SettingsRegistry } from '../components/workspace/settingsRegistry';
 import type { SettingValue } from '../components/workspace/types';
+import { SidebarMenu } from '../components/sidebar-menu/SidebarMenu';
+import type { ViewMenu, ViewMenuEntry } from '../types/viewMenu';
+import EnvironmentProvider from './EnvironmentProvider';
+import AccountProvider from './AccountProvider';
+import { useAuthUser } from '../hooks/useAuthUser';
 
 // =============================================================================
 // CONSTANTS
 // =============================================================================
 
-/** App id of the Pipeline Builder — used for the subscribe banner. */
-const PIPE_BUILDER_APP_ID = 'rocketride.pipeBuilder';
+/** Manifest `mode` values meaning the app REQUIRES payment. A free app
+ *  (mode 'free' or absent) never banners, whatever a local engine stamps
+ *  into appStatus. */
+const PAID_MODES = new Set(['paywall', 'subscription']);
+
+/** Account-row statuses meaning the payment is ACTIVE — no banner. */
+const SUBSCRIPTION_ACTIVE = new Set(['subscribed', 'trialing']);
 
 // =============================================================================
 // STYLES
@@ -75,6 +94,11 @@ const styles = {
 		height: '100%',
 		backgroundColor: 'var(--rr-bg-default)',
 		fontFamily: 'var(--rr-font-family)',
+		// The positioned ancestor for every `contained` DetailPanel opened from
+		// a settings pane (manage-workspaces, environment drawers): the drawer
+		// and its scrim must cover the WHOLE settings surface — nav sidebar
+		// included — not whichever inner pane happens to be positioned.
+		position: 'relative',
 	} as CSSProperties,
 	searchRow: {
 		display: 'flex',
@@ -469,38 +493,128 @@ function matchesSearch(entry: RegistryEntry, query: string): boolean {
 	return haystack.includes(query);
 }
 
+/** The HOST's store adapter for 'host'-scoped settings (VS Code config).
+ *  Entries declaring `store: 'host'` are HIDDEN when the page has none. */
+export interface SettingsHostStore {
+	/** The host store's current values (only host-scoped keys). */
+	values: Record<string, SettingValue>;
+	/** Writes one key (undefined = reset to default). */
+	update(key: string, value: SettingValue | undefined): void;
+}
+
 /**
- * Shell-owned settings overlay, VSCode-style, rendered entirely from the
- * settings registry.
- *
- * Two view modes: with no search text only the nav-selected app's section
- * renders; typing a search switches to a cross-app results view spanning
- * every section.  All edits apply immediately (deltas-only persistence).
+ * A host-injected RICH section: a self-managed body (Connections, Variables)
+ * beside the schema sections. Rich sections own their whole pane INCLUDING
+ * any footer (Save & Reconnect, per-card saves) — they never touch the
+ * schema draft, and the schema Save/Cancel footer appears independently
+ * whenever the draft is dirty.
  */
-const SettingsProvider: React.FC = () => {
-	const { settingsRegistry, settingsOverrides, updateSetting } = useWorkspace();
+/** What a rich section's render receives from the page: in-page navigation
+ *  and the schema draft's state — so a section can deep-link (the Billing
+ *  workspace chip's "change…") and guard actions that must not run over an
+ *  unsaved draft (the workspace switch). All optional to use. */
+export interface ISettingsRichContext {
+	/** Selects another nav section (registry or rich) in place. */
+	navigate: (sectionId: string) => void;
+	/** Whether the schema draft has unsaved edits right now. */
+	isDirty: () => boolean;
+	/** Discards the schema draft (the footer Cancel). */
+	discardDraft: () => void;
+}
+
+export interface SettingsRichSection {
+	/** Stable nav id (shares the id space with registry section ids). */
+	id: string;
+	/** Nav label — also the section's ONLY search-match surface. */
+	title: string;
+	/** Nav grouping, same semantics as a contribution's group. */
+	group?: { id: string; label: string };
+	/** Top-level nav position (default 100; lower = higher). A group sits at
+	 *  its lowest member's order. */
+	order?: number;
+	/** Renders the section's whole pane. */
+	render: (ctx?: ISettingsRichContext) => React.ReactNode;
+}
+
+/** Props for {@link SettingsPage} — everything a host feeds the page. */
+export interface SettingsPageProps {
+	/** The flattened settings registry (declarations). */
+	registry: SettingsRegistry;
+	/** Committed workspace overrides (deltas only, merged across partitions). */
+	overrides: Record<string, SettingValue>;
+	/** Workspace write (partition-routed by the caller's context). */
+	updateSetting: (key: string, value: SettingValue | undefined) => void;
+	/** Host store adapter for 'host'-scoped entries (VS Code only). */
+	hostStore?: SettingsHostStore;
+	/** Host-injected rich sections (Connections, Variables). */
+	extraSections?: SettingsRichSection[];
+	/** Deep link: the nav section to open on mount. */
+	initialSectionId?: string;
+}
+
+/**
+ * The one settings surface, VSCode-style, rendered from the registry — the
+ * cloud mounts it via {@link SettingsProvider} (modal overlay), VS Code as an
+ * editor tab over its mirrored stores.
+ */
+export const SettingsPage: React.FC<SettingsPageProps> = ({ registry, overrides, updateSetting, hostStore, extraSections, initialSectionId }) => {
+	// ── Committed values: workspace overrides ⊕ host-store values ──────────
+	// Host keys are disjoint from workspace keys (the registry routes each key
+	// to exactly one store), so the merge cannot collide.
+	const committed = useMemo<Record<string, SettingValue>>(
+		() => ({ ...overrides, ...(hostStore?.values ?? {}) }),
+		[overrides, hostStore?.values],
+	);
+
+	/** Whether a key is host-scoped (routes through the hostStore adapter). */
+	const isHostKey = useCallback(
+		(key: string): boolean => {
+			const schema = registry.schemas.get(key);
+			return schema !== undefined && settingStoreOf(schema) === 'host';
+		},
+		[registry],
+	);
 
 	// -- Buffered edit model (matches VSCode settings + DetailPanel) -----------
-	// Edits collect in a local draft layered over the committed overrides; the
+	// Edits collect in a local draft layered over the committed values; the
 	// Save/Cancel footer commits or discards them (deltas-only, like updateSetting).
-	const [draft, setDraft] = useState<Record<string, SettingValue>>(() => ({ ...settingsOverrides }));
+	const [draft, setDraft] = useState<Record<string, SettingValue>>(() => ({ ...committed }));
 
-	// Unsaved edits exist when the draft diverges from the committed overrides.
+	// Unsaved edits exist when the draft diverges from the committed values.
 	const dirty = useMemo(() => {
-		const keys = new Set([...Object.keys(draft), ...Object.keys(settingsOverrides)]);
+		const keys = new Set([...Object.keys(draft), ...Object.keys(committed)]);
 		for (const k of keys) {
-			if (draft[k] !== settingsOverrides[k]) return true;
+			if (draft[k] !== committed[k]) return true;
 		}
 		return false;
-	}, [draft, settingsOverrides]);
+	}, [draft, committed]);
 
-	// Re-sync the draft when the committed overrides change externally, but only
-	// while there are no local edits so a background update never clobbers them.
-	const dirtyRef = useRef(dirty);
-	dirtyRef.current = dirty;
+	// REBASE the draft when the committed values change externally: unedited
+	// keys follow the new committed state, while the user's local edits (keys
+	// where the draft diverged from the PREVIOUS committed values — including
+	// staged deletions) carry forward on top. A plain "re-sync unless dirty"
+	// guard deadlocks on async hydration (VS Code's mirrors replay AFTER
+	// mount: committed gains keys, the empty draft reads as "dirty", and the
+	// guard then refuses to ever re-sync), and a plain reset would clobber
+	// in-progress edits when a background update lands mid-edit.
+	const prevCommittedRef = useRef(committed);
 	useEffect(() => {
-		if (!dirtyRef.current) setDraft({ ...settingsOverrides });
-	}, [settingsOverrides]);
+		const prev = prevCommittedRef.current;
+		if (prev === committed) return;
+		prevCommittedRef.current = committed;
+		setDraft((d) => {
+			const next = { ...committed };
+			const keys = new Set([...Object.keys(d), ...Object.keys(prev)]);
+			for (const k of keys) {
+				if (d[k] !== prev[k]) {
+					// A local edit: keep the drafted value (or the staged deletion).
+					if (k in d) next[k] = d[k];
+					else delete next[k];
+				}
+			}
+			return next;
+		});
+	}, [committed]);
 
 	/**
 	 * Stage a setting change in the draft with deltas-only semantics: a value
@@ -510,61 +624,93 @@ const SettingsProvider: React.FC = () => {
 		(key: string, value: SettingValue | undefined) => {
 			setDraft((prev) => {
 				const next = { ...prev };
-				const def = settingsRegistry.defaults[key];
+				const def = registry.defaults[key];
 				if (value === undefined || value === def) delete next[key];
 				else next[key] = value;
 				return next;
 			});
 		},
-		[settingsRegistry]
+		[registry]
+	);
+
+	/** Commits ONE key to its store (host adapter or the workspace). */
+	const commitKey = useCallback(
+		(key: string, value: SettingValue | undefined) => {
+			if (isHostKey(key)) hostStore?.update(key, value);
+			else updateSetting(key, value);
+		},
+		[isHostKey, hostStore, updateSetting]
 	);
 
 	/** Commit the draft: write changed keys and reset removed keys to their default. */
 	const handleSave = useCallback(() => {
 		Object.keys(draft).forEach((k) => {
-			if (draft[k] !== settingsOverrides[k]) updateSetting(k, draft[k]);
+			if (draft[k] !== committed[k]) commitKey(k, draft[k]);
 		});
-		Object.keys(settingsOverrides).forEach((k) => {
-			if (!(k in draft)) updateSetting(k, undefined);
+		Object.keys(committed).forEach((k) => {
+			if (!(k in draft)) commitKey(k, undefined);
 		});
-	}, [draft, settingsOverrides, updateSetting]);
+	}, [draft, committed, commitKey]);
 
 	/** Discard the draft, reverting every control to the committed values. */
-	const handleCancel = useCallback(() => setDraft({ ...settingsOverrides }), [settingsOverrides]);
+	const handleCancel = useCallback(() => setDraft({ ...committed }), [committed]);
 
 	/**
-	 * The typed effective value of a key: the raw override when present,
+	 * The typed effective value of a key: the raw draft value when present,
 	 * otherwise the schema default.  The controls need the TYPED value (a
-	 * boolean checkbox, a numeric input), so this reads the typed overrides and
-	 * registry defaults rather than the stringified public `settings` map.
+	 * boolean checkbox, a numeric input).
 	 *
 	 * @param key - The full dotted setting key.
 	 * @returns The effective value, or undefined when neither is set.
 	 */
 	const effectiveValue = useCallback(
 		(key: string): SettingValue | undefined => {
-			return key in draft ? draft[key] : settingsRegistry.schemas.get(key)?.default;
+			return key in draft ? draft[key] : registry.schemas.get(key)?.default;
 		},
-		[draft, settingsRegistry]
+		[draft, registry]
 	);
 	const { client, isConnected } = useShellConnection();
 	const [search, setSearch] = useState('');
-	const [selectedNav, setSelectedNav] = useState<string | null>(null);
+	const [selectedNav, setSelectedNav] = useState<string | null>(initialSectionId ?? null);
+	// A deep link can arrive while the page is LIVE (VS Code's open command
+	// re-fires with new focus args; the auth-error flow retargets Development)
+	// — follow it without a remount, so an unsaved draft survives.
+	useEffect(() => {
+		if (initialSectionId) setSelectedNav(initialSectionId);
+	}, [initialSectionId]);
 	// Key of the row whose gear menu is open (null = none)
 	const [openMenuKey, setOpenMenuKey] = useState<string | null>(null);
 
-	// ── Subscription status (pipeBuilder upsell banner) ────────────────────
-	const info = client?.getAccountInfo();
-	const pipeBuilderApp = (info?.apps ?? []).find((a: any) => a.id === PIPE_BUILDER_APP_ID);
-	const isSubscribed = pipeBuilderApp?.appStatus === 'subscribed' || pipeBuilderApp?.appStatus === 'trialing';
+	// ── Subscription banner (fully data-driven) ─────────────────────────────
+	// A section advertises a subscription when any app it belongs to — its
+	// contributors OR its storage owner (builtin tool sections store into the
+	// subscribable product app) — has an account row whose appStatus says
+	// "requires a subscription that is not active". No app ids are hardcoded;
+	// a pinned store tool needing a subscription banners its own section.
+	const accountApps: any[] = client?.getAccountInfo()?.apps ?? [];
+
+	/** The app row a section's banner advertises, or undefined for none. */
+	const subscriptionAppOf = useCallback(
+		(sec: RegistrySection): any | undefined => {
+			const ids = new Set<string>(sec.appIds);
+			for (const entry of sec.entries) ids.add(entry.owner);
+			for (const id of ids) {
+				const row = accountApps.find((a) => a.id === id);
+				// Banner = the app REQUIRES payment (manifest mode) and this
+				// account's relationship to it is not active (appStatus).
+				if (row && PAID_MODES.has(row.mode) && !SUBSCRIPTION_ACTIVE.has(row.appStatus)) return row;
+			}
+			return undefined;
+		},
+		[accountApps],
+	);
 
 	/** Opens the checkout modal via the shell:subscribe event. */
-	const handleSubscribe = useCallback(() => {
-		if (!pipeBuilderApp) return;
+	const handleSubscribe = useCallback((app: any) => {
 		// The SDK AppManifestEntry structurally satisfies the minimal
 		// ShellAppEntry contract, so it is passed directly.
-		ConnectionManager.getInstance().emit('shell:subscribe', { app: pipeBuilderApp });
-	}, [pipeBuilderApp]);
+		ConnectionManager.getInstance().emit('shell:subscribe', { app });
+	}, []);
 
 	// ── Services from cached catalog (for format 'rocketride.service') ────
 	const [services, setServices] = useState<Record<string, unknown>>({});
@@ -598,15 +744,73 @@ const SettingsProvider: React.FC = () => {
 		return () => document.removeEventListener('click', close);
 	}, [openMenuKey]);
 
-	// ── Section selection + view mode ──────────────────────────────────────
-	const { sections } = settingsRegistry;
+	// ── Renderable sections ────────────────────────────────────────────────
+	// Host-scoped entries are HIDDEN when the page has no host adapter (the
+	// registry's shells filter removes them on foreign editions first — this
+	// is the belt-and-braces for a same-edition page without the adapter).
+	const sections = useMemo<RegistrySection[]>(() => {
+		const all = registry.sections;
+		if (hostStore) return all;
+		return all
+			.map((sec) => ({ ...sec, entries: sec.entries.filter((e) => settingStoreOf(e.schema) !== 'host') }))
+			.filter((sec) => sec.entries.length > 0);
+	}, [registry, hostStore]);
+	const richSections = extraSections ?? [];
 	const query = search.toLowerCase().trim();
 
 	// The selected section — defaults to the first, falls back when apps change
 	const effectiveNav = useMemo(() => {
-		if (selectedNav && sections.some((s) => s.id === selectedNav)) return selectedNav;
-		return sections[0]?.id ?? null;
-	}, [selectedNav, sections]);
+		const known = (id: string): boolean => sections.some((s) => s.id === id) || richSections.some((r) => r.id === id);
+		if (selectedNav && known(selectedNav)) return selectedNav;
+		return sections[0]?.id ?? richSections[0]?.id ?? null;
+	}, [selectedNav, sections, richSections]);
+
+	/** The selected RICH section, when the nav points at one. */
+	const activeRich = useMemo(() => (query ? undefined : richSections.find((r) => r.id === effectiveNav)), [richSections, effectiveNav, query]);
+
+	// ── Rich-section context: in-page nav + the draft's state ───────────────
+	// Stable identity (dirty read through a ref) so a render-prop consumer
+	// isn't re-created per keystroke in an unrelated schema section.
+	const dirtyRef = useRef(dirty);
+	dirtyRef.current = dirty;
+	const richCtx = useMemo<ISettingsRichContext>(() => ({
+		navigate: (sectionId: string) => {
+			setSearch('');
+			setSelectedNav(sectionId);
+		},
+		isDirty: () => dirtyRef.current,
+		discardDraft: handleCancel,
+	}), [handleCancel]);
+
+	// ── Nav menu: sections + rich sections, group-folded and ORDERED ───────
+	// Entries sharing a group.id fold as children under one expandable parent
+	// (SidebarMenu's one-level accordion); everything else is a flat entry.
+	// Top-level position follows the declared `order` (default 100; a group
+	// sits at its lowest member's order), ties ALPHABETICAL by label — the
+	// product rule is Account, Environment Variables, Integrations,
+	// Connections, then every other category A→Z.
+	const navMenu = useMemo<ViewMenu>(() => {
+		const ranked: Array<{ entry: ViewMenuEntry; order: number }> = [];
+		const groupParents = new Map<string, { entry: ViewMenuEntry; order: number }>();
+		const add = (id: string, label: string, group?: { id: string; label: string }, order = 100): void => {
+			if (!group) {
+				ranked.push({ entry: { id, label }, order });
+				return;
+			}
+			let parent = groupParents.get(group.id);
+			if (!parent) {
+				parent = { entry: { id: `group:${group.id}`, label: group.label, children: [] }, order };
+				groupParents.set(group.id, parent);
+				ranked.push(parent);
+			}
+			parent.order = Math.min(parent.order, order);
+			parent.entry.children!.push({ id, label });
+		};
+		for (const sec of sections) add(sec.id, sec.title, sec.group, sec.order);
+		for (const rich of richSections) add(rich.id, rich.title, rich.group, rich.order);
+		ranked.sort((a, b) => a.order - b.order || a.entry.label.localeCompare(b.entry.label));
+		return { entries: ranked.map((r) => r.entry) };
+	}, [sections, richSections]);
 
 	// Visible sections: search spans ALL sections; otherwise only the selected
 	// section renders — each nav entry is its own page.
@@ -614,19 +818,42 @@ const SettingsProvider: React.FC = () => {
 		if (query) {
 			return sections.map((sec) => ({ ...sec, entries: sec.entries.filter((e) => matchesSearch(e, query)) })).filter((sec) => sec.entries.length > 0);
 		}
+		if (activeRich) return [];
 		return sections.filter((sec) => sec.id === effectiveNav);
-	}, [sections, effectiveNav, query]);
+	}, [sections, effectiveNav, query, activeRich]);
+
+	// Rich sections match a search on their TITLE only, rendered as nav cards.
+	const richMatches = useMemo(() => (query ? richSections.filter((r) => r.title.toLowerCase().includes(query)) : []), [richSections, query]);
 
 	// Total match count shown next to the search box while searching
-	const matchCount = useMemo(() => (query ? visibleSections.reduce((n, sec) => n + sec.entries.length, 0) : 0), [query, visibleSections]);
+	const matchCount = useMemo(
+		() => (query ? visibleSections.reduce((n, sec) => n + sec.entries.length, 0) + richMatches.length : 0),
+		[query, visibleSections, richMatches],
+	);
 
-	/** Selecting a section exits search mode and shows only that app's pane. */
+	/** Selecting a section exits search mode and shows only that pane. */
 	const handleNavSelect = useCallback((id: string) => {
+		// Group parents only expand (SidebarMenu handles that) — not a page.
+		if (id.startsWith('group:')) return;
 		setSelectedNav(id);
 		setSearch('');
 	}, []);
 
-	const hasAny = visibleSections.length > 0;
+	const hasAny = visibleSections.length > 0 || richMatches.length > 0 || activeRich !== undefined;
+
+	// The banner app for the CURRENT view: the selected section's (or, while
+	// searching, the first matched section that advertises one). Sections of
+	// apps that are free, auth-only, or actively subscribed banner nothing —
+	// a subscription banner only ever sits on the pages of the thing being
+	// subscribed to (Rod, 2026-10-25).
+	const bannerApp = useMemo(() => {
+		const current = query ? visibleSections : sections.filter((sec) => sec.id === effectiveNav);
+		for (const sec of current) {
+			const app = subscriptionAppOf(sec);
+			if (app) return app;
+		}
+		return undefined;
+	}, [query, visibleSections, sections, effectiveNav, subscriptionAppOf]);
 
 	return (
 		<div style={styles.root}>
@@ -641,26 +868,36 @@ const SettingsProvider: React.FC = () => {
 
 			{/* ── Body: nav + content ─────────────────────────────── */}
 			<div style={styles.body}>
-				<nav style={styles.sidebar}>
-					{sections.map((sec) => (
-						<button key={sec.id} style={styles.navItem(!query && sec.id === effectiveNav)} onClick={() => handleNavSelect(sec.id)}>
-							{sec.title}
-						</button>
-					))}
+				<nav style={styles.sidebar} aria-label="Settings sections">
+					<SidebarMenu menu={navMenu} activeId={query ? '' : (effectiveNav ?? '')} onSelect={handleNavSelect} collapsed={false} />
 				</nav>
 
 				<div style={styles.content}>
-					{/* Subscribe prompt for unsubscribed users */}
-					{info && pipeBuilderApp && !isSubscribed && (
+					{/* Subscribe prompt: data-driven off the section's app rows */}
+					{bannerApp && (
 						<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', margin: '16px 0 0 0', borderRadius: 10, border: '1px solid var(--rr-border)', background: 'var(--rr-bg-titleBar-inactive)' }}>
-							<span style={{ fontSize: 13, color: 'var(--rr-text-secondary)' }}>Subscribe to unlock pipeline execution and deployment.</span>
-							<button onClick={handleSubscribe} style={{ ...commonStyles.buttonPrimary, fontFamily: 'var(--rr-font-family)', fontWeight: 600, whiteSpace: 'nowrap' } as CSSProperties}>
-								Subscribe to RocketRide
+							<span style={{ fontSize: 13, color: 'var(--rr-text-secondary)' }}>{bannerApp.name ?? bannerApp.id} requires a subscription — these settings apply once it is active.</span>
+							<button onClick={() => handleSubscribe(bannerApp)} style={{ ...commonStyles.buttonPrimary, fontFamily: 'var(--rr-font-family)', fontWeight: 600, whiteSpace: 'nowrap' } as CSSProperties}>
+								Subscribe to {bannerApp.name ?? 'RocketRide'}
 							</button>
 						</div>
 					)}
 
 					{!hasAny && <div style={styles.noResults}>{query ? 'No settings matched your search.' : 'No settings defined.'}</div>}
+
+					{/* A selected RICH section owns the whole pane (its own footer
+					    included); the schema footer below still appears when the
+					    DRAFT is dirty, so pending schema edits are never stranded. */}
+					{activeRich && activeRich.render(richCtx)}
+
+					{/* Rich sections matching a search render as section cards. */}
+					{richMatches.map((rich) => (
+						<div key={rich.id} style={styles.sectionHead}>
+							<button style={{ ...styles.navItem(false), width: 'auto', fontSize: 15 } as CSSProperties} onClick={() => handleNavSelect(rich.id)}>
+								{rich.title} — open section
+							</button>
+						</div>
+					))}
 
 					{visibleSections.map((sec) => (
 						<section key={sec.id}>
@@ -688,6 +925,85 @@ const SettingsProvider: React.FC = () => {
 			)}
 		</div>
 	);
+};
+
+// =============================================================================
+// PROVIDER — the cloud overlay wrapper
+// =============================================================================
+
+/** Props for {@link SettingsProvider} (the overlay deep link). */
+export interface ISettingsProviderProps {
+	/** The nav section to open at (from shell:openOverlay's `section`). */
+	initialSectionId?: string;
+}
+
+/**
+ * Shell-owned settings overlay: {@link SettingsPage} fed from the workspace
+ * context (registry, merged overrides, partition-routed updateSetting).
+ */
+/** The Account group's nav identity (Profile / Billing / API Keys children). */
+const ACCOUNT_GROUP = { id: 'account', label: 'Account' };
+
+/** The one subscribable product app (same identity CheckoutFlow consumers use). */
+const PIPE_BUILDER_ID = 'rocketride.pipeBuilder';
+
+/**
+ * Builds the workspace-switch guard for one render: a dirty schema draft is
+ * confirmed-and-discarded BEFORE the switch commits — a workspace-A draft
+ * must never save into workspace B.
+ */
+function switchGuardOf(ctx?: ISettingsRichContext): () => boolean {
+	return () => {
+		if (!ctx?.isDirty()) return true;
+		if (window.confirm('You have unsaved settings changes. Discard them and switch workspace?')) {
+			ctx.discardDraft();
+			return true;
+		}
+		return false;
+	};
+}
+
+const SettingsProvider: React.FC<ISettingsProviderProps> = ({ initialSectionId }) => {
+	const { settingsRegistry, settingsOverrides, updateSetting, appManifest } = useWorkspace();
+	const authUser = useAuthUser();
+	const isSaas = (authUser?.capabilities ?? []).includes('saas');
+
+	// The cloud's rich sections: Environment Variables (the old standalone
+	// overlay's body, unchanged) and — on SaaS — the Account group (the old
+	// account overlay collapsed to Profile / Billing / API Keys). Section ids
+	// are the deep-link vocabulary the legacy overlay ids map onto.
+	// Nav order (product rule): Account (10), Environment Variables (20),
+	// Integrations (30, VS Code), Connections (40, VS Code), then every other
+	// category at the default (100).
+	const extraSections = useMemo<SettingsRichSection[]>(() => {
+		const sections: SettingsRichSection[] = [
+			{ id: 'environment', title: 'Environment Variables', order: 20, render: () => <EnvironmentProvider /> },
+		];
+		if (isSaas) {
+			const onSubscribe = (): void => {
+				// Shell.tsx mounts the global CheckoutFlow — the emit is enough.
+				const app = appManifest.find((a) => a.id === PIPE_BUILDER_ID);
+				ConnectionManager.getInstance().emit('shell:subscribe', { app: app ?? { id: PIPE_BUILDER_ID, name: 'Rocket Builder' } } as never);
+			};
+			sections.push(
+				{
+					id: 'account:profile', title: 'Profile', group: ACCOUNT_GROUP, order: 10,
+					render: (ctx) => <AccountProvider embeddedSection="profile" confirmWorkspaceSwitch={switchGuardOf(ctx)} {...(ctx ? { onNavigateSection: ctx.navigate } : {})} />,
+				},
+				{
+					id: 'account:billing', title: 'Billing', group: ACCOUNT_GROUP, order: 10,
+					render: (ctx) => <AccountProvider embeddedSection="billing" onSubscribe={onSubscribe} {...(ctx ? { onNavigateSection: ctx.navigate } : {})} />,
+				},
+				{
+					id: 'account:keys', title: 'API Keys', group: ACCOUNT_GROUP, order: 10,
+					render: (ctx) => <AccountProvider embeddedSection="api-keys" {...(ctx ? { onNavigateSection: ctx.navigate } : {})} />,
+				},
+			);
+		}
+		return sections;
+	}, [isSaas, appManifest]);
+
+	return <SettingsPage registry={settingsRegistry} overrides={settingsOverrides} updateSetting={updateSetting} extraSections={extraSections} {...(initialSectionId !== undefined ? { initialSectionId } : {})} />;
 };
 
 export default SettingsProvider;

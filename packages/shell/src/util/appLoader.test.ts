@@ -81,7 +81,7 @@ function heldLoader(): Map<string, { resolve: (v: unknown) => void; reject: (e: 
 test('a module load that ends first (the waitlist screen\'s telemetry entry) never clears the pending mark of the app load still in flight', async () => {
 	stubPage('', false);
 	const held = heldLoader();
-	const [entry] = registerAndMapApps([{ id: 'org.race', moduleId: 'race_mod', name: 'Race', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
+	const [entry] = registerAndMapApps([{ id: 'org.race', moduleId: 'race_mod', name: 'Race', registryVersion: 1 }]);
 	const appLoad = entry.load();
 	assert.equal(isRemotePending('race_mod'), true, 'the app load marks the container');
 	const telemetry = loadAppModule('org.race', 'telemetry');
@@ -100,7 +100,7 @@ test('a module load that ends first (the waitlist screen\'s telemetry entry) nev
 test('the other order: the app load ends first and the module load keeps the mark until it ends', async () => {
 	stubPage('', false);
 	const held = heldLoader();
-	const [entry] = registerAndMapApps([{ id: 'org.race2', moduleId: 'race_mod2', name: 'Race 2', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
+	const [entry] = registerAndMapApps([{ id: 'org.race2', moduleId: 'race_mod2', name: 'Race 2', registryVersion: 1 }]);
 	const telemetry = loadAppModule('org.race2', 'telemetry');
 	const appLoad = entry.load();
 	held.get('race_mod2/AppDescriptor')!.resolve({ default: { id: 'org.race2' } });
@@ -114,7 +114,7 @@ test('the other order: the app load ends first and the module load keeps the mar
 test('a loader that throws before returning a promise leaves no pending mark (app load and module load)', async () => {
 	stubPage('', false);
 	stubLoader(() => { throw new Error('no federation instance'); });
-	const [entry] = registerAndMapApps([{ id: 'org.sync', moduleId: 'sync_mod', name: 'Sync', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
+	const [entry] = registerAndMapApps([{ id: 'org.sync', moduleId: 'sync_mod', name: 'Sync', registryVersion: 1 }]);
 	assert.throws(() => entry.load(), /no federation instance/);
 	assert.equal(isRemotePending('sync_mod'), false, 'the app load released its mark');
 	assert.equal(await loadAppModule('org.sync', 'telemetry'), null);
@@ -124,8 +124,8 @@ test('a loader that throws before returning a promise leaves no pending mark (ap
 test('a later registration batch (the apps a sign-in adds) keeps the earlier batch loadable', async () => {
 	stubPage('', false);
 	stubLoader(async (id: string) => ({ default: id }));
-	registerAndMapApps([{ id: 'org.probe', moduleId: 'probe_mod', name: 'Probe', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
-	registerAndMapApps([{ id: 'org.gated', moduleId: 'gated_mod', name: 'Gated', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
+	registerAndMapApps([{ id: 'org.probe', moduleId: 'probe_mod', name: 'Probe', registryVersion: 1 }]);
+	registerAndMapApps([{ id: 'org.gated', moduleId: 'gated_mod', name: 'Gated', registryVersion: 1 }]);
 	assert.deepEqual(await loadAppModule('org.probe', 'telemetry'), { default: 'probe_mod/telemetry' }, 'the probe catalog app still resolves');
 	assert.deepEqual(await loadAppModule('org.gated', 'telemetry'), { default: 'gated_mod/telemetry' });
 });
@@ -155,8 +155,17 @@ test('the hold applies only to the app the preview is locked to', () => {
 	assert.equal(isDevPreviewPending('org.other'), false);
 });
 
-test('a top-level page never holds', () => {
+test('a top-level rrdev tab holds too (URL-convention self-registration)', () => {
+	// Local-first dev: a top-level F5 tab (?appid&rrdev=1) self-registers
+	// its dev build from its own proxy origin, so its first load holds for
+	// that registration exactly like a framed preview.
 	stubPage('?appid=org.held&rrdev=1', false);
+	stubClock(1_000);
+	assert.equal(isDevPreviewPending('org.held'), true);
+});
+
+test('a page without the rrdev marker never holds', () => {
+	stubPage('?appid=org.held', false);
 	stubClock(1_000);
 	assert.equal(isDevPreviewPending('org.held'), false);
 });
@@ -175,7 +184,9 @@ test('the remaining hold time counts down to zero and is zero outside a dev prev
 	mock.restoreAll();
 	stubClock(31_000);
 	assert.equal(devPreviewHoldRemainingMs(), 0);
-	stubPage('?appid=org.held&rrdev=1', false);
+	// Outside a dev preview = no rrdev marker (a top-level rrdev tab is a
+	// dev preview now — it self-registers and holds like a framed one).
+	stubPage('?appid=org.held', false);
 	mock.restoreAll();
 	stubClock(1_000);
 	assert.equal(devPreviewHoldRemainingMs(), 0);

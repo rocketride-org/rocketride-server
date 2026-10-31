@@ -40,6 +40,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSPrope
 import type { ConnectResult, SignupProperties } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { ConnectionManager } from '../../connection/connection';
+import { registerClientOps } from '../../ops/clientOps';
+import { registerShellHostOps } from '../../ops/hostOps';
 import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
@@ -49,11 +51,12 @@ import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
-import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
+import { getHomeAppId } from '../../constants';
 import { registerAndMapApps, loadAppModule, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
 import { getAppVersionOverrides, setAppVersionOverride, versionedEntryUrl } from '../../util/versionOverride';
 import type { ServerAppEntry } from '../../util/appLoader';
 import { waitForEmbeddedSession } from '../../util/devMode';
+import { devBootConfig } from '../../util/devGate';
 
 // =============================================================================
 // STYLES
@@ -207,8 +210,11 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	// ── Session-locked app ────────────────────────────────────────────────
 	const [sessionAppId] = useState<string>(() => {
+		// Authored preview pages (blob-served by the App Builder) carry their
+		// identity in the injected dev boot config — there is no URL to read.
+		const injected = devBootConfig()?.appId ?? '';
 		const params = new URLSearchParams(window.location.search);
-		const fromUrl = params.get('appId') || params.get('appid') || '';
+		const fromUrl = injected || params.get('appId') || params.get('appid') || '';
 		if (fromUrl) {
 			cm.setSessionAppId(fromUrl);
 			return fromUrl;
@@ -269,6 +275,15 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const loginTargetRef = useRef<string | null>(null);
 	const mountedRef = useRef(true);
 
+	// ── In-process workspace rescope ──────────────────────────────────────
+	// True while the shell is switching workspaces: the workspace subtree is
+	// unmounted (a loading screen holds its place) between the teardown and
+	// the re-authenticated remount. The epoch keys WorkspaceProvider so a
+	// completed rescope remounts every store against the new workspace.
+	const [rescoping, setRescoping] = useState(false);
+	const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
+	const rescopeRunningRef = useRef(false);
+
 	// ── Connection state ──────────────────────────────────────────────────
 	const { isConnected, statusMessage } = useShellConnection();
 
@@ -288,11 +303,25 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// (e.g. apps gated by requiredPermissions). Those need to be registered
 	// as MF remotes and merged into the app list so they can be launched.
 	const apps = useMemo(() => {
-		// Synthetic local entries first computed so both return paths merge them
+		// Local (dev) entries merge on both return paths. In dev the WORKSPACE
+		// manifest is the truth: a locally-registered id REPLACES the server's
+		// row wholesale — the registration IS the row (appStatus 'dev',
+		// onDesktop true, billing gating moot in dev). No field-by-field
+		// overlay to reason about; while the registration lives, the server's
+		// opinion of this app simply does not exist. Ids the server has never
+		// heard of append whole, exactly as before.
 		const withLocal = (list: typeof config.apps): typeof config.apps => {
-			const present = new Set(list.map((a) => a.id));
-			const locals = getLocalAppEntries().filter((e) => !present.has(e.id));
-			return locals.length > 0 ? [...list, ...locals] : list;
+			const locals = getLocalAppEntries();
+			if (locals.length === 0) return list;
+			// IDENTITY CONTINUITY: the registration replaces the server row
+			// wholesale, but where the dev metadata is SILENT about the icon
+			// (URL-convention self-registration posts no manifest), the app
+			// must not lose its face mid-session — inherit the registry's
+			// stable icon URL. Dev metadata still wins wherever it speaks.
+			const byId = new Map(list.map((a) => [a.id, a]));
+			const patched = locals.map((l) => (!l.icon && byId.get(l.id)?.icon ? { ...l, icon: byId.get(l.id)!.icon } : l));
+			const localIds = new Set(locals.map((e) => e.id));
+			return [...list.filter((a) => !localIds.has(a.id)), ...patched];
 		};
 		if (!identity?.apps?.length) return withLocal(config.apps);
 
@@ -348,9 +377,21 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				uri: config.serverUri || undefined,
 				clientName: 'Cloud Shell-UI',
 				authProvider,
-				zitadelUrl: RR_ZITADEL_URL,
-				zitadelClientId: RR_ZITADEL_CLIENT_ID,
 			});
+
+			// FRAMEWORK ROOT: this realm owns the engine connection, so the
+			// brokered client surface registers HERE — request('client.*')
+			// resolves in-process for this realm and for any attached spokes.
+			// Idempotent across remounts (already-registered ops are kept).
+			registerClientOps(cm.ops(), cm);
+			// The SHELL's own host.* ops — those whose capability belongs to
+			// the shell and whose hooks are contract surface, so they cannot
+			// depend on each host remembering to register them. The ops the
+			// HOST APP owns are separate and live with the host
+			// (apps/rocket-ui/src/ops, apps/vscode/src/ops), declared in
+			// shared/ops/hostOps.ts. See ops/hostOps.ts for why the split
+			// exists and which side a new op belongs on.
+			registerShellHostOps(cm.ops(), cm);
 
 			// Run the optional init callback (e.g. theme initialisation)
 			config.onInit?.();
@@ -538,12 +579,51 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	// The user's default org changed (this tab or any other connection). The
 	// server only NOTIFIES — what to do is this client's choice. The shell's
-	// choice: reload, which re-authenticates and re-bootstraps under the
-	// user's current default org.
+	// choice: an IN-PROCESS rescope — announce, unmount the workspace subtree
+	// (its stores flush on the old connection), re-authenticate (the server
+	// resolves the new default org), then remount everything under a fresh
+	// epoch key. Any step failing falls back to the old full page reload —
+	// degraded, never stranded. Why not just reload: a reload tears down the
+	// whole JS world to change one scope; the rescope keeps the page, the MF
+	// containers, and the session, and lands the user back where the switch
+	// started (the Profile section re-opens via the sessionStorage flag the
+	// picker sets — a flag deliberately chosen so the reload FALLBACK lands
+	// there too).
 	useEffect(() => {
-		return cm.on('shell:orgChanged', () => {
-			console.warn('[shell] reloading: default org changed — re-authenticating under the new org');
-			window.location.reload();
+		return cm.on('shell:orgChanged', ({ orgId }: { orgId: string }) => {
+			if (rescopeRunningRef.current) return;
+			rescopeRunningRef.current = true;
+			void (async () => {
+				try {
+					cm.emit('shell:workspaceWillChange', { orgId });
+					// Unmount the workspace subtree FIRST: unmount cleanups flush
+					// pending workspace writes while the OLD connection is still
+					// up — flushing after reconnect would write workspace-A state
+					// into workspace B.
+					setRescoping(true);
+					// One macrotask so the unmount commit (and its synchronous
+					// cleanup effects) run before the connection drops.
+					await new Promise((resolve) => setTimeout(resolve, 0));
+					const token = cm.loadToken();
+					if (!token) throw new Error('no session token to re-authenticate with');
+					await cm.disconnect();
+					const result = await cm.connect(token);
+					if (!result) throw new Error('re-authentication under the new workspace returned no identity');
+					if (!mountedRef.current) return;
+					// Fresh identity = the new org's app manifest/entitlements;
+					// the epoch key remounts WorkspaceProvider so every store
+					// re-reads the new workspace's data.
+					setIdentity(result);
+					setWorkspaceEpoch((e) => e + 1);
+					setRescoping(false);
+					cm.emit('shell:workspaceChanged', { orgId });
+				} catch (err) {
+					console.warn('[shell] reloading: in-process workspace rescope failed — falling back to a full reload', err);
+					window.location.reload();
+				} finally {
+					rescopeRunningRef.current = false;
+				}
+			})();
 		});
 	}, [cm]);
 
@@ -708,7 +788,13 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 							try { window.parent.postMessage({ type: 'rrdev:loginRequest' }, '*'); } catch { /* parentless */ }
 							loginPopupTimerRef.current = window.setTimeout(() => {
 								loginPopupTimerRef.current = null;
-								window.open(`${window.location.origin}/?rrauth=1`, 'rrauth', 'popup=yes,width=520,height=780');
+								// VS Code webviews BLOCK window.open (null, no throw) —
+								// there the embedder's native sign-in above is the ONLY
+								// path, so surface the dead end instead of failing
+								// silently (the warning reaches the Console pane via
+								// the dev console forwarding).
+								const popup = window.open(`${window.location.origin}/?rrauth=1`, 'rrauth', 'popup=yes,width=520,height=780');
+								if (!popup) console.warn('[Shell] sign-in popup blocked by the embedder — waiting for the host to answer rrdev:loginRequest with a session (rrdev:auth)');
 							}, 1500);
 						}}
 					>Sign In</button>
@@ -836,22 +922,31 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	return (
 		<ShellIdentityContext.Provider value={identity}>
 			<ShellApiConfigProvider config={config.apiConfig}>
-				<WorkspaceProvider
-					apps={apps}
-					workspaceDir={config.workspaceDir}
-					startupAppId={activeAppId || sessionAppId || (() => { try { return sessionStorage.getItem(SS_PENDING_APP_ID); } catch { return null; } })() || defaultAppId}
-					defaultAppId={defaultAppId}
-					themeOptions={config.themeConfig.options}
-					onThemeChange={config.themeConfig.onThemeChange}
-				>
-					<ShellLayout
-						config={resolvedConfig}
-						isConnected={isConnected}
-						statusMessage={statusMessage}
-						hideAppSwitcher={!!sessionAppId}
+				{/* Mid-rescope the workspace subtree is OUT of the tree (its
+				    unmount flushed the old workspace's stores on the old
+				    connection); the epoch key makes a finished rescope remount
+				    everything against the new workspace's data. */}
+				{rescoping ? (
+					<LoadingScreen />
+				) : (
+					<WorkspaceProvider
+						key={workspaceEpoch}
+						apps={apps}
+						workspaceDir={config.workspaceDir}
+						startupAppId={activeAppId || sessionAppId || cm.getPendingAppId() || defaultAppId}
 						defaultAppId={defaultAppId}
-					/>
-				</WorkspaceProvider>
+						themeOptions={config.themeConfig.options}
+						onThemeChange={config.themeConfig.onThemeChange}
+					>
+						<ShellLayout
+							config={resolvedConfig}
+							isConnected={isConnected}
+							statusMessage={statusMessage}
+							hideAppSwitcher={!!sessionAppId}
+							defaultAppId={defaultAppId}
+						/>
+					</WorkspaceProvider>
+				)}
 			</ShellApiConfigProvider>
 
 			{/* Checkout overlay — renders outside the shell layout */}

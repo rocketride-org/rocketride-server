@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 import type { ConnectResult } from 'rocketride';
+import type { ToolChannel } from './toolChannel';
 
 // =============================================================================
 // SHELL COMPONENT PROP CONTRACTS
@@ -83,6 +84,13 @@ export interface AppWorkspaceState {
 	prefs: WorkspacePrefs;
 	/** Opaque app-owned state. Used by the Documents library to persist open docs, editors, groups, etc. */
 	appState: Record<string, unknown>;
+	/**
+	 * Setting OVERRIDES this partition OWNS (deltas only — a value equal to
+	 * the schema default is deleted, never stored). Settings live in their
+	 * owning contributor's partition file; the shell partition's live in
+	 * global.json. There is no shared settings file.
+	 */
+	settings?: Record<string, SettingValue>;
 }
 
 // =============================================================================
@@ -108,6 +116,20 @@ export interface WorkspaceState {
 
 /** Value types a setting may hold — mirrors the JSON primitive types. */
 export type SettingValue = string | number | boolean;
+
+/**
+ * Where a setting's VALUE lives — a partition-routing axis, not new storage:
+ *
+ * - `'workspace'` (the default when absent) — the contributing owner's
+ *   partition file in the current workspace (`<owner>.workspace.json`):
+ *   app/project settings.
+ * - `'user'` — the shell partition (`global.json`): the person's own
+ *   settings within the workspace (theme, appearance).
+ * - `'host'` — the running HOST's own store. A VS Code concept only (the
+ *   extension's configuration store, for connection/machine settings); the
+ *   cloud has no host store, and host-scoped entries never render there.
+ */
+export type SettingStore = 'host' | 'workspace' | 'user';
 
 /**
  * JSON-Schema-style declaration of a single setting.
@@ -162,6 +184,20 @@ export interface SettingSchema {
 	required?: boolean;
 	/** Extension keyword: placeholder text for empty string inputs. */
 	placeholder?: string;
+	/**
+	 * Extension keyword: which store holds the value (see {@link SettingStore}).
+	 * Absent = `'workspace'`. `'host'`-scoped settings must ALSO be declared in
+	 * the VS Code extension's package.json `contributes.configuration` — the
+	 * host store is VS Code configuration, and VS Code only stores declared keys.
+	 */
+	store?: SettingStore;
+	/**
+	 * Extension keyword: shell editions this setting applies to
+	 * ('saas' | 'oss' | 'vscode' — the AppManifestEntry.shells vocabulary).
+	 * Absent = every shell. The registry drops entries whose list excludes
+	 * the running edition, so host-inapplicable settings never render.
+	 */
+	shells?: string[];
 }
 
 /**
@@ -220,6 +256,12 @@ export interface AppManifestEntry {
 	/** Categories for filtering/grouping in the app store. */
 	categories?: string[];
 	/**
+	 * Shell editions this app serves ('saas' | 'oss' | 'vscode'). Absent means
+	 * the app works on every shell. Matches the catalog wire's `shell` filter
+	 * vocabulary; hosts hide entries that do not name their edition.
+	 */
+	shells?: string[];
+	/**
 	 * The app's settings contribution (VSCode `contributes.configuration`
 	 * shape).  Available at boot from the manifest — the settings registry is
 	 * flattened from the configurations of all desktop apps.
@@ -231,6 +273,13 @@ export interface AppManifestEntry {
 	 * a deployed pin's appVersion. Absent when the server sent none.
 	 */
 	version?: string;
+	/**
+	 * Registry version number the entry resolves to (the scope-walk winner) —
+	 * present for published store apps; absent for built-ins and dev overlays.
+	 * The desktop's version drop list matches on this (the wire identity),
+	 * never the display semver.
+	 */
+	registryVersion?: number;
 	/** True when the entry is a dev-overlay override (live watch build). */
 	dev?: boolean;
 	/**
@@ -238,6 +287,14 @@ export interface AppManifestEntry {
 	 * Defaults to true — most apps require the user to be logged in.
 	 */
 	authenticated?: boolean;
+	/**
+	 * The app's MONETIZATION MODEL: 'free' | 'paywall' | 'subscription'
+	 * (absent = free). Declared in the app's manifest and passed through the
+	 * wire. Distinct from {@link appStatus}, which is THIS account's current
+	 * relationship to it — a free app never has subscription state, and a
+	 * paid app's status varies per account.
+	 */
+	mode?: string;
 	/** App lifecycle status: auth | free | unsubscribed | subscribed | trialing | past_due | canceled. */
 	appStatus?: string;
 	/** Whether this app is on the user's desktop. */
@@ -302,6 +359,104 @@ export interface AppDescriptor {
 	components?: {
 		[key: string]: React.ComponentType<any> | undefined;
 	};
+	/**
+	 * Dev-tool main surface — mounted DIRECTLY by a host workbench (the VS
+	 * Code extension's tool panel, rocket-ui's tool document) instead of
+	 * booting the full `app`. Declared by apps carrying the `devTool`
+	 * manifest category. Must style exclusively via `var(--rr-*)` tokens —
+	 * theming is the ambient CSS custom properties of the mounting document.
+	 */
+	devToolFrame?: React.ComponentType<DevToolProps>;
+	/**
+	 * Dev-tool sidebar — the tool's CONTROLLER, mounted by the host workbench
+	 * in ITS sidebar (behind the tool's tab) while `devToolFrame` runs in the
+	 * main surface. The two mounts may live in isolated documents (VS Code
+	 * webviews). The controller owns AUTHORITY over the tool's shared state
+	 * (refcounted/singleton coordination, owner-realm stores) — never
+	 * transport: every realm holds its own working client
+	 * (`useShellConnection().client`), and there is ONE socket per host
+	 * process behind them all. Ephemeral UI coordination rides `peer`.
+	 */
+	devToolSidebar?: React.ComponentType<DevToolProps>;
+}
+
+// =============================================================================
+// DEV TOOL CONTRACT — host-mounted tool components
+// =============================================================================
+
+/**
+ * Props every dev-tool component receives from its host workbench.
+ *
+ * NO client member — and none is needed: every mount's realm already holds a
+ * working `RocketRideClient` via `useShellConnection().client` (the root's
+ * real client, or the realm client whose requests ride the shell bus). There
+ * is ONE socket per host process; a controller mount owns AUTHORITY to
+ * coordinate its tool's shared state (refcounted endpoints, single-writer
+ * stores, shared pollers), never the transport. Everything frame↔controller
+ * rides `channel` — ops for that coordination, events for ephemeral UI
+ * coordination, retained state for shared snapshots.
+ *
+ * NO peer member (removed 2026-10-21): the raw post/subscribe pipe is a
+ * host-internal transport seam now (IToolPeer — hosts build the channel over
+ * it). Tools never correlate or envelope by hand.
+ *
+ * No theme member: tools are themed by the ambient `--rr-*` CSS custom
+ * properties of the document they mount into (the shell's active theme
+ * in-browser; the VS Code webview's editor-variable mapping in the editor).
+ */
+export interface DevToolProps {
+	/**
+	 * The channel to this tool's OTHER mount (frame ↔ sidebar) — the tool's
+	 * ONE transport surface, host-built over its relay (in-memory in-shell;
+	 * across webviews in VS Code). Three lanes:
+	 *
+	 *   - STATE (controller → frames): retained per topic, replayed to late
+	 *     subscribers; a publish never summons a window.
+	 *   - EVENTS (either direction): fire-and-forget. Direction discipline: a
+	 *     sidebar mount sends ONLY in response to a user action (an event to
+	 *     a closed frame summons it — a tree click is an implicit "open the
+	 *     tool"); the frame PUSHES its state whenever it changes, and the
+	 *     host retains the last frame→sidebar payload so a (re)mounted
+	 *     sidebar renders without asking. Mount-time handshakes from the
+	 *     sidebar side are a bug: every pinned tool's sidebar mount boots
+	 *     with the host sidebar, and an ask-on-mount would summon every
+	 *     tool's frame.
+	 *   - OPS (frame → controller, correlated): the typed request/response
+	 *     lane — see toolOps.ts (createToolOpClient / createToolOpServer).
+	 */
+	channel: ToolChannel;
+	/**
+	 * Host documents — present on hosts that give one tool MULTIPLE top-level
+	 * documents (e.g. one tab per database connection). `open` opens or
+	 * focuses the tool document for `docKey` with the given tab title,
+	 * mounting `devToolFrame` with that key in {@link DevToolProps.docKey};
+	 * `close` closes it. Hosts without the capability omit the member — the
+	 * tool falls back to its single-frame behavior (an event summons the
+	 * frame).
+	 */
+	documents?: {
+		/** Opens (or focuses) the tool document for one key. */
+		open(docKey: string, title: string): void;
+		/** Closes the tool document for one key (open elsewhere = no-op). */
+		close(docKey: string): void;
+	};
+	/**
+	 * The document key this FRAME mount serves — set when the host opened it
+	 * through `documents.open`. Absent on sidebar mounts and on a tool's
+	 * single/default frame.
+	 */
+	docKey?: string;
+	/**
+	 * For SIDEBAR mounts on hosts with `documents`: the key of this tool's
+	 * document currently fronted in the host's editor area, or null when the
+	 * active editor is NOT one of this tool's documents (another tool, a
+	 * text file). Hosts keep it live across tab switches, so a sidebar can
+	 * follow the selection — highlight the fronted document's row, clear
+	 * highlight and dependent panels on null. Omitted (undefined) by hosts
+	 * that cannot tell and on frame mounts; a sidebar then falls back to its
+	 * own signals (e.g. the frame's channel-event pushes).
+	 */
+	activeDocKey?: string | null;
 }
 
 // =============================================================================

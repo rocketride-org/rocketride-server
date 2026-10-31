@@ -47,7 +47,17 @@ import { ConnectionManager } from './connection';
  * and any transient status message (e.g. "Reconnecting...").
  */
 export interface ShellConnectionState {
-	/** The shared RocketRideClient instance, or `null` if not yet initialised. */
+	/**
+	 * The realm's RocketRideClient, or `null` while the realm has none yet.
+	 *
+	 * In EVERY realm this is a real client: the root's socket-owning instance
+	 * at a framework root, and elsewhere the realm client, whose requests
+	 * ride the shell bus to the root's one socket. It stays `null` until the
+	 * realm is ready to answer truthfully — at the root until `init()`, in a
+	 * bus-mirrored realm until the first identity mirror lands (a client
+	 * seeded from nothing would confidently report "logged out" over a live
+	 * session).
+	 */
 	client: RocketRideClient | null;
 	/** `true` when the WebSocket is authenticated and connected. */
 	isConnected: boolean;
@@ -71,8 +81,14 @@ export interface ShellConnectionState {
  *
  * @example
  * ```tsx
+ * // `client` is non-null in every CONNECTED realm (root or spoke) — gate
+ * // actions on it, but never early-return your whole surface on a null
+ * // client: while the shell is connecting (or before a spoke realm's first
+ * // mirror delivery) that branch would render indefinitely. Render the
+ * // surface in its disconnected/empty state instead.
  * const { client, isConnected } = useShellConnection();
- * if (!client || !isConnected) return <div>Connecting...</div>;
+ * const ready = isConnected && client !== null;
+ * return <Toolbar onRun={ready ? () => client!.restart({ token }) : undefined} />;
  * ```
  */
 export function useShellConnection(): ShellConnectionState {

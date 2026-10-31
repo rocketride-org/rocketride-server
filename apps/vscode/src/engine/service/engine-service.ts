@@ -16,11 +16,9 @@
  * without re-registering the service.
  *
  * Lifecycle:
- *   install()  → download engine + register OS service + start
- *   start()    → start the registered service
- *   stop()     → stop the running service
- *   update()   → stop → download new version → start
- *   remove()   → stop + unregister service + delete files
+ *   start() → start the registered service (reconciler path)
+ *   stop()  → detach (the OS service keeps running independently)
+ *   install/update/remove ride the static ioControl() (panel commands).
  */
 
 import * as vscode from 'vscode';
@@ -66,16 +64,6 @@ export class EngineService extends EngineBackend {
 	// PUBLIC API
 	// =========================================================================
 
-	/** The EngineInstaller (for version fetching in UI). */
-	getInstaller(): EngineInstaller {
-		return this.installer;
-	}
-
-	/** The platform-specific service manager (for advanced operations). */
-	getServiceManager(): import('./service-manager').ServiceManager {
-		return this.serviceManager;
-	}
-
 	/** Returns installed engine version info, or null. */
 	getInfo(): EngineInfo | null {
 		const installed = this.installer.getInstalledVersion();
@@ -86,45 +74,6 @@ export class EngineService extends EngineBackend {
 	// =========================================================================
 	// LIFECYCLE
 	// =========================================================================
-
-	/**
-	 * Downloads the engine, registers the OS service, and starts it.
-	 * Handles sudo/elevation prompts as needed.
-	 */
-	async install(versionSpec: string, config: ConnectionGroupConfig, token?: vscode.CancellationToken): Promise<void> {
-		// Prepare install root (creates dirs, sets permissions on macOS/Linux)
-		this.emitStatus({ phase: 'working', message: 'Preparing install directory...' });
-		await this.serviceManager.prepareInstallRoot();
-
-		// Download engine binary
-		this.emitStatus({ phase: 'working', message: 'Downloading engine...' });
-		const progress: vscode.Progress<{ message?: string }> = {
-			report: (value) => {
-				if (value.message) this.emitStatus({ phase: 'working', message: value.message });
-			},
-		};
-
-		let githubToken: string | undefined;
-		try {
-			const session = await vscode.authentication.getSession('github', [], { createIfNone: false });
-			githubToken = session?.accessToken;
-		} catch { /* proceed without token */ }
-
-		const executablePath = await this.installer.install(versionSpec, progress, token, githubToken);
-		const engineDir = this.installer.dir;
-
-		// Register and start the OS service
-		this.emitStatus({ phase: 'working', message: 'Registering service...' });
-		await this.serviceManager.install(executablePath, engineDir);
-		await this.waitForReady();
-
-		this.emitStatus({
-			phase: 'ready',
-			message: 'Service installed and running',
-			uri: `http://localhost:${SERVICE_PORT}`,
-			version: this.installer.getInstalledVersion()?.tag,
-		});
-	}
 
 	/**
 	 * Starts the service if it's not already running.
@@ -170,52 +119,6 @@ export class EngineService extends EngineBackend {
 	 */
 	async stop(): Promise<void> {
 		this.emitStatus({ phase: 'idle', message: 'Service engine detached' });
-	}
-
-	/**
-	 * Stops the service, downloads a new version, and restarts.
-	 * The service still points to the same fixed engine/ path — no re-registration.
-	 */
-	async update(versionSpec: string, config: ConnectionGroupConfig, token?: vscode.CancellationToken): Promise<void> {
-		this.emitStatus({ phase: 'working', message: 'Stopping service...' });
-		await this.serviceManager.stop();
-
-		// Download new version (replaces engine/ contents in-place)
-		this.emitStatus({ phase: 'working', message: 'Downloading update...' });
-		const progress: vscode.Progress<{ message?: string }> = {
-			report: (value) => {
-				if (value.message) this.emitStatus({ phase: 'working', message: value.message });
-			},
-		};
-
-		let githubToken: string | undefined;
-		try {
-			const session = await vscode.authentication.getSession('github', [], { createIfNone: false });
-			githubToken = session?.accessToken;
-		} catch { /* proceed without token */ }
-
-		await this.installer.install(versionSpec, progress, token, githubToken);
-
-		// Restart (same path, no NSSM reconfiguration needed)
-		this.emitStatus({ phase: 'working', message: 'Starting service...' });
-		await this.serviceManager.start();
-		await this.waitForReady();
-
-		this.emitStatus({
-			phase: 'ready',
-			message: 'Service updated and running',
-			uri: `http://localhost:${SERVICE_PORT}`,
-			version: this.installer.getInstalledVersion()?.tag,
-		});
-	}
-
-	/**
-	 * Stops, unregisters, and deletes the service and engine files.
-	 */
-	async remove(): Promise<void> {
-		this.emitStatus({ phase: 'working', message: 'Removing service...' });
-		await this.serviceManager.remove();
-		this.emitStatus({ phase: 'idle', message: 'Service removed' });
 	}
 
 	/** Re-emits the current status (ready with URI, or idle). */
@@ -310,6 +213,21 @@ export class EngineService extends EngineBackend {
 			: undefined;
 
 		try {
+			// Every lifecycle verb below runs privileged OS commands on
+			// macOS/Linux (sudo -S, password piped on stdin). The password is
+			// collected IN the panel: when sudo would prompt and none came
+			// with the command, answer needsSudo — the panel shows its
+			// password field and re-sends the command with params.sudoPassword.
+			// Windows never takes this branch (needsElevation() is false; UAC
+			// prompts on the privileged calls themselves).
+			if (command !== 'test') {
+				const sudoPassword = params?.sudoPassword as string | undefined;
+				if (sudoPassword !== undefined) {
+					sm.setElevationPassword(sudoPassword);
+				} else if (await sm.needsElevation()) {
+					return { success: false, needsSudo: true };
+				}
+			}
 			switch (command) {
 				case 'install': {
 					const version = (params?.version as string) || 'latest';
@@ -369,7 +287,7 @@ export class EngineService extends EngineBackend {
 
 /**
  * Creates the appropriate ServiceManager for the current platform.
- * This mirrors the old createServiceManager() but lives here with the backend.
+ * Lives here with the backend so the platform choice stays beside its user.
  */
 function createPlatformServiceManager(): import('./service-manager').ServiceManager {
 	switch (process.platform) {

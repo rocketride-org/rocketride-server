@@ -99,6 +99,33 @@ async function saveVscodeAndSharedUiHashes(srcHash, sharedUiHash) {
 	await saveSourceHash(SHARED_UI_HASH_KEY, sharedUiHash);
 }
 
+/**
+ * Fails the build if any webview bundle externalizes the 'vscode' module.
+ *
+ * The rsbuild config externalizes 'vscode' (`commonjs vscode`) so an
+ * extension-host import that leaks into webview-reachable code compiles
+ * SILENTLY into `require("vscode")` — a load-time ReferenceError that
+ * blanks the page. tsc passes, rsbuild passes; this scan is the gate
+ * (alongside the eslint ban on 'vscode'/util/output in views/**).
+ */
+async function assertNoVscodeExternalInWebviews(task) {
+	const bundles = await glob('**/*.js', { cwd: BUILD_WEBVIEW_DIR, absolute: true, nodir: true });
+	const offenders = [];
+	for (const file of bundles) {
+		const text = await readFile(file, 'utf8');
+		if (text.includes('require("vscode")') || text.includes("require('vscode')")) {
+			offenders.push(path.relative(BUILD_WEBVIEW_DIR, file));
+		}
+	}
+	if (offenders.length > 0) {
+		throw new Error(
+			`webview bundle(s) contain require("vscode") — an extension-host module leaked into webview code ` +
+			`(usually via getLogger/util/output; see the eslint webview-realm ban): ${offenders.join(', ')}`
+		);
+	}
+	task.output = `webview bundles verified vscode-free (${bundles.length} files)`;
+}
+
 // =============================================================================
 // Action Factories
 // =============================================================================
@@ -121,6 +148,14 @@ function makeBuildWebviewAction() {
 			await execCommand('npx', ['tsc', '-p', 'tsconfig.webview.json', '--noEmit'], { task, cwd: APP_ROOT });
 
 			await execCommand('pnpm', ['exec', 'rsbuild', 'build'], { task, cwd: APP_ROOT });
+
+			// The dev-tool page is a Module Federation HOST — it needs a normal
+			// chunk graph, so it builds from its own config into webview/devtool/.
+			const devtoolArgs = ['exec', 'rsbuild', 'build', '--config', 'rsbuild.devtool.config.mjs'];
+			await execCommand('pnpm', devtoolArgs, { task, cwd: APP_ROOT });
+
+			// Gate BEFORE saving hashes — a failed scan must re-run next build.
+			await assertNoVscodeExternalInWebviews(task);
 
 			await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash);
 		},
@@ -198,10 +233,9 @@ function makeStageFilesAction() {
 				'webview/**',
 				'shell.tgz',
 				'rocketride-client.tgz',
+				'devServerGuard.cjs',
 				'rocketride-dark-icon.png',
 				'rocketride-light-icon.png',
-				'docker.svg',
-				'onprem.svg',
 				'package.json',
 				'LICENSE',
 				'README.md',
@@ -261,6 +295,17 @@ function makeStageFilesAction() {
 			if (await exists(iconLight)) {
 				await copyFile(iconLight, path.join(BUILD_DIR, 'rocketride-light-icon.png'));
 			}
+			// The dev-server guard wrapper — spawned as a real file by the
+			// watch manager (it cannot live inside the esbuild bundle), so it
+			// ships beside the bundle. Sourced under src/ so the source-hash
+			// change detection restages it on edit. FUNCTIONAL, unlike the
+			// cosmetic icons around it: a missing guard fails every dev-server
+			// start with ENOENT at runtime — fail the STAGE instead.
+			const guardSrc = path.join(SRC_DIR, 'appdev', 'devServerGuard.cjs');
+			if (!(await exists(guardSrc))) {
+				throw new Error(`devServerGuard.cjs missing at ${guardSrc} — the dev-server tether cannot ship`);
+			}
+			await copyFile(guardSrc, path.join(BUILD_DIR, 'devServerGuard.cjs'));
 			const dockerSvg = path.join(APP_ROOT, 'docker.svg');
 			const onpremSvg = path.join(APP_ROOT, 'onprem.svg');
 			if (await exists(dockerSvg)) {
@@ -340,11 +385,7 @@ function makeTestAction() {
 	return {
 		description: 'Testing vscode',
 		run: async (ctx, task) => {
-			const testFiles = (await glob('src/test/*.test.ts', { cwd: APP_ROOT, nodir: true }))
-				// extension.test.ts requires the real extension-host-only `vscode` module.
-				// Compare basenames: glob yields backslash-separated paths on Windows.
-				.filter((file) => path.basename(file) !== 'extension.test.ts')
-				.sort();
+			const testFiles = (await glob('src/test/*.test.ts', { cwd: APP_ROOT, nodir: true })).sort();
 
 			// Fail rather than pass silently: this target exists because these tests
 			// previously ran nowhere, so a glob that matches nothing must not read as green.
@@ -435,6 +476,9 @@ module.exports = {
 					await setState(SRC_HASH_KEY, null);
 					await setState(BUNDLE_HASH_KEY, null);
 					await setState(SHARED_UI_HASH_KEY, null);
+					// Every hash key, or a survivor marks the next build clean —
+					// the exact hazard the comment at BUNDLE_SHARED_UI_HASH_KEY warns of.
+					await setState(BUNDLE_SHARED_UI_HASH_KEY, null);
 					task.output = 'Cleaned vscode';
 				},
 			}),

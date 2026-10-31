@@ -37,6 +37,7 @@ pipeline, streams its output, and ships through the built-in store.
 | Pick or configure a pipeline component | ROCKETRIDE_COMPONENT_REFERENCE.md (+ the catalog and schemas above) |
 | Drive a pipeline from Python or TypeScript | your language's API doc, §Pipeline execution |
 | Build or modify an app | ROCKETRIDE_CONCEPTS.md → ROCKETRIDE_APPS.md → your language's API doc §Apps |
+| Build or modify a dev tool (a panel in the host's sidebar + document tabs) | ROCKETRIDE_APPS.md → ROCKETRIDE_DEVTOOL.md |
 | Use a specific UI component (grid, chat, forms…) | ROCKETRIDE_UI_COMPONENTS.md |
 | Wire an app to a pipeline | ROCKETRIDE_APPS.md §Embedding pipelines |
 | Connect the outside world (MCP, n8n, webhooks, Telegram, CI) | ROCKETRIDE_INTEGRATIONS.md |

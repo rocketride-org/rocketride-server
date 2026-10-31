@@ -90,7 +90,7 @@ interface AppManifestJson {
 	readme?: string;
 	include?: string[];
 	typecheck?: boolean;
-	billing?: { plans?: Array<Record<string, unknown>> } & Record<string, unknown>;
+	billing?: { plans?: unknown[] } & Record<string, unknown>;
 	[key: string]: unknown;
 }
 
@@ -191,12 +191,34 @@ export function ensureProjectId(folder: string): string {
 // =============================================================================
 
 /** The listing projection of an appManifest (the App Builder webview contract). */
+/**
+ * One billing plan of the manifest's `appManifest.billing.plans` — the
+ * Stripe-shaped pricing proposal that rides every deploy (the packed
+ * package.json is the listing truth) and goes live on store approval.
+ */
+export interface BillingPlan {
+	/** Plan display name ("Starter", "Pro"). */
+	nickname: string;
+	/** Price in cents. */
+	amountCents: number;
+	/** ISO currency code. */
+	currency: string;
+	/** Billing interval ("month", "year", "one_time"). */
+	interval: string;
+	/**
+	 * Opaque plan metadata (credits, seats, features, ordering, display
+	 * overrides) — preserved verbatim on the save round-trip, never edited
+	 * by the listing form.
+	 */
+	metadata?: Record<string, unknown>;
+}
+
 export interface AppListing {
 	appId: string;
 	mode: 'free' | 'subscription' | 'paywall';
 	name: string;
 	description: string;
-	plans: Array<Record<string, unknown>>;
+	plans: BillingPlan[];
 	/** App-folder-relative icon path ('' = undeclared). */
 	icon?: string;
 	/** App-folder-relative README path ('' = undeclared). */
@@ -213,6 +235,31 @@ export interface AppListing {
  * @param folder - The app's bound folder (absolute path).
  * @returns The listing projection (mode defaults to 'free').
  */
+/** Narrows an unknown JSON value to a plain object. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Projects one raw manifest plan into the typed shape — the Stripe fields
+ * coerced to their contracted types, every OTHER key carried verbatim so the
+ * load→save round trip never sheds manifest content it does not understand.
+ *
+ * @param raw - One entry of appManifest.billing.plans, straight from JSON.
+ * @returns The typed plan.
+ */
+function normalizeBillingPlan(raw: unknown): BillingPlan {
+	const source = isRecord(raw) ? raw : {};
+	return {
+		...source,
+		nickname: typeof source.nickname === 'string' ? source.nickname : '',
+		amountCents: typeof source.amountCents === 'number' ? source.amountCents : 0,
+		currency: typeof source.currency === 'string' ? source.currency : 'usd',
+		interval: typeof source.interval === 'string' ? source.interval : 'month',
+		...(isRecord(source.metadata) ? { metadata: source.metadata } : {}),
+	};
+}
+
 export function readAppListing(folder: string): AppListing {
 	const { pkg } = readPkg(folder);
 	const m = pkg.appManifest as AppManifestJson;
@@ -222,7 +269,7 @@ export function readAppListing(folder: string): AppListing {
 		mode,
 		name: typeof m.name === 'string' ? m.name : (pkg.name ?? ''),
 		description: typeof m.description === 'string' ? m.description : '',
-		plans: Array.isArray(m.billing?.plans) ? m.billing.plans : [],
+		plans: Array.isArray(m.billing?.plans) ? m.billing.plans.map(normalizeBillingPlan) : [],
 		icon: typeof m.icon === 'string' ? m.icon : '',
 		readme: typeof m.readme === 'string' ? m.readme : '',
 		include: Array.isArray(m.include) ? m.include.filter((p): p is string => typeof p === 'string' && p.length > 0) : [],

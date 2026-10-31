@@ -10,6 +10,20 @@ declare module '*.svg' {
 	export default Component;
 }
 
+/** Append `?url` to import an SVG as a plain asset URL string instead of a
+ *  component — matching apps/shared/src/types/global.d.ts. */
+declare module '*.svg?url' {
+	const url: string;
+	export default url;
+}
+
+/** Append `?inline` to import an SVG as a data URI string — always inlined,
+ *  never an emitted file. Matching apps/shared/src/types/global.d.ts. */
+declare module '*.svg?inline' {
+	const dataUri: string;
+	export default dataUri;
+}
+
 declare module '*.png' {
 	const src: string;
 	export default src;

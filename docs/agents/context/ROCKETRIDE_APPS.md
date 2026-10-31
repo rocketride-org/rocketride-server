@@ -228,11 +228,15 @@ Two rules before anything else:
   deploys until the normal lifecycle (`verifyApp` → `addApp` →
   `publishApp`) runs.
 
-The New App wizard collects an app-name slug, a display name, a template
-(**Blank** or **Dashboard**), and three frame options that each toggle a
-chrome region of the generated app: **sidebar** (two-column layout with a
-navigation sidebar), **status footer** (`AppLayout showStatus`), and
-**doc tabs** (a document tab strip: Documents + DocSplitLayout + DocTabs).
+The New App wizard is the App Builder's empty state: "New app" opens an
+**Untitled** builder document whose body is the wizard (the same pattern as
+the pipeline editor's empty-canvas wizard), and creating the app binds that
+document to the new app's builder. It collects an app-name slug, a display
+name, a template (**Blank** or **Dashboard**), and three frame options that
+each toggle a chrome region of the generated app: **sidebar** (two-column
+layout with a navigation sidebar), **status footer** (`AppLayout
+showStatus`), and **doc tabs** (a document tab strip: Documents +
+DocSplitLayout + DocTabs).
 
 The wizard assembles the app id from your organization's developer id plus
 the slug, validates it, and writes the app folder under `./apps` in your
@@ -262,24 +266,27 @@ sharing one `node_modules`.
 
 ### Watch
 
-Opening an App Builder panel starts the watch for that app (gated by the
-`rocketride.appdev.autoWatch` setting):
+Opening an App Builder panel starts the watch for that app (always — there
+is no opt-out setting):
 
 1. **Install** — one `pnpm install` at the workspace root, shared and
    single-flight across all apps. Editing your app's `package.json`
    triggers a reinstall and a dev-server restart automatically.
-2. **Serve + rebuild** — `rsbuild dev` runs in your app folder, serving the
-   remote on the app's dev port and rebuilding on every save.
-3. **Register** — after each successful rebuild, your **personal dev
-   overlay** on the server is re-pointed at the served bundle, so the
-   preview (and only you) sees the dev version. Re-registering also keeps
-   the overlay's idle TTL alive.
+2. **Serve + rebuild** — `rsbuild dev` runs in your app folder as a
+   **passthrough proxy** to the connected server: your app's workspace
+   files serve from disk under `/apps/<appId>/dev/**`, everything else
+   (auth, the task websocket, other apps) proxies through untouched. It
+   rebuilds on every save.
+3. **Register** — after each successful rebuild, the preview shell is
+   handed the dev entry and your workspace manifest directly
+   (`rrdev:registerRemote`), so the preview (and only you) sees the dev
+   version — metadata included — with zero server involvement.
 4. **Reload** — the preview reloads (debounced) after each successful
    rebuild; hot updates apply where possible, with fallback to a full
    preview reload.
 
 Closing the panel stops the watch (after a short linger so a quick reopen
-revives it) and unregisters the dev overlay. The watch status line reports
+revives it). The watch status line reports
 `idle | installing | building | ok | error`, the last build duration, and
 where the dev bundle serves from — every error carries a human-readable
 reason telling you what to fix.
@@ -312,8 +319,8 @@ reason telling you what to fix.
   real external browser against the same dev session, with full devtools.
 
 The preview URL is a deep link into the shell — `?appid=<your.app>&rrdev=1`
-on the connected server: the same shell your users see, locked to your app
-with the dev overlay active.
+served through your app's dev proxy: the same shell your users see, locked
+to your app with its dev build registered locally.
 
 ### If the preview loops on sign-in
 
@@ -527,23 +534,36 @@ your `app` mount and declare your layout with props:
 
 ```typescript
 interface AppLayoutProps {
-	sidebar?: ReactNode;    // present = two-column app; absent = one column
+	sidebar?: ReactNode;    // present = the app has a sidebar; absent = one column
+	sidebarViews?: SidebarViewContainer[]; // optional: one activity-rail icon per view; REQUIRED for the rail chromes
+	sidebarMode?: 'rocketride' | 'vscode' | 'cursor'; // chrome projection ('vscode' default when sidebarViews is declared; without sidebarViews always the classic column); a non-'default' General > Sidebar user setting overrides it
 	showStatus?: boolean;   // show the status bar (default false)
 	status?: ReactNode;     // status-bar middle slot; implies showStatus
 	children: ReactNode;    // the client-area content
 }
 ```
 
-The `sidebar` node is the *scrolling portion* of the sidebar column — the
-fixed chrome around it (app-switcher header, account/connection footer) is
-the platform's guaranteed navigation, always rendered by the shell.
-Likewise the status bar's connection identity is stock; your `status` node
-fills its middle slot. Components inside your sidebar can call
-`useSidebarCollapsed()` to render an icon-rail form when collapsed.
+Declaring only `sidebar` renders the classic single column (it iconifies
+when collapsed). Declaring `sidebarViews` as well renders the VS Code-style
+frame instead: a fixed **activity rail** (one icon per `sidebarViews`
+entry) beside a **resizable panel** holding your content. The panel header
+shows your app's icon and name; the rail's foot carries the account menu
+and a Documentation icon. Collapsing closes the panel — the rail never
+disappears, and your content is never asked to iconify
+(`useSidebarCollapsed()` returns `false` inside the frame; it still
+reports real collapse in the compact/mobile drawer). View containers
+(`{ id, title, icon, content?, badge?, order?, isDefault? }`)
+without their own `content` share the `sidebar` node and read
+`useSidebarActiveView()` to switch what it presents; an existing
+`ViewMenu` can be projected onto the rail with `viewsFromMenu(menu)` —
+an explicit opt-in. `sidebarMode: 'cursor'` swaps the vertical rail for a
+horizontal icon strip across the panel top (closed, a slim reopen strip
+remains). The status bar's connection identity is stock; your
+`status` node fills its middle slot.
 
 | Zone | Owner | Content |
 |---|---|---|
-| **Sidebar** | Shell chrome + your `sidebar` node | Switcher header, your navigation, account/theme footer |
+| **Sidebar** | Shell frame + your `sidebar` node / `sidebarViews` | Activity rail, app-identity panel header, your navigation, account footer |
 | **Client Area** | Your app | Whatever you render inside `AppLayout` |
 | **Status Bar** | Shell (opt-in via `showStatus`/`status`) | Connection status + your middle slot |
 | **Debug Panel** | Shell (ALT+D) | Live log of every `shell:*` event |
@@ -588,6 +608,7 @@ import { useShellConnection, useWorkspace, usePrefs, AppLayout, Button } from 's
 | `useClient()` | `RocketRideClient \| null`, re-rendering on connect/disconnect. |
 | `useConnectionStatus()` | `ConnectionStatus` — the full state machine (state, retry attempt, progress message). |
 | `useShellApiConfig()` | `ShellApiConfig` — runtime config the host booted with. |
+| `useShellApiKey()` | `{ apiKey, loading, error }` — the connection's API key, fetched asynchronously. The only way to reach it: `client.getApiKey()` throws outside the root realm. Engine work needs no key — the client already carries the session. |
 | `getClient()` | Non-React access to the client singleton. |
 | `useAuthUser()` | `ConnectResult \| null` — current identity (the `AuthUser` type). |
 | `useLogout()` | Sign-out trigger. |
@@ -595,8 +616,19 @@ import { useShellConnection, useWorkspace, usePrefs, AppLayout, Button } from 's
 
 ```typescript
 const { client, isConnected } = useShellConnection();
-if (!client || !isConnected) return <div>Connecting...</div>;
+
+// `client` is a REAL client in every realm, including a VS Code webview —
+// its calls ride the shell bus to the host's socket. It is null only before
+// the realm has heard from the host.
+if (!client) return <Spinner />;        // UNKNOWN — not "disconnected"
+if (!isConnected) return <Offline />;   // known to be down
 ```
+
+**Never render absence as a negative.** `client === null` means *not known
+yet*, so `if (!client || !isConnected) return <div>Connecting…</div>` is a
+bug, not a shortcut: in a realm that is perfectly healthy it renders
+"Connecting…" forever while the status bar says connected. Distinguish the
+two states, and give the unknown one a neutral or loading treatment.
 
 The client instance is always the shell's — never construct a
 `RocketRideClient` in an app.
@@ -758,7 +790,7 @@ from `'shell'`). The full set:
 | `shell:sidebarCollapsing` | `{}` | Sidebar is collapsing. |
 | `shell:themeChange` | `{ tokens }` | Theme changed; `tokens` is the full `--rr-*` map. |
 | `shell:viewActivated` | `{ viewId }` | A view/tab became active — lazy panels init here. |
-| `shell:manifestRefresh` | `{ source }` | Server-side app manifest changed (dev overlay, publish, expiry). |
+| `shell:manifestRefresh` | `{ source }` | Server-side app manifest changed (publish, expiry). |
 | `shell:telemetry` | `{ event, props, ts, id }` | A telemetry fact the shell observed (`auth:complete`) for the active app to forward; `auth:start` and other held facts come from `cm.drainTelemetry()`. |
 | `app:statusChanged` | `{ appId, version?, status, notes? }` | Store review status changed. |
 | `store:changed` | `{ prefix, paths }` | Files changed under a watched store prefix. |
@@ -1779,17 +1811,20 @@ not-yet-published) version never means republishing. Two ways in:
 Both create a **session override**: it lives in the browser tab and dies
 with it — deliberately never persisted server-side, so an override cannot
 sit forgotten and quietly serve old code weeks later. Within the tab, the
-resolution order is: URL `?version=` first, then the session override, then
-your dev overlay, then the server's default for your rungs.
+resolution order is: your local dev registration first (while a watch or
+preview is serving the app, it owns the container outright), then URL
+`?version=`, then the session override, then the server's default for your
+rungs.
 
 Mechanics worth knowing:
 
 - **One version per page.** A loaded app is committed to its version for
   the life of the document — picking a different version after the app has
   loaded reloads the page once (before it loads, the switch is instant).
-- **The dev build wins.** While your watch is serving the app, the dev
-  overlay takes precedence over any override — stop the dev session to
-  test served versions.
+- **The dev build wins.** While your watch is serving the app, the local
+  dev registration (the preview page registers your dev bundle client-side)
+  takes precedence over any override — stop the dev session to test served
+  versions.
 - **Entitlement is enforced per request.** You can load any version served
   on a rung visible to you (your `@me`, a team you belong to, the approved
   store version) — or any version you deployed yourself, published or not.

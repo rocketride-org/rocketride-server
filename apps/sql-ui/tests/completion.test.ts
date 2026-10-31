@@ -31,8 +31,8 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { ISqlSchemaResponse } from '../src/connect';
-import type { ICompletionCandidate } from '../src/sql/completion';
+import type { SqlSchemaResponse } from '../src/connect';
+import type { CompletionCandidate } from '../src/sql/completion';
 import { buildCompletionModel, resolveAliases, suggestAt } from '../src/sql/completion';
 
 // =============================================================================
@@ -40,7 +40,7 @@ import { buildCompletionModel, resolveAliases, suggestAt } from '../src/sql/comp
 // =============================================================================
 
 /** Two tables joined by one declared foreign key, plus an awkward table name. */
-const SCHEMA: ISqlSchemaResponse = {
+const SCHEMA: SqlSchemaResponse = {
 	database: 'sample_shop',
 	tables: {
 		orders: {
@@ -73,7 +73,7 @@ const MODEL = buildCompletionModel(SCHEMA, Date.parse('2026-09-14T14:02:00Z'));
  * @param candidates - The candidates to order.
  * @returns The labels, sorted by sortText.
  */
-function ordered(candidates: ICompletionCandidate[]): string[] {
+function ordered(candidates: CompletionCandidate[]): string[] {
 	return [...candidates].sort((a, b) => a.sortText.localeCompare(b.sortText)).map((c) => c.label);
 }
 
@@ -84,7 +84,7 @@ function ordered(candidates: ICompletionCandidate[]): string[] {
  * @param label - The label to find.
  * @returns The candidate, or undefined.
  */
-function byLabel(candidates: ICompletionCandidate[], label: string): ICompletionCandidate | undefined {
+function byLabel(candidates: CompletionCandidate[], label: string): CompletionCandidate | undefined {
 	return candidates.find((c) => c.label === label);
 }
 

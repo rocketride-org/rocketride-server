@@ -26,14 +26,13 @@
 //
 // Module-level store (admin-ui navigation pattern): the shell mounts App and
 // Sidebar as siblings, so snapshots live here for both to subscribe to.
-// Sessions are cached per endpoint; all database traffic goes through the
-// connect/ layer's ISqlSession — never through client.tool directly.
+// All database traffic arrives as an SqlSession (local or controller-backed
+// — this store neither knows nor cares which): callers obtain the session
+// from their SqlEnv and hand it in. No RocketRide client in here.
 // =============================================================================
 
 import { useSyncExternalStore } from 'react';
-import type { RocketRideClient } from 'shell';
-import type { ISqlEndpoint, ISqlSchemaResponse, ISqlSession, SqlDialect } from '../connect';
-import { createSqlSession } from '../connect';
+import type { SqlSchemaResponse, SqlSession, SqlDialect } from '../connect';
 
 // =============================================================================
 // STATE
@@ -55,11 +54,11 @@ export type SchemaStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type RefreshToolState = 'unknown' | 'available' | 'suspect' | 'unavailable';
 
 /** One connection's schema snapshot. */
-export interface ISchemaState {
+export interface SchemaState {
 	/** Snapshot lifecycle state. */
 	status: SchemaStatus;
 	/** The reflected schema (null until the first refresh completes). */
-	schema: ISqlSchemaResponse | null;
+	schema: SqlSchemaResponse | null;
 	/** Engine dialect reported alongside the snapshot ('unknown' until read). */
 	dialect: SqlDialect;
 	/** Failure detail when status is 'error'. */
@@ -78,7 +77,7 @@ export interface ISchemaState {
 }
 
 /** The idle placeholder returned for connections with no snapshot yet. */
-const IDLE_SCHEMA: ISchemaState = {
+const IDLE_SCHEMA: SchemaState = {
 	status: 'idle',
 	schema: null,
 	dialect: 'unknown',
@@ -90,12 +89,8 @@ const IDLE_SCHEMA: ISchemaState = {
 
 // ── Module-level state ───────────────────────────────────────────────────────
 
-let snapshots: Record<string, ISchemaState> = {};
+let snapshots: Record<string, SchemaState> = {};
 const listeners = new Set<() => void>();
-
-// Session cache per endpoint key, tied to the client that created it so a
-// reconnect (new client instance) transparently rebuilds sessions.
-const sessions = new Map<string, { client: RocketRideClient; session: ISqlSession }>();
 
 /**
  * Replace one connection's snapshot and notify subscribers.
@@ -103,28 +98,9 @@ const sessions = new Map<string, { client: RocketRideClient; session: ISqlSessio
  * @param key - The endpoint key.
  * @param next - The new snapshot for that key.
  */
-function setSnapshot(key: string, next: ISchemaState): void {
+function setSnapshot(key: string, next: SchemaState): void {
 	snapshots = { ...snapshots, [key]: next };
 	listeners.forEach((fn) => fn());
-}
-
-// =============================================================================
-// SESSIONS
-// =============================================================================
-
-/**
- * Get (or lazily create) the cached session for an endpoint.
- *
- * @param client - The shell's RocketRide client.
- * @param endpoint - The endpoint to bind.
- * @returns The cached or freshly created session.
- */
-export function getSession(client: RocketRideClient, endpoint: ISqlEndpoint): ISqlSession {
-	const cached = sessions.get(endpoint.key);
-	if (cached && cached.client === client) return cached.session;
-	const session = createSqlSession(client, endpoint);
-	sessions.set(endpoint.key, { client, session });
-	return session;
 }
 
 // =============================================================================
@@ -148,25 +124,24 @@ const inFlight = new Map<string, { promise: Promise<void>; fresh: boolean }>();
  * The node reflects once at task start, so an ordinary refresh re-reads that
  * same snapshot: it is a cheap way to recover from a transient failure, not a
  * way to see DDL. Pass `fresh` after applying DDL to make the node re-reflect
- * — the resulting snapshot carries {@link ISchemaState.stale} when the call
+ * — the resulting snapshot carries {@link SchemaState.stale} when the call
  * fell back to the task-start reflection.
  *
- * @param client - The shell's RocketRide client.
- * @param endpoint - The connection's endpoint.
+ * @param session - The connection's session (from the caller's SqlEnv).
  * @param opts - Optional refresh options.
  * @param opts.fresh - Re-reflect the database rather than re-reading the
  *                     task-start snapshot.
  * @returns A promise that settles once the requested read has landed.
  */
-export function refreshSchema(client: RocketRideClient, endpoint: ISqlEndpoint, opts?: { fresh?: boolean }): Promise<void> {
-	const key = endpoint.key;
+export function refreshSchema(session: SqlSession, opts?: { fresh?: boolean }): Promise<void> {
+	const key = session.endpoint.key;
 	const fresh = opts?.fresh === true;
 	const active = inFlight.get(key);
 
 	// Joining is only honest when the active refresh answers this caller too.
 	if (active && (!fresh || active.fresh)) return active.promise;
 
-	const run = (): Promise<void> => runRefresh(client, endpoint, fresh);
+	const run = (): Promise<void> => runRefresh(session, fresh);
 	const promise: Promise<void> = (active ? active.promise.then(run, run) : run()).finally(() => {
 		// Only the entry this call installed may be cleared: a later refresh
 		// that queued behind it owns the slot by then.
@@ -180,16 +155,15 @@ export function refreshSchema(client: RocketRideClient, endpoint: ISqlEndpoint, 
  * Perform one refresh. Never rejects: a failure lands in the snapshot's
  * error field, which is what every view reads.
  *
- * @param client - The shell's RocketRide client.
- * @param endpoint - The connection's endpoint.
+ * @param session - The connection's session.
  * @param fresh - Whether to ask the node to re-reflect the database.
  */
-async function runRefresh(client: RocketRideClient, endpoint: ISqlEndpoint, fresh: boolean): Promise<void> {
+async function runRefresh(session: SqlSession, fresh: boolean): Promise<void> {
+	const endpoint = session.endpoint;
 	const current = snapshots[endpoint.key] ?? IDLE_SCHEMA;
 	setSnapshot(endpoint.key, { ...current, status: 'loading', error: null });
 
 	try {
-		const session = getSession(client, endpoint);
 		// Dialect first (cheap), then the full reflection.
 		const dialect = await session.dialect();
 
@@ -253,7 +227,7 @@ function subscribe(cb: () => void): () => void {
  * @param key - The endpoint key (null returns the idle placeholder).
  * @returns The snapshot for that connection.
  */
-export function useSchema(key: string | null): ISchemaState {
+export function useSchema(key: string | null): SchemaState {
 	return useSyncExternalStore(
 		subscribe,
 		() => (key ? snapshots[key] ?? IDLE_SCHEMA : IDLE_SCHEMA),

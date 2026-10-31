@@ -40,8 +40,9 @@
 //   - Browser-specific session storage for auth phase tracking
 // =============================================================================
 
-import { stashSignupProperties, takeSignupProperties, currentSignupProperties, clearSignupProperties } from '../util/signupAttribution';
+import { takeSignupProperties, currentSignupProperties, clearSignupProperties } from '../util/signupAttribution';
 import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError, type PkceCredential, type SignupProperties } from 'rocketride';
+import type { DAPMessage } from 'rocketride';
 import type { ShellConnectionEventMap, IConnectionManager } from '../types/shell';
 import type { IAuthProvider } from '../types/connection';
 // ConnectionState is the one runtime value; the rest are type-only so
@@ -50,9 +51,15 @@ import { ConnectionState } from '../types/connection';
 import type { ConnectionMode, ConnectionStatus } from '../types/connection';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
+import { RocketRideClientProxy } from './RocketRideClientProxy';
 import { AUTH_REJECTED_MESSAGE, ConnectionFailure } from './errors';
 import { shouldReloadForTokenStorageUpdate } from './tokenStorageUpdate';
-import { isEmbeddedDevShell, tokenStore } from '../util/devGate';
+import { createOpBus } from '../ops/busOps';
+import { CLIENT_EVENT_OP } from '../ops/clientOps';
+import type { IOpBus, IBusRequestOptions, BusOpHandler } from '../ops/busOps';
+import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
+import type { IRetainedPort, RetainedSubscriber } from '../ops/retained';
+import { isEmbeddedDevShell, isSameOriginEmbed, tokenStore, sessionScopedStore } from '../util/devGate';
 import { TelemetryChannel, type TelemetryFact } from '../util/telemetryChannel';
 import { AUTH_START_STAMP_KEY, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
 import {
@@ -253,7 +260,9 @@ export class ConnectionManager implements IConnectionManager {
 		return instance;
 	}
 
-	private constructor() {}
+	private constructor() {
+		this.installMirrorSubscriptions();
+	}
 
 	// =========================================================================
 	// PRIVATE STATE
@@ -301,7 +310,26 @@ export class ConnectionManager implements IConnectionManager {
 	// --- Event bus ---
 	private listeners = new Map<string, Set<Handler>>();
 	private wildcardListeners = new Set<WildcardHandler>();
+
+	/** The bus's ADDRESSED-OP lane (request/handle/emitOp) — see busOps.ts.
+	 *  The event lane above broadcasts; this lane routes to THE registered
+	 *  handler, across realms when a bridge is attached (busBridge.ts). */
+	private opBus: IOpBus = createOpBus();
 	private debugLog: DebugLogEntry[] = [];
+
+	// --- Retained-topic lane (publish/subscribe/read — see ops/retained.ts) ---
+	/** This realm's default authority — the ROOT realm's registry IS the
+	 *  framework's, an unbridged realm's is standalone (tests), and a bridged
+	 *  realm's is superseded by the wire port from attachRealmToRoot. */
+	private readonly retainedRegistry = createRetainedRegistry();
+	private retainedPort: IRetainedPort = localRetainedPort(this.retainedRegistry);
+	/** Local subscriptions, re-pointed wholesale when the port swaps. */
+	// `last` caches the newest snapshot this realm has SEEN for the topic, so
+	// a subscriber joining an already-watched topic replays off it. Without
+	// that cache the port's replay — which fires once, when the port
+	// subscription is created — reaches only the FIRST local subscriber, and
+	// every later one waits for an edge that may never come.
+	private readonly topicSubs = new Map<string, { cbs: Set<RetainedSubscriber>; off: () => void; last?: { snapshot: unknown } }>();
 
 	/**
 	 * User-intent control events that must not be silently dropped if emitted
@@ -450,12 +478,12 @@ export class ConnectionManager implements IConnectionManager {
 			},
 		});
 
-		// Store auth provider (preferred) or legacy OAuth config
+		// Store the auth provider. (The deprecated zitadelUrl/zitadelClientId
+		// InitOptions keys remain declared on the frozen contract but are
+		// ignored — every OAuth flow goes through the auth provider.)
 		if (options?.authProvider) {
 			this.authProvider = options.authProvider;
 		}
-		this.zitadelUrl = options?.zitadelUrl ?? '';
-		this.zitadelClientId = options?.zitadelClientId ?? '';
 
 		// Attach immediately so public APIs (rrext_public_*) work before login.
 		// The promise is stored so bootstrap() can await it before login().
@@ -542,11 +570,6 @@ export class ConnectionManager implements IConnectionManager {
 	/** Auth provider for OAuth sign-in (set via init options). */
 	private authProvider: IAuthProvider | null = null;
 
-	/** @deprecated Legacy Zitadel config — use authProvider instead. */
-	private zitadelUrl = '';
-	/** @deprecated Legacy Zitadel config — use authProvider instead. */
-	private zitadelClientId = '';
-
 	/** Cached in-flight/settled bootstrap promise — dedupes repeat bootstrap() calls
 	 *  (StrictMode double-invoke in dev, a Shell remount, MF host re-init) so every caller
 	 *  gets the SAME result instead of a null that the shell would misread as "logged out". */
@@ -558,6 +581,15 @@ export class ConnectionManager implements IConnectionManager {
 	private oauthStarted = false;
 	/** Telemetry facts raised before the active app subscribed (see reportTelemetry). */
 	private telemetry = ConnectionManager.newTelemetryChannel();
+	/** True once this realm was bridged to the root (setRetainedPort) — its
+	 *  telemetry is a MIRROR of the root's; the root owns the channel. */
+	private bridgedRealm = false;
+	/** Fact ids already emitted to this realm's listeners (the retained
+	 *  mirror re-delivers snapshots; ids keep the fan-out exactly-once). */
+	private seenTelemetryFactIds = new Set<string>();
+	/** The root's held facts, mirrored via the retained lane — what a bridged
+	 *  realm's drainTelemetry() answers with, synchronously. */
+	private mirroredHeldFacts: TelemetryFact[] = [];
 	/** Ids of the facts delivered live (the channel numbers the held ones). */
 	private telemetrySeq = 0;
 	/** Counts the drops of held facts (dropHeldTelemetry), so a fact raised before a drop is never held after it. */
@@ -610,6 +642,7 @@ export class ConnectionManager implements IConnectionManager {
 		const held = this.telemetry.report(event, props, Date.now());
 		if (held) {
 			this.logDebug('shell:telemetry', held);
+			this.publishTelemetrySnapshot(null);
 		}
 	}
 
@@ -645,14 +678,34 @@ export class ConnectionManager implements IConnectionManager {
 		try {
 			const live = this.listeners.get('shell:telemetry');
 			if (live && live.size > 0) {
+				this.seenTelemetryFactIds.add(fact.id);
 				this.dispatch(live, 'shell:telemetry', fact);
+				this.publishTelemetrySnapshot(fact);
 			} else if (drops === this.telemetryDrops) {
 				this.telemetry.hold(fact);
+				this.publishTelemetrySnapshot(null);
 			}
 		} catch {
 			// telemetry must never break the shell
 		} finally {
 			this.telemetryInFlight--;
+		}
+	}
+
+	/**
+	 * Publish the telemetry mirror on the retained lane. Events are realm-local
+	 * on the bus BY DESIGN (busBridge), so the root fans facts to other realms
+	 * here instead: `live` is re-emitted by each realm's mirror subscription
+	 * (deduped on fact id), and `held` keeps every realm's drainTelemetry()
+	 * answer current. Published on every mutation of the channel.
+	 *
+	 * @param live - A fact delivered live just now, or null (hold/drain/drop).
+	 */
+	private publishTelemetrySnapshot(live: TelemetryFact | null): void {
+		try {
+			this.publish('shell:telemetry', { live, held: this.telemetry.peek() });
+		} catch {
+			// telemetry must never break the shell
 		}
 	}
 
@@ -664,14 +717,26 @@ export class ConnectionManager implements IConnectionManager {
 	 * @returns The buffered facts in the order they were raised.
 	 */
 	public drainTelemetry(): TelemetryFact[] {
-		return this.telemetry.drain();
+		if (this.bridgedRealm) {
+			// The root owns the channel; this realm answers from the retained
+			// mirror and asks the root to consume. Two realms draining at once
+			// can duplicate a fact — ids make that harmless downstream, and
+			// one forwarding app per tab is the contract.
+			const facts = this.mirroredHeldFacts;
+			this.mirroredHeldFacts = [];
+			for (const f of facts) this.seenTelemetryFactIds.add(f.id);
+			if (facts.length > 0) this.emitOp('telemetry.drained', {});
+			return facts;
+		}
+		const facts = this.telemetry.drain();
+		this.publishTelemetrySnapshot(null);
+		return facts;
 	}
 
 	/**
 	 * Redirect the browser to the OAuth provider for authorization.
 	 *
-	 * Delegates to the auth provider's ``signIn()`` method. Falls back to
-	 * the legacy PKCE flow if no auth provider is configured.
+	 * Delegates to the auth provider's ``signIn()`` method.
 	 *
 	 * @param register - Retained for compatibility; no longer changes the
 	 *                   destination. All flows land on Zitadel's login page
@@ -709,25 +774,16 @@ export class ConnectionManager implements IConnectionManager {
 		// callback page, whose drain hands it over.
 		this.holdTelemetry('auth:start', startProps);
 		try {
-			if (this.authProvider) {
-				await this.authProvider.signIn(undefined, register, signup);
-				return;
-			}
-			// The provider owns pending context; the legacy path has no provider.
-			stashSignupProperties(signup);
-			// Legacy fallback — remove once all callers pass authProvider
-			if (!this.zitadelUrl || !this.zitadelClientId) {
-				console.error('[ConnectionManager] Zitadel not configured');
-				this.emit('shell:error', { error: new Error('Zitadel not configured') });
+			if (!this.authProvider) {
+				console.error('[ConnectionManager] No auth provider configured');
+				this.emit('shell:error', { error: new Error('No auth provider configured') });
 				this.oauthStarted = false; // no redirect happened — allow a retry
 				return;
 			}
-			const { generatePkce, buildAuthUrl } = await import('../util/pkce');
-			const { challenge } = await generatePkce();
-			const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge, register);
-			// assign() (not replace()) keeps the landing page reachable via the
-			// browser back button — matches CloudAuthProvider.signIn().
-			window.location.assign(url);
+			// The provider owns pending signup context (CloudAuthProvider stashes
+			// it); the providerless legacy Zitadel path was removed with the bus
+			// rework, so attribution has exactly one entry point.
+			await this.authProvider.signIn(undefined, register, signup);
 		} catch (err) {
 			// Initiation threw before any redirect (signIn rejected, PKCE/crypto
 			// failure, etc.) — release the guard so a later attempt can retry.
@@ -1364,16 +1420,37 @@ export class ConnectionManager implements IConnectionManager {
 	// PUBLIC ACCESSORS (matches VSCode API)
 	// =========================================================================
 
-	/** Returns the RocketRideClient instance, or null if not initialized. */
+	/**
+	 * Returns the RocketRideClient instance, or null if not initialized.
+	 *
+	 * In a BUS-MIRRORED realm this is the realm's own
+	 * {@link RocketRideClientProxy} — a real client whose `call()` rides the
+	 * bus to the root's socket. It appears once the first mirror delivery has
+	 * seeded it, and not before: a client answering `isAuthenticated()` from
+	 * an unseeded handshake would report a confident FALSE over a live
+	 * session, which is worse than the null a caller already handles.
+	 */
 	public getClient(): RocketRideClient | null {
-		return this.client;
+		// `?? null` closes the gap: callers branch on `=== null`, and a
+		// `undefined` leaking through would be a truthiness-only bug.
+		return this.client ?? this.mirrorClient ?? null;
 	}
 
 	/** Returns true if the WebSocket is authenticated and connected. */
 	public isConnected(): boolean {
+		// A bus-mirrored realm has NO client — the framework root's mirrored
+		// liveness is the answer (the mirror subscription). Null = not a mirrored realm.
+		if (this.mirrorConnected !== null) return this.mirrorConnected;
 		return this.connectionStatus.state === ConnectionState.CONNECTED &&
 			(this.client?.isConnected() ?? false);
 	}
+
+	/** Root-mirrored liveness for socketless realms (null = unmirrored). */
+	private mirrorConnected: boolean | null = null;
+
+	/** This realm's brokered client — built on the first mirror delivery,
+	 *  null in a realm that owns a socket (or has not heard from the root). */
+	private mirrorClient: RocketRideClientProxy | null = null;
 
 	/** Returns true if a connection attempt is in progress. */
 	public isConnecting(): boolean {
@@ -1414,13 +1491,15 @@ export class ConnectionManager implements IConnectionManager {
 		try { tokenStore().setItem(LS_TOKEN, token); } catch (e) {
 			console.error('[ConnectionManager] Failed to save token:', e);
 		}
-		// An embedded preview must not stamp the HOST-WIDE /apps cookie: the
-		// cookie jar is shared by every same-origin frame, so a panel's
-		// injected dev session would swap the bundle credentials out from
-		// under the embedding user's real session and every sibling panel.
-		// The preview's own dev bundle is served by the dev overlay, not
-		// /apps, so the prime is not needed there either.
-		if (isEmbeddedDevShell()) return;
+		// A SAME-ORIGIN embedded preview (the web App Builder iframe) must
+		// not stamp the HOST-WIDE /apps cookie: the jar is shared by every
+		// same-origin frame, so a panel's injected dev session would swap
+		// the bundle credentials out from under the embedding user's real
+		// session and every sibling panel. A CROSS-origin preview (VS Code —
+		// served from its app's dev-proxy origin) owns its jar outright, and
+		// its PUBLISHED app bundles load through the proxy's /apps routes,
+		// so the prime must run there.
+		if (isEmbeddedDevShell() && isSameOriginEmbed()) return;
 		this.primeAppsCookie(token);
 	}
 
@@ -1480,6 +1559,8 @@ export class ConnectionManager implements IConnectionManager {
 		this.telemetryDrops++;
 		try {
 			this.telemetry.clear();
+			this.mirroredHeldFacts = [];
+			this.publishTelemetrySnapshot(null);
 		} catch {
 			// telemetry must never break the shell
 		}
@@ -1542,14 +1623,20 @@ export class ConnectionManager implements IConnectionManager {
 	// SESSION STORAGE HELPERS
 	// =========================================================================
 
-	/** Read session-locked app ID from sessionStorage. */
+	// All tab-session keys route through sessionScopedStore(): a FRAMED
+	// shell (App Builder previews — live and built) gets a frame-local slot
+	// so its session lock / pending app can never stamp the top shell's
+	// next boot; top-level shells keep real sessionStorage (deep links and
+	// the OAuth redirect round-trip depend on it).
+
+	/** Read session-locked app ID from the tab-session store. */
 	public getSessionAppId(): string {
-		try { return sessionStorage.getItem(SS_APP_ID) ?? ''; } catch { return ''; }
+		try { return sessionScopedStore().getItem(SS_APP_ID) ?? ''; } catch { return ''; }
 	}
 
-	/** Save session-locked app ID to sessionStorage. */
+	/** Save session-locked app ID to the tab-session store. */
 	public setSessionAppId(id: string): void {
-		try { sessionStorage.setItem(SS_APP_ID, id); } catch (e) {
+		try { sessionScopedStore().setItem(SS_APP_ID, id); } catch (e) {
 			console.error('[ConnectionManager] Failed to set session app ID:', e);
 		}
 	}
@@ -1557,8 +1644,8 @@ export class ConnectionManager implements IConnectionManager {
 	/** Clear session app ID. */
 	private clearSessionAppId(): void {
 		try {
-			sessionStorage.removeItem(SS_APP_ID);
-			sessionStorage.removeItem(SS_PENDING_APP_ID);
+			sessionScopedStore().removeItem(SS_APP_ID);
+			sessionScopedStore().removeItem(SS_PENDING_APP_ID);
 		} catch (e) {
 			console.error('[ConnectionManager] Failed to clear session storage:', e);
 		}
@@ -1566,19 +1653,19 @@ export class ConnectionManager implements IConnectionManager {
 
 	/** Read the pending app ID (set before OAuth redirect). */
 	public getPendingAppId(): string {
-		try { return sessionStorage.getItem(SS_PENDING_APP_ID) ?? ''; } catch { return ''; }
+		try { return sessionScopedStore().getItem(SS_PENDING_APP_ID) ?? ''; } catch { return ''; }
 	}
 
 	/** Clear the pending app ID. Called when an OAuth round-trip is abandoned
 	 *  (user pressed Back from Zitadel) so the stale target can't re-seed the
 	 *  auth gate on the next load and bounce them straight back to login. */
 	public clearPendingAppId(): void {
-		try { sessionStorage.removeItem(SS_PENDING_APP_ID); } catch { /* storage unavailable */ }
+		try { sessionScopedStore().removeItem(SS_PENDING_APP_ID); } catch { /* storage unavailable */ }
 	}
 
 	/** Save pending app ID (for retrieval after OAuth callback). */
 	public setPendingAppId(id: string): void {
-		try { sessionStorage.setItem(SS_PENDING_APP_ID, id); } catch (e) {
+		try { sessionScopedStore().setItem(SS_PENDING_APP_ID, id); } catch (e) {
 			console.error('[ConnectionManager] Failed to set pending app ID:', e);
 		}
 	}
@@ -1777,6 +1864,293 @@ export class ConnectionManager implements IConnectionManager {
 	public onAny(handler: WildcardHandler): () => void {
 		this.wildcardListeners.add(handler);
 		return () => this.wildcardListeners.delete(handler);
+	}
+
+	// =========================================================================
+	// BUS OPS — the addressed-operation lane (request / handle / emitOp)
+	// =========================================================================
+
+	/**
+	 * Invokes an addressed op and awaits its result — the bus's second lane.
+	 * Resolution: this realm's handler, else the bridge to the framework
+	 * root (router: root handlers -> owning realm -> summon -> reject).
+	 *
+	 * Op names are `ns.verb` by convention (the `.`/`:` split against events
+	 * is voluntary style; the bus matches full strings). Prefer the typed
+	 * facade (`typedBusOps<MyOps>(cm.ops())`) at call sites.
+	 *
+	 * @param op - The op's wire name.
+	 * @param params - The op's payload.
+	 * @param opts - Timeout override.
+	 * @returns The handler's result.
+	 */
+	public request(op: string, params: unknown, opts?: IBusRequestOptions): Promise<unknown> {
+		this.logDebug(op, params);
+		return this.opBus.request(op, params, opts);
+	}
+
+	/**
+	 * Fires an addressed op without awaiting a result — the SAME handler an
+	 * equivalent request() would reach; its return value is discarded. The
+	 * caller chooses the lane, not the name.
+	 *
+	 * @param op - The op's wire name.
+	 * @param params - The op's payload.
+	 */
+	public emitOp(op: string, params: unknown): void {
+		this.logDebug(op, params);
+		this.opBus.emitOp(op, params);
+	}
+
+	/**
+	 * Registers THE handler for an op — registration is the allowlist and
+	 * the routing entry (one handler per name; a second registration
+	 * throws). When this realm is bridged, the registration is announced to
+	 * the root router so any realm can address the op.
+	 *
+	 * @param op - The op's wire name.
+	 * @param handler - Plain async function answering the op.
+	 * @returns An unregister function.
+	 */
+	public handle(op: string, handler: BusOpHandler): () => void {
+		return this.opBus.handle(op, handler);
+	}
+
+	/**
+	 * The raw op bus — for the bridge/router (busBridge.ts) and the typed
+	 * facade (`typedBusOps`). Application code prefers request/handle above.
+	 *
+	 * @returns This realm's op bus.
+	 */
+	public ops(): IOpBus {
+		return this.opBus;
+	}
+
+	// =========================================================================
+	// RETAINED TOPICS — the bus's third lane (publish/subscribe/read)
+	// =========================================================================
+
+	/**
+	 * Publishes a retained topic: the root's registry replaces the topic's
+	 * snapshot and every subscriber (any realm) receives it; late subscribers
+	 * replay it. `undefined` retracts. Doctrine (stated, not enforced): one
+	 * writer per topic, static code-shaped names, immutable JSON-safe
+	 * snapshots — see ops/retained.ts.
+	 *
+	 * @param topic - The topic name (e.g. 'shell:account').
+	 * @param snapshot - The new current value, or undefined to retract.
+	 */
+	public publish(topic: string, snapshot: unknown): void {
+		this.retainedPort.publish(topic, snapshot);
+	}
+
+	/**
+	 * Delivers a TRANSIENT payload to the topic's subscribers — same fan-out
+	 * as publish, nothing stored: read() never sees it, late subscribers
+	 * replay nothing. Cross-realm events with N readers.
+	 *
+	 * @param topic - The topic name.
+	 * @param payload - The transient payload.
+	 */
+	public signal(topic: string, payload: unknown): void {
+		this.retainedPort.signal(topic, payload);
+	}
+
+	/**
+	 * Subscribes to a retained topic. The current snapshot (when one exists)
+	 * is replayed FIRST — async, never inside this call — then every
+	 * replacement is delivered. Subscribing before the first publish is the
+	 * natural case: the callback simply fires on that first publish.
+	 *
+	 * @param topic - The topic name.
+	 * @param cb - Receives each snapshot (`undefined` = retraction).
+	 * @returns Unsubscribe.
+	 */
+	public subscribe(topic: string, cb: RetainedSubscriber): () => void {
+		let entry = this.topicSubs.get(topic);
+		if (!entry) {
+			entry = { cbs: new Set<RetainedSubscriber>(), off: () => {} };
+			this.topicSubs.set(topic, entry);
+			entry.off = this.watchTopic(topic, entry);
+		}
+		entry.cbs.add(cb);
+		// LATE JOINER on a topic already watched here: the port replayed to
+		// whoever opened the subscription, not to this callback. Replay off
+		// the cache — async, matching the port's own discipline, and only if
+		// the subscription is still live. A joiner that arrives before that
+		// first replay has no cache yet and needs none: it is already in
+		// `cbs`, so the port's replay fans to it too.
+		if (entry.last) {
+			const { snapshot } = entry.last;
+			const joined = entry;
+			queueMicrotask(() => {
+				if (joined.cbs.has(cb)) this.fanTopic(new Set([cb]), snapshot);
+			});
+		}
+		return () => {
+			const current = this.topicSubs.get(topic);
+			if (!current) return;
+			current.cbs.delete(cb);
+			if (current.cbs.size === 0) {
+				current.off();
+				this.topicSubs.delete(topic);
+			}
+		};
+	}
+
+	/**
+	 * The topic's current snapshot, or undefined when never published (or
+	 * retracted). Async everywhere — a bridged realm cannot read the root's
+	 * map synchronously, and one signature keeps call sites portable.
+	 *
+	 * @param topic - The topic name.
+	 * @returns The current snapshot.
+	 */
+	public read(topic: string): Promise<unknown> {
+		return this.retainedPort.read(topic);
+	}
+
+	/**
+	 * Installs the realm's retained transport — called ONCE by the bus-realm
+	 * attachment with the wire port from attachRealmToRoot. Every existing
+	 * subscription re-points to the new port (and replays off the root's
+	 * authority), so subscribe-before-attach works.
+	 *
+	 * @param port - The wire-backed port.
+	 */
+	public setRetainedPort(port: IRetainedPort): void {
+		this.bridgedRealm = true;
+		this.retainedPort = port;
+		for (const [topic, entry] of this.topicSubs) {
+			entry.off();
+			entry.off = this.watchTopic(topic, entry);
+		}
+	}
+
+	/** Opens the port subscription for one topic entry, caching each snapshot
+	 *  it delivers so late joiners can replay (see topicSubs). */
+	private watchTopic(topic: string, entry: { cbs: Set<RetainedSubscriber>; off: () => void; last?: { snapshot: unknown } }): () => void {
+		return this.retainedPort.subscribe(topic, (snapshot) => {
+			entry.last = { snapshot };
+			this.fanTopic(entry.cbs, snapshot);
+		});
+	}
+
+	/** Delivers one snapshot to a topic's local subscribers (throw-isolated). */
+	private fanTopic(cbs: Set<RetainedSubscriber>, snapshot: unknown): void {
+		for (const cb of [...cbs]) {
+			try {
+				cb(snapshot);
+			} catch (err) {
+				console.error('[ConnectionManager] topic subscriber threw:', err);
+			}
+		}
+	}
+
+	/**
+	 * The framework's own mirror topics, consumed like anyone else's: a
+	 * SOCKETLESS realm's isConnected()/getConnectionStatus()/getAccountInfo()/
+	 * getCachedServices() answer from the last delivery (the shape-3 cache —
+	 * rebuildable, written by nobody), and the matching shell events re-emit
+	 * locally so consumers written against the ambient manager work
+	 * unchanged. In a realm with a real client nothing publishes these, so
+	 * the subscriptions simply never fire.
+	 */
+	private installMirrorSubscriptions(): void {
+		// Telemetry mirror: the root (or any raising realm) publishes facts on
+		// the retained lane; every realm re-emits NEW live facts to its own
+		// 'shell:telemetry' listeners (events are realm-local on the bus) and
+		// keeps the held list for a synchronous drainTelemetry().
+		this.subscribe('shell:telemetry', (snapshot) => {
+			const snap = snapshot as { live: TelemetryFact | null; held: TelemetryFact[] } | undefined;
+			if (!snap || !Array.isArray(snap.held)) return;
+			this.mirroredHeldFacts = snap.held;
+			// Bound the dedupe set — ids are tab-unique, a long session must not grow it forever.
+			if (this.seenTelemetryFactIds.size > 1024) this.seenTelemetryFactIds.clear();
+			const live = snap.live;
+			if (live && typeof live.id === 'string' && !this.seenTelemetryFactIds.has(live.id)) {
+				this.seenTelemetryFactIds.add(live.id);
+				const subs = this.listeners.get('shell:telemetry');
+				if (subs && subs.size > 0) this.dispatch(subs, 'shell:telemetry', live);
+			}
+		});
+		// Root side of a bridged realm's drain: consume the channel so a held
+		// fact is handed over exactly once per tab.
+		this.handle('telemetry.drained', () => {
+			this.telemetry.drain();
+			this.publishTelemetrySnapshot(null);
+			return {};
+		});
+		this.subscribe('shell:status', (snapshot) => {
+			const mirror = snapshot as { connected: boolean; status: ConnectionStatus; engineHttpUrl?: string } | undefined;
+			if (!mirror || mirror.connected === undefined || mirror.status === undefined) return;
+			// The root's engine HTTP base — so getHttpUrl() answers in
+			// socketless realms (engine-served icons, MF remote entries).
+			if (mirror.engineHttpUrl !== undefined) this.serverUri = mirror.engineHttpUrl;
+			const wasConnected = this.isConnected();
+			this.mirrorConnected = mirror.connected;
+			// Normalize the root's status onto this realm's enum so every state
+			// reader agrees with the liveness flag.
+			this.connectionStatus = { ...mirror.status, state: mirror.connected ? ConnectionState.CONNECTED : ConnectionState.DISCONNECTED };
+			this.seedMirrorClient();
+			this.emit('shell:statusChange', this.connectionStatus);
+			if (mirror.connected && !wasConnected) this.emit('shell:connected', undefined as never);
+			else if (!mirror.connected && wasConnected) this.emit('shell:disconnected', { reason: 'root disconnected', hasError: false } as never);
+		});
+		this.subscribe('shell:account', (snapshot) => {
+			if (!snapshot) return;
+			this.accountInfo = snapshot as ConnectResult;
+			this.seedMirrorClient();
+			this.emit('shell:accountUpdate', this.accountInfo);
+		});
+		this.subscribe('shell:services', (snapshot) => {
+			const services = snapshot as { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string } | undefined;
+			if (!services) return;
+			this.cachedServices = (services.services ?? null) as Record<string, unknown> | null;
+			this.cachedServiceIcons = (services.icons ?? null) as Record<string, string> | null;
+			this.cachedServicesError = services.servicesError ?? null;
+			this.emit('shell:servicesUpdated', { services: this.cachedServices ?? {}, ...(this.cachedServiceIcons ? { icons: this.cachedServiceIcons } : {}), ...(this.cachedServicesError ? { servicesError: this.cachedServicesError } : {}) } as never);
+		});
+	}
+
+	/**
+	 * Builds (once) and re-seeds this realm's brokered client from the mirror
+	 * topics above.
+	 *
+	 * WHY NO TOPIC OF ITS OWN: everything the handshake accessors need is
+	 * already mirrored and already RETAINED — `shell:status` carries liveness
+	 * and the server URL, `shell:account` carries the ConnectResult. Adding a
+	 * `client:identity` topic would mean a second publisher to keep in step
+	 * with these, and a second chance to get the edge-versus-level discipline
+	 * wrong. Retained delivery is what makes it safe: a realm that mounts
+	 * late replays the current snapshot instead of waiting for the next edge.
+	 *
+	 * Called on EVERY delivery, not just the first: the root reconnecting, or
+	 * switching account, has to move this instance with it.
+	 *
+	 * Does nothing in a realm that owns a socket — nothing publishes these
+	 * topics there, so the subscriptions never fire in the first place.
+	 */
+	private seedMirrorClient(): void {
+		if (this.client) return;
+		if (!this.mirrorClient) {
+			this.mirrorClient = new RocketRideClientProxy({
+				request: (op, params, timeoutMs) => this.request(op, params, timeoutMs !== undefined ? { timeoutMs } : undefined),
+			});
+			// Engine events the ROOT received, pushed down to this realm (the
+			// root broadcasts; see CLIENT_EVENT_OP). Registered with the
+			// client, not before it: an event arriving with nowhere to go
+			// would be dropped, and this is the only thing that wants it.
+			this.ops().handle(CLIENT_EVENT_OP, (params) => {
+				const { message } = (params ?? {}) as { message?: DAPMessage };
+				if (message) void this.mirrorClient?.receiveEvent(message);
+			});
+		}
+		this.mirrorClient.applyIdentity({
+			connected: this.mirrorConnected === true,
+			accountInfo: this.accountInfo,
+			...(this.serverUri ? { uri: this.serverUri } : {}),
+		});
 	}
 
 	// =========================================================================

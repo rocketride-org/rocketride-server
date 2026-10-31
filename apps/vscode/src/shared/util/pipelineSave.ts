@@ -111,6 +111,6 @@ export async function savePipelineDocument(document: vscode.TextDocument): Promi
 	// grid editor via the *.pipe custom-editor association.
 	await vscode.workspace.fs.writeFile(target, Buffer.from(document.getText(), 'utf8'));
 	await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
-	await vscode.commands.executeCommand('vscode.openWith', target, 'rocketride.PageProject');
+	await vscode.commands.executeCommand('vscode.openWith', target, 'rocketride.page.project');
 	return target;
 }

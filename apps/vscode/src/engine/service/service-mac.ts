@@ -122,30 +122,6 @@ export class MacServiceManager extends ServiceManager {
 		this.logger.output(`${icons.success} Service removed`);
 	}
 
-	/**
-	 * Unloads the daemon, rewrites the plist with new paths, and reloads.
-	 *
-	 * @param executablePath - Full path to the updated engine executable
-	 * @param engineDir - Working directory for the engine process
-	 */
-	public async update(executablePath: string, engineDir: string): Promise<void> {
-		await this.runSudo('launchctl', ['unload', PLIST_PATH]);
-
-		const plistContent = this.buildPlist(executablePath, engineDir);
-		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rocketride-'));
-		const tmpPlist = path.join(tmpDir, 'rocketride.plist');
-		fs.writeFileSync(tmpPlist, plistContent, { encoding: 'utf8', mode: 0o600 });
-		try {
-			await this.runSudo('cp', [tmpPlist, PLIST_PATH]);
-		} finally {
-			fs.rmSync(tmpDir, { recursive: true, force: true });
-		}
-
-		await this.runSudo('launchctl', ['load', PLIST_PATH]);
-
-		this.logger.output(`${icons.success} Service updated and restarted`);
-	}
-
 	/** Loads the launchd plist (starts the daemon). */
 	public async start(): Promise<void> {
 		await this.runSudo('launchctl', ['load', PLIST_PATH]);

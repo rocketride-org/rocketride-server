@@ -34,7 +34,8 @@ import type { CSSProperties } from 'react';
 import { commonStyles } from '../../themes/styles';
 import { Allotment } from 'allotment';
 import 'allotment/dist/style.css';
-import type { Documents, Public, LayoutNode, LayoutSplit } from './Documents';
+import DocDropZones from './DocDropZones';
+import type { DocumentsLike, LayoutNode, LayoutSplit } from './Documents';
 
 // =============================================================================
 // STYLES
@@ -44,11 +45,6 @@ const styles = {
 	root: {
 		...commonStyles.columnFill,
 		flex: 1,
-		minWidth: 0,
-		overflow: 'hidden',
-	} as CSSProperties,
-	leaf: {
-		...commonStyles.columnFill,
 		minWidth: 0,
 		overflow: 'hidden',
 	} as CSSProperties,
@@ -69,7 +65,7 @@ const SIZE_DEBOUNCE_MS = 200;
  */
 export interface DocSplitLayoutProps {
 	/** The Documents instance to read layout state from. */
-	docs: Public<Documents>;
+	docs: DocumentsLike;
 	/** Render function for each leaf pane — receives groupId, returns JSX. */
 	renderPane: (groupId: string) => React.ReactNode;
 }
@@ -107,7 +103,7 @@ interface LayoutNodeRendererProps {
 	/** The layout tree node to render. */
 	node: LayoutNode;
 	/** The Documents instance (for persisting resize sizes). */
-	docs: Public<Documents>;
+	docs: DocumentsLike;
 	/** Render function for leaf panes. */
 	renderPane: (groupId: string) => React.ReactNode;
 }
@@ -122,7 +118,13 @@ interface LayoutNodeRendererProps {
  */
 const LayoutNodeRenderer: React.FC<LayoutNodeRendererProps> = ({ node, docs, renderPane }) => {
 	if (node.type === 'leaf') {
-		return <div style={styles.leaf}>{renderPane(node.groupId)}</div>;
+		// DocDropZones carries the leaf wrapper styling itself and layers the
+		// drag-a-tab-to-split drop targets over the pane content
+		return (
+			<DocDropZones docs={docs} groupId={node.groupId}>
+				{renderPane(node.groupId)}
+			</DocDropZones>
+		);
 	}
 
 	// Split node — render allotment container with debounced size persistence
@@ -136,7 +138,7 @@ interface SplitRendererProps {
 	/** The split node to render. */
 	node: LayoutSplit;
 	/** The Documents instance. */
-	docs: Public<Documents>;
+	docs: DocumentsLike;
 	/** Render function for leaf panes. */
 	renderPane: (groupId: string) => React.ReactNode;
 }

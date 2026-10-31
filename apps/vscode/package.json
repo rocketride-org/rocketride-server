@@ -17,7 +17,6 @@
 		"rocketride",
 		"data",
 		"pipeline",
-		"debugger",
 		"toolchain"
 	],
 	"icon": "rocketride-dark-icon.png",
@@ -25,7 +24,6 @@
 		"vscode": "^1.99.3"
 	},
 	"categories": [
-		"Debuggers",
 		"Other"
 	],
 	"activationEvents": [
@@ -34,7 +32,7 @@
 	"contributes": {
 		"customEditors": [
 			{
-				"viewType": "rocketride.PageProject",
+				"viewType": "rocketride.page.project",
 				"displayName": "Pipeline Grid Editor",
 				"selector": [
 					{
@@ -145,113 +143,10 @@
 					"default": "latest",
 					"description": "Engine version for local deployment target"
 				},
-				"rocketride.defaultPipelinePath": {
-					"type": "string",
-					"default": "${workspaceFolder}/pipelines",
-					"description": "Default directory path for creating new pipeline files (relative to workspace root)",
-					"examples": [
-						"pipelines",
-						"src/pipelines",
-						"workflows"
-					]
-				},
-				"rocketride.welcomeDismissed": {
+				"rocketride.debug.busTrace": {
 					"type": "boolean",
 					"default": false,
-					"description": "Set to true to skip the welcome/setup page on startup. Reset to false to show it again."
-				},
-				"rocketride.pipelineRestartBehavior": {
-					"type": "string",
-					"enum": [
-						"auto",
-						"manual",
-						"prompt"
-					],
-					"default": "prompt",
-					"description": "Behavior when a .pipe file changes while the pipeline is running.",
-					"enumDescriptions": [
-						"Automatically restart when .pipe changes",
-						"Do not automatically restart",
-						"Prompt to restart when .pipe changes"
-					]
-				},
-				"rocketride.pipelineTTL": {
-					"type": "integer",
-					"enum": [
-						900,
-						1800,
-						3600,
-						14400,
-						28800,
-						0
-					],
-					"enumDescriptions": [
-						"15 minutes",
-						"30 minutes",
-						"1 hour",
-						"4 hours",
-						"8 hours",
-						"Run forever or until you stop it"
-					],
-					"default": 900,
-					"minimum": 0,
-					"description": "Default idle timeout before a running pipeline is shut down."
-				},
-				"rocketride.pipelineTraceLevel": {
-					"type": "string",
-					"enum": [
-						"none",
-						"metadata",
-						"summary",
-						"full"
-					],
-					"default": "full",
-					"description": "Controls tracing verbosity for pipeline execution."
-				},
-				"rocketride.taskArguments": {
-					"type": "string",
-					"default": "",
-					"description": "Additional command-line arguments passed to each pipeline task."
-				},
-				"rocketride.pipelineDebugOutput": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable full debug output for pipeline tasks (--trace=debugOut)."
-				},
-				"rocketride.integrations.autoAgentIntegration": {
-					"type": "boolean",
-					"default": true,
-					"description": "Automatically detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup"
-				},
-				"rocketride.integrations.copilot": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable RocketRide integration with GitHub Copilot"
-				},
-				"rocketride.integrations.claudeCode": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable RocketRide integration with Claude Code"
-				},
-				"rocketride.integrations.cursor": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable RocketRide integration with Cursor"
-				},
-				"rocketride.integrations.windsurf": {
-					"type": "boolean",
-					"default": false,
-					"description": "Enable RocketRide integration with Windsurf"
-				},
-				"rocketride.integrations.claudeMd": {
-					"type": "boolean",
-					"default": false,
-					"description": "Install RocketRide instructions to CLAUDE.md at the repo root (generic agent support)"
-				},
-				"rocketride.integrations.agentsMd": {
-					"type": "boolean",
-					"default": false,
-					"description": "Install RocketRide instructions to AGENTS.md at the repo root (generic agent support)"
+					"description": "Log every shell-bus message crossing a webview bridge to the RocketRide output channel (diagnostics only — very chatty)."
 				},
 				"rocketride.connectionMode": {
 					"type": "string",
@@ -285,37 +180,6 @@
 					"type": "string",
 					"default": "latest",
 					"deprecationMessage": "Migrated to rocketride.deployment.local.engineVersion"
-				},
-				"rocketride.development.teamId": {
-					"type": "string",
-					"default": "",
-					"deprecationMessage": "Retired: the development team is assigned by your server profile"
-				},
-				"rocketride.deployment.teamId": {
-					"type": "string",
-					"default": "",
-					"deprecationMessage": "Retired: deployments are team-scoped on the server; no client-side team setting"
-				},
-				"rocketride.developmentTeamId": {
-					"type": "string",
-					"default": "",
-					"deprecationMessage": "Retired: the development team is assigned by your server profile"
-				},
-				"rocketride.deployTargetTeamId": {
-					"type": "string",
-					"default": "",
-					"deprecationMessage": "Retired: deployments are team-scoped on the server; no client-side team setting"
-				},
-				"rocketride.appdev.shellUrl": {
-					"type": "string",
-					"default": "",
-					"description": "App Builder: override the preview shell base URL (empty = the Development Mode engine). For monorepo developers running the shell dev server.",
-					"format": "uri"
-				},
-				"rocketride.appdev.autoWatch": {
-					"type": "boolean",
-					"default": true,
-					"description": "App Builder: start the app watch/rebuild session automatically when an App Builder screen opens."
 				}
 			}
 		},
@@ -329,16 +193,6 @@
 			]
 		},
 		"commands": [
-			{
-				"command": "rocketride.provider.connection.focus",
-				"title": "Connections",
-				"category": "RocketRide"
-			},
-			{
-				"command": "rocketride.provider.files.focus",
-				"title": "Pipelines",
-				"category": "RocketRide"
-			},
 			{
 				"command": "rocketride.page.monitor.open",
 				"title": "Server Monitor",
@@ -411,18 +265,6 @@
 				"category": "RocketRide Pipeline"
 			},
 			{
-				"command": "rocketride.sidebar.files.openFile",
-				"title": "Open Status Page",
-				"icon": "$(dashboard)",
-				"category": "RocketRide Pipeline"
-			},
-			{
-				"command": "rocketride.sidebar.files.openStatus",
-				"title": "Select Component",
-				"icon": "$(symbol-class)",
-				"category": "RocketRide Pipeline"
-			},
-			{
 				"command": "rocketride.sidebar.files.createFile",
 				"title": "Create New Pipeline",
 				"icon": "$(add)",
@@ -436,18 +278,6 @@
 			{
 				"command": "rocketride.pipeline.save",
 				"title": "Save Pipeline",
-				"category": "RocketRide Pipeline"
-			},
-			{
-				"command": "rocketride.sidebar.files.runPipeline",
-				"title": "Run",
-				"icon": "$(play)",
-				"category": "RocketRide Pipeline"
-			},
-			{
-				"command": "rocketride.sidebar.files.stopPipeline",
-				"title": "Stop Pipeline",
-				"icon": "$(primitive-square)",
 				"category": "RocketRide Pipeline"
 			},
 			{
@@ -483,11 +313,6 @@
 				"command": "rocketride.app.open",
 				"title": "Open App Builder",
 				"category": "RocketRide"
-			},
-			{
-				"command": "rocketride.app.debug",
-				"title": "Debug App (external browser)",
-				"category": "RocketRide"
 			}
 		],
 		"keybindings": [
@@ -495,7 +320,7 @@
 				"command": "rocketride.pipeline.save",
 				"key": "ctrl+s",
 				"mac": "cmd+s",
-				"when": "activeCustomEditorId == 'rocketride.PageProject'"
+				"when": "activeCustomEditorId == 'rocketride.page.project'"
 			}
 		],
 		"menus": {
@@ -507,35 +332,11 @@
 			],
 			"commandPalette": [
 				{
-					"command": "rocketride.sidebar.files.openStatus",
-					"when": "false"
-				},
-				{
-					"command": "rocketride.sidebar.files.openFile",
-					"when": "false"
-				},
-				{
-					"command": "rocketride.sidebar.files.runPipeline",
-					"when": "false"
-				},
-				{
-					"command": "rocketride.sidebar.files.stopPipeline",
-					"when": "false"
-				},
-				{
 					"command": "rocketride.openPipelineAsText",
 					"when": "false"
 				},
 				{
 					"command": "rocketride.page.settings.setupCredentials",
-					"when": "false"
-				},
-				{
-					"command": "rocketride.provider.connection.focus",
-					"when": "false"
-				},
-				{
-					"command": "rocketride.provider.files.focus",
 					"when": "false"
 				},
 				{
@@ -585,34 +386,6 @@
 				{
 					"command": "rocketride.app.open",
 					"when": "false"
-				},
-				{
-					"command": "rocketride.app.debug",
-					"when": "false"
-				}
-			],
-			"view/title": [
-				{
-					"command": "rocketride.sidebar.files.refresh",
-					"when": "view == rocketride.provider.files",
-					"group": "navigation"
-				},
-				{
-					"command": "rocketride.sidebar.files.createFile",
-					"when": "view == rocketride.provider.files",
-					"group": "navigation@2"
-				}
-			],
-			"view/item/context": [
-				{
-					"command": "rocketride.sidebar.files.runPipeline",
-					"when": "view == rocketride.provider.files && viewItem =~ /^pipelineSource:stopped/",
-					"group": "inline@1"
-				},
-				{
-					"command": "rocketride.sidebar.files.stopPipeline",
-					"when": "view == rocketride.provider.files && viewItem =~ /^pipelineSource:running/ || view == rocketride.provider.files && viewItem == unknownTask",
-					"group": "inline@1"
 				}
 			]
 		},
@@ -634,7 +407,8 @@
 	},
 	"main": "./dist/rocketride.js",
 	"devDependencies": {
-		"@rsbuild/core": "~2.0.11",
+		"@module-federation/rsbuild-plugin": "^2.5.1",
+		"@rsbuild/core": "~2.2.12",
 		"@rsbuild/plugin-react": "~2.0.1",
 		"@rsbuild/plugin-type-check": "~1.3.5",
 		"@types/adm-zip": "^0.5.8",
@@ -657,10 +431,12 @@
 		"typescript": "^5.8.3"
 	},
 	"dependencies": {
+		"@module-federation/runtime": "^2.5.1",
 		"@octokit/rest": "^22.0.1",
 		"adm-zip": "^0.6.0",
 		"chart.js": "^4.4.0",
 		"dockerode": "^4.0.12",
+		"es-module-lexer": "^1.7.0",
 		"ignore": "^7.0.5",
 		"proper-lockfile": "^4.1.2",
 		"shared": "file:../shared",
@@ -672,7 +448,6 @@
 		"README.md",
 		"rocketride-dark-icon.png",
 		"rocketride-light-icon.png",
-		"rocketride.js",
 		"package.json",
 		"LICENSE",
 		"docs/**",

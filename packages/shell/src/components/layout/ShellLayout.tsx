@@ -48,15 +48,17 @@ import { HostChromeProvider, useHostChromeState } from './HostChromeContext';
 import { AppFrame } from './AppFrame';
 import RocketRideWordmark from '../../assets/icons/RocketRideWordmark';
 import Sidebar, { useHasSidebarContent } from './Sidebar';
+import SidebarWorkbench from './SidebarWorkbench';
 import { BxMenu } from '../BoxIcon';
 import { useIsCompact } from '../../hooks/useIsCompact';
-import { CompactNavProvider } from './CompactNavContext';
+import { CompactNavProvider, useCompactNav } from './CompactNavContext';
 import StatusBar from './StatusBar';
 import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
 import { ConnectionErrorBanner } from './ConnectionErrorBanner';
 import { getPrerenderedCapture } from '../../util/prerenderFallback';
 import type { ShellConfig } from '../workspace/types';
+import type { ShellSidebarMode } from '../../types/sidebarChrome';
 import { commonStyles } from '../../themes/styles';
 
 // =============================================================================
@@ -861,8 +863,21 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 // =============================================================================
 
 /**
- * Thin wrapper that connects the Sidebar component to the OverlayManager
- * context so it can trigger Account/Settings overlays.
+ * Thin wrapper that connects the sidebar frame to the OverlayManager context
+ * so it can trigger Account/Settings overlays — and picks WHICH frame renders.
+ *
+ * Frame resolution: the rail-plus-panel frame exists ONLY for apps that
+ * declare view containers (`sidebarViews`) — one rail icon per container.
+ * A classic `sidebar={content}` declaration (or the presence-only legacy
+ * descriptor) always renders the classic column; it is never projected
+ * into the rail as a synthetic single icon. On top of that, the classic
+ * column also wins when:
+ *   • compact width — every mode shares the classic drawer below the
+ *     breakpoint (a rail-plus-panel makes no sense on a phone), and
+ *   • an effective 'rocketride' mode — the user's General > Sidebar setting
+ *     when it is anything but 'default' (it overrides the app), otherwise the
+ *     app's explicit `sidebarMode` opt-out (kept for migration).
+ * Apps with no sidebar declaration render no frame (both frames self-hide).
  */
 const SidebarWithOverlay: React.FC<{
 	themeConfig: ShellConfig['themeConfig'];
@@ -872,6 +887,34 @@ const SidebarWithOverlay: React.FC<{
 	isSaas?: boolean;
 }> = ({ themeConfig, account, hideAppSwitcher, isSaas }) => {
 	const onOverlay = useOverlay();
+	const { sidebarMode, sidebarViews } = useHostChromeState();
+	const { isCompact } = useCompactNav();
+	const { activeAppId, settings } = useWorkspace();
+
+	// The user's General > Sidebar setting: 'default' (or unset) defers to the
+	// app's declared mode; any concrete choice overrides what the app requested.
+	const settingMode = settings['rocketride.general.sidebar'];
+	const userMode: ShellSidebarMode | null = settingMode === 'vscode' || settingMode === 'cursor' || settingMode === 'rocketride' ? settingMode : null;
+	const effectiveMode: ShellSidebarMode | null = userMode ?? sidebarMode;
+
+	// Only DECLARED view containers earn the workbench frame — a classic
+	// `sidebar={content}` node (or the presence-only legacy descriptor) is
+	// built for the classic column and renders there, whatever mode is asked.
+	const hasDeclaredViews = (sidebarViews?.length ?? 0) > 0;
+	const optedOut = effectiveMode === 'rocketride';
+	if (hasDeclaredViews && !optedOut && !isCompact) {
+		return (
+			<SidebarWorkbench
+				key={activeAppId}
+				variant={effectiveMode === 'cursor' ? 'cursor' : 'vscode'}
+				themeConfig={themeConfig}
+				account={account}
+				hideAppSwitcher={hideAppSwitcher}
+				isSaas={isSaas}
+				onOverlay={onOverlay}
+			/>
+		);
+	}
 	return (
 		<Sidebar
 			themeConfig={themeConfig}

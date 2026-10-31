@@ -47,7 +47,7 @@
 // guess in a list of findings reads as a fact.
 // =============================================================================
 
-import type { ISqlSchemaResponse, SqlDialect } from '../connect';
+import type { SqlSchemaResponse, SqlDialect } from '../connect';
 
 // =============================================================================
 // TYPES
@@ -71,7 +71,7 @@ export const RULE_LABELS: Record<RuleId, string> = {
 };
 
 /** One thing worth saying about the schema snapshot. */
-export interface IFinding {
+export interface Finding {
 	/** Which rule produced it. */
 	rule: RuleId;
 	/** `warning` = worth fixing; `info` = worth knowing, not a verdict. */
@@ -145,11 +145,11 @@ export function normaliseType(type: string): string {
  * @returns Every finding, ordered.
  */
 export function runSchemaChecks(
-	schema: ISqlSchemaResponse | null | undefined,
+	schema: SqlSchemaResponse | null | undefined,
 	dialect: SqlDialect = 'unknown',
-): IFinding[] {
+): Finding[] {
 	const tables = schema?.tables ?? {};
-	const findings: IFinding[] = [];
+	const findings: Finding[] = [];
 
 	for (const [table, def] of Object.entries(tables)) {
 		// ── R1 — no primary key ──────────────────────────────────────────────

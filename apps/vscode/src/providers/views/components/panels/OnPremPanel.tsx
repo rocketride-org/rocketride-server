@@ -14,8 +14,8 @@
 
 import React, { useState } from 'react';
 import OnPremIcon from '../../../../assets/onprem.svg';
-import { MessageData, settingsStyles as S } from '../../Settings/SettingsWebview';
-import { MessageDisplay } from '../../Settings/MessageDisplay';
+import { MessageData, settingsStyles as S } from '../../settings/SettingsWebview';
+import { MessageDisplay } from '../../settings/MessageDisplay';
 
 // =============================================================================
 // TYPES

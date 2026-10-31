@@ -127,6 +127,18 @@ export class TelemetryChannel {
 	}
 
 	/**
+	 * A non-consuming view of the hold (inherited first, oldest first) — the
+	 * realm mirror publishes this on the retained lane so bridged realms can
+	 * answer drainTelemetry() synchronously. Does not apply the drain TTL:
+	 * the consuming drain stays the one place facts expire.
+	 *
+	 * @returns A copy of every held fact.
+	 */
+	peek(): TelemetryFact[] {
+		return [...this.inherited, ...this.facts].map((f) => ({ ...f, props: { ...f.props } }));
+	}
+
+	/**
 	 * Hand over every held fact once, oldest first, and empty the hold: what an
 	 * earlier page load of the tab mirrored, then this page load's facts, all
 	 * within the TTL and bounded as a whole.

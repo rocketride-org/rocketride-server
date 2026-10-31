@@ -128,12 +128,3 @@ export function renderTraceOutput(data: unknown, lane: string, inputData?: unkno
 	return DiffView({ before: inputData, after: data });
 }
 
-// =============================================================================
-// BACKWARD COMPAT ALIASES
-// =============================================================================
-
-/** Alias for renderTraceInput — used by hasTreeView check. */
-export const renderTraceData = renderTraceInput;
-
-/** Alias for summaryTraceInput — used by collapsed row summary. */
-export const summaryTraceData = summaryTraceInput;

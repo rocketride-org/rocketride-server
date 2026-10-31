@@ -242,8 +242,9 @@ export default tseslint.config(
 				],
 				patterns: [
 					// The in-tree STATIC path form is legal here: bundled component copies are
-					// bundled copies (no self-barrel in shell).
-					{ group: ['shell/*', '!shell/src/*'], message: "Only shell package sources are deep-importable in-tree (shell/src/<group>); everything else is relative (in-package) or the barrel (elsewhere)." },
+					// bundled copies (no self-barrel in shell). gitignore semantics:
+					// un-ignore the src DIR itself, then its subtree.
+					{ group: ['shell/*', '!shell/src', '!shell/src/**'], message: "Only shell package sources are deep-importable in-tree (shell/src/<group>); everything else is relative (in-package) or the barrel (elsewhere)." },
 				],
 			}],
 		},
@@ -264,9 +265,53 @@ export default tseslint.config(
 					// gitignore semantics: a file under an excluded dir cannot be
 					// re-included, so un-ignore shell/themes first, then re-ban its
 					// contents except the one exported stylesheet.
-					{ group: ['shell/*', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css'], message: "The shell surface is barrel-only: import the name from 'shell' (the theme stylesheet is the one exported subpath; SDK values/types come from 'rocketride')." },
+					// EXCEPTIONS: the dependency-free leaves the EXTENSION HOST
+					// types against (it cannot resolve the React barrel) —
+					// toolRelay (the relay policy + host:connection payload)
+					// and toolWorkspaceFs (the fs capability interface).
+					{ group: ['shell/*', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css', '!shell/src', 'shell/src/*', '!shell/src/components', 'shell/src/components/*', '!shell/src/components/workspace', 'shell/src/components/workspace/*', '!shell/src/components/workspace/toolRelay', '!shell/src/components/workspace/toolWorkspaceFs', '!shell/src/ops', 'shell/src/ops/*', '!shell/src/ops/busOps', '!shell/src/ops/busBridge', '!shell/src/ops/clientOps', '!shell/src/ops/retained'], message: "The shell surface is barrel-only: import the name from 'shell' (the theme stylesheet is the one exported subpath; SDK values/types come from 'rocketride'; the ext-host-safe leaves toolRelay/toolWorkspaceFs are the sanctioned deep imports)." },
 				],
 			}],
+		},
+	},
+
+	// vscode WEBVIEW realms (views/** + the mount helper they share): these
+	// compile into webview bundles, where an extension-host import becomes
+	// require("vscode") — a load-time crash no other gate catches (tsc and
+	// the build both pass). no-restricted-syntax, not no-restricted-imports:
+	// a separate rule key composes with the shell-contract block above
+	// instead of replacing its options for these files.
+	{
+		files: ['apps/vscode/src/providers/views/**/*.{ts,tsx,mts}', 'apps/vscode/src/shared/util/mount.ts'],
+		rules: {
+			'no-restricted-syntax': ['error',
+				{ selector: "ImportDeclaration[source.value='vscode']", message: "Webview realm: 'vscode' exists only in the extension host — bundled it becomes require('vscode') and blanks the page at load." },
+				{ selector: 'ImportDeclaration[source.value=/shared\\u002Futil\\u002Foutput$/]', message: "getLogger() imports 'vscode' and must never reach a webview bundle — use console.* here (webview consoles surface in the webview devtools)." },
+			],
+		},
+	},
+
+	// vscode EXTENSION HOST: the Output-channel logger is the one sink
+	// (AGENTS.md) — console.* is invisible to users; and a floating promise
+	// in a message handler reorders init sequences silently.
+	{
+		files: ['apps/vscode/src/**/*.{ts,tsx}'],
+		ignores: ['apps/vscode/src/providers/views/**', '**/*.test.ts'],
+		rules: {
+			'no-console': 'error',
+		},
+	},
+	{
+		files: ['apps/vscode/src/**/*.{ts,tsx}'],
+		ignores: ['**/*.test.ts'],
+		languageOptions: {
+			parserOptions: {
+				projectService: true,
+				tsconfigRootDir: import.meta.dirname,
+			},
+		},
+		rules: {
+			'@typescript-eslint/no-floating-promises': 'error',
 		},
 	},
 
@@ -281,7 +326,11 @@ export default tseslint.config(
 					{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
 				],
 				patterns: [
-					{ group: ['shell/*', '!shell/src/*'], message: "Only shell package sources are deep-importable in-tree (shell/src/<group>)." },
+					// gitignore semantics: un-ignore the src DIR itself, then its
+					// whole subtree — '!shell/src/*' alone cannot re-include files
+					// beneath an excluded directory (same pitfall as the vscode
+					// block documents).
+					{ group: ['shell/*', '!shell/src', '!shell/src/**'], message: "Only shell package sources are deep-importable in-tree (shell/src/<group>)." },
 				],
 			}],
 		},

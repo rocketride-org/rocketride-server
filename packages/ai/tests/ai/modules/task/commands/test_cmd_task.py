@@ -977,6 +977,10 @@ def test_store_commands_init_builds_subcommand_dispatch_table():
         'fs_rmdir',
         'fs_stat',
         'fs_rename',
+        # Whole-document JSON in ONE operation (no open-handle window — the
+        # zero-byte global.json fix); see cmd_store.fs_put_json.
+        'fs_get_json',
+        'fs_put_json',
         'fs_geturl',
     }
 

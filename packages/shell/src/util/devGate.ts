@@ -30,6 +30,43 @@
  */
 
 // =============================================================================
+// INJECTED DEV BOOT CONFIG
+// =============================================================================
+
+/**
+ * The dev boot config an AUTHORING embedder injects into the page it serves —
+ * the web App Builder's blob-authored preview pages (iframe and debug tab),
+ * and any dev server that templates the HTML it proxies. Presence of the
+ * config IS the dev signal: no `rrdev=1`, no URL convention, no probe — the
+ * party that serves the page states the facts in the page.
+ */
+export interface DevBootConfig {
+	/** The app under development — the page's session-locked identity. */
+	appId: string;
+}
+
+declare global {
+	interface Window {
+		/** Injected dev boot config — present only on authored dev pages. */
+		__rrDevBoot?: DevBootConfig;
+	}
+}
+
+/**
+ * The injected dev boot config, or null when this page was not authored by
+ * a dev embedder. Validated shape: a non-empty string appId.
+ *
+ * @returns The config, or null.
+ */
+export function devBootConfig(): DevBootConfig | null {
+	try {
+		const raw = window.__rrDevBoot;
+		if (raw && typeof raw === 'object' && typeof raw.appId === 'string' && raw.appId) return raw;
+	} catch { /* no window (tests) */ }
+	return null;
+}
+
+// =============================================================================
 // DEV GATE
 // =============================================================================
 
@@ -40,8 +77,9 @@ let gateResult: boolean | undefined;
 /**
  * Whether dev hooks are enabled for this shell session.
  *
- * True when this is a development build (NODE_ENV !== 'production') OR the
- * page URL carries `rrdev=1`. Read once at first call and cached.
+ * True when this is a development build (NODE_ENV !== 'production'), the
+ * page URL carries `rrdev=1`, or the page carries an injected dev boot
+ * config (an authored preview page). Read once at first call and cached.
  *
  * @returns True when dev hooks should be installed.
  */
@@ -56,7 +94,7 @@ export function isDevHooksEnabled(): boolean {
 			// the flavor and the hooks can never disagree.
 			if (!urlFlag) urlFlag = sessionStorage.getItem('rr:dev') === '1';
 		} catch { /* no window/location (tests) — build-mode gate only */ }
-		gateResult = process.env.NODE_ENV !== 'production' || urlFlag;
+		gateResult = process.env.NODE_ENV !== 'production' || urlFlag || devBootConfig() !== null;
 	}
 	return gateResult;
 }
@@ -68,6 +106,27 @@ export function isDevHooksEnabled(): boolean {
  */
 export function resetDevGateForTests(): void {
 	gateResult = undefined;
+}
+
+// =============================================================================
+// FRAMED SHELL
+// =============================================================================
+
+/**
+ * Whether this shell runs FRAMED (inside a same-origin iframe) — the App
+ * Builder previews (live AND built) are the platform's framed shells. The
+ * built preview matters here: it boots WITHOUT rrdev (a production shell
+ * serving an immutable version), so the dev gate cannot identify it — but
+ * it still shares the tab's sessionStorage with the top shell, and tab
+ * session state it writes (session lock, pending app, version override)
+ * would leak into the top shell's next boot exactly like the dev preview's.
+ *
+ * @returns True when the shell is not the top-level browsing context.
+ */
+export function isFramedShell(): boolean {
+	try {
+		return window.self !== window.top;
+	} catch { return true; }
 }
 
 // =============================================================================
@@ -91,19 +150,38 @@ export function isEmbeddedDevShell(): boolean {
 	} catch { return false; }
 }
 
+/**
+ * Whether this shell is framed by a SAME-ORIGIN embedder (the web App
+ * Builder's preview iframe lives on the cloud shell's own origin). A
+ * cross-origin embedder (the VS Code webview framing the preview served
+ * from its app's dev-proxy origin) makes the parent's location unreadable —
+ * the throw IS the signal.
+ *
+ * The distinction gates origin-wide side effects: a same-origin embed
+ * shares the embedding user's cookie jar and must not stamp it, while a
+ * cross-origin embed owns its jar outright.
+ *
+ * @returns True when framed and the embedder shares this page's origin.
+ */
+export function isSameOriginEmbed(): boolean {
+	try {
+		return window.self !== window.top && window.parent.location.origin === window.location.origin;
+	} catch { return false; }
+}
+
 // =============================================================================
 // TOKEN STORAGE SCOPE
 // =============================================================================
 
-// Frame-local token slot for embedded dev previews. Deliberately NOT
-// sessionStorage: per WHATWG, same-origin sibling iframes inside one
-// top-level browsing context SHARE a session storage area, so two preview
-// panels on one page could still overwrite or clear each other's token
-// there. A module-level map is scoped to this frame's JS realm — the only
-// truly per-frame slot the platform offers — and needs no persistence:
-// the embedder re-answers `rrdev:auth` on every boot, so a reloaded frame
-// re-adopts its session instead of reading it back from storage.
-const frameTokenStore: Storage = (() => {
+/**
+ * Builds a frame-local Storage shim. Deliberately NOT sessionStorage: per
+ * WHATWG, same-origin sibling iframes inside one top-level browsing context
+ * SHARE a session storage area, so two frames on one page could still
+ * overwrite or clear each other's state there. A module-level map is scoped
+ * to this frame's JS realm — the only truly per-frame slot the platform
+ * offers — and dies with the frame's document.
+ */
+function createFrameStore(): Storage {
 	const data = new Map<string, string>();
 	return {
 		get length(): number { return data.size; },
@@ -113,7 +191,15 @@ const frameTokenStore: Storage = (() => {
 		removeItem: (key: string): void => { data.delete(key); },
 		setItem: (key: string, value: string): void => { data.set(key, value); },
 	};
-})();
+}
+
+// Frame-local token slot for embedded dev previews. Needs no persistence:
+// the embedder re-answers `rrdev:auth` on every boot, so a reloaded frame
+// re-adopts its session instead of reading it back from storage.
+const frameTokenStore: Storage = createFrameStore();
+
+// Frame-local tab-session slot for FRAMED shells (see sessionScopedStore).
+const frameSessionStore: Storage = createFrameStore();
 
 /**
  * The storage backing this shell's session token.
@@ -131,4 +217,25 @@ const frameTokenStore: Storage = (() => {
  */
 export function tokenStore(): Storage {
 	return isEmbeddedDevShell() ? frameTokenStore : localStorage;
+}
+
+/**
+ * The storage backing TAB-SESSION state (session-locked app id, pending
+ * OAuth app id, version overrides).
+ *
+ * FRAMED shells get a frame-local in-memory copy: the tab's sessionStorage
+ * is shared across every same-origin frame, so a preview iframe writing
+ * these keys stamps the TOP shell's next boot — a working-copy session
+ * lock resolves to "App not found", and a built-preview `?version=` seed
+ * silently outranks the top shell's (and the live preview's) dev overlay.
+ * A framed shell needs none of the persistence these keys exist for: its
+ * identity rides its URL, which survives every iframe reload.
+ *
+ * Top-level shells keep real sessionStorage so deep links and the OAuth
+ * redirect round-trip behave exactly as before.
+ *
+ * @returns The Storage object tab-session reads/writes must go through.
+ */
+export function sessionScopedStore(): Storage {
+	return isFramedShell() ? frameSessionStore : sessionStorage;
 }

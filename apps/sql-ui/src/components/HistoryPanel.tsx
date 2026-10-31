@@ -48,8 +48,8 @@ import {
 	ToggleGroup,
 	useDebouncedValue,
 } from 'shell';
-import type { ISqlEndpoint } from '../connect';
-import type { IHistoryEntry } from '../history/types';
+import type { SqlEndpoint } from '../connect';
+import type { HistoryEntry } from '../history/types';
 import {
 	HistoryPrefsBridge,
 	clearForKey,
@@ -62,7 +62,8 @@ import {
 } from '../history/historyStore';
 import { DEFAULT_HISTORY_LIMITS } from '../history/trim';
 import { getDocs, nextQueryDoc } from '../docs';
-import type { IQueryDocPayload } from '../docs';
+import type { QueryDocPayload } from '../docs';
+import { useSqlPageNav } from '../pageNav';
 import { announce } from '../a11y/announce';
 import { DatabaseIcon } from '../icons';
 
@@ -71,9 +72,9 @@ import { DatabaseIcon } from '../icons';
 // =============================================================================
 
 /** Props for the {@link HistoryPanel} component. */
-export interface IHistoryPanelProps {
+export interface HistoryPanelProps {
 	/** The connection whose history is shown. */
-	endpoint: ISqlEndpoint;
+	endpoint: SqlEndpoint;
 	/** Whether the drawer is open. */
 	open: boolean;
 	/** Fired when the user dismisses the drawer. */
@@ -90,7 +91,7 @@ export interface IHistoryPanelProps {
 	 * Run one statement again. The drawer has already confirmed anything that
 	 * changed data when it last ran, so this fires with the user's consent.
 	 */
-	onRerun: (entry: IHistoryEntry) => void;
+	onRerun: (entry: HistoryEntry) => void;
 }
 
 /** The list filters across the top of the drawer. */
@@ -117,7 +118,7 @@ const FILTERS: { id: HistoryFilter; label: string }[] = [
 ];
 
 /** Badge text per statement kind. */
-const KIND_LABEL: Record<IHistoryEntry['kind'], string> = {
+const KIND_LABEL: Record<HistoryEntry['kind'], string> = {
 	read: 'READ',
 	write: 'WRITE',
 	ddl: 'DDL',
@@ -276,7 +277,7 @@ function clock(at: number): string {
  * @param entry - The entry to describe.
  * @returns The badge variant and its label.
  */
-function outcomeBadge(entry: IHistoryEntry): { variant: 'success' | 'info' | 'error' | 'muted'; label: string } {
+function outcomeBadge(entry: HistoryEntry): { variant: 'success' | 'info' | 'error' | 'muted'; label: string } {
 	switch (entry.outcome) {
 		case 'rows': return {
 			variant: 'success',
@@ -311,7 +312,7 @@ function firstLine(sql: string): string {
  * @param entry - The entry.
  * @returns True for writes and schema changes.
  */
-function changesData(entry: IHistoryEntry): boolean {
+function changesData(entry: HistoryEntry): boolean {
 	return entry.kind === 'write' || entry.kind === 'ddl';
 }
 
@@ -322,7 +323,7 @@ function changesData(entry: IHistoryEntry): boolean {
  * @param entry - The entry.
  * @returns The row's accessible label.
  */
-function rowLabel(entry: IHistoryEntry): string {
+function rowLabel(entry: HistoryEntry): string {
 	const badge = outcomeBadge(entry);
 	const parts = [clock(entry.at), KIND_LABEL[entry.kind].toLowerCase(), badge.label];
 	if (entry.pinned) parts.push('pinned');
@@ -339,11 +340,14 @@ function rowLabel(entry: IHistoryEntry): string {
  * The per-connection history drawer: search, filter, inspect, reload, rerun,
  * pin, annotate and delete the statements run on one connection.
  *
- * @param props - {@link IHistoryPanelProps}.
+ * @param props - {@link HistoryPanelProps}.
  * @returns The drawer element.
  */
-export const HistoryPanel: React.FC<IHistoryPanelProps> = (props) => {
+export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 	const { endpoint, open, onClose, onLoadIntoEditor, onRerun } = props;
+
+	// In-workbench page navigation (null in legacy standalone documents).
+	const pageNav = useSqlPageNav();
 
 	const entries = useHistory(endpoint.key);
 	const isRecording = useRecording(endpoint.key);
@@ -353,7 +357,7 @@ export const HistoryPanel: React.FC<IHistoryPanelProps> = (props) => {
 	const [filter, setFilter] = useState<HistoryFilter>('all');
 	const [expandedId, setExpandedId] = useState<string | null>(null);
 	const [noteDraft, setNoteDraft] = useState('');
-	const [confirmRerun, setConfirmRerun] = useState<IHistoryEntry | null>(null);
+	const [confirmRerun, setConfirmRerun] = useState<HistoryEntry | null>(null);
 	const [confirmClear, setConfirmClear] = useState(false);
 
 	// ── Visible rows ─────────────────────────────────────────────────────────
@@ -378,7 +382,7 @@ export const HistoryPanel: React.FC<IHistoryPanelProps> = (props) => {
 	 *
 	 * @param entry - The row's entry.
 	 */
-	const toggleExpanded = (entry: IHistoryEntry): void => {
+	const toggleExpanded = (entry: HistoryEntry): void => {
 		if (expandedId === entry.id) {
 			setExpandedId(null);
 			return;
@@ -393,13 +397,12 @@ export const HistoryPanel: React.FC<IHistoryPanelProps> = (props) => {
 	 *
 	 * @param entry - The entry to open.
 	 */
-	const openInNewQuery = (entry: IHistoryEntry): void => {
-		const { uri, label } = nextQueryDoc(endpoint.key);
-		// No `origin: 'generated'` — this statement is the user's own text,
-		// not something this app wrote, and must not claim otherwise.
-		const payload: IQueryDocPayload = { endpoint, label, initialSql: entry.sql };
-		getDocs()?.openStaticDocument(uri, label, payload);
-		announce(`Opened ${label}`);
+	const openInNewQuery = (entry: HistoryEntry): void => {
+		// The statement re-seeds the connection's QUERY page. No
+		// `origin: 'generated'` — this statement is the user's own text, not
+		// something this app wrote, and must not claim otherwise.
+		pageNav.openQuery({ sql: entry.sql, label: 'Query' });
+		announce('Opened in query page');
 	};
 
 	/**
@@ -407,7 +410,7 @@ export const HistoryPanel: React.FC<IHistoryPanelProps> = (props) => {
 	 *
 	 * @param entry - The entry to rerun.
 	 */
-	const requestRerun = (entry: IHistoryEntry): void => {
+	const requestRerun = (entry: HistoryEntry): void => {
 		if (changesData(entry)) {
 			setConfirmRerun(entry);
 			return;
@@ -541,7 +544,7 @@ export const HistoryPanel: React.FC<IHistoryPanelProps> = (props) => {
 	 * @param entry - The entry being rerun.
 	 * @returns The dialog message.
 	 */
-	const rerunMessage = (entry: IHistoryEntry): string => {
+	const rerunMessage = (entry: HistoryEntry): string => {
 		if (entry.outcome === 'affected' && entry.affected !== undefined) {
 			return `This statement changed data when last run (${entry.affected} rows affected at ${clock(entry.at)}). It runs immediately and autocommits.`;
 		}

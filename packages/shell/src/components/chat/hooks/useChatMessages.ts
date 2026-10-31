@@ -64,7 +64,7 @@ export interface UseChatMessagesReturn {
  * setMessages directly. Direct setMessages calls bypass the messagesRef
  * sync and will cause sendMessage to build history from a stale snapshot.
  */
-export function useChatMessages({ welcomeMessage, initialMessages }: UseChatMessagesOptions = {}): UseChatMessagesReturn {
+export function useChatMessages({ welcomeMessage, initialMessages, request }: UseChatMessagesOptions = {}): UseChatMessagesReturn {
 	const [messages, setMessages] = useState<ChatMessage[]>(initialMessages ?? []);
 	const [isTyping, setIsTyping] = useState(false);
 
@@ -132,7 +132,9 @@ export function useChatMessages({ welcomeMessage, initialMessages }: UseChatMess
 			setIsTyping(true);
 
 			try {
-				const answers = await sendMessageToAPI(text, client, authToken);
+				// step: an injected transport (agent sessions, tests) replaces the
+				// built-in chat API wholesale — same answer shape either way
+				const answers = request ? await request(text) : await sendMessageToAPI(text, client, authToken);
 				const botMsgs: ChatMessage[] = answers.map((a) => ({
 					id: nextId(),
 					text: a.text,
@@ -157,7 +159,7 @@ export function useChatMessages({ welcomeMessage, initialMessages }: UseChatMess
 				setIsTyping(false);
 			}
 		},
-		[sendMessageToAPI, updateMessages]
+		[request, sendMessageToAPI, updateMessages]
 	);
 
 	const addSystemMessage = useCallback(

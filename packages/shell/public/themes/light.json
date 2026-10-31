@@ -4,6 +4,12 @@
 	"--rr-bg-default": "#ffffff",
 	"--rr-bg-paper": "#ffffff",
 	"--rr-bg-surface-alt": "#fafafa",
+	"--rr-doctabs-bg": "#f3f3f3",
+	"--rr-doctabs-tab-active-bg": "#ffffff",
+	"--rr-doctabs-tab-hover-bg": "rgba(0, 0, 0, 0.04)",
+	"--rr-doctabs-fg-active": "#1a1a1a",
+	"--rr-doctabs-fg-inactive": "#666666",
+	"--rr-doctabs-border": "#dcdcdc",
 	"--rr-fg-titleBar-active": "#1a1a1a",
 	"--rr-fg-titleBar-inactive": "#666666",
 	"--rr-bg-titleBar-active": "#e8e8e8",
@@ -42,6 +48,10 @@
 	"--rr-btn-sm-font-size": "9px",
 	"--rr-btn-sm-radius": "3px",
 	"--rr-bg-input": "#ffffff",
+	"--rr-bg-rail": "#ffffff",
+	"--rr-bg-rail-hover": "rgba(0, 0, 0, 0.08)",
+	"--rr-fg-rail": "#666666",
+	"--rr-fg-rail-active": "#1a1a1a",
 	"--rr-bg-list-hover": "rgba(0, 0, 0, 0.04)",
 	"--rr-bg-list-active": "#0e639c",
 	"--rr-fg-list-active": "#ffffff",
@@ -74,5 +84,7 @@
 	"--rr-chart-yellow": "#e67700",
 	"--rr-chart-purple": "#7048e8",
 	"--rr-chart-orange": "#e67a2e",
-	"--rr-chart-red": "#c92a2a"
+	"--rr-chart-red": "#c92a2a",
+	"--rr-rail-mode": "light",
+	"--rr-bg-rail-active": "rgba(0, 0, 0, 0.08)"
 }

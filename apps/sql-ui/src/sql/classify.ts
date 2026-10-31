@@ -51,7 +51,7 @@
 
 import type { SqlDialect } from '../connect';
 import { codeOnly, hasTopLevelKeyword, keywordSites, stripSqlComments } from './split';
-import type { IKeywordSite } from './split';
+import type { KeywordSite } from './split';
 
 // =============================================================================
 // TYPES
@@ -70,7 +70,7 @@ import type { IKeywordSite } from './split';
 export type StatementKind = 'read' | 'write' | 'ddl' | 'tx' | 'other';
 
 /** What the pattern check saw. */
-export interface IPatternFinding {
+export interface PatternFinding {
 	/**
 	 * The shape detected, phrased for the confirmation dialog's sentence
 	 * `Pattern check: <kind> detected.` — e.g. `DELETE without WHERE`.
@@ -179,7 +179,7 @@ function normalize(sql: string, dialect: SqlDialect): string {
  * @param site - A keyword occurrence in it.
  * @returns True when the keyword names a CTE.
  */
-function namesCte(masked: string, site: IKeywordSite): boolean {
+function namesCte(masked: string, site: KeywordSite): boolean {
 	let at = site.index + site.keyword.length;
 	while (at < masked.length && /\s/.test(masked[at])) at += 1;
 	// An optional column list: `merge (x, y) AS (...)`. Walked as a balanced
@@ -301,7 +301,7 @@ export function classifyStatement(sql: string, dialect: SqlDialect = 'unknown'):
  * @param dialect - The engine dialect.
  * @returns The finding, or null when nothing matched.
  */
-export function patternCheck(sql: string, dialect: SqlDialect = 'unknown'): IPatternFinding | null {
+export function patternCheck(sql: string, dialect: SqlDialect = 'unknown'): PatternFinding | null {
 	const head = normalize(sql, dialect);
 	if (!head) return null;
 
@@ -328,7 +328,7 @@ export function patternCheck(sql: string, dialect: SqlDialect = 'unknown'): IPat
 	// SELECT and only locks rows, and an upsert's `DO UPDATE` trails its
 	// INSERT. Reading any `update` would call both an unbounded UPDATE.
 	const leadsWith = /^with\b/i.test(head);
-	const verbs = new Map<number, IKeywordSite>();
+	const verbs = new Map<number, KeywordSite>();
 	if (leadsWith) {
 		const masked = codeOnly(head, dialect);
 		for (const site of keywordSites(head, WITH_LEADERS, dialect)) {

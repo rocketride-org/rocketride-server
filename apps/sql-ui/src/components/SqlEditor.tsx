@@ -21,12 +21,13 @@
 // SOFTWARE.
 
 // =============================================================================
-// SQL-UI — SQL EDITOR (Monaco wrapper, token-themed)
+// SQL-UI — SQL EDITOR (shared Monaco module, token-themed)
 // =============================================================================
 //
-// The app carries its own Monaco dependency (apps never import another app's
-// components); the wrapper follows explorer-ui's MonacoViewer pattern: the
-// @monaco-editor/react Editor with a theme derived from the --rr-* tokens.
+// On the SHARED Monaco module: the editor and its workers are chunks of this
+// remote's own bundle (no CDN loader), and the rr token theme rides with the
+// shared MonacoEditor component — the local theme bridge retired with the
+// migration.
 //
 // Two things here are deliberately MODULE-level rather than per-instance:
 //
@@ -46,10 +47,11 @@
 
 import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import Editor from '@monaco-editor/react';
 import type * as MonacoNS from 'monaco-editor';
+import { MonacoEditor } from 'shared/components/monaco';
+import type { Monaco } from 'shared/components/monaco';
 import type { SqlDialect } from '../connect';
-import type { ICompletionModel } from '../sql/completion';
+import type { CompletionModel } from '../sql/completion';
 import { suggestAt } from '../sql/completion';
 
 // =============================================================================
@@ -57,7 +59,7 @@ import { suggestAt } from '../sql/completion';
 // =============================================================================
 
 /** One decorated character range in the buffer. */
-export interface IDecorationRange {
+export interface DecorationRange {
 	/** Start offset (inclusive). */
 	start: number;
 	/** End offset (exclusive). */
@@ -67,7 +69,7 @@ export interface IDecorationRange {
 }
 
 /** Where the caret and selection are, after a settle. */
-export interface IEditorCursorState {
+export interface EditorCursorState {
 	/** Character offset of the caret. */
 	offset: number;
 	/** Selected text, or '' when the selection is empty. */
@@ -79,7 +81,7 @@ export interface IEditorCursorState {
 }
 
 /** The imperative surface `QueryView` drives the editor through. */
-export interface ISqlEditorHandle {
+export interface SqlEditorHandle {
 	/** The selected text, or '' when the selection is empty. */
 	getSelectionText(): string;
 	/**
@@ -91,13 +93,13 @@ export interface ISqlEditorHandle {
 	/** Character offset of the caret in the buffer. */
 	getCursorOffset(): number;
 	/** Replace the statement decorations (pass [] to clear). */
-	setDecorations(ranges: IDecorationRange[]): void;
+	setDecorations(ranges: DecorationRange[]): void;
 	/** Move focus into the editor. */
 	focus(): void;
 }
 
 /** Props for the {@link SqlEditor} component. */
-export interface ISqlEditorProps {
+export interface SqlEditorProps {
 	/** Current SQL text. */
 	value: string;
 	/** Fired with the new text on every edit. */
@@ -118,9 +120,9 @@ export interface ISqlEditorProps {
 	 * can show which statement a run would send. Not the run path — that reads
 	 * the handle, which is never stale.
 	 */
-	onCursorChange?: (state: IEditorCursorState) => void;
+	onCursorChange?: (state: EditorCursorState) => void;
 	/** Schema-derived suggestions for this connection, when a snapshot exists. */
-	completion?: ICompletionModel | null;
+	completion?: CompletionModel | null;
 }
 
 // =============================================================================
@@ -135,6 +137,7 @@ const styles = {
 		overflow: 'hidden',
 		height: '100%',
 		minHeight: 0,
+		display: 'flex',
 	} as CSSProperties,
 };
 
@@ -170,11 +173,11 @@ function ensureDecorationStyle(): void {
 ensureDecorationStyle();
 
 // =============================================================================
-// LANGUAGE + THEME
+// LANGUAGE
 // =============================================================================
 
 /**
- * Map an engine dialect onto Monaco's SQL language ids (mirrors explorer-ui's
+ * Map an engine dialect onto Monaco's SQL language ids (mirrors the shared
  * extension mapping: .sql/.mysql/.pgsql).
  *
  * @param dialect - The engine dialect.
@@ -186,78 +189,12 @@ function languageFor(dialect: SqlDialect): string {
 	return 'sql';
 }
 
-/** Theme name registered with Monaco. */
-const THEME_NAME = 'rr-sql-theme';
-
-/**
- * Read a CSS custom property from :root.
- *
- * @param name - The custom property name.
- * @param fallback - Value when the property is unset.
- * @returns The trimmed value or the fallback.
- */
-function cssVar(name: string, fallback: string): string {
-	return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
-}
-
-/**
- * Register the token-derived editor theme. Compact subset of explorer-ui's
- * theme bridge: background/foreground/line numbers from --rr-* tokens (which
- * are plain hex in every shipped theme), base vs/vs-dark from the palette mode.
- *
- * @param monaco - The loaded Monaco namespace.
- */
-function defineTheme(monaco: typeof MonacoNS): void {
-	const dark = cssVar('--rr-palette-mode', 'light').replace(/['"]/g, '') === 'dark';
-	monaco.editor.defineTheme(THEME_NAME, {
-		base: dark ? 'vs-dark' : 'vs',
-		inherit: true,
-		rules: [],
-		colors: {
-			'editor.background': cssVar('--rr-bg-paper', dark ? '#252526' : '#ffffff'),
-			'editor.foreground': cssVar('--rr-text-primary', dark ? '#cccccc' : '#1a1a1a'),
-			'editorLineNumber.foreground': cssVar('--rr-text-secondary', '#666666'),
-			'editorLineNumber.activeForeground': cssVar('--rr-text-primary', '#1a1a1a'),
-		},
-	});
-}
-
-// Monotonic theme-change counter shared by every editor instance.
-let themeVersion = 0;
-
-/**
- * Watch for app theme changes and bump a version the editor can re-derive its
- * Monaco theme from (explorer-ui's MonacoViewer pattern): a MutationObserver
- * on the documentElement's data-theme/class/style attributes catches the
- * shell's theme toggle, which Monaco's registered theme cannot see by itself.
- *
- * @returns The current theme version (changes on every theme switch).
- */
-function useThemeVersion(): number {
-	const [version, setVersion] = useState(themeVersion);
-
-	useEffect(() => {
-		// Any attribute mutation that can restyle :root counts as a change.
-		const observer = new MutationObserver(() => {
-			themeVersion += 1;
-			setVersion(themeVersion);
-		});
-		observer.observe(document.documentElement, {
-			attributes: true,
-			attributeFilter: ['data-theme', 'class', 'style'],
-		});
-		return () => observer.disconnect();
-	}, []);
-
-	return version;
-}
-
 // =============================================================================
 // COMPLETION (one provider per language id, for the whole module's lifetime)
 // =============================================================================
 
 /** Per-editor completion state, keyed by the editor model's URI. */
-const completionByModel = new Map<string, { model: ICompletionModel; dialect: SqlDialect }>();
+const completionByModel = new Map<string, { model: CompletionModel; dialect: SqlDialect }>();
 
 /** True once the providers are registered; they are never re-registered. */
 let providersRegistered = false;
@@ -338,7 +275,7 @@ function ensureCompletionProviders(monaco: typeof MonacoNS): void {
  * minimap off, schema-aware suggestions, statement decorations, and the run
  * keybindings wired to the callbacks.
  */
-export const SqlEditor = forwardRef<ISqlEditorHandle, ISqlEditorProps>(function SqlEditor(
+export const SqlEditor = forwardRef<SqlEditorHandle, SqlEditorProps>(function SqlEditor(
 	{ value, onChange, dialect, onRun, onRunAll, onExplain, onCursorChange, completion },
 	ref,
 ) {
@@ -361,8 +298,9 @@ export const SqlEditor = forwardRef<ISqlEditorHandle, ISqlEditorProps>(function 
 		dialectRef.current = dialect;
 	}, [onRun, onRunAll, onExplain, onCursorChange, completion, dialect]);
 
-	// Monaco namespace captured at mount + the app-theme version, so a theme
-	// toggle re-derives the token-based editor theme.
+	// Monaco namespace captured at mount, for the imperative surfaces below
+	// (decorations need Range and the stickiness enum). Theme definition and
+	// theme flips are the shared MonacoEditor's job now.
 	const monacoRef = useRef<typeof MonacoNS | null>(null);
 	const editorRef = useRef<MonacoNS.editor.IStandaloneCodeEditor | null>(null);
 	const decorationsRef = useRef<MonacoNS.editor.IEditorDecorationsCollection | null>(null);
@@ -373,15 +311,6 @@ export const SqlEditor = forwardRef<ISqlEditorHandle, ISqlEditorProps>(function 
 	const completionRef = useRef(completion);
 	const dialectRef = useRef(dialect);
 	const cursorTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-	const themeVersion = useThemeVersion();
-
-	// Re-define and re-apply the theme whenever the app theme changes.
-	useEffect(() => {
-		if (monacoRef.current) {
-			defineTheme(monacoRef.current);
-			monacoRef.current.editor.setTheme(THEME_NAME);
-		}
-	}, [themeVersion]);
 
 	// Publish this editor's completion model for the shared provider to find,
 	// and take it back down on unmount so a closed tab stops answering.
@@ -404,7 +333,7 @@ export const SqlEditor = forwardRef<ISqlEditorHandle, ISqlEditorProps>(function 
 		if (cursorTimerRef.current) clearTimeout(cursorTimerRef.current);
 	}, []);
 
-	useImperativeHandle(ref, (): ISqlEditorHandle => ({
+	useImperativeHandle(ref, (): SqlEditorHandle => ({
 		getSelectionText: () => {
 			const editor = editorRef.current;
 			const selection = editor?.getSelection();
@@ -449,14 +378,13 @@ export const SqlEditor = forwardRef<ISqlEditorHandle, ISqlEditorProps>(function 
 	}), []);
 
 	/**
-	 * Register the theme and the shared completion providers before the editor
-	 * mounts.
+	 * Register the shared completion providers before the editor mounts (the
+	 * shared MonacoEditor handles the theme itself).
 	 *
 	 * @param monaco - The loaded Monaco namespace.
 	 */
-	const handleBeforeMount = useCallback((monaco: typeof MonacoNS) => {
+	const handleBeforeMount = useCallback((monaco: Monaco) => {
 		monacoRef.current = monaco;
-		defineTheme(monaco);
 		ensureCompletionProviders(monaco);
 	}, []);
 
@@ -466,7 +394,7 @@ export const SqlEditor = forwardRef<ISqlEditorHandle, ISqlEditorProps>(function 
 	 * @param editor - The mounted editor instance.
 	 * @param monaco - The loaded Monaco namespace.
 	 */
-	const handleMount = useCallback((editor: MonacoNS.editor.IStandaloneCodeEditor, monaco: typeof MonacoNS) => {
+	const handleMount = useCallback((editor: MonacoNS.editor.IStandaloneCodeEditor, monaco: Monaco) => {
 		editorRef.current = editor;
 		decorationsRef.current = editor.createDecorationsCollection([]);
 		const uri = editor.getModel()?.uri.toString() ?? null;
@@ -520,13 +448,12 @@ export const SqlEditor = forwardRef<ISqlEditorHandle, ISqlEditorProps>(function 
 
 	return (
 		<div style={styles.frame}>
-			<Editor
+			<MonacoEditor
 				value={value}
 				language={languageFor(dialect)}
-				theme={THEME_NAME}
 				beforeMount={handleBeforeMount}
 				onMount={handleMount}
-				onChange={(next) => onChange(next ?? '')}
+				onChange={onChange}
 				options={{
 					minimap: { enabled: false },
 					fontSize: 13,

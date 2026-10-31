@@ -26,13 +26,13 @@
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection } from 'shell';
 import type { GridCellComponent } from 'shell';
 import { Banner, Card, ContentHeader, DataGrid, EmptyState, monoEl, mutedEl } from 'shell';
 import type { GridColumnDefinition, IDataGridPage, IDataGridPageRequest } from 'shell';
 import { commonStyles } from 'shell';
-import type { ISqlEndpoint } from '../connect';
-import { getSession, useSchema } from '../schema/schemaStore';
+import type { SqlEndpoint } from '../connect';
+import { useSchema } from '../schema/schemaStore';
+import { useSqlEnv } from '../sqlEnv';
 import { buildPageStatements } from '../sql/paging';
 import { DatabaseIcon } from '../icons';
 
@@ -41,9 +41,9 @@ import { DatabaseIcon } from '../icons';
 // =============================================================================
 
 /** Props for the {@link TableDataView} component. */
-export interface ITableDataViewProps {
+export interface TableDataViewProps {
 	/** The connection the table lives on. */
-	endpoint: ISqlEndpoint;
+	endpoint: SqlEndpoint;
 	/** The table to browse. */
 	table: string;
 }
@@ -105,8 +105,8 @@ function dataCellEl(value: unknown): HTMLElement {
  * ORDER BY from the grid's sorters, WHERE from search + column filters) and
  * executes them through the connection's session.
  */
-export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }) => {
-	const { client, isConnected } = useShellConnection();
+export const TableDataView: React.FC<TableDataViewProps> = ({ endpoint, table }) => {
+	const env = useSqlEnv();
 	const snapshot = useSchema(endpoint.key);
 
 	// Last page-load failure, surfaced as a banner. The grid keeps showing the
@@ -161,8 +161,8 @@ export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }
 		setLoadError(null);
 
 		const run = (async (): Promise<IDataGridPage<Record<string, unknown>>> => {
-			if (!client || !tableDef) return { rows: [], total: 0 };
-			const session = getSession(client, endpoint);
+			if (!env.ready || !tableDef) return { rows: [], total: 0 };
+			const session = env.getSession(endpoint);
 			const { select, count, params } = buildPageStatements(dialect, table, tableDef, req);
 
 			// Page rows + total over the same WHERE (drives the pager). The two
@@ -196,7 +196,7 @@ export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }
 		);
 		newestRef.current = chain;
 		return chain;
-	}, [client, endpoint, table, tableDef, dialect]);
+	}, [env, endpoint, table, tableDef, dialect]);
 
 	/**
 	 * Surface a page-load failure (the grid itself only shows a transient
@@ -261,7 +261,7 @@ export const TableDataView: React.FC<ITableDataViewProps> = ({ endpoint, table }
 					<DataGrid<Record<string, unknown>>
 						title={table}
 						columns={columns}
-						fetchPage={isConnected ? fetchPage : undefined}
+						fetchPage={env.ready ? fetchPage : undefined}
 						remoteSort
 						onLoadError={handleLoadError}
 						tableId={`sql-data-${endpoint.provider}`}

@@ -13,7 +13,7 @@
  */
 
 import React, { CSSProperties, useEffect, useRef } from 'react';
-import type { StripeKeyUnavailableReason } from '../../types/checkoutTypes';
+import type { StripeKeyReason as StripeKeyUnavailableReason } from 'shared/ops/hostOps';
 
 // =============================================================================
 // STYLES

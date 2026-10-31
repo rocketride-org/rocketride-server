@@ -24,7 +24,6 @@ import { ensureDependencyWiring, ensureWorkspaceFile, runRootInstall, vendorPlat
 import { getLogger } from '../shared/util/output';
 import { ConnectionManager } from '../connection/connection';
 
-export { extractInstallCause, isTransientLockError } from 'rocketride/app-pack';
 
 /**
  * Result of a shell vendor pass — success carries the artifact path,
@@ -57,7 +56,7 @@ const appdevLog = (line: string): void => getLogger().output(`[appdev] ${line}`)
 let ensureShellPromise: Promise<ShellVendorResult> | null = null;
 
 /**
- * The workspace-install AUTHORITY — the WatchManager's generation-chained
+ * The workspace-install AUTHORITY — the DevSessionManager's generation-chained
  * single-flight, registered at its construction.
  *
  * While registered, every install this module needs routes through it, so
@@ -65,7 +64,7 @@ let ensureShellPromise: Promise<ShellVendorResult> | null = null;
  * the vendor pass spawning its OWN pnpm beside the watch/scaffold install
  * raced it on fresh workspaces, and concurrent pnpm runs on one root fail
  * with ERR_PNPM_EEXIST during symlinkAllModules (a half-linked virtual
- * store). An injected seam rather than an import: watchManager already
+ * store). An injected seam rather than an import: the dev-session manager already
  * imports from this module, so importing it back would be a cycle.
  */
 let workspaceInstallDelegate: (() => Promise<boolean>) | null = null;

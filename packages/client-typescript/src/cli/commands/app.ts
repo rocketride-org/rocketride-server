@@ -489,10 +489,13 @@ export interface AppDevOptions extends AppVerbOptions {
 
 /**
  * `app dev`: the App Builder's dev loop in the foreground — serve the app
- * with `rsbuild dev`, point your personal dev overlay at it, and print the
- * preview URL. The preview updates on every save (rsbuild HMR/live reload).
- * Ctrl+C stops the server and drops the overlay. Uses the DEVELOPMENT
- * connection — dev bundles never touch the deployment target.
+ * with `rsbuild dev` as the preview's front door (the generated proxy
+ * wrapper forwards everything but the app's own assets to the engine) and
+ * print the preview URL; the preview page self-registers the local bundle
+ * from that URL. Updates on every save (rsbuild HMR/live reload). Ctrl+C
+ * stops the server — nothing to unregister, the server holds no dev state.
+ * Uses the DEVELOPMENT connection — dev bundles never touch the deployment
+ * target.
  *
  * @param ref - The `[app]` argument.
  * @param options - Parsed command options.
@@ -506,21 +509,17 @@ export async function executeAppDev(ref: string | undefined, options: AppDevOpti
 	const { app } = await findApp(workspaceRoot, ref);
 	if (!app) return out.fail(`"${ref}" has no working copy here to serve`, 'pass the app folder');
 
-	// step: one connection for the whole session — the overlay registration
-	// lives as long as it, and a reconnect re-registers the running server
-	let session: InstanceType<typeof DevSession> | null = null;
-	const client = await connectClient(options, undefined, {
-		persist: true,
-		onConnected: async () => {
-			await session?.reregister();
-		},
-	});
+	// step: validate the development connection once — the dev server will
+	// proxy the preview's traffic to this engine (local-first; no server-side
+	// registration exists, so no connection needs to outlive the check)
+	const client = await connectClient(options);
+	await client.disconnect();
 
-	const previewUrl = devPreviewUrl(toHttpBase(String(options.uri)), app.id);
-	session = new DevSession({
+	const engineOrigin = toHttpBase(String(options.uri));
+	const session = new DevSession({
 		app,
 		workspaceRoot,
-		client,
+		engineOrigin,
 		install: options.install !== false,
 		onLine: (line) => out.line(`  ${line}`),
 		onState: (state, detail) => {
@@ -532,13 +531,16 @@ export async function executeAppDev(ref: string | undefined, options: AppDevOpti
 
 	out.line(`Starting the dev server for ${app.id} (${app.folder})...`);
 	const origin = await session.start();
+	// The preview rides the DEV SERVER's origin (it proxies the engine and
+	// serves the app's bundle); the page self-registers from its URL.
+	const previewUrl = devPreviewUrl(origin, app.id);
 	out.line(`Dev server: ${origin}`);
 	out.line(`Preview:    ${previewUrl}`);
 	out.line('Edit and save to update the preview. Press Ctrl+C to stop.');
 	out.result({ appId: app.id, devOrigin: origin, previewUrl });
 	if (options.open) openBrowser(previewUrl);
 
-	// step: run until Ctrl+C, then stop the tree and drop the overlay
+	// step: run until Ctrl+C, then stop the server tree
 	await new Promise<void>((resolve) => {
 		onInterrupt(() => {
 			out.line('Stopping the dev server...');
@@ -614,7 +616,7 @@ serving the app; a team or @public binding can keep it on your desktop.`,
 	// serve, register, print the preview URL, stop on Ctrl+C.
 	const devCmd = appCmd
 		.command('dev [app]')
-		.description('Serve an app with live preview: rsbuild dev + your personal dev overlay (Ctrl+C stops)')
+		.description('Serve an app with live preview: rsbuild dev fronting the engine (local-first; Ctrl+C stops)')
 		.option('--open', 'Open the preview in your browser')
 		.option('--no-install', 'Skip the workspace pnpm install')
 		.option(workspaceOption, 'Workspace root the app is found in and pnpm install runs at (default: current directory)')

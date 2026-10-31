@@ -86,6 +86,8 @@ class StoreCommands(DAPConn):
             'fs_rename': self._store_fs_rename,
             'fs_geturl': self._store_fs_geturl,
             'fs_read_many': self._store_fs_read_many,
+            'fs_put_json': self._store_fs_put_json,
+            'fs_get_json': self._store_fs_get_json,
         }
 
     # =========================================================================
@@ -337,6 +339,44 @@ class StoreCommands(DAPConn):
         else:
             await fs.close_read(handle)
         return self.build_response(request)
+
+    async def _store_fs_put_json(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Write a JSON value in ONE operation — no handle, no round trips.
+
+        The handle sequence (fs_open -> fs_write -> fs_close) leaves a
+        committable write handle open between messages, and disconnect
+        cleanup commits it: a client that dies after fs_open overwrites the
+        file with an empty buffer. This subcommand exists so a caller that
+        is writing a whole small document (a workspace file, a prefs blob)
+        never opens that window.
+
+        Args:
+            request: Original DAP request.
+            args:    Must contain ``path`` and ``value`` (any JSON value).
+
+        Returns:
+            DAP response with body.bytesWritten.
+        """
+        fs = self._get_file_store()
+        written = await fs.put_json(args.get('path'), args.get('value'))
+        return self.build_response(request, body={'bytesWritten': written})
+
+    async def _store_fs_get_json(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Read and parse a JSON file in ONE operation — the counterpart to
+        ``fs_put_json``.
+
+        Args:
+            request: Original DAP request.
+            args:    Must contain ``path``.
+
+        Returns:
+            DAP response with body.value.
+        """
+        fs = self._get_file_store()
+        value = await fs.get_json(args.get('path'))
+        return self.build_response(request, body={'value': value})
 
     async def _store_fs_delete(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """

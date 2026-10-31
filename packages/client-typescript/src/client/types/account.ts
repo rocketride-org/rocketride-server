@@ -92,6 +92,17 @@ export interface OrgDetail {
 	teamCount: number;
 }
 
+/** The `deleteOrgPrecheck` dry-run result: what deleting the org involves —
+ *  the confirm dialog names the member count and the billing blocker before
+ *  anything is destroyed. */
+export interface DeleteOrgPrecheck {
+	/** How many members lose the workspace (and all of its data). */
+	members: number;
+
+	/** True when an active subscription blocks deletion (cancel billing first). */
+	subscriptionActive: boolean;
+}
+
 // =============================================================================
 // MEMBERS
 // =============================================================================

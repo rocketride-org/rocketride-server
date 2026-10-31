@@ -67,7 +67,7 @@ import { appIconDataUri, findApp, findAppMarkers, MAX_ICON_BYTES, MAX_README_IMA
 import { ensureDependencyWiring, ensureWorkspaceFile, ensureWorkspaceGitignore, extractInstallCause, isTransientLockError, runRootInstall, vendorPlatformPackages } from './vendor.js';
 
 export { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, readProjectId, saveAppListing } from './marker.js';
-export type { AppListing } from './marker.js';
+export type { AppListing, BillingPlan } from './marker.js';
 export { appIconDataUri, findApp, findAppMarkers, MAX_ICON_BYTES, MAX_README_IMAGE_BYTES, probeAppFolder, scanAppMarkers } from './scan.js';
 export type { AppRef, ScannedApp } from './scan.js';
 export { ensureDependencyWiring, ensureWorkspaceFile, ensureWorkspaceGitignore, extractInstallCause, isTransientLockError, runRootInstall, vendorPlatformPackages } from './vendor.js';

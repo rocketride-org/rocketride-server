@@ -120,7 +120,7 @@ const AparaviApp: React.FC<ShellAppProps> = () => {
 	const identity = useAuthUser();
 
 	// Workspace binding — persists tab layout across sessions
-	const { loaded, appState, updateAppState } = useWorkspace();
+	const { loaded, appState, updateAppState, flushWorkspaceNow } = useWorkspace();
 
 	// Pipeline token from client.use() — shared across all chat tabs
 	const [pipelineToken, setPipelineToken] = useState<string | null>(null);
@@ -162,7 +162,7 @@ const AparaviApp: React.FC<ShellAppProps> = () => {
 		};
 
 		// Create the Documents instance — both App and Sidebar share it
-		createDocs(vfs, { appState, updateAppState });
+		createDocs(vfs, { appState, updateAppState, flushNow: flushWorkspaceNow });
 		setReady(true);
 
 		return () => { destroyDocs(); setReady(false); };
@@ -255,7 +255,7 @@ const AparaviAppReady: React.FC<{
 								isActive={state.activeGroupId === groupId}
 								canClose={canCloseGroups}
 								onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)}
-								onCloseGroup={(gid) => docs.closeGroup(gid)}
+								onCloseGroup={(gid) => { void docs.requestCloseGroup(gid); }}
 							/>
 
 							{/* Editor content — each chat tab is independently mounted
