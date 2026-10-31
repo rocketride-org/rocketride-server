@@ -87,6 +87,16 @@ def _rate_limit_hint(headers) -> str:
     return ''
 
 
+def is_too_large(exc: GitHubAPIError) -> bool:
+    """Tell GitHub's refusal of a file over 100 MB (403 with error code ``too_large``) from other 403s."""
+    if exc.status_code != 403 or not isinstance(exc.body, dict):
+        return False
+    errors = exc.body.get('errors')
+    return isinstance(errors, list) and any(
+        isinstance(error, dict) and error.get('code') == 'too_large' for error in errors
+    )
+
+
 def _raise_github_error(resp: requests.Response) -> None:
     """Parse GitHub error response and raise GitHubAPIError."""
     body = None
@@ -392,15 +402,24 @@ def _error_detail(error) -> str:
 
 def redact_result(value: Any, secrets: tuple[str, ...]) -> Any:
     """Remove configured credentials from public read results, including errors."""
-    if isinstance(value, str):
-        for secret in sorted((s for s in secrets if s), key=len, reverse=True):
-            value = value.replace(secret, '[REDACTED]')
+    # Longest first, so a secret that contains another is replaced whole. Sorted once: a
+    # tree result can hold 100,000 entries with several strings each.
+    ordered = tuple(sorted((s for s in secrets if s), key=len, reverse=True))
+    if not ordered:
         return value
-    if isinstance(value, dict):
-        return {redact_result(k, secrets): redact_result(v, secrets) for k, v in value.items()}
-    if isinstance(value, list):
-        return [redact_result(v, secrets) for v in value]
-    return value
+
+    def redact(item: Any) -> Any:
+        if isinstance(item, str):
+            for secret in ordered:
+                item = item.replace(secret, '[REDACTED]')
+            return item
+        if isinstance(item, dict):
+            return {redact(k): redact(v) for k, v in item.items()}
+        if isinstance(item, list):
+            return [redact(v) for v in item]
+        return item
+
+    return redact(value)
 
 
 def get_result(token: str, path: str, *, params: dict | None = None, secrets: tuple[str, ...] = ()) -> dict:

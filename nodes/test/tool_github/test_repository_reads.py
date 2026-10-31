@@ -480,6 +480,433 @@ def test_primary_limit_exhaustion_returns_at_once(node, monkeypatch):
     sleep.assert_not_called()
 
 
+def tree(entries, sha='root-sha', truncated=False):
+    return response({'sha': sha, 'tree': entries, 'truncated': truncated})
+
+
+def routed(responses: dict):
+    """Answer each tree request by (ref or SHA, recursive?) so a wrong URL or mode fails the test."""
+
+    def side_effect(method, url, **kwargs):
+        key = (url.rsplit('/', 1)[1], (kwargs.get('params') or {}).get('recursive') == '1')
+        assert key in responses, f'unexpected request {key}'
+        answer = responses[key]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+    return side_effect
+
+
+def requested(request):
+    """Return (last path segment, recursive) for every request made."""
+    return [
+        (call.args[1].rsplit('/', 1)[1], (call.kwargs.get('params') or {}).get('recursive') == '1')
+        for call in request.call_args_list
+    ]
+
+
+@pytest.mark.parametrize('args', [{}, {'ref': None}, {'ref': ''}, {'ref': ' '}])
+def test_tree_defaults_to_head_and_sorts_entries(node, args):
+    inst, request, _ = node
+    request.return_value = tree(
+        [
+            {'path': 'b.txt', 'type': 'blob', 'size': 2, 'sha': 'blob-sha', 'url': 'omit'},
+            {'path': 'a', 'type': 'tree', 'sha': 'tree-sha', 'mode': '040000'},
+        ]
+    )
+    result = inst.repo_tree(args)
+    assert requested(request) == [('HEAD', True)]
+    assert result['data'] == {
+        'sha': 'root-sha',
+        'tree': [
+            {'path': 'a', 'type': 'tree', 'sha': 'tree-sha', 'mode': '040000'},
+            {'path': 'b.txt', 'type': 'blob', 'size': 2, 'sha': 'blob-sha'},
+        ],
+        'truncated': False,
+        'complete': True,
+        'walked': False,
+    }
+
+
+def test_tree_ref_is_stripped_and_url_encoded_and_the_result_is_the_envelope(node):
+    inst, request, _ = node
+    request.return_value = tree([{'path': 'README.md', 'type': 'blob', 'size': 20, 'sha': 'blob-sha', 'url': 'omit'}])
+    result = inst.repo_tree({'ref': ' release/next '})
+    assert request.call_args.args[1].endswith('/git/trees/release%2Fnext')
+    assert request.call_args.kwargs['params'] == {'recursive': '1'}
+    assert request.call_args.kwargs['headers']['Authorization'] == f'Bearer {TOKEN}'
+    assert result == {
+        'status': 200,
+        'data': {
+            'sha': 'root-sha',
+            'tree': [{'path': 'README.md', 'type': 'blob', 'size': 20, 'sha': 'blob-sha'}],
+            'truncated': False,
+            'complete': True,
+            'walked': False,
+        },
+        'rate_limit': RATE,
+        'next_page': None,
+    }
+    assert TOKEN not in json.dumps(result)
+
+
+def test_tree_truncation_is_explicit_without_walk(node):
+    inst, request, _ = node
+    request.return_value = tree([{'path': 'kept', 'type': 'blob'}], truncated=True)
+    result = inst.repo_tree({'ref': 'main'})
+    assert result['data']['truncated'] is True
+    assert result['data']['complete'] is False
+    assert result['data']['walked'] is False
+    assert result['data']['tree'] == [{'path': 'kept', 'type': 'blob'}]
+    assert 'walk: true' in result['message']
+    assert request.call_count == 1
+
+
+def test_tree_walk_on_a_complete_tree_makes_no_extra_request(node):
+    inst, request, _ = node
+    request.return_value = tree([{'path': 'f', 'type': 'blob'}])
+    result = inst.repo_tree({'walk': True})
+    assert request.call_count == 1
+    assert result['data']['walked'] is False
+    assert result['data']['complete'] is True
+    assert 'message' not in result
+
+
+def test_tree_walk_pins_snapshot_and_reuses_identical_subtrees(node):
+    inst, request, _ = node
+    request.side_effect = routed(
+        {
+            ('main', True): tree([{'path': 'discard-partial', 'type': 'blob'}], truncated=True),
+            ('root-sha', False): tree(
+                [
+                    {'path': 'a', 'type': 'tree', 'sha': 'shared-sha'},
+                    {'path': 'b', 'type': 'tree', 'sha': 'shared-sha'},
+                    {'path': 'submodule', 'type': 'commit', 'sha': 'external', 'mode': '160000'},
+                ]
+            ),
+            ('shared-sha', True): tree(
+                [
+                    {'path': 'file.txt', 'type': 'blob', 'size': 2, 'sha': 'blob-sha'},
+                    {'path': 'nested', 'type': 'tree', 'sha': 'nested-sha'},
+                    {'path': 'nested/deep.txt', 'type': 'blob', 'size': 3, 'sha': 'deep-sha'},
+                ],
+                sha='shared-sha',
+            ),
+        }
+    )
+    result = inst.repo_tree({'ref': 'main', 'walk': True})
+    by_path = {entry['path']: entry for entry in result['data']['tree']}
+    assert list(by_path) == [
+        'a',
+        'a/file.txt',
+        'a/nested',
+        'a/nested/deep.txt',
+        'b',
+        'b/file.txt',
+        'b/nested',
+        'b/nested/deep.txt',
+        'submodule',
+    ]
+    assert by_path['a/nested/deep.txt']['sha'] == 'deep-sha'
+    assert by_path['b/file.txt'] == {'path': 'b/file.txt', 'type': 'blob', 'size': 2, 'sha': 'blob-sha'}
+    assert by_path['submodule']['mode'] == '160000'
+    assert result['data']['complete'] is True
+    assert result['data']['truncated'] is True
+    assert result['data']['walked'] is True
+    assert 'message' not in result
+    # The root is known to be truncated, so it is listed without recursion by the SHA the
+    # ref resolved to; the shared subtree is read once.
+    assert requested(request) == [('main', True), ('root-sha', False), ('shared-sha', True)]
+
+
+def test_tree_walk_splits_only_subtrees_github_truncates_again(node):
+    inst, request, _ = node
+    request.side_effect = routed(
+        {
+            ('main', True): tree([], truncated=True),
+            ('root-sha', False): tree(
+                [
+                    {'path': 'big', 'type': 'tree', 'sha': 'big-sha'},
+                    {'path': 'small', 'type': 'tree', 'sha': 'small-sha'},
+                ]
+            ),
+            ('big-sha', True): tree([{'path': 'partial', 'type': 'blob'}], sha='big-sha', truncated=True),
+            ('big-sha', False): tree(
+                [{'path': 'x', 'type': 'tree', 'sha': 'x-sha'}, {'path': 'readme', 'type': 'blob', 'sha': 'r'}],
+                sha='big-sha',
+            ),
+            ('x-sha', True): tree([{'path': 'f1', 'type': 'blob', 'sha': 'f1'}], sha='x-sha'),
+            ('small-sha', True): tree([{'path': 's1', 'type': 'blob', 'sha': 's1'}], sha='small-sha'),
+        }
+    )
+    result = inst.repo_tree({'ref': 'main', 'walk': True})
+    assert [entry['path'] for entry in result['data']['tree']] == [
+        'big',
+        'big/readme',
+        'big/x',
+        'big/x/f1',
+        'small',
+        'small/s1',
+    ]
+    assert result['data']['complete'] is True
+    assert request.call_count == 6
+    assert set(requested(request)) == {
+        ('main', True),
+        ('root-sha', False),
+        ('big-sha', True),
+        ('big-sha', False),
+        ('x-sha', True),
+        ('small-sha', True),
+    }
+
+
+def test_tree_walk_recovers_more_than_100000_entries(node):
+    inst, request, _ = node
+    directories = [{'path': f'd{i}', 'type': 'tree', 'sha': f's{i}'} for i in range(11)]
+    responses = {('HEAD', True): tree([], truncated=True), ('root-sha', False): tree(directories)}
+    for i in range(11):
+        responses[(f's{i}', True)] = tree(
+            [{'path': f'f{j}', 'type': 'blob', 'size': 1} for j in range(10000)], sha=f's{i}'
+        )
+    request.side_effect = routed(responses)
+    result = inst.repo_tree({'walk': True})
+    assert len(result['data']['tree']) == 110011
+    assert len({entry['path'] for entry in result['data']['tree']}) == 110011
+    assert result['data']['complete'] is True
+    assert request.call_count == 13
+
+
+def test_tree_walk_caps_entries_when_a_few_trees_are_referenced_everywhere(node):
+    """A git bomb: every level holds ten references to one tree, so entries grow tenfold per level while requests do not."""
+    inst, request, _ = node
+    levels = 6
+    responses = {
+        ('main', True): tree([], truncated=True),
+        ('root-sha', False): tree([{'path': f'd{j}', 'type': 'tree', 'sha': 'level1'} for j in range(10)]),
+        (f'level{levels}', True): tree(
+            [{'path': f'f{j}', 'type': 'blob', 'size': 1} for j in range(10)], sha=f'level{levels}'
+        ),
+    }
+    for level in range(1, levels):
+        sha = f'level{level}'
+        responses[(sha, True)] = tree([], sha=sha, truncated=True)
+        responses[(sha, False)] = tree(
+            [{'path': f'd{j}', 'type': 'tree', 'sha': f'level{level + 1}'} for j in range(10)], sha=sha
+        )
+    request.side_effect = routed(responses)
+    result = inst.repo_tree({'ref': 'main', 'walk': True, 'max_entries': 5000})
+    assert len(result['data']['tree']) == 5000
+    assert result['data']['complete'] is False
+    assert result['data']['walked'] is True
+    assert 'max_entries (5000)' in result['message']
+    assert request.call_count <= 2 * levels + 1
+
+
+def test_tree_walk_entry_cap_counts_walk_entries_and_keeps_the_listing(node):
+    inst, request, _ = node
+    first_page = [
+        {'path': 'a', 'type': 'blob'},
+        {'path': 'b', 'type': 'tree', 'sha': 'b-sha'},
+        {'path': 'b/c', 'type': 'blob'},
+    ]
+    root = [{'path': 'a', 'type': 'blob'}, {'path': 'b', 'type': 'tree', 'sha': 'b-sha'}]
+    request.side_effect = [
+        tree(first_page, truncated=True),
+        tree(root),
+        tree([{'path': 'c', 'type': 'blob'}], sha='b-sha'),
+    ]
+    # A cap equal to the tree's size completes it: no off-by-one.
+    result = inst.repo_tree({'walk': True, 'max_entries': 3})
+    assert result['data']['complete'] is True
+    assert [entry['path'] for entry in result['data']['tree']] == ['a', 'b', 'b/c']
+    request.reset_mock()
+    request.side_effect = [
+        tree(first_page, truncated=True),
+        tree(root + [{'path': 'd', 'type': 'blob'}]),
+        tree([{'path': 'c', 'type': 'blob'}], sha='b-sha'),
+    ]
+    # The walk lists a, b and d, reaches the cap at b/c, and keeps b/c from GitHub's listing.
+    result = inst.repo_tree({'walk': True, 'max_entries': 3})
+    assert result['data']['complete'] is False
+    assert [entry['path'] for entry in result['data']['tree']] == ['a', 'b', 'b/c', 'd']
+    assert 'max_entries (3)' in result['message']
+    assert request.call_count == 3
+
+
+@pytest.mark.parametrize('failure', ['budget', 'http', 'truncated', 'shape'])
+def test_tree_walk_never_claims_partial_result_is_complete(node, failure):
+    inst, request, _ = node
+    responses = {
+        ('main', True): tree([{'path': 'first-page.txt', 'type': 'blob'}], truncated=True),
+        ('root-sha', False): tree([{'path': 'src', 'type': 'tree', 'sha': 'subtree'}]),
+    }
+    if failure == 'http':
+        responses[('subtree', True)] = response(
+            {'message': 'Not Found', 'documentation_url': 'https://docs.github.com/rest/git/trees'}, 404
+        )
+    elif failure == 'truncated':
+        responses[('subtree', True)] = tree([], sha='subtree', truncated=True)
+        responses[('subtree', False)] = tree([], sha='subtree', truncated=True)
+    elif failure == 'shape':
+        responses[('subtree', True)] = response({'sha': 'subtree', 'tree': None})
+    request.side_effect = routed(responses)
+    result = inst.repo_tree({'ref': 'main', 'walk': True, 'max_requests': 1 if failure == 'budget' else 10})
+    assert result['data']['complete'] is False
+    assert result['data']['walked'] is True
+    # The entries GitHub's truncated listing named stay in the result.
+    assert result['data']['tree'] == [
+        {'path': 'first-page.txt', 'type': 'blob'},
+        {'path': 'src', 'type': 'tree', 'sha': 'subtree'},
+    ]
+    assert result['rate_limit'] == RATE
+    if failure == 'budget':
+        assert result['status'] == 200
+        assert 'max_requests (1)' in result['message']
+        assert '1 subtree still pending' in result['message']
+        assert request.call_count == 2
+    elif failure == 'http':
+        assert result['status'] == 404
+        assert result['documentation_url'] == 'https://docs.github.com/rest/git/trees'
+        assert (
+            result['message']
+            == 'Tree walk stopped at "src" after 2 requests: GitHub API 404: Not Found; data is partial.'
+        )
+    elif failure == 'truncated':
+        assert result['status'] == 200
+        assert 'non-recursive listing of "src"' in result['message']
+    else:
+        assert result['status'] == 200
+        assert result['message'] == (
+            'Tree walk stopped at "src" after 2 requests: GitHub returned an unexpected response body; '
+            'expected a tree object; data is partial.'
+        )
+
+
+def test_tree_walk_budget_stop_counts_the_subtrees_still_pending(node):
+    inst, request, _ = node
+    request.side_effect = routed(
+        {
+            ('main', True): tree([], truncated=True),
+            ('root-sha', False): tree(
+                [{'path': 'a', 'type': 'tree', 'sha': 'a-sha'}, {'path': 'b', 'type': 'tree', 'sha': 'b-sha'}]
+            ),
+        }
+    )
+    result = inst.repo_tree({'ref': 'main', 'walk': True, 'max_requests': 1})
+    assert result['data']['complete'] is False
+    assert result['message'] == (
+        'Tree walk reached max_requests (1) with 2 subtrees still pending; raise it (up to 10000) '
+        'or call repo_tree with a subtree sha as ref (its paths are then relative to that subtree).'
+    )
+
+
+def test_tree_walk_skips_entries_it_cannot_use(node):
+    inst, request, _ = node
+    request.side_effect = routed(
+        {
+            ('main', True): tree([], truncated=True),
+            ('root-sha', False): tree(
+                [
+                    # A tree entry without a SHA is listed but cannot be read; the walk does not descend.
+                    {'path': 'no-sha', 'type': 'tree'},
+                    {'path': 'src', 'type': 'tree', 'sha': 'src-sha'},
+                    'not an entry',
+                    {'type': 'blob', 'sha': 'pathless'},
+                ]
+            ),
+            ('src-sha', True): tree([{'path': 'a.py', 'type': 'blob'}, None, {'path': 7}], sha='src-sha'),
+        }
+    )
+    result = inst.repo_tree({'ref': 'main', 'walk': True})
+    assert [entry['path'] for entry in result['data']['tree']] == ['no-sha', 'src', 'src/a.py']
+    assert result['data']['complete'] is True
+    assert requested(request) == [('main', True), ('root-sha', False), ('src-sha', True)]
+
+
+def test_tree_walk_stopped_early_keeps_the_initial_listing(node):
+    inst, request, _ = node
+    request.side_effect = routed(
+        {
+            ('main', True): tree(
+                [{'path': 'keep/a.txt', 'type': 'blob', 'sha': 'k'}, {'path': 'src', 'type': 'tree', 'sha': 'subtree'}],
+                truncated=True,
+            ),
+            ('root-sha', False): tree(
+                [{'path': 'src', 'type': 'tree', 'sha': 'subtree'}, {'path': 'other', 'type': 'tree', 'sha': 'o-sha'}]
+            ),
+            ('o-sha', True): tree([{'path': 'o.txt', 'type': 'blob', 'sha': 'o'}], sha='o-sha'),
+            ('subtree', True): response({'message': 'Not Found'}, 404),
+        }
+    )
+    result = inst.repo_tree({'ref': 'main', 'walk': True})
+    assert [entry['path'] for entry in result['data']['tree']] == ['keep/a.txt', 'other', 'other/o.txt', 'src']
+    assert result['data']['complete'] is False
+    assert result['status'] == 404
+    assert (
+        result['message'] == 'Tree walk stopped at "src" after 3 requests: GitHub API 404: Not Found; data is partial.'
+    )
+
+
+def test_tree_walk_failure_without_response_keeps_last_counters(node):
+    inst, request, _ = node
+    request.side_effect = routed(
+        {
+            ('HEAD', True): tree([], truncated=True),
+            ('root-sha', False): tree([{'path': 'src', 'type': 'tree', 'sha': 'subtree'}]),
+            ('subtree', True): requests.ConnectionError('boom ' + TOKEN),
+        }
+    )
+    result = inst.repo_tree({'walk': True})
+    assert result['status'] is None
+    assert result['message'] == (
+        'Tree walk stopped at "src" after 2 requests: GitHub request failed or returned invalid JSON. '
+        'Check connectivity and retry; data is partial.'
+    )
+    assert result['rate_limit'] == RATE
+    assert result['data']['complete'] is False
+    assert [entry['path'] for entry in result['data']['tree']] == ['src']
+    assert TOKEN not in json.dumps(result)
+
+
+def test_tree_errors_are_results(node):
+    inst, request, _ = node
+    request.return_value = response({'message': 'Not Found', 'documentation_url': 'https://docs.github.com/rest'}, 404)
+    result = inst.repo_tree({'ref': 'missing'})
+    assert result == {
+        'status': 404,
+        'message': 'Not Found',
+        'documentation_url': 'https://docs.github.com/rest',
+        'rate_limit': RATE,
+        'next_page': None,
+    }
+    request.return_value = response({'sha': 'root', 'tree': None})
+    result = inst.repo_tree({})
+    assert result['status'] == 200
+    assert 'data' not in result
+    assert 'unexpected' in result['message']
+
+
+@pytest.mark.parametrize(
+    'args',
+    [
+        {'ref': 123},
+        {'walk': 'false'},
+        {'max_requests': 0},
+        {'max_requests': True},
+        {'max_requests': 10001},
+        {'max_entries': 0},
+        {'max_entries': 'many'},
+        {'max_entries': 1000001},
+    ],
+)
+def test_invalid_tree_options_do_not_send_requests(node, args):
+    inst, request, _ = node
+    with pytest.raises(ValueError, match='repo_tree'):
+        inst.repo_tree(args)
+    request.assert_not_called()
+
+
 def test_legacy_call_keeps_body_only_and_raises_http_errors(node):
     _, request, client = node
     request.return_value = response([{'name': 'existing-shape'}])

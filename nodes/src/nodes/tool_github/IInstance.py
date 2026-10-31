@@ -37,7 +37,7 @@ import re
 
 from rocketlib import IInstanceBase, tool_function, warning
 
-from ai.common.utils import normalize_tool_input, require_int, require_str
+from ai.common.utils import normalize_tool_input, optional_int, require_int, require_str
 
 from .github_client import (
     GitHubAPIError,
@@ -50,6 +50,7 @@ from .github_client import (
     clean_repo,
     clean_user,
     clean_workflow,
+    is_too_large,
 )
 from .IGlobal import IGlobal
 from . import github_client, repository_reads
@@ -161,6 +162,24 @@ def _relax_query(q: str, *, max_terms: int = 5) -> str | None:
     return ' '.join([or_clause, *qualifiers]).strip()
 
 
+# Bytes git inspects for a NUL byte before treating a file as binary.
+_BINARY_PROBE_BYTES = 8000
+# file_get's max_bytes: the largest file whose content the blob path downloads. Peak
+# memory is a few times the file size (base64 body, bytes, text), so the default keeps
+# a read to some tens of megabytes. The range runs from the Contents API's 1 MiB, below
+# which the content arrives with the metadata, to GitHub's 100 MiB blob limit.
+FILE_MAX_BYTES_DEFAULT = 8 * 1024 * 1024
+FILE_MAX_BYTES_MIN = 1024 * 1024
+FILE_MAX_BYTES_LIMIT = 100 * 1024 * 1024
+
+
+def _decoded_bytes(content: str, encoding: str | None) -> bytes:
+    """Return GitHub's file content as bytes: base64-decoded when ``encoding`` is ``base64``, else UTF-8 encoded."""
+    if encoding == 'base64':
+        return base64.b64decode(content)
+    return content.encode('utf-8')
+
+
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
@@ -229,15 +248,38 @@ class IInstance(IInstanceBase):
                     'type': 'string',
                     'description': 'Branch, tag, or commit SHA to read from (default: repo default branch)',
                 },
+                'max_bytes': {
+                    'type': 'integer',
+                    'minimum': FILE_MAX_BYTES_MIN,
+                    'maximum': FILE_MAX_BYTES_LIMIT,
+                    'description': (
+                        f'Largest file over 1 MB whose content is downloaded, in bytes (default '
+                        f'{FILE_MAX_BYTES_DEFAULT}, 8 MiB). A larger file comes back with content null and '
+                        'a message, without being downloaded; pass a larger max_bytes to read it.'
+                    ),
+                },
             },
         },
-        description='Get the decoded content and metadata of a single file from a GitHub repository.',
+        description='Get the decoded content and metadata of a single file from a GitHub repository. Files over 1 MB are read through the Git blob API, up to max_bytes (default 8 MiB); when a file is larger than that, GitHub cannot serve the content, or such a file is binary, content is null and message says why.',
     )
     def file_get(self, args):
         """Get the decoded content and metadata of a single file from a GitHub repository."""
         args = normalize_tool_input(args, tool_name='tool_github')
         repo = self._repo(args)
         path = require_str(args, 'path', tool_name='file_get')
+        if isinstance(args.get('max_bytes'), str):
+            # A JSON integer only, as the repository reads take page and per_page.
+            raise ValueError(
+                f'file_get: "max_bytes" must be an integer between {FILE_MAX_BYTES_MIN} and {FILE_MAX_BYTES_LIMIT}'
+            )
+        max_bytes = optional_int(
+            args,
+            'max_bytes',
+            default=FILE_MAX_BYTES_DEFAULT,
+            lo=FILE_MAX_BYTES_MIN,
+            hi=FILE_MAX_BYTES_LIMIT,
+            tool_name='file_get',
+        )
         params = {'ref': args['ref']} if args.get('ref') else None
         # Mint the token outside the try: a 404 from the token endpoint is not a missing file.
         token = self._token()
@@ -246,21 +288,83 @@ class IInstance(IInstanceBase):
         except GitHubAPIError as e:
             if e.status_code == 404:
                 return {'found': False, 'message': str(e)}
+            if is_too_large(e):
+                # The Contents API refuses the file outright (GitHub does this over 100 MB): no
+                # metadata and no blob SHA to fall back to. Say so instead of surfacing a bare 403.
+                return {
+                    'found': True,
+                    'path': path.lstrip('/'),
+                    'content': None,
+                    'message': (
+                        'GitHub refused this file as too large for its Contents API (files over 100 MB '
+                        'are not served through the API). Clone the repository with tool_git to read it.'
+                    ),
+                }
             raise
         if isinstance(data, list):
             raise ValueError(f'Path "{path}" is a directory — use file_list instead')
-        content_b64 = data.get('content', '')
-        content = base64.b64decode(content_b64).decode('utf-8', errors='replace')
-        return {
+        result = {
             'found': True,
             'path': data.get('path'),
             'name': data.get('name'),
             'sha': data.get('sha'),
             'size': data.get('size'),
-            'content': content,
+            'content': None,
             'html_url': data.get('html_url'),
             'download_url': data.get('download_url'),
         }
+        if data.get('encoding') != 'none':
+            content = _decoded_bytes(data.get('content') or '', data.get('encoding'))
+            result['content'] = content.decode('utf-8', errors='replace')
+            return result
+        # Between 1 MB and 100 MB the Contents API returns the metadata with an empty
+        # content and encoding "none". Read the same blob by SHA, which GitHub serves up to
+        # 100 MB, so the content matches the metadata even if the branch moved meanwhile.
+        if not result['sha']:
+            result['message'] = (
+                f'The file is {result["size"]} bytes, over the 1 MB Contents API limit, and GitHub '
+                'returned no blob SHA to read it by. Download it from download_url or clone the '
+                'repository with tool_git.'
+            )
+            return result
+        if isinstance(result['size'], int) and result['size'] > max_bytes:
+            # The metadata names the size, so a file over the cap is refused before its blob
+            # is downloaded, never after the body has been read.
+            result['message'] = (
+                f'The file is {result["size"]} bytes, more than max_bytes ({max_bytes}), so its content was '
+                f'not downloaded. Pass a larger max_bytes (up to {FILE_MAX_BYTES_LIMIT}) to read it, or '
+                'download it from download_url.'
+            )
+            return result
+        try:
+            blob = call(token, 'GET', f'/repos/{repo}/git/blobs/{result["sha"]}')
+        except ValueError as e:
+            # GitHubAPIError (an HTTP refusal), a transport failure or an invalid JSON body:
+            # the metadata is still worth returning, so none of them raises. Transport
+            # exception text is not echoed, as in the repository reads.
+            reason = str(e) if isinstance(e, GitHubAPIError) else 'GitHub request failed or returned invalid JSON'
+            result['message'] = (
+                f'The file is {result["size"]} bytes, over the 1 MB Contents API limit, and the Git '
+                f'blob read failed ({reason}). Download it from download_url or clone the repository '
+                'with tool_git.'
+            )
+            return result
+        raw = _decoded_bytes(blob.get('content') or '', blob.get('encoding'))
+        if isinstance(result['size'], int) and len(raw) != result['size']:
+            result['message'] = (
+                f'GitHub returned {len(raw)} bytes for a {result["size"]}-byte file; the content is withheld '
+                'rather than returned incomplete. Download it from download_url.'
+            )
+            return result
+        if b'\0' in raw[:_BINARY_PROBE_BYTES]:
+            # git's own heuristic. Tens of megabytes of replacement characters help nobody.
+            result['message'] = (
+                f'The file is {result["size"]} bytes of binary content (a NUL byte within its first '
+                f'{_BINARY_PROBE_BYTES} bytes), which this tool returns only as text. Download it from download_url.'
+            )
+            return result
+        result['content'] = raw.decode('utf-8', errors='replace')
+        return result
 
     @tool_function(
         input_schema={
@@ -271,7 +375,7 @@ class IInstance(IInstanceBase):
                 'ref': {'type': 'string', 'description': 'Branch, tag, or commit SHA (default: repo default branch)'},
             },
         },
-        description='List files and directories at a path in a GitHub repository.',
+        description='List files and directories at a path in a GitHub repository: one directory, at most 1,000 entries (the Contents API limit, with no truncation flag). Use repo_tree for a whole or large tree.',
     )
     def file_list(self, args):
         """List files and directories at a path in a GitHub repository."""
@@ -778,6 +882,40 @@ class IInstance(IInstanceBase):
         repo = self._repo(args)
         data = call(self._token(), 'GET', f'/repos/{repo}')
         return clean_repo(data)
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'properties': {
+                'repo': {'type': 'string', 'description': _REPO_DESC},
+                'ref': {
+                    'type': 'string',
+                    'description': 'Branch, tag or SHA; defaults to HEAD, the default branch.',
+                },
+                'walk': {
+                    'type': 'boolean',
+                    'description': 'Complete a truncated tree by reading its subtrees (default false).',
+                },
+                'max_requests': {
+                    'type': 'integer',
+                    'minimum': 1,
+                    'maximum': repository_reads.MAX_REQUESTS_LIMIT,
+                    'description': f'Subtree requests a walk may make (default {repository_reads.MAX_REQUESTS_DEFAULT}). Check data.complete before treating the result as the whole tree.',
+                },
+                'max_entries': {
+                    'type': 'integer',
+                    'minimum': 1,
+                    'maximum': repository_reads.MAX_ENTRIES_LIMIT,
+                    'description': f'Entries a walk may list (default {repository_reads.MAX_ENTRIES_DEFAULT}); a capped walk has data.complete false and a message.',
+                },
+            },
+        },
+        description='Read a repository tree recursively, sorted by path, with truncated and complete flags; walk completes a truncated tree from subtree reads pinned to the same snapshot. Returns data and rate_limit; data.sha is the SHA the ref resolved to: a commit SHA for a branch, tag or commit, which repo_tree and file_get accept as ref to read the same snapshot; a tree SHA passed as ref comes back as itself and works only with repo_tree.',
+    )
+    def repo_tree(self, args):
+        """Read a repository snapshot, optionally completing a truncated tree."""
+        args = normalize_tool_input(args, tool_name='repo_tree')
+        return repository_reads.repo_tree(self._get, self._repo(args, 'repo_tree'), args)
 
     @tool_function(
         input_schema={

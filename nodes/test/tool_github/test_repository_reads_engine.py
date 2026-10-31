@@ -10,6 +10,7 @@ Only HTTP is mocked. Under the engine it runs with the rest of the directory; un
 plain python, without ``engLib``, it is skipped.
 """
 
+import base64
 import importlib.util
 import json
 import sys
@@ -22,6 +23,13 @@ import requests
 
 pytest.importorskip('engLib', reason='Run with engine -m pytest for native tool dispatch')
 from rocketlib import APERR, Ec
+
+
+def json_response(payload, status=200):
+    resp = requests.Response()
+    resp.status_code = status
+    resp._content = json.dumps(payload).encode()
+    return resp
 
 
 @pytest.fixture
@@ -60,10 +68,26 @@ def test_all_new_tools_are_discovered_with_real_schemas(instance):
         inst.invoke(param)
     assert error.value.ec == Ec.PreventDefault
     tools = {tool['name']: tool for tool in param['tools']}
-    for name in ('repo_contributors', 'repo_languages', 'label_list', 'user_get', 'repo_get', 'pr_list'):
+    for name in (
+        'repo_tree',
+        'repo_contributors',
+        'repo_languages',
+        'label_list',
+        'user_get',
+        'file_get',
+        'repo_get',
+        'pr_list',
+    ):
         assert name in tools
         assert tools[name]['inputSchema']['type'] == 'object'
         assert 'token' not in tools[name]['inputSchema']['properties']
+    assert set(tools['repo_tree']['inputSchema']['properties']) == {
+        'repo',
+        'ref',
+        'walk',
+        'max_requests',
+        'max_entries',
+    }
     request.assert_not_called()
 
 
@@ -112,6 +136,49 @@ def test_dispatch_new_read_tools_with_json_input(instance, tool, args, payload, 
     assert param['output']['data'] == data
     assert 'rate_limit' in param['output']
     assert request.call_args.args == ('GET', url)
+
+
+def test_dispatch_repo_tree_with_json_input(instance):
+    inst, request = instance
+    request.return_value = json_response({'sha': 'root', 'tree': [], 'truncated': False})
+    param = {'op': 'tool.invoke', 'tool_name': 'repo_tree', 'input': json.dumps({'ref': 'main'})}
+    inst.invoke(param)
+    assert param['output']['status'] == 200
+    assert param['output']['data'] == {'sha': 'root', 'tree': [], 'truncated': False, 'complete': True, 'walked': False}
+    assert 'rate_limit' in param['output']
+    assert request.call_args.args == ('GET', 'https://api.github.com/repos/owner/repo/git/trees/main')
+
+
+def test_dispatch_file_get_reads_a_large_file_through_the_blob_api(instance):
+    inst, request = instance
+    text = 'x' * 1_048_577
+    request.side_effect = [
+        json_response(
+            {
+                'type': 'file',
+                'name': 'big.txt',
+                'path': 'big.txt',
+                'sha': 'blob-sha',
+                'size': len(text),
+                'encoding': 'none',
+                'content': '',
+            }
+        ),
+        json_response(
+            {
+                'sha': 'blob-sha',
+                'size': len(text),
+                'encoding': 'base64',
+                'content': base64.encodebytes(text.encode()).decode(),
+            }
+        ),
+    ]
+    param = {'op': 'tool.invoke', 'tool_name': 'file_get', 'input': json.dumps({'path': 'big.txt'})}
+    inst.invoke(param)
+    assert param['output']['found'] is True
+    assert param['output']['content'] == text
+    assert 'message' not in param['output']
+    assert request.call_args.args == ('GET', 'https://api.github.com/repos/owner/repo/git/blobs/blob-sha')
 
 
 def test_legacy_write_still_blocked_in_read_only_mode(instance):
