@@ -30,6 +30,7 @@ import * as vscode from 'vscode';
 import { RocketRideClient } from 'rocketride';
 import { generatePkce, buildAuthUrl } from './pkce';
 import { isSecureCloudTarget } from '../config';
+import { resolveCloudAppUrl } from './resolveCloudAppUrl';
 
 import { EventEmitter } from 'events';
 
@@ -328,7 +329,25 @@ export class CloudAuthProvider implements vscode.UriHandler, vscode.Disposable {
 				this.pendingSignOut = false;
 				this._onDidChange.emit('changed');
 			} else {
-				vscode.window.showErrorMessage('RocketRide Cloud sign-in failed: no token received.');
+				// Not waitlisted, but still no token: the account is enabled
+				// (auto-provisioned on first sign-in, and not queued above),
+				// so the only remaining cause is that every rr_* API key on
+				// it is inactive/revoked.
+				const ACTION_OPEN_CLOUD = 'Open RocketRide Cloud';
+				vscode.window
+					.showErrorMessage(
+						'RocketRide Cloud sign-in succeeded, but no active API key was found for this account. Sign in to RocketRide Cloud in your browser to create a new key, then try again.',
+						ACTION_OPEN_CLOUD
+					)
+					.then((selection) => {
+						if (selection !== ACTION_OPEN_CLOUD) return;
+						// Separate from the sign-in try/catch above: a failure here
+						// means the browser didn't open, not that sign-in failed.
+						vscode.env.openExternal(vscode.Uri.parse(resolveCloudAppUrl(cloudUrl))).then(undefined, (openError) => {
+							const openMsg = openError instanceof Error ? openError.message : String(openError);
+							vscode.window.showErrorMessage(`Could not open RocketRide Cloud: ${openMsg}`);
+						});
+					});
 			}
 		} catch (error) {
 			const msg = error instanceof Error ? error.message : String(error);
