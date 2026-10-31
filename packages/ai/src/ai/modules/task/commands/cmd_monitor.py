@@ -464,7 +464,7 @@ class MonitorCommands(DAPConn):
         if token == '*':
             # Only token can be specified
             if project_id or source:
-                raise ValueError('You must specifiy either token or project_id/source, not both')
+                raise ValueError('You must specify either token or project_id/source, not both')
 
             event_key = '*'
             event_id = None
@@ -474,7 +474,7 @@ class MonitorCommands(DAPConn):
         elif token:
             # Only token can be specified
             if project_id or source:
-                raise ValueError('You must specifiy either token or project_id/source, not both')
+                raise ValueError('You must specify either token or project_id/source, not both')
 
             # Resolve the token to a project key
             control = self._server.get_task_control(token)
@@ -545,7 +545,7 @@ class MonitorCommands(DAPConn):
 
         else:
             # Invalid
-            raise ValueError('You must specifiy either token or project_id/source')
+            raise ValueError('You must specify either token or project_id/source')
 
         # If a pipe_id is specified, narrow the key to that specific pipe
         if pipe_id is not None and event_key != '*':
