@@ -337,7 +337,7 @@ async def test_set_monitor_unsubscribe_removes_key():
 async def test_set_monitor_rejects_token_and_project_id_together():
     """Specifying BOTH token and project_id raises ValueError."""
     conn = _make_conn(account_info=_account_info())
-    with pytest.raises(ValueError, match='either token or project_id/source'):
+    with pytest.raises(ValueError, match='You must specify either token or project_id/source'):
         await MonitorCommands.set_monitor(conn, token='tk_1', project_id='proj-1', source='src-1')
 
 
@@ -345,7 +345,7 @@ async def test_set_monitor_rejects_token_and_project_id_together():
 async def test_set_monitor_rejects_no_target():
     """Neither token nor project_id/source given raises ValueError."""
     conn = _make_conn(account_info=_account_info())
-    with pytest.raises(ValueError, match='either token or project_id/source'):
+    with pytest.raises(ValueError, match='You must specify either token or project_id/source'):
         await MonitorCommands.set_monitor(conn)
 
 
