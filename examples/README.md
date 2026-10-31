@@ -17,6 +17,8 @@ Query:      chat -> embedding -> Qdrant -> prompt -> LLM -> response
 - Answers questions by embedding the query, retrieving relevant documents, and generating an answer with GPT-4o
 - Uses the prompt node to merge retrieved context with the user's question
 
+The file has two source components, so it names the one that starts by default: `"source": "chat_1"`, the query flow. To run the ingestion flow instead, name its source when you start the pipeline: `client.use(filepath='rag-pipeline.pipe', source='webhook_1')` in Python, or `client.use({ filepath: 'rag-pipeline.pipe', source: 'webhook_1' })` in TypeScript. Ingest documents first, or the query flow has nothing to retrieve.
+
 **Required env vars:** `ROCKETRIDE_OPENAI_KEY`, `ROCKETRIDE_QDRANT_HOST`, `ROCKETRIDE_COLLECTION_NAME`
 
 ---
