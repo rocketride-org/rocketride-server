@@ -224,7 +224,7 @@ export function ApiKeyLogin({ onSubmit, onCancel, appName = 'RocketRide', initia
 	};
 
 	return (
-		<div style={styles.container}>
+		<div style={styles.container} data-rr-private="">
 			<div style={styles.panel}>
 				{/* Product mark + name. */}
 				<RocketRideMark bodyColor="var(--rr-text-primary)" style={styles.mark} />
