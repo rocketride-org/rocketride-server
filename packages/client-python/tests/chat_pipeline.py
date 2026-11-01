@@ -69,8 +69,8 @@ def _create_llm_component() -> Dict[str, Any]:
             'id': 'llm_anthropic_1',
             'provider': 'llm_anthropic',
             'config': {
-                'profile': 'claude-3_7-sonnet',
-                'claude-3-sonnet': {'apikey': anthropic_key},
+                'profile': 'claude-sonnet-5',
+                'claude-sonnet-5': {'apikey': anthropic_key},
             },
             'input': [{'lane': 'questions', 'from': 'chat_1'}],
         }

@@ -60,8 +60,8 @@ function createLLMComponent() {
 			id: "llm_anthropic_1",
 			provider: "llm_anthropic",
 			config: {
-				profile: "claude-3_7-sonnet",
-				"claude-3-sonnet": { apikey: anthropicKey }
+				profile: "claude-sonnet-5",
+				"claude-sonnet-5": { apikey: anthropicKey }
 			},
 			input: [{ lane: "questions", from: "chat_1" }]
 		};
