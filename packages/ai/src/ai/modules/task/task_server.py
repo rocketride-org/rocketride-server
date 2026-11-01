@@ -89,13 +89,13 @@ from ai.web import WebServer
 from ai.account.models import AccountInfo, resolve_run_permissions
 from ai.account.store import Store
 from .task_conn import TaskConn
-from .task_engine import Task
-from .launcher import Launcher, create_launcher
+from .task_engine import Task, _is_saas_engine
+from .launcher import Launcher, create_launcher, default_runtime
 from .types import LAUNCH_TYPE, TaskError
 from .pipeline import resolve_implied_source
 from .commands.cmd_monitor import owner_key
 
-from rocketlib import debug
+from rocketlib import debug, warning
 
 
 @dataclass
@@ -292,8 +292,10 @@ class TaskServer(DAPBase):
         self._server = server
         self._config = server.config
 
-        # The runtime every Task of this process starts with (see launcher())
+        # The runtime every Task of this process starts with (see launcher()); its
+        # one-time work (docker: info and the startup sweep) runs now, before the first task
         self._launcher: Optional[Launcher] = None
+        self._bg_tasks.append(asyncio.create_task(self._prepare_launcher()))
 
         # Register authentication handler for our keys
         server.add_authenticator(self.authenticate)
@@ -308,14 +310,28 @@ class TaskServer(DAPBase):
         Built once from ``server.config['runtime']`` (``--runtime`` on
         ``eaas.py``), so a runtime's one-time work happens once per process
         and the state of one run lives in its ``Launch``. A config without a
-        runtime gets spawn.
+        runtime gets the default: docker on a hosted engine, spawn otherwise.
 
         Returns:
             Launcher: The shared launcher.
         """
         if self._launcher is None:
-            self._launcher = create_launcher(self._config.get('runtime') or '', self)
+            runtime = self._config.get('runtime') or default_runtime(_is_saas_engine())
+            self._launcher = create_launcher(runtime, self)
         return self._launcher
+
+    async def _prepare_launcher(self) -> None:
+        """
+        Run the launcher's one-time preparation at startup.
+
+        A failure (no docker daemon) is logged here and raised again by each
+        task start, which retries it.
+        """
+        try:
+            await self.launcher().prepare()
+        except Exception as e:
+            runtime = self._launcher.name if self._launcher else self._config.get('runtime')
+            warning(f'Task runtime {runtime!r} is not ready: {e}')
 
     @property
     def store(self) -> Store:

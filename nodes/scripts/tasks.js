@@ -49,6 +49,7 @@ const {
 	withoutXdistArgs,
 	hasDistMode,
 	collectPytestReport,
+	when,
 	parallel,
 	bracket,
 	parseServerAddress,
@@ -116,6 +117,8 @@ function makeSyncNodesAction() {
 	};
 }
 
+// The test server: the one --taskserver names, or an engine started here with the
+// test mocks, under the runtime nodes:test asks for
 function makeStartTestServerAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
@@ -138,6 +141,8 @@ function makeStartTestServerAction(options = {}) {
 				trace: options.trace,
 				logName: 'nodes',
 				verbose: ctx.options?.verbose,
+				// --runtime=docker: every task in a container (container:test)
+				args: options.runtime ? [`--runtime=${options.runtime}`] : [],
 				basePort: 40000, // Use 40000 range for node tests
 				env: {
 					ROCKETRIDE_MOCK: mocksPath,
@@ -152,7 +157,8 @@ function makeStartTestServerAction(options = {}) {
 			});
 
 			ctx.port = result.port;
-			task.output = `Server ready on port ${ctx.port} (mocks enabled)`;
+			const runtime = options.runtime ? `, runtime ${options.runtime}` : '';
+			task.output = `Server ready on port ${ctx.port} (mocks enabled${runtime})`;
 			taskComplete = true;
 			return { port: result.port, server: result.server };
 		},
@@ -187,6 +193,8 @@ function makeRunPytestAction(options = {}) {
 			const testEnv = {
 				...process.env,
 				ROCKETRIDE_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks'),
+				// Tests whose outcome depends on the runtime (the store under docker) read it here
+				ROCKETRIDE_TEST_RUNTIME: options.runtime || 'spawn',
 			};
 			if (mode === 'run') {
 				const bracket = ctx.brackets?.['node-test-server'];
@@ -393,7 +401,7 @@ function makeBuildImageAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
 			const reason = await containerUnavailable();
-			if (reason) return skipLoudly('nodes:build-container', task, reason);
+			if (reason) return skipLoudly('container:build', task, reason);
 
 			const { base, node } = await imageNames();
 			const dockerDir = path.join(PROJECT_ROOT, 'docker');
@@ -439,13 +447,12 @@ function makeBuildImageAction(options = {}) {
 
 // Stage 0 of the container tests: the node image as a run gets it, checked by
 // docker/test-node-image.sh (the release workflow runs the same script before
-// signing). The runtime itself (a pipeline through the container) comes with
-// its Launcher.
+// signing). container:test then runs nodes:test through the docker runtime.
 function makeTestImageAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
 			const reason = await containerUnavailable();
-			if (reason) return skipLoudly('nodes:test-container', task, reason);
+			if (reason) return skipLoudly('container:test', task, reason);
 
 			const { node } = await imageNames();
 			task.output = `Checking ${node}...`;
@@ -455,6 +462,41 @@ function makeTestImageAction(options = {}) {
 			});
 			task.output = `${node}: engine probe and offline installs passed`;
 		},
+	};
+}
+
+// T2's docker arm: nodes:test with every task in a container. Without a daemon
+// it skips loudly, as the image steps before it do.
+function makeContainerRuntimeTestAction(options = {}) {
+	if (!isLinux()) {
+		return {
+			description: 'Testing nodes in containers',
+			run: async (ctx, task) =>
+				skipLoudly('container:test', task, 'Linux only; dist/server here is not a Linux engine'),
+		};
+	}
+	return {
+		description: 'Testing nodes in containers',
+		steps: [
+			when({
+				name: 'docker-available',
+				condition: async () => !(await containerUnavailable()),
+				then: [
+					{
+						name: 'container:test-runtime:run',
+						action: () => makeTestAction({ ...options, test_full: false, runtime: 'docker' }),
+					},
+				],
+				else: [
+					{
+						name: 'container:test-runtime:skip',
+						action: {
+							run: async (ctx, task) => skipLoudly('container:test', task, await containerUnavailable()),
+						},
+					},
+				],
+			}),
+		],
 	};
 }
 
@@ -494,7 +536,7 @@ async function imageNames() {
 // Module Export
 // ============================================================================
 
-module.exports = {
+const nodesModule = {
 	name: 'nodes',
 	description: 'Pipeline Nodes',
 
@@ -528,21 +570,6 @@ module.exports = {
 				],
 			}),
 		},
-		{
-			name: 'nodes:build-container',
-			action: (options) => ({
-				description: 'Build the node container image',
-				steps: ['nodes:build', { name: 'nodes:build-image', action: makeBuildImageAction(options) }],
-			}),
-		},
-		// Not part of nodes:test: it needs a daemon, and skips loudly without one
-		{
-			name: 'nodes:test-container',
-			action: (options) => ({
-				description: 'Test the node container image',
-				steps: ['nodes:build-container', { name: 'nodes:test-image', action: makeTestImageAction(options) }],
-			}),
-		},
 		{ name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
 		{ name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },
 		{
@@ -565,8 +592,40 @@ module.exports = {
 	],
 };
 
+// The node image and the docker runtime: a module of its own, registered from
+// this file (array form, see registry.js) so the helpers above stay shared.
+const containerModule = {
+	name: 'container',
+	description: 'Node container image',
+
+	actions: [
+		{
+			name: 'container:build',
+			action: (options) => ({
+				description: 'Build the node container image',
+				steps: ['nodes:build', { name: 'container:build-image', action: makeBuildImageAction(options) }],
+			}),
+		},
+		// Not part of nodes:test: it needs a daemon, and skips loudly without one
+		{
+			name: 'container:test',
+			action: (options) => ({
+				description: 'Test the node container image, then the nodes through the docker runtime',
+				steps: [
+					'container:build',
+					{ name: 'container:test-image', action: makeTestImageAction(options) },
+					{
+						name: 'container:test-runtime',
+						action: (opts) => makeContainerRuntimeTestAction({ ...options, ...opts }),
+					},
+				],
+			}),
+		},
+	],
+};
+
 // C++ node actions
-module.exports = [module.exports, ...CPP_NODES.map(makeNodeModule)];
+module.exports = [nodesModule, containerModule, ...CPP_NODES.map(makeNodeModule)];
 
 // Export paths for external use
 module.exports.DIST_DIR = DIST_DIR;

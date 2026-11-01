@@ -71,7 +71,8 @@ Limits of `RR_PROC_PRIVATE`:
   If the engine itself cannot, it logs a warning and keeps serving.
 
 For strict separation between pipelines, run them under different OS users or
-in separate containers.
+in separate containers: `--runtime=docker` starts every task in a container of
+its own (see [Tasks in containers](/operate/self-hosting/task-containers)).
 
 ## Network exposure
 
@@ -85,7 +86,11 @@ The engine binds to `localhost` by default:
   from a pool that starts at `--base_port` (20000 by default), for the engine
   only. It accepts a connection only with that pipeline run's own token, which
   the engine keeps and replaces on every start; the pipeline's process is given
-  only a hash of it.
+  only a hash of it. Under `--runtime=docker` a task listens on port 5570 inside
+  its own container instead (see
+  [Tasks in containers](/operate/self-hosting/task-containers)). Other
+  containers on the same Docker network can reach that port too, so there the
+  per-run token is what keeps them out.
 
 Only the source-node HTTP port needs to be accessible to external callers when
 you're using a webhook-based source. Port 5565 is a management interface;
