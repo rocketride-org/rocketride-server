@@ -373,12 +373,13 @@ function ensureWorkspaceOverrides(workspaceRoot: string, deps: ReadonlyArray<(ty
  */
 export function runRootInstall(workspaceRoot: string): Promise<void> {
 	return new Promise((resolve, reject) => {
-		// step: spawn pnpm at the root; shell:true resolves pnpm.cmd on Windows
-		const proc = spawn('pnpm', ['install', '--prefer-offline'], {
-			cwd: workspaceRoot,
-			shell: process.platform === 'win32',
-			env: { ...process.env, NO_COLOR: '1' },
-		});
+		// step: spawn pnpm at the root; shell:true resolves pnpm.cmd on
+		// Windows, and there the command is ONE fixed string — args passed
+		// alongside shell:true are concatenated unescaped (Node's DEP0190)
+		const spawnOptions = { cwd: workspaceRoot, env: { ...process.env, NO_COLOR: '1' } };
+		const proc = process.platform === 'win32'
+			? spawn('pnpm install --prefer-offline', { ...spawnOptions, shell: true })
+			: spawn('pnpm', ['install', '--prefer-offline'], spawnOptions);
 		// step: collect output so a failure can NAME its cause
 		let output = '';
 		proc.stdout?.on('data', (chunk: Buffer) => { output += chunk.toString(); });
