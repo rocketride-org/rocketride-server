@@ -9,13 +9,14 @@
 dist/server/extension
 dist/server/static
 
-# Test binaries and data, debug symbols.
+# Test binaries and data, debug symbols, the coverage report ai:test writes.
 dist/server/aptest
 dist/server/engtest
 dist/server/nodetest
 dist/server/test_files
 dist/server/datasets
 dist/server/symbols
+dist/server/htmlcov
 
 # Whatever the build host installed or resolved: the base installs its own
 # baseline. A release archive has none of these; a developer tree has all of
