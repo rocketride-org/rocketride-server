@@ -50,11 +50,11 @@ const styles = {
 	// shell-owned identity (left) or status (right) sections out of the bar.
 	app: { display: 'flex', alignItems: 'center', gap: 8, flex: 1, minWidth: 0, overflow: 'hidden', padding: '0 12px' } as CSSProperties,
 	right: { display: 'flex', alignItems: 'center', gap: 8 } as CSSProperties,
-	dot: (connected: boolean): CSSProperties => ({
+	dot: (state: ConnectionState): CSSProperties => ({
 		width: 8,
 		height: 8,
 		borderRadius: '50%',
-		backgroundColor: connected ? 'var(--rr-color-success)' : 'var(--rr-color-error)',
+		backgroundColor: DOT_TOKENS[state],
 		display: 'inline-block',
 	}),
 	readyLabel: (connected: boolean): CSSProperties => ({
@@ -67,10 +67,30 @@ const styles = {
 // Types
 // =============================================================================
 
+/** The identity section's three states: a signed-in session with a live
+ *  socket, a session with no identity at all, and a signed-in session whose
+ *  socket is down. */
+type ConnectionState = 'connected' | 'signedOut' | 'disconnected';
+
+/** Dot color per state: green / yellow / red. */
+const DOT_TOKENS: Record<ConnectionState, string> = {
+	connected: 'var(--rr-color-success)',
+	signedOut: 'var(--rr-color-warning)',
+	disconnected: 'var(--rr-color-error)',
+};
+
+/** Identity label per state. */
+const STATE_LABELS: Record<ConnectionState, string> = {
+	connected: 'Connected',
+	signedOut: 'Not signed in',
+	disconnected: 'Not connected',
+};
+
 interface StatusBarProps {
 	appName: string;
 	isConnected: boolean;
-	/** When true, show the connection indicator (dot + label). */
+	/** Whether the session has a signed-in identity — picks the identity
+	 *  section's state together with isConnected. */
 	isAuthenticated: boolean;
 	statusMessage: string | null;
 	onToggleBottomPanel: () => void;
@@ -90,16 +110,16 @@ interface StatusBarProps {
  * @param props - See {@link StatusBarProps}.
  */
 const StatusBar: React.FC<StatusBarProps> = ({ appName, isConnected, isAuthenticated, statusMessage, onToggleBottomPanel, appContent }) => {
+	// The identity section always renders — a hidden indicator reads as a bug
+	// and silently masks the anonymous-session state. Signed-out wins over
+	// disconnected: an anonymous session has no socket to be "down".
+	const state: ConnectionState = !isAuthenticated ? 'signedOut' : isConnected ? 'connected' : 'disconnected';
 	return (
 		<div style={styles.bar}>
 			<div style={styles.left}>
 				<span style={{ cursor: 'pointer' }} onClick={onToggleBottomPanel}>{appName}</span>
-				{isAuthenticated && (
-					<>
-						<span style={styles.dot(isConnected)} />
-						<span>{isConnected ? 'Connected' : 'Disconnected'}</span>
-					</>
-				)}
+				<span style={styles.dot(state)} />
+				<span>{STATE_LABELS[state]}</span>
 			</div>
 			{/* App slot — present only when the active app registered content. */}
 			{appContent != null && <div style={styles.app}>{appContent}</div>}

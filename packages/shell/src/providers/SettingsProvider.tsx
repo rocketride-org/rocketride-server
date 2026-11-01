@@ -66,6 +66,7 @@ import { labelFromKey, settingStoreOf } from '../components/workspace/settingsRe
 import type { RegistryEntry, RegistrySection, SettingsRegistry } from '../components/workspace/settingsRegistry';
 import type { SettingValue } from '../components/workspace/types';
 import { SidebarMenu } from '../components/sidebar-menu/SidebarMenu';
+import { Banner } from '../components/banner/Banner';
 import type { ViewMenu, ViewMenuEntry } from '../types/viewMenu';
 import EnvironmentProvider from './EnvironmentProvider';
 import AccountProvider from './AccountProvider';
@@ -550,6 +551,9 @@ export interface SettingsPageProps {
 	extraSections?: SettingsRichSection[];
 	/** Deep link: the nav section to open on mount. */
 	initialSectionId?: string;
+	/** Host notice rendered under the page heading (the cloud passes its
+	 *  signed-out warning here; absent = no banner row). */
+	banner?: React.ReactNode;
 }
 
 /**
@@ -557,7 +561,7 @@ export interface SettingsPageProps {
  * cloud mounts it via {@link SettingsProvider} (modal overlay), VS Code as an
  * editor tab over its mirrored stores.
  */
-export const SettingsPage: React.FC<SettingsPageProps> = ({ registry, overrides, updateSetting, hostStore, extraSections, initialSectionId }) => {
+export const SettingsPage: React.FC<SettingsPageProps> = ({ registry, overrides, updateSetting, hostStore, extraSections, initialSectionId, banner }) => {
 	// ── Committed values: workspace overrides ⊕ host-store values ──────────
 	// Host keys are disjoint from workspace keys (the registry routes each key
 	// to exactly one store), so the merge cannot collide.
@@ -860,6 +864,8 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ registry, overrides,
 			{/* ── Page heading ───────────────────────────────────── */}
 			<ContentHeader title="Settings" subtitle="Preferences for RocketRide and your installed apps. Only the values you change are saved. Everything else uses each app's default." />
 
+			{banner}
+
 			{/* ── Search row ─────────────────────────────────────── */}
 			<div style={styles.searchRow}>
 				<input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search settings" style={styles.searchInput} />
@@ -1003,7 +1009,15 @@ const SettingsProvider: React.FC<ISettingsProviderProps> = ({ initialSectionId }
 		return sections;
 	}, [isSaas, appManifest]);
 
-	return <SettingsPage registry={settingsRegistry} overrides={settingsOverrides} updateSetting={updateSetting} extraSections={extraSections} {...(initialSectionId !== undefined ? { initialSectionId } : {})} />;
+	// Signed out, the workspace store never writes — changes would apply in
+	// memory and vanish on reload. Say so instead of failing silently.
+	const signedOutBanner = authUser ? undefined : (
+		<div style={{ marginBottom: 16 }}>
+			<Banner variant="warning">Signed out — setting changes apply to this session only and are not saved. Sign in to keep them.</Banner>
+		</div>
+	);
+
+	return <SettingsPage registry={settingsRegistry} overrides={settingsOverrides} updateSetting={updateSetting} extraSections={extraSections} {...(initialSectionId !== undefined ? { initialSectionId } : {})} {...(signedOutBanner !== undefined ? { banner: signedOutBanner } : {})} />;
 };
 
 export default SettingsProvider;

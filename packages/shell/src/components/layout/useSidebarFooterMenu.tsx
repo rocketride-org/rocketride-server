@@ -33,9 +33,10 @@
 
 import React, { useCallback, useMemo } from 'react';
 import {
-	BxCog, BxPalette, BxExport, BxGridAlt, BxHome,
+	BxCog, BxPalette, BxExport, BxGridAlt, BxHome, BxUser,
 } from '../BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
+import { useAuthUser } from '../../hooks/useAuthUser';
 import { getHomeAppId } from '../../constants';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import type { ShellAccountConfig } from '../workspace/types';
@@ -132,6 +133,7 @@ export interface ISidebarFooterMenu {
 export function useSidebarFooterMenu({ account, hideAppSwitcher, onOverlay, isSaas }: ISidebarFooterMenuOptions): ISidebarFooterMenu {
 	const { prefs, setTheme, themeOptions, activeAppId, appManifest } = useWorkspace();
 	const { isOnDesktop } = useSubscriptions();
+	const authUser = useAuthUser();
 
 	/** Apply a theme — delegates to the context's setTheme which handles both prefs and CSS. */
 	const handleThemeSelect = useCallback((themeId: string) => {
@@ -187,10 +189,17 @@ export function useSidebarFooterMenu({ account, hideAppSwitcher, onOverlay, isSa
 			});
 		}
 
-		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => account.onLogout?.() });
+		// The session entry follows the identity: an anonymous session can
+		// only log IN, a signed-in one can only log OUT — never both, never
+		// the wrong one.
+		if (authUser) {
+			items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => account.onLogout?.() });
+		} else {
+			items.push({ id: 'login', label: 'Log in', icon: BxUser, dividerBefore: true, onClick: () => ConnectionManager.getInstance().emit('shell:loginRequest', {}) });
+		}
 
 		return items;
-	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay, isSaas, homeAppId]);
+	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, isOnDesktop, account, authUser, handleThemeSelect, onOverlay, isSaas, homeAppId]);
 
 	return { footerMenuItems, homeAppId };
 }
