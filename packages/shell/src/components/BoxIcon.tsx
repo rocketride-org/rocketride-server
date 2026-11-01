@@ -244,3 +244,27 @@ export const BxPin = createIcon('m12 22 1-2v-3h5a1 1 0 0 0 1-1v-1.586c0-.526-.21
 
 // Boxicons "bx-trophy".
 export const BxTrophy = createIcon('M21 4h-3V3a1 1 0 0 0-1-1H7a1 1 0 0 0-1 1v1H3a1 1 0 0 0-1 1v3c0 4.31 1.799 6.91 4.819 7.012A6.001 6.001 0 0 0 11 17.91V20H9v2h6v-2h-2v-2.09a6.01 6.01 0 0 0 4.181-2.898C20.201 14.91 22 12.31 22 8V5a1 1 0 0 0-1-1zM4 8V6h2v6.83C4.216 12.078 4 9.299 4 8zm8 8c-2.206 0-4-1.794-4-4V4h8v8c0 2.206-1.794 4-4 4zm6-3.17V6h2v2c0 1.299-.216 4.078-2 4.83z');
+
+// Boxicons "bx-folder" — a closed folder.
+export const BxFolder = createIcon('M20 5h-8.586L9.707 3.293A.997.997 0 0 0 9 3H4c-1.103 0-2 .897-2 2v14c0 1.103.897 2 2 2h16c1.103 0 2-.897 2-2V7c0-1.103-.897-2-2-2zM4 19V7h16l.002 12H4z');
+
+// Boxicons "bx-up-arrow-alt" — up one folder.
+export const BxUpArrowAlt = createIcon('M11 8.414V18h2V8.414l4.293 4.293 1.414-1.414L12 4.586l-6.707 6.707 1.414 1.414z');
+
+// Boxicons "bx-left-arrow-alt" — back.
+export const BxLeftArrowAlt = createIcon('M12.707 17.293 8.414 13H18v-2H8.414l4.293-4.293-1.414-1.414L4.586 12l6.707 6.707z');
+
+// Boxicons "bx-right-arrow-alt" — forward.
+export const BxRightArrowAlt = createIcon('m11.293 17.293 1.414 1.414L19.414 12l-6.707-6.707-1.414 1.414L15.586 11H6v2h9.586z');
+
+// Boxicons "bx-info-circle" — details.
+export const BxInfoCircle = createMultiPathIcon(['M12 2C6.486 2 2 6.486 2 12s4.486 10 10 10 10-4.486 10-10S17.514 2 12 2zm0 18c-4.411 0-8-3.589-8-8s3.589-8 8-8 8 3.589 8 8-3.589 8-8 8z', 'M11 11h2v6h-2zm0-4h2v2h-2z']);
+
+// Boxicons "bx-time-five" — recent.
+export const BxTimeFive = createMultiPathIcon(['M12 2C6.486 2 2 6.486 2 12s4.486 10 10 10 10-4.486 10-10S17.514 2 12 2zm0 18c-4.411 0-8-3.589-8-8s3.589-8 8-8 8 3.589 8 8-3.589 8-8 8z', 'M13 7h-2v5.414l3.293 3.293 1.414-1.414L13 11.586z']);
+
+// Boxicons "bx-group" — a team.
+export const BxGroup = createMultiPathIcon(['M16.604 11.048a5.67 5.67 0 0 0 .751-3.44c-.179-1.784-1.175-3.361-2.803-4.44l-1.105 1.666c1.119.742 1.8 1.799 1.918 2.974a3.693 3.693 0 0 1-1.072 2.986l-1.192 1.192 1.618.475C18.951 13.701 19 17.957 19 18h2c0-1.789-.956-5.285-4.396-6.952z', 'M9.5 12c2.206 0 4-1.794 4-4s-1.794-4-4-4-4 1.794-4 4 1.794 4 4 4zm0-6c1.103 0 2 .897 2 2s-.897 2-2 2-2-.897-2-2 .897-2 2-2zm1.5 7H8c-3.309 0-6 2.691-6 6v1h2v-1c0-2.206 1.794-4 4-4h3c2.206 0 4 1.794 4 4v1h2v-1c0-3.309-2.691-6-6-6z']);
+
+// A person inside the Boxicons "bx-shield" outline — staff / admin access.
+export const BxShieldUser = createMultiPathIcon(['M20.995 6.903a.997.997 0 0 0-.547-.797l-7.973-4a.997.997 0 0 0-.895-.002l-8.027 4c-.297.15-.502.437-.544.767-.013.097-1.145 9.741 8.541 15.008a.995.995 0 0 0 .969-.009c9.307-5.259 8.514-14.573 8.476-14.967zm-8.977 12.944c-6.86-4.01-7.14-10.352-7.063-12.205l7.071-3.523 6.998 3.511c.005 1.87-.481 8.243-7.006 12.217z', 'M12 7.25a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5z', 'M8.25 15.75c0-1.8 1.68-2.75 3.75-2.75s3.75.95 3.75 2.75v.5h-7.5z']);

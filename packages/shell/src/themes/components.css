@@ -88,6 +88,8 @@
 .rr-stepper__button:focus-visible,
 .rr-list__item:focus-visible,
 .rr-stat--interactive:focus-visible,
+.rr-item-browser__tile:focus-visible,
+.rr-item-browser__row:focus-visible,
 .rr-link:focus-visible {
 	outline: none;
 	box-shadow: var(--rr-focus-ring);
@@ -1904,6 +1906,11 @@ select.rr-input {
 	color: var(--rr-fg-list-active);
 	background: var(--rr-bg-list-active);
 }
+.rr-tree__row--drop-target,
+.rr-tree__row--drop-target:hover {
+	background: var(--rr-bg-accent-soft);
+	box-shadow: inset 0 0 0 1px var(--rr-accent);
+}
 .rr-tree__row[aria-disabled='true'] {
 	opacity: 0.5;
 }
@@ -2313,6 +2320,18 @@ button.rr-stepper__button:hover {
 }
 .rr-page-layout--carded .rr-page-layout__content-inner {
 	padding: var(--rr-space-4);
+}
+.rr-page-layout--fill .rr-page-layout__content {
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+.rr-page-layout--fill .rr-page-layout__content-inner {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-height: 0;
+	padding: 0;
 }
 .rr-page-layout--narrow .rr-page-layout__content-inner {
 	max-width: 880px;
@@ -3248,4 +3267,163 @@ button.rr-stepper__button:hover {
 		animation: none !important;
 		transition: none !important;
 	}
+}
+
+/* ===================================================================== */
+/* Item browser — icon tiles or a details list, with selection           */
+/* ===================================================================== */
+
+.rr-item-browser {
+	min-height: 100%;
+	font-family: var(--rr-font-family);
+	color: var(--rr-text-primary);
+}
+.rr-item-browser__empty {
+	padding: var(--rr-space-6) var(--rr-space-4);
+	text-align: center;
+	color: var(--rr-text-secondary);
+	font-size: 13px;
+}
+.rr-item-browser__sections {
+	display: flex;
+	flex-direction: column;
+	gap: var(--rr-space-5);
+	padding: var(--rr-space-4);
+}
+.rr-item-browser__section-label {
+	margin-bottom: var(--rr-space-2);
+	font-size: 13px;
+	font-weight: var(--rr-font-weight-semibold);
+	color: var(--rr-text-primary);
+}
+.rr-item-browser__grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+	gap: var(--rr-space-3);
+}
+.rr-item-browser__tile {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 6px;
+	min-width: 0;
+	padding: 16px 8px 12px;
+	border: 1px solid var(--rr-border);
+	border-radius: var(--rr-radius-md);
+	background: var(--rr-bg-paper);
+	cursor: default;
+	user-select: none;
+	transition: background-color var(--rr-duration-fast) var(--rr-ease-standard), border-color var(--rr-duration-fast) var(--rr-ease-standard);
+}
+.rr-item-browser__tile:hover {
+	background: var(--rr-bg-list-hover);
+}
+.rr-item-browser__tile--selected,
+.rr-item-browser__tile--selected:hover {
+	background: var(--rr-bg-accent-soft);
+	border-color: var(--rr-accent);
+}
+.rr-item-browser__tile--drop-target,
+.rr-item-browser__tile--drop-target:hover {
+	background: var(--rr-bg-accent-soft);
+	border-color: var(--rr-accent);
+	box-shadow: 0 0 0 2px var(--rr-accent);
+}
+.rr-item-browser__tile--dragging,
+.rr-item-browser__row--dragging {
+	opacity: 0.5;
+}
+.rr-item-browser__tile-icon {
+	display: inline-flex;
+	color: var(--rr-text-secondary);
+}
+.rr-item-browser__tile-name {
+	max-width: 100%;
+	font-size: 13px;
+	font-weight: var(--rr-font-weight-medium, 500);
+	text-align: center;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.rr-item-browser__tile-detail {
+	font-size: 11px;
+	color: var(--rr-text-secondary);
+}
+.rr-item-browser__table {
+	user-select: none;
+}
+.rr-item-browser__row {
+	cursor: default;
+}
+.rr-item-browser__row:hover {
+	background: var(--rr-bg-list-hover);
+}
+.rr-item-browser__row--selected,
+.rr-item-browser__row--selected:hover {
+	background: var(--rr-bg-accent-soft);
+}
+.rr-item-browser__row--drop-target,
+.rr-item-browser__row--drop-target:hover {
+	background: var(--rr-bg-accent-soft);
+	box-shadow: inset 0 0 0 1px var(--rr-accent);
+}
+.rr-item-browser {
+	position: relative;
+}
+.rr-item-browser--boxing {
+	user-select: none;
+}
+/** The selection box drawn across empty space; fixed, in screen coordinates. */
+.rr-item-browser__box {
+	position: fixed;
+	z-index: var(--rr-z-sticky, 10);
+	border: 1px solid var(--rr-accent);
+	background: color-mix(in srgb, var(--rr-accent) 12%, transparent);
+	pointer-events: none;
+}
+/** The "3 items" label that follows the pointer when several items drag. */
+.rr-item-browser__drag-count {
+	position: fixed;
+	top: -100px;
+	left: -100px;
+	padding: 4px 10px;
+	border-radius: var(--rr-radius-pill, 999px);
+	font-family: var(--rr-font-family);
+	font-size: 12px;
+	font-weight: var(--rr-font-weight-semibold);
+	color: var(--rr-bg-paper);
+	background: var(--rr-text-primary);
+}
+.rr-item-browser__row-name {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--rr-space-2);
+}
+.rr-item-browser__row-icon {
+	display: inline-flex;
+	color: var(--rr-text-secondary);
+}
+
+/** File icon: a page with its extension on a badge, or a folder. */
+/* A light grey page or folder, as in the Fuse file manager, so the coloured badge leads. */
+.rr-file-icon {
+	position: relative;
+	display: inline-flex;
+	color: color-mix(in srgb, var(--rr-text-secondary) 45%, transparent);
+}
+/* The badge sits left of centre, over the page's lower-left corner. */
+.rr-file-icon__badge {
+	position: absolute;
+	left: 38%;
+	bottom: 14%;
+	transform: translateX(-50%);
+	padding: 1px 3px;
+	border-radius: 3px;
+	font-family: var(--rr-font-family);
+	font-size: 9px;
+	font-weight: var(--rr-font-weight-semibold);
+	line-height: 1.2;
+	letter-spacing: 0.02em;
+	color: var(--rr-bg-paper);
 }

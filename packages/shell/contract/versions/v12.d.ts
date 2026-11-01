@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-10-31T22:28:06.126Z
-// Source commit: 42bdef0a56d59fa183056971a7e81dd9e05de483
+// Generated:     2026-11-01T22:18:31.212Z
+// Source commit: 1abd443b7ad8c08fabfbb24837af8eb93cb20284
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -9604,6 +9604,14 @@ export declare const BxClipboard: IconComponent;
 export declare const BxCompass: IconComponent;
 export declare const BxPin: IconComponent;
 export declare const BxTrophy: IconComponent;
+export declare const BxFolder: IconComponent;
+export declare const BxUpArrowAlt: IconComponent;
+export declare const BxLeftArrowAlt: IconComponent;
+export declare const BxRightArrowAlt: IconComponent;
+export declare const BxInfoCircle: IconComponent;
+export declare const BxTimeFive: IconComponent;
+export declare const BxGroup: IconComponent;
+export declare const BxShieldUser: IconComponent;
 /**
  * Props for the Sidebar component.
  */
@@ -12317,6 +12325,14 @@ export interface ITreeProps {
     onSelect?: (id: string) => void;
     /** Tighter rows. */
     dense?: boolean;
+    /**
+     * Whether a node accepts what is being dragged over it. While it does,
+     * the row highlights, and a closed node opens after a short hover, the
+     * way desktop folder trees do.
+     */
+    canDropOn?: (id: string, event: React$1.DragEvent) => boolean;
+    /** Drops what was dragged onto a node that accepted it. */
+    onDropOnNode?: (id: string, event: React$1.DragEvent) => void;
 }
 /**
  * Renders a keyboard-navigable tree.
@@ -12324,7 +12340,7 @@ export interface ITreeProps {
  * @param props - {@link ITreeProps}.
  * @returns The tree element.
  */
-export declare function Tree({ nodes, ariaLabel, expanded, defaultExpanded, onExpandedChange, selectedId, onSelect, dense }: ITreeProps): React$1.ReactElement;
+export declare function Tree({ nodes, ariaLabel, expanded, defaultExpanded, onExpandedChange, selectedId, onSelect, dense, canDropOn, onDropOnNode }: ITreeProps): React$1.ReactElement;
 /** One crumb. */
 export interface IBreadcrumb {
     /** Stable id. */
@@ -12482,6 +12498,87 @@ export interface IConfettiProps {
  * @returns The confetti layer, or nothing under reduced motion.
  */
 export declare function Confetti({ pieceCount }: IConfettiProps): React$1.ReactElement | null;
+/** One file, folder or other item in an {@link ItemBrowser}. */
+export interface IBrowserItem {
+    /** Stable id. */
+    id: string;
+    /** Display name. */
+    name: string;
+    /** Large icon for the grid; the list shows it small beside the name. */
+    icon: React$1.ReactNode;
+    /** Second line under the name in the grid, e.g. "57 files". */
+    detail?: React$1.ReactNode;
+    /** Section label in the grid, e.g. "Folders" or "Files". */
+    section?: string;
+}
+/** A screen point, for placing a context menu. */
+export interface IBrowserPoint {
+    x: number;
+    y: number;
+}
+/** How an {@link ItemBrowser} shows its items. */
+export type ItemBrowserView = "grid" | "list";
+/** Props for the {@link ItemBrowser} component. */
+export interface IItemBrowserProps<T extends IBrowserItem> {
+    /** Items, in display order (sorted by the caller). */
+    items: T[];
+    /** Icons or details. */
+    view: ItemBrowserView;
+    /** Details columns after Name, for the list view. */
+    columns?: ITableColumn<T>[];
+    /** Name column header. Defaults to "Name". */
+    nameHeader?: React$1.ReactNode;
+    /** The active sort; headers of columns with `sortable` report clicks through `onSortChange`. The name column's id is "name". */
+    sort?: ITableSort | null;
+    /** Fired with the next sort when a sortable header is clicked. */
+    onSortChange?: (sort: ITableSort) => void;
+    /** Selected item ids (controlled). */
+    selectedIds: string[];
+    /** Fired with the new selection. */
+    onSelectionChange: (ids: string[]) => void;
+    /** Opens an item: double-click or Enter. */
+    onOpen: (item: T) => void;
+    /** Right-click on an item (which is selected first) or, with null, on empty space. */
+    onContextMenu?: (item: T | null, point: IBrowserPoint) => void;
+    /** Accessible name. */
+    ariaLabel: string;
+    /** Shown when there are no items. */
+    emptyText?: React$1.ReactNode;
+    /**
+     * Drops dragged items onto an item. When set, items can be dragged: a drag
+     * carries the selection (the pressed item is selected first if it was not).
+     */
+    onDropItems?: (draggedIds: string[], target: T) => void;
+    /** Whether an item accepts a drop of these items. Defaults to never. */
+    canDropOn?: (target: T, draggedIds: string[]) => boolean;
+    /** Fired when a drag of items starts, so drop targets outside the browser can accept them. */
+    onItemsDragStart?: (draggedIds: string[]) => void;
+    /** Fired when that drag ends, dropped or not. */
+    onItemsDragEnd?: () => void;
+}
+/**
+ * Renders the items as icon tiles or as a details list.
+ *
+ * @param props - {@link IItemBrowserProps}.
+ * @returns The browser element.
+ */
+export declare function ItemBrowser<T extends IBrowserItem>({ items, view, columns, nameHeader, sort, onSortChange, selectedIds, onSelectionChange, onOpen, onContextMenu, ariaLabel, emptyText, onDropItems, canDropOn, onItemsDragStart, onItemsDragEnd }: IItemBrowserProps<T>): React$1.ReactElement;
+/** Props for the {@link FileIcon} component. */
+export interface IFileIconProps {
+    /** The file or folder name; the badge shows its extension. */
+    name: string;
+    /** Draw a folder instead of a page. */
+    isFolder?: boolean;
+    /** Icon size in px. Defaults to 40. */
+    size?: number;
+}
+/**
+ * Renders a folder, or a page with its extension badge.
+ *
+ * @param props - {@link IFileIconProps}.
+ * @returns The icon element.
+ */
+export declare function FileIcon({ name, isFolder, size }: IFileIconProps): React$1.ReactElement;
 /**
  * Pure rules behind PageLayout's sidebars, kept apart from React so they are
  * unit-testable: when a page counts as narrow, and what each sidebar's open
@@ -12538,6 +12635,12 @@ export interface IPageLayoutProps {
     scroll?: "content" | "page";
     /** Page width (px) below which sidebars become drawers. Defaults to 900. */
     collapseBelow?: number;
+    /**
+     * Let the content fill the space under the header with no padding and no
+     * scroll of its own, for views that lay out and scroll their own panes
+     * (an editor, a file browser). Defaults to false.
+     */
+    fill?: boolean;
 }
 /** One side's controls, from {@link usePageLayout}. */
 export interface IPageSidebarControl {
@@ -12591,7 +12694,7 @@ export declare function PageSidebarToggle({ side, small }: IPageSidebarTogglePro
  * @param props - {@link IPageLayoutProps}.
  * @returns The page element.
  */
-export declare function PageLayout({ children, title, subtitle, actions, breadcrumbs, headingLevel, header, toolbar, leftSidebar, rightSidebar, variant, contentWidth, scroll, collapseBelow }: IPageLayoutProps): React$1.ReactElement;
+export declare function PageLayout({ children, title, subtitle, actions, breadcrumbs, headingLevel, header, toolbar, leftSidebar, rightSidebar, variant, contentWidth, scroll, collapseBelow, fill }: IPageLayoutProps): React$1.ReactElement;
 /** Props for the {@link SettingsSection} component. */
 export interface ISettingsSectionProps {
     /** Section title. */
@@ -14030,6 +14133,8 @@ export declare const shellApi: {
     readonly AttentionRing: typeof AttentionRing;
     readonly CoachMark: typeof CoachMark;
     readonly Confetti: typeof Confetti;
+    readonly ItemBrowser: typeof ItemBrowser;
+    readonly FileIcon: typeof FileIcon;
     readonly PageLayout: typeof PageLayout;
     readonly PageSidebarToggle: typeof PageSidebarToggle;
     readonly usePageLayout: typeof usePageLayout;
@@ -14218,6 +14323,14 @@ export declare const shellApi: {
     readonly BxCompass: IconComponent;
     readonly BxPin: IconComponent;
     readonly BxTrophy: IconComponent;
+    readonly BxFolder: IconComponent;
+    readonly BxUpArrowAlt: IconComponent;
+    readonly BxLeftArrowAlt: IconComponent;
+    readonly BxRightArrowAlt: IconComponent;
+    readonly BxInfoCircle: IconComponent;
+    readonly BxTimeFive: IconComponent;
+    readonly BxGroup: IconComponent;
+    readonly BxShieldUser: IconComponent;
 };
 /**
  * The compile-time shape of the shell API surface.

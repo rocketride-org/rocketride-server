@@ -84,7 +84,18 @@ export interface ITreeProps {
 	onSelect?: (id: string) => void;
 	/** Tighter rows. */
 	dense?: boolean;
+	/**
+	 * Whether a node accepts what is being dragged over it. While it does,
+	 * the row highlights, and a closed node opens after a short hover, the
+	 * way desktop folder trees do.
+	 */
+	canDropOn?: (id: string, event: React.DragEvent) => boolean;
+	/** Drops what was dragged onto a node that accepted it. */
+	onDropOnNode?: (id: string, event: React.DragEvent) => void;
 }
+
+/** How long a drag hovers over a closed node before it opens. */
+const DRAG_OPEN_DELAY_MS = 700;
 
 // =============================================================================
 // HELPERS
@@ -137,12 +148,20 @@ export function expandableSiblingIds(flat: readonly IFlatTreeNode[], index: numb
  * @param props - {@link ITreeProps}.
  * @returns The tree element.
  */
-export function Tree({ nodes, ariaLabel, expanded, defaultExpanded = [], onExpandedChange, selectedId = null, onSelect, dense = false }: ITreeProps): React.ReactElement {
+export function Tree({ nodes, ariaLabel, expanded, defaultExpanded = [], onExpandedChange, selectedId = null, onSelect, dense = false, canDropOn, onDropOnNode }: ITreeProps): React.ReactElement {
 	const [internalExpanded, setInternalExpanded] = useState<string[]>(defaultExpanded);
 	const [focusId, setFocusId] = useState<string | null>(null);
 	const rowRefs = useRef(new Map<string, HTMLLIElement>());
 	const isFocusPendingRef = useRef(false);
 	const typeahead = useTypeahead();
+	const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+	const openTimerRef = useRef<{ id: string; timer: number } | null>(null);
+
+	useEffect(() => {
+		return () => {
+			if (openTimerRef.current) window.clearTimeout(openTimerRef.current.timer);
+		};
+	}, []);
 
 	let expandedIds = internalExpanded;
 	if (expanded !== undefined) expandedIds = expanded;
@@ -249,6 +268,43 @@ export function Tree({ nodes, ariaLabel, expanded, defaultExpanded = [], onExpan
 		}
 	}
 
+	/** Stops waiting to open a node under a drag. */
+	function cancelDragOpen(): void {
+		if (!openTimerRef.current) return;
+		window.clearTimeout(openTimerRef.current.timer);
+		openTimerRef.current = null;
+	}
+
+	/** Drag and drop handlers for a row, when the caller accepts drops. */
+	function dropProps(entry: IFlatTreeNode): React.HTMLAttributes<HTMLLIElement> {
+		if (!canDropOn || !onDropOnNode) return {};
+		const id = entry.node.id;
+		return {
+			onDragOver: (event) => {
+				if (entry.node.disabled || !canDropOn(id, event)) return;
+				event.preventDefault();
+				event.dataTransfer.dropEffect = 'move';
+				if (dropTargetId !== id) setDropTargetId(id);
+				if (entry.hasChildren && !entry.isExpanded && openTimerRef.current?.id !== id) {
+					cancelDragOpen();
+					openTimerRef.current = { id, timer: window.setTimeout(() => toggle(id, true), DRAG_OPEN_DELAY_MS) };
+				}
+			},
+			onDragLeave: (event) => {
+				if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+				if (dropTargetId === id) setDropTargetId(null);
+				if (openTimerRef.current?.id === id) cancelDragOpen();
+			},
+			onDrop: (event) => {
+				cancelDragOpen();
+				setDropTargetId(null);
+				if (!canDropOn(id, event)) return;
+				event.preventDefault();
+				onDropOnNode(id, event);
+			},
+		};
+	}
+
 	let treeClassName = 'rr-tree';
 	if (dense) treeClassName += ' rr-tree--dense';
 
@@ -272,7 +328,7 @@ export function Tree({ nodes, ariaLabel, expanded, defaultExpanded = [], onExpan
 							}
 						}}
 						role="treeitem"
-						className="rr-tree__row"
+						className={dropTargetId === node.id ? 'rr-tree__row rr-tree__row--drop-target' : 'rr-tree__row'}
 						aria-level={entry.level}
 						aria-setsize={entry.setSize}
 						aria-posinset={entry.posInSet}
@@ -289,6 +345,7 @@ export function Tree({ nodes, ariaLabel, expanded, defaultExpanded = [], onExpan
 							if (entry.hasChildren) toggle(node.id, !entry.isExpanded);
 						}}
 						onKeyDown={(event) => handleKeyDown(event, index)}
+						{...dropProps(entry)}
 					>
 						<span className="rr-tree__chevron" data-expandable={entry.hasChildren || undefined} aria-hidden="true" />
 						{node.icon && <span className="rr-tree__icon">{node.icon}</span>}

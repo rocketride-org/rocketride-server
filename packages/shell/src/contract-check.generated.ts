@@ -813,6 +813,16 @@ import type { ICoachMarkProps as Frozen_ICoachMarkProps } from '../contract/vers
 import type { ICoachMarkProps as Current_ICoachMarkProps } from './api';
 import type { IConfettiProps as Frozen_IConfettiProps } from '../contract/versions/v12';
 import type { IConfettiProps as Current_IConfettiProps } from './api';
+import type { IBrowserItem as Frozen_IBrowserItem } from '../contract/versions/v12';
+import type { IBrowserItem as Current_IBrowserItem } from './api';
+import type { IBrowserPoint as Frozen_IBrowserPoint } from '../contract/versions/v12';
+import type { IBrowserPoint as Current_IBrowserPoint } from './api';
+import type { ItemBrowserView as Frozen_ItemBrowserView } from '../contract/versions/v12';
+import type { ItemBrowserView as Current_ItemBrowserView } from './api';
+import type { IItemBrowserProps as Frozen_IItemBrowserProps } from '../contract/versions/v12';
+import type { IItemBrowserProps as Current_IItemBrowserProps } from './api';
+import type { IFileIconProps as Frozen_IFileIconProps } from '../contract/versions/v12';
+import type { IFileIconProps as Current_IFileIconProps } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -1631,3 +1641,13 @@ const _t_ICoachMarkProps: Frozen_ICoachMarkProps = {} as Current_ICoachMarkProps
 void _t_ICoachMarkProps;
 const _t_IConfettiProps: Frozen_IConfettiProps = {} as Current_IConfettiProps;
 void _t_IConfettiProps;
+const _t_IBrowserItem: Frozen_IBrowserItem = {} as Current_IBrowserItem;
+void _t_IBrowserItem;
+const _t_IBrowserPoint: Frozen_IBrowserPoint = {} as Current_IBrowserPoint;
+void _t_IBrowserPoint;
+const _t_ItemBrowserView: Frozen_ItemBrowserView = {} as Current_ItemBrowserView;
+void _t_ItemBrowserView;
+const _t_IItemBrowserProps: Frozen_IItemBrowserProps<any> = {} as Current_IItemBrowserProps<any>;
+void _t_IItemBrowserProps;
+const _t_IFileIconProps: Frozen_IFileIconProps = {} as Current_IFileIconProps;
+void _t_IFileIconProps;

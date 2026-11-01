@@ -95,6 +95,12 @@ export interface IPageLayoutProps {
 	scroll?: 'content' | 'page';
 	/** Page width (px) below which sidebars become drawers. Defaults to 900. */
 	collapseBelow?: number;
+	/**
+	 * Let the content fill the space under the header with no padding and no
+	 * scroll of its own, for views that lay out and scroll their own panes
+	 * (an editor, a file browser). Defaults to false.
+	 */
+	fill?: boolean;
 }
 
 /** One side's controls, from {@link usePageLayout}. */
@@ -254,7 +260,7 @@ export function PageSidebarToggle({ side, small = true }: IPageSidebarToggleProp
  * @param props - {@link IPageLayoutProps}.
  * @returns The page element.
  */
-export function PageLayout({ children, title, subtitle, actions, breadcrumbs, headingLevel = 1, header, toolbar, leftSidebar, rightSidebar, variant = 'simple', contentWidth = 'full', scroll = 'content', collapseBelow = DEFAULT_COLLAPSE_BELOW }: IPageLayoutProps): React.ReactElement {
+export function PageLayout({ children, title, subtitle, actions, breadcrumbs, headingLevel = 1, header, toolbar, leftSidebar, rightSidebar, variant = 'simple', contentWidth = 'full', scroll = 'content', collapseBelow = DEFAULT_COLLAPSE_BELOW, fill = false }: IPageLayoutProps): React.ReactElement {
 	const rootRef = useRef<HTMLDivElement>(null);
 	const leftRef = useRef<HTMLDivElement>(null);
 	const rightRef = useRef<HTMLDivElement>(null);
@@ -363,6 +369,7 @@ export function PageLayout({ children, title, subtitle, actions, breadcrumbs, he
 
 	let rootClassName = `rr-page-layout rr-page-layout--${variant} rr-page-layout--scroll-${scroll}`;
 	if (contentWidth === 'narrow') rootClassName += ' rr-page-layout--narrow';
+	if (fill) rootClassName += ' rr-page-layout--fill';
 
 	const isScrimShown = isDrawerMode && (openState.left || openState.right);
 
@@ -370,7 +377,7 @@ export function PageLayout({ children, title, subtitle, actions, breadcrumbs, he
 	// it holds nothing focusable (WCAG 2.1.1), so it is a labelled, focusable
 	// region while it owns the scroll.
 	let contentScrollProps: React.HTMLAttributes<HTMLDivElement> = {};
-	if (scroll === 'content') {
+	if (scroll === 'content' && !fill) {
 		let contentLabel = 'Page content';
 		if (typeof title === 'string') contentLabel = `${title} content`;
 		contentScrollProps = { tabIndex: 0, role: 'region', 'aria-label': contentLabel };
