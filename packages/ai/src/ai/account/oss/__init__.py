@@ -309,6 +309,15 @@ class Account(AccountBase):
     async def update_organization(self, org_id: str, name: str):
         self._saas_only()
 
+    async def create_organization(self, **kw):
+        self._saas_only()
+
+    async def delete_org_precheck(self, org_id: str):
+        self._saas_only()
+
+    async def delete_organization(self, **kw):
+        self._saas_only()
+
     async def list_org_members(self, org_id: str) -> List:
         self._saas_only()
 
