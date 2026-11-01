@@ -6,7 +6,7 @@ langchain-text-splitters
 langchain-core
 
 # No transformers stack: chunk length is len() or an estimate, and the NLTK
-# and spaCy splitters install their own requirements (nltk.txt, spacy.txt).
+# and spaCy splitters install their own requirements (requirements_nltk.txt, spacy.txt).
 # accelerate here pulled a CUDA torch into every run.
 pyyaml
 filelock
