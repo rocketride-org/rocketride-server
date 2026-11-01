@@ -72,17 +72,22 @@ def test_video_is_streamed_to_disk_not_buffered_in_a_list(monkeypatch):
     inst = _instance(monkeypatch)
 
     inst.writeVideo(AVI_ACTION.BEGIN, 'video/mp4', b'')
-    # A small chunk would pass even with the old in-memory-list bug, since
-    # it never gets flushed to disk either way - it has to clear the file
-    # object's own write buffer to prove anything. 2 MB reliably does.
-    big_chunk = b'x' * (2 * 1024 * 1024)
-    inst.writeVideo(AVI_ACTION.WRITE, 'video/mp4', big_chunk)
-    assert os.path.getsize(inst._tmp_path) >= len(big_chunk), 'bytes should already be on disk before END'
-    inst.writeVideo(AVI_ACTION.WRITE, 'video/mp4', b'chunk-two')
-    inst.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
+    try:
+        # A small chunk would pass even with the old in-memory-list bug, since
+        # it never gets flushed to disk either way - it has to clear the file
+        # object's own write buffer to prove anything. 2 MB reliably does.
+        big_chunk = b'x' * (2 * 1024 * 1024)
+        inst.writeVideo(AVI_ACTION.WRITE, 'video/mp4', big_chunk)
+        assert os.path.getsize(inst._tmp_path) >= len(big_chunk), 'bytes should already be on disk before END'
+        inst.writeVideo(AVI_ACTION.WRITE, 'video/mp4', b'chunk-two')
+        inst.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
 
-    assert inst.driver_calls[0]['data'] == big_chunk + b'chunk-two'
-    assert inst.instance.texts == ['fake response']
+        assert inst.driver_calls[0]['data'] == big_chunk + b'chunk-two'
+        assert inst.instance.texts == ['fake response']
+    finally:
+        # A failed assertion above would otherwise leave the 2 MB temp file on
+        # disk - closing() is a safe no-op once END has already cleaned up.
+        inst.closing()
 
 
 def test_memory_stays_bounded_across_many_chunks(monkeypatch):
@@ -95,19 +100,31 @@ def test_memory_stays_bounded_across_many_chunks(monkeypatch):
     chunk_size = 1024 * 1024  # 1 MB
     chunk_count = 50  # 50 MB total if every chunk were retained in memory
 
-    tracemalloc.start()
-    for _ in range(chunk_count):
-        inst.writeVideo(AVI_ACTION.WRITE, 'video/mp4', b'x' * chunk_size)
-    _current, peak = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
+    # Measure from a baseline instead of relying on start()/stop() to reset global
+    # state: if tracemalloc is already running (e.g. PYTHONTRACEMALLOC=1), start()
+    # leaves existing traces in place and stop() would kill that external tracing.
+    was_tracing = tracemalloc.is_tracing()
+    if not was_tracing:
+        tracemalloc.start()
 
-    # Retaining every chunk in a list peaks near chunk_size * chunk_count (50 MB here);
-    # streaming to disk peaks near a small, constant multiple of one chunk.
-    assert peak < chunk_size * 10, (
-        f'peak traced memory {peak / 1e6:.1f}MB suggests chunks are being retained, not streamed'
-    )
+    try:
+        baseline, _ = tracemalloc.get_traced_memory()
+        for _ in range(chunk_count):
+            inst.writeVideo(AVI_ACTION.WRITE, 'video/mp4', b'x' * chunk_size)
+        _current, peak = tracemalloc.get_traced_memory()
 
-    inst.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
+        # Retaining every chunk in a list grows peak-over-baseline by chunk_size *
+        # chunk_count (50 MB here); streaming to disk grows it by a small, constant
+        # multiple of one chunk.
+        grew = peak - baseline
+        assert grew < chunk_size * 10, (
+            f'peak traced memory grew {grew / 1e6:.1f}MB, suggesting chunks are being retained, not streamed'
+        )
+    finally:
+        if not was_tracing:
+            tracemalloc.stop()
+        # A failed assertion above would otherwise leave the 50 MB temp file on disk.
+        inst.closing()
 
 
 def test_temp_file_is_deleted_after_submission(monkeypatch):
