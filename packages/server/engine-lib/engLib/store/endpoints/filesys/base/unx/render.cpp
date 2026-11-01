@@ -285,8 +285,8 @@ Error IBaseSysInstance<LvlT>::renderStandardFile(ServicePipe &target,
         size -= sizeRead;
     }
 
-    // End the stream
-    ccode = sendTagEndStream(target);
+    // Always end the stream, preserving any earlier read or data-send error.
+    if (auto endCode = sendTagEndStream(target); !ccode) ccode = endCode;
 
 done:
     // Now, if it was the object that failed, then return the no error since
