@@ -36,7 +36,12 @@ class TestReconnectDebugMessageAndAuthError:
     """Tests for ConnectionMixin._schedule_reconnect, _do_reconnect, and _internal_login."""
 
     async def test_schedule_and_do_reconnect_use_debug_message(self):
-        client = RocketRideClient(auth='test_key', uri='http://localhost:5565')
+        debug_messages = []
+        client = RocketRideClient(
+            auth='test_key',
+            uri='http://localhost:5565',
+            on_debug_message=debug_messages.append,
+        )
         client._desired_state = 'authenticated'
         client._current_reconnect_delay = 0.001
         client._internal_attach = AsyncMock()
@@ -49,6 +54,8 @@ class TestReconnectDebugMessageAndAuthError:
         client._internal_attach.assert_awaited_once()
         client._internal_login.assert_awaited_once()
         assert client._current_reconnect_delay == 0.25
+        assert any('Scheduling reconnect in 0.001s' in msg for msg in debug_messages)
+        assert any('Reconnect successful' in msg for msg in debug_messages)
 
     async def test_internal_login_handles_explicit_none_message(self):
         client = RocketRideClient(auth='test_key', uri='http://localhost:5565')
@@ -145,6 +152,41 @@ class TestSendFilesMissingFileAndSyncProgress:
             await client.send_files([str(missing_path)], token='tok_1')
 
         client.pipe.assert_not_awaited()
+
+    async def test_send_files_delivers_progress_to_sync_and_async_handlers(self, tmp_path: Path):
+        sample_file = tmp_path / 'sample.txt'
+        sample_file.write_bytes(b'hello world')
+
+        def make_stub_pipe():
+            stub_pipe = AsyncMock()
+            stub_pipe.pipe_id = 1
+            stub_pipe.close = AsyncMock(return_value={'ok': True})
+            return stub_pipe
+
+        sync_actions = []
+        sync_client = RocketRideClient(
+            auth='test_key',
+            uri='http://localhost:5565',
+            on_event=lambda event: sync_actions.append(event['body']['action']),
+        )
+        sync_client.pipe = AsyncMock(return_value=make_stub_pipe())
+        await sync_client.send_files([str(sample_file)], token='tok_1')
+
+        async_actions = []
+
+        async def async_on_event(event):
+            async_actions.append(event['body']['action'])
+
+        async_client = RocketRideClient(
+            auth='test_key',
+            uri='http://localhost:5565',
+            on_event=async_on_event,
+        )
+        async_client.pipe = AsyncMock(return_value=make_stub_pipe())
+        await async_client.send_files([str(sample_file)], token='tok_1')
+
+        assert sync_actions == ['open', 'write', 'close', 'complete']
+        assert async_actions == ['open', 'write', 'close', 'complete']
 
 
 class TestDAPClientNullTransportGuards:
