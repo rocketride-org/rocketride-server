@@ -269,6 +269,7 @@ class AgentHostServices:
 
         def ingest(self, content: str, tags: List[str], intent_id: str) -> Dict[str, Any]:
             param = IInvokeTool.Invoke(
+                lane='ledger',
                 tool_name='smart_ingest',
                 input={'content': content, 'tags': tags, 'intent_id': intent_id},
             )
@@ -277,6 +278,7 @@ class AgentHostServices:
 
         def recall(self, handle: str) -> Dict[str, Any]:
             param = IInvokeTool.Invoke(
+                lane='ledger',
                 tool_name='recall',
                 input={'handle': handle},
             )

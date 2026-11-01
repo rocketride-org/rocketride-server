@@ -48,7 +48,8 @@ def _ensure_rocketlib_stubs() -> None:
                 self.tools: List[Any] = []
 
         class Invoke(IInvokeOp):
-            def __init__(self, *, tool_name: str, input: Any) -> None:
+            def __init__(self, *, tool_name: str, input: Any, lane: str = 'tool') -> None:
+                self.lane = lane
                 self.tool_name = tool_name
                 self.input = input
                 self.output = None
@@ -97,6 +98,7 @@ class _FakeInstance:
         self.ledger_nodes = ledger_nodes or []
         self.queries: List[str] = []
         self.invocations: List[tuple] = []
+        self.invocation_lanes: List[str] = []
         self.validations: List[tuple] = []
 
     def getControllerNodeIds(self, kind: str) -> List[str]:
@@ -117,6 +119,7 @@ class _FakeInstance:
             raise RuntimeError('no node returned success')
         if isinstance(param, IInvokeTool.Invoke):
             self.invocations.append((component_id, param.tool_name, param.input))
+            self.invocation_lanes.append(getattr(param, 'lane', 'tool'))
             param.output = {'called': param.tool_name}
             return None
         if isinstance(param, IInvokeTool.Validate):
@@ -253,6 +256,7 @@ class TestLedgerHost:
             'smart_ingest',
             {'content': 'payload', 'tags': ['tag1'], 'intent_id': 'intent-1'},
         )
+        assert instance.invocation_lanes[-1] == 'ledger'
 
         recall_out = services.ledger.recall('hdl_123')
         assert recall_out == {'called': 'recall'}
@@ -261,3 +265,4 @@ class TestLedgerHost:
             'recall',
             {'handle': 'hdl_123'},
         )
+        assert instance.invocation_lanes[-1] == 'ledger'
