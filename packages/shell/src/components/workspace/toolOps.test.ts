@@ -35,6 +35,18 @@ import type { IToolPeer, ToolChannel } from './toolChannel';
 type Peer = IToolPeer;
 
 /**
+ * Drains pending delivery. The peer pair posts on setTimeout(0) — a fixed
+ * delay races chained deliveries when the event loop is starved (parallel
+ * builder tasks). Each zero-delay hop yields one FULL loop turn, so ten
+ * hops flush any delivery chain regardless of load.
+ */
+const settle = async (): Promise<void> => {
+	for (let i = 0; i < 10; i++) {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	}
+};
+
+/**
  * An in-memory frame↔controller peer pair with the hosts' asynchronous
  * delivery semantics (each post lands on a fresh macrotask) and the
  * broadcast property of the real relays: every frame-side subscriber sees
@@ -132,7 +144,7 @@ test('a timeout rejects with an answer-not-execution error; the late reply is dr
 	// The handler finishes afterwards; its reply finds no pending entry and
 	// must be ignored (no unhandled rejection, no resurrection).
 	release();
-	await new Promise((resolve) => setTimeout(resolve, 10));
+	await settle();
 	server.dispose();
 });
 
@@ -164,7 +176,7 @@ test('a plain channel EVENT runs the same handler and produces NO reply', async 
 
 	// The uncorrelated path: sendEvent - same name, no correlation id.
 	frame.sendEvent('test.echo', { via: 'event' });
-	await new Promise((resolve) => setTimeout(resolve, 10));
+	await settle();
 
 	assert.deepEqual(seen, [{ via: 'event' }]);
 	assert.equal(strays.length, 0);

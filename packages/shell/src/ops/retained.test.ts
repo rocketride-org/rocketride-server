@@ -15,8 +15,17 @@ import { createRetainedRegistry, localRetainedPort } from './retained';
 import { createOpBus } from './busOps';
 import { attachRealmToRoot, createBusRouter, createLocalEndpointPair } from './busBridge';
 
-/** Flushes queued microtasks + macrotask hops (async delivery + endpoints). */
-const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 25));
+/**
+ * Drains pending bus delivery. Replay and cross-realm hops ride setTimeout(0)
+ * chains — a fixed delay races those chains when the event loop is starved
+ * (parallel builder tasks). Each zero-delay hop here yields one FULL loop
+ * turn, so ten hops flush any delivery chain regardless of load.
+ */
+const settle = async (): Promise<void> => {
+	for (let i = 0; i < 10; i++) {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	}
+};
 
 // =============================================================================
 // REGISTRY (in-realm)

@@ -385,6 +385,12 @@ function makeTestAction() {
 	return {
 		description: 'Testing vscode',
 		run: async (ctx, task) => {
+			// Typecheck the webview project as part of the test graph. The build
+			// action runs the same gate, but behind its change-detection hash —
+			// so `./builder test` alone never caught webview/protocol drift
+			// (e.g. a shell type consumed by webview code changing underneath it).
+			await execCommand('npx', ['tsc', '-p', 'tsconfig.webview.json', '--noEmit'], { task, cwd: APP_ROOT });
+
 			const testFiles = (await glob('src/test/*.test.ts', { cwd: APP_ROOT, nodir: true })).sort();
 
 			// Fail rather than pass silently: this target exists because these tests
