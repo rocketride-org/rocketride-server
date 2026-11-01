@@ -163,6 +163,14 @@ export interface DesktopViewProps {
 	popoverBoundarySelector?: string;
 	/** Message for the zero-apps state. */
 	emptyMessage?: string;
+	/**
+	 * Extra attributes spread onto the greeting heading — the one element
+	 * that carries the user's real first name. Hosts whose telemetry uses
+	 * its own masking selector add that marker here; the built-in
+	 * `data-rr-private` (home-ui's replay mask / click-capture ignore)
+	 * is always present and cannot be removed.
+	 */
+	greetingAttrs?: Record<string, string>;
 	/** Extra styles merged onto the root (padding/width belong to the host). */
 	style?: CSSProperties;
 }
