@@ -23,6 +23,8 @@
 
 import { ChangeEvent, FocusEvent, useState, useEffect, useCallback, useRef, KeyboardEvent } from 'react';
 import TextField, { TextFieldProps } from '@mui/material/TextField';
+import InputAdornment from '@mui/material/InputAdornment';
+import IconButton from '@mui/material/IconButton';
 import { ariaDescribedByIds, BaseInputTemplateProps, examplesId, getInputProps, labelValue, FormContextType, RJSFSchema, StrictRJSFSchema } from '@rjsf/utils';
 
 import { useEnvVarAutocomplete } from '../hooks/useEnvVarAutocomplete';
@@ -104,6 +106,15 @@ export default function BaseInputTemplate<
 		},
 		[autocomplete, controlledValue, onChange, options.emptyValue]
 	);
+
+	const showVarPicker = envKeys.length > 0 && !(disabled || readonly);
+	const handleOpenPicker = useCallback(() => {
+		const el = inputRef.current;
+		if (!el) return;
+		el.focus();
+		const cursor = el.selectionStart ?? String(controlledValue ?? '').length;
+		autocomplete.openAll(el, cursor);
+	}, [autocomplete, controlledValue]);
 
 	const handleKeyDown = useCallback(
 		(e: KeyboardEvent<HTMLInputElement>) => {
@@ -206,6 +217,26 @@ export default function BaseInputTemplate<
 				inputRef={inputRef}
 				InputLabelProps={DisplayInputLabelProps}
 				{...(textFieldProps as TextFieldProps)}
+				InputProps={{
+					...(textFieldProps as TextFieldProps).InputProps,
+					endAdornment: showVarPicker ? (
+						<InputAdornment position="end">
+							{(textFieldProps as TextFieldProps).InputProps?.endAdornment}
+							<IconButton
+								size="small"
+								aria-label="Insert variable"
+								title="Insert variable"
+								onClick={handleOpenPicker}
+								edge="end"
+								sx={{ fontSize: '0.75rem', fontFamily: 'monospace', px: 0.75 }}
+							>
+								{'${}'}
+							</IconButton>
+						</InputAdornment>
+					) : (
+						(textFieldProps as TextFieldProps).InputProps?.endAdornment
+					),
+				}}
 				{...(compactDescriptions
 					? {
 							slotProps: {

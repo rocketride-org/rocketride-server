@@ -27,7 +27,13 @@ export interface UseEnvVarAutocompleteResult {
 	highlightedIndex: number;
 	/** Move highlight up/down. */
 	moveHighlight: (direction: 'up' | 'down') => void;
+	/**
+	 * Open the suggestions list with every saved variable at ``cursorPos``.
+	 * Used by the explicit picker button so users need not type ``${``.
+	 */
+	openAll: (anchorElement: HTMLElement | null, cursorPos: number) => void;
 }
+
 
 // =============================================================================
 // Constants
@@ -35,6 +41,17 @@ export interface UseEnvVarAutocompleteResult {
 
 /** Matches `${` followed by an optional partial ROCKETRIDE_* key name at the end of a string. */
 const TRIGGER_REGEX = /\$\{(ROCKETRIDE_\w*)?$/;
+
+/**
+ * Insert `${key}` replacing the span from ``triggerStart`` to ``cursorPos``.
+ * Used by both the `${` autocomplete path and the explicit picker (`openAll`),
+ * where ``triggerStart === cursorPos`` so the reference is inserted at the caret.
+ */
+export function insertEnvVarRef(currentValue: string, key: string, triggerStart: number, cursorPos: number): string {
+	const before = currentValue.substring(0, triggerStart);
+	const after = currentValue.substring(cursorPos);
+	return `${before}\${${key}}${after}`;
+}
 
 // =============================================================================
 // Hook
@@ -55,9 +72,20 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 
 	// Track the position of the `${` trigger in the input value
 	const triggerStartRef = useRef<number>(0);
+	/**
+	 * When set, selection uses this end cursor instead of the live caret.
+	 * Keeps explicit-picker inserts stable if the user moves the caret while
+	 * the suggestions popover is open.
+	 */
+	const explicitInsertEndRef = useRef<number | null>(null);
+
+	const clearExplicitInsert = useCallback(() => {
+		explicitInsertEndRef.current = null;
+	}, []);
 
 	const handleInputChange = useCallback(
 		(value: string, cursorPos: number, anchorElement: HTMLElement | null) => {
+			clearExplicitInsert();
 			if (!anchorElement || !envKeys.length) {
 				setIsOpen(false);
 				return;
@@ -83,19 +111,18 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 
 			setIsOpen(false);
 		},
-		[envKeys],
+		[clearExplicitInsert, envKeys],
 	);
 
 	const handleSelect = useCallback(
 		(key: string, currentValue: string, inputEl: HTMLInputElement | HTMLTextAreaElement | null): string => {
 			const triggerStart = triggerStartRef.current;
-			const cursorPos = inputEl?.selectionStart ?? currentValue.length;
+			const cursorPos =
+				explicitInsertEndRef.current ?? inputEl?.selectionStart ?? currentValue.length;
 
-			// Replace from the `${` trigger to the cursor with the full variable reference
-			const before = currentValue.substring(0, triggerStart);
-			const after = currentValue.substring(cursorPos);
-			const newValue = `${before}\${${key}}${after}`;
+			const newValue = insertEnvVarRef(currentValue, key, triggerStart, cursorPos);
 
+			explicitInsertEndRef.current = null;
 			setIsOpen(false);
 
 			// Restore cursor position after the inserted reference
@@ -110,7 +137,25 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 		[],
 	);
 
+	const openAll = useCallback(
+		(anchorElement: HTMLElement | null, cursorPos: number) => {
+			if (!anchorElement || !envKeys.length) {
+				setIsOpen(false);
+				return;
+			}
+			// Insert at the caret — no `${` prefix required for the picker path.
+			triggerStartRef.current = cursorPos;
+			explicitInsertEndRef.current = cursorPos;
+			setSuggestions([...envKeys]);
+			setAnchorEl(anchorElement);
+			setHighlightedIndex(0);
+			setIsOpen(true);
+		},
+		[envKeys],
+	);
+
 	const handleDismiss = useCallback(() => {
+		explicitInsertEndRef.current = null;
 		setIsOpen(false);
 	}, []);
 
@@ -124,5 +169,15 @@ export function useEnvVarAutocomplete(envKeys: string[]): UseEnvVarAutocompleteR
 		[suggestions.length],
 	);
 
-	return { isOpen, suggestions, anchorEl, handleInputChange, handleSelect, handleDismiss, highlightedIndex, moveHighlight };
+	return {
+		isOpen,
+		suggestions,
+		anchorEl,
+		handleInputChange,
+		handleSelect,
+		handleDismiss,
+		highlightedIndex,
+		moveHighlight,
+		openAll,
+	};
 }
