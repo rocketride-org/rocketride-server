@@ -85,7 +85,33 @@ def test_video_is_streamed_to_disk_not_buffered_in_a_list(monkeypatch):
     assert inst.instance.texts == ['fake response']
 
 
+def test_memory_stays_bounded_across_many_chunks(monkeypatch):
+    """Peak memory should track one chunk at a time, not the whole video (the original bug)."""
+    import tracemalloc
+
+    inst = _instance(monkeypatch)
+    inst.writeVideo(AVI_ACTION.BEGIN, 'video/mp4', b'')
+
+    chunk_size = 1024 * 1024  # 1 MB
+    chunk_count = 50  # 50 MB total if every chunk were retained in memory
+
+    tracemalloc.start()
+    for _ in range(chunk_count):
+        inst.writeVideo(AVI_ACTION.WRITE, 'video/mp4', b'x' * chunk_size)
+    _current, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
+    # Retaining every chunk in a list peaks near chunk_size * chunk_count (50 MB here);
+    # streaming to disk peaks near a small, constant multiple of one chunk.
+    assert peak < chunk_size * 10, (
+        f'peak traced memory {peak / 1e6:.1f}MB suggests chunks are being retained, not streamed'
+    )
+
+    inst.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
+
+
 def test_temp_file_is_deleted_after_submission(monkeypatch):
+    """A successfully submitted video's temp file is deleted."""
     inst = _instance(monkeypatch)
 
     inst.writeVideo(AVI_ACTION.BEGIN, 'video/mp4', b'')
@@ -97,6 +123,7 @@ def test_temp_file_is_deleted_after_submission(monkeypatch):
 
 
 def test_empty_response_falls_back_to_placeholder_text(monkeypatch):
+    """An empty response from the driver still writes a placeholder, not nothing."""
     inst = _instance(monkeypatch, response='')
 
     inst.writeVideo(AVI_ACTION.BEGIN, 'video/mp4', b'')
@@ -107,6 +134,7 @@ def test_empty_response_falls_back_to_placeholder_text(monkeypatch):
 
 
 def test_no_listener_skips_writing_text(monkeypatch):
+    """No text listener means writeText is never called."""
     inst = _instance(monkeypatch, listeners=())
 
     inst.writeVideo(AVI_ACTION.BEGIN, 'video/mp4', b'')
