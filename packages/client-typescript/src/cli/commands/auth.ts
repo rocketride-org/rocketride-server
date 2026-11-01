@@ -344,10 +344,12 @@ async function signInSaas(uri: string, out: Output): Promise<string> {
 	let outcome: CallbackResult = { ok: false, error: 'Sign-in did not complete; see your terminal.' };
 
 	// step: exchange the code over a temporary DAP connection — the server
-	// consumes the Zitadel tokens and returns an rr_* session key
+	// consumes the Zitadel tokens and returns an rr_* session key.
+	// clientId rides along: Zitadel binds the code to the CLI's own client
+	// registration, and the server-side exchange must name the same client.
 	const tempClient = new RocketRideClient({ persist: false });
 	try {
-		const result = await tempClient.connect({ code, verifier, redirectUri }, { uri });
+		const result = await tempClient.connect({ code, verifier, redirectUri, clientId: DEFAULT_CLI_CLIENT_ID }, { uri });
 		if (result?.waitlisted) {
 			const name = result.displayName || '';
 			out.line(`Thanks for signing up${name ? `, ${name}` : ''}! Your account is in the access queue — you will be emailed when it is activated.`);
