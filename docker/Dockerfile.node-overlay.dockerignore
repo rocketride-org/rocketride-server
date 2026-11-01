@@ -1,0 +1,18 @@
+# Context filter for Dockerfile.node-overlay: the four Python trees of
+# dist/server and nothing else. BuildKit uses this file instead of the context
+# root's .dockerignore.
+*
+!dist/server/ai/
+!dist/server/nodes/
+!dist/server/rocketride/
+!dist/server/rocketride_common/
+
+# Native files are the clean image's (Linux) or not for Linux at all (Windows,
+# macOS); bytecode is rebuilt where it runs.
+**/*.so
+**/*.dll
+**/*.pyd
+**/*.exe
+**/*.dylib
+**/__pycache__
+**/*.pyc
