@@ -16,9 +16,12 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from rocketlib import AVI_ACTION
 
 NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
+# Move to the front rather than "insert only if absent": another test dir already on
+# sys.path can hold a package with the same name as the node (see #1687).
 while str(NODES_SRC) in sys.path:
     sys.path.remove(str(NODES_SRC))
 sys.path.insert(0, str(NODES_SRC))
@@ -69,12 +72,16 @@ def test_video_is_streamed_to_disk_not_buffered_in_a_list(monkeypatch):
     inst = _instance(monkeypatch)
 
     inst.writeVideo(AVI_ACTION.BEGIN, 'video/mp4', b'')
-    inst.writeVideo(AVI_ACTION.WRITE, 'video/mp4', b'chunk-one-')
-    assert not hasattr(inst, '_video_chunks'), 'regression: still buffering chunks in a Python list'
+    # A small chunk would pass even with the old in-memory-list bug, since
+    # it never gets flushed to disk either way - it has to clear the file
+    # object's own write buffer to prove anything. 2 MB reliably does.
+    big_chunk = b'x' * (2 * 1024 * 1024)
+    inst.writeVideo(AVI_ACTION.WRITE, 'video/mp4', big_chunk)
+    assert os.path.getsize(inst._tmp_path) >= len(big_chunk), 'bytes should already be on disk before END'
     inst.writeVideo(AVI_ACTION.WRITE, 'video/mp4', b'chunk-two')
     inst.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
 
-    assert inst.driver_calls[0]['data'] == b'chunk-one-chunk-two'
+    assert inst.driver_calls[0]['data'] == big_chunk + b'chunk-two'
     assert inst.instance.texts == ['fake response']
 
 
@@ -139,3 +146,24 @@ def test_closing_releases_a_stream_that_never_got_an_end(monkeypatch):
 
     assert not os.path.exists(tmp_path)
     assert inst.driver_calls == []  # never submitted
+
+
+def test_a_driver_error_propagates_and_still_deletes_the_temp_file(monkeypatch):
+    """The README promises cleanup even when process_video fails - nothing pinned that before."""
+    inst = _instance(monkeypatch)
+
+    import twelvelabs.twelvelabs_driver as driver_module
+
+    def _raise(api_key, video_path, instructions):
+        raise RuntimeError('boom')
+
+    monkeypatch.setattr(driver_module, 'process_video', _raise)
+
+    inst.writeVideo(AVI_ACTION.BEGIN, 'video/mp4', b'')
+    inst.writeVideo(AVI_ACTION.WRITE, 'video/mp4', b'data')
+    tmp_path = inst._tmp_path
+
+    with pytest.raises(RuntimeError, match='boom'):
+        inst.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
+
+    assert not os.path.exists(tmp_path), 'temp file must be deleted even when the driver call fails'
