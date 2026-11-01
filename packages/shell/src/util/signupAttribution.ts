@@ -38,14 +38,22 @@ function isPrivacySignal(value: unknown): boolean {
 	return value === true || value === 1 || value === '1' || value === 'yes';
 }
 
-function hasConsent(): boolean {
+function privacySignalOn(): boolean {
 	try {
 		const browserNavigator = navigator as Navigator & { globalPrivacyControl?: unknown; msDoNotTrack?: unknown };
 		const browserWindow = window as Window & { doNotTrack?: unknown };
-		if (isPrivacySignal(browserNavigator.doNotTrack)) return false;
-		if (isPrivacySignal(browserNavigator.msDoNotTrack)) return false;
-		if (isPrivacySignal(browserNavigator.globalPrivacyControl)) return false;
-		if (isPrivacySignal(browserWindow.doNotTrack)) return false;
+		if (isPrivacySignal(browserNavigator.doNotTrack)) return true;
+		if (isPrivacySignal(browserNavigator.msDoNotTrack)) return true;
+		if (isPrivacySignal(browserNavigator.globalPrivacyControl)) return true;
+		return isPrivacySignal(browserWindow.doNotTrack);
+	} catch {
+		return true;
+	}
+}
+
+function hasConsent(): boolean {
+	try {
+		if (privacySignalOn()) return false;
 
 		const consent = JSON.parse(localStorage.getItem(CONSENT_STORAGE_KEY) ?? 'null');
 		if (consent?.v !== 1) return false;
@@ -65,16 +73,21 @@ function hasConsent(): boolean {
  * Recheck consent, privacy signals and expiry at each asynchronous auth boundary.
  *
  * @param value - Untrusted signup properties to validate under current consent.
- * @returns Valid context, or null when consent, privacy, expiry or the dev gate disallows it.
+ * @returns Valid context, or null when consent, privacy, expiry or the dev gate disallows it. A cookieless
+ *          context (consent_state set) is valid without an opt-in.
  */
 export function currentSignupProperties(value: unknown): SignupProperties | null {
 	if (isEmbeddedDevShell()) return null;
-	if (!hasConsent()) return null;
-	return normalizeSignupProperties(value);
+	const context = normalizeSignupProperties(value);
+	if (!context) return null;
+	// A cookieless context (consent_state set) needs no opt-in, but a privacy signal still drops it.
+	if (context.consent_state ? privacySignalOn() : !hasConsent()) return null;
+	return context;
 }
 
 /**
- * Retain optional context across a native redirect without putting metadata in the IdP URL.
+ * Retain optional context across a native redirect. Consented context stays in session storage, out of the IdP
+ * URL; cookieless context is never stored and rides the OAuth state instead (signupState).
  *
  * @param value - Candidate context; absent or invalid context clears a stale pending signup.
  * @returns The retained context, or null when consent, validation or storage disallows it.
@@ -84,10 +97,38 @@ export function stashSignupProperties(value: unknown): SignupProperties | null {
 	try {
 		sessionStorage.removeItem(SIGNUP_CONTEXT_KEY);
 		const context = currentSignupProperties(value);
-		if (context) {
+		if (context && !context.consent_state) {
 			sessionStorage.setItem(SIGNUP_CONTEXT_KEY, JSON.stringify(context));
 		}
 		return context;
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * The OAuth state that carries a cookieless context through the identity provider and back.
+ *
+ * @param context - Context returned by stashSignupProperties.
+ * @returns Base64 JSON for a cookieless context; undefined for none or a consented one (which stays in storage).
+ */
+export function signupState(context: SignupProperties | null): string | undefined {
+	if (!context?.consent_state) return undefined;
+	return btoa(JSON.stringify(context));
+}
+
+/**
+ * Read a cookieless context back from the callback's OAuth state and recheck it.
+ *
+ * @param state - The callback's `state` query value.
+ * @returns Valid cookieless context, or null; a consented context is never accepted from the URL.
+ */
+export function signupFromState(state: string | null): SignupProperties | null {
+	if (isEmbeddedDevShell()) return null;
+	try {
+		if (!state || state.length > MAX_STORED_CONTEXT_LENGTH) return null;
+		const context = currentSignupProperties(JSON.parse(atob(state)));
+		return context?.consent_state ? context : null;
 	} catch {
 		return null;
 	}

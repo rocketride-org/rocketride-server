@@ -1689,6 +1689,68 @@ for (const mode of ['provider', 'legacy', 'direct'] as const) {
 	}
 }
 
+for (const mode of ['provider', 'legacy', 'direct'] as const) {
+	for (const scenario of ['undecided', 'rejected', 'accepted', 'private'] as const) {
+		test(`${mode} OAuth carries ${scenario} cookieless context in the OAuth state, never in storage`, async () => {
+			const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
+			const session = recordingSession([['rr:auth:signup', 'stale context']]);
+			const decided = scenario === 'rejected' || scenario === 'accepted';
+			const local = recordingSession(decided ? [['rr_consent_v1', JSON.stringify({ v: 1, choice: scenario, at: Date.now() })]] : []);
+			const redirects: string[] = [];
+			const win = topLevelWindow({ location: { search: '', pathname: '/', origin: 'https://shell.example.test', assign: (url: string) => redirects.push(url) } });
+			await withGlobals({ window: win, sessionStorage: session.storage, localStorage: local.storage, navigator: { globalPrivacyControl: scenario === 'private' } }, async () => {
+				const provider = CloudAuthProvider.getInstance();
+				provider.initialize({ zitadelUrl: 'https://idp.example.test', clientId: 'test-client' });
+				const { manager } = createTestManager();
+				manager.authProvider = mode === 'provider' ? provider : null;
+				Object.assign(manager, { zitadelUrl: 'https://idp.example.test', zitadelClientId: 'test-client' });
+				if (mode === 'direct') await provider.signIn(undefined, true, signup);
+				else await manager.startOAuth(true, { signupProperties: signup });
+				assert.deepEqual(session.writes.filter((write) => write.endsWith('rr:auth:signup')), ['remove:rr:auth:signup']);
+				assert.equal(local.writes.length, 0);
+				assert.equal(redirects.length, 1);
+				const state = new URL(redirects[0]).searchParams.get('state');
+				if (scenario === 'private') assert.equal(state, null);
+				else assert.deepEqual(JSON.parse(atob(state!)), signup);
+				provider.dispose();
+			});
+		});
+	}
+}
+
+test('a cookieless signup completion reads its context from the OAuth state only', async () => {
+	const signup: SignupProperties = { ...signupContext(), consent_state: 'rejected' };
+	const consented = signupContext();
+	const cases: Array<[string, string | null, SignupProperties | null]> = [
+		['cookieless', btoa(JSON.stringify(signup)), signup],
+		['consented context in the URL', btoa(JSON.stringify(consented)), null],
+		['unknown consent state', btoa(JSON.stringify({ ...signup, consent_state: 'accepted' })), null],
+		['malformed', '%%%not-base64', null],
+		['oversized', btoa(JSON.stringify(signup)).padEnd(4096, 'A'), null],
+		['absent', null, null],
+	];
+	for (const [name, state, expected] of cases) {
+		const page = callbackPage();
+		const search = state === null ? '?code=abc' : `?code=abc&state=${encodeURIComponent(state)}`;
+		(page.globals.window as { location: { search: string } }).location.search = search;
+		await withGlobals({ ...page.globals, localStorage: recordingSession().storage, navigator: {} }, async () => {
+			const { manager, exchanged } = callbackManager({ ...authenticatedResult, isNewUser: true });
+			await manager.bootstrap();
+			assert.equal(exchanged.length, 1, `${name}: auth still proceeds`);
+			const credential = exchanged[0];
+			assert.ok(typeof credential === 'object');
+			const resolveSignup = credential.signupProperties;
+			if (expected) {
+				assert.ok(typeof resolveSignup === 'function', name);
+				assert.deepEqual(resolveSignup(), expected, name);
+			} else {
+				assert.equal(resolveSignup, undefined, name);
+			}
+			assert.equal(page.session.writes.some((write) => write.startsWith('set:rr:auth:signup')), false, `${name}: nothing stored`);
+		});
+	}
+});
+
 test('startOAuth in an embedded dev shell does not touch host signup storage', async () => {
 	const signup = signupContext();
 	const session = recordingSession([['rr:auth:signup', 'host context']]);

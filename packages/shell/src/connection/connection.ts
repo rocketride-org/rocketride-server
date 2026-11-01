@@ -40,7 +40,7 @@
 //   - Browser-specific session storage for auth phase tracking
 // =============================================================================
 
-import { stashSignupProperties, takeSignupProperties, currentSignupProperties, clearSignupProperties } from '../util/signupAttribution';
+import { stashSignupProperties, takeSignupProperties, currentSignupProperties, clearSignupProperties, signupState, signupFromState } from '../util/signupAttribution';
 import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError, type PkceCredential, type SignupProperties } from 'rocketride';
 import type { ShellConnectionEventMap, IConnectionManager } from '../types/shell';
 import type { IAuthProvider } from '../types/connection';
@@ -714,7 +714,7 @@ export class ConnectionManager implements IConnectionManager {
 				return;
 			}
 			// The provider owns pending context; the legacy path has no provider.
-			stashSignupProperties(signup);
+			const context = stashSignupProperties(signup);
 			// Legacy fallback — remove once all callers pass authProvider
 			if (!this.zitadelUrl || !this.zitadelClientId) {
 				console.error('[ConnectionManager] Zitadel not configured');
@@ -724,7 +724,7 @@ export class ConnectionManager implements IConnectionManager {
 			}
 			const { generatePkce, buildAuthUrl } = await import('../util/pkce');
 			const { challenge } = await generatePkce();
-			const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge, register);
+			const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge, register, signupState(context));
 			// assign() (not replace()) keeps the landing page reachable via the
 			// browser back button — matches CloudAuthProvider.signIn().
 			window.location.assign(url);
@@ -818,7 +818,7 @@ export class ConnectionManager implements IConnectionManager {
 
 		// ── OAuth callback — exchange authorization code for a session ────
 		if (code) {
-			const signup = takeSignupProperties();
+			const signup = takeSignupProperties() ?? signupFromState(params.get('state'));
 			const verifier = getStoredVerifier();
 			clearStoredVerifier();
 			// Strip the ?code= from the URL so refreshes don't re-exchange.

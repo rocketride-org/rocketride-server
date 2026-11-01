@@ -34,6 +34,8 @@ export type SignupProperties = {
 	exposed_at: number;
 	expires_at: number;
 	consent_version: 1;
+	/** Present only when the visitor had not opted in to analytics storage: the context then rides the OAuth state, never device storage. */
+	consent_state?: 'undecided' | 'rejected';
 };
 
 /** PKCE exchange credentials with optional, consent-aware signup analytics context. */
