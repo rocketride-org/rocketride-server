@@ -485,6 +485,7 @@ export async function executeAppVerify(ref: string | undefined, options: AppVerb
 export interface AppDevOptions extends AppVerbOptions {
 	open?: boolean;
 	install?: boolean;
+	port?: number;
 }
 
 /**
@@ -511,9 +512,17 @@ export async function executeAppDev(ref: string | undefined, options: AppDevOpti
 
 	// step: validate the development connection once — the dev server will
 	// proxy the preview's traffic to this engine (local-first; no server-side
-	// registration exists, so no connection needs to outlive the check)
-	const client = await connectClient(options);
-	await client.disconnect();
+	// registration exists, so no connection needs to outlive the check).
+	// CREDENTIAL-LESS runs are legitimate: the preview's logged-in/out state
+	// is the BROWSER's own session (proxied same-origin), never the CLI key —
+	// so without a key the preflight is skipped, not failed, and the user
+	// tests the logged-out condition or signs in from the preview itself.
+	if (options.apikey) {
+		const client = await connectClient(options);
+		await client.disconnect();
+	} else {
+		out.line('No credentials — skipping the connection check; the preview uses the browser\'s own sign-in.');
+	}
 
 	const engineOrigin = toHttpBase(String(options.uri));
 	const session = new DevSession({
@@ -521,6 +530,15 @@ export async function executeAppDev(ref: string | undefined, options: AppDevOpti
 		workspaceRoot,
 		engineOrigin,
 		install: options.install !== false,
+		// Terminal host: a tab opened on the bare origin gets the preview
+		// params via a 302 (panel hosts never set this — their wrapper stays
+		// byte-identical and they always navigate with the params present).
+		injectPreviewParams: true,
+		port: options.port,
+		// The origin is the session identity: cookies and the registration
+		// are per-origin, so a silent bump strands open tabs and sign-ins.
+		onPortBump: (from, to) =>
+			out.warn(`Port ${from} is busy — serving on ${to}. Preview tabs and sign-ins on port ${from} must be reopened.`),
 		onLine: (line) => out.line(`  ${line}`),
 		onState: (state, detail) => {
 			if (state === 'installing') out.line('Installing workspace dependencies (pnpm install)...');
@@ -618,6 +636,7 @@ serving the app; a team or @public binding can keep it on your desktop.`,
 		.command('dev [app]')
 		.description('Serve an app with live preview: rsbuild dev fronting the engine (local-first; Ctrl+C stops)')
 		.option('--open', 'Open the preview in your browser')
+		.option('--port <port>', 'Dev-server port (default: the port pinned in the app\'s rsbuild config)', (v: string) => parseInt(v, 10))
 		.option('--no-install', 'Skip the workspace pnpm install')
 		.option(workspaceOption, 'Workspace root the app is found in and pnpm install runs at (default: current directory)')
 		.action(async (app, options) => {

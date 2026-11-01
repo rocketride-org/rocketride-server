@@ -128,6 +128,8 @@ export interface DevOutputSignal {
 	origin?: string;
 	/** Build lifecycle edge, when one appeared. */
 	event?: 'built' | 'failed' | 'building';
+	/** rsbuild auto-bumped off a busy port ("port X is in use, using port Y"). */
+	portBump?: { from: number; to: number };
 }
 
 /**
@@ -144,6 +146,10 @@ export function classifyDevOutput(lines: string[]): DevOutputSignal {
 	const signal: DevOutputSignal = {};
 	const origin = /Local:\s+(http:\/\/[\w.-]+:\d+)/.exec(lines.join('\n'));
 	if (origin) signal.origin = origin[1];
+	// The origin is the session identity (cookies, registration): a silent
+	// port bump strands open preview tabs, so the host gets to say so loudly.
+	const bump = /port (\d+) is in use, using port (\d+)/i.exec(lines.join('\n'));
+	if (bump) signal.portBump = { from: Number(bump[1]), to: Number(bump[2]) };
 	const compilerText = lines.filter((line) => !/^\s*\w+\s+\[browser\]/.test(line)).join('\n');
 	if (/built in\s+[\d.]+/i.test(compilerText)) signal.event = 'built';
 	else if (/build failed|error {3}/i.test(compilerText)) signal.event = 'failed';
@@ -238,6 +244,12 @@ export interface DevSessionHooks {
 	onLine?: (line: string, stream: 'stdout' | 'stderr') => void;
 	/** A state change, with the build time on 'ok' and a reason on 'error'. */
 	onState?: (state: DevState, detail?: { origin?: string; durationMs?: number; reason?: string }) => void;
+	/**
+	 * rsbuild auto-bumped off a busy port. The origin is the session identity
+	 * (browser sign-in, registration), so hosts should surface this loudly —
+	 * tabs and logins bound to the old port are stranded.
+	 */
+	onPortBump?: (from: number, to: number) => void;
 }
 
 /** Options for a {@link DevSession}. */
@@ -252,6 +264,10 @@ export interface DevSessionOptions extends DevSessionHooks {
 	install?: boolean;
 	/** Restart the server when the app's package.json changes (default true). */
 	watchPackageJson?: boolean;
+	/** Redirect the bare front door to the preview URL (terminal hosts; see WrapperOptions). */
+	injectPreviewParams?: boolean;
+	/** Dev-server port override — outranks the app config's pinned port. */
+	port?: number;
 }
 
 /** A death inside this window after start counts toward the crash-loop guard. */
@@ -304,7 +320,10 @@ export class DevSession {
 		// The wrapper turns this app's dev server into the preview's front
 		// door (assets under /apps/<id>/dev/, everything else proxied to the
 		// engine). Regenerated per session — the engine origin may change.
-		this.wrapperPath = await writeProxyConfig(this.options.app.folder, this.options.app.id, this.options.engineOrigin);
+		this.wrapperPath = await writeProxyConfig(this.options.app.folder, this.options.app.id, this.options.engineOrigin, {
+			injectPreviewParams: this.options.injectPreviewParams,
+			port: this.options.port,
+		});
 		const ready = new Promise<string>((resolve, reject) => {
 			this.readiness = { resolve, reject };
 		});
@@ -405,6 +424,7 @@ export class DevSession {
 			if (line.trim()) this.options.onLine?.(line, stream);
 		}
 		const signal = classifyDevOutput(lines);
+		if (signal.portBump) this.options.onPortBump?.(signal.portBump.from, signal.portBump.to);
 		if (signal.origin && !this.origin) {
 			this.origin = signal.origin;
 			this.readiness?.resolve(this.origin);
