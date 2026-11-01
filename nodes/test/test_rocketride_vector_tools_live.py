@@ -75,11 +75,12 @@ _DB_MISSING = 'RocketRide test database in RR_TEST_PG_DSN is not reachable' if T
 if _DB_TESTS_REQUIRED and not _db_reachable():
     pytest.fail(f'RR_REQUIRE_DB_TESTS is set but: {_DB_MISSING}', pytrace=False)
 
-# The tests share one fixed table (rr_vec_tools_e2e), so one xdist worker runs
-# the whole module (nodes:test passes --dist loadgroup).
+# One xdist worker runs every module that creates tables in the RR_TEST_PG_DSN
+# database (see the group in test_rocketride_db_live.py); the tests here also
+# share one fixed table (rr_vec_tools_e2e).
 pytestmark = [
     pytest.mark.skipif(not _db_reachable(), reason=_DB_MISSING),
-    pytest.mark.xdist_group('rocketride_vector_tools_live'),
+    pytest.mark.xdist_group('rocketride_pg_live'),
 ]
 
 

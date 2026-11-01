@@ -618,8 +618,10 @@ port and point `RR_TEST_AGE_DSN` at it.
 
 A suite that reuses fixed table or graph names marks its module with
 `pytest.mark.xdist_group`, so one worker runs all of its tests (see
-[Parallel runs](#parallel-runs)). A new live suite either does the same or names
-its tables per test, as `test_vector_store_writes_live.py` does.
+[Parallel runs](#parallel-runs)). Every suite that creates tables in the
+`RR_TEST_PG_DSN` database joins one group, `rocketride_pg_live`, even with a
+table name per test: the SQL node reads every table in the database when it
+starts, and a table that another worker drops during that read fails the test.
 
 ### Listing skipped tests
 
