@@ -428,6 +428,52 @@ const { settings } = useWorkspace();
 const maxResults = settings['acme.brandy.maxResults'] as number;
 ```
 
+- The shell owns the control: declare the setting and read the value. Do
+  not build a toggle or input for it in your own UI, and do not store it
+  in `usePrefs()` — prefs never appear on the Settings page.
+- The shell owns the NAVIGATION too: never add a "Settings" entry to your
+  app's sidebar, rail, or menus — the platform's sidebar footer already
+  opens the Settings overlay for every app, and a second route confuses
+  users ("which settings is this?"). If a view genuinely needs a shortcut
+  (e.g. next to the feature a setting controls), open the shell's overlay
+  instead of rendering anything:
+
+```typescript
+import { ConnectionManager } from 'shell';
+ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'settings' });
+```
+- A fixed set of choices is a `string` with `enum` (rendered as a picker);
+  `enumDescriptions` label each choice in order:
+
+```json
+"acme.brandy.timeFormat": {
+  "type": "string",
+  "enum": ["12h", "24h"],
+  "enumDescriptions": ["12-hour clock with AM/PM", "24-hour clock"],
+  "default": "12h",
+  "description": "How times are displayed."
+}
+```
+
+Adding a setting, end to end:
+
+1. Declare it under `appManifest.contributes.configuration` in your app's
+   `package.json`, key prefixed with the app id.
+2. Reload the preview. The manifest is read without loading your bundle,
+   so a manifest edit is picked up on the next preview reload — the
+   setting then appears in the shell's Settings overlay under your
+   configuration `title`.
+3. Read the effective value with `useWorkspace().settings['<full key>']`
+   (defaults already merged). Components re-render when the user saves a
+   change — react to the value, never cache it.
+
+Persistence needs an identity: a signed-in user's changes are stored as
+overrides in `.workspace/settings.json`; a signed-out session keeps them
+in memory only (the Settings page banners this) and they are gone on
+reload. The scaffold defaults new apps to `authenticated: true` so
+settings persist from day one — opt into `authenticated: false` only for
+an app meant to run signed out, accepting session-only settings.
+
 ### Packaging extra directories (`include`)
 
 Deploying an app uploads its SOURCE — the server owns the build. The deploy
@@ -834,6 +880,19 @@ const unsub = cm.onAny((event, payload) => console.log(event, payload));
 
 ## State & Persistence
 
+Four places hold per-app state. Pick by who changes the value and what it is:
+
+| You want… | Use | Where the user sees it |
+|---|---|---|
+| A value the **user** chooses (time format, API key, result limit) | A **setting**: declare it in the manifest under `contributes.configuration`, read it with `useWorkspace().settings` — see [Declaring settings](#declaring-settings-contributesconfiguration) | The shell's **Settings page**, under your app's group. Your app renders no control for it. |
+| UI state your **app** remembers (selected tab, collapsed section, zoom) | **Prefs**: `usePrefs()` — [below](#prefs--small-ui-preferences) | Nowhere; it just comes back on reload. |
+| Anything else your app wants persisted (open documents, layout, drafts) | **App state**: `updateAppState()` — [below](#app-state--your-opaque-blob) | Nowhere; opaque to the shell. |
+| Data | The server: pipelines, the file store (`client.fs*`) | — |
+
+The common mistake is storing a user choice in prefs and drawing a toggle
+for it in the client area: it works, but it never shows up on the Settings
+page. If a human should be able to find and change it, it is a setting.
+
 The shell persists your app's state per user in `.workspace/` on the server:
 
 | File | Contents |
@@ -893,6 +952,11 @@ updatePrefs({ activeView: 'details' });
 
 Prefs persist per user and per app, riding the workspace exactly like theme
 or sidebar state — never browser `localStorage`.
+
+Prefs are **not** user settings: nothing you put here appears on the
+shell's Settings page. A value the user should be able to find and change
+is declared in the manifest instead — see
+[Declaring settings](#declaring-settings-contributesconfiguration).
 
 ### App state — your opaque blob
 

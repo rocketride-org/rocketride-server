@@ -1412,7 +1412,9 @@ Per-app persisted state, two layers:
   `updateAppState` (opaque app-owned state, functional updater — the
   Documents persistence binding); `settings` / `settingsOverrides` /
   `updateSetting(key, value?)` (effective settings = defaults + overrides;
-  delta-only writer — writing the default deletes the override);
+  delta-only writer — writing the default deletes the override; settings
+  are declared in the app manifest and edited by the user on the shell's
+  Settings page — see ROCKETRIDE_APPS.md §Declaring settings);
   `activeAppId` / `appManifest` / `loadedApps`; `loadApp` / `retryApp` /
   `invalidateApp` (lazy descriptor loads); `themeOptions` / `setTheme`;
   `emit` / `on` (workspace event bus); `loaded` / `seeded` / `appLoading`
