@@ -131,12 +131,12 @@ export class DatabaseApi {
 	 *   objects keyed by column name; `'array'` returns positional arrays
 	 *   (column order preserved, duplicate column names kept) — the shape ORM
 	 *   drivers such as Drizzle require.
-	 * @returns Object with `rows` (row objects, or positional arrays with `rowMode: 'array'`) and `affected_rows` (number).
+	 * @returns Object with `rows` (row objects, or positional arrays with `rowMode: 'array'`) and `affected_rows` (number); `graph_falkordb` adds `truncated: true` when it saved a write but cut its rows to `max_execute_rows`.
 	 */
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode: 'array' }): Promise<{ rows: unknown[][]; affected_rows: number }>;
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>;
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }>;
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }> {
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode: 'array' }): Promise<{ rows: unknown[][]; affected_rows: number; truncated?: boolean }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number; truncated?: boolean }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number; truncated?: boolean }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number; truncated?: boolean }> {
 		if (typeof options.token !== 'string' || options.token.trim() === '') {
 			throw new Error('token must be a non-empty string');
 		}
