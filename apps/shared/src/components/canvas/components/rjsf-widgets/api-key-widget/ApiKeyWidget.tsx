@@ -23,8 +23,8 @@
 
 import { useEffect, useRef, useState, useCallback, KeyboardEvent, FC } from 'react';
 import { WidgetProps } from '@rjsf/utils';
-import { InputAdornment, TextField, Tooltip } from '@mui/material';
-import { Delete } from '@mui/icons-material';
+import { IconButton, InputAdornment, TextField, Tooltip } from '@mui/material';
+import { Delete, Visibility, VisibilityOff } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 
 import { useEnvVarAutocomplete } from '../hooks/useEnvVarAutocomplete';
@@ -63,9 +63,10 @@ const getMaskedValue = (val: string): string => {
 /**
  * RJSF widget for securely entering and displaying API keys.
  * When a key already exists, the field shows a masked value (e.g., "••••abcd")
- * in read-only mode with a delete button to clear it. Once cleared, the field
- * becomes editable for entering a new key. This prevents accidental modification
- * of existing keys while still allowing replacement.
+ * in read-only mode with a delete button to clear it. Once cleared, or when no
+ * key exists yet, the field is editable and masks input as a native password
+ * field (type="password") with a show/hide toggle, rather than showing new
+ * keystrokes in plain text.
  */
 const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, formContext, schema, options }) => {
 	const { t } = useTranslation();
@@ -78,6 +79,9 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 	const [maskApiKey, setMaskApiKey] = useState(!!value);
 	// Initialize the displayed value as the masked representation of the stored key
 	const [tempValue, setTempValue] = useState(() => getMaskedValue(value));
+	// While editing (maskApiKey is false), the input is a real password field by default;
+	// this toggles it to plain text so the user can verify what they typed.
+	const [showRawValue, setShowRawValue] = useState(false);
 
 	const inputRef = useRef<HTMLInputElement>(null);
 
@@ -128,7 +132,7 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 				id={id}
 				name={id}
 				required={required}
-				type={'text'}
+				type={!maskApiKey && !showRawValue ? 'password' : 'text'}
 				label={label && compactDescriptions ? <FieldLabelWithInfo label={label} description={description} fieldTitle={label} /> : label}
 				inputRef={inputRef}
 				size="small"
@@ -161,25 +165,38 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 								}
 							: {}),
 						readOnly: maskApiKey || readonly,
-						endAdornment: maskApiKey && !readonly && (
+						endAdornment: !readonly && (
 							<InputAdornment position="end">
-								<Tooltip title={t('form.apiKeyRemoveTooltip')}>
-									<Delete
-										sx={{
-											cursor: 'pointer',
-											color: 'var(--rr-color-error-light)',
-											'&:hover': {
-												color: 'var(--rr-color-error)',
-											},
-										}}
-										onClick={() => {
-											// Clear the stored key and exit masked mode so user can type a new one
-											setTempValue('');
-											onChange('');
-											setMaskApiKey(false);
-										}}
-									/>
-								</Tooltip>
+								{maskApiKey ? (
+									<Tooltip title={t('form.apiKeyRemoveTooltip')}>
+										<Delete
+											sx={{
+												cursor: 'pointer',
+												color: 'var(--rr-color-error-light)',
+												'&:hover': {
+													color: 'var(--rr-color-error)',
+												},
+											}}
+											onClick={() => {
+												// Clear the stored key and exit masked mode so user can type a new one
+												setTempValue('');
+												onChange('');
+												setMaskApiKey(false);
+											}}
+										/>
+									</Tooltip>
+								) : (
+									<Tooltip title={showRawValue ? t('form.apiKeyHideTooltip') : t('form.apiKeyShowTooltip')}>
+										<IconButton
+											aria-label={showRawValue ? t('form.apiKeyHideTooltip') : t('form.apiKeyShowTooltip')}
+											onClick={() => setShowRawValue((prev) => !prev)}
+											edge="end"
+											size="small"
+										>
+											{showRawValue ? <VisibilityOff /> : <Visibility />}
+										</IconButton>
+									</Tooltip>
+								)}
 							</InputAdornment>
 						),
 					},
