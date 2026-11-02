@@ -220,8 +220,8 @@
 				},
 				"rocketride.integrations.autoAgentIntegration": {
 					"type": "boolean",
-					"default": true,
-					"description": "Automatically detect and install RocketRide documentation for coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup"
+					"default": false,
+					"description": "Automatically detect coding agents (Copilot, Claude Code, Cursor, Windsurf) on startup and install RocketRide documentation for them. Off by default; when enabled, writes .rocketride/docs/, agent stub files, and .gitignore entries into the workspace"
 				},
 				"rocketride.integrations.copilot": {
 					"type": "boolean",

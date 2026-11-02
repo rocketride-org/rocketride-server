@@ -111,7 +111,7 @@ export class AgentManager {
 	private async runAutoInstall(workspaceRoot: vscode.Uri): Promise<void> {
 		const logger = getLogger();
 		const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
-		const autoDetect = workspaceConfig.get<boolean>('integrations.autoAgentIntegration', true);
+		const autoDetect = workspaceConfig.get<boolean>('integrations.autoAgentIntegration', false);
 
 		// Track which installers have already been run so we don't double-install
 		const installed = new Set<string>();
@@ -172,8 +172,8 @@ export class AgentManager {
 			detected.push(byName('Windsurf'));
 		}
 
-		// Standard VS Code → install Copilot (the built-in agent)
-		if (appName.includes('visual studio code') || appName === 'code') {
+		// GitHub Copilot: only if the Copilot extension is actually installed
+		if (vscode.extensions.getExtension('GitHub.copilot') !== undefined || vscode.extensions.getExtension('GitHub.copilot-chat') !== undefined) {
 			detected.push(byName('Copilot'));
 		}
 
