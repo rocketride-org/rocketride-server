@@ -46,6 +46,11 @@ import jwt
 import requests
 from tenacity import RetryCallState, Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+if __package__:
+    from .graphql_guard import mutation_refusal
+else:  # The standalone HTTP tests also import this module directly.
+    from graphql_guard import mutation_refusal
+
 
 class GitHubAPIError(ValueError):
     """Raised when the GitHub API returns an error response.
@@ -424,6 +429,10 @@ UNNAMED_WAIT_SECONDS = 60.0
 MIN_WAIT_SECONDS = 1.0
 _READ_CHUNK_BYTES = 64 * 1024
 _TRANSPORT_FAILURE = 'GitHub request failed or returned invalid JSON. Check connectivity and retry.'
+_GRAPHQL_UNKNOWN_OUTCOME = (
+    'GitHub did not return a usable response. The mutation may already have been applied. '
+    'Check its current state before retrying to avoid duplicate changes.'
+)
 AUTH_FAILURE = 'GitHub authentication failed. Check the node credentials and installation access.'
 
 # A token, or a function that returns the token to send; a function is called before
@@ -755,6 +764,10 @@ def graphql_result(
     ``status: None``. The body is streamed, and reading stops once it passes
     ``max_bytes`` decoded bytes; that answer becomes an error naming the cap.
     """
+    # Conservatively treat an uncheckable document like a mutation. Selecting a named
+    # query in a mixed document does not establish that retrying is safe.
+    may_write = mutation_refusal(query) is not None
+    transport_failure = _GRAPHQL_UNKNOWN_OUTCOME if may_write else _TRANSPORT_FAILURE
     payload: dict = {'query': query}
     if variables is not None:
         payload['variables'] = variables
@@ -771,7 +784,7 @@ def graphql_result(
     except AuthenticationFailed:
         result = failure_result(AUTH_FAILURE)
     except (ValueError, requests.RequestException):
-        result = failure_result(_TRANSPORT_FAILURE)
+        result = failure_result(transport_failure)
     else:
         try:
             body, is_json = (json.loads(content), True) if content is not None else (None, False)
@@ -780,7 +793,8 @@ def graphql_result(
         if content is None:
             result = failure_result(
                 f'The GraphQL response is larger than graphqlMaxResponseBytes ({max_bytes} bytes). Select '
-                'fewer fields or a smaller page, or raise the cap in the node configuration.',
+                'fewer fields or a smaller page, or raise the cap in the node configuration.'
+                + (f' {_GRAPHQL_UNKNOWN_OUTCOME}' if may_write else ''),
                 None,
                 resp.headers,
             )
@@ -790,7 +804,7 @@ def graphql_result(
             result = envelope(resp.status_code, resp.headers, {'data': body.get('data'), 'errors': body.get('errors')})
             result['next_page'] = None
         elif not is_json:
-            result = failure_result(_TRANSPORT_FAILURE)
+            result = failure_result(transport_failure)
         else:
             # JSON of the wrong shape: keep the status and counters, and GitHub's message if any.
             result = shape_failure(envelope(resp.status_code, resp.headers, None), 'a JSON object with data or errors')

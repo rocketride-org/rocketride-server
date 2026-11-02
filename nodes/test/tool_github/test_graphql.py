@@ -302,6 +302,31 @@ def test_mutation_is_sent_when_read_only_is_off(node):
     assert node.request.call_args.kwargs['json'] == {'query': MUTATION}
 
 
+@pytest.mark.parametrize('query', [VIEWER, MUTATION])
+@pytest.mark.parametrize('failure', ['timeout', 'connection', 'invalid-json', 'response-cap'])
+def test_ambiguous_mutation_outcome_does_not_advise_blind_retry(node, query, failure):
+    node.inst.IGlobal.read_only = False
+    if failure in {'timeout', 'connection'}:
+        error = requests.Timeout if failure == 'timeout' else requests.ConnectionError
+        node.request.side_effect = error(TOKEN)
+    elif failure == 'invalid-json':
+        node.request.return_value = gql_response(raw=f'not JSON: {TOKEN}'.encode())
+    else:
+        node.inst.IGlobal.graphql_max_bytes = 1024
+        node.request.return_value = gql_response({'data': {'large': 'x' * 2048}})
+    result = node.inst.graphql({'query': query})
+    assert result['status'] is None
+    assert TOKEN not in json.dumps(result)
+    assert node.request.call_count == 1
+    node.sleep.assert_not_called()
+    if query == MUTATION:
+        assert 'mutation may already have been applied' in result['message']
+        assert 'Check its current state before retrying' in result['message']
+        assert 'Check connectivity and retry' not in result['message']
+    else:
+        assert 'mutation may already have been applied' not in result['message']
+
+
 def test_oversized_response_is_an_error_naming_the_cap_and_is_not_read_in_full(node):
     node.inst.IGlobal.graphql_max_bytes = 1024
     body = json.dumps({'data': {'blob': 'x' * (640 * 1024)}}).encode()

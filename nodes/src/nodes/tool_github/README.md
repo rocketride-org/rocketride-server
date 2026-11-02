@@ -433,6 +433,10 @@ apply it twice: the node retries only answers GitHub rejected before running any
 returned, not retried, and transport failures, where a request may have reached GitHub,
 are never retried.
 
+When a mutation's response is lost, invalid JSON, or over the response cap, its result
+warns that the mutation may already have been applied. Check the affected resource's
+current state before retrying; a missing response does not mean the write failed.
+
 The other tools, `file_get` (both its reads) included, keep their original policy:
 three attempts, waits capped at 30 seconds, a longer requested wait fails at once, and
 failures raise.
