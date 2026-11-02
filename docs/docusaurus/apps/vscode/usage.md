@@ -95,3 +95,13 @@ When enabled, the Copilot and Cursor integrations provide:
 - Pipeline optimization tips.
 
 Enable these in settings under `rocketride.integrations.copilot` and `rocketride.integrations.cursor`.
+
+### Automatic Agent Integration
+
+Automatic agent integration (`rocketride.integrations.autoAgentIntegration`) is **off by default**. When you enable it, RocketRide detects the coding agents you use on startup: Copilot (only when the `GitHub.copilot` or `GitHub.copilot-chat` extension is installed), Cursor, Windsurf, and Claude Code. For each one it finds, it writes into the workspace:
+
+- `.rocketride/docs/`, the RocketRide reference docs for agents.
+- The agent's stub file, for example `.github/copilot-instructions.md`.
+- `.gitignore` entries for `.rocketride/` and `.env`.
+
+Turn it on with the **Automatic Agent Integration** checkbox on the Welcome page or in Settings.

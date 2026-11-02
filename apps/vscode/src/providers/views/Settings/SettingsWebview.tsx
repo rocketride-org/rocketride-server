@@ -492,7 +492,7 @@ export const Settings: React.FC = () => {
 		taskArguments: '',
 		pipelineDebugOutput: false,
 		envVars: {},
-		autoAgentIntegration: true,
+		autoAgentIntegration: false,
 		integrationCopilot: false,
 		integrationClaudeCode: false,
 		integrationCursor: false,

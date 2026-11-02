@@ -235,7 +235,7 @@ export class WelcomeProvider {
 				pipelineTraceLevel: config.pipelineTraceLevel,
 				taskArguments: config.taskArguments,
 				pipelineDebugOutput: config.pipelineDebugOutput,
-				autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', true),
+				autoAgentIntegration: workspaceConfig.get('integrations.autoAgentIntegration', false),
 				integrationCopilot: workspaceConfig.get('integrations.copilot', false),
 				integrationClaudeCode: workspaceConfig.get('integrations.claudeCode', false),
 				integrationCursor: workspaceConfig.get('integrations.cursor', false),

@@ -155,7 +155,7 @@ const DEFAULT_SETTINGS: SettingsData = {
 	taskArguments: '',
 	pipelineDebugOutput: false,
 	envVars: {},
-	autoAgentIntegration: true,
+	autoAgentIntegration: false,
 	integrationCopilot: false,
 	integrationClaudeCode: false,
 	integrationCursor: false,

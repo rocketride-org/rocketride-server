@@ -111,7 +111,7 @@ export class AgentManager {
 	private async runAutoInstall(workspaceRoot: vscode.Uri): Promise<void> {
 		const logger = getLogger();
 		const workspaceConfig = vscode.workspace.getConfiguration('rocketride');
-		const autoDetect = workspaceConfig.get<boolean>('integrations.autoAgentIntegration', true);
+		const autoDetect = workspaceConfig.get<boolean>('integrations.autoAgentIntegration', false);
 
 		// Track which installers have already been run so we don't double-install
 		const installed = new Set<string>();

@@ -341,9 +341,9 @@ function makeTestAction() {
 		description: 'Testing vscode',
 		run: async (ctx, task) => {
 			const testFiles = (await glob('src/test/*.test.ts', { cwd: APP_ROOT, nodir: true }))
-				// extension.test.ts requires the real extension-host-only `vscode` module.
+				// These suites require the real extension-host-only `vscode` module.
 				// Compare basenames: glob yields backslash-separated paths on Windows.
-				.filter((file) => path.basename(file) !== 'extension.test.ts')
+				.filter((file) => !['extension.test.ts', 'agent-manager.test.ts'].includes(path.basename(file)))
 				.sort();
 
 			// Fail rather than pass silently: this target exists because these tests
