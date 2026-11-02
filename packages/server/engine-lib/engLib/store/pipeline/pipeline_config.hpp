@@ -30,7 +30,7 @@ namespace engine::store::pipeline {
  */
 class PipelineConfig {
 public:
-    explicit PipelineConfig(json::Value root = {}) noexcept;
+    ROCKETRIDE_CORE_API explicit PipelineConfig(json::Value root = {}) noexcept;
 
     json::Value &root() noexcept { return m_root; }
     void setRoot(json::Value root) noexcept;

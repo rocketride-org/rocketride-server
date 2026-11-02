@@ -91,6 +91,6 @@ struct Stats {
     }
 };
 
-ErrorOr<Stats> stats() noexcept;
+ROCKETRIDE_CORE_API ErrorOr<Stats> stats() noexcept;
 
 }  // namespace ap::memory

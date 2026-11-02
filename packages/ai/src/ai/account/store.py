@@ -38,6 +38,12 @@ class StorageError(Exception):
     pass
 
 
+class StorageNotFoundError(StorageError):
+    """The file does not exist. Raised by every provider so callers can tell
+    a missing file from a read that failed.
+    """
+
+
 class VersionMismatchError(StorageError):
     """
     Exception raised when a version mismatch is detected during atomic operations.

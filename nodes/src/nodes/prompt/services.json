@@ -92,6 +92,7 @@
 	//
 	"test": {
 		"profiles": ["default"],
+		"requiresHardware": false,
 		"cases": [
 			{
 				"questions": {

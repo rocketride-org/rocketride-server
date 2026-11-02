@@ -307,6 +307,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65535, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-2.5-flash' instead.",
 				"apikey": ""
 			},
 			"models-gemini-2-5-flash-lite-batch": {
@@ -315,6 +317,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65535, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-2.5-flash-lite' instead.",
 				"apikey": ""
 			},
 			"models-gemini-2-5-pro-batch": {
@@ -323,6 +327,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-2.5-pro' instead.",
 				"apikey": ""
 			},
 			"models-gemini-3-1-flash-lite-batch": {
@@ -331,6 +337,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.1-flash-lite' instead.",
 				"apikey": ""
 			},
 			"models-gemini-3-1-pro-preview-batch": {
@@ -339,6 +347,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.1-pro-preview' instead.",
 				"apikey": ""
 			},
 			"models-gemini-3-5-flash-batch": {
@@ -347,6 +357,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.5-flash' instead.",
 				"apikey": ""
 			},
 			"models-gemini-3-5-flash-lite-batch": {
@@ -355,6 +367,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.5-flash-lite' instead.",
 				"apikey": ""
 			},
 			"models-gemini-3-6-flash-batch": {
@@ -363,6 +377,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.6-flash' instead.",
 				"apikey": ""
 			},
 			"models-gemini-3-7-flash": {
@@ -379,6 +395,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.7-flash' instead.",
 				"apikey": ""
 			},
 			"models-gemini-3-8-flash": {
@@ -395,6 +413,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3.8-flash' instead.",
 				"apikey": ""
 			},
 			"models-gemini-3-flash-preview-batch": {
@@ -403,6 +423,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 65536, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the Gemini API serves no model with this ID. Please use 'models/gemini-3-flash-preview' instead.",
 				"apikey": ""
 			}
 		}

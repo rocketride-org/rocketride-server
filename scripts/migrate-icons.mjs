@@ -27,18 +27,12 @@ import { readFile, writeFile, readdir, unlink, mkdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readJson } from './lib/fs.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 const NODES_DIR = path.join(REPO_ROOT, 'nodes', 'src', 'nodes');
-const LEGACY_DIR = path.join(
-	REPO_ROOT,
-	'packages',
-	'shared',
-	'src',
-	'assets',
-	'nodes',
-);
+const LEGACY_DIR = path.join(REPO_ROOT, 'packages', 'shared', 'src', 'assets', 'nodes');
 const FALLBACK_TARGET = path.join(NODES_DIR, 'core');
 const FALLBACK_NAME = 'unknown.svg';
 
@@ -51,14 +45,6 @@ function rel(p) {
  * Good enough for the service JSON files in this repo, which only use
  * top-of-file comments and trailing commas inside arrays/objects.
  */
-function parseJsonc(text) {
-	const stripped = text
-		.replace(/\/\*[\s\S]*?\*\//g, '')
-		.replace(/(^|[^:"'])\/\/[^\n]*/g, '$1')
-		.replace(/,(\s*[}\]])/g, '$1');
-	return JSON.parse(stripped);
-}
-
 async function* walk(dir) {
 	let entries;
 	try {
@@ -108,16 +94,10 @@ function collectIcons(node, into) {
 }
 
 for (const jsonFile of serviceJsonFiles) {
-	let parsed;
-	try {
-		parsed = parseJsonc(await readFile(jsonFile, 'utf8'));
-	} catch (e) {
-		console.warn(`! skipping invalid JSON ${rel(jsonFile)}: ${e.message}`);
-		continue;
-	}
+	const data = await readJson(jsonFile);
 	const dir = path.dirname(jsonFile);
 	const icons = [];
-	collectIcons(parsed, icons);
+	collectIcons(data, icons);
 	for (const iconValue of icons) {
 		if (/^(https?|ftp):\/\//i.test(iconValue)) continue;
 		// `iconValue` is used as a destination filename in path.join(targetDir,

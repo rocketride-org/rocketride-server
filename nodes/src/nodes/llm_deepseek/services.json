@@ -326,6 +326,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 943718, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the DeepSeek API serves no model with this ID. Please use 'deepseek-v4-flash-0731' instead.",
 				"capabilities": {
 					"reasoning": true
 				},
@@ -370,6 +372,8 @@
 				"modelSource": "openrouter",
 				"modelTotalTokens": 1048576, // openrouter
 				"modelOutputTokens": 943718, // openrouter
+				"deprecated": true,
+				"migration": "OpenRouter batch routing alias — the DeepSeek API serves no model with this ID. Please use 'deepseek-v4-pro-0813' instead.",
 				"capabilities": {
 					"reasoning": true
 				},

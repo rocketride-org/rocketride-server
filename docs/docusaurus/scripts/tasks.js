@@ -9,7 +9,19 @@
  */
 const path = require('path');
 const { readdir } = require('node:fs/promises');
-const { execCommand, exists, mkdir, rm, setState, parallel, runPytest, isWindows, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
+const {
+	execCommand,
+	exists,
+	mkdir,
+	rm,
+	setState,
+	parallel,
+	runPytest,
+	isWindows,
+	PROJECT_ROOT,
+	BUILD_ROOT,
+	DIST_ROOT,
+} = require('../../../scripts/lib');
 
 // Light, in-tree reference generators that deposit before gather collects them.
 // Heavier emitters (Python SDKs, engine) refresh via their own :build under
@@ -47,7 +59,14 @@ function makeGatherAction(mode = 'copy') {
 	return {
 		run: async (ctx, task) => {
 			const { gather, assertNoUnexpectedPlaceholders } = require('./lib/gather');
-			const manifest = await gather({ projectRoot: PROJECT_ROOT, contentStaticDir: CONTENT_STATIC_DIR, contentDir: CONTENT_DIR, staticDir: STATIC_DIR, mode, task });
+			const manifest = await gather({
+				projectRoot: PROJECT_ROOT,
+				contentStaticDir: CONTENT_STATIC_DIR,
+				contentDir: CONTENT_DIR,
+				staticDir: STATIC_DIR,
+				mode,
+				task,
+			});
 			// Guardrail: an unexpected placeholder means a spine id and a file path
 			// drifted apart, which otherwise publishes a live "coming soon" URL in
 			// silence. Fails docs:build (and so CI) instead.
@@ -78,7 +97,11 @@ function makeCompileAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
 			await mkdir(SITE_OUT);
-			await execCommand('pnpm', ['exec', 'docusaurus', 'build', '--out-dir', SITE_OUT], { task, cwd: DOCS_DIR, env: docsEnv(options) });
+			await execCommand('pnpm', ['exec', 'docusaurus', 'build', '--out-dir', SITE_OUT], {
+				task,
+				cwd: DOCS_DIR,
+				env: docsEnv(options),
+			});
 			task.output = `Built docs site at ${SITE_OUT}`;
 		},
 	};
@@ -87,7 +110,12 @@ function makeCompileAction(options = {}) {
 function makeDevStartAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			await execCommand('pnpm', ['exec', 'docusaurus', 'start'], { task, cwd: DOCS_DIR, env: docsEnv(options), stdio: 'inherit' });
+			await execCommand('pnpm', ['exec', 'docusaurus', 'start'], {
+				task,
+				cwd: DOCS_DIR,
+				env: docsEnv(options),
+				stdio: 'inherit',
+			});
 		},
 	};
 }
@@ -108,7 +136,11 @@ function makeServeAction() {
 			if (!(await exists(SITE_OUT))) {
 				throw new Error(`No built docs at ${SITE_OUT}. Run 'builder docs:build' first.`);
 			}
-			await execCommand('pnpm', ['exec', 'docusaurus', 'serve', '--dir', SITE_OUT, '--port', '3000'], { task, cwd: DOCS_DIR, stdio: 'inherit' });
+			await execCommand('pnpm', ['exec', 'docusaurus', 'serve', '--dir', SITE_OUT, '--port', '3000'], {
+				task,
+				cwd: DOCS_DIR,
+				stdio: 'inherit',
+			});
 		},
 	};
 }
@@ -144,6 +176,31 @@ function makeTestAction() {
 	};
 }
 
+/** True when `cmd -c <code>` exits 0, with `cmd` resolved exactly as execCommand will run it. */
+async function pythonRuns(cmd, code) {
+	try {
+		await execCommand(cmd, ['-c', code], { cwd: PROJECT_ROOT, stdio: 'ignore', silent: true });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * The Python docs:validate runs under: the built engine, like every other
+ * pytest task, else the first working Python 3.10+ on PATH, because
+ * docs-schemas.yml runs on a clean checkout with no engine.
+ */
+async function resolvePython() {
+	if (await exists(ENGINE + (isWindows() ? '.exe' : ''))) return ENGINE;
+	// Run each candidate rather than look it up: on Windows either name can be
+	// a Microsoft Store stub that sits on PATH and only prints an install hint.
+	for (const cmd of ['python3', 'python']) {
+		if (await pythonRuns(cmd, 'import sys; sys.exit(sys.version_info < (3, 10))')) return cmd;
+	}
+	throw new Error(`docs:validate: no Python 3.10+ found (tried ${ENGINE}, python3, python)`);
+}
+
 /**
  * docs:validate — the deterministic documentation checks, run as a builder
  * task so `docs:test` (and therefore `./builder test`) carries them; CI does
@@ -156,29 +213,31 @@ function makeValidateAction() {
 	return {
 		description: 'Validate documentation schemas',
 		run: async (ctx, task) => {
+			const python = await resolvePython();
+
 			// 1. client-doc parity — blocking
-			await execCommand('python3', ['scripts/validate-client-docs.py'], { task, cwd: PROJECT_ROOT });
+			await execCommand(python, ['scripts/validate-client-docs.py'], { task, cwd: PROJECT_ROOT });
 
 			// 2. the whole node corpus — blocking now that it is clean
-			await execCommand('python3', ['scripts/validate-node-readme.py', '--all', 'nodes/src/nodes'], { task, cwd: PROJECT_ROOT });
+			await execCommand(python, ['scripts/validate-node-readme.py', '--all', 'nodes/src/nodes'], {
+				task,
+				cwd: PROJECT_ROOT,
+			});
 
 			// 3. the validator's own regression tests — the only per-PR gate on
 			// scripts/validate-node-readme.py itself; nodes:test also runs this
 			// file, but nothing in .github/workflows invokes nodes:test.
-			// Run them under the engine's Python like every other pytest task:
-			// a bare `python3` is whatever the runner has on PATH, and the
-			// Windows CI interpreter ships without pytest. docs:validate also
-			// runs where no engine is built (docs-schemas.yml, a clean
-			// checkout), so skip there instead of failing on ENOENT; the full
-			// build jobs still exercise the tests. nodes:test keeps hard-failing
-			// on a missing engine, which is why this guard is local.
+			// The engine carries pytest; a PATH Python may not (docs-schemas.yml
+			// installs it), so skip there instead of failing on the import.
 			const testsFile = path.join(PROJECT_ROOT, 'tests', 'test_validate_node_readme.py');
-			if (!(await exists(ENGINE + (isWindows() ? '.exe' : '')))) {
-				task.output = `pytest: engine not built at ${ENGINE}, skipping ${path.relative(PROJECT_ROOT, testsFile)} (run server:build to include it)`;
+			if (python !== ENGINE && !(await pythonRuns(python, 'import pytest'))) {
+				task.output =
+					`pytest: not installed for ${python}, skipping ${path.relative(PROJECT_ROOT, testsFile)} ` +
+					'(install pytest, or run server:build to use the engine)';
 				return;
 			}
 			await runPytest({
-				engine: ENGINE,
+				engine: python,
 				testsDir: testsFile,
 				execOpts: { task, cwd: PROJECT_ROOT },
 			});
@@ -204,7 +263,10 @@ function makeCheckAction() {
 			const { exportDocs } = require('./lib/export');
 			const { drifted } = await exportDocs({ projectRoot: PROJECT_ROOT, check: true, task });
 			if (drifted.length) {
-				throw new Error(`docs:check: exported copies are out of sync:\n${drifted.map((d) => `  ${d}`).join('\n')}\nRun './builder docs:export' to refresh them.`);
+				throw new Error(
+					`docs:check: exported copies are out of sync:\n${drifted.map((d) => `  ${d}`).join('\n')}\n` +
+						"Run './builder docs:export' to refresh them."
+				);
 			}
 			task.output = 'Docs exports in sync';
 		},
@@ -258,7 +320,13 @@ module.exports = {
 		{
 			name: 'docs:build',
 			action: () => ({
-				steps: [parallel(DOC_GENERATORS, 'Generate reference docs'), 'docs:gather', 'docs:release-notes', 'docs:index', 'docs:compile'],
+				steps: [
+					parallel(DOC_GENERATORS, 'Generate reference docs'),
+					'docs:gather',
+					'docs:release-notes',
+					'docs:index',
+					'docs:compile',
+				],
 			}),
 		},
 

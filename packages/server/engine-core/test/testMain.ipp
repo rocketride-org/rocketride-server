@@ -81,21 +81,28 @@ private:
 
 CATCH_REGISTER_LISTENER(Listener)
 
+#if ROCKETRIDE_PLAT_UNX
+#include <sys/wait.h>
+#endif
+
 namespace ap::application {
 
 Error TestMain() noexcept {
     // Crash-test hook: a fresh process re-exec'd by the "crashpad" test (see
-    // test/plat/unx/minidump.cpp) registers the out-of-process handler and either
-    // faults or exits cleanly, so the parent can verify dump recovery without the
-    // fork-in-a-threaded-process deadlock a plain fork() would hit.
+    // test/plat/unx/minidump.cpp) registers the out-of-process handler (if run
+    // with --dumps) and either faults or exits cleanly, so the parent can
+    // verify dump recovery without the fork-in-a-threaded-process deadlock a
+    // plain fork() would hit.
 #if ROCKETRIDE_PLAT_UNX
     if (auto mode = plat::env("RR_CRASH_CHILD")) {
         plat::minidumpRegister();
-        if (mode == "crash") {
-            // A null-pointer deref is intercepted by AddressSanitizer (it reports
-            // and _exit()s), so the child would exit rather than die by signal and
-            // WIFSIGNALED would fail. Under ASan use std::abort(): SIGABRT isn't
-            // intercepted and Crashpad still catches it. Plain deref otherwise.
+
+        auto crash = [] {
+            // A null-pointer deref is intercepted by AddressSanitizer (it
+            // reports and _exit()s), so the child would exit rather than die by
+            // signal and WIFSIGNALED would fail. Under ASan use std::abort():
+            // SIGABRT isn't intercepted and Crashpad still catches it. Plain
+            // deref otherwise.
 #if defined(__SANITIZE_ADDRESS__)
             std::abort();
 #elif defined(__has_feature)
@@ -109,6 +116,24 @@ Error TestMain() noexcept {
             volatile int* p = nullptr;
             *p = 1;
 #endif
+        };
+
+        if (mode == "crash") crash();
+
+        if (mode == "forkcrash") {
+            // A fork without exec crashes first, then this process. abort(), not
+            // a fault: the forked copy has no signal listener thread, so the
+            // engine's SIGSEGV handler would re-fault forever.
+            auto pid = ::fork();
+            if (pid == 0) std::abort();
+
+            // No fork, or the copy did not crash: exit cleanly so the parent's
+            // WIFSIGNALED check fails instead of passing on our dump alone.
+            int status{};
+            if (pid < 0 || ::waitpid(pid, &status, 0) != pid
+                || !WIFSIGNALED(status))
+                ap::application::quickExit(1);
+            crash();
         }
         ap::application::quickExit(0);
     }

@@ -23,6 +23,11 @@
 
 #include <engLib/eng.h>
 
+// Members are defined out of the header, so every task level is instantiated
+// below; add new levels there or linking fails
+#include "pipetask.output.ipp"
+#include "pipetask.process.ipp"
+
 namespace engine::task {
 //-------------------------------------------------------------------------
 /// @details
@@ -37,4 +42,12 @@ Error IPipeTask<LvlT>::setThreadCount(uint32_t threadCount) {
     m_threadCount = threadCount;
     return {};
 }
+
+template class IPipeTask<Lvl::JobAction>;
+template class IPipeTask<Lvl::JobClassify>;
+template class IPipeTask<Lvl::JobInstance>;
+template class IPipeTask<Lvl::JobPermissions>;
+template class IPipeTask<Lvl::JobPipeline>;
+template class IPipeTask<Lvl::JobScan>;
+template class IPipeTask<Lvl::JobStat>;
 }  // namespace engine::task

@@ -35,6 +35,7 @@ Command surface (kept in exact parity with the TypeScript client's CLI):
     store dir/type/write/...   File store operations
     app create/deploy/verify   App lifecycle
     deploy add/list/publish/.. Deploy lifecycle (deployment target)
+    profile run/start/tree/..  Profile the server process or a pipeline
 
 All output is plain, line-oriented text; every command also accepts
 ``--json`` / ``--json=<file>`` for a machine-readable result. Continuous
@@ -376,6 +377,74 @@ def setup_parser() -> argparse.ArgumentParser:
         help='Always exit 0 on a successful run, even when changes are found (non-gating)',
     )
 
+    # ── profile ──────────────────────────────────────────────────────────
+    # Number options stay strings here: profile.py validates them, with the
+    # same messages and exit code as the TypeScript CLI (argparse would exit 2)
+    profile_parser = subparsers.add_parser('profile', help='Profile the server process or a pipeline')
+    profile_subparsers = profile_parser.add_subparsers(
+        dest='profile_subcommand', help='Profile commands', metavar='COMMAND'
+    )
+    # Unlike the task commands, no ROCKETRIDE_TOKEN default: a missing --token
+    # means the server process, and the environment must not switch that silently
+    token_help = 'Task token of the pipeline to profile (default: the server process)'
+    session_help = 'Session name shown in the report (default: session_<timestamp>)'
+
+    p_start = profile_subparsers.add_parser(
+        'start', help='Start profiling a pipeline and return; stop it with profile stop'
+    )
+    _add_connection_args(p_start)
+    p_start.add_argument('--token', help='Task token of the pipeline to profile (required)')
+    p_start.add_argument('--session', help=session_help)
+
+    p_stop = profile_subparsers.add_parser('stop', help='Stop profiling a pipeline')
+    _add_connection_args(p_stop)
+    p_stop.add_argument('--token', help='Task token of the pipeline being profiled (required)')
+
+    p_run = profile_subparsers.add_parser(
+        'run', help='Profile until Ctrl+C or --duration, then stop; the way to profile the server process'
+    )
+    _add_connection_args(p_run)
+    p_run.add_argument('--token', help=token_help)
+    p_run.add_argument('--session', help=session_help)
+    p_run.add_argument('--duration', help='Stop after this many seconds (default: at Ctrl+C)')
+
+    p_status = profile_subparsers.add_parser('status', help='Show whether a profiling session is active')
+    _add_connection_args(p_status)
+    p_status.add_argument('--token', help=token_help)
+
+    p_list = profile_subparsers.add_parser(
+        'list', help='Show the profiling status of the server process and of every task'
+    )
+    _add_connection_args(p_list)
+    p_list.add_argument('--active', action='store_true', help='Only the processes being profiled')
+
+    p_report = profile_subparsers.add_parser('report', help='Print the text report of the last session')
+    _add_connection_args(p_report)
+    p_report.add_argument('--token', help=token_help)
+
+    p_threads = profile_subparsers.add_parser('threads', help='List the threads of the last session, busiest first')
+    _add_connection_args(p_threads)
+    p_threads.add_argument('--token', help=token_help)
+
+    p_tree = profile_subparsers.add_parser('tree', help='Print the call tree of the last session')
+    _add_connection_args(p_tree)
+    p_tree.add_argument('--token', help=token_help)
+    p_tree.add_argument('--thread', help="Thread id from the ID column of 'profile threads' (default: all threads)")
+    p_tree.add_argument(
+        '--min-pct',
+        dest='min_pct',
+        default='0.1',
+        help='Hide calls below this share of the total time (default: %(default)s)',
+    )
+    p_tree.add_argument('--max-depth', dest='max_depth', default='50', help='Maximum tree depth (default: %(default)s)')
+    p_tree.add_argument(
+        '--include-system',
+        dest='include_system',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Keep stdlib and other system functions; --no-include-system hides them, keeping the project code they call',
+    )
+
     # ── store ────────────────────────────────────────────────────────────
     store_parser = subparsers.add_parser('store', help='File store operations')
     store_subparsers = store_parser.add_subparsers(dest='store_subcommand', help='Store commands', metavar='COMMAND')
@@ -423,13 +492,15 @@ def setup_parser() -> argparse.ArgumentParser:
     app_deploy_parser.add_argument('--verbose', action='store_true', help='Narrate every pack step')
 
     app_create_parser = app_subparsers.add_parser(
-        'create', help='Scaffold a new app under ./apps/<slug> (same templates as the App Builder wizard)'
+        'create', help='Scaffold a new app under ./apps/<slug>-ui (same templates as the App Builder wizard)'
     )
     _add_connection_args(app_create_parser)
     app_create_parser.add_argument('slug', help='App slug')
     app_create_parser.add_argument('--template', default='Blank', help='Template: Blank or Dashboard')
     app_create_parser.add_argument('--name', help='Display name (default: title-cased slug)')
-    app_create_parser.add_argument('--developer', help="Developer id for <developerId>.<slug> (default: 'local')")
+    app_create_parser.add_argument(
+        '--developer', help="Developer id for <developerId>.<slug> (default: the connected account's, else 'local')"
+    )
     app_create_parser.add_argument('--sidebar', action='store_true', help='Two-column layout with a navigation sidebar')
     app_create_parser.add_argument(
         '--no-status-footer', dest='status_footer', action='store_false', help='Omit the bottom status bar'
@@ -567,6 +638,7 @@ async def _dispatch(args) -> int:
     from .commands.deploy import run_deploy
     from .commands.diff import run_diff
     from .commands.otel import run_otel
+    from .commands.profile import run_profile
     from .commands.store import run_store
     from .commands.tasks import run_list, run_start, run_stop, run_upload
     from .commands.validate import run_validate
@@ -589,6 +661,14 @@ async def _dispatch(args) -> int:
         return await run_otel(args)
     if args.command == 'diff':
         return await run_diff(args)
+    if args.command == 'profile':
+        if not getattr(args, 'profile_subcommand', None):
+            print(
+                'Error: Profile subcommand is required (start, stop, run, status, list, report, threads, tree)',
+                file=sys.stderr,
+            )
+            return 1
+        return await run_profile(args)
     if args.command == 'store':
         if not getattr(args, 'store_subcommand', None):
             print('Error: Store subcommand is required (dir, type, write, rm, mkdir, stat)', file=sys.stderr)
@@ -614,12 +694,28 @@ async def _dispatch(args) -> int:
     return 1
 
 
+# Commands that never connect to the engine and read no configuration.
+_LOCAL_ONLY_COMMANDS = frozenset({'diff'})
+
+
+def _is_local_only_command(argv: list) -> bool:
+    """
+    Report whether ``argv`` (without the program name) runs a local-only command.
+
+    The top-level parser defines no options that take a value, so the first
+    argument that is not an option is the command name.
+    """
+    command = next((arg for arg in argv if not arg.startswith('-')), None)
+    return command in _LOCAL_ONLY_COMMANDS
+
+
 def main() -> None:
     """
     Entry point for the CLI application.
 
-    Loads the workspace ``.env`` (real environment wins), parses the
-    command line, dispatches, and exits with the command's code.
+    Loads the workspace ``.env`` (real environment wins) unless the command
+    is local-only, parses the command line, dispatches, and exits with the
+    command's code.
     """
     # Tolerate Unicode output on non-Unicode consoles, which would otherwise
     # abort the command with UnicodeEncodeError.
@@ -631,8 +727,13 @@ def main() -> None:
             pass
 
     # The workspace .env must be in os.environ BEFORE the parser is
-    # built — argparse defaults read it at construction time
-    load_dot_env()
+    # built — argparse defaults read it at construction time. Local-only
+    # commands take no configuration, so they skip it: a .env they would not
+    # use must not be able to change what they compare or break them. That
+    # includes a NO_COLOR set only in the .env, which `diff` therefore ignores
+    # (a NO_COLOR in the shell still applies).
+    if not _is_local_only_command(sys.argv[1:]):
+        load_dot_env()
 
     parser = setup_parser()
     args = parser.parse_args()

@@ -38,6 +38,7 @@ WEAVIATE_COLLECTION_RE = re.compile(r'^[A-Z][_0-9A-Za-z]*$')
 
 class IGlobal(StoreGlobalBase):
     serverName: str = 'weaviate'
+    credential_fields = ('apikey',)
 
     def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
         """Return the driver's Store, imported lazily so config mode never loads the driver."""

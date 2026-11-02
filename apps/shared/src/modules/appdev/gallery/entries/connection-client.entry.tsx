@@ -34,13 +34,13 @@ export const connectionClientEntry: IGalleryEntry = {
 	name: 'Connection & client',
 	group: 'hooks',
 	blurb: 'The ONE connection: the shell-owned ConnectionManager singleton, the shared RocketRideClient it serves, and the hooks apps use to reach both.',
-	doc: `The shell exclusively owns auth and the client — apps never construct a \`RocketRideClient\` or wire their own connection. Everything flows from the \`ConnectionManager\` singleton the shell initializes at boot:
+	doc: `The shell exclusively owns auth and the client. Apps never construct a \`RocketRideClient\` or wire their own connection. Everything flows from the \`ConnectionManager\` singleton the shell initializes at boot:
 
-- \`useShellConnection()\` — the everyday hook: the client, \`isConnected\`, and the transient status message, re-rendering on change.
-- \`useClient()\` — just the client (null until connected); \`getClient()\` is the non-React accessor for callbacks and module code.
-- \`useConnectionStatus()\` — the full state machine (\`ConnectionState\`, mode, retry attempt, last error) for connection-aware UI beyond a boolean.
+- \`useShellConnection()\`: the everyday hook (the client, \`isConnected\`, and the transient status message), re-rendering on change.
+- \`useClient()\`: just the client (null until connected); \`getClient()\` is the non-React accessor for callbacks and module code.
+- \`useConnectionStatus()\`: the full state machine (\`ConnectionState\`, mode, retry attempt, last error) for connection-aware UI beyond a boolean.
 
-All client traffic is DAP over the one WebSocket — there is no per-feature HTTP.`,
+All client traffic is DAP over the one WebSocket; there is no per-feature HTTP.`,
 	docNote: 'Apps NEVER initialize the ConnectionManager, construct clients, or handle auth - that is shell bootstrap. Consume the connection; do not create it.',
 	code: `import { useShellConnection, useClient, getClient, Button } from 'shell';
 

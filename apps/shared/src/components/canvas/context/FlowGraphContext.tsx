@@ -1038,8 +1038,8 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 		const unconfigured = loadData(currentProject);
 		if (unconfigured > 0) {
 			setConfigSnackbar(unconfigured === 1
-				? '1 node needs configuration — look for the red gear'
-				: `${unconfigured} nodes need configuration — look for the red gear`);
+				? '1 node needs configuration. Look for the red gear'
+				: `${unconfigured} nodes need configuration. Look for the red gear`);
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [incomingVersion, incomingProjectId]);
@@ -1088,8 +1088,8 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 		if (unconfigured > 0) {
 			setConfigSnackbar(unconfigured === 1
-				? '1 node needs configuration — look for the red gear'
-				: `${unconfigured} nodes need configuration — look for the red gear`);
+				? '1 node needs configuration. Look for the red gear'
+				: `${unconfigured} nodes need configuration. Look for the red gear`);
 		}
 
 		// Force handle re-registration — invoke-target handles depend on

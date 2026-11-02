@@ -80,7 +80,7 @@ const LatencyPanel: React.FC<Props> = ({ samples }) => {
 								transition: 'height 0.2s',
 								cursor: 'default',
 							}}
-							title={`${fmtMs(s.value)}${s.source ? ` — ${s.source}` : ''}`}
+							title={`${fmtMs(s.value)}${s.source ? ` (${s.source})` : ''}`}
 						/>
 					))}
 				</div>

@@ -31,7 +31,7 @@ has: ``db_arango`` is multi-model and ``db_hydradb`` retrieves natively, so
 neither follows the natural-language-to-query loop this base implements.
 """
 
-from .cypher_safety import is_cypher_safe
+from .cypher_safety import is_cypher_safe, strip_cypher_literals
 from .graph_global_base import DEFAULT_MAX_EXECUTE_ROWS, GraphGlobalBase
 from .graph_instance_base import DEFAULT_ROW_LIMIT, GraphInstanceBase
 
@@ -41,4 +41,5 @@ __all__ = [
     'GraphGlobalBase',
     'GraphInstanceBase',
     'is_cypher_safe',
+    'strip_cypher_literals',
 ]

@@ -273,7 +273,7 @@ function formatClock(time: string): string {
 function summaryWording(state: PickerState): string {
 	switch (state.kind) {
 		case 'demand':
-			return 'On demand — runs only when you trigger it';
+			return 'On demand: runs only when you trigger it';
 		case 'interval':
 			return state.intervalN === 1 ? `Runs every ${state.intervalUnit.slice(0, -1)}` : `Runs every ${state.intervalN} ${state.intervalUnit}`;
 		case 'daily':
@@ -436,7 +436,7 @@ export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, s
 			<DetailPanel
 				open={open}
 				onClose={onClose}
-				title={`Schedule — ${pipelineName ? `${pipelineName}/` : ''}${sourceName || sourceId}`}
+				title={`Schedule: ${pipelineName ? `${pipelineName}/` : ''}${sourceName || sourceId}`}
 				subtitle={`When this source's deployed pipeline runs on ${teamName}, and how long each run stays up.`}
 				busy={busy}
 				dirty={dirty}
@@ -590,7 +590,7 @@ export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, s
 							<span style={S.radio(runFor === 'finish')} />
 							<div style={{ flex: 1 }}>
 								<div style={S.optionTitle}>Until the pipeline finishes</div>
-								<div style={S.optionSub}>The task ends when the source completes — right for batch sources.</div>
+								<div style={S.optionSub}>The task ends when the source completes. Right for batch sources.</div>
 							</div>
 						</div>
 						<div
@@ -618,10 +618,10 @@ export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, s
 											<option value="minutes">minutes</option>
 											<option value="hours">hours</option>
 										</select>
-										then shut down — essential for endpoint-style sources that never terminate on their own.
+										then shut down. Essential for endpoint-style sources that never terminate on their own.
 									</div>
 								) : (
-									<div style={S.optionSub}>Stay up for a set window, then shut down — endpoint-style sources that never terminate on their own.</div>
+									<div style={S.optionSub}>Stay up for a set window, then shut down. For endpoint-style sources that never terminate on their own.</div>
 								)}
 							</div>
 						</div>
@@ -668,7 +668,7 @@ export const SchedulePanel: React.FC<ISchedulePanelProps> = ({ open, sourceId, s
 			{clearConfirm && (
 				<ConfirmDialog
 					title={`Stop scheduling ${sourceName || sourceId}?`}
-					message="On demand removes the schedule — the source stops firing automatically and only runs when triggered."
+					message="On demand removes the schedule: the source stops firing automatically and only runs when triggered."
 					confirmLabel="Save"
 					cancelLabel="Cancel"
 					onConfirm={() => {

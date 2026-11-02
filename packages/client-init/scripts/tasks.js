@@ -37,7 +37,22 @@
  */
 const path = require('path');
 const { glob } = require('glob');
-const { execCommand, exists, mkdir, rm, removeDirAndParents, setState, syncDir, formatSyncStats, hasSourceChanged, saveSourceHash, copyFile, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
+const {
+	execCommand,
+	exists,
+	mkdir,
+	rm,
+	removeDirAndParents,
+	setState,
+	syncDir,
+	formatSyncStats,
+	hasSourceChanged,
+	saveSourceHash,
+	copyFile,
+	PROJECT_ROOT,
+	BUILD_ROOT,
+	DIST_ROOT,
+} = require('../../../scripts/lib');
 
 const PACKAGE_DIR = path.join(__dirname, '..', 'typescript');
 const OUT_DIR = path.join(BUILD_ROOT, 'client-init');

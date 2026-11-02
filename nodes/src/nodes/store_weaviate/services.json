@@ -182,7 +182,7 @@
 		"weaviate.serverName": {
 			"type": "string",
 			"title": "Tool Server Name",
-			"description": "Namespace for agent-facing tool names, e.g. 'weaviate' exposes tools as weaviate.search / weaviate.upsert / weaviate.delete. Change this when running multiple Weaviate nodes in the same pipeline so their tool names do not collide.",
+			"description": "Label for this store in tool-response messages (for example, a refused write names weaviate.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "weaviate",
 			"minLength": 1
 		},

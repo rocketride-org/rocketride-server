@@ -23,17 +23,22 @@ The node uses the lightweight `chromadb-client` HTTP client and creates the coll
 
 ## As a tool
 
-The configured tool server name is the namespace for the functions below; it defaults to `chroma`.
+Pipeline agents address the functions below as `<node id>.<function>`. The configured tool server name (default `chroma`) labels tool-response messages.
 
 | Function | Description |
 | --- | --- |
 | `search` | Search the collection for matching documents. |
+| `objdir` | Lists the distinct parent paths of active documents in the collection as a map of parent path to one object ID each; accepts optional `parent` (exact match), `offset`, and `limit` (default and cap 1000). `offset` and `limit` count documents, not paths: documents that share a parent path appear as one entry, so a page can hold fewer than `limit` entries while more follow. |
+| `get` | Returns up to `limit` chunks (default and cap 100) of one document by `object_id`, ordered by chunk ID, with `total`, `has_more`, and `truncated`; an object ID the store does not hold, or one in the trash, returns a failure object. |
+| `stats` | Returns the collection's count as this store reports it, `document_count` (null on this store, which does not list documents), the embedding model name, and the vector size. |
 | `upsert` | Add or update documents in the collection. |
 | `delete` | Remove documents by object ID. |
+| `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash, keeping their chunks; the reply echoes the distinct IDs, and `matched_chunks` is the number of chunks the store matched (0 when none exists). |
+| `restore` | Takes the documents of a non-empty `object_ids` array out of the trash; the reply echoes the distinct IDs and the numeric `matched_chunks` count, as for `soft_delete`. A document removed with `delete` cannot be restored. |
 
-`search` and an `upsert` without a supplied embedding use the node's bound embedding provider. These calls are separate from the data lanes, so a pipeline embedding upstream does not by itself provide vectors to a tool call. Use different server names when an agent has access to multiple Chroma nodes.
+`search` and an `upsert` without a supplied embedding use the node's bound embedding provider. These calls are separate from the data lanes, so a pipeline embedding upstream does not by itself provide vectors to a tool call. Agents distinguish multiple Chroma nodes by their pipeline node IDs.
 
-`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`, defaulting to `"vectordb_tool"`, `"/"` and `0` respectively.
+`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`; `nodeId` defaults to `"vectordb_tool"`, `parent` to `"/"`, and `chunkId` to the document's position among the chunks sent for its object ID in the call (0 for the first), and an explicit `chunkId` may not repeat within the call.
 
 ## Profiles
 
@@ -86,7 +91,7 @@ Use the bound provider for an agent that must add or search information without 
 
 ### Tool Server Name
 
-This value namespaces the agent functions: `chroma.search`, `chroma.upsert`, and `chroma.delete` by default. Change it for distinct Chroma stores exposed to the same agent.
+The name defaults to `chroma` and labels this store in tool-response messages. Pipeline agents address all eight functions listed above by node ID, for example `<node id>.search` or `<node id>.restore`; changing this label does not change those addresses.
 
 ## Authentication
 
@@ -130,7 +135,7 @@ Agent semantic search and automatic tool upserts require the node's bound embedd
 | `chroma.database` | `string` | **Database**<br/>Chroma Cloud database name (required for Chroma Cloud, optional for self-hosted multi-tenant servers) | `""` |
 | `chroma.profile` | `string` | **Type of chroma host**<br/>Connect to... | `"local"` |
 | `chroma.provider` | `string` |  | const: `"chroma"` |
-| `chroma.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'chroma' exposes tools as chroma.search / chroma.upsert / chroma.delete. Change this when running multiple Chroma nodes in the same pipeline so their tool names do not collide. | `"chroma"` |
+| `chroma.serverName` | `string` | **Tool Server Name**<br/>Label for this store in tool-response messages (for example, a refused write names chroma.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings. | `"chroma"` |
 | `chroma.ssl` | `boolean` | **Use TLS**<br/>Connect over HTTPS. Required for Chroma Cloud, which serves HTTPS only. Turn it off for a self-hosted server reached over plain HTTP. | `true` |
 | `chroma.tenant` | `string` | **Tenant**<br/>Chroma Cloud tenant id (required for Chroma Cloud, optional for self-hosted multi-tenant servers) | `""` |
 | `vector.cloud.host` |  | Enter the server IP address e.g. <your-instance-url> |  |

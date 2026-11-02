@@ -5,7 +5,7 @@ envelope, a synthesized result-column list, prepared-statement parameter
 binding, and agtype result decoding — plus a firewall and a dialect gate for
 the version gaps. This package is that translation, as a **pure transform**
 (no database access), so graph nodes targeting the RocketRide cloud data-core
-(PG16 + AGE 1.5.0) can speak Cypher end to end.
+(PG16 + AGE 1.5.0 or 1.6.0) can speak Cypher end to end.
 
 ## Pipeline
 
@@ -16,11 +16,16 @@ the version gaps. This package is that translation, as a **pure transform**
    not regex. Extracts RETURN projection, write clauses, `$params`,
    variable-length depth bounds, invoked functions.
 2. **Firewall** ([firewall.py](firewall.py)) — resource caps on **both**
-   paths (query length, variable-length depth, statement timeout); semantic
+   paths (query length, variable-length depth, statement timeout, size of the
+   bound `$parameter` JSON — values bound as params skip the parser and the
+   query-length cap; a prepared statement survives ROLLBACK, so the caller
+   frees it inside the transaction when EXECUTE fails, see
+   `TranslatedQuery.prepared_name`); semantic
    read-only rules (no writes, no CALL) on the **safe** path only.
 3. **Dialect** ([capabilities.py](capabilities.py)) — capability table keyed
-   by AGE version: `SUPPORTED` / `EMULATE` (rewrite hook; framework only in
-   v1) / `REJECT` (fail loud pre-flight) / `TBD` (unverified: passes through,
+   by AGE version (`1.5.0`, `1.6.0`; any other version gets the strictest,
+   `1.5.0`): `SUPPORTED` / `EMULATE` (same-meaning rewrite, re-analyzed
+   before emit) / `REJECT` (fail loud pre-flight) / `TBD` (unverified: passes through,
    AGE's own error surfaces via EXPLAIN/execute). Verify TBD cells against
    the live instance and promote them.
 4. **Emit** ([emit.py](emit.py)) — `cypher()` envelope with a
@@ -58,6 +63,62 @@ Probed against a container on the live pin (PG 16.14 + AGE 1.5.0 + pgvector
   execute CREATE TABLE in a read-only transaction").
 - `datetime()` does not exist on 1.5.0 (`ag_catalog.age_datetime` missing)
   → capability REJECT.
+- `SET` / `REMOVE` / `DELETE` reach only the **first** entity a `MERGE`
+  creates in a statement; changes to every other entity a MERGE creates are
+  **not stored** while `RETURN` shows them: the 2nd and later rows of an
+  `UNWIND` or multi-row `MATCH`, the entity of a second MERGE, the far node and
+  the edge of a path MERGE (an edge a MERGE creates never keeps a SET), and
+  repeated SETs on a created node. Entities a MERGE *matched*, variables bound
+  before the first MERGE, and properties inside the MERGE pattern are stored.
+  → capability REJECT (`merge_write`): after the first MERGE, a write may only
+  target a variable bound before it, or the node of a single-node MERGE that
+  opens the query while no `MATCH`/`UNWIND`/`CALL` has multiplied rows (one
+  row, so it is the first entity created). The bulk-upsert form is MERGE, then
+  a separate `UNWIND $rows ... MATCH ... SET` call.
+- MERGE matches on every property in its pattern: with an edge `{prop: 1}`
+  already present, `MERGE (a)-[:REL {prop: 2}]->(b)` creates a second edge. So
+  the rejection message points to a separate `SET` call first.
+- An empty-list `x IN []` (also `[ /*c*/ ]`, `([])`) matches every row; under
+  `NOT`, `AND` or in `RETURN` it fails with `cache lookup failed for type 0`.
+  An empty list passed as a `$parameter` evaluates correctly → capability
+  EMULATE (`empty_list_in`), rewritten to `false`; the query keeps its
+  `$parameter` names, so a removed `$who IN []` does not break the params check.
+- `UNWIND $rows AS r MERGE (:L {id: r.id})` creates one node per row even
+  when rows repeat a key (MERGE does not see nodes created earlier in the
+  same statement): de-duplicate the list before binding it.
+
+## Verified AGE 1.6.0 mechanics
+
+Probed against the datacore image built for 1.6.0 (PG 16.15 + AGE 1.6.0,
+rocketride-saas#814) and `apache/age:release_PG16_1.6.0`:
+
+- Writes after a `MERGE` reach every entity it creates: later `UNWIND` /
+  `MATCH` rows, a second MERGE, the nodes and edge of a path MERGE, `REMOVE`
+  and `DELETE`. `UNWIND ... MERGE` with repeated keys no longer duplicates.
+- When one entity receives several writes in one statement — a
+  `MATCH`/`UNWIND`/`CALL` after it repeats the write once per row, or two rows
+  reach it — AGE keeps only one of them (usually the first; standard Cypher
+  keeps the last). The same holds on 1.5.0, and for entities bound by `MATCH`
+  or `CREATE`. → capability REJECT (`merge_write` in the 1.6.0 table) for the
+  shapes the query text shows: a `MATCH`/`UNWIND`/`CALL` between a MERGE and a
+  write to what it introduced, or a write to a MERGE entity whose key does not
+  change with every `MATCH`/`UNWIND`/`CALL` before the MERGE. A fixed key such
+  as `{name: 'acme'}`, a value from an earlier step, or one side of a cross
+  product repeats across the rows of a later step, so the same entity is
+  written several times. Repeated keys in the data cannot be seen in the text:
+  keep keys unique within one batch.
+- Unchanged from 1.5.0: `x IN []`, `ORDER BY` an alias, `datetime()`, and the
+  syntax gaps (`ON CREATE SET`, `WHERE n:Label`, multi-label, `shortestPath`).
+  AGE's PG16 branch fixes `x IN []` and `ORDER BY` an alias after 1.6.0, in no
+  release yet.
+- A database opened by the 1.6.0 library keeps reporting `1.5.0` in
+  `pg_extension.extversion` until `ALTER EXTENSION age UPDATE TO '1.6.0'` runs,
+  although it already behaves as 1.6.0. The node reads `extversion`, so such a
+  database keeps the strict 1.5.0 rules until the update.
+
+The canary tests in `nodes/test/test_rocketride_graph_full.py` run each shape
+on AGE directly and record what each version stores: when one fails after an
+AGE upgrade, the engine changed and its capability cell needs a look.
 
 ## Vendored code
 
@@ -95,6 +156,5 @@ antlr4 -v 4.13.2 -Dlanguage=Python3 -visitor -o _agtype/gen _agtype/Agtype.g4
   (`syntax error at or near ...`) while plain `MERGE` on the same graph
   succeeds, so all four are promoted to `REJECT` with actionable messages.
   No `TBD` cells remain in the 1.5.0 table.
-- `EMULATE` rewrites (framework hook exists, no emulations implemented).
 - Capability routing to FalkorDB/Neo4j for AGE-can't-do workloads (own
   effort, per the design).

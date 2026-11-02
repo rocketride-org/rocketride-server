@@ -18,15 +18,8 @@ target_link_libraries(engLib PRIVATE zstd::libzstd)
 find_package(cpprestsdk CONFIG REQUIRED)
 target_link_libraries(engLib PRIVATE cpprestsdk::cpprest)
 rocketride_reexport_library_defines(engLib cpprestsdk::cpprest)
-
-find_package(aws-cpp-sdk-core CONFIG REQUIRED)
-find_package(aws-cpp-sdk-s3 CONFIG REQUIRED)
-find_package(aws-cpp-sdk-transfer CONFIG REQUIRED)
-target_link_libraries(engLib PRIVATE aws-cpp-sdk-core aws-cpp-sdk-s3 aws-cpp-sdk-transfer)
-rocketride_reexport_library_defines(engLib aws-cpp-sdk-core aws-cpp-sdk-s3 aws-cpp-sdk-transfer)
-# AWS_ENABLE_IO_COMPLETION_PORTS is not listed in aws-cpp-sdk-core defines,
-# but it's required to link the engLib PCH to the engine, so we define it manually.
-target_compile_definitions(engLib PUBLIC AWS_ENABLE_IO_COMPLETION_PORTS)
+# Disable platform strings, this prevents cpprest from defining the U macro
+target_compile_definitions(engLib PUBLIC -D_TURN_OFF_PLATFORM_STRING=1)
 
 # Find package has issues when attempting to find our interpreter
 # so we set it up ourselves
@@ -42,10 +35,6 @@ set(Python3_Interpreter_FOUND TRUE)
 # for the development end
 find_package(Python3 COMPONENTS Interpreter Development REQUIRED)
 target_link_libraries(engLib PUBLIC Python3::Python)
-
-find_package(azure-identity-cpp CONFIG REQUIRED)
-find_package(azure-storage-blobs-cpp CONFIG REQUIRED)
-target_link_libraries(engLib PUBLIC Azure::azure-identity Azure::azure-storage-blobs)
 
 # Find pybind11 module with CMake
 find_package(pybind11 REQUIRED)
@@ -63,15 +52,15 @@ endif()
 find_package(LibXml2 REQUIRED)
 target_link_libraries(engLib PUBLIC LibXml2::LibXml2)
 
-# classify_api.h lives in engine-lib/include/ (public header for the classify DLL ABI)
-target_include_directories(engLib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../include)
-
 # Link to platform libs
 if(ROCKETRIDE_PLAT_LIN)
     # target_link_libraries(engLib PUBLIC /usr/lib/x86_64-linux-gnu/libfuse.a dl)
 elseif(ROCKETRIDE_PLAT_WIN)
     target_link_libraries(engLib PUBLIC Activeds.lib ADSIid.lib WinHTTP.lib httpapi.lib)
     target_link_libraries(engLib PUBLIC ws2_32.lib iphlpapi.lib rpcrt4.lib WebServices.lib)
+    # Version.lib backs plat::fileVersion - it used to arrive through the AWS
+    # SDK, which now lives in the objstore node
+    target_link_libraries(engLib PUBLIC Version.lib)
 endif()
 
 target_link_libraries(engLib PUBLIC apLib)
@@ -79,10 +68,6 @@ target_link_libraries(engLib PUBLIC apLib)
 if(ROCKETRIDE_PLAT_MAC)
     target_link_libraries(engLib PUBLIC compression)
 endif()
-
-# Disable export definitions on the azure sdk otherwise it tries to dll import on us
-# Disable platform strings this prevents the U macro from being defined
-target_compile_definitions(engLib PUBLIC -D_NO_WASTORAGE_API=1 -D_TURN_OFF_PLATFORM_STRING=1)
 
 # Register our own public include paths for dependencies linking to engLib with
 # un-ambiguous include paths e.g. <engLib/eng.h>

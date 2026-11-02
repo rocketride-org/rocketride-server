@@ -366,7 +366,7 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 					{/* URL with auth (query) — easier for apps that cannot set headers */}
 					<div style={styles.configItem}>
 						<div style={styles.configLabel}>URL with auth (query)</div>
-						<div style={styles.envHint}>(e.g. /chat?auth=pk_...) — use when you cannot send an Authorization header.</div>
+						<div style={styles.envHint}>(e.g. /chat?auth=pk_...). Use when you cannot send an Authorization header.</div>
 						<div style={styles.configValueRow}>
 							<div style={styles.configValueLink} title={urlWithAuth}>
 								<a
@@ -442,7 +442,7 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 											This pipeline reads <strong>{connectedLanes.join(', ')}</strong>.{!readsChosenLane && <> Nothing reads the {payload.lane} lane, so this body is answered 200 OK but reaches no component.</>}
 										</>
 									) : (
-										<> Pick the lane your first component reads — a body sent on a lane nothing reads is answered 200 OK but reaches no component.</>
+										<> Pick the lane your first component reads. A body sent on a lane nothing reads is answered 200 OK but reaches no component.</>
 									)}
 								</div>
 							</>

@@ -14,8 +14,9 @@ than from the app.
 
 - **A running pipeline with a database node.** Connections are discovered
   from running tasks, so a stopped pipeline has none. The supported nodes
-  are [`db_mysql`](../../nodes/src/nodes/db_mysql/README.md), [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md) and
-  [`db_clickhouse`](../../nodes/src/nodes/db_clickhouse/README.md).
+  are [`db_mysql`](../../nodes/src/nodes/db_mysql/README.md), [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md),
+  [`db_clickhouse`](../../nodes/src/nodes/db_clickhouse/README.md) and
+  [`rocketride_sql`](../../nodes/src/nodes/rocketride_sql/README.md).
 - **Direct execution, if you want to run statements.** Each of those nodes
   has an **Allow direct query execution** setting (`allow_execute`), off by
   default and worth leaving off until a caller truly needs it. With it off,
@@ -81,7 +82,7 @@ to run:
 
 Before you press anything, the line under the editor names what a run would
 send: `Will run: statement 2 of 3 (lines 4–6)`, or `Will run: selection
-(lines 2–3)`, or `Will run: nothing — editor is empty`. The editor highlight
+(lines 2–3)`, or `Will run: nothing (editor is empty)`. The editor highlight
 and that line always agree. After a batch, a strip above the results carries
 one entry per statement, and selecting an entry shows that statement's rows.
 
@@ -358,8 +359,8 @@ at all, so these sections say `ClickHouse declares no foreign keys; join
 paths are unavailable.`
 
 **Open as query** writes the join into a new query document. Generated SQL
-is never run for you: the document opens under the banner `Generated preview
-— review, then Run`, and the statement carries `-- generated from declared
+is never run for you: the document opens under the banner `Generated preview:
+review, then Run`, and the statement carries `-- generated from declared
 foreign keys; review before running`. The banner clears on your first edit
 or run.
 
@@ -465,8 +466,9 @@ statements ran either way; only the app's picture of the schema is behind.
 
 ## Next steps
 
-- [`db_mysql`](../../nodes/src/nodes/db_mysql/README.md), [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md) and
-  [`db_clickhouse`](../../nodes/src/nodes/db_clickhouse/README.md): the nodes behind every
+- [`db_mysql`](../../nodes/src/nodes/db_mysql/README.md), [`db_postgres`](../../nodes/src/nodes/db_postgres/README.md),
+  [`db_clickhouse`](../../nodes/src/nodes/db_clickhouse/README.md) and
+  [`rocketride_sql`](../../nodes/src/nodes/rocketride_sql/README.md): the nodes behind every
   connection, including the tool surface and the direct-execution setting.
 - [Apps](../../docs/public/product/concepts/apps.md): what an app is and how it reaches your engine.
 - [Shell API](../../docs/public/product/guides/apps/index.md): the framework SQL Explorer is built on, when

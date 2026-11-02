@@ -168,7 +168,7 @@ class IInstance(IInstanceBase):
     # -----------------------------------------------------------------------
 
     def _token(self) -> str:
-        return self.IGlobal.token
+        return self.IGlobal.get_token()
 
     def _repo(self, args: dict) -> str:
         repo = (args.get('repo') or self.IGlobal.default_repo or '').strip()
@@ -208,8 +208,10 @@ class IInstance(IInstanceBase):
         repo = self._repo(args)
         path = require_str(args, 'path', tool_name='file_get')
         params = {'ref': args['ref']} if args.get('ref') else None
+        # Mint the token outside the try: a 404 from the token endpoint is not a missing file.
+        token = self._token()
         try:
-            data = call(self._token(), 'GET', f'/repos/{repo}/contents/{path.lstrip("/")}', params=params)
+            data = call(token, 'GET', f'/repos/{repo}/contents/{path.lstrip("/")}', params=params)
         except GitHubAPIError as e:
             if e.status_code == 404:
                 return {'found': False, 'message': str(e)}
@@ -1046,7 +1048,10 @@ class IInstance(IInstanceBase):
                 'page': {'type': 'integer', 'description': _PAGE_DESC},
             },
         },
-        description="List repositories for a user. Omit username to list the authenticated user's repos.",
+        description=(
+            "List repositories for a user. Omit username to list the authenticated user's repos "
+            '(PAT) or the repositories the App installation can access (GitHub App auth).'
+        ),
     )
     def user_get_repos(self, args):
         args = normalize_tool_input(args, tool_name='tool_github')
@@ -1056,6 +1061,12 @@ class IInstance(IInstanceBase):
             'per_page': max(1, min(int(args.get('per_page') or 30), 100)),
             'page': max(1, int(args.get('page') or 1)),
         }
+        if not username and self.IGlobal.auth_type == 'app':
+            # An installation token has no user, so GET /user/repos is 403; list the
+            # installation's repositories instead (no `type` filter on that endpoint).
+            params.pop('type', None)
+            data = call(self._token(), 'GET', '/installation/repositories', params=params)
+            return [clean_repo(r) for r in data.get('repositories', [])]
         path = f'/users/{username}/repos' if username else '/user/repos'
         data = call(self._token(), 'GET', path, params=params)
         return [clean_repo(r) for r in data]

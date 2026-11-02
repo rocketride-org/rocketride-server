@@ -279,7 +279,7 @@ class CProfileCommands(DAPConn):
                   all threads when omitted
 
         Returns:
-            Dict[str, Any]: DAP response with tree, total_time, total_calls
+            Dict[str, Any]: DAP response with tree, functions, total_time, total_calls
 
         Usage Example:
         { "command": "rrext_cprofile_report_tree", "arguments": { "max_depth": 30, "min_pct": 0.5 } }

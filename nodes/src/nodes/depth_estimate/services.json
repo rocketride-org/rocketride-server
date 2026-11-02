@@ -65,6 +65,7 @@
 	],
 	"test": {
 		"profiles": ["v2-small"],
+		"requiresHardware": { "cuda": { "vramGb": 2 }, "mps": { "ramGb": 4 }, "cpu": { "ramGb": 4 } },
 		"outputs": ["text"],
 		"timeout": 120,
 		"cases": [
@@ -79,6 +80,7 @@
 	},
 	"fulltest": {
 		"profiles": ["v2-small"],
+		"requiresHardware": { "cuda": { "vramGb": 2 }, "mps": { "ramGb": 4 }, "cpu": { "ramGb": 4 } },
 		"outputs": ["text"],
 		"timeout": 120,
 		"cases": [

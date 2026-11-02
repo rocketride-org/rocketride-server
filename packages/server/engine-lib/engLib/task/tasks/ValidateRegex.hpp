@@ -23,18 +23,12 @@
 
 #pragma once
 
-#include <engLib/store/filters/classify/classifyDllLoader.hpp>
-
 namespace engine::task::validateRegex {
-
-using namespace engine::store::filter::classifyLoader;
-
 //-------------------------------------------------------------------------
 /// @details
-///		Define the  task interface class which is the basis of all jobs
-///		in the engine
-/// 		Validate currently checks either:
-///				PCRE regex [APPLAT-1056]
+///		Validates a PCRE regex. Not implemented: the
+///		validation relied on the removed classification engine,
+///		so it should be reimplemented if needed
 //-------------------------------------------------------------------------
 class Task : public ITask {
 public:
@@ -56,123 +50,11 @@ public:
 protected:
     //-----------------------------------------------------------------
     /// @details
-    ///		Report the validation results via the >INF
-    ///	@param[in] 	result
-    ///		The results to send back
-    //-----------------------------------------------------------------
-    void reportValidationResult(const json::Value &result) noexcept {
-        ASSERT_MSG(result.isMember("valid"), "Validation result is not valid",
-                   result);
-        MONITOR(info, "result", result);
-    }
-
-    //-----------------------------------------------------------------
-    /// @details
-    ///		Reports validation failure to monitor; includes
-    ///		the error chain. Return an empty error for easy chaining
-    ///	@param[in] 	errorCode
-    ///		The error code string
-    ///	@param[in] 	errorMessage
-    ///		The error message
-    ///	@param[in] 	errorOffset
-    ///		Optional offset where the error occurred
-    //-----------------------------------------------------------------
-    Error reportValidationFailed(TextView errorCode, TextView errorMessage,
-                                 Opt<int> errorOffset = std::nullopt) noexcept {
-        LOGT("Regular expression is invalid:", errorMessage);
-
-        json::Value result;
-        result["valid"] = false;
-        result["error"] = _tj(errorCode);
-        result["explanation"] = _tj(errorMessage);
-
-        if (errorOffset) result["position"] = *errorOffset;
-
-        reportValidationResult(result);
-        return {};
-    }
-
-    //-----------------------------------------------------------------
-    /// @details
-    ///		Reports validation failure to monitor; includes
-    ///		the error chain. Return an empty error for easy chaining
-    ///	@param[in] 	ccode;
-    ///		The error code to return
-    //-----------------------------------------------------------------
-    void reportValidationSucceeded() noexcept {
-        LOGT("Regular expression is valid");
-
-        json::Value result;
-        result["valid"] = true;
-
-        reportValidationResult(result);
-    }
-
-    //-----------------------------------------------------------------
-    /// @details
     ///		Execute the task
     //-----------------------------------------------------------------
     Error exec() noexcept override {
-        auto &config = jobConfig();
-        auto regex = config["config"].lookup<Text>("regex");
-        LOGT("Validating regex:", regex);
-
-        // Ensure classification DLL is loaded
-        auto &loader = classifyDll();
-        if (!loader.isLoaded()) {
-            if (auto ccode = loader.init())
-                return APERRT(ccode, "Failed to load classification DLL");
-        }
-
-        const ClassifyApi *api = loader.api();
-        if (!api)
-            return APERRT(Ec::Classify, "Classification API not available");
-
-        // Create engine for validation
-        ClassifyEngineHandle engine = nullptr;
-        const char *configJson = R"({"policies": []})";
-
-        // Pass execDir and cachePath separately (DLL can't access host's
-        // application/config)
-        ClassifyResult result = api->engine_create(
-            configJson, CLASSIFY_FLAG_NONE, Text{application::execDir()}.data(),
-            Text{config::paths().cache}.data(), &engine);
-        if (result != CLASSIFY_OK) {
-            const char *error = api->get_last_error();
-            return APERRT(Ec::Classify,
-                          "Failed to create classification engine",
-                          error ? error : "unknown error");
-        }
-
-        // Validate the regex using the DLL
-        result = api->validate_regex(engine, regex.c_str());
-
-        // Destroy engine (we're done with it)
-        api->engine_destroy(engine);
-
-        if (result == CLASSIFY_OK) {
-            // Regex is valid
-            reportValidationSucceeded();
-        } else if (result == CLASSIFY_ERR_INVALID_PARAM) {
-            // Regex is invalid - get error message via get_last_error
-            const char *error = api->get_last_error();
-            Text errorMessage = error ? error : "Invalid regex";
-            LOGT("Classify regex validation failed:", errorMessage);
-
-            // Try to parse position from error message if available
-            // Format may be: "error at position N: message"
-            Opt<int> errorOffset = std::nullopt;
-
-            reportValidationFailed("REGEX_INVALID"_tv, errorMessage,
-                                   errorOffset);
-        } else {
-            // Unexpected error
-            const char *lastError = api->get_last_error();
-            return APERRT(Ec::Classify, "Regex validation failed unexpectedly",
-                          lastError ? lastError : "unknown error");
-        }
-
-        return {};
+        return APERRT(Ec::NotSupported, "Regex validation is not implemented");
     }
 };
+
 }  // namespace engine::task::validateRegex

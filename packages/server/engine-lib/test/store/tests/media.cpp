@@ -39,10 +39,24 @@
 using engine::store::buildStreamDescriptor;
 
 TEST_CASE("store::media stream descriptor") {
-    IFilterTest filter({engine::store::filter::hash::Type});
-    REQUIRE_NO_ERROR(filter.connect());
+    // The builder is pure, so the Entry is set up directly here rather than
+    // taken from a filter stack. Field values mirror IFilterTest::getDummyEntry.
+    Entry entry(Url{"filesys://testdata/interview.mp4"_tv});
+    entry.objectId("obj1");
+    entry.version(1);
+    entry.flags(0);
+    entry.attrib(0);
+    entry.size(42);
+    entry.storeSize(0);
+    entry.createTime(1633452260);
+    entry.modifyTime(1633452261);
+    entry.accessTime(1633452262);
+    entry.componentId(
+        "fe3d866b27df4d6da5b5f6dc3340dd08bf76c99cc36cd0b5fdcc682084017f20484c6d"
+        "9ce2a66a6d3a08ed55f681c2ae44fe83bfe57e7e30e7f871b9a793b6b1");
+    entry.instanceId(2);
+    entry.wordBatchId(3);
 
-    Entry entry = filter.getDummyEntry("interview.mp4"_tv);
     Text nodeId = "node-7"_tv;
 
     //-----------------------------------------------------------------

@@ -180,7 +180,7 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 
 	/**
 	 * Auto-switch to the most relevant tab when results are available
-	 * Priority: text > tables > images > audio > video > results
+	 * Priority: text > tables > images > audio > video > hashes > results
 	 */
 	useEffect(() => {
 		if (results) {
@@ -194,6 +194,8 @@ export const DropperContainer: React.FC<{ authToken: string | null }> = ({ authT
 				setActiveTab('audio');
 			} else if (results.video.length > 0) {
 				setActiveTab('video');
+			} else if (results.hashes.length > 0) {
+				setActiveTab('hashes');
 			} else {
 				setActiveTab('results');
 			}

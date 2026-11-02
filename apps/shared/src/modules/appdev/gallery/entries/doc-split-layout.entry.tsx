@@ -34,7 +34,7 @@ export const docSplitLayoutEntry: IGalleryEntry = {
 	name: 'DocSplitLayout',
 	group: 'documents',
 	blurb: 'The recursive split-tree renderer for the client area: reads the layout tree from a Documents instance and renders nested resizable panes.',
-	doc: `\`DocSplitLayout\` walks the model's \`LayoutNode\` tree and renders one resizable pane (allotment) per leaf, calling \`renderPane(groupId)\` for each. The app supplies the pane body — typically a \`DocTabs\` strip bound to the group plus the editor for its active document. Drag-resizes are debounced back into the model (\`updateSplitSizes\`), so pane sizes persist with the workspace.`,
+	doc: `\`DocSplitLayout\` walks the model's \`LayoutNode\` tree and renders one resizable pane (allotment) per leaf, calling \`renderPane(groupId)\` for each. The app supplies the pane body: typically a \`DocTabs\` strip bound to the group plus the editor for its active document. Drag-resizes are debounced back into the model (\`updateSplitSizes\`), so pane sizes persist with the workspace.`,
 	docNote: 'The layout tree lives in the Documents model, not in this component - splitting and closing panes are MODEL operations (splitGroup / closeGroup), usually triggered from DocTabs callbacks.',
 	code: `import { Documents, DocTabs, DocSplitLayout } from 'shell';
 

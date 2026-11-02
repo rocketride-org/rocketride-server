@@ -28,19 +28,6 @@
 
 namespace ap::async {
 
-// Initialize upon instantiation our main thread id
-static Tid MainThreadId = threadId();
-
-inline Atomic<bool> &globalCancelFlag() noexcept {
-    static Atomic<bool> flag;
-    return flag;
-}
-
-inline Atomic<time::Duration> &globalCancelFailsafe() noexcept {
-    static Atomic<time::Duration> duration{10s};
-    return duration;
-}
-
 // Sleep for the given duration
 inline void sleep(time::Duration wait) noexcept {
     // Do the wait
@@ -151,7 +138,5 @@ inline void setCurrentThreadName(TextView name) noexcept {
 inline auto getCurrentThreadName() noexcept {
     return ThreadApi::thisCtx()->name();
 }
-
-inline bool isMainThread() noexcept { return MainThreadId == threadId(); }
 
 }  // namespace ap::async

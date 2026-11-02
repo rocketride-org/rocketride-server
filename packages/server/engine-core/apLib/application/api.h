@@ -28,7 +28,7 @@ namespace ap::application {
 class CmdLine;
 
 [[noreturn]] void quickExit(int code = 0) noexcept;
-CmdLine &cmdline() noexcept;
+ROCKETRIDE_CORE_API CmdLine &cmdline() noexcept;
 int argc() noexcept;
 const char **argv() noexcept;
 const std::vector<Text> &args() noexcept;
@@ -44,7 +44,7 @@ int bootstrap(int argc, const Utf16Chr **argv, ErrorCode (*entry)()) noexcept;
 int bootstrap(int argc, const char **argv, ErrorCode (*entry)()) noexcept;
 #endif
 
-file::Path execPath(bool stripExec = false) noexcept;
+ROCKETRIDE_CORE_API file::Path execPath(bool stripExec = false) noexcept;
 inline auto execDir() noexcept { return execPath(true); }
 const file::Path &projectDir() noexcept;
 

@@ -71,6 +71,11 @@ contributor guides in the repo:
 - Contract tests: `./builder nodes:test`, plus
   `python3 scripts/validate-node-readme.py <node-dir>` for the README.
 
+A node you keep on your own engine stays there: an app published to the
+store may use catalog nodes only, so build the node for the catalog or keep
+the step in the app (see
+[Adding a pipeline to your app](/guides/apps/app-builder#adding-a-pipeline-to-your-app)).
+
 ## Contribute code
 
 1. Fork, then branch off `develop`. Branch names follow

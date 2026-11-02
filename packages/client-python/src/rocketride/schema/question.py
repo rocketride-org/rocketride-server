@@ -51,6 +51,7 @@ Advanced Usage:
 """
 
 import json
+import textwrap
 from enum import Enum
 from typing import Union, List, Dict, Optional, Any
 from pydantic import BaseModel, Field, field_validator
@@ -347,6 +348,7 @@ class Question(BaseModel):
         type: The type of question/query (semantic, keyword, etc.)
         filter: Controls which documents to search and how
         expectJson: Whether to return structured JSON data
+        cachePrefix: Whether the unchanging start of the prompt may be cached
         role: AI role/persona for the conversation
         instructions: List of custom instructions for the AI
         history: Previous conversation messages
@@ -365,6 +367,14 @@ class Question(BaseModel):
     )
     expectJson: Optional[bool] = Field(
         False, description='Set to True to get structured JSON responses instead of text.'
+    )
+    cachePrefix: Optional[bool] = Field(
+        False,
+        description=(
+            'Set to True when this prompt will be sent again with only its context, documents, goals or '
+            'questions changed (an agent loop). Providers that support prompt caching may then cache the '
+            'unchanging start of the prompt. Providers without it ignore this.'
+        ),
     )
     role: Optional[str] = Field(
         '', description='AI role or persona for the conversation (e.g., "You are a financial analyst").'
@@ -580,9 +590,14 @@ class Question(BaseModel):
             lines = ['### System Instructions:']
             for i, inst in enumerate(all_instructions, 1):
                 lines.append(f'    {i}) **{inst.subtitle.strip()}**:')
-                for line in inst.instructions.splitlines():
+                # Keep each line's indentation relative to its block, so a code example
+                # keeps its nesting. dedent removes only the indentation every non-blank
+                # line shares. It knows only \n as a line break, so every ending that
+                # splitlines() accepts (\r\n, a lone \r) is made \n first.
+                text = '\n'.join(inst.instructions.splitlines())
+                for line in textwrap.dedent(text).splitlines():
                     if line.strip():
-                        lines.append(f'        {line.strip()}')
+                        lines.append(f'        {line.rstrip()}')
                 lines.append('')  # blank line after each instruction
             parts.append(crlf.join(lines))
 

@@ -71,6 +71,18 @@ jobs:
             exit 1
           fi
 
+      # The node image is ~6 GB unpacked, and buildx keeps its own copy while
+      # building: the runner's root filesystem cannot hold both. /mnt can.
+      - name: Move Docker's data to /mnt
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /mnt/docker
+          conf=/etc/docker/daemon.json
+          { sudo cat "$conf" 2>/dev/null || echo '{}'; } | jq '. + {"data-root": "/mnt/docker"}' | sudo tee "$conf.new" >/dev/null
+          sudo mv "$conf.new" "$conf"
+          sudo systemctl restart docker
+          docker info --format 'docker data in {{.DockerRootDir}}'
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
@@ -81,12 +93,30 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The base the engine image (and the node image) is built FROM. Published
+      # under the same tag rules, so a pulled engine-base matches its engine.
+      # Its build runs the engine, so a tree without its runtime libs stops here.
+      - name: Build and push engine-base
+        id: base
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile.engine-base
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/rocketride-engine-base:${{ inputs.server_version }}${{ inputs.tag_suffix != '' && format('-{0}', inputs.tag_suffix) || (inputs.prerelease && '-prerelease' || '') }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.revision.outputs.sha }}
+
       - name: Build and push
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: docker/Dockerfile.engine
+          build-args: |
+            ENGINE_BASE=ghcr.io/${{ github.repository_owner }}/rocketride-engine-base@${{ steps.base.outputs.digest }}
           push: true
           platforms: linux/amd64
           # Three mutually exclusive shapes, in priority order:
@@ -173,4 +203,46 @@ jobs:
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
           IMAGE: ghcr.io/${{ github.repository_owner }}/rocketride-engine
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Sign engine-base with cosign
+        env:
+          DIGEST: ${{ steps.base.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/rocketride-engine-base
+        run: cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      # The image that runs one pipeline task. Never `latest`: a server starts
+      # tasks only from the node image of its own version, because the task
+      # protocol is not versioned.
+      - name: Build and push node image
+        id: node
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: docker/Dockerfile.node
+          build-args: |
+            ENGINE_BASE=ghcr.io/${{ github.repository_owner }}/rocketride-engine-base@${{ steps.base.outputs.digest }}
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/rocketride-node:${{ inputs.server_version }}${{ inputs.tag_suffix != '' && format('-{0}', inputs.tag_suffix) || (inputs.prerelease && '-prerelease' || '') }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.revision.outputs.sha }}
+
+      # Before signing, as for the engine image: a node image whose engine is
+      # dumpable, whose shipped constraints a container rejects, or whose cache
+      # cannot install a node offline should not acquire a signature.
+      - name: Check the node image
+        env:
+          DIGEST: ${{ steps.node.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/rocketride-node
+        run: |
+          set -euo pipefail
+          docker pull "${IMAGE}@${DIGEST}"
+          sh docker/test-node-image.sh "${IMAGE}@${DIGEST}"
+
+      - name: Sign node image with cosign
+        env:
+          DIGEST: ${{ steps.node.outputs.digest }}
+          IMAGE: ghcr.io/${{ github.repository_owner }}/rocketride-node
         run: cosign sign --yes "${IMAGE}@${DIGEST}"

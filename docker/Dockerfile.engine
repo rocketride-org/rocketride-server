@@ -3,33 +3,21 @@
 #
 # MIT License
 # Copyright (c) 2026 RocketRide
+#
+# Built FROM the engine-base image of the same version:
+#
+#   docker build -f docker/Dockerfile.engine-base -t rocketride/engine-base:<version> .
+#   docker build -f docker/Dockerfile.engine \
+#     --build-arg ENGINE_BASE=rocketride/engine-base:<version> .
 # ---------------------------------------------------------------------------
 
-# === Runtime stage =========================================================
-FROM ubuntu:jammy-20240808@sha256:adbb90115a21969d2fe6fa7f9af4253e16d45f8d4c1e930182610c4731962658
+ARG ENGINE_BASE=rocketride/engine-base:local
+FROM ${ENGINE_BASE}
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       ca-certificates \
-       curl \
-       libc++1 \
-       libc++abi1 \
-       libgomp1 \
-       libgles2 \
-       libegl1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd -r rocketride && useradd -r -g rocketride -d /opt/rocketride rocketride
+COPY --chown=rocketride:rocketride dist/server/static/ /opt/rocketride/static/
 
-COPY --chown=rocketride:rocketride dist/server/ /opt/rocketride/
-
-# Engine writes runtime data to /opt/data; create it writable for the
-# non-root user (root owns /opt) and persist it. See #1295.
-RUN mkdir -p /opt/data && chown -R rocketride:rocketride /opt/data
+# The server's task data persists; engine-base created it writable. See #1295.
 VOLUME /opt/data
-
-WORKDIR /opt/rocketride
-
-USER rocketride
 
 EXPOSE 5565
 

@@ -35,9 +35,10 @@ import numpy as np
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
+from rocketlib import warning
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
-from ai.common.store import DocumentStoreBase
+from ai.common.store import CONTROL_OBJECT_ID, DocumentStoreBase
 from ai.common.config import Config
 from .IGlobal import VALID_TABLE
 
@@ -57,8 +58,12 @@ SQL_QUERIES = {
     # fmt: on
     'count_documents': 'SELECT COUNT(*) FROM {collection}',
     'search_keyword': 'SELECT * FROM {collection} WHERE content LIKE %s {where_clause} LIMIT %s',
-    'get_documents': 'SELECT * FROM {collection} {where_clause} LIMIT %s',
-    'get_paths': 'SELECT parent, objectId FROM {collection} WHERE {where_clause} OFFSET %s LIMIT %s',
+    'get_documents': 'SELECT * FROM {collection} {where_clause} ORDER BY objectId, chunkId, id LIMIT %s OFFSET %s',
+    # One row per distinct parent (the first document under it), so offset and
+    # limit count paths, which is what the objdir tool pages over.
+    'get_paths': 'SELECT DISTINCT ON (parent) parent, objectId FROM {collection} WHERE {where_clause} ORDER BY parent, objectId, id OFFSET %s LIMIT %s',
+    'list_documents': 'SELECT objectId, MIN(parent), COUNT(*) FROM {collection} WHERE {where_clause} GROUP BY objectId ORDER BY objectId OFFSET %s LIMIT %s',
+    'count_listed_documents': 'SELECT COUNT(DISTINCT objectId) FROM {collection} WHERE {where_clause}',
     'insert_chunk': 'INSERT INTO {collection} ({columns}) VALUES ({placeholders})',
     'delete_by_object_ids': 'DELETE FROM {collection} WHERE objectId = ANY(%s)',
     'mark_deleted': 'UPDATE {collection} SET isDeleted = TRUE WHERE objectId = ANY(%s)',
@@ -68,7 +73,30 @@ SQL_QUERIES = {
 }
 
 
+# The writable columns defined by create_collection. DocMetadata carries
+# fields the table has no column for (signature, and anything its
+# extra='allow' config lets through), so an insert must take these only.
+CHUNK_COLUMNS = (
+    'content',
+    'objectId',
+    'nodeId',
+    'parent',
+    'permissionId',
+    'isDeleted',
+    'chunkId',
+    'isTable',
+    'tableId',
+    'vectorSize',
+    'modelName',
+    'embedding',
+)
+
+
 class Store(DocumentStoreBase):
+    # listDocuments and countDocuments below implement the optional listing
+    # of DocumentStoreBase, so the list_documents tool is offered on this store.
+    supports_document_listing = True
+
     apikey: str | None = None
     node: str = 'postgres'
     collection: str = ''
@@ -367,12 +395,74 @@ class Store(DocumentStoreBase):
         with self.client.cursor() as cur:
             cur.execute(
                 SQL_QUERIES['get_documents'].format(collection=self.collection, where_clause=where_sql),
-                params + [docFilter.limit],
+                params + [docFilter.limit, docFilter.offset],
             )
             results = cur.fetchall()
 
         points = [dict(zip([desc[0] for desc in cur.description], row)) for row in results]
         return self._convertToDocs(points)
+
+    def _listingFilter(self, parent: str | None, deleted: bool) -> tuple[str, list]:
+        """
+        Build the WHERE clause shared by listDocuments and countDocuments.
+
+        Selects the chunks in one state (active or soft-deleted) and never the
+        store's own control row, which carries isDeleted like a trashed document.
+        All values are bound parameters; the collection name is validated in __init__.
+        """
+        where_clauses = ['isDeleted = %s', 'objectId <> %s']
+        params: list = [bool(deleted), CONTROL_OBJECT_ID]
+        if parent is not None:
+            where_clauses.append('parent = %s')
+            params.append(parent)
+        return ' AND '.join(where_clauses), params
+
+    def listDocuments(
+        self, parent: str | None = None, offset: int = 0, limit: int = 100, deleted: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        List documents one by one, ordered by object ID.
+
+        @param parent: An exact parent path to filter on, or None for every path.
+        @param offset: The number of documents to skip.
+        @param limit: The maximum number of documents to return.
+        @param deleted: False lists active documents, True the soft-deleted ones.
+        @returns: One dict per document: object_id, parent (the lowest of its chunks' parents) and chunk_count.
+        """
+        if not self._doesCollectionExist():
+            return []
+
+        where_sql, params = self._listingFilter(parent, deleted)
+        with self.client.cursor() as cur:
+            cur.execute(
+                SQL_QUERIES['list_documents'].format(collection=self.collection, where_clause=where_sql),
+                params + [offset, limit],
+            )
+            rows = cur.fetchall()
+
+        return [
+            {'object_id': object_id, 'parent': parent_path, 'chunk_count': count}
+            for object_id, parent_path, count in rows
+        ]
+
+    def countDocuments(self, parent: str | None = None, deleted: bool = False) -> int:
+        """
+        Count the documents listDocuments pages through for the same filter.
+
+        @param parent: An exact parent path to filter on, or None for every path.
+        @param deleted: False counts active documents, True the soft-deleted ones.
+        @returns: The number of distinct object IDs.
+        """
+        if not self._doesCollectionExist():
+            return 0
+
+        where_sql, params = self._listingFilter(parent, deleted)
+        with self.client.cursor() as cur:
+            cur.execute(
+                SQL_QUERIES['count_listed_documents'].format(collection=self.collection, where_clause=where_sql),
+                params,
+            )
+            return cur.fetchone()[0]
 
     def getPaths(self, parent: str | None = None, offset: int = 0, limit: int = 1000) -> Dict[str, str]:
         """
@@ -386,7 +476,10 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return {}
 
-        where_clauses = ['chunkId = 0']
+        # Never the store's own control row or a soft-deleted document (both
+        # carry isDeleted). DISTINCT ON keeps one row per parent, so a document
+        # is listed whatever chunk IDs it has.
+        where_clauses = ['isDeleted = FALSE']
         params = []
 
         if parent is not None:
@@ -419,24 +512,38 @@ class Store(DocumentStoreBase):
             return
 
         objectIds = {chunk.metadata.objectId for chunk in chunks}
-        self.remove(list(objectIds))
-
-        with self.client.cursor() as cur:
-            for chunk in chunks:
-                data = {'content': chunk.page_content, **chunk.metadata.model_dump(), 'embedding': chunk.embedding}
-                if 'vectorSize' not in data or data['vectorSize'] is None:
-                    data['vectorSize'] = len(chunk.embedding) if chunk.embedding else 0
-                if 'modelName' not in data or data['modelName'] is None:
-                    data['modelName'] = ''
-                columns = ', '.join(data.keys())
-                placeholders = ', '.join(['%s'] * len(data))
-                cur.execute(
-                    SQL_QUERIES['insert_chunk'].format(
-                        collection=self.collection, columns=columns, placeholders=placeholders
-                    ),
-                    list(data.values()),
-                )
+        try:
+            with self.client.cursor() as cur:
+                # Replace in one transaction: an invalid new chunk must leave
+                # the previously stored document intact.
+                cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (list(objectIds),))
+                for chunk in chunks:
+                    data = {'content': chunk.page_content, **chunk.metadata.model_dump(), 'embedding': chunk.embedding}
+                    if 'vectorSize' not in data or data['vectorSize'] is None:
+                        data['vectorSize'] = len(chunk.embedding) if chunk.embedding else 0
+                    if 'modelName' not in data or data['modelName'] is None:
+                        data['modelName'] = ''
+                    # Only the table's columns: DocMetadata.model_dump() also
+                    # yields signature and any extra keys, which have none.
+                    data = {key: value for key, value in data.items() if key in CHUNK_COLUMNS}
+                    columns = ', '.join(data.keys())
+                    placeholders = ', '.join(['%s'] * len(data))
+                    cur.execute(
+                        SQL_QUERIES['insert_chunk'].format(
+                            collection=self.collection, columns=columns, placeholders=placeholders
+                        ),
+                        list(data.values()),
+                    )
             self.client.commit()
+        except Exception:
+            # Leave the connection usable: an aborted transaction would fail
+            # every later statement until it is rolled back. A rollback that
+            # fails itself (a broken connection) must not replace the write error.
+            try:
+                self.client.rollback()
+            except Exception as rollback_error:  # noqa: BLE001
+                warning(f'{self.collection}: rollback after a failed write also failed: {rollback_error}')
+            raise
 
     def remove(self, objectIds: List[str]) -> None:
         """
@@ -451,31 +558,43 @@ class Store(DocumentStoreBase):
             cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (objectIds,))
             self.client.commit()
 
-    def markDeleted(self, objectIds: List[str]) -> None:
+    def markDeleted(self, objectIds: List[str]) -> int | None:
         """
         Mark the set of documents with the given objectId as deleted.
 
         @param objectIds: A list of object IDs to mark as deleted.
+        @returns: The number of chunk rows matched (0 when none of the IDs exists or the collection does not),
+            or None when psycopg2 does not know the statement's row count.
         """
         if not self._doesCollectionExist():
-            return
+            return 0
 
         with self.client.cursor() as cur:
             cur.execute(SQL_QUERIES['mark_deleted'].format(collection=self.collection), (objectIds,))
+            matched = cur.rowcount
             self.client.commit()
+        # psycopg2 reports -1 when a statement's row count is not known; say so
+        # rather than claim no rows matched.
+        return matched if matched >= 0 else None
 
-    def markActive(self, objectIds: List[str]) -> None:
+    def markActive(self, objectIds: List[str]) -> int | None:
         """
         Mark the set of documents with the given objectId as active.
 
         @param objectIds: A list of object IDs to mark as active.
+        @returns: The number of chunk rows matched (0 when none of the IDs exists or the collection does not),
+            or None when psycopg2 does not know the statement's row count.
         """
         if not self._doesCollectionExist():
-            return
+            return 0
 
         with self.client.cursor() as cur:
             cur.execute(SQL_QUERIES['mark_active'].format(collection=self.collection), (objectIds,))
+            matched = cur.rowcount
             self.client.commit()
+        # psycopg2 reports -1 when a statement's row count is not known; say so
+        # rather than claim no rows matched.
+        return matched if matched >= 0 else None
 
     def render(self, objectId: str, callback: Callable[[str], None]) -> None:
         """

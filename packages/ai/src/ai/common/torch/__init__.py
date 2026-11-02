@@ -1,9 +1,15 @@
-import os
+import sys
 from rocketlib import debug
-from depends import depends
+from depends import load_depends
 
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-depends(requirements)
+# The guard is a sys.meta_path hook, so it never sees the install: without this
+# the CUDA wheel is fetched first and only then the import fails. Read through
+# sys.modules because importing gpu_guard here pulls in ai.node and the SDK.
+_guard = sys.modules.get('ai.common.models.gpu_guard')
+if _guard is not None and _guard.is_installed():
+    raise ImportError(_guard.blocked_message('torch'))
+
+load_depends(__file__)
 
 # We should have installed torch now
 import torch

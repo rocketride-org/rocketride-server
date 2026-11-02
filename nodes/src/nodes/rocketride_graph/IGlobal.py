@@ -25,10 +25,10 @@
 
 Mirrors ``graph_neo4j`` on :class:`GraphGlobalBase`, with two differences:
 
-1. **Connection** — no host/user/password config; the per-tenant DSN comes
-   from the account layer (``ai.common.rocketride_db``), same seam as
-   ``rocketride_sql`` / ``rocketride_vector``. The tenant database is
-   Postgres + Apache AGE.
+1. **Connection** — no host/user/password config; the DSN is the one the
+   task engine delivered for the node's scope / target
+   (``ai.common.rocketride_db``), same seam as ``rocketride_sql`` /
+   ``rocketride_vector``. The tenant database is Postgres + Apache AGE.
 2. **Query paths** — Apache AGE cannot run bare Cypher, so ``_run_query``
    (safe), ``_run_query_raw`` (EXECUTE) and ``_validate_query`` all route
    through the Cypher->AGE translation layer (``ai.common.graph.age``).
@@ -49,6 +49,8 @@ from psycopg2 import sql
 from rocketlib import warning
 from ai.common.graph import GraphGlobalBase
 from ai.common.graph.age import (
+    CAPABILITY_TABLES,
+    DEFAULT_AGE_VERSION,
     AgeTranslationError,
     FirewallConfig,
     TranslateMode,
@@ -57,7 +59,7 @@ from ai.common.graph.age import (
     decode_row,
     translate,
 )
-from ai.common.rocketride_db import resolve_rocketride_dsn
+from ai.common.rocketride_db import DsnNotDelivered, db_target, resolve_rocketride_dsn
 
 DEFAULT_GRAPH_NAME = 'rocketride'
 DEFAULT_MAX_ROWS = 1000
@@ -80,19 +82,20 @@ class IGlobal(GraphGlobalBase):
     max_rows: int = DEFAULT_MAX_ROWS
     query_timeout_ms: int = DEFAULT_QUERY_TIMEOUT_MS
     age_version: str = ''
+    supports_execute_params = True
 
     # ------------------------------------------------------------------
     # Driver lifecycle
     # ------------------------------------------------------------------
 
     def _open_driver(self, config: Dict[str, Any]) -> None:
-        """Resolve the tenant DSN, connect, and fail fast on a missing graph."""
+        """Read the delivered DSN, connect, and fail fast on a missing graph."""
         self.graph_name = str(config.get('graph') or DEFAULT_GRAPH_NAME).strip()
         self.max_rows = self._config_int(config, 'max_rows', DEFAULT_MAX_ROWS)
         self.query_timeout_ms = self._config_int(config, 'query_timeout_ms', DEFAULT_QUERY_TIMEOUT_MS)
 
-        # The one RocketRide difference: DSN from the account seam, no config.
-        dsn = resolve_rocketride_dsn()
+        # The one RocketRide difference: the delivered DSN, no connection config.
+        dsn = resolve_rocketride_dsn(*db_target(config))
         # Bounded connect so an unreachable pooler fails fast (matches the
         # probe's 3s timeout) instead of waiting out the OS TCP timeout.
         self.client = psycopg2.connect(dsn, connect_timeout=3)
@@ -104,20 +107,23 @@ class IGlobal(GraphGlobalBase):
             if row is None:
                 raise RuntimeError('The tenant database does not have the Apache AGE extension installed')
             self.age_version = row[0]
+            if self.age_version not in CAPABILITY_TABLES:
+                warning(
+                    f'rocketride_graph: no Cypher rules for Apache AGE {self.age_version}; '
+                    f'using the strict AGE {DEFAULT_AGE_VERSION} rules'
+                )
             cur.execute('SELECT 1 FROM ag_catalog.ag_graph WHERE name = %s', (self.graph_name,))
             graph_exists = cur.fetchone() is not None
         self.client.commit()
 
         if not graph_exists:
-            # OPEN QUESTION (create_graph ownership, see the node README and
-            # the design's open-questions): whether the node or the cloud
-            # provisioner creates the per-tenant graph is undecided. Until it
-            # is, the node refuses to run against a missing graph rather than
-            # silently creating one.
+            # The provisioner creates the default graph in every tenant
+            # database. Any other name must already exist: the node never
+            # creates a graph itself.
             raise RuntimeError(
                 f'AGE graph {self.graph_name!r} does not exist in the tenant database. '
-                'Graph provisioning ownership is pending; create the graph '
-                f"(SELECT create_graph('{self.graph_name}')) or configure an existing one."
+                f'Every RocketRide database comes with the {DEFAULT_GRAPH_NAME!r} graph; use it, '
+                f"or create this one first (SELECT create_graph('{self.graph_name}'))."
             )
 
     def _close_driver(self) -> None:
@@ -126,10 +132,14 @@ class IGlobal(GraphGlobalBase):
             self.client = None
 
     def _probe_connection(self, config: Dict[str, Any]) -> None:
-        """Save-time probe: warn-only (the user is still editing the node)."""
+        """Save-time probe: warn-only (the user is still editing the node).
+
+        Outside a task no DSN is delivered, so only scope / target are
+        checked: connectivity is checked when the pipeline runs.
+        """
         conn = None
         try:
-            dsn = resolve_rocketride_dsn()
+            dsn = resolve_rocketride_dsn(*db_target(config))
             conn = psycopg2.connect(dsn, connect_timeout=3)
             with conn.cursor() as cur:
                 cur.execute('SELECT 1')
@@ -141,9 +151,8 @@ class IGlobal(GraphGlobalBase):
                 cur.execute('SELECT 1 FROM ag_catalog.ag_graph WHERE name = %s', (graph,))
                 if cur.fetchone() is None:
                     warning(f'AGE graph {graph!r} does not exist yet in the tenant database')
-        except NotImplementedError as e:
-            # The OSS account stub: no cloud sign-in available.
-            warning(str(e))
+        except DsnNotDelivered:
+            return
         except Exception as e:
             warning(str(e).strip().splitlines()[0] if str(e).strip() else repr(e))
         finally:
@@ -178,7 +187,7 @@ class IGlobal(GraphGlobalBase):
             limit=limit,
             mode=mode,
             graph_name=self.graph_name,
-            age_version=self.age_version or '1.5.0',
+            age_version=self.age_version or DEFAULT_AGE_VERSION,
             firewall=self._firewall_config(),
         )
 
@@ -200,13 +209,27 @@ class IGlobal(GraphGlobalBase):
                 'statement_timeout only apply inside a transaction'
             )
 
-    def _execute_plan(self, plan: TranslatedQuery, fetch_cap: Optional[int] = None) -> List[Tuple]:
+    def _execute_plan(
+        self, plan: TranslatedQuery, fetch_cap: Optional[int] = None, max_rows: Optional[int] = None
+    ) -> List[Tuple]:
         """Run one translated plan in its own transaction; return raw rows.
 
         The plan's READ ONLY flag is applied with ``SET TRANSACTION READ
         ONLY`` as the first in-transaction statement (psycopg2 has already
         opened the transaction), giving server-side write protection on the
         safe path.
+
+        Args:
+            plan (TranslatedQuery): The statements to run, in order.
+            fetch_cap (Optional[int]): Most rows to fetch from the result statement.
+            max_rows (Optional[int]): Row ceiling checked BEFORE commit, so a
+                write whose result exceeds it is rolled back, not half-reported.
+
+        Returns:
+            List[Tuple]: Raw rows of the statement at ``plan.result_index``.
+
+        Raises:
+            ValueError: More than ``max_rows`` rows came back (nothing is committed).
         """
         self._require_transactional_client()
         rows: List[Tuple] = []
@@ -215,14 +238,43 @@ class IGlobal(GraphGlobalBase):
                 if plan.read_only:
                     cur.execute('SET TRANSACTION READ ONLY')
                 for i, (stmt, binds) in enumerate(zip(plan.statements, plan.binds)):
-                    cur.execute(stmt, binds or None)
+                    if i == plan.result_index and plan.prepared_name:
+                        self._execute_prepared(cur, plan.prepared_name, stmt, binds)
+                    else:
+                        cur.execute(stmt, binds or None)
                     if i == plan.result_index and cur.description is not None:
                         rows = cur.fetchmany(fetch_cap) if fetch_cap else cur.fetchall()
+            # Checked after the plan's DEALLOCATE has run, but before commit.
+            if max_rows is not None and len(rows) > max_rows:
+                raise ValueError(f'EXECUTE query exceeded max_execute_rows={max_rows}')
             self.client.commit()
         except Exception:
             self.client.rollback()
             raise
         return rows
+
+    @staticmethod
+    def _execute_prepared(cur, name: str, stmt: str, binds: Tuple) -> None:
+        """Run a plan's EXECUTE, freeing its prepared statement if it fails.
+
+        A prepared statement is a session object that survives ROLLBACK, and
+        the plan's own DEALLOCATE never runs after a failed EXECUTE. It is
+        freed here, inside the same transaction: under a transaction pooler
+        the next transaction may run on another backend.
+
+        Args:
+            cur: Open psycopg2 cursor inside the plan's transaction.
+            name (str): The prepared statement name (generated by the emitter).
+            stmt (str): The ``EXECUTE`` statement.
+            binds (Tuple): Its bind values.
+        """
+        cur.execute('SAVEPOINT rr_age_execute')
+        try:
+            cur.execute(stmt, binds or None)
+        except Exception:
+            cur.execute('ROLLBACK TO SAVEPOINT rr_age_execute')
+            cur.execute(f'DEALLOCATE {name}')
+            raise
 
     def _run_query(self, query: str, params: Optional[Dict] = None, limit: Optional[int] = None) -> List[Dict]:
         """Read-only path: translate (safe mode) and run in a READ ONLY txn."""
@@ -231,15 +283,17 @@ class IGlobal(GraphGlobalBase):
         raw_rows = self._execute_plan(plan, fetch_cap=cap)
         return [decode_row(plan, row) for row in raw_rows]
 
-    def _run_query_raw(self, query: str) -> Dict[str, Any]:
+    def _run_query_raw(self, query: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """EXECUTE path: translation still applies (AGE can't run bare Cypher);
         only the semantic firewall is skipped, never the resource caps.
+
+        ``params`` binds ``$name`` values through the plan's prepared
+        statement, so they skip the parser and the query-length cap (they
+        have their own size cap, ``max_params_bytes``).
         """
-        plan = self._translate(query, mode=TranslateMode.RAW)
+        plan = self._translate(query, params=params, mode=TranslateMode.RAW)
         max_rows = self.max_execute_rows
-        raw_rows = self._execute_plan(plan, fetch_cap=max_rows + 1)
-        if len(raw_rows) > max_rows:
-            raise ValueError(f'EXECUTE query exceeded max_execute_rows={max_rows}')
+        raw_rows = self._execute_plan(plan, fetch_cap=max_rows + 1, max_rows=max_rows)
         rows = [decode_row(plan, row) for row in raw_rows]
         # AGE exposes no write counters (unlike Bolt); affected_rows reports
         # the result-row count — 0 for writes without a RETURN clause.

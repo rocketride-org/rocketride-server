@@ -85,7 +85,7 @@ interface IPathResult {
 // =============================================================================
 
 /** First line of every generated preview statement. */
-const PREVIEW_HEADER = '-- Generated preview — review, then Run.';
+const PREVIEW_HEADER = '-- Generated preview: review, then Run.';
 
 /** Said when the schema declares no foreign keys at all. */
 const NO_KEYS_GENERIC = 'This schema declares no foreign keys; join paths are unavailable.';
@@ -285,7 +285,7 @@ export const TableRecordPanel: React.FC<ITableRecordPanelProps> = (props) => {
 	const openTopRows = (): void => {
 		onOpenQuery(
 			`${PREVIEW_HEADER}\nSELECT * FROM ${quoteIdent(dialect, table)} LIMIT 100`,
-			`${table} — top 100`,
+			`${table}: top 100`,
 		);
 	};
 
@@ -293,7 +293,7 @@ export const TableRecordPanel: React.FC<ITableRecordPanelProps> = (props) => {
 	const openCount = (): void => {
 		onOpenQuery(
 			`${PREVIEW_HEADER}\nSELECT COUNT(*) AS total FROM ${quoteIdent(dialect, table)}`,
-			`${table} — count`,
+			`${table}: count`,
 		);
 	};
 
@@ -337,8 +337,8 @@ export const TableRecordPanel: React.FC<ITableRecordPanelProps> = (props) => {
 					// "25 paths found" would claim there are exactly 25.
 					<div style={styles.summary}>
 						{result.paths.length >= MAX_JOIN_PATHS
-							? `${result.paths.length} paths shown (cap reached — more may exist)`
-							: `${result.paths.length} paths found — choose one`}
+							? `${result.paths.length} paths shown (cap reached, more may exist)`
+							: `${result.paths.length} paths found. Choose one`}
 					</div>
 				)}
 

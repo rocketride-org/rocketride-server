@@ -592,10 +592,10 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 	const warning = packageChecks.filter((c) => c.state === 'warn').length;
 	const readyLead =
 		failing > 0
-			? `${failing} item${failing === 1 ? ' needs' : 's need'} fixing before this app is complete — the build or publish would refuse it as-is.`
+			? `${failing} item${failing === 1 ? ' needs' : 's need'} fixing before this app is complete. The build or publish would refuse it as-is.`
 			: warning > 0
-				? `Everything required is in place — you can deploy and publish this app to your desktop or a team. ${warning} optional item${warning === 1 ? '' : 's'} would polish it.`
-				: 'Everything is in place — deploy it and publish to your desktop or a team whenever you like.';
+				? `Everything required is in place. You can deploy and publish this app to your desktop or a team. ${warning} optional item${warning === 1 ? '' : 's'} would polish it.`
+				: 'Everything is in place. Deploy it and publish to your desktop or a team whenever you like.';
 
 	// Icon preview source: the raster reader already returns a data: URI;
 	// SVG arrives as markup and is inlined here.
@@ -617,7 +617,7 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 				{/* View header — title + one-line purpose */}
 				<div style={styles.head}>
 					<div style={styles.h1}>{app.name}</div>
-					<div style={styles.sub}>Package — everything this app needs to build, deploy, and publish personally: identity, icon, README, and the workspace paths it ships with. Store-only concerns (pricing, review) live on the Store tab.</div>
+					<div style={styles.sub}>Package: everything this app needs to build, deploy, and publish personally (identity, icon, README, and the workspace paths it ships with). Store-only concerns (pricing, review) live on the Store tab.</div>
 				</div>
 
 				{error ? (
@@ -650,7 +650,7 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 										checked={draft?.typecheck !== false}
 										onChange={(e) => setDraft((d) => (d ? { ...d, typecheck: e.target.checked } : d))}
 									/>
-									<span style={styles.checkRowText}>The server verifies the app with your own tsconfig before building — turning this off deploys even with type errors.</span>
+									<span style={styles.checkRowText}>The server verifies the app with your own tsconfig before building. Turning this off deploys even with type errors.</span>
 								</label>
 							</div>
 						</Card>
@@ -720,7 +720,7 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 						</Card>
 
 						<Card header="Include paths">
-							<div style={styles.includeHint}>Workspace directories or files your app imports beyond its own folder (for example <code>apps/shared</code>). They are packed into every deploy and installed by the server build — a missing one fails the build.</div>
+							<div style={styles.includeHint}>Workspace directories or files your app imports beyond its own folder (for example <code>apps/shared</code>). They are packed into every deploy and installed by the server build. A missing one fails the build.</div>
 							{(draft?.include ?? []).map((entry, idx) => (
 								<div key={idx} style={styles.includeRow}>
 									<div style={styles.pathInput}>
@@ -751,7 +751,7 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app }) => {
 			      confirm. ─────────────────────────────────────────────────── */}
 			{dirty && host.saveListing && (
 				<div style={styles.footer}>
-					<span style={styles.footerNote}>Saved to the app&rsquo;s package.json — the manifest is the truth; every deploy packs it.</span>
+					<span style={styles.footerNote}>Saved to the app&rsquo;s package.json. The manifest is the truth; every deploy packs it.</span>
 					<Button variant="primary" small onClick={() => void onSave()} disabled={saving}>
 						{saving ? 'Saving…' : 'Save Package'}
 					</Button>

@@ -70,7 +70,7 @@ export const confirmDialogEntry: IGalleryEntry = {
 	name: 'ConfirmDialog',
 	group: 'content',
 	blurb: 'The stock confirm/cancel dialog on Modal: titled message, Cancel + auto-focused primary confirm, optional third action, danger styling for irreversible actions.',
-	doc: `The ONE way to confirm anything — dirty closes, deletes, plan changes. There is deliberately no ✕: Cancel is the dismiss control (Escape works too). Set \`destructive\` whenever the action cannot be undone, and \`confirmDisabled\` while a required input is missing.`,
+	doc: `The ONE way to confirm anything: dirty closes, deletes, plan changes. There is deliberately no ✕: Cancel is the dismiss control (Escape works too). Set \`destructive\` whenever the action cannot be undone, and \`confirmDisabled\` while a required input is missing.`,
 	knobs: [
 		{ id: 'title', label: 'Title', kind: 'text', defaultValue: 'Delete pipeline?' },
 		{ id: 'confirmLabel', label: 'Confirm label', kind: 'text', defaultValue: 'Delete' },

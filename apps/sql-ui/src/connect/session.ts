@@ -99,7 +99,7 @@ class SqlToolSession implements ISqlSession {
 			source: this.endpoint.source,
 		});
 		if (!token) {
-			throw new Error(`No running task for pipeline '${this.endpoint.pipelineName}' — start the pipeline and retry.`);
+			throw new Error(`No running task for pipeline '${this.endpoint.pipelineName}'. Start the pipeline and retry.`);
 		}
 		this.token = token;
 		return token;

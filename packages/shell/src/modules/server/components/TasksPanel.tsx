@@ -312,7 +312,7 @@ export const TasksPanel: React.FC<ITasksPanelProps> = ({ tasks, listTasks, onRef
 				field: 'name',
 				rrType: 'string',
 				rrDefault: true,
-				rrDescription: 'Task display name (pipeline filename, config name, or source id — the internal task id when unnamed); the second line shows provider, launch type (launch or execute), and the first 8 characters of the project id.',
+				rrDescription: 'Task display name (pipeline filename, config name, or source id; the internal task id when unnamed); the second line shows provider, launch type (launch or execute), and the first 8 characters of the project id.',
 				headerSort: true,
 				// Two-line cell: name over the provider / launch-type / project line.
 				formatter: (cell: CellComponent) => {

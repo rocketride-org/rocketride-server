@@ -1,5 +1,5 @@
 from rocketlib import IGlobalBase, OPEN_MODE, warning, debug
-from ai.common.config import Config
+from ai.common.config import Config, warn_if_credential_unresolved
 from ai.common.chat import ChatBase
 import os
 import re
@@ -38,6 +38,11 @@ class IGlobal(IGlobalBase):
             # Only validate tokens > 0 if provided
             if modelTotalTokens is not None and modelTotalTokens <= 0:
                 warning('Token limit must be greater than 0')
+                return
+
+            # Do not send a ${...} the engine left unfilled to the provider as the key:
+            # its reply would say the key is wrong, not which variable is missing.
+            if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', apikey, self.glb.connConfig):
                 return
 
             # Simple API validation using provider-driven exceptions

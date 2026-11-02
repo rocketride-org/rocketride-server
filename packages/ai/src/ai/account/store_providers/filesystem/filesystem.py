@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 import fnmatch
-from ...store import IStore, StorageError, VersionMismatchError
+from ...store import IStore, StorageError, StorageNotFoundError, VersionMismatchError
 
 # Import platform-specific locking
 if sys.platform == 'win32':
@@ -97,7 +97,7 @@ class FilesystemStore(IStore):
             full_path = self._get_full_path(filename)
 
             if not full_path.exists():
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
 
             # Create lock file for this resource
             lock_path = full_path.parent / f'.{full_path.name}.lock'
@@ -136,7 +136,7 @@ class FilesystemStore(IStore):
             full_path = self._get_full_path(filename)
 
             if not full_path.exists():
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
 
             # Create lock file for this resource
             lock_path = full_path.parent / f'.{full_path.name}.lock'
@@ -231,7 +231,7 @@ class FilesystemStore(IStore):
             full_path = self._get_full_path(filename)
 
             if not full_path.exists():
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
 
             # Create lock file for this resource
             lock_path = full_path.parent / f'.{full_path.name}.lock'
@@ -246,7 +246,7 @@ class FilesystemStore(IStore):
 
                 # Check file still exists (might have been deleted while waiting for lock)
                 if not full_path.exists():
-                    raise StorageError(f'File not found: {filename}')
+                    raise StorageNotFoundError(f'File not found: {filename}')
 
                 # If expected_version provided, verify modification time matches
                 if expected_version is not None:
@@ -288,7 +288,7 @@ class FilesystemStore(IStore):
         try:
             full_path = self._get_full_path(filename)
             if not full_path.is_file():
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
             st = full_path.stat()
             return {'size': st.st_size, 'modified': st.st_mtime}
         except StorageError:
@@ -323,7 +323,7 @@ class FilesystemStore(IStore):
             src_path = self._get_full_path(src)
             dst_path = self._get_full_path(dst)
             if not src_path.exists():
-                raise StorageError(f'File not found: {src}')
+                raise StorageNotFoundError(f'File not found: {src}')
             dst_path.parent.mkdir(parents=True, exist_ok=True)
             await asyncio.to_thread(os.replace, str(src_path), str(dst_path))
         except StorageError:
@@ -336,7 +336,7 @@ class FilesystemStore(IStore):
         try:
             full_path = self._get_full_path(filename)
             if not full_path.exists():
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
             async with aiofiles.open(full_path, 'rb') as f:
                 return await f.read()
         except StorageError:
@@ -457,7 +457,7 @@ class FilesystemStore(IStore):
         try:
             full_path = self._get_full_path(filename)
             if not full_path.exists():
-                raise StorageError(f'File not found: {filename}')
+                raise StorageNotFoundError(f'File not found: {filename}')
             size = full_path.stat().st_size
             f = await aiofiles.open(full_path, 'rb')
             return {'context': {'file': f, 'path': full_path}, 'size': size}

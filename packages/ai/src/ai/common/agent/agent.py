@@ -18,7 +18,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union
 
-from rocketlib import debug, error
+from rocketlib import debug, error, warning
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.llm_adapter import turn_usage
@@ -130,7 +130,10 @@ class AgentBase(ABC):
         Args:
             iInstance: Node instance (`IInstance`) provided by the engine.
             question: Incoming question object from the questions lane.
-            emit_answers_lane: If True, write the answer JSON to the answers lane.
+            emit_answers_lane: True for a top-level run: write the answer JSON to the
+                answers lane, and end a failed or refused run with an error stop status.
+                False for a sub-agent run (an agent called as another agent's tool), which
+                shares its parent's status stream and returns its answer as a tool result.
 
         Returns:
             The answer JSON payload (same object written to the answers lane).
@@ -159,7 +162,6 @@ class AgentBase(ABC):
             except Exception:
                 return safe_str(value)
 
-        task_id = None
         # Bound before the try so the guard/error handlers can read them even if
         # a failure occurs before the context is built or `_run` returns.
         context = None
@@ -174,15 +176,11 @@ class AgentBase(ABC):
                 for inst in self._instructions:
                     question.addInstruction('Additional Instruction', inst.strip())
 
-                # Get the jobs taskId — kept as a local variable inside the
-                # try/except so a missing/inaccessible jobConfig produces a
-                # graceful error answer instead of an unhandled AttributeError.
-                # Not on AgentContext: task_id is the same for every IInstance
-                # of a pipeline, so it serves no purpose as run scaffolding.
-                try:
-                    task_id = iInstance.IEndpoint.endpoint.jobConfig.get('taskId')
-                except Exception:
-                    task_id = None
+                # The task's id is deliberately not read here. It is the task's
+                # private control token (tk_...): whoever holds it can stop the
+                # task or send it data. This payload is what a parent agent hands
+                # to its model when this agent runs as its tool, so it must never
+                # carry the token.
 
                 # Build the per-call context inline.  Channels come from the
                 # cached host; metadata is stamped fresh per call.
@@ -232,8 +230,11 @@ class AgentBase(ABC):
                     },
                     'stack': [],
                 }
-                if task_id:
-                    answer_payload['meta']['task_id'] = task_id
+                # Why the run stopped (e.g. done, max_waves), when the driver's trace
+                # says: a parent agent can then tell a forced answer from a finished one.
+                stop_reason = raw.get('stop_reason') if isinstance(raw, dict) else None
+                if isinstance(stop_reason, str) and stop_reason:
+                    answer_payload['meta']['stop_reason'] = stop_reason
 
                 stack: List[Dict[str, Any]] = []
                 stack.append(
@@ -260,7 +261,9 @@ class AgentBase(ABC):
                         'started_at': started_at,
                         'ended_at': ended_at,
                         'tool_calls': 0,
-                        **({'task_id': task_id} if task_id else {}),
+                        # The run's own reason (often "done") does not stand: its answer
+                        # was refused. The stack's guard entry says why.
+                        'stop_reason': 'error',
                     },
                     'stack': [
                         {
@@ -273,11 +276,21 @@ class AgentBase(ABC):
                         {'kind': 'RocketRide.agent.raw.v1', 'name': 'framework.output', 'payload': _json_safe(raw)},
                     ],
                 }
+                # The run's last status may have said "done"; the refusal must be the last word.
+                # Only a top-level run ends the stream: a sub-agent shares its parent's, and
+                # its refusal is the parent's tool result, not the end of the parent's run.
+                if emit_answers_lane:
+                    self._send_stop_status(iInstance, 'Answer refused: no tool was called.')
 
             except Exception as e:
                 error_type = type(e).__name__
                 error_message = str(e)
                 error(f'agent base _run failed run_id={run_id} type={error_type} message={error_message}')
+                # A driver can raise before it sends any status (agent_rocketride checks its
+                # verify_tool first), so this exit must report its stop reason itself. A
+                # sub-agent does not: its failure is its parent's tool result.
+                if emit_answers_lane:
+                    self._send_stop_status(iInstance, 'The run failed.')
                 ended_at = now_iso()
                 answer_payload = {
                     'content': error_message or f'{error_type} (no message)',
@@ -288,7 +301,7 @@ class AgentBase(ABC):
                         'started_at': started_at,
                         'ended_at': ended_at,
                         'tool_calls': len(context.invoked_tools) if context is not None else 0,
-                        **({'task_id': task_id} if task_id else {}),
+                        'stop_reason': 'error',
                     },
                     'stack': [],
                 }
@@ -486,6 +499,18 @@ class AgentBase(ABC):
         """
         if context and context.invoker and context.invoker.instance:
             context.invoker.instance.sendSSE(type, **data)
+
+    def _send_stop_status(self, iInstance: Any, message: str) -> None:
+        """Send the last status of a run that ended on an error, with ``stop_reason='error'``.
+
+        Sent through ``iInstance``, which every run context uses as its invoker, so a run
+        that fails before its context is built still reports why it stopped. Best effort:
+        a failed send is logged and must not cost the run its answer.
+        """
+        try:
+            iInstance.instance.sendSSE('thinking', message=message, stop_reason='error')
+        except Exception as exc:
+            warning(f'agent base stop status not sent: {type(exc).__name__}: {exc}')
 
     def _agent_id(self, pSelf: Any) -> str:
         """Return the logical agent identifier used in answer metadata."""

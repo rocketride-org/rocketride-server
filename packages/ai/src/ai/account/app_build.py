@@ -1452,9 +1452,9 @@ class AppBuildWorker:
             error(f'[app_build] {app_id} v{version}: build stamp failed: {exc}')
         if self._server is not None:
             try:
-                from ai.modules.task.deploy_events import broadcast_deploy_changed
+                from ai.modules.task.deploy_events import broadcast_app_changed
 
-                await broadcast_deploy_changed(self._server, org_id, '', app_id, 'build')
+                await broadcast_app_changed(self._server, org_id, app_id, 'build')
             except Exception as exc:
                 debug(f'[app_build] deploy event failed: {exc}')
 

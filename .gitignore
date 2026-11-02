@@ -219,11 +219,8 @@ user.json
 # Build version info (generated)
 version.json
 
-downloads/jdk-17.zip
-downloads/jre-17.zip
-downloads/jdk-17.tar.gz
-downloads/jre-17.tar.gz
-downloads/maven-3.9.6.tar.gz
+# Override Visual Studio Artifacts exclusion
+!scripts/release/
 
 # One of the python modules keeps installing this
 include/python3.12/greenlet/greenlet.h

@@ -129,10 +129,12 @@ async function selfUpdate(root, branch, opts = {}) {
 		log(`Fetching scripts/ from ${UPSTREAM_URL} @ ${branch} ...`);
 		runGit([
 			'clone',
-			'--depth', '1',
+			'--depth',
+			'1',
 			'--filter=blob:none',
 			'--sparse',
-			'--branch', branch,
+			'--branch',
+			branch,
 			'--single-branch',
 			UPSTREAM_URL,
 			tmpDir,
@@ -143,7 +145,9 @@ async function selfUpdate(root, branch, opts = {}) {
 		// look like a builder scripts/ directory.
 		const fetched = path.join(tmpDir, 'scripts');
 		if (!fs.existsSync(path.join(fetched, 'build.js'))) {
-			throw new Error(`upstream branch '${branch}' has no scripts/build.js — refusing to replace the local scripts/`);
+			throw new Error(
+				`upstream branch '${branch}' has no scripts/build.js — refusing to replace the local scripts/`
+			);
 		}
 
 		// Swap: move the old directory aside as a backup (a fresh target may

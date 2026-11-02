@@ -56,14 +56,22 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { spawn } from 'child_process';
 import AdmZip from 'adm-zip';
 import ignore from 'ignore';
 import type { Ignore } from 'ignore';
 import { registerAppPack } from '../client/app-pack-registry.js';
-import type { AppPackModule } from '../client/app-pack-registry.js';
 import { renderTemplate, TEMPLATE_NAMES } from '../app-scaffold/index.js';
 import type { TemplateName } from '../app-scaffold/index.js';
+import { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, readProjectId, saveAppListing } from './marker.js';
+import { appIconDataUri, findApp, findAppMarkers, MAX_ICON_BYTES, MAX_README_IMAGE_BYTES, probeAppFolder, scanAppMarkers } from './scan.js';
+import { ensureDependencyWiring, ensureWorkspaceFile, ensureWorkspaceGitignore, extractInstallCause, isTransientLockError, runRootInstall, vendorPlatformPackages } from './vendor.js';
+
+export { ensureAppTrigger, ensureProjectId, markerPathOf, readAppListing, readProjectId, saveAppListing } from './marker.js';
+export type { AppListing } from './marker.js';
+export { appIconDataUri, findApp, findAppMarkers, MAX_ICON_BYTES, MAX_README_IMAGE_BYTES, probeAppFolder, scanAppMarkers } from './scan.js';
+export type { AppRef, ScannedApp } from './scan.js';
+export { ensureDependencyWiring, ensureWorkspaceFile, ensureWorkspaceGitignore, extractInstallCause, isTransientLockError, runRootInstall, vendorPlatformPackages } from './vendor.js';
+export type { PlatformVendorResult, VendorLog, VendorPlatformOptions } from './vendor.js';
 
 /** Receives one human-readable line per pack/verify step. */
 export type PackProgress = (line: string) => void;
@@ -647,6 +655,86 @@ export function verifyAppSource(workspaceRoot: string, appRoot: string): AppVeri
 }
 
 // =============================================================================
+// PREFLIGHT (tiered readiness — the App Builder's PACKAGE/STORE boxes)
+// =============================================================================
+
+/** One tiered readiness row. */
+export interface AppPreflightCheck {
+	/** Stable check id (e.g. 'appid', 'icon', 'desc'). */
+	id: string;
+	/** 'fail' blocks the tier; 'warn' is advisory. */
+	state: 'pass' | 'warn' | 'fail';
+	/** Short human label. */
+	label: string;
+	/** Actionable detail. */
+	note?: string;
+	/** 'package' = the complete-and-buildable bar (all green means a
+	    personal @me/@team publish just works); 'store' = the ADDITIONAL
+	    public-submission bar. */
+	tier?: 'package' | 'store';
+}
+
+/**
+ * Tiered, client-side readiness checks over an app's manifest — no server
+ * round-trip. The PACKAGE tier is the personal-publish bar; the STORE tier
+ * adds what a public store submission needs. Complements
+ * {@link verifyAppSource}, which dry-runs the deploy pack itself.
+ *
+ * @param appFolder - The app's folder (absolute path).
+ * @param workspaceRoot - The workspace `appManifest.include` entries
+ *   resolve against; absent = every declared include reports missing.
+ * @returns The rows, package tier first.
+ */
+export async function preflightApp(appFolder: string, workspaceRoot?: string): Promise<AppPreflightCheck[]> {
+	const scanned = await probeAppFolder(appFolder);
+	const checks: AppPreflightCheck[] = [];
+	if (!scanned) {
+		checks.push({ id: 'manifest', state: 'fail', label: 'App manifest', note: 'No package.json appManifest found for this app.', tier: 'package' });
+		return checks;
+	}
+	const listing = readAppListing(scanned.folder);
+	const fileExists = (rel: string): boolean => fs.existsSync(path.join(scanned.folder, ...rel.replace(/^\.\//, '').split('/')));
+
+	// ── package tier — the personal-publish bar ──────────
+	checks.push(scanned.id.includes('.') ? { id: 'appid', state: 'pass', label: 'App id namespaced', note: scanned.id, tier: 'package' } : { id: 'appid', state: 'fail', label: 'App id namespaced', note: `"${scanned.id}" must be <developerId>.<name>`, tier: 'package' });
+	checks.push(scanned.name ? { id: 'name', state: 'pass', label: 'Display name', note: scanned.name, tier: 'package' } : { id: 'name', state: 'fail', label: 'Display name', note: 'appManifest.name is required.', tier: 'package' });
+	// Icon/readme: a DECLARED path that does not resolve is a fail (the
+	// manifest lies); undeclared is only a warn.
+	if (listing.icon) {
+		checks.push(fileExists(listing.icon) ? { id: 'icon', state: 'pass', label: 'Icon', note: listing.icon, tier: 'package' } : { id: 'icon', state: 'fail', label: 'Icon', note: `${listing.icon} does not exist in the app folder.`, tier: 'package' });
+	} else {
+		checks.push({ id: 'icon', state: 'warn', label: 'Icon', note: 'No icon declared, so tiles show a generic glyph.', tier: 'package' });
+	}
+	if (listing.readme) {
+		checks.push(fileExists(listing.readme) ? { id: 'readme', state: 'pass', label: 'README', note: listing.readme, tier: 'package' } : { id: 'readme', state: 'fail', label: 'README', note: `${listing.readme} does not exist in the app folder.`, tier: 'package' });
+	} else {
+		checks.push({ id: 'readme', state: 'warn', label: 'README', note: 'No README declared. Recommended so users know what the app does.', tier: 'package' });
+	}
+	// Include paths are WORKSPACE-relative; a missing one fails the deploy
+	// pack, so it fails here first, by name.
+	const includeEntries = listing.include ?? [];
+	if (includeEntries.length > 0) {
+		const missing = includeEntries.filter((entry) => !workspaceRoot || !fs.existsSync(path.join(workspaceRoot, ...entry.split('/'))));
+		checks.push(missing.length === 0 ? { id: 'include', state: 'pass', label: 'Include paths', note: `${includeEntries.length} path${includeEntries.length === 1 ? '' : 's'} resolve`, tier: 'package' } : { id: 'include', state: 'fail', label: 'Include paths', note: `Missing in the workspace: ${missing.join(', ')}`, tier: 'package' });
+	}
+	// The typecheck waiver is always VISIBLE, never silent — a deploy that
+	// skips verification should read as a choice.
+	if (listing.typecheck === false) {
+		checks.push({ id: 'typecheck', state: 'warn', label: 'Strict type checking', note: 'Off, so the server builds without verifying types.', tier: 'package' });
+	}
+
+	// ── store tier — the additional public-submission bar ─
+	checks.push(scanned.description ? { id: 'desc', state: 'pass', label: 'Description', tier: 'store' } : { id: 'desc', state: 'fail', label: 'Description', note: 'A store listing needs a description.', tier: 'store' });
+	if (listing.mode !== 'free') {
+		checks.push(listing.plans.length > 0 ? { id: 'pricing', state: 'pass', label: 'Pricing plans', note: `${listing.plans.length} plan${listing.plans.length === 1 ? '' : 's'}`, tier: 'store' } : { id: 'pricing', state: 'fail', label: 'Pricing plans', note: `Mode "${listing.mode}" needs at least one plan.`, tier: 'store' });
+	}
+	// No dist/ check: deployment packs SOURCE (the baseline excludes dist/
+	// unconditionally) and the server builds the client bundle itself, so a
+	// local build is never read or uploaded.
+	return checks;
+}
+
+// =============================================================================
 // CREATE (scaffold a new app)
 // =============================================================================
 
@@ -656,17 +744,23 @@ export interface CreateAppOptions {
 	template?: TemplateName;
 	/** Display name (default: the slug, title-cased). */
 	displayName?: string;
-	/** Developer id for `<developerId>.<slug>` (default 'local' — publishable
-	    beyond the workspace only after a real developer id is registered). */
+	/** Developer id for `<developerId>.<slug>` (default
+	    {@link DEFAULT_DEVELOPER_ID} — publishable beyond the workspace only
+	    after a real developer id is registered). Hosts with a connection
+	    resolve it with {@link resolveDeveloperId}. */
 	developerId?: string;
 	/** Frame options — chrome regions of the generated app. */
 	sidebar?: boolean;
 	statusFooter?: boolean;
 	docTabs?: boolean;
-	/** HTTP(S) base of the development server, used to vendor the
-	    server-matched shell + client packages. Omitted/unreachable = the
-	    scaffold still succeeds and the pins link on the next connected open. */
+	/** HTTP(S) base of the development server: the preview URL's origin,
+	    and where the server-matched shell + client packages vendor from.
+	    Omitted/unreachable = the scaffold still succeeds and the pins link
+	    on the next connected open. */
 	serverBaseUrl?: string;
+	/** Vendor the platform packages from `serverBaseUrl` (default true).
+	    False for hosts that run their own (memoized) vendor pass. */
+	vendor?: boolean;
 	/** Run `pnpm install` at the workspace root (default true). */
 	install?: boolean;
 	/** Per-step narration. */
@@ -692,13 +786,35 @@ const SLUG_RE = /^[a-z][a-zA-Z0-9_-]*$/;
 /** Developer-id grammar: the namespace part of the app id. */
 const DEVELOPER_RE = /^[a-z][a-z_]*$/;
 
+/** The developer namespace used when no account supplies one. Apps in it
+    run and deploy, but publish beyond the workspace only after a real
+    developer id is registered. */
+export const DEFAULT_DEVELOPER_ID = 'local';
+
 /**
- * Scaffolds a new app — the programmatic twin of the App Builder's New App
- * wizard, rendering the exact same templates. Writes the app under
- * `./apps/<slug>`, ensures the pnpm workspace file and ignore hygiene,
- * vendors the server-matched platform packages when a server is reachable,
- * and installs. Everything after the scaffold (editing, verify, deploy)
- * is the normal app lifecycle.
+ * Resolves the developer id from a connected client's account info —
+ * `organization.developerId` off the cached auth response (no extra
+ * server call). The New App wizard and `rocketride app create` both default
+ * the app id's namespace through this.
+ *
+ * @param client - A connected client, or null/undefined when there is none.
+ * @returns The organization's developer id, or null when there is no
+ *   client, no organization, or the organization has not registered one
+ *   (always the case on OSS servers).
+ */
+export function resolveDeveloperId(client: { getAccountInfo(): unknown } | null | undefined): string | null {
+	const info = client?.getAccountInfo() as { organization?: { developerId?: string | null } } | undefined;
+	return info?.organization?.developerId || null;
+}
+
+/**
+ * Scaffolds a new app — the ONE scaffold behind the App Builder's New App
+ * wizard, `rocketride app create`, and `client.deploy.createApp()`. Writes
+ * the app under `./apps/<slug>-ui`, stamps its working-copy projectId, ensures
+ * the pnpm workspace file, dependency wiring, and ignore hygiene, vendors
+ * the server-matched platform packages when a server is given, and
+ * installs. Everything after the scaffold (editing, verify, deploy) is the
+ * normal app lifecycle.
  *
  * @param workspaceRoot - The workspace folder that owns ./apps.
  * @param slug - The app-name slug (lowercase; digits/-/_ after the first).
@@ -714,7 +830,7 @@ export async function createAppWorkspace(workspaceRoot: string, slug: string, op
 	if (!SLUG_RE.test(slug)) {
 		throw new Error(`App slug "${slug}" is invalid — lowercase letter first, then letters/digits/-/_.`);
 	}
-	const developerId = options.developerId ?? 'local';
+	const developerId = options.developerId ?? DEFAULT_DEVELOPER_ID;
 	if (!DEVELOPER_RE.test(developerId)) {
 		throw new Error(`Developer id "${developerId}" is invalid — lowercase letters/underscores only.`);
 	}
@@ -724,9 +840,10 @@ export async function createAppWorkspace(workspaceRoot: string, slug: string, op
 		throw new Error(`Unknown template "${template}" — available: ${TEMPLATE_NAMES.join(', ')}.`);
 	}
 
-	// step: destination — ./apps/<slug>, never over an existing folder
-	const folderRel = `apps/${slug}`;
-	const folderAbs = path.join(wsAbs, 'apps', slug);
+	// step: destination — ./apps/<slug>-ui (the workspace convention every
+	// app UI follows), never over an existing folder
+	const folderRel = `apps/${slug}-ui`;
+	const folderAbs = path.join(wsAbs, 'apps', `${slug}-ui`);
 	if (fs.existsSync(folderAbs)) {
 		throw new Error(`"${folderRel}" already exists — pick another slug or remove the folder.`);
 	}
@@ -745,7 +862,7 @@ export async function createAppWorkspace(workspaceRoot: string, slug: string, op
 		publisher: developerId,
 		moduleId: appId.replace(/[.-]/g, '_'),
 		port,
-		previewUrl: `${base}/?appid=${appId}&rrdev=1`,
+		previewUrl: `${base}/?appid=${encodeURIComponent(appId)}&rrdev=1`,
 	}, {
 		sidebar: options.sidebar ?? false,
 		statusFooter: options.statusFooter ?? true,
@@ -758,57 +875,46 @@ export async function createAppWorkspace(workspaceRoot: string, slug: string, op
 		progress(`+ ${folderRel}/${file.path}`);
 	}
 
+	// step: working-copy identity — the .rrapp trigger and the appManifest
+	// projectId exist from creation, so deploy provenance never depends on
+	// the app having been opened in an editor first
+	ensureAppTrigger(folderAbs, appId);
+	ensureProjectId(folderAbs);
+
 	// step: workspace hygiene — the pnpm workspace file that links every
-	// app, and the ignore entries that keep credentials and outputs out
-	// of git. Existing files are respected: the workspace yaml is only
-	// CREATED when missing (never rewritten), ignores only appended.
-	const wsYaml = path.join(wsAbs, 'pnpm-workspace.yaml');
-	if (!fs.existsSync(wsYaml)) {
-		fs.writeFileSync(wsYaml, "packages:\n  - 'apps/*'\n");
-		progress('+ pnpm-workspace.yaml (claims apps/*)');
-	} else if (!/apps\/\*/.test(fs.readFileSync(wsYaml, 'utf8'))) {
-		progress("warning: pnpm-workspace.yaml does not claim 'apps/*' — add it so the workspace install links this app");
-	}
-	const gitignorePath = path.join(wsAbs, '.gitignore');
-	const wanted = ['.rocketride/', '.env', '**/node_modules/', '**/dist/'];
-	const existingIgnore = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf8') : '';
-	const missing = wanted.filter((entry) => !existingIgnore.split(/\r?\n/).some((line) => line.trim() === entry));
-	if (missing.length > 0) {
-		fs.writeFileSync(gitignorePath, `${existingIgnore ? `${existingIgnore.replace(/\n*$/, '\n')}` : ''}${missing.join('\n')}\n`);
-		progress(`+ .gitignore (${missing.join(', ')})`);
+	// app (created, or amended to claim apps/*), the app's platform
+	// dependency wiring, and the ignore entries that keep credentials and
+	// outputs out of git. All user-owned files are edited conservatively,
+	// and a refusal (an inline yaml value, an unwritable file) is a warning,
+	// not a failure — the app is already written and valid.
+	const hygiene: Array<[string, () => unknown]> = [
+		['pnpm-workspace.yaml', () => ensureWorkspaceFile(wsAbs, progress)],
+		['dependency wiring', () => ensureDependencyWiring(folderAbs, wsAbs, progress)],
+		['.gitignore', () => ensureWorkspaceGitignore(wsAbs, progress)],
+	];
+	for (const [label, step] of hygiene) {
+		try {
+			step();
+		} catch (err) {
+			progress(`warning: ${label} not updated — ${err instanceof Error ? err.message : String(err)}`);
+		}
 	}
 
 	// step: vendor the server-matched platform packages (stable names the
 	// scaffolded file: specs point at). Failures are non-fatal by the same
 	// doctrine as the App Builder: the specs are the well-known locations
-	// and link on the next connected open.
+	// and link on the next connected open. The install runs below. A host
+	// with its own memoized vendor pass opts out (vendor: false).
 	const vendored = { shell: false, client: false };
-	if (options.serverBaseUrl) {
-		const vendorOne = async (route: string, dir: string, fileName: string, label: string): Promise<boolean> => {
-			try {
-				const res = await fetch(new URL(route, `${base}/`), { signal: AbortSignal.timeout(30_000) });
-				if (!res.ok) {
-					progress(`vendoring ${label} skipped — ${base}/${route} returned HTTP ${res.status}`);
-					return false;
-				}
-				const tgz = Buffer.from(await res.arrayBuffer());
-				const target = path.join(wsAbs, '.rocketride', dir, fileName);
-				if (fs.existsSync(target) && tgz.equals(fs.readFileSync(target))) {
-					progress(`${label} unchanged`);
-					return true;
-				}
-				fs.mkdirSync(path.dirname(target), { recursive: true });
-				fs.writeFileSync(target, tgz);
-				progress(`vendored ${label} (${(tgz.length / 1024).toFixed(0)} KB)`);
-				return true;
-			} catch (err) {
-				progress(`vendoring ${label} skipped — ${err instanceof Error ? err.message : String(err)}`);
-				return false;
-			}
-		};
-		vendored.shell = await vendorOne('client/shell', 'shell', 'shell.tgz', 'shell package');
-		vendored.client = await vendorOne('client/typescript', 'client', 'rocketride.tgz', 'client SDK package');
-	} else {
+	if (options.vendor !== false && options.serverBaseUrl) {
+		const result = await vendorPlatformPackages(wsAbs, { baseUrl: base, install: false, log: progress });
+		if (result.ok) {
+			vendored.shell = true;
+			vendored.client = result.clientVendored;
+		} else {
+			progress(`vendoring skipped — ${result.reason}`);
+		}
+	} else if (options.vendor !== false) {
 		progress('no server base URL — platform packages will vendor on the next connected open');
 	}
 
@@ -818,30 +924,17 @@ export async function createAppWorkspace(workspaceRoot: string, slug: string, op
 	let installed = false;
 	if (options.install !== false) {
 		progress('pnpm install --prefer-offline');
-		installed = await new Promise<boolean>((resolve) => {
-			// Single command string when a shell is involved: passing an args
-			// array with shell:true concatenates unescaped (Node DEP0190).
-			// stdio:'ignore' because nobody reads these pipes — a full pipe
-			// buffer would block pnpm forever and the timer below would kill
-			// an install that was in fact succeeding.
-			const proc = process.platform === 'win32'
-				? spawn('pnpm install --prefer-offline', { cwd: wsAbs, shell: true, stdio: 'ignore', env: { ...process.env, NO_COLOR: '1' } })
-				: spawn('pnpm', ['install', '--prefer-offline'], { cwd: wsAbs, stdio: 'ignore', env: { ...process.env, NO_COLOR: '1' } });
-			const timer = setTimeout(() => {
-				proc.kill();
-				resolve(false);
-			}, 300_000);
-			proc.on('error', () => {
-				clearTimeout(timer);
-				progress('pnpm not found — install pnpm (npm install -g pnpm) and run pnpm install at the workspace root');
-				resolve(false);
-			});
-			proc.on('close', (code) => {
-				clearTimeout(timer);
-				if (code !== 0) progress(`pnpm install exited ${code} — run it manually at the workspace root`);
-				resolve(code === 0);
-			});
-		});
+		// The shared root install: its timeout fells the whole process tree
+		// (taskkill /T on Windows, where killing the shell wrapper alone
+		// leaves pnpm running and holding locks)
+		try {
+			await runRootInstall(wsAbs);
+			installed = true;
+		} catch (err) {
+			progress((err as NodeJS.ErrnoException).code === 'ENOENT'
+				? 'pnpm not found — install pnpm (npm install -g pnpm) and run pnpm install at the workspace root'
+				: `${err instanceof Error ? err.message : String(err)} — run pnpm install manually at the workspace root`);
+		}
 	}
 
 	progress(`created ${appId} at ${folderRel} (${files.length} files)`);
@@ -871,7 +964,56 @@ function resolveAppRoot(workspaceRoot: string, appRoot: string): { wsAbs: string
 	return { wsAbs, appAbs, appRootRel };
 }
 
+/**
+ * Reads the working-copy projectId of the app at `appRoot` without writing
+ * — the workspace-relative entry point `deploy.addApp()` uses to forward
+ * `metadata.projectId` provenance. Deploys never stamp: the id is written
+ * at creation (`createAppWorkspace`) and by the editor, so a CI checkout
+ * or a read-only tree deploys as-is.
+ *
+ * @param workspaceRoot - The workspace the app folder is resolved against.
+ * @param appRoot - The app folder: absolute, or relative to workspaceRoot.
+ * @returns The projectId, or null when the working copy has none.
+ * @throws Error when the folder is missing, outside the workspace, or not
+ *   an app (no appManifest.id).
+ */
+export function readProjectIdAt(workspaceRoot: string, appRoot: string): string | null {
+	return readProjectId(resolveAppRoot(workspaceRoot, appRoot).appAbs);
+}
+
 // Arm the client's registry so bundled hosts (which cannot dynamically
 // resolve package specifiers at runtime) get the packer through their own
 // static import of this module.
-registerAppPack({ MAX_PACK_BYTES, MAX_ZIP_BYTES, collectPackedFiles, readIncludeEntries, packAppSource, verifyAppSource, createAppWorkspace } as AppPackModule);
+registerAppPack({
+	MAX_PACK_BYTES,
+	MAX_ZIP_BYTES,
+	MAX_ICON_BYTES,
+	MAX_README_IMAGE_BYTES,
+	DEFAULT_DEVELOPER_ID,
+	collectPackedFiles,
+	readIncludeEntries,
+	packAppSource,
+	verifyAppSource,
+	preflightApp,
+	createAppWorkspace,
+	resolveDeveloperId,
+	markerPathOf,
+	ensureAppTrigger,
+	ensureProjectId,
+	readProjectId,
+	readProjectIdAt,
+	readAppListing,
+	saveAppListing,
+	probeAppFolder,
+	scanAppMarkers,
+	findAppMarkers,
+	findApp,
+	appIconDataUri,
+	ensureWorkspaceFile,
+	ensureWorkspaceGitignore,
+	ensureDependencyWiring,
+	runRootInstall,
+	extractInstallCause,
+	isTransientLockError,
+	vendorPlatformPackages,
+});

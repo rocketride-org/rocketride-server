@@ -54,7 +54,7 @@ import { ChatClientFactory, ChatClientLike, ChatHistoryItem, ConnectionState } f
 export const HISTORY_LIMIT = 6;
 
 /** Rejection message handed to an {@link WidgetConnection.ask} that {@link WidgetConnection.disconnect} closed the transport under. */
-export const ASK_ABANDONED_MESSAGE = 'The connection was closed before the pipeline answered — please try again.';
+export const ASK_ABANDONED_MESSAGE = 'The connection was closed before the pipeline answered. Please try again.';
 
 /** Options for {@link WidgetConnection}. */
 export interface WidgetConnectionOptions {

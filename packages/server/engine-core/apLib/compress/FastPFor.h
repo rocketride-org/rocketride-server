@@ -25,9 +25,9 @@
 
 namespace FastPFor {
 
-void encode(const uint32_t *data, size_t len, uint32_t *out,
+ROCKETRIDE_CORE_API void encode(const uint32_t *data, size_t len, uint32_t *out,
             size_t &compressedSize) noexcept;
-void decode(const uint32_t *data, size_t len, uint32_t *out,
+ROCKETRIDE_CORE_API void decode(const uint32_t *data, size_t len, uint32_t *out,
             size_t &recoveredSize) noexcept;
 bool doesCpuSupportAvx2() noexcept;
 

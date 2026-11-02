@@ -423,7 +423,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 				field: 'unitAmount',
 				rrType: 'number',
 				rrDefault: true,
-				rrDescription: 'Recurring plan price. The raw value is Stripe unit_amount in USD cents — sorting and Min/Max filters operate on cents; the cell renders dollars per interval.',
+				rrDescription: 'Recurring plan price. The raw value is Stripe unit_amount in USD cents. Sorting and Min/Max filters operate on cents; the cell renders dollars per interval.',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
 				headerSort: true,
@@ -436,7 +436,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					return row.interval ? `${formatUsd(cents)} / ${row.interval}` : formatUsd(cents);
 				},
 			},
-			{ title: 'Billing Cycle', field: 'cycle', rrType: 'enum', rrDefault: true, rrDescription: 'How often the plan charges — the Stripe billing interval (month or year), shown as Monthly / Yearly.', headerSort: true },
+			{ title: 'Billing Cycle', field: 'cycle', rrType: 'enum', rrDefault: true, rrDescription: 'How often the plan charges: the Stripe billing interval (month or year), shown as Monthly / Yearly.', headerSort: true },
 			{
 				title: 'Renews/Ends',
 				field: 'currentPeriodEnd',

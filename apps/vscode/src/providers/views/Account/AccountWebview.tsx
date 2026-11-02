@@ -510,7 +510,7 @@ const AccountWebview: React.FC = () => {
 			{showCheckout && stripeKey && (
 				<CheckoutModal
 					appName="Pipe Builder"
-					appDescription="Visual AI pipeline editor -- run and deploy pipelines on RocketRide Cloud."
+					appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud."
 					stripePublishableKey={stripeKey}
 					onFetchPlans={handleFetchPlans}
 					onCreateCheckout={handleCreateCheckout}

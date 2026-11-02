@@ -1,0 +1,31 @@
+# Context filter for Dockerfile.engine-base. BuildKit uses this file instead of
+# the context root's .dockerignore, so the same filter applies whether the
+# context is this repo (release archive extracted into dist/server) or the saas
+# repo (a locally built dist/server).
+*
+!dist/server/
+
+# Overlays and UI bundles: the images built FROM the base add what they need.
+dist/server/extension
+dist/server/static
+
+# Test binaries and data, debug symbols.
+dist/server/aptest
+dist/server/engtest
+dist/server/nodetest
+dist/server/test_files
+dist/server/datasets
+dist/server/symbols
+
+# Whatever the build host installed or resolved: the base installs its own
+# baseline. A release archive has none of these; a developer tree has all of
+# them (pytest included), and cache/ holds a compiled constraints.txt.
+dist/server/bin
+dist/server/lib/python3.12/site-packages
+dist/server/cache
+
+**/__pycache__
+**/*.pyc
+
+# Last on purpose: no negation above can bring one back.
+**/.env

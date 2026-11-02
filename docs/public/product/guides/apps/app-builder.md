@@ -31,6 +31,9 @@ the same loop runs from a terminal or CI.
   only apps inside that namespace. Until the prefix of your app's id
   matches, the Deploy tab is read-only with a banner; the fix is to rename
   the id in `package.json`. Design and Package always work.
+- Catalog nodes only, if the app is headed for the store. Pipelines in a
+  store app use the nodes that ship with the engine and nothing else; see
+  [Adding a pipeline to your app](#adding-a-pipeline-to-your-app).
 
 ## The loop
 
@@ -41,7 +44,7 @@ that, you come back to Design and Deploy most often.
 
 Start from the Dashboard tab, or run **RocketRide: New App** from the
 command palette. The wizard asks for a name and a template (Blank or
-Dashboard) and scaffolds the app under `apps/<slug>`. Always create apps
+Dashboard) and scaffolds the app under `apps/<slug>-ui`. Always create apps
 this way; a hand-made folder fails later with symptoms far from the cause.
 The scaffold starts the id at `local.<slug>` until your organization has a
 developer id; renaming the id later makes it a different app.
@@ -63,6 +66,12 @@ What you will edit:
 rocketride app create reports --template Dashboard
 ```
 
+Both the wizard and the command create the app in `apps/reports-ui` and take
+the developer id from your account. The command reads the account from the
+credentials in `.env`, so run `rocketride login` (or `rocketride init`)
+first. Without an account it warns and uses `local`; pass
+`--developer <id>` to choose one yourself.
+
 ### Design
 
 The Preview pane is the real shell, running against your connected engine,
@@ -72,6 +81,19 @@ it disappears when the panel closes or the connection drops, so
 development work never reaches other users. **Components** is a live
 gallery of everything importable from `shell`, and **Console** shows your
 app's own console output as it runs.
+
+Your app's state does not disappear with the bundle: what the preview saves
+(`prefs`, `appState`) lives in the signed-in user's file store on the
+connected engine (with **Inherit Auth** on, the preview is signed in as you
+are), in a file named after the app id, and survives closing the panel.
+A copy of the app opened on another server, or a working copy under a
+different app id than the published app, has its own state, so edits in
+one do not show in the other. Deploying a new version keeps the state. On
+the same server, user and app id the two read one file but nothing syncs:
+the last save wins, so finish in one, close it, then reload the other
+before editing there. Files your app writes itself through the shell
+connection are stored per server and user only, so a development build
+and the published version on the same server share them.
 
 :::note If the preview keeps showing a sign-in screen
 With **Inherit Auth** off, an app that requires sign-in boots signed out on
@@ -85,7 +107,7 @@ The Package tab edits the `appManifest` block in `package.json`. The file
 is the truth, so editing it by hand is fine. Verification needs no server:
 
 ```bash
-rocketride app verify ./apps/reports
+rocketride app verify ./apps/reports-ui
 ```
 
 ### Your listing
@@ -106,24 +128,57 @@ Two verbs, and they are not the same:
   the same move: repoint, never rebuild. There is no org-wide rung; an
   org-wide audience is a team your admin maintains.
 
+A deploy returns as soon as the server accepts the upload; the version
+can be published, and served, only once its server build finishes. The
+version card shows the build's progress (`queued`, `building`, …) until
+then. Once you publish, **Where this app is live** on the Deploy tab shows
+what a browser in each audience actually gets: `serving`, or why not
+(`not serving: still building`, `not serving: build failed`, `disabled`,
+`in review`). The dashboard says which version you would get right now.
+Every open App Builder updates when a build lands or anyone in your
+organization publishes or disables a version.
+
 A deploy packs the app folder plus any folders listed under
 `appManifest.include`, and nothing else. Every `include` entry must exist.
 
 ```bash
-rocketride app deploy ./apps/reports --comment "first version"
+rocketride app deploy ./apps/reports-ui --comment "first version"
 ```
 
-`rocketride app deploy` needs a deployment target (`ROCKETRIDE_DEPLOY_URI`
-and `ROCKETRIDE_DEPLOY_APIKEY`) and refuses to run without one; `app
-create` uses the development connection (`ROCKETRIDE_URI`) to vendor
-platform packages, and `app verify` needs no connection. Publishing
-happens on the Deploy tab.
+To preview from the terminal instead of the App Builder, run `rocketride app
+dev reports --open`: it serves the app, opens the preview, and updates it on
+every save, whichever editor you use. Ctrl+C stops it.
+
+Publishing happens on the Deploy tab, or from the terminal:
+
+```bash
+rocketride app deploy reports --publish @me   # deploy, wait for the build, publish to your desktop
+rocketride app publish reports 2 --to @team/QA
+rocketride app versions reports                # the version rail
+rocketride app where reports                   # which audiences serve which version
+```
+
+The deploy and publish commands need a deployment target
+(`ROCKETRIDE_DEPLOY_URI` and `ROCKETRIDE_DEPLOY_APIKEY`, written by
+`rocketride login`) and refuse to run without one; `app create` uses the
+development connection (`ROCKETRIDE_URI`) to vendor platform packages, and
+`app verify` needs no connection.
 
 ## Adding a pipeline to your app
 
 There are two ways, and they are different features. See
 [Apps and pipelines](/concepts/apps#apps-and-pipelines) for the idea; this
 is the how-to.
+
+Either way, a pipeline in an app you intend to publish to the store may use
+catalog nodes only: the nodes that ship with the engine, listed in the
+[node catalog](/nodes). A custom node exists only on the engine that loads
+it; RocketRide Cloud loads none, and a few catalog nodes are marked
+unavailable there. Store reviewers reject a pipeline that references
+anything else, and no preflight warns you first. If a step has no catalog
+node, keep that logic in the app, or give an agent step bounded Python
+through the `tool_python` node; ask for a catalog node only for a step
+that must run inside the engine, rather than building one for the app.
 
 ### Inside the app: runs per user, on demand
 
@@ -140,8 +195,16 @@ const { token } = await client.use({ pipeline: summarizer, useExisting: true });
 
 Every signed-in user gets their own instance. Start it once per session and
 keep the token; `useExisting: true` re-attaches after a reload instead of
-failing because the pipeline is already running. The pipeline ships with the
-app on deploy. Use this for work that happens when the user asks for it.
+failing because the pipeline is already running. To run two instances for the
+same user at once, give each `use()` its own unguessable `token` (keep the
+`tk_` prefix). The instance stops by itself after about `ttl` seconds with
+no pipeline data request and no pipeline activity event (`apaevt_*`).
+The default is 15 minutes; `ttl: 0` disables the timeout. Status polling
+and raw stdout/debugger events do not reset the timer. The check runs once
+a minute, so the stop can come up to a minute early. The pipeline ships
+with the app on deploy. Use this for work that happens when the user
+asks for it; it is the default, and the right choice unless the pipeline is
+a service shared by a whole team.
 
 ### Outside the app: shared, on a schedule
 
@@ -161,16 +224,29 @@ import nightly from '../../../pipelines/nightly-report.pipe'; // identity only
 const projectId = String(nightly.project_id);
 ```
 
-Outside its schedule window there is no running instance and no token.
-That is the normal state, not an error; show the feature as offline and
-check again later. Deploying the app does not carry this pipeline, so
-deploy it on its own whenever it changes.
+When no run is active, there is no token. That is a normal state, not an
+error; show the feature as offline and check again later. A cron start and
+`ttl` do not define fixed opening hours: pipeline data requests extend a
+scheduled run's timeout, and a manual run has no timeout. Deploying the
+app does not carry this pipeline, so deploy it on its own whenever it
+changes.
+
+Deployed runs do not inherit the default development idle timeout. To
+limit a scheduled run, configure `--ttl`: it stops after approximately
+that many seconds without a pipeline data request. Emitted events do not
+reset this timer, so a long processing step can still be interrupted.
+An omitted or zero `ttl` disables the timeout. `rocketride deploy run`
+starts a manual run without a timeout, even when a schedule is set. A
+long-lived pipeline started this way can keep running and billing until
+it finishes or someone terminates it. Use a schedule with `ttl` when you
+need the automatic timeout.
 
 | | Inside the app | Outside the app |
 | --- | --- | --- |
 | Where the `.pipe` lives | in the app folder | its own project |
 | Who runs it | one instance per signed-in user | one instance for the team |
 | When it runs | when the app asks | on its schedule |
+| When it stops | finishes, is terminated, or reaches its activity timeout (`ttl`) | finishes, is terminated, or reaches a scheduled run's configured timeout; manual runs have no timeout |
 | How it deploys | with the app | separately, `rocketride deploy` |
 
 ## Next steps

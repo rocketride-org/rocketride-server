@@ -621,7 +621,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			{removeTeam && onRemove && (
 				<ConfirmDialog
 					title={`Remove ${pipelineName || 'this deployment'} from ${removeTeam.teamName}?`}
-					message={`Takes ${pipelineName || 'the deployment'} off ${removeTeam.teamName}: schedules stop firing and the deployment leaves all listings. This is a SOFT remove — the audit history and every published version survive, and deploying any version to ${removeTeam.teamName} revives it.`}
+					message={`Takes ${pipelineName || 'the deployment'} off ${removeTeam.teamName}: schedules stop firing and the deployment leaves all listings. This is a SOFT remove: the audit history and every published version survive, and deploying any version to ${removeTeam.teamName} revives it.`}
 					confirmLabel="Remove"
 					cancelLabel="Cancel"
 					onConfirm={() => {
@@ -710,7 +710,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 						</Button>
 					}
 				>
-					<div style={{ fontSize: 12.5, color: 'var(--rr-text-secondary)', marginBottom: 10 }}>Points the chosen team at v{pickerVersion}. Choosing a team already on a newer version is a rollback &mdash; same gesture, one mental model.</div>
+					<div style={{ fontSize: 12.5, color: 'var(--rr-text-secondary)', marginBottom: 10 }}>Points the chosen team at v{pickerVersion}. Choosing a team already on a newer version is a rollback: same gesture, one mental model.</div>
 					{controlTeams.map((team) => {
 						const current = deployments.find((dep) => dep.teamId === team.id && dep.state !== 'removed');
 						const isCurrent = current?.version === pickerVersion;
@@ -735,7 +735,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 					title={pendingDeploy.fromVersion !== undefined && pendingDeploy.fromVersion > pendingDeploy.version ? `Roll ${pendingDeploy.team.name} back to v${pendingDeploy.version}?` : `Deploy v${pendingDeploy.version} to ${pendingDeploy.team.name}?`}
 					message={
 						<>
-							{pendingDeploy.fromVersion !== undefined ? `${pendingDeploy.team.name} currently runs v${pendingDeploy.fromVersion}. Its next runs will execute v${pendingDeploy.version} — schedules and history carry over.` : `${pendingDeploy.team.name} is not running this project yet. Its runs will execute v${pendingDeploy.version}.`}
+							{pendingDeploy.fromVersion !== undefined ? `${pendingDeploy.team.name} currently runs v${pendingDeploy.fromVersion}. Its next runs will execute v${pendingDeploy.version}. Schedules and history carry over.` : `${pendingDeploy.team.name} is not running this project yet. Its runs will execute v${pendingDeploy.version}.`}
 							{error && <div style={S.errorText}>{error}</div>}
 						</>
 					}

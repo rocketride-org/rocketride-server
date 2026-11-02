@@ -440,6 +440,10 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
         return APERR(Ec::InvalidCommand,
                      "The endpoint is not open during call to getPipe");
 
+    // The pipe gate may refuse the pipe
+    if (pipeGate)
+        if (auto ccode = pipeGate()) return ccode;
+
     // Find a pipe
     _block() {
         // Lock the pipes - we are manipulating the pipe stacks

@@ -168,7 +168,7 @@ export const ConnectionRecordPanel: React.FC<IConnectionRecordPanelProps> = ({ c
 	const maskedKey = record.apikey ? `${record.apikey.slice(0, 4)}${'•'.repeat(8)}${record.apikey.slice(-4)}` : '—';
 
 	return (
-		<DetailPanel persistKey="panelDetailConnectionWidth" open onClose={onClose} avatar={<div style={styles.avatar(AVATAR_COLORS[record.id % AVATAR_COLORS.length])}>#{record.id}</div>} title={`#${record.id} — ${clientName}`} subtitle={record.clientId ?? undefined}>
+		<DetailPanel persistKey="panelDetailConnectionWidth" open onClose={onClose} avatar={<div style={styles.avatar(AVATAR_COLORS[record.id % AVATAR_COLORS.length])}>#{record.id}</div>} title={`#${record.id}: ${clientName}`} subtitle={record.clientId ?? undefined}>
 			{/* ── Connection Info ──────────────────────────────────────────── */}
 			<Section label="Connection Info">
 				<LabelValue label="Connected at" mono>

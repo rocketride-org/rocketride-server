@@ -189,6 +189,7 @@
 	//
 	"test": {
 		"profiles": ["kokoro"],
+		"requiresHardware": { "cuda": { "vramGb": 2 }, "mps": { "ramGb": 4 }, "cpu": { "ramGb": 4 } },
 		"outputs": ["audio"],
 		"cases": [
 			{

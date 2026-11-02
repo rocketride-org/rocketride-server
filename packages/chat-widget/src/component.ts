@@ -419,7 +419,7 @@ export class RocketRideChatElement extends BaseElement {
 		}
 		const connection = this._connection;
 		if (!connection || !connection.isConnected()) {
-			this._appendMessage({ role: 'system', text: 'Not connected yet — please wait a moment and try again.', transient: true });
+			this._appendMessage({ role: 'system', text: 'Not connected yet. Please wait a moment and try again.', transient: true });
 			return;
 		}
 

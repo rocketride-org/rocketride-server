@@ -77,6 +77,9 @@ def test_a_capped_value_the_model_accepts_is_not_called_a_rejection():
 def test_catalogue_breach_is_reported_when_the_value_really_goes_out():
     problem = check_output_token_config('gpt-4.1-mini', 128000, 128000, PROFILES)
     assert 'exceeds the 32,768' in problem
+    # Not "will reject": the Responses API accepts such a request and stops the reply at the model's limit.
+    assert 'may reject the request or stop the reply at its own limit' in problem
+    assert 'will reject' not in problem
 
 
 class TestHandSuppliedTokenFields:

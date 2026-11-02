@@ -680,7 +680,7 @@ export const TeamsPanel: React.FC<TeamsPanelProps> = ({ teams, teamDetail, activ
 													</option>
 													{eligible.map((m) => (
 														<option key={m.userId} value={m.userId}>
-															{m.displayName} — {m.email}
+															{m.displayName} ({m.email})
 														</option>
 													))}
 												</select>

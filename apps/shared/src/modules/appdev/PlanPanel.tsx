@@ -328,8 +328,8 @@ export const PlanPanel: React.FC<IPlanPanelProps> = ({ open, plan, appName, onSa
 			<DetailPanel
 				open={open}
 				onClose={onClose}
-				title={plan ? `Plan — ${plan.nickname}` : 'New plan'}
-				subtitle={`${appName} pricing — staged into the manifest; live on store approval.`}
+				title={plan ? `Plan: ${plan.nickname}` : 'New plan'}
+				subtitle={`${appName} pricing: staged into the manifest; live on store approval.`}
 				busy={busy}
 				dirty={dirty}
 				editing

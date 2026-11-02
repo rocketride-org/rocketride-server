@@ -296,7 +296,7 @@ class Store(DocumentStoreBase):
         if not self.doesCollectionExist():
             return {}
 
-        filter_conditions = {'meta.chunkId': 0}
+        filter_conditions = {'meta.chunkId': 0, 'meta.isDeleted': False}
         if parent is not None:
             filter_conditions['meta.parent'] = {'$regex': parent, '$options': 'i'}
 

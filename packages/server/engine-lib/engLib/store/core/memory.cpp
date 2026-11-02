@@ -21,26 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
-#ifdef CLASSIFY_DLL_EXPORT
-// When building as part of classify wrapper DLL, use apLib directly (no
-// engLib/Python deps)
-#include <apLib/ap.h>
-#include <cstdlib>  // For malloc/free/realloc
-#include <cstring>  // For memset
-
-// Setup namespace aliasing like eng.h does - required for engLib headers
-namespace engine {
-using namespace ap;
-}
-namespace engine::store {
-using namespace ap;
-}
-
-#include <engLib/store/headers/memory.hpp>
-#else
-// Normal engLib build uses the master header
 #include <engLib/eng.h>
-#endif
 
 namespace engine::store {
 //-------------------------------------------------------------------------

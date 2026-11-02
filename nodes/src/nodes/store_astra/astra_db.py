@@ -33,13 +33,32 @@ import re
 
 from astrapy import DataAPIClient, Database
 from astrapy.data_types import DataAPIVector
+from astrapy.exceptions import TooManyDocumentsToCountException
 from astrapy.info import CollectionDefinition, CollectionVectorOptions, CollectionLexicalOptions
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
-from ai.common.store import DocumentStoreBase
+from ai.common.store import CONTROL_OBJECT_ID, DocumentStoreBase
 from ai.common.config import Config
 
 from rocketlib import warning
+
+# A bounded count is exact; past it, stats reports the server's estimate (see
+# count_documents).
+_COUNT_UPPER_BOUND = 10_000
+# The Data API's default exact-count limit, Astra DB's: past it, countDocuments
+# answers with the limit and moreData, and astrapy raises naming the limit.
+_SERVER_COUNT_LIMIT = 1_000
+
+
+def _count_floor(exc: TooManyDocumentsToCountException) -> int:
+    """The number of rows a collection is known to exceed when astrapy refuses to count it."""
+    if not exc.server_max_count_exceeded:
+        return _COUNT_UPPER_BOUND
+    # astrapy carries the server's limit only in its message ("Document count
+    # exceeds 1000, the maximum allowed by the server"); the Data API default
+    # stands in when the message does not name it.
+    match = re.search(r'exceeds (\d+)', exc.text or '')
+    return int(match.group(1)) if match else _SERVER_COUNT_LIMIT
 
 
 class Store(DocumentStoreBase):
@@ -244,8 +263,14 @@ class Store(DocumentStoreBase):
         # Get the collection
         collection = self.database.get_collection(self.collection_name)
 
-        # Return the document count
-        return collection.count_documents({})
+        try:
+            return collection.count_documents({}, upper_bound=_COUNT_UPPER_BOUND)
+        except TooManyDocumentsToCountException as exc:
+            # Past the exact-count ceiling (this node's bound, or the server's
+            # limit), report the server's estimate rather than paging through
+            # every row ID on each stats call. The estimate can lag recent
+            # writes, so never report less than the count known to be exceeded.
+            return max(collection.estimated_document_count(), _count_floor(exc) + 1)
 
     def searchKeyword(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
         """
@@ -317,43 +342,43 @@ class Store(DocumentStoreBase):
 
     def getPaths(self, parent: str | None = None, offset: int = 0, limit: int = 1000) -> Dict[str, str]:
         """
-        More efficient implementation using aggregation to get distinct parent paths.
+        List distinct active parent paths, ordered by path, then paged locally.
+
+        Astra collections have no aggregation API. An unsorted cursor follows
+        every server page; a server-side sort or limit could truncate the input
+        before paths are grouped. Only chunk-zero parent/object metadata is read.
         """
         if not self._doesCollectionExist():
             return {}
 
         # Build match stage filter
-        match_filter = {'meta.chunkId': 0}
+        match_filter = {'meta.chunkId': 0, 'meta.isDeleted': False}
 
         if parent is not None:
             match_filter['meta.parent'] = parent
 
-        # Use aggregation pipeline
-        pipeline = [
-            {'$match': match_filter},
-            {
-                '$group': {
-                    '_id': '$meta.parent',
-                    'objectId': {'$first': '$meta.objectId'},
-                }
-            },
-            {'$skip': offset},
-            {'$limit': limit},
-        ]
-
-        # Execute aggregation
         collection = self.database.get_collection(self.collection_name)
-        results = collection.aggregate(pipeline)
+        results = collection.find(
+            filter=match_filter, projection={'meta.parent': True, 'meta.objectId': True, '_id': False}
+        )
 
-        # Build paths dictionary
+        # Choose the lowest object ID for each path so result order does not
+        # change page boundaries when Astra returns chunks in a different order.
         paths: Dict[str, str] = {}
         for result in results:
-            parent_path = result['_id']
-            object_id = result['objectId']
-            if parent_path and object_id:
+            metadata = result.get('meta') or {}
+            if not isinstance(metadata, dict):
+                continue
+            parent_path = metadata.get('parent')
+            object_id = metadata.get('objectId')
+            if not isinstance(parent_path, str) or not parent_path:
+                continue
+            if not isinstance(object_id, str) or not object_id or object_id == CONTROL_OBJECT_ID:
+                continue
+            if parent_path not in paths or object_id < paths[parent_path]:
                 paths[parent_path] = object_id
 
-        return paths
+        return dict(sorted(paths.items())[offset : offset + limit])
 
     def addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None:
         """
@@ -414,7 +439,7 @@ class Store(DocumentStoreBase):
                 raise Exception('No embedding in document')
 
             # Handle control document with zero vectors
-            if chunk.metadata.objectId == 'schema' and all(x == 0 for x in embedding):
+            if chunk.metadata.objectId == CONTROL_OBJECT_ID and all(x == 0 for x in embedding):
                 embedding = [1e-8] * len(embedding)
 
             # Create the document structure for AstraDB

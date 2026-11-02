@@ -199,7 +199,7 @@ public:
     void startCounters() noexcept;
     Counts &addCompleted(CountSize counts) noexcept;
     Counts &addFailed(CountSize counts) noexcept;
-    Counts &addWords(CountSize counts) noexcept;
+    ROCKETRIDE_CORE_API Counts &addWords(CountSize counts) noexcept;
     void beginObject(TextView path, uint64_t size) noexcept;
     void endObject(TextView path) noexcept;
     void beginObject(Entry &object) noexcept;

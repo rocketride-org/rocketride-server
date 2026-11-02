@@ -420,7 +420,7 @@ class RangeDataSource {
 			// file — cancel the body so a multi-GB response isn't buffered into memory.
 			if (response.status === 200) {
 				await response.body?.cancel();
-				this._recordFailure(chunkIndex, 'Server ignored Range header (200) — partial content unsupported');
+				this._recordFailure(chunkIndex, 'Server ignored Range header (200); partial content unsupported');
 			} else {
 				this._recordFailure(chunkIndex, `Expected 206, got ${response.status}`);
 			}

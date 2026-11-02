@@ -38,13 +38,20 @@ import { DAPMessage, UPLOAD_RESULT } from '../../client/types';
 import { addConnectionOptions, connectClient, loadPipelineConfig, runCliCommand, formatSize } from '../common';
 
 /**
+ * glob options for every lookup below. On Windows the backslash is the
+ * path separator, which glob otherwise reads as an escape and then
+ * matches nothing (validate.ts does the same).
+ */
+const GLOB_OPTIONS = { nodir: true, windowsPathsNoEscape: process.platform === 'win32' };
+
+/**
  * Expand file arguments (files, directories, glob patterns) into a
  * de-duplicated list of absolute file paths.
  *
  * @param patterns - CLI file arguments.
  * @returns Absolute paths of every matched file.
  */
-function findFiles(patterns: string[]): string[] {
+export function findFiles(patterns: string[]): string[] {
 	const files: string[] = [];
 	for (const pattern of patterns) {
 		const fullPath = path.resolve(pattern);
@@ -53,12 +60,12 @@ function findFiles(patterns: string[]): string[] {
 			if (stat.isFile()) {
 				files.push(fullPath);
 			} else if (stat.isDirectory()) {
-				const dirFiles = glob.sync(path.join(fullPath, '**/*'), { nodir: true });
+				const dirFiles = glob.sync(path.join(fullPath, '**/*'), GLOB_OPTIONS);
 				files.push(...dirFiles.map((f) => path.resolve(f)));
 			}
 		} catch {
 			// Not a literal path — treat as a glob pattern
-			const matches = glob.sync(pattern, { nodir: true });
+			const matches = glob.sync(pattern, GLOB_OPTIONS);
 			files.push(...matches.map((f) => path.resolve(f)));
 		}
 	}

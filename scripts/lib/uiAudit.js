@@ -170,17 +170,23 @@ function checkTemplateConformance(name, configText, template) {
 		return `${name}: rsbuild.config.mts is missing the header title, dev hint, or port`;
 	}
 	const rendered = template
-		.split('{{TITLE}}').join(titleMatch[1])
-		.split('{{DEVHINT}}').join(hintMatch[1])
-		.split('{{PORT}}').join(portMatch[1])
-		.split('{{DEVBLOCK}}').join(configText.includes('writeToDisk: true') ? DEV_BLOCK : '');
+		.split('{{TITLE}}')
+		.join(titleMatch[1])
+		.split('{{DEVHINT}}')
+		.join(hintMatch[1])
+		.split('{{PORT}}')
+		.join(portMatch[1])
+		.split('{{DEVBLOCK}}')
+		.join(configText.includes('writeToDisk: true') ? DEV_BLOCK : '');
 	if (rendered === configText) return null;
 	const a = rendered.split('\n');
 	const b = configText.split('\n');
 	for (let i = 0; i < Math.max(a.length, b.length); i++) {
 		if (a[i] !== b[i]) {
-			return `${name}: rsbuild.config.mts drifts from the canonical template at line ${i + 1} ` +
-				`(expected ${JSON.stringify(a[i] ?? '<EOF>')}, found ${JSON.stringify(b[i] ?? '<EOF>')})`;
+			return (
+				`${name}: rsbuild.config.mts drifts from the canonical template at line ${i + 1} ` +
+				`(expected ${JSON.stringify(a[i] ?? '<EOF>')}, found ${JSON.stringify(b[i] ?? '<EOF>')})`
+			);
 		}
 	}
 	return `${name}: rsbuild.config.mts drifts from the canonical template`;
@@ -227,7 +233,7 @@ function checkPortUniqueness(ports) {
 		if (names.length < 2) continue;
 		const sorted = [...names].sort();
 		const allowed = ALLOWED_PORT_SHARERS.some(
-			pair => pair.length === sorted.length && pair.every((n, i) => n === sorted[i]),
+			(pair) => pair.length === sorted.length && pair.every((n, i) => n === sorted[i])
 		);
 		if (!allowed) {
 			errors.push(`dev port ${port} is claimed by ${sorted.join(' AND ')}`);
@@ -257,8 +263,7 @@ function checkManifestHygiene(name, pkg, isApp, needsBrowserslist) {
 			}
 		}
 	}
-	if (needsBrowserslist &&
-		JSON.stringify(pkg.browserslist) !== JSON.stringify(CANONICAL_BROWSERSLIST)) {
+	if (needsBrowserslist && JSON.stringify(pkg.browserslist) !== JSON.stringify(CANONICAL_BROWSERSLIST)) {
 		errors.push(`${name}: browserslist must equal the canonical floor ${JSON.stringify(CANONICAL_BROWSERSLIST)}`);
 	}
 	return errors;
@@ -286,10 +291,8 @@ function checkDependencyRanges(manifests) {
 	for (const [dep, byRange] of ranges) {
 		if (byRange.size < 2) continue;
 		const allowed = ALLOWED_RANGES[dep];
-		if (allowed && [...byRange.keys()].every(r => allowed.includes(r))) continue;
-		const detail = [...byRange.entries()]
-			.map(([range, names]) => `${range} <- ${names.join(', ')}`)
-			.join('; ');
+		if (allowed && [...byRange.keys()].every((r) => allowed.includes(r))) continue;
+		const detail = [...byRange.entries()].map(([range, names]) => `${range} <- ${names.join(', ')}`).join('; ');
 		errors.push(`dependency "${dep}" is declared with ${byRange.size} different ranges: ${detail}`);
 	}
 	return errors;
@@ -317,9 +320,7 @@ function runUiAudit({ overlayRoot, task } = {}) {
 
 	// Pass 1: per-config checks + port collection.
 	for (const { name, dir } of apps) {
-		const configText = fs
-			.readFileSync(path.join(dir, 'rsbuild.config.mts'), 'utf8')
-			.replace(/\r\n/g, '\n');
+		const configText = fs.readFileSync(path.join(dir, 'rsbuild.config.mts'), 'utf8').replace(/\r\n/g, '\n');
 		const portMatch = configText.match(/port: (\d+)/);
 		if (portMatch) ports.push({ name, port: portMatch[1] });
 		if (LEGACY_APPS.includes(name)) continue;
@@ -337,7 +338,7 @@ function runUiAudit({ overlayRoot, task } = {}) {
 	// Pass 3 + 4: manifest hygiene and dependency-range drift.
 	const manifests = readFamilyManifests(apps, overlayRoot);
 	for (const { name, pkg } of manifests) {
-		const isApp = apps.some(a => a.name === name);
+		const isApp = apps.some((a) => a.name === name);
 		const needsBrowserslist = name === 'shell' || (isApp && !LEGACY_APPS.includes(name));
 		errors.push(...checkManifestHygiene(name, pkg, isApp, needsBrowserslist));
 	}

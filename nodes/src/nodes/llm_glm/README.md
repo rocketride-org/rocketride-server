@@ -46,7 +46,7 @@ Default: **GLM-5.2** (`glm-5-2`). The profile set matches the live Z.ai `/models
 
 Choose a model profile. The profile supplies the model identifier and context window, so a cloud pipeline needs no additional model settings. Budget generous output tokens for reasoning-heavy prompts.
 
-To use a self-hosted vLLM or SGLang deployment, select the **Custom Model** profile and point its server base URL at your OpenAI-compatible endpoint. The API key may be left empty there: the node passes a dummy token, and local servers accept any value.
+To use a self-hosted vLLM or SGLang deployment, select the **Custom Model** profile and point its server base URL at your OpenAI-compatible endpoint. Its output limit starts at 8,192 tokens and can be changed there. The API key may be left empty there: the node passes a dummy token, and local servers accept any value.
 
 ## Authentication
 
@@ -76,6 +76,7 @@ Profiles are maintained by the `sync_models` tooling (`llm_glm` provider, `ROCKE
 | `glm.profile` | `string` | **Model**<br/>Zhipu AI GLM LLM model | `"glm-5-2"` |
 | `glm.serverbase` | `string` | **Server base URL**<br/>OpenAI-compatible base URL for the GLM endpoint (e.g. https://api.z.ai/api/paas/v4 for the Z.ai cloud API, http://localhost:8000/v1 for a self-hosted vLLM / SGLang server). | `"https://api.z.ai/api/paas/v4"` |
 | `model` | `string` | **Model**<br/>Zhipu AI GLM model |  |
+| `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 
 ## Dependencies

@@ -60,7 +60,7 @@ export async function deployApp(appId: string, message: string): Promise<Record<
 	const client = ConnectionManager.getInstance().getClient();
 	if (!client || !ConnectionManager.getInstance().isConnected()) {
 		logger.output('[appdev:pack]   check server connection — FAILED: not connected');
-		throw new Error('Not connected — publishing needs a live server connection.');
+		throw new Error('Not connected. Publishing needs a live server connection.');
 	}
 	logger.output('[appdev:pack]   check server connection — OK');
 
@@ -96,7 +96,7 @@ export async function deployApp(appId: string, message: string): Promise<Record<
 		}
 		if ((listing.include?.length ?? 0) > 0) {
 			logger.output('[appdev:pack]   check include layout — FAILED: include declared but the workspace folder IS the app folder');
-			throw new Error('appManifest.include needs the app inside a larger workspace — the workspace folder IS the app folder here.');
+			throw new Error('appManifest.include needs the app inside a larger workspace, but the workspace folder IS the app folder here.');
 		}
 	}
 

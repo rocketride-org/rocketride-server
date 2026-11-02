@@ -10,7 +10,11 @@ text arriving on the `questions` lane is answered on the `answers` lane.
 
 Uses **langchain-aws (`ChatBedrock`)** on top of **boto3 / botocore**. The chat client is
 created once per pipeline run with a fixed `temperature` of `0`; the output token cap is
-taken from the model's configured output-token limit.
+taken from the model's configured output-token limit. Token counts are estimated at
+about four characters a token, so no tokenizer package is needed. The estimate feeds
+the size warnings and nodes that cut documents to fit the model (such as
+`summarization` and `preprocessor_llm`); text that packs more tokens into fewer
+characters, such as code, may count low.
 
 The node automatically prepends a cross-region inference prefix to the model ID based on
 the configured AWS region: `eu.` for `eu*` regions, `apac.` for `ap*` regions, and `us.`
@@ -78,10 +82,32 @@ to edit those values.
 Select **Custom** to use a Bedrock model not listed above. Provide its full
 provider-prefixed model ID (for example,
 `anthropic.claude-3-7-sonnet-20250219-v1:0`) or an ARN for a custom or
-provisioned model, plus the model's total token limit. Bare model names without a
+provisioned model, plus the model's total token limit and its output limit (4,096
+by default; raise it for models that reason before answering). Bare model names without a
 provider prefix produce a save-time warning. See the
 [Bedrock model IDs reference](https://docs.aws.amazon.com/bedrock/latest/userguide/model-ids.html)
 for available identifiers.
+
+### Prompt caching
+
+Claude models on Bedrock can reuse the start of a prompt they have already read, at
+a tenth of the input price. Bedrock does this on its own, but only as best effort;
+a `cache_control` marker makes that start eligible on every call. When a question sets
+`cachePrefix` (the RocketRide Wave agent does on every planning call), the node splits
+the prompt into two text blocks: the start that stays the same between calls (role,
+instructions, examples, history), marked for caching, and the rest (context,
+documents, goals, questions). The model reads the same text either way. Questions
+without the flag are sent as one block, as before.
+
+The marker goes only to Claude models that support it: every Claude from 4 on, Claude
+3.7 Sonnet and Claude 3.5 Haiku. Bedrock rejects it for the older Claude models, so
+they, and models from other providers, get the plain prompt. A prefix shorter than
+the model's minimum (from 512 to 4,096 tokens depending on the model; see
+[the Bedrock prompt caching guide](https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html))
+is simply not cached, at no extra cost. Nova caches repeated prompt starts on its own
+(best effort) and gets no marker.
+
+Cache reads and writes are metered separately from fresh input tokens.
 
 ## Authentication
 
@@ -106,6 +132,7 @@ verify the AWS region first.
 |---|---|---|---|
 | `bedrock.profile` | `string` | **Model**<br/>LLM model | `"meta_llama3_3-70b"` |
 | `model` | `string` | **Model**<br/>Bedrock LLM model name or ARN for custom or provisioned models |  |
+| `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 
 ## Dependencies

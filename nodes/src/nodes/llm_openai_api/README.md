@@ -44,7 +44,7 @@ combined profile table.
 ## Configuration
 
 Choose `custom` for a generic provider and set its model ID, base URL, context limit,
-and API key. Choose one of the named Nebius profiles when using Token Factory; those
+output limit (4,096 tokens unless changed) and API key. Choose one of the named Nebius profiles when using Token Factory; those
 profiles pin the model ID, endpoint, and context limit.
 
 ### Generic OpenAI-compatible endpoints
@@ -63,7 +63,8 @@ combined table require no model or endpoint edits.
 Nebius profiles default the API key to the `${ROCKETRIDE_NEBIUS_KEY}` environment
 substitution, so no per-node key entry is needed when that variable is set. The Nebius
 service also exposes its own `custom` option for another Token Factory model, retaining
-the pinned endpoint, environment-backed key, and 131,072-token context limit. The
+the pinned endpoint, environment-backed key, and 131,072-token context limit, with an
+output limit of 4,096 tokens unless changed. The
 combined table represents the duplicate `custom` key once, using the generic service's
 merged 32,768-token default.
 
@@ -94,6 +95,22 @@ Anything else falls through to the shared LLM base's default retry and mapping l
 test server with a mocked `langchain_openai`, so no real API key is required.
 `ROCKETRIDE_MOCK` must point to `nodes/test/mocks`.
 
+### Model sync (Nebius service only)
+
+The profiles in `services.nebius.json` are maintained by the `sync_models` tooling
+(`llm_nebius` provider, `ROCKETRIDE_NEBIUS_KEY`), which reads Nebius Token Factory's
+own model list. New profiles are written with the Nebius base URL and the same
+`${ROCKETRIDE_NEBIUS_KEY}` reference the existing ones use.
+
+Token limits come only from Nebius: it runs open-weight models on its own hardware,
+so the context window is its choice, and the same model is served with a different
+window by every other host. The sync runs **only** with that key, because Nebius IDs
+(`Qwen/Qwen3-235B-A22B`) appear in no other catalogue and a keyless run would mark
+these profiles deprecated — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
+
+The generic `services.json` profiles are **not** synced: the model is whatever the
+user types for their own OpenAI-compatible endpoint.
+
 ---
 
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
@@ -107,6 +124,7 @@ test server with a mocked `langchain_openai`, so no real API key is required.
 |---|---|---|---|
 | `base_url` | `string` | **Base URL**<br/>API base URL (e.g. https://api.featherless.ai/v1) |  |
 | `model` | `string` | **Model**<br/>Model name (e.g. zai-org/GLM-5, meta-llama/Llama-3-70b) |  |
+| `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `openai_api.profile` | `string` | **Model**<br/>Profile selection | `"custom"` |
 
@@ -116,6 +134,7 @@ test server with a mocked `langchain_openai`, so no real API key is required.
 |---|---|---|---|
 | `base_url` | `string` | **Base URL**<br/>OpenAI-compatible base URL. Defaults to Nebius Token Factory. |  |
 | `model` | `string` | **Model**<br/>Nebius Token Factory model id (e.g. meta-llama/Llama-3.3-70B-Instruct). Full list: https://tokenfactory.nebius.com/models |  |
+| `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `openai_api.profile` | `string` | **Model**<br/>Nebius Token Factory model | `"llama-3-3-70b"` |
 

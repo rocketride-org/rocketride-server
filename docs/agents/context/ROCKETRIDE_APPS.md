@@ -186,7 +186,8 @@ Two rules before anything else:
   files.** The scaffold carries load-bearing details that are easy to get
   subtly wrong by hand: the pinned Module Federation plugin version, the
   `src/index.ts` async boundary, the jsx-dev-runtime HMR anchor, the
-  `*.pipe` module declaration, and the vendored platform-package pins.
+  `emitOnErrors: false` build setting, the `*.pipe` module declaration,
+  and the vendored platform-package pins.
   Hand-rolled app folders fail in ways whose symptoms (blank preview,
   frozen HMR, share-negotiation errors) appear far from the cause.
   Two front doors render the identical templates: the App Builder's New
@@ -218,13 +219,14 @@ Two rules before anything else:
   	displayName: 'Reports',
   	statusFooter: true,
   });
-  // created.appId = 'local.reports', created.folder = 'apps/reports'
+  // created.appId = '<your developer id>.reports', created.folder = 'apps/reports-ui'
   ```
 
-  The scaffold defaults the id to `local.<slug>` (pass `developerId` once
-  your org's id is registered) and is scaffolding only — nothing deploys
-  until the normal lifecycle (`verifyApp` → `addApp` → `publishApp`)
-  runs.
+  The scaffold namespaces the id with the connected org's developer id
+  (falling back to `local.<slug>` when the org has not registered one;
+  pass `developerId` to override) and is scaffolding only — nothing
+  deploys until the normal lifecycle (`verifyApp` → `addApp` →
+  `publishApp`) runs.
 
 The New App wizard collects an app-name slug, a display name, a template
 (**Blank** or **Dashboard**), and three frame options that each toggle a
@@ -251,7 +253,7 @@ sharing one `node_modules`.
 | `README.md` | Ships with the app and appears on its store listing; readme readiness starts green. |
 | `src/index.ts` | The Module Federation **async boundary** — its entire body is `import('./AppDescriptor');`. Required so shared modules are negotiated before any app code runs. |
 | `src/global.d.ts` | Ambient module declaration for `*.pipe` imports (see [Embedding Pipelines](#embedding-pipelines)). |
-| `src/AppDescriptor.ts` | The single exposed module. Starts with `import 'react/jsx-dev-runtime';` — the **HMR anchor**: it keeps the shared JSX runtime referenced even when your root component fails to compile. Without it, an error build orphans the runtime, hot reload tombstones its module factory, and every later fix silently fails to apply (the frozen-preview bug). Do not remove it. |
+| `src/AppDescriptor.ts` | The single exposed module. Starts with `import 'react/jsx-dev-runtime';` — the **HMR anchor**: it keeps the shared JSX runtime referenced even when a save leaves your root component with no JSX. Without it, that update disposes the runtime, no later hot update can bring it back, and every later save silently fails to apply (the frozen-preview bug). Failed builds are covered separately by `emitOnErrors: false` (see [Build Configuration](#build-configuration)). Do not remove it. |
 | `src/App.tsx` | Your root component: `<AppLayout>` composed from the frame options you picked, wrapping a starter `Content`. Recompose its props (`sidebar`, `showStatus`) any time. |
 
 ---
@@ -288,7 +290,9 @@ reason telling you what to fix.
   tablet, phone), each with five common CSS viewports; the iframe gets those
   exact dimensions so responsive breakpoints fire exactly as on the device.
   Orientation, zoom, fit-to-window; all preview preferences persist per
-  workspace and app.
+  workspace and app. The app's own `prefs`/`appState` are not preview
+  preferences: they are saved in the connected server's file store under
+  the app id; see [State & Persistence](#state--persistence).
 - **Code** — file tree + editor (web App Builder only; in VS Code files are
   native and a strip links to them).
 - **Components** — the stock UI component gallery: live examples of
@@ -355,7 +359,7 @@ by hand.
 | Field | Type | Default | Meaning |
 |---|---|---|---|
 | `id` | `string` | required | Stable unique identity, `<developerId>.<name>` (e.g. `acme.brandy`). The prefix must be your org's claimed namespace to deploy or publish. Renaming the id makes it a different app. |
-| `projectId` | `string` | auto | Working-copy GUID the App Builder manages — tells one checkout apart from another; rides deploys only as provenance. Leave it alone. |
+| `projectId` | `string` | auto | Working-copy GUID stamped when the app is created (New App wizard, `rocketride app create`, `createApp`/`create_app`) or first opened in the App Builder — tells one checkout apart from another. Deploys forward it as provenance and never write it. Leave it alone. |
 | `publisher` | `string` | — | Publisher display name in the app store. |
 | `name` | `string` | required | Display name (app switcher, store tile). |
 | `description` | `string` | — | Short description for the store listing. |
@@ -744,7 +748,7 @@ from `'shell'`). The full set:
 | `shell:appsUpdated` | `{ apps }` | App catalog changed — complete replacement set. |
 | `shell:login` | `{ user: ConnectResult }` | Authentication succeeded. |
 | `shell:logout` | `{}` | User signed out. |
-| `shell:loginRequest` | `{ appId?, register? }` | UI requests sign-in. |
+| `shell:loginRequest` | `{ appId?, register?, auto?, signupProperties?: SignupProperties }` | UI requests sign-in; `auto` is set only by the shell's auth gate. |
 | `shell:logoutRequest` | `{}` | UI requests sign-out. |
 | `shell:switchApp` | `{ appId }` | Switch the active app. |
 | `shell:subscribe` | `{ app, plan?, promo? }` | Open subscription checkout; `plan` skips the picker. |
@@ -755,12 +759,31 @@ from `'shell'`). The full set:
 | `shell:themeChange` | `{ tokens }` | Theme changed; `tokens` is the full `--rr-*` map. |
 | `shell:viewActivated` | `{ viewId }` | A view/tab became active — lazy panels init here. |
 | `shell:manifestRefresh` | `{ source }` | Server-side app manifest changed (dev overlay, publish, expiry). |
+| `shell:telemetry` | `{ event, props, ts, id }` | A telemetry fact the shell observed (`auth:complete`) for the active app to forward; `auth:start` and other held facts come from `cm.drainTelemetry()`. |
 | `app:statusChanged` | `{ appId, version?, status, notes? }` | Store review status changed. |
 | `store:changed` | `{ prefix, paths }` | Files changed under a watched store prefix. |
 
 The event map is the platform's shared vocabulary — it carries platform
 events only. For your app's internal communication, use ordinary React
 state or your own emitter; do not overload the shell bus.
+
+Optional `signupProperties` is consent-gated PKCE credential context for sign-up requests.
+The native auth telemetry facts contain no signup attribution; the encoded credential alone
+uses the snake_case `signup_properties` key. See the public Shell API signup attribution guide.
+
+**Telemetry facts.** The shell has no analytics SDK: it raises `auth:start`
+and `auth:complete` (with `is_new`, `waitlisted` and `duration_ms`, the OAuth
+round trip from the redirect, null when unknown) as `shell:telemetry` for the
+active app to forward to its own analytics. `auth:start` is always held (the
+OAuth redirect follows at once), and so is a fact raised while no app listens
+(32 facts, 30 minutes, in the tab's sessionStorage), until the app calls
+`cm.drainTelemetry?.()` (optional: older shells lack it): drain once at
+analytics init, then subscribe, and forward each fact once by its `id` with
+`ts` as its time. On the waitlist
+screen, where no app renders, the shell loads the home app's exposed
+`./telemetry` module and calls its no-argument default export once per page
+load; it starts the home analytics and must not render. Only the home app
+exposes it.
 
 ### Debug log
 
@@ -786,6 +809,40 @@ The shell persists your app's state per user in `.workspace/` on the server:
 | `.workspace/global.json` | Active app + globally-mirrored prefs (theme, sidebar open) |
 | `.workspace/<appId>.workspace.json` | Your app's `{ prefs, appState }` |
 | `.workspace/settings.json` | User setting overrides (deltas only — defaults live in your schema) |
+
+**"On the server" means the server the page is connected to**, in the
+signed-in user's file store, and the file is named after the app id, not
+the version. A page therefore sees the state another page saved only when
+both are on the same server, signed in as the same user, under the same
+app id:
+
+- **A new version** keeps the state: every deployed version of an app reads
+  and writes the same file.
+- **The App Builder preview** runs against the connected development
+  server (`ROCKETRIDE_URI`), so the `prefs` and `appState` it saves live in
+  that server's file store; the published `@me` app lives on the deployment
+  target. When those are different servers, each copy keeps its own file,
+  and edits in one never show up in the other: not data loss, two files.
+- **A working copy under a different app id** than the published app (one
+  scaffolded as `local.<slug>`, or renamed after the org registered its
+  developer id) keeps its own file even on the same server.
+- **Same server, user and app id** (the deployment target is the
+  development server): the preview and the published copy read one file
+  but nothing syncs. Each page keeps the copy it loaded and writes it back
+  whole, so the last save wins: finish in one, close it, then reload the
+  other before editing there.
+
+Which user the preview is signed in as is set by **Inherit Auth**: on (the
+default), the preview is signed in as the App Builder is; off, as whoever
+signs in inside the preview (signed out until then).
+
+Files your app writes itself through the shell connection's file calls (for
+example `client.fsWriteJson('reports/q3.json', data)`) follow a different
+rule: a plain path is stored under the signed-in user's own root in that
+server's file store, with no app id or version in it. A development build
+and the published version on the same server and user therefore read
+and write the same files, and a file both pages write follows the same
+last-save-wins rule.
 
 ### Prefs — small UI preferences
 
@@ -869,6 +926,26 @@ object), never `filepath:` (Node-only). Read
 before authoring the `.pipe` content itself, and
 `ROCKETRIDE_typescript_API.md` for the full client reference.
 
+**Catalog nodes only.** A store app's pipelines may use only catalog nodes:
+the nodes that ship with the engine (`nodes/src/nodes` in the server repo;
+the node catalog on the docs site). A custom node (`local_nodes`, loaded
+with `--node_path`) exists only on the engine that loads it. RocketRide
+Cloud loads none, and also refuses the few catalog nodes marked `nosaas`,
+so being in the catalog is necessary, not sufficient. Store reviewers
+reject a submission whose pipelines reference a provider outside the
+catalog, and nothing before review checks it: the Package and Store
+preflights do not read `.pipe` providers, and
+`.rocketride/services-catalog.json` mirrors whichever engine the workspace
+last synced from, local nodes included, so on a self-hosted engine with
+`--node_path` that file is not the catalog. Decide this before building.
+If the catalog has no node for a step, keep that logic in the app (the app
+already sends documents, controls pipes and makes decisions), or give an
+agent step bounded Python through `tool_python` (sandboxed: allowlisted
+imports only, no network, filesystem or subprocess access). Only a step
+that must run inside the engine is a candidate for a catalog node, and
+that goes through an issue in the server repo, not into the app. Never
+scaffold a custom node for a store app.
+
 ### Secrets and configuration
 
 Pipeline configs reference secrets as `${ROCKETRIDE_*}` placeholders.
@@ -897,7 +974,14 @@ await client.terminate(token);
 
 `use()` is expensive — start the pipeline once per session and keep the
 token; never start/stop around every request. `ttl` controls the idle
-shutdown window (`0` = run until terminated).
+shutdown window (`0` disables the timeout; the default is 15 minutes).
+The idle clock restarts on pipeline data requests and on `apaevt_*` events
+from the pipeline. Status polling, raw stdout, and debugger events do not
+reset it. The task stops after approximately `ttl` seconds without that
+activity, and its billing ends when the task stops. The engine checks idle
+time once a minute in 60-second steps, so the stop can come up to a minute
+before `ttl`. A long step that emits nothing can still hit it: size `ttl`
+to your longest quiet step plus at least a minute of margin.
 
 ### One task for everyone vs a task per user
 
@@ -906,8 +990,28 @@ your app calls `use()`, the owner is the signed-in **user**. So every user
 of your app gets their own instance of the pipeline, automatically.
 `useExisting` does not change that: it attaches to *that user's* own
 already-running instance (a reload, a second tab, a second component)
-instead of failing with 'Pipeline is already running.' — it never crosses
-user boundaries.
+instead of failing with 'Pipeline is already running.' — with the default
+token it never crosses user boundaries. (A custom token is looked up by its
+value alone; see below.)
+
+To run two instances of one pipeline for the same user at once (a second
+tab, say), give each `use()` its own `token`: the server then keys the task
+on that token instead of the hash. Use an unguessable value that keeps the
+`tk_` prefix (`tk_` plus a UUID, for example): the value is the run's private
+token (full control for anyone who presents it), tokens share one namespace
+across every user of the server, and a token without the prefix cannot serve
+as a private token on webhook or dropper endpoints. With `useExisting`, a
+token that matches a running task attaches to it, whoever started it: one
+more reason the value must be unguessable. Keep the tokens you chose: both
+instances get the same `pk_` public authorization key, and a webhook call or
+dropper upload that uses it always reaches the instance that started first
+(to send data to one specific instance, use its `tk_` token); `getTaskToken()`
+is keyed by `projectId` and source, so it returns only one of them. Monitor
+subscriptions are keyed the same way: both instances' events arrive in one
+subscription (each event's `body.__id` names the emitting run, best effort),
+and a few minutes after one instance ends the shared subscription is
+dropped, so resubscribe. The run log is not built for two instances of one
+identity; treat it as unreliable.
 
 **Per-user tasks (the default, and the only behavior `use()` can produce):**
 
@@ -934,7 +1038,11 @@ if (token) await client.send(token, data, undefined, 'text/plain');
   accumulates is visible to all of them.
 - Cost and lifecycle — the run bills to the owning team, resolves the
   team's environment, and outlives any one user's session; restarting or
-  terminating it affects everyone at once.
+  terminating it affects everyone at once. Shared runs do not inherit the
+  default development idle timeout. A scheduled run can have an explicit
+  `ttl`; a manual `deploy.run` has no timeout and can remain running, and
+  billing, until the pipeline finishes or someone terminates it (see
+  'Lifecycle and cost' below).
 
 **Choosing:** per-user when the pipeline holds per-user state or cost
 should follow the user; shared when the pipeline is a service — one big
@@ -998,7 +1106,10 @@ it cannot serve.
 `apaevt_status_update` events stream the same status fields (errors and
 exit code included) while the task runs, and an `apaevt_task` event with
 `action: 'end'` that you did not cause — no `terminate()`, no TTL you
-expected — is your cue to check the status and show the error state:
+expected — is your cue to check the status and show the error state. The
+end event's body carries `reason: 'ttl'` when an idle timeout or a run
+window ended the task, so you can show "stopped by its time limit" instead
+of an error:
 
 ```typescript
 useEffect(() => {
@@ -1047,12 +1158,41 @@ that pipeline separately and manage it through the deploy API
 (`client.deploy.*` — see the SDK docs); your app can still observe its runs
 and read its outputs.
 
+### Lifecycle and cost: bundle and `use()` unless it is a service
+
+The default for an app's pipeline is the bundled one: the `.pipe` lives in
+the app folder, ships with the app so the app and the pipeline always
+match, and your code starts it with `use()`. With the default timeout, each
+user's instance stops by itself when idle. Reach for a team deployment
+when the pipeline is a service shared by a team. To limit a scheduled
+run's lifetime, configure its `ttl`: deployed runs do not inherit the
+default development timeout.
+
+| How the run started | When it stops | Who pays |
+|---|---|---|
+| `use()` from the app | finishes, is terminated, or reaches approximately `ttl` seconds without a pipeline data request or `apaevt_*` event (default 15 minutes; `0` disables timeout) | the signed-in user's development team |
+| A schedule (`deploy.setSchedule(..., { ttl })`) | finishes, is terminated, or reaches its configured `ttl`, counted from the last pipeline data request; omitted or zero `ttl` disables timeout | the deployment's billing team |
+| `deploy.run(projectId, sourceId, teamId)` by hand | no timeout: it runs until the pipeline finishes or someone with `task.control` on the deployment's team calls `terminate(token)` with the token `deploy.run` returned. Disabling the deployment refuses new runs but does not stop one already going | the deployment's billing team |
+
+A long-lived pipeline started with `deploy.run` can keep running and
+billing indefinitely: a manual run ignores the schedule's `ttl`, even
+when a schedule exists. It ends when the pipeline finishes or the task is
+terminated. To apply a configured timeout, start it through its schedule
+(see 'The team-service pattern' below). The scheduled timeout counts
+from the last pipeline data request; emitted events do not reset it. A
+long processing step can therefore be cut off even while emitting events.
+The timeout is approximate, using the same minute-by-minute checks
+described above. The `apaevt_task` end event carries `reason: 'ttl'`
+when a timeout ended the run. An absent reason does not establish a crash:
+normal completion can also omit it. Check task status and exit information
+to distinguish other outcomes.
+
 ### The team-service pattern: addressing a scheduled deployment
 
-The counterpart of embedding, and the shape "runs 9:00–18:00 for the whole
-team" requirements always take: ONE shared pipeline deployed as its own
-`kind: 'pipe'` project and scheduled on a team, with the app **addressing**
-the running task instead of starting its own. The pieces:
+For a scheduled service shared by a team, deploy the pipeline as its own
+`kind: 'pipe'` project. The app **addresses** the running task instead of
+starting its own. Cron determines the start; `ttl` does not guarantee a
+fixed closing time because pipeline data requests extend it. The pieces:
 
 - **Identity without drift** — import the `.pipe` for its `project_id` (the
   scaffold's build treats `.pipe` as JSON) and address the service as
@@ -1455,6 +1595,8 @@ export default defineConfig(() => ({
 	// .pipe files are JSON — importable and passable to client.use().
 	tools: {
 		rspack: {
+			// A failed build emits nothing — the preview keeps the last good one.
+			optimization: { emitOnErrors: false },
 			module: { rules: [{ test: /\.pipe$/, type: 'json' } as const] },
 		},
 	},
@@ -1478,12 +1620,35 @@ Key rules:
   Bundling your own copy of any of them breaks the app at load time.
 - **Keep the exact MF plugin pin** (`2.5.1`) — see
   [the scaffold table](#the-scaffolded-files).
+- **Keep `emitOnErrors: false`.** A failed build then emits nothing, and the
+  preview keeps running the last good build until the fix lands. Without
+  it, the failed build's hot update disposes every module only the broken
+  file imported, and every later save silently fails to apply. Apps
+  scaffolded before this setting existed should add it under
+  `tools.rspack`.
 - **`npm run build` = `tsc --noEmit && rsbuild build`.** Type errors fail
   the local build exactly as the server build will (unless waived with
   `typecheck: false`).
 
 You normally never run these yourself — the watch runs the dev server, and
 deploys build on the server — but they are there for CI or scripted checks.
+
+**The `dist/` folder is never served.** `npm run build` writes `dist/` in
+your app folder, and nothing reads it: not the preview, not the server. A
+local build only proves that the app compiles. The two places a browser
+gets your app from are:
+
+- **The preview** loads it from the watch's dev server (see
+  [The Dev Loop](#the-dev-loop)). If a change does not appear there, read
+  the watch status line. Rebuilding into `dist/` will not help.
+- **Everyone else** loads a deployed version, which the server built itself
+  from your uploaded source and serves at
+  `/apps/<appManifest.id>/v<N>/remoteEntry.js` (see
+  [Deploy and Publish](#deploy-and-publish)). If a change does not appear
+  for them, deploy a new version and publish it.
+
+The served path is keyed on `appManifest.id`, never on the name of your app
+folder.
 
 ---
 
@@ -1551,6 +1716,10 @@ that audience again revives it.
   (review always tracks your current work — to ship older code, deploy it
   again as a new version). Submitting flips the version `private → submit`.
 - **Withdraw** cancels your own submission (`submit → private`).
+- Reviewers reject a submission whose bundled `.pipe` files reference a
+  node outside the catalog (see 'Catalog nodes only' under Embedding
+  Pipelines). No preflight checks this for you: read the providers in your
+  `.pipe` files before you submit.
 - The verdict lands as `ready` (approved — publishable to `@public`) or
   `rejected`, pushed live to your App Builder (`app:statusChanged`), with
   reviewer notes on rejection.
@@ -1589,8 +1758,8 @@ version you want off the air while you investigate — and the still-visible
 row is the reminder. **Remove** is the statement that you no longer serve
 this audience at all, and it tidies the table. The Deploy tab's **Remove**
 action on a where-live row is the remove verb; from scripts,
-`client.removeAppPublish(appId, target)` performs remove, and disable rides
-the same deploy command as its `disable` subcommand. For the `@public` row,
+`client.removeAppPublish(appId, target)` performs remove and
+`client.disableAppPublish(appId, target)` performs disable. For the `@public` row,
 only the developer organization may do either.
 
 ### Testing a specific published version: the version override
@@ -1635,16 +1804,19 @@ Mechanics worth knowing:
 Everything the Deploy tab does is scriptable — the UI and the SDKs call the
 same verbs (TypeScript camelCase / Python snake_case):
 
-| Action | TypeScript verb |
-|---|---|
-| List versions | `client.listDeployments(appId)` |
-| Deploy a source zip | `client.deploy.add({ kind: 'app', data, metadata })` |
-| Publish to a rung | `client.publishApp(appId, version, target)` |
-| Remove a binding | `client.removeAppPublish(appId, target)` |
-| Where live | `client.whereApp(appId)` |
-| Submit / withdraw review | `client.submitApp(...)` / `client.withdrawApp(...)` |
-| Review thread reply | `client.replyApp(appId, message)` |
-| Build log | `client.buildLog(appId, version)` |
+| Action | TypeScript verb | CLI |
+|---|---|---|
+| Live preview (dev loop) | `rocketride/app-dev` (`DevSession`, `devPreviewUrl`) | `rocketride app dev [app] --open` |
+| List versions | `client.listDeployments(appId)` | `rocketride app versions [app]` |
+| Deploy the app's source | `client.deploy.addApp(appFolder, { comment })` | `rocketride app deploy [app]` |
+| Wait for the server build | `client.waitForAppBuild(appId, version)` | (built into `app publish` / `app deploy --publish`) |
+| Publish to a rung | `client.publishApp(appId, version, target)` | `rocketride app publish [app] [version] --to <target>` |
+| Remove a binding | `client.removeAppPublish(appId, target)` | `rocketride app unpublish [app] --from <target>` |
+| Disable a binding | `client.disableAppPublish(appId, target)` | `rocketride app disable [app] --from <target>` |
+| Where live | `client.whereApp(appId)` | `rocketride app where [app]` |
+| Submit / withdraw review | `client.submitApp(...)` / `client.withdrawApp(...)` | `rocketride app submit|withdraw [app] [version]` |
+| Review thread reply | `client.replyApp(appId, message)` | `rocketride app reply [app] -m <text>` |
+| Build log | `client.buildLog(appId, version)` | `rocketride app log [app] [version]` |
 
 The Python client mirrors every verb (`publish_app`, `submit_app`,
 `where_app`, ...). See `ROCKETRIDE_typescript_API.md` and

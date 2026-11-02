@@ -176,6 +176,10 @@ def _format_table(table_info: dict) -> dict:
     return result
 
 
+class MissingLlmError(ValueError):
+    """A natural-language question reached a node with no llm connected."""
+
+
 class DatabaseInstanceBase(IInstanceBase, ABC):
     """Abstract base for the IInstance layer of any relational database node.
 
@@ -200,6 +204,33 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         Surfaced to SDK callers via the ``dialect`` tool function so applications
         can branch on the underlying engine (dialect-specific SQL, type coercion, etc.).
         """
+
+    def _sessionsAreTransactions(self) -> bool:
+        """Return whether a ``begin`` session is a database transaction on this node.
+
+        db_clickhouse overrides this to False: its ``commit`` and ``rollback`` are
+        no-ops and it has no savepoints, so the session tools must not promise rollback.
+        """
+        return True
+
+    def _unknownSession(self, session_id: Any) -> ValueError:
+        """Return the error for a ``session_id`` the registry does not hold."""
+        kind = 'transaction session' if self._sessionsAreTransactions() else 'session'
+        return ValueError(f'unknown or expired {kind}: {session_id}')
+
+    def _sessionRecoveryPolicy(self) -> str:
+        """Return the ``execute`` description's advice for a session after a failed statement."""
+        if not self._sessionsAreTransactions():
+            return (
+                f'A failed statement inside a session_id leaves the session open. A session on '
+                f'{self._db_display_name()} opens no transaction, so it undoes nothing: every statement is '
+                f'executed when it is sent, rollback discards nothing, and savepoints do not exist.'
+            )
+        return (
+            'A failed statement inside a session_id rolls nothing back and leaves the session open: '
+            'recover with rollback, or rollback to savepoint <name>, before sending more work on that '
+            'session. On PostgreSQL the transaction stays aborted until you do, and commit is refused.'
+        )
 
     # ------------------------------------------------------------------
     # Reflection lock
@@ -402,7 +433,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'required': ['sql'],
             'properties': {
                 'sql': {'type': 'string', 'description': 'Raw SQL statement to execute.'},
-                'session_id': {'type': 'string', 'description': 'Optional transaction session id from begin.'},
+                'session_id': {'type': 'string', 'description': 'Optional session id from begin.'},
                 'params': {'type': 'array', 'description': 'Optional positional bind values for $1..$n.'},
                 'row_mode': {
                     'type': 'string',
@@ -420,10 +451,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         },
         description=lambda self: (
             f'Execute a raw SQL statement against this {self._db_display_name()} database. '
-            f'Bypasses LLM translation and SQL safety checks. '
-            f'A failed statement inside a session_id rolls nothing back and leaves the session open: '
-            f'recover with rollback, or rollback to savepoint <name>, before sending more work on that '
-            f'session. On PostgreSQL the transaction stays aborted until you do, and commit is refused.'
+            f'Bypasses LLM translation and SQL safety checks. {self._sessionRecoveryPolicy()}'
         ),
     )
     def execute(self, args):
@@ -447,7 +475,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             try:
                 result = self.IGlobal.tx_registry.execute(session_id, sql.strip(), params, row_mode)
             except KeyError:
-                raise ValueError(f'unknown or expired transaction session: {session_id}')
+                raise self._unknownSession(session_id)
             except Exception as e:
                 # The statement itself failed. `tx_registry` has no IGlobal and
                 # is shared with other callers, so the formatting the sessionless
@@ -518,10 +546,13 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         output_schema={'type': 'object', 'properties': {'session_id': {'type': 'string'}}},
         description=lambda self: (
             f'Begin a transaction on this {self._db_display_name()} database; returns a session_id.'
+            if self._sessionsAreTransactions()
+            else f'Reserve a connection on this {self._db_display_name()} database; returns a session_id. '
+            f'It opens no transaction: statements sent with the session_id are executed when they are sent.'
         ),
     )
     def begin(self, args):
-        """Begin a transaction and return a session_id."""
+        """Open a session and return its session_id; a transaction unless ``_sessionsAreTransactions`` is False."""
         if not self.IGlobal.allow_execute:
             raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
         return {'session_id': self.IGlobal.tx_registry.begin()}
@@ -533,10 +564,14 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'properties': {'session_id': {'type': 'string'}},
         },
         output_schema={'type': 'object', 'properties': {'ok': {'type': 'boolean'}}},
-        description=lambda self: 'Commit an open transaction session.',
+        description=lambda self: (
+            'Commit an open transaction session.'
+            if self._sessionsAreTransactions()
+            else 'Close a session. Its statements were already executed when they were sent.'
+        ),
     )
     def commit(self, args):
-        """Commit an open transaction session."""
+        """Commit and close a session; where sessions are not transactions it only closes it."""
         return self._finishTx(args, commit=True)
 
     @tool_function(
@@ -546,10 +581,14 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'properties': {'session_id': {'type': 'string'}},
         },
         output_schema={'type': 'object', 'properties': {'ok': {'type': 'boolean'}}},
-        description=lambda self: 'Roll back an open transaction session.',
+        description=lambda self: (
+            'Roll back an open transaction session.'
+            if self._sessionsAreTransactions()
+            else 'Close a session. This undoes nothing: its statements were already executed when they were sent.'
+        ),
     )
     def rollback(self, args):
-        """Roll back an open transaction session."""
+        """Roll back and close a session; where sessions are not transactions it only closes it."""
         return self._finishTx(args, commit=False)
 
     def _finishTx(self, args, *, commit: bool):
@@ -561,7 +600,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             (self.IGlobal.tx_registry.commit if commit else self.IGlobal.tx_registry.rollback)(args['session_id'])
         except KeyError:
-            raise ValueError(f'unknown or expired transaction session: {args["session_id"]}')
+            raise self._unknownSession(args['session_id'])
         return {'ok': True}
 
     @tool_function(
@@ -823,7 +862,18 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         Returns the parsed JSON dict from the LLM with keys ``isValid`` and
         ``query``.
+
+        Raises:
+            MissingLlmError: no LLM is connected to the node.
         """
+        # The llm connection is optional: only natural-language questions use
+        # it, while raw SQL through the execute tool never does.
+        if not self.instance.getControllerNodeIds('llm'):
+            raise MissingLlmError(
+                f'No LLM is connected to this {self._db_display_name()} node. '
+                'Natural-language questions need an llm connection; raw SQL through '
+                'the execute tool (client.database.query) works without one.'
+            )
 
         def describe_schema(schema: dict) -> str:
             """Format the db_schema dict into a concise text block for the LLM."""
@@ -1036,6 +1086,14 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
             self._emit(result, lanes, executed=executed)
 
+        except MissingLlmError as e:
+            # The caller needs this cause, not only the log: on the text/answers
+            # lanes when one is wired, otherwise through the engine's error path
+            # (a table-only pipeline has no lane that carries an error message).
+            error(f'Error handling question: {e}')
+            if 'text' not in lanes and 'answers' not in lanes:
+                raise
+            self._emitError(str(e), lanes)
         except Exception as e:
             error(f'Error handling question: {e}')
 

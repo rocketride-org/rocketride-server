@@ -113,7 +113,7 @@ class IInstance(IInstanceBase):
 
         question.addInstruction(
             'Result Example',
-            """"
+            """\
                 {
                     "summary": "This is a summary of the document",
                     "keyPoints": ["key point1", "keypoint2", ...],

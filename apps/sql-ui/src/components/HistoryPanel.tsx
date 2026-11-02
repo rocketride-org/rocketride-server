@@ -604,7 +604,7 @@ export const HistoryPanel: React.FC<IHistoryPanelProps> = (props) => {
 
 				{entries.length >= DEFAULT_HISTORY_LIMITS.maxEntries && (
 					<div style={styles.capLine}>
-						{`${entries.length} of ${DEFAULT_HISTORY_LIMITS.maxEntries} kept — the oldest unpinned entry drops as new ones arrive.`}
+						{`${entries.length} of ${DEFAULT_HISTORY_LIMITS.maxEntries} kept. The oldest unpinned entry drops as new ones arrive.`}
 					</div>
 				)}
 

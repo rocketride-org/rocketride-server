@@ -27,3 +27,10 @@ requests>=2.32.4
 # stays at 2024.1.14 deliberately: 2024.11.20 publishes no macOS wheels, so a
 # tighter pin would make the macOS leg build cmark-gfm from source.
 cmarkgfm>=2024.1.14
+
+# A runtime dependency of the package (pyproject's dependencies) that the engine
+# interpreter does not otherwise carry: rocketride._app_pack imports it at
+# module scope for .gitignore matching, and tests/test_deploy_create_app.py
+# drives add_app through it. CI never pip-installs this package, so its own
+# dependency list never reaches the test step. Floor matches pyproject.toml.
+pathspec>=0.12.0

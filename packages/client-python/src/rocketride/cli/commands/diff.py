@@ -71,13 +71,15 @@ from ...pipediff import (
     load_pipe,
     resolve_git_ref,
 )
-from ...pipediff.reporters import render_human, render_json, render_markdown
+from ...pipediff.reporters import _term_safe, render_human, render_json, render_markdown
 
 
 # An empty pipeline used as the "old" side when --git names a ref in which the
 # file does not yet exist: everything in the working-tree file is then reported
 # as newly added.
 _EMPTY_PIPE: Dict[str, Any] = {'components': []}
+
+_TOO_DEEP = 'Pipeline nesting is too deep to load, compare, or render; reduce nested values'
 
 
 def _should_use_color(stream: Any = None) -> bool:
@@ -109,13 +111,21 @@ def _fail(message: str) -> int:
     Errors are always written to stderr so that ``--json`` and ``--markdown``
     output on stdout stays pure and machine-parseable.
 
+    The message is escaped the way the human report is. It can carry text taken
+    from the inputs - a component id, a path, a ref, a name git echoes back - and
+    the pipe-diff Action pastes this stream into a pull-request comment, so a
+    crafted ``.pipe`` must not be able to print control, bidi, invisible or
+    line-separator characters there (a forged ``Error:`` line, a recoloured or
+    reordered block). They print as ``\\x1b`` / ``\\u202e`` escapes; ordinary text
+    is unchanged.
+
     Args:
         message: Human-readable error description.
 
     Returns:
         The integer exit code ``2``.
     """
-    print(f'Error: {message}', file=sys.stderr)
+    print(f'Error: {_term_safe(message)}', file=sys.stderr)
     return 2
 
 
@@ -139,7 +149,11 @@ def _resolve_inputs(args) -> tuple:
     paths: List[str] = list(getattr(args, 'paths', None) or [])
     git_ref: Optional[str] = getattr(args, 'git', None)
 
-    if git_ref:
+    # ``is not None``, not truthiness: an empty ``--git ""`` must not be read as
+    # "no --git" and silently fall back to file mode.
+    if git_ref is not None:
+        if not git_ref.strip():
+            raise ValueError('--git requires a non-empty REF')
         if len(paths) != 1:
             raise ValueError('--git requires exactly one FILE to compare against the ref')
         file_path = paths[0]
@@ -158,6 +172,36 @@ def _resolve_inputs(args) -> tuple:
     return old_obj, new_obj
 
 
+def _stream_can_print(text: str, stream: Any) -> bool:
+    """
+    Report whether ``stream`` can carry ``text`` exactly.
+
+    ``main()`` opens the standard streams with ``errors='replace'`` so no output
+    can crash a command; a character the stream cannot encode (a lone surrogate,
+    or a letter on an ASCII console) therefore prints as ``?``.
+    """
+    try:
+        text.encode(getattr(stream, 'encoding', None) or 'utf-8')
+    except (UnicodeEncodeError, LookupError):
+        return False
+    return True
+
+
+def _show_unprintable(text: str, stream: Any) -> str:
+    """
+    Return ``text`` with every character ``stream`` cannot encode written as an escape.
+
+    The default would be ``errors='replace'``, which prints each such character as
+    ``?``: ``日本 -> 中国`` on a cp1252 console reads ``?? -> ??``, a change that looks
+    like none. Escapes (``\\u65e5``) keep the two values visibly different.
+    """
+    encoding = getattr(stream, 'encoding', None) or 'utf-8'
+    try:
+        return text.encode(encoding, errors='backslashreplace').decode(encoding)
+    except (LookupError, UnicodeError):
+        return text
+
+
 def _render(args, diff: Any) -> str:
     """
     Render the diff using the reporter selected by the command flags.
@@ -174,10 +218,23 @@ def _render(args, diff: Any) -> str:
         The fully rendered report string for printing to stdout.
     """
     if getattr(args, 'json', False):
-        return json.dumps(render_json(diff), indent=2, ensure_ascii=False, sort_keys=True)
+        # Build the document outside the handler: only the serializer's
+        # non-finite-number failure is an input problem; a ValueError from the
+        # reporter itself is a bug and must keep its traceback.
+        document = render_json(diff)
+        try:
+            text = json.dumps(document, indent=2, ensure_ascii=False, sort_keys=True, allow_nan=False)
+            # Two values that differ only in characters stdout cannot carry (the
+            # lone surrogates "\ud800" and "\udc00" are both valid in a .pipe)
+            # would both print as "?": escape them instead, which is still JSON.
+            if not _stream_can_print(text, sys.stdout):
+                text = json.dumps(document, indent=2, ensure_ascii=True, sort_keys=True, allow_nan=False)
+            return text
+        except ValueError as exc:  # a non-finite number; JSON has no spelling for it
+            raise PipeDiffError(f'The report contains a value JSON cannot represent: {exc}') from exc
     if getattr(args, 'markdown', False):
-        return render_markdown(diff)
-    return render_human(diff, use_color=_should_use_color(sys.stdout))
+        return _show_unprintable(render_markdown(diff), sys.stdout)
+    return _show_unprintable(render_human(diff, use_color=_should_use_color(sys.stdout)), sys.stdout)
 
 
 async def run_diff(args) -> int:
@@ -208,23 +265,26 @@ async def run_diff(args) -> int:
     """
     include_layout = bool(getattr(args, 'include_layout', False))
 
+    # ValueError is a usage error only while reading arguments and inputs; from
+    # the comparison or a reporter it would be a bug, so it is not caught there
+    # and keeps its traceback instead of passing for bad input.
     try:
-        resolved = _resolve_inputs(args)
-    except ValueError as exc:
+        old_obj, new_obj = _resolve_inputs(args)
+    except (PipeDiffError, ValueError) as exc:
         return _fail(str(exc))
-    except PipeDiffError as exc:
-        return _fail(str(exc))
-
-    old_obj, new_obj = resolved
-
+    except RecursionError:
+        return _fail(_TOO_DEEP)
     try:
         diff = diff_pipes(old_obj, new_obj, include_layout=include_layout)
+        # Build the complete report before writing stdout: loading, comparison
+        # and rendering can each exceed Python's recursion limit for deep JSON.
+        report = _render(args, diff)
     except PipeDiffError as exc:
         return _fail(str(exc))
+    except RecursionError:
+        return _fail(_TOO_DEEP)
+    code = 0 if getattr(args, 'exit_zero', False) else (1 if diff.has_semantic_changes else 0)
 
     # Report output goes to stdout only; nothing above this point wrote there.
-    print(_render(args, diff))
-
-    if getattr(args, 'exit_zero', False):
-        return 0
-    return 1 if diff.has_semantic_changes else 0
+    print(report)
+    return code

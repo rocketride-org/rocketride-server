@@ -62,6 +62,8 @@ class Integration:
     title: str
     docs: str
     fields: tuple
+    # False: list the node without auto-wiring secrets (it runs with authType none).
+    wire: bool = True
 
 
 def catalog_from_dict(raw: dict) -> Dict[str, Integration]:
@@ -86,6 +88,7 @@ def catalog_from_dict(raw: dict) -> Dict[str, Integration]:
             title=entry.get('title', name),
             docs=entry.get('docs', ''),
             fields=fields,
+            wire=bool(entry.get('wire', True)),
         )
     return out
 
@@ -114,6 +117,16 @@ def node_tokens(name: str) -> frozenset:
 
 
 def evaluate(spec: Integration, env_keys: Optional[List[str]]) -> dict:
+    if not spec.wire:
+        # Optional-auth nodes must stay listed and must not emit a secret-only
+        # wiring dict (that would recreate #2495: authToken with authType none).
+        return {
+            'status': 'configured',
+            'env_error': False,
+            'missing': [],
+            'candidates': [],
+            'wiring': None,
+        }
     required = [f for f in spec.fields if f.required]
     if env_keys is None:
         return {

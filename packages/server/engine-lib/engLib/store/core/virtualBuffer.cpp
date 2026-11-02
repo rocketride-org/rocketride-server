@@ -21,33 +21,7 @@
 // SOFTWARE.
 // =============================================================================
 
-#ifdef CLASSIFY_DLL_EXPORT
-// When building as part of classify wrapper DLL, use apLib directly (no
-// engLib/Python deps)
-#include <apLib/ap.h>
-
-// Setup namespace aliasing like eng.h does - required for engLib headers
-namespace engine {
-using namespace ap;
-}
-namespace engine::store {
-using namespace ap;
-}
-
-#include <engLib/headers/types.h>  // For Byte, Dword, etc.
-#include <engLib/store/headers/iBuffer.hpp>
-#include <engLib/store/headers/virtualBuffer.hpp>
-#include <engLib/store/headers/memory.hpp>  // For Memory class
-
-// Bring engine types into engine::store
-namespace engine::store {
-using engine::Byte;
-using engine::Dword;
-}  // namespace engine::store
-#else
-// Normal engLib build uses the master header
 #include <engLib/eng.h>
-#endif
 
 namespace engine::store {
 //-------------------------------------------------------------------------

@@ -68,7 +68,7 @@ class AgentMeta(TypedDict, total=False):
     state_ref: str
     started_at: str
     ended_at: str
-    task_id: str
+    stop_reason: str
 
 
 class AgentStackEntry(TypedDict, total=False):
@@ -130,9 +130,12 @@ AGENT_TOOL_OUTPUT_SCHEMA: Dict[str, Any] = {
                 'framework': {'type': 'string'},
                 'agent_id': {'type': 'string'},
                 'run_id': {'type': 'string'},
-                'task_id': {'type': 'string'},
                 'started_at': {'type': 'string'},
                 'ended_at': {'type': 'string'},
+                'stop_reason': {
+                    'type': 'string',
+                    'description': 'Why the run stopped (e.g. done, max_waves, error), when the agent reports it',
+                },
             },
             'required': ['framework', 'agent_id', 'run_id', 'started_at', 'ended_at'],
         },

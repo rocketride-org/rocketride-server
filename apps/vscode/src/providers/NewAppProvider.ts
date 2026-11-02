@@ -43,16 +43,10 @@
 import * as vscode from 'vscode';
 import * as crypto from 'crypto';
 import { readFileSync } from 'fs';
+import { DEFAULT_DEVELOPER_ID, resolveDeveloperId } from 'rocketride/app-pack';
 import { ConnectionManager } from '../connection/connection';
 import { listAppFolders, scaffoldApp } from '../appdev/scaffolder';
 import type { NewAppIdentity, NewAppWebviewToHost } from './types/newAppTypes';
-
-// =============================================================================
-// CONSTANTS
-// =============================================================================
-
-/** The developer id applied when the org has none or the connection is local/offline. */
-const DEFAULT_DEVELOPER_ID = 'local';
 
 // =============================================================================
 // PROVIDER
@@ -214,8 +208,8 @@ export class NewAppProvider {
 		}
 
 		// step: read organization.developerId off the cached account info
-		const accountInfo = client.getAccountInfo() as { organization?: { developerId?: string } } | null;
-		const developerId = accountInfo?.organization?.developerId;
+		// (the same SDK resolution `rocketride app create` uses)
+		const developerId = resolveDeveloperId(client);
 		return developerId ? { developerId, source: 'organization' } : { developerId: DEFAULT_DEVELOPER_ID, source: 'default' };
 	}
 

@@ -59,6 +59,16 @@ const processTextData = (data: any): string[] => {
 };
 
 /**
+ * Processes fingerprint content (hex strings)
+ * Unlike text, each entry stays a separate block so one hash renders per object
+ */
+const processHashData = (data: any): string[] => {
+	const values = Array.isArray(data) ? data : [data];
+
+	return values.filter(item => typeof item === 'string' && item.trim());
+};
+
+/**
  * Processes object-based content (documents, questions, answers)
  * These are Doc objects, Question objects, or Answer objects
  * Returns them as-is without modification
@@ -173,6 +183,7 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 	const videoItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const questionItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 	const answerItems: Array<{ filename: string; content: any; fieldName: string }> = [];
+	const hashItems: Array<{ filename: string; content: any; fieldName: string }> = [];
 
 	// Process each upload result
 	uploadResults.forEach((uploadResult) => {
@@ -268,6 +279,14 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 					});
 					break;
 
+				case 'hash':
+				case 'hashes':
+					// Process content fingerprints (hex strings, one per object)
+					processHashData(fieldData).forEach(content => {
+						hashItems.push({ filename, content, fieldName });
+					});
+					break;
+
 				default:
 					// Log unknown types for debugging
 					console.warn('Unknown field type in pipeline result:', fieldType);
@@ -285,7 +304,8 @@ export const parseDropperResults = (uploadResults: UPLOAD_RESULT[]): ProcessedRe
 		audio: groupByFilename(audioItems),
 		video: groupByFilename(videoItems),
 		questions: groupByFilename(questionItems),
-		answers: groupByFilename(answerItems)
+		answers: groupByFilename(answerItems),
+		hashes: groupByFilename(hashItems)
 	};
 };
 

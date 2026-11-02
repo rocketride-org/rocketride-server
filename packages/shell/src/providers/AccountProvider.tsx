@@ -27,7 +27,7 @@
 // and async callbacks down to the host-agnostic AccountView.
 // =============================================================================
 
-import React, { useState, useEffect, useCallback, CSSProperties } from 'react';
+import React, { useState, useEffect, useCallback, useRef, CSSProperties } from 'react';
 import AccountView from '../modules/account/AccountView';
 import type { IDataGridPageRequest } from '../components/data-grid/DataGrid';
 import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
@@ -114,14 +114,27 @@ const AccountProvider: React.FC = () => {
 	/** Extracts a human-readable message from a thrown value. */
 	const errMsg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-	/** Fetches the current user's profile from the server. */
-	const loadProfile = useCallback(async () => {
-		if (!client) return;
+	/**
+	 * Fetches the current user's profile from the server. Resolves true on
+	 * success; a failure is surfaced as sectionError and resolves false so a
+	 * caller that depends on the refresh (e.g. leaving an org) can tell.
+	 * Only the most recent request may update state: an older response that
+	 * lands after a newer one (e.g. a refresh started before a leave) is
+	 * dropped so it cannot restore a membership that no longer exists.
+	 */
+	const profileRequestSeq = useRef(0);
+	const loadProfile = useCallback(async (): Promise<boolean> => {
+		if (!client) return false;
+		const seq = ++profileRequestSeq.current;
 		try {
 			const body = await client.account.getProfile();
+			if (seq !== profileRequestSeq.current) return true;
 			setProfile(body);
+			return true;
 		} catch (e) {
+			if (seq !== profileRequestSeq.current) return false;
 			setSectionError(errMsg(e));
+			return false;
 		}
 	}, [client]);
 
@@ -376,6 +389,24 @@ const AccountProvider: React.FC = () => {
 		[client]
 	);
 
+	/**
+	 * Removes the user from an organization. Leaving the ACTIVE org makes the
+	 * server push an org-changed event that reloads the shell; leaving another
+	 * org pushes an account update that carries no memberships, so the profile
+	 * (memberships) is reloaded here. The leave has already succeeded by then:
+	 * a failed reload is reported as such, never as a failed leave.
+	 */
+	const handleLeaveOrg = useCallback(
+		async (orgId: string) => {
+			if (!client) return;
+			await client.account.leaveOrg(orgId);
+			if (!(await loadProfile())) {
+				throw new Error('You left the organization, but the organization list could not be refreshed. Reload the page.');
+			}
+		},
+		[client, loadProfile]
+	);
+
 	/** Deletes the user account. */
 	const handleDeleteAccount = useCallback(async () => {
 		if (!client) return;
@@ -578,6 +609,7 @@ const AccountProvider: React.FC = () => {
 				onSaveProfile={handleSaveProfile}
 				onSetDevTeam={handleSetDevTeam}
 				onSetDefaultOrg={handleSetDefaultOrg}
+				onLeaveOrg={handleLeaveOrg}
 				onLogout={() => logout?.()}
 				onDeleteAccount={handleDeleteAccount}
 				onSaveOrgName={handleSaveOrgName}

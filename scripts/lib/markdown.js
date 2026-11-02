@@ -40,7 +40,8 @@ function isExternal(target) {
  * `<img src='...'>` attributes.
  *
  * @param {string} markdown - The document text.
- * @param {string} sourceDir - Repo-relative directory the document lives in (posix, no trailing slash), e.g. `docs/public/typescript`.
+ * @param {string} sourceDir - Repo-relative directory the document lives in (posix, no trailing slash),
+ *   e.g. `docs/public/typescript`.
  * @param {{repo?: string, ref?: string}} [options]
  * @returns {string}
  */

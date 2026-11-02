@@ -20,6 +20,8 @@ Public surface:
   cv2 or Pillow can still reach it.
 - ``pick_torch_device``, ``pick_torch_dtype``, ``resolve_pipeline_device`` —
   select a Torch device/dtype for local-inference nodes.
+- ``probe_hardware``, ``parse_hardware_requirement``, ``check_hardware`` — predict the
+  machine class Torch would use (without importing it) and check ``requiresHardware``.
 - ``post_with_retry`` / ``get_with_retry`` — HTTP POST/GET with retry/backoff.
 - ``colorize_depth``, ``decode_ndarray``, ``encode_ndarray``, ``image_to_bytes``
   — image/ndarray (de)serialization helpers.
@@ -27,7 +29,7 @@ Public surface:
 
 Implementations live in submodules (``string_utils``, ``content_blocks``,
 ``tool_args``,
-``config_utils``, ``agent_tools``, ``file_utils``, ``cuda_utils``,
+``config_utils``, ``agent_tools``, ``file_utils``, ``cuda_utils``, ``hardware``,
 ``http_retry``, ``image_utils``, ``url_utils``); this package re-exports them so
 the canonical import path is ``from ai.common.utils import <name>``.
 """
@@ -37,6 +39,7 @@ from .config_utils import config_int, parse_bool
 from .content_blocks import flatten_content_blocks
 from .file_utils import decode_data_url, guess_filename
 from .cuda_utils import pick_torch_device, pick_torch_dtype, resolve_pipeline_device
+from .hardware import check_hardware, parse_hardware_requirement, probe_hardware
 from .http_retry import get_with_retry, post_with_retry
 from .image_utils import (
     colorize_depth,
@@ -65,6 +68,7 @@ from .url_utils import validate_public_url
 
 __all__ = [
     'colorize_depth',
+    'check_hardware',
     'config_int',
     'decode_data_url',
     'flatten_content_blocks',
@@ -79,11 +83,13 @@ __all__ = [
     'normalize_bound_tools',
     'normalize_tool_input',
     'post_with_retry',
+    'probe_hardware',
     'optional_bool',
     'optional_int',
     'optional_str',
     'optional_str_list',
     'parse_bool',
+    'parse_hardware_requirement',
     'pick_torch_device',
     'pick_torch_dtype',
     'require_bool',

@@ -116,3 +116,35 @@ def test_shipped_catalog_loads():
         for field in integration.fields:
             assert field.suggests
             assert field.suggests.startswith('ROCKETRIDE_')
+
+
+def test_wire_false_stays_listed_without_secret_wiring():
+    """Optional-auth nodes must not emit authToken with authType left at none (#2495 / #2575)."""
+    raw = {
+        'tool_http_request': {
+            'title': 'HTTP Request',
+            'wire': False,
+            'fields': [
+                {
+                    'path': 'http_request.authToken',
+                    'kind': 'secret',
+                    'required': False,
+                    'suggests': 'ROCKETRIDE_HTTP_REQUEST_AUTH_TOKEN',
+                },
+            ],
+        },
+    }
+    spec = creds.catalog_from_dict(raw)['tool_http_request']
+    assert spec.wire is False
+    for env in (None, [], ['ROCKETRIDE_HTTP_REQUEST_AUTH_TOKEN']):
+        state = creds.evaluate(spec, env)
+        assert state['status'] == 'configured'
+        assert state['wiring'] is None
+
+
+def test_shipped_http_request_does_not_auto_wire():
+    spec = creds.load_catalog()['tool_http_request']
+    assert spec.wire is False
+    state = creds.evaluate(spec, ['ROCKETRIDE_HTTP_REQUEST_AUTH_TOKEN'])
+    assert state['status'] == 'configured'
+    assert state['wiring'] is None

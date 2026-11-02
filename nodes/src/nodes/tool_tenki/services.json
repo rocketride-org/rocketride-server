@@ -1,0 +1,181 @@
+{
+	"title": "Tenki Sandbox",
+	"protocol": "tool_tenki://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.tool_tenki",
+	"prefix": "tenki",
+	"icon": "tenki.svg",
+	"documentation": "https://docs.rocketride.org/nodes/tool_tenki",
+	"description": ["Gives agents a disposable Tenki Sandbox Linux VM for running code and shell commands, editing files and working with git repositories.", "One session, created on first use, is shared by every caller of a running pipeline: its files and installed packages are visible to all of them, so use one pipeline per user or trust boundary."],
+	"tile": [],
+	"lanes": {},
+	"preconfig": {
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Tenki Sandbox",
+				"apikey": ""
+			}
+		}
+	},
+	"fields": {
+		"tenki.apikey": {
+			"type": "string",
+			"title": "API Key",
+			"description": "Tenki workspace API key (starts with tk_), from the API Keys screen in the Tenki dashboard.",
+			"default": "",
+			"secure": true,
+			"ui": {
+				"ui:widget": "ApiKeyWidget"
+			}
+		},
+		"tenki.base_url": {
+			"type": "string",
+			"title": "API URL",
+			"description": "Tenki Sandbox API endpoint. Leave empty for the default (https://api.tenki.cloud).",
+			"default": "",
+			"optional": true
+		},
+		"tenki.cpu_cores": {
+			"type": "integer",
+			"title": "CPU Cores",
+			"description": "Virtual CPUs for the sandbox VM, 1 to 16. 0 leaves it to Tenki: 2, or what the Image sets.",
+			"default": 0,
+			"minimum": 0,
+			"maximum": 16
+		},
+		"tenki.memory_mb": {
+			"type": "integer",
+			"title": "Memory (MB)",
+			"description": "Memory for the sandbox VM, 512 to 65536 MB; an odd number is rounded down, since Tenki requires an even one. 0 leaves it to Tenki: 4096, or what the Image sets.",
+			"default": 0,
+			"minimum": 0,
+			"maximum": 65536
+		},
+		"tenki.disk_size_gb": {
+			"type": "integer",
+			"title": "Disk Size (GB)",
+			"description": "Root disk size, 5 to 100 GB. 0 leaves it to Tenki: 5, or the Image's own disk. Tenki recommends 20 for agents that clone repositories and install dependencies.",
+			"default": 0,
+			"minimum": 0,
+			"maximum": 100
+		},
+		"tenki.max_duration_minutes": {
+			"type": "integer",
+			"title": "Max Duration (minutes)",
+			"description": "How long a session may run before Tenki pauses it, set when the session is created, and the only thing that stops an unused session from billing compute: Tenki has no idle timeout. Size it as the cost backstop for a session the pipeline never shuts down, for example after an engine crash. A paused session keeps its files and memory, and the next tool call resumes it for another period of the same length, so this limits one stretch of running, not total spend. A pause cuts off any command still running, so keep it longer than the Execution Timeout.",
+			"default": 60,
+			"minimum": 1,
+			"maximum": 1440
+		},
+		"tenki.pause_retention_hours": {
+			"type": "integer",
+			"title": "Pause Retention (hours)",
+			"description": "How long Tenki keeps a paused session's memory and files before discarding them. Tenki's own default is seven days; a session the pipeline left behind should not hold its code that long. A resume within this time continues where the session left off.",
+			"default": 24,
+			"minimum": 1,
+			"maximum": 8760
+		},
+		"tenki.exec_timeout_secs": {
+			"type": "integer",
+			"title": "Execution Timeout (seconds)",
+			"description": "Max seconds a single run_command/run_code call may take.",
+			"default": 120,
+			"minimum": 1,
+			"maximum": 1200
+		},
+		"tenki.max_output_chars": {
+			"type": "integer",
+			"title": "Max Output (characters)",
+			"description": "Output longer than this is truncated before being returned to the agent.",
+			"default": 50000,
+			"minimum": 1000,
+			"maximum": 1000000
+		},
+		"tenki.image": {
+			"type": "string",
+			"title": "Image",
+			"description": "Registry image to start the sandbox from, such as a template build like myworkspace/my-node-env. Leave empty for Tenki's base image.",
+			"default": "",
+			"optional": true
+		},
+		"tenki.label": {
+			"type": "string",
+			"title": "Label",
+			"description": "A name for this node instance, put into its sessions' names (rocketride-tool-tenki-<label>-<suffix>) and metadata (label). With several Tenki Sandbox nodes in one pipeline, this is what tells their sessions apart in the Tenki dashboard or in anything that lists them. 1 to 32 lowercase letters, digits or -, starting with a letter or digit; a value outside that stops the pipeline at startup. Leave empty for none.",
+			"default": "",
+			"optional": true
+		},
+		"tenki.secret_policies": {
+			"type": "array",
+			"title": "Secret policies",
+			"description": "Names of Tenki request policies to attach, for transparent secret injection. Code in the sandbox uses a placeholder such as secrets://GITHUB_BASIC, and Tenki puts the real value, outside the VM, only into requests a policy allows; a service a policy allows can still send the credential back in its response. For private repositories, name the secret under Private repositories below; git_clone then sends Authorization: Basic secrets://NAME (see the README). Create the secrets and policies in Tenki first; the API key needs Secrets access. Requires Allowed outbound domains: a pipeline with policies and no allowlist does not start. Leave empty to attach none.",
+			"items": {
+				"type": "string"
+			},
+			"default": [],
+			"optional": true
+		},
+		"tenki.allow_domains": {
+			"type": "array",
+			"title": "Allowed outbound domains",
+			"description": "Restricts the sandbox's outbound traffic to these hostnames, such as pypi.org, on any port; one leading *. wildcard is accepted. Leave empty for open outbound access to any host and port. List every host the agent's work needs (pip needs pypi.org and files.pythonhosted.org, for example), and no more: a listed host is somewhere data can be sent. An entry Tenki would refuse (a URL, a port, an underscore) stops the pipeline at startup.",
+			"items": {
+				"type": "string"
+			},
+			"default": [],
+			"optional": true
+		},
+		"tenki.git_auth_url": {
+			"type": "string",
+			"title": "Private repositories: URL prefix",
+			"description": "git_clone clones the private repositories under this https prefix, such as https://github.com/acme/, with the Tenki secret named below as their credential; clones of anything else are sent with no credential, as before. Only used when a secret is named. Make an attached secret policy cover the same URLs: a clone under the prefix that no policy covers is refused by Tenki (403 secret_injection_denied), public repositories included. The host must be in Allowed outbound domains.",
+			"default": "https://github.com/",
+			"optional": true
+		},
+		"tenki.git_auth_secret": {
+			"type": "string",
+			"title": "Private repositories: Tenki secret",
+			"description": "Name of the Tenki secret holding the HTTP Basic credential for the repositories under the prefix above: for GitHub, the base64 of the whole string x-access-token:<token>, where <token> is a read-only token for those repositories (see the README). Only the name is set here; the value stays in Tenki, which adds it outside the VM. Requires Secret policies and Allowed outbound domains. Leave empty to clone public repositories only.",
+			"default": "",
+			"optional": true
+		},
+		"tenki.toolGroups": {
+			"type": "array",
+			"title": "Tool groups",
+			"description": "Which groups of Tenki Sandbox tools this node publishes to the agent: <b>execution</b> (run commands and code), <b>filesystem</b> (write, edit, read and list files, make directories, and delete files or directories) and <b>git</b> (clone, check out, diff and log). <b>Leave this empty to publish all three</b> (12 tools). Naming groups publishes only those (this narrows what the agent is offered; it is not a security boundary, since git can run a command the agent configures inside the VM), and a value that names only unknown groups stops the pipeline at startup.",
+			"uniqueItems": true,
+			"items": {
+				"type": "string",
+				"enum": [
+					["execution", "Execution (2)"],
+					["filesystem", "Filesystem (6)"],
+					["git", "Git (4)"],
+					["all", "All groups (12)"]
+				]
+			},
+			"default": [],
+			"optional": true
+		}
+	},
+	"test": {
+		"profiles": ["default"],
+		"outputs": [],
+		"cases": [
+			{
+				"name": "Tenki Sandbox smoke test (placeholder key)",
+				"text": "test query"
+			}
+		]
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Tenki Sandbox",
+			"properties": ["type", "tenki.apikey", "tenki.base_url", "tenki.cpu_cores", "tenki.memory_mb", "tenki.disk_size_gb", "tenki.max_duration_minutes", "tenki.pause_retention_hours", "tenki.exec_timeout_secs", "tenki.max_output_chars", "tenki.image", "tenki.label", "tenki.secret_policies", "tenki.allow_domains", "tenki.git_auth_url", "tenki.git_auth_secret", "tenki.toolGroups"]
+		}
+	]
+}

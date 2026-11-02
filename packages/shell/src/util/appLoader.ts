@@ -98,6 +98,11 @@ export interface ServerAppEntry {
 // resetRemote() can tear down and re-register a container without callers
 // having to thread the entry URL through.
 const registeredEntries = new Map<string, string>();
+// Server-provided apps by APP id -> their MF container name, for loadAppModule().
+// Added to, never rebuilt, like registeredEntries: registerAndMapApps receives one
+// batch per call (the probe catalog at boot, then only the apps a sign-in adds),
+// so a rebuild would drop the probe's apps, the home app among them.
+const serverAppModules = new Map<string, string>();
 
 // MF containers whose remote has successfully LOADED this document. A loaded
 // container is committed to its version (identity is the name — repointing a
@@ -105,14 +110,38 @@ const registeredEntries = new Map<string, string>();
 // consults this to decide repoint-in-place vs full reload.
 const loadedModules = new Set<string>();
 
-// MF containers with a descriptor load currently IN FLIGHT. A container is
-// committed to its entry from the moment its load STARTS, not when it
-// resolves: forced re-registration drops the runtime's cached promise but
-// does NOT cancel the running operation, so replacing the entry mid-load
+// MF containers with a load currently IN FLIGHT, counted per container. A
+// container is committed to its entry from the moment its load STARTS, not
+// when it resolves: forced re-registration drops the runtime's cached promise
+// but does NOT cancel the running operation, so replacing the entry mid-load
 // races two initializations of one container name. The dev takeover treats
-// pending like loaded. A Set suffices — loadDescriptor dedups concurrent
-// loads per app, so at most one load per container is in flight.
-const pendingModules = new Set<string>();
+// pending like loaded. Counted, not a Set: loadDescriptor dedups concurrent
+// descriptor loads per app, but loadAppModule (the home remote's telemetry
+// entry on the waitlist screen) can load the same container at the same time,
+// and the load that finishes first must not clear the mark of the other.
+const pendingModules = new Map<string, number>();
+
+/** Count one more load of an MF container as in flight. */
+function markPending(moduleId: string): void {
+	pendingModules.set(moduleId, (pendingModules.get(moduleId) ?? 0) + 1);
+}
+
+/** Release one in-flight load of an MF container; its mark goes when the last one settles. */
+function releasePending(moduleId: string): void {
+	const left = (pendingModules.get(moduleId) ?? 0) - 1;
+	if (left > 0) pendingModules.set(moduleId, left);
+	else pendingModules.delete(moduleId);
+}
+
+/**
+ * Whether an MF container has a load in flight in this document (the
+ * descriptor, or another module it exposes).
+ *
+ * @param moduleId - The MF container name.
+ */
+export function isRemotePending(moduleId: string): boolean {
+	return (pendingModules.get(moduleId) ?? 0) > 0;
+}
 
 /**
  * Whether an MF container's remote has successfully loaded this document.
@@ -208,28 +237,45 @@ export function setLocalAppsListener(fn: (() => void) | null): void {
 }
 
 /**
- * Whether an app is an EMBEDDED DEV PREVIEW still waiting for its dev
- * registration. The injection can only arrive after the dev server has
- * booted and announced its address — during that window the deep-linked app
+ * How long an embedded dev preview holds its locked app for the embedder's
+ * dev-remote registration, measured from page load. App Builder mounts the
+ * preview only once its dev server is serving and injects on shell:devReady,
+ * so a healthy registration lands within a second or two — one that has not
+ * arrived by this deadline is not coming (an app id the embedder does not
+ * register, a dead dev server). Ending the hold lets the real outcome show
+ * ("App not found", the load error, or the published fallback) instead of a
+ * splash that never resolves. A registration that does arrive late still
+ * self-corrects: the injection invalidates and reloads the app.
+ */
+export const DEV_REMOTE_TIMEOUT_MS = 30_000;
+
+/**
+ * Milliseconds left in this page's dev-preview hold: 0 once the deadline has
+ * passed, and always 0 on a page that is not an embedded dev preview.
+ */
+export function devPreviewHoldRemainingMs(): number {
+	if (!isDevPreviewPage()) return 0;
+	return Math.max(0, DEV_REMOTE_TIMEOUT_MS - performance.now());
+}
+
+/**
+ * Whether an app is an EMBEDDED DEV PREVIEW's locked app still waiting for
+ * its dev registration. The injection can only arrive after the shell has
+ * booted and announced itself — during that window the deep-linked app
  * either isn't in the manifest (new apps) or fails to load (dead published
  * entry), and showing an error would be a flash that the injection's
  * invalidate-and-retry immediately self-corrects. The layout holds the
- * loading state instead while this is true.
+ * loading state instead while this is true — but only for the app the page
+ * is locked to, and only until DEV_REMOTE_TIMEOUT_MS: an unbounded hold
+ * hides every failure behind the splash.
  *
- * @param appId - The session-locked app id.
+ * @param appId - The app whose load state is being rendered.
  */
 export function isDevPreviewPending(appId: string): boolean {
 	// Once locally registered, real load states (success or error) apply.
 	if (localOverrides.has(appId)) return false;
-	try {
-		// Only embedded dev previews qualify: iframe + the rrdev flag (URL or
-		// the per-tab persistence the flavor picker writes).
-		if (window.self === window.top) return false;
-		const urlFlag = new URLSearchParams(window.location.search).get('rrdev') === '1';
-		return urlFlag || sessionStorage.getItem('rr:dev') === '1';
-	} catch {
-		return false;
-	}
+	const lockedAppId = previewLockedAppId();
+	return !!lockedAppId && appId === lockedAppId && devPreviewHoldRemainingMs() > 0;
 }
 
 /**
@@ -313,6 +359,15 @@ export function unregisterLocalApp(id: string): void {
  * @param entry - The dev server's remoteEntry.js URL.
  */
 export function registerDevRemote(appId: string, moduleId: string, name: string, entry: string): void {
+	// The wrong-id signal: an embedded preview receives ONE registration, for
+	// the app its URL is locked to. A registration for any other id means the
+	// two disagree, and the locked app will never register — say so instead
+	// of letting the preview run out its hold in silence.
+	const lockedAppId = isDevPreviewPage() ? previewLockedAppId() : '';
+	if (lockedAppId && appId !== lockedAppId) {
+		console.warn(`[appLoader] App Builder delivered a dev build for "${appId}", but this preview is for "${lockedAppId}" — check appManifest.id in the app's package.json`);
+	}
+
 	// Injection for a container the manifest registered AND that is LOADED or
 	// mid-load this document: such a container is committed to its entry
 	// (repointing corrupts its consume-shared getters; a forced registration
@@ -326,7 +381,7 @@ export function registerDevRemote(appId: string, moduleId: string, name: string,
 	// permanent one-shot would strand the legitimate recurrence (an app
 	// fallback-loaded again long after its dev server revived). Budget
 	// exhausted → degrade to the force-registration below instead.
-	if (registeredEntries.has(moduleId) && !devRemoteModules.has(moduleId) && (loadedModules.has(moduleId) || pendingModules.has(moduleId))) {
+	if (registeredEntries.has(moduleId) && !devRemoteModules.has(moduleId) && (loadedModules.has(moduleId) || isRemotePending(moduleId))) {
 		const TAKEOVER_WINDOW_MS = 30 * 60_000;
 		const TAKEOVER_MAX_RELOADS = 2;
 		let reboot = false;
@@ -501,6 +556,35 @@ function dumpShareScope(): void {
 }
 
 /**
+ * Load a module an app's container exposes besides its AppDescriptor (the home
+ * remote's `telemetry` entry, used on the shell's own screens where no app
+ * renders). Resolves null when the app is unknown or its container does not
+ * expose that module; never throws. Keeps the same pending/loaded bookkeeping
+ * as load() (counted, so overlapping loads of one container each hold the
+ * mark until they finish): a container loaded here is committed to its
+ * version too, so a later version override falls back to a reload instead of
+ * repointing it.
+ *
+ * @param appId - The app id (not the container name).
+ * @param modulePath - The exposed module path without the leading `./`.
+ * @returns The module namespace, or null.
+ */
+export async function loadAppModule<T = unknown>(appId: string, modulePath: string): Promise<T | null> {
+	const moduleId = serverAppModules.get(appId) ?? localAppMetas.get(appId)?.moduleId;
+	if (!moduleId) return null;
+	markPending(moduleId);
+	try {
+		const mod = (await loadRemote(`${moduleId}/${modulePath}`)) as T;
+		loadedModules.add(moduleId);
+		return mod;
+	} catch {
+		return null; // an older build of the app without that entry, or the container failed to load
+	} finally {
+		releasePending(moduleId);
+	}
+}
+
+/**
  * Returns the entry URL currently registered for an MF remote, or undefined
  * when the module has never been registered. Used by Shell to detect apps
  * whose entry URL changed (dev overlay repoint, new published version) and
@@ -613,6 +697,16 @@ export function resolveServerEntry(a: ServerAppEntry): string | null {
 	return typeof a.registryVersion === 'number' ? versionedEntryUrl(a.id, a.registryVersion) : null;
 }
 
+/**
+ * Register the server's app manifest with Module Federation and map it to the
+ * shell's manifest entries. Entries without a load URL are dropped; dev-owned
+ * containers and a dev preview's session-locked app are not re-registered.
+ * Each entry's `load()` fetches its descriptor lazily (a local override, when
+ * one is registered, wins) and marks the container pending for the whole load.
+ *
+ * @param serverApps - The apps listed in the server's manifest.
+ * @returns One manifest entry per app that resolved to a load URL.
+ */
 export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEntry[] {
 	const overrides = getAppVersionOverrides();
 	const nonce = sessionNonce();
@@ -666,6 +760,7 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 
 	// Record the registered URLs so resetRemote() can rebuild a container.
 	for (const { app, url } of registrable) registeredEntries.set(app.moduleId, url);
+	for (const { app } of resolved) serverAppModules.set(app.id, app.moduleId);
 
 	// Map server entries to runtime AppManifestEntry objects with lazy loaders
 	return resolved.map(({ app: a }) => ({
@@ -693,15 +788,23 @@ export function registerAndMapApps(serverApps: ServerAppEntry[]): AppManifestEnt
 			if (local) return local();
 			// Pending marks the container committed for the WHOLE load — the
 			// dev takeover must not force-register it mid-flight.
-			pendingModules.add(a.moduleId);
-			return (loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>)
+			markPending(a.moduleId);
+			let loading: Promise<{ default: AppDescriptor }>;
+			try {
+				loading = loadRemote(`${a.moduleId}/AppDescriptor`) as Promise<{ default: AppDescriptor }>;
+			} catch (err) {
+				// a loader that throws before it returns a promise must not leave the mark behind
+				releasePending(a.moduleId);
+				throw err;
+			}
+			return loading
 				.then((m) => {
 					// A resolved remote commits this container to its version
 					// for the document's lifetime (see isRemoteLoaded).
 					loadedModules.add(a.moduleId);
 					return m.default;
 				})
-				.finally(() => pendingModules.delete(a.moduleId));
+				.finally(() => releasePending(a.moduleId));
 		},
 	}));
 }

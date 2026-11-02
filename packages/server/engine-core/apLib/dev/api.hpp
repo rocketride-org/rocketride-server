@@ -29,15 +29,6 @@
 
 namespace ap::dev {
 
-namespace {
-// This singleton helps us track recursive asserts, prevents a layered
-// one from executing if one is already active
-bool &fatalityExecuting() noexcept {
-    static bool flag = false;
-    return flag;
-}
-}  // namespace
-
 // Breaks the process on debug builds, optionally logs the location and
 // variable arguments (if specified). On windows this amounts to a call
 // to DebugBreak, posix systems we self signal SIGINT.
@@ -89,6 +80,9 @@ template <typename... DebugInfo>
     std::quick_exit(1);
 #endif
 }
+
+// --dumps read as a boolean: bare, true, 1 or yes turns crash dumps on
+bool dumpsEnabled() noexcept;
 
 const file::Path &crashDumpLocation() noexcept;
 void crashDumpLocation(const file::Path &path) noexcept;

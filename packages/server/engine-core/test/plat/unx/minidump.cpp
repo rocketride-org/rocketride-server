@@ -45,8 +45,10 @@ static std::set<std::filesystem::path> dumpsIn(
 // testMain.ipp) so the child registers Crashpad and faults/exits without the
 // fork-in-a-threaded-process deadlock a plain fork() would hit. Returns the
 // child's wait status. `crashDb` overrides the child's crash DB directory --
-// the parent has already resolved (and cached) its own.
-static int runCrashChild(const char *mode, const char *crashDb = nullptr) {
+// the parent has already resolved (and cached) its own. `dumpsFlag` is the
+// child's --dumps argument; with nullptr it gets none.
+static int runCrashChild(const char *mode, const char *crashDb = nullptr,
+                         const char *dumpsFlag = "--dumps") {
     auto exe = _ts(application::execPath());
     // Resolve the handler here (parent) and hand it to the child explicitly: a
     // re-exec'd child can compute an empty execDir(), so it can't self-locate the
@@ -63,7 +65,8 @@ static int runCrashChild(const char *mode, const char *crashDb = nullptr) {
         ::setenv("RR_CRASH_CHILD", mode, 1);
         ::setenv("ROCKETRIDE_CRASHPAD_HANDLER", handler.c_str(), 1);
         if (crashDb) ::setenv("ROCKETRIDE_CRASHDB_DIR", crashDb, 1);
-        char *const argv[] = {const_cast<char *>(exe.c_str()), nullptr};
+        char *const argv[] = {const_cast<char *>(exe.c_str()),
+                              const_cast<char *>(dumpsFlag), nullptr};
         ::execv(exe.c_str(), argv);
         ::_exit(127);  // exec failed
     }
@@ -98,10 +101,69 @@ TEST_CASE("crashpad") {
         int status = runCrashChild("crash");
         REQUIRE(WIFSIGNALED(status));
 
-        // The parent's sweep relocates the child's dump into crashDumpLocation().
-        plat::minidumpSweep();
-
+        // The child relocates its own dump at crash time; no parent sweep.
         REQUIRE(dumpsIn(crashDir).size() > before.size());
+    }
+
+    // Dumps are opt-in: without the flag, or with it set false, the crash is
+    // still fatal, but no handler starts, so there is no crash DB and no dump.
+    SECTION("without --dumps a crash writes no dump") {
+        for (const char *flag : {(const char *)nullptr, "--dumps=false"}) {
+            INFO((flag ? flag : "no --dumps"));
+            auto dir =
+                std::filesystem::temp_directory_path() / "rr-crashdb-off";
+            std::error_code ec;
+            std::filesystem::remove_all(dir, ec);
+            auto before = dumpsIn(crashDir);
+
+            int status = runCrashChild("crash", dir.c_str(), flag);
+            REQUIRE(WIFSIGNALED(status));
+
+            ::usleep(1000 * 1000);  // let any stray dump land
+
+            REQUIRE(!std::filesystem::exists(dir, ec));
+            REQUIRE(dumpsIn(crashDir) == before);
+        }
+    }
+
+    // On macOS the child dumps via SimulateCrash() and must then stop Crashpad
+    // dumping again on EXC_CRASH; on Linux Crashpad dumps once by design.
+    SECTION("a crash is reported exactly once") {
+        auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-once";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        auto before = dumpsIn(crashDir);
+
+        int status = runCrashChild("crash", dir.c_str());
+        REQUIRE(WIFSIGNALED(status));
+
+        // Give a stray second dump from the out-of-process handler time to land.
+        ::usleep(1000 * 1000);
+
+        REQUIRE(dumpsIn(crashDir).size() == before.size() + 1);
+        REQUIRE(dumpsIn(dir / "pending").empty());
+        REQUIRE(dumpsIn(dir / "completed").empty());
+
+        std::filesystem::remove_all(dir, ec);
+    }
+
+    // A fork without exec inherits the reporter's pipes and handlers but not
+    // its thread: the forked copy's crash must not consume this process's
+    // crash-time report, nor be reported as this process's dump.
+    SECTION("a forked child's crash does not take the parent's report") {
+        auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-fork";
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+        auto before = dumpsIn(crashDir);
+
+        int status = runCrashChild("forkcrash", dir.c_str());
+        REQUIRE(WIFSIGNALED(status));
+
+        ::usleep(1000 * 1000);  // as above: let any stray dump land
+
+        REQUIRE(dumpsIn(crashDir).size() == before.size() + 1);
+
+        std::filesystem::remove_all(dir, ec);
     }
 
     SECTION("clean exit writes no dump") {
@@ -110,6 +172,10 @@ TEST_CASE("crashpad") {
         int status = runCrashChild("clean");
         REQUIRE(WIFEXITED(status));
 
+        // The sweep runs only with dumps on; this process was started without
+        auto dumps = dev::Dumps.val();
+        util::Guard restoreDumps = [&] { dev::Dumps.setValue(dumps); };
+        dev::Dumps.setValue("true");
         plat::minidumpSweep();
 
         REQUIRE(dumpsIn(crashDir) == before);
@@ -158,6 +224,7 @@ TEST_CASE("crashpad") {
         auto dir = std::filesystem::temp_directory_path() / "rr-crashdb-ok";
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
+        auto before = dumpsIn(crashDir);
 
         int status = runCrashChild("crash", dir.c_str());
         REQUIRE(WIFSIGNALED(status));
@@ -166,12 +233,14 @@ TEST_CASE("crashpad") {
         REQUIRE(::stat(dir.c_str(), &st) == 0);
         REQUIRE((st.st_mode & 0777) == 0700);
 
-        // Uploads are disabled, so a finished report stays in pending. The
-        // handler is out-of-process and can outlive the child, so poll for it.
+        // Uploads are disabled, so a finished report stays in pending, unless
+        // the child already relocated it at crash time. The handler is
+        // out-of-process and can outlive the child, so poll for it.
         bool landed = false;
         for (int i = 0; i < 50 && !landed; ++i) {
             landed = !(dumpsIn(dir / "pending").empty()
-                       && dumpsIn(dir / "completed").empty());
+                       && dumpsIn(dir / "completed").empty())
+                     || dumpsIn(crashDir).size() > before.size();
             if (!landed) ::usleep(100 * 1000);  // 100ms * 50 = 5s cap
         }
         REQUIRE(landed);

@@ -66,6 +66,12 @@ The node accepts images in the following formats:
 - **Data URI** (`data:image/...` or `data:application/...`): passed as-is.
 - **Local file path**: read from disk, base64-encoded, and sent as a data URI. Files over **10 MB** are rejected. MIME type is inferred from the file extension (`.jpg`/`.jpeg` -> `image/jpeg`, `.png` -> `image/png`, `.gif` -> `image/gif`, `.webp` -> `image/webp`; any unrecognized extension defaults to `image/jpeg`).
 
+### Model sync
+
+Profiles are maintained by the `sync_models` tooling (`llm_vision_mistral` provider, `ROCKETRIDE_MISTRAL_KEY`). Only models Mistral reports as vision-capable (`capabilities.vision`) are added, and each new one is verified with a real image before it appears here.
+
+The sync runs **only** with that key: this node stores Mistral's versioned IDs (`mistral-medium-2508`), which OpenRouter does not list, so a keyless run would mark working profiles deprecated. Without the key the provider is skipped and nothing changes — see [Why some providers need their own key](https://github.com/rocketride-org/rocketride-server/blob/develop/tools/sync_models/README.md#why-some-providers-need-their-own-key).
+
 ## Upstream docs
 
 - [Mistral vision documentation](https://docs.mistral.ai/capabilities/vision/)

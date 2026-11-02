@@ -54,11 +54,23 @@ async function runVswhere(args) {
 	}
 }
 
-/** Returns VS installation path only if all required components are present: (CoreIde OR CoreBuildTools) AND ATL AND CMake.Project; otherwise null.
+/** Returns VS installation path only if all required components are present:
+ * (CoreIde OR CoreBuildTools) AND ATL AND CMake.Project; otherwise null.
  * Accepts either VC.CoreBuildTools (Build Tools) or VC.CoreIde (full VS IDE), since the full IDE does not
  * register VC.CoreBuildTools in its catalog (see VS2019 Enterprise workload-component-id-vs-enterprise). */
 async function getVsInstalled() {
-	const commonArgs = ['-products', '*', '-all', '-latest', '-requires', VS_REQUIRES_ATL, '-requires', VS_REQUIRES_CMAKENINJA, '-property', 'installationPath'];
+	const commonArgs = [
+		'-products',
+		'*',
+		'-all',
+		'-latest',
+		'-requires',
+		VS_REQUIRES_ATL,
+		'-requires',
+		VS_REQUIRES_CMAKENINJA,
+		'-property',
+		'installationPath',
+	];
 	for (const cppComponent of [VS_REQUIRES_CPP, VS_REQUIRES_CPP_IDE]) {
 		const p = await runVswhere([...commonArgs, '-requires', cppComponent]);
 		if (p) return p;
@@ -89,7 +101,10 @@ async function verifyVsvars(vsRoot) {
 	}
 }
 
-/** Return only env vars that are new or changed compared to base (default process.env). Used to store a minimal overlay in state. */
+/**
+ * Return only env vars that are new or changed compared to base (default process.env).
+ * Used to store a minimal overlay in state.
+ */
 function envDiff(captured, base = process.env) {
 	const out = {};
 	for (const [k, v] of Object.entries(captured)) {
@@ -115,7 +130,9 @@ async function captureVsEnvironment(vsRoot, options = {}) {
 				if (key) env[key] = value;
 			}
 		}
-		const hasVsEnv = (env.INCLUDE && (env.INCLUDE.includes('VC') || env.INCLUDE.includes('Windows'))) || (env.LIB && env.LIB.includes('VC'));
+		const hasVsEnv =
+			(env.INCLUDE && (env.INCLUDE.includes('VC') || env.INCLUDE.includes('Windows'))) ||
+			(env.LIB && env.LIB.includes('VC'));
 		if (!hasVsEnv) return null;
 		return envDiff(env);
 	} catch {
@@ -166,9 +183,11 @@ async function installVs(log) {
  * Saves build.vsPath, build.env, build.generatorName, build.setupAt to state and returns them.
  *
  * @param {Object} options
- * @param {boolean} [options.autoinstall] - If true, install VS Build Tools (download vs_buildtools.exe and run) when not found.
+ * @param {boolean} [options.autoinstall] - If true, install VS Build Tools (download vs_buildtools.exe
+ *   and run) when not found.
  * @param {function(string)} [options.onOutput] - Called for each output line; if omitted, uses console.log.
- * @returns {Promise<{ vsPath: string, env: Object, setupAt: string }>} Resolves with vsPath, env, and setupAt (ISO date); throws on failure.
+ * @returns {Promise<{ vsPath: string, env: Object, setupAt: string }>} Resolves with vsPath, env, and
+ *   setupAt (ISO date); throws on failure.
  */
 async function runCompilerWindowsSetup(options = {}) {
 	const { autoinstall = false, onOutput = null, verbose = false } = options;
@@ -214,11 +233,47 @@ async function runCompilerWindowsSetup(options = {}) {
 		}
 		if (!vsRoot) {
 			log.fail('Visual Studio not found (or missing required components).');
-			const hasCppBuildTools = await runVswhere(['-products', '*', '-all', '-latest', '-requires', VS_REQUIRES_CPP, '-property', 'installationPath']);
-			const hasCppIde = await runVswhere(['-products', '*', '-all', '-latest', '-requires', VS_REQUIRES_CPP_IDE, '-property', 'installationPath']);
+			const hasCppBuildTools = await runVswhere([
+				'-products',
+				'*',
+				'-all',
+				'-latest',
+				'-requires',
+				VS_REQUIRES_CPP,
+				'-property',
+				'installationPath',
+			]);
+			const hasCppIde = await runVswhere([
+				'-products',
+				'*',
+				'-all',
+				'-latest',
+				'-requires',
+				VS_REQUIRES_CPP_IDE,
+				'-property',
+				'installationPath',
+			]);
 			const hasCpp = hasCppBuildTools || hasCppIde;
-			const hasAtl = await runVswhere(['-products', '*', '-all', '-latest', '-requires', VS_REQUIRES_ATL, '-property', 'installationPath']);
-			const hasCmake = await runVswhere(['-products', '*', '-all', '-latest', '-requires', VS_REQUIRES_CMAKENINJA, '-property', 'installationPath']);
+			const hasAtl = await runVswhere([
+				'-products',
+				'*',
+				'-all',
+				'-latest',
+				'-requires',
+				VS_REQUIRES_ATL,
+				'-property',
+				'installationPath',
+			]);
+			const hasCmake = await runVswhere([
+				'-products',
+				'*',
+				'-all',
+				'-latest',
+				'-requires',
+				VS_REQUIRES_CMAKENINJA,
+				'-property',
+				'installationPath',
+			]);
 			if (!hasCpp) out('    - C++ build tools (VC.CoreBuildTools or VC.CoreIde): not installed');
 			if (!hasAtl) out('    - C++ ATL: not installed');
 			if (!hasCmake) out('    - C++ CMake/Ninja: not installed');

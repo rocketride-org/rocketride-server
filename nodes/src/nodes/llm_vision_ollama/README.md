@@ -38,7 +38,7 @@ Default: **Llama 3.2 Vision 11B** (`llama3_2-vision-11b`).
 
 Choose a bundled profile for a known Ollama model or `custom` for another multimodal
 model. All profiles expose the server URL and prompts; `custom` also exposes the model
-name and context limit. The default server is `http://localhost:11434/v1`.
+name, context limit and output limit (4,096 by default). The default server is `http://localhost:11434/v1`.
 
 ### Image to text
 
@@ -91,6 +91,7 @@ The node maps common API failures to clear messages:
 |---|---|---|---|
 | `image_vision_ollama.profile` | `string` | **Vision Model**<br/>Select the Ollama vision model to use | `"llama3_2-vision-11b"` |
 | `model` | `string` | **Model**<br/>Ollama vision model name |  |
+| `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
 | `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
 | `vision.prompt` | `string` | **Analysis Prompt**<br/>Describe what you want to analyze or extract from the image |  |
 | `vision.systemPrompt` | `string` | **System Instructions**<br/>Define the model's role and behavior for image analysis |  |

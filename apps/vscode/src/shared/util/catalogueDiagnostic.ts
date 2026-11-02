@@ -73,7 +73,7 @@ export function catalogueDiagnostic(payload: CataloguePayload): CatalogueDiagnos
 	if (!payload.services || Object.keys(payload.services).length === 0) {
 		return {
 			level: 'warning',
-			message: 'Node catalogue is empty: the engine returned zero services, so .rocketride/services-catalog.json is not written. One malformed node definition empties the whole catalogue — restart the engine with --trace=Services to see which.',
+			message: 'Node catalogue is empty: the engine returned zero services, so .rocketride/services-catalog.json is not written. One malformed node definition empties the whole catalogue. Restart the engine with --trace=Services to see which.',
 		};
 	}
 	return null;

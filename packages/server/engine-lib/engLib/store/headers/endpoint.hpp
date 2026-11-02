@@ -166,7 +166,7 @@ using IPipeConnections = std::vector<json::Value>;
 /// @details
 ///		Define the service endpoint
 //-------------------------------------------------------------------------
-class IServiceEndpoint {
+class ROCKETRIDE_CORE_API IServiceEndpoint {
 public:
     //-----------------------------------------------------------------
     // Explicitly delete the default constructor
@@ -259,6 +259,9 @@ public:
     //-----------------------------------------------------------------
     virtual int getPipeCount() noexcept;
     virtual ErrorOr<ServicePipe> getPipe() noexcept;
+
+    // Runs before getPipe() hands out a pipe; an error refuses it
+    static inline std::function<Error()> pipeGate;
     virtual Error putPipe(ServicePipe &pipe) noexcept;
 
     //-----------------------------------------------------------------

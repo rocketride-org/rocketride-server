@@ -1,0 +1,35 @@
+# ---------------------------------------------------------------------------
+# Dockerfile.node — the runtime of one pipeline task (ai/node.py)
+#
+# MIT License
+# Copyright (c) 2026 RocketRide
+#
+# engine-base plus a warmed wheel cache. Tagged with the engine version, as is
+# the engine-base it is built FROM: the task protocol is not versioned, so a
+# server only ever starts a node image of its own version.
+#
+#   docker build -f docker/Dockerfile.node \
+#     --build-arg ENGINE_BASE=rocketride/engine-base:<version> \
+#     -t rocketride/node:<version> .
+# ---------------------------------------------------------------------------
+
+ARG ENGINE_BASE=rocketride/engine-base:local
+FROM ${ENGINE_BASE}
+
+# depends() runs uv without env=, so these reach every install a task makes.
+# Copy, not hardlink: the cache is an image layer, and a hardlink into the
+# container's site-packages would copy the cache file up first.
+ENV UV_CACHE_DIR=/opt/uv-cache \
+    UV_LINK_MODE=copy
+
+USER root
+RUN mkdir -p "$UV_CACHE_DIR" && chown rocketride:rocketride "$UV_CACHE_DIR"
+COPY --chmod=0755 docker/warm-wheel-cache.sh /usr/local/bin/warm-wheel-cache
+USER rocketride
+
+# Downloaded here, never copied from the build host.
+RUN warm-wheel-cache
+
+# The Launcher supplies the whole command line. tini reaps the uv processes a
+# task spawns.
+ENTRYPOINT ["/usr/bin/tini", "--"]

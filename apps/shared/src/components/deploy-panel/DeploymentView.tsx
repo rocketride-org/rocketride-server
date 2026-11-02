@@ -433,7 +433,7 @@ export const DeploymentView: React.FC<IDeploymentViewProps> = ({ documentTitle, 
 			{/* Title is PINNED with the strip; only the page body scrolls. The
 			    canvas page carries no header (the ProjectView design-page rule —
 			    the canvas is a full-bleed surface). */}
-			{documentTitle && mode !== 'design' && <ContentHeader title={documentTitle} subtitle={mode === 'status' ? 'Deployment status' : 'Scheduled runs — team continuum'} />}
+			{documentTitle && mode !== 'design' && <ContentHeader title={documentTitle} subtitle={mode === 'status' ? 'Deployment status' : 'Scheduled runs: team continuum'} />}
 			<div style={S.pageBody}>
 				<TabPanel
 					panels={{

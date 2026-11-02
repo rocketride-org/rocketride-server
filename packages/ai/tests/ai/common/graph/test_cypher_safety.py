@@ -124,6 +124,7 @@ def test_rejects_write_clauses(cypher):
     'cypher',
     [
         'MATCH (n) /* harmless */ DELETE n',
+        'MATCH (n) WITH n/**/DELETE n',
         '/* SELECT-ish */ MATCH (n) SET n.x = 1',
         "MATCH (n {name: 'safe'}) DELETE n",
         'MATCH (n) WHERE n.x = "CREATE" CREATE (m)',

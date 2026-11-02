@@ -75,7 +75,7 @@ export const modalEntry: IGalleryEntry = {
 	name: 'Modal',
 	group: 'content',
 	blurb: 'The stock dialog: a centered box over a dimmed INERT backdrop - outside-click never closes. Escape closes the topmost layer; focus is trapped and restored on close.',
-	doc: `Modals are for **multi-step flows and pickers** — for confirmations use \`ConfirmDialog\`, and for inspecting/editing the app's own records use a \`DetailPanel\` record panel, not a dialog.
+	doc: `Modals are for **multi-step flows and pickers**. For confirmations use \`ConfirmDialog\`, and for inspecting/editing the app's own records use a \`DetailPanel\` record panel, not a dialog.
 
 Behavior that comes for free: page-scroll lock, Tab focus trap, prior-focus restore, a layered overlay stack (Escape only closes the topmost), and the top-right ✕ that appears exactly when there is no footer (override with \`showClose\`).`,
 	knobs: [

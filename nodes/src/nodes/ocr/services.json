@@ -249,6 +249,7 @@
 	//
 	"test": {
 		"profiles": ["latin"],
+		"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
 		"outputs": ["text", "table"],
 		"timeout": 120,
 		"cases": [
@@ -299,6 +300,7 @@
 		{
 			// EasyOCR profiles (excluding Japanese): full text + table assertions
 			"profiles": ["latin", "latin-extended", "cyrillic", "arabic", "devanagari", "chinese-simplified", "chinese-traditional", "korean"],
+			"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
 			"outputs": ["text", "table"],
 			"timeout": 120,
 			"cases": [
@@ -344,6 +346,7 @@
 		{
 			// EasyOCR Japanese: relaxed text assertion (Japanese models may misread English)
 			"profiles": ["japanese"],
+			"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
 			"outputs": ["text"],
 			"timeout": 120,
 			"cases": [
@@ -362,6 +365,7 @@
 		{
 			// DocTR engine: text assertions only (no table assertions)
 			"profiles": ["doctr"],
+			"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
 			"outputs": ["text"],
 			"timeout": 180,
 			"cases": [

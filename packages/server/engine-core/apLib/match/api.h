@@ -25,7 +25,7 @@
 
 namespace ap::globber {
 Opt<plat::Type> parseAndRemoveOsQualifier(Text &pattern) noexcept;
-Error createPathMatcher(Text path, uint32_t flags, Glob &matcher,
+ROCKETRIDE_CORE_API Error createPathMatcher(Text path, uint32_t flags, Glob &matcher,
                         bool caseAware = plat::PathCaseMode) noexcept;
-bool containsWildcard(const Text &pattern) noexcept;
+ROCKETRIDE_CORE_API bool containsWildcard(const Text &pattern) noexcept;
 }  // namespace ap::globber

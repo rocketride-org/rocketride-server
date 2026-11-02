@@ -99,6 +99,16 @@ export class Output {
 	}
 
 	/**
+	 * Emit a non-fatal warning on stderr — visible in every mode, and never
+	 * mixed into the JSON value on stdout.
+	 *
+	 * @param text - The warning, as a plain sentence.
+	 */
+	warn(text: string): void {
+		console.error(`Warning: ${text}`);
+	}
+
+	/**
 	 * Record the command's JSON result payload.
 	 *
 	 * @param value - JSON-serializable result of the command.

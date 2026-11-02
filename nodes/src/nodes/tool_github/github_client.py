@@ -33,8 +33,10 @@ and response normalisation. All tool methods in IInstance call through here.
 from __future__ import annotations
 
 from typing import Any
+import datetime
 import time
 
+import jwt
 import requests
 from tenacity import RetryCallState, Retrying, retry_if_exception_type, stop_after_attempt, wait_exponential
 
@@ -88,6 +90,75 @@ def _raise_github_error(resp: requests.Response) -> None:
 
 BASE_URL = 'https://api.github.com'
 DEFAULT_TIMEOUT = 30
+
+# GitHub caps App JWT exp at 10 minutes; use 9m30s to leave clock-skew margin.
+APP_JWT_TTL_SECONDS = 570
+
+
+def load_app_private_key(pem_text: str):
+    """Parse a PEM RSA private key for a GitHub App. Raises ValueError on malformed or non-RSA input."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+
+    try:
+        key = serialization.load_pem_private_key((pem_text or '').encode('utf-8'), password=None)
+    except (ValueError, TypeError) as exc:
+        raise ValueError(f'tool_github: invalid GitHub App private key: {exc}') from exc
+    if not isinstance(key, RSAPrivateKey):
+        raise ValueError('tool_github: GitHub App private key must be an RSA key (RS256 signing)')
+    return key
+
+
+def _sign_app_jwt(app_id: str, private_key_pem: str) -> str:
+    """Build and RS256-sign a short-lived JWT per GitHub App auth spec (iss=app_id)."""
+    key = load_app_private_key(private_key_pem)
+    now = int(time.time())
+    # iat is backdated 60s so a client clock slightly ahead of GitHub's still passes.
+    claims = {'iat': now - 60, 'exp': now + APP_JWT_TTL_SECONDS, 'iss': app_id}
+    return jwt.encode(claims, key, algorithm='RS256')
+
+
+def mint_installation_token(app_id: str, private_key_pem: str, installation_id: str) -> tuple[str, float]:
+    """Mint a short-lived GitHub App installation token.
+
+    POSTs to ``/app/installations/{installation_id}/access_tokens`` authenticated
+    with a freshly-signed App JWT. Returns ``(token, expiry_epoch_seconds)``.
+    """
+    jwt_token = _sign_app_jwt(app_id, private_key_pem)
+    headers = {
+        'Authorization': f'Bearer {jwt_token}',
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+    }
+    try:
+        resp = requests.request(
+            'POST',
+            f'{BASE_URL}/app/installations/{installation_id}/access_tokens',
+            headers=headers,
+            timeout=DEFAULT_TIMEOUT,
+        )
+    except requests.RequestException as exc:
+        raise ValueError(f'GitHub App token request failed: {exc}') from exc
+
+    if not resp.ok:
+        _raise_github_error(resp)
+
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise GitHubAPIError(resp.status_code, f'installation token response is not JSON: {exc}') from exc
+    token = data.get('token') if isinstance(data, dict) else None
+    expires_at = data.get('expires_at') if isinstance(data, dict) else None
+    if not token or not expires_at:
+        raise GitHubAPIError(resp.status_code, 'installation token response missing token/expires_at')
+
+    try:
+        expiry = datetime.datetime.fromisoformat(str(expires_at).replace('Z', '+00:00')).timestamp()
+    except ValueError as exc:
+        raise GitHubAPIError(
+            resp.status_code, f'installation token response has invalid expires_at: {expires_at}'
+        ) from exc
+    return token, expiry
 
 
 def call(

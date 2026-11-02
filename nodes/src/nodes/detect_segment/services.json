@@ -176,6 +176,7 @@
 	],
 	"test": {
 		"profiles": ["mask2former-instance"],
+		"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
 		"outputs": ["text"],
 		"timeout": 180,
 		"cases": [
@@ -191,6 +192,7 @@
 	"fulltest": [
 		{
 			"profiles": ["mask2former-instance"],
+			"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
 			"outputs": ["text"],
 			"timeout": 180,
 			"cases": [
@@ -205,6 +207,7 @@
 		},
 		{
 			"profiles": ["mask2former-semantic"],
+			"requiresHardware": { "cuda": { "vramGb": 3 }, "mps": { "ramGb": 6 }, "cpu": { "ramGb": 6 } },
 			"outputs": ["text"],
 			"timeout": 180,
 			"cases": [

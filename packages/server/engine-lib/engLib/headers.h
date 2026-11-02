@@ -23,10 +23,13 @@
 
 #pragma once
 
-// Include the Azure definitions
-
+// Include the cpprest definitions. No engLib code uses cpprest, but its
+// astreambuf.h specializes std::char_traits<unsigned char> and so has to be
+// seen before anything instantiates it - the nodes that do use cpprest get it
+// through this PCH
 #include <cpprest/rawptrstream.h>
 #include <cpprest/asyncrt_utils.h>
+#include <cpprest/http_client.h>
 #ifdef dllimport
 // cpprest SDK is leaking #define dllimport which causes issues with unicode
 // platform.h on osx
@@ -58,10 +61,6 @@
 // Boost lambda -> output iterator utility class
 #include <boost/iterator/function_output_iterator.hpp>
 
-// Include the Azure definitions
-#include <cpprest/rawptrstream.h>
-#include <cpprest/asyncrt_utils.h>
-
 #ifdef ROCKETRIDE_PLAT_WIN
 // Include atlbase.h header
 // AWS undefines Windows marco GetMessage (aws/core/client/AWSError.h).
@@ -70,28 +69,6 @@
 // @see APPLAT-6668
 #include <atlbase.h>
 #endif
-
-// Include the Aws/S3 definitions
-// AWS defines JSON_USE_EXCEPTION in SDKConfig.h, and it conflicts with our
-// definition Note that this has been fixed in upstream AWS:
-// https://github.com/aws/aws-sdk-cpp/pull/1189
-#pragma push_macro("JSON_USE_EXCEPTION")
-#undef JSON_USE_EXCEPTION
-// atlbase.h (included above) pulls in wingdi.h, which defines the ERROR macro
-// (#define ERROR 0). The newer aws-sdk-cpp declares `typedef E ERROR;` in
-// aws/core/utils/Outcome.h, so the macro expands it to `typedef E 0;` and the
-// header fails to compile. Suppress the GDI macro across the AWS includes and
-// restore it afterwards so Windows code below is unaffected.
-#pragma push_macro("ERROR")
-#undef ERROR
-#include <aws/core/Aws.h>
-#include <aws/core/auth/AWSCredentialsProvider.h>
-#include <aws/core/http/Scheme.h>
-#include <aws/core/utils/memory/stl/AWSSet.h>
-#include <aws/core/utils/logging/DefaultLogSystem.h>
-#include <aws/core/utils/logging/AWSLogging.h>
-#pragma pop_macro("ERROR")
-#pragma pop_macro("JSON_USE_EXCEPTION")
 
 #if ROCKETRIDE_PLAT_WIN
 #include <Lm.h>
@@ -128,5 +105,3 @@
 #endif
 #endif
 
-// Azure SDK
-#include <azure/storage/blobs.hpp>

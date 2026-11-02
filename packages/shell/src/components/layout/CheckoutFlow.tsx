@@ -147,7 +147,7 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 				setPresetPlan(null);
 				setPresetPromo(null);
 				cm.emit('shell:switchApp', { appId });
-				cm.emit('shell:statusMessage', { message: `Welcome to ${appName} — your plan is now active.` });
+				cm.emit('shell:statusMessage', { message: `Welcome to ${appName}. Your plan is now active.` });
 				// Auto-clear so the confirmation doesn't linger in the status bar.
 				// Tracked in a ref so it's cancelled if we unmount before it fires.
 				if (statusClearTimer.current) clearTimeout(statusClearTimer.current);

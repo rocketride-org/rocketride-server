@@ -74,7 +74,7 @@ CrewAI Subagent is not a tool and exposes no `run_agent` function.
 Both functions require an object with a non-empty `query: string` and accept
 an optional `context: object`. Context is encoded as a
 `RocketRide.agent.tool_context.v1` entry, and the result is
-`{content, meta, stack}` rather than an `answers`-lane write. Non-object
+`{content, meta, stack}` rather than an `answers`-lane write. `meta` holds the framework, agent and run ids, timings and the tool-call count; it carries `stop_reason` when the run reports why it stopped (`error` when it raised, or when the `require_tool_call` guard refused its answer), and no `stop_reason` means none was reported, not that the run finished. The task's control token is never included. Non-object
 input, a blank query, or non-object context raises `ValueError`. When an
 agent description is configured, it is prepended to the registered tool
 description that a parent agent sees.

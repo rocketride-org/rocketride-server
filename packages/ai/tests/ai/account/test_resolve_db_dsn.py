@@ -68,6 +68,11 @@ class _FakeBroker(BaseHTTPRequestHandler):
             self.send_response(401)
             self.end_headers()
             return
+        if body.get('owner_id') == 'retained-team':
+            # The provisioner's answer for a retained tenant (aiohttp HTTPConflict).
+            self.send_response(409, 'tenant is retained; POST /restore to bring it back')
+            self.end_headers()
+            return
         if tenant == 'unknown-tenant':
             self.send_response(404)
             self.end_headers()
@@ -110,17 +115,27 @@ def _resolve(client_id: str) -> str:
     return asyncio.run(_Minimal().resolve_db_dsn(client_id))
 
 
-def test_unconfigured_env_raises_signin_error(monkeypatch):
+def test_unconfigured_env_raises_no_cloud_db_error(monkeypatch):
     monkeypatch.delenv('ROCKETRIDE_DB_BROKER_URL', raising=False)
     monkeypatch.delenv('ROCKETRIDE_DB_BROKER_TOKEN', raising=False)
-    with pytest.raises(NotImplementedError, match='require signing into RocketRide cloud'):
+    with pytest.raises(NotImplementedError, match='no RocketRide cloud database is configured on this server'):
         _resolve('tenant-1')
 
 
-def test_partial_env_still_raises(monkeypatch, broker):
-    monkeypatch.delenv('ROCKETRIDE_DB_BROKER_TOKEN', raising=False)
-    with pytest.raises(NotImplementedError):
+@pytest.mark.parametrize(
+    ('url', 'token', 'missing'),
+    [
+        ('', TEST_TOKEN, 'ROCKETRIDE_DB_BROKER_URL'),
+        ('https://broker.example/provision', '   ', 'ROCKETRIDE_DB_BROKER_TOKEN'),
+        (' ', '', 'ROCKETRIDE_DB_BROKER_URL, ROCKETRIDE_DB_BROKER_TOKEN'),
+    ],
+)
+def test_missing_broker_variables_named_without_values(monkeypatch, url, token, missing):
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_URL', url)
+    monkeypatch.setenv('ROCKETRIDE_DB_BROKER_TOKEN', token)
+    with pytest.raises(NotImplementedError) as excinfo:
         _resolve('tenant-1')
+    assert str(excinfo.value) == f'no RocketRide cloud database is configured on this server (missing: {missing})'
 
 
 def test_resolves_dsn_via_broker(broker):
@@ -130,6 +145,40 @@ def test_resolves_dsn_via_broker(broker):
 def test_client_id_passed_verbatim_as_tenant_id_with_bearer(broker):
     _resolve('Client-42 ')
     assert broker.requests == [{'auth': f'Bearer {TEST_TOKEN}', 'body': {'tenant_id': 'Client-42'}}]
+
+
+@pytest.mark.parametrize(
+    ('scope', 'owner', 'body'),
+    [
+        ('team', 'team-7', {'scope': 'team', 'org_id': 'org-1', 'owner_id': 'team-7'}),
+        ('user', ' user-9 ', {'scope': 'user', 'org_id': 'org-1', 'owner_id': 'user-9'}),
+    ],
+)
+def test_team_and_user_scope_send_the_scoped_body(broker, scope, owner, body):
+    """The provisioner builds the team / user key itself (SDD 4.1)."""
+    assert asyncio.run(_Minimal().resolve_db_dsn('org-1', scope=scope, owner_id=owner)) == TEST_DSN
+    assert broker.requests == [{'auth': f'Bearer {TEST_TOKEN}', 'body': body}]
+
+
+@pytest.mark.parametrize(
+    ('scope', 'owner', 'message'),
+    [
+        ('org', 'team-7', 'org database takes no owner_id'),
+        ('team', '', 'team database needs an owner_id'),
+        ('user', '  ', 'user database needs an owner_id'),
+        ('everyone', 'x', 'unknown database scope'),
+    ],
+)
+def test_scope_and_owner_must_agree(broker, scope, owner, message):
+    with pytest.raises(ValueError, match=message):
+        asyncio.run(_Minimal().resolve_db_dsn('org-1', scope=scope, owner_id=owner))
+    assert broker.requests == []
+
+
+def test_retained_database_is_a_clear_error(broker):
+    """409 from /provision: the database was retained (team deleted, user left)."""
+    with pytest.raises(RuntimeError, match=r'has been retired and cannot be used \(HTTP 409: tenant is retained'):
+        asyncio.run(_Minimal().resolve_db_dsn('org-1', scope='team', owner_id='retained-team'))
 
 
 def test_idempotent_recall_returns_same_dsn(broker):
@@ -164,7 +213,7 @@ def test_broker_http_error_response_is_closed(monkeypatch):
     monkeypatch.setattr(urllib.request, 'urlopen', raise_http_error)
 
     with pytest.raises(RuntimeError, match='rejected provision.*503'):
-        AccountBase._call_db_broker('https://broker.example/provision', TEST_TOKEN, 'tenant-1')
+        AccountBase._call_db_broker('https://broker.example/provision', TEST_TOKEN, {'tenant_id': 'tenant-1'})
 
     assert response_body.closed
 

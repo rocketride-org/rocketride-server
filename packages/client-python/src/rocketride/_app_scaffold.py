@@ -34,7 +34,7 @@ as the App Builder's New App wizard and ``deploy.createApp()`` do:
   App.tsx is composed from frame options — sidebar, status footer, and
   document tabs each toggle a chrome region of the scaffolded AppLayout.
 - :func:`create_app_workspace` validates the slug/developer-id grammar,
-  writes ``./apps/<slug>``, ensures the pnpm workspace file and ignore
+  writes ``./apps/<slug>-ui``, ensures the pnpm workspace file and ignore
   hygiene, vendors the server-matched shell + client packages when a server
   base URL is given, and runs ``pnpm install`` (non-fatal on failure).
 - Every generated file carries the project MIT header. The MF rsbuild shape
@@ -52,6 +52,7 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -259,6 +260,11 @@ export default defineConfig(() => ({
 	// `as const` keeps the rule's `type` a literal for the config typecheck.
 	tools: {
 		rspack: {
+			// A build with errors emits nothing, so the preview keeps running the
+			// last good one. Emitted, its hot update disposes every module only
+			// the broken file imported; the fix's update cannot bring them back,
+			// and every later save dies silently (the frozen-preview bug).
+			optimization: { emitOnErrors: false },
 			module: {
 				rules: [{ test: /\.pipe$/, type: 'json' } as const],
 			},
@@ -273,7 +279,8 @@ export default defineConfig(() => ({
 	// that rejects check() falls back to a full reload of the preview page.
 	// (The historic reload loop came from zombie multi-container HMR clients,
 	// gone since dev-remote injection became once-per-page; the silent-freeze
-	// class is prevented at the source by the AppDescriptor jsx anchor.)
+	// class is prevented at the source by emitOnErrors: false above for failed
+	// builds, and by the AppDescriptor jsx anchor for JSX-free saves.)
 	// lazyCompilation stays off: compile-on-request made every served bundle
 	// one hash behind, so the dev client always saw itself as stale.
 	// client: the bundle runs INSIDE the preview shell's page (a different
@@ -367,10 +374,11 @@ def _app_descriptor(v: TemplateVars) -> str:
  * declares its layout inside with <AppLayout>.
  */
 
-// HMR anchor: keeps the shared jsx runtime referenced even when the app's
-// root component fails to compile — an error build otherwise orphans it, the
-// hot runtime tombstones its factory, and every later fix-apply dies
-// silently (the frozen-preview bug).
+// HMR anchor: keeps the shared jsx runtime referenced even when a save leaves
+// the root component with no JSX — that update otherwise disposes it, no later
+// update can bring it back, and every later save dies silently (the
+// frozen-preview bug). Failed builds are covered by emitOnErrors: false in
+// rsbuild.config.mts.
 import 'react/jsx-dev-runtime';
 
 import type { AppDescriptor } from 'shell';
@@ -841,7 +849,7 @@ def create_app_workspace(
 ) -> dict:
     """Scaffold a new app — the programmatic twin of the App Builder's New App
     wizard, rendering the exact same templates. Writes the app under
-    ``./apps/<slug>``, ensures the pnpm workspace file and ignore hygiene,
+    ``./apps/<slug>-ui``, ensures the pnpm workspace file and ignore hygiene,
     vendors the server-matched platform packages when a server is reachable,
     and installs. Everything after the scaffold (editing, verify, deploy)
     is the normal app lifecycle.
@@ -889,9 +897,10 @@ def create_app_workspace(
     if template not in TEMPLATE_NAMES:
         raise ValueError(f'Unknown template "{template}" — available: {", ".join(TEMPLATE_NAMES)}.')
 
-    # step: destination — ./apps/<slug>, never over an existing folder
-    folder_rel = f'apps/{slug}'
-    folder_abs = os.path.join(ws_abs, 'apps', slug)
+    # step: destination — ./apps/<slug>-ui (the workspace convention every
+    # app UI follows), never over an existing folder
+    folder_rel = f'apps/{slug}-ui'
+    folder_abs = os.path.join(ws_abs, 'apps', f'{slug}-ui')
     if os.path.exists(folder_abs):
         raise ValueError(f'"{folder_rel}" already exists — pick another slug or remove the folder.')
 
@@ -928,6 +937,16 @@ def create_app_workspace(
         with open(abs_path, 'w', encoding='utf-8', newline='') as f:
             f.write(content)
         progress(f'+ {folder_rel}/{rel_path}')
+
+    # step: working-copy identity — the appManifest projectId exists from
+    # creation, so deploy provenance never depends on the app having been
+    # opened in an editor first (twin of the TS scaffold's ensureProjectId)
+    pkg_path = os.path.join(folder_abs, 'package.json')
+    with open(pkg_path, 'r', encoding='utf-8') as f:
+        pkg = json.load(f)
+    pkg['appManifest']['projectId'] = str(uuid.uuid4())
+    with open(pkg_path, 'w', encoding='utf-8', newline='') as f:
+        f.write(json.dumps(pkg, indent=2, ensure_ascii=False) + '\n')
 
     # step: workspace hygiene — the pnpm workspace file that links every
     # app, and the ignore entries that keep credentials and outputs out

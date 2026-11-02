@@ -32,8 +32,8 @@ void deinit() noexcept;
 // fire dev::crashDumpCreatedCallback() for each. Deliberately not part of
 // init(): the out-of-process handler must start as early as possible, but
 // recovery has to wait until the monitor has installed its callback and the
-// crash-dump location points somewhere that exists. No-op on Windows, which
-// writes and notifies in-process at crash time.
+// crash-dump location points somewhere that exists. No-op without --dumps, and
+// on Windows, which writes and notifies in-process at crash time.
 void minidumpSweep() noexcept;
 
 }  // namespace ap::plat

@@ -94,7 +94,7 @@ export const detailPanelEntry: IGalleryEntry = {
 	name: 'DetailPanel / PanelTabBody',
 	group: 'content',
 	blurb: 'THE record panel: one slide-over surface for inspect / edit / create - EntityHeader + optional tabs + sectioned body + footer verb row. Stacks, resizes, and can anchor contained to the record-owning surface (as this demo does).',
-	doc: `With \`tabs\`, the panel's outer body does not scroll — each tab owns its own overflow. Wrap every tab's content in \`PanelTabBody\` (the one-line stock scroll wrapper) to get that right.`,
+	doc: `With \`tabs\`, the panel's outer body does not scroll; each tab owns its own overflow. Wrap every tab's content in \`PanelTabBody\` (the one-line stock scroll wrapper) to get that right.`,
 	knobs: [
 		{ id: 'side', label: 'Side', kind: 'select', options: ['right', 'bottom'], defaultValue: 'right' },
 		{ id: 'footer', label: 'Footer verbs', kind: 'boolean', defaultValue: true },

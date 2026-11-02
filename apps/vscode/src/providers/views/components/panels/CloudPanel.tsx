@@ -261,7 +261,7 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 					{waitlisted && (
 						<div style={{ marginBottom: 10 }}>
 							<Banner variant="info">
-								Thanks for signing up{waitlistedName ? `, ${waitlistedName}` : ''}! Your account is all set — we&#39;re rolling out
+								Thanks for signing up{waitlistedName ? `, ${waitlistedName}` : ''}! Your account is all set. We&#39;re rolling out
 								access in waves and you&#39;re in the queue. We&#39;ll email you as soon as your account is activated.
 							</Banner>
 						</div>
@@ -304,7 +304,7 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 			{showCheckout && stripeKey && onFetchPlans && onCreateCheckout && onConfirmPending && (
 				<CheckoutModal
 					appName="Pipe Builder"
-					appDescription="Visual AI pipeline editor -- run and deploy pipelines on RocketRide Cloud."
+					appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud."
 					stripePublishableKey={stripeKey}
 					onFetchPlans={onFetchPlans}
 					onCreateCheckout={onCreateCheckout}

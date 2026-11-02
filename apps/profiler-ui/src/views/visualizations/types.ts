@@ -34,7 +34,8 @@
 
 /**
  * A single node in the hierarchical call tree returned by the server.
- * Matches the CProfileTreeNode shape from the client SDK.
+ * Matches the CProfileTreeNode shape from the client SDK: below the first
+ * level the numbers are this path's share of the caller → callee totals.
  */
 export interface ProfileTreeNode {
 	/** Function name. */
@@ -43,7 +44,7 @@ export interface ProfileTreeNode {
 	file: string;
 	/** Source line number. */
 	line: number;
-	/** Number of calls from the parent context. */
+	/** Number of calls from the parent context (this path's share, rounded). */
 	ncalls: number;
 	/** Total time spent in this function (excluding sub-calls). */
 	tottime: number;
@@ -58,11 +59,32 @@ export interface ProfileTreeNode {
 // =============================================================================
 
 /**
+ * One function's totals over the session (or thread), as the text report prints them.
+ * Matches the CProfileFunctionStats shape from the client SDK.
+ */
+export interface ProfileFunctionStats {
+	/** Function name. */
+	name: string;
+	/** Source filename. */
+	file: string;
+	/** Source line number. */
+	line: number;
+	/** Total number of calls. */
+	ncalls: number;
+	/** Self time (excluding sub-calls). */
+	tottime: number;
+	/** Cumulative time (including sub-calls). */
+	cumtime: number;
+}
+
+/**
  * Full response from rrext_cprofile_report_tree.
  */
 export interface ProfileTreeResponse {
 	/** Root node of the call tree (synthetic '<root>' wrapper). */
 	tree: ProfileTreeNode | null;
+	/** Per-function totals, filtered like the tree; absent from older servers. */
+	functions?: ProfileFunctionStats[];
 	/** How long the profiled threads ran — the selected thread, or all of them summed. */
 	total_time: number;
 	/** Total number of function calls recorded. */

@@ -63,8 +63,13 @@ _pygit2_stub.Signature = MagicMock()
 # With these in place, `import rocketlib` works and we get the real
 # tool_function / normalize_tool_input / require_int / require_bool.
 sys.modules['engLib'] = MagicMock()
-_depends_stub = MagicMock()
+# A real module, not a MagicMock: this stub stays in sys.modules for the
+# rest of the session, and other suites monkeypatch its attributes (e.g.
+# media_inspect patches load_depends). Since pytest 9.2, undoing a patch of a
+# MagicMock's lazily created attribute deletes it for every later test.
+_depends_stub = ModuleType('depends')
 _depends_stub.depends = lambda *args, **kwargs: None
+_depends_stub.load_depends = lambda *args, **kwargs: None
 sys.modules['depends'] = _depends_stub
 
 _ai_config_stub = MagicMock()

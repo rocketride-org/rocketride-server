@@ -25,6 +25,6 @@
 
 namespace ap {
 
-ErrorCode make_error_code(DWORD code) noexcept;
+ROCKETRIDE_CORE_API ErrorCode make_error_code(DWORD code) noexcept;
 
 }  // namespace ap

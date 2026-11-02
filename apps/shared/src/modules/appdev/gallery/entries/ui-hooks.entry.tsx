@@ -34,12 +34,12 @@ export const uiHooksEntry: IGalleryEntry = {
 	name: 'UI utility hooks',
 	group: 'hooks',
 	blurb: 'The small cross-cutting hooks: debounced values, popup positioning and dismissal, platform announcements, and cross-app component loading.',
-	doc: `Reach for these before writing an effect by hand — they encode the platform's popup, debounce, and announcement conventions:
+	doc: `Reach for these before writing an effect by hand. They encode the platform's popup, debounce, and announcement conventions:
 
 - \`useClickOutside\` + \`useFixedPopupPosition\` are the popup pair: anchor a \`position: fixed\` popup to its trigger and dismiss it on outside clicks (what \`SidebarFooter\` and the grid header popups use).
 - \`useDebouncedValue\` is the trailing debounce for search inputs feeding \`fetchPage\` or \`matchesSearch\`.
 - \`useAnnouncements\` feeds the platform announcements ticker (fetched JSON, 1h cache, validity-window filtered).
-- \`useAppComponent\` loads a named component from ANOTHER app's catalog — the sanctioned cross-app surface (never import another app's code).`,
+- \`useAppComponent\` loads a named component from ANOTHER app's catalog, the sanctioned cross-app surface (never import another app's code).`,
 	code: `import { useState, useRef, useEffect } from 'react';
 import { useClickOutside, useFixedPopupPosition, useDebouncedValue } from 'shell';
 

@@ -788,6 +788,18 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
     Text filterPipe = engine::store::filter::pipe::Type;
     Text filterBottom = engine::store::filter::bottom::Type;
 
+    // A filter that ships as a node may not be available - a host that cannot
+    // load nodes (engtest) runs without it, and it resolves to nothing there
+    const auto declaredFilter = [](auto type) noexcept {
+        return IServices::getServiceDefinition((Text) type) ? type
+                                                            : decltype(type){};
+    };
+
+    // The C++ nodes may not be available
+    const auto filterHash = declaredFilter("hash"_itv);
+    const auto filterParse = declaredFilter("parse"_itv);
+    const auto filterClassify = declaredFilter("classify"_itv);
+
     // Add the filter
     const auto pushAbsolute =
         localfcn(Text id, uint32_t capabilities, Text logicalType,
@@ -880,10 +892,15 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
                 return APERR(Ec::InvalidParam,
                              "The service is not a target service");
 
+            // These require a classify filter
+            if (!filterClassify)
+                return APERR(Ec::InvalidCommand,
+                             "The classify node is not available");
+
             // This is primarily used as a target to receives text
             // on the writeText interface and classify the incoming
             // documents classification
-            pushString(filter::classify::Type);
+            pushString(filterClassify);
             break;
         }
 
@@ -893,8 +910,13 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
                 return APERR(Ec::InvalidParam,
                              "The service is not a target service");
 
+            // These require a hash filter
+            if (!filterHash)
+                return APERR(Ec::InvalidCommand,
+                             "The hash node is not available");
+
             // Add the hash driver in case one of the paths asked for signing
-            pushString(filter::hash::Type);
+            pushString(filterHash);
 
             // Add autopipe to figure out what to do, what to remote or not
             // This will typically add the parser, optional ocr, indexer if
@@ -904,8 +926,14 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
             pushString("autopipe");
 
             // We can classify at the same time if desired
-            if (config.taskConfig.lookup<bool>("enableClassification"))
-                pushString(filter::classify::Type);
+            if (config.taskConfig.lookup<bool>("enableClassification")) {
+                // These require a classify filter
+                if (!filterClassify)
+                    return APERR(Ec::InvalidCommand,
+                                 "The classify node is not available");
+
+                pushString(filterClassify);
+            }
             break;
         }
 
@@ -915,10 +943,20 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
                 return APERR(Ec::InvalidParam,
                              "The service is not a target service");
 
-            // We are classifying a single file
-            pushString(filter::parse::Type);
+            // These require a parse filter
+            if (!filterParse)
+                return APERR(Ec::InvalidCommand,
+                             "The parse node is not available");
+
+            // These require a classify filter
+            if (!filterClassify)
+                return APERR(Ec::InvalidCommand,
+                             "The classify node is not available");
+
+            pushString(filterParse);
             // pushString(filter::tokenize::Type);
-            pushString(filter::classify::Type);
+
+            pushString(filterClassify);
             break;
         }
 
@@ -928,8 +966,13 @@ Error IServiceEndpoint::buildPipeStack() noexcept {
                 return APERR(Ec::InvalidParam,
                              "The service is not a target service");
 
+            // These require a hash filter
+            if (!filterHash)
+                return APERR(Ec::InvalidCommand,
+                             "The hash node is not available");
+
             // Don't need much, just the hasher
-            pushString(filter::hash::Type);
+            pushString(filterHash);
             break;
         }
 

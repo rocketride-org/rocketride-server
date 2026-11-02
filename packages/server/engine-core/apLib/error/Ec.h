@@ -44,7 +44,7 @@ APUTIL_DEFINE_ENUM(
     TagInvalidSig, TagInvalidSize, TagInvalidType, PackInvalidSig, PackInvalid,
     Lz4Inflate, Lz4Deflate, LicenseLimit, InvalidFilename);
 
-ErrorCode make_error_code(Ec code) noexcept;
+ROCKETRIDE_CORE_API ErrorCode make_error_code(Ec code) noexcept;
 
 }  // namespace ap
 

@@ -256,6 +256,17 @@ class TestQueryExtended:
         assert fake.last_call['input'] == {'sql': 'SELECT $1', 'params': [42]}
 
     @pytest.mark.asyncio
+    async def test_query_with_named_params_for_graph_nodes(self):
+        """Query with a dict of named params (graph / Cypher nodes) forwards it as-is."""
+        api, fake = make_api()
+        rows = [{'id': 1, 'name': 'a "b"'}]
+        await api.query(token=TOKEN, sql='UNWIND $rows AS r CREATE (:Item {id: r.id})', params={'rows': rows})
+        assert fake.last_call['input'] == {
+            'sql': 'UNWIND $rows AS r CREATE (:Item {id: r.id})',
+            'params': {'rows': rows},
+        }
+
+    @pytest.mark.asyncio
     async def test_query_with_session_id_and_params(self):
         """Query with both session_id and params includes both in input."""
         api, fake = make_api()
