@@ -711,6 +711,11 @@
 			"auth_prefix": "Bearer",
 			"smoke_test": "chat",
 			"require_api_key": true,
+			// The model list reports max_output_length, but for some entries it just
+			// repeats the context window (zai-org/glm-5: 202,752 for both), so an
+			// output equal to the window is treated as the swap signature and skipped
+			// rather than recorded as a completion limit.
+			"output_limit_below_context": true,
 			// Same reasoning as llm_gmi_cloud: LiteLLM files these org-prefixed IDs
 			// under other hosts, so it is left out; OpenRouter stays for the proxied
 			// vendor models below.

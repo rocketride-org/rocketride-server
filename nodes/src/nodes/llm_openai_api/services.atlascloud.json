@@ -80,7 +80,7 @@
 				"modelSource": "provider",
 				"base_url": "https://api.atlascloud.ai/v1/",
 				"modelTotalTokens": 1048576,
-				"modelOutputTokens": 4096,
+				"modelOutputTokens": 393216,
 				"apikey": "${ROCKETRIDE_ATLASCLOUD_KEY}",
 				"capabilities": {
 					"reasoning": true
@@ -92,7 +92,7 @@
 				"modelSource": "provider",
 				"base_url": "https://api.atlascloud.ai/v1/",
 				"modelTotalTokens": 1048576,
-				"modelOutputTokens": 4096,
+				"modelOutputTokens": 131072,
 				"apikey": "${ROCKETRIDE_ATLASCLOUD_KEY}",
 				"capabilities": {
 					"reasoning": true

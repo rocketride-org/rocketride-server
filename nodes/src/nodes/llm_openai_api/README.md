@@ -145,6 +145,16 @@ user types for their own OpenAI-compatible endpoint.
 
 ## Schema
 
+### Atlas Cloud (`services.atlascloud.json`)
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `base_url` | `string` | **Base URL**<br/>OpenAI-compatible base URL. Defaults to Atlas Cloud. |  |
+| `model` | `string` | **Model**<br/>Atlas Cloud model id (e.g. deepseek-ai/deepseek-v4-flash). Full list: https://api.atlascloud.ai/v1/models |  |
+| `modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it. |  |
+| `modelTotalTokens` | `number` | **Tokens**<br/>Total Tokens |  |
+| `openai_api.profile` | `string` | **Model**<br/>Atlas Cloud model | `"deepseek-v4-flash"` |
+
 ### OpenAI-Compatible API (`services.json`)
 
 | Field | Type | Description | Default |
