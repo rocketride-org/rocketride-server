@@ -223,7 +223,7 @@ std::vector<FsType> toFsTypeArray(TextView str) noexcept {
     std::vector<FsType> result;
     auto types = split(str, ",");
     for (auto &type : types) {
-        result.push_back(toFsType(str));
+        result.push_back(toFsType(type));
     }
     return result;
 }
