@@ -393,7 +393,7 @@ export type { ITreeProps, ITreeNode } from './components/tree/Tree';
 export type { IBreadcrumbsProps, IBreadcrumb } from './components/breadcrumbs/Breadcrumbs';
 export type { IPaginationProps } from './components/pagination/Pagination';
 export type { IStepperProps, IStep, StepState } from './components/stepper/Stepper';
-export type { IAttentionRingProps, ICoachMarkProps } from './components/coach-mark/CoachMark';
+export type { IAttentionRingProps, ICoachMarkProps, CoachMarkAlign } from './components/coach-mark/CoachMark';
 export type { IConfettiProps } from './components/confetti/Confetti';
 export type { IItemBrowserProps, IBrowserItem, IBrowserPoint, ItemBrowserView } from './components/item-browser/ItemBrowser';
 export type { IFileIconProps } from './components/item-browser/FileIcon';

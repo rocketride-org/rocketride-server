@@ -268,3 +268,15 @@ export const BxGroup = createMultiPathIcon(['M16.604 11.048a5.67 5.67 0 0 0 .751
 
 // A person inside the Boxicons "bx-shield" outline — staff / admin access.
 export const BxShieldUser = createMultiPathIcon(['M20.995 6.903a.997.997 0 0 0-.547-.797l-7.973-4a.997.997 0 0 0-.895-.002l-8.027 4c-.297.15-.502.437-.544.767-.013.097-1.145 9.741 8.541 15.008a.995.995 0 0 0 .969-.009c9.307-5.259 8.514-14.573 8.476-14.967zm-8.977 12.944c-6.86-4.01-7.14-10.352-7.063-12.205l7.071-3.523 6.998 3.511c.005 1.87-.481 8.243-7.006 12.217z', 'M12 7.25a2.25 2.25 0 1 0 0 4.5 2.25 2.25 0 0 0 0-4.5z', 'M8.25 15.75c0-1.8 1.68-2.75 3.75-2.75s3.75.95 3.75 2.75v.5h-7.5z']);
+
+// Boxicons "bxl-visual-studio" — the VS Code logo, for links to the VS Code Marketplace.
+export const BxlVisualStudio = createIcon('m21.29 4.1-4.12-2a1.36 1.36 0 0 0-.48-.1h-.08a1.18 1.18 0 0 0-.72.24l-.14.12-7.88 7.19L4.44 7a.83.83 0 0 0-.54-.17.88.88 0 0 0-.53.17l-1.1 1a.8.8 0 0 0-.27.61.84.84 0 0 0 .27.62l3 2.71-3 2.72a.84.84 0 0 0 0 1.23l1.1 1a.89.89 0 0 0 .6.22.93.93 0 0 0 .47-.17l3.43-2.61 7.88 7.19a1.2 1.2 0 0 0 .76.36h.17a1 1 0 0 0 .49-.12l4.12-2a1.25 1.25 0 0 0 .71-1.1V5.23a1.26 1.26 0 0 0-.71-1.13zM17 16.47l-6-4.53 6-4.53z');
+
+// The Open VSX Registry mark (eclipse-openvsx/openvsx, EPL-2.0), in one color:
+// its two tones become full and lighter shades of the current color.
+export const BxlOpenVsx: IconComponent = ({ size = 24, color = 'currentColor', className, style }) => (
+	<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="-11.3 2.3 128 128" fill={color} className={className} style={style}>
+		<path d="M30 44.2L52.6 5H7.3zM4.6 88.5h45.3L27.2 49.4zm51 0l22.6 39.2 22.6-39.2z" opacity={0.55} />
+		<path d="M52.6 5L30 44.2h45.2zM27.2 49.4l22.7 39.1 22.6-39.1zm51 0L55.6 88.5h45.2z" />
+	</svg>
+);

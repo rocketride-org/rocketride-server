@@ -60,7 +60,16 @@ export interface ICoachMarkProps {
 	onNext?: () => void;
 	/** Label of the next button. Defaults to `'Next'`. */
 	nextLabel?: string;
+	/**
+	 * Which edge of the element the callout lines up with when it sits above
+	 * or below it. Defaults to `'start'` (left). `'end'` (right) suits a wide
+	 * element whose reading ends on the right, so the eye doesn't travel back.
+	 */
+	align?: CoachMarkAlign;
 }
+
+/** The edge of the element a callout above or below it lines up with. */
+export type CoachMarkAlign = 'start' | 'end';
 
 /** The space kept between the element and its ring. */
 const RING_GAP = 4;
@@ -96,7 +105,7 @@ export function AttentionRing({ target }: IAttentionRingProps): React.ReactEleme
  * @param props - {@link ICoachMarkProps}.
  * @returns The coach mark, portalled to the body, or nothing until the target exists.
  */
-export function CoachMark({ target, title, children, progress, onClose, closeLabel = 'Skip tour', onNext, nextLabel = 'Next' }: ICoachMarkProps): React.ReactElement | null {
+export function CoachMark({ target, title, children, progress, onClose, closeLabel = 'Skip tour', onNext, nextLabel = 'Next', align = 'start' }: ICoachMarkProps): React.ReactElement | null {
 	const rect = useTargetRect(target);
 	const titleId = useId();
 	const hasRect = rect !== null;
@@ -121,7 +130,7 @@ export function CoachMark({ target, title, children, progress, onClose, closeLab
 		<div className="rr-coach-mark">
 			<div className="rr-coach-mark__scrim" style={ringStyle(rect)} aria-hidden="true" />
 			<div className="rr-attention-ring" style={ringStyle(rect)} aria-hidden="true" />
-			<div className="rr-coach-mark__callout" style={calloutStyle(rect)} role="dialog" aria-labelledby={titleId}>
+			<div className="rr-coach-mark__callout" style={calloutStyle(rect, align)} role="dialog" aria-labelledby={titleId}>
 				{progress && <div className="rr-coach-mark__progress">{progress}</div>}
 				<div id={titleId} className="rr-coach-mark__title">
 					{title}
@@ -211,18 +220,22 @@ function ringStyle(rect: TargetRect): React.CSSProperties {
 /**
  * Places the callout to the right of the element when it fits, else below
  * it, else above it, else over the element's lower edge; always inside the
- * viewport.
+ * viewport. Above or below, it lines up with the element's left edge, or its
+ * right edge for `'end'`.
  *
  * @param rect - The element's rect.
+ * @param align - Which edge to line up with above or below.
  * @returns Fixed-position styles.
  */
-function calloutStyle(rect: TargetRect): React.CSSProperties {
+function calloutStyle(rect: TargetRect, align: CoachMarkAlign): React.CSSProperties {
 	const maxTop = window.innerHeight - CALLOUT_ROOM - CALLOUT_GAP;
 	const right = rect.left + rect.width + RING_GAP + CALLOUT_GAP;
 	if (right + CALLOUT_WIDTH + CALLOUT_GAP <= window.innerWidth) {
 		return { top: clamp(rect.top - RING_GAP, CALLOUT_GAP, maxTop), left: right };
 	}
-	const left = clamp(rect.left, CALLOUT_GAP, window.innerWidth - CALLOUT_WIDTH - CALLOUT_GAP);
+	let edge = rect.left;
+	if (align === 'end') edge = rect.left + rect.width - CALLOUT_WIDTH;
+	const left = clamp(edge, CALLOUT_GAP, window.innerWidth - CALLOUT_WIDTH - CALLOUT_GAP);
 	const below = rect.top + rect.height + RING_GAP + CALLOUT_GAP;
 	if (below <= maxTop) return { top: below, left };
 	const above = rect.top - RING_GAP - CALLOUT_GAP - CALLOUT_ROOM;

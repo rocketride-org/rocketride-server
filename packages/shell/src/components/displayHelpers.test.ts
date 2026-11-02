@@ -209,4 +209,7 @@ test('getStepState orders complete, current, upcoming; error wins', () => {
 	assert.equal(getStepState(2, 2), 'current');
 	assert.equal(getStepState(3, 2), 'upcoming');
 	assert.equal(getStepState(0, 2, true), 'error');
+	// Done out of order: complete past the current step, but current stays current.
+	assert.equal(getStepState(4, 2, false, true), 'complete');
+	assert.equal(getStepState(2, 2, false, true), 'current');
 });

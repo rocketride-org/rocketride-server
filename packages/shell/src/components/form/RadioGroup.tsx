@@ -45,6 +45,12 @@ export interface IRadioGroupProps<T extends string = string> {
 	name?: string;
 	/** Lay options out in a row instead of a column. */
 	horizontal?: boolean;
+	/**
+	 * Show each option as a bordered card, the chosen one outlined in the
+	 * accent: for a few weighty choices (a plan, a region) where each option
+	 * carries a richer label. The label fills the card's width.
+	 */
+	cards?: boolean;
 	/** Disable every option. */
 	disabled?: boolean;
 	/** Accessible name when not inside a Field. */
@@ -61,7 +67,7 @@ export interface IRadioGroupProps<T extends string = string> {
  * @param props - {@link IRadioGroupProps}.
  * @returns The radio group.
  */
-export function RadioGroup<T extends string = string>({ options, value, onChange, name, horizontal = false, disabled, ariaLabel }: IRadioGroupProps<T>): React.ReactElement {
+export function RadioGroup<T extends string = string>({ options, value, onChange, name, horizontal = false, cards = false, disabled, ariaLabel }: IRadioGroupProps<T>): React.ReactElement {
 	const field = useField();
 	const generatedName = useId();
 	const groupName = name ?? generatedName;
@@ -69,6 +75,7 @@ export function RadioGroup<T extends string = string>({ options, value, onChange
 
 	let groupClassName = 'rr-radio-group';
 	if (horizontal) groupClassName = 'rr-radio-group rr-radio-group--horizontal';
+	if (cards) groupClassName += ' rr-radio-group--cards';
 
 	return (
 		<div role="radiogroup" className={groupClassName} aria-labelledby={field?.labelId} aria-label={ariaLabel} aria-describedby={field?.describedBy} aria-required={field?.isRequired || undefined} aria-invalid={field?.isInvalid || undefined}>

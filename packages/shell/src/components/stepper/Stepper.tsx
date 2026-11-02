@@ -35,6 +35,12 @@ export interface IStep {
 	description?: ReactNode;
 	/** Mark the step as failed. */
 	error?: boolean;
+	/**
+	 * Mark the step done out of order: it shows complete even after the
+	 * current step (a later step done first, in a checklist the person may
+	 * take in any order). The current step still shows as current.
+	 */
+	complete?: boolean;
 	/** Show an "Optional" hint. */
 	optional?: boolean;
 }
@@ -73,17 +79,19 @@ export interface IStepperProps {
 // =============================================================================
 
 /**
- * A step's state from its position and error flag.
+ * A step's state from its position and its error and done flags.
  *
  * @param index - The step's index.
  * @param activeStep - The current step index.
  * @param hasError - Whether the step is marked failed.
+ * @param isDone - Whether the step is marked done out of order.
  * @returns The state.
  */
-export function getStepState(index: number, activeStep: number, hasError = false): StepState {
+export function getStepState(index: number, activeStep: number, hasError = false, isDone = false): StepState {
 	if (hasError) return 'error';
 	if (index < activeStep) return 'complete';
 	if (index === activeStep) return 'current';
+	if (isDone) return 'complete';
 	return 'upcoming';
 }
 
@@ -113,7 +121,7 @@ export function Stepper({ steps, activeStep, vertical = false, onStepClick, isNo
 	return (
 		<ol className={rootClassName} aria-label={ariaLabel}>
 			{steps.map((step, index) => {
-				const state = getStepState(index, activeStep, step.error);
+				const state = getStepState(index, activeStep, step.error, step.complete);
 				const isClickable = Boolean(onStepClick) && index !== activeStep && (state === 'complete' || isNonLinear);
 
 				let marker: ReactNode = index + 1;

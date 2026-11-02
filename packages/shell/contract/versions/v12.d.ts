@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-01T22:18:31.212Z
-// Source commit: 1abd443b7ad8c08fabfbb24837af8eb93cb20284
+// Generated:     2026-11-02T06:25:46.725Z
+// Source commit: 3f2422db939bd357ef84213231521657078fc4b6
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -9612,6 +9612,8 @@ export declare const BxInfoCircle: IconComponent;
 export declare const BxTimeFive: IconComponent;
 export declare const BxGroup: IconComponent;
 export declare const BxShieldUser: IconComponent;
+export declare const BxlVisualStudio: IconComponent;
+export declare const BxlOpenVsx: IconComponent;
 /**
  * Props for the Sidebar component.
  */
@@ -11637,6 +11639,12 @@ export interface IRadioGroupProps<T extends string = string> {
     name?: string;
     /** Lay options out in a row instead of a column. */
     horizontal?: boolean;
+    /**
+     * Show each option as a bordered card, the chosen one outlined in the
+     * accent: for a few weighty choices (a plan, a region) where each option
+     * carries a richer label. The label fills the card's width.
+     */
+    cards?: boolean;
     /** Disable every option. */
     disabled?: boolean;
     /** Accessible name when not inside a Field. */
@@ -11648,7 +11656,7 @@ export interface IRadioGroupProps<T extends string = string> {
  * @param props - {@link IRadioGroupProps}.
  * @returns The radio group.
  */
-export declare function RadioGroup<T extends string = string>({ options, value, onChange, name, horizontal, disabled, ariaLabel }: IRadioGroupProps<T>): React$1.ReactElement;
+export declare function RadioGroup<T extends string = string>({ options, value, onChange, name, horizontal, cards, disabled, ariaLabel }: IRadioGroupProps<T>): React$1.ReactElement;
 /** One option of a Select or Combobox. */
 export interface ISelectOption<T extends string = string> {
     /** Value reported to `onChange`. */
@@ -12408,6 +12416,12 @@ export interface IStep {
     description?: React$1.ReactNode;
     /** Mark the step as failed. */
     error?: boolean;
+    /**
+     * Mark the step done out of order: it shows complete even after the
+     * current step (a later step done first, in a checklist the person may
+     * take in any order). The current step still shows as current.
+     */
+    complete?: boolean;
     /** Show an "Optional" hint. */
     optional?: boolean;
 }
@@ -12471,7 +12485,15 @@ export interface ICoachMarkProps {
     onNext?: () => void;
     /** Label of the next button. Defaults to `'Next'`. */
     nextLabel?: string;
+    /**
+     * Which edge of the element the callout lines up with when it sits above
+     * or below it. Defaults to `'start'` (left). `'end'` (right) suits a wide
+     * element whose reading ends on the right, so the eye doesn't travel back.
+     */
+    align?: CoachMarkAlign;
 }
+/** The edge of the element a callout above or below it lines up with. */
+export type CoachMarkAlign = "start" | "end";
 /**
  * Renders a pulsing ring over the target element, or nothing until it exists.
  *
@@ -12485,7 +12507,7 @@ export declare function AttentionRing({ target }: IAttentionRingProps): React$1.
  * @param props - {@link ICoachMarkProps}.
  * @returns The coach mark, portalled to the body, or nothing until the target exists.
  */
-export declare function CoachMark({ target, title, children, progress, onClose, closeLabel, onNext, nextLabel }: ICoachMarkProps): React$1.ReactElement | null;
+export declare function CoachMark({ target, title, children, progress, onClose, closeLabel, onNext, nextLabel, align }: ICoachMarkProps): React$1.ReactElement | null;
 /** Props for the {@link Confetti} component. */
 export interface IConfettiProps {
     /** How many pieces fall. Defaults to 140. */
@@ -14331,6 +14353,8 @@ export declare const shellApi: {
     readonly BxTimeFive: IconComponent;
     readonly BxGroup: IconComponent;
     readonly BxShieldUser: IconComponent;
+    readonly BxlVisualStudio: IconComponent;
+    readonly BxlOpenVsx: IconComponent;
 };
 /**
  * The compile-time shape of the shell API surface.

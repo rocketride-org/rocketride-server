@@ -902,6 +902,8 @@ select.rr-input {
 	stroke-width: 1.5px;
 	stroke-dasharray: 8 6;
 	animation: rr-card-march 1.6s linear infinite;
+	/* Set to reverse so two highlighted cards side by side march opposite ways. */
+	animation-direction: var(--rr-card-march-direction, normal);
 }
 @keyframes rr-card-march {
 	to {
@@ -1455,6 +1457,39 @@ select.rr-input {
 	flex-direction: row;
 	flex-wrap: wrap;
 	gap: var(--rr-space-2) var(--rr-space-4);
+}
+/* Cards: each option a bordered tile; the chosen one outlined in the accent. */
+.rr-radio-group--cards > .rr-choice {
+	/* Anchors a tab a label may pin to the card's edge ("Most popular"). */
+	position: relative;
+	display: flex;
+	align-items: flex-start;
+	padding: var(--rr-space-3);
+	border: 1px solid var(--rr-border);
+	border-radius: var(--rr-radius-md);
+	background: var(--rr-bg-paper);
+	transition:
+		border-color var(--rr-duration-fast) var(--rr-ease-standard),
+		background-color var(--rr-duration-fast) var(--rr-ease-standard);
+}
+.rr-radio-group--cards > .rr-choice:hover {
+	border-color: var(--rr-border-hover);
+}
+.rr-radio-group--cards > .rr-choice:has(.rr-radio:checked) {
+	border-color: var(--rr-accent);
+	background: var(--rr-bg-accent-soft);
+	box-shadow: inset 0 0 0 1px var(--rr-accent);
+}
+.rr-radio-group--cards > .rr-choice:has(.rr-radio:focus-visible) {
+	outline: 2px solid var(--rr-border-focus);
+	outline-offset: 2px;
+}
+.rr-radio-group--cards .rr-choice__text {
+	flex: 1;
+	min-width: 0;
+}
+.rr-radio-group--cards .rr-radio {
+	margin-top: 3px;
 }
 
 /* ===================================================================== */

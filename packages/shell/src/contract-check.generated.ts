@@ -811,6 +811,8 @@ import type { IAttentionRingProps as Frozen_IAttentionRingProps } from '../contr
 import type { IAttentionRingProps as Current_IAttentionRingProps } from './api';
 import type { ICoachMarkProps as Frozen_ICoachMarkProps } from '../contract/versions/v12';
 import type { ICoachMarkProps as Current_ICoachMarkProps } from './api';
+import type { CoachMarkAlign as Frozen_CoachMarkAlign } from '../contract/versions/v12';
+import type { CoachMarkAlign as Current_CoachMarkAlign } from './api';
 import type { IConfettiProps as Frozen_IConfettiProps } from '../contract/versions/v12';
 import type { IConfettiProps as Current_IConfettiProps } from './api';
 import type { IBrowserItem as Frozen_IBrowserItem } from '../contract/versions/v12';
@@ -1639,6 +1641,8 @@ const _t_IAttentionRingProps: Frozen_IAttentionRingProps = {} as Current_IAttent
 void _t_IAttentionRingProps;
 const _t_ICoachMarkProps: Frozen_ICoachMarkProps = {} as Current_ICoachMarkProps;
 void _t_ICoachMarkProps;
+const _t_CoachMarkAlign: Frozen_CoachMarkAlign = {} as Current_CoachMarkAlign;
+void _t_CoachMarkAlign;
 const _t_IConfettiProps: Frozen_IConfettiProps = {} as Current_IConfettiProps;
 void _t_IConfettiProps;
 const _t_IBrowserItem: Frozen_IBrowserItem = {} as Current_IBrowserItem;
