@@ -146,6 +146,11 @@ inline Path realpath(const Path &path) noexcept {
 // removable
 Opt<bool> isRemovable(FsType type) noexcept;
 Opt<bool> isRemovable(const std::vector<FsType> &types) noexcept;
+
+// given a FsType, determine if it is a kernel pseudo file system (procfs,
+// sysfs, ...) whose files expose kernel state rather than stored data
+bool isPseudoFileSystem(FsType type) noexcept;
+bool isPseudoFileSystem(const std::vector<FsType> &types) noexcept;
 ap::file::FsType toFsType(TextView str) noexcept;
 std::vector<FsType> toFsTypeArray(TextView str) noexcept;
 

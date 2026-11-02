@@ -42,4 +42,9 @@ ErrorOr<MntEntInfo> getMntEntInfo(const Path &path) noexcept;
 // Given a file path, obtain if the underlying mounting path is removable.
 bool isOnRemovableDrive(const Path &path) noexcept;
 
+// Given a device id (StatInfo::volumeId), obtain if it is mounted from a
+// kernel pseudo file system such as procfs or sysfs, whose reported file sizes
+// do not describe readable data. Always false where there are none (Windows).
+bool isOnPseudoFileSystem(uint64_t deviceId) noexcept;
+
 }  // namespace ap::file
