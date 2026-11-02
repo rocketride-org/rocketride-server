@@ -254,6 +254,36 @@ class TestDelete:
 
         assert await fs.read('nonempty/file.txt') == b'data'
 
+    @pytest.mark.asyncio
+    async def test_delete_directory_with_empty_subdirectory_raises(self, fs):
+        """Deleting a directory containing an empty subdirectory raises Directory not empty."""
+        await fs.mkdir('parent/child')
+
+        with pytest.raises(StorageError, match='Directory not empty'):
+            await fs.delete('parent')
+
+        assert (await fs.stat('parent/child'))['exists'] is True
+
+    @pytest.mark.asyncio
+    async def test_delete_empty_directory_preserves_sibling_prefix(self, fs):
+        """Deleting 'foo' does not touch sibling 'foobar' even if list_files strips trailing slash."""
+        await fs.mkdir('foo')
+        await fs.mkdir('foobar')
+
+        orig_list_files = fs._store.list_files
+
+        async def prefix_stripped_list_files(prefix=''):
+            return await orig_list_files(prefix.rstrip('/'))
+
+        fs._store.list_files = prefix_stripped_list_files
+        try:
+            await fs.delete('foo')
+        finally:
+            fs._store.list_files = orig_list_files
+
+        assert (await fs.stat('foo'))['exists'] is False
+        assert (await fs.stat('foobar'))['exists'] is True
+
 
 # ============================================================================
 # Directory Operations

@@ -845,7 +845,8 @@ class FileStore:
         listed = await self._store.list_files(dir_prefix)
         children = [f for f in listed if f != full_path and f.startswith(dir_prefix)]
         if children and full_path not in listed:
-            non_marker = [f for f in children if not f.endswith('/' + DIR_MARKER)]
+            own_marker = dir_prefix + DIR_MARKER
+            non_marker = [f for f in children if f != own_marker]
             if non_marker:
                 raise StorageError(f'Directory not empty: {path}')
             await self.rmdir(path, recursive=False)
@@ -947,17 +948,18 @@ class FileStore:
         if not rest:
             raise StorageError('rmdir cannot target a scope root')
 
-        full_prefix = self._full_path(validated.rstrip('/') + '/')
+        full_prefix = _full.rstrip('/') + '/'
 
         # Refuse if any open handle or write-lock lives under this prefix;
         # otherwise the writer's next write_chunk/close would reference a
         # deleted backend path with undefined behavior.
         self._assert_no_active_handles_under(full_prefix)
 
-        all_files = await self._store.list_files(full_prefix)
+        all_files = [f for f in await self._store.list_files(full_prefix) if f.startswith(full_prefix)]
 
-        # Ignore the dirmarker sentinel when checking emptiness
-        non_marker = [f for f in all_files if not f.endswith('/' + DIR_MARKER)]
+        # Ignore the target directory's own dirmarker sentinel when checking emptiness
+        own_marker = full_prefix + DIR_MARKER
+        non_marker = [f for f in all_files if f != own_marker]
 
         if not recursive and non_marker:
             raise StorageError(f'Directory not empty: {path}')

@@ -1382,7 +1382,7 @@ class TestValidationOperations:
 
             assert result is not None
             assert 'pipeline' in result
-            assert result.get('errors', []) == []
+            assert result['errors'] == []
         finally:
             if client.is_connected():
                 await client.disconnect()
@@ -1398,7 +1398,7 @@ class TestValidationOperations:
 
             assert result is not None
             assert 'pipeline' in result
-            assert result.get('errors', []) == []
+            assert result['errors'] == []
         finally:
             if client.is_connected():
                 await client.disconnect()
@@ -1431,7 +1431,7 @@ class TestValidationOperations:
 
             assert result is not None
             assert 'pipeline' in result
-            assert result.get('errors', []) == []
+            assert result['errors'] == []
         finally:
             if client.is_connected():
                 await client.disconnect()
