@@ -67,6 +67,122 @@ export function devBootConfig(): DevBootConfig | null {
 }
 
 // =============================================================================
+// TAB SESSION — the ONE boot identity of this browsing context
+// =============================================================================
+
+/**
+ * The tab's boot identity: whether it is a dev tab, which app it is locked
+ * to, and which registered web origin its browser sign-in relays through.
+ *
+ * Parsed from the URL exactly ONCE per page load (`rrdev`, `appid`/`appId`,
+ * `rrauthorigin`), merged over the persisted copy, and persisted back under ONE
+ * key — because an OAuth sign-in round trip strips the query string, and
+ * every consumer that re-derived this state from `window.location` with its
+ * own fallback rules eventually diverged from the others. The flavor picker
+ * (stitch-flavors) writes the same key pre-bundle so the flavor choice and
+ * the gate can never disagree.
+ *
+ * Frame scoping rides sessionScopedStore: framed shells get a frame-local
+ * copy (their identity lives in their URL, which the embedder owns), so an
+ * embedded preview can never stamp the top shell's tab identity.
+ */
+export interface TabSession {
+	/** Dev tab: hooks installed, dev flavor, self-registration eligible. */
+	dev: boolean;
+	/** The app this tab is locked to ('' = none): its startup app, its
+	 *  dev-registration subject, and the id the dev hold waits on. */
+	appId: string;
+	/** Registered web origin the dev sign-in relay uses ('' = none). */
+	authOrigin: string;
+	/** The locked app's display name, remembered from the last time this tab
+	 *  SAW the app's manifest — the anonymous manifest omits auth-required
+	 *  apps, so a signed-out surface has nothing else to brand with. */
+	appName?: string;
+	/** The locked app's icon URL, remembered with {@link appName}. */
+	appIcon?: string;
+}
+
+/** The tab-session storage key (JSON TabSession). */
+const TAB_SESSION_KEY = 'rr:tab';
+
+// Computed once on first read, never re-read (a tab's identity must not
+// flip while the shell runs — a mid-session change would strand
+// half-installed hooks and half-held app loads).
+let tabSessionCache: TabSession | undefined;
+
+/**
+ * This tab's boot identity (see {@link TabSession}). Cached on first read.
+ *
+ * @returns The tab session (all-empty on a plain production tab).
+ */
+export function tabSession(): TabSession {
+	if (tabSessionCache) return tabSessionCache;
+	let dev = false;
+	let appId = '';
+	let authOrigin = '';
+	try {
+		const params = new URLSearchParams(window.location.search);
+		dev = params.get('rrdev') === '1';
+		appId = params.get('appId') || params.get('appid') || '';
+		const rrauth = params.get('rrauthorigin') || '';
+		if (rrauth) {
+			// Origin only, http(s) only — the value rides a URL parameter.
+			// A hostile value cannot redirect a sign-in anywhere: Zitadel
+			// only ever redirects to REGISTERED uris.
+			const parsed = new URL(rrauth);
+			if (parsed.protocol === 'http:' || parsed.protocol === 'https:') authOrigin = parsed.origin;
+		}
+	} catch { /* no window/location (tests) — persisted copy only */ }
+	let persisted: Partial<TabSession> = {};
+	try {
+		persisted = JSON.parse(sessionScopedStore().getItem(TAB_SESSION_KEY) ?? '{}') as Partial<TabSession>;
+	} catch { /* unreadable copy — URL facts only */ }
+	const session: TabSession = {
+		dev: dev || persisted.dev === true,
+		appId: appId || (typeof persisted.appId === 'string' ? persisted.appId : ''),
+		authOrigin: authOrigin || (typeof persisted.authOrigin === 'string' ? persisted.authOrigin : ''),
+		// Remembered identity has no URL source — persisted copy only. Only
+		// materialized when present, so a session without one keeps the
+		// three-field shape.
+		...(typeof persisted.appName === 'string' ? { appName: persisted.appName } : {}),
+		...(typeof persisted.appIcon === 'string' ? { appIcon: persisted.appIcon } : {}),
+	};
+	// Persist only a session that SAYS something — plain production tabs
+	// write nothing.
+	if (session.dev || session.appId || session.authOrigin) {
+		try { sessionScopedStore().setItem(TAB_SESSION_KEY, JSON.stringify(session)); } catch { /* storage full */ }
+	}
+	return (tabSessionCache = session);
+}
+
+/**
+ * Updates the tab session (the deprecated get/setSessionAppId facades and
+ * logout route through here). Merges, re-persists, and updates the cache.
+ *
+ * @param patch - Fields to change.
+ */
+export function updateTabSession(patch: Partial<TabSession>): void {
+	const next = { ...tabSession(), ...patch };
+	tabSessionCache = next;
+	try { sessionScopedStore().setItem(TAB_SESSION_KEY, JSON.stringify(next)); } catch { /* storage full */ }
+}
+
+/**
+ * The app id this tab is LOCKED to — the deep-app ("branded") predicate.
+ *
+ * Non-empty when the tab was launched for one specific app: an authored dev
+ * preview page (injected boot config) or an `?appid=` deep link / dev tab.
+ * A locked tab hides every platform affordance that would lead away from
+ * the app (Home, Switch App, the header's go-home lockup) and drops
+ * platform branding from shared surfaces like the Settings overlay.
+ *
+ * @returns The locked app id, or '' for a plain platform tab.
+ */
+export function lockedAppId(): string {
+	return devBootConfig()?.appId || tabSession().appId;
+}
+
+// =============================================================================
 // DEV GATE
 // =============================================================================
 
@@ -78,34 +194,31 @@ let gateResult: boolean | undefined;
  * Whether dev hooks are enabled for this shell session.
  *
  * True when this is a development build (NODE_ENV !== 'production'), the
- * page URL carries `rrdev=1`, or the page carries an injected dev boot
+ * tab session says dev (URL `rrdev=1`, or the persisted per-tab copy that
+ * survives the OAuth round trip), or the page carries an injected dev boot
  * config (an authored preview page). Read once at first call and cached.
  *
  * @returns True when dev hooks should be installed.
  */
 export function isDevHooksEnabled(): boolean {
 	if (gateResult === undefined) {
-		let urlFlag = false;
+		let devFlag = false;
 		try {
-			urlFlag = new URLSearchParams(window.location.search).get('rrdev') === '1';
-			// The OAuth redirect URI is the bare origin, so `rrdev=1` does not
-			// survive the round trip — index.html's flavor picker persists the
-			// choice per tab ('rr:dev'), and the gate honors the same flag so
-			// the flavor and the hooks can never disagree.
-			if (!urlFlag) urlFlag = sessionStorage.getItem('rr:dev') === '1';
+			devFlag = tabSession().dev;
 		} catch { /* no window/location (tests) — build-mode gate only */ }
-		gateResult = process.env.NODE_ENV !== 'production' || urlFlag || devBootConfig() !== null;
+		gateResult = process.env.NODE_ENV !== 'production' || devFlag || devBootConfig() !== null;
 	}
 	return gateResult;
 }
 
 /**
- * TEST-ONLY: forget the cached gate so a test can stage its own
- * window/`rrdev` environment. Production code never calls this — the gate
- * must stay frozen for the life of a real shell session.
+ * TEST-ONLY: forget the cached gate and tab session so a test can stage its
+ * own window/`rrdev` environment. Production code never calls this — the
+ * gate must stay frozen for the life of a real shell session.
  */
 export function resetDevGateForTests(): void {
 	gateResult = undefined;
+	tabSessionCache = undefined;
 }
 
 // =============================================================================
@@ -167,6 +280,31 @@ export function isSameOriginEmbed(): boolean {
 	try {
 		return window.self !== window.top && window.parent.location.origin === window.location.origin;
 	} catch { return false; }
+}
+
+// =============================================================================
+// DEV RELAY ORIGIN
+// =============================================================================
+
+/**
+ * The registered web origin a top-level dev shell relays its browser
+ * sign-in through (CloudAuthProvider's relayOrigin), or '' when none.
+ *
+ * The dev host passes it as `rrauthorigin=<origin>` on the preview URL (the page
+ * origin is a random dev port Zitadel cannot know; the engine's probe
+ * cannot help either — through the dev proxy it resolves to the proxy
+ * itself). It rides the tab session, so it survives the OAuth round trip.
+ * Dev-gated and top-level only.
+ *
+ * @returns The relay origin, or '' (production, framed, or never given).
+ */
+export function devRelayOrigin(): string {
+	if (!isDevHooksEnabled() || isFramedShell()) return '';
+	try {
+		return tabSession().authOrigin;
+	} catch {
+		return '';
+	}
 }
 
 // =============================================================================

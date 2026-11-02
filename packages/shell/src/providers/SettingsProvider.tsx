@@ -71,6 +71,7 @@ import type { ViewMenu, ViewMenuEntry } from '../types/viewMenu';
 import EnvironmentProvider from './EnvironmentProvider';
 import AccountProvider from './AccountProvider';
 import { useAuthUser } from '../hooks/useAuthUser';
+import { lockedAppId } from '../util/devGate';
 
 // =============================================================================
 // CONSTANTS
@@ -862,7 +863,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ registry, overrides,
 	return (
 		<div style={styles.root}>
 			{/* ── Page heading ───────────────────────────────────── */}
-			<ContentHeader title="Settings" subtitle="Preferences for RocketRide and your installed apps. Only the values you change are saved. Everything else uses each app's default." />
+			{/* A deep-app (branded) tab never names the platform — the user is
+			    inside ONE app and must not see RocketRide mentioned. */}
+			<ContentHeader title="Settings" subtitle={lockedAppId()
+				? 'Only the values you change are saved. Everything else uses the app\'s default.'
+				: 'Preferences for RocketRide and your installed apps. Only the values you change are saved. Everything else uses each app\'s default.'} />
 
 			{banner}
 

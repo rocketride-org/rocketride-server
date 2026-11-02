@@ -30,7 +30,7 @@ import { probePackage } from 'shared/tools/appdev/compatProbe';
 import { getDevSessionManager } from '../appdev/devSessionManager';
 import { deployApp } from '../appdev/publish';
 import { getLogger } from '../shared/util/output';
-import { CloudAuthProvider } from '../auth/CloudAuthProvider';
+import { signInPreview } from '../auth/previewAuth';
 import { ConfigManager } from '../config';
 import { registerOpHandlers } from 'shell/src/ops/busOps';
 import type { IOpBus, OpImplTable } from 'shell/src/ops/busOps';
@@ -130,52 +130,22 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 		},
 
 		'host.preview.login': async (p) => {
-			// The preview shell needs a session and this window is signed out —
-			// run the EXTENSION's own sign-in flow (browser-based), then hand
-			// the fresh credential down the app's retained :session lane.
-			// signIn() only OPENS the browser: the token lands later, when the
-			// deep-link callback stores it and fires the provider's change
-			// event — arm a bounded wait for that event BEFORE launching.
-			const auth = CloudAuthProvider.getInstance();
-			let abandonWait = (): void => {};
-			const completed = new Promise<boolean>((resolve) => {
-				const onChanged = (): void => {
-					clearTimeout(timer);
-					resolve(true);
-				};
-				const timer = setTimeout(() => {
-					auth.onDidChange.removeListener('changed', onChanged);
-					resolve(false);
-				}, 300000);
-				auth.onDidChange.once('changed', onChanged);
-				abandonWait = () => {
-					clearTimeout(timer);
-					auth.onDidChange.removeListener('changed', onChanged);
-					resolve(false);
-				};
-			});
+			// PREVIEW-SCOPED sign-in: its own PKCE round trip through the
+			// system browser (loopback redirect, the CLI's native client) —
+			// the EXTENSION's session is never read, written, or replaced.
+			// A developer testing their app's sign-in can use any account,
+			// repeatedly, while this window stays signed in as themselves.
+			// The minted session key travels ONLY down this app's retained
+			// :session lane (one-shot — the consuming page retracts after
+			// applying, the pipeline oauth pattern); the preview shell keeps
+			// it frame-local, so preview sign-in/out and window sign-in/out
+			// stay fully independent.
 			try {
-				await auth.signIn(
-					process.env.RR_ZITADEL_URL || '',
-					process.env.RR_ZITADEL_VSCODE_CLIENT_ID || '',
-					ConfigManager.getInstance().getEffectiveCloudUrl()
-				);
+				const token = await signInPreview(ConfigManager.getInstance().getEffectiveCloudUrl());
+				if (token) retained.publish(`preview:app:${p.app}:session`, { token, source: 'preview' });
 			} catch (err) {
-				// The browser never opened, so no change event is coming: drop
-				// the listener and the five-minute timer instead of leaving
-				// them armed for a token that cannot arrive.
-				abandonWait();
-				getLogger().output(`[appdev] cloud sign-in could not start: ${err}`);
-			}
-			if (await completed) {
-				try {
-					const token = await connectionManager.resolveAuthCredential();
-					// One-shot credential on the retained lane — the consuming
-					// page retracts after applying (the pipeline oauth pattern).
-					if (token) retained.publish(`preview:app:${p.app}:session`, { token });
-				} catch {
-					/* sign-in abandoned — the preview keeps its prompt */
-				}
+				// Abandoned or rejected — the preview keeps its prompt.
+				getLogger().output(`[appdev] preview sign-in did not complete: ${err}`);
 			}
 		},
 

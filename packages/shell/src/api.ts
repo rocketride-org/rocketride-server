@@ -373,7 +373,7 @@ import { SidebarMenu } from './components/sidebar-menu/SidebarMenu';
 import { SidebarCollapsedProvider, SidebarCollapsedGate, useSidebarCollapsed } from './components/sidebar-menu/SidebarCollapsedContext';
 import { SidebarActiveViewProvider, useSidebarActiveView } from './components/sidebar-menu/SidebarActiveViewContext';
 import { viewsFromMenu, menuSectionEntries } from './components/sidebar-menu/viewsFromMenu';
-import { SidebarFooter } from './components/sidebar-footer/SidebarFooter';
+import { SidebarFooter, SidebarFooterExtras } from './components/sidebar-footer/SidebarFooter';
 import { DataGrid } from './components/data-grid/DataGrid';
 import { CardDataGrid } from './components/data-grid/CardDataGrid';
 import { FilterStrip } from './components/data-grid/FilterStrip';
@@ -412,7 +412,7 @@ export {
 	acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer,
 	SaveFileDialog,
 	SidebarMenu, SidebarCollapsedProvider, SidebarCollapsedGate,
-	useSidebarCollapsed, SidebarFooter,
+	useSidebarCollapsed, SidebarFooter, SidebarFooterExtras,
 	// Workbench sidebar modes ('vscode'/'cursor'): the active-view channel
 	// shared sidebar content reads when the shell rail owns the selection.
 	SidebarActiveViewProvider, useSidebarActiveView,
@@ -572,6 +572,7 @@ export const shellApi = {
 	get SidebarActiveViewProvider() { return SidebarActiveViewProvider; },
 	get useSidebarActiveView() { return useSidebarActiveView; },
 	get SidebarFooter() { return SidebarFooter; },
+	get SidebarFooterExtras() { return SidebarFooterExtras; },
 	get DataGrid() { return DataGrid; },
 	get CardDataGrid() { return CardDataGrid; },
 	get FilterStrip() { return FilterStrip; },

@@ -572,11 +572,13 @@ pair unless --no-deploy.`,
 				// step: vendor the platform packages from the same server
 				const base = toHttpBase(uri);
 				const shellTgz = await fetchArtifact(base, 'client/shell', 'platform package (shell.tgz)');
-				if (writeIfChanged(path.join(workspaceRoot, '.rocketride', 'shell', 'shell.tgz'), shellTgz)) {
+				const shellChanged = writeIfChanged(path.join(workspaceRoot, '.rocketride', 'shell', 'shell.tgz'), shellTgz);
+				if (shellChanged) {
 					out.line('Vendored .rocketride/shell/shell.tgz.');
 				}
 				const clientTgz = await fetchArtifact(base, 'client/typescript', 'client SDK package (rocketride.tgz)');
-				if (writeIfChanged(path.join(workspaceRoot, '.rocketride', 'client', 'rocketride.tgz'), clientTgz)) {
+				const clientChanged = writeIfChanged(path.join(workspaceRoot, '.rocketride', 'client', 'rocketride.tgz'), clientTgz);
+				if (clientChanged) {
 					out.line('Vendored .rocketride/client/rocketride.tgz.');
 				}
 
@@ -596,9 +598,13 @@ pair unless --no-deploy.`,
 					fs.mkdirSync(path.join(workspaceRoot, dir), { recursive: true });
 				}
 
-				// step: make the workspace hermetic and link the vendored client
+				// step: make the workspace hermetic and link the vendored client.
+				// The install runs on the FIRST repoint and on every later
+				// re-vendor that changed a tarball — a file: spec only links
+				// new bytes through pnpm, so vendoring without installing
+				// would leave the workspace running the previous client.
 				const repointed = repointClientDependency(workspaceRoot, out);
-				if (repointed && options.install !== false) {
+				if ((repointed || shellChanged || clientChanged) && options.install !== false) {
 					try {
 						out.line('Running pnpm install...');
 						execSync('pnpm install', { cwd: workspaceRoot, stdio: 'ignore' });

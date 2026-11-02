@@ -29,6 +29,7 @@ import assert from 'node:assert/strict';
 import test, { afterEach, mock } from 'node:test';
 import { init } from '@module-federation/runtime';
 import { devPreviewHoldRemainingMs, isDevPreviewPending, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
+import { resetDevGateForTests } from './devGate';
 import type { AppDescriptor } from '../components/workspace/types';
 
 // In the browser the rsbuild MF plugin creates the host instance; stand one
@@ -59,6 +60,9 @@ function stubPage(search: string, framed: boolean): void {
 		setItem: (key: string, value: string) => void store.set(key, value),
 		removeItem: (key: string) => void store.delete(key),
 	});
+	// The tab session freezes on first read (a real page's identity never
+	// changes mid-session); each stubbed page is a NEW page.
+	resetDevGateForTests();
 }
 
 /** Pins the page clock (ms since navigation start) the hold is measured on. */

@@ -51,9 +51,36 @@
 
 import * as path from 'path';
 import { access, mkdir, readFile, writeFile } from 'fs/promises';
+import { CONST_DEFAULT_WEB_CLOUD } from '../client/constants';
 
 /** The wrapper's file name inside the app's .rocketride directory. */
 const WRAPPER_NAME = 'dev-proxy.rsbuild.config.mts';
+
+/** The cloud web app's origin — where cloud browser sign-ins are registered
+ *  (the CLI's webAppUrlFor makes the same mapping for its callback pages). */
+const CLOUD_WEB_APP_ORIGIN = 'https://rocketride.ai';
+
+/**
+ * The REGISTERED web origin for an engine: where a browser can complete an
+ * OAuth sign-in against that engine's Zitadel registration. The cloud API
+ * origin maps to the cloud web app; any other engine's web app is served
+ * from its own origin. The dev preview relays its sign-in through this
+ * origin (`rrauthorigin` param → the shell's dev relay), because the preview's
+ * own random-port origin can never be a registered redirect_uri.
+ *
+ * @param engineOrigin - The connected engine's http(s) origin.
+ * @returns The registered web origin for that engine.
+ */
+export function webOriginFor(engineOrigin: string): string {
+	const canonical = (value: string): string => {
+		try {
+			return new URL(value).origin;
+		} catch {
+			return value.replace(/\/+$/, '').toLowerCase();
+		}
+	};
+	return canonical(engineOrigin) === canonical(CONST_DEFAULT_WEB_CLOUD) ? CLOUD_WEB_APP_ORIGIN : canonical(engineOrigin);
+}
 
 /** Per-host knobs for the generated wrapper. */
 export interface WrapperOptions {
@@ -71,6 +98,14 @@ export interface WrapperOptions {
 	 * auto-bumps when the port is busy.
 	 */
 	port?: number;
+	/**
+	 * The session was launched signed out (--no-auth): the front-door
+	 * redirect appends the empty `#rrtoken=` fragment, so a tab opened on
+	 * the bare origin honors the launch's auth contract exactly like the
+	 * printed preview URL — without this, the 302 resumed whatever session
+	 * the browser remembered for the origin.
+	 */
+	signedOut?: boolean;
 }
 
 /**
@@ -104,7 +139,13 @@ function renderWrapper(appId: string, engineOrigin: string, appConfigPath: strin
 	// would otherwise forward '/' to the engine before the redirect could
 	// fire. (dev.setupMiddlewares is deprecated in favor of server.setup,
 	// but it is the one API that guarantees that ordering.)
-	const previewPath = `/?appid=${encodeURIComponent(appId)}&rrdev=1`;
+	// rrauthorigin: the registered web origin the shell's dev relay signs in
+	// through — baked here so even a hand-typed localhost:<port> tab can
+	// use the preview's Log in button.
+	// _ts (stamped per session at wrapper generation) busts the browser's
+	// cached index.html — a bare-origin open must not revive last session's
+	// stitched html and its stale shell bundle.
+	const previewPath = `/?appid=${encodeURIComponent(appId)}&rrdev=1&rrauthorigin=${encodeURIComponent(webOriginFor(engineOrigin))}&_ts=${Date.now()}${opts.signedOut ? '#rrtoken=' : ''}`;
 	const redirectBlock = opts.injectPreviewParams
 		? `
 		// Bare front door → canonical preview URL (terminal hosts): a tab

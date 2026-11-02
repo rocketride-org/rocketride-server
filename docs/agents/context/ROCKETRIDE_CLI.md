@@ -135,16 +135,24 @@ directory is the app. A lone number is read as the version, so
   stderr. SDK equivalent: `client.deploy.createApp(slug, options)` /
   `client.deploy.create_app` (same developer-id default). Scaffolding
   only — nothing deploys.
-- `rocketride app dev [app] [--open] [--port <port>] [--no-install]
-  [--workspace <dir>]` — live preview from the terminal, the App Builder's
+- `rocketride app dev [app] [--open] [--no-auth] [--port <port>]
+  [--no-install] [--workspace <dir>]` — live preview from the terminal, the App Builder's
   dev loop: runs `rsbuild dev` for the app as the preview's front door
   (local-first — the dev server proxies the shell from the development
   connection and serves the app's bundle itself) and prints the preview URL
   (`--open` opens it; opening the bare `localhost:<port>` also works — it
-  redirects to the preview URL). Works without credentials: the preview's
-  signed-in/out state is the browser's own session. `--port` overrides the
-  app's pinned dev port. The preview
-  updates on every save — edit in any editor. Ctrl+C stops the server —
+  redirects to the preview URL). The preview's signed-in/out state is the
+  browser's own session — but the printed URL carries the workspace
+  credential in its `#fragment` (never sent on the wire), so the tab opens
+  already signed in; `--no-auth` hands no credentials over and clears any session the browser remembers for that origin — the preview runs the app's own first-run sign-in
+  instead, and the footer's Log in button runs the real browser sign-in
+  either way (the shell relays it through the server's registered web
+  origin). `--port`
+  overrides the app's pinned dev port. The preview
+  updates on every save — edit in any editor. The preview tab is a full
+  shell workspace: Home and other apps are reachable, the Switch App menu
+  lists your app marked "(dev)" so you can always come back, and a hard
+  reload (Ctrl+F5) boots back into your app. Ctrl+C stops the server —
   nothing to unregister, the server holds no dev state; the server is
   tethered to the command, so it never outlives it. Several editors and
   terminals can serve the same app at once: each dev server is its own

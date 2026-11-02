@@ -31,7 +31,7 @@ import { SidebarChrome, ToolPanel } from 'shared/tools/core/chrome/SidebarChrome
 import { ToolHostProvider, useArmedToolPeers } from 'shared/tools/core';
 import { useToolStrip } from 'shared/tools/core/chrome/useToolStrip';
 import type { BuiltinToolServices } from 'shared/tools/core';
-import { ConnectionManager, SidebarFooter, realmPrefsHub, createSidebarBusPeer, createWorkspaceFs } from 'shell';
+import { ConnectionManager, SidebarFooter, SidebarFooterExtras, realmPrefsHub, createSidebarBusPeer, createWorkspaceFs } from 'shell';
 import { appPartition } from 'shell/src/workspace/workspaceStore';
 import { applyContainerOrder, containerIdOf, readDevToolPins, DEV_TOOL_PINS_KEY } from 'shell/src/workspace/devToolPins';
 import { registerBuiltinTools } from 'shared/tools/builtins';
@@ -476,7 +476,7 @@ const SidebarViewWebview: React.FC = () => {
 		[connection.state, developmentMode, devProgressMessage, devProgressLog, deployConnectionState, deployTargetMode, deployProgressMessage, deployProgressLog, cloudConnected, subscribed, runCommand]
 	);
 
-	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} menuItems={footerMenuItems} />;
+	const footerSlot = <SidebarFooter collapsed={false} userName={userName} userEmail={userEmail} onOpenDocs={onOpenDocs} menuItems={footerMenuItems} extras={<SidebarFooterExtras onOpenDocs={onOpenDocs} />} />;
 
 	// ── Render ───────────────────────────────────────────────────────────────
 

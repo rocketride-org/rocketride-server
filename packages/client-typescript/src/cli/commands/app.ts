@@ -486,6 +486,10 @@ export interface AppDevOptions extends AppVerbOptions {
 	open?: boolean;
 	install?: boolean;
 	port?: number;
+	/** Commander's negatable --no-auth: false = do not hand the workspace
+	 *  credential to the preview — the tab opens signed out; the Log in
+	 *  button still works. Absent/true = hand it over when one exists. */
+	auth?: boolean;
 }
 
 /**
@@ -535,6 +539,10 @@ export async function executeAppDev(ref: string | undefined, options: AppDevOpti
 		// byte-identical and they always navigate with the params present).
 		injectPreviewParams: true,
 		port: options.port,
+		// --no-auth binds the WHOLE session: the bare-origin front door
+		// redirects with the signed-out directive too, not just the
+		// printed URL.
+		signedOut: options.auth === false,
 		// The origin is the session identity: cookies and the registration
 		// are per-origin, so a silent bump strands open tabs and sign-ins.
 		onPortBump: (from, to) =>
@@ -551,12 +559,29 @@ export async function executeAppDev(ref: string | undefined, options: AppDevOpti
 	const origin = await session.start();
 	// The preview rides the DEV SERVER's origin (it proxies the engine and
 	// serves the app's bundle); the page self-registers from its URL.
-	const previewUrl = devPreviewUrl(origin, app.id);
+	// rrauth wires the preview's Log in button through the dev relay; the
+	// workspace credential rides the #fragment so the tab opens signed in.
+	// The SIGNED form is printed and opened (same machine, same user as the
+	// plaintext .env); the --json result carries the credential-free form —
+	// script output gets piped into logs.
+	const previewUrl = devPreviewUrl(origin, app.id, { engineOrigin });
+	// --no-auth: open signed OUT — guaranteed: rrsignout=1 makes the shell
+	// clear any session the BROWSER remembers for this origin (a prior
+	// sign-in on the same port), not merely withhold the workspace key. The
+	// relay param still rides, so the Log in button works either way.
+	const handOver = !!options.apikey && options.auth !== false;
+	const previewUrlSigned = handOver
+		? devPreviewUrl(origin, app.id, { engineOrigin, token: options.apikey })
+		: options.auth === false
+			? devPreviewUrl(origin, app.id, { engineOrigin, signedOut: true })
+			: previewUrl;
 	out.line(`Dev server: ${origin}`);
-	out.line(`Preview:    ${previewUrl}`);
+	out.line(`Preview:    ${previewUrlSigned}`);
+	if (handOver) out.line('The preview URL carries your API key in its #fragment — the tab opens signed in; the fragment never reaches any server.');
+	else if (options.auth === false) out.line("--no-auth: no credentials handed over — the preview runs the app's own sign-in from scratch.");
 	out.line('Edit and save to update the preview. Press Ctrl+C to stop.');
 	out.result({ appId: app.id, devOrigin: origin, previewUrl });
-	if (options.open) openBrowser(previewUrl);
+	if (options.open) openBrowser(previewUrlSigned);
 
 	// step: run until Ctrl+C, then stop the server tree
 	await new Promise<void>((resolve) => {
@@ -636,6 +661,7 @@ serving the app; a team or @public binding can keep it on your desktop.`,
 		.command('dev [app]')
 		.description('Serve an app with live preview: rsbuild dev fronting the engine (local-first; Ctrl+C stops)')
 		.option('--open', 'Open the preview in your browser')
+		.option('--no-auth', 'Open the preview signed out (do not hand the workspace credential to the browser)')
 		.option('--port <port>', 'Dev-server port (default: the port pinned in the app\'s rsbuild config)', (v: string) => parseInt(v, 10))
 		.option('--no-install', 'Skip the workspace pnpm install')
 		.option(workspaceOption, 'Workspace root the app is found in and pnpm install runs at (default: current directory)')

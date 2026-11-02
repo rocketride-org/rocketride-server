@@ -49,10 +49,10 @@ import { spawn, type ChildProcess } from 'child_process';
 import type { ScannedApp } from '../app-pack/scan.js';
 import { isTransientLockError, runRootInstall } from '../app-pack/vendor.js';
 import { materializeDevServerGuard } from './guard.js';
-import { writeProxyConfig } from './proxyConfig.js';
+import { writeProxyConfig, webOriginFor } from './proxyConfig.js';
 
 export { DEV_SERVER_GUARD_SOURCE, materializeDevServerGuard } from './guard.js';
-export { writeProxyConfig } from './proxyConfig.js';
+export { writeProxyConfig, webOriginFor } from './proxyConfig.js';
 
 // =============================================================================
 // SESSION + PREVIEW URL
@@ -67,10 +67,29 @@ export { writeProxyConfig } from './proxyConfig.js';
  *
  * @param devOrigin - The dev server origin (http://localhost:<port>).
  * @param appId - The app id.
+ * @param opts - Optional sign-in wiring: `engineOrigin` adds the `rrauthorigin`
+ *               param (the registered web origin the shell's dev relay
+ *               signs in through); `token` appends the workspace credential
+ *               as a `#rrtoken=` FRAGMENT — never sent on the wire, consumed
+ *               and stripped by the shell's bootstrap, so the preview opens
+ *               already signed in; `signedOut` appends an EMPTY fragment
+ *               (`#rrtoken=`) — the definitive "signed out" (--no-auth's
+ *               GUARANTEE: the shell clears any session the browser
+ *               remembers for this origin and opens on the signed-out
+ *               page). No fragment at all leaves the tab's own state
+ *               alone.
  * @returns The URL to open in a browser (or an embedding panel).
  */
-export function devPreviewUrl(devOrigin: string, appId: string): string {
-	return `${devOrigin.replace(/\/+$/, '')}/?appid=${encodeURIComponent(appId)}&rrdev=1`;
+export function devPreviewUrl(devOrigin: string, appId: string, opts: { engineOrigin?: string; token?: string; signedOut?: boolean } = {}): string {
+	// _ts busts the browser's cached index.html (same move as the VS Code
+	// panel's preview URL): the flavor picker AND the shell bundle hang off
+	// that document, and a stale cached copy silently runs last week's
+	// shell against this week's URL contract.
+	let url = `${devOrigin.replace(/\/+$/, '')}/?appid=${encodeURIComponent(appId)}&rrdev=1&_ts=${Date.now()}`;
+	if (opts.engineOrigin) url += `&rrauthorigin=${encodeURIComponent(webOriginFor(opts.engineOrigin))}`;
+	if (opts.token) url += `#rrtoken=${encodeURIComponent(opts.token)}`;
+	else if (opts.signedOut) url += '#rrtoken=';
+	return url;
 }
 
 // =============================================================================
@@ -268,6 +287,9 @@ export interface DevSessionOptions extends DevSessionHooks {
 	injectPreviewParams?: boolean;
 	/** Dev-server port override — outranks the app config's pinned port. */
 	port?: number;
+	/** Launched signed out (--no-auth): the front-door redirect carries the
+	 *  empty `#rrtoken=` directive too (see WrapperOptions.signedOut). */
+	signedOut?: boolean;
 }
 
 /** A death inside this window after start counts toward the crash-loop guard. */
@@ -323,6 +345,7 @@ export class DevSession {
 		this.wrapperPath = await writeProxyConfig(this.options.app.folder, this.options.app.id, this.options.engineOrigin, {
 			injectPreviewParams: this.options.injectPreviewParams,
 			port: this.options.port,
+			signedOut: this.options.signedOut,
 		});
 		const ready = new Promise<string>((resolve, reject) => {
 			this.readiness = { resolve, reject };

@@ -116,6 +116,14 @@ export interface SidebarFooterProps {
 	// ── Popup menu items ────────────────────────────────────────────────────
 	/** Host-specific menu items shown in the popup. */
 	menuItems?: SidebarFooterMenuItem[];
+
+	// ── Host extras slot ────────────────────────────────────────────────────
+	/** HOST-owned content above the account row (expanded form only) — the
+	 *  platform hosts (rocket-ui's shell config, the VS Code sidebar) put
+	 *  their announcements ticker + Documentation row here. The footer
+	 *  itself renders NO platform content: a deep-app/branded tab simply
+	 *  passes nothing. */
+	extras?: React.ReactNode;
 }
 
 // =============================================================================
@@ -341,7 +349,7 @@ export const SidebarFooterExtras: React.FC<{
 // COMPONENT
 // =============================================================================
 
-export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userName, userEmail, onOpenDocs, menuItems }) => {
+export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userName, userEmail, onOpenDocs, menuItems, extras }) => {
 	// ── Avatar initials ─────────────────────────────────────────────────────
 	const initials = useMemo(() => {
 		if (!userName) return '';
@@ -452,8 +460,9 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 
 	return (
 		<div style={S.wrapper}>
-			{/* ── Ticker + Documentation (expanded form; see SidebarFooterExtras) */}
-			{!collapsed && <SidebarFooterExtras onOpenDocs={onOpenDocs} />}
+			{/* ── Host extras slot (expanded form) — the platform hosts put the
+			    ticker + Documentation row here; nothing renders by default. */}
+			{!collapsed && extras}
 
 			{/* ── Documentation button (collapsed: icon-only, above the avatar) */}
 			{collapsed && onOpenDocs && (

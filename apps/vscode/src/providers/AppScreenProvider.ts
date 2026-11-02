@@ -222,7 +222,10 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		void this.connectionManager
 			.resolveAuthCredential()
 			.then((token) => {
-				if (token) this.busHost.retained.publish(`preview:app:${appId}:session`, { token });
+				// source 'window': the INHERITED credential — the webview keeps
+				// it in the inherit-gated slot, never the preview-session slot
+				// (host.preview.login publishes source 'preview' on this lane).
+				if (token) this.busHost.retained.publish(`preview:app:${appId}:session`, { token, source: 'window' });
 			})
 			.catch(() => {
 				/* signed out — the preview shows its sign-in prompt */

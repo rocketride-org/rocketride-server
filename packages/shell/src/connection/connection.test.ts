@@ -28,7 +28,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { AuthenticationException, LoginAttemptCancelledError, RocketRideClient, type ConnectResult, type PkceCredential, type SignupProperties } from 'rocketride';
-import { ConnectionState } from '../types/connection';
+import { ConnectionState, AuthPhase } from '../types/connection';
 import type { ConnectionStatus } from '../types/connection';
 import { ConnectionManager } from './connection';
 import { ConnectionFailure, withTimeout } from './errors';
@@ -88,6 +88,9 @@ type ConnectionManagerTestAdapter = {
 	emit(event: string, payload: unknown): void;
 	saveToken(token: string): void;
 	getPendingAppId(): string;
+	setPendingAppId(id: string): void;
+	clearPendingAppId(): void;
+	getConnectionStatus(): ConnectionStatus;
 	initialize(): void;
 	connect(credential?: unknown): Promise<ConnectResult | null>;
 	bootstrap(): Promise<{ result: ConnectResult; appId: string } | null>;
@@ -2040,3 +2043,211 @@ for (const delivery of ['live', 'held'] as const) {
 		});
 	});
 }
+
+// =============================================================================
+// DEV RELAY BOUNCE + TOKEN SEEDING (bootstrap)
+// =============================================================================
+
+test('bootstrap bounces a rrdev-state code to a loopback target via replace() and stops', async () => {
+	const replaced: string[] = [];
+	const win = topLevelWindow({
+		location: {
+			search: '?code=abc&state=rrdev%3Ahttp%3A%2F%2Flocalhost%3A3925',
+			pathname: '/',
+			origin: 'https://shell.example.test',
+			replace: (url: string) => { replaced.push(url); },
+		},
+		history: { state: null, replaceState: () => {} },
+	});
+	await withGlobals({ window: win, sessionStorage: recordingSession().storage }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		// The bounce must fire BEFORE the transport attach — a rejecting
+		// attach here proves the order (a post-attach bounce would throw).
+		manager._attachPromise = Promise.reject(new Error('attach must not be awaited before the bounce'));
+		manager._attachPromise.catch(() => {});
+
+		assert.equal(await manager.bootstrap(), null);
+		assert.deepEqual(replaced, ['http://localhost:3925/?code=abc']);
+	});
+});
+
+test('bootstrap refuses to bounce to non-loopback or same-origin targets', async () => {
+	for (const [origin, state] of [
+		// A non-loopback target: the registered origin must never be an
+		// open redirector, whatever the state parameter claims.
+		['https://shell.example.test', 'rrdev:https://evil.example.test'],
+		// A loopback target that IS this origin: no bounce loops.
+		['http://localhost:3925', 'rrdev:http://localhost:3925'],
+	] as const) {
+		const replaced: string[] = [];
+		const win = topLevelWindow({
+			location: {
+				search: `?code=abc&state=${encodeURIComponent(state)}`,
+				pathname: '/',
+				origin,
+				replace: (url: string) => { replaced.push(url); },
+			},
+			history: { state: null, replaceState: () => {} },
+		});
+		await withGlobals({ window: win, sessionStorage: recordingSession().storage }, async () => {
+			const { manager } = createTestManager();
+			manager.client = testClient();
+			manager._attachPromise = Promise.resolve();
+			manager.loadToken = () => '';
+
+			// No verifier is stored, so the unexchangeable code falls through
+			// to the unauthenticated end state — the code dies unexchanged.
+			assert.equal(await manager.bootstrap(), null);
+			assert.deepEqual(replaced, [], `no bounce for state=${state}`);
+		});
+	}
+});
+
+test('bootstrap seeds a #rrtoken fragment through saveToken and strips it before anything else reads the URL', async () => {
+	const stripped: string[] = [];
+	const win = topLevelWindow({
+		location: {
+			search: '?appid=local.alarm&rrdev=1',
+			pathname: '/',
+			origin: 'http://localhost:3925',
+			hash: '#rrtoken=rr_seeded_key',
+		},
+		history: { state: null, replaceState: (_s: unknown, _t: string, url: string) => { stripped.push(url); } },
+	});
+	await withGlobals({ window: win, sessionStorage: recordingSession().storage }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		const saved: string[] = [];
+		manager.saveToken = (token: string) => { saved.push(token); };
+		// The seeded credential is picked up by the normal stored-token path.
+		manager.loadToken = () => saved[0] ?? '';
+		manager.connectForBootstrap = async () => ({ result: authenticatedResult, appId: '' });
+
+		const outcome = await manager.bootstrap();
+		assert.deepEqual(saved, ['rr_seeded_key'], 'the fragment credential lands in saveToken');
+		assert.deepEqual(stripped, ['/?appid=local.alarm&rrdev=1'], 'the fragment is stripped, params kept');
+		assert.equal(outcome?.result.userToken, authenticatedResult.userToken);
+	});
+});
+
+test('the code exchange echoes the stashed authorize-time redirect_uri and clears the stash', async () => {
+	const page = callbackPage([['rocketride_pkce_redirect', 'https://relay.example.test']]);
+	await withGlobals(page.globals, async () => {
+		const { manager, exchanged } = callbackManager();
+		await manager.bootstrap();
+		assert.equal(exchanged.length, 1);
+		assert.equal((exchanged[0] as { redirectUri?: string }).redirectUri, 'https://relay.example.test');
+		assert.equal(page.session.data.has('rocketride_pkce_redirect'), false, 'the stash is single-use');
+	});
+});
+
+// =============================================================================
+// AUTH PHASE — the tab's one auth state machine
+// =============================================================================
+
+test('auth phase: AUTHORIZING carries the initiator, logout retires to SIGNED_OUT, status mirrors every transition', async () => {
+	const session = recordingSession();
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		// createTestManager stubs getPendingAppId for the flows that are not
+		// about it — these tests ARE about it, so restore the real method.
+		delete (manager as { getPendingAppId?: unknown }).getPendingAppId;
+
+		// A fresh tab: no record, no pending initiator.
+		assert.equal(manager.getPendingAppId(), '');
+
+		// Launch intent: the initiator rides the AUTHORIZING record and the
+		// status mirror follows.
+		manager.setPendingAppId('acme.app');
+		assert.equal(manager.getPendingAppId(), 'acme.app');
+		assert.equal(manager.getConnectionStatus().authPhase, AuthPhase.AUTHORIZING);
+		assert.equal(JSON.parse(session.data.get('rr:auth_phase') ?? '{}').appId, 'acme.app');
+
+		// Dropping the initiator KEEPS the state (abandoned round trip: the
+		// surface must still show, but the stale target must not re-seed).
+		manager.clearPendingAppId();
+		assert.equal(manager.getPendingAppId(), '');
+		assert.equal(JSON.parse(session.data.get('rr:auth_phase') ?? '{}').state, AuthPhase.AUTHORIZING);
+
+		// Explicit sign-out replaces the record and the mirror.
+		manager.clearToken = () => {};
+		manager.disconnect = async () => {};
+		await manager.logout();
+		assert.equal(manager.getConnectionStatus().authPhase, AuthPhase.SIGNED_OUT);
+		assert.equal(JSON.parse(session.data.get('rr:auth_phase') ?? '{}').state, AuthPhase.SIGNED_OUT);
+		assert.equal(manager.getPendingAppId(), '', 'SIGNED_OUT carries no initiator');
+	});
+});
+
+test('logout keeps a locked tab\'s app lock and remembered identity — sign-out must not unpin a ?appId= deep link', async () => {
+	const session = recordingSession([['rr:tab', JSON.stringify({ dev: false, appId: 'mine.alarm', authOrigin: '', appName: 'Alarm Clock', appIcon: '/apps/mine.alarm/icon.png' })]]);
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		resetDevGateForTests();
+		const { manager } = createTestManager();
+		manager.clearToken = () => {};
+		manager.disconnect = async () => {};
+		await manager.logout();
+
+		// The lock survives: the tab exists FOR this app, and the next
+		// sign-in returns to the bare origin with only this record to go on.
+		const kept = JSON.parse(session.data.get('rr:tab') ?? '{}');
+		assert.equal(kept.appId, 'mine.alarm');
+		assert.equal(kept.appName, 'Alarm Clock', 'the signed-out screen brands from the remembered identity');
+		assert.equal(kept.appIcon, '/apps/mine.alarm/icon.png');
+		resetDevGateForTests();
+	});
+});
+
+test('auth phase: a completed sign-in lands AUTHENTICATED, the initiator wins the landing and is consumed', async () => {
+	const session = recordingSession([['rr:auth_phase', JSON.stringify({ state: 'authorizing', appId: 'acme.target' })]]);
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		manager.saveToken = () => {};
+		// Restore the real pending read (createTestManager stubs it to '').
+		delete (manager as { getPendingAppId?: unknown }).getPendingAppId;
+		// The REAL finishConnect runs — it owns the AUTHENTICATED transition
+		// and the landing resolution (initiator over the tab's startup lock).
+		const finish = (manager as unknown as { finishConnect: (r: ConnectResult, a: string) => Promise<{ result: ConnectResult; appId: string }> }).finishConnect.bind(manager);
+		const outcome = await finish(authenticatedResult, 'tab.lock');
+
+		assert.equal(outcome.appId, 'acme.target', 'the initiator is the landing app');
+		assert.equal(manager.getConnectionStatus().authPhase, AuthPhase.AUTHENTICATED);
+		assert.equal(JSON.parse(session.data.get('rr:auth_phase') ?? '{}').state, AuthPhase.AUTHENTICATED);
+		assert.equal(manager.getPendingAppId(), '', 'completion consumed the initiator');
+	});
+});
+
+test('auth phase: an unreadable record reads as FRESH', async () => {
+	const session = recordingSession([['rr:auth_phase', '{broken json']]);
+	await withGlobals({ window: topLevelWindow({ location: { search: '', pathname: '/' } }), sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		assert.equal(manager.getPendingAppId(), '');
+	});
+});
+
+test('an EMPTY #rrtoken fragment (--no-auth) clears the remembered session, resets to FRESH, and strips the fragment', async () => {
+	const session = recordingSession();
+	const stripped: string[] = [];
+	const win = topLevelWindow({
+		location: { search: '?appid=local.alarm&rrdev=1', pathname: '/', origin: 'http://localhost:3926', hash: '#rrtoken=' },
+		history: { state: null, replaceState: (_s: unknown, _t: string, url: string) => { stripped.push(url); } },
+	});
+	await withGlobals({ window: win, sessionStorage: session.storage }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		const cleared: boolean[] = [];
+		manager.clearToken = () => { cleared.push(true); };
+		// The remembered session this origin holds — must NOT be resumed.
+		manager.loadToken = () => '';
+
+		assert.equal(await manager.bootstrap(), null, 'no identity is resumed');
+		assert.deepEqual(cleared, [true], 'the remembered token is cleared');
+		// FRESH, not SIGNED_OUT: a fresh first run auto-starts the login
+		// flow; the signed-out page is for explicit logouts only.
+		assert.equal(manager.getConnectionStatus().authPhase, AuthPhase.FRESH);
+		assert.deepEqual(stripped, ['/?appid=local.alarm&rrdev=1'], 'the fragment is stripped, the query kept');
+	});
+});

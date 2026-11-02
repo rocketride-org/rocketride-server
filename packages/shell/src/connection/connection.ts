@@ -47,7 +47,7 @@ import type { ShellConnectionEventMap, IConnectionManager } from '../types/shell
 import type { IAuthProvider } from '../types/connection';
 // ConnectionState is the one runtime value; the rest are type-only so
 // node:test loads no more than the types module at runtime.
-import { ConnectionState } from '../types/connection';
+import { ConnectionState, AuthPhase } from '../types/connection';
 import type { ConnectionMode, ConnectionStatus } from '../types/connection';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
@@ -59,13 +59,12 @@ import { CLIENT_EVENT_OP } from '../ops/clientOps';
 import type { IOpBus, IBusRequestOptions, BusOpHandler } from '../ops/busOps';
 import { createRetainedRegistry, localRetainedPort } from '../ops/retained';
 import type { IRetainedPort, RetainedSubscriber } from '../ops/retained';
-import { isEmbeddedDevShell, isSameOriginEmbed, tokenStore, sessionScopedStore } from '../util/devGate';
+import { isEmbeddedDevShell, isSameOriginEmbed, isDevHooksEnabled, isFramedShell, tokenStore, tabSession, updateTabSession } from '../util/devGate';
 import { TelemetryChannel, type TelemetryFact } from '../util/telemetryChannel';
-import { AUTH_START_STAMP_KEY, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
+import { AUTH_START_STAMP_KEY, getStoredVerifier, clearStoredVerifier, getStoredRedirectUri, clearStoredRedirectUri } from '../util/pkce';
+import { getAuthPhase, setAuthPhase } from './authPhase';
 import {
 	LS_TOKEN,
-	SS_APP_ID,
-	SS_PENDING_APP_ID,
 	DEBUG_LOG_MAX,
 	DEFAULT_CLIENT_NAME,
 	DEFAULT_WORKSPACE_DIR,
@@ -282,9 +281,11 @@ export class ConnectionManager implements IConnectionManager {
 	/** Monotonic shell lifecycle generation, invalidated before SDK cleanup. */
 	private connectionGeneration = 0;
 
-	/** Connection status state machine. */
+	/** Connection status state machine. authPhase seeds from the tab's
+	 *  persisted record — the one status field that predates the page. */
 	private connectionStatus: ConnectionStatus = {
 		state: ConnectionState.DISCONNECTED,
+		authPhase: getAuthPhase().state,
 		connectionMode: 'cloud',
 		hasCredentials: false,
 		retryAttempt: 0,
@@ -780,10 +781,22 @@ export class ConnectionManager implements IConnectionManager {
 				this.oauthStarted = false; // no redirect happened — allow a retry
 				return;
 			}
-			// The provider owns pending signup context (CloudAuthProvider stashes
-			// it); the providerless legacy Zitadel path was removed with the bus
-			// rework, so attribution has exactly one entry point.
-			await this.authProvider.signIn(undefined, register, signup);
+			// Persist AUTHORIZING before the redirect unloads the page — the
+			// returning load reads it to distinguish "sign-in in flight /
+			// abandoned" from a fresh tab. Reverted if initiation fails, so
+			// a thrown signIn leaves no false abandoned-sign-in behind.
+			const prevPhase = getAuthPhase();
+			this.transitionAuthPhase(AuthPhase.AUTHORIZING, appId || undefined);
+			try {
+				// The provider owns pending signup context (CloudAuthProvider stashes
+				// it); the providerless legacy Zitadel path was removed with the bus
+				// rework, so attribution has exactly one entry point.
+				await this.authProvider.signIn(undefined, register, signup);
+			} catch (err) {
+				setAuthPhase(prevPhase);
+				this.updateConnectionStatus({ authPhase: prevPhase.state });
+				throw err;
+			}
 		} catch (err) {
 			// Initiation threw before any redirect (signIn rejected, PKCE/crypto
 			// failure, etc.) — release the guard so a later attempt can retry.
@@ -826,6 +839,65 @@ export class ConnectionManager implements IConnectionManager {
 	}): Promise<{ result: ConnectResult; appId: string } | null> {
 		if (!this.client) throw new Error('Client not initialized — call init() first.');
 		const bootstrapGeneration = this.connectionGeneration;
+
+		// ── Dev relay bounce ──────────────────────────────────────────────
+		// A top-level DEV shell on a random localhost port cannot be a
+		// registered redirect_uri, so its authorize redirects HERE (the
+		// registered web origin) with the dev origin in `state`. Bounce the
+		// code back before anything heavy runs. LOOPBACK targets only — this
+		// origin must never become an open redirector — and never our own
+		// origin (no bounce loops). The code is useless off the dev origin
+		// anyway: the PKCE verifier never left that tab's sessionStorage. An
+		// invalid target falls through to normal boot, where the code dies
+		// unexchanged (no verifier here matches it).
+		{
+			const relayParams = new URLSearchParams(window.location.search);
+			const relayState = relayParams.get('state') ?? '';
+			const relayCode = relayParams.get('code') ?? '';
+			if (relayCode && relayState.startsWith('rrdev:')) {
+				const target = relayState.slice('rrdev:'.length).replace(/\/+$/, '');
+				const isLoopback = /^http:\/\/(localhost|127\.0\.0\.1)(:\d{1,5})?$/.test(target);
+				if (isLoopback && target !== window.location.origin) {
+					// replace(), not assign(): the bounce must not linger in
+					// history — Back should land before the sign-in, not here.
+					window.location.replace(`${target}/?code=${encodeURIComponent(relayCode)}`);
+					return null;
+				}
+			}
+		}
+
+		// ── Dev token seeding ─────────────────────────────────────────────
+		// The terminal dev host (`rocketride app dev`) hands the workspace
+		// credential in the URL FRAGMENT — never sent on the wire, stripped
+		// before anything else reads the URL, honored ONLY in a top-level
+		// dev shell (framed previews inherit their embedder's session via
+		// rrdev:auth, and production builds have no dev gate). Seeding goes
+		// through saveToken so the /apps cookie primes exactly like any
+		// other sign-in; the normal stored-token path below then connects.
+		// The fragment is the LAUNCHER's definitive session directive (the
+		// same vocabulary as the embedded flow's rrdev:auth answer): a
+		// value signs the tab in as that credential; EMPTY (`#rrtoken=`,
+		// --no-auth) resets the tab to a FRESH first run — clearing
+		// whatever this origin remembers from a prior sign-in on the same
+		// dev port, which merely withholding a key could never undo. Fresh,
+		// not signed-out: a first encounter with an auth-required app goes
+		// STRAIGHT to the login flow (the gate's rule); the signed-out page
+		// is reserved for an explicit logout or an abandoned sign-in. An
+		// ABSENT fragment leaves the tab's own state alone.
+		const bootHash = String(window.location.hash ?? '');
+		if (isDevHooksEnabled() && !isFramedShell() && bootHash.startsWith('#rrtoken=')) {
+			const seeded = decodeURIComponent(bootHash.slice('#rrtoken='.length));
+			// Strip the fragment FIRST (replaceState rewrites the history
+			// entry) so the credential survives in no URL bar, history
+			// entry, or copy-paste — even if the seed itself is empty.
+			window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname + window.location.search);
+			if (seeded) {
+				this.saveToken(seeded);
+			} else {
+				this.clearToken();
+				this.transitionAuthPhase(AuthPhase.FRESH);
+			}
+		}
 
 		// Ensure the transport is attached before any login attempt. The native
 		// attach timeout closes a timed-out handshake before this promise rejects.
@@ -903,8 +975,14 @@ export class ConnectionManager implements IConnectionManager {
 				return null;
 			}
 
+			// The exchange echoes the authorize-time redirect_uri (the page
+			// origin, or the relay origin on a dev-relay sign-in) — stashed
+			// by signIn with the verifier's lifetime.
+			const exchangeRedirectUri = getStoredRedirectUri() ?? window.location.origin;
+			clearStoredRedirectUri();
+
 			try {
-				const completed = await this.connectForBootstrap({ code, verifier, redirectUri: window.location.origin, ...(signup ? { signupProperties: () => currentSignupProperties(signup) } : {}) }, sessionAppId, config);
+				const completed = await this.connectForBootstrap({ code, verifier, redirectUri: exchangeRedirectUri, ...(signup ? { signupProperties: () => currentSignupProperties(signup) } : {}) }, sessionAppId, config);
 				// The identity provider's round trip ended in an identity: the one place a
 				// sign-up or sign-in is known to have completed (token restores never pass here).
 				if (completed) {
@@ -1002,6 +1080,29 @@ export class ConnectionManager implements IConnectionManager {
 	 * Persists the token, emits shell:login, restores saved theme,
 	 * and resolves the target app ID.
 	 */
+	/**
+	 * Transition the tab's auth phase: persist the record (it must survive
+	 * the OAuth redirect's page unloads) and mirror it into ConnectionStatus
+	 * so consumers follow reactively. The ONE writer of both.
+	 *
+	 * @param state - The new phase.
+	 * @param appId - The sign-in's initiator app (AUTHORIZING only).
+	 */
+	private transitionAuthPhase(state: AuthPhase, appId?: string): void {
+		setAuthPhase({ state, ...(appId ? { appId } : {}) });
+		this.updateConnectionStatus({ authPhase: state });
+	}
+
+	/**
+	 * Whether THIS page load has started an OAuth redirect (the one-shot
+	 * startOAuth guard). While true, the page is on its way to the IdP —
+	 * a present auth-start stamp means the launch in progress, not an
+	 * abandoned sign-in from a previous load.
+	 */
+	public isSignInRedirectPending(): boolean {
+		return this.oauthStarted;
+	}
+
 	private async finishConnect(
 		result: ConnectResult,
 		appId: string,
@@ -1037,13 +1138,24 @@ export class ConnectionManager implements IConnectionManager {
 			}
 		}
 
-		// Resolve the target app — check pending app ID from OAuth flow
+		// Resolve the target app. The PENDING id is the sign-in's initiator
+		// (the app active when the user asked to log in) and wins over the
+		// tab's startup lock — logging in from Home must land back on Home,
+		// even in a dev tab whose lock is the app under development. The
+		// AUTHENTICATED transition consumes it (the record is replaced), so
+		// a stale value can never hijack a later boot's landing — and it
+		// retires signed-out/authorizing in the same write.
 		const pendingAppId = this.getPendingAppId();
-		const resolvedAppId = appId || pendingAppId;
+		this.transitionAuthPhase(AuthPhase.AUTHENTICATED);
+		const resolvedAppId = pendingAppId || appId;
 
-		// Notify the workspace to switch to the target app
-		if (resolvedAppId) {
-			if (operation) this.assertCurrentOperation(operation);
+		// Notify the workspace to switch to the target app — FOREGROUND
+		// connects only (operation set): there the workspace is mounted and
+		// listening. During bootstrap (no operation) the workspace does not
+		// exist yet — the emit was lost or raced the mount, and the landing
+		// is the RETURN VALUE instead (Shell seeds startupAppId from it).
+		if (resolvedAppId && operation) {
+			this.assertCurrentOperation(operation);
 			this.emit('shell:switchApp', { appId: resolvedAppId });
 		}
 
@@ -1381,9 +1493,18 @@ export class ConnectionManager implements IConnectionManager {
 	 */
 	public async logout(): Promise<void> {
 		this.invalidateLifecycle('logout');
-		// Clear persisted auth state
+		// Explicit sign-out, remembered per tab: the auth gate must NOT
+		// auto-bounce this person back to the IdP — they are usually
+		// terminating the app. Retired by the next successful sign-in.
+		// Replacing the record also drops any pending initiator app.
+		this.transitionAuthPhase(AuthPhase.SIGNED_OUT);
+		// Clear persisted auth state. The tab's app lock is DELIBERATELY kept:
+		// a locked tab (deployed ?appId= deep link or dev preview) exists FOR
+		// that app — sign-out must not turn it into a plain shell tab, or the
+		// signed-out screen loses its identity and the next sign-in (whose
+		// OAuth round trip returns to the bare origin) lands on Home instead
+		// of back in the app.
 		this.clearToken();
-		this.clearSessionAppId();
 		this.accountInfo = undefined;
 		// Drop any buffered user-intent events so a stale shell:subscribe /
 		// shell:loginRequest can't replay into the next session.
@@ -1629,45 +1750,40 @@ export class ConnectionManager implements IConnectionManager {
 	// next boot; top-level shells keep real sessionStorage (deep links and
 	// the OAuth redirect round-trip depend on it).
 
-	/** Read session-locked app ID from the tab-session store. */
+	/** Read the session-locked app ID (a view over the tab session).
+	 *  @deprecated Prefer `tabSession().appId` — kept as published surface. */
 	public getSessionAppId(): string {
-		try { return sessionScopedStore().getItem(SS_APP_ID) ?? ''; } catch { return ''; }
+		try { return tabSession().appId; } catch { return ''; }
 	}
 
-	/** Save session-locked app ID to the tab-session store. */
+	/** Save the session-locked app ID (a view over the tab session).
+	 *  @deprecated Prefer `updateTabSession` — kept as published surface. */
 	public setSessionAppId(id: string): void {
-		try { sessionScopedStore().setItem(SS_APP_ID, id); } catch (e) {
+		try { updateTabSession({ appId: id }); } catch (e) {
 			console.error('[ConnectionManager] Failed to set session app ID:', e);
 		}
 	}
 
-	/** Clear session app ID. */
-	private clearSessionAppId(): void {
-		try {
-			sessionScopedStore().removeItem(SS_APP_ID);
-			sessionScopedStore().removeItem(SS_PENDING_APP_ID);
-		} catch (e) {
-			console.error('[ConnectionManager] Failed to clear session storage:', e);
-		}
-	}
-
-	/** Read the pending app ID (set before OAuth redirect). */
+	/** Read the pending app ID — the in-flight sign-in's initiator. A view
+	 *  over the auth-phase record: only an AUTHORIZING tab has one. */
 	public getPendingAppId(): string {
-		try { return sessionScopedStore().getItem(SS_PENDING_APP_ID) ?? ''; } catch { return ''; }
+		const phase = getAuthPhase();
+		return phase.state === AuthPhase.AUTHORIZING ? (phase.appId ?? '') : '';
 	}
 
-	/** Clear the pending app ID. Called when an OAuth round-trip is abandoned
-	 *  (user pressed Back from Zitadel) so the stale target can't re-seed the
-	 *  auth gate on the next load and bounce them straight back to login. */
+	/** Drop the pending initiator while KEEPING the phase state. Called when
+	 *  an OAuth round-trip is abandoned (user pressed Back from Zitadel) so
+	 *  the stale target can't re-seed the auth gate on the next load and
+	 *  bounce them straight back to login. */
 	public clearPendingAppId(): void {
-		try { sessionScopedStore().removeItem(SS_PENDING_APP_ID); } catch { /* storage unavailable */ }
+		const phase = getAuthPhase();
+		if (phase.appId) setAuthPhase({ state: phase.state });
 	}
 
-	/** Save pending app ID (for retrieval after OAuth callback). */
+	/** Save the sign-in's initiator app — marks the tab AUTHORIZING (the
+	 *  only state that carries one; retrieval after the OAuth callback). */
 	public setPendingAppId(id: string): void {
-		try { sessionScopedStore().setItem(SS_PENDING_APP_ID, id); } catch (e) {
-			console.error('[ConnectionManager] Failed to set pending app ID:', e);
-		}
+		this.transitionAuthPhase(AuthPhase.AUTHORIZING, id);
 	}
 
 	// =========================================================================

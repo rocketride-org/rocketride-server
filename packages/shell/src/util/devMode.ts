@@ -45,7 +45,7 @@ import * as ReactJsxDevRuntime from 'react/jsx-dev-runtime';
 import * as rocketride from 'rocketride';
 import { ConnectionManager } from '../connection/connection';
 import { isDevHooksEnabled, isEmbeddedDevShell } from './devGate';
-import { registerLocalApp, unregisterLocalApp, invalidateAppDescriptor, registerDevRemote, failDevRemoteWait } from './appLoader';
+import { registerLocalApp, unregisterLocalApp, invalidateAppDescriptor, registerDevRemote, failDevRemoteWait, isDevPreviewPage, previewLockedAppId } from './appLoader';
 import type { LocalAppMeta } from './appLoader';
 
 // The gate lives in devGate.ts (a leaf module — the ConnectionManager needs
@@ -256,6 +256,10 @@ export async function installDevHooks(): Promise<void> {
 			icon: iconPath,
 			configuration: configuration as LocalAppMeta['configuration'],
 			categories: Array.isArray(manifest.categories) ? (manifest.categories as string[]) : undefined,
+			// The app's REAL auth requirement — the dev entry must behave like
+			// the deployed app would, auth gate included (absent = the
+			// platform default, true).
+			authenticated: manifest.authenticated !== false,
 		};
 	};
 
@@ -320,9 +324,13 @@ export async function installDevHooks(): Promise<void> {
 	// NON-proxy session (cloud with rrdev=1) the fetch 404s and this is a
 	// silent no-op by design.
 	void (async () => {
-		const params = new URLSearchParams(window.location.search);
-		const appId = params.get('appid');
-		if (!appId || params.get('rrdev') !== '1') return;
+		// The lock + dev flag come from the URL with the per-tab
+		// sessionStorage fallbacks (previewLockedAppId / isDevPreviewPage) —
+		// an OAuth sign-in round trip returns to `/?code=…` with the preview
+		// params stripped, and keying registration on the raw URL left that
+		// boot waiting forever for a registration nothing would ever send.
+		const appId = previewLockedAppId();
+		if (!appId || !isDevPreviewPage()) return;
 		// Failure settles the TOP-LEVEL page's dev-remote hold (no embedder
 		// exists to register instead). A FRAMED page's fetch failing is the
 		// NORMAL web-builder case (blob injection, no /dev prefix) — there the
@@ -357,6 +365,16 @@ export async function installDevHooks(): Promise<void> {
 			failHold(`Dev manifest fetch failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	})();
+
+	// A FRAMED preview's sign-out must reach its embedder: the panel holds
+	// the preview-scoped session and re-answers it on every devReady, so
+	// without this notification the next handshake would resurrect the
+	// session the user just ended.
+	if (window.parent !== window) {
+		ConnectionManager.getInstance().on('shell:logout', () => {
+			try { window.parent.postMessage({ type: 'rrdev:signedOut' }, '*'); } catch { /* parentless */ }
+		});
+	}
 
 	// Tell the embedder the hooks are ready so it doesn't have to poll. The
 	// embedder is the parent (iframe preview) or the opener (the builder's

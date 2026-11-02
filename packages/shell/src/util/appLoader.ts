@@ -35,7 +35,7 @@ import type { AppManifestEntry, AppDescriptor, AppConfiguration } from '../compo
 // modules reference each other strictly through function calls at runtime,
 // so the import cycle carries no module-evaluation (TDZ) risk.
 import { getAppVersionOverrides, versionedEntryUrl } from './versionOverride';
-import { devBootConfig } from './devGate';
+import { devBootConfig, tabSession } from './devGate';
 
 /**
  * Shape of an app entry from the server (rrext_public_probe or ConnectResult).
@@ -200,6 +200,11 @@ export interface LocalAppMeta {
 	configuration?: AppManifestEntry['configuration'];
 	/** Manifest categories. */
 	categories?: string[];
+	/** The app's auth requirement from ITS manifest (absent = true, the
+	 *  platform default). The dev entry must gate exactly like the deployed
+	 *  app would — hardcoding this false once let auth-required apps render
+	 *  signed out in dev tabs, hiding the gate the user would ship. */
+	authenticated?: boolean;
 }
 
 // Synthetic manifest entries for local apps the server has never heard of:
@@ -245,6 +250,34 @@ export function isDevRemote(moduleId: string): boolean {
  */
 export function setLocalAppsListener(fn: (() => void) | null): void {
 	localAppsListener = fn;
+}
+
+// Change feed for everyone else (useSubscriptions): a version counter and a
+// subscriber set, bumped wherever the single Shell listener is notified.
+let localAppsVersion = 0;
+const localAppsSubscribers = new Set<() => void>();
+
+/** Monotonic version of the local-apps registry (bumps on every change). */
+export function getLocalAppsVersion(): number {
+	return localAppsVersion;
+}
+
+/**
+ * Subscribes to local-app registry changes (useSyncExternalStore-shaped).
+ *
+ * @param cb - Change callback.
+ * @returns Unsubscribe.
+ */
+export function subscribeLocalApps(cb: () => void): () => void {
+	localAppsSubscribers.add(cb);
+	return () => { localAppsSubscribers.delete(cb); };
+}
+
+/** Notify every local-apps consumer (the Shell listener and subscribers). */
+function notifyLocalApps(): void {
+	localAppsVersion++;
+	localAppsListener?.();
+	for (const cb of [...localAppsSubscribers]) cb();
 }
 
 /**
@@ -300,7 +333,9 @@ export function getLocalAppEntries(): AppManifestEntry[] {
 		moduleId: meta.moduleId,
 		name: meta.name,
 		description: meta.description || 'Local development app',
-		authenticated: false,
+		// The app's own manifest decides (default true) — dev must gate
+		// exactly like production will.
+		authenticated: meta.authenticated !== false,
 		public: false,
 		// step: dev means "I'm working on it, show me everything" — the
 		// settings registry and desktop surfaces gate on onDesktop, and
@@ -346,7 +381,7 @@ export function registerLocalApp(id: string, load: () => Promise<AppDescriptor>,
 			moduleId: meta.moduleId || id.replace(/[^a-zA-Z0-9_$]/g, '_'),
 			name: meta.name || id,
 		});
-		localAppsListener?.();
+		notifyLocalApps();
 	}
 	// Release any descriptor loads holding for this app's dev registration:
 	// a local registration satisfies the embedded preview's wait exactly like
@@ -371,7 +406,7 @@ export function unregisterLocalApp(id: string): void {
 	const hadOverride = localOverrides.delete(id);
 	const meta = localAppMetas.get(id);
 	if (meta) devRemoteModules.delete(meta.moduleId);
-	if (localAppMetas.delete(id)) localAppsListener?.();
+	if (localAppMetas.delete(id)) notifyLocalApps();
 	if (hadOverride) {
 		console.log(`[appLoader] Local override removed for "${id}"`);
 	}
@@ -514,19 +549,18 @@ export function fallbackSkippedRemote(appId: string): boolean {
  */
 export function isDevPreviewPage(): boolean {
 	try {
-		if (new URLSearchParams(window.location.search).get('rrdev') === '1') return true;
-		return sessionStorage.getItem('rr:dev') === '1';
+		return tabSession().dev;
 	} catch {
 		return false;
 	}
 }
 
 /**
- * The app id this page is session-locked to (`?appid=` / `?appId=`), or ''.
- * The value identifies WHICH app's first load the dev-preview hold applies
- * to. The URL wins; the sessionStorage copy ('rr:devAppId', persisted by the
- * flavor picker beside 'rr:dev') covers the OAuth redirect, which strips the
- * query string on its way back to the bare origin.
+ * The app id this page is session-locked to, or ''. The value identifies
+ * WHICH app's first load the dev-preview hold applies to. Authored preview
+ * pages state their identity in the page itself (devBootConfig); everyone
+ * else carries it in the tab session (URL-first, with the per-tab persisted
+ * copy covering the OAuth redirect's stripped query string).
  */
 export function previewLockedAppId(): string {
 	try {
@@ -534,10 +568,7 @@ export function previewLockedAppId(): string {
 		// no URL, no sessionStorage, no OAuth round-trip concerns.
 		const injected = devBootConfig()?.appId;
 		if (injected) return injected;
-		const params = new URLSearchParams(window.location.search);
-		const fromUrl = params.get('appId') || params.get('appid');
-		if (fromUrl) return fromUrl;
-		return sessionStorage.getItem('rr:devAppId') || '';
+		return tabSession().appId;
 	} catch {
 		return '';
 	}

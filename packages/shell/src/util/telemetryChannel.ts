@@ -30,9 +30,9 @@
 // until an app drains the channel at its analytics init. auth:start (raised when
 // the OAuth redirect starts) is always held: the callback page drains it. The hold is bounded and mirrored to
 // sessionStorage, so a fact raised on a page load that never mounts the
-// forwarding app (a sign-in that lands in a product app, the goodbye screen's
-// sign-in) reaches the next page load of the same tab, for TELEMETRY_TTL_MS at
-// most. No DOM: unit-tested under node:test with an injected storage.
+// forwarding app (a sign-in that lands in a product app, the signed-out
+// screen's sign-in) reaches the next page load of the same tab, for
+// TELEMETRY_TTL_MS at most. No DOM: unit-tested under node:test with an injected storage.
 // =============================================================================
 
 /**

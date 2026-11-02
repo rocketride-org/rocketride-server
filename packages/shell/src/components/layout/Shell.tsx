@@ -40,6 +40,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSPrope
 import type { ConnectResult, SignupProperties } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { ConnectionManager } from '../../connection/connection';
+import { AuthPhase } from '../../types/connection';
 import { registerClientOps } from '../../ops/clientOps';
 import { registerShellHostOps } from '../../ops/hostOps';
 import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
@@ -51,12 +52,13 @@ import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
+import { SignedOutScreen } from './SignedOutScreen';
 import { getHomeAppId } from '../../constants';
 import { registerAndMapApps, loadAppModule, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
 import { getAppVersionOverrides, setAppVersionOverride, versionedEntryUrl } from '../../util/versionOverride';
 import type { ServerAppEntry } from '../../util/appLoader';
 import { waitForEmbeddedSession } from '../../util/devMode';
-import { devBootConfig } from '../../util/devGate';
+import { devRelayOrigin, lockedAppId, tabSession } from '../../util/devGate';
 
 // =============================================================================
 // STYLES
@@ -98,29 +100,6 @@ const styles = {
 		transform: 'translateY(0)',
 		transition: 'background-color 0.1s ease, box-shadow 0.1s ease, transform 0.1s ease',
 	} as CSSProperties,
-	goodbyeContainer: {
-		display: 'flex',
-		flexDirection: 'column',
-		height: '100vh',
-		fontFamily: 'var(--rr-font-family)',
-		background: 'var(--rr-bg-default)',
-		color: 'var(--rr-text-primary)',
-	} as CSSProperties,
-	goodbyeHeader: {
-		display: 'flex',
-		justifyContent: 'flex-end',
-		alignItems: 'center',
-		padding: '12px 24px',
-		borderBottom: '1px solid var(--rr-border)',
-	} as CSSProperties,
-	goodbyeBody: {
-		display: 'flex',
-		flex: 1,
-		flexDirection: 'column',
-		alignItems: 'center',
-		justifyContent: 'center',
-		gap: 12,
-	} as CSSProperties,
 };
 
 // =============================================================================
@@ -133,10 +112,9 @@ const styles = {
  * - 'loading'    — bootstrap in progress; show spinner.
  * - 'shell'      — show Shell (identity may be null for marketplace).
  * - 'error'      — unrecoverable auth failure.
- * - 'goodbye'    — post-logout screen for session-locked apps.
  * - 'waitlisted' — authenticated but not yet granted access.
  */
-type RenderPhase = 'loading' | 'shell' | 'error' | 'goodbye' | 'waitlisted';
+type RenderPhase = 'loading' | 'shell' | 'error' | 'waitlisted';
 
 // =============================================================================
 // ONE-SHOT RELOAD GUARD
@@ -209,18 +187,10 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const { RR_ZITADEL_URL, RR_ZITADEL_CLIENT_ID } = config.apiConfig;
 
 	// ── Session-locked app ────────────────────────────────────────────────
-	const [sessionAppId] = useState<string>(() => {
-		// Authored preview pages (blob-served by the App Builder) carry their
-		// identity in the injected dev boot config — there is no URL to read.
-		const injected = devBootConfig()?.appId ?? '';
-		const params = new URLSearchParams(window.location.search);
-		const fromUrl = injected || params.get('appId') || params.get('appid') || '';
-		if (fromUrl) {
-			cm.setSessionAppId(fromUrl);
-			return fromUrl;
-		}
-		return cm.getSessionAppId();
-	});
+	// The tab session owns the URL parsing and per-tab persistence; authored
+	// preview pages (blob-served by the App Builder) instead carry their
+	// identity in the injected dev boot config — there is no URL to read.
+	const [sessionAppId] = useState<string>(() => lockedAppId());
 
 	// Deep-link version pin (?appid=X&version=7): seed the session override on
 	// mount — NOT in the useState initializer above, which is impure and would
@@ -270,7 +240,6 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const [showEmbeddedSignIn, setShowEmbeddedSignIn] = useState(false);
 	// Pending popup-fallback timer for the embedded sign-in (cancelled when
 	// the embedder ACKs that it is running its own sign-in flow).
-	const loginPopupTimerRef = useRef<number | null>(null);
 	const [apiKeyError] = useState<string | null>(null);
 	const loginTargetRef = useRef<string | null>(null);
 	const mountedRef = useRef(true);
@@ -363,10 +332,13 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		mountedRef.current = true;
 
 		(async () => {
-			// Initialize and configure the auth provider (SaaS mode)
+			// Initialize and configure the auth provider (SaaS mode).
+			// relayOrigin arms the dev relay for top-level dev shells
+			// (terminal dev loop, F5 preview) — '' everywhere else, which
+			// leaves the sign-in flow byte-identical to before.
 			const authProvider = CloudAuthProvider.getInstance();
 			if (RR_ZITADEL_URL && RR_ZITADEL_CLIENT_ID) {
-				authProvider.initialize({ zitadelUrl: RR_ZITADEL_URL, clientId: RR_ZITADEL_CLIENT_ID });
+				authProvider.initialize({ zitadelUrl: RR_ZITADEL_URL, clientId: RR_ZITADEL_CLIENT_ID, relayOrigin: devRelayOrigin() });
 			}
 
 			// Initialise the client singleton (idempotent). The uri is the
@@ -450,7 +422,24 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					// Gate on waitlist — authenticated but not yet granted access
 					setRenderPhase(result.result?.waitlisted ? 'waitlisted' : 'shell');
 				} else {
-					// No auth — render unauthenticated shell with the default app
+					// No identity. THE top-level auth decision, made BEFORE the
+					// shell phase is ever entered — nothing below this switch has
+					// rendered yet, so nothing can flash. A tab locked to an
+					// auth-required app (unknown manifest = auth-required, the
+					// platform default) goes straight to login from the loading
+					// screen, UNLESS the user explicitly signed out / abandoned a
+					// sign-in here (the shell then renders the signed-out page)
+					// or a failure is latched (the recovery dialog owns it).
+					const phase = cm.getConnectionStatus().authPhase;
+					const signedOutHeld = phase === AuthPhase.SIGNED_OUT || (phase === AuthPhase.AUTHORIZING && !cm.isSignInRedirectPending());
+					const lockedEntry = config.apps.find((a) => a.id === sessionAppId);
+					const lockedNeedsAuth = !!sessionAppId && sessionAppId !== defaultAppId && (lockedEntry ? lockedEntry.authenticated !== false : true);
+					if (lockedNeedsAuth && !signedOutHeld && !cm.getConnectionStatus().lastFailure) {
+						cm.emit('shell:loginRequest', { appId: sessionAppId, auto: true });
+						return; // stay on the loading screen; the navigation takes the page
+					}
+					// Signed-out render is legitimate here (public app, home, or
+					// the signed-out page): enter the shell phase.
 					setRenderPhase('shell');
 				}
 			} catch (err) {
@@ -627,6 +616,20 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		});
 	}, [cm]);
 
+	// The embedded sign-in KICK — deterministic, no timers: try the popup
+	// ON the click gesture, the one moment it can succeed. A blocked popup
+	// is a SYNCHRONOUS fact (VS Code webviews return null without throwing)
+	// and means the embedder owns sign-in — ask it to run its native flow
+	// (it answers with rrdev:auth). Shared by the prompt screen's button
+	// and by loginRequest handling for requests that already carry a
+	// gesture.
+	const kickEmbeddedSignIn = useCallback(() => {
+		const popup = window.open(`${window.location.origin}/?rrauth=1`, 'rrauth', 'popup=yes,width=520,height=780');
+		if (!popup) {
+			try { window.parent.postMessage({ type: 'rrdev:loginRequest' }, '*'); } catch { /* parentless */ }
+		}
+	}, []);
+
 	// Sign-in request from marketplace
 	useEffect(() => {
 		return cm.on('shell:loginRequest', ({ appId, register, auto, signupProperties }: { appId?: string; register?: boolean; auto?: boolean; signupProperties?: SignupProperties }) => {
@@ -636,10 +639,14 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			}
 			if (isSaas) {
 				// EMBEDDED: never navigate the iframe to the IdP (framed IdPs
-				// go blank) — show the sign-in prompt whose button opens the
-				// popup flow instead.
+				// go blank). A USER-GESTURE request (the signed-out screen's
+				// button) kicks the popup flow directly — a second prompt
+				// demanding a second click is a speed bump. The AUTO gate has
+				// no gesture yet (popup rules), so it shows the prompt whose
+				// button provides one.
 				if (window.self !== window.top) {
-					if (mountedRef.current) setShowEmbeddedSignIn(true);
+					if (!auto) kickEmbeddedSignIn();
+					else if (mountedRef.current) setShowEmbeddedSignIn(true);
 					return;
 				}
 				// "Get Started" CTAs pass register:true; it is reported on auth:start (every
@@ -669,16 +676,11 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				window.location.reload();
 			}
 		};
-		const onWindowMessage = (e: MessageEvent): void => {
-			if ((e.data as { type?: string } | undefined)?.type === 'rrdev:loginPending' && loginPopupTimerRef.current !== null) {
-				window.clearTimeout(loginPopupTimerRef.current);
-				loginPopupTimerRef.current = null;
-			}
-		};
-		window.addEventListener('message', onWindowMessage);
+		// (rrdev:loginPending — the embedder's ACK — needs no listener since
+		// the popup-or-embedder choice became synchronous; embedders keep
+		// posting it for older shells, and it is simply ignored here.)
 		return () => {
 			channel.close();
-			window.removeEventListener('message', onWindowMessage);
 		};
 	}, [cm]);
 
@@ -691,9 +693,17 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		// Clear the pending-sign-in flag so HomeApp doesn't get stuck on
 		// the auth transition screen when it mounts after logout.
 		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
-		if (sessionAppId) {
+		if (sessionAppId || tabSession().dev) {
+			// SESSION-LOCKED tab (deployed ?appId= deep link or dev preview):
+			// stay exactly where you are. The signed-out state has honest
+			// surfaces of its own — ShellLayout renders the shared
+			// SignedOutScreen ("You are signed out of <app>" + the app's
+			// icon) for an auth-required app, and a public app simply renders
+			// signed out. The retired 'goodbye' phase showed a bespoke
+			// RocketRide-chromed page here instead — off-brand for a deep-app
+			// tab and a THIRD signed-out surface to keep consistent.
 			cm.logout().finally(() => {
-				if (mountedRef.current) setRenderPhase('goodbye');
+				if (mountedRef.current) setRenderPhase('shell');
 			});
 		} else {
 			// Return to the home app before the auth gate re-runs. Otherwise
@@ -768,38 +778,18 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ('rrauth' — see the bootstrap popup role); the popup hands the session
 	// back over BroadcastChannel and this shell reboots authenticated.
 	if (showEmbeddedSignIn) {
+		// The SAME surface as the top-level signed-out hold — only the
+		// sign-in MECHANICS differ (the popup flow; a frame cannot run the
+		// redirect), stated in the note. Identity resolves like everywhere
+		// else: probe manifest first, then the dev registration.
+		const lockedEntry = config.apps.find((a) => a.id === sessionAppId) ?? getLocalAppEntries().find((a) => a.id === sessionAppId);
 		return (
-			<div style={styles.statusScreen}>
-				<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center', maxWidth: 380, padding: '0 24px' }}>
-					<div style={{ fontSize: 15, fontWeight: 600, color: 'var(--rr-text-primary)' }}>Sign in required</div>
-					<div style={{ fontSize: 12.5 }}>
-						This app requires authentication. Sign in opens in a separate window; this preview continues automatically afterwards.
-					</div>
-					<button
-						style={styles.signInButton}
-						onClick={() => {
-							// Ask the EMBEDDER to run its own sign-in first (the
-							// VSCode host authenticates natively and hands the
-							// session down via rrdev:auth, which reboots this
-							// shell). The popup is the fallback for embedders
-							// without an auth flow of their own — if no session
-							// arrived after a grace period, this page is still
-							// here and opens it.
-							try { window.parent.postMessage({ type: 'rrdev:loginRequest' }, '*'); } catch { /* parentless */ }
-							loginPopupTimerRef.current = window.setTimeout(() => {
-								loginPopupTimerRef.current = null;
-								// VS Code webviews BLOCK window.open (null, no throw) —
-								// there the embedder's native sign-in above is the ONLY
-								// path, so surface the dead end instead of failing
-								// silently (the warning reaches the Console pane via
-								// the dev console forwarding).
-								const popup = window.open(`${window.location.origin}/?rrauth=1`, 'rrauth', 'popup=yes,width=520,height=780');
-								if (!popup) console.warn('[Shell] sign-in popup blocked by the embedder — waiting for the host to answer rrdev:loginRequest with a session (rrdev:auth)');
-							}, 1500);
-						}}
-					>Sign In</button>
-				</div>
-			</div>
+			<SignedOutScreen
+				appName={lockedEntry?.name ?? tabSession().appName ?? sessionAppId ?? 'this app'}
+				iconUrl={lockedEntry?.icon ?? tabSession().appIcon}
+				note="Sign in opens in a separate window; this preview continues automatically afterwards."
+				onSignIn={kickEmbeddedSignIn}
+			/>
 		);
 	}
 
@@ -835,23 +825,6 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			}}>
 				<div style={{ color: 'var(--rr-color-error)', fontSize: 15 }}>Sign in failed. Please try again.</div>
 				<button onClick={startSignIn} style={styles.signInButton}>Sign In</button>
-			</div>
-		);
-	}
-
-	// Goodbye (session-locked post-logout)
-	if (renderPhase === 'goodbye') {
-		return (
-			<div style={styles.goodbyeContainer}>
-				<div style={styles.goodbyeHeader}>
-					<button onClick={startSignIn} style={styles.signInButton}>Sign In</button>
-				</div>
-				<div style={styles.goodbyeBody as CSSProperties}>
-					<div style={{ fontSize: 16, fontWeight: 600 }}>You have been signed out</div>
-					<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)' }}>
-						Close this tab or sign in again to continue.
-					</div>
-				</div>
 			</div>
 		);
 	}
