@@ -251,8 +251,8 @@
 				"title": "SpaceXAI: Grok 4.3 (batch)",
 				"model": "grok-4.3:batch",
 				"modelSource": "openrouter",
-				"modelTotalTokens": 1000000, // openrouter
-				"modelOutputTokens": 900000, // openrouter
+				"modelTotalTokens": 1000000, // manual
+				"modelOutputTokens": 900000, // manual
 				"deprecated": true,
 				"migration": "OpenRouter batch routing alias — the xAI API serves no model with this ID. Please use 'grok-4.3' instead.",
 				"capabilities": {
@@ -263,6 +263,17 @@
 			"grok-4-6": {
 				"title": "SpaceXAI: Grok 4.6",
 				"model": "grok-4.6",
+				"modelSource": "openrouter",
+				"modelTotalTokens": 500000, // openrouter
+				"modelOutputTokens": 450000, // openrouter
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"grok-4-7": {
+				"title": "SpaceXAI: Grok 4.7",
+				"model": "grok-4.7",
 				"modelSource": "openrouter",
 				"modelTotalTokens": 500000, // openrouter
 				"modelOutputTokens": 450000, // openrouter
@@ -497,6 +508,12 @@
 					"properties": [
 						"xai.grok-4-6"
 					]
+				},
+				{
+					"value": "grok-4-7",
+					"properties": [
+						"xai.grok-4-7"
+					]
 				}
 			]
 		},
@@ -579,6 +596,13 @@
 		},
 		"xai.grok-4-6": {
 			"object": "grok-4-6",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"xai.grok-4-7": {
+			"object": "grok-4-7",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"
