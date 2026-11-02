@@ -1,0 +1,35 @@
+# Fork-only: build and package an engine for each engine-build/* branch so the
+# rocketside-demo-issues binary runners can exercise the PR fixes.
+name: PR engine build
+
+on:
+  push:
+    branches: ['engine-build/**']
+
+permissions:
+  contents: read
+
+jobs:
+  init:
+    name: Initialize
+    uses: ./.github/workflows/_init.yaml
+    with:
+      ref: ${{ github.sha }}
+
+  build:
+    name: Build
+    needs: init
+    uses: ./.github/workflows/_build.yaml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      ref: ${{ github.sha }}
+      full_version: ${{ needs.init.outputs.full_server_version }}
+      build_hash: ${{ needs.init.outputs.build_hash }}
+      build_stamp: ${{ needs.init.outputs.build_stamp }}
+      package: true
+      test: true
+      container_test: false
+      retention_days: 7
+    secrets: inherit
