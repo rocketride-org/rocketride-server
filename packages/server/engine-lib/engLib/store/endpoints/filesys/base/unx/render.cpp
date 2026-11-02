@@ -225,11 +225,12 @@ Error IBaseSysInstance<LvlT>::renderStandardFile(ServicePipe &target,
     // if it's a directory we are done
     if (stat.isDir) return {};
 
-    // omit corner case when scanning system files on linux (like /sys/devices
-    // etc) actually this case perfectly handled by global excludes but just in
-    // case it wasn`t applied for some reason leave this check here to not to
-    // hang
-    if (!stat.isLink && stat.size != 0 && stat.sizeOnDisk == 0) {
+    // Skip pseudo files (e.g. /sys/devices/...) whose reported size does not
+    // describe readable data. Zero allocated blocks alone is not enough: valid
+    // sparse files have none either, so only the cheap size test gates the
+    // file system type lookup, and the type decides.
+    if (!stat.isLink && stat.size != 0 && stat.sizeOnDisk == 0 &&
+        ap::file::isOnPseudoFileSystem(stat.volumeId)) {
         return {};
     }
 
