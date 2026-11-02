@@ -322,7 +322,16 @@ def call(
     Returns an empty dict for 204 No Content responses.
     """
     resp = _exchange(token, method, path, params=params, body=body)
-    return {} if resp.status_code == 204 else resp.json()
+    if resp.status_code == 204:
+        return {}
+    try:
+        return resp.json()
+    except ValueError:
+        if method.upper() in {'GET', 'HEAD'}:
+            raise
+    # A successful HTTP status with unreadable JSON cannot establish a write's
+    # outcome. Keep response text and exception context out of the error.
+    raise ValueError(_WRITE_TRANSPORT_FAILURE)
 
 
 def _exchange(
@@ -358,7 +367,8 @@ def _exchange(
         if resp is None:
             # Fixed text, raised outside the handler: requests' own message can quote a
             # header value, the token included, and it must not even be chained.
-            raise ValueError(_CALL_TRANSPORT_FAILURE)
+            message = _CALL_TRANSPORT_FAILURE if method.upper() in {'GET', 'HEAD'} else _WRITE_TRANSPORT_FAILURE
+            raise ValueError(message)
 
         if not resp.ok:
             is_rate_limit = resp.status_code == 429 or (

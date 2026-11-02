@@ -96,6 +96,10 @@ replacement characters. None of these cases raises, whether the blob read failed
 an HTTP status, a transport error or an invalid body; the metadata request itself
 still raises as before, and `found: false` still marks a missing path.
 
+A blob read rejected with HTTP 401 preserves that status so a GitHub App token can
+refresh and the file read can retry once. If the retry is also rejected, or the
+credential is a PAT, the metadata-only result includes `status: 401` and the reason.
+
 `max_bytes` (an integer from 1048576 to 104857600, default 1048576, that is 1 MiB) caps
 the files the blob path downloads. The default is the Contents API's own boundary, so a
 pipeline written before this option sees no larger payloads than before: a file over 1 MB
@@ -516,6 +520,9 @@ not processed, so it is waited out and sent again like a read. Any other outcome
 call at once: a timeout or a dropped connection (the write may have reached GitHub), a
 5xx, or any other status. A transport failure on a write says the write may or may not
 have been applied; check its current state before sending it again.
+
+Legacy REST writes give the same guidance after a timeout, a dropped connection,
+or a successful HTTP response with invalid JSON. They do not retry these failures.
 
 The other tools, `file_get` (both its reads) included, keep their original policy:
 three attempts, waits capped at 30 seconds, a longer requested wait fails at once, and

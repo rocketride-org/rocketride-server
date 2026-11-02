@@ -264,6 +264,25 @@ def test_a_write_is_not_retried_after_a_permission_403(github):
     assert len(github.calls) == 1
 
 
+@pytest.mark.parametrize('failure', ['timeout', 'connection', 'invalid-json'])
+def test_legacy_write_reports_unknown_outcome_without_retrying(monkeypatch, github, failure):
+    request = Mock()
+    if failure == 'invalid-json':
+        request.return_value = response(None, raw=f'unreadable {TOKEN}'.encode())
+    else:
+        error = requests.Timeout if failure == 'timeout' else requests.ConnectionError
+        request.side_effect = error(TOKEN)
+    monkeypatch.setattr(requests, 'request', request)
+    with real_node({'token': TOKEN}) as inst:
+        with pytest.raises(ValueError) as error:
+            dispatch(inst, 'issue_comment', {'repo': 'acme/api', 'issue_number': 7, 'body': 'test'})
+    assert 'write may or may not have been applied' in str(error.value)
+    assert 'Check its current state before you retry' in str(error.value)
+    assert TOKEN not in str(error.value)
+    assert error.value.__context__ is None
+    assert request.call_count == 1
+
+
 def test_a_read_keeps_its_transport_message(monkeypatch, github):
     monkeypatch.setattr(requests, 'request', Mock(side_effect=requests.Timeout('slow')))
     with real_node({'token': TOKEN}) as inst:

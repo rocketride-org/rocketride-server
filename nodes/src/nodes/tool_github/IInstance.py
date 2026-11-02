@@ -580,6 +580,10 @@ class IInstance(IInstanceBase):
             # GitHubAPIError (an HTTP refusal), a transport failure or an invalid JSON/base64 body:
             # the metadata is still worth returning, so none of them raises. Transport
             # exception text is not echoed, as in the repository reads.
+            if isinstance(e, GitHubAPIError) and e.status_code == 401:
+                # Preserve the status for _redacting's one App-token refresh. If the
+                # credential cannot be replaced, retain this metadata-only result.
+                result['status'] = 401
             reason = str(e) if isinstance(e, GitHubAPIError) else 'GitHub request failed or returned invalid JSON'
             result['message'] = (
                 f'The file is {size} bytes, over the 1 MB Contents API limit, and the Git '

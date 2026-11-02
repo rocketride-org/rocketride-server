@@ -554,6 +554,54 @@ def test_a_revoked_installation_token_is_dropped_and_the_call_retried_once(githu
     assert [c.bearer for c in github.calls if (c.method, c.path) == LANGUAGES] == ['ghs_fake_11_1', 'ghs_fake_11_2']
 
 
+@pytest.mark.parametrize('keeps_rejecting', [False, True])
+def test_blob_401_refreshes_app_token_once_and_retains_metadata_on_failure(
+    github, rsa_private_key_pem, keeps_rejecting
+):
+    github.installations = {'acme/api': 11}
+    text = 'x' * 1_048_577
+    metadata_path = '/repos/acme/api/contents/big.txt'
+    blob_path = '/repos/acme/api/git/blobs/b1'
+    github.routes[('GET', metadata_path)] = lambda call: response(
+        {'path': 'big.txt', 'name': 'big.txt', 'sha': 'b1', 'size': len(text), 'encoding': 'none'}
+    )
+
+    def read_blob(call):
+        if call.bearer == 'ghs_fake_11_1' or keeps_rejecting:
+            return response({'message': f'Bad credentials {call.bearer}'}, 401)
+        return response({'encoding': 'base64', 'content': base64.b64encode(text.encode()).decode()})
+
+    github.routes[('GET', blob_path)] = read_blob
+    with real_node(app_config(rsa_private_key_pem, readOnly=True)) as inst:
+        result = dispatch(inst, 'file_get', {'repo': 'acme/api', 'path': 'big.txt'})
+    assert result['found'] is True
+    assert result['sha'] == 'b1'
+    if keeps_rejecting:
+        assert result['content'] is None
+        assert result['status'] == 401
+        assert 'Git blob read failed' in result['message']
+    else:
+        assert result['content'] == text
+        assert 'message' not in result
+    assert 'ghs_fake_' not in json.dumps(result)
+    assert [call.bearer for call in github.requests_to(blob_path)] == ['ghs_fake_11_1', 'ghs_fake_11_2']
+    assert len(github.requests_to(metadata_path)) == 2
+    assert len(github.requests_to('/app/installations/11/access_tokens')) == 2
+
+
+def test_blob_401_with_a_pat_keeps_metadata_without_retrying(github):
+    github.routes[('GET', '/repos/acme/api/contents/big.txt')] = response(
+        {'path': 'big.txt', 'sha': 'b1', 'size': 1_048_577, 'encoding': 'none'}
+    )
+    github.routes[('GET', '/repos/acme/api/git/blobs/b1')] = response({'message': 'Bad credentials'}, 401)
+    with real_node({'token': SENTINEL_PAT, 'readOnly': True}) as inst:
+        result = dispatch(inst, 'file_get', {'repo': 'acme/api', 'path': 'big.txt'})
+    assert result['found'] is True
+    assert result['content'] is None
+    assert result['status'] == 401
+    assert len(github.calls) == 2
+
+
 def test_after_a_reinstall_the_401_leads_to_the_404_rule(github, rsa_private_key_pem):
     github.installations = {'acme/api': 11}
     github.routes[LANGUAGES] = _revoked('ghs_fake_11_1')
