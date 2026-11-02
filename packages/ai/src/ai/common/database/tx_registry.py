@@ -174,6 +174,9 @@ class TransactionAbortedError(RuntimeError):
 # psycopg2/psycopg3 report an aborted transaction block as status 3 (INERROR).
 _TRANSACTION_STATUS_INERROR = 3
 
+# How long close_all() waits for an in-flight sweep to finish its rollbacks.
+_SWEEPER_JOIN_TIMEOUT = 10.0
+
 
 def _transaction_aborted(conn) -> bool:
     """True when the backend reports the open transaction as unrecoverable.
@@ -336,6 +339,16 @@ class TransactionRegistry:
     def close_all(self) -> None:
         """Rollback+close every session, and retire the sweeper (for endGlobal)."""
         self._stop.set()
+        # Wait out a sweep that is already running. _drop() takes a session out of
+        # the registry BEFORE rolling it back, so a reaped session is invisible to
+        # the loop below; without the join, close_all() can return (and endGlobal
+        # dispose the engine) while the sweeper is still mid-rollback on it.
+        # Read under the lock _ensure_sweeper() starts it under: an assigned but
+        # not-yet-started thread would make join() raise RuntimeError.
+        with self._sweeper_lock:
+            sweeper = self._sweeper
+        if sweeper is not None and sweeper is not threading.current_thread():
+            sweeper.join(timeout=_SWEEPER_JOIN_TIMEOUT)
         with self._registry_lock:
             items = list(self._sessions.items())
         for sid, held in items:

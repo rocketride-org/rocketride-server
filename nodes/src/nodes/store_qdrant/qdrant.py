@@ -56,8 +56,14 @@ from qdrant_client.http import models
 from qdrant_client.conversions import common_types as types
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
-from ai.common.store import DocumentStoreBase
+from ai.common.store import CONTROL_OBJECT_ID, DocumentStoreBase
 from ai.common.config import Config
+
+
+# The most points one objdir scroll request asks for. A collection can cap the
+# size of a single request (max_query_limit), so a page is read in requests of
+# this size, following next_page_offset, however large offset + limit is.
+_OBJDIR_SCROLL_PAGE = 1000
 
 """
 NOTE: https://qdrant.tech/documentation/concepts/indexing/
@@ -457,12 +463,15 @@ class Store(DocumentStoreBase):
             return {}
 
         # Build the base: chunk 0 only, exclude the internal schema document
+        # and the trash. The trash test is must_not isDeleted == True, as in
+        # _convertFilter, so a missing or null flag counts as active here as it
+        # does for get and search.
         must: List[models.Condition] = [
             FieldCondition(key='meta.chunkId', match=models.MatchValue(value=0)),
-            FieldCondition(key='meta.isDeleted', match=models.MatchValue(value=False)),
         ]
         must_not: List[models.Condition] = [
-            FieldCondition(key='meta.objectId', match=models.MatchValue(value='schema')),
+            FieldCondition(key='meta.objectId', match=models.MatchValue(value=CONTROL_OBJECT_ID)),
+            FieldCondition(key='meta.isDeleted', match=models.MatchValue(value=True)),
         ]
 
         # If parent specified, match on it
@@ -475,18 +484,31 @@ class Store(DocumentStoreBase):
         # Build up the path list
         paths: Dict[str, str] = {}
 
-        # Perform the search
-        records, nextPoint = self.client.scroll(
-            collection_name=self.collection,
-            scroll_filter=filter,
-            offset=offset,
-            limit=limit,
-            with_vectors=False,
-            with_payload=True,
-        )
+        # Scroll's offset is a point-ID cursor, not a count, and this driver
+        # writes random UUID point IDs, so an integer offset would never move
+        # the start. Read the first offset + limit records instead (scroll
+        # orders by point ID, so the order is stable), in requests of at most
+        # _OBJDIR_SCROLL_PAGE points that follow next_page_offset, and keep the
+        # requested page, as the Pinecone driver does. A page costs offset +
+        # limit records, and no single request exceeds the server's cap.
+        wanted = offset + limit
+        records: List[Any] = []
+        cursor = None
+        while len(records) < wanted:
+            batch, cursor = self.client.scroll(
+                collection_name=self.collection,
+                scroll_filter=filter,
+                limit=min(_OBJDIR_SCROLL_PAGE, wanted - len(records)),
+                offset=cursor,
+                with_vectors=False,
+                with_payload=True,
+            )
+            records.extend(batch)
+            if cursor is None or not batch:
+                break
 
         # Fill it in
-        for record in records:
+        for record in records[offset:wanted]:
             # Get the payload
             payload = record.payload
             if payload is None:
@@ -625,7 +647,7 @@ class Store(DocumentStoreBase):
 
         # Set all the objects with the given objectId to true
         self.client.set_payload(
-            collection_name=self.collection, payload={'meta': {'isDeleted': True}}, points=filter_objectId
+            collection_name=self.collection, payload={'isDeleted': True}, key='meta', points=filter_objectId
         )
         return
 
@@ -645,7 +667,7 @@ class Store(DocumentStoreBase):
 
         # Set all the objects with the given objectId to false
         self.client.set_payload(
-            collection_name=self.collection, payload={'meta': {'isDeleted': False}}, points=filter_objectId
+            collection_name=self.collection, payload={'isDeleted': False}, key='meta', points=filter_objectId
         )
         return
 

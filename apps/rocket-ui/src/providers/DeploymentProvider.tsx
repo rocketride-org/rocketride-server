@@ -46,6 +46,7 @@ import { isTeamLiveEvent } from 'shared/modules/project';
 import { registerServiceIcons } from 'shared/components/canvas/util/Icon';
 import type { TaskEventMessage } from 'shared/modules/project';
 import type { Deployment, DeployHistoryEntry, DeployArtifact } from 'shell';
+import { wireTeamIdOf } from 'rocketride';
 import { useDeployments } from '../hooks/useDeployments';
 
 // Live-feed retention for the record's report cards (mirrors the dev host's
@@ -84,7 +85,7 @@ const DeploymentProvider: React.FC<IDeploymentProviderProps> = ({ teamId: rawTea
 	// only accepts '@me' for the caller's own space, so translate ONCE here
 	// and every fetch/action/monitor below addresses it correctly.
 	const ownUid = client?.getAccountInfo?.()?.userId ?? '';
-	const teamId = ownUid && rawTeamId === `user~${ownUid}` ? '@me' : rawTeamId;
+	const teamId = wireTeamIdOf(rawTeamId, ownUid);
 	const { teams, teamName, refresh: refreshDeployments } = useDeployments();
 
 	// --- Server state ---------------------------------------------------------

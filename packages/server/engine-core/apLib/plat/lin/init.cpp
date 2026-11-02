@@ -31,6 +31,21 @@ void init() noexcept {
     // called once the monitor and the per-task location exist -- no re-register
     // on location change (unlike Breakpad).
     minidumpRegister();
+
+    // Claim the system libstdc++ before anything else can. Its locale facet ids
+    // (std::num_put<char>::id and the other 159) are STB_GNU_UNIQUE, which glibc
+    // binds process-wide to the first definer, RTLD_LOCAL or not. The engine runs
+    // on libc++, so nothing claims them until a JNI library with a statically
+    // linked libstdc++ of its own arrives -- Tika's prebuilt lib7-Zip-JBinding.so
+    // exports 398 such symbols -- and then that copy's numbering wins. The system
+    // runtime's facet table is left renumbered, and the next GCC-built code to
+    // format a number through std::ostream (torch, on import) reaches a facet
+    // that is not there and faults at 0x20.
+    //
+    // Fails open: a host without libstdc++.so.6 cannot load GCC-built code either,
+    // so there is nothing to protect.
+    if (!::dlopen("libstdc++.so.6", RTLD_NOW | RTLD_GLOBAL))
+        LOG(Init, "libstdc++.so.6 not preloaded:", ::dlerror());
 }
 
 void deinit() noexcept { minidumpDeregister(); }

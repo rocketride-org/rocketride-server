@@ -263,6 +263,31 @@ class _FakeSession:
             raise self._driver.raise_error
         return self._driver.result
 
+    def begin_transaction(self, timeout=None):
+        self._driver.tx_events.append('begin')
+        self._driver.tx_timeouts.append(timeout)
+        return _FakeTransaction(self._driver)
+
+
+class _FakeTransaction:
+    """Like neo4j.Transaction: leaving the block commits, an exception rolls back."""
+
+    def __init__(self, driver):
+        self._driver = driver
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, *a):
+        self._driver.tx_events.append('rollback' if exc_type else 'commit')
+        return False
+
+    def run(self, query, params=None):
+        self._driver.calls.append((str(query), params))
+        if self._driver.raise_error:
+            raise self._driver.raise_error
+        return self._driver.result
+
 
 class _FakeDriver:
     def __init__(self, result=None, raise_error=None):
@@ -270,6 +295,8 @@ class _FakeDriver:
         self.raise_error = raise_error
         self.calls = []
         self.session_kwargs = []
+        self.tx_events = []
+        self.tx_timeouts = []
 
     def session(self, **kwargs):
         self.session_kwargs.append(kwargs)
@@ -361,11 +388,72 @@ def test_affected_rows_counted_even_when_write_returns_rows():
     assert out['affected_rows'] == 2  # would have been 0 before the fix
 
 
-def test_execute_raw_caps_at_max_execute_rows():
-    glb = _FakeGlobal(_FakeDriver(_FakeResult(records=[{'n': i} for i in range(10)])))
+def test_execute_raw_commits_in_an_explicit_transaction():
+    driver = _FakeDriver(_FakeResult(records=[{'n': 1}]))
+    out = _FakeGlobal(driver)._run_query_raw('CREATE (n:Item) RETURN 1 AS n')
+    assert out['rows'] == [{'n': 1}]
+    assert driver.tx_events == ['begin', 'commit']
+    assert driver.tx_timeouts == [_glb_mod.IGlobal.QUERY_TIMEOUT]
+
+
+def test_execute_raw_rolls_back_over_max_execute_rows():
+    driver = _FakeDriver(_FakeResult(records=[{'n': i} for i in range(10)]))
+    glb = _FakeGlobal(driver)
     glb.max_execute_rows = 3
     with pytest.raises(ValueError, match='max_execute_rows'):
-        glb._run_query_raw('MATCH (n) RETURN n')
+        glb._run_query_raw('UNWIND range(1, 10) AS i CREATE (n:Item {id: i}) RETURN n.id')
+    # Nothing is saved, so a caller that retries after the error cannot duplicate the write.
+    assert driver.tx_events == ['begin', 'rollback']
+
+
+def test_execute_raw_rolls_back_when_the_driver_raises():
+    driver = _FakeDriver(raise_error=_StubNeo4jError('boom'))
+    with pytest.raises(_StubNeo4jError, match='boom'):
+        _FakeGlobal(driver)._run_query_raw('CREATE (:Item)')
+    assert driver.tx_events == ['begin', 'rollback']
+
+
+def test_execute_raw_binds_params():
+    driver = _FakeDriver(_FakeResult())
+    rows = [{'id': 1}, {'id': 2}]
+    query = 'UNWIND $rows AS row MERGE (:Item {id: row.id})'
+    _FakeGlobal(driver)._run_query_raw(query, params={'rows': rows})
+    assert driver.calls == [(query, {'rows': rows})]
+
+
+@pytest.mark.parametrize(
+    'query',
+    [
+        'CALL { CREATE (:Item) } IN TRANSACTIONS',
+        'UNWIND $rows AS row CALL (row) { MERGE (:Item {id: row.id}) } in transactions of 500 rows',
+        'CALL { CREATE (:Item) }\n  IN 4 CONCURRENT TRANSACTIONS OF 100 ROWS',
+        'CALL { CREATE (:Item) } IN CONCURRENT TRANSACTIONS',
+        'CALL { CREATE (:Item) } /* batched */ IN TRANSACTIONS',
+        'CALL { CREATE (:Item) } IN/*c*/TRANSACTIONS',
+        'USING PERIODIC COMMIT 500 LOAD CSV FROM "file:///items.csv" AS row CREATE (:Item)',
+    ],
+)
+def test_execute_raw_runs_batched_statements_in_auto_commit(query):
+    # Neo4j refuses these inside an explicit transaction.
+    driver = _FakeDriver(_FakeResult())
+    _FakeGlobal(driver)._run_query_raw(query)
+    assert driver.tx_events == []
+    assert driver.calls == [(query, {})]
+
+
+@pytest.mark.parametrize(
+    'query',
+    [
+        'CREATE (n:Note {text: "CALL { } IN TRANSACTIONS"})',
+        '// CALL { CREATE (:Item) } IN TRANSACTIONS\nCREATE (:Item)',
+        'WITH [1] AS transactions MATCH (n) WHERE n.id IN transactions RETURN n',
+    ],
+)
+def test_execute_raw_keeps_other_statements_in_a_transaction(query):
+    # The batching keywords only count as live Cypher, not in a string, a comment or a variable name.
+    driver = _FakeDriver(_FakeResult())
+    _FakeGlobal(driver)._run_query_raw(query)
+    assert driver.tx_events == ['begin', 'commit']
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +482,19 @@ def test_validate_query_reports_error():
 def test_dialect_reports_neo4j():
     inst = _instance(_FakeGlobal(_FakeDriver()))
     assert inst.dialect({}) == {'dialect': 'neo4j'}
+
+
+def test_execute_tool_passes_params_to_the_driver():
+    driver = _FakeDriver(_FakeResult())
+    glb = _FakeGlobal(driver)
+    glb.allow_execute = True
+    _instance(glb).execute({'query': 'CREATE (n:Person {name: $name})', 'params': {'name': 'Ada'}})
+    assert driver.calls == [('CREATE (n:Person {name: $name})', {'name': 'Ada'})]
+
+
+def test_execute_tool_schema_offers_params():
+    inst = _instance(_FakeGlobal(_FakeDriver()))
+    assert 'params' in inst._execute_input_schema()['properties']
 
 
 def test_get_cypher_is_alias_for_get_query():

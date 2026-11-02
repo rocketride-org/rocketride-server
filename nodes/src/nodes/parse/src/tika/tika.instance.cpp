@@ -43,9 +43,8 @@ Error TikaInstance::begin(IServiceConfig &config) noexcept { return {}; }
 ///	@param[in] path
 ///		The path to render
 /// @param[in] flags
-///		Flags to pass to tika api
-///			Bit 0 - 0x01 = Enable OCR
-///			Bit 1 - 0x02 = Enable Magick Image enhancement
+///		Flags to pass to tika api: the entry flags (apLib/entry.hpp)
+///		plus the SKIP_* media bits (tika.hpp)
 ///	@param[in] ctx
 ///		The context
 ///	@returns
@@ -66,7 +65,7 @@ Error TikaInstance::extractTextFromPath(const file::Path &path, long flags,
         // Call it
         if (!methods.m_jni.invokeStaticMethod<jboolean>(
                 methods.m_class, methods.m_extractTextFromPathMethodId,
-                javaPath, flags, userData))
+                javaPath, _cast<jlong>(flags), userData))
             return APERR(Ec::Failed, "Failed to parse");
         return {};
     };
@@ -92,9 +91,8 @@ Error TikaInstance::extractTextFromPath(const file::Path &path, long flags,
 ///	@param[in] size
 ///		Size of data in the buffer
 /// @param[in] flags
-///		Flags to pass to tika api
-///			Bit 0 - 0x01 = Enable OCR
-///			Bit 1 - 0x02 = Enable Magick Image enhancement
+///		Flags to pass to tika api: the entry flags (apLib/entry.hpp)
+///		plus the SKIP_* media bits (tika.hpp)
 ///	@param[in] ctx
 ///		The context
 ///	@returns
@@ -122,7 +120,8 @@ Error TikaInstance::extractTextFromBuffer(const file::Path &path,
         LOG(Parse, "extractTextFromStream", path.fileName(), size, "...");
         if (!methods.m_jni.invokeStaticMethod<jboolean>(
                 methods.m_class, methods.m_extractTextFromStreamMethodId,
-                javaStream.stream(), javaPath, (long)size, flags, userData))
+                javaStream.stream(), javaPath, _cast<jlong>(size),
+                _cast<jlong>(flags), userData))
             return APERR(Ec::Failed, "Failed to parse");
         LOG(Parse, "extractTextFromStream", path.fileName(), size, "done");
         return {};

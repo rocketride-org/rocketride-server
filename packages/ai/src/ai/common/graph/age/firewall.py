@@ -51,6 +51,10 @@ from .errors import AgeFirewallRejected
 # unbounded/deep variable-length traversals are the main resource hazard —
 # AGE expands them recursively; depth 10 on a connected graph is already huge.
 DEFAULT_MAX_QUERY_LENGTH = 10_000
+# Bound values travel as one JSON document beside the query: serialized and
+# parsed by C code (json / agtype input), never by the ANTLR parser, so the
+# cap only bounds memory, and is far above the query-text cap.
+DEFAULT_MAX_PARAMS_BYTES = 8 * 1024 * 1024
 DEFAULT_MAX_VAR_LENGTH_DEPTH = 10
 DEFAULT_STATEMENT_TIMEOUT_MS = 30_000
 # The ANTLR parser burns ~14 stack frames per expression nesting level, so
@@ -64,6 +68,7 @@ class FirewallConfig:
     max_query_length: int = DEFAULT_MAX_QUERY_LENGTH
     max_var_length_depth: int = DEFAULT_MAX_VAR_LENGTH_DEPTH
     max_nesting_depth: int = DEFAULT_MAX_NESTING_DEPTH
+    max_params_bytes: int = DEFAULT_MAX_PARAMS_BYTES
     # Applied by the emitter as SET LOCAL statement_timeout in the query's
     # transaction — the database-side resource backstop for both paths.
     statement_timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS
@@ -98,6 +103,19 @@ def check_pre_parse(cypher: str, config: FirewallConfig) -> None:
                 )
         elif ch in ')]}':
             depth = max(0, depth - 1)
+
+
+def check_params_size(params_json: str, config: FirewallConfig) -> None:
+    """Cap the serialized ``$parameter`` document — both paths.
+
+    ``params_json`` is the exact text bound to the ``cypher()`` params
+    argument (ASCII-only JSON, so its length is its byte size).
+    """
+    if len(params_json) > config.max_params_bytes:
+        raise AgeFirewallRejected(
+            'max_params_bytes',
+            f'parameters are {len(params_json)} bytes of JSON (limit {config.max_params_bytes})',
+        )
 
 
 def check_resource_caps(facts: CypherFacts, config: FirewallConfig) -> None:

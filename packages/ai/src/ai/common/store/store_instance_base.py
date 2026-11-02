@@ -29,8 +29,9 @@ The three pipeline lane handlers are byte-identical across the store drivers:
 questions run a search, documents are written as chunks, and rendering rehydrates
 an object's chunks. They all delegate to ``self.IGlobal.store`` (a
 ``DocumentStoreBase``), so they live here once. Subclassing
-``VectorStoreToolMixin`` also gives every node the ``search``/``upsert``/``delete``
-agent tools uniformly.
+``VectorStoreToolMixin`` also gives every node the agent tools (``search``,
+``objdir``, ``get``, ``stats``, the write tools, and ``list_documents`` where the
+driver supports it) uniformly.
 
 A concrete node inherits this class with no per-driver overrides. See
 ``nodes/src/nodes/store_qdrant/IInstance.py``.

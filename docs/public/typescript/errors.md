@@ -73,7 +73,9 @@ context (mirroring Python's `dap_result`), plus two optional fields:
 - `code` — the server's machine-readable classification, absent when the failure
   has none. Task failures carry one: `TASK_NOT_REGISTERED` (the token names no
   live task — never started, terminated, replaced, or the engine restarted),
-  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`. **Classify on `code`, not
+  `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`; a refused pipe throws
+  `PipeException` with `OUT_OF_CREDITS` (the org is out of credit; clears when
+  it tops up). **Classify on `code`, not
   on `message`**, which is written for people and may be reworded.
 - `hint` — troubleshooting text the SDK attached for a developer, absent when
   there is none. Kept out of `message` so an application can show the message

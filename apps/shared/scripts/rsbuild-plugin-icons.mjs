@@ -48,7 +48,8 @@ import autoCurrentColor from './svgo-auto-currentcolor.mjs';
 export const pluginRocketrideIcons = () => ({
 	name: 'rocketride:icons',
 	setup(api) {
-		pluginSvgr({
+		// plugin-svgr's setup is synchronous; its type only allows a promise
+		void pluginSvgr({
 			svgrOptions: {
 				// Default export = React component (matches our import style).
 				exportType: 'default',
@@ -103,16 +104,10 @@ export const pluginRocketrideIcons = () => ({
 
 			const appRoot = api.context.rootPath;
 			if (!chain.resolve.alias.has('react')) {
-				chain.resolve.alias.set(
-					'react',
-					path.resolve(appRoot, 'node_modules/react'),
-				);
+				chain.resolve.alias.set('react', path.resolve(appRoot, 'node_modules/react'));
 			}
 			if (!chain.resolve.alias.has('react-dom')) {
-				chain.resolve.alias.set(
-					'react-dom',
-					path.resolve(appRoot, 'node_modules/react-dom'),
-				);
+				chain.resolve.alias.set('react-dom', path.resolve(appRoot, 'node_modules/react-dom'));
 			}
 		});
 	},

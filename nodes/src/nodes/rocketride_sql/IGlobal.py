@@ -23,8 +23,13 @@
 
 from typing import Any, Dict
 
+from rocketlib import warning
+
+from ai.common.config import Config
 from ai.common.database import DatabaseGlobalBase
 from ai.common.rocketride_db import (
+    DsnNotDelivered,
+    db_target,
     parse_dsn_fields,
     resolve_rocketride_dsn,
     to_sqlalchemy_url,
@@ -36,27 +41,48 @@ class IGlobal(DatabaseGlobalBase):
 
     Identical to the generic PostgreSQL node in every respect except one: it
     takes **no** connection config. Instead of reading host/user/password, it
-    resolves a ready per-tenant DSN from the account layer, keyed by the
-    authenticated ``client_id`` (see ``ai.common.rocketride_db``). Everything
-    else — schema reflection, EXPLAIN validation, the structured query surface,
-    and the raw EXECUTE path — is inherited unchanged from the base.
+    reads the DSN the task engine delivered for its ``scope`` / ``target``
+    (see ``ai.common.rocketride_db``). Everything else — schema reflection,
+    EXPLAIN validation, the structured query surface, and the raw EXECUTE
+    path — is inherited unchanged from the base.
     """
+
+    # PgBouncer already pools, capping each tenant database at 3 server connections per pooler.
+    POOL_SIZE = 2
+    MAX_OVERFLOW = 2
 
     # Cache the resolved DSN between the paired _connection_params /
     # _build_connection_url calls the base makes in beginGlobal and
     # validateConfig, so both come from a single resolution.
     _dsn: str = ''
 
-    def _connection_params(self, config: Dict[str, Any]) -> Dict[str, str]:
-        """Resolve the cloud DSN and expose the pieces the base needs.
-
-        There are no host/user/password fields; the DSN comes from
-        ``Account.resolve_db_dsn(client_id)``. Resolve it once here, cache it
-        for ``_build_connection_url``, and parse out ``database`` so the base's
-        schema-reflection messaging names the real tenant database. ``table``
-        remains the one structured, user-facing target field.
+    def validateConfig(self):
+        """Save-time probe. Outside a task no DSN is delivered (the server
+        process has no run identity), so only the static checks run and
+        connectivity is checked when the pipeline runs. Inside a task the
+        base's SELECT 1 probe runs against the delivered DSN.
         """
-        self._dsn = resolve_rocketride_dsn()
+        try:
+            config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
+            resolve_rocketride_dsn(*db_target(config))
+        except DsnNotDelivered:
+            return
+        except ValueError as e:
+            warning(str(e))
+            return
+        super().validateConfig()
+
+    def _connection_params(self, config: Dict[str, Any]) -> Dict[str, str]:
+        """Read the delivered cloud DSN and expose the pieces the base needs.
+
+        There are no host/user/password fields; the DSN is the one the task
+        engine delivered for this node's ``scope`` / ``target``. Read it once
+        here, cache it for ``_build_connection_url``, and parse out
+        ``database`` so the base's schema-reflection messaging names the real
+        tenant database. ``table`` remains the one structured, user-facing
+        target field.
+        """
+        self._dsn = resolve_rocketride_dsn(*db_target(config))
         fields = parse_dsn_fields(self._dsn)
         return {
             'host': fields['host'],
@@ -69,12 +95,12 @@ class IGlobal(DatabaseGlobalBase):
     def _build_connection_url(self, params: Dict[str, str]) -> str:
         """Return the SQLAlchemy engine URL for the per-tenant cloud DSN.
 
-        The DSN was resolved and cached in ``_connection_params`` (the base
-        always calls that first). Fall back to a fresh resolution if invoked
-        directly, so the method is safe in isolation.
+        The DSN was read and cached in ``_connection_params``, which the base
+        always calls first. Re-reading here would need the node's scope.
         """
-        dsn = self._dsn or resolve_rocketride_dsn()
-        return to_sqlalchemy_url(dsn)
+        if not self._dsn:
+            raise RuntimeError('_connection_params must run before _build_connection_url')
+        return to_sqlalchemy_url(self._dsn)
 
     def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
         """Return the EXPLAIN-validation retry count from config (default 5)."""

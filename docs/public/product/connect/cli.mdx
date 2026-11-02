@@ -218,7 +218,7 @@ Key flags:
 | Flag | Description |
 | --- | --- |
 | `<old.pipe> <new.pipe>` | The two files to compare (positional). Omit one and pass `--git` instead. |
-| `--git <ref>` | Diff the single working-tree `FILE` against `<ref>` via `git show <ref>:<FILE>`. If the file does not exist in `<ref>`, everything is reported as added. |
+| `--git <ref>` | Diff the single working-tree `FILE` against `<ref>` via `git show <ref>:<FILE>`, looking the file up under the path given. `<ref>` must not be empty. If the file does not exist in `<ref>`, everything is reported as added, plus a version change from `null` when the file has a `version`, and `layout changed` when its `viewport` is non-empty. A symlink committed as a symlink — the file itself or any directory on its path — is compared through the target it had at `<ref>`, wherever it points today. An absolute target inside the checkout, or one that climbs out of the repository and back in through its root (`../<repo>/x.pipe`), is read at `<ref>` like any other link; a target that ends outside the repository, or a loop of links, is an error. On POSIX systems `lnk/../x` follows `lnk` as it was committed at `<ref>`, and a relative `FILE` typed inside a directory link is looked up under the link as the shell spells it (`$PWD`). On a case-insensitive filesystem, a differently cased spelling of a tracked file or of any directory on its path is compared against that file. |
 | `--include-layout` | Enumerate the layout churn that is hidden by default — each node's `ui` block as `ui.*` changes on that node, and the top-level `viewport` as `viewport.*` changes — and count it, so a layout-only edit then exits `1`. |
 | `--json` | Emit a single JSON document to stdout (mutually exclusive with `--markdown`). |
 | `--markdown` | Emit compact, PR-comment-friendly Markdown to stdout (mutually exclusive with `--json`). |
@@ -226,12 +226,28 @@ Key flags:
 
 Exit codes: `0` — no semantic changes (or any successful run when `--exit-zero`
 is set); `1` — semantic changes were found; `2` — usage error, or an unreadable
-/ unparseable file or bad git ref.
+/ unparseable file or bad git ref. `diff` reads no configuration and does not
+load the workspace `.env`, so a `NO_COLOR` set only there is ignored; one in the
+shell environment still disables color.
+
+Non-JSON constants (`NaN`, `Infinity`, `-Infinity`), numeric overflow, and
+nonzero underflow are input errors (exit `2`). Fractional and exponent literals
+use finite IEEE 754 binary64 precision, so literals that round to the same
+binary64 value compare equal; integer literals remain exact within the JSON
+decoder's size limit. These rules also apply to Git blobs. Excessive nesting
+that exceeds parsing, comparison, or reporting limits returns an actionable
+error on stderr with exit `2` and empty stdout. `--exit-zero` does not suppress
+errors. Each error `diff` reports is one line, with control, bidi, invisible and
+line-separator characters taken from the inputs written as `\xNN`/`\uNNNN` escapes.
 
 #### What counts as a change
 
 - **Nodes** are matched by `id`. A new or deleted `id` is an add/remove; an `id`
   present on both sides with a different `provider` is a provider change.
+  Providers and config values are compared as JSON values: a boolean never
+  equals a number and a string never equals either, so `0` → `false` is a
+  change, while numerically equal literals such as `512` and `512.0` compare
+  equal.
 - **Config** is deep-diffed into dotted paths — nested objects become
   `config.default.strlen`, list items become `config.instructions[0]` — and each
   leaf is reported as added, removed, or changed with its old → new value.
@@ -246,6 +262,11 @@ is set); `1` — semantic changes were found; `2` — usage error, or an unreada
   a semantic change, so `diff` exits `0` on it. Pass `--include-layout` to
   enumerate the individual `ui.*` coordinates and `viewport.*` fields; with the
   flag they count as changes, so a canvas-only edit exits `1`.
+- **Canvas groups.** The editor saves a group's children inside the group,
+  under `config.pipeline.components`. Each child is diffed as a node in its own
+  right, matched by `id`: its `ui` is layout, its wiring is edges, and its
+  provider and config changes are reported on the child. Moving a node into or
+  out of a group is layout.
 - **Everything else at the top level is ignored.** `diff` reads exactly
   `components`, `version` and `viewport`; `project_id`, `isLocked`, and any key a
   later schema adds are editor/session metadata, so editing one never reports a
@@ -266,9 +287,9 @@ Config
 Layout: changed (ui/viewport)
 ```
 
-`--json` emits one stable, sorted document — `nodes`, `edges`, `viewport`, and a
-`summary` block with counts and the overall `has_semantic_changes` flag — ideal
-for feeding another tool:
+`--json` emits one stable document with sorted keys — `edges`, `nodes`, a
+`summary` block with counts and the overall `has_semantic_changes` flag, and
+`viewport` — ideal for feeding another tool:
 
 ```json
 {
@@ -286,7 +307,6 @@ for feeding another tool:
     ],
     "removed": []
   },
-  "viewport": [],
   "summary": {
     "config_changes": 1,
     "edges_added": 0,
@@ -299,7 +319,8 @@ for feeding another tool:
     "provider_changes": 0,
     "version_change": null,
     "viewport_changes": 0
-  }
+  },
+  "viewport": []
 }
 ```
 
@@ -308,8 +329,9 @@ The top-level `viewport` array carries the same
 under `--include-layout`; `summary.viewport_changes` is its length.
 
 `--markdown` emits a compact, PR-comment-friendly report — a one-line summary,
-bullet lists for nodes and edges, and a table for config changes (with `|` and
-backticks safely escaped so untrusted values can't break the comment):
+bullet lists for nodes and edges, and a table for config changes (with `|`,
+backticks, and control, bidi, zero-width and non-ASCII space characters escaped so
+untrusted values can't break, reorder or hide anything in the comment):
 
 ```markdown
 **Pipeline diff:** 1 node changed, layout changed
@@ -372,8 +394,9 @@ inputs.
 > base branch against itself, reports no changes and warns. To comment on fork
 > PRs, compute on `pull_request` and post from a `workflow_run` workflow.
 
-> **Before the CLI release:** `rocketride diff` ships in a release after 1.3.0,
-> so PyPI does not serve it yet. Until then, set `install-from` to a pip source
+> **Before the CLI release:** `rocketride diff` is not in a PyPI release yet —
+> 1.4.0 and earlier do not include it; the first release with it will be 1.5.0
+> or later. Until then, set `install-from` to a pip source
 > that does provide the subcommand. Inside `rocketride-server` that is the
 > checkout itself (`install-from: ./packages/client-python`); from any other
 > repository it is this repository's client package at a pinned commit:
@@ -392,8 +415,9 @@ for `--git`, then diff and post the Markdown yourself:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
-      # `rocketride diff` ships in a release AFTER 1.3.0, so `pip install
-      # rocketride` would install a CLI without the subcommand and the next step
+      # `rocketride diff` is not in a PyPI release yet (1.4.0 and earlier lack
+      # it), so `pip install rocketride` would install a CLI without the
+      # subcommand and the next step
       # would fail with "invalid choice: 'diff'". Until that release, install the
       # client package straight from this repository at a pinned commit; pip runs
       # the source's build code, so pin a full SHA, never a branch. Afterwards
@@ -403,6 +427,7 @@ for `--git`, then diff and post the Markdown yourself:
           "rocketride @ git+https://github.com/rocketride-org/rocketride-server@<full-commit-sha>#subdirectory=packages/client-python"
       - name: Semantic diff of the pipeline
         run: |
+          set -o pipefail  # keep an exit-2 input error from being masked by tee
           rocketride diff --git "origin/${{ github.base_ref }}" rag.pipe \
             --markdown --exit-zero | tee pipe-diff.md
       - name: Comment on the PR

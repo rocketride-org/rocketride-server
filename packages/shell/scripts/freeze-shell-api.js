@@ -215,7 +215,11 @@ function expandMapGenerics(dtsText, tsApi) {
 			const keys = [];
 			let allLiteral = node.members.length > 0;
 			for (const m of node.members) {
-				if (tsApi.isPropertySignature(m) && m.name && (tsApi.isStringLiteral(m.name) || tsApi.isIdentifier(m.name))) {
+				if (
+					tsApi.isPropertySignature(m) &&
+					m.name &&
+					(tsApi.isStringLiteral(m.name) || tsApi.isIdentifier(m.name))
+				) {
 					keys.push(m.name.text);
 				} else {
 					allLiteral = false;
@@ -259,7 +263,12 @@ function expandMapGenerics(dtsText, tsApi) {
 		const f = tsApi.factory;
 		const visit = (n) => {
 			// Replace every TYPE REFERENCE to the type parameter with 'key'
-			if (tsApi.isTypeReferenceNode(n) && tsApi.isIdentifier(n.typeName) && n.typeName.text === paramName && !n.typeArguments) {
+			if (
+				tsApi.isTypeReferenceNode(n) &&
+				tsApi.isIdentifier(n.typeName) &&
+				n.typeName.text === paramName &&
+				!n.typeArguments
+			) {
 				return f.createLiteralTypeNode(f.createStringLiteral(key, true));
 			}
 			return tsApi.visitEachChild(n, visit, undefined);
@@ -267,10 +276,28 @@ function expandMapGenerics(dtsText, tsApi) {
 		const substituted = tsApi.visitEachChild(node, visit, undefined);
 		// Drop the now-unused type parameter list per node kind
 		if (tsApi.isMethodSignature(substituted)) {
-			return f.updateMethodSignature(substituted, substituted.modifiers, substituted.name, substituted.questionToken, undefined, substituted.parameters, substituted.type);
+			return f.updateMethodSignature(
+				substituted,
+				substituted.modifiers,
+				substituted.name,
+				substituted.questionToken,
+				undefined,
+				substituted.parameters,
+				substituted.type
+			);
 		}
 		if (tsApi.isMethodDeclaration(substituted)) {
-			return f.updateMethodDeclaration(substituted, substituted.modifiers, substituted.asteriskToken, substituted.name, substituted.questionToken, undefined, substituted.parameters, substituted.type, substituted.body);
+			return f.updateMethodDeclaration(
+				substituted,
+				substituted.modifiers,
+				substituted.asteriskToken,
+				substituted.name,
+				substituted.questionToken,
+				undefined,
+				substituted.parameters,
+				substituted.type,
+				substituted.body
+			);
 		}
 		if (tsApi.isFunctionTypeNode(substituted)) {
 			return f.createFunctionTypeNode(undefined, substituted.parameters, substituted.type);
@@ -285,7 +312,9 @@ function expandMapGenerics(dtsText, tsApi) {
 		if ((tsApi.isMethodSignature(node) || tsApi.isMethodDeclaration(node)) && node.name) {
 			const mg = mapGenericOf(node);
 			if (mg) {
-				const lines = mg.keys.map((k) => printer.printNode(tsApi.EmitHint.Unspecified, substitute(node, mg.paramName, k), sf));
+				const lines = mg.keys.map((k) =>
+					printer.printNode(tsApi.EmitHint.Unspecified, substitute(node, mg.paramName, k), sf)
+				);
 				splices.push([node.getStart(sf), node.getEnd(), lines.join('\n')]);
 				return; // no need to descend into a replaced signature
 			}
@@ -294,7 +323,10 @@ function expandMapGenerics(dtsText, tsApi) {
 		if (tsApi.isPropertySignature(node) && node.type && tsApi.isFunctionTypeNode(node.type)) {
 			const mg = mapGenericOf(node.type);
 			if (mg) {
-				const parts = mg.keys.map((k) => `(${printer.printNode(tsApi.EmitHint.Unspecified, substitute(node.type, mg.paramName, k), sf)})`);
+				const parts = mg.keys.map(
+					(k) =>
+						`(${printer.printNode(tsApi.EmitHint.Unspecified, substitute(node.type, mg.paramName, k), sf)})`
+				);
 				const name = printer.printNode(tsApi.EmitHint.Unspecified, node.name, sf);
 				const q = node.questionToken ? '?' : '';
 				splices.push([node.getStart(sf), node.getEnd(), `${name}${q}: ${parts.join(' & ')};`]);
@@ -405,7 +437,20 @@ function preCheck(failureNote) {
 function generateCandidate() {
 	fs.mkdirSync(TMP_DIR, { recursive: true });
 	const candidatePath = path.join(TMP_DIR, 'candidate.d.ts');
-	const r = runNodeBin(DBG.binPath, ['--project', path.relative(SRC_DIR, CONTRACT_TSCONFIG), '--no-check', '--no-banner', '--export-referenced-types=false', '-o', candidatePath, 'api.ts'], SRC_DIR);
+	const r = runNodeBin(
+		DBG.binPath,
+		[
+			'--project',
+			path.relative(SRC_DIR, CONTRACT_TSCONFIG),
+			'--no-check',
+			'--no-banner',
+			'--export-referenced-types=false',
+			'-o',
+			candidatePath,
+			'api.ts',
+		],
+		SRC_DIR
+	);
 	if (r.code !== 0 || !fs.existsSync(candidatePath)) {
 		console.error('[shell:freeze] dts-bundle-generator FAILED:');
 		console.error(r.output);
@@ -544,7 +589,18 @@ function writeApiVersion(n) {
 
 /** Build the provenance header stamped onto each frozen version file. */
 function versionHeader(next) {
-	return [MIT_HEADER, '', '// =============================================================================', `// FROZEN shell-api contract — ShellApiV${next} — never edit by hand`, '// =============================================================================', `// Generated:     ${new Date().toISOString()}`, `// Source commit: ${gitCommit()}`, `// Generator:     dts-bundle-generator@${DBG.version}`, '// Produced by:   ./builder shell:freeze', '// ============================================================================='].join('\n');
+	return [
+		MIT_HEADER,
+		'',
+		'// =============================================================================',
+		`// FROZEN shell-api contract — ShellApiV${next} — never edit by hand`,
+		'// =============================================================================',
+		`// Generated:     ${new Date().toISOString()}`,
+		`// Source commit: ${gitCommit()}`,
+		`// Generator:     dts-bundle-generator@${DBG.version}`,
+		'// Produced by:   ./builder shell:freeze',
+		'// =============================================================================',
+	].join('\n');
 }
 
 /**
@@ -555,7 +611,15 @@ function versionHeader(next) {
  */
 function writeVersion(next, candidateBody) {
 	fs.mkdirSync(VERSIONS_DIR, { recursive: true });
-	const content = [versionHeader(next), '', BEGIN, candidateBody.trim(), END, `export type ShellApiV${next} = ShellApiShape;`, ''].join('\n');
+	const content = [
+		versionHeader(next),
+		'',
+		BEGIN,
+		candidateBody.trim(),
+		END,
+		`export type ShellApiV${next} = ShellApiShape;`,
+		'',
+	].join('\n');
 	fs.writeFileSync(path.join(VERSIONS_DIR, `v${next}.d.ts`), content);
 }
 
@@ -565,7 +629,13 @@ function writeVersion(next, candidateBody) {
  * @param {number} maxN - The newest (just-frozen) version number.
  */
 function regenerateBarrels(maxN) {
-	const generatedNote = ['', '// =============================================================================', '// GENERATED by `./builder shell:freeze` — do not edit by hand.', '// =============================================================================', ''].join('\n');
+	const generatedNote = [
+		'',
+		'// =============================================================================',
+		'// GENERATED by `./builder shell:freeze` — do not edit by hand.',
+		'// =============================================================================',
+		'',
+	].join('\n');
 
 	// latest.ts re-exports the newest version's full surface. `export type *`
 	// (not `export *`) keeps this a pure type re-export: shell-api is a types-only
@@ -761,7 +831,10 @@ function main() {
 	if (regenDerivedMode) {
 		const { prev } = determineVersions();
 		if (prev < 0) {
-			console.error('[shell:freeze --regen-derived] No frozen version exists. The shell contract baseline is missing — restore packages/shell/contract/versions/.');
+			console.error(
+				'[shell:freeze --regen-derived] No frozen version exists. ' +
+					'The shell contract baseline is missing — restore packages/shell/contract/versions/.'
+			);
 			process.exit(1);
 		}
 		regenerateBarrels(prev);
@@ -793,9 +866,21 @@ function main() {
 		// Step R2 — stub the generated contract files so the pre-check compiles
 		// against the LIVE surface only (no stale floors, no missing ./versions
 		// imports). All three are rewritten for real by the regeneration below.
-		const stubNote = ['// =============================================================================', '// RESET STUB — transient state inside `./builder shell:regen`; regenerated', '// into the real file before the run completes. If you are reading this in a', '// committed tree, a reset was interrupted: re-run `./builder shell:regen`.', '// ============================================================================='].join('\n');
+		const stubNote = [
+			'// =============================================================================',
+			'// RESET STUB — transient state inside `./builder shell:regen`; regenerated',
+			'// into the real file before the run completes. If you are reading this in a',
+			'// committed tree, a reset was interrupted: re-run `./builder shell:regen`.',
+			'// =============================================================================',
+		].join('\n');
 		fs.writeFileSync(CONTRACT_CHECK, `${MIT_HEADER}\n\n${stubNote}\nexport {};\n`);
-		fs.writeFileSync(INDEX_TS, `${MIT_HEADER}\n\n${stubNote}\n// Vacuous alias: contract-hold.ts still assigns the live surface to\n// ShellApiLatest during the pre-check; unknown accepts anything.\nexport type ShellApiLatest = unknown;\n`);
+		fs.writeFileSync(
+			INDEX_TS,
+			`${MIT_HEADER}\n\n${stubNote}\n` +
+				'// Vacuous alias: contract-hold.ts still assigns the live surface to\n' +
+				'// ShellApiLatest during the pre-check; unknown accepts anything.\n' +
+				'export type ShellApiLatest = unknown;\n'
+		);
 		fs.writeFileSync(LATEST_TS, `${MIT_HEADER}\n\n${stubNote}\nexport {};\n`);
 
 		// Step R3 — the normal freeze pipeline, pinned to version 0. A pre-check
@@ -803,7 +888,11 @@ function main() {
 		// versions are gone and three generated files are stubs, and re-running
 		// shell:regen fails at this same point until the live surface compiles —
 		// so the failure note names git restore as the way back.
-		preCheck('[shell:freeze] The reset already dropped the frozen versions and stubbed the generated files. ' + 'Fix the reported type errors and re-run `./builder shell:regen`, or return to the committed ' + 'contract with: git restore packages/shell/contract packages/shell/src/contract-check.generated.ts');
+		preCheck(
+			'[shell:freeze] The reset already dropped the frozen versions and stubbed the generated files. ' +
+				'Fix the reported type errors and re-run `./builder shell:regen`, or return to the committed ' +
+				'contract with: git restore packages/shell/contract packages/shell/src/contract-check.generated.ts'
+		);
 		const candidateBody = generateCandidate();
 		writeVersion(0, candidateBody);
 		try {
@@ -834,13 +923,18 @@ function main() {
 			// A missing baseline in CI is a FAILURE, not a pass: an emptied
 			// versions/ directory would otherwise sail through --check (and the
 			// regen tamper-diff, which also no-ops with nothing to regenerate).
-			console.error('[shell:freeze --check] No frozen version exists. The shell contract baseline is missing — restore packages/shell/contract/versions/ or run `./builder shell:freeze`.');
+			console.error(
+				'[shell:freeze --check] No frozen version exists. The shell contract baseline is missing — ' +
+					'restore packages/shell/contract/versions/ or run `./builder shell:freeze`.'
+			);
 			cleanup();
 			process.exit(1);
 		} else if (!hasActionableChange(prev, candidateBody)) {
 			log(`Up to date with v${prev} (no actionable change).`);
 		} else {
-			console.error(`[shell:freeze --check] Shell API has new exports not in v${prev}. Run \`./builder shell:freeze\`.`);
+			console.error(
+				`[shell:freeze --check] Shell API has new exports not in v${prev}. Run \`./builder shell:freeze\`.`
+			);
 			cleanup();
 			process.exit(1);
 		}

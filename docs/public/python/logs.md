@@ -66,6 +66,13 @@ ids recycle; `beginSeq` never does). Hosts that own a live subscription feed
 arriving events to the session via `ingest_live(event)`; while pinned, arrival
 paces delivery.
 
+## `streams()`
+
+Every continuum of one source you may read, each with its chapters: a dev run logs
+into your own tree, a team deploy (a scheduled run, for instance) into that team's
+tree, an `@me` deploy into your tree again. `chapters()` reads one of them;
+`streams()` names them all, tagged with the scope to pass on to `read()`.
+
 ## `chapters()`
 
 Returns the stream's timeline in one small read: each run's begin/end date-time,

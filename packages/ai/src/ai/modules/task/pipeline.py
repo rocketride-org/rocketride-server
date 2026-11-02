@@ -8,6 +8,9 @@ from typing import Dict, Any, Optional
 # All other env vars are blocked to prevent exfiltration of secrets via ${VAR} expansion.
 ALLOWED_ENV_PREFIX = 'ROCKETRIDE_'
 
+# A ``${NAME}`` placeholder in the serialized pipeline
+PLACEHOLDER = re.compile(r'\$\{([^}]+)\}')
+
 
 def resolve_pipeline_env(pipeline: Dict[str, Any], env: Dict[str, str]) -> Dict[str, Any]:
     """Replace ``${KEY}`` placeholders in a pipeline dict with environment values.
@@ -34,8 +37,16 @@ def resolve_pipeline_env(pipeline: Dict[str, Any], env: Dict[str, str]) -> Dict[
             return json.dumps(value)[1:-1]  # escape but strip outer quotes
         return '<REDACTED>'
 
-    resolved_str = re.sub(r'\$\{([^}]+)\}', replacer, pipeline_str)
+    resolved_str = PLACEHOLDER.sub(replacer, pipeline_str)
     return json.loads(resolved_str)
+
+
+def references_env(pipeline: Dict[str, Any]) -> bool:
+    """Whether the pipeline has a ``${...}`` placeholder that resolves from the environment.
+
+    Others are redacted by :func:`resolve_pipeline_env` whatever the environment holds.
+    """
+    return any(name.startswith(ALLOWED_ENV_PREFIX) for name in PLACEHOLDER.findall(json.dumps(pipeline)))
 
 
 def resolve_implied_source(pipeline: Dict[str, Any]) -> Optional[str]:

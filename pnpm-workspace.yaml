@@ -82,7 +82,9 @@ overrides:
   'minimatch@3>brace-expansion': '>=1.1.18 <2'
   'minimatch@9>brace-expansion': '>=2.1.4 <3'
   'diff@7': '>=8.0.3 <9'
-  dompurify: '>=3.4.13 <3.5.0'
+  # DOMPurify: SAFE_FOR_TEMPLATES bypass via split template expressions
+  # (GHSA-cg2g-xh64-v4q7, 3.4.17).
+  dompurify: '>=3.4.17 <3.5.0'
   # fast-uri host-confusion / SSRF set (GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc,
   # GHSA-fph4-wmhf-6fwf, GHSA-5jgf-p345-68v8). Fixed in 3.1.6; floor to 3.1.7 to
   # match the resolved version and keep future resolution off 3.1.6.
@@ -90,6 +92,10 @@ overrides:
   # fflate infinite loop on malformed ZIP64 (GHSA-px8p-9vwx-vf98); stay on 0.4.x.
   fflate: '>=0.4.9 <0.5'
   glob: '>=11.1.0'
+  # Handlebars: JavaScript injection via own-property check bypass
+  # (GHSA-p8wg-vrv2-v86f) and AST type confusion in compile
+  # (GHSA-8r5x-fm3f-whwj). Both fixed in 4.7.10; reached only through ts-jest.
+  handlebars: '>=4.7.10 <5'
   # Hono: toSSG() incomplete fix for path-write-outside-root (GHSA-gqvv-2mrq-wpjv),
   # unbounded dot-notation nesting in parseBody() causing memory exhaustion
   # (GHSA-g6gw-c38x-mqfc), query parser reads parameters after URL fragment causing
@@ -112,6 +118,9 @@ overrides:
   'postcss-selector-parser@6': '>=6.1.3 <7'
   'postcss-selector-parser@7': '>=7.1.3 <8'
   prismjs: '>=1.30.0 <2'
+  # proxy-addr: IP spoofing via an IPv4-mapped IPv6 trust subnet
+  # (GHSA-jqcg-44mw-7w3h, 2.0.8). express 4 asks for ~2.0.7, express 5 for ^2.0.7.
+  proxy-addr: '>=2.0.8 <3'
   # qs DoS via isBuffer + array-limit bypass (GHSA-4mjr-xmp4-gh2g,
   # GHSA-x5fp-wj9c-mxmx); single 6.x instance, floor to the 6.16.0 fix.
   qs: '>=6.16.0 <7'
@@ -119,7 +128,9 @@ overrides:
   'react-router-config>react-router': '5.3.4'
   'react-router-dom@5>react-router': '5.3.4'
   serialize-javascript: '>=7.0.5 <8'
-  shell-quote: '>=1.9.0 <2'
+  # shell-quote: quote() command injection via a line terminator in a token
+  # (GHSA-pqg4-j6r4-53mv, 1.11.0).
+  shell-quote: '>=1.11.0 <2'
   # SVGO: removeScripts leaves executable links through namespace and control
   # characters (GHSA-w27v-7q3p-w38r, high), and incompletely sanitizes executable
   # HTML in SVG foreignObject (GHSA-4vpr-x523-8j87, medium). Both fixed in 3.3.5.

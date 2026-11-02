@@ -39,7 +39,14 @@ import pytest
 
 import ai.modules.task.commands.cmd_log as cmd_mod
 from ai.modules.task.commands.cmd_log import LogCommands
+from ai.account.file_store import FileStore
 from ai.account.models import resolve_team_permissions
+from ai.account.store import Store, StorageError
+from ai.account.store_providers.filesystem import FilesystemStore
+
+from ..test_run_log import PROJECT, SOURCE, make_stamp, open_writer, output_event
+from ..test_run_log_team import TEAM as TEAM_UUID
+from ..test_run_log_team import open_deploy_writer
 
 
 # ============================================================================
@@ -198,3 +205,102 @@ class TestTeamGate:
         result = await conn._log_delete({}, _args(all=True))
         assert result['body'] == {'deletedSegments': 1}
         assert reader_stub['team_id'] == TEAM
+
+
+# streams: real writer, real store, real reader — no stubs
+
+
+@pytest.fixture
+def real_store(monkeypatch, tmp_path):
+    """A filesystem store shared by the handler's readers and the test's writers."""
+    istore = FilesystemStore(f'filesystem://{tmp_path}/store')
+
+    def file_store(cls, ctx, client_id=None):
+        return FileStore(Store(istore), client_id, ctx)
+
+    monkeypatch.setattr(cmd_mod.Store, 'file_store', classmethod(file_store))
+    return istore
+
+
+# How each kind of run is opened: dev and @me in the caller's tree, team in the team's tree.
+_OPEN = {
+    'dev': open_writer,
+    'me': lambda store, spool: open_writer(store, spool, kind='deploy'),
+    'team': open_deploy_writer,
+}
+
+
+async def _write_run(kind, store, tmp_path):
+    """One completed run of ``kind`` ('dev' | 'me' | 'team') with a single output event."""
+    writer = await _OPEN[kind](store, str(tmp_path))
+    stamp, _, _ = make_stamp(100)
+    writer.append(stamp(output_event(f'{kind}-run')))
+    await writer._drain_uploads()
+    await writer.end_run('ok')
+
+
+def _conn(*team_permissions):
+    """A caller holding ``team_permissions`` on TEAM_UUID; none = no team membership."""
+    teams = [{'id': TEAM_UUID, 'name': 'Production', 'permissions': list(team_permissions)}] if team_permissions else []
+    return _make_conn(_account_info(teams=teams))
+
+
+async def _streams(conn, **extra):
+    args = {'subcommand': 'streams', 'projectId': PROJECT, 'source': SOURCE, **extra}
+    return (await conn.on_rrext_log({'arguments': args}))['body']['streams']
+
+
+class TestStreams:
+    @pytest.mark.asyncio
+    async def test_finds_the_dev_run_and_the_team_run_in_one_call(self, real_store, tmp_path):
+        await _write_run('dev', real_store, tmp_path)
+        await _write_run('team', real_store, tmp_path)
+        conn = _conn('task.monitor')
+
+        streams = await _streams(conn)
+
+        assert [(s['teamId'], s['runKind'], s['ownerKind'], s['teamName']) for s in streams] == [
+            ('', 'dev', 'user', ''),
+            (TEAM_UUID, 'deploy', 'team', 'Production'),
+        ]
+        assert all(len(s['chapters']) == 1 and s['completed'] for s in streams)
+        # The entry is enough to read that stream.
+        page = await conn._reader_for({'projectId': PROJECT, 'source': SOURCE, 'teamId': TEAM_UUID}).read(from_seq=1)
+        assert [e['body']['output'] for e in page['events'] if e.get('event') == 'output'] == ['team-run']
+
+    @pytest.mark.asyncio
+    async def test_a_personal_deploy_is_the_callers_own(self, real_store, tmp_path):
+        await _write_run('me', real_store, tmp_path)
+        assert [(s['teamId'], s['runKind'], s['ownerKind']) for s in await _streams(_conn())] == [
+            ('', 'deploy', 'user')
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_team_the_caller_cannot_monitor_is_absent(self, real_store, tmp_path):
+        await _write_run('team', real_store, tmp_path)
+        assert await _streams(_conn('task.control')) == []
+
+    @pytest.mark.asyncio
+    async def test_a_team_id_in_the_request_does_not_change_the_scopes(self, real_store, tmp_path):
+        await _write_run('dev', real_store, tmp_path)
+        assert [s['runKind'] for s in await _streams(_conn(), teamId=TEAM_UUID)] == ['dev']
+
+    @pytest.mark.asyncio
+    async def test_a_caller_without_monitor_rights_gets_no_streams(self, real_store, tmp_path):
+        await _write_run('dev', real_store, tmp_path)
+        conn = _conn('task.monitor')
+        conn.verify_permission.side_effect = PermissionError("Permission 'task.monitor' denied")
+        with pytest.raises(PermissionError):
+            await _streams(conn)
+        conn.verify_permission.assert_called_once_with('task.monitor')
+
+    @pytest.mark.asyncio
+    async def test_a_failed_read_surfaces_instead_of_dropping_the_scope(self, real_store, tmp_path, monkeypatch):
+        await _write_run('team', real_store, tmp_path)
+
+        async def failing_read(self, path, max_size=0):
+            raise StorageError('boom')
+
+        monkeypatch.setattr(FileStore, 'read', failing_read)
+        with pytest.raises(StorageError, match='boom'):
+            await _streams(_conn('task.monitor'))

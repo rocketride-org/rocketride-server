@@ -61,14 +61,37 @@ import { readJsonSync } from '../../scripts/lib/fs.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_ROOT = path.join(HERE, '..', 'src', 'nodes');
-const DEFAULT_CATALOG = path.join(HERE, '..', '..', 'packages', 'ai', 'src', 'ai', 'modules', 'mcp', 'credentials.json');
+const DEFAULT_CATALOG = path.join(
+	HERE,
+	'..',
+	'..',
+	'packages',
+	'ai',
+	'src',
+	'ai',
+	'modules',
+	'mcp',
+	'credentials.json'
+);
 
 // Same token list as packages/ai/src/ai/modules/mcp/credentials.py:_GENERIC_TOKENS.
 // JS can't import the Python constant, so this is a deliberate duplicate —
 // keep the two lists in sync by hand.
 const GENERIC_TOKENS = new Set([
-	'store', 'tool', 'db', 'graph', 'llm', 'embedding', 'memory', 'search',
-	'rerank', 'vision', 'cloud', 'api', 'agent', 'eval',
+	'store',
+	'tool',
+	'db',
+	'graph',
+	'llm',
+	'embedding',
+	'memory',
+	'search',
+	'rerank',
+	'vision',
+	'cloud',
+	'api',
+	'agent',
+	'eval',
 ]);
 
 // A key is credential-shaped iff it looks like a secret AND is not one of
@@ -204,7 +227,8 @@ function reconcile(existing, scanned, knownServices) {
 
 	const serviceNames = new Set([...Object.keys(existing), ...scanned.keys()]);
 	for (const serviceName of serviceNames) {
-		const existingNode = existing[serviceName] && typeof existing[serviceName] === 'object' ? existing[serviceName] : null;
+		const existingNode =
+			existing[serviceName] && typeof existing[serviceName] === 'object' ? existing[serviceName] : null;
 		const existingFields = existingNode && Array.isArray(existingNode.fields) ? existingNode.fields : [];
 		const existingPaths = new Set(existingFields.map((f) => f && f.path));
 		const detected = scanned.get(serviceName); // Map<path, rawKey> | undefined
@@ -237,7 +261,9 @@ function reconcile(existing, scanned, knownServices) {
 		}
 
 		if (fields.length) {
-			next[serviceName] = existingNode ? { ...existingNode, title: existingNode.title || serviceName, fields } : { title: serviceName, fields };
+			next[serviceName] = existingNode
+				? { ...existingNode, title: existingNode.title || serviceName, fields }
+				: { title: serviceName, fields };
 		} else if (existingNode) {
 			next[serviceName] = existingNode; // preserve verbatim even if it has no fields
 		}
@@ -313,7 +339,9 @@ function main() {
 			if (wrongKeys.length) {
 				console.log('Catalog key(s) match a node DIRECTORY name, not a protocol-derived service name:');
 				for (const { key, suggestions } of wrongKeys) {
-					const suggestion = suggestions.length ? suggestions.join(', ') : '(no protocol-bearing services*.json in that directory)';
+					const suggestion = suggestions.length
+						? suggestions.join(', ')
+						: '(no protocol-bearing services*.json in that directory)';
 					console.log(`  ${key}: use '${suggestion}' instead`);
 				}
 			}
@@ -322,7 +350,9 @@ function main() {
 				for (const { node, path: p } of added) console.log(`  ${node}: ${p}`);
 			}
 			if (stale.length) {
-				console.log(`Stale catalog entr${stale.length === 1 ? 'y' : 'ies'} (no matching detection; not auto-removed):`);
+				console.log(
+					`Stale catalog entr${stale.length === 1 ? 'y' : 'ies'} (no matching detection; not auto-removed):`
+				);
 				for (const { node, path: p } of stale) console.log(`  ${node}: ${p}`);
 			}
 			process.exitCode = 1;
@@ -330,7 +360,10 @@ function main() {
 		}
 		const pending = collectReviewPending(next);
 		if (pending.length) {
-			console.log(`Warning: ${pending.length} catalog field(s) still carry review:true (auto-generated, needs a curated name):`);
+			console.log(
+				`Warning: ${pending.length} catalog field(s) still carry review:true ` +
+					'(auto-generated, needs a curated name):'
+			);
 			for (const { node, path: p } of pending) console.log(`  ${node}: ${p}`);
 		}
 		console.log('nodes:credentials-check: catalog matches detected credential-shaped fields.');
@@ -340,7 +373,8 @@ function main() {
 	writeFileSync(args.catalog, JSON.stringify(next, null, 2) + '\n');
 	console.log(
 		`nodes:credentials-generate wrote ${Object.keys(next).length} node(s): ` +
-		`${added.length} new field(s) appended, ${stale.length} stale entr${stale.length === 1 ? 'y' : 'ies'} kept (not removed).`,
+			`${added.length} new field(s) appended, ` +
+			`${stale.length} stale entr${stale.length === 1 ? 'y' : 'ies'} kept (not removed).`
 	);
 }
 

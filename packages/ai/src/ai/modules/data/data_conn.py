@@ -172,6 +172,9 @@ class DataConn(DAPConn):
         # Key: pipe_id (int), Value: DataConnPipe instance
         self._pipe_map: Dict[int, DataConnPipe] = {}
 
+        # Requests this connection sent to EaaS, by seq, waiting for its response
+        self._asked: Dict[int, asyncio.Future] = {}
+
         # Pipe timeout for zombie detection
         self._pipe_timeout = CONST_DATA_PIPE_TIMEOUT
 
@@ -221,6 +224,36 @@ class DataConn(DAPConn):
     def _target(self) -> Optional['IServiceEndpoint']:
         """Read the source target lazily — never snapshot at connection time."""
         return self._server._target
+
+    async def on_receive(self, message: Dict[str, Any]) -> None:
+        """Hand EaaS's answer to the ask_spend waiting for it; route the rest as usual."""
+        answer = self._asked.pop(message.get('request_seq'), None)
+        if answer and not answer.done():
+            answer.set_result(message)
+        else:
+            await super().on_receive(message)
+
+    async def on_disconnected(self, reason: Optional[str] = None, has_error: bool = False) -> None:
+        """Fail the questions still waiting for EaaS: no answer will come on this connection."""
+        for answer in self._asked.values():
+            if not answer.done():
+                answer.set_exception(ConnectionError(reason or 'EaaS disconnected'))
+        self._asked.clear()
+        await super().on_disconnected(reason, has_error)
+
+    async def ask_spend(self) -> Optional[str]:
+        """Ask EaaS whether this task's org may open a pipe: None, or the refusal."""
+        request = self.build_request('rrext_check_spend')
+        answer = asyncio.get_running_loop().create_future()
+        self._asked[request['seq']] = answer
+        try:
+            await self.send(request)
+            response = await answer
+        finally:
+            self._asked.pop(request['seq'], None)
+        if self.did_fail(response):
+            raise RuntimeError(response.get('message'))
+        return response['body']['refusal']
 
     def _require_target(self) -> 'IServiceEndpoint':
         """Return the registered source target, or raise a controlled error.
@@ -1172,7 +1205,7 @@ class DataConn(DAPConn):
                   all threads when omitted
 
         Returns:
-            Dict[str, Any]: DAP response with tree, total_time, total_calls
+            Dict[str, Any]: DAP response with tree, functions, total_time, total_calls
         """
         args = request.get('arguments', {})
         max_depth = args.get('max_depth', 50)

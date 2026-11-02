@@ -19,6 +19,13 @@ cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
 get_filename_component(ROCKETRIDE_PROJECT_ROOT "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 set(ROCKETRIDE_PACKAGES_DIR "${ROCKETRIDE_PROJECT_ROOT}/packages")
 
+if(ROCKETRIDE_OVERLAY_ROOT)
+    get_filename_component(ROCKETRIDE_OVERLAY_ROOT "${ROCKETRIDE_OVERLAY_ROOT}" ABSOLUTE)
+    set(ROCKETRIDE_DIST_DIR "${ROCKETRIDE_OVERLAY_ROOT}/dist/server")
+else()
+    set(ROCKETRIDE_DIST_DIR "${ROCKETRIDE_PROJECT_ROOT}/dist/server")
+endif()
+
 # -----------------------------------------------------------------------------
 # IDE target grouping
 # -----------------------------------------------------------------------------
@@ -35,6 +42,8 @@ message(STATUS "      version   : ${CMAKE_VERSION}")
 message(STATUS "      generator : ${CMAKE_GENERATOR}")
 message(STATUS "      compiler  : ${CMAKE_CXX_COMPILER}")
 message(STATUS "Project root    : ${ROCKETRIDE_PROJECT_ROOT}")
+message(STATUS "Overlay root    : ${ROCKETRIDE_OVERLAY_ROOT}")
+message(STATUS "Dist dir        : ${ROCKETRIDE_DIST_DIR}")
 
 # -----------------------------------------------------------------------------
 # Build time measurement (optional)
@@ -127,7 +136,6 @@ include(cmake/setup_vcpkg.cmake)
 # -----------------------------------------------------------------------------
 include(cmake/setup.cmake)
 include(cmake/rocketride.cmake)
-include(cmake/rocketride-node.cmake)
 
 # -----------------------------------------------------------------------------
 # Compiler information
@@ -166,14 +174,6 @@ add_subdirectory(engine-mod)
 
 # Main engine executable
 add_subdirectory(engine)
-
-# C++ nodes
-add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/hash ${CMAKE_BINARY_DIR}/nodes/hash)
-add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/parse ${CMAKE_BINARY_DIR}/nodes/parse)
-add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/indexer ${CMAKE_BINARY_DIR}/nodes/indexer)
-add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/objstore ${CMAKE_BINARY_DIR}/nodes/objstore)
-add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/azure ${CMAKE_BINARY_DIR}/nodes/azure)
-add_subdirectory(${ROCKETRIDE_PROJECT_ROOT}/nodes/src/nodes/msservices ${CMAKE_BINARY_DIR}/nodes/msservices)
 
 # -----------------------------------------------------------------------------
 # Testing configuration

@@ -201,16 +201,26 @@ function evalEnumInitializer(expr, memberValues) {
 		const r = evalEnumInitializer(expr.right, memberValues);
 		if (typeof l !== 'number' || typeof r !== 'number') return null;
 		switch (expr.operatorToken.kind) {
-			case ts.SyntaxKind.LessThanLessThanToken: return l << r;
-			case ts.SyntaxKind.GreaterThanGreaterThanToken: return l >> r;
-			case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken: return l >>> r;
-			case ts.SyntaxKind.BarToken: return l | r;
-			case ts.SyntaxKind.AmpersandToken: return l & r;
-			case ts.SyntaxKind.CaretToken: return l ^ r;
-			case ts.SyntaxKind.PlusToken: return l + r;
-			case ts.SyntaxKind.MinusToken: return l - r;
-			case ts.SyntaxKind.AsteriskToken: return l * r;
-			default: return null;
+			case ts.SyntaxKind.LessThanLessThanToken:
+				return l << r;
+			case ts.SyntaxKind.GreaterThanGreaterThanToken:
+				return l >> r;
+			case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken:
+				return l >>> r;
+			case ts.SyntaxKind.BarToken:
+				return l | r;
+			case ts.SyntaxKind.AmpersandToken:
+				return l & r;
+			case ts.SyntaxKind.CaretToken:
+				return l ^ r;
+			case ts.SyntaxKind.PlusToken:
+				return l + r;
+			case ts.SyntaxKind.MinusToken:
+				return l - r;
+			case ts.SyntaxKind.AsteriskToken:
+				return l * r;
+			default:
+				return null;
 		}
 	}
 	return null;
@@ -236,12 +246,18 @@ function rewriteEnumsStructural(dtsText) {
 		let prevNumeric = -1;
 		let folded = true;
 		for (const m of st.members) {
-			if (!ts.isIdentifier(m.name) && !ts.isStringLiteral(m.name)) { folded = false; break; }
+			if (!ts.isIdentifier(m.name) && !ts.isStringLiteral(m.name)) {
+				folded = false;
+				break;
+			}
 			const name = m.name.text;
 			let value;
 			if (m.initializer) {
 				value = evalEnumInitializer(m.initializer, memberValues);
-				if (value === null) { folded = false; break; }
+				if (value === null) {
+					folded = false;
+					break;
+				}
 			} else {
 				value = prevNumeric + 1;
 			}
@@ -249,7 +265,10 @@ function rewriteEnumsStructural(dtsText) {
 			memberValues.set(name, value);
 		}
 		if (!folded || memberValues.size === 0) {
-			log(`WARNING: enum ${st.name.text} could not be folded — frozen nominally (member growth will read as breaking).`);
+			log(
+				`WARNING: enum ${st.name.text} could not be folded — frozen nominally ` +
+					'(member growth will read as breaking).'
+			);
 			continue;
 		}
 		// Base primitive for the type alias: numeric / string / heterogeneous.
@@ -422,7 +441,12 @@ function expandMapGenerics(dtsText) {
 		const f = ts.factory;
 		const visit = (n) => {
 			// Replace every TYPE REFERENCE to the type parameter with 'key'
-			if (ts.isTypeReferenceNode(n) && ts.isIdentifier(n.typeName) && n.typeName.text === paramName && !n.typeArguments) {
+			if (
+				ts.isTypeReferenceNode(n) &&
+				ts.isIdentifier(n.typeName) &&
+				n.typeName.text === paramName &&
+				!n.typeArguments
+			) {
 				return f.createLiteralTypeNode(f.createStringLiteral(key, true));
 			}
 			return ts.visitEachChild(n, visit, undefined);
@@ -430,10 +454,28 @@ function expandMapGenerics(dtsText) {
 		const substituted = ts.visitEachChild(node, visit, undefined);
 		// Drop the now-unused type parameter list per node kind
 		if (ts.isMethodSignature(substituted)) {
-			return f.updateMethodSignature(substituted, substituted.modifiers, substituted.name, substituted.questionToken, undefined, substituted.parameters, substituted.type);
+			return f.updateMethodSignature(
+				substituted,
+				substituted.modifiers,
+				substituted.name,
+				substituted.questionToken,
+				undefined,
+				substituted.parameters,
+				substituted.type
+			);
 		}
 		if (ts.isMethodDeclaration(substituted)) {
-			return f.updateMethodDeclaration(substituted, substituted.modifiers, substituted.asteriskToken, substituted.name, substituted.questionToken, undefined, substituted.parameters, substituted.type, substituted.body);
+			return f.updateMethodDeclaration(
+				substituted,
+				substituted.modifiers,
+				substituted.asteriskToken,
+				substituted.name,
+				substituted.questionToken,
+				undefined,
+				substituted.parameters,
+				substituted.type,
+				substituted.body
+			);
 		}
 		if (ts.isFunctionTypeNode(substituted)) {
 			return f.createFunctionTypeNode(undefined, substituted.parameters, substituted.type);
@@ -448,7 +490,9 @@ function expandMapGenerics(dtsText) {
 		if ((ts.isMethodSignature(node) || ts.isMethodDeclaration(node)) && node.name) {
 			const mg = mapGenericOf(node);
 			if (mg) {
-				const lines = mg.keys.map((k) => printer.printNode(ts.EmitHint.Unspecified, substitute(node, mg.paramName, k), sf));
+				const lines = mg.keys.map((k) =>
+					printer.printNode(ts.EmitHint.Unspecified, substitute(node, mg.paramName, k), sf)
+				);
 				splices.push([node.getStart(sf), node.getEnd(), lines.join('\n')]);
 				return; // no need to descend into a replaced signature
 			}
@@ -457,7 +501,9 @@ function expandMapGenerics(dtsText) {
 		if (ts.isPropertySignature(node) && node.type && ts.isFunctionTypeNode(node.type)) {
 			const mg = mapGenericOf(node.type);
 			if (mg) {
-				const parts = mg.keys.map((k) => `(${printer.printNode(ts.EmitHint.Unspecified, substitute(node.type, mg.paramName, k), sf)})`);
+				const parts = mg.keys.map(
+					(k) => `(${printer.printNode(ts.EmitHint.Unspecified, substitute(node.type, mg.paramName, k), sf)})`
+				);
 				const name = printer.printNode(ts.EmitHint.Unspecified, node.name, sf);
 				const q = node.questionToken ? '?' : '';
 				splices.push([node.getStart(sf), node.getEnd(), `${name}${q}: ${parts.join(' & ')};`]);
@@ -638,7 +684,20 @@ function generateCandidate() {
 	const DBG = resolveBin('dts-bundle-generator', 'dts-bundle-generator');
 	fs.mkdirSync(TMP_DIR, { recursive: true });
 	const candidatePath = path.join(TMP_DIR, 'candidate.d.ts');
-	const r = runNodeBin(DBG.binPath, ['--project', path.relative(CLIENT_SRC_DIR, CONTRACT_TSCONFIG), '--no-check', '--no-banner', '--export-referenced-types=false', '-o', candidatePath, 'index.ts'], CLIENT_SRC_DIR);
+	const r = runNodeBin(
+		DBG.binPath,
+		[
+			'--project',
+			path.relative(CLIENT_SRC_DIR, CONTRACT_TSCONFIG),
+			'--no-check',
+			'--no-banner',
+			'--export-referenced-types=false',
+			'-o',
+			candidatePath,
+			'index.ts',
+		],
+		CLIENT_SRC_DIR
+	);
 	if (r.code !== 0 || !fs.existsSync(candidatePath)) {
 		console.error('[client-typescript:freeze] dts-bundle-generator FAILED:');
 		console.error(r.output);
@@ -711,7 +770,13 @@ function writeVersion(key, candidateBody) {
  * @param {string[]} keys - Ascending floor keys (must be non-empty).
  */
 function regenerateBarrels(keys) {
-	const generatedNote = ['', '// =============================================================================', '// GENERATED by `./builder client-typescript:freeze` — do not edit by hand.', '// =============================================================================', ''].join('\n');
+	const generatedNote = [
+		'',
+		'// =============================================================================',
+		'// GENERATED by `./builder client-typescript:freeze` — do not edit by hand.',
+		'// =============================================================================',
+		'',
+	].join('\n');
 	const newest = keys[keys.length - 1];
 
 	// latest.ts re-exports the newest floor's full surface. `export type *`
@@ -737,7 +802,7 @@ function regenerateBarrels(keys) {
 		' * The newest frozen SDK floor — a convenience alias for consumers.',
 		' *',
 		' * Accumulation is NOT an intersection of versions: the "nothing ever frozen',
-		" * can be removed\" guarantee is the per-version floors in the package's",
+		' * can be removed" guarantee is the per-version floors in the package\'s',
 		' * src/contract-check.generated.ts, which assert the live surface still',
 		' * satisfies EACH frozen floor separately.',
 		' */',
@@ -890,7 +955,14 @@ function regenerateDerived(keys) {
 	// No floors yet — write compile-clean stubs. All three are rewritten for
 	// real once the first floor lands; a committed stub means a first freeze
 	// was interrupted and re-running client-typescript:freeze repairs it.
-	const stubNote = ['// =============================================================================', '// RESET STUB — transient state inside `./builder client-typescript:freeze`;', '// regenerated into the real file before the run completes. If you are reading', '// this in a committed tree, a freeze was interrupted: re-run', '// `./builder client-typescript:freeze`.', '// ============================================================================='].join('\n');
+	const stubNote = [
+		'// =============================================================================',
+		'// RESET STUB — transient state inside `./builder client-typescript:freeze`;',
+		'// regenerated into the real file before the run completes. If you are reading',
+		'// this in a committed tree, a freeze was interrupted: re-run',
+		'// `./builder client-typescript:freeze`.',
+		'// =============================================================================',
+	].join('\n');
 	fs.writeFileSync(CONTRACT_CHECK, `${stubNote}\nexport {};\n`);
 	fs.mkdirSync(CONTRACT_DIR, { recursive: true });
 	fs.writeFileSync(INDEX_TS, `${MIT_HEADER}\n\n${stubNote}\nexport {};\n`);
@@ -908,7 +980,10 @@ function regenerateDerived(keys) {
 function guardKeyOrder(key, keys) {
 	const newer = keys.filter((k) => compareKeys(k, key) > 0);
 	if (newer.length > 0) {
-		console.error(`[client-typescript:freeze] package.json version (${key}) is OLDER than existing floor(s): ${newer.join(', ')}. Released floors are immutable — bump the package version instead.`);
+		console.error(
+			`[client-typescript:freeze] package.json version (${key}) is OLDER than existing floor(s): ` +
+				`${newer.join(', ')}. Released floors are immutable — bump the package version instead.`
+		);
 		cleanup();
 		process.exit(1);
 	}
@@ -928,7 +1003,12 @@ function main() {
 	// against the live surface. The packaging gate: breaking changes fail,
 	// additive work-in-progress passes without demanding a freeze.
 	if (floorsMode) {
-		if (!floorsHold('[client-typescript:freeze --floors] The live SDK surface breaks a frozen contract floor. Breaking changes require a MAJOR/MINOR decision — see packages/client-typescript/contract/.')) {
+		if (
+			!floorsHold(
+				'[client-typescript:freeze --floors] The live SDK surface breaks a frozen contract floor. ' +
+					'Breaking changes require a MAJOR/MINOR decision — see packages/client-typescript/contract/.'
+			)
+		) {
 			process.exit(1);
 		}
 		return;
@@ -944,7 +1024,10 @@ function main() {
 		if (keys.length === 0) {
 			// A missing baseline is a FAILURE, not a pass: an emptied versions/
 			// directory would otherwise no-op straight through the tamper diff.
-			console.error('[client-typescript:freeze --regen] No frozen floor exists. The SDK contract baseline is missing — restore packages/client-typescript/contract/versions/ or run `./builder client-typescript:freeze`.');
+			console.error(
+				'[client-typescript:freeze --regen] No frozen floor exists. The SDK contract baseline is missing — ' +
+					'restore packages/client-typescript/contract/versions/ or run `./builder client-typescript:freeze`.'
+			);
 			process.exit(1);
 		}
 		regenerateDerived(keys);
@@ -969,14 +1052,20 @@ function main() {
 			process.exit(1);
 		}
 		if (!keys.includes(key)) {
-			console.error(`[client-typescript:freeze --check] No frozen floor for package version ${key}. Run \`./builder client-typescript:freeze\`.`);
+			console.error(
+				`[client-typescript:freeze --check] No frozen floor for package version ${key}. ` +
+					'Run `./builder client-typescript:freeze`.'
+			);
 			cleanup();
 			process.exit(1);
 		}
 		const frozenBody = extractBundleBody(fs.readFileSync(path.join(VERSIONS_DIR, `v${key}.d.ts`), 'utf8'));
 		const candidateBody = generateCandidate();
 		if (frozenBody !== candidateBody.trim()) {
-			console.error(`[client-typescript:freeze --check] The live SDK surface differs from floor v${key}. Run \`./builder client-typescript:freeze\`.`);
+			console.error(
+				`[client-typescript:freeze --check] The live SDK surface differs from floor v${key}. ` +
+					'Run `./builder client-typescript:freeze`.'
+			);
 			cleanup();
 			process.exit(1);
 		}
@@ -993,7 +1082,15 @@ function main() {
 	// repaired by re-running — or by `git restore packages/client-typescript`.
 	const immutable = keys.filter((k) => k !== key);
 	regenerateDerived(immutable);
-	if (!floorsHold('[client-typescript:freeze] The derived contract files were regenerated from the immutable floors during this run. Fix the reported errors and re-run `./builder client-typescript:freeze`, or return to the committed contract with: git restore packages/client-typescript/contract packages/client-typescript/src/contract-check.generated.ts')) {
+	if (
+		!floorsHold(
+			'[client-typescript:freeze] The derived contract files were regenerated from the immutable floors ' +
+				'during this run. Fix the reported errors and re-run `./builder client-typescript:freeze`, ' +
+				'or return to the committed contract with: ' +
+				'git restore packages/client-typescript/contract ' +
+				'packages/client-typescript/src/contract-check.generated.ts'
+		)
+	) {
 		cleanup();
 		process.exit(1);
 	}
@@ -1007,7 +1104,10 @@ function main() {
 		log(`Floor v${key} already matches the live surface — floor file kept as-is.`);
 	} else {
 		writeVersion(key, candidateBody);
-		log(`${existingBody === null ? 'Minted' : 'Re-minted in-progress'} floor v${key} -> packages/client-typescript/contract/versions/v${key}.d.ts`);
+		log(
+			`${existingBody === null ? 'Minted' : 'Re-minted in-progress'} floor v${key} -> ` +
+				`packages/client-typescript/contract/versions/v${key}.d.ts`
+		);
 	}
 
 	// Derived artifacts from the FULL floor set (immutable + current).
@@ -1017,7 +1117,10 @@ function main() {
 
 	// Summary.
 	log(`Contract now floors ${allKeys.map((k) => `v${k}`).join(', ')} (immutable floors never rewritten).`);
-	log('Updated packages/client-typescript/contract/{latest.ts,index.ts} and packages/client-typescript/src/contract-check.generated.ts.');
+	log(
+		'Updated packages/client-typescript/contract/{latest.ts,index.ts} and ' +
+			'packages/client-typescript/src/contract-check.generated.ts.'
+	);
 	log('Changes left uncommitted.');
 }
 

@@ -49,24 +49,21 @@ def _local_jwks(monkeypatch, keypair):
     monkeypatch.setattr(auth, '_signing_key_for', lambda token: _FakeKey.key)
 
 
-def make_token(keypair, *, aud=MCP_PROJECT, iss=ISSUER, expires_in=3600, sub='user-123'):
-    """Mint a signed JWT shaped like a Zitadel access token."""
+def make_token(keypair, *, aud=MCP_PROJECT, iss=ISSUER, expires_in=3600, sub='user-123', omit=()):
+    """Mint a signed JWT shaped like a Zitadel access token, without the claims in ``omit``."""
     import jwt
 
     private, _ = keypair
     now = int(time.time())
-    return jwt.encode(
-        {
-            'iss': iss,
-            'sub': sub,
-            'aud': aud,
-            'iat': now,
-            'exp': now + expires_in,
-            'email': 'someone@example.com',
-        },
-        private,
-        algorithm=RS256,
-    )
+    claims = {
+        'iss': iss,
+        'sub': sub,
+        'aud': aud,
+        'iat': now,
+        'exp': now + expires_in,
+        'email': 'someone@example.com',
+    }
+    return jwt.encode({k: v for k, v in claims.items() if k not in omit}, private, algorithm=RS256)
 
 
 def scope_with(credential=None, *, query=b'', state=None):
@@ -204,6 +201,15 @@ def test_token_from_another_issuer_is_rejected(monkeypatch, keypair):
 def test_expired_token_is_rejected(monkeypatch, keypair):
     monkeypatch.setenv(auth.ENV_EXPECTED_AUDIENCE, MCP_PROJECT)
     scope = scope_with(make_token(keypair, expires_in=-3600))
+
+    assert auth.authorize(scope, bind_host='0.0.0.0') is not None
+
+
+@pytest.mark.parametrize('claim', ['exp', 'iat', 'iss'])
+def test_token_missing_a_required_claim_is_rejected(monkeypatch, keypair, claim):
+    """A signed token without exp would never expire; iat and iss are required alongside it."""
+    monkeypatch.setenv(auth.ENV_EXPECTED_AUDIENCE, MCP_PROJECT)
+    scope = scope_with(make_token(keypair, omit=(claim,)))
 
     assert auth.authorize(scope, bind_host='0.0.0.0') is not None
 

@@ -51,7 +51,9 @@ in the team's [run-log continuum](/clients/python/logs), readable by teammates v
 `client.log` with `team_id`. `deploy.run(project_id, source_id, team_id)` triggers
 one deployed source **now** — the same trusted, actor-free team dispatch the
 scheduler uses — returning `{token, version}`, and `deploy.set_source_config` sets
-per-source execution settings for deploy runs (trace level, debug output).
+per-source execution settings for deploy runs (trace level, debug output). A manual
+run has no run window (the schedule's `ttl` applies to scheduled fires only): it
+runs until the pipeline finishes or its token is terminated.
 
 ## States
 

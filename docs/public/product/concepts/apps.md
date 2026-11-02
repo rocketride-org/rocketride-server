@@ -23,12 +23,17 @@ is how that work is shared inside an organization.
 
 A pipeline can belong to an app, or stand beside it. The difference decides who runs it and when.
 
-**Bundled with the app.** The `.pipe` file lives in the app folder and ships with the app. The app starts it when it needs it, for example when the user runs a query, and every signed-in user gets their own instance, automatically. A bundled pipeline is never shared between users and cannot run on a schedule.
+**Bundled with the app.** The `.pipe` file lives in the app folder and ships with the app. The app starts it when it needs it, for example when the user runs a query, and every signed-in user gets their own instance, automatically. A bundled pipeline is never shared between users and cannot run on a schedule, and it stops by itself after approximately `ttl` seconds without a pipeline data request or a pipeline activity event (`apaevt_*`; 15 minutes by default, `0` disables the timeout). Status polling and raw stdout/debugger events do not keep it alive.
 
 **Deployed on its own.** The pipeline is its own project, deployed
 separately from the app. One instance serves everyone on the team it is
-published to, and it can run on a schedule. The app refers to it by
-identity and attaches to whatever is running; it does not start it.
+published to, and it can run on a schedule. A scheduled run can have a
+`ttl` timeout counted from its last pipeline data request; emitted events
+do not reset it. The run can also finish or be stopped before that timeout.
+An omitted or zero `ttl` disables the timeout. A run started by hand ignores
+the schedule's timeout and runs until it finishes or someone stops it.
+The app refers to the pipeline by identity and attaches to whatever is
+running; it does not start it.
 
 A `.pipe` file outside the app folder is not deployed with the app. If the
 app needs it, deploy it separately.

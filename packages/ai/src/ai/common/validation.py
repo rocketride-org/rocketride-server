@@ -202,9 +202,12 @@ def check_output_token_config(
     effective_tokens = min(output_tokens, total_tokens, MAX_OUTPUT_TOKENS)
 
     if catalogue_limit is not None and effective_tokens > catalogue_limit:
+        # "May": the catalogue limit is what the model writes at most, and providers
+        # differ on a larger request (Chat Completions refuses it, the Responses API
+        # accepts it and stops the reply at the model's limit).
         return (
-            f'modelOutputTokens ({effective_tokens:,}) exceeds the {catalogue_limit:,} that {model} accepts. '
-            'The provider will reject the request.'
+            f'modelOutputTokens ({effective_tokens:,}) exceeds the {catalogue_limit:,} output tokens '
+            f'listed for {model}. The provider may reject the request or stop the reply at its own limit.'
         )
 
     if effective_tokens < output_tokens:

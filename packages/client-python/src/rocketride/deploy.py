@@ -206,7 +206,10 @@ class DeployApi:
                 (default: the current working directory).
             comment: Optional "what changed" note kept in the registry.
             metadata: Extra metadata merged over the packed defaults
-                (``appRoot`` is always set from the pack).
+                (``appRoot`` is always set from the pack; ``projectId``
+                provenance defaults to the working copy's appManifest
+                projectId). Deploying never writes the projectId — it is
+                stamped at creation and by the editor.
             on_progress: Optional ``callable(line: str)`` receiving one
                 line per pack step.
 
@@ -215,10 +218,17 @@ class DeployApi:
         """
         # step: pack with the shared rules (raises ValueError on a missing
         # folder, a bad include entry, or a breached size cap)
-        from ._app_pack import pack_app_source
+        from ._app_pack import pack_app_source, read_project_id_at
 
-        packed = pack_app_source(workspace_root or os.getcwd(), app_root, on_progress)
+        root = workspace_root or os.getcwd()
+        packed = pack_app_source(root, app_root, on_progress)
         merged: dict[str, Any] = dict(metadata or {})
+        # step: provenance — forward the working copy's projectId (read,
+        # never stamped) unless the caller supplied one
+        if not merged.get('projectId'):
+            project_id = read_project_id_at(root, app_root)
+            if project_id:
+                merged['projectId'] = project_id
         if packed.app_root:
             merged['appRoot'] = packed.app_root
         return await self.add(
@@ -246,7 +256,7 @@ class DeployApi:
         """
         Scaffold a new app in the workspace — the programmatic twin of the
         App Builder's New App wizard, rendering the identical templates.
-        Writes ``./apps/<slug>``, ensures the pnpm workspace file and ignore
+        Writes ``./apps/<slug>-ui``, ensures the pnpm workspace file and ignore
         hygiene, vendors the connected server's shell + client packages, and
         runs the workspace install. Scaffolding only — nothing is deployed;
         the normal lifecycle (edit -> :meth:`verify_app` -> :meth:`add_app`
@@ -260,9 +270,10 @@ class DeployApi:
                 (default: the current working directory).
             template: 'Blank' (default) or 'Dashboard'.
             display_name: Display name (default: the slug, title-cased).
-            developer_id: Developer id for the app-id namespace (default
-                'local' — publishable beyond the workspace only after a
-                real developer id is registered).
+            developer_id: Developer id for the app-id namespace (default:
+                this client's organization developer id, else 'local' —
+                the same resolution as the New App wizard and
+                ``rocketride app create``).
             sidebar: Two-column frame with a navigation sidebar.
             status_footer: Status bar across the bottom of the app.
             doc_tabs: Document tab strip across the content area.
@@ -299,6 +310,12 @@ class DeployApi:
             uri = self._client.get_connection_info().get('uri') or ''
             if uri:
                 base = to_http_base(uri)
+
+        # step: the app-id namespace defaults to the connected org's
+        # developer id (off the cached login result — no extra call)
+        if developer_id is None:
+            organization = (self._client.get_account_info() or {}).get('organization') or {}
+            developer_id = organization.get('developerId') or None
 
         # step: the scaffold blocks for minutes (two artifact downloads
         # plus `pnpm install`), so it runs on a worker thread instead of

@@ -81,6 +81,19 @@ def _require_writable_task_data(path: str = CONST_TASK_DATA_PATH) -> None:
         )
 
 
+def _normalize_modelserver(address: str) -> str:
+    """Give a bare --modelserver port ('5590') the host it names: localhost.
+
+    Tasks receive the address as given. Naming the host here means every task gets
+    the same explicit address, and a launcher that runs tasks outside this host
+    (the docker runtime planned in #2593) has a loopback host to rewrite; a bare
+    port has none. HOST:PORT and full URLs pass through unchanged.
+    """
+    if address and address.isdigit():
+        return f'localhost:{address}'
+    return address
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Create argument parser for EAAS server."""
     parser = argparse.ArgumentParser(
@@ -178,6 +191,7 @@ async def run(config: Dict[str, Any] = None) -> None:
         config['verbose'] = args.verbose
 
     if config.get('modelserver'):
+        config['modelserver'] = _normalize_modelserver(config['modelserver'])
         print(f'  Model Server: {config["modelserver"]}')
     if config.get('verbose'):
         print('  Verbose logging: enabled')

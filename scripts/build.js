@@ -147,16 +147,15 @@ function parseArgs(args) {
 			// client:update); beats ROCKETRIDE_URI from .config/.env.
 			options.shell = arg.substring('--shell='.length);
 		} else if (arg.startsWith('--overlay-root=')) {
-			options.overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
-			const paths = require('./lib/paths');
-			paths.BUILD_ROOT = path.join(options.overlayRoot, 'build');
-			paths.DIST_ROOT = path.join(options.overlayRoot, 'dist');
-			process.env.ROCKETRIDE_BUILD_ROOT = paths.BUILD_ROOT;
-			process.env.ROCKETRIDE_DIST_ROOT = paths.DIST_ROOT;
+			const overlayRoot = path.resolve(arg.substring('--overlay-root='.length));
+			options.overlayRoot = overlayRoot === path.resolve(ROOT) ? null : overlayRoot;
+			require('./lib/paths').setOverlayRoot(options.overlayRoot);
 		} else if (arg.startsWith('--simulate-gpus=') || arg.startsWith('--simulate_gpus=')) {
 			options.simulateGpus = parseInt(arg.split('=')[1], 10);
 		} else if (arg === '--nodownload') {
 			options.nodownload = true;
+		} else if (arg.startsWith('--suffix=')) {
+			options.suffix = arg.substring('--suffix='.length);
 		} else if (arg.startsWith('--arch=')) {
 			const archValue = arg.substring('--arch='.length).toLowerCase();
 			if (archValue === 'arm' || archValue === 'arm64') {
@@ -284,7 +283,8 @@ Options:
   --list-actions      List all registered actions (including internal)
   --list-deps         Show pipeline flow diagram for specified actions
   --list-modules      List all registered modules
-  --list-skipped[=CAT] Node test tasks: list the tests that will be skipped (CAT: hardware|remote|env|libs|marker) and run nothing
+  --list-skipped[=CAT] Node test tasks: list the tests that will be skipped
+                      (CAT: hardware|remote|env|libs|marker) and run nothing
   --log=FILE          Write output to FILE (grouped by module)
   --models="args"     Pass arguments to sync_models (can be repeated)
   --modelserver[=ADDR] Enable model server mode; bare = start local, =port or =host:port = use existing
@@ -296,11 +296,14 @@ Options:
   --pytest-pattern="EXPR"  Filter pytest tests by name expression (pytest -k)
   --pytest-preinstall="DEPS" Pre-install pip packages before tests (comma-separated)
   --install-all       check-externals:run: ignore # contract-check: skip-install markers, install every requirement*.txt
-  --rebuild-cache     check-externals:run: force a full re-resolve (deletes constraints.txt, requirements.hash and the satisfied/ verdicts)
+  --rebuild-cache     check-externals:run: force a full re-resolve (deletes constraints.txt,
+                      requirements.hash and the satisfied/ verdicts)
   --saas              Enable SaaS mode
   --sequential, -s    Run modules sequentially (default: parallel)
   --simulate-gpus=N   Simulate N virtual GPUs on cuda:0 (model_server:dev)
   --stamp=STAMP       Set build stamp
+  --suffix=NAME       Download the server from the server-v<version>-NAME release
+                      (an experimental release's tag_suffix) instead of a prerelease
   --system-compiler   Install a compatible clang system-wide via apt/dnf (needs --autoinstall + root)
   --taskserver=ADDR   Use existing task server (port or host:port) for tests/run
   --trace="a,b,c"     Enable trace output (passed to engine/tests)
@@ -364,9 +367,9 @@ async function main() {
 	// =========================================================================
 	// Install node deps so module tasks.js can be loaded
 	// =========================================================================
-	let Listr;
+	// listr2 stands in for every dependency: if it loads, the install is done
 	try {
-		Listr = require('listr2').Listr;
+		require('listr2');
 	} catch {
 		console.log('Installing dependencies (fresh clone)...\n');
 		try {
@@ -375,7 +378,7 @@ async function main() {
 		} catch {
 			process.exit(1);
 		}
-		Listr = require('listr2').Listr;
+		require('listr2');
 	}
 
 	// Run deps check silently (only outputs if install needed)
@@ -389,8 +392,9 @@ async function main() {
 	const { clearLog, writeLog, hasLogEntries } = require('./lib/log');
 
 	logModule = { writeLog, hasLogEntries };
-	process.on('SIGINT', () => handleTermination('SIGINT'));
-	process.on('SIGTERM', () => handleTermination('SIGTERM'));
+	// handleTermination ends in process.exit, so nothing waits on it
+	process.on('SIGINT', () => void handleTermination('SIGINT'));
+	process.on('SIGTERM', () => void handleTermination('SIGTERM'));
 
 	// C++/VS setup (Windows) and C++ toolchain (Linux/Mac) run only when compiling the engine
 	// (server:setup-tools in the server build path). Not needed if using a prebuilt engine.
@@ -531,4 +535,4 @@ async function main() {
 	}
 }
 
-main();
+void main();

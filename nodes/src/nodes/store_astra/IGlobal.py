@@ -31,6 +31,7 @@ from ai.common.store import StoreGlobalBase
 
 class IGlobal(StoreGlobalBase):
     serverName: str = 'astra'
+    credential_fields = ('application_token',)
 
     def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
         """Return the driver's Store, imported lazily so config mode never loads the driver."""

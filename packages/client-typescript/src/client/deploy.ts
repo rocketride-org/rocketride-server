@@ -174,19 +174,23 @@ export class DeployApi {
 	 *   (default: `process.cwd()`).
 	 * @param options.comment - "What changed" note kept in the registry.
 	 * @param options.metadata - Extra metadata merged over the packed
-	 *   defaults (e.g. projectId provenance); `appRoot` is always set from
-	 *   the pack.
+	 *   defaults; `appRoot` is always set from the pack, and `projectId`
+	 *   provenance defaults to the working copy's appManifest projectId.
+	 *   Deploying never writes it — the id is stamped at creation and by
+	 *   the editor, so CI and read-only checkouts deploy unchanged.
 	 * @param options.onProgress - Receives one line per pack step (include
 	 *   checks, per-file adds, totals) for hosts that surface progress.
 	 * @returns The artifact entry for the new version.
 	 */
 	async addApp(appRoot: string, options: { workspaceRoot?: string; comment?: string; metadata?: Record<string, unknown>; onProgress?: (line: string) => void } = {}): Promise<PublishResult> {
 		const pack = await this.loadAppPack();
-		const packed = pack.packAppSource(options.workspaceRoot ?? process.cwd(), appRoot, options.onProgress);
+		const workspaceRoot = options.workspaceRoot ?? process.cwd();
+		const projectId = options.metadata?.projectId ?? pack.readProjectIdAt(workspaceRoot, appRoot);
+		const packed = pack.packAppSource(workspaceRoot, appRoot, options.onProgress);
 		return this.add({
 			kind: 'app',
 			data: packed.data,
-			metadata: { ...options.metadata, ...(packed.appRoot ? { appRoot: packed.appRoot } : {}) },
+			metadata: { ...options.metadata, ...(projectId ? { projectId } : {}), ...(packed.appRoot ? { appRoot: packed.appRoot } : {}) },
 			...(options.comment !== undefined && { comment: options.comment }),
 		});
 	}
@@ -194,7 +198,7 @@ export class DeployApi {
 	/**
 	 * Scaffolds a new app in the workspace — the programmatic twin of the
 	 * App Builder's New App wizard, rendering the identical templates
-	 * (Node.js only). Writes `./apps/<slug>`, ensures the pnpm workspace
+	 * (Node.js only). Writes `./apps/<slug>-ui`, ensures the pnpm workspace
 	 * file and ignore hygiene, vendors the connected server's shell +
 	 * client packages, and runs the workspace install. Scaffolding only —
 	 * nothing is deployed; the normal lifecycle (edit → `verifyApp` →
@@ -202,8 +206,10 @@ export class DeployApi {
 	 *
 	 * @param slug - The app-name slug (lowercase; digits/-/_ after the
 	 *   first character). The id becomes `<developerId>.<slug>`.
-	 * @param options - Template, display name, developer id (default
-	 *   'local'), frame options, install toggle, `onProgress`, and
+	 * @param options - Template, display name, developer id (default: this
+	 *   client's organization developer id, else 'local' — the same
+	 *   resolution as the New App wizard and `rocketride app create`),
+	 *   frame options, install toggle, `onProgress`, and
 	 *   `workspaceRoot` (default `process.cwd()`). The server base URL for
 	 *   vendoring defaults to this client's own connection.
 	 * @returns The created app's identity and a report of what ran.
@@ -223,7 +229,8 @@ export class DeployApi {
 			}
 		}
 		const { workspaceRoot, onProgress, ...rest } = options;
-		return pack.createAppWorkspace(workspaceRoot ?? process.cwd(), slug, { ...rest, serverBaseUrl, onProgress });
+		const developerId = options.developerId ?? pack.resolveDeveloperId(this.client) ?? undefined;
+		return pack.createAppWorkspace(workspaceRoot ?? process.cwd(), slug, { ...rest, developerId, serverBaseUrl, onProgress });
 	}
 
 	/**

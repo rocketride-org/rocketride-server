@@ -66,13 +66,6 @@ from rocketride.otelbridge.setup import (
 
 SRC_DIR = Path(__file__).parent.parent / 'src'
 
-try:
-    import opentelemetry.exporter.otlp.proto.grpc  # noqa: F401
-
-    HAS_GRPC_EXPORTER = True
-except ImportError:
-    HAS_GRPC_EXPORTER = False
-
 
 @dataclass
 class BridgeConfigStub:
@@ -357,8 +350,8 @@ def test_missing_otel_message_names_the_extra():
     assert "pip install 'rocketride[otel]'" in missing_otel_message()
 
 
-@pytest.mark.skipif(HAS_GRPC_EXPORTER, reason='OTLP gRPC exporter is installed')
-def test_grpc_protocol_without_grpc_exporter_raises_install_hint():
+def test_grpc_protocol_without_grpc_exporter_raises_install_hint(no_grpc_exporter):
+    """Both gRPC exporter builders name the missing package instead of a raw ImportError."""
     config = BridgeConfigStub(endpoint='http://localhost:4317', protocol='grpc')
     with pytest.raises(OtelNotInstalledError, match='grpc'):
         _build_span_exporter(config)

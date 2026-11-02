@@ -1,0 +1,30 @@
+// Type information for the build-script lint rules (eslint.config.mjs,
+// BUILD_SCRIPTS). Not a type check: checkJs is off.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowJs": true,
+    "checkJs": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": [
+    "**/scripts/**/*.js",
+    "**/scripts/**/*.cjs",
+    "**/scripts/**/*.mjs"
+  ],
+  "exclude": [
+    "scripts/assets",
+    "node_modules",
+    "build",
+    "dist",
+    "**/node_modules",
+    "**/build",
+    "**/dist"
+  ]
+}

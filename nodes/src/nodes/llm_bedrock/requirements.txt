@@ -5,6 +5,9 @@ langchain-aws
 langchain-core
 langchain
 
+# Version check of langchain-aws
+packaging
+
 # AWS SDK deps
 boto3
 botocore

@@ -31,12 +31,18 @@ The configured tool-server name defaults to `postgres`.
 | Function | Description |
 | --- | --- |
 | `search` | Searches the store for a non-empty `query`; accepts optional `top_k` and metadata `filter`, and returns matching content, metadata, and scores. |
-| `upsert` | Adds or updates a non-empty `documents` array. Each document requires content and an object ID; it can provide an embedding and embedding model or use the bound embedding provider. |
-| `delete` | Deletes documents for a non-empty `object_ids` array and returns the deleted count. |
+| `objdir` | Lists the distinct parent paths in the table as a map of parent path to one object ID each; accepts optional `parent`, `offset`, and `limit` (default and cap 1000), and pages count paths. Neither listing has an index to use, so every `objdir` and `list_documents` page scans the whole table (`list_documents` a second time for `total`); ask for large pages. |
+| `list_documents` | Lists the documents one by one, ordered by object ID, each with `object_id`, `parent`, and `chunk_count`; accepts optional `parent` (exact match), `deleted` (true lists the trash), `offset`, and `limit` (default 100, cap 1000). The reply carries `total`, `offset`, and `has_more`. |
+| `get` | Returns up to `limit` chunks (default and cap 100) of one document by `object_id`, ordered by chunk ID, with `total`, `has_more`, and `truncated`. Each call reads at most 10,000 chunks; `total` counts fetched chunks and `has_more` refers only to that fetched set. When `truncated=true`, completeness is not guaranteed, even if `has_more=false`. An object ID the table does not hold, or one in the trash, returns a failure object. |
+| `stats` | Returns the row (chunk) count of the table including its internal schema row and soft-deleted chunks, the number of active documents (`document_count`), the embedding model name, and the vector size. |
+| `upsert` | Adds or replaces a non-empty `documents` array. Each document requires content and an object ID; it can provide an embedding and embedding model or use the bound embedding provider. The chunks sent for one object ID are numbered in the order given unless each carries its own `chunkId`, which may not repeat within the call. |
+| `delete` | Deletes the chunks of a non-empty `object_ids` array for good; the reply echoes the distinct IDs and `deleted_count`, their number (not the documents found). |
+| `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash, keeping their chunks; the reply echoes the distinct IDs and `matched_chunks`, the chunk rows the table held for them. |
+| `restore` | Takes the documents of a non-empty `object_ids` array out of the trash, with the same reply as `soft_delete`. A document removed with `delete` cannot be restored. |
 
-`search` requires a bound embedding provider for semantic similarity search. The three functions return a failure object when their required input or an embedding cannot be obtained.
+`search` requires a bound embedding provider for semantic similarity search. The functions return a failure object when their required input or an embedding cannot be obtained, and refuse the object ID `schema`, which names the table's control row. The write functions (`upsert`, `delete`, `soft_delete`, `restore`) are offered only while the node's `allow_write` config key is on; it is on by default and not a declared setting on this node, so writes to the whole table are offered unless a pipeline sets `allow_write: false` on the node. The `expose_tools` config key, which decides whether the node offers any function at all, is likewise on by default and undeclared; a pipeline sets `expose_tools: false` on the node to offer none.
 
-`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`, defaulting to `"vectordb_tool"`, `"/"` and `0` respectively.
+`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`; `nodeId` defaults to `"vectordb_tool"`, `parent` to `"/"`, and `chunkId` to the document's position among the chunks sent for its object ID in the call (0 for the first), and an explicit `chunkId` may not repeat within the call.
 
 ## Configuration
 
@@ -83,7 +89,7 @@ as an ordinary relevance-tuning issue.
 
 ### Tool Server Name
 
-The tool-server name defaults to `postgres` and prefixes the three agent functions. Change it when multiple PostgreSQL stores are connected to the same agent so their functions do not share a namespace.
+The tool-server name defaults to `postgres` and labels this node in the messages the tool functions return. Agents and apps address the functions by the node's pipeline id, which keeps several PostgreSQL stores apart.
 
 ## Authentication
 
@@ -130,7 +136,7 @@ been removed rather than preserved as a fallback copy.
 |---|---|---|---|
 | `postgres.profile` | `string` | **Type of PostgreSQL host**<br/>Connect to... | `"local"` |
 | `postgres.provider` | `string` |  | const: `"postgres"` |
-| `postgres.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'postgres' exposes tools as postgres.search / postgres.upsert / postgres.delete. Change this when running multiple Postgres nodes in the same pipeline so their tool names do not collide. | `"postgres"` |
+| `postgres.serverName` | `string` | **Tool Server Name**<br/>Label for this store in tool-response messages (for example, a refused write names postgres.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings. | `"postgres"` |
 | `vector.collection` | `string` | **Table**<br/>Name of the table to store vectors. | `"rocketride"` |
 | `vector.local.database` | `string` | **Database**<br/>Name of the database | `"postgres"` |
 | `vector.local.host` |  | **Host**<br/>Host name or IP address of the PostgreSQL server | `"your-postgres-host.example.com"` |

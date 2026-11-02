@@ -58,6 +58,7 @@ import { AgentManager } from './agents/agent-manager';
 import { syncServiceCatalog } from './agents/services';
 import { CloudAuthProvider } from './auth/CloudAuthProvider';
 import { AppScreenProvider } from './providers/AppScreenProvider';
+import { materializeDevServerGuard } from 'rocketride/app-dev';
 import { initWatchManager } from './appdev/watchManager';
 import { ensureShell, refreshVendoredPlatform } from './appdev/appTypes';
 import { debugApp } from './appdev/debug';
@@ -302,10 +303,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				// file in the Explorer opens the App Builder), plus the
 				// watch-session manager driving the inner loop.
 				appScreen = new AppScreenProvider(context);
-				// The guard wrapper ships beside the bundle (staged by
-				// vscode:stage-files); every dev server spawns through it so
-				// it dies with this extension host.
-				const watchManager = initWatchManager(appScreen, context.asAbsolutePath('devServerGuard.cjs'));
+				// The guard wrapper is the SDK's (rocketride/app-dev), written
+				// to a private temp file once per host; every dev server spawns
+				// through it so it dies with this extension host.
+				const watchManager = initWatchManager(appScreen, materializeDevServerGuard());
 				context.subscriptions.push(
 					vscode.window.registerCustomEditorProvider('rocketride.appBuilder', appScreen, {
 						webviewOptions: { retainContextWhenHidden: true },

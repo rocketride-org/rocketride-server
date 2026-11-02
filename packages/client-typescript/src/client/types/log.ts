@@ -104,6 +104,24 @@ export interface LogChaptersResult {
 	completed: boolean;
 }
 
+/** A source identity with no scope — what `client.log.streams()` looks up. */
+export type LogStreamIdentity = Pick<LogStreamRef, 'projectId' | 'source'>;
+
+/** One stream as `client.log.streams()` lists it: its scope plus the chapters body. */
+export interface LogStreamEntry extends LogChaptersResult {
+	/** '' = your own tree. */
+	teamId: string;
+	teamName: string;
+	runKind: LogRunKind;
+	/** Who owns the runs: 'user' (dev or @me deploy) or 'team'. Matches TASK_CONTROL.owner_kind. */
+	ownerKind: 'user' | 'team';
+}
+
+/** Response of `client.log.streams()`; never-logged scopes are absent. */
+export interface LogStreamsResult {
+	streams: LogStreamEntry[];
+}
+
 /** Range/paging options for `client.log.read()`. */
 export interface LogReadParams {
 	/** Inclusive seq lower bound. */

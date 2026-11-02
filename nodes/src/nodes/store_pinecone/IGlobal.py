@@ -87,6 +87,7 @@ def _is_serverless(index: Any) -> bool:
 
 class IGlobal(StoreGlobalBase):
     serverName: str = 'pinecone'
+    credential_fields = ('apikey',)
 
     def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
         """Return the driver's Store, imported lazily so config mode never loads the driver."""

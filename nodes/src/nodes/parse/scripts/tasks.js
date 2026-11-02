@@ -30,12 +30,19 @@
  */
 const path = require('path');
 const {
-    syncDir,
-    removeDirs, BUILD_ROOT, DIST_ROOT,
-    exists, syncFile, setState, getState,
-    saveSourceHash, fingerprint
+	syncDir,
+	removeDirs,
+	BUILD_ROOT,
+	DIST_ROOT,
+	exists,
+	syncFile,
+	setState,
+	getState,
+	saveSourceHash,
+	fingerprint,
 } = require('../../../../../scripts/lib');
 const { execMaven, CORE_DIR } = require('../../../../../packages/java/scripts/tasks');
+const { makeNodeModule } = require('../../../../scripts/node-build');
 
 const PACKAGE_DIR = path.join(__dirname, '..');
 const DIST_DIR = path.join(DIST_ROOT, 'server', 'java');
@@ -51,84 +58,88 @@ const EXCLUDE = ['target'];
 // Action Factories
 // ============================================================================
 
-function makeCheckSourceAction(options = {}) {
-    return {
-        locks: ['parse'],
-        run: async (ctx, task) => {
-            task.output = 'Scanning for changes...';
-            const hash = await parseFingerprint();
-            ctx.parseSourceChanged = hash !== await getState('parse.srcHash');
-            ctx.parseSourceHash = hash;
-            task.output = ctx.parseSourceChanged ? 'Source changed' : 'No changes';
-        }
-    };
+function makeCheckSourceAction() {
+	return {
+		locks: ['parse'],
+		run: async (ctx, task) => {
+			task.output = 'Scanning for changes...';
+			const hash = await parseFingerprint();
+			ctx.parseSourceChanged = hash !== (await getState('parse.srcHash'));
+			ctx.parseSourceHash = hash;
+			task.output = ctx.parseSourceChanged ? 'Source changed' : 'No changes';
+		},
+	};
 }
 
 function makeBuildJarAction(options = {}) {
-    const distParseJar = path.join(DIST_DIR, 'lib', 'rocketride-parse.jar');
+	const distParseJar = path.join(DIST_DIR, 'lib', 'rocketride-parse.jar');
 
-    return {
-        locks: ['parse', 'maven'],
-        run: async (ctx, task) => {
-            // Skip if already built
-            if (!options.force && !ctx.parseSourceChanged && await exists(distParseJar)) {
-                task.output = 'Already built';
-                return;
-            }
+	return {
+		locks: ['parse', 'maven'],
+		run: async (ctx, task) => {
+			// Skip if already built
+			if (!options.force && !ctx.parseSourceChanged && (await exists(distParseJar))) {
+				task.output = 'Already built';
+				return;
+			}
 
-            await setState('parse.srcHash', null);
+			await setState('parse.srcHash', null);
 
-            // includeScope=runtime skips the log4j jars rocketride-core ships
-            await execMaven(['clean', 'compile', 'package', 'dependency:copy-dependencies',
-                             '-DincludeScope=runtime', '-q',
-                             `-Drocketride.build.dir=${BUILD_DIR}`],
-                            { task, cwd: SRC_DIR });
-        }
-    };
+			// includeScope=runtime skips the log4j jars rocketride-core ships
+			await execMaven(
+				[
+					'clean',
+					'compile',
+					'package',
+					'dependency:copy-dependencies',
+					'-DincludeScope=runtime',
+					'-q',
+					`-Drocketride.build.dir=${BUILD_DIR}`,
+				],
+				{ task, cwd: SRC_DIR }
+			);
+		},
+	};
 }
 
 function makeTestJarAction() {
-    return {
-        locks: ['maven'],
-        run: async (_ctx, task) => {
-            await execMaven(['test', '-q', `-Drocketride.build.dir=${BUILD_DIR}`],
-                            { task, cwd: SRC_DIR });
-        }
-    };
+	return {
+		locks: ['maven'],
+		run: async (_ctx, task) => {
+			await execMaven(['test', '-q', `-Drocketride.build.dir=${BUILD_DIR}`], { task, cwd: SRC_DIR });
+		},
+	};
 }
 
 function makeCopyOutputsAction(options = {}) {
-    const distParseJar = path.join(DIST_DIR, 'lib', 'rocketride-parse.jar');
+	const distParseJar = path.join(DIST_DIR, 'lib', 'rocketride-parse.jar');
 
-    return {
-        locks: ['parse'],
-        run: async (ctx, task) => {
-            // Skip if already copied
-            if (!options.force && !ctx.parseSourceChanged && await exists(distParseJar)) {
-                task.output = 'Already copied';
-                return;
-            }
+	return {
+		locks: ['parse'],
+		run: async (ctx, task) => {
+			// Skip if already copied
+			if (!options.force && !ctx.parseSourceChanged && (await exists(distParseJar))) {
+				task.output = 'Already copied';
+				return;
+			}
 
+			const libDir = path.join(DIST_DIR, 'lib');
 
-            const libDir = path.join(DIST_DIR, 'lib');
+			// Copy tika-config.xml
+			const tikaConfig = path.join(SRC_DIR, 'tika-config.xml');
+			await syncFile(tikaConfig, path.join(DIST_DIR, 'tika-config.xml'), { package: true });
 
-            // Copy tika-config.xml
-            const tikaConfig = path.join(SRC_DIR, 'tika-config.xml');
-            await syncFile(tikaConfig, path.join(DIST_DIR, 'tika-config.xml'), { package: true });
+			// Copy the parse jar, named by the pom's finalName
+			const tikaJar = path.join(BUILD_DIR, 'rocketride-parse.jar');
+			await syncFile(tikaJar, distParseJar, { package: true });
 
-            // Copy the parse jar, named by the pom's finalName
-            const tikaJar = path.join(BUILD_DIR, 'rocketride-parse.jar');
-            await syncFile(tikaJar, distParseJar, { package: true });
+			// Copy tika dependencies
+			await syncDir(path.join(BUILD_DIR, 'dependency'), libDir, { mirror: false, package: true });
 
-            // Copy tika dependencies
-            await syncDir(path.join(BUILD_DIR, 'dependency'), libDir, { mirror: false, package: true });
-
-            // Stored once the jar is in the dist, so a failed build is retried
-            await saveSourceHash('parse.srcHash',
-                                 ctx.parseSourceHash
-                                 ?? await parseFingerprint());
-        }
-    };
+			// Stored once the jar is in the dist, so a failed build is retried
+			await saveSourceHash('parse.srcHash', ctx.parseSourceHash ?? (await parseFingerprint()));
+		},
+	};
 }
 
 // ============================================================================
@@ -136,48 +147,63 @@ function makeCopyOutputsAction(options = {}) {
 // ============================================================================
 
 async function parseFingerprint() {
-    const own = await fingerprint(SRC_DIR, { exclude: EXCLUDE });
-    const core = await fingerprint(CORE_DIR, { exclude: EXCLUDE });
-    return `${own}:${core}`;
+	const own = await fingerprint(SRC_DIR, { exclude: EXCLUDE });
+	const core = await fingerprint(CORE_DIR, { exclude: EXCLUDE });
+	return `${own}:${core}`;
 }
 
 // ============================================================================
 // Module Export
 // ============================================================================
 
+const node = makeNodeModule({
+	name: 'parse',
+	srcDir: path.join(PACKAGE_DIR, '..'),
+	description: 'Parse Node (c++ and java)',
+	// Its jar, after the library: both are this node's artifacts
+	extraSteps: ['parse:submodule-build'],
+});
+
 module.exports = {
-    name: 'parse',
-    description: 'Parse Node Java Library',
+	...node,
 
-    actions: [
-        // Internal actions
-        { name: 'parse:check-source', action: makeCheckSourceAction },
-        { name: 'parse:build-jar', action: makeBuildJarAction },
-        { name: 'parse:sync', action: makeCopyOutputsAction },
-        { name: 'parse:test-jar', action: makeTestJarAction },
+	actions: [
+		...node.actions,
 
-        // Submodule actions (called by nodes:build / nodes:clean)
-        { name: 'parse:submodule-build', action: () => ({
-            steps: [
-                // Installs rocketride-core, which this module depends on
-                'java:submodule-build',
-                'parse:check-source',
-                'parse:build-jar',
-                'parse:sync'
-            ]
-        })},
-        { name: 'parse:submodule-test', action: () => ({
-            steps: [
-                'parse:submodule-build',
-                'parse:test-jar'
-            ]
-        })},
-        { name: 'parse:submodule-clean', action: () => ({
-            run: async (ctx, task) => {
-                await removeDirs([BUILD_DIR]);
-                await setState('parse.srcHash', null);
-                task.output = 'Cleaned parse';
-            }
-        })}
-    ]
+		// Internal actions
+		{ name: 'parse:check-source', action: makeCheckSourceAction },
+		{ name: 'parse:build-jar', action: makeBuildJarAction },
+		{ name: 'parse:sync', action: makeCopyOutputsAction },
+		{ name: 'parse:test-jar', action: makeTestJarAction },
+
+		// Submodule actions (called by nodes:build / nodes:clean)
+		{
+			name: 'parse:submodule-build',
+			action: () => ({
+				steps: [
+					// Installs rocketride-core, which this module depends on
+					'java:submodule-build',
+					'parse:check-source',
+					'parse:build-jar',
+					'parse:sync',
+				],
+			}),
+		},
+		{
+			name: 'parse:submodule-test',
+			action: () => ({
+				steps: ['parse:submodule-build', 'parse:test-jar'],
+			}),
+		},
+		{
+			name: 'parse:submodule-clean',
+			action: () => ({
+				run: async (ctx, task) => {
+					await removeDirs([BUILD_DIR]);
+					await setState('parse.srcHash', null);
+					task.output = 'Cleaned parse';
+				},
+			}),
+		},
+	],
 };

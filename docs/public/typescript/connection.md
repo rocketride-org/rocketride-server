@@ -104,3 +104,17 @@ when reconnection should stop.
 "Connected to …" display. `getApiKey()` returns the key in use (debugging only;
 avoid logging it). `setEnv()` replaces the environment map used for
 `${ROCKETRIDE_*}` substitution and credential lookup.
+
+## Optional signup attribution
+
+PKCE credentials passed to `login()` or `connect()` may include `signupProperties` (type
+`SignupProperties` or a synchronous `() => SignupProperties | null` resolver). The SDK evaluates
+the resolver immediately before sending authentication, after transport readiness. Use a resolver
+when consent can change during connection setup; return null to omit context. Resolver errors
+also omit context without interrupting login. The SDK forwards only the bounded version 1 schema validated by
+`normalizeSignupProperties`. Invalid or expired context is omitted; credentials without context
+retain their existing wire encoding. Only the encoded `cd_` credential uses the snake_case
+`signup_properties` key. No context is placed in an OAuth URL. This is analytics
+metadata and never an authorization claim. The backend validates its active experiment separately.
+Optional attribution does not change credential deduplication and is not retained in fallback
+reconnect credentials after successful authentication.

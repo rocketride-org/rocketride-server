@@ -711,7 +711,7 @@ langchain-protocol==0.0.18
     # via
     #   langchain-core
     #   langgraph-sdk
-langchain-text-splitters==1.1.2
+langchain-text-splitters==1.1.3
     # via -r nodes/src/nodes/preprocessor_langchain/requirements.txt
 langchain-xai==1.2.2
     # via -r nodes/src/nodes/llm_xai/requirements.txt

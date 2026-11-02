@@ -49,6 +49,7 @@ type IncomingMessage =
 	| { type: 'appdev:error'; row: AppErrorRow }
 	| { type: 'appdev:watch'; status: WatchStatus }
 	| { type: 'appdev:buildStatus'; appId: string; version?: number; status: string }
+	| { type: 'appdev:deployChanged'; appId: string }
 	| { type: 'appdev:devServer'; entry: string }
 	| { type: 'appdev:auth'; token: string }
 	| { type: 'appdev:reload' }
@@ -74,6 +75,11 @@ interface WirePin {
 	appVersion: string;
 	state: string;
 	deployedAt?: number;
+	// Serving truth (#2461) — absent from older servers.
+	enabled?: boolean;
+	serving?: boolean;
+	reason?: string;
+	servesYou?: boolean;
 }
 interface WireHistoryRow {
 	seq: number;
@@ -545,6 +551,9 @@ const AppWebview: React.FC = () => {
 		for (const fn of buildStatusListeners.current) fn(tick);
 	}, []);
 
+	// ── Deployment-change relay (apaevt_deploy for this app) ────────────
+	const deployChangedListeners = useRef<Set<() => void>>(new Set());
+
 	// ── RPC lane (appdev:call/appdev:result correlation) ────────────────
 	const pendingCalls = useRef<Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>>(new Map());
 	const nextCallId = useRef(1);
@@ -584,6 +593,12 @@ const AppWebview: React.FC = () => {
 					break;
 				case 'appdev:buildStatus':
 					emitBuildStatus({ version: msg.version, status: msg.status });
+					break;
+				case 'appdev:deployChanged':
+					// A deployment change of this app (apaevt_deploy) — a pure
+					// re-fetch signal. Unlike accountChanged the identity is the
+					// same, so the retained build words stay valid.
+					for (const fn of deployChangedListeners.current) fn();
 					break;
 				case 'appdev:devServer': {
 					// Same server, new build (?t only): HMR owns it — no action.
@@ -746,6 +761,12 @@ const AppWebview: React.FC = () => {
 		buildStatusListeners.current.add(fn);
 		return () => buildStatusListeners.current.delete(fn);
 	}, []);
+	const subscribeDeployChanged = useCallback((fn: () => void) => {
+		deployChangedListeners.current.add(fn);
+		return () => {
+			deployChangedListeners.current.delete(fn);
+		};
+	}, []);
 
 	// ── The BRIDGE adapter (IAppBuilderHost over useMessaging) ──────────
 	const host: IAppBuilderHost = useMemo(() => {
@@ -761,6 +782,7 @@ const AppWebview: React.FC = () => {
 			subscribeErrors,
 			subscribeWatch,
 			subscribeBuildStatus,
+			subscribeDeployChanged,
 			// Preview chrome
 			getPreviewUrl: () => previewUrl,
 			// Reload = full inner-loop reset in the extension host (kill dev
@@ -847,6 +869,12 @@ const AppWebview: React.FC = () => {
 						state,
 						audience: rung === 'personal' ? 'on your desktop' : rung === 'public' ? 'the app store' : 'team members',
 						deployedAt: p.deployedAt,
+						// The server's serving truth (#2461): whether a browser in
+						// this audience is actually served, why not, and whether
+						// this is the pin the caller's own resolution picks.
+						serving: p.serving,
+						reason: p.reason,
+						servesYou: p.servesYou,
 					};
 				});
 			},
@@ -882,7 +910,7 @@ const AppWebview: React.FC = () => {
 				await rpc('reply', version === undefined ? [message] : [message, version]);
 			},
 		};
-	}, [capabilities, previewUrl, sendMessage, rpc, accountSeq, subscribeEvents, subscribeConsole, subscribeErrors, subscribeWatch, subscribeBuildStatus]);
+	}, [capabilities, previewUrl, sendMessage, rpc, accountSeq, subscribeEvents, subscribeConsole, subscribeErrors, subscribeWatch, subscribeBuildStatus, subscribeDeployChanged]);
 
 	// ── Render ──────────────────────────────────────────────────────────
 	if (!app) {

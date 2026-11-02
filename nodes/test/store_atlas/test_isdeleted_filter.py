@@ -15,6 +15,7 @@ Usage:
 
 import importlib
 import importlib.util
+import re
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -204,3 +205,45 @@ class TestEmptyListGuards:
             {'meta.objectId': {'$in': ['id-1']}},
             {'$set': {'meta.isDeleted': False}},
         )
+
+
+def test_trash_round_trip_filters_paths_before_paging(store):
+    class Cursor(list):
+        def skip(self, offset):
+            return Cursor(self[offset:])
+
+        def limit(self, limit):
+            return Cursor(self[:limit])
+
+    rows = [
+        {'meta': {'objectId': oid, 'chunkId': chunk, 'parent': f'/{oid}', 'isDeleted': oid == 'schema'}}
+        for oid, chunk in [('a', 0), ('a', 1), ('b', 0), ('schema', 0)]
+    ]
+
+    def find(query):
+        def matches(row):
+            for field, value in query.items():
+                actual = row['meta'][field.removeprefix('meta.')]
+                if isinstance(value, dict):
+                    if not re.search(value['$regex'], actual, re.IGNORECASE):
+                        return False
+                elif actual != value:
+                    return False
+            return True
+
+        return Cursor(row for row in rows if matches(row))
+
+    def update_many(query, update):
+        for row in rows:
+            if row['meta']['objectId'] in query['meta.objectId']['$in']:
+                row['meta']['isDeleted'] = update['$set']['meta.isDeleted']
+
+    store.collection.find.side_effect = find
+    store.collection.update_many.side_effect = update_many
+    store.markDeleted(['a'])
+    assert store.getPaths(limit=1) == {'/b': 'b'}
+    assert store.getPaths(parent='/a') == {}
+    assert store.getPaths(offset=1, limit=1) == {}
+    store.markActive(['a'])
+    assert store.getPaths(parent='/A') == {'/a': 'a'}
+    assert store.getPaths() == {'/a': 'a', '/b': 'b'}

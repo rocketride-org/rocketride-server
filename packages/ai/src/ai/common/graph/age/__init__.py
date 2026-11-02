@@ -29,7 +29,7 @@ description, verified AGE mechanics, and vendored-code provenance.
 """
 
 from .analysis import CypherFacts, analyze
-from .capabilities import AGE_1_5_0, CAPABILITY_TABLES, Capability, CellStatus, DEFAULT_AGE_VERSION
+from .capabilities import AGE_1_5_0, AGE_1_6_0, CAPABILITY_TABLES, Capability, CellStatus, DEFAULT_AGE_VERSION
 from .decode import decode_agtype
 from .emit import TranslatedQuery
 from .errors import AgeFirewallRejected, AgeTranslationError, AgeUnsupportedFeature
@@ -38,6 +38,7 @@ from .translate import TranslateMode, decode_row, translate
 
 __all__ = [
     'AGE_1_5_0',
+    'AGE_1_6_0',
     'AgeFirewallRejected',
     'AgeTranslationError',
     'AgeUnsupportedFeature',

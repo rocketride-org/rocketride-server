@@ -37,7 +37,23 @@
  */
 const path = require('path');
 const { glob } = require('glob');
-const { exists, mkdir, rm, setState, getState, copyFile, removeDirs, syncDir, formatSyncStats, writeJson, createArchive, contentHash, PROJECT_ROOT, BUILD_ROOT, DIST_ROOT } = require('../../../scripts/lib');
+const {
+	exists,
+	mkdir,
+	rm,
+	setState,
+	getState,
+	copyFile,
+	removeDirs,
+	syncDir,
+	formatSyncStats,
+	writeJson,
+	createArchive,
+	contentHash,
+	PROJECT_ROOT,
+	BUILD_ROOT,
+	DIST_ROOT,
+} = require('../../../scripts/lib');
 
 // Sources: the agent docs and the per-agent stubs
 const AGENT_DOCS_DIR = path.join(PROJECT_ROOT, 'docs', 'agents', 'context');
@@ -77,14 +93,21 @@ function makeAgentBundleAction() {
 
 			// step: hash the staged content — the consumers' change stamp
 			const hash = await contentHash(stageDir);
-			const files = [...docFiles.map((f) => path.basename(f)), ...stubFiles.map((f) => `stubs/${path.basename(f)}`)];
+			const files = [
+				...docFiles.map((f) => path.basename(f)),
+				...stubFiles.map((f) => `stubs/${path.basename(f)}`),
+			];
 			await writeJson(path.join(stageDir, 'manifest.json'), { hash, files });
 
 			// step: repack only when content changed — dist zip stays byte-stable
 			const savedHash = await getState(AGENT_BUNDLE_HASH_KEY);
 			if (hash !== savedHash || !(await exists(zipPath))) {
 				await mkdir(outDir);
-				await createArchive(zipPath, stageDir, [...files.filter((f) => !f.startsWith('stubs/')), 'stubs', 'manifest.json']);
+				await createArchive(zipPath, stageDir, [
+					...files.filter((f) => !f.startsWith('stubs/')),
+					'stubs',
+					'manifest.json',
+				]);
 				await setState(AGENT_BUNDLE_HASH_KEY, hash);
 			}
 
@@ -92,7 +115,7 @@ function makeAgentBundleAction() {
 			// server:package so the bundle rides the release archive
 			const stats = await syncDir(outDir, AGENT_STATIC_DIR, { pattern: '*.zip', package: true });
 			task.output = `Agent docs bundle staged (${files.length} files) ${formatSyncStats(stats)}`;
-		}
+		},
 	};
 }
 
@@ -105,7 +128,7 @@ function makeCleanAction() {
 			await rm(AGENT_STATIC_DIR);
 			await setState(AGENT_BUNDLE_HASH_KEY, null);
 			task.output = 'Cleaned agent docs bundle';
-		}
+		},
 	};
 }
 
@@ -118,6 +141,6 @@ module.exports = {
 		// dependents (every client build + vscode), not the bare
 		// `builder build` aggregate.
 		{ name: 'client-docs:agent', action: makeAgentBundleAction },
-		{ name: 'client-docs:clean', action: makeCleanAction }
-	]
+		{ name: 'client-docs:clean', action: makeCleanAction },
+	],
 };

@@ -158,7 +158,10 @@ function hasDistMode(tokens) {
  * @returns {Promise<void>}
  */
 async function collectPytestReport(ctx, run) {
-	const file = path.join(os.tmpdir(), `rocketride-report-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`);
+	const file = path.join(
+		os.tmpdir(),
+		`rocketride-report-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`
+	);
 	try {
 		await run(`--rocketride-report=${file}`);
 		const text = await fs.readFile(file, 'utf8').catch(() => '');
@@ -171,4 +174,11 @@ async function collectPytestReport(ctx, run) {
 	}
 }
 
-module.exports = { runPytest, splitPytestOpts, withoutXdistArgs, requestsXdistWorkers, hasDistMode, collectPytestReport };
+module.exports = {
+	runPytest,
+	splitPytestOpts,
+	withoutXdistArgs,
+	requestsXdistWorkers,
+	hasDistMode,
+	collectPytestReport,
+};

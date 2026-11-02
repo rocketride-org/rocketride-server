@@ -30,6 +30,20 @@ import org.apache.tika.exception.TikaException;
 import org.apache.tika.parser.external.ExternalParser;
 
 public class ConfigBuilder {
+
+	/** Our RAR4 + RAR5 parser over 7-Zip-JBinding; replaces Tika's junrar RarParser when it can run. */
+	static final String RAR_SEVENZIP_PARSER = "com.rocketride.tika_api.parsers.rar.RarSevenZipParser";
+
+	/** Whether a class is on the classpath, without initializing it. */
+	static boolean classPresent(String name) {
+		try {
+			Class.forName(name, false, ConfigBuilder.class.getClassLoader());
+			return true;
+		} catch (ClassNotFoundException e) {
+			return false;
+		}
+	}
+
 	public static boolean ocrEnabled = false;
 	public static boolean magickEnabled = false;
 	public static String languages = null;
@@ -519,11 +533,17 @@ public class ConfigBuilder {
 		// Only when the native library actually loaded. TikaApi.init() logs and carries
 		// on when it does not, and installing a parser that cannot run would leave RAR
 		// with no working parser at all. Keeping junrar preserves RAR4 in that case.
-		if (TikaApi.isSevenZipReady()) {
-			removeParser(doc, "org.apache.tika.parser.pkg.RarParser");
-			findOrAddParser(doc, "com.rocketride.tika_api.parsers.rar.RarSevenZipParser");
-		} else {
+		//
+		// And only when the class resolves: #2440 moved the Tika sources and left
+		// RarSevenZipParser behind, so the swap named a class that was not there and RAR
+		// archives extracted nothing, silently (#2678).
+		if (!TikaApi.isSevenZipReady()) {
 			logger.warn("7-Zip-JBinding unavailable; keeping Tika's RarParser (RAR4 only, RAR5 unsupported)");
+		} else if (!classPresent(RAR_SEVENZIP_PARSER)) {
+			logger.warn(RAR_SEVENZIP_PARSER + " is not on the classpath; keeping Tika's RarParser (RAR4 only, RAR5 unsupported)");
+		} else {
+			removeParser(doc, "org.apache.tika.parser.pkg.RarParser");
+			findOrAddParser(doc, RAR_SEVENZIP_PARSER);
 		}
 
 		// Output the xml

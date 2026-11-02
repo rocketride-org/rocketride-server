@@ -500,8 +500,6 @@ def test_timeout_message_carries_the_session_id(monkeypatch):
 
 
 def _build_engine_stubs():
-    from unittest.mock import MagicMock
-
     rl = types.ModuleType('rocketlib')
     rl.IInstanceBase = object
     rl.IGlobalBase = object
@@ -561,7 +559,17 @@ def _build_engine_stubs():
     sch.Doc = _Doc
 
     cfg = types.ModuleType('ai.common.config')
-    cfg.Config = MagicMock()
+
+    # A real class, not a MagicMock: since pytest 9.2, monkeypatch reads the
+    # value to restore from the instance __dict__, where a MagicMock's lazily
+    # created attributes never live, so undo() deletes them and every later
+    # patch of getNodeConfig fails with AttributeError.
+    class _Config:
+        @staticmethod
+        def getNodeConfig(*_a, **_k):
+            return {}
+
+    cfg.Config = _Config
 
     ai = types.ModuleType('ai')
     ai_common = types.ModuleType('ai.common')

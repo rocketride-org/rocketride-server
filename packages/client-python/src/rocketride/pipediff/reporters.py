@@ -39,9 +39,8 @@ JSON output stable for snapshot tests and keeps PR comments from churning.
 Design notes:
     - The renderers are intentionally *read-only* over the diff model: they never
       construct model objects, so they depend on the model dataclasses for typing
-      only (guarded by ``TYPE_CHECKING``). This keeps the pipediff library free of
-      import-time coupling between the reporters and the engine, and lets the
-      module load even while sibling modules are still being written.
+      only (guarded by ``TYPE_CHECKING``). This keeps the reporters free of
+      import-time coupling to the engine.
     - ANSI color constants are defined locally rather than imported from
       ``rocketride.cli.ui.colors``. The pipediff package is a library that the CLI
       depends on; importing back into the CLI would invert that layering. The
@@ -60,7 +59,10 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+
+from ._pipejson import json_equal
 
 if TYPE_CHECKING:  # pragma: no cover - typing-only imports
     from .model import PipeDiff
@@ -187,9 +189,11 @@ def _organize(diff: 'PipeDiff') -> Dict[str, Any]:
                     'config_changes': [],
                 },
             )
-            if (
-                node_change.provider_old is not None or node_change.provider_new is not None
-            ) and node_change.provider_old != node_change.provider_new:
+            # JSON equality, not ``!=``: Python treats ``0 == False``, which would
+            # drop a real ``0`` -> ``false`` provider change from every report.
+            if (node_change.provider_old is not None or node_change.provider_new is not None) and not json_equal(
+                node_change.provider_old, node_change.provider_new
+            ):
                 entry['provider_old'] = node_change.provider_old
                 entry['provider_new'] = node_change.provider_new
                 entry['has_provider_change'] = True
@@ -251,17 +255,174 @@ def _fmt_value(value: Any) -> str:
     Strings are returned bare; every other JSON type (numbers, booleans, ``None``,
     dicts, lists) is serialized with ``json.dumps`` so the type stays unambiguous
     (``null``/``true``/``false``) and nested structures render deterministically.
+
+    A string is JSON-quoted instead when bare text would misread it: when it is
+    empty (it would print as nothing), has leading or trailing whitespace (it would
+    look trimmed), would itself read as a JSON value (``"true"``, ``"512"``,
+    ``"null"``, or the two-character ``""``), holds a character the renderers
+    escape, holds text that reads like one of those escapes (see
+    :data:`_ESCAPE_LOOKALIKE`), or starts with a quote (so a bare string never reads
+    as a quoted one, even after a console has rewritten it). So ``"true"`` and
+    ``true`` never print alike, and neither does an escaped character and the text
+    of its escape.
     """
     if isinstance(value, str):
-        return value
+        return json.dumps(value, ensure_ascii=False) if _reads_ambiguously(value) else value
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
-# C0 control characters that must never reach a terminal verbatim: CR and LF can
-# rewrite the line the user is reading, ESC starts an ANSI/OSC sequence that can
-# recolor, reposition, or (with OSC 52) touch the clipboard. Tab is harmless and
-# is left alone.
-_TERM_UNSAFE = re.compile(r'[\x00-\x08\x0b-\x1f\x7f]|\r|\n')
+def _reads_ambiguously(text: str) -> bool:
+    """Report whether a bare string would be mistaken for another value (see :func:`_fmt_value`)."""
+    if not text or text != text.strip() or _has_unsafe(text) or _ESCAPE_LOOKALIKE.search(text):
+        return True
+    if text.startswith('"'):
+        return True  # a bare string must never look like a quoted one, on any console
+    try:
+        json.loads(text)
+    except RecursionError:
+        return True
+    except ValueError:
+        return False
+    return True
+
+
+def _visible(text: str) -> str:
+    """
+    Reduce text to what a reader can tell apart.
+
+    Whitespace runs collapse the way a code span trims and HTML folds them, and
+    compatibility forms fold to the character they imitate (U+FF14, the full-width
+    digit four, to ``4``; U+FB01, the ``fi`` ligature, to ``fi``). Invisible
+    characters are not handled here: they are written as escapes before a pair is
+    compared.
+    """
+    return ' '.join(unicodedata.normalize('NFKC', text).split())
+
+
+def _fmt_pair(old: Any, new: Any, escape: Any = None) -> Tuple[str, str]:
+    """
+    Render the two sides of a change so that differing values never read the same.
+
+    Both sides go through :func:`_fmt_value`, which leaves strings bare. That is
+    ambiguous exactly when a string meets another type (``512`` -> ``"512"``
+    printed as ``512 -> 512``) or when two different strings print alike (``""``
+    and the empty string). In those cases strings are JSON-quoted instead, so the
+    type change stays visible; same-type string edits keep the compact form.
+
+    ``escape`` is the renderer's escaping (``_term_safe`` for the terminal,
+    ``_md_code`` for Markdown). The two sides are compared *after* it, because
+    escaping and whitespace folding can make them collide: a reader sees runs of
+    spaces collapse in a code span. JSON quoting then keeps them apart. A string
+    holding an escaped character is already JSON-quoted by :func:`_fmt_value`, so
+    U+202E never prints like the literal text ``\\u202e``.
+
+    Quoting cannot separate two sides that differ only in a compatibility look-alike
+    (``gpt-4`` and ``gpt-`` followed by U+FF14, the full-width digit four): both stay
+    alike inside their quotes. Those are spelled with ASCII escapes as well, so the
+    difference shows as ``\\uff14``.
+    """
+    escape = escape or _identity
+
+    def alike(left: str, right: str) -> bool:
+        return _visible(escape(left)) == _visible(escape(right))
+
+    old_text, new_text = _fmt_value(old), _fmt_value(new)
+    if isinstance(old, str) != isinstance(new, str) or alike(old_text, new_text):
+        old_text = json.dumps(old, ensure_ascii=False, sort_keys=True)
+        new_text = json.dumps(new, ensure_ascii=False, sort_keys=True)
+        if alike(old_text, new_text):
+            old_text = json.dumps(old, ensure_ascii=True, sort_keys=True)
+            new_text = json.dumps(new, ensure_ascii=True, sort_keys=True)
+    return old_text, new_text
+
+
+# Characters that must never reach a terminal or a PR comment verbatim, by Unicode
+# category. Controls (Cc): CR and LF can rewrite the line the user is reading, ESC
+# starts an ANSI/OSC sequence that can recolor, reposition, or (with OSC 52) touch
+# the clipboard, U+009B is an 8-bit CSI and U+0085 a line break. Format characters
+# (Cf): the bidi embedding, override, isolate and mark controls can reorder what a
+# reviewer reads (Trojan Source), and zero-width spaces and joiners, the BOM, soft
+# hyphens and tag characters are invisible, so ``openai`` and ``open<U+200B>ai``
+# would print alike. Spaces other than U+0020 (Zs: NBSP, ideographic space) look
+# like a plain space, line and paragraph separators (Zl, Zp) break lines, lone
+# surrogates (Cs) cannot even be encoded for output, and unassigned code points
+# (Cn) may be any of the above in a later Unicode version. A few characters are
+# just as invisible but sit in other categories (combining marks, letters,
+# symbols): the combining grapheme joiner, the Hangul fillers, the Khmer inherent
+# vowels, the Mongolian free variation selectors, the braille blank and the
+# variation selectors, so they are listed explicitly. Tab is harmless and is
+# left alone. The pattern only pre-selects candidates; the category decides.
+_TERM_UNSAFE = re.compile(r'[^\t\x20-\x7e]')
+_UNSAFE_CATEGORIES = frozenset({'Cc', 'Cf', 'Cs', 'Cn', 'Zl', 'Zp', 'Zs'})
+_INVISIBLE_OTHER = frozenset(
+    [0x034F, 0x115F, 0x1160, 0x17B4, 0x17B5, 0x2800, 0x3164, 0xFFA0]
+    + list(range(0x180B, 0x1810))
+    + list(range(0xFE00, 0xFE10))
+    + list(range(0xE0100, 0xE01F0))
+)
+
+
+def _is_unsafe(char: str) -> bool:
+    """Report whether one character must be escaped (see :data:`_TERM_UNSAFE`)."""
+    return unicodedata.category(char) in _UNSAFE_CATEGORIES or ord(char) in _INVISIBLE_OTHER
+
+
+def _spell_char(char: str) -> str:
+    """Spell one character as a visible ``\\xNN``, ``\\uNNNN`` or ``\\UNNNNNNNN`` escape."""
+    code = ord(char)
+    if code <= 0xFF:
+        return f'\\x{code:02x}'
+    return f'\\u{code:04x}' if code <= 0xFFFF else f'\\U{code:08x}'
+
+
+# Text that reads like one of the escapes written above. The reporters write a
+# hidden character as one of them, and so does a console that cannot print a
+# character (Python's ``backslashreplace``, used by the CLI on a non-UTF-8 stream,
+# spells it exactly this way). A value, identifier or path that merely contains such
+# text would therefore print the same as the character it names: the six characters
+# \u202e as a real U+202E, \u65e5 as a real CJK character on an ASCII console.
+# Such text is JSON-quoted, which doubles its backslash, so the two stay apart on
+# every console. Windows paths and regular expressions are not touched: C:\Users is
+# not an escape, because \U needs eight hex digits.
+_ESCAPE_LOOKALIKE = re.compile(r'\\(?:x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})')
+
+
+def _escape_control(match: re.Match) -> str:
+    """Spell one unsafe character as an escape; any other character is returned as it is."""
+    char = match.group()
+    return _spell_char(char) if _is_unsafe(char) else char
+
+
+# Text that Unicode normalisation (NFC) would rewrite prints exactly like the text it
+# would be rewritten to: a decomposed accent (``e`` and U+0301) like the composed
+# one (U+00E9), Hangul jamo like their syllable, U+212B ANGSTROM SIGN like U+00C5. A
+# node renamed from one spelling to the other would then read as a node removed and
+# the same node added, and a changed value as ``x -> x``. The runs of non-ASCII
+# characters that NFC would change are therefore spelled out, so the two spellings
+# differ on the page as they do in the file. A run takes the character before it,
+# because that is what a combining mark attaches to; text that is already
+# normalised, which is nearly all of it, is left alone.
+_NON_ASCII_RUN = re.compile(r'[\x00-\x7f]?[^\x00-\x7f]+')
+
+
+def _spell_unnormalized(match: re.Match) -> str:
+    """Spell the non-ASCII characters of a run that NFC would rewrite (see :data:`_NON_ASCII_RUN`)."""
+    run = match.group()
+    if unicodedata.is_normalized('NFC', run):
+        return run
+    return ''.join(char if char.isascii() else _spell_char(char) for char in run)
+
+
+def _spell(text: str) -> str:
+    """Write every character a reader cannot see or trust as a visible escape (see :data:`_TERM_UNSAFE`)."""
+    if not text.isascii():
+        text = _NON_ASCII_RUN.sub(_spell_unnormalized, text)
+    return _TERM_UNSAFE.sub(_escape_control, text)
+
+
+def _has_unsafe(text: str) -> bool:
+    """Report whether ``text`` holds a character :func:`_spell` would escape."""
+    return _spell(text) != text
 
 
 def _term_safe(text: Any) -> str:
@@ -271,11 +432,46 @@ def _term_safe(text: Any) -> str:
     Node ids, providers, lanes, config paths, and config values all come from a
     ``.pipe`` file that the diff itself is meant to review, so they are untrusted
     input. Printing them verbatim lets a crafted value emit ANSI escapes (recolor
-    the report, hide lines, move the cursor) or a bare CR/LF that fakes extra
-    report lines. Every such byte is rendered as its ``\\xNN`` escape instead;
-    tabs and printable text pass through unchanged.
+    the report, hide lines, move the cursor), a bare CR/LF that fakes extra
+    report lines, or bidi controls that reorder what is displayed. Every such
+    character is rendered as its ``\\xNN`` (or ``\\uNNNN``) escape instead, and so
+    is non-ASCII text that Unicode normalisation would rewrite (a decomposed
+    accent), which would otherwise print like its composed twin; tabs and
+    printable text pass through unchanged.
     """
-    return _TERM_UNSAFE.sub(lambda m: f'\\x{ord(m.group()):02x}', str(text))
+    return _spell(str(text))
+
+
+def _ident(text: Any) -> str:
+    """
+    Spell an identifier (a node id, an edge endpoint or lane, a config path) for display.
+
+    Identifiers are not values, so they are not quoted merely for holding an escaped
+    character: ``a\\u202e`` is the plain way to show an id with a real U+202E in it.
+    They are quoted when that spelling would be ambiguous:
+
+    - the id itself holds text that reads like an escape (see :data:`_ESCAPE_LOOKALIKE`).
+      JSON quoting doubles the backslash, so ``"a\\\\u202e"`` is the six characters and
+      ``a\\u202e`` is the character;
+    - it starts with a quote, so an unquoted id never looks like a quoted one;
+    - its whitespace would not survive a reader or a Markdown code span: leading or
+      trailing whitespace, a tab, or a run of spaces. ``llm_1`` with a trailing space
+      prints like ``llm_1``, and ``a b`` with a tab or two spaces prints like ``a b``
+      with one. Quoted, the padding sits inside the quotes and the tab is written
+      ``\\t``.
+
+    Ordinary ids and paths, which are single words or single-spaced phrases, print as
+    they always did.
+    """
+    text = str(text)
+    if text.startswith('"') or _ESCAPE_LOOKALIKE.search(text) or _has_ambiguous_whitespace(text):
+        return json.dumps(text, ensure_ascii=False)
+    return text
+
+
+def _has_ambiguous_whitespace(text: str) -> bool:
+    """Report whether ``text`` has whitespace that bare text would hide (see :func:`_ident`)."""
+    return text != text.strip() or '\t' in text or '  ' in text
 
 
 def _identity(text: Any) -> str:
@@ -337,7 +533,8 @@ def _summary_phrase(org: Dict[str, Any], fmt=_identity) -> str:
 
     version_change = org['version_change']
     if version_change:
-        parts.append(f'version {fmt(_fmt_value(version_change[0]))} → {fmt(_fmt_value(version_change[1]))}')
+        old_version, new_version = _fmt_pair(version_change[0], version_change[1], fmt)
+        parts.append(f'version {fmt(old_version)} → {fmt(new_version)}')
 
     if org['layout_changed']:
         parts.append('layout changed')
@@ -359,7 +556,7 @@ def _human_field_line(field_change: Any, palette: _Palette) -> str:
     The path and both values come from the diffed ``.pipe`` files, so each is run
     through :func:`_term_safe` before it reaches the terminal.
     """
-    path = _term_safe(field_change.path)
+    path = _term_safe(_ident(field_change.path))
     kind = field_change.kind
     if kind == 'added':
         body = f'{_MARK_ADDED} {path} = {_term_safe(_fmt_value(field_change.new))}'
@@ -368,8 +565,7 @@ def _human_field_line(field_change: Any, palette: _Palette) -> str:
         body = f'{_MARK_REMOVED} {path} = {_term_safe(_fmt_value(field_change.old))}'
         return '    ' + palette.removed(body)
     # changed
-    old = _term_safe(_fmt_value(field_change.old))
-    new = _term_safe(_fmt_value(field_change.new))
+    old, new = (_term_safe(text) for text in _fmt_pair(field_change.old, field_change.new, _term_safe))
     return '    ' + palette.changed(f'{_MARK_CHANGED} {path}: ') + f'{old} ' + palette.dim('->') + f' {new}'
 
 
@@ -412,18 +608,21 @@ def render_human(diff: 'PipeDiff', *, use_color: bool) -> str:
         lines.append('')
         lines.append('Nodes')
         for node_id, provider in org['nodes_added']:
-            lines.append('  ' + palette.added(f'{_MARK_ADDED} {_term_safe(node_id)} ({_term_safe(provider)})'))
+            lines.append(
+                '  '
+                + palette.added(f'{_MARK_ADDED} {_term_safe(_ident(node_id))} ({_term_safe(_fmt_value(provider))})')
+            )
         for node_id, provider in org['nodes_removed']:
-            lines.append('  ' + palette.removed(f'{_MARK_REMOVED} {_term_safe(node_id)} ({_term_safe(provider)})'))
+            lines.append(
+                '  '
+                + palette.removed(f'{_MARK_REMOVED} {_term_safe(_ident(node_id))} ({_term_safe(_fmt_value(provider))})')
+            )
         for entry in org['nodes_changed']:
             if entry['has_provider_change']:
-                marker = palette.changed(f'{_MARK_CHANGED} {_term_safe(entry["id"])} provider: ')
+                marker = palette.changed(f'{_MARK_CHANGED} {_term_safe(_ident(entry["id"]))} provider: ')
+                provider_old, provider_new = _fmt_pair(entry['provider_old'], entry['provider_new'], _term_safe)
                 lines.append(
-                    '  '
-                    + marker
-                    + f'{_term_safe(entry["provider_old"])} '
-                    + palette.dim('->')
-                    + f' {_term_safe(entry["provider_new"])}'
+                    '  ' + marker + f'{_term_safe(provider_old)} ' + palette.dim('->') + f' {_term_safe(provider_new)}'
                 )
 
     # --- Edges ---
@@ -431,10 +630,10 @@ def render_human(diff: 'PipeDiff', *, use_color: bool) -> str:
         lines.append('')
         lines.append('Edges')
         for from_id, lane, to_id in org['edges_added']:
-            body = f'{_MARK_ADDED} {_term_safe(from_id)} --{_term_safe(lane)}--> {_term_safe(to_id)}'
+            body = f'{_MARK_ADDED} {_term_safe(_ident(from_id))} --{_term_safe(_ident(lane))}--> {_term_safe(_ident(to_id))}'
             lines.append('  ' + palette.added(body))
         for from_id, lane, to_id in org['edges_removed']:
-            body = f'{_MARK_REMOVED} {_term_safe(from_id)} --{_term_safe(lane)}--> {_term_safe(to_id)}'
+            body = f'{_MARK_REMOVED} {_term_safe(_ident(from_id))} --{_term_safe(_ident(lane))}--> {_term_safe(_ident(to_id))}'
             lines.append('  ' + palette.removed(body))
 
     # --- Config ---
@@ -443,14 +642,13 @@ def render_human(diff: 'PipeDiff', *, use_color: bool) -> str:
         lines.append('')
         lines.append('Config')
         for entry in config_nodes:
-            lines.append(f'  {_term_safe(entry["id"])}')
+            lines.append(f'  {_term_safe(_ident(entry["id"]))}')
             for field_change in entry['config_changes']:
                 lines.append(_human_field_line(field_change, palette))
 
     # --- Version / Layout ---
     if org['version_change']:
-        old = _term_safe(_fmt_value(org['version_change'][0]))
-        new = _term_safe(_fmt_value(org['version_change'][1]))
+        old, new = (_term_safe(text) for text in _fmt_pair(*org['version_change'], _term_safe))
         lines.append('')
         lines.append('Version: ' + f'{old} ' + palette.dim('->') + f' {new}')
 
@@ -566,15 +764,24 @@ def _md_code(text: str) -> str:
     stripped by the renderer. This picks a delimiter longer than the longest
     internal backtick run so arbitrary values render literally.
 
-    Line breaks are collapsed to spaces first. A CommonMark code span cannot span a
-    blank line, so a newline in an untrusted value (node id, provider, lane, config
-    value) would otherwise terminate the span and the enclosing bullet/table cell,
-    letting the trailing text render as real Markdown (headings, ``@`` mentions,
-    links) in the auto-posted PR comment. Neutralizing them here — the single choke
-    point every value passes through — covers bullets, table cells, and the version
-    line at once.
+    Line breaks and every other unsafe character are written as visible escapes
+    (``\\x0a``, ``\\u202e``; see :data:`_TERM_UNSAFE`). A CommonMark code span cannot
+    span a blank line, so a newline in an untrusted value (node id, provider, lane,
+    config value) would otherwise terminate the span and the enclosing bullet/table
+    cell, letting the trailing text render as real Markdown (headings, ``@``
+    mentions, links) in the auto-posted PR comment. Escaping rather than folding it
+    to a space also keeps ``a\\nb`` and ``a b`` apart. Neutralizing them here — the
+    single choke point every value passes through — covers bullets, table cells,
+    and the version line at once.
+
+    The empty string has no code-span form: a bare double backtick is read as an
+    opening delimiter that pairs with the next value's two-backtick fence, which
+    leaves that value's text outside any span as live Markdown. It is rendered as
+    the visible JSON empty string ``""`` instead.
     """
-    text = str(text).replace('\r', ' ').replace('\n', ' ')
+    text = _spell(str(text))
+    if not text:
+        return '`""`'
     if '`' not in text:
         return f'`{text}`'
     longest = max(len(run) for run in re.findall(r'`+', text))
@@ -596,35 +803,20 @@ def _md_cell(text: str) -> str:
     renders it verbatim. A literal newline ends the row, so it is folded to a
     space.
 
-    **Exactly one backslash is added per pipe, whatever already precedes it** --
-    a backslash sitting immediately before a pipe is not a special case. In
+    **Exactly one backslash is added per pipe, whatever already precedes it.** In
     cmark-gfm, the parser GitHub runs, the table-cell scanner accepts either a
     lone backslash or a backslash-escaped punctuation pair and takes the longest
-    match, so a run of *n* backslashes before a pipe always parses as *n - 1*
-    lone backslashes followed by the escaped pair ``\\|``. For every *n* >= 1 the
-    pipe is escaped and the row does **not** split; unescaping then strips that
-    one backslash and leaves *n - 1* for the code span to print verbatim. So the
-    value ``\\|`` is emitted as ``\\\\|`` and renders back as ``\\|``. Doubling
-    the run as well (emitting ``\\\\\\|``) would still not split the row -- it
-    would render a spurious extra backslash.
+    match, so a run of *n* backslashes before a pipe always parses as *n - 1* lone
+    backslashes followed by the escaped pair: the pipe is escaped and the row does
+    not split. Unescaping then strips that one backslash and leaves *n - 1* for the
+    code span to print verbatim. Doubling the run as well would still not split the
+    row; it would render a spurious extra backslash.
 
-    Backslashes not adjacent to a pipe are deliberately **not** touched. Inside a
-    code span the inline parser performs no backslash unescaping, so doubling them
-    was emitted verbatim: ``C:\\Users\\alice`` rendered as ``C:\\\\Users\\\\alice``.
+    Backslashes not adjacent to a pipe are left alone: inside a code span the inline
+    parser performs no backslash unescaping, so doubling them would show up doubled.
 
-    ``test_pipediff_reporters.py`` pins both halves of this: the exact bytes this
-    function emits, and that each of them splits back to the original value in a
-    row that keeps its column count. That second half is checked twice over the
-    same corpus -- once by applying the scanner rule directly, so it runs on any
-    interpreter, and once by rendering the row through ``cmarkgfm`` (the same
-    cmark-gfm GitHub renders comments with), which decides the question rather
-    than restating our model of it. CI runs both: ``cmarkgfm`` is installed into
-    the engine interpreter from ``packages/client-python/tests/requirements.txt``
-    by the ``client-python:setup-test-deps`` step, so the renderer cross-check is
-    only skipped on a local interpreter that lacks it.
-
-    This function assumes code-span input; plain text with backslashes would need
-    a different escape, and no caller passes any.
+    This function assumes code-span input; plain text with backslashes would need a
+    different escape, and no caller passes any.
     """
     return str(text).replace('|', '\\|').replace('\n', ' ')
 
@@ -632,10 +824,11 @@ def _md_cell(text: str) -> str:
 def _md_field_change(field_change: Any) -> str:
     """Render a config FieldChange as a compact Markdown 'change' fragment."""
     if field_change.kind == 'added':
-        return f'{_MD_ADDED} {_md_code(field_change.new)}'
+        return f'{_MD_ADDED} {_md_code(_fmt_value(field_change.new))}'
     if field_change.kind == 'removed':
-        return f'{_MD_REMOVED} {_md_code(field_change.old)}'
-    return f'{_md_code(field_change.old)} → {_md_code(field_change.new)}'
+        return f'{_MD_REMOVED} {_md_code(_fmt_value(field_change.old))}'
+    old, new = _fmt_pair(field_change.old, field_change.new, _md_code)
+    return f'{_md_code(old)} → {_md_code(new)}'
 
 
 def render_markdown(diff: 'PipeDiff', *, title: Optional[str] = None) -> str:
@@ -647,6 +840,7 @@ def render_markdown(diff: 'PipeDiff', *, title: Optional[str] = None) -> str:
     Change``), and — only when the diff was computed with ``include_layout`` — a
     ``Layout`` table of the top-level ``viewport.*`` changes. All node ids,
     providers, lanes, versions, values, and the title are wrapped in code spans;
+    add/remove signs are code-spanned so GitHub does not parse nested lists;
     table cells additionally escape ``|`` and newlines so untrusted config values
     cannot break the table or the surrounding comment. Ordering is deterministic,
     so re-running on unchanged input yields byte-identical output.
@@ -682,13 +876,13 @@ def render_markdown(diff: 'PipeDiff', *, title: Optional[str] = None) -> str:
         lines.append('')
         lines.append('**Nodes**')
         for node_id, provider in org['nodes_added']:
-            lines.append(f'- {_MD_ADDED} {_md_code(node_id)} ({_md_code(provider)})')
+            lines.append(f'- {_md_code(_MD_ADDED)} {_md_code(_ident(node_id))} ({_md_code(_fmt_value(provider))})')
         for node_id, provider in org['nodes_removed']:
-            lines.append(f'- {_MD_REMOVED} {_md_code(node_id)} ({_md_code(provider)})')
+            lines.append(f'- {_md_code(_MD_REMOVED)} {_md_code(_ident(node_id))} ({_md_code(_fmt_value(provider))})')
         for entry in provider_changed:
+            provider_old, provider_new = _fmt_pair(entry['provider_old'], entry['provider_new'], _md_code)
             lines.append(
-                f'- {_MD_CHANGED} {_md_code(entry["id"])} provider: '
-                f'{_md_code(entry["provider_old"])} → {_md_code(entry["provider_new"])}'
+                f'- {_MD_CHANGED} {_md_code(_ident(entry["id"]))} provider: {_md_code(provider_old)} → {_md_code(provider_new)}'
             )
 
     # --- Edges ---
@@ -696,9 +890,13 @@ def render_markdown(diff: 'PipeDiff', *, title: Optional[str] = None) -> str:
         lines.append('')
         lines.append('**Edges**')
         for from_id, lane, to_id in org['edges_added']:
-            lines.append(f'- {_MD_ADDED} {_md_code(from_id)} --{_md_code(lane)}--> {_md_code(to_id)}')
+            lines.append(
+                f'- {_md_code(_MD_ADDED)} {_md_code(_ident(from_id))} --{_md_code(_ident(lane))}--> {_md_code(_ident(to_id))}'
+            )
         for from_id, lane, to_id in org['edges_removed']:
-            lines.append(f'- {_MD_REMOVED} {_md_code(from_id)} --{_md_code(lane)}--> {_md_code(to_id)}')
+            lines.append(
+                f'- {_md_code(_MD_REMOVED)} {_md_code(_ident(from_id))} --{_md_code(_ident(lane))}--> {_md_code(_ident(to_id))}'
+            )
 
     # --- Config (table) ---
     config_nodes = [e for e in org['nodes_changed'] if e['config_changes']]
@@ -710,15 +908,14 @@ def render_markdown(diff: 'PipeDiff', *, title: Optional[str] = None) -> str:
         lines.append('| --- | --- | --- |')
         for entry in config_nodes:
             for field_change in entry['config_changes']:
-                node_cell = _md_cell(_md_code(entry['id']))
-                field_cell = _md_cell(_md_code(field_change.path))
+                node_cell = _md_cell(_md_code(_ident(entry['id'])))
+                field_cell = _md_cell(_md_code(_ident(field_change.path)))
                 change_cell = _md_cell(_md_field_change(field_change))
                 lines.append(f'| {node_cell} | {field_cell} | {change_cell} |')
 
     # --- Version / Layout ---
     if org['version_change']:
-        old = _md_code(_fmt_value(org['version_change'][0]))
-        new = _md_code(_fmt_value(org['version_change'][1]))
+        old, new = (_md_code(text) for text in _fmt_pair(*org['version_change'], _md_code))
         lines.append('')
         lines.append(f'**Version:** {old} → {new}')
 
@@ -730,7 +927,7 @@ def render_markdown(diff: 'PipeDiff', *, title: Optional[str] = None) -> str:
         lines.append('| Field | Change |')
         lines.append('| --- | --- |')
         for field_change in org['viewport_changes']:
-            field_cell = _md_cell(_md_code(field_change.path))
+            field_cell = _md_cell(_md_code(_ident(field_change.path)))
             change_cell = _md_cell(_md_field_change(field_change))
             lines.append(f'| {field_cell} | {change_cell} |')
 

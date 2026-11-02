@@ -90,12 +90,31 @@ async function fetchReleases({ repo = REPO, fetchImpl = fetch } = {}) {
  * @return {string} the full Markdown document.
  */
 function releaseNotesMarkdown(releases) {
-	const lines = ['---', 'title: Release Notes', 'description: What shipped in each RocketRide release, generated from GitHub releases.', 'format: md', '---', '', '# Release Notes', '', `Stable releases of every RocketRide component, generated from [GitHub releases](https://github.com/${REPO}/releases)`, 'at build time — newest first. Components version independently, so entries interleave.', ''];
-	const stable = (releases || []).filter((r) => r && !r.draft && !r.prerelease).sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
+	const lines = [
+		'---',
+		'title: Release Notes',
+		'description: What shipped in each RocketRide release, generated from GitHub releases.',
+		'format: md',
+		'---',
+		'',
+		'# Release Notes',
+		'',
+		`Stable releases of every RocketRide component, generated from [GitHub releases](https://github.com/${REPO}/releases)`,
+		'at build time — newest first. Components version independently, so entries interleave.',
+		'',
+	];
+	const stable = (releases || [])
+		.filter((r) => r && !r.draft && !r.prerelease)
+		.sort((a, b) => new Date(b.published_at) - new Date(a.published_at));
 	for (const r of stable) {
 		const { component, version } = parseTag(r.tag_name);
 		const label = COMPONENT_LABELS[component] || component;
-		const date = new Date(r.published_at).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+		const date = new Date(r.published_at).toLocaleDateString('en-US', {
+			year: 'numeric',
+			month: 'long',
+			day: 'numeric',
+			timeZone: 'UTC',
+		});
 		lines.push(`## ${r.name || r.tag_name}`, '');
 		lines.push(`**${label}** · ${version || r.tag_name} · ${date} · [View on GitHub](${r.html_url})`, '');
 		const body = demoteHeadings(stripComments(r.body || '')).trim();

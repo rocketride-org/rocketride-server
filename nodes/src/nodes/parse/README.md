@@ -34,5 +34,15 @@ exact source cell, such as financial-table or regulatory extraction. For
 structure-preserving parsing that retains table HTML plus page and coordinate
 data, use the `datalab_parse` node instead.
 
+**Media is extracted only for connected lanes.** Images, audio and video are
+pulled out only when something is connected to the `image`, `audio` or `video`
+lane. This covers media embedded in documents parsed by Tika and standalone
+image, audio and video files, which still yield their metadata. A pipeline that
+uses only `text` or `table` skips them, which keeps PDFs that draw their pages
+as thousands of small images as fast to parse as any other. Parsers loaded by
+reflection, such as the optional Aspose PDF parser, still extract the images;
+only sending them to the lane is skipped. Connect the `image` lane, for example
+to an OCR node, to receive them.
+
 <!-- ROCKETRIDE:GENERATED:PARAMS START -->
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

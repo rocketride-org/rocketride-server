@@ -21,7 +21,6 @@
 # SOFTWARE.
 # =============================================================================
 
-import threading
 from rocketlib import IGlobalBase, OPEN_MODE
 from ai.common.config import Config
 
@@ -42,7 +41,8 @@ class IGlobal(IGlobalBase):
         This includes:
         - Importing and loading the embedding model for frame embedding.
         - Loading frame extraction configuration (interval, max frames, etc.).
-        - Creating a thread lock for device access during video processing.
+        - Creating the device guard for frame embedding: a lock in-process, a no-op
+          with --modelserver.
 
         Note:
             Nothing here loads or installs torch -- see
@@ -71,8 +71,13 @@ class IGlobal(IGlobalBase):
         self.duration = config.get('duration', 0)
         self.max_video_size_bytes = config.get('maxVideoSizeMB', 500) * 1024 * 1024
 
-        # Mutex for device access during video processing.
-        self.device_lock = threading.Lock()
+        # Local inference must serialize GPU access; with --modelserver this is a
+        # no-op so concurrent videos' frame requests reach the model server's
+        # workers instead of queueing here one frame at a time (the frames of one
+        # video are embedded in order either way).
+        from ai.common.models.base import make_device_lock
+
+        self.device_lock = make_device_lock()
 
     def endGlobal(self):
         """

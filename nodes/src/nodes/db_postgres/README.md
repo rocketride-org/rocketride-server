@@ -48,7 +48,7 @@ answer questions — with the SELECT-only whitelist keeping it read-safe.
 
 | Connection | Required | Description                                    |
 | ---------- | -------- | ---------------------------------------------- |
-| `llm`      | yes      | LLM used to generate SQL from natural language |
+| `llm`      | no       | LLM used to generate SQL from natural language; not needed for execute (raw SQL) |
 
 ## Lanes
 

@@ -47,10 +47,6 @@ from rocketride.otelbridge.setup import OtelNotInstalledError
 HAS_OTEL_SDK = (
     importlib.util.find_spec('opentelemetry') is not None and importlib.util.find_spec('opentelemetry.sdk') is not None
 )
-try:
-    HAS_GRPC_EXPORTER = importlib.util.find_spec('opentelemetry.exporter.otlp.proto.grpc') is not None
-except (ImportError, ValueError):
-    HAS_GRPC_EXPORTER = False
 
 # The rocketride.cli package re-exports the main() FUNCTION under the name
 # 'main', shadowing the main module; import the module explicitly.
@@ -85,6 +81,19 @@ class FakeClient:
 
     async def disconnect(self):
         pass
+
+
+class RefusingClient(FakeClient):
+    """FakeClient whose connect fails, so a bridge that reaches it returns instead of looping."""
+
+    async def connect(self):
+        """Record the attempt, then fail it.
+
+        Raises:
+            ConnectionError: Always.
+        """
+        await super().connect()
+        raise ConnectionError('test client refuses to connect')
 
 
 def make_args(**overrides):
@@ -320,12 +329,15 @@ class TestOtelExecute:
         assert 'opentelemetry-exporter-otlp-proto-grpc' in capsys.readouterr().err
 
     @pytest.mark.skipif(not HAS_OTEL_SDK, reason="requires the 'otel' extra")
-    @pytest.mark.skipif(HAS_GRPC_EXPORTER, reason='OTLP gRPC exporter is installed')
-    async def test_real_grpc_protocol_without_exporter_exits_2(self, capsys):
-        # Nothing faked: the real run_bridge -> build_providers path must
-        # surface the missing gRPC exporter as exit code 2 with the hint.
-        exit_code = await run_otel(make_args(protocol='grpc'), FakeClient())
+    async def test_real_grpc_protocol_without_exporter_exits_2(self, capsys, no_grpc_exporter):
+        # Nothing in the bridge is faked: the real run_bridge -> build_providers
+        # path must surface the missing gRPC exporter as exit code 2 with the hint.
+        client = RefusingClient()
 
+        exit_code = await run_otel(make_args(protocol='grpc'), client)
+
+        # The missing exporter must refuse before any connection attempt
+        assert client.connect_calls == 0
         assert exit_code == 2
         assert 'opentelemetry-exporter-otlp-proto-grpc' in capsys.readouterr().err
 

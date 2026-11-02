@@ -378,7 +378,8 @@ def test_normalize_non_dict_json_returns_empty() -> None:
 # ---------------------------------------------------------------------------
 
 # Expected bare tool names from VectorStoreToolMixin
-_EXPECTED_TOOLS = {'search', 'upsert', 'delete', 'objdir', 'stats', 'get'}
+# list_documents is not among them: FakeStore does not set supports_document_listing.
+_EXPECTED_TOOLS = {'search', 'upsert', 'delete', 'soft_delete', 'restore', 'objdir', 'stats', 'get'}
 
 
 def test_collect_tool_methods_returns_bare_names() -> None:
@@ -731,7 +732,7 @@ def test_delete_calls_store_remove() -> None:
 
     result = instance.delete({'object_ids': ['a', 'b', 'c']})
 
-    assert result == {'success': True, 'deleted_count': 3}
+    assert result == {'success': True, 'deleted_count': 3, 'object_ids': ['a', 'b', 'c']}
     assert store.removed_ids == [['a', 'b', 'c']]
 
 
@@ -740,7 +741,7 @@ def test_delete_strips_whitespace_and_drops_empty() -> None:
     instance = FakeIInstance(FakeIGlobal(store=store, server_name='vdb'))
 
     result = instance.delete({'object_ids': ['  id-1 ', '', '   ', 'id-2']})
-    assert result == {'success': True, 'deleted_count': 2}
+    assert result == {'success': True, 'deleted_count': 2, 'object_ids': ['id-1', 'id-2']}
     assert store.removed_ids == [['id-1', 'id-2']]
 
 

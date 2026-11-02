@@ -559,3 +559,40 @@ def pack_app_source(
         uncompressed_bytes=uncompressed,
         zipped_bytes=len(zipped),
     )
+
+
+def read_project_id_at(workspace_root: str, app_root: str) -> Optional[str]:
+    """Read the working-copy projectId of the app at ``app_root`` without writing.
+
+    The appManifest's ``projectId`` wins; a legacy ``{id, projectId}``
+    ``<name>.rrapp`` marker is the fallback. Deploys only forward this id
+    as provenance and never stamp it: it is written at creation
+    (``create_app_workspace``) and by the editor, so CI and read-only
+    checkouts deploy unchanged. Mirrors the TypeScript ``readProjectIdAt``.
+
+    :param workspace_root: The workspace the app folder resolves against.
+    :param app_root: The app folder, absolute or workspace-relative.
+    :returns: The projectId, or None when the working copy has none.
+    :raises ValueError: When the folder is missing or outside the workspace.
+    """
+    _, app_abs, _ = _resolve_app_root(workspace_root, app_root)
+    try:
+        with open(os.path.join(app_abs, 'package.json'), 'r', encoding='utf-8') as f:
+            manifest = (json.load(f) or {}).get('appManifest') or {}
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not isinstance(manifest, dict):
+        return None
+    project_id = manifest.get('projectId')
+    if isinstance(project_id, str) and project_id:
+        return project_id
+    app_id = manifest.get('id')
+    if not isinstance(app_id, str) or not app_id:
+        return None
+    try:
+        with open(os.path.join(app_abs, f'{app_id.split(".")[-1]}.rrapp'), 'r', encoding='utf-8') as f:
+            legacy = json.load(f)
+    except (OSError, ValueError):
+        return None
+    legacy_id = legacy.get('projectId') if isinstance(legacy, dict) else None
+    return legacy_id if isinstance(legacy_id, str) and legacy_id else None
