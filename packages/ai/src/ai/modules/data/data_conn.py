@@ -737,7 +737,12 @@ class DataConn(DAPConn):
             raise ValueError(f'Write pipe with id {pipe_id} has failed')
 
         def write_sync():
+            """Write this request's data to the pipe on its lane (runs in a worker thread).
 
+            Raises:
+                ValueError: The request has no data, the lane is unknown, or the data does not parse for its lane.
+                UnicodeDecodeError: Text-lane data is not valid UTF-8.
+            """
             # Get the data to write
             data: bytes = args.get('data', None)
             if data is None:
@@ -868,6 +873,14 @@ class DataConn(DAPConn):
             self._reset_pipe_activity(conn_pipe)
 
             def close_sync():
+                """End and close the pipe, then collect the pipeline's results (runs in a worker thread).
+
+                Returns:
+                    The object's response with its objectId, and its error when the object failed.
+
+                Raises:
+                    UnicodeDecodeError: The text-lane data ended inside a character.
+                """
                 # Text that ends inside a character is truncated; a failed pipe already reported its error
                 if conn_pipe.lane == 'text' and not conn_pipe.has_failed:
                     conn_pipe.text_decoder.decode(b'', final=True)
