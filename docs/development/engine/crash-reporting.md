@@ -70,20 +70,20 @@ own `ROCKETRIDE_CRASHDB_DIR` to keep them apart.
 
 ## Getting a dump by hand
 
-The file in the database is already a complete minidump, so you do not have to
-restart the engine to collect one. Restarting only moves and renames it.
+A dump left in the database is already a complete minidump: take it from there.
 
 ```bash
 # after the crash -- the glob avoids computing the exe hash yourself
-ls -l /tmp/rocketride-crashdb-$(id -u)-*/pending/*.dmp
+# (with ROCKETRIDE_CRASHDB_DIR set, look in "$ROCKETRIDE_CRASHDB_DIR"/pending/)
+ls -l "${TMPDIR:-/tmp}"/rocketride-crashdb-$(id -u)-*/pending/*.dmp
 ```
 
 Read `pending/`, not `new/`: Crashpad writes into `new/` and moves the report to
 `pending/` once it is complete.
 
-If you do restart, the dump is no longer in the database. It has been moved to
-the crash-dump location -- `<base>/logs/` when a task set it, otherwise the
-system temp dir -- and renamed to
+A dump the crashing process reported is no longer in the database. It has been
+moved to the crash-dump location -- `<base>/logs/` when a task set it, otherwise
+the system temp dir -- and renamed to
 `<exe>.<version>.<build>.<host>.<UTC-timestamp>.<pid>.dmp`.
 
 ## Generating symbols
@@ -173,9 +173,9 @@ to index that DWARF; that is work, not a hang.
 
 ### Worked example (`aptest`)
 
-`./builder server:test` sweeps each crash dump the engine test suite produces
-into the crash-dump location, so a failing test leaves you a dump named by the
-pattern above. Point LLDB at the test binary and that dump:
+The `crashpad` test in `aptest` crashes a child started with `--dumps`, which
+moves its own dump into the crash-dump location, named by the pattern above.
+Point LLDB at the test binary and that dump:
 
 ```bash
 DEBUGINFOD_URLS= lldb --batch \
