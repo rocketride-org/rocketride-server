@@ -823,13 +823,14 @@ class FileStore:
 
     async def delete(self, path: str) -> None:
         """
-        Delete a file.
+        Delete a file (or an empty directory created with mkdir).
 
         Args:
             path: Relative path within the account store.
 
         Raises:
-            StorageError: If file does not exist, delete fails, or file is open for writing.
+            StorageError: If file does not exist, delete fails, target is a
+                non-empty directory, or file is open for writing.
         """
         full_path, kind, rest = self._resolve(path)
         # Root guard: deleting a root — the caller's own account root
@@ -838,6 +839,18 @@ class FileStore:
             raise StorageError('Cannot delete a scope root')
         if full_path in self._write_locks:
             raise StorageError(f'Cannot delete file while it is open for writing: {path}')
+
+        # Check whether the target is a directory rather than a regular file.
+        dir_prefix = full_path.rstrip('/') + '/'
+        listed = await self._store.list_files(dir_prefix)
+        children = [f for f in listed if f != full_path and f.startswith(dir_prefix)]
+        if children and full_path not in listed:
+            non_marker = [f for f in children if not f.endswith('/' + DIR_MARKER)]
+            if non_marker:
+                raise StorageError(f'Directory not empty: {path}')
+            await self.rmdir(path, recursive=False)
+            return
+
         await self._store.delete_file(full_path)
 
     async def list_dir(self, path: str = '') -> dict:

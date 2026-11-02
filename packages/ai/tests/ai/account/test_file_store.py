@@ -235,6 +235,25 @@ class TestDelete:
         with pytest.raises(StorageError):
             await fs.delete('ghost.txt')
 
+    @pytest.mark.asyncio
+    async def test_delete_empty_directory(self, fs):
+        """Deleting an empty directory created with mkdir removes it cleanly."""
+        await fs.mkdir('emptydir')
+        assert (await fs.stat('emptydir'))['exists'] is True
+
+        await fs.delete('emptydir')
+        assert (await fs.stat('emptydir'))['exists'] is False
+
+    @pytest.mark.asyncio
+    async def test_delete_nonempty_directory_raises(self, fs):
+        """Deleting a non-empty directory via delete() raises Directory not empty."""
+        await fs.write('nonempty/file.txt', b'data')
+
+        with pytest.raises(StorageError, match='Directory not empty'):
+            await fs.delete('nonempty')
+
+        assert await fs.read('nonempty/file.txt') == b'data'
+
 
 # ============================================================================
 # Directory Operations

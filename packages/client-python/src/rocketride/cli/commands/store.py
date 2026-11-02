@@ -134,6 +134,13 @@ async def run_store(args) -> int:
             out.result({'path': args.path, 'created': True})
             return 0
 
+        if subcommand == 'rmdir':
+            recursive = bool(getattr(args, 'recursive', False))
+            await client.fs_rmdir(args.path, recursive=recursive)
+            out.line(f'Removed: {args.path}/')
+            out.result({'path': args.path, 'removed': True, 'recursive': recursive})
+            return 0
+
         if subcommand == 'stat':
             result = await client.fs_stat(args.path)
             if not result.get('exists'):

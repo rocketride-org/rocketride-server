@@ -472,6 +472,13 @@ def setup_parser() -> argparse.ArgumentParser:
     _add_connection_args(mkdir_parser)
     mkdir_parser.add_argument('path', help='Directory path')
 
+    rmdir_parser = store_subparsers.add_parser('rmdir', help='Remove a directory')
+    _add_connection_args(rmdir_parser)
+    rmdir_parser.add_argument('path', help='Directory path')
+    rmdir_parser.add_argument(
+        '-r', '--recursive', action='store_true', help='Remove directory and its contents recursively'
+    )
+
     stat_parser = store_subparsers.add_parser('stat', help='Get file/directory metadata')
     _add_connection_args(stat_parser)
     stat_parser.add_argument('path', help='File or directory path')
