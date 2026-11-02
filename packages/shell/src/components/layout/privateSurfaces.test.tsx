@@ -20,9 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+/// <reference types="node" />
+
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import { AppErrorBoundary } from './AppErrorBoundary';
