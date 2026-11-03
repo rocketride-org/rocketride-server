@@ -1676,6 +1676,34 @@ async def test_resolve_rewrites_relative_icon_to_versioned_url(registry):
 
 
 @pytest.mark.asyncio
+async def test_resolve_rewrites_relative_readme_to_versioned_url(registry):
+    """The manifest's app-relative readme ('./README.md') resolves to the
+    version's constructed serving URL, matching icon resolution so the store
+    detail panel can fetch it. Seeded absolute paths pass through verbatim;
+    empty or traversal paths resolve to ''.
+    """
+    registry.add_version(1, '1.0.0', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    row = registry.publishes[('acme.brandy', 'public~')]
+
+    row['snapshot'] = {'name': 'Brandy', 'readmePath': './README.md'}
+    resolved = await resolve_app_pins('org1', 'u1', [])
+    assert resolved[0]['readme'] == '/apps/acme.brandy/v1/README.md'
+
+    row['snapshot'] = {'name': 'Brandy', 'readmePath': '/apps/acme.brandy/README.md'}
+    resolved = await resolve_app_pins('org1', 'u1', [])
+    assert resolved[0]['readme'] == '/apps/acme.brandy/README.md'
+
+    row['snapshot'] = {'name': 'Brandy', 'readmePath': '../secret.md'}
+    resolved = await resolve_app_pins('org1', 'u1', [])
+    assert resolved[0]['readme'] == ''
+
+    row['snapshot'] = {'name': 'Brandy'}
+    resolved = await resolve_app_pins('org1', 'u1', [])
+    assert resolved[0]['readme'] == ''
+
+
+@pytest.mark.asyncio
 async def test_resolve_internal_serves_unapproved_but_not_failed(registry):
     """Internal (team/user) bindings serve any internal-eligible deployment
     ('private'/'submit'/'ready') but never a 'failed' one.
