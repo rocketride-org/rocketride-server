@@ -12,7 +12,8 @@
 		"description": "Real-time server dashboard showing connections, tasks, and activity",
 		"icon": "./src/icon.svg",
 		"categories": [
-			"tools"
+			"tools",
+			"devTool"
 		],
 		"mode": "free",
 		"authenticated": true,
@@ -38,7 +39,7 @@
 		"shell": "file:../../.rocketride/shell/shell.tgz"
 	},
 	"devDependencies": {
-		"@rsbuild/core": "~2.0.11",
+		"@rsbuild/core": "~2.2.12",
 		"@rsbuild/plugin-react": "~2.0.1",
 		"typescript": "^5.3.0",
 		"@types/react": "~18.3.31",

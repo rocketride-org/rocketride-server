@@ -102,13 +102,13 @@ export function openConnection(docs: Documents, conn: SavedConnection) {
 // =============================================================================
 
 const TestApp: React.FC<ShellAppProps> = (_props) => {
-	const { seeded, appState, updateAppState } = useWorkspace();
+	const { seeded, appState, updateAppState, flushWorkspaceNow } = useWorkspace();
 	const [ready, setReady] = useState(false);
 
 	useEffect(() => {
 		if (!seeded) return;
 
-		createDocs({ appState, updateAppState });
+		createDocs({ appState, updateAppState, flushNow: flushWorkspaceNow });
 		initConnectionStore(appState, updateAppState);
 		setReady(true);
 
@@ -191,7 +191,7 @@ const TestAppReady: React.FC<{ docs: Documents }> = ({ docs }) => {
 								isActive={state.activeGroupId === groupId}
 								canClose={canCloseGroups}
 								onSplit={(gid, dir) => docs.splitGroupWithDocument(gid, dir)}
-								onCloseGroup={(gid) => docs.closeGroup(gid)}
+								onCloseGroup={(gid) => { void docs.requestCloseGroup(gid); }}
 							/>
 
 							{/* Session content — all editors rendered, active shown, others hidden */}

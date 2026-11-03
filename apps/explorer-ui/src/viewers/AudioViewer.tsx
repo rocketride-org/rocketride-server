@@ -26,7 +26,7 @@
 
 import React, { useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { RocketRideClient } from 'shell';
+import type { ExplorerViewerFs } from '../fs';
 import { viewerStyles } from './styles';
 
 const styles = {
@@ -54,11 +54,12 @@ const styles = {
 };
 
 interface Props {
-	client: RocketRideClient;
+	/** The store slice this viewer streams through (never a client). */
+	fs: ExplorerViewerFs;
 	uri: string;
 }
 
-export const AudioViewer: React.FC<Props> = ({ client, uri }) => {
+export const AudioViewer: React.FC<Props> = ({ fs, uri }) => {
 	const [url, setUrl] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const fileName = uri.includes('/') ? uri.substring(uri.lastIndexOf('/') + 1) : uri;
@@ -67,11 +68,11 @@ export const AudioViewer: React.FC<Props> = ({ client, uri }) => {
 		setUrl(null);
 		setError(null);
 		let cancelled = false;
-		client.fsGetUrl(uri)
+		fs.getUrl(uri)
 			.then((u) => { if (!cancelled) setUrl(u); })
 			.catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
 		return () => { cancelled = true; };
-	}, [client, uri]);
+	}, [fs, uri]);
 
 	if (error) return <div style={viewerStyles.message}>{error}</div>;
 	if (!url) return <div style={viewerStyles.message}>Loading audio...</div>;

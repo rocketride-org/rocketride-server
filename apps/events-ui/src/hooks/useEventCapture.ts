@@ -36,7 +36,7 @@
 // =============================================================================
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useClient, useShellEvent } from 'shell';
+import { ConnectionManager, useShellConnection, useShellEvent } from 'shell';
 import type { CaptureSnapshot, CapturedEvent, EventRow, MonitorConfig } from '../types';
 import { EVENT_TYPE_NAMES, FLUSH_INTERVAL_MS, MAX_EVENTS } from '../types';
 import { summarize } from '../format';
@@ -111,7 +111,7 @@ function buildRows(events: CapturedEvent[]): EventRow[] {
  * @returns The capture snapshot plus the config and action handlers.
  */
 export function useEventCapture(): IUseEventCaptureResult {
-	const client = useClient();
+	const { isConnected } = useShellConnection();
 
 	// ── Capture buffer + metric accumulators (mutable refs, not React state:
 	//    they churn per-event and must not each trigger a render). ────────────
@@ -207,10 +207,15 @@ export function useEventCapture(): IUseEventCaptureResult {
 	});
 
 	// Subscribe on start, unsubscribe on stop; a failed subscribe resets active.
+	// Through the realm client, which forwards monitors to the root broker
+	// (the engine-side registration and, in multi-realm hosts, the
+	// cross-realm refcounts live there).
 	useEffect(() => {
-		if (!client) return;
+		if (!isConnected) return;
 		if (!config.active) return;
 
+		const client = ConnectionManager.getInstance().getClient();
+		if (!client) return;
 		// The monitor is keyed on the token; the types select the categories.
 		const key = { token: config.token };
 		client.addMonitor(key, config.types).catch((err) => {
@@ -223,7 +228,7 @@ export function useEventCapture(): IUseEventCaptureResult {
 				console.error('[events-ui] removeMonitor failed', err);
 			});
 		};
-	}, [client, config.active, config.token, config.types]);
+	}, [isConnected, config.active, config.token, config.types]);
 
 	// Cancel any pending flush on unmount (no timer outlives the component).
 	useEffect(() => {
@@ -278,7 +283,7 @@ export function useEventCapture(): IUseEventCaptureResult {
 	return {
 		config,
 		snapshot,
-		connected: Boolean(client),
+		connected: isConnected,
 		toggleActive,
 		clear,
 		setToken,

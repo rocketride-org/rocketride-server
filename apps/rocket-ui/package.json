@@ -10,7 +10,7 @@
 		"id": "rocketride.pipeBuilder",
 		"projectId": "f648481f-cee8-4edd-95c6-c7bd192457d7",
 		"publisher": "Aparavi Software AG",
-		"name": "Pipeline Builder",
+		"name": "Rocket Builder",
 		"description": "Design, run, and deploy AI pipelines visually.",
 		"readme": "./README.md",
 		"icon": "./icon.svg",
@@ -19,76 +19,6 @@
 			"ai"
 		],
 		"mode": "paywall",
-		"contributes": {
-			"configuration": {
-				"title": "Pipeline Builder",
-				"properties": {
-					"rocketride.pipeBuilder.pipelineRestartBehavior": {
-						"type": "string",
-						"enum": [
-							"auto",
-							"manual",
-							"prompt"
-						],
-						"enumDescriptions": [
-							"Automatically restart when .pipe changes",
-							"Do not automatically restart",
-							"Prompt to restart when .pipe changes"
-						],
-						"default": "prompt",
-						"order": 1,
-						"description": "Behavior when a .pipe file changes while the pipeline is running."
-					},
-					"rocketride.pipeBuilder.pipelineTTL": {
-						"type": "integer",
-						"enum": [
-							900,
-							1800,
-							3600,
-							14400,
-							28800,
-							0
-						],
-						"enumDescriptions": [
-							"15 minutes",
-							"30 minutes",
-							"1 hour",
-							"4 hours",
-							"8 hours",
-							"Run forever or until you stop it"
-						],
-						"default": 900,
-						"minimum": 0,
-						"order": 2,
-						"description": "Default idle timeout before a running pipeline is shut down."
-					},
-					"rocketride.pipeBuilder.pipelineTraceLevel": {
-						"type": "string",
-						"enum": [
-							"none",
-							"metadata",
-							"summary",
-							"full"
-						],
-						"default": "full",
-						"order": 3,
-						"description": "Controls tracing verbosity for pipeline execution."
-					},
-					"rocketride.pipeBuilder.taskArguments": {
-						"type": "string",
-						"default": "",
-						"order": 4,
-						"description": "Additional command-line arguments passed to each pipeline task."
-					},
-					"rocketride.pipeBuilder.pipelineDebugOutput": {
-						"type": "boolean",
-						"default": false,
-						"order": 5,
-						"description": "Enable full debug output for pipeline tasks (--trace=debugOut)."
-					}
-				}
-			}
-		},
 		"billing": {
 			"plans": [
 				{
@@ -437,9 +367,8 @@
 				}
 			]
 		},
-		"typecheck": true,
 		"include": [
-			"apps/shared"
+			"rocketride-server/apps/shared"
 		]
 	},
 	"scripts": {
@@ -459,8 +388,10 @@
 		"@fontsource/quicksand": "~5.0.18",
 		"@fontsource/roboto": "~5.0.13",
 		"@fontsource/roboto-condensed": "~5.0.17",
+		"@babel/standalone": "^7.26.0",
 		"@fontsource/ubuntu-mono": "~5.0.20",
 		"@module-federation/rsbuild-plugin": "^2.5.1",
+		"@typescript/ata": "^0.9.8",
 		"@mui/icons-material": "~6.1.5",
 		"@mui/material": "~6.1.5",
 		"@mui/styles": "~5.16.7",
@@ -469,13 +400,15 @@
 		"boxicons": "^2.1.4",
 		"chart.js": "^4.4.0",
 		"clsx": "~2.1.1",
+		"es-module-lexer": "^1.7.0",
+		"fflate": "^0.8.2",
 		"i18next": "~23.11.3",
 		"immer": "~9.0.6",
 		"lodash": "~4.18.1",
 		"lucide-react": "^0.577.0",
 		"markdown-to-jsx": "~7.7.16",
 		"moment": "~2.30.1",
-		"posthog-js": "~1.274.1",
+		"monaco-editor": "^0.55.1",
 		"react": "^18.2.0",
 		"react-canny": "~0.0.8",
 		"react-dom": "^18.2.0",
@@ -483,6 +416,7 @@
 		"react-joyride": "~2.9.3",
 		"react-json-view": "~1.21.3",
 		"react-markdown": "^10.1.0",
+		"react-refresh": "^0.14.2",
 		"react-social-icons": "~6.24.0",
 		"react-syntax-highlighter": "^15.6.6",
 		"react-virtualized-auto-sizer": "~1.0.24",
@@ -491,7 +425,8 @@
 		"remark-gfm": "^4.0.1",
 		"shared": "file:../shared",
 		"rocketride": "workspace:*",
-		"shell": "file:../../.rocketride/shell/shell.tgz"
+		"shell": "file:../../.rocketride/shell/shell.tgz",
+		"typescript": "^5.3.0"
 	},
 	"engines": {
 		"node": ">=20.11.0",
@@ -499,14 +434,13 @@
 	},
 	"devDependencies": {
 		"@chromatic-com/storybook": "^1.7.0",
-		"@rsbuild/core": "~2.0.11",
+		"@rsbuild/core": "~2.2.12",
 		"@rsbuild/plugin-react": "~2.0.1",
 		"@rsbuild/plugin-sass": "~1.5.3",
 		"@simbathesailor/use-what-changed": "~2.0.0",
 		"@types/react": "~18.3.31",
 		"@types/react-dom": "~18.3.7",
 		"@types/react-syntax-highlighter": "^15.5.13",
-		"prop-types": "^15.8.1",
-		"typescript": "^5.3.0"
+		"prop-types": "^15.8.1"
 	}
 }

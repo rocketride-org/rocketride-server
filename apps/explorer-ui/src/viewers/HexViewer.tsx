@@ -35,7 +35,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { RocketRideClient } from 'shell';
+import type { ExplorerViewerFs } from '../fs';
 import { viewerStyles } from './styles';
 
 // -----------------------------------------------------------------------------
@@ -496,11 +496,12 @@ class RangeDataSource {
 // -----------------------------------------------------------------------------
 
 interface Props {
-	client: RocketRideClient;
+	/** The store slice this viewer streams through (never a client). */
+	fs: ExplorerViewerFs;
 	uri: string;
 }
 
-export const HexViewer: React.FC<Props> = ({ client, uri }) => {
+export const HexViewer: React.FC<Props> = ({ fs, uri }) => {
 	const [mode, setMode] = useState<DisplayMode>('byte');
 	const [endian, setEndian] = useState<Endianness>('little');
 	const [hoveredRowIdx, setHoveredRowIdx] = useState(-1);
@@ -526,9 +527,9 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 		let disposed = false;
 
 		const ds = new RangeDataSource(
-			() => client.fsGetUrl(uri),
+			() => fs.getUrl(uri),
 			async () => {
-				const stat = await client.fsStat(uri);
+				const stat = await fs.stat(uri);
 				return stat.size ?? 0;
 			},
 			() => { if (!disposed) setTick(t => t + 1); },
@@ -551,7 +552,7 @@ export const HexViewer: React.FC<Props> = ({ client, uri }) => {
 			ds.dispose();
 			dsRef.current = null;
 		};
-	}, [client, uri]);
+	}, [fs, uri]);
 
 	// --- Track viewport size for virtual scrolling ---------------------------
 
