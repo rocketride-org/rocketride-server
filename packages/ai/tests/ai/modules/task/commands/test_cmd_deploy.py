@@ -194,6 +194,75 @@ class TestPublish:
         account_stub.deployments_deploy.assert_not_awaited()
 
 
+class TestPipeDoorNamespace:
+    """rocketride-ai/rocketride-saas#1011: the pipe door mints pipes, never app ids or app-owned metadata."""
+
+    @staticmethod
+    def _dev_conn(developer_id='acme'):
+        info = _account_info()
+        info.organization['developerId'] = developer_id
+        return _make_conn(info)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('project_id', ['acme', 'acme.brandy', 'acme.deep.name'])
+    async def test_pipe_inside_the_callers_app_namespace_is_refused(self, account_stub, project_id):
+        conn = self._dev_conn()
+        account_stub.deployments_versions.return_value = []
+        with pytest.raises(ValueError, match='developer namespace'):
+            await conn._deploy_add_pipe({}, {'pipeline': {**PIPE, 'project_id': project_id}})
+        account_stub.deployments_publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_existing_own_pipe_keeps_publishing_inside_the_namespace(self, account_stub):
+        """Claiming a developer id must not strand a pipe the org already ships."""
+        conn = self._dev_conn()
+        account_stub.deployments_versions.return_value = [{'version': 1, 'kind': 'pipe'}]
+        await conn._deploy_add_pipe({}, {'pipeline': {**PIPE, 'project_id': 'acme.legacy'}})
+        account_stub.deployments_publish.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_namespace_id_with_an_app_row_stays_refused(self, account_stub):
+        conn = self._dev_conn()
+        account_stub.deployments_versions.return_value = [
+            {'version': 1, 'kind': 'pipe'},
+            {'version': 2, 'kind': 'app'},
+        ]
+        with pytest.raises(ValueError, match='developer namespace'):
+            await conn._deploy_add_pipe({}, {'pipeline': {**PIPE, 'project_id': 'acme.brandy'}})
+        account_stub.deployments_publish.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('project_id', ['proj-1', 'acmex', 'acme-brandy', '0b6b2a52-6a61-4f3f-9a38-2d1f2f7e5a11'])
+    async def test_ordinary_and_lookalike_pipe_ids_still_publish(self, account_stub, project_id):
+        conn = self._dev_conn()
+        await conn._deploy_add_pipe({}, {'pipeline': {**PIPE, 'project_id': project_id}})
+        assert account_stub.deployments_publish.await_args.args[1] == project_id
+
+    @pytest.mark.asyncio
+    async def test_org_without_a_developer_id_publishes_pipes_as_before(self, account_stub):
+        conn = _make_conn(_account_info())
+        await conn._deploy_add_pipe({}, {'pipeline': {**PIPE, 'project_id': 'acme.brandy'}})
+        account_stub.deployments_publish.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_caller_cannot_forge_the_build_lifecycle(self, account_stub):
+        conn = _make_conn(_account_info())
+        sent = {'build': {'status': 'ok'}, 'manifest': {'name': 'Mine'}, 'projectId': 'p'}
+        await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'metadata': sent})
+
+        stored = account_stub.deployments_publish.await_args.kwargs['metadata']
+        assert 'build' not in stored
+        assert stored == {'manifest': {'name': 'Mine'}, 'projectId': 'p'}
+        # The caller's own dict is not mutated.
+        assert 'build' in sent
+
+    @pytest.mark.asyncio
+    async def test_absent_metadata_stays_absent(self, account_stub):
+        conn = _make_conn(_account_info())
+        await conn._deploy_add_pipe({}, {'pipeline': PIPE})
+        assert account_stub.deployments_publish.await_args.kwargs['metadata'] is None
+
+
 # ============================================================================
 # deploy
 # ============================================================================
