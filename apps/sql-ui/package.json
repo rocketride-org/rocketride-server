@@ -17,7 +17,8 @@
 		],
 		"mode": "free",
 		"authenticated": true,
-		"showStatusBar": true
+		"showStatusBar": true,
+		"readme": "./README.md"
 	},
 	"scripts": {
 		"build": "rsbuild build",
@@ -33,7 +34,6 @@
 		"safari >= 13"
 	],
 	"dependencies": {
-		"@module-federation/rsbuild-plugin": "^2.5.1",
 		"@xyflow/react": "~12.3.4",
 		"elkjs": "~0.9.3",
 		"monaco-editor": "^0.55.1",
@@ -43,6 +43,7 @@
 		"shell": "file:../../.rocketride/shell/shell.tgz"
 	},
 	"devDependencies": {
+		"@module-federation/rsbuild-plugin": "^2.5.1",
 		"@rsbuild/core": "~2.2.12",
 		"@rsbuild/plugin-react": "~2.0.1",
 		"typescript": "^5.3.0",
