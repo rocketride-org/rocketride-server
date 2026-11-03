@@ -230,6 +230,19 @@ const styles = {
 	} as CSSProperties,
 	// Borderless glyph close button, right-aligned in the header row. Matches the
 	// account Modal idiom; the header's flex pushes it to the trailing edge.
+	// Never taller than the window: the box caps at the viewport (less a
+	// margin) and its body scrolls, so the header and footer stay in view
+	// however tall the content is.
+	fitViewport: {
+		display: 'flex',
+		flexDirection: 'column',
+		maxHeight: 'calc(100vh - 32px)',
+	} as CSSProperties,
+	scrollBody: {
+		flex: 1,
+		minHeight: 0,
+		overflowY: 'auto',
+	} as CSSProperties,
 	close: {
 		marginLeft: 'auto',
 		background: 'none',
@@ -348,7 +361,7 @@ export function Modal({
 				aria-labelledby={labelledByTitle ? titleId : undefined}
 				// tabIndex -1 lets the box itself hold focus when it has no tabbable child.
 				tabIndex={-1}
-				style={width != null ? { ...commonStyles.modalDialog, width } : commonStyles.modalDialog}
+				style={width != null ? { ...commonStyles.modalDialog, ...styles.fitViewport, width } : { ...commonStyles.modalDialog, ...styles.fitViewport }}
 			>
 				{/* Header: title on the left, optional ✕ pushed to the trailing edge.
 				    display:contents keeps the id-carrying wrapper out of the flex layout. */}
@@ -363,7 +376,7 @@ export function Modal({
 					)}
 				</div>
 				{/* Body. */}
-				<div style={noBodyPadding ? undefined : commonStyles.modalBody}>{children}</div>
+				<div style={noBodyPadding ? styles.scrollBody : { ...commonStyles.modalBody, ...styles.scrollBody }}>{children}</div>
 				{/* Optional footer action row. */}
 				{footer != null && <div style={commonStyles.modalFooter}>{footer}</div>}
 			</div>

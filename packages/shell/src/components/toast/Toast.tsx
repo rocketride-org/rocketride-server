@@ -111,7 +111,13 @@ function ToastItem({ toast }: { toast: IToast }): React.ReactElement {
 				if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setIsPaused(false);
 			}}
 		>
-			<span className="rr-toast__icon" aria-hidden="true" />
+			{toast.icon ? (
+				<span className="rr-toast__icon rr-toast__icon--glyph" aria-hidden="true">
+					{toast.icon}
+				</span>
+			) : (
+				<span className="rr-toast__icon" aria-hidden="true" />
+			)}
 			<div className="rr-toast__body">
 				{toast.title && <div className="rr-toast__title">{toast.title}</div>}
 				<div>{toast.message}</div>

@@ -809,6 +809,8 @@ import type { ShellSidebarFooter as Frozen_ShellSidebarFooter } from '../contrac
 import type { ShellSidebarFooter as Current_ShellSidebarFooter } from './api';
 import type { ViewMenuTag as Frozen_ViewMenuTag } from '../contract/versions/v12';
 import type { ViewMenuTag as Current_ViewMenuTag } from './api';
+import type { ButtonTone as Frozen_ButtonTone } from '../contract/versions/v12';
+import type { ButtonTone as Current_ButtonTone } from './api';
 import type { IAttentionRingProps as Frozen_IAttentionRingProps } from '../contract/versions/v12';
 import type { IAttentionRingProps as Current_IAttentionRingProps } from './api';
 import type { ICoachMarkProps as Frozen_ICoachMarkProps } from '../contract/versions/v12';
@@ -1641,6 +1643,8 @@ const _t_ShellSidebarFooter: Frozen_ShellSidebarFooter = {} as Current_ShellSide
 void _t_ShellSidebarFooter;
 const _t_ViewMenuTag: Frozen_ViewMenuTag = {} as Current_ViewMenuTag;
 void _t_ViewMenuTag;
+const _t_ButtonTone: Frozen_ButtonTone = {} as Current_ButtonTone;
+void _t_ButtonTone;
 const _t_IAttentionRingProps: Frozen_IAttentionRingProps = {} as Current_IAttentionRingProps;
 void _t_IAttentionRingProps;
 const _t_ICoachMarkProps: Frozen_ICoachMarkProps = {} as Current_ICoachMarkProps;

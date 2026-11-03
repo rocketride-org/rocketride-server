@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-02T23:00:29.987Z
-// Source commit: fd1b9454f0716bc82ac5a9352613137c63a9724e
+// Generated:     2026-11-03T21:00:56.811Z
+// Source commit: c5b662dff9d9a195b1b4b7e6c92c0c6c851e50f3
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -9602,6 +9602,8 @@ export declare const BxServer: IconComponent;
 export declare const BxBuildings: IconComponent;
 export declare const BxClipboard: IconComponent;
 export declare const BxCompass: IconComponent;
+export declare const BxDollar: IconComponent;
+export declare const BxError: IconComponent;
 export declare const BxPin: IconComponent;
 export declare const BxTrophy: IconComponent;
 export declare const BxFolder: IconComponent;
@@ -9890,10 +9892,14 @@ export interface ViewMenu {
 }
 /** Visual variant of a {@link Button}. */
 export type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+/** Status tint for a {@link Button}: `success` is green, `danger` is red. */
+export type ButtonTone = "success" | "danger";
 /** Props for the {@link Button} component. */
 export interface IButtonProps {
     /** Visual variant. Defaults to `'primary'`. */
     variant?: ButtonVariant;
+    /** Status tint for the border and label; the variant still sets the fill. */
+    tone?: ButtonTone;
     /** Render the compact (26px tall) size. */
     small?: boolean;
     /** Render the micro (16px tall) size — canvas-node chrome. Wins over `small`. */
@@ -9923,7 +9929,7 @@ export interface IButtonProps {
  * @param props - {@link IButtonProps}.
  * @returns The button element.
  */
-export declare function Button({ variant, small, mini, disabled, onClick, children, title, pressed, ariaExpanded }: IButtonProps): React$1.ReactElement;
+export declare function Button({ variant, tone, small, mini, disabled, onClick, children, title, pressed, ariaExpanded }: IButtonProps): React$1.ReactElement;
 /** Semantic state variant shared by {@link StatusBadge} and {@link StatusDot}. */
 export type StatusVariant = "success" | "info" | "warning" | "error" | "muted";
 /** Props for the {@link StatusBadge} component. */
@@ -11993,11 +11999,6 @@ export interface ITooltipProps {
  * @returns The child, plus the portaled hint while visible.
  */
 export declare function Tooltip({ content, children, placement, delay, disabled }: ITooltipProps): React$1.ReactElement;
-/**
- * Toast store — the framework-free queue behind showToast(). Kept separate
- * from the React viewport so the queue rules (ids, newest-last ordering, the
- * visible cap, default durations) are unit-testable on their own.
- */
 /** Visual + semantic variant of a toast. `error` is announced assertively. */
 export type ToastVariant = "info" | "success" | "warning" | "error";
 /** What a caller passes to showToast(). */
@@ -12015,6 +12016,12 @@ export interface IToastOptions {
         label: string;
         onClick: () => void;
     };
+    /**
+     * Optional glyph for what the toast is about (a payment, a pipeline),
+     * shown in a badge tinted with the variant's colour. Without one the
+     * toast shows a plain dot in that colour.
+     */
+    icon?: React$1.ReactNode;
 }
 /**
  * Shows a toast.
@@ -14356,6 +14363,8 @@ export declare const shellApi: {
     readonly BxBuildings: IconComponent;
     readonly BxClipboard: IconComponent;
     readonly BxCompass: IconComponent;
+    readonly BxDollar: IconComponent;
+    readonly BxError: IconComponent;
     readonly BxPin: IconComponent;
     readonly BxTrophy: IconComponent;
     readonly BxFolder: IconComponent;

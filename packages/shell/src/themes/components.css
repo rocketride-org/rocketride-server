@@ -1613,6 +1613,18 @@ select.rr-input {
 	background: var(--rr-toast-tone);
 	border-radius: 50%;
 }
+.rr-toast__icon--glyph {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	/* Centred on the toast's height, whatever the text's line count. */
+	align-self: center;
+	width: 36px;
+	height: 36px;
+	margin-top: 0;
+	color: var(--rr-toast-tone);
+	background: color-mix(in srgb, var(--rr-toast-tone) 14%, transparent);
+}
 .rr-toast__body {
 	flex: 1;
 	min-width: 0;

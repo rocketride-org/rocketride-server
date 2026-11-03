@@ -15,6 +15,9 @@
  *
  * At most one `primary` Button should appear per view (it is the page's single
  * call to action); `danger` is reserved for destructive actions.
+ *
+ * `tone` tints a button's border and label with a status colour without
+ * filling it: green to start something, red to stop it (Run / Stop in a table).
  */
 
 import React, { CSSProperties, ReactNode } from 'react';
@@ -27,10 +30,15 @@ import { commonStyles } from '../../themes/styles';
 /** Visual variant of a {@link Button}. */
 export type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger';
 
+/** Status tint for a {@link Button}: `success` is green, `danger` is red. */
+export type ButtonTone = 'success' | 'danger';
+
 /** Props for the {@link Button} component. */
 export interface IButtonProps {
 	/** Visual variant. Defaults to `'primary'`. */
 	variant?: ButtonVariant;
+	/** Status tint for the border and label; the variant still sets the fill. */
+	tone?: ButtonTone;
 	/** Render the compact (26px tall) size. */
 	small?: boolean;
 	/** Render the micro (16px tall) size — canvas-node chrome. Wins over `small`. */
@@ -130,6 +138,17 @@ const styles = {
 		color: 'var(--rr-fg-button)',
 	} as CSSProperties,
 
+	// Tone tints: border and label only, so an outline button keeps its
+	// transparent fill and reads as a status, not a call to action.
+	toneSuccess: {
+		borderColor: 'var(--rr-color-success)',
+		color: 'var(--rr-text-success)',
+	} as CSSProperties,
+	toneDanger: {
+		borderColor: 'var(--rr-color-error)',
+		color: 'var(--rr-text-error)',
+	} as CSSProperties,
+
 	// Disabled modifier — half opacity, no pointer interaction.
 	disabled: {
 		...commonStyles.buttonDisabled,
@@ -145,6 +164,12 @@ const VARIANT_STYLES: Record<ButtonVariant, CSSProperties> = {
 	danger: styles.danger,
 };
 
+/** Lookup of the per-tone tint. */
+const TONE_STYLES: Record<ButtonTone, CSSProperties> = {
+	success: styles.toneSuccess,
+	danger: styles.toneDanger,
+};
+
 // =============================================================================
 // COMPONENT
 // =============================================================================
@@ -155,12 +180,13 @@ const VARIANT_STYLES: Record<ButtonVariant, CSSProperties> = {
  * @param props - {@link IButtonProps}.
  * @returns The button element.
  */
-export function Button({ variant = 'primary', small, mini, disabled, onClick, children, title, pressed, ariaExpanded }: IButtonProps): React.ReactElement {
+export function Button({ variant = 'primary', tone, small, mini, disabled, onClick, children, title, pressed, ariaExpanded }: IButtonProps): React.ReactElement {
 	// Compose base + variant colour + optional size (mini wins over small) +
 	// the quiet ghost-small weight + optional disabled modifier.
 	const style: CSSProperties = {
 		...styles.base,
 		...VARIANT_STYLES[variant],
+		...(tone ? TONE_STYLES[tone] : null),
 		...(small ? styles.small : null),
 		...(small && variant === 'ghost' ? styles.ghostSmall : null),
 		...(mini ? styles.mini : null),

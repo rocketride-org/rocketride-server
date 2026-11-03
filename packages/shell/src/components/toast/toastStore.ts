@@ -13,6 +13,8 @@
 // TYPES
 // =============================================================================
 
+import type { ReactNode } from 'react';
+
 /** Visual + semantic variant of a toast. `error` is announced assertively. */
 export type ToastVariant = 'info' | 'success' | 'warning' | 'error';
 
@@ -28,6 +30,12 @@ export interface IToastOptions {
 	duration?: number;
 	/** Optional single action, e.g. Undo or Retry. Clicking it also dismisses. */
 	action?: { label: string; onClick: () => void };
+	/**
+	 * Optional glyph for what the toast is about (a payment, a pipeline),
+	 * shown in a badge tinted with the variant's colour. Without one the
+	 * toast shows a plain dot in that colour.
+	 */
+	icon?: ReactNode;
 }
 
 /** A queued toast: the options plus its id and resolved defaults. */
