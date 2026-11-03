@@ -97,16 +97,14 @@ export function isEmbeddedDevShell(): boolean {
 //
 // The `rrdev:*` protocol (rrdev:auth hands the shell a SESSION TOKEN,
 // rrdev:registerRemote makes it load and run a script) is a privileged
-// channel. The legitimate senders are exactly two:
-//   - the VS Code extension's App Builder webview (apps/vscode,
-//     AppWebview.tsx → PreviewFrame): the shell is an iframe inside a
-//     `vscode-webview://<id>` document; and
-//   - the web App Builder's same-origin preview iframe (parent origin ==
-//     the shell's own origin).
-// Both embed the shell, so the sender is always `window.parent`. A loopback
-// origin (a locally served embedder, e.g. a dev server on localhost) is also
-// accepted. Anything else — any website that opened this page (window.opener),
-// framed it from another origin, or merely knows the URL — is hostile.
+// channel. The one legitimate sender in this repo is the VS Code extension's
+// App Builder webview (apps/vscode, AppWebview.tsx → PreviewFrame): the shell
+// is an iframe inside a `vscode-webview://<id>` document, and the shell may
+// be served by ANY engine, including the production cloud one. A loopback
+// embedder is trusted only when the shell itself is served from loopback
+// (`pnpm start` / a local engine). Anything else — any website that opened
+// this page (window.opener), framed it from another origin, or merely knows
+// the URL — is hostile.
 
 /**
  * Whether a hostname is loopback: `localhost`, `*.localhost`, 127.0.0.0/8 or
@@ -121,9 +119,11 @@ function isLoopbackHostname(hostname: string): boolean {
 /**
  * Whether `origin` (a `MessageEvent.origin`) is an expected dev embedder for
  * a shell served from `shellOrigin`:
- *   - the shell's own origin (the web App Builder's same-origin preview);
- *   - `vscode-webview://<id>` (the VS Code extension's webview);
- *   - a loopback http(s) origin on any port (a locally served embedder).
+ *   - `vscode-webview://<id>` (the VS Code extension's webview), whichever
+ *     engine serves the shell;
+ *   - a loopback http(s) origin on any port, but ONLY when the shell is itself
+ *     served from a loopback origin — a page on localhost must not be able to
+ *     drive a shell served from a real (cloud) origin.
  * Opaque origins ('null'), unparsable values and everything else are refused.
  *
  * @param origin - The sender's origin as reported by the browser.
@@ -132,7 +132,6 @@ function isLoopbackHostname(hostname: string): boolean {
  */
 export function isAllowedEmbedderOrigin(origin: string, shellOrigin: string): boolean {
 	if (!origin || origin === 'null') return false;
-	if (shellOrigin && shellOrigin !== 'null' && origin === shellOrigin) return true;
 	let url: URL;
 	try { url = new URL(origin); } catch { return false; }
 	// Non-special scheme: the URL parser reports origin 'null', so compare the
@@ -141,7 +140,9 @@ export function isAllowedEmbedderOrigin(origin: string, shellOrigin: string): bo
 	if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
 	// `origin` must BE an origin, not a URL that merely starts like one.
 	if (url.origin !== origin) return false;
-	return isLoopbackHostname(url.hostname);
+	if (!isLoopbackHostname(url.hostname)) return false;
+	// Loopback embedder: only for a loopback-served shell.
+	try { return isLoopbackHostname(new URL(shellOrigin).hostname); } catch { return false; }
 }
 
 /**
@@ -179,7 +180,11 @@ export function trustedParentOrigin(): string {
 		if (!isDevHooksEnabled() || window.self === window.top) return '';
 		const ancestors = (window.location as { ancestorOrigins?: ArrayLike<string> }).ancestorOrigins;
 		let origin = ancestors && ancestors.length > 0 ? ancestors[0] : '';
-		if (!origin && document.referrer) origin = new URL(document.referrer).origin;
+		if (!origin && document.referrer) {
+			// Non-special schemes (vscode-webview:) report origin 'null' — rebuild it.
+			const ref = new URL(document.referrer);
+			origin = ref.origin !== 'null' ? ref.origin : `${ref.protocol}//${ref.host}`;
+		}
 		return isAllowedEmbedderOrigin(origin, window.location.origin) ? origin : '';
 	} catch { return ''; }
 }

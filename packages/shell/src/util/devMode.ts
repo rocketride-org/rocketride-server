@@ -41,9 +41,9 @@
  *
  * Who sends `rrdev:*` messages (the only trusted senders; see
  * isTrustedEmbedderMessage): the VS Code extension's App Builder webview
- * (apps/vscode AppWebview.tsx PreviewFrame, origin `vscode-webview://<id>`)
- * and the web App Builder's same-origin preview iframe. Both are the shell's
- * PARENT window. Messages from anyone else — a window.opener, a foreign
+ * (apps/vscode AppWebview.tsx PreviewFrame, origin `vscode-webview://<id>`),
+ * which is the shell's PARENT window. A loopback embedder is trusted only for
+ * a loopback-served shell. Messages from anyone else — a window.opener, a foreign
  * framing page, any other origin, or a top-level shell with no embedder — are
  * ignored, and registerRemote entries must be loopback dev-server URLs.
  */
