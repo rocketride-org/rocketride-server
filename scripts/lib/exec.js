@@ -94,6 +94,43 @@ function resolveWindowsCommand(command, cwd, env) {
  *   are disconnected. Otherwise uses pipe for task/log collection.
  * @returns {Promise<string|{stdout: string, stderr: string, code: number}>}
  */
+const execPath = require('path');
+const execFs = require('fs');
+
+/**
+ * Resolves a bare command name against the CHILD env's path.
+ *
+ * Windows' CreateProcess looks a bare executable name up on the PARENT
+ * process's PATH — the env passed for the child only governs lookups the
+ * child itself performs. A captured VS dev env therefore makes compilers
+ * resolvable INSIDE cmake while cmake itself ENOENTs from any non-VS shell.
+ * Resolving here, at the one spawn boundary, covers every tool for every
+ * call site. Names that already carry a path, non-Windows platforms, and
+ * commands found nowhere pass through unchanged (the spawn error stays the
+ * caller's signal).
+ */
+function resolveCommandOnEnvPath(command, env) {
+	if (process.platform !== 'win32' || !env) return command;
+	if (command.includes('/') || command.includes('\\')) return command;
+	const pathKey = Object.keys(env).find((k) => k.toLowerCase() === 'path');
+	if (!pathKey) return command;
+	const exts = String(env.PATHEXT || process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';');
+	const hasExt = exts.some((e) => command.toLowerCase().endsWith(e.toLowerCase()));
+	for (const dir of String(env[pathKey]).split(execPath.delimiter)) {
+		if (!dir) continue;
+		if (hasExt) {
+			const exact = execPath.join(dir, command);
+			if (execFs.existsSync(exact)) return exact;
+			continue;
+		}
+		for (const ext of exts) {
+			const candidate = execPath.join(dir, command + ext);
+			if (execFs.existsSync(candidate)) return candidate;
+		}
+	}
+	return command;
+}
+
 async function execCommand(command, args, options = {}) {
 	const {
 		cwd = process.cwd(),
@@ -106,6 +143,7 @@ async function execCommand(command, args, options = {}) {
 		stdio = undefined,
 		silent = false,
 	} = options;
+	command = resolveCommandOnEnvPath(command, env);
 	const inherit = stdio === 'inherit';
 	const ignoreStdio = stdio === 'ignore';
 

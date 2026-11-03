@@ -267,8 +267,8 @@ const ICON_MEDIA_TYPES: Record<string, string> = {
 };
 
 /**
- * Converts an icon file to a data: URI — what `register_dev` carries to the
- * server and what webviews render without widening their resource roots.
+ * Converts an icon file to a data: URI — what app tiles and webviews render
+ * without widening their resource roots or adding a serving path.
  *
  * @param iconPath - Absolute icon file path (e.g. {@link ScannedApp.icon}).
  * @param maxBytes - Size ceiling for the conversion; larger files return

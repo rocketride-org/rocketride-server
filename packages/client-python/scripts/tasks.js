@@ -154,6 +154,16 @@ function makeWheelBuildAction() {
 
 			// engine.exe uses an isolated environment - cwd must be dist/server
 			await mkdir(DIST_DIR);
+			// The PEP 517 builder is a build-time TOOL, not a runtime
+			// requirement: a freshly synced engine env (new content hash ->
+			// new prebuilt) ships without it. Ensure it per env instead of
+			// assuming a previous env's manual install survived the refresh.
+			try {
+				await execCommand(ENGINE, ['-c', 'import build'], { task, cwd: SERVER_DIR });
+			} catch {
+				task.output = "Installing the 'build' module into the engine environment";
+				await execCommand(ENGINE, ['-m', 'pip', 'install', 'build'], { task, cwd: SERVER_DIR });
+			}
 			await execCommand(ENGINE, ['-m', 'build', '--no-isolation', BUILD_DIR, '--outdir', DIST_DIR], {
 				task,
 				cwd: SERVER_DIR,
@@ -184,7 +194,8 @@ function makeStartTestServerAction(options = {}) {
 				const parsed = parseServerAddress(taskserver);
 				ctx.port = parsed.port;
 				task.output = `Using existing server at ${parsed.uri}`;
-				return { port: parsed.port, server: null, serverUri: parsed.uri };
+				const envKey = process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
+				return { port: parsed.port, server: null, serverUri: parsed.uri, apikey: envKey };
 			}
 			// Use existing server when ROCKETRIDE_URI is set (e.g. for debugging: start server
 			// yourself, then run tests)
@@ -199,6 +210,10 @@ function makeStartTestServerAction(options = {}) {
 					// Not a valid URL, fall through and start server
 				}
 			}
+			// The key the SERVER authenticates — threaded through the bracket so
+			// the live suites present this exact credential (the URI already is;
+			// a workspace .env's key must never outrank it).
+			const apikey = process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
 			task.output = 'Starting server...';
 			let taskComplete = false;
 			const result = await startServer({
@@ -211,7 +226,7 @@ function makeStartTestServerAction(options = {}) {
 				// expect a shared API key between server and client. Default to the
 				// same local-dev key used by tests when ROCKETRIDE_APIKEY is unset.
 				env: {
-					ROCKETRIDE_APIKEY: process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
+					ROCKETRIDE_APIKEY: apikey,
 				},
 				onOutput: (text) => {
 					if (taskComplete) return;
@@ -225,7 +240,7 @@ function makeStartTestServerAction(options = {}) {
 			ctx.port = result.port;
 			task.output = `Server ready on port ${ctx.port}`;
 			taskComplete = true;
-			return { port: result.port, server: result.server };
+			return { port: result.port, server: result.server, apikey };
 		},
 	};
 }
@@ -286,10 +301,11 @@ function makeRunPytestAction(options = {}) {
 			const testEnv = {
 				...process.env,
 				ROCKETRIDE_URI: serverUri,
-				// CI can provide ROCKETRIDE_APIKEY as an empty string; pytest's
-				// TEST_CONFIG uses os.getenv(..., 'MYAPIKEY') which does not treat
-				// empty as missing. Ensure a usable default for local test server auth.
-				ROCKETRIDE_APIKEY: process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
+				// The server under test OWNS the credential pair: the bracket's key
+				// (what the server was started with) outranks the dotenv-loaded
+				// workspace .env, exactly like the URI. CI can provide an empty
+				// ROCKETRIDE_APIKEY, which must not win either.
+				ROCKETRIDE_APIKEY: bracket.apikey || process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
 			};
 
 			// Use absolute paths since cwd is dist/server

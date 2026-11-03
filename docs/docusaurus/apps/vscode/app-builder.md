@@ -22,10 +22,10 @@ extension surface around it.
 
 ## Settings
 
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `rocketride.appdev.autoWatch` | `true` | Start the watch session automatically when an App Builder opens |
-| `rocketride.appdev.shellUrl` | `""` | Override the preview shell base URL (empty = the Development Mode engine). The origin must match the connected server, or the preview can't see your dev overlay |
+The watch session always starts automatically when an App Builder opens.
+App-related preferences (such as the default `apps/` scaffold directory) live
+in the **RocketRide Settings page** under *Rocket Builder ▸ Apps* — they are
+workspace settings stored on the connected server, not VS Code configuration.
 
 ## Debugging
 

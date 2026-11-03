@@ -25,10 +25,12 @@
 // =============================================================================
 
 import type * as ClientApiV1_3 from './versions/v1.3';
+import type * as ClientApiV1_5 from './versions/v1.5';
 
 /** Registry mapping each frozen SDK floor key (MAJOR.MINOR) to its value-surface snapshot. */
 export interface ClientApiVersions {
 	'1.3': typeof ClientApiV1_3;
+	'1.5': typeof ClientApiV1_5;
 }
 
 /**
@@ -39,6 +41,6 @@ export interface ClientApiVersions {
  * src/contract-check.generated.ts, which assert the live surface still
  * satisfies EACH frozen floor separately.
  */
-export type ClientApiLatest = ClientApiVersions['1.3'];
+export type ClientApiLatest = ClientApiVersions['1.5'];
 
 export type * from './latest';

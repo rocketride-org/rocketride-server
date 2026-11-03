@@ -22,9 +22,10 @@ A complete guide for developers building micro-frontend applications for the Roc
 10. [The Virtual File System (IVirtualFileSystem)](#the-virtual-file-system-ivirtualfilesystem)
 11. [DocExplorer: File Tree Component](#docexplorer-file-tree-component)
 12. [DocTabs: Tab Bar Component](#doctabs-tab-bar-component)
-13. [Cross-App Component Loading](#cross-app-component-loading)
-14. [Theming](#theming)
-15. [Build Configuration](#build-configuration)
+13. [DesktopView: The Shared Desktop Page](#desktopview-the-shared-desktop-page)
+14. [Cross-App Component Loading](#cross-app-component-loading)
+15. [Theming](#theming)
+16. [Build Configuration](#build-configuration)
 
 ---
 
@@ -219,6 +220,8 @@ interface AppManifest {
   readme?: string;
   /** Categories for filtering (e.g. ['tools', 'ai']). */
   categories?: string[];
+  /** Shell editions the app serves ('saas' | 'oss' | 'vscode'). Absent: every shell. */
+  shells?: string[];
   /** When false, the app runs without authentication. Default: true. */
   authenticated?: boolean;
   /** When false, the shell header (app name/icon in the sidebar) is hidden. Default: true. */
@@ -265,6 +268,8 @@ Settings are:
 - Rendered in the shell's Settings overlay (grouped by app)
 - Persisted to `.workspace/settings.json`
 - Available to your app via `useShellApiConfig()`, access as `config['mycompany.myApp.apiKey']`
+
+The shell contributes its own **General** section (keys under `rocketride.general.*`), which always appears first in the Settings overlay. Its keys are reserved — an app redeclaring one is ignored. `rocketride.general.sidebar` (`default` | `vscode` | `cursor` | `rocketride`, default `default`) picks the sidebar layout for every app: `default` defers to each app's declared `sidebarMode`, any other choice overrides it. `vscode`/`cursor` take effect only on apps that declare `sidebarViews`; apps with a classic `sidebar` node keep the classic column.
 
 ---
 
@@ -340,13 +345,29 @@ interface ShellAppProps {
 
 | Zone | Owner | Content |
 |------|-------|---------|
-| **Sidebar** | Your `app` component's layout (`AppLayout`) | App switcher header, your sidebar content, theme/account/settings footer |
+| **Sidebar** | Your `app` component's layout (`AppLayout`) | Classic column for a `sidebar` node; activity rail + panel when the app declares `sidebarViews` (app icon and name in the panel header, your content in the panel, account footer on the rail) |
 | **Client Area** | Your `app` component | Whatever your app renders |
 | **Debug Panel** | Shell (ALT+D toggle) | Live event log, postMessage traffic |
 | **Status Bar** | Shell | Connection status, app name, ready state |
 | **Overlays** | Shell | Account, Billing, Settings (triggered from sidebar footer) |
 
 If your app's layout renders no sidebar, the client area gets the full window width.
+
+**Sidebar chrome.** The chrome follows the declaration. A plain
+`sidebar={content}` node renders the classic single column (which iconifies
+when collapsed). Declaring `sidebarViews` (one entry per rail icon; see
+`SidebarViewContainer`) unlocks the VS Code-style frame instead: a fixed
+activity rail beside a resizable panel holding your content. There,
+collapsing closes the panel; the rail and account footer never disappear,
+and your content is never asked to render an iconified form of itself. An
+existing menu can be projected onto the rail with `viewsFromMenu(menu)` —
+an explicit opt-in, never applied automatically. `sidebarMode: 'rocketride'`
+opts a view-declaring app back into the classic column; compact (mobile)
+widths always render a drawer. The user's **General > Sidebar** setting
+(`rocketride.general.sidebar`) overrides `sidebarMode` whenever it is set to
+anything other than `default`; on `default` the app's declaration applies.
+The `vscode`/`cursor` choices apply only to apps that declare `sidebarViews`
+— a classic sidebar is never shoehorned onto the rail.
 
 ---
 
@@ -827,6 +848,106 @@ Features:
 - Close button (on hover)
 - Active tab highlight
 - Calls `docs.setActiveEditor()` / `docs.closeEditor()` on the provided instance
+
+---
+
+## DesktopView: The Shared Desktop Page
+
+`DesktopView` renders the RocketRide desktop content — a time-aware greeting, a rotating quote, and the responsive app-card grid (launch, version switcher, remove/unsubscribe, subscription badges). It is the one desktop implementation shared by the OSS and SaaS home apps; a launcher app renders it and supplies only the app list and chrome (nav, footer, padding).
+
+```tsx
+import { DesktopView } from 'shell';     // or getShellApi().DesktopView
+
+<DesktopView
+	apps={apps}                            // AppManifestEntry[], pre-filtered/sorted
+	style={{ padding: '60px 40px 80px' }}  // host-owned spacing
+/>
+```
+
+Server interactions (version rails, session overrides, desktop remove, unsubscribe, subscription status) are built in — the component talks to the shell's connection itself. Optional props adjust behavior:
+
+| Prop | Purpose |
+|---|---|
+| `onLaunch` | Replace the default launch (`shell:switchApp`) |
+| `greetingName` / `greetingOverride` | Personalize or pin the greeting |
+| `showQuote` | Hide the rotating quote column (default shown) |
+| `allowRemove` | Disable the hover X + remove/unsubscribe popover |
+| `resolveIcon` | Theme-adaptive icon override per app |
+| `adapter` | Override the server operations (`DesktopAdapter`) |
+| `popoverBoundarySelector` | Host sticky-header selector for drop-list placement |
+| `emptyMessage` | Zero-apps text |
+
+Types: `DesktopViewProps`, `DesktopAdapter`, `DesktopQuote`, `DesktopVersionRow`, `DesktopVersionOverride`. Animations (card cascade, greeting reveal, icon fade) honor `prefers-reduced-motion`. Theming uses the standard `--rr-*` CSS variables.
+
+### Dev Tools
+
+An app can declare itself a **dev tool**: a UI that host workbenches (the VS Code extension, rocket-ui) mount directly as a component — no shell boot, no iframe. Declare the manifest category and the descriptor mount points:
+
+```jsonc
+// package.json → appManifest
+"categories": ["devTool"]
+```
+
+```ts
+// AppDescriptor
+const MY_TOOL: AppDescriptor = {
+	// ...existing fields
+	devToolFrame: MyToolSurface,      // the tool's main surface
+	devToolSidebar: MyToolSidebar,    // optional panel shown in the host's sidebar
+};
+```
+
+Both components receive `DevToolProps`:
+
+| Prop | Purpose |
+|---|---|
+| `channel` | The tool's ONE transport surface to its other mount (frame ↔ sidebar; the mounts may live in isolated documents — VS Code webviews). Three lanes: retained state topics, fire-and-forget events, correlated ops |
+| `documents` | On multi-document hosts: `open(docKey, title)` / `close(docKey)` |
+| `docKey` / `activeDocKey` | The document key a frame serves / the fronted document a sidebar follows |
+
+There is NO client prop — and none is needed. The realm model in three lines:
+
+1. Every surface runs in a **realm** (the shell page, each VS Code webview, each framework page) attached to the shell bus.
+2. Every realm's `useShellConnection().client` is a **real `RocketRideClient`**: the root realm's client owns the socket; every other realm holds a *realm client* whose requests ride the bus to that same socket. There is ONE socket per host process.
+3. A tool's sidebar mount (its **controller**) therefore owns *authority*, not transport: it coordinates the tool's genuinely shared state — refcounted resources, single-writer stores, one shared poller — through tool ops, while every mount makes its own engine calls on its own client.
+
+A tool's ops live in a `src/ops/` directory with a fixed three-file layout (see sql-ui and monitor-ui for the reference shape), re-exported by an `ops/index.ts` barrel:
+
+```ts
+// ops/types.ts — the tool's COORDINATION protocol, declared ONCE as maps
+// extending the shell's base maps (per tool; `host:*` keys are reserved).
+// Only shared state belongs here — plain engine calls go through the realm
+// client.
+import type { ToolOpMap, ToolOpSpec, ToolStateMap, ToolEventMap } from 'shell';
+
+export interface MyOps extends ToolOpMap {
+	'myTool.acquire': ToolOpSpec<{ id: string }, MyHandle>; // refcounted — ONE owner realm
+}
+export interface MyStateMap extends ToolStateMap { records: MyRecord[] }
+export interface MyEventMap extends ToolEventMap { save: MyRecord }
+
+// ops/server.ts — the implementations, served by the sidebar CONTROLLER mount.
+export function serveMyOps(channel: ToolChannel): () => void {
+	const ops = createToolOpServer<MyOps>(channel);
+	ops.serve('myTool.acquire', async ({ id }) => acquire(id));
+	return () => ops.dispose();
+}
+
+// ops/client.ts — the typed calls, used by FRAME mounts.
+export function createMyOpsClient(channel: ToolChannel) {
+	const call = createToolOpClient<MyOps>(channel);
+	return { acquire: (id: string) => call('myTool.acquire', { id }) };
+}
+
+// In the frame: engine work on the realm's own client; shared state via ops.
+const { client, isConnected } = useShellConnection();
+const rows = client ? await client.listTasks({}) : [];
+const handle = await createMyOpsClient(channel).acquire(id);
+```
+
+**Why two readiness hooks exist.** `useShellConnection().isConnected` is *this realm's* connection truth — the mirrored state of the one socket the realm client rides; gate engine calls on it. `useConnectionReady(channel)` reads the `host:connection` system topic — the **controller realm's** reachability, published by the host (never by a tool) and retained on the channel. Today both describe the same single socket; they stay distinct because hosts are growing *multiple connections* (the VS Code dev/deploy slots — see `host.envSlots`), where "my realm's client can reach the engine" and "the controller's connection is up" stop being the same question. Gate frame↔controller coordination on `useConnectionReady`, engine calls on your own realm's state.
+
+There is no theme prop: dev-tool components are themed by the ambient `--rr-*` CSS custom properties of the document they mount into (the active shell theme in a browser; the editor-variable mapping in VS Code) — style exclusively with `var(--rr-*)` tokens. The tab icon hosts show comes from the manifest `icon`; the descriptor is loaded only when the tool is opened.
 
 ---
 
