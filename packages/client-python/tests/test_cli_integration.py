@@ -41,6 +41,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
+import pytest_asyncio
 
 # Load .env from project root before any imports that need env vars
 from dotenv import load_dotenv
@@ -89,6 +90,23 @@ async def ensure_clean_pipeline(client: RocketRideClient, token: str) -> None:
     except Exception:
         # Ignore errors - pipeline might not be running
         pass
+
+
+@pytest_asyncio.fixture(scope='class', loop_scope='class')
+async def client():
+    """
+    One connection per class to verify what the CLI did.
+
+    Connecting is no test's subject, so each class pays for it once. The tests
+    of a class share the class's event loop, the one this connection lives on.
+    """
+    client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    await client.connect()
+    try:
+        yield client
+    finally:
+        if client.is_connected():
+            await client.disconnect()
 
 
 async def run_cli(*args: str, cwd: Optional[str] = None, pipeline: Optional[str] = None) -> Tuple[int, str]:
@@ -173,17 +191,15 @@ async def wait_until_gone(client: RocketRideClient, token: str, timeout: float =
     return False
 
 
+@pytest.mark.asyncio(loop_scope='class')
 class TestCliStart:
     """Test the start command against a live server."""
 
     PIPELINE_TOKEN = 'PY-CLI-START'
     PROJECT_ID = '3f2b1c88-5a41-4d7e-9c22-8b6f0e14a7d3'
 
-    @pytest.mark.asyncio
-    async def test_should_start_a_pipeline_the_server_reports(self, tmp_path):
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    async def test_should_start_a_pipeline_the_server_reports(self, client, tmp_path):
         try:
-            await client.connect()
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
 
             pipeline = write_pipeline(tmp_path, self.PROJECT_ID)
@@ -196,14 +212,9 @@ class TestCliStart:
             assert 'state' in status
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
-    @pytest.mark.asyncio
-    async def test_should_report_the_token_for_monitoring(self, tmp_path):
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    async def test_should_report_the_token_for_monitoring(self, client, tmp_path):
         try:
-            await client.connect()
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
 
             pipeline = write_pipeline(tmp_path, self.PROJECT_ID)
@@ -215,22 +226,15 @@ class TestCliStart:
             assert self.PIPELINE_TOKEN in output
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
-    @pytest.mark.asyncio
     async def test_should_fail_without_a_pipeline_file(self):
         code, output = await run_cli('start', *server_args())
 
         assert code == 1
         assert 'Pipeline file is required' in output
 
-    @pytest.mark.asyncio
-    async def test_should_fail_on_a_missing_pipeline_file(self, tmp_path):
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    async def test_should_fail_on_a_missing_pipeline_file(self, client, tmp_path):
         try:
-            await client.connect()
-
             missing = str(tmp_path / 'no-such.pipe')
             code, output = await run_cli('start', '--token', self.PIPELINE_TOKEN, *server_args(), pipeline=missing)
 
@@ -240,21 +244,17 @@ class TestCliStart:
             assert self.PIPELINE_TOKEN not in await list_task_tokens(client)
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
 
+@pytest.mark.asyncio(loop_scope='class')
 class TestCliStop:
     """Test the stop command against a live server."""
 
     PIPELINE_TOKEN = 'PY-CLI-STOP'
     PROJECT_ID = '5b7c2d99-6e52-4f8a-b133-9c7f1e25b8e4'
 
-    @pytest.mark.asyncio
-    async def test_should_stop_a_running_pipeline(self):
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    async def test_should_stop_a_running_pipeline(self, client):
         try:
-            await client.connect()
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
 
             await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
@@ -266,10 +266,7 @@ class TestCliStop:
             assert await wait_until_gone(client, self.PIPELINE_TOKEN), 'task still reported after stop'
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
-    @pytest.mark.asyncio
     async def test_should_fail_without_a_token(self):
         code, output = await run_cli('stop', *server_args())
 
@@ -277,17 +274,15 @@ class TestCliStop:
         assert 'Token is required' in output
 
 
+@pytest.mark.asyncio(loop_scope='class')
 class TestCliList:
     """Test the list command against a live server."""
 
     PIPELINE_TOKEN = 'PY-CLI-LIST'
     PROJECT_ID = '7d9e4fbb-8a74-4c16-c355-be91f347d1f6'
 
-    @pytest.mark.asyncio
-    async def test_should_list_a_running_task_as_json(self):
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    async def test_should_list_a_running_task_as_json(self, client):
         try:
-            await client.connect()
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
 
             await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
@@ -303,14 +298,9 @@ class TestCliList:
             assert self.PIPELINE_TOKEN in [task.get('token') for task in tasks]
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
-    @pytest.mark.asyncio
-    async def test_should_list_a_running_task_in_human_form(self):
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    async def test_should_list_a_running_task_in_human_form(self, client):
         try:
-            await client.connect()
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
 
             await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
@@ -321,10 +311,9 @@ class TestCliList:
             assert self.PIPELINE_TOKEN in output
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
 
+@pytest.mark.asyncio(loop_scope='class')
 class TestCliUpload:
     """Test the upload command against a live server."""
 
@@ -344,11 +333,8 @@ class TestCliUpload:
             paths.append(str(path))
         return paths
 
-    @pytest.mark.asyncio
-    async def test_should_upload_files_to_an_existing_task(self, tmp_path):
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    async def test_should_upload_files_to_an_existing_task(self, client, tmp_path):
         try:
-            await client.connect()
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
 
             await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
@@ -363,14 +349,9 @@ class TestCliUpload:
             assert self.PIPELINE_TOKEN in await list_task_tokens(client)
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
-    @pytest.mark.asyncio
-    async def test_should_start_and_terminate_its_own_task(self, tmp_path):
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    async def test_should_start_and_terminate_its_own_task(self, client, tmp_path):
         try:
-            await client.connect()
             await ensure_clean_pipeline(client, self.MANAGED_TOKEN)
 
             pipeline = write_pipeline(tmp_path, self.PROJECT_ID)
@@ -385,10 +366,7 @@ class TestCliUpload:
             assert await wait_until_gone(client, self.MANAGED_TOKEN), 'upload task still reported after exit'
         finally:
             await ensure_clean_pipeline(client, self.MANAGED_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
-    @pytest.mark.asyncio
     async def test_should_fail_without_a_pipeline_or_token(self, tmp_path):
         files = self.write_files(tmp_path)
 
@@ -397,11 +375,8 @@ class TestCliUpload:
         assert code == 1
         assert '--pipeline or --token' in output
 
-    @pytest.mark.asyncio
-    async def test_should_fail_when_no_file_matches(self, tmp_path):
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    async def test_should_fail_when_no_file_matches(self, client, tmp_path):
         try:
-            await client.connect()
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
 
             await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
@@ -413,10 +388,9 @@ class TestCliUpload:
             assert 'No files found' in output
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
 
+@pytest.mark.asyncio(loop_scope='class')
 class TestCliProfile:
     """Test the profile commands against a live server.
 
@@ -429,12 +403,9 @@ class TestCliProfile:
     PROJECT_ID = '5e1c2a90-7b3d-4f68-9a21-c4d8e6f03b17'
     TOKEN_ARGS = ('--token', PIPELINE_TOKEN)
 
-    @pytest.mark.asyncio
-    async def test_should_profile_a_task_across_separate_invocations(self):
+    async def test_should_profile_a_task_across_separate_invocations(self, client):
         """A task's session belongs to the server's link to it, so it outlives each CLI process."""
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         try:
-            await client.connect()
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
             await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
 
@@ -455,14 +426,9 @@ class TestCliProfile:
             assert output.startswith('Session: py-cli'), output[:200]
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
-    @pytest.mark.asyncio
-    async def test_should_list_threads_and_draw_one_threads_tree(self):
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    async def test_should_list_threads_and_draw_one_threads_tree(self, client):
         try:
-            await client.connect()
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
             await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
 
@@ -498,14 +464,9 @@ class TestCliProfile:
             assert f'Thread {missing} not found in the last session' in output
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
-    @pytest.mark.asyncio
-    async def test_should_run_a_timed_session_to_completion(self):
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    async def test_should_run_a_timed_session_to_completion(self, client):
         try:
-            await client.connect()
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
             await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
 
@@ -523,15 +484,10 @@ class TestCliProfile:
             assert status.get('active') is False and status.get('has_report') is True, status
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
-    @pytest.mark.asyncio
-    async def test_should_list_which_tasks_are_being_profiled(self):
+    async def test_should_list_which_tasks_are_being_profiled(self, client):
         other = 'PY-CLI-LIST-OTHER'
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         try:
-            await client.connect()
             for token in (self.PIPELINE_TOKEN, other):
                 await ensure_clean_pipeline(client, token)
             await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
@@ -553,14 +509,9 @@ class TestCliProfile:
         finally:
             for token in (self.PIPELINE_TOKEN, other):
                 await ensure_clean_pipeline(client, token)
-            if client.is_connected():
-                await client.disconnect()
 
-    @pytest.mark.asyncio
-    async def test_should_fail_when_the_task_has_no_session_yet(self):
-        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+    async def test_should_fail_when_the_task_has_no_session_yet(self, client):
         try:
-            await client.connect()
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
             await client.use(pipeline=get_echo_pipeline(self.PROJECT_ID), token=self.PIPELINE_TOKEN)
 
@@ -570,8 +521,6 @@ class TestCliProfile:
             assert 'No profiling data available' in output
         finally:
             await ensure_clean_pipeline(client, self.PIPELINE_TOKEN)
-            if client.is_connected():
-                await client.disconnect()
 
 
 class TestCliDispatch:

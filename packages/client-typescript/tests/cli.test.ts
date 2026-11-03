@@ -41,7 +41,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { describe, it, expect, beforeAll, beforeEach, afterEach } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { RocketRideClient } from '../src/client';
 import { getEchoPipeline } from './echo.pipeline';
 
@@ -159,15 +159,22 @@ describe('CLI start Integration Tests', () => {
 
 	let client: RocketRideClient;
 
-	beforeEach(async () => {
+	// One connection per suite: connecting is no test's subject
+	beforeAll(async () => {
 		client = new RocketRideClient({ auth: TEST_CONFIG.auth, uri: TEST_CONFIG.uri });
 		await client.connect();
+	});
+
+	afterAll(async () => {
+		if (client.isConnected()) await client.disconnect();
+	});
+
+	beforeEach(async () => {
 		await ensureCleanPipeline(client, PIPELINE_TOKEN);
 	});
 
 	afterEach(async () => {
 		await ensureCleanPipeline(client, PIPELINE_TOKEN);
-		if (client.isConnected()) await client.disconnect();
 	});
 
 	it('should start a pipeline the server reports', async () => {
@@ -221,9 +228,16 @@ describe('CLI upload Integration Tests', () => {
 
 	let client: RocketRideClient;
 
-	beforeEach(async () => {
+	beforeAll(async () => {
 		client = new RocketRideClient({ auth: TEST_CONFIG.auth, uri: TEST_CONFIG.uri });
 		await client.connect();
+	});
+
+	afterAll(async () => {
+		if (client.isConnected()) await client.disconnect();
+	});
+
+	beforeEach(async () => {
 		await ensureCleanPipeline(client, PIPELINE_TOKEN);
 		await ensureCleanPipeline(client, MANAGED_TOKEN);
 	});
@@ -231,7 +245,6 @@ describe('CLI upload Integration Tests', () => {
 	afterEach(async () => {
 		await ensureCleanPipeline(client, PIPELINE_TOKEN);
 		await ensureCleanPipeline(client, MANAGED_TOKEN);
-		if (client.isConnected()) await client.disconnect();
 	});
 
 	it('should upload files to an existing task and leave it running', async () => {
@@ -295,15 +308,21 @@ describe('CLI stop Integration Tests', () => {
 
 	let client: RocketRideClient;
 
-	beforeEach(async () => {
+	beforeAll(async () => {
 		client = new RocketRideClient({ auth: TEST_CONFIG.auth, uri: TEST_CONFIG.uri });
 		await client.connect();
+	});
+
+	afterAll(async () => {
+		if (client.isConnected()) await client.disconnect();
+	});
+
+	beforeEach(async () => {
 		await ensureCleanPipeline(client, PIPELINE_TOKEN);
 	});
 
 	afterEach(async () => {
 		await ensureCleanPipeline(client, PIPELINE_TOKEN);
-		if (client.isConnected()) await client.disconnect();
 	});
 
 	it('should stop a running pipeline', async () => {
@@ -335,16 +354,22 @@ describe('CLI profile Integration Tests', () => {
 
 	let client: RocketRideClient;
 
-	beforeEach(async () => {
+	beforeAll(async () => {
 		client = new RocketRideClient({ auth: TEST_CONFIG.auth, uri: TEST_CONFIG.uri });
 		await client.connect();
+	});
+
+	afterAll(async () => {
+		if (client.isConnected()) await client.disconnect();
+	});
+
+	beforeEach(async () => {
 		await ensureCleanPipeline(client, PIPELINE_TOKEN);
 		await client.use({ pipeline: getEchoPipeline(PROJECT_ID), token: PIPELINE_TOKEN });
 	});
 
 	afterEach(async () => {
 		await ensureCleanPipeline(client, PIPELINE_TOKEN);
-		if (client.isConnected()) await client.disconnect();
 	});
 
 	// A task's session belongs to the server's link to it, so it outlives each CLI process
