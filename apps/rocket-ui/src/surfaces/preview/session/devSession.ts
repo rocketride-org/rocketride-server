@@ -230,6 +230,13 @@ export class WebDevSession {
 	private readonly folder: string;
 	private readonly appName: string;
 	private readonly moduleId: string;
+	/**
+	 * The scope-registry key for links and shims: per SESSION, not per app —
+	 * split panels run two sessions of one app in SEPARATE preview realms,
+	 * and each session's generated shims/CSS must read back ITS realm's
+	 * share scope and document, never the other panel's.
+	 */
+	private readonly scopeKey: string;
 
 	private monaco: Monaco | null = null;
 	private tsHandle: TypescriptSetupHandle | null = null;
@@ -285,6 +292,7 @@ export class WebDevSession {
 		this.folder = folder;
 		this.appName = appName;
 		this.moduleId = appId.replace(/[^a-zA-Z0-9_$]/g, '_');
+		this.scopeKey = `${appId}#${this.sessionId}`;
 		// step: a prefix lens over the ONE shared staged workspace view —
 		// editor overlays, staged state, and agent writes all converge there
 		this.vfs = scopedFileSystem(getWorkspaceVfs(), `apps/${folder}`);
@@ -628,7 +636,7 @@ export class WebDevSession {
 			// the workspace manifest is the truth for name/icon/settings too
 			if (!this.deps) {
 				const pkg = await readAppPackage(this.folder).catch(() => ({}));
-				this.deps = await prepareDependencies(this.folder, this.appId, pkg, scope);
+				this.deps = await prepareDependencies(this.folder, this.scopeKey, pkg, scope);
 				for (const problem of this.deps.problems) this.pushError(`[deps] ${problem}`);
 				await this.refreshRegistrationMeta(pkg as Record<string, unknown>);
 			}
@@ -655,7 +663,7 @@ export class WebDevSession {
 
 			// step: link against the PREVIEW realm's share scope
 			const result = await linkModules({
-				appId: this.appId,
+				appId: this.scopeKey,
 				modules: linkInputs,
 				entryPath: ENTRY_PATH,
 				scope,
@@ -717,7 +725,7 @@ export class WebDevSession {
 			// mounted tree already holds, and Fast Refresh swaps only this
 			// module's implementations by family id.
 			const result = await linkModules({
-				appId: this.appId,
+				appId: this.scopeKey,
 				modules: new Map([...this.buildResolutionMap(), ...single]),
 				entryPath: path,
 				preLinked: new Map([...last.moduleUrls].filter(([p]) => p !== path)),

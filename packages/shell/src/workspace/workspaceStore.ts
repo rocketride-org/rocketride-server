@@ -381,7 +381,11 @@ export class WorkspaceStore {
 				}
 			}
 
-			this.partitions = { [this.activePartition]: this.withShellPrefs(slice ?? makeDefaultAppState()) };
+			// step: merge, never replace — a partition that entered memory
+			// during the awaits above (a realm's attach, an early write) must
+			// survive the load; the disk slice still wins for the active
+			// partition, because an in-memory active slice is the pre-auth seed
+			this.partitions = { ...this.partitions, [this.activePartition]: this.withShellPrefs(slice ?? this.partitions[this.activePartition] ?? makeDefaultAppState()) };
 			this.notifyPrefs(SHELL_PARTITION);
 			this.notifyPrefs(this.activePartition);
 			this.seeded = true;
@@ -390,7 +394,7 @@ export class WorkspaceStore {
 		} catch {
 			// Best-effort: a missing or corrupt workspace must not block the shell.
 			this.activeAppId = this.defaultAppId;
-			this.partitions = { [this.activePartition]: makeDefaultAppState() };
+			this.partitions = { ...this.partitions, [this.activePartition]: this.partitions[this.activePartition] ?? makeDefaultAppState() };
 			this.seeded = true;
 			this.loaded = true;
 			this.commit();
@@ -682,8 +686,25 @@ export class WorkspaceStore {
 	 *
 	 * @param partition - The partition to load.
 	 */
-	public async ensurePartition(partition: Partition): Promise<void> {
-		if (partition === SHELL_PARTITION || this.partitions[partition]) return;
+	public ensurePartition(partition: Partition): Promise<void> {
+		if (partition === SHELL_PARTITION || this.partitions[partition]) return Promise.resolve();
+		// step: concurrent callers share ONE in-flight read — two reads of the
+		// same file race, and the later assignment would drop a write that
+		// landed between them
+		let pending = this.partitionLoads.get(partition);
+		if (!pending) {
+			pending = this.loadPartition(partition).finally(() => {
+				this.partitionLoads.delete(partition);
+			});
+			this.partitionLoads.set(partition, pending);
+		}
+		return pending;
+	}
+
+	/** In-flight {@link ensurePartition} reads, one per partition. */
+	private partitionLoads = new Map<Partition, Promise<void>>();
+
+	private async loadPartition(partition: Partition): Promise<void> {
 		let slice: AppWorkspaceState | undefined;
 		if (this.canSave()) {
 			try {
@@ -693,6 +714,9 @@ export class WorkspaceStore {
 				/* no saved state for this partition */
 			}
 		}
+		// A partition that appeared during the read holds a NEWER write than
+		// the file — keep it.
+		if (this.partitions[partition]) return;
 		// Seed even on failure: an in-memory bag is what makes later writes
 		// land somewhere, and re-reading on every attach would be a round-trip
 		// per realm.

@@ -84,13 +84,13 @@ origin, so no cross-editor routing exists to disambiguate.
 
 The dev-loop primitives live in the SDK, `rocketride/app-dev`
 (`packages/client-typescript/src/app-dev/`), shared with `rocketride app
-dev`: the session nonce and `devPreviewUrl`, `resolveRsbuildInvocation`, the
+dev`: `devPreviewUrl`, `resolveRsbuildInvocation`, the
 rsbuild output classifier (`splitCompleteLines`, `classifyDevOutput`), the
-guarded spawn and stop (`spawnDevServer`, `stopDevServer`), the overlay calls
-(`registerDevOverlay`, `unregisterDevOverlay`), and the guard program itself
+guarded spawn and stop (`spawnDevServer`, `stopDevServer`), the proxy config
+writer (`writeProxyConfig`, `webOriginFor`), and the guard program itself
 (`DEV_SERVER_GUARD_SOURCE`, written to a private temp file by
 `materializeDevServerGuard` — no host ships it as a separate file). The
-extension's `WatchManager` keeps only the panel orchestration (op chains,
+extension's `DevSessionManager` keeps only the panel orchestration (op chains,
 linger, panel-gated respawn, the install badge); `DevSession` composes the
 same primitives into the single-app foreground loop the CLI runs. Any page
 that loaded a dev bundle — the panel or a plain browser tab — updates on save

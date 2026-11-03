@@ -61,8 +61,11 @@ test("preserves the user's trailing blank lines verbatim", () => {
 	assert.equal(appendGitignoreEntries(existing, ENTRIES), `${existing}.rocketride/\n.env\n`);
 });
 
-test('matches entries despite surrounding whitespace', () => {
-	assert.deepEqual(missingGitignoreEntries('  .env  \n', ENTRIES), ['.rocketride/']);
+test('ignores trailing whitespace but treats leading spaces as part of the pattern', () => {
+	// Git strips only unescaped TRAILING spaces from a pattern; an indented
+	// `  .env` is a different pattern and must not suppress the real rule.
+	assert.deepEqual(missingGitignoreEntries('.env  \n', ENTRIES), ['.rocketride/']);
+	assert.deepEqual(missingGitignoreEntries('  .env\n', ENTRIES), ['.rocketride/', '.env']);
 });
 
 test('does not treat .env.example as covering .env', () => {

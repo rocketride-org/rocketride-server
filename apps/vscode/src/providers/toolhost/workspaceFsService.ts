@@ -41,14 +41,16 @@
 // =============================================================================
 
 import * as vscode from 'vscode';
+import * as path from 'path';
 
 /** Whether an absolute path lies inside one of the open workspace folders. */
 function insideWorkspace(fsPath: string): boolean {
+	if (!fsPath) return false;
+	const target = path.resolve(fsPath);
 	const folders = vscode.workspace.workspaceFolders ?? [];
-	const normalized = fsPath.replace(/\\/g, '/').toLowerCase();
 	return folders.some((folder) => {
-		const root = folder.uri.fsPath.replace(/\\/g, '/').toLowerCase();
-		return normalized === root || normalized.startsWith(`${root}/`);
+		const rel = path.relative(path.resolve(folder.uri.fsPath), target);
+		return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 	});
 }
 

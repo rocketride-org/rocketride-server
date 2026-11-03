@@ -245,16 +245,18 @@ export function removeRequired(schema: RJSFSchema = {}, items: [string[], string
 	const _schema = JSON.parse(JSON.stringify(schema));
 
 	for (const [path, keys] of items) {
-		// Start traversal at schema.properties (the root of field definitions)
-		let temp: Record<string, unknown> = _schema?.properties ?? {};
+		// Start at the root schema — an empty path filters the root `required`
+		let temp: Record<string, unknown> = _schema ?? {};
 
 		// Clone the path array to avoid mutating the caller's data
 		const _path = [...path];
 
-		// Walk down to the target sub-schema following the path segments
+		// Walk down to the target sub-schema; each segment descends through
+		// the current sub-schema's own `properties` map
 		while (_path.length) {
 			const curr = _path.shift();
-			if (curr && curr in temp) temp = temp[curr] as Record<string, unknown>;
+			const props = temp.properties as Record<string, unknown> | undefined;
+			if (curr && props && curr in props) temp = props[curr] as Record<string, unknown>;
 		}
 
 		// Filter the required array to exclude the specified keys, making those fields optional

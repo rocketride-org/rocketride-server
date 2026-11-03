@@ -248,12 +248,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @param raw - One entry of appManifest.billing.plans, straight from JSON.
  * @returns The typed plan.
  */
+/**
+ * Coerces a manifest plan price to cents. A missing value means "no price
+ * declared" (0); a finite number or numeric string is accepted; anything
+ * else is an error — a price must never be silently replaced with zero,
+ * because the load→save round trip would persist it.
+ *
+ * @param value - The raw amountCents entry, straight from JSON.
+ * @returns The price in cents.
+ */
+function normalizeAmountCents(value: unknown): number {
+	if (value === undefined || value === null) return 0;
+	const cents = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
+	if (!Number.isFinite(cents)) {
+		throw new Error(`Invalid appManifest billing plan amountCents: ${JSON.stringify(value)}`);
+	}
+	return cents;
+}
+
 function normalizeBillingPlan(raw: unknown): BillingPlan {
 	const source = isRecord(raw) ? raw : {};
 	return {
 		...source,
 		nickname: typeof source.nickname === 'string' ? source.nickname : '',
-		amountCents: typeof source.amountCents === 'number' ? source.amountCents : 0,
+		amountCents: normalizeAmountCents(source.amountCents),
 		currency: typeof source.currency === 'string' ? source.currency : 'usd',
 		interval: typeof source.interval === 'string' ? source.interval : 'month',
 		...(isRecord(source.metadata) ? { metadata: source.metadata } : {}),

@@ -75,20 +75,20 @@ rather than only as a full-screen app:
 See `ROCKETRIDE_APPS.md` §The App Manifest for every other field; none of them
 behave differently for a tool.
 
-**2. The descriptor** adds the mounts beside (or instead of) `app`:
+**2. The descriptor** adds the mounts beside `app`:
 
 ```tsx
 export default {
-	app: MyToolApp,                 // optional — the full-screen form
+	app: MyToolApp,                 // required — the full-screen form
 	devToolFrame: MyToolFrame,      // the document surface
 	devToolSidebar: MyToolSidebar,  // the controller panel
 } satisfies AppDescriptor;
 ```
 
 Both mounts are optional. A tool may be sidebar-only (a tree with no document
-of its own), frame-only (a surface with no controls), or both. Declaring
-`devToolFrame` without `app` is normal — a tool with no meaningful
-full-screen form should not pretend to have one.
+of its own), frame-only (a surface with no controls), or both. `app` itself is
+**required** by `AppDescriptor` today — a tool with no meaningful full-screen
+form must still declare one (a minimal mount is fine).
 
 ---
 
@@ -176,8 +176,9 @@ is easy to get wrong:
 - A **sidebar** mount sends events **only in response to a user action**. An
   event to a closed frame *summons* it — a tree click is an implicit "open
   the tool".
-- A **frame** pushes its state whenever it changes. The host retains the last
-  frame → sidebar event, so a remounted sidebar renders without asking.
+- A **frame** publishes its state whenever it changes — via `publishState`, a
+  retained state topic, so a remounted sidebar reads the current value with
+  `useToolState` without asking. Events are never retained.
 - **A mount-time handshake from the sidebar is a bug.** Every pinned tool's
   sidebar boots with the host sidebar; an ask-on-mount would summon every
   tool's frame at once.

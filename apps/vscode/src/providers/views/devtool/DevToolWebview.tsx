@@ -197,7 +197,6 @@ const DevToolWebview: React.FC = () => {
 		if (mountedRef.current === mountKey) return;
 		mountedRef.current = mountKey;
 
-		let alive = true;
 		setPhase({ kind: 'loading', name: app.name });
 
 		void (async () => {
@@ -209,7 +208,7 @@ const DevToolWebview: React.FC = () => {
 				registerRemotes([{ name: app.moduleId, entry: entryUrl(data.engineHttpUrl, app.id, app.registryVersion) }], { force: true });
 				const mod = (await loadRemote(`${app.moduleId}/AppDescriptor`)) as { default: AppDescriptor } | null;
 				const descriptor = mod?.default;
-				if (!alive) return;
+				if (mountedRef.current !== mountKey) return;
 
 				const Frame = descriptor?.devToolFrame;
 				if (!Frame) {
@@ -218,14 +217,10 @@ const DevToolWebview: React.FC = () => {
 				}
 				setPhase({ kind: 'ready', Frame });
 			} catch (err) {
-				if (!alive) return;
+				if (mountedRef.current !== mountKey) return;
 				setPhase({ kind: 'error', name: app.name, message: err instanceof Error ? err.message : String(err) });
 			}
 		})();
-
-		return () => {
-			alive = false;
-		};
 	}, [data]);
 
 	// ── DevToolProps (stable identity per tool) ──────────────────────────────

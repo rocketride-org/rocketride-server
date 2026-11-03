@@ -80,7 +80,7 @@ describe('primitives', () => {
 	it('devPreviewUrl locks the app and turns dev hooks on, on the dev origin', () => {
 		// Local-first: the DEV SERVER's own origin is the session identity —
 		// no nonce rides the URL; the page self-registers by convention.
-		expect(devPreviewUrl('http://localhost:3013/', 'acme.clock')).toBe('http://localhost:3013/?appid=acme.clock&rrdev=1');
+		expect(devPreviewUrl('http://localhost:3013/', 'acme.clock')).toMatch(/^http:\/\/localhost:3013\/\?appid=acme\.clock&rrdev=1&_ts=\d+$/);
 		expect(devPreviewUrl('http://localhost:3013', 'acme.clock')).not.toContain('rrsession');
 	});
 

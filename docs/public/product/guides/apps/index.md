@@ -267,7 +267,7 @@ Each property is a `SettingSchema` (`type`, `default`, `description`, `enum`, `r
 Settings are:
 - Rendered in the shell's Settings overlay (grouped by app)
 - Persisted to `.workspace/settings.json`
-- Available to your app via `useShellApiConfig()`, access as `config['mycompany.myApp.apiKey']`
+- Available to your app via `useWorkspace().settings`, access as `settings['mycompany.myApp.apiKey']` (effective values: declared defaults overlaid with the user's overrides)
 
 The shell contributes its own **General** section (keys under `rocketride.general.*`), which always appears first in the Settings overlay. Its keys are reserved — an app redeclaring one is ignored. `rocketride.general.sidebar` (`default` | `vscode` | `cursor` | `rocketride`, default `default`) picks the sidebar layout for every app: `default` defers to each app's declared `sidebarMode`, any other choice overrides it. `vscode`/`cursor` take effect only on apps that declare `sidebarViews`; apps with a classic `sidebar` node keep the classic column.
 
@@ -284,18 +284,28 @@ interface AppDescriptor {
   icon?: React.ReactNode;                  // Icon in app switcher
   branding: ShellBrandingConfig;           // Sidebar header branding
 
-  /** The app's ONE mount point — rendered raw in the client area. */
+  /** The app's ONE mount point — rendered raw in the client area. Required. */
   app: React.ComponentType<ShellAppProps>;
+
+  /** How the app would like the shell sidebar to open when it activates. */
+  sidebar?: 'expanded' | 'collapsed';
 
   /** Optional cross-app component catalog. Never mounted by the shell. */
   components?: {
     [key: string]: React.ComponentType<any>;
   };
+
+  /** Dev-tool mounts — see "Dev Tools" below. Optional; hosted workbenches
+      mount these directly instead of booting the full `app`. */
+  devToolFrame?: React.ComponentType<DevToolProps>;
+  devToolSidebar?: React.ComponentType<DevToolProps>;
 }
 ```
 
-- **`app`** is the single component the shell mounts in the client area; the app composes its own layout inside (columns, sidebar, status bar) with `<AppLayout>`
+- **`app`** is the single component the shell mounts in the client area; the app composes its own layout inside (columns, sidebar, status bar) with `<AppLayout>`. It is **required** even for apps that are primarily dev tools — a tool with no meaningful full-screen form still declares a minimal mount
+- **`sidebar`** lets an app ask for the shell sidebar collapsed on activation; absent means no opinion
 - **`components`** entries (e.g. `Canvas`, `Toolbar`, `DataGrid`) are never mounted by the shell but are loadable by other apps via `useAppComponent()`
+- **`devToolFrame`** / **`devToolSidebar`** are the dev-tool mount points (see [Dev Tools](#dev-tools))
 
 ### ShellBrandingConfig
 

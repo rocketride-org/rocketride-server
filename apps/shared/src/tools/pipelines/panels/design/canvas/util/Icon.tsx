@@ -92,7 +92,17 @@ function processSvg(text: string): string | null {
 	for (const el of all) {
 		for (const attr of Array.from(el.attributes)) {
 			const name = attr.name.toLowerCase();
-			if (name.startsWith('on') || /javascript:/i.test(attr.value)) el.removeAttribute(attr.name);
+			// Browsers strip whitespace/control characters from URLs before
+			// scheme handling, so match against a compacted value — otherwise an
+			// entity-embedded tab defeats a plain javascript: check. Filtered by
+			// char code — a control range inside a regex trips no-control-regex.
+			const compact = Array.from(attr.value)
+				.filter((c) => c.charCodeAt(0) > 0x20)
+				.join('')
+				.toLowerCase();
+			const isRef = name === 'href' || name === 'xlink:href';
+			const safeRef = compact.startsWith('#') || compact.startsWith('data:image/');
+			if (name.startsWith('on') || compact.includes('javascript:') || (isRef && !safeRef)) el.removeAttribute(attr.name);
 		}
 	}
 

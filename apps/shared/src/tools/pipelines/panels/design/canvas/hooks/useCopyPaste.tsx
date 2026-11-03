@@ -133,12 +133,15 @@ export function usePaste() {
 		const { nodes: copiedNodes, edges: copiedEdges } = clipboardRef.current;
 		if (copiedNodes.length === 0) return;
 
-		// Map old IDs to fresh ones
+		// Map old IDs to fresh ones; track IDs assigned earlier in this paste
+		// so two clipboard nodes with the same provider never collide
 		const idMapping = new Map<string, string>();
 		const newNodes: FlowNode[] = [];
+		const taken: { id: string }[] = [...nodes];
 
 		copiedNodes.forEach((node) => {
-			const newId = generateNodeId(nodes, node.data.provider);
+			const newId = generateNodeId(taken, node.data.provider);
+			taken.push({ id: newId });
 			idMapping.set(node.id, newId);
 
 			// Offset so paste is visually distinct from original

@@ -804,7 +804,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 			return id;
 		},
-		[nodes, screenToFlowPosition, setNodes, getInitialFormDataValid, servicesJson, onContentUpdated]
+		[isLocked, nodes, screenToFlowPosition, setNodes, getInitialFormDataValid, servicesJson, onContentUpdated]
 	);
 
 	const updateNode = useCallback(
@@ -822,7 +822,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 			return updatedNode;
 		},
-		[setNodes]
+		[isLocked, setNodes]
 	);
 
 	const deleteNode = useCallback(
@@ -861,7 +861,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 			deleteElements({ nodes: toDelete });
 		},
-		[nodes, setNodes, deleteElements]
+		[isLocked, nodes, setNodes, deleteElements]
 	);
 
 	const onNodesDelete = useCallback(

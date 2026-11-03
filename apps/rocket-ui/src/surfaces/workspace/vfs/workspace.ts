@@ -481,7 +481,7 @@ export function createWorkspace(options: { hostAppId: string; autoCommit: boolea
 	// half-torn-down view.
 	const outgoing = workspaceBuild;
 	builtScopeKey = scopeKey;
-	workspaceBuild = (async () => {
+	const build = (async () => {
 		if (outgoing) {
 			const old = await outgoing.catch(() => null);
 			if (old) await stashForScopeSwitch(old);
@@ -513,7 +513,16 @@ export function createWorkspace(options: { hostAppId: string; autoCommit: boolea
 		workspace = { view, policy, pendingBlocksAuto };
 		return workspace;
 	})();
-	return workspaceBuild;
+	// step: a failed build must not stay memoized — clear the cache (only
+	// while this build is still the current one) so the next call retries.
+	build.catch(() => {
+		if (workspaceBuild === build) {
+			workspaceBuild = null;
+			builtScopeKey = null;
+		}
+	});
+	workspaceBuild = build;
+	return build;
 }
 
 /**

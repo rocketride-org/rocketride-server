@@ -625,6 +625,33 @@ test('delete of a BASE directory commits as a dir tombstone', async () => {
 	assert.equal(base.files.has('apps/x/a.ts'), false);
 });
 
+test('commit replays a dir tombstone before writes recreated beneath it', async () => {
+	const { base, fs } = makeStaged({ 'apps/x/src/deep.ts': 'D' });
+	base.dirs.add('apps/x');
+	await fs.delete('apps/x');
+	await fs.write('apps/x/src/new.ts', 'reborn');
+	const result = await fs.commit();
+	assert.deepEqual(result.conflicts, []);
+	// the recursive dir delete must land FIRST, or it swallows the new file
+	assert.equal(base.files.get('apps/x/src/new.ts'), 'reborn');
+	assert.ok(!base.files.has('apps/x/src/deep.ts'));
+	assert.equal(base.dirs.has('apps/x'), false);
+});
+
+test('undoTurn refuses a turn that deleted a base directory (contents not captured)', async () => {
+	const { base, fs } = makeStaged({ 'apps/x/a.ts': 'A', 'keep.ts': 'old' });
+	base.dirs.add('apps/x');
+	await fs.write('keep.ts', 'turn');
+	await fs.delete('apps/x');
+	const ckpt = await fs.checkpoint('turn');
+	await fs.commit({ retain: true });
+	const result = await fs.undoTurn(ckpt!);
+	assert.equal(result.committed, 0);
+	assert.ok(result.conflicts.some((c) => c.path === 'apps/x' && c.reason === 'missing'));
+	// nothing was partially undone — the base keeps the committed state
+	assert.equal(base.files.get('keep.ts'), 'turn');
+});
+
 test('delete of a missing path is refused up front', async () => {
 	const { fs } = makeStaged({});
 	await assert.rejects(() => fs.delete('nope.ts'), /No such path/);

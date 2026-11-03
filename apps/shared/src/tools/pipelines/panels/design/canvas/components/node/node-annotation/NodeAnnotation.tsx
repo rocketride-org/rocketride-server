@@ -39,6 +39,7 @@ import { ReactElement, useMemo } from 'react';
 import { NodeResizer } from '@xyflow/react';
 import ReactMarkdown from 'react-markdown';
 import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -207,7 +208,7 @@ export default function NodeAnnotation({ id, data, type, parentId, selected }: I
 				{/* Content area — rendered markdown */}
 				<div className="rr-annotation-content">
 					<ConditionalRender condition={content} fallback={<span style={styles.placeholder}>Double-click to add content...</span>}>
-						<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={markdownComponents}>
+						<ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw, rehypeSanitize]} components={markdownComponents}>
 							{content}
 						</ReactMarkdown>
 					</ConditionalRender>
