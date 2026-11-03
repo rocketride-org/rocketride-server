@@ -232,6 +232,16 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # node config key `connect_timeout`.
     connect_timeout: float = 5.0
 
+    # Dead-peer and ping settings for PostgreSQL; `beginGlobal` replaces them from the
+    # node config (`tcp_user_timeout`, `keepalives_*`, `ping_timeout`).
+    network_settings: Dict[str, Any] = {
+        'tcp_user_timeout': 30.0,
+        'keepalives_idle': 30,
+        'keepalives_interval': 10,
+        'keepalives_count': 3,
+        'ping_timeout': 5.0,
+    }
+
     # SQLAlchemy pool sizing for the runtime engine opened in `beginGlobal`.
     POOL_SIZE: int = 10
     MAX_OVERFLOW: int = 20
@@ -794,17 +804,25 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # ------------------------------------------------------------------
 
     def _connect_args(self, db_url: str) -> dict:
-        """Driver ``connect_args`` for the runtime engine: the per-attempt connect timeout.
+        """Driver ``connect_args`` for the runtime engine.
 
-        Applied to the backends whose driver takes ``connect_timeout`` (PostgreSQL,
-        MySQL/MariaDB); a subclass for any other driver overrides this. The
-        timeout comes from the node config key ``connect_timeout`` (seconds,
-        default 5), read in ``beginGlobal``.
+        The per-attempt connect timeout for the backends whose driver takes
+        ``connect_timeout`` (PostgreSQL, MySQL/MariaDB), plus, for PostgreSQL, the
+        keepalive and ``tcp_user_timeout`` settings that drop a connection to a
+        peer that stopped acknowledging. A subclass for any other driver overrides
+        this. Values come from the node config, read in ``beginGlobal``.
+
+        These are ``connect_args``, so they take precedence over the same
+        parameter written in the connection URL's query string.
         """
-        from ai.common.database.connect_retry import connect_timeout_args
+        from ai.common.database.connect_retry import connect_timeout_args, postgres_network_args
         from sqlalchemy.engine import make_url
 
-        return connect_timeout_args(make_url(db_url).get_backend_name(), self.connect_timeout)
+        backend = make_url(db_url).get_backend_name()
+        args = connect_timeout_args(backend, self.connect_timeout)
+        if backend == 'postgresql':
+            args.update(postgres_network_args(self.network_settings))
+        return args
 
     def beginGlobal(self) -> None:
         # One reflection lock per node. Created before anything can reflect, so
@@ -859,11 +877,14 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # holds the statement for the OS TCP timeout (minutes).
         from ai.common.database.connect_retry import (
             install_connect_retry,
+            install_ping_watchdog,
+            network_settings_from_config,
             policy_from_config,
             timeout_from_config,
         )
 
         self.connect_timeout = timeout_from_config(raw)
+        self.network_settings = network_settings_from_config(raw)
         self.engine = create_engine(
             db_url,
             pool_size=self.POOL_SIZE,
@@ -874,6 +895,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # Retry only the opening of a connection, never a statement: nothing has
         # been sent when an attempt is repeated, so no write can be duplicated.
         install_connect_retry(self.engine, policy_from_config(raw))
+        if self.engine.dialect.name == 'postgresql':
+            # Bound the pre-ping check itself: TCP settings cannot detect a pooler that
+            # keeps acknowledging but stopped answering, and libpq has no read timeout.
+            install_ping_watchdog(self.engine, self.network_settings['ping_timeout'])
 
         from ai.common.database.tx_registry import TransactionRegistry
 

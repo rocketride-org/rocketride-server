@@ -416,20 +416,25 @@ def _engine_pool_kwargs(monkeypatch, cls, logical_type, conn_config):
     """
     db_global = sys.modules['ai.common.database.db_global_base']
     calls = []
-    monkeypatch.setattr(db_global, 'create_engine', lambda url, **kw: calls.append(kw) or types.SimpleNamespace())
+    monkeypatch.setattr(
+        db_global,
+        'create_engine',
+        lambda url, **kw: calls.append(kw) or types.SimpleNamespace(dialect=types.SimpleNamespace(name='postgresql')),
+    )
     tx_registry = types.ModuleType('ai.common.database.tx_registry')
     tx_registry.TransactionRegistry = lambda *a, **kw: None
     monkeypatch.setitem(sys.modules, 'ai.common.database.tx_registry', tx_registry)
     # `beginGlobal` imports the connect helpers lazily, like the registry above. The
-    # real module is loaded; only the hook install is skipped, since the engine here
-    # is a stand-in that SQLAlchemy cannot attach an event to.
-    connect_retry = _load_from_path(
-        'ai.common.database.connect_retry',
-        _AI_SRC / 'ai' / 'common' / 'database' / 'connect_retry.py',
-        register=False,
-    )
+    # real module is loaded (registered first, because its dataclass looks its own
+    # module up in `sys.modules`); only the hook installs are skipped, since the
+    # engine here is a stand-in that SQLAlchemy cannot attach an event to.
+    name = 'ai.common.database.connect_retry'
+    spec = importlib.util.spec_from_file_location(name, _AI_SRC / 'ai' / 'common' / 'database' / 'connect_retry.py')
+    connect_retry = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, connect_retry)
+    spec.loader.exec_module(connect_retry)
     monkeypatch.setattr(connect_retry, 'install_connect_retry', lambda engine, policy=None: None)
-    monkeypatch.setitem(sys.modules, 'ai.common.database.connect_retry', connect_retry)
+    monkeypatch.setattr(connect_retry, 'install_ping_watchdog', lambda engine, timeout: None)
     monkeypatch.setattr(sys.modules['ai.common.config'].Config, 'getNodeConfig', lambda provider, cfg: dict(cfg))
     monkeypatch.setattr(cls, '_getDatabaseSchema', lambda self: {})
     monkeypatch.setattr(cls, '_getTableSchema', lambda self, table: {})
@@ -454,7 +459,8 @@ class TestSqlEnginePoolSize:
         # Pooled behind PgBouncer: a connection the pooler dropped must be replaced, and a
         # connect attempt bounded (rocketride-ai/rocketride-saas#789).
         assert kwargs['pool_pre_ping'] is True
-        assert kwargs['connect_args'] == {'connect_timeout': 5}
+        assert kwargs['connect_args']['connect_timeout'] == 5
+        assert kwargs['connect_args']['keepalives'] == 1
 
     @pytest.mark.parametrize('node', ['db_postgres', 'db_mysql'])
     def test_other_sql_nodes_keep_the_default_pool(self, monkeypatch, node):

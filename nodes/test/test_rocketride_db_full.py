@@ -719,6 +719,164 @@ class TestRocketrideSqlE2E:
             stop.set()
             thread.join(timeout=3)
 
+    @staticmethod
+    def _stalling_relay(upstream):
+        """A TCP relay to ``upstream`` that can be told to hold every byte while keeping the sockets open.
+
+        This is a pooler whose process is frozen: the kernel keeps acknowledging segments, so
+        no TCP-level setting (keepalives, ``tcp_user_timeout``) sees anything wrong.
+        Returns ``(port, stall_event, stop)``.
+        """
+        import socket
+        import threading
+        import time
+
+        stall = threading.Event()
+        stopped = threading.Event()
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(8)
+        listener.settimeout(0.2)
+
+        def pump(src, dst):
+            try:
+                while chunk := src.recv(65536):
+                    while stall.is_set() and not stopped.is_set():
+                        time.sleep(0.05)
+                    dst.sendall(chunk)
+            except OSError:
+                pass
+            finally:
+                for sock in (src, dst):
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+
+        def accept():
+            while not stopped.is_set():
+                try:
+                    client, _ = listener.accept()
+                except (socket.timeout, OSError):
+                    continue
+                backend = socket.create_connection(upstream)
+                threading.Thread(target=pump, args=(client, backend), daemon=True).start()
+                threading.Thread(target=pump, args=(backend, client), daemon=True).start()
+            listener.close()
+
+        thread = threading.Thread(target=accept, daemon=True)
+        thread.start()
+
+        def stop():
+            stopped.set()
+            thread.join(timeout=3)
+
+        return listener.getsockname()[1], stall, stop
+
+    def test_a_stalled_pooler_is_bounded_for_the_ping_and_the_reconnect(self, rr_env, monkeypatch, sql_table):
+        """The reviewer's stalled-pooler case: a pooled connection to a peer that stopped answering.
+
+        Without the ping watchdog this blocked forever in ``pool_pre_ping``'s ``SELECT 1``.
+        """
+        import time
+
+        real = urllib.parse.urlparse(TEST_DSN)
+        port, stall, stop = self._stalling_relay((real.hostname, real.port or 5432))
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': self._dsn_on_port(port)}))
+        glb = None
+        try:
+            glb, inst = self._begin(
+                monkeypatch,
+                {
+                    'table': sql_table,
+                    'allow_execute': True,
+                    'ping_timeout': 1,
+                    'connect_timeout': 1,
+                    'connect_retries': 3,
+                    'connect_retry_budget': 2,
+                },
+            )
+            assert inst.execute({'sql': 'SELECT 1 AS one'})['rows'] == [{'one': 1}]  # warm the pool
+            stall.set()
+
+            started = time.monotonic()
+            with pytest.raises(RuntimeError):
+                inst.execute({'sql': 'SELECT 1 AS one'})
+            elapsed = time.monotonic() - started
+
+            # ping_timeout (1 s) + the reconnect: 3 attempts of connect_timeout (1 s) inside a 2 s budget.
+            assert elapsed < 12, f'a stalled pooler held the call for {elapsed:.1f}s'
+        finally:
+            stall.clear()
+            if glb is not None:
+                glb.endGlobal()
+            stop()
+
+    def test_the_node_setting_overrides_a_connect_timeout_written_in_the_dsn(self, rr_env, monkeypatch, sql_table):
+        dsn = self._dsn_on_port(urllib.parse.urlparse(TEST_DSN).port or 5432) + '?connect_timeout=30'
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': dsn}))
+
+        glb, _ = self._begin(monkeypatch, {'table': sql_table, 'connect_timeout': 3})
+        try:
+            with glb.engine.connect() as conn:
+                assert conn.connection.dbapi_connection.get_dsn_parameters()['connect_timeout'] == '3'
+        finally:
+            glb.endGlobal()
+
+    def test_the_keepalive_settings_reach_libpq(self, rr_env, monkeypatch, sql_table):
+        glb, _ = self._begin(
+            monkeypatch,
+            {'table': sql_table, 'keepalives_idle': 20, 'keepalives_interval': 7, 'keepalives_count': 4},
+        )
+        try:
+            with glb.engine.connect() as conn:
+                params = conn.connection.dbapi_connection.get_dsn_parameters()
+            assert (params['keepalives'], params['keepalives_idle']) == ('1', '20')
+            assert (params['keepalives_interval'], params['keepalives_count']) == ('7', '4')
+            if psycopg2.__libpq_version__ >= 120000:
+                assert params['tcp_user_timeout'] == '30000'
+        finally:
+            glb.endGlobal()
+
+    def test_what_libpq_says_for_a_full_role_and_a_mixed_multi_host_failure_is_classified_by_message(
+        self, rr_env, monkeypatch, sql_table, raw_conn
+    ):
+        """psycopg2 sets no SQLSTATE while connecting, so these are told apart by their text (real libpq errors)."""
+        self._begin(monkeypatch, {'table': sql_table})[0].endGlobal()  # loads the node modules the helper imports
+        from ai.common.database.connect_retry import is_transient_connect_error
+
+        parsed = urllib.parse.urlparse(TEST_DSN)
+        port = parsed.port or 5432
+        raw_conn.autocommit = True
+        with raw_conn.cursor() as cur:
+            cur.execute('DROP ROLE IF EXISTS rr789_full_role')
+            cur.execute("CREATE ROLE rr789_full_role LOGIN PASSWORD 'x' CONNECTION LIMIT 0")
+        try:
+
+            def failure(**kw):
+                with pytest.raises(psycopg2.OperationalError) as raised:
+                    psycopg2.connect(connect_timeout=3, dbname=TEST_DB_NAME, **kw)
+                return raised.value
+
+            full = failure(host=parsed.hostname, port=port, user='rr789_full_role', password='x')
+            assert full.pgcode is None  # why the message is what is matched
+            assert is_transient_connect_error(full), str(full)
+
+            mixed = failure(
+                host=f'{parsed.hostname},{parsed.hostname}',
+                port=f'1,{port}',
+                user='rr789_no_such_role',
+                password='x',
+            )
+            assert not is_transient_connect_error(mixed), str(mixed)
+
+            refused = failure(host=parsed.hostname, port=1, user='x', password='x')
+            assert is_transient_connect_error(refused), str(refused)
+        finally:
+            with raw_conn.cursor() as cur:
+                cur.execute('DROP ROLE IF EXISTS rr789_full_role')
+
     def test_config_connection_fields_ignored(self, rr_env, monkeypatch, sql_table):
         """The defining property: config cannot redirect the connection."""
         glb, _ = self._begin(

@@ -224,6 +224,7 @@ class TransactionRegistry:
         self._max_rows = max_rows
         self._clock = clock
         self._sessions: dict[str, _Held] = {}
+        self._pending = 0  # slots reserved by a begin() that is still connecting; guarded by _registry_lock
         self._registry_lock = threading.Lock()  # guards the _sessions dict only
         self._stop = threading.Event()  # set by close_all() to retire the sweeper
         self._sweeper: threading.Thread | None = None
@@ -233,18 +234,30 @@ class TransactionRegistry:
         """Checkout a connection, open a transaction, return a new session_id."""
         self._ensure_sweeper()
         self.reap_idle()
+        # Reserve the slot under the lock, then connect OUTSIDE it. Opening a
+        # connection can take as long as the connect timeout times the retry budget
+        # while a pooler is down; holding the node-wide registry lock for that made
+        # every other session's execute / commit / rollback wait behind it.
         with self._registry_lock:
-            if len(self._sessions) >= self._max_sessions:
+            if len(self._sessions) + self._pending >= self._max_sessions:
                 raise RuntimeError('too many open DB transactions; try again later')
+            self._pending += 1
+        try:
             conn = self._engine.connect()
             try:
                 trans = conn.begin()
-                sid = uuid.uuid4().hex
-                self._sessions[sid] = _Held(conn, trans, self._clock())
             except Exception:
                 conn.close()
                 raise
-            return sid
+        except BaseException:
+            with self._registry_lock:
+                self._pending -= 1
+            raise
+        sid = uuid.uuid4().hex
+        with self._registry_lock:
+            self._pending -= 1
+            self._sessions[sid] = _Held(conn, trans, self._clock())
+        return sid
 
     def execute(self, session_id: str, sql: str, params: list | None = None, row_mode: str = 'object') -> dict:
         """Run SQL on the held connection; refresh last_used; return shaped result.
