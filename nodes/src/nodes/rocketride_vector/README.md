@@ -199,6 +199,12 @@ a full approximate result meeting the threshold does not trigger it. Score
 thresholds still apply, so the final response can contain fewer matches than
 requested.
 
+Queries with few or no qualifying matches take the exact retry. With the default
+non-iterative HNSW scan, requesting more results than its `hnsw.ef_search`
+candidate budget (40 by default) can also trigger the retry even when many
+documents match. Account for that scan cost when choosing limits and thresholds
+for large tables.
+
 Deleted objects are excluded by default, while document rendering reassembles
 stored chunks by chunkId. The store removes all existing chunks for incoming
 object IDs before inserting the replacement chunks, preventing duplicate data
