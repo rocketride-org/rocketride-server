@@ -146,6 +146,15 @@ CONST_WEB_WS_MAX_SIZE = 250 * 1024 * 1024  # maximum WebSocket message size in b
 # the value is deliberately self-describing.
 CONST_DEFAULT_SIGNING_KEY = '<your signing key here -- replace in production>'
 
+# Key for a run's private task token (tk_): HMAC-SHA256 over the run's identity.
+# Engine-only: it is not on the task subprocess allowlist, so pipeline code
+# never sees it (RR_SIGNING_KEY is, which is why it is not reused here). Unset
+# means a random key per process: tokens stay unguessable and stable for the
+# life of the process, and change when it restarts. Set the same value on every
+# replica to keep a relaunched run's token across restarts and pods.
+CONST_TASK_TOKEN_KEY_ENV = 'RR_TASK_TOKEN_KEY'
+CONST_TASK_TOKEN_KEY_MIN_LENGTH = 32  # characters; a shorter configured key refuses to mint
+
 # =============================================================================
 # Data Connection Configuration
 # =============================================================================

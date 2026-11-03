@@ -159,6 +159,12 @@ engine:
     # verifying the moment the pod restarts.
     # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
     # RR_SIGNING_KEY: ""
+    #
+    # Key for each run's private task token (tk_), at least 32 characters.
+    # Unset, each pod uses its own random key and a relaunched run gets a new
+    # private token after a restart. Use the same value on every replica.
+    # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
+    # RR_TASK_TOKEN_KEY: ""
 
   # -- Additional volume mounts for the engine container
   volumeMounts: []
