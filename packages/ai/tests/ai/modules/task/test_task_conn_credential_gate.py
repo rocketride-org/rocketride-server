@@ -239,3 +239,90 @@ async def test_full_user_credential_is_unaffected(cmd):
     spies = _install_spies(conn, [cmd])
     await _dispatch(conn, cmd, {'subcommand': 'history'})
     spies[cmd].assert_awaited_once()
+
+
+def _web_server_with_authenticators(task_identity_server):
+    """A real WebServer.authenticate_credential over [TaskServer.authenticate, rr_ stub].
+
+    ``authenticate_credential`` is the production entry ``TaskConn.on_auth``
+    calls: it strips the optional ``Bearer `` prefix, then walks the registered
+    authenticators (TaskServer.authenticate first, as in production).
+    """
+    from ai.web.server import WebServer
+
+    async def full_user_authenticator(authorization):
+        if not authorization.startswith('rr_'):
+            return None
+        info = _make_account_info(auth=authorization)
+        info.to_connect_result = lambda: {'userId': info.userId}
+        return info
+
+    web = WebServer.__new__(WebServer)
+    web._authenticators = [task_identity_server.authenticate, full_user_authenticator]
+    return web
+
+
+def _task_server():
+    control = SimpleNamespace(userId='launching-user', orgId='org-1', teamId='team-1', public_auth=PUBLIC_KEY)
+    server = TaskServer.__new__(TaskServer)
+    server._task_control = {TASK_TOKEN: control}
+    return server
+
+
+def _wire_real_auth(conn):
+    """Point the connection at the real authenticate_credential chain."""
+    conn._server = SimpleNamespace(
+        _server=_web_server_with_authenticators(_task_server()),
+        broadcast_server_event=AsyncMock(),
+        release_unauthed_slot=lambda ip: None,
+        _unauthed_by_ip={},
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('credential', [f'Bearer {PUBLIC_KEY}', PUBLIC_KEY, f'Bearer {TASK_TOKEN}'])
+async def test_gate_applies_to_identity_from_real_bearer_stripping_auth_path(credential):
+    """pk_/tk_ presented through the real auth command (Bearer prefix included) is gated."""
+    conn = _make_conn(authenticated=False)
+    _wire_real_auth(conn)
+    spies = _install_spies(conn, ['rrext_deploy_app', 'rrext_process'])
+
+    await TaskConn.on_receive(conn, {'type': 'request', 'command': 'auth', 'seq': 1, 'arguments': {'auth': credential}})
+    assert conn._authenticated is True
+    assert conn._account_info.auth == credential.removeprefix('Bearer ')
+
+    await _dispatch(conn, 'rrext_deploy_app', {'subcommand': 'remove', 'target': '@me'})
+    await _dispatch(conn, 'rrext_process')
+    spies['rrext_deploy_app'].assert_not_awaited()
+    spies['rrext_process'].assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_gate_follows_the_connection_through_reauth_and_deauth():
+    """The class is read per request: full user -> pk_ is gated; deauth -> full user is restored."""
+    conn = _make_conn(authenticated=True, account_info=_make_account_info(auth='rr_fullusertoken'))
+    _wire_real_auth(conn)
+    spies = _install_spies(conn, ['rrext_deploy_app'])
+
+    # 1. Full user reaches the deploy handler.
+    await _dispatch(conn, 'rrext_deploy_app')
+    assert spies['rrext_deploy_app'].await_count == 1
+
+    # 2. Re-auth on the same socket with a pk_ key: now gated.
+    await TaskConn.on_receive(conn, {'type': 'request', 'command': 'auth', 'seq': 2, 'arguments': {'auth': PUBLIC_KEY}})
+    assert conn._account_info.auth == PUBLIC_KEY
+    await _dispatch(conn, 'rrext_deploy_app')
+    assert spies['rrext_deploy_app'].await_count == 1
+
+    # 3. Deauth drops identity entirely (nothing dispatches, socket is closed on the next request)...
+    await _dispatch(conn, 'deauth')
+    assert conn._authenticated is False
+    assert conn._account_info is None
+
+    # 4. ...and re-auth as the full user regains the full command set.
+    await TaskConn.on_receive(
+        conn, {'type': 'request', 'command': 'auth', 'seq': 3, 'arguments': {'auth': 'Bearer rr_fullusertoken'}}
+    )
+    assert conn._account_info.auth == 'rr_fullusertoken'
+    await _dispatch(conn, 'rrext_deploy_app')
+    assert spies['rrext_deploy_app'].await_count == 2
