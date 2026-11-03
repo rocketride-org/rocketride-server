@@ -1632,8 +1632,19 @@ select.rr-input {
 }
 .rr-toast__title {
 	font-weight: var(--rr-font-weight-semibold);
+	line-height: var(--rr-line-height-tight, 1.3);
 }
-.rr-toast > .rr-btn,
+.rr-toast__title + .rr-toast__message {
+	margin-top: 2px;
+}
+.rr-toast__message {
+	color: var(--rr-text-secondary);
+}
+.rr-toast__actions {
+	display: flex;
+	gap: var(--rr-space-2);
+	margin-top: var(--rr-space-2-5);
+}
 .rr-toast > .rr-icon-btn {
 	flex-shrink: 0;
 }

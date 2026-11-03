@@ -550,10 +550,12 @@
 	--rr-z-banner: 1000;
 	--rr-z-drawer: 1200;
 	--rr-z-panel: 1500;
+	/* Under the modal layer: an open modal's backdrop (and its blur) covers
+	   toasts, so nothing competes with the dialog the person is in. */
+	--rr-z-toast: 1900;
 	--rr-z-modal: 2000;
 	--rr-z-popover: 2100;
 	--rr-z-menu: 10000;
-	--rr-z-toast: 10500;
 	--rr-z-tooltip: 11000;
 }
 

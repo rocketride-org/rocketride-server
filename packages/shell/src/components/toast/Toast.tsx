@@ -120,20 +120,23 @@ function ToastItem({ toast }: { toast: IToast }): React.ReactElement {
 			)}
 			<div className="rr-toast__body">
 				{toast.title && <div className="rr-toast__title">{toast.title}</div>}
-				<div>{toast.message}</div>
+				<div className="rr-toast__message">{toast.message}</div>
+				{/* Under the text, not beside it: the text keeps the toast's full width. */}
+				{toast.action && (
+					<div className="rr-toast__actions">
+						<button
+							type="button"
+							className="rr-btn rr-btn--secondary rr-btn--sm"
+							onClick={() => {
+								toast.action?.onClick();
+								dismissToast(toast.id);
+							}}
+						>
+							{toast.action.label}
+						</button>
+					</div>
+				)}
 			</div>
-			{toast.action && (
-				<button
-					type="button"
-					className="rr-btn rr-btn--ghost rr-btn--sm"
-					onClick={() => {
-						toast.action?.onClick();
-						dismissToast(toast.id);
-					}}
-				>
-					{toast.action.label}
-				</button>
-			)}
 			<button type="button" className="rr-icon-btn rr-icon-btn--sm" aria-label="Dismiss notification" onClick={() => dismissToast(toast.id)}>
 				{CLOSE_GLYPH}
 			</button>
