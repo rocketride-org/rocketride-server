@@ -1181,7 +1181,13 @@ class FileDeploymentBackend:
         data = await self._store.read_file(entry['artifactPath'])
         if artifact_sha256(data) != entry['sha256']:
             raise StorageError(f'{project_id} v{version}: artifact sha256 mismatch — refusing to load')
-        return json.loads(data)
+        artifact = json.loads(data)
+        # The manifest/build blob rides the registry entry, not the artifact
+        # file — reunite them so consumers that read artifact['metadata']
+        # (e.g. resolve_app_pins' publisher fallback) see it in both editions.
+        if isinstance(entry.get('metadata'), dict) and 'metadata' not in artifact:
+            artifact['metadata'] = entry['metadata']
+        return artifact
 
     async def iter_enabled(self) -> 'AsyncGenerator[Dict[str, Any], None]':
         """Yield every ENABLED team deployment across all orgs (scheduler feed).
