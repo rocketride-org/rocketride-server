@@ -37,7 +37,7 @@
 // decoupled from connection, same as VSCode.
 // =============================================================================
 
-import { stashSignupProperties, takeSignupProperties, currentSignupProperties, signupState, signupFromState } from '../util/signupAttribution';
+import { stashSignupProperties, takeSignupProperties, currentSignupProperties, signupState } from '../util/signupAttribution';
 import type { PkceCredential, SignupProperties } from 'rocketride';
 import type { IAuthProvider } from '../types/connection';
 import { generatePkce, buildAuthUrl, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
@@ -158,13 +158,12 @@ export class CloudAuthProvider implements IAuthProvider {
 	 * that should be passed to ConnectionManager.connect().
 	 *
 	 * @param code - The authorization code from the URL.
-	 * @param state - The callback's OAuth state, which carries a cookieless signup context.
 	 * @returns The PKCE exchange object for client.connect(), or null if
 	 *          the verifier is missing (stale/expired session).
 	 */
-	public handleCallback(code: string, state: string | null = null): PkceCredential | null {
+	public handleCallback(code: string): PkceCredential | null {
 		// Retrieve and clear the stored verifier
-		const signup = takeSignupProperties() ?? signupFromState(state);
+		const signup = takeSignupProperties();
 		const verifier = getStoredVerifier();
 		clearStoredVerifier();
 
