@@ -86,6 +86,15 @@ SQL_QUERIES = {
     'mark_active': 'UPDATE {collection} SET isDeleted = FALSE WHERE objectId = ANY(%s)',
     'render_document': 'SELECT content, chunkId FROM {collection} WHERE objectId = %s AND chunkId >= %s AND chunkId < %s ORDER BY chunkId',
     'semantic_search': 'SELECT *, embedding {similarity_operator} %s AS distance FROM {collection} {where_clause} ORDER BY distance LIMIT %s',
+    # Adding zero to the distance prevents an approximate index from serving
+    # this ORDER BY. The subquery makes the distance alias available to the
+    # expression without passing the query vector a second time. Exclude
+    # undefined distances (NULL / NaN, including zero vectors with cosine).
+    'semantic_search_exact': (
+        'SELECT * FROM (SELECT *, embedding {similarity_operator} %s AS distance '
+        'FROM {collection} {where_clause}) AS candidates '
+        "WHERE distance < 'Infinity'::float8 ORDER BY distance + 0 LIMIT %s"
+    ),
     # fmt: off
     'create_hnsw_index': (
         'CREATE INDEX IF NOT EXISTS {index_name} ON {collection} USING hnsw (embedding {opclass}) WITH (m = {m}, ef_construction = {ef_construction});'
@@ -766,6 +775,30 @@ class Store(DocumentStoreBase):
         with self._cursor() as cur:
             cur.execute(
                 SQL_QUERIES['semantic_search'].format(
+                    collection=self.collection, similarity_operator=self.similarity, where_clause=where_sql
+                ),
+                (embedding_arr, *params, docFilter.limit),
+            )
+            results = cur.fetchall()
+
+            columns = [desc[0] for desc in cur.description]
+            docs = self._convertToDocs([dict(zip(columns, row)) for row in results])
+            try:
+                threshold = max(MIN_SIMILARITY_SCORE, float(self.threshold_search))
+            except (TypeError, ValueError):
+                threshold = MIN_SIMILARITY_SCORE
+
+            # HNSW filters its candidate list after scanning. Deleted or
+            # excluded neighbours can hide eligible matches, or leave only
+            # low-scoring candidates. Count usable matches, not raw rows.
+            if sum(doc.score >= threshold for doc in docs) >= docFilter.limit:
+                return docs
+
+            # Retry with the same filters and limit, without an approximate
+            # index. No index rebuild or session settings are needed, including
+            # on older pgvector versions and transaction-pooled sessions.
+            cur.execute(
+                SQL_QUERIES['semantic_search_exact'].format(
                     collection=self.collection, similarity_operator=self.similarity, where_clause=where_sql
                 ),
                 (embedding_arr, *params, docFilter.limit),
