@@ -348,13 +348,11 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		const run = pendingRun;
 		setPendingRun(null);
 		if (!client || !isConnected) return;
-		projectVfs.write(filename, pipeline)
-			.then(() => {
-				getDocs()?.saveDocument(uri);
-				executePipelineAction(run.action, run.source);
-			})
-			.catch((err) => setPipelineError(err instanceof Error ? err.message : String(err)));
-	}, [pendingRun, isNew, filename, pipeline, client, isConnected, uri, executePipelineAction, projectVfs]);
+		performSave(filename, pipeline, { rethrow: true })
+			.then(() => executePipelineAction(run.action, run.source))
+			// performSave already surfaced the error; abort the run.
+			.catch(() => undefined);
+	}, [pendingRun, isNew, filename, pipeline, client, isConnected, executePipelineAction, performSave]);
 
 	// --- Publish (client.deploy.add of the saved snapshot) --------------------
 

@@ -36,7 +36,7 @@
 //  - devToolSidebar: the menu lives in the HOST's sidebar, an isolated
 //    document — selections ride the tool channel ('page' event) to the frame.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { SidebarMenu, typedToolChannel, useShellEvent } from 'shell';
 import { useDashboardData } from './monitor/useDashboardData';
 import type { DevToolProps, ViewMenu } from 'shell';
@@ -126,11 +126,10 @@ export const MonitorDevToolSidebar: React.FC<DevToolProps> = ({ channel, documen
 		toolChannel.publishState('dashboard', { data, events } satisfies IDashboardSnapshot);
 	}, [toolChannel, data, events]);
 
-	// The frame's manual refresh, nudging this mount's shared poller. The
-	// grids page with the frame's own realm client — nothing served for them.
-	const refreshRef = useRef(refresh);
-	refreshRef.current = refresh;
-	useEffect(() => serveMonitorOps(channel, { refresh: () => refreshRef.current() }), [channel]);
+	// The frame's manual refresh, nudging this mount's shared poller (stable
+	// useCallback identity). The grids page with the frame's own realm
+	// client — nothing served for them.
+	useEffect(() => serveMonitorOps(channel, { refresh }), [channel, refresh]);
 
 	return (
 		<MonitorSidebar

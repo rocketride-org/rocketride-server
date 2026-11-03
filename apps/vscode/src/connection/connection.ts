@@ -596,14 +596,6 @@ export class ConnectionManager extends EventEmitter {
 	}
 
 	/**
-	 * Cancels any pending debounced config-change handler.
-	 *
-	 * Called by the settings save op (ops/settingsOps.ts) after
-	 * applyAllSettings() but before reconcile, so any debounced handler a
-	 * config write queued doesn't race with the reconciler's engine restart
-	 * and CM reconnection sequence.
-	 */
-	/**
 	 * Applies a configuration change NOW: cancels any debounced handler and
 	 * runs the transition directly.
 	 *
@@ -620,6 +612,14 @@ export class ConnectionManager extends EventEmitter {
 		await this.handleConfigurationChanged();
 	}
 
+	/**
+	 * Cancels any pending debounced config-change handler.
+	 *
+	 * Called by the settings save op (ops/settingsOps.ts) after
+	 * applyAllSettings() but before reconcile, so any debounced handler a
+	 * config write queued doesn't race with the reconciler's engine restart
+	 * and CM reconnection sequence.
+	 */
 	public cancelPendingConfigChange(): void {
 		if (this.configChangeTimeout) {
 			clearTimeout(this.configChangeTimeout);

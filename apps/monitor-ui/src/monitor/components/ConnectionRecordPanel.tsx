@@ -7,7 +7,7 @@
 // CONNECTION RECORD PANEL — DetailPanel slide-out for one active connection
 // =============================================================================
 
-import React, { useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import type { CSSProperties } from 'react';
 import { DetailPanel } from 'shell';
 import { Section, LabelValue } from 'shell';
@@ -146,11 +146,13 @@ export const ConnectionRecordPanel: React.FC<IConnectionRecordPanelProps> = ({ c
 	// rows so every parent re-render (each 3s poll) refreshes the open panel.
 	const lastKnownRef = useRef<DashboardConnection | null>(null);
 	const live = connectionId != null ? connections.find((conn) => conn.id === connectionId) : undefined;
-	if (live != null) {
+	useEffect(() => {
 		// Cache the latest resolved snapshot (a plain memo write; the ref is
 		// only read by this component's own render).
-		lastKnownRef.current = live;
-	}
+		if (live != null) {
+			lastKnownRef.current = live;
+		}
+	}, [live]);
 
 	// Step 2: fall back to the last-known snapshot when the row is absent from
 	// the current rows — the id guard ensures a stale cache from a previously

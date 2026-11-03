@@ -3,22 +3,12 @@
 // Copyright (c) 2026 Aparavi Software AG
 // =============================================================================
 
-/**
- * Sidebar types — shared between VS Code webview and rocket-ui hosts.
- *
- * The host builds a flat array of ProjectEntry (one per .pipe file) and
- * passes it into <SidebarMain>.  The component derives the directory
- * hierarchy on the fly via path parsing (S3-style).
- */
-
-
-
 // =============================================================================
 // TOOLS/APPDEV — sidebar data types
 // =============================================================================
 //
-// The App Builder tool's MY APPS shapes (moved from modules/sidebar).
-
+// The App Builder tool's MY APPS shapes — shared between the VS Code webview
+// and rocket-ui hosts.
 // =============================================================================
 
 /**

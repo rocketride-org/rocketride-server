@@ -214,10 +214,6 @@ export type { ToolStateMap, ToolEventMap, TypedToolChannel, IHostConnectionState
 export { createToolOpClient, createToolOpServer, asToolCallMessage, asToolReplyMessage, DEFAULT_OP_TIMEOUT_MS } from './components/workspace/toolOps';
 export type { ToolOpMap, ToolOpSpec, ToolOpParams, ToolOpResult, ToolControllerFn, IToolOpServer, IToolCallOptions, IToolCallMessage, IToolReplyMessage } from './components/workspace/toolOps';
 
-// Workspace prefs store — the host framework's persisted-preference seam:
-// the shell types its SYSTEM partition (ShellPrefsMap); each app privately
-// types its own keys and receives a pre-scoped partition (scopedPrefs) —
-// isolation by construction, no shared flat bag.
 export { useLatest } from './hooks/useLatest';
 // The shell's own confirmation dialog — realm UI, usable by any tool
 // without a host capability (ToolHostServices.confirm is deprecated).
@@ -228,6 +224,10 @@ export type { ChoiceDialogRequest } from './components/modal/confirmService';
 // a dirty document offers Save / Discard / Cancel).
 export { ChoiceDialog } from './components/modal/ChoiceDialog';
 export type { IChoiceOption, IChoiceDialogProps } from './components/modal/ChoiceDialog';
+// Workspace prefs store — the host framework's persisted-preference seam:
+// the shell types its SYSTEM partition (ShellPrefsMap); each app privately
+// types its own keys and receives a pre-scoped partition (scopedPrefs) —
+// isolation by construction, no shared flat bag.
 export { typedPrefs, scopedPrefs, createMirroredPrefsStore, createPrefsHub, realmPrefsHub, prefsTopic, usePref } from './components/workspace/prefsStore';
 export type { IPrefsBus, IPrefsHub } from './components/workspace/prefsStore';
 export { useGridConfigAnswering } from './components/data-grid/gridConfigAnswering';

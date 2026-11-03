@@ -93,7 +93,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	 *   tool peer traffic rides its retained/signal lanes).
 	 */
 	constructor(private readonly extensionUri: vscode.Uri, private readonly context?: vscode.ExtensionContext, private readonly devTools?: DevToolStore, private readonly busHost?: BusHost) {
-		this.toolRows = new ToolRows(this.connectionManager, this.devTools, this.context, this.busHost?.rootBus);
+		this.toolRows = new ToolRows(this.connectionManager, this.devTools, this.context);
 		this.pipelineFiles = new PipelineFiles(this.connectionManager, this.configManager);
 		// The workspace-FS capability (declared in shared/ops/fsOps) is served
 		// HERE too: this provider owns the service and the watch lifecycle.

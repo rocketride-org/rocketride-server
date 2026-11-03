@@ -170,7 +170,9 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 	// bootstrap effect without retriggering it on every settings change.
 	const settingAutoCommit = settings['rocketride.pipeBuilder.autoCommit'] !== false;
 	const autoCommitRef = useRef(settingAutoCommit);
-	autoCommitRef.current = settingAutoCommit;
+	useEffect(() => {
+		autoCommitRef.current = settingAutoCommit;
+	}, [settingAutoCommit]);
 	// True while the auto-commit switch is held up by pending staged
 	// changes — drives the commit / discard / stay prompt below.
 	const [modeSwitchBlocked, setModeSwitchBlocked] = useState(false);

@@ -660,17 +660,17 @@ export const Settings: React.FC = () => {
 			const { development, deployment, ...topLevel } = changes;
 			Object.assign(next, topLevel);
 
-			// Side effects: refresh versions when switching to any mode that
-			// needs them. The host caches results, so repeated calls are cheap.
-			const devMode = changes.development?.connectionMode;
-			const depMode = changes.deployment?.connectionMode;
-			const needsVersions = ['local', 'service', 'docker'];
-			if ((devMode && needsVersions.includes(devMode)) || (depMode && needsVersions.includes(depMode))) {
-				fetchVersions();
-			}
-
 			return next;
 		});
+		// Side effects: refresh versions when switching to any mode that
+		// needs them (outside the updater — updaters must stay pure). The
+		// host caches results, so repeated calls are cheap.
+		const devMode = changes.development?.connectionMode;
+		const depMode = changes.deployment?.connectionMode;
+		const needsVersions = ['local', 'service', 'docker'];
+		if ((devMode && needsVersions.includes(devMode)) || (depMode && needsVersions.includes(depMode))) {
+			fetchVersions();
+		}
 	};
 
 	// ========================================================================

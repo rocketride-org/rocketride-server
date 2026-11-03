@@ -21,7 +21,6 @@ import type { ConnectionManager } from '../../connection/connection';
 import type { DevToolStore } from '../DevToolStore';
 // Deep import on purpose — ext-host-safe .ts leaf (see busHost.ts).
 import { fetchDevToolCatalog } from 'shared/tools/core/devToolCatalog';
-import type { IOpBus } from 'shell/src/ops/busOps';
 import { getLogger } from '../../shared/util/output';
 
 /** workspaceState key for the last-known pinned tool rows (name + inlined
@@ -67,10 +66,7 @@ export class ToolRows {
 	constructor(
 		private readonly connectionManager: ConnectionManager,
 		private readonly devTools?: DevToolStore,
-		private readonly context?: vscode.ExtensionContext,
-		/** The root op bus — the strip fallback's catalog fetch rides the
-		 *  same brokered op every panel calls. */
-		private readonly bus?: IOpBus
+		private readonly context?: vscode.ExtensionContext
 	) {}
 
 	/**
@@ -142,7 +138,7 @@ export class ToolRows {
 		// One catalog fetch per build, and only when a pinned id misses the
 		// account list (the common case — all pins on the desktop — never
 		// pays for it).
-		if (this.bus && this.connectionManager.isConnected() && pinned.some((id) => !byId.has(id))) {
+		if (this.connectionManager.isConnected() && pinned.some((id) => !byId.has(id))) {
 			try {
 				for (const entry of await fetchDevToolCatalog(this.connectionManager.getClient())) {
 					if (!byId.has(entry.id)) byId.set(entry.id, entry);

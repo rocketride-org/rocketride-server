@@ -283,15 +283,20 @@ test('serialized attempt publication cannot let an old filesystem write land aft
 	const oldGeneration = controller.beginAttempt();
 	const oldPublication = controller.serializeAttemptPublication(oldGeneration, async (isCurrent) => {
 		await oldRead.promise;
-		if (isCurrent()) writes.push('old');
+		writes.push(isCurrent() ? 'old write' : 'old skipped');
 	});
+	// Let the old publication start and block on oldRead before ownership
+	// changes — the in-flight case the publication queue exists for.
+	await Promise.resolve();
 
 	const newGeneration = controller.beginAttempt();
 	const newPublication = controller.serializeAttemptPublication(newGeneration, async (isCurrent) => {
-		if (isCurrent()) writes.push('new');
+		writes.push(isCurrent() ? 'new write' : 'new skipped');
 	});
 
 	oldRead.resolve();
 	await Promise.all([oldPublication, newPublication]);
-	assert.deepEqual(writes, ['new']);
+	// The new publication waited for the in-flight old one, which observed
+	// lost ownership at write time.
+	assert.deepEqual(writes, ['old skipped', 'new write']);
 });

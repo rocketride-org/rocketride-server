@@ -61,7 +61,7 @@ export interface IUseEventCaptureResult {
 	config: MonitorConfig;
 	/** Latest coalesced snapshot (grid rows + metrics). */
 	snapshot: CaptureSnapshot;
-	/** Whether a shell client is available to subscribe through. */
+	/** Whether the shell WebSocket is authenticated and connected. */
 	connected: boolean;
 	/** Toggle monitoring on/off (subscribe / unsubscribe). */
 	toggleActive: () => void;
