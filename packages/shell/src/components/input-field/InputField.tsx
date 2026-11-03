@@ -70,6 +70,13 @@ const styles = {
 		borderRadius: 7,
 		background: 'var(--rr-bg-default)',
 	} as CSSProperties,
+	// Disabled: greyed fill and text, and the not-allowed cursor, so the field
+	// reads as locked rather than empty or editable.
+	disabled: {
+		background: 'var(--rr-bg-surface-alt)',
+		color: 'var(--rr-text-disabled)',
+		cursor: 'not-allowed',
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -96,5 +103,10 @@ export function InputField({ className, style, ...rest }: IInputFieldProps): Rea
 		invalidStyle = { borderColor: 'var(--rr-color-error)' };
 	}
 
-	return <input {...fieldProps} className={mergedClassName} style={{ ...styles.input, ...invalidStyle, ...style }} />;
+	let disabledStyle: CSSProperties | undefined;
+	if (fieldProps.disabled) {
+		disabledStyle = styles.disabled;
+	}
+
+	return <input {...fieldProps} className={mergedClassName} style={{ ...styles.input, ...disabledStyle, ...invalidStyle, ...style }} />;
 }
