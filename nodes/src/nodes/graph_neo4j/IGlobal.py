@@ -36,9 +36,9 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import neo4j
+import neo4j.exceptions as _neo4j_exceptions
 from neo4j.exceptions import (
     AuthError,
-    ConnectionAcquisitionTimeoutError,
     Neo4jError,
     ServiceUnavailable,
     SessionExpired,
@@ -48,6 +48,15 @@ from neo4j.exceptions import (
 from rocketlib import error, warning
 
 from ai.common.graph import GraphGlobalBase, GraphUnavailableError, is_cypher_safe, strip_cypher_literals
+
+
+class _AbsentDriverError(Exception):
+    """Stands in for an exception class the installed ``neo4j`` driver does not have; never raised."""
+
+
+# The driver is unpinned and ``ConnectionAcquisitionTimeoutError`` is newer than the others,
+# so an older driver must not take the whole node down at import.
+ConnectionAcquisitionTimeoutError = getattr(_neo4j_exceptions, 'ConnectionAcquisitionTimeoutError', _AbsentDriverError)
 
 DEFAULT_URI = 'neo4j://localhost:7687'
 DEFAULT_DATABASE = 'neo4j'

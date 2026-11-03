@@ -213,6 +213,31 @@ _glb_mod, mod = _load_node()
 graph_base = sys.modules['ai.common.graph']
 
 
+def test_the_node_loads_on_a_driver_without_connection_acquisition_timeout_error():
+    """``neo4j`` is unpinned: a driver that predates that class must not break the node at import."""
+    touched = [n for n in sys.modules if n.startswith(('ai.common.graph', 'nodes.graph_neo4j'))]
+    saved = {n: sys.modules[n] for n in touched}
+    try:
+        with _scoped_stubs():
+            del sys.modules['neo4j.exceptions'].ConnectionAcquisitionTimeoutError
+            _load_from_path('ai.common.graph', _GRAPH_PKG / '__init__.py', is_package=True)
+            old_glb = _load_from_path('nodes.graph_neo4j.IGlobal', _NODE_DIR / 'IGlobal.py')
+
+            assert old_glb.ConnectionAcquisitionTimeoutError is old_glb._AbsentDriverError
+            unavailable = sys.modules['ai.common.graph'].GraphUnavailableError
+            glb = object.__new__(old_glb.IGlobal)
+            glb.database = 'neo4j'
+            glb.driver = _FakeDriver(raise_error=_StubServiceUnavailable('no route'))
+            with pytest.raises(unavailable):
+                glb._validate_query('MATCH (n) RETURN n')  # the other outage classes still work
+            glb.driver = _FakeDriver(raise_error=_StubNeo4jError('Invalid input'))
+            assert glb._validate_query('MATCH (n RETURN n') == (False, 'Invalid input')
+    finally:
+        for name in [n for n in sys.modules if n.startswith(('ai.common.graph', 'nodes.graph_neo4j'))]:
+            sys.modules.pop(name, None)
+        sys.modules.update(saved)
+
+
 # ---------------------------------------------------------------------------
 # Fakes: Bolt driver / session / result
 # ---------------------------------------------------------------------------
