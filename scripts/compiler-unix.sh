@@ -66,6 +66,7 @@ LLVM_TARBALL_VERSION=""     # set when no usable system clang → fetch LLVM fro
 CLANG_PKGS=()               # apt/dnf clang packages to install (--system-compiler)
 CLANG_ALT_VERSION=""        # versioned clang to force via update-alternatives (apt --system-compiler)
 LLVM_APT_VERSION=""         # apt.llvm.org clang major to add when the distro archive lacks it (--system-compiler)
+LLVM_APT_KEY_FILE="scripts/assets/llvm-snapshot.asc"  # vendored apt.llvm.org signing key (repo-root relative; the script cd's there)
 LLVM_TARBALL_PREFIX="$REAL_HOME/toolchains/llvm"  # user-local install root (no root needed to unpack)
 LLVM_TARBALL_FALLBACK="18.1.8"  # used only if the latest 18.x can't be discovered online
 DUMP_SYMS_DIR="$REAL_HOME/toolchains/bin"  # user-local bin for build tools (dump_syms); on the build PATH via tasks.js
@@ -249,26 +250,27 @@ apt_archive_has_clang() {
 ensure_llvm_repo() {
     local ver="$1" codename list="/etc/apt/sources.list.d/llvm-toolchain-$1.list"
     [ -f "$list" ] && return 0
-    command_exists wget || { echo "ERROR: wget is required to add apt.llvm.org (install it or re-run with --autoinstall)"; return 1; }
     command_exists gpg  || { echo "ERROR: gpg is required to add apt.llvm.org (install it or re-run with --autoinstall)"; return 1; }
     codename=$(. /etc/os-release 2>/dev/null; printf '%s' "${VERSION_CODENAME:-}")
     [ -z "$codename" ] && { echo "ERROR: cannot determine apt codename for apt.llvm.org (clang-$ver)"; return 1; }
     echo "→ adding apt.llvm.org ($codename) for clang-$ver"
     $SUDO install -d -m 0755 /etc/apt/keyrings || return 1
-    # Stage via temp files: a plain wget|gpg|tee pipe reports tee's exit (not
-    # wget's), so a failed key download would silently write an empty keyring.
-    # (Can't capture the dearmored key in a var — it's binary, and bash strips NULs.)
+    # The signing key is vendored (scripts/assets/llvm-snapshot.asc, fingerprint
+    # 6084F3CF814B57C1CF12EFD515CF4D18AF4F7421) instead of fetched on every run: a
+    # single wget made the whole build depend on apt.llvm.org being up at that second.
+    # Refresh it from https://apt.llvm.org/llvm-snapshot.gpg.key if LLVM rotates it.
+    # Dearmor via a temp file: a plain gpg|tee pipe reports tee's exit, and the
+    # dearmored key is binary (bash strips NULs), so it can't live in a variable.
+    [ -f "$LLVM_APT_KEY_FILE" ] || { echo "ERROR: vendored apt.llvm.org GPG key missing: $LLVM_APT_KEY_FILE"; return 1; }
     local tmpkey; tmpkey=$(mktemp)
-    wget -qO "$tmpkey" https://apt.llvm.org/llvm-snapshot.gpg.key \
-        || { rm -f "$tmpkey"; echo "ERROR: failed to download the apt.llvm.org GPG key"; return 1; }
-    gpg --dearmor < "$tmpkey" > "$tmpkey.gpg" \
-        || { rm -f "$tmpkey" "$tmpkey.gpg"; echo "ERROR: failed to dearmor the apt.llvm.org GPG key"; return 1; }
-    $SUDO install -m 0644 "$tmpkey.gpg" /etc/apt/keyrings/apt.llvm.org.gpg \
-        || { rm -f "$tmpkey" "$tmpkey.gpg"; return 1; }
-    rm -f "$tmpkey" "$tmpkey.gpg"
+    gpg --dearmor < "$LLVM_APT_KEY_FILE" > "$tmpkey" \
+        || { rm -f "$tmpkey"; echo "ERROR: failed to dearmor the apt.llvm.org GPG key"; return 1; }
+    $SUDO install -m 0644 "$tmpkey" /etc/apt/keyrings/apt.llvm.org.gpg \
+        || { rm -f "$tmpkey"; return 1; }
+    rm -f "$tmpkey"
     echo "deb [signed-by=/etc/apt/keyrings/apt.llvm.org.gpg] http://apt.llvm.org/${codename}/ llvm-toolchain-${codename}-${ver} main" \
         | $SUDO tee "$list" >/dev/null || return 1
-    $SUDO apt-get update || { $SUDO rm -f "$list"; return 1; }
+    $SUDO apt-get update -o Acquire::Retries=5 || { $SUDO rm -f "$list"; return 1; }
 }
 
 # Run a privileged command, or explain how to recover when it can't. The build
@@ -535,9 +537,9 @@ dep_install() {
     local mgr="$1"; shift
     case "$mgr" in
         apt)
-            $SUDO apt-get update || return 1
+            $SUDO apt-get update -o Acquire::Retries=5 || return 1
             local p
-            for p in "$@"; do $SUDO apt-get install -y "$p" || return 1; done
+            for p in "$@"; do $SUDO apt-get install -y -o Acquire::Retries=5 "$p" || return 1; done
             ;;
         dnf) $SUDO dnf install -y "$@" || return 1 ;;
     esac
