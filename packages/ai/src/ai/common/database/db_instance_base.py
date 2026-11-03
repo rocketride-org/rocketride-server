@@ -184,6 +184,14 @@ class MissingLlmError(ValueError):
     """A natural-language question reached a node with no llm connected."""
 
 
+class _QuestionFailed(RuntimeError):
+    """A question failed with a message this module wrote for the caller, safe to put on the lanes."""
+
+
+# What the lanes get for any other failure; the cause goes to the log only
+_QUESTION_FAILED = 'Failed to answer the question'
+
+
 class DatabaseInstanceBase(IInstanceBase, ABC):
     """Abstract base for the IInstance layer of any relational database node.
 
@@ -1077,36 +1085,42 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             is_valid_query = parse_bool(query_json.get('isValid', False))
 
             # The EXPLAIN repair loop gave up: `query` still holds the rejected
-            # SQL, not an answer. Emit the error instead of printing it as prose.
+            # SQL, not an answer. Report the error instead of printing it as prose.
             if query_json.get('error'):
-                self._emitError(query_json['error'], lanes)
-                return
+                raise _QuestionFailed(query_json['error'])
             # The LLM claimed valid SQL but it fails the safety gate: same rule
             # -- surface the rejection, never emit the unsafe SQL as prose/data.
             if is_valid_query and sql_query and not is_sql_safe(sql_query):
-                self._emitError('Generated query contains unsafe SQL', lanes)
-                return
+                raise _QuestionFailed('Generated query contains unsafe SQL')
             # Neither SQL to run nor a prose answer: report it instead of emitting the text 'None'
             if not sql_query:
-                raise RuntimeError('The LLM returned neither a query nor an answer')
+                raise _QuestionFailed('The LLM returned neither a query nor an answer')
 
             executed = is_valid_query and bool(sql_query)
             # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
             result = self._executeSQLQuery(sql_query) if executed else sql_query
             # The database rejected the statement at run time (the cause is in the log)
             if executed and result is None:
-                raise RuntimeError(_QUERY_EXECUTION_FAILED)
-
-            self._emit(result, lanes, executed=executed)
+                raise _QuestionFailed(_QUERY_EXECUTION_FAILED)
 
         except Exception as e:
-            # The caller needs this cause, not only the log: on the text/answers
-            # lanes when one is wired, otherwise through the engine's error path
-            # (a table-only pipeline has no lane that carries an error message).
+            # The caller needs to know the question failed, not only the log: on the
+            # text/answers lanes when one is wired, otherwise through the engine's
+            # error path (a table-only pipeline has no lane that carries an error),
+            # which hands the exception's text to the client too. Only messages
+            # written here reach the caller either way; any other exception text can
+            # carry the LLM's reply or a provider's internals, so it stays in the log.
             error(f'Error handling question: {e}')
+            written_here = isinstance(e, (_QuestionFailed, MissingLlmError))
             if 'text' not in lanes and 'answers' not in lanes:
-                raise
-            self._emitError(str(e), lanes)
+                if written_here:
+                    raise
+                raise _QuestionFailed(_QUESTION_FAILED) from None
+            self._emitError(str(e) if written_here else _QUESTION_FAILED, lanes)
+            return
+
+        # Outside the try: a lane write that fails fails the question
+        self._emit(result, lanes, executed=executed)
 
     def _emitError(self, message: str, lanes) -> None:
         """Emit a validation/safety error to the wired lanes, never a rejected query as prose.

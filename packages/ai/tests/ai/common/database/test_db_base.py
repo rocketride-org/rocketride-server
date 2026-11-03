@@ -942,6 +942,104 @@ def test_write_questions_raises_a_failed_execution_when_no_lane_carries_errors()
     assert fake_instance.table_written is None
 
 
+def _question_instance(reply, lanes, *, explain_ok=True, rows=None):
+    """Build an instance whose LLM step returns ``reply``, with the given lanes wired.
+
+    Args:
+        reply: What ``_buildSQLQueryOnce`` returns, or an exception to raise from it.
+        lanes: The lanes wired to the node.
+        explain_ok: Whether the EXPLAIN check accepts the query (otherwise every attempt is rejected).
+        rows: What ``_executeSQLQuery`` returns.
+
+    Returns:
+        The instance and its lane recorder.
+    """
+    fake_global = _FakeGlobal()
+    if explain_ok:
+        fake_global._validateQuery = lambda sql: (True, None)
+    inst = _sql_instance(fake_global)
+
+    def build(question_text, *, limit, previous_sql, error):
+        """Return ``reply``, or raise it when it is an exception."""
+        if isinstance(reply, BaseException):
+            raise reply
+        return dict(reply)
+
+    inst._buildSQLQueryOnce = build
+    inst._executeSQLQuery = lambda sql: rows
+    fake_instance = _FakeInstance(lanes=lanes)
+    inst.instance = fake_instance
+    return inst, fake_instance
+
+
+def _ask(inst, text='the question'):
+    """Send one question to ``inst``."""
+    question = Question()
+    question.addQuestion(text)
+    inst.writeQuestions(question)
+
+
+@pytest.mark.parametrize(
+    ('reply', 'explain_ok', 'rows', 'message'),
+    [
+        ({'isValid': True, 'query': 'SELECT * FROM'}, False, None, 'syntax error near FROM'),
+        ({'isValid': True, 'query': 'DELETE FROM users'}, True, None, 'Generated query contains unsafe SQL'),
+        ({'isValid': False}, True, None, 'The LLM returned neither a query nor an answer'),
+        ({'isValid': True, 'query': 'SELECT 1'}, True, None, 'Query execution failed'),
+    ],
+    ids=['explain-exhausted', 'unsafe-sql', 'no-query', 'execution-failed'],
+)
+def test_every_failure_fails_a_table_only_question(reply, explain_ok, rows, message):
+    """With no lane that carries an error, each failure point fails the question instead of reporting nothing."""
+    inst, fake_instance = _question_instance(reply, ['table'], explain_ok=explain_ok, rows=rows)
+
+    with pytest.raises(RuntimeError, match=message):
+        _ask(inst)
+    assert fake_instance.table_written is None
+
+
+def test_an_unexpected_failure_reaches_the_lanes_as_a_fixed_message():
+    """Exception text we did not write (here an LLM error quoting the rejected SQL) stays in the log."""
+    leak = ValueError('Cause: bad JSON. Last response: SELECT secret FROM users WHERE token = 1...')
+    inst, fake_instance = _question_instance(leak, ['text', 'answers'])
+
+    _ask(inst)
+
+    assert fake_instance.text_written == 'Failed to answer the question'
+    assert fake_instance.answer_written.getJson() == {'error': 'Failed to answer the question'}
+
+
+def test_an_unexpected_failure_of_a_table_only_question_raises_the_fixed_message():
+    """The engine hands a raised exception's text to the client, so a table-only question raises our text, not the cause."""
+    leak = ValueError('Cause: bad JSON. Last response: SELECT secret FROM users WHERE token = 1...')
+    inst, _ = _question_instance(leak, ['table'])
+
+    with pytest.raises(RuntimeError) as raised:
+        _ask(inst)
+
+    assert str(raised.value) == 'Failed to answer the question'
+    assert raised.value.__suppress_context__
+
+
+class _FailingAnswersInstance(_FakeInstance):
+    """A lane recorder whose answers lane fails to write."""
+
+    def writeAnswers(self, answer):
+        """Fail the write."""
+        raise RuntimeError('answers sink is down')
+
+
+def test_a_failing_lane_write_fails_the_question():
+    """A lane that cannot be written fails the question; the error is not sent to the other lanes on top of the rows."""
+    inst, _ = _question_instance({'isValid': True, 'query': 'SELECT 1'}, ['text', 'answers'], rows=[{'answer': 42}])
+    fake_instance = _FailingAnswersInstance(lanes=['text', 'answers'])
+    inst.instance = fake_instance
+
+    with pytest.raises(RuntimeError, match='answers sink is down'):
+        _ask(inst)
+    assert fake_instance.text_written == str([{'answer': 42}])
+
+
 class _RaisingEngine:
     """An engine whose every statement fails with one exception."""
 
