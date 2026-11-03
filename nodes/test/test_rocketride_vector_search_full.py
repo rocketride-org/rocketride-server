@@ -186,6 +186,7 @@ def test_filtered_search_returns_eligible_documents_in_distance_order(indexed_st
 
 
 def test_unbounded_search_returns_all_eligible_documents(indexed_store):
+    """An unlimited request returns every eligible document in one exact query."""
     from ai.common.schema import DocFilter, QuestionText
 
     store, raw, _, query, searches = indexed_store
