@@ -197,7 +197,7 @@ This keeps deleted chunks or other excluded HNSW candidates from hiding eligible
 matches. The retry scans the matching rows and can cost more on large tables;
 a full approximate result meeting the threshold does not trigger it. Score
 thresholds still apply, so the final response can contain fewer matches than
-requested.
+requested. An unbounded search (`limit=null`) uses the exact query directly.
 
 Queries with few or no qualifying matches take the exact retry. With the default
 non-iterative HNSW scan, requesting more results than its `hnsw.ef_search`
