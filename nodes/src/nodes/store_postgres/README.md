@@ -107,6 +107,21 @@ paths, it cannot take a non-zero result offset. This matters for callers that
 try to paginate semantic results: use a limit or a separate retrieval strategy
 instead of expecting SQL-style offset pagination.
 
+This node does not create a vector index. If an administrator adds HNSW, it
+uses the same `PgVectorStoreBase` search as `rocketride_vector`: on pgvector
+0.8+, a transaction-local iterative scan continues past deleted or excluded
+neighbours, within the server's scan and memory budgets. If no matches meet
+the score threshold and 0.20 minimum floor, an exact retry checks for hidden
+active documents. Nonempty results remain approximate and do not trigger a
+retry merely because they fall short of the requested limit. On older pgvector
+versions, underfilled results also retry. Unindexed tables avoid that redundant
+retry, and an unbounded request uses exact search directly. Exact retries can
+be expensive on large tables, including queries that genuinely have no matches.
+
+The shared base serializes access to each connection. Chunk replacements and
+iterative searches use explicit transactions; other statements autocommit, so
+completed reads do not hold open transactions between calls.
+
 The metadata filters are translated to SQL predicates for node, parent,
 permissions, object IDs, chunk IDs, table data, and deletion state. Normal
 searches exclude marked-deleted rows. Use those filters to narrow one shared
