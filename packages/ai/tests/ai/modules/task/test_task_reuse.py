@@ -60,6 +60,7 @@ def _running(pipeline):
     control.pipeline = pipeline
     control.task = MagicMock()
     control.task.is_task_complete.return_value = False
+    control.task.authorize_reuse = AsyncMock()
     return control
 
 

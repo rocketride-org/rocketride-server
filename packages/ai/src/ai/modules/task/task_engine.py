@@ -30,6 +30,7 @@ Global Resources:
 
 import os
 import asyncio
+import inspect
 import sys
 import json
 import tempfile
@@ -381,6 +382,25 @@ def saas_pipeline_violation(
     return None
 
 
+def _accepts_credential(authorize: Callable[..., Any]) -> bool:
+    """True when ``authorize`` (an ``authorize_db_target``) takes ``credential=``.
+
+    Read from the signature rather than by calling and catching ``TypeError``:
+    a ``TypeError`` raised inside an implementation would otherwise be taken
+    for a missing keyword, retried without the credential and, on an
+    implementation that audits, recorded twice. A signature that cannot be
+    read counts as accepting, so a credential is never dropped on a guess.
+    """
+    try:
+        parameters = inspect.signature(authorize).parameters
+    except (TypeError, ValueError):
+        return True
+    named = parameters.get('credential')
+    if named is not None and named.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY):
+        return True
+    return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values())
+
+
 def _is_saas_engine() -> bool:
     """True when this engine is the hosted (SaaS) one.
 
@@ -686,6 +706,15 @@ class Task(DAPBase):
         # per-connection message stream; the continuum rides in `logSeq`.
         self._log_seq_next = 1
 
+        # The databases this run was authorized for, as ``_db_access`` returned
+        # them: ``(distinct (scope, target) pairs, public-endpoint flag)``. Team
+        # and user ids, never a credential or a DSN. Set at each (re)start and
+        # read back when another connection asks to reuse the running task
+        # (``authorize_reuse``). None until the first start reads it; a
+        # connection reusing a starting run waits on ``_db_seen_event``, which
+        # the ``_db_seen`` property keeps in step.
+        self._db_seen = None
+
         # Run-log writer — the per-task event continuum (created at subprocess
         # start; None if logging setup failed, which must never break the run).
         # run_kind separates the dev and deploy continua; the deploy feature's
@@ -830,7 +859,7 @@ class Task(DAPBase):
         }
 
     async def _authorize_db_targets(
-        self, targets: List[Tuple[str, str]], public_endpoint: bool
+        self, targets: List[Tuple[str, str]], public_endpoint: bool, *, credential: Optional[str] = None
     ) -> List[Tuple[str, str, str]]:
         """Authorize every database the pipeline's DB nodes use (SDD 4.4).
 
@@ -840,6 +869,13 @@ class Task(DAPBase):
         Args:
             targets, public_endpoint: from ``_db_access`` on the resolved
                 pipeline.
+            credential: The ``AccountInfo.auth`` of the connection that started
+                or restarted this run, handed to ``authorize_db_target`` so the
+                account layer can narrow the decision to what that credential
+                may reach. A call argument only: never stored on the task,
+                written to the task file, logged, or put in the identity.
+                ``''`` is the trusted deploy dispatch; ``None`` means there was
+                no connection identity to read.
 
         Returns:
             ``(scope, target, owner)`` per distinct node ``(scope, target)``,
@@ -853,6 +889,18 @@ class Task(DAPBase):
 
         requested = [(scope, target, self._db_owner(scope, target)) for scope, target in targets]
         identity = self._db_identity(public_endpoint)
+        # An account implementation that predates the keyword (an older SaaS
+        # extension against this engine) gets the two-argument call it always
+        # had, instead of a TypeError that fails every DB-node start. Asked
+        # per call, not cached, so there is no module state; the warning names
+        # no credential and takes no keyword (rocketlib's log functions are
+        # positional only).
+        pass_credential = _accepts_credential(account.authorize_db_target)
+        if not pass_credential:
+            warning(
+                'the account implementation predates credential-aware authorize_db_target; '
+                'authorizing the run databases without the presenting credential'
+            )
         approved: Dict[Tuple[str, str], str] = {}
         for scope, owner in dict.fromkeys((scope, owner) for scope, _, owner in requested):
             request: Dict[str, Any] = {'scope': scope}
@@ -860,7 +908,10 @@ class Task(DAPBase):
                 request['team_id'] = owner
             elif scope == 'user':
                 request['user_id'] = owner
-            decision = await account.authorize_db_target(identity, request)
+            if pass_credential:
+                decision = await account.authorize_db_target(identity, request, credential=credential)
+            else:
+                decision = await account.authorize_db_target(identity, request)
             if not decision.allowed:
                 named = f' {owner!r}' if owner else ''
                 raise PermissionError(
@@ -868,6 +919,98 @@ class Task(DAPBase):
                 )
             approved[(scope, owner)] = decision.owner_id
         return [(scope, target, approved[(scope, owner)]) for scope, target, owner in requested]
+
+    @property
+    def _db_seen(self) -> Optional[Tuple[List[Tuple[str, str]], bool]]:
+        """The databases the run was authorized for at its last (re)start, or None while unknown."""
+        return self.__dict__.get('_db_seen_value')
+
+    @_db_seen.setter
+    def _db_seen(self, value: Optional[Tuple[List[Tuple[str, str]], bool]]) -> None:
+        # Set and cleared together with the event, so no writer can leave a
+        # waiter looking at a value the event does not announce.
+        self.__dict__['_db_seen_value'] = value
+        event = self.__dict__.get('_db_seen_event')
+        if event is None:
+            event = self.__dict__['_db_seen_event'] = asyncio.Event()
+        if value is None:
+            event.clear()
+        else:
+            event.set()
+
+    async def _wait_for_db_seen(self) -> Tuple[List[Tuple[str, str]], bool]:
+        """Wait until the run has read the databases it holds.
+
+        Same contract as ``wait_for_running``: a sliding timeout that resets on
+        subprocess events, and a terminal state ends the wait. A restart in
+        progress is not terminal: its stop is followed by the new start.
+
+        Raises:
+            TaskError: the run completed or was stopped first.
+            TimeoutError: no subprocess event for ``CONST_MAX_READY_TIME`` seconds.
+        """
+        event = self.__dict__.get('_db_seen_event')
+        if event is None:
+            event = self.__dict__['_db_seen_event'] = asyncio.Event()
+        while True:
+            seen = self._db_seen
+            if seen is not None:
+                return seen
+            if not getattr(self, '_is_restarting', False):
+                state = self._status.state
+                if state == TASK_STATE.COMPLETED.value:
+                    raise TaskError(TaskError.COMPLETED, 'Task has already completed')
+                if state == TASK_STATE.CANCELLED.value:
+                    raise TaskError(TaskError.STOPPED, self._status.exitMessage or 'Task was stopped')
+            if time.time() - self._last_event_time >= CONST_MAX_READY_TIME:
+                raise TimeoutError(
+                    f'No subprocess events received for {CONST_MAX_READY_TIME} seconds. '
+                    'The task never reported its databases'
+                )
+            try:
+                await asyncio.wait_for(event.wait(), CONST_READY_POLL_INTERVAL)
+            except asyncio.TimeoutError:
+                pass
+
+    async def authorize_reuse(self, *, credential: Optional[str] = None) -> None:
+        """Authorize a connection that asks to reuse this RUNNING task.
+
+        A reuse starts nothing, but it hands the caller the live run, whose
+        subprocess already holds the DSNs it was authorized for. So the
+        requester's own credential must reach every database the run holds,
+        under the run's identity: the same ``_authorize_db_targets`` a start
+        runs, over the targets recorded at the last (re)start. Nothing is kept:
+        the credential is an argument, the targets are ids.
+
+        A run without DB nodes needs nothing. A run that is starting or
+        restarting and could hold a DB node is waited for until it has read
+        its databases (see ``_wait_for_db_seen``). An account implementation
+        without the ``credential`` keyword cannot tell callers apart, so it is
+        not asked (a reuse then behaves as it always did).
+
+        Raises:
+            PermissionError: a database the run holds is denied to this credential.
+            TaskError, TimeoutError: the run ended, or stalled, before it
+                reported its databases.
+        """
+        from ai.account import account
+
+        if not _accepts_credential(account.authorize_db_target):
+            return
+        seen = self._db_seen
+        if seen is None:
+            # Starting or restarting: the resolved pipeline has not been read
+            # yet. Only a pipeline that could hold a DB node (or whose node
+            # providers are still placeholders) has anything to wait for.
+            if not any(
+                isinstance(c, dict) and (c.get('provider') in DB_PROVIDERS or '${' in str(c.get('provider')))
+                for c in (self._pipeline or {}).get('components') or []
+            ):
+                return
+            seen = await self._wait_for_db_seen()
+        targets, public_endpoint = seen
+        if targets:
+            await self._authorize_db_targets(targets, public_endpoint, credential=credential)
 
     async def _resolve_db_dsns(self, wanted: List[Tuple[str, str, str]]) -> Dict[str, str]:
         """Resolve each authorized database once and key it for the nodes.
@@ -902,11 +1045,16 @@ class Task(DAPBase):
                 raise RuntimeError(f'the {scope} database{named} failed to resolve: {str(e).strip() or repr(e)}') from e
         return {dsn_key(scope, target): dsns[(scope, owner)] for scope, target, owner in wanted}
 
-    async def _build_subprocess_env(self, db_access: Tuple[List[Tuple[str, str]], bool]) -> Dict[str, str]:
+    async def _build_subprocess_env(
+        self, db_access: Tuple[List[Tuple[str, str]], bool], *, credential: Optional[str] = None
+    ) -> Dict[str, str]:
         """Build the environment for the task subprocess.
 
         ``db_access`` is ``_db_access`` of the resolved pipeline: the
         databases to authorize and resolve, and the public-endpoint flag.
+        ``credential`` is the presenting connection's ``AccountInfo.auth``,
+        passed straight to ``_authorize_db_targets`` and nowhere else: it never
+        reaches the child's environment or the task file.
 
         The child never gets a copy of the engine's environment: it runs user
         pipeline code, so it only inherits the allowlist in
@@ -950,7 +1098,7 @@ class Task(DAPBase):
         # reason passed down.
         targets, public_endpoint = db_access
         if targets:
-            wanted = await self._authorize_db_targets(targets, public_endpoint)
+            wanted = await self._authorize_db_targets(targets, public_endpoint, credential=credential)
             try:
                 dsns = await self._resolve_db_dsns(wanted)
             except NotImplementedError:
@@ -2407,6 +2555,8 @@ class Task(DAPBase):
         project_id: str,
         source: str,
         provider: str,
+        *,
+        credential: Optional[str] = None,
     ) -> None:
         """
         Restart the task with new pipeline configuration.
@@ -2419,6 +2569,10 @@ class Task(DAPBase):
             project_id: Project identifier (must match existing)
             source: Source identifier (must match existing)
             provider: Provider name (may be updated)
+            credential: The ``AccountInfo.auth`` of the connection that supplied
+                this new pipeline (the restarter, not the original starter),
+                used only to authorize its cloud databases. Passed on to
+                ``start_task`` as an argument; never stored.
 
         Raises:
             RuntimeError: If debugger attached or restart fails
@@ -2459,6 +2613,8 @@ class Task(DAPBase):
 
             # Update internal task configuration
             self._pipeline = pipeline
+            # The new pipeline's databases are not known until it starts
+            self._db_seen = None
             self._pipeline['source'] = source
             self._pipeline['project_id'] = project_id
             self.project_id = project_id
@@ -2484,7 +2640,7 @@ class Task(DAPBase):
             self._server.debug_message(f'Task "{self.id}" starting with new configuration...')
 
             # Start fresh (full initialization)
-            await self.start_task()
+            await self.start_task(credential=credential)
 
             self._server.debug_message(
                 f'Task "{self.id}" restarted successfully (source: {source}, provider: {provider})'
@@ -2500,12 +2656,18 @@ class Task(DAPBase):
             self._restart_env = None
             self._restart_in_progress = False
 
-    async def start_task(self) -> None:
+    async def start_task(self, *, credential: Optional[str] = None) -> None:
         """
         Launch subprocess and initialize communication interfaces.
 
         Performs complete startup sequence with environment detection,
         resource allocation, and interface initialization.
+
+        Args:
+            credential: The ``AccountInfo.auth`` of the connection that started
+                (or, via ``restart_task``, restarted) this run. Used only to
+                authorize the run's cloud databases; never stored on the task,
+                written to the task file, or logged.
 
         Raises:
             RuntimeError: If already started or critical startup failure
@@ -2553,6 +2715,7 @@ class Task(DAPBase):
             # come from what runs, not self._pipeline: ${...} expansion can
             # rewrite any string, a node's provider included.
             db_access = self._db_access(resolved)
+            self._db_seen = db_access
 
             # Write it out, then let `resolved` go out of scope
             self._tmpfile = await self._write_task_file(resolved)
@@ -2643,7 +2806,7 @@ class Task(DAPBase):
             # ROCKETRIDE_* env namespace is caller-influenced by design.
             # _build_subprocess_env additionally scrubs the RocketRide DB
             # broker credentials and injects the resolved per-tenant DSN.
-            subprocess_env = await self._build_subprocess_env(db_access)
+            subprocess_env = await self._build_subprocess_env(db_access, credential=credential)
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
