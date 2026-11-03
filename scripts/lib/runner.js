@@ -82,6 +82,9 @@ class TaskRunner {
 		if (!actionDef) {
 			throw new Error(`Unknown action '${actionName}'`);
 		}
+		if (!registry.isAvailable(actionDef)) {
+			throw new Error(registry.unavailableMessage(actionDef));
+		}
 
 		const actionObj = typeof actionDef.action === 'function' ? actionDef.action(this.options) : actionDef.action;
 
