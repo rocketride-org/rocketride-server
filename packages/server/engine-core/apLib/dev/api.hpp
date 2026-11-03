@@ -81,6 +81,9 @@ template <typename... DebugInfo>
 #endif
 }
 
+// --dumps read as a boolean: bare, true, 1 or yes turns crash dumps on
+bool dumpsEnabled() noexcept;
+
 const file::Path &crashDumpLocation() noexcept;
 void crashDumpLocation(const file::Path &path) noexcept;
 

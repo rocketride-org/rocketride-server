@@ -1,7 +1,14 @@
 # Test dependencies for nodes/test.
 # Installed by nodes:test / nodes:test-full through depends(), so versions follow
 # the engine constraints (the same pins the nodes get at runtime).
-pytest
+
+# nodes:test runs xdist with --dist loadgroup. With pytest-xdist 3.8.0, pytest 9.2
+# spreads the tests of one xdist_group over all workers, with no error
+# (pytest-dev/pytest#15303, pytest-dev/pytest-xdist#1407). Drop the cap once a
+# pytest-xdist release newer than 3.8.0 is out, and require that release instead:
+# without the floor, uv keeps an installed 3.8.0. Same cap in
+# packages/server/build-requirements.txt; the two files must agree.
+pytest<9.2
 pytest-asyncio
 pytest-timeout
 pytest-xdist

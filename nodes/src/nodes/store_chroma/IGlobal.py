@@ -27,6 +27,7 @@
 from typing import Any, Dict, List, Tuple
 
 from ai.common.store import StoreGlobalBase
+from nodes.store_chroma.mode import is_local
 
 
 class IGlobal(StoreGlobalBase):
@@ -34,7 +35,7 @@ class IGlobal(StoreGlobalBase):
 
     def _credentials(self, config: Dict[str, Any]) -> List[Tuple[str, Any]]:
         """The token goes to a cloud or remote server only, never to a local one."""
-        if (config.get('mode') or config.get('profile') or 'local') == 'local':
+        if is_local(config):
             return []
         return [('apikey', config.get('apikey'))]
 

@@ -5,6 +5,7 @@ Provides:
 - Transparency/alpha channel handling
 - Line grouping from word boxes
 - Image format normalization
+- Failed-inference reporting for the wrappers
 """
 
 import io
@@ -246,3 +247,22 @@ def group_words_into_lines(
 
     full_text = '\n'.join(text_lines)
     return full_text, updated_boxes
+
+
+def with_error_field(output_fields: List[str]) -> List[str]:
+    """
+    Add the plain ``error`` field to the fields a wrapper requests.
+
+    The loaders catch a failed inference per image and set ``error`` on that image, so one
+    failure in a model-server batch does not fail the other tasks' images; the field only
+    reaches the wrapper when it is requested. Any model server returns it as it is.
+    """
+    return output_fields if 'error' in output_fields else [*output_fields, 'error']
+
+
+def raise_on_error(engine: str, result: Dict[str, Any]) -> None:
+    """Raise when the loader reported a failed inference for this image (e.g. CUDA out of memory)."""
+    error = result.get('error')
+    # a success carries None; str(e) is '' for some exceptions, e.g. AssertionError()
+    if error is not None:
+        raise RuntimeError(f'{engine} inference failed: {error or "no message"}')
