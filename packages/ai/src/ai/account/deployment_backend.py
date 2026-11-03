@@ -1182,10 +1182,11 @@ class FileDeploymentBackend:
         if artifact_sha256(data) != entry['sha256']:
             raise StorageError(f'{project_id} v{version}: artifact sha256 mismatch — refusing to load')
         artifact = json.loads(data)
-        # The manifest/build blob rides the registry entry, not the artifact
-        # file — reunite them so consumers that read artifact['metadata']
-        # (e.g. resolve_app_pins' publisher fallback) see it in both editions.
-        if isinstance(entry.get('metadata'), dict) and 'metadata' not in artifact:
+        # APP artifacts get the registry entry's manifest/build blob attached
+        # (consumers like resolve_app_pins' publisher fallback read
+        # artifact['metadata']). Pipelines stay byte-faithful: the SDK's
+        # deploy.artifact() contract returns exactly what was published.
+        if artifact.get('kind') == 'app' and isinstance(entry.get('metadata'), dict) and 'metadata' not in artifact:
             artifact['metadata'] = entry['metadata']
         return artifact
 
