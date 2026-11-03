@@ -1,0 +1,22 @@
+diff --git a/apps/chat-ui/src/hooks/useChatMessages.ts b/apps/chat-ui/src/hooks/useChatMessages.ts
+index 7baf445c2..31db35781 100644
+--- a/apps/chat-ui/src/hooks/useChatMessages.ts
++++ b/apps/chat-ui/src/hooks/useChatMessages.ts
+@@ -155,7 +155,7 @@ export const useChatMessages = () => {
+ 				...(answer.key ? { resultKey: answer.key } : {})
+ 			}));
+ 
+-			setMessages(prev => [...prev, ...botResponses]);
++			setMessages([...messages, ...botResponses]);
+ 		} catch (error) {
+ 			// Show error message in chat
+ 			const errorMessage: Message = {
+@@ -169,7 +169,7 @@ export const useChatMessages = () => {
+ 		} finally {
+ 			setIsTyping(false);
+ 		}
+-	}, [sendMessageToAPI]);
++	}, [sendMessageToAPI, messages]);
+ 
+ 	/**
+ 	 * Adds a system message to the chat

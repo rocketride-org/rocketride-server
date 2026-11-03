@@ -1,0 +1,11 @@
+--- a/nodes/src/nodes/response/IInstance.py
++++ b/nodes/src/nodes/response/IInstance.py
+@@ -217,8 +217,6 @@
+         # Add the documents
+         if answer.isJson():
+             self.instance.currentObject.response[key].append(answer.getJson())
+-        else:
+-            self.instance.currentObject.response[key].append(answer.getText())
+ 
+     def _write_media(self, lane: str, action: int, mimeType: str, data: bytes):
+         """Shared handler for the image/audio/video stream lanes.

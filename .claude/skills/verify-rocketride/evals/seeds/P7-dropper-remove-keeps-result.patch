@@ -1,0 +1,13 @@
+diff --git a/apps/dropper-ui/src/hooks/useFileProcessing.ts b/apps/dropper-ui/src/hooks/useFileProcessing.ts
+index 170eccd17..8400b9128 100644
+--- a/apps/dropper-ui/src/hooks/useFileProcessing.ts
++++ b/apps/dropper-ui/src/hooks/useFileProcessing.ts
+@@ -346,7 +346,7 @@ export const useFileProcessing = (
+ 
+ 		// Remove corresponding results
+ 		const updatedUploadResults = uploadResults.filter(
+-			result => result.filepath !== fileToRemove.file.name
++			result => result.filepath === fileToRemove.file.name
+ 		);
+ 		setUploadResults(updatedUploadResults);
+ 

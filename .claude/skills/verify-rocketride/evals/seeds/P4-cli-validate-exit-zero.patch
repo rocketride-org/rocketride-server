@@ -1,0 +1,10 @@
+--- a/packages/client-python/src/rocketride/cli/commands/validate.py
++++ b/packages/client-python/src/rocketride/cli/commands/validate.py
+@@ -215,6 +215,6 @@
+         # step: exit code per the CI contract
+         if processed == 0:
+             return 2
+-        return 0 if summary['invalid'] == 0 else 1
++        return 0 if summary['total'] else 2
+ 
+     return await run_cli_command(args, action)

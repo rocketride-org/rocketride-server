@@ -1,0 +1,11 @@
+--- a/packages/ai/src/ai/account/oss/__init__.py
++++ b/packages/ai/src/ai/account/oss/__init__.py
+@@ -100,7 +100,7 @@
+ 
+         # OSS is a lot looser on the key -- whatever is specified in ROCKETRIDE_APIKEY
+         # on the server env is what we expect. Up to 3rd part and key rotation
+-        if oss_key and oss_key != credential:
++        if oss_key and credential and oss_key not in credential:
+             # Key is configured but the credential doesn't match — reject.
+             return (401, 'Invalid API key')
+ 

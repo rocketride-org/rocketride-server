@@ -1,0 +1,442 @@
+#!/usr/bin/env bash
+# rr-verify: launch, check, drive, and stop a RocketRide engine for verification runs.
+# Run `rr-verify help` for the command list. Evidence goes to <repo>/.verify/<run-id>/.
+set -euo pipefail
+
+SKILL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+REPO=$(git -C "$SKILL_DIR" rev-parse --show-toplevel)
+VERIFY_ROOT="$REPO/.verify"
+SERVER_DIR="$REPO/dist/server"
+MOCKS="$REPO/nodes/test/mocks"
+VENV="$VERIFY_ROOT/venv"
+TS_CLI="$REPO/packages/client-typescript/dist/cli/packages/client-typescript/src/cli/rocketride.js"
+APIKEY="${RR_VERIFY_APIKEY:-verify-key}"
+READY_TIMEOUT="${RR_VERIFY_READY_TIMEOUT:-180}"
+MCP_INIT_PARAMS='{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"rr-verify","version":"1"}}'
+
+die() {
+	echo "rr-verify: $*" >&2
+	exit 2
+}
+
+usage() {
+	cat <<'EOF'
+rr-verify <command> [--id RUN_ID] [--label FEATURE] [args]
+
+  launch [--mock] [--port N]  Start an engine from dist/server. --mock loads nodes/test/mocks so
+                              LLM and vector-store nodes need no keys. The port defaults to a free
+                              port passed explicitly; --port 0 reproduces how the VS Code
+                              extension's local mode starts the engine.
+  doctor                      Read-only health check of the run's engine. Exit 0 = safe to drive.
+  sdk                         Create or refresh .verify/venv with the built Python wheel.
+  chat [--pipe F] [--expect answers|none] QUESTION
+                              Run a chat-source pipeline (default: fixtures/quickstart-chat.pipe).
+  send --pipe F [--expect-text T] TEXT
+                              Run a webhook-source pipeline and send TEXT as text/plain.
+  cli -- ARGS...              Run the Python `rocketride` CLI against the run's engine.
+  tscli -- ARGS...            Run the TypeScript `rocketride` CLI against the run's engine.
+  mcp METHOD [PARAMS_JSON]    Call the engine's HTTP MCP endpoint. initialize is sent first;
+                              `mcp initialize` with no params uses default client params.
+  record FEATURE -- CMD...    Run any command (curl, rr-verify doctor, ...) and save its output.
+  py SCRIPT [ARGS...]         Run a Python script with the SDK venv and the run's connection env.
+  browse [OPTIONS] SCRIPT.mjs [ARGS...]
+                              Run a browser script against the run's engine (or docs server) and
+                              save screenshots, a video, and the console and request errors.
+                              `rr-verify browse --help` lists the options and the helper API.
+  docs                        Serve the built docs site (dist/docs) for this run.
+  vscode COMMAND [ARGS...]    Drive VS Code with the extension from this checkout. rr-verify vscode help lists commands.
+  stop                        Stop the run's engine and everything it started. Evidence stays.
+  runs                        List runs and whether their engine is alive.
+  help                        Show this text.
+
+The run is --id, then $RR_VERIFY_ID, then the most recent launch (.verify/latest).
+--label sets the evidence folder for chat, send, cli, tscli, mcp, and browse.
+Every command except launch, sdk, docs, runs, and help saves evidence under .verify/<run-id>/.
+EOF
+}
+
+RUN_ID="${RR_VERIFY_ID:-}"
+LABEL=""
+parse_globals() {
+	ARGS=()
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--id) RUN_ID="$2"; shift 2 ;;
+			--id=*) RUN_ID="${1#--id=}"; shift ;;
+			--label) LABEL="$2"; shift 2 ;;
+			--label=*) LABEL="${1#--label=}"; shift ;;
+			--) ARGS+=("$@"); break ;;
+			*) ARGS+=("$1"); shift ;;
+		esac
+	done
+}
+
+load_run() {
+	if [ -z "$RUN_ID" ]; then
+		[ -L "$VERIFY_ROOT/latest" ] || die "no run found; start one with: rr-verify launch --mock"
+		RUN_ID=$(readlink "$VERIFY_ROOT/latest")
+	fi
+	RUN_DIR="$VERIFY_ROOT/$RUN_ID"
+	[ -f "$RUN_DIR/engine.env" ] || die "run $RUN_ID has no engine.env; start one with: rr-verify launch --mock"
+	set -a
+	# shellcheck disable=SC1091
+	. "$RUN_DIR/engine.env"
+	set +a
+	export RR_VERIFY_ID="$RUN_ID" RR_VERIFY_DIR="$RUN_DIR"
+}
+
+engine_alive() { kill -0 "$ENGINE_PID" 2>/dev/null; }
+
+stamp() { date +%H%M%S.%3N; }
+
+record() {
+	local label="$1"
+	shift
+	python3 -I "$SKILL_DIR/bin/record.py" "$label" -- "$@"
+}
+
+# shellcheck source=SCRIPTDIR/browser.sh
+. "$SKILL_DIR/bin/browser.sh"
+
+cmd_launch() {
+	local mock=0 port_arg=""
+	set -- ${ARGS[@]+"${ARGS[@]}"}
+	while [ $# -gt 0 ]; do
+		case "$1" in
+			--mock) mock=1; shift ;;
+			--port) port_arg="$2"; shift 2 ;;
+			--port=*) port_arg="${1#--port=}"; shift ;;
+			*) die "launch: unknown argument $1" ;;
+		esac
+	done
+	if [ -z "$port_arg" ]; then
+		port_arg=$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+	fi
+	[ -x "$SERVER_DIR/engine" ] || die "no engine at dist/server/engine. Build it first: ./builder server:build --autoinstall"
+	[ -d "$SERVER_DIR/ai" ] || die "dist/server/ai is missing. Run: ./builder ai:sync nodes:sync"
+	RUN_ID="${RUN_ID:-$(date +%Y%m%d-%H%M%S)-$$}"
+	RUN_DIR="$VERIFY_ROOT/$RUN_ID"
+	[ -e "$RUN_DIR/engine.env" ] && die "run $RUN_ID already exists; pick another run id"
+	mkdir -p "$RUN_DIR"
+	local base_port=$((20000 + (RANDOM % 40) * 1000))
+	local log="$RUN_DIR/engine.log"
+
+	# setsid makes the engine a process-group leader, so `stop` can end it and every
+	# pipeline process it spawned without touching anything else on the machine.
+	local engine_cmd=(setsid ./engine ./ai/eaas.py --host=127.0.0.1 --port="$port_arg" --base_port="$base_port")
+	# A store per run: shell apps are seeded from this checkout's dist/server/static/apps at startup.
+	export RR_STORE_URL="filesystem://$RUN_DIR/store"
+	(
+		cd "$SERVER_DIR"
+		if [ "$mock" = 1 ]; then
+			exec env -u ROCKETRIDE_URI ROCKETRIDE_APIKEY="$APIKEY" ROCKETRIDE_MOCK="$MOCKS" \
+				ROCKETRIDE_OPENAI_KEY="${ROCKETRIDE_OPENAI_KEY:-sk-mock-placeholder}" "${engine_cmd[@]}"
+		else
+			exec env -u ROCKETRIDE_MOCK -u ROCKETRIDE_URI ROCKETRIDE_APIKEY="$APIKEY" "${engine_cmd[@]}"
+		fi
+	) >"$log" 2>&1 </dev/null &
+	local pid=$!
+	# Until engine.env exists, `stop` cannot find this engine, so an interrupted launch ends it here.
+	trap 'kill -TERM -- "-$pid" 2>/dev/null; exit 130' INT TERM HUP
+
+	local waited=0 port=""
+	while :; do
+		if ! kill -0 "$pid" 2>/dev/null; then
+			echo "rr-verify: engine exited during startup. Last log lines:" >&2
+			tail -n 30 "$log" >&2
+			exit 1
+		fi
+		if grep -q 'Application startup complete.' "$log"; then
+			port=$(grep -oE 'Uvicorn running on https?://127\.0\.0\.1:[0-9]+' "$log" | grep -oE '[0-9]+$' | head -n 1 || true)
+			[ -n "$port" ] && break
+		fi
+		if [ "$waited" -ge "$READY_TIMEOUT" ]; then
+			kill -TERM -- "-$pid" 2>/dev/null || true
+			die "engine not ready after ${READY_TIMEOUT}s; see $log"
+		fi
+		sleep 1
+		waited=$((waited + 1))
+	done
+
+	cat >"$RUN_DIR/engine.env" <<EOF
+ENGINE_PID=$pid
+ENGINE_PORT=$port
+ENGINE_BASE_PORT=$base_port
+ENGINE_MOCK=$mock
+ENGINE_LOG=$log
+ROCKETRIDE_URI=http://127.0.0.1:$port
+ROCKETRIDE_APIKEY=$APIKEY
+EOF
+	trap - INT TERM HUP
+	ln -sfn "$RUN_ID" "$VERIFY_ROOT/latest"
+	echo "run:      $RUN_ID"
+	echo "engine:   http://127.0.0.1:$port (pid $pid, mock=$mock, ready in ${waited}s)"
+	echo "evidence: $RUN_DIR"
+}
+
+cmd_doctor() {
+	load_run
+	local fail=0
+	echo "run $RUN_ID"
+	if engine_alive; then echo "ok   engine pid $ENGINE_PID is alive"; else echo "FAIL engine pid $ENGINE_PID is not running"; fail=1; fi
+	if ss -ltnp 2>/dev/null | grep -E "127\.0\.0\.1:$ENGINE_PORT\b" | grep -q "pid=$ENGINE_PID,"; then
+		echo "ok   port $ENGINE_PORT is owned by pid $ENGINE_PID"
+	else
+		echo "FAIL port $ENGINE_PORT is not owned by pid $ENGINE_PID"
+		fail=1
+	fi
+	local version
+	if version=$(curl -sf --max-time 5 "$ROCKETRIDE_URI/version"); then
+		local built
+		built=$(printf '%s' "$version" | grep -oE '"hash":"[0-9a-f]+"' | cut -d'"' -f4)
+		echo "ok   /version answered: $version"
+		if git -C "$REPO" cat-file -e "$built^{commit}" 2>/dev/null; then
+			# The engine runs copies in dist/server. A C++ change since the build needs a rebuild; a
+			# Python or node file only matters if its dist/server copy differs from the source.
+			local f dist_copy stale=0 cpp=0
+			while IFS= read -r f; do
+				[ -n "$f" ] || continue
+				case "$f" in
+					packages/server/*) cpp=$((cpp + 1)); continue ;;
+					packages/ai/src/ai/*) dist_copy="$SERVER_DIR/ai/${f#packages/ai/src/ai/}" ;;
+					nodes/src/nodes/*) dist_copy="$SERVER_DIR/nodes/${f#nodes/src/nodes/}" ;;
+					*) continue ;;
+				esac
+				if [ -e "$REPO/$f" ]; then
+					cmp -s "$REPO/$f" "$dist_copy" || stale=$((stale + 1))
+				elif [ -e "$dist_copy" ]; then
+					stale=$((stale + 1))
+				fi
+			done < <({
+				git -C "$REPO" diff --name-only "$built" -- packages/server packages/ai/src nodes/src
+				git -C "$REPO" ls-files --others --exclude-standard -- packages/server packages/ai/src nodes/src
+			} | sort -u)
+			if [ "$cpp" -gt 0 ]; then
+				echo "WARN $cpp engine C++ file(s) changed since the build ($built). Run ./builder server:build, then launch a new run"
+			fi
+			if [ "$stale" -gt 0 ]; then
+				echo "WARN $stale ai or node file(s) differ from their copies in dist/server. Run ./builder --sequential ai:sync nodes:sync, then launch a new run"
+			fi
+			if [ "$cpp" -eq 0 ] && [ "$stale" -eq 0 ]; then
+				echo "ok   dist/server matches this checkout's engine, ai, and node code (engine built from $built)"
+			fi
+		else
+			echo "WARN engine build commit $built is not in this checkout; rebuild with ./builder server:build"
+		fi
+	else
+		echo "FAIL $ROCKETRIDE_URI/version did not answer"
+		fail=1
+	fi
+	# /task needs auth: a wrong key gets 401, the run's key gets past auth (422 for the missing token).
+	local denied allowed
+	denied=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$ROCKETRIDE_URI/task" -H "Authorization: Bearer wrong-$ROCKETRIDE_APIKEY" || true)
+	allowed=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$ROCKETRIDE_URI/task" -H "Authorization: Bearer $ROCKETRIDE_APIKEY" || true)
+	if [ "$denied" = 401 ]; then echo "ok   a wrong API key is rejected (401)"; else echo "FAIL a wrong API key got HTTP $denied, expected 401"; fail=1; fi
+	case "$allowed" in
+		401 | 403 | 000) echo "FAIL the run's API key got HTTP $allowed"; fail=1 ;;
+		*) echo "ok   the run's API key is accepted (HTTP $allowed)" ;;
+	esac
+	# The SDK and CLI run from the built wheel; a source file newer than it means the wheel is stale.
+	local wheel newer
+	wheel=$(find "$SERVER_DIR/static/clients/python" -maxdepth 1 -name 'rocketride-*.whl' 2>/dev/null | head -n 1)
+	if [ -z "$wheel" ]; then
+		echo "WARN no Python wheel in dist/server/static/clients/python; the SDK and CLI cannot run"
+	else
+		newer=$(find "$REPO/packages/client-python/src" "$REPO/packages/client-common" -name '*.py' -newer "$wheel" 2>/dev/null | wc -l)
+		if [ "$newer" -eq 0 ]; then
+			echo "ok   the Python wheel is newer than the SDK source"
+		else
+			echo "WARN $newer Python SDK source file(s) are newer than the wheel, so the SDK and CLI may not match this checkout. Rebuild: ./builder --sequential client-python:sync-source client-python:wheel-source client-python:copy-readme client-python:wheel-build client-python:sync"
+		fi
+	fi
+	ui_doctor
+	node "$SKILL_DIR/bin/vscode.mjs" doctor || fail=1
+	echo "info mock mode: $([ "$ENGINE_MOCK" = 1 ] && echo on || echo off)"
+	echo "info log: $ENGINE_LOG"
+	return $fail
+}
+
+cmd_sdk() {
+	local wheel sum
+	wheel=$(find "$SERVER_DIR/static/clients/python" -maxdepth 1 -name 'rocketride-*.whl' -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n 1 | cut -d' ' -f2- || true)
+	[ -n "$wheel" ] || die "no Python wheel in dist/server/static/clients/python. Run: ./builder client-python:wheel-source"
+	sum=$(sha256sum "$wheel" | cut -d' ' -f1)
+	mkdir -p "$VERIFY_ROOT"
+	# The venv is shared by every run in this checkout; the lock keeps two first uses from racing.
+	(
+		flock 9
+		if [ -x "$VENV/bin/python" ] && [ "$(cat "$VENV/.wheel" 2>/dev/null)" = "$sum" ]; then
+			exit 0
+		fi
+		rm -rf "$VENV"
+		if command -v uv >/dev/null; then
+			uv venv -q "$VENV"
+			uv pip install -q --python "$VENV/bin/python" "$wheel"
+		else
+			python3 -m venv "$VENV" || die "python3 -m venv failed (install python3-venv or uv)"
+			"$VENV/bin/pip" install -q "$wheel"
+		fi
+		echo "$sum" >"$VENV/.wheel"
+	) 9>"$VERIFY_ROOT/.venv.lock" >&2
+	echo "$VENV/bin/python"
+}
+
+cmd_py() {
+	load_run
+	local py
+	py=$(cmd_sdk)
+	exec "$py" ${ARGS[@]+"${ARGS[@]}"}
+}
+
+cmd_drive() {
+	local mode="$1"
+	load_run
+	local py
+	py=$(cmd_sdk)
+	local label_args=()
+	[ -n "$LABEL" ] && label_args=(--label "$LABEL")
+	exec "$py" "$SKILL_DIR/bin/drive.py" "$mode" ${label_args[@]+"${label_args[@]}"} ${ARGS[@]+"${ARGS[@]}"}
+}
+
+strip_dashdash() {
+	if [ "${ARGS[0]:-}" = "--" ]; then
+		ARGS=("${ARGS[@]:1}")
+	fi
+}
+
+cmd_cli() {
+	load_run
+	cmd_sdk >/dev/null
+	strip_dashdash
+	record "${LABEL:-cli}" "$VENV/bin/rocketride" ${ARGS[@]+"${ARGS[@]}"}
+}
+
+cmd_tscli() {
+	load_run
+	[ -f "$TS_CLI" ] || die "TypeScript CLI not built. Run: ./builder client-typescript:build"
+	strip_dashdash
+	record "${LABEL:-cli}" node "$TS_CLI" ${ARGS[@]+"${ARGS[@]}"}
+}
+
+cmd_record() {
+	load_run
+	local label="${ARGS[0]:-}"
+	if [ -z "$label" ] || [ "$label" = "--" ]; then
+		die "record: FEATURE is required, e.g. rr-verify record engine-health -- curl ..."
+	fi
+	ARGS=("${ARGS[@]:1}")
+	strip_dashdash
+	[ "${#ARGS[@]}" -gt 0 ] || die "record: no command given"
+	record "$label" "${ARGS[@]}"
+}
+
+mcp_post() {
+	curl -s --max-time 60 -X POST "$ROCKETRIDE_URI/mcp" \
+		-H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+		-H "Authorization: Bearer $ROCKETRIDE_APIKEY" -d "$1" | sed -n 's/^data: //p'
+}
+
+mcp_save() {
+	local dir="$1" name="$2" body="$3" out="$4" file
+	file="$dir/$(stamp)-$name.json"
+	printf '{"request":%s,"response":%s,"mock":%s}\n' "$body" "${out:-null}" \
+		"$([ "$ENGINE_MOCK" = 1 ] && echo true || echo false)" >"$file"
+	echo "saved: $file" >&2
+}
+
+cmd_mcp() {
+	load_run
+	local method="${ARGS[0]:-}" params="${ARGS[1]:-}"
+	[ -n "$method" ] || die "mcp: METHOD is required, e.g. tools/list"
+	local dir="$RUN_DIR/${LABEL:-mcp}"
+	mkdir -p "$dir"
+	if [ -z "$params" ]; then
+		if [ "$method" = initialize ]; then params="$MCP_INIT_PARAMS"; else params='{}'; fi
+	fi
+
+	local name="${method//\//_}" tool
+	tool=$(printf '%s' "$params" | grep -oE '^\{"name": ?"[a-z_]+"' | grep -oE '"[a-z_]+"$' | tr -d '"' || true)
+	[ -n "$tool" ] && name="$name-$tool"
+
+	local out body
+	if [ "$method" != initialize ]; then
+		local init="{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"initialize\",\"params\":$MCP_INIT_PARAMS}"
+		out=$(mcp_post "$init")
+		mcp_save "$dir" initialize "$init" "$out"
+		[ -n "$out" ] || die "MCP initialize got no answer from $ROCKETRIDE_URI/mcp"
+	fi
+	body="{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"$method\",\"params\":$params}"
+	out=$(mcp_post "$body")
+	mcp_save "$dir" "$name" "$body" "$out"
+	printf '%s\n' "$out"
+	case "$out" in
+		'' | *'"error":'* | *'"isError":true'*)
+			echo "MCP: error (see the response above)" >&2
+			return 1
+			;;
+		*) echo "MCP: ok" >&2 ;;
+	esac
+}
+
+cmd_stop() {
+	load_run
+	browser_stop
+	node "$SKILL_DIR/bin/vscode.mjs" close --quiet || true
+	if ! engine_alive; then
+		echo "engine pid $ENGINE_PID already stopped"
+	else
+		kill -TERM -- "-$ENGINE_PID" 2>/dev/null || kill -TERM "$ENGINE_PID"
+		for _ in $(seq 1 15); do
+			pgrep -g "$ENGINE_PID" >/dev/null || break
+			sleep 1
+		done
+		if pgrep -g "$ENGINE_PID" >/dev/null; then
+			kill -KILL -- "-$ENGINE_PID" 2>/dev/null || true
+		fi
+		echo "stopped engine pid $ENGINE_PID and its process group"
+	fi
+	pgrep -g "$ENGINE_PID" >/dev/null && die "processes in group $ENGINE_PID are still running"
+	echo "evidence kept at $RUN_DIR"
+}
+
+cmd_runs() {
+	[ -d "$VERIFY_ROOT" ] || {
+		echo "no runs"
+		return
+	}
+	for env in "$VERIFY_ROOT"/*/engine.env; do
+		[ -f "$env" ] || continue
+		[ -L "$(dirname "$env")" ] && continue
+		local id pid port
+		id=$(basename "$(dirname "$env")")
+		pid=$(grep '^ENGINE_PID=' "$env" | cut -d= -f2)
+		port=$(grep '^ENGINE_PORT=' "$env" | cut -d= -f2)
+		printf '%s  port %s  %s\n' "$id" "$port" "$(kill -0 "$pid" 2>/dev/null && echo running || echo stopped)"
+	done
+}
+
+cmd="${1:-help}"
+shift || true
+parse_globals "$@"
+case "$cmd" in
+	launch) cmd_launch ;;
+	doctor) cmd_doctor ;;
+	sdk) cmd_sdk ;;
+	chat) cmd_drive chat ;;
+	send) cmd_drive send ;;
+	py) cmd_py ;;
+	cli) cmd_cli ;;
+	tscli) cmd_tscli ;;
+	mcp) cmd_mcp ;;
+	record) cmd_record ;;
+	browse) cmd_browse ;;
+	docs) cmd_docs ;;
+	vscode) load_run; exec node "$SKILL_DIR/bin/vscode.mjs" ${LABEL:+--label "$LABEL"} ${ARGS[@]+"${ARGS[@]}"} ;;
+	stop) cmd_stop ;;
+	runs) cmd_runs ;;
+	help | -h | --help) usage ;;
+	*)
+		usage
+		exit 2
+		;;
+esac

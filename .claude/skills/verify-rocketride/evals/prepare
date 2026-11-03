@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+# prepare: put an eval checkout into the state a case needs, then sync dist/server.
+#
+#   prepare --worktree DIR [--base REF] [--no-skill] CASE_ID
+#
+# Resets DIR to REF (default: the branch this skill is on), applies the case's planted
+# patch or reverts its real fix, runs the builder steps that copy the change into
+# dist/server, and with --no-skill removes this skill from DIR. DIR must be a checkout
+# used only for evals: its tracked files are reset.
+set -euo pipefail
+
+EVALS=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+HOME_REPO=$(git -C "$EVALS" rev-parse --show-toplevel)
+CASES="$EVALS/cases.json"
+WORKTREE="" BASE="" NO_SKILL=0 CASE=""
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+		--worktree) WORKTREE="$2"; shift 2 ;;
+		--base) BASE="$2"; shift 2 ;;
+		--no-skill) NO_SKILL=1; shift ;;
+		-*) echo "prepare: unknown option $1" >&2; exit 2 ;;
+		*) CASE="$1"; shift ;;
+	esac
+done
+if [ -z "$WORKTREE" ] || [ -z "$CASE" ]; then
+	echo "usage: prepare --worktree DIR [--base REF] [--no-skill] CASE_ID" >&2
+	exit 2
+fi
+[ "$(cd "$WORKTREE" && git rev-parse --show-toplevel)" != "$HOME_REPO" ] || { echo "prepare: refusing to reset the checkout the harness lives in" >&2; exit 2; }
+BASE="${BASE:-$(git -C "$HOME_REPO" rev-parse HEAD)}"
+
+field() { python3 -I -c 'import json,sys; c={c["id"]:c for c in json.load(open(sys.argv[1]))["cases"]}[sys.argv[2]]; v=c.get(sys.argv[3], ""); print(" ".join(v) if isinstance(v, list) else v)' "$CASES" "$CASE" "$1"; }
+KIND=$(field kind)
+[ -n "$KIND" ] || { echo "prepare: unknown case $CASE" >&2; exit 2; }
+
+echo "prepare: resetting $WORKTREE to $BASE"
+git -C "$WORKTREE" reset -q --hard "$BASE"
+git -C "$WORKTREE" clean -qfd -- packages nodes apps docs .claude
+
+case "$KIND" in
+	clean) ;;
+	planted)
+		git -C "$WORKTREE" apply "$EVALS/seeds/$(field seed)"
+		;;
+	replay)
+		sha=$(field commit)
+		# shellcheck disable=SC2046
+		git -C "$WORKTREE" show "$sha" -- $(field paths) | git -C "$WORKTREE" apply -R
+		;;
+	*) echo "prepare: unknown kind $KIND" >&2; exit 2 ;;
+esac
+
+# Always re-sync what earlier cases may have changed in dist/server, so no case inherits
+# another case's bug. The TypeScript SDK is rebuilt only when this case touches it.
+changed=$(git -C "$WORKTREE" status --porcelain -- packages nodes apps docs | awk '{print $2}')
+steps=(ai:sync nodes:sync client-python:sync-source client-python:wheel-source client-python:copy-readme client-python:wheel-build client-python:sync)
+grep -qE '^packages/client-typescript/' <<<"$changed" && steps+=(client-typescript:build)
+# The browser UIs: the shell, chat-ui, dropper-ui, and every shell app. The builder caches each
+# by a hash of its source, so this takes seconds when nothing changed, and it rebuilds a UI that
+# an earlier case modified.
+steps+=(ui:build shell:bundle shell:copy)
+# The docs site has no cache and takes minutes. Build it when this case changes docs, when the
+# last build was from a changed docs tree, or when a docs-site case finds no build.
+docs_marker="$WORKTREE/.verify/prepare-docs-changed"
+docs_changed=0
+grep -qE '^(docs/|nodes/src/nodes/.*README\.md$)' <<<"$changed" && docs_changed=1
+if [ "$docs_changed" = 1 ] || [ -f "$docs_marker" ] || { [ "$(field area)" = docs-site ] && [ ! -f "$WORKTREE/dist/docs/index.html" ]; }; then
+	steps+=(docs:build)
+fi
+# The VS Code extension is rebuilt for every VS Code case, so a clean case never runs an extension
+# an earlier case planted a bug in. The builder skips the work when the source has not changed.
+if grep -qE '^apps/(vscode|shared)/' <<<"$changed" || [[ "$(field area)" == vscode* ]]; then
+	steps+=(vscode:build)
+fi
+if [ "${#steps[@]}" -gt 0 ]; then
+	echo "prepare: ./builder ${steps[*]}"
+	mkdir -p "$WORKTREE/.verify"
+	(cd "$WORKTREE" && ./builder --sequential "${steps[@]}" >"$WORKTREE/.verify/prepare-build.log" 2>&1) || {
+		echo "prepare: builder failed; see $WORKTREE/.verify/prepare-build.log" >&2
+		exit 1
+	}
+fi
+if [ "$docs_changed" = 1 ]; then touch "$docs_marker"; else rm -f "$docs_marker"; fi
+
+if [ "$NO_SKILL" = 1 ]; then
+	rm -rf "$WORKTREE/.claude/skills/verify-rocketride"
+fi
+
+# Commit the case so `git status` and `git diff` are clean: the agent should find a defect by
+# running the product, not by reading an uncommitted diff.
+if ! git -C "$WORKTREE" diff --quiet; then
+	git -C "$WORKTREE" -c user.name=eval -c user.email=eval@localhost commit -q -a --no-verify -m "Update"
+fi
+
+echo "prepare: $CASE ($KIND) ready in $WORKTREE"
+git -C "$WORKTREE" show --stat --format='  %h %s' HEAD | sed 's/^/  /'

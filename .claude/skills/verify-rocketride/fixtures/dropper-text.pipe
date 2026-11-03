@@ -1,0 +1,27 @@
+{
+	"components": [
+		{
+			"id": "dropper_1",
+			"provider": "dropper",
+			"name": "Dropper",
+			"config": { "hideForm": true, "mode": "Source", "parameters": {}, "type": "dropper" }
+		},
+		{
+			"id": "parse_1",
+			"provider": "parse",
+			"name": "Parse",
+			"config": {},
+			"input": [{ "lane": "tags", "from": "dropper_1" }]
+		},
+		{
+			"id": "response_text_1",
+			"provider": "response_text",
+			"name": "Return Text",
+			"config": { "laneName": "text" },
+			"input": [{ "lane": "text", "from": "parse_1" }]
+		}
+	],
+	"source": "dropper_1",
+	"project_id": "2f6a9c1e-8b3d-4f7a-9e2c-5d1b0a7c3e48",
+	"version": 1
+}

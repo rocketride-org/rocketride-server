@@ -1,0 +1,11 @@
+--- a/apps/vscode/src/shared/util/envFile.ts
++++ b/apps/vscode/src/shared/util/envFile.ts
+@@ -138,8 +138,6 @@ export function mergeEnvText(
+ 		if (Object.hasOwn(updates, key)) {
+ 			resultLines.push(`${key}=${quoteIfNeeded(updates[key])}`);
+ 			consumedKeys.add(key);
+-		} else {
+-			resultLines.push(line);
+ 		}
+ 	}
+ 

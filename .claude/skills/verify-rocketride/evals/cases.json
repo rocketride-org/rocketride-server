@@ -1,0 +1,368 @@
+{
+	"about": "Eval cases for verify-rocketride. `area` is the only thing the agent is told. `ground_truth` is for scoring and is never shown to the agent.",
+	"areas": {
+		"chat": "chat pipelines: a Chat source, an LLM node, and a Return Answers node, as the IDE quickstart builds them, run through the Python SDK",
+		"webhook": "webhook pipelines: starting one, sending it text, reading the text it returns, and stopping it",
+		"auth": "the engine's API-key authentication: which requests it accepts and which it rejects",
+		"cli-validate": "the Python `rocketride validate` command, including its output and exit code for valid and invalid pipeline files",
+		"mcp": "the engine's HTTP MCP endpoint, including running a pipeline through it and terminating the task afterwards",
+		"placeholder-key": "what a user sees when a pipeline's LLM API key is an unfilled `${ROCKETRIDE_OPENAI_KEY}` placeholder: run the quickstart chat pipeline on an engine launched without mocks, with ROCKETRIDE_OPENAI_KEY unset, and judge whether the error tells the user what to fix",
+		"local-text-output": "the Local Text Output node (provider `local-text-output`) and its `exclude` setting, which removes one leading path prefix from each object's path before the node writes the file; the path comes from the object name sent with the data; read the node's README for its settings",
+		"question-instructions": "how the Python SDK's `Question.addInstruction()` text appears in the prompt that `Question.getPrompt()` builds, including multi-line, indented content such as a code example",
+		"pipe-diff": "`rocketride diff` on pipeline files, including pipelines whose nodes sit inside canvas groups and files with unusual numeric values",
+		"context-optimizer": "the Context Optimizer node (provider `context_optimizer`) in a chat pipeline (Chat, Context Optimizer, an LLM node, Return Answers) on an engine launched with mocks; read the node's README for its lanes",
+		"canvas": "the Pipeline Builder app in the browser shell the engine serves: signing in, starting a new pipeline from a source, adding nodes to the canvas, and how the nodes render there",
+		"chat-ui": "the browser chat page the engine serves at /chat for a running chat pipeline, opened with ?auth=<the pipeline's public key>: connecting, asking questions, and the conversation it shows; use the quickstart chat pipeline on an engine launched with mocks",
+		"dropper-ui": "the browser dropper page the engine serves at /dropper for a running dropper pipeline, opened with ?auth=<the pipeline's public key>: uploading files, the result it shows for each file, and removing files; a Dropper, Parse, Return Text pipeline is enough",
+		"docs-site": "the documentation site built from this checkout into dist/docs, served the way GitHub Pages serves it: the home page, sidebar navigation, search, and the page for a URL that does not exist",
+		"vscode-canvas": "the VS Code extension's pipeline canvas, driven in VS Code on an engine launched with mocks: open the quickstart chat pipeline (Chat, an LLM node, Return Answers) from the RocketRide sidebar, run it from the canvas, chat with it from the Chat node, and stop it",
+		"vscode-env": "the VS Code extension's connection to a self-hosted engine (Direct Connect from the Welcome page) and the workspace .env file it keeps with the engine's address and key, including when VS Code is reopened on a workspace whose .env also holds the user's own variables",
+		"vscode-pipe-files": "how the VS Code extension's RocketRide sidebar handles .pipe files in the open workspace that are created, copied, replaced, or deleted outside VS Code (for example by git checkout or cp), including whether it changes those files on disk"
+	},
+	"cases": [
+		{
+			"id": "P1",
+			"kind": "planted",
+			"area": "chat",
+			"seed": "P1-return-answers-drops-text.patch",
+			"expect": "defect",
+			"ground_truth": "Return Answers drops text answers: a chat pipeline with Return Answers returns no answers."
+		},
+		{
+			"id": "P2",
+			"kind": "planted",
+			"area": "webhook",
+			"seed": "P2-return-text-off-by-one.patch",
+			"expect": "defect",
+			"ground_truth": "Return Text drops the last character of each text chunk: 'hello from verify' comes back as 'hello from verif'."
+		},
+		{
+			"id": "P3",
+			"kind": "planted",
+			"area": "auth",
+			"seed": "P3-auth-substring-match.patch",
+			"expect": "defect",
+			"ground_truth": "Auth accepts any key that contains the real key as a substring (for example wrong-verify-key), and a request with no key gets no HTTP response instead of 401."
+		},
+		{
+			"id": "P4",
+			"kind": "planted",
+			"area": "cli-validate",
+			"seed": "P4-cli-validate-exit-zero.patch",
+			"expect": "defect",
+			"ground_truth": "rocketride validate exits 0 when a file is invalid."
+		},
+		{
+			"id": "P5",
+			"kind": "planted",
+			"area": "mcp",
+			"seed": "P5-mcp-terminate-untracked-noop.patch",
+			"expect": "defect",
+			"ground_truth": "MCP terminate reports success but does not stop a task MCP no longer tracks, such as one left by a one-shot run_pipeline; the task stays running."
+		},
+		{
+			"id": "R1",
+			"kind": "replay",
+			"area": "placeholder-key",
+			"pr": 2690,
+			"commit": "05971252e",
+			"expect": "defect",
+			"paths": [
+				"nodes/src/nodes/embedding_openai/OpenAIEmbeddingWrapper.py",
+				"nodes/src/nodes/llm_anthropic/IGlobal.py",
+				"nodes/src/nodes/llm_anthropic/anthropic.py",
+				"nodes/src/nodes/llm_baidu_qianfan/IGlobal.py",
+				"nodes/src/nodes/llm_bedrock/IGlobal.py",
+				"nodes/src/nodes/llm_bedrock/bedrock.py",
+				"nodes/src/nodes/llm_deepseek/IGlobal.py",
+				"nodes/src/nodes/llm_gemini/IGlobal.py",
+				"nodes/src/nodes/llm_glm/IGlobal.py",
+				"nodes/src/nodes/llm_gmi_cloud/IGlobal.py",
+				"nodes/src/nodes/llm_kimi/IGlobal.py",
+				"nodes/src/nodes/llm_minimax/IGlobal.py",
+				"nodes/src/nodes/llm_mistral/IGlobal.py",
+				"nodes/src/nodes/llm_openai/IGlobal.py",
+				"nodes/src/nodes/llm_openai_api/IGlobal.py",
+				"nodes/src/nodes/llm_perplexity/IGlobal.py",
+				"nodes/src/nodes/llm_qwen/IGlobal.py",
+				"nodes/src/nodes/llm_vision_gemini/IGlobal.py",
+				"nodes/src/nodes/llm_xai/IGlobal.py",
+				"nodes/src/nodes/store_astra/IGlobal.py",
+				"nodes/src/nodes/store_atlas/IGlobal.py",
+				"nodes/src/nodes/store_chroma/IGlobal.py",
+				"nodes/src/nodes/store_elasticsearch/IGlobal.py",
+				"nodes/src/nodes/store_elasticsearch/elasticsearch_store.py",
+				"nodes/src/nodes/store_milvus/IGlobal.py",
+				"nodes/src/nodes/store_pinecone/IGlobal.py",
+				"nodes/src/nodes/store_postgres/IGlobal.py",
+				"nodes/src/nodes/store_qdrant/IGlobal.py",
+				"nodes/src/nodes/store_weaviate/IGlobal.py",
+				"packages/ai/src/ai/common/chat.py",
+				"packages/ai/src/ai/common/config.py",
+				"packages/ai/src/ai/common/store/store_global_base.py"
+			],
+			"ground_truth": "The literal placeholder reaches OpenAI: the chat answer is OpenAI's 401 'Incorrect API key provided: ${ROCKET***KEY}' instead of an error naming ROCKETRIDE_OPENAI_KEY and where to set it."
+		},
+		{
+			"id": "R3",
+			"kind": "replay",
+			"area": "mcp",
+			"pr": 2315,
+			"commit": "0d12d30a4",
+			"expect": "defect",
+			"paths": [
+				"packages/ai/src/ai/modules/mcp/__init__.py",
+				"packages/ai/src/ai/modules/mcp/auth.py",
+				"packages/ai/src/ai/modules/mcp/engine.py",
+				"packages/ai/src/ai/modules/mcp/handlers.py",
+				"packages/ai/src/ai/modules/mcp/resources.py",
+				"packages/ai/src/ai/modules/mcp/tooling.py",
+				"packages/ai/src/ai/modules/mcp/tools/__init__.py",
+				"packages/ai/src/ai/modules/mcp/tools/capability.py",
+				"packages/ai/src/ai/modules/mcp/tools/execution.py",
+				"packages/ai/src/ai/modules/shell/shell.py",
+				"packages/ai/src/ai/modules/task_http/task_exec.py"
+			],
+			"ground_truth": "The MCP endpoint is broken: POST /mcp is refused, or tools that call the engine fail (for example 'Missing engine URI')."
+		},
+		{
+			"id": "R4",
+			"kind": "replay",
+			"area": "context-optimizer",
+			"pr": 2304,
+			"commit": "97bb71c55",
+			"expect": "defect",
+			"paths": [
+				"nodes/src/nodes/context_optimizer/IInstance.py",
+				"nodes/src/nodes/summarization/IInstance.py",
+				"nodes/src/nodes/tool_guild/IInstance.py",
+				"nodes/src/nodes/tool_n8n/IInstance.py"
+			],
+			"ground_truth": "Context Optimizer also forwards the raw question, so the LLM is asked twice and the chat returns two answers instead of one."
+		},
+		{
+			"id": "R5",
+			"kind": "replay",
+			"area": "local-text-output",
+			"pr": 2078,
+			"commit": "9fd9fdf18",
+			"expect": "defect",
+			"paths": [
+				"nodes/src/nodes/local_text_output/IInstance.py",
+				"nodes/src/nodes/local_text_output/path_prefix.py"
+			],
+			"ground_truth": "exclude removes every occurrence of the prefix instead of one leading prefix: object 'data/in/x/data/in/y.txt' with exclude 'data/in/' is written as x/y.txt instead of x/data/in/y.txt."
+		},
+		{
+			"id": "R6",
+			"kind": "replay",
+			"area": "question-instructions",
+			"pr": 2523,
+			"commit": "b88777f02",
+			"expect": "defect",
+			"paths": [
+				"nodes/src/nodes/summarization/IInstance.py",
+				"packages/client-python/src/rocketride/schema/question.py"
+			],
+			"ground_truth": "getPrompt flattens indentation inside instruction blocks, so nested code loses its structure."
+		},
+		{
+			"id": "R7",
+			"kind": "replay",
+			"area": "pipe-diff",
+			"pr": 2695,
+			"commit": "87f530f39",
+			"expect": "defect",
+			"paths": [
+				"packages/client-python/src/rocketride/cli/commands/diff.py",
+				"packages/client-python/src/rocketride/cli/main.py",
+				"packages/client-python/src/rocketride/pipediff/_pipejson.py",
+				"packages/client-python/src/rocketride/pipediff/engine.py",
+				"packages/client-python/src/rocketride/pipediff/gitref.py",
+				"packages/client-python/src/rocketride/pipediff/reporters.py"
+			],
+			"ground_truth": "Any of: NaN or Infinity accepted; moving a node inside a canvas group reported as a change instead of layout; empty values breaking the Markdown report."
+		},
+		{
+			"id": "R8",
+			"kind": "replay",
+			"area": "canvas",
+			"pr": 2257,
+			"commit": "94b8d5093",
+			"expect": "defect",
+			"paths": [
+				"apps/shared/src/components/canvas/context/FlowProjectContext.tsx",
+				"nodes/src/nodes/rocketride_graph/rocketride_graph.svg",
+				"nodes/src/nodes/rocketride_sql/rocketride_sql.svg",
+				"nodes/src/nodes/rocketride_vector/rocketride_vector.svg"
+			],
+			"ground_truth": "Nodes on the Pipeline Builder canvas lose their header icon once the node's full definition loads, while the node list still shows the icons. Reporting that the RocketRide Graph, SQL, and Vector nodes show the PostgreSQL elephant icon is also a match."
+		},
+		{
+			"id": "P6",
+			"kind": "planted",
+			"area": "chat-ui",
+			"seed": "P6-chat-ui-drops-question.patch",
+			"expect": "defect",
+			"ground_truth": "When the answer arrives, the chat page drops the question the user just asked (and any status lines) from the conversation, so only the greeting and the answer remain."
+		},
+		{
+			"id": "P7",
+			"kind": "planted",
+			"area": "dropper-ui",
+			"seed": "P7-dropper-remove-keeps-result.patch",
+			"expect": "defect",
+			"ground_truth": "Removing a file on the dropper page keeps that file's result and drops the results of the other files: after removing the only file, its text is still shown."
+		},
+		{
+			"id": "C-chat",
+			"kind": "clean",
+			"area": "chat",
+			"expect": "no-defect"
+		},
+		{
+			"id": "C-webhook",
+			"kind": "clean",
+			"area": "webhook",
+			"expect": "no-defect",
+			"known_issues": "After a pipeline is terminated, webhook and SDK submissions report the internal source location 'Queue.hpp:61' (and the task shows exitCode 1) instead of a readable 'pipeline stopped' error, and the HTTP response leaves out the TASK_STOPPED code. Confirmed by hand on 2026-10-24."
+		},
+		{
+			"id": "C-auth",
+			"kind": "clean",
+			"area": "auth",
+			"expect": "no-defect",
+			"known_issues": "The engine accepts the Authorization scheme only as exactly 'Bearer ': a valid key sent as 'bearer <key>' or 'BEARER <key>' gets 401, although RFC 7235 makes the scheme case-insensitive (web/server.py removeprefix). Confirmed by hand on 2026-10-24."
+		},
+		{
+			"id": "C-cli-validate",
+			"kind": "clean",
+			"area": "cli-validate",
+			"expect": "no-defect",
+			"known_issues": "rocketride validate --json (Python and TypeScript CLIs) prints a plain-text error and no JSON when it cannot connect or authenticate, unlike other commands, which print the documented {\"error\": {\"message\", \"hint\"}} envelope. Confirmed by hand on 2026-10-24."
+		},
+		{
+			"id": "C-mcp",
+			"kind": "clean",
+			"area": "mcp",
+			"expect": "no-defect",
+			"known_issues": "Pre-existing in develop and documented in features/mcp.md: (1) a one-shot run_pipeline leaves its task running, so a repeat run fails with 'Pipeline is already running.' until terminated; (2) run_pipeline or send_data with string inputs returns no text field for the echo pipeline because MCP sends without a mimetype. Reporting either is correct, not a false alarm."
+		},
+		{
+			"id": "C-placeholder-key",
+			"kind": "clean",
+			"area": "placeholder-key",
+			"expect": "no-defect"
+		},
+		{
+			"id": "C-context-optimizer",
+			"kind": "clean",
+			"area": "context-optimizer",
+			"expect": "no-defect",
+			"known_issues": "(1) history_budget_pct does not limit history: allocate_budget gives history whatever is left after the other three components, so setting it to 0 does not empty history, although the node README says a component given 0 is emptied. Confirmed by hand on 2026-10-24 (optimizer.py allocate_budget). (2) In auto mode, a max_context_tokens value in the node's auto block or top-level config is used as the context window, although the README says the field is ignored in auto mode (optimizer.py line 245). (3) A Python SDK chat request whose Question has a document added with addDocuments (a plain string, or a Doc leaving optional fields unset) fails with pydantic validation errors and no answer, with or without Context Optimizer, because the SDK sends unset fields as null and the engine rejects them. All confirmed by hand on 2026-10-24. (4) When Context Optimizer falls back to a token-level cut, it can split a multi-byte UTF-8 character and send U+FFFD to the LLM instead of a clean prefix of the question. Confirmed by hand on 2026-10-24."
+		},
+		{
+			"id": "C-local-text-output",
+			"kind": "clean",
+			"area": "local-text-output",
+			"expect": "no-defect",
+			"known_issues": "Objects whose names contain non-ASCII characters (for example plain/caf\u00e9.md or u/\u6587.md) are silently not written, while ASCII names are. Confirmed by hand on 2026-10-24."
+		},
+		{
+			"id": "C-question-instructions",
+			"kind": "clean",
+			"area": "question-instructions",
+			"expect": "no-defect",
+			"known_issues": "Question.getPrompt() drops blank lines inside addInstruction() text: 'First paragraph.\\n\\nSecond paragraph.' renders with no blank line between the paragraphs. Confirmed by hand on 2026-10-24."
+		},
+		{
+			"id": "C-pipe-diff",
+			"kind": "clean",
+			"area": "pipe-diff",
+			"expect": "no-defect"
+		},
+		{
+			"id": "C-canvas",
+			"kind": "clean",
+			"area": "canvas",
+			"expect": "no-defect",
+			"known_issues": "Pipeline Builder crashes with \"Pipeline Builder encountered an error\" (minified React error #185, maximum update depth) in about half of the attempts to pick a starting source such as Chat right after New pipeline; reproduced with plain Playwright and no recording. In an OSS engine the Run button on a source node shows a lock titled \"Subscription required\" and clicking it does nothing, because the app accepts only subscribed or trialing while OSS marks every app free. After a wrong API key and Cancel, the shell shows \"Your session has expired. Please sign in again.\" although nobody was signed in. All confirmed by hand on 2026-10-27. On an engine started without ROCKETRIDE_APIKEY, \"Connect without a key\" on the sign-in form fails with \"No credential provided for connection.\" because the shell refuses an empty key before sending it; any non-empty key connects. Confirmed by hand on 2026-10-27."
+		},
+		{
+			"id": "C-chat-ui",
+			"kind": "clean",
+			"area": "chat-ui",
+			"expect": "no-defect",
+			"known_issues": "A wrong or stale public key leaves the page on \"Connecting...\" with no error message; the only sign is the console error \"Failed to start client: AuthenticationException: Bad request\". Confirmed by hand on 2026-10-27."
+		},
+		{
+			"id": "C-dropper-ui",
+			"kind": "clean",
+			"area": "dropper-ui",
+			"expect": "no-defect",
+			"known_issues": "A wrong or stale public key leaves the page on \"Connecting...\" with no error message; the only sign is the console error \"Failed to start client: AuthenticationException: Bad request\". Confirmed by hand on 2026-10-27. With two uploaded files of the same name, removing one removes both files' results while the other file stays listed, because results are matched by file name. Confirmed by hand on 2026-10-27."
+		},
+		{
+			"id": "C-docs-site",
+			"kind": "clean",
+			"area": "docs-site",
+			"expect": "no-defect",
+			"known_issues": "The docs site's 404 page keeps the title \"RocketRide Documentation\" (the home page's title) instead of a \"Page Not Found\" title, because docs-only Docusaurus routes unknown URLs to DocRoot, which sets no title. Confirmed by hand on 2026-10-27."
+		},
+		{
+			"id": "P8",
+			"kind": "planted",
+			"area": "vscode-canvas",
+			"seed": "P8-vscode-stop-reads-wrong-id.patch",
+			"expect": "defect",
+			"ground_truth": "Stop on the canvas does not stop the pipeline: VS Code shows \"Invalid pipeline: missing project ID or component ID\", the Chat node stays in its stopping state, and the task stays in rocketride list."
+		},
+		{
+			"id": "P9",
+			"kind": "planted",
+			"area": "vscode-env",
+			"seed": "P9-vscode-env-drops-user-vars.patch",
+			"expect": "defect",
+			"ground_truth": "When the extension rewrites the workspace .env on connect (for example when VS Code is reopened), it deletes every variable it does not manage, such as the user's ROCKETRIDE_OPENAI_KEY. Comments stay."
+		},
+		{
+			"id": "R9",
+			"kind": "replay",
+			"area": "vscode-pipe-files",
+			"pr": 2615,
+			"commit": "ada02aec6",
+			"expect": "defect",
+			"paths": [
+				"apps/vscode/src/providers/SidebarProvider.ts",
+				"apps/vscode/src/shared/util/pipeFileDecision.ts",
+				"apps/vscode/src/shared/util/reloadingCache.ts",
+				"apps/vscode/src/shared/util/serialQueue.ts",
+				"apps/vscode/src/test/pipeFileDecision.test.ts",
+				"apps/vscode/src/test/reloadingCache.test.ts",
+				"apps/vscode/src/test/serialQueue.test.ts"
+			],
+			"ground_truth": "A .pipe file copied into the workspace (cp a.pipe b.pipe) is rewritten on disk without asking: the copy gets a new project_id and the whole file is re-serialized with two-space indentation, and no message is shown. The fixed extension leaves the file unchanged and warns that the two files share a project_id."
+		},
+		{
+			"id": "C-vscode-canvas",
+			"kind": "clean",
+			"area": "vscode-canvas",
+			"expect": "no-defect",
+			"known_issues": "Pre-existing on 2026-10-27: (1) after Stop, the Server Monitor lists the stopped task as \"failed (1)\" because the engine gives a user-stopped task exit code 1, as C-webhook records; (2) after Stop, editing the stopped .pipe file in place makes the extension ask \"Pipeline component \\\"Chat\\\" in quickstart-chat.pipe is running. Restart it?\", because the engine still returns a token for the completed task; (3) after Stop, the Chat node and its Pipelines row show 66 errors and 3 warnings, because the engine reports its own thread cancellations (Cancelled*Condition wait*Queue.hpp:179 and similar) as task errors. Reporting any of these is correct, not a false alarm."
+		},
+		{
+			"id": "C-vscode-env",
+			"kind": "clean",
+			"area": "vscode-env",
+			"expect": "no-defect"
+		},
+		{
+			"id": "C-vscode-pipe-files",
+			"kind": "clean",
+			"area": "vscode-pipe-files",
+			"expect": "no-defect",
+			"known_issues": "Pre-existing on 2026-10-27: after a pipeline was run and stopped, editing its .pipe file in place makes the extension ask whether to restart the \"running\" pipeline, although no task runs (the engine still returns a token for the completed task). A .pipe file that an external writer leaves empty for more than 500 ms gets the starter pipeline written into it in place, so a shorter document written afterwards leaves trailing skeleton bytes and invalid JSON. Empty .pipe files created together in a new folder (cp -r) are sometimes never given the starter pipeline, with nothing logged. Both confirmed by hand on 2026-10-27."
+		}
+	],
+	"calibration": "Every bug case was reproduced by hand on 2026-10-24 against the same check on clean code. R2 (#2376) was dropped: reverting it on current develop wraps the component as a pipeline and validates it without error, which a user cannot see as a failure. Defects that agents reported on clean controls were reproduced independently before being added to known_issues; one Codex report (Local Text Output skipping absolute or backslash exclude prefixes on Linux) was judged not a defect and stays a false alarm. Reports judged not defects because the docs state the behavior: send() on a chat-source pipeline returns no answer (docs say use chat()); rocketride validate passes unknown providers (docs say provider availability is a runtime concern). Browser cases (R8, P6, P7, C-canvas, C-chat-ui, C-dropper-ui, C-docs-site) were reproduced by hand on 2026-10-27 with the recipes in features/: each bug case failed its recipe on a prepared eval checkout, and a clean prepare passed the same recipe. #2508 (App Builder preview) was dropped: its fix reverts cleanly, but the preview it repairs runs only inside the VS Code App Builder panel, which hosts the shell in an iframe and injects the dev-server remote by postMessage. No browser path reaches it, and imitating the panel would not be a user path. It belongs with the VS Code surface. VS Code cases (P8, P9, R9, C-vscode-canvas, C-vscode-env, C-vscode-pipe-files) were reproduced by hand on 2026-10-27 with rr-verify vscode on a prepared eval checkout: P8 failed canvas-stop with the \"Invalid pipeline\" notification and a task still listed, P9 lost the user's ROCKETRIDE_OPENAI_KEY line on reopening VS Code, and R9 rewrote a copied .pipe file with a new project_id; a clean prepare passed the same recipes."
+}

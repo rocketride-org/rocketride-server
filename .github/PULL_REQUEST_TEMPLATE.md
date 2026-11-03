@@ -8,10 +8,24 @@
 
 <!-- What kind of change is this? (feature, fix, refactor, docs, chore, etc.) -->
 
-## Testing
+## Verification
+
+<!--
+REQUIRED. Show what you ran and what you saw. See "Show that it works" in CONTRIBUTING.md.
+- Every change: the steps you ran and what happened.
+- UI changes (packages/shell, apps/*-ui, apps/shared, apps/vscode, packages/chat-widget, docs site): screenshots, before and after.
+- Flows (drag and drop, several steps, animation, timing): a short recording or GIF.
+Drag screenshots and recordings into this box. Do not commit them.
+Working with a coding agent? Have it follow .claude/skills/verify-rocketride/SKILL.md and paste its report here.
+-->
+
+Steps:
+
+1.
+
+Result:
 
 - [ ] Tests added or updated
-- [ ] Tested locally
 - [ ] `./builder test` passes
 
 ## Checklist

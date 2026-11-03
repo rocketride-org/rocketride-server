@@ -1,0 +1,31 @@
+{
+	"components": [
+		{
+			"id": "webhook_1",
+			"provider": "webhook",
+			"name": "Webhook",
+			"config": {
+				"hideForm": true,
+				"mode": "Source",
+				"type": "webhook"
+			}
+		},
+		{
+			"id": "response_text_1",
+			"provider": "response_text",
+			"name": "Return Text",
+			"config": {
+				"laneName": "text"
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "webhook_1"
+				}
+			]
+		}
+	],
+	"source": "webhook_1",
+	"project_id": "5b0e8d1c-7f2a-4c3e-9b6d-0a1e2f3a4b5c",
+	"version": 1
+}
