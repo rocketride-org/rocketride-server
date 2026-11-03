@@ -399,6 +399,115 @@ class TestRocketrideSqlE2E:
         finally:
             glb.endGlobal()
 
+    # -- lanes fail closed (rocketride-ai/rocketride-saas#789) ------------------
+
+    @staticmethod
+    def _refuse_connections(glb):
+        """Point the node's engine at a port nothing listens on.
+
+        This is what a pooler that went away leaves a running pipeline with: the
+        task started and reflected the schema, and the next connection attempt is
+        refused.
+        """
+        import socket
+
+        from sqlalchemy import create_engine
+
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', 0))
+            closed_port = probe.getsockname()[1]
+        glb.engine.dispose()
+        glb.engine = create_engine(
+            f'postgresql+psycopg2://nobody:nopass@127.0.0.1:{closed_port}/{TEST_DB_NAME}',
+            connect_args={'connect_timeout': 2},
+        )
+
+    @staticmethod
+    def _lanes(inst, lanes=('text',)):
+        """Give the instance a downstream that records what is emitted."""
+
+        class _Sink:
+            def __init__(self):
+                self.text = []
+                self.answers = []
+
+            def getListeners(self):
+                return list(lanes)
+
+            def writeText(self, text):
+                self.text.append(text)
+
+            def writeAnswers(self, answer):
+                self.answers.append(answer)
+
+        inst.instance = _Sink()
+        return inst.instance
+
+    @staticmethod
+    def _answer(rows):
+        return types.SimpleNamespace(getJson=lambda: rows)
+
+    def test_answers_lane_inserts_when_the_database_is_up(self, rr_env, monkeypatch, sql_table, raw_conn):
+        """Control for the failure cases below: the same call writes the row on a live database."""
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            self._lanes(inst)
+            inst.writeAnswers(self._answer([{'name': 'washer', 'qty': 11}]))
+            with raw_conn.cursor() as cur:
+                cur.execute(f"SELECT count(*) FROM {sql_table} WHERE name = 'washer'")
+                assert cur.fetchone()[0] == 1
+        finally:
+            glb.endGlobal()
+
+    def test_answers_lane_fails_when_the_connection_is_refused(self, rr_env, monkeypatch, sql_table, raw_conn):
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        lane_error = sys.modules['ai.common.database.db_instance_base'].DatabaseLaneError
+        try:
+            self._refuse_connections(glb)
+            self._lanes(inst)
+            with pytest.raises(lane_error) as raised:
+                inst.writeAnswers(self._answer([{'name': 'washer', 'qty': 11}]))
+            assert '127.0.0.1' not in str(raised.value)
+            with raw_conn.cursor() as cur:
+                cur.execute(f"SELECT count(*) FROM {sql_table} WHERE name = 'washer'")
+                assert cur.fetchone()[0] == 0
+        finally:
+            glb.endGlobal()
+
+    def test_table_lane_fails_when_the_connection_is_refused(self, rr_env, monkeypatch, sql_table):
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        lane_error = sys.modules['ai.common.database.db_instance_base'].DatabaseLaneError
+        # The shared stand-in for ai.common.table carries only the markdown writer.
+        monkeypatch.setattr(
+            sys.modules['ai.common.table'].Table,
+            'parse_markdown_table',
+            lambda markdown: (['name', 'qty'], [['washer', 11]]),
+            raising=False,
+        )
+        try:
+            self._refuse_connections(glb)
+            self._lanes(inst)
+            with pytest.raises(lane_error):
+                inst.writeTable('| name | qty |\n| --- | --- |\n| washer | 11 |')
+        finally:
+            glb.endGlobal()
+
+    def test_question_lane_fails_and_never_emits_none_when_the_connection_is_refused(
+        self, rr_env, monkeypatch, sql_table
+    ):
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        lane_error = sys.modules['ai.common.database.db_instance_base'].DatabaseLaneError
+        try:
+            self._refuse_connections(glb)
+            sink = self._lanes(inst, ('text', 'answers'))
+            inst._buildSQLQuery = lambda question_text: {'isValid': True, 'query': f'SELECT * FROM {sql_table}'}
+            question = types.SimpleNamespace(questions=[types.SimpleNamespace(text='what is in stock?')])
+            with pytest.raises(lane_error):
+                inst.writeQuestions(question)
+            assert sink.text == [] and sink.answers == []
+        finally:
+            glb.endGlobal()
+
     def test_config_connection_fields_ignored(self, rr_env, monkeypatch, sql_table):
         """The defining property: config cannot redirect the connection."""
         glb, _ = self._begin(

@@ -29,6 +29,14 @@ the sibling for Cypher graph queries.
 | questions | text | Returns the query result as text. |
 | questions | answers | Returns the query result on the answers lane. |
 
+A lane never reports success for a statement that failed. When the database
+cannot be reached or refuses the statement, the lane raises, the step and the
+task fail, and nothing is emitted: no empty answer, no `None` text, no error
+object on the answers lane. The failure message is generic and the driver's own
+text (host, port, statement fragment) is only in the engine log. This holds for
+a read on the questions lane and for an insert on the answers and table lanes.
+Pipelines that used to complete while the database was down now fail instead.
+
 ## As a tool
 
 The inherited database functions are registered under the bare names below; this
@@ -127,9 +135,9 @@ violation -- omitting the column is the one shape that works for a default, a
 trigger and a generated key alike. Where nothing fills the key in, PostgreSQL
 refuses the row and every row of the batch is rolled back; the failure is
 raised as Insert into "<table>" failed: followed by the database's own primary
-message, with the statement echo stripped. On the answers lane that error is
-logged rather than returned to the caller, so check the server log when a batch
-does not land. SQLAlchemy emits a Python SAWarning (once per column per process
+message, with the statement echo stripped. On the answers lane the step fails
+with a generic message and that text goes to the server log, so check the
+server log for the cause when a batch does not land. SQLAlchemy emits a Python SAWarning (once per column per process
 under the default filter) for a statement that leaves a primary key unbound;
 that is expected here.
 

@@ -970,6 +970,21 @@ updateAppState((prev) => ({ ...prev, lastQuery: 'foo' }));
 The Documents system can bind to it for automatic persistence of open
 documents and layout — see [The Documents System](#the-documents-system).
 
+**`appState` is never a fallback for SQL, for shared state, or for anything
+that coordinates more than one run or user** (leases, locks, queues, counters,
+ownership, "who holds this"). It is per user, per app and per server, the last
+save wins, and it is best-effort: the shell debounces writes by about half a
+second, swallows a write that fails, and skips writes entirely while the
+connection is down, so a value an app "saved" while the database was
+unavailable may exist nowhere. Nothing reconciles it back into SQL afterwards,
+and a second user or run never sees it.
+
+When the cloud database is unavailable, do not record the work in `appState`
+instead. Show an honest "database unavailable" state, block the actions that
+need it, and retry with backoff. A DB node's lane or tool call fails the step
+when its statement fails; do not catch that error and carry on as if the write
+had happened.
+
 ### The two-phase startup: `seeded` vs `loaded`
 
 1. **Seeded** (`seeded = true`, `loaded = false`): the workspace holds

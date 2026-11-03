@@ -53,6 +53,16 @@ from .graph_global_base import DEFAULT_MAX_EXECUTE_ROWS, GraphGlobalBase
 DEFAULT_ROW_LIMIT = 250
 
 
+class GraphLaneError(RuntimeError):
+    """A pipeline lane statement failed against the graph database.
+
+    Raised by the lane handlers instead of returning normally, so the engine
+    marks the step and the task failed. The message is deliberately generic: the
+    driver's sentence can carry a host, a port or a fragment of the query, and
+    the full exception is in the engine log, written by ``error()`` first.
+    """
+
+
 class GraphInstanceBase(IInstanceBase, ABC):
     """Abstract base for the IInstance layer of any graph database node."""
 
@@ -601,12 +611,25 @@ class GraphInstanceBase(IInstanceBase, ABC):
 
             executed = is_valid and bool(query)
             # When the LLM decides it isn't a graph question, `query` holds its prose answer.
-            result = self.IGlobal._run_query(query) if executed else query
+            result = self._runLaneQuery(self.IGlobal._run_query, query) if executed else query
 
             self._emit(result, lanes, executed=executed)
 
+        except GraphLaneError:
+            # `_runLaneQuery` has logged the cause. Fail the step: emitting
+            # anything, an error object included, lets the pipeline carry on as
+            # if the question had been answered.
+            raise
         except Exception as e:
             error(f'Error handling question: {e}')
+
+    def _runLaneQuery(self, runner, statement: str):
+        """Run ``statement`` through ``runner`` for a lane; any failure raises ``GraphLaneError``."""
+        try:
+            return runner(statement)
+        except Exception as e:
+            error(f'Error executing graph query: {e}')
+            raise GraphLaneError(f'{self._db_display_name()} query failed (details are in the engine log)') from None
 
     def _emitError(self, message: str, lanes) -> None:
         """Emit a validation/safety error to the wired lanes, never a broken query as prose."""
@@ -622,8 +645,10 @@ class GraphInstanceBase(IInstanceBase, ABC):
         if not self.IGlobal.allow_execute:
             warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
             return
+        # The statement runs outside the emit `try` below: a failed statement
+        # must fail the step, while the emit block keeps its own handling.
+        result = self._runLaneQuery(self.IGlobal._run_query_raw, statement)
         try:
-            result = self.IGlobal._run_query_raw(statement)
             rows = result.get('rows', [])
             affected = result.get('affected_rows', 0)
             markdown = self._formatResultAsMarkdown(rows) if rows else None

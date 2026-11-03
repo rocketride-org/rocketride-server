@@ -26,6 +26,13 @@ relational SQL or rocketride_vector for embedding-backed document retrieval.
 | questions | text | Returns the graph-query result as text. |
 | questions | answers | Returns the graph-query result on the answers lane. |
 
+A lane never reports success for a statement that failed. When the graph
+database cannot be reached or refuses the query, the lane raises, the step and
+the task fail, and nothing is emitted. The failure message is generic and the
+driver's own text is only in the engine log. This covers a question and a raw
+statement sent on the execute path. Pipelines that used to complete while the
+database was down now fail instead.
+
 ## As a tool
 
 The inherited graph functions are registered under the bare names below; this

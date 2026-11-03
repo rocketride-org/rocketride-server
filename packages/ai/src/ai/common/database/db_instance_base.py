@@ -180,6 +180,19 @@ class MissingLlmError(ValueError):
     """A natural-language question reached a node with no llm connected."""
 
 
+class DatabaseLaneError(RuntimeError):
+    """A pipeline lane statement failed against the database.
+
+    Raised by the lane handlers (``writeQuestions``, ``writeTable``,
+    ``writeAnswers``) instead of returning normally, so the engine marks the step
+    and the task failed. The message is deliberately generic: the lane caller is
+    an upstream node or a person who never wrote the statement, and the driver's
+    sentence can carry a host name, a port or a fragment of the statement. The
+    full exception is in the engine log, written by ``error()`` before this is
+    raised.
+    """
+
+
 class DatabaseInstanceBase(IInstanceBase, ABC):
     """Abstract base for the IInstance layer of any relational database node.
 
@@ -321,8 +334,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return sql_result
 
         sql_query = sql_result['sql']
-        result = self._executeSQLQuery(sql_query)
-        if result is None:
+        try:
+            result = self._executeSQLQuery(sql_query)
+        except DatabaseLaneError:
+            # The tool contract is an explicit `valid: False` result, not an
+            # exception. The lane handlers rely on the raise instead.
             return {'valid': False, 'error': 'Query execution failed', 'sql': sql_query, 'rows': []}
 
         rows = [self._sanitize_row(row) for row in result]
@@ -966,8 +982,14 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         return result.answer
 
-    def _executeSQLQuery(self, query: str) -> list[dict] | None:
-        """Execute a SQL SELECT query and return rows as a list of dicts."""
+    def _executeSQLQuery(self, query: str) -> list[dict]:
+        """Execute a SQL SELECT query and return rows as a list of dicts.
+
+        There is no failure return value: every failure raises
+        ``DatabaseLaneError``. This used to return ``None``, and the lane handler
+        then emitted the string ``"None"`` as the answer, which reads downstream
+        as a successful, empty result.
+        """
         try:
             with self.IGlobal.engine.connect() as conn:
                 result = conn.execute(text(query))
@@ -975,9 +997,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 column_names = result.keys()
                 return [dict(zip(column_names, row)) for row in rows]
 
-        except SQLAlchemyError as e:
+        except Exception as e:
             error(f'Error executing SQL query: {e}')
-            return None
+            raise DatabaseLaneError(f'{self._db_display_name()} query failed (details are in the engine log)') from None
 
     def _executeRawQuery(self, query: str, params: list | None = None, row_mode: str = 'object') -> dict:
         """Execute a raw SQL statement (read or write) without LLM or safety gating.
@@ -1086,6 +1108,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
             self._emit(result, lanes, executed=executed)
 
+        except DatabaseLaneError:
+            # `_executeSQLQuery` has logged the cause. Fail the step: emitting
+            # anything here, an error object included, lets the pipeline carry on
+            # as if the question had been answered.
+            raise
         except MissingLlmError as e:
             # The caller needs this cause, not only the log: on the text/answers
             # lanes when one is wired, otherwise through the engine's error path
@@ -1153,7 +1180,12 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             self._insertData(rows)
         except Exception as e:
+            # Fail the step. Returning normally here reported success for rows
+            # that were never written.
             error(f'Error inserting table data: {e}')
+            raise DatabaseLaneError(
+                f'{self._db_display_name()} table write failed; no rows were saved (details are in the engine log)'
+            ) from None
 
     def writeAnswers(self, answer: Answer) -> None:
         """Handle incoming structured answer data — extract JSON rows and insert."""
@@ -1166,7 +1198,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             self._insertData(items)
         except Exception as e:
+            # Fail the step, same as `writeTable`.
             error(f'Error in writeAnswers: {e}')
+            raise DatabaseLaneError(
+                f'{self._db_display_name()} answers write failed; no rows were saved (details are in the engine log)'
+            ) from None
 
     # ------------------------------------------------------------------
     # Data insertion
