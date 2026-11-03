@@ -81,7 +81,11 @@ export function currentSignupProperties(value: unknown): SignupProperties | null
 	const context = normalizeSignupProperties(value);
 	if (!context) return null;
 	// A cookieless context (consent_state set) needs no opt-in, but a privacy signal still drops it.
-	if (context.consent_state ? privacySignalOn() : !hasConsent()) return null;
+	if (context.consent_state) {
+		if (privacySignalOn()) return null;
+		return context;
+	}
+	if (!hasConsent()) return null;
 	return context;
 }
 
