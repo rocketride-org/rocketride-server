@@ -1021,6 +1021,52 @@ def test_an_unexpected_failure_of_a_table_only_question_raises_the_fixed_message
     assert raised.value.__suppress_context__
 
 
+# An error key the prompt never asked for: the LLM's own text, here echoing a statement
+_LLM_ERROR_REPLY = {'isValid': False, 'error': 'I would run SELECT token FROM users but the table is missing'}
+
+
+def test_an_error_the_llm_reports_reaches_the_lanes_as_a_fixed_message():
+    """The LLM wrote the error key, not the node, so its text stays in the log."""
+    inst, fake_instance = _question_instance(_LLM_ERROR_REPLY, ['text', 'answers'])
+
+    _ask(inst)
+
+    assert fake_instance.text_written == 'Failed to answer the question'
+    assert fake_instance.answer_written.getJson() == {'error': 'Failed to answer the question'}
+
+
+def test_an_error_the_llm_reports_fails_a_table_only_question_with_the_fixed_message():
+    """The raised text reaches the client, so it is the fixed message, not the LLM's."""
+    inst, fake_instance = _question_instance(_LLM_ERROR_REPLY, ['table'])
+
+    with pytest.raises(RuntimeError) as raised:
+        _ask(inst)
+
+    assert str(raised.value) == 'Failed to answer the question'
+    assert fake_instance.table_written is None
+
+
+@pytest.mark.parametrize('tool', ['get_sql', 'get_data'])
+def test_the_tools_report_an_error_the_llm_reports_as_the_fixed_message(tool):
+    """The tools share the query builder, so their error field carries only text the node wrote too."""
+    inst = _sql_instance(_FakeGlobal())
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: dict(_LLM_ERROR_REPLY)
+
+    assert getattr(inst, tool)({'question': 'all users'}) == {'error': 'Failed to answer the question', 'valid': False}
+
+
+def test_build_sql_query_keeps_the_explain_error_over_an_error_the_llm_reports():
+    """When EXPLAIN rejects every attempt, the caller gets the database's message as the node formatted it."""
+    inst = _sql_instance(_FakeGlobal(explain_error='column "userz" does not exist'))
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': True,
+        'query': 'SELECT * FROM userz',
+        'error': 'the LLM had doubts',
+    }
+
+    assert inst._buildSQLQuery('all users')['error'] == 'column "userz" does not exist'
+
+
 class _FailingAnswersInstance(_FakeInstance):
     """A lane recorder whose answers lane fails to write."""
 

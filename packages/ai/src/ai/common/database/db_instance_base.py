@@ -188,7 +188,7 @@ class _QuestionFailed(RuntimeError):
     """A question failed with a message this module wrote for the caller, safe to put on the lanes."""
 
 
-# What the lanes get for any other failure; the cause goes to the log only
+# What the caller gets for a failure whose text the node did not write; the cause goes to the log only
 _QUESTION_FAILED = 'Failed to answer the question'
 
 
@@ -432,9 +432,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         elif is_valid and sql_query:
             return {'error': 'Generated query contains unsafe SQL', 'sql': sql_query, 'valid': False}
         elif result.get('error'):
-            # EXPLAIN rejected the query on every attempt -- surface the real
-            # database error instead of the rejected SQL, so callers can tell
-            # this apart from a genuinely off-topic question.
+            # EXPLAIN rejected the query on every attempt (or the LLM reported an
+            # error) -- surface the error instead of the rejected SQL, so callers
+            # can tell this apart from a genuinely off-topic question.
             return {'error': result['error'], 'valid': False}
         else:
             return {'answer': sql_query, 'valid': False}
@@ -824,7 +824,16 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         LLM and another attempt is made, up to ``IGlobal.max_validation_attempts``
         times.  Returns the last LLM response if EXPLAIN eventually accepts it;
         if every attempt is rejected, the result is forced to ``isValid: False``
-        with the last EXPLAIN error carried in ``error``.
+        with the last EXPLAIN error carried in ``error``. An ``error`` the LLM
+        puts in its own reply becomes ``_QUESTION_FAILED`` (its text goes to the
+        log), so ``error`` in the result is always text the node wrote.
+
+        Args:
+            question_text: The natural-language question.
+            limit: The row limit the generated query must apply.
+
+        Returns:
+            The LLM's reply as a dict with ``isValid`` and ``query``, plus ``error`` when the question failed.
         """
         previous_sql: str | None = None
         last_error: str | None = None
@@ -832,6 +841,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         for attempt in range(self.IGlobal.max_validation_attempts):
             result = self._buildSQLQueryOnce(question_text, limit=limit, previous_sql=previous_sql, error=last_error)
+            # The prompt asks for no error key: whatever the LLM wrote there is its text, not ours
+            if result.get('error'):
+                warning(f'The LLM reported an error for the question: {result["error"]}')
+                result['error'] = _QUESTION_FAILED
 
             is_valid = parse_bool(result.get('isValid', False))
             sql_query = result.get('query', '')
@@ -1084,8 +1097,8 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             sql_query = query_json.get('query')
             is_valid_query = parse_bool(query_json.get('isValid', False))
 
-            # The EXPLAIN repair loop gave up: `query` still holds the rejected
-            # SQL, not an answer. Report the error instead of printing it as prose.
+            # The EXPLAIN repair loop gave up (`query` still holds the rejected SQL,
+            # not an answer) or the LLM reported an error. Report it, never print it as prose.
             if query_json.get('error'):
                 raise _QuestionFailed(query_json['error'])
             # The LLM claimed valid SQL but it fails the safety gate: same rule
