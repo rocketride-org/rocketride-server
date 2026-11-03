@@ -72,8 +72,6 @@ def _reserved_key_error(config: Dict[str, Any]) -> str | None:
 
 
 class IGlobal(IGlobalBase):
-    """Read the result keys the lanes are returned under."""
-
     lanes: Dict[str, str] = {}
 
     def validateConfig(self) -> None:

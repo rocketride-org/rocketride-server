@@ -12,6 +12,7 @@ overwritten instead. The node now refuses such a key when it starts, and warns
 when the config is validated. Drives the real ``IGlobal`` and ``IInstance``.
 """
 
+import importlib.util
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ import pytest
 from rocketlib import OPEN_MODE
 
 NODES_SRC = Path(__file__).parent.parent.parent / 'src' / 'nodes'
+DISCOVERY_PY = Path(__file__).parent.parent / 'framework' / 'discovery.py'
 while str(NODES_SRC) in sys.path:
     sys.path.remove(str(NODES_SRC))
 sys.path.insert(0, str(NODES_SRC))
@@ -155,3 +157,42 @@ def test_unmapped_lanes_use_their_lane_type():
     assert response['grid'] == ['| a |']
     assert response['json'] == [{'k': 1}]
     assert response['result_types'] == {'grid': 'table', 'json': 'json'}
+
+
+def _default_lane_names():
+    """Return ``(services file, default laneName)`` for every response service that sets a default.
+
+    Read with the repo's JSONC reader: the services files have comments and trailing commas.
+
+    Returns:
+        The pairs, sorted by file name.
+    """
+    spec = importlib.util.spec_from_file_location('_response_discovery', DISCOVERY_PY)
+    discovery = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(discovery)
+    found = []
+    for path in sorted((NODES_SRC / 'response').glob('services*.json')):
+        service = discovery._parse_service_json(str(path))
+        assert service is not None, f'{path.name} did not parse'
+        default = service.get('fields', {}).get('laneName', {}).get('default')
+        if default:
+            found.append((path.name, default))
+    return found
+
+
+_DEFAULT_LANE_NAMES = _default_lane_names()
+
+
+def test_the_services_still_set_defaults_to_check():
+    """Guard the test below: with no defaults found it would check nothing and pass."""
+    assert _DEFAULT_LANE_NAMES
+
+
+@pytest.mark.parametrize(
+    ('services_file', 'lane_name'), _DEFAULT_LANE_NAMES, ids=[name for name, _ in _DEFAULT_LANE_NAMES]
+)
+def test_no_service_default_result_key_is_reserved(services_file, lane_name):
+    """A service's default key must stay usable: reserving it would stop every pipeline that keeps the default."""
+    glb = _global({'laneName': lane_name})
+    glb.beginGlobal()
+    assert glb.laneName == lane_name
