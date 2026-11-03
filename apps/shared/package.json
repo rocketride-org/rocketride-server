@@ -32,6 +32,7 @@
     "dagre": "~0.8.5",
     "dompurify": "~3.4.0",
     "elkjs": "~0.9.3",
+    "es-module-lexer": "^1.7.0",
     "fuzzysort": "~3.1.0",
     "html-react-parser": "~5.2.3",
     "i18next": "~23.11.3",
@@ -40,7 +41,7 @@
     "lodash": "~4.18.1",
     "markdown-to-jsx": "~7.7.16",
     "moment": "~2.30.1",
-    "posthog-js": "~1.274.1",
+    "monaco-editor": "^0.55.1",
     "react": "^18.2.0",
     "react-canny": "~0.0.8",
     "react-chartjs-2": "^5.2.0",
@@ -58,12 +59,15 @@
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
-    "@rsbuild/core": "~2.0.11",
+    "@rsbuild/core": "~2.2.12",
     "@rsbuild/plugin-react": "~2.0.1",
     "@rsbuild/plugin-sass": "~1.5.3",
     "@types/d3": "~7.4.3",
     "@types/react": "~18.3.31",
     "@types/react-dom": "~18.3.7",
+    "csstype": "^3.1.0",
+    "es-module-lexer": "^1.7.0",
+    "monaco-editor": "^0.55.1",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/tabulator-tables": "~6.2.0",
     "run-script-os": "^1.1.6",
@@ -72,6 +76,8 @@
     "typescript": "^5.3.0"
   },
   "exports": {
+    "./agent/*": "./src/agent/*",
+    "./workspace/*": "./src/workspace/*",
     "./api/*": "./src/api/*",
     "./components/*": "./src/components/*",
     "./services/*": "./src/services/*",

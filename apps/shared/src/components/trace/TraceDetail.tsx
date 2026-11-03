@@ -11,13 +11,13 @@
  * DetailPanel today, the Analyze page tomorrow).
  */
 import React, { useState, useMemo, useCallback, useEffect, CSSProperties } from 'react';
-import { JsonTree } from '../json-tree';
-import { renderTraceInput, renderTraceOutput, summaryTraceInput, renderTraceData } from './renderers';
+import { JsonTree } from 'shared/components/json-tree';
+import { renderTraceInput, renderTraceOutput, summaryTraceInput } from './renderers';
 import { traceDataEqual } from './renderers/utils';
 import { renderFinalSections, resultFieldCount } from './renderers/render_final';
-import type { TraceRow } from '../../modules/project/types';
-import { parseServerEvent } from '../../modules/project/utils';
-import { useTraceState } from '../../modules/project/hooks/useTraceState';
+import type { TraceRow } from './types';
+import { parseTraceEvent } from './parseTraceEvent';
+import { useTraceState } from './useTraceState';
 import { commonStyles } from 'shell';
 import { EmptyState } from 'shell';
 import { ToggleGroup } from 'shell';
@@ -690,7 +690,7 @@ const InputDataBox: React.FC<{
 	componentNames?: Map<string, string>;
 	showCallInfo?: boolean;
 }> = ({ node, data, label = 'Input', lane, componentNames, showCallInfo }) => {
-	const hasTreeView = data != null && renderTraceData(data, lane) != null;
+	const hasTreeView = data != null && renderTraceInput(data, lane) != null;
 	const availableModes = hasTreeView ? VIEW_MODES : VIEW_MODES.filter((v) => v.mode !== 'tree');
 	const [expanded, setExpanded] = useState(true);
 	const [viewMode, setViewMode] = useState<DataViewMode>(() => (hasTreeView ? 'tree' : 'json'));
@@ -987,10 +987,10 @@ export const TraceDetail: React.FC<ITraceDetailProps> = ({ traceId, projectId, f
 
 	// Fold the raw flow events into call rows (same parse as the live view).
 	const foldedEvents = useMemo(() => {
-		const folded: NonNullable<ReturnType<typeof parseServerEvent>['traceEvent']>[] = [];
+		const folded: NonNullable<ReturnType<typeof parseTraceEvent>>[] = [];
 		for (const message of fetched?.events ?? []) {
-			const parsed = parseServerEvent(message as unknown as Parameters<typeof parseServerEvent>[0], projectId);
-			if (parsed.traceEvent) folded.push(parsed.traceEvent);
+			const parsed = parseTraceEvent((message as Record<string, any>)?.body ?? {});
+			if (parsed) folded.push(parsed);
 		}
 		return folded;
 	}, [fetched, projectId]);
