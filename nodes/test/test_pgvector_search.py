@@ -13,7 +13,6 @@ documents than HNSW's default candidate budget. EXPLAIN checks the executed
 query, so a sequential scan cannot accidentally make the regression pass.
 """
 
-from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -27,7 +26,7 @@ pytestmark = pytest.mark.parametrize('store_env', ['rocketride_vector', 'store_p
 
 
 @pytest.fixture(params=['cosine', 'l2', 'inner_product'])
-def indexed_store(store_env, monkeypatch, request):
+def indexed_store(store_env, request):
     """100 near chunks, 30 eligible documents, and enough noise to use HNSW."""
     import numpy as np
     from psycopg2.extras import execute_values
@@ -99,28 +98,17 @@ def indexed_store(store_env, monkeypatch, request):
     # Record statements that the production driver actually executes.
     searches = []
 
-    class RecordingCursor:
-        def __init__(self, cursor):
-            self.cursor = cursor
+    # Instrument the DB cursor rather than store helper methods so this same
+    # fixture can exercise the pre-fix drivers, which used direct cursors.
+    from psycopg2.extensions import cursor
 
+    class RecordingCursor(cursor):
         def execute(self, sql, params=None):
             if ' AS distance ' in sql:
                 searches.append((sql, params))
-            return self.cursor.execute(sql, params)
+            return super().execute(sql, params)
 
-        def __getattr__(self, name):
-            return getattr(self.cursor, name)
-
-    def record(factory):
-        @contextmanager
-        def recording_cursor():
-            with factory() as cur:
-                yield RecordingCursor(cur)
-
-        return recording_cursor
-
-    monkeypatch.setattr(store, '_cursor', record(store._cursor))
-    monkeypatch.setattr(store, '_transaction', record(store._transaction))
+    store.client.cursor_factory = RecordingCursor
     # Register the numpy adapter on the diagnostic connection too.
     from pgvector.psycopg2 import register_vector
 
@@ -315,7 +303,7 @@ def test_search_omits_vectors_without_a_cosine_distance(indexed_store, missing, 
         if not ann_index:
             cur.execute(f'DROP INDEX {table}_embedding_hnsw')
         cur.execute(
-            f'INSERT INTO {table} (objectId, content, isDeleted, embedding) VALUES (%s, %s, false, %s)',
+            f'INSERT INTO {table} (objectId, chunkId, content, isDeleted, embedding) VALUES (%s, 0, %s, false, %s)',
             ('undefined-distance', 'no cosine distance', None if missing else str([0.0] * len(query))),
         )
     raw.commit()
