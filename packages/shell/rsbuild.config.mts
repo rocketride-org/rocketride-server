@@ -134,6 +134,10 @@ export default defineConfig(({ command }) => {
 					// App remotes (/apps/<appId>/v<N>/remoteEntry.js) are engine-served.
 					'/apps/': { target: 'http://localhost:5565' },
 					'/marketplace': { target: 'http://localhost:5565' },
+					// Endpoint UIs and URLs that running pipelines publish as {host}/... links.
+					'/dropper': { target: 'http://localhost:5565' },
+					'/chat': { target: 'http://localhost:5565' },
+					'/webhook': { target: 'http://localhost:5565' },
 					'/sitemap.xml': { target: 'http://localhost:5565' },
 					'/robots.txt': { target: 'http://localhost:5565' },
 					'/llms.txt': { target: 'http://localhost:5565' },
