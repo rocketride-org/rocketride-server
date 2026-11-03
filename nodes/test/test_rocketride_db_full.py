@@ -834,7 +834,7 @@ class TestRocketrideSqlE2E:
                 params = conn.connection.dbapi_connection.get_dsn_parameters()
             assert (params['keepalives'], params['keepalives_idle']) == ('1', '20')
             assert (params['keepalives_interval'], params['keepalives_count']) == ('7', '4')
-            if psycopg2.__libpq_version__ >= 120000:
+            if psycopg2.extensions.libpq_version() >= 120000:
                 assert params['tcp_user_timeout'] == '30000'
         finally:
             glb.endGlobal()

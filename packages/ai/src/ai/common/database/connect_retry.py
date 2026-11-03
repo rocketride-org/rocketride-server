@@ -232,8 +232,8 @@ def postgres_network_args(settings: dict) -> dict:
     """Return the libpq keepalive and ``tcp_user_timeout`` parameters for a psycopg2 connection.
 
     ``tcp_user_timeout`` needs libpq 12 or newer; an older libpq rejects the option
-    and the connection would fail, so it is added only when psycopg2 reports one that
-    knows it. The keepalive parameters are older and always sent.
+    and the connection would fail, so it is added only when the libpq psycopg2 is
+    running with, at run time, knows it. The keepalive parameters are older and always sent.
     """
     args = {
         'keepalives': 1,
@@ -244,7 +244,9 @@ def postgres_network_args(settings: dict) -> dict:
     try:
         import psycopg2
 
-        if getattr(psycopg2, '__libpq_version__', 0) >= 120000:
+        # The libpq this process loaded, not the one psycopg2 was built against
+        # (``__libpq_version__``): they differ with a system libpq or a wheel upgrade.
+        if psycopg2.extensions.libpq_version() >= 120000:
             args['tcp_user_timeout'] = int(settings['tcp_user_timeout'] * 1000)
     except ImportError:  # pragma: no cover - psycopg2 is the driver whenever this is called
         pass
@@ -254,16 +256,23 @@ def postgres_network_args(settings: dict) -> dict:
 def _abort_connection(dbapi_connection: Any) -> None:
     """Shut down the socket under ``dbapi_connection`` so a blocked read returns with an error.
 
-    Best effort: used from the ping watchdog thread. Works on the file descriptor
-    psycopg2 exposes; where the connection has none, or the platform cannot
-    duplicate it, nothing happens and the ping simply is not bounded.
+    Best effort: used from the ping watchdog thread, which must never raise.
+    Works on the file descriptor psycopg2 exposes. Where the connection has none
+    (already closed: psycopg2 raises ``InterfaceError``), the descriptor is not a
+    socket any more, or the platform cannot duplicate it (Windows), nothing happens
+    and the ping simply is not bounded. The duplicated descriptor is always closed.
     """
     try:
         descriptor = os.dup(dbapi_connection.fileno())
-    except (AttributeError, OSError, ValueError):
+    except Exception:
         return
     try:
-        with socket.socket(fileno=descriptor) as sock:
+        sock = socket.socket(fileno=descriptor)
+    except Exception:
+        os.close(descriptor)  # not a socket (the number was reused): the dup is still ours to close
+        return
+    try:
+        with sock:
             sock.shutdown(socket.SHUT_RDWR)
     except OSError:
         pass
@@ -278,18 +287,43 @@ def install_ping_watchdog(engine: Any, timeout: float) -> None:
     ping then fails as a dropped connection and SQLAlchemy replaces the pooled
     connection through the (bounded) connect path. Only the ping is bounded, never a
     statement.
+
+    ``Timer.cancel()`` does not stop a callback that has already started, so the
+    timer and the ping agree through a lock: the callback aborts only while holding
+    it and only if the ping has not finished, and the ping marks itself finished
+    under the same lock before it returns. A ping that returned just before the
+    deadline therefore never has its connection shut down after it was handed to the
+    caller; and if the abort did happen the ping reports failure, even if
+    ``real_ping`` answered, so the connection is replaced and never reused.
+
+    PostgreSQL through psycopg2 on POSIX only: on Windows ``os.dup`` cannot duplicate
+    the socket, so the watchdog does nothing there and the ping is not bounded.
     """
     dialect = engine.dialect
     real_ping = dialect.do_ping
 
     def bounded_ping(dbapi_connection):
-        timer = threading.Timer(timeout, _abort_connection, (dbapi_connection,))
+        lock = threading.Lock()
+        state = {'done': False, 'aborted': False}
+
+        def abort():
+            with lock:
+                if state['done']:
+                    return
+                state['aborted'] = True
+                _abort_connection(dbapi_connection)
+
+        timer = threading.Timer(timeout, abort)
         timer.daemon = True
         timer.start()
         try:
-            return real_ping(dbapi_connection)
+            result = real_ping(dbapi_connection)
         finally:
+            with lock:
+                state['done'] = True
+                aborted = state['aborted']
             timer.cancel()
+        return False if aborted else result
 
     dialect.do_ping = bounded_ping
 

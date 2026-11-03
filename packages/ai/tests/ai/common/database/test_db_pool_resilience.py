@@ -35,6 +35,7 @@ makes) and ``dialect.do_execute`` (the call that sends a statement).
 
 from __future__ import annotations
 
+import os
 import sqlite3
 import threading
 import time
@@ -360,7 +361,7 @@ def _libpq_knows_tcp_user_timeout():
     try:
         import psycopg2
 
-        return getattr(psycopg2, '__libpq_version__', 0) >= 120000
+        return psycopg2.extensions.libpq_version() >= 120000
     except ImportError:
         return False
 
@@ -411,7 +412,10 @@ def test_tcp_user_timeout_is_sent_only_to_a_libpq_that_knows_it(monkeypatch, lib
     import sys
     import types
 
-    monkeypatch.setitem(sys.modules, 'psycopg2', types.SimpleNamespace(__libpq_version__=libpq))
+    stub = types.SimpleNamespace(
+        extensions=types.SimpleNamespace(libpq_version=lambda: libpq), __libpq_version__=999999
+    )
+    monkeypatch.setitem(sys.modules, 'psycopg2', stub)
 
     args = postgres_network_args(network_settings_from_config({'tcp_user_timeout': 12}))
 
@@ -508,6 +512,106 @@ def test_a_ping_that_answers_in_time_is_left_alone():
         connect_retry_module._abort_connection = original
 
     assert aborted == []
+
+
+class _ManualTimer:
+    """Stands in for ``threading.Timer``: records the callback and lets the test choose when it runs."""
+
+    created: list = []
+
+    def __init__(self, interval, function, args=(), kwargs=None):
+        self.function = function
+        self.cancelled = False
+        _ManualTimer.created.append(self)
+
+    daemon = True
+
+    def start(self):
+        pass
+
+    def cancel(self):
+        self.cancelled = True  # like the real one: it cannot stop a callback that already started
+
+
+def _watched_engine(monkeypatch, real_ping):
+    engine = create_engine('sqlite://')
+    engine.dialect.do_ping = real_ping
+    _ManualTimer.created = []
+    monkeypatch.setattr(connect_retry_module.threading, 'Timer', _ManualTimer)
+    aborted = []
+    monkeypatch.setattr(connect_retry_module, '_abort_connection', aborted.append)
+    install_ping_watchdog(engine, 5)
+    return engine, aborted
+
+
+def test_a_timer_that_fires_after_the_ping_returned_does_not_shut_the_connection_down(monkeypatch):
+    """The race: the callback had already started when the ping finished, so cancel() was too late."""
+    engine, aborted = _watched_engine(monkeypatch, lambda dbapi_connection: True)
+
+    assert engine.dialect.do_ping('connection') is True
+    _ManualTimer.created[0].function()  # the timer thread gets to run after the ping returned
+
+    assert aborted == []  # before the lock: the healthy connection was shut down under the caller
+
+
+def test_a_ping_that_returned_true_but_was_aborted_reports_failure(monkeypatch):
+    """The abort won the race: the connection is unusable, so the ping must not say it is fine."""
+    holder = {}
+
+    def ping_during_which_the_timer_fires(dbapi_connection):
+        holder['engine_timer'].function()  # the abort lands while the ping is still running
+        return True  # and the ping still answers True
+
+    engine, aborted = _watched_engine(monkeypatch, ping_during_which_the_timer_fires)
+    original_start = _ManualTimer.start
+    _ManualTimer.start = lambda self: holder.setdefault('engine_timer', self)
+    try:
+        assert engine.dialect.do_ping('connection') is False
+    finally:
+        _ManualTimer.start = original_start
+
+    assert aborted == ['connection']
+
+
+def test_the_timer_callback_runs_the_abort_at_most_once_per_ping(monkeypatch):
+    engine, aborted = _watched_engine(monkeypatch, lambda dbapi_connection: True)
+    engine.dialect.do_ping('connection')
+
+    callback = _ManualTimer.created[0].function
+    callback()
+    callback()
+
+    assert aborted == []
+
+
+def _open_descriptors():
+    return len(os.listdir('/dev/fd'))
+
+
+@pytest.mark.skipif(not os.path.isdir('/dev/fd'), reason='counts descriptors through /dev/fd')
+def test_the_abort_does_not_leak_a_descriptor_when_the_number_is_not_a_socket():
+    """The fd number was reused by a regular file: the dup is not a socket, and is still closed."""
+    import tempfile
+
+    with tempfile.TemporaryFile() as handle:
+        connection = types.SimpleNamespace(fileno=handle.fileno)
+        before = _open_descriptors()
+        for _ in range(50):
+            _abort_connection(connection)
+
+        assert _open_descriptors() == before
+
+
+def test_the_abort_swallows_the_error_of_an_already_closed_connection():
+    """psycopg2 raises InterfaceError, not OSError, from fileno() once the connection is closed."""
+
+    class InterfaceError(Exception):
+        pass
+
+    def closed():
+        raise InterfaceError('connection already closed')
+
+    _abort_connection(types.SimpleNamespace(fileno=closed))  # must not raise out of the timer thread
 
 
 def test_begin_global_installs_the_watchdog_on_a_postgres_engine(monkeypatch):
@@ -612,3 +716,27 @@ def test_a_begin_that_is_still_connecting_holds_its_slot_and_a_failed_one_gives_
     state['down'] = False
     sid = registry.begin()  # ... and the slot it reserved is free again
     registry.rollback(sid)
+
+
+def test_a_begin_that_finishes_connecting_after_close_all_releases_its_connection():
+    """close_all never saw the connection (it was opened outside the lock), so begin must not register it."""
+    engine, state = _registry_engine(0.4, fail=False)
+    registry = TransactionRegistry(engine, max_rows=100)
+    state['down'] = True  # the connect takes 0.4 s, and succeeds
+    outcome = []
+
+    def begin():
+        try:
+            outcome.append(registry.begin())
+        except Exception as exc:
+            outcome.append(exc)
+
+    thread = threading.Thread(target=begin)
+    thread.start()
+    time.sleep(0.1)  # begin is connecting outside the lock
+    registry.close_all()  # endGlobal
+    thread.join(5)
+
+    assert isinstance(outcome[0], RuntimeError) and 'closed' in str(outcome[0])
+    assert len(registry._sessions) == 0
+    assert engine.pool.checkedout() == 0
