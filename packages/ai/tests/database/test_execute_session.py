@@ -402,6 +402,21 @@ def _mysql_duplicate_entry():
     )
 
 
+def _mysql_syntax_error_with_interpolated_bind():
+    """A pymysql-shaped 1064 syntax error whose near-'...' quote contains a client-interpolated bind."""
+    orig = _FakeDriverError(
+        1064,
+        "You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version "
+        "for the right syntax to use near 'VALUES 'ada@example.com')' at line 1",
+    )
+    return DBAPIError.instance(
+        'INSERT INTO users (email) VALUES %s)',
+        ('ada@example.com',),
+        orig,
+        dbapi_base_err=Exception,
+    )
+
+
 @pytest.mark.parametrize(
     ('build_error', 'expected'),
     [
@@ -413,8 +428,13 @@ def _mysql_duplicate_entry():
             _mysql_duplicate_entry,
             "SQL execution failed: Error 1062: Duplicate entry 'ada@example.com' for key 'users.email'",
         ),
+        (
+            _mysql_syntax_error_with_interpolated_bind,
+            'SQL execution failed: Error 1064: You have an error in your SQL syntax; '
+            "check the manual that corresponds to your MySQL server version for the right syntax to use near 'VALUES' at line 1",
+        ),
     ],
-    ids=['postgres', 'mysql'],
+    ids=['postgres', 'mysql', 'mysql_1064'],
 )
 def test_both_execute_paths_report_a_driver_failure_identically(instance_with_sqlite_registry, build_error, expected):
     """One tool, one gate, one error contract -- whether or not a session is used.

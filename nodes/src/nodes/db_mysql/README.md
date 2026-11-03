@@ -83,13 +83,11 @@ failed statement raises `SQL execution failed:` followed by the database's own
 primary message, identically with and without a `session_id`. What is removed
 is the tail: SQLAlchemy's `[SQL: ...]` / `[parameters: ...]` echo. The primary
 sentence itself is passed through as MySQL wrote it: a `SIGNAL`'s text comes
-back whole, a constraint error names the value that collided, and a syntax
-error (1064) quotes the rest of the statement from where the parser stopped,
-up to 80 characters (`near '...' at line N`), so a value bound after that point
-can appear in it (the driver interpolates bound values client-side; see
-#2732). That is deliberate: reaching this tool at all requires **Allow direct
-query execution**, and a caller who has it can read the same data with a
-`SELECT`. The full text is written to the server log. For ClickHouse, use the
+back whole and a constraint error names the value that collided. For a syntax
+error (`1064`), MySQL's `near '...' at line N` slice is trimmed to keep only
+the first rejected token (when it is not itself a literal) and `at line N`, so
+values bound at or after the parser stop point are not echoed back. The full
+text is written to the server log. For ClickHouse, use the
 `db_clickhouse` node: pointed at ClickHouse's MySQL interface, this node
 returns ClickHouse's error text as is, which can repeat the statement and its
 bound values. `begin` takes no arguments and returns `{session_id}`; `commit`

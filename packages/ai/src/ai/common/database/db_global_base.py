@@ -119,6 +119,56 @@ _DB_ERROR_FALLBACK = 'Database error'
 # merely happens to put two strings in `args` keeps the old behaviour.
 _SQLSTATE = re.compile(r'\A[0-9A-Z]{5}\Z')
 
+# MySQL and MariaDB ER_PARSE_ERROR errno. Keyed on the errno rather than text
+# alone so `SIGNAL`, `Unknown column '...'`, and `Duplicate entry '...'` on
+# other errnos are never touched.
+_MYSQL_ER_PARSE_ERROR = 1064
+
+# MySQL formats ER_PARSE_ERROR (1064) with `near '%-.80s' at line %d`, quoting
+# up to 80 characters of the statement from the token the parser rejected to
+# the end of the query. PyMySQL interpolates bound values client-side, so any
+# value bound at or after the stop point lands inside `<quote>`.
+_MYSQL_NEAR_QUOTE = re.compile(
+    r"( for the right syntax to use) near '(?P<quote>[\s\S]*)'(?P<line> at line \d+)\Z"
+)
+
+# A first token in the 1064 `near '...'` slice that is safe to keep: an
+# unquoted keyword/identifier (not a string/hex/bit introducer like `_binary'`
+# or `x'`), a backtick-quoted identifier, or a single structural punctuation
+# character such as `(` or `,`. String and numeric literals are excluded
+# because the rejected token can itself be a client-interpolated bound value.
+_MYSQL_SAFE_FIRST_TOKEN = re.compile(
+    r"""
+        \A(?:
+            [A-Za-z_][A-Za-z0-9_$]*(?![A-Za-z0-9_$'"])
+          | `[^`\r\n]+`
+          | [^\w\s'"`.+/:@$\\-]
+        )
+    """,
+    re.VERBOSE,
+)
+
+
+def _trim_mysql_parse_error(message: str) -> str:
+    """Trim MySQL/MariaDB ER_PARSE_ERROR (1064) so ``near '...'`` never echoes bound values.
+
+    Keep the primary sentence, the first rejected token when it is not itself a
+    literal, and ``at line N``, dropping the rest of the quoted slice.
+    """
+    match = _MYSQL_NEAR_QUOTE.search(message)
+    if match is None:
+        return message
+    quote = match.group('quote')
+    if quote == '':
+        return message
+    rest = quote.lstrip()
+    token_match = _MYSQL_SAFE_FIRST_TOKEN.match(rest)
+    if token_match is not None:
+        replacement = f"{match.group(1)} near '{token_match.group(0)}'{match.group('line')}"
+    else:
+        replacement = f"{match.group(1)}{match.group('line')}"
+    return f'{message[: match.start()]}{replacement}'
+
 
 def _strip_statement_detail(message: str) -> str:
     """Cut a driver/SQLAlchemy message down to its primary sentence.
@@ -275,14 +325,15 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
           psycopg2's ``LINE n:`` echo, PostgreSQL's DETAIL / HINT / CONTEXT /
           QUERY / STATEMENT *as lines of the message* (the five words are
           left alone in the middle of a sentence, where they belong to the
-          application, not to the server).
+          application, not to the server). For MySQL/MariaDB ``ER_PARSE_ERROR``
+          (1064), ``near '...' at line N`` quotes up to 80 characters of the
+          statement from the stop point onwards, which carries any values
+          PyMySQL interpolated at or after that point; that slice is trimmed to
+          keep only the first rejected token (when it is not itself a literal)
+          and ``at line N``.
         * PASSED THROUGH: the driver's own primary sentence, as the database
-          wrote it. A syntax error can quote part of the statement: sqlite3
-          and psycopg2 name the token they rejected, but MySQL 1064 ``near '...'
-          at line N`` quotes the rest of the statement from where the parser
-          stopped, up to 80 characters, so a value bound after that point can
-          appear in it (pymysql and psycopg2 interpolate bind values
-          client-side). It can also
+          wrote it. A syntax error can quote the rejected token (sqlite3,
+          psycopg2, and MySQL 1064 after the slice trim above). It can also
           quote a value the statement merely TOUCHED rather than carried:
           PostgreSQL's ``invalid input syntax for type integer: "<value>"``
           names the offending row value for an ``INSERT ... SELECT`` or a
@@ -309,7 +360,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             is_seq = isinstance(args, (list, tuple))
 
             if is_seq and len(args) >= 2 and isinstance(args[0], int):
-                return _strip_statement_detail(f'Error {args[0]}: {args[1]}')
+                formatted = _strip_statement_detail(f'Error {args[0]}: {args[1]}')
+                if args[0] == _MYSQL_ER_PARSE_ERROR:
+                    return _trim_mysql_parse_error(formatted)
+                return formatted
 
             # psycopg2: diag.message_primary is the server message with the
             # LINE/DETAIL/HINT context already split off.
@@ -334,7 +388,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             code = getattr(orig, 'code', None)
             message = getattr(orig, 'message', None)
             if isinstance(code, int) and isinstance(message, str) and message.strip():
-                return _strip_statement_detail(f'Error {code}: {message}')
+                formatted = _strip_statement_detail(f'Error {code}: {message}')
+                if code == _MYSQL_ER_PARSE_ERROR:
+                    return _trim_mysql_parse_error(formatted)
+                return formatted
 
             # ODBC-backed drivers report `(sqlstate, message)`. Without this
             # branch the generic one below returned the five-character code
