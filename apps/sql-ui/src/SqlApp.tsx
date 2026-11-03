@@ -50,7 +50,6 @@ import { attachSqlDocumentHost, localSidebarBridge, sendConnectionSave } from '.
 import { SqlEnvProvider, createLocalSqlEnv, createRemoteSqlEnv, useSqlEnv } from './sqlEnv';
 import type { SqlEndpoint } from './connect';
 import ConnectionView from './views/ConnectionView';
-import ConnectionOverlays from './components/ConnectionOverlays';
 import NewConnectionModal from './components/NewConnectionModal';
 import QueryView from './views/QueryView';
 import TableDataView from './views/TableDataView';
@@ -166,10 +165,6 @@ const SqlApp: React.FC<ShellAppProps> = (_props) => {
 		<SqlEnvProvider value={env}>
 			<AppLayout sidebar={sidebar} showStatus>
 				<SqlAppReady docs={getDocs()!} />
-				{/* Sidebar-requested dialogs render HERE, outside the sidebar
-				    subtree — the compact drawer is a transformed ancestor that
-				    would trap a fixed-position overlay. */}
-				<ConnectionOverlays />
 			</AppLayout>
 		</SqlEnvProvider>
 	);
@@ -178,37 +173,6 @@ const SqlApp: React.FC<ShellAppProps> = (_props) => {
 // =============================================================================
 // DEV-TOOL FRAME — one host document per CONNECTION (no inner tab strip)
 // =============================================================================
-
-// Overlay-host claim: sidebar-requested dialogs (add/edit/delete connection)
-// must render in exactly ONE frame per realm. In VS Code each frame is its
-// own document (always one host). In-shell, several connection frames share
-// the realm — the first alive mount holds the claim and it transfers when
-// that mount closes.
-const overlayHosts: Array<() => void> = [];
-
-/** Whether THIS mount currently owns the overlay-host claim. */
-function useOverlayHostClaim(): boolean {
-	const [, force] = useState(0);
-	const tickRef = useRef<(() => void) | null>(null);
-	if (!tickRef.current) tickRef.current = () => force((n) => n + 1);
-	useEffect(() => {
-		const tick = tickRef.current!;
-		overlayHosts.push(tick);
-		overlayHosts.forEach((fn) => fn());
-		return () => {
-			const at = overlayHosts.indexOf(tick);
-			if (at >= 0) overlayHosts.splice(at, 1);
-			overlayHosts.forEach((fn) => fn());
-		};
-	}, []);
-	return overlayHosts[0] === tickRef.current;
-}
-
-/** The sidebar-requested dialogs, rendered by the claim-holding mount only. */
-const OverlayHost: React.FC = () => {
-	const owns = useOverlayHostClaim();
-	return owns ? <ConnectionOverlays /> : null;
-};
 
 /**
  * One connection's workbench as a host document: resolves the saved
@@ -269,8 +233,6 @@ const SqlConnectionDocument: React.FC<{ connId: string }> = ({ connId }) => {
 		<div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}>
 			<LiveRegion />
 			{body}
-			{/* Sidebar-requested dialogs — one host per realm (see the claim). */}
-			<OverlayHost />
 		</div>
 	);
 };
@@ -359,7 +321,6 @@ export const SqlDevTool: React.FC<DevToolProps> = ({ channel, docKey, documents 
 				<div style={styles.welcome}>
 					<EmptyState icon={<DatabaseIcon />} title="SQL Explorer" description="Open a connection from the sidebar, or add one with New Connection." />
 				</div>
-				<OverlayHost />
 			</div>
 		);
 	}

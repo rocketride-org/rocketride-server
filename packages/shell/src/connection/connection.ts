@@ -585,6 +585,10 @@ export class ConnectionManager implements IConnectionManager {
 	/** True once this realm was bridged to the root (setRetainedPort) — its
 	 *  telemetry is a MIRROR of the root's; the root owns the channel. */
 	private bridgedRealm = false;
+	/** Removes this realm's local telemetry.drained handler once it is
+	 *  bridged — a local handler would answer the drain before the forwarder
+	 *  and the root's channel would never be consumed. */
+	private offTelemetryDrained?: () => void;
 	/** Fact ids already emitted to this realm's listeners (the retained
 	 *  mirror re-delivers snapshots; ids keep the fan-out exactly-once). */
 	private seenTelemetryFactIds = new Set<string>();
@@ -2136,6 +2140,10 @@ export class ConnectionManager implements IConnectionManager {
 	 */
 	public setRetainedPort(port: IRetainedPort): void {
 		this.bridgedRealm = true;
+		// The root owns the telemetry channel — this realm must not answer
+		// its own drain locally, or the emit never reaches the root.
+		this.offTelemetryDrained?.();
+		this.offTelemetryDrained = undefined;
 		this.retainedPort = port;
 		for (const [topic, entry] of this.topicSubs) {
 			entry.off();
@@ -2192,7 +2200,7 @@ export class ConnectionManager implements IConnectionManager {
 		});
 		// Root side of a bridged realm's drain: consume the channel so a held
 		// fact is handed over exactly once per tab.
-		this.handle('telemetry.drained', () => {
+		this.offTelemetryDrained = this.handle('telemetry.drained', () => {
 			this.telemetry.drain();
 			this.publishTelemetrySnapshot(null);
 			return {};

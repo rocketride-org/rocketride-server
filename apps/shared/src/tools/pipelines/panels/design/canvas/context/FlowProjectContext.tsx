@@ -314,6 +314,11 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 	const fetchedProvidersRef = useRef<Set<string>>(new Set());
 	const pendingSchemaFetchesRef = useRef<Set<string>>(new Set());
 
+	// Catalog generation — bumped whenever the bulk catalog refreshes so
+	// in-flight fetches started under an older catalog cannot merge stale
+	// definitions into the new one.
+	const catalogGenerationRef = useRef(0);
+
 	// Ride the host callback in a ref so requestNodeSchema stays identity-stable
 	// even when the host passes a fresh function each render.
 	const getNodeSchemaRef = useRef(getNodeSchema);
@@ -322,8 +327,10 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 	// A new bulk catalog invalidates every cached definition (the server's
 	// services may have changed), so drop the cache and let consumers refetch.
 	useEffect(() => {
+		catalogGenerationRef.current += 1;
 		setFullServices({});
 		fetchedProvidersRef.current.clear();
+		pendingSchemaFetchesRef.current.clear();
 	}, [rawServicesJson]);
 
 	/**
@@ -336,8 +343,11 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		if (!provider || !fetchSchema) return;
 		if (fetchedProvidersRef.current.has(provider) || pendingSchemaFetchesRef.current.has(provider)) return;
 		pendingSchemaFetchesRef.current.add(provider);
+		const generation = catalogGenerationRef.current;
 		fetchSchema(provider)
 			.then((definition) => {
+				// A catalog refresh invalidated this fetch — drop the result.
+				if (generation !== catalogGenerationRef.current) return;
 				// An undefined definition is a valid answer — cache the miss.
 				fetchedProvidersRef.current.add(provider);
 				if (definition) {
@@ -348,7 +358,7 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 				// Transient failure (disconnect, timeout): stay retryable.
 			})
 			.finally(() => {
-				pendingSchemaFetchesRef.current.delete(provider);
+				if (generation === catalogGenerationRef.current) pendingSchemaFetchesRef.current.delete(provider);
 			});
 	}, []);
 

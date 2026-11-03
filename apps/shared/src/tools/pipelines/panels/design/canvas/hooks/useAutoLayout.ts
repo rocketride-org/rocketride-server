@@ -142,7 +142,8 @@ export function useAutoLayout(nodes: FlowNode[], edges: Edge[], setNodes: React.
 				rootChildren.push(elkNode);
 			}
 
-			// Build ELK edges (only edges between nodes at the same level)
+			// Build ELK edges — all attached at the root; INCLUDE_CHILDREN below
+			// lets ELK route edges that cross group levels correctly.
 			const elkEdges = edges.map((edge) => ({
 				id: edge.id,
 				sources: [edge.source],
@@ -156,6 +157,7 @@ export function useAutoLayout(nodes: FlowNode[], edges: Edge[], setNodes: React.
 				layoutOptions: {
 					'elk.algorithm': 'layered',
 					'elk.direction': 'RIGHT',
+					'elk.hierarchyHandling': 'INCLUDE_CHILDREN',
 					'elk.spacing.nodeNode': String(NODE_SPACING),
 					'elk.layered.spacing.nodeNodeBetweenLayers': String(LAYER_SPACING),
 					'elk.edgeRouting': 'ORTHOGONAL',

@@ -109,12 +109,14 @@ export const NewAppWizard: React.FC<INewAppWizardProps> = ({ host }) => {
 	const [creating, setCreating] = useState(false);
 	/** Error from a failed create, shown in the form footer. */
 	const [error, setError] = useState<string | null>(null);
+	/** Error from a failed identity pull, shown in place of the loading text. */
+	const [identityError, setIdentityError] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
 		void host.identity().then(
 			(i) => { if (!cancelled) setIdentity(i); },
-			() => { /* host unreachable — the form stays in its loading state */ },
+			(err: unknown) => { if (!cancelled) setIdentityError(err instanceof Error ? err.message : String(err)); },
 		);
 		const off = host.onIdentityChanged?.((i) => setIdentity(i));
 		return () => {
@@ -137,7 +139,13 @@ export const NewAppWizard: React.FC<INewAppWizardProps> = ({ host }) => {
 		[host],
 	);
 
-	if (!identity) return <div style={styles.root}><div style={styles.loading}>Loading&hellip;</div></div>;
+	if (!identity) {
+		return (
+			<div style={styles.root}>
+				<div style={styles.loading}>{identityError ? `Could not load your identity: ${identityError}` : <>Loading&hellip;</>}</div>
+			</div>
+		);
+	}
 
 	return (
 		<div style={styles.root}>

@@ -268,13 +268,16 @@ function normalizeAmountCents(value: unknown): number {
 
 function normalizeBillingPlan(raw: unknown): BillingPlan {
 	const source = isRecord(raw) ? raw : {};
+	// step: metadata never rides the verbatim spread — a non-record value
+	// (string, array) would violate BillingPlan; it re-enters only validated
+	const { metadata, ...rest } = source;
 	return {
-		...source,
+		...rest,
 		nickname: typeof source.nickname === 'string' ? source.nickname : '',
 		amountCents: normalizeAmountCents(source.amountCents),
 		currency: typeof source.currency === 'string' ? source.currency : 'usd',
 		interval: typeof source.interval === 'string' ? source.interval : 'month',
-		...(isRecord(source.metadata) ? { metadata: source.metadata } : {}),
+		...(isRecord(metadata) ? { metadata } : {}),
 	};
 }
 

@@ -220,9 +220,11 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge = localSidebarBridge, ho
 	const openConnection = useCallback((conn: SavedSqlConnection) => {
 		if (!isConnected) { setOpenError('Not connected to a server.'); return; }
 		setOpenError('');
-		setOpeningId(conn.id);
+		// An already-active connection raises no focus change, so nothing
+		// would clear the opening state — skip it and just re-focus.
+		if (endpointKeyForConnection(conn) !== activeKey) setOpeningId(conn.id);
 		bridge.openConnection(conn);
-	}, [bridge, isConnected]);
+	}, [bridge, isConnected, activeKey]);
 
 	// "+ New Connection" as a stock SidebarMenu entry, mirroring the app-builder
 	// sidebar's "+ New app" nav above its MY APPS list. No persistent selection

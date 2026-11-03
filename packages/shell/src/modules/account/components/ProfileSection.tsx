@@ -297,7 +297,11 @@ export const ProfileSection: React.FC<IProfileSectionProps> = (props) => {
 	const defaultOrgId = profile?.defaultOrgId ?? org?.id;
 	const active = useMemo(() => memberships.find((o) => o.id === defaultOrgId) ?? org, [memberships, defaultOrgId, org]);
 	const activeTeams = active?.teams ?? [];
-	const devTeamId = profile?.devTeam || authUser?.devTeam || '';
+	// A stored devTeam can name a team from ANOTHER workspace after a switch;
+	// treating it as unset keeps the placeholder visible so the first team
+	// stays selectable (a foreign id matches no option and fires no onChange).
+	const rawDevTeamId = profile?.devTeam || authUser?.devTeam || '';
+	const devTeamId = activeTeams.some((t) => t.id === rawDevTeamId) ? rawDevTeamId : '';
 
 	return (
 		<section style={styles.stack}>

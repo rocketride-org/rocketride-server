@@ -333,7 +333,11 @@ export class DevSessionManager {
 			this.notify(app.id, { state: 'error', target: 'dev proxy', reason });
 			return;
 		}
-		const proc = spawn(process.execPath, [this.guardPath, String(process.pid), spawnArgs.shell ? '1' : '0', spawnArgs.cmd, ...spawnArgs.args, 'dev', '--config', proxyConfigPath], {
+		// shell:true (the pnpm fallback) joins arguments unquoted — quote any
+		// argument with whitespace so a spaced app path survives the shell.
+		const quoteForShell = (a: string): string => (spawnArgs.shell && /\s/.test(a) ? `"${a}"` : a);
+		const childArgs = [...spawnArgs.args, 'dev', '--config', proxyConfigPath].map(quoteForShell);
+		const proc = spawn(process.execPath, [this.guardPath, String(process.pid), spawnArgs.shell ? '1' : '0', spawnArgs.cmd, ...childArgs], {
 			cwd: app.folder,
 			env: { ...process.env, NO_COLOR: '1' },
 			// Never allocate a console window for the guard or its tree.

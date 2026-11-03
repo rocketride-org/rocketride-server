@@ -392,8 +392,16 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	useEffect(() => {
 		if (!reloadCounter || !client) return;
 		setSectionError(null);
-		if (section === 'profile') loadProfile();
-		else if (section === 'billing') loadBilling();
+		if (section === 'profile') {
+			loadProfile();
+			// The embedded Profile pane renders org, member, and team data
+			// too (see the upfront loader) — keep them fresh as well.
+			if (embeddedSection === 'profile') {
+				loadOrg();
+				loadMembers();
+				loadTeams();
+			}
+		} else if (section === 'billing') loadBilling();
 		else if (section === 'api-keys') {
 			loadProfile();
 			loadKeys();
@@ -451,7 +459,14 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 			// WORKSPACE_SWITCH_LAND_KEY (importing it would cycle:
 			// OverlayManager → SettingsProvider → AccountProvider).
 			try { window.sessionStorage.setItem('rr:workspace-switch-land', '1'); } catch { /* storage unavailable — land on the workbench */ }
-			await client.account.setDefaultOrg(orgId);
+			try {
+				await client.account.setDefaultOrg(orgId);
+			} catch (err) {
+				// A failed switch must not leave the landing flag armed — the
+				// next unrelated mount would open Settings at Profile.
+				try { window.sessionStorage.removeItem('rr:workspace-switch-land'); } catch { /* ignore */ }
+				throw err;
+			}
 		},
 		[client, confirmWorkspaceSwitch]
 	);

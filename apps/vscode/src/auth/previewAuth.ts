@@ -51,10 +51,11 @@ const PREVIEW_AUTH_TIMEOUT_MS = 5 * 60 * 1000;
 /** The neutral page the browser lands on (no window to hand back to —
  *  the preview inside VS Code picks the session up on its own). */
 function callbackPage(ok: boolean, detail?: string): string {
+	const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 	const title = ok ? 'Signed in' : 'Sign-in failed';
 	const body = ok
 		? 'Return to VS Code — the preview continues automatically. You can close this tab.'
-		: `${detail ?? 'The sign-in did not complete.'} Return to VS Code and try again.`;
+		: `${esc(detail ?? 'The sign-in did not complete.')} Return to VS Code and try again.`;
 	return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;font-family:-apple-system,'Segoe UI',sans-serif;background:#f0efe9;color:#0a0a0a}div{max-width:420px;padding:40px;text-align:center}h1{font-size:22px;margin:0 0 8px}p{font-size:14px;line-height:1.5;color:rgba(10,10,10,0.62)}</style></head><body><div><h1>${title}</h1><p>${body}</p></div>${ok ? '<script>window.close();</script>' : ''}</body></html>`;
 }
 

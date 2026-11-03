@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SHARED_ROOT = path.resolve(__dirname, '..');
-const OUT_FILE = path.join(SHARED_ROOT, 'src', 'modules', 'monaco', 'reactTypes.generated.ts');
+const OUT_FILE = path.join(SHARED_ROOT, 'src', 'components', 'monaco', 'reactTypes.generated.ts');
 
 /** The embedded declaration files: [virtual extraLib path, package-relative source]. */
 const LIBS = [
@@ -51,10 +51,15 @@ function readPackaged(rel) {
 
 // step: collect versions for the provenance header
 const versionOf = (name) => JSON.parse(readPackaged(`${name}/package.json`)).version;
-const versions = `@types/react ${versionOf('@types/react')}, @types/react-dom ${versionOf('@types/react-dom')}, csstype ${versionOf('csstype')}`;
+const versions = ['@types/react', '@types/react-dom', 'csstype']
+	.map((name) => `${name} ${versionOf(name)}`)
+	.join(', ');
 
 // step: emit the module — one entry per lib, contents JSON-escaped
-const entries = LIBS.map(([virtualPath, rel]) => `\t{\n\t\tpath: ${JSON.stringify(virtualPath)},\n\t\tcontent: ${JSON.stringify(readPackaged(rel))},\n\t},`).join('\n');
+const entries = LIBS
+	.map(([virtualPath, rel]) =>
+		`\t{\n\t\tpath: ${JSON.stringify(virtualPath)},\n\t\tcontent: ${JSON.stringify(readPackaged(rel))},\n\t},`)
+	.join('\n');
 
 const output = `// =============================================================================
 // MIT License

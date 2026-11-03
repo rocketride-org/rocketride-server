@@ -435,6 +435,9 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 	/** Pointer-over-the-pane gate for the header action buttons (VS Code's
 	    view-title behavior: actions appear on hover, not permanently). */
 	const [paneHovered, setPaneHovered] = useState(false);
+	/** Keyboard counterpart of paneHovered — the hidden header actions stay
+	    tabbable, so focus inside the pane must surface them too. */
+	const [paneFocused, setPaneFocused] = useState(false);
 	const [selectedPath, setSelectedPath] = useState<string>(activeFilePath ?? '');
 	const [menuPath, setMenuPath] = useState<string | null>(null);
 	const [submenuId, setSubmenuId] = useState<string | null>(null);
@@ -1013,14 +1016,20 @@ export const Explorer: React.FC<IExplorerProps> = ({ config, entries, statuses =
 	// --- Render ---------------------------------------------------------------
 
 	return (
-		<div style={S.container} onMouseEnter={() => setPaneHovered(true)} onMouseLeave={() => setPaneHovered(false)}>
+		<div
+			style={S.container}
+			onMouseEnter={() => setPaneHovered(true)}
+			onMouseLeave={() => setPaneHovered(false)}
+			onFocus={() => setPaneFocused(true)}
+			onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setPaneFocused(false); }}
+		>
 			{/* ── Header ──────────────────────────────────────────────── */}
 			<div style={S.sectionHeader}>
 				<span style={S.sectionLabel}>{config.title}</span>
 				{/* Hover-gated, like VS Code's view-title actions; an open
 				    inline-create keeps them up so the affordance that started
 				    the flow never vanishes mid-interaction. */}
-				<div style={S.headerActions(paneHovered || createState !== null)}>
+				<div style={S.headerActions(paneHovered || paneFocused || createState !== null)}>
 					{hasFileManage && (
 						<>
 							<button title={`New ${config.title.replace(/s$/, '')}`} aria-label={`New ${config.title.replace(/s$/, '')}`} style={{ ...S.headerAction, ...actionHoverBg('newFile') }} onClick={() => startCreate('file')} onMouseEnter={() => setHoveredAction('newFile')} onMouseLeave={() => setHoveredAction(null)}>

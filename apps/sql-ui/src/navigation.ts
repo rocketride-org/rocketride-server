@@ -29,7 +29,6 @@
 // =============================================================================
 
 import { useSyncExternalStore } from 'react';
-import type { SavedSqlConnection } from './connect';
 
 // =============================================================================
 // ACTIVE CONNECTION (which workbench document currently has focus)
@@ -123,47 +122,5 @@ export function useTableRecordRequest(): TableRecordRequest | null {
 	return useSyncExternalStore(
 		(cb) => { tableListeners.add(cb); return () => tableListeners.delete(cb); },
 		() => tableRequest,
-	);
-}
-
-// =============================================================================
-// CONNECTION OVERLAYS (sidebar request -> app-root modal/confirm)
-// =============================================================================
-//
-// The shell Modal/ConfirmDialog render fixed-position markup IN PLACE (no
-// portal), and the compact drawer is a transformed ancestor — an overlay
-// rendered inside the sidebar subtree gets trapped in the drawer. So the
-// sidebar only REQUESTS overlays here, and SqlApp hosts them at the app
-// root, outside any transformed container.
-
-/** One requested connection overlay. */
-export type ConnectionOverlayRequest =
-	/** The add/edit modal (editing null = add). */
-	| { kind: 'modal'; editing: SavedSqlConnection | null }
-	/** The delete confirm for one connection. */
-	| { kind: 'delete'; conn: SavedSqlConnection };
-
-let overlayRequest: ConnectionOverlayRequest | null = null;
-const overlayListeners = new Set<() => void>();
-
-/**
- * Request a connection overlay (replaces any current one).
- *
- * @param req - The overlay to show, or null to dismiss.
- */
-export function requestConnectionOverlay(req: ConnectionOverlayRequest | null): void {
-	overlayRequest = req;
-	overlayListeners.forEach((fn) => fn());
-}
-
-/**
- * React hook that subscribes to the requested connection overlay.
- *
- * @returns The current request, or null when none is open.
- */
-export function useConnectionOverlay(): ConnectionOverlayRequest | null {
-	return useSyncExternalStore(
-		(cb) => { overlayListeners.add(cb); return () => overlayListeners.delete(cb); },
-		() => overlayRequest,
 	);
 }

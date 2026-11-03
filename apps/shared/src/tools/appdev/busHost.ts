@@ -71,6 +71,7 @@ export interface IAppBuilderBus {
  *  {@link IAppBuilderBus.getClient}'s `unknown`. */
 interface IAppBuilderClient {
 	addMonitor(key: { token: string }, types: string[]): Promise<void>;
+	removeMonitor(key: { token: string }, types: string[]): Promise<void>;
 	listDeployments(appId: string): Promise<unknown>;
 	publishApp(appId: string, version: number, target: string): Promise<unknown>;
 	removeAppPublish(appId: string, target: string): Promise<unknown>;
@@ -122,15 +123,38 @@ export function createBusAppBuilderHost(o: IBusAppBuilderHostOptions): Partial<I
 			// DEPLOY-typed events only reach connections that monitored them —
 			// arm the wildcard monitor; the realm client forwards it to the
 			// broker (refcounted across realms at multi-realm roots).
-			Promise.resolve().then(() => client().addMonitor({ token: '*' }, ['deploy'])).catch(() => {
-				/* not connected yet — the reconnect path re-arms monitors */
-			});
-			return bus.on('shell:event', ({ event }) => {
+			let armed = false;
+			let disposed = false;
+			Promise.resolve()
+				.then(() => client().addMonitor({ token: '*' }, ['deploy']))
+				.then(() => {
+					armed = true;
+					// Unsubscribed before the add landed — release it right away.
+					if (disposed) return client().removeMonitor({ token: '*' }, ['deploy']);
+					return undefined;
+				})
+				.catch(() => {
+					/* not connected yet — the reconnect path re-arms monitors */
+				});
+			const off = bus.on('shell:event', ({ event }) => {
 				if (event?.event !== 'apaevt_build_status') return;
 				const body = event.body;
 				if (!body || body.appId !== appId) return;
 				listener({ version: body.version, status: body.status ?? '' });
 			});
+			return () => {
+				off();
+				if (disposed) return;
+				disposed = true;
+				if (!armed) return;
+				try {
+					client().removeMonitor({ token: '*' }, ['deploy']).catch(() => {
+						/* connection gone — the broker drops its monitors with it */
+					});
+				} catch {
+					/* connection gone — the broker drops its monitors with it */
+				}
+			};
 		},
 		subscribeDeployChanged: (listener: () => void) => {
 			return bus.on('shell:event', ({ event }) => {

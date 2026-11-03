@@ -183,7 +183,7 @@ export async function probePackage(options: ProbeOptions): Promise<CompatVerdict
 				builtinsHit.add(bare);
 			} else if (specifier.startsWith('/')) {
 				queue.push(`${baseUrl}${specifier}`);
-			} else if (specifier.startsWith('http')) {
+			} else if (/^https?:\/\//.test(specifier) && specifier.startsWith(`${baseUrl}/`)) {
 				queue.push(specifier);
 			}
 			// bare react/react-dom externals resolve from the share scope.

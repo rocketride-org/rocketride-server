@@ -174,7 +174,9 @@ export function createRetainedRegistry(): IRetainedRegistry {
 			}
 			return () => {
 				set!.delete(cb);
-				if (set!.size === 0) subscribers.delete(topic);
+				// Identity check: a second invocation after a NEWER set was
+				// stored for the topic must not delete that set.
+				if (set!.size === 0 && subscribers.get(topic) === set) subscribers.delete(topic);
 			};
 		},
 

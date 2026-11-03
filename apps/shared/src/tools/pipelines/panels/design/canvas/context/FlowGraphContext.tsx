@@ -810,15 +810,12 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 	const updateNode = useCallback(
 		(nodeId: string, data: Partial<INodeData>): FlowNode | undefined => {
 			if (isLocked) return undefined;
-			let updatedNode: FlowNode | undefined;
+			// Compute the result outside the updater — React may defer the
+			// functional updater, so assigning inside it is not reliable here.
+			const current = nodesRef.current.find((n: FlowNode) => n.id === nodeId);
+			const updatedNode: FlowNode | undefined = current ? { ...current, data: { ...current.data, ...data } } : undefined;
 
-			setNodes((nds: FlowNode[]) =>
-				nds.map((n: FlowNode) => {
-					if (n.id !== nodeId) return n;
-					updatedNode = { ...n, data: { ...n.data, ...data } };
-					return updatedNode;
-				})
-			);
+			setNodes((nds: FlowNode[]) => nds.map((n: FlowNode) => (n.id === nodeId ? { ...n, data: { ...n.data, ...data } } : n)));
 
 			return updatedNode;
 		},

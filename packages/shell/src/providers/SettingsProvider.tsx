@@ -898,8 +898,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ registry, overrides,
 
 					{/* A selected RICH section owns the whole pane (its own footer
 					    included); the schema footer below still appears when the
-					    DRAFT is dirty, so pending schema edits are never stranded. */}
-					{activeRich && activeRich.render(richCtx)}
+					    DRAFT is dirty, so pending schema edits are never stranded.
+					    Keyed by section id: several rich sections render the same
+					    provider component at this position, and without a key
+					    React would reuse one instance across navigation, keeping
+					    the previous section's state and effects. */}
+					{activeRich && <React.Fragment key={activeRich.id}>{activeRich.render(richCtx)}</React.Fragment>}
 
 					{/* Rich sections matching a search render as section cards. */}
 					{richMatches.map((rich) => (

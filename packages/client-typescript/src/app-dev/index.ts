@@ -367,6 +367,12 @@ export class DevSession {
 		const proc = this.proc;
 		this.proc = null;
 		if (proc) await stopDevServer(proc);
+		// step: the session-unique wrapper is this session's to remove — a
+		// concurrent session for the same folder owns a different file
+		if (this.wrapperPath) {
+			try { fs.rmSync(this.wrapperPath, { force: true }); } catch { /* best-effort */ }
+			this.wrapperPath = '';
+		}
 		this.readiness?.reject(new Error('dev session stopped'));
 		this.readiness = null;
 		// Nothing to unregister: the preview's registration lives in its tab

@@ -50,11 +50,25 @@
  */
 
 import * as path from 'path';
-import { access, mkdir, readFile, writeFile } from 'fs/promises';
+import { randomBytes } from 'crypto';
+import { access, mkdir, readdir, readFile, rm, writeFile } from 'fs/promises';
 import { CONST_DEFAULT_WEB_CLOUD } from '../client/constants';
 
-/** The wrapper's file name inside the app's .rocketride directory. */
-const WRAPPER_NAME = 'dev-proxy.rsbuild.config.mts';
+/** The wrapper's file-name shape inside the app's .rocketride directory —
+ *  session-unique (owner pid + random token), so concurrent dev servers for
+ *  the same app folder never overwrite each other's wrapper (a crash respawn
+ *  re-reads the file by path). */
+const WRAPPER_PATTERN = /^dev-proxy\.(\d+)-[0-9a-f]+\.rsbuild\.config\.mts$/;
+
+/** Whether a process with this pid is still running. */
+function isAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 /** The cloud web app's origin — where cloud browser sign-ins are registered
  *  (the CLI's webAppUrlFor makes the same mapping for its callback pages). */
@@ -236,7 +250,18 @@ export default mergeRsbuildConfig(appConfig, {
 export async function writeProxyConfig(appFolder: string, appId: string, engineOrigin: string, opts: WrapperOptions = {}): Promise<string> {
 	const dir = path.join(appFolder, '.rocketride');
 	await mkdir(dir, { recursive: true });
-	const wrapperPath = path.join(dir, WRAPPER_NAME);
+	// step: sweep wrappers this process left behind (a new start supersedes
+	// them) and wrappers whose owning process is dead — a LIVE other process
+	// keeps its own wrapper, so concurrent sessions never clobber each other
+	try {
+		for (const name of await readdir(dir)) {
+			const owner = WRAPPER_PATTERN.exec(name);
+			if (!owner) continue;
+			const pid = Number(owner[1]);
+			if (pid === process.pid || !isAlive(pid)) await rm(path.join(dir, name), { force: true });
+		}
+	} catch { /* best-effort sweep */ }
+	const wrapperPath = path.join(dir, `dev-proxy.${process.pid}-${randomBytes(4).toString('hex')}.rsbuild.config.mts`);
 	// step: resolve the config file the app ACTUALLY has, in rsbuild's OWN
 	// selection order (DEFAULT_CONFIG_FILE_NAMES in @rsbuild/core) — the
 	// wrapper must merge the same file a plain `rsbuild dev` would load, and

@@ -105,7 +105,12 @@ export const AgentTool: React.FC<DevToolProps> = ({ documents }) => {
 				// The shell's own dialog — realm UI, present in every host.
 			const confirmed = await showConfirmDialog('Delete session', `Are you sure you want to delete "${title}"?`, 'Delete');
 				if (!confirmed) return;
-				await AgentSession.deleteSession(sessionId);
+				try {
+					await AgentSession.deleteSession(sessionId);
+				} catch (err) {
+					console.log('[AgentTool] session delete failed', err);
+					return;
+				}
 				// Force-close the conversation tab regardless of state.
 				documents?.close(sessionId);
 			})();

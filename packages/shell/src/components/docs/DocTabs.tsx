@@ -32,7 +32,7 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
-import { EDITOR_DND_MIME, beginEditorDrag, endEditorDrag } from './Documents';
+import { EDITOR_DND_MIME, beginEditorDrag, endEditorDrag, getEditorDrag } from './Documents';
 import type { DocumentsLike, SplitOrientation } from './Documents';
 
 // =============================================================================
@@ -404,13 +404,16 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 		// double-handles the same drop as an edge split
 		if (e.dataTransfer.types.includes(DND_MIME)) e.stopPropagation();
 		setIsDragOver(false);
-		try {
-			const data = JSON.parse(e.dataTransfer.getData(DND_MIME));
-			if (data.editorId && data.sourceGroupId !== groupId) {
-				docs.moveEditor(data.editorId, groupId);
-				docs.setActiveGroup(groupId);
-			}
-		} catch { /* ignore malformed data */ }
+		// The per-instance drag session is the only proof the drag belongs to
+		// THIS Documents model — editor ids ('editor-N') collide across
+		// instances, so a transfer-payload id from another app's layout could
+		// name an unrelated editor here. No session for this docs = not ours.
+		const session = getEditorDrag(docs);
+		if (!session) return;
+		if (session.sourceGroupId !== groupId) {
+			docs.moveEditor(session.editorId, groupId);
+			docs.setActiveGroup(groupId);
+		}
 	}, [docs, groupId]);
 
 	// --- Toolbar buttons (right edge) ----------------------------------------

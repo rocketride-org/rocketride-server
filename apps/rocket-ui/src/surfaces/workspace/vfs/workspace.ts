@@ -487,7 +487,11 @@ export function createWorkspace(options: { hostAppId: string; autoCommit: boolea
 			if (old) await stashForScopeSwitch(old);
 		}
 		// step: the scope roots EVERY path translation — set only after the
-		// outgoing workspace is parked, before the first read fires.
+		// outgoing workspace is parked, before the first read fires. The
+		// parked view must not stay reachable once the scope flips (its
+		// reads would translate through the NEW prefix), so getWorkspace()
+		// fails loudly until this build finishes.
+		workspace = null;
 		activeScope = scope;
 		const base = new CachedVfs(createWorkspaceBackend(), { skipDirs: SKIP_DIRS });
 		// step: staged until rehydration settles — write-through cannot be

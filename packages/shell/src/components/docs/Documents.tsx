@@ -985,7 +985,7 @@ export class Documents {
 			const editor = prev.editors[editorId];
 			if (!editor) return prev;
 
-			let newGroups = { ...prev.groups };
+			const newGroups = { ...prev.groups };
 			let emptyGroupId: string | null = null;
 
 			// Remove editor from its group
@@ -1224,6 +1224,19 @@ export class Documents {
 		if (!path) return false;
 		if (!this._vfs) return false;
 		await this._vfs.write(path, doc.content);
+		// Re-key the document (and its editors) to the chosen path and mark
+		// it clean — otherwise the tab stays dirty/untitled after a Ctrl+S
+		// save-as and every later save prompts for a path again.
+		this._update((prev) => {
+			const d = prev.documents[uri];
+			if (!d) return prev;
+			const { [uri]: _removed, ...rest } = prev.documents;
+			const editors = { ...prev.editors };
+			for (const [id, ed] of Object.entries(editors)) {
+				if (ed?.documentUri === uri) editors[id] = { ...ed, documentUri: path, label: labelFromUri(path) };
+			}
+			return { ...prev, editors, documents: { ...rest, [path]: { ...d, uri: path, dirty: false, isNew: false } } };
+		});
 		return true;
 	}
 
@@ -1541,7 +1554,7 @@ export class Documents {
 				}
 			}
 
-			let state: DocumentsState = { ...prev, documents: newDocs, editors: newEditors };
+			const state: DocumentsState = { ...prev, documents: newDocs, editors: newEditors };
 
 			// Collapse the tree using the shared helper
 			const collapsed = collapseEmptyGroup(state, groupId);

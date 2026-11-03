@@ -855,7 +855,9 @@ class FileStore:
                 MAX_CHUNK_SIZE, or the write fails.
         """
         try:
-            payload = json.dumps(value, indent=2).encode('utf-8')
+            # allow_nan=False: NaN/Infinity would serialize to text the
+            # browser's JSON.parse rejects, making the file unreadable.
+            payload = json.dumps(value, indent=2, allow_nan=False).encode('utf-8')
         except (TypeError, ValueError) as exc:
             raise StorageError(f'Value is not JSON-serialisable for {path}: {exc}') from exc
 
@@ -864,7 +866,18 @@ class FileStore:
         if len(payload) > MAX_CHUNK_SIZE:
             raise StorageError(f'JSON payload for {path} exceeds {MAX_CHUNK_SIZE} bytes; use the streaming handle API')
 
-        await self.write(path, payload)
+        # Go through the raw store operation, not self.write(): the handle
+        # API registers a committable handle that disconnect cleanup would
+        # commit mid-write — the exact window this method exists to close.
+        # The shared write lock is held for the whole backend write.
+        full_path = self._full_path(path)
+        if full_path in self._write_locks:
+            raise StorageError(f'File already open for writing: {path}')
+        self._write_locks.add(full_path)
+        try:
+            await self._store.write_bytes(full_path, payload)
+        finally:
+            self._write_locks.discard(full_path)
         return len(payload)
 
     async def get_json(self, path: str) -> Any:

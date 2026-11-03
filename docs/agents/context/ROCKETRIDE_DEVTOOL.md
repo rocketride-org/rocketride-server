@@ -218,7 +218,7 @@ right now": lists, selections, status, counts.
 ### 2. Correlated operations — a REQUEST
 
 ```tsx
-// Declare the vocabulary ONCE, private to your tool (ops.ts):
+// Declare the vocabulary ONCE, private to your tool (src/ops/types.ts):
 interface MyOps extends ToolOpMap {
 	'mytool.refresh': ToolOpSpec<void, void>;
 	'mytool.saveConn': ToolOpSpec<{ name: string; dsn: string }, { id: string }>;
@@ -262,10 +262,13 @@ missed it, and will wait forever for an edge that already happened.
 Three registries, three owners. Put a registration in the wrong one and it
 either collides or never resolves.
 
-**Tool ops (`mytool.*`) — yours.** Declared in your tool's own `ops.ts`,
-served by your controller via `createToolOpServer`, called by your frames via
-`createToolOpClient`. Namespace them with your tool's id. Nearly all of your
-registrations belong here.
+**Tool ops (`mytool.*`) — yours.** Declared in your tool's own `src/ops/`
+directory (`types.ts` holds the maps, `server.ts` the implementations,
+`client.ts` the typed calls, re-exported by an `index.ts` barrel — sql-ui and
+monitor-ui are the reference shape), served by your controller via
+`createToolOpServer`, called by your frames via `createToolOpClient`.
+Namespace them with your tool's id. Nearly all of your registrations belong
+here.
 
 **Client ops (`client.*`) — the shell's, and closed.** There is exactly one
 transport op, `client.request`, plus the genuinely stateful few (the monitor
@@ -365,27 +368,35 @@ all:
 ```tsx
 export const MyDevToolSidebar: React.FC<DevToolProps> = ({ channel }) => {
 	const ch = useMemo(() => typedToolChannel<MyStateMap>(channel), [channel]);
-	const { client } = useShellConnection();
+	const { client, isConnected } = useShellConnection();
 
 	// Visibility is NOT in the props and NOT in usePolling — track it.
 	const [visible, setVisible] = useState(true);
 	useShellEvent('shell:toolSidebarActivated',   ({ appId }) => { if (appId === MY_ID) setVisible(true); });
 	useShellEvent('shell:toolSidebarDeactivated', ({ appId }) => { if (appId === MY_ID) setVisible(false); });
 
+	// Gate on isConnected as well: `client` stays non-null across a
+	// disconnect (null means "not known yet", not "disconnected"). And a
+	// tick is fired with `void` — swallow its rejection here, or a dropped
+	// connection turns every interval into an unhandled rejection.
 	const tick = useCallback(async () => {
-		if (!client) return;
-		ch.publishState('dashboard', await client.getDashboard());
-	}, [client, ch]);
+		if (!client || !isConnected) return;
+		try {
+			ch.publishState('dashboard', await client.getDashboard());
+		} catch (err) {
+			console.error('dashboard refresh failed', err);
+		}
+	}, [client, isConnected, ch]);
 
 	// The interval exists only while the panel is displayed. The retained
 	// snapshot survives the pause, so reactivating renders instantly and
 	// then refreshes — no spinner, and no stale-forever panel.
 	useEffect(() => {
-		if (!visible || !client) return;
+		if (!visible || !client || !isConnected) return;
 		void tick();                                   // refresh on reveal
 		const id = setInterval(() => void tick(), 3000);
 		return () => clearInterval(id);
-	}, [visible, client, tick]);
+	}, [visible, client, isConnected, tick]);
 
 	return <MyPanel snapshot={useToolState(ch, 'dashboard')} />;
 };

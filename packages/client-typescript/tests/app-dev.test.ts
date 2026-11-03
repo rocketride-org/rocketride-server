@@ -119,7 +119,10 @@ describe('primitives', () => {
 		const wrapperPath = await writeProxyConfig(folder, 'acme.clock', 'http://localhost:5565');
 		const wrapper = fs.readFileSync(wrapperPath, 'utf8');
 
-		expect(wrapperPath).toBe(path.join(folder, '.rocketride', 'dev-proxy.rsbuild.config.mts'));
+		// session-unique name: owner pid + token, so concurrent sessions for
+		// the same folder never overwrite each other's wrapper
+		expect(path.dirname(wrapperPath)).toBe(path.join(folder, '.rocketride'));
+		expect(path.basename(wrapperPath)).toMatch(/^dev-proxy\.\d+-[0-9a-f]+\.rsbuild\.config\.mts$/);
 		expect(wrapper).toContain('"/apps/acme.clock/dev"');
 		expect(wrapper).toContain('"http://localhost:5565"');
 		// the catch-all proxy must carve out the locally served prefixes
@@ -162,13 +165,19 @@ describe('DevSession', () => {
 
 		const origin = await session.start();
 		await new Promise((resolve) => setTimeout(resolve, 200));
+
+		// the per-session wrapper is the preview's front door
+		const rocketrideDir = path.join(app.folder, '.rocketride');
+		const wrapperNames = fs.readdirSync(rocketrideDir).filter((name) => name.startsWith('dev-proxy.'));
+		expect(wrapperNames).toHaveLength(1);
+		const wrapper = fs.readFileSync(path.join(rocketrideDir, wrapperNames[0]), 'utf8');
 		await session.stop();
 
 		expect(origin).toBe('http://localhost:3999');
-		// the per-session wrapper is the preview's front door
-		const wrapper = fs.readFileSync(path.join(app.folder, '.rocketride', 'dev-proxy.rsbuild.config.mts'), 'utf8');
 		expect(wrapper).toContain('"http://localhost:5565"');
 		expect(wrapper).toContain('"/apps/acme.clock/dev"');
+		// stop() removes the session's own wrapper
+		expect(fs.existsSync(path.join(rocketrideDir, wrapperNames[0]))).toBe(false);
 		expect(states).toContain('ok');
 		expect(states[states.length - 1]).toBe('stopped');
 	});

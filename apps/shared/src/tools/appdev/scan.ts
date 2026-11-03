@@ -142,7 +142,7 @@ async function probeFolder(fs: WorkspaceFs, folder: string): Promise<IScannedWor
 			folder,
 			...(pkg.version !== undefined ? { version: pkg.version } : {}),
 			...(manifest.description !== undefined ? { description: manifest.description } : {}),
-			...(manifest.icon !== undefined ? { iconPath: joinPath(folder, manifest.icon) } : {}),
+			...(typeof manifest.icon === 'string' ? { iconPath: joinPath(folder, manifest.icon) } : {}),
 		};
 	} catch {
 		// Missing/unreadable/invalid package.json — not an app project.

@@ -68,11 +68,15 @@ export function useStripeKey(enabled = true): StripeKeyState {
 		let settled = false;
 		let attempt = 0;
 		let retryTimer: ReturnType<typeof setTimeout> | undefined;
+		// Bumped on every connection change — a reply from a request sent to
+		// the PREVIOUS server must never settle the hook with that server's key.
+		let generation = 0;
 
 		const request = (): void => {
+			const gen = generation;
 			void cm.request('host.stripeKey', {} as never).then(
-				(r) => apply(r as { key: string | null; reason?: StripeKeyUnavailableReason }),
-				() => apply({ key: null, reason: 'probe-failed' })
+				(r) => { if (gen === generation) apply(r as { key: string | null; reason?: StripeKeyUnavailableReason }); },
+				() => { if (gen === generation) apply({ key: null, reason: 'probe-failed' }); }
 			);
 		};
 
@@ -109,6 +113,7 @@ export function useStripeKey(enabled = true): StripeKeyState {
 		// pre-connect mount and a server switch.
 		const offStatus = cm.on('shell:statusChange', () => {
 			if (disposed) return;
+			generation += 1;
 			settled = false;
 			attempt = 0;
 			if (retryTimer) clearTimeout(retryTimer);

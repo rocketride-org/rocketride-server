@@ -65,8 +65,11 @@ export interface FooterMenuFacts {
 	subscribed: boolean;
 }
 
+/** Connection states that render the in-progress dot. */
+const TRANSITIONAL_STATES = new Set(['connecting', 'downloading-engine', 'starting-engine', 'stopping-engine']);
+
 /** A status dot state from a connection state string. */
-const dotState = (state: string) => (state === 'connected' ? 'connected' : state === 'connecting' ? 'connecting' : 'disconnected') as 'connected' | 'connecting' | 'disconnected';
+const dotState = (state: string): 'connected' | 'connecting' | 'disconnected' => (state === 'connected' ? 'connected' : TRANSITIONAL_STATES.has(state) ? 'connecting' : 'disconnected');
 
 /**
  * Builds the footer popup's items.
@@ -77,7 +80,6 @@ const dotState = (state: string) => (state === 'connected' ? 'connected' : state
  */
 export function buildFooterMenuItems(facts: FooterMenuFacts, runCommand: (command: string, args?: unknown[]) => void): SidebarFooterMenuItem[] {
 	const items: SidebarFooterMenuItem[] = [];
-	const anyConnected = facts.connectionState === 'connected' || facts.deployConnectionState === 'connected';
 
 	// ── Development section ─────────────────────────────────────────────────
 	const devStatus = connectionStatusText(facts.connectionState, facts.developmentMode, facts.devProgressMessage);

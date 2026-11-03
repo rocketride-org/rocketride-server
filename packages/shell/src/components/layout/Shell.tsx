@@ -252,6 +252,10 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const [rescoping, setRescoping] = useState(false);
 	const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
 	const rescopeRunningRef = useRef(false);
+	// An orgChanged that arrives while a rescope is in flight — the running
+	// pass may already have reconnected under an older default, so one more
+	// pass runs when it finishes instead of dropping the notification.
+	const rescopePendingRef = useRef<string | null>(null);
 
 	// ── Connection state ──────────────────────────────────────────────────
 	const { isConnected, statusMessage } = useShellConnection();
@@ -579,8 +583,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// picker sets — a flag deliberately chosen so the reload FALLBACK lands
 	// there too).
 	useEffect(() => {
-		return cm.on('shell:orgChanged', ({ orgId }: { orgId: string }) => {
-			if (rescopeRunningRef.current) return;
+		const runRescope = (orgId: string): void => {
 			rescopeRunningRef.current = true;
 			void (async () => {
 				try {
@@ -611,8 +614,22 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					window.location.reload();
 				} finally {
 					rescopeRunningRef.current = false;
+					// A switch arrived mid-rescope: reconnect once more so the
+					// tab ends scoped to the LATEST default org.
+					const pending = rescopePendingRef.current;
+					if (pending !== null) {
+						rescopePendingRef.current = null;
+						runRescope(pending);
+					}
 				}
 			})();
+		};
+		return cm.on('shell:orgChanged', ({ orgId }: { orgId: string }) => {
+			if (rescopeRunningRef.current) {
+				rescopePendingRef.current = orgId;
+				return;
+			}
+			runRescope(orgId);
 		});
 	}, [cm]);
 

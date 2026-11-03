@@ -53,7 +53,7 @@ export async function createDevPreviewPage(appId: string): Promise<DevPreviewPag
 	// of <head> satisfies both with one insertion.
 	const inject =
 		`<base href="${window.location.origin}/">` +
-		`<script>window.__rrDevBoot=${JSON.stringify({ appId })};</script>`;
+		`<script>window.__rrDevBoot=${JSON.stringify({ appId }).replace(/</g, '\\u003c')};</script>`;
 	const headAt = html.indexOf('<head>');
 	const authored = headAt >= 0
 		? `${html.slice(0, headAt + '<head>'.length)}${inject}${html.slice(headAt + '<head>'.length)}`

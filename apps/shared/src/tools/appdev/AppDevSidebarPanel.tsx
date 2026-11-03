@@ -85,10 +85,18 @@ export const AppDevSidebarPanel: React.FC<IAppDevSidebarPanelProps> = ({ appBuil
 					return (
 						<div
 							key={app.id}
+							role="button"
+							tabIndex={0}
 							style={{ ...panelStyles.row, ...(active ? { background: PANEL_HOVER_BG } : hoverBg(rowKey)) }}
 							onMouseEnter={() => setHoveredRow(rowKey)}
 							onMouseLeave={() => setHoveredRow(null)}
 							onClick={() => appBuilder.onOpenApp(app.id)}
+							onKeyDown={(e) => {
+								if (e.key === 'Enter' || e.key === ' ') {
+									e.preventDefault();
+									appBuilder.onOpenApp(app.id);
+								}
+							}}
 							title={app.folder ? `${app.id}\n${app.folder}` : app.id}
 						>
 							{/* Mirror the Explorer file-row anatomy — 14px chevron slot

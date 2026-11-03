@@ -287,6 +287,10 @@ export const TasksPanel: React.FC<ITasksPanelProps> = ({ tasks, listTasks, onRef
 	// Imperative grid handle: the host's poll re-requests the current page.
 	const gridRef = useRef<IDataGridHandle>(null);
 
+	// Request sequence: page requests and the poll refetch can overlap, and
+	// only the latest response may win the pageRows capture.
+	const fetchSeqRef = useRef(0);
+
 	/**
 	 * Fetch one page of tasks for the grid (REMOTE mode). Browsing, header
 	 * sorting, filtering, and the title-bar search all ride the host's
@@ -300,6 +304,7 @@ export const TasksPanel: React.FC<ITasksPanelProps> = ({ tasks, listTasks, onRef
 		async (req: IDataGridPageRequest): Promise<IDataGridPage<TaskRow>> => {
 			// Step 1: LOCAL grids never call this; the guard keeps TS honest.
 			if (!listTasks) return { rows: [], total: 0 };
+			const seq = ++fetchSeqRef.current;
 			// Step 2: one server-paginated call. The server whitelists sort and
 			// filter keys against the WIRE row keys, so display fields translate
 			// to their wire names first (display-only fields never ride along);
@@ -315,7 +320,7 @@ export const TasksPanel: React.FC<ITasksPanelProps> = ({ tasks, listTasks, onRef
 			// Step 3: capture the wire rows for the record panel lookup, then
 			// flatten them (dashboard snapshot keys) for display.
 			const wireRows = resp?.rows ?? [];
-			setPageRows(wireRows);
+			if (seq === fetchSeqRef.current) setPageRows(wireRows);
 			return { rows: wireRows.map(taskRow), total: resp?.total ?? 0 };
 		},
 		[listTasks]

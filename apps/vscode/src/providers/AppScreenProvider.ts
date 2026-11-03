@@ -120,6 +120,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		}
 		const panel = vscode.window.createWebviewPanel('rocketride.appBuilder.untitled', 'Untitled', vscode.ViewColumn.Active, {
 			enableScripts: true,
+			retainContextWhenHidden: true,
 			localResourceRoots: [this.context.extensionUri],
 		});
 		// No `app` stamp — the page-app bundle renders its unbound body (the
@@ -232,9 +233,10 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 			});
 
 		panel.onDidDispose(() => {
+			// The realm attachment belongs to THIS panel — always detach it.
+			detachRealm();
 			// A newer panel may own this app id now — never clear its state.
 			if (this.panels.get(appId) !== panel) return;
-			detachRealm();
 			this.panels.delete(appId);
 			this.lastWatch.delete(appId);
 			// Retract the app's retained topics — retention outlives the

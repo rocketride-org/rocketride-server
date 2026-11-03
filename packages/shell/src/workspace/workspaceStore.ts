@@ -747,10 +747,13 @@ export class WorkspaceStore {
 		for (const cb of [...this.prefsListeners]) cb(partition);
 	}
 
-	/** Flushes pending writes and clears timers. */
+	/**
+	 * Flushes pending writes and clears timers. Flushing matters: the React
+	 * host's cleanup also runs on a StrictMode effect replay, and cancelling
+	 * the debounce timers without writing would silently drop any queued
+	 * partition writes.
+	 */
 	public dispose(): void {
-		for (const timer of this.appSaveTimers.values()) clearTimeout(timer);
-		this.appSaveTimers.clear();
-		clearTimeout(this.globalSaveTimer);
+		this.flushNow();
 	}
 }

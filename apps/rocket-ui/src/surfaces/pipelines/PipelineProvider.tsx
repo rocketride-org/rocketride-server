@@ -168,7 +168,10 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	 */
 	const performSave = useCallback(
 		async (saveFilename: string, project: PipelineConfig, opts?: { rethrow?: boolean }) => {
-			if (!client || !isConnected) return;
+			if (!client || !isConnected) {
+				if (opts?.rethrow) throw new Error('Not connected');
+				return;
+			}
 			try {
 				await projectVfs.write(saveFilename, project);
 				// Mark clean in Documents model
@@ -277,6 +280,8 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			} catch (err) {
 				console.error('[PipelineProvider] Save-as failed:', err);
 				setPipelineError(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+				// Drop the run intent — a later unrelated save-as must not run it.
+				deferredRunRef.current = null;
 				return;
 			}
 
@@ -412,7 +417,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			{/* Preselect the document's own folder/name (an untitled doc has no
 			    folder, so it opens at the workspace's default pipeline directory
 			    with its "Untitled-N" placeholder). */}
-			{saveDialogOpen && <SaveFileDialog title="Save Pipeline As" vfs={projectVfs} fileTypes={[{ label: 'RocketRide Pipeline', extension: '.pipe' }]} defaultDir={filename.includes('/') ? filename.slice(0, filename.lastIndexOf('/')) : settingDefaultDir} initialName={projectDisplayName(filename)} onConfirm={handleSaveDialogConfirm} onCancel={() => setSaveDialogOpen(false)} />}
+			{saveDialogOpen && <SaveFileDialog title="Save Pipeline As" vfs={projectVfs} fileTypes={[{ label: 'RocketRide Pipeline', extension: '.pipe' }]} defaultDir={filename.includes('/') ? filename.slice(0, filename.lastIndexOf('/')) : settingDefaultDir} initialName={projectDisplayName(filename)} onConfirm={handleSaveDialogConfirm} onCancel={() => { deferredRunRef.current = null; setSaveDialogOpen(false); }} />}
 			{pendingRun && <ConfirmDialog title="Unsaved Changes" message="The pipeline has unsaved changes. Save before running?" confirmLabel="Save & Run" cancelLabel="Cancel" onConfirm={handleSaveAndRun} onCancel={() => setPendingRun(null)} />}
 			{pipelineError && <ConfirmDialog title="Pipeline Error" message={pipelineError} confirmLabel="OK" onConfirm={() => setPipelineError(null)} onCancel={() => setPipelineError(null)} />}
 		</div>

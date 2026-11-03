@@ -91,9 +91,10 @@ export function attachWorkspaceSettings(store: WorkspaceStore, configManager: Co
 		};
 		configManager.setWorkspaceSettings(values);
 		const integrationsChanged = pushIntegrations(settings);
-		// The attach-time push seeds the snapshot without firing — connect-time
-		// installs are the shell:connected autoInstall pass's job.
-		if (notify && integrationsChanged) onIntegrationsChanged?.();
+		// The attach-time push AND the integration partition's first load seed
+		// the snapshot without firing — connect-time installs are the
+		// shell:connected autoInstall pass's job (integrationsSeeded below).
+		if (notify && integrationsChanged && integrationsSeeded) onIntegrationsChanged?.();
 	};
 
 	// The partitions whose deltas this bridge reads must be LOADED for the
@@ -102,9 +103,20 @@ export function attachWorkspaceSettings(store: WorkspaceStore, configManager: Co
 	// ConfigManager) must not depend on a webview having opened. The store's
 	// load() replaces the partition map on every (re)connect, so ensure on
 	// every change signal, not just once — idempotent when already in memory.
+	let integrationsSeeded = false;
 	const ensureOwners = (): void => {
-		void store.ensurePartition(appPartition(TOOL_SETTINGS_OWNER));
-		void store.ensurePartition(appPartition(INTEGRATIONS_APP_ID));
+		store.ensurePartition(appPartition(TOOL_SETTINGS_OWNER)).catch((err: unknown) => {
+			getLogger().error(`[workspaceSettingsBridge] ensurePartition(${TOOL_SETTINGS_OWNER}) failed: ${String(err)}`);
+		});
+		store.ensurePartition(appPartition(INTEGRATIONS_APP_ID)).then(() => {
+			if (integrationsSeeded) return;
+			// The partition's first load materializes the STORED toggles —
+			// a seed, not a change: absorb it into the snapshot silently.
+			integrationsSeeded = true;
+			pushIntegrations(store.getSnapshot().settings ?? {});
+		}, (err: unknown) => {
+			getLogger().error(`[workspaceSettingsBridge] ensurePartition(${INTEGRATIONS_APP_ID}) failed: ${String(err)}`);
+		});
 	};
 
 	ensureOwners();

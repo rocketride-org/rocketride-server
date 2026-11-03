@@ -395,8 +395,8 @@ const AppBuilderProvider: React.FC<{
 
 	// ── Render ───────────────────────────────────────────────────────────
 	if (!isConnected) return <div style={styles.root}><div style={styles.loading}>Connect to a server to open the App Builder.</div></div>;
-	if (stored === undefined || !host || !app || !liveUrl) return <div style={styles.root}><div style={styles.loading}>Loading app&hellip;</div></div>;
 	if (stored === null) return <div style={styles.root}><div style={styles.loading}>No working copy for &quot;{appId}&quot; in your store.</div></div>;
+	if (stored === undefined || !host || !app || !liveUrl) return <div style={styles.root}><div style={styles.loading}>Loading app&hellip;</div></div>;
 
 	return (
 		<div style={styles.root}>

@@ -53,6 +53,9 @@ export function scopedFileSystem(root: IWorkspaceFileSystem, prefix: string): IW
 	/** Subtree-relative -> root path. */
 	const toRoot = (path: string): string => {
 		const p = String(path ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+		if (p.split('/').some((s) => s === '.' || s === '..')) {
+			throw new Error(`Path traversal is not allowed: '${String(path)}'`);
+		}
 		return p ? `${scope}/${p}` : scope;
 	};
 

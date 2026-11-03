@@ -568,7 +568,14 @@ const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfi
 		if (!dragRef.current) return;
 		const next = dragRef.current.startWidth + (e.clientX - dragRef.current.startX);
 		if (next < SNAP_THRESHOLD) {
-			if (open) closePanel();
+			if (open) {
+				// Closing unmounts the sash mid-drag, so no pointerup will
+				// arrive — release the drag state here or a stale dragRef
+				// resizes the panel on a later hover.
+				dragRef.current = null;
+				setIsResizing(false);
+				closePanel();
+			}
 			return;
 		}
 		if (!open) setOpen(true);
@@ -785,31 +792,35 @@ const SidebarWorkbench: React.FC<SidebarWorkbenchProps> = ({ variant, themeConfi
 								style={styles.railButton(open && hiddenViews.some((v) => v.id === activeView?.id), hoveredRailId === 'rr-rail-more')}
 							>
 								<BxDotsHorizontal size={RAIL_ICON} />
-								{moreOpen && moreBtnRef.current && createPortal(
-									(() => {
-										const rect = moreBtnRef.current.getBoundingClientRect();
-										return (
-											<div role="menu" style={{ ...styles.railMoreMenu, left: rect.right + 6, top: Math.min(rect.top, window.innerHeight - 320) }}>
-												{hiddenViews.map((v) => (
-													<button
-														key={v.id}
-														role="menuitem"
-														style={styles.railMenuItem(menuHoverId === v.id, open && activeView?.id === v.id)}
-														onMouseEnter={() => setMenuHoverId(v.id)}
-														onMouseLeave={() => setMenuHoverId(null)}
-														onMouseDown={(e) => { e.preventDefault(); activate(v.id); setMoreOpen(false); }}
-													>
-														<span style={{ display: 'flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{v.icon}</span>
-														<span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.title}</span>
-														{v.badge != null && v.badge !== 0 && <span style={{ ...styles.railBadge, position: 'static' }}>{v.badge}</span>}
-													</button>
-												))}
-											</div>
-										);
-									})(),
-									document.body,
-								)}
 							</button>
+						)}
+						{/* Portalled as a SIBLING of the more button: as its child,
+						    menuitem clicks would bubble (through the React tree) into
+						    the button's own onClick toggle, and interactive controls
+						    would nest. */}
+						{hiddenViews.length > 0 && moreOpen && moreBtnRef.current && createPortal(
+							(() => {
+								const rect = moreBtnRef.current.getBoundingClientRect();
+								return (
+									<div role="menu" style={{ ...styles.railMoreMenu, left: rect.right + 6, top: Math.min(rect.top, window.innerHeight - 320) }}>
+										{hiddenViews.map((v) => (
+											<button
+												key={v.id}
+												role="menuitem"
+												style={styles.railMenuItem(menuHoverId === v.id, open && activeView?.id === v.id)}
+												onMouseEnter={() => setMenuHoverId(v.id)}
+												onMouseLeave={() => setMenuHoverId(null)}
+												onMouseDown={(e) => { e.preventDefault(); activate(v.id); setMoreOpen(false); }}
+											>
+												<span style={{ display: 'flex', width: 16, height: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{v.icon}</span>
+												<span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.title}</span>
+												{v.badge != null && v.badge !== 0 && <span style={{ ...styles.railBadge, position: 'static' }}>{v.badge}</span>}
+											</button>
+										))}
+									</div>
+								);
+							})(),
+							document.body,
 						)}
 					</div>
 					{/* The platform footer rides the rail so the account menu stays

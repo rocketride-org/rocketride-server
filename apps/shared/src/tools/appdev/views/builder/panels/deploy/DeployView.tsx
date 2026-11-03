@@ -828,7 +828,18 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					</div>
 					<div style={styles.rail}>
 						{host.deploy && !readOnly && (
-							<div style={styles.publishCard} onClick={onDeployBuild}>
+							<div
+								style={styles.publishCard}
+								role="button"
+								tabIndex={0}
+								onClick={onDeployBuild}
+								onKeyDown={(e) => {
+									if (e.key === 'Enter' || e.key === ' ') {
+										e.preventDefault();
+										onDeployBuild();
+									}
+								}}
+							>
 								<span style={styles.publishPlus}>+</span>
 								<span style={styles.publishTitle}>Deploy</span>
 								{/* While the zip is in flight the tile itself is the card —

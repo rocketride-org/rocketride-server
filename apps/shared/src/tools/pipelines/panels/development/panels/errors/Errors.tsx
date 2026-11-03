@@ -135,11 +135,15 @@ interface ParsedErrWarn {
 export const Errors: React.FC<ErrorsProps> = ({ title, items, type }) => {
 	/** Parse a structured error string into its components. */
 	const parseItem = (item: string): ParsedErrWarn => {
-		const parts = item.split('*');
+		// Match the structured format type*`message`*file:line against the
+		// backtick delimiters, so a '*' inside the message does not split it;
+		// fall back to the plain split for messages without backticks.
+		const structured = /^([^*]*)\*\s*`([\s\S]*)`\s*\*([^*]*)$/.exec(item);
+		const parts = structured ? [structured[1], structured[2], structured[3]] : item.split('*');
 
 		if (parts.length >= 3) {
 			const errorType = parts[0].trim();
-			const message = parts[1].replace(/^`|`$/g, '').trim();
+			const message = structured ? parts[1].trim() : parts[1].replace(/^`|`$/g, '').trim();
 			const fileInfo = parts[2].trim();
 
 			const colonIndex = fileInfo.lastIndexOf(':');

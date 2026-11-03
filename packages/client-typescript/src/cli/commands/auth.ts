@@ -609,7 +609,12 @@ pair unless --no-deploy.`,
 						out.line('Running pnpm install...');
 						execSync('pnpm install', { cwd: workspaceRoot, stdio: 'ignore' });
 					} catch {
+						// step: the workspace still runs the PREVIOUS vendored
+						// client — that is not an initialized workspace; only
+						// --no-install defers the link intentionally
 						out.line('pnpm install failed — run it manually to link the vendored client.');
+						out.result({ uri, workspaceRoot, initialized: false, installFailed: true });
+						return 1;
 					}
 				}
 

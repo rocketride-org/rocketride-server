@@ -267,9 +267,13 @@ export default tseslint.config(
 					// contents except the one exported stylesheet.
 					// EXCEPTIONS: the dependency-free leaves the EXTENSION HOST
 					// types against (it cannot resolve the React barrel) —
-					// toolRelay (the relay policy + host:connection payload)
-					// and toolWorkspaceFs (the fs capability interface).
-					{ group: ['shell/*', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css', '!shell/src', 'shell/src/*', '!shell/src/components', 'shell/src/components/*', '!shell/src/components/workspace', 'shell/src/components/workspace/*', '!shell/src/components/workspace/toolRelay', '!shell/src/components/workspace/toolWorkspaceFs', '!shell/src/ops', 'shell/src/ops/*', '!shell/src/ops/busOps', '!shell/src/ops/busBridge', '!shell/src/ops/clientOps', '!shell/src/ops/retained'], message: "The shell surface is barrel-only: import the name from 'shell' (the theme stylesheet is the one exported subpath; SDK values/types come from 'rocketride'; the ext-host-safe leaves toolRelay/toolWorkspaceFs are the sanctioned deep imports)." },
+					// toolRelay (the relay policy + host:connection payload),
+					// toolWorkspaceFs (the fs capability interface), the
+					// prefs/settings leaves (prefsStore, settingsRegistry,
+					// types), the workspace leaves (workspaceStore,
+					// devToolPins, workspaceFs), the ops leaves and the
+					// binary wire codec.
+					{ group: ['shell/*', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css', '!shell/src', 'shell/src/*', '!shell/src/components', 'shell/src/components/*', '!shell/src/components/workspace', 'shell/src/components/workspace/*', '!shell/src/components/workspace/toolRelay', '!shell/src/components/workspace/toolWorkspaceFs', '!shell/src/components/workspace/prefsStore', '!shell/src/components/workspace/settingsRegistry', '!shell/src/components/workspace/types', '!shell/src/ops', 'shell/src/ops/*', '!shell/src/ops/busOps', '!shell/src/ops/busBridge', '!shell/src/ops/clientOps', '!shell/src/ops/retained', '!shell/src/workspace', 'shell/src/workspace/*', '!shell/src/workspace/workspaceStore', '!shell/src/workspace/devToolPins', '!shell/src/workspace/workspaceFs', '!shell/src/connection', 'shell/src/connection/*', '!shell/src/connection/binaryWire'], message: "The shell surface is barrel-only: import the name from 'shell' (the theme stylesheet is the one exported subpath; SDK values/types come from 'rocketride'; the listed ext-host-safe leaves are the sanctioned deep imports)." },
 				],
 			}],
 		},

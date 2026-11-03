@@ -197,9 +197,14 @@ const FileProvider: React.FC<FileProviderProps> = ({ path }) => {
 		if (!dirtyRef.current || saving) return;
 		setSaving(true);
 		try {
-			await getWorkspaceVfs().write(path, bufferRef.current, 'editor');
-			dirtyRef.current = false;
-			setDirty(false);
+			const saved = bufferRef.current;
+			await getWorkspaceVfs().write(path, saved, 'editor');
+			// Typing during the await keeps the buffer dirty — only the
+			// snapshot that went to the server is clean.
+			if (bufferRef.current === saved) {
+				dirtyRef.current = false;
+				setDirty(false);
+			}
 			setStale(false);
 			setError(null);
 		} catch (err) {

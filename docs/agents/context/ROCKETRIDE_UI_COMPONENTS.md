@@ -220,9 +220,10 @@ import { Explorer, NOOP_VFS } from 'shell';
 
 Standard vertical menu list on the shared `ViewMenu` entry shape — counts,
 severity badges, one-level accordion sections. Mount any number. (Its
-iconified form now appears only in the compact/mobile drawer — in the
-desktop frame the panel closes instead of iconifying. To promote a menu's
-sections to rail icons, pass `viewsFromMenu(menu)` as `sidebarViews`.)
+iconified form renders in the classic collapsed desktop sidebar — the
+compact/mobile drawer is never collapsed, and in the rail frame the panel
+closes instead of iconifying. To promote a menu's sections to rail icons,
+pass `viewsFromMenu(menu)` as `sidebarViews`.)
 
 | Prop | Type | Dir | Note |
 | --- | --- | --- | --- |

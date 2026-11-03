@@ -281,11 +281,13 @@ const SidebarProvider: React.FC = () => {
 							const docs = getDocs();
 							if (docs) {
 								const st = docs.getState();
-								const editorIds = Object.entries(st.editors)
-									.filter(([, ed]) => ed.documentUri === path)
-									.map(([id]) => id);
-								for (const eid of editorIds) docs.closeEditor(eid);
-								if (editorIds.length > 0) await docs.openDocument(newPath);
+								// A folder rename moves every open descendant too —
+								// match at path-segment boundaries only.
+								const affected = Object.entries(st.editors)
+									.filter(([, ed]) => ed.documentUri === path || ed.documentUri.startsWith(`${path}/`));
+								const reopen = new Set(affected.map(([, ed]) => newPath + ed.documentUri.slice(path.length)));
+								for (const [eid] of affected) docs.closeEditor(eid);
+								for (const uri of reopen) await docs.openDocument(uri);
 							}
 						}
 						break;
@@ -302,7 +304,14 @@ const SidebarProvider: React.FC = () => {
 
 						// Force-remove the document and all editors regardless of dirty state
 						// so stale content doesn't linger if a new file reuses the same name
-						getDocs()?.discardDocument(path);
+						// (a folder delete discards every open descendant too).
+						const docs = getDocs();
+						if (docs) {
+							docs.discardDocument(path);
+							for (const uri of Object.keys(docs.getState().documents)) {
+								if (uri.startsWith(`${path}/`)) docs.discardDocument(uri);
+							}
+						}
 						break;
 					}
 					case 'createFolder':
