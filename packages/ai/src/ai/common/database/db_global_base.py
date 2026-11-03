@@ -153,11 +153,14 @@ def _trim_mysql_parse_error(message: str) -> str:
     """Trim MySQL/MariaDB ER_PARSE_ERROR (1064) so ``near '...'`` never echoes bound values.
 
     Keep the primary sentence, the first rejected token when it is not itself a
-    literal, and ``at line N``, dropping the rest of the quoted slice.
+    literal, and ``at line N``, dropping the rest of the quoted slice. When the
+    English ``for the right syntax to use near '...' at line N`` pattern does
+    not match (for example under a non-English server ``lc_messages`` locale),
+    return a fixed neutral syntax-error message so bound values cannot leak.
     """
     match = _MYSQL_NEAR_QUOTE.search(message)
     if match is None:
-        return message
+        return 'You have an error in your SQL syntax (Error 1064).'
     quote = match.group('quote')
     if quote == '':
         return message

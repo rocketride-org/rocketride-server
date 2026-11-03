@@ -403,7 +403,16 @@ def _mysql_duplicate_entry():
 
 
 def _mysql_syntax_error_with_interpolated_bind():
-    """A pymysql-shaped 1064 syntax error whose near-'...' quote contains a client-interpolated bind."""
+    """A pymysql-shaped 1064 syntax error whose near-'...' quote contains a client-interpolated bind.
+
+    Live capture provenance (MySQL 8.4.11 via PyMySQL 1.2.3 / SQLAlchemy 2.0.55, 2026-10-20):
+    Capture procedure:
+      docker run --rm -d --name mysql84 -e MYSQL_ROOT_PASSWORD=test -e MYSQL_DATABASE=t -p 3306:3306 mysql:8.4.11
+      python -c "import pymysql; c = pymysql.connect(host='127.0.0.1', user='root', password='test', database='t').cursor(); c.execute('INSERT INTO users (email) VALUES %s)', ('ada@example.com',))"
+    SQL: ``INSERT INTO users (email) VALUES %s)``, bound values: ``('ada@example.com',)``.
+    ``Cursor.mogrify()`` emits ``INSERT INTO users (email) VALUES 'ada@example.com')``,
+    and the driver raises ``OperationalError(1064, "You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'VALUES 'ada@example.com')' at line 1")``.
+    """
     orig = _FakeDriverError(
         1064,
         "You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version "
