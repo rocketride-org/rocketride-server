@@ -200,6 +200,21 @@ because they need RocketRide cloud. Access is approved for the whole run, not
 each node: every node in a run can reach every database the run was approved
 for.
 
+### Connection resilience
+
+The node's connection pool checks a pooled connection before handing it out and
+replaces one the server has closed, so the first statement after a pooler restart
+or a failover does not fail on a dead connection. Opening a connection is bounded:
+each attempt gives up after `connect_timeout` seconds (default 5), and an attempt
+that fails because the server is unreachable or not ready (connection refused,
+timed out, the pooler at its client limit, the database starting up) is retried
+with exponential backoff and jitter, at most `connect_retries` attempts in total
+(default 3) within `connect_retry_budget` seconds (default 10). Only the opening
+of a connection is retried. A statement that was already sent is never sent
+again, and a bad password or a missing database is reported at once. When the
+database stays unreachable the step fails with the error described under Lanes.
+These three optional keys are read from the node config.
+
 ## Limitations
 
 This node is marked noremote and depends on a signed-in RocketRide identity to

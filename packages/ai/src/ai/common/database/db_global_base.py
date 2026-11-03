@@ -228,6 +228,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     allow_execute: bool = False
     max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
 
+    # Seconds one connection attempt may take; `beginGlobal` replaces it from the
+    # node config key `connect_timeout`.
+    connect_timeout: float = 5.0
+
     # SQLAlchemy pool sizing for the runtime engine opened in `beginGlobal`.
     POOL_SIZE: int = 10
     MAX_OVERFLOW: int = 20
@@ -789,6 +793,19 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # Lifecycle
     # ------------------------------------------------------------------
 
+    def _connect_args(self, db_url: str) -> dict:
+        """Driver ``connect_args`` for the runtime engine: the per-attempt connect timeout.
+
+        Applied to the backends whose driver takes ``connect_timeout`` (PostgreSQL,
+        MySQL/MariaDB); a subclass for any other driver overrides this. The
+        timeout comes from the node config key ``connect_timeout`` (seconds,
+        default 5), read in ``beginGlobal``.
+        """
+        from ai.common.database.connect_retry import connect_timeout_args
+        from sqlalchemy.engine import make_url
+
+        return connect_timeout_args(make_url(db_url).get_backend_name(), self.connect_timeout)
+
     def beginGlobal(self) -> None:
         # One reflection lock per node. Created before anything can reflect, so
         # `refresh_schema` and `_insertData` always find a real lock here.
@@ -834,7 +851,29 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
         # POOL_SIZE + MAX_OVERFLOW cap the node's concurrent connections
         # (30 by default; a subclass may override both).
-        self.engine = create_engine(db_url, pool_size=self.POOL_SIZE, max_overflow=self.MAX_OVERFLOW)
+        #
+        # `pool_pre_ping` tests a pooled connection on checkout and replaces a
+        # dead one. Without it the first statement after a pooler restart or a
+        # failover fails on a connection the server closed long ago. The
+        # connect timeout bounds one attempt: with none, a black-holed host
+        # holds the statement for the OS TCP timeout (minutes).
+        from ai.common.database.connect_retry import (
+            install_connect_retry,
+            policy_from_config,
+            timeout_from_config,
+        )
+
+        self.connect_timeout = timeout_from_config(raw)
+        self.engine = create_engine(
+            db_url,
+            pool_size=self.POOL_SIZE,
+            max_overflow=self.MAX_OVERFLOW,
+            pool_pre_ping=True,
+            connect_args=self._connect_args(db_url),
+        )
+        # Retry only the opening of a connection, never a statement: nothing has
+        # been sent when an attempt is repeated, so no write can be duplicated.
+        install_connect_retry(self.engine, policy_from_config(raw))
 
         from ai.common.database.tx_registry import TransactionRegistry
 

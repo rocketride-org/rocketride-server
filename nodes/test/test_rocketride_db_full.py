@@ -553,6 +553,9 @@ class TestRocketrideSqlE2E:
         """The connection died after it was obtained: SQLAlchemy marks it invalid, no message matching needed."""
         glb, _ = self._begin(monkeypatch, {'table': sql_table})
         try:
+            # Pre-ping would replace the dead pooled connection before EXPLAIN ran (the
+            # next test); switch it off to exercise the failure arriving mid-statement.
+            glb.engine.pool._pre_ping = False
             with glb.engine.connect() as conn:
                 pid = conn.exec_driver_sql('SELECT pg_backend_pid()').scalar()
             with raw_conn.cursor() as cur:
@@ -561,6 +564,21 @@ class TestRocketrideSqlE2E:
 
             with pytest.raises(self._unavailable_error()):
                 glb._validateQuery(f'SELECT name FROM {sql_table}')
+        finally:
+            glb.endGlobal()
+
+    def test_explain_over_a_connection_the_server_closed_is_replaced_by_pre_ping(
+        self, rr_env, monkeypatch, sql_table, raw_conn
+    ):
+        glb, _ = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            with glb.engine.connect() as conn:
+                pid = conn.exec_driver_sql('SELECT pg_backend_pid()').scalar()
+            with raw_conn.cursor() as cur:
+                cur.execute('SELECT pg_terminate_backend(%s)', (pid,))
+            raw_conn.commit()
+
+            assert glb._validateQuery(f'SELECT name FROM {sql_table}') == (True, '')
         finally:
             glb.endGlobal()
 
@@ -580,6 +598,126 @@ class TestRocketrideSqlE2E:
                 glb._getTableSchema(sql_table)
         finally:
             glb.endGlobal()
+
+    # -- pool resilience (rocketride-ai/rocketride-saas#789) --------------------
+
+    def test_a_pooled_connection_the_server_closed_is_replaced_not_surfaced(
+        self, rr_env, monkeypatch, sql_table, raw_conn
+    ):
+        """Pre-ping: the first statement after a pooler restart must not fail on a dead pooled connection."""
+        glb, inst = self._begin(monkeypatch, {'table': sql_table, 'allow_execute': True})
+        try:
+            with glb.engine.connect() as conn:
+                pid = conn.exec_driver_sql('SELECT pg_backend_pid()').scalar()
+            # The server drops the idle pooled connection, as a pooler restart or a failover does.
+            with raw_conn.cursor() as cur:
+                cur.execute('SELECT pg_terminate_backend(%s)', (pid,))
+                assert cur.fetchone()[0] is True
+            raw_conn.commit()
+
+            result = inst.execute({'sql': 'SELECT 1 AS one'})
+
+            assert result['rows'] == [{'one': 1}]
+        finally:
+            glb.endGlobal()
+
+    def test_the_connect_timeout_reaches_the_driver(self, rr_env, monkeypatch, sql_table):
+        glb, _ = self._begin(monkeypatch, {'table': sql_table, 'connect_timeout': 3})
+        try:
+            with glb.engine.connect() as conn:
+                assert conn.connection.dbapi_connection.get_dsn_parameters()['connect_timeout'] == '3'
+        finally:
+            glb.endGlobal()
+
+    @staticmethod
+    def _dsn_on_port(port):
+        parsed = urllib.parse.urlparse(TEST_DSN)
+        credentials = parsed.netloc.rpartition('@')[0]
+        prefix = f'{credentials}@' if credentials else ''
+        return parsed._replace(netloc=f'{prefix}127.0.0.1:{port}').geturl()
+
+    @staticmethod
+    def _free_port():
+        import socket
+
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', 0))
+            return probe.getsockname()[1]
+
+    def test_a_refused_connection_is_retried_a_bounded_number_of_times(self, rr_env, monkeypatch, sql_table):
+        import time
+
+        port = self._free_port()
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': self._dsn_on_port(port)}))
+        attempts = []
+        real_connect = psycopg2.connect
+        monkeypatch.setattr(psycopg2, 'connect', lambda *a, **kw: (attempts.append(1), real_connect(*a, **kw))[1])
+
+        started = time.monotonic()
+        with pytest.raises(Exception, match='refused'):
+            self._begin(monkeypatch, {'table': sql_table, 'connect_retries': 3, 'connect_retry_budget': 10})
+        elapsed = time.monotonic() - started
+
+        assert len(attempts) == 3  # the first try and two retries, then it gives up
+        assert elapsed < 10
+
+    def test_a_connection_refused_for_a_moment_is_retried_to_success(self, rr_env, monkeypatch, sql_table):
+        """A pooler that is back within the retry budget costs the pipeline nothing."""
+        import socket
+        import threading
+        import time
+
+        port = self._free_port()
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': self._dsn_on_port(port)}))
+        real = urllib.parse.urlparse(TEST_DSN)
+        upstream = (real.hostname, real.port or 5432)
+        stop = threading.Event()
+
+        def pipe(src, dst):
+            try:
+                while chunk := src.recv(65536):
+                    dst.sendall(chunk)
+            except OSError:
+                pass
+            finally:
+                for sock in (src, dst):
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+
+        def proxy_after_delay():
+            time.sleep(0.8)  # the pooler is "down" until now
+            server = socket.socket()
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(('127.0.0.1', port))
+            server.listen()
+            server.settimeout(0.2)
+            while not stop.is_set():
+                try:
+                    client, _ = server.accept()
+                except (socket.timeout, OSError):
+                    continue
+                backend = socket.create_connection(upstream)
+                threading.Thread(target=pipe, args=(client, backend), daemon=True).start()
+                threading.Thread(target=pipe, args=(backend, client), daemon=True).start()
+            server.close()
+
+        thread = threading.Thread(target=proxy_after_delay, daemon=True)
+        thread.start()
+        glb = None
+        try:
+            # Eight attempts and a 20 s budget: the jittered waits cannot all fall inside the 0.8 s outage.
+            glb, inst = self._begin(
+                monkeypatch,
+                {'table': sql_table, 'allow_execute': True, 'connect_retries': 8, 'connect_retry_budget': 20},
+            )
+            assert inst.execute({'sql': 'SELECT 1 AS one'})['rows'] == [{'one': 1}]
+        finally:
+            if glb is not None:
+                glb.endGlobal()
+            stop.set()
+            thread.join(timeout=3)
 
     def test_config_connection_fields_ignored(self, rr_env, monkeypatch, sql_table):
         """The defining property: config cannot redirect the connection."""
