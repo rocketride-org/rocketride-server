@@ -1,12 +1,13 @@
-"""Unit tests for the per-device admission guard (fake memory probe, no torch needed)."""
+"""Unit tests for the per-device admission guard (fake memory probe and NVML, no torch needed)."""
 
+import sys
 import threading
 import time
 
 import pytest
 
 import ai.common.models.device_budget as budgetmod
-from ai.common.models.device_budget import MARGIN_MB, DeviceBudget, device_budget
+from ai.common.models.device_budget import MARGIN_MB, DeviceBudget, _has_neighbour, device_budget
 
 _ENTERS = 5.0  # how long a call that may enter is given to enter
 _STAYS_OUT = 0.3  # how long a call that must wait is watched
@@ -20,6 +21,16 @@ class _Probe:
 
     def __call__(self):
         return self.free, self.cache_free, self.allocated
+
+
+class _Neighbours:
+    """Whether NVML lists another engine process on the GPU."""
+
+    def __init__(self, present=False):
+        self.present = present
+
+    def __call__(self):
+        return self.present
 
 
 class _Call:
@@ -59,10 +70,11 @@ def _inside(calls, expected):
 @pytest.fixture(autouse=True)
 def _fast_recheck(monkeypatch):
     monkeypatch.setattr(budgetmod, 'RECHECK_S', 0.02)
+    monkeypatch.setattr(budgetmod, 'NEIGHBOURS_TTL_S', 0.0)
 
 
-def _gpu(probe):
-    return DeviceBudget('cuda:0', probe)
+def _gpu(probe, neighbours=None):
+    return DeviceBudget('cuda:0', probe, neighbours or _Neighbours())
 
 
 def test_first_call_enters_whatever_it_costs():
@@ -179,6 +191,103 @@ def test_a_failed_call_leaves_the_guard():
     second = _Call(budget, 5000)
     assert second.enters()
     second.leave()
+
+
+def test_a_neighbour_means_one_call_at_a_time():
+    budget = _gpu(_Probe(free=1e6), _Neighbours(present=True))
+    first = _Call(budget, 100)
+    assert first.enters()
+    second = _Call(budget, 100)
+    assert second.stays_out()
+    first.leave()
+    assert second.enters()
+    second.leave()
+
+
+def test_calls_inside_finish_when_a_neighbour_appears():
+    neighbours = _Neighbours()
+    budget = _gpu(_Probe(free=1e6), neighbours)
+    first, second = _Call(budget, 100), _Call(budget, 100)
+    assert first.enters() and second.enters()
+
+    neighbours.present = True
+    third = _Call(budget, 100)
+    assert third.stays_out()
+    first.leave()
+    assert third.stays_out()  # one call is still inside
+    second.leave()
+    assert third.enters()
+    third.leave()
+
+
+def test_a_lone_call_waits_for_memory_while_the_neighbour_drains():
+    probe = _Probe(free=1000)
+    budget = _gpu(probe, _Neighbours(present=True))
+    lone = _Call(budget, 2000)
+    assert lone.stays_out()
+
+    probe.free = 2000 + MARGIN_MB  # the calls the neighbour admitted alone have finished
+    assert lone.enters()
+    lone.leave()
+
+
+def test_a_lone_call_enters_after_the_wait_as_with_the_lock(monkeypatch):
+    monkeypatch.setattr(budgetmod, 'SHARED_WAIT_S', 0.2)
+    budget = _gpu(_Probe(free=100), _Neighbours(present=True))
+    lone = _Call(budget, 5000)
+    assert lone.enters()
+    lone.leave()
+
+
+def test_a_lone_call_of_unknown_cost_enters_beside_a_neighbour():
+    budget = _gpu(_Probe(free=100), _Neighbours(present=True))
+    lone = _Call(budget, None)
+    assert lone.enters()
+    lone.leave()
+
+
+def test_the_budget_returns_when_the_neighbour_leaves():
+    neighbours = _Neighbours(present=True)
+    budget = _gpu(_Probe(free=1e6), neighbours)
+    first = _Call(budget, 100)
+    assert first.enters()
+    second = _Call(budget, 100)
+    assert second.stays_out()
+
+    neighbours.present = False
+    assert second.enters()
+    first.leave()
+    second.leave()
+
+
+_NAMES = {10: 'engine.exe', 11: 'Engine.exe', 20: 'dwm.exe', 21: 'chrome.exe'}
+
+
+def _name_of(pid):
+    return _NAMES.get(pid, '?')
+
+
+def test_desktop_processes_are_not_neighbours():
+    assert not _has_neighbour({10, 20, 21}, 10, 'engine.exe', _name_of)
+
+
+def test_another_engine_process_is_a_neighbour():
+    assert _has_neighbour({10, 11, 20}, 10, 'engine.exe', _name_of)
+
+
+def test_a_process_that_cannot_be_named_is_a_neighbour():
+    assert _has_neighbour({10, 30, 20}, 10, 'engine.exe', _name_of)
+
+
+def test_in_another_pid_namespace_one_unnamed_process_is_this_one():
+    # NVML lists host pids: this process is 5 inside its namespace and 30 on the host
+    assert not _has_neighbour({30, 20}, 5, 'engine', _name_of)
+    assert _has_neighbour({30, 31, 20}, 5, 'engine', _name_of)
+
+
+def test_no_nvml_means_a_neighbour(monkeypatch):
+    monkeypatch.setitem(sys.modules, 'pynvml', None)
+    assert budgetmod._nvml_neighbours('cuda:0')() is True
 
 
 def test_one_guard_per_device(monkeypatch):
