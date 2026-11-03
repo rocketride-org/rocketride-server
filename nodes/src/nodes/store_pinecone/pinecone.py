@@ -56,6 +56,8 @@ Note: a 'collection' as we know it is referred to as an index in pinecone
 
 
 class Store(DocumentStoreBase):
+    """Vector store driver for Pinecone."""
+
     apikey: str | None = None
     node: str = 'pinecone'
     collection: str = ''
@@ -398,10 +400,11 @@ class Store(DocumentStoreBase):
 
         points_to_upsert = []
 
-        # Clear the object id list
-        objectIds: Dict = {}
+        # The objects this batch starts over; the control row is never deleted
+        objectIds = [objectId for objectId in self._objectIdsToReplace(chunks) if objectId != CONTROL_OBJECT_ID]
 
         def flush():
+            """Delete the replaced objects on the first call, then upsert the queued points."""
             nonlocal points_to_upsert
             nonlocal objectIds
 
@@ -410,20 +413,15 @@ class Store(DocumentStoreBase):
 
             # Batch operation for deletion
             if len(objectIds):
-                self.remove(list(objectIds.keys()))
+                self.remove(objectIds)
 
             # Batch operation for upsert
             if len(points_to_upsert):
                 index.upsert(vectors=points_to_upsert)
 
             # Clear them
-            objectIds = {}
+            objectIds = []
             points_to_upsert = []
-
-        # For each document set objectId to true to make sure we delete any chunks we already have added
-        for chunk in chunks:
-            if chunk.metadata.objectId != CONTROL_OBJECT_ID:
-                objectIds[chunk.metadata.objectId] = True
 
         sum_size = 0
         cur_size = 0

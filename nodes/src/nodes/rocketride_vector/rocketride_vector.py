@@ -108,6 +108,8 @@ CHUNK_COLUMNS = (
 
 
 class Store(PgVectorStoreBase):
+    """Vector store driver for RocketRide managed PostgreSQL (pgvector)."""
+
     # listDocuments and countDocuments below implement the optional listing
     # of DocumentStoreBase, so the list_documents tool is offered on this store.
     supports_document_listing = True
@@ -583,11 +585,12 @@ class Store(PgVectorStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        objectIds = {chunk.metadata.objectId for chunk in chunks}
+        objectIds = self._objectIdsToReplace(chunks)
         # Replace in one transaction: an invalid new chunk must leave the
         # previously stored document intact.
         with self._transaction() as cur:
-            cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (list(objectIds),))
+            if objectIds:
+                cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (objectIds,))
             for chunk in chunks:
                 data = {'content': chunk.page_content, **chunk.metadata.model_dump(), 'embedding': chunk.embedding}
                 if 'vectorSize' not in data or data['vectorSize'] is None:

@@ -62,6 +62,8 @@ _MAX_STALLS = 2
 
 
 class Store(DocumentStoreBase):
+    """Vector store driver for Weaviate."""
+
     apikey: str | None = None
     node: str = 'weaviate'
     collection: str = ''
@@ -486,15 +488,10 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        # Clear the object id list
-        objectIds: Dict = {}
+        # The objects this batch starts over
+        objectIds = self._objectIdsToReplace(chunks)
 
-        # For each document
-        for chunk in chunks:
-            # Save this object id
-            objectIds[chunk.metadata.objectId] = True
-
-        # Erase all documents/chunks associated with that ObjectId in one operation
+        # Erase all documents/chunks associated with those ObjectIds in one operation
         # TODO: Start discussion about better use of upsert() method to increase performance)
         if len(objectIds):
             # Delete entities

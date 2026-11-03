@@ -93,6 +93,7 @@ def store_env(monkeypatch, request):
 
 
 def _doc(object_id='a', chunk_id=0, content='original', **metadata):
+    """Build one embedded chunk under ``/test``; extra keyword arguments go into its metadata."""
     from rocketride.schema import Doc, DocMetadata
 
     return Doc(
@@ -104,6 +105,7 @@ def _doc(object_id='a', chunk_id=0, content='original', **metadata):
 
 
 def _rows(conn, table):
+    """Return ``(objectId, chunkId, content)`` for every stored chunk but the schema row, in order."""
     with conn.cursor() as cur:
         cur.execute(
             f"SELECT objectId, chunkId, content FROM {table} WHERE objectId != 'schema' ORDER BY objectId, chunkId"
@@ -117,6 +119,7 @@ def _rows(conn, table):
     ids=['default-signature', 'signature-and-extra'],
 )
 def test_real_metadata_and_schema_row_can_be_written(store_env, metadata):
+    """A chunk with the real metadata model is written, and so is the schema row."""
     store, raw, table = store_env
     doc = _doc(**metadata)
     assert 'signature' in doc.metadata.model_dump()
@@ -128,13 +131,25 @@ def test_real_metadata_and_schema_row_can_be_written(store_env, metadata):
 
 
 def test_replacement_preserves_other_documents(store_env):
+    """Writing an object's chunk 0 again replaces that object and leaves the others alone."""
     store, raw, table = store_env
     store.addChunks([_doc(), _doc(chunk_id=1), _doc('b')])
     store.addChunks([_doc(content='replacement')])
     assert _rows(raw, table) == [('a', 0, 'replacement'), ('b', 0, 'original')]
 
 
+def test_every_flush_of_one_object_is_kept(store_env):
+    """An object written in flushes of 64 chunks keeps all of them; only chunk 0 starts it over (#1986)."""
+    store, raw, table = store_env
+    for flush in (range(0, 64), range(64, 128), range(128, 153)):
+        store.addChunks([_doc('big', chunk_id) for chunk_id in flush])
+    assert [chunk_id for _, chunk_id, _ in _rows(raw, table)] == list(range(153))
+    store.addChunks([_doc('big', 0, 'again'), _doc('big', 1, 'again')])
+    assert _rows(raw, table) == [('big', 0, 'again'), ('big', 1, 'again')]
+
+
 def test_failed_batch_rolls_back_deletion_and_partial_inserts(store_env):
+    """A batch that fails part-way leaves the stored chunks as they were, and the connection usable."""
     import psycopg2
 
     store, raw, table = store_env
@@ -157,6 +172,7 @@ def test_failed_batch_rolls_back_deletion_and_partial_inserts(store_env):
 
 
 def test_empty_batch_does_not_create_a_collection(store_env):
+    """An empty write creates no table."""
     store, raw, table = store_env
     store.addChunks([])
     with raw.cursor() as cur:

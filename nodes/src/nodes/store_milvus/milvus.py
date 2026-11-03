@@ -61,6 +61,8 @@ def _escape_milvus_str(value: object) -> str:
 
 
 class Store(DocumentStoreBase):
+    """Vector store driver for Milvus."""
+
     apikey: str = ''
     collection: str = ''
     vectorSize: int = 0
@@ -456,18 +458,13 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        # Clear the object id list
-        objectIds: Dict = {}
+        # The objects this batch starts over
+        objectIds = self._objectIdsToReplace(chunks)
 
-        # For each document
-        for chunk in chunks:
-            # Save this object id
-            objectIds[chunk.metadata.objectId] = True
-
-        # Erase all documents/chunks associated with that ObjectId in one operation
+        # Erase all documents/chunks associated with those ObjectIds in one operation
         # so we can cleanly insert the new version
-        if len(objectIds.keys()):
-            filter_condition = f"meta['objectId'] in [{', '.join(json.dumps(k) for k in objectIds.keys())}]"
+        if len(objectIds):
+            filter_condition = f"meta['objectId'] in [{', '.join(json.dumps(k) for k in objectIds)}]"
             try:
                 # Delete entities
                 self.client.delete(collection_name=self.collection, filter=filter_condition)
@@ -478,6 +475,7 @@ class Store(DocumentStoreBase):
         batch: List[dict] = []
 
         def flush_batch():
+            """Upsert the queued rows in one request and empty the queue."""
             nonlocal batch
             if not batch:
                 return
