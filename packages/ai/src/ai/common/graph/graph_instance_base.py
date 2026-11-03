@@ -627,12 +627,16 @@ class GraphInstanceBase(IInstanceBase, ABC):
             rows = result.get('rows', [])
             affected = result.get('affected_rows', 0)
             markdown = self._formatResultAsMarkdown(rows) if rows else None
+            notice = ''
+            if result.get('truncated'):
+                # No '|' in it, so Table.parse_markdown_table skips it as a non-table line.
+                notice = f'\n\nThe statement is saved, but its result was cut to the first {len(rows)} rows.'
 
             if 'text' in lanes:
-                self.instance.writeText(markdown if markdown else f'{affected} rows affected')
+                self.instance.writeText((markdown if markdown else f'{affected} rows affected') + notice)
 
             if 'table' in lanes and rows:
-                self.instance.writeTable(markdown)
+                self.instance.writeTable(markdown + notice)
 
             if 'answers' in lanes:
                 answer = Answer()

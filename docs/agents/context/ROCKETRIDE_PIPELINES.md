@@ -683,7 +683,8 @@ an agent can control a graph store as a tool instead.
 passes `max_execute_rows` (25,000 rows by default) fails with nothing saved on `rocketride_graph` and `graph_neo4j`
 (except Neo4j's batched `CALL { ... } IN TRANSACTIONS`, whose earlier batches stay saved);
 `graph_falkordb` cannot roll back, so it saves the write and returns the first rows with
-`truncated: true`. On `rocketride_graph`
+`truncated: true`; it does the same when the reply reaches the server's `RESULTSET_SIZE`
+(10,000 in the official image), because the server cuts replies there. On `rocketride_graph`
 the rules follow the Apache AGE version the database reports (`pg_extension.extversion`):
 1.5.0 and 1.6.0 have their own rules, and any other version gets the strict 1.5.0 rules. A
 database whose AGE library is already 1.6.0 reports 1.5.0 until `ALTER EXTENSION age UPDATE`

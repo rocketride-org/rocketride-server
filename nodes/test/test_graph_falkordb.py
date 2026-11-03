@@ -33,6 +33,7 @@ modules stubbed, mirroring ``test_vectordb_tool_mixin.py``.
 from __future__ import annotations
 
 import datetime
+import json
 import importlib.util
 import sys
 import types
@@ -218,23 +219,36 @@ class _FakeEdge:
         self.properties = {'since': 2020}
 
 
+# The counters falkordb-py's QueryResult exposes, each with the statistics line the server sends for it.
+_STAT_LINES = {
+    'nodes_created': 'Nodes created',
+    'nodes_deleted': 'Nodes deleted',
+    'relationships_created': 'Relationships created',
+    'relationships_deleted': 'Relationships deleted',
+    'properties_set': 'Properties set',
+    'properties_removed': 'Properties removed',
+    'labels_added': 'Labels added',
+    'labels_removed': 'Labels removed',
+    'indices_created': 'Indices created',
+    'indices_deleted': 'Indices deleted',
+}
+
+
 class _FakeResult:
-    def __init__(self, result_set=None, header=None, **stats):
+    """A QueryResult whose counters are set both as attributes and as raw statistics lines.
+
+    ``raw_stats`` replaces the generated lines, to send ones the counters do not cover.
+    """
+
+    def __init__(self, result_set=None, header=None, raw_stats=None, **stats):
         self.result_set = result_set or []
         self.header = header or []
-        for attr in (
-            'nodes_created',
-            'nodes_deleted',
-            'relationships_created',
-            'relationships_deleted',
-            'properties_set',
-            'properties_removed',
-            'labels_added',
-            'labels_removed',
-            'indices_created',
-            'indices_deleted',
-        ):
+        for attr in _STAT_LINES:
             setattr(self, attr, stats.get(attr, 0))
+        if raw_stats is None:
+            raw_stats = [f'{line}: {stats[attr]}' for attr, line in _STAT_LINES.items() if stats.get(attr)]
+            raw_stats += ['Cached execution: 0', 'Query internal execution time: 0.2 milliseconds']
+        self._raw_stats = raw_stats
 
 
 class _FakeGraph:
@@ -266,10 +280,21 @@ class _FakeClient:
     def __init__(self, graph):
         self._graph = graph
         self.selected = []
+        # The server's RESULTSET_SIZE; -1 (no limit) leaves only the node's own cap.
+        # An exception here is raised by config_get instead.
+        self.resultset_size = -1
+        self.config_reads = 0
 
     def select_graph(self, name):
         self.selected.append(name)
         return self._graph
+
+    def config_get(self, name):
+        assert name == 'RESULTSET_SIZE'
+        self.config_reads += 1
+        if isinstance(self.resultset_size, Exception):
+            raise self.resultset_size
+        return self.resultset_size
 
     def list_graphs(self):
         return ['g1', 'g2']
@@ -875,6 +900,161 @@ def test_execute_tool_cuts_a_write_over_the_default_cap():
     assert len(out['rows']) == _DEFAULT_CAP
     assert out['affected_rows'] == total
     assert out['truncated'] is True
+
+
+# ---------------------------------------------------------------------------
+# Read or write: every statistics line of the reply counts, except RUN_STATS
+# ---------------------------------------------------------------------------
+
+# A read reply as a live FalkorDB 6.0.2 sends it: "Graph version" comes on reads too.
+_V6_READ_STATS = ['Cached execution: 0', 'Query internal execution time: 0.05 milliseconds', 'Graph version: 12']
+_WRITE = 'UNWIND range(1, 5) AS i MERGE (n:Item {id: i}) RETURN n.id AS id'
+
+
+def test_execute_raw_counts_a_change_line_that_has_no_counter():
+    # No counter attribute is set, so affected_rows stays 0, but the line still marks a write.
+    glb = _FakeGlobal(_FakeGraph(_result_of(5, raw_stats=['Nodes merged: 5', *_V6_READ_STATS])))
+    glb.max_execute_rows = 3
+
+    out = glb._run_query_raw(_WRITE)
+
+    assert out == {'rows': [{'id': 0}, {'id': 1}, {'id': 2}], 'affected_rows': 0, 'truncated': True}
+
+
+def test_execute_raw_falkordb_6_read_is_not_taken_for_a_write():
+    glb = _FakeGlobal(_FakeGraph(_result_of(5, raw_stats=_V6_READ_STATS)))
+    glb.max_execute_rows = 3
+    with pytest.raises(ValueError, match='max_execute_rows=3'):
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+
+
+@pytest.mark.parametrize('line', ['Nodes merged', 'Nodes merged: many', b'Nodes created: 5'])
+def test_execute_raw_counts_an_unreadable_or_bytes_line_as_a_write(line):
+    glb = _FakeGlobal(_FakeGraph(_result_of(5, raw_stats=[line, *_V6_READ_STATS])))
+    glb.max_execute_rows = 3
+
+    assert glb._run_query_raw(_WRITE)['truncated'] is True
+
+
+def test_execute_raw_zero_change_lines_mean_a_read():
+    stats = ['Nodes created: 0', 'Properties set: 0', *_V6_READ_STATS]
+    glb = _FakeGlobal(_FakeGraph(_result_of(5, raw_stats=stats)))
+    glb.max_execute_rows = 3
+    with pytest.raises(ValueError, match='max_execute_rows=3'):
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+
+
+def test_execute_raw_without_raw_statistics_uses_the_counters():
+    write, read = _result_of(5, nodes_created=5), _result_of(5)
+    del write._raw_stats, read._raw_stats  # a client that keeps no raw lines
+    glb = _FakeGlobal(_FakeGraph(write))
+    glb.max_execute_rows = 3
+
+    assert glb._run_query_raw(_WRITE)['truncated'] is True
+    glb.client._graph._result = read
+    with pytest.raises(ValueError, match='max_execute_rows=3'):
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+
+
+# ---------------------------------------------------------------------------
+# Server RESULTSET_SIZE: the server cuts every reply there without saying so
+# ---------------------------------------------------------------------------
+
+# What the official Docker image sets.
+_IMAGE_RESULTSET_SIZE = 10000
+
+
+def _global_with_server_cap(result, size):
+    glb = _FakeGlobal(_FakeGraph(result))
+    glb.client.resultset_size = size
+    return glb
+
+
+def test_execute_raw_write_cut_by_the_image_server_limit_is_flagged():
+    # A 25,001-row write on a default container: all of it is saved, 10,000 rows come back.
+    glb = _global_with_server_cap(_result_of(_IMAGE_RESULTSET_SIZE, nodes_created=25001), _IMAGE_RESULTSET_SIZE)
+
+    out = glb._run_query_raw(_BULK_WRITE)
+
+    assert len(out['rows']) == _IMAGE_RESULTSET_SIZE
+    assert out['affected_rows'] == 25001
+    assert out['truncated'] is True
+
+
+def test_execute_raw_read_that_reaches_the_server_limit_raises():
+    glb = _global_with_server_cap(_result_of(_IMAGE_RESULTSET_SIZE), _IMAGE_RESULTSET_SIZE)
+    with pytest.raises(ValueError, match=f'RESULTSET_SIZE={_IMAGE_RESULTSET_SIZE}'):
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+
+
+@pytest.mark.parametrize('size', [_IMAGE_RESULTSET_SIZE, -1, 0])
+def test_execute_raw_reply_below_the_server_limit_is_complete(size):
+    glb = _global_with_server_cap(_result_of(_IMAGE_RESULTSET_SIZE - 1, nodes_created=9999), size)
+
+    out = glb._run_query_raw(_BULK_WRITE)
+
+    assert len(out['rows']) == _IMAGE_RESULTSET_SIZE - 1
+    assert 'truncated' not in out
+
+
+def test_execute_raw_node_cap_below_the_server_limit_names_the_node_cap():
+    glb = _global_with_server_cap(_over_cap_result(), _IMAGE_RESULTSET_SIZE)
+    glb.max_execute_rows = 3
+    with pytest.raises(ValueError, match='max_execute_rows=3'):
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+
+
+@pytest.mark.parametrize('answer', [_glb_mod.RedisError('NOPERM no permissions'), None, 'unlimited'])
+def test_execute_raw_unreadable_server_limit_leaves_the_node_cap(answer):
+    # An ACL may deny GRAPH.CONFIG; the node then checks max_execute_rows alone.
+    glb = _global_with_server_cap(_result_of(_IMAGE_RESULTSET_SIZE), answer)
+
+    out = glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+
+    assert len(out['rows']) == _IMAGE_RESULTSET_SIZE
+    assert 'truncated' not in out
+
+
+def test_execute_raw_reads_the_server_limit_on_every_call():
+    # GRAPH.CONFIG SET changes RESULTSET_SIZE while the server runs.
+    glb = _global_with_server_cap(_result_of(3), 3)
+    with pytest.raises(ValueError, match='RESULTSET_SIZE=3'):
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+
+    glb.client.resultset_size = -1
+    assert len(glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')['rows']) == 3
+    assert glb.client.config_reads == 2
+
+
+# ---------------------------------------------------------------------------
+# EXECUTE lane path: a cut result is announced on the text and table lanes
+# ---------------------------------------------------------------------------
+
+
+def _execute_question(statement):
+    """A QuestionType.EXECUTE (3 in the schema stub) carrying one raw statement."""
+    return types.SimpleNamespace(type=3, questions=[types.SimpleNamespace(text=statement)])
+
+
+@pytest.mark.parametrize('count', [5, 3], ids=['cut', 'complete'])
+def test_execute_lane_announces_a_cut_result(count):
+    glb = _FakeGlobal(_FakeGraph(_result_of(count, nodes_created=count)))
+    glb.allow_execute = True
+    glb.max_execute_rows = 3
+    inst = _instance(glb)
+    cap = _CapturingInstance({'text', 'table', 'answers'})
+    inst.instance = cap
+
+    inst.writeQuestions(_execute_question(_WRITE))
+
+    cut = count > 3
+    notice = 'The statement is saved, but its result was cut to the first 3 rows.'
+    assert (notice in cap.text[0]) is cut
+    assert (notice in cap.tables[0]) is cut
+    assert json.loads(cap.answers[0]).get('truncated', False) is cut
+    if cut:
+        # The notice holds no '|', so a markdown-table parser skips it.
+        assert '|' not in cap.tables[0].rsplit('\n\n', 1)[1]
 
 
 # ---------------------------------------------------------------------------
