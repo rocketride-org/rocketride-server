@@ -27,4 +27,16 @@ TEST_CASE("log::Colors") {
     SECTION("LOG") {
         for (auto c : Color{}) LOG(Test, c, colorName(c));
     }
+
+    SECTION("fromString") {
+        for (auto c : Color{}) {
+            auto name = Text{colorName(c)};
+            REQUIRE(_fs<Color>(name) == c);
+            REQUIRE(_fs<Color>(name.lower()) == c);
+            REQUIRE(_fs<Color>(name.upper()) == c);
+        }
+
+        REQUIRE(!_fsc<Color>("not-a-color"_tv));
+        REQUIRE(!_fsc<Color>(""_tv));
+    }
 }

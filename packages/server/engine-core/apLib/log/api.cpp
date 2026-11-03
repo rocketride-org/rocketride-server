@@ -105,8 +105,10 @@ void init() noexcept {
         options().disableAllColors = _fs<bool>(*DisableAllColors);
 
     if (DateTimeFormat) options().dateTimeFormat = _fs<Text>(*DateTimeFormat);
-    if (DecorationColor)
-        options().decorationColor = _fs<Color>(*DecorationColor);
+    if (DecorationColor) {
+        if (auto color = _fsc<Color>(*DecorationColor))
+            options().decorationColor = *color;
+    }
     if (ForceDecoration)
         options().forceDecoration = _fs<bool>(*ForceDecoration);
     if (IncludeDateTime)
