@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-02T06:25:46.725Z
-// Source commit: 3f2422db939bd357ef84213231521657078fc4b6
+// Generated:     2026-11-02T23:00:29.987Z
+// Source commit: fd1b9454f0716bc82ac5a9352613137c63a9724e
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -9869,6 +9869,19 @@ export interface ViewMenuEntry {
      * squares directly. Ignored by TabControl and DetailPanel tabs.
      */
     children?: ViewMenuEntry[];
+    /**
+     * A short text tag after the label, e.g. POC or Beta, marking the entry as
+     * experimental. SidebarMenu renders it as a dashed pill with its
+     * description as the tooltip; ignored by TabControl.
+     */
+    tag?: ViewMenuTag;
+}
+/** A short text tag on a {@link ViewMenuEntry}. */
+export interface ViewMenuTag {
+    /** One or two words, e.g. 'POC'. */
+    label: string;
+    /** What the tag means, shown as the tooltip. */
+    description?: string;
 }
 /** The entry list consumed by TabControl and SidebarMenu. */
 export interface ViewMenu {

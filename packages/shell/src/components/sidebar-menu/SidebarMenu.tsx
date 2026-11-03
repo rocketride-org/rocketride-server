@@ -145,6 +145,21 @@ const styles = {
 		flex: 1,
 	} as CSSProperties,
 
+	// Experimental tag: a dashed outline in the warning text tone, so it reads
+	// as provisional rather than as a count or a status.
+	tag: {
+		flexShrink: 0,
+		padding: '0 5px',
+		borderRadius: 999,
+		border: '1px dashed currentColor',
+		fontSize: 9,
+		lineHeight: '14px',
+		fontWeight: 700,
+		letterSpacing: '0.4px',
+		textTransform: 'uppercase',
+		color: 'var(--rr-text-warning)',
+	} as CSSProperties,
+
 	// Leading icon slot on expanded rows (17px box matching the shell nav icons).
 	// Active rows inherit the selection foreground so the glyph stays legible
 	// on the highlight fill; inactive rows use the quiet secondary tone.
@@ -366,6 +381,12 @@ export function SidebarMenu({ menu, activeId, onSelect, sectionLabel, collapsed 
 				{/* Optional leading icon — same glyph the collapsed rail shows. */}
 				{entry.icon && <span style={styles.itemIcon(isActive, isDisabled, m)}>{entry.icon}</span>}
 				<span style={styles.label}>{entry.label}</span>
+				{/* Experimental tag (POC, Beta) as a dashed pill after the label. */}
+				{entry.tag && (
+					<span style={styles.tag} title={entry.tag.description}>
+						{entry.tag.label}
+					</span>
+				)}
 				{/* Right-aligned count badge when the entry declares a count. */}
 				{entry.count != null && <ViewMenuBadge count={entry.count} severity={entry.severity} />}
 			</div>

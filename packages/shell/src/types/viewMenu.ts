@@ -78,6 +78,20 @@ export interface ViewMenuEntry {
 	 * squares directly. Ignored by TabControl and DetailPanel tabs.
 	 */
 	children?: ViewMenuEntry[];
+	/**
+	 * A short text tag after the label, e.g. POC or Beta, marking the entry as
+	 * experimental. SidebarMenu renders it as a dashed pill with its
+	 * description as the tooltip; ignored by TabControl.
+	 */
+	tag?: ViewMenuTag;
+}
+
+/** A short text tag on a {@link ViewMenuEntry}. */
+export interface ViewMenuTag {
+	/** One or two words, e.g. 'POC'. */
+	label: string;
+	/** What the tag means, shown as the tooltip. */
+	description?: string;
 }
 
 // =============================================================================

@@ -807,6 +807,8 @@ import type { ShellSidebarDensity as Frozen_ShellSidebarDensity } from '../contr
 import type { ShellSidebarDensity as Current_ShellSidebarDensity } from './api';
 import type { ShellSidebarFooter as Frozen_ShellSidebarFooter } from '../contract/versions/v12';
 import type { ShellSidebarFooter as Current_ShellSidebarFooter } from './api';
+import type { ViewMenuTag as Frozen_ViewMenuTag } from '../contract/versions/v12';
+import type { ViewMenuTag as Current_ViewMenuTag } from './api';
 import type { IAttentionRingProps as Frozen_IAttentionRingProps } from '../contract/versions/v12';
 import type { IAttentionRingProps as Current_IAttentionRingProps } from './api';
 import type { ICoachMarkProps as Frozen_ICoachMarkProps } from '../contract/versions/v12';
@@ -1637,6 +1639,8 @@ const _t_ShellSidebarDensity: Frozen_ShellSidebarDensity = {} as Current_ShellSi
 void _t_ShellSidebarDensity;
 const _t_ShellSidebarFooter: Frozen_ShellSidebarFooter = {} as Current_ShellSidebarFooter;
 void _t_ShellSidebarFooter;
+const _t_ViewMenuTag: Frozen_ViewMenuTag = {} as Current_ViewMenuTag;
+void _t_ViewMenuTag;
 const _t_IAttentionRingProps: Frozen_IAttentionRingProps = {} as Current_IAttentionRingProps;
 void _t_IAttentionRingProps;
 const _t_ICoachMarkProps: Frozen_ICoachMarkProps = {} as Current_ICoachMarkProps;

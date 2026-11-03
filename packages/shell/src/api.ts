@@ -208,7 +208,7 @@ export type { IVirtualFileSystem } from './modules/explorer/types';
 
 // ViewMenu declaration types (consumed by shared's TabControl/SidebarMenu)
 export type { DashboardData } from './hooks/useDashboardData';
-export type { ViewMenu, ViewMenuEntry } from './types/viewMenu';
+export type { ViewMenu, ViewMenuEntry, ViewMenuTag } from './types/viewMenu';
 
 // The workspace-prefs accessor shape ({ getPref, setPref }) for usePrefs/PrefsProvider.
 export type { IPrefsApi } from './components/contexts/PrefsContext';
