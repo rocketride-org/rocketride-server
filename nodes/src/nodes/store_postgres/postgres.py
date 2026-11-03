@@ -188,7 +188,6 @@ class Store(PgVectorStoreBase):
         """
         with self._cursor() as cur:
             cur.execute(SQL_QUERIES['create_collection'].format(collection=self.collection, vector_size=vectorSize))
-            self.client.commit()
 
     def _convertFilter(self, docFilter: DocFilter) -> tuple[str, list]:
         """
@@ -543,7 +542,6 @@ class Store(PgVectorStoreBase):
 
         with self._cursor() as cur:
             cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (objectIds,))
-            self.client.commit()
 
     def markDeleted(self, objectIds: List[str]) -> int | None:
         """
@@ -559,7 +557,6 @@ class Store(PgVectorStoreBase):
         with self._cursor() as cur:
             cur.execute(SQL_QUERIES['mark_deleted'].format(collection=self.collection), (objectIds,))
             matched = cur.rowcount
-            self.client.commit()
         # psycopg2 reports -1 when a statement's row count is not known; say so
         # rather than claim no rows matched.
         return matched if matched >= 0 else None
@@ -578,7 +575,6 @@ class Store(PgVectorStoreBase):
         with self._cursor() as cur:
             cur.execute(SQL_QUERIES['mark_active'].format(collection=self.collection), (objectIds,))
             matched = cur.rowcount
-            self.client.commit()
         # psycopg2 reports -1 when a statement's row count is not known; say so
         # rather than claim no rows matched.
         return matched if matched >= 0 else None
