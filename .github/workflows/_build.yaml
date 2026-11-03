@@ -334,7 +334,8 @@ jobs:
           UV_LINK_MODE: copy
         # note: Sequential execution should be changed to parallel execution
         #       after the appropriate fixes have been made, see #743 #1048 for details.
-        run: ${{ matrix.builder_cmd }} test --verbose --sequential --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }}
+        # TEMP (drop before merge): only the CLI harness, to measure it
+        run: ${{ matrix.builder_cmd }} client-python:test client-typescript:test --verbose --sequential --autoinstall ${{ matrix.platform == 'ubuntu' && '--system-compiler' || '' }} --pytest=-k --pytest=test_cli_integration --pytest=--durations=0 --jest=tests/cli.test.ts
 
       # The test servers' side of a failure. Printed rather than uploaded:
       # storage-cleanup.yml deletes artifacts after 3 days, the job log stays.
