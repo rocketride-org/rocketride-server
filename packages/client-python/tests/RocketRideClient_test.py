@@ -480,6 +480,36 @@ class TestDataOperations:
                 await client.disconnect()
 
     @pytest.mark.asyncio
+    async def test_should_join_a_character_split_across_pipe_writes(self):
+        """A text written in chunks cut inside a character reaches the pipeline whole."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        pipeline_token = None
+        try:
+            await client.connect()
+            await ensure_clean_pipeline(client, self.DATA_TOKEN)
+
+            result = await client.use(pipeline=get_echo_pipeline(), token=self.DATA_TOKEN)
+            pipeline_token = result['token']
+
+            pipe = await client.pipe(pipeline_token, {'name': 'test-split.txt'}, 'text/plain')
+
+            await pipe.open()
+
+            # 'П' is two bytes; the first write ends after its first byte
+            data = 'Привет, мир'.encode('utf-8')
+            await pipe.write(data[:1])
+            await pipe.write(data[1:])
+
+            result = await pipe.close()
+
+            assert result['text'][0] == 'Привет, мир\n\n'
+        finally:
+            if pipeline_token:
+                await ensure_clean_pipeline(client, pipeline_token)
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
     async def test_should_handle_file_uploads(self):
         client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
         pipeline_token = None
