@@ -176,6 +176,10 @@ def _format_table(table_info: dict) -> dict:
     return result
 
 
+# What get_data and the question lanes report when _executeSQLQuery returns None
+_QUERY_EXECUTION_FAILED = 'Query execution failed'
+
+
 class MissingLlmError(ValueError):
     """A natural-language question reached a node with no llm connected."""
 
@@ -323,7 +327,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         sql_query = sql_result['sql']
         result = self._executeSQLQuery(sql_query)
         if result is None:
-            return {'valid': False, 'error': 'Query execution failed', 'sql': sql_query, 'rows': []}
+            return {'valid': False, 'error': _QUERY_EXECUTION_FAILED, 'sql': sql_query, 'rows': []}
 
         rows = [self._sanitize_row(row) for row in result]
         return {'valid': True, 'rows': rows, 'sql': sql_query, 'row_limit': limit}
@@ -879,6 +883,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             """Format the db_schema dict into a concise text block for the LLM."""
 
             def simplify_type(sql_type: str) -> str:
+                """Return the type name without its COLLATE clause, upper-cased."""
                 # Strip COLLATE clauses (e.g. VARCHAR(255) COLLATE utf8mb4_general_ci)
                 # so the LLM sees clean type names.
                 return sql_type.split('COLLATE')[0].strip().upper()
@@ -1083,6 +1088,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             executed = is_valid_query and bool(sql_query)
             # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
             result = self._executeSQLQuery(sql_query) if executed else sql_query
+            # The database rejected the statement at run time (the cause is in the log)
+            if executed and result is None:
+                self._emitError(_QUERY_EXECUTION_FAILED, lanes)
+                return
 
             self._emit(result, lanes, executed=executed)
 
