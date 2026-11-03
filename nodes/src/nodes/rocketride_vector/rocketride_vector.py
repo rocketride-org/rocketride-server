@@ -772,9 +772,11 @@ class Store(DocumentStoreBase):
         where_sql, params = self._convertFilter(docFilter)
         embedding_arr = np.array(query.embedding)
 
+        # An unbounded request cannot be satisfied by a bounded ANN scan.
+        search_sql = 'semantic_search_exact' if docFilter.limit is None else 'semantic_search'
         with self._cursor() as cur:
             cur.execute(
-                SQL_QUERIES['semantic_search'].format(
+                SQL_QUERIES[search_sql].format(
                     collection=self.collection, similarity_operator=self.similarity, where_clause=where_sql
                 ),
                 (embedding_arr, *params, docFilter.limit),
@@ -791,7 +793,7 @@ class Store(DocumentStoreBase):
             # HNSW filters its candidate list after scanning. Deleted or
             # excluded neighbours can hide eligible matches, or leave only
             # low-scoring candidates. Count usable matches, not raw rows.
-            if sum(doc.score >= threshold for doc in docs) >= docFilter.limit:
+            if docFilter.limit is None or sum(doc.score >= threshold for doc in docs) >= docFilter.limit:
                 return docs
 
             # Retry with the same filters and limit, without an approximate

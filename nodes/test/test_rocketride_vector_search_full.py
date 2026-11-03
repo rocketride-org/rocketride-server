@@ -185,6 +185,18 @@ def test_filtered_search_returns_eligible_documents_in_distance_order(indexed_st
     assert [doc.score for doc in results] == sorted((doc.score for doc in results), reverse=True)
 
 
+def test_unbounded_search_returns_all_eligible_documents(indexed_store):
+    from ai.common.schema import DocFilter, QuestionText
+
+    store, raw, _, query, searches = indexed_store
+    store.markDeleted(['near'])
+    question = QuestionText(text='nearest document', embedding=query)
+    results = store.searchSemantic(question, DocFilter(limit=None, nodeId='other-node'))
+    assert [doc.metadata.objectId for doc in results] == [f'active-{i:02d}' for i in range(27)]
+    assert len(searches) == 1
+    assert not any('hnsw' in node.get('Index Name', '') for node in _plan_nodes(_plan(raw, searches[0])))
+
+
 def test_empty_filtered_search_stays_empty(indexed_store):
     from ai.common.schema import DocFilter, QuestionText
 
