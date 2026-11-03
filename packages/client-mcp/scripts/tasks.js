@@ -164,6 +164,12 @@ function makeRunPytestAction(options = {}) {
 					env: {
 						...process.env,
 						ROCKETRIDE_URI: serverUri,
+						// The server under test OWNS the credential pair: the bracket's
+						// key (what the server was started with) outranks the
+						// dotenv-loaded workspace .env, exactly like the URI (the
+						// client-python rule). CI can provide an empty
+						// ROCKETRIDE_APIKEY, which must not win either.
+						ROCKETRIDE_APIKEY: bracket.apikey || process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY',
 						PYTHONPATH: buildSrcDir,
 					},
 				},
@@ -180,7 +186,8 @@ function makeStartTestServerAction(options = {}) {
 				const parsed = parseServerAddress(taskserver);
 				ctx.port = parsed.port;
 				task.output = `Using existing server at ${parsed.uri}`;
-				return { port: parsed.port, server: null, serverUri: parsed.uri };
+				const envKey = process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
+				return { port: parsed.port, server: null, serverUri: parsed.uri, apikey: envKey };
 			}
 			const envUri = process.env.ROCKETRIDE_URI;
 			if (envUri) {
@@ -193,6 +200,11 @@ function makeStartTestServerAction(options = {}) {
 					// fall through and start server
 				}
 			}
+			// The key the SERVER authenticates — threaded through the bracket so
+			// the suite presents this exact credential (the URI already is; a
+			// workspace .env's key must never outrank it). Same rule as the
+			// client-python and client-typescript brackets.
+			const apikey = process.env.ROCKETRIDE_APIKEY || 'MYAPIKEY';
 			task.output = 'Starting server...';
 			let taskComplete = false;
 			const result = await startServer({
@@ -201,6 +213,9 @@ function makeStartTestServerAction(options = {}) {
 				logName: 'client-mcp',
 				verbose: ctx.options?.verbose,
 				basePort: 20000,
+				env: {
+					ROCKETRIDE_APIKEY: apikey,
+				},
 				onOutput: (text) => {
 					if (taskComplete) return;
 					const lines = text.trim().split('\n');
@@ -210,7 +225,7 @@ function makeStartTestServerAction(options = {}) {
 			ctx.port = result.port;
 			task.output = `Server ready on port ${result.port}`;
 			taskComplete = true;
-			return { port: result.port, server: result.server };
+			return { port: result.port, server: result.server, apikey };
 		},
 	};
 }

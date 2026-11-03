@@ -103,7 +103,11 @@ function packageJson(v: TemplateVars): string {
 				readme: './README.md',
 				categories: ['custom'],
 				mode: 'free',
-				authenticated: false,
+				// Authenticated from the start: anonymous sessions cannot
+				// persist settings or prefs, so a signed-out default turns
+				// every new app's persistence into a silent no-op. Apps that
+				// genuinely run signed out opt out by hand.
+				authenticated: true,
 			},
 			scripts: {
 				dev: 'rsbuild dev',

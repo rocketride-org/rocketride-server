@@ -143,31 +143,6 @@ export class LinuxServiceManager extends ServiceManager {
 		this.logger.output(`${icons.success} Service removed`);
 	}
 
-	/**
-	 * Stops the service, rewrites the unit file with new paths, and restarts.
-	 *
-	 * @param executablePath - Full path to the updated engine executable
-	 * @param engineDir - Working directory for the engine process
-	 */
-	public async update(executablePath: string, engineDir: string): Promise<void> {
-		await this.runSudo('systemctl', ['stop', UNIT_NAME]);
-
-		const unitContent = this.buildUnitFile(executablePath, engineDir);
-		const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rocketride-'));
-		const tmpUnit = path.join(tmpDir, 'rocketride.service');
-		fs.writeFileSync(tmpUnit, unitContent, { encoding: 'utf8', mode: 0o600 });
-		try {
-			await this.runSudo('cp', [tmpUnit, UNIT_PATH]);
-		} finally {
-			fs.rmSync(tmpDir, { recursive: true, force: true });
-		}
-
-		await this.runSudo('systemctl', ['daemon-reload']);
-		await this.runSudo('systemctl', ['start', UNIT_NAME]);
-
-		this.logger.output(`${icons.success} Service updated and restarted`);
-	}
-
 	/** Starts the systemd service via `sudo systemctl start`. */
 	public async start(): Promise<void> {
 		await this.runSudo('systemctl', ['start', UNIT_NAME]);

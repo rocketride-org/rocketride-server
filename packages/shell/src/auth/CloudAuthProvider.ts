@@ -40,9 +40,10 @@
 import { stashSignupProperties, takeSignupProperties, currentSignupProperties, signupState } from '../util/signupAttribution';
 import type { PkceCredential, SignupProperties } from 'rocketride';
 import type { IAuthProvider } from '../types/connection';
-import { generatePkce, buildAuthUrl, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
-import { LS_TOKEN, SS_PENDING_APP_ID } from '../constants';
-import { tokenStore } from '../util/devGate';
+import { generatePkce, buildAuthUrl, getStoredVerifier, clearStoredVerifier, storeRedirectUri, getStoredRedirectUri, clearStoredRedirectUri } from '../util/pkce';
+import { LS_TOKEN } from '../constants';
+import { tokenStore, isDevHooksEnabled, isFramedShell } from '../util/devGate';
+import { ConnectionManager } from '../connection/connection';
 
 // =============================================================================
 // CLASS
@@ -76,14 +77,24 @@ export class CloudAuthProvider implements IAuthProvider {
 	private clientId = '';
 
 	/**
+	 * Registered web origin the DEV RELAY redirects through (empty = none).
+	 * A top-level dev shell lives on a random localhost port that can never
+	 * be a registered redirect_uri; authorize instead redirects to this
+	 * origin, whose shell bounces the code back (see connection bootstrap).
+	 */
+	private relayOrigin = '';
+
+	/**
 	 * Initialize with Zitadel configuration.
 	 * Must be called before signIn().
 	 *
-	 * @param config - Zitadel OAuth2 configuration.
+	 * @param config - Zitadel OAuth2 configuration; `relayOrigin` arms the
+	 *                 dev relay (top-level dev shells only — see signIn).
 	 */
-	public initialize(config: { zitadelUrl: string; clientId: string }): void {
+	public initialize(config: { zitadelUrl: string; clientId: string; relayOrigin?: string }): void {
 		this.zitadelUrl = config.zitadelUrl;
 		this.clientId = config.clientId;
+		this.relayOrigin = config.relayOrigin ?? '';
 	}
 
 	/**
@@ -117,9 +128,12 @@ export class CloudAuthProvider implements IAuthProvider {
 			throw new Error('CloudAuthProvider not initialized — call initialize() first.');
 		}
 
-		// Store the target app ID so we can restore it after the redirect
+		// The sign-in's initiator app rides the ConnectionManager's auth-phase
+		// record (setPendingAppId → AUTHORIZING), written by the callers that
+		// know it (the Shell's loginRequest handler, startOAuth). Direct
+		// signIn callers passing appId get the same treatment:
 		if (appId) {
-			try { sessionStorage.setItem(SS_PENDING_APP_ID, appId); } catch (e) {
+			try { ConnectionManager.getInstance().setPendingAppId(appId); } catch (e) {
 				console.error('[CloudAuthProvider] Failed to store pending app ID:', e);
 			}
 		}
@@ -129,14 +143,33 @@ export class CloudAuthProvider implements IAuthProvider {
 		// Generate PKCE challenge (stores verifier in sessionStorage automatically)
 		const { challenge } = await generatePkce();
 
+		// step: pick the redirect. A TOP-LEVEL dev shell (terminal dev loop,
+		// F5 external-browser preview) lives on a random localhost port that
+		// can never be a registered redirect_uri — authorize goes to the
+		// registered relay origin instead, with this origin in `state` so
+		// that shell's bootstrap bounces the code straight back (loopback
+		// targets only; framed previews keep their rrdev:auth inheritance).
+		// The verifier never leaves THIS origin's sessionStorage, so the
+		// bounced code is worthless anywhere else.
+		const useRelay = !!this.relayOrigin && this.relayOrigin !== window.location.origin && isDevHooksEnabled() && !isFramedShell();
+		const redirectUri = useRelay ? this.relayOrigin : window.location.origin;
+		// The exchange must echo the authorize-time redirect_uri exactly —
+		// stash it with the verifier's lifetime (both exchange sites read it).
+		storeRedirectUri(redirectUri);
+
+		// The OAuth state carries one thing. A dev relay owns it (attribution never runs in dev loops);
+		// otherwise it is the cookieless signup context, when there is one.
+		let state = signupState(context);
+		if (useRelay) state = `rrdev:${window.location.origin}`;
+
 		// Build the authorization URL
 		const url = buildAuthUrl(
 			this.zitadelUrl,
 			this.clientId,
-			window.location.origin,
+			redirectUri,
 			challenge,
 			register,
-			signupState(context),
+			state,
 		);
 
 		// assign() (not replace()) so the landing page stays in history — the
@@ -162,10 +195,13 @@ export class CloudAuthProvider implements IAuthProvider {
 	 *          the verifier is missing (stale/expired session).
 	 */
 	public handleCallback(code: string): PkceCredential | null {
-		// Retrieve and clear the stored verifier
+		// Retrieve and clear the stored verifier (and the redirect it was
+		// authorized with — the exchange must echo that exact value).
 		const signup = takeSignupProperties();
 		const verifier = getStoredVerifier();
 		clearStoredVerifier();
+		const redirectUri = getStoredRedirectUri() ?? window.location.origin;
+		clearStoredRedirectUri();
 
 		if (!verifier) {
 			console.error('[CloudAuthProvider] No PKCE verifier found — callback may be stale.');
@@ -181,7 +217,7 @@ export class CloudAuthProvider implements IAuthProvider {
 		return {
 			code,
 			verifier,
-			redirectUri: window.location.origin,
+			redirectUri,
 			...(signup ? { signupProperties: () => currentSignupProperties(signup) } : {}),
 		};
 	}

@@ -31,22 +31,18 @@ requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
 from typing import List, Callable, Dict, Any, cast
-import numpy as np
 
 import psycopg2
 from pgvector.psycopg2 import register_vector
-from rocketlib import warning
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
-from ai.common.store import CONTROL_OBJECT_ID, DocumentStoreBase
+from ai.common.store import CONTROL_OBJECT_ID
+from ai.common.store.pgvector_store import MIN_SIMILARITY_SCORE, PgVectorStoreBase
 from ai.common.config import Config
 from .IGlobal import VALID_TABLE
 
 # Default PostgreSQL port
 DEFAULT_POSTGRES_PORT = 5432
-
-# Minimum similarity score threshold for document filtering
-MIN_SIMILARITY_SCORE = 0.20
 
 # SQL Queries
 SQL_QUERIES = {
@@ -69,7 +65,6 @@ SQL_QUERIES = {
     'mark_deleted': 'UPDATE {collection} SET isDeleted = TRUE WHERE objectId = ANY(%s)',
     'mark_active': 'UPDATE {collection} SET isDeleted = FALSE WHERE objectId = ANY(%s)',
     'render_document': 'SELECT content, chunkId FROM {collection} WHERE objectId = %s AND chunkId >= %s AND chunkId < %s ORDER BY chunkId',
-    'semantic_search': 'SELECT *, embedding {similarity_operator} %s AS distance FROM {collection} {where_clause} ORDER BY distance LIMIT %s',
 }
 
 
@@ -92,7 +87,7 @@ CHUNK_COLUMNS = (
 )
 
 
-class Store(DocumentStoreBase):
+class Store(PgVectorStoreBase):
     # listDocuments and countDocuments below implement the optional listing
     # of DocumentStoreBase, so the list_documents tool is offered on this store.
     supports_document_listing = True
@@ -152,6 +147,9 @@ class Store(DocumentStoreBase):
             dbname=self.database, user=self.user, password=self.password, host=self.host, port=self.port
         )
 
+        # Reads must not hold transactions between calls. Serialize this
+        # connection so SET LOCAL and its query cannot overlap another caller.
+        self.client.autocommit = True
         register_vector(self.client)
 
         return
@@ -178,7 +176,7 @@ class Store(DocumentStoreBase):
 
         @returns: True if the collection exists, False otherwise.
         """
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['check_collection_exists'], (self.collection,))
             return cur.fetchone()[0]
 
@@ -188,9 +186,8 @@ class Store(DocumentStoreBase):
 
         @param vectorSize: The size of the vector.
         """
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['create_collection'].format(collection=self.collection, vector_size=vectorSize))
-            self.client.commit()
 
     def _convertFilter(self, docFilter: DocFilter) -> tuple[str, list]:
         """
@@ -349,7 +346,7 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return 0
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['count_documents'].format(collection=self.collection))
             return cur.fetchone()[0]
 
@@ -367,7 +364,7 @@ class Store(DocumentStoreBase):
         where_sql, params = self._convertFilter(docFilter)
         query_params = [f'%{query}%'] + params
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             where_clause = ('AND ' + where_sql.split('WHERE ')[1]) if where_sql else ''
             cur.execute(
                 SQL_QUERIES['search_keyword'].format(collection=self.collection, where_clause=where_clause),
@@ -392,7 +389,7 @@ class Store(DocumentStoreBase):
 
         where_sql, params = self._convertFilter(docFilter)
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(
                 SQL_QUERIES['get_documents'].format(collection=self.collection, where_clause=where_sql),
                 params + [docFilter.limit, docFilter.offset],
@@ -433,7 +430,7 @@ class Store(DocumentStoreBase):
             return []
 
         where_sql, params = self._listingFilter(parent, deleted)
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(
                 SQL_QUERIES['list_documents'].format(collection=self.collection, where_clause=where_sql),
                 params + [offset, limit],
@@ -457,7 +454,7 @@ class Store(DocumentStoreBase):
             return 0
 
         where_sql, params = self._listingFilter(parent, deleted)
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(
                 SQL_QUERIES['count_listed_documents'].format(collection=self.collection, where_clause=where_sql),
                 params,
@@ -488,7 +485,7 @@ class Store(DocumentStoreBase):
 
         where_sql = ' AND '.join(where_clauses)
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(
                 SQL_QUERIES['get_paths'].format(collection=self.collection, where_clause=where_sql),
                 params + [offset, limit],
@@ -512,38 +509,27 @@ class Store(DocumentStoreBase):
             return
 
         objectIds = {chunk.metadata.objectId for chunk in chunks}
-        try:
-            with self.client.cursor() as cur:
-                # Replace in one transaction: an invalid new chunk must leave
-                # the previously stored document intact.
-                cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (list(objectIds),))
-                for chunk in chunks:
-                    data = {'content': chunk.page_content, **chunk.metadata.model_dump(), 'embedding': chunk.embedding}
-                    if 'vectorSize' not in data or data['vectorSize'] is None:
-                        data['vectorSize'] = len(chunk.embedding) if chunk.embedding else 0
-                    if 'modelName' not in data or data['modelName'] is None:
-                        data['modelName'] = ''
-                    # Only the table's columns: DocMetadata.model_dump() also
-                    # yields signature and any extra keys, which have none.
-                    data = {key: value for key, value in data.items() if key in CHUNK_COLUMNS}
-                    columns = ', '.join(data.keys())
-                    placeholders = ', '.join(['%s'] * len(data))
-                    cur.execute(
-                        SQL_QUERIES['insert_chunk'].format(
-                            collection=self.collection, columns=columns, placeholders=placeholders
-                        ),
-                        list(data.values()),
-                    )
-            self.client.commit()
-        except Exception:
-            # Leave the connection usable: an aborted transaction would fail
-            # every later statement until it is rolled back. A rollback that
-            # fails itself (a broken connection) must not replace the write error.
-            try:
-                self.client.rollback()
-            except Exception as rollback_error:  # noqa: BLE001
-                warning(f'{self.collection}: rollback after a failed write also failed: {rollback_error}')
-            raise
+        # Replace in one transaction: an invalid new chunk must leave the
+        # previously stored document intact.
+        with self._transaction() as cur:
+            cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (list(objectIds),))
+            for chunk in chunks:
+                data = {'content': chunk.page_content, **chunk.metadata.model_dump(), 'embedding': chunk.embedding}
+                if 'vectorSize' not in data or data['vectorSize'] is None:
+                    data['vectorSize'] = len(chunk.embedding) if chunk.embedding else 0
+                if 'modelName' not in data or data['modelName'] is None:
+                    data['modelName'] = ''
+                # Only the table's columns: DocMetadata.model_dump() also
+                # yields signature and any extra keys, which have none.
+                data = {key: value for key, value in data.items() if key in CHUNK_COLUMNS}
+                columns = ', '.join(data.keys())
+                placeholders = ', '.join(['%s'] * len(data))
+                cur.execute(
+                    SQL_QUERIES['insert_chunk'].format(
+                        collection=self.collection, columns=columns, placeholders=placeholders
+                    ),
+                    list(data.values()),
+                )
 
     def remove(self, objectIds: List[str]) -> None:
         """
@@ -554,9 +540,8 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['delete_by_object_ids'].format(collection=self.collection), (objectIds,))
-            self.client.commit()
 
     def markDeleted(self, objectIds: List[str]) -> int | None:
         """
@@ -569,10 +554,9 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return 0
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['mark_deleted'].format(collection=self.collection), (objectIds,))
             matched = cur.rowcount
-            self.client.commit()
         # psycopg2 reports -1 when a statement's row count is not known; say so
         # rather than claim no rows matched.
         return matched if matched >= 0 else None
@@ -588,10 +572,9 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             return 0
 
-        with self.client.cursor() as cur:
+        with self._cursor() as cur:
             cur.execute(SQL_QUERIES['mark_active'].format(collection=self.collection), (objectIds,))
             matched = cur.rowcount
-            self.client.commit()
         # psycopg2 reports -1 when a statement's row count is not known; say so
         # rather than claim no rows matched.
         return matched if matched >= 0 else None
@@ -608,7 +591,7 @@ class Store(DocumentStoreBase):
 
         offset = 0
         while True:
-            with self.client.cursor() as cur:
+            with self._cursor() as cur:
                 cur.execute(
                     SQL_QUERIES['render_document'].format(collection=self.collection),
                     (objectId, offset, offset + self.renderChunkSize),
@@ -638,33 +621,3 @@ class Store(DocumentStoreBase):
                 break
 
             offset += self.renderChunkSize
-
-    def searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
-        """
-        Perform a semantic search.
-
-        @param query: The query to search for.
-        @param docFilter: The document filter.
-        @returns: A list of documents that match the query.
-        """
-        if not self._doesCollectionExist():
-            return []
-
-        if query.embedding is None:
-            raise Exception('To use semantic search, you must bind to an embedding module')
-
-        where_sql, params = self._convertFilter(docFilter)
-        embedding_arr = np.array(query.embedding)
-
-        with self.client.cursor() as cur:
-            cur.execute(
-                SQL_QUERIES['semantic_search'].format(
-                    collection=self.collection, similarity_operator=self.similarity, where_clause=where_sql
-                ),
-                (embedding_arr, *params, docFilter.limit),
-            )
-            results = cur.fetchall()
-
-        # Convert results to dictionary
-        points = [dict(zip([desc[0] for desc in cur.description], row)) for row in results]
-        return self._convertToDocs(points)

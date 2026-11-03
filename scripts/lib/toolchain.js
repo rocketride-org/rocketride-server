@@ -41,6 +41,24 @@ async function getWindowsToolchain() {
 	return windowsToolchainCache;
 }
 
+/**
+ * Overlays env vars onto a base CASE-INSENSITIVELY — Windows env names are
+ * case-insensitive, but a JS spread treats 'PATH' (a bash parent) and 'Path'
+ * (the vcvars capture) as different keys, shipping a duplicate-key env block
+ * whose winner is up to CreateProcess internals. One key per name, the
+ * overlay's casing and value winning.
+ */
+function overlayEnv(base, overlay) {
+	const merged = { ...base };
+	for (const key of Object.keys(overlay)) {
+		for (const existing of Object.keys(merged)) {
+			if (existing !== key && existing.toLowerCase() === key.toLowerCase()) delete merged[existing];
+		}
+		merged[key] = overlay[key];
+	}
+	return merged;
+}
+
 async function getVsEnvironment() {
 	if (vsEnvCache) return vsEnvCache;
 	if (!isWindows()) return process.env;
@@ -51,7 +69,7 @@ async function getVsEnvironment() {
 				'Run server:setup-tools first (e.g. run builder server:setup-tools --autoinstall).'
 		);
 	}
-	vsEnvCache = { ...process.env, ...buildEnv };
+	vsEnvCache = overlayEnv(process.env, buildEnv);
 	return vsEnvCache;
 }
 
