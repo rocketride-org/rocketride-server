@@ -21,10 +21,10 @@
 // SOFTWARE.
 // =============================================================================
 
-import { useEffect, useRef, useState, useCallback, KeyboardEvent, FC } from 'react';
+import { useEffect, useRef, useReducer, useCallback, KeyboardEvent, FC, Dispatch } from 'react';
 import { WidgetProps } from '@rjsf/utils';
-import { InputAdornment, TextField, Tooltip } from '@mui/material';
-import { Delete } from '@mui/icons-material';
+import { IconButton, InputAdornment, TextField, Tooltip } from '@mui/material';
+import { Delete, Visibility, VisibilityOff } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
 
 import { useEnvVarAutocomplete } from '../hooks/useEnvVarAutocomplete';
@@ -32,7 +32,7 @@ import EnvVarSuggestions from '../env-var-suggestions/EnvVarSuggestions';
 import FieldLabelWithInfo from '../field-label-with-info/FieldLabelWithInfo';
 
 // =============================================================================
-// Helpers
+// Helpers & State Reducer
 // =============================================================================
 
 /** Number of trailing characters to display unmasked when an API key is present. */
@@ -46,7 +46,7 @@ const lastCharsToShow = 4;
  * @param val - The raw API key string to mask.
  * @returns The masked string with bullet characters replacing hidden characters.
  */
-const getMaskedValue = (val: string): string => {
+export const getMaskedValue = (val: string): string => {
 	if (!val) return '';
 	// If the value is shorter than the number of characters to show, mask the entire value.
 	if (val.length <= lastCharsToShow) {
@@ -56,28 +56,62 @@ const getMaskedValue = (val: string): string => {
 	return maskedPart + val.slice(-lastCharsToShow);
 };
 
+export interface ApiKeyWidgetState {
+	maskApiKey: boolean;
+	showApiKey: boolean;
+	tempValue: string;
+}
+
+export type ApiKeyWidgetAction =
+	| { type: 'toggleVisibility' }
+	| { type: 'change'; value: string }
+	| { type: 'clearSaved' };
+
+export const createInitialApiKeyState = (value: string): ApiKeyWidgetState => ({
+	maskApiKey: Boolean(value),
+	showApiKey: false,
+	tempValue: getMaskedValue(value),
+});
+
+export const reduceApiKeyState = (state: ApiKeyWidgetState, action: ApiKeyWidgetAction): ApiKeyWidgetState => {
+	switch (action.type) {
+		case 'toggleVisibility':
+			return { ...state, showApiKey: !state.showApiKey };
+		case 'change':
+			return {
+				...state,
+				tempValue: action.value,
+				showApiKey: action.value ? state.showApiKey : false,
+			};
+		case 'clearSaved':
+			return {
+				maskApiKey: false,
+				showApiKey: false,
+				tempValue: '',
+			};
+	}
+};
+
 // =============================================================================
 // Component
 // =============================================================================
 
-/**
- * RJSF widget for securely entering and displaying API keys.
- * When a key already exists, the field shows a masked value (e.g., "••••abcd")
- * in read-only mode with a delete button to clear it. Once cleared, the field
- * becomes editable for entering a new key. This prevents accidental modification
- * of existing keys while still allowing replacement.
- */
-const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, formContext, schema, options }) => {
+export interface ApiKeyWidgetViewProps extends WidgetProps {
+	state: ApiKeyWidgetState;
+	dispatch: Dispatch<ApiKeyWidgetAction>;
+}
+
+export const ApiKeyWidgetView: FC<ApiKeyWidgetViewProps> = ({ id, value, label, required, autofocus, disabled, readonly, rawErrors, onChange, formContext, schema, options, state, dispatch }) => {
 	const { t } = useTranslation();
 
 	// Prefer description from uiSchema options, falling back to the JSON Schema description
 	const description = options.description ?? schema.description;
 	const compactDescriptions = formContext?.compactDescriptions === true;
 
-	// If a value already exists, start in masked (read-only) mode to prevent accidental edits
-	const [maskApiKey, setMaskApiKey] = useState(!!value);
-	// Initialize the displayed value as the masked representation of the stored key
-	const [tempValue, setTempValue] = useState(() => getMaskedValue(value));
+	const { maskApiKey, showApiKey, tempValue } = state;
+	const toggleLabel = showApiKey ? 'Hide API key' : 'Show API key';
+	const inputType = maskApiKey || showApiKey ? 'text' : 'password';
+	const displayedValue = maskApiKey && showApiKey ? String(value ?? '') : tempValue;
 
 	const inputRef = useRef<HTMLInputElement>(null);
 
@@ -88,10 +122,10 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 	const onEnvVarSelect = useCallback(
 		(key: string) => {
 			const newValue = autocomplete.handleSelect(key, String(tempValue ?? ''), inputRef.current);
-			setTempValue(newValue);
+			dispatch({ type: 'change', value: newValue });
 			onChange(newValue);
 		},
-		[autocomplete, tempValue, onChange]
+		[autocomplete, tempValue, dispatch, onChange]
 	);
 
 	const handleKeyDown = useCallback(
@@ -117,10 +151,10 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 
 	// When in masked mode, scroll the input to the end so the visible trailing characters are shown
 	useEffect(() => {
-		if (inputRef.current && maskApiKey) {
+		if (inputRef.current && maskApiKey && !showApiKey) {
 			inputRef.current.scrollLeft = inputRef.current.scrollWidth;
 		}
-	}, [maskApiKey]);
+	}, [maskApiKey, showApiKey]);
 
 	return (
 		<>
@@ -128,16 +162,17 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 				id={id}
 				name={id}
 				required={required}
-				type={'text'}
+				type={inputType}
+				autoComplete="off"
 				label={label && compactDescriptions ? <FieldLabelWithInfo label={label} description={description} fieldTitle={label} /> : label}
 				inputRef={inputRef}
 				size="small"
-				value={tempValue}
+				value={displayedValue}
 				onChange={(e) => {
 					const val = e.target.value;
 					const cursor = e.target.selectionStart ?? val.length;
 					// Sync both the local display value and the form value on every keystroke
-					setTempValue(val);
+					dispatch({ type: 'change', value: val });
 					onChange(val);
 					autocomplete.handleInputChange(val, cursor, e.target);
 				}}
@@ -161,25 +196,39 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 								}
 							: {}),
 						readOnly: maskApiKey || readonly,
-						endAdornment: maskApiKey && !readonly && (
+						endAdornment: !disabled && (
 							<InputAdornment position="end">
-								<Tooltip title={t('form.apiKeyRemoveTooltip')}>
-									<Delete
-										sx={{
-											cursor: 'pointer',
-											color: 'var(--rr-color-error-light)',
-											'&:hover': {
-												color: 'var(--rr-color-error)',
-											},
-										}}
-										onClick={() => {
-											// Clear the stored key and exit masked mode so user can type a new one
-											setTempValue('');
-											onChange('');
-											setMaskApiKey(false);
-										}}
-									/>
+								<Tooltip title={toggleLabel}>
+									<IconButton
+										type="button"
+										size="small"
+										edge="end"
+										aria-label={toggleLabel}
+										aria-pressed={showApiKey}
+										onClick={() => dispatch({ type: 'toggleVisibility' })}
+									>
+										{showApiKey ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
+									</IconButton>
 								</Tooltip>
+								{maskApiKey && !readonly && (
+									<Tooltip title={t('form.apiKeyRemoveTooltip')}>
+										<Delete
+											sx={{
+												cursor: 'pointer',
+												ml: 0.5,
+												color: 'var(--rr-color-error-light)',
+												'&:hover': {
+													color: 'var(--rr-color-error)',
+												},
+											}}
+											onClick={() => {
+												// Clear the stored key and exit masked mode so user can type a new one
+												dispatch({ type: 'clearSaved' });
+												onChange('');
+											}}
+										/>
+									</Tooltip>
+								)}
 							</InputAdornment>
 						),
 					},
@@ -188,6 +237,18 @@ const ApiKeyWidget: FC<WidgetProps> = ({ id, value, label, required, autofocus, 
 			{envKeys.length > 0 && <EnvVarSuggestions open={autocomplete.isOpen} anchorEl={autocomplete.anchorEl} suggestions={autocomplete.suggestions} highlightedIndex={autocomplete.highlightedIndex} onSelect={onEnvVarSelect} onDismiss={autocomplete.handleDismiss} />}
 		</>
 	);
+};
+
+/**
+ * RJSF widget for securely entering and displaying API keys.
+ * When a key already exists, the field shows a masked value (e.g., "••••abcd")
+ * in read-only mode with a delete button to clear it. Once cleared, the field
+ * becomes editable for entering a new key. This prevents accidental modification
+ * of existing keys while still allowing replacement.
+ */
+const ApiKeyWidget: FC<WidgetProps> = (props) => {
+	const [state, dispatch] = useReducer(reduceApiKeyState, String(props.value ?? ''), createInitialApiKeyState);
+	return <ApiKeyWidgetView {...props} state={state} dispatch={dispatch} />;
 };
 
 export default ApiKeyWidget;
