@@ -780,7 +780,6 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # ------------------------------------------------------------------
 
     def beginGlobal(self) -> None:
-        """Read the node's settings, open the engine and the transaction registry, and reflect the schema."""
         # One reflection lock per node. Created before anything can reflect, so
         # `refresh_schema` and `_insertData` always find a real lock here.
         self.reflect_lock = threading.Lock()
@@ -855,7 +854,6 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             self.schema = {}
 
     def endGlobal(self) -> None:
-        """Close the open transactions and dispose of the engine."""
         if self.tx_registry:
             self.tx_registry.close_all()
         if self.engine:

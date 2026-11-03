@@ -904,7 +904,6 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             """Format the db_schema dict into a concise text block for the LLM."""
 
             def simplify_type(sql_type: str) -> str:
-                """Return the type name without its COLLATE clause, upper-cased."""
                 # Strip COLLATE clauses (e.g. VARCHAR(255) COLLATE utf8mb4_general_ci)
                 # so the LLM sees clean type names.
                 return sql_type.split('COLLATE')[0].strip().upper()
@@ -1002,7 +1001,8 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 return [dict(zip(column_names, row)) for row in rows]
 
         except Exception as e:
-            # Not only SQLAlchemyError: the clickhouse+native:// connector raises its own DatabaseException
+            # Not only SQLAlchemyError: the clickhouse+native:// connector raises its own DatabaseException,
+            # including when readonly=1 refuses a write
             if not _isDbFailure(e):
                 raise
             error(f'Error executing SQL query: {e}')

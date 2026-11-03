@@ -356,3 +356,53 @@ def test_clickhouse_sends_only_the_settings_the_profile_allows(level, settings):
     assert glb._clickhouse_read_settings(conn, 2) == settings
     assert glb._clickhouse_read_settings(conn, 2) == settings
     assert conn.lookups == 1
+
+
+class _DriverError(Exception):
+    """Stands in for clickhouse-sqlalchemy's DatabaseException: not a SQLAlchemyError, the driver error on ``.orig``."""
+
+    def __init__(self, message):
+        """Carry ``message`` and a driver error on ``.orig``.
+
+        Args:
+            message: The error text.
+        """
+        super().__init__(message)
+        self.orig = Exception(message)
+
+
+def _instance_over(exc):
+    """Return an instance whose read-only connection fails every statement with ``exc``.
+
+    Args:
+        exc: The exception to raise.
+
+    Returns:
+        The instance.
+    """
+
+    @contextmanager
+    def read_only_connection():
+        """Yield a connection whose ``execute`` raises ``exc``."""
+
+        def fail(*_args, **_kwargs):
+            """Raise ``exc``."""
+            raise exc
+
+        yield SimpleNamespace(execute=fail)
+
+    inst = _Instance.__new__(_Instance)
+    inst.IGlobal = SimpleNamespace(read_only_connection=read_only_connection)
+    return inst
+
+
+def test_a_clickhouse_refusal_is_a_failed_query():
+    """ClickHouse refuses a write under readonly=1 with its own DatabaseException; that is a failed query, not a crash."""
+    exc = _DriverError('Code: 164. DB::Exception: Cannot execute query in readonly mode')
+    assert _instance_over(exc)._executeSQLQuery('INSERT INTO t VALUES (1)') is None
+
+
+def test_a_non_database_error_still_propagates():
+    """Only database failures become None: a dialect without a read-only mode still stops the query loudly."""
+    with pytest.raises(RuntimeError, match='No read-only mode'):
+        _instance_over(RuntimeError('No read-only mode for the oracle dialect'))._executeSQLQuery('SELECT 1')
