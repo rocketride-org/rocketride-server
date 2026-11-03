@@ -5,4 +5,6 @@
 
 export { Explorer } from './Explorer';
 export { NOOP_VFS } from './types';
+export { CachedVfs } from './CachedVfs';
+export type { VfsEntry, VfsOverlay, CachedVfsOptions } from './CachedVfs';
 export type { IVirtualFileSystem, IExplorerProps, ExplorerFileAction, ExplorerConfig, ExplorerEntry, ExplorerChild, ExplorerStatus, DirNode } from './types';

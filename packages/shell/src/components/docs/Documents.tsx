@@ -42,6 +42,7 @@
 
 import { useSyncExternalStore } from 'react';
 import type { IVirtualFileSystem } from '../../modules/explorer/types';
+import { showChoiceDialog } from '../modal/confirmService';
 
 // =============================================================================
 // TYPES
@@ -97,6 +98,70 @@ export interface Editor {
 
 /** Split orientation for layout containers. */
 export type SplitOrientation = 'horizontal' | 'vertical';
+
+/** Where the new group lands relative to the one being split. */
+export type SplitPosition = 'before' | 'after';
+
+/**
+ * MIME type key for drag-and-drop editor transfers. Shared by the tab strip
+ * (drag source / tab-bar drop target) and the pane drop zones (edge-split
+ * drop target) so a dragged tab is recognised across both surfaces.
+ */
+export const EDITOR_DND_MIME = 'application/x-rr-editor';
+
+/**
+ * Transient descriptor of a tab drag in flight. Lives OUTSIDE DocumentsState
+ * on purpose: HTML5 drag-and-drop hides the transfer payload until drop, so
+ * hover-time validation (e.g. "don't offer an edge split to a group's only
+ * tab") needs a side channel — and it must never reach workspace persistence.
+ */
+export interface EditorDragSession {
+	/** The editor being dragged. */
+	editorId: string;
+	/** The group the drag started from. */
+	sourceGroupId: string;
+}
+
+/**
+ * In-flight tab drags keyed by Documents instance. Deliberately NOT methods
+ * on the class: `Public<Documents>` appears in contravariant (props) positions
+ * of the frozen shell-api contract, so adding required members to the class
+ * would break structural conformance for older contract versions. Keying by
+ * instance keeps parallel Documents instances from seeing each other's drags.
+ */
+const editorDragSessions = new WeakMap<object, EditorDragSession>();
+
+/**
+ * Marks a tab drag as in flight for a Documents instance. Called by the tab
+ * strip on dragstart so drop targets can validate the gesture during hover.
+ *
+ * @param docs          - The Documents instance the drag belongs to.
+ * @param editorId      - The editor being dragged.
+ * @param sourceGroupId - The group the drag started from.
+ */
+export function beginEditorDrag(docs: object, editorId: string, sourceGroupId: string): void {
+	editorDragSessions.set(docs, { editorId, sourceGroupId });
+}
+
+/**
+ * Clears the in-flight tab drag for a Documents instance. Called by the tab
+ * strip on dragend.
+ *
+ * @param docs - The Documents instance the drag belonged to.
+ */
+export function endEditorDrag(docs: object): void {
+	editorDragSessions.delete(docs);
+}
+
+/**
+ * Returns the in-flight tab drag for a Documents instance, or null.
+ *
+ * @param docs - The Documents instance to look up.
+ * @returns The current drag session descriptor, or null.
+ */
+export function getEditorDrag(docs: object): EditorDragSession | null {
+	return editorDragSessions.get(docs) ?? null;
+}
 
 /**
  * An editor group — a pane container that holds an ordered list of editors.
@@ -154,6 +219,26 @@ export type LayoutNode = LayoutLeaf | LayoutSplit;
  */
 export type Public<T> = { [K in keyof T]: T[K] };
 
+/**
+ * Methods added to {@link Documents} AFTER the shell-api contract froze.
+ *
+ * Keep this list current when adding a method: `Public<Documents>` sits in
+ * contravariant (React FC prop) positions of the frozen contract, so a new
+ * REQUIRED member makes every older contract version non-conformant — a
+ * v5-era app's Documents instance would stop type-checking against the live
+ * components. Listing it here makes it optional where that matters.
+ */
+export type LateDocumentsVerbs = 'requestCloseEditor' | 'requestCloseGroup' | 'saveActiveDocument' | 'flushPersistence';
+
+/**
+ * A Documents instance as components must ACCEPT one: everything the frozen
+ * contract guaranteed, plus {@link LateDocumentsVerbs} as optional members.
+ *
+ * Components feature-detect the optional verbs and fall back to the
+ * unconditional behavior — which is also exactly what an older app gets.
+ */
+export type DocumentsLike = Omit<Public<Documents>, LateDocumentsVerbs> & Partial<Pick<Public<Documents>, LateDocumentsVerbs>>;
+
 /** Complete documents model state. */
 export interface DocumentsState {
 	/** All open documents keyed by URI. */
@@ -198,6 +283,138 @@ export interface WorkspaceBinding {
 	appState: Record<string, unknown>;
 	/** Functional updater to write back to workspace appState. */
 	updateAppState: (updater: (prev: Record<string, unknown>) => Record<string, unknown>) => void;
+	/**
+	 * Optional: writes the workspace's own pending debounced state NOW.
+	 *
+	 * Documents debounces into appState and the workspace debounces appState
+	 * to disk, so a flush that stops at the first stage still leaves the
+	 * change in a timer. Supplying this pushes it down the whole chain.
+	 *
+	 * For a LIVE page only. This must NOT be wired to `pagehide`: the write
+	 * rides the engine socket, and a reload closes it mid-flight — the
+	 * server truncates the target file and never receives the body, which
+	 * turned a workspace file into zero bytes. A half-second of debounce is
+	 * worth losing; the workspace is not.
+	 */
+	flushNow?: () => void;
+}
+
+// =============================================================================
+// DIRTY-CLOSE POLICY — the third collaborator
+// =============================================================================
+//
+// Documents owns the VFS and the persisted state, so it already holds
+// everything a save needs; what it lacked was permission to ASK. These
+// hooks are that permission. The dialogs the shell falls back to mount
+// their own React root (see confirmService), so a plain class can run the
+// whole lifecycle without a host capability or an app callback.
+//
+// Each hook is TRI-STATE on purpose, because "nobody wired this" and
+// "deliberately nothing" are different intentions and the unsafe one must
+// be the explicit one:
+//
+//   omitted   → the shell's stock dialog (SAFE DEFAULT: the user decides)
+//   function  → the app owns the decision (its own chrome, its own save-as)
+//   null      → no prompt; unsaved changes are discarded (OPT-IN)
+//
+// Until this existed, absence meant silent discard — the fail-open default
+// that lost edits in every app that renders DocTabs.
+// =============================================================================
+
+/** What a dirty-close decision can be. */
+export type DirtyCloseChoice = 'save' | 'discard' | 'cancel';
+
+/** One unsaved document a close is about to destroy. */
+export interface DirtyDocInfo {
+	/** The document URI. */
+	uri: string;
+	/** The tab label (the editor's label, or the URI). */
+	label: string;
+	/** True for a never-saved document — saving it needs a path first. */
+	isNew: boolean;
+	/** Whether this instance can save it without asking for a path. */
+	canSave: boolean;
+}
+
+/** The UI policy hooks for a {@link Documents} instance (see file header). */
+export interface DocumentsUi {
+	/**
+	 * Decides what happens to documents whose LAST view is closing with
+	 * unsaved changes. Called once per close with every affected document,
+	 * so a group close asks one question rather than one per tab.
+	 *
+	 * Omit for the shell's Save/Discard/Cancel dialog; pass null to discard
+	 * without asking.
+	 */
+	confirmDirtyClose?: ((docs: readonly DirtyDocInfo[]) => Promise<DirtyCloseChoice>) | null;
+	/**
+	 * Supplies a path for a never-saved document, so "Save" can be offered
+	 * when closing one. Resolve null to abandon the save (the close is then
+	 * cancelled too — the user asked to save and we could not).
+	 *
+	 * The shell has NO default here: a save-as dialog needs the file types
+	 * of the app's own documents, which Documents cannot know. Without it,
+	 * "Save" is simply not offered for new documents.
+	 */
+	pickSavePath?: ((doc: DirtyDocInfo) => Promise<string | null>) | null;
+}
+
+/** Constructor options for {@link Documents}. */
+export interface DocumentsOptions {
+	/** Virtual file system for reading/writing document content. */
+	vfs?: IVirtualFileSystem | null;
+	/** Workspace binding for automatic persistence. */
+	workspace?: WorkspaceBinding;
+	/** Dirty-close and save-as policy (see {@link DocumentsUi}). */
+	ui?: DocumentsUi;
+}
+
+// =============================================================================
+// RESTORE HYGIENE
+// =============================================================================
+
+/**
+ * Drops documents and editors nothing can reach, on restore.
+ *
+ * Earlier builds retained a dirty document when its last editor closed
+ * (editorCount 0, no tab, unsaved content and all) and persisted it
+ * forever, so a saved blob can carry orphans from any number of past
+ * sessions. A document is reachable only through an editor that a group
+ * lists; anything else is dead weight that cannot be opened, closed, or
+ * saved by any user action.
+ *
+ * @param state - The restored state.
+ * @returns The state, or a pruned copy when anything was unreachable.
+ */
+function pruneOrphans(state: DocumentsState): DocumentsState {
+	const liveEditorIds = new Set<string>();
+	for (const group of Object.values(state.groups)) {
+		for (const eid of group?.editorIds ?? []) if (state.editors[eid]) liveEditorIds.add(eid);
+	}
+
+	const editors: Record<string, Editor> = {};
+	const refCounts = new Map<string, number>();
+	for (const eid of liveEditorIds) {
+		const editor = state.editors[eid]!;
+		editors[eid] = editor;
+		refCounts.set(editor.documentUri, (refCounts.get(editor.documentUri) ?? 0) + 1);
+	}
+
+	// Rebuild editorCount from what actually references each document: a
+	// restored count can disagree with the editors it survived alongside.
+	const documents: Record<string, Document> = {};
+	for (const [uri, doc] of Object.entries(state.documents)) {
+		const count = refCounts.get(uri);
+		if (!doc || count === undefined) continue;
+		documents[uri] = doc.editorCount === count ? doc : { ...doc, editorCount: count };
+	}
+
+	const editorsChanged = Object.keys(editors).length !== Object.keys(state.editors).length;
+	const docsChanged =
+		Object.keys(documents).length !== Object.keys(state.documents).length ||
+		Object.keys(documents).some((uri) => documents[uri] !== state.documents[uri]);
+	if (!editorsChanged && !docsChanged) return state;
+	return { ...state, documents, editors };
 }
 
 // =============================================================================
@@ -399,6 +616,7 @@ export class Documents {
 	private _state: DocumentsState;
 	private _vfs: IVirtualFileSystem | null;
 	private _workspace: WorkspaceBinding | null;
+	private _ui: DocumentsUi | null = null;
 	private _persistTimer: ReturnType<typeof setTimeout> | undefined;
 	private _listeners = new Set<() => void>();
 	private _notifyScheduled = false;
@@ -409,26 +627,40 @@ export class Documents {
 	/**
 	 * Creates a new Documents instance.
 	 *
-	 * @param vfs       - Virtual file system for reading/writing document content.
-	 * @param workspace - Optional workspace binding for automatic persistence.
-	 *                    When provided, state is restored from appState on creation
-	 *                    and debounce-saved back on every change.
+	 * Accepts either the positional form (kept verbatim — it is in the frozen
+	 * shell contract) or a single options bag, which is the only way to pass
+	 * the {@link DocumentsUi} policy. The two are told apart by `read`: every
+	 * IVirtualFileSystem has one, no DocumentsOptions does.
+	 *
+	 * @param vfsOrOptions - A virtual file system, or {@link DocumentsOptions}.
+	 * @param workspace    - Optional workspace binding for automatic persistence
+	 *                       (positional form only). When provided, state is
+	 *                       restored from appState on creation and debounce-saved
+	 *                       back on every change.
 	 */
-	constructor(vfs?: IVirtualFileSystem | null, workspace?: WorkspaceBinding) {
+	constructor(vfsOrOptions?: IVirtualFileSystem | null | DocumentsOptions, workspace?: WorkspaceBinding) {
+		const asOptions =
+			vfsOrOptions && typeof vfsOrOptions === 'object' && typeof (vfsOrOptions as IVirtualFileSystem).read !== 'function'
+				? (vfsOrOptions as DocumentsOptions)
+				: null;
+		const vfs = asOptions ? asOptions.vfs : (vfsOrOptions as IVirtualFileSystem | null | undefined);
 		this._vfs = vfs ?? null;
-		this._workspace = workspace ?? null;
+		this._workspace = (asOptions ? asOptions.workspace : workspace) ?? null;
+		this._ui = (asOptions?.ui ?? null) as DocumentsUi | null;
 
-		// Restore from workspace persistence if available
-		const persisted = workspace?.appState?.[APPSTATE_KEY] as Record<string, any> | undefined;
+		// Restore from workspace persistence if available. Read through the
+		// resolved field, NOT the positional parameter — the options form
+		// carries the binding in `vfsOrOptions`.
+		const persisted = this._workspace?.appState?.[APPSTATE_KEY] as Record<string, any> | undefined;
 		if (persisted?.documents && persisted?.groups) {
 			if (persisted.rootNode) {
 				// Current format — use directly
-				this._state = persisted as unknown as DocumentsState;
+				this._state = pruneOrphans(persisted as unknown as DocumentsState);
 			} else if (persisted.groupOrder) {
 				// Legacy format — migrate flat groupOrder to tree
 				const migrated = { ...persisted, rootNode: migrateGroupOrderToTree(persisted.groupOrder) } as unknown as DocumentsState;
 				delete (migrated as any).groupOrder;
-				this._state = migrated;
+				this._state = pruneOrphans(migrated);
 			} else {
 				this._state = makeDefaultState();
 			}
@@ -462,6 +694,11 @@ export class Documents {
 	 * Applies an immutable state update, notifies React subscribers, and
 	 * debounce-saves to workspace persistence if bound.
 	 *
+	 * EVERY change takes the debounce, structural ones included: each write
+	 * is a server round trip, and opening/closing documents is frequent
+	 * enough that per-mutation writes would be a real load. Teardown is
+	 * covered by flushPersistence() instead of by writing eagerly.
+	 *
 	 * @param updater - Pure function that receives current state and returns next state.
 	 */
 	private _update(updater: (prev: DocumentsState) => DocumentsState): void {
@@ -477,12 +714,28 @@ export class Documents {
 			});
 		}
 		// Debounce-save to workspace persistence if bound
-		if (this._workspace) {
-			clearTimeout(this._persistTimer);
-			this._persistTimer = setTimeout(() => {
-				this._workspace?.updateAppState((prev) => ({ ...prev, [APPSTATE_KEY]: this._state }));
-			}, PERSIST_DEBOUNCE_MS);
-		}
+		if (!this._workspace) return;
+		clearTimeout(this._persistTimer);
+		this._persistTimer = setTimeout(() => {
+			this._workspace?.updateAppState((prev) => ({ ...prev, [APPSTATE_KEY]: this._state }));
+		}, PERSIST_DEBOUNCE_MS);
+	}
+
+	/**
+	 * Writes this instance's state through to persistence immediately,
+	 * cancelling the pending debounce.
+	 *
+	 * Safe to call at any time and when nothing is pending: the write is an
+	 * idempotent overwrite of the same value.
+	 */
+	flushPersistence(): void {
+		if (!this._workspace) return;
+		clearTimeout(this._persistTimer);
+		this._persistTimer = undefined;
+		this._workspace.updateAppState((prev) => ({ ...prev, [APPSTATE_KEY]: this._state }));
+		// ...and on down: updateAppState only schedules the workspace's own
+		// debounced disk write, which a teardown would kill in turn.
+		this._workspace.flushNow?.();
 	}
 
 	// --- State access --------------------------------------------------------
@@ -753,12 +1006,16 @@ export class Documents {
 
 			const { [editorId]: _, ...remainingEditors } = prev.editors;
 
-			// Clean up document reference count
+			// Clean up document reference count. The LAST view closing drops
+			// the document whether or not it is dirty: retaining it left an
+			// unreachable editorCount-0 entry (no tab, unsaved content, and
+			// persisted forever). Anything that must not discard silently
+			// asks FIRST — see requestCloseEditor.
 			const doc = prev.documents[editor.documentUri];
 			let newDocs = prev.documents;
 			if (doc) {
 				const newCount = doc.editorCount - 1;
-				if (newCount <= 0 && !doc.dirty) {
+				if (newCount <= 0) {
 					const { [editor.documentUri]: __, ...rest } = prev.documents;
 					newDocs = rest;
 				} else {
@@ -775,6 +1032,199 @@ export class Documents {
 
 			return state;
 		});
+	}
+
+	// --- Policy-aware closing ------------------------------------------------
+
+	/**
+	 * Closes one editor, asking about unsaved changes first.
+	 *
+	 * The prompt happens ONLY when this is the last view of a dirty
+	 * document: closing one of two split views of the same document
+	 * destroys nothing, so asking would be both spurious and dangerous
+	 * (a "discard" would throw away content still on screen).
+	 *
+	 * @param editorId - The editor to close.
+	 * @returns True when the editor closed; false when the user cancelled.
+	 */
+	async requestCloseEditor(editorId: string): Promise<boolean> {
+		const editor = this._state.editors[editorId];
+		// Nothing to close is a satisfied request, not a refusal.
+		if (!editor) return true;
+
+		const info = this._dirtyInfo(editor.documentUri, 1);
+		if (!info) {
+			this.closeEditor(editorId);
+			return true;
+		}
+
+		const resolved = await this._resolveDirtyClose([info]);
+		if (!resolved) return false;
+		this.closeEditor(editorId);
+		return true;
+	}
+
+	/**
+	 * Closes a group, asking once about every unsaved document it is the
+	 * last home of ("3 files have unsaved changes").
+	 *
+	 * One aggregated question, never a loop: the dialog service allows one
+	 * dialog at a time, so prompting per tab would ask about the first and
+	 * silently refuse the rest.
+	 *
+	 * @param groupId - The group to close.
+	 * @returns True when the group closed; false when the user cancelled.
+	 */
+	async requestCloseGroup(groupId: string): Promise<boolean> {
+		const group = this._state.groups[groupId];
+		if (!group) return true;
+
+		// How many of each document's views live in THIS group — a document
+		// also open elsewhere survives the group close, so it is not at risk.
+		const viewsHere = new Map<string, number>();
+		for (const eid of group.editorIds) {
+			const uri = this._state.editors[eid]?.documentUri;
+			if (uri) viewsHere.set(uri, (viewsHere.get(uri) ?? 0) + 1);
+		}
+
+		const atRisk: DirtyDocInfo[] = [];
+		for (const [uri, views] of viewsHere) {
+			const info = this._dirtyInfo(uri, views);
+			if (info) atRisk.push(info);
+		}
+
+		if (atRisk.length > 0) {
+			const resolved = await this._resolveDirtyClose(atRisk);
+			if (!resolved) return false;
+		}
+		this.closeGroup(groupId);
+		return true;
+	}
+
+	/**
+	 * Saves the document in the active editor of the active group — the
+	 * Ctrl+S verb, stated once instead of re-derived in every app's
+	 * `tab:save` listener.
+	 *
+	 * @returns Resolves when the save completed (or there was nothing to do).
+	 */
+	async saveActiveDocument(): Promise<void> {
+		const s = this._state;
+		const group = s.groups[s.activeGroupId];
+		const editorId = group?.editorIds[group.activeEditorIndex];
+		const uri = editorId ? s.editors[editorId]?.documentUri : undefined;
+		if (!uri) return;
+		await this._saveOrSaveAs(uri);
+	}
+
+	// --- Dirty-close internals -----------------------------------------------
+
+	/**
+	 * Describes a document if closing `closingViews` of its views would
+	 * destroy unsaved changes, else null.
+	 *
+	 * @param uri          - The document URI.
+	 * @param closingViews - How many of its views are being closed.
+	 * @returns The risk description, or null when nothing is at stake.
+	 */
+	private _dirtyInfo(uri: string, closingViews: number): DirtyDocInfo | null {
+		const doc = this._state.documents[uri];
+		// Static documents hold nothing to lose (they never go dirty).
+		if (!doc || doc.static || !doc.dirty) return null;
+		// Surviving views elsewhere keep the content reachable and editable.
+		if (doc.editorCount > closingViews) return null;
+		const label = Object.values(this._state.editors).find((e) => e?.documentUri === uri)?.label ?? uri;
+		const canSave = !doc.isNew || typeof this._ui?.pickSavePath === 'function';
+		return { uri, label, isNew: doc.isNew, canSave };
+	}
+
+	/**
+	 * Applies the dirty-close policy to documents about to be destroyed.
+	 *
+	 * @param docs - The at-risk documents (non-empty).
+	 * @returns True to proceed with the close; false to abandon it.
+	 */
+	private async _resolveDirtyClose(docs: readonly DirtyDocInfo[]): Promise<boolean> {
+		const hook = this._ui?.confirmDirtyClose;
+
+		// Explicit opt-out: discard without asking.
+		if (hook === null) return true;
+
+		const choice = hook ? await hook(docs) : await this._askDirtyClose(docs);
+		if (choice === 'cancel') return false;
+		if (choice === 'discard') return true;
+
+		// 'save' — every document must land, or the close is abandoned: the
+		// user asked to keep this work, so failing quietly and closing anyway
+		// would destroy exactly what they tried to protect.
+		for (const doc of docs) {
+			const saved = await this._saveOrSaveAs(doc.uri);
+			if (!saved) return false;
+		}
+		return true;
+	}
+
+	/**
+	 * The shell's stock dirty-close dialog (used when no app hook is given).
+	 *
+	 * @param docs - The at-risk documents.
+	 * @returns The user's choice; 'cancel' whenever no answer was obtained.
+	 */
+	private async _askDirtyClose(docs: readonly DirtyDocInfo[]): Promise<DirtyCloseChoice> {
+		const many = docs.length > 1;
+		const title = many ? 'Unsaved changes' : `Save changes to ${docs[0]!.label}?`;
+		const message = many
+			? `${docs.length} files have unsaved changes:\n\n${docs.map((d) => `• ${d.label}`).join('\n')}\n\nYour changes will be lost if you don't save them.`
+			: "Your changes will be lost if you don't save them.";
+
+		// Save is offered only when EVERY at-risk document can actually be
+		// written — a mixed set would otherwise save some and silently skip
+		// the new ones. An app that wants save-as here wires pickSavePath.
+		const saveable = docs.every((d) => d.canSave);
+
+		const choice = await showChoiceDialog({
+			title,
+			message,
+			options: [
+				{ id: 'cancel', label: 'Cancel' },
+				{ id: 'discard', label: "Don't Save", destructive: true },
+				...(saveable ? [{ id: 'save', label: many ? 'Save All' : 'Save', primary: true }] : []),
+			],
+			cancelId: 'cancel',
+			...(many ? { width: 520 } : {}),
+		});
+
+		// A null means the dialog could not be shown at all — treat the
+		// close as refused rather than guessing (never auto-discard).
+		return choice === 'save' || choice === 'discard' ? choice : 'cancel';
+	}
+
+	/**
+	 * Saves a document, routing a never-saved one through the app's
+	 * save-as hook first.
+	 *
+	 * @param uri - The document URI.
+	 * @returns True when the content reached the VFS.
+	 */
+	private async _saveOrSaveAs(uri: string): Promise<boolean> {
+		const doc = this._state.documents[uri];
+		if (!doc || doc.static) return false;
+
+		if (!doc.isNew) {
+			await this.saveDocument(uri);
+			return this._state.documents[uri]?.dirty !== true;
+		}
+
+		const pick = this._ui?.pickSavePath;
+		if (typeof pick !== 'function') return false;
+		const info = this._dirtyInfo(uri, Number.MAX_SAFE_INTEGER) ?? { uri, label: uri, isNew: true, canSave: true };
+		const path = await pick(info);
+		// No path chosen: the save was abandoned, so the caller must not
+		// proceed as though the content had been written.
+		if (!path) return false;
+		if (!this._vfs) return false;
+		await this._vfs.write(path, doc.content);
+		return true;
 	}
 
 	/**
@@ -898,9 +1348,11 @@ export class Documents {
 	 *
 	 * @param groupId     - The group to split.
 	 * @param orientation - Split direction ('horizontal' = side-by-side, 'vertical' = stacked).
+	 * @param position    - Which side of the original the new group lands on
+	 *                      ('before' = left/top, 'after' = right/bottom). Defaults to 'after'.
 	 * @returns The new group's ID.
 	 */
-	splitGroup(groupId: string, orientation: SplitOrientation): string {
+	splitGroup(groupId: string, orientation: SplitOrientation, position: SplitPosition = 'after'): string {
 		const newGroupId = this._nextGroupId();
 		const splitNodeId = this._nextSplitId();
 		this._update((prev) => {
@@ -915,12 +1367,13 @@ export class Documents {
 			const newGroup: EditorGroup = { id: newGroupId, editorIds: [], activeEditorIndex: -1 };
 			const newLeaf: LayoutLeaf = { type: 'leaf', id: newGroupId, groupId: newGroupId };
 
-			// Replace the original leaf with a split containing both
+			// Replace the original leaf with a split containing both, the new
+			// leaf on the side the position asks for
 			const splitNode: LayoutSplit = {
 				type: 'split',
 				id: splitNodeId,
 				orientation,
-				children: [leaf, newLeaf],
+				children: position === 'before' ? [newLeaf, leaf] : [leaf, newLeaf],
 			};
 
 			return {
@@ -1007,6 +1460,8 @@ export class Documents {
 
 	/**
 	 * Moves an editor from its current group to a different group.
+	 * If the move empties the source group, the group is auto-collapsed from
+	 * the layout tree (VS Code parity, same behavior as closeEditor).
 	 *
 	 * @param editorId      - The editor to move.
 	 * @param targetGroupId - The destination group.
@@ -1016,6 +1471,7 @@ export class Documents {
 			const editor = prev.editors[editorId];
 			if (!editor) return prev;
 			const newGroups = { ...prev.groups };
+			let emptiedGroupId: string | null = null;
 
 			// Remove from source group
 			for (const gid of Object.keys(newGroups)) {
@@ -1026,6 +1482,9 @@ export class Documents {
 					let newActive = group.activeEditorIndex;
 					if (newActive >= newIds.length) newActive = Math.max(0, newIds.length - 1);
 					newGroups[gid] = { ...group, editorIds: newIds, activeEditorIndex: newActive };
+					// Track an emptied source for auto-collapse — unless it IS
+					// the target (same-group move re-adds the editor below)
+					if (newIds.length === 0 && gid !== targetGroupId) emptiedGroupId = gid;
 					break;
 				}
 			}
@@ -1036,7 +1495,14 @@ export class Documents {
 			const newIds = [...target.editorIds, editorId];
 			newGroups[targetGroupId] = { ...target, editorIds: newIds, activeEditorIndex: newIds.length - 1 };
 
-			return { ...prev, groups: newGroups, activeGroupId: targetGroupId };
+			let state: DocumentsState = { ...prev, groups: newGroups, activeGroupId: targetGroupId };
+
+			// Auto-collapse the emptied source group (no-op if it's the root leaf)
+			if (emptiedGroupId) {
+				state = collapseEmptyGroup(state, emptiedGroupId);
+			}
+
+			return state;
 		});
 	}
 
@@ -1061,7 +1527,9 @@ export class Documents {
 					const doc = newDocs[editor.documentUri];
 					if (doc) {
 						const newCount = doc.editorCount - 1;
-						if (newCount <= 0 && !doc.dirty) {
+						// Last view wins the same way as closeEditor: drop it
+						// rather than orphan it. requestCloseGroup asks first.
+						if (newCount <= 0) {
 							const { [editor.documentUri]: _, ...rest } = newDocs;
 							newDocs = rest;
 						} else {
@@ -1166,10 +1634,7 @@ export class Documents {
 	 */
 	destroy(): void {
 		// Flush any pending persistence write before destroying
-		if (this._workspace && this._persistTimer) {
-			clearTimeout(this._persistTimer);
-			this._workspace.updateAppState((prev) => ({ ...prev, [APPSTATE_KEY]: this._state }));
-		}
+		this.flushPersistence();
 		this._vfs = null;
 		this._workspace = null;
 		this._persistTimer = undefined;

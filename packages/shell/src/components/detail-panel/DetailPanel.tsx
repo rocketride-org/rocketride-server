@@ -31,6 +31,7 @@
  */
 
 import React, { CSSProperties, ReactNode, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ViewMenuEntry } from '../../types/viewMenu';
 import { ViewMenuBadge } from '../tab-control/ViewMenuBadge';
 import { CLOSE_GLYPH, trapFocus, acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer } from '../modal/Modal';
@@ -471,6 +472,17 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 	const minSize = bottom ? MIN_HEIGHT : (minWidth ?? MIN_WIDTH);
 	// Drives the slide-in: false on mount (off-screen), flipped true next frame.
 	const [entered, setEntered] = useState(false);
+	// The declared owning surface a `contained` overlay portals into (see the
+	// containment-anchor note before the render): undefined = unresolved (the
+	// probe has not mounted), null = no declaring ancestor (render in place).
+	const [overlayHost, setOverlayHost] = useState<HTMLElement | null | undefined>(undefined);
+	/** Probe callback ref — resolves the nearest `data-rr-overlay-root`. */
+	const probeRef = (el: HTMLSpanElement | null): void => {
+		if (!el) return;
+		const host = el.closest('[data-rr-overlay-root]');
+		const resolved = host instanceof HTMLElement ? host : null;
+		setOverlayHost((prev) => (prev === resolved ? prev : resolved));
+	};
 	// The drawer box — Tab focus is trapped inside it while open.
 	const panelRef = useRef<HTMLDivElement>(null);
 	// The overlay box — its size IS the owning surface, the resize clamp's
@@ -817,6 +829,15 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 		return null;
 	}
 
+	// ── Containment anchor ──────────────────────────────────────────────────
+	// A `contained` drawer must cover its OWNING SURFACE — the whole document
+	// area (a VS Code webview page, the cloud settings dialog) — never
+	// whichever inner pane happens to be positioned. Surfaces declare
+	// themselves with `data-rr-overlay-root`; the drawer portals its overlay
+	// into the nearest declaring ancestor of its render site. No declaring
+	// ancestor → render in place (legacy nearest-positioned-ancestor rule).
+	// Resolution is in render via the probe's layout ref below.
+
 	// ── Stack geometry (derived from the registry every render) ────────────
 	// Push order is bottom -> top; this panel's index locates it. While a
 	// right-drawer stack is live, every size derives from the shared TOP
@@ -833,7 +854,7 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 	// Mirror for the registry (push seeding) and the resize handlers.
 	sizeRef.current = renderSize;
 
-	return (
+	const overlayNode = (
 		/* Dismissal is deliberate-only per the 2026-07-08 design decision: the
 		   close glyph, back arrow, sliver, or Escape — clicking the dim
 		   backdrop must NOT close. */
@@ -959,5 +980,17 @@ export function DetailPanel({ open, onClose, avatar, title, subtitle, tabs, acti
 				/>
 			)}
 		</div>
+	);
+
+	// A non-contained drawer owns the viewport (position: fixed) — render in
+	// place. A contained one portals into its declared owning surface; until
+	// the probe resolves (first open frame) only the probe renders, and with
+	// no declaring ancestor it falls back to in-place (legacy rule).
+	if (!contained) return overlayNode;
+	return (
+		<>
+			<span ref={probeRef} style={{ display: 'none' }} />
+			{overlayHost !== undefined && (overlayHost ? createPortal(overlayNode, overlayHost) : overlayNode)}
+		</>
 	);
 }

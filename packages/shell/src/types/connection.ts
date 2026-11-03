@@ -59,6 +59,32 @@ export enum ConnectionState {
 
 }
 
+/**
+ * The tab's auth journey — ORTHOGONAL to ConnectionState (the socket can be
+ * CONNECTED anonymously while the user is signed out), and PERSISTED per tab
+ * so it survives the OAuth redirect's page unloads. Owned by the
+ * ConnectionManager: it seeds the value from the tab's persisted record at
+ * boot, and every transition (sign-in launch, completion, logout) updates
+ * ConnectionStatus.authPhase, so consumers follow it reactively like every
+ * other status field.
+ */
+export enum AuthPhase {
+	/** No sign-in has ever been attempted in this tab. */
+	FRESH = 'fresh',
+
+	/** A sign-in launched and has not completed. Seen by a LATER page load
+	 *  (no ?code=), it means the person abandoned the IdP — show the
+	 *  signed-out surface, never re-fire the redirect. */
+	AUTHORIZING = 'authorizing',
+
+	/** A sign-in completed in this tab. */
+	AUTHENTICATED = 'authenticated',
+
+	/** The person EXPLICITLY signed out here — the auth gate shows the
+	 *  signed-out surface instead of auto-starting a login. */
+	SIGNED_OUT = 'signed-out',
+}
+
 // =============================================================================
 // CONNECTION MODE
 // =============================================================================
@@ -88,6 +114,13 @@ export type ConnectionMode = 'cloud' | 'local' | 'onprem' | 'docker' | 'service'
 export interface ConnectionStatus {
 	/** Current connection state. */
 	state: ConnectionState;
+
+	/** The tab's auth journey (see {@link AuthPhase}) — persisted per tab,
+	 *  surfaced here so consumers track it like any other status field.
+	 *  OPTIONAL in the type only for the frozen contract floors (the field
+	 *  rides event payloads, a contravariant position); the manager always
+	 *  sets it — absent reads as FRESH. */
+	authPhase?: AuthPhase;
 
 	/** How this connection reaches the server. */
 	connectionMode: ConnectionMode;

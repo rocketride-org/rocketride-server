@@ -23,6 +23,7 @@ Usage:
     shared = await fs.list_dir('@/Team/Development/reports')
 """
 
+import json
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
@@ -820,6 +821,72 @@ class FileStore:
         except Exception:
             await self._force_close_handle(handle_id)
             raise
+
+    async def put_json(self, path: str, value: Any) -> int:
+        """
+        Write a JSON value to a file in ONE operation.
+
+        The handle API (open_write / write_chunk / close_write) spreads a
+        write across several round trips, and a handle that never reaches
+        close_write is still COMMITTED by disconnect cleanup — so a client
+        that dies between open and write replaces the file with whatever it
+        had buffered, which is nothing. That is how a workspace file became
+        zero bytes on a browser reload.
+
+        This has no such window: one request, one backend write, no
+        intermediate state anything could commit on its behalf. A request
+        that never arrives leaves the file exactly as it was.
+
+        Deliberately NOT a temp-file-then-rename: object stores have no
+        rename (a move is copy + delete — more round trips, no atomicity,
+        and stray objects), while their PUT already replaces an object
+        atomically. The single write is both the simplest and the most
+        atomic thing every backend can offer.
+
+        Args:
+            path: Relative path within the account store.
+            value: Any JSON-serialisable value.
+
+        Returns:
+            Number of bytes written.
+
+        Raises:
+            StorageError: If the value is not serialisable, exceeds
+                MAX_CHUNK_SIZE, or the write fails.
+        """
+        try:
+            payload = json.dumps(value, indent=2).encode('utf-8')
+        except (TypeError, ValueError) as exc:
+            raise StorageError(f'Value is not JSON-serialisable for {path}: {exc}') from exc
+
+        # One message carries the whole document, so it is bounded by the
+        # same chunk ceiling a single fs_write is.
+        if len(payload) > MAX_CHUNK_SIZE:
+            raise StorageError(f'JSON payload for {path} exceeds {MAX_CHUNK_SIZE} bytes; use the streaming handle API')
+
+        await self.write(path, payload)
+        return len(payload)
+
+    async def get_json(self, path: str) -> Any:
+        """
+        Read a file and parse it as JSON — the counterpart to ``put_json``,
+        in one operation rather than open / read / close.
+
+        Args:
+            path: Relative path within the account store.
+
+        Returns:
+            The parsed value.
+
+        Raises:
+            StorageError: If the file is missing, unreadable, or not valid
+                JSON.
+        """
+        raw = await self.read(path)
+        try:
+            return json.loads(raw.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise StorageError(f'File is not valid JSON: {path}: {exc}') from exc
 
     async def delete(self, path: str) -> None:
         """

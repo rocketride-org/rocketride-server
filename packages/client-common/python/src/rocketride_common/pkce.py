@@ -94,7 +94,11 @@ def encode_cd_credential(grant: Dict[str, str]) -> str:
     token ever reaches the client.
 
     Args:
-        grant: Dict with ``code``, ``verifier``, and ``redirectUri``.
+        grant: Dict with ``code``, ``verifier``, ``redirectUri``, and
+            (for non-web clients) ``clientId`` — the Zitadel client that
+            minted the code. Zitadel binds codes to their client, so the
+            server-side exchange must name the same one; absent means the
+            server's default (web) client.
 
     Returns:
         The ``cd_``-prefixed credential string.

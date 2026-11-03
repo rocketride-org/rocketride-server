@@ -46,6 +46,7 @@
  */
 
 import { repointRemote, isRemoteLoaded, invalidateAppDescriptor, isDevRemote } from './appLoader';
+import { sessionScopedStore } from './devGate';
 
 // =============================================================================
 // STORAGE
@@ -105,14 +106,21 @@ export interface AppVersionOverride {
 const memoryOverrides: Record<string, AppVersionOverride> = {};
 
 /**
- * Writes the override map to sessionStorage.
+ * Writes the override map to the tab-session store.
+ *
+ * Tab-session scoped (sessionScopedStore): a FRAMED shell keeps its
+ * overrides frame-local — the BUILT preview iframe boots with `?version=N`
+ * and seeds an override for itself, and in shared sessionStorage that seed
+ * would outrank the dev overlay in the top shell AND the live preview
+ * (resolveServerEntry's precedence), silently serving the published
+ * version everywhere in the tab.
  *
  * @param map - The full map to persist.
  * @returns True when storage accepted the write.
  */
 function persistOverrides(map: Record<string, AppVersionOverride>): boolean {
 	try {
-		sessionStorage.setItem(SS_OVERRIDES_KEY, JSON.stringify(map));
+		sessionScopedStore().setItem(SS_OVERRIDES_KEY, JSON.stringify(map));
 		return true;
 	} catch {
 		return false;
@@ -120,14 +128,14 @@ function persistOverrides(map: Record<string, AppVersionOverride>): boolean {
 }
 
 /**
- * Reads the full override map from sessionStorage.
+ * Reads the full override map from the tab-session store.
  *
  * @returns App id → override; empty object when none or storage unavailable.
  */
 export function getAppVersionOverrides(): Record<string, AppVersionOverride> {
 	let stored: Record<string, AppVersionOverride> = {};
 	try {
-		stored = JSON.parse(sessionStorage.getItem(SS_OVERRIDES_KEY) ?? '{}') as Record<string, AppVersionOverride>;
+		stored = JSON.parse(sessionScopedStore().getItem(SS_OVERRIDES_KEY) ?? '{}') as Record<string, AppVersionOverride>;
 	} catch { /* storage unavailable — the in-memory mirror stands in */ }
 	return { ...stored, ...memoryOverrides };
 }

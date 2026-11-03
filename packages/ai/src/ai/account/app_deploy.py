@@ -653,8 +653,11 @@ def _zip_guard(archive: Any) -> str:
 _REPLY_MAX_CHARS = 4000
 
 # Response cap for the build_log verb — long logs serve their TAIL (the
-# failure always lands at the end; the full file stays in the store).
-_BUILD_LOG_MAX_CHARS = 256 * 1024
+# failure always lands at the end; the full file stays in the store). BYTES,
+# because the tail is fetched as a RANGED store read: a rocket-ui-class build
+# writes a multi-megabyte log, and reading the whole object just to keep its
+# last quarter-megabyte made the log modal crawl on S3-backed stores.
+_BUILD_LOG_MAX_BYTES = 256 * 1024
 
 
 async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -815,7 +818,7 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         # Refresh the acting user's manifest (data + signal); other audience
         # members pick the row up on their next account rebuild/login.
         try:
-            from ai.account.dev_overlay import push_refresh
+            from ai.account.manifest_push import push_refresh
 
             await push_refresh(conn._server, conn._account_info.userId, source='app-publish')
         except Exception as exc:
@@ -982,15 +985,33 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
             return conn.build_error(request, f'v{version} of {app_id} has no content home on the server')
         from ai.account.store import Store
 
+        # Ranged tail read: open_read reports the size, read_chunk fetches
+        # only the final cap's worth of bytes (S3/Azure range GET; seek on
+        # filesystem) — never the whole log.
+        log_path = f'{content_root}/build.log'
+        store = Store.instance()._store
         try:
-            data = await Store.instance()._store.read_bytes(f'{content_root}/build.log')
+            opened = await store.open_read(log_path)
         except Exception:
             # No log (legacy build, or the worker never ran) — an empty log
             # is a normal answer, not an error.
             return conn.build_response(request, body={'appId': app_id, 'version': version, 'log': ''})
+        context = opened.get('context')
+        size = int(opened.get('size') or 0)
+        try:
+            offset = max(0, size - _BUILD_LOG_MAX_BYTES)
+            data = await store.read_chunk(log_path, context, offset, _BUILD_LOG_MAX_BYTES) if size > 0 else b''
+        except Exception:
+            return conn.build_response(request, body={'appId': app_id, 'version': version, 'log': ''})
+        finally:
+            try:
+                await store.close_read(log_path, context)
+            except Exception:
+                pass
+        # errors='replace': a byte-offset tail can start mid-UTF-8 sequence.
         text = data.decode('utf-8', errors='replace')
-        if len(text) > _BUILD_LOG_MAX_CHARS:
-            text = f'... (showing the last {_BUILD_LOG_MAX_CHARS} characters)\n{text[-_BUILD_LOG_MAX_CHARS:]}'
+        if size > _BUILD_LOG_MAX_BYTES:
+            text = f'... (showing the last {_BUILD_LOG_MAX_BYTES} bytes of {size})\n{text}'
         return conn.build_response(request, body={'appId': app_id, 'version': version, 'log': text})
 
     # ── where — the reverse index (audience → served version) ─────────────

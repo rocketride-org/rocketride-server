@@ -30,6 +30,7 @@ import type { ConnectResult, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, 
 import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../billing/types';
 import type { ActiveTask } from '../billing/components/BillingDashboard';
 import { ProfilePanel } from './components/ProfilePanel';
+import { ProfileSection } from './components/ProfileSection';
 // EnvScopeCard removed — env management is now in the standalone Environment page
 import { BillingPanel } from './components/BillingPanel';
 import { ApiKeysPanel } from './components/ApiKeysPanel';
@@ -56,31 +57,6 @@ const styles = {
 		fontSize: 13,
 		color: 'var(--rr-text-primary)',
 	} as CSSProperties,
-	/** Full-bleed frosted-glass overlay shown when the shell client is disconnected. */
-	disconnectOverlay: {
-		position: 'absolute',
-		inset: 0,
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		backgroundColor: 'rgba(0, 0, 0, 0.45)',
-		backdropFilter: 'blur(8px)',
-		WebkitBackdropFilter: 'blur(8px)',
-		zIndex: 1000,
-	} as CSSProperties,
-	/** Non-interactive status button rendered inside the disconnect overlay. */
-	disconnectButton: {
-		padding: '14px 40px',
-		fontSize: 14,
-		fontWeight: 700,
-		fontFamily: 'var(--rr-font-family)',
-		color: 'var(--rr-fg-button)',
-		backgroundColor: 'transparent',
-		border: '2px solid rgba(255, 255, 255, 0.7)',
-		borderRadius: 6,
-		cursor: 'default',
-		letterSpacing: '0.05em',
-	} as CSSProperties,
 	/**
 	 * Fills the space below the top TabControl strip; TabPanel's
 	 * 100%-height wrapper resolves against this definite flex box.
@@ -91,6 +67,49 @@ const styles = {
 		flex: 1,
 		minWidth: 0,
 		minHeight: 0,
+	} as CSSProperties,
+};
+
+/** Embedded-mode extras: the live workspace chip row on Billing / API Keys. */
+const embeddedStyles = {
+	/** Embedded pane root: UNLIKE styles.root this must NOT clamp height or
+	 *  clip — the Settings page's content pane owns the scroll, so this
+	 *  container just grows with its content (the EnvironmentView pattern).
+	 *  Deliberately NOT position:relative: the record drawers (`contained`
+	 *  DetailPanels) anchor to the nearest positioned ancestor, which must be
+	 *  the settings dialog/viewport — not this scrolling pane, or the drawer
+	 *  scrolls away with the content. */
+	root: {
+		width: '100%',
+		fontFamily: 'var(--rr-font-family, Roboto, sans-serif)',
+		fontSize: 13,
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+	chipRow: {
+		display: 'inline-flex',
+		alignItems: 'center',
+		gap: 6,
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+		marginBottom: 12,
+	} as CSSProperties,
+	chip: {
+		display: 'inline-block',
+		padding: '1px 8px',
+		borderRadius: 10,
+		background: 'var(--rr-bg-surface-alt)',
+		border: '1px solid var(--rr-border)',
+		fontWeight: 600,
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+	chipLink: {
+		background: 'none',
+		border: 'none',
+		padding: 0,
+		cursor: 'pointer',
+		color: 'var(--rr-text-link)',
+		fontSize: 12,
+		fontFamily: 'inherit',
 	} as CSSProperties,
 };
 
@@ -184,6 +203,26 @@ export interface IAccountViewProps {
 	/** Called when the user drills into / backs out of a team. */
 	onActiveTeamIdChange: (id: string | null) => void;
 
+	// -- Embedded mode (the Settings page's Account group) ----------------------
+	/** Render ONE pane with no tab strip: the collapsed 3-section IA inside
+	 *  the Settings nav — 'profile' (identity + workspace master card,
+	 *  absorbing the old Organization/Teams/Members tabs), 'billing', or
+	 *  'api-keys'. Absent = the classic 6-tab view (unchanged). */
+	embeddedSection?: 'profile' | 'billing' | 'api-keys';
+	/** Settings-nav navigation for embedded cross-links (the Billing / API
+	 *  Keys workspace chip's "change…" jumps to the Profile section). */
+	onNavigateSection?: (sectionId: string) => void;
+	/** Renames ANY workspace by id (the manage-workspaces drawer). */
+	onRenameWorkspace?: (orgId: string, name: string) => Promise<void>;
+	/** Creates a new workspace; the server switches the caller into it. */
+	onCreateWorkspace?: (name: string) => Promise<void>;
+	/** Leaves a workspace the user belongs to (server enforces the rules). */
+	onLeaveWorkspace?: (orgId: string) => Promise<void>;
+	/** Deletes a workspace the user administers (destroys its data). */
+	onDeleteWorkspace?: (orgId: string) => Promise<void>;
+	/** Dry-run for the delete confirm: member count + billing blocker. */
+	onDeleteWorkspacePrecheck?: (orgId: string) => Promise<{ members: number; subscriptionActive: boolean }>;
+
 	// -- Callbacks (async, host handles actual server calls) --------------------
 	/** Persists updated profile fields. */
 	onSaveProfile: (fields: ProfileUpdate) => Promise<void>;
@@ -191,8 +230,6 @@ export interface IAccountViewProps {
 	onSetDevTeam: (teamId: string) => Promise<void>;
 	/** Switches the user's active organization. */
 	onSetDefaultOrg: (orgId: string) => Promise<void>;
-	/** Removes the user from the organization with the given ID. Hosts that omit it (the VS Code account view) show no Leave button. */
-	onLeaveOrg?: (orgId: string) => Promise<void>;
 	/**
 	 * @deprecated Unused — the shell owns the logout flow (`shell:logoutRequest`);
 	 * no panel in this view renders a sign-out control. Kept optional so existing
@@ -249,7 +286,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onLeaveOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, embeddedSection, onNavigateSection, onRenameWorkspace, onCreateWorkspace, onLeaveWorkspace, onDeleteWorkspace, onDeleteWorkspacePrecheck, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -259,15 +296,6 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	const isOrgAdmin = useMemo(() => {
 		return profile?.organization?.permissions?.includes('org.admin') ?? false;
 	}, [profile]);
-
-	/**
-	 * The user's organization memberships for the Organization tab's switcher.
-	 * Prefers the server-side profile over the cached auth token; falls back to
-	 * the single active org when the profile carries no membership list.
-	 */
-	const activeOrgInfo = profile?.organization ?? authUser?.organization ?? null;
-	const memberships = useMemo(() => profile?.memberships ?? (activeOrgInfo ? [activeOrgInfo] : []), [profile?.memberships, activeOrgInfo]);
-	const defaultOrgId = profile?.defaultOrgId ?? activeOrgInfo?.id;
 
 	/**
 	 * Returns true when the current user has team.admin on the given team.
@@ -350,7 +378,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<ContentHeader title="Profile" subtitle="Your identity, sign-in, and defaults for this account." />
 						<div style={commonStyles.tabContent}>
 							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-							<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDevTeam={onSetDevTeam} />
+							<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDevTeam={onSetDevTeam} onSetDefaultOrg={onSetDefaultOrg} />
 						</div>
 					</>
 				),
@@ -382,7 +410,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<ContentHeader title="Organization" subtitle="Your organization's name and settings." />
 						<div style={commonStyles.tabContent}>
 							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-							<OrganizationPanel org={org} onSave={onSaveOrgName} isOrgAdmin={isOrgAdmin} memberships={memberships} defaultOrgId={defaultOrgId} onSetDefaultOrg={onSetDefaultOrg} onLeaveOrg={onLeaveOrg} />
+							<OrganizationPanel org={org} onSave={onSaveOrgName} isOrgAdmin={isOrgAdmin} />
 						</div>
 					</>
 				),
@@ -410,11 +438,92 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, keys, org, memberships, defaultOrgId, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onLeaveOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isActiveTeamAdmin]
+		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isActiveTeamAdmin]
 	);
 
 	// =========================================================================
-	// RENDER
+	// RENDER — EMBEDDED MODE (one pane, no tab strip)
+	// =========================================================================
+
+	if (embeddedSection) {
+		/** The live workspace chip + "change…" link shown on the Billing and
+		 *  API Keys panes — the one committed switcher lives on Profile. */
+		const workspaceName = profile?.organization?.name ?? authUser?.organization?.name ?? '';
+		const chip = workspaceName ? (
+			<span style={embeddedStyles.chipRow}>
+				for <span style={embeddedStyles.chip}>{workspaceName}</span>
+				{onNavigateSection && (
+					<button style={embeddedStyles.chipLink} onClick={() => onNavigateSection('account:profile')}>
+						change…
+					</button>
+				)}
+			</span>
+		) : null;
+
+		return (
+			<div style={embeddedStyles.root}>
+				{embeddedSection === 'profile' && (
+					<>
+						<ContentHeader title="Profile" subtitle="Who you are, and the workspace you're working in." />
+						<div style={commonStyles.tabContent}>
+							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
+							<ProfileSection
+								profile={profile}
+								authUser={authUser}
+								members={members}
+								teams={teams}
+								teamDetail={teamDetail}
+								activeTeamId={activeTeamId}
+								isOrgAdmin={isOrgAdmin}
+								isActiveTeamAdmin={isActiveTeamAdmin}
+								onActiveTeamIdChange={onActiveTeamIdChange}
+								onLoadTeamDetail={onLoadTeamDetail}
+								onSaveProfile={onSaveProfile}
+								onSetDevTeam={async (id) => onSetDevTeam(id)}
+								onSetDefaultOrg={async (id) => onSetDefaultOrg(id)}
+								onRenameWorkspace={onRenameWorkspace ?? (async (_orgId, name) => onSaveOrgName(name))}
+								{...(onCreateWorkspace ? { onCreateWorkspace } : {})}
+								{...(onLeaveWorkspace ? { onLeaveWorkspace } : {})}
+								{...(onDeleteWorkspace ? { onDeleteWorkspace } : {})}
+								{...(onDeleteWorkspacePrecheck ? { onDeleteWorkspacePrecheck } : {})}
+								onInviteMember={onInviteMember}
+								onUpdateMemberRole={onUpdateMemberRole}
+								onRemoveMember={onRemoveMember}
+								onResendInvite={onResendInvite}
+								onCreateTeam={onCreateTeam}
+								onDeleteTeam={onDeleteTeam}
+								onAddTeamMember={onAddTeamMember}
+								onEditTeamMemberPerms={onEditTeamMemberPerms}
+								onRemoveTeamMember={onRemoveTeamMember}
+							/>
+						</div>
+					</>
+				)}
+				{embeddedSection === 'billing' && (
+					<>
+						<ContentHeader title="Billing" subtitle="Subscriptions, account balance, and payment methods." />
+						<div style={commonStyles.tabContent}>
+							{chip}
+							<BillingPanel isConnected={isConnected} subscriptions={subscriptions} loading={billingLoading} error={billingError} creditBalance={creditBalance} apps={apps} onCancelSubscription={onCancelSubscription} onOpenPortal={handlePortal} isOrgAdmin={isOrgAdmin} onSubscribe={onSubscribe} transactions={transactions} usageByUser={usageByUser} usageByTeam={usageByTeam} activeTasks={activeTasks} dashboardLoading={dashboardLoading} onTransactionPage={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} topupPlans={topupPlans} onBuyTopup={onBuyTopup} allPlans={allPlans} onPurchaseTopup={onPurchaseTopup} onUpgradeSubscription={onUpgradeSubscription} />
+						</div>
+					</>
+				)}
+				{embeddedSection === 'api-keys' && (
+					<>
+						<ContentHeader title="API Keys" subtitle="Create and revoke keys for programmatic access." />
+						<div style={commonStyles.tabContent}>
+							{chip}
+							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
+							<ApiKeysPanel keys={keys} teams={teams} onCreateKey={onCreateKey} onRevokeKey={onRevokeKey} />
+						</div>
+					</>
+				)}
+			</div>
+		);
+	}
+
+	// =========================================================================
+	// RENDER — CLASSIC TAB VIEW
 	// =========================================================================
 
 	return (
@@ -426,14 +535,6 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				<TabPanel panels={panels} activeId={section} />
 			</div>
 
-			{/* Frosted-glass overlay with a disabled status button when disconnected. */}
-			{!isConnected && (
-				<div style={styles.disconnectOverlay}>
-					<button type="button" style={styles.disconnectButton} disabled>
-						[ Disconnected ]
-					</button>
-				</div>
-			)}
 		</div>
 	);
 };

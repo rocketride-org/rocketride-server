@@ -133,6 +133,10 @@ async def handle_fetch(request: Request):
     # If the token carries a download_name, force a download with that filename
     # (Content-Disposition: attachment). Otherwise serve inline so media
     # viewers can stream the file (video/audio/pdf) in the browser.
+    # Any-origin CORS is CORRECT here: the signed token in the URL is the
+    # entire authorization (no cookies are read), so this is the presigned-URL
+    # model — hosts outside the engine's origin (the VS Code extension's
+    # dev-tool webviews) fetch file content with these URLs.
     if download_name:
         return FileResponse(
             path=str(abs_path),
@@ -140,6 +144,7 @@ async def handle_fetch(request: Request):
             headers={
                 'Cache-Control': 'private, max-age=3600',
                 'Accept-Ranges': 'bytes',
+                'Access-Control-Allow-Origin': '*',
             },
         )
     return FileResponse(
@@ -148,6 +153,7 @@ async def handle_fetch(request: Request):
         headers={
             'Cache-Control': 'private, max-age=3600',
             'Accept-Ranges': 'bytes',
+            'Access-Control-Allow-Origin': '*',
         },
     )
 
@@ -203,11 +209,14 @@ async def handle_fetch_dir(request: Request):
 
     # Bundle directories are immutable (one upload, one hash) — cache hard.
     # Content-Type comes from the file extension (remoteEntry.js → JS).
+    # Any-origin CORS: the signed token in the path is the authorization
+    # (no cookies) — same presigned-URL reasoning as handle_fetch above.
     return FileResponse(
         path=str(abs_path),
         content_disposition_type='inline',
         headers={
             'Cache-Control': 'private, max-age=86400, immutable',
             'Accept-Ranges': 'bytes',
+            'Access-Control-Allow-Origin': '*',
         },
     )

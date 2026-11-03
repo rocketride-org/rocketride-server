@@ -27,7 +27,16 @@
 # =============================================================================
 
 from dataclasses import dataclass
-from typing import Any, NotRequired, Optional, TypedDict
+import sys
+from typing import Any, Optional
+
+if sys.version_info >= (3, 12):
+    from typing import NotRequired, TypedDict
+else:
+    # The repo floor is 3.10 (AGENTS.md): NotRequired lands in typing on
+    # 3.11, and pydantic refuses typing.TypedDict before 3.12 — both names
+    # come from typing_extensions on older interpreters.
+    from typing_extensions import NotRequired, TypedDict
 
 from pydantic import BaseModel
 

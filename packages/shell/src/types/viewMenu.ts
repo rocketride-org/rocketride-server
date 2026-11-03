@@ -69,6 +69,12 @@ export interface ViewMenuEntry {
 	 */
 	disabled?: boolean;
 	/**
+	 * When true, the entry is a drag source AND drop target for TabControl's
+	 * `onReorder` (reorderable tabs, e.g. the sidebar's pinned dev tools).
+	 * Ignored by SidebarMenu, and by TabControl without `onReorder`.
+	 */
+	draggable?: boolean;
+	/**
 	 * Child entries, making this entry an expandable SECTION in SidebarMenu
 	 * (one level deep — children never declare children of their own). A
 	 * section row does not navigate: clicking it expands its children and

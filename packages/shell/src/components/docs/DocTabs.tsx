@@ -32,28 +32,90 @@
 import React, { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
-import type { Documents, Public, SplitOrientation } from './Documents';
+import { EDITOR_DND_MIME, beginEditorDrag, endEditorDrag } from './Documents';
+import type { DocumentsLike, SplitOrientation } from './Documents';
 
 // =============================================================================
 // STYLES
 // =============================================================================
 
-/** MIME type key for drag-and-drop editor transfers. */
-const DND_MIME = 'application/x-rr-editor';
+/** MIME type key for drag-and-drop editor transfers (shared with DocDropZones). */
+const DND_MIME = EDITOR_DND_MIME;
+
+/** Class names for the bar and its scrollable tab region (hover-scrollbar CSS). */
+const BAR_CLASS = 'rr-doctabs-bar';
+const SCROLL_CLASS = 'rr-doctabs-scroll';
+const SCROLL_STYLE_ID = 'rr-doctabs-scroll-style';
+
+/**
+ * Injects the hover-scrollbar rules exactly once.
+ *
+ * Inline styles cannot express the VS Code behaviour where the tab strip's
+ * horizontal scrollbar is invisible until the bar is hovered: the thumb colour
+ * must flip on an ancestor's `:hover`. The thin scrollbar is always declared
+ * (so overflowing strips reserve its lane and nothing jumps on hover) with a
+ * transparent thumb that only takes the token colour while the bar is hovered.
+ */
+function ensureScrollStyle(): void {
+	// Skip when there is no document (non-browser environments).
+	if (typeof document === 'undefined') return;
+	// Already injected — nothing to do.
+	if (document.getElementById(SCROLL_STYLE_ID)) return;
+	const el = document.createElement('style');
+	el.id = SCROLL_STYLE_ID;
+	el.textContent = [
+		`.${SCROLL_CLASS} { scrollbar-width: thin; scrollbar-color: transparent transparent; }`,
+		`.${BAR_CLASS}:hover .${SCROLL_CLASS} { scrollbar-color: var(--rr-bg-scrollbar-thumb, rgba(121, 121, 121, 0.4)) transparent; }`,
+	].join('\n');
+	document.head.appendChild(el);
+}
+
+// Inject once at module load (safe no-op outside the DOM) so the first paint
+// already has the hover rules — a mount effect would run one frame too late.
+ensureScrollStyle();
+
+/** Upper-corner radius of the active tab AND the radius of the concave
+    connectors flaring its bottom edge into the strip. */
+const TAB_RADIUS = 8;
 
 const styles = {
+	// The strip: a full-width shaded band the tabs sit on, VS Code's
+	// editorGroupHeader.tabsBackground. The --rr-doctabs-* tokens are mapped
+	// to the real --vscode-tab-* variables in the VS Code host; everywhere
+	// else the fallbacks reuse the stock semantic tokens.
 	bar: (_isActiveGroup: boolean, isDragOver: boolean): CSSProperties => ({
 		display: 'flex',
 		height: 36,
 		flexShrink: 0,
-		borderBottom: '1px solid var(--rr-border)',
-		borderTop: isDragOver ? '2px solid var(--rr-brand)' : 'none',
-		paddingTop: isDragOver ? 0 : 3,
-		backgroundColor: 'var(--rr-bg-paper)',
+		// NO bottom rule: the strip and the editor below separate by fill
+		// alone, exactly like VS Code's tab bar. The drop-target cue is an
+		// inset shadow (a border would change the bar's inner height and
+		// jiggle the tabs mid-drag).
+		boxShadow: isDragOver ? 'inset 0 2px 0 var(--rr-brand)' : 'none',
+		backgroundColor: 'var(--rr-doctabs-bg, var(--rr-bg-widget))',
 		overflow: 'hidden',
 		alignItems: 'stretch',
 	}),
-	tab: (isActive: boolean, isActiveGroup: boolean, isHovered: boolean, isDragging: boolean): CSSProperties => ({
+	// The scrollable tab region — the toolbar buttons sit OUTSIDE it, pinned to
+	// the bar's right edge, so only the tabs pan. Overflow handling lives in
+	// the injected SCROLL_CLASS rules (thumb visible only while the bar is
+	// hovered, VS Code-style).
+	tabsScroll: {
+		display: 'flex',
+		alignItems: 'stretch',
+		flex: 1,
+		minWidth: 0,
+		overflowX: 'auto',
+		overflowY: 'hidden',
+	} as CSSProperties,
+	// Modern VS Code tab anatomy: the active tab is a browser-style tab —
+	// editor-background fill, ROUNDED upper corners, and concave connectors
+	// flaring its bottom edge into the strip (the corner pieces below).
+	// Inactive tabs have NO fill of their own — the strip shows through —
+	// and a neutral hover overlay that must never read as the active fill.
+	// 1px separators divide them, dropped next to the active tab where VS
+	// Code hides them. Weight stays normal — VS Code never bolds the label.
+	tab: (isActive: boolean, _isActiveGroup: boolean, isHovered: boolean, isDragging: boolean, hideSeparator: boolean): CSSProperties => ({
 		display: 'flex',
 		alignItems: 'center',
 		gap: 6,
@@ -62,17 +124,36 @@ const styles = {
 		cursor: 'grab',
 		fontSize: 12,
 		fontFamily: 'var(--rr-font-family)',
-		fontWeight: isActive ? 600 : 400,
-		color: isActive ? 'var(--rr-text-primary)' : 'var(--rr-text-secondary)',
+		color: isActive
+			? 'var(--rr-doctabs-fg-active, var(--rr-text-primary))'
+			: 'var(--rr-doctabs-fg-inactive, var(--rr-text-secondary))',
 		backgroundColor: isActive
-			? 'var(--rr-bg-default)'
-			: isHovered ? 'var(--rr-bg-surface-alt)' : 'transparent',
-		borderRight: '1px solid var(--rr-border)',
-		borderBottom: isActive && isActiveGroup ? '2px solid var(--rr-brand)' : '2px solid transparent',
+			? 'var(--rr-doctabs-tab-active-bg, var(--rr-bg-default))'
+			: isHovered
+				? 'var(--rr-doctabs-tab-hover-bg, var(--rr-bg-widget-hover))'
+				: 'transparent',
+		borderRadius: isActive || isHovered ? `${TAB_RADIUS}px ${TAB_RADIUS}px 0 0` : 0,
+		borderRight: isActive || hideSeparator ? '1px solid transparent' : '1px solid var(--rr-doctabs-border, var(--rr-border))',
 		whiteSpace: 'nowrap',
 		position: 'relative',
+		// The active tab paints ABOVE its neighbours so the corner connectors
+		// can overhang them.
+		zIndex: isActive ? 1 : undefined,
 		userSelect: 'none',
 		opacity: isDragging ? 0.4 : 1,
+	}),
+	// Concave bottom connectors: an r×r piece outside each bottom corner of
+	// the active tab, filled with the tab colour except a quarter-circle of
+	// it carved away — the browser-tab flare joining the tab to the strip
+	// rule. The half-pixel stop softens the curve's edge (anti-aliasing).
+	tabCorner: (side: 'left' | 'right'): CSSProperties => ({
+		position: 'absolute',
+		bottom: 0,
+		[side]: -TAB_RADIUS,
+		width: TAB_RADIUS,
+		height: TAB_RADIUS,
+		background: `radial-gradient(circle at ${side === 'left' ? '0 0' : '100% 0'}, transparent ${TAB_RADIUS}px, var(--rr-doctabs-tab-active-bg, var(--rr-bg-default)) ${TAB_RADIUS + 0.5}px)`,
+		pointerEvents: 'none',
 	}),
 	// Neutral on purpose: "unsaved" must never share a color with the
 	// warning-diagnostics chips (indicator-semantics decision 2026-08-07 —
@@ -85,18 +166,20 @@ const styles = {
 		backgroundColor: 'var(--rr-text-primary)',
 		flexShrink: 0,
 	} as CSSProperties,
+	// 24px box + 22px glyph: the 36px strip still fits it, and anything
+	// smaller proved too small to see or hit (sized up twice by request).
 	closeBtn: (visible: boolean): CSSProperties => ({
 		display: 'flex',
 		alignItems: 'center',
 		justifyContent: 'center',
-		width: 16,
-		height: 16,
-		borderRadius: 3,
+		width: 24,
+		height: 24,
+		borderRadius: 4,
 		border: 'none',
 		background: 'transparent',
 		color: 'var(--rr-text-secondary)',
 		cursor: 'pointer',
-		fontSize: 12,
+		fontSize: 22,
 		lineHeight: 1,
 		opacity: visible ? 1 : 0,
 		transition: 'opacity 100ms',
@@ -109,9 +192,6 @@ const styles = {
 		fontSize: 12,
 		color: 'var(--rr-text-tertiary, #888)',
 		fontFamily: 'var(--rr-font-family)',
-	} as CSSProperties,
-	spacer: {
-		flex: 1,
 	} as CSSProperties,
 	toolbarBtn: {
 		display: 'flex',
@@ -160,8 +240,16 @@ const styles = {
  * Props for the DocTabs component.
  */
 export interface DocTabsProps {
-	/** The Documents instance to read state from and dispatch actions to. */
-	docs: Public<Documents>;
+	/**
+	 * The Documents instance to read state from and dispatch actions to.
+	 *
+	 * The policy-aware verbs are OPTIONAL in this type on purpose: the
+	 * frozen shell contract pins the Documents shape apps were built
+	 * against, so requiring members added later would reject a perfectly
+	 * good instance from a v5-era app. Absence is feature-detected below
+	 * and falls back to the unconditional close.
+	 */
+	docs: DocumentsLike;
 	/** The editor group whose tabs should be rendered. */
 	groupId: string;
 	/** Whether this group is the currently focused group. */
@@ -215,8 +303,15 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 
 	/**
 	 * Handles the close button click on a tab.
-	 * If the document is dirty and an onDirtyClose callback is provided,
-	 * delegates to the callback. Otherwise closes the editor directly.
+	 *
+	 * An app that passes `onDirtyClose` owns the decision for a dirty
+	 * document (the pre-existing contract). Otherwise the close goes
+	 * through requestCloseEditor, which applies the Documents instance's
+	 * dirty-close policy — the shell's Save/Discard/Cancel dialog by
+	 * default, and NEVER a silent discard.
+	 *
+	 * Note it asks only when this is the LAST view of the document; a split
+	 * view closes without ceremony because nothing is lost.
 	 *
 	 * @param e        - Mouse event (stopped to prevent tab activation).
 	 * @param editorId - The editor to close.
@@ -229,6 +324,10 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 		// If dirty and callback provided, delegate for confirmation
 		if (doc?.dirty && onDirtyClose) {
 			onDirtyClose(editorId, editor.documentUri);
+			return;
+		}
+		if (docs.requestCloseEditor) {
+			void docs.requestCloseEditor(editorId);
 			return;
 		}
 		docs.closeEditor(editorId);
@@ -257,15 +356,19 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 	const handleDragStart = useCallback((e: React.DragEvent, editorId: string) => {
 		e.dataTransfer.setData(DND_MIME, JSON.stringify({ editorId, sourceGroupId: groupId }));
 		e.dataTransfer.effectAllowed = 'move';
+		// Publish the drag session so pane drop zones can validate the gesture
+		// during hover (the transfer payload is unreadable until drop)
+		beginEditorDrag(docs, editorId, groupId);
 		setDraggingId(editorId);
-	}, [groupId]);
+	}, [docs, groupId]);
 
 	/**
-	 * Clears the dragging visual state when drag ends.
+	 * Clears the dragging visual state and the shared drag session when drag ends.
 	 */
 	const handleDragEnd = useCallback(() => {
+		endEditorDrag(docs);
 		setDraggingId(null);
-	}, []);
+	}, [docs]);
 
 	/**
 	 * Allows the tab bar to accept drops by preventing the default.
@@ -275,6 +378,9 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 	const handleDragOver = useCallback((e: React.DragEvent) => {
 		if (e.dataTransfer.types.includes(DND_MIME)) {
 			e.preventDefault();
+			// The bar owns the gesture while hovered — don't let the enclosing
+			// DocDropZones pane wrapper show an edge-split highlight for it
+			e.stopPropagation();
 			e.dataTransfer.dropEffect = 'move';
 			setIsDragOver(true);
 		}
@@ -294,6 +400,9 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 	 */
 	const handleDrop = useCallback((e: React.DragEvent) => {
 		e.preventDefault();
+		// Stop here so the enclosing DocDropZones pane wrapper never
+		// double-handles the same drop as an edge split
+		if (e.dataTransfer.types.includes(DND_MIME)) e.stopPropagation();
 		setIsDragOver(false);
 		try {
 			const data = JSON.parse(e.dataTransfer.getData(DND_MIME));
@@ -312,7 +421,6 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 	 */
 	const renderToolbar = () => (
 		<>
-			<div style={styles.spacer} />
 			{onSplit && (
 				<SplitButton
 					btnRef={splitBtnRef}
@@ -343,12 +451,16 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 	if (group.editorIds.length === 0) {
 		return (
 			<div
+				className={BAR_CLASS}
 				style={styles.bar(isActive, isDragOver)}
+				data-rr-editor-droptarget="true"
 				onDragOver={handleDragOver}
 				onDragLeave={handleDragLeave}
 				onDrop={handleDrop}
 			>
-				<div style={styles.empty}>No open editors</div>
+				<div className={SCROLL_CLASS} style={styles.tabsScroll}>
+					<div style={styles.empty}>No open editors</div>
+				</div>
 				{renderToolbar()}
 			</div>
 		);
@@ -356,29 +468,45 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 
 	return (
 		<div
+			className={BAR_CLASS}
 			style={styles.bar(isActive, isDragOver)}
+			data-rr-editor-droptarget="true"
 			onDragOver={handleDragOver}
 			onDragLeave={handleDragLeave}
 			onDrop={handleDrop}
 		>
+			<div
+				className={SCROLL_CLASS}
+				style={styles.tabsScroll}
+				// A plain vertical wheel pans the strip horizontally (VS Code
+				// behaviour) — trackpad horizontal swipes already scroll natively.
+				onWheel={(e) => {
+					if (e.deltaY !== 0 && e.deltaX === 0) e.currentTarget.scrollLeft += e.deltaY;
+				}}
+			>
 			{group.editorIds.map((editorId, index) => {
 				const editor = state.editors[editorId];
 				if (!editor) return null;
 				const doc = state.documents[editor.documentUri];
 				const isActiveTab = index === group.activeEditorIndex;
 				const isHovered = hoveredTab === editorId;
+				// VS Code hides the separator adjacent to the active tab (its
+				// connector curve takes that spot).
+				const precedesActive = index + 1 === group.activeEditorIndex;
 
 				return (
 					<div
 						key={editorId}
 						draggable
-						style={styles.tab(isActiveTab, isActive, isHovered, draggingId === editorId)}
+						style={styles.tab(isActiveTab, isActive, isHovered, draggingId === editorId, precedesActive)}
 						onClick={() => handleTabClick(index)}
 						onMouseEnter={() => setHoveredTab(editorId)}
 						onMouseLeave={() => setHoveredTab(null)}
 						onDragStart={(e) => handleDragStart(e, editorId)}
 						onDragEnd={handleDragEnd}
 					>
+						{isActiveTab && <span style={styles.tabCorner('left')} />}
+						{isActiveTab && <span style={styles.tabCorner('right')} />}
 						{doc?.dirty && <div style={styles.dirtyDot} />}
 						<span>{editor.label}</span>
 						<button
@@ -390,6 +518,7 @@ const DocTabs: React.FC<DocTabsProps> = ({ docs, groupId, isActive = false, canC
 					</div>
 				);
 			})}
+			</div>
 			{renderToolbar()}
 		</div>
 	);

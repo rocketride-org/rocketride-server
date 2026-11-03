@@ -38,7 +38,7 @@ Exposes two commands to the DAP dispatcher; each is a one-liner delegating
 to ``account.handle_app(conn, request)``:
 
   - ``rrext_app``        — the consolidated app namespace (developer_*,
-                           submit/register_dev, list/get/list_mine,
+                           submit, list/get/list_mine,
                            desktop_*, admin_*, pricing_*)
   - ``rrext_deploy_app`` — app publish control on the deployments registry
 """
