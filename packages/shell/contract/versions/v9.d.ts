@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV9 — never edit by hand
 // =============================================================================
-// Generated:     2026-10-30T16:47:23.738Z
-// Source commit: d9d9a002f71427705d9df4f5a0201d99090d1565
+// Generated:     2026-11-03T15:37:34.548Z
+// Source commit: e83a29b317ec3575144137ed236d9762a64af605
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -7229,6 +7229,21 @@ export interface ShellConfig {
      * live traffic off the serving host (e.g. CDN-served UI, direct API).
      */
     serverUri?: string;
+    /**
+     * HOST-owned sidebar extras — the platform's announcements ticker +
+     * Documentation row. The shell frames render ONLY what the host
+     * provides here (and withhold it entirely in deep-app/session-locked
+     * tabs); the sidebar components themselves carry no platform content.
+     * `render` produces the expanded block (`padded` for standalone
+     * placements like the workbench panel foot); `onOpenDocs` drives the
+     * collapsed rail's Documentation icon.
+     */
+    sidebarExtras?: {
+        render: (opts?: {
+            padded?: boolean;
+        }) => React$1.ReactNode;
+        onOpenDocs?: () => void;
+    };
     /** All RR_* runtime config — passed through to remote apps via useShellApiConfig(). */
     apiConfig: ShellApiConfig;
     /** Branding shown on the loading screen before any app is mounted. */
@@ -7429,6 +7444,19 @@ export declare enum ConnectionState {
     /** Authentication was rejected by the server (bad/expired/revoked key). */
     AUTH_FAILED = "auth-failed"
 }
+declare enum AuthPhase {
+    /** No sign-in has ever been attempted in this tab. */
+    FRESH = "fresh",
+    /** A sign-in launched and has not completed. Seen by a LATER page load
+     *  (no ?code=), it means the person abandoned the IdP — show the
+     *  signed-out surface, never re-fire the redirect. */
+    AUTHORIZING = "authorizing",
+    /** A sign-in completed in this tab. */
+    AUTHENTICATED = "authenticated",
+    /** The person EXPLICITLY signed out here — the auth gate shows the
+     *  signed-out surface instead of auto-starting a login. */
+    SIGNED_OUT = "signed-out"
+}
 /**
  * The mode of connection — determines credential requirements and server type.
  *
@@ -7449,6 +7477,12 @@ export type ConnectionMode = "cloud" | "local" | "onprem" | "docker" | "service"
 export interface ConnectionStatus {
     /** Current connection state. */
     state: ConnectionState;
+    /** The tab's auth journey (see {@link AuthPhase}) — persisted per tab,
+     *  surfaced here so consumers track it like any other status field.
+     *  OPTIONAL in the type only for the frozen contract floors (the field
+     *  rides event payloads, a contravariant position); the manager always
+     *  sets it — absent reads as FRESH. */
+    authPhase?: AuthPhase;
     /** How this connection reaches the server. */
     connectionMode: ConnectionMode;
     /** Timestamp of last successful connection. */
@@ -9273,6 +9307,13 @@ export declare class ConnectionManager implements IConnectionManager {
         appId: string;
     } | null>;
     /**
+     * Whether THIS page load has started an OAuth redirect (the one-shot
+     * startOAuth guard). While true, the page is on its way to the IdP —
+     * a present auth-start stamp means the launch in progress, not an
+     * abandoned sign-in from a previous load.
+     */
+    isSignInRedirectPending(): boolean;
+    /**
      * Connect to the server using the provided credential.
      *
      * Deduplicates concurrent calls for the same normalized endpoint and
@@ -9332,17 +9373,22 @@ export declare class ConnectionManager implements IConnectionManager {
     clearToken(): void;
     /** Update the hasCredentials flag based on token availability. */
     updateCredentialsStatus(): void;
-    /** Read session-locked app ID from the tab-session store. */
+    /** Read the session-locked app ID (a view over the tab session).
+     *  @deprecated Prefer `tabSession().appId` — kept as published surface. */
     getSessionAppId(): string;
-    /** Save session-locked app ID to the tab-session store. */
+    /** Save the session-locked app ID (a view over the tab session).
+     *  @deprecated Prefer `updateTabSession` — kept as published surface. */
     setSessionAppId(id: string): void;
-    /** Read the pending app ID (set before OAuth redirect). */
+    /** Read the pending app ID — the in-flight sign-in's initiator. A view
+     *  over the auth-phase record: only an AUTHORIZING tab has one. */
     getPendingAppId(): string;
-    /** Clear the pending app ID. Called when an OAuth round-trip is abandoned
-     *  (user pressed Back from Zitadel) so the stale target can't re-seed the
-     *  auth gate on the next load and bounce them straight back to login. */
+    /** Drop the pending initiator while KEEPING the phase state. Called when
+     *  an OAuth round-trip is abandoned (user pressed Back from Zitadel) so
+     *  the stale target can't re-seed the auth gate on the next load and
+     *  bounce them straight back to login. */
     clearPendingAppId(): void;
-    /** Save pending app ID (for retrieval after OAuth callback). */
+    /** Save the sign-in's initiator app — marks the tab AUTHORIZING (the
+     *  only state that carries one; retrieval after the OAuth callback). */
     setPendingAppId(id: string): void;
     /**
      * Returns the cached service catalog, triggering a lazy fetch on first access.
@@ -10468,7 +10514,7 @@ export interface WorkspaceFs {
     /**
      * Finds files by glob across the workspace.
      *
-     * @param include - Include glob (e.g. '**​/*.rrapp').
+     * @param include - Include glob (e.g. '**\/*.rrapp').
      * @param exclude - Optional exclude glob.
      * @returns Paths in the host's spelling.
      */
@@ -10871,11 +10917,13 @@ export declare class CloudAuthProvider implements IAuthProvider {
      * Initialize with Zitadel configuration.
      * Must be called before signIn().
      *
-     * @param config - Zitadel OAuth2 configuration.
+     * @param config - Zitadel OAuth2 configuration; `relayOrigin` arms the
+     *                 dev relay (top-level dev shells only — see signIn).
      */
     initialize(config: {
         zitadelUrl: string;
         clientId: string;
+        relayOrigin?: string;
     }): void;
     /**
      * Clean up resources.
@@ -11982,6 +12030,8 @@ export interface SidebarProps {
      * regardless of the server edition).
      */
     isSaas?: boolean;
+    /** Host-owned sidebar extras (ticker + docs) — absent in deep-app tabs. */
+    sidebarExtras?: ShellConfig["sidebarExtras"];
 }
 /**
  * Props for the NavButton component.
@@ -12314,6 +12364,9 @@ export interface SettingsPageProps {
     extraSections?: SettingsRichSection[];
     /** Deep link: the nav section to open on mount. */
     initialSectionId?: string;
+    /** Host notice rendered under the page heading (the cloud passes its
+     *  signed-out warning here; absent = no banner row). */
+    banner?: React$1.ReactNode;
 }
 /**
  * The one settings surface, VSCode-style, rendered from the registry — the
@@ -13308,7 +13361,26 @@ export interface SidebarFooterProps {
     onOpenDocs?: () => void;
     /** Host-specific menu items shown in the popup. */
     menuItems?: SidebarFooterMenuItem[];
+    /** HOST-owned content above the account row (expanded form only) — the
+     *  platform hosts (rocket-ui's shell config, the VS Code sidebar) put
+     *  their announcements ticker + Documentation row here. The footer
+     *  itself renders NO platform content: a deep-app/branded tab simply
+     *  passes nothing. */
+    extras?: React$1.ReactNode;
 }
+/**
+ * The footer's non-account content: the announcements ticker and the
+ * Documentation row. Extracted from SidebarFooter so the workbench frame can
+ * place it at the PANEL's foot (the account row lives on the rail there),
+ * while the classic/drawer footer keeps rendering it inline above the
+ * account row. One markup, two placements.
+ */
+export declare const SidebarFooterExtras: React$1.FC<{
+    onOpenDocs?: () => void;
+    /** Standalone placements (the workbench panel foot) bring their own
+        8px wrapper padding; inside SidebarFooter the wrapper already has it. */
+    padded?: boolean;
+}>;
 export declare const SidebarFooter: React$1.FC<SidebarFooterProps>;
 /**
  * Declared value type of a grid column — drives which filter control the
@@ -14933,6 +15005,14 @@ export interface DesktopViewProps {
     popoverBoundarySelector?: string;
     /** Message for the zero-apps state. */
     emptyMessage?: string;
+    /**
+     * Extra attributes spread onto the greeting heading — the one element
+     * that carries the user's real first name. Hosts whose telemetry uses
+     * its own masking selector add that marker here; the built-in
+     * `data-rr-private` (home-ui's replay mask / click-capture ignore)
+     * is always present and cannot be removed.
+     */
+    greetingAttrs?: Record<string, string>;
     /** Extra styles merged onto the root (padding/width belong to the host). */
     style?: React$1.CSSProperties;
 }
@@ -15153,6 +15233,10 @@ export declare const shellApi: {
     readonly SidebarActiveViewProvider: import("react").FC<ISidebarActiveViewProviderProps>;
     readonly useSidebarActiveView: typeof useSidebarActiveView;
     readonly SidebarFooter: import("react").FC<SidebarFooterProps>;
+    readonly SidebarFooterExtras: import("react").FC<{
+        onOpenDocs?: () => void;
+        padded?: boolean;
+    }>;
     readonly DataGrid: <Row extends Record<string, unknown>>(props: IDataGridProps<Row> & {
         ref?: import("react").Ref<IDataGridHandle>;
     }) => import("react").ReactElement;
