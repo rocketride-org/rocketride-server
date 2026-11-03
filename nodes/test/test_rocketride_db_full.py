@@ -399,6 +399,484 @@ class TestRocketrideSqlE2E:
         finally:
             glb.endGlobal()
 
+    # -- lanes fail closed (rocketride-ai/rocketride-saas#789) ------------------
+
+    @staticmethod
+    def _refuse_connections(glb):
+        """Point the node's engine at a port nothing listens on.
+
+        This is what a pooler that went away leaves a running pipeline with: the
+        task started and reflected the schema, and the next connection attempt is
+        refused.
+        """
+        import socket
+
+        from sqlalchemy import create_engine
+
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', 0))
+            closed_port = probe.getsockname()[1]
+        glb.engine.dispose()
+        glb.engine = create_engine(
+            f'postgresql+psycopg2://nobody:nopass@127.0.0.1:{closed_port}/{TEST_DB_NAME}',
+            connect_args={'connect_timeout': 2},
+        )
+
+    @staticmethod
+    def _lanes(inst, lanes=('text',)):
+        """Give the instance a downstream that records what is emitted."""
+
+        class _Sink:
+            def __init__(self):
+                self.text = []
+                self.answers = []
+
+            def getListeners(self):
+                return list(lanes)
+
+            def writeText(self, text):
+                self.text.append(text)
+
+            def writeAnswers(self, answer):
+                self.answers.append(answer)
+
+        inst.instance = _Sink()
+        return inst.instance
+
+    @staticmethod
+    def _answer(rows):
+        return types.SimpleNamespace(getJson=lambda: rows)
+
+    def test_answers_lane_inserts_when_the_database_is_up(self, rr_env, monkeypatch, sql_table, raw_conn):
+        """Control for the failure cases below: the same call writes the row on a live database."""
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            self._lanes(inst)
+            inst.writeAnswers(self._answer([{'name': 'washer', 'qty': 11}]))
+            with raw_conn.cursor() as cur:
+                cur.execute(f"SELECT count(*) FROM {sql_table} WHERE name = 'washer'")
+                assert cur.fetchone()[0] == 1
+        finally:
+            glb.endGlobal()
+
+    def test_answers_lane_fails_when_the_connection_is_refused(self, rr_env, monkeypatch, sql_table, raw_conn):
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        lane_error = sys.modules['ai.common.database.db_instance_base'].DatabaseLaneError
+        try:
+            self._refuse_connections(glb)
+            self._lanes(inst)
+            with pytest.raises(lane_error) as raised:
+                inst.writeAnswers(self._answer([{'name': 'washer', 'qty': 11}]))
+            assert '127.0.0.1' not in str(raised.value)
+            with raw_conn.cursor() as cur:
+                cur.execute(f"SELECT count(*) FROM {sql_table} WHERE name = 'washer'")
+                assert cur.fetchone()[0] == 0
+        finally:
+            glb.endGlobal()
+
+    def test_table_lane_fails_when_the_connection_is_refused(self, rr_env, monkeypatch, sql_table):
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        lane_error = sys.modules['ai.common.database.db_instance_base'].DatabaseLaneError
+        # The shared stand-in for ai.common.table carries only the markdown writer.
+        monkeypatch.setattr(
+            sys.modules['ai.common.table'].Table,
+            'parse_markdown_table',
+            lambda markdown: (['name', 'qty'], [['washer', 11]]),
+            raising=False,
+        )
+        try:
+            self._refuse_connections(glb)
+            self._lanes(inst)
+            with pytest.raises(lane_error):
+                inst.writeTable('| name | qty |\n| --- | --- |\n| washer | 11 |')
+        finally:
+            glb.endGlobal()
+
+    def test_question_lane_fails_and_never_emits_none_when_the_connection_is_refused(
+        self, rr_env, monkeypatch, sql_table
+    ):
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        lane_error = sys.modules['ai.common.database.db_instance_base'].DatabaseLaneError
+        try:
+            self._refuse_connections(glb)
+            sink = self._lanes(inst, ('text', 'answers'))
+            inst._buildSQLQuery = lambda question_text: {'isValid': True, 'query': f'SELECT * FROM {sql_table}'}
+            question = types.SimpleNamespace(questions=[types.SimpleNamespace(text='what is in stock?')])
+            with pytest.raises(lane_error):
+                inst.writeQuestions(question)
+            assert sink.text == [] and sink.answers == []
+        finally:
+            glb.endGlobal()
+
+    # -- EXPLAIN and table checks: an outage is not a verdict on the SQL ---------
+
+    @staticmethod
+    def _unavailable_error():
+        return sys.modules['ai.common.database.db_global_base'].DatabaseUnavailableError
+
+    def test_explain_over_a_refused_connection_fails_the_question_lane_without_a_repair_loop(
+        self, rr_env, monkeypatch, sql_table
+    ):
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            self._refuse_connections(glb)
+            sink = self._lanes(inst, ('text', 'answers'))
+            glb.max_validation_attempts = 5
+            asked = []
+            inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: (
+                asked.append(1) or {'isValid': True, 'query': f'SELECT * FROM {sql_table}'}
+            )
+            question = types.SimpleNamespace(questions=[types.SimpleNamespace(text='what is in stock?')])
+
+            with pytest.raises(self._unavailable_error()):
+                inst.writeQuestions(question)
+
+            assert len(asked) == 1  # the outage was not fed back to the LLM as a rejection
+            assert sink.text == [] and sink.answers == []
+        finally:
+            glb.endGlobal()
+
+    def test_explain_of_bad_sql_on_a_live_database_is_still_a_rejection(self, rr_env, monkeypatch, sql_table):
+        glb, _ = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            ok, message = glb._validateQuery('SELECT * FROM rr_no_such_table')
+            assert ok is False and 'does not exist' in message
+
+            ok, message = glb._validateQuery(f'SELECT no_such_column FROM {sql_table}')
+            assert ok is False and 'no_such_column' in message
+
+            assert glb._validateQuery(f'SELECT name FROM {sql_table}') == (True, '')
+        finally:
+            glb.endGlobal()
+
+    def test_explain_over_a_connection_the_server_closed_is_an_outage(self, rr_env, monkeypatch, sql_table, raw_conn):
+        """The connection died after it was obtained: SQLAlchemy marks it invalid, no message matching needed."""
+        glb, _ = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            # Pre-ping would replace the dead pooled connection before EXPLAIN ran (the
+            # next test); switch it off to exercise the failure arriving mid-statement.
+            glb.engine.pool._pre_ping = False
+            with glb.engine.connect() as conn:
+                pid = conn.exec_driver_sql('SELECT pg_backend_pid()').scalar()
+            with raw_conn.cursor() as cur:
+                cur.execute('SELECT pg_terminate_backend(%s)', (pid,))
+            raw_conn.commit()
+
+            with pytest.raises(self._unavailable_error()):
+                glb._validateQuery(f'SELECT name FROM {sql_table}')
+        finally:
+            glb.endGlobal()
+
+    def test_explain_over_a_connection_the_server_closed_is_replaced_by_pre_ping(
+        self, rr_env, monkeypatch, sql_table, raw_conn
+    ):
+        glb, _ = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            with glb.engine.connect() as conn:
+                pid = conn.exec_driver_sql('SELECT pg_backend_pid()').scalar()
+            with raw_conn.cursor() as cur:
+                cur.execute('SELECT pg_terminate_backend(%s)', (pid,))
+            raw_conn.commit()
+
+            assert glb._validateQuery(f'SELECT name FROM {sql_table}') == (True, '')
+        finally:
+            glb.endGlobal()
+
+    def test_table_exists_over_a_refused_connection_raises_and_a_missing_table_is_false(
+        self, rr_env, monkeypatch, sql_table
+    ):
+        glb, _ = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            assert glb._tableExists(sql_table) is True
+            assert glb._tableExists('rr_no_such_table') is False
+
+            self._refuse_connections(glb)
+
+            with pytest.raises(self._unavailable_error()):
+                glb._tableExists(sql_table)
+            with pytest.raises(self._unavailable_error()):
+                glb._getTableSchema(sql_table)
+        finally:
+            glb.endGlobal()
+
+    # -- pool resilience (rocketride-ai/rocketride-saas#789) --------------------
+
+    def test_a_pooled_connection_the_server_closed_is_replaced_not_surfaced(
+        self, rr_env, monkeypatch, sql_table, raw_conn
+    ):
+        """Pre-ping: the first statement after a pooler restart must not fail on a dead pooled connection."""
+        glb, inst = self._begin(monkeypatch, {'table': sql_table, 'allow_execute': True})
+        try:
+            with glb.engine.connect() as conn:
+                pid = conn.exec_driver_sql('SELECT pg_backend_pid()').scalar()
+            # The server drops the idle pooled connection, as a pooler restart or a failover does.
+            with raw_conn.cursor() as cur:
+                cur.execute('SELECT pg_terminate_backend(%s)', (pid,))
+                assert cur.fetchone()[0] is True
+            raw_conn.commit()
+
+            result = inst.execute({'sql': 'SELECT 1 AS one'})
+
+            assert result['rows'] == [{'one': 1}]
+        finally:
+            glb.endGlobal()
+
+    def test_the_connect_timeout_reaches_the_driver(self, rr_env, monkeypatch, sql_table):
+        glb, _ = self._begin(monkeypatch, {'table': sql_table, 'connect_timeout': 3})
+        try:
+            with glb.engine.connect() as conn:
+                assert conn.connection.dbapi_connection.get_dsn_parameters()['connect_timeout'] == '3'
+        finally:
+            glb.endGlobal()
+
+    @staticmethod
+    def _dsn_on_port(port):
+        parsed = urllib.parse.urlparse(TEST_DSN)
+        credentials = parsed.netloc.rpartition('@')[0]
+        prefix = f'{credentials}@' if credentials else ''
+        return parsed._replace(netloc=f'{prefix}127.0.0.1:{port}').geturl()
+
+    @staticmethod
+    def _free_port():
+        import socket
+
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', 0))
+            return probe.getsockname()[1]
+
+    def test_a_refused_connection_is_retried_a_bounded_number_of_times(self, rr_env, monkeypatch, sql_table):
+        import time
+
+        port = self._free_port()
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': self._dsn_on_port(port)}))
+        attempts = []
+        real_connect = psycopg2.connect
+        monkeypatch.setattr(psycopg2, 'connect', lambda *a, **kw: (attempts.append(1), real_connect(*a, **kw))[1])
+
+        started = time.monotonic()
+        with pytest.raises(Exception, match='refused'):
+            self._begin(monkeypatch, {'table': sql_table, 'connect_retries': 3, 'connect_retry_budget': 10})
+        elapsed = time.monotonic() - started
+
+        assert len(attempts) == 3  # the first try and two retries, then it gives up
+        assert elapsed < 10
+
+    def test_a_connection_refused_for_a_moment_is_retried_to_success(self, rr_env, monkeypatch, sql_table):
+        """A pooler that is back within the retry budget costs the pipeline nothing."""
+        import socket
+        import threading
+        import time
+
+        port = self._free_port()
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': self._dsn_on_port(port)}))
+        real = urllib.parse.urlparse(TEST_DSN)
+        upstream = (real.hostname, real.port or 5432)
+        stop = threading.Event()
+
+        def pipe(src, dst):
+            try:
+                while chunk := src.recv(65536):
+                    dst.sendall(chunk)
+            except OSError:
+                pass
+            finally:
+                for sock in (src, dst):
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+
+        def proxy_after_delay():
+            time.sleep(0.8)  # the pooler is "down" until now
+            server = socket.socket()
+            server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            server.bind(('127.0.0.1', port))
+            server.listen()
+            server.settimeout(0.2)
+            while not stop.is_set():
+                try:
+                    client, _ = server.accept()
+                except (socket.timeout, OSError):
+                    continue
+                backend = socket.create_connection(upstream)
+                threading.Thread(target=pipe, args=(client, backend), daemon=True).start()
+                threading.Thread(target=pipe, args=(backend, client), daemon=True).start()
+            server.close()
+
+        thread = threading.Thread(target=proxy_after_delay, daemon=True)
+        thread.start()
+        glb = None
+        try:
+            # Eight attempts and a 20 s budget: the jittered waits cannot all fall inside the 0.8 s outage.
+            glb, inst = self._begin(
+                monkeypatch,
+                {'table': sql_table, 'allow_execute': True, 'connect_retries': 8, 'connect_retry_budget': 20},
+            )
+            assert inst.execute({'sql': 'SELECT 1 AS one'})['rows'] == [{'one': 1}]
+        finally:
+            if glb is not None:
+                glb.endGlobal()
+            stop.set()
+            thread.join(timeout=3)
+
+    @staticmethod
+    def _stalling_relay(upstream):
+        """A TCP relay to ``upstream`` that can be told to hold every byte while keeping the sockets open.
+
+        This is a pooler whose process is frozen: the kernel keeps acknowledging segments, so
+        no TCP-level setting (keepalives, ``tcp_user_timeout``) sees anything wrong.
+        Returns ``(port, stall_event, stop)``.
+        """
+        import socket
+        import threading
+        import time
+
+        stall = threading.Event()
+        stopped = threading.Event()
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(('127.0.0.1', 0))
+        listener.listen(8)
+        listener.settimeout(0.2)
+
+        def pump(src, dst):
+            try:
+                while chunk := src.recv(65536):
+                    while stall.is_set() and not stopped.is_set():
+                        time.sleep(0.05)
+                    dst.sendall(chunk)
+            except OSError:
+                pass
+            finally:
+                for sock in (src, dst):
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+
+        def accept():
+            while not stopped.is_set():
+                try:
+                    client, _ = listener.accept()
+                except (socket.timeout, OSError):
+                    continue
+                backend = socket.create_connection(upstream)
+                threading.Thread(target=pump, args=(client, backend), daemon=True).start()
+                threading.Thread(target=pump, args=(backend, client), daemon=True).start()
+            listener.close()
+
+        thread = threading.Thread(target=accept, daemon=True)
+        thread.start()
+
+        def stop():
+            stopped.set()
+            thread.join(timeout=3)
+
+        return listener.getsockname()[1], stall, stop
+
+    def test_a_stalled_pooler_is_bounded_for_the_ping_and_the_reconnect(self, rr_env, monkeypatch, sql_table):
+        """The reviewer's stalled-pooler case: a pooled connection to a peer that stopped answering.
+
+        Without the ping watchdog this blocked forever in ``pool_pre_ping``'s ``SELECT 1``.
+        """
+        import time
+
+        real = urllib.parse.urlparse(TEST_DSN)
+        port, stall, stop = self._stalling_relay((real.hostname, real.port or 5432))
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': self._dsn_on_port(port)}))
+        glb = None
+        try:
+            glb, inst = self._begin(
+                monkeypatch,
+                {
+                    'table': sql_table,
+                    'allow_execute': True,
+                    'ping_timeout': 1,
+                    'connect_timeout': 1,
+                    'connect_retries': 3,
+                    'connect_retry_budget': 2,
+                },
+            )
+            assert inst.execute({'sql': 'SELECT 1 AS one'})['rows'] == [{'one': 1}]  # warm the pool
+            stall.set()
+
+            started = time.monotonic()
+            with pytest.raises(RuntimeError):
+                inst.execute({'sql': 'SELECT 1 AS one'})
+            elapsed = time.monotonic() - started
+
+            # ping_timeout (1 s) + the reconnect: 3 attempts of connect_timeout (1 s) inside a 2 s budget.
+            assert elapsed < 12, f'a stalled pooler held the call for {elapsed:.1f}s'
+        finally:
+            stall.clear()
+            if glb is not None:
+                glb.endGlobal()
+            stop()
+
+    def test_the_node_setting_overrides_a_connect_timeout_written_in_the_dsn(self, rr_env, monkeypatch, sql_table):
+        dsn = self._dsn_on_port(urllib.parse.urlparse(TEST_DSN).port or 5432) + '?connect_timeout=30'
+        monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': dsn}))
+
+        glb, _ = self._begin(monkeypatch, {'table': sql_table, 'connect_timeout': 3})
+        try:
+            with glb.engine.connect() as conn:
+                assert conn.connection.dbapi_connection.get_dsn_parameters()['connect_timeout'] == '3'
+        finally:
+            glb.endGlobal()
+
+    def test_the_keepalive_settings_reach_libpq(self, rr_env, monkeypatch, sql_table):
+        glb, _ = self._begin(
+            monkeypatch,
+            {'table': sql_table, 'keepalives_idle': 20, 'keepalives_interval': 7, 'keepalives_count': 4},
+        )
+        try:
+            with glb.engine.connect() as conn:
+                params = conn.connection.dbapi_connection.get_dsn_parameters()
+            assert (params['keepalives'], params['keepalives_idle']) == ('1', '20')
+            assert (params['keepalives_interval'], params['keepalives_count']) == ('7', '4')
+            if psycopg2.extensions.libpq_version() >= 120000:
+                assert params['tcp_user_timeout'] == '30000'
+        finally:
+            glb.endGlobal()
+
+    def test_what_libpq_says_for_a_full_role_and_a_mixed_multi_host_failure_is_classified_by_message(
+        self, rr_env, monkeypatch, sql_table, raw_conn
+    ):
+        """psycopg2 sets no SQLSTATE while connecting, so these are told apart by their text (real libpq errors)."""
+        self._begin(monkeypatch, {'table': sql_table})[0].endGlobal()  # loads the node modules the helper imports
+        from ai.common.database.connect_retry import is_transient_connect_error
+
+        parsed = urllib.parse.urlparse(TEST_DSN)
+        port = parsed.port or 5432
+        raw_conn.autocommit = True
+        with raw_conn.cursor() as cur:
+            cur.execute('DROP ROLE IF EXISTS rr789_full_role')
+            cur.execute("CREATE ROLE rr789_full_role LOGIN PASSWORD 'x' CONNECTION LIMIT 0")
+        try:
+
+            def failure(**kw):
+                with pytest.raises(psycopg2.OperationalError) as raised:
+                    psycopg2.connect(connect_timeout=3, dbname=TEST_DB_NAME, **kw)
+                return raised.value
+
+            full = failure(host=parsed.hostname, port=port, user='rr789_full_role', password='x')
+            assert full.pgcode is None  # why the message is what is matched
+            assert is_transient_connect_error(full), str(full)
+
+            mixed = failure(
+                host=f'{parsed.hostname},{parsed.hostname}',
+                port=f'1,{port}',
+                user='rr789_no_such_role',
+                password='x',
+            )
+            assert not is_transient_connect_error(mixed), str(mixed)
+
+            refused = failure(host=parsed.hostname, port=1, user='x', password='x')
+            assert is_transient_connect_error(refused), str(refused)
+        finally:
+            with raw_conn.cursor() as cur:
+                cur.execute('DROP ROLE IF EXISTS rr789_full_role')
+
     def test_config_connection_fields_ignored(self, rr_env, monkeypatch, sql_table):
         """The defining property: config cannot redirect the connection."""
         glb, _ = self._begin(

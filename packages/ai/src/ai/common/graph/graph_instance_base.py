@@ -48,9 +48,19 @@ from ai.common.table import Table
 from ai.common.utils import normalize_tool_input, parse_bool, require_str
 
 from .cypher_safety import is_cypher_safe
-from .graph_global_base import DEFAULT_MAX_EXECUTE_ROWS, GraphGlobalBase
+from .graph_global_base import DEFAULT_MAX_EXECUTE_ROWS, GraphGlobalBase, GraphUnavailableError
 
 DEFAULT_ROW_LIMIT = 250
+
+
+class GraphLaneError(RuntimeError):
+    """A pipeline lane statement failed against the graph database.
+
+    Raised by the lane handlers instead of returning normally, so the engine
+    marks the step and the task failed. The message is deliberately generic: the
+    driver's sentence can carry a host, a port or a fragment of the query, and
+    the full exception is in the engine log, written by ``error()`` first.
+    """
 
 
 class GraphInstanceBase(IInstanceBase, ABC):
@@ -212,7 +222,12 @@ class GraphInstanceBase(IInstanceBase, ABC):
         question = require_str(args, 'question', tool_name='get_query')
 
         limit = self._clamp_limit(args.get('limit'))
-        result = self._buildQuery(question, limit=limit)
+        try:
+            result = self._buildQuery(question, limit=limit)
+        except GraphUnavailableError as e:
+            # The tool contract is an explicit `valid: False` result; the lane
+            # handler raises instead.
+            return {'error': str(e), 'valid': False}
 
         query = result.get('query', '')
         if not parse_bool(result.get('isValid', False)) or not query:
@@ -583,30 +598,56 @@ class GraphInstanceBase(IInstanceBase, ABC):
             self._answerExecute(question_text, lanes)
             return
 
+        # What to tell the lanes, decided inside the `try` and written outside it. A
+        # write to a downstream node can fail (a DB node downstream raising on its own
+        # outage reaches this caller as a plain `Exception`); with the writes inside
+        # the `try`, the catch-all below would log that failure and return, and the
+        # step would complete with the rows never written.
+        error_message: Optional[str] = None
+        result: Any = None
+        executed = False
+
         try:
             generated = self._buildQuery(question_text)
             query = generated.get('query', '')
             is_valid = parse_bool(generated.get('isValid', False))
 
-            # The EXPLAIN repair loop gave up: `query` still holds the broken Cypher,
-            # not an answer. Emit the error instead of printing it as a prose answer.
             if generated.get('error'):
-                self._emitError(generated['error'], lanes)
-                return
-            # The LLM claimed a valid query but it carries a write/admin clause: same
-            # rule — surface the rejection, never emit the unsafe query as prose.
-            if is_valid and query and not is_cypher_safe(query):
-                self._emitError('Generated query contains write or admin clauses', lanes)
-                return
+                # The EXPLAIN repair loop gave up: `query` still holds the broken Cypher,
+                # not an answer. Emit the error instead of printing it as a prose answer.
+                error_message = generated['error']
+            elif is_valid and query and not is_cypher_safe(query):
+                # The LLM claimed a valid query but it carries a write/admin clause: same
+                # rule — surface the rejection, never emit the unsafe query as prose.
+                error_message = 'Generated query contains write or admin clauses'
+            else:
+                executed = is_valid and bool(query)
+                # When the LLM decides it isn't a graph question, `query` holds its prose answer.
+                result = self._runLaneQuery(self.IGlobal._run_query, query) if executed else query
 
-            executed = is_valid and bool(query)
-            # When the LLM decides it isn't a graph question, `query` holds its prose answer.
-            result = self.IGlobal._run_query(query) if executed else query
-
-            self._emit(result, lanes, executed=executed)
-
+        except (GraphLaneError, GraphUnavailableError):
+            # `_runLaneQuery` / the driver's `_validate_query` have logged the cause. Fail the step: emitting
+            # anything, an error object included, lets the pipeline carry on as
+            # if the question had been answered.
+            raise
         except Exception as e:
+            # The node's own non-database work failed (the LLM returned nothing usable):
+            # log it. A database failure never lands here.
             error(f'Error handling question: {e}')
+            return
+
+        if error_message is not None:
+            self._emitError(error_message, lanes)
+            return
+        self._emit(result, lanes, executed=executed)
+
+    def _runLaneQuery(self, runner, statement: str):
+        """Run ``statement`` through ``runner`` for a lane; any failure raises ``GraphLaneError``."""
+        try:
+            return runner(statement)
+        except Exception as e:
+            error(f'Error executing graph query: {e}')
+            raise GraphLaneError(f'{self._db_display_name()} query failed (details are in the engine log)') from None
 
     def _emitError(self, message: str, lanes) -> None:
         """Emit a validation/safety error to the wired lanes, never a broken query as prose."""
@@ -622,29 +663,29 @@ class GraphInstanceBase(IInstanceBase, ABC):
         if not self.IGlobal.allow_execute:
             warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
             return
-        try:
-            result = self.IGlobal._run_query_raw(statement)
-            rows = result.get('rows', [])
-            affected = result.get('affected_rows', 0)
-            markdown = self._formatResultAsMarkdown(rows) if rows else None
-            notice = ''
-            if result.get('truncated'):
-                # No '|' in it, so Table.parse_markdown_table skips it as a non-table line.
-                notice = f'\n\nThe statement is saved, but its result was cut to the first {len(rows)} rows.'
+        # No catch-all around the statement or the writes. The statement raises on a
+        # failure, and a write to a downstream node can fail too (a DB node downstream
+        # raising on its own outage reaches this caller as a plain `Exception`);
+        # swallowing either would let the step complete with the rows never written.
+        result = self._runLaneQuery(self.IGlobal._run_query_raw, statement)
+        rows = result.get('rows', [])
+        affected = result.get('affected_rows', 0)
+        markdown = self._formatResultAsMarkdown(rows) if rows else None
+        notice = ''
+        if result.get('truncated'):
+            # No '|' in it, so Table.parse_markdown_table skips it as a non-table line.
+            notice = f'\n\nThe statement is saved, but its result was cut to the first {len(rows)} rows.'
 
-            if 'text' in lanes:
-                self.instance.writeText((markdown if markdown else f'{affected} rows affected') + notice)
+        if 'text' in lanes:
+            self.instance.writeText((markdown if markdown else f'{affected} rows affected') + notice)
 
-            if 'table' in lanes and rows:
-                self.instance.writeTable(markdown + notice)
+        if 'table' in lanes and rows:
+            self.instance.writeTable(markdown + notice)
 
-            if 'answers' in lanes:
-                answer = Answer()
-                answer.setAnswer(json.dumps(result, default=str))
-                self.instance.writeAnswers(answer)
-
-        except Exception as e:
-            error(f'Error handling execute question: {e}')
+        if 'answers' in lanes:
+            answer = Answer()
+            answer.setAnswer(json.dumps(result, default=str))
+            self.instance.writeAnswers(answer)
 
     def _emit(self, result: Any, lanes, *, executed: bool) -> None:
         """Write a query result to whichever of the text/table/answers lanes are wired."""

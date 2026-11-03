@@ -36,11 +36,27 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import neo4j
-from neo4j.exceptions import Neo4jError, ServiceUnavailable
+import neo4j.exceptions as _neo4j_exceptions
+from neo4j.exceptions import (
+    AuthError,
+    Neo4jError,
+    ServiceUnavailable,
+    SessionExpired,
+    TransientError,
+)
 
 from rocketlib import error, warning
 
-from ai.common.graph import GraphGlobalBase, is_cypher_safe, strip_cypher_literals
+from ai.common.graph import GraphGlobalBase, GraphUnavailableError, is_cypher_safe, strip_cypher_literals
+
+
+class _AbsentDriverError(Exception):
+    """Stands in for an exception class the installed ``neo4j`` driver does not have; never raised."""
+
+
+# The driver is unpinned and ``ConnectionAcquisitionTimeoutError`` is newer than the others,
+# so an older driver must not take the whole node down at import.
+ConnectionAcquisitionTimeoutError = getattr(_neo4j_exceptions, 'ConnectionAcquisitionTimeoutError', _AbsentDriverError)
 
 DEFAULT_URI = 'neo4j://localhost:7687'
 DEFAULT_DATABASE = 'neo4j'
@@ -190,6 +206,19 @@ class IGlobal(GraphGlobalBase):
             with self.driver.session(database=self.database) as session:
                 session.run(f'EXPLAIN {query}').consume()
             return True, ''
+        except (
+            ServiceUnavailable,
+            SessionExpired,
+            ConnectionAcquisitionTimeoutError,
+            AuthError,
+            TransientError,
+            OSError,
+        ) as e:
+            # The server is unreachable, dropped the session, refused the
+            # credentials or reported itself unavailable: not a verdict on the
+            # query. Raised so a lane fails instead of feeding it back to the LLM.
+            warning(f'Graph database unavailable during EXPLAIN validation: {e}')
+            raise GraphUnavailableError('Graph database is unavailable (details are in the engine log)') from None
         except Neo4jError as e:
             return False, str(e.message or e)
         except Exception as e:

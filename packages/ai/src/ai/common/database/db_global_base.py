@@ -58,12 +58,84 @@ from sqlalchemy import (
     inspect,
     text,
 )
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, InterfaceError as SAInterfaceError, TimeoutError as SAPoolTimeoutError
 
 from rocketlib import IGlobalBase, error, warning
 from ai.common.config import Config
 
 DEFAULT_MAX_EXECUTE_ROWS = 25000
+
+
+class DatabaseUnavailableError(RuntimeError):
+    """The database could not be reached, or dropped the connection, while serving a request.
+
+    Raised instead of reporting the failure as a property of the SQL: a
+    connection that was refused says nothing about the statement, so the caller
+    must neither feed it back to the LLM as "the database rejected your query"
+    nor carry on as if the question had been answered. The message is generic;
+    the driver's text is in the engine log.
+    """
+
+
+# PostgreSQL SQLSTATE classes and codes that mean the server cannot take the
+# request right now rather than that the statement is wrong:
+# 08 connection exception, 53 insufficient resources (too many connections),
+# 57P01 admin_shutdown, 57P02 crash_shutdown, 57P03 cannot_connect_now.
+_UNAVAILABLE_SQLSTATE_CLASSES = frozenset({'08', '53'})
+_UNAVAILABLE_SQLSTATES = frozenset({'57P01', '57P02', '57P03'})
+
+# MySQL / MariaDB server error numbers (PyMySQL puts them in ``args[0]``) that mean
+# the server is going away: 1053 ER_SERVER_SHUTDOWN. The disconnects SQLAlchemy
+# already recognises (2006, 2013, ...) arrive as ``connection_invalidated``.
+_UNAVAILABLE_MYSQL_ERRNOS = frozenset({1053})
+
+# Deliberately NOT outages, so they keep the "the database rejected this statement"
+# path: PostgreSQL 55P03 lock_not_available and 57014 query_canceled (a statement or
+# lock timeout is about this query, not about the server), and ClickHouse 202
+# TOO_MANY_SIMULTANEOUS_QUERIES / 241 MEMORY_LIMIT_EXCEEDED (resource limits of the
+# query). `test_db_lane_failures.py` pins each as a rejection.
+
+# Driver exception classes, matched by name through the MRO, that say the link to
+# the server failed. Names rather than imports because this base must not depend
+# on one node's driver (clickhouse-driver's NetworkError is the reason).
+_UNAVAILABLE_DRIVER_CLASS_NAMES = frozenset({'InterfaceError', 'NetworkError', 'SocketTimeoutError'})
+
+
+def is_connection_failure(exc: BaseException) -> bool:
+    """Return True when ``exc``, raised while a statement ran, means the database is unreachable.
+
+    Decided by exception type and SQLSTATE, not by message text. Deliberately not
+    "any ``OperationalError``": PyMySQL raises one for an unknown column, which is
+    the SQL being wrong and is exactly what the LLM repair loop exists for.
+
+    * SQLAlchemy marked the connection invalid (``connection_invalidated``: the
+      dialect recognised a disconnect), raised ``InterfaceError``, or the pool
+      timed out handing out a connection;
+    * the driver's own error is a socket-level ``OSError`` (refused, reset,
+      timed out), a driver interface/network class, or carries an unavailable
+      SQLSTATE.
+
+    Only for a failure that happened *after* a connection was obtained: an error
+    while opening one is always a connection failure and callers separate that
+    phase themselves.
+    """
+    if isinstance(exc, DBAPIError) and exc.connection_invalidated:
+        return True
+    if isinstance(exc, (SAInterfaceError, SAPoolTimeoutError)):
+        return True
+    orig = getattr(exc, 'orig', None) or exc
+    if isinstance(orig, OSError):
+        return True
+    if any(cls.__name__ in _UNAVAILABLE_DRIVER_CLASS_NAMES for cls in type(orig).__mro__):
+        return True
+    code = getattr(orig, 'pgcode', None)
+    if isinstance(code, str) and (code[:2] in _UNAVAILABLE_SQLSTATE_CLASSES or code in _UNAVAILABLE_SQLSTATES):
+        return True
+    args = getattr(orig, 'args', ())
+    if args and isinstance(args[0], int) and args[0] in _UNAVAILABLE_MYSQL_ERRNOS:
+        return True
+    return False
+
 
 # Everything a driver or SQLAlchemy appends to its primary message that can
 # echo the executed statement or the values bound into it back to the caller:
@@ -155,6 +227,20 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     max_validation_attempts: int = 5
     allow_execute: bool = False
     max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
+
+    # Seconds one connection attempt may take; `beginGlobal` replaces it from the
+    # node config key `connect_timeout`.
+    connect_timeout: float = 5.0
+
+    # Dead-peer and ping settings for PostgreSQL; `beginGlobal` replaces them from the
+    # node config (`tcp_user_timeout`, `keepalives_*`, `ping_timeout`).
+    network_settings: Dict[str, Any] = {
+        'tcp_user_timeout': 30.0,
+        'keepalives_idle': 30,
+        'keepalives_interval': 10,
+        'keepalives_count': 3,
+        'ping_timeout': 5.0,
+    }
 
     # SQLAlchemy pool sizing for the runtime engine opened in `beginGlobal`.
     POOL_SIZE: int = 10
@@ -406,13 +492,27 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # ------------------------------------------------------------------
 
     def _tableExists(self, table: str) -> bool:
-        """Return True if the table exists in the connected database."""
+        """Return True if the table exists in the connected database.
+
+        ``False`` means the table is not there (or the engine is not set up). A
+        database that cannot be reached raises ``DatabaseUnavailableError``
+        instead: reporting it as "no such table" sent ``_insertData`` down the
+        create-the-table path, whose failure then read as "could not be created"
+        for what was an outage.
+        """
         if not self.engine:
             return False
+        connected = False
         try:
-            inspector = inspect(self.engine)
-            return table in inspector.get_table_names()
-        except Exception:
+            with self.engine.connect() as conn:
+                connected = True
+                return table in inspect(conn).get_table_names()
+        except Exception as e:
+            # Failing to open the connection at all is an outage whatever the
+            # driver called it; after that, only the unavailable shapes are.
+            if not connected or is_connection_failure(e):
+                error(f'Database unavailable while checking for table "{table}": {e}')
+                raise DatabaseUnavailableError('Database is unavailable (details are in the engine log)') from None
             return False
 
     def _is_datetime_string(self, value: str) -> bool:
@@ -580,15 +680,21 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         if not self.engine:
             raise ValueError('Database connection is not initialized.')
 
+        phase = 'before'
         try:
-            inspector = inspect(self.engine)
-
             # Return None (rather than raising) when the table is absent so
-            # callers can handle the missing-table case gracefully.
+            # callers can handle the missing-table case gracefully. An outage
+            # raises `DatabaseUnavailableError` from here instead.
             if not self._tableExists(table):
                 return None
 
-            columns = inspector.get_columns(table)
+            # An explicit connection, so "could not connect" is told apart from a
+            # reflection error: `inspect(engine)` connects inside itself, and the
+            # driver's refusal then looks like any other failure.
+            phase = 'connecting'
+            with self.engine.connect() as conn:
+                phase = 'connected'
+                columns = inspect(conn).get_columns(table)
             schema: Dict[str, Tuple[str, str]] = {}
             for column in columns:
                 col_name = column['name']
@@ -607,7 +713,12 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
             return [(col_name, str(col_type)) for col_name, (col_type, _comment) in schema.items()]
 
+        except DatabaseUnavailableError:
+            raise
         except Exception as e:
+            if phase == 'connecting' or (phase == 'connected' and is_connection_failure(e)):
+                error(f'Database unavailable while reflecting table "{table}": {e}')
+                raise DatabaseUnavailableError('Database is unavailable (details are in the engine log)') from None
             warning(f'Unable to retrieve database schema for "{table}": {e}')
             return None
 
@@ -652,7 +763,9 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
         Runs ``EXPLAIN <query>`` inside a read-only connection.  The connection
         is always closed after the check so no rows are returned or state changed.
-        Returns ``(True, '')`` on success or ``(False, error_message)`` on failure.
+        Returns ``(True, '')`` on success or ``(False, error_message)`` when the
+        database rejects the statement. Raises ``DatabaseUnavailableError`` when the
+        database cannot be reached: that is not a property of the SQL.
 
         ``EXPLAIN`` is standard SQL supported by MySQL and PostgreSQL; both
         engines raise an exception for syntactically or semantically invalid
@@ -669,17 +782,47 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         """
         if not self.engine:
             return False, 'Database engine not initialized'
+        connected = False
         try:
             with self.engine.connect() as conn:
+                connected = True
                 conn.execute(text(f'EXPLAIN {query}'))
             return True, ''
         except Exception as e:
+            # A database that cannot be reached is not a verdict on the SQL.
+            # Reporting it as "rejected" fed the connection error to the LLM as
+            # the reason its query was wrong, and let the lane finish as though
+            # the question had been answered. Raise it instead.
+            if not connected or is_connection_failure(e):
+                error(f'Database unavailable during EXPLAIN validation: {e}')
+                raise DatabaseUnavailableError('Database is unavailable (details are in the engine log)') from None
             warning(f'EXPLAIN validation failed for the generated query: {e}')
             return False, self._format_db_error(e)
 
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
+
+    def _connect_args(self, db_url: str) -> dict:
+        """Driver ``connect_args`` for the runtime engine.
+
+        The per-attempt connect timeout for the backends whose driver takes
+        ``connect_timeout`` (PostgreSQL, MySQL/MariaDB), plus, for PostgreSQL, the
+        keepalive and ``tcp_user_timeout`` settings that drop a connection to a
+        peer that stopped acknowledging. A subclass for any other driver overrides
+        this. Values come from the node config, read in ``beginGlobal``.
+
+        These are ``connect_args``, so they take precedence over the same
+        parameter written in the connection URL's query string.
+        """
+        from ai.common.database.connect_retry import connect_timeout_args, postgres_network_args
+        from sqlalchemy.engine import make_url
+
+        backend = make_url(db_url).get_backend_name()
+        args = connect_timeout_args(backend, self.connect_timeout)
+        if backend == 'postgresql':
+            args.update(postgres_network_args(self.network_settings))
+        return args
 
     def beginGlobal(self) -> None:
         # One reflection lock per node. Created before anything can reflect, so
@@ -726,7 +869,36 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
         # POOL_SIZE + MAX_OVERFLOW cap the node's concurrent connections
         # (30 by default; a subclass may override both).
-        self.engine = create_engine(db_url, pool_size=self.POOL_SIZE, max_overflow=self.MAX_OVERFLOW)
+        #
+        # `pool_pre_ping` tests a pooled connection on checkout and replaces a
+        # dead one. Without it the first statement after a pooler restart or a
+        # failover fails on a connection the server closed long ago. The
+        # connect timeout bounds one attempt: with none, a black-holed host
+        # holds the statement for the OS TCP timeout (minutes).
+        from ai.common.database.connect_retry import (
+            install_connect_retry,
+            install_ping_watchdog,
+            network_settings_from_config,
+            policy_from_config,
+            timeout_from_config,
+        )
+
+        self.connect_timeout = timeout_from_config(raw)
+        self.network_settings = network_settings_from_config(raw)
+        self.engine = create_engine(
+            db_url,
+            pool_size=self.POOL_SIZE,
+            max_overflow=self.MAX_OVERFLOW,
+            pool_pre_ping=True,
+            connect_args=self._connect_args(db_url),
+        )
+        # Retry only the opening of a connection, never a statement: nothing has
+        # been sent when an attempt is repeated, so no write can be duplicated.
+        install_connect_retry(self.engine, policy_from_config(raw))
+        if self.engine.dialect.name == 'postgresql':
+            # Bound the pre-ping check itself: TCP settings cannot detect a pooler that
+            # keeps acknowledging but stopped answering, and libpq has no read timeout.
+            install_ping_watchdog(self.engine, self.network_settings['ping_timeout'])
 
         from ai.common.database.tx_registry import TransactionRegistry
 

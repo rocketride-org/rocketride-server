@@ -39,7 +39,7 @@ from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
 from rocketlib.types import IInvokeLLM
 
-from .IGlobal import DEFAULT_MAX_EXECUTE_ROWS, IGlobal
+from .IGlobal import DEFAULT_MAX_EXECUTE_ROWS, ArangoLaneError, ArangoUnavailableError, IGlobal
 from .utils import _parse_is_valid
 
 
@@ -208,7 +208,12 @@ class IInstance(IInstanceBase):
             raise ValueError('"question" is required and must be a non-empty string')
 
         limit = _clamp_limit(args.get('limit'))
-        result = self._buildAqlQuery(question.strip(), limit=limit)
+        try:
+            result = self._buildAqlQuery(question.strip(), limit=limit)
+        except ArangoUnavailableError as e:
+            # The tool contract is an explicit `valid: False` result; the lane
+            # handler raises instead.
+            return {'error': str(e), 'aql': '', 'valid': False}
         is_valid = _parse_is_valid(result.get('isValid', False))
         aql = result.get('query', '')
 
@@ -250,26 +255,31 @@ class IInstance(IInstanceBase):
             if not self.IGlobal.allow_execute:
                 warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
                 return
-            try:
-                execute_result = self.IGlobal._run_query_raw(question_text)
-                rows = execute_result['rows']
-                affected = execute_result['affected_rows']
-                markdown = self._formatResultAsMarkdown(rows) if rows else None
+            # No catch-all around the statement or the writes. The statement raises on a
+            # failure, and a write to a downstream node can fail too (a DB node
+            # downstream raising on its own outage reaches this caller as a plain
+            # `Exception`); swallowing either would let the step complete with the
+            # rows never written.
+            execute_result = self._runLaneQuery(self.IGlobal._run_query_raw, question_text)
+            rows = execute_result['rows']
+            affected = execute_result['affected_rows']
+            markdown = self._formatResultAsMarkdown(rows) if rows else None
 
-                if 'text' in lanes:
-                    self.instance.writeText(markdown if markdown else f'{affected} rows affected')
+            if 'text' in lanes:
+                self.instance.writeText(markdown if markdown else f'{affected} rows affected')
 
-                if 'table' in lanes and rows:
-                    self.instance.writeTable(markdown)
+            if 'table' in lanes and rows:
+                self.instance.writeTable(markdown)
 
-                if 'answers' in lanes:
-                    answer = Answer()
-                    answer.setAnswer(json.dumps(execute_result, default=str))
-                    self.instance.writeAnswers(answer)
-            except Exception as e:
-                error(f'Error handling execute question: {e}')
+            if 'answers' in lanes:
+                answer = Answer()
+                answer.setAnswer(json.dumps(execute_result, default=str))
+                self.instance.writeAnswers(answer)
             return
 
+        # The writes to the lanes sit outside the `try`: a write to a downstream node can
+        # fail (a DB node downstream raising on its own outage reaches this caller as a
+        # plain `Exception`), and the catch-all below would swallow it.
         try:
             query_json = self._buildAqlQuery(question_text)
             is_valid = _parse_is_valid(query_json.get('isValid', False))
@@ -279,28 +289,43 @@ class IInstance(IInstanceBase):
             executed = is_valid and bool(aql)
 
             if executed:
-                result = self.IGlobal._run_query(aql)
+                result = self._runLaneQuery(self.IGlobal._run_query, aql)
             else:
                 # Off-topic question -> the LLM's text answer; exhausted validation
                 # -> the EXPLAIN error (don't emit the rejected query as an answer).
                 result = query_json.get('error') or aql
-
-            if 'text' in lanes:
-                self.instance.writeText(str(result))
-
-            if 'table' in lanes and executed and result:
-                self.instance.writeTable(self._formatResultAsMarkdown(result))
-
-            if 'answers' in lanes:
-                answer = Answer()
-                if executed and result:
-                    answer.setAnswer(self._formatResultAsMarkdown(result))
-                else:
-                    answer.setAnswer(str(result))
-                self.instance.writeAnswers(answer)
-
+        except (ArangoLaneError, ArangoUnavailableError):
+            # `_runLaneQuery` / `_validate_query` have logged the cause. Fail the
+            # step: emitting anything lets the pipeline carry on as if the
+            # question had been answered.
+            raise
         except Exception as e:
+            # The node's own non-database work failed (the LLM returned nothing usable):
+            # log it. A database failure never lands here.
             error(f'Error handling question: {e}')
+            return
+
+        if 'text' in lanes:
+            self.instance.writeText(str(result))
+
+        if 'table' in lanes and executed and result:
+            self.instance.writeTable(self._formatResultAsMarkdown(result))
+
+        if 'answers' in lanes:
+            answer = Answer()
+            if executed and result:
+                answer.setAnswer(self._formatResultAsMarkdown(result))
+            else:
+                answer.setAnswer(str(result))
+            self.instance.writeAnswers(answer)
+
+    def _runLaneQuery(self, runner, statement: str):
+        """Run ``statement`` through ``runner`` for a lane; any failure raises ``ArangoLaneError``."""
+        try:
+            return runner(statement)
+        except Exception as e:
+            error(f'Error executing AQL: {e}')
+            raise ArangoLaneError('ArangoDB query failed (details are in the engine log)') from None
 
     # ------------------------------------------------------------------
     # AQL query building

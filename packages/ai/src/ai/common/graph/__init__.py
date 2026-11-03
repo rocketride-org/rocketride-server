@@ -32,7 +32,7 @@ neither follows the natural-language-to-query loop this base implements.
 """
 
 from .cypher_safety import is_cypher_safe, strip_cypher_literals
-from .graph_global_base import DEFAULT_MAX_EXECUTE_ROWS, GraphGlobalBase
+from .graph_global_base import DEFAULT_MAX_EXECUTE_ROWS, GraphGlobalBase, GraphUnavailableError
 from .graph_instance_base import DEFAULT_ROW_LIMIT, GraphInstanceBase
 
 __all__ = [
@@ -40,6 +40,7 @@ __all__ = [
     'DEFAULT_ROW_LIMIT',
     'GraphGlobalBase',
     'GraphInstanceBase',
+    'GraphUnavailableError',
     'is_cypher_safe',
     'strip_cypher_literals',
 ]

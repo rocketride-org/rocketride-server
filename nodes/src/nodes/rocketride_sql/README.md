@@ -29,6 +29,19 @@ the sibling for Cypher graph queries.
 | questions | text | Returns the query result as text. |
 | questions | answers | Returns the query result on the answers lane. |
 
+A lane never reports success for a statement that failed. When the database
+cannot be reached or refuses the statement, the lane raises, the step and the
+task fail, and nothing is emitted: no empty answer, no `None` text, no error
+object on the answers lane. The failure message is generic and the driver's own
+text (host, port, statement fragment) is only in the engine log. This holds for
+a read on the questions lane and for an insert on the answers and table lanes.
+Pipelines that used to complete while the database was down now fail instead.
+The same holds for the validation step that checks a generated query before it
+runs: a database that cannot be reached fails the step (and the LLM is not asked
+to rewrite a query that was never at fault), while a query the database rejects
+is still reported as an error on the lanes. The `get_sql` and `get_data` tools
+report an outage as an explicit `valid: false` result.
+
 ## As a tool
 
 The inherited database functions are registered under the bare names below; this
@@ -127,9 +140,9 @@ violation -- omitting the column is the one shape that works for a default, a
 trigger and a generated key alike. Where nothing fills the key in, PostgreSQL
 refuses the row and every row of the batch is rolled back; the failure is
 raised as Insert into "<table>" failed: followed by the database's own primary
-message, with the statement echo stripped. On the answers lane that error is
-logged rather than returned to the caller, so check the server log when a batch
-does not land. SQLAlchemy emits a Python SAWarning (once per column per process
+message, with the statement echo stripped. On the answers lane the step fails
+with a generic message and that text goes to the server log, so check the
+server log for the cause when a batch does not land. SQLAlchemy emits a Python SAWarning (once per column per process
 under the default filter) for a statement that leaves a primary key unbound;
 that is expected here.
 
@@ -186,6 +199,42 @@ self-hosted engine supports only Organization; Team and Personal fail at start
 because they need RocketRide cloud. Access is approved for the whole run, not
 each node: every node in a run can reach every database the run was approved
 for.
+
+### Connection resilience
+
+The node's connection pool checks a pooled connection before handing it out and
+replaces one the server has closed, so the first statement after a pooler restart
+or a failover does not fail on a dead connection. What is bounded in time, and
+what is not:
+
+- **Opening a connection**, handshake and authentication included: each attempt
+  gives up after `connect_timeout` seconds (default 5, at most 60). An attempt that
+  fails because the server is unreachable or not ready (connection refused, timed
+  out, the pooler at its client limit or unable to reach its backend, a role or
+  server at its connection limit, the database starting up) is retried with
+  exponential backoff and jitter, at most `connect_retries` attempts in total
+  (default 3, at most 10) within `connect_retry_budget` seconds (default 10, at most
+  60), so one connect takes at most the budget plus one `connect_timeout`. A bad
+  role, password or database is reported at once, even when it comes back beside a
+  refused address from a multi-host DSN. `connect_timeout` set here takes precedence
+  over one written in the connection URL.
+- **A peer that stops acknowledging** (a network partition, a dead host): the
+  connection carries `keepalives_idle` (30 s), `keepalives_interval` (10 s),
+  `keepalives_count` (3) and, on libpq 12 or newer, `tcp_user_timeout` (30 s), so it
+  is dropped within about a minute.
+- **The pre-ping health check**: `ping_timeout` (default 5 s) bounds it, which also
+  covers a pooler process that keeps acknowledging but has stopped answering. A
+  watchdog shuts the connection's socket down if the ping overruns; it never touches
+  a connection whose ping already returned. It does nothing on Windows, where the
+  socket cannot be duplicated, so there the ping is not bounded.
+- **Not bounded: a statement already running on a healthy connection.** Use the
+  server's `statement_timeout` for that. A statement that was sent is never sent
+  again.
+
+These are optional node config keys. When the database stays unreachable the step
+fails with the error described under Lanes. The keepalive, `tcp_user_timeout` and
+`ping_timeout` settings apply to PostgreSQL; MySQL and MariaDB get the connect
+timeout and the retry.
 
 ## Limitations
 

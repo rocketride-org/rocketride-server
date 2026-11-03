@@ -224,6 +224,8 @@ class TransactionRegistry:
         self._max_rows = max_rows
         self._clock = clock
         self._sessions: dict[str, _Held] = {}
+        self._pending = 0  # slots reserved by a begin() that is still connecting; guarded by _registry_lock
+        self._generation = 0  # bumped by close_all(); a begin() that spans a bump must not register; same lock
         self._registry_lock = threading.Lock()  # guards the _sessions dict only
         self._stop = threading.Event()  # set by close_all() to retire the sweeper
         self._sweeper: threading.Thread | None = None
@@ -233,18 +235,40 @@ class TransactionRegistry:
         """Checkout a connection, open a transaction, return a new session_id."""
         self._ensure_sweeper()
         self.reap_idle()
+        # Reserve the slot under the lock, then connect OUTSIDE it. Opening a
+        # connection can take as long as the connect timeout times the retry budget
+        # while a pooler is down; holding the node-wide registry lock for that made
+        # every other session's execute / commit / rollback wait behind it.
         with self._registry_lock:
-            if len(self._sessions) >= self._max_sessions:
+            if len(self._sessions) + self._pending >= self._max_sessions:
                 raise RuntimeError('too many open DB transactions; try again later')
+            self._pending += 1
+            generation = self._generation
+        try:
             conn = self._engine.connect()
             try:
                 trans = conn.begin()
-                sid = uuid.uuid4().hex
-                self._sessions[sid] = _Held(conn, trans, self._clock())
             except Exception:
                 conn.close()
                 raise
-            return sid
+        except BaseException:
+            with self._registry_lock:
+                self._pending -= 1
+            raise
+        sid = uuid.uuid4().hex
+        with self._registry_lock:
+            self._pending -= 1
+            closed = self._generation != generation
+            if not closed:
+                self._sessions[sid] = _Held(conn, trans, self._clock())
+        if closed:
+            # `close_all` ran while this begin was connecting outside the lock; it
+            # never saw this connection, so release it here instead of registering a
+            # session nobody will close. (A begin that starts after `close_all` is
+            # unaffected: the registry stays usable, as it always was.)
+            conn.close()
+            raise RuntimeError('the transaction registry is closed')
+        return sid
 
     def execute(self, session_id: str, sql: str, params: list | None = None, row_mode: str = 'object') -> dict:
         """Run SQL on the held connection; refresh last_used; return shaped result.
@@ -339,6 +363,8 @@ class TransactionRegistry:
     def close_all(self) -> None:
         """Rollback+close every session, and retire the sweeper (for endGlobal)."""
         self._stop.set()
+        with self._registry_lock:
+            self._generation += 1
         # Wait out a sweep that is already running. _drop() takes a session out of
         # the registry BEFORE rolling it back, so a reaped session is invisible to
         # the loop below; without the join, close_all() can return (and endGlobal

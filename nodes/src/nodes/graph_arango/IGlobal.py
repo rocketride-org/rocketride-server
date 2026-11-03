@@ -43,6 +43,32 @@ from .utils import _is_aql_safe, _plan_is_modification
 
 DEFAULT_MAX_EXECUTE_ROWS = 25000
 
+
+class ArangoUnavailableError(RuntimeError):
+    """ArangoDB could not be reached, or dropped the connection, while serving a request.
+
+    Raised by ``_validate_query`` instead of reporting the outage as a rejected
+    query, and by the lane handlers (``ArangoLaneError``) when a statement
+    fails. The message is generic; the driver's text is in the engine log.
+    """
+
+
+class ArangoLaneError(RuntimeError):
+    """A pipeline lane statement failed against ArangoDB; the step must fail."""
+
+
+def _is_unavailable(exc: BaseException) -> bool:
+    """Return True for a connection-level failure.
+
+    python-arango's ``ServerConnectionError``, a socket-level ``OSError``
+    (``requests``' ``ConnectionError`` and ``Timeout`` are ``OSError`` subclasses,
+    so the HTTP transport is covered without importing it), or the server
+    answering HTTP 503 (``ArangoServerError.http_code``: starting up, shutting
+    down, or no leader).
+    """
+    return isinstance(exc, (ServerConnectionError, OSError)) or getattr(exc, 'http_code', None) == 503
+
+
 # Map ArangoDB's numeric collection type codes to readable names.
 _COLLECTION_TYPE_EDGE = 3
 
@@ -213,9 +239,12 @@ class IGlobal(IGlobalBase):
         """
         try:
             plan = self.db.aql.explain(aql)
-        except ArangoError as e:
-            return False, str(e)
         except Exception as e:
+            if _is_unavailable(e):
+                # Not a verdict on the query: raised so a lane fails instead of
+                # feeding the outage back to the LLM as a rejection.
+                warning(f'ArangoDB unavailable during EXPLAIN validation: {e}')
+                raise ArangoUnavailableError('ArangoDB is unavailable (details are in the engine log)') from None
             return False, str(e)
         if _plan_is_modification(plan):
             return False, 'Query performs data modification; this node is read-only.'
