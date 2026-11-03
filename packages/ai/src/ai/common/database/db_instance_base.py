@@ -883,7 +883,6 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             """Format the db_schema dict into a concise text block for the LLM."""
 
             def simplify_type(sql_type: str) -> str:
-                """Return the type name without its COLLATE clause, upper-cased."""
                 # Strip COLLATE clauses (e.g. VARCHAR(255) COLLATE utf8mb4_general_ci)
                 # so the LLM sees clean type names.
                 return sql_type.split('COLLATE')[0].strip().upper()
@@ -980,7 +979,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 column_names = result.keys()
                 return [dict(zip(column_names, row)) for row in rows]
 
-        except SQLAlchemyError as e:
+        except Exception as e:
+            # Not only SQLAlchemyError: the clickhouse+native:// connector raises its own DatabaseException
+            if not _isDbFailure(e):
+                raise
             error(f'Error executing SQL query: {e}')
             return None
 
@@ -1084,18 +1086,20 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             if is_valid_query and sql_query and not is_sql_safe(sql_query):
                 self._emitError('Generated query contains unsafe SQL', lanes)
                 return
+            # Neither SQL to run nor a prose answer: report it instead of emitting the text 'None'
+            if not sql_query:
+                raise RuntimeError('The LLM returned neither a query nor an answer')
 
             executed = is_valid_query and bool(sql_query)
             # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
             result = self._executeSQLQuery(sql_query) if executed else sql_query
             # The database rejected the statement at run time (the cause is in the log)
             if executed and result is None:
-                self._emitError(_QUERY_EXECUTION_FAILED, lanes)
-                return
+                raise RuntimeError(_QUERY_EXECUTION_FAILED)
 
             self._emit(result, lanes, executed=executed)
 
-        except MissingLlmError as e:
+        except Exception as e:
             # The caller needs this cause, not only the log: on the text/answers
             # lanes when one is wired, otherwise through the engine's error path
             # (a table-only pipeline has no lane that carries an error message).
@@ -1103,8 +1107,6 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             if 'text' not in lanes and 'answers' not in lanes:
                 raise
             self._emitError(str(e), lanes)
-        except Exception as e:
-            error(f'Error handling question: {e}')
 
     def _emitError(self, message: str, lanes) -> None:
         """Emit a validation/safety error to the wired lanes, never a rejected query as prose.

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import time
 from datetime import datetime
+from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
@@ -273,7 +274,6 @@ class _StandInClickHouseServerException(Exception):
     """
 
     def __init__(self, code, message):
-        """Keep the ClickHouse error code and text."""
         super().__init__(message)
         self.code = code
         self.message = message
@@ -292,7 +292,6 @@ class _StandInClickHouseDatabaseException(Exception):
     """
 
     def __init__(self, orig):
-        """Wrap the driver's exception."""
         super().__init__(orig)
         self.orig = orig
 
@@ -520,7 +519,6 @@ def test_format_db_error_returns_a_neutral_string_when_the_message_is_only_detai
     ids=['signal', 'signal-looking-like-clickhouse', 'syntax-error'],
 )
 def test_format_db_error_leaves_other_databases_text_alone(base, errno, text, kept):
-    """A non-ClickHouse error keeps its errno prefix and its own sentence."""
     exc = _wrapped(_FakeDriverError(errno, text), 'SELECT 1', {})
 
     result = base._format_db_error(exc)
@@ -540,13 +538,11 @@ def test_format_db_error_leaves_other_databases_text_alone(base, errno, text, ke
     ],
 )
 def test_format_db_error_leaves_text_that_resembles_a_clickhouse_echo_alone(base, text):
-    """Text that only looks like a ClickHouse statement echo is not cut."""
     assert base._format_db_error(_wrapped(_FakeDriverError(text), 'SELECT 1', {})) == text
 
 
 @pytest.mark.parametrize('filler', [' ', ' \n', '\n '])
 def test_format_db_error_time_does_not_grow_with_whitespace(base, filler):
-    """Formatting stays fast on long whitespace runs (no catastrophic regex backtracking)."""
     # Small first: a cubic pattern takes ~0.5 s here and would take an hour at 20,000.
     for size, limit in ((1000, 0.1), (20000, 1)):
         exc = _wrapped(_FakeDriverError(f'bad{filler * size}value [SQL: SELECT 1]'), 'SELECT 1', {})
@@ -699,17 +695,14 @@ class _FakeGlobal:
     """Stub IGlobal: every EXPLAIN attempt rejects the query."""
 
     def __init__(self, max_attempts=2, explain_error='syntax error near FROM'):
-        """Set how many EXPLAIN attempts are allowed and the error each one returns."""
         self.max_validation_attempts = max_attempts
         self._explain_error = explain_error
 
     def _validateQuery(self, sql):
-        """Reject every query with the configured EXPLAIN error."""
         return False, self._explain_error
 
 
 def _sql_instance(fake_global):
-    """Return a bare instance bound to ``fake_global`` as its IGlobal."""
     inst = _TestableInstance.__new__(_TestableInstance)
     inst.IGlobal = fake_global
     return inst
@@ -776,26 +769,21 @@ class _FakeInstance:
     """Minimal stand-in for IFilterInstance: records what each lane receives."""
 
     def __init__(self, lanes):
-        """Record nothing yet; ``lanes`` are the wired lane names."""
         self._lanes = lanes
         self.text_written = None
         self.table_written = None
         self.answer_written = None
 
     def getListeners(self):
-        """Return the wired lane names."""
         return list(self._lanes)
 
     def writeText(self, text):
-        """Record what the text lane received."""
         self.text_written = text
 
     def writeTable(self, markdown):
-        """Record what the table lane received."""
         self.table_written = markdown
 
     def writeAnswers(self, answer):
-        """Record what the answers lane received."""
         self.answer_written = answer
 
 
@@ -943,6 +931,100 @@ def test_write_questions_reports_an_empty_result_as_rows_not_as_a_failure():
     assert fake_instance.answer_written.getText() == '[]'
 
 
+def test_write_questions_raises_a_failed_execution_when_no_lane_carries_errors():
+    """A table-only pipeline has no lane for an error, so a failed query fails the question instead of looking like zero rows."""
+    inst, fake_instance = _executing_instance(None, ['table'])
+    question = Question()
+    question.addQuestion('the answer')
+
+    with pytest.raises(RuntimeError, match='Query execution failed'):
+        inst.writeQuestions(question)
+    assert fake_instance.table_written is None
+
+
+class _RaisingEngine:
+    """An engine whose every statement fails with one exception."""
+
+    def __init__(self, exc):
+        """Fail every statement with ``exc``."""
+        self.exc = exc
+
+    @contextmanager
+    def connect(self):
+        """Yield a connection whose ``execute`` raises."""
+        yield SimpleNamespace(execute=self._fail)
+
+    def _fail(self, *_args, **_kwargs):
+        """Raise the configured exception."""
+        raise self.exc
+
+
+def test_execute_sql_query_reports_a_clickhouse_failure_as_none():
+    """clickhouse+native:// raises a DatabaseException that is not a SQLAlchemyError; it is still a failed query."""
+    inst = _sql_instance(
+        SimpleNamespace(
+            engine=_RaisingEngine(
+                _StandInClickHouseDatabaseException(
+                    _StandInClickHouseServerException(60, "Table default.widgets doesn't exist")
+                )
+            )
+        )
+    )
+
+    assert inst._executeSQLQuery('SELECT * FROM widgets') is None
+
+
+def test_execute_sql_query_lets_a_non_database_error_through():
+    """Only database failures become None; anything else is a bug and propagates."""
+    inst = _sql_instance(SimpleNamespace(engine=_RaisingEngine(RuntimeError('boom'))))
+
+    with pytest.raises(RuntimeError, match='boom'):
+        inst._executeSQLQuery('SELECT 1')
+
+
+def test_write_questions_reports_a_clickhouse_failure_on_the_lanes():
+    """Through the real _executeSQLQuery, a ClickHouse runtime failure reaches the lanes as the failure message."""
+    fake_global = _FakeGlobal()
+    fake_global._validateQuery = lambda sql: (True, None)
+    fake_global.engine = _RaisingEngine(
+        _StandInClickHouseDatabaseException(
+            _StandInClickHouseServerException(60, "Table default.widgets doesn't exist")
+        )
+    )
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': True,
+        'query': 'SELECT 1',
+    }
+    fake_instance = _FakeInstance(lanes=['text', 'answers'])
+    inst.instance = fake_instance
+    question = Question()
+    question.addQuestion('widgets')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written == 'Query execution failed'
+    assert fake_instance.answer_written.getJson() == {'error': 'Query execution failed'}
+
+
+@pytest.mark.parametrize('reply', [{'isValid': False}, {'isValid': True, 'query': None}])
+def test_write_questions_reports_a_reply_without_query_or_answer(reply):
+    """An LLM reply with neither SQL nor a prose answer is reported, not written as the text 'None'."""
+    fake_global = _FakeGlobal()
+    fake_global._validateQuery = lambda sql: (True, None)
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: dict(reply)
+    fake_instance = _FakeInstance(lanes=['text', 'answers'])
+    inst.instance = fake_instance
+    question = Question()
+    question.addQuestion('anything')
+
+    inst.writeQuestions(question)
+
+    assert fake_instance.text_written == 'The LLM returned neither a query nor an answer'
+    assert fake_instance.answer_written.getJson() == {'error': 'The LLM returned neither a query nor an answer'}
+
+
 # ---------------------------------------------------------------------------
 # _tableExists (engine-backed)
 # ---------------------------------------------------------------------------
@@ -1065,16 +1147,13 @@ class _InstanceWithLlms:
     """Stand-in for IFilterInstance that reports which llm nodes are connected."""
 
     def __init__(self, llm_node_ids):
-        """Report ``llm_node_ids`` as the connected llm nodes."""
         self._llm_node_ids = llm_node_ids
         self.asked = False
 
     def getControllerNodeIds(self, class_type):
-        """Return the connected llm node ids for ``llm``, none for any other class."""
         return list(self._llm_node_ids) if class_type == 'llm' else []
 
     def invoke(self, *args, **kwargs):
-        """Note that the llm was asked, then stop the test there."""
         self.asked = True
         raise RuntimeError('stop after the LLM call')
 
@@ -1096,7 +1175,6 @@ def test_question_without_llm_names_the_cause_and_the_raw_sql_path():
 
 
 def test_question_with_llm_reaches_the_llm():
-    """With an llm connected, the question is sent to it."""
     inst = _sql_instance(SimpleNamespace(db_schema={}, db_description='', dialect='testdb', max_validation_attempts=1))
     inst.instance = _InstanceWithLlms(['llm_openai_1'])
 
@@ -1110,7 +1188,6 @@ class _LaneInstanceWithoutLlm(_FakeInstance):
     """Lane-recording instance with no llm controller connected."""
 
     def getControllerNodeIds(self, class_type):
-        """Report no llm connected."""
         return []
 
 
@@ -1153,7 +1230,6 @@ def test_write_questions_without_llm_raises_when_no_lane_carries_the_error(lanes
 
 
 def test_write_questions_without_llm_does_not_raise_when_text_is_wired():
-    """With no llm and the text lane wired, the cause goes to the lane instead of raising."""
     inst = _sql_instance(_FakeGlobal(max_attempts=1))
     fake_instance = _LaneInstanceWithoutLlm(lanes=['text', 'table'])
     inst.instance = fake_instance
