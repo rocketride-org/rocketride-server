@@ -19,7 +19,7 @@ Found a bug? Please [open an issue](https://github.com/rocketride-org/rocketride
 
 ## Security Issues
 
-For security vulnerabilities, please see our [Security Policy](SECURITY.md). Do **not** open a public issue for security concerns.
+For security vulnerabilities, please see our [Security Policy](../SECURITY.md). Do **not** open a public issue for security concerns.
 
 ## What Doesn't Belong in Issues
 
