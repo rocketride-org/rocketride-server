@@ -213,7 +213,8 @@ still apply, so a response can contain fewer matches than requested.
 Deleted objects are excluded by default, while document rendering reassembles
 stored chunks by chunkId. When a batch holds an object's chunk 0, the store removes
 that object's existing chunks before inserting the batch, preventing duplicate
-data for a re-ingested object; a later batch of the same object adds to it. The deleted mark is the same one the `soft_delete`
+data for a re-ingested object; a later batch of the same object without chunk 0 adds
+to it. The deleted mark is the same one the `soft_delete`
 tool sets and `restore` clears: a document in the trash keeps its rows and its
 chunk IDs, and the `delete` tool removes rows for good.
 
