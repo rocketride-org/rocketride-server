@@ -1694,8 +1694,9 @@ for (const mode of ['provider', 'legacy', 'direct'] as const) {
 		test(`${mode} OAuth carries ${scenario} cookieless context in the OAuth state, never in storage`, async () => {
 			const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
 			const session = recordingSession([['rr:auth:signup', 'stale context']]);
-			const decided = scenario === 'rejected' || scenario === 'accepted';
-			const local = recordingSession(decided ? [['rr_consent_v1', JSON.stringify({ v: 1, choice: scenario, at: Date.now() })]] : []);
+			const records: Array<[string, string]> = [];
+			if (scenario === 'rejected' || scenario === 'accepted') records.push(['rr_consent_v1', JSON.stringify({ v: 1, choice: scenario, at: Date.now() })]);
+			const local = recordingSession(records);
 			const redirects: string[] = [];
 			const win = topLevelWindow({ location: { search: '', pathname: '/', origin: 'https://shell.example.test', assign: (url: string) => redirects.push(url) } });
 			await withGlobals({ window: win, sessionStorage: session.storage, localStorage: local.storage, navigator: { globalPrivacyControl: scenario === 'private' } }, async () => {
@@ -1711,30 +1712,38 @@ for (const mode of ['provider', 'legacy', 'direct'] as const) {
 				assert.equal(redirects.length, 1);
 				const state = new URL(redirects[0]).searchParams.get('state');
 				if (scenario === 'private') assert.equal(state, null);
-				else assert.deepEqual(JSON.parse(atob(state!)), signup);
+				else assert.deepEqual(JSON.parse(atob(state!)), { v: 1, signup });
 				provider.dispose();
 			});
 		});
 	}
 }
 
-test('a cookieless signup completion reads its context from the OAuth state only', async () => {
+test('a cookieless signup completion reads its context from the OAuth state envelope only', async () => {
 	const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
 	const consented = signupContext();
-	const cases: Array<[string, string | null, SignupProperties | null]> = [
-		['cookieless', btoa(JSON.stringify(signup)), signup],
-		['consented context in the URL', btoa(JSON.stringify(consented)), null],
-		['rejected consent state', btoa(JSON.stringify({ ...signup, consent_state: 'rejected' })), null],
-		['unknown consent state', btoa(JSON.stringify({ ...signup, consent_state: 'accepted' })), null],
-		['malformed', '%%%not-base64', null],
-		['oversized', btoa(JSON.stringify(signup)).padEnd(4096, 'A'), null],
-		['absent', null, null],
+	const accepted = { v: 1, choice: 'accepted', at: Date.now() };
+	const envelope = (value: unknown) => btoa(JSON.stringify(value));
+	// [name, state, expected context, consent record in the browser at the callback]
+	const cases: Array<[string, string | null, SignupProperties | null, object | null]> = [
+		['undecided envelope', envelope({ v: 1, signup }), signup, null],
+		['bare context without the envelope', envelope(signup), null, null],
+		['envelope without a version', envelope({ signup }), null, null],
+		['envelope of another version', envelope({ v: 2, signup }), null, null],
+		['consented context in the envelope, even under consent', envelope({ v: 1, signup: consented }), null, accepted],
+		['rejected consent state', envelope({ v: 1, signup: { ...signup, consent_state: 'rejected' } }), null, null],
+		['unknown consent state', envelope({ v: 1, signup: { ...signup, consent_state: 'accepted' } }), null, null],
+		['malformed', '%%%not-base64', null, null],
+		['oversized', envelope({ v: 1, signup }).padEnd(4096, 'A'), null, null],
+		['absent', null, null, null],
 	];
-	for (const [name, state, expected] of cases) {
+	for (const [name, state, expected, record] of cases) {
 		const page = callbackPage();
-		const search = state === null ? '?code=abc' : `?code=abc&state=${encodeURIComponent(state)}`;
-		(page.globals.window as { location: { search: string } }).location.search = search;
-		await withGlobals({ ...page.globals, localStorage: recordingSession().storage, navigator: {} }, async () => {
+		const location = (page.globals.window as { location: { search: string } }).location;
+		if (state !== null) location.search = `?code=abc&state=${encodeURIComponent(state)}`;
+		const local = recordingSession();
+		if (record) local.storage.setItem('rr_consent_v1', JSON.stringify(record));
+		await withGlobals({ ...page.globals, localStorage: local.storage, navigator: {} }, async () => {
 			const { manager, exchanged } = callbackManager({ ...authenticatedResult, isNewUser: true });
 			await manager.bootstrap();
 			assert.equal(exchanged.length, 1, `${name}: auth still proceeds`);

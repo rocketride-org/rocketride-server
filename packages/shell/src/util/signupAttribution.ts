@@ -33,6 +33,8 @@ const CONSENT_STORAGE_KEY = 'rr_consent_v1';
 const CONSENT_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000;
 const CONSENT_CLOCK_SKEW_MS = 60 * 1000;
 const MAX_STORED_CONTEXT_LENGTH = 2048;
+// Version of the OAuth state envelope `{ v, signup }` that carries a cookieless context.
+const SIGNUP_STATE_VERSION = 1;
 
 function isPrivacySignal(value: unknown): boolean {
 	return value === true || value === 1 || value === '1' || value === 'yes';
@@ -113,16 +115,19 @@ export function stashSignupProperties(value: unknown): SignupProperties | null {
 /**
  * The OAuth state that carries a cookieless context through the identity provider and back.
  *
+ * The state is base64 JSON `{ v: 1, signup }`. It is readable and unsigned: PKCE already prevents a forged
+ * callback, so a forged state can only change attribution. A nonce can be added later under the same envelope.
+ *
  * @param context - Context returned by stashSignupProperties.
- * @returns Base64 JSON for a cookieless context; undefined for none or a consented one (which stays in storage).
+ * @returns The state for a cookieless context; undefined for none or a consented one (which stays in storage).
  */
 export function signupState(context: SignupProperties | null): string | undefined {
 	if (!context?.consent_state) return undefined;
-	return btoa(JSON.stringify(context));
+	return btoa(JSON.stringify({ v: SIGNUP_STATE_VERSION, signup: context }));
 }
 
 /**
- * Read a cookieless context back from the callback's OAuth state and recheck it.
+ * Read a cookieless context back from the callback's OAuth state envelope (see signupState) and recheck it.
  *
  * @param state - The callback's `state` query value.
  * @returns Valid cookieless context, or null; a consented context is never accepted from the URL.
@@ -131,8 +136,11 @@ export function signupFromState(state: string | null): SignupProperties | null {
 	if (isEmbeddedDevShell()) return null;
 	try {
 		if (!state || state.length > MAX_STORED_CONTEXT_LENGTH) return null;
-		const context = currentSignupProperties(JSON.parse(atob(state)));
-		return context?.consent_state ? context : null;
+		const envelope = JSON.parse(atob(state));
+		if (envelope?.v !== SIGNUP_STATE_VERSION) return null;
+		const context = currentSignupProperties(envelope.signup);
+		if (!context?.consent_state) return null;
+		return context;
 	} catch {
 		return null;
 	}
