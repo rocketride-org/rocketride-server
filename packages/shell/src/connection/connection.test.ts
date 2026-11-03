@@ -1691,7 +1691,7 @@ for (const mode of ['provider', 'legacy', 'direct'] as const) {
 
 for (const mode of ['provider', 'legacy', 'direct'] as const) {
 	for (const scenario of ['undecided', 'expired', 'rejected', 'accepted', 'private', 'unreadable'] as const) {
-		test(`${mode} OAuth puts a cookieless context in the OAuth state only for an undecided visitor (${scenario}), never in storage`, async () => {
+		test(`${mode} OAuth puts a cookieless context in the OAuth state only for an undecided visitor (${scenario}), never in site storage`, async () => {
 			const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
 			const session = recordingSession([['rr:auth:signup', 'stale context']]);
 			const records: Array<[string, string]> = [];

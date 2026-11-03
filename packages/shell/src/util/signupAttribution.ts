@@ -110,7 +110,8 @@ export function currentSignupProperties(value: unknown): SignupProperties | null
 
 /**
  * Retain optional context across a native redirect. Consented context stays in session storage, out of the IdP
- * URL; cookieless context is never stored and rides the OAuth state instead (signupState).
+ * URL. Cookieless context is not written to site storage; it rides the OAuth state instead (signupState), which
+ * is part of the authorize URL.
  *
  * @param value - Candidate context; absent or invalid context clears a stale pending signup.
  * @returns The retained context, or null when consent, validation or storage disallows it.
@@ -134,6 +135,8 @@ export function stashSignupProperties(value: unknown): SignupProperties | null {
  *
  * The state is base64 JSON `{ v: 1, signup }`. It is readable and unsigned: PKCE already prevents a forged
  * callback, so a forged state can only change attribution. A nonce can be added later under the same envelope.
+ * Nothing is written to site storage, but the authorize URL, state included, stays in this browser's history
+ * (sign-in keeps that entry with assign()) and reaches the identity provider's request logs.
  *
  * @param context - Context returned by stashSignupProperties.
  * @returns The state for a cookieless context; undefined for none or a consented one (which stays in storage).

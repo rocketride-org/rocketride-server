@@ -34,7 +34,10 @@ export type SignupProperties = {
 	exposed_at: number;
 	expires_at: number;
 	consent_version: 1;
-	/** Present only when the visitor had not yet chosen whether to allow analytics: the context then rides the OAuth state, never device storage. */
+	/**
+	 * Present only when the visitor had not yet chosen whether to allow analytics. The context then rides the OAuth
+	 * state instead of site storage, so it stays in browser history and reaches the identity provider's request logs.
+	 */
 	consent_state?: 'undecided';
 };
 

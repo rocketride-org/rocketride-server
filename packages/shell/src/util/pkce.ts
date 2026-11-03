@@ -185,7 +185,9 @@ export function clearStoredVerifier(): void {
  * @param _register     - Historical sign-up intent flag; both flows now land on
  *                        the login page (with its Register link), see below
  * @param state         - Optional OAuth state, returned unchanged on the callback
- *                        (carries a cookieless signup context; see signupState)
+ *                        (carries a cookieless signup context; see signupState).
+ *                        Like the rest of this URL it stays in browser history
+ *                        and reaches the identity provider's request logs.
  * @returns The fully formed authorization URL string ready for browser navigation.
  */
 export function buildAuthUrl(
@@ -216,6 +218,10 @@ export function buildAuthUrl(
     // ("could not sign up at this time"), so the register flag no longer maps
     // to it. The parameter is kept so callers' intent stays visible at call sites.
     params.set('prompt', 'login');
+    // The state is not written to site storage, but it is part of this URL: the
+    // browser keeps it in history (callers navigate with assign() on purpose) and
+    // the identity provider sees it in its request logs. Only the callback URL is
+    // stripped after sign-in.
     if (state) params.set('state', state);
 
     // Strip any trailing slash from the base URL before appending the path
