@@ -26,9 +26,12 @@
  */
 
 import * as vscode from 'vscode';
+import { getLogger } from './shared/util/output';
 import { RocketRideClient } from 'rocketride';
 
-export type ConnectionMode = 'cloud' | 'docker' | 'service' | 'onprem' | 'local';
+// ONE declaration for this union — see shared/types/connection.ts.
+import type { ConnectionMode } from './shared/types/connection';
+export type { ConnectionMode };
 
 /** Which settings group a connection reads from. */
 export type ConnectionGroup = 'development' | 'deployment';
@@ -58,6 +61,19 @@ export interface ConnectionGroupConfig {
 		/** Engine version: 'latest', 'prerelease', or a specific tag */
 		engineVersion: string;
 	};
+}
+
+/** The pipeline-family values — sourced from the SHARED WORKSPACE SETTINGS
+ *  (the `rocketride.pipeBuilder.*` keys in the server-side workspace), pushed
+ *  into the sync cache by the workspace-settings bridge. They are NOT VS Code
+ *  configuration anymore; the old flat keys sit unread. */
+export interface WorkspaceSettingsValues {
+	defaultPipelinePath: string;
+	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
+	pipelineTtl: number;
+	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
+	taskArguments: string;
+	pipelineDebugOutput: boolean;
 }
 
 /** Top-level cached config with nested per-group settings. */
@@ -107,19 +123,6 @@ export interface ConnectionGroupSnapshot {
 export interface SettingsSnapshot {
 	development: ConnectionGroupSnapshot;
 	deployment: ConnectionGroupSnapshot;
-	defaultPipelinePath: string;
-	pipelineRestartBehavior: 'auto' | 'manual' | 'prompt';
-	pipelineTtl: number;
-	pipelineTraceLevel: 'none' | 'metadata' | 'summary' | 'full';
-	taskArguments: string;
-	pipelineDebugOutput: boolean;
-	autoAgentIntegration: boolean;
-	integrationCopilot: boolean;
-	integrationClaudeCode: boolean;
-	integrationCursor: boolean;
-	integrationWindsurf: boolean;
-	integrationClaudeMd: boolean;
-	integrationAgentsMd: boolean;
 }
 
 /**
@@ -170,11 +173,12 @@ export class ConfigManager {
 		local: { engineVersion: 'latest' },
 	};
 
-	// Cached configuration
+	// Cached configuration. The pipeline-family fields hold their declared
+	// defaults until the workspace-settings bridge's first push.
 	private config: ConfigManagerInfo = {
 		development: { ...ConfigManager.DEFAULT_GROUP, connectionMode: 'local' },
 		deployment: { ...ConfigManager.DEFAULT_GROUP, connectionMode: null },
-		defaultPipelinePath: '',
+		defaultPipelinePath: 'pipelines',
 		pipelineRestartBehavior: 'prompt',
 		pipelineTtl: 900,
 		pipelineTraceLevel: 'full',
@@ -241,7 +245,7 @@ export class ConfigManager {
 		const defaultMode = group === 'development' ? 'local' : null;
 		const connectionMode = gc.get<ConnectionMode | null>('connectionMode', defaultMode);
 		let hostUrl = gc.get<string>('hostUrl', '');
-		let apiKey = await this.getApiKeyFromStorage(group);
+		const apiKey = await this.getApiKeyFromStorage(group);
 		const useCustomServer = gc.get<boolean>('useCustomServer', false);
 		const cloudUrl = gc.get<string>('cloudUrl', '');
 
@@ -273,18 +277,24 @@ export class ConfigManager {
 	 * EngineRegistry can force a cache refresh after external writes.
 	 */
 	public async refreshConfig(): Promise<void> {
-		const config = vscode.workspace.getConfiguration(this.configSection);
-
+		// Pipeline-family values are NOT re-read here: they come from the
+		// shared workspace settings via setWorkspaceSettings() (the bridge),
+		// so a config refresh keeps whatever the bridge last pushed.
 		this.config = {
+			...this.config,
 			development: await this.refreshGroupConfig('development'),
 			deployment: await this.refreshGroupConfig('deployment'),
-			defaultPipelinePath: config.get('defaultPipelinePath', 'pipelines'),
-			pipelineRestartBehavior: config.get('pipelineRestartBehavior', 'prompt'),
-			pipelineTtl: config.get('pipelineTTL', 900),
-			pipelineTraceLevel: config.get('pipelineTraceLevel', 'full'),
-			taskArguments: config.get('taskArguments', ''),
-			pipelineDebugOutput: config.get('pipelineDebugOutput', false),
 		};
+	}
+
+	/**
+	 * Pushes the pipeline-family values from the shared workspace settings
+	 * into the sync cache — called by the workspace-settings bridge on load
+	 * and on every workspace-settings change. Synchronous on purpose: every
+	 * consumer reads `getConfig()` synchronously.
+	 */
+	public setWorkspaceSettings(values: WorkspaceSettingsValues): void {
+		this.config = { ...this.config, ...values };
 	}
 
 	/**
@@ -293,7 +303,7 @@ export class ConfigManager {
 	private async getApiKeyFromStorage(group: ConnectionGroup): Promise<string> {
 		if (this.isDisposing) return '';
 		if (!this.context) {
-			console.warn('ConfigManager not initialized with context - cannot access secure storage');
+			getLogger().info('ConfigManager not initialized with context - cannot access secure storage');
 			return '';
 		}
 		try {
@@ -301,7 +311,7 @@ export class ConfigManager {
 			return (await this.context.secrets.get(key)) || '';
 		} catch (error: unknown) {
 			if (error instanceof Error && error.name === 'Canceled') return '';
-			console.error(`Failed to retrieve ${group} API key from secure storage:`, error);
+			getLogger().error(`Failed to retrieve ${group} API key from secure storage: ${String(error)}`);
 			return '';
 		}
 	}
@@ -464,7 +474,7 @@ export class ConfigManager {
 			}
 		} catch (error: unknown) {
 			if (error instanceof Error && error.name === 'Canceled') return;
-			console.error(`Failed to store ${group} API key in secure storage:`, error);
+			getLogger().error(`Failed to store ${group} API key in secure storage: ${String(error)}`);
 			throw new Error(`Failed to store ${group} API key securely`);
 		}
 	}
@@ -486,7 +496,7 @@ export class ConfigManager {
 			}
 		} catch (error: unknown) {
 			if (error instanceof Error && error.name === 'Canceled') return;
-			console.error(`Failed to delete ${group} API key from secure storage:`, error);
+			getLogger().error(`Failed to delete ${group} API key from secure storage: ${String(error)}`);
 			throw new Error(`Failed to delete ${group} API key`);
 		}
 	}
@@ -529,24 +539,9 @@ export class ConfigManager {
 			await wc.update('deployment.cloudUrl', s.deployment.cloudUrl, vscode.ConfigurationTarget.Global);
 			await wc.update('deployment.local.engineVersion', s.deployment.local.engineVersion, vscode.ConfigurationTarget.Global);
 
-			// --- Global settings ---
-			await wc.update('defaultPipelinePath', s.defaultPipelinePath, vscode.ConfigurationTarget.Global);
-			await wc.update('pipelineRestartBehavior', s.pipelineRestartBehavior, vscode.ConfigurationTarget.Global);
-
-			// --- Pipeline execution defaults ---
-			await wc.update('pipelineTTL', s.pipelineTtl, vscode.ConfigurationTarget.Global);
-			await wc.update('pipelineTraceLevel', s.pipelineTraceLevel, vscode.ConfigurationTarget.Global);
-			await wc.update('taskArguments', s.taskArguments, vscode.ConfigurationTarget.Global);
-			await wc.update('pipelineDebugOutput', s.pipelineDebugOutput, vscode.ConfigurationTarget.Global);
-
-			// --- Integration settings ---
-			await wc.update('integrations.autoAgentIntegration', s.autoAgentIntegration, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.copilot', s.integrationCopilot, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.claudeCode', s.integrationClaudeCode, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.cursor', s.integrationCursor, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.windsurf', s.integrationWindsurf, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.claudeMd', s.integrationClaudeMd, vscode.ConfigurationTarget.Global);
-			await wc.update('integrations.agentsMd', s.integrationAgentsMd, vscode.ConfigurationTarget.Global);
+			// (Pipeline-family values ride the shared workspace settings and
+			// integration toggles ride the host-settings mirror — neither is
+			// part of the connection snapshot anymore.)
 
 			// --- Secure storage (per-group API keys) ---
 			await this.setApiKey('development', s.development.apiKey);
@@ -561,29 +556,6 @@ export class ConfigManager {
 		} finally {
 			this.isBatchApplying = false;
 		}
-	}
-
-	/**
-	 * Opens the RocketRide configuration settings page
-	 */
-	public async openSettings(): Promise<void> {
-		await vscode.commands.executeCommand('rocketride.page.settings.open');
-	}
-
-	/**
-	 * Updates the host URL for a group (ASYNC).
-	 */
-	public async updateHostUrl(group: ConnectionGroup, hostUrl: string): Promise<void> {
-		const config = vscode.workspace.getConfiguration(this.configSection);
-		await config.update(`${group}.hostUrl`, hostUrl, vscode.ConfigurationTarget.Global);
-	}
-
-	/**
-	 * Updates the connection mode for a group (ASYNC).
-	 */
-	public async updateConnectionMode(group: ConnectionGroup, connectionMode: ConnectionMode | null): Promise<void> {
-		const config = vscode.workspace.getConfiguration(this.configSection);
-		await config.update(`${group}.connectionMode`, connectionMode, vscode.ConfigurationTarget.Global);
 	}
 
 	/**
@@ -612,7 +584,7 @@ export class ConfigManager {
 			try {
 				disposable.dispose();
 			} catch (error) {
-				console.error('Error disposing ConfigManager resource:', error);
+				getLogger().error(`Error disposing ConfigManager resource: ${String(error)}`);
 			}
 		});
 		this.disposables = [];

@@ -6,7 +6,7 @@
 /**
  * App scaffolder — the VS Code host of `rocketride.app.create`.
  *
- * The New App wizard (NewAppProvider webview) collects the app-name slug,
+ * The New App wizard (the newapp framework page) collects the app-name slug,
  * display name, and frame options, assembles the app id from the resolved
  * developer id, and calls scaffoldApp(). Scaffolding validates at submit
  * time (the wizard panel is modeless — its form state may be stale), then
@@ -27,10 +27,10 @@ import * as vscode from 'vscode';
 import { createAppWorkspace } from 'rocketride/app-pack';
 import { ConnectionManager } from '../connection/connection';
 import { getLogger } from '../shared/util/output';
-import type { FrameOptions, TemplateName } from 'shared/modules/appdev/templates';
+import type { FrameOptions, TemplateName } from 'shared/tools/appdev/templates';
 import { getExtensionContext } from '../extension';
 import { vendorAppTypes } from './appTypes';
-import { getWatchManager } from './watchManager';
+import { getDevSessionManager } from './devSessionManager';
 
 // =============================================================================
 // VALIDATION
@@ -167,10 +167,10 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 	});
 	const target = vscode.Uri.joinPath(root.uri, ...created.folder.split('/'));
 
-	// No launch.json entry is scaffolded: F5 debugging goes through the
-	// rocketride.app.debug command, which builds its config in-memory and
-	// ensures the watch session first — a static launch entry would open
-	// the preview with no dev bundle being served.
+	// No launch.json entry is scaffolded: a static launch entry would open
+	// the preview with no dev bundle being served. (The external-browser
+	// debug command was removed 2026-10-16; preview + console cover the
+	// in-editor loop.)
 
 	// First scaffold in a fresh workspace also seeds settings.json so the
 	// Explorer hides the gitignored machine-generated trees.
@@ -189,9 +189,9 @@ export async function scaffoldApp(params: ScaffoldParams): Promise<string> {
 	// The root workspace claims apps/* — invalidate the shared install so
 	// the brand-new member links even when no watch session starts (the
 	// single-flight memo dedupes against the watch's own install).
-	const watchManager = getWatchManager();
-	watchManager?.invalidateInstall();
-	void watchManager?.ensureInstalled(appId);
+	const devSessions = getDevSessionManager();
+	devSessions?.invalidateInstall();
+	void devSessions?.ensureInstalled(appId);
 	// No toast: the App Builder opens on the new app — that IS the feedback.
 	return appId;
 }

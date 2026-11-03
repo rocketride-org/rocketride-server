@@ -65,7 +65,7 @@ import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import {
 	ConnectionGenerationController,
 	GenerationOwnedOperationSlot,
-} from './connection-generation';
+} from 'shared/utils/connectionGeneration';
 
 // =============================================================================
 // CONSTANTS
@@ -224,11 +224,6 @@ export class ConnectionManager extends EventEmitter {
 	public async stop(): Promise<void> {
 		await this.disconnect();
 		// Registry disposal is handled by extension.ts, not here
-	}
-
-	/** Returns the engine registry. */
-	public getEngineRegistry(): EngineRegistry | undefined {
-		return this.engineRegistry;
 	}
 
 	/**
@@ -565,7 +560,7 @@ export class ConnectionManager extends EventEmitter {
 			}
 			this.configChangeTimeout = setTimeout(() => {
 				this.configChangeTimeout = undefined;
-				this.handleConfigurationChanged();
+				void this.handleConfigurationChanged();
 			}, 300);
 		});
 
@@ -603,11 +598,28 @@ export class ConnectionManager extends EventEmitter {
 	/**
 	 * Cancels any pending debounced config-change handler.
 	 *
-	 * Called by SettingsProvider and WelcomeProvider after applyAllSettings()
-	 * but before reconcile, so the debounced handler (which fires from the
-	 * welcomeDismissed write) doesn't race with the reconciler's engine
-	 * restart and CM reconnection sequence.
+	 * Called by the settings save op (ops/settingsOps.ts) after
+	 * applyAllSettings() but before reconcile, so any debounced handler a
+	 * config write queued doesn't race with the reconciler's engine restart
+	 * and CM reconnection sequence.
 	 */
+	/**
+	 * Applies a configuration change NOW: cancels any debounced handler and
+	 * runs the transition directly.
+	 *
+	 * The Settings save path MUST call this (on the DeployManager): its
+	 * batched write suppresses every config-change event, so the debounced
+	 * handler never schedules and the shared↔independent deploy transition
+	 * would silently not happen. (It historically rode the post-batch
+	 * `welcomeDismissed` config write — gone since Welcome dismissal moved
+	 * to globalState — leaving a disconnected engine's client reconnecting
+	 * to a dead port forever.)
+	 */
+	public async applyConfigurationChange(): Promise<void> {
+		this.cancelPendingConfigChange();
+		await this.handleConfigurationChanged();
+	}
+
 	public cancelPendingConfigChange(): void {
 		if (this.configChangeTimeout) {
 			clearTimeout(this.configChangeTimeout);
@@ -627,16 +639,6 @@ export class ConnectionManager extends EventEmitter {
 	/** Returns the connection mode for this connection's group. */
 	public getConnectionMode(): ConnectionMode | null {
 		return this.getGroupConfig().connectionMode;
-	}
-
-	/** Returns the host URL for this connection's group. */
-	public getHostUrl(): string {
-		return this.getGroupConfig().hostUrl;
-	}
-
-	/** Returns the API key for this connection's group. */
-	public getApiKey(): string {
-		return this.getGroupConfig().apiKey;
 	}
 
 	// =========================================================================
@@ -743,7 +745,6 @@ export class ConnectionManager extends EventEmitter {
 		this.retrySaturatedLogged = false;
 				this.updateConnectionStatus({
 					state: ConnectionState.CONNECTED,
-					lastConnected: new Date(),
 					lastError: undefined,
 					progressMessage: undefined,
 					progressLogLine: undefined,
@@ -1004,18 +1005,6 @@ export class ConnectionManager extends EventEmitter {
 		const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
 		const port = url.port || (url.protocol === 'https:' ? '443' : '80');
 		return `${wsProtocol}//${url.hostname}:${port}/task/service`;
-	}
-
-	/** Returns engine version info from the EngineManager, or null. */
-	/** Returns engine version info for the current connection mode. */
-	public getEngineInfo(): { version: string | null; publishedAt: string | null } {
-		const mode = this.getGroupConfig().connectionMode ?? 'local';
-		const engine = this.engineRegistry?.getEngine(mode);
-		const info = engine?.getInfo();
-		return {
-			version: info?.version ?? null,
-			publishedAt: info?.publishedAt ?? null,
-		};
 	}
 
 	// =========================================================================

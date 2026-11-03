@@ -19,8 +19,8 @@ import { CloudPanel } from './panels/CloudPanel';
 import { OnPremPanel } from './panels/OnPremPanel';
 import { DockerPanel } from './panels/DockerPanel';
 import { ServicePanel } from './panels/ServicePanel';
-import { settingsStyles as S } from '../Settings/SettingsWebview';
-import type { SettingsData, ConnectionMode, EngineVersionItem, MessageData } from '../Settings/SettingsWebview';
+import { settingsStyles as S } from '../settings/SettingsWebview';
+import type { SettingsData, ConnectionMode, EngineVersionItem, MessageData } from '../settings/SettingsWebview';
 import type { ServiceStatus, DockerStatus, VersionOption } from './panels/shared';
 
 // =============================================================================
@@ -114,6 +114,8 @@ export interface ConnectionConfigProps {
 	onServiceRemove: () => void;
 	onServiceStart: () => void;
 	onServiceStop: () => void;
+	/** Sudo entry (Linux/macOS service lifecycle) — shown when
+	 *  host.engine.control answers needsSudo. */
 	sudoPromptVisible: boolean;
 	sudoPasswordInput: string;
 	onSudoPasswordChange: (pw: string) => void;

@@ -1,0 +1,20 @@
+/* =============================================================================
+ * MIT License
+ * Copyright (c) 2026 Aparavi Software AG
+ * ============================================================================= */
+
+/**
+ * Sidebar-webview-only chrome fixes.
+ *
+ * VS Code rounds its webview CONTAINER and clips the content, so a header
+ * band painted flush to the top edge shows sliced-round corners we cannot
+ * prevent from inside the webview. Flatten the mode strip's band instead —
+ * the active underline and the bottom divider carry the structure, and with
+ * nothing painted into the corners there is nothing to clip.
+ *
+ * Stylesheet `!important` outranks the component's inline style by design —
+ * this is a HOST-environment correction, not a theme choice.
+ */
+#root [role='tablist'] {
+	background: transparent !important;
+}

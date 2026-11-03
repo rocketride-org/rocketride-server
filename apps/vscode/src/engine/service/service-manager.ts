@@ -67,11 +67,6 @@ export abstract class ServiceManager {
 	 */
 	abstract remove(): Promise<void>;
 
-	/**
-	 * Update the service to point to a new executable and restart.
-	 */
-	abstract update(executablePath: string, engineDir: string): Promise<void>;
-
 	/** Start the service. */
 	abstract start(): Promise<void>;
 
@@ -130,27 +125,5 @@ export abstract class ServiceManager {
 			});
 			socket.connect(port, 'localhost');
 		});
-	}
-}
-
-/**
- * Creates the appropriate ServiceManager for the current platform.
- */
-export function createServiceManager(): ServiceManager {
-	switch (process.platform) {
-		case 'win32': {
-			const { WindowsServiceManager } = require('./service-windows');
-			return new WindowsServiceManager();
-		}
-		case 'linux': {
-			const { LinuxServiceManager } = require('./service-linux');
-			return new LinuxServiceManager();
-		}
-		case 'darwin': {
-			const { MacServiceManager } = require('./service-mac');
-			return new MacServiceManager();
-		}
-		default:
-			throw new Error(`Unsupported platform for service deployment: ${process.platform}`);
 	}
 }

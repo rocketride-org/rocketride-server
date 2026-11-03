@@ -14,7 +14,6 @@
  */
 
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import * as https from 'https';
 import * as http from 'http';
@@ -295,7 +294,7 @@ export class WindowsServiceManager extends ServiceManager {
 				`:: RocketRide Engine — ${name.replace('.ps1', '')} (double-click to run as Administrator)`,
 				`net session >nul 2>&1`,
 				`if %errorlevel% neq 0 (`,
-				`    powershell -NoProfile -Command "Start-Process cmd.exe -ArgumentList '/c \"%~f0\"' -Verb RunAs"`,
+				`    powershell -NoProfile -Command "Start-Process cmd.exe -ArgumentList '/c "%~f0"' -Verb RunAs"`,
 				`    exit /b`,
 				`)`,
 				`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0${name}"`,
@@ -307,28 +306,6 @@ export class WindowsServiceManager extends ServiceManager {
 				// Best effort — non-critical
 			}
 		}
-	}
-
-	// =========================================================================
-	// Update — point service to new executable, restart
-	// =========================================================================
-
-	/**
-	 * Stops the service, reconfigures NSSM to point to the new executable, and restarts.
-	 *
-	 * @param executablePath - Full path to the updated engine executable
-	 * @param engineDir - Working directory for the engine process
-	 */
-	public async update(executablePath: string, engineDir: string): Promise<void> {
-		await this.runElevatedScript('update.ps1', [
-			psCmd(NSSM_PATH, 'stop', SERVICE_NAME),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'Application', executablePath),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppParameters', `./ai/eaas.py --host=127.0.0.1 --port=${SERVICE_PORT}`),
-			psCmd(NSSM_PATH, 'set', SERVICE_NAME, 'AppDirectory', engineDir),
-			psCmd(NSSM_PATH, 'start', SERVICE_NAME),
-		].join('\n'));
-
-		this.logger.output(`${icons.success} Service updated and restarted`);
 	}
 
 	// =========================================================================

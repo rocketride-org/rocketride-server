@@ -11,9 +11,10 @@
  * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
+import { displayVersion } from './shared';
 import React from 'react';
 import LocalIcon from '../../../../assets/local.svg';
-import { settingsStyles as S, EngineVersionItem } from '../../Settings/SettingsWebview';
+import { settingsStyles as S, EngineVersionItem } from '../../settings/SettingsWebview';
 
 // =============================================================================
 // TYPES
@@ -32,7 +33,6 @@ export interface LocalPanelProps {
 // HELPERS
 // =============================================================================
 
-const displayVersion = (tagName: string): string => tagName.replace(/^server-/, '');
 
 // =============================================================================
 // COMPONENT
