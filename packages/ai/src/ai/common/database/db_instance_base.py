@@ -1090,28 +1090,33 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         lanes = self.instance.getListeners()
 
+        # What to tell the lanes, decided inside the `try` and written outside it.
+        # A write to a downstream node can fail (a DB node downstream raising on its
+        # own outage reaches this caller as a plain `Exception`); if the writes sat
+        # in the `try`, the catch-all below would log that failure and return, and
+        # the step would complete with the rows never written.
+        error_message: str | None = None
+        result: Any = None
+        executed = False
+
         try:
             # Ask the LLM to translate the natural-language question into SQL.
             query_json = self._buildSQLQuery(question_text)
             sql_query = query_json.get('query')
             is_valid_query = parse_bool(query_json.get('isValid', False))
 
-            # The EXPLAIN repair loop gave up: `query` still holds the rejected
-            # SQL, not an answer. Emit the error instead of printing it as prose.
             if query_json.get('error'):
-                self._emitError(query_json['error'], lanes)
-                return
-            # The LLM claimed valid SQL but it fails the safety gate: same rule
-            # -- surface the rejection, never emit the unsafe SQL as prose/data.
-            if is_valid_query and sql_query and not is_sql_safe(sql_query):
-                self._emitError('Generated query contains unsafe SQL', lanes)
-                return
-
-            executed = is_valid_query and bool(sql_query)
-            # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
-            result = self._executeSQLQuery(sql_query) if executed else sql_query
-
-            self._emit(result, lanes, executed=executed)
+                # The EXPLAIN repair loop gave up: `query` still holds the rejected
+                # SQL, not an answer. Emit the error instead of printing it as prose.
+                error_message = query_json['error']
+            elif is_valid_query and sql_query and not is_sql_safe(sql_query):
+                # The LLM claimed valid SQL but it fails the safety gate: same rule
+                # -- surface the rejection, never emit the unsafe SQL as prose/data.
+                error_message = 'Generated query contains unsafe SQL'
+            else:
+                executed = is_valid_query and bool(sql_query)
+                # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
+                result = self._executeSQLQuery(sql_query) if executed else sql_query
 
         except (DatabaseLaneError, DatabaseUnavailableError):
             # `_executeSQLQuery` / `_validateQuery` have logged the cause. Fail the step: emitting
@@ -1125,9 +1130,17 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             error(f'Error handling question: {e}')
             if 'text' not in lanes and 'answers' not in lanes:
                 raise
-            self._emitError(str(e), lanes)
+            error_message = str(e)
         except Exception as e:
+            # The node's own non-database work failed (the LLM returned nothing usable,
+            # a prompt error): log it. A database failure never lands here.
             error(f'Error handling question: {e}')
+            return
+
+        if error_message is not None:
+            self._emitError(error_message, lanes)
+            return
+        self._emit(result, lanes, executed=executed)
 
     def _emitError(self, message: str, lanes) -> None:
         """Emit a validation/safety error to the wired lanes, never a rejected query as prose.

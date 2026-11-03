@@ -58,12 +58,15 @@ class ArangoLaneError(RuntimeError):
 
 
 def _is_unavailable(exc: BaseException) -> bool:
-    """Return True for a connection-level failure: python-arango's ``ServerConnectionError`` or a socket-level ``OSError``.
+    """Return True for a connection-level failure.
 
-    ``requests``' ``ConnectionError`` and ``Timeout`` are ``OSError`` subclasses,
-    so this covers the HTTP transport without importing it.
+    python-arango's ``ServerConnectionError``, a socket-level ``OSError``
+    (``requests``' ``ConnectionError`` and ``Timeout`` are ``OSError`` subclasses,
+    so the HTTP transport is covered without importing it), or the server
+    answering HTTP 503 (``ArangoServerError.http_code``: starting up, shutting
+    down, or no leader).
     """
-    return isinstance(exc, (ServerConnectionError, OSError))
+    return isinstance(exc, (ServerConnectionError, OSError)) or getattr(exc, 'http_code', None) == 503
 
 
 # Map ArangoDB's numeric collection type codes to readable names.

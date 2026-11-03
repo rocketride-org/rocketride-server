@@ -72,6 +72,10 @@ class _StubTransientError(_StubNeo4jError):
     pass
 
 
+class _StubConnectionAcquisitionTimeoutError(Exception):
+    pass
+
+
 class _StubBase:
     """Stand-in for IInstanceBase / IGlobalBase — the engine supplies the real one."""
 
@@ -146,6 +150,7 @@ def _install_stubs() -> None:
     neo4j_exceptions.AuthError = _StubAuthError
     neo4j_exceptions.SessionExpired = _StubSessionExpired
     neo4j_exceptions.TransientError = _StubTransientError
+    neo4j_exceptions.ConnectionAcquisitionTimeoutError = _StubConnectionAcquisitionTimeoutError
     neo4j.exceptions = neo4j_exceptions
 
     sys.modules.update(
@@ -478,6 +483,7 @@ def test_execute_raw_keeps_other_statements_in_a_transaction(query):
         _StubSessionExpired('session expired'),
         _StubAuthError('unauthorized'),
         _StubTransientError('database unavailable'),
+        _StubConnectionAcquisitionTimeoutError('pool exhausted'),
         ConnectionResetError('reset'),
     ],
 )

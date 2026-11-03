@@ -395,6 +395,36 @@ def test_is_connection_failure_by_exception_type(exc, expected):
     assert is_connection_failure(exc) is expected
 
 
+def _mysql_error(number):
+    return sqlite3.OperationalError(number, 'driver text')
+
+
+@pytest.mark.parametrize(
+    'exc, expected',
+    [
+        (_mysql_error(1053), True),  # ER_SERVER_SHUTDOWN: the server is going away
+        (_mysql_error(1054), False),  # ER_BAD_FIELD_ERROR: the LLM's SQL
+        (_mysql_error(1064), False),  # ER_PARSE_ERROR
+    ],
+)
+def test_is_connection_failure_by_mysql_error_number(exc, expected):
+    assert is_connection_failure(exc) is expected
+
+
+class _ClickHouseError(Exception):
+    """A ClickHouse server error: the numeric code rides on ``.code``."""
+
+    def __init__(self, code):
+        super().__init__(f'Code: {code}.')
+        self.code = code
+
+
+@pytest.mark.parametrize('code', [202, 241])
+def test_clickhouse_resource_limit_errors_are_known_rejections(code):
+    """TOO_MANY_SIMULTANEOUS_QUERIES and MEMORY_LIMIT_EXCEEDED are about the query, not the link."""
+    assert is_connection_failure(_ClickHouseError(code)) is False
+
+
 @pytest.mark.parametrize(
     'code, expected',
     [
@@ -404,7 +434,8 @@ def test_is_connection_failure_by_exception_type(exc, expected):
         ('57P03', True),
         ('42601', False),
         ('42703', False),
-        ('57014', False),
+        ('57014', False),  # statement timeout / query_canceled: about the query
+        ('55P03', False),  # lock_timeout / lock_not_available: about the query
     ],
 )
 def test_is_connection_failure_by_sqlstate(code, expected):
@@ -452,3 +483,45 @@ def test_an_insert_during_an_outage_reports_the_outage_not_a_failed_table_creati
     messages = ' '.join(str(entry) for entry in logged)
     assert 'unavailable' in messages
     assert 'could not be created' not in messages and 'Failed to create table' not in messages
+
+
+# ---------------------------------------------------------------------------
+# A failing downstream write is not swallowed here
+# ---------------------------------------------------------------------------
+
+
+class _DownstreamFails(_Lanes):
+    """A downstream node whose own lane failed.
+
+    The engine re-raises a Python exception from a downstream node in its upstream
+    caller as a plain ``Exception``, never as the original class, so that is what is
+    raised here.
+    """
+
+    def writeText(self, text):
+        raise Exception('Exception: PostgreSQL answers write failed; no rows were saved')
+
+    def writeTable(self, markdown):
+        raise Exception('Exception: PostgreSQL table write failed; no rows were saved')
+
+    def writeAnswers(self, answer):
+        raise Exception('Exception: PostgreSQL answers write failed; no rows were saved')
+
+
+@pytest.mark.parametrize('lanes', [('text',), ('table',), ('answers',)])
+def test_the_question_lane_fails_when_a_downstream_write_fails(lanes):
+    """The question was answered, but its rows were not written downstream: the step must fail."""
+    inst = _make(_healthy_engine(), lanes)
+    inst.instance = _DownstreamFails(lanes)
+
+    with pytest.raises(Exception, match='write failed'):
+        inst.writeQuestions(_question())
+
+
+def test_the_error_lane_write_is_not_swallowed_either():
+    inst = _make(_healthy_engine(), ('text',))
+    inst._buildSQLQuery = lambda question_text: {'isValid': True, 'query': 'DELETE FROM users'}
+    inst.instance = _DownstreamFails(('text',))
+
+    with pytest.raises(Exception, match='write failed'):
+        inst.writeQuestions(_question())

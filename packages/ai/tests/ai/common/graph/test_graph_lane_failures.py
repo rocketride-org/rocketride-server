@@ -242,3 +242,31 @@ def test_a_genuine_validation_rejection_keeps_its_behaviour():
     assert inst.llm_calls == 5  # the repair loop ran to exhaustion
     assert 'Syntax error' in inst.instance.text[0]
     assert 'Syntax error' in inst.instance.answers[0].getJson()['error']
+
+
+# ---------------------------------------------------------------------------
+# A failing downstream write is not swallowed here
+# ---------------------------------------------------------------------------
+
+
+class _DownstreamFails(_Lanes):
+    """A downstream node whose own lane failed; the engine re-raises it here as a plain ``Exception``."""
+
+    def writeText(self, text):
+        raise Exception('Exception: rocketride_sql answers write failed; no rows were saved')
+
+    def writeTable(self, markdown):
+        raise Exception('Exception: rocketride_sql table write failed; no rows were saved')
+
+    def writeAnswers(self, answer):
+        raise Exception('Exception: rocketride_sql answers write failed; no rows were saved')
+
+
+@pytest.mark.parametrize('kind', ['QUESTION', 'EXECUTE'])
+@pytest.mark.parametrize('lanes', [('text',), ('table',), ('answers',)])
+def test_the_lane_fails_when_a_downstream_write_fails(lanes, kind):
+    inst = _make(fail=False, lanes=lanes)
+    inst.instance = _DownstreamFails(lanes)
+
+    with pytest.raises(Exception, match='write failed'):
+        inst.writeQuestions(_question(getattr(QuestionType, kind), 'MATCH (n) RETURN n'))

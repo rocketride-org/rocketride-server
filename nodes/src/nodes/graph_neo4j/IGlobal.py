@@ -36,7 +36,14 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 import neo4j
-from neo4j.exceptions import AuthError, Neo4jError, ServiceUnavailable, SessionExpired, TransientError
+from neo4j.exceptions import (
+    AuthError,
+    ConnectionAcquisitionTimeoutError,
+    Neo4jError,
+    ServiceUnavailable,
+    SessionExpired,
+    TransientError,
+)
 
 from rocketlib import error, warning
 
@@ -190,7 +197,14 @@ class IGlobal(GraphGlobalBase):
             with self.driver.session(database=self.database) as session:
                 session.run(f'EXPLAIN {query}').consume()
             return True, ''
-        except (ServiceUnavailable, SessionExpired, AuthError, TransientError, OSError) as e:
+        except (
+            ServiceUnavailable,
+            SessionExpired,
+            ConnectionAcquisitionTimeoutError,
+            AuthError,
+            TransientError,
+            OSError,
+        ) as e:
             # The server is unreachable, dropped the session, refused the
             # credentials or reported itself unavailable: not a verdict on the
             # query. Raised so a lane fails instead of feeding it back to the LLM.

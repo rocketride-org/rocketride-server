@@ -84,6 +84,17 @@ class DatabaseUnavailableError(RuntimeError):
 _UNAVAILABLE_SQLSTATE_CLASSES = frozenset({'08', '53'})
 _UNAVAILABLE_SQLSTATES = frozenset({'57P01', '57P02', '57P03'})
 
+# MySQL / MariaDB server error numbers (PyMySQL puts them in ``args[0]``) that mean
+# the server is going away: 1053 ER_SERVER_SHUTDOWN. The disconnects SQLAlchemy
+# already recognises (2006, 2013, ...) arrive as ``connection_invalidated``.
+_UNAVAILABLE_MYSQL_ERRNOS = frozenset({1053})
+
+# Deliberately NOT outages, so they keep the "the database rejected this statement"
+# path: PostgreSQL 55P03 lock_not_available and 57014 query_canceled (a statement or
+# lock timeout is about this query, not about the server), and ClickHouse 202
+# TOO_MANY_SIMULTANEOUS_QUERIES / 241 MEMORY_LIMIT_EXCEEDED (resource limits of the
+# query). `test_db_lane_failures.py` pins each as a rejection.
+
 # Driver exception classes, matched by name through the MRO, that say the link to
 # the server failed. Names rather than imports because this base must not depend
 # on one node's driver (clickhouse-driver's NetworkError is the reason).
@@ -119,6 +130,9 @@ def is_connection_failure(exc: BaseException) -> bool:
         return True
     code = getattr(orig, 'pgcode', None)
     if isinstance(code, str) and (code[:2] in _UNAVAILABLE_SQLSTATE_CLASSES or code in _UNAVAILABLE_SQLSTATES):
+        return True
+    args = getattr(orig, 'args', ())
+    if args and isinstance(args[0], int) and args[0] in _UNAVAILABLE_MYSQL_ERRNOS:
         return True
     return False
 

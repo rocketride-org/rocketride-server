@@ -212,6 +212,14 @@ class SqlStatementError(RuntimeError):
     """
 
 
+class HotdataLaneError(RuntimeError):
+    """The Hotdata service could not answer a question; the step must fail.
+
+    Generic on purpose: the client's own message carries the API URL and the
+    transport's text. The full exception is in the engine log.
+    """
+
+
 class MissingLlmError(RuntimeError):
     """A natural-language question reached the node with no llm connected.
 
@@ -865,7 +873,11 @@ ORDER BY table_schema, table_name, ordinal_position"""
             # the lanes let the pipeline finish as though the question had been
             # answered, so fail the step.
             error(f'db_hotdata: error handling question: {e}')
-            raise
+            status = getattr(e, 'status_code', None)
+            detail = f' (HTTP {status})' if status else ''
+            raise HotdataLaneError(
+                f'db_hotdata: the Hotdata service could not answer the question{detail} (details are in the engine log)'
+            ) from None
         except Exception as e:
             error(f'db_hotdata: error handling question: {e}')
             self._emitError(str(e), lanes)

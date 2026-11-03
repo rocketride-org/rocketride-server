@@ -927,6 +927,57 @@ class TestLanesFailClosed:
         with pytest.raises(ArangoUnavailableError):
             ig._validate_query('FOR u IN users RETURN u')
 
+    def test_validate_query_raises_when_the_server_answers_503(self):
+        unavailable = ArangoError('service unavailable')
+        unavailable.http_code = 503
+
+        def _raise(_aql):
+            raise unavailable
+
+        ig = IGlobal.__new__(IGlobal)
+        ig.db = SimpleNamespace(aql=SimpleNamespace(explain=_raise))
+
+        with pytest.raises(ArangoUnavailableError):
+            ig._validate_query('FOR u IN users RETURN u')
+
+    def test_validate_query_keeps_other_http_errors_as_rejections(self):
+        rejected = ArangoError('bad AQL')
+        rejected.http_code = 400
+
+        def _raise(_aql):
+            raise rejected
+
+        ig = IGlobal.__new__(IGlobal)
+        ig.db = SimpleNamespace(aql=SimpleNamespace(explain=_raise))
+
+        ok, message = ig._validate_query('FOR RETURN')
+
+        assert ok is False and 'bad AQL' in message
+
+    @pytest.mark.parametrize('qtype', ['QUESTION', 'EXECUTE'])
+    @pytest.mark.parametrize('lanes', [('text',), ('table',), ('answers',)])
+    def test_a_failing_downstream_write_fails_the_step(self, qtype, lanes):
+        """The engine re-raises a downstream node's failure here as a plain Exception; it must not be swallowed."""
+
+        class _Downstream(_FakeInstance):
+            def writeText(self, text):
+                raise Exception('Exception: downstream write failed')
+
+            writeTable = writeAnswers = writeText
+
+        ig = _fake_ig(
+            allow_execute=True,
+            _run_query_raw=lambda aql, *a, **k: {'rows': [{'a': 1}], 'affected_rows': 0},
+            _run_query=lambda aql, *a, **k: [{'a': 1}],
+        )
+        inst = _make_instance(
+            ig=ig,
+            instance=_Downstream(lanes, invoke_answer={'isValid': 'true', 'query': 'FOR u IN users RETURN u'}),
+        )
+
+        with pytest.raises(Exception, match='downstream write failed'):
+            inst.writeQuestions(self._question(getattr(_QTYPE, qtype), text='FOR u IN users RETURN u'))
+
     def test_validate_query_still_reports_a_server_rejection_as_a_message(self):
         def _raise(_aql):
             raise ArangoError('AQL: syntax error, unexpected identifier')
