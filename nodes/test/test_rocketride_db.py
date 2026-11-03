@@ -583,6 +583,25 @@ def _make_store(cls, config):
 
 
 class TestRocketrideVectorStore:
+    @pytest.mark.parametrize('candidate_score', [0.1, 0.3])
+    def test_full_batch_of_weak_ann_candidates_does_not_hide_a_strong_match(self, monkeypatch, candidate_score):
+        """Retry after the 0.20 floor or configured threshold removes ANN hits."""
+        cls, _ = _vector_store_cls(monkeypatch)
+        module = sys.modules[cls.__module__]
+        monkeypatch.setattr(module, 'Doc', types.SimpleNamespace)
+        monkeypatch.setattr(_FakeCursor, 'description', [('content',), ('objectid',), ('distance',)], raising=False)
+        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine', 'score': 0.5})
+        monkeypatch.setattr(store, '_convertFilter', lambda doc_filter: ('WHERE isDeleted = %s', [False]))
+        store.client.fetch_batches = [
+            [('weak candidate', f'weak-{i}', 1 - candidate_score) for i in range(5)],
+            [('strong match', 'recovered', 0.05)],
+        ]
+
+        docs = store.searchSemantic(types.SimpleNamespace(embedding=[1.0, 0.0]), types.SimpleNamespace(limit=5))
+
+        assert [doc.metadata['objectId'] for doc in docs] == ['recovered']
+        assert abs(docs[0].score - 0.95) < 1e-9
+
     def test_store_connects_to_its_scopes_database(self, monkeypatch):
         cls, _ = _vector_store_cls(monkeypatch)
         user_dsn = 'postgresql://u_rw:pw@pooler:5432/t_user_u1'

@@ -190,6 +190,15 @@ case. Keyword search uses a content LIKE match; semantic search needs an
 embedding bound to the question and raises if none is available. Missing tables
 produce empty search results rather than an error.
 
+Semantic search first uses the normal nearest-neighbour query. If fewer than
+the requested number of matches meet the score threshold (and the 0.20 minimum
+floor), the node retries with an exact search using the same filters and limit.
+This keeps deleted chunks or other excluded HNSW candidates from hiding eligible
+matches. The retry scans the matching rows and can cost more on large tables;
+a full approximate result meeting the threshold does not trigger it. Score
+thresholds still apply, so the final response can contain fewer matches than
+requested.
+
 Deleted objects are excluded by default, while document rendering reassembles
 stored chunks by chunkId. The store removes all existing chunks for incoming
 object IDs before inserting the replacement chunks, preventing duplicate data
