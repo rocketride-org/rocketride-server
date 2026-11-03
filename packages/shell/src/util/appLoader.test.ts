@@ -28,7 +28,7 @@
 import assert from 'node:assert/strict';
 import test, { afterEach, mock } from 'node:test';
 import { init } from '@module-federation/runtime';
-import { devPreviewHoldRemainingMs, isDevPreviewPending, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
+import { devPreviewHoldRemainingMs, isDevPreviewPending, isDevRemote, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
 import type { AppDescriptor } from '../components/workspace/types';
 
 // In the browser the rsbuild MF plugin creates the host instance; stand one
@@ -199,4 +199,24 @@ test('a dev registration for the locked app is not reported as a mismatch', () =
 	const warn = mock.method(console, 'warn', () => {});
 	registerDevRemote('org.match', 'org_match', 'Match', 'http://localhost:1/remoteEntry.js');
 	assert.equal(warn.mock.callCount(), 0);
+});
+
+test('a dev registration whose entry is not a loopback dev server is refused (no remote, no local app)', () => {
+	stubPage('?appid=org.evil&rrdev=1', true);
+	setDescriptorInvalidator(() => {});
+	mock.method(console, 'error', () => {});
+	const registerRemotes = mock.method(federation, 'registerRemotes', () => {});
+	for (const [i, entry] of ['https://attacker.example/remoteEntry.js', '//attacker.example/remoteEntry.js', 'javascript:alert(1)', 'http://localhost.attacker.example/remoteEntry.js', 'http://user:pw@localhost:1/remoteEntry.js', '/remoteEntry.js'].entries()) {
+		registerDevRemote('org.evil', `org_evil${i}`, 'Evil', entry);
+		assert.equal(isDevRemote(`org_evil${i}`), false, entry);
+	}
+	assert.equal(registerRemotes.mock.callCount(), 0, 'nothing was handed to Module Federation');
+	assert.equal(isDevPreviewPending('org.evil'), true, 'the locked app is still waiting for a real registration');
+});
+
+test('a dev registration with a loopback dev-server entry is registered', () => {
+	stubPage('?appid=org.good&rrdev=1', true);
+	setDescriptorInvalidator(() => {});
+	registerDevRemote('org.good', 'org_good', 'Good', 'http://127.0.0.1:3001/remoteEntry.js?t=1');
+	assert.equal(isDevRemote('org_good'), true);
 });

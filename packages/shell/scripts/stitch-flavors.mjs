@@ -33,6 +33,11 @@
  *     is the bare origin — comes back to the same flavor.
  *   - Everyone else gets the production assets; dev assets are dormant
  *     objects in the bucket that production visitors never fetch.
+ *   - Picking the flavor is NOT the dev-hooks capability: the hooks are a
+ *     build-time property of the dev flavor itself (src/util/devGate.ts —
+ *     the production flavor can never enable them, whatever the URL or
+ *     sessionStorage says), and the dev flavor only answers `rrdev:*`
+ *     messages from its embedding App Builder (isTrustedEmbedderMessage).
  *
  * Steps: copy shell-dev's hashed assets into shell (hash-named — no
  * collisions), extract each flavor's script/css tags from its emitted html,

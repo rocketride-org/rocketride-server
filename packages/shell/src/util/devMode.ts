@@ -32,16 +32,26 @@
  *     app resolves react/shell/shared to the SAME instances a bundled
  *     app would get from the MF share scope.
  *
- * Everything here is inert unless dev hooks are enabled: a development build
- * (NODE_ENV !== 'production') or an explicit `rrdev=1` URL parameter. The
- * URL form exists so the App Builder previews can enable hooks against a
- * production-built shell served by a local engine.
+ * Everything here is inert unless dev hooks are enabled, and they are a
+ * BUILD-TIME capability only: a development build (NODE_ENV !== 'production'
+ * — `rsbuild dev`, or the dev flavor stitched beside the production assets,
+ * which the App Builder previews select with `?rrdev=1` in index.html's flavor
+ * picker). A production build never enables them from the URL or from
+ * sessionStorage (see devGate.ts).
+ *
+ * Who sends `rrdev:*` messages (the only trusted senders; see
+ * isTrustedEmbedderMessage): the VS Code extension's App Builder webview
+ * (apps/vscode AppWebview.tsx PreviewFrame, origin `vscode-webview://<id>`)
+ * and the web App Builder's same-origin preview iframe. Both are the shell's
+ * PARENT window. Messages from anyone else — a window.opener, a foreign
+ * framing page, any other origin, or a top-level shell with no embedder — are
+ * ignored, and registerRemote entries must be loopback dev-server URLs.
  */
 
 import React from 'react';
 import * as ReactDom from 'react-dom';
 import { ConnectionManager } from '../connection/connection';
-import { isDevHooksEnabled, isEmbeddedDevShell } from './devGate';
+import { isDevHooksEnabled, isEmbeddedDevShell, isTrustedEmbedderMessage, isAllowedDevRemoteEntry, trustedParentOrigin } from './devGate';
 import { registerLocalApp, unregisterLocalApp, invalidateAppDescriptor, registerDevRemote } from './appLoader';
 
 // The gate lives in devGate.ts (a leaf module — the ConnectionManager needs
@@ -143,6 +153,84 @@ export function waitForEmbeddedSession(timeoutMs: number): Promise<string | null
 }
 
 // =============================================================================
+// EMBEDDER MESSAGES (rrdev:*)
+// =============================================================================
+
+/** Collaborators of the message handler (injectable so tests need no shell boot). */
+export interface EmbedderMessageDeps {
+	/** Registers a dev-server-hosted MF remote (appLoader.registerDevRemote). */
+	registerRemote: typeof registerDevRemote;
+	/** The token holder (ConnectionManager.getInstance()). */
+	connection: () => Pick<ConnectionManager, 'loadToken' | 'saveToken' | 'clearToken'>;
+	/** Reloads the page into a changed session state. */
+	reload: () => void;
+}
+
+const defaultEmbedderDeps: EmbedderMessageDeps = {
+	registerRemote: registerDevRemote,
+	connection: () => ConnectionManager.getInstance(),
+	reload: () => window.location.reload(),
+};
+
+/**
+ * Handles one window `message` event. ONLY the trusted embedder may drive it
+ * (isTrustedEmbedderMessage: dev build, embedded, sender is window.parent and
+ * its origin is an expected embedder) — everything else, including every
+ * message that carries a token or a remote entry, is dropped without effect.
+ *
+ * @param e - The message event.
+ * @param deps - Collaborators; defaults to the live shell.
+ */
+export function handleEmbedderMessage(e: Pick<MessageEvent, 'data' | 'origin' | 'source'>, deps: EmbedderMessageDeps = defaultEmbedderDeps): void {
+	const data = e.data as { type?: string; appId?: string; moduleId?: string; name?: string; entry?: string; token?: string } | undefined;
+	// Cheap shape filter first so unrelated window messages stay silent.
+	if (typeof data?.type !== 'string' || !data.type.startsWith('rrdev:')) return;
+	if (!isTrustedEmbedderMessage(e)) {
+		console.warn(`[devMode] ignoring ${data.type} from untrusted sender (origin ${JSON.stringify(e.origin)})`);
+		return;
+	}
+	if (data.type === 'rrdev:registerRemote') {
+		if (!data.appId || !data.moduleId || !data.entry) {
+			console.warn(`[devMode] ignoring rrdev:registerRemote without appId/moduleId/entry: ${JSON.stringify({ appId: data.appId, moduleId: data.moduleId, entry: data.entry })}`);
+			return;
+		}
+		if (!isAllowedDevRemoteEntry(data.entry)) {
+			console.warn(`[devMode] ignoring rrdev:registerRemote: entry ${JSON.stringify(data.entry)} is not a loopback dev-server URL`);
+			return;
+		}
+		deps.registerRemote(data.appId, data.moduleId, data.name || data.appId, data.entry);
+	} else if (data.type === 'rrdev:auth' && typeof data.token === 'string') {
+		// rrdev:auth carries the embedder's DEFINITIVE session state: a token
+		// to adopt (the VSCode host's own credential) or empty for "no
+		// session" (signed out, or Inherit Auth off). One message covers
+		// grant and revoke — there is no separate clear message.
+		const cm = deps.connection();
+		// loadToken() yields '' when absent, so '' compares as "no session"
+		// on both sides of the protocol.
+		if (cm.loadToken() === data.token) {
+			// Already in the answered state — just release a pending boot
+			// wait; on later re-answers (re-inject, toggle no-op) this is
+			// a no-op.
+			settleBootAnswer(data.token || null);
+			return;
+		}
+		if (data.token) cm.saveToken(data.token); else cm.clearToken();
+		if (settleBootAnswer(data.token || null)) {
+			// Boot-window answer: bootstrap is still holding behind the
+			// loading screen and proceeds straight into the new state —
+			// no reload, no sign-in flash.
+			console.log(`[devMode] embedder session ${data.token ? 'received' : 'empty'} — continuing boot`);
+		} else {
+			// Post-boot change (Inherit Auth toggled, explicit sign-in,
+			// late credential): reboot into the new state exactly once —
+			// after the reload the states match and this is a no-op.
+			console.log(`[devMode] embedder session ${data.token ? 'received' : 'cleared'} — rebooting`);
+			deps.reload();
+		}
+	}
+}
+
+// =============================================================================
 // DEV SHARE SCOPE + WINDOW API INSTALL
 // =============================================================================
 
@@ -201,51 +289,15 @@ export async function installDevHooks(): Promise<void> {
 
 	// Embedded previews: mirror this shell's console + errors to the parent
 	// embedder so hosts without same-origin access (the VSCode webview) can
-	// render them in the App Builder's Console/Errors panes. postMessage is
-	// origin-agnostic, so this is the one channel that works everywhere.
+	// render them in the App Builder's Console/Errors panes. Rows are aimed at
+	// the trusted embedder's origin (see installConsoleForwarding).
 	installConsoleForwarding();
 
 	// Embedded previews: accept dev-remote registrations and session state
-	// from the embedder. The App Builder panel KNOWS its rsbuild dev server's
-	// address — it posts it here and this shell wires the remote itself.
-	// rrdev:auth carries the embedder's DEFINITIVE session state: a token to
-	// adopt (the VSCode host's own credential) or empty for "no session"
-	// (signed out, or Inherit Auth off). One message covers grant and revoke —
-	// there is no separate clear message.
-	window.addEventListener('message', (e: MessageEvent) => {
-		const data = e.data as { type?: string; appId?: string; moduleId?: string; name?: string; entry?: string; token?: string } | undefined;
-		if (data?.type === 'rrdev:registerRemote') {
-			if (!data.appId || !data.moduleId || !data.entry) {
-				console.warn(`[devMode] ignoring rrdev:registerRemote without appId/moduleId/entry: ${JSON.stringify({ appId: data.appId, moduleId: data.moduleId, entry: data.entry })}`);
-				return;
-			}
-			registerDevRemote(data.appId, data.moduleId, data.name || data.appId, data.entry);
-		} else if (data?.type === 'rrdev:auth' && typeof data.token === 'string') {
-			const cm = ConnectionManager.getInstance();
-			// loadToken() yields '' when absent, so '' compares as "no session"
-			// on both sides of the protocol.
-			if (cm.loadToken() === data.token) {
-				// Already in the answered state — just release a pending boot
-				// wait; on later re-answers (re-inject, toggle no-op) this is
-				// a no-op.
-				settleBootAnswer(data.token || null);
-				return;
-			}
-			if (data.token) cm.saveToken(data.token); else cm.clearToken();
-			if (settleBootAnswer(data.token || null)) {
-				// Boot-window answer: bootstrap is still holding behind the
-				// loading screen and proceeds straight into the new state —
-				// no reload, no sign-in flash.
-				console.log(`[devMode] embedder session ${data.token ? 'received' : 'empty'} — continuing boot`);
-			} else {
-				// Post-boot change (Inherit Auth toggled, explicit sign-in,
-				// late credential): reboot into the new state exactly once —
-				// after the reload the states match and this is a no-op.
-				console.log(`[devMode] embedder session ${data.token ? 'received' : 'cleared'} — rebooting`);
-				window.location.reload();
-			}
-		}
-	});
+	// from the TRUSTED embedder only (handleEmbedderMessage vets every
+	// message). The App Builder panel KNOWS its rsbuild dev server's address —
+	// it posts it here and this shell wires the remote itself.
+	window.addEventListener('message', (e: MessageEvent) => handleEmbedderMessage(e));
 
 	// Tell a parent embedder the hooks are ready so it doesn't have to poll.
 	try {
@@ -297,8 +349,13 @@ function installConsoleForwarding(): void {
 
 	/** Posts one row to the embedder; never throws into app code. */
 	const forward = (type: string, payload: Record<string, unknown>): void => {
+		// Console rows carry hrefs (OAuth `?code=` returns included) — aim
+		// them at the trusted embedder's origin only; with no trusted parent
+		// (a foreign framing page, origin unknown) nothing is forwarded.
+		const target = trustedParentOrigin();
+		if (!target) return;
 		try {
-			window.parent.postMessage({ type, ...payload }, '*');
+			window.parent.postMessage({ type, ...payload }, target);
 		} catch { /* embedder gone — drop the row */ }
 	};
 

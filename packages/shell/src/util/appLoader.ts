@@ -35,6 +35,7 @@ import type { AppManifestEntry, AppDescriptor, AppConfiguration } from '../compo
 // modules reference each other strictly through function calls at runtime,
 // so the import cycle carries no module-evaluation (TDZ) risk.
 import { getAppVersionOverrides, versionedEntryUrl } from './versionOverride';
+import { isAllowedDevRemoteEntry, isDevHooksEnabled } from './devGate';
 
 /**
  * Shape of an app entry from the server (rrext_public_probe or ConnectResult).
@@ -359,6 +360,14 @@ export function unregisterLocalApp(id: string): void {
  * @param entry - The dev server's remoteEntry.js URL.
  */
 export function registerDevRemote(appId: string, moduleId: string, name: string, entry: string): void {
+	// The one choke point for dev-remote entries: a remote entry is SCRIPT the
+	// shell executes with the user's session, so only a loopback dev server may
+	// supply one (the embedder's own rsbuild server), whoever the caller is.
+	if (!isAllowedDevRemoteEntry(entry)) {
+		console.error(`[appLoader] refusing dev remote "${moduleId}": entry ${JSON.stringify(entry)} is not a loopback dev-server URL`);
+		return;
+	}
+
 	// The wrong-id signal: an embedded preview receives ONE registration, for
 	// the app its URL is locked to. A registration for any other id means the
 	// two disagree, and the locked app will never register — say so instead
@@ -483,6 +492,8 @@ export function fallbackSkippedRemote(appId: string): boolean {
  */
 export function isDevPreviewPage(): boolean {
 	try {
+		// A production build is never a dev preview, whatever the URL says.
+		if (!isDevHooksEnabled()) return false;
 		if (window.self === window.top) return false;
 		if (new URLSearchParams(window.location.search).get('rrdev') === '1') return true;
 		return sessionStorage.getItem('rr:dev') === '1';
