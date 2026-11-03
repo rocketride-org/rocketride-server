@@ -45,7 +45,7 @@ Default: **Gemini 3.1 Pro** (`gemini-3_1-pro-preview`).
 | Profile | Model | Context tokens | Output tokens |
 | ------- | ----- | -------------- | ------------- |
 | `custom` | _(user-specified)_ | editable | editable |
-| Gemini 3.1 Flash Image Preview | `models/gemini-3.1-flash-image-preview` | 131,072 | 58,982 |
+| Gemini 3.1 Flash Image Preview | `models/gemini-3.1-flash-image-preview` | 131,072 | 32,768 |
 | Gemini 3.1 Flash Lite | `models/gemini-3.1-flash-lite-preview` | 1,048,576 | 65,536 |
 | Gemini 3 Flash Preview | `models/gemini-3-flash-preview` | 1,048,576 | 65,536 |
 | Gemini 3 Pro Image Preview | `models/gemini-3-pro-image-preview` | 65,536 | 32,768 |
@@ -55,8 +55,8 @@ Default: **Gemini 3.1 Pro** (`gemini-3_1-pro-preview`).
 | Gemini 2.5 Flash Image | `models/gemini-2.5-flash-image` | 32,768 | 8,192 |
 | Gemini 3 Pro Preview | `models/gemini-3-pro-preview` | 1,048,576 | 65,536 |
 | Gemini 3 Pro Image | `models/gemini-3-pro-image` | 131,072 | 32,768 |
-| Gemini 2.0 Flash | `models/gemini-2.0-flash` | 1,048,576 | 65,535 |
-| Gemini 2.0 Flash Lite | `models/gemini-2.0-flash-lite` | — | 65,536 |
+| Gemini 2.0 Flash | `models/gemini-2.0-flash` | 1,048,576 | 8,192 |
+| Gemini 2.0 Flash Lite | `models/gemini-2.0-flash-lite` | — | 8,192 |
 | Google: Gemini 2.5 Flash Lite Preview 09-2025 | `models/gemini-2.5-flash-lite-preview-09-2025` | 1,048,576 | 65,535 |
 | Google: Gemini 2.5 Pro Preview 06-05 | `models/gemini-2.5-pro-preview` | 1,048,576 | 65,536 |
 | Google: Gemini 2.5 Pro Preview 05-06 | `models/gemini-2.5-pro-preview-05-06` | 1,048,576 | 65,535 |
@@ -65,7 +65,7 @@ Default: **Gemini 3.1 Pro** (`gemini-3_1-pro-preview`).
 | Google Gemini Pro Latest | `models/gemini-pro-latest` | 1,048,576 | 65,536 |
 | Google: Nano Banana 2 (Gemini 3.1 Flash Image) | `models/gemini-3.1-flash-image` | 131,072 | 32,768 |
 | Google: Gemini 3.1 Flash Lite | `models/gemini-3.1-flash-lite` | 1,048,576 | 65,536 |
-| Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image) | `models/gemini-3.1-flash-lite-image` | 65,536 | 58,982 |
+| Google: Nano Banana 2 Lite (Gemini 3.1 Flash Lite Image) | `models/gemini-3.1-flash-lite-image` | 65,536 | 4,096 |
 | `models-gemini-2-5-flash-batch` | `models/gemini-2.5-flash:batch` | 1,048,576 | 65,535 |
 | `models-gemini-2-5-flash-lite-batch` | `models/gemini-2.5-flash-lite:batch` | 1,048,576 | 65,535 |
 | `models-gemini-2-5-pro-batch` | `models/gemini-2.5-pro:batch` | 1,048,576 | 65,536 |
@@ -93,8 +93,9 @@ context window, and output limit, so most pipelines need no other settings.
 
 Select `custom` to enter a Gemini model identifier such as
 `models/gemini-2.5-pro`, its combined input and output token limit, and its output
-token limit. The custom defaults are 1,114,112 total tokens and 65,536 output
-tokens; set both to the actual limits of the model you select.
+token limit. The custom default for total tokens is 1,114,112; set it to the model's
+actual context window. Leave the output limit empty to send Google no limit, so the
+model's own maximum applies; a value you enter is sent as `max_output_tokens`.
 
 ## Authentication
 
@@ -139,8 +140,8 @@ with a mocked `google.genai`, so no real API key is required. Set `ROCKETRIDE_MO
 |---|---|---|---|
 | `gemini.apikey` | `string` | **API Key**<br/>Google AI Developer API key |  |
 | `gemini.model` | `string` | **Model**<br/>Gemini model |  |
+| `gemini.modelOutputTokens` | `integer` | **Output Tokens**<br/>Most tokens the model may write in one reply (at least 1,024), sent to Google as max_output_tokens. Leave it empty to send no limit, so Google uses the model's own maximum. Thinking models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Total Tokens; a larger value is lowered to it. |  |
 | `gemini.modelTotalTokens` | `number` | **Total Tokens**<br/>Maximum number of input + output tokens |  |
-| `gemini.outputTokens` | `number` | **Output Tokens**<br/>Maximum number of output tokens |  |
 | `gemini.profile` | `string` | **Model**<br/>Gemini LLM model | `"gemini-3_1-pro-preview"` |
 
 ## Dependencies
