@@ -499,19 +499,12 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        # Clear the object id list
-        objectIds: Dict[str, bool] = {}
-
-        # For each document
-        for chunk in chunks:
-            # If we are writing chunk 0, then delete the object
-            if not chunk.metadata.chunkId:
-                # Save this object id to be deleted
-                objectIds[chunk.metadata.objectId] = True
+        # The objects this batch starts over
+        objectIds = self._objectIdsToReplace(chunks)
 
         # Delete existing documents with matching objectIds
         if objectIds:
-            delete_query = {'query': {'terms': {'meta.objectId': list(objectIds.keys())}}}
+            delete_query = {'query': {'terms': {'meta.objectId': objectIds}}}
             self.client.delete_by_query(index=self.index, body=delete_query)
 
         # Prepare bulk operations
@@ -543,6 +536,7 @@ class Store(DocumentStoreBase):
             return meta
 
         def _run_bulk(actions_batch: List[Dict[str, Any]]) -> None:
+            """Index one batch with the bulk helper; raise with the first item error the server reported."""
             try:
                 bulk(self.client, actions_batch)
             except BulkIndexError as e:

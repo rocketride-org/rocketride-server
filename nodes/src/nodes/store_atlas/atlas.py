@@ -323,15 +323,12 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        # Collect object IDs to delete
-        objectIds = set()
-        for chunk in chunks:
-            if not chunk.metadata.chunkId:
-                objectIds.add(chunk.metadata.objectId)
+        # The objects this batch starts over
+        objectIds = self._objectIdsToReplace(chunks)
 
         # Delete existing documents with same object IDs
         if objectIds:
-            self.collection.delete_many({'meta.objectId': {'$in': list(objectIds)}})
+            self.collection.delete_many({'meta.objectId': {'$in': objectIds}})
 
         # Prepare documents for insertion
         documents = []

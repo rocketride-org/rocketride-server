@@ -62,6 +62,8 @@ def _count_floor(exc: TooManyDocumentsToCountException) -> int:
 
 
 class Store(DocumentStoreBase):
+    """Vector store driver for DataStax Astra DB."""
+
     application_token: str | None = None
     node: str = 'astra_db'
     collection_name: str = ''
@@ -395,20 +397,22 @@ class Store(DocumentStoreBase):
         # Clear the documents list
         documents: List[Dict] = []
 
-        # Clear the object id list for deletion
-        objectIds: Dict = {}
+        # The objects this batch starts over
+        objectIds = self._objectIdsToReplace(chunks)
 
         def flush():
+            """Delete the replaced objects (first call only), then insert the queued documents that have a vector."""
             nonlocal documents
             nonlocal objectIds
 
             # First, delete existing documents if we have objectIds to delete
             if len(objectIds):
                 # Delete all documents with these object IDs
-                for objectId in objectIds.keys():
+                for objectId in objectIds:
                     collection.delete_many({'meta.objectId': objectId})
 
             def is_valid_vector(vector):
+                """Return True unless the vector is (near) zero, which Astra cannot index."""
                 magnitude = sum(x * x for x in vector) ** 0.5
                 return magnitude > 1e-6
 
@@ -419,15 +423,8 @@ class Store(DocumentStoreBase):
                 collection.insert_many(valid_docs)
 
             # Clear them
-            objectIds = {}
+            objectIds = []
             documents = []
-
-        # For each document, check if we need to delete existing chunks
-        for chunk in chunks:
-            # If we are writing chunk 0, then delete the object
-            if not chunk.metadata.chunkId:
-                # Save this object id to be deleted
-                objectIds[chunk.metadata.objectId] = True
 
         # For each document, prepare the data for insertion
         for chunk in chunks:
