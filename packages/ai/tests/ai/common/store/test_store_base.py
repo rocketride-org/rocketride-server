@@ -22,6 +22,7 @@ import pytest
 from rocketlib import OPEN_MODE
 
 import ai.common.store.store_global_base as sgb
+from ai.common.schema import Doc, DocMetadata
 from ai.common.store.store_global_base import StoreGlobalBase
 from ai.common.store.store_instance_base import StoreInstanceBase
 
@@ -35,18 +36,22 @@ class _FakeStore:
     """Minimal stand-in for a DocumentStoreBase with the attrs _sub_key reads."""
 
     def __init__(self):
+        """Use fixed host, port and collection; record no calls yet."""
         self.host = 'Host'
         self.port = 5555
         self.collection = 'Coll'
         self.calls = []
 
     def dispatchSearch(self, instance, question):
+        """Record a search."""
         self.calls.append(('search', question))
 
     def addChunks(self, documents):
+        """Record a write."""
         self.calls.append(('add', documents))
 
     def render(self, objectId, callback):
+        """Record a render."""
         self.calls.append(('render', objectId))
 
 
@@ -56,22 +61,27 @@ class _TestableGlobal(StoreGlobalBase):
     serverName = 'defaultname'
 
     def __init__(self, store):
+        """Hand out ``store`` when the base opens one."""
         self._store_to_return = store
         self._conn_config = {}
         self.opened = False
 
     def getConnConfig(self):
+        """Return the injected config."""
         # Bypass the filter/endpoint config plumbing; tests inject directly.
         return self._conn_config
 
     def _open_store(self, logical_type, conn_config, bag):
+        """Note the open and return the fake store."""
         self.opened = True
         return self._store_to_return
 
     def _sub_key(self) -> str:
+        """Key the store by host, port and collection."""
         return f'{self.store.host}/{self.store.port}/{self.store.collection}'
 
     def _probe_connection(self, config) -> None:
+        """Accept any config."""
         return
 
 
@@ -93,6 +103,7 @@ def warnings(monkeypatch):
 
 
 def _make(open_mode=OPEN_MODE.SOURCE, store=None):
+    """Return a global over ``store`` (a fake one by default) in ``open_mode``."""
     g = _TestableGlobal(store=store if store is not None else _FakeStore())
     g.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=open_mode, bag={}))
     g.glb = SimpleNamespace(logicalType='teststore', connConfig={})
@@ -162,6 +173,7 @@ def test_wire_embedding_warns_instead_of_raising_when_getembedding_throws(monkey
     import ai.common.embedding as emb
 
     def _boom(provider, config, bag):
+        """Fail the way a missing embedding model does."""
         raise RuntimeError('no model here')
 
     monkeypatch.setattr(emb, 'getEmbedding', _boom)
@@ -211,6 +223,7 @@ def test_end_global_clears_state_and_transform_key(monkeypatch):
 
 
 def _instance_with_store(store):
+    """Return an instance whose global holds ``store``."""
     inst = _TestableInstance.__new__(_TestableInstance)
     inst.IGlobal = SimpleNamespace(store=store)
     return inst
@@ -243,7 +256,7 @@ def test_lane_handlers_delegate_to_store_when_present():
     inst = _instance_with_store(store)
 
     inst.writeQuestions(SimpleNamespace())
-    inst.writeDocuments([{'x': 1}])
+    inst.writeDocuments([Doc(page_content='x', metadata=DocMetadata(objectId='o', chunkId=0))])
 
     kinds = [c[0] for c in store.calls]
     assert kinds == ['search', 'add']
@@ -357,14 +370,17 @@ class _KeyedGlobal(_TestableGlobal):
     credential_fields = ('apikey',)
 
     def __init__(self, store):
+        """Start unprobed."""
         super().__init__(store)
         self.probed = False
 
     def _probe_connection(self, config) -> None:
+        """Note that the probe ran."""
         self.probed = True
 
 
 def _keyed(conn_config):
+    """Return a keyed global whose config is ``conn_config``."""
     g = _KeyedGlobal(store=_FakeStore())
     g.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(openMode=OPEN_MODE.SOURCE, bag={}))
     g.glb = SimpleNamespace(logicalType='teststore', connConfig=conn_config)
@@ -373,6 +389,7 @@ def _keyed(conn_config):
 
 
 def test_an_unfilled_key_stops_the_store_before_it_opens(monkeypatch):
+    """A ${VAR} key with no such variable stops beginGlobal before the driver connects."""
     config = {'apikey': '${ROCKETRIDE_QDRANT_KEY}'}
     _patch_config(monkeypatch, config)
     g = _keyed(config)
@@ -383,6 +400,7 @@ def test_an_unfilled_key_stops_the_store_before_it_opens(monkeypatch):
 
 
 def test_an_unfilled_key_is_reported_at_save_time_without_a_probe(monkeypatch, warnings):
+    """At save time, validateConfig names the missing variable and sends nothing to the server."""
     config = {'apikey': '${ROCKETRIDE_QDRANT_KEY}'}
     _patch_config(monkeypatch, config)
     g = _keyed(config)
@@ -395,6 +413,7 @@ def test_an_unfilled_key_is_reported_at_save_time_without_a_probe(monkeypatch, w
 
 @pytest.mark.parametrize('config', [{'apikey': 'a-real-key'}, {'apikey': ''}, {}])
 def test_a_filled_empty_or_absent_key_opens_the_store(monkeypatch, config):
+    """A real, empty or absent key does not block the store from opening."""
     _patch_config(monkeypatch, config)
     g = _keyed(config)
 
@@ -404,6 +423,7 @@ def test_a_filled_empty_or_absent_key_opens_the_store(monkeypatch, config):
 
 
 def test_a_driver_without_credential_fields_is_not_checked(monkeypatch):
+    """A driver that declares no credential fields is not checked for placeholders."""
     _patch_config(monkeypatch, {'apikey': '${ROCKETRIDE_NOT_SENT}'})
     g = _make()
 
