@@ -1100,4 +1100,4 @@ malformed or expired reads as undecided), so accepting or rejecting on the banne
 or storage that cannot be read, omits either kind. Coordinate any change to this key or schema with
 both repositories.
 `CloudAuthProvider.signIn()` owns pending signup storage; `startOAuth()` passes validated context
-to it and stores context itself only on the legacy path without an auth provider.
+to it.

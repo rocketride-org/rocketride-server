@@ -40,7 +40,7 @@ function isPrivacySignal(value: unknown): boolean {
 	return value === true || value === 1 || value === '1' || value === 'yes';
 }
 
-function privacySignalOn(): boolean {
+function hasPrivacySignal(): boolean {
 	try {
 		const browserNavigator = navigator as Navigator & { globalPrivacyControl?: unknown; msDoNotTrack?: unknown };
 		const browserWindow = window as Window & { doNotTrack?: unknown };
@@ -82,7 +82,7 @@ function consentChoice(): 'accepted' | 'rejected' | 'undecided' | null {
 }
 
 function hasConsent(): boolean {
-	if (privacySignalOn()) return false;
+	if (hasPrivacySignal()) return false;
 	return consentChoice() === 'accepted';
 }
 
@@ -100,7 +100,7 @@ export function currentSignupProperties(value: unknown): SignupProperties | null
 	if (!context) return null;
 	// A cookieless context needs no opt-in, but any choice on the banner or a privacy signal drops it.
 	if (context.consent_state) {
-		if (privacySignalOn()) return null;
+		if (hasPrivacySignal()) return null;
 		if (consentChoice() !== 'undecided') return null;
 		return context;
 	}
