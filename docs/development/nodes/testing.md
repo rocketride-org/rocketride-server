@@ -34,6 +34,8 @@ Run tests:
 ./builder nodes:test-full
 ```
 
+The same tests run with every task in a container or a Kubernetes Job (`--runtime=docker`, `--runtime=k8s`): see [Testing the task runtimes](../engine/task-runtimes.md).
+
 ---
 
 ## Test Configuration Schema

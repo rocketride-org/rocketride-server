@@ -104,6 +104,13 @@ uses the literal `MYAPIKEY`, the same placeholder as `.env.template`. Ubuntu als
 starts MinIO, Azurite, and Postgres (pgvector + Apache AGE, on `:55432`/`:55433`)
 for the storage and database node tests.
 
+Ubuntu also runs `./builder container:test` — the node image probes, then the
+node tests with every task in a container (`--runtime=docker`) — on a PR only
+when the image's inputs changed (the `container` path filter in `ci.yml`), and
+on every other trigger. CI has no Kubernetes cluster, so
+`nodes:test --runtime=k8s` runs only on your machine: see
+[Testing the task runtimes](engine/task-runtimes.md).
+
 Per-module equivalents when you only touched one area:
 
 ```bash
