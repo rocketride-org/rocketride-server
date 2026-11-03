@@ -344,10 +344,12 @@ async function signInSaas(uri: string, out: Output): Promise<string> {
 	let outcome: CallbackResult = { ok: false, error: 'Sign-in did not complete; see your terminal.' };
 
 	// step: exchange the code over a temporary DAP connection — the server
-	// consumes the Zitadel tokens and returns an rr_* session key
+	// consumes the Zitadel tokens and returns an rr_* session key.
+	// clientId rides along: Zitadel binds the code to the CLI's own client
+	// registration, and the server-side exchange must name the same client.
 	const tempClient = new RocketRideClient({ persist: false });
 	try {
-		const result = await tempClient.connect({ code, verifier, redirectUri }, { uri });
+		const result = await tempClient.connect({ code, verifier, redirectUri, clientId: DEFAULT_CLI_CLIENT_ID }, { uri });
 		if (result?.waitlisted) {
 			const name = result.displayName || '';
 			out.line(`Thanks for signing up${name ? `, ${name}` : ''}! Your account is in the access queue — you will be emailed when it is activated.`);
@@ -570,11 +572,13 @@ pair unless --no-deploy.`,
 				// step: vendor the platform packages from the same server
 				const base = toHttpBase(uri);
 				const shellTgz = await fetchArtifact(base, 'client/shell', 'platform package (shell.tgz)');
-				if (writeIfChanged(path.join(workspaceRoot, '.rocketride', 'shell', 'shell.tgz'), shellTgz)) {
+				const shellChanged = writeIfChanged(path.join(workspaceRoot, '.rocketride', 'shell', 'shell.tgz'), shellTgz);
+				if (shellChanged) {
 					out.line('Vendored .rocketride/shell/shell.tgz.');
 				}
 				const clientTgz = await fetchArtifact(base, 'client/typescript', 'client SDK package (rocketride.tgz)');
-				if (writeIfChanged(path.join(workspaceRoot, '.rocketride', 'client', 'rocketride.tgz'), clientTgz)) {
+				const clientChanged = writeIfChanged(path.join(workspaceRoot, '.rocketride', 'client', 'rocketride.tgz'), clientTgz);
+				if (clientChanged) {
 					out.line('Vendored .rocketride/client/rocketride.tgz.');
 				}
 
@@ -594,14 +598,23 @@ pair unless --no-deploy.`,
 					fs.mkdirSync(path.join(workspaceRoot, dir), { recursive: true });
 				}
 
-				// step: make the workspace hermetic and link the vendored client
+				// step: make the workspace hermetic and link the vendored client.
+				// The install runs on the FIRST repoint and on every later
+				// re-vendor that changed a tarball — a file: spec only links
+				// new bytes through pnpm, so vendoring without installing
+				// would leave the workspace running the previous client.
 				const repointed = repointClientDependency(workspaceRoot, out);
-				if (repointed && options.install !== false) {
+				if ((repointed || shellChanged || clientChanged) && options.install !== false) {
 					try {
 						out.line('Running pnpm install...');
 						execSync('pnpm install', { cwd: workspaceRoot, stdio: 'ignore' });
 					} catch {
+						// step: the workspace still runs the PREVIOUS vendored
+						// client — that is not an initialized workspace; only
+						// --no-install defers the link intentionally
 						out.line('pnpm install failed — run it manually to link the vendored client.');
+						out.result({ uri, workspaceRoot, initialized: false, installFailed: true });
+						return 1;
 					}
 				}
 

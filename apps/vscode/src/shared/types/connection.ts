@@ -33,9 +33,6 @@ export enum ConnectionState {
 	/** No active connection or engine process */
 	DISCONNECTED = 'disconnected',
 
-	/** Local mode: engine is being downloaded from GitHub */
-	DOWNLOADING_ENGINE = 'downloading-engine',
-
 	/** Local mode: engine process is starting up */
 	STARTING_ENGINE = 'starting-engine',
 
@@ -53,9 +50,6 @@ export enum ConnectionState {
 
 	/** Authentication was rejected by the server (bad/expired/revoked key) */
 	AUTH_FAILED = 'auth-failed',
-
-	/** Local mode: engine process is shutting down */
-	STOPPING_ENGINE = 'stopping-engine',
 }
 
 /**
@@ -75,9 +69,6 @@ export interface ConnectionStatus {
 
 	/** Current connection mode */
 	connectionMode: ConnectionMode;
-
-	/** Timestamp of last successful connection */
-	lastConnected?: Date;
 
 	/** Last error message */
 	lastError?: string;

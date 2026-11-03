@@ -31,7 +31,8 @@
 import 'react/jsx-dev-runtime';
 
 import type { AppDescriptor } from 'shell';
-import ExplorerApp from './ExplorerApp';
+import ExplorerApp, { ExplorerDevTool } from './ExplorerApp';
+import { ExplorerDevToolSidebar } from './ExplorerSidebar';
 
 /**
  * AppDescriptor for the File Explorer application.
@@ -49,6 +50,10 @@ const EXPLORER_APP: AppDescriptor = {
 	// Two-column app: ExplorerApp's root AppLayout declares the file-tree
 	// Explorer sidebar and the status bar.
 	app: ExplorerApp,
+	// Dev-tool mounts: the editor groups in the host's panel, the file tree
+	// in the host's sidebar — coordinated over the DevToolProps peer channel.
+	devToolFrame: ExplorerDevTool,
+	devToolSidebar: ExplorerDevToolSidebar,
 };
 
 export default EXPLORER_APP;

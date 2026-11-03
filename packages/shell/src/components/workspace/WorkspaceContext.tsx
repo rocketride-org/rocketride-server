@@ -27,8 +27,10 @@
 import React, { createContext, useContext, useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { useWorkspaceState } from '../../hooks/useWorkspaceState';
-import { buildSettingsRegistry, effectiveSettings } from './settingsRegistry';
-import type { SettingsRegistry } from './settingsRegistry';
+import { buildSettingsRegistry, effectiveSettings, settingStoreOf, SHELL_SECTION_ID } from './settingsRegistry';
+import type { RegistryEntry, SettingsRegistry } from './settingsRegistry';
+import { getSettingsContributions, onSettingsContributionsChanged } from './settingsContributions';
+import { appPartition, SHELL_PARTITION } from '../../workspace/workspaceStore';
 import type { WorkspacePrefs, AppDescriptor, AppManifestEntry, SettingValue } from './types';
 import type { ShellConnectionEventMap } from '../../types/shell';
 import { GRID_CONFIG_GET, GRID_CONFIG_SET, GRID_CONFIG_CLEAR } from '../data-grid/gridConfigChannel';
@@ -38,6 +40,7 @@ import { ConnectionManager } from '../../connection/connection';
 import { HOME_APP_ID, HELLO_APP_ID } from '../../constants';
 import { resetRemote, setDescriptorInvalidator, isDevPreviewPage, previewLockedAppId, waitForDevRemote, isDevRemote, fallbackSkippedRemote, devPreviewHoldRemainingMs, DEV_REMOTE_TIMEOUT_MS } from '../../util/appLoader';
 import { getAppVersionOverride, clearAppVersionOverride } from '../../util/versionOverride';
+import { sessionScopedStore } from '../../util/devGate';
 import { SHELL_API_VERSION } from '../../apiver';
 
 // =============================================================================
@@ -49,6 +52,14 @@ import { SHELL_API_VERSION } from '../../apiver';
  * the user's last position.  Cleared when returning to 'home' so that a fresh
  * load without a session lock always lands on the home screen.
  *
+ * Tab-session scoped (sessionScopedStore): same-origin iframes SHARE the
+ * tab's sessionStorage, so a FRAMED preview (live OR built) session-locked
+ * to a working-copy app would stamp its id into the TOP shell's restore key
+ * — and the working copy exists only via dev injection, so the top shell's
+ * next refresh restores an app its server manifest cannot resolve ("App not
+ * found"). A framed shell's writes land frame-local instead; its identity
+ * rides its URL, which survives every iframe reload.
+ *
  * @param appId - The app being switched to.
  */
 function persistActiveApp(appId: string): void {
@@ -56,9 +67,9 @@ function persistActiveApp(appId: string): void {
 		// Both home apps count as "home": rocketride.home (SaaS) and
 		// rocketride.hello (OSS) — returning to either clears the session lock.
 		if (appId === HOME_APP_ID || appId === HELLO_APP_ID) {
-			sessionStorage.removeItem('rr:appId');
+			sessionScopedStore().removeItem('rr:appId');
 		} else {
-			sessionStorage.setItem('rr:appId', appId);
+			sessionScopedStore().setItem('rr:appId', appId);
 		}
 	} catch { /* storage unavailable */ }
 }
@@ -108,6 +119,13 @@ export interface IWorkspaceContext {
 	appState: Record<string, unknown>;
 	/** Update the opaque app-owned state via a functional updater. */
 	updateAppState: (updater: (prev: Record<string, unknown>) => Record<string, unknown>) => void;
+	/**
+	 * Writes the workspace's pending debounced state to disk NOW.
+	 *
+	 * Hand this to Documents as `WorkspaceBinding.flushNow` so a page
+	 * teardown cannot strand the last change in a timer that never fires.
+	 */
+	flushWorkspaceNow: () => void;
 	/** ID of the currently active app. */
 	activeAppId: string;
 	/** Lightweight manifest entries for all apps — always available, no bundle load needed. */
@@ -236,15 +254,37 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	// Destructure all state and mutation helpers from the persistence hook
 	const {
 		loaded, seeded, activeAppId, prefs, appState, settings: settingsOverrides,
-		switchApp, updatePrefs, updateAppState, updateSetting: writeSettingOverride,
+		switchApp, updatePrefs, updateAppState, flushWorkspaceNow, updateSetting: writeSettingOverride, ensurePartition,
 	} = useWorkspaceState(client, isConnected, defaultAppId, workspaceDir, startupAppId);
+
+	// An in-process workspace rescope is about to unmount this tree and
+	// reconnect under another workspace. Flush the debounced write queue NOW,
+	// while the OLD connection is still up — a flush after the reconnect would
+	// write this workspace's state into the next one, and the page-reload path
+	// simply lost these writes (flushNow is forbidden on unload; a live-page
+	// teardown is exactly what it is for).
+	useEffect(() => {
+		return ConnectionManager.getInstance().on('shell:workspaceWillChange', () => {
+			flushWorkspaceNow();
+		});
+	}, [flushWorkspaceNow]);
 
 	// ── Settings registry + effective values ───────────────────────────────
 	// The registry flattens every desktop app's configuration (VSCode
 	// contributes.configuration shape) into one declaration index.  It rebuilds
 	// whenever the manifest changes (connect / shell:accountUpdate deliver a new
 	// `apps` array).  Effective settings = declared defaults + stored overrides.
-	const settingsRegistry = useMemo(() => buildSettingsRegistry(apps), [apps]);
+	// Registered contributions (builtin tools, pinned dev tools, host blocks)
+	// join the registry and re-trigger the build on register/unregister.
+	const [settingsContributions, setSettingsContributions] = useState(() => getSettingsContributions());
+	useEffect(() => onSettingsContributionsChanged(() => setSettingsContributions(getSettingsContributions())), []);
+	// This provider only ever runs in the cloud shells (VS Code has no
+	// WorkspaceProvider); 'saas' and 'oss' carry identical shells lists on
+	// every declaration today, so one edition name serves both.
+	const settingsRegistry = useMemo(
+		() => buildSettingsRegistry(apps, { shell: 'saas', contributions: settingsContributions }),
+		[apps, settingsContributions],
+	);
 	// Effective values keep their declared JSON type (string | number | boolean).
 	// The settings page reads settingsOverrides + registry defaults for its
 	// controls; every other app reads this merged effective map.
@@ -253,19 +293,59 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		[settingsRegistry, settingsOverrides],
 	);
 
+	// Key → registry entry, for partition routing (owner + store).
+	const settingEntries = useMemo(() => {
+		const map = new Map<string, RegistryEntry>();
+		for (const section of settingsRegistry.sections) {
+			for (const entry of section.entries) map.set(entry.key, entry);
+		}
+		return map;
+	}, [settingsRegistry]);
+
+	// Every owner partition with declared settings must be LOADED for its
+	// deltas to join the merged view (partitions load lazily; the active app's
+	// is the only one the store reads on its own). Owners are few — the shell,
+	// the builtins, a handful of apps.
+	useEffect(() => {
+		if (!loaded) return;
+		const owners = new Set<string>();
+		for (const entry of settingEntries.values()) {
+			if (entry.owner !== SHELL_SECTION_ID) owners.add(entry.owner);
+		}
+		for (const owner of owners) void ensurePartition(appPartition(owner));
+	}, [loaded, settingEntries, ensurePartition]);
+
 	/**
-	 * Persists a setting change with deltas-only semantics: a value equal to
-	 * the schema default deletes the override instead of storing it, so
-	 * settings.json only ever contains deviations from the defaults.
+	 * Persists a setting change with deltas-only semantics, routed to the
+	 * OWNING partition: a value equal to the schema default deletes the
+	 * override instead of storing it, so partition files only ever contain
+	 * deviations from the defaults.
+	 *
+	 * 'user'-store keys and shell-owned keys land in the shell partition
+	 * (global.json); everything else lands in the owner's partition file.
+	 * 'host'-store keys never reach the workspace — the settings page writes
+	 * those through its host adapter.
 	 *
 	 * @param key   - The dotted setting key.
 	 * @param value - The new value, or undefined to reset to default.
 	 */
 	const updateSetting = useCallback((key: string, value: SettingValue | undefined) => {
+		const entry = settingEntries.get(key);
+		if (!entry) {
+			// No declaration, no owner, nowhere to write — a stale caller.
+			console.warn(`[Workspace] updateSetting: unknown setting key '${key}' (no registry entry — not persisted)`);
+			return;
+		}
+		const store = settingStoreOf(entry.schema);
+		if (store === 'host') {
+			console.warn(`[Workspace] updateSetting: '${key}' is host-scoped — the host adapter owns it, not the workspace`);
+			return;
+		}
+		const partition = store === 'user' || entry.owner === SHELL_SECTION_ID ? SHELL_PARTITION : appPartition(entry.owner);
 		const def = settingsRegistry.defaults[key];
 		// Equal to the declared default → remove the override entirely
-		writeSettingOverride(key, value !== undefined && value === def ? undefined : value);
-	}, [settingsRegistry, writeSettingOverride]);
+		writeSettingOverride(partition, key, value !== undefined && value === def ? undefined : value);
+	}, [settingEntries, settingsRegistry, writeSettingOverride]);
 
 	// ── Grid config channel bridge (web host) ──────────────────────────────
 	// Answers shared DataGrid persistence over the document CustomEvent
@@ -383,15 +463,18 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		const load = (async (): Promise<boolean> => {
 		await Promise.resolve();
 		try {
-			// Embedded dev preview: the locked app's remote is registered by the
-			// embedder AFTER boot (its dev server may still be installing —
-			// seconds of pnpm + rsbuild startup against a millisecond shell
-			// boot). Hold this load until the registration arrives; attempting
-			// earlier can only fail with RUNTIME-004 noise. BOUNDED by the
-			// page's shared hold deadline (the same one the layout's splash
-			// honours), and inside the try, so a never-registering dev server
-			// fails into the normal error path (which clears loadingMapRef)
-			// instead of holding the loading flag forever.
+			// Dev preview: the locked app's remote registers AFTER boot — a
+			// framed preview via the embedder's push (its dev server may still
+			// be installing — seconds of pnpm + rsbuild startup against a
+			// millisecond shell boot), a top-level F5 tab via the URL-convention
+			// self-registration. Hold this load until the registration arrives;
+			// attempting earlier can only fail with RUNTIME-004 noise. BOUNDED
+			// by the page's shared hold deadline (the same one the layout's
+			// splash honours), plus failDevRemoteWait rejects early on a
+			// definitive self-registration failure — and inside the try, so a
+			// never-registering dev server fails into the normal error path
+			// (which clears loadingMapRef) instead of holding the loading flag
+			// forever.
 			if (isDevPreviewPage() && previewLockedAppId() === appId) {
 				console.log(`[WorkspaceContext] holding "${appId}" until its dev remote registers`);
 				try {
@@ -651,7 +734,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		<WorkspaceContext.Provider value={{
 			loaded, seeded, appLoading,
 			prefs,
-			appState, updateAppState,
+			appState, updateAppState, flushWorkspaceNow,
 			activeAppId,
 			appManifest: apps,
 			loadedApps,

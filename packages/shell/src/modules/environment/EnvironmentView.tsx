@@ -197,10 +197,10 @@ const SlotPanel: React.FC<{
 	// ── SaaS server — scoped cards gated by permissions ─────────────────
 	return (
 		<div style={contentStyle}>
-			{/* Organization scope — only visible to org admins */}
+			{/* Workspace scope — only visible to workspace admins */}
 			{slot.isOrgAdmin && slot.orgId && (
 				<EnvScopeCard
-					label="Organization"
+					label="Workspace"
 					env={envs[envKey('org', slot.orgId)]}
 					onRequestLoad={() => onLoadEnv(slot.id, 'org', slot.orgId)}
 					onSave={async (env) => {
@@ -270,7 +270,7 @@ const EnvironmentView: React.FC<EnvironmentViewProps> = ({ slots, envs, onLoadEn
 	if (slots.length === 0) {
 		return (
 			<div style={styles.container}>
-				<ContentHeader title="Environment Variables" subtitle="Key–value variables injected into your pipelines at run time. Scopes cascade: a user variable overrides the same key on the team, which overrides the organization." />
+				<ContentHeader title="Environment Variables" subtitle="Key–value variables injected into your pipelines at run time. Scopes cascade: a user variable overrides the same key on the team, which overrides the workspace." />
 				{error && <div style={styles.errorBanner}>{error}</div>}
 				<div style={{ padding: '16px 24px', color: 'var(--rr-text-secondary)', fontFamily: 'var(--rr-font-family)' }}>No connection slots available.</div>
 			</div>
@@ -285,7 +285,7 @@ const EnvironmentView: React.FC<EnvironmentViewProps> = ({ slots, envs, onLoadEn
 			{viewMenu && <TabControl menu={viewMenu} activeId={activeTab} onSelect={setActiveTab} />}
 
 			{/* Page heading — what this page is and how the scopes interact. */}
-			<ContentHeader title="Environment Variables" subtitle="Key–value variables injected into your pipelines at run time. Scopes cascade: a user variable overrides the same key on the team, which overrides the organization." />
+			<ContentHeader title="Environment Variables" subtitle="Key–value variables injected into your pipelines at run time. Scopes cascade: a user variable overrides the same key on the team, which overrides the workspace." />
 
 			{/* Page-level error banner */}
 			{error && <div style={styles.errorBanner}>{error}</div>}

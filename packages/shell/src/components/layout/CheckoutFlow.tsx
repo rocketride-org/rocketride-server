@@ -86,7 +86,7 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 	useEffect(() => {
 		return ConnectionManager.getInstance().on('shell:unsubscribe', ({ appId }: { appId: string }) => {
 			const client = ConnectionManager.getInstance().getClient();
-			if (client && orgId) {
+			if (orgId && client) {
 				client.billing.cancelSubscription(orgId, appId)
 					.then(() => console.log('[unsubscribe] canceled', appId))
 					.catch((err) => console.error('[unsubscribe] error', err));
@@ -98,7 +98,15 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 	if (!checkoutApp || !stripeKey || !orgId) return null;
 
 	// --- Render CheckoutModal ------------------------------------------------
+	// Engine access is the realm's own client, so this flow renders in any
+	// realm (the real client at the cloud root; the realm client — requests
+	// over the bridge — in a page webview).
 	const cm = ConnectionManager.getInstance();
+	const needClient = () => {
+		const client = cm.getClient();
+		if (!client || !cm.isConnected()) throw new Error('Not connected to a server.');
+		return client;
+	};
 
 	return (
 		<CheckoutModal
@@ -108,34 +116,22 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, orgId }) 
 			preselectedPlan={presetPlan ?? undefined}
 			preselectedPromo={presetPromo ?? undefined}
 			onFetchPlans={async () => {
-				const c = cm.getClient();
-				if (!c) throw new Error('Not connected');
-				return c.billing.getProductPrices(checkoutApp.id);
+				return needClient().billing.getProductPrices(checkoutApp.id) as Promise<CheckoutPlan[]>;
 			}}
 			onCreateCheckout={async (priceId: string, promotionCode?: string) => {
-				const c = cm.getClient();
-				if (!c) throw new Error('Not connected');
-				return c.billing.createCheckoutSession(orgId, checkoutApp.id, priceId, promotionCode);
+				return needClient().billing.createCheckoutSession(orgId, checkoutApp.id, priceId, promotionCode);
 			}}
 			onValidatePromoCode={async (code: string, priceId?: string) => {
-				const c = cm.getClient();
-				if (!c) throw new Error('Not connected');
-				return c.billing.validatePromoCode(orgId, code, priceId);
+				return needClient().billing.validatePromoCode(orgId, code, priceId) as Promise<PromoValidation>;
 			}}
 			onRedeemPromoCode={async (code: string) => {
-				const c = cm.getClient();
-				if (!c) throw new Error('Not connected');
-				return c.billing.redeemPromoCode(orgId, code);
+				return needClient().billing.redeemPromoCode(orgId, code) as Promise<never>;
 			}}
 			onConfirmPending={async (subscriptionId: string, priceId: string) => {
-				const c = cm.getClient();
-				if (!c) return;
-				await (c as any).dapRequest('rrext_account_billing', {
-					subcommand: 'confirm_pending',
-					appId: checkoutApp.id,
-					subscriptionId,
-					priceId,
-				});
+				// No SDK method exists for confirm_pending (the old direct-client
+				// path called a phantom `dapRequest`); wrap the public call()
+				// exactly as BillingApi wraps its other verbs.
+				await needClient().call('rrext_account_billing', { subcommand: 'confirm_pending', appId: checkoutApp.id, subscriptionId, priceId });
 			}}
 			onSuccess={() => {
 				// New purchase complete: drop the user into the app they just bought

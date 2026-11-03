@@ -30,10 +30,9 @@
 // silently (the frozen-preview bug).
 import 'react/jsx-dev-runtime';
 
-import React from 'react';
 import type { AppDescriptor } from 'shell';
-import { RocketRideMark } from 'shell';
-import SqlApp from './SqlApp';
+import SqlApp, { SqlDevTool } from './SqlApp';
+import { SqlDevToolSidebar } from './SqlSidebar';
 
 /**
  * SQL Explorer app descriptor. The client area hosts the connection landing
@@ -46,14 +45,19 @@ const SQL_APP: AppDescriptor = {
 	name: 'SQL Explorer',
 	branding: {
 		appName: 'SQL Explorer',
-		// style fills the shell's sized icon wrapper (the shared mark defaults to a
-		// fixed 24px; width/height:100% preserves the fill-to-slot behaviour).
-		iconDark: React.createElement(RocketRideMark, { bodyColor: '#E0DDF0', style: { width: '100%', height: '100%' } }),
-		iconLight: React.createElement(RocketRideMark, { bodyColor: '#1E1A34', style: { width: '100%', height: '100%' } }),
+		// NO iconDark/iconLight here: branding icons OUTRANK the manifest icon
+		// by contract, and the RocketRideMark entries this block used to carry
+		// (wordmark-header era) masked the app's real icon on the rail and
+		// panel header. Absent, the shell falls through to the manifest icon.
 	},
 	// Two-column app: SqlApp's root AppLayout declares the navigation/schema
 	// sidebar and the status bar.
 	app: SqlApp,
+	// Dev-tool mounts: the workbench in the host's main area, the
+	// connections/schema sidebar in the host's sidebar — actions and state
+	// sync over the peer channel (sqlBridge).
+	devToolFrame: SqlDevTool,
+	devToolSidebar: SqlDevToolSidebar,
 };
 
 export default SQL_APP;

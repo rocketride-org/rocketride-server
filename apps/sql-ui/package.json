@@ -7,16 +7,18 @@
 	"appManifest": {
 		"id": "rocketride.sql",
 		"projectId": "5badc60c-1b62-4c00-83ef-081f0c96d02a",
-		"publisher": "Aparavi Software AG",
+		"publisher": "RocketRide",
 		"name": "SQL Explorer",
 		"description": "Browse, query, design, and diagram SQL databases through pipeline database nodes",
 		"icon": "./src/icon.svg",
 		"categories": [
-			"tools"
+			"tools",
+			"devTool"
 		],
 		"mode": "free",
 		"authenticated": true,
-		"showStatusBar": true
+		"showStatusBar": true,
+		"readme": "./README.md"
 	},
 	"scripts": {
 		"build": "rsbuild build",
@@ -32,8 +34,6 @@
 		"safari >= 13"
 	],
 	"dependencies": {
-		"@module-federation/rsbuild-plugin": "^2.5.1",
-		"@monaco-editor/react": "^4.7.0",
 		"@xyflow/react": "~12.3.4",
 		"elkjs": "~0.9.3",
 		"monaco-editor": "^0.55.1",
@@ -43,7 +43,8 @@
 		"shell": "file:../../.rocketride/shell/shell.tgz"
 	},
 	"devDependencies": {
-		"@rsbuild/core": "~2.0.11",
+		"@module-federation/rsbuild-plugin": "^2.5.1",
+		"@rsbuild/core": "~2.2.12",
 		"@rsbuild/plugin-react": "~2.0.1",
 		"typescript": "^5.3.0",
 		"@types/react": "~18.3.31",

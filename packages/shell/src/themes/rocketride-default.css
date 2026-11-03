@@ -66,6 +66,30 @@
 	--rr-bg-surface: #ffffff;
 
 	/* ================================================================== */
+	/* Document tabs (DocTabs editor-group strips)                         */
+	/* ================================================================== */
+
+	/** Tab strip background — the shaded band the tabs sit on. */
+	--rr-doctabs-bg: #f3f3f3;
+
+	/** Active tab fill — matches the content background so the active tab
+	    reads as part of the editor below it. */
+	--rr-doctabs-tab-active-bg: #ffffff;
+
+	/** Inactive tab hover overlay — neutral, never the active fill
+	    (inactive tabs otherwise carry no fill; the strip shows through). */
+	--rr-doctabs-tab-hover-bg: rgba(0, 0, 0, 0.04);
+
+	/** Active tab label colour. */
+	--rr-doctabs-fg-active: #1a1a1a;
+
+	/** Inactive tab label colour. */
+	--rr-doctabs-fg-inactive: #666666;
+
+	/** 1px separator between tabs. */
+	--rr-doctabs-border: #dcdcdc;
+
+	/* ================================================================== */
 	/* Title bar                                                           */
 	/* ================================================================== */
 
@@ -210,6 +234,23 @@
 
 	/** Input field background. */
 	--rr-bg-input: #ffffff;
+
+	/* ================================================================== */
+	/* Workbench activity rail                                             */
+	/* ================================================================== */
+
+	/** Activity rail background — inverted like VS Code's activity bar,
+	    dark in every theme (dark themes supply their own shade). */
+	--rr-bg-rail: #2c2c2c;
+
+	/** Rail icon-button hover background. */
+	--rr-bg-rail-hover: rgba(255, 255, 255, 0.12);
+
+	/** Rail icon colour — inactive views. */
+	--rr-fg-rail: rgba(255, 255, 255, 0.6);
+
+	/** Rail icon colour — the active view. */
+	--rr-fg-rail-active: #ffffff;
 
 	/* ================================================================== */
 	/* Lists                                                               */

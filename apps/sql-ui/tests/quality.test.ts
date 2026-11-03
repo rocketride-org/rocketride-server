@@ -26,7 +26,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { ISqlSchemaResponse } from '../src/connect';
+import type { SqlSchemaResponse } from '../src/connect';
 import { RULE_LABELS, normaliseType, runSchemaChecks } from '../src/schema/quality';
 
 // =============================================================================
@@ -64,7 +64,7 @@ describe('runSchemaChecks', () => {
 	});
 
 	it('R1 warns for a table with no primary key', () => {
-		const schema: ISqlSchemaResponse = {
+		const schema: SqlSchemaResponse = {
 			tables: {
 				audit_log: { columns: [{ column: 'id', type: 'BIGINT' }] },
 				customers: { columns: [{ column: 'id', type: 'BIGINT' }], primary_key: ['id'] },
@@ -78,7 +78,7 @@ describe('runSchemaChecks', () => {
 	});
 
 	it('R1 drops to information on ClickHouse, which reflects no primary key', () => {
-		const schema: ISqlSchemaResponse = {
+		const schema: SqlSchemaResponse = {
 			tables: {
 				events: { columns: [{ column: 'ts', type: 'DateTime' }] },
 				hits: { columns: [{ column: 'ts', type: 'DateTime' }] },

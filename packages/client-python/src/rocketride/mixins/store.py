@@ -28,7 +28,6 @@ Convenience wrappers (fs_read_string, fs_write_json, etc.) handle
 open/close internally.
 """
 
-import json
 from typing import Dict, Any, List, Optional
 from ..core import DAPClient
 
@@ -334,13 +333,26 @@ class StoreMixin(DAPClient):
             raise
 
     async def fs_read_json(self, path: str) -> Any:
-        """Read a JSON file. Returns the parsed object."""
-        text = await self.fs_read_string(path)
-        return json.loads(text)
+        """Read a JSON file in ONE round trip. Returns the parsed object."""
+        self._validate_store_path(path)
+        body = await self.call('rrext_store', subcommand='fs_get_json', path=path)
+        return body.get('value')
 
     async def fs_write_json(self, path: str, obj: Any) -> None:
-        """Write an object as JSON."""
-        await self.fs_write_string(path, json.dumps(obj, indent=2))
+        """
+        Write an object as JSON in ONE round trip.
+
+        The handle sequence this used to run (fs_open, fs_write, fs_close)
+        leaves a write handle open between messages, and the server commits
+        that handle when the connection drops — a client that dies after
+        fs_open replaces the file with an empty buffer. A single request has
+        no such window: one that never arrives leaves the file untouched.
+
+        The whole value travels in that message, so this is for complete
+        documents (it always was). Large payloads belong on the handle API.
+        """
+        self._validate_store_path(path)
+        await self.call('rrext_store', subcommand='fs_put_json', path=path, value=obj)
 
     # =========================================================================
     # Domain Convenience - Projects

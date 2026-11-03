@@ -32,7 +32,7 @@
 
 import type { RocketRideClient } from './client.js';
 import type { ConnectResult } from './types/client.js';
-import type { OrgDetail, ApiKeyRecord, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, CreateKeyParams, InviteMemberParams, TeamMemberParams } from './types/account.js';
+import type { OrgDetail, DeleteOrgPrecheck, ApiKeyRecord, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, CreateKeyParams, InviteMemberParams, TeamMemberParams } from './types/account.js';
 
 // =============================================================================
 // ACCOUNT API CLASS
@@ -125,11 +125,25 @@ export class AccountApi {
 	}
 
 	/**
+	 * Creates a new organization (workspace); the caller becomes its admin.
+	 *
+	 * On success the server switches the caller's default org to the new one
+	 * and pushes `apaext_org_changed` — clients rescope through their normal
+	 * org-switch path.
+	 *
+	 * @param name - The new organization's name (non-empty; normal org-name rules).
+	 */
+	async createOrg(name: string): Promise<void> {
+		await this.client.call('rrext_account_org', { subcommand: 'create', name });
+	}
+
+	/**
 	 * Removes the current user from an organization.
 	 *
-	 * The server refuses to let the organization's last admin leave. Leaving
-	 * the user's ACTIVE organization switches them to another membership and
-	 * pushes a refreshed identity to all of the user's connections; leaving a
+	 * The server refuses — with a user-presentable message — to let the
+	 * organization's last admin leave. Leaving the user's ACTIVE organization
+	 * switches them to another membership and pushes a refreshed identity
+	 * (`apaext_org_changed`) to all of the user's connections; leaving a
 	 * non-active organization pushes nothing, so callers that show
 	 * memberships should re-read the profile afterwards.
 	 *
@@ -137,6 +151,32 @@ export class AccountApi {
 	 */
 	async leaveOrg(orgId: string): Promise<void> {
 		await this.client.call('rrext_account_org', { subcommand: 'leave', orgId });
+	}
+
+	/**
+	 * Dry-run of {@link deleteOrg}: what WOULD deletion involve. Lets the
+	 * confirm dialog name the member count and the billing blocker before
+	 * anything is destroyed.
+	 *
+	 * @param orgId - Organisation UUID.
+	 * @returns The org's member count and whether a subscription is active.
+	 */
+	async deleteOrgPrecheck(orgId: string): Promise<DeleteOrgPrecheck> {
+		return this.client.call<DeleteOrgPrecheck>('rrext_account_org', { subcommand: 'delete', orgId, confirm: false });
+	}
+
+	/**
+	 * Permanently deletes an organization and ALL of its data (pipelines,
+	 * deployments, apps, environment variables, API keys) for every member.
+	 * Admin-gated; the server rejects on the caller's last workspace or an
+	 * active subscription. Deleting the CURRENT org re-points the default and
+	 * pushes `apaext_org_changed` (other members are re-pointed on their next
+	 * touch).
+	 *
+	 * @param orgId - Organisation UUID to delete.
+	 */
+	async deleteOrg(orgId: string): Promise<void> {
+		await this.client.call('rrext_account_org', { subcommand: 'delete', orgId, confirm: true });
 	}
 
 	// =========================================================================

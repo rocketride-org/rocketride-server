@@ -50,7 +50,7 @@ export type SqlDialect = 'mysql' | 'postgres' | 'clickhouse' | 'neo4j' | 'unknow
  * One reachable database tool node inside a running pipeline task — the unit
  * a "connection" binds to. Purely descriptive: holds no token or client state.
  */
-export interface ISqlEndpoint {
+export interface SqlEndpoint {
 	/** Stable identity for lists/maps: `${projectId}:${source}:${nodeId}`. */
 	key: string;
 	/** Project (pipeline) identifier the task was started from. */
@@ -74,7 +74,7 @@ export interface ISqlEndpoint {
 // =============================================================================
 
 /** Result of executing a raw SQL statement on a database node. */
-export interface ISqlExecuteResult {
+export interface SqlExecuteResult {
 	/** Result rows (empty for non-SELECT statements). */
 	rows: Record<string, unknown>[];
 	/** Rows affected by INSERT/UPDATE/DELETE (0 for SELECT). */
@@ -86,7 +86,7 @@ export interface ISqlExecuteResult {
  * `get_schema` wire format (db_instance_base.get_schema): name + SQL type
  * only — nullability/defaults arrive later via INFORMATION_SCHEMA queries.
  */
-export interface ISqlSchemaColumn {
+export interface SqlSchemaColumn {
 	/** Column name. */
 	column: string;
 	/** Engine-reported datatype string (e.g. 'VARCHAR(255)', 'BIGINT'). */
@@ -94,7 +94,7 @@ export interface ISqlSchemaColumn {
 }
 
 /** One foreign key in a reflected table schema (get_schema wire format). */
-export interface ISqlSchemaForeignKey {
+export interface SqlSchemaForeignKey {
 	/** Constrained (local) column names. */
 	columns: string[];
 	/** Referenced table name. */
@@ -104,27 +104,27 @@ export interface ISqlSchemaForeignKey {
 }
 
 /** Reflected schema for one table (get_schema wire format). */
-export interface ISqlSchemaTable {
+export interface SqlSchemaTable {
 	/** Columns in engine order. */
-	columns: ISqlSchemaColumn[];
+	columns: SqlSchemaColumn[];
 	/** Primary key column names (present only when the table has one). */
 	primary_key?: string[];
 	/** Foreign keys declared on this table (present only when any exist). */
-	foreign_keys?: ISqlSchemaForeignKey[];
+	foreign_keys?: SqlSchemaForeignKey[];
 }
 
 /** Response of the node's `get_schema` / `refresh_schema` tools. */
-export interface ISqlSchemaResponse {
+export interface SqlSchemaResponse {
 	/** Database name the node is attached to. */
 	database?: string;
 	/** Reflected tables keyed by table name. */
-	tables?: Record<string, ISqlSchemaTable>;
+	tables?: Record<string, SqlSchemaTable>;
 	/** Error message when reflection failed. */
 	error?: string;
 	/**
 	 * True when this response was served from the node's TASK-START snapshot
 	 * and may therefore not reflect DDL run since. Set by
-	 * {@link ISqlSession.refreshSchema} when the node has no `refresh_schema`
+	 * {@link SqlSession.refreshSchema} when the node has no `refresh_schema`
 	 * tool and the call fell back to `get_schema`; `get_schema` itself always
 	 * serves that snapshot and never sets the flag.
 	 */
@@ -139,9 +139,9 @@ export interface ISqlSchemaResponse {
  * A live, bound conversation with one database endpoint. The ONLY surface the
  * rest of the app uses to talk to a database — obtained via createSqlSession.
  */
-export interface ISqlSession {
+export interface SqlSession {
 	/** The endpoint this session is bound to. */
-	readonly endpoint: ISqlEndpoint;
+	readonly endpoint: SqlEndpoint;
 	/**
 	 * Execute a raw SQL statement (requires `allow_execute` on the node).
 	 *
@@ -163,7 +163,7 @@ export interface ISqlSession {
 	 *                          Only for statements that are safe to re-run.
 	 * @returns Rows and affected-row count.
 	 */
-	execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean }): Promise<ISqlExecuteResult>;
+	execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean }): Promise<SqlExecuteResult>;
 	/**
 	 * Reflect the schema of the attached database (or a single table).
 	 *
@@ -174,7 +174,7 @@ export interface ISqlSession {
 	 * @param table - Optional table name to reflect just one table.
 	 * @returns The reflected schema.
 	 */
-	getSchema(table?: string): Promise<ISqlSchemaResponse>;
+	getSchema(table?: string): Promise<SqlSchemaResponse>;
 	/**
 	 * Re-reflect the attached database and return the fresh schema.
 	 *
@@ -182,14 +182,14 @@ export interface ISqlSession {
 	 * gives no reliable way to tell "this node has no such tool" apart from
 	 * any other failure, and matching on error text would break the moment
 	 * the wording changed. The response then carries
-	 * {@link ISqlSchemaResponse.stale} so callers can tell the user the
+	 * {@link SqlSchemaResponse.stale} so callers can tell the user the
 	 * schema may be out of date rather than showing a post-DDL snapshot as
 	 * if it were current.
 	 *
 	 * @returns The reflected schema, flagged `stale` when it came from the
 	 *          fallback.
 	 */
-	refreshSchema(): Promise<ISqlSchemaResponse>;
+	refreshSchema(): Promise<SqlSchemaResponse>;
 	/**
 	 * Report the engine dialect of the attached database.
 	 *
@@ -203,7 +203,7 @@ export interface ISqlSession {
 // =============================================================================
 
 /** Result of probing an endpoint before binding a session to it. */
-export interface ISqlProbeResult {
+export interface SqlProbeResult {
 	/** Whether the endpoint answered both probe calls. */
 	ok: boolean;
 	/** Reported dialect ('unknown' when the probe failed). */

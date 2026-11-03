@@ -17,6 +17,9 @@
 		"paths": {
 			"shared/*": [
 				"../shared/src/*"
+			],
+			"shell/src/*": [
+				"../../packages/shell/src/*"
 			]
 		}
 	},
@@ -26,8 +29,6 @@
 	"exclude": [
 		"src/**/*.tsx",
 		"src/providers/views/**",
-		"src/providers/components/**",
-		"src/shared/util/mount.ts",
-		"src/shared/util/useMessaging.ts"
+		"src/shared/util/mount.ts"
 	]
 }

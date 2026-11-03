@@ -7,12 +7,14 @@
 	"appManifest": {
 		"id": "rocketride.monitor",
 		"projectId": "5c1b4921-0d93-4c82-8023-3f94cb85a008",
-		"publisher": "Aparavi Software AG",
+		"publisher": "RocketRide",
 		"name": "Server Monitor",
 		"description": "Real-time server dashboard showing connections, tasks, and activity",
 		"icon": "./src/icon.svg",
+		"readme": "./README.md",
 		"categories": [
-			"tools"
+			"tools",
+			"devTool"
 		],
 		"mode": "free",
 		"authenticated": true,
@@ -31,14 +33,14 @@
 		"safari >= 13"
 	],
 	"dependencies": {
-		"@module-federation/rsbuild-plugin": "^2.5.1",
 		"react": "^18.2.0",
 		"react-dom": "^18.2.0",
 		"rocketride": "file:../../.rocketride/client/rocketride.tgz",
 		"shell": "file:../../.rocketride/shell/shell.tgz"
 	},
 	"devDependencies": {
-		"@rsbuild/core": "~2.0.11",
+		"@module-federation/rsbuild-plugin": "^2.5.1",
+		"@rsbuild/core": "~2.2.12",
 		"@rsbuild/plugin-react": "~2.0.1",
 		"typescript": "^5.3.0",
 		"@types/react": "~18.3.31",

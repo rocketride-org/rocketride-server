@@ -49,7 +49,7 @@ import type { SqlDialect } from '../connect';
 // =============================================================================
 
 /** One `key: value` detail line of a plan node. */
-export interface IPlanField {
+export interface PlanField {
 	/** The planner's own field name, verbatim. */
 	key: string;
 	/** The value rendered as text. */
@@ -62,25 +62,25 @@ export interface IPlanField {
 }
 
 /** One node of a normalised plan tree. */
-export interface IPlanNode {
+export interface PlanNode {
 	/** Row label, e.g. `Nested Loop` or `table: orders`. */
 	label: string;
 	/** The node's own scalar fields, in planner order. */
-	fields: IPlanField[];
+	fields: PlanField[];
 	/** Child nodes (empty for leaves). */
-	children: IPlanNode[];
+	children: PlanNode[];
 }
 
 /** A successfully interpreted plan. */
-export interface IPlanParseOk {
+export interface PlanParseOk {
 	/** Discriminant. */
 	ok: true;
 	/** The plan's root node. */
-	root: IPlanNode;
+	root: PlanNode;
 }
 
 /** An uninterpretable plan — the caller shows the raw output instead. */
-export interface IPlanParseMiss {
+export interface PlanParseMiss {
 	/** Discriminant. */
 	ok: false;
 	/** Why interpretation failed (shown to no one; useful in tests/logs). */
@@ -88,7 +88,7 @@ export interface IPlanParseMiss {
 }
 
 /** Result of {@link parseExplain}. */
-export type PlanParseResult = IPlanParseOk | IPlanParseMiss;
+export type PlanParseResult = PlanParseOk | PlanParseMiss;
 
 // =============================================================================
 // STATEMENT BUILDING
@@ -132,7 +132,7 @@ const NUMERIC_TEXT = /^-?\d+(\.\d+)?([eE][-+]?\d+)?$/;
  * @param value - The raw value from the plan document.
  * @returns The normalised field.
  */
-function toField(key: string, value: unknown): IPlanField {
+function toField(key: string, value: unknown): PlanField {
 	if (typeof value === 'number') {
 		return { key, value: String(value), numeric: Number.isFinite(value) };
 	}
@@ -154,8 +154,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
  * @param skip - Keys handled by the caller (already consumed as label/children).
  * @returns The scalar fields and the child entries, both in document order.
  */
-function splitNode(obj: Record<string, unknown>, skip: string[]): { fields: IPlanField[]; children: [string, unknown][] } {
-	const fields: IPlanField[] = [];
+function splitNode(obj: Record<string, unknown>, skip: string[]): { fields: PlanField[]; children: [string, unknown][] } {
+	const fields: PlanField[] = [];
 	const children: [string, unknown][] = [];
 	for (const [key, value] of Object.entries(obj)) {
 		if (skip.includes(key)) continue;
@@ -192,12 +192,12 @@ function splitNode(obj: Record<string, unknown>, skip: string[]): { fields: IPla
  * @param value - The plan object to walk.
  * @returns The node, or null when the value is not an object.
  */
-function mysqlNode(label: string, value: unknown): IPlanNode | null {
+function mysqlNode(label: string, value: unknown): PlanNode | null {
 	if (!isPlainObject(value)) return null;
 	const tableName = typeof value.table_name === 'string' ? value.table_name : null;
 	const nodeLabel = label === 'table' && tableName ? `table: ${tableName}` : label;
 	const { fields, children } = splitNode(value, tableName && label === 'table' ? ['table_name'] : []);
-	const childNodes: IPlanNode[] = [];
+	const childNodes: PlanNode[] = [];
 	for (const [key, child] of children) {
 		if (Array.isArray(child)) {
 			// nested_loop: [{ table: {...} }, { table: {...} }] — each element is
@@ -258,7 +258,7 @@ function parseMysql(rows: Record<string, unknown>[]): PlanParseResult {
  * @param value - The plan object.
  * @returns The node, or null when the value is not a plan object.
  */
-function postgresNode(value: unknown): IPlanNode | null {
+function postgresNode(value: unknown): PlanNode | null {
 	if (!isPlainObject(value)) return null;
 	const nodeType = typeof value['Node Type'] === 'string' ? value['Node Type'] as string : null;
 	if (!nodeType) return null;
@@ -266,7 +266,7 @@ function postgresNode(value: unknown): IPlanNode | null {
 	const label = relation ? `${nodeType} on ${relation}` : nodeType;
 	const { fields } = splitNode(value, ['Node Type', 'Plans']);
 	const rawChildren = value.Plans;
-	const children: IPlanNode[] = [];
+	const children: PlanNode[] = [];
 	if (Array.isArray(rawChildren)) {
 		rawChildren.forEach((child) => {
 			const node = postgresNode(child);
@@ -332,10 +332,10 @@ function parseClickhouse(rows: Record<string, unknown>[]): PlanParseResult {
 
 	// The shallowest line is the root; deeper lines attach to the nearest
 	// preceding line with a smaller indent.
-	const root: IPlanNode = { label: lines[0].text, fields: [], children: [] };
-	const stack: { indent: number; node: IPlanNode }[] = [{ indent: lines[0].indent, node: root }];
+	const root: PlanNode = { label: lines[0].text, fields: [], children: [] };
+	const stack: { indent: number; node: PlanNode }[] = [{ indent: lines[0].indent, node: root }];
 	for (const line of lines.slice(1)) {
-		const node: IPlanNode = { label: line.text, fields: [], children: [] };
+		const node: PlanNode = { label: line.text, fields: [], children: [] };
 		while (stack.length > 1 && line.indent <= stack[stack.length - 1].indent) stack.pop();
 		// A sibling of the root (same indent, no deeper parent) still needs a
 		// home: it becomes a child of the root rather than a lost node.
@@ -376,7 +376,7 @@ export function parseExplain(dialect: SqlDialect, rows: Record<string, unknown>[
  * @param node - The root node.
  * @returns The total node count including the root.
  */
-export function countPlanNodes(node: IPlanNode): number {
+export function countPlanNodes(node: PlanNode): number {
 	return 1 + node.children.reduce((sum, child) => sum + countPlanNodes(child), 0);
 }
 
@@ -416,7 +416,7 @@ export function formatRawPlan(rows: Record<string, unknown>[]): string {
 // =============================================================================
 
 /** One rule-detected observation about a plan node. */
-export interface IPlanNote {
+export interface PlanNote {
 	/** The planner field the rule read, verbatim — the note's whole evidence. */
 	evidence: string;
 	/** What that field conventionally means, in plain words. */
@@ -430,7 +430,7 @@ export interface IPlanNote {
  * @param key - The field key.
  * @returns The value, or null when the node has no such field.
  */
-function field(node: IPlanNode, key: string): string | null {
+function field(node: PlanNode, key: string): string | null {
 	return node.fields.find((f) => f.key === key)?.value ?? null;
 }
 
@@ -445,8 +445,8 @@ function field(node: IPlanNode, key: string): string | null {
  * @param node - The plan node to inspect.
  * @returns The notes, in rule order (possibly empty).
  */
-export function planNotes(node: IPlanNode): IPlanNote[] {
-	const notes: IPlanNote[] = [];
+export function planNotes(node: PlanNode): PlanNote[] {
+	const notes: PlanNote[] = [];
 
 	// ── MySQL: access_type = ALL is the documented full-scan marker ──────────
 	if (field(node, 'access_type') === 'ALL') {

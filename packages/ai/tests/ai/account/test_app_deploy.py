@@ -46,7 +46,7 @@ from types import SimpleNamespace
 import pytest
 
 from ai.account import account as account_singleton
-from ai.account import dev_overlay
+from ai.account import manifest_push
 from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
     _serving_block_of,
@@ -363,7 +363,7 @@ def quiet_push(monkeypatch):
     async def push_refresh(server, user_id, source):
         calls.append({'user_id': user_id, 'source': source})
 
-    monkeypatch.setattr(dev_overlay, 'push_refresh', push_refresh)
+    monkeypatch.setattr(manifest_push, 'push_refresh', push_refresh)
     return calls
 
 

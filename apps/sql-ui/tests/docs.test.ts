@@ -33,7 +33,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-	CONNECTIONS_URI,
 	connectionUri,
 	designUri,
 	diagramUri,
@@ -105,7 +104,7 @@ describe('scheme predicates', () => {
 		assert.equal(isQueryUri(connectionUri(KEY)), false);
 		assert.equal(isTableDataUri(designUri(KEY, 'orders')), false);
 		assert.equal(isDesignUri(tableDataUri(KEY, 'orders')), false);
-		assert.equal(isDiagramUri(CONNECTIONS_URI), false);
+		assert.equal(isDiagramUri('not-a-document'), false);
 	});
 });
 
@@ -117,7 +116,7 @@ describe('endpointKeyFromUri', () => {
 	it('returns the key of a connection document and null for anything else', () => {
 		assert.equal(endpointKeyFromUri(connectionUri(KEY)), KEY);
 		assert.equal(endpointKeyFromUri(diagramUri(KEY)), null);
-		assert.equal(endpointKeyFromUri(CONNECTIONS_URI), null);
+		assert.equal(endpointKeyFromUri('not-a-document'), null);
 	});
 });
 
@@ -143,8 +142,8 @@ describe('endpointKeyFromAnyUri', () => {
 		assert.equal(endpointKeyFromAnyUri(tableDataUri(KEY, 'a b/c?d#e')), KEY);
 	});
 
-	it('returns null for the landing document and unknown schemes', () => {
-		assert.equal(endpointKeyFromAnyUri(CONNECTIONS_URI), null);
+	it('returns null for schemeless and unknown-scheme URIs', () => {
+		assert.equal(endpointKeyFromAnyUri('not-a-document'), null);
 		assert.equal(endpointKeyFromAnyUri('settings:foo'), null);
 		assert.equal(endpointKeyFromAnyUri(''), null);
 	});

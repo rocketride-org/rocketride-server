@@ -30,7 +30,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { ISqlSchemaResponse } from '../src/connect';
+import type { SqlSchemaResponse } from '../src/connect';
 import type { AlterOp } from '../src/sql/ddl';
 import { changedColumns, inboundImpact } from '../src/views/TableDesignView';
 
@@ -39,7 +39,7 @@ import { changedColumns, inboundImpact } from '../src/views/TableDesignView';
 // =============================================================================
 
 /** A shop schema: orders and invoices both reference customers.id. */
-const SCHEMA: ISqlSchemaResponse = {
+const SCHEMA: SqlSchemaResponse = {
 	database: 'shop',
 	tables: {
 		customers: {
