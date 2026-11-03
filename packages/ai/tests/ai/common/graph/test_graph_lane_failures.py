@@ -38,6 +38,7 @@ import types
 import pytest
 
 import ai.common.graph.graph_instance_base as graph_module
+from ai.common.graph.graph_global_base import GraphUnavailableError
 from ai.common.graph.graph_instance_base import GraphInstanceBase, GraphLaneError
 
 # The lane compares against these members; a stand-in keeps the test independent of which
@@ -177,3 +178,67 @@ def test_a_disabled_execute_lane_is_still_a_warning_not_a_failure(monkeypatch):
     inst.writeQuestions(_question(QuestionType.EXECUTE, 'CREATE (:Lease)'))
 
     assert warned and inst.instance.text == []
+
+
+# ---------------------------------------------------------------------------
+# The EXPLAIN step: an unreachable database is not a rejected query
+# ---------------------------------------------------------------------------
+
+
+class _ValidatingGlobal(_Global):
+    """A global whose EXPLAIN step either reports the outage or rejects the query."""
+
+    max_validation_attempts = 5
+    read_row_cap = 1000
+
+    def __init__(self, *, outage):
+        super().__init__(fail=False)
+        self._outage = outage
+        self.db_description = ''
+        self.graph_schema = {}
+
+    def _validate_query(self, query):
+        if self._outage:
+            raise GraphUnavailableError('Graph database is unavailable (details are in the engine log)')
+        return False, 'Syntax error at MATCH'
+
+
+def _validating(*, outage, lanes=('text', 'answers')):
+    inst = _make(fail=False, lanes=lanes)
+    inst.IGlobal = _ValidatingGlobal(outage=outage)
+    del inst._buildQuery  # use the real repair loop, so the real _validate_query is consulted
+    inst.llm_calls = 0
+
+    def once(question_text, *, limit, previous_query, error_message):
+        inst.llm_calls += 1
+        return {'isValid': True, 'query': 'MATCH (n) RETURN n LIMIT 1'}
+
+    inst._buildQueryOnce = once
+    return inst
+
+
+def test_an_unreachable_database_during_explain_fails_the_question_lane_without_asking_the_llm_again():
+    inst = _validating(outage=True)
+
+    with pytest.raises(GraphUnavailableError):
+        inst.writeQuestions(_question())
+
+    assert inst.llm_calls == 1  # no repair loop: the outage is not the query's fault
+    assert inst.instance.text == [] and inst.instance.answers == []
+
+
+def test_an_unreachable_database_during_explain_is_an_explicit_result_for_the_tools():
+    inst = _validating(outage=True)
+
+    for result in (inst.get_query({'question': 'who?'}), inst.get_data({'question': 'who?'})):
+        assert result['valid'] is False and 'unavailable' in result['error']
+
+
+def test_a_genuine_validation_rejection_keeps_its_behaviour():
+    inst = _validating(outage=False)
+
+    inst.writeQuestions(_question())  # does not raise
+
+    assert inst.llm_calls == 5  # the repair loop ran to exhaustion
+    assert 'Syntax error' in inst.instance.text[0]
+    assert 'Syntax error' in inst.instance.answers[0].getJson()['error']

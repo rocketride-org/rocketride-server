@@ -64,6 +64,14 @@ class _StubAuthError(_StubNeo4jError):
     pass
 
 
+class _StubSessionExpired(Exception):
+    pass
+
+
+class _StubTransientError(_StubNeo4jError):
+    pass
+
+
 class _StubBase:
     """Stand-in for IInstanceBase / IGlobalBase — the engine supplies the real one."""
 
@@ -136,6 +144,8 @@ def _install_stubs() -> None:
     neo4j_exceptions.Neo4jError = _StubNeo4jError
     neo4j_exceptions.ServiceUnavailable = _StubServiceUnavailable
     neo4j_exceptions.AuthError = _StubAuthError
+    neo4j_exceptions.SessionExpired = _StubSessionExpired
+    neo4j_exceptions.TransientError = _StubTransientError
     neo4j.exceptions = neo4j_exceptions
 
     sys.modules.update(
@@ -459,6 +469,31 @@ def test_execute_raw_keeps_other_statements_in_a_transaction(query):
 # ---------------------------------------------------------------------------
 # _validate_query: EXPLAIN
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'exc',
+    [
+        _StubServiceUnavailable('no route'),
+        _StubSessionExpired('session expired'),
+        _StubAuthError('unauthorized'),
+        _StubTransientError('database unavailable'),
+        ConnectionResetError('reset'),
+    ],
+)
+def test_validate_query_raises_when_the_server_cannot_be_reached(exc):
+    glb = _FakeGlobal(_FakeDriver(raise_error=exc))
+
+    with pytest.raises(graph_base.GraphUnavailableError):
+        glb._validate_query('MATCH (n) RETURN n')
+
+
+def test_validate_query_still_reports_a_server_rejection_as_a_message():
+    ok, message = _FakeGlobal(_FakeDriver(raise_error=_StubNeo4jError('Invalid input')))._validate_query(
+        'MATCH (n RETURN n'
+    )
+
+    assert ok is False and 'Invalid input' in message
 
 
 def test_validate_query_runs_explain():

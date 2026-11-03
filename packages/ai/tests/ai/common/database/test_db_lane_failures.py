@@ -42,11 +42,14 @@ from __future__ import annotations
 import sqlite3
 import threading
 
+from sqlalchemy.exc import OperationalError
+
 import pytest
 from sqlalchemy import create_engine
 
+import ai.common.database.db_global_base as db_global_base_module
 import ai.common.database.db_instance_base as db_instance_module
-from ai.common.database.db_global_base import DatabaseGlobalBase
+from ai.common.database.db_global_base import DatabaseGlobalBase, DatabaseUnavailableError, is_connection_failure
 from ai.common.database.db_instance_base import DatabaseInstanceBase, DatabaseLaneError
 
 _DRIVER_SENTENCE = 'connection to server at "10.0.0.7", port 5432 failed: Connection refused'
@@ -153,6 +156,7 @@ def logged(monkeypatch):
         entries.append(args)
 
     monkeypatch.setattr(db_instance_module, 'error', record)
+    monkeypatch.setattr(db_global_base_module, 'error', record)
     return entries
 
 
@@ -255,3 +259,196 @@ def test_a_non_database_answer_is_still_passed_through_without_touching_the_data
     inst.writeQuestions(_question('When did Rome fall?'))
 
     assert inst.instance.text == ['Rome fell in 410.']
+
+
+# ---------------------------------------------------------------------------
+# The EXPLAIN step: an unreachable database is not a rejected query
+# ---------------------------------------------------------------------------
+
+
+class _LlmCounter:
+    """Stands in for the LLM call so a test can see how often the repair loop asked it."""
+
+    def __init__(self, query='SELECT * FROM leases'):
+        self.calls = 0
+        self.query = query
+
+    def __call__(self, question_text, *, limit, previous_sql, error):
+        self.calls += 1
+        return {'isValid': True, 'query': self.query}
+
+
+def _with_llm(inst, llm):
+    """Use the real ``_buildSQLQuery`` (so the real ``_validateQuery`` runs) over a counted LLM stand-in."""
+    del inst._buildSQLQuery  # the instance attribute _make installed; fall back to the class method
+    inst._buildSQLQueryOnce = llm
+    return inst
+
+
+def test_validate_query_raises_when_the_connection_is_refused():
+    inst = _make(_refusing_engine())
+
+    with pytest.raises(DatabaseUnavailableError) as raised:
+        inst.IGlobal._validateQuery('SELECT 1')
+
+    assert 'Connection refused' not in str(raised.value) and '10.0.0.7' not in str(raised.value)
+
+
+def test_a_refused_connection_during_explain_fails_the_question_lane_without_asking_the_llm_again(logged):
+    llm = _LlmCounter()
+    inst = _with_llm(_make(_refusing_engine(), ('text', 'answers')), llm)
+    inst.IGlobal.max_validation_attempts = 5
+
+    with pytest.raises(DatabaseUnavailableError):
+        inst.writeQuestions(_question())
+
+    assert llm.calls == 1  # no repair loop: the outage is not the SQL's fault
+    assert inst.instance.text == [] and inst.instance.answers == []
+    assert any(_DRIVER_SENTENCE in str(entry) for entry in logged)
+
+
+def test_a_refused_connection_during_explain_is_an_explicit_result_for_the_tools():
+    inst = _with_llm(_make(_refusing_engine()), _LlmCounter())
+
+    result = inst.get_sql({'question': 'how many?'})
+
+    assert result['valid'] is False and 'unavailable' in result['error']
+    assert inst.get_data({'question': 'how many?'})['valid'] is False
+
+
+def test_a_genuine_validation_rejection_keeps_its_behaviour():
+    """Bad SQL is still the LLM's to repair and still reported as an error on the lanes."""
+    engine = _healthy_engine()
+    llm = _LlmCounter(query='SELECT * FROM no_such_table')
+    inst = _with_llm(_make(engine, ('text', 'answers')), llm)
+    inst.IGlobal.max_validation_attempts = 2
+
+    ok, message = inst.IGlobal._validateQuery('SELECT * FROM no_such_table')
+    assert ok is False and 'no such table' in message
+
+    inst.writeQuestions(_question())  # does not raise
+
+    assert llm.calls == 2  # the repair loop ran
+    assert 'no such table' in inst.instance.text[0]
+    assert 'no such table' in inst.instance.answers[0].getJson()['error']
+
+
+def _engine_failing_execute_with(exc):
+    """A connected engine whose statement execution then fails with ``exc``."""
+    engine = _healthy_engine()
+
+    def failing(cursor, statement, parameters, context=None):
+        raise exc
+
+    engine.dialect.do_execute = failing
+    return engine
+
+
+def test_a_connection_dropped_while_explain_runs_is_unavailable():
+    """SQLAlchemy marked the connection invalid (the dialect recognised the disconnect): type-based, no message match."""
+    engine = _engine_failing_execute_with(sqlite3.ProgrammingError('Cannot operate on a closed database.'))
+    inst = _make(engine)
+
+    with pytest.raises(DatabaseUnavailableError):
+        inst.IGlobal._validateQuery('SELECT 1')
+
+
+def test_a_cannot_connect_now_sqlstate_during_explain_is_unavailable():
+    exc = sqlite3.OperationalError('the server said no')
+    exc.pgcode = '57P03'
+    inst = _make(_engine_failing_execute_with(exc))
+
+    with pytest.raises(DatabaseUnavailableError):
+        inst.IGlobal._validateQuery('SELECT 1')
+
+
+def test_an_operational_error_about_the_sql_is_still_a_rejection():
+    """PyMySQL raises OperationalError for an unknown column: the SQL's fault, so the LLM repairs it."""
+    inst = _make(_engine_failing_execute_with(sqlite3.OperationalError("Unknown column 'x' in 'field list'")))
+
+    ok, message = inst.IGlobal._validateQuery('SELECT x FROM t')
+
+    assert ok is False and 'Unknown column' in message
+
+
+class _Named:
+    """Builds an exception whose class name, but nothing else, matches a driver's."""
+
+    @staticmethod
+    def make(name, base=Exception):
+        return type(name, (base,), {})('boom')
+
+
+@pytest.mark.parametrize(
+    'exc, expected',
+    [
+        (ConnectionRefusedError('refused'), True),
+        (TimeoutError('timed out'), True),
+        (_Named.make('InterfaceError'), True),
+        (_Named.make('NetworkError'), True),
+        (_Named.make('SocketTimeoutError'), True),
+        (OperationalError('SELECT 1', {}, sqlite3.OperationalError('x')), False),
+        (ValueError('nope'), False),
+    ],
+)
+def test_is_connection_failure_by_exception_type(exc, expected):
+    assert is_connection_failure(exc) is expected
+
+
+@pytest.mark.parametrize(
+    'code, expected',
+    [
+        ('08006', True),
+        ('53300', True),
+        ('57P01', True),
+        ('57P03', True),
+        ('42601', False),
+        ('42703', False),
+        ('57014', False),
+    ],
+)
+def test_is_connection_failure_by_sqlstate(code, expected):
+    exc = sqlite3.OperationalError('driver text')
+    exc.pgcode = code
+
+    assert is_connection_failure(exc) is expected
+
+
+# ---------------------------------------------------------------------------
+# _tableExists: an outage is not "the table does not exist"
+# ---------------------------------------------------------------------------
+
+
+def test_table_exists_raises_when_the_database_cannot_be_reached():
+    inst = _make(_refusing_engine())
+
+    with pytest.raises(DatabaseUnavailableError):
+        inst.IGlobal._tableExists('answers')
+
+
+def test_table_exists_still_reports_a_missing_table_as_false_and_a_present_one_as_true():
+    engine = _healthy_engine()
+    inst = _make(engine)
+    with engine.begin() as conn:
+        conn.exec_driver_sql('CREATE TABLE present (id INTEGER PRIMARY KEY)')
+
+    assert inst.IGlobal._tableExists('present') is True
+    assert inst.IGlobal._tableExists('missing') is False
+
+
+def test_get_table_schema_raises_during_an_outage_instead_of_reporting_no_table():
+    inst = _make(_refusing_engine())
+
+    with pytest.raises(DatabaseUnavailableError):
+        inst.IGlobal._getTableSchema('answers')
+
+
+def test_an_insert_during_an_outage_reports_the_outage_not_a_failed_table_creation(logged):
+    inst = _make(_refusing_engine())
+
+    with pytest.raises(DatabaseLaneError):
+        inst.writeAnswers(_answer([{'lease': 'a'}]))
+
+    messages = ' '.join(str(entry) for entry in logged)
+    assert 'unavailable' in messages
+    assert 'could not be created' not in messages and 'Failed to create table' not in messages

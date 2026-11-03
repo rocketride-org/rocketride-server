@@ -39,7 +39,7 @@ from ai.common.schema import Answer, Question, QuestionType
 from ai.common.table import Table
 from rocketlib.types import IInvokeLLM
 
-from .IGlobal import DEFAULT_MAX_EXECUTE_ROWS, IGlobal
+from .IGlobal import DEFAULT_MAX_EXECUTE_ROWS, ArangoLaneError, ArangoUnavailableError, IGlobal
 from .utils import _parse_is_valid
 
 
@@ -208,7 +208,12 @@ class IInstance(IInstanceBase):
             raise ValueError('"question" is required and must be a non-empty string')
 
         limit = _clamp_limit(args.get('limit'))
-        result = self._buildAqlQuery(question.strip(), limit=limit)
+        try:
+            result = self._buildAqlQuery(question.strip(), limit=limit)
+        except ArangoUnavailableError as e:
+            # The tool contract is an explicit `valid: False` result; the lane
+            # handler raises instead.
+            return {'error': str(e), 'aql': '', 'valid': False}
         is_valid = _parse_is_valid(result.get('isValid', False))
         aql = result.get('query', '')
 
@@ -250,8 +255,10 @@ class IInstance(IInstanceBase):
             if not self.IGlobal.allow_execute:
                 warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
                 return
+            # The statement runs outside the emit `try` below: a failed statement
+            # must fail the step, while the emit block keeps its own handling.
+            execute_result = self._runLaneQuery(self.IGlobal._run_query_raw, question_text)
             try:
-                execute_result = self.IGlobal._run_query_raw(question_text)
                 rows = execute_result['rows']
                 affected = execute_result['affected_rows']
                 markdown = self._formatResultAsMarkdown(rows) if rows else None
@@ -279,7 +286,7 @@ class IInstance(IInstanceBase):
             executed = is_valid and bool(aql)
 
             if executed:
-                result = self.IGlobal._run_query(aql)
+                result = self._runLaneQuery(self.IGlobal._run_query, aql)
             else:
                 # Off-topic question -> the LLM's text answer; exhausted validation
                 # -> the EXPLAIN error (don't emit the rejected query as an answer).
@@ -299,8 +306,21 @@ class IInstance(IInstanceBase):
                     answer.setAnswer(str(result))
                 self.instance.writeAnswers(answer)
 
+        except (ArangoLaneError, ArangoUnavailableError):
+            # `_runLaneQuery` / `_validate_query` have logged the cause. Fail the
+            # step: emitting anything lets the pipeline carry on as if the
+            # question had been answered.
+            raise
         except Exception as e:
             error(f'Error handling question: {e}')
+
+    def _runLaneQuery(self, runner, statement: str):
+        """Run ``statement`` through ``runner`` for a lane; any failure raises ``ArangoLaneError``."""
+        try:
+            return runner(statement)
+        except Exception as e:
+            error(f'Error executing AQL: {e}')
+            raise ArangoLaneError('ArangoDB query failed (details are in the engine log)') from None
 
     # ------------------------------------------------------------------
     # AQL query building

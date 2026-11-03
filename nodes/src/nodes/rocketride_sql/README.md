@@ -36,6 +36,11 @@ object on the answers lane. The failure message is generic and the driver's own
 text (host, port, statement fragment) is only in the engine log. This holds for
 a read on the questions lane and for an insert on the answers and table lanes.
 Pipelines that used to complete while the database was down now fail instead.
+The same holds for the validation step that checks a generated query before it
+runs: a database that cannot be reached fails the step (and the LLM is not asked
+to rewrite a query that was never at fault), while a query the database rejects
+is still reported as an error on the lanes. The `get_sql` and `get_data` tools
+report an outage as an explicit `valid: false` result.
 
 ## As a tool
 

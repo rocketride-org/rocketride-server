@@ -31,7 +31,10 @@ database cannot be reached or refuses the query, the lane raises, the step and
 the task fail, and nothing is emitted. The failure message is generic and the
 driver's own text is only in the engine log. This covers a question and a raw
 statement sent on the execute path. Pipelines that used to complete while the
-database was down now fail instead.
+database was down now fail instead. The same holds for the validation step that
+checks a generated query before it runs: a database that cannot be reached fails
+the step, while a query the database rejects is still reported as an error on
+the lanes.
 
 ## As a tool
 

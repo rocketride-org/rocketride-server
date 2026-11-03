@@ -48,7 +48,7 @@ from ai.common.table import Table
 from ai.common.utils import normalize_tool_input, parse_bool, require_str
 
 from .cypher_safety import is_cypher_safe
-from .graph_global_base import DEFAULT_MAX_EXECUTE_ROWS, GraphGlobalBase
+from .graph_global_base import DEFAULT_MAX_EXECUTE_ROWS, GraphGlobalBase, GraphUnavailableError
 
 DEFAULT_ROW_LIMIT = 250
 
@@ -222,7 +222,12 @@ class GraphInstanceBase(IInstanceBase, ABC):
         question = require_str(args, 'question', tool_name='get_query')
 
         limit = self._clamp_limit(args.get('limit'))
-        result = self._buildQuery(question, limit=limit)
+        try:
+            result = self._buildQuery(question, limit=limit)
+        except GraphUnavailableError as e:
+            # The tool contract is an explicit `valid: False` result; the lane
+            # handler raises instead.
+            return {'error': str(e), 'valid': False}
 
         query = result.get('query', '')
         if not parse_bool(result.get('isValid', False)) or not query:
@@ -615,8 +620,8 @@ class GraphInstanceBase(IInstanceBase, ABC):
 
             self._emit(result, lanes, executed=executed)
 
-        except GraphLaneError:
-            # `_runLaneQuery` has logged the cause. Fail the step: emitting
+        except (GraphLaneError, GraphUnavailableError):
+            # `_runLaneQuery` / the driver's `_validate_query` have logged the cause. Fail the step: emitting
             # anything, an error object included, lets the pipeline carry on as
             # if the question had been answered.
             raise

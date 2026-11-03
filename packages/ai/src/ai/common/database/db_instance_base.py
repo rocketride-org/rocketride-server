@@ -52,7 +52,7 @@ from ai.common.table import Table
 from ai.common.utils import parse_bool
 from rocketlib.types import IInvokeLLM
 
-from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase
+from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase, DatabaseUnavailableError
 from .sql_safety import is_sql_safe
 
 
@@ -426,7 +426,12 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         question = question.strip()
         limit = args.get('limit', 250)
-        result = self._buildSQLQuery(question, limit=limit)
+        try:
+            result = self._buildSQLQuery(question, limit=limit)
+        except DatabaseUnavailableError as e:
+            # The tool contract is an explicit `valid: False` result; the lane
+            # handler raises instead.
+            return {'error': str(e), 'valid': False}
 
         is_valid = parse_bool(result.get('isValid', False))
         sql_query = result.get('query', '')
@@ -1108,8 +1113,8 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
             self._emit(result, lanes, executed=executed)
 
-        except DatabaseLaneError:
-            # `_executeSQLQuery` has logged the cause. Fail the step: emitting
+        except (DatabaseLaneError, DatabaseUnavailableError):
+            # `_executeSQLQuery` / `_validateQuery` have logged the cause. Fail the step: emitting
             # anything here, an error object included, lets the pipeline carry on
             # as if the question had been answered.
             raise

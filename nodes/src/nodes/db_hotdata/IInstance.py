@@ -40,6 +40,7 @@ from ai.common.utils import normalize_tool_input
 from rocketlib import IInstanceBase, debug, error, tool_function, warning
 from rocketlib.types import IInvokeLLM
 
+from .hotdata_client import HotdataError
 from .hotdata_schema import (
     format_schema_for_prompt,
     get_dialect_prompt_text,
@@ -856,6 +857,15 @@ ORDER BY table_schema, table_name, ordinal_position"""
                 raise
             self._emitError(str(e), lanes)
             return
+        except HotdataError as e:
+            # `get_data` raises a `HotdataError` only for a failure no rewrite of the
+            # SQL can fix (an unreachable API, a 5xx, a rejected key, an exhausted
+            # 429 budget); a statement the server rejected is retried there and
+            # surfaces as a plain `RuntimeError` below. Reporting such a failure on
+            # the lanes let the pipeline finish as though the question had been
+            # answered, so fail the step.
+            error(f'db_hotdata: error handling question: {e}')
+            raise
         except Exception as e:
             error(f'db_hotdata: error handling question: {e}')
             self._emitError(str(e), lanes)

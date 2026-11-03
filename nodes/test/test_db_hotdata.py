@@ -1303,6 +1303,51 @@ def test_questions_lane_emits_structured_error_on_failure():
     assert 'error' in payload, 'errors must be structurally distinguishable from prose'
 
 
+@pytest.mark.parametrize(
+    'failure',
+    [
+        client_mod.HotdataError('hotdata: cannot reach https://api.example: refused'),
+        client_mod.HotdataError('hotdata: POST /query failed with HTTP 503', status_code=503),
+        client_mod.HotdataError('hotdata: HTTP 401: invalid_api_key', status_code=401),
+    ],
+    ids=['unreachable', 'server-error', 'rejected-key'],
+)
+def test_questions_lane_fails_the_step_when_the_service_cannot_answer(failure):
+    """An outage is not a question the lanes can answer: the step fails and nothing is emitted."""
+    g = _loaded_global(max_attempts=3)
+    queries = []
+
+    def _query(**_kw):
+        queries.append(1)
+        raise failure
+
+    g.client = SimpleNamespace(information_schema=lambda **_kw: {'tables': []}, query=_query)
+    inst = _instance(g)
+    inst.instance = _FakeLaneInstance(['text', 'table', 'answers'])
+
+    with pytest.raises(client_mod.HotdataError):
+        inst.writeQuestions(SimpleNamespace(questions=[SimpleNamespace(text='q')]))
+
+    assert len(queries) == 1  # not retried as though the SQL were at fault
+    assert not (inst.instance.texts or inst.instance.tables or inst.instance.answers)
+
+
+def test_questions_lane_still_emits_an_error_for_a_statement_the_server_rejected():
+    """A real SQL rejection (the server minted a query run id) is the statement's fault: reported on the lanes."""
+    g = _loaded_global(max_attempts=1)
+    rejected = client_mod.HotdataError('hotdata: HTTP 400: no such table', status_code=400, query_run_id='qrun-1')
+    g.client = SimpleNamespace(
+        information_schema=lambda **_kw: {'tables': []},
+        query=lambda **_kw: (_ for _ in ()).throw(rejected),
+    )
+    inst = _instance(g)
+    inst.instance = _FakeLaneInstance(['text', 'answers'])
+
+    inst.writeQuestions(SimpleNamespace(questions=[SimpleNamespace(text='q')]))
+
+    assert 'error' in json.loads(inst.instance.answers[0].answer)
+
+
 def test_question_without_llm_names_the_cause_and_the_raw_sql_path():
     """With no llm connected, a question fails with a clear message, not an engine error.
 

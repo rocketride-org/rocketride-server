@@ -508,6 +508,79 @@ class TestRocketrideSqlE2E:
         finally:
             glb.endGlobal()
 
+    # -- EXPLAIN and table checks: an outage is not a verdict on the SQL ---------
+
+    @staticmethod
+    def _unavailable_error():
+        return sys.modules['ai.common.database.db_global_base'].DatabaseUnavailableError
+
+    def test_explain_over_a_refused_connection_fails_the_question_lane_without_a_repair_loop(
+        self, rr_env, monkeypatch, sql_table
+    ):
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            self._refuse_connections(glb)
+            sink = self._lanes(inst, ('text', 'answers'))
+            glb.max_validation_attempts = 5
+            asked = []
+            inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: (
+                asked.append(1) or {'isValid': True, 'query': f'SELECT * FROM {sql_table}'}
+            )
+            question = types.SimpleNamespace(questions=[types.SimpleNamespace(text='what is in stock?')])
+
+            with pytest.raises(self._unavailable_error()):
+                inst.writeQuestions(question)
+
+            assert len(asked) == 1  # the outage was not fed back to the LLM as a rejection
+            assert sink.text == [] and sink.answers == []
+        finally:
+            glb.endGlobal()
+
+    def test_explain_of_bad_sql_on_a_live_database_is_still_a_rejection(self, rr_env, monkeypatch, sql_table):
+        glb, _ = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            ok, message = glb._validateQuery('SELECT * FROM rr_no_such_table')
+            assert ok is False and 'does not exist' in message
+
+            ok, message = glb._validateQuery(f'SELECT no_such_column FROM {sql_table}')
+            assert ok is False and 'no_such_column' in message
+
+            assert glb._validateQuery(f'SELECT name FROM {sql_table}') == (True, '')
+        finally:
+            glb.endGlobal()
+
+    def test_explain_over_a_connection_the_server_closed_is_an_outage(self, rr_env, monkeypatch, sql_table, raw_conn):
+        """The connection died after it was obtained: SQLAlchemy marks it invalid, no message matching needed."""
+        glb, _ = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            with glb.engine.connect() as conn:
+                pid = conn.exec_driver_sql('SELECT pg_backend_pid()').scalar()
+            with raw_conn.cursor() as cur:
+                cur.execute('SELECT pg_terminate_backend(%s)', (pid,))
+            raw_conn.commit()
+
+            with pytest.raises(self._unavailable_error()):
+                glb._validateQuery(f'SELECT name FROM {sql_table}')
+        finally:
+            glb.endGlobal()
+
+    def test_table_exists_over_a_refused_connection_raises_and_a_missing_table_is_false(
+        self, rr_env, monkeypatch, sql_table
+    ):
+        glb, _ = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            assert glb._tableExists(sql_table) is True
+            assert glb._tableExists('rr_no_such_table') is False
+
+            self._refuse_connections(glb)
+
+            with pytest.raises(self._unavailable_error()):
+                glb._tableExists(sql_table)
+            with pytest.raises(self._unavailable_error()):
+                glb._getTableSchema(sql_table)
+        finally:
+            glb.endGlobal()
+
     def test_config_connection_fields_ignored(self, rr_env, monkeypatch, sql_table):
         """The defining property: config cannot redirect the connection."""
         glb, _ = self._begin(
