@@ -209,7 +209,7 @@
 			"default": 25000,
 			"minimum": 1,
 			"maximum": 25000,
-			"description": "Upper cap on rows returned by the execute tool. The query fails if exceeded, so one statement cannot exhaust worker memory."
+			"description": "Upper cap on rows returned by the execute tool. A read over the cap fails. A write over the cap is already saved, so it returns the first rows flagged as truncated."
 		},
 		"graph_falkordb.query_timeout_ms": {
 			"type": "integer",

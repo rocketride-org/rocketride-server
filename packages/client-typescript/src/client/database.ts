@@ -50,7 +50,7 @@ import type { SequelizeConstructor } from './database/sequelize/create-sequelize
  */
 export interface DatabaseLike {
 	/** Execute a raw SQL statement. */
-	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>;
+	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number; truncated?: boolean }>;
 	/** Begin a database transaction. */
 	beginTransaction(options: { token: string; nodeId?: string }): Promise<{ session_id: string }>;
 	/** Commit an open transaction. */
@@ -68,9 +68,9 @@ export interface DatabaseLike {
  */
 export interface DrizzleDatabaseLike {
 	/** Execute a raw SQL statement. `rowMode: 'array'` returns positional rows. */
-	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode: 'array' }): Promise<{ rows: unknown[][]; affected_rows: number }>;
-	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>;
-	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }>;
+	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode: 'array' }): Promise<{ rows: unknown[][]; affected_rows: number; truncated?: boolean }>;
+	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number; truncated?: boolean }>;
+	query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number; truncated?: boolean }>;
 	/** Begin a database transaction. */
 	beginTransaction(options: { token: string; nodeId?: string }): Promise<{ session_id: string }>;
 	/** Commit an open transaction. */
@@ -131,12 +131,12 @@ export class DatabaseApi {
 	 *   objects keyed by column name; `'array'` returns positional arrays
 	 *   (column order preserved, duplicate column names kept) — the shape ORM
 	 *   drivers such as Drizzle require.
-	 * @returns Object with `rows` (row objects, or positional arrays with `rowMode: 'array'`) and `affected_rows` (number).
+	 * @returns Object with `rows` (row objects, or positional arrays with `rowMode: 'array'`) and `affected_rows` (number); `graph_falkordb` adds `truncated: true` when it saved a write but cut its rows, at `max_execute_rows` or at the server's `RESULTSET_SIZE`.
 	 */
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode: 'array' }): Promise<{ rows: unknown[][]; affected_rows: number }>;
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number }>;
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }>;
-	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number }> {
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode: 'array' }): Promise<{ rows: unknown[][]; affected_rows: number; truncated?: boolean }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' }): Promise<{ rows: Record<string, unknown>[]; affected_rows: number; truncated?: boolean }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[]; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number; truncated?: boolean }>;
+	async query(options: { token: string; sql: string; nodeId?: string; sessionId?: string; params?: unknown[] | Record<string, unknown>; rowMode?: 'object' | 'array' }): Promise<{ rows: unknown[][] | Record<string, unknown>[]; affected_rows: number; truncated?: boolean }> {
 		if (typeof options.token !== 'string' || options.token.trim() === '') {
 			throw new Error('token must be a non-empty string');
 		}

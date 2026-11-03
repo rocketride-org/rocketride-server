@@ -96,6 +96,9 @@ class DatabaseApi:
 
         Returns:
             Dict with ``rows`` (list of row dicts) and ``affected_rows`` (int).
+            ``graph_falkordb`` adds ``truncated: True`` when it saved a write but
+            cut its rows, at ``max_execute_rows`` or at the server's
+            ``RESULTSET_SIZE``.
 
         Raises:
             ValueError: If ``token`` or ``sql`` is empty or whitespace-only.

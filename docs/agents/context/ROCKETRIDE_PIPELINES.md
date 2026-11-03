@@ -679,7 +679,12 @@ no database connection settings in the pipeline. Their classType also includes `
 an agent can control a graph store as a tool instead.
 
 **Writing to a graph store** goes through its `execute` tool (node config
-`allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. On `rocketride_graph`
+`allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. A write whose result
+passes `max_execute_rows` (25,000 rows by default) fails with nothing saved on `rocketride_graph` and `graph_neo4j`
+(except Neo4j's batched `CALL { ... } IN TRANSACTIONS`, whose earlier batches stay saved);
+`graph_falkordb` cannot roll back, so it saves the write and returns the first rows with
+`truncated: true`; it does the same when the reply reaches the server's `RESULTSET_SIZE`
+(10,000 in the official image), because the server cuts replies there. On `rocketride_graph`
 the rules follow the Apache AGE version the database reports (`pg_extension.extversion`):
 1.5.0 and 1.6.0 have their own rules, and any other version gets the strict 1.5.0 rules. A
 database whose AGE library is already 1.6.0 reports 1.5.0 until `ALTER EXTENSION age UPDATE`
@@ -687,7 +692,7 @@ runs, so it keeps the 1.5.0 rules until then.
 
 - Bind values as named `params` (`{ "rows": [...] }` for `$rows`) — never paste them into the
   Cypher text: no escaping, and bound values do not count toward the 10,000-character query
-  limit. `graph_neo4j` accepts `params` too; `graph_falkordb` rejects them.
+  limit. `graph_neo4j` and `graph_falkordb` accept `params` too.
 - On AGE 1.5.0 a bulk upsert is TWO calls. AGE 1.5.0 applies SET / REMOVE / DELETE only to the
   first node or edge a MERGE creates in a statement, so `UNWIND ... MERGE ... SET` in one call is
   rejected:
