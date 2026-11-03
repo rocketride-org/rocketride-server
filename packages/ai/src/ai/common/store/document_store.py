@@ -1131,7 +1131,10 @@ class VectorStoreToolMixin:
                             },
                             'object_id': {
                                 'type': 'string',
-                                'description': 'Unique identifier for the document. Used for deduplication.',
+                                'description': (
+                                    'Identifier of the document the text belongs to. A call that includes the '
+                                    "document's chunk 0 replaces what is stored for it."
+                                ),
                             },
                             'metadata': {
                                 'type': 'object',
@@ -1182,8 +1185,10 @@ class VectorStoreToolMixin:
         },
         description=(
             'Add or update documents in the vector database. Each document requires content text and an '
-            'object ID for deduplication. Embeddings are computed automatically when an embedding provider '
-            'is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed '
+            'object ID. For each object ID, a call that includes chunk 0 replaces the chunks stored for it, '
+            'and a call without chunk 0 adds to them. Documents without metadata.chunkId are numbered 0, 1, '
+            '2 ... per object ID, so such a call replaces. Embeddings are computed automatically when an '
+            'embedding provider is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed '
             '"embedding" (float array) and "embedding_model" (string) per document to skip auto-computation. '
             "Several documents with one object ID are stored as that document's chunks. "
             'Returns {"success": false, "error": "..."} when embeddings cannot be obtained.'
