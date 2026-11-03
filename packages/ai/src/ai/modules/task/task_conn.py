@@ -100,6 +100,63 @@ task.debug          Allow debugging a specific task
 """
 
 
+# ---------------------------------------------------------------------------
+# Credential-class gate for task-capability sockets
+# ---------------------------------------------------------------------------
+#
+# ``pk_`` (public key; the credential embedded in the chat widget) and ``tk_``
+# (private task token) authenticate a synthetic identity that still carries the
+# LAUNCHING user's ``userId`` and org (``TaskServer._build_task_account_info``).
+# Handlers that act on that identity (account, deploy, app pins, history,
+# key issuance, the user's file/pipeline stores) cannot tell such a socket
+# from the user, so the socket's command set is fixed here, at dispatch, as an
+# explicit allow-list. Everything else -- including commands added later --
+# is refused (fail closed). Full-user credentials are not affected.
+#
+# Both classes: the SDK handshake (``auth``/``deauth``), liveness and identity,
+# the data pipe (``rrext_process``) and the per-pipe event subscription the
+# data pipe opens (``rrext_monitor``; ``get_task_token`` binds it to the
+# credential's own task). That is everything the chat widget
+# (packages/chat-widget) and chat UI (apps/chat-ui) send through the SDK.
+TASK_CREDENTIAL_PREFIXES = ('pk_', 'tk_')
+TASK_KEY_COMMANDS = frozenset(
+    {
+        'auth',
+        'deauth',
+        'rrext_ping',
+        'rrext_identify',
+        'rrext_process',
+        'rrext_monitor',
+    }
+)
+# ``tk_`` carries the full scope of its ONE task (task.control/monitor): it
+# may also read that task's status and pipeline and stop or restart it. Each of
+# these resolves its task through ``get_task``/``get_task_token``, which ignore
+# any caller-supplied token for pk_/tk_ and use the credential's own.
+TASK_TOKEN_COMMANDS = TASK_KEY_COMMANDS | frozenset(
+    {
+        'rrext_get_task_status',
+        'rrext_get_pipeline',
+        'terminate',
+        'restart',
+    }
+)
+
+
+def task_credential_commands(account_info: Any) -> Optional[frozenset]:
+    """Return the allowed command set for a task-capability identity, else None.
+
+    ``None`` means the identity is a full-user credential and is not gated here.
+    The class is read from the raw credential recorded on the identity at
+    authentication (``AccountInfo.auth``), the same marker ``get_task`` and
+    ``resolve_run_permissions`` use to bind pk_/tk_ to their task.
+    """
+    auth = getattr(account_info, 'auth', '') or ''
+    if not isinstance(auth, str) or not auth.startswith(TASK_CREDENTIAL_PREFIXES):
+        return None
+    return TASK_TOKEN_COMMANDS if auth.startswith('tk_') else TASK_KEY_COMMANDS
+
+
 class TaskConn(
     TaskCommands,
     DataCommands,
@@ -277,6 +334,19 @@ class TaskConn(
             await self.send(err)
             self._transport.disconnect()
             return
+
+        # Task-capability sockets (pk_/tk_) may only send their allow-listed
+        # commands. Checked on the same ``command`` string DAPConn turns into
+        # ``on_<command>``, before any handler is looked up.
+        allowed = task_credential_commands(self._account_info)
+        if allowed is not None:
+            if message.get('type') != 'request':
+                # Nothing but requests is dispatched; do not forward the rest.
+                return
+            if not isinstance(cmd, str) or cmd not in allowed:
+                err = self.build_error(message, 'Command not permitted for task-scoped credentials')
+                await self.send(err)
+                return
 
         await super().on_receive(message)
 
