@@ -32,7 +32,7 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 RESERVED_RESULT_KEYS = ('result_types', 'name', 'path', 'metadata', 'objectId', 'error', 'status')
 
 
-def _configuredKeys(config: Dict[str, Any]) -> tuple[str | None, Dict[str, str]]:
+def _configured_keys(config: Dict[str, Any]) -> tuple[str | None, Dict[str, str]]:
     """Read the result keys a response node is configured with.
 
     Args:
@@ -52,7 +52,7 @@ def _configuredKeys(config: Dict[str, Any]) -> tuple[str | None, Dict[str, str]]
     return config.get('laneName'), lanes
 
 
-def _reservedKeyError(config: Dict[str, Any]) -> str | None:
+def _reserved_key_error(config: Dict[str, Any]) -> str | None:
     """Explain which configured result keys are reserved, if any.
 
     Args:
@@ -61,7 +61,7 @@ def _reservedKeyError(config: Dict[str, Any]) -> str | None:
     Returns:
         The message naming each reserved key the config uses, or None when it uses none.
     """
-    laneName, lanes = _configuredKeys(config)
+    laneName, lanes = _configured_keys(config)
     reserved = sorted({key for key in (laneName, *lanes.values()) if key in RESERVED_RESULT_KEYS})
     if not reserved:
         return None
@@ -78,8 +78,7 @@ class IGlobal(IGlobalBase):
 
     def validateConfig(self) -> None:
         """Warn when a lane is mapped to a result key the result object already uses."""
-        message = _reservedKeyError(self.glb.connConfig)
-        if message:
+        if message := _reserved_key_error(self.glb.connConfig):
             warning(message)
 
     def beginGlobal(self):
@@ -89,10 +88,10 @@ class IGlobal(IGlobalBase):
             ValueError: A lane is mapped to a key the result object already uses.
         """
         config = self.glb.connConfig
-        message = _reservedKeyError(config)
-        # The config dialog opens the node too: there validateConfig reports it
+        message = _reserved_key_error(config)
+        # Opened only to be configured, the node must still start; validateConfig reports the key there
         if message and self.IEndpoint.endpoint.openMode != OPEN_MODE.CONFIG:
             raise ValueError(message)
 
         # This will create a local copy
-        self.laneName, self.lanes = _configuredKeys(config)
+        self.laneName, self.lanes = _configured_keys(config)

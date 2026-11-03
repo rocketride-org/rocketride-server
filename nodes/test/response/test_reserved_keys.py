@@ -24,7 +24,7 @@ while str(NODES_SRC) in sys.path:
     sys.path.remove(str(NODES_SRC))
 sys.path.insert(0, str(NODES_SRC))
 
-from response.IGlobal import RESERVED_RESULT_KEYS, IGlobal  # noqa: E402
+from response.IGlobal import IGlobal  # noqa: E402
 from response.IInstance import IInstance  # noqa: E402
 from ai.common.schema import Answer  # noqa: E402
 
@@ -76,7 +76,11 @@ def _instance(glb):
     return inst
 
 
-@pytest.mark.parametrize('key', RESERVED_RESULT_KEYS)
+# Listed here, not read from RESERVED_RESULT_KEYS, so that dropping a key from the node fails this test
+_KEYS_THE_RESULT_ALREADY_HOLDS = ('result_types', 'name', 'path', 'metadata', 'objectId', 'error', 'status')
+
+
+@pytest.mark.parametrize('key', _KEYS_THE_RESULT_ALREADY_HOLDS)
 def test_a_reserved_lane_name_stops_the_node_with_a_clear_error(key):
     """Every reserved key is refused as the single-lane ``laneName``."""
     with pytest.raises(ValueError, match=f"Result key '{key}' is reserved"):
