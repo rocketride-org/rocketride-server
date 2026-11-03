@@ -108,8 +108,6 @@ CHUNK_COLUMNS = (
 
 
 class Store(PgVectorStoreBase):
-    """Vector store driver for RocketRide managed PostgreSQL (pgvector)."""
-
     # listDocuments and countDocuments below implement the optional listing
     # of DocumentStoreBase, so the list_documents tool is offered on this store.
     supports_document_listing = True

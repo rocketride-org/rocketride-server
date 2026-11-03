@@ -536,7 +536,6 @@ class Store(DocumentStoreBase):
             return meta
 
         def _run_bulk(actions_batch: List[Dict[str, Any]]) -> None:
-            """Index one batch with the bulk helper; raise with the first item error the server reported."""
             try:
                 bulk(self.client, actions_batch)
             except BulkIndexError as e:

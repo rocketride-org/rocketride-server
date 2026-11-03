@@ -62,8 +62,6 @@ _MAX_STALLS = 2
 
 
 class Store(DocumentStoreBase):
-    """Vector store driver for Weaviate."""
-
     apikey: str | None = None
     node: str = 'weaviate'
     collection: str = ''

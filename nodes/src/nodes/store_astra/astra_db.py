@@ -62,8 +62,6 @@ def _count_floor(exc: TooManyDocumentsToCountException) -> int:
 
 
 class Store(DocumentStoreBase):
-    """Vector store driver for DataStax Astra DB."""
-
     application_token: str | None = None
     node: str = 'astra_db'
     collection_name: str = ''
@@ -412,7 +410,6 @@ class Store(DocumentStoreBase):
                     collection.delete_many({'meta.objectId': objectId})
 
             def is_valid_vector(vector):
-                """Return True unless the vector is (near) zero, which Astra cannot index."""
                 magnitude = sum(x * x for x in vector) ** 0.5
                 return magnitude > 1e-6
 

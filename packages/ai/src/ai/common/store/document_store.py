@@ -168,15 +168,9 @@ class DocumentStoreBase(ABC):
         """
 
     def _getDocKey(self, doc: Doc) -> Tuple[str, int]:
-        """
-        Return the key that identifies a chunk among search results: (objectId, chunkId).
-        """
         return (doc.metadata.objectId, doc.metadata.chunkId)
 
     def _getTableKey(self, doc: Doc) -> Tuple[str, int]:
-        """
-        Return the key that identifies a table among search results: (objectId, tableId).
-        """
         return (doc.metadata.objectId, doc.metadata.tableId)
 
     def _processFullTables(self, documents: Dict[Tuple[str, int], Doc]) -> Dict[Tuple[str, int], Doc]:
@@ -289,9 +283,6 @@ class DocumentStoreBase(ABC):
         return newDocs
 
     def _processFullDocuments(self, documents: Dict[Tuple[str, int], Doc]) -> Dict[Tuple[str, int], Doc]:
-        """
-        Replace each hit by its whole document: every chunk of the object, joined in chunk order, with the best hit score.
-        """
         # Make sure we only read it once
         objectIds: Dict[str, Doc] = {}
 
@@ -339,9 +330,6 @@ class DocumentStoreBase(ABC):
         return newDocs
 
     def _queryDocuments(self, question: Question) -> Dict[Tuple[str, int], Doc]:
-        """
-        Return the question's own documents plus the search hits that meet the score threshold, keyed by (objectId, chunkId).
-        """
         # Get the type of question being asked
         type = question.type
 
@@ -355,7 +343,6 @@ class DocumentStoreBase(ABC):
             documents[key] = doc
 
         def _addDoc(doc: Doc):
-            """Add a hit that meets the score threshold; a chunk already held keeps the higher score."""
             # If it doesn't meet our score threshold, skip it
             if doc.score < self.threshold_search:
                 return
@@ -374,7 +361,6 @@ class DocumentStoreBase(ABC):
             documents[key] = doc
 
         def _addDocs(docs: List[Doc]):
-            """Keep each of the hits through _addDoc."""
             # For each document, add it
             for doc in docs:
                 _addDoc(doc)
@@ -417,9 +403,6 @@ class DocumentStoreBase(ABC):
         return documents
 
     def dispatchSearch(self, pSelf: IInstanceBase, question: Question) -> List[Doc]:
-        """
-        Answer a question from the store and write the results to the wired documents, answers and questions lanes.
-        """
         # Perform the raw query
         documents = self._queryDocuments(question)
 
@@ -777,9 +760,6 @@ class VectorStoreToolMixin:
     # --- Configuration knobs (override via IGlobal) ------------------------
 
     def _vectordb_default_top_k(self) -> int:
-        """
-        Return the node's default result count for the search tool, clamped to 1 .. the tool maximum.
-        """
         glb = getattr(self, 'IGlobal', None)
         value = getattr(glb, 'default_top_k', None)
         try:
@@ -789,9 +769,6 @@ class VectorStoreToolMixin:
         return max(1, min(value, _VECTORDB_TOOL_MAX_TOP_K))
 
     def _vectordb_score_threshold(self) -> float:
-        """
-        Return the node's minimum score for tool search results, clamped to 0 .. 1.
-        """
         glb = getattr(self, 'IGlobal', None)
         value = getattr(glb, 'score_threshold', None)
         try:
@@ -801,9 +778,6 @@ class VectorStoreToolMixin:
         return max(0.0, min(value, 1.0))
 
     def _vectordb_store(self) -> 'DocumentStoreBase':
-        """
-        Return the node's open store; raise if the node has not opened one.
-        """
         store = getattr(getattr(self, 'IGlobal', None), 'store', None)
         if store is None:
             raise RuntimeError('vectordb tool: store not initialized')
@@ -1717,7 +1691,6 @@ class VectorStoreToolMixin:
         # metadata, so repeated chunk IDs returned in a different order on the next
         # call cannot shift a page boundary and drop or repeat a chunk.
         def _page_key(chunk):
-            """Order chunks by chunkId, then content and metadata, so a page is stable."""
             return (
                 int(chunk.get('chunkId') or 0),
                 str(chunk.get('content') or ''),

@@ -56,8 +56,6 @@ Note: a 'collection' as we know it is referred to as an index in pinecone
 
 
 class Store(DocumentStoreBase):
-    """Vector store driver for Pinecone."""
-
     apikey: str | None = None
     node: str = 'pinecone'
     collection: str = ''

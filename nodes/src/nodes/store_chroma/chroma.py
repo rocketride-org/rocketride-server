@@ -65,8 +65,6 @@ def _check_server_version(version: str) -> None:
 
 
 class Store(DocumentStoreBase):
-    """Vector store driver for Chroma."""
-
     apikey: str | None = None
     node: str = 'chroma'
     collection: str = ''
@@ -391,7 +389,6 @@ class Store(DocumentStoreBase):
             raise Exception(f'Error creating Chroma collection: {e}') from e
 
     def _convertFilter(self, docFilter: DocFilter) -> Dict[str, Any]:
-        """Translate a DocFilter into a Chroma ``where`` clause (conditions joined with ``$and``)."""
         filters = []
         if docFilter.nodeId is not None:
             filters.append({'nodeId': {'$eq': docFilter.nodeId}})

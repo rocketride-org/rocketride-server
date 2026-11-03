@@ -61,8 +61,6 @@ def _escape_milvus_str(value: object) -> str:
 
 
 class Store(DocumentStoreBase):
-    """Vector store driver for Milvus."""
-
     apikey: str = ''
     collection: str = ''
     vectorSize: int = 0
@@ -475,7 +473,6 @@ class Store(DocumentStoreBase):
         batch: List[dict] = []
 
         def flush_batch():
-            """Upsert the queued rows in one request and empty the queue."""
             nonlocal batch
             if not batch:
                 return

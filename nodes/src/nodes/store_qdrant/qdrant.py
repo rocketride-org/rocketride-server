@@ -89,8 +89,6 @@ MIN_RELEVANCE_SCORE = 0.20
 
 
 class Store(DocumentStoreBase):
-    """Vector store driver for Qdrant."""
-
     apikey: str | None = None
     node: str = 'qdrant'
     collection: str = ''
