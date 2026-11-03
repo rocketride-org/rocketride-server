@@ -399,7 +399,7 @@ class Store(DocumentStoreBase):
         points_to_upsert = []
 
         # The objects this batch starts over; the control row is never deleted
-        objectIds = [objectId for objectId in self._objectIdsToReplace(chunks) if objectId != CONTROL_OBJECT_ID]
+        objectIds = [objectId for objectId in self.objectIdsToReplace(chunks) if objectId != CONTROL_OBJECT_ID]
 
         def flush():
             """Delete the replaced objects on the first call, then upsert the queued points."""

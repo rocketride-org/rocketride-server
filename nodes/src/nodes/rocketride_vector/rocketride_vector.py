@@ -583,7 +583,7 @@ class Store(PgVectorStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        objectIds = self._objectIdsToReplace(chunks)
+        objectIds = self.objectIdsToReplace(chunks)
         # Replace in one transaction: an invalid new chunk must leave the
         # previously stored document intact.
         with self._transaction() as cur:

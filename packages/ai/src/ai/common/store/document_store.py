@@ -91,12 +91,12 @@ class DocumentStoreBase(ABC):
         Write documents into the store.
 
         A batch that holds an object's chunk 0 replaces that object: its stored
-        chunks are deleted first (see _objectIdsToReplace). The chunks of an object
+        chunks are deleted first (see objectIdsToReplace). The chunks of an object
         whose chunk 0 is not in the batch are added to the ones already stored.
         """
 
     @staticmethod
-    def _objectIdsToReplace(chunks: List[Doc]) -> List[str]:
+    def objectIdsToReplace(chunks: List[Doc]) -> List[str]:
         """
         Return the object IDs whose stored chunks a write of these chunks replaces.
 
@@ -1161,7 +1161,9 @@ class VectorStoreToolMixin:
             'Add or update documents in the vector database. Each document requires content text and an '
             'object ID. For each object ID, a call that includes chunk 0 replaces the chunks stored for it, '
             'and a call without chunk 0 adds to them. Documents without metadata.chunkId are numbered 0, 1, '
-            '2 ... per object ID, so such a call replaces. Embeddings are computed automatically when an '
+            '2 ... per object ID, so such a call replaces. A call without chunk 0 that repeats a stored chunk '
+            'number stores a second copy of it: to change one chunk, send the whole object from chunk 0. '
+            'Embeddings are computed automatically when an '
             'embedding provider is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed '
             '"embedding" (float array) and "embedding_model" (string) per document to skip auto-computation. '
             "Several documents with one object ID are stored as that document's chunks. "

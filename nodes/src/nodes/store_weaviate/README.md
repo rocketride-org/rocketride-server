@@ -97,7 +97,7 @@ For a cloud profile, provide the API key; the runtime uses it for the cloud conn
 
 ### Search and document lifecycle
 
-Semantic search requires an embedding and does not accept a non-zero offset. Keyword search matches content with the metadata filters. A batch that holds an object's chunk 0 deletes that object's existing chunks before the new chunks are added, so a re-ingest replaces the object; a batch without chunk 0 adds its chunks to the stored ones, so an object written in several batches keeps them all. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
+Semantic search requires an embedding and does not accept a non-zero offset. Keyword search matches content with the metadata filters. A batch that holds an object's chunk 0 deletes that object's existing chunks before the new chunks are added, so a re-ingest replaces the object; a batch without chunk 0 adds its chunks to the stored ones, so an object written in several batches keeps them all. Rows get generated IDs, so a batch without chunk 0 that repeats a chunk number already stored keeps both copies; to change a chunk, write the object again from chunk 0. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
 
 Before semantic search, the driver checks that the collection is compatible with
 the query's embedding model. The collection's batch import reports an error if

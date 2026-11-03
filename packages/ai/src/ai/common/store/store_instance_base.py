@@ -87,7 +87,7 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceTransform, ABC):
             self._objectIdsWritten = set()
         late = [
             objectId
-            for objectId in DocumentStoreBase._objectIdsToReplace(documents)
+            for objectId in DocumentStoreBase.objectIdsToReplace(documents)
             if objectId in self._objectIdsWritten
         ]
         if late:

@@ -457,7 +457,7 @@ class Store(DocumentStoreBase):
             return
 
         # The objects this batch starts over
-        objectIds = self._objectIdsToReplace(chunks)
+        objectIds = self.objectIdsToReplace(chunks)
 
         # Erase all documents/chunks associated with those ObjectIds in one operation
         # so we can cleanly insert the new version

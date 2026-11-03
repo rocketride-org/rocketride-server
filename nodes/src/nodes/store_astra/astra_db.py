@@ -396,7 +396,7 @@ class Store(DocumentStoreBase):
         documents: List[Dict] = []
 
         # The objects this batch starts over
-        objectIds = self._objectIdsToReplace(chunks)
+        objectIds = self.objectIdsToReplace(chunks)
 
         def flush():
             """Delete the replaced objects (first call only), then insert the queued documents that have a vector."""

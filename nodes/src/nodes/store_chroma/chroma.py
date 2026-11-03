@@ -620,7 +620,7 @@ class Store(DocumentStoreBase):
             return
 
         # The objects this batch starts over
-        object_ids_to_delete = self._objectIdsToReplace(chunks)
+        object_ids_to_delete = self.objectIdsToReplace(chunks)
         ids: List[str] = []
         embeddings: List[List[float]] = []
         metadatas: List[Dict] = []

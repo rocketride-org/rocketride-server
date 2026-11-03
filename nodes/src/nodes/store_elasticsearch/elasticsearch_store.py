@@ -500,7 +500,7 @@ class Store(DocumentStoreBase):
             return
 
         # The objects this batch starts over
-        objectIds = self._objectIdsToReplace(chunks)
+        objectIds = self.objectIdsToReplace(chunks)
 
         # Delete existing documents with matching objectIds
         if objectIds:

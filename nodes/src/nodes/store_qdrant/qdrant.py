@@ -543,7 +543,7 @@ class Store(DocumentStoreBase):
         points: List[models.PointStruct] = []
 
         # The objects this batch starts over
-        objectIds = self._objectIdsToReplace(chunks)
+        objectIds = self.objectIdsToReplace(chunks)
 
         def flush():
             """Send one batch: delete the replaced objects (first call only), then upsert the queued points."""

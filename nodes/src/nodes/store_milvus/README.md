@@ -98,7 +98,7 @@ For a cloud profile, provide the API key; the runtime passes it as the Milvus to
 
 ### Search and document lifecycle
 
-Semantic search requires an embedding and does not accept a non-zero offset. Keyword search uses the same metadata filters as retrieval. A batch that holds an object's chunk 0 deletes that object's existing chunks before the new chunks are inserted, so a re-ingest replaces the object; a batch without chunk 0 adds its chunks to the stored ones, so an object written in several batches keeps them all. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
+Semantic search requires an embedding and does not accept a non-zero offset. Keyword search uses the same metadata filters as retrieval. A batch that holds an object's chunk 0 deletes that object's existing chunks before the new chunks are inserted, so a re-ingest replaces the object; a batch without chunk 0 adds its chunks to the stored ones, so an object written in several batches keeps them all. Rows get generated IDs, so a batch without chunk 0 that repeats a chunk number already stored keeps both copies; to change a chunk, write the object again from chunk 0. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
 
 Milvus inserts chunks in batches of 50. A semantic search against an existing
 collection also checks the embedding model before querying, so a model or vector
