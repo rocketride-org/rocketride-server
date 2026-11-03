@@ -29,7 +29,6 @@ const SLUG_PATTERN = /^[a-z][a-z0-9-]{0,79}$/;
 const UUID_V4_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const MESSAGE_REVISION_PATTERN = /^[a-f0-9]{16}$/;
 const SIGNUP_PROPERTY_KEYS = ['schema_version', 'experiment', 'experiment_revision', 'variant_id', 'assignment_id', 'exposure_id', 'landing_message_revision', 'exposed_at', 'expires_at', 'consent_version'];
-const CONSENT_STATES = ['undecided', 'rejected'];
 
 function hasExactKeys(properties: Record<string, unknown>): boolean {
 	const keys = Object.keys(properties).filter((key) => key !== 'consent_state');
@@ -69,7 +68,7 @@ export function normalizeSignupProperties(value: unknown, now = Date.now()): Sig
 		if (!hasExactKeys(properties)) return null;
 		if (properties.schema_version !== 1) return null;
 		if (properties.consent_version !== 1) return null;
-		if ('consent_state' in properties && !CONSENT_STATES.includes(properties.consent_state as string)) return null;
+		if ('consent_state' in properties && properties.consent_state !== 'undecided') return null;
 		if (!isSlug(properties.experiment)) return null;
 		if (!isSlug(properties.experiment_revision)) return null;
 		if (!isSlug(properties.variant_id)) return null;

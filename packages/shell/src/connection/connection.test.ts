@@ -1719,11 +1719,12 @@ for (const mode of ['provider', 'legacy', 'direct'] as const) {
 }
 
 test('a cookieless signup completion reads its context from the OAuth state only', async () => {
-	const signup: SignupProperties = { ...signupContext(), consent_state: 'rejected' };
+	const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
 	const consented = signupContext();
 	const cases: Array<[string, string | null, SignupProperties | null]> = [
 		['cookieless', btoa(JSON.stringify(signup)), signup],
 		['consented context in the URL', btoa(JSON.stringify(consented)), null],
+		['rejected consent state', btoa(JSON.stringify({ ...signup, consent_state: 'rejected' })), null],
 		['unknown consent state', btoa(JSON.stringify({ ...signup, consent_state: 'accepted' })), null],
 		['malformed', '%%%not-base64', null],
 		['oversized', btoa(JSON.stringify(signup)).padEnd(4096, 'A'), null],
