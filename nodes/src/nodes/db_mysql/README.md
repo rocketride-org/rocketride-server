@@ -207,9 +207,9 @@ expected here.
 
 A failed insert raises `Insert into "<table>" failed:` followed by MySQL's own
 primary message, with SQLAlchemy's statement and parameter echo stripped the
-same way `execute` strips it. The `answers` lane logs that error rather than
-returning it, so the server log is where a batch that did not land is
-explained.
+same way `execute` strips it. The `answers` lane fails the step with a generic
+message and writes that error to the server log, so the server log is where a
+batch that did not land is explained.
 
 ### Connection checks and transactions
 

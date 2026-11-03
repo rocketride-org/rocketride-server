@@ -850,6 +850,8 @@ def _graph_iglobal(monkeypatch):
         return _GraphClient()
 
     psycopg2_mod.connect = connect
+    psycopg2_mod.InterfaceError = type('InterfaceError', (Exception,), {})
+    psycopg2_mod.OperationalError = type('OperationalError', (Exception,), {})
     psycopg2_mod.sql = types.ModuleType('psycopg2.sql')
     monkeypatch.setitem(sys.modules, 'psycopg2', psycopg2_mod)
     monkeypatch.setitem(sys.modules, 'psycopg2.sql', psycopg2_mod.sql)
@@ -863,6 +865,7 @@ def _graph_iglobal(monkeypatch):
     graph_pkg.GraphGlobalBase = type(
         'GraphGlobalBase', (), {'_config_int': staticmethod(lambda cfg, key, default: default)}
     )
+    graph_pkg.GraphUnavailableError = type('GraphUnavailableError', (RuntimeError,), {})
     age = types.ModuleType('ai.common.graph.age')
     for name in ('AgeTranslationError', 'FirewallConfig', 'TranslatedQuery'):
         setattr(age, name, type(name, (), {}))
@@ -905,3 +908,82 @@ class TestRocketrideGraphConnection:
         glb._probe_connection({'scope': 'team', 'target': 'team:x'})
         assert connects == []
         assert len(warnings) == 1 and 'not a valid team or user id' in warnings[0]
+
+
+class _ExplainClient(_GraphClient):
+    """A client whose cursor raises ``failure`` when the EXPLAIN runs."""
+
+    def __init__(self, failure):
+        super().__init__()
+        self.failure = failure
+        self.rollbacks = 0
+
+    def cursor(self):
+        failure = self.failure
+
+        class _Cursor(_GraphCursor):
+            def execute(self, sql, params=None):
+                if str(sql).startswith('EXPLAIN'):
+                    raise failure
+                return super().execute(sql, params)
+
+        return _Cursor(self.executed, self.fetch_batches)
+
+    def rollback(self):
+        self.rollbacks += 1
+
+
+class TestRocketrideGraphValidateQuery:
+    """EXPLAIN against a connection that is gone is an outage, not a rejected query (rocketride-ai/rocketride-saas#789)."""
+
+    def _glb(self, monkeypatch, failure):
+        glb, _, _ = _graph_iglobal(monkeypatch)
+        module = sys.modules['nodes.rocketride_graph.IGlobal']
+        glb.client = _ExplainClient(failure() if callable(failure) else failure)
+        plan = types.SimpleNamespace(statements=['SELECT 1'], binds=[None], result_index=0)
+        glb._translate = lambda *a, **kw: plan
+        glb._require_transactional_client = lambda: None
+        return glb, module, sys.modules['ai.common.graph'].GraphUnavailableError
+
+    @staticmethod
+    def _driver_error(name, pgcode=None):
+        """A factory, called after the stub driver is loaded (the classes belong to it)."""
+
+        def make():
+            error = sys.modules['nodes.rocketride_graph.IGlobal'].psycopg2.__dict__[name]('driver text')
+            error.pgcode = pgcode
+            return error
+
+        return make
+
+    @pytest.mark.parametrize(
+        'name, pgcode',
+        [
+            ('InterfaceError', None),
+            ('OperationalError', None),
+            ('OperationalError', '08006'),
+            ('OperationalError', '57P03'),
+        ],
+    )
+    def test_a_lost_connection_raises(self, monkeypatch, name, pgcode):
+        failure = self._driver_error(name, pgcode)
+        glb, _, unavailable = self._glb(monkeypatch, failure)
+
+        with pytest.raises(unavailable):
+            glb._validate_query('MATCH (n) RETURN n')
+
+    def test_a_socket_level_error_raises(self, monkeypatch):
+        glb, _, unavailable = self._glb(monkeypatch, ConnectionResetError('reset'))
+
+        with pytest.raises(unavailable):
+            glb._validate_query('MATCH (n) RETURN n')
+
+    @pytest.mark.parametrize('pgcode', ['42601', '42703', '57014'])
+    def test_a_server_answer_about_the_query_is_still_a_message(self, monkeypatch, pgcode):
+        failure = self._driver_error('OperationalError', pgcode)
+        glb, _, _ = self._glb(monkeypatch, failure)
+
+        ok, message = glb._validate_query('MATCH (n RETURN n')
+
+        assert ok is False and message == 'driver text'
+        assert glb.client.rollbacks == 1

@@ -64,6 +64,18 @@ class _StubAuthError(_StubNeo4jError):
     pass
 
 
+class _StubSessionExpired(Exception):
+    pass
+
+
+class _StubTransientError(_StubNeo4jError):
+    pass
+
+
+class _StubConnectionAcquisitionTimeoutError(Exception):
+    pass
+
+
 class _StubBase:
     """Stand-in for IInstanceBase / IGlobalBase — the engine supplies the real one."""
 
@@ -136,6 +148,9 @@ def _install_stubs() -> None:
     neo4j_exceptions.Neo4jError = _StubNeo4jError
     neo4j_exceptions.ServiceUnavailable = _StubServiceUnavailable
     neo4j_exceptions.AuthError = _StubAuthError
+    neo4j_exceptions.SessionExpired = _StubSessionExpired
+    neo4j_exceptions.TransientError = _StubTransientError
+    neo4j_exceptions.ConnectionAcquisitionTimeoutError = _StubConnectionAcquisitionTimeoutError
     neo4j.exceptions = neo4j_exceptions
 
     sys.modules.update(
@@ -196,6 +211,31 @@ def _load_node():
 
 _glb_mod, mod = _load_node()
 graph_base = sys.modules['ai.common.graph']
+
+
+def test_the_node_loads_on_a_driver_without_connection_acquisition_timeout_error():
+    """``neo4j`` is unpinned: a driver that predates that class must not break the node at import."""
+    touched = [n for n in sys.modules if n.startswith(('ai.common.graph', 'nodes.graph_neo4j'))]
+    saved = {n: sys.modules[n] for n in touched}
+    try:
+        with _scoped_stubs():
+            del sys.modules['neo4j.exceptions'].ConnectionAcquisitionTimeoutError
+            _load_from_path('ai.common.graph', _GRAPH_PKG / '__init__.py', is_package=True)
+            old_glb = _load_from_path('nodes.graph_neo4j.IGlobal', _NODE_DIR / 'IGlobal.py')
+
+            assert old_glb.ConnectionAcquisitionTimeoutError is old_glb._AbsentDriverError
+            unavailable = sys.modules['ai.common.graph'].GraphUnavailableError
+            glb = object.__new__(old_glb.IGlobal)
+            glb.database = 'neo4j'
+            glb.driver = _FakeDriver(raise_error=_StubServiceUnavailable('no route'))
+            with pytest.raises(unavailable):
+                glb._validate_query('MATCH (n) RETURN n')  # the other outage classes still work
+            glb.driver = _FakeDriver(raise_error=_StubNeo4jError('Invalid input'))
+            assert glb._validate_query('MATCH (n RETURN n') == (False, 'Invalid input')
+    finally:
+        for name in [n for n in sys.modules if n.startswith(('ai.common.graph', 'nodes.graph_neo4j'))]:
+            sys.modules.pop(name, None)
+        sys.modules.update(saved)
 
 
 # ---------------------------------------------------------------------------
@@ -459,6 +499,32 @@ def test_execute_raw_keeps_other_statements_in_a_transaction(query):
 # ---------------------------------------------------------------------------
 # _validate_query: EXPLAIN
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'exc',
+    [
+        _StubServiceUnavailable('no route'),
+        _StubSessionExpired('session expired'),
+        _StubAuthError('unauthorized'),
+        _StubTransientError('database unavailable'),
+        _StubConnectionAcquisitionTimeoutError('pool exhausted'),
+        ConnectionResetError('reset'),
+    ],
+)
+def test_validate_query_raises_when_the_server_cannot_be_reached(exc):
+    glb = _FakeGlobal(_FakeDriver(raise_error=exc))
+
+    with pytest.raises(graph_base.GraphUnavailableError):
+        glb._validate_query('MATCH (n) RETURN n')
+
+
+def test_validate_query_still_reports_a_server_rejection_as_a_message():
+    ok, message = _FakeGlobal(_FakeDriver(raise_error=_StubNeo4jError('Invalid input')))._validate_query(
+        'MATCH (n RETURN n'
+    )
+
+    assert ok is False and 'Invalid input' in message
 
 
 def test_validate_query_runs_explain():

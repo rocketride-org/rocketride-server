@@ -47,7 +47,7 @@ import psycopg2
 from psycopg2 import sql
 
 from rocketlib import warning
-from ai.common.graph import GraphGlobalBase
+from ai.common.graph import GraphGlobalBase, GraphUnavailableError
 from ai.common.graph.age import (
     CAPABILITY_TABLES,
     DEFAULT_AGE_VERSION,
@@ -62,6 +62,26 @@ from ai.common.graph.age import (
 from ai.common.rocketride_db import DsnNotDelivered, db_target, resolve_rocketride_dsn
 
 DEFAULT_GRAPH_NAME = 'rocketride'
+
+
+def _is_unavailable(exc: BaseException) -> bool:
+    """Return True when ``exc`` means the connection to the server is gone, by type and SQLSTATE.
+
+    ``InterfaceError`` is psycopg2's "connection already closed". An
+    ``OperationalError`` with no server SQLSTATE was raised client-side (the link
+    dropped); one with a SQLSTATE is the server answering, and only the
+    connection-exception (08), insufficient-resources (53) and shutdown / cannot
+    connect now (57P01-57P03) codes mean unavailable. Anything else, a syntax
+    error above all, is the query.
+    """
+    if isinstance(exc, (OSError, psycopg2.InterfaceError)):
+        return True
+    if isinstance(exc, psycopg2.OperationalError):
+        code = getattr(exc, 'pgcode', None)
+        return code is None or code[:2] in ('08', '53') or code in ('57P01', '57P02', '57P03')
+    return False
+
+
 DEFAULT_MAX_ROWS = 1000
 DEFAULT_QUERY_TIMEOUT_MS = 30000
 
@@ -327,6 +347,11 @@ class IGlobal(GraphGlobalBase):
             self.client.rollback()
             return True, ''
         except Exception as e:
+            if _is_unavailable(e):
+                # The connection is gone: not a verdict on the query. Raised so a
+                # lane fails instead of feeding the outage back to the LLM.
+                warning(f'Graph database unavailable during EXPLAIN validation: {e}')
+                raise GraphUnavailableError('Graph database is unavailable (details are in the engine log)') from None
             self.client.rollback()
             return False, str(e)
 

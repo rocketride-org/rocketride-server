@@ -225,6 +225,9 @@ _parse_is_valid = _UTILS._parse_is_valid
 _plan_is_modification = _UTILS._plan_is_modification
 _plan_nodes = _UTILS._plan_nodes
 IGlobal = _IG.IGlobal
+ArangoLaneError = _IG.ArangoLaneError
+ArangoUnavailableError = _IG.ArangoUnavailableError
+ServerConnectionError = _IG.ServerConnectionError
 ArangoError = _IG.ArangoError
 _json_type = _IG._json_type
 _is_edge_collection = _IG._is_edge_collection
@@ -848,6 +851,143 @@ class TestWriteQuestions:
         inst = _make_instance(ig=_fake_ig(), instance=_FakeInstance())
         inst.writeQuestions(SimpleNamespace(type=_QTYPE.QUESTION, questions=[]))
         assert any('No question text' in w for w in _WARNING_CALLS)
+
+
+class TestLanesFailClosed:
+    """A DB outage must never let a step complete (rocketride-ai/rocketride-saas#789)."""
+
+    def _question(self, qtype, text='show users'):
+        return SimpleNamespace(type=qtype, questions=[SimpleNamespace(text=text)])
+
+    @staticmethod
+    def _boom(*_a, **_k):
+        raise ConnectionError('connection refused: http://10.0.0.5:8529 FOR u IN users RETURN u')
+
+    def test_a_failed_execute_statement_fails_the_step_and_emits_nothing(self):
+        _reset_logs()
+        ig = _fake_ig(allow_execute=True, _run_query_raw=self._boom)
+        inst = _make_instance(ig=ig, instance=_FakeInstance())
+
+        with pytest.raises(ArangoLaneError) as raised:
+            inst.writeQuestions(self._question(_QTYPE.EXECUTE, text='FOR u IN users REMOVE u IN users'))
+
+        assert '10.0.0.5' not in str(raised.value) and 'REMOVE' not in str(raised.value)
+        assert not (inst.instance.texts or inst.instance.tables or inst.instance.answers)
+        assert any('10.0.0.5' in e for e in _ERROR_CALLS)  # the cause is in the log
+
+    def test_a_failed_read_statement_fails_the_step_and_emits_nothing(self):
+        ig = _fake_ig(_run_query=self._boom)
+        inst = _make_instance(
+            ig=ig,
+            instance=_FakeInstance(invoke_answer={'isValid': 'true', 'query': 'FOR u IN users RETURN u'}),
+        )
+
+        with pytest.raises(ArangoLaneError):
+            inst.writeQuestions(self._question(_QTYPE.QUESTION))
+
+        assert not (inst.instance.texts or inst.instance.tables or inst.instance.answers)
+
+    def test_an_unreachable_server_during_explain_fails_the_step_without_a_repair_loop(self):
+        def outage(_aql):
+            raise ArangoUnavailableError('ArangoDB is unavailable (details are in the engine log)')
+
+        ig = _fake_ig(max_validation_attempts=5, _validate_query=outage)
+        fake = _FakeInstance(invoke_answer={'isValid': 'true', 'query': 'FOR u IN users RETURN u'})
+        inst = _make_instance(ig=ig, instance=fake)
+
+        with pytest.raises(ArangoUnavailableError):
+            inst.writeQuestions(self._question(_QTYPE.QUESTION))
+
+        assert len(fake.invoked) == 1  # the LLM was asked once; the outage is not the query's fault
+        assert not (fake.texts or fake.tables or fake.answers)
+
+    def test_get_aql_reports_the_outage_as_an_explicit_invalid_result(self):
+        def outage(_aql):
+            raise ArangoUnavailableError('ArangoDB is unavailable (details are in the engine log)')
+
+        ig = _fake_ig(_validate_query=outage)
+        inst = _make_instance(
+            ig=ig, instance=_FakeInstance(invoke_answer={'isValid': 'true', 'query': 'FOR u IN users RETURN u'})
+        )
+
+        result = inst.get_aql({'question': 'who?'})
+
+        assert result['valid'] is False and 'unavailable' in result['error']
+
+    @pytest.mark.parametrize(
+        'exc', [ServerConnectionError('no route'), ConnectionError('refused'), TimeoutError('slow')]
+    )
+    def test_validate_query_raises_when_the_server_cannot_be_reached(self, exc):
+        def _raise(_aql):
+            raise exc
+
+        ig = IGlobal.__new__(IGlobal)
+        ig.db = SimpleNamespace(aql=SimpleNamespace(explain=_raise))
+
+        with pytest.raises(ArangoUnavailableError):
+            ig._validate_query('FOR u IN users RETURN u')
+
+    def test_validate_query_raises_when_the_server_answers_503(self):
+        unavailable = ArangoError('service unavailable')
+        unavailable.http_code = 503
+
+        def _raise(_aql):
+            raise unavailable
+
+        ig = IGlobal.__new__(IGlobal)
+        ig.db = SimpleNamespace(aql=SimpleNamespace(explain=_raise))
+
+        with pytest.raises(ArangoUnavailableError):
+            ig._validate_query('FOR u IN users RETURN u')
+
+    def test_validate_query_keeps_other_http_errors_as_rejections(self):
+        rejected = ArangoError('bad AQL')
+        rejected.http_code = 400
+
+        def _raise(_aql):
+            raise rejected
+
+        ig = IGlobal.__new__(IGlobal)
+        ig.db = SimpleNamespace(aql=SimpleNamespace(explain=_raise))
+
+        ok, message = ig._validate_query('FOR RETURN')
+
+        assert ok is False and 'bad AQL' in message
+
+    @pytest.mark.parametrize('qtype', ['QUESTION', 'EXECUTE'])
+    @pytest.mark.parametrize('lanes', [('text',), ('table',), ('answers',)])
+    def test_a_failing_downstream_write_fails_the_step(self, qtype, lanes):
+        """The engine re-raises a downstream node's failure here as a plain Exception; it must not be swallowed."""
+
+        class _Downstream(_FakeInstance):
+            def writeText(self, text):
+                raise Exception('Exception: downstream write failed')
+
+            writeTable = writeAnswers = writeText
+
+        ig = _fake_ig(
+            allow_execute=True,
+            _run_query_raw=lambda aql, *a, **k: {'rows': [{'a': 1}], 'affected_rows': 0},
+            _run_query=lambda aql, *a, **k: [{'a': 1}],
+        )
+        inst = _make_instance(
+            ig=ig,
+            instance=_Downstream(lanes, invoke_answer={'isValid': 'true', 'query': 'FOR u IN users RETURN u'}),
+        )
+
+        with pytest.raises(Exception, match='downstream write failed'):
+            inst.writeQuestions(self._question(getattr(_QTYPE, qtype), text='FOR u IN users RETURN u'))
+
+    def test_validate_query_still_reports_a_server_rejection_as_a_message(self):
+        def _raise(_aql):
+            raise ArangoError('AQL: syntax error, unexpected identifier')
+
+        ig = IGlobal.__new__(IGlobal)
+        ig.db = SimpleNamespace(aql=SimpleNamespace(explain=_raise))
+
+        ok, message = ig._validate_query('FOR RETURN')
+
+        assert ok is False and 'syntax error' in message
 
 
 class TestFormatMarkdown:

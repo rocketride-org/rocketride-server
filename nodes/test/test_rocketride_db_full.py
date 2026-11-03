@@ -399,6 +399,188 @@ class TestRocketrideSqlE2E:
         finally:
             glb.endGlobal()
 
+    # -- lanes fail closed (rocketride-ai/rocketride-saas#789) ------------------
+
+    @staticmethod
+    def _refuse_connections(glb):
+        """Point the node's engine at a port nothing listens on.
+
+        This is what a pooler that went away leaves a running pipeline with: the
+        task started and reflected the schema, and the next connection attempt is
+        refused.
+        """
+        import socket
+
+        from sqlalchemy import create_engine
+
+        with socket.socket() as probe:
+            probe.bind(('127.0.0.1', 0))
+            closed_port = probe.getsockname()[1]
+        glb.engine.dispose()
+        glb.engine = create_engine(
+            f'postgresql+psycopg2://nobody:nopass@127.0.0.1:{closed_port}/{TEST_DB_NAME}',
+            connect_args={'connect_timeout': 2},
+        )
+
+    @staticmethod
+    def _lanes(inst, lanes=('text',)):
+        """Give the instance a downstream that records what is emitted."""
+
+        class _Sink:
+            def __init__(self):
+                self.text = []
+                self.answers = []
+
+            def getListeners(self):
+                return list(lanes)
+
+            def writeText(self, text):
+                self.text.append(text)
+
+            def writeAnswers(self, answer):
+                self.answers.append(answer)
+
+        inst.instance = _Sink()
+        return inst.instance
+
+    @staticmethod
+    def _answer(rows):
+        return types.SimpleNamespace(getJson=lambda: rows)
+
+    def test_answers_lane_inserts_when_the_database_is_up(self, rr_env, monkeypatch, sql_table, raw_conn):
+        """Control for the failure cases below: the same call writes the row on a live database."""
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            self._lanes(inst)
+            inst.writeAnswers(self._answer([{'name': 'washer', 'qty': 11}]))
+            with raw_conn.cursor() as cur:
+                cur.execute(f"SELECT count(*) FROM {sql_table} WHERE name = 'washer'")
+                assert cur.fetchone()[0] == 1
+        finally:
+            glb.endGlobal()
+
+    def test_answers_lane_fails_when_the_connection_is_refused(self, rr_env, monkeypatch, sql_table, raw_conn):
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        lane_error = sys.modules['ai.common.database.db_instance_base'].DatabaseLaneError
+        try:
+            self._refuse_connections(glb)
+            self._lanes(inst)
+            with pytest.raises(lane_error) as raised:
+                inst.writeAnswers(self._answer([{'name': 'washer', 'qty': 11}]))
+            assert '127.0.0.1' not in str(raised.value)
+            with raw_conn.cursor() as cur:
+                cur.execute(f"SELECT count(*) FROM {sql_table} WHERE name = 'washer'")
+                assert cur.fetchone()[0] == 0
+        finally:
+            glb.endGlobal()
+
+    def test_table_lane_fails_when_the_connection_is_refused(self, rr_env, monkeypatch, sql_table):
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        lane_error = sys.modules['ai.common.database.db_instance_base'].DatabaseLaneError
+        # The shared stand-in for ai.common.table carries only the markdown writer.
+        monkeypatch.setattr(
+            sys.modules['ai.common.table'].Table,
+            'parse_markdown_table',
+            lambda markdown: (['name', 'qty'], [['washer', 11]]),
+            raising=False,
+        )
+        try:
+            self._refuse_connections(glb)
+            self._lanes(inst)
+            with pytest.raises(lane_error):
+                inst.writeTable('| name | qty |\n| --- | --- |\n| washer | 11 |')
+        finally:
+            glb.endGlobal()
+
+    def test_question_lane_fails_and_never_emits_none_when_the_connection_is_refused(
+        self, rr_env, monkeypatch, sql_table
+    ):
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        lane_error = sys.modules['ai.common.database.db_instance_base'].DatabaseLaneError
+        try:
+            self._refuse_connections(glb)
+            sink = self._lanes(inst, ('text', 'answers'))
+            inst._buildSQLQuery = lambda question_text: {'isValid': True, 'query': f'SELECT * FROM {sql_table}'}
+            question = types.SimpleNamespace(questions=[types.SimpleNamespace(text='what is in stock?')])
+            with pytest.raises(lane_error):
+                inst.writeQuestions(question)
+            assert sink.text == [] and sink.answers == []
+        finally:
+            glb.endGlobal()
+
+    # -- EXPLAIN and table checks: an outage is not a verdict on the SQL ---------
+
+    @staticmethod
+    def _unavailable_error():
+        return sys.modules['ai.common.database.db_global_base'].DatabaseUnavailableError
+
+    def test_explain_over_a_refused_connection_fails_the_question_lane_without_a_repair_loop(
+        self, rr_env, monkeypatch, sql_table
+    ):
+        glb, inst = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            self._refuse_connections(glb)
+            sink = self._lanes(inst, ('text', 'answers'))
+            glb.max_validation_attempts = 5
+            asked = []
+            inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: (
+                asked.append(1) or {'isValid': True, 'query': f'SELECT * FROM {sql_table}'}
+            )
+            question = types.SimpleNamespace(questions=[types.SimpleNamespace(text='what is in stock?')])
+
+            with pytest.raises(self._unavailable_error()):
+                inst.writeQuestions(question)
+
+            assert len(asked) == 1  # the outage was not fed back to the LLM as a rejection
+            assert sink.text == [] and sink.answers == []
+        finally:
+            glb.endGlobal()
+
+    def test_explain_of_bad_sql_on_a_live_database_is_still_a_rejection(self, rr_env, monkeypatch, sql_table):
+        glb, _ = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            ok, message = glb._validateQuery('SELECT * FROM rr_no_such_table')
+            assert ok is False and 'does not exist' in message
+
+            ok, message = glb._validateQuery(f'SELECT no_such_column FROM {sql_table}')
+            assert ok is False and 'no_such_column' in message
+
+            assert glb._validateQuery(f'SELECT name FROM {sql_table}') == (True, '')
+        finally:
+            glb.endGlobal()
+
+    def test_explain_over_a_connection_the_server_closed_is_an_outage(self, rr_env, monkeypatch, sql_table, raw_conn):
+        """The connection died after it was obtained: SQLAlchemy marks it invalid, no message matching needed."""
+        glb, _ = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            with glb.engine.connect() as conn:
+                pid = conn.exec_driver_sql('SELECT pg_backend_pid()').scalar()
+            with raw_conn.cursor() as cur:
+                cur.execute('SELECT pg_terminate_backend(%s)', (pid,))
+            raw_conn.commit()
+
+            with pytest.raises(self._unavailable_error()):
+                glb._validateQuery(f'SELECT name FROM {sql_table}')
+        finally:
+            glb.endGlobal()
+
+    def test_table_exists_over_a_refused_connection_raises_and_a_missing_table_is_false(
+        self, rr_env, monkeypatch, sql_table
+    ):
+        glb, _ = self._begin(monkeypatch, {'table': sql_table})
+        try:
+            assert glb._tableExists(sql_table) is True
+            assert glb._tableExists('rr_no_such_table') is False
+
+            self._refuse_connections(glb)
+
+            with pytest.raises(self._unavailable_error()):
+                glb._tableExists(sql_table)
+            with pytest.raises(self._unavailable_error()):
+                glb._getTableSchema(sql_table)
+        finally:
+            glb.endGlobal()
+
     def test_config_connection_fields_ignored(self, rr_env, monkeypatch, sql_table):
         """The defining property: config cannot redirect the connection."""
         glb, _ = self._begin(
