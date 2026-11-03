@@ -30,7 +30,7 @@
 // the server's get_schema untouched; app-side queries fill the gaps).
 // =============================================================================
 
-import type { ISqlSession, SqlDialect } from '../connect';
+import type { SqlSession, SqlDialect } from '../connect';
 
 // NOTE: the table name below is DATA (compared against INFORMATION_SCHEMA
 // columns), not an identifier, so it rides as a `$1` BIND on both dialects.
@@ -44,7 +44,7 @@ import type { ISqlSession, SqlDialect } from '../connect';
 // =============================================================================
 
 /** One named foreign key constraint read from INFORMATION_SCHEMA. */
-export interface INamedForeignKey {
+export interface NamedForeignKey {
 	/** Constraint name (the handle DROP needs). */
 	name: string;
 	/** Local column name. */
@@ -63,7 +63,7 @@ export interface INamedForeignKey {
  * @param table - The table name.
  * @returns The table's named foreign keys (possibly empty).
  */
-export async function fetchForeignKeyNames(session: ISqlSession, dialect: SqlDialect, table: string): Promise<INamedForeignKey[]> {
+export async function fetchForeignKeyNames(session: SqlSession, dialect: SqlDialect, table: string): Promise<NamedForeignKey[]> {
 	let sql: string;
 	if (dialect === 'mysql') {
 		// KEY_COLUMN_USAGE carries the referencing rows; scope to this schema.

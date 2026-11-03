@@ -63,7 +63,7 @@ export interface IStatement {
 }
 
 /** Where one keyword sits in a statement's code. */
-export interface IKeywordSite {
+export interface KeywordSite {
 	/** The keyword, spelled as the caller passed it in. */
 	keyword: string;
 	/** Character offset of the occurrence in the statement. */
@@ -82,7 +82,7 @@ export interface IKeywordSite {
 }
 
 /** The lexical traits that differ between the dialects the app speaks. */
-interface IScanTraits {
+interface ScanTraits {
 	/** `#` starts a line comment (MySQL only; ClickHouse has `--` and `/* *\/`). */
 	hashComments: boolean;
 	/** `--` only starts a comment when whitespace follows (MySQL only). */
@@ -99,7 +99,7 @@ interface IScanTraits {
 type RegionKind = 'code' | 'string' | 'comment';
 
 /** A maximal stretch of one lexical kind. */
-interface IRegion {
+interface Region {
 	/** The lexical kind of this stretch. */
 	kind: RegionKind;
 	/** Start offset (inclusive). */
@@ -125,7 +125,7 @@ interface IRegion {
  * @param dialect - The engine dialect.
  * @returns The traits the scanner applies.
  */
-function traitsFor(dialect: SqlDialect): IScanTraits {
+function traitsFor(dialect: SqlDialect): ScanTraits {
 	return {
 		hashComments: dialect === 'mysql',
 		dashCommentsNeedSpace: dialect === 'mysql',
@@ -227,7 +227,7 @@ function skipDelimited(sql: string, open: number, delim: string, backslashEscape
  * @param traits - The dialect's lexical traits.
  * @returns True when the dashes start a comment.
  */
-function opensDashComment(sql: string, open: number, traits: IScanTraits): boolean {
+function opensDashComment(sql: string, open: number, traits: ScanTraits): boolean {
 	if (!traits.dashCommentsNeedSpace) return true;
 	const next = sql[open + 2];
 	// Nothing follows the dashes, so there is no text left to hide either way.
@@ -336,8 +336,8 @@ function skipDollarQuoted(sql: string, open: number): number {
  * @param traits - The dialect's lexical traits.
  * @returns The regions, in order, covering the whole buffer.
  */
-function scanRegions(sql: string, traits: IScanTraits): IRegion[] {
-	const regions: IRegion[] = [];
+function scanRegions(sql: string, traits: ScanTraits): Region[] {
+	const regions: Region[] = [];
 	const n = sql.length;
 	let codeStart = 0;
 	let i = 0;
@@ -436,7 +436,7 @@ function lineAt(starts: number[], offset: number): number {
  * @param traits - The dialect's lexical traits.
  * @returns A string of the same length holding only the code characters.
  */
-function maskNonCode(sql: string, traits: IScanTraits): string {
+function maskNonCode(sql: string, traits: ScanTraits): string {
 	const regions = scanRegions(sql, traits);
 	let out = '';
 	for (const region of regions) {
@@ -463,7 +463,7 @@ export function stripSqlComments(sql: string, dialect: SqlDialect = 'unknown'): 
 }
 
 /** One whole-word keyword occurrence in code. */
-interface IKeywordHit {
+interface KeywordHit {
 	/** Offset of the occurrence in the masked text. */
 	index: number;
 	/** Parenthesis depth, counted in code only, at that offset. */
@@ -489,7 +489,7 @@ interface IKeywordHit {
  * @param keyword - The keyword to look for (case-insensitive).
  * @returns The occurrences, in text order.
  */
-function keywordHits(masked: string, keyword: string): IKeywordHit[] {
+function keywordHits(masked: string, keyword: string): KeywordHit[] {
 	// The boundary is the IDENTIFIER class, not `\b`: `\b` is ASCII-only, so it
 	// would end the word between `where` and the `é` of the legal alias
 	// `whereé` and read that alias as a WHERE clause. The leading boundary is
@@ -497,7 +497,7 @@ function keywordHits(masked: string, keyword: string): IKeywordHit[] {
 	// 16.4, and this app supports Safari 13 — so the keyword starts after
 	// whatever group 1 matched.
 	const needle = new RegExp(`(^|[^${IDENTIFIER_CLASS}])(${keyword})(?![${IDENTIFIER_CLASS}])`, 'gi');
-	const hits: IKeywordHit[] = [];
+	const hits: KeywordHit[] = [];
 	const open: number[] = [];
 	let scanned = 0;
 	let match = needle.exec(masked);
@@ -553,7 +553,7 @@ export function hasTopLevelKeyword(sql: string, keyword: string, dialect: SqlDia
  *
  * The lexical half of the question "what is this statement doing": WHERE each
  * keyword sits, not what that means. The caller applies the meaning — the
- * pattern check reads the first site of a {@link IKeywordSite.group} as that
+ * pattern check reads the first site of a {@link KeywordSite.group} as that
  * group's verb, whether the group is the statement itself or one CTE body.
  *
  * Text order is decided on masked text, so an occurrence inside a literal, a
@@ -564,9 +564,9 @@ export function hasTopLevelKeyword(sql: string, keyword: string, dialect: SqlDia
  * @param dialect - The engine dialect.
  * @returns The sites, sorted by position.
  */
-export function keywordSites(sql: string, keywords: string[], dialect: SqlDialect = 'unknown'): IKeywordSite[] {
+export function keywordSites(sql: string, keywords: string[], dialect: SqlDialect = 'unknown'): KeywordSite[] {
 	const masked = maskNonCode(sql, traitsFor(dialect));
-	const sites: IKeywordSite[] = [];
+	const sites: KeywordSite[] = [];
 	for (const keyword of keywords) {
 		for (const hit of keywordHits(masked, keyword)) {
 			sites.push({ keyword, index: hit.index, depth: hit.depth, group: hit.group });

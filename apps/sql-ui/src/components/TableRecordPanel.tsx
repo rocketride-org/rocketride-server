@@ -33,8 +33,8 @@
 import React, { useId, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Button, DetailPanel, LabelValue, Section, StatusBadge } from 'shell';
-import type { ISqlSchemaTable, SqlDialect } from '../connect';
-import type { IJoinPath, IRelationGraph } from '../schema/relations';
+import type { SqlSchemaTable, SqlDialect } from '../connect';
+import type { JoinPath, RelationGraph } from '../schema/relations';
 import { MAX_JOIN_PATHS, describeHop, findJoinPaths, generateJoinSql, inboundReferences } from '../schema/relations';
 import { quoteIdent } from '../sql/paging';
 import { announce } from '../a11y/announce';
@@ -45,7 +45,7 @@ import { TableIcon } from '../icons';
 // =============================================================================
 
 /** Props for the {@link TableRecordPanel} component. */
-export interface ITableRecordPanelProps {
+export interface TableRecordPanelProps {
 	/** Whether the drawer is open. */
 	open: boolean;
 	/** Fired when the user dismisses the drawer. */
@@ -55,11 +55,11 @@ export interface ITableRecordPanelProps {
 	/** Table name (drawer title). */
 	table: string;
 	/** The table's reflected schema (null renders an empty body). */
-	def: ISqlSchemaTable | null;
+	def: SqlSchemaTable | null;
 	/** Engine dialect — drives identifier quoting and the no-keys wording. */
 	dialect: SqlDialect;
 	/** The connection's declared-foreign-key graph. */
-	graph: IRelationGraph;
+	graph: RelationGraph;
 	/** Unix ms the snapshot was read (0 = never). */
 	refreshedAt: number;
 	/** Fired when the user opens the table's data browser. */
@@ -73,11 +73,11 @@ export interface ITableRecordPanelProps {
 }
 
 /** What the join-path finder has to say right now. */
-interface IPathResult {
+interface PathResult {
 	/** The destination that was searched for. */
 	to: string;
 	/** The shortest paths found (empty = none within the depth cap). */
-	paths: IJoinPath[];
+	paths: JoinPath[];
 }
 
 // =============================================================================
@@ -250,10 +250,10 @@ function clock(at: number): string {
  * keys, the tables that reference it, one-click preview queries, and a join
  * path to any other table — all from the connection's schema snapshot.
  *
- * @param props - {@link ITableRecordPanelProps}.
+ * @param props - {@link TableRecordPanelProps}.
  * @returns The drawer element.
  */
-export const TableRecordPanel: React.FC<ITableRecordPanelProps> = (props) => {
+export const TableRecordPanel: React.FC<TableRecordPanelProps> = (props) => {
 	const {
 		open, onClose, database, table, def, dialect, graph, refreshedAt,
 		onBrowseData, onDesign, onOpenTable, onOpenQuery,
@@ -272,7 +272,7 @@ export const TableRecordPanel: React.FC<ITableRecordPanelProps> = (props) => {
 	const inbound = useMemo(() => inboundReferences(graph, table), [graph, table]);
 
 	const [target, setTarget] = useState('');
-	const [result, setResult] = useState<IPathResult | null>(null);
+	const [result, setResult] = useState<PathResult | null>(null);
 	const [chosen, setChosen] = useState(0);
 	const selectId = useId();
 

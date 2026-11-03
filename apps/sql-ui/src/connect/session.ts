@@ -27,17 +27,18 @@
 // Attach-mechanics live here on purpose (see types.ts). Today a session
 // resolves the owning task's token lazily and drives the node's shared SQL
 // tools (execute / get_schema / refresh_schema / dialect) via client.tool.
-// When the attach path changes, this file changes — the ISqlSession contract
+// When the attach path changes, this file changes — the SqlSession contract
 // does not.
 // =============================================================================
 
-import type { RocketRideClient } from 'shell';
+import type { RocketRideClient } from 'rocketride';
+import { revivalFor } from './resolver';
 import type {
-	ISqlEndpoint,
-	ISqlExecuteResult,
-	ISqlProbeResult,
-	ISqlSchemaResponse,
-	ISqlSession,
+	SqlEndpoint,
+	SqlExecuteResult,
+	SqlProbeResult,
+	SqlSchemaResponse,
+	SqlSession,
 	SqlDialect,
 } from './types';
 
@@ -63,13 +64,13 @@ function toDialect(value: unknown): SqlDialect {
 // =============================================================================
 
 /**
- * ISqlSession over the pipeline tool transport: resolves the task token on
+ * SqlSession over the pipeline tool transport: resolves the task token on
  * first use, invokes the node's tools through client.tool, and re-resolves
  * the token once on failure (the task may have restarted since binding).
  */
-class SqlToolSession implements ISqlSession {
+class SqlToolSession implements SqlSession {
 	/** The endpoint this session is bound to. */
-	readonly endpoint: ISqlEndpoint;
+	readonly endpoint: SqlEndpoint;
 
 	/** The shell's RocketRide client (owned by the shell, never by this app). */
 	private readonly client: RocketRideClient;
@@ -81,7 +82,7 @@ class SqlToolSession implements ISqlSession {
 	 * @param client - The shell's RocketRide client.
 	 * @param endpoint - The endpoint to bind to.
 	 */
-	constructor(client: RocketRideClient, endpoint: ISqlEndpoint) {
+	constructor(client: RocketRideClient, endpoint: SqlEndpoint) {
 		this.client = client;
 		this.endpoint = endpoint;
 	}
@@ -94,10 +95,23 @@ class SqlToolSession implements ISqlSession {
 	 */
 	private async resolveToken(): Promise<string> {
 		if (this.token) return this.token;
-		const token = await this.client.getTaskToken({
+		let token = await this.client.getTaskToken({
 			projectId: this.endpoint.projectId,
 			source: this.endpoint.source,
 		});
+		if (!token) {
+			// Direct-mode temp pipelines idle out on their TTL — when the
+			// resolver registered a revival for this endpoint, re-`use` the
+			// pipeline once and resolve again before giving up.
+			const revive = revivalFor(this.endpoint.key);
+			if (revive) {
+				await revive();
+				token = await this.client.getTaskToken({
+					projectId: this.endpoint.projectId,
+					source: this.endpoint.source,
+				});
+			}
+		}
 		if (!token) {
 			throw new Error(`No running task for pipeline '${this.endpoint.pipelineName}'. Start the pipeline and retry.`);
 		}
@@ -138,25 +152,25 @@ class SqlToolSession implements ISqlSession {
 	}
 
 	/** @inheritdoc */
-	async execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean }): Promise<ISqlExecuteResult> {
+	async execute(sql: string, opts?: { params?: unknown[]; idempotent?: boolean }): Promise<SqlExecuteResult> {
 		// Omit `params` entirely when there is nothing to bind: the node's
 		// placeholder rewriting is skipped for an empty list, so an unbound
 		// statement keeps travelling exactly as it did before.
 		const params = opts?.params;
 		const input = params && params.length > 0 ? { sql, params } : { sql };
 		// Default NO retry: an unmarked statement may well be a write.
-		return this.invoke<ISqlExecuteResult>('execute', input, opts?.idempotent === true);
+		return this.invoke<SqlExecuteResult>('execute', input, opts?.idempotent === true);
 	}
 
 	/** @inheritdoc */
-	async getSchema(table?: string): Promise<ISqlSchemaResponse> {
-		return this.invoke<ISqlSchemaResponse>('get_schema', table ? { table } : {}, true);
+	async getSchema(table?: string): Promise<SqlSchemaResponse> {
+		return this.invoke<SqlSchemaResponse>('get_schema', table ? { table } : {}, true);
 	}
 
 	/** @inheritdoc */
-	async refreshSchema(): Promise<ISqlSchemaResponse> {
+	async refreshSchema(): Promise<SqlSchemaResponse> {
 		try {
-			return await this.invoke<ISqlSchemaResponse>('refresh_schema', {}, true);
+			return await this.invoke<SqlSchemaResponse>('refresh_schema', {}, true);
 		} catch {
 			// ANY failure falls back. A node without the tool and a node that
 			// simply could not answer are indistinguishable at this layer, and
@@ -187,7 +201,7 @@ class SqlToolSession implements ISqlSession {
  * @param endpoint - The endpoint to bind to.
  * @returns The bound session.
  */
-export function createSqlSession(client: RocketRideClient, endpoint: ISqlEndpoint): ISqlSession {
+export function createSqlSession(client: RocketRideClient, endpoint: SqlEndpoint): SqlSession {
 	return new SqlToolSession(client, endpoint);
 }
 
@@ -199,7 +213,7 @@ export function createSqlSession(client: RocketRideClient, endpoint: ISqlEndpoin
  * @param endpoint - The endpoint to probe.
  * @returns The probe result.
  */
-export async function probeSqlEndpoint(client: RocketRideClient, endpoint: ISqlEndpoint): Promise<ISqlProbeResult> {
+export async function probeSqlEndpoint(client: RocketRideClient, endpoint: SqlEndpoint): Promise<SqlProbeResult> {
 	const session = createSqlSession(client, endpoint);
 	try {
 		// Dialect first (cheapest), then a full reflection for the summary.

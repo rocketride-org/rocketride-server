@@ -26,7 +26,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { ISqlSchemaResponse } from '../src/connect';
+import type { SqlSchemaResponse } from '../src/connect';
 import { quoteIdent } from '../src/sql/paging';
 import {
 	buildRelationGraph,
@@ -43,7 +43,7 @@ import {
 // =============================================================================
 
 /** A small shop: orders -> customers, order_items -> orders/products, audit_log alone. */
-const SHOP: ISqlSchemaResponse = {
+const SHOP: SqlSchemaResponse = {
 	database: 'shop',
 	tables: {
 		customers: {
@@ -76,7 +76,7 @@ const SHOP: ISqlSchemaResponse = {
 };
 
 /** A composite key: shipments (tenant_id, order_no) -> orders (tenant_id, no). */
-const COMPOSITE: ISqlSchemaResponse = {
+const COMPOSITE: SqlSchemaResponse = {
 	tables: {
 		orders: {
 			columns: [{ column: 'tenant_id', type: 'INT' }, { column: 'no', type: 'INT' }],
@@ -94,7 +94,7 @@ const COMPOSITE: ISqlSchemaResponse = {
 };
 
 /** Two distinct keys between the same pair of tables. */
-const PARALLEL: ISqlSchemaResponse = {
+const PARALLEL: SqlSchemaResponse = {
 	tables: {
 		people: { columns: [{ column: 'id', type: 'INT' }], primary_key: ['id'] },
 		messages: {
@@ -111,7 +111,7 @@ const PARALLEL: ISqlSchemaResponse = {
 };
 
 /** A table that points at itself. */
-const SELF_REF: ISqlSchemaResponse = {
+const SELF_REF: SqlSchemaResponse = {
 	tables: {
 		nodes: {
 			columns: [{ column: 'id', type: 'INT' }, { column: 'parent_id', type: 'INT' }],
@@ -126,7 +126,7 @@ const SELF_REF: ISqlSchemaResponse = {
 };
 
 /** A chain long enough to exceed a depth cap: a -> b -> c -> d -> e -> f. */
-const CHAIN: ISqlSchemaResponse = {
+const CHAIN: SqlSchemaResponse = {
 	tables: {
 		a: { columns: [{ column: 'id', type: 'INT' }], primary_key: ['id'] },
 		b: { columns: [{ column: 'a_id', type: 'INT' }, { column: 'id', type: 'INT' }], primary_key: ['id'], foreign_keys: [{ columns: ['a_id'], referred_table: 'a', referred_columns: ['id'] }] },
@@ -290,7 +290,7 @@ describe('generateJoinSql', () => {
 	});
 
 	it('quotes per dialect, escaping quotes inside identifiers', () => {
-		const odd: ISqlSchemaResponse = {
+		const odd: SqlSchemaResponse = {
 			tables: {
 				'we"ird': { columns: [{ column: 'id', type: 'INT' }], primary_key: ['id'] },
 				'ba`d': {
@@ -316,7 +316,7 @@ describe('generateJoinSql', () => {
 	});
 
 	it('gives colliding initials distinct aliases', () => {
-		const collide: ISqlSchemaResponse = {
+		const collide: SqlSchemaResponse = {
 			tables: {
 				orders: { columns: [{ column: 'id', type: 'INT' }], primary_key: ['id'] },
 				offers: {

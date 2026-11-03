@@ -27,7 +27,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { SqlDialect } from '../src/connect';
-import type { AlterOp, IColumnSpec } from '../src/sql/ddl';
+import type { AlterOp, ColumnSpec } from '../src/sql/ddl';
 import { describeOp, generateAlterStatements, generateCreateTable } from '../src/sql/ddl';
 
 // =============================================================================
@@ -43,7 +43,7 @@ const DIALECTS: SqlDialect[] = ['mysql', 'postgres', 'clickhouse'];
  * @param over - Fields to override.
  * @returns The column spec.
  */
-function col(over: Partial<IColumnSpec> = {}): IColumnSpec {
+function col(over: Partial<ColumnSpec> = {}): ColumnSpec {
 	return { name: 'c', type: 'INT', nullable: true, defaultExpr: '', primaryKey: false, ...over };
 }
 

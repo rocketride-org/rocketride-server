@@ -44,7 +44,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { IPrefsApi } from 'shell';
-import type { IHistoryEntry } from '../src/history/types';
+import type { HistoryEntry } from '../src/history/types';
 import { DEFAULT_HISTORY_LIMITS } from '../src/history/trim';
 import { attachPrefs, setRecording } from '../src/history/historyStore';
 import { emitRun } from '../src/history/runEvents';
@@ -102,8 +102,8 @@ function fakePrefs(initial: Record<string, unknown> = {}): IFakePrefs {
  * @param key - The connection's endpoint key.
  * @returns The entries, or undefined when the connection was never written.
  */
-function storedEntries(prefs: IFakePrefs, key: string): IHistoryEntry[] | undefined {
-	const bag = prefs.values[PREF_HISTORY] as Record<string, IHistoryEntry[]> | undefined;
+function storedEntries(prefs: IFakePrefs, key: string): HistoryEntry[] | undefined {
+	const bag = prefs.values[PREF_HISTORY] as Record<string, HistoryEntry[]> | undefined;
 	return bag?.[key];
 }
 
@@ -127,7 +127,7 @@ function storedRecording(prefs: IFakePrefs, key: string): boolean | undefined {
  * @param at - The run time, which also orders the list.
  * @returns The entry.
  */
-function run(id: string, sql: string, at = 1): IHistoryEntry {
+function run(id: string, sql: string, at = 1): HistoryEntry {
 	return { id, sql, at, ms: 3, outcome: 'rows', rows: 1, kind: 'read' };
 }
 
@@ -283,7 +283,7 @@ describe('history store — reloading bounded entries', () => {
 			emitRun(key, run('prefix-orders', `${prefix} FROM orders`, 10));
 			emitRun(key, run('prefix-invoices', `${prefix} FROM invoices`, 20));
 			await settle();
-			const written = storedEntries(prefs, key) as IHistoryEntry[];
+			const written = storedEntries(prefs, key) as HistoryEntry[];
 			assert.equal(written.length, 2);
 			// The trap, stated as an assertion: on disk the two statements are
 			// character-for-character identical.

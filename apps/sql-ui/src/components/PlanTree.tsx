@@ -41,7 +41,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, KeyboardEvent } from 'react';
 import { StatusBadge } from 'shell';
-import type { IPlanNode } from '../sql/explain';
+import type { PlanNode } from '../sql/explain';
 import { planNotes } from '../sql/explain';
 
 // =============================================================================
@@ -49,17 +49,17 @@ import { planNotes } from '../sql/explain';
 // =============================================================================
 
 /** Props for the {@link PlanTree} component. */
-export interface IPlanTreeProps {
+export interface PlanTreeProps {
 	/** The parsed plan's root node. */
-	root: IPlanNode;
+	root: PlanNode;
 }
 
 /** One flattened, currently visible tree row. */
-interface IFlatRow {
+interface FlatRow {
 	/** Stable identity: the node's path through the tree (`0.2.1`). */
 	id: string;
 	/** The node this row draws. */
-	node: IPlanNode;
+	node: PlanNode;
 	/** ARIA level, 1-based. */
 	level: number;
 	/** Id of the row's parent (null at the root). */
@@ -171,7 +171,7 @@ const styles = {
  * @param collapsed - The set of collapsed node ids.
  * @param out - The accumulating row list.
  */
-function flatten(node: IPlanNode, id: string, level: number, parentId: string | null, collapsed: Set<string>, out: IFlatRow[]): void {
+function flatten(node: PlanNode, id: string, level: number, parentId: string | null, collapsed: Set<string>, out: FlatRow[]): void {
 	out.push({ id, node, level, parentId });
 	if (collapsed.has(id)) return;
 	node.children.forEach((child, i) => flatten(child, `${id}.${i}`, level + 1, id, collapsed, out));
@@ -189,13 +189,13 @@ function flatten(node: IPlanNode, id: string, level: number, parentId: string | 
  * into the first child), ← collapses an expanded row (or steps out to the
  * parent). Focus is roving — exactly one row is tabbable at a time.
  */
-export const PlanTree: React.FC<IPlanTreeProps> = ({ root }) => {
+export const PlanTree: React.FC<PlanTreeProps> = ({ root }) => {
 	const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 	const [focusedId, setFocusedId] = useState('0');
 	const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
-	const rows = useMemo<IFlatRow[]>(() => {
-		const out: IFlatRow[] = [];
+	const rows = useMemo<FlatRow[]>(() => {
+		const out: FlatRow[] = [];
 		flatten(root, '0', 1, null, collapsed, out);
 		return out;
 	}, [root, collapsed]);
@@ -234,7 +234,7 @@ export const PlanTree: React.FC<IPlanTreeProps> = ({ root }) => {
 	 * @param e - The keyboard event.
 	 * @param row - The row the event came from.
 	 */
-	const onKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>, row: IFlatRow): void => {
+	const onKeyDown = useCallback((e: KeyboardEvent<HTMLDivElement>, row: FlatRow): void => {
 		const index = rows.findIndex((r) => r.id === row.id);
 		const hasChildren = row.node.children.length > 0;
 		const isCollapsed = collapsed.has(row.id);
