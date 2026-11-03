@@ -418,6 +418,11 @@ class TestRocketrideSqlE2E:
 
 
 def _load_vector_store(monkeypatch):
+    search_module = _load_from_path(
+        'ai.common.store.pgvector_store', _AI_SRC / 'ai/common/store/pgvector_store.py', register=False
+    )
+    monkeypatch.setitem(sys.modules, 'ai.common.store.pgvector_store', search_module)
+
     iglobal = _load_from_path('nodes.rocketride_vector.IGlobal', _VEC_NODE_DIR / 'IGlobal.py', register=False)
     pkg = types.ModuleType('nodes.rocketride_vector')
     pkg.__path__ = [str(_VEC_NODE_DIR)]
@@ -449,6 +454,7 @@ _NODE_LOADER_ALIASES = (
     (
         _load_vector_store,
         (
+            'ai.common.store.pgvector_store',
             'nodes.rocketride_vector',
             'nodes.rocketride_vector.IGlobal',
             'nodes.rocketride_vector.rocketride_vector',
@@ -573,8 +579,8 @@ class TestRocketrideVectorE2E:
             raw_conn.commit()
 
         # EXPLAIN the exact statement the driver runs for semantic search.
-        node_module = sys.modules['nodes.rocketride_vector.rocketride_vector']
-        search_sql = node_module.SQL_QUERIES['semantic_search'].format(
+        search_module = sys.modules['ai.common.store.pgvector_store']
+        search_sql = search_module.SEARCH_SQL['semantic_search'].format(
             collection=VEC_TABLE, similarity_operator='<=>', where_clause=''
         )
         probe = _unit_vec(rng)

@@ -190,20 +190,25 @@ case. Keyword search uses a content LIKE match; semantic search needs an
 embedding bound to the question and raises if none is available. Missing tables
 produce empty search results rather than an error.
 
-Semantic search first uses the normal nearest-neighbour query. If fewer than
-the requested number of matches meet the score threshold (and the 0.20 minimum
-floor), the node retries with an exact search using the same filters and limit.
-This keeps deleted chunks or other excluded HNSW candidates from hiding eligible
-matches. The retry scans the matching rows and can cost more on large tables;
-a full approximate result meeting the threshold does not trigger it. Score
-thresholds still apply, so the final response can contain fewer matches than
-requested. An unbounded search (`limit=null`) uses the exact query directly.
+On pgvector 0.8 or newer, semantic search uses an iterative HNSW scan in strict
+distance order. It can continue past deleted or metadata-excluded neighbours
+and serve limits larger than the initial candidate budget. The setting is
+transaction-local, so it works through a transaction pooler and does not persist
+after the search. The server's HNSW scan and memory budgets still apply.
 
-Queries with few or no qualifying matches take the exact retry. With the default
-non-iterative HNSW scan, requesting more results than its `hnsw.ef_search`
-candidate budget (40 by default) can also trigger the retry even when many
-documents match. Account for that scan cost when choosing limits and thresholds
-for large tables.
+If that scan returns no matches meeting the score threshold (and the 0.20
+minimum floor), the node retries exactly with the same filters and limit.
+Iterative scans can still miss a relevant neighbour, particularly among many
+duplicate vectors. The retry avoids an empty answer when an eligible match
+exists, but scans the eligible vectors even when the answer is genuinely empty.
+This can be expensive on large tables. A nonempty qualifying result does not
+trigger the retry merely because it contains fewer matches than requested;
+it remains approximate and does not guarantee all qualifying neighbours.
+
+On pgvector older than 0.8, iterative scans are unavailable, so an underfilled
+qualifying result also triggers the exact retry. An unbounded search
+(`limit=null`) uses the exact query directly on every version. Score thresholds
+still apply, so a response can contain fewer matches than requested.
 
 Deleted objects are excluded by default, while document rendering reassembles
 stored chunks by chunkId. The store removes all existing chunks for incoming
