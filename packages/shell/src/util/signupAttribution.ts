@@ -53,22 +53,37 @@ function privacySignalOn(): boolean {
 	}
 }
 
-function hasConsent(): boolean {
+/**
+ * The visitor's choice on the SaaS consent banner, read from its record.
+ *
+ * @returns The choice of a valid, current record; 'undecided' when the record is missing, malformed or expired;
+ *          null when storage cannot be read, which shows neither a choice nor its absence.
+ */
+function consentChoice(): 'accepted' | 'rejected' | 'undecided' | null {
+	let raw: string | null;
 	try {
-		if (privacySignalOn()) return false;
-
-		const consent = JSON.parse(localStorage.getItem(CONSENT_STORAGE_KEY) ?? 'null');
-		if (consent?.v !== 1) return false;
-		if (consent.choice !== 'accepted') return false;
-		if (typeof consent.at !== 'number') return false;
-		if (!Number.isFinite(consent.at)) return false;
-		const now = Date.now();
-		if (now - consent.at > CONSENT_LIFETIME_MS) return false;
-		if (consent.at > now + CONSENT_CLOCK_SKEW_MS) return false;
-		return true;
+		raw = localStorage.getItem(CONSENT_STORAGE_KEY);
 	} catch {
-		return false;
+		return null;
 	}
+	try {
+		const consent = JSON.parse(raw ?? 'null');
+		if (consent?.v !== 1) return 'undecided';
+		if (consent.choice !== 'accepted' && consent.choice !== 'rejected') return 'undecided';
+		if (typeof consent.at !== 'number') return 'undecided';
+		if (!Number.isFinite(consent.at)) return 'undecided';
+		const now = Date.now();
+		if (now - consent.at > CONSENT_LIFETIME_MS) return 'undecided';
+		if (consent.at > now + CONSENT_CLOCK_SKEW_MS) return 'undecided';
+		return consent.choice;
+	} catch {
+		return 'undecided';
+	}
+}
+
+function hasConsent(): boolean {
+	if (privacySignalOn()) return false;
+	return consentChoice() === 'accepted';
 }
 
 /**
@@ -76,15 +91,17 @@ function hasConsent(): boolean {
  *
  * @param value - Untrusted signup properties to validate under current consent.
  * @returns Valid context, or null when consent, privacy, expiry or the dev gate disallows it. A cookieless
- *          context (consent_state set) is valid without an opt-in.
+ *          context (consent_state set) is valid only while the visitor is undecided: no privacy signal and no
+ *          valid, current consent record.
  */
 export function currentSignupProperties(value: unknown): SignupProperties | null {
 	if (isEmbeddedDevShell()) return null;
 	const context = normalizeSignupProperties(value);
 	if (!context) return null;
-	// A cookieless context (consent_state set) needs no opt-in, but a privacy signal still drops it.
+	// A cookieless context needs no opt-in, but any choice on the banner or a privacy signal drops it.
 	if (context.consent_state) {
 		if (privacySignalOn()) return null;
+		if (consentChoice() !== 'undecided') return null;
 		return context;
 	}
 	if (!hasConsent()) return null;

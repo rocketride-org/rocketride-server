@@ -1690,16 +1690,20 @@ for (const mode of ['provider', 'legacy', 'direct'] as const) {
 }
 
 for (const mode of ['provider', 'legacy', 'direct'] as const) {
-	for (const scenario of ['undecided', 'rejected', 'accepted', 'private'] as const) {
-		test(`${mode} OAuth carries ${scenario} cookieless context in the OAuth state, never in storage`, async () => {
+	for (const scenario of ['undecided', 'expired', 'rejected', 'accepted', 'private', 'unreadable'] as const) {
+		test(`${mode} OAuth puts a cookieless context in the OAuth state only for an undecided visitor (${scenario}), never in storage`, async () => {
 			const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
 			const session = recordingSession([['rr:auth:signup', 'stale context']]);
 			const records: Array<[string, string]> = [];
 			if (scenario === 'rejected' || scenario === 'accepted') records.push(['rr_consent_v1', JSON.stringify({ v: 1, choice: scenario, at: Date.now() })]);
+			// An expired record no longer counts as a choice.
+			if (scenario === 'expired') records.push(['rr_consent_v1', JSON.stringify({ v: 1, choice: 'rejected', at: Date.now() - 366 * 24 * 60 * 60 * 1000 })]);
 			const local = recordingSession(records);
+			let localStorage: object = local.storage;
+			if (scenario === 'unreadable') localStorage = { getItem: () => { throw new Error('storage denied'); } };
 			const redirects: string[] = [];
 			const win = topLevelWindow({ location: { search: '', pathname: '/', origin: 'https://shell.example.test', assign: (url: string) => redirects.push(url) } });
-			await withGlobals({ window: win, sessionStorage: session.storage, localStorage: local.storage, navigator: { globalPrivacyControl: scenario === 'private' } }, async () => {
+			await withGlobals({ window: win, sessionStorage: session.storage, localStorage, navigator: { globalPrivacyControl: scenario === 'private' } }, async () => {
 				const provider = CloudAuthProvider.getInstance();
 				provider.initialize({ zitadelUrl: 'https://idp.example.test', clientId: 'test-client' });
 				const { manager } = createTestManager();
@@ -1711,8 +1715,8 @@ for (const mode of ['provider', 'legacy', 'direct'] as const) {
 				assert.equal(local.writes.length, 0);
 				assert.equal(redirects.length, 1);
 				const state = new URL(redirects[0]).searchParams.get('state');
-				if (scenario === 'private') assert.equal(state, null);
-				else assert.deepEqual(JSON.parse(atob(state!)), { v: 1, signup });
+				if (scenario === 'undecided' || scenario === 'expired') assert.deepEqual(JSON.parse(atob(state!)), { v: 1, signup });
+				else assert.equal(state, null);
 				provider.dispose();
 			});
 		});
@@ -1723,10 +1727,14 @@ test('a cookieless signup completion reads its context from the OAuth state enve
 	const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
 	const consented = signupContext();
 	const accepted = { v: 1, choice: 'accepted', at: Date.now() };
+	const rejected = { v: 1, choice: 'rejected', at: Date.now() };
 	const envelope = (value: unknown) => btoa(JSON.stringify(value));
 	// [name, state, expected context, consent record in the browser at the callback]
 	const cases: Array<[string, string | null, SignupProperties | null, object | null]> = [
 		['undecided envelope', envelope({ v: 1, signup }), signup, null],
+		['undecided envelope after the visitor rejected', envelope({ v: 1, signup }), null, rejected],
+		['undecided envelope after the visitor accepted', envelope({ v: 1, signup }), null, accepted],
+		['undecided envelope with an expired record', envelope({ v: 1, signup }), signup, { ...rejected, at: Date.now() - 366 * 24 * 60 * 60 * 1000 }],
 		['bare context without the envelope', envelope(signup), null, null],
 		['envelope without a version', envelope({ signup }), null, null],
 		['envelope of another version', envelope({ v: 2, signup }), null, null],
