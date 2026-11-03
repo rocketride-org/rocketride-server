@@ -1,11 +1,12 @@
 """
 Unit tests for ai.common.database.sql_safety.is_sql_safe.
 
-is_sql_safe is the dialect-agnostic gate that filters LLM-generated SQL before
-the relational-DB drivers run it. Only SELECT and WITH (CTE) statements are
-allowed; everything else (mutation, DDL, file IO, CALL, etc.) must be rejected.
-These tests exercise the allowlist, the comment / multi-statement stripping, and
-the SELECT INTO OUTFILE / DUMPFILE side-channel guard.
+is_sql_safe is the shape check that filters LLM-generated SQL before the
+relational-DB drivers run it. Only SELECT (optionally behind EXPLAIN) is
+allowed; everything else (mutation, DDL, WITH, file IO, CALL, etc.) must be
+rejected, and so must a SELECT with INTO or a row lock. These tests exercise
+the allowlist, the masking of literals and comments under PostgreSQL and MySQL
+rules, multi-statement input, and the clauses that make a SELECT write.
 """
 
 import pytest
@@ -163,4 +164,70 @@ def test_into_inside_string_does_not_false_positive():
     """The word 'into' in a string literal should not trigger the OUTFILE block."""
     # Plain SELECT with 'into' as data, not as a clause keyword.
     sql = "SELECT 'shipped into market' AS phrase"
+    assert is_sql_safe(sql) is True
+
+
+# ---------------------------------------------------------------------------
+# Literal- and dialect-aware masking (#2087)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        # A '--' inside a literal used to strip the rest of the statement, INTO OUTFILE included
+        "SELECT '--x' INTO OUTFILE '/tmp/export'",
+        "SELECT '--' INTO DUMPFILE '/tmp/x'",
+        # PostgreSQL ends a line comment at a lone CR, so the DROP after it runs
+        'SELECT 1 -- x\r; DROP TABLE t',
+        # MySQL reads --1 as minus minus one, not a comment
+        "SELECT 1--1 INTO OUTFILE '/tmp/f'",
+        # MySQL runs the body of /*! */ and /*M! */, and a /*+ */ hint can lift the time limit
+        "SELECT 1 /*! INTO OUTFILE '/tmp/f' */",
+        "SELECT 1 /*M! INTO OUTFILE '/tmp/f' */",
+        'SELECT /*+ SET_VAR(max_execution_time=0) */ SLEEP(100)',
+        # A backslash closes nothing in a PostgreSQL string, so the INTO here is real on PostgreSQL
+        "SELECT 'a' INTO new_t FROM t -- '",
+        # A dollar-quoted string hides a quote from a reader that does not know dollar quoting
+        "SELECT $$'$$ INTO new_t FROM t",
+    ],
+)
+def test_literals_and_comments_cannot_hide_a_clause(sql):
+    """Masking follows each database's reading of quotes and comments, so nothing real is hidden."""
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        'SELECT * INTO new_t FROM t',
+        'SELECT * INTO new_t FROM t WHERE a > 1',
+        'SELECT a INTO @v FROM t',
+        'SELECT * FROM t FOR UPDATE',
+        'SELECT * FROM t FOR NO KEY UPDATE',
+        'SELECT * FROM t FOR SHARE',
+        'SELECT * FROM t LOCK IN SHARE MODE',
+    ],
+)
+def test_select_that_writes_or_locks_is_rejected(sql):
+    """SELECT INTO creates a table (PostgreSQL) or a file (MySQL); FOR UPDATE / SHARE take row locks."""
+    assert is_sql_safe(sql) is False
+
+
+@pytest.mark.parametrize(
+    'sql',
+    [
+        "SELECT 'it''s' AS q",
+        "SELECT E'it's' AS q",
+        "SELECT $$'$$ AS q",
+        'SELECT 5 # 3',
+        'SELECT `into` FROM t',
+        'SELECT "into" FROM t',
+        "SELECT 'a; DROP TABLE t' AS q",
+        "SELECT name FROM t WHERE note = 'for update'",
+        'SELECT 1 -- INTO OUTFILE\nFROM t',
+    ],
+)
+def test_ordinary_reads_with_quotes_and_comments_pass(sql):
+    """Quoted text, identifiers and comments that only look like a clause do not reject a read."""
     assert is_sql_safe(sql) is True

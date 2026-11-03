@@ -161,11 +161,22 @@ from the environment where the pipeline runs.
 ### Generated-query safety
 
 For LLM-generated SQL, the node only accepts `SELECT`, optionally preceded by
-`EXPLAIN`. It strips comments, checks every semicolon-separated statement, and
-rejects CTEs plus `SELECT ... INTO OUTFILE` or `INTO DUMPFILE`. It validates
-each safe candidate with `EXPLAIN` and feeds database errors to the LLM for the
-next attempt. If the LLM decides a question is not a database query, its text
+`EXPLAIN`, and rejects a `SELECT` with `INTO` (`INTO OUTFILE` and
+`INTO DUMPFILE` included) or a row lock. It masks literals and comments before
+checking, under MySQL rules (backslash escapes, `#` and `-- ` comments) as well
+as PostgreSQL's, rejects comments MySQL runs (`/*! */`, `/*M! */`) and optimizer
+hints (`/*+ */`), checks every semicolon-separated statement, and rejects CTEs.
+It validates each safe candidate with `EXPLAIN` and feeds database errors to the
+LLM for the next attempt. If the LLM decides a question is not a database query, its text
 answer is emitted instead of executing SQL.
+
+The `EXPLAIN` and the query run in a read-only session
+(`SET SESSION TRANSACTION READ ONLY`), which refuses writes and DDL, with
+`max_execution_time` (`max_statement_time` on MariaDB) set to 60 seconds; both
+are reset before the connection is reused. The shape check is a first pass, not
+the guarantee, and a read-only session does not stop `LOAD_FILE()` or
+`SELECT ... INTO OUTFILE`, because a file is not a table: connect as a user that
+has `SELECT` on the tables it should answer from and no `FILE` privilege.
 
 ### Inserting answers
 

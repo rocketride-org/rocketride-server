@@ -42,8 +42,9 @@ import re
 import threading
 
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from sqlalchemy import (
     Column,
@@ -58,6 +59,7 @@ from sqlalchemy import (
     inspect,
     text,
 )
+from sqlalchemy.engine import Connection
 from sqlalchemy.exc import DBAPIError
 
 from rocketlib import IGlobalBase, error, warning
@@ -159,6 +161,13 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # SQLAlchemy pool sizing for the runtime engine opened in `beginGlobal`.
     POOL_SIZE: int = 10
     MAX_OVERFLOW: int = 20
+
+    # Longest a generated query may run, in seconds (`read_only_connection`): a pg_sleep or a cartesian
+    # product the LLM wrote must not hold a worker and a pooled connection indefinitely.
+    READ_QUERY_TIMEOUT: int = 60
+
+    # ClickHouse only: the `readonly` level of the user's profile, read on first use
+    _clickhouse_profile_readonly: Optional[int] = None
 
     # Serialises this node's schema re-reflection: `refresh_schema`'s full
     # table walk against `_insertData`'s lazy rebuild of `schema`, and either
@@ -647,11 +656,100 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
 
         return db_schema
 
+    @contextmanager
+    def read_only_connection(self) -> Iterator[Connection]:
+        """Yield a connection on which the database refuses writes and stops a query after ``READ_QUERY_TIMEOUT``.
+
+        This is the guarantee that a generated query cannot change the database; ``is_sql_safe`` is only a
+        first pass over its shape.
+
+        - PostgreSQL: a READ ONLY transaction (``postgresql_readonly``, set before the transaction begins)
+          with ``SET LOCAL statement_timeout``.
+        - MySQL and MariaDB: a read-only session (``SET SESSION TRANSACTION READ ONLY``, which also refuses
+          DDL) with ``max_execution_time`` (``max_statement_time`` on MariaDB). ``SELECT ... INTO OUTFILE``
+          is not a table change and still runs here: ``is_sql_safe`` refuses it, and a role without the FILE
+          privilege cannot run it.
+        - ClickHouse: ``readonly=1`` and ``max_execution_time`` sent with each query; readonly=1 also refuses
+          table functions such as ``url()`` and ``file()`` and stops the query from changing either setting.
+          A user whose profile is already read-only gets only what it may change (``_clickhouse_read_settings``).
+        - SQLite: ``PRAGMA query_only``.
+
+        Nothing outlives the block: the transaction is rolled back, and what was set on the session is reset
+        before the connection goes back to the pool. A connection whose reset fails is discarded. Reads of
+        server files and signals to other sessions (``pg_read_file``, ``pg_terminate_backend``, ``LOAD_FILE``)
+        are reads to the database: only a role without those privileges stops them.
+
+        Raises:
+            RuntimeError: The engine's dialect has no read-only mode here, so no query is run.
+        """
+        dialect = self.engine.dialect.name
+        if dialect not in ('postgresql', 'mysql', 'clickhouse', 'sqlite'):
+            raise RuntimeError(f'No read-only mode for the {dialect} dialect; the query was not run')
+        timeout = int(self.READ_QUERY_TIMEOUT)
+        with self.engine.connect() as conn:
+            if dialect == 'postgresql':
+                # Before the transaction begins; SQLAlchemy resets it when the connection goes back to the pool
+                conn.execution_options(postgresql_readonly=True)
+                conn.exec_driver_sql(f'SET LOCAL statement_timeout = {timeout * 1000}')
+                yield conn
+                return
+            if dialect == 'clickhouse':
+                yield conn.execution_options(settings=self._clickhouse_read_settings(conn, timeout))
+                return
+            if dialect == 'mysql':
+                # The session, not one transaction: DDL commits implicitly and would start a read-write one
+                setting, value = (
+                    ('max_statement_time', timeout)
+                    if conn.dialect.is_mariadb
+                    else ('max_execution_time', timeout * 1000)
+                )
+                begin = ['SET SESSION TRANSACTION READ ONLY', f'SET SESSION {setting} = {value}']
+                end = ['SET SESSION TRANSACTION READ WRITE', f'SET SESSION {setting} = DEFAULT']
+            else:
+                begin, end = ['PRAGMA query_only = ON'], ['PRAGMA query_only = OFF']
+            try:
+                for statement in begin:
+                    conn.exec_driver_sql(statement)
+                yield conn
+            finally:
+                try:
+                    conn.rollback()
+                    for statement in end:
+                        conn.exec_driver_sql(statement)
+                    conn.rollback()
+                except Exception as e:
+                    # The session may still be read-only or time-limited: never hand it to another caller
+                    warning(f'Could not reset a read-only database session, discarding it: {e}')
+                    conn.invalidate()
+
+    def _clickhouse_read_settings(self, conn: Connection, timeout: int) -> Dict[str, int]:
+        """Return the per-query settings that make a ClickHouse query read-only and time-limited.
+
+        A user whose profile already sets ``readonly`` may not send it, and with readonly=1 may send no
+        setting at all (every query would fail with code 164). So the profile's value is read once and
+        only what the user may change is sent: nothing for readonly=1 (the profile's own
+        ``max_execution_time`` applies), the time limit for readonly=2, both for readonly=0.
+
+        Args:
+            conn: An open connection, used for the one lookup.
+            timeout: The time limit in seconds.
+
+        Returns:
+            The settings to send with each query.
+        """
+        if self._clickhouse_profile_readonly is None:
+            self._clickhouse_profile_readonly = int(conn.exec_driver_sql("SELECT getSetting('readonly')").scalar())
+        if self._clickhouse_profile_readonly == 1:
+            return {}
+        if self._clickhouse_profile_readonly == 2:
+            return {'max_execution_time': timeout}
+        return {'max_execution_time': timeout, 'readonly': 1}
+
     def _validateQuery(self, query: str) -> tuple[bool, str]:
         """Validate a SQL query using EXPLAIN without executing it.
 
-        Runs ``EXPLAIN <query>`` inside a read-only connection.  The connection
-        is always closed after the check so no rows are returned or state changed.
+        Runs ``EXPLAIN <query>`` inside ``read_only_connection``, so even a database that
+        evaluated part of the query while planning it could not write.
         Returns ``(True, '')`` on success or ``(False, error_message)`` on failure.
 
         ``EXPLAIN`` is standard SQL supported by MySQL and PostgreSQL; both
@@ -670,7 +768,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         if not self.engine:
             return False, 'Database engine not initialized'
         try:
-            with self.engine.connect() as conn:
+            with self.read_only_connection() as conn:
                 conn.execute(text(f'EXPLAIN {query}'))
             return True, ''
         except Exception as e:
@@ -682,6 +780,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # ------------------------------------------------------------------
 
     def beginGlobal(self) -> None:
+        """Read the node's settings, open the engine and the transaction registry, and reflect the schema."""
         # One reflection lock per node. Created before anything can reflect, so
         # `refresh_schema` and `_insertData` always find a real lock here.
         self.reflect_lock = threading.Lock()
@@ -756,6 +855,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             self.schema = {}
 
     def endGlobal(self) -> None:
+        """Close the open transactions and dispose of the engine."""
         if self.tx_registry:
             self.tx_registry.close_all()
         if self.engine:

@@ -172,10 +172,19 @@ server from the environment where the pipeline runs.
 ### Generated-query safety
 
 For LLM-generated SQL, the node only accepts `SELECT`, optionally preceded by
-`EXPLAIN`. It strips comments, checks every semicolon-separated statement, and
-rejects CTEs plus `SELECT ... INTO OUTFILE` or `INTO DUMPFILE`. It validates
-each safe candidate with `EXPLAIN` and feeds database errors to the LLM for the
-next attempt.
+`EXPLAIN`. It masks literals and comments, checks every semicolon-separated
+statement, and rejects CTEs plus a `SELECT` with `INTO` or a row lock. It validates each safe
+candidate with `EXPLAIN` and feeds database errors to the LLM for the next
+attempt.
+
+The `EXPLAIN` and the query are sent with the settings `readonly=1` and
+`max_execution_time=60`: ClickHouse refuses writes, DDL, setting changes inside
+the query and table functions such as `url()` and `file()`, and stops a query
+that runs longer. A user whose settings profile is already read-only gets only
+what it may change: with `readonly=2` the node sends the time limit alone, and
+with `readonly=1` it sends nothing, so the profile's own `max_execution_time`
+applies. The shape check is a first pass, not the guarantee; connect as a user
+with `SELECT` on the tables it should answer from.
 
 ### ClickHouse schema details
 

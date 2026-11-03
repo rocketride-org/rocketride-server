@@ -904,6 +904,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             """Format the db_schema dict into a concise text block for the LLM."""
 
             def simplify_type(sql_type: str) -> str:
+                """Return the type name without its COLLATE clause, upper-cased."""
                 # Strip COLLATE clauses (e.g. VARCHAR(255) COLLATE utf8mb4_general_ci)
                 # so the LLM sees clean type names.
                 return sql_type.split('COLLATE')[0].strip().upper()
@@ -992,9 +993,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         return result.answer
 
     def _executeSQLQuery(self, query: str) -> list[dict] | None:
-        """Execute a SQL SELECT query and return rows as a list of dicts."""
+        """Execute a generated SELECT on a read-only, time-limited connection and return rows as a list of dicts."""
         try:
-            with self.IGlobal.engine.connect() as conn:
+            with self.IGlobal.read_only_connection() as conn:
                 result = conn.execute(text(query))
                 rows = result.fetchall()
                 column_names = result.keys()

@@ -8,7 +8,7 @@ Plays two roles in a pipeline. As a pipeline node, it receives natural-language 
 
 Uses SQLAlchemy with the psycopg2 driver (`psycopg2-binary`). The connection string is built as `postgresql+psycopg2://user:password@host/database`; user, password, and database are URL-encoded so reserved characters (`@`, `/`, `#`, `:`) are safe, and the host may carry an explicit port (e.g. `localhost:5433`).
 
-Safety defaults: only `SELECT` statements are permitted for queries (whitelist check, see Notes), generated SQL is validated with `EXPLAIN` against the live database before execution, and raw SQL execution is disabled by default via `allow_execute`.
+Safety defaults: generated SQL must be shaped like a `SELECT` (see Notes), is validated with `EXPLAIN` against the live database, and runs in a read-only transaction with a 60-second statement timeout; raw SQL execution is disabled by default via `allow_execute`.
 
 The same implementation also ships as a Supabase preset (`services.supabase.json`, protocol `db_supabase://`): Supabase is managed Postgres, so it is a branded configuration, not separate code.
 
@@ -42,7 +42,7 @@ first insert.
 
 An agent (e.g. `agent_deepagent`) with this node connected as a tool. The
 agent calls `get_schema` to learn the shape of the data, then `get_data` to
-answer questions — with the SELECT-only whitelist keeping it read-safe.
+answer questions; generated queries run in a read-only transaction, so they cannot change data.
 
 ## Connections
 
@@ -128,8 +128,8 @@ database error back to the LLM, so attempts are not blind retries.
 
 Gates the raw-SQL tool functions (`execute`, `begin`, `commit`, `rollback`).
 Off by default — leave it off unless a trusted application explicitly needs to
-issue SQL directly, because enabled callers bypass both the LLM translation
-and the SELECT-only safety check.
+issue SQL directly, because enabled callers bypass the LLM translation, the
+SELECT-only check and the read-only transaction.
 
 ## Limitations
 
@@ -141,10 +141,13 @@ PostgreSQL server it queries.
 
 ### SQL safety & validation
 
-Generated SQL passes two gates before execution:
+Generated SQL passes three gates:
 
-1. **Whitelist check**: only statements beginning with `SELECT` (optionally prefixed by `EXPLAIN`) are allowed; everything else is rejected. Comments are stripped first so comment-based bypasses are neutralised, every statement in a multi-statement input is checked, `SELECT ... INTO OUTFILE/DUMPFILE` is blocked, and `WITH` (CTE) is deliberately excluded because PostgreSQL accepts CTE-into-mutation (e.g. `WITH x AS (...) DELETE ...`).
+1. **Shape check**: only statements beginning with `SELECT` (optionally prefixed by `EXPLAIN`) are allowed, and a `SELECT` with `INTO` or a row lock (`FOR UPDATE`, `FOR SHARE`) is rejected. Literals and comments are masked first, under PostgreSQL and under MySQL quoting rules, so text inside them can neither hide a clause nor trip a check. Every statement in a multi-statement input is checked, and `WITH` (CTE) is deliberately excluded because PostgreSQL accepts CTE-into-mutation (e.g. `WITH x AS (...) DELETE ...`).
 2. **`EXPLAIN` validation**: the query is validated against the live database. If `EXPLAIN` rejects it, the rejected SQL and the database error are fed back to the LLM for a corrected query, up to `max_attempts` times (default 5).
+3. **Read-only transaction**: the `EXPLAIN` and the query run in a `READ ONLY` transaction with `statement_timeout` set to 60 seconds. PostgreSQL refuses any write (`SELECT ... INTO`, `nextval`, `setval`, `FOR UPDATE`, a function that modifies data) and cancels a query that runs longer.
+
+The shape check is a first pass, not the guarantee: a `SELECT` can call a function whose side effects its text does not show. The read-only transaction stops writes, but not reads of server files (`pg_read_file`, `lo_import`), signals to other sessions (`pg_terminate_backend`) or connections out of the database (`dblink`). The role the node connects as controls those: grant it `SELECT` on the tables it should answer from and nothing more, not superuser and not membership of `pg_read_server_files`, `pg_signal_backend` or `pg_execute_server_program`.
 
 Insert operations never go through SQL generation; they use the `answers` lane.
 
