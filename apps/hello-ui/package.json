@@ -7,7 +7,7 @@
   "appManifest": {
     "id": "rocketride.hello",
     "projectId": "cbf738b8-95f1-4d41-8d4d-4179c3d4a380",
-    "publisher": "Aparavi Software AG",
+    "publisher": "RocketRide",
     "name": "RocketRide",
     "description": "Landing page and dashboard",
     "icon": "./src/icon.svg",

@@ -7,7 +7,7 @@
 	"appManifest": {
 		"id": "rocketride.explorer",
 		"projectId": "71e95c24-091d-4dce-a50a-053579b68838",
-		"publisher": "Aparavi Software AG",
+		"publisher": "RocketRide",
 		"name": "File Explorer",
 		"description": "Browse, view, and edit files stored on the RocketRide server",
 		"icon": "./icon.svg",

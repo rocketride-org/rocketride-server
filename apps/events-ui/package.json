@@ -7,7 +7,7 @@
 	"appManifest": {
 		"id": "rocketride.events",
 		"projectId": "a3515d9f-c356-41dc-9862-34eb4d92ea2d",
-		"publisher": "Aparavi Software AG",
+		"publisher": "RocketRide",
 		"name": "Event Monitor",
 		"description": "Real-time event stream viewer with JSON inspection and export",
 		"icon": "./icon.svg",

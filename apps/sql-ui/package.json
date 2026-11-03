@@ -7,7 +7,7 @@
 	"appManifest": {
 		"id": "rocketride.sql",
 		"projectId": "5badc60c-1b62-4c00-83ef-081f0c96d02a",
-		"publisher": "Aparavi Software AG",
+		"publisher": "RocketRide",
 		"name": "SQL Explorer",
 		"description": "Browse, query, design, and diagram SQL databases through pipeline database nodes",
 		"icon": "./src/icon.svg",

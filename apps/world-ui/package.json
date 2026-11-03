@@ -7,7 +7,7 @@
   "appManifest": {
     "id": "rocketride.world",
     "projectId": "c13662ab-13a9-4375-a43d-2529e189c0e6",
-    "publisher": "Aparavi Software AG",
+    "publisher": "RocketRide",
     "name": "Hello World",
     "description": "A simple Hello World demo application",
     "icon": "./src/icon.svg",

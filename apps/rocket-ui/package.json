@@ -9,7 +9,7 @@
 	"appManifest": {
 		"id": "rocketride.pipeBuilder",
 		"projectId": "f648481f-cee8-4edd-95c6-c7bd192457d7",
-		"publisher": "Aparavi Software AG",
+		"publisher": "RocketRide",
 		"name": "Rocket Builder",
 		"description": "Design, run, and deploy AI pipelines visually.",
 		"readme": "./README.md",
