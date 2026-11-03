@@ -99,7 +99,7 @@ Provide the configured PostgreSQL host, port, user, password, and database. The 
 
 ### Search and document lifecycle
 
-Semantic search requires an embedding. Keyword search performs a `LIKE` match on content with the metadata filters. Re-ingesting an object deletes its existing rows before replacement chunks are inserted. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
+Semantic search requires an embedding. Keyword search performs a `LIKE` match on content with the metadata filters. Re-ingesting an object atomically replaces its existing rows with the new chunks in one transaction. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
 
 Semantic search orders by the chosen pgvector distance operator and checks that
 the stored embedding model is compatible before searching. Unlike the other
@@ -132,10 +132,9 @@ managed store, not the routine way to restrict a query.
 
 Rendering retrieves an object's chunks in `chunkId` order and sends joined text to the callback in `renderChunkSize` groups. The node's document count is a count of rows in the table.
 
-The runtime removes an object's existing rows and commits that deletion before
-it inserts the replacement chunks. Retain a source of truth that can be
-ingested again: if a replacement write fails, the previous rows have already
-been removed rather than preserved as a fallback copy.
+The runtime removes an object's existing rows and inserts the replacement
+chunks in one transaction. If a replacement write fails, the transaction rolls
+back and the previous rows remain in place.
 
 ## Upstream docs
 
