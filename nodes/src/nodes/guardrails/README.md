@@ -18,7 +18,7 @@ Text that is empty or whitespace-only is forwarded without checks.
 
 | Connection | Required | Description |
 | --- | --- | --- |
-| llm | no | Judges, after a retrieval miss, whether an answer states anything that needs a source. Called only by the grounding check, so only when `require_grounding` is on and a search found nothing. Without it, any stated figure counts and other claims are not checked. |
+| llm | no | Judges, after a retrieval miss, whether an answer states anything that needs a source. Called only by the grounding check, so only when `require_grounding` is on and a search found nothing. Without it, any stated figure counts and other claims are not checked. Use a separate LLM node: the engine rejects a pipeline whose answering LLM is also this connection. |
 
 ## Lanes
 
@@ -83,7 +83,7 @@ When any enabled check fails, `policy_mode` decides the outcome:
 | `warn`  | Each violation is logged as a warning; the item is forwarded anyway.               |
 | `log`   | The item is forwarded with no warnings emitted.                                    |
 
-Blocking happens silently from the pipeline's point of view: downstream nodes simply never receive the item. The one exception is an answer that fails only on grounding after a retrieval miss, which is replaced with a short refusal instead (`Guardrails output replaced: ...`). Check the engine logs (`Guardrails input blocked: ...` / `Guardrails output blocked: ...`) to see what was rejected and why.
+Blocking happens silently from the pipeline's point of view: downstream nodes simply never receive the item. The one exception is an answer that fails only on grounding after a retrieval miss, which is replaced with a short refusal instead (`Guardrails output replaced: ...`). Check the engine logs (`Guardrails input blocked: ...` / `Guardrails output blocked: ...`) to see what was rejected and why. Output checks see only what arrives on the `answers` lane: reasoning that a model streams to the chat UI on its thinking channel bypasses every rule here.
 
 ---
 
