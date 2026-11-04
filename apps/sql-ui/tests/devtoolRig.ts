@@ -198,4 +198,3 @@ export async function rig(opts: { saved?: SavedSqlConnection[]; rows?: IFakeTask
 export function toolRequests(engine: IScriptedRealm<IFakeClientRealm>, tool: string) {
 	return engine.requests.filter((request) => request.op === 'client.tool' && (request.params as { tool: string }).tool === tool);
 }
-
