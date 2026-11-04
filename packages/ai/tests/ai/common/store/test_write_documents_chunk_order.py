@@ -52,9 +52,9 @@ def warnings(monkeypatch):
 def _instance():
     """Return an instance with a recording store, opened on a first object."""
     inst = _Instance.__new__(_Instance)
-    inst.IGlobal = SimpleNamespace(store=_Store())
-    # Not the transform endpoint: IInstanceTransform.open has nothing else to do
-    inst._isEndpoint = lambda: False
+    # A filter in the pipe, not its endpoint: IInstanceTransform.open has nothing else to do
+    inst.IGlobal = SimpleNamespace(store=_Store(), glb=SimpleNamespace(logicalType='store'))
+    inst.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(logicalType='source'))
     inst.open(None)
     return inst
 

@@ -42,6 +42,11 @@ def test_each_object_is_judged_on_its_own_chunks():
     assert DocumentStoreBase.objectIdsToReplace(chunks) == ['b', 'a']
 
 
+def test_an_object_with_chunk_zero_twice_is_listed_once():
+    """Two chunk 0s of one object in a batch still delete it once."""
+    assert DocumentStoreBase.objectIdsToReplace([_chunk('a', 0), _chunk('a', 0), _chunk('a', 1)]) == ['a']
+
+
 def test_an_empty_batch_replaces_nothing():
     """No chunks, no objects to delete."""
     assert DocumentStoreBase.objectIdsToReplace([]) == []

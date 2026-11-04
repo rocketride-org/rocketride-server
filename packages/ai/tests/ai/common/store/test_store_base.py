@@ -242,6 +242,10 @@ def test_lane_handlers_delegate_to_store_when_present():
     """With a store present, the three lanes delegate to it."""
     store = _FakeStore()
     inst = _instance_with_store(store)
+    # The engine opens the object before its lanes write; a filter in the pipe, not its endpoint
+    inst.IGlobal.glb = SimpleNamespace(logicalType='store')
+    inst.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(logicalType='source'))
+    inst.open(None)
 
     inst.writeQuestions(SimpleNamespace())
     inst.writeDocuments([Doc(page_content='x', metadata=DocMetadata(objectId='o', chunkId=0))])

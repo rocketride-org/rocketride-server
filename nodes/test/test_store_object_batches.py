@@ -244,7 +244,12 @@ def _postgres(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
     log = _Log()
     store = module.Store.__new__(module.Store)
     store.collection = 'test'
-    store._transaction = lambda: contextlib.nullcontext(_Cursor(log))
+
+    def transaction() -> contextlib.AbstractContextManager[_Cursor]:
+        """Open a transaction whose cursor logs into ``log``."""
+        return contextlib.nullcontext(_Cursor(log))
+
+    store._transaction = transaction
     return store, log
 
 
@@ -267,7 +272,12 @@ def _rocketride_vector(monkeypatch: pytest.MonkeyPatch) -> tuple[object, _Log]:
     log = _Log()
     store = module.Store.__new__(module.Store)
     store.collection = 'test'
-    store._transaction = lambda: contextlib.nullcontext(_Cursor(log))
+
+    def transaction() -> contextlib.AbstractContextManager[_Cursor]:
+        """Open a transaction whose cursor logs into ``log``."""
+        return contextlib.nullcontext(_Cursor(log))
+
+    store._transaction = transaction
     return store, log
 
 
