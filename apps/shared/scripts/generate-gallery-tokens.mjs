@@ -23,7 +23,8 @@
 
 /**
  * Generates the component gallery's per-entry token-usage map
- * (`src/modules/appdev/gallery/tokenUsage.generated.ts`).
+ * (`src/tools/appdev/views/builder/panels/design/panels/components/
+ * tokenUsage.generated.ts`).
  *
  * For every gallery entry with a live component, the generator scans the
  * component's source directory for:
@@ -63,8 +64,13 @@ const SHELL_SRC = path.join(APP_ROOT, '..', '..', 'packages', 'shell', 'src');
 /** The commonStyles definition file the transitive resolution reads. */
 const STYLES_FILE = path.join(SHELL_SRC, 'themes', 'styles.ts');
 
+/** The gallery panel that owns the generated module (Design > Components). */
+const GALLERY_DIR = path.join(
+	SRC_DIR, 'tools', 'appdev', 'views', 'builder', 'panels', 'design', 'panels', 'components'
+);
+
 /** The generated module the gallery imports. */
-const OUTPUT_FILE = path.join(SRC_DIR, 'modules', 'appdev', 'gallery', 'tokenUsage.generated.ts');
+const OUTPUT_FILE = path.join(GALLERY_DIR, 'tokenUsage.generated.ts');
 
 // =============================================================================
 // ENTRY SOURCE MAP

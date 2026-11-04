@@ -70,6 +70,9 @@ export interface IoControlResult {
 	success: boolean;
 	/** Error message if the operation failed. */
 	error?: string;
+	/** The verb needs a sudo password first (macOS/Linux service lifecycle) —
+	 *  the caller re-sends the command with `params.sudoPassword`. */
+	needsSudo?: boolean;
 	/** Arbitrary data returned by the operation. */
 	data?: Record<string, unknown>;
 }

@@ -43,7 +43,7 @@ Test Coverage:
 
 Test Configuration:
     Tests use environment variables for configuration:
-    - ROCKETRIDE_URI: Server URI (defaults to http://localhost:5565)
+    - ROCKETRIDE_URI: Server URI (defaults to http://127.0.0.1:5565)
     - ROCKETRIDE_APIKEY: Authentication key (defaults to 'MYAPIKEY')
     - Various LLM API keys for chat tests (ROCKETRIDE_OPENAI_KEY, etc.)
 
@@ -104,7 +104,7 @@ DAPMessage = Dict[str, Any]
 
 # Test configuration
 TEST_CONFIG = {
-    'uri': os.getenv('ROCKETRIDE_URI', 'http://localhost:5565'),
+    'uri': os.getenv('ROCKETRIDE_URI', 'http://127.0.0.1:5565'),
     'auth': os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY'),
     'timeout': 30.0,  # 30 second timeout for integration tests
 }
@@ -473,6 +473,36 @@ class TestDataOperations:
             assert isinstance(result['text'], list)
             assert len(result['text']) > 0
             assert result['text'][0] == '\n\n'.join(chunks) + '\n\n'
+        finally:
+            if pipeline_token:
+                await ensure_clean_pipeline(client, pipeline_token)
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_join_a_character_split_across_pipe_writes(self):
+        """A text written in chunks cut inside a character reaches the pipeline whole."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        pipeline_token = None
+        try:
+            await client.connect()
+            await ensure_clean_pipeline(client, self.DATA_TOKEN)
+
+            result = await client.use(pipeline=get_echo_pipeline(), token=self.DATA_TOKEN)
+            pipeline_token = result['token']
+
+            pipe = await client.pipe(pipeline_token, {'name': 'test-split.txt'}, 'text/plain')
+
+            await pipe.open()
+
+            # 'П' is two bytes; the first write ends after its first byte
+            data = 'Привет, мир'.encode('utf-8')
+            await pipe.write(data[:1])
+            await pipe.write(data[1:])
+
+            result = await pipe.close()
+
+            assert result['text'][0] == 'Привет, мир\n\n'
         finally:
             if pipeline_token:
                 await ensure_clean_pipeline(client, pipeline_token)
@@ -2419,6 +2449,20 @@ Integration tests may fail. Please ensure:
 def test_get_websocket_uri_normalization(input_uri: str, expected_uri: str) -> None:
     """Verify websocket URI normalization preserves secure and non-secure schemes."""
     assert ConnectionMixin._get_websocket_uri(input_uri) == expected_uri
+
+
+@pytest.mark.parametrize(
+    ('input_uri', 'expected_uri'),
+    [
+        ('5590', 'ws://localhost:5590/models'),
+        ('localhost:5590', 'ws://localhost:5590/models'),
+        ('192.168.1.100:5590', 'ws://192.168.1.100:5590/models'),
+        ('wss://model.rocketride.dev:443', 'wss://model.rocketride.dev:443/models'),
+    ],
+)
+def test_get_websocket_uri_model_server_address(input_uri: str, expected_uri: str) -> None:
+    """Verify every --modelserver form, a bare port included, reaches the model server."""
+    assert ConnectionMixin._get_websocket_uri(input_uri, '/models') == expected_uri
 
 
 # ============================================================================

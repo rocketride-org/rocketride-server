@@ -43,83 +43,37 @@
  * Each icon represents a specific state, action, or message type used throughout
  * the extension. The naming convention follows a descriptive approach where
  * the property name clearly indicates the intended use case.
- * 
+ *
  * Icon Categories:
- * - Status indicators: begin, end, success, error, warning
- * - Process states: loading, connecting, debug, launch, stop
- * - Communication: send, receive, message, question, help
- * - System types: python, pipeline
- * - Special states: exception (critical errors)
+ * - Status indicators: begin, success, error, warning, info
+ * - Process states: launch, stop
+ * - Communication: send, receive
  */
 export const icons = {
 	/** 🟢 Indicates the start of a process or operation */
 	begin: '🟢',
-	
-	/** 🌐 Shows network connection or connection establishment in progress */
-	connecting: '🌐',
-	
-	/** 🐞 Represents debugging operations, breakpoints, or debug-related actions */
-	debug: '🐞',
-	
-	/** 🏁 Indicates the completion or end of a process */
-	end: '🏁',
-	
+
 	/** ❌ Shows general errors or failed operations */
 	error: '❌',
-	
-	/** 💀 Represents critical exceptions or fatal errors that cause termination */
-	exception: '💀',
-	
-	/** ❔ Used for help messages or guidance information */
-	help: '❔',
-	
+
 	/** ℹ️ Displays informational messages or status updates */
 	info: 'ℹ️',
-	
+
 	/** 🚀 Indicates launching or starting of applications/processes */
 	launch: '🚀',
-	
-	/** ⏳ Shows operations in progress or waiting states */
-	loading: '⏳',
-	
-	/** 🗨️ Represents general messages or communication */
-	message: '🗨️',
-	
-	/** 🔧 Indicates pipeline operations or configuration activities */
-	pipeline: '🔧',
-	
-	/** 🐍 Specifically represents Python-related operations or processes */
-	python: '🐍',
-	
-	/** ❓ Used for questions or prompts requiring user input */
-	question: '❓',
-	
+
 	/** ⬅️ Shows incoming data, messages, or responses from external sources */
 	receive: '⬅️',
-	
+
 	/** ➡️ Shows outgoing data, messages, or requests to external sources */
 	send: '➡️',
-	
+
 	/** 🛑 Indicates stopping, termination, or halting of operations */
 	stop: '🛑',
-	
+
 	/** ✅ Shows successful completion of operations */
 	success: '✅',
-	
+
 	/** ⚠️ Indicates warnings or potential issues that don't prevent operation */
 	warning: '⚠️'
 };
-
-/**
- * Type definition for the icons object to enable better TypeScript support
- * This allows for compile-time checking of icon property names and provides
- * better IDE autocompletion when using the icons object.
- */
-export type IconKeys = keyof typeof icons;
-
-/**
- * Type definition for icon values (all are emoji strings)
- * This ensures type safety when working with icon values and helps prevent
- * accidental assignment of non-emoji strings to icon properties.
- */
-export type IconValue = typeof icons[IconKeys];

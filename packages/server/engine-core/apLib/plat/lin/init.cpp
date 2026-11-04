@@ -27,9 +27,8 @@ namespace ap::plat::lin {
 
 void init() noexcept {
     // Crashpad starts once, as early as possible, so a fault during startup is
-    // still caught. Recovering the previous run's dumps is plat::minidumpSweep(),
-    // called once the monitor and the per-task location exist -- no re-register
-    // on location change (unlike Breakpad).
+    // still caught -- no re-register when the per-task dump location changes
+    // (unlike Breakpad).
     minidumpRegister();
 
     // Claim the system libstdc++ before anything else can. Its locale facet ids

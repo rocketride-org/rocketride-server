@@ -32,7 +32,7 @@
 import type { CSSProperties, ReactElement } from 'react';
 
 /** Shared props for the app's inline SVG icons. */
-interface IIconProps {
+interface IconProps {
 	/** Optional inline style override (size defaults to 100% of the slot). */
 	style?: CSSProperties;
 }
@@ -46,7 +46,7 @@ const defaultStyle: CSSProperties = { width: '100%', height: '100%', display: 'b
  * @param props - Icon props (optional style override).
  * @returns The SVG element.
  */
-export function DatabaseIcon(props: IIconProps): ReactElement {
+export function DatabaseIcon(props: IconProps): ReactElement {
 	return (
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" style={{ ...defaultStyle, ...props.style }} aria-hidden="true">
 			<ellipse cx="12" cy="5.5" rx="7" ry="2.8" />
@@ -62,7 +62,7 @@ export function DatabaseIcon(props: IIconProps): ReactElement {
  * @param props - Icon props (optional style override).
  * @returns The SVG element.
  */
-export function TableIcon(props: IIconProps): ReactElement {
+export function TableIcon(props: IconProps): ReactElement {
 	return (
 		<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" style={{ ...defaultStyle, ...props.style }} aria-hidden="true">
 			<rect x="3.5" y="4.5" width="17" height="15" rx="1.5" />
