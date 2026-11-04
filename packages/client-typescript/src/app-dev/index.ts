@@ -314,6 +314,7 @@ export class DevSession {
 	private stopping = false;
 	private pkgWatcher: fs.FSWatcher | null = null;
 	private pkgTimer: NodeJS.Timeout | undefined;
+	private pkgPollFile: string | null = null;
 	private restarts: Promise<void> = Promise.resolve();
 	private restartQueued = false;
 	private readiness: { resolve: (origin: string) => void; reject: (err: Error) => void } | null = null;
@@ -361,6 +362,8 @@ export class DevSession {
 		if (this.pkgTimer) clearTimeout(this.pkgTimer);
 		this.pkgWatcher?.close();
 		this.pkgWatcher = null;
+		if (this.pkgPollFile) fs.unwatchFile(this.pkgPollFile);
+		this.pkgPollFile = null;
 		// a restart in flight may be stopping the old server; let it finish
 		// (it will not spawn again once `stopping` is set)
 		await this.restarts;
@@ -478,17 +481,27 @@ export class DevSession {
 	 * file over package.json, and a file watch stays on the replaced inode.
 	 * On Windows, watches the folder's real path: a folder named through an
 	 * 8.3 short name (C:\Users\JOHNSM~1\...) makes libuv abort the whole
-	 * process on the first change event.
+	 * process on the first change event. If the real path cannot be resolved
+	 * (e.g. an SMB share that denies querying an ancestor), polls package.json
+	 * instead, which never touches the unsafe watch path.
 	 */
 	private watchPackageJson(): void {
+		const folder = this.options.app.folder;
+		const schedule = (): void => {
+			if (this.pkgTimer) clearTimeout(this.pkgTimer);
+			this.pkgTimer = setTimeout(() => this.requestRestart(), 800);
+		};
 		try {
-			this.pkgWatcher = fs.watch(process.platform === 'win32' ? fs.realpathSync.native(this.options.app.folder) : this.options.app.folder, (_event, filename) => {
-				if (filename?.toString() !== 'package.json') return;
-				if (this.pkgTimer) clearTimeout(this.pkgTimer);
-				this.pkgTimer = setTimeout(() => this.requestRestart(), 800);
+			const watched = process.platform === 'win32' ? fs.realpathSync.native(folder) : folder;
+			this.pkgWatcher = fs.watch(watched, (_event, filename) => {
+				if (filename?.toString() === 'package.json') schedule();
 			});
 		} catch {
-			// no watcher on this platform/filesystem — edits need a manual restart
+			// no folder watcher: poll the file's mtime (also covers a missing watch API)
+			this.pkgPollFile = path.join(folder, 'package.json');
+			fs.watchFile(this.pkgPollFile, { interval: 1000 }, (cur, prev) => {
+				if (cur.mtimeMs !== prev.mtimeMs) schedule();
+			});
 		}
 	}
 
