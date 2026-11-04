@@ -24,9 +24,12 @@
 // EXPLORER DEV TOOL — FS-BACKED HISTORY PREFERENCES (§3.5)
 // =============================================================================
 //
-// Dev-tool mounts get no workspace preferences (neither host gives store
-// tools ToolHostServices/prefs), so the CONTROLLER persists history itself, in
-// a per-user file beside the SQL tool's saved connections:
+// History is per USER and can be large (a bag of up to 256 KB per owner), so
+// the CONTROLLER persists it in a per-user file in the account store, beside
+// the SQL tool's saved connections, through the realm's own client. (The
+// host's per-workspace, mirrored `ToolHostServices.prefs` partition is not the
+// place for it: it is republished whole on every write, and it would strand
+// the history users already have.)
 //
 //   @/User/.workspace/rocketride.<tool>.history.json      historyPrefsPath(tool)
 //
@@ -39,7 +42,7 @@
 //     only once `load()` settled. A change made before or during the load is
 //     QUEUED and applied over the loaded file (it wins over the stored value),
 //     then written once the load is ready.
-//   NEVER CLOBBER. `client.fsStat` tells a missing file (first run: start
+//   NEVER CLOBBER. `fsStat` tells a missing file (first run: start
 //     empty, writes allowed) from one that exists. The engine answers
 //     `{exists: false}` for a missing file AND for a missing parent folder
 //     (packages/ai/src/ai/account/file_store.py FileStore.stat: an absent
@@ -75,7 +78,8 @@
 //     after one `client.fsMkdir` of the folder. A failed write keeps the
 //     change and retries with backoff, PREFS_WRITE_RETRIES times; the next
 //     change, flush() or close() tries again after that. Every fs request
-//     names its bus timeout (PREFS_FS_TIMEOUT_MS).
+//     is bounded by an application deadline (engineClient.ts createPrefsFs,
+//     PREFS_FS_DEADLINE_MS): the SDK's file calls have no timeout of their own.
 //   LAST WRITER WINS across windows: each window writes the whole file from
 //     what it loaded, so two windows of the same user that both write keep
 //     only the later one's view. A known limitation.
@@ -84,15 +88,10 @@
 import { isPlainObject } from '../checks';
 import { MAX_HISTORY_BAG_CHARS } from '../history/types';
 import type { IPrefsAccessor } from '../history/types';
-import { busRequest } from './busClient';
-import type { IExplorerBus } from './busClient';
-import { assertTimeoutMs } from './timeouts';
+import type { IPrefsFs } from './engineClient';
 
 /** The file format version this module reads and writes. */
 export const PREFS_FILE_VERSION = 1;
-
-/** Bus timeout of each fs request (stat, read, mkdir, write). */
-export const PREFS_FS_TIMEOUT_MS = 15_000;
 
 /** Quiet period before a batch of preference changes is written. */
 export const PREFS_WRITE_DEBOUNCE_MS = 1_000;
@@ -145,8 +144,8 @@ interface IOwnerBag {
 
 /** What {@link createFsPrefs} needs. */
 export interface IFsPrefsOptions {
-	/** The controller realm's bus (its ConnectionManager). */
-	cm: IExplorerBus;
+	/** The file-store calls (engineClient.ts `createPrefsFs`: each call bounded by its own deadline). */
+	fs: IPrefsFs;
 	/** The file (see {@link historyPrefsPath}). */
 	path: string;
 	/** The identity fingerprint this accessor belongs to (required; no identity: no file). */
@@ -155,8 +154,6 @@ export interface IFsPrefsOptions {
 	ownerNow?: () => string | null;
 	/** The folder to create before the first write (default: the path's folder). */
 	dir?: string;
-	/** Bus timeout per fs request (default {@link PREFS_FS_TIMEOUT_MS}). */
-	timeoutMs?: number;
 	/** Write debounce (default {@link PREFS_WRITE_DEBOUNCE_MS}). */
 	debounceMs?: number;
 	/** File cap (default {@link MAX_PREFS_FILE_CHARS}). */
@@ -208,7 +205,7 @@ class FileFormatError extends Error {
 /**
  * Read the stored file.
  *
- * @param raw - What `client.fsReadJson` answered.
+ * @param raw - What `fsReadJson` answered.
  * @returns The owner bags.
  * @throws Error for anything but this module's format (the file is then never written).
  */
@@ -229,14 +226,13 @@ function readFile(raw: unknown): Record<string, IOwnerBag> {
  *
  * @param opts - See {@link IFsPrefsOptions}.
  * @returns The accessor; `load()` it (or use {@link attachWhenLoaded}) before attaching.
- * @throws RangeError without an owner or with an unusable timeout.
+ * @throws RangeError without an owner.
  */
 export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
-	const { cm, path, owner } = opts;
+	const { fs, path, owner } = opts;
 	if (typeof owner !== 'string' || owner === '') {
 		throw new RangeError('createFsPrefs needs the identity fingerprint as its owner; without an identity, history stays in memory.');
 	}
-	const timeoutMs = assertTimeoutMs(opts.timeoutMs ?? PREFS_FS_TIMEOUT_MS, 'prefs fs timeoutMs');
 	const debounceMs = opts.debounceMs ?? PREFS_WRITE_DEBOUNCE_MS;
 	const maxFileChars = opts.maxFileChars ?? MAX_PREFS_FILE_CHARS;
 	const maxOwners = Math.max(1, opts.maxOwners ?? MAX_PREFS_OWNERS);
@@ -313,11 +309,11 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 	 * @returns The owner's bag and the others, or 'stale' when the owner changed during a request.
 	 */
 	const readOnce = async (): Promise<{ mine: Record<string, unknown>; others: Record<string, IOwnerBag> } | 'stale'> => {
-		const stat = await busRequest(cm, 'client.fsStat', { path }, timeoutMs);
+		const stat = await fs.fsStat(path);
 		if (!stillOwner()) return 'stale';
 		if (isPlainObject(stat) && stat.exists === false) return { mine: {}, others: {} };
-		if (!isPlainObject(stat) || stat.exists !== true) throw new Error('client.fsStat gave no answer about the history file.');
-		const raw = await busRequest(cm, 'client.fsReadJson', { path }, timeoutMs);
+		if (!isPlainObject(stat) || stat.exists !== true) throw new Error('fsStat gave no answer about the history file.');
+		const raw = await fs.fsReadJson<unknown>(path);
 		if (!stillOwner()) return 'stale';
 		const owners = readFile(raw);
 		const own = { ...(owners[owner]?.prefs ?? {}) };
@@ -434,7 +430,7 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 		try {
 			if (!madeDir && dir !== '') {
 				try {
-					await busRequest(cm, 'client.fsMkdir', { path: dir }, timeoutMs);
+					await fs.fsMkdir(dir);
 				} catch {
 					// Usually "already exists"; a real failure surfaces on the write.
 				}
@@ -446,7 +442,7 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 			const composed = compose();
 			dirty = false;
 			if (composed === null) return;
-			await busRequest(cm, 'client.fsWriteJson', { path, value: composed.file }, timeoutMs);
+			await fs.fsWriteJson(path, composed.file);
 			if (disposed) return;
 			others = composed.kept;
 			retries = 0;

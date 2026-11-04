@@ -30,10 +30,14 @@
 // =============================================================================
 
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
-import { useAuthUser, usePrefs } from 'shell';
+import { useAuthUser, usePrefs, useShellConnection } from 'shell';
 import { identityFingerprint, identityFromConnectResult } from './connect/identity';
 import type { IEndpointState, IEndpointStore } from './connect/store';
 import type { IPrefsAccessor } from './history/types';
+import { createExplorerClient } from './devtool/engineClient';
+import type { IRealmClient } from './devtool/engineClient';
+import { engineStatus } from './devtool/readiness';
+import type { EngineStatus } from './devtool/readiness';
 import { createShellWatch } from './shellBinding';
 import type { IExplorerClient } from './types';
 
@@ -120,4 +124,33 @@ export function useEndpointStoreLifecycle(store: IEndpointStore, client: IExplor
 		// `fingerprint` stands in for the identity: a new object with the same
 		// user, organization and team must not re-attach.
 	}, [store, client, fingerprint]);
+}
+
+/** What {@link useRealmEngine} returns. */
+export interface IRealmEngine {
+	/** `waiting` (no client yet), `disconnected`, or `ready`. */
+	status: EngineStatus;
+	/** The engine client, only while `status` is `ready`; one stable instance per realm client. */
+	client: IExplorerClient | null;
+}
+
+/**
+ * The realm's engine access: the realm's own RocketRideClient
+ * (`useShellConnection().client`: the root's, or the proxy riding the shell
+ * bus), narrowed to the library's client and gated on the realm's readiness.
+ * It never infers what the realm owns from having a client.
+ *
+ * The adapter reads the latest client through a ref at call time, so a request
+ * in flight when the client is replaced is never sent through a stale one; the
+ * returned `client` is null unless the status is `ready`.
+ *
+ * @returns The status and, when ready, the client.
+ */
+export function useRealmEngine(): IRealmEngine {
+	const { client: raw, isConnected } = useShellConnection();
+	const latest = useRef<IRealmClient | null>(null);
+	latest.current = raw as unknown as IRealmClient | null;
+	const adapter = useMemo(() => createExplorerClient(() => latest.current), []);
+	const status = engineStatus({ client: raw, isConnected });
+	return useMemo(() => ({ status, client: status === 'ready' ? adapter : null }), [status, adapter]);
 }

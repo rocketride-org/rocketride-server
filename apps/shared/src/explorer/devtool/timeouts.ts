@@ -29,15 +29,20 @@
 //
 //   session wait W        the tool session's own timer (connect/session.ts);
 //                         its ExplorerToolError is the honest answer
-//   SDK timeout           W + SDK_TIMEOUT_SLACK_MS (the session sends it)
-//   bus timeout           SDK timeout + BUS_TOOL_MARGIN_MS (busClient.ts asks
-//                         `cm.request('client.tool', …, { timeoutMs })`)
+//   SDK timeout           W + SDK_TIMEOUT_SLACK_MS (the session sends it; the
+//                         adapter passes it to `client.tool({ timeout })`)
+//   transport timeout     SDK timeout + PROXY_BUS_SLACK_MS: what a realm's
+//                         RocketRideClientProxy asks of the shell bus for that
+//                         request (it adds the slack itself); the root's real
+//                         client has no bus hop and just uses the SDK timeout
 //   frame timeout         controller timeout + FRAME_OP_MARGIN_MS (the frame's
 //                         `call(…, { timeoutMs })`, frame.ts)
 //
-// Both platform lanes default to 120 s (DEFAULT_BUS_REQUEST_TIMEOUT_MS,
-// DEFAULT_OP_TIMEOUT_MS) whatever the tool's own budget is, so nothing here
-// ever relies on a default: every request names its wait.
+// The SDK accepts a timeout only on `tool`. Every other client method this
+// library calls (getTasks, listTasks, getTaskPipeline, fs*, add/removeMonitor)
+// has none, so engineClient.ts bounds each with an APPLICATION deadline taken
+// from this file; on expiry the caller stops waiting and is told the request
+// was not cancelled. Nothing here relies on the 120 s bus default.
 //
 // A wait is a setTimeout delay, and a delay above 2^31-1 ms fires AT ONCE. So
 // "no client timeout" (the session's `timeoutMs: null`, where the app offers
@@ -55,25 +60,27 @@ export const MAX_TIMER_MS = 2_147_483_647;
 export const SDK_TIMEOUT_SLACK_MS = 1_000;
 
 /**
- * Added to the SDK timeout of a `client.tool` request to get its bus timeout.
- * It covers the SDK's own slack in reporting its timeout plus the bus hops
- * (realm -> framework root -> SDK and back; in VS Code the root is the
- * extension host, whose event loop can lag under load), so the SDK's answer,
- * and before it the session's, always arrives before the bus gives up.
+ * What a realm's RocketRideClientProxy adds to an explicit SDK timeout to get
+ * its bus timeout (RocketRideClientProxy.ts `BUS_TIMEOUT_SLACK_MS`, private;
+ * the realm-client integration test pins the two through a real proxy). It
+ * covers the bus hops (realm -> framework root -> SDK and back; in VS Code the
+ * root is the extension host, whose event loop can lag under load), so the
+ * SDK's answer, and before it the session's, arrives before the bus gives up.
  */
-export const BUS_TOOL_MARGIN_MS = 5_000;
+export const PROXY_BUS_SLACK_MS = 5_000;
 
 /**
- * The bus timeout of a `client.tool` call the session deliberately left
- * unbounded (no SDK `timeout`). 24 hours: longer than any statement a person
- * waits on in an open editor, short enough that a lost answer eventually frees
- * the bus's pending entry, and far below {@link MAX_TIMER_MS} even with every
- * margin added.
+ * The SDK timeout of a `tool` call the session deliberately left unbounded
+ * (no `timeout`). Passed explicitly because a proxy with no timeout falls back
+ * to the 120 s bus default and would cut the call short. 24 hours: longer than
+ * any statement a person waits on in an open editor, short enough that a lost
+ * answer eventually frees the pending entry, and far below {@link MAX_TIMER_MS}
+ * even with every margin added.
  */
 export const UNBOUNDED_TOOL_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Bus timeout of `client.getTasks` (discovery's one list call). Equal to the
+ * Application deadline of `getTasks` (discovery's one list call). Equal to the
  * endpoint store's default discovery bound (connect/store.ts
  * `discoveryTimeoutMs`), so a wedged root is reported by whichever fires
  * first, never by the 120 s default.
@@ -81,17 +88,20 @@ export const UNBOUNDED_TOOL_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 export const GET_TASKS_TIMEOUT_MS = 30_000;
 
 /**
- * Bus timeout of `client.listTasks` (discovery's readable names only). Equal
+ * Application deadline of `listTasks` (discovery's readable names only). Equal
  * to discovery's own wait for it (connect/discovery.ts `TASK_NAMES_TIMEOUT_MS`;
- * a test pins the two), so the bus gives up when discovery stops waiting.
+ * a test pins the two), so the request is given up when discovery stops waiting.
  */
 export const LIST_TASKS_TIMEOUT_MS = 10_000;
 
-/** Bus timeout of `client.getTaskPipeline` (discovery's per-task fallback; it runs inside the same discovery bound). */
+/** Application deadline of `getTaskPipeline` (discovery's per-task fallback; it runs inside the same discovery bound). */
 export const GET_TASK_PIPELINE_TIMEOUT_MS = 30_000;
 
-/** Bus timeout of `client.addMonitor` / `client.removeMonitor` (a registration; failing it only costs live updates). */
+/** Application deadline of `addMonitor` / `removeMonitor` (a registration; failing it only costs live updates). */
 export const MONITOR_TIMEOUT_MS = 15_000;
+
+/** Application deadline of each file-store request the history accessor makes (stat, read, mkdir, write). */
+export const PREFS_FS_DEADLINE_MS = 15_000;
 
 /** Added to the controller's own timeout to get the frame's op timeout, so the controller's honest answer arrives first. */
 export const FRAME_OP_MARGIN_MS = 5_000;
@@ -112,27 +122,39 @@ export function assertTimeoutMs(timeoutMs: unknown, what = 'timeoutMs'): number 
 }
 
 /**
- * The bus timeout for one `client.tool` request, from the SDK timeout the
+ * The SDK timeout to pass for one `tool` request, from the timeout the
  * request carries.
  *
  * @param sdkTimeoutMs - The request's `timeout` (undefined: deliberately unbounded).
- * @returns The bus `timeoutMs`.
+ * @returns The `timeout` for `client.tool`.
+ * @throws RangeError when it is not a usable delay (with the proxy slack added).
  */
-export function busToolTimeoutMs(sdkTimeoutMs: number | undefined): number {
+export function toolSdkTimeoutMs(sdkTimeoutMs: number | undefined): number {
 	if (sdkTimeoutMs === undefined) return UNBOUNDED_TOOL_TIMEOUT_MS;
-	return assertTimeoutMs(assertTimeoutMs(sdkTimeoutMs, 'client.tool timeout') + BUS_TOOL_MARGIN_MS, 'client.tool bus timeout');
+	assertTimeoutMs(assertTimeoutMs(sdkTimeoutMs, 'tool timeout') + PROXY_BUS_SLACK_MS, 'tool transport timeout');
+	return sdkTimeoutMs;
 }
 
 /**
- * The bus timeout of one tool call whose session wait is known: what the
- * controller's adapter will pass for it.
+ * The transport (bus) timeout a realm's proxy uses for one `tool` call.
+ *
+ * @param sdkTimeoutMs - The SDK timeout (undefined: unbounded).
+ * @returns The SDK timeout plus {@link PROXY_BUS_SLACK_MS}.
+ */
+export function toolTransportTimeoutMs(sdkTimeoutMs: number | undefined): number {
+	return toolSdkTimeoutMs(sdkTimeoutMs) + PROXY_BUS_SLACK_MS;
+}
+
+/**
+ * The budget of one tool call whose session wait is known: the longest the
+ * controller can take for it (what the frame's timeout is built from).
  *
  * @param waitMs - The session wait (null: the session left it unbounded).
- * @returns The bus `timeoutMs` of that call.
+ * @returns The transport timeout of that call.
  */
 export function toolCallBudgetMs(waitMs: number | null): number {
-	if (waitMs === null) return UNBOUNDED_TOOL_TIMEOUT_MS;
-	return busToolTimeoutMs(assertTimeoutMs(waitMs, 'session wait') + SDK_TIMEOUT_SLACK_MS);
+	if (waitMs === null) return toolTransportTimeoutMs(undefined);
+	return toolTransportTimeoutMs(assertTimeoutMs(waitMs, 'session wait') + SDK_TIMEOUT_SLACK_MS);
 }
 
 /**
