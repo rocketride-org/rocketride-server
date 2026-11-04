@@ -25,17 +25,17 @@
 // =============================================================================
 //
 // The controller-side replacement for shellBinding.ts `createShellWatch`, built
-// from the identity tracker and the activation gate instead of raw shell
+// from the identity tracker and the engine readiness instead of raw shell
 // events. Discovery is ALLOWED only while both hold:
 //
 //   identity.known       the tracker vouches for the session (identity.ts)
-//   activation.isOpen()  the tool was activated (activation.ts)
+//   engine.isReady()     the realm's client exists and is connected (readiness.ts)
 //
 // What the watch does with that:
 //
 //   - forwards every identity change to the store (`onIdentity`); unknown
 //     arrives as null, which resets everything the store holds;
-//   - when discovery becomes allowed (first activation with a known identity,
+//   - when discovery becomes allowed (first moment the engine is ready with a known identity,
 //     or a known identity again after a drop) it asks for one refresh
 //     (`onReconnect`: discover and re-probe), and again when the fingerprint
 //     switches between two KNOWN identities while discovery stays allowed
@@ -55,7 +55,7 @@ import type { ShellEventMap } from 'shell';
 import { isPlainObject } from '../checks';
 import type { EndpointWatch } from '../connect/store';
 import type { IExplorerClient, IExplorerIdentity } from '../types';
-import type { IActivationGate } from './activation';
+import type { IEngineReadiness } from './readiness';
 import type { IIdentityTracker } from './identity';
 
 /** The monitor key and type that deliver task lifecycle events (as shellBinding.ts). */
@@ -82,8 +82,8 @@ export interface IDevToolDiscoveryOptions {
 	client: IExplorerClient;
 	/** The identity tracker. */
 	identity: IIdentityTracker;
-	/** The activation gate. */
-	activation: IActivationGate;
+	/** The controller's engine readiness (the realm's client present and connected). */
+	engine: IEngineReadiness;
 	/** Where focus comes from (default: the window, when there is one; null: none). */
 	focusTarget?: IFocusTarget | null;
 }
@@ -92,11 +92,11 @@ export interface IDevToolDiscoveryOptions {
 export interface IDevToolDiscovery {
 	/** Pass to `store.attach(client, identity.get().identity, watch)`. */
 	readonly watch: EndpointWatch;
-	/** Whether the store may discover now (identity known AND activated). */
+	/** Whether the store may discover now (identity known AND the engine ready). */
 	allowed(): boolean;
 	/** Be told when `allowed()` changes; returns unsubscribe. */
 	subscribe(cb: (allowed: boolean) => void): () => void;
-	/** Stop following identity and activation (idempotent). */
+	/** Stop following identity and readiness (idempotent). */
 	dispose(): void;
 }
 
@@ -107,10 +107,10 @@ export interface IDevToolDiscovery {
  * @returns The composition.
  */
 export function createDevToolDiscovery(opts: IDevToolDiscoveryOptions): IDevToolDiscovery {
-	const { cm, client, identity, activation } = opts;
+	const { cm, client, identity, engine } = opts;
 	const focusTarget = opts.focusTarget !== undefined ? opts.focusTarget : (typeof window !== 'undefined' ? window : null);
 	const listeners = new Set<(allowed: boolean) => void>();
-	const compute = (): boolean => identity.get().known && activation.isOpen();
+	const compute = (): boolean => identity.get().known && engine.isReady();
 	let allowed = compute();
 	let fingerprint = identity.get().fingerprint;
 	let disposed = false;
@@ -135,7 +135,7 @@ export function createDevToolDiscovery(opts: IDevToolDiscoveryOptions): IDevTool
 		const switched = previous !== null && fingerprint !== null && previous !== fingerprint;
 		if (wasAllowed && allowed && switched) for (const waker of [...wakers]) waker.onAllowed();
 	});
-	const offActivation = activation.subscribe(() => update());
+	const offEngine = engine.subscribe(() => update());
 
 	const watch: EndpointWatch = (handlers) => {
 		let monitored = false;
@@ -189,7 +189,7 @@ export function createDevToolDiscovery(opts: IDevToolDiscoveryOptions): IDevTool
 			if (disposed) return;
 			disposed = true;
 			offIdentity();
-			offActivation();
+			offEngine();
 			listeners.clear();
 		},
 	};

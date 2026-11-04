@@ -27,11 +27,10 @@
 // Frames hold no client (R1): every engine-facing step is an op on the
 // controller. This is the frame's runtime for those ops:
 //
-//   - ONE controller function and ONE channel per frame peer. Both
-//     `createToolController` and `createToolChannel` subscribe the peer at
-//     construction and can never be disposed (toolOps.ts, toolChannel.ts); on
-//     a frame peer each subscription also announces a HELLO. They are cached
-//     per peer, so a StrictMode double mount adds nothing.
+//   - The host's channel (DevToolProps.channel) is the frame's only transport.
+//     A frame never builds a channel (one subscribes its peer for good and can
+//     never be disposed): the typed op client is a thin closure over it, so a
+//     StrictMode double mount adds nothing.
 //   - Every call names an explicit `timeoutMs` (timeouts.ts) and is stamped
 //     with `deadlineAt` (deadline.ts), which the controller enforces.
 //   - The moment `host:connection` turns false, every pending call is
@@ -67,8 +66,7 @@
 import type { ToolChannel, ToolControllerFn, ToolOpMap, ToolOpParams, ToolOpResult } from 'shell';
 import { ExplorerToolError, readErrorMessage } from '../errors';
 import { isDeadlineExpiredText, stampDeadline } from './deadline';
-import { channelFor, CONTROLLER_STATE_TOPIC } from './realm';
-import type { DevToolPeer } from './realm';
+import { CONTROLLER_STATE_TOPIC } from './realm';
 import { fromReply, isLaneTimeoutText } from './reply';
 import type { Reply, ReplyValue } from './reply';
 import { assertTimeoutMs } from './timeouts';
@@ -87,14 +85,10 @@ export interface IFrameCallOptions {
 
 /** What {@link createFrameCaller} needs. */
 export interface IFrameCallerOptions {
-	/** The frame mount's peer (DevToolProps.peer). */
-	peer: DevToolPeer;
-	/** The host's channel for this mount (DevToolProps.channel), when it gave one. */
-	channel?: ToolChannel;
-	/** The shell's `createToolController` (injected: no value import from 'shell'). */
-	createToolController: <O extends ToolOpMap>(peer: DevToolPeer) => ToolControllerFn<O>;
-	/** The shell's `createToolChannel`. */
-	createToolChannel: (peer: DevToolPeer) => ToolChannel;
+	/** The host's channel for this mount (DevToolProps.channel). */
+	channel: ToolChannel;
+	/** The shell's `createToolOpClient` (injected: no value import from 'shell'). */
+	createToolOpClient: <O extends ToolOpMap>(channel: ToolChannel) => ToolControllerFn<O>;
 	/** The clock deadlines are stamped from (default `Date.now`). */
 	now?: () => number;
 	/** Hold calls until the controller publishes readiness (default true; see the header). */
@@ -126,25 +120,6 @@ export interface IFrameCaller<O extends ToolOpMap> {
 	dispose(): void;
 }
 
-/** The controller function built for each frame peer. */
-const controllers = new WeakMap<DevToolPeer, ToolControllerFn<ToolOpMap>>();
-
-/**
- * The one controller function for a frame peer.
- *
- * @param peer - The frame's peer.
- * @param create - The shell's `createToolController`.
- * @returns The function (untyped; the caller types it).
- */
-function controllerFor(peer: DevToolPeer, create: IFrameCallerOptions['createToolController']): ToolControllerFn<ToolOpMap> {
-	let fn = controllers.get(peer);
-	if (fn === undefined) {
-		fn = create<ToolOpMap>(peer);
-		controllers.set(peer, fn);
-	}
-	return fn;
-}
-
 /**
  * Build a frame's caller.
  *
@@ -153,8 +128,8 @@ function controllerFor(peer: DevToolPeer, create: IFrameCallerOptions['createToo
  */
 export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions): IFrameCaller<O> {
 	const now = opts.now ?? Date.now;
-	const send = controllerFor(opts.peer, opts.createToolController) as unknown as (op: string, params: unknown, options: { timeoutMs: number }) => Promise<unknown>;
-	const channel = opts.channel ?? channelFor(opts.peer, opts.createToolChannel);
+	const { channel } = opts;
+	const send = opts.createToolOpClient<ToolOpMap>(channel) as unknown as (op: string, params: unknown, options: { timeoutMs: number }) => Promise<unknown>;
 
 	const waitForController = opts.waitForController ?? true;
 

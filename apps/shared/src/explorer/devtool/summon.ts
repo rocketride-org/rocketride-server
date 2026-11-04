@@ -42,8 +42,10 @@
 //     nothing.
 //   - Sent only after SUMMON_SETTLE_MS without a nonce, so a frame whose
 //     controller is already up (its retained readiness replays on subscribe)
-//     sends nothing. Re-sent at SUMMON_RETRY_MS while no nonce arrives. That
-//     helps one case only: rocket-ui arms a tool's sidebar peer once its
+//     sends nothing. Re-sent ONCE, at SUMMON_RETRY_MS, while no nonce arrives,
+//     and again when a new episode starts (the nonce went away, or the host
+//     connection came back); never on a ladder. The retry helps one case only:
+//     rocket-ui arms a tool's sidebar peer once its
 //     pinned-tool list is known, and a live signal sent before that is lost.
 //     It does not help a peer that is armed but whose host has no handler for
 //     `host.mountToolSidebar` (rocket-ui's collapsed sidebar unmounts the
@@ -74,8 +76,8 @@ export const SUMMON_EVENT = `${RESERVED_STATE_PREFIX}summon`;
 /** How long a frame listens for a retained readiness nonce before it summons. */
 export const SUMMON_SETTLE_MS = 250;
 
-/** The delays between re-sends while no controller answers (then it stops). */
-export const SUMMON_RETRY_MS: readonly number[] = [1_000, 2_000, 4_000, 8_000];
+/** The delays between re-sends within one episode while no controller answers (one retry, then it stops; a new episode sends afresh). */
+export const SUMMON_RETRY_MS: readonly number[] = [1_000];
 
 /** How long an episode waits for a controller before the frame says to open the sidebar. */
 export const SUMMON_GRACE_MS = 5_000;
@@ -93,7 +95,7 @@ export type SummonState = 'ready' | 'summoning' | 'unanswered';
 
 /** What {@link createControllerSummon} needs. */
 export interface IControllerSummonOptions {
-	/** The frame's channel (DevToolProps.channel, or the one built over its peer). */
+	/** The frame's channel (DevToolProps.channel). */
 	channel: ToolChannel;
 	/** Runs `fn` after `ms`; returns a cancel (default setTimeout; tests inject their own). */
 	schedule?: (fn: () => void, ms: number) => () => void;

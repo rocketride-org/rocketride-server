@@ -27,10 +27,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { IToolOpServer, ToolChannel, ToolOpMap, ToolOpSpec } from 'shell';
-import { attachController } from './controller';
+import { assertNoOpEventCollisions, attachController } from './controller';
 import type { RequiredControllerHandlers } from './controller';
 import type { IDeadline } from './deadline';
-import type { DevToolPeer } from './realm';
 import type { Reply } from './reply';
 import { CONTROLLER_STATE_TOPIC, RESERVED_STATE_PREFIX } from './realm';
 import { createDevToolHarness, manualNow, settle, shellProtocol, spyPeer } from './testing';
@@ -41,62 +40,36 @@ interface TestOps extends ToolOpMap {
 }
 
 /** Counts op servers the controller creates and disposes, over the real factory. */
-function countingServers(order: string[] = []) {
+function countingServers() {
 	const counts = { created: 0, disposed: 0 };
-	const factory = (peer: DevToolPeer): IToolOpServer<TestOps> => {
-		order.push('opServer');
+	const factory = (channel: ToolChannel): IToolOpServer<TestOps> => {
 		counts.created += 1;
-		const server = shellProtocol.createToolOpServer<TestOps>(peer);
+		const server = shellProtocol.createToolOpServer<TestOps>(channel);
 		return { serve: (op, handler) => server.serve(op, handler), dispose: () => { counts.disposed += 1; server.dispose(); } };
 	};
 	return { counts, factory };
 }
 
-/** Counts channels built over the real factory. */
-function countingChannels(order: string[] = []) {
-	const counts = { created: 0 };
-	const factory = (peer: DevToolPeer): ToolChannel => {
-		order.push('channel');
-		counts.created += 1;
-		return shellProtocol.createToolChannel(peer);
-	};
-	return { counts, factory };
-}
-
-describe('attachController — subscription order and lifetime (R6)', () => {
-	it('with no host channel: ONE channel per peer, created BEFORE the op server, which is created last', () => {
+describe('attachController — the host channel is the only subscriber (R6)', () => {
+	it('subscribes nothing itself: the host channel is the sidebar peer\'s one subscription, before and after a mount', () => {
 		const h = createDevToolHarness();
 		const spy = spyPeer(h.sidebarPeer);
-		const order: string[] = [];
-		const channels = countingChannels(order);
-		const servers = countingServers(order);
-		const first = attachController<TestOps>({ peer: spy.peer, createToolChannel: channels.factory, createToolOpServer: servers.factory, handlers: {} });
-		assert.deepEqual(order, ['channel', 'opServer']);
-		assert.equal(spy.subscribes, 2, 'the channel and the op server — the controller itself never subscribes');
-		first.dispose();
-		const second = attachController<TestOps>({ peer: spy.peer, createToolChannel: channels.factory, createToolOpServer: servers.factory, handlers: {} });
-		assert.equal(channels.counts.created, 1, 'the channel is cached per peer: a remount adds no channel subscription');
-		assert.equal(second.channel, first.channel);
-		assert.equal(spy.subscribes, 3);
-		second.dispose();
-	});
-
-	it('uses the host channel when given and never builds one', () => {
-		const h = createDevToolHarness();
-		const host = shellProtocol.createToolChannel(h.sidebarPeer);
-		const channels = countingChannels();
-		const servers = countingServers();
-		const attached = attachController<TestOps>({ peer: h.sidebarPeer, channel: host, createToolChannel: channels.factory, createToolOpServer: servers.factory, handlers: {} });
-		assert.equal(attached.channel, host);
-		assert.equal(channels.counts.created, 0);
+		const channel = shellProtocol.createToolChannel(spy.peer);
+		const before = spy.subscribes;
+		const attached = attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: { 't.echo': ({ x }) => x } });
+		assert.equal(spy.subscribes, before, 'the controller never subscribes the peer');
+		assert.equal(attached.channel, channel);
 		attached.dispose();
+		attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} }).dispose();
+		assert.equal(spy.subscribes, before, 'a remount adds no subscription either');
 	});
 
-	it('leaves exactly one live op server per peer, even if a previous mount was never disposed', () => {
+	it('leaves exactly one live op server per channel, even if a previous mount was never disposed', () => {
 		const h = createDevToolHarness();
+		const channel = shellProtocol.createToolChannel(h.sidebarPeer);
 		const servers = countingServers();
-		const a = attachController<TestOps>({ peer: h.sidebarPeer, createToolChannel: shellProtocol.createToolChannel, createToolOpServer: servers.factory, handlers: {} });
-		attachController<TestOps>({ peer: h.sidebarPeer, createToolChannel: shellProtocol.createToolChannel, createToolOpServer: servers.factory, handlers: {} });
+		const a = attachController<TestOps>({ channel, createToolOpServer: servers.factory, handlers: {} });
+		attachController<TestOps>({ channel, createToolOpServer: servers.factory, handlers: {} });
 		assert.equal(servers.counts.created - servers.counts.disposed, 1);
 		a.dispose();
 		assert.equal(servers.counts.created - servers.counts.disposed, 1, 'disposing a superseded mount twice is a no-op');
@@ -105,12 +78,8 @@ describe('attachController — subscription order and lifetime (R6)', () => {
 	it('posts no event and no call while mounting, only its retained readiness state (a quiet sidebar, R7)', () => {
 		const h = createDevToolHarness();
 		const spy = spyPeer(h.sidebarPeer);
-		const attached = attachController<TestOps>({
-			peer: spy.peer,
-			createToolChannel: shellProtocol.createToolChannel,
-			createToolOpServer: shellProtocol.createToolOpServer,
-			handlers: { 't.echo': ({ x }) => x },
-		});
+		const channel = shellProtocol.createToolChannel(spy.peer);
+		const attached = attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: { 't.echo': ({ x }) => x } });
 		assert.equal(spy.posts.length, 1);
 		const post = spy.posts[0] as { __rrtool: string; topic: string; snapshot: { ready: unknown } };
 		assert.equal(post.__rrtool, 'state', 'a retained state publish, which R7 allows');
@@ -127,7 +96,7 @@ describe('attachController — every op answers a Reply (R3)', () => {
 		}
 		const h = createDevToolHarness();
 		// @ts-expect-error -- every controller op answers a Reply; a plain result type is refused
-		const attached = attachController<PlainOps>({ peer: h.sidebarPeer, createToolChannel: shellProtocol.createToolChannel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} });
+		const attached = attachController<PlainOps>({ channel: shellProtocol.createToolChannel(h.sidebarPeer), createToolOpServer: shellProtocol.createToolOpServer, handlers: {} });
 		attached.dispose();
 	});
 
@@ -139,10 +108,11 @@ describe('attachController — every op answers a Reply (R3)', () => {
 			'x.never': ToolOpSpec<IDeadline, never>;
 		}
 		const h = createDevToolHarness();
+		const channel = shellProtocol.createToolChannel(h.sidebarPeer);
 		// @ts-expect-error -- `any` would let a plain result and a missing deadline through
-		attachController<AnyOps>({ peer: h.sidebarPeer, createToolChannel: shellProtocol.createToolChannel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} }).dispose();
+		attachController<AnyOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} }).dispose();
 		// @ts-expect-error -- a `never` result is not a Reply (an op that never answers is Reply<never>)
-		attachController<NeverOps>({ peer: h.sidebarPeer, createToolChannel: shellProtocol.createToolChannel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} }).dispose();
+		attachController<NeverOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} }).dispose();
 	});
 
 	it('RequiredControllerHandlers makes production wiring name every op (round 3)', () => {
@@ -150,27 +120,25 @@ describe('attachController — every op answers a Reply (R3)', () => {
 		// @ts-expect-error -- 't.other' is missing
 		const some: RequiredControllerHandlers<TestOps> = { 't.echo': ({ x }) => x };
 		const h = createDevToolHarness();
-		attachController<TestOps>({ peer: h.sidebarPeer, createToolChannel: shellProtocol.createToolChannel, createToolOpServer: shellProtocol.createToolOpServer, handlers: all }).dispose();
+		attachController<TestOps>({ channel: shellProtocol.createToolChannel(h.sidebarPeer), createToolOpServer: shellProtocol.createToolOpServer, handlers: all }).dispose();
 		assert.equal(typeof some, 'object');
 	});
 });
 
 describe('attachController — every handler is served through the deadline guard (R2)', () => {
-	it('answers an on-time call, refuses a late one and one without a deadline, and opens activation on the first accepted op', async () => {
+	it('answers an on-time call, refuses a late one and one without a deadline, and reports the first accepted op', async () => {
 		const h = createDevToolHarness();
 		const clock = manualNow(1_000);
 		const ran: number[] = [];
 		const firstOps: string[] = [];
 		const attached = attachController<TestOps>({
-			peer: h.sidebarPeer,
-			createToolChannel: shellProtocol.createToolChannel,
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
 			createToolOpServer: shellProtocol.createToolOpServer,
 			handlers: { 't.echo': ({ x }) => { ran.push(x); return x * 10; } },
 			now: clock.now,
 			onFirstOp: (op) => firstOps.push(op),
 		});
-		const frame = h.newFramePeer();
-		const call = shellProtocol.createToolController<TestOps>(frame);
+		const call = shellProtocol.createToolOpClient<TestOps>(shellProtocol.createToolChannel(h.newFramePeer()));
 		await settle();
 
 		await assert.rejects(call('t.echo', { x: 1 } as TestOps['t.echo']['params'], { timeoutMs: 1_000 }), /deadlineAt/);
@@ -186,14 +154,13 @@ describe('attachController — every handler is served through the deadline guar
 		const h = createDevToolHarness();
 		let ran = 0;
 		const attached = attachController<TestOps>({
-			peer: h.sidebarPeer,
-			createToolChannel: shellProtocol.createToolChannel,
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
 			createToolOpServer: shellProtocol.createToolOpServer,
 			handlers: { 't.other': () => { ran += 1; return 'x'; } },
 		});
 		attached.dispose();
 		attached.dispose();
-		const call = shellProtocol.createToolController<TestOps>(h.newFramePeer());
+		const call = shellProtocol.createToolOpClient<TestOps>(shellProtocol.createToolChannel(h.newFramePeer()));
 		await settle();
 		await assert.rejects(call('t.other', { deadlineAt: Date.now() + 60_000 }, { timeoutMs: 50 }), /did not answer/);
 		assert.equal(ran, 0);
@@ -207,9 +174,9 @@ describe('attachController — readiness (CE-9)', () => {
 		const channel = shellProtocol.createToolChannel(h.sidebarPeer);
 		const seen: unknown[] = [];
 		channel.onState(CONTROLLER_STATE_TOPIC, (snapshot) => seen.push(snapshot));
-		const first = attachController<TestOps>({ peer: h.sidebarPeer, channel, createToolChannel: shellProtocol.createToolChannel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} });
+		const first = attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} });
 		first.dispose();
-		const second = attachController<TestOps>({ peer: h.sidebarPeer, channel, createToolChannel: shellProtocol.createToolChannel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} });
+		const second = attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} });
 		const readies = seen.map((snapshot) => (snapshot as { ready: string | null }).ready);
 		assert.equal(readies.length, 3);
 		assert.equal(typeof readies[0], 'string');
@@ -224,8 +191,8 @@ describe('attachController — readiness (CE-9)', () => {
 		const channel = shellProtocol.createToolChannel(h.sidebarPeer);
 		let last: unknown;
 		channel.onState(CONTROLLER_STATE_TOPIC, (snapshot) => { last = snapshot; });
-		const stale = attachController<TestOps>({ peer: h.sidebarPeer, channel, createToolChannel: shellProtocol.createToolChannel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} });
-		const live = attachController<TestOps>({ peer: h.sidebarPeer, channel, createToolChannel: shellProtocol.createToolChannel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} });
+		const stale = attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} });
+		const live = attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: {} });
 		const ready = (last as { ready: string | null }).ready;
 		stale.dispose();
 		assert.deepEqual(last, { ready });
@@ -234,3 +201,52 @@ describe('attachController — readiness (CE-9)', () => {
 	});
 });
 
+describe('platform behavior (documented, so a shell fix shows up here) — events and held calls', () => {
+	it('a plain EVENT named like an op runs its handler, with no reply; with no deadlineAt the guard refuses it and nothing runs', async () => {
+		const h = createDevToolHarness();
+		const ran: number[] = [];
+		const refused: string[] = [];
+		const attached = attachController<TestOps>({
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
+			createToolOpServer: shellProtocol.createToolOpServer,
+			handlers: { 't.echo': ({ x }) => { ran.push(x); return x; } },
+			onRefused: (error) => refused.push(error.reason),
+		});
+		const frame = shellProtocol.createToolChannel(h.newFramePeer());
+		await settle();
+		// An event whose payload carries a live deadline runs the handler: the channel's registry answers events too (toolChannel.ts).
+		frame.sendEvent('t.echo', { x: 7, deadlineAt: Date.now() + 60_000 });
+		await settle();
+		// It can run MORE THAN ONCE: a frame's event reaches the sidebar peer as a signal and again through the retained last-payload slot (busPeer.ts).
+		assert.ok(ran.length >= 1 && ran.every((x) => x === 7), 'accepted platform semantics: never name an event like an op, and make mutating handlers check their own authority');
+		const ranBefore = ran.length;
+		// An event without a deadline is a protocol error: refused, not run.
+		frame.sendEvent('t.echo', { x: 8 });
+		frame.sendEvent('t.echo', undefined);
+		await settle();
+		assert.equal(ran.length, ranBefore, 'nothing ran for an event without a deadline');
+		assert.ok(refused.length >= 2 && refused.every((reason) => reason === 'missing'));
+		attached.dispose();
+	});
+
+	it('assertNoOpEventCollisions names every event that shares an op\'s name', () => {
+		assert.deepEqual(assertNoOpEventCollisions(['t.echo', 't.other'], ['refresh', 't.other', `${RESERVED_STATE_PREFIX}summon`]), ['t.other']);
+		assert.deepEqual(assertNoOpEventCollisions(['t.echo'], ['refresh']), []);
+	});
+
+	it('a call the sidebar peer HELD for an unmounted controller is dropped when the host builds the channel before the controller serves (toolChannel.ts: no registry, no answer)', async () => {
+		const h = createDevToolHarness();
+		const frame = shellProtocol.createToolChannel(h.newFramePeer());
+		await settle();
+		const lost = frame.call('t.echo', { x: 1, deadlineAt: Date.now() + 60_000 }, { timeoutMs: 150 });
+		await settle();
+		assert.deepEqual(h.emitted.map((e) => e.op), ['host.mountToolSidebar'], 'the peer held it and asked the host to mount the controller');
+		// The host's render builds the channel: the held call is flushed into a channel with no handler yet.
+		const channel = shellProtocol.createToolChannel(h.sidebarPeer);
+		await settle();
+		// The controller's effect then serves; the call is already gone.
+		const attached = attachController<TestOps>({ channel, createToolOpServer: shellProtocol.createToolOpServer, handlers: { 't.echo': ({ x }) => x } });
+		await assert.rejects(lost, /did not answer/);
+		attached.dispose();
+	});
+});
