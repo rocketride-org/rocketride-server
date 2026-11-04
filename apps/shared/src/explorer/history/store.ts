@@ -229,6 +229,16 @@ export function createHistoryStore<F extends string>(options: IHistoryStoreOptio
 	// ── State ─────────────────────────────────────────────────────────────────
 
 	let bag: HistoryBag<F> = {};
+	/**
+	 * What the stored keys held that this store cannot use, carried through every
+	 * write unchanged (the file is long-lived, hand-editable and shared with other
+	 * clients, so an unparseable value is another client's data, not garbage):
+	 * entries it could not read, per connection key; whole values under a key that
+	 * is not a list (the key is then never written by this store); the same for
+	 * the recording switches; and a history or recording value that is not an
+	 * object at all (that preference is then not written).
+	 */
+	let opaque: { entries: Record<string, unknown[]>; foreign: Record<string, unknown>; bagForeign: boolean; flags: Record<string, unknown>; flagsForeign: boolean } = { entries: {}, foreign: {}, bagForeign: false, flags: {}, flagsForeign: false };
 	let recording: Record<string, boolean> = {};
 	let hydrated = false;
 
@@ -399,12 +409,25 @@ export function createHistoryStore<F extends string>(options: IHistoryStoreOptio
 	function hydrate(): void {
 		const rawBag = prefs?.getPref(historyKey);
 		const next: HistoryBag<F> = {};
-		if (rawBag && typeof rawBag === 'object') {
+		opaque = { entries: {}, foreign: {}, bagForeign: false, flags: {}, flagsForeign: false };
+		if (rawBag && typeof rawBag === 'object' && !Array.isArray(rawBag)) {
 			for (const [key, value] of Object.entries(rawBag as Record<string, unknown>)) {
-				if (!Array.isArray(value)) continue;
-				const entries = value.map(readEntry).filter((entry): entry is IHistoryEntry<F> => entry !== null);
+				if (!Array.isArray(value)) {
+					opaque.foreign[key] = value;
+					continue;
+				}
+				const entries: IHistoryEntry<F>[] = [];
+				const unreadable: unknown[] = [];
+				for (const item of value) {
+					const entry = readEntry(item);
+					if (entry === null) unreadable.push(item);
+					else entries.push(entry);
+				}
+				if (unreadable.length > 0) opaque.entries[key] = unreadable;
 				if (entries.length > 0) next[key] = trim(entries);
 			}
+		} else if (rawBag !== undefined && rawBag !== null) {
+			opaque.bagForeign = true;
 		}
 
 		const pendingKeys = Object.keys(bag);
@@ -420,10 +443,13 @@ export function createHistoryStore<F extends string>(options: IHistoryStoreOptio
 
 		const rawRecording = prefs?.getPref(recordingKey);
 		const flags: Record<string, boolean> = {};
-		if (rawRecording && typeof rawRecording === 'object') {
+		if (rawRecording && typeof rawRecording === 'object' && !Array.isArray(rawRecording)) {
 			for (const [key, value] of Object.entries(rawRecording as Record<string, unknown>)) {
 				if (typeof value === 'boolean') flags[key] = value;
+				else opaque.flags[key] = value;
 			}
+		} else if (rawRecording !== undefined && rawRecording !== null) {
+			opaque.flagsForeign = true;
 		}
 		// A switch flipped before the bridge mounted outranks the stored one —
 		// but only while it is still UNSAVED. Rebuilding from the stored flags
@@ -445,6 +471,21 @@ export function createHistoryStore<F extends string>(options: IHistoryStoreOptio
 		if (pendingKeys.length > 0 || Object.keys(unsavedRecording).length > 0) schedulePersist();
 	}
 
+	/**
+	 * The history value to write: this store's entries, then everything it could
+	 * not read, exactly as stored. A key whose stored value was not a list is
+	 * written back as it was (this store's entries for it stay in memory).
+	 *
+	 * @returns The value for the history preference.
+	 */
+	function withOpaque(): Record<string, unknown> {
+		const out: Record<string, unknown> = {};
+		for (const [key, value] of Object.entries(bag)) out[key] = value;
+		for (const [key, extra] of Object.entries(opaque.entries)) out[key] = [...((out[key] as unknown[] | undefined) ?? []), ...extra];
+		for (const [key, value] of Object.entries(opaque.foreign)) out[key] = value;
+		return out;
+	}
+
 	/** Write both preference keys now, applying the whole-bag budget first. */
 	function flush(): void {
 		persistTimer = null;
@@ -453,8 +494,8 @@ export function createHistoryStore<F extends string>(options: IHistoryStoreOptio
 		// Only re-notify when the budget actually dropped something.
 		const changed = JSON.stringify(trimmed) !== JSON.stringify(bag);
 		bag = trimmed;
-		prefs.setPref(historyKey, bag);
-		prefs.setPref(recordingKey, recording);
+		if (!opaque.bagForeign) prefs.setPref(historyKey, withOpaque());
+		if (!opaque.flagsForeign) prefs.setPref(recordingKey, { ...opaque.flags, ...recording });
 		// The switches are on disk now, so nothing in memory outranks them.
 		unsavedRecording = {};
 		if (changed) notify();
@@ -496,6 +537,7 @@ export function createHistoryStore<F extends string>(options: IHistoryStoreOptio
 		}
 		bag = {};
 		recording = {};
+		opaque = { entries: {}, foreign: {}, bagForeign: false, flags: {}, flagsForeign: false };
 		unsavedRecording = {};
 		pendingRuns = [];
 		viewCache.clear();

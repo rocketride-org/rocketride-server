@@ -294,6 +294,17 @@ reads the store with `getHistory(key)`, `getRecording(key)` and
 `subscribe(listener)`. Per-connection booleans use
 `createConnectionFlags` ([`history/flags.ts`](../../../apps/shared/src/explorer/history/flags.ts)).
 
+**Unreadable stored content is carried, never dropped.** The preference file is
+long-lived, hand-editable and shared with other clients, so what the store
+cannot read is another client's data. `hydrate` keeps, and every write puts back
+unchanged: entries that are not usable records (with the key's readable entries
+rewritten around them), a connection whose stored value is not a list (the store
+never writes that key; its own entries for it stay in memory), recording
+switches that are not booleans, and a history or recording value that is not an
+object at all (that preference is not written). Another owner's unreadable
+content is forgotten with the rest of memory on an owner change, never written
+into the next owner's file. Entries it cannot read are not shown.
+
 **Legacy keys.** When `legacyKeyOf` maps a connection to its pre-v1 key (SQL
 passes `legacyKeyFromKey`), reads are a merged view of both lists. No automatic
 write touches the old list, because several new keys can read one old key (the
@@ -775,10 +786,16 @@ per workspace, mirrored to every realm and republished whole on each write.
   the file. A change made before or during the load is queued, applied over
   what the load read, and written once it is ready.
 - **First run vs unreadable file.**
-  - The engine's `fs_stat` answers `{ exists: false }` for a missing file AND
-    for a missing parent folder (`FileStore.stat`,
-    `packages/ai/src/ai/account/file_store.py`), so a first run is always
-    ready.
+  - **`{ exists: false }` is not proof of a first run.** The engine's
+    `fs_stat` answers it for a missing file, a missing parent folder AND any
+    storage error (`FileStore.stat` catches `StorageError`, not only
+    `StorageNotFoundError`; a throttled or failing backend looks like an absent
+    file). So a "missing" stat is confirmed by a read: only a read that fails
+    as a proven not-found (`/file not found/i`, the rule develop's saved
+    connections use; the SDK exposes no structured code) is a first run. A read
+    that succeeds means the file is there and is used; any other failure leaves
+    it unreadable, with no writer installed, the failure surfaced and the
+    bounded retry below.
   - A failed request is retried (`PREFS_LOAD_ATTEMPTS` in all) before the
     session falls back to memory. A realm with no client yet fails the request
     as `unavailable` (nothing sent); that is never taken for a missing file.
