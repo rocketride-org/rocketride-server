@@ -27,4 +27,13 @@ TEST_CASE("log::Colors") {
     SECTION("LOG") {
         for (auto c : Color{}) LOG(Test, c, colorName(c));
     }
+
+    SECTION("Conversion from string") {
+        for (auto c : Color{}) {
+            REQUIRE(_fs<Color>(colorName(c)) == c);
+            REQUIRE(_fs<Color>(iText{colorName(c)}.lowerCase()) == c);
+            REQUIRE(_fs<Color>(iText{colorName(c)}.upperCase()) == c);
+        }
+        REQUIRE(_fsc<Color>("invalid").hasCcode());
+    }
 }
