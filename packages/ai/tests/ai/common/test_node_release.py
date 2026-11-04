@@ -48,6 +48,15 @@ def test_the_index_is_the_one_the_server_was_built_with(layout):
     assert asked == []
 
 
+def test_a_package_in_dist_nodes_is_read_and_nothing_is_downloaded(layout):
+    tmp, _, asked = layout
+    os.makedirs(tmp / 'nodes')
+    (tmp / 'nodes' / 'llm_x.rrnode').write_bytes(ZIP)
+
+    assert node_release.read_package('llm_x', ZIP_SHA) == ZIP
+    assert asked == []
+
+
 def test_a_prerelease_package_is_found_under_its_own_tag(layout):
     _, release, asked = layout
     release[f'{node_release.RELEASES}/server-v1.2.3-prerelease/llm_x.rrnode'] = ZIP
@@ -112,3 +121,14 @@ def test_threads_saving_the_same_file_each_leave_it_whole(tmp_path):
 
     assert errors == [] and open(path, 'rb').read() == b'x' * 100_000
     assert os.listdir(tmp_path / 'cache') == ['abc.rrnode']
+
+
+def test_a_failed_write_leaves_nothing_in_the_cache(tmp_path, monkeypatch):
+    def full(*args):
+        raise OSError(28, 'No space left on device')
+
+    monkeypatch.setattr(node_release.os, 'replace', full)
+
+    with pytest.raises(OSError, match='No space left'):
+        node_release.save(str(tmp_path / 'cache' / 'abc.rrnode'), b'x')
+    assert os.listdir(tmp_path / 'cache') == []
