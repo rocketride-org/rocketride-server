@@ -109,7 +109,7 @@ export const ApiKeyWidgetView: FC<ApiKeyWidgetViewProps> = ({ id, value, label, 
 	const compactDescriptions = formContext?.compactDescriptions === true;
 
 	const { maskApiKey, showApiKey, tempValue } = state;
-	const toggleLabel = showApiKey ? 'Hide API key' : 'Show API key';
+	const toggleLabel = showApiKey ? t('form.apiKeyHide', 'Hide API key') : t('form.apiKeyShow', 'Show API key');
 	const inputType = maskApiKey || showApiKey ? 'text' : 'password';
 	const displayedValue = maskApiKey && showApiKey ? String(value ?? '') : tempValue;
 
@@ -212,9 +212,11 @@ export const ApiKeyWidgetView: FC<ApiKeyWidgetViewProps> = ({ id, value, label, 
 								</Tooltip>
 								{maskApiKey && !readonly && (
 									<Tooltip title={t('form.apiKeyRemoveTooltip')}>
-										<Delete
+										<IconButton
+											type="button"
+											size="small"
+											aria-label={t('form.apiKeyRemoveTooltip')}
 											sx={{
-												cursor: 'pointer',
 												ml: 0.5,
 												color: 'var(--rr-color-error-light)',
 												'&:hover': {
@@ -226,7 +228,9 @@ export const ApiKeyWidgetView: FC<ApiKeyWidgetViewProps> = ({ id, value, label, 
 												dispatch({ type: 'clearSaved' });
 												onChange('');
 											}}
-										/>
+										>
+											<Delete fontSize="small" />
+										</IconButton>
 									</Tooltip>
 								)}
 							</InputAdornment>

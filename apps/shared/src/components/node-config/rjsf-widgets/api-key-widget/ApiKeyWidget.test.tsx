@@ -131,6 +131,7 @@ test('saved API key renders masked trailing preview in read-only mode with show 
 
 	assert.match(markup, /<input[^>]*readonly=""[^>]*type="text"[^>]*value="•••••••••abcd"/);
 	assert.match(markup, /<button[^>]*aria-label="Show API key"[^>]*aria-pressed="false"/);
+	assert.match(markup, /<button[^>]*aria-label="form\.apiKeyRemoveTooltip"/);
 });
 
 test('saved API key show/hide toggle reveals and re-masks the key, and delete resets to empty password input', () => {
