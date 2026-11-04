@@ -1694,6 +1694,10 @@ async def test_resolve_rewrites_relative_readme_to_versioned_url(registry):
     resolved = await resolve_app_pins('org1', 'u1', [])
     assert resolved[0]['readme'] == '/apps/acme.brandy/README.md'
 
+    row['snapshot'] = {'name': 'Brandy', 'readmePath': 'https://docs.example.com/README.md'}
+    resolved = await resolve_app_pins('org1', 'u1', [])
+    assert resolved[0]['readme'] == 'https://docs.example.com/README.md'
+
     row['snapshot'] = {'name': 'Brandy', 'readmePath': '../secret.md'}
     resolved = await resolve_app_pins('org1', 'u1', [])
     assert resolved[0]['readme'] == ''

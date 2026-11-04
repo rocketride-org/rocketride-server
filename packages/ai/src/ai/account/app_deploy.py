@@ -1148,7 +1148,7 @@ def _asset_url_of(app_id: str, version: int, asset_path: str) -> str:
     rel = str(asset_path or '').strip().replace('\\', '/')
     if not rel:
         return ''
-    if rel.startswith('/'):
+    if rel.startswith(('/', 'http://', 'https://')):
         return rel
     parts = [p for p in rel.split('/') if p not in ('', '.')]
     if not parts or '..' in parts:
