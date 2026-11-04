@@ -377,3 +377,46 @@ def _reader_config(store):
             database=getattr(store, 'database', None),
         )
     return config
+
+
+# ---------------------------------------------------------------------------
+# D6-VX-1: a permanent delete is conditional on the trashed state
+# ---------------------------------------------------------------------------
+
+
+def test_remove_trashed_deletes_only_the_chunks_still_in_the_trash(store_env):
+    store, raw, table = store_env
+    _seed(store)
+    store.markDeleted(['b', 'c'])
+    store.markActive(['c'])  # restored before the delete
+
+    assert (
+        store.removeTrashed(['a', 'b', 'c', 'schema']) == 2
+    )  # b's two chunks; a and c are live, schema is never touched
+    with raw.cursor() as cur:
+        cur.execute(f"SELECT objectId FROM {table} WHERE objectId != 'schema' ORDER BY objectId")
+        assert [row[0] for row in cur.fetchall()] == ['a', 'c']
+        cur.execute(f"SELECT count(*) FROM {table} WHERE objectId = 'schema'")
+        assert cur.fetchone()[0] == 1
+
+
+def test_a_restore_between_the_live_check_and_the_permanent_delete_keeps_the_document(store_env):
+    store, _, _ = store_env
+    _seed(store)
+    tool = _tools(store)
+    assert tool.soft_delete({'object_ids': ['b', 'c']})['success']
+    inner = tool._tool
+    original = inner._vx_with_live_chunk
+
+    def check_then_restore(st, ids):
+        kept = original(st, ids)
+        assert tool.restore({'object_ids': ['b']})['success']  # a concurrent restore lands here
+        return kept
+
+    inner._vx_with_live_chunk = check_then_restore
+    answer = tool.delete({'object_ids': ['b', 'c'], 'deleted_only': True})
+
+    assert answer['success'] is True and answer['kept_live'] == ['b'], answer
+    assert answer['removed_chunks'] == 1  # c's chunk: what the store actually deleted
+    assert [row['object_id'] for row in tool.list_documents({})['documents']] == ['a', 'b']
+    assert tool.get({'object_id': 'b'})['total'] == 2
