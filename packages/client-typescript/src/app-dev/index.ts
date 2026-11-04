@@ -476,10 +476,13 @@ export class DevSession {
 	 * Restarts (reinstall + respawn) when the app's package.json changes.
 	 * Watches the folder, not the file: an editor's atomic save renames a new
 	 * file over package.json, and a file watch stays on the replaced inode.
+	 * Watches the folder's real path: on Windows, a folder named through an
+	 * 8.3 short name (C:\Users\JOHNSM~1\...) makes libuv abort the whole
+	 * process on the first change event.
 	 */
 	private watchPackageJson(): void {
 		try {
-			this.pkgWatcher = fs.watch(this.options.app.folder, (_event, filename) => {
+			this.pkgWatcher = fs.watch(fs.realpathSync.native(this.options.app.folder), (_event, filename) => {
 				if (filename?.toString() !== 'package.json') return;
 				if (this.pkgTimer) clearTimeout(this.pkgTimer);
 				this.pkgTimer = setTimeout(() => this.requestRestart(), 800);

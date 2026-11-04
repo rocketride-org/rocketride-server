@@ -35,7 +35,7 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { classifyDevOutput, DEV_SERVER_GUARD_SOURCE, DevSession, devPreviewUrl, materializeDevServerGuard, resolveRsbuildInvocation, splitCompleteLines, stopDevServer, writeProxyConfig } from '../src/app-dev/index';
 import * as vendor from '../src/app-pack/vendor';
 import * as common from '../src/cli/common';
@@ -68,6 +68,13 @@ function writeServedApp(port = 3999): { folder: string; app: { id: string; name:
 	fs.writeFileSync(path.join(folder, 'clock.rrapp'), '{}');
 	fs.writeFileSync(path.join(bin, 'rsbuild.js'), `console.log('  \\u279c Local:    http://localhost:${port}/');\nconsole.log('ready   built in 0.10 s');\nsetInterval(() => {}, 1000);\n`);
 	return { folder, app: { id: 'acme.clock', name: 'Clock', moduleId: 'acme_clock', folder } };
+}
+
+/** The folder's 8.3 short path on Windows; undefined elsewhere or when it cannot be read. */
+function shortPath(folder: string): string | undefined {
+	if (process.platform !== 'win32') return undefined;
+	const result = spawnSync('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${folder}") do @echo %~sI"`], { encoding: 'utf8', windowsVerbatimArguments: true });
+	return result.status === 0 ? result.stdout.trim() : undefined;
 }
 
 /** Polls until the condition holds (fails the test after ~5 s). */
@@ -232,6 +239,20 @@ describe('DevSession', () => {
 		await waitFor(() => restarts() === 1);
 		atomicSave('0.1.2');
 		await waitFor(() => restarts() === 2);
+		await session.stop();
+	}, 15000);
+
+	it('restarts on a package.json change when the app folder is named through its 8.3 short path', async () => {
+		const { folder, app } = writeServedApp(3995);
+		const short = shortPath(folder);
+		// Other platforms, and Windows volumes without 8.3 names, have no short path to watch through.
+		if (!short || short.toLowerCase() === folder.toLowerCase()) return;
+		const lines: string[] = [];
+		const session = new DevSession({ app: { ...app, folder: short }, workspaceRoot: ws, engineOrigin: 'http://localhost:5565', install: false, onLine: (line) => lines.push(line) });
+
+		await session.start();
+		fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'clock-ui', version: '0.1.1', appManifest: { id: 'acme.clock', name: 'Clock' } }));
+		await waitFor(() => lines.some((l) => l.startsWith('package.json changed')));
 		await session.stop();
 	}, 15000);
 });
