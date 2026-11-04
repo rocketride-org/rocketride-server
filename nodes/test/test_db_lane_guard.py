@@ -222,9 +222,14 @@ def test_every_registered_suite_file_exists_and_every_pooler_suite_is_registered
         assert set(lane['poolerSuites']) <= set(out['suites']), lane['file']
 
 
+# A suite that needs a live database names its server variable as a string literal
+# (os.environ.get('RR_TEST_PG_DSN'), a helper's parameter, ...); a docstring or comment that
+# merely mentions a variable does not make a suite one.
+_READS_A_SERVER = re.compile(r"""['"]RR_(?:REQUIRE_DB_TESTS|TEST_[A-Z0-9_]*(?:DSN|URI|URL))['"]""")
+
+
 def _needs_a_live_database(path: Path) -> bool:
-    text = path.read_text(encoding='utf-8', errors='replace')
-    return bool(re.search(r'RR_REQUIRE_DB_TESTS|RR_TEST_[A-Z0-9_]*(?:DSN|URI|URL)\b', text))
+    return bool(_READS_A_SERVER.search(path.read_text(encoding='utf-8', errors='replace')))
 
 
 def test_every_suite_that_needs_a_live_database_is_registered():

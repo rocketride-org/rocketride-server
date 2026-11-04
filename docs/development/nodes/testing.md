@@ -648,7 +648,7 @@ the domain's registration file or in the app's own docs.
 
 `nodes/test/test_db_lane_guard.py` checks the registry: every registration is
 well-formed, every suite file exists and is registered exactly once, and every
-`nodes/test/test_*.py` that reads a live-database variable (`RR_REQUIRE_DB_TESTS`
+`nodes/test/test_*.py` that reads a live-database variable from the environment (`RR_REQUIRE_DB_TESTS`
 or an `RR_TEST_*_DSN`/`_URI`/`_URL`) is registered, so a new live suite cannot
 be collected by the mocked pass by mistake. Name new suites `test_*_full.py`.
 
