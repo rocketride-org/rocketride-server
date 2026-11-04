@@ -104,6 +104,16 @@ class Output:
         if self._mode != 'stdout':
             print(text)
 
+    def warn(self, text: str) -> None:
+        """
+        Emit a non-fatal warning on stderr — visible in every mode, and never
+        mixed into the JSON value on stdout.
+
+        Args:
+            text: The warning, as a plain sentence.
+        """
+        print(f'Warning: {text}', file=sys.stderr)
+
     def result(self, value: Any) -> None:
         """
         Record the command's JSON result payload.

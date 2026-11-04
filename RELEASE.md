@@ -44,8 +44,7 @@ The monorepo produces five independently versioned and released packages:
 Each package produces specific artifacts during the build:
 
 **Server** (per platform):
-- `rocketride-server-v{version}-win64.zip`: Windows x64 binary archive
-- `rocketride-server-v{version}-win64.symbols.zip`: Windows debug symbols
+- `rocketride-server-v{version}-win64.zip`: Windows x64 binary archive, debug symbols (`*.pdb`) included
 - `rocketride-server-v{version}-win64.manifest.json`: Build manifest with content hash
 - `rocketride-server-v{version}-linux-x64.tar.gz`: Linux x64 binary archive
 - `rocketride-server-v{version}-linux-x64.manifest.json`: Build manifest
@@ -331,7 +330,7 @@ Both workflows build on the same three platforms:
 | Platform | Runner | Server artifact format |
 |----------|--------|----------------------|
 | Linux x64 | `ubuntu-22.04` | `.tar.gz` |
-| Windows x64 | `windows-2022` | `.zip` + `.symbols.zip` |
+| Windows x64 | `windows-2022` | `.zip` |
 | macOS ARM64 | `macos-14` | `.tar.gz` |
 
 Client packages (TypeScript, Python, MCP) and the VS Code extension are platform-independent and are built only on the Ubuntu runner.

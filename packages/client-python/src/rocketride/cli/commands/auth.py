@@ -37,6 +37,7 @@ prompts, the loopback OAuth listener, and command wiring. Kept in exact
 parity with the TypeScript CLI's ``src/cli/commands/auth.ts``.
 """
 
+import html
 import json
 import os
 import socket
@@ -45,7 +46,7 @@ import threading
 import urllib.parse
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional, Tuple
 
 from rocketride_common.env import (
     ENV_DEPLOY_APIKEY,
@@ -153,28 +154,197 @@ def _open_browser(url: str) -> None:
         pass
 
 
-def _authorize_via_loopback(zitadel_url: str, client_id: str, challenge: str, out: Output) -> Dict[str, str]:
+# The RocketRide web app's two palettes — 'rocketride' (dark) and
+# 'rocketride-light', from packages/shell/public/themes/*.json (a unit test
+# keeps these in step). The callback page cannot read the theme a user saved
+# inside the web app (another origin's storage), so it follows the system
+# light/dark setting onto these palettes — the web app's own default.
+CALLBACK_PALETTES = {
+    'dark': {
+        'bg': '#080808',
+        'paper': '#161616',
+        'text': '#ffffff',
+        'muted': 'rgba(255,255,255,0.40)',
+        'border': 'rgba(255,255,255,0.08)',
+        'buttonBg': '#00b9ec',
+        'buttonFg': '#ffffff',
+        'success': '#229954',
+        'error': '#f44336',
+    },
+    'light': {
+        'bg': '#f0efe9',
+        'paper': '#e8e7e1',
+        'text': '#0a0a0a',
+        'muted': 'rgba(10,10,10,0.62)',
+        'border': 'rgba(0,0,0,0.15)',
+        'buttonBg': '#00a3d9',
+        'buttonFg': '#0a0a0a',
+        'success': '#229954',
+        'error': '#f44336',
+    },
+}
+
+# The web app's font stack (the themes' --rr-font-family).
+_CALLBACK_FONT = "'Figtree Variable', 'Figtree', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+
+# The RocketRide mark, as on the landing page (flame in brand red, body in text colour).
+_CALLBACK_LOGO = (
+    '<svg class="logo" width="36" height="36" viewBox="0 0 191 192" fill="none" aria-hidden="true">'
+    '<path d="M159.5 161.424L153.7 167.224C151.9 169.024 148.9 169.024 147 167.224L126.6 146.824C115.6 135.824 115.6 118.024 126.6 107.024C138.1 95.5245 138.1 76.9245 126.6 65.4245L125.1 63.9245C113.6 52.4245 95 52.4245 83.5 63.9245C72.5 74.9245 54.6 74.9245 43.6 63.9245L23.2 43.5245C21.4 41.7245 21.4 38.7245 23.2 36.8245L29 31.0245C37 23.0245 49.1 20.5245 59.6 24.9245L87.5 36.3245C97.3 40.1245 108.4 38.0245 116.3 31.1245L137 10.4245C138.6 8.92449 140.4 7.42449 142.5 6.22449C146.2 4.12449 150.3 3.02449 154.5 2.62449L185.4 0.0244895C188.3 -0.275511 190.8 2.22449 190.5 5.12449L187.8 36.4245C187.3 42.8245 184.5 48.8245 180.1 53.5245L160.5 73.1245C152.5 81.2245 150.1 93.3245 154.5 103.824L155.5 106.224L161.2 120.024L165.6 130.924C169.9 141.424 167.5 153.524 159.5 161.524V161.424Z" fill="currentColor" fill-opacity="0.85"/>'
+    '<path d="M0.799997 190.325C-0.200003 189.325 -0.300003 187.625 0.599997 186.425L21.1 162.024C31.1 150.024 37.9 137.725 41.3 125.325C43.6 116.625 44.6 108.525 44.1 101.225C44.1 100.325 44.4 99.4245 45.1 98.8245C45.8 98.2245 46.8 97.9245 47.7 98.1245C65 101.625 83.5 98.3245 98.5 88.9245C99.6 88.2245 101.1 88.4245 102 89.3245C102.9 90.2245 103.1 91.7245 102.4 92.8245C93 107.825 89.7 126.325 93.2 143.525C93.4 144.325 93.2 145.225 92.6 145.925C92 146.625 91 147.225 90.1 147.125C82.8 146.625 74.6 147.525 66 149.925C53.6 153.225 41.2 160.025 29.3 170.125L4.9 190.625C3.8 191.525 2.1 191.525 0.999997 190.425H0.799997V190.325Z" fill="#F93822"/>'
+    '</svg>'
+)
+
+
+# The RocketRide cloud's web app — where people use RocketRide in a browser.
+_CLOUD_WEB_APP_URL = 'https://rocketride.ai/'
+
+
+def web_app_url_for(server_base: str) -> str:
+    """
+    The web app a signed-in user should land on for a server.
+
+    The cloud API (CONST_DEFAULT_WEB_CLOUD) is fronted by the cloud web app at
+    rocketride.ai; any other server serves its web app from its own origin.
+    Mirrors the TypeScript CLI's webAppUrlFor.
+
+    Args:
+        server_base: The server's http(s) origin (to_http_base of its URI).
+
+    Returns:
+        The web app URL, with a trailing slash.
+    """
+    from ...core.constants import CONST_DEFAULT_WEB_CLOUD
+
+    origin = server_base.rstrip('/')
+    return (
+        _CLOUD_WEB_APP_URL if _canonical_origin(origin) == _canonical_origin(CONST_DEFAULT_WEB_CLOUD) else f'{origin}/'
+    )
+
+
+def _canonical_origin(url: str) -> str:
+    """Lowercase scheme://host with a default port dropped (like the WHATWG URL origin)."""
+    parsed = urllib.parse.urlparse(url)
+    try:
+        port = parsed.port
+    except ValueError:
+        return url.lower()
+    scheme = parsed.scheme.lower()
+    host = (parsed.hostname or '').lower()
+    if port is None or (scheme, port) in (('http', 80), ('https', 443)):
+        return f'{scheme}://{host}'
+    return f'{scheme}://{host}:{port}'
+
+
+def _palette_vars(p: Dict[str, str]) -> str:
+    return (
+        f'--bg:{p["bg"]};--paper:{p["paper"]};--text:{p["text"]};--muted:{p["muted"]};--border:{p["border"]};'
+        f'--btn-bg:{p["buttonBg"]};--btn-fg:{p["buttonFg"]};--ok:{p["success"]};--err:{p["error"]}'
+    )
+
+
+def _render_callback_page(
+    ok: bool, web_url: Optional[str] = None, error: Optional[str] = None, waitlisted: bool = False
+) -> str:
+    """
+    Render the page the browser lands on after the sign-in redirect, branded
+    like the RocketRide landing page and themed with the web app's palettes
+    (system light/dark).
+
+    Success tries to close the tab. Chromium allows that for this tab;
+    Firefox only lets scripts close windows scripts opened, so there the page
+    stays as a finished state, with a link to the web app. A waitlisted
+    account stays open with its access-queue notice. A failure shows the
+    reason and makes no close attempt. Mirrors the TypeScript CLI's
+    renderCallbackPage.
+
+    Args:
+        ok: Whether sign-in finished (credential exchanged).
+        web_url: The server's web app, linked from the page (absolute http(s) only).
+        error: The failure reason (when not ok).
+        waitlisted: The account is in the access queue (when ok).
+
+    Returns:
+        The HTML document.
+    """
+    style = ''.join(
+        [
+            f':root{{{_palette_vars(CALLBACK_PALETTES["light"])}}}',
+            f'@media (prefers-color-scheme:dark){{:root{{{_palette_vars(CALLBACK_PALETTES["dark"])}}}}}',
+            '*{box-sizing:border-box}',
+            f'body{{margin:0;min-height:100vh;display:flex;flex-direction:column;background:var(--bg);color:var(--text);font-family:{_CALLBACK_FONT};-webkit-font-smoothing:antialiased}}',
+            'header{display:flex;align-items:center;gap:10px;padding:20px 28px}',
+            'header .logo{color:var(--text);display:block;flex-shrink:0}',
+            'header span{font-size:22px;font-weight:700}',
+            'main{flex:1;display:grid;place-items:center;padding:24px}',
+            '.card{width:100%;max-width:440px;padding:40px 36px;text-align:center;background:var(--paper);border:1px solid var(--border);border-radius:16px}',
+            '.badge{width:56px;height:56px;margin:0 auto 20px;display:grid;place-items:center;border-radius:50%;border:2px solid var(--state)}',
+            '.badge svg{display:block;stroke:var(--state)}',
+            'h1{margin:0 0 8px;font-size:28px;font-weight:800}',
+            'p{margin:0;font-size:15px;line-height:1.5;color:var(--muted)}',
+            '.reason{margin-top:12px;color:var(--text);word-break:break-word}',
+            '.btn{display:inline-block;margin-top:28px;padding:10px 22px;border-radius:8px;background:var(--btn-bg);color:var(--btn-fg);font-weight:700;font-size:15px;text-decoration:none}',
+            '.hint{margin-top:18px;font-size:13px}',
+        ]
+    )
+    head = (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<meta name="color-scheme" content="light dark"><title>RocketRide sign-in</title><style>{style}</style></head>'
+        f'<body><header>{_CALLBACK_LOGO}<span>RocketRide</span></header><main>'
+    )
+
+    if not ok:
+        badge = '<div class="badge" style="--state:var(--err)"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round"><path d="M12 7v6"/><path d="M12 17h.01"/></svg></div>'
+        reason = html.escape(error or 'unknown error')
+        return f'{head}<div class="card">{badge}<h1>Sign-in failed</h1><p class="reason">{reason}</p><p class="hint">Return to your terminal and run <strong>rocketride login</strong> again.</p></div></main></body></html>'
+
+    # step: the web app link — absolute http(s) with a host only
+    parsed_url = urllib.parse.urlparse(web_url or '')
+    target_url = web_url if parsed_url.scheme in ('http', 'https') and parsed_url.hostname else ''
+
+    badge = '<div class="badge" style="--state:var(--ok)"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>'
+    button = f'<a class="btn" href="{html.escape(target_url)}">Open RocketRide</a>' if target_url else ''
+    if waitlisted:
+        return f'{head}<div class="card">{badge}<h1>You\'re on the list</h1><p>Your account is in the access queue; you will be emailed when it is activated.</p>{button}</div></main></body></html>'
+    return f'{head}<div class="card">{badge}<h1>You\'re signed in</h1><p>Return to your terminal; the RocketRide CLI is ready.</p>{button}<p class="hint">You can close this tab.</p></div></main><script>window.close();</script></body></html>'
+
+
+def _authorize_via_loopback(
+    zitadel_url: str,
+    client_id: str,
+    challenge: str,
+    out: Output,
+    open_browser: Callable[[str], None] = _open_browser,
+) -> Tuple[Dict[str, str], Callable[[str], None]]:
     """
     Run the loopback-redirect PKCE authorization and return the code.
 
     Starts a listener on a random 127.0.0.1 port, sends the browser to
     the Zitadel authorize URL, and returns the ``code`` query parameter
-    from the redirect.
+    from the redirect. A code is not a sign-in yet (the exchange and the
+    key mint can still fail), so the browser's request is held open until
+    the caller reports the real outcome through ``finish``. A provider
+    error or a code-less redirect is answered at once.
 
     Args:
         zitadel_url: Base URL of the Zitadel instance.
         client_id: OAuth public client id.
         challenge: The S256 code challenge.
         out: Output channel for progress lines.
+        open_browser: Opens the authorize URL (the system browser by default).
 
     Returns:
-        Dict with ``code`` and the exact ``redirectUri`` used.
+        A dict with ``code`` and the exact ``redirectUri`` used, and
+        ``finish(page)``, which answers the held browser request with the
+        rendered page and closes the listener.
 
     Raises:
         RuntimeError: On timeout, rejection, or a code-less redirect.
     """
     result: Dict[str, str] = {}
     done = threading.Event()
+    final: Dict[str, str] = {}
+    page_ready = threading.Event()
 
     class CallbackHandler(BaseHTTPRequestHandler):
         """One-shot handler for the OAuth loopback redirect."""
@@ -186,17 +356,26 @@ def _authorize_via_loopback(zitadel_url: str, client_id: str, challenge: str, ou
                 self.end_headers()
                 return
             params = urllib.parse.parse_qs(parsed.query)
-            self.send_response(200)
-            self.send_header('Content-Type', 'text/html')
-            self.end_headers()
-            self.wfile.write(
-                b'<html><body><p>RocketRide sign-in received. You can close this window and return to the terminal.</p></body></html>'
-            )
             if 'error' in params:
                 result['error'] = (params.get('error_description') or params.get('error') or ['unknown'])[0]
+                page = _render_callback_page(False, error=result['error'])
+                done.set()
             else:
                 result['code'] = (params.get('code') or [''])[0]
-            done.set()
+                done.set()
+                if result['code']:
+                    # hold the browser until the caller knows the outcome
+                    page_ready.wait(OAUTH_TIMEOUT_S)
+                    page = final.get('page') or _render_callback_page(
+                        False, error='Sign-in did not complete; see your terminal.'
+                    )
+                else:
+                    page = _render_callback_page(False, error='The sign-in redirect carried no authorization code.')
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html; charset=utf-8')
+            self.send_header('Cache-Control', 'no-store')
+            self.end_headers()
+            self.wfile.write(page.encode('utf-8'))
 
         def log_message(self, format, *log_args):  # noqa: A002
             """Silence the default request logging."""
@@ -206,23 +385,35 @@ def _authorize_via_loopback(zitadel_url: str, client_id: str, challenge: str, ou
     redirect_uri = f'http://127.0.0.1:{port}/auth/callback'
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
+
+    def close() -> None:
+        # shutdown() waits for the handler, so a held page is written first
+        server.shutdown()
+        server.server_close()
+
+    def finish(page: str) -> None:
+        if page_ready.is_set():
+            return
+        final['page'] = page
+        page_ready.set()
+        close()
+
     try:
         authorize_url = build_authorize_url(zitadel_url, client_id, redirect_uri, challenge)
         out.line('Opening your browser to sign in...')
         out.line(f'If it did not open, visit: {authorize_url}')
-        _open_browser(authorize_url)
+        open_browser(authorize_url)
 
         if not done.wait(OAUTH_TIMEOUT_S):
             raise RuntimeError('Sign-in timed out waiting for the browser redirect')
-    finally:
-        server.shutdown()
-        server.server_close()
-
-    if 'error' in result:
-        raise RuntimeError(f'Sign-in was rejected: {result["error"]}')
-    if not result.get('code'):
-        raise RuntimeError('Sign-in redirect carried no authorization code')
-    return {'code': result['code'], 'redirectUri': redirect_uri}
+        if 'error' in result:
+            raise RuntimeError(f'Sign-in was rejected: {result["error"]}')
+        if not result.get('code'):
+            raise RuntimeError('Sign-in redirect carried no authorization code')
+    except BaseException:
+        close()
+        raise
+    return {'code': result['code'], 'redirectUri': redirect_uri}, finish
 
 
 async def _sign_in_saas(uri: str, out: Output) -> str:
@@ -248,8 +439,11 @@ async def _sign_in_saas(uri: str, out: Output) -> str:
     # step: PKCE verifier + S256 challenge (shared helper)
     verifier, challenge = generate_pkce()
 
-    # step: browser authorization via the loopback redirect
-    grant = _authorize_via_loopback(DEFAULT_ZITADEL_URL, DEFAULT_CLI_CLIENT_ID, challenge, out)
+    # step: browser authorization via the loopback redirect; the browser
+    # waits on its callback page until this sign-in finishes
+    grant, finish = _authorize_via_loopback(DEFAULT_ZITADEL_URL, DEFAULT_CLI_CLIENT_ID, challenge, out)
+    web_url = web_app_url_for(to_http_base(uri))
+    page = _render_callback_page(False, error='Sign-in did not complete; see your terminal.')
 
     # step: exchange the code over a temporary DAP connection — the
     # credential string is the cd_-encoded PKCE triple; the server
@@ -257,7 +451,11 @@ async def _sign_in_saas(uri: str, out: Output) -> str:
     credential = encode_cd_credential(
         {'code': grant['code'], 'verifier': verifier, 'redirectUri': grant['redirectUri']}
     )
-    client = RocketRideClient(uri, auth=credential)
+    try:
+        client = RocketRideClient(uri, auth=credential)
+    except BaseException as err:
+        finish(_render_callback_page(False, error=str(err)))
+        raise
     try:
         result = await client.connect() or {}
         if result.get('waitlisted'):
@@ -266,6 +464,7 @@ async def _sign_in_saas(uri: str, out: Output) -> str:
             out.line(
                 f'Thanks for signing up{suffix}! Your account is in the access queue — you will be emailed when it is activated.'
             )
+            page = _render_callback_page(True, web_url=web_url, waitlisted=True)
             return ''
         if not result.get('userToken'):
             raise RuntimeError('Sign-in succeeded but the server returned no token')
@@ -280,8 +479,13 @@ async def _sign_in_saas(uri: str, out: Output) -> str:
             raise RuntimeError('Sign-in succeeded but the server minted no API key')
         display = result.get('displayName', '')
         out.line(f'Signed in{f" as {display}" if display else ""}; minted API key {key_name!r}.')
+        page = _render_callback_page(True, web_url=web_url)
         return key
+    except Exception as err:
+        page = _render_callback_page(False, error=str(err))
+        raise
     finally:
+        finish(page)
         try:
             await client.disconnect()
         except Exception:  # noqa: BLE001

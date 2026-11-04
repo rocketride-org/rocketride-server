@@ -20,3 +20,4 @@ google-api-python-client    # tool_google_workspace: test_google_client.py, gmai
 google-auth                 # tool_google_workspace
 langchain-aws               # llm_bedrock: test_token_count.py, test_prompt_cache.py
 langchain-anthropic         # llm_anthropic: test_prompt_cache.py
+astrapy                     # store_astra: test_active_paths.py

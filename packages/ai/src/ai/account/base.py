@@ -59,6 +59,12 @@ class DbDecision(NamedTuple):
         return self.allowed
 
 
+class OutOfCreditsError(RuntimeError):
+    """The org is out of credit; ``code`` is what clients receive."""
+
+    code = 'OUT_OF_CREDITS'
+
+
 class AccountBase(ABC):
     """
     Abstract interface for the RocketRide Account facade.
@@ -321,6 +327,10 @@ class AccountBase(ABC):
             ``{'balances': {resource: float, ...}}``
         """
         return {'balances': {}}
+
+    async def check_spend(self, org_id: str) -> 'str | None':
+        """Why the org may not open a pipe, or None if it may. OSS has no balance, so it always may."""
+        return None
 
     async def get_transactions(
         self,

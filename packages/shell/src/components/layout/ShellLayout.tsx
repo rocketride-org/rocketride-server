@@ -532,7 +532,7 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		if (!suppressGateRef.current && !identity && !failureLatched && activeManifest && activeManifest.authenticated !== false && activeAppId !== defaultAppId) {
 			if (authGateTriggeredRef.current === activeAppId) return;
 			authGateTriggeredRef.current = activeAppId;
-			ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId });
+			ConnectionManager.getInstance().emit('shell:loginRequest', { appId: activeAppId, auto: true });
 		} else {
 			authGateTriggeredRef.current = null;
 		}

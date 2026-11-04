@@ -32,6 +32,10 @@ import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from '../shared/util/runClassification';
 import { checkMissingEnvVars } from '../shared/util/envVarCheck';
 import { getLogger } from '../shared/util/output';
+import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId, EMPTY_FILE_SETTLE_MS } from '../shared/util/pipeFileDecision';
+import type { PipeFileEvent } from '../shared/util/pipeFileDecision';
+import { SerialQueue } from '../shared/util/serialQueue';
+import { ReloadingCache, isUnderNodeModules } from '../shared/util/reloadingCache';
 import { getProjectProvider } from '../extension';
 import { scanWorkspaceApps, appIconDataUri } from '../appdev/appScan';
 import type { ScannedApp } from '../appdev/appScan';
@@ -68,6 +72,11 @@ interface ProjectEntryDTO {
 // PROVIDER
 // =============================================================================
 
+/** Resolves after `ms`: the watcher's "give the other writer a moment" wait. */
+function settle(ms: number): Promise<void> {
+	return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export class SidebarProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'rocketride.sidebar.main';
 
@@ -78,7 +87,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	private deployManager = DeployManager.getDeployInstance();
 
 	// ── Pipeline file state ──────────────────────────────────────────────────
-	private parsedFiles = new Map<string, ParsedPipelineFile>();
+	/**
+	 * The parsed .pipe files, keyed by path. Handlers write through
+	 * cacheParsedFile; loadPipelineFiles rebuilds the map and installs it in
+	 * one assignment, with the writes made meanwhile re-applied, and of two
+	 * overlapping reloads only the newer installs (see ReloadingCache).
+	 */
+	private cache = new ReloadingCache<ParsedPipelineFile>();
+	/**
+	 * Created files are handled one at a time, behind the initial load. Each
+	 * handler judges its file against parsedFiles and adds its file to
+	 * parsedFiles afterwards, so two running side by side would each see a
+	 * cache without the other's file, and a project_id the two share would go
+	 * unreported.
+	 */
+	private createdFileQueue = new SerialQueue();
 
 	// ── App Builder state ────────────────────────────────────────────────────
 	// Cached workspace scan (re-run on .rrapp / package.json events) and the
@@ -100,6 +123,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	private logger = getLogger();
 
+	/** The installed parsed-file cache, read only; writes go through cacheParsedFile. */
+	private get parsedFiles(): ReadonlyMap<string, ParsedPipelineFile> {
+		return this.cache.entries;
+	}
+	/** Set by dispose(): a settle wait that outlives the provider must not write. */
+	private disposed = false;
+	/** `<fsPath>\n<project_id>` pairs the duplicate warning was already shown for. */
+	private duplicatePromptsShown = new Set<string>();
+
 	/**
 	 * Creates the sidebar provider.
 	 * Sets up file watchers and event listeners, and kicks off initial file load.
@@ -107,7 +139,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	constructor(private readonly extensionUri: vscode.Uri) {
 		this.setupFileWatching();
 		this.setupEventListeners();
-		this.loadPipelineFiles();
+		// First on the created-file queue: no created file is judged against a
+		// cache the initial load is still filling.
+		void this.createdFileQueue
+			.enqueue(() => this.loadPipelineFiles())
+			.catch((error) => {
+				this.logger.error(`Initial pipeline file load failed (${error instanceof Error ? error.message : String(error)}).`);
+			});
 		void this.rescanApps();
 	}
 
@@ -203,20 +241,36 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	// FILE WATCHING
 	// =========================================================================
 
-	/** Watches for .pipe / .pipe.json create/delete/change events in the workspace. */
+	/**
+	 * Watches for .pipe / .pipe.json create/delete/change events in the workspace.
+	 *
+	 * findFiles excludes node_modules; the watcher does not, and the default
+	 * files.watcherExclude leaves a top-level node_modules/x.pipe through. Every
+	 * event is filtered here, once, by whole path segment, before any handler
+	 * runs: a .pipe file inside an installed package is never written to (the
+	 * created and changed reconciles write) and never cached (a reload would not
+	 * list it, so it would appear and vanish).
+	 */
 	private setupFileWatching(): void {
 		const watcherPipe = vscode.workspace.createFileSystemWatcher('**/*.pipe');
 		const watcherPipeJson = vscode.workspace.createFileSystemWatcher('**/*.pipe.json');
+		const outsideNodeModules =
+			(handle: (uri: vscode.Uri) => void) =>
+			(uri: vscode.Uri): void => {
+				// Relative to the workspace folder, the way findFiles applies its exclude.
+				if (isUnderNodeModules(vscode.workspace.asRelativePath(uri, false))) return;
+				handle(uri);
+			};
 
 		this.disposables.push(
 			watcherPipe,
-			watcherPipe.onDidCreate((uri) => this.handleFileCreated(uri)),
-			watcherPipe.onDidDelete((uri) => this.handleFileDeleted(uri)),
-			watcherPipe.onDidChange((uri) => this.handleFileChanged(uri)),
+			watcherPipe.onDidCreate(outsideNodeModules((uri) => this.enqueueCreatedFile(uri))),
+			watcherPipe.onDidDelete(outsideNodeModules((uri) => this.handleFileDeleted(uri))),
+			watcherPipe.onDidChange(outsideNodeModules((uri) => this.handleFileChanged(uri))),
 			watcherPipeJson,
-			watcherPipeJson.onDidCreate((uri) => this.handleFileCreated(uri)),
-			watcherPipeJson.onDidDelete((uri) => this.handleFileDeleted(uri)),
-			watcherPipeJson.onDidChange((uri) => this.handleFileChanged(uri))
+			watcherPipeJson.onDidCreate(outsideNodeModules((uri) => this.enqueueCreatedFile(uri))),
+			watcherPipeJson.onDidDelete(outsideNodeModules((uri) => this.handleFileDeleted(uri))),
+			watcherPipeJson.onDidChange(outsideNodeModules((uri) => this.handleFileChanged(uri)))
 		);
 
 		// App discovery is .rrapp-driven, and the marker's adjacent
@@ -235,7 +289,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			}, 500);
 		};
 		const onBindingEvent = (uri: vscode.Uri): void => {
-			if (uri.fsPath.includes('node_modules')) return;
+			// Workspace-relative, the way the app scan applies its exclude.
+			if (isUnderNodeModules(vscode.workspace.asRelativePath(uri, false))) return;
 			scheduleRescan();
 		};
 		this.disposables.push(
@@ -293,93 +348,210 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 		return rows;
 	}
 
-	/** Handles a newly created .pipe file — assigns a project_id if missing. */
-	private async handleFileCreated(uri: vscode.Uri): Promise<void> {
-		try {
-			const raw = await vscode.workspace.fs.readFile(uri);
-			const text = Buffer.from(raw).toString('utf8').trim();
+	/**
+	 * Queues a created .pipe file for handleFileCreated. Files created together
+	 * (a checkout, a copied folder) arrive as a burst of events; handled side by
+	 * side, each would be judged against a cache that holds none of the others.
+	 * A handler that fails is logged and does not hold up the next one.
+	 */
+	private enqueueCreatedFile(uri: vscode.Uri): void {
+		void this.createdFileQueue
+			.enqueue(() => this.handleFileCreated(uri))
+			.catch((error) => {
+				this.logger.error(`Pipeline ${vscode.workspace.asRelativePath(uri)}: create handling failed (${error instanceof Error ? error.message : String(error)}).`);
+			});
+	}
 
-			if (!text) {
-				const parsed = { project_id: crypto.randomUUID(), components: [] };
-				await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
-			} else {
-				try {
-					const result = JSON.parse(text);
-					if (result && typeof result === 'object' && !Array.isArray(result)) {
-						const parsed = result as Record<string, unknown>;
-						if (Array.isArray(parsed.components)) {
-							const existingIds = new Set([...this.parsedFiles.values()].map((f) => f.projectId).filter((id): id is string => typeof id === 'string' && id.trim() !== ''));
-							const projectId = typeof parsed.project_id === 'string' && parsed.project_id.trim() !== '' ? parsed.project_id : null;
-							const isDuplicate = projectId !== null && existingIds.has(projectId);
-							if (!projectId || isDuplicate) {
-								parsed.project_id = crypto.randomUUID();
-								await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
-							}
-						}
-					}
-				} catch {
-					// Invalid JSON — leave as-is
-				}
-			}
-		} catch {
-			// File can't be read yet
-		}
-		await this.loadPipelineFiles();
+	/**
+	 * Handles a newly created .pipe file. A genuinely new, empty file gets the
+	 * starter skeleton and a pipeline without a project_id gets one; see
+	 * reconcileProjectId for what the watcher may and may not write. Runs on
+	 * createdFileQueue, one file at a time and after the initial load. Only
+	 * the created file is parsed into the cache, as handleFileChanged does: a
+	 * checkout that adds a hundred files must not run a hundred workspace
+	 * scans, and the next queued file needs no more than this one's entry.
+	 */
+	private async handleFileCreated(uri: vscode.Uri): Promise<void> {
+		// The queue can hold a file past dispose(), and dispose() can land during
+		// the settle wait inside reconcileProjectId; a disposed provider has
+		// nothing to refresh.
+		if (this.disposed) return;
+		// node_modules events never get here: setupFileWatching filters them.
+		await this.reconcileProjectId(uri, 'created');
+		if (this.disposed) return;
+		const text = await this.readPipeText(uri);
+		// Gone again already (a checkout, a temporary file): nothing to show.
+		if (text === undefined) return;
+		this.cacheParsedFile(uri.fsPath, PipelineFileParser.parseContent(text, uri.fsPath, this.getServiceClassInfoMap()));
+		vscode.commands.executeCommand('setContext', 'rocketride.noPipelineFiles', false);
+		this.sendEntriesUpdate();
 	}
 
 	/** Removes the deleted file from the parsed-files cache and updates the webview. */
 	private async handleFileDeleted(uri: vscode.Uri): Promise<void> {
-		this.parsedFiles.delete(uri.fsPath);
+		if (this.disposed) return;
+		this.cacheParsedFile(uri.fsPath, null);
 		this.sendEntriesUpdate();
 	}
 
 	/** Re-parses a changed .pipe file, ensures project_id, and optionally restarts. */
 	private async handleFileChanged(uri: vscode.Uri): Promise<void> {
-		try {
-			const raw = await vscode.workspace.fs.readFile(uri);
-			const text = Buffer.from(raw).toString('utf8');
-			const trimmed = text.trim();
+		await this.reconcileProjectId(uri, 'changed');
+		// dispose() can land during the settle wait inside reconcileProjectId.
+		if (this.disposed) return;
 
-			if (!trimmed) {
-				const parsed = { project_id: crypto.randomUUID(), components: [] };
-				await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(parsed, null, 2), 'utf8'));
-			} else {
-				try {
-					const result = JSON.parse(text);
-					if (result && typeof result === 'object' && !Array.isArray(result)) {
-						const root = result as Record<string, unknown>;
-						const target = root.pipeline && typeof root.pipeline === 'object' && !Array.isArray(root.pipeline) ? (root.pipeline as Record<string, unknown>) : root;
-						if (Array.isArray(target.components)) {
-							const existingIds = new Set(
-								[...this.parsedFiles.values()]
-									.filter((f) => f.filePath !== uri.fsPath)
-									.map((f) => f.projectId)
-									.filter((id): id is string => typeof id === 'string' && id.trim() !== '')
-							);
-							const projectId = typeof target.project_id === 'string' && target.project_id.trim() !== '' ? target.project_id : null;
-							const isDuplicate = projectId !== null && existingIds.has(projectId);
-							if (!projectId || isDuplicate) {
-								target.project_id = crypto.randomUUID();
-								await vscode.workspace.fs.writeFile(uri, Buffer.from(JSON.stringify(result, null, 2), 'utf8'));
-							}
-						}
-					}
-				} catch {
-					// Invalid JSON
-				}
-			}
-		} catch {
-			// File can't be read
+		// Re-parse the changed file. Deleted meanwhile (a checkout, a temporary
+		// file): the delete handler already dropped it, and a parse of a missing
+		// path must not put it back as an invalid entry.
+		const text = await this.readPipeText(uri);
+		if (this.disposed) return;
+		if (text === undefined) {
+			this.cacheParsedFile(uri.fsPath, null);
+			this.sendEntriesUpdate();
+			return;
 		}
-
-		// Re-parse the changed file
-		const parsedFile = await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap());
-		this.parsedFiles.set(uri.fsPath, parsedFile);
+		const parsedFile = PipelineFileParser.parseContent(text, uri.fsPath, this.getServiceClassInfoMap());
+		this.cacheParsedFile(uri.fsPath, parsedFile);
 
 		this.sendEntriesUpdate();
 
 		// Handle pipeline restart based on configuration
 		await this.handlePipelineRestart(uri, parsedFile);
+	}
+
+	/**
+	 * The one way a watcher handler writes to the parsed-file cache. A reload
+	 * in progress builds its own map and would drop the write on its swap, so
+	 * the cache also records the write for the reload to re-apply. `null`
+	 * deletes.
+	 */
+	private cacheParsedFile(fsPath: string, parsed: ParsedPipelineFile | null): void {
+		this.cache.write(fsPath, parsed);
+	}
+
+	// =========================================================================
+	// PROJECT ID RECONCILIATION (issue #2466)
+	// =========================================================================
+
+	/**
+	 * The only path through which the watcher writes to a user's file. What
+	 * happens is decided by the pure decidePipeFile(); this method reads,
+	 * waits, prompts and writes.
+	 */
+	private async reconcileProjectId(uri: vscode.Uri, event: PipeFileEvent, settled = false): Promise<void> {
+		if (this.disposed) return;
+		const text = await this.readPipeText(uri);
+		// Not readable (not there yet, or already gone): nothing to decide.
+		if (text === undefined) return;
+
+		const decision = decidePipeFile({ event, filePath: uri.fsPath, text, known: [...this.parsedFiles.values()], settled });
+		switch (decision.kind) {
+			case 'leave':
+				return;
+			case 'confirm-empty':
+				// A file another program is still saving reads as empty for a
+				// moment. Look again once it has had time to land.
+				await settle(EMPTY_FILE_SETTLE_MS);
+				await this.reconcileProjectId(uri, event, true);
+				return;
+			case 'seed-empty': {
+				// Only reachable through the settled re-entry above. Look once more
+				// right before writing: a save that landed since the settled read
+				// must not be replaced by the skeleton. writePipeText re-checks the
+				// disposed flag.
+				const latest = await this.readPipeText(uri);
+				if (latest === undefined || latest.trim() !== '') return;
+				await this.writePipeText(uri, emptyPipelineSkeleton(crypto.randomUUID()), 'new empty file, wrote the starter pipeline');
+				return;
+			}
+			case 'assign-id':
+				// Only a pipeline without a usable id gets here; assignProjectId
+				// re-reads the file and writes only while that is still so.
+				await this.assignProjectId(uri, null, 'had no project_id, assigned one');
+				return;
+			case 'ask-duplicate':
+				// Deliberately not awaited: the warning stays open until the user
+				// acts, and the rest of the handler (sidebar refresh, re-parse,
+				// restart) must not wait for that. The prompt is marked as shown
+				// before it opens and both files are re-read before any write, so
+				// a detached, late answer is safe.
+				void this.offerNewProjectId(uri, decision.projectId, decision.otherPath).catch((error) => {
+					this.logger.error(`Pipeline ${vscode.workspace.asRelativePath(uri)}: duplicate id prompt failed (${error instanceof Error ? error.message : String(error)}).`);
+				});
+				return;
+		}
+	}
+
+	/**
+	 * Writes a fresh project_id into the file, keeping its formatting. The file
+	 * is read again first and left alone if its id is no longer `expectedId`:
+	 * the user may have edited it since the decision was made (the duplicate
+	 * warning can sit open for a long time).
+	 */
+	private async assignProjectId(uri: vscode.Uri, expectedId: string | null, why: string): Promise<void> {
+		const text = await this.readPipeText(uri);
+		if (text === undefined || readPipeProjectId(text) !== expectedId) return;
+		const next = withProjectId(text, crypto.randomUUID());
+		if (next === undefined) return;
+		await this.writePipeText(uri, next, why);
+	}
+
+	/**
+	 * A genuine duplicate: another file carries the same id. Nothing is written
+	 * unless the user asks for it. The clash is confirmed against the disk
+	 * first, because a rename delivers delete and create in no fixed order and
+	 * the cache can briefly still hold the file's previous path, and again
+	 * after the user answers, because the warning can stay open for a long
+	 * time and the clash may have been resolved meanwhile.
+	 */
+	private async offerNewProjectId(uri: vscode.Uri, projectId: string, otherPath: string): Promise<void> {
+		const other = await PipelineFileParser.parseFile(otherPath, this.getServiceClassInfoMap());
+		if (other.projectId !== projectId) return;
+
+		const file = vscode.workspace.asRelativePath(uri);
+		const otherFile = vscode.workspace.asRelativePath(otherPath);
+		this.logger.info(`Pipeline ${file}: project_id ${projectId} is also used by ${otherFile}. File left unchanged.`);
+
+		// Ask once per file and id for the session: every save of a file the
+		// user chose to keep as it is would otherwise ask again.
+		const promptKey = `${uri.fsPath}\n${projectId}`;
+		if (this.duplicatePromptsShown.has(promptKey)) return;
+		this.duplicatePromptsShown.add(promptKey);
+
+		const assign = 'Assign new id';
+		// Defence in depth: VS Code renders [label](target) in notification text
+		// as a link, and a file name in a cloned repository can contain that
+		// syntax. Break it so the warning carries no link the extension did not write.
+		const plain = (name: string): string => name.replace(/\]\(/g, '] (');
+		const choice = await vscode.window.showWarningMessage(`${plain(file)} has the same project_id as ${plain(otherFile)}. Pipelines with the same id cannot be told apart when they run. The file was not changed.`, assign);
+		if (choice !== assign) return;
+		// The warning can stay open for minutes: rewrite only while the clash still exists.
+		const stillOther = await PipelineFileParser.parseFile(otherPath, this.getServiceClassInfoMap());
+		if (stillOther.projectId !== projectId) return;
+		await this.assignProjectId(uri, projectId, `duplicate of ${otherFile}, new id assigned at the user's request`);
+	}
+
+	/** The file's text, or undefined when it cannot be read (not there yet, or gone). */
+	private async readPipeText(uri: vscode.Uri): Promise<string | undefined> {
+		try {
+			return Buffer.from(await vscode.workspace.fs.readFile(uri)).toString('utf8');
+		} catch {
+			return undefined;
+		}
+	}
+
+	/** Writes `text` to the file and records why in the output channel. */
+	private async writePipeText(uri: vscode.Uri, text: string, why: string): Promise<void> {
+		// Every write path awaits a read or a prompt first, and the provider
+		// may be disposed meanwhile. Checked here so no path can forget it.
+		if (this.disposed) return;
+		const file = vscode.workspace.asRelativePath(uri);
+		try {
+			await vscode.workspace.fs.writeFile(uri, Buffer.from(text, 'utf8'));
+			this.logger.info(`Pipeline ${file}: ${why}.`);
+		} catch (error) {
+			this.logger.error(`Pipeline ${file}: write failed (${error instanceof Error ? error.message : String(error)}).`);
+		}
 	}
 
 	// =========================================================================
@@ -427,7 +599,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 		// Re-parse when service definitions arrive
 		const servicesUpdatedHandler = () => {
-			this.loadPipelineFiles();
+			void this.loadPipelineFiles().catch((error) => {
+				this.logger.error(`Pipeline file reload after a services update failed (${error instanceof Error ? error.message : String(error)}).`);
+			});
 		};
 		this.connectionManager.on('shell:servicesUpdated', servicesUpdatedHandler);
 
@@ -566,19 +740,56 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 	// PIPELINE FILE LOADING
 	// =========================================================================
 
-	/** Scans the workspace for .pipe / .pipe.json files, parses them, and updates the webview. */
+	/**
+	 * Scans the workspace for .pipe / .pipe.json files, parses them, and updates
+	 * the webview. The cache is replaced in one assignment once every file is
+	 * parsed: the refresh button and a services update reload outside the
+	 * created-file queue, and a handler deciding during such a reload must see
+	 * the previous cache whole, not one being refilled.
+	 *
+	 * The delete and change handlers write to that previous cache meanwhile,
+	 * and the swap would drop their writes: a file deleted during the reload
+	 * would come back, a changed one would keep its old sources and id. The
+	 * cache records their writes and re-applies them after the swap. Of two
+	 * overlapping reloads only the newer installs its map; the older waits for
+	 * the newer to finish before it returns, whether it was superseded while
+	 * parsing or failed, so the created-file queue, which runs the initial
+	 * load first, continues against the newer reload's map, or, when that
+	 * reload failed, against the current one (ReloadingCache holds this logic,
+	 * with its tests).
+	 *
+	 * Invariant that keeps the queue deadlock-free: only the initial load runs
+	 * on createdFileQueue. The refresh button and a services update reload
+	 * outside it on purpose; a queued load awaiting settled() on a load queued
+	 * behind it would wait on itself (see serialQueue.ts).
+	 */
 	private async loadPipelineFiles(): Promise<void> {
-		const [pipeFiles, pipeJsonFiles] = await Promise.all([vscode.workspace.findFiles('**/*.pipe', '**/node_modules/**'), vscode.workspace.findFiles('**/*.pipe.json', '**/node_modules/**')]);
-		const files = [...pipeFiles, ...pipeJsonFiles];
-
-		this.parsedFiles.clear();
-
-		for (const uri of files) {
-			const parsedFile = await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap());
-			this.parsedFiles.set(uri.fsPath, parsedFile);
+		const seq = this.cache.beginReload();
+		let parsed: Map<string, ParsedPipelineFile>;
+		try {
+			const [pipeFiles, pipeJsonFiles] = await Promise.all([vscode.workspace.findFiles('**/*.pipe', '**/node_modules/**'), vscode.workspace.findFiles('**/*.pipe.json', '**/node_modules/**')]);
+			parsed = new Map<string, ParsedPipelineFile>();
+			for (const uri of [...pipeFiles, ...pipeJsonFiles]) {
+				parsed.set(uri.fsPath, await PipelineFileParser.parseFile(uri.fsPath, this.getServiceClassInfoMap()));
+			}
+		} catch (error) {
+			// Nothing to install. When this was the newest reload, whoever waits on
+			// it goes on with the current cache; when a newer one is in flight, wait
+			// for it like a superseded load does, so the created-file queue does
+			// not run against the constructor's empty map because a scan failed.
+			this.cache.finishReload(seq, undefined);
+			await this.cache.settled();
+			throw error;
 		}
 
-		vscode.commands.executeCommand('setContext', 'rocketride.noPipelineFiles', files.length === 0);
+		if (!this.cache.finishReload(seq, parsed)) {
+			// A newer reload has started since: it saw everything this one saw.
+			// Wait for it, so whatever is queued behind this load finds its map.
+			await this.cache.settled();
+			return;
+		}
+
+		vscode.commands.executeCommand('setContext', 'rocketride.noPipelineFiles', this.parsedFiles.size === 0);
 		this.sendEntriesUpdate();
 	}
 
@@ -800,6 +1011,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
 	/** Unsubscribes from task events and disposes all listeners. */
 	public dispose(): void {
+		this.disposed = true;
 		const client = this.connectionManager.getClient();
 		if (client) {
 			client.removeMonitor({ token: '*' }, ['task']).catch(() => {});

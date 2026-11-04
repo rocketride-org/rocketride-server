@@ -267,6 +267,8 @@ function makeStartTestServerAction(options = {}) {
 			const result = await startServer({
 				script: 'ai/eaas.py',
 				trace: options.trace,
+				logName: 'client-typescript',
+				verbose: ctx.options?.verbose,
 				basePort: 30000,
 				// CI for fork PRs doesn't have repo secrets; the integration tests
 				// expect a shared API key between server and client. Default to the
@@ -408,7 +410,7 @@ module.exports = {
 		},
 		{
 			name: 'client-typescript:test',
-			action: () => ({
+			action: (options) => ({
 				description: 'Testing client-typescript',
 				steps: [
 					'server:build',
@@ -418,7 +420,7 @@ module.exports = {
 					),
 					bracket({
 						name: 'ts-test-server',
-						setup: makeStartTestServerAction(),
+						setup: makeStartTestServerAction(options),
 						teardown: makeStopTestServerAction(),
 						steps: ['client-typescript:run-jest'],
 					}),

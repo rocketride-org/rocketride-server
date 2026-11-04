@@ -22,6 +22,8 @@
  * SOFTWARE.
  */
 
+import { normalizeSignupProperties } from './signup.js';
+import type { PkceCredential } from './types/signup.js';
 import { TransportWebSocket } from './core/TransportWebSocket.js';
 import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
@@ -347,6 +349,7 @@ interface LoginLifecycleOperation {
 	readonly generation: number;
 	readonly endpoint: string;
 	readonly credentialKey: string;
+	pkce?: PkceCredential;
 	readonly priority: LifecyclePriority;
 	readonly promise: Promise<ConnectResult>;
 	resolve: (result: ConnectResult) => void;
@@ -644,9 +647,17 @@ export class RocketRideClient extends DAPClient {
 	// INTERNAL CONNECTION HELPERS
 	// ============================================================================
 
-	private _resolveCredential(credential?: string | { code: string; verifier: string; redirectUri: string }): string {
+	private _resolveCredential(credential?: string | PkceCredential): string {
 		if (credential && typeof credential === 'object') {
-			// Keep the established deterministic PKCE wire encoding.
+			// No context retains the established deterministic PKCE wire encoding.
+			let signupValue: unknown;
+			try {
+				const value = credential.signupProperties;
+				signupValue = typeof value === 'function' ? value() : value;
+			} catch {
+				// Optional getters and resolvers cannot prevent authentication.
+			}
+			const signup = normalizeSignupProperties(signupValue);
 			return (
 				'cd_' +
 				btoa(
@@ -654,6 +665,7 @@ export class RocketRideClient extends DAPClient {
 						code: credential.code,
 						verifier: credential.verifier,
 						redirectUri: credential.redirectUri,
+						...(signup ? { signup_properties: signup } : {}),
 					})
 				)
 			);
@@ -823,7 +835,8 @@ export class RocketRideClient extends DAPClient {
 			await this._prepareOperationTransport(operation, timeout);
 			this._assertCurrentOperation(operation);
 
-			const authArguments: Record<string, unknown> = { auth: operation.credentialKey };
+			// Consent/expiry may change while transport is opening. No await between resolution and send.
+			const authArguments: Record<string, unknown> = { auth: operation.pkce ? this._resolveCredential(operation.pkce) : operation.credentialKey };
 			if (this._clientDisplayName) authArguments.clientName = this._clientDisplayName;
 			if (this._clientDisplayVersion) authArguments.clientVersion = this._clientDisplayVersion;
 
@@ -867,7 +880,7 @@ export class RocketRideClient extends DAPClient {
 		}
 	}
 
-	private _startLoginOperation(endpoint: string, credentialKey: string, priority: LifecyclePriority, timeout?: number): LoginLifecycleOperation | undefined {
+	private _startLoginOperation(endpoint: string, credentialKey: string, priority: LifecyclePriority, timeout?: number, pkce?: PkceCredential): LoginLifecycleOperation | undefined {
 		const current = this._lifecycleOperation;
 		if (priority === 'foreground') this._clearReconnectTimer();
 		if (priority === 'background' && current?.priority === 'foreground' && !current.settled) {
@@ -879,6 +892,7 @@ export class RocketRideClient extends DAPClient {
 
 		let priorCleanup = Promise.resolve();
 		const operation = this._createLifecycleOperation(endpoint, credentialKey, priority);
+		operation.pkce = pkce;
 		this._lifecycleOperation = operation;
 		this._uri = endpoint;
 		this._desiredState = 'authenticated';
@@ -903,9 +917,23 @@ export class RocketRideClient extends DAPClient {
 		return operation;
 	}
 
-	private _startForegroundLogin(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
+	private _startForegroundLogin(credential?: string | PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		const endpoint = options?.uri ? this._getWebsocketUri(options.uri) : this._uri;
-		const credentialKey = this._resolveCredential(credential);
+		let pkce: PkceCredential | undefined;
+		if (credential && typeof credential === 'object') {
+			pkce = {
+				code: credential.code,
+				verifier: credential.verifier,
+				redirectUri: credential.redirectUri,
+				// Defer even property access to the guarded send boundary.
+				signupProperties: () => {
+					const value = credential.signupProperties;
+					return typeof value === 'function' ? value() : value ?? null;
+				},
+			};
+		}
+		// Optional attribution is not credential identity and must not survive in the reconnect key.
+		const credentialKey = this._resolveCredential(pkce ? { ...pkce, signupProperties: undefined } : credential);
 		const current = this._lifecycleOperation;
 		if (current?.priority === 'foreground' && !current.settled && !current.cancellationReason && current.endpoint === endpoint && (current.credentialKey === credentialKey || (current.accepted && this._apikey === credentialKey))) {
 			return current.promise;
@@ -913,7 +941,7 @@ export class RocketRideClient extends DAPClient {
 		if (current?.accepted && current.settled && this._authenticated && current.endpoint === endpoint && (current.credentialKey === credentialKey || this._apikey === credentialKey)) {
 			return Promise.resolve(this._connectResult ?? ({} as ConnectResult));
 		}
-		const operation = this._startLoginOperation(endpoint, credentialKey, 'foreground', options?.timeout);
+		const operation = this._startLoginOperation(endpoint, credentialKey, 'foreground', options?.timeout, pkce);
 		if (!operation) throw new Error('Unable to start foreground login');
 		return operation.promise;
 	}
@@ -951,7 +979,7 @@ export class RocketRideClient extends DAPClient {
 			if (this._desiredState === 'authenticated') {
 				const lifecycleOperation = this._lifecycleOperation;
 				const credentialKey = lifecycleOperation && !lifecycleOperation.accepted ? lifecycleOperation.credentialKey : (this._apikey ?? lifecycleOperation?.credentialKey ?? '');
-				const operation = this._startLoginOperation(this._uri, credentialKey, 'background');
+				const operation = this._startLoginOperation(this._uri, credentialKey, 'background', undefined, !lifecycleOperation?.accepted ? lifecycleOperation?.pkce : undefined);
 				if (!operation) return;
 				void operation.promise.then(
 					() => {
@@ -1091,7 +1119,7 @@ export class RocketRideClient extends DAPClient {
 	 * resolution checks the argument, configured environment, and stored client state
 	 * (initialized by `config.auth` and updated after authentication). The transport stays attached.
 	 */
-	async login(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
+	async login(credential?: string | PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		return this._startForegroundLogin(credential, options);
 	}
 
@@ -1184,7 +1212,7 @@ export class RocketRideClient extends DAPClient {
 	 * resolution checks the argument, configured environment, and stored client state
 	 * (initialized by `config.auth` and updated after authentication).
 	 */
-	async connect(credential?: string | { code: string; verifier: string; redirectUri: string }, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
+	async connect(credential?: string | PkceCredential, options?: { uri?: string; timeout?: number }): Promise<ConnectResult> {
 		return this._startForegroundLogin(credential, options);
 	}
 
@@ -1361,7 +1389,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
 	 * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
 	 * @param options.source - Override pipeline source
-	 * @param options.threads - Number of threads for execution (default: 1)
+	 * @param options.threads - Number of threads for execution (omit to let the server decide)
 	 * @param options.useExisting - Use existing pipeline instance
 	 * @param options.args - Command line arguments to pass to pipeline
 	 * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
@@ -2852,6 +2880,64 @@ export class RocketRideClient extends DAPClient {
 		return (body as any)?.pins ?? [];
 	}
 
+	/**
+	 * Wait for one app version's server build to finish — deploying returns
+	 * at once with `buildStatus: 'queued'`, and publish/submit/serve all
+	 * gate on a finished ('ok') build. Polls the version rail.
+	 *
+	 * @param appId - App id
+	 * @param registryVersion - Registry version number from the rail
+	 * @param options.timeoutMs - Give up after this long (default 10 minutes)
+	 * @param options.intervalMs - Poll interval (default 3 seconds)
+	 * @param options.onStatus - Called whenever the build status changes
+	 * @returns The version's rail entry once its build is 'ok'
+	 * @throws Error when the build failed, the version is unknown, or the wait timed out
+	 */
+	async waitForAppBuild(appId: string, registryVersion: number, options: { timeoutMs?: number; intervalMs?: number; onStatus?: (status: string) => void } = {}): Promise<Awaited<ReturnType<RocketRideClient['listDeployments']>>[number]> {
+		const deadline = Date.now() + (options.timeoutMs ?? 10 * 60 * 1000);
+		let lastStatus = '';
+		for (;;) {
+			const row = (await this.listDeployments(appId)).find((r) => r.registryVersion === registryVersion);
+			if (!row) throw new Error(`Version ${registryVersion} of ${appId} not found`);
+			if (row.buildStatus !== lastStatus) {
+				lastStatus = row.buildStatus;
+				options.onStatus?.(lastStatus);
+			}
+			if (row.buildStatus === 'ok') return row;
+			if (row.buildStatus === 'failed' || row.state === 'failed') {
+				throw new Error(`Version ${registryVersion} of ${appId} failed its server build — read it with buildLog(appId, ${registryVersion})`);
+			}
+			if (Date.now() >= deadline) {
+				throw new Error(`Timed out waiting for version ${registryVersion} of ${appId} to build (status '${row.buildStatus || 'unknown'}')`);
+			}
+			await new Promise((resolve) => setTimeout(resolve, options.intervalMs ?? 3000));
+		}
+	}
+
+	/**
+	 * The caller org's developer namespace — the `<developerId>` half of
+	 * every app id it owns. Readable on both editions (OSS answers the
+	 * fixed namespace its sessions carry; there is no Stripe Connect there).
+	 *
+	 * @returns `{developerId, stripeAccountId, stripeAccountStatus}`;
+	 *   `developerId` is null until an org admin registers one
+	 */
+	async developerStatus(): Promise<{ developerId: string | null; stripeAccountId: string | null; stripeAccountStatus: string }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'developer_status' })) as any;
+	}
+
+	/**
+	 * Claim the caller org's developer id slug (org.admin, self-service,
+	 * SaaS only). Apps are then created as `<developerId>.<name>` and can
+	 * publish beyond the workspace.
+	 *
+	 * @param developerId - The slug to claim (lowercase letters/underscores)
+	 * @returns The server's registration record
+	 */
+	async registerDeveloper(developerId: string): Promise<Record<string, unknown>> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'developer_register', developerId })) as any;
+	}
+
 	// (appEntry is RETIRED: versions serve from stable constructed URLs —
 	// /apps/<appId>/v<N>/remoteEntry.js — with entitlement enforced per
 	// request by the serve route, so there is nothing to mint.)
@@ -3054,7 +3140,10 @@ export class RocketRideClient extends DAPClient {
 	 * @param target  - Task token to profile a pipeline subprocess, or
 	 *                  undefined/null to profile the server process itself.
 	 * @param session - Optional human-readable session name.
-	 * @returns Status object with session info and start time.
+	 * @returns Status object with session info and start time. If a session is
+	 *          already active, status is 'error' with a message instead.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileStart(target?: string | null, session?: string): Promise<CProfileStatusResponse> {
 		const args: Record<string, unknown> = {};
@@ -3067,7 +3156,11 @@ export class RocketRideClient extends DAPClient {
 	 * Stop the active cProfile profiling session.
 	 *
 	 * @param target - Task token if profiling a pipeline, or undefined for server.
-	 * @returns Result with session name and runtime.
+	 * @returns Result with session name and runtime. With no active session, or a
+	 *          server-process session another connection started, status is
+	 *          'error' with a message instead.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileStop(target?: string | null): Promise<CProfileStopResponse> {
 		const args: Record<string, unknown> = {};
@@ -3080,6 +3173,8 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @param target - Task token if querying a pipeline, or undefined for server.
 	 * @returns Status indicating active/inactive, owner, runtime.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileStatus(target?: string | null): Promise<CProfileStatusResponse> {
 		const args: Record<string, unknown> = {};
@@ -3091,7 +3186,10 @@ export class RocketRideClient extends DAPClient {
 	 * Get the full cProfile report from the last completed session.
 	 *
 	 * @param target - Task token if querying a pipeline, or undefined for server.
-	 * @returns Object containing the full pstats text report.
+	 * @returns Object containing the full pstats text report, or a placeholder
+	 *          message when no session has completed.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileReport(target?: string | null): Promise<CProfileReportResponse> {
 		const args: Record<string, unknown> = {};
@@ -3112,7 +3210,11 @@ export class RocketRideClient extends DAPClient {
 	 * @param includeSystem - Keep stdlib/system functions in the tree (server default true).
 	 * @param thread   - Thread id from cprofileThreads() for that thread alone;
 	 *                   all threads merged when omitted.
-	 * @returns Object containing the tree root, total_time, and total_calls.
+	 * @returns Object containing the tree root, functions (exact per-function
+	 *          totals; absent from older servers), total_time, and total_calls.
+	 *          With no completed session, tree is null and error holds the message.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileReportTree(target?: string | null, maxDepth?: number, minPct?: number, includeSystem?: boolean, thread?: number | null): Promise<CProfileReportTreeResponse> {
 		const args: Record<string, unknown> = {};
@@ -3129,7 +3231,10 @@ export class RocketRideClient extends DAPClient {
 	 * List the threads profiled in the last completed session.
 	 *
 	 * @param target - Task token if querying a pipeline, or undefined for server.
-	 * @returns Object containing the threads, busiest first.
+	 * @returns Object containing the threads, busiest first. With no completed
+	 *          session, threads is empty and error holds the message.
+	 * @throws Error if the caller lacks task.control, or the target is not a
+	 *         task the caller may control.
 	 */
 	async cprofileThreads(target?: string | null): Promise<CProfileThreadsResponse> {
 		const args: Record<string, unknown> = {};

@@ -306,6 +306,7 @@ const NewAppWebview: React.FC = () => {
 	// ── Derivations ──────────────────────────────────────────────────────
 	// step: validate the slug and check for a live folder collision
 	const nameValid = APP_NAME_RE.test(appName);
+	// The SDK scaffold's apps/<slug>-ui rule, shared with `rocketride app create`.
 	const folderName = `${appName}-ui`;
 	const collision = nameValid && (identity?.existingFolders ?? []).includes(folderName);
 	const workspaceOpen = identity?.workspaceOpen ?? false;

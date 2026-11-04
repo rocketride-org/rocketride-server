@@ -56,7 +56,21 @@ Pick a profile with the **Model Profile** selector; only the model and
 field defaults, which reproduce the behavior this node had before the
 decoding and VAD fields were exposed. Most users only need the profile and
 `language`. Models are downloaded from HuggingFace on first use, and the GPU
-is used automatically when available.
+is used automatically when available. Before the first GPU load in a process,
+and on later loads until a check has given a clear answer, the node checks, in
+a separate process, that GPU transcription really works: it transcribes one
+second of audio with the `tiny` model when those weights are present (fetching
+them first if it can, waiting at most 30 seconds and retrying the download
+once, on the next load, if that was not enough; without them, or when the
+cache cannot be read, the check rests on handing a CUDA tensor to CTranslate2,
+a lighter check that can still fail). A GPU with room for the CUDA tensor but
+not for `tiny` is not a clear answer: with a model server the load keeps the
+GPU on the lighter check (and the second time keeps that answer); without one
+it runs on the CPU and the next load checks again. A GPU without room even for
+the tensor sends the load to the CPU and the next load checks again, with or
+without a model server. If the check fails, the node logs an error
+naming the cause, reports the reason as `device_fallback` in the model
+metadata, and runs on the CPU, where `float16` becomes `int8`.
 
 ### Model
 
@@ -170,7 +184,7 @@ unreachable from the UI.
 ## Dependencies
 
 - `faster-whisper`
-- `ctranslate2`
+- `ctranslate2` `>=4.8,<5`
 - `av`
 - `tokenizers`
 - `huggingface-hub`

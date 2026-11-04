@@ -191,6 +191,8 @@ export interface IAccountViewProps {
 	onSetDevTeam: (teamId: string) => Promise<void>;
 	/** Switches the user's active organization. */
 	onSetDefaultOrg: (orgId: string) => Promise<void>;
+	/** Removes the user from the organization with the given ID. Hosts that omit it (the VS Code account view) show no Leave button. */
+	onLeaveOrg?: (orgId: string) => Promise<void>;
 	/**
 	 * @deprecated Unused — the shell owns the logout flow (`shell:logoutRequest`);
 	 * no panel in this view renders a sign-out control. Kept optional so existing
@@ -247,7 +249,7 @@ export interface IAccountViewProps {
  * to the host via async callback props defined in IAccountViewProps.
  */
 const AccountView: React.FC<IAccountViewProps> = (props) => {
-	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
+	const { isConnected, sectionError, profile, authUser, keys, org, members, teams, teamDetail, subscriptions, billingLoading, billingError, creditBalance, apps, onCancelSubscription, onOpenPortal, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription, section, onSectionChange, activeTeamId, onActiveTeamIdChange, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onLeaveOrg, onSaveOrgName, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onResendInvite, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, onLoadTeamDetail } = props;
 
 	// =========================================================================
 	// PERMISSION HELPERS
@@ -257,6 +259,15 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 	const isOrgAdmin = useMemo(() => {
 		return profile?.organization?.permissions?.includes('org.admin') ?? false;
 	}, [profile]);
+
+	/**
+	 * The user's organization memberships for the Organization tab's switcher.
+	 * Prefers the server-side profile over the cached auth token; falls back to
+	 * the single active org when the profile carries no membership list.
+	 */
+	const activeOrgInfo = profile?.organization ?? authUser?.organization ?? null;
+	const memberships = useMemo(() => profile?.memberships ?? (activeOrgInfo ? [activeOrgInfo] : []), [profile?.memberships, activeOrgInfo]);
+	const defaultOrgId = profile?.defaultOrgId ?? activeOrgInfo?.id;
 
 	/**
 	 * Returns true when the current user has team.admin on the given team.
@@ -339,7 +350,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<ContentHeader title="Profile" subtitle="Your identity, sign-in, and defaults for this account." />
 						<div style={commonStyles.tabContent}>
 							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-							<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDevTeam={onSetDevTeam} onSetDefaultOrg={onSetDefaultOrg} />
+							<ProfilePanel profile={profile} authUser={authUser} onSave={onSaveProfile} onSetDevTeam={onSetDevTeam} />
 						</div>
 					</>
 				),
@@ -371,7 +382,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 						<ContentHeader title="Organization" subtitle="Your organization's name and settings." />
 						<div style={commonStyles.tabContent}>
 							{sectionError && <p style={{ color: 'var(--rr-color-error)', fontSize: 13, marginBottom: 12 }}>{sectionError}</p>}
-							<OrganizationPanel org={org} onSave={onSaveOrgName} isOrgAdmin={isOrgAdmin} />
+							<OrganizationPanel org={org} onSave={onSaveOrgName} isOrgAdmin={isOrgAdmin} memberships={memberships} defaultOrgId={defaultOrgId} onSetDefaultOrg={onSetDefaultOrg} onLeaveOrg={onLeaveOrg} />
 						</div>
 					</>
 				),
@@ -399,7 +410,7 @@ const AccountView: React.FC<IAccountViewProps> = (props) => {
 				),
 			},
 		}),
-		[sectionError, profile, authUser, keys, org, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isActiveTeamAdmin]
+		[sectionError, profile, authUser, keys, org, memberships, defaultOrgId, teams, teamDetail, activeTeamId, members, isConnected, subscriptions, billingLoading, billingError, creditBalance, transactions, apps, usageByUser, usageByTeam, activeTasks, dashboardLoading, topupPlans, allPlans, fetchTransactions, fetchTransactionDistinct, onSaveProfile, onSetDevTeam, onSetDefaultOrg, onLeaveOrg, onSubscribe, onTransactionPage, onBuyTopup, onPurchaseTopup, onUpgradeSubscription, onSaveOrgName, onResendInvite, onActiveTeamIdChange, onLoadTeamDetail, onCreateKey, onRevokeKey, onInviteMember, onUpdateMemberRole, onRemoveMember, onCancelSubscription, onCreateTeam, onDeleteTeam, onAddTeamMember, onEditTeamMemberPerms, onRemoveTeamMember, handlePortal, isOrgAdmin, isActiveTeamAdmin]
 	);
 
 	// =========================================================================

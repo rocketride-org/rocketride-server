@@ -162,3 +162,72 @@ def test_empty_batch_does_not_create_a_collection(store_env):
     with raw.cursor() as cur:
         cur.execute('SELECT to_regclass(%s)', (table,))
         assert cur.fetchone()[0] is None
+
+
+def test_listing_skips_the_schema_row_and_deleted_documents(store_env):
+    """The listing holds documents only: not the store's schema row, not soft-deleted ones (#2587).
+
+    Both Postgres drivers carry their own copy of the filter, so the fixture's
+    parametrisation is what covers store_postgres as well as rocketride_vector.
+    """
+    store, _, _ = store_env
+    other = _doc('b')
+    other.metadata.parent = '/other'
+    store.addChunks([_doc(), other])
+    store.markDeleted(['b'])
+
+    # No None key for the schema row, and the soft-deleted document is gone.
+    assert store.getPaths() == {'/test': 'a'}
+
+
+@pytest.mark.parametrize('repeated_chunk_id', [False, True])
+def test_get_tool_pages_past_one_hundred_chunks(store_env, repeated_chunk_id):
+    """The tool cap must leave later chunks accessible on both Postgres drivers."""
+    from ai.common.store.document_store import VectorStoreToolMixin
+
+    store, _, _ = store_env
+    # Reverse insertion order to ensure SQL orders before applying pagination.
+    store.addChunks([_doc(chunk_id=0 if repeated_chunk_id else i, content=f'chunk {i}') for i in reversed(range(205))])
+    tool = VectorStoreToolMixin()
+    tool.IGlobal = types.SimpleNamespace(store=store, expose_tools=True, allow_write=False)
+
+    chunks = []
+    for offset, expected_size in [(0, 100), (100, 100), (200, 5), (205, 0)]:
+        result = tool.get({'object_id': 'a', 'offset': offset, 'limit': 1000000})
+        assert result['success'] is True
+        assert len(result['chunks']) == expected_size
+        assert (result['total'], result['offset'], result['has_more']) == (205, offset, offset + 100 < 205)
+        chunks.extend(result['chunks'])
+
+    expected_ids = [0] * 205 if repeated_chunk_id else list(range(205))
+    # Ties on chunkId are ordered by content by the tool, independently of the SQL order.
+    if repeated_chunk_id:
+        expected_contents = sorted(f'chunk {i}' for i in range(205))
+    else:
+        expected_contents = [f'chunk {i}' for i in range(205)]
+    assert [chunk['chunkId'] for chunk in chunks] == expected_ids
+    assert [chunk['content'] for chunk in chunks] == expected_contents
+
+
+def test_objdir_tool_pages_past_one_thousand_paths(store_env):
+    """Capped path listings have stable pages independent of insertion order."""
+    from ai.common.store.document_store import VectorStoreToolMixin
+
+    store, _, _ = store_env
+    docs = []
+    for i in reversed(range(1005)):
+        doc = _doc(object_id=f'obj-{i:04d}')
+        doc.metadata.parent = f'/path-{i:04d}'
+        docs.append(doc)
+    store.addChunks(docs)
+    tool = VectorStoreToolMixin()
+    tool.IGlobal = types.SimpleNamespace(store=store, expose_tools=True, allow_write=False)
+
+    paths = []
+    for offset, expected_size in [(0, 1000), (1000, 5), (1005, 0)]:
+        result = tool.objdir({'offset': offset, 'limit': 1000000})
+        assert result['success'] is True
+        assert len(result['paths']) == expected_size
+        paths.extend(result['paths'].items())
+
+    assert paths == [(f'/path-{i:04d}', f'obj-{i:04d}') for i in range(1005)]

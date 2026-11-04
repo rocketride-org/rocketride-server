@@ -32,9 +32,10 @@
 // defines canonical event names and payload types that both hosts agree on.
 // =============================================================================
 
-import type { ConnectResult, DAPMessage } from 'rocketride';
+import type { ConnectResult, DAPMessage, SignupProperties } from 'rocketride';
 import type { ConnectionStatus } from './connection';
 import type { CheckoutPlan, PromoValidation } from '../modules/checkout/types';
+import type { TelemetryFact } from '../util/telemetryChannel';
 
 // =============================================================================
 // APP ENTRY — minimal shape for app catalog events
@@ -181,10 +182,12 @@ export interface ShellConnectionEventMap {
 	 * Sign-in request initiated by the UI (e.g. "Get Started" button).
 	 *
 	 * Optional `appId` specifies which app to navigate to after auth completes.
-	 * Optional `register` requests Zitadel's sign-up form instead of sign-in
-	 * (used by "Get Started" CTAs vs. "Sign In" controls).
+	 * Optional `register` marks a sign-up intent ("Get Started" CTAs vs. "Sign In"
+	 * controls); it no longer changes the destination. `auto` marks a request
+	 * the shell raised itself (the auth gate of an app that requires sign-in)
+	 * rather than a click; it is reported on the auth:start telemetry fact.
 	 */
-	'shell:loginRequest': { appId?: string; register?: boolean };
+	'shell:loginRequest': { appId?: string; register?: boolean; auto?: boolean; signupProperties?: SignupProperties };
 
 	/** Sign-out request initiated by the UI (e.g. "Sign Out" button). */
 	'shell:logoutRequest': Record<string, never>;
@@ -213,6 +216,16 @@ export interface ShellConnectionEventMap {
 
 	/** Navigate back to the My Apps launcher screen. */
 	'shell:myApps': Record<string, never>;
+
+	/**
+	 * A product-telemetry fact the shell observed (`auth:complete`). The shell
+	 * has no analytics transport; the active app forwards these to its own.
+	 * `auth:start` is never delivered here (the OAuth redirect follows at once):
+	 * it is kept in the connection manager's buffer, as are facts raised before
+	 * any app subscribed or whose last listener left before their dispatch, and
+	 * handed over by `drainTelemetry()`.
+	 */
+	'shell:telemetry': TelemetryFact;
 
 	/**
 	 * Request the shell open a built-in overlay (e.g. from a guest app's

@@ -124,6 +124,21 @@ export class AccountApi {
 		await this.client.call('rrext_account_org', { subcommand: 'update', orgId, name });
 	}
 
+	/**
+	 * Removes the current user from an organization.
+	 *
+	 * The server refuses to let the organization's last admin leave. Leaving
+	 * the user's ACTIVE organization switches them to another membership and
+	 * pushes a refreshed identity to all of the user's connections; leaving a
+	 * non-active organization pushes nothing, so callers that show
+	 * memberships should re-read the profile afterwards.
+	 *
+	 * @param orgId - Organisation UUID to leave.
+	 */
+	async leaveOrg(orgId: string): Promise<void> {
+		await this.client.call('rrext_account_org', { subcommand: 'leave', orgId });
+	}
+
 	// =========================================================================
 	// API KEYS
 	// =========================================================================
@@ -177,7 +192,8 @@ export class AccountApi {
 	 * Sends an invitation to a new organization member.
 	 *
 	 * @param orgId  - Organisation UUID.
-	 * @param params - Invitation parameters (email, givenName, familyName, role).
+	 * @param params - Invitation parameters (email, givenName, familyName, role,
+	 *                 optional teamAssignments).
 	 */
 	async inviteMember(orgId: string, params: InviteMemberParams): Promise<void> {
 		await this.client.call('rrext_account_members', { subcommand: 'invite', orgId, ...params });

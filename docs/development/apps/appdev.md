@@ -2,8 +2,19 @@
 
 The VS Code extension hosts the **App Builder** — the surface for developing,
 previewing, and deploying RocketRide apps. This page documents the contracts
-that surface exposes; the runtime lives under `apps/vscode/src/appdev/` and
-`apps/vscode/src/providers/AppScreenProvider.ts`.
+that surface exposes.
+
+The editor-agnostic app logic lives in the SDK, in
+`packages/client-typescript/src/app-pack/` (`rocketride/app-pack`), and is
+shared with the `rocketride` CLI: the scaffold (`createAppWorkspace`, writing
+`apps/<slug>-ui`), developer-id resolution (`resolveDeveloperId`), the `.rrapp`
+trigger and `appManifest` access (`marker.ts`), app discovery (`scan.ts`),
+tiered readiness (`preflightApp`), and workspace wiring plus platform
+vendoring (`vendor.ts`). `apps/vscode/src/appdev/` and
+`apps/vscode/src/providers/AppScreenProvider.ts` are the VS Code host: marker
+discovery through the workspace index, the session vendor memo, the
+single-flight install, and the panels. Fix behavior in the SDK, not in the
+extension, so both hosts get it.
 
 ## The `.rrapp` trigger (contentless marker)
 
@@ -61,6 +72,21 @@ editors (or windows) can dev-serve the same app concurrently; previews
 launched from an editor carry its `rrsession` nonce and resolve that
 editor's server, and shells without a nonce take the newest registration.
 
+The dev-loop primitives live in the SDK, `rocketride/app-dev`
+(`packages/client-typescript/src/app-dev/`), shared with `rocketride app
+dev`: the session nonce and `devPreviewUrl`, `resolveRsbuildInvocation`, the
+rsbuild output classifier (`splitCompleteLines`, `classifyDevOutput`), the
+guarded spawn and stop (`spawnDevServer`, `stopDevServer`), the overlay calls
+(`registerDevOverlay`, `unregisterDevOverlay`), and the guard program itself
+(`DEV_SERVER_GUARD_SOURCE`, written to a private temp file by
+`materializeDevServerGuard` — no host ships it as a separate file). The
+extension's `WatchManager` keeps only the panel orchestration (op chains,
+linger, panel-gated respawn, the install badge); `DevSession` composes the
+same primitives into the single-app foreground loop the CLI runs. Any page
+that loaded a dev bundle — the panel or a plain browser tab — updates on save
+through rsbuild's own HMR/live-reload client (`ws://localhost:<port>`), so no
+server push is involved.
+
 ## `appdev:call` — the app-control message
 
 The webview drives all app lifecycle actions through one correlated message:
@@ -92,7 +118,7 @@ missing/non-numeric version is rejected, not sent as `null`).
 | `developerStatus` | —                             | the org's developer-namespace registration status |
 | `registerDeveloper` | `[developerId]`             | claims the org's developer-id slug |
 | `loadListing` / `saveListing` | `[listing?]`      | read/write the app's store listing metadata |
-| `preflight`       | —                             | pre-submit checks (app entry point + rsbuild config present) |
+| `preflight`       | —                             | tiered readiness rows `{ id, state, label, note?, tier }` from the SDK's `preflightApp`: the `package` tier is the personal-publish bar, the `store` tier adds the public-submission bar |
 | `history`         | —                             | the app's full `deployment_history` stream, **oldest-first** — audit rows plus the review thread (`reply` rows); the host walks the server's 100-row pages. Rows are self-describing: audience rows carry the dereferenced `name`/`handle` (plus `previousVersion` on a repoint), deploy rows the deploy `comment`, review rows their `from`/`to` states — the view never needs a second lookup |
 | `reply`           | `[message, registryVersion?]` | appends a developer message to the review thread (side `'developer'`) |
 | `buildLog`        | `[registryVersion]`           | one version's durable server build log (phase-by-phase output; `''` = no log) — the Deploy card's `failed` badge opens it |

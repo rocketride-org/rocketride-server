@@ -53,6 +53,8 @@ import sys
 import urllib.parse
 import types
 
+from ._store_base_stubs import store_base_stubs
+
 from pathlib import Path
 
 import pytest
@@ -181,6 +183,8 @@ def _build_rr_env(monkeypatch):
                 'maxChunkId',
             ):
                 setattr(self, name, kw.get(name))
+            # The drivers page with these since #2631; the stand-in must carry them too.
+            self.offset = kw.get('offset', 0)
             self.limit = kw.get('limit', 10)
 
     class _QuestionText(str):
@@ -222,7 +226,13 @@ def _build_rr_env(monkeypatch):
                 self._createCollection(len(documents[0].embedding))
             return True
 
+    # rocketride_vector's IGlobal / IInstance sit on the store base since #2587;
+    # these tests drive the driver Store directly, so only the names matter.
+    bases = store_base_stubs()
     store_mod.DocumentStoreBase = _StubDocumentStoreBase
+    store_mod.StoreGlobalBase = bases.StoreGlobalBase
+    store_mod.StoreInstanceBase = bases.StoreInstanceBase
+    store_mod.CONTROL_OBJECT_ID = bases.CONTROL_OBJECT_ID
 
     monkeypatch.setitem(sys.modules, 'ai', ai_pkg)
     monkeypatch.setitem(sys.modules, 'ai.common', common_pkg)
@@ -408,6 +418,11 @@ class TestRocketrideSqlE2E:
 
 
 def _load_vector_store(monkeypatch):
+    search_module = _load_from_path(
+        'ai.common.store.pgvector_store', _AI_SRC / 'ai/common/store/pgvector_store.py', register=False
+    )
+    monkeypatch.setitem(sys.modules, 'ai.common.store.pgvector_store', search_module)
+
     iglobal = _load_from_path('nodes.rocketride_vector.IGlobal', _VEC_NODE_DIR / 'IGlobal.py', register=False)
     pkg = types.ModuleType('nodes.rocketride_vector')
     pkg.__path__ = [str(_VEC_NODE_DIR)]
@@ -439,6 +454,7 @@ _NODE_LOADER_ALIASES = (
     (
         _load_vector_store,
         (
+            'ai.common.store.pgvector_store',
             'nodes.rocketride_vector',
             'nodes.rocketride_vector.IGlobal',
             'nodes.rocketride_vector.rocketride_vector',
@@ -563,8 +579,8 @@ class TestRocketrideVectorE2E:
             raw_conn.commit()
 
         # EXPLAIN the exact statement the driver runs for semantic search.
-        node_module = sys.modules['nodes.rocketride_vector.rocketride_vector']
-        search_sql = node_module.SQL_QUERIES['semantic_search'].format(
+        search_module = sys.modules['ai.common.store.pgvector_store']
+        search_sql = search_module.SEARCH_SQL['semantic_search'].format(
             collection=VEC_TABLE, similarity_operator='<=>', where_clause=''
         )
         probe = _unit_vec(rng)

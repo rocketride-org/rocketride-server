@@ -63,7 +63,7 @@ export interface ISqlEndpoint {
 	nodeId: string;
 	/** Display name of the database component (falls back to nodeId). */
 	nodeName: string;
-	/** Component provider, e.g. 'db_mysql', 'db_postgres', 'db_clickhouse'. */
+	/** Component provider, e.g. 'db_mysql', 'db_postgres', 'db_clickhouse', 'rocketride_sql'. */
 	provider: string;
 	/** Whether the owning task was running at discovery time. */
 	running: boolean;

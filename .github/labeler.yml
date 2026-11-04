@@ -5,7 +5,7 @@ module:server:
   - changed-files:
       - all-globs-to-any-file: ["packages/vcpkg/**", "!**/scripts/**", "!**/docs/**"]
   - changed-files:
-      - all-globs-to-any-file: ["packages/tika/**", "!**/scripts/**", "!**/docs/**"]
+      - all-globs-to-any-file: ["packages/java/**", "!**/scripts/**", "!**/docs/**"]
 
 module:nodes:
   - changed-files:
@@ -14,14 +14,24 @@ module:nodes:
 module:client-typescript:
   - changed-files:
       - all-globs-to-any-file: ["packages/client-typescript/**", "!**/scripts/**", "!**/docs/**"]
+  - changed-files:
+      - all-globs-to-any-file: ["packages/client-common/**", "!**/scripts/**", "!**/docs/**"]
+  - changed-files:
+      - all-globs-to-any-file: ["packages/client-init/**", "!**/scripts/**", "!**/docs/**"]
 
 module:client-python:
   - changed-files:
       - all-globs-to-any-file: ["packages/client-python/**", "!**/scripts/**", "!**/docs/**"]
+  - changed-files:
+      - all-globs-to-any-file: ["packages/client-common/**", "!**/scripts/**", "!**/docs/**"]
 
 module:client-mcp:
   - changed-files:
       - all-globs-to-any-file: ["packages/client-mcp/**", "!**/scripts/**", "!**/docs/**"]
+
+module:n8n:
+  - changed-files:
+      - all-globs-to-any-file: ["packages/n8n-nodes/**", "!**/scripts/**", "!**/docs/**"]
 
 module:ai:
   - changed-files:
@@ -29,30 +39,54 @@ module:ai:
 
 module:ui:
   - changed-files:
-      - all-globs-to-any-file: ["apps/chat-ui/**", "!**/scripts/**", "!**/docs/**"]
+      - all-globs-to-any-file: ["apps/*-ui/**", "!**/scripts/**", "!**/docs/**"]
   - changed-files:
-      - all-globs-to-any-file: ["apps/dropper-ui/**", "!**/scripts/**", "!**/docs/**"]
+      - all-globs-to-any-file: ["apps/shared/**", "!**/scripts/**", "!**/docs/**"]
   - changed-files:
-      - all-globs-to-any-file: ["packages/shared-ui/**", "!**/scripts/**", "!**/docs/**"]
+      - all-globs-to-any-file: ["packages/shell/**", "!**/scripts/**", "!**/docs/**"]
+  - changed-files:
+      - all-globs-to-any-file: ["packages/chat-widget/**", "!**/scripts/**", "!**/docs/**"]
 
 module:vscode:
   - changed-files:
       - all-globs-to-any-file: ["apps/vscode/**", "!**/scripts/**", "!**/docs/**"]
 
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "**/test/**"
+          - "**/tests/**"
+          - "**/testdata/**"
+          - "**/testing/**"
+          - "**/*.test.*"
+          - "**/*.spec.*"
+          - "**/test_*.py"
+
 ci/cd:
   - changed-files:
-      - any-glob-to-any-file: ".github/**"
+      - any-glob-to-any-file:
+          - ".github/**"
+          - "tools/**"
 
 docker:
   - changed-files:
       - any-glob-to-any-file: "docker/**"
 
+deploy:
+  - changed-files:
+      - any-glob-to-any-file: "deploy/**"
+
 builder:
   - changed-files:
-      - any-glob-to-any-file: "**/scripts/**"
+      - any-glob-to-any-file:
+          - "**/scripts/**"
+          - "builder"
+          - "builder.cmd"
 
 docs:
   - changed-files:
       - any-glob-to-any-file:
           - "docs/**"
           - "**/*.md"
+          - "examples/**"
+          - "pipelines/**"
