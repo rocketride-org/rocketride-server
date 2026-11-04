@@ -40,7 +40,7 @@ import { manualClock } from '../connect/testing';
 import { ExplorerToolError } from '../errors';
 import { attachController } from './controller';
 import type { IDeadline } from './deadline';
-import { createExplorerClient, createPrefsFs } from './engineClient';
+import { createExplorerAdmin, createExplorerClient, createPrefsFs } from './engineClient';
 import type { IRealmClient } from './engineClient';
 import { createFrameCaller } from './frame';
 import { createFsPrefs, historyPrefsPath, PREFS_FILE_VERSION, PREFS_LOAD_ATTEMPTS } from './prefs';
@@ -107,6 +107,18 @@ describe('case 1 — every call the adapter makes rides the root\'s ONE request 
 		assert.deepEqual(h.monitors.map((m) => m.op), ['add', 'remove'], 'monitors go to the root, which owns their refcount');
 		const stat = h.socket.find((s) => subcommand(s.message) === 'fs_stat');
 		assert.ok(stat, 'the DAP message was built by the SDK, in the realm, from its own code');
+	});
+});
+
+describe('case 1b — the admin calls ride the same one request op', () => {
+	it('terminate and getEnvironmentKeys work through a real realm client, and the root bus sees only the surviving vocabulary', async () => {
+		const h = createRealmClientHarness();
+		h.onRequest((message) => (message.command === 'rrext_account_me' ? { body: { keys: ['ROCKETRIDE_A'] } } : { body: {} }));
+		const admin = createExplorerAdmin(() => h.client as unknown as IRealmClient);
+		await admin.terminate('tk-1');
+		assert.deepEqual(await admin.getEnvironmentKeys(), ['ROCKETRIDE_A']);
+		assert.equal(h.socket[0].message.command, 'terminate');
+		for (const op of h.rootOps) assert.ok(ROOT_VOCABULARY.has(op), `the realm client put '${op}' on the root bus`);
 	});
 });
 

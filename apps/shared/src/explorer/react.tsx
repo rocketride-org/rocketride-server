@@ -35,9 +35,9 @@ import { identityFingerprint, identityFromConnectResult } from './connect/identi
 import type { IEndpointState, IEndpointStore } from './connect/store';
 import type { IPrefsAccessor } from './history/types';
 import { createExplorerClient } from './devtool/engineClient';
-import type { IRealmClient } from './devtool/engineClient';
-import { engineStatus } from './devtool/readiness';
-import type { EngineStatus } from './devtool/readiness';
+import type { IRealmClient, RealmClientGetter } from './devtool/engineClient';
+import { createEngineReadiness, engineStatus } from './devtool/readiness';
+import type { EngineStatus, IEngineReadiness } from './devtool/readiness';
 import { createShellWatch } from './shellBinding';
 import type { IExplorerClient } from './types';
 
@@ -153,4 +153,39 @@ export function useRealmEngine(): IRealmEngine {
 	const adapter = useMemo(() => createExplorerClient(() => latest.current), []);
 	const status = engineStatus({ client: raw, isConnected });
 	return useMemo(() => ({ status, client: status === 'ready' ? adapter : null }), [status, adapter]);
+}
+
+/** What {@link useEngineSource} returns. */
+export interface IEngineSource {
+	/** The realm's client right now (null until the realm has one); one stable function. */
+	getClient: RealmClientGetter<IRealmClient>;
+	/** The realm's engine readiness, kept current; one stable store. */
+	readiness: IEngineReadiness;
+}
+
+/**
+ * The realm's engine source for a controller that is built once, in an effect:
+ * a stable getter over the latest `useShellConnection().client` and a stable
+ * readiness store fed from the same hook. Neither changes identity across
+ * renders, so a controller (and every adapter made from `getClient`) is not
+ * rebuilt when the client or the connection changes: each call reads the
+ * getter again, and discovery follows the readiness store.
+ *
+ * The getter returns the client whenever the realm has one, connected or not;
+ * `readiness` says whether engine requests may be sent.
+ *
+ * @returns The getter and the readiness store.
+ */
+export function useEngineSource(): IEngineSource {
+	const { client, isConnected } = useShellConnection();
+	const latest = useRef<IRealmClient | null>(null);
+	latest.current = client as unknown as IRealmClient | null;
+	const source = useMemo<IEngineSource>(() => ({
+		getClient: () => latest.current,
+		readiness: createEngineReadiness({ client: latest.current, isConnected }),
+	}), []); // eslint-disable-line react-hooks/exhaustive-deps
+	useLayoutEffect(() => {
+		source.readiness.set({ client, isConnected });
+	}, [source, client, isConnected]);
+	return source;
 }

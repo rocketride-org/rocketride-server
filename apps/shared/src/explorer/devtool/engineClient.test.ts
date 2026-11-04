@@ -30,7 +30,7 @@ import { TASK_NAMES_REQUEST, TASK_NAMES_TIMEOUT_MS } from '../connect/discovery'
 import { codedError } from '../connect/testing';
 import { ExplorerToolError } from '../errors';
 import type { IExplorerEndpoint } from '../types';
-import { createExplorerClient, createPrefsFs, withDeadline } from './engineClient';
+import { createExplorerAdmin, createExplorerClient, createPrefsFs, requireRealmClient, withDeadline } from './engineClient';
 import type { IRealmClient } from './engineClient';
 import {
 	FRAME_OP_MARGIN_MS,
@@ -68,6 +68,12 @@ function spyClient(answer: (method: string, args: unknown[]) => unknown = () => 
 		fsReadJson: make('fsReadJson'),
 		fsMkdir: make('fsMkdir'),
 		fsWriteJson: make('fsWriteJson'),
+		use: make('use'),
+		getTaskToken: make('getTaskToken'),
+		terminate: make('terminate'),
+		getService: make('getService'),
+		validate: make('validate'),
+		account: { getEnvironmentKeys: make('getEnvironmentKeys') },
 	} as unknown as IRealmClient;
 	return { client, calls };
 }
@@ -227,5 +233,48 @@ describe('T4 end to end — session wait < SDK timeout < transport timeout < fra
 	it('frameOpTimeoutMs refuses a controller budget it cannot exceed with a real timer', () => {
 		assert.throws(() => frameOpTimeoutMs(MAX_TIMER_MS), RangeError);
 		assert.throws(() => frameOpTimeoutMs(Number.NaN), RangeError);
+	});
+});
+
+describe('requireRealmClient — the one guard', () => {
+	it('returns the client, or rejects as unavailable naming the request', () => {
+		const { client } = spyClient();
+		assert.equal(requireRealmClient(() => client, 'x'), client);
+		assert.throws(() => requireRealmClient(() => null, 'getFoo'), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'unavailable' && /getFoo/.test(error.message));
+		assert.throws(() => requireRealmClient(() => undefined, 'y'), ExplorerToolError);
+	});
+});
+
+describe('createExplorerAdmin — generic SDK calls with a deadline, no retries', () => {
+	it('each call reaches the SDK method with its own arguments and returns its answer', async () => {
+		const { client, calls } = spyClient((method) => (method === 'getEnvironmentKeys' ? ['ROCKETRIDE_A'] : method === 'getTaskToken' ? 'tk' : { token: 'tk' }));
+		const admin = createExplorerAdmin(() => client);
+		assert.deepEqual(await admin.use({ pipeline: { components: [] } as never, source: 's', ttl: 60 }), { token: 'tk' });
+		assert.equal(await admin.getTaskToken({ projectId: 'p', source: 's' }), 'tk');
+		await admin.terminate('tk');
+		await admin.getService('db_postgres');
+		await admin.validate({ pipeline: { components: [] } });
+		assert.deepEqual(await admin.getEnvironmentKeys(), ['ROCKETRIDE_A']);
+		assert.deepEqual(calls.map((c) => c.method), ['use', 'getTaskToken', 'terminate', 'getService', 'validate', 'getEnvironmentKeys']);
+		assert.deepEqual(calls[0].args, [{ pipeline: { components: [] }, source: 's', ttl: 60 }]);
+		assert.deepEqual(calls[2].args, ['tk']);
+	});
+
+	it('SDK errors are the same object; no client is unavailable and nothing is called', async () => {
+		const sdk = codedError('nope', 'TASK_STOPPED');
+		const { client } = spyClient(() => { throw sdk; });
+		await assert.rejects(createExplorerAdmin(() => client).terminate('tk'), (error: unknown) => error === sdk);
+		await assert.rejects(createExplorerAdmin(() => null).use({ filepath: 'x.pipe' }), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'unavailable');
+		await assert.rejects(createExplorerAdmin(() => null).getEnvironmentKeys(), ExplorerToolError);
+	});
+
+	it('an expired deadline says it was not cancelled, and nothing retries: use and terminate are called exactly once', async () => {
+		const { client, calls } = spyClient(() => new Promise(() => undefined));
+		const admin = createExplorerAdmin(() => client, { use: 20, terminate: 20 });
+		for (const run of [() => admin.use({ filepath: 'x.pipe' }), () => admin.terminate('tk')]) {
+			await assert.rejects(run(), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'timeout' && /not cancelled and may still complete/.test(error.message));
+		}
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		assert.deepEqual(calls.map((c) => c.method), ['use', 'terminate'], 'one call each, no automatic retry');
 	});
 });

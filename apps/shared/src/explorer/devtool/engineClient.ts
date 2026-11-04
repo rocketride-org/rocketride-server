@@ -48,6 +48,7 @@
 // the SDK's RocketRideClient is assignable to it.
 // =============================================================================
 
+import type { PipelineConfig, ServiceDefinition, ValidationResult } from 'rocketride';
 import { ExplorerToolError } from '../errors';
 import type { IExplorerClient } from '../types';
 import {
@@ -55,7 +56,13 @@ import {
 	GET_TASKS_TIMEOUT_MS,
 	LIST_TASKS_TIMEOUT_MS,
 	MONITOR_TIMEOUT_MS,
+	ENVIRONMENT_KEYS_DEADLINE_MS,
+	GET_SERVICE_DEADLINE_MS,
+	GET_TASK_TOKEN_DEADLINE_MS,
 	PREFS_FS_DEADLINE_MS,
+	TERMINATE_DEADLINE_MS,
+	USE_DEADLINE_MS,
+	VALIDATE_DEADLINE_MS,
 	assertTimeoutMs,
 	toolSdkTimeoutMs,
 } from './timeouts';
@@ -81,8 +88,36 @@ export interface IPrefsFs {
 	fsWriteJson(path: string, obj: any): Promise<void>;
 }
 
+/** The generic SDK calls an Explorer's controller makes besides discovery and tools (see {@link createExplorerAdmin}). */
+export interface IAdminCalls {
+	/** Start (or reuse) a pipeline and get its task token. */
+	use(options: {
+		token?: string;
+		filepath?: string;
+		pipeline?: PipelineConfig;
+		source?: string;
+		threads?: number;
+		useExisting?: boolean;
+		args?: string[];
+		ttl?: number;
+		pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
+		name?: string;
+		env?: Record<string, string>;
+	}): Promise<Record<string, unknown> & { token: string }>;
+	/** The token of a running task for a project and source, if any. */
+	getTaskToken(options: { projectId: string; source: string; teamId?: string }): Promise<string | undefined>;
+	/** Terminate a running pipeline. */
+	terminate(token: string): Promise<void>;
+	/** One service's definition. */
+	getService(service: string): Promise<ServiceDefinition>;
+	/** Validate a pipeline. */
+	validate(options: { pipeline: PipelineConfig | Record<string, unknown>; source?: string }): Promise<ValidationResult>;
+	/** The account namespace (`client.account`). */
+	account: { getEnvironmentKeys(): Promise<string[]> };
+}
+
 /** The part of a RocketRideClient (root or realm proxy) this library calls. */
-export interface IRealmClient extends IPrefsFs {
+export interface IRealmClient extends IPrefsFs, IAdminCalls {
 	getTasks(): Promise<Array<Record<string, unknown>>>;
 	listTasks(req?: { page_size?: number; filters?: Record<string, string | string[]>; sort?: Array<{ field: string; dir: 'asc' | 'desc' }> }): Promise<unknown>;
 	getTaskPipeline(token: string): Promise<Record<string, unknown> | undefined>;
@@ -144,14 +179,16 @@ export function withDeadline<T>(run: () => Promise<T>, deadlineMs: number, what:
 }
 
 /**
- * The client of a realm, or the refusal that says nothing was sent.
+ * The client of a realm, or the refusal that says nothing was sent. The one
+ * guard every call of this module goes through; a lane's own SDK calls use it
+ * too, so a realm with no client answers the same way everywhere.
  *
  * @param get - The realm's client getter.
  * @param what - The request, for the message.
  * @returns The client.
  * @throws ExplorerToolError (kind `unavailable`) when the realm has none yet.
  */
-function need<C>(get: RealmClientGetter<C>, what: string): C {
+export function requireRealmClient<C>(get: RealmClientGetter<C>, what: string): C {
 	const client = get();
 	if (client === null || client === undefined) {
 		throw new ExplorerToolError({ kind: 'unavailable', tool: what, message: `This window is not connected to a server yet, so '${what}' was not sent.` });
@@ -168,27 +205,27 @@ function need<C>(get: RealmClientGetter<C>, what: string): C {
 export function createExplorerClient(get: RealmClientGetter<IRealmClient>): IExplorerClient {
 	return {
 		async getTasks() {
-			const rows = await withDeadline(() => need(get, 'getTasks').getTasks(), GET_TASKS_TIMEOUT_MS, 'getTasks');
+			const rows = await withDeadline(() => requireRealmClient(get, 'getTasks').getTasks(), GET_TASKS_TIMEOUT_MS, 'getTasks');
 			if (!Array.isArray(rows)) throw new Error('getTasks answered with something that is not a list of tasks.');
 			return rows;
 		},
 		listTasks(req) {
-			return withDeadline(() => need(get, 'listTasks').listTasks(req), LIST_TASKS_TIMEOUT_MS, 'listTasks');
+			return withDeadline(() => requireRealmClient(get, 'listTasks').listTasks(req), LIST_TASKS_TIMEOUT_MS, 'listTasks');
 		},
 		async getTaskPipeline(token) {
-			const pipeline = await withDeadline(() => need(get, 'getTaskPipeline').getTaskPipeline(token), GET_TASK_PIPELINE_TIMEOUT_MS, 'getTaskPipeline');
+			const pipeline = await withDeadline(() => requireRealmClient(get, 'getTaskPipeline').getTaskPipeline(token), GET_TASK_PIPELINE_TIMEOUT_MS, 'getTaskPipeline');
 			return pipeline !== null && typeof pipeline === 'object' && !Array.isArray(pipeline) ? pipeline : undefined;
 		},
 		tool<T>(options: { token: string; tool: string; nodeId?: string; input?: Record<string, unknown>; timeout?: number }): Promise<T> {
 			// The SDK's own timeout bounds it (and, in a proxy, the bus above it).
 			const timeout = toolSdkTimeoutMs(options.timeout);
-			return Promise.resolve().then(() => need(get, 'tool').tool<T>({ ...options, timeout }));
+			return Promise.resolve().then(() => requireRealmClient(get, 'tool').tool<T>({ ...options, timeout }));
 		},
 		addMonitor(key, types) {
-			return withDeadline(() => need(get, 'addMonitor').addMonitor(key, types), MONITOR_TIMEOUT_MS, 'addMonitor');
+			return withDeadline(() => requireRealmClient(get, 'addMonitor').addMonitor(key, types), MONITOR_TIMEOUT_MS, 'addMonitor');
 		},
 		removeMonitor(key, types) {
-			return withDeadline(() => need(get, 'removeMonitor').removeMonitor(key, types), MONITOR_TIMEOUT_MS, 'removeMonitor');
+			return withDeadline(() => requireRealmClient(get, 'removeMonitor').removeMonitor(key, types), MONITOR_TIMEOUT_MS, 'removeMonitor');
 		},
 	};
 }
@@ -202,9 +239,55 @@ export function createExplorerClient(get: RealmClientGetter<IRealmClient>): IExp
  */
 export function createPrefsFs(get: RealmClientGetter<IPrefsFs>, deadlineMs: number = PREFS_FS_DEADLINE_MS): IPrefsFs {
 	return {
-		fsStat: (path) => withDeadline(() => need(get, 'fsStat').fsStat(path), deadlineMs, 'fsStat'),
-		fsReadJson: <T>(path: string) => withDeadline(() => need(get, 'fsReadJson').fsReadJson<T>(path), deadlineMs, 'fsReadJson'),
-		fsMkdir: (path) => withDeadline(() => need(get, 'fsMkdir').fsMkdir(path), deadlineMs, 'fsMkdir'),
-		fsWriteJson: (path, obj) => withDeadline(() => need(get, 'fsWriteJson').fsWriteJson(path, obj), deadlineMs, 'fsWriteJson'),
+		fsStat: (path) => withDeadline(() => requireRealmClient(get, 'fsStat').fsStat(path), deadlineMs, 'fsStat'),
+		fsReadJson: <T>(path: string) => withDeadline(() => requireRealmClient(get, 'fsReadJson').fsReadJson<T>(path), deadlineMs, 'fsReadJson'),
+		fsMkdir: (path) => withDeadline(() => requireRealmClient(get, 'fsMkdir').fsMkdir(path), deadlineMs, 'fsMkdir'),
+		fsWriteJson: (path, obj) => withDeadline(() => requireRealmClient(get, 'fsWriteJson').fsWriteJson(path, obj), deadlineMs, 'fsWriteJson'),
+	};
+}
+
+/** The deadlines of {@link createExplorerAdmin}, each overridable. */
+export interface IAdminDeadlines {
+	use?: number;
+	getTaskToken?: number;
+	terminate?: number;
+	getService?: number;
+	validate?: number;
+	getEnvironmentKeys?: number;
+}
+
+/** The generic SDK calls, each bounded by an application deadline. */
+export interface IExplorerAdmin {
+	use: IAdminCalls['use'];
+	getTaskToken: IAdminCalls['getTaskToken'];
+	terminate: IAdminCalls['terminate'];
+	getService: IAdminCalls['getService'];
+	validate: IAdminCalls['validate'];
+	getEnvironmentKeys(): Promise<string[]>;
+}
+
+/**
+ * The generic SDK calls a controller makes besides discovery and tools:
+ * `use`, `getTaskToken`, `terminate`, `getService`, `validate` and
+ * `account.getEnvironmentKeys`. None has an SDK timeout, so each carries an
+ * application deadline (an expiry reports "not cancelled, may still
+ * complete"). SDK errors pass through untouched, and a realm with no client
+ * rejects as `unavailable` (nothing sent). NOTHING IS EVER RETRIED here:
+ * `use` and `terminate` change what runs on the engine, and an expired
+ * deadline does not tell whether they happened, so a caller that wants a
+ * second attempt must look at the engine first.
+ *
+ * @param get - The realm's client getter.
+ * @param deadlines - Deadline overrides, in ms.
+ * @returns The calls.
+ */
+export function createExplorerAdmin(get: RealmClientGetter<IAdminCalls>, deadlines: IAdminDeadlines = {}): IExplorerAdmin {
+	return {
+		use: (options) => withDeadline(() => requireRealmClient(get, 'use').use(options), deadlines.use ?? USE_DEADLINE_MS, 'use'),
+		getTaskToken: (options) => withDeadline(() => requireRealmClient(get, 'getTaskToken').getTaskToken(options), deadlines.getTaskToken ?? GET_TASK_TOKEN_DEADLINE_MS, 'getTaskToken'),
+		terminate: (token) => withDeadline(() => requireRealmClient(get, 'terminate').terminate(token), deadlines.terminate ?? TERMINATE_DEADLINE_MS, 'terminate'),
+		getService: (service) => withDeadline(() => requireRealmClient(get, 'getService').getService(service), deadlines.getService ?? GET_SERVICE_DEADLINE_MS, 'getService'),
+		validate: (options) => withDeadline(() => requireRealmClient(get, 'validate').validate(options), deadlines.validate ?? VALIDATE_DEADLINE_MS, 'validate'),
+		getEnvironmentKeys: () => withDeadline(() => requireRealmClient(get, 'getEnvironmentKeys').account.getEnvironmentKeys(), deadlines.getEnvironmentKeys ?? ENVIRONMENT_KEYS_DEADLINE_MS, 'getEnvironmentKeys'),
 	};
 }

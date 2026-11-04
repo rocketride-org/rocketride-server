@@ -100,6 +100,24 @@ export const GET_TASK_PIPELINE_TIMEOUT_MS = 30_000;
 /** Application deadline of `addMonitor` / `removeMonitor` (a registration; failing it only costs live updates). */
 export const MONITOR_TIMEOUT_MS = 15_000;
 
+/** Application deadline of `use` (starting a pipeline can start an engine: the longest generic call). */
+export const USE_DEADLINE_MS = 120_000;
+
+/** Application deadline of `terminate`. */
+export const TERMINATE_DEADLINE_MS = 30_000;
+
+/** Application deadline of `getTaskToken`. */
+export const GET_TASK_TOKEN_DEADLINE_MS = 30_000;
+
+/** Application deadline of `getService`. */
+export const GET_SERVICE_DEADLINE_MS = 30_000;
+
+/** Application deadline of `validate`. */
+export const VALIDATE_DEADLINE_MS = 60_000;
+
+/** Application deadline of `getEnvironmentKeys`. */
+export const ENVIRONMENT_KEYS_DEADLINE_MS = 15_000;
+
 /** Application deadline of each file-store request the history accessor makes (stat, read, mkdir, write). */
 export const PREFS_FS_DEADLINE_MS = 15_000;
 
