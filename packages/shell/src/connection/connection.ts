@@ -40,7 +40,7 @@
 //   - Browser-specific session storage for auth phase tracking
 // =============================================================================
 
-import { stashSignupProperties, takeSignupProperties, currentSignupProperties, clearSignupProperties } from '../util/signupAttribution';
+import { stashSignupProperties, takeSignupProperties, currentSignupProperties, clearSignupProperties, signupState, signupFromState } from '../util/signupAttribution';
 import { RocketRideClient, ConnectResult, AuthenticationException, LoginAttemptCancelledError, type PkceCredential, type SignupProperties } from 'rocketride';
 import type { ShellConnectionEventMap, IConnectionManager } from '../types/shell';
 import type { IAuthProvider } from '../types/connection';
@@ -714,7 +714,7 @@ export class ConnectionManager implements IConnectionManager {
 				return;
 			}
 			// The provider owns pending context; the legacy path has no provider.
-			stashSignupProperties(signup);
+			const context = stashSignupProperties(signup);
 			// Legacy fallback — remove once all callers pass authProvider
 			if (!this.zitadelUrl || !this.zitadelClientId) {
 				console.error('[ConnectionManager] Zitadel not configured');
@@ -724,7 +724,7 @@ export class ConnectionManager implements IConnectionManager {
 			}
 			const { generatePkce, buildAuthUrl } = await import('../util/pkce');
 			const { challenge } = await generatePkce();
-			const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge, register);
+			const url = buildAuthUrl(this.zitadelUrl, this.zitadelClientId, window.location.origin, challenge, register, signupState(context));
 			// assign() (not replace()) keeps the landing page reachable via the
 			// browser back button — matches CloudAuthProvider.signIn().
 			window.location.assign(url);
@@ -789,13 +789,17 @@ export class ConnectionManager implements IConnectionManager {
 
 		const params = new URLSearchParams(window.location.search);
 		const code = params.get('code');
-		// Only honor `auth_error`: it is set exclusively by our own OAuth
-		// callback (the registered redirect_uri is the server callback, which
-		// wraps every Zitadel failure as `auth_error` before redirecting here).
-		// The generic OAuth `error`/`error_description` params never legitimately
-		// reach the app this way, so reading them would let any unrelated app
-		// deep-link (`/app?error=…`) hijack bootstrap into a false sign-in banner.
+		// Only `auth_error` is honored as a sign-in failure: our own OAuth
+		// callback sets it. The generic OAuth `error`/`error_description` params
+		// can reach the app too (the registered redirect URIs are origin roots),
+		// but honoring them would let any unrelated app deep-link (`/app?error=…`)
+		// into a false sign-in banner. Such a return still carries `state`, which
+		// may hold a cookieless signup context, so it is stripped from the URL.
 		const errorDescription = params.get('auth_error');
+		if (!code && !errorDescription && params.has('error') && params.has('state')) {
+			clearSignupProperties();
+			window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname);
+		}
 
 		if (errorDescription) {
 			clearSignupProperties();
@@ -818,7 +822,7 @@ export class ConnectionManager implements IConnectionManager {
 
 		// ── OAuth callback — exchange authorization code for a session ────
 		if (code) {
-			const signup = takeSignupProperties();
+			const signup = takeSignupProperties() ?? signupFromState(params.get('state'));
 			const verifier = getStoredVerifier();
 			clearStoredVerifier();
 			// Strip the ?code= from the URL so refreshes don't re-exchange.

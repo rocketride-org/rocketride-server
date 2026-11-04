@@ -92,6 +92,16 @@ for (const method of ['login', 'connect'] as const) {
 		assert.deepEqual(JSON.parse(atob(wire.slice(3))), { ...credential, signup_properties: signup });
 	});
 
+	test(`${method} preserves an undecided cookieless context and refuses any other consent state`, async () => {
+		const signup: SignupProperties = { ...signupContext(), consent_state: 'undecided' };
+		const wire = await captureAuth(method, { ...credential, signupProperties: signup });
+		assert.deepEqual(JSON.parse(atob(wire.slice(3))), { ...credential, signup_properties: signup });
+		for (const consentState of ['rejected', 'accepted', '', null]) {
+			const invalid = { ...credential, signupProperties: { ...signupContext(), consent_state: consentState } } as PkceCredential;
+			assert.equal(await captureAuth(method, invalid), 'cd_' + btoa(JSON.stringify(credential)));
+		}
+	});
+
 	test(`${method} preserves exact legacy bytes when context is absent or malformed`, async () => {
 		const expected = 'cd_eyJjb2RlIjoidGVzdC1jb2RlIiwidmVyaWZpZXIiOiJ0ZXN0LXZlcmlmaWVyIiwicmVkaXJlY3RVcmkiOiJodHRwczovL2V4YW1wbGUuaW52YWxpZCJ9';
 		assert.equal(await captureAuth(method, credential), expected);

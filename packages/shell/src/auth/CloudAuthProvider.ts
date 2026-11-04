@@ -37,7 +37,7 @@
 // decoupled from connection, same as VSCode.
 // =============================================================================
 
-import { stashSignupProperties, takeSignupProperties, currentSignupProperties } from '../util/signupAttribution';
+import { stashSignupProperties, takeSignupProperties, currentSignupProperties, signupState } from '../util/signupAttribution';
 import type { PkceCredential, SignupProperties } from 'rocketride';
 import type { IAuthProvider } from '../types/connection';
 import { generatePkce, buildAuthUrl, getStoredVerifier, clearStoredVerifier } from '../util/pkce';
@@ -124,7 +124,7 @@ export class CloudAuthProvider implements IAuthProvider {
 			}
 		}
 
-		stashSignupProperties(register ? signup : null);
+		const context = stashSignupProperties(register ? signup : null);
 
 		// Generate PKCE challenge (stores verifier in sessionStorage automatically)
 		const { challenge } = await generatePkce();
@@ -136,6 +136,7 @@ export class CloudAuthProvider implements IAuthProvider {
 			window.location.origin,
 			challenge,
 			register,
+			signupState(context),
 		);
 
 		// assign() (not replace()) so the landing page stays in history — the
