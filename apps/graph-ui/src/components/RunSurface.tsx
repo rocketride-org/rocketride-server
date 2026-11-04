@@ -69,7 +69,7 @@ import type { ResultTab } from '../graph/results';
 import type { ILoadSlot } from '../graph/loadSlot';
 import { inspectorTextOfRow } from '../graph/rowInspect';
 import type { ReadQueryResult } from '../graph/types';
-import { STOP_WAITING_NOTE, num, resultAnnouncement, resultMeta, truncationText } from '../graph/wording';
+import { STOP_WAITING_NOTE, engineNotReadyText, num, resultAnnouncement, resultMeta, truncationText, writeTruncationText } from '../graph/wording';
 import { GraphView } from './GraphView';
 import InspectorPanel from './InspectorPanel';
 import QueryEditor from './QueryEditor';
@@ -152,7 +152,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 	const writable = dialectCanWrite(dialect);
 	const announce = useCallback((text: string) => announcer.announce(text), []);
 	// Why nothing may be sent right now (statements and graph actions alike), or null.
-	const blocked = !env.ready ? 'The shell is not connected to the engine.' : paused;
+	const blocked = !env.ready ? (engineNotReadyText(env.engine) ?? 'The shell is not connected to the engine.') : paused;
 
 	// ── The session on this endpoint (the token never leaves the store) ──────
 	// Keyed on the endpoint's KEY, not its object: background discovery hands back a new object for the same
@@ -375,7 +375,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 
 	// ── Meta line ────────────────────────────────────────────────────────────
 	const metaText = result ? resultMeta(displayed, result) : '';
-	const truncation = result ? truncationText(result) : null;
+	const truncation = result ? (mode === 'write' ? writeTruncationText(result) : truncationText(result)) : null;
 	const willRun = describeSnapshot(view ?? { text, start: 0, end: 0, caret: 0 });
 	const strip = runner.runs.length > 1;
 

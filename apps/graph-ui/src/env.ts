@@ -44,6 +44,7 @@ import type { IExplorerEndpoint, IHistoryEntry, IPrefsAccessor, IProbeResult, IT
 import type { IGraphEndpointsState, IGraphHistoryView } from './devtool/protocol';
 import type { IGraphPreview, PreviewAction } from './graph/previews';
 import type { ISchemaStore } from './graph/schemaStore';
+import type { EngineStatus } from 'shared/explorer/devtool/readiness';
 
 /** A value that changes, readable outside React (useSyncExternalStore-friendly: `get` is stable between changes). */
 export interface IReadable<T> {
@@ -86,6 +87,11 @@ export interface IGraphEnv {
 	mount: GraphMount;
 	/** Whether the engine is reachable (frames: the host's `host:connection`). Drives run/apply enablement. */
 	ready: boolean;
+	/**
+	 * Why it is not (or is): `waiting` (the realm has no client yet, or the host has not said), `disconnected`, or
+	 * `ready`. Waiting is never worded as disconnected. Absent means `ready` follows the boolean.
+	 */
+	engine?: EngineStatus;
 	/** Discovered connections and their probes. */
 	endpoints: IReadable<IGraphEndpointsState>;
 	/**

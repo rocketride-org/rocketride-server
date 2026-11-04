@@ -146,7 +146,7 @@ function describeKind(error: IFailureInput, canWrite: boolean): Omit<IFailureNot
 		return { ...base, variant: 'error', headline: error.headline, hint: canWrite ? 'To change data, use the write console for this connection.' : 'Browsing is read-only. To change data, use a node with direct execution turned on.' };
 	}
 	if (/^Refused:/i.test(error.headline)) return { ...base, variant: 'error', headline: error.headline, hint: null };
-	if (/^Not supported on Apache AGE/i.test(error.headline)) return { ...base, variant: 'error', headline: error.headline, hint: 'Apache AGE 1.5.0 does not support this Cypher construct; rewrite the query without it.' };
+	if (/^Not supported on Apache AGE/i.test(error.headline)) return { ...base, variant: 'error', headline: error.headline, hint: ageUnsupportedHint(error.headline) };
 	if (/^Query timed out/i.test(error.headline)) return { ...base, variant: 'warning', headline: error.headline, hint: 'The node stopped the query. Narrow it, or lower the row limit.' };
 	if (/^Invalid read_query input/i.test(error.headline)) return { ...base, variant: 'error', headline: error.headline, hint: null };
 	return { ...base, variant: 'error', headline: error.headline || error.message, hint: null };
@@ -262,3 +262,15 @@ export function describeWriteFailure(message: string, error: unknown): IFailureN
 
 /** Re-exported so the canvas notice and the failure strip share one place for their wording. */
 export { GRID_NOTICE };
+
+/**
+ * The hint under an AGE "Not supported" headline, naming the version the NODE reported (`Not supported on Apache AGE
+ * <version>: <construct>`), never one this app assumes. A headline without a version says no version.
+ *
+ * @param headline - The node's headline.
+ * @returns The hint.
+ */
+export function ageUnsupportedHint(headline: string): string {
+	const version = /^Not supported on Apache AGE (\d[\w.+-]*):/i.exec(headline)?.[1];
+	return `${version ? `Apache AGE ${version}` : 'This Apache AGE server'} does not support this Cypher construct; rewrite the query without it.`;
+}

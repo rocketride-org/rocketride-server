@@ -58,14 +58,16 @@ export interface ILocalGraphEnvOptions {
 	mount: Exclude<GraphMount, 'frame'>;
 	/** Whether the realm is connected. */
 	ready: boolean;
-	/** The realm's bus-backed client, or null while not connected. */
+	/** Why it is not: waiting for the realm's client, or disconnected (default: follows `ready`). */
+	engine?: IGraphEnv['engine'];
+	/** The realm's engine client (over its own RocketRideClient), or null while it is not ready. */
 	client: IExplorerClient | null;
 	stores: IGraphStores;
 	activeConnection: IReadable<string | null>;
 	openDocument(target: DocTarget): void;
 	prefs: IPrefsAccessor;
 	historyPrivacyNote: string;
-	/** Override discovery (the controller gates it on identity and activation). */
+	/** Override discovery (the controller gates it on identity and the engine's readiness). */
 	refresh?: IGraphEnv['refresh'];
 }
 
@@ -164,6 +166,7 @@ export function createLocalGraphEnv(opts: ILocalGraphEnvOptions): IGraphEnv {
 	return {
 		mount: opts.mount,
 		ready: opts.ready,
+		engine: opts.engine ?? (opts.ready ? 'ready' : 'disconnected'),
 		endpoints,
 		refresh: opts.refresh ?? ((o) => (client ? stores.endpoints.refresh(client, { reprobe: o?.reprobe === true }) : Promise.resolve())),
 		probe: (key) => (client ? stores.endpoints.probe(client, key) : Promise.resolve(null)),

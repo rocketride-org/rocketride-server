@@ -24,7 +24,7 @@
 // GRAPH-UI - DEV-TOOL FRAME (a document frame: no client, everything over ops)
 // =============================================================================
 //
-// A plain function over the frame mount's peer, the host's channel and the
+// A plain function over the host's channel for the frame mount and the
 // shell's protocol factories (injected), so it runs under node:test against
 // the real shell modules. It holds NO client and no token (R1): it builds the
 // REMOTE env every view of the frame uses.
@@ -61,8 +61,7 @@ import { HOST_CONNECTION_TOPIC, createFrameCaller } from 'shared/explorer/devtoo
 import type { IFrameCaller } from 'shared/explorer/devtool/frame';
 import { createFrameIdentityGuard, followSignIn } from 'shared/explorer/devtool/frameIdentity';
 import type { FrameResetReason, IFrameIdentityGuard, SignInState } from 'shared/explorer/devtool/frameIdentity';
-import { CONTROLLER_STATE_TOPIC, channelFor } from 'shared/explorer/devtool/realm';
-import type { DevToolPeer } from 'shared/explorer/devtool/realm';
+import { CONTROLLER_STATE_TOPIC } from 'shared/explorer/devtool/realm';
 import { createControllerSummon } from 'shared/explorer/devtool/summon';
 import type { SummonState } from 'shared/explorer/devtool/summon';
 import { TOOL } from '../adapters/explorer';
@@ -76,18 +75,14 @@ import type { DocRoute, GraphOps, HistoryEdit, IActiveEvent, IFrameSchema, IGrap
 
 /** What {@link createGraphFrame} needs. NO client and no ConnectionManager: a frame holds none (R1, T2). */
 export interface IGraphFrameOptions {
-	/** The frame mount's peer. */
-	peer: DevToolPeer;
-	/** The host's channel for this mount, when it gave one. */
-	channel?: ToolChannel;
+	/** The host's channel for this mount (DevToolProps.channel). */
+	channel: ToolChannel;
 	/** The host's documents API. */
 	documents?: DevToolProps['documents'];
 	/** The frame's docKey. */
 	docKey?: string | null;
-	/** The shell's createToolController (injected). */
-	createToolController: <O extends ToolOpMap>(peer: DevToolPeer) => ToolControllerFn<O>;
-	/** The shell's createToolChannel (injected). */
-	createToolChannel: (peer: DevToolPeer) => ToolChannel;
+	/** The shell's createToolOpClient (injected). */
+	createToolOpClient: <O extends ToolOpMap>(channel: ToolChannel) => ToolControllerFn<O>;
 	/** The clock (deadlines). */
 	now?: () => number;
 	/** Where focus comes from (default: the window; null: none). */
@@ -115,7 +110,7 @@ export interface IGraphFrame {
 	/** What the controller says about the account: pending (nothing yet), nobody, or signed in. */
 	readonly signIn: IReadable<SignInState>;
 	/** The REMOTE env (rebuild when `connected` changes). */
-	env(ready: boolean): IGraphEnv;
+	env(ready: boolean, waiting?: boolean): IGraphEnv;
 	/** Why the frame last cleared its caches, or null. */
 	lastReset(): FrameResetReason | null;
 	/** Dispose (idempotent): pending calls are dropped as stale. */
@@ -233,8 +228,9 @@ export function createGraphFrame(opts: IGraphFrameOptions): IGraphFrame {
 	const route = routeDocKey(opts.docKey);
 	const docKey = typeof opts.docKey === 'string' ? opts.docKey : '';
 	const report = (error: unknown): void => opts.onError?.(error);
-	const channel = opts.channel ?? channelFor(opts.peer, opts.createToolChannel);
-	const caller = createFrameCaller<GraphOps>({ peer: opts.peer, channel, createToolController: opts.createToolController, createToolChannel: opts.createToolChannel, ...(opts.now ? { now: opts.now } : {}) });
+	const channel = opts.channel;
+	// No `identityNow` yet (the platform's D1.1 binds the identity fence): the frame's own guard follows the identity.
+	const caller = createFrameCaller<GraphOps>({ channel, createToolOpClient: opts.createToolOpClient, ...(opts.now ? { now: opts.now } : {}) });
 	const offs: Array<() => void> = [];
 	let disposed = false;
 	let resetWhy: FrameResetReason | null = null;
@@ -429,7 +425,7 @@ export function createGraphFrame(opts: IGraphFrameOptions): IGraphFrame {
 		return labels;
 	}
 	const prefs = memoryPrefs();
-	const envs = new Map<boolean, IGraphEnv>();
+	const envs = new Map<string, IGraphEnv>();
 
 	const openDocument = (target: DocTarget): void => {
 		const documents = opts.documents;
@@ -449,12 +445,14 @@ export function createGraphFrame(opts: IGraphFrameOptions): IGraphFrame {
 		summon,
 		signIn,
 		lastReset: () => resetWhy,
-		env(ready) {
-			const cached = envs.get(ready);
+		env(ready, waiting = false) {
+			const engine = ready ? 'ready' : waiting ? 'waiting' : 'disconnected';
+			const cached = envs.get(engine);
 			if (cached) return cached;
 			const env: IGraphEnv = {
 				mount: 'frame',
 				ready,
+				engine,
 				gridPersistence: SESSION_GRIDS,
 				endpoints,
 				// An automatic refresh (quiet) says nothing when refused: at mount the controller may still be settling its
@@ -490,7 +488,7 @@ export function createGraphFrame(opts: IGraphFrameOptions): IGraphFrame {
 				prefs,
 				historyPrivacyNote: DEVTOOL_HISTORY_PRIVACY_NOTE,
 			};
-			envs.set(ready, env);
+			envs.set(engine, env);
 			return env;
 		},
 		dispose() {

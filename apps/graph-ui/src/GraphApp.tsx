@@ -42,11 +42,11 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { AppLayout, Button, ConnectionManager, DocSplitLayout, DocTabs, EmptyState, commonStyles, usePrefs, useShellConnection } from 'shell';
+import { AppLayout, Button, DocSplitLayout, DocTabs, EmptyState, commonStyles, usePrefs } from 'shell';
 import type { Documents, ShellAppProps } from 'shell';
 import { identityFingerprint, identityFromConnectResult } from 'shared/explorer';
 import type { IExplorerEndpoint, IPrefsAccessor } from 'shared/explorer';
-import { getBusExplorerClient } from 'shared/explorer/devtool/busClient';
+import { useRealmEngine } from 'shared/explorer/react';
 import { activeConnection, appPreviews, dataVersions, graphEndpoints, graphHistory, schemas } from './adapters/explorer';
 import { GraphHistoryPrefsBridge, useEndpointStoreLifecycle } from './adapters/react';
 import { APP_HISTORY_PRIVACY_NOTE, GraphEnvProvider, useGraphEndpoints } from './env';
@@ -119,14 +119,15 @@ const AppPrefsBinding: React.FC<{ prefs: ReturnType<typeof forwardingPrefs> }> =
  */
 const GraphApp: React.FC<ShellAppProps> = ({ identity }) => {
 	const [ready, setReady] = useState(false);
-	const { isConnected } = useShellConnection();
-	// The realm's bus-backed client (one per realm): in the shell `client.*` runs in this realm, codes intact.
-	const client = useMemo(() => (isConnected ? getBusExplorerClient(ConnectionManager.getInstance()) : null), [isConnected]);
+	// The realm's own RocketRideClient, narrowed to the library's client: non-null only once the realm can answer
+	// truthfully (`waiting` is not `disconnected`).
+	const { status: engine, client } = useRealmEngine();
+	const isConnected = engine === 'ready';
 	useEndpointStoreLifecycle(graphEndpoints, client, identity);
 	const [prefs] = useState(forwardingPrefs);
 	const env = useMemo(
-		() => createLocalGraphEnv({ mount: 'app', ready: isConnected, client, stores: APP_STORES, activeConnection, openDocument: openAppDocument, prefs, historyPrivacyNote: APP_HISTORY_PRIVACY_NOTE }),
-		[isConnected, client, prefs]
+		() => createLocalGraphEnv({ mount: 'app', ready: isConnected, engine, client, stores: APP_STORES, activeConnection, openDocument: openAppDocument, prefs, historyPrivacyNote: APP_HISTORY_PRIVACY_NOTE }),
+		[isConnected, engine, client, prefs]
 	);
 
 	// A different user, organization or team (or a sign-out) must find nothing from before: no schema, and no

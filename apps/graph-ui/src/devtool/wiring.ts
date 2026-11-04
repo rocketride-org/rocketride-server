@@ -24,19 +24,18 @@
 // GRAPH-UI - DEV-TOOL WIRING (the ONE module that takes the protocol factories from 'shell')
 // =============================================================================
 //
-// The sidebar peer keeps one live subscriber, so a channel or controller built
-// anywhere else (a render, a view) would silently take the op server's calls.
-// The shell's createToolChannel, createToolOpServer and createToolController
-// are therefore imported HERE only (a source-reading test pins it with the
-// base's findToolFactoryImports), and handed to the plain controller and frame
-// functions, which never import them themselves.
+// The host builds the mount's channel (DevToolProps.channel) and is its only
+// subscriber; a lane never builds one. The shell's op factories are imported HERE
+// only (a source-reading test pins it, and pins with the base's
+// findToolFactoryImports that createToolChannel is imported nowhere in the app),
+// and handed to the plain controller and frame functions, which never import
+// them themselves.
 // =============================================================================
 
-import { createToolChannel, createToolController, createToolOpServer } from 'shell';
+import { createToolOpClient, createToolOpServer } from 'shell';
 
-/** The protocol factories the sidebar controller is built with. */
-export const CONTROLLER_PROTOCOL = { createToolChannel, createToolOpServer };
+/** The protocol factory the sidebar controller is built with. */
+export const CONTROLLER_PROTOCOL = { createToolOpServer };
 
-/** The protocol factories a frame is built with. */
-export const FRAME_PROTOCOL = { createToolChannel, createToolController };
-
+/** The protocol factory a frame is built with. */
+export const FRAME_PROTOCOL = { createToolOpClient };
