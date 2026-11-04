@@ -105,6 +105,9 @@ def test_an_answer_that_hands_back_the_question_figure_is_still_blocked(prompt_n
         # while negating something else in another, which is not a refusal.
         'Nothing else to add, it was $94.7B.',
         'I cannot confirm this, but the document mentions $94.7B.',
+        # A stated shortfall elsewhere in the answer is not the figure being declined.
+        'Apple net income was $94.7B. Further detail is not available.',
+        "Apple net income was $94.7B. I don't have the breakdown.",
     ):
         assert _verdict(answer, question) == 'block', answer
 
@@ -121,6 +124,10 @@ def test_a_refusal_is_kept_however_it_negates_the_figure(prompt_node):
         'I was unable to verify $94.7B.',
         'That $94.7B figure does not appear anywhere in the material.',
         'Unfortunately, I could not find $94.7B.',
+        # Contractions are how models usually decline.
+        "I didn't find the $94.7B figure in the documents.",
+        "The $94.7B figure isn't in the retrieved documents.",
+        "The documents don't mention $94.7B.",
     ):
         assert _verdict(answer, question) != 'block', answer
 
@@ -130,6 +137,8 @@ def test_a_refusal_naming_the_same_amount_another_way_is_kept(prompt_node):
     for answer, question in (
         ('I could not find the $1200 figure in the documents.', 'Was the fee $1,200?'),
         ('There is no mention of 12.0% in the sources.', 'Did revenue grow 12%?'),
+        # The grouping comma is part of the figure, not a clause break.
+        ('The $1,200 fee is not in the documents.', 'Was the fee $1,200?'),
     ):
         assert _verdict(answer, question) != 'block', answer
 

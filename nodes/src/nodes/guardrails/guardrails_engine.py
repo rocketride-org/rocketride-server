@@ -397,16 +397,18 @@ class GuardrailsEngine:
     # 12.0 and 12 are one amount, 94.70 and 94.7 are one amount.
     _TRAILING_ZEROS = re.compile(r'(\d+\.\d*?)0+(?=\D|$)')
     _TRAILING_POINT = re.compile(r'(\d+)\.(?=\D|$)')
-    # A refusal negates or reports an inability; an affirmation does neither.
+    # A refusal negates or reports an inability; an affirmation does neither. The
+    # contraction sits outside the word boundary, since "didn't" has none before its n.
     _NEGATION = re.compile(
-        r"\b(?:no|not|none|nothing|never|cannot|can't|couldn't|unable|n't|without|outside|beyond|lacks?|lacking)\b"
+        r"\b(?:no|not|none|nothing|never|cannot|unable|without|outside|beyond|lacks?|lacking)\b|n't\b"
     )
     # An answer that opens by agreeing is affirming the figure, whatever it negates later.
     _AFFIRMS = re.compile(r"^\W*(?:yes|correct|indeed|true|confirmed|that is right|that's right)\b")
     _SENTENCE = re.compile(r'(?<=[.!?])\s+|\n+')
     # A negation binds to its own clause: "nothing else to add, it was $94.7B" states
     # the figure, it does not decline it.
-    _CLAUSE = re.compile(r',\s*|;\s*|\s+(?:but|though|although|however|while|whereas)\s+')
+    # A comma between digits groups a figure, so $1,200 stays in one clause.
+    _CLAUSE = re.compile(r'(?<!\d),\s*|,(?!\d)\s*|;\s*|\s+(?:but|though|although|however|while|whereas)\s+')
     # A question writing $94.7B and an answer writing $94.7 billion name the same
     # amount, so the scale word is folded to its initial before they are compared.
     _SCALE_WORDS = (('billion', 'b'), ('bn', 'b'), ('million', 'm'), ('thousand', 'k'))
@@ -435,7 +437,7 @@ class GuardrailsEngine:
         if not stated:
             return False
         if not question_text.strip():
-            return not cls._declines(output)
+            return not cls._declines(output, shortfall_anywhere=True)
         if stated - cls._figures(question_text):
             return True
         # Every figure came from the question. Handing one back as fact asserts it
@@ -443,14 +445,20 @@ class GuardrailsEngine:
         return not cls._declines(output)
 
     @classmethod
-    def _declines(cls, output: str) -> bool:
+    def _declines(cls, output: str, shortfall_anywhere: bool = False) -> bool:
         """Report whether *output* refuses rather than answers.
 
         A refusal negates the figure it declines to state, which holds for wordings
-        the phrase list never anticipated. The negation is looked for in the figure's
-        own clause, so an affirmation carrying an unrelated "no" is not mistaken for
-        one, and an answer that opens by agreeing is never a refusal. The phrase list
-        stays for the few that state a shortfall without negating anything.
+        the phrase list never anticipated. The negation or stated shortfall is looked
+        for in the figure's own clause, so an affirmation carrying an unrelated "no"
+        or "not available" is not mistaken for one, and an answer that opens by
+        agreeing is never a refusal.
+
+        Args:
+            output: The answer to classify.
+            shortfall_anywhere: Accept a phrase-list shortfall anywhere in the answer.
+                Used when no question was recorded, where a figure cannot be attributed
+                and the check errs toward delivering the answer.
         """
         body = output.strip().lower().replace('\u2019', "'")
         if cls._AFFIRMS.match(body):
@@ -459,9 +467,16 @@ class GuardrailsEngine:
         # declines to state, while an affirmation can carry an unrelated "no".
         for sentence in cls._SENTENCE.split(body):
             for clause in cls._CLAUSE.split(sentence):
-                if cls.FIGURE_PATTERN.search(clause) and cls._NEGATION.search(clause):
+                if cls.FIGURE_PATTERN.search(clause) and (
+                    cls._NEGATION.search(clause) or cls._states_shortfall(clause)
+                ):
                     return True
-        return any(marker in body for marker in cls.ABSTENTION_MARKERS)
+        return shortfall_anywhere and cls._states_shortfall(body)
+
+    @classmethod
+    def _states_shortfall(cls, text: str) -> bool:
+        """Report whether *text* uses one of the phrases that report missing information."""
+        return any(marker in text for marker in cls.ABSTENTION_MARKERS)
 
     @classmethod
     def _figures(cls, text: str) -> Set[str]:
