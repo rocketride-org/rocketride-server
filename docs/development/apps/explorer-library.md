@@ -410,7 +410,7 @@ gives the history accessor its four file-store calls. In React,
 - **`createExplorerAdmin(getClient)`** bounds the generic calls `use`,
   `getTaskToken`, `terminate`, `getService`, `validate` and
   `account.getEnvironmentKeys` with application deadlines (`USE_DEADLINE_MS`
-  120 s, `VALIDATE_DEADLINE_MS` 60 s, `TERMINATE_`/`GET_TASK_TOKEN_`/`GET_SERVICE_DEADLINE_MS`
+  100 s, `VALIDATE_DEADLINE_MS` 60 s, `TERMINATE_`/`GET_TASK_TOKEN_`/`GET_SERVICE_DEADLINE_MS`
   30 s, `ENVIRONMENT_KEYS_DEADLINE_MS` 15 s; each overridable). SDK errors pass
   through untouched. **Nothing is retried**: an expired deadline for `use` or
   `terminate` says the request was not cancelled and may still complete, and a
@@ -437,6 +437,17 @@ gives the history accessor its four file-store calls. In React,
   waiting and gets an `ExplorerToolError` of kind `timeout` that says the
   request was not cancelled and may still complete. A late answer or failure is
   swallowed.
+
+**Errors from `terminate`.** The develop SDK's `terminate()` rethrows a plain
+`Error` with the server's message, so a `terminate` failure carries no `code`
+(`use` does: it throws a `DAPException`). The library passes errors through
+untouched and never rebuilds a code from text.
+
+**`use`'s deadline** is `USE_DEADLINE_MS` = 100 s, deliberately below the bus's
+120 s default request timeout: `use` sends its request with no SDK timeout, so
+through a proxy the bus timer would otherwise tie with ours, and whichever fired
+first would decide the message. Ours is shorter, so the caller always gets the
+"not cancelled, may still complete" text.
 
 A frame waits longer than its controller: `frameOpTimeoutMs(controllerMs)` adds
 `FRAME_OP_MARGIN_MS` (5 s), and `toolCallBudgetMs(wait)` is one tool call's
@@ -466,9 +477,12 @@ controller budget.
   arrives after it, without running it.
 - **The frame caller.** `createFrameCaller({ channel, createToolOpClient })`
   calls through the host's channel and builds no subscription of its own.
-  With `identityNow` a call is bound to the identity fingerprint when issued,
-  and its answer, success or failure, is discarded as kind `stale` if the frame
-  is under another identity when it arrives.
+  With `identityNow` a call is bound to the first known identity fingerprint:
+  the one when it is issued, or none when none is known yet (a cold start:
+  unknown to A is not a change). Its answer, success or failure, is discarded as
+  kind `stale` if the frame is under another identity, or none, when it arrives
+  (A to B, or A to null on a sign-out). The identity is read at issue and at
+  answer.
   - Every call needs an explicit `timeoutMs`. A missing or unusable one is a
     programming error: `call` and `callReply` **throw** a RangeError
     synchronously, so a `.catch` on the returned promise never sees it.
@@ -603,9 +617,21 @@ its tab is first selected, or when one of its frames asks the host to mount it,
 and keep it mounted, so mounting is the activation.
 
 **Discovery** ([`watch.ts`](../../../apps/shared/src/explorer/devtool/watch.ts)).
-`createDevToolDiscovery({ cm, client, identity, engine })` gives the store's
-watch. It allows discovery only while the identity is known **and** the engine
-is `ready`. It forwards identity changes (unknown resets the store), and
+`createDevToolDiscovery({ cm, client, identity, engine, present? })` gives the
+store's watch. It allows discovery only while the identity is known **and** the
+engine is `ready`.
+
+**Quiet at boot.** A pinned tool's controller mounts when the host boots, with
+nobody there, and a probe is a tool call that keeps a pipeline alive. So until a
+person is present, a refresh is discovery reads only (`getTasks`, `listTasks`,
+`getTaskPipeline`): endpoints are listed but stay `probing`, and no `dialect`
+call is sent. Pass `holdProbes: () => discovery.holdProbes()` to
+`createEndpointStore`, and call `discovery.markUserPresent('op')` from
+`attachController`'s `onFirstOp` and `markUserPresent('user')` on the first
+sidebar interaction. The first call releases the probes with one refresh; later
+calls do nothing; task events and focus do not count. (`present: true` skips the
+hold.) The history file reads and writes are account-store calls, not pipeline
+calls, so they are not held. It forwards identity changes (unknown resets the store), and
 registers the task monitor only once discovery is allowed. It refreshes once
 whenever discovery becomes allowed, and again when the identity switches
 between two known fingerprints. A change in permission hints alone refreshes
@@ -649,10 +675,9 @@ one activation path. `createControllerSummon({ channel })` uses it on purpose.
   re-sends once, at `SUMMON_RETRY_MS`, if no nonce arrives, and sends afresh
   when a new episode starts (the nonce goes away, or the host connection comes
   back). It sends nothing while the host says it is disconnected. The retry
-  helps only a sidebar peer that rocket-ui arms late. A peer whose host has no
-  mount handler (a collapsed rocket-ui sidebar) latches busPeer's one summon
-  per hold, and the re-send is only held; the frame then says to open the
-  sidebar. That late-armed case is still to be confirmed in the real rocket-ui
+  helps only a sidebar peer that rocket-ui arms late (a collapsed rocket-ui
+  sidebar is hidden, not unmounted, so the host's mount handler stays). That
+  late-armed case is still to be confirmed in the real rocket-ui
   host. Once a controller has mounted and gone, rocket-ui's cached sidebar
   channel keeps the peer subscribed, so busPeer no longer holds messages or asks
   the host to mount: the cached channel absorbs the summon and the frame ends
@@ -762,7 +787,8 @@ per workspace, mirrored to every realm and republished whole on each write.
   - **Nothing it does not understand is erased.** Another owner's entry,
     well-formed or not, and any unknown top-level field (a newer client's) are
     written back exactly as stored. An entry that is not a bag is never
-    dropped by the owner cap. If THIS owner's entry is not a bag, the file is
+    dropped, and never counts toward the owner cap, so it cannot push a real
+    owner out. If THIS owner's entry is not a bag, the file is
     left unwritten and the session stays in memory.
   - A write that falls due while nobody is vouched for (`ownerNow()` null, a
     reconnect) is held. It looks again at most every 30 s, without using up
@@ -781,8 +807,12 @@ per workspace, mirrored to every realm and republished whole on each write.
   - Every fs request has an application deadline (`PREFS_FS_DEADLINE_MS`).
   - `@/User/.workspace/…` and SQL's scope-less `.workspace/…` are the same
     folder.
-- **Last writer wins across windows** (a known limitation). Drafts and
-  captions stay session-only.
+- **No lost updates across owners.** Each write re-reads the file just before
+  it and merges: this owner's bag from memory, every other owner's entry and
+  every unknown field from the fresh read. A failed fresh read writes nothing:
+  the change stays in memory, the failure is reported, and the write is retried
+  like any failed write. Two windows under the SAME owner still keep only the
+  later one's bag for that owner. Drafts and captions stay session-only.
 
 **Rules a controller must follow** (they come from the shell's `busPeer.ts`,
 `toolChannel.ts` and `toolOps.ts`):
@@ -852,10 +882,6 @@ the host's one channel per mount over a harness peer
   controller "may still be executing it" although nothing ran.
 - **After the controller unmounts in rocket-ui**, a frame's summon does not
   reach `host.mountToolSidebar` (see Summoning above).
-- **`shell:event` does not fire in a mirrored realm.** The shell re-emits the
-  root socket's events only where the socket lives, so task events never wake a
-  store there; it refreshes on focus, reconnect and explicit refresh. (Identity
-  resets do work there: they follow the identity tracker.)
 
 - The React hook and the components that import from `shell` are type-checked
   and bundled but have no DOM tests: the repository has no component test

@@ -48,9 +48,10 @@
 //                    socket-owning one on its handshake, a mirrored one when the
 //                    root's status mirror turns connected): events were missed.
 //
-// Task events (`shell:event`) are the shell's own: a mirrored realm does not
-// re-emit what the root's socket receives, so there they never fire and the
-// store refreshes on focus, reconnect and explicit refresh only.
+// Task events (`shell:event`) reach a mirrored realm too: the VS Code host
+// broadcasts the root's events as `mirror.event`, and each webview realm
+// re-emits them as `shell:event` (busRealm.ts). The monitor that produces them
+// is registered at the root through the realm client (`addMonitor`).
 //
 // Everything it registers is removed by the returned function.
 // =============================================================================

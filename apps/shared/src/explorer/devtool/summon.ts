@@ -53,9 +53,8 @@
 //     busPeer no longer holds frame messages and never asks the host to mount
 //     again (`sidebarCb` is set for good). The cached channel absorbs the
 //     summon event and nothing mounts; the frame ends at 'unanswered' ("open
-//     the sidebar"). Nor does it help a host with no `host.mountToolSidebar`
-//     handler (a collapsed rocket-ui sidebar unmounts the chrome that handles
-//     it). That limit applies whenever the controller unmounts while the
+//     the sidebar"). (A collapsed rocket-ui sidebar is hidden, not unmounted,
+//     so the host's mount handler stays.) That limit applies whenever the controller unmounts while the
 //     cached channel lives (a SidebarChrome remount, a tool unpinned while its
 //     document stays open).
 //   - Not sent while the host says it is disconnected: no controller can mount
