@@ -570,6 +570,20 @@ a document reaches the engine only through the sidebar. The generic document
 with no connection says how to open one. The same features are there, with
 these differences:
 
+- **Documents hold no engine connection of their own.** Every statement,
+  schema read, history write and saved-connection change is a request the
+  document sends to the sidebar, which runs it on the tool's one connection
+  and checks it again itself (who is signed in, what the connection's safety
+  setting allows). This is the design every Explorer shares. It differs from
+  the first dev-tool version of SQL Explorer, where each document ran its
+  statements on its own connection and the sidebar only started and stopped
+  the temporary pipelines of direct connections.
+- **Direct connections share one temporary pipeline.** Documents opened on
+  the same direct connection use the same pipeline. Closing one document
+  leaves it running for the others; it stops when the last document closes.
+  Deleting the connection stops it at once, and a document still open on it
+  says the connection no longer exists.
+
 - **History lives in a file.** The tool keeps query history in
   `.workspace/rocketride.sql.history.json` in your user storage on the server,
   beside the saved connections, one section per signed-in account. It is read

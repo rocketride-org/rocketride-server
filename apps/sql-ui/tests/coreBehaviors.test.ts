@@ -215,3 +215,28 @@ describe('a failed saved-list load is tried once more, from the next call', () =
 		}
 	});
 });
+
+describe('endpoint probes wait for a person (holdProbes / markUserPresent)', () => {
+	it('a dev-tool controller discovers but sends no tool call until a person is present; the full app does not wait', async () => {
+		const engine = scriptedClientRealm(engineScript([PIPELINE], [taskRow('p1')]));
+		const core = createSqlCore({ ...engine.source, mode: 'devtool', focusTarget: null });
+		engine.realm.login(USER);
+		try {
+			await until(() => engine.ops().includes('client.getTasks'), 'the first discovery');
+			await new Promise<void>((resolve) => { setTimeout(resolve, 200); });
+			assert.equal(engine.ops().includes('client.tool'), false, 'discovery is reads only: no probe yet');
+			core.discovery.markUserPresent('user');
+			await until(() => engine.ops().includes('client.tool'), 'the held probe to go out');
+		} finally {
+			core.dispose();
+		}
+		const app = scriptedClientRealm(engineScript([PIPELINE], [taskRow('p1')]));
+		const appCore = createSqlCore({ ...app.source, mode: 'app', focusTarget: null });
+		app.realm.login(USER);
+		try {
+			await until(() => app.ops().includes('client.tool'), 'the full app\'s probe, with nobody holding it back');
+		} finally {
+			appCore.dispose();
+		}
+	});
+});
