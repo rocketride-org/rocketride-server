@@ -18,8 +18,8 @@ replacing what legitimately differs between runs: node and relationship ids
 ``refreshed_at`` timestamps, and, in Neo4j's ``get_schema``, labels and types
 other test data left on the shared server.
 
-Runs in the unmocked live-database lane (DB_LIVE_SUITES in
-``nodes/scripts/tasks.js``); skips without the drivers or databases unless
+Runs in the unmocked live-database lane (registered in
+``nodes/scripts/db-lanes/graph.js``); skips without the drivers or databases unless
 ``RR_REQUIRE_DB_TESTS`` is set.
 """
 

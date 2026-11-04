@@ -3,7 +3,7 @@
 Captured by `nodes/test/graph_wire_fixtures.py --live` from the real node tools
 (read_query, dialect, get_schema, refresh_schema, error text) running on the real
 neo4j 6.3.1 / falkordb 1.7.0 / psycopg2 drivers against the live test databases CI
-starts (`.github/workflows/_build.yaml`): Neo4j 5.26.31 Community, FalkorDB 6.0.1,
+starts (`nodes/test/db-services/graph.sh`): Neo4j 5.26.31 Community, FalkorDB 6.0.1,
 PostgreSQL 16 with Apache AGE 1.5.0. Only the engine surface (rocketlib, config) is
 stubbed.
 

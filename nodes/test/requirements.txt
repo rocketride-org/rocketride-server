@@ -24,7 +24,7 @@ img2table                   # ocr: test_model_server_ocr.py
 # fixtures were validated with. Those pins reach these installs through the
 # engine constraints, so no version is repeated here.
 psycopg2-binary             # rocketride_*, db/store_postgres: test_rocketride_db_full.py, test_rocketride_graph_full.py
-pgvector                    # rocketride_vector, store_postgres: test_rocketride_db_full.py, test_rocketride_vector_tools_full.py, test_vector_store_writes_full.py
+pgvector                    # the live pgvector suites' import guards (every suite in nodes/scripts/db-lanes/ that talks to pgvector); unpinned here: nodes/src/nodes/constraints.lock pins 0.4.2, the version both the nodes and these suites use
 antlr4-python3-runtime      # rocketride_graph (AGE translator, generated with ANTLR 4.13.2): live database suites
 neo4j                       # graph_neo4j: live database suites (test_graph_drivers_full.py uses its Bolt hydration)
 falkordb                    # graph_falkordb: live database suites

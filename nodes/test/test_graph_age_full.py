@@ -733,8 +733,8 @@ class TestReadQuery:
 # no bound list compares with AGE ids exactly, so each id is its own parameter
 # in an OR chain. Through read_query that is one PREPARE whose agtype map holds
 # every id, an EXECUTE and a DEALLOCATE inside one transaction. This module
-# also runs through the transaction-mode pooler (DB_POOLER_SUITES in
-# nodes/scripts/tasks.js), where the three must stay on one server session.
+# also runs through the transaction-mode pooler (poolerSuites in
+# nodes/scripts/db-lanes/graph.js), where the three must stay on one server session.
 AGE_CONNECT_MAX_NODES = 40
 
 

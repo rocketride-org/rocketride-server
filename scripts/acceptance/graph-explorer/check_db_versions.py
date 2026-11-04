@@ -8,7 +8,7 @@
 compares the graph tools' output exactly with the committed captures in
 ``apps/graph-ui/tests/fixtures/v1/live``, including each server's version and its
 own error text. CI starts exactly those servers (images pinned by digest in
-``.github/workflows/_build.yaml``; README.md here starts the same images). On a
+``nodes/test/db-services/graph.sh``; README.md here starts the same images). On a
 container made from a newer image that suite fails with "regenerate the
 fixtures", which would be the wrong fix: this check names the real cause first.
 
@@ -102,7 +102,7 @@ def compare(expected: Dict[str, Dict[str, Optional[str]]], actual: Dict[str, Uni
             seen = ' '.join(filter(None, got)) or 'no version'
             problems.append(
                 f'{engine}: the server reports {seen}, the committed captures and CI use {wanted}: '
-                'recreate the container from the image in README.md (the one .github/workflows/_build.yaml pins); '
+                'recreate the container from the image in README.md (the one nodes/test/db-services/graph.sh pins); '
                 'do not regenerate the fixtures'
             )
     return problems
