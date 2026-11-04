@@ -442,6 +442,7 @@ const mapReading = (extra = {}) => ({
 });
 /** The Compare step's second question. */
 const QUESTION_B = 'How is the station powered in winter?';
+const STAR_B_LEGEND = `Hollow star: "${QUESTION_B}" (compared on the Query tab)`;
 
 /** Rows of a backend that ran every planned step and passed it. */
 const passingRows = (key) =>
@@ -1921,7 +1922,7 @@ test('keywordVerdict, thresholdVerdict, compareVerdict, layoutVerdict: the searc
 		after: mapReading({
 			queryA: 'placed',
 			queryB: 'placed',
-			legend: `Showing 308 of 308 chunks (random sample) Hollow star: "${QUESTION_B}" (compared in Search)`,
+			legend: `Showing 308 of 308 chunks (random sample) ${STAR_B_LEGEND}`,
 		}),
 		n: 308,
 		questionB: QUESTION_B,
@@ -2055,7 +2056,7 @@ test(
 		const placed = mapReading({
 			queryA: 'placed',
 			queryB: 'placed',
-			legend: `Showing 308 of 308 chunks (random sample) Hollow star: "${QUESTION_B}" (compared in Search)`,
+			legend: `Showing 308 of 308 chunks (random sample) ${STAR_B_LEGEND}`,
 		});
 		assert.strictEqual(lane.mapSettledVerdict(placed, stars), true);
 		assert.notStrictEqual(lane.mapSettledVerdict({ ...placed, queryB: 'none' }, stars), true);
@@ -2075,7 +2076,7 @@ test(
 		const placed = mapReading({
 			queryA: 'placed',
 			queryB: 'placed',
-			legend: `Showing 308 of 308 chunks (random sample) Hollow star: "${QUESTION_B}" (compared in Search)`,
+			legend: `Showing 308 of 308 chunks (random sample) ${STAR_B_LEGEND}`,
 		});
 		const sound = {
 			a: r(['a', 'b', 'c', 'd']),
@@ -2287,7 +2288,8 @@ const UI_SOURCES = [
 		null,
 		[
 			hook(UI.search.panel),
-			`aria-label="${UI.search.box}"`,
+			// The first question box is named by the mode: 'Search question', or 'Question A' while comparing.
+			`'${UI.search.box}'`,
 			`aria-label="${UI.search.boxB}"`,
 			`aria-label="${UI.search.threshold}"`,
 		],
@@ -2360,7 +2362,7 @@ const SOURCES = [
 			'el.dataset.drawCount',
 		],
 	],
-	['E5', 'map/overlay.ts', 'hoverEdges', ['extras.hoverEdges', 'ctx.lineWidth = 2']],
+	['E5', 'map/overlay.ts', 'hoverEdges', ['extras.hoverEdges', 'ctx.lineWidth = Math.max(2, linkWidth(dpr))']],
 	[
 		'E5',
 		'components/MapToolbar.tsx',
@@ -2387,13 +2389,13 @@ const SOURCES = [
 		'E5',
 		'views/MapView.tsx',
 		'data-edge-mode',
-		["data-map-state={sample ? 'ready'", 'Hollow star: "${queryB.text}" (compared in Search)'],
+		["data-map-state={sample ? 'ready'", 'Hollow star: "${queryB.text}" (compared on the Query tab)'],
 	],
 	[
 		'E5',
 		'components/MapToolbar.tsx',
 		'aria-label="Edges per point"',
-		['<span role="status" style={MAP_STYLES.small}>', '{props.busy}'],
+		['<div style={S.status} data-map-status="">', 'const words = props.busy ?? notice?.text'],
 	],
 	[
 		'E5',

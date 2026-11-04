@@ -314,7 +314,7 @@ const UI = {
 	search: {
 		panel: '[data-component="SearchPanel"]',
 		box: 'Search question',
-		boxB: 'Second question (B)',
+		boxB: 'Question B',
 		// The mode is a radio group (Semantic, Keyword, Hybrid, Auto).
 		mode: { semantic: /^Semantic$/, keyword: /^Keyword$/ },
 		threshold: 'Threshold',
