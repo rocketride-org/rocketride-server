@@ -315,6 +315,7 @@ export class DevSession {
 	private pkgWatcher: fs.FSWatcher | null = null;
 	private pkgTimer: NodeJS.Timeout | undefined;
 	private pkgPollFile: string | null = null;
+	private pkgPollListener: ((cur: fs.Stats, prev: fs.Stats) => void) | null = null;
 	private restarts: Promise<void> = Promise.resolve();
 	private restartQueued = false;
 	private readiness: { resolve: (origin: string) => void; reject: (err: Error) => void } | null = null;
@@ -362,8 +363,10 @@ export class DevSession {
 		if (this.pkgTimer) clearTimeout(this.pkgTimer);
 		this.pkgWatcher?.close();
 		this.pkgWatcher = null;
-		if (this.pkgPollFile) fs.unwatchFile(this.pkgPollFile);
+		// remove only this session's listener; another session may poll the same file
+		if (this.pkgPollFile && this.pkgPollListener) fs.unwatchFile(this.pkgPollFile, this.pkgPollListener);
 		this.pkgPollFile = null;
+		this.pkgPollListener = null;
 		// a restart in flight may be stopping the old server; let it finish
 		// (it will not spawn again once `stopping` is set)
 		await this.restarts;
@@ -499,9 +502,10 @@ export class DevSession {
 		} catch {
 			// no folder watcher: poll the file's mtime (also covers a missing watch API)
 			this.pkgPollFile = path.join(folder, 'package.json');
-			fs.watchFile(this.pkgPollFile, { interval: 1000 }, (cur, prev) => {
+			this.pkgPollListener = (cur, prev) => {
 				if (cur.mtimeMs !== prev.mtimeMs) schedule();
-			});
+			};
+			fs.watchFile(this.pkgPollFile, { interval: 1000 }, this.pkgPollListener);
 		}
 	}
 
