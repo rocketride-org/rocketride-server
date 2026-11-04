@@ -83,13 +83,18 @@ def save(path: str, data: bytes) -> bytes:
     """Write a file whole or not at all: another process or thread may be reading or writing it."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     handle, staging = tempfile.mkstemp(dir=os.path.dirname(path))
-    with os.fdopen(handle, 'wb') as file:
-        file.write(data)
     try:
-        os.replace(staging, path)
-    except PermissionError:
-        # Windows refuses to replace a file a reader holds open; that reader keeps a whole copy
-        os.remove(staging)
+        with os.fdopen(handle, 'wb') as file:
+            file.write(data)
+        try:
+            os.replace(staging, path)
+        except PermissionError:
+            # Windows refuses to replace a file a reader holds open; that reader keeps a whole copy
+            pass
+    finally:
+        # Gone after a replace; left behind by a failed write, which would fill the cache on every retry
+        with contextlib.suppress(OSError):
+            os.remove(staging)
     return data
 
 

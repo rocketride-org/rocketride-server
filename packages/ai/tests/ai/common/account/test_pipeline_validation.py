@@ -125,7 +125,7 @@ def test_validate_reads_the_plans_of_a_node_that_only_eaas_serves(patch_service_
     """A node EaaS serves is not in the engine's registry; its plans still count."""
     from ai.modules.task import node_store
 
-    monkeypatch.setattr(node_store, '_definitions', {'providerS': {'plans': ['enterprise']}})
+    monkeypatch.setattr(node_store, '_definitions', {'providers': {'plans': ['enterprise']}})
     pipeline = {'source': 'a', 'components': [{'id': 'a', 'provider': 'providerS', 'input': []}]}
 
     validator = pv.AccountPipelineValidation()

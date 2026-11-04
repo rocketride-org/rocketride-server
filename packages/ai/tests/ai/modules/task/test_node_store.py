@@ -7,6 +7,7 @@
 
 import base64
 import json
+import os
 import pathlib
 import re
 
@@ -118,6 +119,42 @@ def test_a_run_gets_on_disk_only_the_nodes_its_pipeline_names_that_the_server_la
 
     assert placed == ['llm_x']
     assert server['unpacked'] == [('llm_x', b'llm_x:x', 'x', server['nodes'])]
+
+
+def test_a_node_already_unpacked_is_placed_without_reading_its_package(server, monkeypatch):
+    os.makedirs(os.path.join(server['nodes'], 'llm_x'))
+    with open(os.path.join(server['nodes'], 'llm_x', node_store.node_packages.DIGEST_FILE), 'w') as file:
+        file.write('x')
+
+    def offline(name, sha256):
+        raise OSError('no cache and no release')
+
+    monkeypatch.setattr(node_store.account, 'node_package', offline)
+    node_store.start()
+
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['llm_x']
+    assert server['unpacked'] == []
+
+
+def test_a_served_node_is_found_whatever_the_case_of_its_name(server):
+    node_store.start()
+
+    assert node_store.served('Provider_X') == {**PACKAGED, 'icon': X_ICON}
+    assert node_store.place({'components': [{'provider': 'Provider_X'}]}) == ['llm_x']
+    assert node_store.place(
+        {'components': [{'provider': 'AutoPipe', 'config': {'llm': {'provider': 'PROVIDER_X'}}}]}
+    ) == ['llm_x']
+
+
+def test_a_served_node_the_index_names_in_capitals_is_found_in_lower_case(server, monkeypatch):
+    index = _index()
+    index['nodes']['llm_x']['services'] = {'services.json': json.dumps({**PACKAGED, 'protocol': 'Provider_X://'})}
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+
+    node_store.start()
+
+    assert node_store.served('provider_x') is not None
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['llm_x']
 
 
 def test_a_pipeline_that_names_no_served_node_unpacks_nothing(server):
