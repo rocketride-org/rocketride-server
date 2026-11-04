@@ -116,7 +116,10 @@ def _load_iinstance():
         return sys.modules['prompt.IInstance']
     finally:
         for name, prior in saved.items():
-            sys.modules.pop(name, None) if prior is None else sys.modules.__setitem__(name, prior)
+            if prior is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = prior
 
 
 @pytest.fixture
@@ -136,12 +139,16 @@ def _emitted(inst):
     `closing` resets the node's own question on its way out, so the emitted
     object is the only place the turn's instructions survive.
     """
-    return inst.emitted[-1] if inst.emitted else None
+    if not inst.emitted:
+        return None
+    return inst.emitted[-1]
 
 
 def _titles(inst):
     q = _emitted(inst)
-    return [i.subtitle for i in q.instructions] if q else []
+    if q is None:
+        return []
+    return [i.subtitle for i in q.instructions]
 
 
 def _grounding_text(inst):

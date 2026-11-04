@@ -1036,14 +1036,22 @@ class TestIInstanceLifecycle:
         inst.asked = []
 
         def invoke(param):
+            # Called here, not lazily in getText, so a failing llm fails the invoke
+            # itself, which is where a real provider error surfaces.
             inst.asked.append(param.question)
-            return types.SimpleNamespace(getText=lambda: llm(param.question))
+            text = llm(param.question)
+            return types.SimpleNamespace(getText=lambda: text)
+
+        def llm_nodes(classType):
+            if llm and classType == 'llm':
+                return ['llm_1']
+            return []
 
         inst.instance = types.SimpleNamespace(
             writeAnswers=inst.forwarded.append,
             writeQuestions=lambda q: None,
             writeDocuments=lambda d: None,
-            getControllerNodeIds=lambda classType: ['llm_1'] if llm and classType == 'llm' else [],
+            getControllerNodeIds=llm_nodes,
             invoke=invoke,
         )
         inst.preventDefault = lambda: inst.prevented.append(True)
@@ -1220,6 +1228,19 @@ class TestIInstanceLifecycle:
         inst.writeAnswers(FakeAnswer('Send the $12.4 million invoice to john.doe@example.com.'))
 
         assert inst.forwarded == []
+
+    def test_a_replacement_is_used_only_when_every_violation_names_the_same_one(self):
+        """Pinned on the method itself, so the outcome never depends on set order."""
+        IInstance, _, _, _, FakeAnswer = self._load_iinstance_class()
+        inst = IInstance()
+
+        assert inst._replacement_for(FakeAnswer('x'), [{'replacement': 'r'}, {'replacement': 'r'}]).getText() == 'r'
+        for violations in (
+            [{'replacement': 'r'}, {'rule': 'pii_leak'}],
+            [{'rule': 'pii_leak'}, {'replacement': 'r'}],
+            [{'replacement': 'r'}, {'replacement': 'other'}],
+        ):
+            assert inst._replacement_for(FakeAnswer('x'), violations) is None, violations
 
     def test_a_json_answer_is_dropped_rather_than_replaced(self):
         """A consumer parsing JSON would fail on a sentence, so the old block stands."""

@@ -90,7 +90,7 @@ class IInstance(IInstanceBase):
         self.question_text = full_text
         # The model may answer from material handed to it in the question, so an empty
         # search is not a miss then, as the prompt node also decides.
-        self.question_has_material = bool(question.context or getattr(question, 'documents', None))
+        self.question_has_material = bool(question.context or question.documents)
 
         if not full_text.strip():
             # Nothing to check, forward as-is
@@ -168,12 +168,13 @@ class IInstance(IInstanceBase):
 
         if result['action'] == 'block':
             replacement = self._replacement_for(answer, result['violations'])
-            verb = 'replaced' if replacement else 'blocked'
-            for violation in result['violations']:
-                warning(f'Guardrails output {verb}: {violation["rule"]} \u2014 {violation["details"]}')
             if replacement:
+                for violation in result['violations']:
+                    warning(f'Guardrails output replaced: {violation["rule"]} \u2014 {violation["details"]}')
                 self._forward_answer(replacement)
                 return
+            for violation in result['violations']:
+                warning(f'Guardrails output blocked: {violation["rule"]} \u2014 {violation["details"]}')
             self.preventDefault()
             return
 
@@ -193,13 +194,19 @@ class IInstance(IInstanceBase):
         figure, not for leaked PII. A JSON answer is still dropped, since a consumer
         parsing it would fail on a sentence.
         """
+        if answer.expectJson:
+            return None
         replies = {violation.get('replacement') for violation in violations}
-        if len(replies) != 1 or None in replies or getattr(answer, 'expectJson', False):
+        # A violation with no stand-in, such as leaked PII, means nothing is delivered.
+        if None in replies:
+            return None
+        # Violations that name different stand-ins cannot both be honoured.
+        if len(replies) != 1:
             return None
         reply = Answer()
         reply.setAnswer(replies.pop())
         # The model still ran, so its usage stays on the turn.
-        reply.tokens = getattr(answer, 'tokens', None)
+        reply.tokens = answer.tokens
         return reply
 
     def _judge_with_llm(self, question_text: str, answer_text: str) -> Optional[bool]:
@@ -209,21 +216,26 @@ class IInstance(IInstanceBase):
         connected, or when the call fails or its reply is not a verdict, so the engine
         falls back to its figure rule rather than to a guess.
         """
+        if not self.instance.getControllerNodeIds('llm'):
+            return None
+
+        fence = f'<<{secrets.token_hex(8)}>>'
+        question = Question(role='You check chat replies for claims made without a source.')
+        question.addInstruction('Grounding check', _GROUNDING_CHECK.format(fence=fence))
+        question.addQuestion(f'Message:\n{fence}\n{question_text}\n{fence}\n\nReply:\n{fence}\n{answer_text}\n{fence}')
+
+        # The model call is the one step that can fail at runtime: provider errors,
+        # timeouts, rate limits. Any of those leaves the figure rule to decide.
         try:
-            if not self.instance.getControllerNodeIds('llm'):
-                return None
-            fence = f'<<{secrets.token_hex(8)}>>'
-            question = Question(role='You check chat replies for claims made without a source.')
-            question.addInstruction('Grounding check', _GROUNDING_CHECK.format(fence=fence))
-            question.addQuestion(
-                f'Message:\n{fence}\n{question_text}\n{fence}\n\nReply:\n{fence}\n{answer_text}\n{fence}'
-            )
             result = self.instance.invoke(IInvokeLLM.Ask(question=question))
-            # A verdict wrapped in markdown or punctuation is still a verdict.
-            verdict = (result.getText() if result else '').strip().strip('*`_."\' ').upper()
         except Exception as e:
             warning(f'Guardrails grounding check could not ask the llm: {e}')
             return None
+        if result is None:
+            return None
+
+        # A verdict wrapped in markdown or punctuation is still a verdict.
+        verdict = result.getText().strip().strip('*`_."\' ').upper()
         if verdict.startswith('SOURCE'):
             return True
         if verdict.startswith('NONE'):

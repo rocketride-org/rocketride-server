@@ -167,9 +167,10 @@ class IInstance(IInstanceBase):
             # merging branches is left exactly as it was. A miss forces an abstention
             # only when no other lane supplied context that could answer the question.
             if self.retrieval_ran:
-                grounded = self.question.documents or self.question.context
-                body = _GROUNDING_INSTRUCTION if grounded else _ABSTAIN_INSTRUCTION
-                self.question.addInstruction('Grounding', body)
+                if self.question.documents or self.question.context:
+                    self.question.addInstruction('Grounding', _GROUNDING_INSTRUCTION)
+                else:
+                    self.question.addInstruction('Grounding', _ABSTAIN_INSTRUCTION)
 
             debug(f'Enhanced question: {self.question.getPrompt()}')
 
