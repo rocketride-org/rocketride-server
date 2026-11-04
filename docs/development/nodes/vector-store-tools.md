@@ -34,8 +34,9 @@ object ID the store does not hold (`code: "NOT_FOUND"`; a document that is in
 the trash is `IN_TRASH`, the reserved ID `RESERVED_ID`). Pagination values go through
 `ai.common.utils.optional_int`: integers or integer strings, bounds checked,
 booleans and floats rejected, caps applied silently (100 chunks for `get`, 1000
-paths for `objdir`; `list_documents` clamps to 500 documents per page and says
-so in `warnings`). The explorer's tools (`dialect`, `chunks`, `vectors`,
+paths for `objdir`, a page counting distinct paths; `list_documents` defaults to
+100 documents, clamps to 1000 and says so in `warnings`, and refuses a limit
+below 1). The explorer's tools (`dialect`, `chunks`, `vectors`,
 `sample`, ...) sit beside these for apps and are specified in
 [vector-tool-contract.md](vector-tool-contract.md), which is the authority for
 every answer shape; this page covers what a driver author has to implement.
