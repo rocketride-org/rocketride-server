@@ -398,7 +398,9 @@ async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bo
     rail rows (the plain seed handles a fresh app), no seed rows (a user
     deployed the id first, and it is left alone), or when the public audience
     serves a direct deploy rather than a seed: a release must not replace what
-    someone deployed on purpose. A manual ``--reseed`` still does.
+    someone deployed on purpose. The SaaS fleet pass (``saas:seed --reseed``)
+    honors this guard too; the deliberate per-app replace is the
+    ``admin_reseed`` verb.
     """
     app_id = str(entry['id'])
     local = bundle_digest(app_id)
