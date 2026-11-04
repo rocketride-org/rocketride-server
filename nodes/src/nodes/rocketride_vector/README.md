@@ -7,7 +7,7 @@ over the SQL and graph nodes for retrieval-augmented document search.
 ## What it does
 
 The node writes documents from the documents lane into a pgvector-backed table,
-replacing existing chunks for the same object IDs. Questions can produce
+replacing an object's existing chunks when a batch starts it over with chunk 0. Questions can produce
 matching documents, answers, or enriched questions through the three configured
 question outputs. Use it when retrieval should flow through a pipeline. The
 same store can be offered to an agent or app as tools once Expose as tools is
@@ -51,7 +51,7 @@ the repository is a chat agent wired to this node's tools.
 | `list_documents` | Lists the documents one by one, ordered by object ID, each with `object_id`, `parent`, and `chunk_count`; accepts optional `parent` (exact match), `deleted` (true lists the trash), `offset`, and `limit`. The reply carries `total` (documents matching the filter), `offset`, and `has_more`. |
 | `get` | Returns up to `limit` chunks of one document by `object_id`, sorted by chunk ID; use `offset` to retrieve subsequent pages. Each call reads at most 10,000 chunks. The reply carries `total` (the number of chunks fetched), `has_more` (whether another page exists within that fetched set), and `truncated`. When `truncated=true`, the read ceiling was reached: `total` may be incomplete, and even `has_more=false` does not guarantee the whole document was retrieved. The tool pages the document itself, ordering chunks by chunk ID and then content, so `offset` behaves the same on every store. An object ID the table does not hold returns a failure object, and so does a document in the trash: the message says that `restore` makes it readable again while writes through tools are allowed, and that this node does not offer `restore` while they are off. |
 | `stats` | Returns the row (chunk) count of the whole table, including the store's one internal schema row and soft-deleted documents, the number of active documents (`document_count`), the embedding model name, and the vector size. |
-| `upsert` | Adds or replaces a non-empty `documents` array (content, object ID, optional metadata, optional embedding and model). The chunks sent for one object ID in a call are numbered 0, 1, 2 ... in the order given unless each carries its own `chunkId`, which may not repeat within the call; a later call for the same object ID replaces all of its chunks. Offered only while writes are allowed. |
+| `upsert` | Adds or replaces a non-empty `documents` array (content, object ID, optional metadata, optional embedding and model). The chunks sent for one object ID in a call are numbered 0, 1, 2 ... in the order given unless each carries its own `chunkId`, which may not repeat within the call; a later call that carries the object's chunk 0 (as one without explicit chunk IDs does) replaces all of its chunks, and one that does not adds to them, keeping both copies of any chunk number it repeats. Offered only while writes are allowed. |
 | `delete` | Deletes the chunks of a non-empty `object_ids` array for good. The reply echoes the distinct IDs and `deleted_count`, their number, not the number of documents found. Offered only while writes are allowed. |
 | `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash: their chunks stay stored but leave `search`, `objdir`, `list_documents`, and `get` until restored. The reply echoes the distinct IDs and `matched_chunks`, the number of chunk rows the table held for them (0 when none exists). Offered only while writes are allowed. |
 | `restore` | Takes the documents of a non-empty `object_ids` array out of the trash, with the same reply as `soft_delete`. A document removed with `delete` cannot be restored. Offered only while writes are allowed. |
@@ -211,9 +211,11 @@ qualifying result also triggers the exact retry. An unbounded search
 still apply, so a response can contain fewer matches than requested.
 
 Deleted objects are excluded by default, while document rendering reassembles
-stored chunks by chunkId. The store removes all existing chunks for incoming
-object IDs before inserting the replacement chunks, preventing duplicate data
-for a re-ingested object. The deleted mark is the same one the `soft_delete`
+stored chunks by chunkId. When a batch holds an object's chunk 0, the store removes
+that object's existing chunks before inserting the batch, preventing duplicate
+data for a re-ingested object; a later batch of the same object without chunk 0 adds
+to it, and keeps both copies of a chunk number it repeats (rows get generated IDs);
+to change a chunk, write the object again from chunk 0. The deleted mark is the same one the `soft_delete`
 tool sets and `restore` clears: a document in the trash keeps its rows and its
 chunk IDs, and the `delete` tool removes rows for good.
 
