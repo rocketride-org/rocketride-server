@@ -33,10 +33,11 @@ from the base class.
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from redis.exceptions import RedisError
+from redis.exceptions import RedisError, ResponseError
 
 from rocketlib import OPEN_MODE, warning
 
@@ -249,21 +250,44 @@ class IGlobal(GraphGlobalBase):
         columns = [column.display_name for column in facts.return_columns]
         return _guarded_statement(statement, max_rows, columns)
 
-    def _unparsed_execute_statement(self, statement: str, params: Optional[Dict[str, Any]], max_rows: int) -> str:
+    def _unparsed_execute_statement(self, statement: str, params: Optional[Dict[str, Any]], _max_rows: int) -> str:
         """Statement to send when the openCypher grammar does not recognize it.
 
-        No Project operator means no rows, so index creation, ``FOREACH``, and
-        other non-returning commands go out unchanged. A Project operator's
-        children are the result columns, and that statement gets the same cap.
+        ``EXPLAIN`` does not name result columns, so a plan that returns rows
+        cannot be capped and is refused before ``query()``. A plan whose root
+        does not return rows (index creation, ``FOREACH``, ``LOAD CSV``) goes
+        out unchanged.
         """
         try:
-            plan = self.select_graph().explain(statement, params=params or None)
-        except RedisError:
-            return statement
-        columns = _structured_columns(plan)
-        if not columns:
-            return statement
-        return _guarded_statement(statement, max_rows, columns)
+            plan = self._explain_for_execute(statement, params)
+        except ResponseError:
+            # A syntax error is the server's own reply. Running the statement
+            # would only hide that text, and it must not run uncapped.
+            raise
+        except RedisError as exc:
+            raise ValueError('EXECUTE query was not run because FalkorDB could not classify the statement') from exc
+        root = _explain_root(plan)
+        if root is None:
+            raise ValueError('EXECUTE query was not run because FalkorDB could not classify the statement')
+        if root not in _NON_RETURNING_ROOTS:
+            raise ValueError('EXECUTE query was not run: the row cap cannot be applied to this statement')
+        return statement
+
+    def _explain_for_execute(self, statement: str, params: Optional[Dict[str, Any]]):
+        """EXPLAIN ``statement``, creating the graph key first when it is missing.
+
+        FalkorDB rejects ``GRAPH.EXPLAIN`` with ``Invalid graph operation on
+        empty key`` until the graph exists. The first write creates that key,
+        and so does a read, without storing the caller's statement.
+        """
+        graph = self.select_graph()
+        try:
+            return graph.explain(statement, params=params or None)
+        except ResponseError as exc:
+            if _MISSING_GRAPH not in str(exc):
+                raise
+        graph.query('RETURN 1', timeout=self.query_timeout_ms)
+        return graph.explain(statement, params=params or None)
 
     def _validate_query(self, query: str) -> Tuple[bool, str]:
         """Check syntax with EXPLAIN without running the query."""
@@ -522,6 +546,8 @@ def _quote_name(name: str) -> str:
 # matches this substring and leaves every other server error alone.
 # https://github.com/FalkorDB/FalkorDB/blob/master/graph/src/runtime/functions/temporal.rs
 _CAP_ERROR = 'Invalid time string: _rr_execute_cap'
+# GRAPH.EXPLAIN before the graph key exists. A read creates the key.
+_MISSING_GRAPH = 'Invalid graph operation on empty key'
 # Present only in a statement this module wrapped, so a user's own CALL is not
 # mistaken for a server that lacks subqueries.
 _GUARD_CALL = 'WHERE localtime(_rr_d) IS NOT NULL'
@@ -534,19 +560,15 @@ def _wrap_capped_query(statement: str, max_rows: int, columns: List[str]) -> str
     under-count. Both CASE branches are plain strings, so eager evaluation cannot
     fail them. ``localtime`` then rejects only the over-cap token, and the client
     reports that token. The call sits in WHERE so a planner cannot drop it.
+
+    ``statement`` is copied verbatim. Indenting it, or rebuilding it with
+    ``splitlines()``, rewrites a newline that sits inside a string literal.
     """
     quoted = [_quote_name(name) for name in columns]
-    indented = []
-    for line in statement.splitlines():
-        if line:
-            indented.append(f'  {line}')
-        else:
-            indented.append('')
-    body = '\n'.join(indented)
     projected = ', '.join(f'_rr_row[{index}] AS {name}' for index, name in enumerate(quoted))
     return (
         'CALL {\n'
-        f'{body}\n'
+        f'{statement}\n'
         '}\n'
         f'WITH * LIMIT {max_rows + 1}\n'
         f'WITH collect([{", ".join(quoted)}]) AS _rr_rows\n'
@@ -580,48 +602,35 @@ def _is_subquery_unsupported(exc: BaseException) -> bool:
     """True when the server rejected the wrapper's first line, not the user's text.
 
     FalkorDB reports ``Invalid input ... (line: 1, column: ...)``. The wrapper
-    owns line 1 (``CALL {``); the user's statement is indented beneath it.
+    owns line 1 (``CALL {``); the user's statement starts on the next line.
+    ``line: 12`` is a syntax error deeper in the statement, not an old server.
     """
     text = str(exc)
     if 'Invalid input' not in text:
         return False
-    return 'line: 1' in text or 'line 1,' in text
+    return re.search(r'line:? 1\b', text) is not None
 
 
-def _structured_columns(plan: Any) -> Optional[List[str]]:
-    """Result column names from the client's EXPLAIN tree.
+# Roots that do not produce a client result set, captured from FalkorDB
+# graph module 60002 (Redis 8.10.2). A pure write is ``Commit``. Index
+# commands are ``Create Index`` and ``Drop Index``. A ``Project`` nested
+# under ``Commit`` (``WITH`` before ``FOREACH``) is not the root.
+#
+# A returning plan on that server is rooted at ``Project``, ``Sort``,
+# ``Limit``, ``Distinct``, or ``ProcedureCall``. The C engine wraps a read
+# in ``Results`` instead (falkordb-py ``plan_helpers.ENGINE_ROOT_OPS``).
+# None of those plans name the columns, so any other root is refused
+# rather than sent without a cap.
+_NON_RETURNING_ROOTS = frozenset({'Commit', 'Create Index', 'Drop Index'})
 
-    ``[]`` means the plan has no Project operator, so the statement returns no
-    named columns and can be sent unchanged. ``None`` means the value is not a
-    parsed tree. Column names are the Project node's children; the producer
-    sits under the last column, so it is not itself a column.
-    """
+
+def _explain_root(plan: Any) -> Optional[str]:
+    """Name of the EXPLAIN tree's root operator, or None when it cannot be read."""
     root = getattr(plan, 'structured_plan', None)
-    if root is None:
+    name = getattr(root, 'name', None)
+    if not name:
         return None
-    project = _find_named(root, 'Project')
-    if project is None:
-        return []
-    columns = []
-    for child in getattr(project, 'children', []) or []:
-        # An operator carries arguments (`Node By Label Scan | (n)`). A column does not.
-        if getattr(child, 'args', None):
-            continue
-        name = getattr(child, 'name', None)
-        if name:
-            columns.append(str(name))
-    return columns
-
-
-def _find_named(op: Any, name: str) -> Any:
-    """First operation named ``name`` in an EXPLAIN tree, or None."""
-    if getattr(op, 'name', None) == name:
-        return op
-    for child in getattr(op, 'children', []) or []:
-        found = _find_named(child, name)
-        if found is not None:
-            return found
-    return None
+    return str(name)
 
 
 def _affected_rows(result) -> int:

@@ -56,6 +56,10 @@ class _StubRedisError(Exception):
     pass
 
 
+class _StubResponseError(_StubRedisError):
+    """Server reply, matching redis.exceptions.ResponseError."""
+
+
 class _StubBase:
     """Stand-in for IInstanceBase / IGlobalBase — the engine supplies the real one."""
 
@@ -127,6 +131,7 @@ def _install_stubs() -> None:
 
     redis_exceptions = types.ModuleType('redis.exceptions')
     redis_exceptions.RedisError = _StubRedisError
+    redis_exceptions.ResponseError = _StubResponseError
     redis = types.ModuleType('redis')
     redis.exceptions = redis_exceptions
 
@@ -796,59 +801,133 @@ def test_execute_return_star_is_refused():
     assert graph.calls == []
 
 
-class _PlanOp:
-    """The fields of falkordb.execution_plan.Operation that execute reads."""
+def _execution_plan(lines):
+    """Parse GRAPH.EXPLAIN lines with the real falkordb-py ExecutionPlan."""
+    from falkordb.execution_plan import ExecutionPlan
 
-    def __init__(self, name, children=None, args=None):
-        self.name = name
-        self.children = children or []
-        self.args = args
+    return ExecutionPlan(lines)
 
 
-class _Plan:
-    def __init__(self, root):
-        self.structured_plan = root
+# Captured from FalkorDB graph module 60002 (Redis 8.10.2, image
+# falkordb/falkordb:latest). EXPLAIN lists operators, not column names.
+_INDEX_PLAN = ['Create Index | :Person(["name"])']
+_FOREACH_PLAN = [
+    'Commit',
+    '    ForEach | x',
+    '        All Node Scan | (n)',
+    '        Update',
+    '            Argument',
+]
+_LOAD_CSV_PLAN = [
+    'Commit',
+    '    Create | (n:Item), ',
+    '        Load CSV',
+]
+# A Project under Commit is the WITH, not a result. The root is Commit.
+_WITH_FOREACH_PLAN = [
+    'Commit',
+    '    ForEach | x',
+    '        Project',
+    '            All Node Scan | (n)',
+    '        Update',
+    '            Argument',
+]
+_LABEL_SCAN_PLAN = [
+    'Project',
+    '    Node By Label Scan | (n:Person)',
+]
+# C-engine shape from falkordb-py plan_helpers: a read is wrapped in Results.
+_RESULTS_PLAN = [
+    'Results',
+    '    Project',
+    '        Node By Label Scan | (n:Person)',
+]
+_CALL_SUBQUERY_PLAN = [
+    'Project',
+    '    Apply',
+    '        Unwind',
+    '        Project',
+    '            Commit',
+    '                Create | (n:Item), ',
+    '                    Project',
+    '                        Argument',
+]
 
 
 def test_execute_grammar_miss_without_rows_is_sent_unchanged():
     """CREATE INDEX, FOREACH, and LOAD CSV used to run, and still do."""
-    # No Project operator: the command returns no rows.
-    plan = _Plan(_PlanOp('ProcedureCall', args='db.idx.fulltext.createNodeIndex'))
-    statements = [
-        'CREATE INDEX FOR (p:Person) ON (p.name)',
-        'CREATE INDEX ON :Person(name)',
-        'MATCH (n) FOREACH (x IN [1,2] | SET n.v = x)',
-        'LOAD CSV FROM "file:///tmp/a.csv" AS row CREATE (n:Item {id: row.id})',
+    cases = [
+        ('CREATE INDEX FOR (p:Person) ON (p.name)', _INDEX_PLAN),
+        ('CREATE INDEX ON :Person(name)', _INDEX_PLAN),
+        ('MATCH (n) FOREACH (x IN [1,2] | SET n.v = x)', _FOREACH_PLAN),
+        ('LOAD CSV FROM "file:///tmp/a.csv" AS row CREATE (n:Item {id: row.id})', _LOAD_CSV_PLAN),
+        ('MATCH (n) WITH n FOREACH (x IN [1] | SET n.v = x)', _WITH_FOREACH_PLAN),
     ]
-    for statement in statements:
-        graph = _FakeGraph(explain_plan=plan)
+    for statement, lines in cases:
+        graph = _FakeGraph(explain_plan=_execution_plan(lines))
         glb = _FakeGlobal(graph)
         glb._run_query_raw(statement)
         assert graph.calls[0][0] == 'explain'
         assert graph.calls[1] == ('query', statement, None, glb.query_timeout_ms)
 
 
-def test_execute_call_subquery_is_capped_from_the_plan():
-    """A CALL {} the grammar rejects still runs, with the cap, when EXPLAIN names columns."""
-    # Same shape ExecutionPlan builds: the column is a Project child, and the
-    # producer hangs under that column.
-    plan = _Plan(_PlanOp('Results', [_PlanOp('Project', [_PlanOp('i', [_PlanOp('Apply')])])]))
+def test_execute_returning_plan_is_refused_without_column_names():
+    """EXPLAIN never names columns, so a returning plan is not sent uncapped."""
     statement = 'MATCH (n) CALL { WITH n RETURN n.id AS i } RETURN i'
-    graph = _FakeGraph(_FakeResult(result_set=[[1]], header=[[1, 'i']]), explain_plan=plan)
+    for lines in (_LABEL_SCAN_PLAN, _RESULTS_PLAN, _CALL_SUBQUERY_PLAN):
+        graph = _FakeGraph(explain_plan=_execution_plan(lines))
+        glb = _FakeGlobal(graph)
+        with pytest.raises(ValueError, match='row cap cannot be applied'):
+            glb._run_query_raw(statement, params={'name': 'Ada'})
+        assert graph.calls == [('explain', statement, {'name': 'Ada'}, None)]
+
+
+def test_execute_unreadable_plan_is_refused():
+    graph = _FakeGraph(explain_plan='plan')
     glb = _FakeGlobal(graph)
-    glb._run_query_raw(statement, params={'name': 'Ada'})
-    assert graph.calls[0] == ('explain', statement, {'name': 'Ada'}, None)
-    assert graph.calls[1][0] == 'query'
-    assert 'collect([`i`])' in graph.calls[1][1]
-    assert graph.calls[1][2] == {'name': 'Ada'}
+    with pytest.raises(ValueError, match='could not classify'):
+        glb._run_query_raw('CREATE INDEX FOR (p:Person) ON (p.name)')
+    assert [call[0] for call in graph.calls] == ['explain']
 
 
-def test_execute_explain_failure_does_not_block_a_falkordb_command():
-    graph = _FakeGraph(explain_error=mod.RedisError('EXPLAIN failed'))
+def test_execute_explain_syntax_error_is_the_servers_error():
+    graph = _FakeGraph(explain_error=_glb_mod.ResponseError('Invalid input at pos: 13 at char !'))
+    glb = _FakeGlobal(graph)
+    with pytest.raises(_glb_mod.ResponseError, match='Invalid input'):
+        glb._run_query_raw('CREATE INDEX !!!')
+    assert [call[0] for call in graph.calls] == ['explain']
+
+
+def test_execute_missing_graph_is_created_before_explain():
+    """EXPLAIN needs the graph key. A read creates it, then the plan is read."""
+    graph = _FakeGraph(explain_plan=_execution_plan(_INDEX_PLAN))
+    graph._explain_error = _glb_mod.ResponseError('Invalid graph operation on empty key')
+    graph._explain_once = True
+    real_explain = graph.explain
+
+    def explain_once(q, params=None):
+        if graph._explain_once:
+            graph._explain_once = False
+            graph._explain_error = None
+            graph.calls.append(('explain', q, params, None))
+            raise _glb_mod.ResponseError('Invalid graph operation on empty key')
+        return real_explain(q, params)
+
+    graph.explain = explain_once
     glb = _FakeGlobal(graph)
     statement = 'CREATE INDEX FOR (p:Person) ON (p.name)'
     glb._run_query_raw(statement)
-    assert graph.calls[1] == ('query', statement, None, glb.query_timeout_ms)
+    assert ('query', 'RETURN 1', None, glb.query_timeout_ms) in graph.calls
+    assert graph.calls[-1] == ('query', statement, None, glb.query_timeout_ms)
+
+
+def test_execute_explain_failure_refuses_an_unclassified_statement():
+    graph = _FakeGraph(explain_error=mod.RedisError('Connection refused'))
+    glb = _FakeGlobal(graph)
+    statement = 'CREATE INDEX FOR (p:Person) ON (p.name)'
+    with pytest.raises(ValueError, match='could not classify'):
+        glb._run_query_raw(statement)
+    assert [call[0] for call in graph.calls] == ['explain']
 
 
 def test_execute_old_server_maps_a_rejected_wrapper():
@@ -863,6 +942,31 @@ def test_execute_user_syntax_error_inside_the_wrapper_stays_a_driver_error():
     glb = _FakeGlobal(graph)
     with pytest.raises(mod.RedisError, match='line: 3'):
         glb._run_query_raw('RETURN 1 AS n')
+
+
+def test_execute_syntax_error_on_line_12_is_not_an_old_server():
+    graph = _FakeGraph(raise_error=mod.RedisError("Invalid input 'x': expected y (line: 12, column: 1)"))
+    glb = _FakeGlobal(graph)
+    with pytest.raises(mod.RedisError, match='line: 12'):
+        glb._run_query_raw('RETURN 1 AS n')
+
+
+def test_execute_wrapper_keeps_a_newline_inside_a_string_literal():
+    graph = _FakeGraph(_FakeResult(result_set=[['a\nb']], header=[[1, 't']]))
+    glb = _FakeGlobal(graph)
+    glb._run_query_raw("CREATE (n:Item {t: 'a\nb'}) RETURN n.t AS t")
+    sent = graph.calls[0][1]
+    assert "t: 'a\nb'" in sent
+    assert "t: 'a\n  b'" not in sent
+
+
+def test_execute_wrapper_keeps_crlf_inside_a_string_literal():
+    graph = _FakeGraph(_FakeResult(result_set=[['a\r\nb']], header=[[1, 't']]))
+    glb = _FakeGlobal(graph)
+    glb._run_query_raw("CREATE (n:Item {t: 'a\r\nb'}) RETURN n.t AS t")
+    sent = graph.calls[0][1]
+    assert "t: 'a\r\nb'" in sent
+    assert "t: 'a\nb'" not in sent
 
 
 # ---------------------------------------------------------------------------
@@ -1183,8 +1287,10 @@ def falkordb_execute(monkeypatch):
         pytest.skip('set FALKORDB_TEST_URL or FALKORDB_TEST_HOST to run execute against FalkorDB')
 
     from redis.exceptions import RedisError as RealRedisError
+    from redis.exceptions import ResponseError as RealResponseError
 
     monkeypatch.setattr(_glb_mod, 'RedisError', RealRedisError)
+    monkeypatch.setattr(_glb_mod, 'ResponseError', RealResponseError)
     try:
         import falkordb
         from falkordb import FalkorDB
@@ -1254,12 +1360,20 @@ def test_live_return_star_writes_nothing(falkordb_execute):
     assert _item_count(db) == 0
 
 
-def test_live_call_subquery_over_cap_rolls_back(falkordb_execute):
+def test_live_call_subquery_is_refused_and_writes_nothing(falkordb_execute):
+    """CALL {} fails the grammar, and EXPLAIN does not name the columns."""
     glb, db = falkordb_execute
-    query = 'UNWIND range(1, 5) AS i CALL { WITH i CREATE (n:Item {id: i}) RETURN i AS i } RETURN i'
-    with pytest.raises(ValueError, match='max_execute_rows=3'):
+    query = 'UNWIND range(1, 5) AS i CALL { WITH i CREATE (n:Item {id: i}) RETURN i AS kept } RETURN kept'
+    with pytest.raises(ValueError, match='row cap cannot be applied'):
         glb._run_query_raw(query)
     assert _item_count(db) == 0
+
+
+def test_live_newline_in_a_literal_is_stored_unchanged(falkordb_execute):
+    glb, db = falkordb_execute
+    out = glb._run_query_raw("CREATE (n:Item {t: 'a\nb'}) RETURN n.t AS t")
+    assert out['rows'] == [{'t': 'a\nb'}]
+    assert _item_count(db) == 1
 
 
 def test_live_index_and_foreach_reach_the_server(falkordb_execute):
