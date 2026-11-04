@@ -18,8 +18,10 @@
  * (build it first) with a stand-in for the cloud database broker, starts each
  * shipped Graph Explorer template (`apps/graph-ui/templates`) against the test
  * servers, and calls its graph tools through the Python SDK.
- * (`test_rocketride_graph_full.py` is registered by `rocketride-db.js`; it is
- * named under `poolerSuites` below.)
+ * `test_rocketride_graph_full.py` exists on develop, where `nodes:test` leaves it out
+ * (its mocked pass globs `*_full.py` away) and only `nodes:test-full` collects it.
+ * Listing it below is this domain's deliberate CI change: it joins the unmocked live
+ * pass, required on the Linux CI leg, and runs a second time through the AGE pooler.
  *
  * AGE pooler pass: with `RR_TEST_AGE_POOLER_DSN` set, the two AGE suites run a
  * second time through that transaction-mode pooler (`RR_TEST_AGE_DSN` is pointed
@@ -54,6 +56,8 @@
 module.exports = {
 	name: 'graph',
 	suites: [
+		// develop's AGE suite for the RocketRide graph node (see the header: a CI behavior change).
+		'test_rocketride_graph_full.py',
 		'test_graph_age_full.py',
 		'test_graph_drivers_full.py',
 		'test_graph_neo4j_full.py',
