@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased] — since 2026-10-16
 
 ### Added
+
+- **nodes**: add experimental `tool_redis` with seven namespaced Redis/Valkey utilities, read-only defaults, bounded results and hosted TLS/public-host guards.
 - **server**: a seeded app version records the sha256 of the bundle it was copied from (`metadata.build.bundleSha256`), and `bundle_changed()` tells an orchestrator whether the pod's build differs from the app's newest seed, so a deploy can re-seed only the apps whose build changed. An app whose public version is a direct deploy, not a seed, counts as unchanged, so a release never replaces it
 - **typescript**: add `SignupProperties`, `PkceCredential` and `normalizeSignupProperties` for optional validated signup attribution resolved immediately before PKCE authentication; credentials without context retain their existing bytes (#2890).
 - **shell**: freeze additive API v8 with consent-gated `signupProperties` in `startOAuth` and `shell:loginRequest`, kept only in the PKCE credential and out of native telemetry facts; recheck privacy signals, consent and expiry after redirects and before authentication (#2890).

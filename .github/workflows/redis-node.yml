@@ -1,0 +1,85 @@
+name: Redis node — Valkey engine dispatch
+# Proposed new server fixture: reviewer approval required before merge.
+on:
+  pull_request:
+    paths:
+      - 'nodes/src/nodes/tool_redis/**'
+      - 'nodes/test/tool_redis/**'
+      - 'nodes/test/mocks/redis_fake/**'
+      - '.github/workflows/redis-node.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  redis-node:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      REDIS_TEST_URL: redis://127.0.0.1:6381/0
+      REDIS_AUTH_TEST_URL: redis://:redis-node-test-only@localhost:6382
+      REDIS_TLS_TEST_URL: rediss://:redis-node-test-only@localhost:6383
+      ROCKETRIDE_REDIS_HOST: 127.0.0.1
+      ROCKETRIDE_REDIS_PORT: '6381'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
+        with:
+          version: 10.33.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - run: pnpm install --frozen-lockfile
+      - name: Build the engine and stage nodes
+        run: ./builder server:build
+      - name: Start disposable Valkey fixtures
+        run: |
+          sh nodes/test/tool_redis/prepare_live.sh
+          echo "REDIS_TLS_CA_FILE=$GITHUB_WORKSPACE/nodes/test/tool_redis/.certs/server.crt" >> "$GITHUB_ENV"
+      - name: Install test dependencies in engine Python
+        working-directory: dist/server
+        run: ./engine -c "from depends import depends; depends('../../nodes/test/requirements.txt')"
+      - name: Start engine
+        run: |
+          mkdir -p redis-test-evidence
+          cd dist/server
+          ./engine ./ai/eaas.py --host=127.0.0.1 > ../../redis-test-evidence/engine.log 2>&1 &
+      - name: Wait for engine
+        run: |
+          python3 - <<'PY'
+          import time, urllib.request
+          for attempt in range(60):
+              try:
+                  urllib.request.urlopen('http://127.0.0.1:5565/client/typescript', timeout=2).close()
+                  break
+              except OSError:
+                  time.sleep(1)
+          else:
+              raise SystemExit('Engine did not become available')
+          PY
+      - name: Test all seven tools, lifecycle, auth, TLS and shared fake regressions
+        working-directory: nodes
+        run: |
+          set -o pipefail
+          ../dist/server/engine -m pytest test/tool_redis test/memory_persistent test/test_contracts.py -q --rootdir . --junitxml=../redis-test-evidence/results.xml 2>&1 | tee ../redis-test-evidence/tests.log
+      - name: Standard services.json cases
+        working-directory: nodes
+        run: ../dist/server/engine -m pytest test/test_dynamic.py -k tool_redis -q --rootdir .
+      - name: Validate README and credential catalog
+        run: |
+          python3 scripts/validate-node-readme.py nodes/src/nodes/tool_redis
+          node nodes/scripts/gen-credentials.mjs --check
+          node scripts/verify-action-pins.mjs
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: redis-node-valkey-evidence
+          path: redis-test-evidence/
+      - name: Stop fixtures
+        if: always()
+        run: docker compose -p rocketride-redis-v1 -f nodes/test/tool_redis/compose.yaml down -v

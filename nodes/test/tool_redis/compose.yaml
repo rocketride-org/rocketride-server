@@ -1,0 +1,32 @@
+# Disposable test infrastructure only; adding Valkey to CI needs reviewer approval.
+x-valkey: &valkey
+  image: valkey/valkey:8.1.11@sha256:8f836008e0986c36adf50da714c7060cf689dbb335f61fe077939d90fa650809
+services:
+  plain:
+    <<: *valkey
+    ports: ["127.0.0.1:6381:6379"]
+    command: ["valkey-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  auth:
+    <<: *valkey
+    ports: ["127.0.0.1:6382:6379"]
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--requirepass", "redis-node-test-only"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "--no-auth-warning", "-a", "redis-node-test-only", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+  tls:
+    <<: *valkey
+    ports: ["127.0.0.1:6383:6379"]
+    volumes: ["./.certs:/tls:ro"]
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--port", "0", "--tls-port", "6379", "--tls-cert-file", "/tls/server.crt", "--tls-key-file", "/tls/server.key", "--tls-ca-cert-file", "/tls/server.crt", "--tls-auth-clients", "no", "--requirepass", "redis-node-test-only"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "--tls", "--cacert", "/tls/server.crt", "--no-auth-warning", "-h", "localhost", "-a", "redis-node-test-only", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
