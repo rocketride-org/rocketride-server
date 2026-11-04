@@ -367,4 +367,3 @@ describe('readiness — a call made in the render -> effect window (CE-9)', () =
 		caller.dispose();
 	});
 });
-
