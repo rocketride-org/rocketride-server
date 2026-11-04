@@ -642,7 +642,7 @@ def test_format_db_error_replaces_unmatched_mysql_1064_with_neutral_message(base
 
     result = base._format_db_error(exc)
 
-    assert result == 'Error 1064: You have an error in your SQL syntax (Error 1064).'
+    assert result == 'You have an error in your SQL syntax (Error 1064).'
     assert 'QA_CANARY_M2' not in result
 
 
