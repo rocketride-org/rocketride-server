@@ -34,6 +34,7 @@ depends(requirements)
 
 from typing import List, Callable, Dict, Any, Iterable, Iterator, Optional, Sequence, Tuple
 import re
+import time
 import functools
 import json
 import uuid
@@ -324,6 +325,14 @@ def _vector_of(obj: Any) -> List[float]:
     if isinstance(vector, dict):
         vector = vector.get('default', next(iter(vector.values()), None))
     return [float(x) for x in vector or []]
+
+
+# How long a trash update pauses after a page that left the number of pending
+# chunks where it was, so a lagging replica can catch up.
+_REPEAT_PAUSE_SECONDS = 1.0
+
+# How many such pages in a row a trash update tolerates before it fails.
+_MAX_STALLS = 2
 
 
 class Store(DocumentStoreBase):
@@ -864,12 +873,12 @@ class Store(DocumentStoreBase):
 
     def _setDeleted(self, objectIds: List[str], deleted: bool) -> None:
         """
-        Set ``isDeleted`` on every chunk of ``objectIds``.
+        Set ``isDeleted`` on every chunk of ``objectIds``, draining the chunks still in the other state.
 
-        Reads the chunks still in the other state a page at a time (a query without a limit
-        returns only the server's default of 10 objects); each update takes a chunk out of
-        the next read, and a page of chunks already updated ends the loop. Same name,
-        arguments and return as #2704's helper, so either copy serves both callers.
+        A query without a limit returns only the server's default of 10 objects, so the chunks are read a
+        page at a time (``UPDATE_PAGE``); each update takes a chunk out of the next read, which keeps every
+        query bounded without offsets into a shrinking result set or the server's result window. Same
+        name, arguments and return as #2704's helper, so either copy serves both callers.
         """
         # By definition, if the collection does not exists, there
         # is nothing to mark
@@ -877,15 +886,29 @@ class Store(DocumentStoreBase):
             return
 
         pending = _all(_any_equal('objectId', list(objectIds)), Filter.by_property('isDeleted').equal(not deleted))
-        done = set()
+        # Progress is the number of chunks still pending, recounted after each
+        # page: O(1) state however many chunks the call touches. A page that
+        # leaves the count where it was is a stall (a lagging replica, or an
+        # update that does not persist); pause and go on for up to _MAX_STALLS
+        # stalls in a row, and fail on the next one instead of looping.
+        remaining = self.collectionObj.aggregate.over_all(filters=pending, total_count=True).total_count or 0
+        stalls = 0
         while True:
-            points = self.collectionObj.query.fetch_objects(filters=pending, limit=UPDATE_PAGE).objects
-            fresh = [point for point in points if str(point.uuid) not in done]
-            for point in fresh:
-                done.add(str(point.uuid))
-                self.collectionObj.data.update(uuid=point.uuid, properties={'isDeleted': deleted})
-            if not fresh or len(points) < UPDATE_PAGE:
+            points = self.collectionObj.query.fetch_objects(filters=pending, limit=UPDATE_PAGE)
+            if not points.objects:
                 return
+            for point in points.objects:
+                self.collectionObj.data.update(uuid=point.uuid, properties={'isDeleted': deleted})
+            left = self.collectionObj.aggregate.over_all(filters=pending, total_count=True).total_count or 0
+            if left < remaining:
+                remaining, stalls = left, 0
+                continue
+            stalls += 1
+            if stalls > _MAX_STALLS:
+                raise Exception(
+                    f'isDeleted={deleted} did not persist on {left} chunk(s); the change is partly applied, retry to finish'
+                )
+            time.sleep(_REPEAT_PAUSE_SECONDS)
 
     @_backend_errors('markDeleted')
     def markDeleted(self, objectIds: List[str]) -> Optional[int]:

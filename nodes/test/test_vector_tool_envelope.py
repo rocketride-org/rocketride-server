@@ -37,11 +37,10 @@ from .test_vector_hooks import MemoryStore, corpus
 
 #: sha256 of today's six agent descriptors (search, upsert, delete, objdir, get, stats) as
 #: ``_build_tool_descriptors`` builds them, JSON with sorted keys and no spaces. Regenerated
-#: for the develop merge of 87f530f39: #2631 gave objdir and get their develop descriptors
-#: (``minimum`` bounds and capped defaults on offset/limit, and get's ordered paging with
-#: ``total``/``offset``/``has_more``/``truncated``); search, upsert, delete and stats are
-#: unchanged.
-LEGACY_AGENT_CATALOG_SHA256 = '36741af73b843e2c550dbddbd1c53579d506e16740ab73755031d3aa26fb0fe6'
+#: for the develop merge of b76848a6f: the six are byte-identical to what develop builds
+#: (#2631 gave objdir and get their descriptors; #2587/#2704 gave upsert its chunk numbering,
+#: delete its ``object_ids`` answer and stats its ``document_count``).
+LEGACY_AGENT_CATALOG_SHA256 = '549b4904a65411925e55b7718c2f819a59ce5d8f981725619b438d75d78ca9d9'
 
 LEGACY_TOOLS = ('delete', 'get', 'objdir', 'search', 'stats', 'upsert')
 #: #2704's three, listed for agents too: the document listing and the trash.
@@ -702,14 +701,21 @@ def test_dialect_matches_the_fixture(wired):
 
 def test_stats_matches_the_fixture(wired):
     _store, inst, _sample = wired
-    _same_keys(inst.stats({}), _fixture('stats_pgvector'), 'stats')
-    _same_keys(_node(MemoryStore()).stats({}), _fixture('stats_collection_missing_legacy'), 'stats(missing)')
+    # document_count is #2704's name for the documents figure, kept beside it.
+    _same_keys(inst.stats({}), _fixture('stats_pgvector'), 'stats', {'document_count'})
+    _same_keys(
+        _node(MemoryStore()).stats({}),
+        _fixture('stats_collection_missing_legacy'),
+        'stats(missing)',
+        {'document_count'},
+    )
 
 
 def test_list_documents_matches_the_fixture(wired):
     _store, inst, _sample = wired
     answer, fixture = inst.list_documents({}), _fixture('list_documents_page1')
-    _same_keys(answer, fixture, 'list_documents')
+    # documents, offset and has_more are #2704's answer keys, kept as aliases of items / next_cursor.
+    _same_keys(answer, fixture, 'list_documents', {'documents', 'offset', 'has_more'})
     _same_keys(
         answer['items'][0],
         fixture['items'][0],
@@ -808,13 +814,14 @@ def test_the_trash_answers_match_the_fixtures(wired):
         ('delete', {'object_ids': ['doc01']}, 'delete_ok'),
     ):
         answer, fixture = getattr(inst, tool)(args), _fixture(name)
-        _same_keys(answer, fixture, tool)
+        # moved_chunks (the trash writes) and object_ids (delete's echo) are #2704-compatible additions.
+        _same_keys(answer, fixture, tool, {'moved_chunks', 'object_ids'})
         _same_keys(answer['audit'], fixture['audit'], f'{tool}.audit')
     store.markDeleted(['doc02'])
     store.rows[('doc03', 0)].metadata.isDeleted = True
     emptied = inst.delete({'object_ids': ['doc02', 'doc03'], 'deleted_only': True})
     fixture = _fixture('delete_deleted_only')
-    _same_keys(emptied, fixture, 'delete(deleted_only)')
+    _same_keys(emptied, fixture, 'delete(deleted_only)', {'object_ids'})
     assert emptied['kept_live'] == ['doc03'] and fixture['kept_live']
     in_trash = inst.list_documents({'deleted': 'deleted'})
     assert [item['objectId'] for item in in_trash['items']] == ['doc03']

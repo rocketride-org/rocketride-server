@@ -33,4 +33,8 @@ export interface AppDevOpMap extends ShellOpMap {
 	/** PUSH — the identity changed (connection/account events) while a
 	 *  wizard may be open. */
 	'host.appdev.identityChanged': ShellOpSpec<NewAppIdentity, void>;
+	/** Close the UNBOUND (untitled) App Builder document without creating
+	 *  anything — the wizard's Cancel. A host with no untitled builder open
+	 *  treats it as a no-op. */
+	'host.appdev.closeWizard': ShellOpSpec<Record<string, never>, void>;
 }

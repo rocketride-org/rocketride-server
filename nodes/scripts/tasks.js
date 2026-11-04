@@ -108,6 +108,11 @@ const DB_LIVE_SUITES = [
 	// rocketride_vector's agent tools and the vector-store writes, on pgvector.
 	'test_rocketride_vector_tools_full.py',
 	'test_vector_store_writes_full.py',
+	// #2704 / #2955 on the shared pgvector driver: the listing and trash tools, and the
+	// filtered HNSW search with its exact recovery. test_pgvector_search.py is not named
+	// *_full, so without this entry the mocked pass would collect it.
+	'test_vector_store_listing_full.py',
+	'test_pgvector_search.py',
 	// Vector Explorer: the shared pgvector driver behind store_postgres, and the
 	// Qdrant and Chroma drivers, on new and legacy-shaped collections
 	// (test_rocketride_db_full.py above covers rocketride_vector).
@@ -206,6 +211,8 @@ function makeStartTestServerAction(options = {}) {
 			const result = await startServer({
 				script: 'ai/eaas.py',
 				trace: options.trace,
+				logName: 'nodes',
+				verbose: ctx.options?.verbose,
 				basePort: 40000, // Use 40000 range for node tests
 				env: {
 					ROCKETRIDE_MOCK: mocksPath,
@@ -222,7 +229,7 @@ function makeStartTestServerAction(options = {}) {
 			ctx.port = result.port;
 			task.output = `Server ready on port ${ctx.port} (mocks enabled)`;
 			taskComplete = true;
-			return { port: result.port, server: result.server };
+			return { port: result.port, server: result.server, serverUri: result.uri };
 		},
 	};
 }
@@ -258,8 +265,8 @@ function makeRunPytestAction(options = {}) {
 			};
 			if (mode === 'run') {
 				const bracket = ctx.brackets?.['node-test-server'];
-				if (!bracket?.port) throw new Error('node-test-server bracket missing — server did not start');
-				testEnv.ROCKETRIDE_URI = bracket.serverUri || `http://localhost:${bracket.port}`;
+				if (!bracket?.serverUri) throw new Error('node-test-server bracket missing — server did not start');
+				testEnv.ROCKETRIDE_URI = bracket.serverUri;
 			} else if (options.taskserver) {
 				// The hardware gate needs to know the tests would run on another machine.
 				testEnv.ROCKETRIDE_URI = parseServerAddress(options.taskserver).uri;

@@ -27,21 +27,18 @@ import '../../styles/root.css';
 import React from 'react';
 import { mountComponent } from '../../../shared/util/mount';
 import { attachBusRealm } from '../hooks/busRealm';
-import AccountPage from '../account/AccountWebview';
-import EnvironmentPage from '../environment/EnvironmentWebview';
 import WelcomePage from '../welcome/WelcomeWebview';
 import SettingsPage from '../settings/SettingsWebview';
 import DevToolReadmePage from '../devtool-readme/DevToolReadmeWebview';
-import NewAppPage from '../new-app/NewAppWebview';
 
 // Every framework page this host can serve — THE allowlist of what mounts.
+// (No `newapp` page: the New App wizard is the UNBOUND App Builder's body —
+// page-app with no app stamp — not a framework page. No `environment` or
+// `account` pages: both are Settings sections.)
 const PAGES: Record<string, React.ComponentType> = {
-	account: AccountPage,
-	environment: EnvironmentPage,
 	welcome: WelcomePage,
 	settings: SettingsPage,
 	'devtool-readme': DevToolReadmePage,
-	newapp: NewAppPage,
 };
 
 /** Rendered when the host names a page this bundle does not know. */
@@ -53,6 +50,16 @@ const PageNotFound: React.FC = () => (
 
 // The realm's ONE bus attachment, before anything renders.
 attachBusRealm();
+
+// The webview's #root IS the document surface: declare it as the overlay
+// root so every `contained` DetailPanel opened anywhere in a page (a
+// settings drawer, a record panel) slides over and dims the WHOLE page —
+// never just whichever inner pane happens to be positioned.
+const rootElement = document.getElementById('root');
+if (rootElement) {
+	rootElement.dataset.rrOverlayRoot = '1';
+	rootElement.style.position = 'relative';
+}
 
 const page = document.body.dataset.rrPage ?? '';
 mountComponent(PAGES[page] ?? PageNotFound, page || 'page-frame');

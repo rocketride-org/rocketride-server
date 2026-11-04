@@ -244,6 +244,17 @@ def metadataValue(doc: Any, name: str) -> Any:
     return value
 
 
+def _driver_count(value: Any) -> Optional[int]:
+    """A count a driver reported: a whole number from zero up, else None (never a made-up count).
+
+    A boolean, a string and a negative number (psycopg2's -1 for a row count it does not know) are
+    None, as on develop's ``soft_delete``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
 def _int_or_none(value: Any) -> Optional[int]:
     if isinstance(value, bool) or value is None:
         return None
@@ -1561,6 +1572,23 @@ class VectorExplorerTools:
                 'type': ['integer', 'null'],
                 'description': 'Documents in the whole listing, where the store counts them.',
             },
+            'documents': {
+                'type': 'array',
+                'description': (
+                    "The same rows in #2704's shape (object_id, parent, chunk_count), an alias of items "
+                    'kept for its callers.'
+                ),
+                'items': {
+                    'type': 'object',
+                    'properties': {
+                        'object_id': {'type': 'string'},
+                        'parent': {'type': ['string', 'null']},
+                        'chunk_count': {'type': ['integer', 'null']},
+                    },
+                },
+            },
+            'offset': {'type': 'integer', 'description': 'Always 0: the listing pages with cursor.'},
+            'has_more': {'type': 'boolean', 'description': 'Whether a page follows (next_cursor is not null).'},
             'counts_exact': {'type': 'boolean'},
             'distinct': {'type': 'boolean'},
             'sorted': {'type': 'boolean'},
@@ -1715,6 +1743,13 @@ class VectorExplorerTools:
             'counts_exact': page.counts_exact,
             'distinct': page.distinct,
             'sorted': page.sorted,
+            # #2704's answer keys, kept as aliases so its callers read the same answer: the rows in its
+            # shape, the offset (always 0 here, the listing pages with cursor) and whether a page follows.
+            'documents': [
+                {'object_id': item['objectId'], 'parent': item['path'], 'chunk_count': item['chunks']} for item in items
+            ],
+            'offset': 0,
+            'has_more': next_cursor is not None,
         }
         if doc_filter is not None:
             skipped = (getattr(page, 'filter_ignored', None) or ()) if hand_over and hook_filter is doc_filter else None
@@ -2761,10 +2796,13 @@ class VectorExplorerTools:
     def _vx_trash_write(self, tool: str, args: Mapping[str, Any], *, deleted: bool) -> Dict[str, Any]:
         """The body of ``soft_delete`` (``deleted``) and ``restore``: the gate, the ids, one driver call.
 
-        ``matched_chunks`` is what the driver's ``markDeleted`` / ``markActive`` answers: the
+        ``moved_chunks`` is what the driver's ``markDeleted`` / ``markActive`` answers: the
         chunks the call moved into or out of the trash (0 for a document already in that
-        state), or None where the store cannot count. ``not_found`` names the ids with no
-        chunk stored at all; restoring a document that is not in the trash moves nothing.
+        state), or None where the store cannot count. ``matched_chunks`` keeps #2704's meaning,
+        the chunk rows the store holds for the ids in either state (what its UPDATE by object
+        id matched); where the store cannot count them it is ``moved_chunks``. ``not_found``
+        names the ids with no chunk stored at all; restoring a document that is not in the
+        trash moves nothing.
         """
         store = self._vx_store()
         # The gate runs first (on the ids as sent), then the input is checked.
@@ -2774,17 +2812,22 @@ class VectorExplorerTools:
         ids = self._vx_write_ids(tool, args.get('object_ids'), decision)
         not_found = self._vx_unstored(store, ids)
         targets = [oid for oid in ids if oid not in not_found]
+        moved: Optional[int] = 0
         matched: Optional[int] = 0
         if targets:
-            matched = _int_or_none(store.markDeleted(targets) if deleted else store.markActive(targets))
+            moved = _driver_count(store.markDeleted(targets) if deleted else store.markActive(targets))
+            matched = self._vx_count(store.countChunks, deletedFilter('all', objectIds=list(targets)))
+            if matched is None or (moved is not None and matched < moved):
+                matched = moved
         action = f'vector.{tool}'
-        self._vx_log_write(action, ids, matched, decision.origin)
+        self._vx_log_write(action, ids, moved, decision.origin)
         return {
             'success': True,
             'object_ids': ids,
             'matched_chunks': matched,
+            'moved_chunks': moved,
             'not_found': not_found,
-            'audit': self._vx_audit(action, store, ids, matched, decision),
+            'audit': self._vx_audit(action, store, ids, moved, decision),
         }
 
     def _vx_has_live_chunk(self, store: Any, object_id: str) -> bool:

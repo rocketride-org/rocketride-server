@@ -208,7 +208,7 @@ export interface WorkspaceFs {
 	/**
 	 * Finds files by glob across the workspace.
 	 *
-	 * @param include - Include glob (e.g. '**​/*.rrapp').
+	 * @param include - Include glob (e.g. '**\/*.rrapp').
 	 * @param exclude - Optional exclude glob.
 	 * @returns Paths in the host's spelling.
 	 */
@@ -294,9 +294,16 @@ export function globToRegExp(glob: string): RegExp {
 		const c = g[i];
 		if (c === '*') {
 			if (g[i + 1] === '*') {
-				// '**/' or trailing '**' — any depth (including none).
-				re += '(?:.*)';
-				i += g[i + 2] === '/' ? 2 : 1;
+				if (g[i + 2] === '/') {
+					// '**/' — zero or more WHOLE segments; keeping the segment
+					// boundary stops 'src/**/index.ts' matching 'src/myindex.ts'.
+					re += '(?:.*/)?';
+					i += 2;
+				} else {
+					// Trailing / embedded '**' — anything.
+					re += '.*';
+					i += 1;
+				}
 			} else {
 				re += '[^/]*';
 			}

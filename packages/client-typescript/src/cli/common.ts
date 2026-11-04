@@ -36,10 +36,10 @@ import * as fs from 'fs';
 import * as readline from 'readline';
 import { Command } from 'commander';
 import { RocketRideClient } from '../client/client';
-import { DAPMessage, PipelineConfig } from '../client/types';
+import { DAPMessage, PipelineConfig, RocketRideClientConfig } from '../client/types';
 import { CONST_DEFAULT_WEB_LOCAL } from '../client/constants';
 import { Output, JsonOption } from './output';
-import { ENV_DEV_URI, ENV_DEV_APIKEY, ENV_DEPLOY_URI, ENV_DEPLOY_APIKEY } from './env';
+import { ENV_DEV_URI, ENV_DEV_APIKEY, ENV_DEPLOY_URI, ENV_DEPLOY_APIKEY, NO_DEPLOY_TARGET_MESSAGE } from './env';
 
 /** Options every connected command accepts. */
 export interface ConnectionOptions {
@@ -93,10 +93,13 @@ export function addDeployConnectionOptions(cmd: Command): Command {
  *
  * @param options - Parsed command options carrying uri/apikey.
  * @param onEvent - Optional DAP event handler (e.g. upload progress lines).
+ * @param config - Extra client settings for long-running commands (e.g.
+ *   `persist` + `onConnected` to survive and react to reconnects).
  * @returns The connected client.
  */
-export async function connectClient(options: ConnectionOptions, onEvent?: (message: DAPMessage) => Promise<void>): Promise<RocketRideClient> {
+export async function connectClient(options: ConnectionOptions, onEvent?: (message: DAPMessage) => Promise<void>, config: Pick<RocketRideClientConfig, 'persist' | 'onConnected' | 'onDisconnected'> = {}): Promise<RocketRideClient> {
 	const client = new RocketRideClient({
+		...config,
 		uri: options.uri,
 		auth: options.apikey,
 		onEvent,
@@ -104,6 +107,23 @@ export async function connectClient(options: ConnectionOptions, onEvent?: (messa
 	activeClients.add(client);
 	await client.connect();
 	return client;
+}
+
+/**
+ * Connect to the DEPLOYMENT target, enforcing the hard stop: lifecycle
+ * verbs (deploy, publish, review) never fall back to the development
+ * connection as a guess. Shared by the `deploy` and `app` groups.
+ *
+ * @param options - Parsed command options (from addDeployConnectionOptions).
+ * @param out - The command's output channel.
+ * @returns The connected client, or null after reporting the stop.
+ */
+export async function connectDeploy(options: ConnectionOptions, out: Output): Promise<RocketRideClient | null> {
+	if (!options.uri) {
+		out.fail(NO_DEPLOY_TARGET_MESSAGE);
+		return null;
+	}
+	return connectClient(options);
 }
 
 /**

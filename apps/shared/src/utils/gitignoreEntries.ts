@@ -29,14 +29,17 @@
 /**
  * Which of `entries` are not already listed in `content`.
  *
- * Matching is on exact trimmed lines. That is deliberate: a user whose
+ * Matching is on exact lines, with only trailing whitespace stripped — git
+ * removes unescaped trailing spaces from a pattern but keeps leading ones, so
+ * an indented `  .env` is a different pattern and must not count as present.
+ * The strictness is deliberate: a user whose
  * `.gitignore` already says `*.env` or `**\/.env` has a broader rule than we
  * would add, and second-guessing it risks writing a narrower duplicate. The
  * cost of the strict comparison is an occasional redundant line, which is
  * harmless; the cost of being clever is fighting the user's own config.
  */
 export function missingGitignoreEntries(content: string, entries: readonly string[]): string[] {
-	const present = new Set(content.split('\n').map((line) => line.trim()));
+	const present = new Set(content.split('\n').map((line) => line.replace(/\s+$/, '')));
 	return entries.filter((entry) => !present.has(entry));
 }
 

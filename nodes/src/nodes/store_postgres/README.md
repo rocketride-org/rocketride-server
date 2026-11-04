@@ -37,12 +37,12 @@ The configured tool-server name defaults to `postgres`.
 | `get` | Returns the chunks of one `object_id` in chunk order, with `offset` and `limit`. |
 | `stats` | Reports the number of stored rows, the embedding model and the vector size. |
 | `list_documents` | Lists the documents one by one with their path and chunk count, in pages ordered by path; pass `next_cursor` for the next page. `deleted: 'deleted'` (or `true`) lists the trash, and `parent` keeps one exact path. |
-| `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash: their chunks stay stored but leave search, `objdir`, `get` and the listing until `restore`. Returns `matched_chunks`, the chunks it moved. |
+| `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash: their chunks stay stored but leave search, `objdir`, `get` and the listing until `restore`. Returns `moved_chunks`, the chunks it moved, and `matched_chunks`, the chunk rows the store holds for those IDs. |
 | `restore` | Takes the documents of a non-empty `object_ids` array out of the trash; a document not in it is left as it is. |
 
 `search` requires a bound embedding provider for semantic similarity search. The functions return a failure object when their required input or an embedding cannot be obtained. The collection's control record (object ID `schema`) is never listed and can never be removed through a tool.
 
-`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`, defaulting to `"vectordb_tool"`, `"/"` and `0` respectively.
+`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`; `nodeId` defaults to `"vectordb_tool"`, `parent` to `"/"`, and `chunkId` to the document's position among the chunks sent for its object ID in the call (0 for the first), and an explicit `chunkId` may not repeat within the call.
 
 ## Configuration
 
@@ -92,7 +92,7 @@ the failure as an ordinary relevance-tuning issue.
 
 ### Tool Server Name
 
-The tool-server name defaults to `postgres` and prefixes the three agent functions. Change it when multiple PostgreSQL stores are connected to the same agent so their functions do not share a namespace.
+The tool-server name defaults to `postgres` and labels this node in the messages the tool functions return. Agents and apps address the functions by the node's pipeline id, which keeps several PostgreSQL stores apart.
 
 ### Write switches
 
@@ -124,6 +124,18 @@ filter's offset and limit. Filtered searches keep scanning the HNSW index
 search restricted to a few documents still returns up to its limit. With an
 older pgvector a filtered search can return fewer rows than its limit; the
 store then reports the caveat `filtered_search_may_underfill`.
+
+A filtered search that HNSW still leaves short is recovered with an exact
+search: when the table has a valid approximate index (HNSW or IVFFlat) and no
+result meets the score threshold (and the 0.20 minimum floor), the same search
+runs again exactly, in the same transaction, with the same filters and limit.
+On pgvector 0.8 and later a nonempty result stays approximate and does not
+trigger the retry merely because it falls short of the requested limit; before
+0.8 an underfilled result also retries. A table without an approximate index is
+never scanned twice, and an unbounded request (no limit) runs the exact
+statement directly. Exact retries can be expensive on large tables, including
+queries that genuinely have no matches. The retry runs inside the connection
+discipline described under Connections: read-only transactions that always end.
 
 The metadata filters are translated to SQL predicates for node, parent,
 permissions, object IDs, chunk IDs, table data, and deletion state. Normal
@@ -167,7 +179,7 @@ again at most once a minute.
 |---|---|---|---|
 | `postgres.profile` | `string` | **Type of PostgreSQL host**<br/>Connect to... | `"local"` |
 | `postgres.provider` | `string` |  | const: `"postgres"` |
-| `postgres.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'postgres' exposes tools as postgres.search / postgres.upsert / postgres.delete. Change this when running multiple Postgres nodes in the same pipeline so their tool names do not collide. | `"postgres"` |
+| `postgres.serverName` | `string` | **Tool Server Name**<br/>Label for this store in tool-response messages (for example, a refused write names postgres.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings. | `"postgres"` |
 | `vector.collection` | `string` | **Table**<br/>Name of the table to store vectors. | `"rocketride"` |
 | `vector.local.database` | `string` | **Database**<br/>Name of the database | `"postgres"` |
 | `vector.local.host` |  | **Host**<br/>Host name or IP address of the PostgreSQL server | `"your-postgres-host.example.com"` |
@@ -182,5 +194,5 @@ again at most once a minute.
 
 ## Source
 
-[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/store_postgres)
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/nihalnihalani/rocketride-server/tree/develop/nodes/src/nodes/store_postgres)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

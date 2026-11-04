@@ -50,11 +50,16 @@ def test_a_soft_delete_and_a_restore_of_153_documents_move_all_306_chunks(contex
 
     moved = tools.soft_delete({'object_ids': DOCS})
     assert moved['success'] and moved['not_found'] == [], moved
+    assert moved['moved_chunks'] in (306, None), (kind, moved['moved_chunks'])
     assert moved['matched_chunks'] in (306, None), (kind, moved['matched_chunks'])
     assert _trashed(store) == {True: 306, False: 0}, kind
     again = tools.soft_delete({'object_ids': DOCS})
-    assert again['matched_chunks'] in (0, None), (kind, again['matched_chunks'])
+    # Nothing moves the second time; a store that counts still holds the 306 chunks the ids name, and one that
+    # cannot count answers what its driver reported (0 moved).
+    assert again['moved_chunks'] in (0, None), (kind, again['moved_chunks'])
+    assert again['matched_chunks'] in (0, 306, None), (kind, again['matched_chunks'])
 
     back = tools.restore({'object_ids': DOCS})
+    assert back['moved_chunks'] in (306, None), (kind, back['moved_chunks'])
     assert back['matched_chunks'] in (306, None), (kind, back['matched_chunks'])
     assert _trashed(store) == {True: 0, False: 306}, kind

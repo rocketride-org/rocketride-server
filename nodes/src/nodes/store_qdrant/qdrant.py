@@ -65,8 +65,14 @@ from qdrant_client.http import models
 from qdrant_client.conversions import common_types as types
 
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
-from ai.common.store import DocumentStoreBase
+from ai.common.store import CONTROL_OBJECT_ID, DocumentStoreBase
 from ai.common.config import Config
+
+
+# The most points one objdir scroll request asks for. A collection can cap the
+# size of a single request (max_query_limit), so a page is read in requests of
+# this size, following next_page_offset, however large offset + limit is.
+_OBJDIR_SCROLL_PAGE = 1000
 
 """
 NOTE: https://qdrant.tech/documentation/concepts/indexing/
@@ -90,9 +96,6 @@ enabled by building qdrant from source with
 # this it is dropped as noise regardless of the configured retrieval score.
 # A caller that sets DocFilter.minScore (the explorer tools) overrides it.
 MIN_RELEVANCE_SCORE = 0.20
-
-# objectId of the collection's control record (model name and vector size).
-CONTROL_OBJECT_ID = 'schema'
 
 # Qdrant distance -> the explorer's metric vocabulary ('cosine' | 'l2' | 'ip').
 _METRICS = {'Cosine': 'cosine', 'Euclid': 'l2', 'Dot': 'ip'}
@@ -654,11 +657,31 @@ class Store(DocumentStoreBase):
         # Build up the path list
         paths: Dict[str, str] = {}
 
-        # Perform the search (a numeric offset skips rows; Qdrant's own offset is a point id)
-        records = self._scrollWindow(filter, offset, limit)
+        # Scroll's offset is a point-ID cursor, not a count, and this driver
+        # writes random UUID point IDs, so an integer offset would never move
+        # the start. Read the first offset + limit records instead (scroll
+        # orders by point ID, so the order is stable), in requests of at most
+        # _OBJDIR_SCROLL_PAGE points that follow next_page_offset, and keep the
+        # requested page, as the Pinecone driver does. A page costs offset +
+        # limit records, and no single request exceeds the server's cap.
+        wanted = offset + limit
+        records: List[Any] = []
+        cursor = None
+        while len(records) < wanted:
+            batch, cursor = self.client.scroll(
+                collection_name=self.collection,
+                scroll_filter=filter,
+                limit=min(_OBJDIR_SCROLL_PAGE, wanted - len(records)),
+                offset=cursor,
+                with_vectors=False,
+                with_payload=True,
+            )
+            records.extend(batch)
+            if cursor is None or not batch:
+                break
 
         # Fill it in
-        for record in records:
+        for record in records[offset:wanted]:
             # Get the payload
             payload = record.payload
             if payload is None:

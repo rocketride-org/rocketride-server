@@ -1,4 +1,6 @@
-falkordb>=1.6,<2
+# 1.6.1 is the first release that quotes parameter names and map keys in the
+# CYPHER header, which every tool's params go through.
+falkordb>=1.6.1,<2
 # Declared because IInstance imports redis.exceptions directly: falkordb-py
 # has no error hierarchy of its own and re-raises redis-py exceptions verbatim.
 redis>=7.1,<8

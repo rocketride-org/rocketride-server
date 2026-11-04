@@ -57,12 +57,13 @@ _VEC_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_vector'
 TEST_DSN = 'postgresql://rruser:rrpass@localhost:55432/rrtenant'
 
 
-def _load_from_path(name: str, path: Path, *, is_package: bool = False):
+def _load_from_path(name: str, path: Path, *, is_package: bool = False, register: bool = True):
     search = [str(path.parent)] if is_package else None
     spec = importlib.util.spec_from_file_location(name, path, submodule_search_locations=search)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    if register:
+        sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -912,6 +913,172 @@ class TestPgVectorTransactions:
         assert rows['c']['meta'] == {'size': 7} and 'meta' not in rows['b']
 
 
+class TestPgVectorSearchRecovery:
+    """The filtered-search recovery of the shared driver (#2955; live twin: test_pgvector_search.py).
+
+    HNSW filters its candidate list after scanning it, so excluded neighbours (a trashed document's
+    chunks, other paths) can hide eligible matches. The driver recovers an underfilled answer with
+    the exact search, in the same read transaction, where an approximate index could have hidden them.
+    """
+
+    @staticmethod
+    def _store(env, version='0.8.0', **config):
+        env.db.extension_version = version
+        store = _make_store(env, {'collection': 'rr_vec', 'similarity': 'cosine', 'score': 0.5, **config})
+        store.addChunks([_doc('recovered', 0, [1, 0, 0, 0, 0])])  # creates the table and its HNSW index
+        return store
+
+    @staticmethod
+    def _question():
+        from ai.common.schema import QuestionText
+
+        question = QuestionText(text='q')
+        question.embedding = [1, 0, 0, 0, 0]
+        return question
+
+    @staticmethod
+    def _scan_with(store, monkeypatch, weak_score, weak_rows=5):
+        """Make the approximate scan answer ``weak_rows`` candidates of ``weak_score``; the exact one is real."""
+        from ai.common.schema import DocFilter
+
+        calls = []
+        real = store._search_semantic_in
+
+        def scan(cur, embedding, doc_filter, *, exact=False):
+            calls.append('exact' if exact else 'ann')
+            rows = real(cur, embedding, doc_filter, exact=exact)
+            if exact or not weak_rows:
+                return rows if exact else []
+            template = real(cur, embedding, DocFilter(limit=1), exact=True)[0]
+            return [dict(template, objectid=f'weak-{i}', distance=1 - weak_score) for i in range(weak_rows)]
+
+        monkeypatch.setattr(store, '_search_semantic_in', scan)
+        return calls
+
+    @pytest.mark.parametrize('version', ['0.7.4', '0.8.0'])
+    @pytest.mark.parametrize('weak_score', [0.1, 0.3])
+    def test_a_full_batch_of_weak_candidates_does_not_hide_a_strong_match(
+        self, mock_rv, monkeypatch, version, weak_score
+    ):
+        """Candidates under the 0.20 floor or the node's threshold do not count: the exact retry finds the match."""
+        from ai.common.schema import DocFilter
+
+        store = self._store(mock_rv, version)
+        calls = self._scan_with(store, monkeypatch, weak_score)
+
+        docs = store.searchSemantic(self._question(), DocFilter(limit=5))
+
+        assert [d.metadata.objectId for d in docs] == ['recovered']
+        assert abs(docs[0].score - 1.0) < 1e-9
+        assert calls[:2] == ['ann', 'exact']
+
+    @pytest.mark.parametrize('version, retried', [('0.7.4', True), ('0.8.0', False)])
+    def test_an_underfilled_nonempty_answer_is_recovered_only_before_the_iterative_scan(
+        self, mock_rv, monkeypatch, version, retried
+    ):
+        """On pgvector 0.8 a nonempty answer stays approximate: fewer than limit alone costs no full scan."""
+        from ai.common.schema import DocFilter
+
+        store = self._store(mock_rv, version)
+        calls = []
+        real = store._search_semantic_in
+
+        def scan(cur, embedding, doc_filter, *, exact=False):
+            calls.append('exact' if exact else 'ann')
+            return real(cur, embedding, doc_filter, exact=exact)
+
+        monkeypatch.setattr(store, '_search_semantic_in', scan)
+
+        docs = store.searchSemantic(self._question(), DocFilter(limit=5))
+
+        assert [d.metadata.objectId for d in docs] == ['recovered']
+        assert calls == (['ann', 'exact'] if retried else ['ann'])
+
+    def test_an_empty_answer_is_confirmed_exactly_where_an_approximate_index_exists(self, mock_rv, monkeypatch):
+        from ai.common.schema import DocFilter
+
+        store = self._store(mock_rv)
+        calls = self._scan_with(store, monkeypatch, weak_score=0.1, weak_rows=0)
+
+        assert store.searchSemantic(self._question(), DocFilter(limit=5, parent='/missing')) == []
+        assert calls[:2] == ['ann', 'exact']
+
+    def test_a_table_without_an_approximate_index_is_never_scanned_twice(self, mock_rv, monkeypatch):
+        from ai.common.schema import DocFilter
+
+        store = self._store(mock_rv)
+        mock_rv.db.table('rr_vec').indexes.clear()
+        calls = self._scan_with(store, monkeypatch, weak_score=0.1, weak_rows=0)
+
+        assert store.searchSemantic(self._question(), DocFilter(limit=5, parent='/missing')) == []
+        assert calls == ['ann']
+
+    def test_an_unbounded_search_runs_the_exact_statement_at_once(self, mock_rv):
+        from ai.common.schema import DocFilter
+
+        store = self._store(mock_rv)
+        store.addChunks([_doc('b', 0, [0.5, 0.5, 0, 0, 0])])
+
+        docs = store.searchSemantic(self._question(), DocFilter(limit=None))
+
+        assert [d.metadata.objectId for d in docs] == ['recovered', 'b']
+        assert len(_statements(mock_rv, 'semantic_exact')) == 1
+        assert _statements(mock_rv, 'semantic') == []
+
+    def test_the_exact_statement_leaves_out_undefined_distances(self, mock_rv):
+        """A zero vector has no cosine distance: the exact search must not return it as a match."""
+        from ai.common.schema import DocFilter
+
+        store = self._store(mock_rv)
+        store.addChunks([_doc('zero', 0, [0, 0, 0, 0, 0])])
+
+        docs = store.searchSemantic(self._question(), DocFilter(limit=None))
+
+        assert [d.metadata.objectId for d in docs] == ['recovered']
+
+
+@pytest.mark.parametrize('method', ['markDeleted', 'markActive'])
+@pytest.mark.parametrize('rowcount, moved', [(3, 3), (0, 0), (-1, None)])
+def test_the_trash_reports_the_rows_it_moved_and_none_when_the_count_is_unknown(
+    mock_rv, monkeypatch, method, rowcount, moved
+):
+    """The UPDATE's row count is the chunks moved; psycopg2's -1 (not known) is None, never a claimed 0."""
+    store = _make_store(mock_rv, {'collection': 'rr_vec', 'similarity': 'cosine'})
+    store.addChunks([_doc('a', i, [1, 0, 0, 0, 0]) for i in range(3)])
+    if method == 'markActive':
+        store.markDeleted(['a'])
+    original = mock_rv.psycopg2.MockCursor._op_set_deleted
+
+    def count_as(self, body, params, tag):
+        original(self, body, params, tag)
+        self.rowcount = rowcount
+
+    monkeypatch.setattr(mock_rv.psycopg2.MockCursor, '_op_set_deleted', count_as)
+
+    assert getattr(store, method)(['a']) == moved
+
+
+def test_getpaths_pages_distinct_paths_whatever_the_chunk_ids(mock_rv):
+    """One row per distinct path (its lowest object id); a document counts whatever chunk ids it has."""
+    from ai.common.schema import Doc, DocMetadata
+
+    store = _make_store(mock_rv, {'collection': 'rr_vec', 'similarity': 'cosine'})
+
+    def doc(object_id, chunk_id, parent):
+        return Doc(
+            page_content='x',
+            metadata=DocMetadata(objectId=object_id, chunkId=chunk_id, parent=parent, isDeleted=False),
+            embedding=[1, 0, 0, 0, 0],
+            embedding_model='m',
+        )
+
+    store.addChunks([doc('b', 0, '/same'), doc('a', 0, '/same'), doc('c', 2, '/other'), doc('d', 0, '/z')])
+    assert store.getPaths() == {'/other': 'c', '/same': 'a', '/z': 'd'}
+    assert store.getPaths(offset=1, limit=1) == {'/same': 'a'}
+    store.markDeleted(['c'])
+    assert store.getPaths() == {'/same': 'a', '/z': 'd'}
+
+
 class TestPgVectorSupportLevel:
     """Both pgvector providers report support 'supported' (vector-tool-contract.md §3).
 
@@ -1098,9 +1265,11 @@ class TestRocketrideVectorWriteGate:
 
 
 class _FakeCursor:
-    def __init__(self, executed, fetch_batches):
+    def __init__(self, executed, fetch_batches, rowcount=-1):
         self._executed = executed
         self._fetch_batches = fetch_batches
+        # What psycopg2 reports after a statement; -1 when it does not know.
+        self.rowcount = rowcount
 
     def execute(self, sql, params=None):
         self._executed.append(sql)
@@ -1125,9 +1294,11 @@ class _FakeClient:
         self.commits = 0
         # Queue of row batches returned by successive fetchall() calls.
         self.fetch_batches: list[list] = []
+        # The row count every cursor reports after its statement.
+        self.rowcount = -1
 
     def cursor(self):
-        return _FakeCursor(self.executed, self.fetch_batches)
+        return _FakeCursor(self.executed, self.fetch_batches, self.rowcount)
 
     def commit(self):
         self.commits += 1
@@ -1186,6 +1357,8 @@ def _graph_iglobal(monkeypatch):
     for name in ('AgeTranslationError', 'FirewallConfig', 'TranslatedQuery'):
         setattr(age, name, type(name, (), {}))
     age.TranslateMode = types.SimpleNamespace(SAFE='safe')
+    age.CAPABILITY_TABLES = {'1.5.0': {}, '1.6.0': {}}
+    age.DEFAULT_AGE_VERSION = '1.5.0'
     for name in ('decode_agtype', 'decode_row', 'translate'):
         setattr(age, name, lambda *a, **kw: None)
     for name, mod in (

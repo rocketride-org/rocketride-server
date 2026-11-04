@@ -38,6 +38,7 @@ const {
 	BUILD_ROOT,
 	DIST_ROOT,
 	hasSourceChanged,
+	hasBuildInputChanged,
 	saveSourceHash,
 	setState,
 	exists,
@@ -67,10 +68,21 @@ const SHARED_UI_HASH_KEY = 'vscode.sharedUiHash';
 // shared (appdev templates) into rocketride.js, and reusing the webview's
 // SHARED_UI_HASH_KEY would let whichever step ran first mark the other clean.
 const BUNDLE_SHARED_UI_HASH_KEY = 'vscode.bundleSharedUiHash';
+// The webview builds' config files — a config-only change must rebuild too.
+const WEBVIEW_CONFIG_HASH_KEY = 'vscode.webviewConfigHash';
 
 // All extension build output goes here (bundle, webview, manifest for vsce and F5)
 const BUILD_DIR = path.join(BUILD_ROOT, 'vscode');
 const BUILD_WEBVIEW_DIR = path.join(BUILD_DIR, 'webview');
+const BUILD_DEVTOOL_DIR = path.join(BUILD_WEBVIEW_DIR, 'devtool');
+
+// Webview build configs (and the local plugin they import) — changes here
+// must invalidate the cached webview build just like source changes.
+const WEBVIEW_CONFIG_FILES = [
+	path.join(APP_ROOT, 'rsbuild.config.mjs'),
+	path.join(APP_ROOT, 'rsbuild.devtool.config.mjs'),
+	path.join(PROJECT_ROOT, 'apps', 'shared', 'scripts', 'rsbuild-plugin-icons.mjs'),
+];
 
 // .vsix output directory
 const VSCODE_DIST_DIR = path.join(DIST_ROOT, 'vscode');
@@ -83,20 +95,23 @@ const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'clients', 'v
 // =============================================================================
 
 async function hasVscodeOrSharedUiChanged() {
-	const [vscode, sharedUi] = await Promise.all([
+	const [vscode, sharedUi, config] = await Promise.all([
 		hasSourceChanged(SRC_DIR, SRC_HASH_KEY),
 		hasSourceChanged(SHARED_UI_SRC, SHARED_UI_HASH_KEY),
+		hasBuildInputChanged(WEBVIEW_CONFIG_HASH_KEY, [], WEBVIEW_CONFIG_FILES),
 	]);
 	return {
-		changed: vscode.changed || sharedUi.changed,
+		changed: vscode.changed || sharedUi.changed || config.changed,
 		srcHash: vscode.hash,
 		sharedUiHash: sharedUi.hash,
+		configHash: config.hash,
 	};
 }
 
-async function saveVscodeAndSharedUiHashes(srcHash, sharedUiHash) {
+async function saveVscodeAndSharedUiHashes(srcHash, sharedUiHash, configHash) {
 	await saveSourceHash(SRC_HASH_KEY, srcHash);
 	await saveSourceHash(SHARED_UI_HASH_KEY, sharedUiHash);
+	await saveSourceHash(WEBVIEW_CONFIG_HASH_KEY, configHash);
 }
 
 /**
@@ -133,8 +148,8 @@ async function assertNoVscodeExternalInWebviews(task) {
 function makeBuildWebviewAction() {
 	return {
 		run: async (ctx, task) => {
-			const { changed, srcHash, sharedUiHash } = await hasVscodeOrSharedUiChanged();
-			const outputExists = await exists(BUILD_WEBVIEW_DIR);
+			const { changed, srcHash, sharedUiHash, configHash } = await hasVscodeOrSharedUiChanged();
+			const outputExists = (await exists(BUILD_WEBVIEW_DIR)) && (await exists(BUILD_DEVTOOL_DIR));
 
 			if (!changed && outputExists) {
 				task.output = 'No changes detected';
@@ -157,7 +172,7 @@ function makeBuildWebviewAction() {
 			// Gate BEFORE saving hashes — a failed scan must re-run next build.
 			await assertNoVscodeExternalInWebviews(task);
 
-			await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash);
+			await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash, configHash);
 		},
 	};
 }
@@ -214,7 +229,7 @@ function makeBundleExtensionAction() {
 function makeStageFilesAction() {
 	return {
 		run: async (ctx, task) => {
-			const { changed, srcHash, sharedUiHash } = await hasVscodeOrSharedUiChanged();
+			const { changed, srcHash, sharedUiHash, configHash } = await hasVscodeOrSharedUiChanged();
 			const stagedPkgPath = path.join(BUILD_DIR, 'package.json');
 			const buildHasManifest = await exists(stagedPkgPath);
 
@@ -306,6 +321,14 @@ function makeStageFilesAction() {
 				throw new Error(`devServerGuard.cjs missing at ${guardSrc} — the dev-server tether cannot ship`);
 			}
 			await copyFile(guardSrc, path.join(BUILD_DIR, 'devServerGuard.cjs'));
+			const dockerSvg = path.join(APP_ROOT, 'docker.svg');
+			const onpremSvg = path.join(APP_ROOT, 'onprem.svg');
+			if (await exists(dockerSvg)) {
+				await copyFile(dockerSvg, path.join(BUILD_DIR, 'docker.svg'));
+			}
+			if (await exists(onpremSvg)) {
+				await copyFile(onpremSvg, path.join(BUILD_DIR, 'onprem.svg'));
+			}
 			await copyFile(path.join(PROJECT_ROOT, 'LICENSE'), path.join(BUILD_DIR, 'LICENSE'));
 			if (!(await exists(README_DEST))) {
 				throw new Error(
@@ -327,7 +350,7 @@ function makeStageFilesAction() {
 				await rm(legacyDocsDir);
 			}
 
-			await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash);
+			await saveVscodeAndSharedUiHashes(srcHash, sharedUiHash, configHash);
 			task.output = 'Manifest staged in build/vscode';
 		},
 	};
@@ -377,6 +400,12 @@ function makeTestAction() {
 	return {
 		description: 'Testing vscode',
 		run: async (ctx, task) => {
+			// Typecheck the webview project as part of the test graph. The build
+			// action runs the same gate, but behind its change-detection hash —
+			// so `./builder test` alone never caught webview/protocol drift
+			// (e.g. a shell type consumed by webview code changing underneath it).
+			await execCommand('npx', ['tsc', '-p', 'tsconfig.webview.json', '--noEmit'], { task, cwd: APP_ROOT });
+
 			const testFiles = (await glob('src/test/*.test.ts', { cwd: APP_ROOT, nodir: true })).sort();
 
 			// Fail rather than pass silently: this target exists because these tests

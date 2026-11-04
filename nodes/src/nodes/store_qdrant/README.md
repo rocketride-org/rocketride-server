@@ -11,7 +11,7 @@ managed service (Qdrant Cloud).
 
 ## What it does
 
-Stores pre-embedded document chunks in a Qdrant collection and retrieves them by semantic (vector) similarity or full-text keyword search. Works with both self-hosted Qdrant and Qdrant Cloud. The node is also a tool node (`classType: ["store", "tool"]` with the `invoke` capability), so agents in the same pipeline can call its `search`, `upsert`, and `delete` tools directly.
+Stores pre-embedded document chunks in a Qdrant collection and retrieves them by semantic (vector) similarity or full-text keyword search. Works with both self-hosted Qdrant and Qdrant Cloud. The node is also a tool node (`classType: ["store", "tool"]` with the `invoke` capability), so agents in the same pipeline can use the eight functions documented under As a tool, including document retrieval, statistics, trash and restore, subject to the tool-exposure and write-permission settings.
 
 Uses the official **`qdrant_client`** Python SDK over REST (`prefer_grpc=False`, 60-second timeout). If the configured host has no scheme, `http://` is prepended automatically.
 
@@ -65,7 +65,7 @@ every question.
 
 ## As a tool
 
-Tools are exposed under the configured `serverName` namespace (default `qdrant`).
+Pipeline agents address the functions as `<node id>.<function>`. The configured `serverName` (default `qdrant`) labels tool-response messages. The available functions are `search`, `objdir`, `get`, `stats`, `upsert`, `delete`, `soft_delete`, and `restore`; write functions require `allow_write`, and all functions require `expose_tools`.
 
 ### `search`
 
@@ -79,11 +79,23 @@ Semantic similarity search over the collection.
 
 Requires an embedding provider bound to the node (the embedding sub-block in the configuration). If semantic search fails, the tool falls back to keyword search. Returns `{"results": [{content, score, metadata}], "total": n}` on success or `{"success": false, "error": "..."}` on failure.
 
+### `objdir`
+
+List the distinct parent paths of active documents in the collection as a map of parent path to one object ID each. Takes optional `parent` (a text match on the stored parent, not an exact path), `offset` and `limit` (default and cap 1000). `offset` and `limit` count documents, not paths: documents that share a parent path appear as one entry, so a page can hold fewer than `limit` entries while more follow. Qdrant's scroll offset is a point-ID cursor, so each page reads `offset + limit` points from the start of the collection, in requests of at most 1,000 points, and skips the first `offset`.
+
+### `get`
+
+Return the chunks of one document. Takes a required `object_id` and optional `offset` and `limit` (default and cap 100); chunks come ordered by chunk ID with `total`, `has_more` and `truncated`. An object ID the collection does not hold, or one in the trash, returns `{"success": false, "error": "..."}`.
+
+### `stats`
+
+Return the collection's point count as Qdrant reports it, `document_count` (null on this store, which does not list documents), the embedding model name and the vector size.
+
 ### `upsert`
 
 Add or update documents in the collection.
 
-Each item in the `documents` array requires `content` and `object_id` (used for deduplication) and may include `metadata` (keys `nodeId`/`parent`/`chunkId` are stored; defaults `"vectordb_tool"`, `"/"`, `0`), plus optional pre-computed `embedding` and `embedding_model` to skip automatic embedding. Without a pre-computed vector the node's bound embedding provider is used; if none is configured the call fails. Returns `{"success": true, "count": n, "skipped": n}`.
+Each item in the `documents` array requires `content` and `object_id` (used for deduplication) and may include `metadata` (keys `nodeId`/`parent`/`chunkId` are stored; `nodeId` defaults to `"vectordb_tool"`, `parent` to `"/"`, and `chunkId` to the position among the chunks sent for that object ID in the call, 0 for the first; an explicit `chunkId` may not repeat within the call), plus optional pre-computed `embedding` and `embedding_model` to skip automatic embedding. Without a pre-computed vector the node's bound embedding provider is used; if none is configured the call fails. Returns `{"success": true, "count": n, "skipped": n}`.
 
 ### `delete`
 
@@ -101,7 +113,7 @@ Pass the previous answer's `next_cursor` as `cursor` for the next page. `deleted
 
 Move documents to the trash by ID.
 
-Takes a required `object_ids` string array. The chunks stay stored but leave search, `objdir`, `get` and the listing until `restore`. Returns `{"success": true, "object_ids": [...], "matched_chunks": n, "not_found": [...]}`, where `matched_chunks` counts the chunks moved.
+Takes a required `object_ids` string array. The chunks stay stored but leave search, `objdir`, `get` and the listing until `restore`. Returns `{"success": true, "object_ids": [...], "matched_chunks": n, "moved_chunks": m, "not_found": [...]}`, where `moved_chunks` counts the chunks moved and `matched_chunks` the chunk rows the store holds for those IDs.
 
 ### `restore`
 
@@ -126,10 +138,10 @@ API key, and collection fields.
 
 ### Tool Server Name
 
-Prefix for the tool names agents see: `qdrant` exposes `qdrant.search`,
-`qdrant.upsert`, `qdrant.delete`. Change it when running multiple Qdrant nodes
-in the same pipeline — give each a distinct name so their tool names do not
-collide and the agent can tell the stores apart.
+The name defaults to `qdrant` and labels this store in tool-response messages.
+Pipeline agents address all eight functions documented above by node ID, for
+example `<node id>.search` or `<node id>.restore`; changing this label does not
+change those addresses.
 
 ### Write switches
 
@@ -198,7 +210,7 @@ When the configuration is saved, the node validates it with a fast read-only pro
 |---|---|---|---|
 | `qdrant.profile` | `string` | **Type of Qdrant host**<br/>Connect to... | `"cloud"` |
 | `qdrant.provider` | `string` |  | const: `"qdrant"` |
-| `qdrant.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'qdrant' exposes tools as qdrant.search / qdrant.upsert / qdrant.delete. Change this when running multiple Qdrant nodes in the same pipeline so their tool names do not collide. | `"qdrant"` |
+| `qdrant.serverName` | `string` | **Tool Server Name**<br/>Label for this store in tool-response messages (for example, a refused write names qdrant.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings. | `"qdrant"` |
 | `vector.cloud.host` |  | Enter the server IP address e.g. <your-instance-name>.<region>.qdrant.io |  |
 | `vector.cloud.port` |  |  | `6333` |
 | `vector.local.host` |  |  | `"localhost"` |
@@ -217,5 +229,5 @@ When the configuration is saved, the node validates it with a fast read-only pro
 
 ## Source
 
-[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/store_qdrant)
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/nihalnihalani/rocketride-server/tree/develop/nodes/src/nodes/store_qdrant)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

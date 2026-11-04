@@ -42,7 +42,6 @@ import { useShellConnection } from 'shell';
 import { SidebarMenu, BxPlus, BxCheck, BxEditAlt, BxTrash } from 'shell';
 import type { DevToolProps, ViewMenu } from 'shell';
 import { useSavedConnections, useSavedConnectionsStatus, loadSavedConnections, deleteSavedConnection, endpointKeyForConnection, releaseDirectEndpoint } from './connect';
-import { getBusSqlClient } from './connect/busClient';
 import type { SavedSqlConnection } from './connect';
 import { localSidebarBridge, createSidebarToolBridge } from './sqlBridge';
 import type { SqlSidebarBridge } from './sqlBridge';
@@ -221,9 +220,11 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge = localSidebarBridge, ho
 	const openConnection = useCallback((conn: SavedSqlConnection) => {
 		if (!isConnected) { setOpenError('Not connected to a server.'); return; }
 		setOpenError('');
-		setOpeningId(conn.id);
+		// An already-active connection raises no focus change, so nothing
+		// would clear the opening state — skip it and just re-focus.
+		if (endpointKeyForConnection(conn) !== activeKey) setOpeningId(conn.id);
 		bridge.openConnection(conn);
-	}, [bridge, isConnected]);
+	}, [bridge, isConnected, activeKey]);
 
 	// "+ New Connection" as a stock SidebarMenu entry, mirroring the app-builder
 	// sidebar's "+ New app" nav above its MY APPS list. No persistent selection
@@ -266,9 +267,17 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge = localSidebarBridge, ho
 							title={conn.mode === 'pipeline' ? `${conn.name} — pipeline: ${conn.pipelineName}` : `${conn.name} — direct (${conn.provider})`}
 							style={styles.row(isActive, isHovered)}
 							onClick={() => { if (!isOpening && !isConfirming) openConnection(conn); }}
-							onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !isOpening && !isConfirming) { e.preventDefault(); openConnection(conn); } }}
+							// Only the ROW itself opens — the nested action buttons'
+							// Enter/Space bubbles here and must keep its own meaning.
+							onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ') && !isOpening && !isConfirming) { e.preventDefault(); openConnection(conn); } }}
 							onMouseEnter={() => setHoveredId(conn.id)}
 							onMouseLeave={() => setHoveredId(null)}
+							// Focus mirrors hover so keyboard users reach the revealed
+							// actions; blur only clears when focus leaves the row.
+							onFocus={() => setHoveredId(conn.id)}
+							onBlur={(e) => {
+								if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHoveredId((prev) => (prev === conn.id ? null : prev));
+							}}
 						>
 							<span style={styles.rowIcon(isActive)}><DatabaseIcon /></span>
 							{isConfirming ? (
@@ -283,7 +292,7 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge = localSidebarBridge, ho
 											e.stopPropagation();
 											// Best-effort stop of a direct connection's temp
 											// pipeline; the idle TTL reaps it otherwise.
-											if (conn.mode === 'direct' && isConnected) void releaseDirectEndpoint(getBusSqlClient(), endpointKeyForConnection(conn));
+											if (conn.mode === 'direct' && isConnected && client) void releaseDirectEndpoint(client, endpointKeyForConnection(conn));
 											deleteSavedConnection(conn.id);
 											setConfirmDeleteId(null);
 										}}
@@ -303,7 +312,7 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge = localSidebarBridge, ho
 							) : (
 								<>
 									<span style={styles.rowLabel}>{isOpening ? `${conn.name}…` : conn.name}</span>
-									{/* Hover actions: modify / delete. */}
+									{/* Hover/focus actions: modify / delete. */}
 									{isHovered && !isOpening && (
 										<>
 											<button
@@ -357,19 +366,19 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge = localSidebarBridge, ho
  * mutation, publishes it as retained channel state) and follows the host's
  * activeDocKey to highlight the fronted connection.
  */
-export const SqlDevToolSidebar: React.FC<DevToolProps> = ({ peer, channel, documents, activeDocKey }) => {
+export const SqlDevToolSidebar: React.FC<DevToolProps> = ({ channel, documents, activeDocKey }) => {
 	const { client, isConnected } = useShellConnection();
 	// Controller bridge: commits incoming saves, publishes the list as
 	// retained channel state, and carries the sidebar's actions.
-	const bridge = useMemo(() => createSidebarToolBridge({ peer, ...(channel ? { channel } : {}), ...(documents ? { documents } : {}) }), [peer, channel, documents]);
+	const bridge = useMemo(() => createSidebarToolBridge({ channel, ...(documents ? { documents } : {}) }), [channel, documents]);
 
 	// This is the OWNER realm: load the list from the server store with the
 	// persistence writer installed. Every mutation — inline delete here,
 	// editor saves arriving over the channel — commits in this realm, and
 	// each commit republishes the state topic to every document.
 	useEffect(() => {
-		if (isConnected) void loadSavedConnections(getBusSqlClient());
-	}, [isConnected]);
+		if (isConnected && client) void loadSavedConnections(client);
+	}, [isConnected, client]);
 
 	return <SqlSidebar bridge={bridge} {...(activeDocKey !== undefined ? { hostActiveDoc: activeDocKey } : {})} />;
 };

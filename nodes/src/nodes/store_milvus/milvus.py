@@ -50,6 +50,7 @@ from ai.common.store import DocumentStoreBase
 from ai.common.store.errors import StoreError, StoreUnsupported, ToolRefusal
 from ai.common.store.vx_types import DELETED_VALUES, ChunkPage, DocPage, DocumentRow, StoreInfo
 from ai.common.config import Config
+from nodes.store_milvus.mode import is_local
 
 # Default batch size for bulk upsert operations
 DEFAULT_BULK_INSERT_BATCH_SIZE = 50
@@ -336,8 +337,6 @@ class Store(DocumentStoreBase):
         self.timeout = max(int(config.get('timeout', DEFAULT_TIMEOUT)), 1)
         self.bulkInsertBatchSize = max(int(config.get('bulkInsertBatchSize', DEFAULT_BULK_INSERT_BATCH_SIZE)), 1)
 
-        profile = config.get('mode')
-
         # check if the similarity matches milvus configuration options
         similarity = config.get('similarity', 'COSINE')
         if similarity in ['L2', 'IP', 'COSINE', 'JACCARD', 'HAMMING', 'BM25']:
@@ -347,7 +346,8 @@ class Store(DocumentStoreBase):
 
         # Establish a connection to the Milvus instance with configurable timeout
         try:
-            if profile != 'local':
+            # Read the same way as the key check (IGlobal._credentials).
+            if not is_local(config):
                 # Init the store (host was stripped of protocol at line 87, so always add https://)
                 self.client = MilvusClient(uri=f'https://{self.host}', token=self.apikey, timeout=self.timeout)
             else:
@@ -673,7 +673,7 @@ class Store(DocumentStoreBase):
 
         # Base filter: Only chunk 0 of live documents
         filter_expr = (
-            f"meta['chunkId'] == 0 and meta['isDeleted'] == False and meta['objectId'] != '{CONTROL_OBJECT_ID}'"
+            f"meta['chunkId'] == 0 and meta['isDeleted'] == false and meta['objectId'] != '{CONTROL_OBJECT_ID}'"
         )
 
         # If parent specified, add condition

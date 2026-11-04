@@ -369,7 +369,8 @@ class Collection:
         if field_sort:
             data = data[:SORTED_FIND_MAX]
 
-        # Apply projection: $vector only on request; allow-list or deny-list of top-level fields
+        # Apply projection: $vector only on request; allow-list or deny-list of fields (a dotted key
+        # such as 'meta.parent' names a nested field, as on the Data API)
         projection = projection or {}
         include_vector = projection.get('$vector') in (1, True)
         allow = [k for k, v in projection.items() if v in (1, True) and not k.startswith('$')]
@@ -378,9 +379,27 @@ class Collection:
         for doc in data:
             out = {k: copy.deepcopy(v) for k, v in doc.items() if k != '$vector'}
             if allow:
-                out = {k: v for k, v in out.items() if k in allow or k in ('_id', '$similarity')}
+                kept = {k: v for k, v in out.items() if k in allow or k in ('_id', '$similarity')}
+                for key in allow:
+                    if '.' in key:
+                        value = _get_path(doc, key)
+                        if value is not None:
+                            node = kept
+                            *parents, leaf = key.split('.')
+                            for part in parents:
+                                node = node.setdefault(part, {})
+                            node[leaf] = copy.deepcopy(value)
+                out = kept
             for k in deny:
-                out.pop(k, None)
+                if '.' in k:
+                    *parents, leaf = k.split('.')
+                    node = out
+                    for part in parents:
+                        node = node.get(part) if isinstance(node, dict) else None
+                    if isinstance(node, dict):
+                        node.pop(leaf, None)
+                else:
+                    out.pop(k, None)
             if include_vector and '$vector' in doc:
                 out['$vector'] = list(doc['$vector'])
             projected.append(out)
@@ -400,10 +419,6 @@ class Collection:
         if info is None:
             raise RuntimeError(f'Collection {self.name} not found')
         return info.get('definition') or CollectionDefinition()
-
-    def estimated_document_count(self, **kwargs) -> int:
-        """An estimate of the documents in the collection."""
-        return len(self._get_data())
 
     def insert_many(self, documents: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
@@ -511,6 +526,10 @@ class Collection:
                 'Document count exceeds required upper bound', server_max_count_exceeded=False
             )
         return len(data)
+
+    def estimated_document_count(self, **_: Any) -> int:
+        """Estimate the collection size; the mock knows it exactly."""
+        return len(self._get_data())
 
 
 # =============================================================================

@@ -32,6 +32,7 @@ import chromadb
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 from ai.common.config import Config
+from nodes.store_chroma.mode import is_local
 from rocketlib import debug
 import base64
 import binascii
@@ -228,12 +229,9 @@ class Store(DocumentStoreBase):
         self.renderChunkSize = config.get('renderChunkSize', self.renderChunkSize)
         self.payload_limit = config.get('payloadLimit', self.payload_limit)
 
-        # The merged node config carries the profile selection in 'mode':
-        # getNodeConfig consumes the 'profile' key while merging the selected
-        # profile's contents, so 'profile' is absent when configured through
-        # a service/autopipe config and the cloud branch was never taken.
-        # Keep 'profile' as a fallback for direct configurations.
-        profile = config.get('mode') or config.get('profile') or 'local'
+        # Read the same way as the key check (IGlobal._credentials), so the key is
+        # checked exactly when it is sent.
+        local = is_local(config)
 
         # check if the similarity matches qdrant configuration options
         similarity = config.get('similarity', 'cosine')
@@ -247,7 +245,7 @@ class Store(DocumentStoreBase):
         # KeyError('_type')). Wrap it so the user gets an actionable message instead of a
         # silent failure.
         try:
-            if profile == 'local':
+            if local:
                 self.client = chromadb.HttpClient(host=self.host, port=self.port)
             else:
                 # Cloud / remote server. Chroma Cloud only serves HTTPS, and a
@@ -915,10 +913,23 @@ class Store(DocumentStoreBase):
                 continue
             ids = [rid for rid, _meta in pairs]
             metadatas = [{**meta, 'isDeleted': value} for _rid, meta in pairs]
-            for start in range(0, len(ids), 1000):
-                self.collectionObj.update(ids=ids[start : start + 1000], metadatas=metadatas[start : start + 1000])
+            # The HTTP client refuses one request above the server's batch limit, which it reports;
+            # a document with many chunks is updated in slices.
+            size = self._maxBatchSize(fallback=len(ids))
+            for start in range(0, len(ids), size):
+                self.collectionObj.update(ids=ids[start : start + size], metadatas=metadatas[start : start + size])
             moved += len(ids)
         return moved
+
+    def _maxBatchSize(self, fallback: int) -> int:
+        """
+        Return the largest batch the connected server accepts, as the client reports it.
+
+        @param fallback: The size to use when the client cannot report one.
+        """
+        get_max = getattr(getattr(self, 'client', None), 'get_max_batch_size', None)
+        size = get_max() if callable(get_max) else None
+        return size if isinstance(size, int) and not isinstance(size, bool) and size > 0 else max(fallback, 1)
 
     def render(self, objectId: str, callback: Callable[[str], None]) -> None:
         """

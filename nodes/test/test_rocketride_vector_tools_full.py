@@ -270,6 +270,12 @@ def test_tools_round_trip_on_the_real_store(tools_env):
     assert (deleted['success'], deleted['deleted_count']) == (True, 1)
     assert tools.stats({})['count'] == 3
     assert '/c' not in tools.objdir({})['paths']
+    assert tools.get({'object_id': 'obj-c'}) == {
+        'success': False,
+        'code': 'NOT_FOUND',
+        'error': "get: no document with object_id 'obj-c'",
+        'object_id': 'obj-c',
+    }
 
 
 def test_search_without_an_embedder_names_the_node(tools_env):
@@ -357,10 +363,13 @@ def test_tools_are_refused_until_the_node_exposes_them(tools_env):
     calls = [
         ('stats', {}),
         ('objdir', {}),
+        ('list_documents', {}),
         ('get', {'object_id': 'obj-a'}),
         ('search', {'query': 'anything'}),
         ('upsert', {'documents': _docs([('a', _unit_vec(rng))])}),
         ('delete', {'object_ids': ['obj-a']}),
+        ('soft_delete', {'object_ids': ['obj-a']}),
+        ('restore', {'object_ids': ['obj-a']}),
     ]
     for tool, args in calls:
         result = getattr(tools, tool)(args)

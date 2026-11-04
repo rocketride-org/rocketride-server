@@ -23,20 +23,23 @@ The node uses the lightweight `chromadb-client` HTTP client and creates the coll
 
 ## As a tool
 
-The configured tool server name is the namespace for the functions below; it defaults to `chroma`.
+Pipeline agents address the functions below as `<node id>.<function>`. The configured tool server name (default `chroma`) labels tool-response messages.
 
 | Function | Description |
 | --- | --- |
 | `search` | Search the collection for matching documents. |
+| `objdir` | Lists the distinct parent paths of active documents in the collection as a map of parent path to one object ID each; accepts optional `parent` (exact match), `offset`, and `limit` (default and cap 1000). `offset` and `limit` count documents, not paths: documents that share a parent path appear as one entry, so a page can hold fewer than `limit` entries while more follow. |
+| `get` | Returns up to `limit` chunks (default and cap 100) of one document by `object_id`, ordered by chunk ID, with `total`, `has_more`, and `truncated`; an object ID the store does not hold, or one in the trash, returns a failure object. |
+| `stats` | Returns the collection's count as this store reports it, `document_count` (null on this store, which does not list documents), the embedding model name, and the vector size. |
 | `upsert` | Add or update documents in the collection. |
 | `delete` | Remove documents by object ID. |
 | `list_documents` | List the documents one by one with their path and chunk count, in pages ordered by path (follow `next_cursor`); `deleted: 'deleted'` lists the trash. |
 | `soft_delete` | Move documents to the trash by object ID: their chunks stay stored but leave search, `objdir`, `get` and the listing until `restore`. |
 | `restore` | Take documents out of the trash by object ID. |
 
-`search` and an `upsert` without a supplied embedding use the node's bound embedding provider. These calls are separate from the data lanes, so a pipeline embedding upstream does not by itself provide vectors to a tool call. Use different server names when an agent has access to multiple Chroma nodes.
+`search` and an `upsert` without a supplied embedding use the node's bound embedding provider. These calls are separate from the data lanes, so a pipeline embedding upstream does not by itself provide vectors to a tool call. Agents distinguish multiple Chroma nodes by their pipeline node IDs.
 
-`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`, defaulting to `"vectordb_tool"`, `"/"` and `0` respectively.
+`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`; `nodeId` defaults to `"vectordb_tool"`, `parent` to `"/"`, and `chunkId` to the document's position among the chunks sent for its object ID in the call (0 for the first), and an explicit `chunkId` may not repeat within the call.
 
 ## Profiles
 
@@ -89,7 +92,7 @@ Use the bound provider for an agent that must add or search information without 
 
 ### Tool Server Name
 
-This value namespaces the agent functions: `chroma.search`, `chroma.upsert`, and `chroma.delete` by default. Change it for distinct Chroma stores exposed to the same agent.
+The name defaults to `chroma` and labels this store in tool-response messages. Pipeline agents address all eight functions listed above by node ID, for example `<node id>.search` or `<node id>.restore`; changing this label does not change those addresses.
 
 ### Write switches
 
@@ -151,7 +154,7 @@ Agent semantic search and automatic tool upserts require the node's bound embedd
 | `chroma.database` | `string` | **Database**<br/>Chroma Cloud database name (required for Chroma Cloud, optional for self-hosted multi-tenant servers) | `""` |
 | `chroma.profile` | `string` | **Type of chroma host**<br/>Connect to... | `"local"` |
 | `chroma.provider` | `string` |  | const: `"chroma"` |
-| `chroma.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'chroma' exposes tools as chroma.search / chroma.upsert / chroma.delete. Change this when running multiple Chroma nodes in the same pipeline so their tool names do not collide. | `"chroma"` |
+| `chroma.serverName` | `string` | **Tool Server Name**<br/>Label for this store in tool-response messages (for example, a refused write names chroma.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings. | `"chroma"` |
 | `chroma.ssl` | `boolean` | **Use TLS**<br/>Connect over HTTPS. Required for Chroma Cloud, which serves HTTPS only. Turn it off for a self-hosted server reached over plain HTTP. | `true` |
 | `chroma.tenant` | `string` | **Tenant**<br/>Chroma Cloud tenant id (required for Chroma Cloud, optional for self-hosted multi-tenant servers) | `""` |
 | `vector.cloud.host` |  | Enter the server IP address e.g. <your-instance-url> |  |
@@ -165,5 +168,5 @@ Agent semantic search and automatic tool upserts require the node's bound embedd
 
 ## Source
 
-[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/store_chroma)
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/nihalnihalani/rocketride-server/tree/develop/nodes/src/nodes/store_chroma)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

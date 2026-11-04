@@ -2603,7 +2603,9 @@ def test_delete_extended_answer(context):
     store = clustered(CountingStore, docs=2, chunks=3)
     answer = node(store, allow_writes=True).delete({'object_ids': ['doc00', 'doc00', 'ghost']})
     assert answer['success'] is True
-    assert (answer['deleted_count'], answer['removed_chunks'], answer['not_found']) == (3, 3, ['ghost'])
+    # deleted_count is the distinct ids the request named (#2704), not the entries it carried.
+    assert (answer['deleted_count'], answer['removed_chunks'], answer['not_found']) == (2, 3, ['ghost'])
+    assert answer['object_ids'] == ['doc00', 'ghost']
     assert answer['audit']['action'] == 'vector.delete' and answer['audit']['object_ids'] == ['doc00', 'ghost']
 
 
@@ -2753,9 +2755,15 @@ def test_get_starts_at_the_first_stored_chunk():
     assert answer['total'] == 10 and answer['has_more'] is False
 
 
-def test_get_of_the_control_record_is_empty():
+def test_get_of_the_control_record_is_refused():
+    """The control row is reserved, as on develop (#2704): a failure that names it, not an empty page."""
     answer = node(clustered()).get({'object_id': 'schema'})
-    assert answer['success'] is True and answer['chunks'] == [] and answer['has_more'] is False
+    assert answer == {
+        'success': False,
+        'code': 'RESERVED_ID',
+        'error': "get: object_id 'schema' is reserved for the store's control row",
+        'object_id': 'schema',
+    }
 
 
 def test_objdir_lists_entries_without_collapsing_equal_paths():

@@ -7,7 +7,7 @@
 	"appManifest": {
 		"id": "rocketride.explorer",
 		"projectId": "71e95c24-091d-4dce-a50a-053579b68838",
-		"publisher": "Aparavi Software AG",
+		"publisher": "RocketRide",
 		"name": "File Explorer",
 		"description": "Browse, view, and edit files stored on the RocketRide server",
 		"icon": "./icon.svg",
@@ -36,7 +36,6 @@
 		"safari >= 13"
 	],
 	"dependencies": {
-		"@module-federation/rsbuild-plugin": "^2.5.1",
 		"docx-preview": "^0.3.3",
 		"dompurify": "~3.4.13",
 		"monaco-editor": "^0.55.1",
@@ -47,6 +46,7 @@
 		"shell": "file:../../.rocketride/shell/shell.tgz"
 	},
 	"devDependencies": {
+		"@module-federation/rsbuild-plugin": "^2.5.1",
 		"@rsbuild/core": "~2.2.12",
 		"@rsbuild/plugin-react": "~2.0.1",
 		"typescript": "^5.3.0",

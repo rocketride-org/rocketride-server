@@ -136,7 +136,7 @@
 		"rrvector.serverName": {
 			"type": "string",
 			"title": "Tool Server Name",
-			"description": "Label for this store in the messages its tool functions return (for example a refused write names rrvector.delete). Agents see the functions as <node id>.search, objdir, get, stats, and upsert / delete when writes through tools are allowed; apps call client.tool with the function name and the node id.",
+			"description": "Label for this store in tool-response messages (for example, a refused write names rrvector.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "rrvector",
 			"minLength": 1
 		},

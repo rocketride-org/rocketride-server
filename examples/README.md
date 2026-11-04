@@ -17,6 +17,8 @@ Query:      chat -> embedding -> Qdrant -> prompt -> LLM -> response
 - Answers questions by embedding the query, retrieving relevant documents, and generating an answer with GPT-4o
 - Uses the prompt node to merge retrieved context with the user's question
 
+The file has two source components, so it names the one that starts by default: `"source": "chat_1"`, the query flow. To run the ingestion flow instead, name its source when you start the pipeline: `client.use(filepath='rag-pipeline.pipe', source='webhook_1')` in Python, or `client.use({ filepath: 'rag-pipeline.pipe', source: 'webhook_1' })` in TypeScript. Ingest documents first, or the query flow has nothing to retrieve.
+
 **Required env vars:** `ROCKETRIDE_OPENAI_KEY`, `ROCKETRIDE_QDRANT_HOST`, `ROCKETRIDE_COLLECTION_NAME`
 
 ---
@@ -133,9 +135,9 @@ chat -> RocketRide agent -> response
 ```
 
 - The store node's "Expose as tools" setting is on, which is what offers its functions to the agent; it is off by default on the managed store
-- With tools exposed, `objdir` and `get` can enumerate and read the whole `knowledge_base` collection through the pipeline, so give the pipeline's chat key only to callers who may read every document in it; otherwise leave the setting off
-- The agent lists the stored documents (`objdir`, which returns one object id per distinct parent path, so give each document its own parent path for a complete listing), reads one back (`get`), reports the store's statistics (`stats`) and searches by meaning (`search`; the template wires the `embedding_transformer` miniLM profile as the node's Embedding setting so the tool can embed the query)
-- `upsert` and `delete` are offered to the agent only when the store node's "Allow writes through tools" setting is on; it is off in this template, so asked to delete, the agent reports that it has no delete tool
+- With tools exposed, `list_documents` and `get` can enumerate and read the whole `knowledge_base` collection through the pipeline, so give the pipeline's chat key only to callers who may read every document in it; otherwise leave the setting off
+- The agent lists the stored documents (`list_documents`, one entry per document with its parent path and chunk count; `objdir` is the older map of parent paths to one object id each), reads one back (`get`, which reports an unknown or trashed object id as a failure), reports the store's statistics (`stats`, with the row count and the number of active documents) and searches by meaning (`search`; the template wires the `embedding_transformer` miniLM profile as the node's Embedding setting so the tool can embed the query)
+- `upsert`, `delete`, `soft_delete` and `restore` are offered to the agent only when the store node's "Allow writes through tools" setting is on; it is off in this template, so asked to delete, the agent reports that it has no delete tool
 - The store is the team's RocketRide cloud database, so the template runs on RocketRide Cloud or on a self-hosted engine with a database broker; on a local engine use `store_postgres` with your own PostgreSQL instead
 - Seed the store first through a pipeline that writes to the node's `documents` lane using the same embedding model as the queries: the template's `miniLM` profile uses `sentence-transformers/multi-qa-MiniLM-L6-cos-v1`. For an existing store, change the template's embedding profile to match the model that produced its stored vectors, then ask the agent about what is there
 

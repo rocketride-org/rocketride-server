@@ -35,7 +35,7 @@ const read = (file: string): string => fs.readFileSync(path.join(DIR, file), 'ut
 
 describe('the dev-tool deep entry', () => {
 	it('has the modules the lanes import', () => {
-		for (const name of ['activation.ts', 'busClient.ts', 'controller.ts', 'deadline.ts', 'frame.ts', 'frameIdentity.ts', 'gridPersistence.ts', 'identity.ts', 'prefs.ts', 'realm.ts', 'reply.ts', 'state.ts', 'summon.ts', 'testing.ts', 'timeouts.ts', 'watch.ts']) {
+		for (const name of ['controller.ts', 'deadline.ts', 'engineClient.ts', 'frame.ts', 'frameIdentity.ts', 'gridPersistence.ts', 'identity.ts', 'prefs.ts', 'readiness.ts', 'realm.ts', 'reply.ts', 'state.ts', 'summon.ts', 'testing.ts', 'timeouts.ts', 'watch.ts']) {
 			assert.ok(modules.includes(name), name);
 		}
 	});
@@ -51,6 +51,25 @@ describe('the dev-tool deep entry', () => {
 		for (const file of modules) {
 			const reaches = /packages\/shell\/src/.test(read(file).split('\n').filter((line) => line.startsWith('import')).join('\n'));
 			assert.equal(reaches, file === 'testing.ts', file);
+		}
+	});
+
+	it('keeps none of the retired platform surface: no addressed client op, no peer, no realm-kind inference', () => {
+		const retired = /['"`]client\.(?!request\b|addMonitor\b|removeMonitor\b|event\b|log\.)[A-Za-z]+['"`]/;
+		for (const file of modules) {
+			const code = read(file).split('\n').filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line)).join('\n');
+			assert.doesNotMatch(code, retired, `${file}: an addressed client.<op> the root no longer serves`);
+			assert.doesNotMatch(code, /\bcm\.request\(/, `${file}: a bus op`);
+			assert.doesNotMatch(code, /\b(?:DevToolPeer|channelFor|realmKind|createToolController|createActivationGate)\b/, `${file}: retired symbol`);
+		}
+		assert.ok(!modules.includes('busClient.ts') && !modules.includes('activation.ts'));
+	});
+
+	it('hand-builds no DAP envelope and reaches no ConnectionManager internals', () => {
+		for (const file of modules) {
+			const code = read(file);
+			assert.doesNotMatch(code, /\b(?:buildRequest|_proxyTransport|_transport|opBus|ConnectionManager\.getInstance)\b/, file);
+			assert.doesNotMatch(code, /type:\s*['"]request['"]/, file);
 		}
 	});
 

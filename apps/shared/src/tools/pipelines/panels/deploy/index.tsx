@@ -6,8 +6,8 @@
 /**
  * The DEPLOY panel — the third tab of the pipeline editor's strip.
  *
- * Composes the SHARED {@link DeployPanel} (`shared/panels/deploy`, which the
- * cloud's DeploymentProvider also mounts) with the pipeline-specific
+ * Composes {@link DeployPanel} (now a sibling — the pipeline tool owns its
+ * deployment UI) with the pipeline-specific
  * adaptation that used to sit inline in ProjectView: the readonly guard, the
  * team-deployment row mapping, and the publish gating derived from document
  * state.
@@ -20,10 +20,24 @@
 import React, { useMemo } from 'react';
 import type { ComponentProps } from 'react';
 import { commonStyles } from 'shell';
-import { DeployPanel } from 'shared/panels/deploy/DeployPanel';
-import type { DeploySnapshot } from 'shared/panels/deploy/DeployPanel';
-import type { DeployTeamRef, TeamDeployment, TeamDeploymentRow } from 'shared/panels/deploy/types';
-import type { SchedulePreviewResult } from 'shared/panels/deploy/DeploymentView';
+import { DeployPanel } from './DeployPanel';
+import type { DeploySnapshot } from './DeployPanel';
+import type { DeployTeamRef, TeamDeployment, TeamDeploymentRow } from './types';
+import type { SchedulePreviewResult } from './DeploymentView';
+
+// ── The deploy module's own surface (folded in from shared/panels/deploy,
+//    2026-10-22 — the pipeline tool owns its deployment UI) ──────────────────
+export { DeployPanel } from './DeployPanel';
+export type { IDeployPanelProps, DeploySnapshot } from './DeployPanel';
+export { DeploymentView } from './DeploymentView';
+export type { IDeploymentViewProps, DeploymentInfo, SchedulePreviewResult } from './DeploymentView';
+export { DeploymentRecordPanel } from './DeploymentRecordPanel';
+export { TeamDeploymentRecordPanel } from './TeamDeploymentRecordPanel';
+export type { ITeamDeploymentRecordPanelProps, ITeamDeploymentRecordData } from './TeamDeploymentRecordPanel';
+export type { IDeploymentRecordPanelProps, IDeploymentRecordData } from './DeploymentRecordPanel';
+export { SchedulePanel, describeCron, describeTtl } from './SchedulePanel';
+export type { ISchedulePanelProps } from './SchedulePanel';
+export type { DeployTeamRef, DeployVersionCard, TeamDeployment, TeamDeploymentSchedule, TeamDeploymentRow, TeamDeploymentSource, DeployHistoryRow, DeployScheduleRow } from './types';
 
 // =============================================================================
 // THE CAPABILITY

@@ -7,16 +7,16 @@
  * AppScreenProvider — one App Builder panel per app (page-app webview).
  *
  * The panel is a BUS REALM: its identity is STAMPED into the served HTML
- * (`data-rr-app`), boot state rides `host.appbuilder.load`, host verbs ride
- * the `host.appbuilder.*` ops (ops/appBuilderOps.ts), the SDK half rides the
+ * (`data-rr-app`), boot state rides `host.preview.load`, host verbs ride
+ * the `host.preview.*` ops (ops/previewOps.ts), the SDK half rides the
  * brokered `client.app.*` ops, and the dev-session feeds ride the app's
  * topics:
  *
- *   appbuilder:app:<appId>:watch    RETAINED WatchStatus — retracted on close
- *   appbuilder:app:<appId>:dev      RETAINED {entry,manifest} — retracted
- *   appbuilder:app:<appId>:console  SIGNAL   row (realm keeps its backlog)
- *   appbuilder:app:<appId>:errors   SIGNAL   row
- *   appbuilder:app:<appId>:session  RETAINED {token} — one-shot credential,
+ *   preview:app:<appId>:watch    RETAINED WatchStatus — retracted on close
+ *   preview:app:<appId>:dev      RETAINED {entry,manifest} — retracted
+ *   preview:app:<appId>:console  SIGNAL   row (realm keeps its backlog)
+ *   preview:app:<appId>:errors   SIGNAL   row
+ *   preview:app:<appId>:session  RETAINED {token} — one-shot credential,
  *                                   the consuming page retracts after apply
  *
  * This provider keeps only what is genuinely PANEL work: the .rrapp custom
@@ -30,7 +30,7 @@ import { renderWebviewHtml } from './toolhost/frameworkProvider';
 import { ConnectionManager } from '../connection/connection';
 import { scanWorkspaceApps } from 'shared/tools/appdev';
 import { hostWorkspaceFs } from './toolhost/hostWorkspaceFs';
-import { ensureAppTrigger, ensureProjectId } from '../appdev/appMarker';
+import { ensureAppTrigger, ensureProjectId } from 'rocketride/app-pack';
 import { ensureDevSession, getDevSessionManager } from '../appdev/devSessionManager';
 import { vendorAppTypes } from '../appdev/appTypes';
 import type { BusHost } from './toolhost/busHost';
@@ -59,6 +59,8 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	/** Latest watch status per app — the reconnect vendor-retry scan reads it
 	 *  (the webview's replay rides the retained topic, not this map). */
 	private lastWatch = new Map<string, AppWatchStatus>();
+	/** The one UNTITLED (unbound) builder panel, when open. */
+	private untitledPanel: vscode.WebviewPanel | undefined;
 
 	constructor(
 		private readonly context: vscode.ExtensionContext,
@@ -96,9 +98,45 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		// The document: <folder>/<name>.rrapp — a contentless trigger created
 		// on demand. The working-copy projectId is ensured in the appManifest
 		// (package.json is the single home of app facts).
-		await ensureProjectId(app.folder);
-		const trigger = await ensureAppTrigger(app.folder, appId);
+		ensureProjectId(app.folder);
+		// SDK ensureAppTrigger returns the path; the editor open needs a Uri.
+		const trigger = vscode.Uri.file(ensureAppTrigger(app.folder, appId));
 		await vscode.commands.executeCommand('vscode.openWith', trigger, 'rocketride.appBuilder');
+	}
+
+	/**
+	 * Open (or reveal) the UNTITLED App Builder — the unbound builder whose
+	 * body is the New App wizard (the builder's empty state, pipeline-editor
+	 * pattern). No app document exists yet, so this is a plain webview panel
+	 * titled "Untitled"; a successful scaffold opens the real custom editor
+	 * and retires this panel (closeUntitled, via the host.appdev ops), and
+	 * Cancel retires it the same way. One at a time: a second New App
+	 * reveals the open wizard rather than spawning another.
+	 */
+	public showUntitled(): void {
+		if (this.untitledPanel) {
+			this.untitledPanel.reveal();
+			return;
+		}
+		const panel = vscode.window.createWebviewPanel('rocketride.appBuilder.untitled', 'Untitled', vscode.ViewColumn.Active, {
+			enableScripts: true,
+			retainContextWhenHidden: true,
+			localResourceRoots: [this.context.extensionUri],
+		});
+		// No `app` stamp — the page-app bundle renders its unbound body (the
+		// wizard) when `data-rr-app` is absent.
+		panel.webview.html = renderWebviewHtml(this.context, panel.webview, { htmlFile: 'page-app.html' });
+		const detachRealm = this.busHost.attachWebview(panel.webview, 'page:preview/untitled');
+		this.untitledPanel = panel;
+		panel.onDidDispose(() => {
+			detachRealm();
+			if (this.untitledPanel === panel) this.untitledPanel = undefined;
+		});
+	}
+
+	/** Closes the untitled builder panel, if one is open (no-op otherwise). */
+	public closeUntitled(): void {
+		this.untitledPanel?.dispose();
 	}
 
 	// =========================================================================
@@ -174,9 +212,9 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		this.panels.set(appId, panel);
 		panel.webview.html = this.getHtmlForWebview(panel.webview, appId);
 
-		// The panel is a bus realm: boot state rides host.appbuilder.load,
+		// The panel is a bus realm: boot state rides host.preview.load,
 		// the SDK half rides client.app.*, the feeds ride the app's topics.
-		const detachRealm = this.busHost.attachWebview(panel.webview, `page:appbuilder/${appId}`);
+		const detachRealm = this.busHost.attachWebview(panel.webview, `page:preview/${appId}`);
 
 		// Session handoff: this window is already authenticated — give the
 		// preview shell the same credential so apps requiring auth render
@@ -185,30 +223,34 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 		void this.connectionManager
 			.resolveAuthCredential()
 			.then((token) => {
-				if (token) this.busHost.retained.publish(`appbuilder:app:${appId}:session`, { token });
+				// source 'window': the INHERITED credential — the webview keeps
+				// it in the inherit-gated slot, never the preview-session slot
+				// (host.preview.login publishes source 'preview' on this lane).
+				if (token) this.busHost.retained.publish(`preview:app:${appId}:session`, { token, source: 'window' });
 			})
 			.catch(() => {
 				/* signed out — the preview shows its sign-in prompt */
 			});
 
 		panel.onDidDispose(() => {
+			// The realm attachment belongs to THIS panel — always detach it.
+			detachRealm();
 			// A newer panel may own this app id now — never clear its state.
 			if (this.panels.get(appId) !== panel) return;
-			detachRealm();
 			this.panels.delete(appId);
 			this.lastWatch.delete(appId);
 			// Retract the app's retained topics — retention outlives the
 			// publisher by design, and a reopened panel must not replay a
 			// closed session's state (or a stale credential).
-			this.busHost.retained.publish(`appbuilder:app:${appId}:watch`, undefined);
-			this.busHost.retained.publish(`appbuilder:app:${appId}:dev`, undefined);
-			this.busHost.retained.publish(`appbuilder:app:${appId}:session`, undefined);
+			this.busHost.retained.publish(`preview:app:${appId}:watch`, undefined);
+			this.busHost.retained.publish(`preview:app:${appId}:dev`, undefined);
+			this.busHost.retained.publish(`preview:app:${appId}:session`, undefined);
 			// The App Screen owns the watch lifecycle: closing it ends the
 			// session and drops the dev overlay (shell returns to published).
 			void getDevSessionManager()?.stop(appId);
 		});
 
-		// Start the inner loop (setting-gated by rocketride.appdev.autoWatch)
+		// Start the inner loop (always — auto-watch is the only behavior)
 		if (app) {
 			// Vendor the platform package FIRST, then start the watch: the
 			// watch's workspace install resolves .rocketride/shell/shell.tgz,
@@ -261,7 +303,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	 */
 	public notifyWatch(appId: string, status: AppWatchStatus): void {
 		this.lastWatch.set(appId, status);
-		this.busHost.retained.publish(`appbuilder:app:${appId}:watch`, status);
+		this.busHost.retained.publish(`preview:app:${appId}:watch`, status);
 	}
 
 	/**
@@ -276,7 +318,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	 *   preview shell's app metadata, not the server registry.
 	 */
 	public notifyDevServer(appId: string, entry: string, manifest?: Record<string, unknown>): void {
-		this.busHost.retained.publish(`appbuilder:app:${appId}:dev`, { entry, manifest });
+		this.busHost.retained.publish(`preview:app:${appId}:dev`, { entry, manifest });
 	}
 
 	/**
@@ -289,7 +331,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	 * @param text - Row text (one line).
 	 */
 	public notifyConsole(appId: string, level: 'log' | 'warn' | 'error', text: string): void {
-		this.busHost.retained.signal(`appbuilder:app:${appId}:console`, { time: AppScreenProvider.feedTime(), level, text });
+		this.busHost.retained.signal(`preview:app:${appId}:console`, { time: AppScreenProvider.feedTime(), level, text });
 	}
 
 	/**
@@ -300,7 +342,7 @@ export class AppScreenProvider implements vscode.CustomReadonlyEditorProvider {
 	 * @param source - Optional origin tag ("rsbuild", "pnpm install").
 	 */
 	public notifyError(appId: string, message: string, source?: string): void {
-		this.busHost.retained.signal(`appbuilder:app:${appId}:errors`, { time: AppScreenProvider.feedTime(), message, source });
+		this.busHost.retained.signal(`preview:app:${appId}:errors`, { time: AppScreenProvider.feedTime(), message, source });
 	}
 
 	/**

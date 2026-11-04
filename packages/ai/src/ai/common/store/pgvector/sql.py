@@ -515,12 +515,49 @@ class Statements:
             [vector] + params + [limit, offset],
         )
 
+    def semantic_exact(
+        self, columns: Sequence[str], metric: str, vector: str, where: Where, limit: Optional[int], offset: int
+    ) -> Tuple[sql.Composed, List[Any]]:
+        """The semantic search that no ANN index can serve (the exact recovery of a filtered HNSW scan).
+
+        Adding zero to the distance keeps the planner off an approximate index for this ORDER BY; the
+        subquery makes the ``distance`` alias visible to that expression without passing the query
+        vector twice. Undefined distances (NULL or NaN, such as a zero vector under cosine) are left out.
+        """
+        pred, params = where.build()
+        return (
+            _q(
+                'semantic_exact',
+                'SELECT * FROM (SELECT {cols}, "embedding" {op} %s::vector AS "distance" FROM {t} WHERE {w}) '
+                'AS candidates WHERE "distance" < \'Infinity\'::float8 ORDER BY "distance" + 0 LIMIT %s OFFSET %s',
+                cols=self._select_list(columns, embedding=False),
+                op=sql.SQL(OPERATORS[metric]),
+                t=self.t,
+                w=pred,
+            ),
+            [vector] + params + [limit, offset],
+        )
+
+    def has_ann_index(self) -> Tuple[sql.Composed, List[Any]]:
+        """Whether the table has a valid approximate (HNSW or IVFFlat) index: only then can an exact retry find more."""
+        return (
+            _q(
+                'has_ann_index',
+                'SELECT EXISTS (SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid '
+                'JOIN pg_am a ON a.oid = c.relam '
+                "WHERE i.indrelid = to_regclass(%s) AND i.indisvalid AND a.amname IN ('hnsw', 'ivfflat'))",
+            ),
+            [self.regclass],
+        )
+
     def paths(self, where: Where, limit: Optional[int], offset: int) -> Tuple[sql.Composed, List[Any]]:
+        """One row per distinct parent (its lowest object id), so ``offset`` and ``limit`` count paths."""
         pred, params = where.build()
         return (
             _q(
                 'paths',
-                'SELECT "parent", "objectid" FROM {t} WHERE {w} ORDER BY "parent", "objectid" LIMIT %s OFFSET %s',
+                'SELECT DISTINCT ON ("parent") "parent", "objectid" FROM {t} WHERE {w} '
+                'ORDER BY "parent", "objectid" LIMIT %s OFFSET %s',
                 t=self.t,
                 w=pred,
             ),
