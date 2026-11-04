@@ -60,18 +60,22 @@ async function twoFrames() {
 	const r = await rig({ saved: [PIPELINE, DIRECT], rows, docKey: 'c-direct', tool: (params) => (params.tool === 'execute' ? { rows: [{ ok: 1 }], affected_rows: 0 } : { dialect: 'mysql' }) });
 	r.engine.script['client.use'] = async () => {
 		await new Promise<void>((resolve) => { setImmediate(resolve); });
-		if (rows.length === 1) rows.push(directRow());
+		if (!rows.some((row) => row.token === 'tk_direct')) rows.push(directRow());
 		return {};
 	};
-	r.engine.script['client.getTaskToken'] = () => 'tk_direct';
-	r.engine.script['client.terminate'] = () => ({});
+	let alive = false;
+	let tokenGate: Promise<void> | null = null;
+	const start = r.engine.script['client.use']!;
+	r.engine.script['client.use'] = async (params) => { await start(params); alive = true; return {}; };
+	r.engine.script['client.getTaskToken'] = async () => { if (tokenGate) await tokenGate; return alive ? 'tk_direct' : undefined; };
+	r.engine.script['client.terminate'] = () => { alive = false; const i = rows.findIndex((row) => row.token === 'tk_direct'); if (i >= 0) rows.splice(i, 1); return {}; };
 	const second = attachSqlFrame({ channel: shellProtocol.createToolChannel(r.h.newFramePeer()), docKey: 'c-direct', documents: { open: () => undefined, close: () => undefined }, protocol: r.protocol });
 	const history = createRemoteHistory({ caller: second.caller, channel: sqlChannel(second.channel), owner: second.owner });
 	const env2 = createRemoteSqlEnv(second.caller, true, second.owner, history);
 	await settle();
 	const uses = (): number => r.engine.requests.filter((q) => q.op === 'client.use').length;
 	const terminated = (): number => r.engine.requests.filter((q) => q.op === 'client.terminate').length;
-	return { r, env2, second, history, uses, terminated, dispose: () => { history.dispose(); second.dispose(); r.dispose(); } };
+	return { r, env2, second, history, uses, terminated, setTokenGate: (gate: Promise<void> | null) => { tokenGate = gate; }, dispose: () => { history.dispose(); second.dispose(); r.dispose(); } };
 }
 
 describe('two frames on one direct connection', () => {
@@ -113,6 +117,62 @@ describe('two frames on one direct connection', () => {
 			t.env2.releaseEndpoint(DIRECT.id, b.key);
 			await new Promise<void>((resolve) => { setTimeout(resolve, 50); });
 			assert.equal(t.terminated(), 1);
+		} finally {
+			t.dispose();
+		}
+	});
+});
+
+describe('holders are per frame, and a close never races a new open (D6-SQL-4, D6-SQL-5)', () => {
+	it('a frame that resolves again (a list republish, a remount of its env) is still one holder: closing every frame stops the pipeline', async () => {
+		const t = await twoFrames();
+		try {
+			const a = await t.r.env.resolveEndpoint(DIRECT);
+			await t.r.env.resolveEndpoint(DIRECT);
+			await t.r.env.resolveEndpoint(DIRECT);
+			const b = await t.env2.resolveEndpoint(DIRECT);
+			t.r.env.releaseEndpoint(DIRECT.id, a.key);
+			await new Promise<void>((resolve) => { setTimeout(resolve, 80); });
+			assert.equal(t.terminated(), 0, 'frame B still holds it');
+			t.env2.releaseEndpoint(DIRECT.id, b.key);
+			await until(() => t.terminated() === 1, 'the last real close to stop the pipeline');
+		} finally {
+			t.dispose();
+		}
+	});
+
+	it('a new open while the last close is tearing down gets a live pipeline: nothing is terminated under it', async () => {
+		const t = await twoFrames();
+		try {
+			const a = await t.r.env.resolveEndpoint(DIRECT);
+			let open!: () => void;
+			t.setTokenGate(new Promise<void>((resolve) => { open = resolve; }));
+			t.r.env.releaseEndpoint(DIRECT.id, a.key);
+			await new Promise<void>((resolve) => { setTimeout(resolve, 30); });
+			const opening = t.env2.resolveEndpoint(DIRECT);
+			await new Promise<void>((resolve) => { setTimeout(resolve, 30); });
+			t.setTokenGate(null);
+			open();
+			const b = await opening;
+			assert.equal(t.terminated(), 0, 'a pipeline with a holder is never terminated');
+			const result = await t.env2.getSession(b).execute('SELECT 1', { idempotent: true });
+			assert.deepEqual(result.rows, [{ ok: 1 }]);
+			assert.equal(t.uses(), 1, 'and it did not have to be restarted');
+		} finally {
+			t.dispose();
+		}
+	});
+
+	it('a close that has already torn the pipeline down is followed by a fresh start for a later open', async () => {
+		const t = await twoFrames();
+		try {
+			const a = await t.r.env.resolveEndpoint(DIRECT);
+			t.r.env.releaseEndpoint(DIRECT.id, a.key);
+			await until(() => t.terminated() === 1, 'the teardown');
+			const b = await t.env2.resolveEndpoint(DIRECT);
+			assert.equal(t.uses(), 2, 'a new pipeline');
+			const result = await t.env2.getSession(b).execute('SELECT 1', { idempotent: true });
+			assert.deepEqual(result.rows, [{ ok: 1 }]);
 		} finally {
 			t.dispose();
 		}

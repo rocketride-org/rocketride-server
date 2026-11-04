@@ -37,6 +37,7 @@ import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
 	getSavedConnections,
+	getSavedConnectionsLoadProblem,
 	getSavedConnectionsStatus,
 	loadSavedConnections,
 	resetSavedConnections,
@@ -91,6 +92,46 @@ describe('loadSavedConnections: a failed read never installs the writer', () => 
 		await loadSavedConnections(fs);
 		assert.equal(getSavedConnectionsStatus(), 'idle');
 		assert.deepEqual(writes, []);
+	});
+});
+
+describe('loadSavedConnections: a file that parses but is not a list is unreadable, never replaced (D6-SQL-2)', () => {
+	/** A user store holding one file; every write replaces it (as the real store does). */
+	function store(initial: unknown): { fs: SavedConnectionsFs; content: () => unknown; writes: number } {
+		const state = { content: initial, writes: 0 };
+		const fs: SavedConnectionsFs = {
+			fsMkdir: async () => undefined,
+			fsReadJson: async () => JSON.parse(JSON.stringify(state.content)),
+			fsWriteJson: async (_path, value) => { state.content = value; state.writes += 1; },
+		};
+		return { fs, content: () => state.content, get writes() { return state.writes; } };
+	}
+
+	for (const [what, stored] of [
+		['a versioned object', { version: 2, connections: [ONE, TWO] }],
+		['a string', 'connections'],
+		['a number', 7],
+		['null', null],
+	] as Array<[string, unknown]>) {
+		it(`${what}: no writer, a surfaced reason, and the stored file is untouched after a save`, async () => {
+			const original = JSON.parse(JSON.stringify(stored));
+			const s = store(stored);
+			await loadSavedConnections(s.fs);
+			assert.equal(getSavedConnectionsStatus(), 'idle', 'the list is not ready');
+			assert.match(getSavedConnectionsLoadProblem() ?? '', /not a list of connections|format/i, 'the reason is surfaced');
+			upsertSavedConnection({ ...ONE, id: 'c-new', name: 'New' });
+			await new Promise<void>((resolve) => { setImmediate(resolve); });
+			assert.equal(s.writes, 0, 'nothing was written');
+			assert.deepEqual(s.content(), original, 'the stored file is exactly what it was');
+		});
+	}
+
+	it('a real list still loads, and clears an earlier problem', async () => {
+		await loadSavedConnections(store({ not: 'a list' }).fs);
+		assert.ok(getSavedConnectionsLoadProblem() !== null);
+		await loadSavedConnections(store([ONE]).fs);
+		assert.equal(getSavedConnectionsStatus(), 'ready');
+		assert.equal(getSavedConnectionsLoadProblem(), null);
 	});
 });
 
