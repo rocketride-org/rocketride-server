@@ -59,7 +59,7 @@ export const GALLERY_TOKEN_USAGE: Record<string, IGalleryTokenUsage> = {
 		},
 	},
 	'chat-view': {
-		direct: ['--rr-bg-default', '--rr-bg-paper', '--rr-bg-scrollbar-thumb', '--rr-bg-widget', '--rr-border', '--rr-border-focus', '--rr-border-input', '--rr-brand', '--rr-color-error', '--rr-fg-button', '--rr-font-family', '--rr-font-family-widget', '--rr-font-mono', '--rr-font-size-widget', '--rr-text-caption', '--rr-text-disabled', '--rr-text-link', '--rr-text-primary', '--rr-text-secondary'],
+		direct: ['--rr-bg-default', '--rr-bg-paper', '--rr-bg-scrollbar-thumb', '--rr-bg-widget', '--rr-border', '--rr-border-focus', '--rr-border-input', '--rr-brand', '--rr-color-error', '--rr-color-info', '--rr-color-success', '--rr-fg-button', '--rr-font-family', '--rr-font-family-widget', '--rr-font-mono', '--rr-font-size-widget', '--rr-text-caption', '--rr-text-disabled', '--rr-text-link', '--rr-text-primary', '--rr-text-secondary'],
 		commonStyles: {
 			cardFlat: ['--rr-bg-paper', '--rr-border'],
 			inputField: ['--rr-bg-input', '--rr-border-input', '--rr-text-primary'],
