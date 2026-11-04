@@ -52,6 +52,7 @@ interface IRig {
 	monitors: string[];
 	client: IExplorerClient;
 	engine: IEngineReadiness;
+	discovery: ReturnType<typeof createDevToolDiscovery>;
 	/** Tell the readiness what the realm's client and connection are now (what useRealmEngine does on every render). */
 	syncEngine: () => void;
 	detach: () => void;
@@ -66,7 +67,7 @@ interface IRig {
  * @param opts - `engineStaysDown`: never tell the readiness the realm's client is there (a realm that cannot answer yet).
  * @returns The rig.
  */
-function rig(opts: { engineStaysDown?: boolean } = {}): IRig {
+function rig(opts: { engineStaysDown?: boolean; present?: boolean } = {}): IRig {
 	const realm = createFakeClientRealm();
 	const world = fakeWorld([row({ ownerId: 'user-a', teamId: 'team-1' })]);
 	const clock = manualClock();
@@ -81,8 +82,8 @@ function rig(opts: { engineStaysDown?: boolean } = {}): IRig {
 	const syncEngine = (): void => { if (!opts.engineStaysDown) engine.set({ client: realm.cm.getClient(), isConnected: realm.cm.isConnected() }); };
 	const offConnected = realm.cm.on('shell:connected', syncEngine);
 	const offDisconnected = realm.cm.on('shell:disconnected', syncEngine);
-	const discovery = createDevToolDiscovery({ cm: realm.cm, client, identity, engine, focusTarget: null });
-	const store = createEndpointStore({ providers: new Set(['db_postgres']), roles: SINGLE_TOOLS_ROLE, tools: {}, clock });
+	const discovery = createDevToolDiscovery({ cm: realm.cm, client, identity, engine, focusTarget: null, present: opts.present ?? true });
+	const store = createEndpointStore({ providers: new Set(['db_postgres']), roles: SINGLE_TOOLS_ROLE, tools: {}, clock, holdProbes: () => discovery.holdProbes() });
 	const detach = store.attach(client, identity.get().identity, discovery.watch);
 	return {
 		realm,
@@ -91,6 +92,7 @@ function rig(opts: { engineStaysDown?: boolean } = {}): IRig {
 		monitors,
 		client,
 		engine,
+		discovery,
 		syncEngine,
 		detach,
 		dispose: () => { detach(); discovery.dispose(); offConnected(); offDisconnected(); identity.dispose(); },
@@ -107,6 +109,27 @@ describe('the ConnectionManager satisfies the structural discovery bus', () => {
 });
 
 describe('createDevToolDiscovery', () => {
+	it('DA-R2-04: a controller mounted at host boot issues ZERO tool calls until a user-presence trigger; the first trigger probes once', async () => {
+		const r = rig({ present: false });
+		r.realm.login(account('user-a', 'org-1', 'team-1'));
+		await r.clock.advance(1_000);
+		assert.equal(r.world.getTasksCalls, 1, 'discovery (a read of the task list) runs at mount');
+		assert.equal(r.endpoints(), 1, 'the endpoint is listed');
+		assert.equal(r.world.calls.length, 0, 'but no endpoint is probed: no tool call reaches a pipeline');
+		assert.equal(r.discovery.holdProbes(), true);
+		r.realm.emit('shell:event', { event: { event: 'apaevt_task', body: { action: 'begin' } } });
+		await r.clock.advance(1_000);
+		assert.equal(r.world.calls.length, 0, 'task events and focus do not count as presence');
+
+		r.discovery.markUserPresent('op');
+		await r.clock.advance(1_000);
+		assert.deepEqual(r.world.calls.map((call) => call.tool), ['dialect'], 'the first trigger probes once');
+		r.discovery.markUserPresent('user');
+		await r.clock.advance(1_000);
+		assert.equal(r.world.calls.length, 1, 'a later trigger starts nothing');
+		r.dispose();
+	});
+
 	it('a null account means no discovery call, whatever wakes the store', async () => {
 		const r = rig();
 		r.realm.emit('shell:event', { event: { event: 'apaevt_task', body: { action: 'begin' } } });

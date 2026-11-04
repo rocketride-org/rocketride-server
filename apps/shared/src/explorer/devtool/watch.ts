@@ -86,6 +86,14 @@ export interface IDevToolDiscoveryOptions {
 	engine: IEngineReadiness;
 	/** Where focus comes from (default: the window, when there is one; null: none). */
 	focusTarget?: IFocusTarget | null;
+	/**
+	 * Whether a person is already using the tool at mount (default false). A
+	 * pinned tool's controller mounts at host boot with nobody there, and
+	 * probing every endpoint then would keep every running pipeline alive
+	 * (a probe is a tool call). Until `markUserPresent`, discovery is reads only
+	 * ({@link IDevToolDiscovery.holdProbes}).
+	 */
+	present?: boolean;
 }
 
 /** The composition. */
@@ -96,6 +104,20 @@ export interface IDevToolDiscovery {
 	allowed(): boolean;
 	/** Be told when `allowed()` changes; returns unsubscribe. */
 	subscribe(cb: (allowed: boolean) => void): () => void;
+	/**
+	 * Whether endpoint probes (tool calls) are held: true until a person is
+	 * present. Pass it as the store's `holdProbes`.
+	 */
+	holdProbes(): boolean;
+	/**
+	 * A person is using the tool: the first frame op (`attachController`'s
+	 * `onFirstOp`), or an interaction in the sidebar. The first call releases the
+	 * held probes with one refresh (no new protocol: the lane calls it from the
+	 * two places it already knows); later calls do nothing.
+	 *
+	 * @param reason - What showed presence (for the lane's own logging).
+	 */
+	markUserPresent(reason: 'op' | 'user'): void;
 	/** Stop following identity and readiness (idempotent). */
 	dispose(): void;
 }
@@ -114,6 +136,7 @@ export function createDevToolDiscovery(opts: IDevToolDiscoveryOptions): IDevTool
 	let allowed = compute();
 	let fingerprint = identity.get().fingerprint;
 	let disposed = false;
+	let present = opts.present === true;
 
 	/** Fan-out targets inside the watch (one per attached store). */
 	const wakers = new Set<{ onAllowed: () => void; onIdentity: (next: IExplorerIdentity | null) => void }>();
@@ -181,6 +204,14 @@ export function createDevToolDiscovery(opts: IDevToolDiscoveryOptions): IDevTool
 	return {
 		watch,
 		allowed: () => allowed,
+		holdProbes: () => !present,
+		markUserPresent() {
+			if (present || disposed) return;
+			present = true;
+			// One refresh now releases the probes discovery held; if discovery is not
+			// allowed yet, the refresh it makes when it becomes allowed probes.
+			if (allowed) for (const waker of [...wakers]) waker.onAllowed();
+		},
 		subscribe(cb) {
 			listeners.add(cb);
 			return () => { listeners.delete(cb); };
