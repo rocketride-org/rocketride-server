@@ -305,50 +305,28 @@ jobs:
             echo "RR_REQUIRE_DB_TESTS=1"
           } >> "$GITHUB_ENV"
 
-      # Vector stores for the Vector Explorer live suites (Linux only), run by
-      # the unmocked live-database pass of nodes:test: Qdrant 1.17.1 and Chroma
-      # 1.5.9 pinned by digest (the images scripts/acceptance/vector-explorer/
-      # containers/start.sh pins), and PgBouncer in transaction mode in front of
-      # rr-pgvector, through which the pgvector suites run their pooled cases.
-      # Vars are exported only once all three answer, and RR_REQUIRE_DB_TESTS
-      # (above) makes an unreachable server a failure.
-      - name: Start vector stores (Qdrant + Chroma + pgvector PgBouncer) for tests / Linux
+      # Servers of the live database lane's domains (Linux only), one script per
+      # domain in nodes/test/db-services/, run in sorted order after the Postgres
+      # step. A domain adds its servers by adding its script, never by editing
+      # this workflow. The protocol (stdout = NAME=value lines, exported here only
+      # after the script succeeded; images pinned by digest) is in
+      # nodes/test/db-services/_common.sh. The suites those servers feed are
+      # registered in nodes/scripts/db-lanes/.
+      - name: Start DB live-lane services / Linux
         if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test
         run: |
           set -euo pipefail
-          docker run -d --name rr-qdrant -p 56333:6333 -p 56334:6334 \
-            qdrant/qdrant:v1.17.1@sha256:94728574965d17c6485dd361aa3c0818b325b9016dac5ea6afec7b4b2700865f
-          docker run -d --name rr-chroma -p 58000:8000 \
-            chromadb/chroma:1.5.9@sha256:1e0b73a187a28757c572acba508c46f48c9e8b0acaf5c20e6d95cdedce1acdf6
-          docker run -d --name rr-pgvector-pgbouncer --link rr-pgvector:pgv -p 56434:5432 \
-            -e DB_HOST=pgv -e DB_USER=rruser -e DB_PASSWORD=rrpass -e DB_NAME=rrtenant \
-            -e POOL_MODE=transaction -e AUTH_TYPE=scram-sha-256 -e DEFAULT_POOL_SIZE=4 -e MAX_CLIENT_CONN=200 \
-            edoburu/pgbouncer@sha256:9c78945868a6a142c7fc40ccd843bbe5a606df163c7ffce4de70e0d628d696a2
-          ready=
-          for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:56333/readyz >/dev/null 2>&1; then ready=1; break; fi
-            sleep 1
+          shopt -s nullglob
+          for script in nodes/test/db-services/[a-z]*.sh; do
+            echo "::group::$script"
+            vars=$(bash "$script")
+            echo "::endgroup::"
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              [[ "$line" =~ ^[A-Z][A-Z0-9_]*=.*$ ]] || { echo "$script printed a line that is not NAME=value: $line"; exit 1; }
+              echo "$line" >> "$GITHUB_ENV"
+            done <<< "$vars"
           done
-          [ "${ready:-}" = "1" ] || { echo "rr-qdrant did not become ready"; docker logs rr-qdrant || true; exit 1; }
-          ready=
-          for i in $(seq 1 60); do
-            if curl -fsS http://127.0.0.1:58000/api/v2/heartbeat >/dev/null 2>&1; then ready=1; break; fi
-            sleep 1
-          done
-          [ "${ready:-}" = "1" ] || { echo "rr-chroma did not become ready"; docker logs rr-chroma || true; exit 1; }
-          pgb_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' rr-pgvector-pgbouncer)
-          ready=
-          for i in $(seq 1 30); do
-            if docker exec rr-pgvector psql "postgresql://rruser:rrpass@${pgb_ip}:5432/rrtenant" -tAc 'SELECT 1' >/dev/null 2>&1; then ready=1; break; fi
-            sleep 1
-          done
-          [ "${ready:-}" = "1" ] || { echo "rr-pgvector-pgbouncer did not become ready"; docker logs rr-pgvector-pgbouncer || true; exit 1; }
-          {
-            echo "RR_TEST_PGVECTOR_DSN=postgresql://rruser:rrpass@localhost:55432/rrtenant"
-            echo "RR_TEST_PGVECTOR_POOLER_DSN=postgresql://rruser:rrpass@localhost:56434/rrtenant"
-            echo "RR_TEST_QDRANT_URL=http://127.0.0.1:56333"
-            echo "RR_TEST_CHROMA_URL=http://127.0.0.1:58000"
-          } >> "$GITHUB_ENV"
 
       - name: Test
         if: inputs.codeql == false && inputs.test

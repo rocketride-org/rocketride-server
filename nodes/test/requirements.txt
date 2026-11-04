@@ -19,7 +19,7 @@ pytest-xdist
 # Base engine packages (numpy, pillow, requests, SQLAlchemy, antlr4) need no entry.
 img2table                   # ocr: test_model_server_ocr.py
 psycopg2-binary             # rocketride_*, db/store_postgres: test_rocketride_db_full.py, test_rocketride_graph_full.py
-pgvector                    # live suites' import guards: test_rocketride_db_full.py, test_rocketride_vector_tools_full.py, test_vector_store_writes_full.py
+pgvector                    # the live pgvector suites' import guards (every suite in nodes/scripts/db-lanes/ that talks to pgvector); unpinned here: nodes/src/nodes/constraints.lock pins 0.4.2, the version both the nodes and these suites use
 python-docx                 # tool_microsoft_365: test_word.py
 smbprotocol                 # text_output: test_validate_config.py
 pygit2                      # tool_git: test_tools.py

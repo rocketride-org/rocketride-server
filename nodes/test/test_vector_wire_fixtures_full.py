@@ -12,7 +12,7 @@ files in their canonical form (floats to 4 decimal places, run-specific values
 scrubbed; the floats of embedding-derived answers within
 ``FLOAT_TOLERANCE``). A tool answering a capture with another outcome than the
 one it is for fails generation. Registered as a live database suite
-(DB_LIVE_SUITES in ``nodes/scripts/tasks.js``); skips without the engine or the
+(``nodes/scripts/db-lanes/vector.js``); skips without the engine or the
 databases unless ``RR_REQUIRE_DB_TESTS`` is set, and never runs under
 ``ROCKETRIDE_MOCK`` (NOT RUN).
 """
