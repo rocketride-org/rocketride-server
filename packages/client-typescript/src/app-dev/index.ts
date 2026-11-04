@@ -494,18 +494,28 @@ export class DevSession {
 			if (this.pkgTimer) clearTimeout(this.pkgTimer);
 			this.pkgTimer = setTimeout(() => this.requestRestart(), 800);
 		};
-		try {
-			const watched = process.platform === 'win32' ? fs.realpathSync.native(folder) : folder;
-			this.pkgWatcher = fs.watch(watched, (_event, filename) => {
-				if (filename?.toString() === 'package.json') schedule();
-			});
-		} catch {
-			// no folder watcher: poll the file's mtime (also covers a missing watch API)
+		// poll the file's mtime (no folder watcher, or the folder watcher failed)
+		const poll = (): void => {
 			this.pkgPollFile = path.join(folder, 'package.json');
 			this.pkgPollListener = (cur, prev) => {
 				if (cur.mtimeMs !== prev.mtimeMs) schedule();
 			};
 			fs.watchFile(this.pkgPollFile, { interval: 1000 }, this.pkgPollListener);
+		};
+		try {
+			const watched = process.platform === 'win32' ? fs.realpathSync.native(folder) : folder;
+			const watcher = fs.watch(watched, (_event, filename) => {
+				if (filename?.toString() === 'package.json') schedule();
+			});
+			// a watcher error (folder removed, permissions changed) falls back to polling
+			watcher.on('error', () => {
+				watcher.close();
+				if (this.pkgWatcher === watcher) this.pkgWatcher = null;
+				if (!this.stopping && !this.pkgPollFile) poll();
+			});
+			this.pkgWatcher = watcher;
+		} catch {
+			poll();
 		}
 	}
 
