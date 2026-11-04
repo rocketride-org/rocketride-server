@@ -209,7 +209,9 @@ class IInstance(IInstanceTransform):
             if self.instance.hasListener('text'):
                 debug(f'Emitting text len={len(text_out)}')
                 self.instance.writeText(text_out)
-        if docs_batch and self.instance.hasListener('documents'):
+        # Sent even when nothing matched, as DocumentStore.dispatchSearch does, so a
+        # downstream node can tell a search that missed from a pipeline with no search.
+        if self.instance.hasListener('documents'):
             try:
                 self.instance.writeDocuments(docs_batch)
             except Exception:
@@ -269,7 +271,8 @@ class IInstance(IInstanceTransform):
             if self.instance.hasListener('text'):
                 debug(f'Emitting text len={len(content)} from hit id={hit.get("_id")}')
                 self.instance.writeText(content)
-        if docs_batch_vec and self.instance.hasListener('documents'):
+        # Sent even when nothing matched; see _handle_text_search.
+        if self.instance.hasListener('documents'):
             try:
                 self.instance.writeDocuments(docs_batch_vec)
             except Exception:
