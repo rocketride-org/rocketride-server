@@ -47,6 +47,39 @@ except PackageNotFoundError:
     _SERVER_VERSION = '0.0.0'
 
 
+SERVER_INSTRUCTIONS = (
+    'RocketRide pipelines: build, validate, run and observe data and AI pipelines, manage team deployments '
+    "and cron schedules, and read the caller's file store and run logs. Search these tools when the user "
+    'mentions RocketRide, a .pipe file or pipeline definition, pipeline components or nodes, task tokens, '
+    'deployments or schedules, or run traces and logs.\n\n'
+    'Core sequence: list_components (what is ready to use now), then describe_component (config schema), '
+    'then validate_pipeline, then run_pipeline, which returns task_token, projectId and source. '
+    'Then send_data to feed more input, monitor to wait for completion, list_running_pipelines to find '
+    'tokens, terminate to stop. Pipeline definitions are always inline JSON objects; no tool reads a '
+    'pipeline from a file path. Store tools take store-relative paths. Files reach a running pipeline '
+    'through run_dropper_pipe, which returns an upload_url and a dropper_url; send_files (local engines '
+    "only) uploads files from the engine host's own disk.\n\n"
+    'Other tools: list_integrations (credential setup status; variable names only, never values), '
+    'resolve_config, describe_pipeline, scaffold_node; store_read, store_list, store_stat, store_get_url; '
+    'save_template, load_template; deploy_add, then deploy_to_team, then deploy_set_schedule, with '
+    'deploy_list, deploy_status, deploy_versions, deploy_enable, deploy_disable, deploy_remove; '
+    'log_chapters, log_read, log_traces, log_trace, keyed by projectId and source.\n\n'
+    'Results: every tool returns a JSON object with ok. A recoverable failure is {ok: false, error_type, '
+    'message, hint}; follow the hint when present before retrying. validate_pipeline instead returns '
+    '{ok, errors, warnings}, with ok false when errors is non-empty: a validation rejection, not the shared '
+    'error envelope; isError is still true. '
+    'A lost connection or failed authentication is a protocol error, not a JSON object.\n\n'
+    'Side effects: run_pipeline, run_dropper_pipe and send_data start or feed billable work, and the '
+    "pipeline's nodes may call external services. validate_pipeline is static for a whole pipeline, but "
+    "its single-component form {version, component} runs that provider's configuration probe, which can "
+    'send a small request to the configured provider or database; validate whole pipelines unless the '
+    'user asks for a component probe. terminate, save_template, deploy_to_team, deploy_set_schedule, '
+    'deploy_enable, deploy_disable, deploy_remove, and deploy_add with deploy_to change or cancel state '
+    'and may re-arm schedules; confirm with the user when the request does not ask for them explicitly. '
+    'deploy_add is not idempotent: after a timeout call deploy_versions before retrying.'
+)
+
+
 def build_mcp_server(
     engine_factory: Callable[[], EngineClient],
     task_registry: Optional[TaskRegistry] = None,
@@ -194,6 +227,7 @@ def build_mcp_server(
     server = Server(
         'rocketride-mcp',
         version=_SERVER_VERSION,
+        instructions=SERVER_INSTRUCTIONS,
         on_list_tools=_on_list_tools,
         on_call_tool=_on_call_tool,
         on_list_resources=_on_list_resources,

@@ -13,7 +13,7 @@ from starlette.routing import Mount, Route
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 
 from ai.constants import CONST_DEFAULT_WEB_HOST, CONST_DEFAULT_WEB_PORT
-from ai.web import oauth_resource
+from ai.web import oauth_resource, openai_apps_challenge
 
 from . import auth
 from . import identity
@@ -711,6 +711,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     # ------------------------------------------------------------------
     if hasattr(server, 'add_route'):
         oauth_resource.register_routes(server)
+        openai_apps_challenge.register_routes(server)
 
     # dev_no_auth was decided once in section 2 via auth.dev_bypass_active --
     # the same answer handle_mcp passes to auth.authorize. Asking for the

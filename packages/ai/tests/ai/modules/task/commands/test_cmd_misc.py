@@ -359,6 +359,30 @@ async def test_on_rrext_validate_does_not_wrap_single_component_payload(monkeypa
 
 
 @pytest.mark.asyncio
+async def test_on_rrext_validate_unwraps_the_mcp_tools_component_envelope(monkeypatch):
+    """The MCP validate_pipeline tool wraps the component form once more before sending it.
+
+    The engine still has to see the bare {version, component}: it dispatches on the
+    root ``component`` key to the provider's configuration probe, which is why the
+    MCP tool is annotated as a write.
+    """
+    captured = {}
+    monkeypatch.setattr(cmd_misc, 'resolve_implied_source', lambda p: None)
+    monkeypatch.setattr(
+        cmd_misc,
+        'validatePipeline',
+        lambda payload: captured.update(payload) or {'ok': True},
+    )
+
+    conn = _make_conn()
+    component = {'id': 'llm_openai_api_1', 'provider': 'llm_openai_api', 'config': {}}
+    envelope = {'pipeline': {'version': 1, 'component': component}}
+    await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': envelope}})
+
+    assert captured == {'version': 1, 'component': component}
+
+
+@pytest.mark.asyncio
 async def test_on_rrext_validate_does_not_infer_source_for_a_single_component(monkeypatch):
     """Source inference is a full-pipeline concern; a lone component is passed through."""
     seen = []

@@ -30,6 +30,12 @@ is not offered (see its entry). This page is the full reference; the
 - **Pipelines are inline-only.** Every `pipeline` parameter takes the pipeline
   JSON itself (a `{"pipeline": {...}}` wrapper is auto-unwrapped). File paths
   are rejected — the client reads its own `.pipe` file and sends the contents.
+- **Every tool carries annotations.** `readOnlyHint`, `destructiveHint` and
+  `openWorldHint` are explicit on all 33 tools; the table under
+  [Annotations](#annotations) gives each value and its reason. Five tools are
+  open-world: the four execution tools, because a pipeline's nodes run whatever
+  the pipeline defines, and `validate_pipeline`, because its single-component
+  form runs the provider's configuration probe.
 
 ## Discover components
 
@@ -97,13 +103,20 @@ node on the connected engine are listed.
 ### validate_pipeline
 
 Validate an inline pipeline with the engine's own validator — the same rules
-`use()` applies, so there is no client-side drift — plus one check the engine's
+`use()` applies — plus one client-side addition, a catalog check the engine's
 pipeline path does not cover: every component must name a provider the engine
 has a service for.
 
+The single-component form `{version, component}` that the node editor sends is
+accepted too. It is not static: the engine instantiates the provider and runs
+its configuration probe, which for LLM nodes sends a small completion request to
+the configured endpoint and for stores connects to the configured database. Validate
+whole pipelines unless you want that probe.
+
 - **Parameters:** `pipeline` (object, required).
 - **Returns:** `{ok, errors: [], warnings: []}` — `ok` is true only when there
-  are no errors.
+  are no errors. A rejection (`ok: false`) sets the MCP `isError` flag but is
+  not the shared error envelope.
 
 ### describe_pipeline
 
@@ -249,7 +262,7 @@ always returns within the timeout.
 List the running pipelines on the connected server.
 
 - **Parameters:** none.
-- **Returns:** `{ok, tasks, count}` — task tokens, names, and state, ready to
+- **Returns:** `{ok, tasks, count}` — task tokens, names, and status, ready to
   feed `monitor`, `send_data`, or `terminate`. In MCP Apps hosts the result
   renders as the
   [pipelines-table widget](/connect/mcp/http/resources-and-widgets#widgets).
@@ -389,7 +402,8 @@ schedules stop firing and manual runs are refused until it is enabled again.
 
 ### deploy_remove
 
-Soft-remove a team's deployment. It leaves listings and stops running; its
+Soft-remove a team's deployment. It leaves listings and its schedules stop
+firing; running tasks are not terminated (use `terminate` for that). Its
 versions and audit history are kept, and `deploy_to_team` revives it.
 
 - **Parameters:** `project_id` (string, required); `team_id` (string,
@@ -451,3 +465,46 @@ lane data, plus node narration.
 - **Returns:** `{ok, beginSeq, summary, events, context}`.
 - **Errors:** a trace below the retention horizon returns
   `{ok: false, error_type: 'TraceExpired', ...}`.
+
+## Annotations
+
+Every tool declares all three MCP annotations explicitly. Each value holds for
+every input form the tool accepts, including optional modes. Hosts use these
+hints to decide when to ask for confirmation; they do not change what a tool
+does.
+
+| Tool | `readOnlyHint` | `destructiveHint` | `openWorldHint` | Reason |
+| --- | --- | --- | --- | --- |
+| `list_components` | true | false | false | Reads the engine catalog and the caller's variable names; writes nothing; bounded to this engine and account. |
+| `describe_component` | true | false | false | Reads one service definition and its credential readiness; writes nothing. |
+| `resolve_config` | true | false | false | Computes the merged config the engine would load for a component; nothing is saved. |
+| `validate_pipeline` | false | true | true | Whole-pipeline validation is a static engine check, but the accepted single-component form `{version, component}` runs that provider's own configuration probe inside the engine: LLM nodes send a small completion request to the configured endpoint, a charge that cannot be undone, and store nodes connect to the configured database with the supplied credentials. Destinations are caller-configured, so the tool is open-world. No run is started and nothing is saved. |
+| `describe_pipeline` | true | false | false | Parses caller-supplied pipeline JSON with best-effort catalog lookups; nothing is saved or run. |
+| `run_pipeline` | false | true | true | Starts a billable task whose nodes run caller-defined logic that can write, delete or send data to any service the pipeline names. |
+| `run_dropper_pipe` | false | true | true | Starts a billable task and returns public upload URLs; the pipeline's nodes can reach any external service it names. |
+| `send_data` | false | true | true | Feeds data into a running pipeline; processing can write, delete or send externally as the pipeline defines. |
+| `terminate` | false | true | false | Cancels a running task, which counts as destructive; bounded to the tasks the caller is authorized to control on this engine. |
+| `send_files` | false | true | true | Uploads files from the engine host into a running pipeline (local engines only); the pipeline's effects are open-ended. |
+| `store_read` | true | false | false | Reads one file from the caller's own account store. |
+| `store_list` | true | false | false | Lists entries in the caller's own account store. |
+| `store_stat` | true | false | false | Reads file or directory metadata from the caller's own account store. |
+| `store_get_url` | true | false | false | Signs a time-limited download URL for a file in the caller's store; nothing is stored or changed, though the URL is a bearer capability. |
+| `save_template` | false | true | false | Writes `.templates/<id>.json` in the caller's store and overwrites an existing template with the same id. |
+| `load_template` | true | false | false | Reads a saved template from the caller's own store. |
+| `deploy_add` | false | true | false | Registers a new immutable version (additive), but the optional deploy_to replaces the team's live pointer and re-arms its unpaused schedules; private org registry. |
+| `deploy_list` | true | false | false | Reads the deployment records the caller may see. |
+| `deploy_status` | true | false | false | Reads one team deployment record. |
+| `deploy_versions` | true | false | false | Reads a project's registered versions. |
+| `deploy_to_team` | false | true | false | Replaces the team's live version pointer (promotion or rollback), revives a removed deployment and re-arms its unpaused schedules; private registry. |
+| `deploy_set_schedule` | false | true | false | Replaces or clears one source's cron schedule, cancelling scheduled runs or arming new metered ones; private registry. |
+| `deploy_enable` | false | true | false | Re-arms the deployment's unpaused schedules, which start metered runs that cannot be undone; private registry. |
+| `deploy_disable` | false | true | false | Cancels every future scheduled run of the deployment (the kill switch); private registry. |
+| `deploy_remove` | false | true | false | Soft-removes the deployment and cancels its scheduled runs; versions and history are kept; private registry. |
+| `monitor` | true | false | false | Polls task status; only the server's in-memory token bookkeeping changes when the task completes. |
+| `list_running_pipelines` | true | false | false | Lists the running tasks the caller is permitted to see on this engine. |
+| `log_chapters` | true | false | false | Reads persisted run-log metadata. |
+| `log_read` | true | false | false | Reads a bounded page of persisted run-log events. |
+| `log_traces` | true | false | false | Reads trace summaries from the persisted run log. |
+| `log_trace` | true | false | false | Reads one trace's events from the persisted run log. |
+| `scaffold_node` | true | false | false | Renders node file contents for the caller to write; the server writes nothing. |
+| `list_integrations` | true | false | false | Reports credential setup status by variable name; values never transit MCP; nothing is stored. |
