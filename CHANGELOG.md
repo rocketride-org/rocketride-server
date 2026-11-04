@@ -5,7 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — since 2026-10-16
+## [Unreleased] — since 2026-11-04
+
+## [3.6.0] - 2026-11-04
 
 ### Added
 - **typescript**: add `SignupProperties`, `PkceCredential` and `normalizeSignupProperties` for optional validated signup attribution resolved immediately before PKCE authentication; credentials without context retain their existing bytes (#2890).
@@ -14,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **shell**: carry an undecided visitor's cookieless signup context in the OAuth `state` as a `{ v: 1, signup }` envelope: nothing in site storage, readable and unsigned, kept in browser history and the identity provider's request logs. It is rechecked when built, on the callback and before authentication, and dropped once the visitor accepts or rejects, or sends DNT/GPC (#2978).
 - **nodes**: the vector-store tools gain `soft_delete` and `restore` on all nine store nodes (`rocketride_vector`, `store_astra`, `store_atlas`, `store_chroma`, `store_milvus`, `store_pinecone`, `store_postgres`, `store_qdrant`, `store_weaviate`): they move documents to the trash and back over the drivers' existing soft-delete support, are offered beside `upsert` and `delete` only while writes through tools are allowed, and report `matched_chunks` where the store counts the rows it marks (the two Postgres stores and Chroma). `rocketride_vector` and `store_postgres` also offer `list_documents` (one entry per document with its parent path and chunk count, paged and ordered by object ID, active documents or the trash) and report `document_count` in `stats`; both come from an optional driver capability (`DocumentStoreBase.listDocuments`, `countDocuments`, `supports_document_listing`) any other driver can adopt (#2587)
 - **shell, TypeScript client**: the shell reports sign-in starts and completions as product-telemetry facts for the active app to forward to its own analytics: `shell:telemetry` (`{ event, props, ts, id }`, typed as `TelemetryFact` in `rocketride/app-sdk`) carries `auth:complete` (`is_new`, `waitlisted`, `duration_ms`) live, and `connectionManager.drainTelemetry()` hands over, once, the facts held while no app listened (up to 32, for 30 minutes, in the tab's sessionStorage), `auth:start` always among them since the OAuth redirect follows it at once. `shell:loginRequest` gains `auto`, set by the shell's own auth gate, and `ConnectResult` gains `isNewUser`: true or false when the account provider knows whether the sign-in created the account, null when it does not. On the waitlist screen the shell runs the home app's `./telemetry` entry once per page load (#2858)
+- **nodes**: `rocketride_vector` can expose its store to agents and apps as tools (agents call `<node id>.search`, apps call `client.tool` with the tool name and the node id): `search`, `objdir`, `get` and `stats` when the new "Expose as tools" setting is on, `upsert` and `delete` only when "Allow writes through tools" is on as well. Both are off by default, since the table lives in the team's managed database. The node now sits on the shared store base classes instead of a copy of their lane code (#2587)
+- **builder**: keep test server output, show it when tests fail (#2630)
+- **builder, server, nodes**: standalone c++ node build (#2644)
+- **client-typescript**: share app scaffold logic between the CLI and the VS Code extension (#2849)
+- **nodes**: add tool_masky node for Masky AI avatars (#2731)
+- **shell**: serve the Cookie Policy and the Marketplace Publisher Terms as public legal pages (#2900)
+- **shell, client**: switch or leave organizations; invites pre-select the org's development team (#2871)
 
 ### Changed
 - **nodes**: on all nine vector-store nodes, `get` answers an object ID the store does not hold, or one in the trash, with `{"success": false, "error": ...}` instead of an empty page; `upsert` numbers the chunks sent for one object ID in the order given instead of storing them all as chunk 0, and rejects an explicit `chunkId` that repeats within a call; `upsert`, `delete`, `soft_delete`, `restore` and `get` refuse the reserved object ID `schema` (the store's control row); `delete` echoes the distinct IDs it was given and counts them in `deleted_count`; `stats` carries `document_count`, null where the store cannot count documents. On the two Postgres stores `objdir` pages count parent paths rather than documents, so a page holds `limit` entries while more follow, and lists a document whatever chunk IDs it has (#2587, #2668)
@@ -23,7 +32,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **nodes**: `rocketride_vector` and PostgreSQL vector stores share a search base that continues HNSW scans past soft-deleted and metadata-excluded neighbours on pgvector 0.8+, using transaction-local settings. Searches with no qualifying matches retry exactly so hidden active documents remain searchable; nonempty results stay approximate and avoid a full scan merely to fill the requested limit. Older pgvector versions also retry underfilled results. Unindexed tables avoid the redundant retry. Exact retries can be expensive on large tables. PostgreSQL store connections serialize operations and use explicit transactions for chunk replacement and iterative searches, releasing them after success or failure.
 - **parse**: RAR4 and RAR5 archives extracted nothing since #2440, silently and on every platform: the move of the Tika code into the parse node left `RarSevenZipParser` behind in the unbuilt `packages/tika`, so `ConfigBuilder` replaced Tika's RAR parser with a class that was not on the classpath. The class now lives in the parse node library, the swap checks that the class resolves before it removes Tika's own parser, and a RAR5 archive yields its member text again (#2678)
-- **server**: a Linux task running parse beside a node that imports torch died at start with SIGSEGV in libstdc++: the jar's prebuilt `lib7-Zip-JBinding.so` carries a statically linked libstdc++ whose GNU-unique locale ids collided with the system runtime's. The engine now claims the system libstdc++ at startup, before any JNI library can (#2676, #2720)
 - **parse**: parse tasks that started together, or while another parse task was running, broke each other's 7-Zip-JBinding: every task rewrote the shared native library in `<data>/cache` in place (16.02-2.01 never matches its own hash), so on Windows the later tasks lost RAR support silently and on Linux a running task could crash with SIGBUS or SIGSEGV. The parse node now extracts the library itself, reuses a complete copy and publishes a new one only by an atomic rename (#2790)
 - **profiler**: the call tree repeated a function's callees under every path that reached it, and the Profiler app's table summed the repeats (2–3× on shared callees). A function's copies now split its callee totals and add up to them, the all-threads tree is built over every thread at once, so work spread thinly over a pool is not pruned away, and `rrext_cprofile_report_tree` returns `functions`, the exact per-function totals the table shows (#2786)
 - **nodes**: `parse` extracts images, audio and video, embedded in documents or as standalone files, only when something is connected to that lane (the optional Aspose PDF parser still extracts images itself and only skips sending them), and reuses its Tika configuration for embedded objects instead of rebuilding it per object; with the stock Tika PDF parser, PDFs drawn as thousands of inline images parse in about a second on text pipelines instead of minutes, and pipelines that consume the images get the same images several times faster on image-heavy documents (#2745).
@@ -35,11 +43,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **embedding_video**: with `--modelserver` the node embedded one frame at a time across every video in the task: each frame's CLIP/ViT call was wrapped in a task-wide `threading.Lock` held across the model-server round trip. The guard now comes from `make_device_lock()` as in the other vision nodes: a no-op with the model server, the same lock for in-process inference; a single video's frames are still embedded in order (#2863)
 - **profiler**: the SDK docs promised a `RuntimeError` for an active or missing session, which comes back as `{'status': 'error'}`, and `ROCKETRIDE_CLI.md` advised `--min-pct 0` on short runs; the docstrings, JSDoc and agent docs now give the real outcomes and the CLI's no-data exit codes (#2876)
 - **ai**: a bare port in `--modelserver` (`--modelserver=5590`) is normalized to `localhost:5590`, the model server on the engine's own loopback; the Python client read the digits as a hostname and connected to `ws://5590:5565/models`. A model server on the Docker host still needs an address such as `host.docker.internal:5590`; remapping for Docker tasks is tracked in #2593 (#2679)
+- **nodes**: the `objdir` tool of `store_postgres` and `rocketride_vector` no longer lists the store's internal `schema` control row (it appeared as a `None` key) or soft-deleted documents (#2587)
+- **ai**: hosted engines never install or import torch, model server or not (#2682)
+- **ai**: say the provider may reject an output limit above the model's, not will (#2692)
+- **builder**: run a bracket's teardown when a step inside it fails (#2777)
+- **cli**: close or continue the browser tab after login (#2852)
+- **config**: ignore editor name metadata in typo warnings (#2959)
+- **docs**: fix the footer Instagram link and add TikTok (#2860)
+- **engine**: intern Python error locations so stored errors stay valid (#2797)
+- **mcp**: require exp, iat and iss on /mcp tokens explicitly (#2796)
+- **nodes**: c++ node build deps (#2779)
+- **server**: Linux crash dumps work on hosts that set `fs.suid_dumpable=2` (#2865)
+- **shell**: keep /marketplace and /build-publish-earn out of sitemap.xml and llms.txt until they relaunch (#2953)
+- **sql-ui**: discover RocketRide SQL nodes as connections (#2686)
+- **task**: refuse a pipe to an org that is out of credit (#2641)
+- **task**: load placeholder values at each start instead of keeping them (#2794)
+- **task**: a start that fails inside a restart ends the run as stopped (#2834)
+- **vscode**: preserve pipeline files and IDs in the sidebar watcher (#2615)
+
+### Maintenance
+
+- 2 chore, 1 refactor and 1 CI commit are omitted from the list above. #2674, #2688, #2690, #2695, #2713, #2714 and #2720 shipped in 3.5.0 as stage copies and are listed there.
 
 ## [3.5.0] - 2026-10-16
 
 ### Added
-- **nodes**: `rocketride_vector` can expose its store to agents and apps as tools (agents call `<node id>.search`, apps call `client.tool` with the tool name and the node id): `search`, `objdir`, `get` and `stats` when the new "Expose as tools" setting is on, `upsert` and `delete` only when "Allow writes through tools" is on as well. Both are off by default, since the table lives in the team's managed database. The node now sits on the shared store base classes instead of a copy of their lane code (#2587)
 - **docker**: releases publish `rocketride-node`, an image that runs one pipeline task (engine-base plus a warmed wheel cache), and `rocketride-engine-base`; both cosign-signed, the node image checked before signing and never tagged `latest`.
 - **cli**: `rocketride profile` subcommand (Python + TS) — profile the server process or a pipeline (#2382)
 - **nodes**: add discord — Discord Bot source node over the Gateway; routes messages and image/audio/video/document attachments to the text/image/audio/video/tags lanes and posts the pipeline's first answer back as a reply, channel message, or thread (with thread naming); guild/channel/mention/bot gates, chunked replies (optionally numbered), mention allowlists, text-attachment decoding and attachment merge, and reaction/no_reply/outbound events (#1503)
@@ -71,7 +99,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **docker**: the engine image is built FROM a shared `engine-base` and runs as uid 1000 (was a system user, uid 999). An existing `/opt/data` volume has to be handed over once: `docker run --rm -v rocketride-data:/opt/data alpine chown -R 1000:1000 /opt/data`. The engine now refuses to start, naming that command, when its data directory is not writable.
 
 ### Fixed
-- **nodes**: the `objdir` tool of `store_postgres` and `rocketride_vector` no longer lists the store's internal `schema` control row (it appeared as a `None` key) or soft-deleted documents (#2587)
 - **ai**: the shared embedding factory imports providers from the shipped `nodes` package (#2587).
 - **nodes**: PostgreSQL vector stores accept document metadata fields outside the SQL schema and roll back failed chunk replacements, preserving existing documents (#2587).
 - **account**: apply requiredPermissions to the versioned bundle route (#2401) (#2406)
@@ -116,6 +143,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **task**: report a missing cloud database instead of ROCKETRIDE_CLIENT_ID (#2578)
 - **tools**: stamp reasoning for models stored under a prefixed ID (#2447)
 - **tools**: ignore OpenRouter routing variants during discovery (#2480)
+- **server**: claim the GNU C++ runtime at engine startup, so a task that runs `parse` and then a node importing torch no longer crashes (#2720)
+- **nodes**: langchain-text-splitters 1.1.3, so General Text stops loading torch (#2674)
+- **agent_rocketride**: log the wait for timed-out calls as a warning (#2714)
+- **ai, nodes**: cut remaining ClickHouse echoes, keep other dialects' error text whole, fix ClickHouse session docs (#2713)
+- **agent**: report the stop reason when a run fails early or its answer is refused (#2688)
+- **ai, nodes**: name the missing variable when a key is an unfilled placeholder (#2690)
+- **pipediff**: harden numbers, nesting, and Markdown reports (#2695)
 
 ### Maintenance
 
