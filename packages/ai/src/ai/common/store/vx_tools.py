@@ -2788,6 +2788,29 @@ class VectorExplorerTools:
                     per[oid] = 0
         return [oid for oid in ids if per[oid] == 0]
 
+    def _vx_remove_trashed(self, store: Any, ids: Sequence[str]) -> Tuple[List[str], Optional[int], List[str]]:
+        """Permanently delete the trashed chunks of ``ids`` (``delete {deleted_only}``); ``(not_found, rows, raced)``.
+
+        The delete is the driver's ``removeTrashed``: conditional on the trashed state in the same
+        store operation, so a chunk a concurrent restore made live is not removed. ``not_found``
+        names the ids with nothing stored; ``raced`` the ids that still have chunks afterwards
+        (restored while the call ran), which the answer reports as ``kept_live``; ``rows`` is what
+        the store actually removed (None where it cannot say).
+        """
+        ids = [oid for oid in ids if oid != CONTROL_OBJECT_ID]
+        try:
+            not_found = self._vx_unstored(store, ids)
+            targets = [oid for oid in ids if oid not in not_found]
+            rows: Optional[int] = 0
+            raced: List[str] = []
+            if targets:
+                rows = _driver_count(store.removeTrashed(list(targets)))
+                gone = set(self._vx_unstored(store, targets))
+                raced = [oid for oid in targets if oid not in gone]
+            return not_found, rows, raced
+        finally:
+            _vx_state(store).forget_counts()
+
     def _vx_with_live_chunk(self, store: Any, ids: Sequence[str]) -> List[str]:
         """The ids among ``ids`` that have a chunk out of the trash, in order (``delete {deleted_only}`` keeps them).
 

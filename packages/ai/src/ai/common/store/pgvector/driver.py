@@ -1032,6 +1032,29 @@ class PgVectorStore(DocumentStoreBase):
                 self._mark_missing()
                 return 0
 
+    def removeTrashed(self, objectIds: List[str]) -> Optional[int]:
+        """Delete the chunks of ``objectIds`` whose ``isdeleted`` is true, in one statement; return the rows removed.
+
+        The state is part of the DELETE's WHERE, so a row a concurrent ``restore`` has just flipped (the
+        UPDATE commits first, or this statement waits for it and re-reads the row) is not deleted. The
+        control record is never removed.
+        """
+        ids = [str(o) for o in objectIds or [] if str(o) != CONTROL_OBJECT_ID]
+        if not ids or not self._exists_now():
+            return 0
+        statement = self._sql.delete(Where(deleted='deleted', object_ids=ids))
+
+        def work(cur):
+            cur.execute(*statement)
+            return max(0, int(cur.rowcount or 0))
+
+        with self._write_lock:
+            try:
+                return self._db.run_write(work)
+            except CollectionMissing:
+                self._mark_missing()
+                return 0
+
 
 # -----------------------------------------------------------------------------
 # Helpers

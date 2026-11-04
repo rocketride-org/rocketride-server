@@ -129,6 +129,12 @@ export const NOT_DISCOVERED_TEXT = 'The connections have not been discovered yet
 /** Said when a call that waited for discovery has too little of its time left to run (it was not sent). */
 export const TOO_LATE_TEXT = 'The request waited for the connections to be discovered and has too little of its time left to run. Nothing was sent; try again.';
 
+/** Said when an op accepted under one account would have been sent under another (nothing was sent). */
+export const STALE_ACCOUNT_TEXT = 'The account changed while this request waited, so it was not sent.';
+
+/** Said when a permanent delete asks for anything but the trash-only form. */
+export const DELETE_ONLY_TEXT = 'Documents are deleted permanently only while they are in the trash. Nothing was sent.';
+
 /** The least time a call is started with (a shorter one could only time out). */
 const MIN_CALL_MS = 1_000;
 
@@ -415,29 +421,50 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 	};
 
 	// ── Op handlers: each answers a Reply (attachController wraps escaping failures) ────────────
+	// The identity fence (the controller-side twin of the frame caller's): the account the controller serves when an op is
+	// ACCEPTED. An op held for discovery (or anything else) is refused unsent, as `stale`, if the account changed before
+	// it is sent: nothing A asked for runs under B. A cold start (unknown, then A) is not a change.
+	const accountNow = (): string | null => (identity.get().known ? identity.get().fingerprint : null);
+	const holdAccount = (): (() => void) => {
+		const bound = accountNow();
+		return () => {
+			if (bound !== null && accountNow() !== bound) throw new ExplorerToolError({ kind: 'stale', tool: 'vector', message: STALE_ACCOUNT_TEXT });
+		};
+	};
 	const read = (op: ReadOp) => async (params: unknown) => {
+		const sameAccount = holdAccount();
 		const key = keyOf(params, op);
 		const tool = OP_TOOL[op];
 		const input = inputOf(params, op);
 		const endpoint = await endpointFor(key, tool, params);
+		sameAccount();
 		checkRead(op, input, limitsOf(key), tool);
 		// Never past the frame's deadline: a call that waited for discovery gets what is left of it.
 		const left = timeLeft(params);
 		if (left < MIN_CALL_MS) throw new ExplorerToolError({ kind: 'unavailable', tool, message: TOO_LATE_TEXT });
 		const wait = Math.min(waitOf(op, key), left);
+		sameAccount();
 		const raw = await store.session(client, endpoint).invoke<unknown>(tool, input, { nodeId: nodeFor(op, endpoint, tool), timeoutMs: wait });
 		return replyOk(sized(raw, op, tool));
 	};
 	const write = (op: WriteOp) => async (params: unknown) => {
+		const sameAccount = holdAccount();
 		const key = keyOf(params, op);
 		const tool = OP_TOOL[op];
 		const input = inputOf(params, op);
+		// The app's only permanent delete removes a document only while every chunk of it is in the trash (`deleted_only`):
+		// a restore that lands first keeps its document. A call that asks for anything else is refused; one that says nothing
+		// is sent as deleted_only (the unconditional form is never sent).
+		if (op === OP.deletePermanently && input.deleted_only !== undefined && input.deleted_only !== true) {
+			throw invalid(tool, DELETE_ONLY_TEXT);
+		}
 		const endpoint = await endpointFor(key, tool, params);
+		sameAccount();
 		const ids = idsOf(input, limitsOf(key), tool);
 		const refusal = writeRefusal(endpoint, tool);
 		if (refusal) throw refusal;
-		const deletedOnly = op === OP.deletePermanently && input.deleted_only === true;
-		const action: DocWriteAction = op === OP.trash ? 'trash' : op === OP.restore ? 'restore' : deletedOnly ? 'empty' : 'delete';
+		// `empty` is Empty trash (the call said so); a single document's permanent delete is `delete`. Both are sent deleted_only.
+		const action: DocWriteAction = op === OP.trash ? 'trash' : op === OP.restore ? 'restore' : input.deleted_only === true ? 'empty' : 'delete';
 		const origin = typeof field(params, 'origin') === 'string' ? (field(params, 'origin') as string) : '';
 		// Never past the frame's deadline: a write that waited for discovery gets what is left of it (its answer, or the
 		// session's "stopped waiting", reaches the frame before the frame gives up), and one with too little left is
@@ -446,8 +473,9 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 		if (left < MIN_CALL_MS) throw new ExplorerToolError({ kind: 'unavailable', tool, message: TOO_LATE_TEXT });
 		const wait = Math.min(waitOf(op, key), left);
 		// Only what the write takes is sent: never a field a frame added.
-		const clean: Record<string, unknown> = { object_ids: ids, ...(deletedOnly ? { deleted_only: true } : {}) };
+		const clean: Record<string, unknown> = { object_ids: ids, ...(op === OP.deletePermanently ? { deleted_only: true } : {}) };
 		let raw: unknown;
+		sameAccount();
 		try {
 			raw = await store.session(client, endpoint).invoke<unknown>(tool, clean, { nodeId: endpoint.nodeId, timeoutMs: wait, idempotent: false });
 		} catch (error) {

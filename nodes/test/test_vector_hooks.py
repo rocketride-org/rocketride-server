@@ -172,6 +172,14 @@ class MemoryStore(DocumentStoreBase):
         for key in [k for k in self.rows if k[0] in objectIds]:
             del self.rows[key]
 
+    def removeTrashed(self, objectIds: List[str]) -> Optional[int]:
+        """Delete the chunks of ``objectIds`` that are in the trash, and only those."""
+        self.calls.append(('removeTrashed', list(objectIds)))
+        keys = [k for k, d in self.rows.items() if k[0] in objectIds and k[0] != 'schema' and d.metadata.isDeleted]
+        for key in keys:
+            del self.rows[key]
+        return len(keys)
+
     def markDeleted(self, objectIds: List[str]) -> Optional[int]:
         return self._mark(objectIds, True)
 

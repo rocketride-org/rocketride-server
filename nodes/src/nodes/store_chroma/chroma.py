@@ -1494,3 +1494,21 @@ class Store(DocumentStoreBase):
                 self.collectionObj.delete(where=where)
                 removed += rows
         return removed
+
+    def removeTrashed(self, objectIds: List[str]) -> Optional[int]:
+        """Delete the chunks of ``objectIds`` that are in the trash, and only those, in one operation; return the rows removed.
+
+        The deleted flag is part of the delete's own filter, so a chunk a concurrent ``restore`` has just made
+        live is never removed. Never the control record.
+        """
+        ids = [oid for oid in dict.fromkeys(str(o).strip() for o in objectIds) if oid and oid != CONTROL_OBJECT_ID]
+        if not ids or not self._exists():
+            return 0
+        removed = 0
+        for batch in self._idBatches(ids):
+            where = {'$and': [{'objectId': {'$in': batch}}, {'isDeleted': {'$eq': True}}]}
+            rows = sum(1 for _ in self._readAll(where, []))
+            if rows:
+                self.collectionObj.delete(where=where)
+                removed += rows
+        return removed

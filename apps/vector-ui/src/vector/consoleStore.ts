@@ -249,7 +249,7 @@ type ListKey = 'directory' | 'trash';
 
 /** A trash answer read as a write's view: the documents it moved, the chunks it moved, and its audit block. */
 function moved(view: ITrashView): IRemoveView {
-	return { removed: view.moved.map((objectId) => ({ objectId, chunks: null })), notFound: view.notFound, keptLive: [], removedChunks: view.movedChunks, audit: view.audit };
+	return { removed: view.moved.map((objectId) => ({ objectId, chunks: null })), notFound: view.notFound, keptLive: [], removedChunks: view.movedChunks, someUnmoved: view.someUnmoved, audit: view.audit };
 }
 
 /**

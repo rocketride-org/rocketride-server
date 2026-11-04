@@ -349,6 +349,8 @@ export interface IRemovalOutcome {
 	keptLive: string[];
 	/** Rows removed in total, or null when any batch could not count them. */
 	removedChunks: number | null;
+	/** A trash move or restore: some documents of some batch were already in that state. */
+	someUnmoved?: boolean;
 	batchesRun: number;
 	batchesTotal: number;
 	/** Why it stopped, when a batch failed. */
@@ -376,6 +378,7 @@ export async function runRemoval(ids: readonly string[], call: (batch: string[])
 			outcome.keptLive.push(...view.keptLive);
 			if (view.audit) outcome.audits?.push(view.audit);
 			outcome.removedChunks = outcome.removedChunks === null || view.removedChunks === null ? null : outcome.removedChunks + view.removedChunks;
+			if (view.someUnmoved) outcome.someUnmoved = true;
 			outcome.batchesRun += 1;
 		} catch (error) {
 			outcome.error = failureText(error, { write: true }) ?? { headline: 'The removal was dropped.' };
@@ -420,6 +423,13 @@ export function removalSummary(outcome: IRemovalOutcome, targets: ReadonlyArray<
 		const was = targets.length === 1 && outcome.removed.length === 1 ? 'was' : 'were';
 		const gone = outcome.notFound.length === 0 ? '' : ` ${formatCount(outcome.notFound.length)} ${outcome.notFound.length === 1 ? 'was' : 'were'} already gone.`;
 		return `Nothing moved: ${who} ${was} ${action === 'trash' ? 'already in the trash' : 'already restored'}.${gone}`;
+	}
+	// A batch where some documents were already in that state: only the chunks can be counted, never the documents that
+	// moved, so the sentence says some did and gives the chunks.
+	if (movesChunks && outcome.someUnmoved && outcome.removedChunks !== null && outcome.removedChunks > 0 && outcome.removed.length > 1 && !outcome.error) {
+		const already = action === 'trash' ? 'already in the trash' : 'already restored';
+		const gone = outcome.notFound.length === 0 ? '' : ` ${formatCount(outcome.notFound.length)} ${outcome.notFound.length === 1 ? 'was' : 'were'} already gone.`;
+		return `${words.done} some of the ${formatCount(outcome.removed.length)} documents${words.tail}${rows}; the rest were ${already}.${gone}`;
 	}
 	if (action !== 'empty' && targets.length === 1 && outcome.removed.length <= 1 && !outcome.error) {
 		const path = targets[0].path || targets[0].objectId;

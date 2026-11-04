@@ -105,6 +105,7 @@ const ALWAYS_REQUIRED_TESTS = [
 	'devtool.env.test.ts',
 	'devtool.protocol.test.ts',
 	'devtool.robustness.test.ts',
+	'devtool.d6.test.ts',
 	'devtool.controller.test.ts',
 	'devtool.frame.test.ts',
 	'devtool.mounts.test.ts',

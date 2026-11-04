@@ -825,6 +825,20 @@ class Store(DocumentStoreBase):
         self.updateRecords(objectIds, isDeleteOperation=True)
         return
 
+    @_backend_errors('removeTrashed')
+    def removeTrashed(self, objectIds: List[str]) -> Optional[int]:
+        """Delete the chunks of ``objectIds`` that are in the trash, and only those, in one delete by metadata filter (Pinecone does not count what it deletes: None).
+
+        The deleted flag is part of the delete's own filter, so a chunk a concurrent ``restore`` has just made
+        live is never removed. Never the control record.
+        """
+        ids = [o for o in objectIds or [] if o != CONTROL_OBJECT_ID]
+        if not ids or not self.doesCollectionExist():
+            return 0
+        index = self.client.Index(self.collection)
+        index.delete(filter={'$and': [{'objectId': {'$in': ids}}, {'isDeleted': {'$eq': True}}]})
+        return None
+
     @_backend_errors('markDeleted')
     def markDeleted(self, objectIds: List[str]) -> int:
         """
