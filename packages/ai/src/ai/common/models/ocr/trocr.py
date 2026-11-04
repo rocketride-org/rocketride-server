@@ -30,6 +30,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
 from ..base import BaseLoader, get_model_server_address, ModelClient
+from ..device_budget import device_budget
 from .utils import preprocess_image_transparency, group_words_into_lines, raise_on_error, with_error_field
 
 logger = logging.getLogger('rocketlib.models.trocr')
@@ -384,10 +385,13 @@ class TrOCR:
         preprocessed = TrOCRLoader.preprocess(self._model, images, self._metadata)
         t_pre = (time.perf_counter() - t0) * 1000
 
-        # GPU inference phase — run OCR recognition
+        # GPU inference phase — wait for the device (cost not measured: alone), then run OCR
         t0 = time.perf_counter()
-        raw_output = TrOCRLoader.inference(self._model, preprocessed, self._metadata)
-        t_gpu = (time.perf_counter() - t0) * 1000
+        with device_budget(self._model['device']).reserve(TrOCRLoader.inference_cost_mb(preprocessed)):
+            t_wait = (time.perf_counter() - t0) * 1000
+            t0 = time.perf_counter()
+            raw_output = TrOCRLoader.inference(self._model, preprocessed, self._metadata)
+            t_gpu = (time.perf_counter() - t0) * 1000
 
         # Postprocess phase — extract text results
         t0 = time.perf_counter()
@@ -401,7 +405,7 @@ class TrOCR:
                 'gpu_preprocess': t_pre,
                 'gpu_compute': t_gpu,
                 'gpu_postprocess': t_post,
-                'gpu_queue_wait': 0,
+                'gpu_queue_wait': t_wait,
                 'gpu_memory': model_gpu_gb(self._model) * inference_sec,
             }
         )
