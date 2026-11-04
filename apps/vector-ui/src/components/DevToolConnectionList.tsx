@@ -158,7 +158,7 @@ export const DevToolConnectionList: React.FC = () => {
 	// The header's actions show while the pointer is over the list or focus is inside it (keyboard users reach them too).
 	const [paneHovered, setPaneHovered] = useState(false);
 	const [paneFocused, setPaneFocused] = useState(false);
-	const line = sidebarListLine(status, endpoints, error);
+	const line = sidebarListLine(status, endpoints, error, env.engine);
 	// Refresh cannot run while discovery runs or the realm is offline. It says so with aria-disabled and ignores the
 	// activation: a `disabled` button would drop the keyboard focus to the page, and the header cluster would fade.
 	const refreshBlocked = !env.ready || status === 'loading';

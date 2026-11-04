@@ -38,6 +38,7 @@
 // needed, Metadata column pending).
 // =============================================================================
 
+import type { EngineStatus } from 'shared/explorer/devtool/readiness';
 import { READ_ONLY_DETAIL } from 'shared/explorer';
 import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import type { IDialectResult } from '../contract/types';
@@ -276,6 +277,12 @@ export interface IListLine {
 	detail: string | null;
 }
 
+/** The sidebar's line while the realm has no client yet. */
+export const WAITING_FOR_SERVER_TEXT = 'Waiting for the server connection\u2026';
+
+/** The sidebar's line while the realm has a client that is not connected. */
+export const DISCONNECTED_FROM_SERVER_TEXT = 'Not connected to the server.';
+
 /**
  * The line under the dev-tool sidebar's rows, from the same empty states as the full app's landing. Nothing while
  * discovery has not started (it waits for the activation and a known identity, so "discovering" would not be true),
@@ -286,7 +293,12 @@ export interface IListLine {
  * @param error - The discovery failure text, when it failed.
  * @returns The line, or null.
  */
-export function sidebarListLine(status: 'idle' | 'loading' | 'ready' | 'error', endpoints: readonly IExplorerEndpoint[], error: string | null): IListLine | null {
+export function sidebarListLine(status: 'idle' | 'loading' | 'ready' | 'error', endpoints: readonly IExplorerEndpoint[], error: string | null, engine: EngineStatus = 'ready'): IListLine | null {
+	// Nothing can be discovered without the server: say which of the two it is (the realm has no client yet, or it has
+	// one that is not connected), unless rows already say it all.
+	if (engine !== 'ready' && endpoints.length === 0) {
+		return { tone: 'muted', text: engine === 'waiting' ? WAITING_FOR_SERVER_TEXT : DISCONNECTED_FROM_SERVER_TEXT, detail: null };
+	}
 	if (status === 'idle') return null;
 	if (status === 'error' && endpoints.length > 0) return { tone: 'error', text: `Refresh failed: ${error ?? 'the list of running pipelines could not be read'}. Showing what was found before.`, detail: null };
 	const empty = emptyState(status, endpoints, error);

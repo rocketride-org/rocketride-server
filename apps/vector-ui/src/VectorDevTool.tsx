@@ -46,6 +46,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Banner, Button, EmptyState } from 'shell';
 import type { DevToolProps } from 'shell';
+import { frameStatus } from 'shared/explorer/devtool/readiness';
 import type { IExplorerEndpoint } from 'shared/explorer';
 import { announcer } from './adapters/explorer';
 import ConnectionDetailsPanel from './components/ConnectionDetailsPanel';
@@ -107,7 +108,9 @@ const FrameRoot: React.FC<{ frame: IVectorFrame }> = ({ frame }) => {
 	const signIn = useReadable(frame.signIn);
 	// Not yet published is not ready either; the document states tell the two apart.
 	const ready = host === true;
-	const env = useMemo(() => frame.env(ready), [frame, ready]);
+	// The host has not said yet is waiting, not disconnected (readiness.ts: frameStatus).
+	const waiting = frameStatus(host, 'ready') === 'waiting';
+	const env = useMemo(() => frame.env(ready, waiting), [frame, ready, waiting]);
 	const gates: IDocGates = { host, summon, signIn };
 	return (
 		<VectorEnvProvider value={env}>

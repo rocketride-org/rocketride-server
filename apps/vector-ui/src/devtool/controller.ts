@@ -657,7 +657,7 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 	// ── The sidebar's own env (LOCAL, over this controller's store and client) ──────────────────
 	const registry = createConnectionRegistry();
 	const activeConnection: IReadable<string | null> = { get: active.get, subscribe: active.subscribe };
-	let lastEnv: { ready: boolean; env: IVectorEnv } | null = null;
+	let lastEnv: { status: EngineStatus; env: IVectorEnv } | null = null;
 	const engineStatus: IReadable<EngineStatus> = { get: () => engine.status(), subscribe: (listener) => engine.subscribe(() => listener()) };
 
 	return {
@@ -675,10 +675,12 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 		},
 		env(given) {
 			// A boolean is the old shape of the question: connected or not.
-			const ready = typeof given === 'boolean' ? given : given === 'ready';
-			if (lastEnv && lastEnv.ready === ready) return lastEnv.env;
+			const status: EngineStatus = typeof given === 'boolean' ? (given ? 'ready' : 'disconnected') : given;
+			const ready = status === 'ready';
+			if (lastEnv && lastEnv.status === status) return lastEnv.env;
 			const env = createLocalVectorEnv({
 				ready,
+				engine: status,
 				client,
 				store,
 				registry,
@@ -698,7 +700,7 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 					return discovery.allowed() ? store.refresh(client, { reprobe: o?.reprobe === true }) : Promise.resolve();
 				},
 			});
-			lastEnv = { ready, env };
+			lastEnv = { status, env };
 			return env;
 		},
 		dispose() {

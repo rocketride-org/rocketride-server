@@ -70,6 +70,7 @@ import type { IFrameCaller } from 'shared/explorer/devtool/frame';
 import { IDENTITY_STATE_TOPIC, createFrameIdentityGuard, followSignIn } from 'shared/explorer/devtool/frameIdentity';
 import type { FrameResetReason, IFrameIdentityGuard, SignInState } from 'shared/explorer/devtool/frameIdentity';
 import { CONTROLLER_STATE_TOPIC, mountNonce } from 'shared/explorer/devtool/realm';
+import type { EngineStatus } from 'shared/explorer/devtool/readiness';
 import { createControllerSummon } from 'shared/explorer/devtool/summon';
 import type { SummonState } from 'shared/explorer/devtool/summon';
 import { makeConsoleActions } from '../adapters/consoleActions';
@@ -153,7 +154,8 @@ export interface IVectorFrame {
 	/** Whether this document is visible (a hidden one polls nothing). */
 	readonly visible: IReadable<boolean>;
 	/** The REMOTE env (rebuild when `connected` changes). */
-	env(ready: boolean): IVectorEnv;
+	/** The env for the host's state: `ready` (connected), `waiting` (the host has not said yet), else disconnected. */
+	env(ready: boolean, waiting?: boolean): IVectorEnv;
 	/** A console's side: hints out, other frames' writes and map requests in. Returns the unbind. */
 	bindConsole(entry: IConnectionEntry): () => void;
 	/** A document's side: the console's query in, focus requests and writes in. Returns the unbind. */
@@ -543,7 +545,7 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 		caller.callReply(OP.requestFocus, { key: endpoint.key, docKey: target, chunkId }, { timeoutMs: frameTimeoutFor(OP.requestFocus) }).catch(report);
 	};
 	const activeConnection: IReadable<string | null> = { get: () => frameKey, subscribe: () => () => undefined };
-	const envs = new Map<boolean, IVectorEnv>();
+	const envs = new Map<EngineStatus, IVectorEnv>();
 
 	return {
 		route,
@@ -562,12 +564,14 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 		summaries,
 		visible,
 		lastReset: () => resetWhy,
-		env(ready) {
-			const cached = envs.get(ready);
+		env(ready, waiting = false) {
+			const engine: EngineStatus = ready ? 'ready' : waiting ? 'waiting' : 'disconnected';
+			const cached = envs.get(engine);
 			if (cached) return cached;
 			const env: IVectorEnv = {
 				kind: 'remote',
 				ready,
+				engine,
 				endpoints,
 				// An automatic refresh (quiet) says nothing when refused: at mount the controller may still be settling its
 				// identity, and the endpoints state says what happened.
@@ -590,7 +594,7 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 				activeConnection,
 				degraded: DEVTOOL_DEGRADED,
 			};
-			envs.set(ready, env);
+			envs.set(engine, env);
 			return env;
 		},
 		bindConsole(entry) {
