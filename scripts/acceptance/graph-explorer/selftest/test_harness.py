@@ -274,8 +274,13 @@ class DatabaseImagesMatchCI(unittest.TestCase):
     def test_readme_starts_the_database_images_ci_runs(self):
         readme = self.images(ACC / 'README.md')
         ci = self.images(REPO / '.github' / 'workflows' / '_build.yaml')
+        # The graph servers are started by nodes/test/db-services/graph.sh (and the shared
+        # PgBouncer pin in _common.sh); the Postgres images stay in _build.yaml.
+        for script in sorted((REPO / 'nodes' / 'test' / 'db-services').glob('*.sh')):
+            for repo, refs in self.images(script).items():
+                ci.setdefault(repo, set()).update(refs)
         for repo in ('apache/age', 'pgvector/pgvector', 'neo4j', 'falkordb/falkordb', 'edoburu/pgbouncer'):
-            self.assertIn(repo, ci, f'_build.yaml no longer starts {repo}')
+            self.assertIn(repo, ci, f'CI (_build.yaml, db-services) no longer starts {repo}')
             self.assertEqual(readme.get(repo), ci[repo], f'README.md does not start the {repo} image CI runs')
 
 

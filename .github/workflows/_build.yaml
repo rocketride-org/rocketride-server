@@ -264,8 +264,7 @@ jobs:
 
       # Postgres for the RocketRide cloud DB node integration suites (Linux
       # only): pgvector for rocketride_sql/vector, Apache AGE for
-      # rocketride_graph, and PgBouncer in transaction mode in front of AGE.
-      # Same pattern as the S3 (moto) and Azurite steps above — env vars are
+      # rocketride_graph. Same pattern as the S3 (moto) and Azurite steps above — env vars are
       # exported to $GITHUB_ENV only after both databases are healthy, and
       # RR_REQUIRE_DB_TESTS additionally turns the suites' unreachable-DB
       # skip into a hard failure, so a container that fails to start can
@@ -276,7 +275,7 @@ jobs:
       # runs) and AGE 1.5.0. The remaining drift is the PG minor inside each
       # image and the two-images-vs-one-database split; publishing the exact
       # single-image cloud pin to GHCR is a noted follow-up.
-      - name: Start Postgres (pgvector + AGE + PgBouncer) for tests / Linux
+      - name: Start Postgres (pgvector + AGE) for tests / Linux
         if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test
         run: |
           set -euo pipefail
@@ -299,67 +298,35 @@ jobs:
           # Smoke both: a vector literal and an AGE graph round-trip.
           docker exec rr-pgvector psql -U rruser -d rrtenant -c "SELECT '[1,2,3]'::vector;"
           docker exec rr-age psql -U rruser -d rrtenant -c "SET search_path=ag_catalog,\"\$user\",public; SELECT create_graph('ci_smoke'); SELECT drop_graph('ci_smoke', true);"
-          # The cloud reaches tenant databases through a transaction-mode
-          # pooler, so the AGE suites also run through PgBouncer (1.26,
-          # pinned by digest) in front of rr-age; nodes:test runs them a
-          # second time with RR_TEST_AGE_DSN pointing here and the admin DSN
-          # direct. psql in rr-age reaches the pooler by its bridge address.
-          docker run -d --name rr-pgbouncer --link rr-age:age -p 56433:5432 \
-            -e DB_HOST=age -e DB_USER=rruser -e DB_PASSWORD=rrpass -e DB_NAME=rrtenant \
-            -e POOL_MODE=transaction -e AUTH_TYPE=scram-sha-256 -e DEFAULT_POOL_SIZE=4 -e MAX_CLIENT_CONN=200 \
-            edoburu/pgbouncer@sha256:9c78945868a6a142c7fc40ccd843bbe5a606df163c7ffce4de70e0d628d696a2
-          pgb_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' rr-pgbouncer)
-          ready=
-          for i in $(seq 1 30); do
-            if docker exec rr-age psql "postgresql://rruser:rrpass@${pgb_ip}:5432/rrtenant" -tAc 'SELECT 1' >/dev/null 2>&1; then ready=1; break; fi
-            sleep 1
-          done
-          [ "${ready:-}" = "1" ] || { echo "rr-pgbouncer did not become ready"; docker logs rr-pgbouncer || true; exit 1; }
-          # Export test vars only once both databases (and the pooler) are live.
+          # Export test vars only once both databases are live.
           {
             echo "RR_TEST_PG_DSN=postgresql://rruser:rrpass@localhost:55432/rrtenant"
             echo "RR_TEST_AGE_DSN=postgresql://rruser:rrpass@localhost:55433/rrtenant"
-            echo "RR_TEST_AGE_POOLER_DSN=postgresql://rruser:rrpass@localhost:56433/rrtenant"
             echo "RR_REQUIRE_DB_TESTS=1"
           } >> "$GITHUB_ENV"
 
-      # Neo4j and FalkorDB for the graph node live suites (Linux only), run by
-      # the unmocked live-database pass of nodes:test. Pinned by digest: the
-      # graph tools' read-only and result-shape guarantees are proved against
-      # these exact servers (Neo4j 5.26.31 Community, FalkorDB module 6.0.1).
-      # Community has no custom roles, so the read-only ROLE boundary is not
-      # exercised here; the suites prove the node's own read path instead.
-      # Vars are exported only once both servers answer, and
-      # RR_REQUIRE_DB_TESTS (above) makes an unreachable server a failure.
-      - name: Start graph databases (Neo4j + FalkorDB) for tests / Linux
+      # Servers of the live database lane's domains (Linux only), one script per
+      # domain in nodes/test/db-services/, run in sorted order after the Postgres
+      # step. A domain adds its servers by adding its script, never by editing
+      # this workflow. The protocol (stdout = NAME=value lines, exported here only
+      # after the script succeeded; images pinned by digest) is in
+      # nodes/test/db-services/_common.sh. The suites those servers feed are
+      # registered in nodes/scripts/db-lanes/.
+      - name: Start DB live-lane services / Linux
         if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test
         run: |
           set -euo pipefail
-          docker run -d --name rr-neo4j -p 57687:7687 \
-            -e NEO4J_AUTH=neo4j/rr-ci-graph-pass \
-            -e NEO4J_server_memory_heap_max__size=512m \
-            neo4j:5.26-community@sha256:d9cfe82983d27f5a75b3aaae8f316d04f9a698a3b7f6103a508f7caf8362f255
-          docker run -d --name rr-falkordb -p 56379:6379 \
-            falkordb/falkordb@sha256:e2765e207e5ba4ee90e47ed31eb7491ad6dd3d42241c326e429375c02ad9882f
-          ready=
-          for i in $(seq 1 60); do
-            if docker exec rr-neo4j cypher-shell -u neo4j -p rr-ci-graph-pass 'RETURN 1' >/dev/null 2>&1; then ready=1; break; fi
-            sleep 2
+          shopt -s nullglob
+          for script in nodes/test/db-services/[a-z]*.sh; do
+            echo "::group::$script"
+            vars=$(bash "$script")
+            echo "::endgroup::"
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              [[ "$line" =~ ^[A-Z][A-Z0-9_]*=.*$ ]] || { echo "$script printed a line that is not NAME=value: $line"; exit 1; }
+              echo "$line" >> "$GITHUB_ENV"
+            done <<< "$vars"
           done
-          [ "${ready:-}" = "1" ] || { echo "rr-neo4j did not become ready"; docker logs rr-neo4j || true; exit 1; }
-          ready=
-          for i in $(seq 1 30); do
-            if docker exec rr-falkordb redis-cli GRAPH.QUERY ci_smoke 'RETURN 1' >/dev/null 2>&1; then ready=1; break; fi
-            sleep 1
-          done
-          [ "${ready:-}" = "1" ] || { echo "rr-falkordb did not become ready"; docker logs rr-falkordb || true; exit 1; }
-          docker exec rr-falkordb redis-cli GRAPH.DELETE ci_smoke >/dev/null 2>&1 || true
-          {
-            echo "RR_TEST_NEO4J_URI=bolt://localhost:57687"
-            echo "RR_TEST_NEO4J_USER=neo4j"
-            echo "RR_TEST_NEO4J_PASSWORD=rr-ci-graph-pass" # gitleaks:allow — throwaway CI container password
-            echo "RR_TEST_FALKORDB_URL=redis://localhost:56379"
-          } >> "$GITHUB_ENV"
 
       - name: Test
         if: inputs.codeql == false && inputs.test

@@ -69,7 +69,7 @@ every run, so no cached bundle masks the served build.
 
 ### 2. Database containers
 
-The same images CI starts (`.github/workflows/_build.yaml`; Neo4j and FalkorDB
+The same images CI starts (`nodes/test/db-services/graph.sh`; Neo4j and FalkorDB
 pinned by digest), with local-only throwaway values, published on 127.0.0.1
 only. Use exactly these: the node suites compare the graph tools' output with
 captures taken on these servers, including the server version and its own
@@ -311,8 +311,8 @@ test describes. They check that:
   key/value one, shows `(set)`), so the password is never printed;
 - `check_db_versions.py` takes the expected versions from the committed
   captures and fails on another version or edition, or an unreachable server;
-- the database and PgBouncer images in this README are the ones `_build.yaml`
-  starts;
+- the database and PgBouncer images in this README are the ones
+  `nodes/test/db-services/` starts;
 - the lifecycle restart rows, the Graph Explorer Ask and Escape steps, and the
   `lane_a11y.cjs` contrast, stroke and reduced-motion rows cannot pass without
   observing what they name;

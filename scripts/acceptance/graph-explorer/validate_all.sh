@@ -14,7 +14,7 @@
 #
 # Prerequisites: the database containers from README.md (the nodes:test and
 # nodes:test-db steps require them via RR_REQUIRE_DB_TESTS=1), started from the
-# images CI pins in .github/workflows/_build.yaml, and a built dist/server. The
+# images CI pins in nodes/test/db-services/ (graph.sh, _common.sh), and a built dist/server. The
 # db-versions step checks first that the servers report the versions the
 # committed wire captures were taken on (check_db_versions.py): the wire-fixture
 # suite compares those exactly, so a container from a newer image fails it for
