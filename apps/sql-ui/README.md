@@ -671,8 +671,10 @@ there, with these differences:
   and checks it again itself: who is signed in, and the connection's safety
   level. A statement or an Apply that asks at that level (see [Confirmations and safety levels](#confirmations-and-safety-levels)) is
   refused unless the request says the document's own confirmation ran, and a
-  lower level is accepted only with a one-time ticket the sidebar issues after
-  the document's downgrade dialog; a plain request cannot lower it. This
+  lower level is accepted only with a one-time ticket the sidebar issues on
+  request. The document asks for it after its downgrade dialog, but the sidebar
+  cannot check that the dialog was shown: a request without a ticket cannot
+  lower the level, and one with a ticket is trusted as the user's own. This
   guards against requests that skip the confirmation. It is a check on
   statement text, not a database security boundary: a document that says it
   confirmed is trusted as the user's own, and the node's `allow_execute`

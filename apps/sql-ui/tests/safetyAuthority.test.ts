@@ -51,6 +51,7 @@ import { SQL_OP_TIMEOUT_MS } from '../src/sqlTimeouts';
 import { createSqlCore } from '../src/sqlCore';
 import { taskRow } from './support';
 import { USER, engineScript, scriptedClientRealm, until } from './realm';
+import { manualNow } from 'shared/explorer/devtool/testing';
 import { PIPELINE, postgres, rig, toolRequests } from './devtoolRig';
 import type { IRig } from './devtoolRig';
 
@@ -219,6 +220,23 @@ describe('a downgrade ticket expires', () => {
 			assert.equal(levelOf(), 'risky', 'just inside the lifetime it is accepted');
 		} finally {
 			core.dispose();
+		}
+	});
+});
+
+describe('a downgrade ticket expires, end to end through the controller', () => {
+	it('a ticket issued by sql.requestSafetyDowngrade and used after five minutes on the controller\'s clock is refused', async () => {
+		const clock = manualNow(Date.now());
+		const r = await rig({ saved: [STRICT], tool: postgres, now: clock.now });
+		try {
+			await r.env.resolveEndpoint(STRICT);
+			const owner = r.frame.owner();
+			const issued = await op(r, 'sql.requestSafetyDowngrade', { connId: 'c-pipe', safety: 'risky', owner }) as { ticket: string };
+			clock.advance(5 * 60_000 + 1);
+			await assert.rejects(op(r, 'sql.setConnectionSafety', { connId: 'c-pipe', safety: 'risky', owner, ticket: issued.ticket }), refused);
+			assert.equal(levelOf(), 'every', 'the expired ticket changed nothing');
+		} finally {
+			r.dispose();
 		}
 	});
 });

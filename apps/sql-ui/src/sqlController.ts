@@ -384,6 +384,8 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 		getClient: opts.getClient,
 		engine: opts.engine,
 		mode: 'devtool',
+		// The same clock the deadline guard uses, so a ticket's expiry is testable through the controller.
+		...(opts.now ? { now: opts.now } : {}),
 		...(opts.focusTarget !== undefined ? { focusTarget: opts.focusTarget } : {}),
 		...(opts.clock ? { clock: opts.clock } : {}),
 	});
