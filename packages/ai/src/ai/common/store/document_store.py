@@ -716,6 +716,21 @@ class DocumentStoreBase(ABC):
         self.remove(ids)
         return count
 
+    def removeTrashed(self, objectIds: List[str]) -> Optional[int]:
+        """
+        Permanently remove the chunks of ``objectIds`` that are in the trash, and only those.
+
+        The condition is part of the store operation itself (one SQL statement, one delete by
+        filter that includes the deleted flag), so a chunk a concurrent ``restore`` has just made
+        live is never removed: the check and the delete cannot be separated. Returns the rows
+        removed (None when the backend cannot say). Never removes the control record.
+
+        There is no safe default (a delete by id would remove live chunks too), so a driver
+        that cannot express the condition keeps this one: ``delete {deleted_only}`` is then
+        refused with ``UNSUPPORTED``.
+        """
+        raise StoreUnsupported(f'{type(self).__name__} cannot delete only the chunks that are in the trash')
+
     @staticmethod
     def resolveDeleted(docFilter: DocFilter) -> 'Deleted':
         """
@@ -1980,7 +1995,11 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         The only permanent delete. With ``deleted_only`` (the Vector Explorer's "Empty
         trash") a document is removed only when every chunk of it is in the trash; one
         that still has a live chunk (a later ingest batch added it) is left whole and named
-        in ``kept_live``.
+        in ``kept_live``. The permanent delete is conditional on the trashed state inside the
+        store operation (``removeTrashed``), so a restore that lands between the live check and
+        the delete keeps its document: it is named in ``kept_live`` too, and ``removed_chunks``
+        counts what was actually deleted. A store that cannot express the condition refuses
+        ``deleted_only`` with ``UNSUPPORTED``.
         """
         store = self._vectordb_store()
 
@@ -2013,7 +2032,10 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         targets = [oid for oid in unique_ids if oid not in kept_live]
         not_found: List[str] = []
         rows: Optional[int] = 0
-        if targets:
+        if targets and deleted_only:
+            not_found, rows, raced = self._vx_remove_trashed(store, targets)
+            kept_live = kept_live + raced
+        elif targets:
             _removed, not_found, rows = self._vx_remove(store, targets)
         # The audit names every id the call named, as without deleted_only (kept_live and
         # not_found say which of them were left alone); rows is what went.

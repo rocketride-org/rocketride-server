@@ -1358,3 +1358,18 @@ class Store(DocumentStoreBase):
         removed = self._countWhere([f"meta['objectId'] in [{_str_list(ids)}]"])
         self.remove(ids)
         return removed
+
+    def removeTrashed(self, objectIds: List[str]) -> Optional[int]:
+        """Delete the chunks of ``objectIds`` that are in the trash, and only those, in one operation; return the rows removed.
+
+        The deleted flag is part of the delete's own filter, so a chunk a concurrent ``restore`` has just made
+        live is never removed. Never the control record.
+        """
+        ids = [o for o in objectIds or [] if o != CONTROL_OBJECT_ID]
+        if not ids or not self._doesCollectionExist():
+            return 0
+        trashed = [f"meta['objectId'] in [{_str_list(ids)}]", "meta['isDeleted'] == true"]
+        removed = self._countWhere(trashed)
+        if removed:
+            self.client.delete(collection_name=self.collection, filter=' and '.join(trashed), timeout=self.timeout)
+        return removed
