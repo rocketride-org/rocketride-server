@@ -255,7 +255,6 @@ export function buildAuthUrl(
         code_challenge: challenge,
         code_challenge_method: 'S256',
     });
-    if (state) params.set('state', state);
 
     // Always land on Zitadel's login page (prompt=login): it forces the login UI
     // so Zitadel never silently reuses its SSO session (account switching stays

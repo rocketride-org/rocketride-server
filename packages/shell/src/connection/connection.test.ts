@@ -2059,6 +2059,23 @@ test('OAuth error discards pending signup context without reading it', async () 
 });
 
 
+test('an identity provider error return strips its state from the URL without a sign-in failure', async () => {
+	const envelope = btoa(JSON.stringify({ v: 1, signup: { ...signupContext(), consent_state: 'undecided' } }));
+	const urls: string[] = [];
+	const win = topLevelWindow({
+		location: { search: `?error=access_denied&state=${encodeURIComponent(envelope)}`, pathname: '/' },
+		history: { state: null, replaceState: (_state: unknown, _title: string, url: string) => urls.push(url) },
+	});
+	await withGlobals({ window: win, sessionStorage: recordingSession().storage, localStorage: recordingSession().storage, navigator: {} }, async () => {
+		const { manager } = createTestManager();
+		manager.client = testClient();
+		manager._attachPromise = Promise.resolve();
+		await manager.bootstrap();
+		assert.deepEqual(urls, ['/']);
+		assert.notEqual(manager.connectionStatus.state, ConnectionState.AUTH_FAILED);
+	});
+});
+
 test('startOAuth omits a throwing signup getter and allows retry after provider failure', async () => {
 	const session = recordingSession();
 	const local = recordingSession([['rr_consent_v1', JSON.stringify({ v: 1, choice: 'accepted', at: Date.now() })]]);

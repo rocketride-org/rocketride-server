@@ -921,13 +921,17 @@ export class ConnectionManager implements IConnectionManager {
 
 		const params = new URLSearchParams(window.location.search);
 		const code = params.get('code');
-		// Only honor `auth_error`: it is set exclusively by our own OAuth
-		// callback (the registered redirect_uri is the server callback, which
-		// wraps every Zitadel failure as `auth_error` before redirecting here).
-		// The generic OAuth `error`/`error_description` params never legitimately
-		// reach the app this way, so reading them would let any unrelated app
-		// deep-link (`/app?error=…`) hijack bootstrap into a false sign-in banner.
+		// Only `auth_error` is honored as a sign-in failure: our own OAuth
+		// callback sets it. The generic OAuth `error`/`error_description` params
+		// can reach the app too (the registered redirect URIs are origin roots),
+		// but honoring them would let any unrelated app deep-link (`/app?error=…`)
+		// into a false sign-in banner. Such a return still carries `state`, which
+		// may hold a cookieless signup context, so it is stripped from the URL.
 		const errorDescription = params.get('auth_error');
+		if (!code && !errorDescription && params.has('error') && params.has('state')) {
+			clearSignupProperties();
+			window.history.replaceState({ ...(window.history.state ?? {}) }, '', window.location.pathname);
+		}
 
 		if (errorDescription) {
 			clearSignupProperties();

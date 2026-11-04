@@ -157,8 +157,8 @@ export class CloudAuthProvider implements IAuthProvider {
 		// stash it with the verifier's lifetime (both exchange sites read it).
 		storeRedirectUri(redirectUri);
 
-		// The OAuth state carries one thing. A dev relay owns it (attribution never runs in dev loops);
-		// otherwise it is the cookieless signup context, when there is one.
+		// The OAuth state carries one thing. A dev relay owns it when relaying; otherwise, including an
+		// unframed dev shell without the relay, it is the cookieless signup context, when there is one.
 		let state = signupState(context);
 		if (useRelay) state = `rrdev:${window.location.origin}`;
 
