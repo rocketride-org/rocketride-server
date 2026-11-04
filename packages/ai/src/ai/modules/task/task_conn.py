@@ -542,7 +542,7 @@ class TaskConn(
             request (Dict[str, Any]): The command request containing task token
 
         Returns:
-            str: The task token for the request.
+            str | None: The task token for the request, or None when the request carries none.
 
         Raises:
             PermissionError: If the connection is not authenticated.
@@ -581,7 +581,9 @@ class TaskConn(
             TASK: The task instance corresponding to the token.
 
         Raises:
-            KeyError: If the task with the specified token does not exist.
+            ValueError: If the request carries no task token.
+            TaskError: Code TASK_NOT_REGISTERED if the token names no live task.
+            PermissionError: If the connection lacks the permission the command requires.
         """
         # Get the token
         token = self.get_task_token(request, permissions)

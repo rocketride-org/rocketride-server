@@ -106,9 +106,9 @@ class DAPBase:
         Initialize the DAP base class with configuration and module identification.
 
         Args:
-            **kwargs: Additional keyword arguments. The 'module' key is used for
-                    logging prefixes and component identification. If not provided,
-                    defaults to 'UNKNOWN'.
+            module (str): Message type used for logging prefixes and component
+                identification. Defaults to 'UNKNOWN'.
+            **kwargs: Additional keyword arguments forwarded to the transport layer.
         """
         # Message type identifier for logging - helps distinguish different DAP instances
         # This should be set by concrete classes to provide meaningful log prefixes

@@ -1048,7 +1048,7 @@ class WebServer:
 
         Behavior:
             - Uses `importlib.import_module()` to dynamically import a module.
-            - The module is expected to exist within the `ai.modules.<module>.endpoints` namespace.
+            - The module is expected to exist as `ai.modules.<moduleName>` and expose `initModule`.
             - This allows API endpoints from the specified module to be registered dynamically.
 
         Example:
