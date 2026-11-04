@@ -34,6 +34,7 @@ import React, { useEffect, useState } from 'react';
 import { decideConsent, getConsentState, subscribeConsent, withdrawConsent } from './consentState';
 import { privacySignalOn } from 'rocketride/analytics';
 import type { ConsentState } from './consent';
+import { COOKIE_POLICY_PATH, PRIVACY_POLICY_PATH } from './ConsentBanner';
 
 // ==== styles ================================================================
 
@@ -137,9 +138,9 @@ export const PrivacyPanel: React.FC = () => {
 			<p style={styles.muted}>
 				This choice applies to this browser only — it is never stored on your account, and signed-in
 				screens are never recorded either way. Details:{' '}
-				<a href="/legal/privacy" target="_blank" rel="noreferrer" style={styles.link}>Privacy Policy</a>
+				<a href={PRIVACY_POLICY_PATH} target="_blank" rel="noreferrer" style={styles.link}>Privacy Policy</a>
 				{' '}·{' '}
-				<a href="/legal/cookies" target="_blank" rel="noreferrer" style={styles.link}>Cookie Policy</a>.
+				<a href={COOKIE_POLICY_PATH} target="_blank" rel="noreferrer" style={styles.link}>Cookie Policy</a>.
 			</p>
 		</div>
 	);

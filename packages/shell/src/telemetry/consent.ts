@@ -63,6 +63,11 @@ export class ConsentStore {
 	private readonly now: () => number;
 	private readonly version: number;
 	private memory: ConsentRecord | null = null;
+	/**
+	 * True when this page's last decision could not be written: the stored record
+	 * (possibly an older 'accepted') is stale, so the page's own decision wins.
+	 */
+	private writeFailed = false;
 	private readonly listeners = new Set<(state: ConsentState, origin: ConsentOrigin) => void>();
 	private last: ConsentState | null = null;
 
@@ -85,6 +90,9 @@ export class ConsentStore {
 	 * @returns The stored record if valid, else what this page decided, else null.
 	 */
 	record(): ConsentRecord | null {
+		if (this.writeFailed && this.memory) {
+			return this.memory; // the store is stale: a reject or withdrawal must not read back as 'accepted'
+		}
 		let raw: string | null = null;
 		try {
 			if (this.storage) {
@@ -110,10 +118,19 @@ export class ConsentStore {
 		const before = this.state();
 		const rec: ConsentRecord = { v: this.version, choice, at: this.now() };
 		this.memory = rec;
+		this.writeFailed = false;
 		try {
 			this.storage?.setItem(CONSENT_KEY, JSON.stringify(rec));
 		} catch {
-			/* quota or disabled storage: the choice holds for this page */
+			// Quota or disabled storage: the choice holds for this page, over
+			// whatever stale record storage still returns. Best effort, drop that
+			// record too, so other tabs stop following it.
+			this.writeFailed = true;
+			try {
+				this.storage?.removeItem(CONSENT_KEY);
+			} catch {
+				/* unavailable */
+			}
 		}
 		this.last = choice;
 		if (before !== choice) {
@@ -129,6 +146,7 @@ export class ConsentStore {
 	reload(): void {
 		const before = this.last ?? 'undecided';
 		this.memory = null;
+		this.writeFailed = false; // another tab's write is the record now
 		const now = this.state();
 		this.last = now;
 		if (now !== before) {

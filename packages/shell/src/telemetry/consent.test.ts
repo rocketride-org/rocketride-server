@@ -82,3 +82,36 @@ test('reload follows another tab: a removed record emits undecided with origin e
 	assert.deepEqual(seen.at(-1), ['rejected', 'external']);
 	assert.equal(consent.state(), 'rejected');
 });
+
+test('a decision whose write fails wins over the stale stored record, and listeners still fire', () => {
+	const storage = fakeStorage();
+	storage.data.set(CONSENT_KEY, JSON.stringify({ v: CONSENT_VERSION, choice: 'accepted', at: Date.now() }));
+	// writes throw (quota), reads and removals still work: the stale 'accepted' is dropped
+	const failing = { ...storage, setItem: () => { throw new Error('QuotaExceededError'); } };
+	const store = new ConsentStore({ storage: failing });
+	const seen: string[] = [];
+	store.subscribe((state, origin) => { seen.push(`${state}:${origin}`); });
+	assert.equal(store.state(), 'accepted');
+	store.decide('rejected');
+	assert.equal(store.state(), 'rejected', 'the in-memory decision wins');
+	assert.deepEqual(seen, ['rejected:local']);
+	assert.equal(storage.data.has(CONSENT_KEY), false, 'the stale record is removed best effort');
+});
+
+test('a failed write wins even when the stale record cannot be removed either', () => {
+	const storage = fakeStorage();
+	storage.data.set(CONSENT_KEY, JSON.stringify({ v: CONSENT_VERSION, choice: 'accepted', at: Date.now() }));
+	const stuck = { ...storage, setItem: () => { throw new Error('denied'); }, removeItem: () => { throw new Error('denied'); } };
+	const store = new ConsentStore({ storage: stuck });
+	const seen: string[] = [];
+	store.subscribe((state) => { seen.push(state); });
+	store.decide('rejected');
+	assert.equal(store.state(), 'rejected');
+	assert.equal(store.record()?.choice, 'rejected');
+	assert.deepEqual(seen, ['rejected']);
+	// another tab's write later becomes the record again
+	storage.data.set(CONSENT_KEY, JSON.stringify({ v: CONSENT_VERSION, choice: 'accepted', at: Date.now() }));
+	store.reload();
+	assert.equal(store.state(), 'accepted');
+	assert.deepEqual(seen, ['rejected', 'accepted']);
+});

@@ -37,6 +37,14 @@ let pageActive = false;
 let trafficClass = 'visible';
 /** True only when the shell knows the surface is signed out (set from the identity it resolves). */
 let knownSignedOut = false;
+/**
+ * The last resolved auth state the shell reported, replayed onto the transport's
+ * identity when its chunk binds (a report made before the chunk landed would
+ * otherwise be lost). null = nothing resolved yet: the bootstrap is still
+ * running, so nothing is replayed and the identity stays "unknown" (never a
+ * signed-out report, which would reset a stored identified identity).
+ */
+let lastAuth: { isAuthed: boolean; userId: string | null } | null = null;
 /** The app-registerable before-send veto for experiment-bearing events; allows everything by default. */
 let attributionGate: (event: unknown) => boolean = () => true;
 /**
@@ -94,11 +102,17 @@ export function initTelemetryHost(config: TelemetryConfig): void {
 	if (enabled !== null) {
 		return;
 	}
+	// Each disabled branch drops the queue's hold: captures held by an earlier
+	// page load of the tab would otherwise sit in sessionStorage with nothing
+	// to drain them. (An embedded preview's queue has no storage, so this
+	// never touches the host tab's hold.)
 	if (!config.key || typeof window === 'undefined') {
+		queue.clearHold();
 		enabled = false;
 		return;
 	}
 	if (privacySignalOn()) {
+		queue.clearHold();
 		enabled = false;
 		return;
 	}
@@ -109,6 +123,7 @@ export function initTelemetryHost(config: TelemetryConfig): void {
 		// (setHostTelemetryEnabled) is wired for the day a VS Code profile
 		// (events-only instance, gated by the editor's telemetry setting) gets
 		// its first consumer.
+		queue.clearHold();
 		enabled = false;
 		return;
 	}
@@ -136,30 +151,7 @@ export function initTelemetryHost(config: TelemetryConfig): void {
 	// Eager chunk fetch, deferred init: shrink the hold's window without paying init before first paint.
 	void import('./transport')
 		.then((module) => {
-			transport = module;
-			module.bindTransport({
-				queue,
-				isPage: () => {
-					return pageActive;
-				},
-				privacySignal: () => {
-					return privacySignalOn();
-				},
-				signedOut: () => {
-					return knownSignedOut;
-				},
-				visibleLoad: () => {
-					return trafficClass === 'visible';
-				},
-				ensureInit: () => {
-					return enabled === true;
-				},
-				allowAttribution: (event) => {
-					return attributionGate(event);
-				},
-			});
-			scheduleStart();
-			module.startWebVitals();
+			onTransportLoaded(module);
 		})
 		.catch(() => {
 			// The chunk failed to load (offline, blocked): captures stay in the
@@ -169,6 +161,43 @@ export function initTelemetryHost(config: TelemetryConfig): void {
 	window.addEventListener('pagehide', () => {
 		startSdk(true);
 	});
+}
+
+/**
+ * The transport chunk landed: bind it to this page load, replay the auth state
+ * resolved before it was in, then schedule the SDK start.
+ *
+ * @param module - The loaded transport chunk.
+ */
+function onTransportLoaded(module: typeof Transport): void {
+	transport = module;
+	module.bindTransport({
+		queue,
+		isPage: () => {
+			return pageActive;
+		},
+		privacySignal: () => {
+			return privacySignalOn();
+		},
+		signedOut: () => {
+			return knownSignedOut;
+		},
+		visibleLoad: () => {
+			return trafficClass === 'visible';
+		},
+		ensureInit: () => {
+			return enabled === true;
+		},
+		allowAttribution: (event) => {
+			return attributionGate(event);
+		},
+	});
+	// Replay the auth state resolved before the chunk landed, BEFORE the
+	// SDK starts: the init then identifies a signed-in accepted visitor
+	// and drops a stored identified identity only on a known sign-out.
+	replayAuth();
+	scheduleStart();
+	module.startWebVitals();
 }
 
 /** This page load's rr_journey key (crypto UUID where available). */
@@ -304,17 +333,26 @@ export function setPageActive(active: boolean): void {
  */
 export function setTelemetryIdentity(isAuthed: boolean, userId: string | null): void {
 	knownSignedOut = !isAuthed;
+	lastAuth = { isAuthed, userId };
+	replayAuth();
+}
+
+/** Forward the last resolved auth state to the transport's identity, once the chunk is in. */
+function replayAuth(): void {
 	const identity = transport?.transportIdentity();
-	if (!identity) {
+	if (!identity || !lastAuth) {
 		return;
 	}
-	identity.setAuthed(isAuthed);
-	identity.setIdentity(userId);
+	identity.setAuthed(lastAuth.isAuthed);
+	identity.setIdentity(lastAuth.userId);
 }
 
 /** Off only, no init, no capture: the moment a sign-in is known, before paint. */
 export function markTelemetrySignedIn(): void {
 	knownSignedOut = false;
+	// A later bind replays signed in, keeping whatever user id is already known
+	// (the identity report that follows the sign-in brings the id).
+	lastAuth = { isAuthed: true, userId: lastAuth?.userId ?? null };
 	transport?.transportIdentity().markSignedIn();
 }
 
@@ -403,8 +441,24 @@ export function resetTelemetryHostForTests(): void {
 	pageActive = false;
 	trafficClass = 'visible';
 	knownSignedOut = false;
+	lastAuth = null;
 	attributionGate = () => true;
 	hostTelemetryEnabled = null;
 	reporters.clear();
 	queue = newQueue();
+}
+
+/**
+ * TEST ONLY — bind a fake transport chunk exactly as the keyed path's import
+ * does (replay, then the start schedule), without fetching posthog-js. The
+ * host counts as enabled, as it is whenever the chunk import runs.
+ */
+export function loadTransportForTests(module: Pick<typeof Transport, 'bindTransport' | 'transportIdentity' | 'startWebVitals' | 'initPostHog' | 'active' | 'registerOnInstances'>): void {
+	enabled = true;
+	onTransportLoaded(module as typeof Transport);
+}
+
+/** TEST ONLY — whether the host currently treats the surface as known signed out. */
+export function knownSignedOutForTests(): boolean {
+	return knownSignedOut;
 }

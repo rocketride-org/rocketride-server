@@ -284,9 +284,15 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	// The resolved identity drives telemetry's signed-in state and the opaque
 	// id the consented instance identifies by (never an email or name).
+	// identity === null means "signed out" only once the bootstrap has
+	// resolved: while it runs (loading) or after it failed (error) the state
+	// is unknown, and unknown must stay off the known-signed-out path (rich
+	// capture, signed-out capture config, the stored-identity reset).
+	const authResolved = renderPhase !== 'loading' && renderPhase !== 'error';
 	useEffect(() => {
+		if (!authResolved) return;
 		setTelemetryIdentity(identity !== null, identity?.userId ?? null);
-	}, [identity]);
+	}, [identity, authResolved]);
 	const [activeAppId, setActiveAppId] = useState<string | null>(null);
 	const [showApiKeyLogin, setShowApiKeyLogin] = useState(false);
 	// Embedded (iframe) sign-in prompt — the popup-based OAuth entry point

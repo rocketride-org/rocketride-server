@@ -55,6 +55,9 @@ import { PHONE_MARGIN, compactCopy, nextPlacement, onScreen, placementLabel, pos
 /** The privacy policy the banner links to. */
 export const PRIVACY_POLICY_PATH = '/legal/privacy-policy';
 
+/** The cookie policy the privacy settings link to. */
+export const COOKIE_POLICY_PATH = '/legal/cookie-policy';
+
 /** The approved copy (2026-10-10), verbatim. */
 export const COPY = {
 	heading: 'Help us craft a better RocketRide',
