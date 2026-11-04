@@ -34,9 +34,11 @@ Note:
 """
 
 import asyncio
+import contextlib
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -81,6 +83,12 @@ CLI_ENTRY = (
 # whoever runs the suite must not reach the subprocess
 CLI_ENV_VARS = ('ROCKETRIDE_URI', 'ROCKETRIDE_APIKEY', 'ROCKETRIDE_TOKEN', 'ROCKETRIDE_PIPELINE')
 
+# Under the engine's embedded interpreter (how CI runs this suite) the engine
+# writes its own log to stdout, status lines included: "Waiting for another
+# installation to complete..." while another engine holds install.lock. The
+# CLI's stdout is the command's output, so the engine log goes to a file.
+UNDER_ENGINE = Path(sys.executable).stem.lower() == 'engine'
+
 
 async def ensure_clean_pipeline(client: RocketRideClient, token: str) -> None:
     """Clean up pipeline if it exists, ignoring errors."""
@@ -108,7 +116,8 @@ async def run_cli_streams(
             stray positional. Both spellings feed the same argparse dest.
 
     Returns:
-        Tuple of (exit code, stdout, stderr)
+        Tuple of (exit code, stdout, stderr). Under the engine, a failing
+        command's stderr ends with the engine log (see UNDER_ENGINE).
     """
     env = dict(os.environ)
 
@@ -121,25 +130,44 @@ async def run_cli_streams(
     if pipeline is not None:
         env['ROCKETRIDE_PIPELINE'] = pipeline
 
-    process = await asyncio.create_subprocess_exec(
-        sys.executable,
-        '-c',
-        CLI_ENTRY,
-        *args,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-        cwd=cwd,
-    )
+    engine_log = None
+    engine_args: List[str] = []
+    if UNDER_ENGINE:
+        fd, engine_log = tempfile.mkstemp(prefix='rr-cli-engine-', suffix='.log')
+        os.close(fd)
+        engine_args = [f'--log.file={engine_log}']
 
     try:
-        stdout, stderr = await asyncio.wait_for(process.communicate(), TEST_CONFIG['timeout'])
-    except asyncio.TimeoutError:
-        process.kill()
-        await process.communicate()
-        raise
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            *engine_args,
+            '-c',
+            CLI_ENTRY,
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+            cwd=cwd,
+        )
 
-    return process.returncode, stdout.decode('utf-8', errors='replace'), stderr.decode('utf-8', errors='replace')
+        try:
+            stdout, stderr = await asyncio.wait_for(process.communicate(), TEST_CONFIG['timeout'])
+        except asyncio.TimeoutError:
+            process.kill()
+            await process.communicate()
+            raise
+
+        out = stdout.decode('utf-8', errors='replace')
+        err = stderr.decode('utf-8', errors='replace')
+        if engine_log and process.returncode != 0:
+            log_text = Path(engine_log).read_text(encoding='utf-8', errors='replace')
+            if log_text:
+                err += f'\n--- engine log ---\n{log_text}'
+        return process.returncode, out, err
+    finally:
+        if engine_log:
+            with contextlib.suppress(OSError):
+                os.unlink(engine_log)
 
 
 async def run_cli(*args: str, cwd: Optional[str] = None, pipeline: Optional[str] = None) -> Tuple[int, str]:
