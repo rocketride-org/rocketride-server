@@ -535,7 +535,7 @@ shows the full statement, its outcome and its round trip, and lets you load it
 into the editor, run it again, pin it, annotate it or delete it. Re-running an
 entry that changed data asks first and quotes what it did last time, whatever
 the connection's safety level; the rerun is a fresh run with its own entry,
-and the safety level can ask again before it is sent. 
+and the safety level can ask again before it is sent.
 
 **Where it is stored matters.** In the app, history goes to your RocketRide
 workspace preferences on the server, per user, not into the browser, and the

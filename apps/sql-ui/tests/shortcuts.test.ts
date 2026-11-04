@@ -125,4 +125,3 @@ describe('the shortcut sheet says what a keyboard run does on a schema-only node
 		assert.match(sheet, /On a schema-only node a run from the keyboard sends nothing and says why; Check again on the query page looks again/);
 	});
 });
-
