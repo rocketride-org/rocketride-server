@@ -128,6 +128,22 @@ const CPP_NODE_BUILDS = [...SRC_NODE_DIRS]
 // runs it): then an unreachable server fails, and so does a suite in which
 // nothing passed or a test that skipped without a deliberate "NOT RUN:" reason.
 // nodes/test/test_db_lane_guard.py checks every registration.
+//
+// Registering nothing changes nothing: with no registration the mocked pass and
+// every task behave exactly as they did before the registry (no live pass, no
+// extra --ignore). Suites that existed before the registry (DEVELOP_DB_SUITES)
+// keep their old behavior until a domain lists one in its `suites`: develop's
+// `*_full.py` suites stay out of nodes:test (its mocked pass globs them away; only
+// nodes:test-full collects them) and test_pgvector_search.py stays in the mocked
+// pass. Listing one is that domain's deliberate, documented CI change.
+//
+// The live pass runs in one process, in a fixed order that does not depend on
+// which domains are present: the DEVELOP_DB_SUITES that some domain registered,
+// in the order below, then each domain's other suites (domains by file name,
+// suites as listed). The suites share the test databases (rr-pgvector, rr-age and
+// the servers of db-services/); each is written to create its own uniquely named
+// tables, graphs or collections and remove them, so order should not matter.
+// That is an assumption of the suites, not something this runner enforces.
 
 const DB_LANES_DIR = path.join(__dirname, 'db-lanes');
 const DB_POOLER_MODES = ['second-pass', 'in-suite'];
@@ -209,9 +225,33 @@ function loadDbLanes(dir = DB_LANES_DIR) {
 	return lanes;
 }
 
+// The live database suites that exist on develop, in the order the live pass runs the ones a
+// domain registered. Without a registration each keeps its behavior on develop (see above).
+const DEVELOP_DB_SUITES = [
+	'test_rocketride_db_full.py',
+	'test_rocketride_graph_full.py',
+	'test_rocketride_vector_tools_full.py',
+	'test_vector_store_listing_full.py',
+	'test_vector_store_writes_full.py',
+	'test_pgvector_search.py',
+];
+
+/**
+ * The live pass's suites in their fixed order: the registered DEVELOP_DB_SUITES first (in that
+ * list's order, whichever domain registered them), then each domain's remaining suites.
+ *
+ * @param {object[]} lanes - Registrations from loadDbLanes, in file-name order.
+ * @returns {string[]} File names in nodes/test.
+ */
+function orderDbSuites(lanes) {
+	const registered = new Set(lanes.flatMap((lane) => lane.suites));
+	const first = DEVELOP_DB_SUITES.filter((suite) => registered.has(suite));
+	const rest = lanes.flatMap((lane) => lane.suites.filter((suite) => !DEVELOP_DB_SUITES.includes(suite)));
+	return [...first, ...rest];
+}
+
 const DB_LANES = loadDbLanes();
-// Every registered suite, in registration order: one process, since they share database fixtures.
-const DB_LIVE_SUITES = DB_LANES.flatMap((lane) => lane.suites);
+const DB_LIVE_SUITES = orderDbSuites(DB_LANES);
 
 /**
  * The collection ignores of the mocked pass. Without test_full every
@@ -503,7 +543,10 @@ function makeInstallTestDepsAction() {
 function makeRunDbPytestAction(options = {}) {
 	return {
 		run: async (ctx, task) => {
-			if (DB_LIVE_SUITES.length === 0) return;
+			if (DB_LIVE_SUITES.length === 0) {
+				task.output = 'No live database suites are registered (nodes/scripts/db-lanes/)';
+				return;
+			}
 			require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 			const required = dbTestsRequired(options.requireDb);
 			const testEnv = { ...process.env };
@@ -681,8 +724,8 @@ function makeTestAction(options = {}) {
 			steps: [{ name: runName, action: makeRunPytestAction(options) }],
 		})
 	);
-	// Live database suites need no test server, only their databases.
-	if (!options.taskserver) {
+	// Live database suites need no test server, only their databases (none registered: no step).
+	if (!options.taskserver && DB_LIVE_SUITES.length > 0) {
 		steps.push({ name: 'nodes:run-pytest-db', action: makeRunDbPytestAction(options) });
 	}
 	return { description: 'Testing nodes', steps };
@@ -877,6 +920,8 @@ module.exports = [module.exports, ...CPP_NODES.map(makeNodeModule)];
 module.exports.dbLane = {
 	DB_LANES_DIR,
 	DB_LIVE_SUITES,
+	DEVELOP_DB_SUITES,
+	orderDbSuites,
 	loadDbLanes,
 	validateDbLane,
 	mockedPassIgnores,
