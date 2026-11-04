@@ -56,15 +56,20 @@ if (input.required !== undefined) {
     });
     if (saved === undefined) delete process.env.RR_REQUIRE_DB_TESTS;
 }
+if (input.order) {
+    out.order = lane.orderDbSuites(input.order);
+}
 if (input.registry) {
     out.lanes = lane.loadDbLanes().map((l) => ({
         file: l.file, name: l.name, suites: l.suites, poolerSuites: l.poolerSuites || [], poolerMode: l.poolerMode || null,
     }));
     out.suites = lane.DB_LIVE_SUITES;
+    out.developSuites = lane.DEVELOP_DB_SUITES;
     out.lanesDir = lane.DB_LANES_DIR;
 }
 if (input.ignores) {
     out.ignores = { mocked: lane.mockedPassIgnores(false), full: lane.mockedPassIgnores(true) };
+    out.noneRegistered = { mocked: lane.mockedPassIgnores(false, []), full: lane.mockedPassIgnores(true, []) };
     out.testDir = require('path').join(require('path').dirname(process.argv[1]), '..', 'test');
 }
 if (input.validate) {
@@ -207,11 +212,10 @@ def _registry():
 
 def test_every_registration_loads_and_no_suite_is_registered_twice():
     out = _registry()
-    assert out['lanes'], 'at least the registrations in nodes/scripts/db-lanes/ load'
     assert [lane['file'] for lane in out['lanes']] == sorted(lane['file'] for lane in out['lanes'])
     assert len({lane['name'] for lane in out['lanes']}) == len(out['lanes'])
     assert len(out['suites']) == len(set(out['suites']))
-    assert out['suites'] == [suite for lane in out['lanes'] for suite in lane['suites']]
+    assert sorted(out['suites']) == sorted(suite for lane in out['lanes'] for suite in lane['suites'])
 
 
 def test_every_registered_suite_file_exists_and_every_pooler_suite_is_registered():
@@ -235,13 +239,15 @@ def _needs_a_live_database(path: Path) -> bool:
 def test_every_suite_that_needs_a_live_database_is_registered():
     # An unregistered one would be collected by the mocked pass, where nodes/test/mocks
     # shadows its driver, and skip or fail there instead of running on the real server.
-    registered = set(_registry()['suites'])
+    out = _registry()
+    registered = set(out['suites']) | set(out['developSuites'])
     for path in sorted(_TEST_DIR.glob('test_*.py')):
         if path.name == Path(__file__).name:
             continue
         if _needs_a_live_database(path):
             assert path.name in registered, (
-                f'{path.name} reads a live-database variable but no nodes/scripts/db-lanes/*.js registers it'
+                f'{path.name} reads a live-database variable but is neither registered in nodes/scripts/db-lanes/*.js '
+                'nor listed in DEVELOP_DB_SUITES (nodes/scripts/tasks.js)'
             )
 
 
@@ -316,3 +322,48 @@ def test_the_mocked_pass_leaves_the_live_suites_out_by_path_wherever_pytest_runs
     assert ignored(full) == by_path, 'so does nodes:test-full'
     assert mocked[:4] == ['--ignore-glob', '**/test_*_full.py', '--ignore-glob', '**/test_*_full/**']
     assert '--ignore-glob' not in full, 'nodes:test-full collects the other _full suites'
+
+
+# ---------------------------------------------------------------------------
+# Registering nothing changes nothing; the run order is fixed
+# ---------------------------------------------------------------------------
+
+
+def test_develop_suites_exist_and_the_lists_do_not_repeat():
+    out = _registry()
+    assert len(out['developSuites']) == len(set(out['developSuites']))
+    for suite in out['developSuites']:
+        assert (_TEST_DIR / suite).is_file(), f'DEVELOP_DB_SUITES names {suite}, which nodes/test does not have'
+
+
+def test_with_nothing_registered_the_mocked_pass_is_what_it_was_before_the_registry():
+    # develop's nodes:test left *_full.py out by glob and nodes:test-full left nothing out.
+    out = _lane({'ignores': True})
+    assert out['noneRegistered']['mocked'] == [
+        '--ignore-glob',
+        '**/test_*_full.py',
+        '--ignore-glob',
+        '**/test_*_full/**',
+    ]
+    assert out['noneRegistered']['full'] == []
+
+
+def test_the_live_pass_order_does_not_depend_on_which_domain_registered_a_develop_suite():
+    develop = _registry()['developSuites']
+    a, b, c = develop[0], develop[1], develop[5]
+    lanes = [
+        {'name': 'alpha', 'suites': ['test_alpha_one_full.py', c, 'test_alpha_two_full.py']},
+        {'name': 'beta', 'suites': [b, 'test_beta_full.py', a]},
+    ]
+    # Develop's suites first, in DEVELOP_DB_SUITES order, then each domain's own, domains in file order.
+    expected = [a, b, c, 'test_alpha_one_full.py', 'test_alpha_two_full.py', 'test_beta_full.py']
+    assert _lane({'order': lanes})['order'] == expected
+    swapped = [
+        {'name': 'beta', 'suites': [b, 'test_beta_full.py', a]},
+        {'name': 'alpha', 'suites': ['test_alpha_one_full.py', c, 'test_alpha_two_full.py']},
+    ]
+    got = _lane({'order': swapped})['order']
+    assert got[:3] == [a, b, c], 'develop suites keep their order whichever domain comes first'
+    assert got[3:] == ['test_beta_full.py', 'test_alpha_one_full.py', 'test_alpha_two_full.py']
+    assert _lane({'order': [{'name': 'alpha', 'suites': [c]}]})['order'] == [c], 'a develop suite alone'
+    assert _lane({'order': []})['order'] == []
