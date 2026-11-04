@@ -20,8 +20,11 @@
 // the retired TelemetryChannel proved: bounded buffer, TTL, per-entry ids, a
 // corrupt mirror reads as empty. The next page load of the tab drains the
 // inherited entries into the SDK at ITS start — with their original timestamps
-// and their id as the event uuid, so an at-least-once replay dedupes instead
-// of double-counting (drain order: capture first, clear after). This load's
+// and their id as the event uuid (drain order: capture first, clear after).
+// The id is minted as an RFC 4122-shaped UUID because posthog-js keeps an
+// explicit uuid only when it matches that shape (it mints a fresh one
+// otherwise), and PostHog drops an event whose uuid it already ingested — so
+// an at-least-once replay of the same entry dedupes instead of double-counting. This load's
 // own replay keeps start-time stamps as before: posthog-js keys its page-view
 // state on the $pageview's timestamp, and an explicit earlier timestamp broke
 // web vitals and replay. Accepted loss windows are stated in the plan: a tab
@@ -75,6 +78,55 @@ type Pending = { event: string; props: Record<string, unknown>; options?: Captur
 /** A mirrored capture: what a next page load needs to replay it truthfully. */
 type Held = { event: string; props: Record<string, unknown>; ts: number; id: string };
 
+/** The shape posthog-js requires of an explicit capture uuid (it replaces anything else with a fresh one). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The slice of Web Crypto the uuid minting uses; injectable for tests. */
+export type UuidCrypto = { randomUUID?: () => string; getRandomValues?: <T extends Uint8Array>(array: T) => T };
+
+/**
+ * Whether `id` is a uuid posthog-js keeps as the event uuid.
+ *
+ * @param id - The candidate.
+ * @returns True for an 8-4-4-4-12 hex string.
+ */
+export function isEventUuid(id: unknown): id is string {
+	return typeof id === 'string' && UUID_RE.test(id);
+}
+
+/**
+ * Mint a v4 uuid for a held capture: crypto.randomUUID where available (secure contexts), else a
+ * getRandomValues-based v4, else a Math.random-based v4 — always 8-4-4-4-12 so posthog-js keeps it.
+ *
+ * @param c - The crypto to use (default: globalThis.crypto; null = none).
+ * @returns The uuid.
+ */
+export function newEventUuid(c: UuidCrypto | null | undefined = (globalThis as { crypto?: UuidCrypto }).crypto): string {
+	try {
+		const id = c?.randomUUID?.();
+		if (isEventUuid(id)) return id.toLowerCase();
+	} catch {
+		/* not a secure context, or unsupported: fall through */
+	}
+	const bytes = new Uint8Array(16);
+	let filled = false;
+	try {
+		if (c?.getRandomValues) {
+			c.getRandomValues(bytes);
+			filled = true;
+		}
+	} catch {
+		/* fall through to Math.random */
+	}
+	if (!filled) {
+		for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+	}
+	bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+	bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+	const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+	return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 /** The tab's sessionStorage, or null where there is none or its accessor throws (storage disabled). */
 function defaultStorage(): HoldStorage | null {
 	try {
@@ -95,7 +147,6 @@ export class SdkQueue {
 	private inherited: Held[];
 	/** This page load's mirrored entries (parallel to `pending`). */
 	private held: Held[] = [];
-	private seq = 0;
 	private readonly storage: HoldStorage | null;
 	private readonly now: () => number;
 
@@ -107,7 +158,13 @@ export class SdkQueue {
 		this.deps = deps;
 		this.storage = 'storage' in deps ? deps.storage || null : defaultStorage();
 		this.now = deps.now ?? (() => Date.now());
-		this.inherited = this.readMirror();
+		const { entries, normalized } = this.readMirror();
+		this.inherited = entries;
+		if (normalized) {
+			// A legacy entry got a fresh uuid: write it back now, so a load that crashes mid-drain and the
+			// load after it replay the SAME uuid (and dedupe) instead of minting another one each time.
+			this.persist();
+		}
 	}
 
 	/**
@@ -148,7 +205,7 @@ export class SdkQueue {
 		this.pending.push({ event, props: stamped, options });
 		// Mirror AT ENQUEUE: a redirect or crash a moment later still finds the entry.
 		const ts = this.now();
-		this.held.push({ event, props: stamped, ts, id: `${ts.toString(36)}-h${(this.seq++).toString(36)}` });
+		this.held.push({ event, props: stamped, ts, id: newEventUuid() });
 		this.persist();
 	}
 
@@ -169,8 +226,8 @@ export class SdkQueue {
 	 * super properties. Runs once.
 	 *
 	 * Inherited entries (an earlier page load's mirror — the OAuth round trip's other half) are
-	 * replayed FIRST, each with its original timestamp and its id as the event uuid: at-least-once
-	 * with dedupe, and a prior load's event is never stamped with this load's time. This load's own
+	 * replayed FIRST, each with its original timestamp and its id (a v4 uuid, which posthog-js keeps)
+	 * as the event uuid: at-least-once with dedupe, and a prior load's event is never stamped with this load's time. This load's own
 	 * entries keep start-time stamps — posthog-js keys page-view state on the $pageview timestamp.
 	 * The mirror is cleared only after the drain captured everything (capture first, clear after).
 	 *
@@ -259,26 +316,37 @@ export class SdkQueue {
 		}
 	}
 
-	/** Read what an earlier page load of the tab mirrored: valid entries within the TTL only; a corrupt mirror reads as empty. */
-	private readMirror(): Held[] {
-		if (!this.storage) return [];
+	/**
+	 * Read what an earlier page load of the tab mirrored: valid entries within the TTL only; a corrupt
+	 * mirror reads as empty. An entry whose id is missing or not uuid-shaped (a mirror written before
+	 * ids were uuids) gets a fresh uuid HERE, once per load and never at replay, so every capture of
+	 * that entry carries the same uuid; posthog-js would otherwise mint a new one per capture.
+	 *
+	 * @returns The entries, and whether any id was normalized (the constructor then rewrites the mirror).
+	 */
+	private readMirror(): { entries: Held[]; normalized: boolean } {
+		const empty = { entries: [] as Held[], normalized: false };
+		if (!this.storage) return empty;
 		try {
 			const raw = this.storage.getItem(HOLD_STORAGE_KEY);
-			if (!raw) return [];
+			if (!raw) return empty;
 			const parsed: unknown = JSON.parse(raw);
-			if (!Array.isArray(parsed)) return [];
+			if (!Array.isArray(parsed)) return empty;
 			const now = this.now();
 			const out: Held[] = [];
-			for (const [index, item] of parsed.entries()) {
+			let normalized = false;
+			for (const item of parsed) {
 				if (!item || typeof item !== 'object') continue;
 				const { event, props, ts, id } = item as Partial<Held>;
 				if (typeof event !== 'string' || event === '' || typeof ts !== 'number' || !Number.isFinite(ts)) continue;
 				if (now - ts > HOLD_TTL_MS || ts - now > 60_000) continue; // expired, or written by a clock ahead of this one
-				out.push({ event, props: props && typeof props === 'object' ? { ...props } : {}, ts, id: typeof id === 'string' && id ? id : `${ts.toString(36)}-m${index.toString(36)}` });
+				const uuid = isEventUuid(id) ? id : newEventUuid();
+				normalized ||= uuid !== id;
+				out.push({ event, props: props && typeof props === 'object' ? { ...props } : {}, ts, id: uuid });
 			}
-			return out;
+			return { entries: out, normalized };
 		} catch {
-			return []; // unreadable or corrupt mirror: nothing to replay
+			return empty; // unreadable or corrupt mirror: nothing to replay
 		}
 	}
 

@@ -30,7 +30,7 @@
 // the one affordance to change it (the Settings Privacy section).
 // =============================================================================
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { Reporter } from 'rocketride/analytics';
 import { ConnectionManager } from '../connection/connection';
 import { getConsentState, subscribeConsent } from './consentState';
@@ -94,14 +94,16 @@ export function useConsent(): ConsentApi {
 		return getConsentState();
 	});
 	useEffect(() => {
-		return subscribeConsent((next) => {
+		const unsubscribe = subscribeConsent((next) => {
 			setState(next);
 		});
+		// The store does not replay its state to a new listener: a decision made between the render's
+		// initial read and this subscription would otherwise be missed until the next change.
+		setState(getConsentState());
+		return unsubscribe;
 	}, []);
-	return {
-		state,
-		openSettings: () => {
-			ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'settings', section: 'privacy' });
-		},
-	};
+	const openSettings = useCallback(() => {
+		ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'settings', section: 'privacy' });
+	}, []);
+	return useMemo(() => ({ state, openSettings }), [state, openSettings]);
 }

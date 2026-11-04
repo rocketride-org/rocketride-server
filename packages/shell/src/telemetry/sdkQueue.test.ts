@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { HOLD_MAX, HOLD_STORAGE_KEY, HOLD_TTL_MS, MAX_PENDING, SdkQueue, type HoldStorage, type SdkQueueDeps } from './sdkQueue.ts';
+import { HOLD_MAX, HOLD_STORAGE_KEY, HOLD_TTL_MS, MAX_PENDING, SdkQueue, isEventUuid, newEventUuid, type HoldStorage, type SdkQueueDeps } from './sdkQueue.ts';
+
+/** The uuid shape posthog-js@1.433.5 keeps as an explicit capture uuid (anything else is replaced). */
+const POSTHOG_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 type CaptureCall = { kind: 'capture'; event: string; props: Record<string, unknown>; options?: unknown };
 type Call = CaptureCall | { kind: 'register'; props: Record<string, unknown> } | { kind: 'init' };
@@ -244,7 +247,7 @@ test('the next page load drains the inherited hold with original timestamps and 
 	assert.equal(sent[0].event, 'cta:click');
 	const options = sent[0].options as { timestamp?: Date; uuid?: string };
 	assert.equal(options.timestamp?.getTime(), 1_000_000, 'original time, not the drain time');
-	assert.ok(options.uuid, 'the fact id rides as the event uuid so a replay dedupes');
+	assert.match(options.uuid ?? '', POSTHOG_UUID, 'the fact id rides as the event uuid in the shape posthog-js keeps, so a replay dedupes');
 	assert.equal(sent[1].event, '$pageview');
 	assert.equal((sent[1].options as undefined | object), undefined, 'this load\'s own replay keeps start-time semantics');
 	assert.equal(storage.getItem(HOLD_STORAGE_KEY), null, 'cleared after the drain (capture first, clear after)');
@@ -296,4 +299,44 @@ test('a failed init clears the mirror: a stale hold must not outlive a load with
 	const second = heldHarness(storage, () => 1_010_000, true);
 	second.queue.start();
 	assert.equal(storage.getItem(HOLD_STORAGE_KEY), null);
+});
+
+test('a legacy non-uuid id in the inherited hold is normalized once at hydrate: every replay of it carries the same uuid', () => {
+	const storage = memoryStorage();
+	storage.setItem(HOLD_STORAGE_KEY, JSON.stringify([
+		{ event: 'cta:click', props: {}, ts: 1_000_000, id: 'lfls-h0' },
+		{ event: 'cta:view', props: {}, ts: 1_000_000 },
+	]));
+	heldHarness(storage, () => 1_010_000); // hydrates and rewrites the mirror
+	const rewritten = JSON.parse(storage.getItem(HOLD_STORAGE_KEY) as string) as Array<{ id: string }>;
+	assert.equal(rewritten.length, 2);
+	for (const entry of rewritten) {
+		assert.match(entry.id, POSTHOG_UUID, 'the hydrated mirror was rewritten with uuid ids');
+	}
+	// A load that crashes before clearing re-reads the SAME normalized ids: no fresh mint per load.
+	const third = heldHarness(storage, () => 1_020_000);
+	third.queue.start();
+	const sent = captures(third.calls).map((c) => (c.options as { uuid?: string }).uuid);
+	assert.deepEqual(sent, rewritten.map((e) => e.id));
+});
+
+test('a uuid-shaped inherited id is kept as is', () => {
+	const storage = memoryStorage();
+	const id = '123e4567-e89b-42d3-a456-426614174000';
+	storage.setItem(HOLD_STORAGE_KEY, JSON.stringify([{ event: 'cta:click', props: {}, ts: 1_000_000, id }]));
+	const h = heldHarness(storage, () => 1_010_000);
+	h.queue.start();
+	assert.equal((captures(h.calls)[0].options as { uuid?: string }).uuid, id);
+});
+
+test('newEventUuid: randomUUID, else getRandomValues, else Math.random; always a v4 posthog-js keeps', () => {
+	assert.equal(newEventUuid({ randomUUID: () => '123E4567-E89B-42D3-A456-426614174000' }), '123e4567-e89b-42d3-a456-426614174000');
+	const fromBytes = newEventUuid({ randomUUID: () => { throw new Error('insecure context'); }, getRandomValues: (a) => a.fill(0xff) });
+	assert.equal(fromBytes, 'ffffffff-ffff-4fff-bfff-ffffffffffff');
+	for (const id of [newEventUuid(null), newEventUuid({ randomUUID: () => 'not-a-uuid' }), newEventUuid()]) {
+		assert.match(id, POSTHOG_UUID);
+		assert.match(id, /^.{14}4.{4}[89ab]/i, 'version 4, RFC 4122 variant');
+		assert.ok(isEventUuid(id));
+	}
+	assert.equal(isEventUuid('lfls-h0'), false);
 });
