@@ -255,7 +255,7 @@ async function until(ready: () => boolean): Promise<void> {
 	assert.ok(ready(), 'the condition never came true');
 }
 
-test("Undo on the latest turn's card puts the file back and is gone after; another team's workspace has no Undo", async () => {
+test("Undo on the latest turn's card outlives a refused message, puts the file back and is gone after; another team's workspace has no Undo", async () => {
 	store(scripted([planReply(['read_file', { path: 'a.txt' }]), planReply(['edit_file', { path: 'a.txt', oldString: 'alpha', newString: 'ALPHA' }]), doneReply('Changed a.txt.')]));
 	const { backend, vfs } = workspace({ 'a.txt': 'alpha' });
 	setAgentHost(hostOver(vfs));
@@ -266,6 +266,10 @@ test("Undo on the latest turn's card puts the file back and is gone after; anoth
 	await until(() => chat.snapshot().phase === 'idle' && closingRows(session, chat).length === 1);
 	assert.equal(backend.files.get('a.txt'), 'ALPHA');
 	const [row] = closingRows(session, chat);
+	// step: a message refused before its turn starts is no newer turn, so the Undo stays
+	chat.send(`Use sk-proj-${'h'.repeat(40)}`);
+	await until(() => chat.snapshot().phase === 'idle' && chat.snapshot().messages.some((m) => m.isError));
+	assert.ok(closingRows(session, chat)[0].card?.actions, 'the refused message took the Undo');
 	const notes: string[] = [];
 	const press = { openFile: () => undefined, openVariables: () => undefined, send: () => undefined, note: (text: string) => void notes.push(text) };
 	// step: after a team switch the host has another workspace, and the turn's changes are not in it

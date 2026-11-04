@@ -346,8 +346,6 @@ export class AgentSession {
 		let started = false;
 		let record: UndoRecord | null = null;
 		this.running++;
-		// step: only the latest turn can be undone, so one that starts ends the earlier turn's Undo
-		this.latest = null;
 		try {
 			const { results, turn: ended } = await this.run(
 				text,
@@ -356,6 +354,8 @@ export class AgentSession {
 				turnId,
 				() => {
 					started = true;
+					// step: only the latest turn can be undone, so one that starts ends the earlier turn's Undo; a refused message starts none
+					this.latest = null;
 				},
 				(undo) => {
 					record = undo;
