@@ -7,7 +7,7 @@
 	"appManifest": {
 		"id": "rocketride.graph",
 		"projectId": "c9af6cbd-6b02-47fd-923c-ea7a44256a19",
-		"publisher": "Aparavi Software AG",
+		"publisher": "RocketRide",
 		"name": "Graph Explorer",
 		"description": "Browse and query Apache AGE, Neo4j and FalkorDB graphs through pipeline graph nodes",
 		"icon": "./src/icon.svg",
