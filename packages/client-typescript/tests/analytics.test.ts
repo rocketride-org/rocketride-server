@@ -23,40 +23,60 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import { initReport, report } from '../src/client/analytics';
+import { createReporter, type SendOptions } from '../src/client/analytics';
 
-describe('rocketride/analytics report core', () => {
-	it('stamps the app id from initReport on every event', () => {
+describe('rocketride/analytics bound reporters', () => {
+	it('stamps the bound app id on every event', () => {
 		const seen: Array<[string, Record<string, unknown> | undefined]> = [];
-		initReport('test-app', (event, props) => seen.push([event, props]));
+		const report = createReporter('test-app', (event, props) => seen.push([event, props]));
 		report('nav:click', { target: 'pricing' });
 		expect(seen).toEqual([['nav:click', { app: 'test-app', target: 'pricing' }]]);
 	});
 
+	it('two reporters stamp independently — a late event from a backgrounded app names its true emitter', () => {
+		const seen: Array<Record<string, unknown> | undefined> = [];
+		const sink = (_event: string, props?: Record<string, unknown>) => seen.push(props);
+		const homeReport = createReporter('home-ui', sink);
+		const sqlReport = createReporter('sql-ui', sink);
+		// sql-ui is now the active app; a straggling home-ui listener fires late.
+		sqlReport('query:run');
+		homeReport('page:engagement');
+		expect(seen).toEqual([{ app: 'sql-ui' }, { app: 'home-ui' }]);
+	});
+
 	it('accepts any string event name (loose, no central taxonomy)', () => {
 		const seen: string[] = [];
-		initReport('test-app', (event) => seen.push(event));
+		const report = createReporter('test-app', (event) => seen.push(event));
 		report('made:up_on_the_spot');
 		expect(seen).toEqual(['made:up_on_the_spot']);
 	});
 
 	it('caller props cannot overwrite the app stamp', () => {
 		const seen: Array<Record<string, unknown> | undefined> = [];
-		initReport('test-app', (_event, props) => seen.push(props));
+		const report = createReporter('test-app', (_event, props) => seen.push(props));
 		report('store:app_view', { app: 'spoofed', app_id: 'some.catalog.app' });
 		expect(seen).toEqual([{ app: 'test-app', app_id: 'some.catalog.app' }]);
 	});
 
+	it('passes capture options through to the sink untouched', () => {
+		const seen: Array<SendOptions | undefined> = [];
+		const report = createReporter('test-app', (_event, _props, options) => seen.push(options));
+		const timestamp = new Date(1700000000000);
+		report('cta:click', { intent: 'register' }, { transport: 'sendBeacon', timestamp, uuid: 'fact-1a2b' });
+		report('nav:click');
+		expect(seen).toEqual([{ transport: 'sendBeacon', timestamp, uuid: 'fact-1a2b' }, undefined]);
+	});
+
 	it('drops non-string and empty event names', () => {
 		const seen: string[] = [];
-		initReport('test-app', (event) => seen.push(event));
+		const report = createReporter('test-app', (event) => seen.push(event));
 		report('');
 		report(42 as unknown as string);
 		expect(seen).toEqual([]);
 	});
 
 	it('never throws, even when the sink does', () => {
-		initReport('test-app', () => {
+		const report = createReporter('test-app', () => {
 			throw new Error('sink exploded');
 		});
 		expect(() => report('nav:click')).not.toThrow();
