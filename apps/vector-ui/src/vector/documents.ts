@@ -161,6 +161,11 @@ export interface IPagerState {
 	cursor: string | null;
 	/** The store's total, when it said. */
 	total: number | null;
+	/**
+	 * Whether that total is exact (the page's `counts_exact`). A store that counts by first chunk, estimates, or caps its
+	 * count says false: the heading then says "about" instead of presenting the number as a count of what is stored.
+	 */
+	totalExact: boolean;
 	status: PagerStatus;
 	/** Stop asking at this many rows (Load more raises it). */
 	cap: number;
@@ -197,7 +202,7 @@ export interface IPagerState {
  * @returns The state.
  */
 export function pagerInit(cap: number = DIRECTORY_AUTO_ROWS): IPagerState {
-	return { rows: [], cursor: null, total: null, status: 'idle', cap, storeSorted: true, caveats: [], error: null, pages: 0, filter: null, filterApplied: null, filterIgnored: [] };
+	return { rows: [], cursor: null, total: null, totalExact: true, status: 'idle', cap, storeSorted: true, caveats: [], error: null, pages: 0, filter: null, filterApplied: null, filterIgnored: [] };
 }
 
 /**
@@ -256,7 +261,7 @@ export function pagerApplyPage(state: IPagerState, page: IDocumentsPageView): IP
 	}
 	// The first page replaces what the listing held from before.
 	const { held: _held, stale: _stale, ...rest } = state;
-	const base = { ...rest, cursor: page.nextCursor, total: page.total ?? state.total, storeSorted: page.sorted, caveats: page.caveats, error: null, pages: state.pages + 1, filterApplied, filterIgnored };
+	const base = { ...rest, cursor: page.nextCursor, total: page.total ?? state.total, totalExact: page.total === null ? state.totalExact : page.countsExact, storeSorted: page.sorted, caveats: page.caveats, error: null, pages: state.pages + 1, filterApplied, filterIgnored };
 	let status: PagerStatus = 'loading';
 	if (page.pagingUnsupported) status = 'unsupported';
 	else if (page.nextCursor === null || page.items.length === 0) status = 'done';
@@ -386,7 +391,7 @@ export function directoryHeading(state: IPagerState): string {
 	// A store that did not apply the listing's filter (or only part of it) counted every document: its total is not
 	// what the list shows, which is matched here.
 	const totalShown = state.filter === null || state.filterApplied === 'server';
-	if (state.total !== null && totalShown) return `${formatCount(state.total)} ${state.total === 1 ? 'document' : 'documents'}`;
+	if (state.total !== null && totalShown) return `${state.totalExact ? '' : 'about '}${formatCount(state.total)} ${state.total === 1 ? 'document' : 'documents'}`;
 	const n = state.rows.length;
 	if (state.stale) return `${formatCount(n)} last known`;
 	if (listingComplete(state)) return `${formatCount(n)} ${n === 1 ? 'document' : 'documents'}`;
