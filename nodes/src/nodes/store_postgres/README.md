@@ -120,7 +120,7 @@ Semantic search requires an embedding. Keyword search is a case-insensitive subs
 
 Semantic search orders by the chosen pgvector distance operator and honors the
 filter's offset and limit. Filtered searches keep scanning the HNSW index
-(pgvector's iterative scan, from version 0.8) until they have enough rows, so a
+(pgvector's iterative scan in strict distance order, from version 0.8) until they have enough rows, so a
 search restricted to a few documents still returns up to its limit. With an
 older pgvector a filtered search can return fewer rows than its limit; the
 store then reports the caveat `filtered_search_may_underfill`.

@@ -623,7 +623,7 @@ class PgVectorStore(DocumentStoreBase):
             if score is None or score < floor:
                 continue
             docs.append(self._doc(row, score=score))
-        # HNSW's iterative scan may return rows slightly out of order.
+        # The strict-order scan already returns rows by distance; the stable sort only fixes ties by score.
         docs.sort(key=lambda d: -d.score)
         return docs
 

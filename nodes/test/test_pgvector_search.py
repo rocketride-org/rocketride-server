@@ -13,7 +13,7 @@ documents than HNSW's default candidate budget. EXPLAIN checks the executed
 query, so a sequential scan cannot accidentally make the regression pass.
 
 Both drivers are the shared ``PgVectorStore`` (pooled connections, ``SET LOCAL
-hnsw.iterative_scan = relaxed_order`` inside each read transaction, the exact
+hnsw.iterative_scan = strict_order`` inside each read transaction, the exact
 recovery in ``_semantic_with_recovery``); the statements are recorded through
 the pool's cursor factory.
 """
@@ -150,7 +150,7 @@ def _assert_session_clean(store):
 
 def _plan(raw, statement):
     with raw.cursor() as cur:
-        cur.execute('SET LOCAL hnsw.iterative_scan = relaxed_order')
+        cur.execute('SET LOCAL hnsw.iterative_scan = strict_order')
         cur.execute('EXPLAIN (ANALYZE, FORMAT JSON) ' + statement[0], statement[1])
         plan = cur.fetchone()[0][0]['Plan']
     raw.rollback()

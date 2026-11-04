@@ -341,7 +341,7 @@ class Statements:
             f"SET LOCAL statement_timeout = '{int(statement_timeout_ms)}ms'"
         )
         if iterative_scan:
-            text += '; SET LOCAL hnsw.iterative_scan = relaxed_order'
+            text += '; SET LOCAL hnsw.iterative_scan = strict_order'
         return text
 
     @staticmethod

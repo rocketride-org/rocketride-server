@@ -737,7 +737,7 @@ class TestPgVectorTransactions:
         assert all('SET TRANSACTION READ ONLY' in b and "statement_timeout = '30000ms'" in b for b in begins)
         # The open probe reads the pgvector version; every read after it sets the iterative scan.
         assert 'hnsw.iterative_scan' not in begins[0]
-        assert all('hnsw.iterative_scan = relaxed_order' in b for b in begins[1:])
+        assert all('hnsw.iterative_scan = strict_order' in b for b in begins[1:])
         assert all(b.startswith("/* rr-pgvector:begin_read */ SELECT '[0]'::vector;") for b in begins)
         # Nothing is ever set for the session (a transaction-mode pooler would leak it).
         every = _statements(mock_rv)

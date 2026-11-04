@@ -554,7 +554,7 @@ def _bulk_table(store, admin, table, rng, *, objects=1000, chunks=5):
 
 class TestSearch:
     def test_iterative_scan_is_set_in_the_search_transaction(self, dsn, table, stores, admin):
-        """``hnsw.iterative_scan`` is ``relaxed_order`` inside the very transaction a filtered search runs in."""
+        """``hnsw.iterative_scan`` is ``strict_order`` inside the very transaction a filtered search runs in."""
         rng = np.random.default_rng(20)
         store = _open(dsn, table, stores)
         _bulk_table(store, admin, table, rng, objects=200, chunks=5)
@@ -570,7 +570,7 @@ class TestSearch:
             return rows, setting, read_only
 
         rows, setting, read_only = store._db.run_read(in_one_transaction)
-        assert setting == 'relaxed_order'
+        assert setting == 'strict_order'
         assert read_only == 'on'
         assert len(rows) == 10
 
@@ -597,7 +597,7 @@ class TestSearch:
             rows = store._search_semantic_in(cur, q.embedding, _filter(objectIds=ids, limit=10, minScore=-math.inf))
             return len(rows)
 
-        assert store._db.run_read(lambda cur: forced(cur, 'relaxed_order')) == 10
+        assert store._db.run_read(lambda cur: forced(cur, 'strict_order')) == 10
         assert store._db.run_read(lambda cur: forced(cur, 'off')) < 10
 
     def test_floor_drops_low_scores_unless_min_score_is_set(self, dsn, table, stores):
