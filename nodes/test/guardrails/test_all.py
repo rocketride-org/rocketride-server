@@ -1125,8 +1125,8 @@ class TestIInstanceLifecycle:
         assert fence in first.instructions[0].instructions, 'the instruction names the fence it uses'
         assert fence != second.questions[0].text.splitlines()[1], 'the fence is not reused across calls'
 
-    def test_context_handed_to_the_model_counts_as_a_source(self):
-        """An answer drawn from text-lane context is grounded, as the prompt node treats it."""
+    def test_a_search_that_found_nothing_is_not_a_miss_when_the_question_carried_material(self):
+        """The model may answer from text-lane context, as the prompt node tells it to."""
         IInstance, EngineClass, FakeQuestion, FakeQuestionText, FakeAnswer = self._load_iinstance_class()
         inst = self._grounding_node(IInstance, EngineClass)
 
@@ -1152,7 +1152,35 @@ class TestIInstanceLifecycle:
         inst.open(None)
 
         assert inst.question_text == ''
+        assert inst.question_has_material is False
         assert inst.source_documents == []
+
+    def test_question_context_does_not_switch_on_the_coverage_check(self):
+        """Without a documents lane, Strict scores nothing, exactly as before this node changed.
+
+        Counting question context as source material would have scored ordinary
+        answers against conversation history and blocked them with no replacement.
+        """
+        IInstance, EngineClass, FakeQuestion, FakeQuestionText, FakeAnswer = self._load_iinstance_class()
+        inst = self._grounding_node(IInstance, EngineClass, enable_hallucination_check=True)
+
+        inst.open(None)
+        inst.writeQuestions(
+            FakeQuestion(questions=[FakeQuestionText('And the next step?')], context=['Earlier: we chose plan B.'])
+        )
+        answer = FakeAnswer('Schedule the kickoff meeting with the vendor this week.')
+        inst.writeAnswers(answer)
+
+        assert inst.forwarded == [answer]
+
+    def test_a_verdict_in_markdown_is_still_a_verdict(self):
+        IInstance, EngineClass, FakeQuestion, FakeQuestionText, FakeAnswer = self._load_iinstance_class()
+        for reply, delivered in (('**SOURCE**', EngineClass.UNGROUNDED_REPLY), ('`NONE`.', 'Tim Cook.')):
+            inst = self._grounding_node(IInstance, EngineClass, llm=lambda q, r=reply: r)
+
+            assert self._miss(inst, FakeQuestion, FakeQuestionText, FakeAnswer, 'Who runs Apple?', 'Tim Cook.') == [
+                delivered
+            ], reply
 
     def test_a_retrieval_miss_still_forwards_an_ordinary_answer(self):
         """The lane path, not just the engine: a miss must not silence the node.

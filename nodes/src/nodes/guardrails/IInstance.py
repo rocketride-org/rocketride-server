@@ -53,12 +53,14 @@ class IInstance(IInstanceBase):
         self.source_documents = []
         self.retrieval_ran = False
         self.question_text = ''
+        self.question_has_material = False
 
     def open(self, entry: Entry):
         """Reset per-object state."""
         self.source_documents = []
         self.retrieval_ran = False
         self.question_text = ''
+        self.question_has_material = False
 
     def writeQuestions(self, question: Question):
         """Run input guardrails on the question before forwarding.
@@ -86,10 +88,9 @@ class IInstance(IInstanceBase):
         # Kept for the output pass, where the grounding check needs what the answer
         # replies to.
         self.question_text = full_text
-        # Material the model was handed inside the question is a source too, as the
-        # prompt node treats it, so an answer drawn from it is not read as ungrounded.
-        self._collect_sources(question.context or [])
-        self._collect_sources(getattr(question, 'documents', None) or [])
+        # The model may answer from material handed to it in the question, so an empty
+        # search is not a miss then, as the prompt node also decides.
+        self.question_has_material = bool(question.context or getattr(question, 'documents', None))
 
         if not full_text.strip():
             # Nothing to check, forward as-is
@@ -153,11 +154,13 @@ class IInstance(IInstanceBase):
         # searched and matched nothing" from "this pipeline has no documents lane
         # at all"; an empty source list alone cannot tell them apart, and failing
         # the second would drop correct answers from every non-retrieval pipeline.
+        # A search that found nothing is not a miss when the question itself carried
+        # material to answer from.
         context = {
             'source_documents': self.source_documents,
-            'retrieval_ran': self.retrieval_ran,
+            'retrieval_ran': self.retrieval_ran and not self.question_has_material,
             'question_text': self.question_text,
-            'judge': self._needs_source,
+            'judge': self._judge_with_llm,
         }
 
         # Run output guardrails
@@ -199,7 +202,7 @@ class IInstance(IInstanceBase):
         reply.tokens = getattr(answer, 'tokens', None)
         return reply
 
-    def _needs_source(self, question_text: str, answer_text: str) -> Optional[bool]:
+    def _judge_with_llm(self, question_text: str, answer_text: str) -> Optional[bool]:
         """Ask the llm connection whether an answer states anything needing a source.
 
         Called by the engine only after a retrieval miss. Returns None when no llm is
@@ -216,7 +219,8 @@ class IInstance(IInstanceBase):
                 f'Message:\n{fence}\n{question_text}\n{fence}\n\nReply:\n{fence}\n{answer_text}\n{fence}'
             )
             result = self.instance.invoke(IInvokeLLM.Ask(question=question))
-            verdict = (result.getText() if result else '').strip().upper()
+            # A verdict wrapped in markdown or punctuation is still a verdict.
+            verdict = (result.getText() if result else '').strip().strip('*`_."\' ').upper()
         except Exception as e:
             warning(f'Guardrails grounding check could not ask the llm: {e}')
             return None
@@ -226,18 +230,6 @@ class IInstance(IInstanceBase):
             return False
         warning(f'Guardrails grounding check got no verdict from the llm: {verdict[:80]!r}')
         return None
-
-    def _collect_sources(self, items) -> None:
-        """Add the text of each document or string in *items* to the source material."""
-        for item in items:
-            if hasattr(item, 'page_content'):
-                content = item.page_content
-            elif isinstance(item, dict):
-                content = item.get('page_content')
-            else:
-                content = item
-            if content and str(content).strip():
-                self.source_documents.append(str(content))
 
     def _forward_answer(self, answer: Answer):
         """Forward an answer downstream exactly once. See `_forward_question`
@@ -256,9 +248,18 @@ class IInstance(IInstanceBase):
             documents: List of Doc objects from the pipeline.
         """
         # Set on dispatch, not on content: a hit whose documents carry no usable
-        # text still means retrieval ran, and _collect_sources skips those.
+        # text still means retrieval ran, and the loop below skips those.
         self.retrieval_ran = True
-        self._collect_sources(documents)
+
+        for doc in documents:
+            if hasattr(doc, 'page_content'):
+                content = doc.page_content
+            elif isinstance(doc, dict):
+                content = doc.get('page_content')
+            else:
+                content = doc
+            if content and str(content).strip():
+                self.source_documents.append(str(content))
 
         # Forward documents downstream. See `_forward_question` for why
         # preventDefault() must come after the forward, not before -- it
@@ -271,3 +272,4 @@ class IInstance(IInstanceBase):
         self.source_documents = []
         self.retrieval_ran = False
         self.question_text = ''
+        self.question_has_material = False

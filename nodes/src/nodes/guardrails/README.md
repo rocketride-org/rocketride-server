@@ -28,7 +28,7 @@ Text that is empty or whitespace-only is forwarded without checks.
 | `answers`   | `answers`   | Output checks run after the LLM responds                             |
 | `documents` | `documents` | Forwarded unchanged; content is collected as ground-truth context for the hallucination check |
 
-Question text is assembled from both the question objects and any attached context before evaluation. Context and documents attached to the question count as source material alongside the `documents` lane, as they do for the prompt node. Collected content resets per pipeline object.
+Question text is assembled from both the question objects and any attached context before evaluation. A search that found nothing is not treated as a miss when the question itself carries context or documents, as the prompt node also decides. Collected content resets per pipeline object.
 
 ## Profiles
 
