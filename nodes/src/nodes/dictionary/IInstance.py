@@ -41,17 +41,13 @@ class IInstance(IInstanceBase):
     # Class attributes for tracking the current chunk and table IDs.
     chunkId: int = 0
 
-    def _extractDefinitions(self, text: str) -> List[Doc]:
+    def _extractDefinitions(self, text: str) -> None:
         """Extract definitions from a document, structure them as JSON objects.
 
         Add them to the vector database.
 
         Args:
-            metadata (Dict[str, Any]): Metadata associated with the document.
             text (str): Text content of the document.
-
-        Returns:
-            List[Doc]: A list of documents with extracted definitions.
         """
         question: Question = Question(type=QuestionType.QUESTION, expectJson=True, role='You are a friendly assistant')
 

@@ -759,7 +759,7 @@ class TaskServer(DAPBase):
         Retrieve task control structure with a given project/source id.
 
         Args:
-            token (str): The token to retrieve
+            public_auth (str): The public key token to look up
 
         Returns:
             TASK_CONTROL: Complete task control structure with metadata and references
@@ -1554,7 +1554,6 @@ class TaskServer(DAPBase):
         changed during restart. Only the pipeline configuration and provider can be updated.
 
         Args:
-            apikey (str): API key for authentication (must match task's apikey)
             request (Dict[str, Any]): Restart request containing:
                 - arguments: Task configuration including:
                     - token: Task token to restart (required)
@@ -1709,9 +1708,8 @@ class TaskServer(DAPBase):
         proper resource cleanup while handling various edge cases gracefully.
 
         Args:
-            request (Dict[str, Any]): Stop request containing:
-                - token: Unique task identifier to stop
-            conn (TaskConn): Connection requesting the task stop
+            token (str): Unique task identifier to stop.
+            reason (str): Why the task is being stopped (default: 'user').
 
         Termination Logic:
         - Only LAUNCH and EXECUTE type tasks are terminated by stop requests
