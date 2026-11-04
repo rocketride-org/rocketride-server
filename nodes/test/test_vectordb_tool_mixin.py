@@ -1058,6 +1058,7 @@ class _DataLane(StoreInstanceBase, IInstanceBase):
 def _data_lane(store) -> _DataLane:
     inst = object.__new__(_DataLane)
     inst.IGlobal = SimpleNamespace(store=store)
+    inst._objectIdsWritten = set()  # what the engine's open() sets before any lane writes (#2962)
     return inst
 
 

@@ -3,7 +3,7 @@ import importlib
 import json
 import threading
 from abc import abstractmethod, ABC
-from typing import TYPE_CHECKING, List, Callable, Dict, Any, FrozenSet, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, List, Callable, Dict, Any, FrozenSet, Optional, Sequence, Set, Tuple
 from rocketlib import IInstanceBase, tool_function, warning
 from ..schema import Doc, DocFilter, DocMetadata, Question, QuestionText, QuestionType, Answer
 from . import vx_write_gate
@@ -214,8 +214,39 @@ class DocumentStoreBase(ABC):
     @abstractmethod
     def addChunks(self, chunks: List[Doc]) -> None:
         """
-        Write (or overwrite) documents into the store.
+        Write documents into the store.
+
+        A batch that holds an object's chunk 0 replaces that object: its stored
+        chunks are deleted first (see objectIdsToReplace). The chunks of an object
+        whose chunk 0 is not in the batch are added to the ones already stored.
+
+        Args:
+            chunks: The batch to write.
         """
+
+    @staticmethod
+    def objectIdsToReplace(chunks: List[Doc]) -> List[str]:
+        """
+        Return the object IDs whose stored chunks a write of these chunks replaces.
+
+        Only an object whose chunk 0 is in the batch starts over. A producer can
+        hand one object to the store in several batches (embedding_transformer
+        flushes every 64 chunks), and deleting the object on each of them would
+        keep only the last batch (#1986).
+
+        Args:
+            chunks: The batch about to be written.
+
+        Returns:
+            The object ID of each chunk 0 in the batch, each once, in batch order.
+        """
+        objectIds: List[str] = []
+        seen: Set[str] = set()
+        for chunk in chunks:
+            if chunk.metadata.chunkId == 0 and chunk.metadata.objectId not in seen:
+                seen.add(chunk.metadata.objectId)
+                objectIds.append(chunk.metadata.objectId)
+        return objectIds
 
     @abstractmethod
     def remove(self, objectIds: List[str]) -> None:
@@ -1758,7 +1789,10 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
                             },
                             'object_id': {
                                 'type': 'string',
-                                'description': 'Unique identifier for the document. Used for deduplication.',
+                                'description': (
+                                    'Identifier of the document the text belongs to. A call that includes the '
+                                    "document's chunk 0 replaces what is stored for it."
+                                ),
                             },
                             'metadata': {
                                 'type': 'object',
@@ -1809,8 +1843,12 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         },
         description=(
             'Add or update documents in the vector database. Each document requires content text and an '
-            'object ID for deduplication. Embeddings are computed automatically when an embedding provider '
-            'is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed '
+            'object ID. For each object ID, a call that includes chunk 0 replaces the chunks stored for it, '
+            'and a call without chunk 0 adds to them. Documents without metadata.chunkId are numbered 0, 1, '
+            '2 ... per object ID, so such a call replaces. A call without chunk 0 that repeats a stored chunk '
+            'number can store a second copy of it: to change one chunk, send the whole object from chunk 0. '
+            'Embeddings are computed automatically when an '
+            'embedding provider is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed '
             '"embedding" (float array) and "embedding_model" (string) per document to skip auto-computation. '
             "Several documents with one object ID are stored as that document's chunks. "
             'Returns {"success": false, "error": "..."} when embeddings cannot be obtained.'

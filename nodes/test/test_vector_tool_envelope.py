@@ -41,7 +41,7 @@ from .test_vector_hooks import MemoryStore, corpus
 #: where develop's text is false on this branch: objdir's ``parent`` (Qdrant matches the exact path,
 #: not as a text match) and stats' ``document_count`` (null where the store cannot count, not
 #: "does not list documents": every driver lists).
-LEGACY_AGENT_CATALOG_SHA256 = '5d8017a3425e90a584801102e7a54d690f3b0edc352fcf53c640a3ef31707260'
+LEGACY_AGENT_CATALOG_SHA256 = '619a07af850b04c5b329f5c70b18828e911a76fab7859e3573fb6d123851e391'
 
 LEGACY_TOOLS = ('delete', 'get', 'objdir', 'search', 'stats', 'upsert')
 #: #2704's three, listed for agents too: the document listing and the trash.

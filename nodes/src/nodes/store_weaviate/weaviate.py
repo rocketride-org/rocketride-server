@@ -805,6 +805,11 @@ class Store(DocumentStoreBase):
         object's older chunks are removed first; later batches of the same object
         (the embedding nodes send long documents in several) are added to it.
         Object ids are keyed by (objectId, chunkId), so rewriting a chunk replaces it.
+
+        Args:
+            chunks: The batch to write.
+            checkCollection: Create the collection if it is missing and check that the chunks match its
+                embedding model and vector size; createCollection passes False when it writes its control row.
         """
         # If no documents present, get out
         if not len(chunks):
@@ -814,13 +819,10 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        # The objects this batch starts (it holds their chunk 0)
-        objectIds: Dict = {}
-        for chunk in chunks:
-            if not chunk.metadata.chunkId:
-                objectIds[chunk.metadata.objectId] = True
+        # The objects this batch starts over
+        objectIds = self.objectIdsToReplace(chunks)
 
-        # Erase the previous version of those objects in one operation
+        # Erase all documents/chunks associated with those ObjectIds in one operation
         if len(objectIds):
             self.collectionObj.data.delete_many(where=_any_equal('objectId', list(objectIds)))
 
