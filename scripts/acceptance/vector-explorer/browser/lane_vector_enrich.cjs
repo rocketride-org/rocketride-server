@@ -2009,24 +2009,12 @@ async function drive(fixtureKey, base, out, planned, step) {
 		return download(() => visible(page.locator(UI.export.format(id, format))).click());
 	};
 	/**
-	 * Confirm (or cancel) the move-to-trash or permanent-delete dialog in front. A move to the trash
-	 * (action 'trash') can be undone and asks for nothing typed: a typed field there throws. A permanent
-	 * delete (action 'delete') types what it asks for: a shared table's name, else `typedCount`.
+	 * Confirm (or cancel) the inline move-to-trash or permanent-delete confirmation in front. A move to the trash
+	 * (action 'trash') can be undone and asks for nothing typed: a typed field there throws. A permanent delete
+	 * (action 'delete') types what it asks for: a shared table's name, the file name, else `typedCount`.
 	 */
-	const answerRemoval = async (confirm, { action = 'trash', typedCount = null } = {}) => {
-		const dialog = visible(page.getByRole('dialog'));
-		await dialog.waitFor({ timeout: 15000 });
-		if (!confirm) return button(/^Cancel$/, dialog).click();
-		const typedBox = visible(dialog.getByRole('textbox'));
-		const asksTyped = await typedBox.isVisible().catch(() => false);
-		if (action === 'trash') {
-			if (asksTyped) throw new Error('the move to the trash asks for something typed');
-			return button(CONSOLE.trashConfirm, dialog).click();
-		}
-		const table = CONSOLE.typedConfirm.exec(await C.textOf(dialog));
-		if (asksTyped) await typedBox.fill(table ? table[1] : String(typedCount));
-		return button(CONSOLE.deleteConfirm, dialog).click();
-	};
+	const answerRemoval = (confirm, { action = 'trash', typedCount = null } = {}) =>
+		C.answerConfirm(page, { confirm, action, typedCount });
 	const stats = async () => {
 		const s = await store.tool(fixture, 'stats', { mode: 'full' });
 		return s && s.success === true
@@ -3191,19 +3179,15 @@ async function drive(fixtureKey, base, out, planned, step) {
 			const trashed = [...trashedDemo];
 			await C.openConnection(page, fixture);
 			await openConsole();
-			// The directory draws the rows in view only: filter it down to one document at a time.
-			const box = visible(page.getByRole('searchbox', { name: 'Filter documents by path' }));
+			// The grids draw the rows in view only: filter the listing down to one document at a time.
 			const rowButton = (name) => visible(page.getByRole('button', { name, exact: true }));
-			const showOne = async (p) => {
-				await box.fill(p);
-				await C.sleep(800);
-			};
-			// The trashed demo documents come back from the Trash view, one row at a time (Restore asks nothing);
+			const showOne = (p) => C.showOne(page, p);
+			// The trashed demo documents come back from the Trash tab, one row at a time (Restore asks nothing);
 			// one that fails does not keep the others from being tried.
 			const before = await stats();
 			const sinceRestore = capture.frames.length;
 			const refusedRestore = [];
-			if (trashed.length) await C.showDirectoryView(page, 'trash');
+			if (trashed.length) await C.showTab(page, 'trash');
 			for (const p of trashed) {
 				try {
 					await showOne(p);
@@ -3225,19 +3209,20 @@ async function drive(fixtureKey, base, out, planned, step) {
 			for (const p of ownUploads) if ((await store.state(fixture, C.objectId(p))) === 'active') stored.push(p);
 			const refusedDelete = [];
 			const refused = (p) => refusedDelete.some((r) => r.startsWith(`${p}: `));
-			if (stored.length) await C.showDirectoryView(page, 'active');
+			if (stored.length) await C.showTab(page, 'documents');
 			for (const p of stored) {
 				try {
 					await showOne(p);
 					const at = capture.frames.length;
-					await rowButton(CONSOLE.trash(p)).click();
+					await C.stageDocument(page, p.split('/').pop());
+					await C.pendingBar(page).getByRole('button', { name: CONSOLE.apply }).click();
 					await answerRemoval(true);
 					await C.waitForExchange(capture, 'soft_delete', { since: at, timeout: 60000 });
 				} catch (e) {
 					refusedDelete.push(`${p}: ${errText(e)} (moving it to the trash)`);
 				}
 			}
-			if (stored.length) await C.showDirectoryView(page, 'trash');
+			if (stored.length) await C.showTab(page, 'trash');
 			for (const p of stored.filter((q) => !refused(q))) {
 				try {
 					await showOne(p);
@@ -3250,8 +3235,8 @@ async function drive(fixtureKey, base, out, planned, step) {
 				}
 			}
 			await C.sleep(1500);
-			await box.fill('').catch(() => {});
-			await C.showDirectoryView(page, 'active').catch(() => {});
+			await C.showOne(page, '').catch(() => {});
+			await C.showTab(page, 'documents').catch(() => {});
 			// Every permanent delete the page sent in this run: only the lane's own uploads may be among them.
 			const deleteSent = C.exchanges(capture, 'delete', 0).map((x) => x.input);
 			const ownStates = {};

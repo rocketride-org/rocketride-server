@@ -186,9 +186,14 @@ async function main() {
 	const capture = C.captureFrames(page);
 	// The document count of the stats strip in front (null while it shows none).
 	const statsDocuments = () => C.statsFigure(page, 'documents');
-	const uploadFiles = (files) =>
-		page.locator('input[type="file"]:not([webkitdirectory])').first().setInputFiles(files);
-	const uploadFolder = (dir) => page.locator('input[type="file"][webkitdirectory]').first().setInputFiles(dir);
+	const uploadFiles = async (files) => {
+		await C.openAddDocuments(page);
+		return page.locator('input[type="file"]:not([webkitdirectory])').first().setInputFiles(files);
+	};
+	const uploadFolder = async (dir) => {
+		await C.openAddDocuments(page);
+		return page.locator('input[type="file"][webkitdirectory]').first().setInputFiles(dir);
+	};
 	const own = {
 		single: `lane-${RUN}.md`,
 		folder: `lane-${RUN}`,
@@ -358,48 +363,65 @@ async function main() {
 			return landed === true ? true : `no chunk #${target[2]} of ${target[1]} is shown after open`;
 		});
 
-		// The directory's own controls: a row's button by its exact name and the dialog in front.
+		// The Documents and Trash tabs (the redesign): a grid per tab, a pending bar under the panels while
+		// documents are
+		// staged, an inline confirmation, and the Trash tab's own buttons. The grids draw the rows in view only, so a
+		// step filters a listing down to its document (C.showOne) before it touches the row.
 		const rowButton = (name) => page.getByRole('button', { name, exact: true }).filter({ visible: true }).first();
-		const dialog = page.getByRole('dialog').filter({ visible: true }).first();
-		const dialogButton = (name) => dialog.getByRole('button', { name }).first();
-		const showView = (which) => C.showDirectoryView(page, which);
 		const trashCount = () => C.trashCount(page);
-		// The directory renders only the rows in view: filter it to one document so its row is there.
-		const filterTo = async (name) => {
-			await page.getByPlaceholder(UI.filterPaths).filter({ visible: true }).first().fill(name);
-			await page.waitForTimeout(500);
+		const bar = () => C.pendingBar(page);
+		const writeSentence = async () => (await C.textOf(bar())).trim();
+		// The Overview's own figure: the stats strip is in front on that tab only.
+		const overviewDocuments = async () => {
+			await C.showTab(page, 'overview');
+			return statsDocuments();
 		};
 
 		await step(
 			page,
-			'trash: Cancel focused and sending nothing, Move to trash moves exactly that document to the trash',
+			'documents: staging sends nothing, Apply asks first, Confirm moves exactly that document to the trash',
 			async (note) => {
 				// The chat step's "open" left a document tab in front: back to this connection's console.
 				await C.openConnection(page, fixture);
-				const shown = await statsDocuments();
+				const shown = await overviewDocuments();
 				const trashBefore = await trashCount();
-				await filterTo(own.single);
-				const trash = rowButton(UI.trash(own.single));
-				const confirm = dialogButton(UI.trashConfirm);
+				await C.showTab(page, 'documents');
+				await C.showOne(page, own.single);
 				const since = capture.frames.length;
-				await trash.click();
-				await confirm.waitFor({ timeout: 15000 });
-				const focused = (await C.focusedText(page)).trim();
-				if (focused !== UI.cancel) return `focus is on ${JSON.stringify(focused)}, not Cancel`;
-				await dialogButton(UI.cancel).click();
+				await C.stageDocument(page, own.single);
+				await bar().waitFor({ timeout: 15000 });
+				if (sentWrites(capture.frames.slice(since)).length) return 'staging a document sent a write';
+				if (!/1 document/.test(await C.textOf(bar())))
+					return `the pending bar does not name one document: ${await C.textOf(bar())}`;
+				// Discard drops it and sends nothing.
+				await bar().getByRole('button', { name: UI.discard }).click();
+				await page.waitForTimeout(500);
+				if (
+					await bar()
+						.isVisible()
+						.catch(() => false)
+				)
+					return 'the pending bar stays after Discard';
+				if (sentWrites(capture.frames.slice(since)).length) return 'Discard sent a write';
+				// Stage again, Apply opens the confirmation; Cancel sends nothing and leaves the document stored.
+				await C.stageDocument(page, own.single);
+				await bar().getByRole('button', { name: UI.apply }).click();
+				const group = C.inlineConfirm(page);
+				await group.waitFor({ timeout: 15000 });
+				if ((await group.getAttribute('aria-label')) !== UI.titles.trashOne)
+					return `the confirmation is "${await group.getAttribute('aria-label')}"`;
+				if (await group.getByRole('textbox').count()) return 'the move to the trash asks for something typed';
+				await C.answerConfirm(page, { confirm: false });
 				await page.waitForTimeout(1000);
 				if (capture.sockets === 0) return 'the page opened no WebSocket';
 				const cancelled = sentWrites(capture.frames.slice(since));
 				if (cancelled.length) return `the page sent ${cancelled.join(', ')} although Cancel was chosen`;
 				const kept = await stateOf(own.single);
 				if (kept !== 'active') return `after Cancel the document is ${kept}`;
+				// Apply again and Confirm: exactly one soft_delete, for exactly that document.
 				const sinceConfirm = capture.frames.length;
-				await trash.click();
-				await confirm.waitFor({ timeout: 15000 });
-				// A move to the trash can be undone: nothing to type, a shared rocketride_vector table included.
-				if (await dialog.getByRole('textbox').count()) return 'the move to the trash asks for something typed';
-				if (await confirm.isDisabled()) return 'Move to trash is disabled';
-				await confirm.click();
+				await bar().getByRole('button', { name: UI.apply }).click();
+				await C.answerConfirm(page, { action: 'trash' });
 				await C.waitForExchange(capture, 'soft_delete', { since: sinceConfirm, timeout: 60000 });
 				await page.waitForTimeout(1500);
 				const sent = sentWrites(capture.frames.slice(sinceConfirm));
@@ -408,40 +430,40 @@ async function main() {
 				const nested = await stateOf(own.nested);
 				note({ sent, asked, single, nested, trashBefore });
 				if (JSON.stringify(sent) !== JSON.stringify(['soft_delete']))
-					return `Move to trash sent ${JSON.stringify(sent)}, not one soft_delete`;
+					return `Apply sent ${JSON.stringify(sent)}, not one soft_delete`;
 				if (JSON.stringify(asked) !== JSON.stringify([C.objectId(own.single)]))
 					return `soft_delete asked for ${JSON.stringify(asked)}, not the document's own objectId`;
-				if (single !== 'trash') return `after Move to trash the document is ${single}, not in the trash`;
-				if (nested !== 'active') return `Move to trash touched another document (it is ${nested})`;
+				if (single !== 'trash') return `after Apply the document is ${single}, not in the trash`;
+				if (nested !== 'active') return `Apply touched another document (it is ${nested})`;
+				// The refresh after the write: the grid no longer lists it, the stats and the Trash tab's count follow.
 				if (shown !== null) await C.waitForStatsFigure(page, 'documents', 30000, shown - 1).catch(() => {});
-				const after = await statsDocuments();
+				const after = await overviewDocuments();
 				if (shown === null || after !== shown - 1) return `stats ${shown} -> ${after}`;
-				// "Trash (N)" is the store's count; a store that gives none shows plain "Trash" before and after.
 				const trashAfter = await trashCount();
 				note({ trashAfter });
 				return trashBefore === null || trashAfter === trashBefore + 1
 					? true
-					: `the Trash switch counts ${trashAfter}, ${trashBefore} before`;
+					: `the Trash tab counts ${trashAfter}, ${trashBefore} before`;
 			}
 		);
 
 		await step(
 			page,
-			'trash view: Restore brings the document back; Delete permanently, typed on a shared table, deletes it',
+			'trash: Restore brings the document back; a typed permanent delete (file or table name) deletes it',
 			async (note) => {
 				const id = C.objectId(own.single);
 				const start = await stateOf(own.single);
-				if (start !== 'trash') return `the document is ${start} before the Trash view, not in the trash`;
-				const shown = await statsDocuments();
+				if (start !== 'trash') return `the document is ${start} before the Trash tab, not in the trash`;
+				const shown = await overviewDocuments();
 				let since = capture.frames.length;
-				await showView('trash');
-				// The Trash view lists the store's trash.
+				await C.showTab(page, 'trash');
+				// The Trash tab lists the store's trash.
 				const listing = await C.waitForExchange(capture, 'list_documents', {
 					since,
 					timeout: 30000,
 					where: (x) => x.input.deleted === 'deleted',
 				});
-				await filterTo(own.single);
+				await C.showOne(page, own.single);
 				since = capture.frames.length;
 				await rowButton(UI.restore(own.single)).click();
 				await C.waitForExchange(capture, 'restore', { since, timeout: 60000 });
@@ -455,41 +477,51 @@ async function main() {
 				if (JSON.stringify(restored) !== JSON.stringify([id]))
 					return `restore asked for ${JSON.stringify(restored)}, not the document's own objectId`;
 				if (back !== 'active') return `after Restore the document is ${back}`;
+				const restoredLine = await writeSentence();
+				note({ restoredLine });
 				if (shown !== null) await C.waitForStatsFigure(page, 'documents', 30000, shown + 1).catch(() => {});
-				const restoredStats = await statsDocuments();
+				const restoredStats = await overviewDocuments();
 				if (shown === null || restoredStats !== shown + 1)
 					return `after Restore the stats show ${restoredStats}, ${shown} before`;
-				// To the trash again, then delete it permanently from the Trash view.
-				await showView('active');
-				await filterTo(own.single);
+				// To the trash again (stage, Apply, Confirm), then delete it permanently from the Trash tab.
+				await C.showTab(page, 'documents');
+				await C.showOne(page, own.single);
 				since = capture.frames.length;
-				await rowButton(UI.trash(own.single)).click();
-				await dialogButton(UI.trashConfirm).click();
+				await C.stageDocument(page, own.single);
+				await bar().getByRole('button', { name: UI.apply }).click();
+				await C.answerConfirm(page, { action: 'trash' });
 				await C.waitForExchange(capture, 'soft_delete', { since, timeout: 60000 });
 				await page.waitForTimeout(1000);
 				const again = await stateOf(own.single);
 				if (again !== 'trash') return `moved to the trash again, the document is ${again}`;
-				await showView('trash');
-				await filterTo(own.single);
+				await C.showTab(page, 'trash');
+				await C.showOne(page, own.single);
 				since = capture.frames.length;
 				await rowButton(UI.deletePermanently(own.single)).click();
-				const confirm = dialogButton(UI.deleteConfirm);
-				await confirm.waitFor({ timeout: 15000 });
-				const focused = (await C.focusedText(page)).trim();
-				if (focused !== UI.cancel) return `focus is on ${JSON.stringify(focused)}, not Cancel`;
-				// A shared rocketride_vector table asks for its name typed first; the delete stays disabled until then.
-				const typed = UI.typedConfirm.exec(await C.textOf(dialog));
-				note({ typed: typed ? typed[1] : null });
-				if (fixtureKey === 'rocketride_vector' && !typed)
+				const group = C.inlineConfirm(page);
+				await group.waitFor({ timeout: 15000 });
+				if ((await group.getAttribute('aria-label')) !== UI.titles.deleteOne)
+					return `the confirmation is "${await group.getAttribute('aria-label')}"`;
+				const confirm = group.getByRole('button', { name: UI.deleteConfirm }).first();
+				// A permanent delete is always typed: the file name, or a shared rocketride_vector table's name. The
+				// confirm
+				// button stays disabled (aria-disabled) until what is typed matches.
+				const prompt = await C.textOf(group);
+				const table = UI.typedConfirm.exec(prompt);
+				const file = UI.typedFile.exec(prompt);
+				note({ typed: table ? 'table' : file ? 'file' : null });
+				if (fixtureKey === 'rocketride_vector' && !table)
 					return 'the shared table asked for no typed table name';
-				if (typed) {
-					if (!(await confirm.isDisabled()))
-						return 'Delete permanently is enabled before the table name is typed';
-					await dialog.getByRole('textbox', { name: UI.typedConfirm }).first().fill(typed[1]);
-				} else if (await dialog.getByRole('textbox').count()) {
-					return 'deleting one document of a store that is not shared asks for something typed';
-				}
-				await confirm.click();
+				if (!table && !file) return 'a permanent delete asked for nothing typed';
+				if ((await confirm.getAttribute('aria-disabled')) !== 'true')
+					return 'Delete permanently is enabled before anything is typed';
+				// Cancel first: nothing is sent, the document stays in the trash.
+				await C.answerConfirm(page, { confirm: false });
+				await page.waitForTimeout(800);
+				if (sentWrites(capture.frames.slice(since)).length)
+					return 'Cancel on the permanent delete sent a write';
+				await rowButton(UI.deletePermanently(own.single)).click();
+				await C.answerConfirm(page, { action: 'delete' });
 				await C.waitForExchange(capture, 'delete', { since, timeout: 60000 });
 				await page.waitForTimeout(1500);
 				const deleteSent = sentWrites(capture.frames.slice(since));
@@ -506,11 +538,174 @@ async function main() {
 			}
 		);
 
+		// Two more documents for the batch steps: moved to the trash through the app, then restored behind its back.
+		const batch = [`lane-${RUN}-batch-a.md`, `lane-${RUN}-batch-b.md`];
+		own.batchA = batch[0];
+		own.batchB = batch[1];
+		await step(
+			page,
+			'a batch already restored elsewhere: Restore selected says what moved, never a restore it did not do',
+			async (note) => {
+				for (const name of batch) {
+					const file = path.join(work, name);
+					fs.writeFileSync(
+						file,
+						`# ${name}\n\nBatch note ${RUN}. Glassbrook spring feeds the settling tank.\n`
+					);
+				}
+				await C.showTab(page, 'documents');
+				await uploadFiles(batch.map((name) => path.join(work, name)));
+				const rows = await C.waitForUploads(page, batch, 120000);
+				if (!C.uploadsDone(rows, batch))
+					return `the batch uploads did not finish as done: ${JSON.stringify(rows.slice(-3))}`;
+				// Stage both (the scope box narrows to the lane's batch prefix), Apply, Confirm: both in the trash.
+				await C.showOne(page, `lane-${RUN}-batch`);
+				let since = capture.frames.length;
+				for (const name of batch) await C.stageDocument(page, name);
+				await bar().getByRole('button', { name: UI.apply }).click();
+				const group = C.inlineConfirm(page);
+				await group.waitFor({ timeout: 15000 });
+				if ((await group.getAttribute('aria-label')) !== 'Move 2 documents to the trash?')
+					return `the confirmation is "${await group.getAttribute('aria-label')}"`;
+				await C.answerConfirm(page, { action: 'trash' });
+				await C.waitForExchange(capture, 'soft_delete', { since, timeout: 60000 });
+				await page.waitForTimeout(1500);
+				for (const name of batch)
+					if ((await stateOf(name)) !== 'trash') return `${name} is not in the trash after Apply`;
+				// The Trash tab lists both; the lane restores ONE of them through the store (as another writer would).
+				await C.showTab(page, 'trash');
+				await C.showOne(page, `lane-${RUN}-batch`);
+				await rowButton(UI.select(batch[0])).waitFor({ timeout: 15000 });
+				const other = await store.tool(fixture, 'restore', { object_ids: [C.objectId(batch[0])] });
+				if (!other.success) return `the store refused the lane's own restore: ${JSON.stringify(other)}`;
+				// The grid is stale: both rows still shown. Select both, Restore selected: one moves, one already had.
+				since = capture.frames.length;
+				await page.getByRole('button', { name: UI.selectAllShown }).filter({ visible: true }).first().click();
+				await page
+					.getByRole('button', { name: UI.restoreSelected, exact: true })
+					.filter({ visible: true })
+					.first()
+					.click();
+				const exchange = await C.waitForExchange(capture, 'restore', { since, timeout: 60000 });
+				await page.waitForTimeout(1500);
+				const answered = exchange.result || {};
+				note({ answered: { matched_chunks: answered.matched_chunks, moved_chunks: answered.moved_chunks } });
+				for (const name of batch)
+					if ((await stateOf(name)) !== 'active') return `${name} is not active after Restore selected`;
+				// moved_chunks is what moved (one document's chunks); matched_chunks counts both documents' chunks.
+				if (typeof answered.moved_chunks !== 'number') return 'the restore answer carries no moved_chunks';
+				if (typeof answered.matched_chunks === 'number' && !(answered.moved_chunks < answered.matched_chunks))
+					return `moved_chunks ${answered.moved_chunks} is not below ${answered.matched_chunks} matched`;
+				const line = await writeSentence();
+				note({ line });
+				if (UI.nothingMoved.test(line)) return `the line says nothing moved although a document moved: ${line}`;
+				if (!new RegExp(`${answered.moved_chunks} chunks? moved`).test(line))
+					return `the line does not say ${answered.moved_chunks} chunks moved: ${line}`;
+				// A second time over the same stale selection moves nothing: the sentence says so.
+				since = capture.frames.length;
+				await store.tool(fixture, 'soft_delete', { object_ids: batch.map(C.objectId) });
+				await C.showTab(page, 'trash');
+				await C.showOne(page, `lane-${RUN}-batch`);
+				await rowButton(UI.select(batch[0])).waitFor({ timeout: 15000 });
+				await store.tool(fixture, 'restore', { object_ids: batch.map(C.objectId) });
+				await page.getByRole('button', { name: UI.selectAllShown }).filter({ visible: true }).first().click();
+				await page
+					.getByRole('button', { name: UI.restoreSelected, exact: true })
+					.filter({ visible: true })
+					.first()
+					.click();
+				await C.waitForExchange(capture, 'restore', { since, timeout: 60000 });
+				await page.waitForTimeout(1500);
+				const nothing = await writeSentence();
+				note({ nothing });
+				return UI.nothingMoved.test(nothing) && /already restored/.test(nothing)
+					? true
+					: `no "Nothing moved ... already restored" line: ${nothing}`;
+			}
+		);
+
+		// A bulk write that fails after part of it ran (more documents than one batch holds). The lane's own page
+		// script closes the socket on the SECOND soft_delete request, so the failure falls between batches.
+		await step(
+			page,
+			'a bulk move that fails after its first batch says how far it got and leaves the rest staged',
+			async (note) => {
+				if (fixtureKey !== 'qdrant')
+					return 'NOT RUN: the 150-document bulk needs the Qdrant pager fixture; run with FIXTURE=qdrant';
+				const pager = E.FIXTURES.qdrant_pager;
+				await C.openConnection(page, pager);
+				await C.showTab(page, 'documents');
+				await page
+					.waitForFunction(() => !/Loading documents…/.test(document.body.innerText), null, {
+						timeout: 120000,
+					})
+					.catch(() => {});
+				const pagerStore = C.storeClient(base);
+				try {
+					const before = await pagerStore.tool(pager, 'stats', { mode: 'full' });
+					// Close the socket instead of sending the second soft_delete batch.
+					// This callback runs in the page, not in Node, so Node's WebSocket support does not apply.
+					/* eslint-disable n/no-unsupported-features/node-builtins */
+					await page.evaluate(() => {
+						const send = WebSocket.prototype.send;
+						let seen = 0;
+						WebSocket.prototype.send = function (data) {
+							try {
+								if (typeof data === 'string' && /"tool":\s*"soft_delete"/.test(data) && ++seen === 2) {
+									this.close();
+									return;
+								}
+							} catch {
+								// a frame that is not JSON is sent as it is
+							}
+							return send.call(this, data);
+						};
+					});
+					/* eslint-enable n/no-unsupported-features/node-builtins */
+					// Stage up to 150 documents: the rows in view are enough to need a second batch.
+					const boxes = page.getByRole('checkbox', { name: /^Stage .* to move to the trash$/ });
+					const count = Math.min(150, await boxes.count());
+					if (count < 20) return `only ${count} rows are in view to stage: scroll the grid first`;
+					for (let i = 0; i < count; i += 1) await boxes.nth(i).check();
+					await bar().getByRole('button', { name: UI.apply }).click();
+					const group = C.inlineConfirm(page);
+					await group.waitFor({ timeout: 15000 });
+					// A bulk move opens its confirmation on Cancel; Confirm is still pressed explicitly.
+					await C.answerConfirm(page, { action: 'trash' });
+					await page.waitForTimeout(5000);
+					const line = await writeSentence();
+					const stopped = UI.stoppedAfter.exec(line);
+					note({ line });
+					const after = await pagerStore.tool(pager, 'stats', { mode: 'full' });
+					if (!stopped) return `the line does not say where the write stopped: ${line}`;
+					if (!(after.deleted_documents > (before.deleted_documents || 0)))
+						return 'no document reached the trash before the failure';
+					return Number(stopped[1]) < Number(stopped[2]) &&
+						(await bar()
+							.isVisible()
+							.catch(() => false))
+						? true
+						: 'the batches or the staged rest are not as stopped';
+				} finally {
+					// Put the fixture right through the store: everything the lane moved is restored.
+					const trash = await pagerStore
+						.tool(pager, 'list_documents', { deleted: 'deleted', limit: 200 })
+						.catch(() => null);
+					const ids = trash && trash.success ? trash.items.map((i) => i.objectId) : [];
+					if (ids.length)
+						await pagerStore.tool(pager, 'restore', { object_ids: ids.slice(0, 100) }).catch(() => {});
+					if (ids.length > 100)
+						await pagerStore.tool(pager, 'restore', { object_ids: ids.slice(100) }).catch(() => {});
+				}
+			}
+		);
+
 		await step(page, 'the 1,500-document store loads to completion without reshuffling', async (note) => {
 			// The whole load can take under a second, too fast to poll: record every change of the progress
 			// line and of the first row from before the connection opens.
 			await page.evaluate(watchLoading);
 			await C.openConnection(page, E.FIXTURES.qdrant_pager);
+			await C.showTab(page, 'documents');
 			await page
 				.waitForFunction(() => !/Loading documents…/.test(document.body.innerText), null, { timeout: 120000 })
 				.catch(() => {});

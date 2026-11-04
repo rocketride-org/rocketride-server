@@ -28,26 +28,62 @@ const CONSOLE = {
 	sources: 'Sources of this answer',
 	sourceOpen: /^open\b/i,
 	sourceTarget: /^Open (.+) at chunk (\d+)$/,
-	// A directory row's buttons (DocumentRow.tsx): Move to trash in the Documents view; Restore (at once,
-	// nothing to confirm) and Delete permanently in the Trash view.
-	trash: (p) => `Move ${p} to the trash`,
+	// The connection's workbench: one tablist ("Collection views") over Overview, Documents, Query, Map, Collection and
+	// Trash. The Trash tab's name carries the store's count ("Trash (N)"), plain "Trash" when the store gives none.
+	workbenchTabs: 'Collection views',
+	tabs: {
+		overview: /^Overview$/,
+		documents: /^Documents$/,
+		query: /^Query$/,
+		map: /^Map$/,
+		collection: /^Collection$/,
+		trash: /^Trash(?: \(([\d,]+)\))?$/,
+	},
+	// The scope box both listings share (components/ScopeBar.tsx): the grids draw the rows in view only, so a lane
+	// filters a listing down to one document to reach its row.
+	scopeBox: 'Filter documents by path',
+	// The Documents grid (components/DocumentsTab.tsx): a row's staging checkbox, named by the document's name.
+	documentsGrid: 'Stored documents',
+	stage: (name) => `Stage ${name} to move to the trash`,
+	staging: 'Staging',
+	// The pending bar under the panels while documents are staged (components/PendingBar.tsx).
+	pendingBar: 'Pending changes',
+	review: 'Review',
+	discard: 'Discard',
+	apply: 'Apply',
+	// The Trash grid (components/TrashTab.tsx): a row's buttons, named by the document's path; "Select <path>" ticks a
+	// row; the toolbar's buttons work on the ticked rows.
+	trashGrid: 'Documents in the trash',
 	restore: (p) => `Restore ${p}`,
 	deletePermanently: (p) => `Delete ${p} permanently`,
-	// The directory title's Documents / Trash switch (aria-pressed buttons); "Trash (N)" is the store's
-	// stats.deleted_documents, plain "Trash" when the store gives no count. Empty trash shows in the Trash view.
-	views: 'Documents or trash',
-	documentsView: /^Documents$/,
-	trashView: /^Trash(?: \(([\d,]+)\))?$/,
-	emptyTrash: 'Empty trash',
-	// The confirm buttons (vector/confirm.ts). A move to the trash (one document, several) asks for nothing
-	// typed; a permanent delete (one, several, Empty trash) is destructive.
+	select: (p) => `Select ${p}`,
+	selectAllShown: /^Select all shown/,
+	restoreSelected: 'Restore selected',
+	deleteSelected: /^Delete selected permanently/,
+	emptyTrash: /^Empty trash/,
+	// The inline confirmation (components/InlineRemoveConfirm.tsx, vector/confirm.ts): a group named by its title,
+	// with a
+	// Cancel button and the confirm button. A move to the trash (undoable) asks for nothing typed; every permanent
+	// write is typed: the file name, the count, or (a shared rocketride_vector table) the table's name.
+	confirmGroup: '[data-inline-confirm]',
+	titles: {
+		trashOne: 'Move this document to the trash?',
+		trashMany: /^Move [\d,]+ documents to the trash\?$/,
+		deleteOne: 'Delete this document permanently?',
+		deleteMany: /^Delete [\d,]+ documents permanently\?$/,
+		emptyTrash: 'Empty the trash?',
+	},
 	trashConfirm: /^(?:Move to trash|Move [\d,]+ documents to the trash)$/,
 	deleteConfirm: /^(?:Delete permanently|Delete [\d,]+ documents permanently|Empty trash)$/,
-	// A shared rocketride_vector table asks for its name typed before a permanent delete is enabled; other
-	// stores ask for the count (`Type N to confirm.`) before deleting several documents or emptying the trash.
 	typedConfirm: /Type the table name '([^']+)' to confirm/,
-	filterPaths: 'Filter paths…',
+	typedFile: /Type the file name '([^']+)' to confirm/,
+	typedCount: /Type ([\d,]+) to confirm/,
 	cancel: 'Cancel',
+	// The write line under the panels (a finished write's sentence) and the sentences of a batch that moved nothing.
+	writeLine: 'Pending changes',
+	nothingMoved: /^Nothing moved: /,
+	stoppedAfter: /Stopped after (\d+) of (\d+) batches/,
+	// The Documents listing's own progress line ("Loading documents… N of TOTAL"); its count is directoryCount above.
 	loading: /Loading documents…/,
 	readOnly: /Read-only/,
 	logout: 'Log out',

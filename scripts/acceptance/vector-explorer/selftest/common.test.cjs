@@ -318,7 +318,8 @@ test('documentStateOf reads a chunks answer as active, in the trash or gone, not
 });
 
 test("the selector table holds the app's wording", () => {
-	assert.strictEqual(CONSOLE.trash('C:/demo/a.md'), 'Move C:/demo/a.md to the trash');
+	assert.strictEqual(CONSOLE.stage('a.md'), 'Stage a.md to move to the trash');
+	assert.strictEqual(CONSOLE.select('C:/demo/a.md'), 'Select C:/demo/a.md');
 	assert.strictEqual(CONSOLE.restore('C:/demo/a.md'), 'Restore C:/demo/a.md');
 	assert.strictEqual(CONSOLE.deletePermanently('C:/demo/a.md'), 'Delete C:/demo/a.md permanently');
 	// The confirm buttons: a move to the trash (one, several) is never a permanent delete, and back.
@@ -330,11 +331,23 @@ test("the selector table holds the app's wording", () => {
 		assert.ok(!CONSOLE.trashConfirm.test(label), label);
 	for (const label of ['Move to trash', 'Delete C:/demo/a.md permanently', 'Delete selected permanently', 'Cancel'])
 		assert.ok(!CONSOLE.deleteConfirm.test(label), label);
-	// The Documents / Trash switch: "Trash (N)" counts the store's trash, "Trash" when it gives no count.
-	assert.deepStrictEqual(CONSOLE.trashView.exec('Trash (1,234)').slice(1), ['1,234']);
-	assert.strictEqual(CONSOLE.trashView.exec('Trash')[1], undefined);
-	assert.ok(!CONSOLE.trashView.test('Empty trash'));
-	assert.ok(CONSOLE.documentsView.test('Documents') && !CONSOLE.documentsView.test('Documents or trash'));
+	// The Trash tab: "Trash (N)" counts the store's trash, "Trash" when it gives no count.
+	assert.deepStrictEqual(CONSOLE.tabs.trash.exec('Trash (1,234)').slice(1), ['1,234']);
+	assert.strictEqual(CONSOLE.tabs.trash.exec('Trash')[1], undefined);
+	assert.ok(!CONSOLE.tabs.trash.test('Empty trash'));
+	assert.ok(CONSOLE.tabs.documents.test('Documents') && !CONSOLE.tabs.documents.test('Documents or trash'));
+	assert.ok(CONSOLE.emptyTrash.test('Empty trash…') && CONSOLE.deleteSelected.test('Delete selected permanently…'));
+	assert.ok(
+		CONSOLE.titles.trashMany.test('Move 12 documents to the trash?') &&
+			!CONSOLE.titles.trashMany.test('Move this document to the trash?')
+	);
+	assert.ok(CONSOLE.typedFile.exec("Type the file name 'a.md' to confirm.")[1] === 'a.md');
+	assert.ok(CONSOLE.typedCount.exec('Type 12 to confirm.')[1] === '12');
+	assert.ok(CONSOLE.nothingMoved.test('Nothing moved: 2 documents were already restored.'));
+	assert.deepStrictEqual(CONSOLE.stoppedAfter.exec('Moved 100 documents. Stopped after 1 of 2 batches: x').slice(1), [
+		'1',
+		'2',
+	]);
 	assert.ok(MAP.nativeGraph('Qdrant').test('… · neighbour graph computed by Qdrant · …'));
 	assert.ok(MAP.nodeGraph.test('… · neighbour graph computed by the store node · …'));
 	assert.ok(MAP.layoutNotBetter.test('Neighbour layout did not improve on PCA for this sample'));
@@ -373,15 +386,20 @@ test("the selectors the lanes read exist in the app's source", () => {
 	const path = require('path');
 	const src = (file) =>
 		fs.readFileSync(path.join(__dirname, '..', '..', '..', '..', 'apps', 'vector-ui', 'src', file), 'utf8');
-	assert.match(src('components/StatsStrip.tsx'), /data-figure=\{f\.key\}/, 'each stats figure carries data-figure');
+	assert.match(
+		src('components/StatsStrip.tsx'),
+		/data-figure=\{card\.key\}/,
+		'each stats figure carries data-figure'
+	);
 	assert.match(
 		src('components/UploadList.tsx'),
 		/aria-label="Uploads"[\s\S]*<li key=\{row\.id\} style=\{S\.row\} data-status=\{row\.status\}>[\s\S]*title=\{row\.path\}/,
 		'each upload row carries data-status and its path as a title'
 	);
-	// The directory's filter row is the ScopeBar; the path box is its first field.
-	assert.match(src('components/ScopeBar.tsx'), new RegExp(`placeholder="${CONSOLE.filterPaths}"`));
-	assert.match(src('components/DocumentDirectory.tsx'), /<ScopeBar\b/);
+	// The listings' filter row is the ScopeBar; the path box is its first field (a searchbox named by its aria-label).
+	assert.match(src('components/ScopeBar.tsx'), new RegExp(`aria-label="${CONSOLE.scopeBox}"`));
+	assert.match(src('components/DocumentsTab.tsx'), /<ScopeBar\b/);
+	assert.match(src('components/TrashTab.tsx'), /<ScopeBar\b/);
 	assert.match(src('components/SourcesPanel.tsx'), new RegExp(`aria-label="${CONSOLE.sources}"`));
 	assert.match(src('components/SourcesPanel.tsx'), /aria-label=\{`Open \$\{path\} at chunk \$\{source\.chunkId\}`\}/);
 	assert.ok(CONSOLE.sourceOpen.test('Open C:/demo/a.md at chunk 3'));
@@ -390,20 +408,39 @@ test("the selectors the lanes read exist in the app's source", () => {
 		'12',
 	]);
 	assert.match(src('vector/confirm.ts'), /prompt: `Type the table name '\$\{table\}' to confirm\.`/);
-	// The directory row's buttons, the title's Documents / Trash switch, Empty trash and the confirm buttons.
-	const row = src('components/DocumentRow.tsx');
-	for (const name of ['Move ${label} to the trash', 'Restore ${label}', 'Delete ${label} permanently'])
-		assert.ok(row.includes(`aria-label={\`${name}\`}`), `DocumentRow.tsx names a button ${name}`);
-	const directory = src('components/DocumentDirectory.tsx');
-	assert.ok(directory.includes(`aria-label="${CONSOLE.views}"`), 'the Documents / Trash switch');
+	// The Documents grid's staging checkbox, the pending bar, the Trash grid's row buttons and toolbar, the tab row.
+	const documents = src('components/DocumentsTab.tsx');
 	assert.ok(
-		directory.includes(
-			"which === 'active' ? 'Documents' : trashCount === null ? 'Trash' : `Trash (${formatCount(trashCount)})`"
-		)
+		documents.includes('aria-label={`Stage ${name} to move to the trash`}'),
+		'DocumentsTab.tsx names the staging checkbox'
 	);
-	assert.ok(directory.includes(CONSOLE.emptyTrash), 'the Empty trash button');
+	assert.ok(documents.includes(`label="${CONSOLE.documentsGrid}"`), 'the Documents grid');
+	const trash = src('components/TrashTab.tsx');
+	for (const name of ['Restore ${label(item)}', 'Delete ${label(item)} permanently', 'Select ${label(item)}'])
+		assert.ok(trash.includes('aria-label={`' + name + '`}'), `TrashTab.tsx names a control ${name}`);
+	assert.ok(trash.includes(`label="${CONSOLE.trashGrid}"`), 'the Trash grid');
+	for (const label of ['Restore selected', 'Delete selected permanently…', 'Empty trash…'])
+		assert.ok(trash.includes(label), `TrashTab.tsx has the button ${label}`);
+	assert.ok(trash.includes('Select all shown ('), 'the Select all shown button');
+	const pending = src('components/PendingBar.tsx');
+	assert.ok(pending.includes(`aria-label="${CONSOLE.pendingBar}"`), 'the pending bar region');
+	for (const label of ['Review', 'Discard', 'Apply'])
+		assert.ok(pending.includes(label), `PendingBar.tsx has ${label}`);
+	assert.ok(src('components/WorkbenchTabs.tsx').includes(`label="${CONSOLE.workbenchTabs}"`), 'the tab row');
+	assert.ok(
+		src('vector/workbench.ts').includes('`${label} (${formatCount(counts.trash)})`'),
+		'the Trash tab counts the trash'
+	);
+	assert.ok(src('components/InlineRemoveConfirm.tsx').includes('data-inline-confirm'), 'the inline confirmation');
+	assert.ok(
+		src('components/AddDocumentsAside.tsx').includes('aria-label="Add documents"'),
+		'the Add documents aside'
+	);
 	const confirm = src('vector/confirm.ts');
 	for (const label of [
+		"title: 'Move this document to the trash?'",
+		"title: 'Delete this document permanently?'",
+		"title: 'Empty the trash?'",
 		"confirmLabel: 'Move to trash'",
 		'confirmLabel: `Move ${n} documents to the trash`',
 		"confirmLabel: 'Delete permanently'",

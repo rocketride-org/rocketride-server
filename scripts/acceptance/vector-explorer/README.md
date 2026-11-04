@@ -26,7 +26,7 @@ not a secret. Never point them at a database that holds data you care about.
 | `calibrate_chunking.py` | Measures the templates' chunk sizes on the demo corpus and, with `--write N`, records the choice in `apps/vector-ui/tests/fixtures/chunking.json` and every template's `chunk_1`. |
 | `stub_llm.py` | A local test stub of an OpenAI-compatible chat server, **not a model**: deterministic answers tagged `[STUB-LLM]` that quote the prompt, plain and streamed (SSE); `--tool-call NAME` answers one request with a tool call. Logs request bodies to `out/` (git-ignored). |
 | `fake_broker.py` | Local stand-in for the DB broker's `/provision` endpoint, so `rocketride_vector` resolves a local database: the direct gx-pgvector DSN, or with `--pooler` the vx-pgbouncer one (both with `sslmode=disable`: the local containers serve no TLS). |
-| `browser/lane_vector.cjs` | The console lane (gate G3; Playwright, Chrome): connections, console, upload, chat, the trash (move to the trash, restore, delete permanently), paging, sign-out, privacy. Writes one JSON verdict per step to `out/lane_vector.json`. |
+| `browser/lane_vector.cjs` | The console lane (gate G3; Playwright, Chrome): connections, console, upload, chat, the Documents and Trash tabs (stage, review, Apply with its inline confirmation, restore, a typed permanent delete, a batch that was already restored elsewhere, a bulk write that fails after its first batch), paging, sign-out, privacy. Writes one JSON verdict per step to `out/lane_vector.json`. |
 | `browser/lane_vector_map.cjs` | The map lane (gate G4): both sample modes, hover, neighbours, lasso, query star and rays, the Table alternative, chunk path, duplicates, outliers, keyboard sectors, the layout-quality rule, the Qdrant legend, t-SNE's limit, Cancel, privacy. Writes `out/lane_vector_map.json` (with what each step measured). |
 | `browser/ui.cjs` | Every selector, sentence and canvas data attribute the two lanes look for, in one table. |
 | `browser/common.cjs` | What the lanes share: the step recorder, the WebSocket frame capture, the store's side through the TypeScript client, the privacy property. |
@@ -339,3 +339,13 @@ Fixed in this build (the lanes and suites now rely on the fix):
   retrieval reached the LLM node, nothing about answer quality.
 - The stub's request log and the engine's run logs hold document text; keep
   `out/` and the store directory local and delete them when done.
+
+## Not run yet: the Documents and Trash steps
+
+The Documents and Trash steps of `browser/lane_vector.cjs` (and the trash helpers of `lane_vector_enrich.cjs`) are
+written for the redesigned tabs (`browser/ui.cjs` names every control; `selftest/common.test.cjs` pins each name
+against the app's source). They have **not been run**: that needs a built engine (`./builder build`, which makes
+`dist/server/engine`), the four containers (`containers/start.sh`) and the fixtures running (`start_fixtures.py`).
+Until they are run, treat their selectors, and the upload and chat steps' ("Add documents" aside, file inputs),
+as unverified against a live page. The bulk-failure step needs the Qdrant pager fixture (`FIXTURE=qdrant`) and
+restores what it moved through the store.

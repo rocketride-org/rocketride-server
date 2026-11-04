@@ -637,35 +637,107 @@ async function openConnection(page, fixture) {
 	await waitForStatsFigure(page, 'documents', 60000);
 }
 
-/** The visible Documents / Trash switch button of the directory in front: which is 'active' or 'trash'. */
-function directoryViewButton(page, which) {
+/** The visible workbench tab (Overview, Documents, Query, Map, Collection, Trash) of the connection in front. */
+function workbenchTab(page, which) {
 	return page
-		.getByRole('group', { name: CONSOLE.views })
+		.getByRole('tablist', { name: CONSOLE.workbenchTabs })
 		.filter({ visible: true })
 		.first()
-		.getByRole('button', { name: which === 'trash' ? CONSOLE.trashView : CONSOLE.documentsView })
+		.getByRole('tab', { name: CONSOLE.tabs[which] })
 		.first();
 }
 
-/** Bring the directory's Documents or Trash view to the front: click its switch, wait until it is pressed. */
-async function showDirectoryView(page, which, timeout = 10000) {
-	const toggle = directoryViewButton(page, which);
-	await toggle.click();
+/** Bring a workbench tab to the front: click it (the tab row opens on Enter or click), wait until it is selected. */
+async function showTab(page, which, timeout = 10000) {
+	const tab = workbenchTab(page, which);
+	if ((await tab.getAttribute('aria-selected').catch(() => null)) !== 'true') await tab.click();
 	const deadline = Date.now() + timeout;
 	while (Date.now() < deadline) {
-		if ((await toggle.getAttribute('aria-pressed').catch(() => null)) === 'true') return;
+		if ((await tab.getAttribute('aria-selected').catch(() => null)) === 'true') return;
 		await sleep(250);
 	}
-	throw new Error(`the ${which === 'trash' ? 'Trash' : 'Documents'} switch is not pressed after the click`);
+	throw new Error(`the ${which} tab is not selected after the click`);
 }
 
-/** The count on the visible Trash switch ("Trash (N)": stats.deleted_documents); null when it shows none. */
+/** The count on the visible Trash tab ("Trash (N)": stats.deleted_documents); null when it shows none. */
 async function trashCount(page) {
-	const label = await directoryViewButton(page, 'trash')
+	const label = await workbenchTab(page, 'trash')
 		.innerText()
 		.catch(() => '');
-	const m = CONSOLE.trashView.exec(String(label || '').trim());
+	const m = CONSOLE.tabs.trash.exec(String(label || '').trim());
 	return m && m[1] ? Number(m[1].replace(/,/g, '')) : null;
+}
+
+/**
+ * Narrow the listing in front (Documents or Trash) to the paths containing `text`. The grids draw the rows in view
+ * only, so a lane reaches one document's row by filtering to it first.
+ */
+async function showOne(page, text) {
+	await page.getByRole('searchbox', { name: CONSOLE.scopeBox }).filter({ visible: true }).first().fill(text);
+	await sleep(800);
+}
+
+/** The pending bar of the connection in front (a region named "Pending changes"), or a locator that matches none. */
+function pendingBar(page) {
+	return page.getByRole('region', { name: CONSOLE.pendingBar }).filter({ visible: true }).first();
+}
+
+/** The inline confirmation in front. */
+function inlineConfirm(page) {
+	return page.locator(CONSOLE.confirmGroup).filter({ visible: true }).first();
+}
+
+/**
+ * Answer the inline confirmation in front. A move to the trash (action 'trash') can be undone and asks for nothing
+ * typed: a typed field there throws. A permanent delete or Empty trash (action 'delete') types what it asks for: a
+ * shared table's name, the file name, or `typedCount`.
+ *
+ * @returns {Promise<{ typed: string | null }>} What it typed, or null when nothing was asked.
+ */
+async function answerConfirm(page, { confirm = true, action = 'trash', typedCount = null } = {}) {
+	const group = inlineConfirm(page);
+	await group.waitFor({ timeout: 15000 });
+	if (!confirm) {
+		await group.getByRole('button', { name: CONSOLE.cancel }).first().click();
+		return { typed: null };
+	}
+	const box = group.getByRole('textbox').first();
+	const asksTyped = await box.isVisible().catch(() => false);
+	if (action === 'trash') {
+		if (asksTyped) throw new Error('the move to the trash asks for something typed');
+		await group.getByRole('button', { name: CONSOLE.trashConfirm }).first().click();
+		return { typed: null };
+	}
+	let typed = null;
+	if (asksTyped) {
+		const prompt = await textOf(group);
+		const table = CONSOLE.typedConfirm.exec(prompt);
+		const file = CONSOLE.typedFile.exec(prompt);
+		typed = table ? table[1] : file ? file[1] : String(typedCount);
+		await box.fill(typed);
+	}
+	await group.getByRole('button', { name: CONSOLE.deleteConfirm }).first().click();
+	return { typed };
+}
+
+/**
+ * Open the "Add documents" aside of the connection in front (the header's button) unless it is open: the file inputs
+ * exist only while it is.
+ */
+async function openAddDocuments(page) {
+	if ((await page.locator('input[type="file"]').count()) > 0) return;
+	await page.getByRole('button', { name: 'Add documents', exact: true }).filter({ visible: true }).first().click();
+	await page.locator('input[type="file"]').first().waitFor({ state: 'attached', timeout: 15000 });
+}
+
+/** Stage one document of the Documents grid (its row is in view: showOne first) and return its checkbox. */
+async function stageDocument(page, name) {
+	const box = page
+		.getByRole('checkbox', { name: CONSOLE.stage(name), exact: true })
+		.filter({ visible: true })
+		.first();
+	await box.check();
+	return box;
 }
 
 /**
@@ -749,6 +821,13 @@ module.exports = {
 	attrText,
 	textOf,
 	openConnection,
-	showDirectoryView,
+	workbenchTab,
+	showTab,
 	trashCount,
+	showOne,
+	pendingBar,
+	inlineConfirm,
+	answerConfirm,
+	stageDocument,
+	openAddDocuments,
 };
