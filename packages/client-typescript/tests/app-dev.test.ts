@@ -50,9 +50,9 @@ beforeEach(() => {
 
 afterEach(() => {
 	jest.restoreAllMocks();
-	// Windows releases a killed dev server's working directory a moment after
-	// the kill returns; retrying covers that window (EBUSY) on a loaded runner.
-	fs.rmSync(ws, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+	// Windows refuses to remove a folder a just-stopped dev server still holds
+	// until that process is fully gone, which takes longer on a busy machine
+	fs.rmSync(ws, { recursive: true, force: true, maxRetries: 10 });
 });
 
 /** A connectClient stand-in for executeAppDev (validated once, then dropped). */
