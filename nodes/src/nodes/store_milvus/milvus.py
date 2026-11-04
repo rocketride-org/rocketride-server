@@ -447,6 +447,11 @@ class Store(DocumentStoreBase):
     def addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None:
         """
         Add document chunks to the document store using batched bulk upsert.
+
+        Args:
+            chunks: The batch to write.
+            checkCollection: Create the collection if it is missing and check that the chunks match its
+                embedding model and vector size; createCollection passes False when it writes its control row.
         """
         # If no documents present, get out
         if not len(chunks):
@@ -456,18 +461,13 @@ class Store(DocumentStoreBase):
         if checkCollection and not self.createCollection(chunks):
             return
 
-        # Clear the object id list
-        objectIds: Dict = {}
+        # The objects this batch starts over
+        objectIds = self.objectIdsToReplace(chunks)
 
-        # For each document
-        for chunk in chunks:
-            # Save this object id
-            objectIds[chunk.metadata.objectId] = True
-
-        # Erase all documents/chunks associated with that ObjectId in one operation
+        # Erase all documents/chunks associated with those ObjectIds in one operation
         # so we can cleanly insert the new version
-        if len(objectIds.keys()):
-            filter_condition = f"meta['objectId'] in [{', '.join(json.dumps(k) for k in objectIds.keys())}]"
+        if len(objectIds):
+            filter_condition = f"meta['objectId'] in [{', '.join(json.dumps(k) for k in objectIds)}]"
             try:
                 # Delete entities
                 self.client.delete(collection_name=self.collection, filter=filter_condition)
