@@ -68,11 +68,11 @@ function harness(over: Partial<IConsoleDeps> = {}) {
 		},
 		trash: async (ids) => {
 			calls.push({ tool: 'soft_delete', args: [ids] });
-			return readTrashResult({ ...fixture('soft_delete_ok'), object_ids: ids, matched_chunks: 12 * ids.length });
+			return readTrashResult({ ...fixture('soft_delete_ok'), object_ids: ids, matched_chunks: 12 * ids.length, moved_chunks: 12 * ids.length });
 		},
 		restore: async (ids) => {
 			calls.push({ tool: 'restore', args: [ids] });
-			return readTrashResult({ ...fixture('restore_ok'), object_ids: ids, matched_chunks: 12 * ids.length });
+			return readTrashResult({ ...fixture('restore_ok'), object_ids: ids, matched_chunks: 12 * ids.length, moved_chunks: 12 * ids.length });
 		},
 		remove: async (ids, opts) => {
 			calls.push({ tool: 'delete', args: opts?.deletedOnly ? [ids, 'deleted_only'] : [ids] });
@@ -365,7 +365,7 @@ test('move to trash: Confirm sends soft_delete once, then refreshes the stats in
 		'the directory starts over'
 	);
 	assert.ok(!calls.some((c) => c.tool === 'delete'), 'nothing is deleted permanently');
-	assert.deepEqual(announced, ['Moved C:/demo/field/kestrel_field_guide.md to the trash (12 chunks)']);
+	assert.deepEqual(announced, ['Moved C:/demo/field/kestrel_field_guide.md to the trash (12 chunks moved)']);
 	assert.deepEqual(removedIds, [['kestrel']], 'the selection and the map forget it');
 	assert.equal(store.getState().chunks.objectId, null, "the trashed document's chunk list closes");
 	assert.deepEqual([probes, written()], [1, 1], 'the dialect is probed again and the map draws its sample again');
@@ -409,7 +409,7 @@ test('one write at a time: while one runs no confirmation opens, no restore is s
 			maxInFlight = Math.max(maxInFlight, inFlight);
 			await new Promise<void>((resolve) => (release = resolve));
 			inFlight -= 1;
-			return readTrashResult({ ...fixture('soft_delete_ok'), object_ids: ids, matched_chunks: 2 * ids.length });
+			return readTrashResult({ ...fixture('soft_delete_ok'), object_ids: ids, matched_chunks: 2 * ids.length, moved_chunks: 2 * ids.length });
 		},
 	});
 	store.setWritesEnabled(true);
@@ -443,7 +443,7 @@ test('several documents go to the trash in batches of write_ids_max and stop at 
 		trash: async (ids) => {
 			sent.push([...ids]);
 			if (sent.length === 2) throw new ExplorerToolError({ kind: 'store', tool: 'soft_delete', message: 'x', code: 'WRITES_DISABLED' });
-			return readTrashResult({ success: true, object_ids: ids, not_found: [], matched_chunks: ids.length });
+			return readTrashResult({ success: true, object_ids: ids, not_found: [], matched_chunks: ids.length, moved_chunks: ids.length });
 		},
 	});
 	store.setWritesEnabled(true);
@@ -456,7 +456,7 @@ test('several documents go to the trash in batches of write_ids_max and stop at 
 		sent.map((b) => b.length),
 		[100, 100]
 	);
-	assert.equal(announced[0], `Moved 100 documents to the trash (100 chunks). Stopped after 1 of 3 batches: ${CODE_SENTENCES.WRITES_DISABLED}`);
+	assert.equal(announced[0], `Moved 100 documents to the trash (100 chunks moved). Stopped after 1 of 3 batches: ${CODE_SENTENCES.WRITES_DISABLED}`);
 	store.dispose();
 });
 
@@ -509,7 +509,7 @@ test('restore runs at once (it can be undone), refreshes everything a write does
 		['stats', 'full'],
 	]);
 	assert.ok(calls.some((c) => c.tool === 'documents' && c.args[0] === null) && calls.some((c) => c.tool === 'trash listing' && c.args[0] === null), 'both listings start over');
-	assert.deepEqual(announced, ['Restored C:/demo/field/gull.md (12 chunks)']);
+	assert.deepEqual(announced, ['Restored C:/demo/field/gull.md (12 chunks moved)']);
 	assert.deepEqual(removedIds, [], 'a restored document is stored: nothing forgets it');
 	assert.deepEqual([probes, written()], [1, 1]);
 	store.dispose();

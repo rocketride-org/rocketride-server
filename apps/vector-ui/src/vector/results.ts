@@ -397,8 +397,12 @@ export interface ITrashView {
 	/** The documents asked for that are stored (distinct, in request order). */
 	moved: string[];
 	notFound: string[];
-	/** The chunks the call moved; null when the store cannot count them. */
-	matchedChunks: number | null;
+	/**
+	 * The chunks the call actually moved into or out of the trash (the answer's `moved_chunks`): 0 for documents that
+	 * were already in that state, null when the store cannot count them or the node predates the field. Never
+	 * `matched_chunks`, which counts every chunk the store holds for the ids, moved or not.
+	 */
+	movedChunks: number | null;
 }
 
 /**
@@ -410,5 +414,5 @@ export interface ITrashView {
 export function readTrashResult(value: Record<string, unknown>): ITrashView {
 	const notFound = strings(value.not_found);
 	const gone = new Set(notFound);
-	return { moved: [...new Set(strings(value.object_ids))].filter((objectId) => !gone.has(objectId)), notFound, matchedChunks: count(value.matched_chunks) };
+	return { moved: [...new Set(strings(value.object_ids))].filter((objectId) => !gone.has(objectId)), notFound, movedChunks: count(value.moved_chunks) };
 }

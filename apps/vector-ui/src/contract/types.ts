@@ -858,16 +858,20 @@ export interface ISoftDeleteInput {
 }
 
 /**
- * `soft_delete` (move to the trash) and `restore` (back out of it) answer. `matched_chunks` counts the chunks
- * the call moved (0 for a document already in that state), or null where the store cannot count; a restore of
- * a document that is not in the trash changes nothing for it. `audit.action` is `vector.soft_delete` or
- * `vector.restore`.
+ * `soft_delete` (move to the trash) and `restore` (back out of it) answer. `moved_chunks` counts the chunks the
+ * call actually moved (0 for documents already in that state), or null where the store cannot count; the app
+ * reads this one. `matched_chunks` keeps develop's #2704 meaning, every chunk the store holds for the ids in either
+ * state (what an UPDATE by object id matches), and is not what moved. A restore of a document that is not in the
+ * trash changes nothing for it. `audit.action` is `vector.soft_delete` or `vector.restore`.
  */
 export interface ISoftDeleteResult {
 	success: true;
 	/** The ids asked for, distinct, in request order. */
 	object_ids: string[];
-	matched_chunks: number | null;
+	/** The chunk rows the store holds for the ids (develop's meaning); not what moved. */
+	matched_chunks?: number | null;
+	/** The chunks actually moved; null where the store cannot count. Absent on a node older than this contract. */
+	moved_chunks?: number | null;
 	not_found: string[];
 	audit: IWriteAudit;
 }
@@ -882,6 +886,8 @@ export interface IDeleteInput {
 export interface IDeleteResult {
 	success: true;
 	deleted_count: number;
+	/** The distinct ids the request named, in order (develop's #2704 echo). */
+	object_ids?: string[];
 	removed_chunks?: number | null;
 	not_found?: string[];
 	kept_live?: string[];

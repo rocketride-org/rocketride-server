@@ -212,7 +212,7 @@ test('every write (delete, soft_delete, restore) is sent once, even when the tas
 	const emptied = await deleteBatch(session, e2.nodeId, [kestrel, partly], { deletedOnly: true });
 	assert.deepEqual([emptied.removed.map((r) => r.objectId), emptied.keptLive], [[kestrel], [partly]], 'a document with a live chunk is kept');
 	assert.deepEqual((await trashBatch(session, e2.nodeId, [kestrel])).moved, [kestrel]);
-	assert.deepEqual((await restoreBatch(session, e2.nodeId, [kestrel])).matchedChunks, 12);
+	assert.deepEqual((await restoreBatch(session, e2.nodeId, [kestrel])).movedChunks, 12);
 	assert.deepEqual(
 		ok.calls.filter((c) => ['delete', 'soft_delete', 'restore'].includes(c.tool)).map((c) => [c.tool, c.nodeId, c.input]),
 		[

@@ -174,7 +174,7 @@ test('soft_delete and restore: the documents moved into and out of the trash, an
 				const raw = capture(backend, `${tool}${kind}`);
 				const view = readTrashResult(unwrapEnvelope(tool, raw));
 				assert.ok(view.moved.length > 0, `${backend}/${tool}${kind}: a document moved`);
-				assert.ok(view.matchedChunks === null || view.matchedChunks > 0, `${backend}/${tool}${kind}: its chunks, or null where the store cannot count`);
+				assert.ok(view.movedChunks === null || view.movedChunks > 0, `${backend}/${tool}${kind}: its chunks, or null where the store cannot count`);
 				assert.equal(raw.audit.action, `vector.${tool}`);
 			}
 		}

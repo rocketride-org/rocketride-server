@@ -183,10 +183,20 @@ test('readDeleteResult: the batch less what was not found or kept live, and noth
 test('readTrashResult: soft_delete and restore say which documents moved and how many chunks', () => {
 	for (const name of ['soft_delete_ok', 'restore_ok']) {
 		const view = readTrashResult(fixture(name));
-		assert.deepEqual([view.moved, view.notFound, view.matchedChunks], [fixture(name).object_ids, [], 12], name);
+		assert.deepEqual([view.moved, view.notFound, view.movedChunks], [fixture(name).object_ids, [], 12], name);
 	}
-	const mixed = readTrashResult({ success: true, object_ids: ['a', 'b', 'a'], not_found: ['b'], matched_chunks: null });
-	assert.deepEqual([mixed.moved, mixed.notFound, mixed.matchedChunks], [['a'], ['b'], null]);
+	const mixed = readTrashResult({ success: true, object_ids: ['a', 'b', 'a'], not_found: ['b'], matched_chunks: 9, moved_chunks: null });
+	assert.deepEqual([mixed.moved, mixed.notFound, mixed.movedChunks], [['a'], ['b'], null]);
+});
+
+test('readTrashResult reads moved_chunks, never matched_chunks: a batch whose documents were already restored moved nothing', () => {
+	// develop\'s matched_chunks counts every chunk the store holds for the ids; only moved_chunks says what moved.
+	const already = readTrashResult({ success: true, object_ids: ['a', 'b'], not_found: [], matched_chunks: 8, moved_chunks: 0 });
+	assert.equal(already.movedChunks, 0);
+	const partial = readTrashResult({ success: true, object_ids: ['a', 'b'], not_found: [], matched_chunks: 8, moved_chunks: 3 });
+	assert.equal(partial.movedChunks, 3);
+	// A node older than the field reports nothing, and the app does not fall back to the other count.
+	assert.equal(readTrashResult({ success: true, object_ids: ['a'], not_found: [], matched_chunks: 8 }).movedChunks, null);
 });
 
 test('readStats: deleted_documents is the Trash count, null where the store cannot count', () => {
