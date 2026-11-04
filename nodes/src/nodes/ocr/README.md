@@ -12,7 +12,7 @@ Table extraction uses **img2table** for OpenCV-based table structure detection, 
 
 Animated GIFs are handled frame by frame: each frame is OCR'd individually and the per-frame texts are joined with newlines before being written to the `text` lane.
 
-Concurrent instances share one engine. Without a model server, each read waits in a per-device memory budget (`ai.common.models.device_budget`): several reads run on a GPU at once when they fit in its memory, and one at a time on CPU or while another engine process uses the GPU. With a model server, the server batches them.
+Concurrent instances share one engine. Without a model server, each read waits in a per-device memory budget (`ai.common.models.device_budget`). EasyOCR and DocTR state the memory a read needs, so several of their reads run on a GPU at once when they fit. Surya and TrOCR have no measured cost and read one at a time. On CPU, or while another engine process uses the GPU, every engine reads one at a time. With a model server, the server batches the reads.
 
 ## Example pipelines
 
