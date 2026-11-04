@@ -116,6 +116,8 @@ class DataServer(DAPBase):
         Args:
             conn (DataConnection): The disconnected WebSocket connection
         """
+        await conn.disconnect()
+
         # Log the disconnection for debugging purposes
         self.debug_message('Data connection disconnected.')
 
@@ -146,16 +148,17 @@ class DataServer(DAPBase):
         _eaas = (conn, asyncio.get_running_loop())
         _eaas_connected.set()
 
-        # Accept the connection and start servicing it. This will not
-        # return until the connection is closed
-        await transport.accept(websocket=websocket)
+        try:
+            # Accept the connection and start servicing it. This will not
+            # return until the connection is closed
+            await transport.accept(websocket=websocket)
+        finally:
+            if _eaas and _eaas[0] is conn:
+                _eaas = None
+                _eaas_connected.clear()
 
-        if _eaas and _eaas[0] is conn:
-            _eaas = None
-            _eaas_connected.clear()
-
-        # Signal we are disconnected
-        await self._dapbase_on_disconnected(conn)
+            # Signal we are disconnected
+            await self._dapbase_on_disconnected(conn)
         return
 
 

@@ -237,11 +237,12 @@ class DataConn(DAPConn):
             await super().on_receive(message)
 
     async def on_disconnected(self, reason: Optional[str] = None, has_error: bool = False) -> None:
-        """Fail the questions still waiting for EaaS: no answer will come on this connection."""
+        """Fail the questions still waiting for EaaS and clean up connection resources."""
         for answer in self._asked.values():
             if not answer.done():
                 answer.set_exception(ConnectionError(reason or 'EaaS disconnected'))
         self._asked.clear()
+        await self.disconnect()
         await super().on_disconnected(reason, has_error)
 
     async def ask_spend(self) -> Optional[str]:
@@ -286,16 +287,25 @@ class DataConn(DAPConn):
         profiler.release(f'data:{id(self)}')
 
         # Signal shutdown to monitoring task
-        self._shutdown_event.set()
+        shutdown_event = getattr(self, '_shutdown_event', None)
+        if shutdown_event is not None:
+            shutdown_event.set()
 
         # Wait for monitoring task to complete
-        if self._monitor_task and not self._monitor_task.done():
-            await self._monitor_task
+        monitor_task = getattr(self, '_monitor_task', None)
+        if monitor_task and not monitor_task.done():
+            try:
+                await monitor_task
+            except asyncio.CancelledError:
+                pass
 
         # Clean up any remaining pipes
-        for pipe_id in list(self._pipe_map.keys()):
+        pipe_map = getattr(self, '_pipe_map', None)
+        if not pipe_map:
+            return
+        for pipe_id in list(pipe_map.keys()):
             self.debug_message(f'Cleaning up remaining pipe {pipe_id} during disconnect')
-            conn_pipe = self._pipe_map.pop(pipe_id, None)
+            conn_pipe = pipe_map.pop(pipe_id, None)
             if conn_pipe:
                 conn_pipe.has_failed = True  # Mark as failed for monitoring
                 await asyncio.to_thread(self._cleanup_pipe, conn_pipe)

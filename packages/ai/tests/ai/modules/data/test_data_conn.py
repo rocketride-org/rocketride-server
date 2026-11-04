@@ -553,3 +553,53 @@ async def test_close_after_a_failed_write_does_not_raise_a_second_error(monkeypa
 
     assert result['objectId'] == 'obj-1'
     conn_pipe.pipe.close.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# Disconnect / shutdown cleanup of _monitor_task
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_disconnected_stops_monitor_task():
+    """Disconnecting a DataConn stops the _monitor_pipes background task cleanly."""
+    server_mock = MagicMock()
+    server_mock._target = None
+    conn = DataConn(server=server_mock, transport=MagicMock())
+
+    assert not conn._monitor_task.done()
+
+    await conn.on_disconnected('WebSocket closed')
+
+    assert conn._shutdown_event.is_set()
+    assert conn._monitor_task.done()
+
+
+@pytest.mark.asyncio
+async def test_dataserver_listen_stops_monitor_task_even_when_accept_fails(monkeypatch):
+    """DataServer.listen always disconnects DataConn and finishes _monitor_task in finally."""
+    import ai.modules.data.data_server as data_server
+
+    server = data_server.DataServer(server=MagicMock())
+    created = []
+    real_data_conn = data_server.DataConn
+
+    def _capture_conn(**kwargs):
+        conn = real_data_conn(**kwargs)
+        created.append(conn)
+        return conn
+
+    async def _failing_accept(websocket):
+        raise RuntimeError('socket closed abruptly')
+
+    monkeypatch.setattr(data_server, 'DataConn', _capture_conn)
+    monkeypatch.setattr(data_server, 'TransportWebSocket', lambda: MagicMock(accept=_failing_accept))
+
+    with pytest.raises(RuntimeError, match='socket closed abruptly'):
+        await server.listen(MagicMock())
+
+    assert len(created) == 1
+    conn = created[0]
+    assert conn._shutdown_event.is_set()
+    assert conn._monitor_task.done()
+    assert data_server._eaas is None and not data_server._eaas_connected.is_set()
