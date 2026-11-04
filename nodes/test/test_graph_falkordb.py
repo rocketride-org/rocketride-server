@@ -56,6 +56,29 @@ class _StubRedisError(Exception):
     pass
 
 
+class _StubRedis:
+    """redis.Redis as the node's URL path uses it: records the call, owns a pool object, and counts closes."""
+
+    last_url = None
+    last_kwargs = None
+    instances: list = []
+
+    def __init__(self):
+        self.connection_pool = object()
+        self.closed = 0
+
+    @classmethod
+    def from_url(cls, url, **kwargs):
+        instance = cls()
+        cls.last_url = url
+        cls.last_kwargs = kwargs
+        cls.instances.append(instance)
+        return instance
+
+    def close(self):
+        self.closed += 1
+
+
 class _StubBase:
     """Stand-in for IInstanceBase / IGlobalBase — the engine supplies the real one."""
 
@@ -132,6 +155,7 @@ def _install_stubs() -> None:
     redis_exceptions.RedisError = _StubRedisError
     redis = types.ModuleType('redis')
     redis.exceptions = redis_exceptions
+    redis.Redis = _StubRedis
 
     sys.modules.update(
         {
@@ -1072,20 +1096,31 @@ class _RecordingFalkorDB:
     last_url = None
 
     def __init__(self, **kwargs):
-        _RecordingFalkorDB.last_kwargs = kwargs
-        _RecordingFalkorDB.last_url = None
+        # A client built over a URL's pool (connection_pool=...) keeps what the URL path recorded.
+        if 'connection_pool' not in kwargs:
+            _RecordingFalkorDB.last_kwargs = kwargs
+            _RecordingFalkorDB.last_url = None
+
+    def close(self):
+        pass
+
+
+class _RecordingRedis(_StubRedis):
+    """The URL path's redis.Redis: what it was asked, mirrored onto _RecordingFalkorDB for the assertions."""
 
     @classmethod
     def from_url(cls, url, **kwargs):
-        instance = cls.__new__(cls)
+        instance = super().from_url(url, **kwargs)
         _RecordingFalkorDB.last_url = url
-        _RecordingFalkorDB.last_kwargs = kwargs
+        # decode_responses is the node's own constant; the tests look at what the caller chose.
+        _RecordingFalkorDB.last_kwargs = {k: v for k, v in kwargs.items() if k != 'decode_responses'}
         return instance
 
 
 @pytest.fixture
 def recording_client(monkeypatch):
     monkeypatch.setattr(_glb_mod, 'FalkorDB', _RecordingFalkorDB)
+    monkeypatch.setattr(_glb_mod.redis, 'Redis', _RecordingRedis)
     _RecordingFalkorDB.last_kwargs = None
     _RecordingFalkorDB.last_url = None
     return _RecordingFalkorDB
@@ -1146,7 +1181,9 @@ def test_url_profile_connects_from_url(recording_client):
     _glb_mod.IGlobal._connect({'mode': 'url', 'url': f'  {url}  '})
 
     # No password field set -> the URL is passed through untouched.
-    assert recording_client.last_url == url
+    assert recording_client.last_url == url.replace('falkor://', 'redis://', 1), (
+        'the falkor:// scheme is redis://, as FalkorDB.from_url maps it'
+    )
     assert recording_client.last_kwargs == {}
 
 
@@ -1154,14 +1191,14 @@ def test_password_field_replaces_the_one_embedded_in_the_url(recording_client):
     """The field is the single source of truth: redis-py must not prefer the URL."""
     _glb_mod.IGlobal._connect({'mode': 'url', 'url': 'falkor://falkordb:stale@host:53939', 'password': 'current'})
 
-    assert recording_client.last_url == 'falkor://falkordb@host:53939'
+    assert recording_client.last_url == 'redis://falkordb@host:53939'
     assert recording_client.last_kwargs == {'password': 'current'}
 
 
 def test_password_field_fills_in_a_url_without_credentials(recording_client):
     _glb_mod.IGlobal._connect({'mode': 'url', 'url': 'falkor://falkordb@host:53939', 'password': 'secret'})
 
-    assert recording_client.last_url == 'falkor://falkordb@host:53939'
+    assert recording_client.last_url == 'redis://falkordb@host:53939'
     assert recording_client.last_kwargs == {'password': 'secret'}
 
 
@@ -1210,7 +1247,7 @@ def test_probe_does_not_leak_url_credentials(monkeypatch, recording_client):
     messages = []
     monkeypatch.setattr(_glb_mod, 'warning', messages.append)
     monkeypatch.setattr(
-        recording_client, 'from_url', classmethod(lambda cls, url, **kw: (_ for _ in ()).throw(_StubRedisError('nope')))
+        _RecordingRedis, 'from_url', classmethod(lambda cls, url, **kw: (_ for _ in ()).throw(_StubRedisError('nope')))
     )
 
     glb = _FakeGlobal(_FakeGraph())
@@ -1225,7 +1262,7 @@ def test_probe_does_not_leak_unix_socket_password(monkeypatch, recording_client)
     messages = []
     monkeypatch.setattr(_glb_mod, 'warning', messages.append)
     monkeypatch.setattr(
-        recording_client, 'from_url', classmethod(lambda cls, url, **kw: (_ for _ in ()).throw(_StubRedisError('nope')))
+        _RecordingRedis, 'from_url', classmethod(lambda cls, url, **kw: (_ for _ in ()).throw(_StubRedisError('nope')))
     )
 
     glb = _FakeGlobal(_FakeGraph())
@@ -1564,3 +1601,42 @@ def test_refresh_timeout_keeps_the_last_good_schema():
     out = inst.refresh_schema({})
     assert out['schema']['stale'] is True and 'Query timed out' in out['schema']['error']
     assert out['relationships'] == [{'type': 'KNOWS', 'start': 'Person', 'end': 'Person'}]
+
+
+# ---------------------------------------------------------------------------
+# A URL-built client must not share a pool with a throwaway that disconnects it
+# ---------------------------------------------------------------------------
+#
+# FalkorDB.from_url built a temporary redis.Redis that owned the pool and passed the same pool to the client it
+# returned; when the temporary was garbage collected its __del__ disconnected the pool, so a reply being read at
+# that moment died with "'NoneType' object has no attribute 'readline'". The node now keeps the owner on the client.
+
+
+def test_url_client_keeps_the_pool_owner_alive_for_as_long_as_the_client(monkeypatch, recording_client):
+    import gc
+    import weakref
+
+    client = _glb_mod._client_from_url('falkor://host:6379')
+    owner = _StubRedis.instances[-1]
+    assert client._rr_pool_owner is owner, "the pool's owner lives on the client, not on a stack frame"
+    ref = weakref.ref(owner)
+    del owner
+    gc.collect()
+    assert ref() is not None, 'collecting garbage cannot reach the owner (its __del__ would disconnect the pool)'
+    assert _StubRedis.instances[-1].closed == 0
+
+
+def test_closing_a_url_client_closes_its_pool_owner_once_and_a_host_port_client_has_none(recording_client):
+    client = _glb_mod._client_from_url('redis://host:6379')
+    owner = _StubRedis.instances[-1]
+    _glb_mod._close_client(client)
+    assert owner.closed == 1, 'the pool is closed with the client, not left to the collector'
+    plain = _RecordingFalkorDB(host='h', port=1)
+    _glb_mod._close_client(plain)  # no owner: just the client's own close
+
+
+def test_the_node_never_calls_from_url_on_the_falkordb_class():
+    source = (_NODE_DIR / 'IGlobal.py').read_text()
+    assert 'FalkorDB.from_url' not in source.replace('``FalkorDB.from_url``', '').replace(
+        "``FalkorDB.from_url's", ''
+    ), 'FalkorDB.from_url hands its pool to a throwaway client whose collection disconnects it'
