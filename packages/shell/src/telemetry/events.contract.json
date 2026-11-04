@@ -1,0 +1,343 @@
+{
+	"$comment": "The TRANSPORT's event contract: what the shell's telemetry layer itself emits (auth facts, the consent lifecycle) and the posthog-js SDK events its instances produce. App taxonomies live with their apps (home-ui: src/telemetry/events.contract.json). Documentation only - never imported at runtime; events.ts carries the runtime names.",
+	"version": 1,
+	"superProperties": {
+		"app": {
+			"type": "string",
+			"const": "home-ui",
+			"description": "Stamped by rocketride/analytics report() on every event; identifies the emitting app."
+		},
+		"is_authed": {
+			"type": "boolean",
+			"description": "True while the shell has an identity. Registered by HomeApp whenever identity changes, before the first $pageview."
+		},
+		"rr_traffic": {
+			"type": "string",
+			"enum": [
+				"visible",
+				"hidden",
+				"prerender",
+				"zero_viewport"
+			],
+			"description": "Load classification at init time: document.prerendering wins, then visibilityState hidden, then a zero innerWidth or innerHeight, else visible. Events are never dropped on it."
+		},
+		"rr_traffic_activated": {
+			"type": "boolean",
+			"const": true,
+			"description": "Present only on a load that started as prerender or hidden and was later activated (prerenderingchange, or the document becoming visible). rr_traffic keeps the load classification."
+		},
+		"rr_test": {
+			"type": "boolean",
+			"const": true,
+			"description": "Present only when the page host is a local or test host (localhost, 127.0.0.1, [::1], *.localhost, *.test). Lets test ingestion be filtered out."
+		},
+		"consent_state": {
+			"type": "string",
+			"enum": [
+				"undecided",
+				"accepted",
+				"rejected"
+			],
+			"description": "The visitor's consent record at capture time (our own rr:consent, never PostHog's flag). undecided and rejected: the cookieless instance; accepted: the persistent instance with replay and heatmaps."
+		},
+		"rr_replay_gate": {
+			"type": "string",
+			"enum": [
+				"none",
+				"save_data",
+				"slow_network",
+				"low_memory",
+				"no_home_block"
+			],
+			"description": "Accepted visitors only (the persistent instance): why session replay is skipped on this device (Save-Data, a 2G/3G effective connection, or device memory at or below LOW_MEMORY_GB as Chromium reports it; no_home_block where the browser cannot apply the block that keeps a recording to the home content), or none. Heatmaps and click capture are not affected. Absent on cookieless events."
+		},
+		"rr_journey": {
+			"type": "string",
+			"pattern": "^[0-9a-f-]{32,36}$",
+			"description": "One random key per page load, generated in memory on both instances. The cookieless instance never stores it; the opted-in instance keeps its super properties in its own storage, so for an opted-in visitor the current load's key sits there until the next load replaces it. It joins the cookieless and the consented halves of a page load in which the visitor opted in (consent:handoff carries the same key), so SQL can stitch them; it never links two page loads."
+		},
+		"rr_bridged": {
+			"type": "boolean",
+			"const": true,
+			"description": "Present only on a copy: at a mid-visit accept, the page views and section views this page load already sent on the cookieless instance are sent once more on the consented instance, in order, with their original page context (URL, path, referrer, page, section) and this flag, so the consented session holds the whole journey from landing. Event and volume counts exclude rr_bridged; funnels include it."
+		},
+		"rr_continued_visit": {
+			"type": "boolean",
+			"const": true,
+			"description": "Present only on the consented instance's events in the session that continues a visit which began cookieless in the same tab (a mid-visit accept), including after the sign-in round trip; absent once that session ends. Session and visitor counts exclude it, because the cookieless session already counted the visit; funnels keep it."
+		},
+		"utm_source": {
+			"type": [
+				"string",
+				"null"
+			],
+			"description": "SDK acquisition field (may change on later visits); roulette acquisition freezes the enrollment URL separately."
+		},
+		"utm_medium": {
+			"type": [
+				"string",
+				"null"
+			],
+			"description": "SDK acquisition field (may change on later visits); roulette acquisition freezes the enrollment URL separately."
+		},
+		"utm_campaign": {
+			"type": [
+				"string",
+				"null"
+			],
+			"description": "SDK acquisition field (may change on later visits); roulette acquisition freezes the enrollment URL separately."
+		},
+		"utm_content": {
+			"type": [
+				"string",
+				"null"
+			],
+			"description": "SDK acquisition field (may change on later visits); roulette acquisition freezes the enrollment URL separately."
+		},
+		"utm_term": {
+			"type": [
+				"string",
+				"null"
+			],
+			"description": "SDK acquisition field (may change on later visits); roulette acquisition freezes the enrollment URL separately."
+		}
+	},
+	"events": {
+		"auth:start": {
+			"owner": "shell",
+			"description": "Raised by a shell with the telemetry channel when it starts the OAuth redirect (ConnectionManager.startOAuth, behind its one-shot guard), which every sign-in and sign-up entry of the shell and its screens goes through (CloudAuthProvider.signIn(), also on the shell API, does not raise it). auto marks a request the shell's auth gate raised for an app that requires sign-in, not a click. Forwarded by home-ui once per fact with the time it was observed; a fact raised while no app listened is held in the shell's channel (sessionStorage, 30 minutes) and forwarded on the next home-ui init. Absent on an older shell.",
+			"properties": {
+				"register": {
+					"type": "boolean"
+				},
+				"app_id": {
+					"type": "string",
+					"pattern": "^[A-Za-z0-9._-]{1,128}$"
+				},
+				"from_path": {
+					"type": "string",
+					"pattern": "^/"
+				},
+				"auto": {
+					"type": "boolean"
+				},
+				"schema_version": {
+					"const": 1
+				},
+				"experiment": {
+					"type": "string"
+				},
+				"experiment_revision": {
+					"type": "string"
+				},
+				"variant_id": {
+					"type": "string"
+				},
+				"assignment_id": {
+					"type": "string"
+				},
+				"exposure_id": {
+					"type": "string"
+				},
+				"landing_message_revision": {
+					"type": "string"
+				},
+				"exposed_at": {
+					"type": "number"
+				},
+				"expires_at": {
+					"type": "number"
+				},
+				"consent_version": {
+					"const": 1
+				}
+			},
+			"required": [
+				"register",
+				"from_path",
+				"auto"
+			]
+		},
+		"auth:complete": {
+			"owner": "shell+home-ui",
+			"description": "Identity resolved after the OAuth round trip, exactly one per sign-in. Owned by the shell, or by home-ui on a shell without the telemetry channel. On a shell with the telemetry channel: raised by the shell after the PKCE callback connect (token restores never raise it) and forwarded by home-ui once per fact with the fact's own time; a fact raised on a page load that never mounts home-ui is held for 30 minutes and forwarded on the next init; source 'shell', is_new the engine's new-user flag (null on an engine without it), waitlisted marks an account created without access yet. On an older shell: home-ui reports it itself when its mount completes a pending sign-in; source 'home-ui', is_new null, waitlisted false (a waitlisted account never mounts home-ui).",
+			"properties": {
+				"is_new": {
+					"type": [
+						"boolean",
+						"null"
+					]
+				},
+				"waitlisted": {
+					"type": "boolean"
+				},
+				"secs_since_start": {
+					"type": [
+						"number",
+						"null"
+					],
+					"minimum": 0,
+					"description": "The sign-in round trip in seconds, to a tenth: on a shell with the telemetry channel, the duration_ms the shell measured from its OAuth start; on an older shell, the time since the register or sign-in CTA stamped sessionStorage rr:auth:start_ts. Null when unknown, or longer than an hour."
+				},
+				"source": {
+					"type": "string",
+					"enum": [
+						"home-ui",
+						"shell"
+					]
+				},
+				"schema_version": {
+					"const": 1
+				},
+				"experiment": {
+					"type": "string"
+				},
+				"experiment_revision": {
+					"type": "string"
+				},
+				"variant_id": {
+					"type": "string"
+				},
+				"assignment_id": {
+					"type": "string"
+				},
+				"exposure_id": {
+					"type": "string"
+				},
+				"landing_message_revision": {
+					"type": "string"
+				},
+				"exposed_at": {
+					"type": "number"
+				},
+				"expires_at": {
+					"type": "number"
+				},
+				"consent_version": {
+					"const": 1
+				}
+			},
+			"required": [
+				"is_new",
+				"waitlisted",
+				"secs_since_start",
+				"source"
+			]
+		},
+		"consent:shown": {
+			"owner": "home-ui",
+			"description": "The consent banner prompted an undecided visitor (once per page load; a reopen from the footer does not count).",
+			"properties": {},
+			"required": []
+		},
+		"consent:decision": {
+			"owner": "home-ui",
+			"description": "The visitor accepted, rejected, or withdrew consent. withdrawn: an opted-in visitor chose No thanks in the reopened banner (the stored record becomes rejected, so they are not asked again; the consented instance is torn down). Captured on the instance that is active after the decision (after an accept: the consented instance, after the bridge's copies; after a rejection or a withdrawal: the cookieless instance). Never captured by a tab that only followed another tab's decision.",
+			"properties": {
+				"choice": {
+					"type": "string",
+					"enum": [
+						"accepted",
+						"rejected",
+						"withdrawn"
+					]
+				},
+				"version": {
+					"type": "integer",
+					"minimum": 1
+				}
+			},
+			"required": [
+				"choice",
+				"version"
+			]
+		},
+		"consent:handoff": {
+			"owner": "home-ui",
+			"description": "Sent on the cookieless instance at the moment a mid-visit accept (in this tab or another) moves capture to the consented instance, after which the cookieless instance sends nothing for the rest of the page load. Funnels exclude sessions with this event: the journey continues, whole, in the consented session (rr_bridged copies, rr_continued_visit). Carries consent_state accepted and the load's rr_journey.",
+			"properties": {
+				"bridged_events": {
+					"type": "integer",
+					"minimum": 0,
+					"description": "How many page views and section views were re-sent on the consented instance (at most 100)."
+				}
+			},
+			"required": [
+				"bridged_events"
+			]
+		},
+		"$pageleave": {
+			"owner": "sdk",
+			"description": "Sent by posthog-js on pagehide. Carries $prev_pageview_duration and the $prev_pageview_max_scroll_percentage computed against scroll_root_selector.",
+			"properties": {},
+			"required": []
+		}
+	},
+	"sdkEvents": {
+		"$comment": "Events posthog-js emits on its own for visitors who accepted (consent_state accepted, the persistent instance); never from the cookieless instance. Their shapes are the SDK's; the sanitiser reduces every URL in them, drops click ids, drops a data-rr-private element chain and keeps no copied text or form content. Listed so dashboard queries and reviewers know the full event surface.",
+		"$web_vitals": {
+			"states": [
+				"undecided",
+				"rejected",
+				"accepted"
+			],
+			"description": "LCP, CLS, INP and FCP with attribution, one per page view on hide; every consent state (the cookieless instance sends it unless the consented one is active)."
+		},
+		"$autocapture": {
+			"states": [
+				"accepted"
+			],
+			"description": "Click autocapture only (dom_event_allowlist click, no copied text); $elements_chain string in production (elementsChainAsString), hrefs reduced, private chains dropped. Signed-out surfaces only."
+		},
+		"$rageclick": {
+			"states": [
+				"accepted"
+			],
+			"description": "Derived from clicks by the SDK; same element scrubbing as $autocapture. Signed-out surfaces only."
+		},
+		"$dead_click": {
+			"states": [
+				"accepted"
+			],
+			"description": "From the dead-clicks chunk after idle; same element scrubbing. Signed-out surfaces only."
+		},
+		"$exception": {
+			"states": [
+				"accepted"
+			],
+			"description": "Unhandled errors and rejections from the exception chunk, on signed-out surfaces only (like heatmaps and click capture); console errors are not captured."
+		},
+		"$$heatmap": {
+			"states": [
+				"accepted"
+			],
+			"description": "Click and scroll-depth batches keyed by the reduced page URL, inner-scroller coordinates. Signed-out surfaces only."
+		},
+		"$snapshot": {
+			"states": [
+				"accepted"
+			],
+			"description": "Session replay chunks: accepted visitors on signed-out surfaces, visible loads, devices the replay gate does not exclude (rr_replay_gate none). Inputs masked; everything outside the home remote's root ([data-rr-home-root]: the shell's surfaces), iframes, the landing terminal ([data-rr-replay-block]) and data-rr-private elements blocked (sized placeholders: no text, no attributes), and no recording where the browser cannot apply that block; no canvas, console or network payloads; pointer positions every 200 ms. Carries no super properties."
+		},
+		"$identify": {
+			"states": [
+				"accepted"
+			],
+			"description": "The opaque engine user id as distinct_id, no person properties; sign-out resets the id."
+		},
+		"$pageleave": {
+			"states": [
+				"undecided",
+				"rejected",
+				"accepted"
+			],
+			"description": "From whichever instance is active at unload (the cookieless one sends nothing while the consented one is active)."
+		},
+		"$dead_swipe": {
+			"states": [
+				"accepted"
+			],
+			"description": "From the dead-clicks chunk (a swipe with no effect); same element scrubbing as $dead_click; signed-out surfaces only."
+		}
+	}
+}

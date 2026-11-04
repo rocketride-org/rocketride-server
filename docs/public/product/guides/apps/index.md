@@ -396,6 +396,27 @@ Import everything from `'rocketride/app-sdk'`:
 import { useShellConnection, useShellApiConfig, useWorkspace, connectionManager } from 'rocketride/app-sdk';
 ```
 
+### Telemetry
+
+The shell owns the one product-telemetry transport (keys, consent, delivery —
+served to it at runtime by the platform; your app never carries any of it).
+Your app receives a bound reporter and simply calls it:
+
+```typescript
+import { useReport } from 'shell';
+
+const report = useReport();
+report('chat:message_sent', { length: 42 });
+```
+
+The reporter is bound to YOUR app id by the shell — every event is stamped
+with its true emitter, and there is nothing to initialise or configure. Event
+names are your app's own taxonomy (`object:action` by convention); document
+them beside your call sites. `useConsent()` exposes the visitor's
+analytics-consent state read-only (plus `openSettings()` to the Privacy
+section) for apps that gate their own captures on it. With no telemetry
+configured on the server (self-hosted), every call is a silent no-op.
+
 ### Connection
 
 | Hook/Function | Returns | Purpose |
@@ -1082,7 +1103,7 @@ service validates its experiment/catalog separately. This context is untrusted a
 and must never authorize access or establish account identity.
 
 The consent record is written by the SaaS consent banner in `rocketride-saas`, under
-`localStorage['rr_consent_v1']`. Its shared schema is
+`localStorage['rr:consent']`. Its shared schema is
 `{ v: 1, choice: 'accepted' | 'rejected', at: number }`, where `at` is milliseconds since epoch.
 The shell accepts only `accepted` records up to 365 days old, with at most 60 seconds of future
 clock skew, and omits context under DNT or GPC. Missing, malformed or unavailable storage

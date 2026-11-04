@@ -72,6 +72,8 @@ import EnvironmentProvider from './EnvironmentProvider';
 import AccountProvider from './AccountProvider';
 import { useAuthUser } from '../hooks/useAuthUser';
 import { lockedAppId } from '../util/devGate';
+import { telemetryEnabled } from '../telemetry/host';
+import { PrivacyPanel } from '../telemetry/PrivacyPanel';
 
 // =============================================================================
 // CONSTANTS
@@ -1014,6 +1016,15 @@ const SettingsProvider: React.FC<ISettingsProviderProps> = ({ initialSectionId }
 					render: (ctx) => <AccountProvider embeddedSection="api-keys" {...(ctx ? { onNavigateSection: ctx.navigate } : {})} />,
 				},
 			);
+			// Privacy: the device's analytics-consent record, mirrored from the
+			// banner's localStorage state (one key, one transition set). Cloud
+			// shell only by construction — VS Code mounts SettingsPage with its
+			// own sections, and the editor's telemetry setting is the one switch
+			// there. Hidden when the server serves no telemetry key: there is
+			// nothing to consent to.
+			if (telemetryEnabled()) {
+				sections.push({ id: 'privacy', title: 'Privacy', order: 50, render: () => <PrivacyPanel /> });
+			}
 		}
 		return sections;
 	}, [isSaas, appManifest]);
