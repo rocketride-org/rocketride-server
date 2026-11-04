@@ -736,3 +736,40 @@ class TestDecode:
     def test_bad_agtype_raises(self):
         with pytest.raises(age.AgeTranslationError, match='agtype syntax error'):
             age.decode_agtype('{"unterminated')
+
+
+# ---------------------------------------------------------------------------
+# capabilities verified on AGE 1.5.0 only: any other version says so
+# ---------------------------------------------------------------------------
+
+_UNCONFIRMED_ON_OTHER_VERSIONS = [
+    ('RETURN date() AS d', 'temporal_functions', 'date()'),
+    ('MATCH (n:P) RETURN elementId(n) AS e', 'element_id', 'elementId()'),
+    ('MATCH (n:P) RETURN [x IN [1, 2] | x] AS l', 'list_comprehension', 'list comprehension'),
+    ('MATCH (n) WHERE EXISTS { MATCH (n)-->() } RETURN n', 'exists_subquery', 'EXISTS { ... } subquery'),
+]
+
+
+@pytest.mark.parametrize('query, feature, construct', _UNCONFIRMED_ON_OTHER_VERSIONS)
+def test_a_cell_verified_on_1_5_0_only_keeps_its_text_there(query, feature, construct):
+    with pytest.raises(age.AgeUnsupportedFeature) as err:
+        age.translate(query, mode=SAFE, graph_name='g', age_version='1.5.0')
+    assert err.value.feature == feature and err.value.construct == construct and err.value.age_version == '1.5.0'
+    assert 'Verified on AGE' not in str(err.value)
+
+
+@pytest.mark.parametrize('version', ['1.6.0', '1.7.0'])
+@pytest.mark.parametrize('query, feature, construct', _UNCONFIRMED_ON_OTHER_VERSIONS)
+def test_a_cell_verified_on_1_5_0_only_says_so_on_another_version(query, feature, construct, version):
+    with pytest.raises(age.AgeUnsupportedFeature) as err:
+        age.translate(query, mode=SAFE, graph_name='g', age_version=version)
+    assert err.value.age_version == version
+    assert f'Verified on AGE 1.5.0; not confirmed on {version}.' in str(err.value)
+
+
+def test_a_cell_verified_on_1_6_0_does_not_carry_the_note():
+    # merge_write was verified on 1.6.0 itself.
+    query = 'UNWIND [1, 2] AS i MERGE (n:P {k: 1}) SET n.v = i'
+    with pytest.raises(age.AgeUnsupportedFeature) as err:
+        age.translate(query, mode=RAW, graph_name='g', age_version='1.6.0')
+    assert 'Verified on AGE 1.5.0' not in str(err.value)

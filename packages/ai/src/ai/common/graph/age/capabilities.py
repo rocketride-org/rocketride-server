@@ -74,6 +74,31 @@ class Capability:
     construct: str = ''
 
 
+# Cells first verified against AGE 1.5.0 only. AGE_1_6_0 inherits them, but nobody has run them on 1.6.0 (or on an
+# unlisted version that falls back to these rules), so a rejection there says so instead of claiming the new version.
+VERIFIED_ON_1_5_0_ONLY = frozenset(
+    {
+        'temporal_functions',
+        'element_id',
+        'list_comprehension',
+        'pattern_comprehension',
+        'all_shortest_paths',
+        # syntax_hint() features (a parse that failed):
+        'exists_subquery',
+        'shortest_path',
+        'regex_match',
+        'exists_function',
+    }
+)
+
+
+def _with_verification(feature: str, detail: str, age_version: str) -> str:
+    """Add the verification note to a detail that was verified on AGE 1.5.0 only, when the engine is another version."""
+    if feature in VERIFIED_ON_1_5_0_ONLY and age_version != '1.5.0':
+        return f'{detail}. Verified on AGE 1.5.0; not confirmed on {age_version}.'
+    return detail
+
+
 def _uses_function(name: str) -> Callable[[CypherFacts], bool]:
     return lambda facts: name in facts.function_names
 
@@ -329,7 +354,9 @@ def apply_capabilities(facts: CypherFacts, age_version: str = DEFAULT_AGE_VERSIO
             if cap.feature == 'temporal_functions':
                 used = sorted(set(_TEMPORAL_FUNCTIONS) & facts.function_names)
                 construct = ', '.join(f'{name}()' for name in used) or construct
-            raise AgeUnsupportedFeature(cap.feature, cap.detail, construct, age_version)
+            raise AgeUnsupportedFeature(
+                cap.feature, _with_verification(cap.feature, cap.detail, age_version), construct, age_version
+            )
         if cap.status is CellStatus.EMULATE and cap.rewrite is not None:
             # Re-analyze the rewritten text so later stages see consistent
             # facts, but keep the caller-visible column names of the query
@@ -388,10 +415,12 @@ _SYNTAX_HINTS: Tuple[Tuple[str, str, str, str], ...] = (
 _BLANK_LITERALS = re.compile(r"""'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`[^`]*`|//[^\r\n]*|/\*.*?\*/""", re.DOTALL)
 
 
-def syntax_hint(query: str) -> Optional[AgeUnsupportedFeature]:
+def syntax_hint(query: str, age_version: str = DEFAULT_AGE_VERSION) -> Optional[AgeUnsupportedFeature]:
     """Return a precise unsupported-feature error for a query that failed to parse, if one applies."""
     code = _BLANK_LITERALS.sub(' ', query)
     for pattern, feature, construct, detail in _SYNTAX_HINTS:
         if re.search(pattern, code, re.IGNORECASE):
-            return AgeUnsupportedFeature(feature, detail, construct, DEFAULT_AGE_VERSION)
+            return AgeUnsupportedFeature(
+                feature, _with_verification(feature, detail, age_version), construct, age_version
+            )
     return None

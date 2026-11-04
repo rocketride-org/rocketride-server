@@ -591,7 +591,7 @@ def _projection_column(item_ctx) -> ReturnColumn:
     return ReturnColumn(display_name=_strip_backticks(expr_text), expression=expression)
 
 
-def analyze(query: str) -> CypherFacts:
+def analyze(query: str, age_version: Optional[str] = None) -> CypherFacts:
     """Parse ``query`` with the openCypher grammar and extract translation facts.
 
     Raises:
@@ -621,9 +621,9 @@ def analyze(query: str) -> CypherFacts:
     if listener.errors:
         # Constructs a Neo4j user types early that this grammar cannot parse
         # get a precise "not supported" hint instead of a bare syntax error.
-        from .capabilities import syntax_hint
+        from .capabilities import DEFAULT_AGE_VERSION, syntax_hint
 
-        hint = syntax_hint(query)
+        hint = syntax_hint(query, age_version or DEFAULT_AGE_VERSION)
         if hint is not None:
             raise hint
         raise AgeTranslationError('Cypher syntax error: ' + '; '.join(listener.errors[:5]))
