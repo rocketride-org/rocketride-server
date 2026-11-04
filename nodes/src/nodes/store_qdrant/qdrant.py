@@ -703,6 +703,11 @@ class Store(DocumentStoreBase):
     def addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None:
         """
         Add document chunks to the document store.
+
+        Args:
+            chunks: The batch to write.
+            checkCollection: Create the collection if it is missing and check that the chunks match its
+                embedding model and vector size; createCollection passes False when it writes its control row.
         """
         # If no documents present, get out
         if not len(chunks):
@@ -715,10 +720,11 @@ class Store(DocumentStoreBase):
         # Clear the points
         points: List[models.PointStruct] = []
 
-        # Clear the object id list
-        objectIds: Dict = {}
+        # The objects this batch starts over
+        objectIds = self.objectIdsToReplace(chunks)
 
         def flush():
+            """Send one batch: delete the replaced objects (first call only), then upsert the queued points."""
             nonlocal points
             nonlocal objectIds
             ops = []
@@ -729,11 +735,7 @@ class Store(DocumentStoreBase):
                     models.DeleteOperation(
                         delete=models.FilterSelector(
                             filter=Filter(
-                                must=[
-                                    FieldCondition(
-                                        key='meta.objectId', match=models.MatchAny(any=list(objectIds.keys()))
-                                    )
-                                ]
+                                must=[FieldCondition(key='meta.objectId', match=models.MatchAny(any=objectIds))]
                             )
                         )
                     )
@@ -751,15 +753,8 @@ class Store(DocumentStoreBase):
             self.client.batch_update_points(collection_name=self.collection, update_operations=ops)
 
             # Clear them
-            objectIds = {}
+            objectIds = []
             points = []
-
-        # For each document
-        for chunk in chunks:
-            # If we are writing chunk 0, then delete the object
-            if not chunk.metadata.chunkId:
-                # Save this object id to be deleted
-                objectIds[chunk.metadata.objectId] = True
 
         sum_size = 0
         cur_size = 0
