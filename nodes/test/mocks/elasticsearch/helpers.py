@@ -4,6 +4,14 @@ from typing import Any, List, Iterator, Optional, Dict
 from . import _store_data
 
 
+class BulkIndexError(Exception):
+    """Raised by the real helpers.bulk on a partial failure; the store imports it."""
+
+    def __init__(self, message: str = '', errors: Any = None):
+        super().__init__(message)
+        self.errors = errors or []
+
+
 def bulk(client: Any, actions: List[Dict[str, Any]], **kwargs: Any) -> Any:
     _store = _store_data._store
     for action in actions:
