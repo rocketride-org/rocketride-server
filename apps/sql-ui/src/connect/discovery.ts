@@ -31,7 +31,8 @@
 // file is the only place that changes.
 // =============================================================================
 
-import type { SqlWireClient } from './busClient';
+import type { RocketRideClient } from 'rocketride';
+import { isDirectEndpointKey } from './resolver';
 import type { SqlEndpoint } from './types';
 
 // =============================================================================
@@ -83,7 +84,7 @@ interface PipelineDict {
  * @param client - The shell's RocketRide client.
  * @returns Endpoints sorted by pipeline name, then node id.
  */
-export async function discoverSqlEndpoints(client: SqlWireClient): Promise<SqlEndpoint[]> {
+export async function discoverSqlEndpoints(client: RocketRideClient): Promise<SqlEndpoint[]> {
 	// One page of 100 covers realistic task counts; discovery re-runs on demand.
 	const tasks = await client.listTasks({ page_size: 100 });
 	/** The task-row shape this discovery reads (loose adapter result). */
@@ -94,6 +95,9 @@ export async function discoverSqlEndpoints(client: SqlWireClient): Promise<SqlEn
 	// rows for the same pipeline; the token resolver returns the live one.
 	const seen = new Set<string>();
 	const candidates = rows.filter((task) => {
+		// Direct-mode temp pipelines (sqlconn-<id>) are not user pipelines —
+		// surfacing them would let a pipeline binding alias a direct endpoint.
+		if (isDirectEndpointKey(task.projectId)) return false;
 		// TASK_STATE >= 4 (STOPPING/COMPLETED/CANCELLED) is not attachable;
 		// `completed` alone misses the stopping window.
 		if (task.completed || task.state >= 4) return false;

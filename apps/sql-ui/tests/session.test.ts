@@ -32,7 +32,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { SqlWireClient } from '../src/connect/busClient';
+import type { RocketRideClient } from 'shell';
 import type { SqlEndpoint } from '../src/connect';
 import { createSqlSession } from '../src/connect/session';
 
@@ -53,7 +53,7 @@ interface IToolCall {
 /** A fake client plus the call log it records. */
 interface IFakeClient {
 	/** The client handed to the session. */
-	client: SqlWireClient;
+	client: RocketRideClient;
 	/** Every tool invocation, in order. */
 	calls: IToolCall[];
 	/** How many times the token was resolved. */
@@ -94,7 +94,7 @@ function fakeClient(tokens: string[], behave: (call: IToolCall, index: number) =
 			calls.push(call);
 			return behave(call, calls.length - 1);
 		},
-	} as unknown as SqlWireClient;
+	} as unknown as RocketRideClient;
 	return {
 		client,
 		calls,

@@ -72,10 +72,9 @@ import { ExplorerToolError } from 'shared/explorer';
 import type { IExplorerEndpoint, IInvokeOptions, IProbeResult, IRoleChannel } from 'shared/explorer';
 import { HOST_CONNECTION_TOPIC, createFrameCaller } from 'shared/explorer/devtool/frame';
 import type { IFrameCaller } from 'shared/explorer/devtool/frame';
-import { createFrameIdentityGuard, followSignIn } from 'shared/explorer/devtool/frameIdentity';
+import { IDENTITY_STATE_TOPIC, createFrameIdentityGuard, followSignIn } from 'shared/explorer/devtool/frameIdentity';
 import type { FrameResetReason, IFrameIdentityGuard, SignInState } from 'shared/explorer/devtool/frameIdentity';
-import { CONTROLLER_STATE_TOPIC, channelFor, mountNonce } from 'shared/explorer/devtool/realm';
-import type { DevToolPeer } from 'shared/explorer/devtool/realm';
+import { CONTROLLER_STATE_TOPIC, mountNonce } from 'shared/explorer/devtool/realm';
 import { createControllerSummon } from 'shared/explorer/devtool/summon';
 import type { SummonState } from 'shared/explorer/devtool/summon';
 import { probeAwareChannel } from '../adapters/actions';
@@ -104,18 +103,14 @@ export interface IVisibilitySource {
 
 /** What {@link createVectorFrame} needs. NO client and no ConnectionManager: a frame holds none (R1, T2). */
 export interface IVectorFrameOptions {
-	/** The frame mount's peer. */
-	peer: DevToolPeer;
-	/** The host's channel for this mount, when it gave one. */
-	channel?: ToolChannel;
+	/** The host's channel for this mount (DevToolProps.channel). */
+	channel: ToolChannel;
 	/** The host's documents API. */
 	documents?: DevToolProps['documents'];
 	/** The frame's docKey. */
 	docKey?: string | null;
-	/** The shell's createToolController (injected). */
-	createToolController: <O extends ToolOpMap>(peer: DevToolPeer) => ToolControllerFn<O>;
-	/** The shell's createToolChannel (injected). */
-	createToolChannel: (peer: DevToolPeer) => ToolChannel;
+	/** The shell's createToolOpClient (injected). */
+	createToolOpClient: <O extends ToolOpMap>(channel: ToolChannel) => ToolControllerFn<O>;
 	/** The clock (deadlines). */
 	now?: () => number;
 	/** Timers (the summon, the hint debounce); returns a cancel. Default setTimeout. */
@@ -316,8 +311,12 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 			return () => clearTimeout(handle);
 		});
 	const hintDelay = opts.hintDelayMs ?? 250;
-	const channel = opts.channel ?? channelFor(opts.peer, opts.createToolChannel);
-	const caller = createFrameCaller<VectorOps>({ peer: opts.peer, channel, createToolController: opts.createToolController, createToolChannel: opts.createToolChannel, ...(opts.now ? { now: opts.now } : {}) });
+	const channel = opts.channel;
+	// The identity fence: the account the controller vouches for NOW (its `identity` topic). A call is held while nobody is
+	// vouched for (inside its own deadline), and an answer for account A never reaches a frame that has adopted B. A cold
+	// start (unknown, then A) is not a change. Declared before the caller, and before any subscription that could reach it.
+	let identityFingerprint: string | null = null;
+	const caller = createFrameCaller<VectorOps>({ channel, createToolOpClient: opts.createToolOpClient, identityNow: () => identityFingerprint, ...(opts.now ? { now: opts.now } : {}) });
 	const registry = createConnectionRegistry();
 	// The Query tab's history: memory only, emptied on a change of identity.
 	const queryHistory = sessionQueryHistory(DEVTOOL_HISTORY_NOTE);
@@ -346,6 +345,11 @@ export function createVectorFrame(opts: IVectorFrameOptions): IVectorFrame {
 	let mapListener: ((request: { keys: VectorKey[]; source: HighlightSource }) => void) | null = null;
 	let eventFocus: IFocusRequest | null = null;
 	let eventMap: (IMapRequest & { docKey: string }) | null = null;
+
+	offs.push(channel.onState(IDENTITY_STATE_TOPIC, (snapshot) => {
+		const value = field(snapshot, 'fingerprint');
+		identityFingerprint = typeof value === 'string' && value !== '' ? value : null;
+	}));
 
 	// ── Mirrors of the host's and the controller's retained state ───────────────────────────────
 	const connected = cell<boolean | undefined>(undefined);

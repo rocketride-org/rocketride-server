@@ -14,17 +14,16 @@
 
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'node:test';
-import type { ToolOpMap } from 'shell';
+import type { ToolChannel, ToolControllerFn, ToolOpMap } from 'shell';
 import { ExplorerToolError } from 'shared/explorer';
 import { codedError } from 'shared/explorer/connect/testing';
 import type { IToolCall } from 'shared/explorer/connect/testing';
 import { createFrameCaller } from 'shared/explorer/devtool/frame';
 import type { IFrameCaller } from 'shared/explorer/devtool/frame';
-import type { DevToolPeer } from 'shared/explorer/devtool/realm';
 import { MAX_RETAINED_STATE_BYTES, MAX_RETAINED_TOTAL_BYTES, jsonByteLength } from 'shared/explorer/devtool/state';
 import { assertJsonSafe, createDevToolHarness, manualNow } from 'shared/explorer/devtool/testing';
 import type { IDevToolHarness } from 'shared/explorer/devtool/testing';
-import { BUS_TOOL_MARGIN_MS, FRAME_OP_MARGIN_MS, SDK_TIMEOUT_SLACK_MS } from 'shared/explorer/devtool/timeouts';
+import { PROXY_BUS_SLACK_MS, FRAME_OP_MARGIN_MS, SDK_TIMEOUT_SLACK_MS } from 'shared/explorer/devtool/timeouts';
 import { WRITE_REFUSED_TEXT } from '../src/devtool/controller';
 import { CONTROLLER_LOCAL_OP_MS, ENDPOINTS_STATE_BYTES, EVENT, OP, RELAY_OP_MS, RESULT_CAPS, SAMPLE_BUDGET_CAP_MS, STATE, VECTOR_APP_ID, VERSIONS_STATE_BYTES, endpointsSnapshot, frameTimeoutFor, versionsSnapshot, waitFor } from '../src/devtool/protocol';
 import type { IDocVersion, VectorOps } from '../src/devtool/protocol';
@@ -39,16 +38,16 @@ afterEach(disposeAll);
 /** A frame's raw caller over a real frame peer of the harness. */
 function frameCaller(h: IDevToolHarness, now?: () => number, spy?: Array<{ op: string; timeoutMs: number | undefined; deadlineAt: number | undefined }>): IFrameCaller<VectorOps> {
 	const peer = h.newFramePeer();
-	const createToolController = spy
-		? <O extends ToolOpMap>(p: DevToolPeer) => {
-				const fn = shellProtocol.createToolController<O>(p);
+	const createToolOpClient = spy
+		? <O extends ToolOpMap>(channel: ToolChannel): ToolControllerFn<O> => {
+				const fn = shellProtocol.createToolOpClient<O>(channel);
 				return ((op: string, params: unknown, options?: { timeoutMs?: number }) => {
 					spy.push({ op, timeoutMs: options?.timeoutMs, deadlineAt: (params as { deadlineAt?: number })?.deadlineAt });
 					return (fn as unknown as (o: string, pp: unknown, oo?: unknown) => Promise<unknown>)(op, params, options);
-				}) as unknown as ReturnType<typeof shellProtocol.createToolController<O>>;
+				}) as unknown as ToolControllerFn<O>;
 			}
-		: shellProtocol.createToolController;
-	return createFrameCaller<VectorOps>({ peer, channel: shellProtocol.createToolChannel(peer), createToolController, createToolChannel: shellProtocol.createToolChannel, ...(now ? { now } : {}) });
+		: shellProtocol.createToolOpClient;
+	return createFrameCaller<VectorOps>({ channel: shellProtocol.createToolChannel(peer), createToolOpClient, ...(now ? { now } : {}) });
 }
 
 /** A signed-in VS Code realm, its controller and a frame's caller, with the first discovery and probe done. */
@@ -195,14 +194,16 @@ describe('T4 - timeouts: the frame always waits longer than the controller\'s ow
 		const expected: Record<string, number> = { stats: statement, list_documents: statement, chunks: statement, project: statement, neighbors: statement, recommend: statement, similarity_matrix: statement, sample: limits.sample_budget_ms + 30_000, search: 60_000, embed: 60_000 };
 		for (const call of TOOL_CALLS) {
 			assert.equal(waitFor(call.op, info), expected[call.tool], `${call.op}: the session wait`);
-			assert.equal(busOf(call.tool), expected[call.tool] + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS, `${call.op}: the bus waits the session wait + SDK slack + bus margin`);
+			assert.equal(busOf(call.tool), expected[call.tool] + SDK_TIMEOUT_SLACK_MS + PROXY_BUS_SLACK_MS, `${call.op}: the bus waits the session wait + SDK slack + bus margin`);
 			assert.equal(frameOf(call.op), busOf(call.tool) + FRAME_OP_MARGIN_MS, `${call.op}: the frame waits the bus timeout + its margin`);
 		}
-		assert.equal(busOf('dialect'), 15_000 + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS);
+		assert.equal(busOf('dialect'), 15_000 + SDK_TIMEOUT_SLACK_MS + PROXY_BUS_SLACK_MS);
 		assert.equal(frameOf(OP.probe), busOf('dialect') + FRAME_OP_MARGIN_MS);
 		assert.equal(frameOf(OP.refresh), CONTROLLER_LOCAL_OP_MS + FRAME_OP_MARGIN_MS, 'refresh STARTS discovery; its results arrive as state');
 		assert.equal(frameOf(OP.requestFocus), RELAY_OP_MS + FRAME_OP_MARGIN_MS, 'a relay is answered from memory');
-		for (const request of engine.requests) assert.ok(typeof request.timeoutMs === 'number' && request.timeoutMs > 0 && request.timeoutMs !== 120_000, `${request.op} names its own bus timeout, never the 120 s default`);
+		// Every tool call names its own bus timeout (the SDK timeout + the proxy's slack), never the 120 s default; the other
+		// engine requests carry the adapter's own application deadlines (engineClient.ts), not a bus timeout the lane sets.
+		for (const request of engine.requests.filter((r) => r.op === 'client.tool')) assert.ok(typeof request.timeoutMs === 'number' && request.timeoutMs > 0 && request.timeoutMs !== 120_000, `${request.op} names its own bus timeout, never the 120 s default`);
 		caller.dispose();
 		mounted.controller.dispose();
 	});
@@ -305,7 +306,7 @@ describe('T10 - a write that ran is never reported as failed for its size', () =
 		const run = await connected({}, { resultCaps: { [OP.trash]: 256 } });
 		assert.ok(JSON.stringify(fixture('soft_delete_ok')).length > 256, 'the premise: the node\'s answer is over the cap');
 		const answer = await run.caller.callReply(OP.trash, { key: run.key, input: { object_ids: [DOC_ID] }, origin: 'frame-a' }, T);
-		assert.deepEqual(answer, { success: true, object_ids: [DOC_ID], matched_chunks: 12, not_found: [] }, 'the fields the frame reads, without the audit block');
+		assert.deepEqual(answer, { success: true, object_ids: [DOC_ID], matched_chunks: 12, moved_chunks: 12, not_found: [] }, 'the fields the frame reads, without the audit block');
 		await until(() => Boolean((latestStateMap(run.h)[STATE.docVersions]?.snapshot as Record<string, IDocVersion> | undefined)?.[run.key]), 'the bump');
 		assert.equal((latestStateMap(run.h)[STATE.docVersions]?.snapshot as Record<string, IDocVersion>)[run.key].origin, 'frame-a', 'the frame relists itself, as for any write that answered');
 		run.caller.dispose();
@@ -421,8 +422,11 @@ describe('T11 - no bulk result is retained state, and sizes are guarded', () => 
 });
 
 describe('T4 / T13 on the wait path: a call that waited for discovery runs only inside what is left of its deadline', () => {
-	/** A frame call held across a remount (the controller unmounts while it is on the bus), then a fresh controller. */
-	async function heldAcrossRemount(op: 'vector.stats' | 'vector.trash', timeoutMs: number) {
+	/**
+	 * A frame call that reaches a FRESH controller while its discovery is still under way (a remount in the host's
+	 * channel; the engine holds `getTasks` until the test releases it): it waits for the discovery, inside its deadline.
+	 */
+	async function heldDuringDiscovery(op: 'vector.stats' | 'vector.trash', timeoutMs: number) {
 		const clock = manualNow(2_000_000);
 		const engine = vscodeRealm(READS);
 		signInVsCode(engine.realm);
@@ -432,38 +436,50 @@ describe('T4 / T13 on the wait path: a call that waited for discovery runs only 
 		const key = first.controller.store.getState().endpoints[0].key;
 		const caller = frameCaller(first.h, clock.now);
 		await until(() => caller.controllerReady(), 'the readiness');
-		const input = op === OP.trash ? { object_ids: [DOC_ID] } : { mode: 'full' };
-		const call = caller.callReply(op, (op === OP.trash ? { key, input, origin: 'f' } : { key, input }) as never, { timeoutMs });
 		first.controller.dispose();
 		await settle();
+		let release: () => void = () => undefined;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		engine.before.current = async (name) => {
+			if (name === 'client.getTasks') await gate;
+		};
 		const before = engine.requests.length;
-		// The fresh controller has discovered nothing: the held call waits for its discovery, inside the deadline.
+		// The fresh controller has discovered nothing: the call waits for its discovery, inside the deadline.
 		const again = mountController(engine.cm, { now: clock.now }, first.h, first);
-		return { engine, caller, call, again, before };
+		const input = op === OP.trash ? { object_ids: [DOC_ID] } : { mode: 'full' };
+		const call = caller.callReply(op, (op === OP.trash ? { key, input, origin: 'f' } : { key, input }) as never, { timeoutMs });
+		void call.catch(() => undefined);
+		await settle();
+		return { engine, caller, call, again, before, release: () => { engine.before.current = null; release(); } };
 	}
 
 	it('a read: the session is asked for what is left of the deadline (less a margin), never the full wait', async () => {
-		const run = await heldAcrossRemount(OP.stats, 20_000);
+		const run = await heldDuringDiscovery(OP.stats, 20_000);
+		run.release();
 		assert.deepEqual(await run.call, fixture('stats_pgvector'));
 		const stats = run.engine.requests.slice(run.before).find((r) => r.op === 'client.tool' && (r.params as { tool?: string }).tool === 'stats');
 		assert.ok(stats, 'the read ran');
 		// The deadline is 20 s from the (frozen) clock; the session gets 20 s less the 1 s margin, the bus 6 s more.
-		assert.equal(stats.timeoutMs, 20_000 - 1_000 + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS, 'bounded by the deadline, not the 40 s statement wait');
+		assert.equal(stats.timeoutMs, 20_000 - 1_000 + SDK_TIMEOUT_SLACK_MS + PROXY_BUS_SLACK_MS, 'bounded by the deadline, not the 40 s statement wait');
 		run.caller.dispose();
 		run.again.controller.dispose();
 	});
 
 	it('a write: sent with what is left of its deadline, so its answer (or "stopped waiting") reaches the frame before it gives up', async () => {
-		const run = await heldAcrossRemount(OP.trash, 20_000);
+		const run = await heldDuringDiscovery(OP.trash, 20_000);
+		run.release();
 		assert.deepEqual(await run.call, fixture('soft_delete_ok'));
 		const trash = run.engine.requests.slice(run.before).find((r) => r.op === 'client.tool' && (r.params as { tool?: string }).tool === 'soft_delete');
-		assert.equal(trash?.timeoutMs, 20_000 - 1_000 + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS, 'bounded by the deadline, not the 40 s write wait');
+		assert.equal(trash?.timeoutMs, 20_000 - 1_000 + SDK_TIMEOUT_SLACK_MS + PROXY_BUS_SLACK_MS, 'bounded by the deadline, not the 40 s write wait');
 		run.caller.dispose();
 		run.again.controller.dispose();
 	});
 
 	it('a write with less than a second of its deadline left is refused before anything is sent', async () => {
-		const run = await heldAcrossRemount(OP.trash, 1_500);
+		const run = await heldDuringDiscovery(OP.trash, 1_500);
+		run.release();
 		await assert.rejects(run.call, (e: unknown) => e instanceof ExplorerToolError && e.kind === 'unavailable' && /Nothing was sent/.test(e.message));
 		assert.ok(!run.engine.world.calls.some((c) => c.tool === 'soft_delete'), 'the write never reached the node');
 		run.caller.dispose();
@@ -472,45 +488,34 @@ describe('T4 / T13 on the wait path: a call that waited for discovery runs only 
 });
 
 describe('T13 - deadlines: an expired call never runs; an on-time one does', () => {
-	it('a Delete permanently and a sample the PEER holds past their deadlines reach a remounted controller, which refuses them; an on-time held sample runs', async () => {
-		const clock = manualNow(1_000_000);
+	it('a Delete permanently and a sample that reach the controller after their deadlines are refused (nothing runs); an on-time sample runs', async () => {
+		// The frame stamps its deadlines on one clock, the controller reads another five minutes ahead: every call the
+		// frame sends has already expired when the controller sees it (a throttled hidden webview, or a call that sat on the bus).
+		const frameClock = manualNow(1_000_000);
+		const controllerClock = manualNow(1_000_000 + 5 * 60_000);
 		const engine = vscodeRealm(READS);
 		signInVsCode(engine.realm);
-		const first = mountController(engine.cm, { now: clock.now });
-		first.h.setHostConnection(true);
-		await until(() => Object.keys(first.controller.store.getState().probes).length === 1, 'the probe');
-		const key = first.controller.store.getState().endpoints[0].key;
-		const caller = frameCaller(first.h, clock.now);
-		await until(() => caller.controllerReady(), 'the readiness');
-
-		// The frame calls while the controller is ready; the controller unmounts while both calls are on the bus (a VS
-		// Code disconnect): the real busPeer HOLDS them, and the frame gives up.
-		const lateDelete = caller.callReply(OP.deletePermanently, { key, input: { object_ids: ['91ae15d4-3f6e-589f-bb81-72301f2ca1b6'] }, origin: 'f' }, { timeoutMs: 40 });
-		const lateSample = caller.callReply(OP.sample, { key, input: { n: 1000 } }, { timeoutMs: 40 });
-		first.controller.dispose();
+		const refused: string[] = [];
+		const mounted = mountController(engine.cm, { now: controllerClock.now, onError: (error, where) => refused.push(`${where}:${(error as { reason?: string }).reason ?? ''}`) });
+		mounted.h.setHostConnection(true);
+		await until(() => Object.keys(mounted.controller.store.getState().probes).length === 1, 'the probe');
+		const key = mounted.controller.store.getState().endpoints[0].key;
+		const late = frameCaller(mounted.h, frameClock.now);
+		await until(() => late.controllerReady(), 'the readiness');
+		const lateDelete = late.callReply(OP.deletePermanently, { key, input: { object_ids: ['91ae15d4-3f6e-589f-bb81-72301f2ca1b6'] }, origin: 'f' }, { timeoutMs: 60_000 });
+		const lateSample = late.callReply(OP.sample, { key, input: { n: 1000 } }, { timeoutMs: 60_000 });
 		await assert.rejects(lateDelete, (error: unknown) => error instanceof ExplorerToolError && error.kind === 'timeout');
 		await assert.rejects(lateSample, (error: unknown) => error instanceof ExplorerToolError && error.kind === 'timeout');
-		assert.equal(caller.pending(), 0, 'the frame gave up on both');
-
-		// Minutes pass, then the controller remounts (the host's channel and peer live on) and receives the held calls.
-		clock.advance(5 * 60_000);
-		const refused: string[] = [];
-		const again = mountController(engine.cm, { now: clock.now, onError: (error, where) => refused.push(`${where}:${(error as { reason?: string }).reason ?? ''}`) }, first.h, first);
-		await settle();
 		assert.ok(!engine.world.calls.some((c) => c.tool === 'delete'), 'the expired delete never reached the node');
 		assert.ok(!engine.world.calls.some((c) => c.tool === 'sample'), 'the expired sample never reached the node');
-		assert.equal(refused.filter((r) => r === 'refused:expired').length, 2, 'both DID reach the controller, which refused them');
+		assert.equal(refused.filter((r) => r === 'refused:expired').length, 2, 'both reached the controller, which refused them');
 
-		// Control: the same race, with the remount inside the deadline: the held sample runs.
-		await until(() => caller.controllerReady(), 'the remounted readiness');
-		const onTime = caller.callReply(OP.sample, { key, input: { n: 1000 } }, { timeoutMs: 60_000 });
-		again.controller.dispose();
-		await settle();
-		const third = mountController(engine.cm, { now: clock.now }, first.h, first);
-		await until(() => Object.keys(third.controller.store.getState().probes).length === 1, 'the third controller\'s probe');
-		assert.deepEqual(await onTime, fixture('sample_demo_1000'), 'the on-time held sample ran on the remounted controller');
+		// Control: a call stamped on the controller's own clock is on time and runs.
+		const onTime = frameCaller(mounted.h, controllerClock.now);
+		assert.deepEqual(await onTime.callReply(OP.sample, { key, input: { n: 1000 } }, { timeoutMs: 60_000 }), fixture('sample_demo_1000'), 'the on-time sample ran');
 		assert.equal(engine.world.calls.filter((c) => c.tool === 'sample').length, 1);
-		caller.dispose();
-		third.controller.dispose();
+		late.dispose();
+		onTime.dispose();
+		mounted.controller.dispose();
 	});
 });

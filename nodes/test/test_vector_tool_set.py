@@ -167,6 +167,7 @@ def test_soft_delete_moves_documents_to_the_trash_and_says_what_it_moved(context
     answer = node(store, allow_writes=True).soft_delete({'object_ids': ['doc01', 'doc01', 'ghost']})
     assert answer['success'] is True, answer
     assert (answer['object_ids'], answer['matched_chunks'], answer['not_found']) == (['doc01', 'ghost'], 2, ['ghost'])
+    assert answer['moved_chunks'] == 2
     audit = answer['audit']
     assert (audit['action'], audit['object_ids'], audit['rows']) == ('vector.soft_delete', ['doc01', 'ghost'], 2)
     assert audit['caller'] == {'auth': 'task', 'userId': 'u-0001', 'teamId': 't-0001'}
@@ -182,18 +183,20 @@ def test_restore_takes_documents_out_of_the_trash_and_a_live_one_is_a_no_op(cont
     inst.soft_delete({'object_ids': ['doc01']})
     answer = inst.restore({'object_ids': ['doc01', 'doc02']})
     assert answer['success'] is True, answer
-    assert (answer['object_ids'], answer['matched_chunks'], answer['not_found']) == (['doc01', 'doc02'], 2, [])
+    # matched_chunks is every chunk the store holds for the ids (doc02 is live already); moved_chunks is what came out.
+    assert (answer['object_ids'], answer['matched_chunks'], answer['not_found']) == (['doc01', 'doc02'], 4, [])
+    assert answer['moved_chunks'] == 2
     assert answer['audit']['action'] == 'vector.restore'
     assert not any(_rows(store).values())
     again = inst.restore({'object_ids': ['doc00']})
-    assert (again['success'], again['matched_chunks'], again['not_found']) == (True, 0, [])
+    assert (again['success'], again['matched_chunks'], again['moved_chunks'], again['not_found']) == (True, 2, 0, [])
 
 
 def test_an_agent_soft_deletes_with_allow_write_alone(context):
     context(agent())
     store = clustered(CountingStore, docs=2, chunks=2)
     answer = node(store, allow_writes=False).soft_delete({'object_ids': ['doc00']})
-    assert answer['success'] is True and answer['matched_chunks'] == 2, answer
+    assert answer['success'] is True and (answer['matched_chunks'], answer['moved_chunks']) == (2, 2), answer
     assert answer['audit']['caller'] == {'auth': 'agent', 'userId': None, 'teamId': None}
 
 
@@ -322,8 +325,10 @@ def test_a_trash_write_of_stored_documents_counts_them_once(context, tool):
     ids = sorted({key[0] for key in _rows(store)})
     store.calls.clear()
     answer = getattr(node(store), tool)({'object_ids': ids})
-    assert (answer['success'], answer['matched_chunks'], answer['not_found']) == (True, 600, []), answer
-    assert len(_count_calls(store)) == 1, _count_calls(store)
+    assert (answer['success'], answer['matched_chunks'], answer['moved_chunks']) == (True, 600, 600), answer
+    assert answer['not_found'] == []
+    # One count of the documents (not_found) and one of the chunks (matched_chunks): never one per id.
+    assert len(_count_calls(store)) == 2, _count_calls(store)
 
 
 def test_a_trash_write_still_names_the_unknown_ids(context):
@@ -332,6 +337,7 @@ def test_a_trash_write_still_names_the_unknown_ids(context):
     ids = sorted({key[0] for key in _rows(store)}) + ['ghost-a', 'ghost-b']
     answer = node(store).soft_delete({'object_ids': ids})
     assert (answer['success'], answer['matched_chunks'], answer['not_found']) == (True, 150, ['ghost-a', 'ghost-b'])
+    assert answer['moved_chunks'] == 150
 
 
 def test_emptying_a_trash_of_wholly_trashed_documents_checks_them_once(context):
@@ -369,16 +375,20 @@ def test_get_and_chunks_tell_a_trashed_document_from_an_unknown_one():
     store = clustered(CountingStore, docs=2, chunks=2)
     store.markDeleted(['doc01'])
     inst = node(store)
-    for tool, args in (('get', {'object_id': 'doc01'}), ('chunks', {'object_id': 'doc01'})):
-        answer = getattr(inst, tool)(args)
-        assert answer == {
-            'success': False,
-            'code': 'IN_TRASH',
-            'error': f"{tool}: the document 'doc01' is in the trash; restore it to read it",
-            'object_id': 'doc01',
-        }
+    # get keeps #2704's wording (and its not-found failure), chunks the contract's.
+    for tool, message in (
+        ('get', "get: document 'doc01' is soft-deleted; restore it to read it"),
+        ('chunks', "chunks: the document 'doc01' is in the trash; restore it to read it"),
+    ):
+        answer = getattr(inst, tool)({'object_id': 'doc01'})
+        assert answer == {'success': False, 'code': 'IN_TRASH', 'error': message, 'object_id': 'doc01'}
     unknown = inst.get({'object_id': 'ghost'})
-    assert unknown['success'] is True and unknown['chunks'] == [] and unknown['total'] == 0
+    assert unknown == {
+        'success': False,
+        'code': 'NOT_FOUND',
+        'error': "get: no document with object_id 'ghost'",
+        'object_id': 'ghost',
+    }
     assert inst.chunks({'object_id': 'ghost'})['code'] == 'NOT_FOUND'
     trashed = inst.chunks({'object_id': 'doc01', 'deleted': 'deleted'})
     assert trashed['success'] is True and [item['chunkId'] for item in trashed['items']] == [0, 1]

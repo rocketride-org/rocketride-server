@@ -46,7 +46,9 @@ writes through tools is also on, because they change that table. While a
 switch is off the affected functions are left out of the tool list: an agent's
 call fails with "not found in tool catalog", an app's `client.tool` call fails
 with the engine's "No handler found for tool" error, and a direct call returns
-a failure object naming the switch.
+a failure object naming the switch. Both switches are node-wide: every caller
+who may invoke tools on the pipeline gets the same functions, and the node
+applies no per-user access control of its own.
 `examples/rocketride-vector-agent.pipe` in the repository is a chat agent
 wired to this node's tools.
 
@@ -59,7 +61,7 @@ wired to this node's tools.
 | `upsert` | Adds or replaces a non-empty `documents` array; each needs `content` and an `object_id`. Offered only while writes are allowed. |
 | `delete` | Removes every chunk of the documents in a non-empty `object_ids` array. Offered only while writes are allowed. |
 | `list_documents` | Lists the documents one by one with their path and chunk count, in pages ordered by path; pass `next_cursor` for the next page. `deleted: 'deleted'` (or `true`) lists the trash, and `parent` keeps one exact path. |
-| `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash: their chunks stay stored but leave search, `objdir`, `get` and the listing until `restore`. Returns `matched_chunks`. Offered only while writes are allowed. |
+| `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash: their chunks stay stored but leave search, `objdir`, `get` and the listing until `restore`. Returns `moved_chunks`, the chunks it moved, and `matched_chunks`, the chunk rows the table holds for those IDs. Offered only while writes are allowed. |
 | `restore` | Takes the documents of a non-empty `object_ids` array out of the trash. Offered only while writes are allowed. |
 
 The Vector Explorer reads the store through the same tool surface (`dialect`,
@@ -149,7 +151,8 @@ found for tool" error, and a direct call returns a failure object. The
 documents and questions lanes are unaffected. Turn it on only for a pipeline
 whose agent or app is meant to read this table through tools. These reads are
 not restricted to the matches above the questions lane's score threshold;
-`objdir` still lists only one object ID per distinct parent path.
+`list_documents` lists every document, `objdir` one object ID per distinct
+parent path.
 
 ### Allow writes through tools
 
@@ -223,7 +226,16 @@ Semantic search needs an embedding bound to the question and raises if none is
 available; filtered searches keep scanning the HNSW index until they have enough
 rows (pgvector 0.8 and later; with an older pgvector a filtered search can
 return fewer rows than its limit, reported as the caveat
-`filtered_search_may_underfill`). Missing tables produce empty search results rather than an error. Deleted
+`filtered_search_may_underfill`). A filtered search that HNSW still leaves
+short is recovered with an exact search on a table that has an approximate
+index: when no result meets the score threshold (and the 0.20 floor), the same
+search runs again exactly, in the same transaction, with the same filters and
+limit. On pgvector 0.8 and later a nonempty result stays approximate and does
+not trigger the retry merely because it falls short of the limit; before 0.8
+an underfilled result also retries. A table without an approximate index is
+never scanned twice, and a search with no limit runs the exact statement at
+once. Exact retries can be expensive on large tables, including queries that
+genuinely have no matches. Missing tables produce empty search results rather than an error. Deleted
 objects are excluded by default (a row with no deletion flag at all counts as
 not deleted), while document rendering reassembles stored chunks in chunkId
 order.
@@ -255,7 +267,7 @@ pooler. Errors never name the database server, user or database.
 | `rrvector.provider` | `string` |  | const: `"rocketride_vector"` |
 | `rrvector.scope` | `string` | **Database**<br/>Organization (default): shared by everyone in the organization. Team: the run's team (your current dev team, or the team a deploy is billed to). Personal: your own, for runs you start yourself. Each is a separate database: switching doesn't move data, and a new one starts empty. | `"org"` |
 | `rrvector.score` | `number` | **Score threshold**<br/>Minimum similarity score for a document to be returned by search. | `0.5` |
-| `rrvector.serverName` | `string` | **Tool Server Name**<br/>Label for this store in the messages its tool functions return (for example a refused write names rrvector.delete). Agents see the functions as <node id>.search, objdir, get, stats, and upsert / delete when writes through tools are allowed; apps call client.tool with the function name and the node id. | `"rrvector"` |
+| `rrvector.serverName` | `string` | **Tool Server Name**<br/>Label for this store in tool-response messages (for example, a refused write names rrvector.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings. | `"rrvector"` |
 | `rrvector.similarity` | `string` | **Similarity Metric**<br/>The similarity metric to use for vector search. Also selects the HNSW index operator class. | `"cosine"` |
 | `rrvector.target` | `string` | **Team or user**<br/>Another team's or user's database (admins only). Leave empty to use your own team's or your own | `""` |
 
@@ -265,5 +277,5 @@ pooler. Errors never name the database server, user or database.
 
 ## Source
 
-[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/rocketride_vector)
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/nihalnihalani/rocketride-server/tree/develop/nodes/src/nodes/rocketride_vector)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

@@ -727,7 +727,7 @@ class Store(DocumentStoreBase):
             metadata['content'] = chunk.page_content
 
             # Bogus document which is not compatible with pinecone because it can't accept all zeroes
-            if chunk.metadata.objectId == 'schema':
+            if chunk.metadata.objectId == CONTROL_OBJECT_ID:
                 embedding[-1] = 1
                 metadata['nodeId'] = ''
                 metadata['parent'] = ''

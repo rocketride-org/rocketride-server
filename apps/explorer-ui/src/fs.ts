@@ -21,26 +21,37 @@
 // SOFTWARE.
 
 // =============================================================================
-// EXPLORER FS — where the frame's store access actually goes
+// EXPLORER FS — the viewers' narrow store surface
 // =============================================================================
 //
-// The viewer surface reaches the server store through this ONE seam instead
-// of holding a RocketRide client. Two implementations:
-//
-//   LOCAL  (createLocalExplorerFs)  — wraps the shell client directly; used
-//          by the full app, whose realm legitimately owns a connection.
-//   REMOTE (createRemoteExplorerFs) — routes every call over controller(...)
-//          ops to the tool's sidebar controller (the file tree's realm,
-//          which keeps its own client). Used by dev-tool document frames:
-//          frames hold NO client. Presigned-URL fetches stay in the frame —
-//          they are plain HTTP, no engine connection involved.
+// The viewer surface reaches the server store through this ONE seam. A single
+// implementation wraps the realm's own RocketRideClient — in the full app
+// that is the root's client, in a dev-tool frame it is the realm client
+// (`useShellConnection().client`), whose requests ride the shell bus. The
+// old LOCAL/REMOTE split (controller-served `explorer.*` tool ops) existed
+// only because frames once had no client at all. Presigned-URL fetches stay
+// plain HTTP, no engine connection involved.
 // =============================================================================
 
-import { ConnectionManager } from 'shell';
-import type { ToolControllerFn } from 'shell';
-import type { ExplorerDirEntry, ExplorerOps, ExplorerStat } from './ops';
+import type { RocketRideClient } from 'rocketride';
 
-/** The store surface the explorer frame uses — never a client. */
+/** One directory entry of a listing. */
+export interface ExplorerDirEntry {
+	/** Entry name (no path). */
+	name: string;
+	/** Entry kind — matches the shell VFS contract. */
+	type: 'dir' | 'file';
+}
+
+/** File metadata. */
+export interface ExplorerStat {
+	/** 'file' or 'dir'. */
+	type?: string;
+	/** Size in bytes (files). */
+	size?: number;
+}
+
+/** The store surface the explorer viewers use. */
 export interface IExplorerFs {
 	/** Whether the store is reachable (gates mounting and hex fallback). */
 	ready: boolean;
@@ -66,64 +77,37 @@ export interface IExplorerFs {
 export type ExplorerViewerFs = Pick<IExplorerFs, 'getUrl' | 'stat'>;
 
 /**
- * The bus-backed store surface — the controller realm's implementation.
- * Every call is a brokered `client.*` op: in-process at the framework root
- * (cloud full app), bridged to the extension host in the VS Code sidebar
- * realm. No client object, no socket, no token in this realm.
+ * The store surface over the realm's client. Works identically in every
+ * realm: the SDK packs/validates locally, and only the transport differs.
  *
- * @param isConnected - The realm's connection flag (mirror-primed off-root).
- * @returns The fs (rebuild when the flag changes).
+ * @param client - The realm's connected client, or null while disconnected.
+ * @returns The fs (rebuild when the client/connection changes).
  */
-export function createLocalExplorerFs(isConnected: boolean): IExplorerFs {
-	const cm = ConnectionManager.getInstance();
-	const need = (): void => {
-		if (!isConnected) throw new Error('Not connected to a server.');
+export function createExplorerFs(client: RocketRideClient | null): IExplorerFs {
+	const need = (): RocketRideClient => {
+		if (!client) throw new Error('Not connected to a server.');
+		return client;
 	};
 	return {
-		ready: isConnected,
+		ready: client !== null,
 		list: async (dir) => {
-			need();
-			const result = await cm.request('client.fsListDir', { path: dir }) as { entries?: Array<{ name: string; type: string }> };
+			const result = await need().fsListDir(dir);
 			return (result.entries ?? []).map((e) => ({ name: e.name, type: e.type === 'dir' ? 'dir' as const : 'file' as const }));
 		},
-		readString: (path) => { need(); return cm.request('client.fsReadString', { path }) as Promise<string>; },
-		getUrl: (path) => { need(); return cm.request('client.fsGetUrl', { path }) as Promise<string>; },
-		writeString: async (path, content) => { need(); await cm.request('client.fsWriteString', { path, text: content }); },
-		rename: async (oldPath, newPath) => { need(); await cm.request('client.fsRename', { from: oldPath, to: newPath }); },
+		readString: (path) => need().fsReadString(path),
+		getUrl: (path) => need().fsGetUrl(path),
+		writeString: (path, content) => need().fsWriteString(path, content),
+		rename: (oldPath, newPath) => need().fsRename(oldPath, newPath),
 		stat: async (path) => {
-			need();
-			const stat = await cm.request('client.fsStat', { path }) as { type?: 'file' | 'dir'; size?: number };
+			const stat = await need().fsStat(path);
 			return { ...(stat.type !== undefined ? { type: stat.type } : {}), ...(stat.size !== undefined ? { size: stat.size } : {}) };
 		},
 		remove: async (path) => {
-			need();
-			const stat = await cm.request('client.fsStat', { path }) as { type?: string };
-			if (stat.type === 'dir') await cm.request('client.fsRmdir', { path, recursive: true });
-			else await cm.request('client.fsDelete', { path });
+			const c = need();
+			const stat = await c.fsStat(path);
+			if (stat.type === 'dir') await c.fsRmdir(path, true);
+			else await c.fsDelete(path);
 		},
-		mkdir: async (path) => { need(); await cm.request('client.fsMkdir', { path }); },
-	};
-}
-
-/**
- * The controller-backed store surface (dev-tool document frames): every
- * call crosses the tool channel and executes on the controller's single
- * engine connection.
- *
- * @param call - The frame's controller function (createToolController(peer)).
- * @param ready - The controller realm's server reachability (`host:connection`).
- * @returns The fs (rebuild when `ready` changes).
- */
-export function createRemoteExplorerFs(call: ToolControllerFn<ExplorerOps>, ready: boolean): IExplorerFs {
-	return {
-		ready,
-		list: (dir) => call('explorer.listDir', { dir }),
-		readString: (path) => call('explorer.readString', { path }),
-		getUrl: (path) => call('explorer.getUrl', { path }),
-		writeString: (path, content) => call('explorer.writeString', { path, content }),
-		rename: (oldPath, newPath) => call('explorer.rename', { oldPath, newPath }),
-		stat: (path) => call('explorer.stat', { path }),
-		remove: (path) => call('explorer.remove', { path }),
-		mkdir: (path) => call('explorer.mkdir', { path }),
+		mkdir: (path) => need().fsMkdir(path),
 	};
 }

@@ -72,7 +72,6 @@ const SPINE = [
 				items: [
 					{ id: 'guides/apps/app-builder', label: 'App Builder' },
 					{ id: 'guides/apps', label: 'Shell API' },
-					{ id: 'guides/apps/vector-explorer', label: 'Vector Explorer' },
 				],
 			},
 		],

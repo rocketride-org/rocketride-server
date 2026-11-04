@@ -16,9 +16,8 @@
  * in-place updates — there is no separate reload push). The server holds NO
  * dev state — registration lives in preview pages and dies with them.
  *
- * Lifecycle: started when an App Builder panel opens (setting-gated by
- * `rocketride.appdev.autoWatch`), stopped when the panel closes or the
- * extension deactivates.
+ * Lifecycle: started when an App Builder panel opens, stopped when the
+ * panel closes or the extension deactivates.
  */
 
 import * as vscode from 'vscode';
@@ -27,9 +26,10 @@ import { existsSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { spawn, ChildProcess } from 'child_process';
 import { ConnectionManager } from '../connection/connection';
-import { extractInstallCause, isTransientLockError, setWorkspaceInstallDelegate } from './appTypes';
+import { extractInstallCause, isTransientLockError } from 'rocketride/app-pack';
+import { setWorkspaceInstallDelegate } from './appTypes';
 import { getLogger } from '../shared/util/output';
-import { writeProxyConfig } from './proxyConfig';
+import { writeProxyConfig } from 'rocketride/app-dev';
 import type { IScannedWorkspaceApp as ScannedApp } from 'shared/tools/appdev';
 import type { AppScreenProvider, AppWatchStatus } from '../providers/AppScreenProvider';
 
@@ -333,7 +333,11 @@ export class DevSessionManager {
 			this.notify(app.id, { state: 'error', target: 'dev proxy', reason });
 			return;
 		}
-		const proc = spawn(process.execPath, [this.guardPath, String(process.pid), spawnArgs.shell ? '1' : '0', spawnArgs.cmd, ...spawnArgs.args, 'dev', '--config', proxyConfigPath], {
+		// shell:true (the pnpm fallback) joins arguments unquoted — quote any
+		// argument with whitespace so a spaced app path survives the shell.
+		const quoteForShell = (a: string): string => (spawnArgs.shell && /\s/.test(a) ? `"${a}"` : a);
+		const childArgs = [...spawnArgs.args, 'dev', '--config', proxyConfigPath].map(quoteForShell);
+		const proc = spawn(process.execPath, [this.guardPath, String(process.pid), spawnArgs.shell ? '1' : '0', spawnArgs.cmd, ...childArgs], {
 			cwd: app.folder,
 			env: { ...process.env, NO_COLOR: '1' },
 			// Never allocate a console window for the guard or its tree.
@@ -1051,16 +1055,12 @@ export function getDevSessionManager(): DevSessionManager | null {
 
 /**
  * Ensures the watch session for an app is running (used by the App Screen
- * open path and F5). Honors the `rocketride.appdev.autoWatch` setting when
- * `force` is false.
+ * open path and F5). Auto-watch is the ONLY behavior — the old
+ * `rocketride.appdev.autoWatch` opt-out was deleted (opening the builder
+ * without its watch session gave a stale preview and no build feedback).
  *
  * @param app - The app to watch.
- * @param force - True to start regardless of the autoWatch setting (F5).
  */
-export async function ensureDevSession(app: ScannedApp, force = false): Promise<void> {
-	const manager = instance;
-	if (!manager) return;
-	const autoWatch = vscode.workspace.getConfiguration('rocketride.appdev').get<boolean>('autoWatch', true);
-	if (!force && !autoWatch) return;
-	await manager.start(app);
+export async function ensureDevSession(app: ScannedApp): Promise<void> {
+	await instance?.start(app);
 }

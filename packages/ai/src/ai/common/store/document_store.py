@@ -1041,7 +1041,7 @@ class DocumentStoreBase(ABC):
 
             # Create a document filter to locate the control document
             filter = DocFilter()
-            filter.objectIds = ['schema']  # Looking for the reference schema document
+            filter.objectIds = [CONTROL_OBJECT_ID]  # Looking for the reference schema document
             filter.isDeleted = True  # Ensure it's the correct metadata document
 
             # Fetch the document using the filter
@@ -1127,7 +1127,7 @@ class DocumentStoreBase(ABC):
 
             # Create metadata for the "bogus" document
             metadata = DocMetadata(
-                objectId='schema',  # Unique identifier for schema validation
+                objectId=CONTROL_OBJECT_ID,  # Unique identifier for schema validation
                 chunkId=0,  # The chunk id
                 vectorSize=vectorSize,  # Store vector size for future validation
                 modelName=modelName,  # Store embedding model name
@@ -1242,7 +1242,7 @@ _normalize_vectordb_tool_input = normalize_tool_input
 
 class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
     """
-    Expose vector DB search/upsert/delete as agent tools.
+    Expose vector DB search/upsert/delete and the document listing as agent tools.
 
     Any vectordb ``IInstance`` that inherits from this mixin is automatically
     discoverable through the ``tool.*`` control-plane protocol. The mixin
@@ -1254,16 +1254,14 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
     ``"tool"`` in its ``classType`` list and ``"invoke"`` in its
     ``capabilities`` list.
 
-    Tool names follow the established ``<serverName>.<toolName>`` convention
-    documented in ``ai.common.tools`` and used by the MCP client: every tool
-    method on this mixin is exposed as ``<serverName>.search``,
-    ``<serverName>.upsert`` and ``<serverName>.delete`` where ``serverName``
-    comes from ``self.IGlobal.serverName`` (user-configurable via
-    ``services.json``). This prevents tool-name collisions when a pipeline
-    contains more than one vectordb node. An agent node in the same pipeline
-    addresses them by the store node's pipeline id instead
-    (``<node id>.search``, see ``ai.common.agent``); there ``serverName``
-    only labels the tools' messages.
+    An agent node in the same pipeline addresses the tools by the store
+    node's pipeline id (``<node id>.search``, ``<node id>.upsert`` and so on;
+    see ``ai.common.agent``), so two vectordb nodes in one pipeline never
+    collide, and an app calls them by the bare function name and the node id.
+    ``serverName`` (``self.IGlobal.serverName``, configurable in
+    ``services.json``) only labels the tools' messages, such as a refused
+    write naming ``<serverName>.delete``; changing it does not change the
+    addresses.
 
     Two optional ``IGlobal`` switches gate the surface (``StoreGlobalBase``
     resolves both from the node config). ``expose_tools`` decides whether the
@@ -1315,13 +1313,13 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         return store
 
     def _vectordb_server_name(self) -> str:
-        """Return the namespace prefix for this node's tools.
+        """Return the label this node's tool messages carry (not the tools' address).
 
         Reads ``self.IGlobal.serverName`` (set from the node config). Falls
         back to the provider name (``self.IGlobal.glb.logicalType``) and
         finally to ``'vectordb'`` if neither is available. The returned value
         is stripped of leading/trailing whitespace and ``'.'`` characters to
-        guarantee a clean ``<server>.<tool>`` format.
+        guarantee a clean ``<server>.<tool>`` in those messages.
         """
         glb = getattr(self, 'IGlobal', None)
         name = getattr(glb, 'serverName', None)
@@ -1335,7 +1333,7 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         return name or _VECTORDB_DEFAULT_SERVER_NAME
 
     def _vectordb_allow_write(self) -> bool:
-        """Whether the ``upsert`` and ``delete`` tools may change the store.
+        """Whether the write tools (``upsert``, ``delete``, ``soft_delete``, ``restore``) may change the store.
 
         Reads ``self.IGlobal.allow_write``. A node that does not define the
         attribute allows writes, which keeps every existing store node as it
@@ -1761,7 +1759,12 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
                                     },
                                     'chunkId': {
                                         'type': 'integer',
-                                        'description': 'Chunk index recorded on the document (default: 0).',
+                                        'minimum': 0,
+                                        'description': (
+                                            'Chunk index recorded on the document. Without it, the chunks sent for one '
+                                            'object ID are numbered 0, 1, 2 ... in the order given; an explicit index '
+                                            'may not repeat within one call.'
+                                        ),
                                     },
                                 },
                                 'additionalProperties': False,
@@ -1794,6 +1797,7 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
             'object ID for deduplication. Embeddings are computed automatically when an embedding provider '
             'is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed '
             '"embedding" (float array) and "embedding_model" (string) per document to skip auto-computation. '
+            "Several documents with one object ID are stored as that document's chunks. "
             'Returns {"success": false, "error": "..."} when embeddings cannot be obtained.'
         ),
     )
@@ -1818,7 +1822,16 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
 
         embed_model_name = getattr(getattr(self, 'IGlobal', None), 'embed_model_name', None)
 
-        docs: List[Doc] = []
+        from ai.common.utils import optional_int
+
+        # First pass: validate, and settle each document's chunk number. An
+        # explicit chunkId is kept and may not repeat within the call for one
+        # object ID; a document without one takes the lowest number that object
+        # ID has not used, so several chunks sent for one object without numbers
+        # are stored as chunks 0, 1, 2 ... in the order given, not all as chunk 0
+        # (which the drivers accept and get then returns in no defined order).
+        entries: List[Tuple[dict, str, str, dict, Optional[int]]] = []
+        explicit: Dict[str, set] = {}
         skipped = 0
         for raw in raw_docs:
             if not isinstance(raw, dict):
@@ -1829,13 +1842,41 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
             if not content or not object_id:
                 skipped += 1
                 continue
+            if object_id == CONTROL_OBJECT_ID:
+                return {
+                    'success': False,
+                    'error': f"upsert: object_id '{object_id}' is reserved for the store's control row",
+                }
 
             extra_meta = raw.get('metadata') or {}
+            if not isinstance(extra_meta, dict):
+                return {'success': False, 'error': f"upsert: metadata must be an object (document '{object_id}')"}
+            try:
+                chunk_id = optional_int(extra_meta, 'chunkId', default=None, lo=0, tool_name='upsert')
+            except ValueError as exc:
+                return {'success': False, 'error': f"{exc} (document '{object_id}')"}
+            if chunk_id is not None:
+                if chunk_id in explicit.setdefault(object_id, set()):
+                    return {
+                        'success': False,
+                        'error': f"upsert: document '{object_id}' lists chunkId {chunk_id} more than once",
+                    }
+                explicit[object_id].add(chunk_id)
+            entries.append((raw, content, object_id, extra_meta, chunk_id))
+
+        next_free: Dict[str, int] = {}
+        docs: List[Doc] = []
+        for raw, content, object_id, extra_meta, chunk_id in entries:
+            if chunk_id is None:
+                chunk_id = next_free.get(object_id, 0)
+                while chunk_id in explicit.get(object_id, ()):
+                    chunk_id += 1
+                next_free[object_id] = chunk_id + 1
             metadata = DocMetadata(
                 objectId=object_id,
                 nodeId=extra_meta.get('nodeId', 'vectordb_tool'),
                 parent=extra_meta.get('parent', '/'),
-                chunkId=extra_meta.get('chunkId', 0),
+                chunkId=chunk_id,
                 isDeleted=False,
             )
             doc = Doc(
@@ -1919,7 +1960,15 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
             'type': 'object',
             'properties': {
                 'success': {'type': 'boolean'},
-                'deleted_count': {'type': 'integer'},
+                'deleted_count': {
+                    'type': 'integer',
+                    'description': 'The distinct object IDs the request named, not the documents found.',
+                },
+                'object_ids': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': 'The distinct object IDs the request named, in the order given.',
+                },
             },
         },
         description='Delete documents from the vector database by their object IDs.',
@@ -1971,7 +2020,8 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         self._vx_log_write('vector.delete', unique_ids, rows, decision.origin)
         return {
             'success': True,
-            'deleted_count': len(clean_ids),
+            'deleted_count': len(unique_ids),
+            'object_ids': unique_ids,
             'removed_chunks': rows,
             'not_found': not_found,
             'kept_live': kept_live,
@@ -2023,6 +2073,13 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
                 'matched_chunks': {
                     'type': ['integer', 'null'],
                     'description': (
+                        'Chunk rows the store holds for those IDs in either state (0 when none of them exists), '
+                        'or null when the store does not report a count.'
+                    ),
+                },
+                'moved_chunks': {
+                    'type': ['integer', 'null'],
+                    'description': (
                         'Chunks the call moved to the trash (0 for documents already there), or null when the '
                         'store does not count.'
                     ),
@@ -2069,6 +2126,13 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
                 'matched_chunks': {
                     'type': ['integer', 'null'],
                     'description': (
+                        'Chunk rows the store holds for those IDs in either state (0 when none of them exists), '
+                        'or null when the store does not report a count.'
+                    ),
+                },
+                'moved_chunks': {
+                    'type': ['integer', 'null'],
+                    'description': (
                         'Chunks the call took out of the trash (0 for documents not in it), or null when the '
                         'store does not count.'
                     ),
@@ -2097,7 +2161,10 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
             'properties': {
                 'parent': {
                     'type': 'string',
-                    'description': 'Optional parent path filter. Only return paths under this parent.',
+                    'description': (
+                        'Optional parent path; lists documents stored under exactly this parent '
+                        '(Atlas matches it as a case-insensitive pattern).'
+                    ),
                 },
                 'offset': {
                     'type': 'integer',
@@ -2130,9 +2197,10 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         ``paths`` maps each path to an objectId as before; the control record is never
         listed. ``parent``, when given, is an exact path (as develop's drivers read it),
         never a prefix. ``offset`` must be 0 or more and ``limit`` 1 or more (at most
-        1000 are returned). On a driver with a native document
-        listing (``listDocumentPage``), ``entries`` lists every document (path and objectId,
-        equal paths not collapsed) and deleted documents are left out. On any other
+        1000 are returned); a page counts distinct PATHS (#2668), each mapped to its lowest
+        objectId. On a driver with a native document listing (``listDocumentPage``),
+        ``entries`` lists every document under the page's paths (path and objectId, equal
+        paths not collapsed) and deleted documents are left out. On any other
         driver the answer is the driver's own ``getPaths`` page, as before: the default
         listing pages by offset, which several backends ignore or read as a point id.
 
@@ -2192,15 +2260,17 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         store may hold more (a key of ``_OBJDIR_STOPPED``), or None when the page is full
         or the listing ended.
         """
-        entries: List[Dict[str, str]] = []
+        # #2668: a page counts distinct PATHS, as it did on develop; each path appears once in ``paths`` (its
+        # lowest object ID) and ``entries`` still lists every document under the paths of the page.
+        groups: Dict[str, List[str]] = {}
         seen: set = set()
-        skipped = 0
         scanned = 0
         stopped: Optional[str] = None
+        wanted = offset + limit
         page_size = VECTOR_TOOL_LIMITS['documents_page']
         guard = ListingGuard(_OBJDIR_SCAN_MAX, page_size, VECTOR_TOOL_LIMITS['sample_budget_ms'] / 1000.0)
         cursor: Optional[str] = None
-        while len(entries) < limit:
+        while True:
             page = store.listDocumentPage(
                 cursor=cursor,
                 limit=page_size,
@@ -2214,21 +2284,21 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
                     continue
                 seen.add(row.objectId)
                 new_documents += 1
-                if row.deleted:
+                if row.deleted or (parent is not None and row.path != parent):
                     continue
-                if parent is not None and row.path != parent:
-                    continue
-                if skipped < offset:
-                    skipped += 1
-                    continue
-                if len(entries) < limit:
-                    entries.append({'path': row.path, 'objectId': row.objectId})
+                groups.setdefault(row.path, []).append(row.objectId)
             scanned += len(page.items)
+            # Rows arrive ordered by path on a sorted listing: once one path past the page has started, the
+            # page's own paths (and every document under them) are complete. Otherwise read it all.
+            if page.sorted and len(groups) > wanted:
+                break
             if guard.stop(page, new_documents) or scanned >= _OBJDIR_SCAN_MAX:
-                if guard.reason != 'complete' and len(entries) < limit:
+                if guard.reason != 'complete' and len(groups) < wanted:
                     stopped = guard.reason if guard.reason in ('budget', 'stale') else 'cap'
                 break
             cursor = page.next_cursor
+        chosen = sorted(groups)[offset:wanted]
+        entries = [{'path': path, 'objectId': oid} for path in chosen for oid in sorted(groups[path])]
         return entries, stopped
 
     @tool_function(
@@ -2280,7 +2350,7 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
             'Retrieve document chunks by objectId from the vector database, in pages of up to 100 '
             "ordered by chunk ID; `total` is the document's chunk count and `has_more` says whether "
             'another page follows. A document is read up to 10000 chunks; `truncated` is true when that '
-            'ceiling was hit.'
+            'ceiling was hit. An unknown object ID, or one in the trash, returns {"success": false, "error": "..."}.'
         ),
     )
     @vectordb_tool
@@ -2299,6 +2369,12 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         object_id = str(args.get('object_id') or '').strip()
         if not object_id:
             raise ToolRefusal('INVALID_INPUT', 'object_id is required')
+        if object_id == CONTROL_OBJECT_ID:
+            raise ToolRefusal(
+                'RESERVED_ID',
+                f"get: object_id '{object_id}' is reserved for the store's control row",
+                {'object_id': object_id},
+            )
 
         from ai.common.utils import optional_int
 
@@ -2318,9 +2394,21 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
             isDeleted=False,
         )
         docs = store.get(doc_filter)
-        if not docs and self._vx_in_trash(store, object_id):
-            # No live chunk: every chunk of it is in the trash (an unknown id stays an empty page).
-            raise self._vx_in_trash_refusal('get', object_id)
+        if not docs:
+            # Not a page past the end: nothing is readable under this id. A document in the trash
+            # (no live chunk, so every chunk is there) is told apart from an unknown one, since
+            # restore makes the first readable again.
+            if self._vx_in_trash(store, object_id):
+                if self._vectordb_allow_write():
+                    message = f"get: document '{object_id}' is soft-deleted; restore it to read it"
+                else:
+                    # restore is a write tool: do not point to a tool this node does not offer.
+                    message = (
+                        f"get: document '{object_id}' is soft-deleted; this node does not offer restore "
+                        'while writes through tools are off'
+                    )
+                raise ToolRefusal('IN_TRASH', message, {'object_id': object_id})
+            raise ToolRefusal('NOT_FOUND', f"get: no document with object_id '{object_id}'", {'object_id': object_id})
 
         chunks = [
             {
@@ -2371,13 +2459,23 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         output_schema={
             'type': 'object',
             'properties': {
-                'count': {'type': 'integer', 'description': 'Total number of documents.'},
+                'count': {
+                    'type': 'integer',
+                    'description': 'Rows (chunks) in the collection, as the store counts them.',
+                },
+                'document_count': {
+                    'type': ['integer', 'null'],
+                    'description': 'Active documents, or null where the store cannot count them.',
+                },
                 'model': {'type': 'string', 'description': 'Embedding model name.'},
                 'vector_size': {'type': 'integer', 'description': 'Embedding vector dimension.'},
                 'success': {'type': 'boolean'},
             },
         },
-        description='Return statistics about this vector store collection.',
+        description=(
+            'Return statistics about this vector store collection: the row count, the number of active '
+            'documents where the store can tell, the embedding model and the vector size.'
+        ),
     )
     @vectordb_tool
     def stats(self, args):
@@ -2396,4 +2494,7 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         mode = args.get('mode', 'full') or 'full'
         if mode not in ('full', 'quick'):
             raise ToolRefusal('INVALID_INPUT', "mode must be 'full' or 'quick'.")
-        return self._vx_stats(store, mode)
+        answer = self._vx_stats(store, mode)
+        # #2704's name for the active documents figure, kept so its callers read the same answer.
+        answer['document_count'] = answer.get('documents')
+        return answer

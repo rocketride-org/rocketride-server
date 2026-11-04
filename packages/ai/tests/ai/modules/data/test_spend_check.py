@@ -14,6 +14,7 @@ into OutOfCreditsError.
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
 from unittest.mock import AsyncMock, MagicMock
 
@@ -93,11 +94,14 @@ def test_with_no_eaas_connected_the_gate_waits_then_refuses(monkeypatch):
         data_server.require_credit()
 
 
-@pytest.mark.parametrize('hosted', [True, False])
-def test_only_a_hosted_task_makes_require_credit_the_pipe_gate(monkeypatch, hosted):
+@pytest.mark.parametrize(
+    ('flags', 'hosted'),
+    [(['--hosted'], True), ([], False), (['--shared-host'], False)],
+)
+def test_only_a_hosted_task_makes_require_credit_the_pipe_gate(monkeypatch, flags, hosted):
     set_gate = MagicMock()
     monkeypatch.setattr(data_server.engLib, 'setPipeGate', set_gate)
-    monkeypatch.setattr(data_server.sys, 'argv', ['node.py', '--hosted'] if hosted else ['node.py'])
+    monkeypatch.setattr(sys, 'argv', ['node.py', *flags])
 
     data_server.DataServer(server=MagicMock())
 

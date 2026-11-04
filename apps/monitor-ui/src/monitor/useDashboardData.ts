@@ -32,7 +32,6 @@
 import { useEffect, useCallback, useSyncExternalStore } from 'react';
 import { useShellConnection } from 'shell';
 import { ConnectionManager } from 'shell';
-import { getClient } from 'shell';
 import { parseActivityEvent } from './index';
 import type { DashboardResponse, ActivityEvent } from './index';
 
@@ -107,13 +106,14 @@ let _fetchPromise: Promise<void> | null = null;
  */
 function _fetchDashboard(): Promise<void> {
 	if (_fetchPromise) return _fetchPromise;
-	// Over the shell bus: in-process at the framework root, bridged in spoke
-	// realms (liveness answers from mirror-primed state there).
+	// The realm's own client — real at the root, the realm client (requests
+	// ride the shell bus) everywhere else.
 	const cm = ConnectionManager.getInstance();
-	if (!cm.isConnected()) return Promise.resolve();
+	const client = cm.isConnected() ? cm.getClient() : null;
+	if (!client) return Promise.resolve();
 	_fetchPromise = (async () => {
 		try {
-			const dashboard = await cm.request('client.getDashboard', {}) as Awaited<ReturnType<NonNullable<ReturnType<typeof getClient>>['getDashboard']>>;
+			const dashboard = await client.getDashboard();
 			if (dashboard?.overview) {
 				_data = dashboard;
 				_error = null;

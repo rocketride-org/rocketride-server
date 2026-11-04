@@ -175,8 +175,8 @@ test('the announcement after a write names the document and the rows it moved or
 	const kestrel = [{ objectId: 'k', path: 'C:/demo/field/kestrel_field_guide.md' }];
 	const one = { removed: [{ objectId: 'k', chunks: 12 }], notFound: [], keptLive: [], removedChunks: 12, batchesRun: 1, batchesTotal: 1, error: null };
 	assert.equal(removalSummary(one, kestrel, 'delete'), 'Deleted C:/demo/field/kestrel_field_guide.md permanently (12 chunks)');
-	assert.equal(removalSummary(one, kestrel, 'trash'), 'Moved C:/demo/field/kestrel_field_guide.md to the trash (12 chunks)');
-	assert.equal(removalSummary(one, kestrel, 'restore'), 'Restored C:/demo/field/kestrel_field_guide.md (12 chunks)');
+	assert.equal(removalSummary(one, kestrel, 'trash'), 'Moved C:/demo/field/kestrel_field_guide.md to the trash (12 chunks moved)');
+	assert.equal(removalSummary(one, kestrel, 'restore'), 'Restored C:/demo/field/kestrel_field_guide.md (12 chunks moved)');
 	const gone = { removed: [], notFound: ['k'], keptLive: [], removedChunks: 0, batchesRun: 1, batchesTotal: 1, error: null };
 	assert.equal(removalSummary(gone, [{ objectId: 'k', path: 'x.md' }], 'delete'), 'x.md was already gone; nothing was deleted');
 	assert.equal(removalSummary(gone, [{ objectId: 'k', path: 'x.md' }], 'trash'), 'x.md was already gone; nothing was moved to the trash');
@@ -193,7 +193,12 @@ test('the announcement after a write names the document and the rows it moved or
 		error: null,
 	};
 	assert.equal(removalSummary(many, [], 'delete'), 'Deleted 2 documents permanently (3 chunks). 1 was already gone.');
-	assert.equal(removalSummary(many, [], 'restore'), 'Restored 2 documents (3 chunks). 1 was already gone.');
+	assert.equal(removalSummary(many, [], 'restore'), 'Restored 2 documents (3 chunks moved). 1 was already gone.');
+	// A batch whose documents were already restored moved nothing: the sentence says so, and never claims a restore.
+	const already = { removed: [{ objectId: 'a', chunks: null }, { objectId: 'b', chunks: null }], notFound: ['c'], keptLive: [], removedChunks: 0, batchesRun: 1, batchesTotal: 1, error: null };
+	assert.equal(removalSummary(already, [], 'restore'), 'Nothing moved: 2 documents were already restored. 1 was already gone.');
+	assert.equal(removalSummary({ ...already, removed: [{ objectId: 'a', chunks: null }], notFound: [] }, [{ objectId: 'a', path: 'a.md' }], 'restore'), 'Nothing moved: a.md was already restored.');
+	assert.equal(removalSummary({ ...already, notFound: [] }, [], 'trash'), 'Nothing moved: 2 documents were already in the trash.');
 	const emptied = { ...many, notFound: [], keptLive: ['p', 'q'] };
 	assert.equal(removalSummary(emptied, [], 'empty'), 'Emptied the trash: deleted 2 documents permanently (3 chunks). 2 were kept whole, because they still have chunks outside the trash: p, q.', 'named by objectId where no path is known');
 	assert.equal(removalSummary(emptied, [{ objectId: 'p', path: 'docs/p.md' }], 'empty'), 'Emptied the trash: deleted 2 documents permanently (3 chunks). 2 were kept whole, because they still have chunks outside the trash: docs/p.md, q.', 'by path where it is');
@@ -227,7 +232,7 @@ function consoleWith(rows: IDocumentItem[], writeBatch: number) {
 		chunks: async () => readChunksPage(fixture('chunks_page')),
 		trash: async (ids) => {
 			sent.push([...ids]);
-			return readTrashResult({ ...fixture('soft_delete_ok'), object_ids: ids, matched_chunks: 3 * ids.length });
+			return readTrashResult({ ...fixture('soft_delete_ok'), object_ids: ids, matched_chunks: 3 * ids.length, moved_chunks: 3 * ids.length });
 		},
 		restore: async () => assert.fail('the queue never restores'),
 		remove: async (ids) => {

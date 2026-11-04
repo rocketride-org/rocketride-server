@@ -20,10 +20,10 @@
 // =============================================================================
 
 import { ConnectionManager, createToolChannel, createSidebarBusPeer, createFrameBusPeer } from 'shell';
-import type { DevToolProps, ToolChannel } from 'shell';
+import type { IToolPeer, ToolChannel } from 'shell';
 
-/** The peer shape handed to both mounts. */
-type Peer = DevToolProps['peer'];
+/** The transport pipe under each mount's channel (host-internal). */
+type Peer = IToolPeer;
 
 /** Cached per-tool objects — stable identities across remounts. */
 interface Slots {
@@ -53,7 +53,16 @@ function slot(appId: string): Slots {
  */
 export function getFramePeer(appId: string): Peer {
 	const s = slot(appId);
-	if (!s.framePeer) s.framePeer = createFrameBusPeer(appId, ConnectionManager.getInstance());
+	if (!s.framePeer) {
+		// A frame existing is proof the tool needs its SIDEBAR peer armed: the
+		// armed peer's standing subscription is what holds frame payloads and
+		// raises the controller summon. Without it, a post from this frame is
+		// a signal with no subscriber — dropped into the void (the pin list
+		// arms the pinned set, but a frame can outlive or precede a pin).
+		// Arming is a handful of subscriptions; mounting stays lazy.
+		getSidebarPeer(appId);
+		s.framePeer = createFrameBusPeer(appId, ConnectionManager.getInstance());
+	}
 	return s.framePeer;
 }
 

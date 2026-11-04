@@ -31,14 +31,13 @@
 // sidebar panel, the two joined by the profilerBridge channel.
 // =============================================================================
 
-import React, { useEffect, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import type { DevToolProps, ShellAppProps } from 'shell';
-import { ConnectionManager, AppLayout, createToolChannel, createToolController, useConnectionReady, useShellConnection } from 'shell';
+import { AppLayout, useShellConnection } from 'shell';
 import ProfilerView from './views/ProfilerView';
 import ProfilerSidebar from './ProfilerSidebar';
 import { localFrameChannel, createPeerFrameChannel } from './profilerBridge';
-import { callProfilerOp } from './ops';
-import type { ProfilerEngine, ProfilerOps } from './ops';
+import { createProfilerEngine } from './engine';
 
 // =============================================================================
 // MAIN COMPONENT
@@ -49,19 +48,9 @@ import type { ProfilerEngine, ProfilerOps } from './ops';
  * panel in the sidebar. Both ends share the in-document channel.
  */
 const ProfilerApp: React.FC<ShellAppProps> = (_props) => {
-	const { isConnected } = useShellConnection();
-	// The LOCAL engine over the SHELL BUS — named client.* ops, no client
-	// object in this realm.
-	const engine = useMemo<ProfilerEngine>(() => {
-		const cm = ConnectionManager.getInstance();
-		return {
-			ready: isConnected,
-			call: <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
-				if (!cm.isConnected()) return Promise.reject(new Error('Not connected to a server.'));
-				return callProfilerOp<T>((op, params) => cm.request(op, params), command, args);
-			},
-		};
-	}, [isConnected]);
+	// The realm's own client — raw rrext_* commands go through client.call().
+	const { client, isConnected } = useShellConnection();
+	const engine = useMemo(() => createProfilerEngine(isConnected ? client : null), [client, isConnected]);
 	return (
 		<AppLayout sidebar={<ProfilerSidebar />} showStatus>
 			<ProfilerView channel={localFrameChannel} engine={engine} />
@@ -79,20 +68,13 @@ const ProfilerApp: React.FC<ShellAppProps> = (_props) => {
  * panel). Controls live in the tool's sidebar mount; the two coordinate over
  * the host-relayed peer channel.
  */
-export const ProfilerDevTool: React.FC<DevToolProps> = ({ peer, channel }) => {
-	const frameChannel = useMemo(() => createPeerFrameChannel(peer), [peer]);
+export const ProfilerDevTool: React.FC<DevToolProps> = ({ channel }) => {
+	const frameChannel = useMemo(() => createPeerFrameChannel(channel), [channel]);
 
-	// FRAMES HOLD NO ROCKETRIDE CLIENT: commands ride the controller op, and
-	// enablement is the host-published `host:connection` system topic.
-	const toolChannel = useMemo(() => channel ?? createToolChannel(peer), [channel, peer]);
-	const call = useMemo(() => createToolController<ProfilerOps>(peer), [peer]);
-	// Tri-state collapsed at the gate: "no snapshot yet" disables like false.
-	const ready = useConnectionReady(toolChannel) === true;
-	const engine = useMemo<ProfilerEngine>(() => ({
-		ready,
-		call: <T,>(command: string, args?: Record<string, unknown>): Promise<T> =>
-			call('profiler.call', { command, ...(args ? { args } : {}) }) as Promise<T>,
-	}), [call, ready]);
+	// This frame holds its OWN realm client — commands ride the shell bus to
+	// the host's socket; enablement is the realm's mirrored connection state.
+	const { client, isConnected } = useShellConnection();
+	const engine = useMemo(() => createProfilerEngine(isConnected ? client : null), [client, isConnected]);
 
 	return <ProfilerView channel={frameChannel} engine={engine} />;
 };

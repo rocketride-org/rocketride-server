@@ -1,7 +1,8 @@
 """
 Unit tests for the write switch on ai.common.store.document_store.VectorStoreToolMixin.
 
-Coverage for issue #2587: every tool honours ``IGlobal.expose_tools``, the upsert and delete tools also ``IGlobal.allow_write``.
+Coverage for issue #2587: every tool honours ``IGlobal.expose_tools``, the write
+tools (upsert, delete, soft_delete, restore) also ``IGlobal.allow_write``.
 A node that never sets it keeps writing (every existing store node); a node that
 sets it off (rocketride_vector, whose table lives in the team's managed database)
 gets a readable refusal instead of a write, and the read tools are not affected
@@ -40,7 +41,10 @@ class _Discoverable:
     """Stand-in for the engine base whose _collect_tool_methods lists every tool."""
 
     def _collect_tool_methods(self):
-        return {name: getattr(self, name) for name in ('search', 'upsert', 'delete', 'objdir', 'get', 'stats')}
+        return {
+            name: getattr(self, name)
+            for name in ('search', 'upsert', 'delete', 'soft_delete', 'restore', 'objdir', 'get', 'stats')
+        }
 
 
 class _Tools(VectorStoreToolMixin, _Discoverable):
@@ -61,7 +65,8 @@ _DOCS = [{'content': 'hello', 'object_id': 'obj-1', 'embedding': [0.1, 0.2], 'em
 def _store():
     store = MagicMock()
     store.getPaths.return_value = {'/docs': ['obj-1']}
-    store.get.return_value = []
+    # One chunk, so get finds the document; an empty read is a not-found failure (as on develop).
+    store.get.return_value = [SimpleNamespace(page_content='hello', metadata={'chunkId': 0, 'objectId': 'obj-1'})]
     store.count_documents.return_value = 3
     store.modelName = 'test-model'
     store.vectorSize = 2
@@ -122,15 +127,16 @@ def test_a_string_switch_is_parsed_like_a_config_value(value, allowed):
         assert tools.delete({'object_ids': ['obj-1']})['success'] is allowed
 
 
-@pytest.mark.parametrize('allow_write, advertised', [(None, 6), (True, 6), (False, 4)])
+@pytest.mark.parametrize('allow_write, advertised', [(None, 8), (True, 8), (False, 4)])
 def test_write_tools_are_left_out_of_discovery_while_writes_are_off(allow_write, advertised):
+    # list_documents is never among them here: the MagicMock store does not list documents.
     tools = _Tools(_store(), allow_write=allow_write)
 
     names = set(tools._collect_tool_methods())
 
     assert len(names) == advertised
     assert {'search', 'objdir', 'get', 'stats'} <= names
-    assert ({'upsert', 'delete'} <= names) is (allow_write is not False)
+    assert ({'upsert', 'delete', 'soft_delete', 'restore'} <= names) is (allow_write is not False)
 
 
 def test_the_refusal_comes_before_input_validation():
@@ -269,18 +275,16 @@ def test_get_pages_the_whole_document_regardless_of_the_driver():
     assert [c['content'] for c in pages[2]['chunks']] == [f'chunk {i}' for i in range(200, 205)]
 
 
-def test_get_on_an_empty_document_has_no_pages():
+def test_get_on_an_unknown_document_is_a_failure_not_an_empty_page():
+    """An object ID the store never returns a chunk for is reported, whatever the offset (#2587)."""
     store = _store()
+    store.get.return_value = []
     tools = _Tools(store, allow_write=False, expose_tools=True)
 
-    assert tools.get({'object_id': 'obj-1', 'offset': 7}) == {
-        'success': True,
-        'chunks': [],
-        'total': 0,
-        'offset': 7,
-        'has_more': False,
-        'truncated': False,
-    }
+    result = tools.get({'object_id': 'obj-1', 'offset': 7})
+
+    assert result['success'] is False and result['object_id'] == 'obj-1'
+    assert 'no document' in result['error']
 
 
 def test_get_pages_are_stable_when_chunk_ids_repeat_and_the_store_reorders():
@@ -378,6 +382,9 @@ _EVERY_TOOL = [
     ('search', {'query': 'hello'}),
     ('upsert', {'documents': _DOCS}),
     ('delete', {'object_ids': ['obj-1']}),
+    ('soft_delete', {'object_ids': ['obj-1']}),
+    ('restore', {'object_ids': ['obj-1']}),
+    ('list_documents', {}),
     ('objdir', {}),
     ('get', {'object_id': 'obj-1'}),
     ('stats', {}),
@@ -387,7 +394,16 @@ _EVERY_TOOL = [
 def test_tools_stay_exposed_when_the_node_sets_nothing():
     """A store node that never defines expose_tools keeps every tool, as before."""
     tools = _Tools(_store())
-    assert set(tools._collect_tool_methods()) == {'search', 'upsert', 'delete', 'objdir', 'get', 'stats'}
+    assert set(tools._collect_tool_methods()) == {
+        'search',
+        'upsert',
+        'delete',
+        'soft_delete',
+        'restore',
+        'objdir',
+        'get',
+        'stats',
+    }
 
 
 def test_no_tool_is_advertised_while_tools_are_off():
@@ -407,7 +423,18 @@ def test_every_tool_refuses_when_the_node_does_not_expose_tools(tool, args):
     assert result['success'] is False
     assert 'expose_tools=true' in result['error']
     assert f'rrvector.{tool}' in result['error']
-    for method in ('addChunks', 'remove', 'getPaths', 'get', 'count_documents', 'searchSemantic', 'searchKeyword'):
+    for method in (
+        'addChunks',
+        'remove',
+        'markDeleted',
+        'markActive',
+        'listDocuments',
+        'getPaths',
+        'get',
+        'count_documents',
+        'searchSemantic',
+        'searchKeyword',
+    ):
         getattr(store, method).assert_not_called()
 
 

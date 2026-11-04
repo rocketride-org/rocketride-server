@@ -273,8 +273,8 @@ export const EnvScopeCard: React.FC<{
  */
 export const EnvironmentPanel: React.FC<EnvironmentPanelProps> = ({ isOrgAdmin, isTeamAdmin, orgEnv, teamEnv, userEnv, onSaveOrgEnv, onSaveTeamEnv, onSaveUserEnv }) => (
 	<section>
-		{/* Organization scope — only visible to org admins */}
-		{isOrgAdmin && <EnvScopeCard label="Organization" env={orgEnv} onSave={onSaveOrgEnv} />}
+		{/* Workspace scope — only visible to workspace admins */}
+		{isOrgAdmin && <EnvScopeCard label="Workspace" env={orgEnv} onSave={onSaveOrgEnv} />}
 
 		{/* Team scope — only visible to team admins */}
 		{isTeamAdmin && <EnvScopeCard label="Team" env={teamEnv} onSave={onSaveTeamEnv} />}

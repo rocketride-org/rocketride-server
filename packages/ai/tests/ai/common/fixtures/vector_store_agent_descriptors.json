@@ -20,7 +20,15 @@
   "outputSchema": {
    "properties": {
     "deleted_count": {
+     "description": "The distinct object IDs the request named, not the documents found.",
      "type": "integer"
+    },
+    "object_ids": {
+     "description": "The distinct object IDs the request named, in the order given.",
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
     },
     "success": {
      "type": "boolean"
@@ -30,7 +38,7 @@
   }
  },
  {
-  "description": "Demo corpus Retrieve document chunks by objectId from the vector database, in pages of up to 100 ordered by chunk ID; `total` is the document's chunk count and `has_more` says whether another page follows. A document is read up to 10000 chunks; `truncated` is true when that ceiling was hit.",
+  "description": "Demo corpus Retrieve document chunks by objectId from the vector database, in pages of up to 100 ordered by chunk ID; `total` is the document's chunk count and `has_more` says whether another page follows. A document is read up to 10000 chunks; `truncated` is true when that ceiling was hit. An unknown object ID, or one in the trash, returns {\"success\": false, \"error\": \"...\"}.",
   "inputSchema": {
    "properties": {
     "limit": {
@@ -189,7 +197,7 @@
      ]
     },
     "limit": {
-     "description": "Documents per page (default 200, at most 500).",
+     "description": "Documents per page (default 100, at most 1,000; below 1 is refused).",
      "type": "integer"
     },
     "object_ids": {
@@ -235,6 +243,30 @@
     "distinct": {
      "type": "boolean"
     },
+    "documents": {
+     "description": "The same rows in #2704's shape (object_id, parent, chunk_count), an alias of items kept for its callers.",
+     "items": {
+      "properties": {
+       "chunk_count": {
+        "type": [
+         "integer",
+         "null"
+        ]
+       },
+       "object_id": {
+        "type": "string"
+       },
+       "parent": {
+        "type": [
+         "string",
+         "null"
+        ]
+       }
+      },
+      "type": "object"
+     },
+     "type": "array"
+    },
     "error": {
      "type": "string"
     },
@@ -252,6 +284,10 @@
      },
      "type": "array"
     },
+    "has_more": {
+     "description": "Whether a page follows (next_cursor is not null).",
+     "type": "boolean"
+    },
     "items": {
      "description": "One row per document: objectId, path, chunks, has_first_chunk, tables, deleted, nodeId, size, modifyTime, ingestedAt, pointId, max_chunk_id, deleted_chunks.",
      "items": {
@@ -265,6 +301,10 @@
       "string",
       "null"
      ]
+    },
+    "offset": {
+     "description": "Always 0: the listing pages with cursor.",
+     "type": "integer"
     },
     "sorted": {
      "type": "boolean"
@@ -298,7 +338,7 @@
      "type": "integer"
     },
     "parent": {
-     "description": "Optional parent path filter. Only return paths under this parent.",
+     "description": "Optional parent path; lists documents stored under exactly this parent (Atlas matches it as a case-insensitive pattern).",
      "type": "string"
     }
    },
@@ -342,6 +382,13 @@
      "type": "object"
     },
     "matched_chunks": {
+     "description": "Chunk rows the store holds for those IDs in either state (0 when none of them exists), or null when the store does not report a count.",
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "moved_chunks": {
      "description": "Chunks the call took out of the trash (0 for documents not in it), or null when the store does not count.",
      "type": [
       "integer",
@@ -474,6 +521,13 @@
      "type": "object"
     },
     "matched_chunks": {
+     "description": "Chunk rows the store holds for those IDs in either state (0 when none of them exists), or null when the store does not report a count.",
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "moved_chunks": {
      "description": "Chunks the call moved to the trash (0 for documents already there), or null when the store does not count.",
      "type": [
       "integer",
@@ -502,7 +556,7 @@
   }
  },
  {
-  "description": "Demo corpus Return statistics about this vector store collection.",
+  "description": "Demo corpus Return statistics about this vector store collection: the row count, the number of active documents where the store can tell, the embedding model and the vector size.",
   "inputSchema": {
    "properties": {},
    "type": "object"
@@ -511,8 +565,15 @@
   "outputSchema": {
    "properties": {
     "count": {
-     "description": "Total number of documents.",
+     "description": "Rows (chunks) in the collection, as the store counts them.",
      "type": "integer"
+    },
+    "document_count": {
+     "description": "Active documents, or null where the store cannot count them.",
+     "type": [
+      "integer",
+      "null"
+     ]
     },
     "model": {
      "description": "Embedding model name.",
@@ -530,7 +591,7 @@
   }
  },
  {
-  "description": "Demo corpus Add or update documents in the vector database. Each document requires content text and an object ID for deduplication. Embeddings are computed automatically when an embedding provider is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed \"embedding\" (float array) and \"embedding_model\" (string) per document to skip auto-computation. Returns {\"success\": false, \"error\": \"...\"} when embeddings cannot be obtained.",
+  "description": "Demo corpus Add or update documents in the vector database. Each document requires content text and an object ID for deduplication. Embeddings are computed automatically when an embedding provider is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed \"embedding\" (float array) and \"embedding_model\" (string) per document to skip auto-computation. Several documents with one object ID are stored as that document's chunks. Returns {\"success\": false, \"error\": \"...\"} when embeddings cannot be obtained.",
   "inputSchema": {
    "properties": {
     "documents": {
@@ -557,7 +618,8 @@
         "description": "Optional metadata. Only nodeId, parent and chunkId are stored; unrecognized keys are rejected.",
         "properties": {
          "chunkId": {
-          "description": "Chunk index recorded on the document (default: 0).",
+          "description": "Chunk index recorded on the document. Without it, the chunks sent for one object ID are numbered 0, 1, 2 ... in the order given; an explicit index may not repeat within one call.",
+          "minimum": 0,
           "type": "integer"
          },
          "nodeId": {

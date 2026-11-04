@@ -48,7 +48,7 @@ import type { CSSProperties } from 'react';
 import { commonStyles, Button } from 'shell';
 import { MonacoEditor, detectLanguage } from 'shared/components/monaco';
 import type { Monaco } from 'shared/components/monaco';
-import { WORKSPACE_URI_PREFIX, ensureWorkspaceEditorTs, getWorkspaceEditorTs, primeProjectSources, releaseProjectSource } from '../appdev/session/editorTypes';
+import { WORKSPACE_URI_PREFIX, ensureWorkspaceEditorTs, getWorkspaceEditorTs, primeProjectSources, releaseProjectSource } from '../preview/session/editorTypes';
 import { getWorkspaceVfs } from './vfs/workspace';
 
 // =============================================================================
@@ -197,9 +197,14 @@ const FileProvider: React.FC<FileProviderProps> = ({ path }) => {
 		if (!dirtyRef.current || saving) return;
 		setSaving(true);
 		try {
-			await getWorkspaceVfs().write(path, bufferRef.current, 'editor');
-			dirtyRef.current = false;
-			setDirty(false);
+			const saved = bufferRef.current;
+			await getWorkspaceVfs().write(path, saved, 'editor');
+			// Typing during the await keeps the buffer dirty — only the
+			// snapshot that went to the server is clean.
+			if (bufferRef.current === saved) {
+				dirtyRef.current = false;
+				setDirty(false);
+			}
 			setStale(false);
 			setError(null);
 		} catch (err) {

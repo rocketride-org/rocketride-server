@@ -26,14 +26,16 @@
 // =============================================================================
 //
 // A TOOL IS AN APP: the four resident tools register here with the same
-// surface a store tool MF-exports, and the hosts' sidebars render them by
-// iterating the registry — no per-host composition roots, no fixed-mode
-// special cases. The tier is decided by the registration route alone
-// (this registry ⇒ builtin, the MF catalog ⇒ store).
+// manifest + descriptor pair a store tool ships, and the hosts' sidebars
+// render them by iterating the registry — no per-host composition roots, no
+// fixed-mode special cases. The tier is decided by the registration route
+// alone (this registry ⇒ builtin, the MF catalog ⇒ store); the one thing a
+// builtin's manifest lacks is a loader, because there is nothing to fetch.
 //
 // Hosts call registerBuiltinTools() once at startup; registration order is
 // the strip's default order (Agent first — the startup default where the
-// host serves it).
+// host serves it). Host reach is the manifest's `shells` declaration
+// (absent = every shell), exactly as for a store app.
 // =============================================================================
 
 import { registerBuiltinTool } from './core/registry';
@@ -46,40 +48,102 @@ import { NodesTool } from './nodes/NodesTool';
 import { PipelinesTool } from './pipelines/PipelinesTool';
 import { AppsIcon } from '../components/icons/AppsIcon';
 import { CodiconCircuitBoard, CodiconTypeHierarchy } from '../components/icons/Codicon';
+// Catalog icons: the SAME glyph sources as the strip tabs, as plain assets.
+// `?url` bypasses SVGR and yields the emitted asset's URL — every host
+// resolves it like any web app (the VS Code webviews via assetPrefix 'auto').
+import agentIconUrl from './agent/icon.svg?url';
+import appsIconUrl from './appdev/icon.svg?url';
+import nodesIconUrl from './nodes/icon.svg?url';
+import pipelinesIconUrl from './pipelines/icon.svg?url';
+// Setting declarations live in the PURE toolSettings leaf (the ext host and
+// settings surfaces import that, never this asset-bearing module).
+import { APPS_TOOL_SETTINGS, PIPELINES_TOOL_SETTINGS, TOOL_SETTINGS_OWNER } from './toolSettings';
+
+const PUBLISHER = 'Aparavi Software AG';
 
 /** Registers the builtin tools (idempotent — the registry dedupes by id). */
 export function registerBuiltinTools(): void {
 	registerBuiltinTool({
-		// No VS Code surface BY POLICY: that host's agent story is Claude
-		// Code / Copilot — a second chat surface would be clutter.
-		id: 'agent',
-		name: 'Agent',
-		description: 'Agent sessions against the connected engine.',
-		icon: <AgentIcon size={16} />,
-		sidebar: AgentTool,
-		frame: AgentConversationTool,
-		hosts: ['rocket'],
+		manifest: {
+			name: 'Agent',
+			publisher: PUBLISHER,
+			// All builtin tools are Rocket Builder's tools — their prefs and
+			// setting deltas store under the product's app partition so they
+			// follow the person across the tool and app surfaces.
+			storageAppId: TOOL_SETTINGS_OWNER,
+			description: 'Agent sessions against the connected engine.',
+			icon: agentIconUrl,
+			categories: ['devTool'],
+			// No VS Code surface BY POLICY: that host's agent story is Claude
+			// Code / Copilot — a second chat surface would be clutter.
+			shells: ['saas', 'oss'],
+		},
+		descriptor: {
+			id: 'agent',
+			name: 'Agent',
+			icon: <AgentIcon size={16} />,
+			devToolSidebar: AgentTool,
+			devToolFrame: AgentConversationTool,
+		},
 	});
 	registerBuiltinTool({
-		id: 'apps',
-		name: 'Apps',
-		description: 'Build, package, and deploy apps (App Builder).',
-		icon: <AppsIcon size={16} />,
-		sidebar: AppDevTool,
-		frame: AppsToolFrame,
+		manifest: {
+			name: 'Apps',
+			publisher: PUBLISHER,
+			// All builtin tools are Rocket Builder's tools — their prefs and
+			// setting deltas store under the product's app partition so they
+			// follow the person across the tool and app surfaces.
+			storageAppId: TOOL_SETTINGS_OWNER,
+			description: 'Build, package, and deploy apps (App Builder).',
+			icon: appsIconUrl,
+			categories: ['devTool'],
+			configuration: APPS_TOOL_SETTINGS,
+		},
+		descriptor: {
+			id: 'apps',
+			name: 'Apps',
+			icon: <AppsIcon size={16} />,
+			devToolSidebar: AppDevTool,
+			devToolFrame: AppsToolFrame,
+		},
 	});
 	registerBuiltinTool({
-		id: 'nodes',
-		name: 'Nodes',
-		description: 'Browse and scaffold pipeline nodes.',
-		icon: <CodiconCircuitBoard size={16} />,
-		sidebar: NodesTool,
+		manifest: {
+			name: 'Nodes',
+			publisher: PUBLISHER,
+			// All builtin tools are Rocket Builder's tools — their prefs and
+			// setting deltas store under the product's app partition so they
+			// follow the person across the tool and app surfaces.
+			storageAppId: TOOL_SETTINGS_OWNER,
+			description: 'Browse and scaffold pipeline nodes.',
+			icon: nodesIconUrl,
+			categories: ['devTool'],
+		},
+		descriptor: {
+			id: 'nodes',
+			name: 'Nodes',
+			icon: <CodiconCircuitBoard size={16} />,
+			devToolSidebar: NodesTool,
+		},
 	});
 	registerBuiltinTool({
-		id: 'pipelines',
-		name: 'Pipelines',
-		description: 'Discover, open, and run pipelines.',
-		icon: <CodiconTypeHierarchy size={16} />,
-		sidebar: PipelinesTool,
+		manifest: {
+			name: 'Pipelines',
+			publisher: PUBLISHER,
+			// All builtin tools are Rocket Builder's tools — their prefs and
+			// setting deltas store under the product's app partition so they
+			// follow the person across the tool and app surfaces.
+			storageAppId: TOOL_SETTINGS_OWNER,
+			description: 'Discover, open, and run pipelines.',
+			icon: pipelinesIconUrl,
+			categories: ['devTool'],
+			configuration: PIPELINES_TOOL_SETTINGS,
+		},
+		descriptor: {
+			id: 'pipelines',
+			name: 'Pipelines',
+			icon: <CodiconTypeHierarchy size={16} />,
+			devToolSidebar: PipelinesTool,
+		},
 	});
 }

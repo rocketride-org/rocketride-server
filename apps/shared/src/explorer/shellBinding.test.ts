@@ -17,22 +17,53 @@
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
 
 // =============================================================================
-// EXPLORER — SHELL BINDING (what a task event asks the endpoint store to do)
-// =============================================================================
-//
-// The engine announces a task's start (`begin`, `restart`) while the task is
-// still loading, and discovery lists running tasks only, so the store must be
-// told WHICH task started to keep looking for it. These cases pin how an
-// `apaevt_task` message is read; the subscriptions themselves need the shell.
+// EXPLORER — SHELL BINDING: identity changes in a MIRRORED realm (DA-R1-05)
 // =============================================================================
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readTaskEvent } from './shellBinding';
+import { createEndpointStore } from './connect/store';
+import { fakeWorld, manualClock, row } from './connect/testing';
+import { account, createFakeMirroredRealm, settle } from './devtool/testing';
+import { createShellWatch, readTaskEvent } from './shellBinding';
+import type { IShellWatchBus } from './shellBinding';
+import { SINGLE_TOOLS_ROLE } from './types';
+import { identityFromConnectResult } from './connect/identity';
+
+describe('createShellWatch — a sign-out or an account switch resets the store in a mirrored realm', () => {
+	it('the shell never emits login / logout / org events there; the root\'s account topic going null and then B arriving does it', async () => {
+		const realm = createFakeMirroredRealm();
+		realm.root.connect(account('user-a', 'org-1', 'team-1'));
+		await settle();
+		const world = fakeWorld([row({ ownerId: 'user-a', teamId: 'team-1' })]);
+		const clock = manualClock();
+		const store = createEndpointStore({ providers: new Set(['db_postgres']), roles: SINGLE_TOOLS_ROLE, tools: {}, clock });
+		const bus = realm.cm as unknown as IShellWatchBus;
+		const detach = store.attach(world.client, identityFromConnectResult(account('user-a', 'org-1', 'team-1')), createShellWatch(world.client, bus));
+		await settle();
+		realm.emit('shell:connected', undefined); // the first discovery, as a reconnect asks for it
+		await clock.advance(1_000);
+		assert.equal(store.getState().endpoints.length, 1, 'discovered under A');
+
+		// Sign-out as the VS Code root reports it: status false, then a null account the realm manager IGNORES.
+		realm.root.disconnect();
+		await settle();
+		await clock.advance(1_000);
+		assert.deepEqual(realm.events.filter((event) => ['shell:login', 'shell:logout', 'shell:orgChanged'].includes(event)), [], 'no login / logout / org event ever fired in this realm');
+		assert.equal(store.getState().endpoints.length, 0, 'the store was reset for "nobody"');
+
+		// B signs in: the store resets for B and discovers B's runs.
+		world.rows = [row({ ownerId: 'user-b', teamId: 'team-1' })];
+		realm.root.connect(account('user-b', 'org-1', 'team-1'));
+		await settle();
+		await clock.advance(1_000);
+		assert.equal(store.getState().endpoints.length, 1);
+		assert.equal(store.getState().endpoints[0].ownerId, 'user-b', 'only B\'s runs');
+		detach();
+	});
+});
 
 describe('readTaskEvent — an apaevt_task message as the store reads it', () => {
 	it('ignores anything that is not an apaevt_task event', () => {

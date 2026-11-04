@@ -1270,7 +1270,7 @@ def test_documents_clamps_the_limit_with_a_warning():
     store = clustered(docs=2, chunks=1)
     answer = node(store).list_documents({'limit': 10_000})
     assert answer['warnings'] == ['limit_clamped']
-    assert [c for c in store.calls if c[0] == 'listDocumentPage'][-1][2] == 500
+    assert [c for c in store.calls if c[0] == 'listDocumentPage'][-1][2] == 1000
 
 
 @pytest.mark.parametrize(
@@ -2603,7 +2603,9 @@ def test_delete_extended_answer(context):
     store = clustered(CountingStore, docs=2, chunks=3)
     answer = node(store, allow_writes=True).delete({'object_ids': ['doc00', 'doc00', 'ghost']})
     assert answer['success'] is True
-    assert (answer['deleted_count'], answer['removed_chunks'], answer['not_found']) == (3, 3, ['ghost'])
+    # deleted_count is the distinct ids the request named (#2704), not the entries it carried.
+    assert (answer['deleted_count'], answer['removed_chunks'], answer['not_found']) == (2, 3, ['ghost'])
+    assert answer['object_ids'] == ['doc00', 'ghost']
     assert answer['audit']['action'] == 'vector.delete' and answer['audit']['object_ids'] == ['doc00', 'ghost']
 
 
@@ -2753,9 +2755,15 @@ def test_get_starts_at_the_first_stored_chunk():
     assert answer['total'] == 10 and answer['has_more'] is False
 
 
-def test_get_of_the_control_record_is_empty():
+def test_get_of_the_control_record_is_refused():
+    """The control row is reserved, as on develop (#2704): a failure that names it, not an empty page."""
     answer = node(clustered()).get({'object_id': 'schema'})
-    assert answer['success'] is True and answer['chunks'] == [] and answer['has_more'] is False
+    assert answer == {
+        'success': False,
+        'code': 'RESERVED_ID',
+        'error': "get: object_id 'schema' is reserved for the store's control row",
+        'object_id': 'schema',
+    }
 
 
 def test_objdir_lists_entries_without_collapsing_equal_paths():
@@ -2787,9 +2795,12 @@ def test_objdir_filters_by_an_exact_parent_and_pages():
         + [make_doc('longer', 0, path='/docs/same.md.bak'), make_doc('below', 0, path='/docs/sub/x.md')]
     )
     inst = node(store)
-    answer = inst.objdir({'parent': '/docs/same.md', 'offset': 1, 'limit': 2})
-    assert [e['objectId'] for e in answer['entries']] == ['d1', 'd2']
-    assert answer['truncated'] is False
+    # A page counts distinct paths (#2668): the five documents under the one path are one path, mapped to
+    # its lowest object id, and `entries` still lists every document under it.
+    answer = inst.objdir({'parent': '/docs/same.md', 'limit': 2})
+    assert [e['objectId'] for e in answer['entries']] == ['d0', 'd1', 'd2', 'd3', 'd4']
+    assert answer['paths'] == {'/docs/same.md': 'd0'} and answer['truncated'] is False
+    assert inst.objdir({'parent': '/docs/same.md', 'offset': 1, 'limit': 2})['entries'] == []
     everything = inst.objdir({'parent': '/docs/same.md'})['entries']
     assert sorted(e['objectId'] for e in everything) == ['d0', 'd1', 'd2', 'd3', 'd4']
     assert inst.objdir({'parent': '/docs/'})['entries'] == []
@@ -2799,6 +2810,15 @@ def test_objdir_filters_by_an_exact_parent_and_pages():
 def test_objdir_refuses_a_parent_that_is_not_a_string():
     answer = node(ExactListingStore().seed(corpus({'a': [0]}))).objdir({'parent': 5})
     assert (answer['success'], answer['code']) == (False, 'INVALID_INPUT')
+
+
+def test_objdir_pages_distinct_paths_whatever_the_documents_per_path():
+    docs = [make_doc(f'{path}{n}', 0, path=f'/{path}.md') for path in ('a', 'b', 'c', 'd') for n in range(3)]
+    inst = node(ExactListingStore().seed(docs))
+    first = inst.objdir({'limit': 2})
+    assert first['paths'] == {'/a.md': 'a0', '/b.md': 'b0'} and len(first['entries']) == 6
+    second = inst.objdir({'offset': 2, 'limit': 2})
+    assert second['paths'] == {'/c.md': 'c0', '/d.md': 'd0'} and inst.objdir({'offset': 4})['paths'] == {}
 
 
 def test_objdir_pages_a_native_listing_past_one_page():

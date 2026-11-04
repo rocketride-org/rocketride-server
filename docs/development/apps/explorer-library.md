@@ -479,36 +479,84 @@ document-URI key rule), and the drawer's selection and probe rules
 ## Running the library in a dev-tool controller
 
 A dev tool (`AppDescriptor.devToolSidebar` plus `devToolFrame`) mounts the app
-twice and gives neither mount a client. The deep entry
+twice, and the host gives each mount a `channel` (`DevToolProps.channel`, a
+`ToolChannel`) as its one transport. The deep entry
 [`devtool/`](../../../apps/shared/src/explorer/devtool/), imported as
 `shared/explorer/devtool/<module>`, is what an Explorer needs to run there. It
 is **not** exported from the `shared/explorer` barrel and imports no value from
-`shell`: the caller passes in the realm's `ConnectionManager` (as a structural
-type) and the shell's `createToolChannel`, `createToolController` and
-`createToolOpServer`. So every module runs under `node:test`.
+`shell`: the caller passes in the realm's client (as a structural type) and the
+shell's `createToolOpServer` and `createToolOpClient`. So every module runs
+under `node:test`. A lane never builds a channel and never touches a peer: the
+host builds the channel, and it is the only subscriber of the mount's peer.
 
 **Split ownership.** The sidebar mount is the **controller**. It owns the
-endpoint store (token vault, discovery, probes, task watch), the bus client,
+endpoint store (token vault, discovery, probes, task watch), the engine client,
 identity, schema caches, history and every op handler. **Frames** own the
 editor, the statement runner and its generation tickets, render models,
-selection and "Stop waiting". They hold no client and reach the engine only
-through ops. Nothing may assume the two share memory: in VS Code they are
+selection and "Stop waiting". The library gives them no engine client and they
+reach the engine only through ops. Nothing may assume the two share memory: in VS Code they are
 separate webviews.
 
-**Engine access** ([`busClient.ts`](../../../apps/shared/src/explorer/devtool/busClient.ts)).
-`getBusExplorerClient(cm)` is the library's `IExplorerClient` over
-`cm.request('client.<op>', …)`, with one instance per realm. Every request names
-its own bus timeout, and none relies on the bus's 120 s default
-([`timeouts.ts`](../../../apps/shared/src/explorer/devtool/timeouts.ts)):
+**Engine access** ([`engineClient.ts`](../../../apps/shared/src/explorer/devtool/engineClient.ts)).
+Every realm's `useShellConnection().client` is a real `RocketRideClient`: the
+root's socket-owning instance, or a `RocketRideClientProxy` whose requests ride
+the shell bus to the root's one socket. It is `null` until the realm can answer
+truthfully. `createExplorerClient(getClient)` narrows it to the library's
+`IExplorerClient` over a structural `IRealmClient`, and `createPrefsFs(getClient)`
+gives the history accessor its four file-store calls. In React,
+`useRealmEngine()` (`react.tsx`) builds one adapter per realm client and returns
+`{ status, client }`, where `client` is non-null only when `status` is `ready`.
 
-| Request | Bus `timeoutMs` |
+- **`useEngineSource()`** (`react.tsx`) is for a controller built once in an
+  effect: a stable `getClient` over the latest `useShellConnection().client`
+  and a stable `readiness` store (`IEngineReadiness`) fed from the same hook.
+  Neither changes identity across renders, so nothing is rebuilt when the client
+  or the connection changes. `getClient` returns the client whenever the realm
+  has one, connected or not; `readiness` says whether requests may be sent.
+- **`requireRealmClient(get, what)`** is the guard every call goes through:
+  the client, or a rejection of kind `unavailable` (nothing sent). A lane's own
+  SDK calls use it too.
+- **`createExplorerAdmin(getClient)`** bounds the generic calls `use`,
+  `getTaskToken`, `terminate`, `getService`, `validate` and
+  `account.getEnvironmentKeys` with application deadlines (`USE_DEADLINE_MS`
+  100 s, `VALIDATE_DEADLINE_MS` 60 s, `TERMINATE_`/`GET_TASK_TOKEN_`/`GET_SERVICE_DEADLINE_MS`
+  30 s, `ENVIRONMENT_KEYS_DEADLINE_MS` 15 s; each overridable). SDK errors pass
+  through untouched. **Nothing is retried**: an expired deadline for `use` or
+  `terminate` says the request was not cancelled and may still complete, and a
+  caller wanting another attempt looks at the engine first.
+- **A getter, not a client.** Each call reads the getter again, so a client that
+  is not there yet is never captured. With no client a call rejects as kind
+  `unavailable` before anything is sent.
+- **Errors pass through untouched.** The SDK error object and its `code` reach
+  the caller as thrown, and nothing is parsed out of a message.
+- **Every request is bounded, and none relies on the bus's 120 s default**
+  ([`timeouts.ts`](../../../apps/shared/src/explorer/devtool/timeouts.ts)). The
+  SDK takes a timeout on `tool` only, so the rest carry an application deadline:
+
+| Request | Bound |
 |---|---|
-| `client.tool` with an SDK `timeout` | `timeout + BUS_TOOL_MARGIN_MS` (5 s) |
-| `client.tool` the session left unbounded (`timeoutMs: null`) | `UNBOUNDED_TOOL_TIMEOUT_MS` (24 h; a delay above 2^31-1 ms fires at once) |
-| `client.getTasks`, `client.getTaskPipeline` | 30 s each |
-| `client.listTasks` (discovery's names) | `LIST_TASKS_TIMEOUT_MS` (10 s, discovery's own wait for it) |
-| `client.addMonitor`, `client.removeMonitor` | 15 s |
-| anything else (`fs*`, `use`, `getEnvironmentKeys`) | `busRequest(cm, op, params, timeoutMs)`; the timeout is required |
+| `tool` with a `timeout` | passed to `client.tool({ timeout })` as is; a proxy asks the bus for that plus `PROXY_BUS_SLACK_MS` (5 s) |
+| `tool` the session left unbounded (`timeoutMs: null`) | `UNBOUNDED_TOOL_TIMEOUT_MS` (24 h) passed as the SDK timeout, because a timeout-less proxy request falls back to the 120 s bus default; a delay above 2^31-1 ms fires at once |
+| `getTasks`, `getTaskPipeline` | application deadline, 30 s each |
+| `listTasks` (discovery's names) | `LIST_TASKS_TIMEOUT_MS` (10 s, discovery's own wait for it) |
+| `addMonitor`, `removeMonitor` | application deadline, 15 s |
+| `fsStat`, `fsReadJson`, `fsMkdir`, `fsWriteJson` | `PREFS_FS_DEADLINE_MS` (15 s) |
+
+- **An application deadline does not cancel.** When it expires the caller stops
+  waiting and gets an `ExplorerToolError` of kind `timeout` that says the
+  request was not cancelled and may still complete. A late answer or failure is
+  swallowed.
+
+**Errors from `terminate`.** The develop SDK's `terminate()` rethrows a plain
+`Error` with the server's message, so a `terminate` failure carries no `code`
+(`use` does: it throws a `DAPException`). The library passes errors through
+untouched and never rebuilds a code from text.
+
+**`use`'s deadline** is `USE_DEADLINE_MS` = 100 s, deliberately below the bus's
+120 s default request timeout: `use` sends its request with no SDK timeout, so
+through a proxy the bus timer would otherwise tie with ours, and whichever fired
+first would decide the message. Ours is shorter, so the caller always gets the
+"not cancelled, may still complete" text.
 
 A frame waits longer than its controller: `frameOpTimeoutMs(controllerMs)` adds
 `FRAME_OP_MARGIN_MS` (5 s), and `toolCallBudgetMs(wait)` is one tool call's
@@ -522,7 +570,8 @@ controller budget.
   only. So every op returns `Reply<T>`: `{ ok: true, value }` or
   `{ ok: false, error: { kind, code?, message, tool?, detail?, retryAfterS? } }`.
   - On the controller, `toReply(fn)` builds it. The lanes' own timeout texts
-    ("did not answer within", "timed out after") become kind `timeout`, and
+    ("did not answer within", "timed out after", the SDK's "Request timed out
+    after") become kind `timeout`, and
     "Not connected to server" becomes `unavailable`. Programming errors are
     rethrown.
   - On the frame, `fromReply` (or `callReply`) rebuilds an `ExplorerToolError`
@@ -535,8 +584,16 @@ controller budget.
 - **Deadlines.** Every call carries `deadlineAt` (the frame's now plus its
   `timeoutMs`). The controller refuses a call that has no deadline, or that
   arrives after it, without running it.
-- **The frame caller.** `createFrameCaller` builds one controller function and
-  one channel per frame peer.
+- **The frame caller.** `createFrameCaller({ channel, createToolOpClient })`
+  calls through the host's channel and builds no subscription of its own.
+  With `identityNow` a call is **held** while the frame knows no identity: like
+  the controller wait it waits inside its own deadline (looking again every
+  25 ms) and, if the deadline passes first, rejects as kind `unavailable`,
+  unsent. Once sent it is bound to the identity the frame is under then, and its
+  answer, success or failure, is discarded as kind `stale` if the frame is under
+  another identity, or none, when it arrives (A to B, or A to null on a
+  sign-out). So there is no unknown, A, B gap. The identity is read at send and
+  at answer.
   - Every call needs an explicit `timeoutMs`. A missing or unusable one is a
     programming error: `call` and `callReply` **throw** a RangeError
     synchronously, so a `.catch` on the returned promise never sees it.
@@ -558,11 +615,14 @@ controller budget.
     that publishes no readiness).
 
 **Controller wiring** ([`controller.ts`](../../../apps/shared/src/explorer/devtool/controller.ts)).
-`attachController({ peer, channel, createToolChannel, createToolOpServer, handlers })`
-uses the host's channel, or builds one per peer, **before** it creates exactly
-one op server, and serves every handler through the deadline guard. Call it in a
-`useEffect` and return its `dispose` as the cleanup; never build the op server
-in `useMemo`, because StrictMode mounts twice.
+`attachController({ channel, createToolOpServer, handlers })` creates one op
+server over the host's channel and serves every handler through the deadline
+guard. The channel's registry answers calls on the subscription the host
+already made, so the controller subscribes nothing. Call it in a `useEffect`
+and return its `dispose` as the cleanup; never build the op server in
+`useMemo`, because StrictMode mounts twice (a handler registered later replaces
+the earlier one, and a disposed server only removes handlers that are still its
+own).
 
 - **Every op answers a Reply.** The op map must declare a `Reply<T>` result and
   an `IDeadline` in the params of every op, or `attachController<Ops>` does not
@@ -584,72 +644,110 @@ in `useMemo`, because StrictMode mounts twice.
   answers is `Reply<never>`). Handlers are optional in `ControllerHandlers`;
   annotate production wiring with `RequiredControllerHandlers<Ops>` so that a
   missing or misspelt op is a compile error.
-- **The op server sees calls only.** It subscribes through a shim that drops
-  every other envelope, so a channel event that shares an op's name can never
-  run a handler. The controller's channel still hears every event.
+- **Only a correlated call runs a handler.** The channel answers plain events
+  through the same registry as calls, with no reply, and a frame's event
+  reaches the sidebar peer twice (live, then through the retained last-payload
+  slot, which replays it on every later mount). So `attachController` listens
+  for each served op's name as an event: the channel shows an event to those
+  listeners, synchronously and with the same payload object, before it runs the
+  handler, so a handler invocation whose params are such a payload is refused
+  (`DeadlineError` reason `event`). Two more refusals back it:
+  - a call with no `deadlineAt` (reason `missing`), or one past the deadline
+    (`expired`);
+  - a `deadlineAt` further ahead than the op's largest budget (reason
+    `horizon`): `maxBudgetMs` per op, default `MAX_OP_BUDGET_MS` (the frame
+    timeout of an unbounded tool call), so a replayed payload cannot stay
+    executable indefinitely.
+
+  Pass the lane's event names as `events` and attach throws when one is also a
+  served op (`assertNoOpEventCollisions` is the same check). A mutating handler
+  should still check its own authority (identity, endpoint, permission).
 - **Readiness.** Once every handler is served, the controller publishes
   `{ ready: <nonce> }` on the state topic `devtool:controller`
   (`CONTROLLER_STATE_TOPIC`), and `{ ready: null }` when the live mount
   unmounts. Frames send nothing before they see a nonce. The `devtool:` prefix
   (`RESERVED_STATE_PREFIX`) is reserved for this library: lanes never publish
   under it (the shell reserves `host:` the same way).
-- **Held calls, and dropped ones.** The peer holds a frame call only while NO
-  subscriber at all is on the sidebar peer, and hands it to the next
-  subscriber. The calls held that way reach the handlers once they are all
-  registered, and the deadline decides whether each one runs. But both hosts
-  build the sidebar channel during render (VS Code `DevToolSidebarMount.tsx`,
-  rocket-ui `DevToolMount.tsx`), before the controller's effect, and that
-  channel holds the live slot until the op server subscribes. A call that
-  arrives in that window goes to the channel, which drops it. Readiness is
-  what keeps frames from sending then.
-- **Without a host channel** (a test-only path: both real hosts pass a sidebar
-  channel), the fallback channel's first subscription hands any held calls
-  over to the op server instead of swallowing them.
+- **Held calls are dropped.** While no controller is subscribed, the sidebar
+  peer holds a frame call (it asks the host to mount the controller once per
+  hold). Both hosts build the sidebar channel during render (VS Code
+  `DevToolSidebarMount.tsx`, rocket-ui `useToolStrip.tsx`), before the
+  controller's effect, and the peer flushes its held calls into the channel as
+  it is built. A channel with no served ops answers no call, so the call is
+  dropped and its caller times out. `controller.test.ts` pins this platform
+  behavior against the real `toolChannel`, so a shell fix would show there.
+  Readiness is what keeps frames from sending in that window, and
+  `devtool:summon` (see below) is how a frame gets the controller mounted
+  without sending a call.
 
 **Identity** ([`identity.ts`](../../../apps/shared/src/explorer/devtool/identity.ts)).
 `createIdentityTracker({ cm })` reports `{ known, identity, fingerprint }` and
-fails closed:
+fails closed. Every realm has a client, so it never infers what a realm owns
+from having one; the bus's own capabilities decide:
 
 - A disconnect, a logout or an organization change makes the identity unknown.
   Logout and organization change stay unknown until a real account arrives.
-- In a realm that owns the client (rocket-ui), the source is the SDK client's
-  account, which every handshake refreshes. It is not
-  `ConnectionManager.getAccountInfo()`, which keeps the account from sign-in.
-- In a socketless realm (VS Code), the source is the root's retained
-  `shell:account` topic, read at mount and on every reconnect. The realm's
-  manager ignores the `null` that topic carries after a sign-out.
-- A reconnect never brings back the account from before the drop. Account A,
-  then a disconnect, then a reconnect as B reads A, unknown, B.
+- When the bus offers `read`, the tracker reads the root's retained
+  `shell:account` topic at mount and on every connect, and trusts nothing until
+  that read answers. Once the topic has delivered a value (even `null`) to this
+  realm it is the authority: the VS Code extension host publishes it on every
+  status change and `null` when it loses the account, while a mirrored realm's
+  manager ignores that `null`, so the realm client's `getAccountInfo()` can
+  still answer the previous account after a sign-out.
+- A topic that never delivers (the cloud shell's root publishes none) leaves the
+  client's own account as the answer: the SDK refreshes it on every handshake.
+  It is not `ConnectionManager.getAccountInfo()`, which keeps the account from
+  sign-in. A bus with no `read` has only the client.
+- **No stale flash.** `shell:status` (connected) reaches a mirrored realm before
+  `shell:account`, so its client can be authenticated and still hold the
+  previous account. The tracker reads the topic instead, and reports unknown
+  until the new account arrives. Account A, a disconnect, then a connect as B
+  reads A, unknown, B.
 - A topic delivery is newer than any root read still in flight, so a late read
   never overrides it.
 - An anonymous or public attach never yields an identity. The SDK sets no
   account for it, and the shell emits `shell:connected` only for an
-  authenticated client. The tracker also requires a client realm's client to
-  report `isAuthenticated()`.
+  authenticated client. The tracker also requires the client, when there is
+  one, to report `isAuthenticated()`.
 
-**Activation** ([`activation.ts`](../../../apps/shared/src/explorer/devtool/activation.ts)).
-The first discovery waits until the tool has been activated. Both hosts build
-a store tool's sidebar only when its tab is first selected, or when one of its
-frames summons the controller (`host.mountToolSidebar`), and then keep it
-mounted. So the mount itself counts as the activation in any realm the gate can
-classify: a client realm (rocket-ui) or a **socketless** one (VS Code:
-connected, `getClient()` null). The selection's `shell:toolSidebarActivated`
-fires before the sidebar can hear it, so the gate cannot wait for it.
+**Readiness** ([`readiness.ts`](../../../apps/shared/src/explorer/devtool/readiness.ts)).
+Waiting is never rendered as "disconnected".
 
-A bus the gate cannot classify (no `getClient`) waits for the first of these:
+- **Controller.** `engineStatus({ client, isConnected })` is `waiting` while the
+  realm has no client, `disconnected` with a client that is not up, and `ready`
+  with both. `createEngineReadiness()` holds it as a store (`set` the facts,
+  `subscribe`); `useRealmEngine()` feeds it from `useShellConnection()`. Engine
+  requests and discovery wait for `ready`.
+- **Frame.** `frameStatus(hostConnected, controllerState)` is `waiting` until
+  the host's first `host:connection` snapshot, `disconnected` when it says so,
+  and then `connected` (controller ready), `controller-unavailable` (summon
+  `unanswered`) or `waiting`. The library publishes no `host:*` topic.
 
-- `shell:toolSidebarActivated` for this app;
-- the first op from a frame;
-- a string `activeDocKey` (`''` is the generic frame);
-- `open('user')`.
-
-Before #2625 `9bd5d931f`, rocket-ui mounted every pinned controller at boot,
-and the gate kept a client realm closed until one of those signals arrived.
+There is no activation gate: both hosts build a store tool's sidebar only when
+its tab is first selected, or when one of its frames asks the host to mount it,
+and keep it mounted, so mounting is the activation.
 
 **Discovery** ([`watch.ts`](../../../apps/shared/src/explorer/devtool/watch.ts)).
-`createDevToolDiscovery({ cm, client, identity, activation })` gives the store's
-watch. It allows discovery only while the identity is known **and** the tool is
-activated. It forwards identity changes (unknown resets the store), and
+`createDevToolDiscovery({ cm, client, identity, engine, present? })` gives the
+store's watch. It allows discovery only while the identity is known **and** the
+engine is `ready`.
+
+**Quiet at boot.** A pinned tool's controller mounts when the host boots, with
+nobody there, and a probe is a tool call that keeps a pipeline alive. So until a
+frame of the tool is open or a person interacted, a refresh is discovery reads only (`getTasks`, `listTasks`,
+`getTaskPipeline`): endpoints are listed but stay `probing`, and no `dialect`
+call is sent. Pass `holdProbes: () => discovery.holdProbes()` to
+`createEndpointStore`, and call `discovery.markUserPresent('op')` from
+`attachController`'s `onFirstOp` and `markUserPresent('user')` on the first
+sidebar interaction. "Present" therefore means a frame of the tool is open
+(its first op counts even when automatic, such as a restored document's) or a
+person interacted. The first call releases the probes with one refresh; later
+calls do nothing; task events and focus do not count. (`present: true` skips the
+hold.) **Lane obligation:** while probes are held an explicit refresh sends no
+probe either, so any explicit Refresh the lane offers must call
+`markUserPresent('user')` (before its own `store.refresh`). "Test connection"
+(`store.probe`) is not held. The history file reads and writes are account-store calls, not pipeline
+calls, so they are not held. It forwards identity changes (unknown resets the store), and
 registers the task monitor only once discovery is allowed. It refreshes once
 whenever discovery becomes allowed, and again when the identity switches
 between two known fingerprints. A change in permission hints alone refreshes
@@ -671,8 +769,8 @@ the first fingerprint it sees and keeps following:
 - `host:connection` turning false calls `onReset('disconnected')`.
 
 `publishIdentityState` publishes nothing until the tracker settles
-(`whenSettled`: at once in a client realm, after the root read in a socketless
-one) or knows an identity. So a controller remount, whose new tracker starts
+(`whenSettled`: at once when there is nothing to read, after the root read
+otherwise) or knows an identity. So a controller remount, whose new tracker starts
 unknown, does not make live frames reset for nothing.
 
 `followSignIn(channel, onChange)` tells a frame what it may say about the
@@ -683,20 +781,25 @@ account. It reports one of three states:
 - `'signed-in'`: a fingerprint was published.
 
 **Summoning the controller** ([`summon.ts`](../../../apps/shared/src/explorer/devtool/summon.ts)).
-Since #2625 `9bd5d931f`, a host builds a tool's sidebar only when the tool is
-selected, or when busPeer summons it: while no controller is subscribed, the
-sidebar peer holds frame messages and emits `host.mountToolSidebar` once per
-hold period. `createControllerSummon({ channel })` uses that on purpose.
+A host builds a tool's sidebar only when the tool is selected, or when busPeer
+summons it: while no controller is subscribed, the sidebar peer holds frame
+messages and emits `host.mountToolSidebar` once per hold period. That is the
+one activation path. `createControllerSummon({ channel })` uses it on purpose.
 
 - **What it sends.** A frame whose controller has published no readiness nonce
   sends one `devtool:summon` event once `SUMMON_SETTLE_MS` have passed. It
-  re-sends at `SUMMON_RETRY_MS` while no nonce arrives, and sends nothing
-  while the host says it is disconnected. The re-sends help only a sidebar
-  peer that rocket-ui arms late. A peer whose host has no mount handler (a
-  collapsed rocket-ui sidebar) latches busPeer's one summon per hold, and the
-  re-sends are only held; the frame then says to open the sidebar.
-- **It is an event, never a call.** On the summon-driven mount, a call held in
-  the peer is delivered into the host channel and dropped. No controller
+  re-sends once, at `SUMMON_RETRY_MS`, if no nonce arrives, and sends afresh
+  when a new episode starts (the nonce goes away, or the host connection comes
+  back). It sends nothing while the host says it is disconnected. The retry
+  helps only a sidebar peer that rocket-ui arms late (a collapsed rocket-ui
+  sidebar is hidden, not unmounted, so the host's mount handler stays). That
+  late-armed case is still to be confirmed in the real rocket-ui
+  host. Once a controller has mounted and gone, rocket-ui's cached sidebar
+  channel keeps the peer subscribed, so busPeer no longer holds messages or asks
+  the host to mount: the cached channel absorbs the summon and the frame ends
+  at `'unanswered'` ("open the sidebar").
+- **It is an event, never a call.** A call the peer held is flushed into the
+  host channel before the controller serves, and dropped. No controller
   listens for the event, so its replays do nothing.
 - **Its states.** `state()` is `'summoning'` for `SUMMON_GRACE_MS`, then
   `'unanswered'`, or `'ready'` once a nonce arrives. Say "open the sidebar"
@@ -767,12 +870,16 @@ backstop:
   `assertRetainedStateSize` lets a test pin the largest snapshots.
 
 **History in dev-tool mounts** ([`prefs.ts`](../../../apps/shared/src/explorer/devtool/prefs.ts)).
-Store tools get no workspace preferences, so the controller passes the history
-store `createFsPrefs({ cm, path: historyPrefsPath('<tool>'), owner: fingerprint, ownerNow })`.
-That is a file at `@/User/.workspace/rocketride.<tool>.history.json`, attached
-with `attachWhenLoaded(prefs, (api, owner) => store.attachPrefs(api, owner))`.
+History is per user and can be large (up to 256 KB per owner), so the
+controller passes the history store
+`createFsPrefs({ fs: createPrefsFs(getClient), path: historyPrefsPath('<tool>'), owner: fingerprint, ownerNow })`.
+That is a file at `@/User/.workspace/rocketride.<tool>.history.json`, written
+through the realm's client and attached with
+`attachWhenLoaded(prefs, (api, owner) => store.attachPrefs(api, owner))`. The
+host's `ToolHostServices.prefs` partition is not used for it: that store is
+per workspace, mirrored to every realm and republished whole on each write.
 
-- **Load first.** `client.fsStat` then `client.fsReadJson` run before the
+- **Load first.** `fsStat` then `fsReadJson` run before the
   attach, so the store never starts empty and its first write never clobbers
   the file. A change made before or during the load is queued, applied over
   what the load read, and written once it is ready.
@@ -782,7 +889,8 @@ with `attachWhenLoaded(prefs, (api, owner) => store.attachPrefs(api, owner))`.
     `packages/ai/src/ai/account/file_store.py`), so a first run is always
     ready.
   - A failed request is retried (`PREFS_LOAD_ATTEMPTS` in all) before the
-    session falls back to memory.
+    session falls back to memory. A realm with no client yet fails the request
+    as `unavailable` (nothing sent); that is never taken for a missing file.
   - A file that exists but cannot be read, or is in an unknown or newer
     format, is never written; history stays in memory for that session.
     That includes a zero-byte file, such as one left by an interrupted write
@@ -792,6 +900,12 @@ with `attachWhenLoaded(prefs, (api, owner) => store.attachPrefs(api, owner))`.
 - **One bag per identity fingerprint.** At most 8 bags are kept. The owner is
   checked before every file request and again after every awaited one (a
   write's mkdir, a load's stat and read).
+  - **Nothing it does not understand is erased.** Another owner's entry,
+    well-formed or not, and any unknown top-level field (a newer client's) are
+    written back exactly as stored. An entry that is not a bag is never
+    dropped, and never counts toward the owner cap, so it cannot push a real
+    owner out. If THIS owner's entry is not a bag, the file is
+    left unwritten and the session stays in memory.
   - A write that falls due while nobody is vouched for (`ownerNow()` null, a
     reconnect) is held. It looks again at most every 30 s, without using up
     the failure retries, and lands once the same owner is back. A load waits
@@ -802,54 +916,62 @@ with `attachWhenLoaded(prefs, (api, owner) => store.attachPrefs(api, owner))`.
     settled and the owner was checked again.
   - After `dispose()`, nothing is sent and nothing read is accepted.
 - **Writes.** They are debounced and serialised, and the first one runs
-  `client.fsMkdir` on the folder.
+  `fsMkdir` on the folder.
   - A failed write retries with backoff (`PREFS_WRITE_RETRIES`).
   - The file is capped at twice the 256 KB history bag, measured as the SDK
     writes it (two-space indented JSON).
-  - Every fs request has an explicit timeout.
+  - Every fs request has an application deadline (`PREFS_FS_DEADLINE_MS`).
   - `@/User/.workspace/…` and SQL's scope-less `.workspace/…` are the same
     folder.
-- **Last writer wins across windows** (a known limitation). Drafts and
-  captions stay session-only.
+- **No lost updates across owners.** Each write re-reads the file just before
+  it and merges: this owner's bag from memory, every other owner's entry and
+  every unknown field from the fresh read. A failed fresh read writes nothing:
+  the change stays in memory, the failure is reported, and the write is retried
+  like any failed write. Two windows under the SAME owner still keep only the
+  later one's bag for that owner. **Known limit:** between the fresh read's
+  answer and the write's arrival at the server (one round trip, at most the
+  15 s fs deadline) another window's write can still land and be reverted for
+  that one write; the owner's next write repairs it, and no entry is ever
+  corrupted. Closing it needs a server-side compare-and-swap on `fs_put_json`. Drafts and captions stay session-only.
 
-**Rules a controller must follow** (they come from the shell's `busPeer.ts`
-and `toolOps.ts`):
+**Rules a controller must follow** (they come from the shell's `busPeer.ts`,
+`toolChannel.ts` and `toolOps.ts`):
 
-- The sidebar peer has **one** live subscriber, whichever subscribed last.
-  Nothing may subscribe after the op server, and the controller never calls
-  `peer.subscribe` itself. Nothing at runtime can catch a stray subscriber, so
-  each app keeps two guards:
-  - **One wiring module.** `createToolChannel`, `createToolOpServer` and
-    `createToolController` are imported in ONE wiring module per app. A
-    source-reading test pins this with `findToolFactoryImports` from
+- The host's channel is the **only** subscriber of the sidebar peer, and its
+  registry serves the ops. A lane never builds a channel and never subscribes a
+  peer. Nothing at runtime can catch a stray one (a second channel takes the
+  peer's single live slot, and every call then goes unanswered), so each app
+  keeps two guards:
+  - **No channel factory.** A source-reading test pins that no lane module
+    imports `createToolChannel` from `shell`, with `findToolFactoryImports` from
     `testing.ts`. That helper is an accident guard, not a boundary: it reads
     text, and catches named, aliased, namespace, default, re-export and
     dynamic imports in either quote style.
   - **A mount test.** The lane's mount test ends with
-    `assertSidebarSubscribers(spy)`, which requires exactly two live
-    subscriptions: the channel, then the op server.
-- The live subscriber hears every frame event twice, and a remount replays the
-  last one. Events are idempotent hints only and every mutation is an op. Rod's
-  op server would run an event that shares an op's name, so
-  `attachController`'s shim drops events before the op server sees them. Even
-  so, keep event and op names disjoint.
-- Calls are held only while no subscriber at all is on the sidebar peer, and
-  `attachController` passes held calls to the handlers, so the deadline
-  decides whether each one runs. A call that arrives while another subscriber
-  (the host channel) holds the slot is dropped; frames wait for readiness to
-  avoid that.
+    `assertSidebarSubscribers(spy)`, which requires exactly one live
+    subscription: the host's channel.
+- A frame's event reaches the controller's channel twice (live, then through the
+  retained slot), and a remount replays the last one. Events are idempotent
+  hints only and every mutation is an op. An event that shares an op's name
+  is refused by the controller (and attach throws when `events` collides), so
+  keep event and op names disjoint.
+- A call that reaches the controller's channel before its handlers are served
+  is dropped; frames wait for readiness to avoid that.
 - A sidebar mount posts no event and no call, opens no document and registers
   no monitor; its only posts are retained state (readiness, identity).
 
-**What the platform loses.** In VS Code, the controller's own `client.tool`
-failures arrive without `code`: the bus bridge carries messages only. So the
-`TASK_STOPPED` retry and the stopped-versus-unreachable probe split cannot work
-there, and no code is ever rebuilt from message text. There are no brokered
-`chat` or pipe ops, so features that need them must degrade in dev-tool mounts.
+**What the platform loses.** An application deadline (`getTasks`, `fs*`, the
+monitors) stops the caller waiting but cannot cancel the request. The SDK's own
+timeout, on `tool`, is a plain `Error` whose text ("Request timed out after
+<n>ms") is the only thing that identifies it, so `reply.ts` classifies it by
+that text as kind `timeout`. No `code` is ever rebuilt from message text.
 
 **Testing** ([`testing.ts`](../../../apps/shared/src/explorer/devtool/testing.ts)).
 The harness runs the shell's **real** `busPeer`, `toolOps`, `toolChannel` and
-retained registry, imported from source by relative path.
+retained registry, imported from source by relative path. A lane test builds
+the host's one channel per mount over a harness peer
+(`shellProtocol.createToolChannel(h.sidebarPeer)` and
+`...(h.newFramePeer())`) and never touches the peer again.
 
 - **The JSON wire.** By default `createDevToolHarness` carries every bus
   payload as its JSON image, as VS Code's postMessage does, and records each
@@ -858,11 +980,28 @@ retained registry, imported from source by relative path.
   optional fields (`payload`, `args`, `result`, `error`) may be absent;
   whatever they hold is judged in full. `{ json: false }` models rocket-ui's
   in-process realm.
-- **Helpers.** It adds `assertJsonSafe`, `settle()`, `spyPeer`, the two quirk-1
-  guards above, and fake VS Code and rocket-ui realms whose rules cite
-  `connection.ts`.
+- **A real realm client.** `createRealmClientHarness()` builds a real
+  `RocketRideClientProxy` over a real op bus on which `registerClientOps`
+  serves the root's surface, across a JSON hop; only the socket is a stand-in
+  (`onRequest` scripts it). `realmClient.integration.test.ts` drives the adapter,
+  the controller and the frame through it. The shared test runner
+  (`scripts/stub-shell.cjs`) stubs `rocketride` for everything except files
+  under `packages/shell/src/`, which need the real SDK.
+- **Helpers.** `assertJsonSafe`, `settle()`, `spyPeer`, the lane guards above,
+  and fake mirrored (VS Code) and client (rocket-ui) realms whose rules cite
+  `connection.ts`. The mirrored one has no client until its first status mirror,
+  then a client that keeps the last account the manager saw.
 
 ## Known limits
+
+- **A stale readiness nonce after the VS Code sidebar webview closes.** The
+  extension host detaches the realm without clearing the root-retained tool
+  state, so a frame still sees `{ ready: <nonce> }` for a controller that no
+  longer exists. The frame reports `connected`, nothing summons (a nonce means
+  no summon), and each call waits its full timeout, whose text says the
+  controller "may still be executing it" although nothing ran.
+- **After the controller unmounts in rocket-ui**, a frame's summon does not
+  reach `host.mountToolSidebar` (see Summoning above).
 
 - The React hook and the components that import from `shell` are type-checked
   and bundled but have no DOM tests: the repository has no component test

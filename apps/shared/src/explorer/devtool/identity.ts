@@ -30,25 +30,31 @@
 // previous session's runs. The tracker answers ONE question, "whose session
 // is this, right now?", and answers "unknown" whenever it cannot be sure.
 //
-// WHERE THE ANSWER COMES FROM (verified in source, 2026-10-21):
+// WHERE THE ANSWER COMES FROM. Every realm holds a real client (the root's, or
+// a RocketRideClientProxy seeded from the root's mirror), so whether a realm
+// owns a socket is NEVER inferred from having a client. Two sources exist, and
+// the bus's own capabilities decide between them:
 //
-//   A realm that OWNS the client (rocket-ui): the SDK client's own account,
-//   `getClient().getAccountInfo()`. Every (re)connect handshake sets it, every
-//   disconnect and logout clears it, an `apaext_account` push replaces it
-//   (client-typescript client.ts: _connectResult), so the tracker reads it
-//   directly rather than through the manager.
-//
-//   A SOCKETLESS realm (VS Code webview; `getClient()` is null): the root's
-//   retained `shell:account` topic. The extension host republishes it on
-//   every status change and account push, and publishes null when it loses
-//   the account (apps/vscode busHost.ts startMirrors; the SDK clears its
-//   account before announcing a disconnect). The realm's own manager IGNORES
+//   The root's retained `shell:account` topic, when the bus offers
+//   `subscribe`/`read` AND the topic has ever delivered a value to this realm
+//   (even null): the authority. The VS Code extension host republishes it on
+//   every status change and account push, and publishes null when it loses the
+//   account (apps/vscode busHost.ts startMirrors; the SDK clears its account
+//   before announcing a disconnect). A mirrored realm's own manager IGNORES
 //   that null (connection.ts installMirrorSubscriptions: `if (!snapshot)
-//   return;`), so its `getAccountInfo()` can keep answering the previous
-//   account after a sign-out. The tracker therefore subscribes to the topic
-//   itself and reads it (`cm.read`) at mount and on every reconnect.
+//   return;`), so the realm client's `getAccountInfo()` keeps answering the
+//   PREVIOUS account after a sign-out, and `shell:status` (connected) lands
+//   before `shell:account` on the next sign-in: a client read at that moment
+//   would show the old user for the new connection. So once the topic is known
+//   the tracker reads and follows the topic, never the client's account.
 //
-// RECONNECT RULE. What a socketless realm sees around a reconnect: the root
+//   The client's own account (`getAccountInfo()`), when the topic never
+//   delivered (the cloud shell's root has no such publisher): every
+//   (re)connect handshake sets it, every disconnect and logout clears it, an
+//   `apaext_account` push replaces it (client-typescript client.ts:
+//   _connectResult).
+//
+// RECONNECT RULE. What a mirrored realm sees around a reconnect: the root
 // publishes `shell:status` then `shell:account` on the same host event, so the
 // realm emits `shell:connected` FIRST and `shell:accountUpdate` (the fresh
 // account) AFTER it. So:
@@ -59,7 +65,7 @@
 //   shell:login / accountUpdate   -> that account (a falsy one: unknown)
 //   shell:logout / orgChanged     -> unknown until a truthy account arrives
 //                                    (a reconnect does not end the wait)
-//   topic snapshot (socketless)   -> that account; null: unknown
+//   topic snapshot                -> that account; null: unknown
 //
 // Account A -> disconnect -> reconnect -> account B therefore reads A, then
 // unknown, then B: never "A again", never "A then nothing". If the root kept
@@ -74,8 +80,8 @@
 // (client.ts), the manager emits `shell:connected` only for an AUTHENTICATED
 // client (connection.ts onConnected guard and `_connect`'s
 // requireAuthenticatedResult, which demands a userId), and the root publishes
-// a null account. The tracker still fails closed on it: in a client realm the
-// identity is known only while the client reports `isAuthenticated()`.
+// a null account. The tracker still fails closed on it: the identity is known
+// only while the client (when there is one) reports `isAuthenticated()`.
 //
 // A bus without `read`/`subscribe` (a bare structural fake) degrades to the
 // strict event rule: the mount-time `getAccountInfo()`, then only account
@@ -101,9 +107,9 @@ export interface IIdentityBus {
 	getAccountInfo(): unknown;
 	/** Whether the realm is connected. */
 	isConnected(): boolean;
-	/** The realm's client (null in a socketless realm). */
+	/** The realm's client (null until the realm can answer; never evidence of what the realm owns). */
 	getClient?(): unknown;
-	/** Follow a retained topic (the root's account topic). */
+	/** Follow a retained topic (the root's account topic): its presence is the capability. */
 	subscribe?(topic: string, cb: (snapshot: unknown) => void): () => void;
 	/** Read a retained topic at the root. */
 	read?(topic: string): Promise<unknown>;
@@ -132,8 +138,9 @@ export interface IIdentityTracker {
 	/** Be told about every change (fingerprint or permission hints); returns unsubscribe. */
 	subscribe(cb: (snapshot: IIdentitySnapshot) => void): () => void;
 	/**
-	 * Whether the tracker has given its FIRST real answer: at once in a client
-	 * realm, once the root's account topic was read in a socketless one. Before
+	 * Whether the tracker has given its FIRST real answer: at once, unless the
+	 * root's account topic is being read (the bus offers `read`) and that read
+	 * has not answered. Before
 	 * that, `known: false` means "not read yet", not "signed out".
 	 */
 	settled(): boolean;
@@ -183,12 +190,11 @@ export function createIdentityTracker(opts: { cm: IIdentityBus }): IIdentityTrac
 		}
 	};
 	const client = (): unknown => (typeof cm.getClient === 'function' ? cm.getClient() : undefined);
-	const socketless = (): boolean => typeof cm.getClient === 'function' && (client() === null || client() === undefined);
-	const canReadRoot = (): boolean => socketless() && typeof cm.read === 'function';
-	/** In a client realm, whether the client says its session is authenticated (fails closed). */
+	/** Whether the root's account topic has ever delivered a value (even null) to this realm: then it is the authority. */
+	let topicKnown = false;
+	/** The client says its session is authenticated, or has no way to say (fails closed on a throw). */
 	const authenticated = (): boolean => {
-		if (socketless()) return true;
-		const own = client() as { isAuthenticated?: () => unknown } | undefined;
+		const own = client() as { isAuthenticated?: () => unknown } | null | undefined;
 		if (typeof own?.isAuthenticated !== 'function') return true;
 		try {
 			return own.isAuthenticated() === true;
@@ -231,27 +237,49 @@ export function createIdentityTracker(opts: { cm: IIdentityBus }): IIdentityTrac
 		publish();
 	};
 
-	/** Re-read the source of truth for this realm kind (mount and reconnect). */
+	/** Trust the client's own account (the topic never delivered). */
+	const acceptClient = (): void => {
+		const own = client() as { getAccountInfo?: () => unknown } | null | undefined;
+		accept(typeof own?.getAccountInfo === 'function' ? own.getAccountInfo() : cm.getAccountInfo());
+	};
+
+	/** Whether a read of the root topic is pending at mount (the first answer is not in yet). */
+	let readPending = false;
+
+	/** Re-read the source of truth (mount and reconnect). */
 	const reread = (): void => {
 		if (disposed || awaiting) return publish();
 		if (!isConnected()) return forget(false);
-		if (canReadRoot()) {
+		if (typeof cm.read === 'function') {
 			const seq = ++readSeq;
-			(cm.read as (topic: string) => Promise<unknown>)(ACCOUNT_MIRROR_TOPIC).then(
+			cm.read(ACCOUNT_MIRROR_TOPIC).then(
 				(value) => {
-					if (!disposed && seq === readSeq && !awaiting) accept(value);
+					if (!disposed && seq === readSeq && !awaiting) {
+						if (value !== undefined) {
+							topicKnown = true;
+							accept(value);
+						} else if (topicKnown) {
+							// The topic spoke before and now says nothing: nobody is vouched for.
+							forget(false);
+						} else {
+							// The root has no account topic (the cloud shell's root): the client's own account answers.
+							acceptClient();
+						}
+					}
+					readPending = false;
 					markSettled();
 				},
 				() => {
 					if (!disposed && seq === readSeq) forget(false);
+					readPending = false;
 					markSettled();
 				},
 			);
+			readPending = true;
+			// Nothing is trusted until the read answers: a mirrored realm's client may still hold the PREVIOUS account.
 			return;
 		}
-		if (socketless()) return publish();
-		const own = client() as { getAccountInfo?: () => unknown } | undefined;
-		accept(typeof own?.getAccountInfo === 'function' ? own.getAccountInfo() : cm.getAccountInfo());
+		acceptClient();
 	};
 
 	const on = (event: IdentityEvent, handler: (payload: unknown) => void): void => {
@@ -267,22 +295,20 @@ export function createIdentityTracker(opts: { cm: IIdentityBus }): IIdentityTrac
 
 	if (typeof cm.subscribe === 'function') {
 		offs.push(cm.subscribe(ACCOUNT_MIRROR_TOPIC, (value) => {
-			if (disposed || !socketless()) return;
+			if (disposed || value === undefined) return;
+			topicKnown = true;
 			// Newer than any read still in flight: that read must not land after it.
 			readSeq += 1;
 			if (value) accept(value);
 			else forget(false);
+			readPending = false;
 			markSettled();
 		}));
 	}
 
-	// Mount: a socketless realm with a root to read waits for it; a bare bus
-	// takes the manager's snapshot (the only one it has); a client realm reads
-	// its client.
-	if (socketless() && !canReadRoot()) accept(isConnected() ? cm.getAccountInfo() : null);
-	else reread();
-	// Only a socketless realm's root read answers later; everything else answered now.
-	if (!(socketless() && canReadRoot() && isConnected())) markSettled();
+	// Mount: read the source of truth. Only a pending read of the root answers later.
+	reread();
+	if (!readPending) markSettled();
 
 	return {
 		get: () => snapshot,

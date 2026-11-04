@@ -15,18 +15,17 @@ import path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
 import type { IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import { ExplorerToolError } from 'shared/explorer';
+import { assertNoOpEventCollisions } from 'shared/explorer/devtool/controller';
 import { createFrameCaller } from 'shared/explorer/devtool/frame';
 import { assertSidebarSubscribers, findToolFactoryImports } from 'shared/explorer/devtool/testing';
 import type { IDevToolHarness } from 'shared/explorer/devtool/testing';
 import { NOT_DISCOVERED_TEXT, NOT_LISTED_TEXT } from '../src/devtool/controller';
-import { FOCUS_MAX_AGE_MS, OP, QUERY_TEXT_MAX, STATE, VECTOR_APP_ID } from '../src/devtool/protocol';
+import { EVENT, FOCUS_MAX_AGE_MS, OP, QUERY_TEXT_MAX, STATE, VECTOR_APP_ID } from '../src/devtool/protocol';
 import type { IFocusRequest, IMapRequest, IQueryHint, VectorOps } from '../src/devtool/protocol';
 import { consoleUri, documentUri } from '../src/vector/addresses';
 import { connectionRow, rowStatusText, sidebarListLine } from '../src/vector/connections';
 import { fixture } from './support/fixtures';
-import { account, disposeAll, latestStateMap, manualTimers, mountController, nonStatePosts, publishedStates, recordingDocuments, rocketRealm, settle, shellProtocol, signInVsCode, track, until, vscodeRealm } from './support/devtool';
-import { createVectorController } from '../src/devtool/controller';
-import { makeVectorEndpointStore } from '../src/adapters/explorer';
+import { account, announceFrame, disposeAll, latestStateMap, manualTimers, mountController, nonStatePosts, publishedStates, rocketRealm, settle, shellProtocol, signInVsCode, track, until, vscodeRealm } from './support/devtool';
 import { createDevToolHarness } from 'shared/explorer/devtool/testing';
 
 afterEach(disposeAll);
@@ -54,7 +53,9 @@ function allSources(): Array<{ path: string; text: string }> {
 function frameSide(h: IDevToolHarness) {
 	const peer = h.newFramePeer();
 	const channel = shellProtocol.createToolChannel(peer);
-	const caller = createFrameCaller<VectorOps>({ peer, channel, createToolController: shellProtocol.createToolController, createToolChannel: shellProtocol.createToolChannel });
+	const caller = createFrameCaller<VectorOps>({ channel, createToolOpClient: shellProtocol.createToolOpClient });
+	// The host announces the frame mount (HELLO): a frame that was not announced hears no controller event.
+	track({ dispose: announceFrame(h) });
 	return { peer, channel, caller };
 }
 
@@ -241,61 +242,107 @@ describe('the relays: a document focus and a map request cross as ops, are retai
 });
 
 describe('calls held for the sidebar controller before it mounts', () => {
-	it('a held requestFocus and a held showOnMap are answered ok once it mounts, and both requests are published', async () => {
+	it('a call the PEER holds before a mount with a FRESH host channel goes to that channel and is dropped (F2): never answered, never refused, and nothing crashes', async () => {
 		const engine = vscodeRealm();
 		signInVsCode(engine.realm);
 		const h = createDevToolHarness(VECTOR_APP_ID);
-		// A frame that calls without waiting for readiness: with no subscriber on the sidebar peer, the peer holds the
-		// calls and hands them over synchronously when the controller subscribes, inside attachController, before
-		// createVectorController has its result, its channel or its publisher.
-		const caller = createFrameCaller<VectorOps>({ peer: h.newFramePeer(), createToolController: shellProtocol.createToolController, createToolChannel: shellProtocol.createToolChannel, waitForController: false });
-		await settle();
+		h.setHostConnection(true);
+		const isCall = (value: unknown): boolean => (value as { __rrtool?: unknown } | null)?.__rrtool === 'call';
+		const heldCalls = (): number => h.wire.filter((entry) => entry.topic === `tool:${VECTOR_APP_ID}:toSidebar` && isCall(entry.value)).length;
+		// Our frames (the base caller's default) wait for readiness: nothing reaches the peer.
 		const key = 'k1|held';
-		const docKey = documentUri(key, 'doc-1');
-		const focus = caller.callReply(OP.requestFocus, { key, docKey, chunkId: 3 }, { timeoutMs: 10_000 });
-		const map = caller.callReply(OP.showOnMap, { key, keys: [['doc-1', 0]], source: 'document' }, { timeoutMs: 10_000 });
+		const waiting = createFrameCaller<VectorOps>({ channel: shellProtocol.createToolChannel(h.newFramePeer()), createToolOpClient: shellProtocol.createToolOpClient });
+		await assert.rejects(waiting.callReply(OP.requestFocus, { key, docKey: documentUri(key, 'doc-1'), chunkId: 3 }, { timeoutMs: 60 }), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'timeout' && /was not sent/.test(error.message));
+		assert.equal(heldCalls(), 0, 'a waiting frame posts no call');
+		// A caller that does not wait (no lane does) puts its calls in the hold, which summons the controller.
+		const eager = createFrameCaller<VectorOps>({ channel: shellProtocol.createToolChannel(h.newFramePeer()), createToolOpClient: shellProtocol.createToolOpClient, waitForController: false });
+		const focus = eager.callReply(OP.requestFocus, { key, docKey: documentUri(key, 'doc-1'), chunkId: 3 }, { timeoutMs: 300 });
+		const map = eager.callReply(OP.showOnMap, { key, keys: [['doc-1', 0]], source: 'document' }, { timeoutMs: 300 });
+		void focus.catch(() => undefined);
+		void map.catch(() => undefined);
 		await settle();
-		// No host channel: the fallback channel catches the held burst and attachController releases it at its end.
-		const errors: unknown[] = [];
-		const controller = track(createVectorController({
-			cm: engine.cm,
-			peer: h.sidebarPeer,
-			documents: recordingDocuments().documents,
-			createToolChannel: shellProtocol.createToolChannel,
-			createToolOpServer: shellProtocol.createToolOpServer,
-			focusTarget: null,
-			store: makeVectorEndpointStore({ debounceMs: 0 }),
-			onError: (error) => errors.push(error),
-		}));
-		assert.equal(await focus, null, 'the held focus is answered ok');
-		assert.equal(await map, null, 'the held map request is answered ok');
-		await until(() => stateOf<Record<string, IFocusRequest>>(h, STATE.focusRequests)?.[key]?.chunkId === 3, 'the focus request published');
-		await until(() => stateOf<Record<string, IMapRequest>>(h, STATE.mapRequests)?.[key]?.keys?.[0]?.[0] === 'doc-1', 'the map request published');
-		assert.deepEqual(errors, []);
-		caller.dispose();
-		controller.dispose();
+		assert.equal(heldCalls(), 2);
+		assert.ok(h.emitted.some((entry) => entry.op === 'host.mountToolSidebar'), 'the held calls summoned the controller');
+		// The host mounts it as on a first mount: a NEW channel on the sidebar peer, then the controller.
+		const mounted = mountController(engine.cm, {}, h);
+		await assert.rejects(focus, (error: unknown) => error instanceof ExplorerToolError && error.kind === 'timeout', 'a served call would have been answered at once');
+		await assert.rejects(map, (error: unknown) => error instanceof ExplorerToolError && error.kind === 'timeout');
+		assert.deepEqual(mounted.errors, [], 'the host channel took the calls: the controller never saw them, and nothing was reported');
+		assert.equal(stateOf<Record<string, IFocusRequest>>(h, STATE.focusRequests)?.[key], undefined, 'no focus request was published');
+		waiting.dispose();
+		eager.dispose();
+		mounted.controller.dispose();
+	});
+
+	it('the relays still answer from a whole controller: a call in a controller that is up publishes its request (TDZ ordering kept)', async () => {
+		const engine = vscodeRealm();
+		signInVsCode(engine.realm);
+		const mounted = mountController(engine.cm);
+		mounted.h.setHostConnection(true);
+		const frame = frameSide(mounted.h);
+		await until(() => frame.caller.controllerReady(), 'the readiness');
+		const key = 'k1|up';
+		assert.equal(await frame.caller.callReply(OP.requestFocus, { key, docKey: documentUri(key, 'doc-1'), chunkId: 3 }, { timeoutMs: 10_000 }), null);
+		assert.equal(await frame.caller.callReply(OP.showOnMap, { key, keys: [['doc-1', 0]], source: 'document' }, { timeoutMs: 10_000 }), null);
+		await until(() => stateOf<Record<string, IFocusRequest>>(mounted.h, STATE.focusRequests)?.[key]?.chunkId === 3, 'the focus request published');
+		await until(() => stateOf<Record<string, IMapRequest>>(mounted.h, STATE.mapRequests)?.[key]?.keys?.[0]?.[0] === 'doc-1', 'the map request published');
+		assert.deepEqual(mounted.errors, []);
+		frame.caller.dispose();
+		mounted.controller.dispose();
 	});
 });
 
-describe('T6 - a quiet sidebar: no event, call or document at mount; the mount is the activation, and discovery waits for a known identity', () => {
-	it('rocket-ui: state publishes only, then the first discovery with no activation event; a later selection starts nothing more', async () => {
+describe('T6 - a quiet sidebar: no event, call or document at mount; probes are held until a person is present, and discovery waits for a known identity', () => {
+	it('rocket-ui: a boot mount (nobody present) publishes state, discovers (a read) and issues ZERO tool calls; a person releases the held probes', async () => {
 		const engine = rocketRealm();
 		engine.realm.login(account('u1'));
-		const mounted = mountController(engine.cm);
+		const mounted = mountController(engine.cm, { present: false });
 		await settle();
 		assert.deepEqual(nonStatePosts(mounted.spy.posts), [], 'no event or call posts at mount');
 		assert.ok(mounted.spy.posts.length > 0, 'the premise: retained state was published');
 		assert.deepEqual(mounted.docs.opened, [], 'no documents.open at mount');
 		assert.deepEqual(mounted.h.emitted, [], 'nothing summoned a frame');
-		assert.equal(mounted.controller.activation.reason(), 'lazyMount', 'the mount is the activation');
+		assert.equal(mounted.controller.discovery.holdProbes(), true, 'the probes are held until a person is present');
 		await until(() => engine.requests.some((r) => r.op === 'client.getTasks'), 'the first discovery');
-		const discoveries = engine.requests.filter((r) => r.op === 'client.getTasks').length;
+		await until(() => mounted.controller.store.getState().endpoints.length === 1, 'the connection listed');
+		await settle();
+		assert.equal(engine.requests.filter((r) => r.op === 'client.tool').length, 0, 'a boot mount issues no tool call');
+		assert.equal(engine.world.calls.length, 0);
 		engine.realm.activate(VECTOR_APP_ID);
 		await settle();
-		assert.equal(engine.requests.filter((r) => r.op === 'client.getTasks').length, discoveries);
+		assert.equal(engine.requests.filter((r) => r.op === 'client.tool').length, 0, 'selecting the tool is not presence');
 		assert.deepEqual(nonStatePosts(mounted.spy.posts), [], 'still no event or call posts');
-		assert.deepEqual(mounted.docs.opened, []);
+		mounted.controller.discovery.markUserPresent('user');
+		await until(() => engine.requests.some((r) => r.op === 'client.tool'), 'the probe once a person is present');
+		assert.equal(mounted.controller.discovery.holdProbes(), false);
 		mounted.controller.dispose();
+	});
+
+	it('the first frame op shows a person present (onFirstOp), and so do a sidebar click and an explicit Refresh; an automatic (quiet) refresh does not', async () => {
+		const engine = vscodeRealm();
+		signInVsCode(engine.realm);
+		const op = mountController(engine.cm, { present: false });
+		op.h.setHostConnection(true);
+		await until(() => op.controller.store.getState().endpoints.length === 1, 'discovery');
+		await settle();
+		assert.equal(engine.requests.filter((r) => r.op === 'client.tool').length, 0);
+		const frame = frameSide(op.h);
+		await until(() => frame.caller.controllerReady(), 'the readiness');
+		await frame.caller.callReply(OP.refresh, {}, { timeoutMs: 5_000 });
+		assert.equal(op.controller.discovery.holdProbes(), false, 'the first op released the probes');
+		frame.caller.dispose();
+		op.controller.dispose();
+
+		const quiet = mountController(vscodeRealm().cm, { present: false });
+		quiet.controller.env(true).refresh?.({ quiet: true });
+		assert.equal(quiet.controller.discovery.holdProbes(), true, 'a quiet refresh is not presence');
+		quiet.controller.env(true).refresh?.({});
+		assert.equal(quiet.controller.discovery.holdProbes(), false, 'an explicit Refresh is');
+		quiet.controller.dispose();
+	});
+
+	it('no event name is also an op name (the channel would run the op\'s handler for such an event)', () => {
+		assert.deepEqual(assertNoOpEventCollisions(Object.values(OP), Object.values(EVENT)), []);
 	});
 
 	it('rocket-ui: a sidebar mounted before sign-in sends nothing until the identity is known', async () => {
@@ -408,8 +455,11 @@ describe('docVersions is cut by its own snapshot, so the stamps outlast the list
 });
 
 describe('R6 - one wiring module; the controller is built in an effect', () => {
-	it('createToolChannel, createToolOpServer and createToolController are imported from shell in ONE module', () => {
-		assert.deepEqual(findToolFactoryImports(allSources()), ['devtool/wiring.ts']);
+	it('createToolChannel is imported nowhere in the app (the host builds every channel); createToolOpServer and createToolOpClient come from shell in ONE module', () => {
+		const sources = allSources();
+		assert.deepEqual(findToolFactoryImports(sources), []);
+		const importing = sources.filter((file) => /\b(?:createToolOpServer|createToolOpClient)\b[^;]*from 'shell'/.test(code(file.text))).map((file) => file.path);
+		assert.deepEqual(importing, ['devtool/wiring.ts']);
 	});
 
 	it('the sidebar mount builds its controller in an effect with a disposing cleanup, never in a memo, and never subscribes the peer', () => {
@@ -417,7 +467,8 @@ describe('R6 - one wiring module; the controller is built in an effect', () => {
 		assert.match(sidebar, /useEffect\(\(\) => \{[\s\S]*?const created = createVectorController\(\{[\s\S]*?return \(\) => \{\s*created\.dispose\(\);/);
 		assert.doesNotMatch(sidebar, /useMemo\(\(\) => createVectorController|peer\.subscribe/);
 		assert.match(sidebar, /useEffect\(\(\) => \{\s*controller\?\.noteActiveDocKey\(activeDocKey\);\s*\}, \[controller, activeDocKey\]\);/);
-		assert.match(sidebar, /if \(!env\) return null;/, 'nothing until the controller exists (the host shows the load state)');
+		assert.match(sidebar, /if \(!controller\) return null;/, 'nothing until the controller exists (the host shows the load state)');
+		assert.match(sidebar, /useEngineSource\(\)/, 'the client and readiness come from the realm\'s engine source');
 	});
 });
 

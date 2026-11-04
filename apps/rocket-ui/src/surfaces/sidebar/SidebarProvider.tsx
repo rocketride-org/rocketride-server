@@ -43,7 +43,7 @@ import { toolDocUri } from 'shell';
 import { realmPrefsHub } from 'shell';
 import type { BuiltinToolServices } from 'shared/tools/core';
 import { registerBuiltinTools } from 'shared/tools/builtins';
-import { appdevFrames } from '../appdev/session/appdevFrames';
+import { appdevFrames } from '../preview/session/appdevFrames';
 import { BxExport, useSidebarCollapsed, useSidebarActiveView } from 'shell';
 import type { ProjectEntry } from 'shared/tools/pipelines/sidebar/types';
 import type { SidebarMode, ToolTabsSidebar } from 'shared/tools/core/chrome/types';
@@ -55,7 +55,7 @@ import { isPipelineFile, pipelineExtension } from '../workspace/projectStore';
 import { createProjectVfs } from '../workspace/projectVfs';
 import { getWorkspaceVfs, storePathToVirtual } from '../workspace/vfs/workspace';
 import { downloadJson } from '../../utils/downloadFile';
-import { scanApps } from '../appdev/session/appStore';
+import { scanApps } from '../preview/session/appStore';
 import { INTRO_PAGES } from 'shared/tools/introCatalog';
 import type { IntroMode } from 'shared/tools/introCatalog';
 
@@ -72,14 +72,22 @@ registerBuiltinTools();
  * registered sidebar content even while the sidebar is collapsed to its icon
  * rail; this free-form Explorer content has no icon-rail form (a future
  * per-app design task), so the gate reads the shell-provided collapsed flag
- * and renders nothing while collapsed — preserving the previous
- * hide-when-collapsed look. The confirm/error dialogs mount OUTSIDE this gate
- * so they stay up (and their promises resolve) across a collapse.
+ * and HIDES it while collapsed — preserving the previous hide-when-collapsed
+ * look. Hidden, never unmounted: the content hosts the tool CONTROLLERS and
+ * the host.mountToolSidebar summon handler, and a restored tool document (an
+ * agent conversation tab) must reach its controller while collapsed — an
+ * invisible sidebar is still a loaded sidebar. The confirm/error dialogs
+ * mount OUTSIDE this gate so they stay up (and their promises resolve)
+ * across a collapse.
  */
 const SidebarCollapsedGate: React.FC<{ children: ReactNode }> = ({ children }) => {
 	// Collapsed flag provided by the shell around the sidebar slot.
 	const collapsed = useSidebarCollapsed();
-	return collapsed ? null : <>{children}</>;
+	return (
+		<div style={{ display: collapsed ? 'none' : 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+			{children}
+		</div>
+	);
 };
 
 // =============================================================================
@@ -273,11 +281,13 @@ const SidebarProvider: React.FC = () => {
 							const docs = getDocs();
 							if (docs) {
 								const st = docs.getState();
-								const editorIds = Object.entries(st.editors)
-									.filter(([, ed]) => ed.documentUri === path)
-									.map(([id]) => id);
-								for (const eid of editorIds) docs.closeEditor(eid);
-								if (editorIds.length > 0) await docs.openDocument(newPath);
+								// A folder rename moves every open descendant too —
+								// match at path-segment boundaries only.
+								const affected = Object.entries(st.editors)
+									.filter(([, ed]) => ed.documentUri === path || ed.documentUri.startsWith(`${path}/`));
+								const reopen = new Set(affected.map(([, ed]) => newPath + ed.documentUri.slice(path.length)));
+								for (const [eid] of affected) docs.closeEditor(eid);
+								for (const uri of reopen) await docs.openDocument(uri);
 							}
 						}
 						break;
@@ -294,7 +304,14 @@ const SidebarProvider: React.FC = () => {
 
 						// Force-remove the document and all editors regardless of dirty state
 						// so stale content doesn't linger if a new file reuses the same name
-						getDocs()?.discardDocument(path);
+						// (a folder delete discards every open descendant too).
+						const docs = getDocs();
+						if (docs) {
+							docs.discardDocument(path);
+							for (const uri of Object.keys(docs.getState().documents)) {
+								if (uri.startsWith(`${path}/`)) docs.discardDocument(uri);
+							}
+						}
 						break;
 					}
 					case 'createFolder':
@@ -336,6 +353,10 @@ const SidebarProvider: React.FC = () => {
 	// Action error state — shown as a dialog when run/stop fails
 	const [actionError, setActionError] = useState<string | null>(null);
 
+	// The run call honors the pipeline settings (it hard-coded 'full' before
+	// the settings unification — the one reader that bypassed the setting).
+	const { settings: workspaceSettings } = useWorkspace();
+
 	/**
 	 * Handles run/stop actions on source components.
 	 */
@@ -352,7 +373,9 @@ const SidebarProvider: React.FC = () => {
 							.split('/')
 							.pop()
 							?.replace(/\.pipe$/, '') ?? filePath;
-					await client.use({ pipeline, source: sourceId, name, pipelineTraceLevel: 'full' });
+					const rawTrace = workspaceSettings['rocketride.pipeBuilder.pipelineTraceLevel'];
+					const traceLevel = rawTrace === 'none' || rawTrace === 'metadata' || rawTrace === 'summary' || rawTrace === 'full' ? rawTrace : 'full';
+					await client.use({ pipeline, source: sourceId, name, pipelineTraceLevel: traceLevel });
 				} catch (err) {
 					setActionError(err instanceof Error ? err.message : String(err));
 				}
@@ -365,7 +388,7 @@ const SidebarProvider: React.FC = () => {
 				}
 			}
 		},
-		[client, isConnected]
+		[client, isConnected, projectVfs, workspaceSettings]
 	);
 
 	/**
@@ -558,7 +581,6 @@ const SidebarProvider: React.FC = () => {
 		prefsHub,
 		pins,
 		onPinsChange: setPins,
-		peerFor: getSidebarPeer,
 		channelFor,
 		documentsFor,
 		revealTool,

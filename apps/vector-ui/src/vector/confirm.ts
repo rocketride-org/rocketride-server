@@ -403,7 +403,10 @@ const SUMMARY_WORDS: Readonly<Record<RemovalAction, { done: string; tail: string
  */
 export function removalSummary(outcome: IRemovalOutcome, targets: ReadonlyArray<{ objectId: string; path: string }>, action: RemovalAction): string {
 	const words = SUMMARY_WORDS[action];
-	const rows = outcome.removedChunks === null ? '' : ` (${formatCount(outcome.removedChunks)} ${outcome.removedChunks === 1 ? 'chunk' : 'chunks'})`;
+	// A trash move or a restore says what MOVED (the answer's `moved_chunks`): a document already in that state moves
+	// nothing, so a mixed batch (some already restored) reports the chunks that really changed, never the whole batch.
+	const movesChunks = action === 'trash' || action === 'restore';
+	const rows = outcome.removedChunks === null ? '' : ` (${formatCount(outcome.removedChunks)} ${outcome.removedChunks === 1 ? 'chunk' : 'chunks'}${movesChunks ? ' moved' : ''})`;
 	const stopped = outcome.error ? ` Stopped after ${outcome.batchesRun} of ${outcome.batchesTotal} batches: ${outcome.error.headline}` : '';
 	// The documents kept whole, by path where the targets know it.
 	const paths = new Map(targets.map((t) => [t.objectId, t.path || t.objectId]));
@@ -412,6 +415,12 @@ export function removalSummary(outcome: IRemovalOutcome, targets: ReadonlyArray<
 	const keptList = `${keptPaths.join(', ')}${keptMore > 0 ? ` and ${formatCount(keptMore)} more` : ''}`;
 	const kept = outcome.keptLive.length === 0 ? '' : outcome.keptLive.length === 1 ? ` 1 was kept whole, because it still has chunks outside the trash: ${keptList}.` : ` ${formatCount(outcome.keptLive.length)} were kept whole, because they still have chunks outside the trash: ${keptList}.`;
 	if (outcome.removed.length === 0 && outcome.notFound.length === 0 && outcome.keptLive.length === 0) return outcome.error ? outcome.error.headline : `Nothing was ${words.none}.`;
+	if (movesChunks && outcome.removedChunks === 0 && outcome.removed.length > 0 && !outcome.error) {
+		const who = targets.length === 1 && outcome.removed.length === 1 ? targets[0].path || targets[0].objectId : `${formatCount(outcome.removed.length)} documents`;
+		const was = targets.length === 1 && outcome.removed.length === 1 ? 'was' : 'were';
+		const gone = outcome.notFound.length === 0 ? '' : ` ${formatCount(outcome.notFound.length)} ${outcome.notFound.length === 1 ? 'was' : 'were'} already gone.`;
+		return `Nothing moved: ${who} ${was} ${action === 'trash' ? 'already in the trash' : 'already restored'}.${gone}`;
+	}
 	if (action !== 'empty' && targets.length === 1 && outcome.removed.length <= 1 && !outcome.error) {
 		const path = targets[0].path || targets[0].objectId;
 		if (outcome.keptLive.length === 1) return `${path} was kept whole, because it still has chunks outside the trash; nothing was ${words.none}.`;

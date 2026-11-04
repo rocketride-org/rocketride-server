@@ -42,7 +42,7 @@
 
 import { getDocs } from '../../../docs';
 import { isPipelineFile } from '../projectStore';
-import { readAppPackage } from '../../appdev/session/appStore';
+import { readAppPackage } from '../../preview/session/appStore';
 import { getMediaInfo } from 'shared/utils/mediaTypes';
 
 // =============================================================================

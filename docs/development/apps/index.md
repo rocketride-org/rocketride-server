@@ -16,9 +16,9 @@ and that difference is what this page covers.
 - [Explorer library](explorer-library.md): the shared code under
   `apps/shared/src/explorer/` that SQL Explorer, Graph Explorer and Vector
   Explorer compile in (discovery, tool sessions, history, the statement runner).
-- [Vector Explorer](vector-explorer.md): how the app, the shared library and
-  the vector store nodes fit together, the write switch, and which suites and
-  fixtures test them. The interface itself is the
+- `apps/vector-ui/docs/development.md`: how the Vector Explorer app, the shared
+  library and the vector store nodes fit together, the write switch, and which
+  suites and fixtures test them. The interface itself is the
   [Vector store tool contract](../nodes/vector-tool-contract.md).
 - `scripts/acceptance/vector-explorer/README.md`: manual live-engine and browser acceptance lanes for Vector Explorer (not run by CI).
 - [App Builder](appdev.md): the VS Code surface for developing, previewing and

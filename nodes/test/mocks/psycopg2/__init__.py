@@ -553,11 +553,30 @@ class MockCursor:
         page = self._paged(scored, it)
         self._rows_out(names, [row for _d, row in page], {id(row): {'distance': d} for d, row in page})
 
+    def _op_semantic_exact(self, body: str, params: List[Any], tag: str) -> None:
+        """The exact recovery search: the semantic statement under a subquery that drops undefined distances."""
+        inner = body[body.index('(') + 1 : body.rindex(') AS candidates')]
+        self._op_semantic(inner + ' ORDER BY "distance" LIMIT %s OFFSET %s', params, tag)
+        self._results = [row for row in self._results if row[-1] is not None and math.isfinite(row[-1])]
+        self.rowcount = len(self._results)
+
+    def _op_has_ann_index(self, body: str, params: List[Any], tag: str) -> None:
+        table = MockConnection._tables.get(_unquote(params[0]))
+        has = bool(table) and any(
+            method in ('hnsw', 'ivfflat') for method, _definition, _options in table.indexes.values()
+        )
+        self._set(['exists'], [(has,)])
+
     def _op_paths(self, body: str, params: List[Any], tag: str) -> None:
         table = self._table(body)
         test, it = self._where(body, params)
         rows = self._ordered([r for r in table.rows.values() if test(r)], ('parent', 'objectid'))
-        self._set(['parent', 'objectid'], [(r.get('parent'), r.get('objectid')) for r in self._paged(rows, it)])
+        # DISTINCT ON (parent): the first row (the lowest object id) of each path, so the page counts paths.
+        distinct: List[Dict[str, Any]] = []
+        for row in rows:
+            if not distinct or distinct[-1].get('parent') != row.get('parent'):
+                distinct.append(row)
+        self._set(['parent', 'objectid'], [(r.get('parent'), r.get('objectid')) for r in self._paged(distinct, it)])
 
     def _op_render(self, body: str, params: List[Any], tag: str) -> None:
         table = self._table(body)

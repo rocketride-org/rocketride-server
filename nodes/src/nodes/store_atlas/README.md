@@ -8,7 +8,7 @@ MongoDB Atlas is a managed database service. This node stores documents in an At
 
 ## What it does
 
-The node ingests embedded chunks into a MongoDB Atlas collection and searches them for incoming questions. Semantic questions use an Atlas `$vectorSearch` aggregation; keyword questions use MongoDB full-text search. It also exposes `search`, `upsert`, and `delete` when bound to an agent.
+The node ingests embedded chunks into a MongoDB Atlas collection and searches them for incoming questions. Semantic questions use an Atlas `$vectorSearch` aggregation; keyword questions use MongoDB full-text search. It also offers the eight agent tools listed below, including document retrieval, statistics, trash and restore, subject to the tool-exposure and write-permission settings.
 
 Choose it when your RocketRide store belongs in an Atlas collection and you want both retrieval paths from one node. Use a different store node for a collection hosted by a different database engine; this implementation creates Atlas-specific metadata, text, and vector indexes on first ingest.
 
@@ -25,20 +25,23 @@ An embedding node must run before the document lane. Ingesting a chunk without a
 
 ## As a tool
 
-The configured tool server name is the namespace for the functions below; it defaults to `atlas`.
+Pipeline agents address the functions below as `<node id>.<function>`. The configured tool server name (default `atlas`) labels tool-response messages.
 
 | Function | Description |
 | --- | --- |
 | `search` | Search the collection for matching documents. |
+| `objdir` | Lists the distinct parent paths of active documents in the collection as a map of parent path to one object ID each; accepts optional `parent` (a case-insensitive pattern, not an exact path), `offset`, and `limit` (default and cap 1000). `offset` and `limit` count documents, not paths: documents that share a parent path appear as one entry, so a page can hold fewer than `limit` entries while more follow. |
+| `get` | Returns up to `limit` chunks (default and cap 100) of one document by `object_id`, ordered by chunk ID, with `total`, `has_more`, and `truncated`; an object ID the store does not hold, or one in the trash, returns a failure object. |
+| `stats` | Returns the collection's count as this store reports it, `document_count` (null on this store, which does not list documents), the embedding model name, and the vector size. |
 | `upsert` | Add or update documents in the collection. |
 | `delete` | Remove documents by object ID. |
 | `list_documents` | List the documents one by one with their path and chunk count, in pages ordered by path (follow `next_cursor`); `deleted: 'deleted'` lists the trash. |
 | `soft_delete` | Move documents to the trash by object ID: their chunks stay stored but leave search, `objdir`, `get` and the listing until `restore`. |
 | `restore` | Take documents out of the trash by object ID. |
 
-`search` and an `upsert` without a supplied embedding use the node's bound embedding provider. Tool invocations do not flow through the pipeline's embedding lane, so bind that provider when agents should create or search vectors automatically. Choose a distinct tool server name for each Atlas node an agent can access.
+`search` and an `upsert` without a supplied embedding use the node's bound embedding provider. Tool invocations do not flow through the pipeline's embedding lane, so bind that provider when agents should create or search vectors automatically. Agents distinguish multiple Atlas nodes by their pipeline node IDs.
 
-`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`, defaulting to `"vectordb_tool"`, `"/"` and `0` respectively.
+`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`; `nodeId` defaults to `"vectordb_tool"`, `parent` to `"/"`, and `chunkId` to the document's position among the chunks sent for its object ID in the call (0 for the first), and an explicit `chunkId` may not repeat within the call.
 
 ## Configuration
 
@@ -76,7 +79,7 @@ The implementation flushes an insert batch at 500 documents or when its accumula
 
 ### Tool Server Name
 
-This is the namespace for the three agent functions: `atlas.search`, `atlas.upsert`, and `atlas.delete` by default. Change it to avoid collisions between multiple Atlas tool nodes.
+The name defaults to `atlas` and labels this store in tool-response messages. Pipeline agents address all eight functions listed above by node ID, for example `<node id>.search` or `<node id>.restore`; changing this label does not change those addresses.
 
 ### Write switches
 
@@ -124,7 +127,7 @@ Semantic search is appropriate when matching meaning across different wording, b
 
 ### Agent tool behavior
 
-The agent `search` function performs semantic retrieval and the agent `upsert` function can use a supplied vector or a bound embedding provider. `delete` permanently removes by object ID. Keep the tool server name unique when several Atlas stores are attached to one agent; otherwise the same function names would collide.
+The agent `search` function performs semantic retrieval and the agent `upsert` function can use a supplied vector or a bound embedding provider. `delete` permanently removes by object ID. Pipeline node IDs distinguish the functions when several Atlas stores are attached to one agent.
 
 ## Upstream docs
 
@@ -138,7 +141,7 @@ The agent `search` function performs semantic retrieval and the agent `upsert` f
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `atlas.provider` | `string` |  | const: `"atlas"` |
-| `atlas.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'atlas' exposes tools as atlas.search / atlas.upsert / atlas.delete. Change this when running multiple Atlas nodes in the same pipeline so their tool names do not collide. | `"atlas"` |
+| `atlas.serverName` | `string` | **Tool Server Name**<br/>Label for this store in tool-response messages (for example, a refused write names atlas.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings. | `"atlas"` |
 | `vector.cloud.host` |  | Enter the server IP address e.g. <your-instance-name>.<region>.atlas.io |  |
 | `vector.database` |  |  | `"rocketride_db"` |
 
@@ -151,5 +154,5 @@ The agent `search` function performs semantic retrieval and the agent `upsert` f
 
 ## Source
 
-[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/store_atlas)
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/nihalnihalani/rocketride-server/tree/develop/nodes/src/nodes/store_atlas)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

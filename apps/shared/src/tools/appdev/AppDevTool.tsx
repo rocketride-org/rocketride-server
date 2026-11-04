@@ -63,7 +63,9 @@ export const AppDevTool: React.FC<DevToolProps> = ({ documents }) => {
 	const appBuilder: AppBuilderSidebar = {
 		apps,
 		...(services.activeDocKey?.startsWith(activePrefix) ? { activeAppId: services.activeDocKey.slice(activePrefix.length) } : {}),
-		onNewApp: () => (toolDocs ? documents?.open('newapp', 'New App') : services.openPage('newapp', 'New App')),
+		// 'Untitled' like a new pipeline: the doc is the unbound builder and
+		// renames to the app's display name once the scaffold binds it.
+		onNewApp: () => (toolDocs ? documents?.open('newapp', 'Untitled') : services.openPage('newapp', 'Untitled')),
 		onOpenApp: (appId: string) => {
 			const name = apps.find((a) => a.id === appId)?.name ?? appId;
 			if (toolDocs) documents?.open(appId, name);

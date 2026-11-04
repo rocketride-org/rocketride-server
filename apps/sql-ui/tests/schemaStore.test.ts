@@ -31,13 +31,17 @@
 // What is asserted here is which TOOLS a refresh reaches for, because that is
 // the whole behaviour under test: whether a fresh read is attempted at all,
 // and whether a caller that needs one is made to wait for it.
+//
+// The store takes an SqlSession, not a client, so each test binds the REAL
+// session over a fake client — the tool log then still shows every call the
+// refresh caused, fallback reads included.
 // =============================================================================
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { SqlEndpoint, SqlSession } from '../src/connect';
-import type { SqlWireClient } from '../src/connect/busClient';
-import { createSqlSession } from '../src/connect/session';
+import type { RocketRideClient } from 'shell';
+import type { SqlEndpoint } from '../src/connect';
+import { createSqlSession } from '../src/connect';
 import { refreshSchema } from '../src/schema/schemaStore';
 
 // =============================================================================
@@ -47,7 +51,7 @@ import { refreshSchema } from '../src/schema/schemaStore';
 /** A fake client plus the tool names it was asked for, in order. */
 interface IFakeClient {
 	/** The client handed to the store. */
-	client: SqlWireClient;
+	client: RocketRideClient;
 	/** Every tool invoked, in order. */
 	tools: string[];
 }
@@ -89,29 +93,8 @@ function fakeClient(behave: (tool: string, index: number) => unknown): IFakeClie
 			tools.push(tool);
 			return behave(tool, tools.length - 1);
 		},
-	} as unknown as SqlWireClient;
+	} as unknown as RocketRideClient;
 	return { client, tools };
-}
-
-/** One session per (fake client, endpoint key), as the app keeps one per connection. */
-const sessions = new WeakMap<SqlWireClient, Map<string, SqlSession>>();
-
-/**
- * The session a refresh runs on (refreshSchema takes a session, not a client).
- *
- * @param client - The fake client.
- * @param endpoint - The endpoint.
- * @returns The session, created once per client and endpoint.
- */
-function sessionFor(client: SqlWireClient, endpoint: SqlEndpoint): SqlSession {
-	const byKey = sessions.get(client) ?? new Map<string, SqlSession>();
-	sessions.set(client, byKey);
-	let session = byKey.get(endpoint.key);
-	if (session === undefined) {
-		session = createSqlSession(client, endpoint);
-		byKey.set(endpoint.key, session);
-	}
-	return session;
 }
 
 /** How many times one tool was invoked. */
@@ -133,13 +116,14 @@ describe('refreshSchema — fresh reflection after a fallback', () => {
 			if (tool === 'refresh_schema' && countOf(tools, 'refresh_schema') === 1) throw new Error('task restarted');
 			return { database: 'shop', tables: {} };
 		});
+		const session = createSqlSession(client, endpoint);
 
-		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
+		await refreshSchema(session, { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 1);
 		// The first attempt fell back, so the snapshot came from get_schema.
 		assert.equal(countOf(tools, 'get_schema'), 1);
 
-		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
+		await refreshSchema(session, { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 2);
 		// The second attempt answered, so no fallback read was needed.
 		assert.equal(countOf(tools, 'get_schema'), 1);
@@ -154,12 +138,13 @@ describe('refreshSchema — fresh reflection after a fallback', () => {
 			if (tool === 'refresh_schema') throw new Error('no such tool');
 			return { database: 'shop', tables: {} };
 		});
+		const session = createSqlSession(client, endpoint);
 
-		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
-		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
+		await refreshSchema(session, { fresh: true });
+		await refreshSchema(session, { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 2);
 
-		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
+		await refreshSchema(session, { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 2, 'the latch holds after two fallbacks');
 	});
 
@@ -172,11 +157,12 @@ describe('refreshSchema — fresh reflection after a fallback', () => {
 			if (tool === 'refresh_schema' && countOf(tools, 'refresh_schema') !== 2) throw new Error('flaky');
 			return { database: 'shop', tables: {} };
 		});
+		const session = createSqlSession(client, endpoint);
 
-		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
-		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
-		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
-		await refreshSchema(sessionFor(client, endpoint), { fresh: true });
+		await refreshSchema(session, { fresh: true });
+		await refreshSchema(session, { fresh: true });
+		await refreshSchema(session, { fresh: true });
+		await refreshSchema(session, { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 4);
 	});
 });
@@ -200,11 +186,12 @@ describe('refreshSchema — concurrency', () => {
 			if (tool === 'get_schema') await blocked;
 			return { database: 'shop', tables: {} };
 		});
+		const session = createSqlSession(client, endpoint);
 
-		const ordinary = refreshSchema(sessionFor(client, endpoint));
+		const ordinary = refreshSchema(session);
 		// Let the ordinary refresh reach its held `get_schema` call.
 		await new Promise((resolve) => { setTimeout(resolve, 0); });
-		const fresh = refreshSchema(sessionFor(client, endpoint), { fresh: true });
+		const fresh = refreshSchema(session, { fresh: true });
 		assert.equal(countOf(tools, 'refresh_schema'), 0, 'the queued fresh read has not jumped the queue');
 
 		release();
@@ -222,10 +209,11 @@ describe('refreshSchema — concurrency', () => {
 			await blocked;
 			return { database: 'shop', tables: {} };
 		});
+		const session = createSqlSession(client, endpoint);
 
-		const first = refreshSchema(sessionFor(client, endpoint));
+		const first = refreshSchema(session);
 		await new Promise((resolve) => { setTimeout(resolve, 0); });
-		const second = refreshSchema(sessionFor(client, endpoint));
+		const second = refreshSchema(session);
 		release();
 		await Promise.all([first, second]);
 		assert.equal(countOf(tools, 'get_schema'), 1);

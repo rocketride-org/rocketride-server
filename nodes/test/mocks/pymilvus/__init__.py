@@ -384,9 +384,9 @@ def _parse_filter_expression(filter_expr: str, data: Dict[str, Any]) -> bool:
         # Parse expected value
         if expected.startswith("'") and expected.endswith("'"):
             expected = expected[1:-1]
-        elif expected == 'True':
+        elif expected in ('True', 'true'):
             expected = True
-        elif expected == 'False':
+        elif expected in ('False', 'false'):
             expected = False
         elif expected.isdigit():
             expected = int(expected)

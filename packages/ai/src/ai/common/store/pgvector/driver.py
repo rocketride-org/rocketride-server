@@ -526,8 +526,11 @@ class PgVectorStore(DocumentStoreBase):
         return self._read(work, [])
 
     def getPaths(self, parent: str | None = None, offset: int = 0, limit: int = 1000) -> Dict[str, str]:
-        """``{path: objectId}`` of every active document with a chunk 0, ordered by path."""
-        where = Where(deleted='active', chunk_ids=[0], parent=parent)
+        """``{path: objectId}`` of every active document, one per distinct path (its lowest object id), by path.
+
+        Any chunk counts, so a document is listed whatever chunk ids it has; ``offset`` and ``limit`` count paths.
+        """
+        where = Where(deleted='active', parent=parent)
         statement = self._sql.paths(where, max(0, int(limit)), max(0, int(offset)))
 
         def work(cur):
@@ -552,14 +555,57 @@ class PgVectorStore(DocumentStoreBase):
 
         return self._read(work, [])
 
-    def _search_semantic_in(self, cur, embedding: Sequence[float], docFilter: DocFilter) -> List[Dict[str, Any]]:
-        """Run the semantic search on ``cur`` (inside a read transaction); rows carry ``distance``."""
+    def _search_semantic_in(
+        self, cur, embedding: Sequence[float], docFilter: DocFilter, *, exact: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Run the semantic search on ``cur`` (inside a read transaction); rows carry ``distance``.
+
+        ``exact`` runs the statement no approximate index can serve (see ``Statements.semantic_exact``).
+        """
         limit, offset = self._limit_offset(docFilter)
-        statement = self._sql.semantic(
+        build = self._sql.semantic_exact if exact else self._sql.semantic
+        statement = build(
             self._cached_columns(), self.metric, vector_literal(embedding), self._where(docFilter), limit, offset
         )
         cur.execute(*statement)
         return self._fetch_dicts(cur)
+
+    def _semantic_with_recovery(self, cur, embedding: Sequence[float], docFilter: DocFilter) -> List[Dict[str, Any]]:
+        """The semantic rows for ``docFilter``, with the exact recovery of a filtered HNSW scan.
+
+        HNSW filters its candidate list after scanning it, so excluded neighbours (a trashed document's
+        chunks, other paths) can hide eligible matches. The scan continues past them (iterative scan) where
+        pgvector has it, but may still end with too few usable rows. Usable rows are those at or above the
+        score threshold (and the 0.20 floor). Then, on a table with a valid approximate index, the same search runs again exactly, in the same
+        transaction:
+
+        - an unbounded request (no limit) cannot be satisfied by a bounded approximate scan, so it runs exactly at once;
+        - on pgvector with the iterative scan, an answer with at least one usable row stays approximate (fewer
+          than ``limit`` alone does not justify a full-table scan), and only an answer with none is confirmed exactly;
+        - before it (no iterative scan), any underfilled answer is recovered exactly.
+
+        A table without an approximate index is exact already: it is never scanned twice.
+        """
+        limit, _offset = self._limit_offset(docFilter)
+        if limit is None:
+            return self._search_semantic_in(cur, embedding, docFilter, exact=True)
+        rows = self._search_semantic_in(cur, embedding, docFilter)
+        # A row is usable when the question lane would keep it: at or above the node's score threshold, which
+        # is never below the floor. A caller that sets minScore (the explorer) asks for its own bound instead.
+        floor = self.effectiveFloor(docFilter)
+        if getattr(docFilter, 'minScore', None) is None:
+            floor = max(floor, self.threshold_search)
+        usable = 0
+        for row in rows:
+            score = self._score(row.get('distance'))
+            if score is not None and score >= floor:
+                usable += 1
+        if usable >= limit or (self._db.iterative_scan and usable > 0):
+            return rows
+        cur.execute(*self._sql.has_ann_index())
+        if not cur.fetchone()[0]:
+            return rows
+        return self._search_semantic_in(cur, embedding, docFilter, exact=True)
 
     def searchSemantic(self, query: QuestionText, docFilter: DocFilter) -> List[Doc]:
         """The nearest chunks to the question's embedding, best first, above ``effectiveFloor``."""
@@ -569,7 +615,7 @@ class PgVectorStore(DocumentStoreBase):
             raise Exception('To use semantic search, you must bind to an embedding module')
         embedding = list(query.embedding)
         self._columns_now()
-        rows = self._read(lambda cur: self._search_semantic_in(cur, embedding, docFilter), [])
+        rows = self._read(lambda cur: self._semantic_with_recovery(cur, embedding, docFilter), [])
         floor = self.effectiveFloor(docFilter)
         docs: List[Doc] = []
         for row in rows:
@@ -577,7 +623,7 @@ class PgVectorStore(DocumentStoreBase):
             if score is None or score < floor:
                 continue
             docs.append(self._doc(row, score=score))
-        # HNSW's iterative scan may return rows slightly out of order.
+        # The strict-order scan already returns rows by distance; the stable sort only fixes ties by score.
         docs.sort(key=lambda d: -d.score)
         return docs
 
@@ -683,10 +729,12 @@ class PgVectorStore(DocumentStoreBase):
         """Mark every chunk of ``objectIds`` active again (never the control record); return the chunks moved."""
         return self._set_deleted(objectIds, False)
 
-    def _set_deleted(self, objectIds: List[str], value: bool) -> int:
+    def _set_deleted(self, objectIds: List[str], value: bool) -> Optional[int]:
         """One UPDATE over the chunks of ``objectIds`` in the other state; its row count is what moved.
 
         A NULL ``isdeleted`` reads as active, so ``markDeleted`` takes it and ``markActive`` leaves it.
+        psycopg2 reports -1 when a statement's row count is not known: that is None here (unknown),
+        never 0 (nothing moved).
         """
         ids = [str(o) for o in objectIds or []]
         if not ids or not self._exists_now():
@@ -695,7 +743,8 @@ class PgVectorStore(DocumentStoreBase):
 
         def work(cur):
             cur.execute(*statement)
-            return max(0, int(cur.rowcount or 0))
+            moved = cur.rowcount
+            return int(moved) if isinstance(moved, int) and not isinstance(moved, bool) and moved >= 0 else None
 
         with self._write_lock:
             return self._db.run_write(work)

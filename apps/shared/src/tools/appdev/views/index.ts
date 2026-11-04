@@ -47,6 +47,10 @@ export { LogList, LOG_LIST_CAP } from './builder/panels/design/panels/console/Lo
 export type { ILogListProps, LogListRow } from './builder/panels/design/panels/console/LogList';
 export { NewAppForm, deriveDisplayName } from './new-app/NewAppForm';
 export type { INewAppFormProps, NewAppIdentity } from './new-app/NewAppForm';
+export { NewAppWizard } from './new-app/NewAppWizard';
+export type { INewAppWizardHost, INewAppWizardProps } from './new-app/NewAppWizard';
+export { createBusNewAppWizardHost } from './new-app/newAppWizardBusHost';
+export type { INewAppWizardBusHostOptions } from './new-app/newAppWizardBusHost';
 export { ComponentGallery, KnobsPanel, GALLERY_ENTRIES, GALLERY_GROUPS } from './builder/panels/design/panels/components';
 export type {
 	GalleryGroup,

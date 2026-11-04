@@ -62,19 +62,17 @@
 
 import type { DevToolProps, IToolOpServer, ToolChannel } from 'shell';
 import { ExplorerToolError, createActiveKeyStore } from 'shared/explorer';
-import type { IEndpointStore, IExplorerClient, IExplorerEndpoint, IProbeResult } from 'shared/explorer';
-import { createActivationGate } from 'shared/explorer/devtool/activation';
-import type { IActivationBus, IActivationGate } from 'shared/explorer/devtool/activation';
-import { getBusExplorerClient } from 'shared/explorer/devtool/busClient';
-import type { IExplorerBus } from 'shared/explorer/devtool/busClient';
+import type { IEndpointStore, IEndpointStoreOptions, IExplorerClient, IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import { attachController } from 'shared/explorer/devtool/controller';
 import type { RequiredControllerHandlers } from 'shared/explorer/devtool/controller';
 import { readDeadline } from 'shared/explorer/devtool/deadline';
+import { createExplorerClient } from 'shared/explorer/devtool/engineClient';
+import type { IRealmClient, RealmClientGetter } from 'shared/explorer/devtool/engineClient';
 import { publishIdentityState } from 'shared/explorer/devtool/frameIdentity';
 import { createIdentityTracker } from 'shared/explorer/devtool/identity';
 import type { IIdentityBus, IIdentityTracker } from 'shared/explorer/devtool/identity';
 import { mountNonce } from 'shared/explorer/devtool/realm';
-import type { DevToolPeer } from 'shared/explorer/devtool/realm';
+import type { EngineStatus, IEngineReadiness } from 'shared/explorer/devtool/readiness';
 import { replyOk } from 'shared/explorer/devtool/reply';
 import { guardRetainedState, jsonByteLength } from 'shared/explorer/devtool/state';
 import type { IOversizeInfo } from 'shared/explorer/devtool/state';
@@ -106,7 +104,6 @@ import {
 	RESULT_TOO_LARGE,
 	STATE,
 	SUMMARY_STATE_BYTES,
-	VECTOR_APP_ID,
 	VERSIONS_STATE_BYTES,
 	endpointsSnapshot,
 	field,
@@ -118,7 +115,7 @@ import {
 import type { DocWriteAction, IConsoleSummary, IDocVersion, IFocusRequest, IMapRequest, IQueryHint, ReadOp, ToolOp, VectorOps, WriteOp } from './protocol';
 
 /** What the controller needs from its realm's ConnectionManager (structural; tests pass the base's fake realms). */
-export type IVectorRealm = IIdentityBus & IActivationBus & IDiscoveryBus & IExplorerBus;
+export type IVectorRealm = IIdentityBus & IDiscoveryBus;
 
 /** Said when a frame asks for a write the controller cannot vouch for (nothing was sent). */
 export const WRITE_REFUSED_TEXT = 'Documents cannot be removed or restored through this connection right now. Nothing was sent.';
@@ -136,7 +133,7 @@ export const TOO_LATE_TEXT = 'The request waited for the connections to be disco
 const MIN_CALL_MS = 1_000;
 
 /** What a write's answer is cut to when it is over its cap: the fields a frame reads (vector/results.ts). */
-const WRITE_ANSWER_FIELDS = ['success', 'code', 'error', 'retry_after_s', 'object_ids', 'not_found', 'kept_live', 'matched_chunks', 'removed_chunks', 'deleted_count'] as const;
+const WRITE_ANSWER_FIELDS = ['success', 'code', 'error', 'retry_after_s', 'object_ids', 'not_found', 'kept_live', 'moved_chunks', 'matched_chunks', 'removed_chunks', 'deleted_count'] as const;
 
 /** How many connections' query hints and summaries are kept (the most recently changed). */
 const MAX_HINT_KEYS = 32;
@@ -146,22 +143,24 @@ const LISTING_WAIT_MARGIN_MS = 1_000;
 
 /** What {@link createVectorController} needs. */
 export interface IVectorControllerOptions {
-	/** The realm's ConnectionManager. */
+	/** The realm's ConnectionManager (identity events and the task-event stream). */
 	cm: IVectorRealm;
-	/** The sidebar mount's peer. */
-	peer: DevToolPeer;
-	/** The host's channel (both hosts pass one). */
-	channel?: ToolChannel;
+	/** The host's channel for this mount (DevToolProps.channel). */
+	channel: ToolChannel;
+	/** The realm's client right now (useEngineSource().getClient): read again on every request, never captured. */
+	getClient: RealmClientGetter<IRealmClient>;
+	/** The realm's engine readiness (useEngineSource().readiness): waiting, disconnected or ready. */
+	readiness: IEngineReadiness;
 	/** The host's documents API (opened only on a user action). */
 	documents?: DevToolProps['documents'];
 	/** The sidebar's activeDocKey prop at mount. */
 	activeDocKey?: string | null;
-	/** The shell's createToolChannel (injected). */
-	createToolChannel: (peer: DevToolPeer) => ToolChannel;
 	/** The shell's createToolOpServer (injected). */
-	createToolOpServer: (peer: DevToolPeer) => IToolOpServer<VectorOps>;
-	/** The tool's app id (default rocketride.vector). */
-	appId?: string;
+	createToolOpServer: (channel: ToolChannel) => IToolOpServer<VectorOps>;
+	/** Whether a person is already using the tool at mount (default false: endpoint probes are held; see the header). */
+	present?: boolean;
+	/** Options for the controller's own endpoint store (tests shorten its debounce); `holdProbes` is always the discovery's. */
+	endpointOptions?: Partial<IEndpointStoreOptions>;
 	/** The clock (deadlines). */
 	now?: () => number;
 	/** Timers (request expiry); returns a cancel. Default setTimeout. */
@@ -184,14 +183,17 @@ export interface IVectorController {
 	readonly store: IEndpointStore;
 	readonly client: IExplorerClient;
 	readonly identity: IIdentityTracker;
-	readonly activation: IActivationGate;
+	/** The realm's engine readiness (the mount feeds it from useEngineSource). */
+	readonly engine: IEngineReadiness;
+	/** The engine's status as a readable (the sidebar rebuilds its env when it changes). */
+	readonly engineStatus: IReadable<EngineStatus>;
 	readonly discovery: IDevToolDiscovery;
 	/** The connection the fronted document belongs to. */
 	readonly activeConnection: IReadable<string | null>;
 	/** Feed every new activeDocKey prop value. */
 	noteActiveDocKey(key: string | null | undefined): void;
-	/** The LOCAL env the sidebar's view uses (rebuild it when the realm's connection flag changes). */
-	env(ready: boolean): IVectorEnv;
+	/** The LOCAL env the sidebar's view uses (rebuild it when the engine status changes). */
+	env(status: EngineStatus | boolean): IVectorEnv;
 	/** Dispose everything (idempotent). */
 	dispose(): void;
 }
@@ -213,8 +215,8 @@ function isVectorKey(value: unknown): value is VectorKey {
  * @returns The controller; dispose it in the mount's cleanup.
  */
 export function createVectorController(opts: IVectorControllerOptions): IVectorController {
-	const { cm, peer } = opts;
-	const appId = opts.appId ?? VECTOR_APP_ID;
+	const { cm } = opts;
+	const engine = opts.readiness;
 	const now = opts.now ?? Date.now;
 	const schedule =
 		opts.schedule ??
@@ -223,11 +225,11 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 			return () => clearTimeout(handle);
 		});
 	const report = (error: unknown, where: string): void => opts.onError?.(error, where);
-	const client = getBusExplorerClient(cm);
-	const store = opts.store ?? makeVectorEndpointStore();
+	const client = createExplorerClient(opts.getClient);
 	const identity = createIdentityTracker({ cm });
-	const activation = createActivationGate({ appId, cm, ...(opts.activeDocKey !== undefined ? { activeDocKey: opts.activeDocKey } : {}) });
-	const discovery = createDevToolDiscovery({ cm, client, identity, activation, ...(opts.focusTarget !== undefined ? { focusTarget: opts.focusTarget } : {}) });
+	// The discovery exists before the store: the store asks it whether probes (tool calls) are held.
+	const discovery = createDevToolDiscovery({ cm, client, identity, engine, present: opts.present === true, ...(opts.focusTarget !== undefined ? { focusTarget: opts.focusTarget } : {}) });
+	const store = opts.store ?? makeVectorEndpointStore({ ...opts.endpointOptions, holdProbes: () => discovery.holdProbes() });
 	const offs: Array<() => void> = [];
 	const cancels = new Set<() => void>();
 	let disposed = false;
@@ -534,13 +536,14 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 
 	// ── The channel first, then the ONE op server (attachController, R6) ────────────────────────
 	const attached = attachController<VectorOps>({
-		peer,
-		...(opts.channel ? { channel: opts.channel } : {}),
-		createToolChannel: opts.createToolChannel,
+		channel: opts.channel,
 		createToolOpServer: opts.createToolOpServer,
 		handlers,
 		now,
-		onFirstOp: () => activation.open('op'),
+		// A channel event named like an op would run that op's handler: attach refuses it.
+		events: Object.values(EVENT),
+		// The first frame call: a person is using the tool, so the held endpoint probes are released.
+		onFirstOp: () => discovery.markUserPresent('op'),
 		onRefused: (error) => report(error, 'refused'),
 	});
 
@@ -642,7 +645,7 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 		publishSummaries();
 	}));
 
-	// ── Discovery: the store follows identity, activation, task events and focus ────────────────
+	// ── Discovery: the store follows identity, engine readiness, task events and focus ────────────────
 	offs.push(store.attach(client, identity.get().identity, discovery.watch));
 
 	// The sidebar's Query history: memory only (nothing of a dev-tool mount is stored), and another identity's goes.
@@ -663,21 +666,24 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 	const registry = createConnectionRegistry();
 	const activeConnection: IReadable<string | null> = { get: active.get, subscribe: active.subscribe };
 	let lastEnv: { ready: boolean; env: IVectorEnv } | null = null;
+	const engineStatus: IReadable<EngineStatus> = { get: () => engine.status(), subscribe: (listener) => engine.subscribe(() => listener()) };
 
 	return {
 		channel: attached.channel,
 		store,
 		client,
 		identity,
-		activation,
+		engine,
+		engineStatus,
 		discovery,
 		activeConnection,
 		noteActiveDocKey(key) {
 			hostActive = key;
-			activation.noteActiveDocKey(key);
 			syncActive();
 		},
-		env(ready) {
+		env(given) {
+			// A boolean is the old shape of the question: connected or not.
+			const ready = typeof given === 'boolean' ? given : given === 'ready';
 			if (lastEnv && lastEnv.ready === ready) return lastEnv.env;
 			const env = createLocalVectorEnv({
 				ready,
@@ -688,16 +694,16 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 				activeConnection,
 				// Documents open on a click only (R7), which is also the user activating the tool.
 				openConsole: (endpoint) => {
-					activation.open('user');
+					discovery.markUserPresent('user');
 					opts.documents?.open(consoleUri(endpoint.key), endpoint.nodeName || 'Vector store');
 				},
 				openDocument: (endpoint, objectId, path) => {
-					activation.open('user');
+					discovery.markUserPresent('user');
 					opts.documents?.open(documentUri(endpoint.key, objectId), documentTitle(objectId, path));
 				},
 				refresh: (o) => {
 					// A refresh asked for in the sidebar; an automatic one (quiet) is not the user activating the tool.
-					if (!o?.quiet) activation.open('user');
+					if (!o?.quiet) discovery.markUserPresent('user');
 					return discovery.allowed() ? store.refresh(client, { reprobe: o?.reprobe === true }) : Promise.resolve();
 				},
 			});
@@ -712,7 +718,6 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 			cancels.clear();
 			registry.clear();
 			discovery.dispose();
-			activation.dispose();
 			attached.dispose();
 			identity.dispose();
 		},

@@ -42,6 +42,7 @@ tools mixed in ahead of them (``vx_tools_ext``). See
 """
 
 from .document_store import (
+    CONTROL_OBJECT_ID,
     DocumentStoreBase,
     VectorStoreToolMixin,
     getStore,
@@ -53,6 +54,7 @@ from .vx_tools import VectorExplorerTools, vectordb_tool
 from .vx_tools_ext import VectorExplorerExtTools
 
 __all__ = [
+    'CONTROL_OBJECT_ID',
     'DocumentStoreBase',
     'StoreError',
     'StoreGlobalBase',
