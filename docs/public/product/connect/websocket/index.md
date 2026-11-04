@@ -34,7 +34,9 @@ different host or port to reach a remote or self-hosted engine.
 Before authenticating, a client may open a public connection and send
 `rrext_public_probe`. The response body carries `version`, `capabilities`,
 `platform`, the public `apps` list, `stripePublishableKey` (when billing is
-configured), and `endpoints` — the server's public addresses:
+configured), `posthogPublishableKey` + `posthogHost` (when product telemetry
+is configured; absent means telemetry is off), and `endpoints` — the server's
+public addresses:
 
 ```json
 { "endpoints": { "api": "origin", "ui": "origin" } }
