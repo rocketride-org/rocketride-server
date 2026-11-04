@@ -52,3 +52,25 @@ test('the same node gives the same digest on another build', async () => {
 	const second = (await packageNode('demo', makeNode())).entry.sha256;
 	assert.strictEqual(first, second);
 });
+
+test('a node packaged on Windows gives the digest built on Linux', async () => {
+	const dir = makeNode();
+	const linux = (await packageNode('demo', dir)).entry.sha256;
+
+	// adm-zip reads the platform once, when it loads; load it again as Windows
+	const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+	const fresh = () => {
+		for (const key of Object.keys(require.cache)) {
+			if (key.includes('adm-zip') || key.endsWith(path.join('scripts', 'tasks.js'))) delete require.cache[key];
+		}
+	};
+	try {
+		Object.defineProperty(process, 'platform', { value: 'win32' });
+		fresh();
+		const windows = (await require('./tasks').packageNode('demo', dir)).entry.sha256;
+		assert.strictEqual(windows, linux);
+	} finally {
+		Object.defineProperty(process, 'platform', platform);
+		fresh();
+	}
+});

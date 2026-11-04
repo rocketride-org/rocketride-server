@@ -13,6 +13,9 @@
 # Markdown files should use LF (node doc generator writes LF; prevents spurious diffs on Windows)
 *.md text eol=lf
 
+# Node sources are zipped into .rrnode packages: LF on every checkout keeps their digests equal
+nodes/src/nodes/** text=auto eol=lf
+
 # Windows batch files should use CRLF
 *.cmd text eol=crlf
 *.bat text eol=crlf
