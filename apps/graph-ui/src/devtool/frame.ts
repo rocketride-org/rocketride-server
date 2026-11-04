@@ -59,7 +59,7 @@ import type { IExplorerEndpoint, IGenerationTicket, IHistoryEntry, IInvokeOption
 import { createSessionGridPersistence } from 'shared/explorer/devtool/gridPersistence';
 import { HOST_CONNECTION_TOPIC, createFrameCaller } from 'shared/explorer/devtool/frame';
 import type { IFrameCaller } from 'shared/explorer/devtool/frame';
-import { createFrameIdentityGuard, followSignIn } from 'shared/explorer/devtool/frameIdentity';
+import { IDENTITY_STATE_TOPIC, createFrameIdentityGuard, followSignIn } from 'shared/explorer/devtool/frameIdentity';
 import type { FrameResetReason, IFrameIdentityGuard, SignInState } from 'shared/explorer/devtool/frameIdentity';
 import { CONTROLLER_STATE_TOPIC } from 'shared/explorer/devtool/realm';
 import { createControllerSummon } from 'shared/explorer/devtool/summon';
@@ -229,8 +229,15 @@ export function createGraphFrame(opts: IGraphFrameOptions): IGraphFrame {
 	const docKey = typeof opts.docKey === 'string' ? opts.docKey : '';
 	const report = (error: unknown): void => opts.onError?.(error);
 	const channel = opts.channel;
-	// No `identityNow` yet (the platform's D1.1 binds the identity fence): the frame's own guard follows the identity.
-	const caller = createFrameCaller<GraphOps>({ channel, createToolOpClient: opts.createToolOpClient, ...(opts.now ? { now: opts.now } : {}) });
+	// The identity fence: the account the controller vouches for NOW (its `identity` topic), so an answer for account A
+	// never reaches a frame that has adopted B, and no call is sent while nobody is vouched for (it waits inside its own
+	// deadline). A cold start (unknown, then A) is not a change.
+	let identityFingerprint: string | null = null;
+	const offIdentityNow = channel.onState(IDENTITY_STATE_TOPIC, (snapshot) => {
+		const value = field(snapshot, 'fingerprint');
+		identityFingerprint = typeof value === 'string' && value !== '' ? value : null;
+	});
+	const caller = createFrameCaller<GraphOps>({ channel, createToolOpClient: opts.createToolOpClient, identityNow: () => identityFingerprint, ...(opts.now ? { now: opts.now } : {}) });
 	const offs: Array<() => void> = [];
 	let disposed = false;
 	let resetWhy: FrameResetReason | null = null;
@@ -495,6 +502,7 @@ export function createGraphFrame(opts: IGraphFrameOptions): IGraphFrame {
 			if (disposed) return;
 			disposed = true;
 			for (const off of offs.splice(0)) off();
+			offIdentityNow();
 			guard.dispose();
 			caller.dispose();
 		},
