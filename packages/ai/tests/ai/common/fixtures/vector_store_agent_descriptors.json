@@ -197,7 +197,7 @@
      ]
     },
     "limit": {
-     "description": "Documents per page (default 200, at most 500).",
+     "description": "Documents per page (default 100, at most 1,000; below 1 is refused).",
      "type": "integer"
     },
     "object_ids": {
@@ -338,7 +338,7 @@
      "type": "integer"
     },
     "parent": {
-     "description": "Optional parent path; lists documents stored under exactly this parent (Atlas matches it as a case-insensitive pattern, Qdrant as a text match).",
+     "description": "Optional parent path; lists documents stored under exactly this parent (Atlas matches it as a case-insensitive pattern).",
      "type": "string"
     }
    },
@@ -569,7 +569,7 @@
      "type": "integer"
     },
     "document_count": {
-     "description": "Active documents, or null on a store that does not list documents.",
+     "description": "Active documents, or null where the store cannot count them.",
      "type": [
       "integer",
       "null"

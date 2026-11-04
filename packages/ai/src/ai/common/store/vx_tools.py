@@ -1078,6 +1078,11 @@ _DELETED_SCHEMA = {
 # =============================================================================
 
 
+#: ``list_documents`` page size: #2704's 100 by default and 1,000 at most (the app sends its own ``limit``).
+LIST_DOCUMENTS_DEFAULT_LIMIT = 100
+LIST_DOCUMENTS_MAX_LIMIT = 1000
+
+
 class VectorExplorerTools:
     """The Vector Explorer's tools; mixed into ``VectorStoreToolMixin``.
 
@@ -1519,7 +1524,10 @@ class VectorExplorerTools:
                 'type': ['string', 'null'],
                 'description': 'next_cursor of the previous page (null for the first).',
             },
-            'limit': {'type': 'integer', 'description': 'Documents per page (default 200, at most 500).'},
+            'limit': {
+                'type': 'integer',
+                'description': 'Documents per page (default 100, at most 1,000; below 1 is refused).',
+            },
             'object_ids': {'type': ['array', 'null'], 'items': {'type': 'string'}},
             'deleted': {
                 'description': (
@@ -1645,9 +1653,11 @@ class VectorExplorerTools:
                 ):
                     raise invalidCursor()
                 trash_phase, cursor = True, inner
-        limit = _clamped(
-            _int_arg(args, 'limit', DEFAULTS['documents_page']), 1, LIMITS['documents_page'], 'limit', warnings
-        )
+        # #2704's page size, kept: 100 by default, at most 1,000; a limit below 1 is refused, not clamped.
+        limit = _int_arg(args, 'limit', LIST_DOCUMENTS_DEFAULT_LIMIT)
+        if limit < 1:
+            raise _invalid('list_documents: limit must be 1 or more.')
+        limit = _clamped(limit, 1, LIST_DOCUMENTS_MAX_LIMIT, 'limit', warnings)
         object_ids = args.get('object_ids')
         if object_ids is not None:
             object_ids = _strings_arg(object_ids, 'object_ids', LIMITS['documents_page'])

@@ -2163,7 +2163,7 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
                     'type': 'string',
                     'description': (
                         'Optional parent path; lists documents stored under exactly this parent '
-                        '(Atlas matches it as a case-insensitive pattern, Qdrant as a text match).'
+                        '(Atlas matches it as a case-insensitive pattern).'
                     ),
                 },
                 'offset': {
@@ -2197,9 +2197,10 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         ``paths`` maps each path to an objectId as before; the control record is never
         listed. ``parent``, when given, is an exact path (as develop's drivers read it),
         never a prefix. ``offset`` must be 0 or more and ``limit`` 1 or more (at most
-        1000 are returned). On a driver with a native document
-        listing (``listDocumentPage``), ``entries`` lists every document (path and objectId,
-        equal paths not collapsed) and deleted documents are left out. On any other
+        1000 are returned); a page counts distinct PATHS (#2668), each mapped to its lowest
+        objectId. On a driver with a native document listing (``listDocumentPage``),
+        ``entries`` lists every document under the page's paths (path and objectId, equal
+        paths not collapsed) and deleted documents are left out. On any other
         driver the answer is the driver's own ``getPaths`` page, as before: the default
         listing pages by offset, which several backends ignore or read as a point id.
 
@@ -2259,15 +2260,17 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
         store may hold more (a key of ``_OBJDIR_STOPPED``), or None when the page is full
         or the listing ended.
         """
-        entries: List[Dict[str, str]] = []
+        # #2668: a page counts distinct PATHS, as it did on develop; each path appears once in ``paths`` (its
+        # lowest object ID) and ``entries`` still lists every document under the paths of the page.
+        groups: Dict[str, List[str]] = {}
         seen: set = set()
-        skipped = 0
         scanned = 0
         stopped: Optional[str] = None
+        wanted = offset + limit
         page_size = VECTOR_TOOL_LIMITS['documents_page']
         guard = ListingGuard(_OBJDIR_SCAN_MAX, page_size, VECTOR_TOOL_LIMITS['sample_budget_ms'] / 1000.0)
         cursor: Optional[str] = None
-        while len(entries) < limit:
+        while True:
             page = store.listDocumentPage(
                 cursor=cursor,
                 limit=page_size,
@@ -2281,21 +2284,21 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
                     continue
                 seen.add(row.objectId)
                 new_documents += 1
-                if row.deleted:
+                if row.deleted or (parent is not None and row.path != parent):
                     continue
-                if parent is not None and row.path != parent:
-                    continue
-                if skipped < offset:
-                    skipped += 1
-                    continue
-                if len(entries) < limit:
-                    entries.append({'path': row.path, 'objectId': row.objectId})
+                groups.setdefault(row.path, []).append(row.objectId)
             scanned += len(page.items)
+            # Rows arrive ordered by path on a sorted listing: once one path past the page has started, the
+            # page's own paths (and every document under them) are complete. Otherwise read it all.
+            if page.sorted and len(groups) > wanted:
+                break
             if guard.stop(page, new_documents) or scanned >= _OBJDIR_SCAN_MAX:
-                if guard.reason != 'complete' and len(entries) < limit:
+                if guard.reason != 'complete' and len(groups) < wanted:
                     stopped = guard.reason if guard.reason in ('budget', 'stale') else 'cap'
                 break
             cursor = page.next_cursor
+        chosen = sorted(groups)[offset:wanted]
+        entries = [{'path': path, 'objectId': oid} for path in chosen for oid in sorted(groups[path])]
         return entries, stopped
 
     @tool_function(
@@ -2462,7 +2465,7 @@ class VectorStoreToolMixin(VectorExplorerExtTools, VectorExplorerTools):
                 },
                 'document_count': {
                     'type': ['integer', 'null'],
-                    'description': 'Active documents, or null on a store that does not list documents.',
+                    'description': 'Active documents, or null where the store cannot count them.',
                 },
                 'model': {'type': 'string', 'description': 'Embedding model name.'},
                 'vector_size': {'type': 'integer', 'description': 'Embedding vector dimension.'},
