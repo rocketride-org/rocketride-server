@@ -12,7 +12,7 @@ A batch that carries a document's first chunk replaces every chunk stored for
 that document; a later batch of the same document adds its chunks, so a long
 document that the embedding node sends in several batches is stored whole. A
 batch without chunk 0 that repeats a chunk number already stored replaces that chunk
-instead of keeping a second copy, and the document's other chunks stay.
+instead of keeping a second copy, and the document's other chunks stay. This applies to chunks written by this version; rows an older version stored with generated IDs are not matched, so a repeated chunk number there keeps the old duplicate until the document is written again from chunk 0.
 Questions can produce matching documents, answers, or enriched questions through
 the three configured question outputs. The same store can be offered to an agent
 or app as tools once Expose as tools is on, and the Vector Explorer app browses,
