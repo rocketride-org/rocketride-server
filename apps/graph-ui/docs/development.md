@@ -82,6 +82,12 @@ live here.
   file is still loading (it waits, unhydrated, in the store), is dropped if the
   identity changes again before that load ends. It is never given to another
   owner.
+- A frame's calls are fenced by the account the controller vouches for
+  (`createFrameCaller({ identityNow })`, fed by the controller's `identity`
+  topic): no call is sent while nobody is known (it waits inside its own
+  deadline and fails unsent), and an answer for account A never reaches a frame
+  that has adopted B (kind `stale`, ignored by callers). A cold start (unknown,
+  then A) is not a change.
 - A disconnect does not keep a document's work. The controller resets its
   store (the identity is unknown), and both hosts unmount the documents while
   the server is unreachable (rocket-ui's DevToolMount, VS Code's panel), so the

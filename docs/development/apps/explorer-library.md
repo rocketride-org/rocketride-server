@@ -85,7 +85,7 @@ A connection is a **role map**, not a provider set
 | Spec | Roles | Use |
 |---|---|---|
 | `SINGLE_TOOLS_ROLE` | one `tools` role, any source | SQL, Graph |
-| `VECTOR_ROLES` | `ingest_1`, `chat_1`, `tools_1` (`tools` required) | Vector (tested with mocks; no Vector app ships) |
+| `VECTOR_ROLES` | `ingest_1`, `chat_1`, `tools_1` (`tools` required) | Vector (tested with mocks; the SQL, Graph and Vector apps are the three consumers and are in progress) |
 
 Multi-role specs group the running sources of **one project, owner kind, owner,
 team and run kind** into one connection. Runs that differ in any of those never
@@ -477,12 +477,14 @@ controller budget.
   arrives after it, without running it.
 - **The frame caller.** `createFrameCaller({ channel, createToolOpClient })`
   calls through the host's channel and builds no subscription of its own.
-  With `identityNow` a call is bound to the first known identity fingerprint:
-  the one when it is issued, or none when none is known yet (a cold start:
-  unknown to A is not a change). Its answer, success or failure, is discarded as
-  kind `stale` if the frame is under another identity, or none, when it arrives
-  (A to B, or A to null on a sign-out). The identity is read at issue and at
-  answer.
+  With `identityNow` a call is **held** while the frame knows no identity: like
+  the controller wait it waits inside its own deadline (looking again every
+  25 ms) and, if the deadline passes first, rejects as kind `unavailable`,
+  unsent. Once sent it is bound to the identity the frame is under then, and its
+  answer, success or failure, is discarded as kind `stale` if the frame is under
+  another identity, or none, when it arrives (A to B, or A to null on a
+  sign-out). So there is no unknown, A, B gap. The identity is read at send and
+  at answer.
   - Every call needs an explicit `timeoutMs`. A missing or unusable one is a
     programming error: `call` and `callReply` **throw** a RangeError
     synchronously, so a `.catch` on the returned promise never sees it.
@@ -623,14 +625,19 @@ engine is `ready`.
 
 **Quiet at boot.** A pinned tool's controller mounts when the host boots, with
 nobody there, and a probe is a tool call that keeps a pipeline alive. So until a
-person is present, a refresh is discovery reads only (`getTasks`, `listTasks`,
+frame of the tool is open or a person interacted, a refresh is discovery reads only (`getTasks`, `listTasks`,
 `getTaskPipeline`): endpoints are listed but stay `probing`, and no `dialect`
 call is sent. Pass `holdProbes: () => discovery.holdProbes()` to
 `createEndpointStore`, and call `discovery.markUserPresent('op')` from
 `attachController`'s `onFirstOp` and `markUserPresent('user')` on the first
-sidebar interaction. The first call releases the probes with one refresh; later
+sidebar interaction. "Present" therefore means a frame of the tool is open
+(its first op counts even when automatic, such as a restored document's) or a
+person interacted. The first call releases the probes with one refresh; later
 calls do nothing; task events and focus do not count. (`present: true` skips the
-hold.) The history file reads and writes are account-store calls, not pipeline
+hold.) **Lane obligation:** while probes are held an explicit refresh sends no
+probe either, so any explicit Refresh the lane offers must call
+`markUserPresent('user')` (before its own `store.refresh`). "Test connection"
+(`store.probe`) is not held. The history file reads and writes are account-store calls, not pipeline
 calls, so they are not held. It forwards identity changes (unknown resets the store), and
 registers the task monitor only once discovery is allowed. It refreshes once
 whenever discovery becomes allowed, and again when the identity switches
@@ -812,7 +819,11 @@ per workspace, mirrored to every realm and republished whole on each write.
   every unknown field from the fresh read. A failed fresh read writes nothing:
   the change stays in memory, the failure is reported, and the write is retried
   like any failed write. Two windows under the SAME owner still keep only the
-  later one's bag for that owner. Drafts and captions stay session-only.
+  later one's bag for that owner. **Known limit:** between the fresh read's
+  answer and the write's arrival at the server (one round trip, at most the
+  15 s fs deadline) another window's write can still land and be reverted for
+  that one write; the owner's next write repairs it, and no entry is ever
+  corrupted. Closing it needs a server-side compare-and-swap on `fs_put_json`. Drafts and captions stay session-only.
 
 **Rules a controller must follow** (they come from the shell's `busPeer.ts`,
 `toolChannel.ts` and `toolOps.ts`):

@@ -271,6 +271,25 @@ describe('T6 - a quiet sidebar: no event, tool call or document at mount; mounti
 	});
 });
 
+describe('T7b - the frame\'s calls are fenced by the account the controller vouches for', () => {
+	it('no call is sent while nobody is vouched for (it fails unsent, inside its deadline); once an account is known it runs', async () => {
+		const engine = vscodeRealm();
+		engine.realm.root.connect(null);
+		const mounted = mountController(engine.cm);
+		mounted.h.setHostConnection(true);
+		const { frame } = mountFrame(mounted.h, undefined);
+		await settle();
+		await assert.rejects(frame.caller.callReply(OP.historyList, { key: 'k1|any' }, { timeoutMs: 120 }), (error: unknown) => error instanceof ExplorerToolError && (error.kind === 'unavailable' || error.kind === 'timeout'), 'unsent');
+		assert.equal(mounted.errors.length, 0, 'the controller never saw it');
+		engine.realm.root.accountChanged(account('u1'));
+		await until(() => mounted.controller.identity.get().known, 'the account is known');
+		const served = await frame.caller.callReply(OP.historyList, { key: 'k1|any' }, { timeoutMs: 5_000 });
+		assert.deepEqual(served, { entries: [], recording: true });
+		frame.dispose();
+		mounted.controller.dispose();
+	});
+});
+
 describe('T7 - identity fails closed', () => {
 	it('a connected realm with no account discovers nothing, and a frame\'s refresh is refused as data', async () => {
 		const engine = vscodeRealm();

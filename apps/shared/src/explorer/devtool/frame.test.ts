@@ -417,3 +417,100 @@ describe('createFrameCaller — identity fence binds to the FIRST known identity
 		}
 	});
 });
+
+describe('createFrameCaller — a call is held until an identity is known (DA-R3-03)', () => {
+	function slowLane(delayMs: number) {
+		const h = createDevToolHarness();
+		const seen: number[] = [];
+		const attached = attachController<FrameOps>({
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
+			createToolOpServer: shellProtocol.createToolOpServer,
+			handlers: { 'f.echo': async (params) => { seen.push(params.x); await new Promise((resolve) => setTimeout(resolve, delayMs)); return params.x; } },
+		});
+		return { h, attached, seen };
+	}
+
+	it('R3-F1: unknown -> A -> B before the answer is stale (the call was held until A, then bound to A); unknown -> A alone is accepted', async () => {
+		const { h, attached } = slowLane(80);
+		let identity: string | null = null;
+		const caller = createFrameCaller<FrameOps>({ ...frameOf(h), identityNow: () => identity });
+		await settle();
+		const first = caller.callReply('f.echo', { x: 1 }, { timeoutMs: 5_000 }).then(() => 'resolved', (error: { kind?: string }) => `rejected:${error.kind}`);
+		setTimeout(() => { identity = 'fp-A'; }, 10);
+		setTimeout(() => { identity = 'fp-B'; }, 60);
+		assert.equal(await first, 'rejected:stale');
+		identity = null;
+		const second = caller.callReply('f.echo', { x: 2 }, { timeoutMs: 5_000 }).then(() => 'resolved', (error: { kind?: string }) => `rejected:${error.kind}`);
+		setTimeout(() => { identity = 'fp-A'; }, 10);
+		assert.equal(await second, 'resolved');
+		caller.dispose();
+		attached.dispose();
+	});
+
+	it('nothing is sent while no identity is known; if the deadline passes first it rejects as unavailable, unsent', async () => {
+		const { h, attached, seen } = slowLane(5);
+		const caller = createFrameCaller<FrameOps>({ ...frameOf(h), identityNow: () => null });
+		await settle();
+		await assert.rejects(caller.callReply('f.echo', { x: 3 }, { timeoutMs: 120 }), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'unavailable' && /not sent/.test(error.message));
+		assert.deepEqual(seen, [], 'the controller never saw it');
+		assert.equal(caller.pending(), 0);
+		caller.dispose();
+		attached.dispose();
+	});
+
+	it('dispose rejects a call that is waiting for an identity as stale and stops looking', async () => {
+		const { h, attached } = slowLane(5);
+		const caller = createFrameCaller<FrameOps>({ ...frameOf(h), identityNow: () => null });
+		await settle();
+		const waiting = caller.callReply('f.echo', { x: 4 }, { timeoutMs: 5_000 });
+		caller.dispose();
+		await assert.rejects(waiting, (error: unknown) => error instanceof ExplorerToolError && error.kind === 'stale');
+		attached.dispose();
+	});
+});
+
+describe('createFrameCaller — the identity is captured at ISSUE (DA-R31-01, DA-R31-02)', () => {
+	it('R31-1: a call issued under A that waits for the controller is refused unsent as stale when the frame is under B by the time it could go; the controller never runs it', async () => {
+		const h = createDevToolHarness('t.b');
+		h.setHostConnection(true);
+		let identity: string | null = 'fp-A';
+		const caller = createFrameCaller<FrameOps>({ ...frameOf(h), identityNow: () => identity });
+		await settle();
+		const call = caller.callReply('f.echo', { x: 1 }, { timeoutMs: 3_000 }).then(() => 'resolved', (error: { kind?: string }) => `rejected:${error.kind}`);
+		identity = null;
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		identity = 'fp-B';
+		const ran: number[] = [];
+		const attached = attachController<FrameOps>({
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
+			createToolOpServer: shellProtocol.createToolOpServer,
+			handlers: { 'f.echo': ({ x }) => { ran.push(x); return x; } },
+		});
+		assert.equal(await call, 'rejected:stale');
+		assert.deepEqual(ran, [], 'a call issued under A never ran under B');
+		caller.dispose();
+		attached.dispose();
+	});
+
+	it('R31-2: identity known at issue, controller not ready, identity drops to null and returns: the call goes when A is back, it does not run out its deadline', async () => {
+		const h = createDevToolHarness('t.c');
+		h.setHostConnection(true);
+		let identity: string | null = 'fp-A';
+		const caller = createFrameCaller<FrameOps>({ ...frameOf(h), identityNow: () => identity });
+		await settle();
+		const started = Date.now();
+		const call = caller.callReply('f.echo', { x: 2 }, { timeoutMs: 800 }).then((value) => `resolved:${value}`, (error: { kind?: string }) => `rejected:${error.kind}`);
+		identity = null;
+		const attached = attachController<FrameOps>({
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
+			createToolOpServer: shellProtocol.createToolOpServer,
+			handlers: { 'f.echo': ({ x }) => x },
+		});
+		await settle();
+		identity = 'fp-A';
+		assert.equal(await call, 'resolved:2');
+		assert.ok(Date.now() - started < 600, 'it did not wait out its deadline');
+		caller.dispose();
+		attached.dispose();
+	});
+});
