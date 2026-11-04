@@ -108,6 +108,8 @@ import { gateApplyStatements } from './sql/gate';
 import type { ConnectionStatusSource } from './connectionStatus';
 import {
 	DISCOVERY_WAIT_MS,
+	TEARDOWN_POLL_MS,
+	TEARDOWN_WAIT_MS,
 	ENV_KEYS_TIMEOUT_MS,
 	FS_TIMEOUT_MS,
 	LIST_WAIT_MS,
@@ -647,6 +649,29 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 		return pending;
 	};
 
+	/** Tokens of direct pipelines that were terminated and may not be gone yet, by project id. */
+	const dying = new Map<string, string>();
+
+	/**
+	 * Wait (bounded) until a terminated pipeline's token no longer resolves.
+	 *
+	 * @param projectId - The temporary pipeline's project id.
+	 * @param token - The terminated task's token.
+	 */
+	const awaitTeardown = async (projectId: string, token: string): Promise<void> => {
+		const until = Date.now() + TEARDOWN_WAIT_MS;
+		while (Date.now() < until) {
+			let now: string | undefined;
+			try {
+				now = await admin.getTaskToken({ projectId, source: TOOLS_SOURCE_ID });
+			} catch {
+				return;
+			}
+			if (now !== token) return;
+			await new Promise<void>((resolve) => { setTimeout(resolve, TEARDOWN_POLL_MS); });
+		}
+	};
+
 	/**
 	 * Stop a direct connection's pipeline, best effort (the 15-minute idle TTL
 	 * reaps whatever a failure leaves behind). Each step is sent once.
@@ -655,8 +680,16 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 	 */
 	const terminateDirect = async (record: DirectConnection): Promise<void> => {
 		try {
-			const token = await admin.getTaskToken({ projectId: directProjectId(record), source: TOOLS_SOURCE_ID });
-			if (typeof token === 'string' && token !== '') await admin.terminate(token);
+			const projectId = directProjectId(record);
+			const token = await admin.getTaskToken({ projectId, source: TOOLS_SOURCE_ID });
+			if (typeof token === 'string' && token !== '') {
+				// The engine tears a task down asynchronously: its token can still
+				// resolve for a moment after `terminate` answers. Remember it, so a
+				// resolution that comes straight after waits for the teardown and
+				// starts a fresh pipeline instead of reusing the dying one.
+				dying.set(projectId, token);
+				await admin.terminate(token);
+			}
 		} catch {
 			// Best effort.
 		}
@@ -682,6 +715,18 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 	const locate = async (record: SavedSqlConnection, tool: string): Promise<IExplorerEndpoint> => {
 		const legacyKey = endpointKeyForConnection(record);
 		let found = match(legacyKey);
+		if (record.mode === 'direct') {
+			// Just terminated (a release, then straight away a new resolution): the
+			// task may still look running to discovery and to `getTaskToken`. Wait
+			// for it to go, and do not trust what discovery last showed.
+			const projectId = directProjectId(record);
+			const token = dying.get(projectId);
+			if (token !== undefined) {
+				dying.delete(projectId);
+				await awaitTeardown(projectId, token);
+				found = undefined;
+			}
+		}
 		const running = (endpoint: IExplorerEndpoint | undefined): boolean => endpoint !== undefined && endpoint.state !== 'stopped';
 		if (!running(found)) {
 			if (record.mode === 'direct') {
