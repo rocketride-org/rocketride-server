@@ -399,10 +399,11 @@ class GuardrailsEngine:
         """
         if not output.strip():
             return False
-        verdict = judge(question_text, output) if judge else None
-        if verdict is None:
-            return bool(self.FIGURE_PATTERN.search(output))
-        return verdict
+        if judge:
+            verdict = judge(question_text, output)
+            if verdict is not None:
+                return verdict
+        return bool(self.FIGURE_PATTERN.search(output))
 
     def check_hallucination(
         self,
@@ -440,14 +441,19 @@ class GuardrailsEngine:
         if not source_documents:
             # Nothing retrieved is when a model is most likely to answer from memory,
             # so skipping here stood the guard down at the one moment it was needed.
-            # A pipeline with no documents lane never retrieves, so it passes.
-            if not self.require_grounding or not retrieval_ran or not self._needs_source(output, question_text, judge):
-                return {
-                    'rule': 'hallucination',
-                    'passed': True,
-                    'severity': 'low',
-                    'details': 'No source documents provided; hallucination check skipped',
-                }
+            skipped = {
+                'rule': 'hallucination',
+                'passed': True,
+                'severity': 'low',
+                'details': 'No source documents provided; hallucination check skipped',
+            }
+            if not self.require_grounding:
+                return skipped
+            # A pipeline with no documents lane never retrieves.
+            if not retrieval_ran:
+                return skipped
+            if not self._needs_source(output, question_text, judge):
+                return skipped
             return {
                 'rule': 'hallucination',
                 'passed': False,
