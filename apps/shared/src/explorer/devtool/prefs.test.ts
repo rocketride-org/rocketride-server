@@ -54,6 +54,8 @@ function fakeFs(script: Record<string, (params: Record<string, unknown>) => unkn
 	const run = async (op: string, params: Record<string, unknown>): Promise<never> => {
 		requests.push({ op, params });
 		const answer = script[op];
+		// An unscripted read of a file the script's stat called missing is the engine's not-found.
+		if (answer === undefined && op === 'fsReadJson') throw new Error(`File not found: ${String(params.path)}`);
 		if (answer === undefined) throw new Error(`unexpected ${op}`);
 		return answer(params) as never;
 	};
@@ -173,7 +175,7 @@ describe('createFsPrefs — load first', () => {
 		}
 	});
 
-	it('first run (no file): nothing is read; the first write makes the folder, then writes', async () => {
+	it('first run (no file): the missing stat is confirmed by a not-found read; the first write makes the folder, then writes', async () => {
 		const { fs, requests } = fakeFs({
 			'fsStat': () => ({ exists: false }),
 			'fsMkdir': () => undefined,
@@ -188,8 +190,10 @@ describe('createFsPrefs — load first', () => {
 		await settle();
 		assert.deepEqual(requests.map((r) => [r.op, (r.params as { path: string }).path]), [
 			['fsStat', PATH],
+			['fsReadJson', PATH], // the "missing" stat is confirmed by a read
 			['fsMkdir', '@/User/.workspace'],
 			['fsStat', PATH], // the fresh read just before the write
+			['fsReadJson', PATH],
 			['fsWriteJson', PATH],
 		]);
 	});
@@ -557,7 +561,7 @@ describe('createFsPrefs — the owner is re-checked after every file request', (
 		assert.equal(requests.length, 1, 'no retry while unknown');
 		current = OWNER;
 		await clock.advance(5_000);
-		assert.equal(requests.length, 2);
+		assert.equal(requests.length, 3, 'the retry: a stat, then the read that confirms it is missing');
 		assert.equal(await loading, 'ready');
 	});
 });
@@ -728,5 +732,68 @@ describe('createFsPrefs — two owners of one file never revert each other (DA-R
 		const ids = Object.keys(world.stored().owners);
 		for (let i = 0; i < 7; i += 1) assert.ok(ids.includes(`junk-${i}`), `junk-${i} is carried`);
 		for (const id of ['team-A', 'team-B', 'team-C']) assert.ok(ids.includes(id), `${id} is kept`);
+	});
+});
+
+describe('createFsPrefs — a "missing" stat is confirmed by a read (D6-SQL-3)', () => {
+	const stored = { version: PREFS_FILE_VERSION, owners: { [OWNER]: { at: 1, prefs: { 'graph.history': { k1: [{ id: 'old1' }, { id: 'old2' }] } } } } };
+
+	/** A store whose stat says "missing" first, whatever is stored; reads answer per `read`. */
+	function lyingStat(read: () => unknown) {
+		let file: unknown = JSON.parse(JSON.stringify(stored));
+		const writes: unknown[] = [];
+		const fs: IPrefsFs = {
+			fsStat: async () => ({ exists: false }),
+			fsReadJson: async <T,>() => read() as T,
+			fsMkdir: async () => undefined,
+			fsWriteJson: async (_path: string, obj: unknown) => { writes.push(obj); file = obj; },
+		};
+		return { fs, writes, stored: () => file };
+	}
+
+	it('stat says missing but the read fails for another reason (a throttled backend): the load fails, no writer is installed, the stored history is untouched', async () => {
+		const world = lyingStat(() => { throw new Error('SlowDown: please reduce your request rate'); });
+		const errors: string[] = [];
+		const { clock, opts } = options(world.fs, { onError: (_error, phase) => errors.push(phase) });
+		const prefs = createFsPrefs(opts);
+		const loading = prefs.load();
+		for (let i = 0; i < PREFS_LOAD_ATTEMPTS; i += 1) {
+			await settle();
+			await clock.advance(3_000);
+		}
+		assert.equal(await loading, 'failed');
+		prefs.setPref('graph.history', { k1: [{ id: 'new1' }] });
+		await prefs.flush();
+		await clock.advance(60_000);
+		await settle();
+		assert.deepEqual(world.writes, [], 'nothing written');
+		assert.deepEqual(world.stored(), stored, 'old1 and old2 survive in storage');
+		assert.deepEqual(errors, ['load']);
+	});
+
+	it('stat says missing but the read SUCCEEDS: the stat lied, the file is used and the write keeps its content', async () => {
+		const world = lyingStat(() => stored);
+		const { clock, opts } = options(world.fs);
+		const prefs = createFsPrefs(opts);
+		assert.equal(await prefs.load(), 'ready');
+		assert.deepEqual(prefs.getPref('graph.history'), { k1: [{ id: 'old1' }, { id: 'old2' }] });
+		prefs.setPref('other', 1);
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		const written = world.writes[0] as { owners: Record<string, { prefs: Record<string, unknown> }> };
+		assert.deepEqual(written.owners[OWNER].prefs['graph.history'], { k1: [{ id: 'old1' }, { id: 'old2' }] });
+	});
+
+	it('stat says missing and the read fails as a proven not-found: first run, writes allowed', async () => {
+		const world = lyingStat(() => { throw new Error('File not found: @/User/.workspace/rocketride.graph.history.json'); });
+		const { clock, opts } = options(world.fs);
+		const prefs = createFsPrefs(opts);
+		assert.equal(await prefs.load(), 'ready');
+		prefs.setPref('k', 1);
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		assert.equal(world.writes.length, 1);
 	});
 });
