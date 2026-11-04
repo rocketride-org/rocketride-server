@@ -253,9 +253,13 @@ describe('DevSession', () => {
 		const session = new DevSession({ app: { ...app, folder: short }, workspaceRoot: ws, engineOrigin: 'http://localhost:5565', install: false, onLine: (line) => lines.push(line) });
 
 		await session.start();
-		fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'clock-ui', version: '0.1.1', appManifest: { id: 'acme.clock', name: 'Clock' } }));
-		await waitFor(() => lines.some((l) => l.startsWith('package.json changed')));
-		await session.stop();
+		try {
+			fs.writeFileSync(path.join(folder, 'package.json'), JSON.stringify({ name: 'clock-ui', version: '0.1.1', appManifest: { id: 'acme.clock', name: 'Clock' } }));
+			// the replacement server prints a second banner
+			await waitFor(() => lines.filter((l) => l.includes('http://localhost:3995')).length >= 2);
+		} finally {
+			await session.stop();
+		}
 	}, 15000);
 });
 
