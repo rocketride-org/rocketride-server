@@ -494,9 +494,17 @@ export class DevSession {
 			if (this.pkgTimer) clearTimeout(this.pkgTimer);
 			this.pkgTimer = setTimeout(() => this.requestRestart(), 800);
 		};
+		const pkgFile = path.join(folder, 'package.json');
+		const mtime = (): number => {
+			try {
+				return fs.statSync(pkgFile).mtimeMs;
+			} catch {
+				return 0;
+			}
+		};
 		// poll the file's mtime (no folder watcher, or the folder watcher failed)
 		const poll = (): void => {
-			this.pkgPollFile = path.join(folder, 'package.json');
+			this.pkgPollFile = pkgFile;
 			this.pkgPollListener = (cur, prev) => {
 				if (cur.mtimeMs !== prev.mtimeMs) schedule();
 			};
@@ -504,14 +512,22 @@ export class DevSession {
 		};
 		try {
 			const watched = process.platform === 'win32' ? fs.realpathSync.native(folder) : folder;
+			// package.json's mtime as of the last change the watcher reported
+			let seen = mtime();
 			const watcher = fs.watch(watched, (_event, filename) => {
-				if (filename?.toString() === 'package.json') schedule();
+				if (filename?.toString() !== 'package.json') return;
+				seen = mtime();
+				schedule();
 			});
-			// a watcher error (folder removed, permissions changed) falls back to polling
+			// a watcher error (folder removed, permissions changed) falls back to polling;
+			// polling takes the current mtime as its baseline, so a change the watcher
+			// missed before failing is queued here
 			watcher.on('error', () => {
 				watcher.close();
 				if (this.pkgWatcher === watcher) this.pkgWatcher = null;
-				if (!this.stopping && !this.pkgPollFile) poll();
+				if (this.stopping || this.pkgPollFile) return;
+				if (mtime() !== seen) schedule();
+				poll();
 			});
 			this.pkgWatcher = watcher;
 		} catch {
