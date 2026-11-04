@@ -62,8 +62,10 @@
 //   - IDENTITY FENCE (optional, `identityNow`). A call is not SENT while the
 //     frame knows no identity: like the controller wait it holds inside the
 //     call's own deadline (looking again every IDENTITY_POLL_MS) and, if the
-//     deadline passes first, rejects as kind `unavailable`, unsent. Once sent it
-//     is bound to the identity the frame is under then; if the frame is under
+//     deadline passes first, rejects as kind `unavailable`, unsent. A call is
+//     bound to the identity the frame is under when it is ISSUED (when none is
+//     known, to the one it is sent under); if the frame is under another one
+//     before it is sent it is refused unsent as `stale`; if the frame is under
 //     another identity, or none, when the answer arrives, the answer is
 //     discarded and the call rejects as kind `stale` (callers ignore it), so
 //     account A's answer never reaches a frame that has adopted B, and there is
@@ -249,7 +251,9 @@ export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions
 		// it waits for the controller, inside its own deadline): so there is no
 		// unknown -> A -> B gap, and only A -> B or A -> null before the answer
 		// arrives is a change.
-		let issuedUnder: string | null = null;
+		// Captured at ISSUE whenever one is known; only a call issued while none is
+		// known takes its identity at send time.
+		let issuedUnder: string | null = opts.identityNow?.() ?? null;
 		const changedSince = (): boolean => {
 			if (opts.identityNow === undefined || issuedUnder === null) return false;
 			return (opts.identityNow() ?? null) !== issuedUnder;
@@ -278,8 +282,19 @@ export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions
 					message: `'${op}' was not sent: the tool's controller did not become ready within ${Math.round(timeoutMs / 1000)}s.`,
 				}));
 			const go = (): void => {
-				if (!pending.has(entry)) return;
-				if (!controllerOk() || !identityKnown()) return; // still waiting: a nonce, the poll or the deadline decides
+				if (!pending.has(entry) || entry.sent) return;
+				if (!controllerOk()) return; // still waiting: a nonce or the deadline decides
+				if (!identityKnown()) {
+					// The identity dropped while waiting: look again, do not run out the deadline.
+					if (entry.poll === null && entry.go !== null) entry.poll = setInterval(go, IDENTITY_POLL_MS);
+					return;
+				}
+				const current = opts.identityNow?.() ?? null;
+				if (issuedUnder !== null && current !== issuedUnder) {
+					// Issued under A, the frame is under B now: it is never sent.
+					if (settle(entry)) reject(staleIdentity());
+					return;
+				}
 				if (entry.timer !== null) clearTimeout(entry.timer);
 				if (entry.poll !== null) clearInterval(entry.poll);
 				entry.timer = null;
@@ -291,7 +306,7 @@ export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions
 					if (settle(entry)) reject(notSent());
 					return;
 				}
-				issuedUnder = opts.identityNow?.() ?? null;
+				if (issuedUnder === null) issuedUnder = current;
 				entry.sent = true;
 				send(op, args, { timeoutMs: left }).then(
 					(value) => { if (settle(entry)) { if (changedSince()) reject(staleIdentity()); else resolve(value); } },

@@ -468,3 +468,49 @@ describe('createFrameCaller — a call is held until an identity is known (DA-R3
 		attached.dispose();
 	});
 });
+
+describe('createFrameCaller — the identity is captured at ISSUE (DA-R31-01, DA-R31-02)', () => {
+	it('R31-1: a call issued under A that waits for the controller is refused unsent as stale when the frame is under B by the time it could go; the controller never runs it', async () => {
+		const h = createDevToolHarness('t.b');
+		h.setHostConnection(true);
+		let identity: string | null = 'fp-A';
+		const caller = createFrameCaller<FrameOps>({ ...frameOf(h), identityNow: () => identity });
+		await settle();
+		const call = caller.callReply('f.echo', { x: 1 }, { timeoutMs: 3_000 }).then(() => 'resolved', (error: { kind?: string }) => `rejected:${error.kind}`);
+		identity = null;
+		await new Promise((resolve) => setTimeout(resolve, 30));
+		identity = 'fp-B';
+		const ran: number[] = [];
+		const attached = attachController<FrameOps>({
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
+			createToolOpServer: shellProtocol.createToolOpServer,
+			handlers: { 'f.echo': ({ x }) => { ran.push(x); return x; } },
+		});
+		assert.equal(await call, 'rejected:stale');
+		assert.deepEqual(ran, [], 'a call issued under A never ran under B');
+		caller.dispose();
+		attached.dispose();
+	});
+
+	it('R31-2: identity known at issue, controller not ready, identity drops to null and returns: the call goes when A is back, it does not run out its deadline', async () => {
+		const h = createDevToolHarness('t.c');
+		h.setHostConnection(true);
+		let identity: string | null = 'fp-A';
+		const caller = createFrameCaller<FrameOps>({ ...frameOf(h), identityNow: () => identity });
+		await settle();
+		const started = Date.now();
+		const call = caller.callReply('f.echo', { x: 2 }, { timeoutMs: 800 }).then((value) => `resolved:${value}`, (error: { kind?: string }) => `rejected:${error.kind}`);
+		identity = null;
+		const attached = attachController<FrameOps>({
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
+			createToolOpServer: shellProtocol.createToolOpServer,
+			handlers: { 'f.echo': ({ x }) => x },
+		});
+		await settle();
+		identity = 'fp-A';
+		assert.equal(await call, 'resolved:2');
+		assert.ok(Date.now() - started < 600, 'it did not wait out its deadline');
+		caller.dispose();
+		attached.dispose();
+	});
+});
