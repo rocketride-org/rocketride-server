@@ -100,7 +100,7 @@
 // action in the sidebar.
 // =============================================================================
 
-import type { DevToolProps, ToolChannel } from 'shell';
+import type { DevToolProps, IToolOpServer, ToolChannel, ToolOpMap } from 'shell';
 import { ExplorerToolError } from 'shared/explorer/errors';
 import { attachController } from 'shared/explorer/devtool/controller';
 import type { RequiredControllerHandlers } from 'shared/explorer/devtool/controller';
@@ -113,12 +113,13 @@ import { attachWhenLoaded, createFsPrefs, historyPrefsPath } from 'shared/explor
 import type { IFsPrefs } from 'shared/explorer/devtool/prefs';
 import type { IIdentitySnapshot } from 'shared/explorer/devtool/identity';
 import type { IStoreClock } from 'shared/explorer/connect/store';
-import type { DevToolPeer } from 'shared/explorer/devtool/realm';
+import type { IRealmClient, RealmClientGetter } from 'shared/explorer/devtool/engineClient';
+import type { IEngineReadiness } from 'shared/explorer/devtool/readiness';
 import type { IFocusTarget } from 'shared/explorer/devtool/watch';
-import { SQL_APP_ID } from './appId';
 import { getSavedConnections, getSavedConnectionsStatus, subscribeSavedConnections } from './connect';
 import { MAX_APPLY_STATEMENTS } from './connect/tools';
 import { connectionEditorDocKey } from './docs';
+import { SQL_EVENT_NAMES } from './ops';
 import type { ConnectionsState, HistoryState, SqlOps } from './ops';
 import { checkHistoryEdit, checkHistoryEntry } from './history/api';
 import type { HistoryEdit, HistoryStorage } from './history/api';
@@ -133,23 +134,22 @@ import { gateStatement } from './sql/gate';
 import { createSqlCore } from './sqlCore';
 import type { SqlCore, SqlCoreBus } from './sqlCore';
 import { sqlChannel } from './sqlFrame';
-import type { SqlToolProtocol } from './sqlFrame';
-import { SAVED_QUERIES_LOAD_WAIT_MS } from './sqlTimeouts';
+import { SAVED_QUERIES_LOAD_WAIT_MS, SQL_OP_TIMEOUT_MS } from './sqlTimeouts';
 import { MAX_QUESTION_CHARS } from './connect/tools';
 
 /** What {@link attachSqlController} needs (DevToolProps plus the injected realm and factories). */
 export interface SqlControllerOptions {
-	/** The sidebar mount's peer. */
-	peer: DevToolPeer;
-	/** The host's channel, when it gave one. */
-	channel?: ToolChannel;
+	/** The host's channel for this mount (`DevToolProps.channel`): the only subscriber of the sidebar peer. */
+	channel: ToolChannel;
 	/** The host's documents API (opened only on user actions). */
 	documents?: DevToolProps['documents'];
-	/** The sidebar's activeDocKey at mount. */
-	activeDocKey?: string | null;
-	/** The realm's ConnectionManager. */
+	/** The realm's ConnectionManager (identity events and the server event stream). */
 	cm: SqlCoreBus;
-	/** The protocol factories. */
+	/** The realm's client right now (`useEngineSource().getClient`). */
+	getClient: RealmClientGetter<IRealmClient>;
+	/** The realm's engine readiness (`useEngineSource().readiness`). */
+	engine: IEngineReadiness;
+	/** The shell's op-server factory (`createToolOpServer`), injected so tests run the real one. */
 	protocol: SqlToolProtocol;
 	/** The deadline guard's clock (tests). */
 	now?: () => number;
@@ -159,6 +159,12 @@ export interface SqlControllerOptions {
 	clock?: IStoreClock;
 	/** Told about every call the deadline guard refused (tests, diagnostics). */
 	onRefused?: (error: DeadlineError) => void;
+}
+
+/** The one shell factory the controller needs. */
+export interface SqlToolProtocol {
+	/** Build the controller's op server over the host's channel. */
+	createToolOpServer: <O extends ToolOpMap>(channel: ToolChannel) => IToolOpServer<O>;
 }
 
 /** A mounted controller. */
@@ -366,9 +372,9 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 	let disposed = false;
 	const core = createSqlCore({
 		cm: opts.cm,
-		appId: SQL_APP_ID,
+		getClient: opts.getClient,
+		engine: opts.engine,
 		mode: 'devtool',
-		activeDocKey: opts.activeDocKey ?? null,
 		...(opts.focusTarget !== undefined ? { focusTarget: opts.focusTarget } : {}),
 		...(opts.clock ? { clock: opts.clock } : {}),
 	});
@@ -416,7 +422,7 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 	 */
 	const historyFile = (owner: string): IFsPrefs => {
 		const accessor = createFsPrefs({
-			cm: opts.cm,
+			fs: core.fs,
 			path: historyPrefsPath('sql'),
 			owner,
 			// Who is signed in now: the live fingerprint, or null while nobody is
@@ -472,7 +478,7 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 		offAttachWhenActive = null;
 		if (owner !== null) {
 			// The file is read only once the tool is activated (R7).
-			offAttachWhenActive = core.activation.subscribe(() => {
+			offAttachWhenActive = core.whenAllowed(() => {
 				if (historyOwner === owner && !disposed) attachFile(owner);
 			});
 		}
@@ -506,9 +512,9 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 
 	let publishSaved: () => void = () => undefined;
 	const saved = createSavedQueriesFile({
-		cm: opts.cm,
+		fs: core.fs,
 		identity: core.identity,
-		activation: core.activation,
+		whenAllowed: core.whenAllowed,
 		loadWaitMs: SAVED_QUERIES_LOAD_WAIT_MS,
 		onChange: () => publishSaved(),
 	});
@@ -634,15 +640,19 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 	// The channel first (the host's, or one per peer), then exactly one op
 	// server, inside the caller's effect (R6).
 	const attached = attachController<SqlOps>({
-		peer: opts.peer,
-		...(opts.channel ? { channel: opts.channel } : {}),
-		createToolChannel: opts.protocol.createToolChannel,
+		channel: opts.channel,
 		createToolOpServer: opts.protocol.createToolOpServer,
 		handlers,
+		// An op's deadline may reach as far as its frame's own timeout (an
+		// `execute` waits up to ~48 h), never the library's default horizon.
+		maxBudgetMs: SQL_OP_TIMEOUT_MS,
+		// Events are idempotent hints; a frame's event may never run an op.
+		events: SQL_EVENT_NAMES,
 		...(opts.now ? { now: opts.now } : {}),
 		...(opts.onRefused ? { onRefused: opts.onRefused } : {}),
-		// The first op from a frame is an activation (R7).
-		onFirstOp: () => core.activation.open('op'),
+		// The first op from a frame means a person is present: endpoint probes
+		// (tool calls) may start.
+		onFirstOp: () => core.discovery.markUserPresent('op'),
 	});
 
 	// Retained state, within 64 KiB per topic and 128 KiB together (identity
@@ -701,15 +711,15 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 	const bridge: SqlSidebarBridge = {
 		// Hosts open the connection's OWN top-level tab through documents.
 		openConnection: (conn) => {
-			core.activation.open('user');
+			core.discovery.markUserPresent('user');
 			opts.documents?.open(conn.id, conn.name);
 		},
 		openConnectionEditor: (editing) => {
-			core.activation.open('user');
+			core.discovery.markUserPresent('user');
 			opts.documents?.open(connectionEditorDocKey(editing?.id ?? null), editing ? `Edit ${editing.name}` : 'New Connection');
 		},
 		deleteConnection: (conn) => {
-			core.activation.open('user');
+			core.discovery.markUserPresent('user');
 			void core.deleteConnection(conn.id).catch((error: unknown) => {
 				const message = error instanceof Error ? error.message : String(error);
 				errorSubs.forEach((fn) => fn(message));
@@ -734,7 +744,7 @@ export function attachSqlController(opts: SqlControllerOptions): SqlControllerMo
 		history,
 		savedQueries: saved,
 		channel: attached.channel,
-		noteActiveDocKey: (key) => core.activation.noteActiveDocKey(key),
+		noteActiveDocKey: (key) => { if (typeof key === 'string' && key !== '') core.discovery.markUserPresent('user'); },
 		dispose() {
 			if (disposed) return;
 			disposed = true;

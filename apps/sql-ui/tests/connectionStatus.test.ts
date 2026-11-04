@@ -37,7 +37,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { CONTROLLER_STATE_TOPIC } from 'shared/explorer/devtool/realm';
 import { account, settle } from 'shared/explorer/devtool/testing';
-import { SQL_APP_ID } from '../src/appId';
 import { endpointKeyForConnection, getSavedConnections, resetSavedConnections } from '../src/connect';
 import { connectionStatus } from '../src/connectionStatus';
 import type { ConnectionStatusSource, DiscoveredStatus } from '../src/connectionStatus';
@@ -232,7 +231,7 @@ describe('the sidebar\'s status source: discovery and open failures, in the real
 	it('full app: the local bridge reads the same source from the app\'s own core', async () => {
 		resetSavedConnections({ force: true });
 		const engine = scriptedClientRealm(engineScript([PIPELINE], [taskRow('p1')], postgres));
-		const core = createSqlCore({ cm: engine.cm, appId: SQL_APP_ID, mode: 'app', focusTarget: null });
+		const core = createSqlCore({ ...engine.source, mode: 'app', focusTarget: null });
 		const bridge = createLocalSidebarBridge(core);
 		const sources: ConnectionStatusSource[] = [];
 		const off = bridge.subscribeStatus((source) => { sources.push(source); });

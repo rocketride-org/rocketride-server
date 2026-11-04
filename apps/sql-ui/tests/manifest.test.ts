@@ -32,7 +32,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 
 const APP_ROOT = path.join(__dirname, '..');
@@ -70,5 +70,25 @@ describe('appManifest', () => {
 		assert.equal(typeof version, 'string');
 		assert.match(version as string, /^\d+\.\d+\.\d+$/);
 		assert.notEqual(version, '1.0.0');
+		// Develop shipped 1.0.0; a seeded install compares versions for difference
+		// only, but the version a person sees must not go backwards.
+		const [major = 0, minor = 0] = (version as string).split('.').map(Number);
+		assert.ok(major > 1 || (major === 1 && minor > 0), `${version} is above develop's 1.0.0`);
+	});
+
+	it('keeps develop\'s manifest conventions: the publisher, the README field, the app id and the project id', () => {
+		const manifest = JSON.parse(readFileSync(path.join(APP_ROOT, 'package.json'), 'utf8')).appManifest as Record<string, unknown>;
+		assert.equal(manifest.publisher, 'RocketRide');
+		assert.equal(manifest.readme, './README.md');
+		assert.equal(manifest.id, 'rocketride.sql');
+		assert.equal(manifest.projectId, '5badc60c-1b62-4c00-83ef-081f0c96d02a');
+		assert.equal(manifest.icon, './src/icon.svg');
+	});
+
+	it('keeps the README images in assets/ (the README links ./assets/), and the module-federation plugin a devDependency', () => {
+		for (const image of ['screenshot.png', 'new-connection.png', 'query.png']) assert.ok(existsSync(path.join(APP_ROOT, 'assets', image)), `assets/${image}`);
+		const pkg = JSON.parse(readFileSync(path.join(APP_ROOT, 'package.json'), 'utf8')) as { dependencies: Record<string, string>; devDependencies: Record<string, string> };
+		assert.ok('@module-federation/rsbuild-plugin' in pkg.devDependencies);
+		assert.equal('@module-federation/rsbuild-plugin' in pkg.dependencies, false);
 	});
 });

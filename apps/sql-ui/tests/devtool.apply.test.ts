@@ -36,7 +36,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { ExplorerToolError } from 'shared/explorer/errors';
-import { SQL_APP_ID } from '../src/appId';
 import { TRANSACTIONS_UNAVAILABLE_CODE, getSavedConnections, isTransactionsUnavailable, resetSavedConnections } from '../src/connect';
 import { createLocalSqlEnv } from '../src/localEnv';
 import { APPLY_UNKNOWN_DIALECT_TEXT } from '../src/sql/gate';
@@ -143,7 +142,7 @@ describe('the full app takes the same path: its session\'s apply goes through th
 	it('refuses transaction text in the list, and runs a good list as one transaction', async () => {
 		resetSavedConnections({ force: true });
 		const engine = scriptedClientRealm(engineScript([PIPELINE], [taskRow('p1')], nodeOf('postgres')));
-		const core = createSqlCore({ cm: engine.cm, appId: SQL_APP_ID, mode: 'app', focusTarget: null });
+		const core = createSqlCore({ ...engine.source, mode: 'app', focusTarget: null });
 		const env = createLocalSqlEnv(core, true, () => undefined, { getPref: () => undefined, setPref: () => undefined });
 		try {
 			engine.realm.login(USER);

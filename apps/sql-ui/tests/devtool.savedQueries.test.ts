@@ -40,7 +40,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { ExplorerToolError } from 'shared/explorer/errors';
-import { PREFS_FILE_VERSION, PREFS_FS_TIMEOUT_MS, PREFS_LOAD_ATTEMPTS } from 'shared/explorer/devtool/prefs';
+import { PREFS_FILE_VERSION, PREFS_LOAD_ATTEMPTS } from 'shared/explorer/devtool/prefs';
+import { PREFS_FS_DEADLINE_MS } from 'shared/explorer/devtool/timeouts';
 import { account, createDevToolHarness, settle, shellProtocol, spyPeer } from 'shared/explorer/devtool/testing';
 import type { IPrefsAccessor } from 'shared/explorer/history/types';
 import { SQL_APP_ID } from '../src/appId';
@@ -59,7 +60,7 @@ import { createRemoteSqlEnv } from '../src/sqlEnv';
 import { createRemoteHistory } from '../src/history/remoteHistory';
 import { FS_TIMEOUT_MS, SAVED_QUERIES_LOAD_WAIT_MS, SQL_OP_TIMEOUT_MS } from '../src/sqlTimeouts';
 import { taskRow } from './support';
-import { SAVED_PATH, USER, engineScript, scriptedClientRealm, scriptedSocketlessRealm, until } from './realm';
+import { SAVED_PATH, USER, engineScript, scriptedClientRealm, scriptedMirroredRealm, until } from './realm';
 import { PIPELINE, postgres, rig } from './devtoolRig';
 
 const KEY = 'p1:s1:db_1';
@@ -135,13 +136,13 @@ function hold(engine: { script: Record<string, (params: unknown) => unknown> }, 
 async function vscodeRig(files: Record<string, unknown> = {}) {
 	resetSavedConnections({ force: true });
 	const h = createDevToolHarness(SQL_APP_ID, { json: true });
-	const engine = scriptedSocketlessRealm(engineScript([PIPELINE], [taskRow('p1', { ownerId: 'uA' }), taskRow('p1', { ownerId: 'uB', token: 'tk_sentinel_b' })], postgres, files));
+	const engine = scriptedMirroredRealm(engineScript([PIPELINE], [taskRow('p1', { ownerId: 'uA' }), taskRow('p1', { ownerId: 'uB', token: 'tk_sentinel_b' })], postgres, files));
 	const sidebar = spyPeer(h.sidebarPeer);
 	const hostChannel = shellProtocol.createToolChannel(sidebar.peer);
-	const mountController = (): SqlControllerMount => attachSqlController({ peer: sidebar.peer, channel: hostChannel, cm: engine.cm, protocol: shellProtocol, focusTarget: null });
+	const mountController = (): SqlControllerMount => attachSqlController({ channel: hostChannel, ...engine.source, protocol: shellProtocol, focusTarget: null });
 	let controller = mountController();
 	let view: ReturnType<typeof createRemoteSavedQueries> | null = null;
-	const frame = attachSqlFrame({ peer: h.newFramePeer(), docKey: 'c-pipe', documents: { open: () => undefined, close: () => undefined }, protocol: shellProtocol, onReset: () => view?.reset() });
+	const frame = attachSqlFrame({ channel: shellProtocol.createToolChannel(h.newFramePeer()), docKey: 'c-pipe', documents: { open: () => undefined, close: () => undefined }, protocol: shellProtocol, onReset: () => view?.reset() });
 	view = createRemoteSavedQueries({ caller: frame.caller, channel: sqlChannel(frame.channel), owner: frame.owner });
 	await settle();
 	const read = (owner: string | null) => frame.caller.callReply('sql.savedQueries', { connId: 'c-pipe', owner }, { timeoutMs: SQL_OP_TIMEOUT_MS['sql.savedQueries'] });
@@ -171,8 +172,8 @@ describe('saved queries in a dev tool: the controller keeps them in their own fi
 		assert.equal(SAVED_QUERIES_PATH, '@/User/.workspace/rocketride.sql.queries.json');
 		// Frames may not import the library's prefs module (it reaches the bus
 		// client), so the wait is spelled out in sqlTimeouts and pinned here.
-		assert.equal(FS_TIMEOUT_MS, PREFS_FS_TIMEOUT_MS);
-		assert.equal(SAVED_QUERIES_LOAD_WAIT_MS, PREFS_LOAD_ATTEMPTS * 2 * PREFS_FS_TIMEOUT_MS + 1_000 + 3_000);
+		assert.equal(FS_TIMEOUT_MS, PREFS_FS_DEADLINE_MS);
+		assert.equal(SAVED_QUERIES_LOAD_WAIT_MS, PREFS_LOAD_ATTEMPTS * 2 * PREFS_FS_DEADLINE_MS + 1_000 + 3_000);
 	});
 
 	it('reads the file before it serves (stat, then read), and a frame is served what was saved, with where it is kept', async () => {
@@ -587,7 +588,7 @@ describe('saved queries in the full app: the workspace preferences, through the 
 	it('saves under `sql.savedQueries` in the app\'s preferences, for the signed-in account only', async () => {
 		resetSavedConnections({ force: true });
 		const engine = scriptedClientRealm(engineScript([PIPELINE], [taskRow('p1')], postgres));
-		const core = createSqlCore({ cm: engine.cm, appId: SQL_APP_ID, mode: 'app', focusTarget: null });
+		const core = createSqlCore({ ...engine.source, mode: 'app', focusTarget: null });
 		const values = new Map<string, unknown>();
 		const prefs: IPrefsAccessor = { getPref: (key) => values.get(key), setPref: (key, value) => { values.set(key, value); } };
 		const env = createLocalSqlEnv(core, true, () => undefined, prefs);
@@ -636,7 +637,7 @@ describe('saved queries in the full app: the workspace preferences, through the 
 	it('the pin outlives the env being rebuilt (a reconnect): one view per engine core', async () => {
 		resetSavedConnections({ force: true });
 		const engine = scriptedClientRealm(engineScript([PIPELINE], [taskRow('p1')], postgres));
-		const core = createSqlCore({ cm: engine.cm, appId: SQL_APP_ID, mode: 'app', focusTarget: null });
+		const core = createSqlCore({ ...engine.source, mode: 'app', focusTarget: null });
 		const prefs: IPrefsAccessor = { getPref: () => undefined, setPref: () => undefined };
 		try {
 			assert.equal(createLocalSqlEnv(core, true, () => undefined, prefs).savedQueries, createLocalSqlEnv(core, false, () => undefined, prefs).savedQueries);

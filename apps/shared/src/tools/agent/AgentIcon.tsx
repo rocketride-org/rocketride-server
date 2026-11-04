@@ -28,7 +28,7 @@ export interface AgentIconProps {
  * @param props - {@link AgentIconProps}.
  */
 export const AgentIcon: React.FC<AgentIconProps> = ({ size = 20 }) => (
-	<svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round">
+	<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1} strokeLinecap="round" strokeLinejoin="round">
 		<style>{`
 			.rr-agent-eye  { transform-box: fill-box; transform-origin: center;    animation: rr-agent-blink 4s infinite; }
 			.rr-agent-ant  { transform-box: fill-box; transform-origin: 100% 100%; animation: rr-agent-sway 3s ease-in-out infinite; }

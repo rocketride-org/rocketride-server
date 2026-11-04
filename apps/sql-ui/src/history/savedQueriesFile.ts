@@ -50,21 +50,20 @@
 import { ExplorerToolError } from 'shared/explorer/errors';
 import { createFsPrefs } from 'shared/explorer/devtool/prefs';
 import type { IFsPrefs } from 'shared/explorer/devtool/prefs';
-import type { IExplorerBus } from 'shared/explorer/devtool/busClient';
+import type { IPrefsFs } from 'shared/explorer/devtool/engineClient';
 import type { IIdentitySnapshot, IIdentityTracker } from 'shared/explorer/devtool/identity';
-import type { IActivationGate } from 'shared/explorer/devtool/activation';
 import type { IPrefsAccessor } from 'shared/explorer/history/types';
 import { SAVED_QUERIES_PATH } from './savedQueries';
 import type { SavedQueriesStorage } from './savedQueries';
 
 /** What {@link createSavedQueriesFile} needs. */
 export interface SavedQueriesFileOptions {
-	/** The controller realm's bus. */
-	cm: IExplorerBus;
+	/** The user-store calls over the realm's client (`core.fs`). */
+	fs: IPrefsFs;
 	/** The controller core's identity tracker. */
 	identity: IIdentityTracker;
-	/** The controller core's activation gate (nothing is read before it opens). */
-	activation: IActivationGate;
+	/** Runs a function once the identity is known and the engine is ready (`core.whenAllowed`): nothing is read before. */
+	whenAllowed: (fn: () => void) => () => void;
 	/** How long a read or an edit waits for the account's file to be read. */
 	loadWaitMs: number;
 	/** Told on every change of storage or contents (the controller republishes its topic). */
@@ -120,7 +119,7 @@ export function createSavedQueriesFile(opts: SavedQueriesFileOptions): SavedQuer
 	 */
 	const fileFor = (account: string): IFsPrefs => {
 		const accessor = createFsPrefs({
-			cm: opts.cm,
+			fs: opts.fs,
 			path: SAVED_QUERIES_PATH,
 			owner: account,
 			// Who is signed in now: the library HOLDS a write while it is null
@@ -180,7 +179,7 @@ export function createSavedQueriesFile(opts: SavedQueriesFileOptions): SavedQuer
 		offActive = null;
 		storage = next === null ? 'none' : 'file';
 		if (next !== null) {
-			offActive = opts.activation.subscribe(() => {
+			offActive = opts.whenAllowed(() => {
 				if (owner === next && !closed) attach(next);
 			});
 		}

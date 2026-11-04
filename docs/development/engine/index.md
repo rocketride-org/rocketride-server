@@ -327,8 +327,11 @@ The external parsers shell out via the Unix `env` shim; if `env` or a required t
 
 ## Debugging crash dumps
 
-The engine uses Crashpad: a crash writes a `.dmp` minidump, which the next run
-sweeps into the crash-dump location. Turning one back into a stack trace (LLDB,
+Started with `--dumps`, the engine writes a minidump when it crashes. On Linux
+and macOS Crashpad writes a `.dmp`, which the crashing engine moves into the
+crash-dump location before it exits; a later run sweeps any it could not move.
+On Windows the engine writes an `.mdmp` there itself. Without `--dumps` it
+writes none. Turning one back into a stack trace (LLDB,
 GDB via `minidump-2-core`, or `minidump-stackwalk` against the shipped `.sym`
 store), generating and storing symbols, and the Windows/WinDbg path are all
 covered in [Crash reporting](crash-reporting.md).

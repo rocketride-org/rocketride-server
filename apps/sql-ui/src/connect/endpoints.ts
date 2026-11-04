@@ -45,14 +45,15 @@ import { SQL_TOOLS } from './tools';
 /**
  * Create SQL Explorer's endpoint store.
  *
- * @param opts - Optional clock (tests).
+ * @param opts - Optional clock (tests); `holdProbes` keeps endpoint probes back until a person is present.
  * @returns The store.
  */
-export function createSqlEndpoints(opts: { clock?: IStoreClock } = {}): IEndpointStore {
+export function createSqlEndpoints(opts: { clock?: IStoreClock; holdProbes?: () => boolean } = {}): IEndpointStore {
 	return createEndpointStore({
 		providers: DATABASE_PROVIDERS,
 		roles: SINGLE_TOOLS_ROLE,
 		tools: SQL_TOOLS,
 		...(opts.clock ? { clock: opts.clock } : {}),
+		...(opts.holdProbes ? { holdProbes: opts.holdProbes } : {}),
 	});
 }

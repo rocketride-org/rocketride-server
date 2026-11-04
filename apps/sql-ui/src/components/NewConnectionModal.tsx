@@ -40,6 +40,7 @@
 // would quietly reset the connection to the default.
 // =============================================================================
 
+import { keptPipelineBinding } from '../connect/keptBinding';
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Banner, Button, ContentHeader, Modal } from 'shell';
@@ -348,7 +349,26 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 	/** Persists the pipeline-bound record from the selected endpoint. */
 	const savePipeline = useCallback(async () => {
 		const endpoint = endpoints.find((e: SqlEndpoint) => e.key === selectedKey);
-		if (!endpoint) { setError('Select a database node.'); return; }
+		if (!endpoint) {
+			// The saved node is not discoverable (its pipeline is stopped):
+			// keep the existing binding and apply the new name.
+			const kept = keptPipelineBinding(editing, selectedKey, name);
+			if (kept === null) {
+				setError('Select a database node.');
+				return;
+			}
+			setSaving(true);
+			try {
+				await env.saveConnection(kept);
+				onSaved?.(kept);
+				onClose();
+			} catch (err) {
+				setError(err instanceof Error ? err.message : String(err));
+			} finally {
+				setSaving(false);
+			}
+			return;
+		}
 		const record: SavedSqlConnection = {
 			id: editing?.id ?? newConnectionId(),
 			mode: 'pipeline' as const,

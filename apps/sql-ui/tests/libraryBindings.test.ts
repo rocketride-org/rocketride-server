@@ -39,7 +39,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { connectionEditorDocKey, connectionEditorIdFromUri, connectionEditorUri, endpointKeyFromAnyUri, isConnectionEditorUri, parseConnectionEditorDocKey } from '../src/docs';
-import { getActiveConnection, requestConnectionOverlay, setActiveConnection, subscribeActiveConnection } from '../src/navigation';
+import { getActiveConnection, setActiveConnection, subscribeActiveConnection } from '../src/navigation';
 
 /**
  * Read one source file of the app.
@@ -107,11 +107,5 @@ describe('library bindings: what the binding keeps', () => {
 		assert.deepEqual(seen, ['k1', null]);
 		assert.equal(getActiveConnection(), 'k2');
 		setActiveConnection(null);
-	});
-
-	it('keeps the connection-overlay slot dismissable (request null closes it)', () => {
-		assert.doesNotThrow(() => requestConnectionOverlay(null));
-		assert.match(source('navigation.ts'), /export type ConnectionOverlayRequest =/);
-		assert.match(source('navigation.ts'), /export function useConnectionOverlay\(\): ConnectionOverlayRequest \| null/);
 	});
 });

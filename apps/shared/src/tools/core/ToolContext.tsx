@@ -72,7 +72,10 @@ export interface BuiltinToolServices extends ToolHostServices {
 	 *  identities (tool:apps/newapp, tool:apps/<appId>) and routes docKeys;
 	 *  the builder/wizard internals are host adapters. A host without this
 	 *  seam keeps its page routing and the tool falls back to openPage. */
-	appdevFrames?: { builder: ComponentType<{ appId: string }>; newApp: ComponentType };
+	/** The App Builder document body. `appId: null` is the UNBOUND builder —
+	 *  it renders the New App wizard (the builder's empty state, like the
+	 *  pipeline editor's empty-canvas wizard). */
+	appdevFrames?: { builder: ComponentType<{ appId: string | null }> };
 }
 
 /**

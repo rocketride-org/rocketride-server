@@ -49,6 +49,8 @@ from psycopg2 import sql
 from rocketlib import warning
 from ai.common.graph import GraphGlobalBase
 from ai.common.graph.age import (
+    CAPABILITY_TABLES,
+    DEFAULT_AGE_VERSION,
     AgeTranslationError,
     FirewallConfig,
     TranslateMode,
@@ -105,6 +107,11 @@ class IGlobal(GraphGlobalBase):
             if row is None:
                 raise RuntimeError('The tenant database does not have the Apache AGE extension installed')
             self.age_version = row[0]
+            if self.age_version not in CAPABILITY_TABLES:
+                warning(
+                    f'rocketride_graph: no Cypher rules for Apache AGE {self.age_version}; '
+                    f'using the strict AGE {DEFAULT_AGE_VERSION} rules'
+                )
             cur.execute('SELECT 1 FROM ag_catalog.ag_graph WHERE name = %s', (self.graph_name,))
             graph_exists = cur.fetchone() is not None
         self.client.commit()
@@ -180,7 +187,7 @@ class IGlobal(GraphGlobalBase):
             limit=limit,
             mode=mode,
             graph_name=self.graph_name,
-            age_version=self.age_version or '1.5.0',
+            age_version=self.age_version or DEFAULT_AGE_VERSION,
             firewall=self._firewall_config(),
         )
 

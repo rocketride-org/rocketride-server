@@ -26,9 +26,9 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { ConnectionManager, useShellConnection, useShellEvent } from 'shell';
-import { Explorer, createToolOpServer } from 'shell';
-import type { ExplorerOps } from './ops';
+import { useShellConnection, useShellEvent } from 'shell';
+import { Explorer } from 'shell';
+import type { RocketRideClient } from 'rocketride';
 import { BxDownload, BxDockLeft, SidebarCollapsedGate } from 'shell';
 import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction } from 'shell';
 import type { IVirtualFileSystem, DevToolProps } from 'shell';
@@ -91,10 +91,10 @@ const styles = {
  * prop. Files open in the Documents tab system on click.
  */
 const ExplorerSidebar: React.FC<{ bridge?: ExplorerDocsBridge; gated?: boolean }> = ({ bridge = localDocsBridge, gated = true }) => {
-	const { isConnected } = useShellConnection();
-	// Engine access rides the SHELL BUS (brokered client.* ops) — this realm
-	// holds no client object and no socket.
-	const cm = ConnectionManager.getInstance();
+	// The realm's own client — the root's real one, or the realm client whose
+	// requests ride the shell bus. Same type, same behaviour either way.
+	const { client: shellClient, isConnected } = useShellConnection();
+	const client = isConnected ? shellClient : null;
 	const [entries, setEntries] = useState<ExplorerEntry[]>([]);
 
 	// Active file path (for highlighting) — from the bridge: the Documents
@@ -105,14 +105,14 @@ const ExplorerSidebar: React.FC<{ bridge?: ExplorerDocsBridge; gated?: boolean }
 	// --- Refresh file list (recursive) ----------------------------------------
 
 	const refresh = useCallback(async () => {
-		if (!isConnected) { setEntries([]); return; }
+		if (!client) { setEntries([]); return; }
 		try {
-			const allEntries = await listRecursive('@');
+			const allEntries = await listRecursive(client, '@');
 			setEntries(allEntries);
 		} catch {
 			setEntries([]);
 		}
-	}, [isConnected]);
+	}, [client]);
 
 	// Refresh on mount and when connection changes
 	useEffect(() => { refresh(); }, [refresh]);
@@ -133,7 +133,7 @@ const ExplorerSidebar: React.FC<{ bridge?: ExplorerDocsBridge; gated?: boolean }
 		path: string,
 		newName?: string,
 	) => {
-		if (!isConnected) return;
+		if (!client) return;
 		try {
 			switch (action) {
 				case 'rename': {
@@ -141,28 +141,28 @@ const ExplorerSidebar: React.FC<{ bridge?: ExplorerDocsBridge; gated?: boolean }
 					const dir = path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '';
 					const newPath = dir ? `${dir}/${newName}` : newName;
 					if (newPath === path) break;
-					await cm.request('client.fsRename', { from: path, to: newPath });
+					await client.fsRename(path, newPath);
 					// Re-point open editor tabs (local or over the peer channel)
 					bridge.renamed(path, newPath);
 					break;
 				}
 				case 'delete': {
-					const stat = await cm.request('client.fsStat', { path }) as { type?: string };
+					const stat = await client.fsStat(path);
 					if (stat.type === 'dir') {
-						await cm.request('client.fsRmdir', { path, recursive: true });
+						await client.fsRmdir(path, true);
 					} else {
-						await cm.request('client.fsDelete', { path });
+						await client.fsDelete(path);
 					}
 					bridge.deleted(path);
 					break;
 				}
 				case 'createFile': {
-					await cm.request('client.fsWriteString', { path, text: '' });
+					await client.fsWriteString(path, '');
 					bridge.open(path);
 					break;
 				}
 				case 'createFolder': {
-					await cm.request('client.fsMkdir', { path });
+					await client.fsMkdir(path);
 					break;
 				}
 			}
@@ -170,12 +170,12 @@ const ExplorerSidebar: React.FC<{ bridge?: ExplorerDocsBridge; gated?: boolean }
 		} catch (err) {
 			console.error(`[ExplorerSidebar] ${action} failed:`, err);
 		}
-	}, [isConnected, cm, refresh]);
+	}, [client, refresh, bridge]);
 
 	// --- Move (drag within tree) ----------------------------------------------
 
 	const handleMove = useCallback(async (sourcePath: string, targetDir: string) => {
-		if (!isConnected) return;
+		if (!client) return;
 		try {
 			const name = sourcePath.includes('/') ? sourcePath.substring(sourcePath.lastIndexOf('/') + 1) : sourcePath;
 			// The tree is rooted at the '@' mount (listRecursive above), so an
@@ -183,26 +183,26 @@ const ExplorerSidebar: React.FC<{ bridge?: ExplorerDocsBridge; gated?: boolean }
 			// letting a bare name silently target the plain user store.
 			const newPath = `${targetDir || '@'}/${name}`;
 			if (newPath === sourcePath) return;
-			await cm.request('client.fsRename', { from: sourcePath, to: newPath });
+			await client.fsRename(sourcePath, newPath);
 			// Keep open editor tabs in sync with the move (local or peer).
 			bridge.moved(sourcePath, newPath);
 			await refresh();
 		} catch (err) {
 			console.error('[ExplorerSidebar] move failed:', err);
 		}
-	}, [isConnected, cm, refresh, bridge]);
+	}, [client, refresh, bridge]);
 
 	// --- Upload (drop from OS) ------------------------------------------------
 
 	const handleUpload = useCallback(async (files: File[], targetDir: string) => {
-		if (!isConnected) return;
+		if (!client) return;
 		try {
 			for (const file of files) {
 				// Same root rule as handleMove: '' targetDir is the '@' mount.
 				const path = `${targetDir || '@'}/${file.name}`;
-				const { handle } = await cm.request('client.fsOpen', { path, mode: 'w' }) as { handle: unknown };
-				// 1 MB chunks: write bytes ride the bus base64-encoded (the
-				// JSON-safe binary rule), so keep frames postMessage-friendly.
+				const { handle } = await client.fsOpen(path, 'w');
+				// 1 MB chunks (in an off-root realm the bytes ride the bus
+				// base64-framed — binaryWire — so keep frames postMessage-friendly).
 				const chunkSize = 1024 * 1024;
 				try {
 					// Stream the file in chunks via File.slice so we never
@@ -210,24 +210,24 @@ const ExplorerSidebar: React.FC<{ bridge?: ExplorerDocsBridge; gated?: boolean }
 					let offset = 0;
 					while (offset < file.size) {
 						const chunk = new Uint8Array(await file.slice(offset, offset + chunkSize).arrayBuffer());
-						await cm.request('client.fsWrite', { handle, dataB64: bytesToB64(chunk) });
+						await client.fsWrite(handle, chunk);
 						offset += chunkSize;
 					}
 				} finally {
 					// Always close the handle, even if a write throws mid-stream.
-					await cm.request('client.fsClose', { handle, mode: 'w' });
+					await client.fsClose(handle, 'w');
 				}
 			}
 			await refresh();
 		} catch (err) {
 			console.error('[ExplorerSidebar] upload failed:', err);
 		}
-	}, [isConnected, cm, refresh]);
+	}, [client, refresh]);
 
 	// --- Download (kebab menu action) -----------------------------------------
 
 	const handleDownload = useCallback(async (path: string) => {
-		if (!isConnected) return;
+		if (!client) return;
 		try {
 			const name = path.includes('/') ? path.substring(path.lastIndexOf('/') + 1) : path;
 			// Pass downloadName so the server bakes `Content-Disposition:
@@ -235,7 +235,7 @@ const ExplorerSidebar: React.FC<{ bridge?: ExplorerDocsBridge; gated?: boolean }
 			// cloud, /task/fetch header for local). This makes the download
 			// filename work even for cross-origin cloud URLs, where the
 			// `<a download>` attribute is otherwise ignored.
-			const url = await cm.request('client.fsGetUrl', { path, downloadName: name }) as string;
+			const url = await client.fsGetUrl(path, undefined, name);
 			if (!url) return;
 			const a = document.createElement('a');
 			a.href = url;
@@ -246,7 +246,7 @@ const ExplorerSidebar: React.FC<{ bridge?: ExplorerDocsBridge; gated?: boolean }
 		} catch (err) {
 			console.error('[ExplorerSidebar] download failed:', err);
 		}
-	}, [isConnected, cm]);
+	}, [client]);
 
 	// --- Open with... handler ----------------------------------------------------
 
@@ -305,12 +305,12 @@ const ExplorerSidebar: React.FC<{ bridge?: ExplorerDocsBridge; gated?: boolean }
 };
 
 /**
- * The tree as a host-mounted devToolSidebar: document actions ride the peer
+ * The tree as a host-mounted devToolSidebar: document actions ride the tool
  * channel to the frame (which owns Documents), and the active-path highlight
  * arrives back the same way.
  */
-export const ExplorerDevToolSidebar: React.FC<DevToolProps> = ({ peer, documents }) => {
-	const bridge = useMemo(() => createPeerDocsBridge(peer), [peer]);
+export const ExplorerDevToolSidebar: React.FC<DevToolProps> = ({ channel, documents }) => {
+	const bridge = useMemo(() => createPeerDocsBridge(channel), [channel]);
 
 	// SINGLE-PANE UX: the explorer's editor surface is one pane, so
 	// activating its sidebar tab opens (or reveals) it — the tool's choice.
@@ -325,41 +325,8 @@ export const ExplorerDevToolSidebar: React.FC<DevToolProps> = ({ peer, documents
 		if (appId === 'rocketride.explorer') documents?.open('', 'File Explorer');
 	});
 
-	// ── CONTROLLER duties: the frame holds no RocketRide client ──────────────
-
-	// The frame's store surface, served on this mount's engine connection.
-	useEffect(() => {
-		const ops = createToolOpServer<ExplorerOps>(peer);
-		// Served over the SHELL BUS — the controller realm needs no client
-		// object (brokered client.* ops; connection liveness is bus-mirrored).
-		const cm = ConnectionManager.getInstance();
-		const need = (): void => {
-			if (!cm.isConnected()) throw new Error('Not connected to a server.');
-		};
-		ops.serve('explorer.listDir', async ({ dir }) => {
-			need();
-			const result = await cm.request('client.fsListDir', { path: dir }) as { entries?: Array<{ name: string; type: string }> };
-			return (result.entries ?? []).map((e) => ({ name: e.name, type: e.type === 'dir' ? 'dir' as const : 'file' as const }));
-		});
-		ops.serve('explorer.readString', async ({ path }) => { need(); return cm.request('client.fsReadString', { path }) as Promise<string>; });
-		ops.serve('explorer.getUrl', async ({ path }) => { need(); return cm.request('client.fsGetUrl', { path }) as Promise<string>; });
-		ops.serve('explorer.writeString', async ({ path, content }) => { need(); await cm.request('client.fsWriteString', { path, text: content }); });
-		ops.serve('explorer.rename', async ({ oldPath, newPath }) => { need(); await cm.request('client.fsRename', { from: oldPath, to: newPath }); });
-		ops.serve('explorer.stat', async ({ path }) => {
-			need();
-			const stat = await cm.request('client.fsStat', { path }) as { type?: 'file' | 'dir'; size?: number };
-			return { ...(stat.type !== undefined ? { type: stat.type } : {}), ...(stat.size !== undefined ? { size: stat.size } : {}) };
-		});
-		ops.serve('explorer.remove', async ({ path }) => {
-			need();
-			const stat = await cm.request('client.fsStat', { path }) as { type?: string };
-			if (stat.type === 'dir') await cm.request('client.fsRmdir', { path, recursive: true });
-			else await cm.request('client.fsDelete', { path });
-		});
-		ops.serve('explorer.mkdir', async ({ path }) => { need(); await cm.request('client.fsMkdir', { path }); });
-		return () => ops.dispose();
-	}, [peer]);
-
+	// No controller duties remain: the frame holds its own realm client (the
+	// shell bus carries its requests), so no `explorer.*` ops are served here.
 	return <ExplorerSidebar bridge={bridge} gated={false} />;
 };
 
@@ -373,9 +340,10 @@ export const ExplorerDevToolSidebar: React.FC<DevToolProps> = ({ peer, documents
  * can derive its tree hierarchy from.
  */
 async function listRecursive(
+	client: RocketRideClient,
 	dir: string,
 ): Promise<ExplorerEntry[]> {
-	const result = await ConnectionManager.getInstance().request('client.fsListDir', { path: dir }) as { entries?: Array<{ name: string; type?: 'file' | 'dir' }> };
+	const result = await client.fsListDir(dir);
 	const entries: ExplorerEntry[] = [];
 
 	for (const item of result.entries ?? []) {
@@ -384,7 +352,7 @@ async function listRecursive(
 
 		if (item.type === 'dir') {
 			try {
-				const children = await listRecursive(path);
+				const children = await listRecursive(client, path);
 				entries.push(...children);
 			} catch {
 				// Skip inaccessible directories
@@ -396,19 +364,3 @@ async function listRecursive(
 }
 
 export default ExplorerSidebar;
-
-/**
- * Encodes bytes for the bus's JSON-safe binary rule (clientOps fsWrite) —
- * chunked so large frames never blow the call stack via spread.
- *
- * @param bytes - The chunk to encode.
- * @returns Base64 text.
- */
-function bytesToB64(bytes: Uint8Array): string {
-	let bin = '';
-	const step = 0x8000;
-	for (let i = 0; i < bytes.length; i += step) {
-		bin += String.fromCharCode(...bytes.subarray(i, i + step));
-	}
-	return btoa(bin);
-}

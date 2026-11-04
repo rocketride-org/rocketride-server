@@ -45,12 +45,11 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { SERVICE_TIMEOUT_MS, USE_TIMEOUT_MS } from '../src/sqlTimeouts';
 import { ExplorerToolError } from 'shared/explorer/errors';
-import { SQL_APP_ID } from '../src/appId';
 import { endpointForConnection } from '../src/connect';
 import type { SavedSqlConnection } from '../src/connect';
 import { createSqlCore } from '../src/sqlCore';
-import { ENV_KEYS_TIMEOUT_MS, FS_TIMEOUT_MS, RELEASE_STEP_TIMEOUT_MS, USE_TIMEOUT_MS } from '../src/sqlTimeouts';
 import type { SqlCore } from '../src/sqlCore';
 import { taskRow } from './support';
 import type { IFakeTaskRow } from './support';
@@ -83,7 +82,7 @@ const directRow = (): IFakeTaskRow => taskRow('sqlconn-c-direct', {
  */
 async function rig(saved: SavedSqlConnection[], rows: IFakeTaskRow[], tool?: Parameters<typeof engineScript>[2]): Promise<{ engine: IScriptedRealm<IFakeClientRealm>; core: SqlCore }> {
 	const engine = scriptedClientRealm(engineScript(saved, rows, tool));
-	const core = createSqlCore({ cm: engine.cm, appId: SQL_APP_ID, mode: 'app', focusTarget: null });
+	const core = createSqlCore({ ...engine.source, mode: 'app', focusTarget: null });
 	engine.realm.login(USER);
 	return { engine, core };
 }
@@ -169,7 +168,6 @@ describe('resolution: a saved connection names one running endpoint', () => {
 			assert.equal(endpoint.key, 'sqlconn-c-direct:tools_1:db_mysql_1');
 			assert.equal(endpoint.connId, 'c-direct');
 			const use = engine.requests.find((request) => request.op === 'client.use')!;
-			assert.equal(use.timeoutMs, USE_TIMEOUT_MS);
 			assert.deepEqual(use.params, {
 				pipeline: {
 					project_id: 'sqlconn-c-direct',
@@ -215,10 +213,10 @@ describe('resolution: a saved connection names one running endpoint', () => {
 	});
 });
 
-describe('identity and activation gate discovery', () => {
+describe('identity and engine readiness gate discovery', () => {
 	it('discovers nothing and reads no saved connections while no identity is known (a null account means no discovery call)', async () => {
 		const engine = scriptedClientRealm(engineScript([PIPELINE], [devRow()]));
-		const core = createSqlCore({ cm: engine.cm, appId: SQL_APP_ID, mode: 'app', focusTarget: null });
+		const core = createSqlCore({ ...engine.source, mode: 'app', focusTarget: null });
 		try {
 			await assert.rejects(core.resolve('c-pipe'), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'unavailable');
 			await assert.rejects(core.pickable(), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'unavailable');
@@ -229,11 +227,10 @@ describe('identity and activation gate discovery', () => {
 		}
 	});
 
-	it('a dev-tool controller reads nothing, the saved list included, while nobody is signed in; its mount is the activation (#2625 9bd5d931f), so signing in reads and discovers', async () => {
+	it('a dev-tool controller reads nothing, the saved list included, while nobody is signed in; its mount is its activation, so signing in (identity known and engine ready) reads and discovers', async () => {
 		const engine = scriptedClientRealm(engineScript([PIPELINE], [devRow()]));
-		const core = createSqlCore({ cm: engine.cm, appId: SQL_APP_ID, mode: 'devtool', focusTarget: null });
+		const core = createSqlCore({ ...engine.source, mode: 'devtool', focusTarget: null });
 		try {
-			assert.equal(core.activation.reason(), 'lazyMount');
 			await new Promise<void>((resolve) => { setTimeout(resolve, 400); });
 			assert.deepEqual(engine.ops(), [], 'no engine request while the identity is unknown');
 			engine.realm.login(USER);
@@ -244,7 +241,7 @@ describe('identity and activation gate discovery', () => {
 		}
 	});
 
-	it('the full app reads its saved list as soon as it is signed in (its gate is open from the start)', async () => {
+	it('the full app reads its saved list as soon as it is signed in (a person is present from the start)', async () => {
 		const { engine, core } = await rig([PIPELINE], [devRow()]);
 		try {
 			await until(() => engine.ops().includes('client.fsReadJson'), 'the saved list to be read');
@@ -274,7 +271,6 @@ describe('the New Connection picker and the other engine calls', () => {
 			assert.deepEqual(await core.envKeys(), ['ROCKETRIDE_A', 'ROCKETRIDE_B']);
 			const request = engine.requests.find((r) => r.op === 'client.getEnvironmentKeys')!;
 			assert.deepEqual(request.params, {});
-			assert.equal(request.timeoutMs, ENV_KEYS_TIMEOUT_MS);
 		} finally {
 			core.dispose();
 		}
@@ -292,34 +288,29 @@ describe('the New Connection picker and the other engine calls', () => {
 			await core.release('c-direct');
 			const token = engine.requests.find((r) => r.op === 'client.getTaskToken')!;
 			assert.deepEqual(token.params, { projectId: 'sqlconn-c-direct', source: 'tools_1' });
-			assert.equal(token.timeoutMs, RELEASE_STEP_TIMEOUT_MS);
 			const terminate = engine.requests.find((r) => r.op === 'client.terminate')!;
 			assert.deepEqual(terminate.params, { token: 'tk_sentinel_direct' });
-			assert.equal(terminate.timeoutMs, RELEASE_STEP_TIMEOUT_MS);
 		} finally {
 			core.dispose();
 		}
 	});
 
-	it('names an explicit bus timeout on every request it makes (none falls to the 120 s default)', async () => {
-		const rows: IFakeTaskRow[] = [devRow()];
-		const { engine, core } = await rig([PIPELINE, DIRECT], rows, (params) => (params.tool === 'execute' ? { rows: [], affected_rows: 0 } : params.tool === 'get_schema' ? { tables: {} } : { dialect: 'postgres' }));
-		engine.script['client.use'] = () => { rows.push(directRow()); return {}; };
-		engine.script['client.getService'] = () => ({ Pipe: {} });
-		engine.script['client.validate'] = () => ({ errors: [], warnings: [] });
-		engine.script['client.getEnvironmentKeys'] = () => [];
+	it('bounds every engine request with a deadline: a hung one fails as `timeout` ("not cancelled, may still complete"), and a write-like call is never sent twice', async (t) => {
+		const { engine, core } = await rig([PIPELINE, DIRECT], [devRow()]);
+		engine.script['client.getService'] = () => new Promise(() => undefined);
+		engine.script['client.use'] = () => new Promise(() => undefined);
 		try {
-			await core.withSession('c-pipe', async (session) => { await session.execute('SELECT 1'); await session.getSchema(); await session.dialect(); });
-			await core.resolve('c-direct');
-			await core.pickable();
-			await core.getService('db_mysql');
-			await core.validate({ component: {} });
-			await core.envKeys();
-			const fsRead = engine.requests.find((r) => r.op === 'client.fsReadJson')!;
-			assert.equal(fsRead.timeoutMs, FS_TIMEOUT_MS);
-			const missing = engine.requests.filter((r) => typeof r.timeoutMs !== 'number');
-			assert.deepEqual(missing.map((r) => r.op), []);
+			t.mock.timers.enable({ apis: ['setTimeout'] });
+			const service = assert.rejects(core.getService('db_mysql'), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'timeout' && /not cancelled/.test(error.message));
+			t.mock.timers.tick(SERVICE_TIMEOUT_MS);
+			await service;
+			const start = assert.rejects(core.resolve('c-direct'), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'timeout' && /not cancelled/.test(error.message));
+			await new Promise<void>((resolve) => { setImmediate(resolve); });
+			t.mock.timers.tick(USE_TIMEOUT_MS);
+			await start;
+			assert.equal(engine.requests.filter((r) => r.op === 'client.use').length, 1, '`use` is sent once: an expired deadline leaves it running');
 		} finally {
+			t.mock.timers.reset();
 			core.dispose();
 		}
 	});

@@ -25,38 +25,55 @@
 // =============================================================================
 //
 // The dev-tool library's fake realms (shared/explorer/devtool/testing) stand
-// in for a ConnectionManager's identity, connection and activation events.
-// Their `request` refuses everything; these helpers replace it with a script
-// per bus op, and record every request with the timeout it named, so a test
-// can check what the engine core sends and how long it waits. Not a test
-// file (the runner only collects *.test.ts).
+// in for a ConnectionManager's identity and connection events. The realm's
+// CLIENT is a scripted stand-in: each method answers from a script keyed by
+// the wire op it used to be (`client.getTasks`, `client.use`, ...), and every
+// call is recorded with its params, so a test can check what the engine core
+// sends. Like the real realm client it throws while the realm is not
+// connected, and it is `null` before a mirrored realm's first status. Not a
+// test file (the runner only collects *.test.ts).
 // =============================================================================
 
-import { account, createFakeClientRealm, createFakeSocketlessRealm } from 'shared/explorer/devtool/testing';
-import type { IFakeClientRealm, IFakeSocketlessRealm } from 'shared/explorer/devtool/testing';
+import { account, createFakeClientRealm, createFakeMirroredRealm } from 'shared/explorer/devtool/testing';
+import type { IFakeClientRealm, IFakeMirroredRealm } from 'shared/explorer/devtool/testing';
+import { createEngineReadiness } from 'shared/explorer/devtool/readiness';
+import type { IEngineReadiness } from 'shared/explorer/devtool/readiness';
+import type { IRealmClient, RealmClientGetter } from 'shared/explorer/devtool/engineClient';
 import type { SqlCoreBus } from '../src/sqlCore';
 import type { SavedSqlConnection } from '../src/connect';
 import type { IFakeTaskRow } from './support';
 
-/** One bus request the code under test made. */
+/** One engine request the code under test made. */
 export interface IRequest {
-	/** The op wire name. */
+	/** The op wire name (`client.<method>`). */
 	op: string;
-	/** Its params. */
+	/** Its params, in the shape the old bus op carried. */
 	params: unknown;
-	/** The bus timeout it named (undefined: none, which the 120 s default would fill). */
+	/** Always undefined now (deadlines are the library's, not a per-request bus timeout); kept for readability of older assertions. */
 	timeoutMs: number | undefined;
 }
 
-/** A script: what each bus op answers (throw to fail it). */
+/** A script: what each op answers (throw to fail it). */
 export type BusScript = Record<string, (params: unknown) => unknown>;
 
-/** A realm with a scripted engine. */
-export interface IScriptedRealm<R> {
-	/** The fake realm (identity, connection and activation events). */
-	realm: R;
-	/** Its ConnectionManager with the scripted `request`. */
+/** What a core or a controller is given (`SqlCoreBus`, `getClient`, `engine`). */
+export interface IEngineSource {
+	/** The realm's manager (identity and server events). */
 	cm: SqlCoreBus;
+	/** The realm's client right now. */
+	getClient: RealmClientGetter<IRealmClient>;
+	/** The realm's engine readiness, kept in step with the realm's connection. */
+	engine: IEngineReadiness;
+}
+
+/** A realm with a scripted engine. */
+export interface IScriptedRealm<R> extends IEngineSource {
+	/** The fake realm (identity and connection events). */
+	realm: R;
+	/** The scripted client. */
+	client: IRealmClient;
+	/** The `{ cm, getClient, engine }` a core is built from. */
+	source: IEngineSource;
 	/** Every request, in order. */
 	requests: IRequest[];
 	/** The script (mutable: a test may change an answer mid-way). */
@@ -66,29 +83,53 @@ export interface IScriptedRealm<R> {
 }
 
 /**
- * Wrap a fake realm's manager with a scripted `request`.
+ * Wrap a fake realm's manager with a scripted client and a readiness store.
  *
  * @param realm - The fake realm.
  * @param cm - Its manager.
  * @param script - What each op answers.
  * @returns The scripted realm.
  */
-function scripted<R>(realm: R, cm: object, script: BusScript): IScriptedRealm<R> {
+function scripted<R>(realm: R, cm: IFakeManager, script: BusScript): IScriptedRealm<R> {
 	const requests: IRequest[] = [];
-	const scriptedCm = {
-		...cm,
-		request: async (op: string, params: unknown, opts?: { timeoutMs?: number }): Promise<unknown> => {
-			requests.push({ op, params, timeoutMs: opts?.timeoutMs });
-			// As the real host does: nothing is answered while the realm is down.
-			const live = (cm as { isConnected?: () => boolean }).isConnected;
-			if (typeof live === 'function' && !live()) throw new Error('Not connected to server');
-			const answer = script[op];
-			if (!answer) throw new Error(`No scripted answer for ${op}`);
-			return answer(params);
-		},
-	} as unknown as SqlCoreBus;
-	return { realm, cm: scriptedCm, requests, script, ops: () => requests.map((request) => request.op) };
+	const call = async (op: string, params: unknown): Promise<unknown> => {
+		requests.push({ op, params, timeoutMs: undefined });
+		// As the real realm client does: nothing is answered while the realm is down.
+		if (!cm.isConnected()) throw new Error('Not connected to server');
+		const answer = script[op];
+		if (!answer) throw new Error(`No scripted answer for ${op}`);
+		return answer(params);
+	};
+	const client = {
+		getTasks: () => call('client.getTasks', {}),
+		listTasks: (req?: unknown) => call('client.listTasks', req ?? {}),
+		getTaskPipeline: (token: string) => call('client.getTaskPipeline', { token }),
+		tool: (options: unknown) => call('client.tool', options),
+		addMonitor: (key: unknown, types: unknown) => call('client.addMonitor', { key, types }),
+		removeMonitor: (key: unknown, types: unknown) => call('client.removeMonitor', { key, types }),
+		fsStat: (path: string) => call('client.fsStat', { path }),
+		fsReadJson: (path: string) => call('client.fsReadJson', { path }),
+		fsMkdir: (path: string) => call('client.fsMkdir', { path }),
+		fsWriteJson: (path: string, value: unknown) => call('client.fsWriteJson', { path, value }),
+		use: (options: unknown) => call('client.use', options),
+		getTaskToken: (options: unknown) => call('client.getTaskToken', options),
+		terminate: (token: string) => call('client.terminate', { token }),
+		getService: (service: string) => call('client.getService', { service }),
+		validate: (options: unknown) => call('client.validate', options),
+		account: { getEnvironmentKeys: () => call('client.getEnvironmentKeys', {}) },
+	} as unknown as IRealmClient;
+	// A mirrored realm has no client until its first status mirror.
+	const getClient: RealmClientGetter<IRealmClient> = () => (cm.getClient() === null || cm.getClient() === undefined ? null : client);
+	const engine = createEngineReadiness({ client: getClient(), isConnected: cm.isConnected() });
+	const sync = (): void => engine.set({ client: getClient(), isConnected: cm.isConnected() });
+	for (const event of ['shell:connected', 'shell:disconnected', 'shell:statusChange', 'shell:login', 'shell:logout'] as const) cm.on(event, sync);
+	const scriptedCm = cm as unknown as SqlCoreBus;
+	const source: IEngineSource = { cm: scriptedCm, getClient, engine };
+	return { realm, cm: scriptedCm, getClient, engine, client, source, requests, script, ops: () => requests.map((request) => request.op) };
 }
+
+/** The manager surface the fakes offer. */
+type IFakeManager = IFakeClientRealm['cm'];
 
 /**
  * A rocket-ui-style realm (it owns the client) with a scripted engine.
@@ -102,13 +143,13 @@ export function scriptedClientRealm(script: BusScript): IScriptedRealm<IFakeClie
 }
 
 /**
- * A VS Code-style (socketless) realm with a scripted engine.
+ * A VS Code-style (mirrored) realm with a scripted engine.
  *
  * @param script - What each op answers.
  * @returns The scripted realm.
  */
-export function scriptedSocketlessRealm(script: BusScript): IScriptedRealm<IFakeSocketlessRealm> {
-	const realm = createFakeSocketlessRealm();
+export function scriptedMirroredRealm(script: BusScript): IScriptedRealm<IFakeMirroredRealm> {
+	const realm = createFakeMirroredRealm();
 	return scripted(realm, realm.cm, script);
 }
 

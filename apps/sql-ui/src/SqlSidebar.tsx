@@ -39,6 +39,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ConnectionManager, useShellConnection } from 'shell';
+import { useEngineSource } from 'shared/explorer/react';
 import { SidebarMenu, BxPlus, BxCheck, BxEditAlt, BxTrash } from 'shell';
 import type { DevToolProps, ViewMenu } from 'shell';
 import { useSavedConnections, useSavedConnectionsStatus, endpointKeyForConnection } from './connect';
@@ -46,7 +47,7 @@ import type { SavedSqlConnection } from './connect';
 import { connectionStatus } from './connectionStatus';
 import type { ConnectionStatusKind, ConnectionStatusSource } from './connectionStatus';
 import type { SqlSidebarBridge } from './sidebarBridge';
-import { SQL_TOOL_PROTOCOL } from './sqlBridge';
+import { SQL_CONTROLLER_PROTOCOL } from './sqlBridge';
 import { attachSqlController } from './sqlController';
 import type { SqlControllerMount } from './sqlController';
 import { DatabaseIcon } from './icons';
@@ -239,9 +240,11 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge, hostActiveDoc }) => {
 	const openConnection = useCallback((conn: SavedSqlConnection) => {
 		if (!isConnected) { setOpenError('Not connected to a server.'); return; }
 		setOpenError('');
-		setOpeningId(conn.id);
+		// An already-active connection raises no focus change, so nothing
+		// would clear the opening state — skip it and just re-focus.
+		if (endpointKeyForConnection(conn) !== activeKey) setOpeningId(conn.id);
 		bridge.openConnection(conn);
-	}, [bridge, isConnected]);
+	}, [bridge, isConnected, activeKey]);
 
 	// "+ New Connection" as a stock SidebarMenu entry, mirroring the app-builder
 	// sidebar's "+ New app" nav above its MY APPS list. No persistent selection
@@ -285,9 +288,17 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge, hostActiveDoc }) => {
 							title={conn.mode === 'pipeline' ? `${conn.name} — pipeline: ${conn.pipelineName}` : `${conn.name} — direct (${conn.provider})`}
 							style={styles.row(isActive, isHovered)}
 							onClick={() => { if (!isOpening && !isConfirming) openConnection(conn); }}
-							onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && !isOpening && !isConfirming) { e.preventDefault(); openConnection(conn); } }}
+							// Only the ROW itself opens — the nested action buttons'
+							// Enter/Space bubbles here and must keep its own meaning.
+							onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ') && !isOpening && !isConfirming) { e.preventDefault(); openConnection(conn); } }}
 							onMouseEnter={() => setHoveredId(conn.id)}
 							onMouseLeave={() => setHoveredId(null)}
+							// Focus mirrors hover so keyboard users reach the revealed
+							// actions; blur only clears when focus leaves the row.
+							onFocus={() => setHoveredId(conn.id)}
+							onBlur={(e) => {
+								if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setHoveredId((prev) => (prev === conn.id ? null : prev));
+							}}
 						>
 							<span style={styles.rowIcon(isActive)}><DatabaseIcon /></span>
 							{isConfirming ? (
@@ -323,7 +334,7 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge, hostActiveDoc }) => {
 								<>
 									<span style={styles.rowLabel}>{isOpening ? `${conn.name}…` : conn.name}</span>
 									{status.label && <span style={styles.status(status.kind)} title={status.detail}>{status.label}</span>}
-									{/* Hover actions: modify / delete. */}
+									{/* Hover/focus actions: modify / delete. */}
 									{isHovered && !isOpening && (
 										<>
 											<button
@@ -377,38 +388,40 @@ const SqlSidebar: React.FC<SqlSidebarProps> = ({ bridge, hostActiveDoc }) => {
  * mutation, publishes it as retained channel state) and follows the host's
  * activeDocKey to highlight the fronted connection.
  */
-export const SqlDevToolSidebar: React.FC<DevToolProps> = ({ peer, channel, documents, activeDocKey }) => {
+export const SqlDevToolSidebar: React.FC<DevToolProps> = ({ channel, documents, activeDocKey }) => {
+	// The realm's engine source: a stable getter over its client and a stable
+	// readiness store. The controller is built once per channel; neither a new
+	// client nor a reconnect rebuilds it.
+	const { getClient, readiness } = useEngineSource();
 	// The controller (sqlController.ts): its engine core, exactly one op
 	// server (created after the channel), the retained state it publishes, and
 	// the sidebar's bridge. Built in an EFFECT and disposed with it (R6): under
 	// StrictMode that is mount -> dispose -> mount, which leaves one live op
 	// server. It posts nothing and opens no document at mount (R7).
 	const [mount, setMount] = useState<SqlControllerMount | null>(null);
-	const activeDocKeyRef = useRef(activeDocKey);
-	activeDocKeyRef.current = activeDocKey;
 	// The host's documents API, read at call time: a host that hands a new
 	// object on a re-render must not remount the controller (its op server).
 	const documentsRef = useRef(documents);
 	documentsRef.current = documents;
 	useEffect(() => {
 		const attached = attachSqlController({
-			peer,
-			...(channel ? { channel } : {}),
+			channel,
 			documents: {
 				open: (key, title) => documentsRef.current?.open(key, title),
 				close: (key) => documentsRef.current?.close(key),
 			},
-			activeDocKey: activeDocKeyRef.current ?? null,
 			cm: ConnectionManager.getInstance(),
-			protocol: SQL_TOOL_PROTOCOL,
+			getClient,
+			engine: readiness,
+			protocol: SQL_CONTROLLER_PROTOCOL,
 		});
 		setMount(attached);
 		return () => {
 			attached.dispose();
 			setMount((current) => (current === attached ? null : current));
 		};
-	}, [peer, channel]);
-	// A non-null activeDocKey is an activation (R7).
+	}, [channel, getClient, readiness]);
+	// A non-null activeDocKey means a person fronted a document: probes may start.
 	useEffect(() => { mount?.noteActiveDocKey(activeDocKey); }, [mount, activeDocKey]);
 
 	if (!mount) return null;

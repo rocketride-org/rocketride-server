@@ -10,12 +10,13 @@
 // The file tree opens documents and keeps tabs honest across rename/move/
 // delete. Inside the app, tree and editor share one Documents singleton —
 // the LOCAL bridge talks to it directly. Mounted as a devToolSidebar, the
-// tree lives in the HOST's sidebar webview, an isolated document — the PEER
-// bridge sends the same actions over the DevToolProps peer channel, and the
-// frame (which owns Documents) applies them through the local bridge and
-// publishes the active path back.
+// tree lives in the HOST's sidebar webview, an isolated document — the
+// CHANNEL bridge sends the same actions as tool-channel events ('docs'
+// toward the frame, which owns Documents and applies them through the local
+// bridge; 'active' back toward the tree highlight).
 
-import type { DevToolProps } from 'shell';
+import { typedToolChannel } from 'shell';
+import type { ToolChannel, ToolEventMap as ToolEventMapBase, ToolStateMap as ToolStateMapBase } from 'shell';
 import { getDocs } from './docs';
 import type { ViewerId } from './viewerRegistry';
 
@@ -39,14 +40,23 @@ export interface ExplorerDocsBridge {
 	subscribeActive(cb: (path: string) => void): () => void;
 }
 
-/** The peer wire protocol between the two mounts (app-internal). */
-type ExplorerPeerMessage =
+/** The 'docs' channel event's payload (sidebar → frame, app-internal). */
+type ExplorerDocsAction =
 	| { op: 'open'; path: string }
 	| { op: 'openWith'; path: string; viewerId: ViewerId }
 	| { op: 'renamed'; from: string; to: string }
 	| { op: 'moved'; from: string; to: string }
-	| { op: 'deleted'; path: string }
-	| { op: 'active'; path: string };
+	| { op: 'deleted'; path: string };
+
+/** The explorer's channel events (either direction). */
+interface ExplorerEventMap extends ToolEventMapBase {
+	/** A tree action for the frame's Documents (user-initiated — may summon
+	 *  a closed frame, which is the point of a tree click). */
+	docs: ExplorerDocsAction;
+	/** The frame's active document path (tree highlight). The host retains
+	 *  the last frame push for a remounted sidebar. */
+	active: string;
+}
 
 // =============================================================================
 // LOCAL BRIDGE — tree and Documents in the same document
@@ -134,39 +144,36 @@ export const localDocsBridge: ExplorerDocsBridge = {
 // =============================================================================
 
 /**
- * Builds the sidebar-mount bridge: actions post over the peer channel; the
- * active path arrives as `active` messages published by the frame.
+ * Builds the sidebar-mount bridge: actions ride the channel's 'docs' event;
+ * the active path arrives as the frame's 'active' event.
  *
- * @param peer - The host-relayed channel from DevToolProps.
+ * @param channel - The mount's channel from DevToolProps.
  * @returns The bridge the tree renders against.
  */
-export function createPeerDocsBridge(peer: DevToolProps['peer']): ExplorerDocsBridge {
-	const post = (message: ExplorerPeerMessage) => peer.post(message);
+export function createPeerDocsBridge(channel: ToolChannel): ExplorerDocsBridge {
+	const typed = typedToolChannel<ToolStateMapBase, ExplorerEventMap>(channel);
+	const send = (action: ExplorerDocsAction) => typed.sendEvent('docs', action);
 	return {
-		open: (path) => post({ op: 'open', path }),
-		openWith: (path, viewerId) => post({ op: 'openWith', path, viewerId }),
-		renamed: (from, to) => post({ op: 'renamed', from, to }),
-		moved: (from, to) => post({ op: 'moved', from, to }),
-		deleted: (path) => post({ op: 'deleted', path }),
-		subscribeActive: (cb) =>
-			peer.subscribe((message) => {
-				const msg = message as ExplorerPeerMessage;
-				if (msg && msg.op === 'active') cb(msg.path);
-			}),
+		open: (path) => send({ op: 'open', path }),
+		openWith: (path, viewerId) => send({ op: 'openWith', path, viewerId }),
+		renamed: (from, to) => send({ op: 'renamed', from, to }),
+		moved: (from, to) => send({ op: 'moved', from, to }),
+		deleted: (path) => send({ op: 'deleted', path }),
+		subscribeActive: (cb) => typed.onEvent('active', cb),
 	};
 }
 
 /**
- * Attaches the FRAME side of the peer protocol: applies incoming tree
- * actions through the local bridge and publishes active-path changes.
+ * Attaches the FRAME side of the protocol: applies incoming tree actions
+ * through the local bridge and publishes active-path changes.
  * Call once Documents exists; returns the detach function.
  *
- * @param peer - The host-relayed channel from DevToolProps.
+ * @param channel - The mount's channel from DevToolProps.
  * @returns Unsubscribe for both directions.
  */
-export function attachExplorerPeerHost(peer: DevToolProps['peer']): () => void {
-	const offPeer = peer.subscribe((message) => {
-		const msg = message as ExplorerPeerMessage;
+export function attachExplorerPeerHost(channel: ToolChannel): () => void {
+	const typed = typedToolChannel<ToolStateMapBase, ExplorerEventMap>(channel);
+	const offDocsEvents = typed.onEvent('docs', (msg) => {
 		if (!msg || typeof msg !== 'object') return;
 		switch (msg.op) {
 			case 'open': localDocsBridge.open(msg.path); break;
@@ -177,20 +184,20 @@ export function attachExplorerPeerHost(peer: DevToolProps['peer']): () => void {
 		}
 	});
 	// Publish the active path — now, and on every Documents change. The
-	// sidebar mount may attach late; the host buffers briefly, and every
-	// subsequent change re-publishes anyway.
+	// sidebar mount may attach late; the host retains the last frame push,
+	// and every subsequent change re-publishes anyway.
 	const docs = getDocs();
 	let last: string | null = null;
 	const publish = () => {
 		const path = readActivePath();
 		if (path === last) return;
 		last = path;
-		peer.post({ op: 'active', path } satisfies ExplorerPeerMessage);
+		typed.sendEvent('active', path);
 	};
 	publish();
 	const offDocs = docs ? docs.subscribe(publish) : () => {};
 	return () => {
-		offPeer();
+		offDocsEvents();
 		offDocs();
 	};
 }

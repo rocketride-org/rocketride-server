@@ -41,7 +41,6 @@ import path from 'node:path';
 import { ExplorerToolError } from 'shared/explorer/errors';
 import { account } from 'shared/explorer/devtool/testing';
 import type { IPrefsAccessor } from 'shared/explorer/history/types';
-import { SQL_APP_ID } from '../src/appId';
 import { getSavedConnections, resetSavedConnections } from '../src/connect';
 import type { DirectConnection, SavedSqlConnection } from '../src/connect';
 import { createSqlCore } from '../src/sqlCore';
@@ -129,7 +128,7 @@ describe('setting the level in the full app', () => {
 	it('goes straight to the core, which keeps the stored config', async () => {
 		resetSavedConnections({ force: true });
 		const engine = scriptedClientRealm(engineScript([WITH_SECRET], [taskRow('p1')], postgres));
-		const core = createSqlCore({ cm: engine.cm, appId: SQL_APP_ID, mode: 'app', focusTarget: null });
+		const core = createSqlCore({ ...engine.source, mode: 'app', focusTarget: null });
 		const prefs: IPrefsAccessor = { getPref: () => undefined, setPref: () => undefined };
 		const env = createLocalSqlEnv(core, true, () => undefined, prefs);
 		try {
@@ -151,7 +150,7 @@ describe('setting the level in the full app when the account changes', () => {
 		const answer = engine.script['client.fsReadJson']!;
 		const waiting: Array<() => void> = [];
 		engine.script['client.fsReadJson'] = (params) => new Promise((resolve) => { waiting.push(() => resolve(answer(params))); });
-		const core = createSqlCore({ cm: engine.cm, appId: SQL_APP_ID, mode: 'app', focusTarget: null });
+		const core = createSqlCore({ ...engine.source, mode: 'app', focusTarget: null });
 		try {
 			engine.realm.login(USER);
 			await until(() => waiting.length > 0, 'the first account\'s list read');

@@ -18,13 +18,13 @@ Designed for integration with a FastAPI application and built on top of the ai.w
 """
 
 import asyncio
-import sys
 import threading
 import time
 from typing import TYPE_CHECKING, Optional
 from fastapi import WebSocket
 from dataclasses import dataclass
 import engLib
+from hosting import is_hosted
 from rocketlib import IEndpointBase
 from ai.common.dap import DAPBase, TransportWebSocket
 from ai.account.base import OutOfCreditsError
@@ -77,7 +77,7 @@ class DataServer(DAPBase):
         self._server = server
 
         # A hosted task asks EaaS for credit before every getPipe()
-        if '--hosted' in sys.argv:
+        if is_hosted():
             engLib.setPipeGate(require_credit)
 
         # Initialize parent with server identification

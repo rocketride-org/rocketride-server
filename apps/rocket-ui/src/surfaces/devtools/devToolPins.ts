@@ -44,10 +44,12 @@
 // it (the same tolerance VS Code's bare-row fallback gives).
 // =============================================================================
 
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
-import { ConnectionManager, realmPrefsHub, useWorkspace } from 'shell';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
+import { ConnectionManager, realmPrefsHub, registerSettings, useWorkspace } from 'shell';
+import { TOOL_SETTINGS_GROUP } from 'shared/tools/toolSettings';
 import type { AppManifestEntry, PrefsStore } from 'shell';
 import { applyContainerOrder, containerIdOf, readDevToolPins, storeToolIds, DEV_TOOL_PINS_KEY } from 'shell/src/workspace/devToolPins';
+import { builtinServesHost, getBuiltinTools } from 'shared/tools/core';
 import { appPartition } from 'shell/src/workspace/workspaceStore';
 import { fetchDevToolCatalog } from 'shared/tools/core/devToolCatalog';
 import type { ToolTab } from 'shared/tools/core/chrome/types';
@@ -95,9 +97,9 @@ async function refreshCatalog(): Promise<void> {
 	if (!cm.isConnected()) return;
 	catalogStore.inFlight = true;
 	try {
-		// The brokered op — resolves locally here in the root, exactly the
-		// call every webview realm makes. One path.
-		catalogStore.entries = await fetchDevToolCatalog(cm);
+		// The realm's client — the real one here in the root, exactly the
+		// call every webview realm makes on its realm client. One path.
+		catalogStore.entries = await fetchDevToolCatalog(cm.getClient());
 		for (const cb of [...catalogStore.subs]) cb();
 	} catch {
 		/* transient — the next connect/account event refetches */
@@ -176,9 +178,40 @@ export function useDevToolPins(): DevToolPins {
 		return pins.map((id) => byId.get(id)).filter((a): a is AppManifestEntry => !!a).map(toToolTab);
 	}, [pins, appManifest]);
 
+	// A pinned STORE tool with `configuration` contributes a settings section
+	// WHILE pinned (builtins register their own at startup, for the host's
+	// lifetime — registration follows the functionality's lifetime). Unpinning
+	// disposes the registration, removing the section live; the tool's deltas
+	// stay in its partition file and revive on re-pin.
+	useEffect(() => {
+		const offs = pins
+			.map((id) => appManifest.find((a) => a.id === id))
+			.filter((a): a is AppManifestEntry => !!a && !!a.configuration)
+			.map((a) =>
+				registerSettings({
+					appId: a.id,
+					name: a.name,
+					...(a.shells ? { shells: a.shells } : {}),
+					group: TOOL_SETTINGS_GROUP,
+					configuration: a.configuration!,
+				}),
+			);
+		return () => offs.forEach((off) => off());
+	}, [pins, appManifest]);
+
 	const pin = useCallback((appId: string) => {
 		if (list.includes(appId)) return;
-		store.set(DEV_TOOL_PINS_KEY, [...list, appId]);
+		// FIRST pin has to materialise the list: an EMPTY list means "never
+		// arranged — every builtin shows", but a list that EXISTS is the
+		// enablement allowlist. Appending to the empty list would therefore
+		// silently disable every builtin tab (the pane stack then falls back
+		// to this very pin while the rail still shows the builtin icons).
+		// Same rule as useToolStrip's toggleBuiltin materialisation.
+		const base = list.length === 0
+			// A builtin's manifest id IS its pin id (`builtin.<tool>`).
+			? getBuiltinTools().filter((t) => builtinServesHost(t, 'rocket')).map((t) => t.manifest.id)
+			: list;
+		store.set(DEV_TOOL_PINS_KEY, [...base, appId]);
 	}, [list, store]);
 
 	const unpin = useCallback((appId: string) => {

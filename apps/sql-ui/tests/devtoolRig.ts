@@ -31,17 +31,16 @@
 // controller answers from a script (realm.ts). Not a test file.
 // =============================================================================
 
-import type { IToolOpServer, ToolControllerFn, ToolOpMap } from 'shell';
+import type { IToolOpServer, ToolChannel, ToolControllerFn, ToolOpMap } from 'shell';
 import { createDevToolHarness, settle, shellProtocol, spyPeer } from 'shared/explorer/devtool/testing';
 import type { IDevToolHarness, IFakeClientRealm, IPeerSpy } from 'shared/explorer/devtool/testing';
-import type { DevToolPeer } from 'shared/explorer/devtool/realm';
 import { SQL_APP_ID } from '../src/appId';
 import { resetSavedConnections } from '../src/connect';
 import type { DirectConnection, PipelineBoundConnection, SavedSqlConnection } from '../src/connect';
 import { attachSqlController } from '../src/sqlController';
-import type { SqlControllerMount } from '../src/sqlController';
+import type { SqlControllerMount, SqlToolProtocol } from '../src/sqlController';
 import { attachSqlFrame, sqlChannel } from '../src/sqlFrame';
-import type { SqlFrameMount, SqlToolProtocol } from '../src/sqlFrame';
+import type { SqlFrameMount, SqlFrameProtocol } from '../src/sqlFrame';
 import { createRemoteSqlEnv } from '../src/sqlEnv';
 import type { SqlEnv } from '../src/sqlEnv';
 import { createRemoteHistory } from '../src/history/remoteHistory';
@@ -115,7 +114,7 @@ export interface IRig {
 	h: IDevToolHarness;
 	engine: IScriptedRealm<IFakeClientRealm>;
 	spy: IPeerSpy;
-	protocol: SqlToolProtocol;
+	protocol: SqlToolProtocol & SqlFrameProtocol;
 	mount: SqlControllerMount;
 	frame: SqlFrameMount;
 	env: SqlEnv;
@@ -134,7 +133,7 @@ export interface IRig {
  * Mount a controller (as the hosts do: a host channel on the sidebar peer,
  * then the controller in an effect) and one frame on a connection document.
  *
- * @param opts - The engine's saved list, tasks and tool answers; whether to sign in; `onRefused` hears every call the controller's deadline guard refused; `bareGate` hands the controller a bus without `getClient`, whose realm the activation gate cannot classify (a VS Code webview mounted while its root is down), so the gate waits for an explicit signal.
+ * @param opts - The engine's saved list, tasks and tool answers; whether to sign in; `onRefused` hears every call the controller's deadline guard refused; `bareGate` hands the controller a bus without `getClient`, whose realm has no client yet (a VS Code webview mounted while its root is down).
  * @returns The rig.
  */
 export async function rig(opts: { saved?: SavedSqlConnection[]; rows?: IFakeTaskRow[]; tool?: (params: { tool: string; input?: Record<string, unknown> }) => unknown; login?: boolean; activate?: boolean; now?: () => number; docKey?: string; files?: Record<string, unknown>; bareGate?: boolean; onRefused?: (error: unknown) => void; listed?: Record<string, unknown>[] } = {}): Promise<IRig> {
@@ -147,25 +146,25 @@ export async function rig(opts: { saved?: SavedSqlConnection[]; rows?: IFakeTask
 	const documents = { open: (key: string, title: string) => { docs.opened.push([key, title]); }, close: (key: string) => { docs.closed.push(key); } };
 	const frameCalls: Array<{ op: string; timeoutMs: number | undefined }> = [];
 	const servers = { created: 0, disposed: 0 };
-	const protocol: SqlToolProtocol = {
-		createToolChannel: shellProtocol.createToolChannel,
-		createToolController: <O extends ToolOpMap>(peer: DevToolPeer): ToolControllerFn<O> => {
-			const fn = shellProtocol.createToolController<O>(peer);
+	const protocol: SqlToolProtocol & SqlFrameProtocol = {
+		createToolOpClient: <O extends ToolOpMap>(channel: ToolChannel): ToolControllerFn<O> => {
+			const fn = shellProtocol.createToolOpClient<O>(channel);
 			return ((op: keyof O & string, params: never, callOpts?: { timeoutMs?: number }) => {
 				frameCalls.push({ op, timeoutMs: callOpts?.timeoutMs });
 				return fn(op, params, callOpts);
 			}) as ToolControllerFn<O>;
 		},
-		createToolOpServer: <O extends ToolOpMap>(peer: DevToolPeer): IToolOpServer<O> => {
+		createToolOpServer: <O extends ToolOpMap>(channel: ToolChannel): IToolOpServer<O> => {
 			servers.created += 1;
-			const server = shellProtocol.createToolOpServer<O>(peer);
+			const server = shellProtocol.createToolOpServer<O>(channel);
 			return { serve: (op, handler) => server.serve(op, handler), dispose: () => { servers.disposed += 1; server.dispose(); } };
 		},
 	};
-	const cm = opts.bareGate
-		? new Proxy(engine.cm, { get: (target, prop) => (prop === 'getClient' ? undefined : Reflect.get(target, prop, target)) })
-		: engine.cm;
-	const controllerOpts = { peer: spy.peer, channel: hostChannel, documents, cm, protocol, focusTarget: null, ...(opts.now ? { now: opts.now } : {}), ...(opts.onRefused ? { onRefused: opts.onRefused } : {}) };
+	// A bus without `getClient` models a VS Code webview mounted while its root is down: the realm has no client yet.
+	const source = opts.bareGate
+		? { ...engine.source, getClient: () => null }
+		: engine.source;
+	const controllerOpts = { channel: hostChannel, documents, ...source, protocol, focusTarget: null, ...(opts.now ? { now: opts.now } : {}), ...(opts.onRefused ? { onRefused: opts.onRefused } : {}) };
 	let mount = attachSqlController(controllerOpts);
 	if (opts.login !== false) engine.realm.login(USER);
 	// The user selected the tool's sidebar (rocket-ui's shell:toolSidebarActivated):
@@ -174,7 +173,7 @@ export async function rig(opts: { saved?: SavedSqlConnection[]; rows?: IFakeTask
 	h.setHostConnection(true);
 	// The frame's summon runs on manual timers, so no summon reaches the wire unless a test advances them.
 	const timers = manualTimers();
-	const frame = attachSqlFrame({ peer: h.newFramePeer(), docKey: opts.docKey ?? 'c-pipe', documents, protocol, summonSchedule: timers.schedule, ...(opts.now ? { now: opts.now } : {}) });
+	const frame = attachSqlFrame({ channel: shellProtocol.createToolChannel(h.newFramePeer()), docKey: opts.docKey ?? 'c-pipe', documents, protocol, summonSchedule: timers.schedule, ...(opts.now ? { now: opts.now } : {}) });
 	const history = createRemoteHistory({ caller: frame.caller, channel: sqlChannel(frame.channel), owner: frame.owner });
 	const env = createRemoteSqlEnv(frame.caller, true, frame.owner, history);
 	await settle();

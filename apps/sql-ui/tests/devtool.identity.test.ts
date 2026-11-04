@@ -52,7 +52,7 @@ import { createRemoteSqlEnv } from '../src/sqlEnv';
 import { createRemoteHistory } from '../src/history/remoteHistory';
 import { SQL_OP_TIMEOUT_MS } from '../src/sqlTimeouts';
 import { taskRow } from './support';
-import { SAVED_PATH, engineScript, scriptedSocketlessRealm, until } from './realm';
+import { SAVED_PATH, engineScript, scriptedMirroredRealm, until } from './realm';
 import { PIPELINE, postgres, rig } from './devtoolRig';
 
 const SRC = path.resolve(__dirname, '..', 'src');
@@ -115,17 +115,17 @@ const historyFileRequest = (params: unknown): boolean => (params as { path?: str
 async function vscodeRig(tool: (params: { tool: string }) => unknown = postgres, files: Record<string, unknown> = {}) {
 	resetSavedConnections({ force: true });
 	const h = createDevToolHarness(SQL_APP_ID, { json: true });
-	const engine = scriptedSocketlessRealm(engineScript([PIPELINE], [taskRow('p1', { ownerId: 'uA' }), taskRow('p1', { ownerId: 'uB', token: 'tk_sentinel_b' })], tool, files));
+	const engine = scriptedMirroredRealm(engineScript([PIPELINE], [taskRow('p1', { ownerId: 'uA' }), taskRow('p1', { ownerId: 'uB', token: 'tk_sentinel_b' })], tool, files));
 	const sidebar = spyPeer(h.sidebarPeer);
 	const hostChannel = shellProtocol.createToolChannel(sidebar.peer);
-	const mountController = (): SqlControllerMount => attachSqlController({ peer: sidebar.peer, channel: hostChannel, cm: engine.cm, protocol: shellProtocol, focusTarget: null });
+	const mountController = (): SqlControllerMount => attachSqlController({ channel: hostChannel, ...engine.source, protocol: shellProtocol, focusTarget: null });
 	let controller = mountController();
 	const closed: string[] = [];
 	const resets: FrameResetReason[] = [];
 	const framePeer = spyPeer(h.newFramePeer());
 	let history: ReturnType<typeof createRemoteHistory> | null = null;
 	const frame = attachSqlFrame({
-		peer: framePeer.peer,
+		channel: shellProtocol.createToolChannel(framePeer.peer),
 		docKey: 'c-pipe',
 		documents: { open: () => undefined, close: (key) => { closed.push(key); } },
 		protocol: shellProtocol,

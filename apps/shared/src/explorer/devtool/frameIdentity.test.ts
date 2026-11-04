@@ -29,7 +29,7 @@ import assert from 'node:assert/strict';
 import { createFrameIdentityGuard, followSignIn, IDENTITY_STATE_TOPIC, publishIdentityState } from './frameIdentity';
 import type { FrameResetReason, SignInState } from './frameIdentity';
 import { createIdentityTracker } from './identity';
-import { account, assertJsonSafe, createDevToolHarness, createFakeClientRealm, createFakeSocketlessRealm, settle, shellProtocol } from './testing';
+import { account, assertJsonSafe, createDevToolHarness, createFakeClientRealm, createFakeMirroredRealm, settle, shellProtocol } from './testing';
 
 /**
  * A controller publishing a client realm's identity, and a frame over the same tool.
@@ -66,9 +66,11 @@ describe('publishIdentityState — the controller side', () => {
 		const seen: unknown[] = [];
 		channel.onState(IDENTITY_STATE_TOPIC, (snapshot) => seen.push(snapshot));
 		const stop = publishIdentityState(channel, tracker);
+		await settle();
 		realm.accountUpdate(account('user-a', 'org-1', 'team-1', { permissions: ['task.data'] }));
 		realm.drop();
 		realm.reconnect(account('user-b'));
+		await settle();
 		assert.deepEqual(seen, [{ fingerprint: 'user-a|org-1|team-1' }, { fingerprint: null }, { fingerprint: 'user-b|org-1|team-1' }]);
 		for (const snapshot of seen) assertJsonSafe(snapshot);
 		await settle();
@@ -201,7 +203,7 @@ describe('round 3 — the guard keeps following (CE-3)', () => {
 describe('round 3 — a controller mount does not reset live frames for nothing (CE-10)', () => {
 	it('a remounted controller publishes nothing until its tracker read settles, so frames see A -> A', async () => {
 		const h = createDevToolHarness();
-		const realm = createFakeSocketlessRealm();
+		const realm = createFakeMirroredRealm();
 		realm.root.connect(account('user-a'));
 		await settle();
 		const controller = shellProtocol.createToolChannel(h.sidebarPeer);
@@ -246,7 +248,7 @@ describe('T7, the frame half, over a socketless realm (review finding 3)', () =>
 	it('A, disconnect, reconnect, B after shell:connected: the document closes once and resets [unknown, identity]; a landing frame only resets', async () => {
 		for (const docKey of ['workbench:k1', undefined]) {
 			const h = createDevToolHarness();
-			const realm = createFakeSocketlessRealm();
+			const realm = createFakeMirroredRealm();
 			realm.root.connect(account('user-a'));
 			await settle();
 			const tracker = createIdentityTracker({ cm: realm.cm });

@@ -54,8 +54,8 @@ class StoreGlobalBase(IGlobalTransform, ABC):
     # Overridden by the driver and, when present, by the merged node config.
     serverName: str = ''
 
-    # Whether the upsert/delete tools may change the store (read by
-    # VectorStoreToolMixin). True keeps every existing driver as it was; a
+    # Whether the write tools (upsert, delete, soft_delete, restore) may change
+    # the store (read by VectorStoreToolMixin). True keeps every existing driver as it was; a
     # driver whose store is shared or managed sets the class default to False
     # and lets the node owner opt in through an ``allow_write`` config field.
     # Resolved from the merged node config in beginGlobal, like serverName.

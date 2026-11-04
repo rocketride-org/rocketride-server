@@ -24,9 +24,12 @@
 // EXPLORER DEV TOOL — FS-BACKED HISTORY PREFERENCES (§3.5)
 // =============================================================================
 //
-// Dev-tool mounts get no workspace preferences (neither host gives store
-// tools ToolHostServices/prefs), so the CONTROLLER persists history itself, in
-// a per-user file beside the SQL tool's saved connections:
+// History is per USER and can be large (a bag of up to 256 KB per owner), so
+// the CONTROLLER persists it in a per-user file in the account store, beside
+// the SQL tool's saved connections, through the realm's own client. (The
+// host's per-workspace, mirrored `ToolHostServices.prefs` partition is not the
+// place for it: it is republished whole on every write, and it would strand
+// the history users already have.)
 //
 //   @/User/.workspace/rocketride.<tool>.history.json      historyPrefsPath(tool)
 //
@@ -39,7 +42,7 @@
 //     only once `load()` settled. A change made before or during the load is
 //     QUEUED and applied over the loaded file (it wins over the stored value),
 //     then written once the load is ready.
-//   NEVER CLOBBER. `client.fsStat` tells a missing file (first run: start
+//   NEVER CLOBBER. `fsStat` tells a missing file (first run: start
 //     empty, writes allowed) from one that exists. The engine answers
 //     `{exists: false}` for a missing file AND for a missing parent folder
 //     (packages/ai/src/ai/account/file_store.py FileStore.stat: an absent
@@ -51,9 +54,13 @@
 //     its history in memory and the failure is reported.
 //   ONE BAG PER OWNER. The owner is the identity fingerprint (user,
 //     organization, development team). The file keeps one bag per owner and
-//     an accessor reads and writes only its own; the others are written back
-//     untouched (at most MAX_PREFS_OWNERS bags, the least recently written
-//     dropped once a write succeeds). An accessor is made for ONE owner, and
+//     an accessor reads and writes only its own; every other entry is written
+//     back exactly as stored, well-formed or not, and so is any top-level field
+//     this module does not know (a newer client's). Only well-formed bags count
+//     toward MAX_PREFS_OWNERS (an entry that is not a bag never counts, so it
+//     cannot push a real owner out) (the least recently written dropped once a write
+//     succeeds); an entry that is not a bag is carried and never dropped. An
+//     entry for THIS owner that is not a bag leaves the file unwritten. An accessor is made for ONE owner, and
 //     the owner is checked before every file request AND again after every
 //     awaited one (a write's mkdir, a load's stat and read):
 //       - `ownerNow()` null (a reconnect: nobody is vouched for yet) HOLDS a
@@ -75,24 +82,21 @@
 //     after one `client.fsMkdir` of the folder. A failed write keeps the
 //     change and retries with backoff, PREFS_WRITE_RETRIES times; the next
 //     change, flush() or close() tries again after that. Every fs request
-//     names its bus timeout (PREFS_FS_TIMEOUT_MS).
-//   LAST WRITER WINS across windows: each window writes the whole file from
-//     what it loaded, so two windows of the same user that both write keep
-//     only the later one's view. A known limitation.
+//     is bounded by an application deadline (engineClient.ts createPrefsFs,
+//     PREFS_FS_DEADLINE_MS): the SDK's file calls have no timeout of their own.
+//   NO LOST UPDATES ACROSS OWNERS. Each write re-reads the file first and
+//     merges (see `write`), so two windows of one user under different
+//     identities do not revert each other. Two windows under the SAME owner
+//     still keep only the later one's bag for that owner.
 // =============================================================================
 
 import { isPlainObject } from '../checks';
 import { MAX_HISTORY_BAG_CHARS } from '../history/types';
 import type { IPrefsAccessor } from '../history/types';
-import { busRequest } from './busClient';
-import type { IExplorerBus } from './busClient';
-import { assertTimeoutMs } from './timeouts';
+import type { IPrefsFs } from './engineClient';
 
 /** The file format version this module reads and writes. */
 export const PREFS_FILE_VERSION = 1;
-
-/** Bus timeout of each fs request (stat, read, mkdir, write). */
-export const PREFS_FS_TIMEOUT_MS = 15_000;
 
 /** Quiet period before a batch of preference changes is written. */
 export const PREFS_WRITE_DEBOUNCE_MS = 1_000;
@@ -145,8 +149,8 @@ interface IOwnerBag {
 
 /** What {@link createFsPrefs} needs. */
 export interface IFsPrefsOptions {
-	/** The controller realm's bus (its ConnectionManager). */
-	cm: IExplorerBus;
+	/** The file-store calls (engineClient.ts `createPrefsFs`: each call bounded by its own deadline). */
+	fs: IPrefsFs;
 	/** The file (see {@link historyPrefsPath}). */
 	path: string;
 	/** The identity fingerprint this accessor belongs to (required; no identity: no file). */
@@ -155,8 +159,6 @@ export interface IFsPrefsOptions {
 	ownerNow?: () => string | null;
 	/** The folder to create before the first write (default: the path's folder). */
 	dir?: string;
-	/** Bus timeout per fs request (default {@link PREFS_FS_TIMEOUT_MS}). */
-	timeoutMs?: number;
 	/** Write debounce (default {@link PREFS_WRITE_DEBOUNCE_MS}). */
 	debounceMs?: number;
 	/** File cap (default {@link MAX_PREFS_FILE_CHARS}). */
@@ -206,22 +208,58 @@ class FileFormatError extends Error {
 }
 
 /**
- * Read the stored file.
- *
- * @param raw - What `client.fsReadJson` answered.
- * @returns The owner bags.
- * @throws Error for anything but this module's format (the file is then never written).
+ * Another owner's entry, kept exactly as it was read (it is written back as is).
  */
-function readFile(raw: unknown): Record<string, IOwnerBag> {
+interface IKeptEntry {
+	/** Its `at`, for ordering (0 when malformed). */
+	at: number;
+	/** The entry as stored: never rewritten, whatever its shape. */
+	raw: unknown;
+	/** True when it is not a well-formed bag: it is carried untouched and never dropped. */
+	pinned: boolean;
+}
+
+/** What a read of the file gives. */
+interface ILoadedFile {
+	/** The accessor's own preferences. */
+	mine: Record<string, unknown>;
+	/** Every other owner's entry, as stored. */
+	others: Record<string, IKeptEntry>;
+	/** Top-level fields this module does not know (a newer client's), carried unchanged. */
+	extra: Record<string, unknown>;
+}
+
+/**
+ * Read the stored file. Nothing is judged and nothing is dropped: another
+ * owner's entry, well-formed or not, and any unknown top-level field are
+ * carried through writes unchanged.
+ *
+ * @param raw - What `fsReadJson` answered.
+ * @param owner - The accessor's owner.
+ * @returns The owner's preferences, the others' entries and the unknown fields.
+ * @throws Error for a file that is not in this module's format, or whose entry for `owner` is not a bag (the file is then never written).
+ */
+function readFile(raw: unknown, owner: string): ILoadedFile {
 	if (!isPlainObject(raw) || raw.version !== PREFS_FILE_VERSION || !isPlainObject(raw.owners)) {
 		throw new FileFormatError(`The history file is not in format version ${PREFS_FILE_VERSION}; it is left untouched.`);
 	}
-	const owners: Record<string, IOwnerBag> = {};
-	for (const [id, bag] of Object.entries(raw.owners)) {
-		if (!isPlainObject(bag) || !isPlainObject(bag.prefs)) continue;
-		owners[id] = { at: typeof bag.at === 'number' && Number.isFinite(bag.at) ? bag.at : 0, prefs: bag.prefs };
+	const extra: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(raw)) {
+		if (key !== 'version' && key !== 'owners') extra[key] = value;
 	}
-	return owners;
+	let mine: Record<string, unknown> = {};
+	const others: Record<string, IKeptEntry> = {};
+	for (const [id, entry] of Object.entries(raw.owners)) {
+		const wellFormed = isPlainObject(entry) && isPlainObject(entry.prefs);
+		if (id === owner) {
+			if (!wellFormed) throw new FileFormatError('This owner\'s entry in the history file is not a preferences bag; the file is left untouched.');
+			mine = { ...(entry as { prefs: Record<string, unknown> }).prefs };
+			continue;
+		}
+		const at = wellFormed && typeof (entry as { at?: unknown }).at === 'number' && Number.isFinite((entry as { at: number }).at) ? (entry as { at: number }).at : 0;
+		others[id] = { at, raw: entry, pinned: !wellFormed };
+	}
+	return { mine, others, extra };
 }
 
 /**
@@ -229,14 +267,13 @@ function readFile(raw: unknown): Record<string, IOwnerBag> {
  *
  * @param opts - See {@link IFsPrefsOptions}.
  * @returns The accessor; `load()` it (or use {@link attachWhenLoaded}) before attaching.
- * @throws RangeError without an owner or with an unusable timeout.
+ * @throws RangeError without an owner.
  */
 export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
-	const { cm, path, owner } = opts;
+	const { fs, path, owner } = opts;
 	if (typeof owner !== 'string' || owner === '') {
 		throw new RangeError('createFsPrefs needs the identity fingerprint as its owner; without an identity, history stays in memory.');
 	}
-	const timeoutMs = assertTimeoutMs(opts.timeoutMs ?? PREFS_FS_TIMEOUT_MS, 'prefs fs timeoutMs');
 	const debounceMs = opts.debounceMs ?? PREFS_WRITE_DEBOUNCE_MS;
 	const maxFileChars = opts.maxFileChars ?? MAX_PREFS_FILE_CHARS;
 	const maxOwners = Math.max(1, opts.maxOwners ?? MAX_PREFS_OWNERS);
@@ -255,7 +292,8 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 
 	let status: FsPrefsStatus = 'idle';
 	let loading: Promise<FsPrefsStatus> | null = null;
-	let others: Record<string, IOwnerBag> = {};
+	let others: Record<string, IKeptEntry> = {};
+	let extra: Record<string, unknown> = {};
 	let mine: Record<string, unknown> = {};
 	/** Changes made before the load reached ready: applied over what it read. */
 	const queued: Record<string, unknown> = {};
@@ -312,17 +350,14 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 	 *
 	 * @returns The owner's bag and the others, or 'stale' when the owner changed during a request.
 	 */
-	const readOnce = async (): Promise<{ mine: Record<string, unknown>; others: Record<string, IOwnerBag> } | 'stale'> => {
-		const stat = await busRequest(cm, 'client.fsStat', { path }, timeoutMs);
+	const readOnce = async (): Promise<ILoadedFile | 'stale'> => {
+		const stat = await fs.fsStat(path);
 		if (!stillOwner()) return 'stale';
-		if (isPlainObject(stat) && stat.exists === false) return { mine: {}, others: {} };
-		if (!isPlainObject(stat) || stat.exists !== true) throw new Error('client.fsStat gave no answer about the history file.');
-		const raw = await busRequest(cm, 'client.fsReadJson', { path }, timeoutMs);
+		if (isPlainObject(stat) && stat.exists === false) return { mine: {}, others: {}, extra: {} };
+		if (!isPlainObject(stat) || stat.exists !== true) throw new Error('fsStat gave no answer about the history file.');
+		const raw = await fs.fsReadJson<unknown>(path);
 		if (!stillOwner()) return 'stale';
-		const owners = readFile(raw);
-		const own = { ...(owners[owner]?.prefs ?? {}) };
-		delete owners[owner];
-		return { mine: own, others: owners };
+		return readFile(raw, owner);
 	};
 
 	const load = (): Promise<FsPrefsStatus> => {
@@ -357,6 +392,7 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 				if (result === 'stale') continue;
 				mine = result.mine;
 				others = result.others;
+				extra = result.extra;
 				lastError = null;
 				loaded = true;
 				break;
@@ -390,13 +426,22 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 	 *
 	 * @returns The file and the kept owners.
 	 */
-	const compose = (): { file: { version: number; owners: Record<string, IOwnerBag> }; kept: Record<string, IOwnerBag> } | null => {
+	const compose = (): { file: Record<string, unknown>; kept: Record<string, IKeptEntry> } | null => {
 		const own: IOwnerBag = { at: now(), prefs: JSON.parse(JSON.stringify(mine)) as Record<string, unknown> };
-		const kept = Object.entries(others).sort((a, b) => b[1].at - a[1].at).slice(0, maxOwners - 1);
+		// Entries that are not well-formed bags are carried and never dropped; the cap trims only well-formed ones, least recently written first.
+		const pinned = Object.entries(others).filter(([, entry]) => entry.pinned);
+		const kept = Object.entries(others)
+			.filter(([, entry]) => !entry.pinned)
+			.sort((a, b) => b[1].at - a[1].at)
+			.slice(0, Math.max(0, maxOwners - 1));
 		for (;;) {
-			const file = { version: PREFS_FILE_VERSION, owners: { ...Object.fromEntries(kept), [owner]: own } };
+			const owners: Record<string, unknown> = {};
+			for (const [id, entry] of [...pinned, ...kept]) owners[id] = entry.raw;
+			owners[owner] = own;
+			// Unknown top-level fields first, then ours: a newer client's content survives untouched.
+			const file = { ...extra, version: PREFS_FILE_VERSION, owners };
 			// Measured as client.ts fsWriteJson writes it: JSON.stringify(obj, null, 2).
-			if (JSON.stringify(file, null, 2).length <= maxFileChars) return { file, kept: Object.fromEntries(kept) };
+			if (JSON.stringify(file, null, 2).length <= maxFileChars) return { file, kept: Object.fromEntries([...pinned, ...kept]) };
 			if (kept.length === 0) break;
 			kept.pop();
 		}
@@ -434,7 +479,7 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 		try {
 			if (!madeDir && dir !== '') {
 				try {
-					await busRequest(cm, 'client.fsMkdir', { path: dir }, timeoutMs);
+					await fs.fsMkdir(dir);
 				} catch {
 					// Usually "already exists"; a real failure surfaces on the write.
 				}
@@ -442,11 +487,20 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 				// The owner may have changed, or the accessor gone, while the folder was made.
 				if (!mayWrite()) return;
 			}
+			// Re-read the file NOW and merge: this owner's bag comes from memory, every
+			// other owner's entry and every unknown field from what is stored now, so
+			// another window's newer write (another identity of the same user) is never
+			// reverted. A failed read writes nothing: the change stays in memory and the
+			// failure is reported (and retried, as any failed write).
+			const fresh = await readOnce();
+			if (fresh === 'stale' || !mayWrite()) return;
+			others = fresh.others;
+			extra = fresh.extra;
 			// Composed only now, from the bag of an owner who is signed in now.
 			const composed = compose();
 			dirty = false;
 			if (composed === null) return;
-			await busRequest(cm, 'client.fsWriteJson', { path, value: composed.file }, timeoutMs);
+			await fs.fsWriteJson(path, composed.file);
 			if (disposed) return;
 			others = composed.kept;
 			retries = 0;

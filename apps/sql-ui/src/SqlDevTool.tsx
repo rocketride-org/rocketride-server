@@ -46,7 +46,7 @@ import { EmptyState, useConnectionReady } from 'shell';
 import { useConnectionRecord } from './connectionRecord';
 import type { SqlEndpoint } from './connect';
 import { setActiveConnection } from './navigation';
-import { SQL_TOOL_PROTOCOL, frameChannel } from './sqlBridge';
+import { SQL_FRAME_PROTOCOL } from './sqlBridge';
 import { attachSqlFrame, connectionDocState, directReleaseKey, followControllerReady, frameGates, routeDocKey, sqlChannel } from './sqlFrame';
 import { followSignIn } from 'shared/explorer/devtool/frameIdentity';
 import type { SignInState } from 'shared/explorer/devtool/frameIdentity';
@@ -58,7 +58,6 @@ import { createRemoteSavedQueries } from './history/remoteSavedQueries';
 import type { RemoteSavedQueries } from './history/remoteSavedQueries';
 import { SqlEnvProvider, createRemoteSqlEnv, useSqlEnv } from './sqlEnv';
 import ConnectionView from './views/ConnectionView';
-import ConnectionOverlays from './components/ConnectionOverlays';
 import ConnectionEditorBody from './components/ConnectionEditorBody';
 import LiveRegion from './components/LiveRegion';
 import { DatabaseIcon } from './icons';
@@ -71,37 +70,6 @@ const styles = {
 		alignItems: 'center',
 		justifyContent: 'center',
 	} as CSSProperties,
-};
-
-// Overlay-host claim: sidebar-requested dialogs (add/edit/delete connection)
-// must render in exactly ONE frame per realm. In VS Code each frame is its
-// own document (always one host). In-shell, several connection frames share
-// the realm — the first alive mount holds the claim and it transfers when
-// that mount closes.
-const overlayHosts: Array<() => void> = [];
-
-/** Whether THIS mount currently owns the overlay-host claim. */
-function useOverlayHostClaim(): boolean {
-	const [, force] = useState(0);
-	const tickRef = useRef<(() => void) | null>(null);
-	if (!tickRef.current) tickRef.current = () => force((n) => n + 1);
-	useEffect(() => {
-		const tick = tickRef.current!;
-		overlayHosts.push(tick);
-		overlayHosts.forEach((fn) => fn());
-		return () => {
-			const at = overlayHosts.indexOf(tick);
-			if (at >= 0) overlayHosts.splice(at, 1);
-			overlayHosts.forEach((fn) => fn());
-		};
-	}, []);
-	return overlayHosts[0] === tickRef.current;
-}
-
-/** The sidebar-requested dialogs, rendered by the claim-holding mount only. */
-const OverlayHost: React.FC = () => {
-	const owns = useOverlayHostClaim();
-	return owns ? <ConnectionOverlays /> : null;
 };
 
 /**
@@ -199,8 +167,6 @@ const SqlConnectionDocument: React.FC<{ connId: string; sidebarClosed: boolean; 
 	return (
 		<div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}>
 			{body}
-			{/* Sidebar-requested dialogs — one host per realm (see the claim). */}
-			<OverlayHost />
 		</div>
 	);
 };
@@ -259,11 +225,11 @@ function useSummonState(summon: IControllerSummon | null): SummonState {
  * it shows the landing state. The connections list lives in the HOST's
  * sidebar panel (SqlDevToolSidebar, the controller).
  */
-export const SqlDevTool: React.FC<DevToolProps> = ({ peer, channel, docKey, documents }) => {
-	// The frame's channel (the host's, or one per peer) and its wiring: the
+export const SqlDevTool: React.FC<DevToolProps> = ({ channel, docKey, documents }) => {
+	// The frame's channel (the host's) and its wiring: the
 	// frame caller, the realm's read-only connection replica, the active-key
 	// pushes, and the identity guard — mounted in an effect, disposed with it.
-	const toolChannel = useMemo(() => frameChannel(peer, channel), [peer, channel]);
+	const toolChannel = channel;
 	// The host's documents API, read at call time: a new object on a re-render
 	// must not remount the frame wiring (which drops pending calls).
 	const documentsRef = useRef(documents);
@@ -273,14 +239,13 @@ export const SqlDevTool: React.FC<DevToolProps> = ({ peer, channel, docKey, docu
 		let history: RemoteHistory | null = null;
 		let saved: RemoteSavedQueries | null = null;
 		const frame = attachSqlFrame({
-			peer,
 			channel: toolChannel,
 			docKey: docKey ?? null,
 			documents: {
 				open: (key, title) => documentsRef.current?.open(key, title),
 				close: (key) => documentsRef.current?.close(key),
 			},
-			protocol: SQL_TOOL_PROTOCOL,
+			protocol: SQL_FRAME_PROTOCOL,
 			// Identity changed, unknown, or the host connection dropped: the
 			// frame wiring clears the realm's schemas; the history and
 			// saved-queries views are ours.
@@ -297,7 +262,7 @@ export const SqlDevTool: React.FC<DevToolProps> = ({ peer, channel, docKey, docu
 			history?.dispose();
 			frame.dispose();
 		};
-	}, [peer, toolChannel, docKey]);
+	}, [toolChannel, docKey]);
 
 	// FRAMES HOLD NO ROCKETRIDE CLIENT: run/apply enablement is the host's
 	// `host:connection` snapshot, and every call is a controller op.
@@ -342,7 +307,6 @@ export const SqlDevTool: React.FC<DevToolProps> = ({ peer, channel, docKey, docu
 				<div style={styles.welcome}>
 					<EmptyState icon={<DatabaseIcon />} title="SQL Explorer" description="Open a connection from the sidebar, or add a database with + New Connection: pick a database node from a pipeline you are running, or enter the connection details directly." />
 				</div>
-				<OverlayHost />
 			</div>
 		);
 	}

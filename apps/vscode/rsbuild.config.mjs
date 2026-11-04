@@ -113,9 +113,12 @@ export default defineConfig({
 			vscode: 'commonjs vscode',
 		},
 		cleanDistPath: true,
-		// Inline all static assets as data URIs — VS Code webviews cannot
-		// resolve emitted file paths set dynamically from JavaScript.
-		dataUriLimit: Number.MAX_SAFE_INTEGER,
+		// Emitted assets resolve EXACTLY as in the cloud shells: 'auto'
+		// derives the public path from the loading script's own URL — which
+		// the host providers rewrite to a webview-resource URI — so every
+		// runtime-constructed asset URL lands inside the webview origin.
+		// (Same setting as rsbuild.devtool.config.mjs and rocket-ui.)
+		assetPrefix: 'auto',
 	},
 
 	html: {

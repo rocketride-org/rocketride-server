@@ -220,9 +220,10 @@ import { Explorer, NOOP_VFS } from 'shell';
 
 Standard vertical menu list on the shared `ViewMenu` entry shape — counts,
 severity badges, one-level accordion sections. Mount any number. (Its
-iconified form now appears only in the compact/mobile drawer — in the
-desktop frame the panel closes instead of iconifying. To promote a menu's
-sections to rail icons, pass `viewsFromMenu(menu)` as `sidebarViews`.)
+iconified form renders in the classic collapsed desktop sidebar — the
+compact/mobile drawer is never collapsed, and in the rail frame the panel
+closes instead of iconifying. To promote a menu's sections to rail icons,
+pass `viewsFromMenu(menu)` as `sidebarViews`.)
 
 | Prop | Type | Dir | Note |
 | --- | --- | --- | --- |
@@ -816,8 +817,11 @@ const grid = useRef<IDataGridHandle>(null);
 	title="Pipelines"
 	columns={columns}
 	remoteSort
+	// fetchPage is YOUR loader — there is no client.listPipelines(). Build
+	// the page from a real SDK call (see ROCKETRIDE_typescript_API.md) or
+	// your own endpoint, and return { rows, total }.
 	fetchPage={({ page, size, sort, filters, search }) =>
-		client.listPipelines({ page, size, sort, filters, search })}
+		loadPipelinePage({ page, size, sort, filters, search })}
 	onRowClick={(row) => openDetail(row)}
 />
 // After a mutation: re-request the current page.
@@ -1344,7 +1348,7 @@ Event catalog (`out` = the shell emits it; `in` = an app emits it):
 | `shell:servicesUpdated` | `{ services, icons?, servicesError? }` | out | Service catalog fetched or refreshed. |
 | `shell:appsUpdated` | `{ apps: ShellAppEntry[] }` | out | App catalog changed (full replacement). |
 | `shell:login` / `shell:logout` | `{ user: ConnectResult }` / `void` | out | Authenticated / identity cleared. |
-| `shell:loginRequest` / `shell:logoutRequest` | `{ appId?, register? }` / `void` | in | UI-initiated sign-in / sign-out. |
+| `shell:loginRequest` / `shell:logoutRequest` | `{ appId?, register?, auto?, signupProperties?: SignupProperties }` / `void` | in | UI-initiated sign-in / sign-out; `auto` is set only by the shell's auth gate; `signupProperties` is optional consent-gated sign-up credential context. |
 | `shell:switchApp` | `{ appId }` | in | Switch the active app. |
 | `shell:openOverlay` | `{ id: 'account' \| 'settings' \| 'environment' }` | in | Open a shell overlay (guarded allowlist). |
 | `shell:subscribe` / `shell:unsubscribe` | `{ app, plan?, promo? }` / `{ appId }` | in | Open checkout for a paid app / subscription cancelled. |
@@ -1352,6 +1356,7 @@ Event catalog (`out` = the shell emits it; `in` = an app emits it):
 | `shell:themeChange` | `{ tokens: Record<string, string> }` | out | Theme tokens changed — canvases repaint from these. |
 | `shell:viewActivated` / `shell:sidebarCollapsing` | `{ viewId }` / `void` | out | View became active / sidebar starting to collapse. |
 | `shell:manifestRefresh` | `{ source }` | out | Server-side app manifest changed (dev overlay, publish, expiry). |
+| `shell:telemetry` | `{ event, props, ts, id }` | out | Telemetry fact (`auth:complete`) for the active app to forward; `auth:start`, always held, and facts held while nobody listened come from `ConnectionManager.getInstance().drainTelemetry()`, drained once at analytics init. On the waitlist screen the shell calls the home app's `./telemetry` entry once per page load to do that. |
 | `app:statusChanged` | `{ appId, status, notes? }` | out | Marketplace review status changed. |
 | `store:changed` | `{ prefix, paths }` | out | Files changed under a watched store prefix. |
 
@@ -1408,7 +1413,9 @@ Per-app persisted state, two layers:
   `updateAppState` (opaque app-owned state, functional updater — the
   Documents persistence binding); `settings` / `settingsOverrides` /
   `updateSetting(key, value?)` (effective settings = defaults + overrides;
-  delta-only writer — writing the default deletes the override);
+  delta-only writer — writing the default deletes the override; settings
+  are declared in the app manifest and edited by the user on the shell's
+  Settings page — see ROCKETRIDE_APPS.md §Declaring settings);
   `activeAppId` / `appManifest` / `loadedApps`; `loadApp` / `retryApp` /
   `invalidateApp` (lazy descriptor loads); `themeOptions` / `setTheme`;
   `emit` / `on` (workspace event bus); `loaded` / `seeded` / `appLoading`

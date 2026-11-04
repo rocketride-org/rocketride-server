@@ -31,9 +31,19 @@ const stub = {
 	commonStyles: new Proxy({}, { get: () => ({}) }),
 };
 
+// The shell's own sources, which the dev-tool test harness
+// (shared/explorer/devtool/testing.ts) loads by relative path, need the REAL
+// SDK: RocketRideClientProxy extends RocketRideClient, and a stub makes that
+// `extends undefined`. Only files under packages/shell/src/ get it; everything
+// else keeps the stub.
+const SHELL_SOURCES = /[\\/]packages[\\/]shell[\\/]src[\\/]/;
+
 // step: intercept CJS loads of the platform specifiers before tsx resolves them
 const origLoad = Module._load;
 Module._load = function (request, parent, isMain) {
+	if (request === 'rocketride' && parent && SHELL_SOURCES.test(parent.filename || '')) {
+		return origLoad.call(this, request, parent, isMain);
+	}
 	if (request === 'shell' || request === 'rocketride') return stub;
 	return origLoad.call(this, request, parent, isMain);
 };
