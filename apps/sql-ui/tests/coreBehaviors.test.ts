@@ -240,3 +240,39 @@ describe('endpoint probes wait for a person (holdProbes / markUserPresent)', () 
 		}
 	});
 });
+
+describe('the engine tears a terminated pipeline down asynchronously', () => {
+	it('a resolution straight after a release waits for the old task to go, then starts a fresh pipeline (never reuses the dying one)', async () => {
+		const rows: IFakeTaskRow[] = [];
+		const fresh = (token: string): IFakeTaskRow => ({ ...directRow(), token });
+		const { engine, core, uses } = await rig([DIRECT], rows);
+		let generation = 0;
+		let terminatedAt = 0;
+		engine.script['client.use'] = async () => {
+			// useExisting: the dying task is reattached while it still answers; otherwise a new one starts.
+			if (terminatedAt === 0 || Date.now() - terminatedAt >= 500) {
+				generation += 1;
+				rows.splice(0, rows.length, fresh(`tk_gen${generation}`));
+			}
+			return {};
+		};
+		// The old token keeps resolving for 500 ms after `terminate` answers (the engine's teardown).
+		engine.script['client.getTaskToken'] = () => (terminatedAt !== 0 && Date.now() - terminatedAt < 500 ? 'tk_gen1' : rows[0]?.token ?? '');
+		engine.script['client.terminate'] = () => { terminatedAt = Date.now(); return {}; };
+		try {
+			const first = await core.resolve('c-direct');
+			assert.equal(rows[0]?.token, 'tk_gen1');
+			await core.release('c-direct', first.key);
+			const started = Date.now();
+			const again = await core.resolve('c-direct');
+			assert.ok(Date.now() - started >= 400, 'it waited for the teardown');
+			assert.equal(uses(), 2, 'a fresh pipeline was started');
+			assert.equal(rows[0]?.token, 'tk_gen2', 'and it is the new one');
+			await core.sessionFor(again).execute('SELECT 1', { idempotent: true });
+			const executes = engine.requests.filter((q) => q.op === 'client.tool' && (q.params as { tool: string }).tool === 'execute');
+			assert.equal((executes.at(-1)?.params as { token: string }).token, 'tk_gen2', 'the statement went to the new task');
+		} finally {
+			core.dispose();
+		}
+	});
+});

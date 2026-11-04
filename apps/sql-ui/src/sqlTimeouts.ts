@@ -65,8 +65,14 @@ export const USE_TIMEOUT_MS = 60_000;
  */
 export const DISCOVERY_WAIT_MS = 45_000;
 
-/** The longest a resolution can take: the list, a direct pipeline's start, and a discovery. */
-export const RESOLVE_BUDGET_MS = LIST_WAIT_MS + USE_TIMEOUT_MS + DISCOVERY_WAIT_MS;
+/** How long a resolution waits for a just-terminated direct pipeline to disappear (the engine tears a task down asynchronously). */
+export const TEARDOWN_WAIT_MS = 5_000;
+
+/** How often it looks. */
+export const TEARDOWN_POLL_MS = 200;
+
+/** The longest a resolution can take: the list, a just-terminated pipeline's teardown, a direct pipeline's start, and a discovery. */
+export const RESOLVE_BUDGET_MS = LIST_WAIT_MS + USE_TIMEOUT_MS + DISCOVERY_WAIT_MS + TEARDOWN_WAIT_MS;
 
 /**
  * The longest the shared session's one retry of a statement can add: it
