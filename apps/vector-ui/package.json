@@ -7,7 +7,7 @@
 	"appManifest": {
 		"id": "rocketride.vector",
 		"projectId": "5c94285d-1311-42b8-bc6b-6233f45d1cb2",
-		"publisher": "Aparavi Software AG",
+		"publisher": "RocketRide",
 		"name": "Vector Explorer",
 		"description": "Manage and visualise the documents in a vector store through pipeline store nodes",
 		"icon": "./src/icon.svg",

@@ -46,7 +46,7 @@ test('manifest identity: id, name, publisher, description and the module federat
 	assert.equal(pkg.name, '@rocketride/vector-ui');
 	assert.equal(m.id, 'rocketride.vector');
 	assert.equal(m.name, 'Vector Explorer');
-	assert.equal(m.publisher, 'Aparavi Software AG');
+	assert.equal(m.publisher, 'RocketRide');
 	assert.equal(m.description, 'Manage and visualise the documents in a vector store through pipeline store nodes');
 	assert.equal(m.id.replace(/[^a-zA-Z0-9_$]/g, '_'), 'rocketride_vector');
 	// A version 4 uuid of its own: not any other app's.
