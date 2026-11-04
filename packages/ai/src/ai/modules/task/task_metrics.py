@@ -20,8 +20,8 @@ import asyncio
 import time
 import uuid
 import psutil
-from typing import Optional, TYPE_CHECKING, Callable
-from rocketlib import debug
+from typing import Any, Dict, Optional, TYPE_CHECKING, Callable
+from rocketlib import debug, error
 from ai.constants import (
     CONST_METRICS_SAMPLE_INTERVAL,
     CONST_BILLING_REPORT_INTERVAL,
@@ -30,6 +30,31 @@ from ai.constants import (
 
 if TYPE_CHECKING:
     from rocketride import TASK_STATUS
+
+# Process-wide tally of failed ledger writes. Published on /status by the
+# task module (modules/task/__init__.py). Resets with the process.
+_LEDGER_HEALTH: Dict[str, Any] = {'failures': 0, 'last_error_type': '', 'last_time': 0.0}
+LEDGER_FAILURE_PREFIX = '[TaskMetrics] billing ledger write failed'
+
+
+def _note_ledger_failure(exc: BaseException) -> None:
+    _LEDGER_HEALTH['failures'] += 1
+    _LEDGER_HEALTH['last_error_type'] = type(exc).__name__
+    _LEDGER_HEALTH['last_time'] = time.time()
+
+
+def billing_ledger_status(status: Dict[str, Any]) -> None:
+    """/status callback: how many ledger writes this process failed to make.
+
+    /status answers any authenticated caller and the tally spans every tenant
+    on the process, so it carries counts and an exception type only. The error
+    text, task and payer go to the log line.
+    """
+    status['billing'] = {
+        'ledgerWriteFailures': _LEDGER_HEALTH['failures'],
+        'lastLedgerErrorType': _LEDGER_HEALTH['last_error_type'],
+        'lastLedgerFailureTime': _LEDGER_HEALTH['last_time'],
+    }
 
 
 class TaskMetrics:
@@ -65,6 +90,9 @@ class TaskMetrics:
         source_name: Optional[str] = None,
         sample_interval: Optional[float] = None,
         on_update_callback: Optional[Callable[[], None]] = None,
+        owner_kind: str = 'user',
+        run_kind: str = 'dev',
+        trigger: str = '',
     ):
         """
         Initialize metrics collector for a process tree.
@@ -83,6 +111,9 @@ class TaskMetrics:
             org_id: Organisation the task belongs to (for per-org billing)
             sample_interval: Seconds between metric samples (default: from constants.CONST_METRICS_SAMPLE_INTERVAL)
             on_update_callback: Optional callback to invoke when metrics are updated
+            owner_kind: 'user' or 'team', the payer classification from the trusted dispatch
+            run_kind: 'dev' or 'deploy', from the trusted dispatch
+            trigger: What fired a deploy run ('schedule', 'manual'), empty for a dev run
 
         Raises:
             psutil.NoSuchProcess: If process does not exist
@@ -100,6 +131,10 @@ class TaskMetrics:
         self.org_id = org_id or ''
         self.pipeline_name = pipeline_name or ''
         self.source_name = source_name or ''
+        self.owner_kind = owner_kind or 'user'
+        self.run_kind = run_kind or 'dev'
+        self.trigger = trigger or ''
+        self._ledger_failures = 0
         self.sample_interval = sample_interval if sample_interval is not None else CONST_METRICS_SAMPLE_INTERVAL
         self._on_update_callback = on_update_callback
 
@@ -489,6 +524,12 @@ class TaskMetrics:
         if self._on_update_callback:
             self._on_update_callback()
 
+    def _actor_id(self) -> Optional[str]:
+        """The ledger actor: the owning user for a user-owned run, None for a team-owned run."""
+        if self.owner_kind == 'team':
+            return None
+        return self.user_id or None
+
     async def _report_to_billing_system(self) -> None:
         """
         Write cumulative token usage to the credit ledger via ``account.apply_debit()``.
@@ -550,23 +591,45 @@ class TaskMetrics:
                 'client_id': self.client_id,
                 'duration_seconds': round(self._duration_seconds, 1),
                 'tokens_total': round(self._status.tokens.total, 2),
+                'run_kind': self.run_kind,
+                'trigger': self.trigger,
             }
+            failed: list[tuple[str, BaseException]] = []
             for resource, description, amount in token_totals:
                 if amount <= 0:
                     continue
                 idem_key = f'task:{self.billing_run_id}:{description}'
-                await account.apply_debit(
-                    org_id=self.org_id,
-                    user_id=self.user_id,
-                    team_id=self.team_id,
-                    resource=resource,
-                    amount=amount,
-                    idempotency_key=idem_key,
-                    context=context,
-                    description=description,
-                )
+                try:
+                    await account.apply_debit(
+                        org_id=self.org_id,
+                        user_id=self._actor_id(),
+                        team_id=self.team_id,
+                        resource=resource,
+                        amount=amount,
+                        idempotency_key=idem_key,
+                        context=context,
+                        description=description,
+                        owner_kind=self.owner_kind,
+                        run_id=self.billing_run_id,
+                    )
+                except Exception as e:  # one category must not starve the others
+                    failed.append((description, e))
         except Exception as e:
-            debug(f'[TaskMetrics] Error writing to billing ledger: {e}')
+            failed = [('report', e)]
+
+        if failed:
+            self._ledger_failures += len(failed)
+            for _, e in failed:
+                _note_ledger_failure(e)
+            first = failed[0][1]
+            line = (
+                f'{LEDGER_FAILURE_PREFIX}: task={self.task_id} run_id={self.billing_run_id} '
+                f'owner_kind={self.owner_kind} org={self.org_id} team={self.team_id} '
+                f'categories={[d for d, _ in failed]} error={type(first).__name__}: {first}'
+            )
+            # First failure of a run at error level; repeats at debug so a long
+            # outage does not write four error lines a minute per run.
+            (error if self._ledger_failures == len(failed) else debug)(line)
 
     async def _monitoring_loop(self) -> None:
         """
@@ -688,6 +751,12 @@ class TaskMetrics:
         async with self._metrics_lock:
             await self._report_to_billing_system()
 
+        if self._ledger_failures:
+            error(
+                f'{LEDGER_FAILURE_PREFIX}: task={self.task_id} run_id={self.billing_run_id} '
+                f'ended with {self._ledger_failures} failed ledger writes'
+            )
+
         # Audit the final frozen usage totals for this task
         await self._audit_task_usage()
 
@@ -725,7 +794,7 @@ class TaskMetrics:
                     usage[key] = round(val, 2)
 
             await account.audit(
-                user_id=self.user_id,
+                user_id=self._actor_id(),
                 source='billing',
                 reason='task_usage',
                 request_data={
@@ -733,6 +802,9 @@ class TaskMetrics:
                     'pipeline': self.pipeline_name,
                     'source': self.source_name,
                     'duration_seconds': round(self._duration_seconds, 1),
+                    'run_id': self.billing_run_id,
+                    'owner_kind': self.owner_kind,
+                    'trigger': self.trigger,
                 },
                 response_data={
                     'tokens_total': round(total, 2),

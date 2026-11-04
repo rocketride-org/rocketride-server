@@ -32,6 +32,11 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     # Store task server in server state for access by other modules if needed
     server.app.state.task = task_server
 
+    # Ledger write failures are counted per process and shown on /status.
+    from .task_metrics import billing_ledger_status
+
+    server.registerStatusCallback(billing_ledger_status)
+
     scheduler = TaskScheduler(task_server)
     server.app.state.scheduler = scheduler
     scheduler.start()

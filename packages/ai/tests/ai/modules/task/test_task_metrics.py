@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -127,7 +127,17 @@ def mock_billing_rates(monkeypatch):
     """Mock account.get_billing_rates() so _update_tokens() uses test rates."""
     mock_account = MagicMock()
     mock_account.get_billing_rates.return_value = _TEST_BILLING_RATES
+    mock_account.apply_debit = AsyncMock(return_value=True)
+    mock_account.audit = AsyncMock()
     monkeypatch.setitem(sys.modules, 'ai.account', MagicMock(account=mock_account))
+    return mock_account
+
+
+@pytest.fixture(autouse=True)
+def reset_ledger_health(monkeypatch):
+    """The ledger tally is process-wide; each test starts from the initial values."""
+    for key, value in {'failures': 0, 'last_error_type': '', 'last_time': 0.0}.items():
+        monkeypatch.setitem(task_metrics._LEDGER_HEALTH, key, value)
 
 
 def _make_metrics(fake_psutil, pid=1234, sample_interval=1.0, callback=None):
@@ -151,6 +161,30 @@ def _make_metrics(fake_psutil, pid=1234, sample_interval=1.0, callback=None):
         task_status=status,
         sample_interval=sample_interval,
         on_update_callback=callback,
+    )
+    return tm, status
+
+
+def _make_billable_metrics(
+    fake_psutil, *, owner_kind='user', user_id='u1', run_kind='dev', trigger='', cpu_utilization=10.0
+):
+    """Build a meter that reaches the ledger: org, team and task id set, one positive category."""
+    status = make_status()
+    status.tokens.cpu_utilization = cpu_utilization
+    status.tokens.total = cpu_utilization
+    tm = task_metrics.TaskMetrics(
+        pid=1234,
+        task_status=status,
+        task_id='task-1',
+        client_id=user_id or '',
+        user_id=user_id,
+        team_id='team-1',
+        org_id='org-1',
+        pipeline_name='pipe',
+        source_name='src',
+        owner_kind=owner_kind,
+        run_kind=run_kind,
+        trigger=trigger,
     )
     return tm, status
 
@@ -565,3 +599,151 @@ def test_stop_monitoring_on_idle_is_a_noop(fake_psutil, no_gpu):
         await tm.stop_monitoring()
 
     asyncio.run(run())  # absence of exception is the assertion
+
+
+# ---------------------------------------------------------------------------
+# Ledger attribution and failure visibility
+# ---------------------------------------------------------------------------
+
+
+def test_team_owned_report_debits_the_org_and_team_with_no_actor(fake_psutil, mock_billing_rates):
+    tm, _ = _make_billable_metrics(fake_psutil, owner_kind='team', user_id='', run_kind='deploy', trigger='schedule')
+
+    asyncio.run(tm._report_to_billing_system())
+
+    mock_billing_rates.apply_debit.assert_awaited_once()
+    kwargs = mock_billing_rates.apply_debit.await_args.kwargs
+    assert kwargs['user_id'] is None
+    assert kwargs['owner_kind'] == 'team'
+    assert kwargs['run_id'] == tm.billing_run_id
+    assert kwargs['org_id'] == 'org-1'
+    assert kwargs['team_id'] == 'team-1'
+    assert kwargs['resource'] == 'tokens'
+    assert kwargs['description'] == 'cpu_utilization'
+    assert kwargs['amount'] == 10.0
+    assert kwargs['idempotency_key'] == f'task:{tm.billing_run_id}:cpu_utilization'
+    assert kwargs['context']['run_kind'] == 'deploy'
+    assert kwargs['context']['trigger'] == 'schedule'
+
+
+def test_user_owned_report_keeps_the_actor(fake_psutil, mock_billing_rates):
+    tm, _ = _make_billable_metrics(fake_psutil)
+
+    asyncio.run(tm._report_to_billing_system())
+
+    kwargs = mock_billing_rates.apply_debit.await_args.kwargs
+    assert kwargs['user_id'] == 'u1'
+    assert kwargs['owner_kind'] == 'user'
+    assert kwargs['run_id'] == tm.billing_run_id
+
+
+def test_repeated_reports_reuse_the_key_with_cumulative_amounts(fake_psutil, mock_billing_rates):
+    tm, status = _make_billable_metrics(fake_psutil)
+
+    asyncio.run(tm._report_to_billing_system())
+    status.tokens.cpu_utilization = 15.0
+    asyncio.run(tm._report_to_billing_system())
+
+    calls = mock_billing_rates.apply_debit.await_args_list
+    assert [c.kwargs['idempotency_key'] for c in calls] == [f'task:{tm.billing_run_id}:cpu_utilization'] * 2
+    assert [c.kwargs['amount'] for c in calls] == [10.0, 15.0]
+
+
+def test_only_positive_categories_reach_the_ledger(fake_psutil, mock_billing_rates):
+    tm, _ = _make_billable_metrics(fake_psutil)
+
+    asyncio.run(tm._report_to_billing_system())
+
+    assert mock_billing_rates.apply_debit.await_count == 1
+
+
+def test_a_failed_ledger_write_is_logged_once_at_error_level_and_counted(fake_psutil, mock_billing_rates, monkeypatch):
+    tm, _ = _make_billable_metrics(fake_psutil)
+    mock_billing_rates.apply_debit.side_effect = RuntimeError('db down')
+    error = MagicMock()
+    debug = MagicMock()
+    monkeypatch.setattr(task_metrics, 'error', error)
+    monkeypatch.setattr(task_metrics, 'debug', debug)
+
+    asyncio.run(tm._report_to_billing_system())
+    asyncio.run(tm._report_to_billing_system())
+
+    error.assert_called_once()
+    line = error.call_args.args[0]
+    assert line.startswith(task_metrics.LEDGER_FAILURE_PREFIX)
+    assert f'run_id={tm.billing_run_id}' in line
+    assert any(c.args[0].startswith(task_metrics.LEDGER_FAILURE_PREFIX) for c in debug.call_args_list)
+    assert tm._ledger_failures == 2
+    assert task_metrics._LEDGER_HEALTH['failures'] == 2
+    assert task_metrics._LEDGER_HEALTH['last_error_type'] == 'RuntimeError'
+
+
+def test_one_failing_category_does_not_skip_the_others(fake_psutil, mock_billing_rates):
+    tm, status = _make_billable_metrics(fake_psutil)
+    status.tokens.cpu_memory = 20.0
+    mock_billing_rates.apply_debit.side_effect = [RuntimeError('x'), True]
+
+    asyncio.run(tm._report_to_billing_system())
+
+    calls = mock_billing_rates.apply_debit.await_args_list
+    assert [c.kwargs['description'] for c in calls] == ['cpu_utilization', 'cpu_memory']
+    assert tm._ledger_failures == 1
+
+
+def test_stop_monitoring_reports_a_run_with_failed_ledger_writes(fake_psutil, mock_billing_rates, monkeypatch):
+    tm, _ = _make_billable_metrics(fake_psutil)
+    tm._ledger_failures = 3
+    error = MagicMock()
+    monkeypatch.setattr(task_metrics, 'error', error)
+
+    asyncio.run(tm.stop_monitoring())
+
+    error.assert_called_once()
+    assert 'ended with 3 failed ledger writes' in error.call_args.args[0]
+
+
+def test_team_owned_audit_has_no_actor_and_names_the_run(fake_psutil, mock_billing_rates):
+    tm, _ = _make_billable_metrics(fake_psutil, owner_kind='team', user_id='', run_kind='deploy', cpu_utilization=5.0)
+
+    asyncio.run(tm._audit_task_usage())
+
+    mock_billing_rates.audit.assert_awaited_once()
+    kwargs = mock_billing_rates.audit.await_args.kwargs
+    assert kwargs['user_id'] is None
+    assert kwargs['source'] == 'billing'
+    assert kwargs['reason'] == 'task_usage'
+    assert kwargs['request_data']['run_id'] == tm.billing_run_id
+    assert kwargs['request_data']['owner_kind'] == 'team'
+
+
+def test_user_owned_audit_keeps_the_actor(fake_psutil, mock_billing_rates):
+    tm, _ = _make_billable_metrics(fake_psutil, cpu_utilization=5.0)
+
+    asyncio.run(tm._audit_task_usage())
+
+    assert mock_billing_rates.audit.await_args.kwargs['user_id'] == 'u1'
+
+
+def test_billing_ledger_status_publishes_the_tally_without_the_error_text():
+    task_metrics._note_ledger_failure(RuntimeError('boom'))
+
+    status = {}
+    task_metrics.billing_ledger_status(status)
+
+    assert status['billing']['ledgerWriteFailures'] == 1
+    assert status['billing']['lastLedgerErrorType'] == 'RuntimeError'
+    assert status['billing']['lastLedgerFailureTime'] > 0
+    assert 'boom' not in str(status)
+
+
+def test_a_report_that_cannot_reach_the_account_is_counted(fake_psutil, monkeypatch):
+    tm, _ = _make_billable_metrics(fake_psutil)
+    monkeypatch.setitem(sys.modules, 'ai.account', None)
+    error = MagicMock()
+    monkeypatch.setattr(task_metrics, 'error', error)
+
+    asyncio.run(tm._report_to_billing_system())
+
+    error.assert_called_once()
+    assert "categories=['report']" in error.call_args.args[0]
+    assert tm._ledger_failures == 1
