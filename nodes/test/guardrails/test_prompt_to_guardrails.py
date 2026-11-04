@@ -104,6 +104,7 @@ def _delivered(g, answer, question=QUESTION, retrieved=True, **overrides):
         writeAnswers=delivered.append,
         writeQuestions=lambda q: None,
         writeDocuments=lambda d: None,
+        getControllerNodeIds=lambda classType: [],
     )
     inst.preventDefault = lambda: None
     inst.open(None)

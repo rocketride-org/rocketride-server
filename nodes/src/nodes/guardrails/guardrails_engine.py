@@ -24,7 +24,7 @@
 """Guardrails engine for input/output safety checks on AI pipelines."""
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 
 class GuardrailsEngine:
@@ -387,12 +387,31 @@ class GuardrailsEngine:
         re.IGNORECASE,
     )
 
+    def _needs_source(
+        self, output: str, question_text: str, judge: Optional[Callable[[str, str], Optional[bool]]]
+    ) -> bool:
+        """Report whether an answer given after a retrieval miss states anything needing a source.
+
+        Whether a sentence asserts a claim takes reading it, so a judge decides when
+        one is wired. Without one, or when it gives no verdict, a stated figure is
+        the claim recognised without reading: it fails whether the model asserts it
+        or declines it, and the replacement makes that distinction unnecessary.
+        """
+        if not output.strip():
+            return False
+        verdict = judge(question_text, output) if judge else None
+        if verdict is None:
+            return bool(self.FIGURE_PATTERN.search(output))
+        return verdict
+
     def check_hallucination(
         self,
         output: str,
         source_documents: Optional[List[str]] = None,
         retrieval_ran: bool = True,
         score_coverage: bool = True,
+        question_text: str = '',
+        judge: Optional[Callable[[str, str], Optional[bool]]] = None,
     ) -> Dict[str, Any]:
         """Verify that claims in output are grounded in source documents.
 
@@ -408,6 +427,11 @@ class GuardrailsEngine:
             score_coverage: Whether to run the sentence-level coverage scoring.
                             False when the operator disabled the coverage check but
                             still requires grounding.
+            question_text: The question the answer replies to, for the judge.
+            judge: Optional checker called after a retrieval miss with the question
+                   and the answer. True means the answer states something that needs
+                   a source, False that it does not, None that it has no verdict, in
+                   which case the figure rule decides.
 
         Returns:
             A check result dict. A failure after a retrieval miss also carries a
@@ -416,12 +440,8 @@ class GuardrailsEngine:
         if not source_documents:
             # Nothing retrieved is when a model is most likely to answer from memory,
             # so skipping here stood the guard down at the one moment it was needed.
-            # A pipeline with no documents lane never retrieves, and an answer with no
-            # figure (a greeting, a clarifying question, a refusal) asserts nothing
-            # this check can judge, so both pass. Any figure fails, whether the model
-            # asserts it or declines it: telling those apart means parsing English,
-            # and the replacement makes the distinction unnecessary.
-            if not self.require_grounding or not retrieval_ran or not self.FIGURE_PATTERN.search(output):
+            # A pipeline with no documents lane never retrieves, so it passes.
+            if not self.require_grounding or not retrieval_ran or not self._needs_source(output, question_text, judge):
                 return {
                     'rule': 'hallucination',
                     'passed': True,
@@ -432,7 +452,7 @@ class GuardrailsEngine:
                 'rule': 'hallucination',
                 'passed': False,
                 'severity': 'high',
-                'details': 'No documents were retrieved, so a figure in the answer cannot be grounded',
+                'details': 'No documents were retrieved, so the answer cannot be grounded',
                 'replacement': self.UNGROUNDED_REPLY,
             }
 
@@ -706,6 +726,8 @@ class GuardrailsEngine:
                         source_docs,
                         retrieval_ran=ran,
                         score_coverage=self.enable_hallucination_check,
+                        question_text=context.get('question_text', ''),
+                        judge=context.get('judge'),
                     )
                 )
 

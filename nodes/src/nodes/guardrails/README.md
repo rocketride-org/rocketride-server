@@ -6,13 +6,19 @@ A RocketRide filter node that checks questions before they reach an LLM and answ
 
 Evaluates `questions` before forwarding them, `answers` before forwarding them, and collects `documents` as grounding context for answer checks. Input checks cover prompt-injection patterns, optional topic keywords, and optional size limits; output checks cover configured grounding, content-safety, PII, and format rules. Unlike an LLM moderation or retrieval node, it decides from the text and local configuration, then either forwards or suppresses the original pipeline item.
 
-All checks are pure stdlib and regex: the node has no external dependencies, no model calls, and adds no network latency.
+All checks are pure stdlib and regex: the node has no external dependencies and makes no model calls, with one opt-in exception. When an `llm` is connected, the grounding check asks it to judge an answer, and only after a retrieval miss (see [Connections](#connections)).
 
 How it reacts is controlled by the `policy_mode` field: `block` drops the offending question or answer and never forwards it, `warn` logs the violation and forwards anyway, and `log` records the violation silently. The default profile runs in `warn` mode, so a freshly added node never blocks traffic until you opt in.
 
 Text that is empty or whitespace-only is forwarded without checks.
 
 ---
+
+## Connections
+
+| Connection | Required | Description |
+| --- | --- | --- |
+| llm | no | Judges, after a retrieval miss, whether an answer states anything that needs a source. Called only by the grounding check, so only when `require_grounding` is on and a search found nothing. Without it, any stated figure counts and other claims are not checked. |
 
 ## Lanes
 
@@ -22,7 +28,7 @@ Text that is empty or whitespace-only is forwarded without checks.
 | `answers`   | `answers`   | Output checks run after the LLM responds                             |
 | `documents` | `documents` | Forwarded unchanged; content is collected as ground-truth context for the hallucination check |
 
-Question text is assembled from both the question objects and any attached context before evaluation. Collected document content resets per pipeline object.
+Question text is assembled from both the question objects and any attached context before evaluation. Context and documents attached to the question count as source material alongside the `documents` lane, as they do for the prompt node. Collected content resets per pipeline object.
 
 ## Profiles
 
@@ -60,7 +66,7 @@ Run on the `answers` lane before the answer is forwarded:
 
 Enable hallucination checking only when relevant documents arrive on the `documents` lane before the answer. It is a lexical grounding test, so use it to flag potentially unsupported output rather than as a factual verifier. Select an expected format only when a downstream consumer requires that shape; an unrecognized format value is skipped.
 
-- **Hallucination** (rule `hallucination`, high severity): sentence-level grounding check. Each output sentence is evaluated for keyword overlap (3+ character non-stop words) against the combined source documents; sentences with less than 30% coverage are flagged. Coverage scoring runs only while `enable_hallucination_check` is on. The check is skipped when no documents have been received, unless `require_grounding` is set **and** the `documents` lane was actually dispatched, which is when a model is most likely to answer from memory. A pipeline with no `documents` lane never retrieves, so its answers are not treated as ungrounded. After a miss, an answer fails when it states a figure (an amount, a percentage, or a scaled or grouped number, in digits or in words), because nothing retrieved can support one, whether the model asserts it or declines it. Under `block` the failed answer is replaced with a short refusal rather than dropped, so the user is told the documents do not cover the question instead of receiving nothing; a refusal that quoted a figure therefore still reaches the user as a refusal. The replacement is used only when grounding is the sole violation, and a JSON answer is dropped as before, since a consumer parsing it would fail on a sentence. Answers without a figure, such as greetings, clarifying questions and refusals, pass unchanged. The check does not judge a claim without a figure. A figure worked out from numbers in the question also gets the refusal, and a size such as `128k` reads as a figure.
+- **Hallucination** (rule `hallucination`, high severity): sentence-level grounding check. Each output sentence is evaluated for keyword overlap (3+ character non-stop words) against the combined source documents; sentences with less than 30% coverage are flagged. Coverage scoring runs only while `enable_hallucination_check` is on. The check is skipped when no documents have been received, unless `require_grounding` is set **and** the `documents` lane was actually dispatched, which is when a model is most likely to answer from memory. A pipeline with no `documents` lane never retrieves, so its answers are not treated as ungrounded. After a miss, an answer fails when it states something that needs a source. With an `llm` connected, that model decides: it is shown the question and the answer, marked as data rather than instructions, and asked for a one-word verdict. It catches claims with no figure in them ("Their CEO is Tim Cook"), lets a calculation from the question's own numbers through, and treats confirming the question's figure as a claim. If no `llm` is connected, or the call fails or returns no verdict, a stated figure (an amount, a percentage, or a scaled or grouped number, in digits or in words) is the claim, whether the model asserts it or declines it, and other claims are not checked. Under `block` the failed answer is replaced with a short refusal rather than dropped, so the user is told the documents do not cover the question instead of receiving nothing; a refusal that quoted a figure therefore still reaches the user as a refusal. The replacement is used only when grounding is the sole violation, and a JSON answer is dropped as before, since a consumer parsing it would fail on a sentence. Answers with nothing to ground, such as greetings, clarifying questions and refusals, pass unchanged.
 - **Content safety** (rule `content_safety`, critical severity): regex patterns across three categories: self-harm, violence (weapon and explosive construction), and illegal activity (hacking, theft, counterfeiting).
 - **PII leak** (rule `pii_leak`, high severity): pattern matches for `email`, `phone_us`, `ssn`, `credit_card`, and `ip_address`.
 - **Format compliance** (rule `format_compliance`, medium severity): only runs when `expected_format` is set. `json` must parse cleanly; `markdown` requires at least one markdown element (heading, bold, code, list marker); `bullet_list` and `numbered_list` require at least half the non-empty lines to be list items.
@@ -99,7 +105,7 @@ Blocking happens silently from the pipeline's point of view: downstream nodes si
 | `max_input_length` | `number` | **Max input length (chars)**<br/>Maximum character count for input text (0 = no limit) | `0` |
 | `max_tokens_estimate` | `number` | **Max tokens (estimate)**<br/>Maximum estimated token count for input text (0 = no limit) | `0` |
 | `policy_mode` | `string` | **Policy mode**<br/>How to handle violations: block (reject), warn (log + continue), log (silent) | `"warn"` |
-| `require_grounding` | `boolean` | **Require grounding**<br/>After a retrieval returns nothing, treat an answer that states a figure as a violation, since nothing retrieved can support it. Under block the answer is replaced with a short refusal rather than dropped. Answers without a figure, such as greetings and refusals, are unaffected, and a non-numeric claim is not checked. Needs the documents lane wired to have any effect. | `false` |
+| `require_grounding` | `boolean` | **Require grounding**<br/>After a retrieval returns nothing, treat an answer that states something needing a source as a violation. Under block it is replaced with a short refusal rather than dropped. With an llm connected, that model judges the answer; without one, any stated figure counts and other claims are not checked. Needs the documents lane wired to have any effect. | `false` |
 
 ## Source
 
