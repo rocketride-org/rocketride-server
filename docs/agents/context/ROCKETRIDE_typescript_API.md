@@ -505,6 +505,13 @@ const response = await client.chat({
 });
 ```
 
+An LLM chat emits one terminal event, including a question with `expectJson` (which does not stream tokens):
+
+- `done` — the answer was written. The payload is empty.
+- `error` — the model call or the answer write failed. `data.message` is `<ExceptionName>: <text>`. When the turn reached the model, `data.tokens` is that turn's usage (`input`, `output`, `cache_read`, `cache_creation`, `model`, plus `calls` and `breakdown` when there was more than one call).
+
+The Trace Tokens grid reads `answer.tokens` on a written answer, so a failed turn leaves that grid empty. The usage for that turn is on the `error` event.
+
 ---
 
 ## 5. Chat & Question
@@ -518,6 +525,8 @@ chat(options: { token: string; question: Question; onSSE?: (type: string, data: 
 ```
 
 **Important:** use this with pipelines that have `chat` as the source component — for ALL conversational interfaces (web, console, API, mobile). For document processing/uploads, use `send()`/`sendFiles()` with a `webhook` source instead.
+
+A failed LLM call is not an answer. `chat()` rejects with `PipeException` (see [Exceptions](#18-exceptions)), and the provider text is that exception's message. Code that used to read the error text from `answers` now catches the rejection. The call emits an `error` event first (see [Streaming callback](#streaming-callback-onsse)).
 
 ```typescript
 import { Question } from 'rocketride';

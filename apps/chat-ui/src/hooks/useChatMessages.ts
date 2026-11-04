@@ -92,6 +92,8 @@ export const useChatMessages = () => {
 				token: authToken,
 				question: question,
 				onSSE: async (type: string, data: Record<string, unknown>) => {
+					// sendMessage shows this same failure as the bot message.
+					if (type === 'error') return;
 					const text = data.message as string | undefined;
 					if (text) {
 						setMessages(prev => [...prev, {

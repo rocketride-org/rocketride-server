@@ -94,22 +94,27 @@ class LLMBase(IInstanceBase):
                     on_chunk=_noop,
                     on_reasoning_chunk=on_reasoning_chunk,
                 )
+                _flush_reasoning(force=True)  # emit any trailing partial line
+                usage = read_usage()  # turn total: summed across every model call this turn
+                if usage:
+                    answer.tokens = usage  # shown in the Trace "Tokens" grid on the answers lane
+                self.instance.writeAnswers(answer)
+                # One terminal event on every chat, including expectJson, which does not stream.
+                _emit_sse('done')
             except Exception as e:
                 # A failure must not look like an answer. error() is what the engine
                 # turns into apaevt_status_error, which fills the task errors list.
                 # Re-raising fails the pipe, so chat() raises instead of returning.
+                # The Trace Tokens grid reads answer.tokens on a written answer, so a
+                # failed turn leaves that grid empty; the usage rides on this event.
                 message = f'{type(e).__name__}: {e}'
-                error(f'writeQuestions: LLM call failed: {message}')
-                _emit_sse('error', message=message)
+                error(f'writeQuestions failed: {message}')
+                usage = read_usage()
+                if usage:
+                    _emit_sse('error', message=message, tokens=usage)
+                else:
+                    _emit_sse('error', message=message)
                 raise
-
-            _flush_reasoning(force=True)  # emit any trailing partial line
-            usage = read_usage()  # turn total: summed across every model call this turn
-            if usage:
-                answer.tokens = usage  # shown in the Trace "Tokens" grid on the answers lane
-            self.instance.writeAnswers(answer)
-            # One terminal event on every chat, including expectJson, which does not stream.
-            _emit_sse('done')
 
     @invoke_function
     def getContextLength(self, _param):
