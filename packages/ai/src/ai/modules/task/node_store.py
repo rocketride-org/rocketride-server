@@ -42,7 +42,8 @@ from ai.account import account
 from ai.common import node_packages, node_release
 from ai.constants import CONST_NODES_CONTRACT
 
-# name -> index entry, provider (logical type) -> name, and provider -> definition with its icon inline
+# name -> index entry, provider (logical type) -> name, and provider -> definition with its icon inline;
+# providers are keyed in lower case, as the engine ignores case when it looks one up
 _nodes: Dict[str, Dict[str, Any]] = {}
 _providers: Dict[str, str] = {}
 _definitions: Dict[str, Dict[str, Any]] = {}
@@ -74,13 +75,13 @@ def start() -> None:
             if all(getServiceDefinition(provider) is not None for provider in protocols):
                 continue
             for provider in protocols:
-                if providers.setdefault(provider, name) != name:
+                if providers.setdefault(provider.lower(), name) != name:
                     warning(
-                        f'Node index: {provider} is in both {providers[provider]} and {name}; {name} is not served for it'
+                        f'Node index: {provider} is in both {providers[provider.lower()]} and {name}; {name} is not served for it'
                     )
             nodes[name] = entry
             for service in services.values():
-                provider = service.get('protocol', '').split(':')[0]
+                provider = service.get('protocol', '').split(':')[0].lower()
                 if providers.get(provider) == name:
                     definitions[provider] = _inline_icon(service, entry['icons'])
         # The engine parses them now: a definition it refuses would fail every catalogue call
@@ -130,7 +131,7 @@ def custom() -> List[Dict[str, Any]]:
 
 def served(provider: str) -> Optional[Dict[str, Any]]:
     """The definition of a node EaaS serves, for a lookup the engine cannot answer."""
-    return _definitions.get(provider)
+    return _definitions.get(provider.lower())
 
 
 def _providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
@@ -140,7 +141,7 @@ def _providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
     def walk(value: Any) -> None:
         if isinstance(value, dict):
             if isinstance(value.get('provider'), str):
-                found.add(value['provider'])
+                found.add(value['provider'].lower())
             for item in value.values():
                 walk(item)
         elif isinstance(value, list):
@@ -148,8 +149,9 @@ def _providers_of(components: Iterable[Dict[str, Any]]) -> Set[str]:
                 walk(item)
 
     for component in components:
-        found.add(component.get('provider', ''))
-        if component.get('provider') == 'autopipe':
+        provider = str(component.get('provider', '')).lower()
+        found.add(provider)
+        if provider == 'autopipe':
             found.update(_AUTOPIPE_FILTERS)
             walk(component.get('config', {}))
     return found
@@ -161,5 +163,7 @@ def place(pipeline: Dict[str, Any]) -> List[str]:
     with _unpacking:
         for name in names:
             sha256 = _nodes[name]['sha256']
-            node_packages.unpack(name, account.node_package(name, sha256), sha256, node_release.nodes_dir())
+            # Already unpacked: the package is not read, so a launch needs neither the cache nor the release
+            if node_packages.digest_of(os.path.join(node_release.nodes_dir(), name)) != sha256:
+                node_packages.unpack(name, account.node_package(name, sha256), sha256, node_release.nodes_dir())
     return names
