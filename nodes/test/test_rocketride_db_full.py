@@ -63,6 +63,7 @@ _REPO = Path(__file__).resolve().parents[2]
 _AI_SRC = _REPO / 'packages' / 'ai' / 'src'
 _RRDB_PATH = _AI_SRC / 'ai' / 'common' / 'rocketride_db.py'
 _DB_BASE_DIR = _AI_SRC / 'ai' / 'common' / 'database'
+_STORE_DIR = _AI_SRC / 'ai' / 'common' / 'store'
 _UTILS_DIR = _AI_SRC / 'ai' / 'common' / 'utils'
 _SQL_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_sql'
 _VEC_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_vector'
@@ -241,6 +242,10 @@ def _build_rr_env(monkeypatch):
     monkeypatch.setitem(sys.modules, 'ai.common.config', config)
     monkeypatch.setitem(sys.modules, 'ai.common.transform', transform)
     monkeypatch.setitem(sys.modules, 'ai.common.store', store_mod)
+
+    # The driver asks its base which objects a batch replaces: give the stub the real rule, not a copy of it
+    document_store = _load_from_path('ai.common.store.document_store', _STORE_DIR / 'document_store.py', register=False)
+    _StubDocumentStoreBase.objectIdsToReplace = staticmethod(document_store.DocumentStoreBase.objectIdsToReplace)
 
     config_utils = _load_from_path(
         'ai.common.utils.config_utils',
