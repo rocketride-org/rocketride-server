@@ -247,7 +247,10 @@ class PreProcessor(PreProcessorBase):
 
             import langchain_text_splitters.nltk as nltk_splitters
 
-            nltk_splitters = importlib.reload(nltk_splitters)
+            # The module records whether nltk exists at import, which is before
+            # depends() has installed it. Reload so the class sees the package
+            # that was just installed. reload returns the same module object.
+            importlib.reload(nltk_splitters)
             SplitterClass = nltk_splitters.NLTKTextSplitter
 
             import nltk

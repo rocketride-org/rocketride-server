@@ -2,7 +2,7 @@
 # Dependabot smoke test: pipeline node Python deps
 #
 # Verifies that each affected pipeline node still imports cleanly with the
-# current pins in its requirements.txt / nltk.txt / spacy.txt. PR CI runs
+# current pins in its requirements.txt / requirements_nltk.txt / spacy.txt. PR CI runs
 # build/lint only and never imports these node modules, so a bumped Python
 # dep can silently break a pipeline at runtime.
 #
@@ -67,7 +67,7 @@ for node_dir in "${!NODE_IMPORTS[@]}"; do
 
   # Install every .txt requirement file in the node dir. Some nodes split
   # heavy deps across multiple files (e.g. preprocessor_langchain has both
-  # nltk.txt and spacy.txt).
+  # requirements_nltk.txt and spacy.txt).
   for req_file in "$node_dir"/*.txt; do
     [ -f "$req_file" ] || continue
     echo "  pip install -r $req_file"
