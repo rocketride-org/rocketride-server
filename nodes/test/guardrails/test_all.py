@@ -454,6 +454,18 @@ class TestHallucination:
 
         assert result['passed']
 
+    def test_a_calculation_after_a_miss_is_replaced_too(self):
+        """The other known limit: a figure worked out from the question is still a figure.
+
+        Telling "15% of 200 is 30" from "yes, it was $94.7B" means reading the sentence,
+        which is the rule-writing this check gave up. require_grounding asks for figures
+        to come from documents, so after a miss the refusal is the answer.
+        """
+        engine = _make_engine(require_grounding=True)
+        result = engine.check_hallucination('15% of 200 is 30.', source_documents=[], retrieval_ran=True)
+
+        assert not result['passed']
+
     def test_an_empty_answer_is_not_an_ungrounded_answer(self):
         """Blank output asserts nothing, so there is nothing to ground.
 
