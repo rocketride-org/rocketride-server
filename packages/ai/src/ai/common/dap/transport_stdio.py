@@ -825,6 +825,17 @@ class TransportStdio(TransportBase):
                     }
                 )
 
+        # Parse channel signals: '>CHN*state' or '>CHN*state*connection_id'
+        elif message.startswith('>CHN*'):
+            parts = message.split('*')
+            await self._transport_receive(
+                {
+                    'type': 'event',
+                    'event': 'apaevt_channel',
+                    'body': {'state': parts[1], 'id': parts[2] if len(parts) > 2 else None},
+                }
+            )
+
         # Parse job status messages: '>JOB*status_message'. A BARE '>JOB'
         # (no delimiter) is the empty status — the engine's monitorStatus('')
         # only appends '*text' when there is text, and nodes use the empty
