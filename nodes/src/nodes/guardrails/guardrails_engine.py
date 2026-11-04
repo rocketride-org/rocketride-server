@@ -24,7 +24,7 @@
 """Guardrails engine for input/output safety checks on AI pipelines."""
 
 import re
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 
 class GuardrailsEngine:
@@ -363,148 +363,35 @@ class GuardrailsEngine:
     # Output guardrails
     # -------------------------------------------------------------------------
 
-    # Consulted only when no question was recorded, where a figure cannot be
-    # attributed to either side. The main path tests for a claim instead, so a
-    # refusal worded off this list is not blocked.
-    ABSTENTION_MARKERS = (
-        'do not have',
-        "don't have",
-        'not have the information',
-        'no documents were retrieved',
-        'not provided',
-        'not available',
-        'does not contain',
-        'do not contain',
-        'cannot answer',
-        'unable to answer',
-        'cannot determine',
-        'unable to determine',
-        'no information',
-        'no data',
-        'no relevant documents',
-        'not found',
-        'not specified',
-        'not stated',
-        'not mentioned',
-        'not disclosed',
-        'insufficient information',
-    )
+    # Delivered in place of an answer that states a figure after a retrieval miss.
+    # Nothing retrieved can support a figure, so declining is the only grounded
+    # answer, and a refusal that happened to quote one loses nothing by this.
+    UNGROUNDED_REPLY = "I couldn't find anything in the available documents to answer that."
 
-    # A figure the question did not name is the claim this check exists to catch.
-    # Nothing is grounded in the empty-retrieval branch, so a stated amount is
-    # unsupported however the sentence around it is hedged.
-    _WHITESPACE = re.compile(r'\s+')
-    # 12.0 and 12 are one amount, 94.70 and 94.7 are one amount.
-    _TRAILING_ZEROS = re.compile(r'(\d+\.\d*?)0+(?=\D|$)')
-    _TRAILING_POINT = re.compile(r'(\d+)\.(?=\D|$)')
-    # A refusal negates or reports an inability; an affirmation does neither. The
-    # contraction sits outside the word boundary, since "didn't" has none before its n.
-    _NEGATION = re.compile(
-        r"\b(?:no|not|none|nothing|never|cannot|unable|without|outside|beyond|lacks?|lacking)\b|n't\b"
+    _NUMBER_WORDS = (
+        r'(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen'
+        r'|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred)'
     )
-    # An answer that opens by agreeing is affirming the figure, whatever it negates later.
-    _AFFIRMS = re.compile(r"^\W*(?:yes|correct|indeed|true|confirmed|that is right|that's right)\b")
-    _SENTENCE = re.compile(r'(?<=[.!?])\s+|\n+')
-    # A negation binds to its own clause: "nothing else to add, it was $94.7B" states
-    # the figure, it does not decline it.
-    # A comma between digits groups a figure, so $1,200 stays in one clause.
-    _CLAUSE = re.compile(r'(?<!\d),\s*|,(?!\d)\s*|;\s*|\s+(?:but|though|although|however|while|whereas)\s+')
-    # A question writing $94.7B and an answer writing $94.7 billion name the same
-    # amount, so the scale word is folded to its initial before they are compared.
-    _SCALE_WORDS = (('billion', 'b'), ('bn', 'b'), ('million', 'm'), ('thousand', 'k'))
+    _UNITS = r'(?:trillion|billion|million|thousand|percent|per cent|dollars?|euros?|pounds?|usd|eur|gbp)'
 
+    # A figure is the claim checked after a miss: an amount, a percentage, or a
+    # scaled or grouped number, in digits or in words. A year or a plain count is
+    # not one, so "I do not have data for 2024" is left alone. A bare suffix needs a
+    # decimal or two digits, so "94.7B" and "10k" count while "plan 2b" does not.
     FIGURE_PATTERN = re.compile(
-        r'[$£€]\s*[\d,.]+\s*(?:billion|million|thousand|bn|b\b|m\b|k\b)?'
-        r'|[\d,.]+\s*%'
-        r'|\d[\d,.]*\s*(?:billion|million|thousand|bn|m\b|k\b)'
-        r'|\d{1,3}(?:,\d{3})+',
+        r'[$£€]\s*\d[\d,.]*(?:\s*(?:trillion|billion|million|thousand)\b|(?:tn|bn|b|m|k)\b)?'
+        rf'|\d[\d,.]*\s*(?:%|{_UNITS}\b|tn\b|bn\b)'
+        r'|(?:\d+\.\d+|\d{2,})(?:tn|bn|b|m|k)\b'
+        r'|\b\d{1,3}(?:,\d{3})+\b'
+        rf'|\b{_NUMBER_WORDS}(?:[\s-]+(?:{_NUMBER_WORDS}|and))*[\s-]+{_UNITS}\b',
         re.IGNORECASE,
     )
-
-    @classmethod
-    def _is_ungrounded_claim(cls, output: str, question_text: str = '') -> bool:
-        """Report whether *output* states a figure *question_text* did not name.
-
-        Args:
-            output: The answer to classify.
-            question_text: The question it answers. A figure quoted back from the
-                question is a reference, not a claim the model invented.
-
-        Returns:
-            True when the answer asserts a figure the question did not name.
-        """
-        stated = cls._figures(output)
-        if not stated:
-            return False
-        if not question_text.strip():
-            return not cls._declines(output, shortfall_anywhere=True)
-        if stated - cls._figures(question_text):
-            return True
-        # Every figure came from the question. Handing one back as fact asserts it
-        # as much as inventing one, so only a refusal is allowed to repeat it.
-        return not cls._declines(output)
-
-    @classmethod
-    def _declines(cls, output: str, shortfall_anywhere: bool = False) -> bool:
-        """Report whether *output* refuses rather than answers.
-
-        A refusal negates the figure it declines to state, which holds for wordings
-        the phrase list never anticipated. The negation or stated shortfall is looked
-        for in the figure's own clause, so an affirmation carrying an unrelated "no"
-        or "not available" is not mistaken for one, and an answer that opens by
-        agreeing is never a refusal.
-
-        Args:
-            output: The answer to classify.
-            shortfall_anywhere: Accept a phrase-list shortfall anywhere in the answer.
-                Used when no question was recorded, where a figure cannot be attributed
-                and the check errs toward delivering the answer.
-        """
-        body = output.strip().lower().replace('\u2019', "'")
-        if cls._AFFIRMS.match(body):
-            return False
-        # The negation has to sit with the figure. A refusal negates the thing it
-        # declines to state, while an affirmation can carry an unrelated "no".
-        for sentence in cls._SENTENCE.split(body):
-            for clause in cls._CLAUSE.split(sentence):
-                if cls.FIGURE_PATTERN.search(clause) and (
-                    cls._NEGATION.search(clause) or cls._states_shortfall(clause)
-                ):
-                    return True
-        return shortfall_anywhere and cls._states_shortfall(body)
-
-    @classmethod
-    def _states_shortfall(cls, text: str) -> bool:
-        """Report whether *text* uses one of the phrases that report missing information."""
-        return any(marker in text for marker in cls.ABSTENTION_MARKERS)
-
-    @classmethod
-    def _figures(cls, text: str) -> Set[str]:
-        """Return the figures in *text*, normalised so one amount has one spelling."""
-        return {f for f in (cls._normalise(m) for m in cls.FIGURE_PATTERN.findall(text)) if f}
-
-    @classmethod
-    def _normalise(cls, text: str) -> str:
-        """Reduce a figure to the form the comparison is made in.
-
-        One amount has one spelling here: the scale word folds to its initial,
-        grouping separators go, and a decimal tail that adds nothing is dropped,
-        so $1,200 and $1200, or 12% and 12.0%, are the same figure. The currency
-        symbol and the scale letter are kept, since they change the amount.
-        """
-        out = text.lower()
-        for word, initial in cls._SCALE_WORDS:
-            out = out.replace(word, initial)
-        out = cls._WHITESPACE.sub('', out).strip('.,').replace(',', '')
-        out = cls._TRAILING_ZEROS.sub(r'\1', out)
-        return cls._TRAILING_POINT.sub(r'\1', out)
 
     def check_hallucination(
         self,
         output: str,
         source_documents: Optional[List[str]] = None,
         retrieval_ran: bool = True,
-        question_text: str = '',
         score_coverage: bool = True,
     ) -> Dict[str, Any]:
         """Verify that claims in output are grounded in source documents.
@@ -516,21 +403,25 @@ class GuardrailsEngine:
             output: The LLM output text to verify.
             source_documents: List of source document texts. If empty/None, the check
                               passes unless require_grounding is set.
+            retrieval_ran: Whether the documents lane was dispatched, so an empty
+                           source list means a miss rather than no retrieval at all.
             score_coverage: Whether to run the sentence-level coverage scoring.
                             False when the operator disabled the coverage check but
                             still requires grounding.
 
         Returns:
-            A check result dict.
+            A check result dict. A failure after a retrieval miss also carries a
+            'replacement' reply for the caller to deliver instead of the answer.
         """
         if not source_documents:
             # Nothing retrieved is when a model is most likely to answer from memory,
             # so skipping here stood the guard down at the one moment it was needed.
-            # Callers that require grounding get a failure instead, but only when a
-            # retrieval actually ran and missed, and only for an answer that states a
-            # figure the question did not name: a pipeline with no documents lane never
-            # retrieves, and an ordinary conversational turn asserts nothing to ground.
-            if not self.require_grounding or not retrieval_ran or not self._is_ungrounded_claim(output, question_text):
+            # A pipeline with no documents lane never retrieves, and an answer with no
+            # figure (a greeting, a clarifying question, a refusal) asserts nothing
+            # this check can judge, so both pass. Any figure fails, whether the model
+            # asserts it or declines it: telling those apart means parsing English,
+            # and the replacement makes the distinction unnecessary.
+            if not self.require_grounding or not retrieval_ran or not self.FIGURE_PATTERN.search(output):
                 return {
                     'rule': 'hallucination',
                     'passed': True,
@@ -541,7 +432,8 @@ class GuardrailsEngine:
                 'rule': 'hallucination',
                 'passed': False,
                 'severity': 'high',
-                'details': 'No source documents provided; the answer cannot be grounded',
+                'details': 'No documents were retrieved, so a figure in the answer cannot be grounded',
+                'replacement': self.UNGROUNDED_REPLY,
             }
 
         if not score_coverage:
@@ -813,7 +705,6 @@ class GuardrailsEngine:
                         text,
                         source_docs,
                         retrieval_ran=ran,
-                        question_text=context.get('question_text', ''),
                         score_coverage=self.enable_hallucination_check,
                     )
                 )

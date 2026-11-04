@@ -216,7 +216,7 @@
 		"require_grounding": {
 			"type": "boolean",
 			"title": "Require grounding",
-			"description": "After a retrieval returns nothing, treat an answer as a violation when it states a figure, unless the answer declines to give one. Greetings, acknowledgements and refusals are unaffected, and a non-numeric claim is not checked. Needs the documents lane wired to have any effect.",
+			"description": "After a retrieval returns nothing, treat an answer that states a figure as a violation, since nothing retrieved can support it. Under block the answer is replaced with a short refusal rather than dropped. Answers without a figure, such as greetings and refusals, are unaffected, and a non-numeric claim is not checked. Needs the documents lane wired to have any effect.",
 			"default": false
 		},
 		"max_input_length": {
