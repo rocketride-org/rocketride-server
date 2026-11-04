@@ -15,7 +15,10 @@ import { ExplorerToolError } from 'shared/explorer';
 import { projectRows, vectorComponents } from 'shared/explorer/connect/testing';
 import type { IFakeRow } from 'shared/explorer/connect/testing';
 import { consoleUri } from '../src/vector/addresses';
+import { connectionDocState } from '../src/devtool/frameText';
 import { STATE } from '../src/devtool/protocol';
+import { DISCONNECTED_FROM_SERVER_TEXT, WAITING_FOR_SERVER_TEXT, sidebarListLine } from '../src/vector/connections';
+import { frameStatus } from 'shared/explorer/devtool/readiness';
 import type { IDocVersion } from '../src/devtool/protocol';
 import { fixture } from './support/fixtures';
 import { account, disposeAll, latestStateMap, mountController, settle, signInVsCode, until, vscodeRealm } from './support/devtool';
@@ -176,6 +179,55 @@ describe('mutating ops enforce their own checks, whatever the frame believed', (
 			await assert.rejects(tool(framed, endpointOf(framed, key), name, { object_ids: [DOC_ID] }), (e: unknown) => e instanceof ExplorerToolError, name);
 			assert.equal(engine.world.calls.length, before, `${name}: nothing was sent`);
 		}
+		mounted.controller.dispose();
+	});
+});
+
+describe('readiness is a tri-state: waiting for the server, disconnected, ready', () => {
+	it('the sidebar\'s engine status follows the realm\'s facts: no client is waiting, a client that is not connected is disconnected, then ready', async () => {
+		const engine = vscodeRealm();
+		const mounted = mountController(engine.cm);
+		const { controller } = mounted;
+		controller.engine.set({ client: null, isConnected: false });
+		assert.equal(controller.engineStatus.get(), 'waiting');
+		assert.equal(controller.env(controller.engineStatus.get()).engine, 'waiting');
+		assert.equal(controller.env('waiting').ready, false);
+		controller.engine.set({ client: {}, isConnected: false });
+		assert.equal(controller.engineStatus.get(), 'disconnected');
+		assert.equal(controller.env('disconnected').engine, 'disconnected');
+		controller.engine.set({ client: {}, isConnected: true });
+		assert.equal(controller.engineStatus.get(), 'ready');
+		assert.equal(controller.env('ready').engine, 'ready');
+		assert.equal(controller.env('ready').ready, true);
+		// The old boolean question still means connected or not.
+		assert.equal(controller.env(false).engine, 'disconnected');
+		controller.dispose();
+	});
+
+	it('the sidebar list says which: "Waiting for the server connection…", "Not connected to the server.", nothing once rows say it all', () => {
+		assert.deepEqual(sidebarListLine('idle', [], null, 'waiting'), { tone: 'muted', text: WAITING_FOR_SERVER_TEXT, detail: null });
+		assert.deepEqual(sidebarListLine('idle', [], null, 'disconnected'), { tone: 'muted', text: DISCONNECTED_FROM_SERVER_TEXT, detail: null });
+		assert.notEqual(WAITING_FOR_SERVER_TEXT, DISCONNECTED_FROM_SERVER_TEXT);
+		assert.equal(sidebarListLine('idle', [], null, 'ready'), null, 'ready: discovery has not started, claim nothing');
+		assert.equal(sidebarListLine('idle', [], null), null, 'the default is ready');
+	});
+
+	it('a frame\'s env and its document states tell waiting (the host has not said), disconnected and connected apart', async () => {
+		const engine = vscodeRealm();
+		signInVsCode(engine.realm);
+		const mounted = mountController(engine.cm);
+		const framed = mountFrame(mounted.h, undefined, { hintDelayMs: 0 });
+		assert.equal(framed.frame.env(false, true).engine, 'waiting');
+		assert.equal(framed.frame.env(false).engine, 'disconnected');
+		assert.equal(framed.frame.env(true).engine, 'ready');
+		assert.notEqual(framed.frame.env(false, true), framed.frame.env(false), 'the two not-ready envs are not one object');
+		assert.equal(frameStatus(undefined, 'ready'), 'waiting');
+		assert.equal(frameStatus(false, 'ready'), 'disconnected');
+		assert.equal(frameStatus(true, 'ready'), 'connected');
+		const gates = { summon: 'ready' as const, signIn: 'signed-in' as const, found: true, opened: false };
+		assert.equal(connectionDocState({ host: undefined, ...gates }), 'waiting');
+		assert.equal(connectionDocState({ host: false, ...gates }), 'not-connected');
+		assert.equal(connectionDocState({ host: true, ...gates }), 'open');
 		mounted.controller.dispose();
 	});
 });

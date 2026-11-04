@@ -39,6 +39,7 @@
 // the pure adapters and a frame can import it.
 // =============================================================================
 
+import type { EngineStatus } from 'shared/explorer/devtool/readiness';
 import type { IEndpointState, IExplorerEndpoint, IProbeResult } from 'shared/explorer';
 import type { IVectorCaller } from './adapters/actions';
 import type { IConnectionEntry } from './adapters/connections';
@@ -147,6 +148,11 @@ export interface IVectorEnv {
 	kind: VectorEnvKind;
 	/** Whether the engine is reachable (a frame: the host's `host:connection`). Drives what may be sent. */
 	ready: boolean;
+	/**
+	 * Why it is not (or that it is): `waiting` (the realm has no client yet, or the host has not said), `disconnected` (a
+	 * client, but not connected) or `ready`. `ready` is `engine === 'ready'`.
+	 */
+	engine: EngineStatus;
 	/** Discovered connections and their probes. */
 	endpoints: IReadable<IVectorEndpointsState>;
 	/**

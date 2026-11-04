@@ -31,6 +31,7 @@
 // a view makes anyway fails with a sentence (adapters/connections.ts).
 // =============================================================================
 
+import type { EngineStatus } from 'shared/explorer/devtool/readiness';
 import type { IEndpointStore, IExplorerClient, IExplorerEndpoint } from 'shared/explorer';
 import { probeAware, probeAwareChannel, vectorChannels } from './adapters/actions';
 import type { IConnectionLink, IConnectionRegistry } from './adapters/connections';
@@ -41,6 +42,8 @@ import type { IQueryHistorySource, IReadable, IVectorEndpointsState, IVectorEnv 
 export interface ILocalVectorEnvOptions {
 	/** Whether the realm is connected. */
 	ready: boolean;
+	/** The engine's tri-state; default follows `ready` (connected or not). */
+	engine?: EngineStatus;
 	/** The realm's client (the full app's SDK client, the controller's bus client), or null while not connected. */
 	client: IExplorerClient | null;
 	/** The realm's endpoint store. */
@@ -87,6 +90,7 @@ export function createLocalVectorEnv(opts: ILocalVectorEnvOptions): IVectorEnv {
 	return {
 		kind: 'local',
 		ready: opts.ready,
+		engine: opts.engine ?? (opts.ready ? 'ready' : 'disconnected'),
 		endpoints,
 		refresh: opts.refresh ?? ((o) => (client ? store.refresh(client, { reprobe: o?.reprobe === true }) : Promise.resolve())),
 		probe: (key) => (client ? store.probe(client, key) : Promise.resolve(null)),
