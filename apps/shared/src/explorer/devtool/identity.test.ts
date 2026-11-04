@@ -378,4 +378,3 @@ describe('tracker settling (the first answer it can vouch for, or not)', () => {
 		t2.dispose();
 	});
 });
-

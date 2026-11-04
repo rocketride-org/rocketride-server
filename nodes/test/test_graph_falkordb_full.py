@@ -269,13 +269,17 @@ class TestServerLimits:
         finally:
             glb.endGlobal()
 
-    def test_legacy_execute_read_fails_instead_of_returning_a_cut_reply(self, falkor_env, falkor_graph):
+    def test_legacy_execute_fails_instead_of_returning_a_cut_reply(self, falkor_env, falkor_graph):
         glb, inst = _start(falkor_env, allow_execute=True)
         try:
             cap = glb.server_result_cap
             if cap is None:
                 pytest.skip('server does not allow GRAPH.CONFIG GET RESULTSET_SIZE')
-            with pytest.raises(ValueError, match=rf'^EXECUTE query reached the server RESULTSET_SIZE={cap}'):
+            # The default shape reads RESULTSET_SIZE on every call (#2617): a reply that reaches it is over the cap.
+            with pytest.raises(
+                ValueError,
+                match=rf'^EXECUTE query (reached the server RESULTSET_SIZE={cap}|exceeded max_execute_rows=\d+)',
+            ):
                 inst.execute({'query': f'UNWIND range(1, {cap + 5000}) AS i RETURN i'})
             exact = inst.execute({'query': f'UNWIND range(1, {cap - 1}) AS i RETURN i'})
             assert len(exact['rows']) == cap - 1 and exact['rows'][-1] == {'i': cap - 1}

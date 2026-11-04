@@ -277,4 +277,3 @@ describe('round 3 — findToolFactoryImports catches every import form (CE-7; an
 		assert.deepEqual(findToolFactoryImports(files), ['ns.ts', 'dq.ts', 'reexport.ts', 'star.ts', 'dyn.ts', 'default.ts']);
 	});
 });
-
