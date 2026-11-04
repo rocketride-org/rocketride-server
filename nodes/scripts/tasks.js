@@ -92,6 +92,9 @@ const SERVER_NODES = new Set(['core', 'autopipe']);
 // Fixed entry times keep a package's digest the same from build to build
 const ZIP_TIME = new Date(1980, 0, 1);
 
+// adm-zip stamps the building OS in each entry; one value keeps the digest the same on every platform
+const ZIP_MADE_BY = 0x0314; // Unix, zip 2.0
+
 // Build inputs or runtime files - none of it belongs in dist.
 const IGNORE = ['**/CMakeLists.txt', '**/src/**', '**/lib/**', '**/scripts/**', '**/target/**', '**/__pycache__/**'];
 
@@ -185,6 +188,7 @@ async function packageNode(name, srcDir) {
 	const add = (entry, data) => {
 		zip.addFile(entry, data);
 		zip.getEntry(entry).header.time = ZIP_TIME;
+		zip.getEntry(entry).header.made = ZIP_MADE_BY;
 	};
 
 	// Definitions travel as text so Python reads 1.0 as a float; JSON.parse checks they are plain JSON
