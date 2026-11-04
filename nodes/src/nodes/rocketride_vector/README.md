@@ -10,7 +10,9 @@ graph nodes for retrieval-augmented document search.
 The node writes documents from the documents lane into a pgvector-backed table.
 A batch that carries a document's first chunk replaces every chunk stored for
 that document; a later batch of the same document adds its chunks, so a long
-document that the embedding node sends in several batches is stored whole.
+document that the embedding node sends in several batches is stored whole. A
+batch without chunk 0 that repeats a chunk number already stored replaces that chunk
+instead of keeping a second copy, and the document's other chunks stay.
 Questions can produce matching documents, answers, or enriched questions through
 the three configured question outputs. The same store can be offered to an agent
 or app as tools once Expose as tools is on, and the Vector Explorer app browses,
