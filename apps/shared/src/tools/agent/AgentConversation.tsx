@@ -41,7 +41,8 @@
 // A brand-new conversation renders a welcome panel of example prompts in
 // place of the empty thread — clicking one sends it as the first request.
 //
-// Beside the composer, ApprovalModeSwitch sets the approval mode for every agent chat (the Settings setting).
+// Beside the composer, ApprovalModeSwitch sets the approval mode for every agent chat (the Settings setting),
+// and ModelPicker sets this conversation's model.
 //
 // The session is loaded once per mount; Documents keeps open tabs mounted,
 // so switching tabs never reloads, and reopening a closed tab re-reads disk.
@@ -49,15 +50,17 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
-import { Button, ChatView, ConnectionManager, useChatMessages, useShellConnection, useWorkspace, commonStyles } from 'shell';
+import { Button, ChatView, ConnectionManager, getClient, useChatMessages, useShellConnection, useWorkspace, commonStyles } from 'shell';
 import type { DevToolProps } from 'shell';
 import type { TextResult } from 'shell';
 import type { ChatCardAction, ChatTurn } from 'shell/src/components/chat/types';
 import { AgentSession } from '../../modules/agent/agent';
 import type { AgentCallback } from '../../modules/agent/agent';
 import { findAgentHost, type ApprovalControls, type ApprovalMode } from '../../modules/agent/host';
+import { readModelOffers } from '../../modules/agent/modelEngine';
 import { buttonize } from '../../utils/buttonize';
 import { AgentIcon } from './AgentIcon';
+import { ModelPicker } from './ModelPicker';
 
 // =============================================================================
 // EXAMPLE PROMPTS
@@ -194,6 +197,12 @@ const ApprovalModeSwitch: React.FC<{ controls: ApprovalControls }> = ({ controls
 		</Button>
 	);
 };
+
+/** Opens the Variables overlay, from a card or the model picker. */
+const openVariables = (): void => ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'environment' });
+
+/** What the model picker shows. */
+const readOffers = () => readModelOffers(getClient);
 
 // =============================================================================
 // COMPONENT
@@ -342,7 +351,7 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 				openFile: (path) => {
 					void findAgentHost()?.openFile?.(path);
 				},
-				openVariables: () => ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'environment' }),
+				openVariables,
 				send: handleSend,
 				note: addSystemMessage,
 			});
@@ -370,9 +379,17 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 		</div>
 	);
 
+	// step: the connection also redraws the picker, since nothing can be read before it
+	const beforeComposer = (
+		<>
+			{approvals && <ApprovalModeSwitch controls={approvals} />}
+			<ModelPicker session={session} disabled={isTyping} offers={readOffers} refreshKey={`${ends}:${isConnected}`} onOpenVariables={openVariables} />
+		</>
+	);
+
 	return (
 		<div style={styles.root}>
-			<ChatView messages={shown} isTyping={isTyping} isConnected={isConnected} onSend={handleSend} placeholder="Reply to the agent..." emptySlot={welcome} leadingInputSlot={approvals && <ApprovalModeSwitch controls={approvals} />} turn={controls} onCardAction={handleCardAction} />
+			<ChatView messages={shown} isTyping={isTyping} isConnected={isConnected} onSend={handleSend} placeholder="Reply to the agent..." emptySlot={welcome} leadingInputSlot={beforeComposer} turn={controls} onCardAction={handleCardAction} />
 		</div>
 	);
 };

@@ -272,7 +272,7 @@ async function agentTurn(ws: MemoryWorkspace, model: ModelCall, opts: { client?:
 	const host = hostFor(ws, { devSession: () => opts.dev ?? null, ...(editors ? { editor: (path: string) => editors[path] ?? null } : {}) });
 	const chunks: Array<{ type: string; text: string }> = [];
 	const queued = [...(opts.queued ?? [])];
-	const options = { history: opts.history ?? [], prompts: BUILDER_PROMPTS, token: async () => '', signal: opts.signal ?? new AbortController().signal, takeQueued: () => queued.splice(0), ask: opts.ask };
+	const options = { history: opts.history ?? [], prompts: BUILDER_PROMPTS, chatModel: { name: 'test-model', ask: model }, signal: opts.signal ?? new AbortController().signal, takeQueued: () => queued.splice(0), ask: opts.ask };
 	await runAgent('Describe and tidy the leak pipeline.', (type, text) => chunks.push({ type, text }), options, { host, client: () => opts.client ?? null, model, markers: async () => null, choose: opts.choose });
 	return chunks;
 }

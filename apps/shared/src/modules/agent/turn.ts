@@ -32,6 +32,7 @@
 
 import type { ChatCard } from 'shell/src/components/chat/types';
 
+import type { KeyTrouble } from './model';
 import { redactText } from './toolkits/common';
 import { costText, tokensText } from './usage';
 
@@ -87,7 +88,8 @@ export interface TurnUsage {
 
 /**
  * What a needs_input turn asks of the user. `question` and `variable` come
- * from ask_user; `continue` is the kind a turn paused by a limit uses.
+ * from ask_user, and `variable` also from a key the model needs; `continue` is
+ * the kind a turn paused by a limit uses.
  */
 export interface NeedsInputRequest {
 	/** A short id; the reply that answers it says "(answering request <id>)" to the model. */
@@ -135,6 +137,8 @@ export interface TurnResult {
 	finalText: string;
 	/** Why a failed turn failed, when it threw. */
 	error?: string;
+	/** The model the turn asked, as its catalog names it; unset for a turn saved before the choice, or one refused before it started. */
+	model?: string;
 	/** What the turn changed, in the order first changed. */
 	files: TurnFile[];
 	/** The newest result per check target and step. */
@@ -239,19 +243,19 @@ export function choiceAction(index: number): string {
  *
  * - done: "Done", the changed files and every check.
  * - failed and incomplete: "Not finished", the failing checks or the error.
- * - needs_input: "Needs you", with a button per choice, Open Variables for a
- *   variable, or Continue. An answered request's buttons are disabled. A turn
+ * - needs_input: "Needs you", with a button per choice, Open Variables and
+ *   Continue for a variable, or Continue. An answered request's buttons are disabled. A turn
  *   a limit paused says so in its title ("Paused after 60 steps").
  * - stopped: "Stopped", the files changed so far.
  *
  * Files the turn left in place are links; deleted ones are lines. A turn
- * whose model has no price says so, since the cost limit does not apply.
+ * whose model has no known price says the limit counts it at an assumed rate.
  */
 export function turnCard(turn: TurnResult): ChatCard {
 	const files = turn.files.filter((f) => f.change !== 'deleted').map((f) => f.path);
 	const deleted = turn.files.filter((f) => f.change === 'deleted').map((f) => `Deleted ${f.path}`);
 	const checkLine = (c: TurnCheck): string => `${c.target}: ${c.summary || c.status.replace('_', ' ')}`;
-	const unpriced = turn.usage.tokens && !turn.usage.cost ? [`No price for this model, so the cost limit does not apply (${tokensText(turn.usage.tokens.input + turn.usage.tokens.output)}).`] : [];
+	const unpriced = turn.usage.tokens && !turn.usage.cost ? ['No known price for this model. The cost limit counts it at an assumed rate.'] : [];
 	const withFiles = ({ lines: own = [], ...card }: ChatCard): ChatCard => {
 		const lines = [...own, ...deleted, ...unpriced];
 		return { ...card, ...(lines.length ? { lines } : {}), ...(files.length ? { files } : {}) };
@@ -276,14 +280,13 @@ export function turnCard(turn: TurnResult): ChatCard {
 }
 
 /**
- * What a turn's usage shows in its row's meta line.
+ * What a turn shows in its row's meta line: the model that answered first, so a change shows row by row, then what it used.
  *
- * @returns "~$0.42 est., not counting thinking", or the tokens for a model with no price; '' when nothing was counted.
+ * @returns "claude-sonnet-5-5 · ~$0.42 est., not counting thinking", or the tokens for a model with no price; '' when nothing was counted.
  */
-export function usageMeta(usage: TurnUsage): string {
-	if (usage.cost) return `${costText(usage.cost.usd)}, not counting thinking`;
-	if (usage.tokens) return tokensText(usage.tokens.input + usage.tokens.output);
-	return '';
+export function usageMeta({ model, usage }: TurnResult): string {
+	const used = usage.cost ? `${costText(usage.cost.usd)}, not counting thinking` : usage.tokens ? tokensText(usage.tokens.input + usage.tokens.output) : '';
+	return used && model ? `${model} · ${used}` : used;
 }
 
 /**
@@ -297,6 +300,15 @@ export function undoParts(state: 'ready' | 'waiting' | { unavailable: string }):
 	return { actions: [{ id: UNDO, label: 'Undo', ...(state === 'waiting' ? { disabled: true } : {}) }] };
 }
 
+/**
+ * The request for a key the model needs. The turn's answer row shows its question.
+ */
+export function keyRequest(trouble: KeyTrouble): NeedsInputRequest {
+	const { provider, variable, state } = trouble;
+	const question = state === 'missing' ? `Your ${provider} key is not set. Add ${variable} in Variables, then press Continue.` : `${provider} refused the key in ${variable}. Fix it in Variables, then press Continue.`;
+	return { id: crypto.randomUUID().slice(0, 8), kind: 'variable', question, variable, variableSet: state === 'rejected' };
+}
+
 /** A request's lines and buttons. */
 function requestParts(request: NeedsInputRequest | undefined): Pick<ChatCard, 'lines' | 'actions'> {
 	if (!request) return {};
@@ -306,7 +318,7 @@ function requestParts(request: NeedsInputRequest | undefined): Pick<ChatCard, 'l
 			return { actions: (request.choices ?? []).map((choice, i) => ({ id: choiceAction(i), label: choice, ...(disabled ? { disabled } : {}) })) };
 		case 'variable': {
 			const known = request.variableSet === undefined ? '' : request.variableSet ? ' is set in Variables' : ' is not set in Variables';
-			return { lines: [`${request.variable ?? 'A Variable'}${known}`], actions: [{ id: OPEN_VARIABLES, label: 'Open Variables' }] };
+			return { lines: [`${request.variable ?? 'A Variable'}${known}`], actions: [{ id: OPEN_VARIABLES, label: 'Open Variables' }, { id: CONTINUE, label: 'Continue', ...(disabled ? { disabled } : {}) }] };
 		}
 		case 'continue':
 			return { actions: [{ id: CONTINUE, label: 'Continue', ...(disabled ? { disabled } : {}) }] };

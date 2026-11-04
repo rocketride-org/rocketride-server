@@ -47,6 +47,7 @@
 import type { AppConfiguration } from 'shell/src/components/workspace/types';
 import type { SettingsContribution } from 'shell/src/components/workspace/settingsContributions';
 import { BUILTIN_PIN_PREFIX } from 'shell/src/workspace/devToolPins';
+import { DEFAULT_MODEL_SETTING } from '../modules/agent/model';
 
 /** The settings-nav group every DEV TOOL's section folds under. */
 export const TOOL_SETTINGS_GROUP = { id: 'rocket-builder', label: 'Rocket Builder' } as const;
@@ -138,7 +139,7 @@ export const PIPELINES_TOOL_SETTINGS: AppConfiguration = {
 			default: 2,
 			order: 10,
 			shells: ['saas', 'oss'],
-			description: "The most one agent turn's estimated model cost may reach, in US dollars. At the limit it pauses and asks; Continue starts a new turn with a fresh budget. The estimate counts 4 characters as a token and leaves out the model's thinking, so a turn can cost more than the limit. 0 means no limit, and a model with no known price has none.",
+			description: "The most one agent turn's estimated model cost may reach, in US dollars. At the limit it pauses and asks; Continue starts a new turn with a fresh budget. The estimate counts 4 characters as a token and leaves out the model's thinking, so a turn can cost more than the limit. 0 means no limit, and a model with no known price is counted at an assumed rate.",
 		},
 		'rocketride.pipeBuilder.agentAllowScheduleChanges': {
 			type: 'boolean',
@@ -153,6 +154,13 @@ export const PIPELINES_TOOL_SETTINGS: AppConfiguration = {
 			order: 12,
 			shells: ['saas', 'oss'],
 			description: 'Let the agent turn deployments on and off without asking. Always allow on a card turns this on. Removing a deployment always asks.',
+		},
+		'rocketride.pipeBuilder.agentDefaultModel': {
+			type: 'string',
+			default: DEFAULT_MODEL_SETTING,
+			order: 13,
+			shells: ['saas', 'oss'],
+			description: 'The model a new agent chat starts with, as provider/model. The picker beside the chat box sets it for that chat and updates this. Existing chats keep their own model.',
 		},
 	},
 };

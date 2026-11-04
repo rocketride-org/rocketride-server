@@ -26,6 +26,8 @@
 // =============================================================================
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { test } from 'node:test';
 
 import type { ChatMessage } from 'shell';
@@ -37,10 +39,13 @@ import type { IVirtualFileSystem } from 'shell/src/modules/explorer/types';
 import { StagedFileSystem } from '../vfs/stagedFileSystem';
 import { AgentSession } from './agent';
 import { setAgentHost, type AgentHost, type AgentLimits, type ApprovalSettings } from './host';
+import { DEFAULT_MODEL, ModelFailure, PROVIDER_IDS } from './model';
+import { openChatModel, readModelOffers } from './modelEngine';
+import { PRICES } from './usage';
 import type { AgentSessionFile } from './sessions';
 import { FilesystemTools } from './toolkits/filesystem';
 import type { UndoRecord } from './toolkits/undo';
-import { UNDO } from './turn';
+import { CONTINUE, CONTINUE_TEXT, OPEN_VARIABLES, UNDO } from './turn';
 
 // =============================================================================
 // HELPERS
@@ -100,7 +105,7 @@ function store(engine: Record<string, unknown> = {}, extra: AgentSessionFile[] =
 /** An engine whose model answers from `replies`, taking each in turn; once they run out, a model call never returns. */
 function scripted(replies: string[]): Record<string, unknown> {
 	return {
-		use: async () => ({ token: 'tk_standin' }),
+		use: async () => ({ token: 'tk_model' }),
 		chat: async () => {
 			const next = replies.shift();
 			return next === undefined ? new Promise(() => undefined) : { answers: [next] };
@@ -240,6 +245,18 @@ test('a request that could pass the cost limit is never sent, and the turn pause
 	assert.deepEqual({ outcome: ended.outcome, reason: ended.reason, request: ended.request?.kind }, { outcome: 'needs_input', reason: 'cost_limit', request: 'continue' });
 });
 
+test('a model with no known price pauses at the limit too, and no invented dollar figure is shown', async () => {
+	const replies = [planReply(['read_file', { path: 'a.txt' }])];
+	store(scripted(replies));
+	setAgentHost(hostOver(workspace({}).vfs, { steps: 60, costUsd: 0.01 }));
+	const session = AgentSession.newSession();
+	session.setModel({ provider: 'openai', model: 'model-with-no-row' });
+	const { turn: ended } = await session.execute('Read the files.', undefined, turn());
+	assert.equal(replies.length, 1, 'no model request was sent');
+	assert.deepEqual({ reason: ended.reason, cost: ended.usage.cost, request: ended.request?.kind }, { reason: 'cost_limit', cost: undefined, request: 'continue' });
+	assert.ok(!/est\./.test(ended.finalText), ended.finalText);
+});
+
 // =============================================================================
 // UNDO — the latest turn's file changes, put back or refused
 // =============================================================================
@@ -340,4 +357,141 @@ test("auto: a teammate's server edit to a file the agent created refuses the Und
 	backend.files.set('c.txt', 'gamma, and a teammate');
 	assert.equal((await record.undo()).kind, 'refused');
 	assert.equal(backend.files.get('c.txt'), 'gamma, and a teammate', "the teammate's file is not deleted");
+});
+
+// =============================================================================
+// THE MODEL'S KEY — no key, a refused key, and the one Variable each provider names
+// =============================================================================
+
+/**
+ * An engine as keys behave on it: a task holds the key its Variable had when it started, and asking
+ * for a running task hands it back. A key that is not 'good' is refused.
+ */
+function keyedEngine(key: { now: string }, names: string[], replies: string[]): Record<string, unknown> & { started: unknown[] } {
+	const tasks = new Map<string, string>();
+	const started: unknown[] = [];
+	return {
+		started,
+		account: { getEnvironmentKeys: async () => names },
+		use: async ({ pipeline }: { pipeline: { project_id: string } }) => {
+			const token = `tk_${pipeline.project_id}`;
+			if (!tasks.has(token)) {
+				tasks.set(token, key.now);
+				started.push(pipeline);
+			}
+			return { token };
+		},
+		terminate: async (token: string) => void tasks.delete(token),
+		chat: async ({ token }: { token: string }) => ({ answers: [tasks.get(token) === 'good' ? replies.shift() : "**LLM error** — AuthenticationError: Error code: 401 - {'error': {'message': 'invalid x-api-key'}}"] }),
+	};
+}
+
+test('with no key nothing starts, and the turn ends on the Variable card, whose Continue sends the reply', async () => {
+	const engine = keyedEngine({ now: 'good' }, [], []);
+	store(engine);
+	setAgentHost(hostOver(workspace({}).vfs));
+	const session = AgentSession.newSession();
+	const chat = new TurnController({ initialMessages: session.messages, request: () => async (text, sink, turn) => (await session.execute(text, sink, turn)).results, now: () => '12:00', stopGraceMs: 0 });
+	chat.send('Build it.');
+	await until(() => chat.snapshot().phase === 'idle' && closingRows(session, chat).length === 1);
+	const [row] = closingRows(session, chat);
+	assert.deepEqual(engine.started, [], 'nothing started');
+	assert.equal(row.text, 'Your Anthropic key is not set. Add ROCKETRIDE_ANTHROPIC_KEY in Variables, then press Continue.');
+	assert.deepEqual(
+		row.card?.actions?.map((action) => action.id),
+		[OPEN_VARIABLES, CONTINUE]
+	);
+	assert.deepEqual({ outcome: session.turns[0].outcome, requests: session.turns[0].usage.modelRequests }, { outcome: 'needs_input', requests: 0 });
+	const sent: string[] = [];
+	assert.equal(session.cardAction(row.id, { kind: 'action', id: CONTINUE }, { openFile: () => undefined, openVariables: () => undefined, send: (text) => void sent.push(text) }), true);
+	assert.deepEqual(sent, [CONTINUE_TEXT]);
+});
+
+test('a refusal a fresh task repeats ends on the Variable card, and after the fix Continue starts a task that answers', async () => {
+	const key = { now: 'wrong' };
+	const engine = keyedEngine(key, ['ROCKETRIDE_ANTHROPIC_KEY'], [doneReply('Answered.')]);
+	store(engine);
+	setAgentHost(hostOver(workspace({}).vfs));
+	const session = AgentSession.newSession();
+	const { turn: refused } = await session.execute('Build it.', undefined, turn());
+	assert.equal(engine.started.length, 2, 'the refusal was tried once more on a fresh task');
+	assert.deepEqual({ outcome: refused.outcome, kind: refused.request?.kind, variable: refused.request?.variable, requests: refused.usage.modelRequests }, { outcome: 'needs_input', kind: 'variable', variable: 'ROCKETRIDE_ANTHROPIC_KEY', requests: 0 });
+	assert.match(refused.finalText, /^Anthropic refused the key in ROCKETRIDE_ANTHROPIC_KEY\./);
+	// step: the running task still holds the wrong key, so the fix only shows once the fresh try starts another
+	key.now = 'good';
+	const { turn: fixed } = await session.execute(CONTINUE_TEXT, undefined, turn());
+	assert.equal(engine.started.length, 3);
+	assert.deepEqual({ outcome: fixed.outcome, finalText: fixed.finalText }, { outcome: 'done', finalText: 'Answered.' });
+});
+
+test('each provider in the table names the Variable credentials.json suggests for its node, and the pipeline asks for it by name', async () => {
+	const credentials = JSON.parse(readFileSync(path.join(__dirname, '../../../../../packages/ai/src/ai/modules/mcp/credentials.json'), 'utf8')) as Record<string, { fields: Array<{ path: string; suggests: string }> }>;
+	const question = { role: '', instructions: [], history: [], goals: [], context: [], question: 'Hi.', expectJson: false, cachePrefix: false };
+	for (const provider of PROVIDER_IDS) {
+		const ask = (client: unknown) =>
+			openChatModel({ provider, model: 'model.1' }, 'chat', () => client as never)
+				.ask(question)
+				.catch((error: unknown) => error);
+		const failure = await ask({ account: { getEnvironmentKeys: async () => [] } });
+		assert.ok(failure instanceof ModelFailure && failure.key);
+		const { variable } = failure.key;
+		let pipeline: { project_id: string; components: Array<{ provider: string; config: Record<string, { apikey?: string }> }> } | undefined;
+		await ask({
+			account: { getEnvironmentKeys: async () => [variable] },
+			use: async (o: { pipeline: typeof pipeline }) => {
+				pipeline = o.pipeline;
+				throw new Error('no engine in this test');
+			},
+		});
+		assert.equal(pipeline?.project_id, `chat-${provider}-model_1`, 'the id holds no dot');
+		const node = pipeline.components[1];
+		assert.equal(credentials[node.provider].fields.find((field) => field.path === 'llm.apikey')?.suggests, variable, provider);
+		assert.equal(node.config['model.1'].apikey, `\${${variable}}`, 'the browser only ever names the key');
+	}
+});
+
+test('every model the picker offers is a profile of its node, with a price', async () => {
+	const offers = await readModelOffers(() => ({ account: { getEnvironmentKeys: async () => [] } }) as never);
+	assert.deepEqual(
+		offers.map((offer) => offer.provider),
+		[...PROVIDER_IDS]
+	);
+	for (const { provider, models } of offers) {
+		const services = readFileSync(path.join(__dirname, `../../../../../nodes/src/nodes/llm_${provider}/services.json`), 'utf8');
+		assert.ok(models.length > 0, provider);
+		for (const { model } of models) {
+			assert.ok(services.includes(`"${model}": {`), `${model} is a profile of llm_${provider}`);
+			assert.ok(
+				PRICES.some((row) => row.model === model),
+				`${model} has a price`
+			);
+		}
+	}
+});
+
+// =============================================================================
+// THE CONVERSATION'S MODEL
+// =============================================================================
+
+test("a conversation keeps its model: a turn asks it, it is saved with it, and another conversation's pick does not move it", async () => {
+	const openai = { provider: 'openai', model: 'openai-5-4' } as const;
+	const opus = { provider: 'anthropic', model: 'claude-opus-5' } as const;
+	const engine = keyedEngine({ now: 'good' }, ['ROCKETRIDE_OPENAI_KEY'], [doneReply('Answered.')]);
+	const written = store(engine, [{ version: 2, sessionId: SAVED_SESSION, title: 'Old save', date: 1, contextRefs: [], messages: [], scopeKey: 'team-a', model: openai }]);
+	let last = { ...DEFAULT_MODEL };
+	setAgentHost({ ...hostOver(workspace({}).vfs), lastModel: { read: () => last, write: (choice) => void (last = choice as typeof last) } });
+	const stored = await AgentSession.getSession(SAVED_SESSION);
+	// step: a pick in one conversation is what the next new one starts from, and nothing else
+	AgentSession.newSession().setModel(opus);
+	assert.deepEqual(stored.model, openai);
+	assert.deepEqual(AgentSession.newSession().model, opus);
+	assert.equal(written.size, 0, 'a conversation with no file gets none from a pick');
+	const { turn: ended } = await stored.execute('Build it.', undefined, turn());
+	const [pipeline] = engine.started as Array<{ components: Array<{ provider: string; config: { profile?: string } }> }>;
+	assert.deepEqual({ node: pipeline.components[1].provider, profile: pipeline.components[1].config.profile, asked: ended.model }, { node: 'llm_openai', profile: 'openai-5-4', asked: 'openai-5-4' });
+	await stored.save(stored.messages);
+	assert.deepEqual((await AgentSession.getSession(SAVED_SESSION)).model, openai);
+	// step: a stored conversation saves its own pick at once
+	stored.setModel(opus);
+	await until(() => (written.get(sessionPath(SAVED_SESSION)) as AgentSessionFile).model?.model === opus.model);
 });

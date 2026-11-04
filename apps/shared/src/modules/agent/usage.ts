@@ -33,9 +33,12 @@
  * Before each request the meter reserves its input estimate plus an output
  * allowance, and refuses a request that would pass the limit (CostLimitError).
  * A reply replaces the allowance with its own estimate; a failed request keeps
- * its whole reservation, since what the provider billed is unknown. The
+ * its whole reservation, since what the provider billed is unknown, unless it
+ * cannot have been billed at all. The
  * cachePrefix start gets cache rates only when its row says the provider caches
  * it: the first request writes it, later ones read it until 5 idle minutes.
+ * The limit applies to every model: one the table does not list is counted at
+ * ASSUMED_PRICE, for the limit only, so no dollar figure is ever shown from it.
  */
 
 import type { QuestionSpec } from './wave/plan';
@@ -58,14 +61,35 @@ export interface PriceRow {
 }
 
 /** Where the prices come from, and the day they were read there. */
-export const PRICES_SOURCE = { url: 'https://platform.claude.com/docs/en/about-claude/pricing', read: '2026-10-27' } as const;
+export const PRICES_SOURCES = [
+	{ url: 'https://platform.claude.com/docs/en/about-claude/pricing', read: '2026-11-04' },
+	{ url: 'https://developers.openai.com/api/docs/pricing', read: '2026-11-04' },
+] as const;
 
 /**
- * The prices the meter knows. One row: the stand-in's model (standin.ts),
- * from Anthropic's price page. Anthropic's model node marks the cached start
- * (nodes/src/nodes/llm_anthropic/anthropic.py, SUPPORTS_PROMPT_CACHE_PREFIX).
+ * The prices the meter knows: every model the picker offers (modelEngine.ts). OpenAI's are its standard
+ * short-context rates, and Haiku 5.5's are for prompts up to 100,000 tokens. Anthropic's model node marks
+ * the cached start (nodes/src/nodes/llm_anthropic/anthropic.py, SUPPORTS_PROMPT_CACHE_PREFIX). OpenAI's
+ * does not, so its cache rates are never read and repeat the input rate.
  */
-export const PRICES: readonly PriceRow[] = [{ model: 'claude-sonnet-5', input: 2, cacheWrite: 2.5, cacheRead: 0.2, output: 10, cachesPrefix: true }];
+export const PRICES: readonly PriceRow[] = [
+	{ model: 'claude-fable-5-1', input: 10, cacheWrite: 12.5, cacheRead: 0.25, output: 50, cachesPrefix: true },
+	{ model: 'claude-opus-5-5', input: 4, cacheWrite: 5, cacheRead: 0.2, output: 20, cachesPrefix: true },
+	{ model: 'claude-opus-5', input: 5, cacheWrite: 6.25, cacheRead: 0.5, output: 25, cachesPrefix: true },
+	{ model: 'claude-sonnet-5-5', input: 2, cacheWrite: 2.5, cacheRead: 0.1, output: 10, cachesPrefix: true },
+	{ model: 'claude-haiku-5-5', input: 0.1, cacheWrite: 0.125, cacheRead: 0.01, output: 0.5, cachesPrefix: true },
+	{ model: 'gpt-6-astra', input: 10, cacheWrite: 10, cacheRead: 10, output: 50, cachesPrefix: false },
+	{ model: 'gpt-6-1-sol', input: 2, cacheWrite: 2, cacheRead: 2, output: 10, cachesPrefix: false },
+	{ model: 'gpt-6-sol', input: 2, cacheWrite: 2, cacheRead: 2, output: 10, cachesPrefix: false },
+	{ model: 'openai-5-4', input: 2.5, cacheWrite: 2.5, cacheRead: 2.5, output: 15, cachesPrefix: false },
+	{ model: 'openai-5-4-mini', input: 0.75, cacheWrite: 0.75, cacheRead: 0.75, output: 4.5, cachesPrefix: false },
+];
+
+/**
+ * What the limit counts a model the table does not list at, per million tokens. Not a real price and
+ * not an upper bound, so it never reaches the user as a dollar figure.
+ */
+export const ASSUMED_PRICE: Omit<PriceRow, 'model'> = { input: 5, cacheWrite: 5, cacheRead: 5, output: 25, cachesPrefix: false };
 
 /** Characters per estimated token. */
 export const CHARS_PER_TOKEN = 4;
@@ -86,13 +110,13 @@ export const CACHE_LIFE_MS = 5 * 60_000;
  */
 export class CostLimitError extends Error {
 	/**
-	 * @param spentUsd - The turn's estimate before this request.
+	 * @param spentUsd - The turn's estimate before this request; unset for a model with no known price, whose estimate is not shown.
 	 */
 	constructor(
-		readonly spentUsd: number,
+		readonly spentUsd: number | undefined,
 		readonly limitUsd: number
 	) {
-		super(`the next model request could pass this turn's cost limit of ${dollars(limitUsd)} (${costText(spentUsd)} so far)`);
+		super(`the next model request could pass this turn's cost limit of ${dollars(limitUsd)}${spentUsd === undefined ? '' : ` (${costText(spentUsd)} so far)`}`);
 		this.name = 'CostLimitError';
 	}
 }
@@ -138,6 +162,8 @@ export interface Reservation {
 	settle(replyChars: number): void;
 	/** The request failed, and what it was billed is unknown: the reservation stays. */
 	keep(): void;
+	/** The request cannot have been billed (no key, a refused key, a task that never started): it counts for nothing. */
+	release(): void;
 }
 
 /** What a turn's model requests used so far. */
@@ -147,15 +173,15 @@ export interface UsageSnapshot {
 	inputTokens: number;
 	/** Estimated output tokens: each reply's, or the allowance of a request that failed or is still on its way. */
 	outputTokens: number;
-	/** The estimated cost in USD; unset for a model the price table does not have. */
+	/** The estimated cost in USD; unset for a model the price table does not list. */
 	usd?: number;
 }
 
 /** What a meter is built with. */
 export interface MeterOptions {
-	/** The model the requests go to; unset or missing from the price table, the meter counts tokens and prices nothing. */
+	/** The model the requests go to; unset or missing from the price table, the meter shows tokens and no dollars. */
 	model?: string;
-	/** The turn's cost limit in USD; 0 or unset means none. A model with no price has no limit. */
+	/** The turn's cost limit in USD; 0 or unset means none. */
 	limitUsd?: number;
 	/** The model's configured output maximum in tokens; unset reserves OUTPUT_ALLOWANCE_TOKENS. */
 	outputMax?: number;
@@ -181,8 +207,10 @@ function tailChars(q: QuestionSpec): number {
 
 /** One turn's model requests: what they used, and the cost limit. */
 export class UsageMeter {
-	/** The model's prices, when the table has them. */
+	/** The model's prices, when the table has them. Only these ever show as dollars. */
 	readonly row: PriceRow | undefined;
+	/** What the limit counts it at. */
+	private readonly rates: Omit<PriceRow, 'model'>;
 	/** The limit in USD; 0 when there is none. */
 	readonly limitUsd: number;
 	/** The output each request reserves, in tokens. */
@@ -195,12 +223,13 @@ export class UsageMeter {
 
 	constructor(o: MeterOptions = {}) {
 		this.row = (o.prices ?? PRICES).find((row) => row.model === o.model);
-		this.limitUsd = this.row && o.limitUsd && o.limitUsd > 0 ? o.limitUsd : 0;
+		this.rates = this.row ?? ASSUMED_PRICE;
+		this.limitUsd = o.limitUsd && o.limitUsd > 0 ? o.limitUsd : 0;
 		this.allowance = o.outputMax && o.outputMax > 0 ? o.outputMax : OUTPUT_ALLOWANCE_TOKENS;
 		this.now = o.now ?? Date.now;
 	}
 
-	/** The estimated cost of the requests so far, reservations included; 0 for a model with no price. */
+	/** The estimated cost of the requests so far, reservations included, for the limit; a model with no known price counts at ASSUMED_PRICE. */
 	get spentUsd(): number {
 		return this.requests.reduce((sum, r) => sum + r.usd, 0);
 	}
@@ -214,18 +243,18 @@ export class UsageMeter {
 	 */
 	reserve(q: QuestionSpec): Reservation {
 		const at = this.now();
-		const { row } = this;
+		const { rates } = this;
 		const prefix = tokensIn(prefixChars(q));
 		const tail = tokensIn(tailChars(q));
 		// step: the start is priced at the cache rates only where the provider caches it and the question asks
-		const cached = row?.cachesPrefix === true && q.cachePrefix;
+		const cached = rates.cachesPrefix && q.cachePrefix;
 		const writes = cached && (this.cachedAt === undefined || at - this.cachedAt > CACHE_LIFE_MS);
-		const prefixRate = !row ? 0 : !cached ? row.input : writes ? row.cacheWrite : row.cacheRead;
-		const inputUsd = row ? (prefix * prefixRate + tail * row.input) / 1e6 : 0;
-		const outputUsd = (tokens: number): number => (row ? (tokens * row.output) / 1e6 : 0);
+		const prefixRate = !cached ? rates.input : writes ? rates.cacheWrite : rates.cacheRead;
+		const inputUsd = (prefix * prefixRate + tail * rates.input) / 1e6;
+		const outputUsd = (tokens: number): number => (tokens * rates.output) / 1e6;
 		const request = { input: prefix + tail, output: this.allowance, usd: inputUsd + outputUsd(this.allowance) };
 		const spent = this.spentUsd;
-		if (this.limitUsd > 0 && spent + request.usd > this.limitUsd) throw new CostLimitError(spent, this.limitUsd);
+		if (this.limitUsd > 0 && spent + request.usd > this.limitUsd) throw new CostLimitError(this.row ? spent : undefined, this.limitUsd);
 		this.requests.push(request);
 		let open = true;
 		return {
@@ -238,6 +267,11 @@ export class UsageMeter {
 			},
 			keep: () => {
 				open = false;
+			},
+			release: () => {
+				if (!open) return;
+				open = false;
+				this.requests.splice(this.requests.indexOf(request), 1);
 			},
 		};
 	}

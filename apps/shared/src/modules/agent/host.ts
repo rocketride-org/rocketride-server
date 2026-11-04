@@ -33,6 +33,7 @@
 
 import type { AppErrorRow, ConsoleRow, WatchStatus } from '../../tools/appdev/types';
 import type { IWorkspaceFileSystem } from '../vfs/vfsTypes';
+import type { ModelChoice } from './model';
 
 // =============================================================================
 // THE SEAM
@@ -140,6 +141,11 @@ export interface AgentHost {
 	 * turn gets DEFAULT_LIMITS.
 	 */
 	limits?: { read(): AgentLimits };
+	/**
+	 * The user's last pick of a model, which a new conversation starts from. read() always returns a
+	 * choice, the default for a garbled value. Without it a new conversation uses DEFAULT_MODEL.
+	 */
+	lastModel?: { read(): ModelChoice; write(choice: ModelChoice): void };
 	/**
 	 * Opens a workspace file in its editor, for a file link on a turn's card.
 	 * Hosts without editors leave it out, and the link does nothing.

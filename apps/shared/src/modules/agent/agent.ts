@@ -40,12 +40,12 @@ import { getClient } from 'shell';
 import type { ChatMessage, TextResult } from 'shell';
 import type { ChatCard, ChatCardAction, ChatTurn } from 'shell/src/components/chat/types';
 import { findAgentHost, getAgentHost } from './host';
+import { DEFAULT_MODEL, parseModelChoice, type ModelChoice } from './model';
+import { openChatModel } from './modelEngine';
 import { BUILDER_PROMPTS } from './prompts';
 import { runAgent } from './run';
 import { configureSessions, deleteSession as deleteStoredSession, getAgentSessions, getContext, isNotFound, saveSession } from './sessions';
 import type { AgentSessionFile, AgentSessionMeta } from './sessions';
-// TEMPORARY (spec §11): delete when Rod's wiring lands
-import { StandinPipelines, STANDIN_MODEL } from './standin';
 import { looksLikeCredential, redactDeep, redactText } from './toolkits/common';
 import type { UndoOutcome, UndoRecord } from './toolkits/undo';
 import { choiceAction, CONTINUE, CONTINUE_TEXT, failedTurn, OPEN_VARIABLES, TurnError, turnCard, UNDO, undoParts, usageMeta, type RunRecord, type TurnRecord, type TurnResult } from './turn';
@@ -67,9 +67,9 @@ export interface AgentOptions {
 	turn: ChatTurn;
 	/** The mounting app's workspace map and guide router (default: the pipe builder's). */
 	prompts?: AppPrompts;
-	/** The token of a running LLM pipeline (default: the stand-in pipeline, TEMPORARY). */
-	token?: string;
-	/** The conversation the request belongs to; names its stand-in pipeline (TEMPORARY), and owns the runs the request starts. */
+	/** The model that answers (default: DEFAULT_MODEL). */
+	model?: ModelChoice;
+	/** The conversation the request belongs to; scopes its model's task, and owns the runs the request starts. */
 	conversationId?: string;
 	/** The turn's id (default: a new one). */
 	turnId?: string;
@@ -79,31 +79,18 @@ export interface AgentOptions {
 	undo?: (record: UndoRecord) => void;
 }
 
-// TEMPORARY (spec §11): delete when Rod's wiring lands
-/** The stand-in model pipelines, one per conversation. */
-const standin = new StandinPipelines(getClient);
-
 /**
  * The agent transport: one request, run to its answer. Progress and the
  * answer stream to the callback.
  *
  * @param callback - Receives each output chunk as (type, content).
- * @param options - The chat turn, the app's prompts, and the model pipeline.
+ * @param options - The chat turn, the app's prompts, and the model.
  * @throws A TurnError when the model fails before the run gathered anything.
  */
 export async function agent(request: string, callback: AgentCallback, options: AgentOptions): Promise<TurnResult> {
-	const { turn, prompts = BUILDER_PROMPTS, token: given, conversationId = crypto.randomUUID(), turnId, runs, undo } = options;
-	// TEMPORARY (spec §11): delete when Rod's wiring lands
-	// step: a given token is used as is; without one, the conversation's stand-in pipeline answers (and restarts on a failure)
-	const token = given ? async () => given : () => standin.token(conversationId);
-	const onPipelineError = given
-		? undefined
-		: async () => {
-				await standin.restart(conversationId);
-			};
-	// step: the stand-in's model has a price; a given token's model is not known, so nothing is priced
-	const model = given ? undefined : STANDIN_MODEL;
-	return runAgent(request, callback, { history: [...turn.history], prompts, token, onPipelineError, signal: turn.signal, takeQueued: () => turn.takeQueued(), ask: (card) => turn.ask(card), turnId, conversationId, runs, model, undo }, { host: getAgentHost(), client: getClient });
+	const { turn, prompts = BUILDER_PROMPTS, model: choice = DEFAULT_MODEL, conversationId = crypto.randomUUID(), turnId, runs, undo } = options;
+	const chatModel = openChatModel(choice, conversationId, getClient);
+	return runAgent(request, callback, { history: [...turn.history], prompts, chatModel, signal: turn.signal, takeQueued: () => turn.takeQueued(), ask: (card) => turn.ask(card), turnId, conversationId, runs, undo }, { host: getAgentHost(), client: getClient });
 }
 
 // =============================================================================
@@ -207,6 +194,8 @@ export class AgentSession {
 	private detached = false;
 	/** The request a card button answered, while its reply is on the way. */
 	private claimed: string | null = null;
+	/** The conversation's model, which only setModel changes. */
+	private chosen: ModelChoice;
 	/** The last save, so saves land in order. */
 	private saving: Promise<void> = Promise.resolve();
 	/** The latest turn that ran, with its Undo record. In memory only: a reload starts with none. */
@@ -224,8 +213,9 @@ export class AgentSession {
 	 * @param date - Epoch-ms creation stamp.
 	 * @param contextRefs - Workspace-relative context paths.
 	 * @param messages - The stored conversation.
+	 * @param model - The stored model; anything unreadable, or none, takes the last pick, once, so another conversation's pick never moves this one.
 	 */
-	private constructor(sessionId: string, title: string, date: number, contextRefs: string[], messages: ChatMessage[], scopeKey?: string, turns: TurnRecord[] = [], runsStarted: RunRecord[] = []) {
+	private constructor(sessionId: string, title: string, date: number, contextRefs: string[], messages: ChatMessage[], scopeKey?: string, turns: TurnRecord[] = [], runsStarted: RunRecord[] = [], model?: unknown) {
 		this.sessionId = sessionId;
 		this.title = title;
 		this.date = date;
@@ -234,6 +224,7 @@ export class AgentSession {
 		this.scopeKey = scopeKey;
 		this.turns = turns;
 		this.runsStarted = runsStarted;
+		this.chosen = parseModelChoice(model) ?? findAgentHost()?.lastModel?.read() ?? DEFAULT_MODEL;
 	}
 
 	// ── Statics — session management ─────────────────────────────────────
@@ -284,7 +275,7 @@ export class AgentSession {
 		const stored = JSON.parse(raw) as AgentSessionFile;
 		// step: a version 1 file has no turns and no runs, so its runs are nobody's
 		const v2 = stored.version === 2;
-		const session = new AgentSession(sessionId, stored.title ?? UNTITLED, stored.date ?? Date.now(), stored.contextRefs ?? [], stored.messages ?? [], stored.scopeKey, v2 ? (stored.turns ?? []) : [], v2 ? (stored.runsStarted ?? []) : []);
+		const session = new AgentSession(sessionId, stored.title ?? UNTITLED, stored.date ?? Date.now(), stored.contextRefs ?? [], stored.messages ?? [], stored.scopeKey, v2 ? (stored.turns ?? []) : [], v2 ? (stored.runsStarted ?? []) : [], stored.model);
 		session.stored = true;
 		return session;
 	}
@@ -310,6 +301,26 @@ export class AgentSession {
 	}
 
 	// ── Instance — one conversation ──────────────────────────────────────
+
+	/** The conversation's model. The same object until setModel, so the picker can read it directly. */
+	get model(): ModelChoice {
+		return this.chosen;
+	}
+
+	/**
+	 * Sets the conversation's model, for its next turn: a running turn holds its own copy. It is also
+	 * the last pick, which a new conversation starts from.
+	 */
+	setModel(choice: ModelChoice): void {
+		this.chosen = choice;
+		findAgentHost()?.lastModel?.write(choice);
+		if (this.stored) {
+			this.persist(this.messages).catch((err) => {
+				console.log("[AgentSession] could not save the conversation's model", err);
+			});
+		}
+		this.changed();
+	}
 
 	/**
 	 * Readies what the user typed before the chat makes it a row: each key comes back as
@@ -420,8 +431,7 @@ export class AgentSession {
 		const answering = this.takeRequest(turnId);
 		starting();
 		const { callback, results } = routeChunks(onStatus);
-		// TEMPORARY (spec §11): delete when Rod's wiring lands
-		const ended = await agent(answering ? `${text}\n\n${answeringNote(answering)}` : text, callback, { turn, conversationId: this.sessionId, turnId, runs: this.runsStarted, undo });
+		const ended = await agent(answering ? `${text}\n\n${answeringNote(answering)}` : text, callback, { turn, model: this.chosen, conversationId: this.sessionId, turnId, runs: this.runsStarted, undo });
 		return { results, turn: ended };
 	}
 
@@ -558,7 +568,7 @@ export class AgentSession {
 			// a request a card button already answered shows its buttons disabled while the reply is on its way
 			const shown = turn.request && turn.request.id === this.claimed ? { ...turn, request: { ...turn.request, answeredBy: '' } } : turn;
 			const card = latest && latest.turnId === turn.turnId ? withUndo(turnCard(shown), latest.state) : turnCard(shown);
-			const meta = usageMeta(turn.usage);
+			const meta = usageMeta(turn);
 			return { ...m, card, ...(meta ? { meta } : {}) };
 		});
 	}
@@ -640,7 +650,7 @@ export class AgentSession {
 		if (action.id === UNDO) return this.undoFrom(messageId, handlers);
 		const request = this.turns.find((t) => t.messageId === messageId)?.request;
 		if (!request || request.answeredBy !== undefined || this.claimed === request.id) return false;
-		const reply = request.kind === 'continue' ? (action.id === CONTINUE ? CONTINUE_TEXT : undefined) : request.choices?.find((_, i) => choiceAction(i) === action.id);
+		const reply = request.kind === 'question' ? request.choices?.find((_, i) => choiceAction(i) === action.id) : action.id === CONTINUE ? CONTINUE_TEXT : undefined;
 		if (reply === undefined) return false;
 		this.claimed = request.id;
 		handlers.send(reply);
@@ -659,7 +669,7 @@ export class AgentSession {
 		await this.persist(messages);
 	}
 
-	/** Writes the session file (version 2: rows with cards, turns, runs); writes land in the order asked. */
+	/** Writes the session file (version 2: rows with cards, turns, runs, the model); writes land in the order asked. */
 	private async persist(messages: ChatMessage[]): Promise<void> {
 		const rows = this.withCards(messages, false).map((m) => ({ ...m, text: redactText(m.text), ...(m.card ? { card: redactDeep(m.card) } : {}) }));
 		this.messages = rows;
@@ -673,6 +683,7 @@ export class AgentSession {
 			...(this.scopeKey !== undefined ? { scopeKey: this.scopeKey } : {}),
 			turns: redactDeep(this.turns),
 			runsStarted: redactDeep(this.runsStarted),
+			model: this.chosen,
 		};
 		const write = this.saving.then(() => saveSession(file));
 		this.saving = write.catch(() => undefined);

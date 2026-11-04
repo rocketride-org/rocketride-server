@@ -43,6 +43,7 @@
 import { getClient } from 'shell';
 import type { ChatMessage, RocketRideClient } from 'shell';
 import { emitFsChange } from '../../utils/fsNotify';
+import type { ModelChoice } from './model';
 import type { RunRecord, TurnRecord } from './turn';
 
 // =============================================================================
@@ -85,6 +86,8 @@ export interface AgentSessionFile {
 	turns?: TurnRecord[];
 	/** Version 2: the pipeline runs the conversation started, which Auto may stop or restart. */
 	runsStarted?: RunRecord[];
+	/** The conversation's model; a file without one takes the last pick when it opens. */
+	model?: ModelChoice;
 }
 
 // =============================================================================

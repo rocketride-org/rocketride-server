@@ -30,31 +30,31 @@
  * the code-built checks line; a stopped run sends no `content`.
  * The step limit and the cost limit both end the turn as needs_input. The Undo
  * record holds file content, so it goes to `options.undo`, never the result.
- * Browser-only parts (model pipeline, Monaco markers) come in through `deps`, so
- * tests run without a browser. One `Approvals` per run rates every tool act; the
- * model's own `chat` calls keep the real client.
+ * The model comes in through `options.chatModel` and browser-only parts (Monaco
+ * markers) through `deps`, so tests run without a browser. One `Approvals` per run
+ * rates every tool act; the model's own calls never pass through it.
  */
 
-import { Question } from 'rocketride';
 import type { ChatMessage } from 'shell';
 import type { ChatAskCard, ChatAsking } from 'shell/src/components/chat/types';
 
 import { isReferencePath } from '../vfs/referenceTree';
 import { DEFAULT_LIMITS, findAgentHost, type AgentHost } from './host';
+import { ModelFailure, type ChatModel, type KeyTrouble, type ModelAsk } from './model';
 import { CORE_PROMPT } from './prompts';
 import { APP_CHECK_TOOL, AppCheckToolkit, monacoMarkerSource, reportPassed, typesNote, validateNote, validateSaved } from './toolkits/appCheck';
 import type { CheckReport, MarkerSource, SaveValidation } from './toolkits/appCheck';
 import { Approvals } from './toolkits/approval';
 import { AppToolkit, DEPLOY_APP_TIMEOUT_MS } from './toolkits/appTools';
 import { AskUserToolkit } from './toolkits/askUser';
-import { NOT_CONNECTED_MESSAGE, redactDeep, redactText, shellChoice, type ChoiceFn, type ClientGetter } from './toolkits/common';
+import { redactDeep, redactText, shellChoice, type ChoiceFn, type ClientGetter } from './toolkits/common';
 import { FilesystemTools, normalizePath, type FileTracker } from './toolkits/filesystem';
 import { findApp, InventoryToolkit, readApps } from './toolkits/inventory';
 import { RocketRideClientToolkit, RunLedger } from './toolkits/rocketrideClient';
 import { UNDO_ROW, type UndoRecord } from './toolkits/undo';
 import { composeToolkits, UserTime } from './tools';
-import { outcomeOf, TurnError, type NeedsInputRequest, type RunRecord, type TurnCheck, type TurnResult, type TurnUsage } from './turn';
-import { CostLimitError, dollars, UsageMeter } from './usage';
+import { keyRequest, outcomeOf, TurnError, type NeedsInputRequest, type RunRecord, type TurnCheck, type TurnResult, type TurnUsage } from './turn';
+import { dollars, UsageMeter } from './usage';
 import { runLoop, TOOL_TIMEOUT_MS, type FinishRule, type LoopResult, type RanCall } from './wave/loop';
 import { buildPrefix } from './wave/plan';
 import type { AppPrompts, HistoryTurn, ModelCall, QuestionSpec } from './wave/plan';
@@ -99,10 +99,8 @@ export interface AgentRunOptions {
 	history: ChatMessage[];
 	/** The mounting app's workspace map and guide router. */
 	prompts: AppPrompts;
-	/** The token of the running LLM pipeline; read again after a restart. */
-	token: () => Promise<string>;
-	/** Restarts the LLM pipeline after it fails. */
-	onPipelineError?: () => Promise<void>;
+	/** The turn's model. */
+	chatModel: ChatModel;
 	/** Aborted when the user stops the run; the loop then starts nothing new and ends. */
 	signal: AbortSignal;
 	/** Takes the messages the user sent since the last take, oldest first. */
@@ -115,8 +113,6 @@ export interface AgentRunOptions {
 	conversationId?: string;
 	/** The runs the conversation started. The run adds the ones it starts to this array (default: none, kept nowhere). */
 	runs?: RunRecord[];
-	/** The model the pipeline behind `token` runs, as the price table names it; unset when unknown, so nothing is priced. */
-	model?: string;
 	/** Takes the run's Undo record when the run ends, however it ends. It holds file content, so it stays in memory. */
 	undo?: (record: UndoRecord) => void;
 }
@@ -127,7 +123,7 @@ export interface AgentDeps {
 	host: AgentHost;
 	/** The connected RocketRide client, or null when there is none. */
 	client: ClientGetter;
-	/** Asks the model one question (default: the LLM pipeline behind `options.token`). */
+	/** Asks the model one question (default: `options.chatModel`). */
 	model?: ModelCall;
 	/** Asks the user what to do with unsaved changes the agent wants to change (default: the three-button dialog). */
 	choose?: ChoiceFn;
@@ -486,175 +482,56 @@ function median(values: number[]): number {
 }
 
 // =============================================================================
-// CHAT MODEL — one model call, asked on the LLM pipeline's token
+// CHAT MODEL — the retry and meter policy around one model call
 // =============================================================================
 
-/**
- * A provider that fails does not make `client.chat` throw: the LLM pipeline
- * answers with text starting "**LLM error** —". This section turns that, a dead
- * token and an empty reply into errors the loop shows as a banner.
- */
-
-// =============================================================================
-// ERRORS
-// =============================================================================
-
-/** The start of the answer the LLM pipeline writes when the provider call failed (packages/ai/src/ai/common/llm_base.py:95). */
-const LLM_ERROR_PREFIX = '**LLM error** — ';
-
-/** Why a model call failed: the provider rejected it, the pipeline died, or nothing came back. */
-class ModelError extends Error {
-	/**
-	 * @param message - What went wrong, readable as it stands.
-	 * @param kind - 'provider' when the model call inside the pipeline failed, 'pipeline' when
-	 *   the pipeline stopped responding, 'empty' when it answered with nothing.
-	 */
-	constructor(
-		message: string,
-		readonly kind: 'provider' | 'pipeline' | 'empty'
-	) {
-		super(message);
-		this.name = 'ModelError';
-	}
-}
-
-// =============================================================================
-// THE CALL
-// =============================================================================
-
-/** The part of the RocketRide client a model call needs. */
-export interface ChatClient {
-	/**
-	 * Asks the pipeline behind `token` one question.
-	 *
-	 * @returns The pipeline result, with the model's text in `answers`. Its other
-	 *   fields depend on the pipeline; the index signature lets the client's
-	 *   `PIPELINE_RESULT` fit, which an all-optional type would refuse.
-	 */
-	chat(o: { token: string; question: unknown }): Promise<{ answers?: unknown[]; [field: string]: unknown }>;
-}
-
-/** What createChatModel needs from its host. */
+/** What createChatModel needs. */
 export interface ChatModelOptions {
-	client: () => ChatClient | null;
-	/** The token of the running LLM pipeline. Read again after a restart, since a new pipeline has a new token. */
-	token: () => Promise<string>;
-	/** Turns a question into whatever `client.chat` takes. */
-	toQuestion: (q: QuestionSpec) => unknown;
-	/** Restarts the LLM pipeline. Called once per model call, when the pipeline fails the first time. */
-	onPipelineError?: () => Promise<void>;
-	/** Aborted when the user stops the run: a call that fails after it neither restarts the pipeline nor retries. */
+	ask: ModelAsk;
+	/** Aborted when the user stops the run: a call that fails after it does not retry, so it cannot restart the task the next turn is about to use. */
 	signal?: AbortSignal;
-	/** Reserves each request before it is sent, the retry after a restart included, and takes what it used. */
+	/** Reserves each request before it is sent, the retry included, and takes what it used. */
 	meter?: UsageMeter;
+	/** Hears a request's final failure when a key is the cause. The loop swallows failures once it has gathered something, so it cannot tell the run. */
+	onKeyTrouble?: (trouble: KeyTrouble) => void;
 }
 
 /**
  * Builds the model call the Wave loop uses. It resolves with the model's text or
- * rejects: no client with a plain Error, a cost-limit refusal with
- * CostLimitError, anything else with a ModelError. A pipeline failure gets one
- * restart (`onPipelineError`) and one retry. Once the run is stopped a failure
- * gets no restart: it would end the pipeline the next turn is about to use.
- * Each request, retry included, is reserved on the meter just before it is
- * sent; a failed request keeps its reservation.
+ * rejects. A retryable ModelFailure gets one fresh try, none after Stop. Each send
+ * is reserved just before it goes: a failure the provider cannot have billed releases
+ * its reservation, any other keeps it. A CostLimitError comes from reserve, before
+ * anything is sent, and passes through untouched.
  */
 export function createChatModel(o: ChatModelOptions): ModelCall {
+	const send = async (q: QuestionSpec, fresh: boolean): Promise<string> => {
+		const held = o.meter?.reserve(q);
+		try {
+			const text = await o.ask(q, fresh ? { fresh } : undefined);
+			held?.settle(text.length);
+			return text;
+		} catch (error) {
+			if (error instanceof ModelFailure && !error.billed) held?.release();
+			else held?.keep();
+			throw error;
+		}
+	};
 	return async (q) => {
-		const client = o.client();
-		if (!client) throw new Error(NOT_CONNECTED_MESSAGE);
-		const question = o.toQuestion(q);
-
-		const ask = async (): Promise<{ answers?: unknown[] }> => {
-			const token = await o.token();
-			const held = o.meter?.reserve(q);
-			try {
-				const result = await client.chat({ token, question });
-				const text = replyText(result);
-				if (text.startsWith(LLM_ERROR_PREFIX)) held?.keep();
-				else held?.settle(text.length);
-				return result;
-			} catch (error) {
-				held?.keep();
-				throw error;
-			}
-		};
-
 		const started = performance.now();
 		try {
-			let result: { answers?: unknown[] };
 			try {
-				result = await ask();
+				return await send(q, false);
 			} catch (first) {
-				// step: a request the cost limit refused was never sent, so there is nothing to restart
-				if (first instanceof CostLimitError) throw first;
-				if (!o.onPipelineError || o.signal?.aborted) throw pipelineError(first);
-				try {
-					await o.onPipelineError();
-					result = await ask();
-				} catch (second) {
-					throw second instanceof CostLimitError ? second : pipelineError(second);
-				}
+				if (!(first instanceof ModelFailure) || !first.retryable || o.signal?.aborted) throw first;
+				return await send(q, true);
 			}
-			return answerText(result);
+		} catch (error) {
+			// step: after Stop a refusal got no fresh try, so it says nothing about the key
+			if (error instanceof ModelFailure && error.key && !o.signal?.aborted) o.onKeyTrouble?.(error.key);
+			throw error;
 		} finally {
 			const ms = Math.round(performance.now() - started);
 			console.log(`[agent] model call ${ms} ms`);
-		}
-	};
-}
-
-/** Wraps a failed chat call in the error the user reads. */
-function pipelineError(cause: unknown): ModelError {
-	const reason = cause instanceof Error ? cause.message : String(cause);
-	return new ModelError(`The model pipeline stopped responding: ${reason}`, 'pipeline');
-}
-
-/** The text a pipeline result answers with; '' for none. */
-function replyText(result: { answers?: unknown[] }): string {
-	const first = result.answers?.[0];
-	return typeof first === 'string' ? first : first == null ? '' : JSON.stringify(first);
-}
-
-/** Pulls the model's text out of a pipeline result, or throws the error it stands for. */
-function answerText(result: { answers?: unknown[] }): string {
-	const text = replyText(result);
-	if (text.trim() === '') throw new ModelError('The model returned no answer.', 'empty');
-	if (text.startsWith(LLM_ERROR_PREFIX)) {
-		throw new ModelError(`The model provider failed: ${text.slice(LLM_ERROR_PREFIX.length)}`, 'provider');
-	}
-	return text;
-}
-
-// =============================================================================
-// THE QUESTION
-// =============================================================================
-
-/**
- * Builds the client's Question from a spec. This is the agent's only runtime
- * import of 'rocketride', which is undefined under shared:test, so tests pass a
- * fake `toQuestion` to createChatModel instead.
- */
-function toRocketRideQuestion(q: QuestionSpec): Question {
-	const question = new Question({ expectJson: q.expectJson, cachePrefix: q.cachePrefix, role: q.role });
-	for (const { title, text } of q.instructions) question.addInstruction(title, text);
-	for (const turn of q.history) question.addHistory({ role: turn.role, content: turn.content });
-	for (const goal of q.goals) question.addGoal(goal);
-	for (const item of q.context) question.addContext(item);
-	question.addQuestion(q.question);
-	return question;
-}
-
-/** Meters a model a test passes; createChatModel meters its own requests. */
-function metered(call: ModelCall, meter: UsageMeter): ModelCall {
-	return async (q) => {
-		const held = meter.reserve(q);
-		try {
-			const text = await call(q);
-			held.settle(text.length);
-			return text;
-		} catch (error) {
-			held.keep();
-			throw error;
 		}
 	};
 }
@@ -674,8 +551,10 @@ export async function runAgent(request: string, callback: (type: string, content
 	const turnId = options.turnId ?? crypto.randomUUID();
 	// step: the turn's limits, read once; the meter counts every model request sent, so a turn that throws still reports them
 	const limits = host.limits?.read() ?? DEFAULT_LIMITS;
-	const meter = new UsageMeter({ model: options.model, limitUsd: limits.costUsd });
-	const model: ModelCall = deps.model ? metered(deps.model, meter) : createChatModel({ client, token: options.token, toQuestion: toRocketRideQuestion, onPipelineError: options.onPipelineError, signal: options.signal, meter });
+	const meter = new UsageMeter({ model: options.chatModel.name, limitUsd: limits.costUsd });
+	let keyTrouble: KeyTrouble | undefined;
+	// step: a test's fake and the real model pass through the same retry and meter policy
+	const model = createChatModel({ ask: deps.model ?? options.chatModel.ask, signal: options.signal, meter, onKeyTrouble: (trouble) => (keyTrouble = trouble) });
 	const choose = deps.choose ?? shellChoice();
 	const markers = deps.markers ?? editorMarkers;
 
@@ -744,7 +623,7 @@ export async function runAgent(request: string, callback: (type: string, content
 			modelRequests: used.requests,
 			toolCalls,
 			...(used.requests > 0 ? { tokens: { input: used.inputTokens, output: used.outputTokens, estimated: true } } : {}),
-			...(used.usd !== undefined ? { cost: { usd: used.usd, estimated: true } } : {}),
+			...(used.requests > 0 && used.usd !== undefined ? { cost: { usd: used.usd, estimated: true } } : {}),
 		};
 	};
 	const turnOf = (outcome: Pick<TurnResult, 'outcome' | 'reason' | 'finalText' | 'error'>, waves: number, toolCalls: number): TurnResult => {
@@ -755,6 +634,7 @@ export async function runAgent(request: string, callback: (type: string, content
 			turnId,
 			...(host.scopeKey !== undefined ? { scopeKey: host.scopeKey } : {}),
 			...outcome,
+			model: options.chatModel.name,
 			files: files.tracker.changes(),
 			checks: checks.results(),
 			usage: usageOf(waves, toolCalls),
@@ -762,6 +642,14 @@ export async function runAgent(request: string, callback: (type: string, content
 			...(ledger.started.length ? { runsStarted: [...ledger.started] } : {}),
 			...(undo === 'none' ? {} : { undoAvailable: typeof undo !== 'object' }),
 		});
+	};
+
+	// step: the loop only sees a failed model, so a key the user must fix ends the turn here, on its card
+	const endForKey = (trouble: KeyTrouble, gathered: string, waves: number, toolCalls: number): TurnResult => {
+		paused = keyRequest(trouble);
+		const text = gathered ? `${gathered}\n\n${paused.question}` : paused.question;
+		callback('content', text);
+		return turnOf({ outcome: 'needs_input', reason: 'needs_input', finalText: text }, waves, toolCalls);
 	};
 
 	let result: LoopResult;
@@ -789,6 +677,7 @@ export async function runAgent(request: string, callback: (type: string, content
 			maxWaves: limits.steps,
 		});
 	} catch (error) {
+		if (keyTrouble) return endForKey(keyTrouble, '', 1, 0);
 		// step: nothing was gathered, so the chat shows the model's error; the result says what the turn got to
 		const message = error instanceof Error ? error.message : String(error);
 		throw new TurnError(message, turnOf({ outcome: 'failed', reason: 'error', finalText: '', error: message }, 1, 0));
@@ -797,6 +686,8 @@ export async function runAgent(request: string, callback: (type: string, content
 		runEnded.abort();
 		options.undo?.(files.undo);
 	}
+
+	if (keyTrouble && result.stopReason === 'error') return endForKey(keyTrouble, finalText(result, checks, shown), result.waves, result.toolCalls);
 
 	// step: a limit paused the turn: it asks the user to continue, in a new turn with a fresh budget
 	if (result.stopReason === 'limited' || result.stopReason === 'cost_limit') {

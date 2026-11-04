@@ -30,6 +30,7 @@
  */
 
 import type { RocketRideClient } from 'shell';
+import { DEFAULT_MODEL, modelSetting, parseModelChoice, type ModelChoice } from 'shared/modules/agent/model';
 import { DEFAULT_LIMITS, type AgentDevSession, type AgentHost, type AgentLimits, type ApprovalControls, type ApprovalPrefs, type ApprovalSettings, type Grant } from 'shared/modules/agent/host';
 import type { FrameOptions } from 'shared/tools/appdev';
 import { scaffoldApp } from '../surfaces/preview/session/appStore';
@@ -149,13 +150,28 @@ function limitOf(settings: Readonly<Record<string, unknown>>, key: keyof AgentLi
 /** The limits as the settings now stand; a turn reads them when it starts. */
 let limits: AgentLimits = DEFAULT_LIMITS;
 
+// =============================================================================
+// THE LAST MODEL — what a new agent chat starts with
+// =============================================================================
+
+/** The setting behind it, as shared/tools/toolSettings.ts declares it. */
+const MODEL_KEY = 'rocketride.pipeBuilder.agentDefaultModel';
+
+/** The last pick as the settings now stand; a missing or garbled value reads as the default. */
+let lastModel: ModelChoice = DEFAULT_MODEL;
+
+/** Writes the last pick; it comes back through RocketApp's next push, so the workspace is the one source. */
+let writeSetting: SettingWriter | null = null;
+
 /**
- * Pushes the workspace settings into the agent's approvals and limits.
+ * Pushes the workspace settings into the agent's approvals, limits and last model.
  * RocketApp calls it on every settings change.
  */
 export function feedApprovalSettings(settings: Readonly<Record<string, unknown>>, write: SettingWriter): void {
 	approvalFeed.push(settings, write);
 	limits = { steps: Math.floor(limitOf(settings, 'steps')), costUsd: limitOf(settings, 'costUsd') };
+	lastModel = parseModelChoice(settings[MODEL_KEY]) ?? DEFAULT_MODEL;
+	writeSetting = write;
 }
 
 // =============================================================================
@@ -204,6 +220,7 @@ export function createRocketAgentHost(client: RocketRideClient, ws: Workspace): 
 		},
 		approvals: { run: approvalFeed.run, controls: approvalFeed.controls },
 		limits: { read: () => limits },
+		lastModel: { read: () => lastModel, write: (choice) => writeSetting?.(MODEL_KEY, modelSetting(choice)) },
 		// step: while another team's workspace is current an old run finds no editor, so it opens no
 		// dialog, and an answer given after a switch saves and discards nothing
 		editor: (path) => {
