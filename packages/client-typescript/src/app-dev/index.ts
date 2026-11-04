@@ -495,38 +495,47 @@ export class DevSession {
 			this.pkgTimer = setTimeout(() => this.requestRestart(), 800);
 		};
 		const pkgFile = path.join(folder, 'package.json');
-		const mtime = (): number => {
+		// mtime, ctime and size: a write that restores the mtime still moves the
+		// ctime. '' for a missing file (fs.watchFile reports it with zeroed stats).
+		const stampOf = (stats: fs.Stats): string => (stats.nlink > 0 ? `${stats.mtimeMs}:${stats.ctimeMs}:${stats.size}` : '');
+		const stamp = (): string => {
 			try {
-				return fs.statSync(pkgFile).mtimeMs;
+				return stampOf(fs.statSync(pkgFile));
 			} catch {
-				return 0;
+				return '';
 			}
 		};
-		// poll the file's mtime (no folder watcher, or the folder watcher failed)
+		// poll the file's stats (no folder watcher, or the folder watcher failed)
 		const poll = (): void => {
 			this.pkgPollFile = pkgFile;
+			let missing = false;
 			this.pkgPollListener = (cur, prev) => {
-				if (cur.mtimeMs !== prev.mtimeMs) schedule();
+				const now = stampOf(cur);
+				// a file that comes back always restarts: when it returns, fs.watchFile
+				// compares it with the stats from before it went, and a restart made
+				// while it was missing could not install
+				if (now !== stampOf(prev) || (missing && now)) schedule();
+				missing = !now;
 			};
 			fs.watchFile(this.pkgPollFile, { interval: 1000 }, this.pkgPollListener);
 		};
 		try {
 			const watched = process.platform === 'win32' ? fs.realpathSync.native(folder) : folder;
-			// package.json's mtime as of the last change the watcher reported
-			let seen = mtime();
+			// package.json's stamp as of the last change the watcher reported
+			let seen = stamp();
 			const watcher = fs.watch(watched, (_event, filename) => {
 				if (filename?.toString() !== 'package.json') return;
-				seen = mtime();
+				seen = stamp();
 				schedule();
 			});
 			// a watcher error (folder removed, permissions changed) falls back to polling;
-			// polling takes the current mtime as its baseline, so a change the watcher
+			// polling takes the current stats as its baseline, so a change the watcher
 			// missed before failing is queued here
 			watcher.on('error', () => {
 				watcher.close();
 				if (this.pkgWatcher === watcher) this.pkgWatcher = null;
 				if (this.stopping || this.pkgPollFile) return;
-				if (mtime() !== seen) schedule();
+				if (stamp() !== seen) schedule();
 				poll();
 			});
 			this.pkgWatcher = watcher;
