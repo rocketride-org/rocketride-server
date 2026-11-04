@@ -522,7 +522,7 @@ test('onMutate announces staged mutations with their origin; write-through and n
 	assert.deepEqual(fired, [{ path: 'apps/x/a.ts', origin: 'editor' }]);
 	fired.length = 0;
 	await fs.write('apps/x/a.ts', 'A', 'editor');
-	assert.deepEqual(fired, []);
+	assert.deepEqual(fired, [] as typeof fired);
 
 	// Delete and mkdir announce.
 	await fs.delete('apps/x/gone.ts', 'editor');
@@ -568,7 +568,7 @@ test('onMutate announces staged mutations with their origin; write-through and n
 	await fs.setWriteThrough(true);
 	fired.length = 0;
 	await fs.write('apps/x/a.ts', 'direct');
-	assert.deepEqual(fired, []);
+	assert.deepEqual(fired, [] as typeof fired);
 });
 
 test('write-through save is freshness-gated: a moved base refuses the save', async () => {
