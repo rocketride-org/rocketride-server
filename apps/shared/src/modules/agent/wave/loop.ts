@@ -74,7 +74,7 @@ export interface FinishRule {
 	/**
 	 * A wave's calls have ended.
 	 *
-	 * @param calls - Every call the wave ran, in call order (memory.peek and calls skipped for missing arguments are left out), then each timed-out call that has ended since the last wave.
+	 * @param calls - Every call the wave ran, in call order (memory.peek and calls skipped for a missing argument or reference are left out), then each timed-out call that has ended since the last wave.
 	 */
 	endWave(calls: RanCall[]): Promise<void>;
 	/**
@@ -245,7 +245,7 @@ interface Entry extends ResultEntry {
 	total_chars?: number;
 }
 
-/** A call made ready to run: its arguments resolved, or why it cannot run, or its peek already read. `skipped` marks a call left out for missing required arguments. */
+/** A call made ready to run: its arguments resolved, or why it cannot run, or its peek already read. `skipped` marks a call left out for a missing required argument or a reference that names nothing. */
 type Prepared = { call: ToolCall; args: Record<string, unknown> } | { call: ToolCall; entry: Entry; skipped?: true };
 
 /** What a wave's calls left behind, in call order. */
@@ -743,7 +743,7 @@ class WaveRun {
 			try {
 				args = resolveArgRefs(call.args, this.memory);
 			} catch (error) {
-				return { call, entry: { tool: call.tool, key, error: messageOf(error) } };
+				return { call, entry: { tool: call.tool, key, error: messageOf(error) }, skipped: true };
 			}
 			return call.tool === PEEK_TOOL ? { call, entry: this.peek(key, args) } : { call, args };
 		});

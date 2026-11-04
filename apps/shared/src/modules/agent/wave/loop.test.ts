@@ -131,6 +131,13 @@ test('done after a change is refused until a check passes in a later wave', asyn
 	assert.deepEqual({ answer: result.answer, stopReason: result.stopReason }, { answer: 'checked', stopReason: 'done' });
 });
 
+test('a call whose memory reference names nothing did not run, so it is no change and done needs no check', async () => {
+	const checks = record();
+	const write = stub('write_file');
+	const result = await loop(scriptedModel([plan(['write_file', { path: APP_FILE, content: '{{memory.ref:wave-0.r9}}' }]), done('finished')]), [write, checkTool(checks)], { finish: checks });
+	assert.deepEqual({ answer: result.answer, ran: write.seen.length }, { answer: 'finished', ran: 0 });
+});
+
 test('a failed check, or a check call that errors, blocks done until a newer one passes', async () => {
 	// pass, then fail or error: the newest check decides, so the work is unchecked again
 	for (const verdict of ['fail', 'error'] as const) {
