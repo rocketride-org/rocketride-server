@@ -57,7 +57,8 @@
 //     an accessor reads and writes only its own; every other entry is written
 //     back exactly as stored, well-formed or not, and so is any top-level field
 //     this module does not know (a newer client's). Only well-formed bags count
-//     toward MAX_PREFS_OWNERS (the least recently written dropped once a write
+//     toward MAX_PREFS_OWNERS (an entry that is not a bag never counts, so it
+//     cannot push a real owner out) (the least recently written dropped once a write
 //     succeeds); an entry that is not a bag is carried and never dropped. An
 //     entry for THIS owner that is not a bag leaves the file unwritten. An accessor is made for ONE owner, and
 //     the owner is checked before every file request AND again after every
@@ -83,9 +84,10 @@
 //     change, flush() or close() tries again after that. Every fs request
 //     is bounded by an application deadline (engineClient.ts createPrefsFs,
 //     PREFS_FS_DEADLINE_MS): the SDK's file calls have no timeout of their own.
-//   LAST WRITER WINS across windows: each window writes the whole file from
-//     what it loaded, so two windows of the same user that both write keep
-//     only the later one's view. A known limitation.
+//   NO LOST UPDATES ACROSS OWNERS. Each write re-reads the file first and
+//     merges (see `write`), so two windows of one user under different
+//     identities do not revert each other. Two windows under the SAME owner
+//     still keep only the later one's bag for that owner.
 // =============================================================================
 
 import { isPlainObject } from '../checks';
@@ -431,7 +433,7 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 		const kept = Object.entries(others)
 			.filter(([, entry]) => !entry.pinned)
 			.sort((a, b) => b[1].at - a[1].at)
-			.slice(0, Math.max(0, maxOwners - 1 - pinned.length));
+			.slice(0, Math.max(0, maxOwners - 1));
 		for (;;) {
 			const owners: Record<string, unknown> = {};
 			for (const [id, entry] of [...pinned, ...kept]) owners[id] = entry.raw;
@@ -485,6 +487,15 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 				// The owner may have changed, or the accessor gone, while the folder was made.
 				if (!mayWrite()) return;
 			}
+			// Re-read the file NOW and merge: this owner's bag comes from memory, every
+			// other owner's entry and every unknown field from what is stored now, so
+			// another window's newer write (another identity of the same user) is never
+			// reverted. A failed read writes nothing: the change stays in memory and the
+			// failure is reported (and retried, as any failed write).
+			const fresh = await readOnce();
+			if (fresh === 'stale' || !mayWrite()) return;
+			others = fresh.others;
+			extra = fresh.extra;
 			// Composed only now, from the bag of an owner who is signed in now.
 			const composed = compose();
 			dirty = false;

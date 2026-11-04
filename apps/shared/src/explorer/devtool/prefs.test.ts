@@ -189,6 +189,7 @@ describe('createFsPrefs — load first', () => {
 		assert.deepEqual(requests.map((r) => [r.op, (r.params as { path: string }).path]), [
 			['fsStat', PATH],
 			['fsMkdir', '@/User/.workspace'],
+			['fsStat', PATH], // the fresh read just before the write
 			['fsWriteJson', PATH],
 		]);
 	});
@@ -364,9 +365,10 @@ describe('createFsPrefs — round 3: nothing a person changed is lost to timing'
 
 	it('a change made while the file is loading is written once the load is ready, without another setPref (review finding 1)', async () => {
 		let release: (value: unknown) => void = () => undefined;
+		let reads = 0;
 		const { prefs, clock, writes } = make({
 			'fsStat': () => ({ exists: true }),
-			'fsReadJson': () => new Promise((resolve) => { release = resolve; }),
+			'fsReadJson': () => (reads++ === 0 ? new Promise((resolve) => { release = resolve; }) : file({ stored: true })),
 		});
 		const loading = prefs.load();
 		await settle();
@@ -632,5 +634,99 @@ describe('createFsPrefs — nothing the module does not understand is ever erase
 		assert.ok(ids.includes('junk'), 'the malformed entry is carried');
 		assert.ok(ids.includes(OWNER));
 		assert.ok(!ids.includes('o0') && ids.includes('o5'), 'the least recently written well-formed bags went');
+	});
+});
+
+describe('createFsPrefs — two owners of one file never revert each other (DA-R2-02, DA-R2-05)', () => {
+	/** One shared stored file and a file store over it that can be told to fail reads. */
+	function shared(initial: unknown) {
+		let file: unknown = initial === undefined ? undefined : JSON.parse(JSON.stringify(initial));
+		const state = { failReads: false, writes: 0 };
+		const fs: IPrefsFs = {
+			fsStat: async () => ({ exists: file !== undefined }),
+			fsReadJson: async <T,>() => {
+				if (state.failReads) throw new Error('storage backend unavailable');
+				return JSON.parse(JSON.stringify(file)) as T;
+			},
+			fsMkdir: async () => undefined,
+			fsWriteJson: async (_path: string, obj: unknown) => { state.writes += 1; file = JSON.parse(JSON.stringify(obj)); },
+		};
+		return { fs, state, stored: () => file as { version: number; owners: Record<string, { prefs: Record<string, unknown> }>; [key: string]: unknown } };
+	}
+
+	it('R2-6: window A (loaded first) writes after window B wrote its own bag: B\'s newer entry survives in STORAGE, and A\'s change lands', async () => {
+		const world = shared({ version: PREFS_FILE_VERSION, owners: { 'team-B': { at: 1, prefs: { h: 'B-old' } } } });
+		const a = options(world.fs, { owner: 'team-A' });
+		const b = options(world.fs, { owner: 'team-B' });
+		const prefsA = createFsPrefs(a.opts);
+		const prefsB = createFsPrefs(b.opts);
+		await prefsA.load();
+		await prefsB.load();
+		prefsB.setPref('h', 'B-new');
+		await b.clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefsB.flush();
+		prefsA.setPref('h', 'A-new');
+		await a.clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefsA.flush();
+		await settle();
+		assert.deepEqual(world.stored().owners['team-B'].prefs, { h: 'B-new' }, 'B\'s newer bag was not reverted');
+		assert.deepEqual(world.stored().owners['team-A'].prefs, { h: 'A-new' });
+	});
+
+	it('a field a newer client added between load and write is kept (the merge is from the fresh read)', async () => {
+		const world = shared({ version: PREFS_FILE_VERSION, owners: {} });
+		const { clock, opts } = options(world.fs, { owner: 'team-A' });
+		const prefs = createFsPrefs(opts);
+		await prefs.load();
+		const file = world.stored();
+		file.note = 'added by another client';
+		file.owners['team-Z'] = { prefs: { z: 1 } };
+		prefs.setPref('h', 1);
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		const after = world.stored();
+		assert.equal(after.note, 'added by another client');
+		assert.deepEqual(after.owners['team-Z'], { prefs: { z: 1 } });
+		assert.deepEqual(after.owners['team-A'].prefs, { h: 1 });
+	});
+
+	it('when the fresh read fails nothing is written: the change stays in memory, the failure is reported, and a later success lands it', async () => {
+		const world = shared({ version: PREFS_FILE_VERSION, owners: { 'team-B': { at: 1, prefs: { h: 'B' } } } });
+		const errors: string[] = [];
+		const { clock, opts } = options(world.fs, { owner: 'team-A', onError: (_error, phase) => errors.push(phase) });
+		const prefs = createFsPrefs(opts);
+		await prefs.load();
+		world.state.failReads = true;
+		prefs.setPref('h', 'A');
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		assert.equal(world.state.writes, 0, 'no write on a failed fresh read');
+		assert.ok(errors.includes('write'));
+		assert.equal(prefs.getPref('h'), 'A', 'still in memory');
+		world.state.failReads = false;
+		await prefs.flush();
+		await settle();
+		assert.deepEqual(world.stored().owners['team-A'].prefs, { h: 'A' });
+		assert.deepEqual(world.stored().owners['team-B'].prefs, { h: 'B' });
+	});
+
+	it('R2-5: malformed entries do not count toward the owner cap and never push a well-formed owner out', async () => {
+		const owners: Record<string, unknown> = {};
+		for (let i = 0; i < 7; i += 1) owners[`junk-${i}`] = `bad-${i}`;
+		owners['team-B'] = { at: 5, prefs: { b: 1 } };
+		owners['team-C'] = { at: 6, prefs: { c: 1 } };
+		const world = shared({ version: PREFS_FILE_VERSION, owners });
+		const { clock, opts } = options(world.fs, { owner: 'team-A' });
+		const prefs = createFsPrefs(opts);
+		await prefs.load();
+		prefs.setPref('h', 1);
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		const ids = Object.keys(world.stored().owners);
+		for (let i = 0; i < 7; i += 1) assert.ok(ids.includes(`junk-${i}`), `junk-${i} is carried`);
+		for (const id of ['team-A', 'team-B', 'team-C']) assert.ok(ids.includes(id), `${id} is kept`);
 	});
 });
