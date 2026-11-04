@@ -1246,4 +1246,3 @@ test('B4: a probe that never answers is not waited for past REPROBE_WAIT_MS: the
 	assert.equal(probes, 2, 'and Refresh is asked again');
 	store.dispose();
 });
-

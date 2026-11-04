@@ -102,4 +102,3 @@ export function documentFocus<T extends IFocusCandidate>(root: IFocusRoot<T> | n
 	if (root === null) return firstFocusable([opener]);
 	return firstFocusable([opener, root.querySelector('[data-document-tabs] [aria-pressed="true"]'), root.querySelector('[data-document-gone]'), ...Array.from(root.querySelectorAll(TABBABLE))]);
 }
-

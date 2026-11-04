@@ -580,4 +580,3 @@ test("live B10: a document's write slot is inside its surface, so Write details 
 	assert.match(code('VectorDevTool.tsx'), /<div ref=\{root\} style=\{styles\.document\} data-document=\{objectId\}>[\s\S]*?<div style=\{styles\.documentBody\}>[\s\S]*?<DocumentWriteLine /);
 	assert.match(code('components/WriteAuditDetails.tsx'), /node\.closest<HTMLElement>\('\[data-console\], \[data-document\]'\)/);
 });
-

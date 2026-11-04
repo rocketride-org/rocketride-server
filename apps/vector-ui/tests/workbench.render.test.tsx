@@ -253,4 +253,3 @@ test("B10: a document surface says what its own write did, in a fixed slot of th
 	const hubSlot = hub.slice(hub.lastIndexOf('<div', hub.indexOf('data-bottom-slot=""')), hub.indexOf('data-bottom-slot=""'));
 	assert.equal(slotTag(empty), hubSlot, "the hub's bottom slot, exactly");
 });
-

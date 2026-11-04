@@ -240,4 +240,3 @@ test("R2-B7: a store's words without a leading exception or class name", async (
 	assert.equal(withoutExceptionName('Error: '), 'Error: ', 'nothing left: the text as it was');
 	assert.equal(EMPTY.unreachable('ResponseHandlingException: The store could not be reached.'), 'Store unreachable: The store could not be reached.');
 });
-
