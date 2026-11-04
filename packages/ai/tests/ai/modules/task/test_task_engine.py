@@ -24,17 +24,21 @@ Two methods are already exercised by separate, security-focused tests:
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import hashlib
+import inspect
 import json
 import os
 import sys
+import textwrap
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from ai.constants import CONST_STATUS_HISTORY_LIMIT
+from ai.modules.task import task_engine
 from ai.modules.task.task_engine import (
     CONST_TRACE_PAYLOAD_CAP,
     CONST_TRACE_PREVIEW_BYTES,
@@ -2417,3 +2421,59 @@ async def test_data_channel_disconnect_fails_pending_requests(reason, expected):
     with pytest.raises(ConnectionError, match=expected):
         await asyncio.wait_for(pending, timeout=1)
     assert parent._data_client is None
+
+
+# ---------------------------------------------------------------------------
+# _build_task_metrics
+# ---------------------------------------------------------------------------
+
+
+def test_build_task_metrics_hands_the_payer_and_owner_kind_to_the_meter(monkeypatch):
+    meter_cls = MagicMock()
+    monkeypatch.setattr(task_engine, 'TaskMetrics', meter_cls)
+    t = _task()
+    t._run_kind = 'deploy'
+    t._owner_kind = 'team'
+    t._run_trigger = 'schedule'
+    t._on_metrics_updated = MagicMock()
+    t._server = MagicMock()
+    t._server.get_task_control.return_value = SimpleNamespace(userId='', teamId='team-1', orgId='org-1')
+
+    Task._build_task_metrics(t, 4321)
+
+    meter_cls.assert_called_once()
+    kwargs = meter_cls.call_args.kwargs
+    assert kwargs['pid'] == 4321
+    assert kwargs['user_id'] == ''
+    assert kwargs['team_id'] == 'team-1'
+    assert kwargs['org_id'] == 'org-1'
+    assert kwargs['owner_kind'] == 'team'
+    assert kwargs['run_kind'] == 'deploy'
+    assert kwargs['trigger'] == 'schedule'
+    assert kwargs['task_id'] == 'task-test'
+
+
+def test_start_task_builds_its_meter_through_build_task_metrics():
+    # start_task spawns a subprocess and is not unit-drivable, so this one is static.
+    def calls(func):
+        tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
+        return [n for n in ast.walk(tree) if isinstance(n, ast.Call)]
+
+    start_calls = calls(Task.start_task)
+    assert '_build_task_metrics' in {c.func.attr for c in start_calls if isinstance(c.func, ast.Attribute)}
+    assert 'TaskMetrics' not in {c.func.id for c in start_calls if isinstance(c.func, ast.Name)}
+
+    meters = [c for c in calls(Task._build_task_metrics) if isinstance(c.func, ast.Name) and c.func.id == 'TaskMetrics']
+    assert len(meters) == 1
+    assert {k.arg for k in meters[0].keywords} >= {
+        'pid',
+        'task_status',
+        'task_id',
+        'client_id',
+        'user_id',
+        'team_id',
+        'org_id',
+        'owner_kind',
+        'run_kind',
+        'trigger',
+    }

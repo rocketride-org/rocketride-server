@@ -281,13 +281,15 @@ class AccountBase(ABC):
     async def apply_debit(
         self,
         org_id: str,
-        user_id: str,
+        user_id: str | None,
         team_id: str | None,
         resource: str,
         amount: float,
         idempotency_key: str,
         context: dict,
         description: str | None = None,
+        owner_kind: str = 'user',
+        run_id: str | None = None,
     ) -> bool:
         """
         Debit an org's ledger (UPSERT for task usage).
@@ -300,13 +302,15 @@ class AccountBase(ABC):
 
         Args:
             org_id:          Organisation to debit.
-            user_id:         User whose task triggered the burn (required for attribution).
+            user_id:         The actor for a user-owned run; None for a team-owned run, which has no actor.
             team_id:         Team the task belongs to (None when task has no team scope).
             resource:        Billing bucket (e.g. tokens, video, audio).
             amount:          Positive amount to debit (negated internally).
             idempotency_key: Namespaced dedup key (e.g. ``task:abc123:gpu_memory``).
             context:         Human-readable audit context — pipeline name, source, etc.
             description:     Line-item detail (e.g. gpu_memory, cpu_utilization).
+            owner_kind:      'user' or 'team', the payer classification the trusted dispatch stamped on the run.
+            run_id:          The meter's billing run id; the idempotency key is ``task:{run_id}:{description}``.
 
         Returns:
             True on success, False on duplicate or no-op.

@@ -2500,6 +2500,25 @@ class Task(DAPBase):
             self._restart_env = None
             self._restart_in_progress = False
 
+    def _build_task_metrics(self, pid: int) -> TaskMetrics:
+        """Build this run's meter: payer from the task control, owner kind and trigger from the trusted dispatch."""
+        control = self._server.get_task_control(self.token) if self.token else None
+        return TaskMetrics(
+            pid=pid,
+            task_status=self._status,
+            task_id=self.id,
+            client_id=self.client_id,
+            user_id=getattr(control, 'userId', '') if control else '',
+            team_id=getattr(control, 'teamId', '') if control else '',
+            org_id=getattr(control, 'orgId', '') if control else '',
+            pipeline_name=self._task_name or '',
+            source_name=self._status.name or self.source or '',
+            on_update_callback=self._on_metrics_updated,
+            owner_kind=self._owner_kind,
+            run_kind=self._run_kind,
+            trigger=self._run_trigger,
+        )
+
     async def start_task(self) -> None:
         """
         Launch subprocess and initialize communication interfaces.
@@ -2740,20 +2759,7 @@ class Task(DAPBase):
 
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
-                # Resolve billing identity from task control
-                _control = self._server.get_task_control(self.token) if self.token else None
-                self._task_metrics = TaskMetrics(
-                    pid=self._engine_process.pid,
-                    task_status=self._status,
-                    task_id=self.id,
-                    client_id=self.client_id,
-                    user_id=getattr(_control, 'userId', '') if _control else '',
-                    team_id=getattr(_control, 'teamId', '') if _control else '',
-                    org_id=getattr(_control, 'orgId', '') if _control else '',
-                    pipeline_name=self._task_name or '',
-                    source_name=self._status.name or self.source or '',
-                    on_update_callback=self._on_metrics_updated,
-                )
+                self._task_metrics = self._build_task_metrics(self._engine_process.pid)
                 self._task_metrics.start_monitoring()
                 self.debug_message(f'Started metrics monitoring for PID {self._engine_process.pid}')
             except Exception as e:
