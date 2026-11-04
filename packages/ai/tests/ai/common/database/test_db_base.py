@@ -1168,6 +1168,52 @@ def test_write_questions_reports_a_clickhouse_failure_on_the_lanes():
     assert fake_instance.answer_written.getJson() == {'error': 'Query execution failed'}
 
 
+def _empty_widgets_global(base):
+    """Return a stub IGlobal whose generated SQL runs read-only on ``base``, where table ``widgets`` has no row.
+
+    Args:
+        base: The SQLite-backed DatabaseGlobalBase fixture.
+
+    Returns:
+        The stub, with EXPLAIN accepting every query.
+    """
+    with base.engine.begin() as conn:
+        conn.exec_driver_sql('CREATE TABLE widgets (id INTEGER)')
+    fake_global = _FakeGlobal()
+    fake_global._validateQuery = lambda sql: (True, None)
+    fake_global.read_only_connection = base.read_only_connection
+    return fake_global
+
+
+def _ask_for_widgets(fake_global):
+    """Return an instance on ``fake_global`` whose LLM translates every question into ``SELECT id FROM widgets``.
+
+    Args:
+        fake_global: The stub IGlobal the instance queries.
+
+    Returns:
+        The instance.
+    """
+    inst = _sql_instance(fake_global)
+    inst._buildSQLQueryOnce = lambda question_text, *, limit, previous_sql, error: {
+        'isValid': True,
+        'query': 'SELECT id FROM widgets',
+    }
+    return inst
+
+
+def test_execute_sql_query_returns_an_empty_list_when_no_row_matches(base):
+    """A query that matches no row ran: [] is its result, and only None means the query failed."""
+    assert _sql_instance(_empty_widgets_global(base))._executeSQLQuery('SELECT id FROM widgets') == []
+
+
+def test_get_data_returns_no_rows_as_a_valid_result(base):
+    """get_data answers a generated query that matches no row with zero rows, not with the failure message."""
+    result = _ask_for_widgets(_empty_widgets_global(base)).get_data({'question': 'widgets'})
+
+    assert result == {'valid': True, 'rows': [], 'sql': 'SELECT id FROM widgets', 'row_limit': 250}
+
+
 @pytest.mark.parametrize('reply', [{'isValid': False}, {'isValid': True, 'query': None}])
 def test_write_questions_reports_a_reply_without_query_or_answer(reply):
     """An LLM reply with neither SQL nor a prose answer is reported, not written as the text 'None'."""
