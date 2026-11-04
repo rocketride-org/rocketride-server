@@ -337,3 +337,42 @@ describe('createFrameCaller — waits for its controller (CE-9)', () => {
 	});
 });
 
+describe('createFrameCaller — identity fence (DA-R1-06)', () => {
+	it('an answer to a call issued under identity A is discarded as stale once the frame is under B; a call issued under B is fine', async () => {
+		const h = createDevToolHarness();
+		let release: (value: number) => void = () => undefined;
+		const gate = new Promise<number>((resolve) => { release = resolve; });
+		const attached = attachController<FrameOps>({
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
+			createToolOpServer: shellProtocol.createToolOpServer,
+			handlers: { 'f.echo': async (params) => (params.x === 1 ? gate : params.x) },
+		});
+		let identity: string | null = 'A';
+		const caller = createFrameCaller<FrameOps>({ ...frameOf(h), identityNow: () => identity });
+		await settle();
+		const underA = caller.callReply('f.echo', { x: 1 }, { timeoutMs: 5_000 });
+		await settle();
+		identity = 'B';
+		release(111);
+		await assert.rejects(underA, (error: unknown) => error instanceof ExplorerToolError && error.kind === 'stale' && error.tool === 'f.echo');
+		assert.equal(await caller.callReply('f.echo', { x: 2 }, { timeoutMs: 5_000 }), 2);
+		caller.dispose();
+		attached.dispose();
+	});
+
+	it('a FAILURE that arrives after the identity changed is stale too, and without identityNow nothing changes', async () => {
+		const h = createDevToolHarness();
+		const stop = serve(h);
+		let identity: string | null = 'A';
+		const fenced = createFrameCaller<FrameOps>({ ...frameOf(h), identityNow: () => identity });
+		const plain = createFrameCaller<FrameOps>({ ...frameOf(h) });
+		await settle();
+		const failing = fenced.callReply('f.read', { q: 'bad' }, { timeoutMs: 5_000 });
+		identity = null;
+		await assert.rejects(failing, (error: unknown) => error instanceof ExplorerToolError && error.kind === 'stale');
+		assert.deepEqual(await plain.callReply('f.read', { q: 'ok' }, { timeoutMs: 5_000 }), { rows: [1, 2] });
+		fenced.dispose();
+		plain.dispose();
+		stop();
+	});
+});

@@ -59,6 +59,11 @@
 //     succeed. A stale nonce left by a dead controller is bounded the same
 //     way, by the deadline. `waitForController: false` sends at once (a
 //     controller that publishes no readiness).
+//   - IDENTITY FENCE (optional, `identityNow`). A call is bound to the identity
+//     fingerprint at the moment it is issued; if the frame is under another
+//     identity when the answer arrives, the answer is discarded and the call
+//     rejects as kind `stale` (callers ignore it), so account A's answer never
+//     reaches a frame that has adopted B.
 //   - `dispose` (the effect cleanup) stops following host:connection and
 //     rejects what is still pending as `stale`, which callers ignore.
 // =============================================================================
@@ -93,6 +98,13 @@ export interface IFrameCallerOptions {
 	now?: () => number;
 	/** Hold calls until the controller publishes readiness (default true; see the header). */
 	waitForController?: boolean;
+	/**
+	 * The identity fingerprint the frame is under now (frameIdentity.ts guard
+	 * `first()`/current, or the tracker's). A call is bound to it when issued,
+	 * and its answer, success or failure, is discarded as kind `stale` if the
+	 * identity changed before it arrived.
+	 */
+	identityNow?: () => string | null;
 }
 
 /** A frame's way to call its controller. */
@@ -219,6 +231,13 @@ export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions
 		if (connected === false) {
 			return Promise.reject(new ExplorerToolError({ kind: 'unavailable', tool: op, message: `Not connected to a server, so '${op}' was not sent.` }));
 		}
+		const issuedUnder = opts.identityNow?.() ?? null;
+		const changedSince = (): boolean => opts.identityNow !== undefined && (opts.identityNow() ?? null) !== issuedUnder;
+		const staleIdentity = (): ExplorerToolError => new ExplorerToolError({
+			kind: 'stale',
+			tool: op,
+			message: `'${op}' was answered after the identity changed; the answer was discarded.`,
+		});
 		const args = stampDeadline(params as object | undefined, timeoutMs, now);
 		const { deadlineAt } = args;
 		return new Promise<unknown>((resolve, reject) => {
@@ -242,8 +261,8 @@ export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions
 				}
 				entry.sent = true;
 				send(op, args, { timeoutMs: left }).then(
-					(value) => { if (settle(entry)) resolve(value); },
-					(error: unknown) => { if (settle(entry)) reject(mapFailure(op, error)); },
+					(value) => { if (settle(entry)) { if (changedSince()) reject(staleIdentity()); else resolve(value); } },
+					(error: unknown) => { if (settle(entry)) reject(changedSince() ? staleIdentity() : mapFailure(op, error)); },
 				);
 			};
 			if (!waitForController || ready !== null) {
