@@ -106,9 +106,8 @@ def test_a_package_with_files_outside_its_node_is_refused(nodes):
 
 
 def test_an_unpack_that_was_killed_is_swept_once_it_is_old(nodes):
-    parent = os.path.dirname(nodes)
-    old = os.path.join(parent, '.rrnode-staging-old')
-    fresh = os.path.join(parent, '.rrnode-staging-fresh')
+    old = os.path.join(nodes, '.rrnode-staging-old')
+    fresh = os.path.join(nodes, '.rrnode-staging-fresh')
     os.makedirs(old)
     os.makedirs(fresh)
     hour_ago = time.time() - 3700
@@ -118,3 +117,21 @@ def test_an_unpack_that_was_killed_is_swept_once_it_is_old(nodes):
     node_packages.unpack('railnode', data, sha256, nodes)
 
     assert not os.path.exists(old) and os.path.exists(fresh)
+
+
+def test_a_package_unpacks_when_only_nodes_is_writable(nodes, monkeypatch):
+    # A read-only root with nodes/ mounted writable, as the Helm chart runs it
+    mkdtemp = node_packages.tempfile.mkdtemp
+
+    def only_in_nodes(dir=None, **kwargs):
+        if os.path.abspath(dir) != os.path.abspath(nodes):
+            raise OSError(30, 'Read-only file system', dir)
+        return mkdtemp(dir=dir, **kwargs)
+
+    monkeypatch.setattr(node_packages.tempfile, 'mkdtemp', only_in_nodes)
+    data, sha256 = _package()
+
+    node_dir = node_packages.unpack('railnode', data, sha256, nodes)
+
+    assert node_packages.digest_of(node_dir) == sha256
+    assert os.listdir(nodes) == ['railnode']

@@ -102,14 +102,13 @@ def start() -> None:
 
 
 def _unwritable(nodes_dir: str) -> Optional[str]:
-    """Why a node cannot be unpacked into nodes_dir, or None: it is staged beside nodes/ and moved in."""
-    for path in (os.path.dirname(os.path.abspath(nodes_dir)), nodes_dir):
-        try:
-            # A real write: os.access does not see read-only mounts
-            with tempfile.NamedTemporaryFile(dir=path):
-                pass
-        except OSError as e:
-            return f'{path} is not writable ({e})'
+    """Why a node cannot be unpacked into nodes_dir, or None: it is staged in nodes/ and moved in place."""
+    try:
+        # A real write: os.access does not see read-only mounts
+        with tempfile.NamedTemporaryFile(dir=nodes_dir):
+            pass
+    except OSError as e:
+        return f'{nodes_dir} is not writable ({e})'
     return None
 
 

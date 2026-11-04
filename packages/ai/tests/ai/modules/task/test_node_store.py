@@ -219,6 +219,21 @@ def test_a_read_only_install_serves_nothing_and_says_so_once(server, monkeypatch
     assert 'not writable' in server['warnings'][0] and 'llm_x' in server['warnings'][0]
 
 
+def test_an_install_writable_only_in_nodes_serves_its_nodes(server, monkeypatch):
+    named = node_store.tempfile.NamedTemporaryFile
+
+    def only_in_nodes(dir=None, **kwargs):
+        if dir != server['nodes']:
+            raise OSError(30, 'Read-only file system', dir)
+        return named(dir=dir, **kwargs)
+
+    monkeypatch.setattr(node_store.tempfile, 'NamedTemporaryFile', only_in_nodes)
+
+    node_store.start()
+
+    assert server['warnings'] == [] and node_store.served('provider_x') is not None
+
+
 def test_the_autopipe_filters_are_the_ones_autopipe_inserts():
     source = pathlib.Path(__file__).resolve().parents[6] / 'nodes' / 'src' / 'nodes' / 'autopipe' / 'IGlobal.py'
     inserted = set(re.findall(r"getFilter\('[^']+', '([^']+)'", source.read_text(encoding='utf-8')))
