@@ -144,6 +144,14 @@ def test_every_flush_of_one_object_is_kept(store_env):
     assert _rows(raw, table) == [('big', 0, 'again'), ('big', 1, 'again')]
 
 
+def test_a_repeated_chunk_without_chunk_zero_replaces_the_stored_row(store_env):
+    """Deliberate deviation from #2962, which keeps both copies: a stored chunk number sent again replaces it."""
+    store, raw, table = store_env
+    store.addChunks([_doc('a', 0, 'a0'), _doc('a', 1, 'a1'), _doc('a', 2, 'a2'), _doc('b', 0, 'b0')])
+    store.addChunks([_doc('a', 1, 'a1 corrected')])
+    assert _rows(raw, table) == [('a', 0, 'a0'), ('a', 1, 'a1 corrected'), ('a', 2, 'a2'), ('b', 0, 'b0')]
+
+
 def test_failed_batch_rolls_back_deletion_and_partial_inserts(store_env):
     import psycopg2
 

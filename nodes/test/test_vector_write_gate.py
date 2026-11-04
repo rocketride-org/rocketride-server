@@ -462,6 +462,7 @@ class _Instance(StoreInstanceBase, IInstanceBase):
 def _instance(store) -> _Instance:
     inst = object.__new__(_Instance)
     inst.IGlobal = SimpleNamespace(store=store)
+    inst._objectIdsWritten = set()  # what the engine's open() sets before any lane writes (#2962)
     return inst
 
 
