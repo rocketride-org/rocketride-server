@@ -646,10 +646,27 @@ files, so domains never edit the same lines. Domain-specific notes (which
 suites, which servers, how to regenerate fixtures) live in the header comment of
 the domain's registration file or in the app's own docs.
 
+Registering changes behavior only for the suites registered. With no
+registration `nodes:test` is what it was: no live pass, the mocked pass leaves
+`*_full.py` out by glob and `nodes:test-full` collects everything. The suites
+that exist on develop (`DEVELOP_DB_SUITES` in `tasks.js`) keep that behavior
+until a domain lists one in its `suites`: they stay out of `nodes:test`
+(`test_pgvector_search.py`, which is not named `*_full`, stays in its mocked
+pass). Listing one moves it to the unmocked live pass and, with
+`RR_REQUIRE_DB_TESTS` set as on the Linux CI leg, makes it required: a change
+to CI for every PR, so the domain's PR says so.
+
+The live pass runs in one process in a fixed order that does not depend on
+which domains exist: the registered `DEVELOP_DB_SUITES` in that list's order,
+then each domain's other suites (domains by file name, suites as listed). The
+suites share the test databases and each is written to create and remove its own
+tables, graphs or collections, so order should not matter; the runner does not
+enforce that.
+
 `nodes/test/test_db_lane_guard.py` checks the registry: every registration is
 well-formed, every suite file exists and is registered exactly once, and every
 `nodes/test/test_*.py` that reads a live-database variable from the environment (`RR_REQUIRE_DB_TESTS`
-or an `RR_TEST_*_DSN`/`_URI`/`_URL`) is registered, so a new live suite cannot
+or an `RR_TEST_*_DSN`/`_URI`/`_URL`) is registered or listed in `DEVELOP_DB_SUITES`, so a new live suite cannot
 be collected by the mocked pass by mistake. Name new suites `test_*_full.py`.
 
 ```bash

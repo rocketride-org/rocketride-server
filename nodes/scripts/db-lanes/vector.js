@@ -10,10 +10,14 @@
  * `test_store_postgres_full.py` (PostgreSQL with pgvector), `test_store_qdrant_full.py`
  * (Qdrant) and `test_store_chroma_full.py` (Chroma) drive the shared drivers behind
  * the vector stores on new and legacy-shaped collections; they stub the engine
- * surface themselves. (The suites that predate this domain, `test_rocketride_db_full.py`,
- * `test_rocketride_vector_tools_full.py`, `test_vector_store_writes_full.py`,
- * `test_vector_store_listing_full.py` and `test_pgvector_search.py`, are registered by
- * `rocketride-db.js`.) `test_vector_toolpath_full.py` does not stub: it starts the
+ * surface themselves. The suites that exist on develop and this domain changed
+ * (`test_rocketride_db_full.py`, `test_rocketride_vector_tools_full.py`,
+ * `test_vector_store_writes_full.py`, `test_vector_store_listing_full.py` and
+ * `test_pgvector_search.py`) are listed below: a deliberate CI change of this PR. On
+ * develop `nodes:test` leaves the four `*_full.py` suites out (its mocked pass globs them
+ * away; only `nodes:test-full` collects them) and runs `test_pgvector_search.py` in its
+ * mocked pass; here all five run in the unmocked live pass, required on the Linux CI leg.
+ * `test_vector_toolpath_full.py` does not stub: it starts the
  * engine in `dist/server` (build it first) with a stand-in for the cloud database
  * broker, starts each shipped Vector Explorer template (`apps/vector-ui/templates`)
  * against the test servers, and calls its store and `embed` tools through the Python
@@ -46,6 +50,12 @@
 module.exports = {
 	name: 'vector',
 	suites: [
+		// develop's pgvector suites (see the header: a CI behavior change).
+		'test_rocketride_db_full.py',
+		'test_rocketride_vector_tools_full.py',
+		'test_vector_store_listing_full.py',
+		'test_vector_store_writes_full.py',
+		'test_pgvector_search.py',
 		'test_store_postgres_full.py',
 		'test_store_qdrant_full.py',
 		'test_store_chroma_full.py',
