@@ -39,6 +39,7 @@ const {
 	isDirectory,
 	removeDir,
 	PROJECT_ROOT,
+	BUILD_ROOT,
 	DIST_ROOT,
 	OVERLAY_ROOT,
 	startServer,
@@ -92,6 +93,152 @@ const CPP_NODES = [...SRC_NODE_DIRS]
 const CPP_NODE_BUILDS = [...SRC_NODE_DIRS]
 	.filter(([name, srcDir]) => fs.existsSync(path.join(srcDir, name, 'CMakeLists.txt')))
 	.map(([name]) => `${name}:build`);
+
+// ============================================================================
+// Live database lane: registry
+// ============================================================================
+//
+// Some suites drive a real driver against a real server and stub the engine
+// surface themselves, so they need no test server; but they must run WITHOUT
+// ROCKETRIDE_MOCK, because nodes/test/mocks shadows psycopg2, qdrant_client,
+// chromadb, falkordb, ... engine-wide. The mocked pass therefore leaves these
+// files out by path (mockedPassIgnores) and a separate pass runs them.
+//
+// The suites are registered per domain, one file each in nodes/scripts/db-lanes/
+// (sorted by file name), so a domain adds its suites, its pooler pass and its
+// notes without touching this file or another domain's registration:
+//
+//   module.exports = {
+//     name: 'graph',                      // unique, kebab-case
+//     suites: ['test_graph_x_full.py'],   // files in nodes/test, registered by exactly one domain
+//     poolerSuites: ['test_graph_x_full.py'],   // optional: suites that also run through a pooler
+//     poolerEnv: 'RR_TEST_GRAPH_POOLER_DSN',    // names the pooler; unset = the pooler leg is left out
+//     poolerMode: 'second-pass',          // 'second-pass': run poolerSuites again, with
+//                                         //   secondPassEnv(poolerDsn, env) merged into the environment
+//                                         // 'in-suite': the suites parametrise their cases over the pooler
+//                                         //   themselves; with poolerEnv set each must pass a case whose
+//                                         //   test id carries "pooler"
+//     secondPassEnv: (poolerDsn, env) => ({ ... }),   // second-pass only
+//     junit: 'junit-graph-pooler.xml',    // optional, second-pass report name
+//     poolerUnsetNote: '...',             // optional: said in the task output when a required run lacks poolerEnv
+//   };
+//
+// Each suite skips when its server is unreachable, unless the databases are
+// required (nodes:test-db by default; nodes:test with RR_REQUIRE_DB_TESTS, as CI
+// runs it): then an unreachable server fails, and so does a suite in which
+// nothing passed or a test that skipped without a deliberate "NOT RUN:" reason.
+// nodes/test/test_db_lane_guard.py checks every registration.
+
+const DB_LANES_DIR = path.join(__dirname, 'db-lanes');
+const DB_POOLER_MODES = ['second-pass', 'in-suite'];
+
+// A skip whose reason starts with this is deliberate (e.g. a test that needs a
+// Neo4j Enterprise role, or a pooled case while its pooler DSN is not set); any
+// other skip under a required run fails it.
+const DB_EXPECTED_SKIP_PREFIX = 'NOT RUN:';
+
+/**
+ * Throw unless a registration is well-formed.
+ *
+ * @param {object} lane - The module.exports of a nodes/scripts/db-lanes file.
+ * @param {string} file - Its file name, for messages.
+ */
+function validateDbLane(lane, file) {
+	const fail = (why) => {
+		throw new Error(`db-lanes/${file}: ${why}`);
+	};
+	if (!lane || typeof lane !== 'object') fail('must export an object');
+	if (typeof lane.name !== 'string' || !/^[a-z][a-z0-9-]*$/.test(lane.name)) fail('name must be kebab-case');
+	const isSuite = (s) => typeof s === 'string' && /^test_[A-Za-z0-9_]+\.py$/.test(s);
+	if (!Array.isArray(lane.suites) || lane.suites.length === 0 || !lane.suites.every(isSuite)) {
+		fail('suites must be a non-empty array of test_*.py file names (no directories)');
+	}
+	if (new Set(lane.suites).size !== lane.suites.length) fail('suites lists a file twice');
+	if (lane.poolerSuites !== undefined) {
+		if (!Array.isArray(lane.poolerSuites) || lane.poolerSuites.length === 0 || !lane.poolerSuites.every(isSuite)) {
+			fail('poolerSuites must be a non-empty array of test_*.py file names');
+		}
+		if (!DB_POOLER_MODES.includes(lane.poolerMode)) fail(`poolerMode must be one of ${DB_POOLER_MODES.join(', ')}`);
+		if (typeof lane.poolerEnv !== 'string' || !/^[A-Z][A-Z0-9_]*$/.test(lane.poolerEnv)) {
+			fail('poolerEnv must name an environment variable');
+		}
+		if (lane.poolerMode === 'second-pass' && typeof lane.secondPassEnv !== 'function') {
+			fail('a second-pass pooler needs secondPassEnv(poolerDsn, env)');
+		}
+	} else if (lane.poolerMode !== undefined || lane.poolerEnv !== undefined || lane.secondPassEnv !== undefined) {
+		fail('poolerMode, poolerEnv and secondPassEnv need poolerSuites');
+	}
+	for (const key of ['junit', 'poolerUnsetNote']) {
+		if (lane[key] !== undefined && typeof lane[key] !== 'string') fail(`${key} must be a string`);
+	}
+}
+
+/**
+ * Load the registrations of a directory, sorted by file name. A suite file named
+ * twice, in one registration or two, throws.
+ *
+ * @param {string} dir - Defaults to nodes/scripts/db-lanes.
+ * @returns {object[]} The registrations, each with its `file`.
+ */
+function loadDbLanes(dir = DB_LANES_DIR) {
+	if (!fs.existsSync(dir)) return [];
+	const lanes = [];
+	const owner = new Map();
+	for (const file of fs
+		.readdirSync(dir)
+		.filter((f) => f.endsWith('.js'))
+		.sort()) {
+		const lane = require(path.join(dir, file));
+		validateDbLane(lane, file);
+		if (lanes.some((l) => l.name === lane.name)) throw new Error(`db-lanes/${file}: name "${lane.name}" is taken`);
+		for (const suite of lane.suites) {
+			if (owner.has(suite)) {
+				throw new Error(`db-lanes/${file}: ${suite} is already registered by ${owner.get(suite)}`);
+			}
+			owner.set(suite, file);
+		}
+		lanes.push({ ...lane, file });
+	}
+	for (const lane of lanes) {
+		for (const suite of lane.poolerSuites || []) {
+			if (!owner.has(suite)) {
+				throw new Error(`db-lanes/${lane.file}: poolerSuites names ${suite}, which no registration lists`);
+			}
+		}
+	}
+	return lanes;
+}
+
+const DB_LANES = loadDbLanes();
+// Every registered suite, in registration order: one process, since they share database fixtures.
+const DB_LIVE_SUITES = DB_LANES.flatMap((lane) => lane.suites);
+
+/**
+ * The collection ignores of the mocked pass. Without test_full every
+ * test_*_full.py is left out by glob; in both modes the live database suites
+ * are also left out by absolute path. pytest makes an --ignore-glob pattern
+ * absolute against its working directory before matching, so the glob holds
+ * only when pytest runs from nodes/ (as this module starts it) or a directory
+ * that contains it; from dist/server, say, it matches nothing, serially or
+ * under xdist. A path holds wherever pytest runs.
+ */
+function mockedPassIgnores(testFull, suites = DB_LIVE_SUITES) {
+	const args = testFull ? [] : ['--ignore-glob', '**/test_*_full.py', '--ignore-glob', '**/test_*_full/**'];
+	for (const suite of suites) args.push('--ignore', path.join(TEST_DIR, suite));
+	return args;
+}
+
+/**
+ * Whether the live databases are required: RR_REQUIRE_DB_TESTS when set
+ * ('0', 'false', 'no' and 'off' mean no), otherwise the action's default.
+ */
+function dbTestsRequired(byDefault) {
+	const raw = String(process.env.RR_REQUIRE_DB_TESTS || '')
+		.trim()
+		.toLowerCase();
+	if (!raw) return !!byDefault;
+	return !['0', 'false', 'no', 'off'].includes(raw);
+}
 
 // ============================================================================
 // Action Factories
@@ -197,7 +344,7 @@ function makeRunPytestAction(options = {}) {
 				testEnv.ROCKETRIDE_URI = parseServerAddress(options.taskserver).uri;
 			}
 
-			// Use absolute paths since cwd is dist/server
+			// Absolute paths: the engine is dist/server's, pytest runs from nodes/ (PACKAGE_DIR)
 			const extraArgs = ['-v', '--rootdir', PACKAGE_DIR];
 
 			// Warmup only concerns the dynamic tests; collecting just those keeps it quick.
@@ -206,9 +353,8 @@ function makeRunPytestAction(options = {}) {
 				extraArgs.unshift(path.join(TEST_DIR, 'test_dynamic.py'));
 			}
 
-			if (!options.test_full) {
-				extraArgs.push('--ignore-glob', '**/test_*_full.py', '--ignore-glob', '**/test_*_full/**');
-			}
+			// The live database suites run in their own unmocked pass (makeRunDbPytestAction).
+			extraArgs.push(...mockedPassIgnores(options.test_full));
 
 			// Exclude skip_node tests by default (same as skip_nodes in pytest_generate_tests for dynamic tests)
 			const pytestTokens = splitPytestOpts(options.pytest);
@@ -345,6 +491,160 @@ function makeInstallTestDepsAction() {
 	};
 }
 
+// Runs DB_LIVE_SUITES in one process (they share database fixtures, so no
+// xdist) without ROCKETRIDE_MOCK. A domain that registers a pooler adds, when
+// its poolerEnv is set, either a second pass of its poolerSuites with
+// secondPassEnv applied (poolerMode 'second-pass') or a check that each of them
+// passed a pooled case in the live pass ('in-suite'). When the databases are
+// required (options.requireDb, nodes:test-db; or RR_REQUIRE_DB_TESTS) every
+// suite must pass at least one test, and no test may skip without a "NOT RUN:"
+// reason: a suite whose tests skip proves nothing about the database it was
+// written for.
+function makeRunDbPytestAction(options = {}) {
+	return {
+		run: async (ctx, task) => {
+			if (DB_LIVE_SUITES.length === 0) return;
+			require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
+			const required = dbTestsRequired(options.requireDb);
+			const testEnv = { ...process.env };
+			delete testEnv.ROCKETRIDE_MOCK;
+			// The suites read the variable themselves (unreachable server -> fail, not skip).
+			if (required) testEnv.RR_REQUIRE_DB_TESTS = '1';
+			else delete testEnv.RR_REQUIRE_DB_TESTS;
+
+			const reportDir = path.join(BUILD_ROOT, 'nodes-db-tests');
+			await fs.promises.mkdir(reportDir, { recursive: true });
+			const passes = [{ suites: DB_LIVE_SUITES, report: 'junit.xml', env: testEnv, pooled: [] }];
+			for (const lane of DB_LANES) {
+				if (!lane.poolerSuites) continue;
+				const poolerDsn = String(testEnv[lane.poolerEnv] || '').trim();
+				if (!poolerDsn) {
+					if (required) {
+						const fallback = `${lane.poolerEnv} is not set: the ${lane.name} pooler leg is not run`;
+						const note = lane.poolerUnsetNote || fallback;
+						task.output = task.output ? `${task.output}\n${note}` : note;
+					}
+					continue;
+				}
+				if (lane.poolerMode === 'in-suite') {
+					passes[0].pooled.push({ lane, suites: lane.poolerSuites });
+				} else {
+					passes.push({
+						suites: lane.poolerSuites,
+						report: lane.junit || `junit-${lane.name}-pooler.xml`,
+						env: { ...testEnv, ...lane.secondPassEnv(poolerDsn, testEnv) },
+						pooled: [],
+					});
+				}
+			}
+
+			const pytestTokens = splitPytestOpts(options.pytest);
+			for (const pass of passes) {
+				const suites = pass.suites.map((suite) => path.join(TEST_DIR, suite));
+				const report = path.join(reportDir, pass.report);
+				await fs.promises.rm(report, { force: true });
+				await runPytest({
+					engine: ENGINE,
+					testsDir: suites[0],
+					extraArgs: [
+						...suites.slice(1),
+						'-v',
+						'-rs',
+						'--rootdir',
+						PACKAGE_DIR,
+						'-p',
+						'no:xdist',
+						`--junitxml=${report}`,
+						...withoutXdistArgs(pytestTokens),
+					],
+					execOpts: { task, cwd: PACKAGE_DIR, env: pass.env },
+				});
+				if (required) {
+					const xml = await fs.promises.readFile(report, 'utf8');
+					checkRequiredDbResults(xml, pass.suites, pass.report);
+					for (const { lane, suites: pooledSuites } of pass.pooled) {
+						checkPooledCases(xml, pooledSuites, pass.report, lane.poolerEnv);
+					}
+				}
+			}
+		},
+	};
+}
+
+/**
+ * Throw unless every suite passed at least one test and every skip in the
+ * report is a deliberate "NOT RUN:" one.
+ */
+function checkRequiredDbResults(xml, suites, label = 'junit.xml') {
+	const counts = countJunitResults(xml);
+	const names = suites.map((suite) => path.basename(suite, '.py'));
+	const empty = names.filter((name) => !(counts[name]?.passed > 0));
+	if (empty.length > 0) {
+		throw new Error(`The live databases are required but no test passed in: ${empty.join(', ')} (${label})`);
+	}
+	const unexpected = names.flatMap((name) => counts[name].unexpectedSkips);
+	if (unexpected.length > 0) {
+		throw new Error(
+			`The live databases are required but ${unexpected.length} test(s) skipped without a ` +
+				`${DB_EXPECTED_SKIP_PREFIX} reason (${label}):\n  ${unexpected.join('\n  ')}`
+		);
+	}
+}
+
+/**
+ * Throw unless every suite passed at least one pooled case: a test whose id
+ * carries "pooler" (cases a suite parametrises over its pooler DSN).
+ */
+function checkPooledCases(xml, suites, label = 'junit.xml', envName = 'the pooler DSN') {
+	const names = suites.map((suite) => path.basename(suite, '.py'));
+	const counts = countJunitResults(xml);
+	const missing = names.filter((name) => !(counts[name]?.pooledPassed > 0));
+	if (missing.length > 0) {
+		throw new Error(`${envName} is set but no pooled case passed in: ${missing.join(', ')} (${label})`);
+	}
+}
+
+function unescapeXml(text) {
+	return text
+		.replace(/&quot;/g, '"')
+		.replace(/&apos;/g, "'")
+		.replace(/&lt;/g, '<')
+		.replace(/&gt;/g, '>')
+		.replace(/&#(\d+);/g, (_m, code) => String.fromCharCode(Number(code)))
+		.replace(/&amp;/g, '&');
+}
+
+// Per-module passed/skipped/failed counts from a pytest JUnit report, with the
+// skips whose reason does not start with "NOT RUN:" and the passed cases whose
+// id carries "pooler". Test cases are attributed by the module name in their
+// classname ("test_x" or "test_x.Class").
+function countJunitResults(xml) {
+	const counts = {};
+	const caseRe = /<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g;
+	let match;
+	while ((match = caseRe.exec(xml)) !== null) {
+		const classname = (/classname="([^"]*)"/.exec(match[1]) || [])[1] || '';
+		const testName = unescapeXml((/\bname="([^"]*)"/.exec(match[1]) || [])[1] || '');
+		const module = classname.split('.').find((part) => part.startsWith('test_')) || classname;
+		const body = match[3] || '';
+		const entry =
+			counts[module] ||
+			(counts[module] = { passed: 0, skipped: 0, failed: 0, pooledPassed: 0, unexpectedSkips: [] });
+		const skipped = /<skipped\b([^>]*)/.exec(body);
+		if (skipped) {
+			entry.skipped += 1;
+			const reason = unescapeXml((/message="([^"]*)"/.exec(skipped[1]) || [])[1] || '');
+			if (!reason.startsWith(DB_EXPECTED_SKIP_PREFIX))
+				entry.unexpectedSkips.push(`${module}::${testName}: ${reason}`);
+		} else if (/<(failure|error)\b/.test(body)) entry.failed += 1;
+		else {
+			entry.passed += 1;
+			if (/pooler/.test(testName)) entry.pooledPassed += 1;
+		}
+	}
+	return counts;
+}
+
 function makeTestAction(options = {}) {
 	if (options.warmup && !['plan', 'off'].includes(options.warmup)) {
 		throw new Error(`--warmup=${options.warmup}: expected 'plan' or 'off'`);
@@ -381,6 +681,10 @@ function makeTestAction(options = {}) {
 			steps: [{ name: runName, action: makeRunPytestAction(options) }],
 		})
 	);
+	// Live database suites need no test server, only their databases.
+	if (!options.taskserver) {
+		steps.push({ name: 'nodes:run-pytest-db', action: makeRunDbPytestAction(options) });
+	}
 	return { description: 'Testing nodes', steps };
 }
 
@@ -532,6 +836,20 @@ module.exports = {
 		},
 		{ name: 'nodes:test', action: (options) => makeTestAction({ ...options, test_full: false }) },
 		{ name: 'nodes:test-full', action: (options) => makeTestAction({ ...options, test_full: true }) },
+		// The live-database lane on its own: the databases are required unless
+		// RR_REQUIRE_DB_TESTS=0 (nodes:test keeps them optional by default).
+		{
+			name: 'nodes:test-db',
+			action: (options) => ({
+				description: 'Testing nodes (live databases)',
+				steps: [
+					'server:build',
+					parallel(['nodes:build', 'ai:build', 'client-python:build'], 'Build dependencies'),
+					{ name: 'nodes:install-test-deps', action: makeInstallTestDepsAction() },
+					{ name: 'nodes:run-pytest-db', action: makeRunDbPytestAction({ ...options, requireDb: true }) },
+				],
+			}),
+		},
 		{
 			name: 'nodes:test-contracts',
 			action: () => ({
@@ -554,6 +872,19 @@ module.exports = {
 
 // C++ node actions
 module.exports = [module.exports, ...CPP_NODES.map(makeNodeModule)];
+
+// The live-database lane's registry and pure helpers (nodes/test/test_db_lane_guard.py).
+module.exports.dbLane = {
+	DB_LANES_DIR,
+	DB_LIVE_SUITES,
+	loadDbLanes,
+	validateDbLane,
+	mockedPassIgnores,
+	dbTestsRequired,
+	countJunitResults,
+	checkRequiredDbResults,
+	checkPooledCases,
+};
 
 // Export paths for external use
 module.exports.DIST_DIR = DIST_DIR;

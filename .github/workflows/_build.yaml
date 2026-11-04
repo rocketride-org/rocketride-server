@@ -305,6 +305,29 @@ jobs:
             echo "RR_REQUIRE_DB_TESTS=1"
           } >> "$GITHUB_ENV"
 
+      # Servers of the live database lane's domains (Linux only), one script per
+      # domain in nodes/test/db-services/, run in sorted order after the Postgres
+      # step. A domain adds its servers by adding its script, never by editing
+      # this workflow. The protocol (stdout = NAME=value lines, exported here only
+      # after the script succeeded; images pinned by digest) is in
+      # nodes/test/db-services/_common.sh. The suites those servers feed are
+      # registered in nodes/scripts/db-lanes/.
+      - name: Start DB live-lane services / Linux
+        if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for script in nodes/test/db-services/[a-z]*.sh; do
+            echo "::group::$script"
+            vars=$(bash "$script")
+            echo "::endgroup::"
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              [[ "$line" =~ ^[A-Z][A-Z0-9_]*=.*$ ]] || { echo "$script printed a line that is not NAME=value: $line"; exit 1; }
+              echo "$line" >> "$GITHUB_ENV"
+            done <<< "$vars"
+          done
+
       - name: Test
         if: inputs.codeql == false && inputs.test
         # Integration tests boot a local server on :5565 and connect a test
