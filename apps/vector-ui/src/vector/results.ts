@@ -375,6 +375,8 @@ export interface IRemoveView {
 	keptLive: string[];
 	/** Rows the node says it removed; null when it could not count them. */
 	removedChunks: number | null;
+	/** A trash move or restore: some of the batch's documents were already in that state, so they moved nothing. */
+	someUnmoved?: boolean;
 }
 
 /**
@@ -403,6 +405,11 @@ export interface ITrashView {
 	 * `matched_chunks`, which counts every chunk the store holds for the ids, moved or not.
 	 */
 	movedChunks: number | null;
+	/**
+	 * Some documents of the batch were already in that state: the chunks the store holds for the ids (`matched_chunks`)
+	 * exceed the chunks that moved. False when either count is missing (nothing can be said, so nothing is claimed).
+	 */
+	someUnmoved: boolean;
 }
 
 /**
@@ -414,5 +421,7 @@ export interface ITrashView {
 export function readTrashResult(value: Record<string, unknown>): ITrashView {
 	const notFound = strings(value.not_found);
 	const gone = new Set(notFound);
-	return { moved: [...new Set(strings(value.object_ids))].filter((objectId) => !gone.has(objectId)), notFound, movedChunks: count(value.moved_chunks) };
+	const movedChunks = count(value.moved_chunks);
+	const matched = count(value.matched_chunks);
+	return { moved: [...new Set(strings(value.object_ids))].filter((objectId) => !gone.has(objectId)), notFound, movedChunks, someUnmoved: movedChunks !== null && matched !== null && movedChunks < matched };
 }
