@@ -7,7 +7,7 @@
 	"appManifest": {
 		"id": "rocketride.events",
 		"projectId": "a3515d9f-c356-41dc-9862-34eb4d92ea2d",
-		"publisher": "Aparavi Software AG",
+		"publisher": "RocketRide",
 		"name": "Event Monitor",
 		"description": "Real-time event stream viewer with JSON inspection and export",
 		"icon": "./icon.svg",
@@ -48,13 +48,13 @@
 		"safari >= 13"
 	],
 	"dependencies": {
-		"@module-federation/rsbuild-plugin": "^2.5.1",
 		"react": "^18.2.0",
 		"react-dom": "^18.2.0",
 		"rocketride": "workspace:*",
 		"shell": "file:../../.rocketride/shell/shell.tgz"
 	},
 	"devDependencies": {
+		"@module-federation/rsbuild-plugin": "^2.5.1",
 		"@rsbuild/core": "~2.2.12",
 		"@rsbuild/plugin-react": "~2.0.1",
 		"typescript": "^5.3.0",

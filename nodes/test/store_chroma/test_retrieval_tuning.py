@@ -60,6 +60,7 @@ _STUBBED_MODULE_NAMES = (
     'ai.common.schema',
     'ai.common.store',
     'ai.common.config',
+    'nodes.store_chroma.mode',
     'chroma_store_under_test',
 )
 
@@ -117,6 +118,14 @@ def _install_stubs() -> None:
     config_mod = types.ModuleType('ai.common.config')
     config_mod.Config = MagicMock()
     sys.modules['ai.common.config'] = config_mod
+
+    # The driver reads local vs cloud from the node package's helper. Importing it
+    # through the package would load the whole node, so register the file alone.
+    mode_py = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'store_chroma' / 'mode.py'
+    mode_spec = importlib.util.spec_from_file_location('nodes.store_chroma.mode', mode_py)
+    mode_mod = importlib.util.module_from_spec(mode_spec)
+    mode_spec.loader.exec_module(mode_mod)
+    sys.modules['nodes.store_chroma.mode'] = mode_mod
 
 
 @contextmanager

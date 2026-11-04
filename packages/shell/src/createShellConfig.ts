@@ -24,9 +24,11 @@
 // createShellConfig — Assembles the ShellConfig for the cloud host
 // =============================================================================
 
+import React from 'react';
 import { fetchAndApplyTheme } from './themes';
 import type { ShellConfig, ShellApiConfig, AppManifestEntry } from './components/workspace/types';
 import { ConnectionManager } from './connection/connection';
+import { SidebarFooterExtras, openPlatformDocs } from './components/sidebar-footer/SidebarFooter';
 
 // =============================================================================
 // API CONFIG — read from RR_* process.env defines (cloud only)
@@ -123,15 +125,33 @@ export function buildShellConfig(apps: AppManifestEntry[], capabilities: string[
 
 		// Apply the user's saved theme on first mount so the loading screen
 		// background matches their preference instead of always showing light.
-		// Falls back to rocketride-light if nothing is saved yet.
+		// PRECEDENCE: the saved theme ID (rr:theme — the user's actual pick,
+		// rewritten by every setTheme including home-ui's toggle) wins; the
+		// home appearance MODE (rr:home:theme, 'light'/'dark' only) is a
+		// fallback hint for browsers that have never saved an id. Preferring
+		// the mode mapped boots to rocketride[-light] while the restore path
+		// applied the saved id — two palettes alternating between boots.
+		// Unknown ids never apply (a 404'd theme would render tokenless).
 		onInit: () => {
-			const homeTheme = (() => { try { return localStorage.getItem('rr:home:theme'); } catch { return null; } })();
 			const saved = (() => {
+				try {
+					const id = localStorage.getItem('rr:theme');
+					if (id && THEME_OPTIONS.some((option) => option.id === id)) return id;
+				} catch { /* unreadable storage — fall through to the hint */ }
+				const homeTheme = (() => { try { return localStorage.getItem('rr:home:theme'); } catch { return null; } })();
 				if (homeTheme === 'dark') return 'rocketride';
-				if (homeTheme === 'light') return 'rocketride-light';
-				try { return localStorage.getItem('rr:theme') || 'rocketride-light'; } catch { return 'rocketride-light'; }
+				return 'rocketride-light';
 			})();
 			return fetchAndApplyTheme(saved, '/shell/themes').catch(console.error);
+		},
+
+		// The CLOUD host's sidebar extras: the platform's announcements
+		// ticker + Documentation row. Host-owned by design — the shell's
+		// sidebar renders only what this provides, and deep-app tabs get
+		// nothing (ShellLayout withholds the slot there).
+		sidebarExtras: {
+			render: (opts?: { padded?: boolean }) => React.createElement(SidebarFooterExtras, { onOpenDocs: openPlatformDocs, padded: opts?.padded }),
+			onOpenDocs: openPlatformDocs,
 		},
 
 		themeConfig: {

@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import { formatBatchOutcome, formatPriorStatements } from 'shared/explorer';
 import type { IStatementRunBase } from 'shared/explorer';
 import { ExplorerToolError } from 'shared/explorer';
-import { WRITE_MAY_HAVE_APPLIED, WRITE_PROBABLY_ROLLED_BACK, describeFailure, describeFailureMessage, describeFailureOf, describeWriteFailure } from '../src/graph/failures';
+import { WRITE_MAY_HAVE_APPLIED, WRITE_PROBABLY_ROLLED_BACK, ageUnsupportedHint, describeFailure, describeFailureMessage, describeFailureOf, describeWriteFailure } from '../src/graph/failures';
 import type { IFailureInput } from '../src/graph/failures';
 import { GRAPH_BATCH_WORDS, prepareStatement, refuseNonReads, toHistoryEntry } from '../src/graph/runConfig';
 import { parseDialect } from '../src/graph/dialect';
@@ -93,6 +93,15 @@ test('an AGE limitation keeps the node\'s explanation and says what to do', () =
 	assert.match(n.headline, /^Not supported on Apache AGE 1\.5\.0: date\(\)/);
 	assert.match(n.detail, /store dates as ISO-8601 strings/);
 	assert.match(n.hint ?? '', /rewrite the query/);
+});
+
+test('the AGE hint names the version the NODE reported, never an assumed one', () => {
+	for (const version of ['1.5.0', '1.6.0', '1.7.0']) {
+		const n = describeFailure(failure('raised', `Not supported on Apache AGE ${version}: date()\nApache AGE has no date(). Verified on AGE 1.5.0; not confirmed on ${version}.`), false);
+		assert.equal(n.hint, `Apache AGE ${version} does not support this Cypher construct; rewrite the query without it.`);
+		assert.ok(!/1\.5\.0/.test(n.hint ?? '') || version === '1.5.0', 'a 1.6.0 server is not told it is 1.5.0');
+	}
+	assert.equal(ageUnsupportedHint('Not supported on Apache AGE: date()'), 'This Apache AGE server does not support this Cypher construct; rewrite the query without it.', 'no version in the headline: none is claimed');
 });
 
 test('a timeout says this app stopped waiting and that nothing here cancels the query', () => {

@@ -209,7 +209,7 @@
 			"default": 25000,
 			"minimum": 1,
 			"maximum": 25000,
-			"description": "Upper cap on rows returned by the execute tool, kept one row below the server's RESULTSET_SIZE. In the default shape the call fails if exceeded, so one statement cannot exhaust worker memory; with shape \"graph\" the result is cut at the cap and reported as truncated."
+			"description": "Upper cap on rows returned by the execute tool, kept one row below the server's RESULTSET_SIZE. In the default shape a read over the cap fails, and a write over it is already saved, so it returns the first rows flagged as truncated. With shape \"graph\" the result is cut at the cap and reported as truncated."
 		},
 		"graph_falkordb.query_timeout_ms": {
 			"type": "integer",

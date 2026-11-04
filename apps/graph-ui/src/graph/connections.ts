@@ -453,7 +453,7 @@ export interface IListLine {
 
 /**
  * The line under the sidebar rows, from the same empty states as the full app's landing. Nothing while discovery has
- * not started (it waits for the activation and a known identity, so "discovering" would not be true), and nothing
+ * not started (it waits for a known identity and a ready engine, so "discovering" would not be true), and nothing
  * while the rows say it all (each row says why it cannot be used).
  *
  * @param status - The discovery lifecycle.

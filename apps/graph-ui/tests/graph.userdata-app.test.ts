@@ -288,7 +288,7 @@ describe('the full app routes every preference it keeps through the one page pin
 	it('the env\'s prefs (drafts, captions, the editor height), the grid layouts, the styles, the saved queries and history', () => {
 		const app = read('GraphApp.tsx');
 		assert.match(app, /prefs: pinnedPrefs\(APP_WORKSPACE_PIN, prefs, ownerNow\), grids: pinnedGrids\(APP_WORKSPACE_PIN, APP_GRIDS, ownerNow\), userData: createAppUserData\(prefs, ownerNow, \(\) => prefsLoaded\.current\)/);
-		assert.match(app, /createLocalGraphEnv\(\{ mount: 'app', ready: isConnected, client, stores: APP_STORES, activeConnection, openDocument: openAppDocument, prefs: pinned\.prefs, historyPrivacyNote: \(\) => appHistoryNote\(APP_WORKSPACE_PIN\.access\(owner\.current\)\), userData: pinned\.userData, gridPersistence: pinned\.grids \}\)/);
+		assert.match(app, /createLocalGraphEnv\(\{ mount: 'app', ready: isConnected, engine, client, stores: APP_STORES, activeConnection, openDocument: openAppDocument, prefs: pinned\.prefs, historyPrivacyNote: \(\) => appHistoryNote\(APP_WORKSPACE_PIN\.access\(owner\.current\)\), userData: pinned\.userData, gridPersistence: pinned\.grids \}\)/);
 		assert.match(app, /const \[prefs\] = useState\(createForwardingPrefs\);/, 'one accessor that reads its own writes');
 		assert.match(app, /<AppPrefsBinding prefs=\{prefs\} onBound=\{pinned\.userData\.notify\} \/>/, 'readers read again once the shell hands out the new accessor');
 		assert.match(app, /const \{ loaded \} = useWorkspace\(\);/, 'styles and saved queries wait for the shell to load the prefs');

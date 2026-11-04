@@ -21,32 +21,22 @@
 // SOFTWARE.
 
 // =============================================================================
-// EXPLORER DEV TOOL — REALM FACTS (what kind of realm, one channel per peer)
+// EXPLORER DEV TOOL — CONTROLLER READINESS TOPIC (what frames wait for)
 // =============================================================================
 //
-// Two facts every dev-tool mount needs and the platform does not hand over:
+// The one cross-mount fact this library owns: whether a controller is serving.
+// A frame's call that reaches a sidebar peer while no controller has served its
+// handlers is LOST (the host builds the sidebar channel at render, which flushes
+// the peer's held calls into a channel that has no registry yet, and the
+// channel drops calls it cannot serve), so frames send nothing until the
+// controller says it is ready (frame.ts), and ask the host to mount it with
+// one event (summon.ts).
 //
-//  1. WHICH KIND OF REALM. A VS Code webview realm is SOCKETLESS: its
-//     ConnectionManager has no client (`getClient()` is null) and answers
-//     `isConnected()` from the framework root's mirror (connection.ts
-//     `mirrorConnected`). A realm with a client (rocket-ui) can only be
-//     connected through that client. So "connected without a client" proves a
-//     socketless realm; a clientless realm that is down cannot be told apart
-//     from one whose client is not built yet, and stays `unknown`.
-//
-//  2. ONE CHANNEL PER PEER. `createToolChannel(peer)` subscribes the peer at
-//     construction and can never be disposed (toolChannel.ts). A mount that
-//     builds one per render, or per StrictMode mount, leaks a subscription
-//     each time (and on the sidebar peer, steals the single live slot,
-//     busPeer.ts). {@link channelFor} caches one per peer for the realm's
-//     lifetime, which is the peer's lifetime too (the hosts create one
-//     sidebar peer per tool per realm).
+// The topic sits under this library's reserved `devtool:` prefix (the shell
+// reserves `host:` for itself and this library never publishes under it).
+// There is no realm-kind probe here: every realm holds a real client, so what
+// a realm owns is never inferred from whether it has one.
 // =============================================================================
-
-import type { DevToolProps, ToolChannel } from 'shell';
-
-/** A dev-tool mount's peer pipe. */
-export type DevToolPeer = DevToolProps['peer'];
 
 /**
  * State topics whose names start with this prefix belong to this library;
@@ -75,54 +65,4 @@ export interface IControllerState {
  */
 export function mountNonce(): string {
 	return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-/** What kind of realm a ConnectionManager lives in. */
-export type RealmKind = 'socketless' | 'client' | 'unknown';
-
-/** What {@link realmKind} reads. */
-export interface IRealmProbe {
-	/** Whether the realm is connected (mirrored in a socketless realm). */
-	isConnected(): boolean;
-	/** The realm's own client, or null in a socketless realm. */
-	getClient?(): unknown;
-}
-
-/**
- * Tell a socketless realm from a realm that owns the client.
- *
- * @param cm - The realm's ConnectionManager (structural).
- * @returns `client` when it holds a client; `socketless` when it is connected
- *   without one; `unknown` otherwise (down and clientless, or no getClient).
- */
-export function realmKind(cm: IRealmProbe): RealmKind {
-	if (typeof cm.getClient !== 'function') return 'unknown';
-	const client = cm.getClient();
-	if (client !== null && client !== undefined) return 'client';
-	let connected = false;
-	try {
-		connected = cm.isConnected() === true;
-	} catch {
-		connected = false;
-	}
-	return connected ? 'socketless' : 'unknown';
-}
-
-/** The channel built for each peer that arrived without a host channel. */
-const channels = new WeakMap<DevToolPeer, ToolChannel>();
-
-/**
- * The one channel for a peer: built on first use, reused for the peer's lifetime.
- *
- * @param peer - The mount's peer.
- * @param createToolChannel - The shell's factory (injected: no value import from 'shell').
- * @returns The channel.
- */
-export function channelFor(peer: DevToolPeer, createToolChannel: (peer: DevToolPeer) => ToolChannel): ToolChannel {
-	let channel = channels.get(peer);
-	if (channel === undefined) {
-		channel = createToolChannel(peer);
-		channels.set(peer, channel);
-	}
-	return channel;
 }

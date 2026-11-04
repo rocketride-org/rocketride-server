@@ -60,6 +60,7 @@ import { labelColors, typeColorsOf } from './graph/colors';
 import { connectionRow, sidebarListLine } from './graph/connections';
 import type { IBadge } from './graph/connections';
 import { parseDialect } from './graph/dialect';
+import { engineNotReadyText } from './graph/wording';
 import { NO_SCHEMA, SAMPLED_NOTE, schemaStatusText } from './graph/schema';
 import { buildSchemaList, countsNote } from './graph/schemaTree';
 import type { ISchemaEntry } from './graph/schemaStore';
@@ -252,7 +253,9 @@ const GraphSidebar: React.FC<IGraphSidebarProps> = ({ devtool = false }) => {
 
 	// The full app's menu: one entry that opens the Connections landing.
 	const menu: ViewMenu = useMemo(() => ({ entries: [{ id: 'connections', label: 'Connections', icon: <GraphIcon />, ...(endpoints.length > 0 ? { count: endpoints.length } : {}) }] }), [endpoints.length]);
-	const line = sidebarListLine(status, endpoints, error);
+	// While the engine is not ready the list says why (waiting is not disconnected); otherwise discovery's own line.
+	const notReady = engineNotReadyText(env.engine);
+	const line = notReady !== null && endpoints.length === 0 ? { tone: 'muted' as const, text: notReady, detail: null } : sidebarListLine(status, endpoints, error);
 	// Refresh cannot run while discovery runs or the realm is offline. It says so with aria-disabled and ignores the
 	// activation: a `disabled` button would drop the keyboard focus to the page, and the header cluster would fade.
 	const refreshBlocked = !isConnected || status === 'loading';

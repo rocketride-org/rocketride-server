@@ -83,15 +83,16 @@ test('no template ships a project_id: nothing is shared between everyone who imp
 });
 
 test('the editor path that gives an imported template its own id still exists (a guard that the premise above holds)', () => {
-	// The .pipe watcher moved out of SidebarProvider.ts into sidebar/pipelineFiles.ts (PipelineFiles) with the dev-tool platform.
+	// The .pipe watcher (sidebar/pipelineFiles.ts, PipelineFiles) reconciles a created file's project_id: a pipeline
+	// without one is given a fresh one (assignProjectId), so two imports of one template never share an id.
 	const provider = path.resolve(__dirname, '..', '..', 'vscode', 'src', 'providers', 'sidebar', 'pipelineFiles.ts');
 	const source = fs.readFileSync(provider, 'utf8');
-	const from = source.indexOf('private async handleFileCreated');
-	const to = source.indexOf('private async handleFileChanged', from);
-	assert.ok(from >= 0 && to > from, `handleFileCreated (followed by handleFileChanged) is in ${provider}; if it moved again, follow it`);
-	const created = source.slice(from, to);
-	assert.match(created, /if \(!projectId \|\| isDuplicate\)/);
-	assert.match(created, /crypto\.randomUUID\(\)/);
+	const created = source.slice(source.indexOf('private async handleFileCreated'), source.indexOf('private handleFileDeleted'));
+	assert.ok(created.includes('this.reconcileProjectId(uri, \'created\')'), `handleFileCreated reconciles the project_id in ${provider}; if it moved again, follow it`);
+	const assign = source.slice(source.indexOf('case \'assign-id\':'), source.indexOf('case \'ask-duplicate\':'));
+	assert.match(assign, /this\.assignProjectId\(uri, null,/, 'a pipeline without a project_id gets one');
+	const writer = source.slice(source.indexOf('private async assignProjectId'));
+	assert.match(writer, /crypto\.randomUUID\(\)/);
 });
 
 test('the Neo4j template names a placeholder reader, not the admin default, and its note recommends a read-only role without claiming a guarantee', () => {

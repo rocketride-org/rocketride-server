@@ -25,15 +25,31 @@ live here.
   (`GraphDevToolFrame.tsx`). Views never call `useShellConnection`, `usePrefs`
   or the adapter's stores: they read the GraphEnv (`src/env.ts`). The full app
   and the controller use the LOCAL env (`src/localEnv.ts`) over their own
-  stores and the realm's bus-backed client; a frame uses the REMOTE env built
-  by `src/devtool/frame.ts`, which holds no client.
+  stores and the realm's own engine client (`RocketRideClient`, narrowed by
+  `createExplorerClient`; `useRealmEngine()` in the app, `useEngineSource()` in
+  the controller); a frame uses the REMOTE env built by `src/devtool/frame.ts`,
+  which holds no client. `env.engine` says why the engine cannot be asked:
+  `waiting` (the realm has no client yet, or the host has not reported) is
+  worded differently from `disconnected`.
 - `src/devtool/protocol.ts` is the contract: the `graph.*` ops (each answers a
   Reply and carries a deadline), the retained state topics (each under 64 KiB;
   rows and history lists travel as op results) and the `active` event.
   `src/devtool/controller.ts` serves it (it re-checks the write gate and counts
   writes); `src/devtool/wiring.ts` is the only module that imports the shell's
-  protocol factories. Both build on `shared/explorer/devtool` (see
+  op factories (`createToolOpServer`, `createToolOpClient`); the host builds the
+  mount's channel (`DevToolProps.channel`) and no lane builds one. Both build on `shared/explorer/devtool` (see
   `docs/development/apps/explorer-library.md`).
+- There is no activation gate. A store tool's sidebar mounts when its tab is
+  first selected, or at host boot when it is pinned, so mounting alone may
+  DISCOVER and read history (reads) once an identity is known and the engine is
+  ready. Endpoint probes are tool calls, and a tool call keeps a running
+  pipeline alive, so they are HELD until a person is present
+  (`createEndpointStore({ holdProbes })` over `discovery.holdProbes()`): the
+  first frame op (`attachController`'s `onFirstOp`), the first pointer or key
+  event in the sidebar, an explicit Refresh, or a click that opens a document
+  call `discovery.markUserPresent`. A boot mount issues zero tool calls
+  (`tests/devtool.lifecycle.test.ts`, T6). Op and event names are distinct
+  (`assertNoOpEventCollisions`, checked at attach and in a test).
 - Schema loads are STARTED across the channel, not awaited. `graph.loadSchema`
   answers once the controller has started the load (a frame waits at most
   15 s for that), and the outcome arrives as `schemas` state. At the
@@ -113,8 +129,12 @@ live here.
   unit tests, and the React-side rules that decide whether the UI stays in step
   with its state are pinned by reading the source (`tests/graph.wiring.test.ts`).
 - The dev-tool suites (`tests/devtool.*.test.ts`) run the controller and frames
-  over the shell's real bus peer, op lane and channel, with every payload
-  carried as JSON as VS Code does (`tests/support/devtool.ts`). `mountFrame`
+  over the shell's real peers, op lane and channel, with every payload carried
+  as JSON as VS Code does (`tests/support/devtool.ts`). The realm is the shared
+  library's fake mirrored (VS Code) or client (rocket-ui) realm, whose client
+  serves engine requests from a fake engine and records each as
+  `client.<method>`; `tests/graph.engine-status.test.ts` also drives a REAL
+  realm client (`createRealmClientHarness`). `mountFrame`
   runs each frame's summon on manual timers (`timers.advance(ms)`), so a suite
   sees a summon only when it moves time on.
 - `tests/fixtures/v1/live/` holds answers captured from the real node tools on

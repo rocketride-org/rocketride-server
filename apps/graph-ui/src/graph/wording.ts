@@ -47,6 +47,25 @@ import { INITIAL_NODES, MAX_NODES, MAX_RELATIONSHIPS } from './budgets';
 import type { IGraphModel } from './model';
 import type { IResultSummary } from './results';
 import type { ReadQueryResult } from './types';
+import type { EngineStatus } from 'shared/explorer/devtool/readiness';
+
+/** Said while the realm has no engine client yet (or the host has not reported one): a wait, never "disconnected". */
+export const ENGINE_WAITING_TEXT = 'Waiting for the server connection\u2026';
+
+/** Said when the realm has a client and its connection to the server is down. */
+export const ENGINE_DISCONNECTED_TEXT = 'Not connected to a RocketRide server.';
+
+/**
+ * What to say about the engine connection while requests cannot be sent.
+ *
+ * @param engine - The env's engine status (absent: treated as ready).
+ * @returns The sentence, or null when requests may be sent.
+ */
+export function engineNotReadyText(engine: EngineStatus | undefined): string | null {
+	if (engine === 'waiting') return ENGINE_WAITING_TEXT;
+	if (engine === 'disconnected') return ENGINE_DISCONNECTED_TEXT;
+	return null;
+}
 
 /** "1,000" style number formatting (stable across locales). */
 export function num(n: number): string {
@@ -70,6 +89,18 @@ export function truncationText(result: Pick<ReadQueryResult, 'truncated' | 'trun
 		default:
 			return `Limit reached at ${num(result.row_limit)} rows, more rows may exist.`;
 	}
+}
+
+/**
+ * The truncation sentence for a result of the WRITE console: the statement has run and its writes are saved, so a cut
+ * result must not read as "more rows may exist" for a read the person can repeat.
+ *
+ * @param result - An `execute` (shape graph) envelope.
+ * @returns A sentence, or null when nothing was cut.
+ */
+export function writeTruncationText(result: Pick<ReadQueryResult, 'truncated' | 'truncated_by' | 'row_limit' | 'element_limit' | 'value_limit'>): string | null {
+	const cut = truncationText(result);
+	return cut === null ? null : `The statement ran and its writes are saved; only part of its result is shown. ${cut}`;
 }
 
 /**

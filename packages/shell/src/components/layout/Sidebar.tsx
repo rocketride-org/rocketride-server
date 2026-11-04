@@ -34,8 +34,8 @@ import { BxDockLeft, BxX } from '../BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
 import type { IconComponent } from '../BoxIcon';
 import { useWorkspace } from '../workspace/WorkspaceContext';
-import type { ShellThemeConfig, ShellAccountConfig } from '../workspace/types';
-import { SidebarFooter, openPlatformDocs } from '../sidebar-footer/SidebarFooter';
+import type { ShellThemeConfig, ShellAccountConfig, ShellConfig } from '../workspace/types';
+import { SidebarFooter } from '../sidebar-footer/SidebarFooter';
 import { useSidebarFooterMenu } from './useSidebarFooterMenu';
 import { RocketRideMark } from '../RocketRideMark';
 import { SidebarCollapsedProvider } from '../sidebar-menu/SidebarCollapsedContext';
@@ -153,6 +153,8 @@ export interface SidebarProps {
 	 * regardless of the server edition).
 	 */
 	isSaas?: boolean;
+	/** Host-owned sidebar extras (ticker + docs) — absent in deep-app tabs. */
+	sidebarExtras?: ShellConfig['sidebarExtras'];
 }
 
 /**
@@ -421,7 +423,7 @@ export const AppSwitcherButton: React.FC<{
  *
  * @param props - Sidebar configuration and callbacks.
  */
-const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, hideAppSwitcher, onOverlay, isSaas }) => {
+const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, hideAppSwitcher, onOverlay, isSaas, sidebarExtras }) => {
 	// Not props: `SidebarProps` is part of the frozen app-facing contract, and
 	// the drawer is a shell-internal concern no app can see. See
 	// `CompactNavContext`.
@@ -787,16 +789,24 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 					</button>
 				) : (
 					<>
-						<button
-							title="Go to home"
-							aria-label="Go to home"
-							onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: homeAppId })}
-							onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
-							onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-							style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px', borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', transition: 'background 120ms ease' }}
-						>
-							<AppSwitcherButton collapsed={effectiveCollapsed} />
-						</button>
+						{/* Deep-app tab: the lockup is static identity, not a way
+						    out — there is no home to go to. */}
+						{hideAppSwitcher ? (
+							<div style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px' }}>
+								<AppSwitcherButton collapsed={effectiveCollapsed} />
+							</div>
+						) : (
+							<button
+								title="Go to home"
+								aria-label="Go to home"
+								onClick={() => ConnectionManager.getInstance().emit('shell:switchApp', { appId: homeAppId })}
+								onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))'; }}
+								onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+								style={{ display: 'flex', flex: 1, minWidth: 0, alignItems: 'center', padding: '2px 4px', borderRadius: 6, border: 'none', background: 'transparent', cursor: 'pointer', font: 'inherit', color: 'inherit', textAlign: 'left', transition: 'background 120ms ease' }}
+							>
+								<AppSwitcherButton collapsed={effectiveCollapsed} />
+							</button>
+						)}
 						<button
 							title={isCompact ? 'Close navigation' : 'Collapse sidebar'}
 							aria-label={isCompact ? 'Close navigation' : 'Collapse sidebar'}
@@ -877,7 +887,8 @@ const Sidebar: React.FC<SidebarProps> = ({ themeConfig: _themeConfig, account, h
 				userName={account.userName}
 				userEmail={account.userEmail}
 				menuItems={footerMenuItems}
-				onOpenDocs={openPlatformDocs}
+				onOpenDocs={sidebarExtras?.onOpenDocs}
+				extras={sidebarExtras?.render()}
 			/>
 
 			{/* ================================================================

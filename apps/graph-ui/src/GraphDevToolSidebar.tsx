@@ -27,19 +27,23 @@
 // A thin React shell over devtool/controller.ts (R6): the controller is built
 // in an effect and disposed in its cleanup (never in useMemo: the shell renders
 // under StrictMode, which mounts twice), so exactly one op server is live. It
-// never subscribes the peer itself. Its view is the connection list plus the
-// active connection's schema tree, over the controller's LOCAL env; the realm's
-// connection flag is the mirrored `useShellConnection().isConnected` (a sidebar
-// cannot read `host:connection`).
+// builds no channel (the host's `channel` is the mount's one transport). Its
+// view is the connection list plus the active connection's schema tree, over the
+// controller's LOCAL env. The realm's client and connection state come from
+// useEngineSource(): a stable getter and a readiness store (waiting, disconnected,
+// ready), so the controller is built once and never captures a stale client.
+// The first interaction in the sidebar tells the controller a person is present,
+// which releases the endpoint probes it holds until then.
 // =============================================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ConnectionManager, useShellConnection } from 'shell';
+import { ConnectionManager } from 'shell';
 import type { DevToolProps } from 'shell';
+import { useEngineSource } from 'shared/explorer/react';
 import { createGraphController } from './devtool/controller';
-import type { IGraphController, IGraphRealm } from './devtool/controller';
+import type { IGraphController } from './devtool/controller';
 import { CONTROLLER_PROTOCOL } from './devtool/wiring';
-import { GraphEnvProvider } from './env';
+import { GraphEnvProvider, useReadable } from './env';
 import GraphSidebar from './GraphSidebar';
 
 /**
@@ -48,19 +52,19 @@ import GraphSidebar from './GraphSidebar';
  * @param props - The host's DevToolProps.
  * @returns The sidebar.
  */
-export const GraphDevToolSidebar: React.FC<DevToolProps> = ({ peer, channel, documents, activeDocKey }) => {
-	const { isConnected } = useShellConnection();
+export const GraphDevToolSidebar: React.FC<DevToolProps> = ({ channel, documents, activeDocKey }) => {
+	const { getClient, readiness } = useEngineSource();
 	const [controller, setController] = useState<IGraphController | null>(null);
-	// The latest documents API and activeDocKey, for a controller built once per peer.
+	// The latest documents API and activeDocKey, for a controller built once per channel.
 	const latest = useRef({ documents, activeDocKey });
 	latest.current = { documents, activeDocKey };
 
 	useEffect(() => {
-		const realm: IGraphRealm = ConnectionManager.getInstance();
 		const created = createGraphController({
-			cm: realm,
-			peer,
-			...(channel ? { channel } : {}),
+			cm: ConnectionManager.getInstance(),
+			channel,
+			getClient,
+			readiness,
 			documents: {
 				open: (key, title) => latest.current.documents?.open(key, title),
 				close: (key) => latest.current.documents?.close(key),
@@ -73,17 +77,26 @@ export const GraphDevToolSidebar: React.FC<DevToolProps> = ({ peer, channel, doc
 			created.dispose();
 			setController((current) => (current === created ? null : current));
 		};
-	}, [peer, channel]);
+	}, [channel, getClient, readiness]);
 
 	useEffect(() => {
 		controller?.noteActiveDocKey(activeDocKey);
 	}, [controller, activeDocKey]);
 
-	const env = useMemo(() => (controller ? controller.env(isConnected) : null), [controller, isConnected]);
-	if (!env) return null;
+	if (!controller) return null;
+	return <SidebarBody controller={controller} />;
+};
+
+/** The sidebar's body: the env follows the engine status; the first interaction marks a person present. */
+const SidebarBody: React.FC<{ controller: IGraphController }> = ({ controller }) => {
+	const status = useReadable(controller.engineStatus);
+	const env = useMemo(() => controller.env(status), [controller, status]);
+	const present = (): void => controller.discovery.markUserPresent('user');
 	return (
 		<GraphEnvProvider value={env}>
-			<GraphSidebar devtool />
+			<div style={{ display: 'contents' }} onPointerDownCapture={present} onKeyDownCapture={present}>
+				<GraphSidebar devtool />
+			</div>
 		</GraphEnvProvider>
 	);
 };

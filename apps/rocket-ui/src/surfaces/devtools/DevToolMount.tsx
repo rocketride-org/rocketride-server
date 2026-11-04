@@ -36,11 +36,11 @@
 // =============================================================================
 
 import React, { useEffect, useMemo } from 'react';
-import { activeDocKeyFor, toolDocUri, useShellConnection, useWorkspace } from 'shell';
+import { activeDocKeyFor, announceFramePresence, ConnectionManager, toolDocUri, useShellConnection, useWorkspace } from 'shell';
 import { isBuiltinTool, ToolMount } from 'shared/tools/core';
 import type { ToolDescriptorSource } from 'shared/tools/core';
 import type { DevToolProps, Documents } from 'shell';
-import { getFramePeer, getSidebarPeer, getToolChannel } from './peer';
+import { getToolChannel } from './peer';
 import { getDocs } from '../../docs';
 
 // =============================================================================
@@ -102,14 +102,23 @@ const DevToolMount: React.FC<DevToolMountProps> = ({ appId, name, slot, docKey }
 	}, [descriptor, loadError]);
 
 	const unavailable = !client || !isConnected ? `Connect to a RocketRide server to open ${name ?? appId}.` : null;
-	const peer = slot === 'frame' ? getFramePeer(appId) : getSidebarPeer(appId);
 	const channel = getToolChannel(appId, slot);
+
+	// FRAME liveness: announce this mount to the tool's sidebar peer — HELLO
+	// on mount (flips it to direct delivery + flushes buffered events), BYE
+	// on unmount (re-arms buffering and the panel summon). The channel above
+	// is cached per tool (one standing subscription), so presence must ride
+	// the MOUNT lifecycle, not the subscription count.
+	useEffect(() => {
+		if (slot !== 'frame') return;
+		return announceFramePresence(appId, ConnectionManager.getInstance());
+	}, [appId, slot]);
 
 	// Sidebar mounts (controllers) follow the workbench's fronted tab via
 	// activeDocKey — host-tracked, exactly like the VS Code extension. The
 	// inner component exists so the Documents store hook is unconditional.
 	const docs = getDocs();
-	const shared = { appId, slot, peer, channel, documents, source, unavailable, ...(name !== undefined ? { name } : {}) };
+	const shared = { appId, slot, channel, documents, source, unavailable, ...(name !== undefined ? { name } : {}) };
 	if (slot === 'sidebar' && docs) {
 		return <SidebarWithActiveDoc docs={docs} mount={shared} />;
 	}

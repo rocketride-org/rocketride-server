@@ -34,7 +34,7 @@
 // writes, and never writes a file it could not read. Each follower tracks the
 // signed-in account the way the controller's history does:
 //
-//   - the file is read once the tool is activated (R7), for the account
+//   - the file is read once the engine is ready (no activation gate), for the account
 //     signed in then;
 //   - another account: the previous account's accessor is DROPPED at once,
 //     its pending write with it, and nothing of it is served again;
@@ -51,8 +51,8 @@
 
 import { ExplorerToolError } from 'shared/explorer';
 import type { IPrefsAccessor } from 'shared/explorer';
-import type { IActivationGate } from 'shared/explorer/devtool/activation';
-import type { IExplorerBus } from 'shared/explorer/devtool/busClient';
+import type { IPrefsFs } from 'shared/explorer/devtool/engineClient';
+import type { IEngineReadiness } from 'shared/explorer/devtool/readiness';
 import type { IIdentitySnapshot, IIdentityTracker } from 'shared/explorer/devtool/identity';
 import { createFsPrefs } from 'shared/explorer/devtool/prefs';
 import type { IFsPrefs } from 'shared/explorer/devtool/prefs';
@@ -60,12 +60,12 @@ import type { IUserDataSource, UserDataRead, UserDataStorage } from './userData'
 
 /** What {@link createUserDataFile} needs. */
 export interface IUserDataFileOptions {
-	/** The controller realm's bus. */
-	cm: IExplorerBus;
+	/** The file-store calls of the controller realm's client (engineClient.ts `createPrefsFs`). */
+	fs: IPrefsFs;
 	/** The controller's identity tracker. */
 	identity: Pick<IIdentityTracker, 'get' | 'subscribe'>;
-	/** The controller's activation gate (nothing is read before it opens). */
-	activation: Pick<IActivationGate, 'subscribe'>;
+	/** The controller's engine readiness (nothing is read before the engine is ready). */
+	engine: Pick<IEngineReadiness, 'isReady' | 'subscribe'>;
 	/** How long a read or an edit waits for the account's file to be read. */
 	loadWaitMs: number;
 	/** Told on every change of storage or contents (the controller republishes its topic). */
@@ -123,7 +123,7 @@ export function createUserDataFile(opts: IUserDataFileOptions): IUserDataFile {
 	 */
 	const fileFor = (account: string): IFsPrefs =>
 		createFsPrefs({
-			cm: opts.cm,
+			fs: opts.fs,
 			path,
 			owner: account,
 			// Who is signed in now: the library HOLDS a write while it is null and drops it once another account is known.
@@ -177,10 +177,19 @@ export function createUserDataFile(opts: IUserDataFileOptions): IUserDataFile {
 		offActive?.();
 		offActive = null;
 		if (next !== null) {
-			// The gate tells once, when it opens: at once when it already is.
-			offActive = opts.activation.subscribe(() => {
-				if (owner === next && !closed) attach(next);
-			});
+			// Read once the engine can be asked: at once when it already can.
+			const go = (): boolean => {
+				if (owner !== next || closed || !opts.engine.isReady()) return false;
+				attach(next);
+				return true;
+			};
+			if (!go()) {
+				offActive = opts.engine.subscribe(() => {
+					if (!go()) return;
+					offActive?.();
+					offActive = null;
+				});
+			}
 		}
 		changed();
 	};

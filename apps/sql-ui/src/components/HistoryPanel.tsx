@@ -346,7 +346,7 @@ function rowLabel(entry: HistoryEntry): string {
 export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 	const { endpoint, open, onClose, onLoadIntoEditor, onRerun } = props;
 
-	// In-workbench page navigation (null in legacy standalone documents).
+	// In-workbench page navigation.
 	const pageNav = useSqlPageNav();
 
 	const entries = useHistory(endpoint.key);

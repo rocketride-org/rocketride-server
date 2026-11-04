@@ -24,7 +24,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { ExplorerToolError } from 'shared/explorer';
-import { PREFS_FILE_VERSION, PREFS_FS_TIMEOUT_MS, PREFS_LOAD_ATTEMPTS } from 'shared/explorer/devtool/prefs';
+import { PREFS_FILE_VERSION, PREFS_LOAD_ATTEMPTS } from 'shared/explorer/devtool/prefs';
+import { PREFS_FS_DEADLINE_MS } from 'shared/explorer/devtool/timeouts';
 import { jsonByteLength } from 'shared/explorer/devtool/state';
 import { assertJsonSafe } from 'shared/explorer/devtool/testing';
 import { OP, STATE, USER_DATA_LOAD_WAIT_MS, frameTimeoutFor } from '../src/devtool/protocol';
@@ -97,7 +98,7 @@ describe('user data in a dev tool: the controller keeps it in its own file, per 
 	it('names the two files beside the history file, and waits for them as long as the library may take to read one', () => {
 		assert.equal(SAVED_QUERIES_PATH, '@/User/.workspace/rocketride.graph.saved.json');
 		assert.equal(STYLES_PATH, '@/User/.workspace/rocketride.graph.styles.json');
-		assert.equal(USER_DATA_LOAD_WAIT_MS, PREFS_LOAD_ATTEMPTS * 2 * PREFS_FS_TIMEOUT_MS + 1_000 + 3_000, 'the library\'s whole load');
+		assert.equal(USER_DATA_LOAD_WAIT_MS, PREFS_LOAD_ATTEMPTS * 2 * PREFS_FS_DEADLINE_MS + 1_000 + 3_000, 'the library\'s whole load');
 		for (const op of [OP.styles, OP.savedQueries, OP.styleEdit, OP.savedEdit]) assert.ok(frameTimeoutFor(op) > USER_DATA_LOAD_WAIT_MS, `${op}: the frame waits longer than the controller may`);
 	});
 
@@ -232,15 +233,11 @@ describe('user data: colour slots are given by the controller, written only to t
 		const engine = vscodeRealm();
 		let hold = true;
 		const releases: Array<() => void> = [];
-		const inner = engine.cm.request.bind(engine.cm);
-		const cm = Object.assign(Object.create(null), engine.cm, {
-			request: async (op: string, params: unknown, opts?: { timeoutMs?: number }) => {
-				if (hold && (params as { path?: string } | null)?.path === STYLES_PATH && (op === 'client.fsStat' || op === 'client.fsReadJson')) await new Promise<void>((resolve) => releases.push(resolve));
-				return inner(op, params, opts);
-			},
-		});
+		engine.before.current = async (op, params) => {
+			if (hold && (params as { path?: string } | null)?.path === STYLES_PATH && (op === 'client.fsStat' || op === 'client.fsReadJson')) await new Promise<void>((resolve) => releases.push(resolve));
+		};
 		signInVsCode(engine.realm);
-		const mounted = mountController(cm as never);
+		const mounted = mountController(engine.cm);
 		mounted.h.setHostConnection(true);
 		const { frame } = mountFrame(mounted.h, undefined);
 		await until(() => frame.env(true).endpoints.get().endpoints.length === 1, 'discovery');
@@ -272,13 +269,11 @@ describe('user data: colour slots are given by the controller, written only to t
 		const one = vscodeRealm();
 		const two = vscodeRealm();
 		// Both windows reach the same user store (the engine's), each through its own realm.
-		const shared = (engine: typeof one) => Object.assign(Object.create(null), engine.cm, {
-			request: (op: string, params: unknown, opts?: { timeoutMs?: number }) => (op.startsWith('client.fs') ? one.cm.request(op, params, opts) : engine.cm.request(op, params, opts)),
-		});
+		two.shareFiles(one);
 		signInVsCode(one.realm);
 		signInVsCode(two.realm);
-		const w1 = mountController(shared(one) as never);
-		const w2 = mountController(shared(two) as never);
+		const w1 = mountController(one.cm);
+		const w2 = mountController(two.cm);
 		for (const w of [w1, w2]) w.h.setHostConnection(true);
 		const f1 = mountFrame(w1.h, undefined).frame;
 		const f2 = mountFrame(w2.h, undefined).frame;
@@ -347,15 +342,11 @@ describe('T7 - user data: nothing of one account is served to, kept for, or writ
 		const engine = vscodeRealm();
 		let hold = true;
 		const releases: Array<() => void> = [];
-		const inner = engine.cm.request.bind(engine.cm);
-		const cm = Object.assign(Object.create(null), engine.cm, {
-			request: async (op: string, params: unknown, opts?: { timeoutMs?: number }) => {
-				if (hold && (params as { path?: string } | null)?.path === SAVED_QUERIES_PATH && (op === 'client.fsStat' || op === 'client.fsReadJson')) await new Promise<void>((resolve) => releases.push(resolve));
-				return inner(op, params, opts);
-			},
-		});
+		engine.before.current = async (op, params) => {
+			if (hold && (params as { path?: string } | null)?.path === SAVED_QUERIES_PATH && (op === 'client.fsStat' || op === 'client.fsReadJson')) await new Promise<void>((resolve) => releases.push(resolve));
+		};
 		signInVsCode(engine.realm);
-		const mounted = mountController(cm as never);
+		const mounted = mountController(engine.cm);
 		mounted.h.setHostConnection(true);
 		const { frame } = mountFrame(mounted.h, undefined);
 		await until(() => frame.env(true).endpoints.get().endpoints.length === 1, 'discovery');

@@ -47,17 +47,24 @@
 // No Node types here: apps/shared compiles this file with the browser libs.
 // =============================================================================
 
+import type { DAPMessage } from 'rocketride';
 import { createRetainedRegistry, localRetainedPort } from '../../../../../packages/shell/src/ops/retained';
 import type { IRetainedRegistry } from '../../../../../packages/shell/src/ops/retained';
 import { createFrameBusPeer, createSidebarBusPeer } from '../../../../../packages/shell/src/components/workspace/busPeer';
 import type { IBusPeerBus } from '../../../../../packages/shell/src/components/workspace/busPeer';
+import { createOpBus } from '../../../../../packages/shell/src/ops/busOps';
+import { registerClientOps } from '../../../../../packages/shell/src/ops/clientOps';
+import { RocketRideClientProxy } from '../../../../../packages/shell/src/connection/RocketRideClientProxy';
 import { createToolChannel } from '../../../../../packages/shell/src/components/workspace/toolChannel';
-import { createToolController, createToolOpServer } from '../../../../../packages/shell/src/components/workspace/toolOps';
+import type { IToolPeer } from '../../../../../packages/shell/src/components/workspace/toolChannel';
+import { createToolOpClient, createToolOpServer } from '../../../../../packages/shell/src/components/workspace/toolOps';
 import { HOST_CONNECTION_TOPIC } from '../../../../../packages/shell/src/components/workspace/toolRelay';
 import { GRID_CONFIG_CLEAR, GRID_CONFIG_GET, GRID_CONFIG_SET, createMessageGridPersistence } from '../../../../../packages/shell/src/components/data-grid/gridConfigChannel';
 import type { IGridConfigClearDetail, IGridConfigGetDetail, IGridConfigSetDetail } from '../../../../../packages/shell/src/components/data-grid/gridConfigChannel';
 import type { IDataGridPersistence } from '../../../../../packages/shell/src/components/data-grid/persistence';
-import type { DevToolPeer } from './realm';
+
+/** A tool mount's raw transport pipe: host-internal; tools only ever see the channel built over it. */
+export type HarnessPeer = IToolPeer;
 
 // =============================================================================
 // THE REAL PROTOCOL
@@ -66,7 +73,7 @@ import type { DevToolPeer } from './realm';
 /** The shell's real protocol primitives, for injection into the dev-tool modules. */
 export const shellProtocol = {
 	createToolChannel,
-	createToolController,
+	createToolOpClient,
 	createToolOpServer,
 	createSidebarBusPeer,
 	createFrameBusPeer,
@@ -300,9 +307,9 @@ export interface IDevToolHarness extends IRecordingBus {
 	/** The tool's app id. */
 	appId: string;
 	/** The tool's sidebar peer: ONE per realm, as both hosts create it. */
-	sidebarPeer: DevToolPeer;
+	sidebarPeer: HarnessPeer;
 	/** A new frame peer (one per frame mount). */
-	newFramePeer(): DevToolPeer;
+	newFramePeer(): HarnessPeer;
 	/** Publish `host:connection` as the hosts do (DevToolMount.tsx, extension.ts). */
 	setHostConnection(connected: boolean): void;
 	/** Every write on this tool's topics and on host:connection, in order. */
@@ -335,7 +342,7 @@ export function createDevToolHarness(appId = 'tool.test', opts: IBusOptions = {}
 /** A peer wrapper that counts what crosses it. */
 export interface IPeerSpy {
 	/** The wrapped peer (hand this to the code under test). */
-	peer: DevToolPeer;
+	peer: HarnessPeer;
 	/** Everything posted. */
 	posts: unknown[];
 	/** How many times it was subscribed. */
@@ -350,7 +357,7 @@ export interface IPeerSpy {
  * @param peer - The real peer.
  * @returns The spy.
  */
-export function spyPeer(peer: DevToolPeer): IPeerSpy {
+export function spyPeer(peer: HarnessPeer): IPeerSpy {
 	const spy: IPeerSpy = {
 		posts: [],
 		subscribes: 0,
@@ -378,36 +385,36 @@ export function spyPeer(peer: DevToolPeer): IPeerSpy {
 }
 
 // =============================================================================
-// LANE GUARDS (quirk 1: the sidebar peer keeps ONE live subscriber)
+// LANE GUARDS (the channel is the only subscriber of a sidebar peer)
 // =============================================================================
 
 /**
- * Assert a mounted controller left exactly TWO live subscriptions on the
- * sidebar peer: its channel, then its op server. Nothing can stop a third at
- * runtime (busPeer.ts hands the live slot to whoever subscribed last, so a
- * channel built in a render after the effect silently takes every call), so
- * each lane pins it in its own mount test:
+ * Assert a mounted controller left exactly ONE live subscription on the
+ * sidebar peer: the host's channel. The channel's registry answers calls, so
+ * nothing else may subscribe (a second channel built in a render would take
+ * the peer's single live slot, busPeer.ts, and every call would then go
+ * unanswered).
  *
  *   const spy = spyPeer(h.sidebarPeer);
  *   const channel = shellProtocol.createToolChannel(spy.peer);   // as the host does
- *   <mount the lane's controller wiring over spy.peer and channel>
+ *   <mount the lane's controller wiring over channel>
  *   assertSidebarSubscribers(spy, 'graph sidebar');
  *
  * @param spy - The spied sidebar peer the mount used.
  * @param label - Names the mount in the error.
- * @throws Error unless `spy.active === 2`.
+ * @throws Error unless `spy.active === 1`.
  */
 export function assertSidebarSubscribers(spy: IPeerSpy, label = 'controller mount'): void {
-	if (spy.active === 2) return;
-	throw new Error(`${label}: the sidebar peer has ${spy.active} live subscribers; a mounted controller must leave exactly 2 (its channel, then its op server). `
-		+ 'Any other subscriber takes the op server\'s live slot (busPeer.ts), and every call then goes unanswered.');
+	if (spy.active === 1) return;
+	throw new Error(`${label}: the sidebar peer has ${spy.active} live subscribers; a mounted controller must leave exactly 1 (the host's channel). `
+		+ 'Any other subscriber takes the channel\'s live slot (busPeer.ts), and every call then goes unanswered.');
 }
 
-/** The protocol factories every app must import in ONE wiring module. */
-const TOOL_FACTORIES = ['createToolChannel', 'createToolOpServer', 'createToolController'];
+/** The protocol factory no lane may reach: the host builds every channel. */
+const TOOL_FACTORIES = ['createToolChannel'];
 
-/** `createToolChannel|createToolOpServer|createToolController` as a whole word. */
-const FACTORY_NAME = /\b(?:createToolChannel|createToolOpServer|createToolController)\b/;
+/** `createToolChannel` as a whole word. */
+const FACTORY_NAME = /\bcreateToolChannel\b/;
 
 /** The 'shell' module specifier, in either quote style. */
 const SHELL = `(?:'shell'|"shell")`;
@@ -427,10 +434,10 @@ function clauseNames(clause: string): string[] {
 }
 
 /**
- * The files that can reach a protocol factory (createToolChannel,
- * createToolOpServer, createToolController) from 'shell' at RUNTIME. A lane's
- * source-reading test asserts the list is exactly its one wiring module, so
- * no view builds a stray subscriber (see {@link assertSidebarSubscribers}).
+ * The files that can reach `createToolChannel` from 'shell' at RUNTIME. A
+ * lane's source-reading test asserts the list is empty: the host builds every
+ * channel (DevToolProps.channel), so a lane that builds one has a stray
+ * subscriber (see {@link assertSidebarSubscribers}).
  *
  * An ACCIDENT GUARD, not a security boundary: it reads text with regular
  * expressions. It reports a file that
@@ -490,7 +497,6 @@ export interface IFakeRealmCm {
 	getClient(): unknown;
 	subscribe(topic: string, cb: (snapshot: unknown) => void): () => void;
 	read(topic: string): Promise<unknown>;
-	request(op: string, params: unknown, opts?: { timeoutMs?: number }): Promise<unknown>;
 	/** Shell-event listeners plus topic subscriptions currently registered (leak checks). */
 	listenerCount(): number;
 }
@@ -541,8 +547,8 @@ function countedSubscribe(port: ReturnType<typeof localRetainedPort>) {
 	return { subscribe, state };
 }
 
-/** A VS Code webview realm and the extension host root that mirrors into it. */
-export interface IFakeSocketlessRealm {
+/** A mirrored realm (a VS Code webview) and the extension host root that mirrors into it. */
+export interface IFakeMirroredRealm {
 	/** The realm's manager. */
 	cm: IFakeRealmCm;
 	/** The root registry (shared by the root and the realm). */
@@ -565,21 +571,28 @@ export interface IFakeSocketlessRealm {
 }
 
 /**
- * A socketless realm: no client, liveness and account mirrored from the root.
- * The realm side follows connection.ts installMirrorSubscriptions; the root
- * side follows apps/vscode/src/providers/toolhost/busHost.ts startMirrors.
+ * A mirrored realm: liveness and account mirrored from the root. Like develop's
+ * ConnectionManager it has NO client until the first status mirror lands, and
+ * then a realm client (a proxy) whose `isAuthenticated()` follows the mirrored
+ * liveness and whose `getAccountInfo()` keeps the LAST truthy account (the
+ * manager ignores a null account snapshot, connection.ts
+ * installMirrorSubscriptions), so it can answer a previous account after a
+ * sign-out. The root side follows apps/vscode/src/providers/toolhost/busHost.ts
+ * startMirrors.
  *
  * @param registry - The root registry (default: fresh).
  * @returns The realm.
  */
-export function createFakeSocketlessRealm(registry: IRetainedRegistry = createRetainedRegistry()): IFakeSocketlessRealm {
+export function createFakeMirroredRealm(registry: IRetainedRegistry = createRetainedRegistry()): IFakeMirroredRealm {
 	const hub = eventHub();
 	const port = localRetainedPort(registry);
 	const counted = countedSubscribe(port);
 	let mirrorConnected: boolean | null = null;
 	let accountInfo: unknown;
+	/** The realm client, seeded on the first status mirror (connection.ts seedMirrorClient). */
+	let client: { getAccountInfo(): unknown; isAuthenticated(): boolean } | null = null;
 
-	// connection.ts isConnected(): the mirror answers in a socketless realm; with no client, false otherwise.
+	// connection.ts isConnected(): the mirror answers in a mirrored realm.
 	const isConnected = (): boolean => mirrorConnected ?? false;
 
 	// connection.ts installMirrorSubscriptions, 'shell:status'.
@@ -588,6 +601,7 @@ export function createFakeSocketlessRealm(registry: IRetainedRegistry = createRe
 		if (!mirror || mirror.connected === undefined || mirror.status === undefined) return;
 		const wasConnected = isConnected();
 		mirrorConnected = mirror.connected;
+		client ??= { getAccountInfo: () => accountInfo, isAuthenticated: () => mirrorConnected === true };
 		hub.emit('shell:statusChange', mirror.status);
 		if (mirror.connected && !wasConnected) hub.emit('shell:connected', undefined);
 		else if (!mirror.connected && wasConnected) hub.emit('shell:disconnected', { reason: 'root disconnected', hasError: false });
@@ -603,10 +617,9 @@ export function createFakeSocketlessRealm(registry: IRetainedRegistry = createRe
 		on: hub.on,
 		isConnected,
 		getAccountInfo: () => accountInfo,
-		getClient: () => null,
+		getClient: () => client,
 		subscribe: counted.subscribe,
 		read: port.read,
-		request: async () => { throw new Error('Not connected to server'); },
 		listenerCount: () => hub.count() + counted.state.active,
 	};
 
@@ -634,14 +647,12 @@ export function createFakeSocketlessRealm(registry: IRetainedRegistry = createRe
 	};
 }
 
-/** A rocket-ui realm: the realm owns the SDK client. */
+/** A rocket-ui realm: the realm's client is the SDK client itself. */
 export interface IFakeClientRealm {
 	/** The realm's manager. */
 	cm: IFakeRealmCm;
 	/** Every shell event emitted, in order. */
 	events: string[];
-	/** Every bus request / emitOp the code under test made. */
-	requests: Array<{ op: string; params: unknown }>;
 	/** Emit a shell event directly. */
 	emit(event: string, payload: unknown): void;
 	/** A foreground sign-in: login, then connected. */
@@ -680,7 +691,6 @@ export function createFakeClientRealm(): IFakeClientRealm {
 	const hub = eventHub();
 	const port = localRetainedPort(createRetainedRegistry());
 	const counted = countedSubscribe(port);
-	const requests: Array<{ op: string; params: unknown }> = [];
 	let connected = false;
 	let authenticated = false;
 	let sdkAccount: unknown;
@@ -694,17 +704,12 @@ export function createFakeClientRealm(): IFakeClientRealm {
 		getClient: () => client,
 		subscribe: counted.subscribe,
 		read: port.read,
-		request: async (op, params) => {
-			requests.push({ op, params });
-			throw new Error('Not connected to server');
-		},
 		listenerCount: () => hub.count() + counted.state.active,
 	};
 
 	return {
 		cm,
 		events: hub.log,
-		requests,
 		emit: hub.emit,
 		login(user) {
 			sdkAccount = user;
@@ -754,6 +759,71 @@ export function createFakeClientRealm(): IFakeClientRealm {
 			hub.emit('shell:toolSidebarDeactivated', { appId });
 		},
 	};
+}
+
+// =============================================================================
+// A REAL REALM CLIENT OVER THE SHELL BUS (RocketRideClientProxy + the root's clientOps)
+// =============================================================================
+
+/** What the fake socket is asked, and answers. */
+export type SocketHandler = (message: DAPMessage, timeout: number | undefined) => unknown | Promise<unknown>;
+
+/** A realm's real client, riding a real root bus, over a fake socket. */
+export interface IRealmClientHarness {
+	/** The realm's client: a REAL RocketRideClientProxy (what `useShellConnection().client` is in a mirrored realm). */
+	client: RocketRideClientProxy;
+	/** Every op the ROOT bus served, in order (the realm's whole vocabulary on the wire). */
+	rootOps: string[];
+	/** Every request the realm's transport made: the op, and the bus timeout the proxy asked for. */
+	transport: Array<{ op: string; timeoutMs: number | undefined }>;
+	/** What reached the fake socket: the DAP message and the SDK timeout. */
+	socket: Array<{ message: DAPMessage; timeout: number | undefined }>;
+	/** Monitors the root was asked to add or remove. */
+	monitors: Array<{ op: 'add' | 'remove'; key: unknown; types: string[] }>;
+	/** Script the socket: return the response BODY, throw to stand in for a failure, or never settle. */
+	onRequest(handler: SocketHandler): void;
+	/** Whether the root's socket is up (the root refuses `client.request` with 'Not connected to server' when it is not). */
+	setSocketUp(up: boolean): void;
+}
+
+/**
+ * Build a real realm client over the real shell bus: the realm's
+ * RocketRideClientProxy sends `client.request` through a transport that
+ * crosses a JSON hop (as a VS Code webview does) to a root op bus on which
+ * `registerClientOps` serves the root's surface, and only the socket itself
+ * is a stand-in.
+ *
+ * @returns The harness.
+ */
+export function createRealmClientHarness(): IRealmClientHarness {
+	let handler: SocketHandler = () => ({});
+	let up = true;
+	const socket: IRealmClientHarness['socket'] = [];
+	const monitors: IRealmClientHarness['monitors'] = [];
+	const fakeSdk = {
+		request: async (message: DAPMessage, timeout?: number): Promise<DAPMessage> => {
+			socket.push({ message, timeout });
+			const body = await handler(message, timeout);
+			return { type: 'response', seq: 1, success: true, ...(body as object) } as DAPMessage;
+		},
+		addMonitor: async (key: unknown, types: string[]) => { monitors.push({ op: 'add', key, types }); },
+		removeMonitor: async (key: unknown, types: string[]) => { monitors.push({ op: 'remove', key, types }); },
+	};
+	const root = createOpBus();
+	registerClientOps(root, { getClient: () => fakeSdk, isConnected: () => up });
+	const rootOps: string[] = [];
+	const transport: IRealmClientHarness['transport'] = [];
+	const json = <T>(value: T): T => (value === undefined ? value : (JSON.parse(JSON.stringify(value)) as T));
+	const client = new RocketRideClientProxy({
+		request: async (op, params, timeoutMs) => {
+			transport.push({ op, timeoutMs });
+			rootOps.push(op);
+			const answer = await root.request(op, json(params), timeoutMs !== undefined ? { timeoutMs } : undefined);
+			return json(answer);
+		},
+	});
+	client.applyIdentity({ connected: true });
+	return { client, rootOps, transport, socket, monitors, onRequest: (next) => { handler = next; }, setSocketUp: (value) => { up = value; } };
 }
 
 // =============================================================================

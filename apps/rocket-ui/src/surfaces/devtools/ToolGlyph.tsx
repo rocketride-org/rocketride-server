@@ -43,13 +43,15 @@ import { CodiconExtensions } from 'shared/components/icons/Codicon';
  */
 export const ToolGlyph: React.FC<{ iconUrl?: string | undefined; size?: number }> = ({ iconUrl, size = 20 }) => {
 	if (!iconUrl) return <CodiconExtensions size={size} />;
+	// JSON-quoting keeps data: URIs (spaces, parens, quotes) a valid url().
+	const cssUrl = `url(${JSON.stringify(iconUrl)})`;
 	const mask: CSSProperties = {
 		width: size,
 		height: size,
 		display: 'inline-block',
 		backgroundColor: 'currentColor',
-		WebkitMaskImage: `url(${iconUrl})`,
-		maskImage: `url(${iconUrl})`,
+		WebkitMaskImage: cssUrl,
+		maskImage: cssUrl,
 		WebkitMaskRepeat: 'no-repeat',
 		maskRepeat: 'no-repeat',
 		WebkitMaskSize: 'contain',

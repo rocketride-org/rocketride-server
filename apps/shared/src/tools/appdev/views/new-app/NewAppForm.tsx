@@ -31,14 +31,18 @@
  * writes the scaffold in one pass), and closing the surface discards
  * everything.
  *
- * Hosts own everything transport-shaped: the VSCode wrapper feeds identity/
- * error state over useMessaging; the web host feeds it from the live client
- * and runs the scaffold against the store VFS. The form renders whatever
- * identity the host reports and calls back with only the app-name half, the
- * display name, and the frame options.
+ * Hosts own everything transport-shaped (see NewAppWizard's host seam): the
+ * VS Code host feeds identity and runs the scaffold over the host.appdev.*
+ * ops; the web host feeds it from the live client and scaffolds against the
+ * store VFS. The form renders whatever identity the host reports and calls
+ * back with only the app-name half, the display name, and the frame options.
+ *
+ * Built on the shell kit (Card / InputField / Button) — no bespoke form
+ * chrome; only the wireframe preview SVG is deliberately custom.
  */
 
 import React, { useCallback, useState } from 'react';
+import { Button, Card, InputField } from 'shell';
 import type { FrameOptions } from '../../templates';
 import type { NewAppIdentity } from '../../types';
 
@@ -106,8 +110,8 @@ const WF_FILL = {
 // =============================================================================
 
 const styles: Record<string, React.CSSProperties> = {
-	// The page mirrors the pipeline canvas behind its starting-point card:
-	// the editor background with the same dot grid, card floating centered.
+	// Plain editor background, card floating centered — the wizard is a
+	// form, not a canvas, so no pipeline-style dot grid behind it.
 	page: {
 		display: 'flex',
 		justifyContent: 'center',
@@ -119,19 +123,13 @@ const styles: Record<string, React.CSSProperties> = {
 		fontFamily: 'var(--rr-font-family-widget)',
 		fontSize: 12,
 		color: 'var(--rr-fg-widget)',
-		backgroundImage: 'radial-gradient(var(--rr-border) 1px, transparent 1px)',
-		backgroundSize: '24px 24px',
+		background: 'var(--rr-bg-default)',
 	},
-	// Card shell matches EmptyCanvasPrompt: bg-widget, 8px radius, 24/28 padding
-	card: {
+	// Width constraint around the shell Card (Card itself takes no style).
+	cardWrap: {
 		width: '100%',
 		maxWidth: 560,
 		height: 'fit-content',
-		background: 'var(--rr-bg-widget)',
-		border: '1px solid var(--rr-border)',
-		borderRadius: 8,
-		padding: '24px 28px',
-		boxSizing: 'border-box',
 	},
 	heading: { margin: '0 0 4px 0', fontSize: 14, fontWeight: 600, color: 'var(--rr-text-primary)' },
 	subheading: { margin: '0 0 16px 0', fontSize: 12, color: 'var(--rr-text-secondary)' },
@@ -146,7 +144,9 @@ const styles: Record<string, React.CSSProperties> = {
 	checkHint: { display: 'block', color: 'var(--rr-text-secondary)', fontSize: 11, marginTop: 2, lineHeight: 1.3 },
 	field: { marginBottom: 12 },
 	fieldLabel: { display: 'block', marginBottom: 4, fontSize: 12 },
-	input: { width: '100%', boxSizing: 'border-box', background: 'var(--rr-bg-input)', border: '1px solid var(--rr-border)', borderRadius: 4, color: 'var(--rr-text-primary)', fontFamily: 'inherit', fontSize: 12, padding: '6px 10px', outline: 'none' },
+	// The input itself is the shell InputField — only layout and the invalid
+	// border live here (inline styles merge into the component's own).
+	input: { width: '100%', boxSizing: 'border-box' },
 	inputInvalid: { borderColor: 'var(--rr-error, #be1100)' },
 	fieldError: { color: 'var(--rr-error, #f48771)', fontSize: 11, marginTop: 4 },
 	identity: { border: '1px solid var(--rr-border)', borderRadius: 4, padding: '10px 12px' },
@@ -159,10 +159,6 @@ const styles: Record<string, React.CSSProperties> = {
 	footer: { display: 'flex', alignItems: 'center', gap: 8 },
 	footerNote: { flex: 1, color: 'var(--rr-text-secondary)', fontSize: 11, lineHeight: 1.4 },
 	footerError: { flex: 1, color: 'var(--rr-error, #f48771)', fontSize: 11, lineHeight: 1.4 },
-	button: { fontFamily: 'inherit', fontSize: 12, padding: '6px 14px', borderRadius: 4, border: '1px solid transparent', cursor: 'pointer', transition: 'background-color 0.1s, border-color 0.1s' },
-	buttonPrimary: { background: 'var(--rr-brand)', color: 'var(--rr-text-on-brand, #ffffff)' },
-	buttonPrimaryDisabled: { background: 'var(--rr-bg-input)', color: 'var(--rr-text-secondary)', cursor: 'default' },
-	buttonSecondary: { background: 'transparent', color: 'var(--rr-text-primary)', borderColor: 'var(--rr-border)' },
 };
 
 // =============================================================================
@@ -331,6 +327,7 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 	// ── Derivations ──────────────────────────────────────────────────────
 	// step: validate the slug and check for a live folder collision
 	const nameValid = APP_NAME_RE.test(appName);
+	// The SDK scaffold's apps/<slug>-ui rule, shared with `rocketride app create`.
 	const folderName = `${appName}-ui`;
 	const collision = nameValid && identity.existingFolders.includes(folderName);
 	const workspaceOpen = identity.workspaceOpen;
@@ -364,7 +361,8 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 
 	return (
 		<div style={styles.page}>
-			<div style={styles.card}>
+			<div style={styles.cardWrap}>
+				<Card>
 				{/* ── Application frame ─────────────────────────────────── */}
 				<h3 style={styles.heading}>Create a new app</h3>
 				<p style={styles.subheading}>Choose an application frame to begin; the preview updates live</p>
@@ -386,7 +384,7 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 					<label htmlFor="appName" style={styles.fieldLabel}>
 						App name
 					</label>
-					<input
+					<InputField
 						id="appName"
 						type="text"
 						spellCheck={false}
@@ -402,7 +400,7 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 					<label htmlFor="displayName" style={styles.fieldLabel}>
 						Display name
 					</label>
-					<input
+					<InputField
 						id="displayName"
 						type="text"
 						spellCheck={false}
@@ -441,13 +439,12 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 				{/* ── Footer ────────────────────────────────────────────── */}
 				<div style={styles.footer}>
 					<div style={error ? styles.footerError : styles.footerNote}>{error ?? note}</div>
-					<button type="button" style={{ ...styles.button, ...styles.buttonSecondary }} onClick={onCancel}>
-						Cancel
-					</button>
-					<button type="button" style={{ ...styles.button, ...(canCreate ? styles.buttonPrimary : styles.buttonPrimaryDisabled) }} disabled={!canCreate} onClick={() => onCreate(appName, displayName.trim(), frame)}>
+					<Button variant="secondary" onClick={onCancel}>Cancel</Button>
+					<Button variant="primary" disabled={!canCreate} onClick={() => onCreate(appName, displayName.trim(), frame)}>
 						{creating ? 'Creating...' : 'Create App'}
-					</button>
+					</Button>
 				</div>
+				</Card>
 			</div>
 		</div>
 	);

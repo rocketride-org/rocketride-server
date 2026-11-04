@@ -64,7 +64,7 @@ const styles = {
  * @param props - The host's DevToolProps.
  * @returns The frame.
  */
-export const GraphDevTool: React.FC<DevToolProps> = ({ peer, channel, documents, docKey }) => {
+export const GraphDevTool: React.FC<DevToolProps> = ({ channel, documents, docKey }) => {
 	const [frame, setFrame] = useState<IGraphFrame | null>(null);
 	useEffect(() => {
 		// The frame this effect builds, for its own error reporter (which runs only later, after the frame exists).
@@ -75,14 +75,14 @@ export const GraphDevTool: React.FC<DevToolProps> = ({ peer, channel, documents,
 			const text = frameFailureText(error, mount.frame?.controllerReady.get() ?? false);
 			if (text !== null) announcer.announce(text);
 		};
-		const created: IGraphFrame = createGraphFrame({ peer, ...(channel ? { channel } : {}), ...(documents ? { documents } : {}), docKey: docKey ?? null, ...FRAME_PROTOCOL, onError });
+		const created: IGraphFrame = createGraphFrame({ channel, ...(documents ? { documents } : {}), docKey: docKey ?? null, ...FRAME_PROTOCOL, onError });
 		mount.frame = created;
 		setFrame(created);
 		return () => {
 			created.dispose();
 			setFrame((current) => (current === created ? null : current));
 		};
-	}, [peer, channel, documents, docKey]);
+	}, [channel, documents, docKey]);
 	if (!frame) return null;
 	return <FrameRoot frame={frame} />;
 };
@@ -94,7 +94,9 @@ const FrameRoot: React.FC<{ frame: IGraphFrame }> = ({ frame }) => {
 	const signIn = useReadable(frame.signIn);
 	// Not yet published is not ready either; the document states tell the two apart.
 	const ready = host === true;
-	const env = useMemo(() => frame.env(ready), [frame, ready]);
+	// The host has not said yet is waiting, not disconnected.
+	const waiting = host === undefined;
+	const env = useMemo(() => frame.env(ready, waiting), [frame, ready, waiting]);
 	const gates: IDocGates = { host, summon, signIn };
 	return (
 		<GraphEnvProvider value={env}>

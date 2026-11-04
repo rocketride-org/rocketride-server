@@ -88,6 +88,7 @@ const REQUIRED_TESTS = [
 	'graph.userdata-store.test.ts',
 	'graph.userdata-app.test.ts',
 	'devtool.userdata.test.ts',
+	'graph.engine-status.test.ts',
 ];
 
 const mod = createAppModule({

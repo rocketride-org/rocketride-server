@@ -25,19 +25,24 @@
 // =============================================================================
 //
 // A plain function over injected parts (the realm's ConnectionManager as a
-// structural type, the peer, the host's channel and the shell's protocol
-// factories), so it runs under node:test against the real shell modules. The
-// React mount (GraphDevToolSidebar.tsx) calls it in an effect and disposes it
-// in the cleanup (R6).
+// structural type, the realm's client getter and engine readiness, the host's
+// channel and the shell's op-server factory), so it runs under node:test against
+// the real shell modules. The React mount (GraphDevToolSidebar.tsx) calls it in
+// an effect and disposes it in the cleanup (R6).
 //
 // What it owns (R1): its OWN endpoint store, schema store, data versions,
-// history and preview request; the bus-backed client; the identity tracker,
-// the activation gate and the discovery watch; and every op handler.
+// history and preview request; the engine client (over the realm's own
+// RocketRideClient); the identity tracker, the engine readiness and the
+// discovery watch; and every op handler.
 //
-//   QUIET (R7)  At mount it publishes retained state only: no event, no call,
-//               no document, no engine request. Discovery waits for identity
-//               AND activation (devtool/watch.ts); history is read only once
-//               the tool is activated and an identity is known.
+//   QUIET (R7)  At mount it publishes retained state only: no event, no
+//               document, and no tool call. There is no activation gate (a
+//               store tool's sidebar mounts when its tab is first selected, or
+//               at host boot when pinned), so mounting alone may discover (a
+//               read) and read history once an identity is known and the engine
+//               is ready; but endpoint probes are tool calls and are HELD until
+//               a person is present (devtool/watch.ts markUserPresent: the first
+//               frame op, a sidebar interaction or an explicit Refresh).
 //   GATES (T10) graph.execute re-checks the write gate (canWrite on the
 //               node's own dialect answer, and a ready endpoint) HERE, whatever
 //               the frame believed, and counts the write (countWrite) here too,
@@ -52,8 +57,8 @@
 //               same cuts; a result over maxResultBytes is refused, not sent.
 //   USER DATA   Saved queries and label styles live in two files of their
 //               own, one section per account each (graph/userDataFile.ts),
-//               read like history once the tool is activated and an identity
-//               is known. Frames read and change them with owned ops (the
+//               read like history once an identity is known and the engine
+//               is ready. Frames read and change them with owned ops (the
 //               caller's account is checked before and after every wait) and
 //               follow a `{styleRev, savedRev}` topic. A loaded schema's
 //               labels get their colour slots here (followAssignments),
@@ -63,18 +68,16 @@
 
 import type { DevToolProps, IToolOpServer, ToolChannel } from 'shell';
 import { ExplorerToolError, createActiveKeyStore } from 'shared/explorer';
-import type { IExplorerClient, IExplorerEndpoint, IHistoryEntry } from 'shared/explorer';
-import { createActivationGate } from 'shared/explorer/devtool/activation';
-import type { IActivationBus, IActivationGate } from 'shared/explorer/devtool/activation';
-import { getBusExplorerClient } from 'shared/explorer/devtool/busClient';
-import type { IExplorerBus } from 'shared/explorer/devtool/busClient';
+import type { IEndpointStoreOptions, IExplorerClient, IExplorerEndpoint, IHistoryEntry } from 'shared/explorer';
 import { attachController } from 'shared/explorer/devtool/controller';
 import type { RequiredControllerHandlers } from 'shared/explorer/devtool/controller';
 import { publishIdentityState } from 'shared/explorer/devtool/frameIdentity';
 import { createIdentityTracker } from 'shared/explorer/devtool/identity';
 import type { IIdentityBus, IIdentityTracker } from 'shared/explorer/devtool/identity';
 import { attachWhenLoaded, createFsPrefs, historyPrefsPath } from 'shared/explorer/devtool/prefs';
-import type { DevToolPeer } from 'shared/explorer/devtool/realm';
+import { createExplorerClient, createPrefsFs } from 'shared/explorer/devtool/engineClient';
+import type { IRealmClient, RealmClientGetter } from 'shared/explorer/devtool/engineClient';
+import type { EngineStatus, IEngineReadiness } from 'shared/explorer/devtool/readiness';
 import { replyOk } from 'shared/explorer/devtool/reply';
 import { guardRetainedState, jsonByteLength } from 'shared/explorer/devtool/state';
 import type { IOversizeInfo } from 'shared/explorer/devtool/state';
@@ -97,11 +100,11 @@ import { createLocalGraphEnv, schemaViewOf } from '../localEnv';
 import type { IGraphStores } from '../localEnv';
 import { adoptParkedHistory, ownerNowOf, parkHistory, settleOwed } from './owedHistory';
 import type { IOwedHistory, IVouch } from './owedHistory';
-import { EVENT, GRAPH_APP_ID, OP, STATE, USER_DATA_LOAD_WAIT_MS, docKeyFor, endpointsSnapshot, field, schemasSnapshot, toWire, versionsSnapshot } from './protocol';
+import { EVENT, OP, STATE, USER_DATA_LOAD_WAIT_MS, docKeyFor, endpointsSnapshot, field, schemasSnapshot, toWire, versionsSnapshot } from './protocol';
 import type { GraphOps, HistoryEdit, IGraphHistoryView, ISavedQueriesAnswer, IStylesAnswer } from './protocol';
 
 /** What the controller needs from its realm's ConnectionManager (structural; tests pass the base's fake realms). */
-export type IGraphRealm = IIdentityBus & IActivationBus & IDiscoveryBus & IExplorerBus;
+export type IGraphRealm = IIdentityBus & IDiscoveryBus;
 
 /** The largest result the controller sends to a frame (well above the node's own bounds; see T11). */
 export const MAX_GRAPH_RESULT_BYTES = 32 * 1024 * 1024;
@@ -111,22 +114,24 @@ export const WRITE_REFUSED_TEXT = 'This connection does not allow writes: its no
 
 /** What {@link createGraphController} needs. */
 export interface IGraphControllerOptions {
-	/** The realm's ConnectionManager. */
+	/** The realm's ConnectionManager (identity events and the task-event stream). */
 	cm: IGraphRealm;
-	/** The sidebar mount's peer. */
-	peer: DevToolPeer;
-	/** The host's channel (both hosts pass one). */
-	channel?: ToolChannel;
+	/** The host's channel for this mount (DevToolProps.channel). */
+	channel: ToolChannel;
+	/** The realm's client right now (useEngineSource().getClient): read again on every request, never captured. */
+	getClient: RealmClientGetter<IRealmClient>;
+	/** The realm's engine readiness (useEngineSource().readiness): waiting, disconnected or ready. */
+	readiness: IEngineReadiness;
 	/** The host's documents API (opened only on a user action). */
 	documents?: DevToolProps['documents'];
 	/** The sidebar's activeDocKey prop at mount. */
 	activeDocKey?: string | null;
-	/** The shell's createToolChannel (injected). */
-	createToolChannel: (peer: DevToolPeer) => ToolChannel;
 	/** The shell's createToolOpServer (injected). */
-	createToolOpServer: (peer: DevToolPeer) => IToolOpServer<GraphOps>;
-	/** The tool's app id (default rocketride.graph). */
-	appId?: string;
+	createToolOpServer: (channel: ToolChannel) => IToolOpServer<GraphOps>;
+	/** Whether a person is already using the tool at mount (default false: probes are held; see the header). */
+	present?: boolean;
+	/** Options for the controller's own endpoint store (tests shorten its debounce); `holdProbes` is always the discovery's. */
+	endpointOptions?: Partial<IEndpointStoreOptions>;
 	/** The clock (deadlines, previews). */
 	now?: () => number;
 	/** Where focus comes from (null in tests). */
@@ -145,14 +150,17 @@ export interface IGraphController {
 	readonly stores: IGraphStores;
 	readonly client: IExplorerClient;
 	readonly identity: IIdentityTracker;
-	readonly activation: IActivationGate;
+	/** The realm's engine readiness (the mount feeds it from useEngineSource). */
+	readonly engine: IEngineReadiness;
+	/** The engine's status as a readable (the sidebar rebuilds its env when it changes). */
+	readonly engineStatus: IReadable<EngineStatus>;
 	readonly discovery: IDevToolDiscovery;
 	/** The connection the fronted document belongs to. */
 	readonly activeConnection: IReadable<string | null>;
 	/** Feed every new activeDocKey prop value. */
 	noteActiveDocKey(key: string | null | undefined): void;
 	/** The LOCAL env the sidebar's views use (rebuild it when the realm's connection flag changes). */
-	env(ready: boolean): IGraphEnv;
+	env(status: EngineStatus | boolean): IGraphEnv;
 	/** Dispose everything (idempotent). History still pending is written first. */
 	dispose(): void;
 }
@@ -164,22 +172,23 @@ export interface IGraphController {
  * @returns The controller; dispose it in the mount's cleanup.
  */
 export function createGraphController(opts: IGraphControllerOptions): IGraphController {
-	const { cm, peer } = opts;
-	const appId = opts.appId ?? GRAPH_APP_ID;
+	const { cm } = opts;
+	const engine = opts.readiness;
 	const now = opts.now ?? Date.now;
 	const maxResultBytes = opts.maxResultBytes ?? MAX_GRAPH_RESULT_BYTES;
 	const report = (error: unknown, where: string): void => opts.onError?.(error, where);
-	const client = getBusExplorerClient(cm);
+	const client = createExplorerClient(opts.getClient);
+	const prefsFs = createPrefsFs(opts.getClient);
+	const identity = createIdentityTracker({ cm });
+	// The discovery exists before the store: the store asks it whether probes (tool calls) are held.
+	const discovery = createDevToolDiscovery({ cm, client, identity, engine, present: opts.present === true, ...(opts.focusTarget !== undefined ? { focusTarget: opts.focusTarget } : {}) });
 	const stores: IGraphStores = {
-		endpoints: opts.stores?.endpoints ?? makeGraphEndpointStore(),
+		endpoints: opts.stores?.endpoints ?? makeGraphEndpointStore({ ...opts.endpointOptions, holdProbes: () => discovery.holdProbes() }),
 		schemas: opts.stores?.schemas ?? createSchemaStore(),
 		dataVersions: opts.stores?.dataVersions ?? createDataVersions(),
 		history: opts.stores?.history ?? makeGraphHistory(),
 		previews: opts.stores?.previews ?? createPreviewStore({ now }),
 	};
-	const identity = createIdentityTracker({ cm });
-	const activation = createActivationGate({ appId, cm, ...(opts.activeDocKey !== undefined ? { activeDocKey: opts.activeDocKey } : {}) });
-	const discovery = createDevToolDiscovery({ cm, client, identity, activation, ...(opts.focusTarget !== undefined ? { focusTarget: opts.focusTarget } : {}) });
 	const offs: Array<() => void> = [];
 	let disposed = false;
 
@@ -265,9 +274,9 @@ export function createGraphController(opts: IGraphControllerOptions): IGraphCont
 	let userDataLive = false;
 	const followFile = (path: string, what: string, bump: () => void) =>
 		createUserDataFile({
-			cm,
+			fs: prefsFs,
 			identity,
-			activation,
+			engine,
 			path,
 			what,
 			loadWaitMs: USER_DATA_LOAD_WAIT_MS,
@@ -405,13 +414,14 @@ export function createGraphController(opts: IGraphControllerOptions): IGraphCont
 
 	// ── The channel first, then the ONE op server (attachController, R6) ────────────────────────
 	const attached = attachController<GraphOps>({
-		peer,
-		...(opts.channel ? { channel: opts.channel } : {}),
-		createToolChannel: opts.createToolChannel,
+		channel: opts.channel,
 		createToolOpServer: opts.createToolOpServer,
 		handlers,
 		now,
-		onFirstOp: () => activation.open('op'),
+		// A channel event named like an op would run that op's handler: attach refuses it.
+		events: Object.values(EVENT),
+		// The first frame call: a person is using the tool, so the held endpoint probes are released.
+		onFirstOp: () => discovery.markUserPresent('op'),
 		onRefused: (error) => report(error, 'refused'),
 	});
 	// The guard DEGRADES an oversize snapshot through `shrink` (here: the protocol's own cuts at the budget the guard
@@ -491,7 +501,7 @@ export function createGraphController(opts: IGraphControllerOptions): IGraphCont
 		}
 	}));
 
-	// ── Discovery: the store follows identity, activation, task events and focus ────────────────
+	// ── Discovery: the store follows identity, engine readiness, task events and focus ────────────────
 	offs.push(stores.endpoints.attach(client, identity.get().identity, discovery.watch));
 
 	// ── Identity: what belonged to the previous one goes ────────────────────────────────────────
@@ -517,11 +527,11 @@ export function createGraphController(opts: IGraphControllerOptions): IGraphCont
 	let historyOwner: string | null = null;
 	const newAccessor = (owner: string): IOwedHistory => {
 		const vouch: IVouch = { tracker: identity };
-		const prefs = createFsPrefs({ cm, path: historyPath, owner, ownerNow: ownerNowOf(vouch), onError: (error, phase) => report(error, `history ${phase}`) });
+		const prefs = createFsPrefs({ fs: prefsFs, path: historyPath, owner, ownerNow: ownerNowOf(vouch), onError: (error, phase) => report(error, `history ${phase}`) });
 		return { owner, prefs, vouch };
 	};
 	function syncHistory(): void {
-		const owner = activation.isOpen() && identity.get().known ? identity.get().fingerprint : null;
+		const owner = identity.get().known ? identity.get().fingerprint : null;
 		if (owner === historyOwner) return;
 		// 1. The batch still in the store's debounce is the PREVIOUS owner's: hand it to that owner's accessor before the
 		//    detach drops it. A disconnect, a sign-out or an account switch reaches the identity tracker before anything
@@ -563,11 +573,12 @@ export function createGraphController(opts: IGraphControllerOptions): IGraphCont
 		detachHistory = attachWhenLoaded(current.prefs, (api, who) => stores.history.attachPrefs(api, who));
 		if (owed) void owed.prefs.flush();
 	}
-	offs.push(activation.subscribe(() => syncHistory()));
+	// History is read once an identity is known: the owner changes with the identity (the subscription above).
+	syncHistory();
 
 	// ── The sidebar's own env (LOCAL, over these stores) ─────────────────────────────────────────
 	const openDocument = (target: DocTarget): void => {
-		activation.open('user');
+		discovery.markUserPresent('user');
 		const documents = opts.documents;
 		if (!documents) return;
 		if (target.kind === 'connections') documents.open('', 'Graph Explorer');
@@ -575,26 +586,31 @@ export function createGraphController(opts: IGraphControllerOptions): IGraphCont
 	};
 	const sidebarPrefs = memoryPrefs();
 	const activeConnection: IReadable<string | null> = { get: active.get, subscribe: active.subscribe };
-	let lastEnv: { ready: boolean; env: IGraphEnv } | null = null;
+	let lastEnv: { status: EngineStatus; env: IGraphEnv } | null = null;
+	const engineStatus: IReadable<EngineStatus> = { get: () => engine.status(), subscribe: (listener) => engine.subscribe(() => listener()) };
 
 	return {
 		channel: attached.channel,
 		stores,
 		client,
 		identity,
-		activation,
+		engine,
+		engineStatus,
 		discovery,
 		activeConnection,
 		noteActiveDocKey(key) {
 			hostActive = key;
-			activation.noteActiveDocKey(key);
 			syncActive();
 		},
-		env(ready) {
-			if (lastEnv && lastEnv.ready === ready) return lastEnv.env;
+		env(given) {
+			// A boolean is the old shape of the question: connected or not.
+			const status: EngineStatus = typeof given === 'boolean' ? (given ? 'ready' : 'disconnected') : given;
+			const ready = status === 'ready';
+			if (lastEnv && lastEnv.status === status) return lastEnv.env;
 			const local = createLocalGraphEnv({
 				mount: 'controller',
 				ready,
+				engine: status,
 				client: ready ? client : null,
 				stores,
 				activeConnection,
@@ -603,8 +619,8 @@ export function createGraphController(opts: IGraphControllerOptions): IGraphCont
 				historyPrivacyNote: DEVTOOL_HISTORY_PRIVACY_NOTE,
 				userData,
 				refresh: (o) => {
-					// A refresh asked for in the sidebar; an automatic one (quiet) is not the user activating the tool.
-					if (!o?.quiet) activation.open('user');
+					// A refresh asked for in the sidebar; an automatic one (quiet) does not show a person is present.
+					if (!o?.quiet) discovery.markUserPresent('user');
 					return discovery.allowed() ? stores.endpoints.refresh(client, { reprobe: o?.reprobe === true }) : Promise.resolve();
 				},
 			});
@@ -615,12 +631,12 @@ export function createGraphController(opts: IGraphControllerOptions): IGraphCont
 				previews: {
 					...local.previews,
 					request: (input) => {
-						activation.open('user');
+						discovery.markUserPresent('user');
 						local.previews.request(input);
 					},
 				},
 			};
-			lastEnv = { ready, env };
+			lastEnv = { status, env };
 			return env;
 		},
 		dispose() {
@@ -640,7 +656,6 @@ export function createGraphController(opts: IGraphControllerOptions): IGraphCont
 			current = null;
 			held = null;
 			discovery.dispose();
-			activation.dispose();
 			attached.dispose();
 			const snapshot = identity.get();
 			if (owed && !(snapshot.known && snapshot.fingerprint === owed.owner)) {

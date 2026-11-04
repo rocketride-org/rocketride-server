@@ -49,7 +49,7 @@ export interface IDeadline {
 }
 
 /** Why a call was refused. */
-export type DeadlineRefusal = 'missing' | 'expired';
+export type DeadlineRefusal = 'missing' | 'expired' | 'event' | 'horizon';
 
 /** A call the deadline guard refused (it was NOT executed). */
 export class DeadlineError extends Error {
@@ -59,7 +59,7 @@ export class DeadlineError extends Error {
 	/** The op's wire name. */
 	readonly op: string;
 
-	/** How late the call arrived, in ms (expired calls only). */
+	/** How late the call arrived (expired calls), or how far past the horizon its deadline was (horizon refusals), in ms. */
 	readonly lateMs?: number;
 
 	/**
@@ -70,7 +70,11 @@ export class DeadlineError extends Error {
 	constructor(op: string, reason: DeadlineRefusal, lateMs?: number) {
 		super(reason === 'missing'
 			? `'${op}' carries no deadlineAt; refused without running it (protocol error).`
-			: `'${op}' arrived ${lateMs ?? 0} ms after its deadline; the caller had given up, so it was not run.`);
+			: reason === 'event'
+				? `'${op}' arrived as a channel event, not a call; refused without running it (protocol error).`
+				: reason === 'horizon'
+					? `'${op}' carries a deadlineAt ${lateMs ?? 0} ms further ahead than any call to it may have; refused without running it (protocol error).`
+					: `'${op}' arrived ${lateMs ?? 0} ms after its deadline; the caller had given up, so it was not run.`);
 		this.name = 'DeadlineError';
 		this.reason = reason;
 		this.op = op;
@@ -128,6 +132,12 @@ export interface IDeadlineGuardOptions {
 	onRefused?: (error: DeadlineError) => void;
 	/** Told about every accepted call, just before its handler runs. */
 	onAccepted?: (op: string) => void;
+	/**
+	 * The furthest ahead of `now()` a call's deadline may be (the op's largest
+	 * legal budget). A call, or a replayed copy of one, whose deadline lies
+	 * beyond it is refused, so no payload can stay executable indefinitely.
+	 */
+	maxAheadMs?: number;
 }
 
 /**
@@ -149,6 +159,7 @@ export function guardDeadline<P, R>(op: string, handler: (params: P) => R | Prom
 		else {
 			const late = now() - deadlineAt;
 			if (late > 0) refusal = new DeadlineError(op, 'expired', late);
+			else if (opts.maxAheadMs !== undefined && -late > opts.maxAheadMs) refusal = new DeadlineError(op, 'horizon', -late - opts.maxAheadMs);
 		}
 		if (refusal !== null) {
 			opts.onRefused?.(refusal);

@@ -74,6 +74,31 @@ class Capability:
     construct: str = ''
 
 
+# Cells first verified against AGE 1.5.0 only. AGE_1_6_0 inherits them, but nobody has run them on 1.6.0 (or on an
+# unlisted version that falls back to these rules), so a rejection there says so instead of claiming the new version.
+VERIFIED_ON_1_5_0_ONLY = frozenset(
+    {
+        'temporal_functions',
+        'element_id',
+        'list_comprehension',
+        'pattern_comprehension',
+        'all_shortest_paths',
+        # syntax_hint() features (a parse that failed):
+        'exists_subquery',
+        'shortest_path',
+        'regex_match',
+        'exists_function',
+    }
+)
+
+
+def _with_verification(feature: str, detail: str, age_version: str) -> str:
+    """Add the verification note to a detail that was verified on AGE 1.5.0 only, when the engine is another version."""
+    if feature in VERIFIED_ON_1_5_0_ONLY and age_version != '1.5.0':
+        return f'{detail}. Verified on AGE 1.5.0; not confirmed on {age_version}.'
+    return detail
+
+
 def _uses_function(name: str) -> Callable[[CypherFacts], bool]:
     return lambda facts: name in facts.function_names
 
@@ -117,7 +142,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.REJECT,
             detect=_uses_function('datetime'),
             detail=(
-                'AGE 1.5.0 has no datetime() (function ag_catalog.age_datetime does not exist); '
+                'Apache AGE has no datetime() (function ag_catalog.age_datetime does not exist); '
                 'store timestamps as ISO-8601 strings or epoch numbers instead'
             ),
             construct='datetime()',
@@ -137,7 +162,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.REJECT,
             detect=lambda facts: facts.has_order_by_alias,
             detail=(
-                "AGE 1.5.0 cannot ORDER BY a projection alias ('could not find rte for <name>'); "
+                "Apache AGE cannot ORDER BY a projection alias ('could not find rte for <name>'); "
                 'order by the expression itself (e.g. ORDER BY r.since, not ORDER BY since)'
             ),
             construct='ORDER BY <alias>',
@@ -151,7 +176,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.REJECT,
             detect=lambda facts: facts.has_merge_action,
             detail=(
-                "AGE 1.5.0 does not parse MERGE ... ON CREATE/ON MATCH SET (syntax error at 'ON'); "
+                "Apache AGE does not parse MERGE ... ON CREATE/ON MATCH SET (syntax error at 'ON'); "
                 'use plain MERGE, then a separate SET clause (MERGE (n) ... SET n.prop = ...)'
             ),
             construct='MERGE ... ON CREATE/ON MATCH SET',
@@ -161,7 +186,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.REJECT,
             detect=lambda facts: facts.has_where_label_check,
             detail=(
-                "AGE 1.5.0 does not parse label predicates in WHERE — 'WHERE n:Label' and "
+                "Apache AGE does not parse label predicates in WHERE — 'WHERE n:Label' and "
                 "'WHERE (n:Label)' both fail (syntax error at ':'); put the label in the "
                 'pattern instead (MATCH (n:Label))'
             ),
@@ -172,7 +197,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.REJECT,
             detect=lambda facts: facts.has_multi_label,
             detail=(
-                'AGE 1.5.0 does not parse multiple labels on one node — (n:A:B) fails in both '
+                'Apache AGE does not parse multiple labels on one node — (n:A:B) fails in both '
                 "CREATE and MATCH (syntax error at ':'); model the second label as a property "
                 'or an edge to a category node'
             ),
@@ -206,7 +231,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.EMULATE,
             detect=lambda facts: bool(facts.empty_in_spans),
             detail=(
-                "AGE 1.5.0 evaluates 'x IN []' as true for every row, and fails with 'cache lookup "
+                "Apache AGE evaluates 'x IN []' as true for every row, and fails with 'cache lookup "
                 "failed for type 0' under NOT / AND / RETURN; rewritten to 'false', its openCypher "
                 'value. An empty list passed as a $parameter is evaluated correctly.'
             ),
@@ -217,7 +242,7 @@ AGE_1_5_0: Dict[str, Capability] = {
             status=CellStatus.REJECT,
             detect=_uses_function('shortestpath'),
             detail=(
-                'AGE 1.5.0 has no shortestPath() (syntax error); use a bounded variable-length '
+                'Apache AGE has no shortestPath() (syntax error); use a bounded variable-length '
                 'match (e.g. (a)-[*..3]-(b)) and rank by path length in the query'
             ),
             construct='shortestPath()',
@@ -275,23 +300,51 @@ AGE_1_5_0: Dict[str, Capability] = {
     )
 }
 
+# ---------------------------------------------------------------------------
+# AGE 1.6.0 — verified 2026-10-13 / 2026-10-19 against the datacore image built
+# for it (PG 16.15 + AGE 1.6.0, rocketride-saas#814). SET/REMOVE/DELETE now reach
+# every entity a MERGE creates, but when one entity receives several writes in a
+# statement only one of them is kept — on 1.5.0 as well, and also for entities
+# bound by MATCH or CREATE. Everything else behaves as on 1.5.0.
+# ---------------------------------------------------------------------------
+
+AGE_1_6_0: Dict[str, Capability] = {
+    **AGE_1_5_0,
+    'merge_write': Capability(
+        feature='merge_write',
+        status=CellStatus.REJECT,
+        detect=lambda facts: facts.has_repeated_merge_write,
+        detail=(
+            'AGE 1.6.0 keeps only one of several SET/REMOVE/DELETE writes that one entity a '
+            'MERGE created receives in a statement: here the same entity is written from '
+            'several rows (a MATCH/UNWIND/CALL after the MERGE, or a MERGE entity whose key '
+            'does not change with every MATCH/UNWIND/CALL before it: a fixed key, a value '
+            'from an earlier step, one side of a cross product). Make each row write its own '
+            'entity, or run the write as a separate '
+            'execute call (MATCH (n:L {key: ...}) SET n.prop = ...)'
+        ),
+    ),
+}
+
 #: Capability tables keyed by AGE version string.
 CAPABILITY_TABLES: Dict[str, Dict[str, Capability]] = {
     '1.5.0': AGE_1_5_0,
+    '1.6.0': AGE_1_6_0,
 }
 
+#: The strictest table: used for the default and for any version not listed.
 DEFAULT_AGE_VERSION = '1.5.0'
 
 
 def apply_capabilities(facts: CypherFacts, age_version: str = DEFAULT_AGE_VERSION) -> CypherFacts:
     """Run the dialect gate: REJECT cells raise; EMULATE cells rewrite.
 
-    Unknown versions fall back to the newest known table (closest behaviour
-    beats no gate at all). TBD and SUPPORTED cells pass through unchanged.
+    A version without its own table gets the strictest one
+    (``DEFAULT_AGE_VERSION``): a newer table relaxes rules that an older or
+    unknown engine may still need. TBD and SUPPORTED cells pass through
+    unchanged.
     """
-    table = CAPABILITY_TABLES.get(age_version)
-    if table is None:
-        table = CAPABILITY_TABLES[sorted(CAPABILITY_TABLES)[-1]]
+    table = CAPABILITY_TABLES.get(age_version) or CAPABILITY_TABLES[DEFAULT_AGE_VERSION]
 
     for cap in table.values():
         if not cap.detect(facts):
@@ -301,7 +354,9 @@ def apply_capabilities(facts: CypherFacts, age_version: str = DEFAULT_AGE_VERSIO
             if cap.feature == 'temporal_functions':
                 used = sorted(set(_TEMPORAL_FUNCTIONS) & facts.function_names)
                 construct = ', '.join(f'{name}()' for name in used) or construct
-            raise AgeUnsupportedFeature(cap.feature, cap.detail, construct, age_version)
+            raise AgeUnsupportedFeature(
+                cap.feature, _with_verification(cap.feature, cap.detail, age_version), construct, age_version
+            )
         if cap.status is CellStatus.EMULATE and cap.rewrite is not None:
             # Re-analyze the rewritten text so later stages see consistent
             # facts, but keep the caller-visible column names of the query
@@ -360,10 +415,12 @@ _SYNTAX_HINTS: Tuple[Tuple[str, str, str, str], ...] = (
 _BLANK_LITERALS = re.compile(r"""'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`[^`]*`|//[^\r\n]*|/\*.*?\*/""", re.DOTALL)
 
 
-def syntax_hint(query: str) -> Optional[AgeUnsupportedFeature]:
+def syntax_hint(query: str, age_version: str = DEFAULT_AGE_VERSION) -> Optional[AgeUnsupportedFeature]:
     """Return a precise unsupported-feature error for a query that failed to parse, if one applies."""
     code = _BLANK_LITERALS.sub(' ', query)
     for pattern, feature, construct, detail in _SYNTAX_HINTS:
         if re.search(pattern, code, re.IGNORECASE):
-            return AgeUnsupportedFeature(feature, detail, construct, DEFAULT_AGE_VERSION)
+            return AgeUnsupportedFeature(
+                feature, _with_verification(feature, detail, age_version), construct, age_version
+            )
     return None

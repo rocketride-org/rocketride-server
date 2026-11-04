@@ -25,10 +25,12 @@
 // APPS TOOL — FRAME (routes the tool's documents to the host's frame bodies)
 // =============================================================================
 //
-// The apps tool OWNS its document identities: `tool:apps/newapp` is the
-// New App wizard, `tool:apps/<appId>` an App Builder screen. The builder
-// and wizard INTERNALS are host adapters today (the appdevFrames seam);
-// this frame contributes the routing, so no host carries `app:*`/`newapp`
+// The apps tool OWNS its document identities: `tool:apps/<appId>` is an App
+// Builder screen, and `tool:apps/newapp` the UNBOUND builder — the same
+// builder body with no app, which renders the New App wizard as its empty
+// state (pipeline-editor pattern: an empty canvas presents the wizard).
+// The builder INTERNALS are host adapters (the appdevFrames seam); this
+// frame contributes the routing, so no host carries `app:*`/`newapp`
 // special cases in its document ladder.
 // =============================================================================
 
@@ -52,13 +54,9 @@ export const AppsToolFrame: React.FC<DevToolProps> = ({ docKey }) => {
 	const services = useToolHost();
 	const frames = services.appdevFrames;
 	if (!frames) return <div style={emptyStyle}>This host does not serve App Builder documents.</div>;
-	if (docKey === 'newapp') {
-		const NewApp = frames.newApp;
-		return <NewApp />;
-	}
 	if (docKey) {
 		const Builder = frames.builder;
-		return <Builder appId={docKey} />;
+		return <Builder appId={docKey === 'newapp' ? null : docKey} />;
 	}
 	return <div style={emptyStyle}>Open an app from the Apps sidebar.</div>;
 };

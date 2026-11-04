@@ -41,29 +41,21 @@
 //                             endpoint key came to front — the fallback
 //                             selection signal for hosts without
 //                             DevToolProps.activeDocKey.
-//   STATE  'engine'           HOST → documents: engine reachability (the
-//                             generic tools/core topic — the host publishes
-//                             it, no tool does). Frames hold NO RocketRide
-//                             client — their run/apply enablement derives
-//                             from this retained snapshot.
-//   OPS    sql.*              document → controller → document: every engine
-//                             interaction a frame needs (resolve/release,
-//                             execute, schema, dialect, discovery, service,
-//                             validate, env keys), executed on the
-//                             controller's single connection. The vocabulary
-//                             lives in ops.ts; frames reach it through the
-//                             remote SqlEnv (sqlEnv.ts), never directly.
+//   OPS    sql.*              document → controller → document: ENDPOINT
+//                             LIFECYCLE only (resolve/release/discover) —
+//                             refcounted direct-mode temp pipelines must be
+//                             managed in ONE realm. Statement traffic runs on
+//                             each frame's own realm client (sqlEnv.ts).
 // =============================================================================
 
-import { createToolChannel, createToolOpServer, typedToolChannel } from 'shell';
+import { typedToolChannel } from 'shell';
 import { ConnectionManager } from 'shell';
-import { getBusSqlClient } from './connect/busClient';
-import type { SqlWireClient } from './connect/busClient';
+import type { RocketRideClient } from 'rocketride';
 import type { DevToolProps, ToolChannel, TypedToolChannel } from 'shell';
-import { applySavedConnections, discoverSqlEndpoints, getSavedConnection, getSavedConnections, getSavedConnectionsStatus, releaseDirectEndpoint, resolveEndpoint, subscribeSavedConnections, upsertSavedConnection } from './connect';
+import { applySavedConnections, getSavedConnections, getSavedConnectionsStatus, resolveEndpoint, subscribeSavedConnections, upsertSavedConnection } from './connect';
 import type { SavedSqlConnection } from './connect';
-import { getLocalSession } from './sqlEnv';
-import type { SqlOps, SqlStateMap, SqlEventMap } from './ops';
+import { serveSqlOps } from './ops';
+import type { SqlStateMap, SqlEventMap } from './ops';
 import { getActiveConnection, subscribeActiveConnection } from './navigation';
 import { connectionEditorDocKey, connectionEditorUri, connectionUri, getDocs } from './docs';
 
@@ -71,7 +63,7 @@ import { connectionEditorDocKey, connectionEditorUri, connectionUri, getDocs } f
 // PROTOCOL
 // =============================================================================
 //
-// The tool's topics, events and ops live in ops.ts as protocol maps
+// The tool's topics, events and ops live in ops/sqlOps.ts as protocol maps
 // (SqlStateMap / SqlEventMap / SqlOps) — the typed channel view below makes
 // every key and payload check at the call site.
 
@@ -93,19 +85,15 @@ export interface SqlSidebarBridge {
 
 /** What a mount hands the bridge builders — straight from DevToolProps. */
 export interface SqlToolMountContext {
-	/** The peer pipe (the channel's transport). */
-	peer: DevToolProps['peer'];
-	/** The typed channel; built locally over `peer` when the host is too old
-	 *  to provide one (degraded: no host-side retention). */
-	channel?: ToolChannel;
+	/** The mount's channel (host-built over its transport). */
+	channel: ToolChannel;
 	/** Host documents API, when the host has one. */
 	documents?: DevToolProps['documents'];
 }
 
-/** The mount's channel, host-provided or locally constructed, as the sql
- *  tool's typed protocol view. */
+/** The mount's channel as the sql tool's typed protocol view. */
 function channelOf(ctx: SqlToolMountContext): TypedToolChannel<SqlStateMap, SqlEventMap> {
-	return typedToolChannel<SqlStateMap, SqlEventMap>(ctx.channel ?? createToolChannel(ctx.peer));
+	return typedToolChannel<SqlStateMap, SqlEventMap>(ctx.channel);
 }
 
 // =============================================================================
@@ -121,10 +109,16 @@ function channelOf(ctx: SqlToolMountContext): TypedToolChannel<SqlStateMap, SqlE
  * @throws When resolution fails (no client, pipeline start failure).
  */
 async function openSavedConnection(conn: SavedSqlConnection): Promise<void> {
-	const client = getBusSqlClient();
-	if (!ConnectionManager.getInstance().isConnected()) throw new Error('Not connected to a server.');
-	const endpoint = await resolveEndpoint(client, conn);
+	const endpoint = await resolveEndpoint(needRealmClient(), conn);
 	getDocs()?.openStaticDocument(connectionUri(endpoint.key), conn.name, endpoint);
+}
+
+/** The realm's connected client, or throws the standard message. */
+function needRealmClient(): RocketRideClient {
+	const cm = ConnectionManager.getInstance();
+	const client = cm.getClient();
+	if (!client || !cm.isConnected()) throw new Error('Not connected to a server.');
+	return client;
 }
 
 // =============================================================================
@@ -184,40 +178,11 @@ export function createSidebarToolBridge(ctx: SqlToolMountContext): SqlSidebarBri
 		upsertSavedConnection(payload);
 	});
 
-	// Operations served on the controller's engine connection — plain
-	// handlers; correlation and replies are the op server's business. The
-	// session ops share the realm's local session cache (token caching).
-	const needClient = (): SqlWireClient => {
-		const client = getBusSqlClient();
-		if (!ConnectionManager.getInstance().isConnected()) throw new Error('Not connected to a server.');
-		return client;
-	};
-	const ops = createToolOpServer<SqlOps>(ctx.peer);
-	ops.serve('sql.resolveEndpoint', async ({ connId }) => {
-		const conn = getSavedConnection(connId);
-		if (!conn) throw new Error(`No saved connection '${connId}'.`);
-		return resolveEndpoint(needClient(), conn);
-	});
-	ops.serve('sql.releaseEndpoint', async ({ key }) => {
-		await releaseDirectEndpoint(needClient(), key);
-	});
-	ops.serve('sql.discoverEndpoints', async () => discoverSqlEndpoints(needClient()));
-	ops.serve('sql.execute', async ({ endpoint, sql, params, idempotent }) =>
-		getLocalSession(needClient(), endpoint).execute(sql, { ...(params ? { params } : {}), ...(idempotent !== undefined ? { idempotent } : {}) }));
-	ops.serve('sql.getSchema', async ({ endpoint, table }) => getLocalSession(needClient(), endpoint).getSchema(table));
-	ops.serve('sql.refreshSchema', async ({ endpoint }) => getLocalSession(needClient(), endpoint).refreshSchema());
-	ops.serve('sql.dialect', async ({ endpoint }) => getLocalSession(needClient(), endpoint).dialect());
-	ops.serve('sql.getService', async ({ provider }) => needClient().getService(provider));
-	ops.serve('sql.validate', async ({ pipeline }) => needClient().validate({ pipeline }));
-	ops.serve('sql.envKeys', async () => {
-		try {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const keys = await (needClient() as any).account?.getEnvironmentKeys?.();
-			return (keys as string[] | undefined) ?? [];
-		} catch {
-			return [];
-		}
-	});
+	// ENDPOINT LIFECYCLE, served in this one realm — direct-mode temp
+	// pipelines are refcounted, and the refcount must have a single owner.
+	// Statement traffic never arrives here: frames run it on their own
+	// realm client. (Implementations: ops/server.ts.)
+	serveSqlOps(ctx.channel);
 
 	// The list rides to every document as retained state — now, whenever the
 	// store changes, and never before the owner load has read the file.

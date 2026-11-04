@@ -99,7 +99,7 @@ import { inspectorTextOfRow } from '../graph/rowInspect';
 import { EDITOR_HEIGHT_PREF_KEY, clampEditorHeight, splitToggled, storedEditorHeight } from '../graph/splitPane';
 import type { IEditorSplit } from '../graph/splitPane';
 import type { ReadQueryResult } from '../graph/types';
-import { AGE_AFFECTED_NOT_REPORTED, CHANGES_NOTE, FULL_SCREEN_TEXT, NOTICE_HEADLINE_MAX, STOP_WAITING_NOTE, changesText, graphRunLabel, num, resultAnnouncement, resultMeta, resultNotes, splitNotice, truncationText } from '../graph/wording';
+import { AGE_AFFECTED_NOT_REPORTED, CHANGES_NOTE, FULL_SCREEN_TEXT, NOTICE_HEADLINE_MAX, STOP_WAITING_NOTE, changesText, engineNotReadyText, graphRunLabel, num, resultAnnouncement, resultMeta, resultNotes, splitNotice, truncationText, writeTruncationText } from '../graph/wording';
 import type { IResultNote } from '../graph/wording';
 import { GraphFailureBanner } from './GraphFailureBanner';
 import { GraphView } from './GraphView';
@@ -330,7 +330,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 	const notReported = affectedNotReported(mode, dialect?.dialect);
 	const announce = useCallback((text: string) => announcer.announce(text), []);
 	// Why nothing may be sent right now (statements and graph actions alike), or null.
-	const blocked = !env.ready ? 'The shell is not connected to the engine.' : paused;
+	const blocked = !env.ready ? (engineNotReadyText(env.engine) ?? 'The shell is not connected to the engine.') : paused;
 
 	// ── The session on this endpoint (the token never leaves the store) ──────
 	// Keyed on the endpoint's KEY, not its object: background discovery hands back a new object for the same
@@ -705,7 +705,7 @@ export const RunSurface: React.FC<IRunSurfaceProps> = ({ endpoint, mode, paused 
 
 	// ── Meta line ────────────────────────────────────────────────────────────
 	const metaText = result ? resultMeta(displayed, result, notReported) : '';
-	const truncation = result ? truncationText(result) : null;
+	const truncation = result ? (mode === 'write' ? writeTruncationText(result) : truncationText(result)) : null;
 	const metaLine = `${metaText}${truncation ? ` · ${truncation}` : ''}`;
 	const willRun = describeSnapshot(view ?? { text, start: 0, end: 0, caret: 0 });
 	const strip = runner.runs.length > 1;

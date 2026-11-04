@@ -146,15 +146,17 @@ export const PipelinesTool: React.FC<DevToolProps> = () => {
 		setUnknownTasks(unknown);
 	}, [isKnownTask]);
 
-	// Live feed over the SHELL BUS: monitor + dashboard seed on every
-	// (re)connect through the brokered client.* ops (in-process at the
-	// framework root, bridged in spoke realms), apaevt_task events folded as
-	// they arrive off the local event lane (socket- or mirror-fed).
+	// Live feed through the realm's client: monitor + dashboard seed on every
+	// (re)connect (the real client at the framework root, the realm client —
+	// requests over the bridge — in spoke realms), apaevt_task events folded
+	// as they arrive off the local event lane (socket- or mirror-fed).
 	useEffect(() => {
 		const cm = ConnectionManager.getInstance();
 		const seed = (): void => {
-			void cm.request('client.addMonitor', { key: { token: '*' }, types: ['task'] }).catch(() => { /* feed degrades to dashboard-only */ });
-			cm.request('client.getDashboard', {}).then((dashboard) => {
+			const client = cm.getClient();
+			if (!client) return;
+			void client.addMonitor({ token: '*' }, ['task']).catch(() => { /* feed degrades to dashboard-only */ });
+			client.getDashboard().then((dashboard) => {
 				const tasks = (dashboard as { tasks?: DashboardTaskDTO[] } | null)?.tasks;
 				if (tasks) seedFromDashboard(tasks);
 			}).catch(() => { /* no snapshot — events still fold */ });

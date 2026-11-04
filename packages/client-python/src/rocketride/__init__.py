@@ -127,6 +127,7 @@ from .types.account import (
     AccountOrgTeam,
     ApiKeyRecord,
     OrgDetail,
+    DeleteOrgPrecheck,
     MemberRecord,
     TeamRecord,
     TeamDetail,
@@ -151,6 +152,18 @@ from .core.exceptions import AuthenticationException, CommandException
 
 # Import identity types returned by connect()
 from .types.client import TeamInfo, OrgInfo, ConnectResult, ServerInfoResult
+
+# Pure deploy/publish helpers shared by every host (teams, versions, names)
+from .deploy_helpers import (
+    DeployTeamRef,
+    parse_registry_version,
+    pick_publish_version,
+    pipeline_name_from_path,
+    resolve_deploy_teams,
+    resolve_team_arg,
+    team_name_of,
+    wire_team_id_of,
+)
 
 # Import the run-log DVR session class (the codec stays internal — only the
 # session and its user-facing types are public surface).
@@ -183,6 +196,14 @@ __all__ = [
     'RocketRideClientConfig',
     'RocketRideException',
     'LogEventStream',
+    'DeployTeamRef',
+    'parse_registry_version',
+    'pick_publish_version',
+    'pipeline_name_from_path',
+    'resolve_deploy_teams',
+    'resolve_team_arg',
+    'team_name_of',
+    'wire_team_id_of',
     'AuthenticationException',
     'CommandException',
     'CONST_DEFAULT_SERVICE',
@@ -238,6 +259,7 @@ __all__ = [
     'AccountOrgTeam',
     'ApiKeyRecord',
     'OrgDetail',
+    'DeleteOrgPrecheck',
     'MemberRecord',
     'TeamRecord',
     'TeamDetail',

@@ -56,6 +56,8 @@ from rocketlib import warning
 from ai.common.graph import GraphGlobalBase
 from ai.common.graph.adapters import age_adapter
 from ai.common.graph.age import (
+    CAPABILITY_TABLES,
+    DEFAULT_AGE_VERSION,
     AgeFirewallRejected,
     AgeTranslationError,
     AgeUnsupportedFeature,
@@ -195,6 +197,11 @@ class IGlobal(GraphGlobalBase):
             if not rows:
                 raise RuntimeError('The tenant database does not have the Apache AGE extension installed')
             self.age_version = rows[0][0]
+            if self.age_version not in CAPABILITY_TABLES:
+                warning(
+                    f'rocketride_graph: no Cypher rules for Apache AGE {self.age_version}; '
+                    f'using the strict AGE {DEFAULT_AGE_VERSION} rules'
+                )
             graph_exists = bool(
                 self._sql_read('SELECT 1 FROM ag_catalog.ag_graph WHERE name = %s', (self.graph_name,), pool=pool)
             )
@@ -278,7 +285,7 @@ class IGlobal(GraphGlobalBase):
             limit=limit,
             mode=mode,
             graph_name=self.graph_name,
-            age_version=self.age_version or '1.5.0',
+            age_version=self.age_version or DEFAULT_AGE_VERSION,
             firewall=self._firewall_config(),
         )
 
@@ -538,7 +545,7 @@ class IGlobal(GraphGlobalBase):
         return list(plan.columns) if plan.has_return else []
 
     def _describe_error(self, exc):
-        version = self.age_version or '1.5.0'
+        version = self.age_version or DEFAULT_AGE_VERSION
         if isinstance(exc, AgeUnsupportedFeature):
             return f'Not supported on Apache AGE {version}: {exc.construct}', exc.detail
         if isinstance(exc, AgeFirewallRejected):
@@ -674,7 +681,7 @@ class IGlobal(GraphGlobalBase):
         }
 
     def _prompt_rules(self):
-        version = self.age_version or '1.5.0'
+        version = self.age_version or DEFAULT_AGE_VERSION
         return [
             f'The database is PostgreSQL with Apache AGE {version}, which runs a SUBSET of Cypher.',
             'Read only: MATCH, OPTIONAL MATCH, WITH, UNWIND, RETURN, ORDER BY, SKIP, LIMIT. Never CALL.',

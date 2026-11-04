@@ -91,4 +91,3 @@ export function generateGraph(options: IGenerateOptions): { nodes: GraphNode[]; 
 	}
 	return { nodes, relationships };
 }
-

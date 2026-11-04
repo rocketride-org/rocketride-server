@@ -159,6 +159,47 @@ const domStyles = {
 // HELPERS
 // =============================================================================
 
+/** Display-row keys the task wire rows carry under different names. */
+const WIRE_FIELD_MAP: Record<string, string> = {
+	elapsed: 'elapsedTime',
+	completions: 'completedCount',
+	idle: 'idleTime',
+};
+
+/**
+ * Display-only fields with no wire scalar (cpu/mem live under the nested
+ * `metrics` object, status is derived client-side) — the server's key
+ * whitelist cannot resolve them, so they never ride a remote request and
+ * their columns drop header sorting in REMOTE mode.
+ */
+const DISPLAY_ONLY_FIELDS = new Set(['cpu', 'mem', 'status']);
+
+/**
+ * Translate a grid page request's sort and filter keys from display-row
+ * fields to the wire keys the list API paginates on, dropping the
+ * display-only fields the server cannot resolve.
+ *
+ * @param req - The grid page request.
+ * @returns The wire-keyed sorters and filters.
+ */
+function toWireRequest(req: IDataGridPageRequest): { sort: { field: string; dir: 'asc' | 'desc' }[]; filters: Record<string, string | string[]> } {
+	// Step 1: sorters — rename mapped fields, drop display-only ones.
+	const sort = req.sort
+		.filter((s) => !DISPLAY_ONLY_FIELDS.has(s.field))
+		.map((s) => (WIRE_FIELD_MAP[s.field] ? { ...s, field: WIRE_FIELD_MAP[s.field] } : s));
+	// Step 2: filters — range bounds ride as `${field}__gte` / `${field}__lte`
+	// keys, so the rename applies to the BASE field with the suffix kept.
+	const filters: Record<string, string | string[]> = {};
+	for (const [key, value] of Object.entries(req.filters)) {
+		const match = /^(.*?)(__gte|__lte)?$/.exec(key);
+		const base = match?.[1] ?? key;
+		const suffix = match?.[2] ?? '';
+		if (DISPLAY_ONLY_FIELDS.has(base)) continue;
+		filters[`${WIRE_FIELD_MAP[base] ?? base}${suffix}`] = value;
+	}
+	return { sort, filters };
+}
+
 /**
  * Flatten one task wire row (the dashboard snapshot keys the list API
  * returns) into its grid display row: derived identity line, live metrics
@@ -246,6 +287,10 @@ export const TasksPanel: React.FC<ITasksPanelProps> = ({ tasks, listTasks, onRef
 	// Imperative grid handle: the host's poll re-requests the current page.
 	const gridRef = useRef<IDataGridHandle>(null);
 
+	// Request sequence: page requests and the poll refetch can overlap, and
+	// only the latest response may win the pageRows capture.
+	const fetchSeqRef = useRef(0);
+
 	/**
 	 * Fetch one page of tasks for the grid (REMOTE mode). Browsing, header
 	 * sorting, filtering, and the title-bar search all ride the host's
@@ -259,20 +304,23 @@ export const TasksPanel: React.FC<ITasksPanelProps> = ({ tasks, listTasks, onRef
 		async (req: IDataGridPageRequest): Promise<IDataGridPage<TaskRow>> => {
 			// Step 1: LOCAL grids never call this; the guard keeps TS honest.
 			if (!listTasks) return { rows: [], total: 0 };
-			// Step 2: one server-paginated call. Sorters, filter values, and the
-			// search term are forwarded verbatim — the server whitelists the row
-			// keys, drops anything unknown, and matches across ALL pages.
+			const seq = ++fetchSeqRef.current;
+			// Step 2: one server-paginated call. The server whitelists sort and
+			// filter keys against the WIRE row keys, so display fields translate
+			// to their wire names first (display-only fields never ride along);
+			// the search term forwards verbatim and matches across ALL pages.
+			const { sort, filters } = toWireRequest(req);
 			const resp = await listTasks({
 				page: req.page,
 				page_size: req.size,
-				sort: req.sort,
-				filters: req.filters,
+				sort,
+				filters,
 				...(req.search !== undefined ? { search: req.search } : {}),
 			});
 			// Step 3: capture the wire rows for the record panel lookup, then
 			// flatten them (dashboard snapshot keys) for display.
 			const wireRows = resp?.rows ?? [];
-			setPageRows(wireRows);
+			if (seq === fetchSeqRef.current) setPageRows(wireRows);
 			return { rows: wireRows.map(taskRow), total: resp?.total ?? 0 };
 		},
 		[listTasks]
@@ -303,8 +351,11 @@ export const TasksPanel: React.FC<ITasksPanelProps> = ({ tasks, listTasks, onRef
 	 * `rrType: 'number'` (Min/Max filter, right-aligned); status is an enum
 	 * with a declared `rrOptions` vocabulary (remote grids have no distinct
 	 * endpoint to derive a checklist from). Sorting is remote: header clicks
-	 * ride the page request to the server.
+	 * ride the page request to the server — except the display-only columns
+	 * (CPU / Memory / Status), whose values have no wire scalar; those sort
+	 * locally in LOCAL mode and drop header sorting in REMOTE mode.
 	 */
+	const remote = Boolean(listTasks);
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
 			{
@@ -356,7 +407,7 @@ export const TasksPanel: React.FC<ITasksPanelProps> = ({ tasks, listTasks, onRef
 				rrDescription: 'CPU utilisation of the running task as a percentage of one core (the cpu_percent metric); completed tasks report none.',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
-				headerSort: true,
+				headerSort: !remote,
 				sorter: 'number',
 				// Mini gauge while running; muted placeholder once completed.
 				formatter: (cell: CellComponent) => {
@@ -373,7 +424,7 @@ export const TasksPanel: React.FC<ITasksPanelProps> = ({ tasks, listTasks, onRef
 				rrDescription: 'Resident CPU memory of the running task in MB (the cpu_memory_mb metric); the gauge scales against a 2048 MB reference; completed tasks report none.',
 				hozAlign: 'right',
 				headerHozAlign: 'right',
-				headerSort: true,
+				headerSort: !remote,
 				sorter: 'number',
 				// Mini gauge while running; muted placeholder once completed.
 				formatter: (cell: CellComponent) => {
@@ -428,7 +479,7 @@ export const TasksPanel: React.FC<ITasksPanelProps> = ({ tasks, listTasks, onRef
 				// rrOptions the enum filter would fall back to a plain text input.
 				rrOptions: ['running', 'completed', 'failed', 'idle (ttl)'],
 				rrDescription: 'Task state: the live status message while running (falling back to running), idle (ttl) near the idle timeout, completed on a clean exit, failed (code) otherwise.',
-				headerSort: true,
+				headerSort: !remote,
 				formatter: (cell: CellComponent) => {
 					const row = cell.getRow().getData() as TaskRow;
 					// Badge family shared with the record panel's Status section.
@@ -436,7 +487,7 @@ export const TasksPanel: React.FC<ITasksPanelProps> = ({ tasks, listTasks, onRef
 				},
 			},
 		],
-		[]
+		[remote]
 	);
 
 	// The record panel resolves against whichever WIRE rows back the grid:

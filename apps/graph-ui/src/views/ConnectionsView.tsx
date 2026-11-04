@@ -31,6 +31,7 @@ import ConnectionDrawer from '../components/ConnectionDrawer';
 import GraphConnectionCard from '../components/GraphConnectionCard';
 import { useGraphEndpoints, useGraphEnv } from '../env';
 import { drawerKeyAfter, landingView } from '../graph/connections';
+import { engineNotReadyText } from '../graph/wording';
 import { GraphIcon } from '../icons';
 import { styles } from '../styles';
 
@@ -84,6 +85,11 @@ export const ConnectionsView: React.FC = () => {
 				}
 			/>
 			<div style={styles.content}>
+				{engineNotReadyText(env.engine) !== null && (
+					<div style={{ marginBottom: 16 }}>
+						<Banner variant={env.engine === 'waiting' ? 'info' : 'warning'}>{engineNotReadyText(env.engine)}</Banner>
+					</div>
+				)}
 				{status === 'error' && endpoints.length > 0 && (
 					<div style={{ marginBottom: 16 }}>
 						<Banner variant="error">Refresh failed: {error}. Showing what was found before.</Banner>

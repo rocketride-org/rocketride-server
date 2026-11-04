@@ -33,9 +33,11 @@
 
 import React, { useCallback, useMemo } from 'react';
 import {
-	BxCog, BxLock, BxPalette, BxUser, BxExport, BxGridAlt, BxHome,
+	BxCog, BxPalette, BxExport, BxGridAlt, BxHome, BxUser,
 } from '../BoxIcon';
 import { ConnectionManager } from '../../connection/connection';
+import { useAuthUser } from '../../hooks/useAuthUser';
+import { tabSession } from '../../util/devGate';
 import { getHomeAppId } from '../../constants';
 import { useWorkspace } from '../workspace/WorkspaceContext';
 import type { ShellAccountConfig } from '../workspace/types';
@@ -132,6 +134,7 @@ export interface ISidebarFooterMenu {
 export function useSidebarFooterMenu({ account, hideAppSwitcher, onOverlay, isSaas }: ISidebarFooterMenuOptions): ISidebarFooterMenu {
 	const { prefs, setTheme, themeOptions, activeAppId, appManifest } = useWorkspace();
 	const { isOnDesktop } = useSubscriptions();
+	const authUser = useAuthUser();
 
 	/** Apply a theme — delegates to the context's setTheme which handles both prefs and CSS. */
 	const handleThemeSelect = useCallback((themeId: string) => {
@@ -145,13 +148,18 @@ export function useSidebarFooterMenu({ account, hideAppSwitcher, onOverlay, isSa
 	const homeAppId = getHomeAppId(!!isSaas);
 
 	const footerMenuItems: SidebarFooterMenuItem[] = useMemo(() => {
+		// A DEEP-APP tab (session-locked: hideAppSwitcher) is the app's own
+		// surface — Home is the same exit from it as Switch App, so both
+		// leave the menu together. Settings/Theme stay: they configure the
+		// experience the user is in, not a way out of it.
 		const items: SidebarFooterMenuItem[] = [
-			{ id: 'home', label: 'Home', icon: BxHome, onClick: () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: homeAppId }) },
-			...(isSaas ? [{ id: 'account', label: 'Account', icon: BxUser, dividerBefore: true, onClick: () => onOverlay('account') } satisfies SidebarFooterMenuItem] : []),
-			{ id: 'environment', label: 'Variables', icon: BxLock, dividerBefore: !isSaas, onClick: () => onOverlay('environment') },
+			...(hideAppSwitcher ? [] : [{ id: 'home', label: 'Home', icon: BxHome, onClick: () => ConnectionManager.getInstance().emit('shell:switchApp', { appId: homeAppId }) } as SidebarFooterMenuItem]),
 			// Settings is a global workspace view (shell "General" plus any installed app's
 			// settings), so it's always available. Per-app gating lives in SettingsProvider.
-			{ id: 'settings', label: 'Settings', icon: BxCog, onClick: () => onOverlay('settings') },
+			// Account and Environment Variables are Settings SECTIONS (no footer
+			// entries of their own since 2026-10-26; the legacy 'account' /
+			// 'environment' overlay ids deep-link into the Settings overlay).
+			{ id: 'settings', label: 'Settings', icon: BxCog, dividerBefore: !hideAppSwitcher, onClick: () => onOverlay('settings') },
 			{
 				id: 'theme', label: 'Theme', icon: BxPalette, dividerBefore: true,
 				submenu: themeOptions.map((t) => ({
@@ -172,24 +180,39 @@ export function useSidebarFooterMenu({ account, hideAppSwitcher, onOverlay, isSa
 				ConnectionManager.getInstance().emit('shell:switchApp', { appId });
 			};
 
+			// A DEV tab's locked app is a first-class destination for the
+			// tab's life: it registers locally (never on the server desktop),
+			// so without this carve-out the switcher offers no way BACK to
+			// the app under development after visiting Home or another app.
+			const devAppId = tabSession().dev ? tabSession().appId : '';
 			items.push({
 				id: 'apps', label: 'Switch App', icon: BxGridAlt,
 				submenu: appManifest
 					.filter((a) => a.id !== 'rocketride.home' && a.id !== 'rocketride.hello')
-					.filter((a) => isOnDesktop(a.id))
+					.filter((a) => isOnDesktop(a.id) || a.id === devAppId)
 					.sort((a, b) => a.name.localeCompare(b.name))
 					.map((app) => ({
-						id: app.id, label: app.name, checked: activeAppId === app.id,
+						id: app.id, label: app.id === devAppId ? `${app.name} (dev)` : app.name, checked: activeAppId === app.id,
 						icon: ({ size }: { size?: number }) => <AppIcon name={app.name} iconUrl={app.icon} size={size} />,
 						onClick: () => handleSwitchApp(app.id),
 					})),
 			});
 		}
 
-		items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => account.onLogout?.() });
+		// The session entry follows the identity: an anonymous session can
+		// only log IN, a signed-in one can only log OUT — never both, never
+		// the wrong one.
+		if (authUser) {
+			items.push({ id: 'logout', label: 'Log out', icon: BxExport, dividerBefore: true, onClick: () => account.onLogout?.() });
+		} else {
+			// The ACTIVE app rides the request: sign-in must land the user
+			// back where they started it (the pending-app id survives the
+			// OAuth round trip and outranks the tab's startup lock).
+			items.push({ id: 'login', label: 'Log in', icon: BxUser, dividerBefore: true, onClick: () => ConnectionManager.getInstance().emit('shell:loginRequest', activeAppId ? { appId: activeAppId } : {}) });
+		}
 
 		return items;
-	}, [themeOptions, prefs.theme, showAppSwitcher, appManifest, activeAppId, isOnDesktop, account, handleThemeSelect, onOverlay, isSaas, homeAppId]);
+	}, [themeOptions, prefs.theme, showAppSwitcher, hideAppSwitcher, appManifest, activeAppId, isOnDesktop, account, authUser, handleThemeSelect, onOverlay, isSaas, homeAppId]);
 
 	return { footerMenuItems, homeAppId };
 }

@@ -19,7 +19,8 @@ import { assertSidebarSubscribers } from 'shared/explorer/devtool/testing';
 import { makeGraphEndpointStore, makeGraphHistory } from '../src/adapters/explorer';
 import { adoptParkedHistory, hasParkedHistory, parkHistory } from '../src/devtool/owedHistory';
 import type { IOwedHistory } from '../src/devtool/owedHistory';
-import { OP } from '../src/devtool/protocol';
+import { EVENT, OP } from '../src/devtool/protocol';
+import { assertNoOpEventCollisions } from 'shared/explorer/devtool/controller';
 import { historyPrefsPath } from 'shared/explorer/devtool/prefs';
 import { PREVIEW_MAX_AGE_MS, previewFor } from '../src/graph/previews';
 import { account, graphRow, mountController, mountFrame, readOnlyNode, rocketRealm, settle, signInVsCode, until, vscodeRealm } from './support/devtool';
@@ -144,22 +145,21 @@ describe('frames say which document they are once per controller, and stay quiet
 		mounted.controller.dispose();
 	});
 
-	it('a schema load the sidebar starts by itself does not count as the user activating the tool', async () => {
-		// A VS Code realm mounted while its root is down cannot be classified,
-		// so its gate is still closed (a classified realm's mount IS the activation).
+	it('a schema load the sidebar starts by itself does not show a person is present; a click does', async () => {
+		// Nobody present (a pinned tool's boot mount): endpoint probes are held until someone is.
 		const engine = vscodeRealm();
-		const mounted = mountController(engine.cm);
-		assert.equal(mounted.controller.activation.isOpen(), false, 'the premise: the gate is closed');
+		const mounted = mountController(engine.cm, { present: false });
+		assert.equal(mounted.controller.discovery.holdProbes(), true, 'the premise: probes are held');
 		await mounted.controller.env(true).loadSchema('k1|unknown');
-		assert.equal(mounted.controller.activation.isOpen(), false, 'an effect-driven load opens nothing');
+		assert.equal(mounted.controller.discovery.holdProbes(), true, 'an effect-driven load shows nobody');
 		mounted.controller.env(true).openDocument({ kind: 'connections' });
-		assert.equal(mounted.controller.activation.reason(), 'user', 'a click does');
+		assert.equal(mounted.controller.discovery.holdProbes(), false, 'a click does');
 		mounted.controller.dispose();
 	});
 });
 
-describe('T6 - a quiet sidebar: no event, call or document at mount; the mount is the activation, and discovery waits for a known identity', () => {
-	it('rocket-ui (since #2625 9bd5d931f a sidebar mounts only when selected or summoned): state publishes only, then the first discovery and the history read with no activation event', async () => {
+describe('T6 - a quiet sidebar: no event, tool call or document at mount; mounting may read (discover, history) once an identity is known, and probes wait for a person', () => {
+	it('rocket-ui: state publishes only, then the first discovery and the history read; a later selection starts nothing more', async () => {
 		const engine = rocketRealm();
 		engine.realm.login(account('u1'));
 		const mounted = mountController(engine.cm);
@@ -168,16 +168,61 @@ describe('T6 - a quiet sidebar: no event, call or document at mount; the mount i
 		assert.ok(mounted.spy.posts.length > 0, 'the premise: retained state was published');
 		assert.deepEqual(mounted.docs.opened, [], 'no documents.open at mount');
 		assert.deepEqual(mounted.h.emitted, [], 'nothing summoned a frame');
-		assert.equal(mounted.controller.activation.reason(), 'lazyMount', 'the mount is the activation');
 
 		await until(() => engine.requests.some((r) => r.op === 'client.getTasks'), 'the first discovery');
 		await until(() => engine.requests.some((r) => r.op === 'client.fsStat'), 'the history read');
 		const discoveries = engine.requests.filter((r) => r.op === 'client.getTasks').length;
-		engine.realm.activate(APP);
 		await settle();
-		assert.equal(engine.requests.filter((r) => r.op === 'client.getTasks').length, discoveries, 'a later selection starts nothing more');
+		assert.equal(engine.requests.filter((r) => r.op === 'client.getTasks').length, discoveries, 'nothing more starts by itself');
 		assert.deepEqual(nonStatePosts(mounted.spy.posts), [], 'still no event or call posts');
 		assert.deepEqual(mounted.docs.opened, [], 'still no documents.open');
+		mounted.controller.dispose();
+	});
+
+	it('a boot mount (nobody present) discovers and reads history but issues ZERO tool calls; a sidebar interaction releases the probes', async () => {
+		const engine = rocketRealm();
+		engine.realm.login(account('u1'));
+		const mounted = mountController(engine.cm, { present: false });
+		await until(() => engine.requests.some((r) => r.op === 'client.getTasks'), 'discovery');
+		await until(() => engine.requests.some((r) => r.op === 'client.fsStat'), 'the history read');
+		await until(() => mounted.controller.stores.endpoints.getState().endpoints.length === 1, 'the connection is listed');
+		await settle();
+		assert.equal(engine.requests.filter((r) => r.op === 'client.tool').length, 0, 'not one tool call at boot');
+		assert.equal(engine.world.calls.length, 0, 'and none reached the engine');
+		assert.equal(mounted.controller.stores.endpoints.getState().endpoints[0].state, 'probing', 'the connection waits for its probe');
+		assert.deepEqual(nonStatePosts(mounted.spy.posts), []);
+		assert.deepEqual(mounted.docs.opened, []);
+
+		mounted.controller.discovery.markUserPresent('user');
+		await until(() => engine.requests.some((r) => r.op === 'client.tool'), 'the probe once a person is present');
+		await until(() => mounted.controller.stores.endpoints.getState().endpoints[0].state === 'ready', 'the connection is ready');
+		mounted.controller.dispose();
+	});
+
+	it('the first frame op shows a person is present and releases the held probes', async () => {
+		const engine = rocketRealm();
+		engine.realm.login(account('u1'));
+		const mounted = mountController(engine.cm, { present: false });
+		mounted.h.setHostConnection(true);
+		await until(() => mounted.controller.stores.endpoints.getState().endpoints.length === 1, 'the connection is listed');
+		assert.equal(engine.requests.filter((r) => r.op === 'client.tool').length, 0, 'no probe yet');
+		const { frame } = mountFrame(mounted.h, undefined);
+		await frame.caller.callReply(OP.refreshEndpoints, {}, { timeoutMs: 5_000 });
+		await until(() => engine.requests.some((r) => r.op === 'client.tool'), 'the probe once a frame asked for something');
+		frame.dispose();
+		mounted.controller.dispose();
+	});
+
+	it('an explicit Refresh in the sidebar shows a person is present; an automatic one does not', async () => {
+		const engine = rocketRealm();
+		engine.realm.login(account('u1'));
+		const mounted = mountController(engine.cm, { present: false });
+		await until(() => mounted.controller.stores.endpoints.getState().endpoints.length === 1, 'the connection is listed');
+		await mounted.controller.env(true).refresh({ quiet: true });
+		assert.equal(mounted.controller.discovery.holdProbes(), true, 'a quiet refresh shows nobody');
+		await mounted.controller.env(true).refresh();
+		assert.equal(mounted.controller.discovery.holdProbes(), false, 'a refresh a person asked for does');
+		await until(() => engine.requests.some((r) => r.op === 'client.tool'), 'the probe');
 		mounted.controller.dispose();
 	});
 
@@ -185,7 +230,6 @@ describe('T6 - a quiet sidebar: no event, call or document at mount; the mount i
 		const engine = rocketRealm();
 		const mounted = mountController(engine.cm);
 		await settle();
-		assert.equal(mounted.controller.activation.isOpen(), true, 'the premise: the mount activated it');
 		assert.deepEqual(engine.requests, [], 'no history read, no discovery, while nobody is signed in');
 		engine.realm.login(account('u1'));
 		await until(() => engine.requests.some((r) => r.op === 'client.fsStat'), 'history read once signed in');
@@ -193,28 +237,37 @@ describe('T6 - a quiet sidebar: no event, call or document at mount; the mount i
 		mounted.controller.dispose();
 	});
 
-	it('a user action in the sidebar activates it too, and opens the document it names', async () => {
+	it('a user action in the sidebar opens the document it names and shows a person is present', async () => {
 		const engine = rocketRealm();
 		engine.realm.login(account('u1'));
-		const mounted = mountController(engine.cm);
+		const mounted = mountController(engine.cm, { present: false });
 		const env = mounted.controller.env(true);
 		env.openDocument({ kind: 'connections' });
 		assert.deepEqual(mounted.docs.opened, [{ key: '', title: 'Graph Explorer' }]);
+		assert.equal(mounted.controller.discovery.holdProbes(), false);
 		await until(() => engine.requests.some((r) => r.op === 'client.getTasks'), 'discovery after the click');
 		mounted.controller.dispose();
 	});
 
-	it('VS Code (the sidebar mounts lazily: the mount is the activation) still waits for a known identity', async () => {
+	it('VS Code (a mirrored realm has no client until its root reports) is waiting, not disconnected, and discovers once signed in', async () => {
 		const engine = vscodeRealm();
 		const mounted = mountController(engine.cm);
 		await settle();
-		assert.equal(mounted.controller.activation.isOpen(), false, 'not connected yet: the realm cannot be classified');
+		assert.equal(mounted.controller.engine.status(), 'waiting', 'no client yet: a wait');
+		assert.equal(mounted.controller.env('waiting').engine, 'waiting');
 		assert.deepEqual(engine.requests, []);
 		signInVsCode(engine.realm);
 		await until(() => engine.requests.some((r) => r.op === 'client.getTasks'), 'discovery once signed in');
-		assert.equal(mounted.controller.activation.reason(), 'lazyMount');
+		assert.equal(mounted.controller.engine.status(), 'ready');
+		engine.realm.root.disconnect();
+		await settle();
+		assert.equal(mounted.controller.engine.status(), 'disconnected', 'a client whose connection dropped is disconnected');
 		assert.deepEqual(nonStatePosts(mounted.spy.posts), []);
 		mounted.controller.dispose();
+	});
+
+	it('every Graph op and event name is distinct: a plain event named like an op would run that op\'s handler', () => {
+		assert.deepEqual(assertNoOpEventCollisions(Object.values(OP), Object.values(EVENT)), []);
 	});
 });
 
@@ -267,15 +320,11 @@ describe('T7 - history belongs to one identity at a time (the controller side)',
 		// Hold the history file reads, so the window between B signing in and B's file loading is observable.
 		let holdReads = false;
 		const releases: Array<() => void> = [];
-		const inner = engine.cm.request.bind(engine.cm);
-		const cm = Object.assign(Object.create(null), engine.cm, {
-			request: async (op: string, params: unknown, opts?: { timeoutMs?: number }) => {
-				if (holdReads && (op === 'client.fsStat' || op === 'client.fsReadJson')) await new Promise<void>((resolve) => releases.push(resolve));
-				return inner(op, params, opts);
-			},
-		});
+		engine.before.current = async (op) => {
+			if (holdReads && (op === 'client.fsStat' || op === 'client.fsReadJson')) await new Promise<void>((resolve) => releases.push(resolve));
+		};
 		signInVsCode(engine.realm, 'u1');
-		const mounted = mountController(cm as never);
+		const mounted = mountController(engine.cm);
 		mounted.h.setHostConnection(true);
 		const landing = mountFrame(mounted.h, undefined);
 		await until(() => Object.keys(landing.frame.env(true).endpoints.get().probes).length === 1, 'the probe');

@@ -252,12 +252,17 @@ class GraphGlobalBase(IGlobalBase, ABC):
         """Execute a raw statement with no safety gate (the EXECUTE path).
 
         Returns ``{'rows': [...], 'affected_rows': N}``, mirroring the SQL side.
-        Only reachable when the node owner sets ``allow_execute``. Must cap rows
-        at ``max_execute_rows`` so one query cannot exhaust worker memory. On an
+        Only reachable when the node owner sets ``allow_execute``. Must return
+        at most ``max_execute_rows`` rows. A driver whose client streams the
+        reply stops reading past the cap, which also bounds worker memory; a
+        client that parses the whole reply first can only cut it afterwards,
+        so there the cap bounds the result, not memory. On an
         engine with transactions, check the cap before commit, so a statement
         over it saves nothing and a retry cannot duplicate its writes. A
         statement the engine commits in batches on its own is outside that
-        guarantee.
+        guarantee. On an engine with no rollback, a write over the cap is
+        already saved: return the capped rows with ``'truncated': True`` rather
+        than raise, so the caller does not retry it.
 
         A driver that sets ``supports_execute_params`` also accepts
         ``params: Optional[Dict]`` — bound values for ``$name`` placeholders.
