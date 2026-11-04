@@ -102,7 +102,7 @@ surface (`rocketride/drizzle`), plus a deprecated Sequelize binding.
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| `database.query` | `async def query(*, token, sql, node_id='', session_id='', params=None) -> dict` | Execute raw SQL or Cypher through the pipeline's `execute` tool function; `params` is a positional list for SQL nodes, or a dict keyed by placeholder name for the `rocketride_graph` and `graph_neo4j` nodes (`graph_falkordb` rejects params); returns `{rows, affected_rows}`. |
+| `database.query` | `async def query(*, token, sql, node_id='', session_id='', params=None) -> dict` | Execute raw SQL or Cypher through the pipeline's `execute` tool function; `params` is a positional list for SQL nodes, or a dict keyed by placeholder name for the graph nodes (`rocketride_graph`, `graph_neo4j`, `graph_falkordb`); returns `{rows, affected_rows}`, plus `truncated: True` from `graph_falkordb` when it saved a write but cut its rows, at `max_execute_rows` or at the server's `RESULTSET_SIZE`. |
 | `database.begin_transaction` | `async def begin_transaction(*, token, node_id='') -> dict` | Open a transaction (`begin` tool function); returns `{session_id}`. |
 | `database.commit` | `async def commit(*, token, session_id, node_id='') -> dict` | Commit the open transaction. |
 | `database.rollback` | `async def rollback(*, token, session_id, node_id='') -> dict` | Roll back the open transaction. |
@@ -145,7 +145,7 @@ live on `client.deploy`; the unprefixed verbs are methods on the client itself
 | ------ | --------- | ----------- |
 | `deploy.add` | `async def add(self, pipeline=None, *, kind='pipe', data=None, metadata=None, comment=None, deploy_to=None) -> PublishResult` | The ONE rail door (on the `client.deploy` namespace): deploy any kind of object as the next immutable registry version. `kind='pipe'` (default) takes a `pipeline` dict; `kind='app'` takes ONE `data` zip of the app's SOURCE (the server performs the build; client-produced binaries are never trusted), retained and unpacked at receipt, born deployment-state `private`. The app id must be inside your developer namespace. |
 | `deploy.add_app` | `async def add_app(self, app_root, *, workspace_root=None, comment=None, metadata=None, on_progress=None) -> PublishResult` | Pack an app folder's source and deploy it as the next registry version — the one call behind the App Builder's Deploy button and CI scripts. Packs by the App Builder rules (workspace-rooted zip, `appManifest.include`, hierarchical gitignore + the hard node_modules/dist/.git baseline, symlink containment, 50MB zipped / 512MB uncompressed caps); `on_progress` narrates one line per step. Deploying activates nothing — bind an audience with `publish_app` afterwards. |
-| `deploy.create_app` | `async def create_app(self, slug, *, workspace_root=None, template='Blank', display_name=None, developer_id=None, sidebar=False, status_footer=True, doc_tabs=False, install=True, server_base_url=None, on_progress=None) -> dict` | Scaffold a new app in the workspace — the programmatic twin of the App Builder's New App wizard, rendering the identical templates. Writes `./apps/<slug>`, vendors the connected server's shell + client packages, and runs the workspace install. The id becomes `<developerId>.<slug>`. Scaffolding only — the lifecycle (`verify_app` → `add_app` → `publish_app`) follows. Returns the TypeScript `CreatedApp` keys (`appId`, `folder`, `files`, `vendored`, `installed`). |
+| `deploy.create_app` | `async def create_app(self, slug, *, workspace_root=None, template='Blank', display_name=None, developer_id=None, sidebar=False, status_footer=True, doc_tabs=False, install=True, server_base_url=None, on_progress=None) -> dict` | Scaffold a new app in the workspace — the programmatic twin of the App Builder's New App wizard, rendering the identical templates. Writes `./apps/<slug>-ui`, vendors the connected server's shell + client packages, and runs the workspace install. The id becomes `<developerId>.<slug>`. Scaffolding only — the lifecycle (`verify_app` → `add_app` → `publish_app`) follows. Returns the TypeScript `CreatedApp` keys (`appId`, `folder`, `files`, `vendored`, `installed`). |
 | `deploy.verify_app` | `async def verify_app(self, app_root, *, workspace_root=None) -> AppVerifyReport` | The no-side-effect precheck for `add_app` — purely local, no server call: manifest shape and id grammar, declared icon/README assets, `appManifest.include` entries, and a pack dry run against the size caps. Server-side concerns (the build, store review) are out of scope. |
 | `list_deployments` | `async def list_deployments(self, app_id) -> list[dict]` | The version rail, newest first — the developer org sees its FULL rail (published or not), other callers only their visible versions. Each entry (`registryVersion`, `appVersion`, `sha256`, `publishedAt`, `author`, `message`, `state`, `buildStatus`, `buildPhase`, `buildEndedAt`, `rungs`) carries its deployment `state`, its build lifecycle (`buildStatus` — 'ok' = servable — plus the `buildPhase` it reached and `buildEndedAt`, which is always present: epoch seconds, or `None` until the build ends), and the `rungs` naming the audiences bound to it. No error text rides the rail: read it with `build_log`. |
 | `submit_app` | `async def submit_app(self, app_id, registry_version) -> dict` | Submit a deployed version for review — flips the deployment `private` → `submit`. |
@@ -156,6 +156,9 @@ live on `client.deploy`; the unprefixed verbs are methods on the client itself
 | `remove_app_publish` | `async def remove_app_publish(self, app_id, target) -> dict` | Remove an audience binding — the app stops serving to that audience and the row leaves the where-live listing. SOFT: registry versions and audit history survive; publishing to the audience again revives it. Returns the final `publish` binding row (state `removed`). |
 | `disable_app_publish` | `async def disable_app_publish(self, app_id, target) -> dict` | Disable an audience binding — serving stops, but the row STAYS in the where-live listing marked `disabled` (a visible off switch), unlike `remove_app_publish`. Publishing any version to that audience re-enables it. Returns the `publish` binding row (state `disabled`). |
 | `where_app` | `async def where_app(self, app_id) -> list[dict]` | The reverse index: `{rung, handle, version, appVersion, state, deployedAt}` per audience — `state` is the bound deployment's review state. |
+| `wait_for_app_build` | `async def wait_for_app_build(self, app_id, registry_version, *, timeout=600.0, interval=3.0, on_status=None) -> dict` | Wait for one version's server build — deploying returns at once with `buildStatus: 'queued'`, and publish/submit/serve gate on a finished (`ok`) build. Polls the rail; raises on a failed build, an unknown version, or the timeout. |
+| `developer_status` | `async def developer_status(self) -> dict` | The caller org's developer namespace — the `<developerId>` half of every app id it owns: `{developerId, stripeAccountId, stripeAccountStatus}`, `developerId` None until an org admin registers one. Readable on both editions. |
+| `register_developer` | `async def register_developer(self, developer_id) -> dict` | Claim the caller org's developer id slug (org.admin, self-service, SaaS only). |
 
 Serving needs no verb: a version's bundle loads from the stable
 `/apps/<app_id>/v<N>/remoteEntry.js` URL constructed from its registry
@@ -169,19 +172,18 @@ Two raw DAP commands carry this surface (call via
 
 - **`rrext_deploy_app`** — the developer-account + review verbs (claiming a
   developerId is a deploy PREREQUISITE, not a marketplace action): the
-  `developer_*` family, `submit`, and `register_dev`.
+  `developer_*` family and `submit`.
 - **`rrext_app`** — the pure marketplace: browse (`list`/`get`/`list_mine`),
   install (`desktop_add`/`desktop_remove`), admin review (`admin_*`), and
   pricing (`pricing_*`).
 
-Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
+Grouped families (the `developer_*`/`submit` rows are on
 `rrext_deploy_app`; the rest on `rrext_app`):
 
 | Subcommand family | Subcommands | Guard | Purpose |
 | ----------------- | ----------- | ----- | ------- |
 | developer_* | `developer_register` · `developer_stripe` · `developer_dashboard` · `developer_status` | org.admin (register) | Claim the org's developer id slug + Stripe Connect onboarding. |
-| submit | `submit` | developer org + namespace | Submit a deployed version for review — flips the DEPLOYMENT `private` → `submit`. |
-| register_dev | `register_dev` | self | Per-user live dev overlay (App Builder hot-reload); OSS-capable. |
+| submit | `submit` · `withdraw` · `reply` | developer org + namespace | Submit a deployed version for review (flips the DEPLOYMENT `private` → `submit`), cancel a pending review, or append a developer message to the review thread. |
 | catalog | `list` · `get` · `list_mine` · `desktop_add` · `desktop_remove` | authenticated | Browse reachable apps, the developer's own rail view, and desktop membership. |
 | admin_* | `admin_queue` · `admin_approve` · `admin_reject` · `admin_reply` · `admin_reseed` | sys.admin | Store review over the DEPLOYMENTS: the queue is deployments in `submit`; `admin_approve(appId, version)` → `ready`, `admin_reject(appId, version)` → `rejected`. |
 | pricing_* | `pricing_list` · `pricing_create` · `pricing_delete` | developer org | Manage Stripe price tiers for a monetized app. |

@@ -25,7 +25,7 @@ import os
 import re
 import json
 from rocketlib import IGlobalBase, warning
-from ai.common.config import Config
+from ai.common.config import Config, warn_if_credential_unresolved
 from ai.common.chat import ChatBase
 
 
@@ -52,6 +52,14 @@ class IGlobal(IGlobalBase):
             config = Config.getNodeConfig(self.glb.logicalType, self.glb.connConfig)
             accessKey = config.get('accessKey')
             secretKey = config.get('secretKey')
+
+            # Do not send a ${...} the engine left unfilled to the provider as the key:
+            # its reply would say the key is wrong, not which variable is missing.
+            if warn_if_credential_unresolved(self.glb.logicalType, 'accessKey', accessKey, self.glb.connConfig):
+                return
+            if warn_if_credential_unresolved(self.glb.logicalType, 'secretKey', secretKey, self.glb.connConfig):
+                return
+
             region = config.get('region')
             model = config.get('model')
             modelTotalTokens = config.get('modelTotalTokens')

@@ -44,7 +44,7 @@ that, you come back to Design and Deploy most often.
 
 Start from the Dashboard tab, or run **RocketRide: New App** from the
 command palette. The wizard asks for a name and a template (Blank or
-Dashboard) and scaffolds the app under `apps/<slug>`. Always create apps
+Dashboard) and scaffolds the app under `apps/<slug>-ui`. Always create apps
 this way; a hand-made folder fails later with symptoms far from the cause.
 The scaffold starts the id at `local.<slug>` until your organization has a
 developer id; renaming the id later makes it a different app.
@@ -66,6 +66,12 @@ What you will edit:
 rocketride app create reports --template Dashboard
 ```
 
+Both the wizard and the command create the app in `apps/reports-ui` and take
+the developer id from your account. The command reads the account from the
+credentials in `.env`, so run `rocketride login` (or `rocketride init`)
+first. Without an account it warns and uses `local`; pass
+`--developer <id>` to choose one yourself.
+
 ### Design
 
 The Preview pane is the real shell, running against your connected engine,
@@ -75,6 +81,19 @@ it disappears when the panel closes or the connection drops, so
 development work never reaches other users. **Components** is a live
 gallery of everything importable from `shell`, and **Console** shows your
 app's own console output as it runs.
+
+Your app's state does not disappear with the bundle: what the preview saves
+(`prefs`, `appState`) lives in the signed-in user's file store on the
+connected engine (with **Inherit Auth** on, the preview is signed in as you
+are), in a file named after the app id, and survives closing the panel.
+A copy of the app opened on another server, or a working copy under a
+different app id than the published app, has its own state, so edits in
+one do not show in the other. Deploying a new version keeps the state. On
+the same server, user and app id the two read one file but nothing syncs:
+the last save wins, so finish in one, close it, then reload the other
+before editing there. Files your app writes itself through the shell
+connection are stored per server and user only, so a development build
+and the published version on the same server share them.
 
 :::note If the preview keeps showing a sign-in screen
 With **Inherit Auth** off, an app that requires sign-in boots signed out on
@@ -88,7 +107,7 @@ The Package tab edits the `appManifest` block in `package.json`. The file
 is the truth, so editing it by hand is fine. Verification needs no server:
 
 ```bash
-rocketride app verify ./apps/reports
+rocketride app verify ./apps/reports-ui
 ```
 
 ### Your listing
@@ -123,14 +142,27 @@ A deploy packs the app folder plus any folders listed under
 `appManifest.include`, and nothing else. Every `include` entry must exist.
 
 ```bash
-rocketride app deploy ./apps/reports --comment "first version"
+rocketride app deploy ./apps/reports-ui --comment "first version"
 ```
 
-`rocketride app deploy` needs a deployment target (`ROCKETRIDE_DEPLOY_URI`
-and `ROCKETRIDE_DEPLOY_APIKEY`) and refuses to run without one; `app
-create` uses the development connection (`ROCKETRIDE_URI`) to vendor
-platform packages, and `app verify` needs no connection. Publishing
-happens on the Deploy tab.
+To preview from the terminal instead of the App Builder, run `rocketride app
+dev reports --open`: it serves the app, opens the preview, and updates it on
+every save, whichever editor you use. Ctrl+C stops it.
+
+Publishing happens on the Deploy tab, or from the terminal:
+
+```bash
+rocketride app deploy reports --publish @me   # deploy, wait for the build, publish to your desktop
+rocketride app publish reports 2 --to @team/QA
+rocketride app versions reports                # the version rail
+rocketride app where reports                   # which audiences serve which version
+```
+
+The deploy and publish commands need a deployment target
+(`ROCKETRIDE_DEPLOY_URI` and `ROCKETRIDE_DEPLOY_APIKEY`, written by
+`rocketride login`) and refuse to run without one; `app create` uses the
+development connection (`ROCKETRIDE_URI`) to vendor platform packages, and
+`app verify` needs no connection.
 
 ## Adding a pipeline to your app
 

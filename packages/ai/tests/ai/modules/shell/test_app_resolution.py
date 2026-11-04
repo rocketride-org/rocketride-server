@@ -145,8 +145,8 @@ def test_invisible_app_is_the_same_404_as_before(monkeypatch, tmp_path):
     assert client.get('/apps/ghost.app').status_code == 404
 
 
-def test_dev_overlay_only_entry_is_not_resolvable(monkeypatch, tmp_path):
-    """A visible entry WITHOUT a registryVersion (dev-overlay preview) has
+def test_entry_only_row_is_not_resolvable(monkeypatch, tmp_path):
+    """A visible entry WITHOUT a registryVersion (entry-only row) has
     nothing versioned to serve — the probe must say 404, not invent a URL.
     """
     overlay = {'id': 'me.dev', 'name': 'Dev', 'entry': 'http://localhost:3100/remoteEntry.js'}

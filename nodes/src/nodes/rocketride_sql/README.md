@@ -155,6 +155,38 @@ explicit transactions; otherwise keep it off so those tools fail rather than
 executing input. It does not change the questions lane, which only ever runs
 LLM-generated, safety-checked SELECT statements.
 
+### Database
+
+Database picks which RocketRide cloud database the node uses. It defaults to
+Organization, so existing pipelines keep using the database they already had.
+
+- **Organization**: the database shared by everyone in the organization the
+  pipeline runs in. Data from before this choice existed lives here.
+- **Team**: the database of the run's team. A run from the builder uses your
+  current dev team and needs run rights (task.control) on it; a deployed
+  pipeline uses the team it is billed to.
+- **Personal**: your own database in this organization. It works only when you
+  are the person running the pipeline: builder runs, store apps you run, and
+  pipelines you deploy for yourself (@me). A pipeline deployed for a team has
+  no person behind it, so it fails at start with an error that says so.
+  Organization admins can reach members' personal databases, and that access
+  is logged.
+
+Each choice is a separate database. Switching does not move or copy data, and
+a database you have not used yet is created empty on the first run that needs
+it. Tables created in one database are not visible from the others.
+
+A pipeline exposed through a public link (a chat, dropper, webhook, Discord or
+Telegram source) runs as you, so visitors' requests use your team or personal
+database, not their own.
+
+Access is checked when the run starts. If the run may not use the chosen
+database, it does not start, and the error says which database and why. A
+self-hosted engine supports only Organization; Team and Personal fail at start
+because they need RocketRide cloud. Access is approved for the whole run, not
+each node: every node in a run can reach every database the run was approved
+for.
+
 ## Limitations
 
 This node is marked noremote and depends on a signed-in RocketRide identity to

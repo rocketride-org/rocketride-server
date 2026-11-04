@@ -31,6 +31,7 @@ from typing import Any, Callable, Dict, List, Tuple
 
 import pytest
 
+import ai.common.agent.agent as agent_module
 from ai.common.agent import AgentBase, AgentContext
 from ai.common.llm_adapter import report_llm_tokens
 from ai.common.utils import parse_bool
@@ -67,12 +68,13 @@ class _FakeInner:
     def __init__(self) -> None:
         self.pipeId = 42
         self.written: List[Any] = []
+        self.sse: List[Tuple[Any, Dict[str, Any]]] = []
 
     def writeAnswers(self, answer: Any) -> None:
         self.written.append(answer)
 
-    def sendSSE(self, *args: Any, **kwargs: Any) -> None:
-        pass
+    def sendSSE(self, type: Any, **kwargs: Any) -> None:
+        self.sse.append((type, kwargs))
 
 
 class _FakeIInstance:
@@ -211,6 +213,103 @@ def test_guard_answer_is_emitted_on_the_answers_lane():
 
     # Even a tripped guard still emits exactly one answer downstream.
     assert len(ii.instance.written) == 1
+
+
+# ---------------------------------------------------------------------------
+# The last status of a run that ends on an error
+# ---------------------------------------------------------------------------
+
+
+def _fail_before_any_status(_driver, _context, _question):
+    """Like agent_rocketride when verify_tool names no connected tool: it raises first."""
+    raise ValueError("verify_tool 'workspace.compile' is not a connected tool (connected: none)")
+
+
+def _say_done_then_narrate(driver, context, _question):
+    driver.sendSSE(context, 'thinking', message='Generating final answer...', stop_reason='done')
+    return ('I called the weather tool and it is sunny.', {'raw': 'narrated', 'stop_reason': 'done'})
+
+
+def test_a_run_that_raises_before_any_status_still_reports_why_it_stopped():
+    ii = _FakeIInstance()
+    payload = _make_driver(_fail_before_any_status, require_tool_call=False).run_agent(
+        ii, _FakeQuestion(), emit_answers_lane=True
+    )
+
+    assert payload['meta']['stop_reason'] == 'error'
+    assert 'is not a connected tool' in payload['content']
+    assert ii.instance.sse, 'the run sent no status at all'
+    assert ii.instance.sse[-1] == ('thinking', {'message': 'The run failed.', 'stop_reason': 'error'})
+
+
+def test_a_run_that_fails_before_its_context_is_built_still_reports_why_it_stopped():
+    """The status goes through the invoker, which exists before the run context does."""
+
+    class _BrokenQuestion(_FakeQuestion):
+        def addInstruction(self, *args: Any, **kwargs: Any) -> None:
+            raise ValueError('instruction rejected')
+
+    ii = _FakeIInstance()
+    driver = _make_driver(_call_one_tool, require_tool_call=False)
+    driver._instructions = ['be brief']
+
+    payload = driver.run_agent(ii, _BrokenQuestion(), emit_answers_lane=True)
+
+    assert payload['meta']['stop_reason'] == 'error'
+    assert ii.instance.sse[-1] == ('thinking', {'message': 'The run failed.', 'stop_reason': 'error'})
+
+
+def test_a_refused_answer_overrides_the_done_status():
+    ii = _FakeIInstance()
+    _make_driver(_say_done_then_narrate, require_tool_call=True).run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
+
+    assert [kw['stop_reason'] for _, kw in ii.instance.sse] == ['done', 'error']
+
+
+def test_a_run_that_answers_sends_no_extra_status():
+    ii = _FakeIInstance()
+    _make_driver(_call_one_tool, require_tool_call=True).run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
+
+    assert ii.instance.sse == []
+
+
+def test_a_sub_agent_that_fails_leaves_the_stream_to_its_parent():
+    """A sub-agent shares its parent's status stream; its failure is a tool result, not the end."""
+    ii = _FakeIInstance()
+
+    payload = _make_driver(_fail_before_any_status, require_tool_call=False).run_agent(
+        ii, _FakeQuestion(), emit_answers_lane=False
+    )
+
+    assert payload['meta']['stop_reason'] == 'error'
+    assert ii.instance.sse == []
+
+
+def test_a_sub_agent_whose_answer_is_refused_leaves_the_stream_to_its_parent():
+    ii = _FakeIInstance()
+
+    _make_driver(_say_done_then_narrate, require_tool_call=True).run_agent(ii, _FakeQuestion(), emit_answers_lane=False)
+
+    assert [kw['stop_reason'] for _, kw in ii.instance.sse] == ['done']
+
+
+def test_a_failed_status_send_keeps_the_answer(monkeypatch):
+    """The answer still goes out, and the lost status is a warning in normal logs."""
+    warned: List[str] = []
+    monkeypatch.setattr(agent_module, 'warning', warned.append)
+    ii = _FakeIInstance()
+
+    def broken_send(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError('pipe closed')
+
+    ii.instance.sendSSE = broken_send
+    payload = _make_driver(_fail_before_any_status, require_tool_call=False).run_agent(
+        ii, _FakeQuestion(), emit_answers_lane=True
+    )
+
+    assert 'is not a connected tool' in payload['content']
+    assert len(ii.instance.written) == 1
+    assert warned == ['agent base stop status not sent: RuntimeError: pipe closed']
 
 
 # ---------------------------------------------------------------------------

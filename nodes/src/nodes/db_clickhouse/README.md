@@ -47,9 +47,9 @@ configurable server-name prefix.
 | `refresh_schema` | Re-read the schema, replace the cache, and return it. |
 | `get_sql` | Generate a safe `SELECT` without executing it. |
 | `execute` | Run raw SQL, bypassing LLM translation and the safety check. |
-| `begin` | Open a transaction and return its session ID. |
-| `commit` | Commit and close a transaction session. |
-| `rollback` | Roll back and close a transaction session. |
+| `begin` | Reserve a connection and return its session ID; no transaction is opened. |
+| `commit` | Close a session; its statements were already executed. |
+| `rollback` | Close a session; this undoes nothing. |
 | `dialect` | Return `{ "dialect": "clickhouse" }`. |
 
 `get_data` and `get_sql` require a non-empty `question`; `get_data` accepts an
@@ -69,37 +69,47 @@ leaves the cached schema exactly as it was. `get_data` returns
 `{valid: false, answer}`, and a query execution failure returns
 `{valid: false, error, sql, rows: []}`.
 
-`execute` requires non-empty `sql` and optionally accepts a transaction
-`session_id` plus positional values for `$1`, `$2`, and so on. It returns
+`execute` requires non-empty `sql` and optionally accepts a `session_id`
+from `begin` plus positional values for `$1`, `$2`, and so on. It returns
 `{rows, affected_rows}`. A failed statement raises `SQL execution failed:`
 followed by `Error <code>:` and ClickHouse's own primary message,
 identically with and without a `session_id`. The `clickhouse+native://`
 driver does not raise a DBAPI error, so the node unwraps it to the driver
 error it carries; the code and message come from the server's
-own `ServerException`. What is removed is the tail: SQLAlchemy's
-`[SQL: ...]` / `[parameters: ...]` echo, ClickHouse's server stack trace,
-and its `failed at position` quotation of the statement. The primary
-sentence itself is passed through as ClickHouse wrote it, so it can name a
-value or an identifier the statement carried or touched. That is
-deliberate: reaching this tool at all requires **Allow direct query
-execution**, and a caller who has it can read the same data with a
-`SELECT`. The full text stays in the server log. `begin` takes no
-arguments and returns
-`{session_id}`; `commit` and `rollback` require that ID and return
-`{ok: true}`. These four write-capable operations fail when **Allow direct
-query execution** is off; unknown or expired session IDs also fail. Invalid
-tool input raises an error.
+own `ServerException`. The driver interpolates bound values into the
+statement, so where ClickHouse repeats the statement or its input it repeats
+the caller's values. That is removed: SQLAlchemy's `[SQL: ...]` /
+`[parameters: ...]` echo, the stack trace, the `failed at position` quotation,
+the rest of the input after `here:`, `before:` or `at:` (the remaining
+`INSERT ... VALUES` rows), the expression after `Cannot deduce template of
+expression:` and `(result column not found):`, the `Row N:` dump of a CSV or
+TSV parse error, the text after `in scope`, `In query`, `while processing
+query:`, `while processing:` and `While processing` (with the `required
+columns` list), and a runtime context, `: while executing 'FUNCTION ...'`.
+These are the shapes the node recognises, not a promise that ClickHouse has no
+other. ClickHouse's own sentence is kept, so it can name a value or an
+identifier the statement carried or touched. A `throwIf` message (code 395) is
+the caller's own text: it comes back whole with its runtime context dropped,
+while one reported without that context gets the markers like any other
+message. If the cut leaves only the exception class, the result says the
+server's message only repeated the statement. That is deliberate:
+reaching this tool at all requires **Allow direct query execution**, and a
+caller who has it can read the same data with a `SELECT`. The full text is
+written to the server log. `begin` takes no arguments and returns `{session_id}`;
+`commit` and `rollback` require that ID and return `{ok: true}`. These four
+write-capable operations fail when **Allow direct query execution** is off;
+unknown or expired session IDs also fail. Invalid tool input raises an error.
 
-A failed statement rolls nothing back and leaves the session open. The error
-text is byte-identical with and without a `session_id` and carries no recovery
-advice, so the policy is stated in the `execute` tool description instead.
-Recovery is the client's: issue `rollback` to discard the transaction, or
-`rollback to savepoint <name>` to undo only the failed portion and continue.
-A database that aborts the whole transaction on error (PostgreSQL, not
-ClickHouse) rejects every later statement on that session until one of those
-runs, and the node refuses the commit rather than letting it degrade into a
-silent rollback. The idle reaper is the backstop for a session abandoned
-instead.
+A session opens no ClickHouse transaction. `begin` reserves a connection for
+the `session_id`, but every statement sent on it is executed when it is sent,
+and other connections see its effect without waiting for a `commit`;
+`commit` and `rollback` only close the session, so `rollback` discards
+nothing. Savepoints do not exist either: `SAVEPOINT` is a syntax error, and
+`rollback to savepoint <name>` fails with `unknown savepoint`. To undo a
+write, run a statement that reverses it. A failed statement leaves the
+session open. Its error text is byte-identical with and without a
+`session_id` and carries no advice, so this policy is stated in the `execute`
+tool description instead. The idle reaper closes a session that is abandoned.
 
 ## Configuration
 
@@ -146,9 +156,10 @@ subsequent execution will succeed.
 
 Leave this off by default. When on, the `execute`, `begin`, `commit`, and
 `rollback` tools can bypass LLM translation and the generated-query safety
-check, and raw statements use a transaction that commits on success. Enable it
-only for trusted callers that need writes or dialect-specific SQL; use
-`get_data` for ordinary read-only retrieval.
+check, and each raw statement is applied when it runs: ClickHouse holds no
+transaction for it to commit or roll back. Enable it only for trusted callers
+that need writes or dialect-specific SQL; use `get_data` for ordinary
+read-only retrieval.
 
 ## Limitations
 

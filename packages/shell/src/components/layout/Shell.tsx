@@ -37,9 +37,12 @@
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import type { ConnectResult } from 'rocketride';
+import type { ConnectResult, SignupProperties } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { ConnectionManager } from '../../connection/connection';
+import { AuthPhase } from '../../types/connection';
+import { registerClientOps } from '../../ops/clientOps';
+import { registerShellHostOps } from '../../ops/hostOps';
 import { CloudAuthProvider } from '../../auth/CloudAuthProvider';
 import { useShellConnection } from '../../connection/ConnectionContext';
 import { ShellApiConfigProvider } from '../../connection/ShellApiConfigContext';
@@ -49,11 +52,13 @@ import { ShellLayout } from './ShellLayout';
 import { CheckoutFlow } from './CheckoutFlow';
 import { ApiKeyLogin } from './ApiKeyLogin';
 import LoadingScreen from './LoadingScreen';
-import { SS_PENDING_APP_ID, getHomeAppId } from '../../constants';
-import { registerAndMapApps, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
+import { SignedOutScreen } from './SignedOutScreen';
+import { getHomeAppId } from '../../constants';
+import { registerAndMapApps, loadAppModule, resolveServerEntry, getRegisteredEntry, invalidateAppDescriptor, getLocalAppEntries, setLocalAppsListener, isDevRemote, repointRemote } from '../../util/appLoader';
 import { getAppVersionOverrides, setAppVersionOverride, versionedEntryUrl } from '../../util/versionOverride';
 import type { ServerAppEntry } from '../../util/appLoader';
 import { waitForEmbeddedSession } from '../../util/devMode';
+import { devRelayOrigin, lockedAppId, tabSession } from '../../util/devGate';
 
 // =============================================================================
 // STYLES
@@ -95,29 +100,6 @@ const styles = {
 		transform: 'translateY(0)',
 		transition: 'background-color 0.1s ease, box-shadow 0.1s ease, transform 0.1s ease',
 	} as CSSProperties,
-	goodbyeContainer: {
-		display: 'flex',
-		flexDirection: 'column',
-		height: '100vh',
-		fontFamily: 'var(--rr-font-family)',
-		background: 'var(--rr-bg-default)',
-		color: 'var(--rr-text-primary)',
-	} as CSSProperties,
-	goodbyeHeader: {
-		display: 'flex',
-		justifyContent: 'flex-end',
-		alignItems: 'center',
-		padding: '12px 24px',
-		borderBottom: '1px solid var(--rr-border)',
-	} as CSSProperties,
-	goodbyeBody: {
-		display: 'flex',
-		flex: 1,
-		flexDirection: 'column',
-		alignItems: 'center',
-		justifyContent: 'center',
-		gap: 12,
-	} as CSSProperties,
 };
 
 // =============================================================================
@@ -130,10 +112,9 @@ const styles = {
  * - 'loading'    — bootstrap in progress; show spinner.
  * - 'shell'      — show Shell (identity may be null for marketplace).
  * - 'error'      — unrecoverable auth failure.
- * - 'goodbye'    — post-logout screen for session-locked apps.
  * - 'waitlisted' — authenticated but not yet granted access.
  */
-type RenderPhase = 'loading' | 'shell' | 'error' | 'goodbye' | 'waitlisted';
+type RenderPhase = 'loading' | 'shell' | 'error' | 'waitlisted';
 
 // =============================================================================
 // ONE-SHOT RELOAD GUARD
@@ -206,15 +187,10 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const { RR_ZITADEL_URL, RR_ZITADEL_CLIENT_ID } = config.apiConfig;
 
 	// ── Session-locked app ────────────────────────────────────────────────
-	const [sessionAppId] = useState<string>(() => {
-		const params = new URLSearchParams(window.location.search);
-		const fromUrl = params.get('appId') || params.get('appid') || '';
-		if (fromUrl) {
-			cm.setSessionAppId(fromUrl);
-			return fromUrl;
-		}
-		return cm.getSessionAppId();
-	});
+	// The tab session owns the URL parsing and per-tab persistence; authored
+	// preview pages (blob-served by the App Builder) instead carry their
+	// identity in the injected dev boot config — there is no URL to read.
+	const [sessionAppId] = useState<string>(() => lockedAppId());
 
 	// Deep-link version pin (?appid=X&version=7): seed the session override on
 	// mount — NOT in the useState initializer above, which is impure and would
@@ -264,10 +240,22 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const [showEmbeddedSignIn, setShowEmbeddedSignIn] = useState(false);
 	// Pending popup-fallback timer for the embedded sign-in (cancelled when
 	// the embedder ACKs that it is running its own sign-in flow).
-	const loginPopupTimerRef = useRef<number | null>(null);
 	const [apiKeyError] = useState<string | null>(null);
 	const loginTargetRef = useRef<string | null>(null);
 	const mountedRef = useRef(true);
+
+	// ── In-process workspace rescope ──────────────────────────────────────
+	// True while the shell is switching workspaces: the workspace subtree is
+	// unmounted (a loading screen holds its place) between the teardown and
+	// the re-authenticated remount. The epoch keys WorkspaceProvider so a
+	// completed rescope remounts every store against the new workspace.
+	const [rescoping, setRescoping] = useState(false);
+	const [workspaceEpoch, setWorkspaceEpoch] = useState(0);
+	const rescopeRunningRef = useRef(false);
+	// An orgChanged that arrives while a rescope is in flight — the running
+	// pass may already have reconnected under an older default, so one more
+	// pass runs when it finishes instead of dropping the notification.
+	const rescopePendingRef = useRef<string | null>(null);
 
 	// ── Connection state ──────────────────────────────────────────────────
 	const { isConnected, statusMessage } = useShellConnection();
@@ -288,11 +276,25 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// (e.g. apps gated by requiredPermissions). Those need to be registered
 	// as MF remotes and merged into the app list so they can be launched.
 	const apps = useMemo(() => {
-		// Synthetic local entries first computed so both return paths merge them
+		// Local (dev) entries merge on both return paths. In dev the WORKSPACE
+		// manifest is the truth: a locally-registered id REPLACES the server's
+		// row wholesale — the registration IS the row (appStatus 'dev',
+		// onDesktop true, billing gating moot in dev). No field-by-field
+		// overlay to reason about; while the registration lives, the server's
+		// opinion of this app simply does not exist. Ids the server has never
+		// heard of append whole, exactly as before.
 		const withLocal = (list: typeof config.apps): typeof config.apps => {
-			const present = new Set(list.map((a) => a.id));
-			const locals = getLocalAppEntries().filter((e) => !present.has(e.id));
-			return locals.length > 0 ? [...list, ...locals] : list;
+			const locals = getLocalAppEntries();
+			if (locals.length === 0) return list;
+			// IDENTITY CONTINUITY: the registration replaces the server row
+			// wholesale, but where the dev metadata is SILENT about the icon
+			// (URL-convention self-registration posts no manifest), the app
+			// must not lose its face mid-session — inherit the registry's
+			// stable icon URL. Dev metadata still wins wherever it speaks.
+			const byId = new Map(list.map((a) => [a.id, a]));
+			const patched = locals.map((l) => (!l.icon && byId.get(l.id)?.icon ? { ...l, icon: byId.get(l.id)!.icon } : l));
+			const localIds = new Set(locals.map((e) => e.id));
+			return [...list.filter((a) => !localIds.has(a.id)), ...patched];
 		};
 		if (!identity?.apps?.length) return withLocal(config.apps);
 
@@ -334,10 +336,13 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		mountedRef.current = true;
 
 		(async () => {
-			// Initialize and configure the auth provider (SaaS mode)
+			// Initialize and configure the auth provider (SaaS mode).
+			// relayOrigin arms the dev relay for top-level dev shells
+			// (terminal dev loop, F5 preview) — '' everywhere else, which
+			// leaves the sign-in flow byte-identical to before.
 			const authProvider = CloudAuthProvider.getInstance();
 			if (RR_ZITADEL_URL && RR_ZITADEL_CLIENT_ID) {
-				authProvider.initialize({ zitadelUrl: RR_ZITADEL_URL, clientId: RR_ZITADEL_CLIENT_ID });
+				authProvider.initialize({ zitadelUrl: RR_ZITADEL_URL, clientId: RR_ZITADEL_CLIENT_ID, relayOrigin: devRelayOrigin() });
 			}
 
 			// Initialise the client singleton (idempotent). The uri is the
@@ -348,9 +353,21 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				uri: config.serverUri || undefined,
 				clientName: 'Cloud Shell-UI',
 				authProvider,
-				zitadelUrl: RR_ZITADEL_URL,
-				zitadelClientId: RR_ZITADEL_CLIENT_ID,
 			});
+
+			// FRAMEWORK ROOT: this realm owns the engine connection, so the
+			// brokered client surface registers HERE — request('client.*')
+			// resolves in-process for this realm and for any attached spokes.
+			// Idempotent across remounts (already-registered ops are kept).
+			registerClientOps(cm.ops(), cm);
+			// The SHELL's own host.* ops — those whose capability belongs to
+			// the shell and whose hooks are contract surface, so they cannot
+			// depend on each host remembering to register them. The ops the
+			// HOST APP owns are separate and live with the host
+			// (apps/rocket-ui/src/ops, apps/vscode/src/ops), declared in
+			// shared/ops/hostOps.ts. See ops/hostOps.ts for why the split
+			// exists and which side a new op belongs on.
+			registerShellHostOps(cm.ops(), cm);
 
 			// Run the optional init callback (e.g. theme initialisation)
 			config.onInit?.();
@@ -409,7 +426,24 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 					// Gate on waitlist — authenticated but not yet granted access
 					setRenderPhase(result.result?.waitlisted ? 'waitlisted' : 'shell');
 				} else {
-					// No auth — render unauthenticated shell with the default app
+					// No identity. THE top-level auth decision, made BEFORE the
+					// shell phase is ever entered — nothing below this switch has
+					// rendered yet, so nothing can flash. A tab locked to an
+					// auth-required app (unknown manifest = auth-required, the
+					// platform default) goes straight to login from the loading
+					// screen, UNLESS the user explicitly signed out / abandoned a
+					// sign-in here (the shell then renders the signed-out page)
+					// or a failure is latched (the recovery dialog owns it).
+					const phase = cm.getConnectionStatus().authPhase;
+					const signedOutHeld = phase === AuthPhase.SIGNED_OUT || (phase === AuthPhase.AUTHORIZING && !cm.isSignInRedirectPending());
+					const lockedEntry = config.apps.find((a) => a.id === sessionAppId);
+					const lockedNeedsAuth = !!sessionAppId && sessionAppId !== defaultAppId && (lockedEntry ? lockedEntry.authenticated !== false : true);
+					if (lockedNeedsAuth && !signedOutHeld && !cm.getConnectionStatus().lastFailure) {
+						cm.emit('shell:loginRequest', { appId: sessionAppId, auto: true });
+						return; // stay on the loading screen; the navigation takes the page
+					}
+					// Signed-out render is legitimate here (public app, home, or
+					// the signed-out page): enter the shell phase.
 					setRenderPhase('shell');
 				}
 			} catch (err) {
@@ -501,6 +535,27 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		}
 	}, [identity, apps]);
 
+	// The waitlist screen renders no app, so nothing would forward the telemetry
+	// facts the connection manager holds (auth:complete for a waitlisted sign-up,
+	// the one most likely to end with the tab closed). The home remote's
+	// `telemetry` entry initialises its analytics and forwards them; an older
+	// home build without the entry resolves null and nothing happens. Once per
+	// page load: the entry drains the held facts once and subscribes for the rest.
+	const telemetryEntryRanRef = useRef(false);
+	useEffect(() => {
+		if (renderPhase !== 'waitlisted' || telemetryEntryRanRef.current) {
+			return;
+		}
+		telemetryEntryRanRef.current = true;
+		void loadAppModule<{ default?: () => void }>(defaultAppId, 'telemetry')
+			.then((entry) => {
+				entry?.default?.();
+			})
+			.catch(() => {
+				// the entry's own failure stays inside it
+			});
+	}, [renderPhase, defaultAppId]);
+
 	// Refresh identity on account update
 	useEffect(() => {
 		return cm.on('shell:accountUpdate', (result: ConnectResult) => {
@@ -517,32 +572,105 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 
 	// The user's default org changed (this tab or any other connection). The
 	// server only NOTIFIES — what to do is this client's choice. The shell's
-	// choice: reload, which re-authenticates and re-bootstraps under the
-	// user's current default org.
+	// choice: an IN-PROCESS rescope — announce, unmount the workspace subtree
+	// (its stores flush on the old connection), re-authenticate (the server
+	// resolves the new default org), then remount everything under a fresh
+	// epoch key. Any step failing falls back to the old full page reload —
+	// degraded, never stranded. Why not just reload: a reload tears down the
+	// whole JS world to change one scope; the rescope keeps the page, the MF
+	// containers, and the session, and lands the user back where the switch
+	// started (the Profile section re-opens via the sessionStorage flag the
+	// picker sets — a flag deliberately chosen so the reload FALLBACK lands
+	// there too).
 	useEffect(() => {
-		return cm.on('shell:orgChanged', () => {
-			console.warn('[shell] reloading: default org changed — re-authenticating under the new org');
-			window.location.reload();
+		const runRescope = (orgId: string): void => {
+			rescopeRunningRef.current = true;
+			void (async () => {
+				try {
+					cm.emit('shell:workspaceWillChange', { orgId });
+					// Unmount the workspace subtree FIRST: unmount cleanups flush
+					// pending workspace writes while the OLD connection is still
+					// up — flushing after reconnect would write workspace-A state
+					// into workspace B.
+					setRescoping(true);
+					// One macrotask so the unmount commit (and its synchronous
+					// cleanup effects) run before the connection drops.
+					await new Promise((resolve) => setTimeout(resolve, 0));
+					const token = cm.loadToken();
+					if (!token) throw new Error('no session token to re-authenticate with');
+					await cm.disconnect();
+					const result = await cm.connect(token);
+					if (!result) throw new Error('re-authentication under the new workspace returned no identity');
+					if (!mountedRef.current) return;
+					// Fresh identity = the new org's app manifest/entitlements;
+					// the epoch key remounts WorkspaceProvider so every store
+					// re-reads the new workspace's data.
+					setIdentity(result);
+					setWorkspaceEpoch((e) => e + 1);
+					setRescoping(false);
+					cm.emit('shell:workspaceChanged', { orgId });
+				} catch (err) {
+					console.warn('[shell] reloading: in-process workspace rescope failed — falling back to a full reload', err);
+					window.location.reload();
+				} finally {
+					rescopeRunningRef.current = false;
+					// A switch arrived mid-rescope: reconnect once more so the
+					// tab ends scoped to the LATEST default org.
+					const pending = rescopePendingRef.current;
+					if (pending !== null) {
+						rescopePendingRef.current = null;
+						runRescope(pending);
+					}
+				}
+			})();
+		};
+		return cm.on('shell:orgChanged', ({ orgId }: { orgId: string }) => {
+			if (rescopeRunningRef.current) {
+				rescopePendingRef.current = orgId;
+				return;
+			}
+			runRescope(orgId);
 		});
 	}, [cm]);
 
+	// The embedded sign-in KICK — deterministic, no timers: try the popup
+	// ON the click gesture, the one moment it can succeed. A blocked popup
+	// is a SYNCHRONOUS fact (VS Code webviews return null without throwing)
+	// and means the embedder owns sign-in — ask it to run its native flow
+	// (it answers with rrdev:auth). Shared by the prompt screen's button
+	// and by loginRequest handling for requests that already carry a
+	// gesture.
+	const kickEmbeddedSignIn = useCallback(() => {
+		const popup = window.open(`${window.location.origin}/?rrauth=1`, 'rrauth', 'popup=yes,width=520,height=780');
+		if (!popup) {
+			try { window.parent.postMessage({ type: 'rrdev:loginRequest' }, '*'); } catch { /* parentless */ }
+		}
+	}, []);
+
 	// Sign-in request from marketplace
 	useEffect(() => {
-		return cm.on('shell:loginRequest', ({ appId, register }: { appId?: string; register?: boolean }) => {
+		return cm.on('shell:loginRequest', ({ appId, register, auto, signupProperties }: { appId?: string; register?: boolean; auto?: boolean; signupProperties?: SignupProperties }) => {
 			if (appId) {
 				cm.setPendingAppId(appId);
 				loginTargetRef.current = appId;
 			}
 			if (isSaas) {
 				// EMBEDDED: never navigate the iframe to the IdP (framed IdPs
-				// go blank) — show the sign-in prompt whose button opens the
-				// popup flow instead.
+				// go blank). A USER-GESTURE request (the signed-out screen's
+				// button) kicks the popup flow directly — a second prompt
+				// demanding a second click is a speed bump. The AUTO gate has
+				// no gesture yet (popup rules), so it shows the prompt whose
+				// button provides one.
 				if (window.self !== window.top) {
-					if (mountedRef.current) setShowEmbeddedSignIn(true);
+					if (!auto) kickEmbeddedSignIn();
+					else if (mountedRef.current) setShowEmbeddedSignIn(true);
 					return;
 				}
-				// "Get Started" CTAs pass register:true → Zitadel sign-up form.
-				cm.startOAuth(register);
+				// "Get Started" CTAs pass register:true; it is reported on auth:start (every
+				// flow lands on the IdP login page, which offers Register). The auth:start
+				// fact and the round-trip stamp are raised inside startOAuth, behind its
+				// one-shot guard, for this and every other entry.
+				cm.startOAuth(register, { appId, auto, signupProperties });
 			} else {
 				if (mountedRef.current) setShowApiKeyLogin(true);
 			}
@@ -565,16 +693,11 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				window.location.reload();
 			}
 		};
-		const onWindowMessage = (e: MessageEvent): void => {
-			if ((e.data as { type?: string } | undefined)?.type === 'rrdev:loginPending' && loginPopupTimerRef.current !== null) {
-				window.clearTimeout(loginPopupTimerRef.current);
-				loginPopupTimerRef.current = null;
-			}
-		};
-		window.addEventListener('message', onWindowMessage);
+		// (rrdev:loginPending — the embedder's ACK — needs no listener since
+		// the popup-or-embedder choice became synchronous; embedders keep
+		// posting it for older shells, and it is simply ignored here.)
 		return () => {
 			channel.close();
-			window.removeEventListener('message', onWindowMessage);
 		};
 	}, [cm]);
 
@@ -587,9 +710,17 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		// Clear the pending-sign-in flag so HomeApp doesn't get stuck on
 		// the auth transition screen when it mounts after logout.
 		try { sessionStorage.removeItem('rr:auth:pending'); } catch { /* noop */ }
-		if (sessionAppId) {
+		if (sessionAppId || tabSession().dev) {
+			// SESSION-LOCKED tab (deployed ?appId= deep link or dev preview):
+			// stay exactly where you are. The signed-out state has honest
+			// surfaces of its own — ShellLayout renders the shared
+			// SignedOutScreen ("You are signed out of <app>" + the app's
+			// icon) for an auth-required app, and a public app simply renders
+			// signed out. The retired 'goodbye' phase showed a bespoke
+			// RocketRide-chromed page here instead — off-brand for a deep-app
+			// tab and a THIRD signed-out surface to keep consistent.
 			cm.logout().finally(() => {
-				if (mountedRef.current) setRenderPhase('goodbye');
+				if (mountedRef.current) setRenderPhase('shell');
 			});
 		} else {
 			// Return to the home app before the auth gate re-runs. Otherwise
@@ -664,32 +795,18 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ('rrauth' — see the bootstrap popup role); the popup hands the session
 	// back over BroadcastChannel and this shell reboots authenticated.
 	if (showEmbeddedSignIn) {
+		// The SAME surface as the top-level signed-out hold — only the
+		// sign-in MECHANICS differ (the popup flow; a frame cannot run the
+		// redirect), stated in the note. Identity resolves like everywhere
+		// else: probe manifest first, then the dev registration.
+		const lockedEntry = config.apps.find((a) => a.id === sessionAppId) ?? getLocalAppEntries().find((a) => a.id === sessionAppId);
 		return (
-			<div style={styles.statusScreen}>
-				<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center', maxWidth: 380, padding: '0 24px' }}>
-					<div style={{ fontSize: 15, fontWeight: 600, color: 'var(--rr-text-primary)' }}>Sign in required</div>
-					<div style={{ fontSize: 12.5 }}>
-						This app requires authentication. Sign in opens in a separate window; this preview continues automatically afterwards.
-					</div>
-					<button
-						style={styles.signInButton}
-						onClick={() => {
-							// Ask the EMBEDDER to run its own sign-in first (the
-							// VSCode host authenticates natively and hands the
-							// session down via rrdev:auth, which reboots this
-							// shell). The popup is the fallback for embedders
-							// without an auth flow of their own — if no session
-							// arrived after a grace period, this page is still
-							// here and opens it.
-							try { window.parent.postMessage({ type: 'rrdev:loginRequest' }, '*'); } catch { /* parentless */ }
-							loginPopupTimerRef.current = window.setTimeout(() => {
-								loginPopupTimerRef.current = null;
-								window.open(`${window.location.origin}/?rrauth=1`, 'rrauth', 'popup=yes,width=520,height=780');
-							}, 1500);
-						}}
-					>Sign In</button>
-				</div>
-			</div>
+			<SignedOutScreen
+				appName={lockedEntry?.name ?? tabSession().appName ?? sessionAppId ?? 'this app'}
+				iconUrl={lockedEntry?.icon ?? tabSession().appIcon}
+				note="Sign in opens in a separate window; this preview continues automatically afterwards."
+				onSignIn={kickEmbeddedSignIn}
+			/>
 		);
 	}
 
@@ -725,23 +842,6 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			}}>
 				<div style={{ color: 'var(--rr-color-error)', fontSize: 15 }}>Sign in failed. Please try again.</div>
 				<button onClick={startSignIn} style={styles.signInButton}>Sign In</button>
-			</div>
-		);
-	}
-
-	// Goodbye (session-locked post-logout)
-	if (renderPhase === 'goodbye') {
-		return (
-			<div style={styles.goodbyeContainer}>
-				<div style={styles.goodbyeHeader}>
-					<button onClick={startSignIn} style={styles.signInButton}>Sign In</button>
-				</div>
-				<div style={styles.goodbyeBody as CSSProperties}>
-					<div style={{ fontSize: 16, fontWeight: 600 }}>You have been signed out</div>
-					<div style={{ fontSize: 13, color: 'var(--rr-text-secondary)' }}>
-						Close this tab or sign in again to continue.
-					</div>
-				</div>
 			</div>
 		);
 	}
@@ -812,22 +912,31 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	return (
 		<ShellIdentityContext.Provider value={identity}>
 			<ShellApiConfigProvider config={config.apiConfig}>
-				<WorkspaceProvider
-					apps={apps}
-					workspaceDir={config.workspaceDir}
-					startupAppId={activeAppId || sessionAppId || (() => { try { return sessionStorage.getItem(SS_PENDING_APP_ID); } catch { return null; } })() || defaultAppId}
-					defaultAppId={defaultAppId}
-					themeOptions={config.themeConfig.options}
-					onThemeChange={config.themeConfig.onThemeChange}
-				>
-					<ShellLayout
-						config={resolvedConfig}
-						isConnected={isConnected}
-						statusMessage={statusMessage}
-						hideAppSwitcher={!!sessionAppId}
+				{/* Mid-rescope the workspace subtree is OUT of the tree (its
+				    unmount flushed the old workspace's stores on the old
+				    connection); the epoch key makes a finished rescope remount
+				    everything against the new workspace's data. */}
+				{rescoping ? (
+					<LoadingScreen />
+				) : (
+					<WorkspaceProvider
+						key={workspaceEpoch}
+						apps={apps}
+						workspaceDir={config.workspaceDir}
+						startupAppId={activeAppId || sessionAppId || cm.getPendingAppId() || defaultAppId}
 						defaultAppId={defaultAppId}
-					/>
-				</WorkspaceProvider>
+						themeOptions={config.themeConfig.options}
+						onThemeChange={config.themeConfig.onThemeChange}
+					>
+						<ShellLayout
+							config={resolvedConfig}
+							isConnected={isConnected}
+							statusMessage={statusMessage}
+							hideAppSwitcher={!!sessionAppId}
+							defaultAppId={defaultAppId}
+						/>
+					</WorkspaceProvider>
+				)}
 			</ShellApiConfigProvider>
 
 			{/* Checkout overlay — renders outside the shell layout */}

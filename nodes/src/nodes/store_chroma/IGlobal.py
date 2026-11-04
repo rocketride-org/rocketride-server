@@ -24,13 +24,20 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
-from typing import Any, Dict
+from typing import Any, Dict, List, Tuple
 
 from ai.common.store import StoreGlobalBase
+from nodes.store_chroma.mode import is_local
 
 
 class IGlobal(StoreGlobalBase):
     serverName: str = 'chroma'
+
+    def _credentials(self, config: Dict[str, Any]) -> List[Tuple[str, Any]]:
+        """The token goes to a cloud or remote server only, never to a local one."""
+        if is_local(config):
+            return []
+        return [('apikey', config.get('apikey'))]
 
     def _open_store(self, logical_type: str, conn_config: Dict[str, Any], bag: Dict[str, Any]):
         """Return the driver's Store, imported lazily so config mode never loads the driver."""

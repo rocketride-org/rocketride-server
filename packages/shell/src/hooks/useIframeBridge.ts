@@ -182,15 +182,8 @@ export function useIframeBridge(iframeRef: RefObject<HTMLIFrameElement>): void {
 					// Delegate to the shell's logout flow (Zitadel PKCE end-session)
 					logoutRef.current?.();
 					break;
-				case 'shell:openTab':
-					// Translate the iframe's openTab request into a window CustomEvent
-					// that the shell's tab manager listens for
-					window.dispatchEvent(
-						new CustomEvent('shell:openSingleton', {
-							detail: { viewType: msg.viewType, label: msg.label },
-						})
-					);
-					break;
+				// (shell:openTab is accepted but ignored: the shell:openSingleton
+				// CustomEvent it used to dispatch had no listener anywhere.)
 			}
 		};
 		// Register on the parent window so messages from the iframe bubble up here

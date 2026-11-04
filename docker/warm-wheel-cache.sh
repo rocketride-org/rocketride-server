@@ -19,7 +19,8 @@
 #   without a model server (torch_allowed below); anywhere else it would put a
 #   CUDA torch into every run, and the build fails. The rest go to
 #   $UV_CACHE_DIR/warmed.txt: what the cache promises, and what
-#   test-node-image.sh installs offline.
+#   test-node-image.sh installs offline. A resolution that fails says nothing
+#   about torch: it is tried again, and if it keeps failing the build stops.
 set -eu
 
 # Files that may need torch: installed only without a model server, where the
@@ -30,6 +31,34 @@ torch_allowed() {
         nodes/audio_tts/requirements.txt) return 0 ;;  # depends() only without a model server
         nodes/anonymize/requirements.txt) return 0 ;;  # never installed by the node: GLiNER comes through ai.common.models
     esac
+    return 1
+}
+
+# Prints what installing $1 into $2 would add with torch allowed; the rest of
+# the arguments are uv's. Three tries: a plan uv could not make (PyPI out of
+# reach, say) would read as "no torch" and promise an install the cache cannot
+# serve offline.
+plan_with_torch() {
+    plan_req=$1
+    plan_target=$2
+    shift 2
+    for attempt in 1 2 3; do
+        if plan=$(./bin/uv pip install --dry-run \
+                -r "$plan_req" \
+                "$@" \
+                --python ./engine \
+                --target "$plan_target" \
+                --index-strategy unsafe-best-match \
+                --no-build-isolation \
+                --excludes "$engine_excludes" 2>&1); then
+            printf '%s\n' "$plan"
+            return 0
+        fi
+        if [ "$attempt" -lt 3 ]; then
+            sleep 10
+        fi
+    done
+    printf '%s\n' "$plan"
     return 1
 }
 
@@ -76,14 +105,12 @@ for req in $(find nodes ai -name 'requirement*.txt' | sort); do
             --no-build-isolation \
             --excludes "$excludes"; then
         failed="$failed $req"
-    elif ./bin/uv pip install --dry-run \
-            -r "$req" \
-            "$@" \
-            --python ./engine \
-            --target "$target" \
-            --index-strategy unsafe-best-match \
-            --no-build-isolation \
-            --excludes "$engine_excludes" 2>&1 | grep -qE '^ \+ torch=='; then
+    elif ! plan=$(plan_with_torch "$req" "$target" "$@"); then
+        echo "FATAL: could not tell whether $req needs torch; uv failed 3 times:"
+        printf '%s\n' "$plan" | tail -n 20
+        rm -rf "$target" "$excludes"
+        exit 1
+    elif printf '%s\n' "$plan" | grep -qE '^ \+ torch=='; then
         needs_torch="$needs_torch $req"
         torch_allowed "$req" || forbidden="$forbidden $req"
     else

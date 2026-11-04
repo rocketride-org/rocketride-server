@@ -24,39 +24,30 @@
 """
 Shared connection resolution for the RocketRide cloud database nodes.
 
-``rocketride_sql``, ``rocketride_vector`` and ``rocketride_graph`` all connect
-to the same per-tenant cloud database and take **no** connection config.  Rather
-than reading host/user/password, they resolve a ready DSN from the account layer
-keyed by the authenticated ``client_id``.  Centralising that resolution here
-gives the three nodes one identical seam — and one place for tests to inject a
-fake resolver — so node code is byte-for-byte independent of which
-``Account.resolve_db_dsn`` implementation (OSS stub, real SaaS, or fake) is live.
+``rocketride_sql``, ``rocketride_vector`` and ``rocketride_graph`` take **no**
+connection config. Each node names a database by ``scope`` (``org``, ``team``
+or ``user``) and an optional ``target`` (a team id or user id; empty means the
+run's own). The task engine authorizes every ``(scope, target)`` a pipeline
+asks for, resolves each DSN server-side at task start, and delivers them as a
+JSON map in ``ROCKETRIDE_DB_DSNS``. Nodes only look their key up. They never resolve a
+DSN themselves: a missing key raises, and outside a task (a save-time probe in
+the server process) nothing is delivered, so the probe does static checks only
+(datacore isolation SDD 4.6).
 
-In the hosted path the task engine resolves the DSN server-side and injects it
-as ``ROCKETRIDE_DB_DSN``; nodes never resolve identity themselves (identity
-rides the task file since #1686 — the task engine does NOT set
-``ROCKETRIDE_CLIENT_ID``).  The env-based ``current_client_id`` accessor
-remains for the account fallback used by server-process callers and tests.
-The account call is async while node lifecycle code (``beginGlobal`` /
-``Store.__init__``) is synchronous, so it is bridged with ``asyncio.run`` —
-safe only from a thread with no running loop, which is exactly how nodes are
-constructed.
+Stdlib only: nodes tests load this file in isolation.
 """
 
-import asyncio
+import json
 import os
+import re
 import urllib.parse
+from collections.abc import Iterable, Mapping
 
-# Identity override consumed only by the account fallback (server-process
-# callers and tests). The task engine does NOT set this in node subprocesses:
-# identity rides the task file (#1686) and the ROCKETRIDE_* env namespace is
-# caller-influenced by design.
-CLIENT_ID_ENV = 'ROCKETRIDE_CLIENT_ID'
-
-# The task engine resolves the per-tenant DSN server-side at task start (only
-# the server process has SaaS account context) and injects it here for
-# pipelines that contain RocketRide cloud DB nodes.
-DB_DSN_ENV = 'ROCKETRIDE_DB_DSN'
+# The task engine resolves every DSN server-side at task start (only the
+# server process has SaaS account context) and delivers them here as a JSON
+# map, keyed by dsn_key(scope, target), for pipelines with RocketRide cloud
+# DB nodes.
+DB_DSNS_ENV = 'ROCKETRIDE_DB_DSNS'
 
 # When server-side resolution fails (e.g. a broker outage), or the engine has
 # no database broker at all, the task engine passes the reason down here
@@ -65,43 +56,73 @@ DB_DSN_ENV = 'ROCKETRIDE_DB_DSN'
 DB_RESOLVE_ERROR_ENV = 'ROCKETRIDE_DB_RESOLVE_ERROR'
 
 
-def _run_async(async_fn, *args):
-    """Run an async callable from synchronous node lifecycle code.
+# The node providers that use a RocketRide cloud database.
+DB_PROVIDERS = frozenset({'rocketride_sql', 'rocketride_vector', 'rocketride_graph'})
 
-    Only safe to call from a thread with no running event loop — node
-    ``beginGlobal`` / ``Store.__init__`` are invoked synchronously by the
-    engine, which is the supported caller. Pre-check before creating the
-    coroutine so a misuse surfaces with a clear message and cannot leak an
-    unawaited coroutine.
+# Source providers whose callers reach the run as its owner with no identity
+# of their own: a pk_ chat, dropper or webhook link, or a chat bot. A pipeline
+# with any of them exposes a public endpoint (SDD 4.4 hard rule 2). Every task
+# gets a pk_ token, so the token alone can't decide this (open question 14).
+PUBLIC_SOURCE_PROVIDERS = frozenset({'chat', 'dropper', 'webhook', 'discord', 'telegram'})
+
+DB_SCOPES = ('org', 'team', 'user')
+
+# A team or user id: the provisioner's owner-id shape
+# (datacore/provisioner/provisioner.py _SAFE_ID), capped at the width the SaaS
+# audit log stores (64).
+_TARGET_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._@-]{0,63}')
+
+
+class DsnNotDelivered(ValueError):
+    """No DSN was delivered to this process: it is not a task.
+
+    Raised to save-time probes, which run in the server process with no
+    identity. They do static checks only; connectivity is checked when the
+    pipeline runs.
     """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        pass
-    else:
-        raise RuntimeError(
-            'resolve_rocketride_dsn must not be called from a thread with a running event loop; '
-            'RocketRide DB node lifecycle methods are constructed synchronously by the engine.'
-        )
-    return asyncio.run(async_fn(*args))
 
 
-def current_client_id() -> str:
-    """Return the authenticated ``client_id`` for the running task.
+def db_target(config: Mapping) -> tuple[str, str]:
+    """Read and check a DB node's ``(scope, target)`` from its resolved config.
+
+    Args:
+        config: The node config after ``Config.getNodeConfig`` (flat keys).
+
+    Returns:
+        ``(scope, target)``. scope defaults to ``'org'``; target ``''`` means
+        the run's own team or user.
 
     Raises:
-        ValueError: if the identity env var is missing. Inside a task the
-            engine delivers a DSN or a resolve error before this is reached,
-            so this normally means a server-process caller or a test without
-            an identity.
+        ValueError: unknown scope, a target on the org scope, or a malformed id.
     """
-    client_id = os.environ.get(CLIENT_ID_ENV, '').strip()
-    if not client_id:
-        raise ValueError(
-            f'no signed-in RocketRide identity is available ({CLIENT_ID_ENV} is not set); '
-            'RocketRide cloud database nodes resolve their database from the identity of the task that runs them'
-        )
-    return client_id
+    scope = config.get('scope') or 'org'
+    target = config.get('target') or ''
+    if not isinstance(scope, str) or scope.strip() not in DB_SCOPES:
+        raise ValueError(f'scope must be one of {", ".join(DB_SCOPES)} (got {scope!r})')
+    if not isinstance(target, str):
+        raise ValueError(f'target must be a team or user id (got {target!r})')
+    scope, target = scope.strip(), target.strip()
+    if scope == 'org' and target:
+        raise ValueError('the org scope takes no target: clear the target or pick the team or user scope')
+    if target and not _TARGET_ID.fullmatch(target):
+        raise ValueError(f'target {target!r} is not a valid team or user id')
+    return scope, target
+
+
+def dsn_key(scope: str, target: str = '') -> str:
+    """The ``ROCKETRIDE_DB_DSNS`` key for a node's ``(scope, target)``."""
+    return f'{scope}:{target}' if target else scope
+
+
+def exposes_public_endpoint(components: Iterable) -> bool:
+    """True when any component is a public source (``PUBLIC_SOURCE_PROVIDERS``)."""
+    return any(isinstance(c, dict) and c.get('provider') in PUBLIC_SOURCE_PROVIDERS for c in components or ())
+
+
+def _describe(scope: str, target: str) -> str:
+    if scope == 'org':
+        return 'the org database'
+    return f'the {scope} database {target!r}' if target else f"the run's own {scope} database"
 
 
 def to_sqlalchemy_url(dsn: str) -> str:
@@ -122,45 +143,51 @@ def to_sqlalchemy_url(dsn: str) -> str:
     return dsn
 
 
-def resolve_rocketride_dsn() -> str:
-    """Resolve the per-tenant libpq DSN for the current client.
+def resolve_rocketride_dsn(scope: str = 'org', target: str = '') -> str:
+    """Return the DSN the task engine delivered for ``(scope, target)``.
 
-    Delivery order:
+    Lookup order:
 
-    1. ``ROCKETRIDE_DB_DSN`` env — the production path. The task engine
-       resolves the DSN server-side at task start (the SaaS account context
-       exists only in the server process; node subprocesses always see the
-       OSS account) and injects it here at task start.
-    2. ``Account.resolve_db_dsn(client_id)`` — fallback for callers running
-       inside the server process (or tests injecting a fake account). On an
-       engine with no database broker this raises ``NotImplementedError``
-       (no cloud database configured), or the identity ``ValueError`` first
-       when ``ROCKETRIDE_CLIENT_ID`` is unset.
+    1. ``ROCKETRIDE_DB_DSNS``: the per-task map. A missing key raises; it
+       never falls back to another database.
+    2. ``ROCKETRIDE_DB_RESOLVE_ERROR``: server-side resolution failed, or the
+       engine has no database broker. Raises with that reason.
+    3. Nothing delivered: this process is not a task. Raises DsnNotDelivered.
 
     Returns the raw DSN (URL form, directly usable by ``psycopg2.connect``).
     Callers that need a SQLAlchemy engine URL should wrap the result in
     :func:`to_sqlalchemy_url`.
+
+    Raises:
+        ValueError: bad scope/target, a key missing from the map, or a
+            server-side resolution failure.
+        DsnNotDelivered: called outside a task.
     """
-    injected = os.environ.get(DB_DSN_ENV, '').strip()
-    if injected:
-        return injected
+    scope, target = db_target({'scope': scope, 'target': target})
+    key = dsn_key(scope, target)
+
+    delivered = os.environ.get(DB_DSNS_ENV, '').strip()
+    if delivered:
+        try:
+            dsns = json.loads(delivered)
+        except ValueError:
+            raise ValueError(f'{DB_DSNS_ENV} is not valid JSON') from None
+        dsn = dsns.get(key) if isinstance(dsns, dict) else None
+        if not isinstance(dsn, str) or not dsn.strip():
+            raise ValueError(
+                f'this task was not given {_describe(scope, target)}; the engine authorizes it at task start'
+            )
+        return dsn.strip()
 
     # Server-side resolution was attempted and failed, or the engine has no
-    # database broker: report that reason, not the missing-identity error the
-    # account fallback below would produce (the task engine scrubs the broker
-    # env from node subprocesses, so the fallback cannot succeed here anyway).
+    # database broker: report that reason.
     resolve_error = os.environ.get(DB_RESOLVE_ERROR_ENV, '').strip()
     if resolve_error:
         raise ValueError(f'RocketRide cloud database is not available for this task: {resolve_error}')
 
-    # Lazy import: ai.common is imported very early, and ai.account pulls in the
-    # OSS/SaaS overlay — importing at module load risks a cycle.
-    from ai.account import account
-
-    dsn = _run_async(account.resolve_db_dsn, current_client_id())
-    if not dsn or not isinstance(dsn, str):
-        raise ValueError('Account.resolve_db_dsn returned an empty DSN')
-    return dsn
+    raise DsnNotDelivered(
+        'no RocketRide cloud database is delivered outside a running pipeline; connectivity is checked when it runs'
+    )
 
 
 def parse_dsn_fields(dsn: str) -> dict:

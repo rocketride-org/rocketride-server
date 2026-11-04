@@ -44,8 +44,9 @@ dependencies.
 pip install rocketride
 ```
 
-> **Before the CLI release:** `rocketride diff` ships in a release after 1.3.0, so
-> PyPI does not serve it yet. Until then install the client package from this
+> **Before the CLI release:** `rocketride diff` is not in a PyPI release yet —
+> 1.4.0 and earlier do not include it; the first release with it will be 1.5.0
+> or later. Until then install the client package from this
 > repository at a pinned commit — pip executes the source's build code, so pin a
 > full commit SHA rather than a branch:
 >
@@ -90,7 +91,7 @@ rocketride diff --git <ref> <file.pipe> [--include-layout] [--json | --markdown]
 | Flag | Description |
 | --- | --- |
 | `<old.pipe> <new.pipe>` | The two files to compare (positional, old first). Pass exactly one file with `--git` instead. |
-| `--git <ref>` | Diff the working-tree `FILE` against `<ref>` via `git show <ref>:<FILE>`. `<ref>` is any revision git accepts — a commit SHA, branch, tag, `HEAD`, `HEAD~1`, `origin/main`. If the file does not exist in `<ref>`, everything is reported as added, plus a version change from `null`. |
+| `--git <ref>` | Diff the working-tree `FILE` against `<ref>` via `git show <ref>:<FILE>`, looking the file up under the path given. `<ref>` is any revision git accepts — a commit SHA, branch, tag, `HEAD`, `HEAD~1`, `origin/main` — and must not be empty. If the file does not exist in `<ref>`, everything is reported as added, plus a version change from `null` when the file has a `version`, and `layout changed` when its `viewport` is non-empty. A symlink committed as a symlink — the file itself or any directory on its path — is compared through the target it had at `<ref>`, wherever it points today. An absolute target inside the checkout, or one that climbs out of the repository and back in through its root (`../<repo>/x.pipe`), is read at `<ref>` like any other link; a path that reaches the repository only through some other alias (a link elsewhere pointing into a subdirectory) counts as outside. A target that ends outside the repository, or a loop of links, is an error; a target that did not exist at `<ref>` counts as a missing file. A relative `FILE` typed inside a directory link is looked up under the link as the shell spells it (`$PWD`), and `lnk/../x` follows `lnk` as it was committed at `<ref>`; Windows folds `..` as text before it reaches a link, so there `..` after a link follows the working tree. On a case-insensitive filesystem, a differently cased spelling of a tracked file or of any directory on its path is compared against that file. |
 | `--include-layout` | Enumerate the layout churn that is hidden by default — each node's `ui` block as `ui.*` changes on that node, and the top-level `viewport` as `viewport.*` changes — and count it, so a layout-only edit then exits `1`. |
 | `--json` | Emit a single JSON document to stdout (mutually exclusive with `--markdown`). |
 | `--markdown` | Emit compact, PR-comment-friendly Markdown to stdout (mutually exclusive with `--json`). |
@@ -99,7 +100,26 @@ rocketride diff --git <ref> <file.pipe> [--include-layout] [--json | --markdown]
 **Exit codes:** `0` no semantic changes (or any successful run with
 `--exit-zero`); `1` semantic changes were found; `2` usage error, or an
 unreadable / unparseable file, or a bad git ref. Errors always go to stderr, so
-`--json` and `--markdown` output on stdout stays pure.
+`--json` and `--markdown` output on stdout stays pure. Each error `diff` reports
+is one line, with control, bidi, invisible and line-separator characters taken
+from the inputs (an id, a path, a ref) written as
+`\xNN`/`\uNNNN` escapes, so a crafted file cannot forge or reorder the error
+text a CI job pastes into a pull-request comment; ordinary text prints as typed. `diff` reads no
+configuration, so unlike the connected commands it does not load the workspace
+`.env`: a `NO_COLOR` set only there is ignored, while one in the shell
+environment still disables color.
+
+Non-JSON constants (`NaN`, `Infinity`, `-Infinity`), numeric overflow, and
+nonzero values that underflow to zero are rejected with exit `2`. Fractional
+and exponent literals use finite IEEE 754 binary64 precision: literals such as
+`0.1` and `0.10000000000000001` round to the same value and compare equal.
+Integer literals retain exact Python integer precision, subject to the JSON
+decoder's size limit. The same rules apply to files read from Git; an
+already-parsed `dict` must also contain only finite floats. Excessive nesting
+that exceeds the parser, comparison, or renderer limit produces an actionable
+error on stderr with exit `2` and no report on stdout. `--exit-zero` does not
+suppress these errors. A key repeated within one JSON object keeps its last
+value, as in `json.loads`, `JSON.parse`, and the engine's own reader.
 
 `--json` here is a **format flag** — a whole JSON document on stdout — not the
 shared `--json [FILE]` result envelope the connected subcommands use. That
@@ -108,13 +128,15 @@ difference is deliberate: `diff` produces a report, not a command result.
 ## What counts as a change
 
 - **Nodes** are matched by `id`. A new or deleted `id` is an add/remove; an `id`
-  present on both sides with a different `provider` is a provider change. A
-  duplicate `id` within one file is rejected with exit `2` rather than silently
-  shadowing a node.
+  present on both sides with a different `provider` is a provider change
+  (compared as JSON values, like config). A duplicate `id` within one file is
+  rejected with exit `2` rather than silently shadowing a node.
 - **Config** is deep-diffed into dotted paths — nested objects become
   `config.default.strlen`, list items become `config.instructions[0]` — and each
-  leaf is reported as added, removed, or changed with its old → new value. JSON
-  types are compared type-sensitively, so `false` → `0` is a change.
+  leaf is reported as added, removed, or changed with its old → new value.
+  Values are compared as JSON values: a boolean never equals a number and a
+  string never equals either, so `false` → `0` is a change, while numerically
+  equal literals such as `512` and `512.0` compare equal.
 - **Edges** are the directed wires between components, reconstructed from every
   component's `input[]` (data lanes) and `control[]` (agent orchestration lanes,
   such as an agent's `llm`, `tool`, or `memory`). Rewiring a step shows up as a
@@ -125,6 +147,13 @@ difference is deliberate: `diff` produces a report, not a command result.
   default and summarized as a single `Layout: changed` line, so a pure canvas move
   exits `0`. `--include-layout` enumerates the individual `ui.*` and `viewport.*`
   fields and makes them count, so a canvas-only edit then exits `1`.
+- **Canvas groups.** The editor saves a group's children inside the group
+  component, under `config.pipeline.components`. Each child is diffed as a node
+  in its own right, matched by `id` like any other: its `ui` is layout, its
+  wiring is edges, and its provider and config changes are reported on the child.
+  Moving a node into or out of a group changes only its `ui` (`parentId` and a
+  group-relative position), so it is layout too. Ids must be unique across
+  groups.
 - **Everything else at the top level is ignored.** `diff` reads exactly
   `components`, `version` and `viewport`; `project_id`, `isLocked`, and any key a
   later schema adds are editor/session metadata rather than pipeline behavior, so
@@ -133,7 +162,12 @@ difference is deliberate: `diff` produces a report, not a command result.
 ## Output modes
 
 The default **human** output is grouped and colored (color auto-disables when
-piped or when `NO_COLOR` is set), with `+` added, `-` removed, `~` changed:
+piped or when `NO_COLOR` is set), with `+` added, `-` removed, `~` changed.
+Characters a reader cannot see or trust in values and identifiers are printed
+as `\xNN`/`\uNNNN` escapes: C0 and C1 controls, the Unicode bidi controls,
+zero-width and other format characters (a zero-width space, a BOM, a soft
+hyphen), every space other than U+0020, line and paragraph separators, and lone
+surrogates:
 
 ```text
 Pipeline diff: 1 node changed, layout changed
@@ -145,8 +179,26 @@ Config
 Layout: changed (ui/viewport)
 ```
 
-`--json` emits one stable, sorted document — `nodes`, `edges`, `viewport`, and a
-`summary` block with counts and the overall `has_semantic_changes` flag:
+Text that Unicode normalization would rewrite (a decomposed accent such as `e`
+followed by U+0301, or U+212B ANGSTROM SIGN) is written as escapes too, so it
+never reads like its composed twin. When the two sides of a change differ only
+in a compatibility look-alike (a full-width digit, the `fi` ligature), both
+sides are JSON-quoted with every non-ASCII character written as a `\uNNNN`
+escape.
+A string is also JSON-quoted when it holds text that reads like one of these
+escapes (the six characters `\u202e` print as `"\\u202e"`) or starts with a
+quote. Node ids, edge endpoints and lanes, and config paths are quoted the same
+way, and only in those cases, so a real U+202E and the six characters `\u202e`
+never print alike, even on a console that writes the character as `\u202e`
+itself.
+An identifier is also JSON-quoted when it has leading or trailing whitespace, a
+tab, or a run of two or more spaces, so `llm_1 ` with a trailing space and
+`llm_1` never print alike: the padding shows inside the quotes and a tab is
+written `\t`. Ordinary single-spaced ids and paths print bare, as before.
+
+`--json` emits one stable document with sorted keys — `edges`, `nodes`, a
+`summary` block with counts and the overall `has_semantic_changes` flag, and
+`viewport`:
 
 ```json
 {
@@ -203,7 +255,20 @@ _Layout (ui/viewport) changed._
 Values reaching the Markdown report are untrusted `.pipe` content, so every value
 is wrapped in a code span whose fence is longer than any backtick run inside it,
 and pipes are escaped so a value cannot split the table row or break out of the
-comment.
+comment. The same characters as in the human output — controls, bidi and other
+format characters, non-ASCII spaces, separators, line breaks — are written as
+`\xNN`/`\uNNNN`-style escapes, so a crafted value cannot reorder or hide what
+the reviewer sees in the rendered comment. Node and edge add/remove signs are also
+code-spanned, preserving the visible `+` or `-` beside each identity after
+GitHub renders the list.
+
+In every format but JSON, strings print bare and other values use JSON spelling
+(`true`, `null`, `{"k": "v"}`). A string is JSON-quoted when bare text would
+misread it: when it is empty (`""`), has leading or trailing whitespace, would
+itself read as a JSON value (`"true"`, `"512"`), or holds an escaped character,
+so that a real U+202E (`"\u202e"`) and the six characters `\u202e` never print
+alike. When the two sides of a change would still look alike, because they cross
+types or differ only in whitespace, both are JSON-quoted.
 
 ## Review pipelines like code in CI
 
@@ -258,10 +323,10 @@ if diff.has_semantic_changes:
 | Function | Description |
 | --- | --- |
 | `load_pipe(path_or_obj)` | Load and validate a pipeline from a filesystem path or an already-parsed `dict`. Raises `PipeDiffError` for an unreadable file, invalid UTF-8, invalid JSON, a non-object top level, a missing or non-list `components`, a component without a non-empty string `id`, a duplicate component `id`, or malformed `input[]` / `control[]` wiring. |
-| `diff_pipes(old, new, *, include_layout=False)` | Compare two loaded pipelines and return a `PipeDiff`. `include_layout` folds each node's `ui` differences into its field changes and enumerates the top-level `viewport` into `PipeDiff.viewport_changes`. |
-| `deep_diff_config(old, new)` | Deep-diff two config dicts into a list of `FieldChange` with dotted paths (`None` is treated as an empty dict). The building block `diff_pipes` uses per node. |
+| `diff_pipes(old, new, *, include_layout=False)` | Compare two loaded pipelines and return a `PipeDiff`. `include_layout` folds each node's `ui` differences into its field changes and enumerates the top-level `viewport` into `PipeDiff.viewport_changes`. Raises `PipeDiffError` when a pipeline value is nested too deeply, or refers to itself, so that it cannot be compared or reported. |
+| `deep_diff_config(old, new)` | Deep-diff two config dicts into a list of `FieldChange` with dotted paths (`None` is treated as an empty dict). The building block `diff_pipes` uses per node. Raises `PipeDiffError` when a config value is nested too deeply, or refers to itself, so that it cannot be compared or reported. |
 | `resolve_git_ref(ref, file_path)` | Return the parsed pipeline at a git ref via `git show <ref>:<path>`, or `None` when the file does not exist in that ref. Raises `PipeDiffError` when the path is outside a repository, the ref is unknown, `git` is unavailable or times out, or the retrieved contents are not a valid pipeline. Arguments are passed as an argv list (never a shell string). |
-| `PipeDiffError` | The single exception type the package raises. The CLI maps it to exit code `2`. |
+| `PipeDiffError` | The single exception type the package raises for input problems: an unreadable, malformed, or structurally invalid pipeline, a non-finite number, a duplicate id, or a value nested too deeply or referring to itself. The CLI maps it to exit code `2`. `diff_pipes` expects the dicts `load_pipe` returns; passing anything else raises the ordinary `AttributeError` or `TypeError`. |
 
 ### Data model
 
@@ -299,6 +364,9 @@ nothing, so they compose into your own tooling.
   under a new `id` and the diff reports a removal plus an addition, not a rename.
 - **`--git` needs a real repository.** The ref side is read through `git show`, so
   the file must live inside a git worktree and the ref must be present locally.
+- **Cross-script look-alikes are not flagged.** A Cyrillic `а` in place of a
+  Latin `a` is reported as the change it is, but the two spellings can look the
+  same; compare the `--json` output when in doubt.
 - **No engine validation.** `diff` checks that both files are well-formed
   pipelines, not that they are runnable — use [`rocketride
   validate`](/connect/cli#validate) for that.

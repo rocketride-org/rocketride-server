@@ -1,5 +1,5 @@
 name: Experimental release
-run-name: Experimental release ${{ inputs.ref }} → -${{ inputs.tag_suffix }}
+run-name: Experimental release ${{ github.ref_name }} → -${{ inputs.tag_suffix }}
 
 # Workshop / experimental releases from non-develop branches.
 #
@@ -25,10 +25,6 @@ permissions:
 on:
   workflow_dispatch:
     inputs:
-      ref:
-        description: 'Branch / tag / sha to build from (e.g. exp/chicago-workshop)'
-        required: true
-        type: string
       tag_suffix:
         description: 'Suffix appended to the version tag (e.g. "experimental" → server-vX.Y.Z-experimental)'
         required: true
@@ -38,13 +34,23 @@ on:
         required: false
         type: string
         default: 'server'
+      docker:
+        description: 'Publish the docker image (for server release only)'
+        required: false
+        type: boolean
+        default: true
+      test:
+        description: 'Run the test suite'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   init:
     name: Initialize
     uses: ./.github/workflows/_init.yaml
     with:
-      ref: ${{ inputs.ref }}
+      ref: ${{ github.sha }}
 
   build:
     name: Build
@@ -54,12 +60,13 @@ jobs:
       contents: read
       packages: write
     with:
-      ref: ${{ inputs.ref }}
+      ref: ${{ github.sha }}
       full_version: ${{ needs.init.outputs.full_server_version }}
       build_hash: ${{ needs.init.outputs.build_hash }}
       build_stamp: ${{ needs.init.outputs.build_stamp }}
       nodownload: true
       package: true
+      test: ${{ inputs.test }}
     secrets: inherit
 
   # Build a flat matrix from the comma-separated `products` input.
@@ -125,7 +132,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Download artifacts
@@ -170,7 +177,7 @@ jobs:
           # the "Latest" badge on the Releases page over real releases.
           prerelease: true
           body: |
-            Experimental build from `${{ inputs.ref }}` (commit `${{ github.sha }}`).
+            Experimental build from `${{ github.ref_name }}` (commit `${{ github.sha }}`).
             Suffix: `${{ inputs.tag_suffix }}`.
 
             Not produced by the normal release pipeline — see workshop / experimental usage notes.
@@ -195,10 +202,11 @@ jobs:
   # cannot disturb develop's pipeline.
   #
   # Only when the run actually includes the server; a vscode-only workshop
-  # build has no engine to publish.
+  # build has no engine to publish. Nothing waits for the image, so a run that
+  # only wants the archives can turn it off and finish ~10 min sooner.
   docker:
     name: Docker
-    if: ${{ contains(inputs.products, 'server') }}
+    if: ${{ inputs.docker && contains(inputs.products, 'server') }}
     needs: [init, build]
     uses: ./.github/workflows/_docker.yaml
     permissions:
@@ -211,7 +219,7 @@ jobs:
       # executes (that is what broke every nightly after #929).
       id-token: write
     with:
-      ref: ${{ inputs.ref }}
+      ref: ${{ github.sha }}
       server_version: ${{ needs.init.outputs.server_version }}
       tag_suffix: ${{ inputs.tag_suffix }}
     secrets: inherit

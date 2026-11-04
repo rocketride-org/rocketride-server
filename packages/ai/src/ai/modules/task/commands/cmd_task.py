@@ -167,8 +167,6 @@ class TaskCommands(DAPConn):
             # server's own RR_* settings are never a layer, sys.admin included:
             # a pipeline an admin runs could otherwise write them into any node
             # config.
-            merged_env: Dict[str, str] = {}
-
             # Run classification comes ONLY from the trusted in-process
             # dispatch (start_server_task_as_team sets these attributes on
             # its connection) — never from DAP arguments, so remote clients
@@ -186,15 +184,16 @@ class TaskCommands(DAPConn):
             # depend on which human deployed it); a USER-owned run — an
             # interactive .use OR a personal @me deploy — applies its owner's
             # user layer.
-            merged_env.update(
-                await account.get_merged_env(
-                    user_id='' if owner_kind == 'team' else self._account_info.userId,
-                    org_id=org_id,
-                    team_id=team_id,
-                )
-            )
-            # Caller-supplied env overrides on top
-            merged_env.update(caller_env)
+            env_user_id = '' if owner_kind == 'team' else self._account_info.userId
+
+            # Loaded by the task at each (re)start rather than here, so the
+            # decrypted values are not kept on the task while it runs
+            async def env_source() -> Dict[str, str]:
+                merged_env: Dict[str, str] = {}
+                merged_env.update(await account.get_merged_env(user_id=env_user_id, org_id=org_id, team_id=team_id))
+                # Caller-supplied env overrides on top
+                merged_env.update(caller_env)
+                return merged_env
 
             # Start the task without debugger attachment
             response = await self._server.start_task(
@@ -205,7 +204,7 @@ class TaskCommands(DAPConn):
                 user_id=self._account_info.userId,
                 team_id=team_id,
                 org_id=org_id,
-                env=merged_env,
+                env_source=env_source,
                 run_kind=run_kind,
                 owner_kind=owner_kind,
                 trigger=trigger,
@@ -352,7 +351,15 @@ class TaskCommands(DAPConn):
             # task.control on that team (sys.admin bypasses). A dev-team
             # check alone let any task.control holder restart other teams'
             # token-addressed tasks.
-            self.get_task(request, 'task.control')
+            task = self.get_task(request, 'task.control')
+
+            # A restart decrypts the team's CURRENT secrets again (the task loads
+            # its ${...} values at every start), so re-check access to the team as
+            # on_execute does: get_task gives a run's owner access without asking
+            # whether they are still on the team. pk_/tk_ connections are scoped
+            # to their task already.
+            if self._account_info and not self._account_info.auth.startswith(('pk_', 'tk_')):
+                self.verify_team_permission(task.team_id, 'task.control')
 
             # Start the task without debugger attachment
             response = await self._server.restart_task(

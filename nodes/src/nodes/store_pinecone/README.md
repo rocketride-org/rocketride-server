@@ -31,12 +31,17 @@ The configured tool-server name defaults to `pinecone`.
 | Function | Description |
 | --- | --- |
 | `search` | Searches the store for a non-empty `query`; accepts optional `top_k` and metadata `filter`, and returns matching content, metadata, and scores. |
+| `objdir` | Lists the distinct parent paths of active documents in the collection as a map of parent path to one object ID each; accepts optional `parent` (exact match), `offset`, and `limit` (default and cap 1000). `offset` and `limit` count documents, not paths: documents that share a parent path appear as one entry, so a page can hold fewer than `limit` entries while more follow. |
+| `get` | Returns up to `limit` chunks (default and cap 100) of one document by `object_id`, ordered by chunk ID, with `total`, `has_more`, and `truncated`; an object ID the store does not hold, or one in the trash, returns a failure object. |
+| `stats` | Returns the collection's count as this store reports it, `document_count` (null on this store, which does not list documents), the embedding model name, and the vector size. |
 | `upsert` | Adds or updates a non-empty `documents` array. Each document requires content and an object ID; it can provide an embedding and embedding model or use the bound embedding provider. |
 | `delete` | Deletes documents for a non-empty `object_ids` array and returns the deleted count. |
+| `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash, keeping their chunks; the reply echoes the distinct IDs, and `matched_chunks` is null on this store. |
+| `restore` | Takes the documents of a non-empty `object_ids` array out of the trash. A document removed with `delete` cannot be restored. |
 
-`search` requires a bound embedding provider for semantic similarity search. The three functions return a failure object when their required input or an embedding cannot be obtained.
+`search` requires a bound embedding provider for semantic similarity search. The functions return a failure object when their required input or an embedding cannot be obtained; `get` answers an unknown object ID the same way.
 
-`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`, defaulting to `"vectordb_tool"`, `"/"` and `0` respectively.
+`search` accepts an optional `filter` object honoring only `objectId`, `nodeId` and `parent`; any other key is rejected. `upsert` accepts an optional `metadata` object storing `nodeId`, `parent` and `chunkId`; `nodeId` defaults to `"vectordb_tool"`, `parent` to `"/"`, and `chunkId` to the document's position among the chunks sent for its object ID in the call (0 for the first), and an explicit `chunkId` may not repeat within the call.
 
 ## Profiles
 
@@ -82,7 +87,7 @@ not see every index available to a broader application credential.
 
 ### Tool Server Name
 
-The tool-server name defaults to `pinecone` and prefixes the three agent functions. Change it when multiple Pinecone stores are connected to the same agent so their functions do not share a namespace.
+The tool-server name defaults to `pinecone` and labels this store in tool-response messages. Pipeline agents address all eight functions listed above by node ID, for example `<node id>.search` or `<node id>.restore`; changing this label does not change those addresses.
 
 ## Authentication
 
@@ -129,7 +134,7 @@ separate caller choice rather than an accidental result of broad searching.
 | `pinecone.collection` | `string` | **Collection**<br/>Enter the name of the collection. Accepted are: Lower case, alphanumeric characters, hyphens | `"rocketride"` |
 | `pinecone.profile` | `string` | **Type of Pinecone Connection**<br/>Connect to... | `"pod-based"` |
 | `pinecone.provider` | `string` |  | const: `"pinecone"` |
-| `pinecone.serverName` | `string` | **Tool Server Name**<br/>Namespace for agent-facing tool names, e.g. 'pinecone' exposes tools as pinecone.search / pinecone.upsert / pinecone.delete. Change this when running multiple Pinecone nodes in the same pipeline so their tool names do not collide. | `"pinecone"` |
+| `pinecone.serverName` | `string` | **Tool Server Name**<br/>Label for this store in tool-response messages (for example, a refused write names pinecone.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings. | `"pinecone"` |
 
 ## Dependencies
 

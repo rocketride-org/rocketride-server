@@ -20,6 +20,7 @@ subclass that supplies SQLite-compatible stubs, then exercise:
 
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -263,72 +264,6 @@ def test_format_db_error_mysql_duplicate_entry_keeps_the_value_the_caller_sent(b
     assert 'sqlalche.me' not in message
 
 
-class _FakeServerException(Exception):
-    """Stand-in for clickhouse_driver.errors.ServerException.
-
-    Its ``str()`` is what the driver's DBAPI wrapper ends up rendering: a code
-    line, the message, and a symbolised server stack trace.
-    """
-
-    def __init__(self, code, message, trailer=''):
-        super().__init__(code, message)
-        self._code = code
-        self._message = message
-        self._trailer = trailer
-
-    def __str__(self):
-        """Render the driver's documented ``Code: N.\nDB::Exception: …`` form."""
-        return (
-            f'Code: {self._code}.\nDB::Exception: {self._message}{self._trailer}. '
-            'Stack trace:\n\n0. DB::Exception::Exception(...) @ 0x1a2b3c\n'
-            '1. DB::throwAtAssertionFailed(...) @ 0x4d5e6f\n'
-        )
-
-
-def test_format_db_error_clickhouse_dbapi_shape_is_cut_at_the_stack_trace(base):
-    """clickhouse-driver's OWN DBAPI shape: ``.orig.args`` is not ``(errno, message)``.
-
-    Constructed shape; driver not installed. This is the layer
-    ``clickhouse_driver.dbapi`` exposes — ``OperationalError(ServerException)``,
-    so ``args`` holds one exception object rather than an ``(int, str)`` pair
-    and every earlier branch falls through to ``str(orig)``, which carries a
-    symbolised server stack trace the caller cannot act on.
-
-    Note the db_clickhouse node does NOT go through this DBAPI: it connects
-    with ``clickhouse+native://``, i.e. clickhouse-sqlalchemy's own connector,
-    whose exception shape is covered by
-    ``test_format_db_error_clickhouse_native_connector_shape_keeps_the_code``.
-    """
-    orig = _FakeDriverError(_FakeServerException(60, "Table default.widgets doesn't exist"))
-    assert len(orig.args) == 1 and not isinstance(orig.args[0], str)
-    exc = _wrapped(orig, 'SELECT * FROM widgets', {})
-
-    message = base._format_db_error(exc)
-    assert message == "Code: 60.\nDB::Exception: Table default.widgets doesn't exist."
-    assert 'Stack trace' not in message
-    assert '0x1a2b3c' not in message
-    assert '[SQL:' not in message
-    assert '[parameters:' not in message
-
-
-def test_format_db_error_clickhouse_syntax_error_drops_the_position_echo(base):
-    """ClickHouse quotes the failing statement fragment after ``failed at position``.
-
-    Constructed shape; driver not installed. The fragment is the same class of
-    statement echo as psycopg2's ``LINE n:``, so it is cut at the same kind of
-    marker.
-    """
-    orig = _FakeDriverError(
-        _FakeServerException(62, 'Syntax error', trailer=": failed at position 21 ('hunter2') (line 1, col 21)")
-    )
-    exc = _wrapped(orig, "INSERT INTO t VALUES 'hunter2'", {})
-
-    message = base._format_db_error(exc)
-    assert message == 'Code: 62.\nDB::Exception: Syntax error:'
-    assert 'hunter2' not in message
-    assert 'Stack trace' not in message
-
-
 class _StandInClickHouseServerException(Exception):
     """Stand-in for clickhouse_driver.errors.ServerException.
 
@@ -376,159 +311,6 @@ def test_format_db_error_clickhouse_native_connector_shape_keeps_the_code(base):
     exc = _StandInClickHouseDatabaseException(orig)
 
     assert base._format_db_error(exc) == "Error 60: Table default.widgets doesn't exist"
-
-
-def test_format_db_error_clickhouse_native_connector_trims_the_message_tail(base):
-    """The code branch still runs through the stripper, so tails inside it go.
-
-    ClickHouse builds its ``message`` from the server payload, which carries
-    both the statement fragment at the error position and the server stack
-    trace; the markers cut them here as they do anywhere else.
-    """
-    orig = _StandInClickHouseServerException(
-        62,
-        "Syntax error: failed at position 21 ('hunter2') (line 1, col 21). "
-        'Stack trace:\n\n0. DB::Exception::Exception(...) @ 0x1a2b3c\n',
-    )
-    exc = _StandInClickHouseDatabaseException(orig)
-
-    message = base._format_db_error(exc)
-    assert message == 'Error 62: Syntax error:'
-    assert 'hunter2' not in message
-    assert 'Stack trace' not in message
-
-
-# ---------------------------------------------------------------------------
-# _format_db_error — ClickHouse echoes the statement INSIDE its message
-#
-# The other drivers append their statement echo after the primary sentence;
-# ClickHouse splices it into the middle of one. Code 47 (UNKNOWN_IDENTIFIER)
-# reads "Missing columns: 'x' while processing query: '<sql>', required
-# columns: 'x'" on the old parser and "Unknown expression identifier 'x' in
-# scope <sql>" on the analyzer, so without markers for those three phrases the
-# whole statement survived the strip.
-#
-# No live ClickHouse server is available in this suite — neither
-# clickhouse-driver nor clickhouse-sqlalchemy is installed — so both connector
-# shapes below are constructed from the message forms the server documents,
-# the same way the PostgreSQL and MySQL cases above are. This is the dialect
-# where the echo matters most: clickhouse-driver interpolates bind values
-# client-side (it sends no server-side parameters by default), so the echoed
-# statement carries the literal a caller bound rather than a placeholder.
-# ---------------------------------------------------------------------------
-
-
-def test_format_db_error_clickhouse_dbapi_cuts_the_while_processing_query_echo(base):
-    """Code 47 through ``clickhouse_driver.dbapi``: the inlined literal must not survive.
-
-    Constructed shape; driver not installed. ``str(orig)`` is the only thing
-    this layer offers (``args`` holds an exception object, not an
-    ``(int, str)`` pair), and the query ClickHouse repeats has ``hunter2``
-    already interpolated into it by the client, so the marker has to fire
-    mid-sentence — the identifier list before it is the part the caller needs.
-    """
-    orig = _FakeDriverError(
-        _FakeServerException(
-            47,
-            "Missing columns: 'secret'",
-            trailer=(
-                " while processing query: 'SELECT secret FROM users "
-                "WHERE token = ''hunter2''', required columns: 'secret'"
-            ),
-        )
-    )
-    exc = _wrapped(orig, 'SELECT secret FROM users WHERE token = %(token)s', {'token': 'hunter2'})
-
-    message = base._format_db_error(exc)
-    assert message == "Code: 47.\nDB::Exception: Missing columns: 'secret'"
-    assert 'hunter2' not in message
-    assert 'while processing query' not in message
-    assert 'required columns' not in message
-    assert 'Stack trace' not in message
-
-
-def test_format_db_error_clickhouse_native_connector_cuts_the_in_scope_echo(base):
-    """The analyzer's ``in scope <sql>`` form, on the connector db_clickhouse uses.
-
-    Constructed shape; clickhouse-sqlalchemy is not installed. ClickHouse's
-    analyzer prints the resolved query back after "in scope" instead of after
-    "while processing query:", and formats it from the AST — which is why the
-    marker below requires an uppercase statement keyword after the phrase.
-    """
-    orig = _StandInClickHouseServerException(
-        47,
-        "Unknown expression identifier 'secret' in scope SELECT secret FROM users WHERE token = 'hunter2'",
-    )
-    exc = _StandInClickHouseDatabaseException(orig)
-
-    message = base._format_db_error(exc)
-    assert message == "Error 47: Unknown expression identifier 'secret'"
-    assert 'hunter2' not in message
-    assert 'in scope' not in message
-
-
-def test_format_db_error_clickhouse_cuts_a_parenthesised_subquery_scope(base):
-    """A scope that is itself a subquery is echoed in parentheses; it must still be cut.
-
-    Constructed shape; clickhouse-sqlalchemy is not installed and no live
-    ClickHouse server is available in this suite. ClickHouse's analyzer
-    formats a scope that is a subquery or a CTE body through ``ASTSubquery``,
-    which parenthesises it, so the echo reads ``in scope (SELECT ...)``
-    instead of ``in scope SELECT ...``. The client has already inlined the
-    caller's bind value into it either way, which is what the lookahead's
-    optional ``(`` is there to catch.
-    """
-    orig = _StandInClickHouseServerException(
-        47,
-        "Unknown expression identifier 'token' in scope (SELECT token FROM users WHERE token = 'hunter2') AS filtered",
-    )
-    exc = _StandInClickHouseDatabaseException(orig)
-
-    message = base._format_db_error(exc)
-    assert message == "Error 47: Unknown expression identifier 'token'"
-    assert 'hunter2' not in message
-    assert 'in scope' not in message
-
-
-def test_format_db_error_clickhouse_cuts_a_sentence_initial_in_scope_echo(base):
-    """The analyzer's other echo form: a new sentence starting ``In scope <sql>``.
-
-    Constructed shape; clickhouse-sqlalchemy is not installed and no live
-    ClickHouse server is available in this suite. The message text is the
-    released ``There are no table sources. In scope {}`` format string with a
-    query substituted for ``{}``. This capitalised form is the analyzer's
-    common one — it appears in dozens of messages per release, against the two
-    or three that splice a lowercase ``in scope`` into the middle of a
-    sentence — and it carries the same client-inlined bind value, so the
-    marker matches either case.
-    """
-    orig = _StandInClickHouseServerException(
-        47,
-        "There are no table sources. In scope SELECT token FROM users WHERE token = 'hunter2'",
-    )
-    exc = _StandInClickHouseDatabaseException(orig)
-
-    message = base._format_db_error(exc)
-    assert message == 'Error 47: There are no table sources.'
-    assert 'hunter2' not in message
-    assert 'In scope' not in message
-
-
-def test_format_db_error_clickhouse_cuts_a_lone_required_columns_tail(base):
-    """``, required columns:`` is a marker in its own right, not only a suffix.
-
-    Constructed shape. In the code-47 message the two echoes travel together,
-    so cutting at "while processing query:" already removes this tail; the
-    marker is carried separately so a shape that lists the required columns
-    without repeating the query does not leak the list either.
-    """
-    orig = _StandInClickHouseServerException(
-        47,
-        "Not found column secret in block, required columns: 'secret', 'token'",
-    )
-    exc = _StandInClickHouseDatabaseException(orig)
-
-    assert base._format_db_error(exc) == 'Error 47: Not found column secret in block'
 
 
 def test_format_db_error_keeps_the_words_in_scope_inside_an_application_message(base):
@@ -714,6 +496,60 @@ def test_format_db_error_returns_a_neutral_string_when_the_message_is_only_detai
     """
     exc = RuntimeError('[SQL: SELECT 1]')
     assert base._format_db_error(exc) == 'Database error'
+
+
+# MySQL 8.4.11 through pymysql, 2026-10-20: other databases' text is left alone.
+@pytest.mark.parametrize(
+    ('errno', 'text', 'kept'),
+    [
+        (1644, 'Upload failed at position 3 of batch', 'Upload failed at position 3 of batch'),
+        (
+            1644,
+            'DB::Exception: tenant QA_APP_T1 rejected. Upload failed at position 3 of batch',
+            'DB::Exception: tenant QA_APP_T1 rejected. Upload failed at position 3 of batch',
+        ),
+        (
+            1064,
+            'You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version '
+            "for the right syntax to use near 'BY id LIMIT 1, 'QA_CANARY_M2'' at line 1",
+            'You have an error in your SQL syntax',
+        ),
+    ],
+    ids=['signal', 'signal-looking-like-clickhouse', 'syntax-error'],
+)
+def test_format_db_error_leaves_other_databases_text_alone(base, errno, text, kept):
+    exc = _wrapped(_FakeDriverError(errno, text), 'SELECT 1', {})
+
+    result = base._format_db_error(exc)
+
+    assert result.startswith(f'Error {errno}: ')
+    assert kept in result
+
+
+@pytest.mark.parametrize(
+    'text',
+    [
+        'Upload failed at position 3 of batch',
+        'Retry later. Stack trace: unavailable',
+        'Import aborted: While processing row 5 of upload.csv',
+        'Rejected: In query WITH clause not allowed',
+        "constraint failed while processing: 'batch 7'",
+    ],
+)
+def test_format_db_error_leaves_text_that_resembles_a_clickhouse_echo_alone(base, text):
+    assert base._format_db_error(_wrapped(_FakeDriverError(text), 'SELECT 1', {})) == text
+
+
+@pytest.mark.parametrize('filler', [' ', ' \n', '\n '])
+def test_format_db_error_time_does_not_grow_with_whitespace(base, filler):
+    # Small first: a cubic pattern takes ~0.5 s here and would take an hour at 20,000.
+    for size, limit in ((1000, 0.1), (20000, 1)):
+        exc = _wrapped(_FakeDriverError(f'bad{filler * size}value [SQL: SELECT 1]'), 'SELECT 1', {})
+
+        start = time.perf_counter()
+        base._format_db_error(exc)
+
+        assert time.perf_counter() - start < limit
 
 
 # ---------------------------------------------------------------------------

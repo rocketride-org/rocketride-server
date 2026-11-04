@@ -36,10 +36,11 @@ inherit the engine's full environment, only an allowlist:
 
 - process basics: `PATH`, `HOME`, locale, TLS and proxy settings
 - interpreter and ML runtime settings (`PYTHON*`, `HF_*`, `CUDA_*`, and similar)
-- every `ROCKETRIDE_` variable except four the engine removes:
+- every `ROCKETRIDE_` variable except five the engine removes:
   `ROCKETRIDE_DB_BROKER_URL`, `ROCKETRIDE_DB_BROKER_TOKEN`,
-  `ROCKETRIDE_DB_DSN`, and `ROCKETRIDE_DB_RESOLVE_ERROR`. A task that uses a
-  RocketRide database node then gets its own resolved `ROCKETRIDE_DB_DSN`.
+  `ROCKETRIDE_DB_DSNS`, `ROCKETRIDE_DB_DSN`, and `ROCKETRIDE_DB_RESOLVE_ERROR`.
+  A task that uses a RocketRide database node then gets `ROCKETRIDE_DB_DSNS`,
+  holding the DSN of each database the run was approved for.
   Any other `ROCKETRIDE_DB_*` name passes through like the rest.
 - what nodes and the task itself use directly: `RR_STORE_URL`,
   `RR_STORE_SECRET_KEY`, `RR_SIGNING_KEY`, `RR_BASE_URL`, `RR_CORS_ORIGINS`,

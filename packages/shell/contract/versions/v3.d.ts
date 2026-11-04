@@ -7706,77 +7706,6 @@ export interface IUsePollingOptions {
     gate?: "shell" | "none";
 }
 export declare function usePolling(fetcher: () => void | Promise<void>, interval: number, options?: IUsePollingOptions): void;
-/** Wrapper for activity events from either channel. */
-export type ActivityEvent = {
-    source: "task";
-    body: TaskEvent;
-    receivedAt: number;
-} | {
-    source: "dashboard";
-    body: DashboardEvent;
-    receivedAt: number;
-};
-interface IMonitorViewProps {
-    /**
-     * Document display name for the page header. When provided, the view
-     * renders a stock {@link ContentHeader} titled with this name (matching
-     * the host's tab title), pinned between the page strip and the scrolling
-     * page bodies. No header renders without it.
-     */
-    documentTitle?: string;
-    /** Full dashboard snapshot from rrext_dashboard response, or null if not yet loaded. */
-    data: DashboardResponse | null;
-    /** Activity events pushed from the server (newest first). */
-    events: ActivityEvent[];
-    /** Whether the client is connected to the server. */
-    isConnected: boolean;
-    /** Callback to request a manual data refresh from the host. */
-    onRefresh?: () => void;
-    /**
-     * Optional server-paginated connections fetcher — presence switches the
-     * Connections grid to REMOTE mode (host binds it to `listConnections`).
-     */
-    listConnections?: (req: ListPageRequest) => Promise<ListPageResponse<DashboardConnection>>;
-    /**
-     * Optional server-paginated tasks fetcher — presence switches the Tasks
-     * grid to REMOTE mode (host binds it to `listTasks`).
-     */
-    listTasks?: (req: ListPageRequest) => Promise<ListPageResponse<DashboardTask>>;
-    /**
-     * Receives ONE combined refetch that silently re-requests the current
-     * page of every remote grid — the host polls it (usePolling, 3s) the way
-     * the admin views poll their own grids.
-     */
-    onRefetchReady?: (refetch: () => void) => void;
-}
-export declare const MonitorView: React$1.FC<IMonitorViewProps>;
-/**
- * Parse a raw server event into a monitor ActivityEvent.
- *
- * @param raw - Raw event object from the server WebSocket.
- * @returns ActivityEvent if the event is dashboard or task related, null otherwise.
- */
-export declare function parseActivityEvent(raw: unknown): ActivityEvent | null;
-/** Data returned by the useDashboardData hook. */
-export interface DashboardData {
-    /** Latest dashboard snapshot, or null if not yet loaded. */
-    data: DashboardResponse | null;
-    /** Activity events (newest first). */
-    events: ActivityEvent[];
-    /** Last fetch failure (e.g. a permission denial), or null when healthy. */
-    error: string | null;
-    /** Trigger a manual refresh. */
-    refresh: () => void;
-}
-/**
- * Shared hook that provides server dashboard data and activity events.
- *
- * Uses a module-level singleton: the first consumer starts polling, the last
- * one to unmount stops it. Data persists across view switches.
- *
- * @returns Dashboard data, events, and a manual refresh callback.
- */
-export declare function useDashboardData(): DashboardData;
 /**
  * Returns the current ConnectionStatus with automatic re-renders on changes.
  *
@@ -11525,111 +11454,6 @@ export declare function getAppVersionOverride(appId: string): AppVersionOverride
  * @returns 'ready' when the switch can proceed in-place, else 'reload-required'.
  */
 export declare function applyAppVersionOverride(appId: string, moduleId: string, override: AppVersionOverride | null): "ready" | "reload-required";
-interface IOverviewGridProps {
-    /** Full dashboard snapshot, or null while it has not loaded yet. */
-    data: DashboardResponse | null;
-    /** Optional manual refresh callback — renders the header's Refresh action. */
-    onRefresh?: () => void;
-}
-/**
- * Overview grid — the unified Connections & Tasks CardDataGrid: connections
- * first, then running tasks, then the five most recent completed ones, with
- * CPU/Memory gauges and status badges. Clicking a client row opens the
- * connection record panel; clicking a task row opens the task record panel.
- *
- * @param props - {@link IOverviewGridProps}.
- * @returns The card-hosted grid plus both record panels.
- */
-export declare const OverviewGrid: React$1.FC<IOverviewGridProps>;
-interface IConnectionsPanelProps {
-    /**
-     * Snapshot connection rows (the dashboard snapshot). LOCAL mode renders
-     * exactly these; with `listConnections` present the fetched pages take
-     * over and this prop is unused.
-     */
-    connections?: DashboardConnection[];
-    /**
-     * Optional server-paginated fetcher — presence switches the grid to
-     * REMOTE mode. Hosts bind it to their client's `listConnections`.
-     */
-    listConnections?: (req: ListPageRequest) => Promise<ListPageResponse<DashboardConnection>>;
-    /**
-     * Receives the grid's silent current-page refetch trigger (REMOTE mode
-     * only) so the HOST owns the polling cadence.
-     */
-    onRefetchReady?: (refetch: () => void) => void;
-}
-/**
- * Connections grid — every active client connection as a CardDataGrid with
- * identity, client label, traffic counters, subscription counts, and auth
- * status; clicking a row opens the connection record panel.
- *
- * @param props - {@link IConnectionsPanelProps}.
- * @returns The card-hosted grid plus its record panel.
- */
-export declare const ConnectionsPanel: React$1.FC<IConnectionsPanelProps>;
-interface ITasksPanelProps {
-    /**
-     * Snapshot task rows (the dashboard snapshot): feeds the header's
-     * running/completed counts in both modes, and the grid rows plus record
-     * panel in LOCAL mode. Null while the snapshot has not loaded yet (the
-     * header counts stay hidden).
-     */
-    tasks?: DashboardTask[] | null;
-    /**
-     * Optional server-paginated fetcher — presence switches the grid to
-     * REMOTE mode. Hosts bind it to their client's `listTasks`.
-     */
-    listTasks?: (req: ListPageRequest) => Promise<ListPageResponse<DashboardTask>>;
-    /**
-     * Receives the grid's silent current-page refetch trigger (REMOTE mode
-     * only) so the HOST owns the polling cadence.
-     */
-    onRefetchReady?: (refetch: () => void) => void;
-}
-/**
- * Tasks grid — all pipeline tasks as a CardDataGrid with CPU/Memory gauges,
- * elapsed time, completion counts, TTL/idle time, and status badges;
- * clicking a row opens the task record panel.
- *
- * @param props - {@link ITasksPanelProps}.
- * @returns The card-hosted grid plus its record panel.
- */
-export declare const TasksPanel: React$1.FC<ITasksPanelProps>;
-/** Semantic tone of an event, keyed off what happened (not who reported it). */
-export type EventTone = "connection" | "task" | "warning" | "system";
-interface IEventDisplay {
-    /** Semantic tone (drives the badge / feed color). */
-    tone: EventTone;
-    /** Short category label (connect, disconnect, task, security, system). */
-    label: string;
-    /** Human-readable one-line summary. */
-    message: string;
-    /** Epoch-milliseconds arrival time of the event at this client. */
-    timestamp: number;
-}
-interface IActivityPanelProps {
-    /** Accumulated activity events (newest first, as delivered by the host). */
-    events: ActivityEvent[];
-}
-/**
- * Describe one activity event from either channel (task / dashboard) as its
- * display fields. Exported for the Overview surfaces' Recent Activity feeds,
- * which render the same events in card form.
- *
- * @param event - The wrapped activity event.
- * @returns Tone, label, message, and the arrival timestamp (epoch ms).
- */
-export declare function getEventDisplay(event: ActivityEvent): IEventDisplay;
-/**
- * Activity grid — live stream of server events (connections, task lifecycle,
- * errors) as a CardDataGrid fed by the host's event feed (LOCAL mode: each
- * poll / push hands down a new events array, applied silently).
- *
- * @param props - {@link IActivityPanelProps}.
- * @returns The card-hosted grid.
- */
-export declare const ActivityPanel: React$1.FC<IActivityPanelProps>;
 /**
  * Formatting utilities for the Server Monitor module.
  */
@@ -12116,7 +11940,6 @@ export declare const shellApi: {
     readonly useIframeBridge: typeof useIframeBridge;
     readonly useSubscriptions: typeof useSubscriptions;
     readonly usePolling: typeof usePolling;
-    readonly useDashboardData: typeof useDashboardData;
     readonly useConnectionStatus: typeof useConnectionStatus;
     readonly useShellApiConfig: typeof useShellApiConfig;
     readonly useAppComponent: typeof useAppComponent;
@@ -12226,7 +12049,7 @@ export type ShellApiShape = typeof shellApi;
  * @returns The frozen `shellApi` object.
  */
 export declare function getShellApi(): ShellApiShape;
-export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, Explorer as DocExplorer, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IConfirmDialogProps as ConfirmDialogProps, IExplorerProps as DocExplorerProps, PipelineControlConnection as IControlConnection, PipelineInputConnection as IInputConnection, PromoRedemption$1 as PromoRedemption, PromoValidation$1 as PromoValidation, ShellConnectionEventMap as ShellEventMap, TASK_STATE as ITaskState, TASK_STATUS as ITaskStatus, TASK_STATUS_FLOW as IFlowData, };
-export {};
+export { AppManifestEntry$1 as AppManifestEntry, ConnectResult as AuthUser, Document$1 as Document, Explorer as DocExplorer, ExplorerChild as DocEntryChild, ExplorerConfig as DocExplorerConfig, ExplorerEntry as DocEntry, ExplorerStatus as DocEntryStatus, IConfirmDialogProps as ConfirmDialogProps, IExplorerProps as DocExplorerProps, PipelineControlConnection as IControlConnection, PipelineInputConnection as IInputConnection, PromoRedemption$1 as PromoRedemption, PromoValidation$1 as PromoValidation, ShellConnectionEventMap as ShellEventMap, TASK_STATE as ITaskState, TASK_STATUS as ITaskStatus, TASK_STATUS_FLOW as IFlowData };
+
 // ===== END FROZEN BUNDLE =====
 export type ShellApiV3 = ShellApiShape;

@@ -35,6 +35,9 @@ module.exports = {
 	// Platform utilities (platform.js)
 	...require('./platform'),
 
+	// Native build environment (toolchain.js)
+	...require('./toolchain'),
+
 	// Markdown utilities (markdown.js)
 	...require('./markdown'),
 

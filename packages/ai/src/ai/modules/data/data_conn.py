@@ -19,6 +19,7 @@ processing operations, enabling remote data pipeline control and monitoring.
 """
 
 import asyncio
+import codecs
 import json
 import time
 from dataclasses import dataclass, field
@@ -116,6 +117,8 @@ class DataConnPipe:
     created_time: float = field(default_factory=time.time)  # Track when pipe was created
     last_activity_time: float = field(default_factory=time.time)  # Track last write/close activity
     in_use: bool = False  # True while a sync operation (write) is actively running in a thread
+    # Text lane: holds the bytes of a character that a write cut in half
+    text_decoder: codecs.IncrementalDecoder = field(default_factory=codecs.getincrementaldecoder('utf-8'))
 
 
 class DataConn(DAPConn):
@@ -172,6 +175,9 @@ class DataConn(DAPConn):
         # Key: pipe_id (int), Value: DataConnPipe instance
         self._pipe_map: Dict[int, DataConnPipe] = {}
 
+        # Requests this connection sent to EaaS, by seq, waiting for its response
+        self._asked: Dict[int, asyncio.Future] = {}
+
         # Pipe timeout for zombie detection
         self._pipe_timeout = CONST_DATA_PIPE_TIMEOUT
 
@@ -221,6 +227,36 @@ class DataConn(DAPConn):
     def _target(self) -> Optional['IServiceEndpoint']:
         """Read the source target lazily — never snapshot at connection time."""
         return self._server._target
+
+    async def on_receive(self, message: Dict[str, Any]) -> None:
+        """Hand EaaS's answer to the ask_spend waiting for it; route the rest as usual."""
+        answer = self._asked.pop(message.get('request_seq'), None)
+        if answer and not answer.done():
+            answer.set_result(message)
+        else:
+            await super().on_receive(message)
+
+    async def on_disconnected(self, reason: Optional[str] = None, has_error: bool = False) -> None:
+        """Fail the questions still waiting for EaaS: no answer will come on this connection."""
+        for answer in self._asked.values():
+            if not answer.done():
+                answer.set_exception(ConnectionError(reason or 'EaaS disconnected'))
+        self._asked.clear()
+        await super().on_disconnected(reason, has_error)
+
+    async def ask_spend(self) -> Optional[str]:
+        """Ask EaaS whether this task's org may open a pipe: None, or the refusal."""
+        request = self.build_request('rrext_check_spend')
+        answer = asyncio.get_running_loop().create_future()
+        self._asked[request['seq']] = answer
+        try:
+            await self.send(request)
+            response = await answer
+        finally:
+            self._asked.pop(request['seq'], None)
+        if self.did_fail(response):
+            raise RuntimeError(response.get('message'))
+        return response['body']['refusal']
 
     def _require_target(self) -> 'IServiceEndpoint':
         """Return the registered source target, or raise a controlled error.
@@ -701,7 +737,12 @@ class DataConn(DAPConn):
             raise ValueError(f'Write pipe with id {pipe_id} has failed')
 
         def write_sync():
+            """Write this request's data to the pipe on its lane (runs in a worker thread).
 
+            Raises:
+                ValueError: The request has no data, the lane is unknown, or the data does not parse for its lane.
+                UnicodeDecodeError: Text-lane data is not valid UTF-8.
+            """
             # Get the data to write
             data: bytes = args.get('data', None)
             if data is None:
@@ -721,8 +762,10 @@ class DataConn(DAPConn):
 
                 # Handle different lane types with appropriate data writing
                 if lane == 'text':
-                    string_data = data.decode('utf-8')
-                    pipe.writeText(string_data)
+                    # Writes are cut at any byte (an HTTP body arrives in stream chunks)
+                    string_data = conn_pipe.text_decoder.decode(data)
+                    if string_data:
+                        pipe.writeText(string_data)
 
                 elif lane == 'json':
                     try:
@@ -830,6 +873,18 @@ class DataConn(DAPConn):
             self._reset_pipe_activity(conn_pipe)
 
             def close_sync():
+                """End and close the pipe, then collect the pipeline's results (runs in a worker thread).
+
+                Returns:
+                    The object's response with its objectId, and its error when the object failed.
+
+                Raises:
+                    UnicodeDecodeError: The text-lane data ended inside a character.
+                """
+                # Text that ends inside a character is truncated; a failed pipe already reported its error
+                if conn_pipe.lane == 'text' and not conn_pipe.has_failed:
+                    conn_pipe.text_decoder.decode(b'', final=True)
+
                 # End the pipe and close it.  If either step throws (e.g. a
                 # node's writeText/writeAudio raised during closing flush),
                 # we still need to extract whatever results and error info
@@ -1172,7 +1227,7 @@ class DataConn(DAPConn):
                   all threads when omitted
 
         Returns:
-            Dict[str, Any]: DAP response with tree, total_time, total_calls
+            Dict[str, Any]: DAP response with tree, functions, total_time, total_calls
         """
         args = request.get('arguments', {})
         max_depth = args.get('max_depth', 50)

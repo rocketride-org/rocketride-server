@@ -18,7 +18,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Union
 
-from rocketlib import debug, error
+from rocketlib import debug, error, warning
 from ai.common.schema import Answer, Question
 from ai.common.config import Config
 from ai.common.llm_adapter import turn_usage
@@ -130,7 +130,10 @@ class AgentBase(ABC):
         Args:
             iInstance: Node instance (`IInstance`) provided by the engine.
             question: Incoming question object from the questions lane.
-            emit_answers_lane: If True, write the answer JSON to the answers lane.
+            emit_answers_lane: True for a top-level run: write the answer JSON to the
+                answers lane, and end a failed or refused run with an error stop status.
+                False for a sub-agent run (an agent called as another agent's tool), which
+                shares its parent's status stream and returns its answer as a tool result.
 
         Returns:
             The answer JSON payload (same object written to the answers lane).
@@ -273,11 +276,21 @@ class AgentBase(ABC):
                         {'kind': 'RocketRide.agent.raw.v1', 'name': 'framework.output', 'payload': _json_safe(raw)},
                     ],
                 }
+                # The run's last status may have said "done"; the refusal must be the last word.
+                # Only a top-level run ends the stream: a sub-agent shares its parent's, and
+                # its refusal is the parent's tool result, not the end of the parent's run.
+                if emit_answers_lane:
+                    self._send_stop_status(iInstance, 'Answer refused: no tool was called.')
 
             except Exception as e:
                 error_type = type(e).__name__
                 error_message = str(e)
                 error(f'agent base _run failed run_id={run_id} type={error_type} message={error_message}')
+                # A driver can raise before it sends any status (agent_rocketride checks its
+                # verify_tool first), so this exit must report its stop reason itself. A
+                # sub-agent does not: its failure is its parent's tool result.
+                if emit_answers_lane:
+                    self._send_stop_status(iInstance, 'The run failed.')
                 ended_at = now_iso()
                 answer_payload = {
                     'content': error_message or f'{error_type} (no message)',
@@ -486,6 +499,18 @@ class AgentBase(ABC):
         """
         if context and context.invoker and context.invoker.instance:
             context.invoker.instance.sendSSE(type, **data)
+
+    def _send_stop_status(self, iInstance: Any, message: str) -> None:
+        """Send the last status of a run that ended on an error, with ``stop_reason='error'``.
+
+        Sent through ``iInstance``, which every run context uses as its invoker, so a run
+        that fails before its context is built still reports why it stopped. Best effort:
+        a failed send is logged and must not cost the run its answer.
+        """
+        try:
+            iInstance.instance.sendSSE('thinking', message=message, stop_reason='error')
+        except Exception as exc:
+            warning(f'agent base stop status not sent: {type(exc).__name__}: {exc}')
 
     def _agent_id(self, pSelf: Any) -> str:
         """Return the logical agent identifier used in answer metadata."""

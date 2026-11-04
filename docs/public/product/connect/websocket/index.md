@@ -133,6 +133,7 @@ than inferring one from the prose.
 | `TASK_AMBIGUOUS` | An unscoped lookup matched several running tasks; retry with a scope. |
 | `TASK_COMPLETED` | The task finished before the request could be served. |
 | `TASK_STOPPED` | The task was stopped or cancelled before the request. |
+| `OUT_OF_CREDITS` | The org is out of credit, so the task refuses a new pipe; clears when it tops up. |
 
 These codes ride command replies. A task key rejected while the connection is
 still being established — on the HTTP request or the WebSocket upgrade — is
