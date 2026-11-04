@@ -156,3 +156,35 @@ describe('D6-PKG-1: the manifest follows develop\'s convention', () => {
 		assert.equal(manifest.id, 'rocketride.vector');
 	});
 });
+
+describe('D61-VX-1: a write accepted while no account is known is refused unsent', () => {
+	for (const [name, op, input] of [
+		['soft_delete', OP.trash, { object_ids: [ID] }],
+		['restore', OP.restore, { object_ids: [ID] }],
+		['delete', OP.deletePermanently, { object_ids: [ID], deleted_only: true }],
+	] as const) {
+		it(`a ${name} asked for with nobody signed in is never sent under whoever signs in next`, async () => {
+			const engine = vscodeRealm();
+			signInVsCode(engine.realm, 'u1');
+			const first = mountController(engine.cm);
+			first.h.setHostConnection(true);
+			await until(() => Object.keys(first.controller.store.getState().probes).length === 1, 'discovery under A');
+			const key = first.controller.store.getState().endpoints[0].key;
+			first.controller.dispose();
+			engine.realm.root.connect(null);
+			await settle();
+			const second = mountController(engine.cm, {}, first.h, first);
+			const caller = track(createFrameCaller<VectorOps>({ channel: shellProtocol.createToolChannel(first.h.newFramePeer()), createToolOpClient: shellProtocol.createToolOpClient }));
+			await until(() => caller.controllerReady(), 'the controller readiness');
+			const pending = caller.callReply(op, { key, input, origin: 'frame' } as never, T).then((v) => ({ ok: v }), (e: unknown) => ({ err: e }));
+			await settle();
+			engine.realm.root.connect(account('u2'));
+			await settle();
+			const outcome = (await pending) as { err?: ExplorerToolError };
+			await settle();
+			assert.equal(engine.world.calls.filter((c) => c.tool === name).length, 0, `${name} was sent under the account that signed in later`);
+			assert.ok(outcome.err instanceof ExplorerToolError && outcome.err.kind === 'unavailable' && /signed-in account/.test(outcome.err.message), JSON.stringify(outcome));
+			second.controller.dispose();
+		});
+	}
+});

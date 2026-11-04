@@ -132,6 +132,9 @@ export const TOO_LATE_TEXT = 'The request waited for the connections to be disco
 /** Said when an op accepted under one account would have been sent under another (nothing was sent). */
 export const STALE_ACCOUNT_TEXT = 'The account changed while this request waited, so it was not sent.';
 
+/** Said when a write is asked for while no signed-in account is known (nothing was sent). */
+export const NO_ACCOUNT_TEXT = 'No signed-in account is known yet, so this change was not sent. Sign in, then try again.';
+
 /** Said when a permanent delete asks for anything but the trash-only form. */
 export const DELETE_ONLY_TEXT = 'Documents are deleted permanently only while they are in the trash. Nothing was sent.';
 
@@ -448,6 +451,9 @@ export function createVectorController(opts: IVectorControllerOptions): IVectorC
 		return replyOk(sized(raw, op, tool));
 	};
 	const write = (op: WriteOp) => async (params: unknown) => {
+		// A write needs a known account at the moment it is accepted: one asked for while nobody is signed in would otherwise
+		// be sent under whoever signs in next. (A read may wait through a cold start.)
+		if (accountNow() === null) throw new ExplorerToolError({ kind: 'unavailable', tool: OP_TOOL[op], message: NO_ACCOUNT_TEXT });
 		const sameAccount = holdAccount();
 		const key = keyOf(params, op);
 		const tool = OP_TOOL[op];
