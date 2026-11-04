@@ -59,14 +59,15 @@
 //     succeed. A stale nonce left by a dead controller is bounded the same
 //     way, by the deadline. `waitForController: false` sends at once (a
 //     controller that publishes no readiness).
-//   - IDENTITY FENCE (optional, `identityNow`). A call is bound to the first
-//     known identity fingerprint: the one at the moment it is issued, or, when
-//     none is known yet (a cold start), none at all (unknown -> A is not a
-//     change). If the frame is under another identity, or none, when the answer
-//     arrives, the answer is discarded and the call rejects as kind `stale`
-//     (callers ignore it), so account A's answer never reaches a frame that has
-//     adopted B. The identity is read when the call is issued and when its
-//     answer arrives, not in between.
+//   - IDENTITY FENCE (optional, `identityNow`). A call is not SENT while the
+//     frame knows no identity: like the controller wait it holds inside the
+//     call's own deadline (looking again every IDENTITY_POLL_MS) and, if the
+//     deadline passes first, rejects as kind `unavailable`, unsent. Once sent it
+//     is bound to the identity the frame is under then; if the frame is under
+//     another identity, or none, when the answer arrives, the answer is
+//     discarded and the call rejects as kind `stale` (callers ignore it), so
+//     account A's answer never reaches a frame that has adopted B, and there is
+//     no unknown -> A -> B gap. The identity is read at send and at answer.
 //   - `dispose` (the effect cleanup) stops following host:connection and
 //     rejects what is still pending as `stale`, which callers ignore.
 // =============================================================================
@@ -78,6 +79,9 @@ import { CONTROLLER_STATE_TOPIC } from './realm';
 import { fromReply, isLaneTimeoutText } from './reply';
 import type { Reply, ReplyValue } from './reply';
 import { assertTimeoutMs } from './timeouts';
+
+/** How often a call waiting for the frame's identity looks again. */
+const IDENTITY_POLL_MS = 25;
 
 /** The host-published connection topic (the shell's HOST_CONNECTION_TOPIC, toolRelay.ts; a test pins the two). */
 export const HOST_CONNECTION_TOPIC = 'host:connection';
@@ -103,9 +107,11 @@ export interface IFrameCallerOptions {
 	waitForController?: boolean;
 	/**
 	 * The identity fingerprint the frame is under now (frameIdentity.ts guard
-	 * `first()`/current, or the tracker's). A call is bound to it when issued,
-	 * and its answer, success or failure, is discarded as kind `stale` if the
-	 * identity changed before it arrived.
+	 * `first()`/current, or the tracker's). While it returns null a call is HELD
+	 * (inside its own deadline; kind `unavailable`, unsent, if the deadline passes
+	 * first). Once sent a call is bound to the identity it was sent under, and its
+	 * answer, success or failure, is discarded as kind `stale` if the identity
+	 * changed (to another, or to none) before it arrived.
 	 */
 	identityNow?: () => string | null;
 }
@@ -157,6 +163,8 @@ export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions
 		go: (() => void) | null;
 		/** Its readiness-wait bound. */
 		timer: ReturnType<typeof setTimeout> | null;
+		/** Its identity look-out, while the frame knows no identity. */
+		poll: ReturnType<typeof setInterval> | null;
 	}
 	const pending = new Set<IPending>();
 	let connected: boolean | null = null;
@@ -171,7 +179,9 @@ export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions
 	 */
 	const settle = (entry: IPending): boolean => {
 		if (entry.timer !== null) clearTimeout(entry.timer);
+		if (entry.poll !== null) clearInterval(entry.poll);
 		entry.timer = null;
+		entry.poll = null;
 		entry.go = null;
 		return pending.delete(entry);
 	};
@@ -234,15 +244,18 @@ export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions
 		if (connected === false) {
 			return Promise.reject(new ExplorerToolError({ kind: 'unavailable', tool: op, message: `Not connected to a server, so '${op}' was not sent.` }));
 		}
-		// Bound to the FIRST KNOWN identity: a call issued while none is known
-		// (a cold start, before the identity topic delivers) binds to the first
-		// one seen when its answer arrives, so unknown -> A is not a change;
-		// only A -> B, or A -> null (a sign-out), is.
-		const issuedUnder = opts.identityNow?.() ?? null;
+		// Bound to the identity the frame is under WHEN THE CALL IS SENT, and a
+		// call is not sent while `identityNow` says none is known (it waits, like
+		// it waits for the controller, inside its own deadline): so there is no
+		// unknown -> A -> B gap, and only A -> B or A -> null before the answer
+		// arrives is a change.
+		let issuedUnder: string | null = null;
 		const changedSince = (): boolean => {
 			if (opts.identityNow === undefined || issuedUnder === null) return false;
 			return (opts.identityNow() ?? null) !== issuedUnder;
 		};
+		const identityKnown = (): boolean => opts.identityNow === undefined || (opts.identityNow() ?? null) !== null;
+		const controllerOk = (): boolean => !waitForController || ready !== null;
 		const staleIdentity = (): ExplorerToolError => new ExplorerToolError({
 			kind: 'stale',
 			tool: op,
@@ -251,36 +264,48 @@ export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions
 		const args = stampDeadline(params as object | undefined, timeoutMs, now);
 		const { deadlineAt } = args;
 		return new Promise<unknown>((resolve, reject) => {
-			const entry: IPending = { op, reject, sent: false, go: null, timer: null };
+			const entry: IPending = { op, reject, sent: false, go: null, timer: null, poll: null };
 			pending.add(entry);
-			const notSent = (): ExplorerToolError => new ExplorerToolError({
-				kind: 'timeout',
-				tool: op,
-				message: `'${op}' was not sent: the tool's controller did not become ready within ${Math.round(timeoutMs / 1000)}s.`,
-			});
+			const notSent = (): ExplorerToolError => (controllerOk()
+				? new ExplorerToolError({
+					kind: 'unavailable',
+					tool: op,
+					message: `'${op}' was not sent: no signed-in identity became known within ${Math.round(timeoutMs / 1000)}s.`,
+				})
+				: new ExplorerToolError({
+					kind: 'timeout',
+					tool: op,
+					message: `'${op}' was not sent: the tool's controller did not become ready within ${Math.round(timeoutMs / 1000)}s.`,
+				}));
 			const go = (): void => {
-				if (entry.timer !== null) clearTimeout(entry.timer);
-				entry.timer = null;
-				entry.go = null;
 				if (!pending.has(entry)) return;
+				if (!controllerOk() || !identityKnown()) return; // still waiting: a nonce, the poll or the deadline decides
+				if (entry.timer !== null) clearTimeout(entry.timer);
+				if (entry.poll !== null) clearInterval(entry.poll);
+				entry.timer = null;
+				entry.poll = null;
+				entry.go = null;
 				// The wait comes out of the call's own budget.
 				const left = Math.floor(deadlineAt - now());
 				if (left < 1) {
 					if (settle(entry)) reject(notSent());
 					return;
 				}
+				issuedUnder = opts.identityNow?.() ?? null;
 				entry.sent = true;
 				send(op, args, { timeoutMs: left }).then(
 					(value) => { if (settle(entry)) { if (changedSince()) reject(staleIdentity()); else resolve(value); } },
 					(error: unknown) => { if (settle(entry)) reject(changedSince() ? staleIdentity() : mapFailure(op, error)); },
 				);
 			};
-			if (!waitForController || ready !== null) {
+			if (controllerOk() && identityKnown()) {
 				go();
 				return;
 			}
 			entry.go = go;
 			entry.timer = setTimeout(() => { if (settle(entry)) reject(notSent()); }, timeoutMs);
+			// The identity has no event to wait on here, so it is looked at on a short interval.
+			if (!identityKnown()) entry.poll = setInterval(go, IDENTITY_POLL_MS);
 		});
 	};
 
