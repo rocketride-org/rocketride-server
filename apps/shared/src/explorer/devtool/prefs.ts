@@ -54,9 +54,12 @@
 //     its history in memory and the failure is reported.
 //   ONE BAG PER OWNER. The owner is the identity fingerprint (user,
 //     organization, development team). The file keeps one bag per owner and
-//     an accessor reads and writes only its own; the others are written back
-//     untouched (at most MAX_PREFS_OWNERS bags, the least recently written
-//     dropped once a write succeeds). An accessor is made for ONE owner, and
+//     an accessor reads and writes only its own; every other entry is written
+//     back exactly as stored, well-formed or not, and so is any top-level field
+//     this module does not know (a newer client's). Only well-formed bags count
+//     toward MAX_PREFS_OWNERS (the least recently written dropped once a write
+//     succeeds); an entry that is not a bag is carried and never dropped. An
+//     entry for THIS owner that is not a bag leaves the file unwritten. An accessor is made for ONE owner, and
 //     the owner is checked before every file request AND again after every
 //     awaited one (a write's mkdir, a load's stat and read):
 //       - `ownerNow()` null (a reconnect: nobody is vouched for yet) HOLDS a
@@ -203,22 +206,58 @@ class FileFormatError extends Error {
 }
 
 /**
- * Read the stored file.
+ * Another owner's entry, kept exactly as it was read (it is written back as is).
+ */
+interface IKeptEntry {
+	/** Its `at`, for ordering (0 when malformed). */
+	at: number;
+	/** The entry as stored: never rewritten, whatever its shape. */
+	raw: unknown;
+	/** True when it is not a well-formed bag: it is carried untouched and never dropped. */
+	pinned: boolean;
+}
+
+/** What a read of the file gives. */
+interface ILoadedFile {
+	/** The accessor's own preferences. */
+	mine: Record<string, unknown>;
+	/** Every other owner's entry, as stored. */
+	others: Record<string, IKeptEntry>;
+	/** Top-level fields this module does not know (a newer client's), carried unchanged. */
+	extra: Record<string, unknown>;
+}
+
+/**
+ * Read the stored file. Nothing is judged and nothing is dropped: another
+ * owner's entry, well-formed or not, and any unknown top-level field are
+ * carried through writes unchanged.
  *
  * @param raw - What `fsReadJson` answered.
- * @returns The owner bags.
- * @throws Error for anything but this module's format (the file is then never written).
+ * @param owner - The accessor's owner.
+ * @returns The owner's preferences, the others' entries and the unknown fields.
+ * @throws Error for a file that is not in this module's format, or whose entry for `owner` is not a bag (the file is then never written).
  */
-function readFile(raw: unknown): Record<string, IOwnerBag> {
+function readFile(raw: unknown, owner: string): ILoadedFile {
 	if (!isPlainObject(raw) || raw.version !== PREFS_FILE_VERSION || !isPlainObject(raw.owners)) {
 		throw new FileFormatError(`The history file is not in format version ${PREFS_FILE_VERSION}; it is left untouched.`);
 	}
-	const owners: Record<string, IOwnerBag> = {};
-	for (const [id, bag] of Object.entries(raw.owners)) {
-		if (!isPlainObject(bag) || !isPlainObject(bag.prefs)) continue;
-		owners[id] = { at: typeof bag.at === 'number' && Number.isFinite(bag.at) ? bag.at : 0, prefs: bag.prefs };
+	const extra: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(raw)) {
+		if (key !== 'version' && key !== 'owners') extra[key] = value;
 	}
-	return owners;
+	let mine: Record<string, unknown> = {};
+	const others: Record<string, IKeptEntry> = {};
+	for (const [id, entry] of Object.entries(raw.owners)) {
+		const wellFormed = isPlainObject(entry) && isPlainObject(entry.prefs);
+		if (id === owner) {
+			if (!wellFormed) throw new FileFormatError('This owner\'s entry in the history file is not a preferences bag; the file is left untouched.');
+			mine = { ...(entry as { prefs: Record<string, unknown> }).prefs };
+			continue;
+		}
+		const at = wellFormed && typeof (entry as { at?: unknown }).at === 'number' && Number.isFinite((entry as { at: number }).at) ? (entry as { at: number }).at : 0;
+		others[id] = { at, raw: entry, pinned: !wellFormed };
+	}
+	return { mine, others, extra };
 }
 
 /**
@@ -251,7 +290,8 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 
 	let status: FsPrefsStatus = 'idle';
 	let loading: Promise<FsPrefsStatus> | null = null;
-	let others: Record<string, IOwnerBag> = {};
+	let others: Record<string, IKeptEntry> = {};
+	let extra: Record<string, unknown> = {};
 	let mine: Record<string, unknown> = {};
 	/** Changes made before the load reached ready: applied over what it read. */
 	const queued: Record<string, unknown> = {};
@@ -308,17 +348,14 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 	 *
 	 * @returns The owner's bag and the others, or 'stale' when the owner changed during a request.
 	 */
-	const readOnce = async (): Promise<{ mine: Record<string, unknown>; others: Record<string, IOwnerBag> } | 'stale'> => {
+	const readOnce = async (): Promise<ILoadedFile | 'stale'> => {
 		const stat = await fs.fsStat(path);
 		if (!stillOwner()) return 'stale';
-		if (isPlainObject(stat) && stat.exists === false) return { mine: {}, others: {} };
+		if (isPlainObject(stat) && stat.exists === false) return { mine: {}, others: {}, extra: {} };
 		if (!isPlainObject(stat) || stat.exists !== true) throw new Error('fsStat gave no answer about the history file.');
 		const raw = await fs.fsReadJson<unknown>(path);
 		if (!stillOwner()) return 'stale';
-		const owners = readFile(raw);
-		const own = { ...(owners[owner]?.prefs ?? {}) };
-		delete owners[owner];
-		return { mine: own, others: owners };
+		return readFile(raw, owner);
 	};
 
 	const load = (): Promise<FsPrefsStatus> => {
@@ -353,6 +390,7 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 				if (result === 'stale') continue;
 				mine = result.mine;
 				others = result.others;
+				extra = result.extra;
 				lastError = null;
 				loaded = true;
 				break;
@@ -386,13 +424,22 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 	 *
 	 * @returns The file and the kept owners.
 	 */
-	const compose = (): { file: { version: number; owners: Record<string, IOwnerBag> }; kept: Record<string, IOwnerBag> } | null => {
+	const compose = (): { file: Record<string, unknown>; kept: Record<string, IKeptEntry> } | null => {
 		const own: IOwnerBag = { at: now(), prefs: JSON.parse(JSON.stringify(mine)) as Record<string, unknown> };
-		const kept = Object.entries(others).sort((a, b) => b[1].at - a[1].at).slice(0, maxOwners - 1);
+		// Entries that are not well-formed bags are carried and never dropped; the cap trims only well-formed ones, least recently written first.
+		const pinned = Object.entries(others).filter(([, entry]) => entry.pinned);
+		const kept = Object.entries(others)
+			.filter(([, entry]) => !entry.pinned)
+			.sort((a, b) => b[1].at - a[1].at)
+			.slice(0, Math.max(0, maxOwners - 1 - pinned.length));
 		for (;;) {
-			const file = { version: PREFS_FILE_VERSION, owners: { ...Object.fromEntries(kept), [owner]: own } };
+			const owners: Record<string, unknown> = {};
+			for (const [id, entry] of [...pinned, ...kept]) owners[id] = entry.raw;
+			owners[owner] = own;
+			// Unknown top-level fields first, then ours: a newer client's content survives untouched.
+			const file = { ...extra, version: PREFS_FILE_VERSION, owners };
 			// Measured as client.ts fsWriteJson writes it: JSON.stringify(obj, null, 2).
-			if (JSON.stringify(file, null, 2).length <= maxFileChars) return { file, kept: Object.fromEntries(kept) };
+			if (JSON.stringify(file, null, 2).length <= maxFileChars) return { file, kept: Object.fromEntries([...pinned, ...kept]) };
 			if (kept.length === 0) break;
 			kept.pop();
 		}

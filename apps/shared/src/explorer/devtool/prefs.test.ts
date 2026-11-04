@@ -560,3 +560,77 @@ describe('createFsPrefs — the owner is re-checked after every file request', (
 	});
 });
 
+describe('createFsPrefs — nothing the module does not understand is ever erased (DA-R1-02)', () => {
+	/** A store holding `stored`, recording what is written. */
+	function storeOf(stored: unknown) {
+		let file: unknown = JSON.parse(JSON.stringify(stored));
+		const writes: unknown[] = [];
+		const fs: IPrefsFs = {
+			fsStat: async () => ({ exists: true, type: 'file' }),
+			fsReadJson: async <T,>() => JSON.parse(JSON.stringify(file)) as T,
+			fsMkdir: async () => undefined,
+			fsWriteJson: async (_path: string, obj: unknown) => { writes.push(obj); file = JSON.parse(JSON.stringify(obj)); },
+		};
+		return { fs, writes, stored: () => file as { version: number; owners: Record<string, unknown>; [key: string]: unknown } };
+	}
+
+	it('another owner\'s malformed entry, a well-formed one this module would normalise, and an unknown top-level field all survive another owner\'s write, unchanged in STORAGE', async () => {
+		const original = {
+			version: PREFS_FILE_VERSION,
+			note: 'written by a newer client',
+			newer: { nested: [1, 2, { three: 3 }] },
+			owners: {
+				'team-B': { at: 5, prefs: ['legacy', 'array', 'form'] },
+				'team-C': { at: 6, prefs: { k: 'kept' } },
+				'team-D': { prefs: { noAt: true }, flag: 'extra field on an entry' },
+				'team-E': 'not even an object',
+			},
+		};
+		const { fs, stored } = storeOf(original);
+		const { clock, opts } = options(fs, { owner: 'team-A' });
+		const prefs = createFsPrefs(opts);
+		assert.equal(await prefs.load(), 'ready');
+		prefs.setPref('history', { q: 1 });
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		const after = stored();
+		assert.equal(after.note, original.note);
+		assert.deepEqual(after.newer, original.newer);
+		for (const id of ['team-B', 'team-C', 'team-D', 'team-E']) assert.deepEqual(after.owners[id], (original.owners as Record<string, unknown>)[id], `${id} is exactly as stored`);
+		assert.deepEqual((after.owners['team-A'] as { prefs: unknown }).prefs, { history: { q: 1 } });
+		assert.equal(after.version, PREFS_FILE_VERSION);
+	});
+
+	it('an entry of THIS owner that is not a bag is never overwritten: the session stays in memory and nothing is written', async () => {
+		const original = { version: PREFS_FILE_VERSION, owners: { [OWNER]: ['old', 'format'], other: { at: 1, prefs: { a: 1 } } } };
+		const { fs, writes, stored } = storeOf(original);
+		const errors: string[] = [];
+		const { clock, opts } = options(fs, { onError: (_error, phase) => errors.push(phase) });
+		const prefs = createFsPrefs(opts);
+		assert.equal(await prefs.load(), 'failed');
+		prefs.setPref('history', { q: 1 });
+		await prefs.flush();
+		await clock.advance(60_000);
+		assert.deepEqual(writes, []);
+		assert.deepEqual(stored(), original);
+		assert.deepEqual(errors, ['load']);
+	});
+
+	it('the owner cap trims only well-formed bags: a malformed entry is never the one dropped', async () => {
+		const owners: Record<string, unknown> = { junk: 42 };
+		for (let i = 0; i < 6; i += 1) owners[`o${i}`] = { at: i + 1, prefs: { i } };
+		const { fs, stored } = storeOf({ version: PREFS_FILE_VERSION, owners });
+		const { clock, opts } = options(fs, { maxOwners: 4 });
+		const prefs = createFsPrefs(opts);
+		await prefs.load();
+		prefs.setPref('k', 1);
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		const ids = Object.keys(stored().owners);
+		assert.ok(ids.includes('junk'), 'the malformed entry is carried');
+		assert.ok(ids.includes(OWNER));
+		assert.ok(!ids.includes('o0') && ids.includes('o5'), 'the least recently written well-formed bags went');
+	});
+});
