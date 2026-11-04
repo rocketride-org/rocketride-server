@@ -803,7 +803,8 @@ per workspace, mirrored to every realm and republished whole on each write.
 - A frame's event reaches the controller's channel twice (live, then through the
   retained slot), and a remount replays the last one. Events are idempotent
   hints only and every mutation is an op. An event that shares an op's name
-  would run the handler, so keep event and op names disjoint.
+  is refused by the controller (and attach throws when `events` collides), so
+  keep event and op names disjoint.
 - A call that reaches the controller's channel before its handlers are served
   is dropped; frames wait for readiness to avoid that.
 - A sidebar mount posts no event and no call, opens no document and registers
