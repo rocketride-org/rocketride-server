@@ -10,16 +10,15 @@
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { ToolOpMap } from 'shell';
+import type { ToolChannel, ToolOpMap } from 'shell';
 import { ExplorerToolError } from 'shared/explorer';
 import type { IExplorerEndpoint } from 'shared/explorer';
 import { codedError } from 'shared/explorer/connect/testing';
 import type { IToolCall } from 'shared/explorer/connect/testing';
 import { MAX_RETAINED_STATE_BYTES, MAX_RETAINED_TOTAL_BYTES, jsonByteLength } from 'shared/explorer/devtool/state';
 import type { IDevToolHarness } from 'shared/explorer/devtool/testing';
-import { BUS_TOOL_MARGIN_MS, FRAME_OP_MARGIN_MS, SDK_TIMEOUT_SLACK_MS } from 'shared/explorer/devtool/timeouts';
+import { FRAME_OP_MARGIN_MS, PROXY_BUS_SLACK_MS, SDK_TIMEOUT_SLACK_MS } from 'shared/explorer/devtool/timeouts';
 import { assertJsonSafe, manualNow } from 'shared/explorer/devtool/testing';
-import type { DevToolPeer } from 'shared/explorer/devtool/realm';
 import { createFrameCaller } from 'shared/explorer/devtool/frame';
 import { createDevToolHarness } from 'shared/explorer/devtool/testing';
 import { WRITE_REFUSED_TEXT } from '../src/devtool/controller';
@@ -136,14 +135,14 @@ describe('T4 - timeouts: the frame always waits longer than the controller\'s ow
 		signInVsCode(engine.realm);
 		const mounted = mountController(engine.cm, { now: clock.now });
 		mounted.h.setHostConnection(true);
-		const spyController = <O extends ToolOpMap>(peer: DevToolPeer) => {
-			const fn = shellProtocol.createToolController<O>(peer);
+		const spyController = <O extends ToolOpMap>(channel: ToolChannel) => {
+			const fn = shellProtocol.createToolOpClient<O>(channel);
 			return ((op: string, params: unknown, options?: { timeoutMs?: number }) => {
 				sent.push({ op, timeoutMs: options?.timeoutMs, deadlineAt: (params as { deadlineAt?: number })?.deadlineAt });
 				return (fn as unknown as (o: string, p: unknown, opts?: unknown) => Promise<unknown>)(op, params, options);
-			}) as unknown as ReturnType<typeof shellProtocol.createToolController<O>>;
+			}) as unknown as ReturnType<typeof shellProtocol.createToolOpClient<O>>;
 		};
-		const { frame } = mountFrame(mounted.h, undefined, { createToolController: spyController, now: clock.now });
+		const { frame } = mountFrame(mounted.h, undefined, { createToolOpClient: spyController, now: clock.now });
 		await until(() => Object.keys(frame.env(true).endpoints.get().probes).length === 1, 'the probe');
 		const endpoint = frame.env(true).endpoints.get().endpoints[0];
 		const session = sessionOf(frame, endpoint);
@@ -164,17 +163,17 @@ describe('T4 - timeouts: the frame always waits longer than the controller\'s ow
 			return call.timeoutMs as number;
 		};
 		const statementWait = (NEO4J_DIALECT.limits as { statement_timeout_ms: number }).statement_timeout_ms + 10_000;
-		assert.equal(busOf('read_query'), statementWait + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS, 'read_query: the node deadline + pad, + SDK slack, + bus margin');
+		assert.equal(busOf('read_query'), statementWait + SDK_TIMEOUT_SLACK_MS + PROXY_BUS_SLACK_MS, 'read_query: the node deadline + pad, + SDK slack, + bus margin');
 		assert.equal(frameOf(OP.readQuery), busOf('read_query') + FRAME_OP_MARGIN_MS, 'and the frame waits the bus timeout + its margin');
-		assert.equal(busOf('execute'), statementWait + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS, 'execute: the same statement wait');
+		assert.equal(busOf('execute'), statementWait + SDK_TIMEOUT_SLACK_MS + PROXY_BUS_SLACK_MS, 'execute: the same statement wait');
 		assert.equal(frameOf(OP.execute), busOf('execute') + FRAME_OP_MARGIN_MS);
-		assert.equal(busOf('get_query'), 120_000 + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS);
+		assert.equal(busOf('get_query'), 120_000 + SDK_TIMEOUT_SLACK_MS + PROXY_BUS_SLACK_MS);
 		assert.equal(frameOf(OP.ask), busOf('get_query') + FRAME_OP_MARGIN_MS);
-		assert.equal(busOf('dialect'), 15_000 + SDK_TIMEOUT_SLACK_MS + BUS_TOOL_MARGIN_MS);
+		assert.equal(busOf('dialect'), 15_000 + SDK_TIMEOUT_SLACK_MS + PROXY_BUS_SLACK_MS);
 		assert.equal(frameOf(OP.probe), busOf('dialect') + FRAME_OP_MARGIN_MS);
 		assert.equal(frameOf(OP.refreshEndpoints), CONTROLLER_LOCAL_OP_MS + FRAME_OP_MARGIN_MS, 'refresh STARTS discovery; its results arrive as state');
 		assert.equal(frameOf(OP.historyList), CONTROLLER_LOCAL_OP_MS + FRAME_OP_MARGIN_MS, 'an op answered from memory: 15 s');
-		for (const request of engine.requests) assert.ok(typeof request.timeoutMs === 'number' && request.timeoutMs > 0 && request.timeoutMs !== 120_000, `${request.op} names its own bus timeout, never the 120 s default`);
+		for (const request of engine.requests.filter((r) => r.op === 'client.tool')) assert.ok(typeof request.timeoutMs === 'number' && request.timeoutMs > 0 && request.timeoutMs !== 120_000, `${request.op} names its own transport timeout, never the 120 s bus default`);
 		frame.dispose();
 		mounted.controller.dispose();
 	});
@@ -416,7 +415,7 @@ describe('T11 - no bulk result is retained state, and sizes are guarded', () => 
 });
 
 describe('T13 - deadlines: an expired call never runs, on every path a call can wait', () => {
-	it('a write the PEER holds reaches a remount that keeps its host channel (rocket-ui caches one per tool); the frame has already given up and the controller refuses it (control: an on-time held read runs)', async () => {
+	it('a write in flight when the controller unmounts never runs on a remount that keeps its host channel (rocket-ui caches one per tool): the frame has already given up, the channel drops it or the controller refuses it as expired (control: an on-time call runs)', async () => {
 		const clock = manualNow(1_000_000);
 		const engine = vscodeRealm(undefined, (call) => (call.tool === 'dialect' ? NEO4J_WRITABLE : readOnlyNode(call)));
 		signInVsCode(engine.realm);
@@ -440,17 +439,16 @@ describe('T13 - deadlines: an expired call never runs, on every path a call can 
 		const again = mountController(engine.cm, { now: clock.now, onError: (error, where) => errors.push(`${where}:${(error as { reason?: string }).reason ?? ''}`) }, first.h, first);
 		await settle();
 		assert.ok(!engine.world.calls.some((c) => c.tool === 'execute'), 'the expired write never reached the node');
-		assert.ok(errors.includes('refused:expired'), 'it DID reach the controller, which refused it');
+		// Since the platform's controller-op design the host channel is the one place a call lands: with no op server
+		// behind it (the controller unmounted) it drops the call (FOLLOW_UPS F2), so the controller never even sees it.
+		// Either way the expired write must not run, and if it IS replayed the controller refuses it.
+		assert.ok(errors.every((entry) => entry === 'refused:expired'), 'nothing but an expiry refusal can have been reported');
 
-		// Control: the same race, with the remount inside the deadline: the held call runs.
-		await settle();
-		const onTime = frame.caller.callReply(OP.historyList, { key }, { timeoutMs: 60_000 });
-		again.controller.dispose();
-		await settle();
-		const third = mountController(engine.cm, { now: clock.now }, first.h, first);
-		assert.deepEqual(await onTime, { entries: [], recording: true }, 'the on-time held call ran on the remounted controller');
+		// Control: the remounted controller serves a fresh, on-time call (the refusal was about the late one only).
+		const onTime = await frame.caller.callReply(OP.historyList, { key }, { timeoutMs: 60_000 });
+		assert.deepEqual(onTime, { entries: [], recording: true }, 'an on-time call runs on the remounted controller');
 		frame.dispose();
-		third.controller.dispose();
+		again.controller.dispose();
 	});
 
 	it('a call the PEER holds before a mount with a FRESH host channel (a first or summon-driven mount; VS Code builds one per mount) goes to that channel and is dropped: never answered, never refused; our frames, which wait for readiness, never put a call in the hold', async () => {
@@ -462,12 +460,12 @@ describe('T13 - deadlines: an expired call never runs, on every path a call can 
 		const heldCalls = (): number => h.wire.filter((entry) => entry.topic === `tool:${GRAPH_APP_ID}:toSidebar` && isCall(entry.value)).length;
 
 		// Our frames (the base caller's default) wait for readiness: nothing reaches the peer.
-		const waiting = createFrameCaller<GraphOps>({ peer: h.newFramePeer(), createToolController: shellProtocol.createToolController, createToolChannel: shellProtocol.createToolChannel });
+		const waiting = createFrameCaller<GraphOps>({ channel: shellProtocol.createToolChannel(h.newFramePeer()), createToolOpClient: shellProtocol.createToolOpClient });
 		await assert.rejects(waiting.callReply(OP.historyList, { key: 'k1|any' }, { timeoutMs: 60 }), (error: unknown) => error instanceof ExplorerToolError && error.kind === 'timeout' && /was not sent/.test(error.message));
 		assert.equal(heldCalls(), 0, 'a waiting frame posts no call');
 
 		// A caller that does not wait (no lane does) puts its call in the hold, which summons the controller.
-		const eager = createFrameCaller<GraphOps>({ peer: h.newFramePeer(), createToolController: shellProtocol.createToolController, createToolChannel: shellProtocol.createToolChannel, waitForController: false });
+		const eager = createFrameCaller<GraphOps>({ channel: shellProtocol.createToolChannel(h.newFramePeer()), createToolOpClient: shellProtocol.createToolOpClient, waitForController: false });
 		const held = eager.callReply(OP.historyList, { key: 'k1|any' }, { timeoutMs: 300 });
 		await settle();
 		assert.equal(heldCalls(), 1);

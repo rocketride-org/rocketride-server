@@ -177,11 +177,11 @@ describe('T9 - docKey routing for every family', () => {
 });
 
 describe('T12 - the full app (app:) runs on the LOCAL env', () => {
-	it('GraphApp provides the LOCAL env over its own stores and the realm\'s bus client, to its tree AND to the sidebar the shell renders apart', () => {
+	it('GraphApp provides the LOCAL env over its own stores and the realm\'s engine client, to its tree AND to the sidebar the shell renders apart', () => {
 		const app = code(read('GraphApp.tsx'));
 		assert.match(app, /const APP_STORES: IGraphStores = \{ endpoints: graphEndpoints, schemas, dataVersions, history: graphHistory, previews: appPreviews \};/);
-		assert.match(app, /getBusExplorerClient\(ConnectionManager\.getInstance\(\)\)/);
-		assert.match(app, /createLocalGraphEnv\(\{ mount: 'app', ready: isConnected, client, stores: APP_STORES,/);
+		assert.match(app, /const \{ status: engine, client \} = useRealmEngine\(\);/, 'the client is the realm\'s own, narrowed, and null until the realm can answer');
+		assert.match(app, /createLocalGraphEnv\(\{ mount: 'app', ready: isConnected, engine, client, stores: APP_STORES,/);
 		assert.match(app, /<GraphEnvProvider value=\{env\}><GraphSidebar \/><\/GraphEnvProvider>/);
 		assert.match(app, /historyPrivacyNote: APP_HISTORY_PRIVACY_NOTE/);
 	});
@@ -247,16 +247,20 @@ describe('T12 - the full app (app:) runs on the LOCAL env', () => {
 			assert.doesNotMatch(text, /useShellConnection|usePrefs|getDocs\(|graphEndpoints|graphHistory|workbenchRequests/, `${file} still reaches past the env`);
 			assert.match(text, /useGraphEnv\(\)|useGraphEndpoints\(\)/, `${file} reads the env`);
 		}
-		const users = allSources().filter((f) => /\buseShellConnection\(\)/.test(code(f.text))).map((f) => f.path).sort();
-		assert.deepEqual(users, ['GraphApp.tsx', 'GraphDevToolSidebar.tsx'], 'only the two LOCAL mount roots read the shell connection');
+		assert.deepEqual(allSources().filter((f) => /\buseShellConnection\(\)/.test(code(f.text))).map((f) => f.path), [], 'nothing reads the shell connection by hand: the engine hooks do');
+		const users = allSources().filter((f) => /\buse(RealmEngine|EngineSource)\(\)/.test(code(f.text))).map((f) => f.path).sort();
+		assert.deepEqual(users, ['GraphApp.tsx', 'GraphDevToolSidebar.tsx'], 'only the two LOCAL mount roots read the realm\'s engine');
 		const prefs = allSources().filter((f) => /\busePrefs\(\)/.test(code(f.text))).map((f) => f.path);
 		assert.deepEqual(prefs, ['GraphApp.tsx'], 'only the full app reads the workspace prefs (a dev-tool mount would write into the host\'s bag)');
 	});
 });
 
 describe('R6 - one wiring module; mounts built in effects', () => {
-	it('createToolChannel, createToolOpServer and createToolController are imported from shell in ONE module', () => {
-		assert.deepEqual(findToolFactoryImports(allSources()), ['devtool/wiring.ts']);
+	it('createToolChannel is imported nowhere (the host builds the channel); the op factories are imported from shell in ONE module', () => {
+		assert.deepEqual(findToolFactoryImports(allSources()), [], 'a lane never builds a channel');
+		const importers = allSources().filter((f) => /import\s*\{[^}]*\bcreateToolOp(Client|Server)\b[^}]*\}\s*from\s*'shell'/.test(f.text)).map((f) => f.path);
+		assert.deepEqual(importers, ['devtool/wiring.ts']);
+		assert.deepEqual(allSources().filter((f) => /\bcreateToolController\b|\bDevToolPeer\b|\bgetBusExplorerClient\b|\bcreateActivationGate\b/.test(code(f.text))).map((f) => f.path), [], 'none of the removed Explorer symbols is used');
 	});
 
 	it('the sidebar builds its controller, and the frame its caller, in an effect with a disposing cleanup, never in a memo', () => {

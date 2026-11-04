@@ -82,6 +82,7 @@ const REQUIRED_TESTS = [
 	'devtool.protocol.test.ts',
 	'devtool.lifecycle.test.ts',
 	'devtool.mounts.test.ts',
+	'graph.engine-status.test.ts',
 ];
 
 const mod = createAppModule({
