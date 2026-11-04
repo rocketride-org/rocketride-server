@@ -81,6 +81,7 @@ export const PRICES: readonly PriceRow[] = [
 	{ model: 'gpt-6-astra', input: 10, cacheWrite: 10, cacheRead: 10, output: 50, cachesPrefix: false },
 	{ model: 'gpt-6-1-sol', input: 2, cacheWrite: 2, cacheRead: 2, output: 10, cachesPrefix: false },
 	{ model: 'gpt-6-sol', input: 2, cacheWrite: 2, cacheRead: 2, output: 10, cachesPrefix: false },
+	{ model: 'gpt-6-luna', input: 0.1, cacheWrite: 0.1, cacheRead: 0.1, output: 0.5, cachesPrefix: false },
 	{ model: 'openai-5-4', input: 2.5, cacheWrite: 2.5, cacheRead: 2.5, output: 15, cachesPrefix: false },
 	{ model: 'openai-5-4-mini', input: 0.75, cacheWrite: 0.75, cacheRead: 0.75, output: 4.5, cachesPrefix: false },
 ];

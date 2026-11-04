@@ -77,6 +77,7 @@ const PROVIDERS: Readonly<Record<ProviderId, ProviderRow>> = {
 			{ model: 'gpt-6-astra', title: 'GPT-6 Astra' },
 			{ model: 'gpt-6-1-sol', title: 'GPT-6.1 Sol' },
 			{ model: 'gpt-6-sol', title: 'GPT-6 Sol' },
+			{ model: 'gpt-6-luna', title: 'GPT-6 Luna' },
 			{ model: 'openai-5-4', title: 'GPT-5.4' },
 			{ model: 'openai-5-4-mini', title: 'GPT-5.4 mini' },
 		],

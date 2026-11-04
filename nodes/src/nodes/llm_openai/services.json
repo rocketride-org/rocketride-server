@@ -918,6 +918,17 @@
 				},
 				"apikey": ""
 			},
+			"gpt-6-luna": {
+				"title": "GPT-6 Luna",
+				"model": "gpt-6-luna",
+				"modelSource": "provider",
+				"modelTotalTokens": 1050000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
 			"gpt-6-astra": {
 				"title": "OpenAI: GPT-6 Astra",
 				"model": "gpt-6-astra",
@@ -1642,6 +1653,12 @@
 					]
 				},
 				{
+					"value": "gpt-6-luna",
+					"properties": [
+						"openai.gpt-6-luna"
+					]
+				},
+				{
 					"value": "gpt-6-astra",
 					"properties": [
 						"openai.gpt-6-astra"
@@ -2191,6 +2208,13 @@
 		},
 		"openai.gpt-6-sol": {
 			"object": "gpt-6-sol",
+			"properties": [
+				"llm.cloud.apikey",
+				"llm.cloud.modelSource"
+			]
+		},
+		"openai.gpt-6-luna": {
+			"object": "gpt-6-luna",
 			"properties": [
 				"llm.cloud.apikey",
 				"llm.cloud.modelSource"

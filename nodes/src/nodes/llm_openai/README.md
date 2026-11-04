@@ -25,7 +25,7 @@ Default: **GPT-5.2** (`openai-5-2`).
 | `gpt-5-5` | `gpt-5.5` | 1,050,000 | 128,000 |
 
 <details>
-<summary><strong>View 82 more models</strong></summary>
+<summary><strong>View 83 more models</strong></summary>
 
 | Profile | Model | Context | Output |
 | ------- | ----- | ------- | ------ |
@@ -102,6 +102,7 @@ Default: **GPT-5.2** (`openai-5-2`).
 | `gpt-5-pro-batch` | `gpt-5-pro:batch` | 400,000 | 128,000 |
 | `gpt-6-1-sol` | `gpt-6.1-sol` | 1,050,000 | 128,000 |
 | `gpt-6-sol` | `gpt-6-sol` | 1,050,000 | 128,000 |
+| `gpt-6-luna` | `gpt-6-luna` | 1,050,000 | 128,000 |
 | `gpt-6-astra` | `gpt-6-astra` | 1,050,000 | 128,000 |
 | `gpt-6-astra-batch` | `gpt-6-astra:batch` | 1,050,000 | 128,000 |
 | `gpt-6-astra-pro` | `gpt-6-astra-pro` | 1,050,000 | 128,000 |
