@@ -490,6 +490,11 @@ class Store(DocumentStoreBase):
     def addChunks(self, chunks: List[Doc], checkCollection: bool = True) -> None:
         """
         Add document chunks to the document store.
+
+        Args:
+            chunks: The batch to write.
+            checkCollection: Create the collection if it is missing and check that the chunks match its
+                embedding model and vector size; createCollection passes False when it writes its control row.
         """
         # If no documents present, get out
         if not len(chunks):

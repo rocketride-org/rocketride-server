@@ -387,6 +387,11 @@ class Store(DocumentStoreBase):
         Add document chunks to the document store.
 
         (currently doing it chunk by chunk but will upgrade to batch additions with payload limits like others)
+
+        Args:
+            chunks: The batch to write.
+            checkCollection: Create the collection if it is missing and check that the chunks match its
+                embedding model and vector size; createCollection passes False when it writes its control row.
         """
         # If no documents present, get out
         if not len(chunks):

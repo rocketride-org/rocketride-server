@@ -93,6 +93,9 @@ class DocumentStoreBase(ABC):
         A batch that holds an object's chunk 0 replaces that object: its stored
         chunks are deleted first (see objectIdsToReplace). The chunks of an object
         whose chunk 0 is not in the batch are added to the ones already stored.
+
+        Args:
+            chunks: The batch to write.
         """
 
     @staticmethod
