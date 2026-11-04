@@ -240,7 +240,7 @@ function makeStartTestServerAction(options = {}) {
 			ctx.port = result.port;
 			task.output = `Server ready on port ${ctx.port}`;
 			taskComplete = true;
-			return { port: result.port, server: result.server, apikey };
+			return { port: result.port, server: result.server, serverUri: result.uri, apikey };
 		},
 	};
 }
@@ -294,9 +294,10 @@ function makeRunPytestAction(options = {}) {
 			require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
 
 			const bracket = ctx.brackets?.['py-test-server'];
-			if (!bracket?.port) throw new Error('py-test-server bracket missing — server did not start');
-			// Use existing server URI when set (e.g. ROCKETRIDE_URI=http://localhost:5678 for debugging)
-			const serverUri = bracket.serverUri || `http://localhost:${bracket.port}`;
+			if (!bracket?.serverUri) throw new Error('py-test-server bracket missing — server did not start');
+			// The server the bracket started, or the existing one it was pointed at
+			// (--taskserver, or ROCKETRIDE_URI when debugging against your own server)
+			const serverUri = bracket.serverUri;
 
 			const testEnv = {
 				...process.env,

@@ -43,7 +43,7 @@ Test Coverage:
 
 Test Configuration:
     Tests use environment variables for configuration:
-    - ROCKETRIDE_URI: Server URI (defaults to http://localhost:5565)
+    - ROCKETRIDE_URI: Server URI (defaults to http://127.0.0.1:5565)
     - ROCKETRIDE_APIKEY: Authentication key (defaults to 'MYAPIKEY')
     - Various LLM API keys for chat tests (ROCKETRIDE_OPENAI_KEY, etc.)
 
@@ -104,7 +104,7 @@ DAPMessage = Dict[str, Any]
 
 # Test configuration
 TEST_CONFIG = {
-    'uri': os.getenv('ROCKETRIDE_URI', 'http://localhost:5565'),
+    'uri': os.getenv('ROCKETRIDE_URI', 'http://127.0.0.1:5565'),
     'auth': os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY'),
     'timeout': 30.0,  # 30 second timeout for integration tests
 }
