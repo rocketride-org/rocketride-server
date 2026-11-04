@@ -22,8 +22,8 @@
  * SOFTWARE.
  */
 
-import { describe, it, expect } from '@jest/globals';
-import { createReporter, type SendOptions } from '../src/client/analytics';
+import { afterEach, describe, it, expect } from '@jest/globals';
+import { createReporter, privacySignalOn, type SendOptions } from '../src/client/analytics';
 
 describe('rocketride/analytics bound reporters', () => {
 	it('stamps the bound app id on every event', () => {
@@ -80,5 +80,60 @@ describe('rocketride/analytics bound reporters', () => {
 			throw new Error('sink exploded');
 		});
 		expect(() => report('nav:click')).not.toThrow();
+	});
+});
+
+describe('privacySignalOn', () => {
+	const saved = {
+		navigator: Object.getOwnPropertyDescriptor(globalThis, 'navigator'),
+		window: Object.getOwnPropertyDescriptor(globalThis, 'window'),
+	};
+
+	/** Install a fake navigator and window on the global object (jest runs this suite in node). */
+	const install = (nav: object, win: object = {}) => {
+		Object.defineProperty(globalThis, 'navigator', { value: nav, configurable: true, writable: true });
+		Object.defineProperty(globalThis, 'window', { value: win, configurable: true, writable: true });
+	};
+
+	afterEach(() => {
+		for (const key of ['navigator', 'window'] as const) {
+			const descriptor = saved[key];
+			if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+			else delete (globalThis as Record<string, unknown>)[key];
+		}
+	});
+
+	it('is false outside a browser (no window)', () => {
+		delete (globalThis as Record<string, unknown>).window;
+		expect(privacySignalOn()).toBe(false);
+	});
+
+	it.each([['0'], [false], ['unspecified'], [null], [undefined], [0], ['no']])('treats %p as no signal', (value) => {
+		install({ doNotTrack: value, msDoNotTrack: value, globalPrivacyControl: value }, { doNotTrack: value });
+		expect(privacySignalOn()).toBe(false);
+	});
+
+	it.each([
+		['navigator.doNotTrack "1"', { doNotTrack: '1' }, {}],
+		['navigator.doNotTrack "yes"', { doNotTrack: 'yes' }, {}],
+		['navigator.msDoNotTrack "1"', { msDoNotTrack: '1' }, {}],
+		['window.doNotTrack "1"', {}, { doNotTrack: '1' }],
+		['navigator.globalPrivacyControl true', { globalPrivacyControl: true }, {}],
+		['navigator.globalPrivacyControl 1', { globalPrivacyControl: 1 }, {}],
+	])('is true for %s', (_label, nav, win) => {
+		install(nav, win);
+		expect(privacySignalOn()).toBe(true);
+	});
+
+	it('is false when reading a signal throws', () => {
+		const nav = {};
+		Object.defineProperty(nav, 'doNotTrack', {
+			get() {
+				throw new Error('blocked');
+			},
+		});
+		install(nav);
+		expect(() => privacySignalOn()).not.toThrow();
+		expect(privacySignalOn()).toBe(false);
 	});
 });

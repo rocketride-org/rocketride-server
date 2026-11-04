@@ -1,15 +1,17 @@
 {
 	"$comment": "The TRANSPORT's event contract: what the shell's telemetry layer itself emits (auth facts, the consent lifecycle) and the posthog-js SDK events its instances produce. App taxonomies live with their apps (home-ui: src/telemetry/events.contract.json). Documentation only - never imported at runtime; events.ts carries the runtime names.",
-	"version": 1,
-	"superProperties": {
+	"version": 2,
+	"stampedProperties": {
 		"app": {
 			"type": "string",
-			"const": "home-ui",
-			"description": "Stamped by rocketride/analytics report() on every event; identifies the emitting app."
-		},
+			"pattern": "^[A-Za-z0-9._-]{1,128}$",
+			"description": "Not a super property: stamped per event by the reporter that sent it (rocketride/analytics createReporter, stamped last so caller props cannot overwrite it). 'shell' for the transport's own events (auth:*, consent:*); otherwise the emitting app's descriptor id (e.g. 'rocketride.home'). Absent on SDK-generated events ($pageleave, sdkEvents)."
+		}
+	},
+	"superProperties": {
 		"is_authed": {
 			"type": "boolean",
-			"description": "True while the shell has an identity. Registered by HomeApp whenever identity changes, before the first $pageview."
+			"description": "True while the shell has an identity. Registered by the shell's telemetry transport whenever identity changes (Shell.tsx calls setTelemetryIdentity, which calls Identity.setAuthed)."
 		},
 		"rr_traffic": {
 			"type": "string",
@@ -105,7 +107,7 @@
 	"events": {
 		"auth:start": {
 			"owner": "shell",
-			"description": "Raised by a shell with the telemetry channel when it starts the OAuth redirect (ConnectionManager.startOAuth, behind its one-shot guard), which every sign-in and sign-up entry of the shell and its screens goes through (CloudAuthProvider.signIn(), also on the shell API, does not raise it). auto marks a request the shell's auth gate raised for an app that requires sign-in, not a click. Forwarded by home-ui once per fact with the time it was observed; a fact raised while no app listened is held in the shell's channel (sessionStorage, 30 minutes) and forwarded on the next home-ui init. Absent on an older shell.",
+			"description": "Raised by a shell with the telemetry channel when it starts the OAuth redirect (ConnectionManager.startOAuth, behind its one-shot guard), which every sign-in and sign-up entry of the shell and its screens goes through (CloudAuthProvider.signIn(), also on the shell API, does not raise it). auto marks a request the shell's auth gate raised for an app that requires sign-in, not a click. Reported by the shell on its own reporter (app 'shell'), sent by beacon when the SDK is up; raised before the SDK starts, it waits in the queue, mirrored to the sessionStorage hold, and is replayed on the next page load (the OAuth callback) with its original time.",
 			"properties": {
 				"register": {
 					"type": "boolean"
@@ -120,36 +122,6 @@
 				},
 				"auto": {
 					"type": "boolean"
-				},
-				"schema_version": {
-					"const": 1
-				},
-				"experiment": {
-					"type": "string"
-				},
-				"experiment_revision": {
-					"type": "string"
-				},
-				"variant_id": {
-					"type": "string"
-				},
-				"assignment_id": {
-					"type": "string"
-				},
-				"exposure_id": {
-					"type": "string"
-				},
-				"landing_message_revision": {
-					"type": "string"
-				},
-				"exposed_at": {
-					"type": "number"
-				},
-				"expires_at": {
-					"type": "number"
-				},
-				"consent_version": {
-					"const": 1
 				}
 			},
 			"required": [
@@ -159,8 +131,8 @@
 			]
 		},
 		"auth:complete": {
-			"owner": "shell+home-ui",
-			"description": "Identity resolved after the OAuth round trip, exactly one per sign-in. Owned by the shell, or by home-ui on a shell without the telemetry channel. On a shell with the telemetry channel: raised by the shell after the PKCE callback connect (token restores never raise it) and forwarded by home-ui once per fact with the fact's own time; a fact raised on a page load that never mounts home-ui is held for 30 minutes and forwarded on the next init; source 'shell', is_new the engine's new-user flag (null on an engine without it), waitlisted marks an account created without access yet. On an older shell: home-ui reports it itself when its mount completes a pending sign-in; source 'home-ui', is_new null, waitlisted false (a waitlisted account never mounts home-ui).",
+			"owner": "shell",
+			"description": "Identity resolved after the OAuth round trip, exactly one per sign-in. Reported by the shell on its own reporter (app 'shell') after the PKCE callback connect (token restores never raise it); raised before the SDK starts, it waits in the queue, mirrored to the sessionStorage hold, and is replayed on the next page load if this one ends first. source is always 'shell', is_new the engine's new-user flag (null on an engine without it), waitlisted marks an account created without access yet.",
 			"properties": {
 				"is_new": {
 					"type": [
@@ -171,67 +143,34 @@
 				"waitlisted": {
 					"type": "boolean"
 				},
-				"secs_since_start": {
+				"duration_ms": {
 					"type": [
 						"number",
 						"null"
 					],
 					"minimum": 0,
-					"description": "The sign-in round trip in seconds, to a tenth: on a shell with the telemetry channel, the duration_ms the shell measured from its OAuth start; on an older shell, the time since the register or sign-in CTA stamped sessionStorage rr:auth:start_ts. Null when unknown, or longer than an hour."
+					"description": "The sign-in round trip in milliseconds, measured from the stamp the shell writes with the PKCE verifier at its OAuth start (sessionStorage rr:shell:auth_start_ts). Null when unknown (no stamp, an embedded preview, a sign-in that did not start in this tab), or longer than an hour."
 				},
 				"source": {
 					"type": "string",
-					"enum": [
-						"home-ui",
-						"shell"
-					]
-				},
-				"schema_version": {
-					"const": 1
-				},
-				"experiment": {
-					"type": "string"
-				},
-				"experiment_revision": {
-					"type": "string"
-				},
-				"variant_id": {
-					"type": "string"
-				},
-				"assignment_id": {
-					"type": "string"
-				},
-				"exposure_id": {
-					"type": "string"
-				},
-				"landing_message_revision": {
-					"type": "string"
-				},
-				"exposed_at": {
-					"type": "number"
-				},
-				"expires_at": {
-					"type": "number"
-				},
-				"consent_version": {
-					"const": 1
+					"const": "shell"
 				}
 			},
 			"required": [
 				"is_new",
 				"waitlisted",
-				"secs_since_start",
+				"duration_ms",
 				"source"
 			]
 		},
 		"consent:shown": {
-			"owner": "home-ui",
+			"owner": "shell",
 			"description": "The consent banner prompted an undecided visitor (once per page load; a reopen from the footer does not count).",
 			"properties": {},
 			"required": []
 		},
 		"consent:decision": {
-			"owner": "home-ui",
+			"owner": "shell",
 			"description": "The visitor accepted, rejected, or withdrew consent. withdrawn: an opted-in visitor chose No thanks in the reopened banner (the stored record becomes rejected, so they are not asked again; the consented instance is torn down). Captured on the instance that is active after the decision (after an accept: the consented instance, after the bridge's copies; after a rejection or a withdrawal: the cookieless instance). Never captured by a tab that only followed another tab's decision.",
 			"properties": {
 				"choice": {
@@ -253,7 +192,7 @@
 			]
 		},
 		"consent:handoff": {
-			"owner": "home-ui",
+			"owner": "shell",
 			"description": "Sent on the cookieless instance at the moment a mid-visit accept (in this tab or another) moves capture to the consented instance, after which the cookieless instance sends nothing for the rest of the page load. Funnels exclude sessions with this event: the journey continues, whole, in the consented session (rr_bridged copies, rr_continued_visit). Carries consent_state accepted and the load's rr_journey.",
 			"properties": {
 				"bridged_events": {
