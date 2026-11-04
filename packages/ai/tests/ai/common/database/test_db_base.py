@@ -1086,6 +1086,17 @@ def test_a_failing_lane_write_fails_the_question():
     assert fake_instance.text_written == str([{'answer': 42}])
 
 
+def test_a_failing_lane_write_while_reporting_a_failure_passes_the_downstream_error_on():
+    """Writing the error runs the downstream nodes too; their failure reaches the caller as they reported it."""
+    inst, _ = _question_instance({'isValid': True, 'query': 'SELECT 1'}, ['text', 'answers'], rows=None)
+    fake_instance = _FailingAnswersInstance(lanes=['text', 'answers'])
+    inst.instance = fake_instance
+
+    with pytest.raises(RuntimeError, match='answers sink is down'):
+        _ask(inst)
+    assert fake_instance.text_written == 'Query execution failed'
+
+
 class _RaisingEngine:
     """An engine whose every statement fails with one exception."""
 

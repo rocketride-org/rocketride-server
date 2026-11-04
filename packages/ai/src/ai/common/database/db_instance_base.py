@@ -1132,7 +1132,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             self._emitError(str(e) if written_here else _QUESTION_FAILED, lanes)
             return
 
-        # Outside the try: a lane write that fails fails the question
+        # Outside the try: a lane write runs the downstream nodes, so their failure fails the question with their own error
         self._emit(result, lanes, executed=executed)
 
     def _emitError(self, message: str, lanes) -> None:
