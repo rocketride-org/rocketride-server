@@ -143,6 +143,9 @@ function withEngine(base: IFakeRealmCm, world: IFakeWorld): IEngineRealm {
 		},
 		fsReadJson: async (path) => {
 			await record('fsReadJson', { path });
+			// The engine's file store fails a read of a missing file as 'File not found: …'. The history
+			// store confirms a "missing" stat by such a read before it calls the file a first run.
+			if (!files.has(path)) throw new Error(`File not found: ${path}`);
 			return files.get(path) as never;
 		},
 		fsMkdir: async (path) => {
