@@ -27,20 +27,31 @@
 // A thin React shell over devtool/controller.ts (R6): the controller is built
 // in an effect and disposed in its cleanup (never in useMemo: the shell renders
 // under StrictMode, which mounts twice), so exactly one op server is live. It
-// never subscribes the peer itself. Its view is the connection list over the
-// controller's LOCAL env; the realm's connection flag is the mirrored
-// `useShellConnection().isConnected` (a sidebar cannot read `host:connection`).
+// builds no channel (the host's `channel` is the mount's one transport). Its view
+// is the connection list over the controller's LOCAL env. The realm's client and
+// connection state come from useEngineSource(): a stable getter and a readiness
+// store (waiting, disconnected, ready), so the controller is built once and never
+// captures a stale client. The first interaction in the sidebar tells the
+// controller a person is present, which releases the endpoint probes it holds
+// until then.
 // It renders nothing until the controller exists: the host shows the load state.
 // =============================================================================
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ConnectionManager, useShellConnection } from 'shell';
+import type { CSSProperties } from 'react';
+import { ConnectionManager } from 'shell';
+import { useEngineSource } from 'shared/explorer/react';
 import type { DevToolProps } from 'shell';
 import DevToolConnectionList from './components/DevToolConnectionList';
 import { createVectorController } from './devtool/controller';
-import type { IVectorController, IVectorRealm } from './devtool/controller';
+import type { IVectorController } from './devtool/controller';
 import { CONTROLLER_PROTOCOL } from './devtool/wiring';
-import { VectorEnvProvider } from './envContext';
+import { VectorEnvProvider, useReadable } from './envContext';
+
+const styles = {
+	// The presence wrapper adds no box of its own.
+	presence: { display: 'contents' } as CSSProperties,
+};
 
 /**
  * The dev-tool sidebar (the controller).
@@ -48,19 +59,19 @@ import { VectorEnvProvider } from './envContext';
  * @param props - The host's DevToolProps.
  * @returns The sidebar.
  */
-export const VectorDevToolSidebar: React.FC<DevToolProps> = ({ peer, channel, documents, activeDocKey }) => {
-	const { isConnected } = useShellConnection();
+export const VectorDevToolSidebar: React.FC<DevToolProps> = ({ channel, documents, activeDocKey }) => {
+	const { getClient, readiness } = useEngineSource();
 	const [controller, setController] = useState<IVectorController | null>(null);
-	// The latest documents API and activeDocKey, for a controller built once per peer.
+	// The latest documents API and activeDocKey, for a controller built once per channel.
 	const latest = useRef({ documents, activeDocKey });
 	latest.current = { documents, activeDocKey };
 
 	useEffect(() => {
-		const realm: IVectorRealm = ConnectionManager.getInstance();
 		const created = createVectorController({
-			cm: realm,
-			peer,
-			...(channel ? { channel } : {}),
+			cm: ConnectionManager.getInstance(),
+			channel,
+			getClient,
+			readiness,
 			documents: {
 				open: (key, title) => latest.current.documents?.open(key, title),
 				close: (key) => latest.current.documents?.close(key),
@@ -73,17 +84,26 @@ export const VectorDevToolSidebar: React.FC<DevToolProps> = ({ peer, channel, do
 			created.dispose();
 			setController((current) => (current === created ? null : current));
 		};
-	}, [peer, channel]);
+	}, [channel, getClient, readiness]);
 
 	useEffect(() => {
 		controller?.noteActiveDocKey(activeDocKey);
 	}, [controller, activeDocKey]);
 
-	const env = useMemo(() => (controller ? controller.env(isConnected) : null), [controller, isConnected]);
-	if (!env) return null;
+	if (!controller) return null;
+	return <SidebarBody controller={controller} />;
+};
+
+/** The sidebar's body: the env follows the engine status; the first interaction marks a person present. */
+const SidebarBody: React.FC<{ controller: IVectorController }> = ({ controller }) => {
+	const status = useReadable(controller.engineStatus);
+	const env = useMemo(() => controller.env(status), [controller, status]);
+	const present = (): void => controller.discovery.markUserPresent('user');
 	return (
 		<VectorEnvProvider value={env}>
-			<DevToolConnectionList />
+			<div style={styles.presence} onPointerDownCapture={present} onKeyDownCapture={present}>
+				<DevToolConnectionList />
+			</div>
 		</VectorEnvProvider>
 	);
 };

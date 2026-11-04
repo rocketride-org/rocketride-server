@@ -196,9 +196,11 @@ describe('R14 - every view reaches the engine through the env', () => {
 		assert.match(consoleView, /env\.openDocument\(entry\.ctx\.endpoint, objectId, row\?\.path \?\? null, chunkId\)/);
 	});
 
-	it('only the two LOCAL mount roots read the shell connection: the full app and the dev-tool sidebar (the controller)', () => {
+	it('only the two LOCAL mount roots read the shell connection: the full app (useShellConnection) and the dev-tool sidebar (the controller, through useEngineSource)', () => {
 		const users = allSources().filter((f) => /\buseShellConnection\(\)/.test(code(f)));
-		assert.deepEqual(users, ['VectorApp.tsx', 'VectorDevToolSidebar.tsx']);
+		assert.deepEqual(users, ['VectorApp.tsx']);
+		const sources = allSources().filter((f) => /\buseEngineSource\(\)/.test(code(f)));
+		assert.deepEqual(sources, ['VectorDevToolSidebar.tsx']);
 	});
 
 	it('the full app provides the LOCAL env over its own store, registry and client, around everything it renders', () => {

@@ -46,7 +46,9 @@ limits) is `docs/development/nodes/vector-tool-contract.md`.
   controller use the LOCAL env (`src/localEnv.ts`): the full app over the
   store singleton and its SDK client (the client it uses for chat and uploads,
   which the bus does not carry), the controller over its own store and the
-  realm's bus-backed client. A frame uses the REMOTE env built by
+  realm's own `RocketRideClient`, reached through `useEngineSource()` (a stable
+  getter and an engine-readiness store, so the controller is built once and never
+  captures a stale client). A frame uses the REMOTE env built by
   `src/devtool/frame.ts`, which holds no client.
 - Connection objects (console controller, selection, tab, scope) live in a
   per-mount registry (`createConnectionRegistry` in `adapters/connections.ts`)
@@ -70,8 +72,8 @@ limits) is `docs/development/nodes/vector-tool-contract.md`.
   frames; `focusChunk`, `showOnMap` to frames). `waitFor` names each op's
   session wait (a sample its budget, capped at 300 s, plus 30 s; search and
   embed 60 s; everything else the statement deadline plus 10 s, or 40 s); the
-  controller asks the session for exactly that, the bus adds 6 s and the frame
-  5 s more (`frameTimeoutFor`).
+  controller asks the session for exactly that plus the SDK slack (1 s), a realm's
+  proxy adds `PROXY_BUS_SLACK_MS` (5 s) and the frame 5 s more (`frameTimeoutFor`).
 - `src/devtool/controller.ts` serves it. It resolves the key to its endpoint
   and the node (the embedding node for `embed`), answers the raw tool value
   (failure envelopes included: the frame unwraps them with their code), caps
@@ -141,7 +143,10 @@ limits) is `docs/development/nodes/vector-tool-contract.md`.
 - The dev-tool suites (`tests/devtool.*.test.ts`) run the controller and
   frames over the shell's REAL bus peer, op lane and channel through the base's
   harness (`shared/explorer/devtool/testing`, JSON wire on), with a fake engine
-  behind the base's fake VS Code and rocket-ui realms (`tests/support/`). They
+  behind the base's fake mirrored (VS Code) and rocket-ui realms: the realm's
+  client serves the engine requests, as its `RocketRideClient` does in
+  production (`tests/support/devtool.ts`). A frame is announced to the sidebar
+  peer the way a host does (`announceFrame`), or it hears no controller event. They
   dispose what they mounted after each test, so a failing test leaves no timer
   behind.
 - `./builder vector-ui:e2e-live` runs the browser lanes in
@@ -335,8 +340,11 @@ The app also declares `devToolFrame` and `devToolSidebar`
 Code and rocket-ui mount it beside the pipeline editor on the dev-tool
 contract the [Explorer library](https://github.com/rocketride-org/rocketride-server/blob/develop/docs/development/apps/explorer-library.md#running-the-library-in-a-dev-tool-controller)
 describes. The sidebar mount is the controller: it owns the endpoint store,
-the bus-backed client, identity and discovery, and serves `vector.*` ops by
-connection key. Every document is a frame with no client: `console:<key>`
+the engine client over the realm's own `RocketRideClient`, identity and
+discovery, and serves `vector.*` ops by connection key. It builds no channel: the
+host's `DevToolProps.channel` is the mount's one transport, and the controller
+attaches its op server to it (`attachController`, with every event name checked
+against the op names). Every document is a frame with no client: `console:<key>`
 (the map is a tab inside it) and `document:<key>:<encoded objectId>`; the
 generic frame is one empty state, and any other docKey is "not found".
 
@@ -649,3 +657,14 @@ record each server's version.
 
 The stub LLM is a test stand-in: answers start with `[STUB-LLM]` and prove that
 retrieval reached the LLM node, nothing about answer quality.
+
+- **Presence.** A pinned tool's controller mounts at host boot with nobody there,
+  and an endpoint probe is a tool call (it keeps a pipeline alive). So a mount
+  discovers connections (a read) but issues **no tool call** until a person is
+  present: the first frame op (`onFirstOp`), the first interaction in the sidebar,
+  or an explicit Refresh. A quiet (automatic) refresh is not presence.
+- **Write answers.** `soft_delete` and `restore` answer both `matched_chunks`
+  (develop's #2704 meaning: every chunk the store holds for the ids) and
+  `moved_chunks` (what actually moved: 0 for a document already in that state).
+  The app reads `moved_chunks` only, and a batch that moved nothing says
+  "Nothing moved: ... already restored", never a restore it did not do.

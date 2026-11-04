@@ -77,7 +77,7 @@ const styles = {
  * @param props - The host's DevToolProps.
  * @returns The frame.
  */
-export const VectorDevTool: React.FC<DevToolProps> = ({ peer, channel, documents, docKey }) => {
+export const VectorDevTool: React.FC<DevToolProps> = ({ channel, documents, docKey }) => {
 	const [frame, setFrame] = useState<IVectorFrame | null>(null);
 	useEffect(() => {
 		// The frame this effect builds, for its own error reporter (which runs only later, after the frame exists).
@@ -88,14 +88,14 @@ export const VectorDevTool: React.FC<DevToolProps> = ({ peer, channel, documents
 			const text = frameFailureText(error, mount.frame?.controllerReady.get() ?? false);
 			if (text !== null) announcer.announce(text);
 		};
-		const created: IVectorFrame = createVectorFrame({ peer, ...(channel ? { channel } : {}), ...(documents ? { documents } : {}), docKey: docKey ?? null, ...FRAME_PROTOCOL, onError });
+		const created: IVectorFrame = createVectorFrame({ channel, ...(documents ? { documents } : {}), docKey: docKey ?? null, ...FRAME_PROTOCOL, onError });
 		mount.frame = created;
 		setFrame(created);
 		return () => {
 			created.dispose();
 			setFrame((current) => (current === created ? null : current));
 		};
-	}, [peer, channel, documents, docKey]);
+	}, [channel, documents, docKey]);
 	if (!frame) return null;
 	return <FrameRoot frame={frame} />;
 };

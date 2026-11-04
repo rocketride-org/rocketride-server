@@ -11,7 +11,7 @@ import { createVectorFrame } from '../../src/devtool/frame';
 import type { IVectorFrame, IVectorFrameOptions, IVisibilitySource } from '../../src/devtool/frame';
 import { shellProtocol } from 'shared/explorer/devtool/testing';
 import type { IDevToolHarness } from 'shared/explorer/devtool/testing';
-import { manualTimers, recordingDocuments, track } from './devtool';
+import { announceFrame, manualTimers, recordingDocuments, track } from './devtool';
 import type { IManualTimers } from './devtool';
 
 /** A visibility source a test flips by hand. */
@@ -57,17 +57,17 @@ export function mountFrame(h: IDevToolHarness, docKey: string | undefined, over:
 	const errors: unknown[] = [];
 	const timers = manualTimers();
 	const frame = track(createVectorFrame({
-		peer,
 		channel: shellProtocol.createToolChannel(peer),
 		documents: docs.documents,
 		docKey,
-		createToolController: shellProtocol.createToolController,
-		createToolChannel: shellProtocol.createToolChannel,
+		createToolOpClient: shellProtocol.createToolOpClient,
 		focusTarget: null,
 		visibility: manualVisibility(true),
 		schedule: timers.schedule,
 		onError: (error) => errors.push(error),
 		...over,
 	}));
+	// The host announces each frame mount to the sidebar peer (HELLO now, BYE from the cleanup).
+	track({ dispose: announceFrame(h) });
 	return { frame, docs, errors, timers };
 }

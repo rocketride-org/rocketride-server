@@ -298,6 +298,8 @@ describe('a frame created while the controller is already ready (its retained st
 				inner.sendEvent(name, payload);
 			},
 			onEvent: (name, cb) => inner.onEvent(name, cb),
+			call: inner.call.bind(inner),
+			serveOp: inner.serveOp.bind(inner),
 		};
 		let second: ReturnType<typeof mountFrame> | null = null;
 		assert.doesNotThrow(() => {
@@ -384,7 +386,7 @@ describe('docVersions keeps every connection\'s stamp, however many documents it
 	it('8 connections each trashing a full batch keep all 8 stamps under the budget, and a frame relists only for its own connection\'s write', async () => {
 		const PROJECTS = 8;
 		const rows = Array.from({ length: PROJECTS }, (_, i) => projectRows(['ingest_1', 'chat_1', 'tools_1'], vectorComponents('postgres'), { projectId: `vp-${i}` })).flat();
-		const echo = (call: { input?: Record<string, unknown> }) => ({ success: true, object_ids: call.input?.object_ids, matched_chunks: 1, not_found: [] });
+		const echo = (call: { input?: Record<string, unknown> }) => ({ success: true, object_ids: call.input?.object_ids, matched_chunks: 1, moved_chunks: 1, not_found: [] });
 		const engine = vscodeRealm({ soft_delete: echo }, rows);
 		signInVsCode(engine.realm);
 		const mounted = mountController(engine.cm);

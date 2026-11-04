@@ -10,36 +10,46 @@
 // The bus, the peers, the op lane and the channel are the shell's real modules
 // (shared/explorer/devtool/testing.ts, JSON wire ON by default, as VS Code's
 // postMessage carries every payload). The realm's ConnectionManager is the
-// base's fake VS Code or rocket-ui realm, with its `request` routed to a fake
-// engine (vectorWorld) and every bus request recorded. `client.listTasks`
-// answers an empty page unless the world lists tasks itself.
+// base's fake VS Code (mirrored) or rocket-ui realm; its client keeps the realm's
+// own account answers and serves the engine requests from a fake engine
+// (vectorWorld), as the realm's RocketRideClient does in production. Every engine
+// request is recorded under the name it had on the bus (`client.<method>`).
+// `listTasks` answers an empty page unless the world lists tasks itself.
 // =============================================================================
 
-import { makeVectorEndpointStore } from '../../src/adapters/explorer';
 import { createVectorController } from '../../src/devtool/controller';
 import type { IVectorController, IVectorControllerOptions, IVectorRealm } from '../../src/devtool/controller';
 import { VECTOR_APP_ID } from '../../src/devtool/protocol';
 import type { IFakeRow, IFakeWorld } from 'shared/explorer/connect/testing';
-import { account, createDevToolHarness, createFakeClientRealm, createFakeSocketlessRealm, settle, shellProtocol, spyPeer } from 'shared/explorer/devtool/testing';
-import type { IDevToolHarness, IPeerSpy } from 'shared/explorer/devtool/testing';
+import type { IRealmClient, RealmClientGetter } from 'shared/explorer/devtool/engineClient';
+import { createEngineReadiness } from 'shared/explorer/devtool/readiness';
+import type { IEngineReadiness } from 'shared/explorer/devtool/readiness';
+import { toolTransportTimeoutMs } from 'shared/explorer/devtool/timeouts';
+import { account, createDevToolHarness, createFakeClientRealm, createFakeMirroredRealm, settle, shellProtocol, spyPeer } from 'shared/explorer/devtool/testing';
+import type { IDevToolHarness, IFakeMirroredRealm, IFakeRealmCm, IPeerSpy } from 'shared/explorer/devtool/testing';
+import { announceFramePresence } from '../../../../packages/shell/src/components/workspace/busPeer';
 import { vectorRows, vectorWorld } from './vectorWorld';
 import type { ToolBehaviour } from './vectorWorld';
 
-/** One bus request the code under test made. */
+/** One request the code under test made to the realm's engine client. */
 export interface IBusRequest {
+	/** `client.<method>`: the name the request had when it rode the bus (kept so one vocabulary reads the same everywhere). */
 	op: string;
 	params: unknown;
+	/** The bus timeout a realm proxy would ask for (`tool`: the SDK timeout plus PROXY_BUS_SLACK_MS); undefined otherwise. */
 	timeoutMs: number | undefined;
 }
 
 /** A fake engine behind a fake realm. */
 export interface IEngineRealm {
-	/** The realm's ConnectionManager, with `request` routed to the engine. */
-	cm: IVectorRealm & { request(op: string, params: unknown, opts?: { timeoutMs?: number }): Promise<unknown> };
+	/** The realm's ConnectionManager; its `getClient()` is a realm client that also answers engine requests from the engine. */
+	cm: IVectorRealm & IFakeRealmCm;
 	/** The engine (task rows, tool behaviour, every tool call). */
 	world: IFakeWorld;
-	/** Every bus request, in order. */
+	/** Every engine request, in order. */
 	requests: IBusRequest[];
+	/** Runs before every engine request (hold, delay or fail one). */
+	before: { current: ((op: string) => Promise<void> | void) | null };
 }
 
 /** Everything a test mounted, disposed after each test (so a failing test leaves no timer keeping the run alive). */
@@ -71,45 +81,90 @@ export function disposeAll(): void {
 export const EMPTY_TASK_PAGE = { rows: [], total: 0, page: 1, pageSize: 100 };
 
 /**
- * Route a fake realm's bus requests to a fake engine.
+ * Give a fake realm an engine: its client keeps the realm's own account answers (the identity tracker reads them) and
+ * serves the engine requests from a fake world, as the realm's RocketRideClient does in production.
  *
  * @param base - The fake realm's manager.
  * @param world - The engine.
  * @returns The engine realm.
  */
-function withEngine(base: object, world: IFakeWorld): IEngineRealm {
+function withEngine(base: IFakeRealmCm, world: IFakeWorld): IEngineRealm {
 	const requests: IBusRequest[] = [];
-	const request = async (op: string, params: unknown, opts?: { timeoutMs?: number }): Promise<unknown> => {
-		requests.push({ op, params, timeoutMs: opts?.timeoutMs });
-		const p = (params ?? {}) as Record<string, unknown>;
-		switch (op) {
-			case 'client.getTasks':
-				return world.client.getTasks();
-			case 'client.listTasks':
-				return world.client.listTasks ? world.client.listTasks(p) : EMPTY_TASK_PAGE;
-			case 'client.getTaskPipeline':
-				return world.client.getTaskPipeline(p.token as string);
-			case 'client.tool':
-				return world.client.tool(p as never);
-			case 'client.addMonitor':
-			case 'client.removeMonitor':
-				return undefined;
-			default:
-				throw new Error(`No handler serves '${op}'`);
-		}
+	const before: IEngineRealm['before'] = { current: null };
+	const record = async (op: string, params: unknown, timeoutMs?: number): Promise<void> => {
+		requests.push({ op: `client.${op}`, params, timeoutMs });
+		await before.current?.(`client.${op}`);
 	};
-	return { cm: Object.assign(Object.create(null), base, { request }) as IEngineRealm['cm'], world, requests };
+	const never = (name: string) => async (): Promise<never> => {
+		throw new Error(`the Vector tests never call client.${name}`);
+	};
+	const files = new Map<string, unknown>();
+	const engineMethods: Omit<IRealmClient, 'getAccountInfo'> = {
+		getTasks: async () => {
+			await record('getTasks', {});
+			return world.client.getTasks();
+		},
+		listTasks: async (req) => {
+			await record('listTasks', req ?? {});
+			return world.client.listTasks ? world.client.listTasks((req ?? {}) as never) : EMPTY_TASK_PAGE;
+		},
+		getTaskPipeline: async (token) => {
+			await record('getTaskPipeline', { token });
+			return world.client.getTaskPipeline(token);
+		},
+		tool: async (options) => {
+			await record('tool', options, toolTransportTimeoutMs(options.timeout));
+			return world.client.tool(options as never) as never;
+		},
+		addMonitor: async (key, types) => {
+			await record('addMonitor', { key, types });
+		},
+		removeMonitor: async (key, types) => {
+			await record('removeMonitor', { key, types });
+		},
+		fsStat: async (path) => {
+			await record('fsStat', { path });
+			return { exists: files.has(path) };
+		},
+		fsReadJson: async (path) => {
+			await record('fsReadJson', { path });
+			return files.get(path) as never;
+		},
+		fsMkdir: async (path) => {
+			await record('fsMkdir', { path });
+		},
+		fsWriteJson: async (path, value) => {
+			await record('fsWriteJson', { path, value });
+			files.set(path, value);
+		},
+		use: never('use'),
+		getTaskToken: never('getTaskToken'),
+		terminate: never('terminate'),
+		getService: never('getService'),
+		validate: never('validate'),
+		account: { getEnvironmentKeys: never('account.getEnvironmentKeys') },
+	};
+	const cm = Object.assign(Object.create(null), base, {
+		// The realm's own client when it has one: its account answers, plus the engine requests.
+		getClient: () => {
+			const own = base.getClient() as { getAccountInfo(): unknown; isAuthenticated(): boolean } | null;
+			return own === null || own === undefined
+				? null
+				: Object.assign(Object.create(null), engineMethods, { getAccountInfo: () => own.getAccountInfo(), isAuthenticated: () => own.isAuthenticated() });
+		},
+	}) as IEngineRealm['cm'];
+	return { cm, world, requests, before };
 }
 
 /**
- * A VS Code realm (socketless: the sidebar mounts lazily) with an engine.
+ * A VS Code realm (a mirrored realm: the sidebar mounts lazily) with an engine.
  *
  * @param over - Per-tool answers that replace the defaults.
  * @param rows - The task rows.
  * @returns The realm and its engine.
  */
 export function vscodeRealm(over: Partial<Record<string, ToolBehaviour>> = {}, rows: IFakeRow[] = vectorRows()) {
-	const realm = createFakeSocketlessRealm();
+	const realm = createFakeMirroredRealm();
 	return { realm, ...withEngine(realm.cm, vectorWorld(over, rows)) };
 }
 
@@ -123,6 +178,37 @@ export function vscodeRealm(over: Partial<Record<string, ToolBehaviour>> = {}, r
 export function rocketRealm(over: Partial<Record<string, ToolBehaviour>> = {}, rows: IFakeRow[] = vectorRows()) {
 	const realm = createFakeClientRealm();
 	return { realm, ...withEngine(realm.cm, vectorWorld(over, rows)) };
+}
+
+/** What a realm's client is as the engine source sees it. */
+type EngineSourceCm = IVectorRealm & { getClient(): unknown; isConnected(): boolean; on(event: string, handler: (payload: never) => void): () => void };
+
+/** The shell events after which a realm's client or connection may have changed. */
+const READINESS_EVENTS = ['shell:connected', 'shell:disconnected', 'shell:statusChange', 'shell:login', 'shell:logout', 'shell:accountUpdate'] as const;
+
+/**
+ * What `useEngineSource()` does in production, without React: a getter over the realm's current client and a readiness
+ * store kept current from the realm's own events.
+ *
+ * @param cm - The realm.
+ * @returns The getter, the readiness and the unsubscribe.
+ */
+export function engineSource(cm: EngineSourceCm): { getClient: RealmClientGetter<IRealmClient>; readiness: IEngineReadiness; stop(): void } {
+	const facts = (): { client: unknown; isConnected: boolean } => ({ client: cm.getClient() ?? null, isConnected: cm.isConnected() });
+	const readiness = createEngineReadiness(facts());
+	const offs = READINESS_EVENTS.map((event) => cm.on(event, () => readiness.set(facts())));
+	return { getClient: () => (cm.getClient() as IRealmClient | null) ?? null, readiness, stop: () => offs.forEach((off) => off()) };
+}
+
+/**
+ * What a host does when a frame mounts (DevToolMount's effect): HELLO to the sidebar peer, which flips it to direct
+ * event delivery and flushes what it buffered. A frame that has not been announced hears no controller event.
+ *
+ * @param h - The harness.
+ * @returns Cleanup (says BYE).
+ */
+export function announceFrame(h: IDevToolHarness): () => void {
+	return announceFramePresence(h.appId, h.bus);
 }
 
 /** A documents API that records what was opened and closed. */
@@ -156,7 +242,8 @@ export interface IMountedController {
 
 /**
  * Mount the controller as a host does: the host's channel first, then the controller. A REMOUNT reuses the host's
- * peer and channel (both hosts build one channel per peer and keep it while the controller comes and goes).
+ * peer and channel (both hosts build one channel per peer and keep it while the controller comes and goes). A person
+ * is present by default (`present: true`); pass `present: false` for a pinned tool's boot mount.
  *
  * @param cm - The realm.
  * @param over - Controller options to override.
@@ -164,23 +251,28 @@ export interface IMountedController {
  * @param reuse - A previous mount whose peer spy and host channel to keep.
  * @returns The mount.
  */
-export function mountController(cm: IVectorRealm, over: Partial<IVectorControllerOptions> = {}, h: IDevToolHarness = createDevToolHarness(VECTOR_APP_ID), reuse?: IMountedController): IMountedController {
+export function mountController(cm: EngineSourceCm, over: Partial<IVectorControllerOptions> = {}, h: IDevToolHarness = createDevToolHarness(VECTOR_APP_ID), reuse?: IMountedController): IMountedController {
 	const spy = reuse?.spy ?? spyPeer(h.sidebarPeer);
 	const channel = reuse?.hostChannel ?? shellProtocol.createToolChannel(spy.peer);
 	const docs = recordingDocuments();
 	const errors: Array<{ where: string; error: unknown }> = [];
+	const source = engineSource(cm);
 	const controller = track(createVectorController({
 		cm,
-		peer: spy.peer,
 		channel,
+		getClient: source.getClient,
+		readiness: source.readiness,
 		documents: docs.documents,
-		createToolChannel: shellProtocol.createToolChannel,
 		createToolOpServer: shellProtocol.createToolOpServer,
 		focusTarget: null,
-		store: makeVectorEndpointStore({ debounceMs: 0 }),
+		present: true,
+		...(over.store ? {} : { endpointOptions: { debounceMs: 0 } }),
 		onError: (error, where) => errors.push({ where, error }),
 		...over,
 	}));
+	// The realm's listeners the source added go with the controller (the leak checks count them).
+	const dispose = controller.dispose.bind(controller);
+	Object.assign(controller, { dispose: () => { source.stop(); dispose(); } });
 	return { h, spy, hostChannel: channel, controller, docs, errors };
 }
 
@@ -246,7 +338,7 @@ export async function until(predicate: () => boolean, what: string, rounds = 80)
  * @param realm - The realm.
  * @param userId - The user.
  */
-export function signInVsCode(realm: ReturnType<typeof createFakeSocketlessRealm>, userId = 'u1'): void {
+export function signInVsCode(realm: IFakeMirroredRealm, userId = 'u1'): void {
 	realm.root.connect(account(userId));
 }
 

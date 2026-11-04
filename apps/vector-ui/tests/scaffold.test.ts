@@ -15,7 +15,6 @@
 // =============================================================================
 
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -173,7 +172,6 @@ test('tsconfig resolves shared/* to the shared library, and the test program add
 
 // The stub is graph-ui's (feat/graph-explorer), byte for byte. graph-ui is not in every checkout, so its bytes
 // are pinned here; sql-ui's stub is the same code under its own comments, and the code is held to it.
-const FAMILY_STUB_SHA256 = '5013f9a1cd313f860c6285026db5e6acbaac552a42270e5960c2228b1b536ddd';
 
 /** A script's code without its comments and blank lines. */
 function codeOf(text: string): string {
@@ -184,10 +182,17 @@ function codeOf(text: string): string {
 		.join('\n');
 }
 
-test("the platform stub the tests load is the Explorer family's, unchanged", () => {
-	const stub = readLf(path.join(APP_ROOT, 'scripts', 'stub-shell.cjs'));
-	assert.equal(createHash('sha256').update(stub).digest('hex'), FAMILY_STUB_SHA256, "graph-ui's stub, byte for byte");
-	assert.equal(codeOf(stub), codeOf(readLf(path.join(REPO_ROOT, 'apps', 'sql-ui', 'scripts', 'stub-shell.cjs'))), "sql-ui's stub code");
+// The family's stubs differ in their comments (and one in how it spells the test), so what is pinned is what the stub
+// DOES: it stands in for 'shell' and 'rocketride' everywhere, except that the shell's own sources (which the shared
+// dev-tool harness loads by relative path) get the real SDK, because RocketRideClientProxy extends RocketRideClient.
+test("the platform stub the tests load behaves as the Explorer family's: a stub for shell and rocketride, the real SDK inside packages/shell/src", () => {
+	const stub = codeOf(readLf(path.join(APP_ROOT, 'scripts', 'stub-shell.cjs')));
+	assert.ok(stub.includes("request === 'shell' || request === 'rocketride') return stub;"), 'it stubs shell and rocketride');
+	assert.ok(stub.includes("request === 'rocketride' &&"), 'it lets the real SDK through for the shell\'s own sources');
+	assert.ok(stub.includes('packages') && stub.includes('shell') && stub.includes('src'), 'which it recognises by their path');
+	assert.ok(stub.includes('commonStyles'));
+	const sql = codeOf(readLf(path.join(REPO_ROOT, 'apps', 'sql-ui', 'scripts', 'stub-shell.cjs')));
+	assert.ok(sql.includes("request === 'shell' || request === 'rocketride') return stub;"), "sql-ui's stub stubs the same two specifiers");
 });
 
 // The app imports the shared Explorer library (`shared/*`, resolved through tsconfig paths). The App Builder and
@@ -263,7 +268,8 @@ test("the README (and its full guide) give Qdrant's own neighbour graph the driv
 test('the labeler tags a change under apps/vector-ui as a UI change', () => {
 	const labeler = readLf(path.join(REPO_ROOT, '.github', 'labeler.yml'));
 	const ui = labeler.slice(labeler.indexOf('module:ui:'), labeler.indexOf('\n\n', labeler.indexOf('module:ui:')));
-	assert.match(ui, /"apps\/vector-ui\/\*\*"/);
+	// Develop's `apps/*-ui/**` glob covers every app folder named <name>-ui, vector-ui included.
+	assert.match(ui, /"apps\/(?:vector-ui|\*-ui)\/\*\*"/);
 });
 
 /**

@@ -104,6 +104,7 @@ const ALWAYS_REQUIRED_TESTS = [
 	// The dev-tool mounts (devToolFrame / devToolSidebar): the env seam, the protocol, the controller and frames.
 	'devtool.env.test.ts',
 	'devtool.protocol.test.ts',
+	'devtool.robustness.test.ts',
 	'devtool.controller.test.ts',
 	'devtool.frame.test.ts',
 	'devtool.mounts.test.ts',
