@@ -20,7 +20,7 @@ import { registerVscodeClientOverrides } from './clientOverrides';
 import { registerVscodeHostOps } from './hostOps';
 import { registerVscodeSettingsOps } from './settingsOps';
 import { registerVscodeAppDevOps } from './appdevOps';
-import { registerVscodeAppBuilderOps } from './appBuilderOps';
+import { registerVscodePreviewOps } from './previewOps';
 import type { ISettingsOpsController } from './settingsOps';
 
 /**
@@ -37,14 +37,10 @@ import type { ISettingsOpsController } from './settingsOps';
  * @returns The settings controller the extension wires to the Welcome and
  *          Settings FrameworkProvider lifecycle hooks.
  */
-export function registerVscodeOps(busHost: BusHost, context: vscode.ExtensionContext): ISettingsOpsController {
+export function registerVscodeOps(busHost: BusHost, context: vscode.ExtensionContext, deps: { closeWizard: () => void }): ISettingsOpsController {
 	busHost.registerMonitorBroker();
 	registerVscodeClientOverrides(busHost.rootBus, busHost.connectionManager);
-	registerClientOps(busHost.rootBus, busHost.connectionManager, {
-		// Stripe portal/checkout return target: the webview's own origin is
-		// never valid, so the HOST decides — the public site.
-		portalReturnUrl: () => 'https://rocketride.ai',
-	});
+	registerClientOps(busHost.rootBus, busHost.connectionManager);
 	registerVscodeHostOps(busHost.rootBus, {
 		context,
 		connectionManager: busHost.connectionManager,
@@ -54,8 +50,9 @@ export function registerVscodeOps(busHost: BusHost, context: vscode.ExtensionCon
 		context,
 		connectionManager: busHost.connectionManager,
 		broadcast: (op, params) => busHost.broadcastEmitOp(op, params),
+		closeWizard: deps.closeWizard,
 	});
-	registerVscodeAppBuilderOps(busHost.rootBus, {
+	registerVscodePreviewOps(busHost.rootBus, {
 		context,
 		connectionManager: busHost.connectionManager,
 		retained: busHost.retained,

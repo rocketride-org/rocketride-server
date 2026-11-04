@@ -36,17 +36,31 @@
 //                    `restart` additionally asks for a re-probe, because the
 //                    node behind the same token may have changed.
 //   window focus     `focus` and `visibilitychange` (the store rate-limits).
-//   identity         `shell:logout`, `shell:login`, `shell:accountUpdate`,
-//                    `shell:orgChanged`: a sign-out or a different user /
-//                    organization / team resets everything the store holds.
-//   reconnect        `shell:connected`: events were missed while down.
+//   identity         the identity tracker (devtool/identity.ts): a sign-out or
+//                    a different user / organization / team resets everything
+//                    the store holds. NOT the shell's login / logout / org
+//                    events: those fire only in the realm that owns the socket,
+//                    never in a mirrored (VS Code webview) realm, whose sign-out
+//                    arrives as the root's account topic going null. The tracker
+//                    follows that topic where the bus has it, and the realm
+//                    client otherwise.
+//   reconnect        `shell:connected`: emitted in both realm kinds (the
+//                    socket-owning one on its handshake, a mirrored one when the
+//                    root's status mirror turns connected): events were missed.
+//
+// Task events (`shell:event`) reach a mirrored realm too: the VS Code host
+// broadcasts the root's events as `mirror.event`, and each webview realm
+// re-emits them as `shell:event` (busRealm.ts). The monitor that produces them
+// is registered at the root through the realm client (`addMonitor`).
 //
 // Everything it registers is removed by the returned function.
 // =============================================================================
 
 import { ConnectionManager } from 'shell';
+import type { ShellEventMap } from 'shell';
 import { isPlainObject } from './checks';
-import { identityFromConnectResult } from './connect/identity';
+import { createIdentityTracker } from './devtool/identity';
+import type { IIdentityBus, IdentityEvent } from './devtool/identity';
 import type { EndpointWatch } from './connect/store';
 import type { IExplorerClient } from './types';
 
@@ -54,15 +68,22 @@ import type { IExplorerClient } from './types';
 const TASK_MONITOR_KEY = { token: '*' };
 const TASK_MONITOR_TYPES = ['task'];
 
+/** What the watch needs from a realm's ConnectionManager (structural: any realm's fits). */
+export interface IShellWatchBus extends Omit<IIdentityBus, 'on'> {
+	/** Follow a shell event; returns the unsubscribe function. */
+	on<K extends IdentityEvent | 'shell:event'>(event: K, handler: (payload: ShellEventMap[K]) => void): () => void;
+}
+
 /**
  * Build the watch an endpoint store attaches with.
  *
  * @param client - The shell's client (its monitors are ref-counted).
+ * @param bus - The realm's ConnectionManager (default: the singleton; tests pass a fake realm's).
  * @returns A watch for `store.attach(client, identity, watch)`.
  */
-export function createShellWatch(client: IExplorerClient): EndpointWatch {
+export function createShellWatch(client: IExplorerClient, bus?: IShellWatchBus): EndpointWatch {
 	return (handlers) => {
-		const manager = ConnectionManager.getInstance();
+		const manager = bus ?? (ConnectionManager.getInstance() as unknown as IShellWatchBus);
 		const unsubscribers: Array<() => void> = [];
 
 		// Task events only flow once a task monitor exists; a failure to register
@@ -75,12 +96,12 @@ export function createShellWatch(client: IExplorerClient): EndpointWatch {
 			const body = isPlainObject(message.body) ? message.body : null;
 			handlers.onTaskEvent({ reprobe: body?.action === 'restart' });
 		}));
-		unsubscribers.push(manager.on('shell:logout', () => handlers.onIdentity(null)));
-		unsubscribers.push(manager.on('shell:login', ({ user }) => handlers.onIdentity(identityFromConnectResult(user))));
-		unsubscribers.push(manager.on('shell:accountUpdate', (account) => handlers.onIdentity(identityFromConnectResult(account))));
-		// A pure notification: the new organization's identity arrives with the
-		// next login/account event, and everything held for the old one is stale now.
-		unsubscribers.push(manager.on('shell:orgChanged', () => handlers.onIdentity(null)));
+		// Identity: the tracker, which handles both realm kinds (see the header).
+		// It starts unknown until its first read answers, so the first snapshot is
+		// ignored unless it differs from what the store was attached with.
+		const tracker = createIdentityTracker({ cm: manager });
+		unsubscribers.push(tracker.subscribe((snapshot) => handlers.onIdentity(snapshot.identity)));
+		unsubscribers.push(() => tracker.dispose());
 		unsubscribers.push(manager.on('shell:connected', () => handlers.onReconnect()));
 
 		const onVisible = (): void => {

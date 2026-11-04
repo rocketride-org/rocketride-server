@@ -50,7 +50,9 @@
 #include <thread>
 #include <vector>
 
-#if ROCKETRIDE_PLAT_MAC
+#if ROCKETRIDE_PLAT_LIN
+#include <sys/prctl.h>
+#elif ROCKETRIDE_PLAT_MAC
 #include <mach/mach.h>
 #include <sys/proc.h>
 #include <sys/sysctl.h>
@@ -488,6 +490,13 @@ public:
         // More memory: Crashpad has no full-memory flag; nominate ranges via
         // CrashpadInfo::set_extra_memory_ranges() (gated on Heap/IsDebug like
         // plat/win/minidump.hpp) when a buffer worth capturing exists.
+
+#if ROCKETRIDE_PLAT_LIN
+        // An execute-only engine on a host with fs.suid_dumpable=2 starts with
+        // its dumpable flag at 2, and Crashpad lifts it for a dump only from 0
+        // (#2782). 0 closes the process as 2 does.
+        if (::prctl(PR_GET_DUMPABLE) == 2) ::prctl(PR_SET_DUMPABLE, 0);
+#endif
 
         bool ok = m_client.StartHandler(
             internal::toFilePath(handlerPath),

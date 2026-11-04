@@ -277,6 +277,8 @@ export function guardRetainedState(channel: ToolChannel, opts: IStateGuardOption
 		onState: (topic, cb) => channel.onState(topic, cb),
 		sendEvent: (name, payload) => channel.sendEvent(name, payload),
 		onEvent: (name, cb) => channel.onEvent(name, cb),
+		call: (op, args, opts) => channel.call(op, args, opts),
+		serveOp: (op, handler) => channel.serveOp(op, handler),
 		retainedBytes: () => ({ total: total(), byTopic: { ...sizes } }),
 	};
 }

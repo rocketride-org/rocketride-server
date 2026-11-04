@@ -59,6 +59,7 @@ import { commonStyles } from './themes/styles';
 
 // Hooks
 import { useShellConnection } from './connection/ConnectionContext';
+import { useShellApiKey } from './ops/hostOps';
 import { useAuthUser, useLogout } from './hooks/useAuthUser';
 import { useWorkspace } from './components/workspace/WorkspaceContext';
 import { useClient } from './hooks/useClient';
@@ -93,7 +94,7 @@ import { useAppState, AppStateProvider } from './components/contexts/AppStateCon
 // them as lazy getters (the freeze fingerprints VALUE names off shellApi's
 // members; a standalone re-export is invisible to it).
 import { createToolChannel, asToolStateMessage, asToolEventMessage } from './components/workspace/toolChannel';
-import { createToolController, createToolOpServer, asToolCallMessage, asToolReplyMessage, DEFAULT_OP_TIMEOUT_MS } from './components/workspace/toolOps';
+import { createToolOpClient, createToolOpServer, asToolCallMessage, asToolReplyMessage, DEFAULT_OP_TIMEOUT_MS } from './components/workspace/toolOps';
 import { typedToolChannel, useToolState, useConnectionReady, publishHostConnectionState, HOST_CONNECTION_TOPIC } from './components/workspace/toolProtocol';
 import { typedPrefs, scopedPrefs, createMirroredPrefsStore, createPrefsHub, realmPrefsHub, usePref } from './components/workspace/prefsStore';
 import { ToolHostProvider, useToolHost, createLoopbackPeer } from './components/workspace/toolHost';
@@ -103,7 +104,7 @@ import { createRetainedRegistry, localRetainedPort } from './ops/retained';
 import { registerClientOps } from './ops/clientOps';
 import { useGridConfigAnswering } from './components/data-grid/gridConfigAnswering';
 import { hostConnectionPayload, TOOL_RELAY_BUFFER_LIMIT } from './components/workspace/toolRelay';
-import { createSidebarBusPeer, createFrameBusPeer } from './components/workspace/busPeer';
+import { createSidebarBusPeer, createFrameBusPeer, announceFramePresence } from './components/workspace/busPeer';
 import { toolDocUri, parseToolDocUri, activeDocKeyFor, TOOL_DOC_PREFIX } from './components/workspace/toolDocUri';
 
 // Auth providers
@@ -178,13 +179,26 @@ import { BxPlus, BxEditAlt, BxTrash, BxDesktop, BxGridAlt, BxCog, BxListUl, BxSt
 // =============================================================================
 
 // Shell component prop contracts + workspace/config types
-export type { ShellAppProps, AppDescriptor, DevToolProps, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
+export type { ShellAppProps, AppDescriptor, DevToolProps, AppManifestEntry, ShellConfig, ShellApiConfig, WorkspacePrefs, WorkspaceState, AppWorkspaceState, SettingValue, SettingSchema, SettingStore, AppConfiguration, ShellBrandingConfig, ShellThemeConfig, ShellThemeOption, ShellAccountConfig } from './components/workspace/types';
+
+// Settings — contributions are REGISTERED (builtin/dev tools, host blocks;
+// registration, not discovery) and the registry flattens them with the app
+// manifest. settingStoreOf normalizes a schema's store declaration.
+export { registerSettings, getSettingsContributions, onSettingsContributionsChanged } from './components/workspace/settingsContributions';
+export type { SettingsContribution } from './components/workspace/settingsContributions';
+export { buildSettingsRegistry, effectiveSettings, settingStoreOf, labelFromKey, SHELL_SECTION_ID } from './components/workspace/settingsRegistry';
+export type { SettingsRegistry, RegistrySection, RegistryEntry, RegistryBuildOptions, ShellKind } from './components/workspace/settingsRegistry';
+// The ONE settings surface: the cloud overlay wraps it (SettingsProvider);
+// VS Code renders it as an editor tab over its mirrored stores, with its
+// Connections sections injected as self-managed rich sections.
+export { SettingsPage } from './providers/SettingsProvider';
+export type { SettingsPageProps, SettingsRichSection, SettingsHostStore, ISettingsProviderProps, ISettingsRichContext } from './providers/SettingsProvider';
 
 // Tool channel — the typed state/event surface between a tool's controller
 // (devToolSidebar) and its document views (devToolFrame). Hosts construct it
 // over the peer transport; tools receive it as DevToolProps.channel.
 export { createToolChannel, asToolStateMessage, asToolEventMessage } from './components/workspace/toolChannel';
-export type { ToolChannel, ToolChannelUnsubscribe, IToolStateMessage, IToolEventMessage } from './components/workspace/toolChannel';
+export type { ToolChannel, ToolChannelUnsubscribe, IToolStateMessage, IToolEventMessage, IToolPeer } from './components/workspace/toolChannel';
 
 // Tool protocol — typed protocol maps over the tool channel (the ShellEventMap
 // pattern per tool): the host-owned base state map (`host:*` reserved), each
@@ -197,13 +211,9 @@ export type { ToolStateMap, ToolEventMap, TypedToolChannel, IHostConnectionState
 // its sidebar controller, typed by the tool's op map. The call/reply wire
 // guards are for host relays (calls are never retained, replies never
 // buffered or summoning).
-export { createToolController, createToolOpServer, asToolCallMessage, asToolReplyMessage, DEFAULT_OP_TIMEOUT_MS } from './components/workspace/toolOps';
+export { createToolOpClient, createToolOpServer, asToolCallMessage, asToolReplyMessage, DEFAULT_OP_TIMEOUT_MS } from './components/workspace/toolOps';
 export type { ToolOpMap, ToolOpSpec, ToolOpParams, ToolOpResult, ToolControllerFn, IToolOpServer, IToolCallOptions, IToolCallMessage, IToolReplyMessage } from './components/workspace/toolOps';
 
-// Workspace prefs store — the host framework's persisted-preference seam:
-// the shell types its SYSTEM partition (ShellPrefsMap); each app privately
-// types its own keys and receives a pre-scoped partition (scopedPrefs) —
-// isolation by construction, no shared flat bag.
 export { useLatest } from './hooks/useLatest';
 // The shell's own confirmation dialog — realm UI, usable by any tool
 // without a host capability (ToolHostServices.confirm is deprecated).
@@ -214,6 +224,10 @@ export type { ChoiceDialogRequest } from './components/modal/confirmService';
 // a dirty document offers Save / Discard / Cancel).
 export { ChoiceDialog } from './components/modal/ChoiceDialog';
 export type { IChoiceOption, IChoiceDialogProps } from './components/modal/ChoiceDialog';
+// Workspace prefs store — the host framework's persisted-preference seam:
+// the shell types its SYSTEM partition (ShellPrefsMap); each app privately
+// types its own keys and receives a pre-scoped partition (scopedPrefs) —
+// isolation by construction, no shared flat bag.
 export { typedPrefs, scopedPrefs, createMirroredPrefsStore, createPrefsHub, realmPrefsHub, prefsTopic, usePref } from './components/workspace/prefsStore';
 export type { IPrefsBus, IPrefsHub } from './components/workspace/prefsStore';
 export { useGridConfigAnswering } from './components/data-grid/gridConfigAnswering';
@@ -229,13 +243,13 @@ export type { ToolHostServices } from './components/workspace/toolHost';
 // (vscode: real files; rocket-ui: the staged store view). All-async.
 export type { WorkspaceFs, ChangeKind, CommitResult, StagedConflict, LayerMeta, PendingState } from './workspace/workspaceFs';
 export { StaleWriteError, globToRegExp } from './workspace/workspaceFs';
-export { createWorkspaceFs } from './workspace/workspaceFsClient';
-export type { IWorkspaceFsBus } from './workspace/workspaceFsClient';
+export { createWorkspaceFs } from './ops/workspaceFsClient';
+export type { IWorkspaceFsBus } from './ops/workspaceFsClient';
 
 // Tool relay — the ONE relay policy between a tool's two mounts (hosts wire
 // transport + scheduling; the relay decides retention/buffering/summon).
 export { hostConnectionPayload, TOOL_RELAY_BUFFER_LIMIT } from './components/workspace/toolRelay';
-export { createSidebarBusPeer, createFrameBusPeer } from './components/workspace/busPeer';
+export { createSidebarBusPeer, createFrameBusPeer, announceFramePresence } from './components/workspace/busPeer';
 
 // Tool document URIs — the `tool:<appId>[/<docKey>]` convention, spelled once.
 export { toolDocUri, parseToolDocUri, activeDocKeyFor, TOOL_DOC_PREFIX } from './components/workspace/toolDocUri';
@@ -285,6 +299,7 @@ export type * from 'rocketride';
 
 // Connection manager standalone types
 export type { InitOptions, DebugLogEntry } from './connection/connection';
+export type { ShellApiKeyState } from './ops/hostOps';
 
 // Auth identity type (ConnectResult aliased as AuthUser)
 export type { AuthUser } from './hooks/useAuthUser';
@@ -358,7 +373,7 @@ import { SidebarMenu } from './components/sidebar-menu/SidebarMenu';
 import { SidebarCollapsedProvider, SidebarCollapsedGate, useSidebarCollapsed } from './components/sidebar-menu/SidebarCollapsedContext';
 import { SidebarActiveViewProvider, useSidebarActiveView } from './components/sidebar-menu/SidebarActiveViewContext';
 import { viewsFromMenu, menuSectionEntries } from './components/sidebar-menu/viewsFromMenu';
-import { SidebarFooter } from './components/sidebar-footer/SidebarFooter';
+import { SidebarFooter, SidebarFooterExtras } from './components/sidebar-footer/SidebarFooter';
 import { DataGrid } from './components/data-grid/DataGrid';
 import { CardDataGrid } from './components/data-grid/CardDataGrid';
 import { FilterStrip } from './components/data-grid/FilterStrip';
@@ -397,7 +412,7 @@ export {
 	acquireOverlayLayer, isTopOverlayLayer, releaseOverlayLayer,
 	SaveFileDialog,
 	SidebarMenu, SidebarCollapsedProvider, SidebarCollapsedGate,
-	useSidebarCollapsed, SidebarFooter,
+	useSidebarCollapsed, SidebarFooter, SidebarFooterExtras,
 	// Workbench sidebar modes ('vscode'/'cursor'): the active-view channel
 	// shared sidebar content reads when the shell rail owns the selection.
 	SidebarActiveViewProvider, useSidebarActiveView,
@@ -557,6 +572,7 @@ export const shellApi = {
 	get SidebarActiveViewProvider() { return SidebarActiveViewProvider; },
 	get useSidebarActiveView() { return useSidebarActiveView; },
 	get SidebarFooter() { return SidebarFooter; },
+	get SidebarFooterExtras() { return SidebarFooterExtras; },
 	get DataGrid() { return DataGrid; },
 	get CardDataGrid() { return CardDataGrid; },
 	get FilterStrip() { return FilterStrip; },
@@ -579,6 +595,7 @@ export const shellApi = {
 	get formatDuration() { return formatDuration; },
 	get commonStyles() { return commonStyles; },
 	get useShellConnection() { return useShellConnection; },
+	get useShellApiKey() { return useShellApiKey; },
 	get useAuthUser() { return useAuthUser; },
 	get useLogout() { return useLogout; },
 	get useWorkspace() { return useWorkspace; },
@@ -591,7 +608,7 @@ export const shellApi = {
 	get createToolChannel() { return createToolChannel; },
 	get asToolStateMessage() { return asToolStateMessage; },
 	get asToolEventMessage() { return asToolEventMessage; },
-	get createToolController() { return createToolController; },
+	get createToolOpClient() { return createToolOpClient; },
 	get createToolOpServer() { return createToolOpServer; },
 	get asToolCallMessage() { return asToolCallMessage; },
 	get asToolReplyMessage() { return asToolReplyMessage; },
@@ -615,6 +632,7 @@ export const shellApi = {
 	get TOOL_RELAY_BUFFER_LIMIT() { return TOOL_RELAY_BUFFER_LIMIT; },
 	get createSidebarBusPeer() { return createSidebarBusPeer; },
 	get createFrameBusPeer() { return createFrameBusPeer; },
+	get announceFramePresence() { return announceFramePresence; },
 	get toolDocUri() { return toolDocUri; },
 	get parseToolDocUri() { return parseToolDocUri; },
 	get activeDocKeyFor() { return activeDocKeyFor; },
@@ -711,7 +729,7 @@ export const shellApi = {
 // additions are append-only, exactly like the object.
 export {
 	// Hooks
-	useShellConnection, useAuthUser, useLogout, useWorkspace, useClient,
+	useShellConnection, useShellApiKey, useAuthUser, useLogout, useWorkspace, useClient,
 	useShellEvent, useIframeBridge, useSubscriptions, usePolling,
 	useConnectionStatus, useShellApiConfig, useAppComponent,
 	useClickOutside, useFixedPopupPosition, usePrefs, useAppState,

@@ -51,11 +51,12 @@
 //   busOps.ts       "Op '<op>' timed out after <n>ms"               -> timeout
 //   busBridge.ts    "… (bridged)" / "… (routed to <host>)"          -> timeout
 //   clientOps.ts    "Not connected to server"                       -> unavailable
+//   SDK request     "Request timed out after <n>ms"                 -> timeout
 //
 // Everything else is `raised`, message verbatim. A `code` is copied only when
-// the thrown value carries one (the SDK's DAPException, in a realm that has
-// the client); it is never parsed out of text (R10). Over the VS Code bridge
-// the controller's own `client.tool` failures arrive without one.
+// the thrown value carries one (the SDK's DAPException; the realm client
+// rebuilds it across the shell bus, errorWire.ts); it is never parsed out of
+// text (R10).
 // =============================================================================
 
 import { ExplorerToolError, readErrorCode, readErrorMessage } from '../errors';
@@ -113,6 +114,9 @@ const OP_LANE_TIMEOUT = /^'[^']*' did not answer within \d+s;/;
 /** The bus lane's timeout (busOps.ts, busBridge.ts): `Op '<op>' timed out after <n>ms[ (…)]`. */
 const BUS_LANE_TIMEOUT = /^Op '[^']*' timed out after \d+ms(?: \([^)]*\))?$/;
 
+/** The SDK's own request timeout (DAPClient.ts request): a plain Error, so only its text identifies it. */
+const SDK_REQUEST_TIMEOUT = /^Request timed out after \d+ms$/;
+
 /** The brokered client's not-connected refusal (clientOps.ts). */
 const NOT_CONNECTED = 'Not connected to server';
 
@@ -120,10 +124,10 @@ const NOT_CONNECTED = 'Not connected to server';
  * Whether a message is one of the lanes' own timeout texts.
  *
  * @param message - The message.
- * @returns True for an op-lane or bus-lane timeout.
+ * @returns True for an op-lane, bus-lane or SDK request timeout.
  */
 export function isLaneTimeoutText(message: string): boolean {
-	return OP_LANE_TIMEOUT.test(message) || BUS_LANE_TIMEOUT.test(message);
+	return OP_LANE_TIMEOUT.test(message) || BUS_LANE_TIMEOUT.test(message) || SDK_REQUEST_TIMEOUT.test(message);
 }
 
 /**

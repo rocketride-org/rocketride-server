@@ -110,13 +110,14 @@ describe('createControllerSummon', () => {
 		summon.dispose();
 	});
 
-	it('re-sends a bounded number of times while no controller answers (a sidebar peer armed late), and busPeer still asks the host once per hold', async () => {
+	it('re-sends ONCE per episode while no controller answers (a sidebar peer armed late), never on a ladder, and busPeer still asks the host once per hold', async () => {
 		const h = createDevToolHarness(APP, { json: true });
 		const timers = manualTimers();
 		const summon = createControllerSummon({ channel: shellProtocol.createToolChannel(h.newFramePeer()), schedule: timers.schedule });
 		timers.advance(SUMMON_SETTLE_MS + SUMMON_RETRY_MS.reduce((sum, ms) => sum + ms, 0) + 60_000);
 		await settle();
-		assert.equal(summon.sent(), 1 + SUMMON_RETRY_MS.length);
+		assert.deepEqual(SUMMON_RETRY_MS.length, 1, 'one retry');
+		assert.equal(summon.sent(), 2, 'the first send and its one retry');
 		assert.equal(timers.pending(), 0, 'nothing left scheduled');
 		assert.equal(mountRequests(h).length, 1, 'one mount request per hold period');
 		summon.dispose();
@@ -125,8 +126,7 @@ describe('createControllerSummon', () => {
 	it('a frame whose controller is already up sends nothing', async () => {
 		const h = createDevToolHarness(APP, { json: true });
 		const attached = attachController<SummonOps>({
-			peer: h.sidebarPeer,
-			createToolChannel: shellProtocol.createToolChannel,
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
 			createToolOpServer: shellProtocol.createToolOpServer,
 			handlers: { 's.read': (params) => toReply(() => params.key) },
 		});
@@ -151,13 +151,12 @@ describe('createControllerSummon', () => {
 		await settle();
 		assert.equal(summon.sent(), 1);
 
-		// The host mounts the controller as both hosts do: its channel first, then the op server.
+		// The host mounts the controller as both hosts do: its channel first (built at render, which flushes the held event into it), then the op server.
+		const channel = shellProtocol.createToolChannel(h.sidebarPeer);
 		const handled: string[] = [];
 		const refused: unknown[] = [];
 		const attached = attachController<SummonOps>({
-			peer: h.sidebarPeer,
-			channel: shellProtocol.createToolChannel(h.sidebarPeer),
-			createToolChannel: shellProtocol.createToolChannel,
+			channel,
 			createToolOpServer: shellProtocol.createToolOpServer,
 			handlers: { 's.read': (params) => toReply(() => { handled.push(params.key); return params.key; }) },
 			onRefused: (error) => refused.push(error),

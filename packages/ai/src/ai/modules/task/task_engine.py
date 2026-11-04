@@ -18,7 +18,7 @@ Classes:
     Task: Main pipeline task execution and lifecycle management
 
 Constants:
-    CONST_DEFAULT_MAX_THREADS: Default thread pool size (4)
+    CONST_DEFAULT_MAX_THREADS: Default thread pool size (64)
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS: Graceful termination timeout (5s)
     CONST_STATUS_UPDATE_FREQ: Status update frequency (100ms)
     CONST_MAX_READY_TIME: Maximum time to wait for task readiness (30s)
@@ -38,10 +38,11 @@ import socket
 import hashlib
 import shlex
 import shutil
-from typing import TYPE_CHECKING, Callable, Dict, Any, List, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Awaitable, Callable, Dict, Any, List, Mapping, Optional, Tuple
 from tenacity import retry, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, warning, args as startup_args
+from hosting import HOSTED_FLAG, SHARED_HOST_FLAG
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
     CONST_CANCEL_WAIT_TIMEOUT_SECONDS,
@@ -70,7 +71,7 @@ from rocketride import (
     EVENT_TYPE,
 )
 from .dbg_stdio import DbgStdio
-from .pipeline import resolve_pipeline_env
+from .pipeline import references_env, resolve_pipeline_env
 from .types import LAUNCH_TYPE, TaskError
 from .task_conn import TaskConn
 from .task_metrics import TaskMetrics
@@ -320,17 +321,20 @@ def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
 # Nodes a hosted (SaaS) engine refuses to launch. The canvas already hides
 # `nosaas` services, but a pipeline can reach the engine without the canvas,
 # so the engine enforces the same rule itself. Any service built on the MCP
-# client node is refused in stdio mode: that transport launches a command
-# inside the engine's container. Its HTTP transports are fine. Matching is on
-# the node module, not the provider name: several services share the node
-# (tool_butterbase is one) and provider lookup is case-insensitive.
+# client node is refused in stdio mode while the task shares the engine's
+# host: that transport launches a command there. Its HTTP transports are
+# fine. Matching is on the node module, not the provider name: several
+# services share the node (tool_butterbase is one) and provider lookup is
+# case-insensitive.
 CONST_SAAS_BLOCKED_CAPABILITY = 'nosaas'
 CONST_MCP_CLIENT_NODE_PATH = 'nodes.tool_mcp_client'
 
-# Task subprocesses of a hosted engine get this flag on their command line.
-# Pipeline-supplied args can add flags but not remove this one, so nodes can
-# rely on it (the MCP stdio client refuses to start when it is present).
-CONST_HOSTED_CHILD_FLAG = '--hosted'
+# Task subprocesses of a hosted engine get these flags on their command line
+# (see the hosting module): --hosted always, --shared-host when the task shares
+# the engine's host. Pipeline-supplied args can add flags but not remove these,
+# so the task can rely on them.
+CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
+CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
 
 
 def _service_capabilities(service: Any) -> List[str]:
@@ -345,6 +349,7 @@ def saas_pipeline_violation(
     pipeline: Dict[str, Any],
     get_service: Callable[[str], Any],
     get_node_config: Callable[[str, Dict[str, Any]], Dict[str, Any]],
+    shared_host: bool = True,
 ) -> Optional[str]:
     """Return why a hosted engine must refuse ``pipeline``, or None if it may run.
 
@@ -352,7 +357,8 @@ def saas_pipeline_violation(
     and ``Config.getNodeConfig`` in production. The MCP transport is resolved the
     way the node resolves it (profile defaults merged under the component config),
     because the default profile is itself stdio. Anything that cannot be resolved
-    is refused.
+    is refused. ``shared_host`` says the task will share the engine's host (the
+    task's ``--shared-host``); only then is stdio MCP refused.
     """
     for component in pipeline.get('components', []) or []:
         provider = str(component.get('provider') or '')
@@ -362,7 +368,7 @@ def saas_pipeline_violation(
         if CONST_SAAS_BLOCKED_CAPABILITY in _service_capabilities(service):
             return f'Node "{label}" ({provider}) is not available on RocketRide Cloud.'
 
-        if str((service or {}).get('path') or '').lower() == CONST_MCP_CLIENT_NODE_PATH:
+        if shared_host and str((service or {}).get('path') or '').lower() == CONST_MCP_CLIENT_NODE_PATH:
             try:
                 transport = str(get_node_config(provider, component.get('config') or {}).get('transport') or 'stdio')
             except Exception:
@@ -535,6 +541,7 @@ class Task(DAPBase):
         run_kind: str = 'dev',
         owner_kind: str = '',
         trigger: str = 'manual',
+        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]] = None,
         **kwargs,
     ) -> None:
         """
@@ -550,6 +557,9 @@ class Task(DAPBase):
             client_id: Account identifier for store access scoping
             team_id: Owning team id (rides the task file as trusted identity)
             org_id: Owning org id (rides the task file as trusted identity)
+            env: Fixed values for ${...} placeholders, used when no env_source is given
+            env_source: Returns the values for ${...} placeholders. Called at every
+                start and restart, so the values live only while the pipeline is resolved
             run_kind: Run classification ('dev' | 'deploy') — picks the
                 run-log continuum; only the trusted dispatch sets 'deploy'
             trigger: What fired the run ('' | 'manual' | 'schedule');
@@ -620,6 +630,9 @@ class Task(DAPBase):
         # Lifecycle state
         self._tmpfile = None
         self._stop_requested = False
+        # Bumped by every stop_task, so a restart can tell whether a stop arrived
+        # while it loaded, even on a task whose last run was already stopped
+        self._stop_count = 0
         # WHY the stop was requested ('user' | 'ttl'); None until requested.
         # A ttl-window expiry is SUCCESS (the run stayed up exactly as
         # configured), so the run-log outcome derives from this.
@@ -705,6 +718,8 @@ class Task(DAPBase):
 
         # Termination management
         self._is_restarting = False
+        # One restart at a time: two would share _restart_env and _is_restarting
+        self._restart_in_progress = False
         self._is_terminating = False
         self._termination_lock = asyncio.Lock()
 
@@ -712,17 +727,39 @@ class Task(DAPBase):
         self._launch_args = launch_args
         self._launch_type: LAUNCH_TYPE = launch_type
         self._pipeline: Dict[str, Any] = pipeline
-        self._env: Dict[str, str] = env or {}
+        # Where ${...} placeholders resolve from. The values are loaded at each
+        # (re)start and dropped once the task file is written, so decrypted
+        # variables are not held for the task's lifetime.
+        if env_source is None:
+            fixed_env = dict(env or {})
+
+            async def env_source() -> Dict[str, str]:
+                return dict(fixed_env)
+
+        self._env_source = env_source
+
+        # Values a restart loaded before stopping the old process, for the next start only
+        self._restart_env: Optional[Dict[str, str]] = None
 
         # Initialize DAP base
         super().__init__(f'TASK-{self.id}', **kwargs)
 
-    def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
-        """Replace ``${KEY}`` placeholders using the merged environment dict.
+    async def _load_env(self, pipeline: Dict[str, Any]) -> Dict[str, str]:
+        """Load the values for the pipeline's placeholders; nothing is loaded when it has none."""
+        if not references_env(pipeline):
+            return {}
+        return await self._env_source()
 
-        Delegates to :func:`pipeline.resolve_pipeline_env`.
+    async def _resolve_pipeline(self, pipeline: Dict[str, Any]) -> Dict[str, Any]:
+        """Replace ``${KEY}`` placeholders using freshly loaded environment values.
+
+        Uses the values a restart already loaded, if any. Delegates to
+        :func:`pipeline.resolve_pipeline_env`.
         """
-        return resolve_pipeline_env(pipeline, self._env)
+        env, self._restart_env = self._restart_env, None
+        if env is None:
+            env = await self._load_env(pipeline)
+        return resolve_pipeline_env(pipeline, env)
 
     # Reason handed to the node subprocess when this engine has no database
     # broker (a local engine, or a self-hosted one without the broker env).
@@ -934,6 +971,18 @@ class Task(DAPBase):
 
         return subprocess_env
 
+    def _shares_host(self) -> bool:
+        """
+        Whether the task shares the engine's host, so it gets --shared-host.
+
+        A hosted engine's task does: spawn is the only runtime. The pre-launch
+        check and the task's command line both ask here, so they agree.
+
+        Returns:
+            True for a task of a hosted engine.
+        """
+        return _is_saas_engine()
+
     def _check_pipeline(self, pipeline: Dict[str, Any]) -> None:
         """
         Validate pipeline configuration and extract metadata.
@@ -958,7 +1007,9 @@ class Task(DAPBase):
             from rocketlib import getServiceDefinition
             from ai.common.config import Config
 
-            problem = saas_pipeline_violation(pipeline, getServiceDefinition, Config.getNodeConfig)
+            problem = saas_pipeline_violation(
+                pipeline, getServiceDefinition, Config.getNodeConfig, shared_host=self._shares_host()
+            )
             if problem:
                 raise ValueError(problem)
 
@@ -2384,12 +2435,28 @@ class Task(DAPBase):
         5. Reset all status from the previous run
         6. Start task (full initialization)
         """
+        # Checked and set before the first await, so a concurrent restart is refused
+        # instead of starting with the other restart's values
+        if self._restart_in_progress:
+            raise RuntimeError('Failed to restart task: a restart is already in progress')
+        self._restart_in_progress = True
+
         try:
             self._server.debug_message(f'Task "{self.id}" restart initiated...')
 
             # Check if debugger is attached - fail if so
             if self.has_attached_debugger():
                 raise RuntimeError('Cannot restart task while debugger is attached. Please detach the debugger first.')
+
+            # Load the new run's values while the old process still runs and
+            # nothing has changed yet: a failed load leaves the task as it was
+            stops_before = self._stop_count
+            self._restart_env = await self._load_env(pipeline)
+
+            # A stop that arrived while the values loaded wins: nothing has
+            # changed yet, so the task stays stopped instead of starting again
+            if self._stop_count != stops_before:
+                raise RuntimeError('the task was stopped while the restart loaded its values')
 
             # Set the restart flag to inhibit termination/start events
             self._is_restarting = True
@@ -2432,8 +2499,10 @@ class Task(DAPBase):
             raise RuntimeError(f'Failed to restart task: {str(e)}')
 
         finally:
-            # Always reset this
+            # Always reset these
             self._is_restarting = False
+            self._restart_env = None
+            self._restart_in_progress = False
 
     async def start_task(self) -> None:
         """
@@ -2475,7 +2544,7 @@ class Task(DAPBase):
 
             # Resolve ${...} placeholders into a local variable — never stored on self
             # so secrets are not retained in memory beyond the temp file write.
-            resolved = self._resolve_pipeline(self._pipeline)
+            resolved = await self._resolve_pipeline(self._pipeline)
 
             # Check it - throws on error
             self._check_pipeline(resolved)
@@ -2538,40 +2607,38 @@ class Task(DAPBase):
                     '--data_host=127.0.0.1',
                 ]
             )
-            # Tell the task it runs under a hosted engine (see CONST_HOSTED_CHILD_FLAG)
+            # Tell the task it runs under a hosted engine, and on its host (see CONST_HOSTED_CHILD_FLAG)
             if _is_saas_engine():
                 child_args.append(CONST_HOSTED_CHILD_FLAG)
+            if self._shares_host():
+                child_args.append(CONST_SHARED_HOST_CHILD_FLAG)
 
             # Pass model server address if configured
             modelserver = self._server._config.get('modelserver')
             if modelserver:
                 child_args.append(f'--modelserver={modelserver}')
 
-            user_args = self._launch_args.get('args', [])
-            for arg in user_args:
-                if ' ' in arg:
+            def _user_args():
+                """A pipeline's own arguments, a quoted string split as a shell would split it."""
+                for arg in self._launch_args.get('args', []):
                     try:
-                        child_args.extend(shlex.split(arg))
+                        yield from shlex.split(arg) if ' ' in arg else [arg]
                     except ValueError as e:
                         self.debug_message(f'Failed to parse engine arg {arg!r}: {e}, using as-is')
-                        child_args.append(arg)
-                else:
+                        yield arg
+
+            for arg in _user_args():
+                # Crash dumps are the operator's call, so a pipeline's own --dumps is skipped
+                if arg.split('=', 1)[0].lower() != '--dumps':
                     child_args.append(arg)
 
-            # Inherit parent engine's --trace setting if not explicitly provided
-            if not any(a.startswith('--trace=') for a in child_args):
-                for arg in startup_args():
-                    if arg.startswith('--trace='):
-                        child_args.append(arg)
-                        break
-
-            # Inherit parent engine's --node_path so workspace-local nodes load
-            # in the task subprocess too (Opt reads argv only, not the env).
-            if not any(a.startswith('--node_path=') for a in child_args):
-                for arg in startup_args():
-                    if arg.startswith('--node_path='):
-                        child_args.append(arg)
-                        break
+            # The engine's own options: --dumps always, trace and node path unless the caller set one
+            for arg in startup_args():
+                option = arg.split('=', 1)[0] + '='
+                if option == '--dumps=':
+                    child_args.append(arg)
+                elif option in ('--trace=', '--node_path=') and not any(a.startswith(option) for a in child_args):
+                    child_args.append(arg)
 
             await self._send_status_update()
 
@@ -2585,6 +2652,12 @@ class Task(DAPBase):
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
                 subprocess_env.pop('ROCKETRIDE_MOCK', None)
+
+            # A stop that arrived during the awaits above (loading the
+            # placeholder values, writing the task file) found no process to
+            # end: honour it here instead of starting one
+            if self._stop_requested:
+                raise RuntimeError('the task was stopped before it started')
 
             self._engine_process = await asyncio.create_subprocess_exec(
                 exec_path,
@@ -2743,6 +2816,11 @@ class Task(DAPBase):
             self.debug_message(f'Task started successfully with PID {self._engine_process.pid}')
 
         except Exception as e:
+            # A start that fails ends the run, restart or not. Left set, the
+            # flag makes _terminated report "Restarting" for a dead task and
+            # skip the end event and the run log's end. restart_task's
+            # finally clears it too.
+            self._is_restarting = False
             await self._terminated()
             self.debug_message(f'Task startup failed: {e}')
             raise
@@ -2764,6 +2842,7 @@ class Task(DAPBase):
 
                 # Mark as a requested stop and block new operations.
                 self._stop_requested = True
+                self._stop_count += 1
                 self._stop_reason = reason
                 self._is_terminating = True
 

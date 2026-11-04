@@ -52,7 +52,12 @@ export function loadMonaco(): Promise<Monaco> {
 	if (!monacoPromise) {
 		// step: workers MUST be wired before the first editor import runs
 		ensureMonacoEnvironment();
-		monacoPromise = import('monaco-editor/esm/vs/editor/editor.main.js').then((m) => m as unknown as Monaco);
+		monacoPromise = import('monaco-editor/esm/vs/editor/editor.main.js')
+			.then((m) => m as unknown as Monaco)
+			.catch((err: unknown) => {
+				monacoPromise = null;
+				throw err;
+			});
 	}
 	return monacoPromise;
 }

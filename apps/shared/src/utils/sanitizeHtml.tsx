@@ -60,9 +60,11 @@ export const sanitizeAndParseHtmlToReact = (text?: string): string | ReactNode =
 				const el = domNode as DOMElement;
 				if (el.name === 'a' && el.attribs?.href) {
 					const { href, ...rest } = el.attribs;
+					// step: rest spreads FIRST — the sanitizer preserves target/rel
+					// (ADD_ATTR above), so the fixed safe values must win last
 					return (
-						<a href={href} target="_blank" rel="noopener noreferrer" {...rest}>
-							{el.children ? parse(domToReact(el.children as DOMNode[]) as string) : null}
+						<a {...rest} href={href} target="_blank" rel="noopener noreferrer">
+							{el.children ? domToReact(el.children as DOMNode[], options) : null}
 						</a>
 					);
 				}

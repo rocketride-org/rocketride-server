@@ -36,6 +36,7 @@ import { createCatalogueReporter } from 'shared/utils/catalogueDiagnostic';
 import { ConnectionManager, disconnectCloudConnections } from './connection/connection';
 import { DeployManager } from './connection/deploy-manager';
 import { ConfigManager } from './config';
+import { attachWorkspaceSettings } from './workspaceSettingsBridge';
 import { savePipelineDocument } from './shared/util/pipelineSave';
 import { EngineRegistry } from './engine';
 import { getUserConfigDir, getSystemInstallDir, migrateLocalEngine, migrateServiceConfig } from './engine/config/config-migration';
@@ -148,40 +149,10 @@ async function runMigrations(context: vscode.ExtensionContext): Promise<void> {
 		logger.output(`${icons.success} Migrated settings to development/deployment groups`);
 	}
 
-	// Migration 3b: legacy per-connection debug-output flags fold into the ONE
-	// per-task setting — any scope that had debug output on keeps it on (OR of
-	// the old keys; same intent, wider scope). Own marker: the V2 migration
-	// shipped earlier, so users who already completed it must still get this
-	// one. engineArgs is deliberately NOT migrated: engine PROCESS flags are
-	// not per-task arguments, and silently injecting them into every .use call
-	// could break runs.
-	if (!context.globalState.get('debugOutputMigrationDone')) {
-		const legacyDebugKeys = ['local.debugOutput', 'deploy.local.debugOutput', 'development.local.debugOutput', 'deployment.local.debugOutput'];
-		for (const target of [vscode.ConfigurationTarget.Global, vscode.ConfigurationTarget.Workspace] as const) {
-			const scope = target === vscode.ConfigurationTarget.Global ? 'globalValue' : 'workspaceValue';
-			let anyOn = false;
-			let anySet = false;
-			for (const key of legacyDebugKeys) {
-				const value = config.inspect<unknown>(key)?.[scope];
-				if (value !== undefined) {
-					anySet = true;
-					if (value === true) anyOn = true;
-				}
-			}
-			// Write the replacement BEFORE deleting anything: a failure mid-way
-			// must never have destroyed the only copy of the old configuration
-			// (the whole migration is retry-safe in that order).
-			if (anySet && anyOn && config.inspect<unknown>('pipelineDebugOutput')?.[scope] === undefined) {
-				await config.update('pipelineDebugOutput', true, target);
-			}
-			for (const key of legacyDebugKeys) {
-				if (config.inspect<unknown>(key)?.[scope] !== undefined) {
-					await config.update(key, undefined, target);
-				}
-			}
-		}
-		await context.globalState.update('debugOutputMigrationDone', true);
-	}
+	// (The old "migration 3b" — folding legacy per-connection debug flags
+	// into the flat pipelineDebugOutput key — is gone WITH that key: debug
+	// output is a workspace setting now, and migrating into an unread key is
+	// pointless. Stale legacy debug keys sit ignored.)
 
 	// Migration 4: Move local engine from globalStorage to per-user dir
 	// Old: globalStorage/engines/server-3.2.0--abc/engine.exe + pointer files
@@ -297,9 +268,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				// in src/ops. The returned controller is the settings pages'
 				// panel-lifecycle seam (open args, polling, close semantics).
 				const devTools = new DevToolStore(busHost.prefs);
-				const settingsOps = registerVscodeOps(busHost, context);
+				// closeWizard closes the untitled App Builder panel — appScreen
+				// is constructed below; the op can only fire once it exists.
+				const settingsOps = registerVscodeOps(busHost, context, { closeWizard: () => appScreen?.closeUntitled() });
 				busHost.startMirrors();
 				context.subscriptions.push({ dispose: () => busHost.dispose() });
+
+				// Pipeline-family AND integration values come from the SHARED
+				// workspace settings (the server-side workspace); the bridge
+				// keeps ConfigManager's sync cache + the integration read seam
+				// current, and fires when an integration toggle's effective
+				// value changes so the stubs apply to the repo. Debounced: one
+				// Save commits several toggles as individual deltas.
+				let agentInstallTimer: NodeJS.Timeout | undefined;
+				const onIntegrationsChanged = (): void => {
+					const workspaceRoot = vscode.workspace.workspaceFolders?.[0];
+					if (!workspaceRoot) return;
+					if (agentInstallTimer) clearTimeout(agentInstallTimer);
+					agentInstallTimer = setTimeout(() => {
+						new AgentManager().installFromSettings(workspaceRoot.uri).catch((err) => {
+							vscode.window.showWarningMessage(`Agent documentation install failed: ${err}`);
+						});
+					}, 1000);
+				};
+				context.subscriptions.push(
+					{ dispose: attachWorkspaceSettings(busHost.prefs, ConfigManager.getInstance(), onIntegrationsChanged) },
+					{ dispose: () => { if (agentInstallTimer) clearTimeout(agentInstallTimer); } },
+				);
 
 				// The HOST owns the tools' reachability topic: every frame's
 				// bus peer subscribes `host:connection` (retained — a late
@@ -339,6 +334,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 						settingsOps.setOpenArgs({
 							focus: typeof args[0] === 'string' ? args[0] : undefined,
 							authError: typeof args[1] === 'string' ? args[1] : undefined,
+							// The pre-run env gate's missing keys (focus 'environment').
+							// setOpenArgs replaces WHOLE args each open, so a plain
+							// open clears a previous gate by construction.
+							envPrefill: Array.isArray(args[2]) ? (args[2] as string[]) : undefined,
 						});
 						settingsOps.pageOpened('settings');
 					},
@@ -404,38 +403,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 					onOpen: () => settingsOps.pageOpened('welcome'),
 					onClose: (userClosed) => settingsOps.pageClosed('welcome', userClosed),
 				});
-				const account = new FrameworkProvider(context, busHost, {
-					page: 'account',
-					command: 'rocketride.page.account.open',
-					viewType: 'rocketride.page.account',
-					title: 'Account',
-				});
-				// The Environment page's missing-keys prefill (the pre-run env
-				// gate): pull-based for open-with-args (the realm attaches
-				// after the command fires), push for an already-open page.
-				let envPrefillKeys: string[] = [];
-				busHost.rootBus.handle('env.getPrefill', async () => ({ keys: envPrefillKeys }));
-				const environment = new FrameworkProvider(context, busHost, {
-					page: 'environment',
-					command: 'rocketride.page.environment.open',
-					viewType: 'rocketride.page.environment',
-					title: 'Variables',
-					onOpen: (args) => {
-						const keys = Array.isArray(args[0]) ? (args[0] as string[]) : [];
-						if (keys.length > 0) {
-							envPrefillKeys = keys;
-							busHost.broadcastEmitOp('env.prefill', { keys });
-						}
-					},
-				});
-				// New App wizard — a framework page (shared NewAppForm over the
-				// host.appdev.* ops); the open command keeps its historic id.
-				const newApp = new FrameworkProvider(context, busHost, {
-					page: 'newapp',
-					command: 'rocketride.app.create',
-					viewType: 'rocketride.page.newApp',
-					title: 'New App',
-				});
+				// The standalone Account page is gone — Account is a Settings nav
+				// group (Profile / Billing / API Keys). The old command survives
+				// as a deep link so every existing caller keeps working.
+				context.subscriptions.push(
+					vscode.commands.registerCommand('rocketride.page.account.open', (...args: unknown[]) => {
+						const sub = typeof args[0] === 'string' ? args[0] : '';
+						const focus = sub === 'billing' ? 'account:billing' : sub === 'api-keys' ? 'account:keys' : 'account';
+						return vscode.commands.executeCommand('rocketride.page.settings.open', focus);
+					})
+				);
+				// (The standalone Environment page is gone — Environment Variables
+				// is a Settings section; the pre-run env gate's keys ride the
+				// Settings open args, replaced on every open.)
 				// Dev tools: the tool panels (MF host webviews) + the modules
 				// flow's details page (README + Install/Remove — Remove also
 				// closes the tool's open panel). Each registers its own command.
@@ -477,7 +457,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 					refreshTools: async () => sidebar?.refreshDevTools(),
 					broadcast: (op, params) => busHost.broadcastEmitOp(op, params),
 				});
-				context.subscriptions.push(welcomePage, settingsPage, account, environment, newApp, devTools, devToolPanels, devToolReadme);
+				context.subscriptions.push(welcomePage, settingsPage, devTools, devToolPanels, devToolReadme);
 
 				// Register unified project editor (canvas + status + trace)
 				pipeline = new PipelineProvider(context, busHost);
@@ -519,7 +499,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				barStatus.initializeConnectionManager();
 				context.subscriptions.push(barStatus);
 
-				const welcomeDismissed = vscode.workspace.getConfiguration('rocketride').get<boolean>('welcomeDismissed', false);
+				// Welcome is DERIVED, not a setting: it shows only while no
+				// connection has ever been configured (saving Welcome/Settings
+				// writes development.connectionMode globally) and the user has
+				// not dismissed it (a globalState flag — the old
+				// rocketride.welcomeDismissed config key sits unread).
+				const connectionConfigured = vscode.workspace.getConfiguration('rocketride').inspect('development.connectionMode')?.globalValue !== undefined;
+				const welcomeDismissed = connectionConfigured || context.globalState.get<boolean>('rocketride.welcomeDismissed', false);
 				if (!welcomeDismissed) {
 					// First run: show welcome page, don't auto-connect — NO
 					// engine/connection work happens until the user confirms
@@ -666,6 +652,11 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 		vscode.commands.registerCommand('rocketride.app.open', (appId: string) => {
 			// Fire-and-forget: a rejection has no other surface here — say it.
 			appScreen?.show(appId).catch((err) => vscode.window.showErrorMessage(`Failed to open app: ${err instanceof Error ? err.message : String(err)}`));
+		}),
+		// New App — the UNTITLED App Builder (the wizard is the unbound
+		// builder's empty state). The command keeps its historic id.
+		vscode.commands.registerCommand('rocketride.app.create', () => {
+			appScreen?.showUntitled();
 		}),
 		vscode.commands.registerCommand('rocketride.refresh', () => {
 			vscode.window.showInformationMessage('RocketRide views refreshed');
@@ -893,9 +884,8 @@ export async function deactivate(): Promise<void> {
 // triggered the fetch.
 // =========================================================================
 
-/** Cached GitHub releases (engine binaries). Written via setCachedEngineVersions; currently no reader (kept so the ops-side setter contract stays stable). */
-/** Replaces the cached engine version list. Called by settingsOps after a successful GitHub API fetch. */
-export const setCachedEngineVersions = (v: Array<{ tag_name: string; prerelease: boolean }>) => {
+/** No-op sink kept so the ops-side setter contract stays stable (no reader remains). */
+export const setCachedEngineVersions = (_v: Array<{ tag_name: string; prerelease: boolean }>) => {
 };
 
 /** Cached GHCR container tags (Docker images). Populated by ConnectionMessageHandler.fetchAndBroadcastDockerTags(). */

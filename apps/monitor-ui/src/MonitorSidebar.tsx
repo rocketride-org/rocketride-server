@@ -34,26 +34,15 @@
 // Two mounts, one menu:
 //  - In-app: MonitorApp owns the page state and passes it straight in.
 //  - devToolSidebar: the menu lives in the HOST's sidebar, an isolated
-//    document — selections ride the DevToolProps peer channel to the frame.
+//    document — selections ride the tool channel ('page' event) to the frame.
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ConnectionManager, SidebarMenu, createToolChannel, createToolOpServer, typedToolChannel, useShellEvent } from 'shell';
+import React, { useEffect, useMemo, useState } from 'react';
+import { SidebarMenu, typedToolChannel, useShellEvent } from 'shell';
 import { useDashboardData } from './monitor/useDashboardData';
 import type { DevToolProps, ViewMenu } from 'shell';
 import type { MonitorPageId } from './monitor';
-import type { IDashboardSnapshot, MonitorOps, MonitorStateMap } from './ops';
-
-// =============================================================================
-// PEER PROTOCOL — sidebar mount ↔ frame (app-internal)
-// =============================================================================
-
-/**
- * The page-sync wire protocol between the tool's two mounts. Either
- * direction: "the active page is / should be `page`". The FRAME pushes it on
- * mount and on every change (the host retains the last push for a reloaded
- * sidebar); the SIDEBAR posts it only on a user selection.
- */
-export type MonitorPeerMessage = { op: 'page'; page: MonitorPageId };
+import { serveMonitorOps } from './ops';
+import type { IDashboardSnapshot, MonitorEventMap, MonitorStateMap } from './ops';
 
 // =============================================================================
 // COMPONENT — the menu itself
@@ -97,16 +86,16 @@ export const MonitorSidebar: React.FC<IMonitorSidebarProps> = ({ activeId, onSel
 };
 
 // =============================================================================
-// DEV-TOOL SIDEBAR — the menu in the host's sidebar, synced over peer
+// DEV-TOOL SIDEBAR — the menu in the host's sidebar, synced over the channel
 // =============================================================================
 
 /**
- * The page menu as a host-mounted devToolSidebar: selections post over the
- * peer channel to the frame panel, and the frame's current page arrives back
- * the same way (seeded by a `hello` on mount, since the frame may already be
- * on a page when this mount attaches).
+ * The page menu as a host-mounted devToolSidebar: selections ride the
+ * channel's 'page' event to the frame panel, and the frame's current page
+ * arrives back the same way (the host retains the frame's last push, so a
+ * remounted sidebar renders without asking).
  */
-export const MonitorDevToolSidebar: React.FC<DevToolProps> = ({ peer, channel, documents }) => {
+export const MonitorDevToolSidebar: React.FC<DevToolProps> = ({ channel, documents }) => {
 	const [page, setPage] = useState<MonitorPageId>('overview');
 
 	// SINGLE-PANE UX: the monitor is one surface, so activating its sidebar
@@ -122,21 +111,12 @@ export const MonitorDevToolSidebar: React.FC<DevToolProps> = ({ peer, channel, d
 		if (appId === 'rocketride.monitor') documents?.open('', 'Server Monitor');
 	});
 
+	const toolChannel = useMemo(() => typedToolChannel<MonitorStateMap, MonitorEventMap>(channel), [channel]);
+
 	// The frame pushes its page on mount and on change (the host retains the
-	// last push across sidebar reloads) — this mount only listens, and posts
+	// last push across sidebar reloads) — this mount only listens, and sends
 	// nothing except user selections below.
-	useEffect(
-		() =>
-			peer.subscribe((message) => {
-				const msg = message as MonitorPeerMessage;
-				if (msg && msg.op === 'page') setPage(msg.page);
-			}),
-		[peer]
-	);
-
-	// ── CONTROLLER duties: the frame holds no RocketRide client ──────────────
-
-	const toolChannel = useMemo(() => typedToolChannel<MonitorStateMap>(channel ?? createToolChannel(peer)), [channel, peer]);
+	useEffect(() => toolChannel.onEvent('page', setPage), [toolChannel]);
 
 	// This mount's own dashboard poll (the badge source below shares the same
 	// module singleton) doubles as the frame's data feed: publish every tick
@@ -146,28 +126,17 @@ export const MonitorDevToolSidebar: React.FC<DevToolProps> = ({ peer, channel, d
 		toolChannel.publishState('dashboard', { data, events } satisfies IDashboardSnapshot);
 	}, [toolChannel, data, events]);
 
-	// The frame's grid pages + manual refresh, served on this connection.
-	const refreshRef = useRef(refresh);
-	refreshRef.current = refresh;
-	useEffect(() => {
-		const ops = createToolOpServer<MonitorOps>(peer);
-		// Served over the SHELL BUS — no client object in this realm.
-		const cm = ConnectionManager.getInstance();
-		const need = (): void => {
-			if (!cm.isConnected()) throw new Error('Not connected to a server.');
-		};
-		ops.serve('monitor.listConnections', async (req) => { need(); return cm.request('client.listConnections', req) as never; });
-		ops.serve('monitor.listTasks', async (req) => { need(); return cm.request('client.listTasks', req) as never; });
-		ops.serve('monitor.refresh', async () => { refreshRef.current(); });
-		return () => ops.dispose();
-	}, [peer]);
+	// The frame's manual refresh, nudging this mount's shared poller (stable
+	// useCallback identity). The grids page with the frame's own realm
+	// client — nothing served for them.
+	useEffect(() => serveMonitorOps(channel, { refresh }), [channel, refresh]);
 
 	return (
 		<MonitorSidebar
 			activeId={page}
 			onSelect={(id) => {
 				setPage(id);
-				peer.post({ op: 'page', page: id } satisfies MonitorPeerMessage);
+				toolChannel.sendEvent('page', id);
 			}}
 		/>
 	);

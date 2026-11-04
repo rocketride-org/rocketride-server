@@ -60,9 +60,22 @@ class MockCursor:
         """Execute a SQL query."""
         # Normalize query
         query_lower = query.lower().strip()
+        # Each execute replaces the result set, including when search reuses
+        # one cursor for its ANN-index probe after fetching all candidates.
+        self._results = []
+        self._result_index = 0
+        self.description = []
 
+        # Model pgvector 0.8 on an unindexed in-memory table. The real-database
+        # regressions cover ANN behavior; this mock serves the pipeline smoke test.
+        if query_lower.startswith('select extversion') and 'from pg_extension' in query_lower:
+            self._results = [('0.8.0',)]
+            self.description = [('extversion',)]
+        elif query_lower.startswith('select exists') and 'from pg_index' in query_lower:
+            self._results = [(False,)]
+            self.description = [('exists',)]
         # Handle different query types
-        if query_lower.startswith('select exists'):
+        elif query_lower.startswith('select exists'):
             self._handle_exists_query(query, params)
         elif query_lower.startswith('create table'):
             self._handle_create_table(query, params)

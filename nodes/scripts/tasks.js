@@ -184,6 +184,8 @@ function makeStartTestServerAction(options = {}) {
 			const result = await startServer({
 				script: 'ai/eaas.py',
 				trace: options.trace,
+				logName: 'nodes',
+				verbose: ctx.options?.verbose,
 				basePort: 40000, // Use 40000 range for node tests
 				env: {
 					ROCKETRIDE_MOCK: mocksPath,
@@ -200,7 +202,7 @@ function makeStartTestServerAction(options = {}) {
 			ctx.port = result.port;
 			task.output = `Server ready on port ${ctx.port} (mocks enabled)`;
 			taskComplete = true;
-			return { port: result.port, server: result.server };
+			return { port: result.port, server: result.server, serverUri: result.uri };
 		},
 	};
 }
@@ -236,8 +238,8 @@ function makeRunPytestAction(options = {}) {
 			};
 			if (mode === 'run') {
 				const bracket = ctx.brackets?.['node-test-server'];
-				if (!bracket?.port) throw new Error('node-test-server bracket missing — server did not start');
-				testEnv.ROCKETRIDE_URI = bracket.serverUri || `http://localhost:${bracket.port}`;
+				if (!bracket?.serverUri) throw new Error('node-test-server bracket missing — server did not start');
+				testEnv.ROCKETRIDE_URI = bracket.serverUri;
 			} else if (options.taskserver) {
 				// The hardware gate needs to know the tests would run on another machine.
 				testEnv.ROCKETRIDE_URI = parseServerAddress(options.taskserver).uri;

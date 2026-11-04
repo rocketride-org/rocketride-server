@@ -42,7 +42,7 @@ import pytest
 
 from rocketride import RocketRideClient
 
-SERVER_URI = os.environ.get('ROCKETRIDE_URI', 'http://localhost:5565')
+SERVER_URI = os.environ.get('ROCKETRIDE_URI', 'http://127.0.0.1:5565')
 
 # The one team on the OSS test server.
 TEAM = 'local'

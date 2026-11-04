@@ -20,7 +20,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { GenericEvent, ConnectionState, PIPE_BUILDER_APP_ID } from '../shared/types';
+import { GenericEvent, ConnectionState, ConnectionStatus, PIPE_BUILDER_APP_ID } from '../shared/types';
 import { PIPELINE_PARTITION } from 'shared/tools/pipelines/types';
 import type { TaskStatus } from 'shared/tools/pipelines/types';
 import { ConnectionManager } from '../connection/connection';
@@ -140,26 +140,31 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 	// =========================================================================
 
 	private setupEventListeners(): void {
-		const eventListener = this.connectionManager.on('shell:event', (event) => {
+		// Named handlers removed with off() on dispose — ConnectionManager is
+		// a Node EventEmitter, so on() returns the SHARED manager, which must
+		// never land in disposables (its dispose() tears the manager down).
+		const onShellEvent = (event: GenericEvent): void => {
 			try {
 				this.handleEvent(event);
 			} catch (error) {
 				this.logger.error(`Handling event: ${error}`);
 			}
-		});
+		};
+		this.connectionManager.on('shell:event', onShellEvent);
 
 		// Subscription state is NOT pushed: every realm mirrors shell:account
 		// and derives it with isAppSubscribed. The host only GATES run.
 
-		const envKeysChangedListener = this.connectionManager.on('shell:envKeysChanged', () => {
+		const onEnvKeysChanged = (): void => {
 			void this.broadcastEnvKeys();
-		});
+		};
+		this.connectionManager.on('shell:envKeysChanged', onEnvKeysChanged);
 
 		// Connection + services state ride the framework's retained topics
 		// ('shell:status' / 'shell:services' — busHost.startMirrors) and the
 		// realm-local shell events; no typed pushes. The reconnect hook below
 		// only restarts monitoring (realm-side in a later step).
-		const connectionStateListener = this.connectionManager.on('shell:statusChange', async (connectionStatus) => {
+		const onStatusChange = (connectionStatus: ConnectionStatus): void => {
 			try {
 				if (connectionStatus.state === ConnectionState.CONNECTED) {
 					// Monitoring is realm-owned now (brokered client.addMonitor
@@ -170,7 +175,8 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 			} catch (error) {
 				this.logger.error(`Handling connection state change: ${error}`);
 			}
-		});
+		};
+		this.connectionManager.on('shell:statusChange', onStatusChange);
 
 		const configChangeListener = vscode.workspace.onDidChangeConfiguration((event) => {
 			if (event.affectsConfiguration('rocketride.development.connectionMode') || event.affectsConfiguration('rocketride.deployment.connectionMode')) {
@@ -180,7 +186,12 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 		// Seed the topic so a panel opening before any config change replays it.
 		this.publishCloudSetup();
 
-		this.disposables.push(eventListener, envKeysChangedListener, connectionStateListener, configChangeListener);
+		this.disposables.push(
+			{ dispose: () => this.connectionManager.off('shell:event', onShellEvent) },
+			{ dispose: () => this.connectionManager.off('shell:envKeysChanged', onEnvKeysChanged) },
+			{ dispose: () => this.connectionManager.off('shell:statusChange', onStatusChange) },
+			configChangeListener
+		);
 	}
 
 	// =========================================================================
@@ -345,7 +356,9 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				}
 			},
 			'host.pipeline.viewState': (p) => {
-				if (!p.viewState) return;
+				// Readonly task: docs never persist — each opened task would
+				// otherwise leave a permanent appState entry.
+				if (!p.viewState || parseTaskDoc(p.doc)) return;
 				this.busHost.prefs.setAppStateKey(PIPELINE_PARTITION, p.doc, p.viewState);
 			},
 			'host.pipeline.oauthStart': (p) => this.startOAuth(stateFor(p.doc).document, p.url),
@@ -414,8 +427,10 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 			if (document.isUntitled) {
 				webviewPanel.reveal(undefined, false);
 				runTarget = await savePipelineDocument(document);
-			} else {
-				await this.saveDocument(document, text);
+			} else if (document.isDirty && !(await document.save())) {
+				// saveDocument() diffs content and skips identical text, which
+				// would leave a dirty buffer unsaved — save the document itself.
+				throw new Error('The pipeline could not be saved; run cancelled');
 			}
 			if (runTarget) {
 				// The untitled save reopens the file under a NEW URI — the

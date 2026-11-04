@@ -53,7 +53,7 @@ import { init, registerRemotes, loadRemote } from '@module-federation/runtime';
 import * as shellNS from 'shell';
 import * as rocketrideNS from 'rocketride';
 import { createToolChannel } from 'shell';
-import type { AppDescriptor, DevToolProps } from 'shell';
+import type { AppDescriptor, DevToolProps, IToolPeer } from 'shell';
 import { ToolMount } from 'shared/tools/core';
 import type { ToolDescriptorSource } from 'shared/tools/core';
 import type { ToolTab } from 'shared/tools/core/chrome/types';
@@ -112,8 +112,9 @@ export interface DevToolSidebarMountProps {
 	tool: ToolTab;
 	/** Engine connection facts; null while disconnected. */
 	host: DevToolHostInfo | null;
-	/** Host-relayed peer channel to the tool's frame panel. */
-	peer: DevToolProps['peer'];
+	/** The transport pipe to the tool's frame panel (host-internal; the
+	 *  channel below is built over it). */
+	peer: IToolPeer;
 	/** Host-relayed documents API (one editor panel per document key). */
 	documents?: DevToolProps['documents'];
 	/** The tool's fronted document key (null = a non-tool tab is fronted;
@@ -194,7 +195,6 @@ export const DevToolSidebarMount: React.FC<DevToolSidebarMountProps> = ({ tool, 
 			appId={tool.id}
 			name={tool.name}
 			slot="sidebar"
-			peer={peer}
 			channel={channel}
 			source={source}
 			fallback={fallback}

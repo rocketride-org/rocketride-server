@@ -60,9 +60,10 @@ describe('toReply — the controller side', () => {
 
 	it("classifies the bus lane's timeout texts (local, bridged, routed) as kind timeout", async () => {
 		for (const message of [
-			"Op 'client.tool' timed out after 66000ms",
-			"Op 'client.tool' timed out after 66000ms (bridged)",
-			"Op 'client.getTasks' timed out after 30000ms (routed to VS Code host)",
+			"Op 'client.request' timed out after 66000ms",
+			"Op 'client.request' timed out after 66000ms (bridged)",
+			'Request timed out after 66000ms',
+			"Op 'client.request' timed out after 30000ms (routed to VS Code host)",
 		]) {
 			const reply = await toReply(() => { throw new Error(message); }, { tool: 'get_schema' });
 			assert.deepEqual(reply, { ok: false, error: { kind: 'timeout', message, tool: 'get_schema' } }, message);

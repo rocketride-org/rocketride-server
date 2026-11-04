@@ -55,9 +55,9 @@ const svgCache = new Map<string, string>();
 /**
  * Fetches and sanitizes one SVG. Strips every element class that can carry
  * active or externally-loading content (script, foreignObject, style,
- * iframe/embed/object, SMIL animation, external <use>), every on* handler,
- * and javascript:/data: hrefs — the markup is inlined into the page, so it
- * must carry no active content.
+ * iframe/embed/object, SMIL animation), every on* handler, and every
+ * URL-bearing attribute that is not an in-document fragment — the markup is
+ * inlined into the page, so it must carry no active content.
  *
  * @param src - The SVG URL.
  * @returns Sanitized outer markup, or null when the payload is unusable.
@@ -79,12 +79,18 @@ async function loadSvg(src: string): Promise<string | null> {
 		for (const el of Array.from(doc.querySelectorAll('script, foreignObject, style, iframe, embed, object, animate, animateTransform, animateMotion, set'))) el.remove();
 		for (const el of Array.from(doc.querySelectorAll('*'))) {
 			for (const attr of Array.from(el.attributes)) {
-				if (/^on/i.test(attr.name)) el.removeAttribute(attr.name);
-				if (/href$/i.test(attr.name)) {
-					// step: <use> may only reference in-document fragments;
-					// everywhere else, no scriptable/data schemes
-					const external = el.tagName.toLowerCase() === 'use' && !attr.value.trim().startsWith('#');
-					if (external || /^\s*(javascript|data):/i.test(attr.value)) el.removeAttribute(attr.name);
+				const name = attr.name.toLowerCase();
+				if (name.startsWith('on')) {
+					el.removeAttribute(attr.name);
+					continue;
+				}
+				// step: URL-bearing attributes may only reference in-document
+				// fragments (an inline icon never navigates or loads). Strip
+				// control characters and whitespace BEFORE the check — the URL
+				// parser ignores them, so they can hide a scheme (java\tscript:)
+				if (/(?:^|:)(?:href|src|action|formaction)$/.test(name)) {
+					const value = attr.value.replace(/[^\u0021-\u007e\u00a0-\uffff]/g, '');
+					if (!value.startsWith('#')) el.removeAttribute(attr.name);
 				}
 			}
 		}

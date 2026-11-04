@@ -35,7 +35,7 @@ The registered tool names are the bare method names below (an agent catalog name
 | `refresh_schema` | Takes no arguments; re-reads the schema of the configured graph now and returns it like `get_schema`. |
 | `get_query` | Requires a non-empty `question`, with optional `limit`; returns validated read-only Cypher and `valid: true`, or an `error`/off-topic `answer` with `valid: false`. |
 | `read_query` | Requires non-empty `cypher`; accepts object `params` and integer `limit` (default 1,000, capped by `max_rows`, the server's `RESULTSET_SIZE` and 25,000). Always runs `GRAPH.RO_QUERY` on the configured graph, whatever `allow_writes` or `allow_execute` say, with the query timeout clamped to the server's `TIMEOUT_MAX`, and refuses `LOAD CSV`: it reads the graph only. Returns `{columns, rows, row_limit, truncated, truncated_by, element_limit, elements, value_limit, values}` in the shared graph result shape; failures raise an error whose first line is a headline (`Refused: …`, `Query timed out after N ms`, `Invalid read_query input: …`, `Query result cannot be represented`, `Query failed`) and whose remaining lines are the detail, the server's message where there is one. |
-| `execute` | Requires raw `query` and runs it without LLM translation or the `read_query` statement rules (so `LOAD CSV` runs here); it raises an error unless `allow_execute` is enabled. In the default shape it fails when the result exceeds the execute row cap (`max_execute_rows`, kept below the server's `RESULTSET_SIZE`). With `shape: "graph"` it returns the `read_query` shape plus `affected_rows`, cut at that cap and reported as `truncated_by: "rows"`. |
+| `execute` | Requires raw `query` and runs it without LLM translation or the `read_query` statement rules (so `LOAD CSV` runs here); accepts an optional object `params` for `$name` placeholders; it raises an error unless `allow_execute` is enabled. In the default shape a read whose result exceeds the execute row cap (`max_execute_rows`, kept below the server's `RESULTSET_SIZE`) fails, and a write whose result exceeds it is already saved, so it returns the capped rows with `truncated: true`; a reply that reaches the server's `RESULTSET_SIZE` counts as over the cap. With `shape: "graph"` it returns the `read_query` shape plus `affected_rows`, cut at that cap and reported as `truncated_by: "rows"`. |
 | `dialect` | Takes no meaningful arguments and returns `{dialect: "falkordb"}` plus the engine version, graph, capabilities, limits and read boundary. |
 | `query` | Requires non-empty `cypher`; accepts optional object `params` and optional `graph`. Returns columns, serialized rows (at most `max_rows`, kept below the server's `RESULTSET_SIZE`), count, and truncation state; Redis failures return `error` with empty rows. With `allow_writes` off it runs `GRAPH.RO_QUERY`, so the server rejects writes; with `allow_writes` on it runs `GRAPH.QUERY` with the statement as written. |
 | `list_graphs` | Takes no arguments and returns graph names, or `error` with an empty graph list on a Redis failure. |
@@ -90,10 +90,10 @@ row below it. `read_query`, `get_data`, `query` and `execute` with `shape:
 "graph"` report a reply cut at their cap as truncated (`truncated_by: "rows"` in
 the `read_query` shape). The questions lane is capped the same way but reports
 no truncation: its lanes carry only text and tables. `execute` in its default
-shape fails when its reply is over its row cap (`max_execute_rows`, lowered
-below `RESULTSET_SIZE`: 9,999 rows on a stock server's 10,000). The statement
-has still run, and FalkorDB does not roll back the writes it made, so the error
-says so; add a `LIMIT` or use `shape: "graph"` to get the first rows instead.
+shape reads `RESULTSET_SIZE` again on every call and treats a reply that reaches it as over the cap; a read over
+the cap fails, while a write over it is already saved (FalkorDB does not roll it back), so it returns its rows cut at
+the cap with `truncated: true` and no error, and is never retried. Use `shape: "graph"` to get the first rows of
+either as a `read_query` envelope.
 Every query the node runs carries the query timeout clamped to `TIMEOUT_MAX`,
 since the server refuses a larger one. `GRAPH.EXPLAIN` (the generated-query
 check) and the start-up `GRAPH.CONFIG GET` and `MODULE LIST` calls run no query
@@ -125,7 +125,9 @@ The manual profile passes host, port, optional username/password, and TLS to the
 
 ### Write access, row caps, and timeout
 
-`allow_writes` defaults to false, using `GRAPH.RO_QUERY` so the server rejects write clauses. Enable it only for a trusted workload; direct `query` then uses `GRAPH.QUERY` and can return write statistics. `max_rows` caps the results of `get_data`, the questions lane, `query` and `read_query`; all but the questions lane mark a cut result as truncated. `max_execute_rows` makes an oversized `execute` result fail in the default shape; with `shape: "graph"` the result is cut at the cap and reported as truncated. Both caps stay one row below the server's `RESULTSET_SIZE`. `query_timeout_ms` bounds every server query, clamped to the server's `TIMEOUT_MAX`.
+`allow_writes` defaults to false, using `GRAPH.RO_QUERY` so the server rejects write clauses. Enable it only for a trusted workload; direct `query` then uses `GRAPH.QUERY` and can return write statistics. `max_rows` caps the results of `get_data`, the questions lane, `query` and `read_query`; all but the questions lane mark a cut result as truncated. `max_execute_rows` caps what `execute` returns. FalkorDB saves a statement before it returns and cannot roll it back, so the cap applies to the reply: in the default shape a read over the cap fails, while a write over it returns the first rows with `truncated: true` and no error, because retrying a saved write would store it twice. With `shape: "graph"` the result is cut at the cap and reported as truncated, for reads and writes alike. Both caps stay one row below the server's `RESULTSET_SIZE`. `query_timeout_ms` bounds every server query, clamped to the server's `TIMEOUT_MAX`.
+
+FalkorDB's own `RESULTSET_SIZE` setting (10,000 in the official Docker image) cuts a larger reply without saying so, and the caps are applied after the client has read the whole reply, so they do not limit what one query loads into worker memory. The two execute shapes learn that limit differently. The default shape reads `RESULTSET_SIZE` on every call (`GRAPH.CONFIG SET` changes it while the server runs) and treats a reply that reaches it as over the cap, since a complete reply of exactly that size looks the same. `shape: "graph"`, `read_query`, `get_data`, `query` and the questions lane use the value read once at pipeline start (`limits.server_result_cap` in `dialect`), so a limit changed while the pipeline runs is not seen by them until it restarts.
 
 ## Authentication
 
@@ -193,7 +195,7 @@ for another refresh of the same node to finish, then runs within its
 | `graph_falkordb.graph` | `string` | **Default Graph**<br/>A FalkorDB server hosts many graphs. This is the one queried when the caller does not name another. | `"agent"` |
 | `graph_falkordb.host` | `string` | **Host**<br/>FalkorDB host, e.g. localhost or your-instance.falkordb.cloud. | `"localhost"` |
 | `graph_falkordb.max_attempts` | `integer` | **Max Validation Attempts**<br/>Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query. | `5` |
-| `graph_falkordb.max_execute_rows` | `integer` | **Max Execute Rows**<br/>Upper cap on rows returned by the execute tool, kept one row below the server's RESULTSET_SIZE. In the default shape the call fails if exceeded, so one statement cannot exhaust worker memory; with shape "graph" the result is cut at the cap and reported as truncated. | `25000` |
+| `graph_falkordb.max_execute_rows` | `integer` | **Max Execute Rows**<br/>Upper cap on rows returned by the execute tool, kept one row below the server's RESULTSET_SIZE. In the default shape a read over the cap fails, and a write over it is already saved, so it returns the first rows flagged as truncated. With shape "graph" the result is cut at the cap and reported as truncated. | `25000` |
 | `graph_falkordb.max_rows` | `integer` | **Max Rows**<br/>Upper cap on rows returned by get_data, the questions lane, query and read_query. Results beyond it are cut; get_data, query and read_query flag them as truncated (the questions lane does not report it). It is kept one row below the server's RESULTSET_SIZE. | `250` |
 | `graph_falkordb.password` | `string` | **Password**<br/>Password for the FalkorDB instance. Stored encrypted. When set it is the one used, replacing any password embedded in the FalkorDB URL. Leave empty for no auth, or to use the one the URL already carries. | `""` |
 | `graph_falkordb.port` | `integer` | **Port**<br/>FalkorDB port (Redis protocol). FalkorDB Cloud assigns a per-instance port. | `6379` |
@@ -205,7 +207,7 @@ for another refresh of the same node to finish, then runs within its
 
 ## Dependencies
 
-- `falkordb` `==1.7.0`
+- `falkordb` `>=1.6.1,<2` (1.7.0 is the version the live suites are validated against)
 - `redis` `>=7.1,<8`
 
 ## Source

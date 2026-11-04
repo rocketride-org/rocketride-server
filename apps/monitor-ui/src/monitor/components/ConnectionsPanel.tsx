@@ -203,6 +203,10 @@ export const ConnectionsPanel: React.FC<IConnectionsPanelProps> = ({ connections
 	// Imperative grid handle: the host's poll re-requests the current page.
 	const gridRef = useRef<IDataGridHandle>(null);
 
+	// Request sequence: page requests and the poll refetch can overlap, and
+	// only the latest response may win the pageRows capture.
+	const fetchSeqRef = useRef(0);
+
 	/**
 	 * Fetch one page of connections for the grid (REMOTE mode). Browsing,
 	 * header sorting, filtering, and the title-bar search all ride the host's
@@ -217,6 +221,7 @@ export const ConnectionsPanel: React.FC<IConnectionsPanelProps> = ({ connections
 		async (req: IDataGridPageRequest): Promise<IDataGridPage<ConnectionRow>> => {
 			// Step 1: LOCAL grids never call this; the guard keeps TS honest.
 			if (!listConnections) return { rows: [], total: 0 };
+			const seq = ++fetchSeqRef.current;
 			// Step 2: one server-paginated call. Sorters, filter values, and the
 			// search term are forwarded verbatim — the server whitelists the row
 			// keys, drops anything unknown, and matches across ALL pages.
@@ -230,7 +235,7 @@ export const ConnectionsPanel: React.FC<IConnectionsPanelProps> = ({ connections
 			// Step 3: widen the wire rows (dashboard snapshot keys) to grid rows.
 			const rows = (resp?.rows ?? []).map((row): ConnectionRow => ({ ...row }));
 			const total = resp?.total ?? 0;
-			setPageRows(rows);
+			if (seq === fetchSeqRef.current) setPageRows(rows);
 			return { rows, total };
 		},
 		[listConnections]

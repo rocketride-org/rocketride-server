@@ -43,16 +43,13 @@ import { commonStyles } from 'shell';
 import { closeDocumentByUri, connectionEditorIdFromUri, createDocs, destroyDocs, endpointKeyFromAnyUri, endpointKeyFromUri, getDocs, isConnectionEditorUri, isDesignUri, isDiagramUri, isQueryUri, isTableDataUri, parseConnectionEditorDocKey } from './docs';
 import type { QueryDocPayload } from './docs';
 import { setActiveConnection } from './navigation';
-import { getBusSqlClient } from './connect/busClient';
 import { loadSavedConnections, resetSavedConnections, isDirectEndpointKey, useSavedConnections, useSavedConnectionsStatus } from './connect';
 import type { SavedSqlConnection } from './connect';
-import { createToolChannel, createToolController, useConnectionReady } from 'shell';
-import type { SqlOps } from './ops';
+import { createSqlOpsClient } from './ops';
 import { attachSqlDocumentHost, localSidebarBridge, sendConnectionSave } from './sqlBridge';
 import { SqlEnvProvider, createLocalSqlEnv, createRemoteSqlEnv, useSqlEnv } from './sqlEnv';
 import type { SqlEndpoint } from './connect';
 import ConnectionView from './views/ConnectionView';
-import ConnectionOverlays from './components/ConnectionOverlays';
 import NewConnectionModal from './components/NewConnectionModal';
 import QueryView from './views/QueryView';
 import TableDataView from './views/TableDataView';
@@ -150,16 +147,16 @@ const SqlApp: React.FC<ShellAppProps> = (_props) => {
 	// per-user-per-server, so every host (app, preview, VS Code tool) sees
 	// the same list. Reconnects re-load against the new server.
 	useEffect(() => {
-		if (isConnected) void loadSavedConnections(getBusSqlClient());
-	}, [isConnected]);
+		if (isConnected && client) void loadSavedConnections(client);
+	}, [isConnected, client]);
 
 	// Sidebar node memoized once: SqlSidebar takes no props and reads all its
 	// state from the shared singletons, so the slot registration is stable.
 	const sidebar = useMemo(() => <SqlSidebar />, []);
 
-	// The FULL APP's engine surface: the realm legitimately owns a client, so
+	// The FULL APP's engine surface: this realm owns endpoint lifecycle, so
 	// the views get the LOCAL environment (dev-tool frames get the remote one).
-	const env = useMemo(() => createLocalSqlEnv(isConnected), [isConnected]);
+	const env = useMemo(() => createLocalSqlEnv(isConnected ? client : null), [client, isConnected]);
 
 	// Two-column app: the navigation/schema sidebar mounts once Documents is
 	// ready (it shares the singleton with the workbench documents).
@@ -168,10 +165,6 @@ const SqlApp: React.FC<ShellAppProps> = (_props) => {
 		<SqlEnvProvider value={env}>
 			<AppLayout sidebar={sidebar} showStatus>
 				<SqlAppReady docs={getDocs()!} />
-				{/* Sidebar-requested dialogs render HERE, outside the sidebar
-				    subtree — the compact drawer is a transformed ancestor that
-				    would trap a fixed-position overlay. */}
-				<ConnectionOverlays />
 			</AppLayout>
 		</SqlEnvProvider>
 	);
@@ -180,37 +173,6 @@ const SqlApp: React.FC<ShellAppProps> = (_props) => {
 // =============================================================================
 // DEV-TOOL FRAME — one host document per CONNECTION (no inner tab strip)
 // =============================================================================
-
-// Overlay-host claim: sidebar-requested dialogs (add/edit/delete connection)
-// must render in exactly ONE frame per realm. In VS Code each frame is its
-// own document (always one host). In-shell, several connection frames share
-// the realm — the first alive mount holds the claim and it transfers when
-// that mount closes.
-const overlayHosts: Array<() => void> = [];
-
-/** Whether THIS mount currently owns the overlay-host claim. */
-function useOverlayHostClaim(): boolean {
-	const [, force] = useState(0);
-	const tickRef = useRef<(() => void) | null>(null);
-	if (!tickRef.current) tickRef.current = () => force((n) => n + 1);
-	useEffect(() => {
-		const tick = tickRef.current!;
-		overlayHosts.push(tick);
-		overlayHosts.forEach((fn) => fn());
-		return () => {
-			const at = overlayHosts.indexOf(tick);
-			if (at >= 0) overlayHosts.splice(at, 1);
-			overlayHosts.forEach((fn) => fn());
-		};
-	}, []);
-	return overlayHosts[0] === tickRef.current;
-}
-
-/** The sidebar-requested dialogs, rendered by the claim-holding mount only. */
-const OverlayHost: React.FC = () => {
-	const owns = useOverlayHostClaim();
-	return owns ? <ConnectionOverlays /> : null;
-};
 
 /**
  * One connection's workbench as a host document: resolves the saved
@@ -271,8 +233,6 @@ const SqlConnectionDocument: React.FC<{ connId: string }> = ({ connId }) => {
 		<div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}>
 			<LiveRegion />
 			{body}
-			{/* Sidebar-requested dialogs — one host per realm (see the claim). */}
-			<OverlayHost />
 		</div>
 	);
 };
@@ -320,25 +280,23 @@ const ConnectionEditorBody: React.FC<{
  * DevToolProps.documents) it renders that connection's workbench; without
  * one — the tool's generic document — it shows the landing state. The
  * connections list and schema tree live in the HOST's sidebar panel
- * (SqlDevToolSidebar); sidebar actions arrive over the peer channel and the
+ * (SqlDevToolSidebar); sidebar actions arrive over the tool channel and the
  * frame pushes the list + active key back (ref-counted: any number of
  * connection frames share one wiring per realm).
  */
-export const SqlDevTool: React.FC<DevToolProps> = ({ peer, channel, docKey, documents }) => {
+export const SqlDevTool: React.FC<DevToolProps> = ({ channel, docKey, documents }) => {
 	// Document side of the tool protocol: applies the controller's retained
 	// connection list as this realm's read-only replica (frames never read
 	// the server file themselves), acts on controller events, announces the
 	// active endpoint. Ref-counted — any number of frames, one wiring.
-	useEffect(() => attachSqlDocumentHost({ peer, ...(channel ? { channel } : {}), ...(documents ? { documents } : {}) }), [peer, channel, documents]);
+	useEffect(() => attachSqlDocumentHost({ channel, ...(documents ? { documents } : {}) }), [channel, documents]);
 
-	// FRAMES HOLD NO ROCKETRIDE CLIENT. Every engine interaction below this
-	// point is a controller op: the calling function rides the peer, and the
-	// enablement flag is the host-published `host:connection` system topic.
-	const toolChannel = useMemo(() => channel ?? createToolChannel(peer), [channel, peer]);
-	const call = useMemo(() => createToolController<SqlOps>(peer), [peer]);
-	// Tri-state collapsed at the gate: "no snapshot yet" disables like false.
-	const engineReady = useConnectionReady(toolChannel) === true;
-	const env = useMemo(() => createRemoteSqlEnv(call, engineReady), [call, engineReady]);
+	// This frame holds its OWN realm client (requests ride the shell bus) —
+	// statement traffic runs on it; endpoint lifecycle forwards to the
+	// controller through the ops client (refcounted in one realm).
+	const { client, isConnected } = useShellConnection();
+	const ops = useMemo(() => createSqlOpsClient(channel), [channel]);
+	const env = useMemo(() => createRemoteSqlEnv(ops, isConnected ? client : null), [ops, client, isConnected]);
 
 	// The connection editor rides its own docKey family ('edit:…'); every
 	// other docKey is a saved connection id.
@@ -352,7 +310,7 @@ export const SqlDevTool: React.FC<DevToolProps> = ({ peer, channel, docKey, docu
 				onOpenSaved={(saved) => documents?.open(saved.id, saved.name)}
 				// Isolated document: the save commits in the CONTROLLER realm
 				// (the owner) as a channel event.
-				commit={(conn) => sendConnectionSave({ peer, ...(channel ? { channel } : {}) }, conn)}
+				commit={(conn) => sendConnectionSave({ channel }, conn)}
 			/>
 		);
 	} else if (docKey) {
@@ -363,7 +321,6 @@ export const SqlDevTool: React.FC<DevToolProps> = ({ peer, channel, docKey, docu
 				<div style={styles.welcome}>
 					<EmptyState icon={<DatabaseIcon />} title="SQL Explorer" description="Open a connection from the sidebar, or add one with New Connection." />
 				</div>
-				<OverlayHost />
 			</div>
 		);
 	}

@@ -126,9 +126,12 @@ export const MonacoEditor: React.FC<IMonacoEditorProps> = ({ model, value, langu
 	const silentRef = useRef(false);
 	const themeVersion = useThemeVersion();
 
-	// Latest props for the async create step (create runs once).
+	// Latest props for the async create step (create runs once). Updated in
+	// an effect declared BEFORE the create effect so creation sees fresh props.
 	const propsRef = useRef({ model, value, language, uri, onChange, beforeMount, onMount, options });
-	propsRef.current = { model, value, language, uri, onChange, beforeMount, onMount, options };
+	useEffect(() => {
+		propsRef.current = { model, value, language, uri, onChange, beforeMount, onMount, options };
+	});
 
 	// ── Create once ──────────────────────────────────────────────────────
 	useEffect(() => {

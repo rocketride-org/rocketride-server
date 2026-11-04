@@ -55,7 +55,15 @@ Usage:
         print(f"Event: {event['event']}")
 """
 
-from typing import Any, Callable, Awaitable, TypedDict, Literal, Optional, Union
+from typing import Any, Callable, Awaitable, Literal, Optional, Union
+import sys
+
+if sys.version_info >= (3, 12):
+    from typing import TypedDict
+else:
+    # SDK floor is 3.10: pydantic consumers (the engine's AccountInfo model)
+    # refuse typing.TypedDict before 3.12; typing_extensions provides both.
+    from typing_extensions import TypedDict
 
 from typing_extensions import NotRequired
 

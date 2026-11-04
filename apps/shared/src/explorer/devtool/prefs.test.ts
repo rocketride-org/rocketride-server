@@ -29,8 +29,8 @@ import assert from 'node:assert/strict';
 import { manualClock } from '../connect/testing';
 import { createHistoryStore } from '../history/store';
 import type { IHistoryEntry } from '../history/types';
-import type { IExplorerBus } from './busClient';
-import { attachWhenLoaded, createFsPrefs, historyPrefsPath, PREFS_FILE_VERSION, PREFS_FS_TIMEOUT_MS, PREFS_LOAD_ATTEMPTS, PREFS_WRITE_DEBOUNCE_MS, PREFS_WRITE_RETRIES } from './prefs';
+import type { IPrefsFs } from './engineClient';
+import { attachWhenLoaded, createFsPrefs, historyPrefsPath, PREFS_FILE_VERSION, PREFS_LOAD_ATTEMPTS, PREFS_WRITE_DEBOUNCE_MS, PREFS_WRITE_RETRIES } from './prefs';
 import type { IFsPrefsOptions } from './prefs';
 import { settle } from './testing';
 
@@ -41,26 +41,29 @@ const OWNER = 'user-a|org-1|team-1';
 interface IFsRequest {
 	op: string;
 	params: unknown;
-	timeoutMs: number | undefined;
 }
 
 /**
- * A bus answering the fs ops a test scripts (an unscripted op throws).
+ * A file store answering the fs calls a test scripts (an unscripted call throws).
  *
- * @param script - The answer per op (a function of the params; throw to fail).
- * @returns The bus and its request log.
+ * @param script - The answer per call (a function of the params; throw to fail).
+ * @returns The store and its request log.
  */
-function fakeFs(script: Record<string, (params: Record<string, unknown>) => unknown>): { cm: IExplorerBus; requests: IFsRequest[] } {
+function fakeFs(script: Record<string, (params: Record<string, unknown>) => unknown>): { fs: IPrefsFs; requests: IFsRequest[] } {
 	const requests: IFsRequest[] = [];
-	const cm: IExplorerBus = {
-		request: async (op, params, opts) => {
-			requests.push({ op, params, timeoutMs: opts?.timeoutMs });
-			const answer = script[op];
-			if (answer === undefined) throw new Error(`unexpected ${op}`);
-			return answer(params as Record<string, unknown>);
-		},
+	const run = async (op: string, params: Record<string, unknown>): Promise<never> => {
+		requests.push({ op, params });
+		const answer = script[op];
+		if (answer === undefined) throw new Error(`unexpected ${op}`);
+		return answer(params) as never;
 	};
-	return { cm, requests };
+	const fs: IPrefsFs = {
+		fsStat: (path) => run('fsStat', { path }),
+		fsReadJson: (path) => run('fsReadJson', { path }),
+		fsMkdir: (path) => run('fsMkdir', { path }),
+		fsWriteJson: (path, value) => run('fsWriteJson', { path, value }),
+	};
+	return { fs, requests };
 }
 
 /** A stored file holding `prefs` for OWNER (and any other owners given). */
@@ -73,15 +76,15 @@ const file = (prefs: Record<string, unknown>, others: Record<string, { at: numbe
 const entry = (id: string, at: number): IHistoryEntry<'cypher'> => ({ id, at, ms: 3, outcome: 'rows', rows: 1, kind: 'read', cypher: `MATCH (n) RETURN n // ${id}` });
 
 /**
- * Options over a fake bus and a manual clock.
+ * Options over a fake file store and a manual clock.
  *
- * @param cm - The bus.
+ * @param fs - The file store.
  * @param over - Overrides.
  * @returns The options and the clock.
  */
-function options(cm: IExplorerBus, over: Partial<IFsPrefsOptions> = {}) {
+function options(fs: IPrefsFs, over: Partial<IFsPrefsOptions> = {}) {
 	const clock = manualClock();
-	return { clock, opts: { cm, path: PATH, owner: OWNER, setTimer: clock.setTimer, clearTimer: clock.clearTimer, now: clock.now, ...over } satisfies IFsPrefsOptions };
+	return { clock, opts: { fs, path: PATH, owner: OWNER, setTimer: clock.setTimer, clearTimer: clock.clearTimer, now: clock.now, ...over } satisfies IFsPrefsOptions };
 }
 
 describe('historyPrefsPath', () => {
@@ -93,11 +96,11 @@ describe('historyPrefsPath', () => {
 describe('createFsPrefs — load first', () => {
 	it('attach waits for the load, and the store hydrates from the loaded file', async () => {
 		let release: (value: unknown) => void = () => undefined;
-		const { cm } = fakeFs({
-			'client.fsStat': () => ({ exists: true, type: 'file' }),
-			'client.fsReadJson': () => new Promise((resolve) => { release = resolve; }),
+		const { fs } = fakeFs({
+			'fsStat': () => ({ exists: true, type: 'file' }),
+			'fsReadJson': () => new Promise((resolve) => { release = resolve; }),
 		});
-		const prefs = createFsPrefs(options(cm).opts);
+		const prefs = createFsPrefs(options(fs).opts);
 		const attached: Array<{ owner: string; history: unknown }> = [];
 		attachWhenLoaded(prefs, (api, owner) => {
 			attached.push({ owner, history: api.getPref('graph.history') });
@@ -113,13 +116,13 @@ describe('createFsPrefs — load first', () => {
 
 	it('the first write after the load contains the loaded entries (a real history store)', async () => {
 		const writes: unknown[] = [];
-		const { cm } = fakeFs({
-			'client.fsStat': () => ({ exists: true, type: 'file' }),
-			'client.fsReadJson': () => file({ 'graph.history': { k1: [entry('e1', 10)] } }),
-			'client.fsMkdir': () => undefined,
-			'client.fsWriteJson': (params) => { writes.push(params.value); },
+		const { fs } = fakeFs({
+			'fsStat': () => ({ exists: true, type: 'file' }),
+			'fsReadJson': () => file({ 'graph.history': { k1: [entry('e1', 10)] } }),
+			'fsMkdir': () => undefined,
+			'fsWriteJson': (params) => { writes.push(params.value); },
 		});
-		const { clock, opts } = options(cm);
+		const { clock, opts } = options(fs);
 		const prefs = createFsPrefs(opts);
 		const store = createHistoryStore({ historyKey: 'graph.history', recordingKey: 'graph.historyRecording', textField: 'cypher', persistDelayMs: 0 });
 		const detach = attachWhenLoaded(prefs, (api, owner) => store.attachPrefs(api, owner));
@@ -137,11 +140,11 @@ describe('createFsPrefs — load first', () => {
 
 	it('a read failure never overwrites the file: history stays in memory for the session', async () => {
 		const errors: string[] = [];
-		const { cm, requests } = fakeFs({
-			'client.fsStat': () => ({ exists: true, type: 'file' }),
-			'client.fsReadJson': () => { throw new Error('Op failed at the root'); },
+		const { fs, requests } = fakeFs({
+			'fsStat': () => ({ exists: true, type: 'file' }),
+			'fsReadJson': () => { throw new Error('Op failed at the root'); },
 		});
-		const { clock, opts } = options(cm, { onError: (_error, phase) => errors.push(phase) });
+		const { clock, opts } = options(fs, { onError: (_error, phase) => errors.push(phase) });
 		const prefs = createFsPrefs(opts);
 		const attached: string[] = [];
 		attachWhenLoaded(prefs, (_api, owner) => { attached.push(owner); return () => undefined; });
@@ -154,29 +157,29 @@ describe('createFsPrefs — load first', () => {
 		assert.deepEqual(prefs.getPref('graph.history'), { k1: [entry('e9', 90)] });
 		await clock.advance(PREFS_WRITE_DEBOUNCE_MS * 5);
 		await prefs.flush();
-		const attempt = ['client.fsStat', 'client.fsReadJson'];
+		const attempt = ['fsStat', 'fsReadJson'];
 		assert.deepEqual(requests.map((r) => r.op), Array.from({ length: PREFS_LOAD_ATTEMPTS }, () => attempt).flat(), 'retried reads only: no mkdir, no write');
 		assert.deepEqual(errors, ['load'], 'reported once, after the last attempt');
 	});
 
 	it('a file in an unknown or newer format is never overwritten either', async () => {
 		for (const stored of [{ version: PREFS_FILE_VERSION + 1, owners: {} }, 'not an object', { version: PREFS_FILE_VERSION, owners: [] }]) {
-			const { cm, requests } = fakeFs({ 'client.fsStat': () => ({ exists: true }), 'client.fsReadJson': () => stored });
-			const prefs = createFsPrefs(options(cm).opts);
+			const { fs, requests } = fakeFs({ 'fsStat': () => ({ exists: true }), 'fsReadJson': () => stored });
+			const prefs = createFsPrefs(options(fs).opts);
 			assert.equal(await prefs.load(), 'failed', JSON.stringify(stored));
 			prefs.setPref('graph.history', {});
 			await prefs.flush();
-			assert.equal(requests.some((r) => r.op === 'client.fsWriteJson'), false);
+			assert.equal(requests.some((r) => r.op === 'fsWriteJson'), false);
 		}
 	});
 
 	it('first run (no file): nothing is read; the first write makes the folder, then writes', async () => {
-		const { cm, requests } = fakeFs({
-			'client.fsStat': () => ({ exists: false }),
-			'client.fsMkdir': () => undefined,
-			'client.fsWriteJson': () => undefined,
+		const { fs, requests } = fakeFs({
+			'fsStat': () => ({ exists: false }),
+			'fsMkdir': () => undefined,
+			'fsWriteJson': () => undefined,
 		});
-		const { clock, opts } = options(cm);
+		const { clock, opts } = options(fs);
 		const prefs = createFsPrefs(opts);
 		assert.equal(await prefs.load(), 'ready');
 		assert.equal(prefs.getPref('graph.history'), undefined);
@@ -184,11 +187,11 @@ describe('createFsPrefs — load first', () => {
 		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
 		await settle();
 		assert.deepEqual(requests.map((r) => [r.op, (r.params as { path: string }).path]), [
-			['client.fsStat', PATH],
-			['client.fsMkdir', '@/User/.workspace'],
-			['client.fsWriteJson', PATH],
+			['fsStat', PATH],
+			['fsMkdir', '@/User/.workspace'],
+			['fsStat', PATH], // the fresh read just before the write
+			['fsWriteJson', PATH],
 		]);
-		assert.ok(requests.every((r) => r.timeoutMs === PREFS_FS_TIMEOUT_MS), 'every fs request names an explicit timeout');
 	});
 });
 
@@ -201,13 +204,13 @@ describe('createFsPrefs — writes', () => {
 	 */
 	async function loaded(over: Partial<IFsPrefsOptions> = {}, stored: unknown = file({})) {
 		const writes: unknown[] = [];
-		const { cm, requests } = fakeFs({
-			'client.fsStat': () => ({ exists: true }),
-			'client.fsReadJson': () => stored,
-			'client.fsMkdir': () => undefined,
-			'client.fsWriteJson': (params) => { writes.push(params.value); },
+		const { fs, requests } = fakeFs({
+			'fsStat': () => ({ exists: true }),
+			'fsReadJson': () => stored,
+			'fsMkdir': () => undefined,
+			'fsWriteJson': (params) => { writes.push(params.value); },
 		});
-		const { clock, opts } = options(cm, over);
+		const { clock, opts } = options(fs, over);
 		const prefs = createFsPrefs(opts);
 		await prefs.load();
 		return { prefs, clock, writes, requests };
@@ -281,8 +284,8 @@ describe('createFsPrefs — writes', () => {
 	});
 
 	it('refuses to exist without an owner (no identity: history stays in memory)', () => {
-		const { cm } = fakeFs({});
-		assert.throws(() => createFsPrefs({ cm, path: PATH, owner: '' }), RangeError);
+		const { fs } = fakeFs({});
+		assert.throws(() => createFsPrefs({ fs, path: PATH, owner: '' }), RangeError);
 	});
 });
 
@@ -296,19 +299,19 @@ describe('createFsPrefs — round 3: nothing a person changed is lost to timing'
 	 */
 	function make(script: Record<string, (params: Record<string, unknown>) => unknown>, over: Partial<IFsPrefsOptions> = {}) {
 		const writes: unknown[] = [];
-		const { cm, requests } = fakeFs({
-			'client.fsMkdir': () => undefined,
-			'client.fsWriteJson': (params) => { writes.push(params.value); },
+		const { fs, requests } = fakeFs({
+			'fsMkdir': () => undefined,
+			'fsWriteJson': (params) => { writes.push(params.value); },
 			...script,
 		});
-		const { clock, opts } = options(cm, over);
+		const { clock, opts } = options(fs, over);
 		return { prefs: createFsPrefs(opts), clock, writes, requests };
 	}
 	const ownPrefs = (value: unknown): Record<string, unknown> => (value as { owners: Record<string, { prefs: Record<string, unknown> }> }).owners[OWNER].prefs;
 
 	it('a write that falls due while the identity is transiently unknown is kept, and written once the same owner is back (CE-4)', async () => {
 		let current: string | null = OWNER;
-		const { prefs, clock, writes } = make({ 'client.fsStat': () => ({ exists: false }) }, { ownerNow: () => current });
+		const { prefs, clock, writes } = make({ 'fsStat': () => ({ exists: false }) }, { ownerNow: () => current });
 		await prefs.load();
 		prefs.setPref('k', 'v');
 		current = null;
@@ -324,7 +327,7 @@ describe('createFsPrefs — round 3: nothing a person changed is lost to timing'
 
 	it('a different owner still drops the pending change', async () => {
 		let current: string | null = OWNER;
-		const { prefs, clock, writes } = make({ 'client.fsStat': () => ({ exists: false }) }, { ownerNow: () => current });
+		const { prefs, clock, writes } = make({ 'fsStat': () => ({ exists: false }) }, { ownerNow: () => current });
 		await prefs.load();
 		prefs.setPref('k', 'v');
 		current = 'user-b|org-1|team-1';
@@ -337,8 +340,8 @@ describe('createFsPrefs — round 3: nothing a person changed is lost to timing'
 		let failures = 1;
 		const attempts: number[] = [];
 		const { prefs, clock, writes } = make({
-			'client.fsStat': () => ({ exists: false }),
-			'client.fsWriteJson': (params) => {
+			'fsStat': () => ({ exists: false }),
+			'fsWriteJson': (params) => {
 				attempts.push(1);
 				if (failures > 0) { failures -= 1; throw new Error('Op failed at the root'); }
 				writes.push(params.value);
@@ -362,9 +365,10 @@ describe('createFsPrefs — round 3: nothing a person changed is lost to timing'
 
 	it('a change made while the file is loading is written once the load is ready, without another setPref (review finding 1)', async () => {
 		let release: (value: unknown) => void = () => undefined;
+		let reads = 0;
 		const { prefs, clock, writes } = make({
-			'client.fsStat': () => ({ exists: true }),
-			'client.fsReadJson': () => new Promise((resolve) => { release = resolve; }),
+			'fsStat': () => ({ exists: true }),
+			'fsReadJson': () => (reads++ === 0 ? new Promise((resolve) => { release = resolve; }) : file({ stored: true })),
 		});
 		const loading = prefs.load();
 		await settle();
@@ -379,8 +383,8 @@ describe('createFsPrefs — round 3: nothing a person changed is lost to timing'
 
 	it('a change made before load() is queued and applied over the loaded file (CE-5)', async () => {
 		const { prefs, clock, writes } = make({
-			'client.fsStat': () => ({ exists: true }),
-			'client.fsReadJson': () => file({ stored: 1, early: 'old' }),
+			'fsStat': () => ({ exists: true }),
+			'fsReadJson': () => file({ stored: 1, early: 'old' }),
 		});
 		prefs.setPref('early', true);
 		await prefs.load();
@@ -394,25 +398,25 @@ describe('createFsPrefs — round 3: nothing a person changed is lost to timing'
 	it('a transient load failure is retried; a first run never ends up session-only (engine fs_stat: {exists:false} for a missing file or folder)', async () => {
 		let failures = 1;
 		const { prefs, clock } = make({
-			'client.fsStat': () => {
-				if (failures > 0) { failures -= 1; throw new Error("Op 'client.fsStat' timed out after 15000ms"); }
+			'fsStat': () => {
+				if (failures > 0) { failures -= 1; throw new Error("Op 'fsStat' timed out after 15000ms"); }
 				return { exists: false };
 			},
 		});
 		const loading = prefs.load();
 		await clock.advance(60_000);
 		assert.equal(await loading, 'ready');
-		const stuck = make({ 'client.fsStat': () => { throw new Error('Not connected to server'); } });
+		const stuck = make({ 'fsStat': () => { throw new Error('Not connected to server'); } });
 		const stuckLoading = stuck.prefs.load();
 		await stuck.clock.advance(5 * 60_000);
 		assert.equal(await stuckLoading, 'failed');
-		assert.equal(stuck.requests.filter((r) => r.op === 'client.fsStat').length, PREFS_LOAD_ATTEMPTS, 'bounded');
+		assert.equal(stuck.requests.filter((r) => r.op === 'fsStat').length, PREFS_LOAD_ATTEMPTS, 'bounded');
 	});
 
 	it('the file cap measures what the SDK writes: pretty JSON with two-space indents (client.ts fsWriteJson)', async () => {
 		const value = { k1: [entry('e1', 1)] };
 		const compact = JSON.stringify(file({ 'graph.history': value })).length;
-		const { prefs, writes } = make({ 'client.fsStat': () => ({ exists: false }) }, { maxFileChars: compact + 40 });
+		const { prefs, writes } = make({ 'fsStat': () => ({ exists: false }) }, { maxFileChars: compact + 40 });
 		await prefs.load();
 		prefs.setPref('graph.history', value);
 		await prefs.flush();
@@ -420,7 +424,7 @@ describe('createFsPrefs — round 3: nothing a person changed is lost to timing'
 	});
 
 	it('close() works when taken off the object', async () => {
-		const { prefs, writes } = make({ 'client.fsStat': () => ({ exists: false }) });
+		const { prefs, writes } = make({ 'fsStat': () => ({ exists: false }) });
 		await prefs.load();
 		prefs.setPref('k', 1);
 		const { close } = prefs;
@@ -442,12 +446,12 @@ describe('createFsPrefs — the owner is re-checked after every file request', (
 		let release: () => void = () => undefined;
 		let mkdirs = 0;
 		const writes: unknown[] = [];
-		const { cm, requests } = fakeFs({
-			'client.fsStat': () => ({ exists: false }),
-			'client.fsMkdir': () => { mkdirs += 1; return new Promise<void>((resolve) => { release = resolve; }); },
-			'client.fsWriteJson': (params) => { writes.push(params.value); },
+		const { fs, requests } = fakeFs({
+			'fsStat': () => ({ exists: false }),
+			'fsMkdir': () => { mkdirs += 1; return new Promise<void>((resolve) => { release = resolve; }); },
+			'fsWriteJson': (params) => { writes.push(params.value); },
 		});
-		const { clock, opts } = options(cm, { ownerNow });
+		const { clock, opts } = options(fs, { ownerNow });
 		return { prefs: createFsPrefs(opts), clock, writes, requests, release: () => release(), mkdirs: () => mkdirs };
 	}
 
@@ -482,7 +486,7 @@ describe('createFsPrefs — the owner is re-checked after every file request', (
 		await r.prefs.flush();
 		await r.prefs.close();
 		assert.equal(r.writes.length, 0);
-		assert.equal(r.requests.some((q) => q.op === 'client.fsWriteJson'), false);
+		assert.equal(r.requests.some((q) => q.op === 'fsWriteJson'), false);
 	});
 
 	it('mkdir in flight, then dispose(): nothing is sent', async () => {
@@ -501,11 +505,11 @@ describe('createFsPrefs — the owner is re-checked after every file request', (
 		for (const next of [B, null]) {
 			let current: string | null = OWNER;
 			const reads: Array<(value: unknown) => void> = [];
-			const { cm, requests } = fakeFs({
-				'client.fsStat': () => ({ exists: true }),
-				'client.fsReadJson': () => new Promise((resolve) => { reads.push(resolve); }),
+			const { fs, requests } = fakeFs({
+				'fsStat': () => ({ exists: true }),
+				'fsReadJson': () => new Promise((resolve) => { reads.push(resolve); }),
 			});
-			const { clock, opts } = options(cm, { ownerNow: () => current });
+			const { clock, opts } = options(fs, { ownerNow: () => current });
 			const prefs = createFsPrefs(opts);
 			const loading = prefs.load();
 			await settle();
@@ -527,20 +531,20 @@ describe('createFsPrefs — the owner is re-checked after every file request', (
 			assert.equal(await loading, 'ready');
 			assert.equal(prefs.getPref('fresh'), true);
 			assert.equal(prefs.getPref('secret'), undefined);
-			assert.equal(requests.filter((q) => q.op === 'client.fsStat').length, 2);
+			assert.equal(requests.filter((q) => q.op === 'fsStat').length, 2);
 		}
 	});
 
 	it('no fs request, first or retry, while nobody is vouched for', async () => {
 		let current: string | null = null;
 		let failures = 1;
-		const { cm, requests } = fakeFs({
-			'client.fsStat': () => {
+		const { fs, requests } = fakeFs({
+			'fsStat': () => {
 				if (failures > 0) { failures -= 1; throw new Error('Not connected to server'); }
 				return { exists: false };
 			},
 		});
-		const { clock, opts } = options(cm, { ownerNow: () => current });
+		const { clock, opts } = options(fs, { ownerNow: () => current });
 		const prefs = createFsPrefs(opts);
 		const loading = prefs.load();
 		await clock.advance(10_000);
@@ -558,3 +562,171 @@ describe('createFsPrefs — the owner is re-checked after every file request', (
 	});
 });
 
+describe('createFsPrefs — nothing the module does not understand is ever erased (DA-R1-02)', () => {
+	/** A store holding `stored`, recording what is written. */
+	function storeOf(stored: unknown) {
+		let file: unknown = JSON.parse(JSON.stringify(stored));
+		const writes: unknown[] = [];
+		const fs: IPrefsFs = {
+			fsStat: async () => ({ exists: true, type: 'file' }),
+			fsReadJson: async <T,>() => JSON.parse(JSON.stringify(file)) as T,
+			fsMkdir: async () => undefined,
+			fsWriteJson: async (_path: string, obj: unknown) => { writes.push(obj); file = JSON.parse(JSON.stringify(obj)); },
+		};
+		return { fs, writes, stored: () => file as { version: number; owners: Record<string, unknown>; [key: string]: unknown } };
+	}
+
+	it('another owner\'s malformed entry, a well-formed one this module would normalise, and an unknown top-level field all survive another owner\'s write, unchanged in STORAGE', async () => {
+		const original = {
+			version: PREFS_FILE_VERSION,
+			note: 'written by a newer client',
+			newer: { nested: [1, 2, { three: 3 }] },
+			owners: {
+				'team-B': { at: 5, prefs: ['legacy', 'array', 'form'] },
+				'team-C': { at: 6, prefs: { k: 'kept' } },
+				'team-D': { prefs: { noAt: true }, flag: 'extra field on an entry' },
+				'team-E': 'not even an object',
+			},
+		};
+		const { fs, stored } = storeOf(original);
+		const { clock, opts } = options(fs, { owner: 'team-A' });
+		const prefs = createFsPrefs(opts);
+		assert.equal(await prefs.load(), 'ready');
+		prefs.setPref('history', { q: 1 });
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		const after = stored();
+		assert.equal(after.note, original.note);
+		assert.deepEqual(after.newer, original.newer);
+		for (const id of ['team-B', 'team-C', 'team-D', 'team-E']) assert.deepEqual(after.owners[id], (original.owners as Record<string, unknown>)[id], `${id} is exactly as stored`);
+		assert.deepEqual((after.owners['team-A'] as { prefs: unknown }).prefs, { history: { q: 1 } });
+		assert.equal(after.version, PREFS_FILE_VERSION);
+	});
+
+	it('an entry of THIS owner that is not a bag is never overwritten: the session stays in memory and nothing is written', async () => {
+		const original = { version: PREFS_FILE_VERSION, owners: { [OWNER]: ['old', 'format'], other: { at: 1, prefs: { a: 1 } } } };
+		const { fs, writes, stored } = storeOf(original);
+		const errors: string[] = [];
+		const { clock, opts } = options(fs, { onError: (_error, phase) => errors.push(phase) });
+		const prefs = createFsPrefs(opts);
+		assert.equal(await prefs.load(), 'failed');
+		prefs.setPref('history', { q: 1 });
+		await prefs.flush();
+		await clock.advance(60_000);
+		assert.deepEqual(writes, []);
+		assert.deepEqual(stored(), original);
+		assert.deepEqual(errors, ['load']);
+	});
+
+	it('the owner cap trims only well-formed bags: a malformed entry is never the one dropped', async () => {
+		const owners: Record<string, unknown> = { junk: 42 };
+		for (let i = 0; i < 6; i += 1) owners[`o${i}`] = { at: i + 1, prefs: { i } };
+		const { fs, stored } = storeOf({ version: PREFS_FILE_VERSION, owners });
+		const { clock, opts } = options(fs, { maxOwners: 4 });
+		const prefs = createFsPrefs(opts);
+		await prefs.load();
+		prefs.setPref('k', 1);
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		const ids = Object.keys(stored().owners);
+		assert.ok(ids.includes('junk'), 'the malformed entry is carried');
+		assert.ok(ids.includes(OWNER));
+		assert.ok(!ids.includes('o0') && ids.includes('o5'), 'the least recently written well-formed bags went');
+	});
+});
+
+describe('createFsPrefs — two owners of one file never revert each other (DA-R2-02, DA-R2-05)', () => {
+	/** One shared stored file and a file store over it that can be told to fail reads. */
+	function shared(initial: unknown) {
+		let file: unknown = initial === undefined ? undefined : JSON.parse(JSON.stringify(initial));
+		const state = { failReads: false, writes: 0 };
+		const fs: IPrefsFs = {
+			fsStat: async () => ({ exists: file !== undefined }),
+			fsReadJson: async <T,>() => {
+				if (state.failReads) throw new Error('storage backend unavailable');
+				return JSON.parse(JSON.stringify(file)) as T;
+			},
+			fsMkdir: async () => undefined,
+			fsWriteJson: async (_path: string, obj: unknown) => { state.writes += 1; file = JSON.parse(JSON.stringify(obj)); },
+		};
+		return { fs, state, stored: () => file as { version: number; owners: Record<string, { prefs: Record<string, unknown> }>; [key: string]: unknown } };
+	}
+
+	it('R2-6: window A (loaded first) writes after window B wrote its own bag: B\'s newer entry survives in STORAGE, and A\'s change lands', async () => {
+		const world = shared({ version: PREFS_FILE_VERSION, owners: { 'team-B': { at: 1, prefs: { h: 'B-old' } } } });
+		const a = options(world.fs, { owner: 'team-A' });
+		const b = options(world.fs, { owner: 'team-B' });
+		const prefsA = createFsPrefs(a.opts);
+		const prefsB = createFsPrefs(b.opts);
+		await prefsA.load();
+		await prefsB.load();
+		prefsB.setPref('h', 'B-new');
+		await b.clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefsB.flush();
+		prefsA.setPref('h', 'A-new');
+		await a.clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefsA.flush();
+		await settle();
+		assert.deepEqual(world.stored().owners['team-B'].prefs, { h: 'B-new' }, 'B\'s newer bag was not reverted');
+		assert.deepEqual(world.stored().owners['team-A'].prefs, { h: 'A-new' });
+	});
+
+	it('a field a newer client added between load and write is kept (the merge is from the fresh read)', async () => {
+		const world = shared({ version: PREFS_FILE_VERSION, owners: {} });
+		const { clock, opts } = options(world.fs, { owner: 'team-A' });
+		const prefs = createFsPrefs(opts);
+		await prefs.load();
+		const file = world.stored();
+		file.note = 'added by another client';
+		file.owners['team-Z'] = { prefs: { z: 1 } };
+		prefs.setPref('h', 1);
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		const after = world.stored();
+		assert.equal(after.note, 'added by another client');
+		assert.deepEqual(after.owners['team-Z'], { prefs: { z: 1 } });
+		assert.deepEqual(after.owners['team-A'].prefs, { h: 1 });
+	});
+
+	it('when the fresh read fails nothing is written: the change stays in memory, the failure is reported, and a later success lands it', async () => {
+		const world = shared({ version: PREFS_FILE_VERSION, owners: { 'team-B': { at: 1, prefs: { h: 'B' } } } });
+		const errors: string[] = [];
+		const { clock, opts } = options(world.fs, { owner: 'team-A', onError: (_error, phase) => errors.push(phase) });
+		const prefs = createFsPrefs(opts);
+		await prefs.load();
+		world.state.failReads = true;
+		prefs.setPref('h', 'A');
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		assert.equal(world.state.writes, 0, 'no write on a failed fresh read');
+		assert.ok(errors.includes('write'));
+		assert.equal(prefs.getPref('h'), 'A', 'still in memory');
+		world.state.failReads = false;
+		await prefs.flush();
+		await settle();
+		assert.deepEqual(world.stored().owners['team-A'].prefs, { h: 'A' });
+		assert.deepEqual(world.stored().owners['team-B'].prefs, { h: 'B' });
+	});
+
+	it('R2-5: malformed entries do not count toward the owner cap and never push a well-formed owner out', async () => {
+		const owners: Record<string, unknown> = {};
+		for (let i = 0; i < 7; i += 1) owners[`junk-${i}`] = `bad-${i}`;
+		owners['team-B'] = { at: 5, prefs: { b: 1 } };
+		owners['team-C'] = { at: 6, prefs: { c: 1 } };
+		const world = shared({ version: PREFS_FILE_VERSION, owners });
+		const { clock, opts } = options(world.fs, { owner: 'team-A' });
+		const prefs = createFsPrefs(opts);
+		await prefs.load();
+		prefs.setPref('h', 1);
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		const ids = Object.keys(world.stored().owners);
+		for (let i = 0; i < 7; i += 1) assert.ok(ids.includes(`junk-${i}`), `junk-${i} is carried`);
+		for (const id of ['team-A', 'team-B', 'team-C']) assert.ok(ids.includes(id), `${id} is kept`);
+	});
+});

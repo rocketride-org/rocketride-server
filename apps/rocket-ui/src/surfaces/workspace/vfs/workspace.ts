@@ -481,13 +481,17 @@ export function createWorkspace(options: { hostAppId: string; autoCommit: boolea
 	// half-torn-down view.
 	const outgoing = workspaceBuild;
 	builtScopeKey = scopeKey;
-	workspaceBuild = (async () => {
+	const build = (async () => {
 		if (outgoing) {
 			const old = await outgoing.catch(() => null);
 			if (old) await stashForScopeSwitch(old);
 		}
 		// step: the scope roots EVERY path translation — set only after the
-		// outgoing workspace is parked, before the first read fires.
+		// outgoing workspace is parked, before the first read fires. The
+		// parked view must not stay reachable once the scope flips (its
+		// reads would translate through the NEW prefix), so getWorkspace()
+		// fails loudly until this build finishes.
+		workspace = null;
 		activeScope = scope;
 		const base = new CachedVfs(createWorkspaceBackend(), { skipDirs: SKIP_DIRS });
 		// step: staged until rehydration settles — write-through cannot be
@@ -513,7 +517,16 @@ export function createWorkspace(options: { hostAppId: string; autoCommit: boolea
 		workspace = { view, policy, pendingBlocksAuto };
 		return workspace;
 	})();
-	return workspaceBuild;
+	// step: a failed build must not stay memoized — clear the cache (only
+	// while this build is still the current one) so the next call retries.
+	build.catch(() => {
+		if (workspaceBuild === build) {
+			workspaceBuild = null;
+			builtScopeKey = null;
+		}
+	});
+	workspaceBuild = build;
+	return build;
 }
 
 /**

@@ -31,7 +31,7 @@
 // does not.
 // =============================================================================
 
-import type { SqlWireClient } from './busClient';
+import type { RocketRideClient } from 'rocketride';
 import { revivalFor } from './resolver';
 import type {
 	SqlEndpoint,
@@ -73,7 +73,7 @@ class SqlToolSession implements SqlSession {
 	readonly endpoint: SqlEndpoint;
 
 	/** The shell's RocketRide client (owned by the shell, never by this app). */
-	private readonly client: SqlWireClient;
+	private readonly client: RocketRideClient;
 
 	/** Cached task token; null until first resolution or after invalidation. */
 	private token: string | null = null;
@@ -82,7 +82,7 @@ class SqlToolSession implements SqlSession {
 	 * @param client - The shell's RocketRide client.
 	 * @param endpoint - The endpoint to bind to.
 	 */
-	constructor(client: SqlWireClient, endpoint: SqlEndpoint) {
+	constructor(client: RocketRideClient, endpoint: SqlEndpoint) {
 		this.client = client;
 		this.endpoint = endpoint;
 	}
@@ -201,7 +201,7 @@ class SqlToolSession implements SqlSession {
  * @param endpoint - The endpoint to bind to.
  * @returns The bound session.
  */
-export function createSqlSession(client: SqlWireClient, endpoint: SqlEndpoint): SqlSession {
+export function createSqlSession(client: RocketRideClient, endpoint: SqlEndpoint): SqlSession {
 	return new SqlToolSession(client, endpoint);
 }
 
@@ -213,7 +213,7 @@ export function createSqlSession(client: SqlWireClient, endpoint: SqlEndpoint): 
  * @param endpoint - The endpoint to probe.
  * @returns The probe result.
  */
-export async function probeSqlEndpoint(client: SqlWireClient, endpoint: SqlEndpoint): Promise<SqlProbeResult> {
+export async function probeSqlEndpoint(client: RocketRideClient, endpoint: SqlEndpoint): Promise<SqlProbeResult> {
 	const session = createSqlSession(client, endpoint);
 	try {
 		// Dialect first (cheapest), then a full reflection for the summary.

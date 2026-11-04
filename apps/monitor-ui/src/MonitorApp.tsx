@@ -34,14 +34,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { DevToolProps, ShellAppProps } from 'shell';
-import { ConnectionManager, usePolling, AppLayout, createToolChannel, createToolController, typedToolChannel, useConnectionReady, useToolState } from 'shell';
+import { usePolling, AppLayout, typedToolChannel, useShellConnection, useToolState } from 'shell';
 import { useDashboardData } from './monitor/useDashboardData';
 import { commonStyles } from 'shell';
 import MonitorView from './monitor';
 import type { DashboardConnection, DashboardTask, ListPageRequest, ListPageResponse, MonitorPageId } from './monitor';
-import type { IDashboardSnapshot, MonitorOps, MonitorStateMap } from './ops';
+import { createMonitorOpsClient } from './ops';
+import type { IDashboardSnapshot, MonitorEventMap, MonitorStateMap } from './ops';
 import { MonitorSidebar } from './MonitorSidebar';
-import type { MonitorPeerMessage } from './MonitorSidebar';
 
 // =============================================================================
 // CONSTANTS
@@ -90,8 +90,10 @@ export interface IMonitorSurfaceProps {
  * singleton, which the host has connected before mounting.
  */
 export const MonitorSurface: React.FC<IMonitorSurfaceProps> = ({ page }) => {
-	// Engine access rides the SHELL BUS (brokered client.* ops).
-	const cm = ConnectionManager.getInstance();
+	// The realm's own client — real at the root, the realm client (requests
+	// ride the shell bus) in spoke realms.
+	const { client: shellClient, isConnected } = useShellConnection();
+	const client = isConnected ? shellClient : null;
 
 	// Shared 3s dashboard snapshot + activity feed (module-level singleton hook,
 	// so data survives view switches without re-fetching).
@@ -106,9 +108,9 @@ export const MonitorSurface: React.FC<IMonitorSurfaceProps> = ({ page }) => {
 	const listConnections = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardConnection>> => {
 		// No client yet (shell still connecting): an empty page — the
 		// connection-gated poll refetches as soon as the shell comes up.
-		if (!cm.isConnected()) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
-		return cm.request('client.listConnections', req) as Promise<ListPageResponse<DashboardConnection>>;
-	}, [cm]);
+		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+		return client.listConnections(req) as Promise<ListPageResponse<DashboardConnection>>;
+	}, [client]);
 
 	/**
 	 * Paged tasks fetcher for the shared Tasks grid (REMOTE mode).
@@ -118,9 +120,9 @@ export const MonitorSurface: React.FC<IMonitorSurfaceProps> = ({ page }) => {
 	 */
 	const listTasks = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardTask>> => {
 		// Same shell-connecting guard as listConnections.
-		if (!cm.isConnected()) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
-		return cm.request('client.listTasks', req) as Promise<ListPageResponse<DashboardTask>>;
-	}, [cm]);
+		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+		return client.listTasks(req) as Promise<ListPageResponse<DashboardTask>>;
+	}, [client]);
 
 	// Combined remote-grid refetch handed up by MonitorView; polled at the
 	// same 3s cadence as the dashboard snapshot so the current page of each
@@ -181,45 +183,38 @@ const MonitorApp: React.FC<ShellAppProps> = (_props) => {
  * on mount and on every change; the host retains the last push so a
  * reloaded sidebar highlights correctly without asking.
  */
-export const MonitorDevToolFrame: React.FC<DevToolProps> = ({ peer, channel }) => {
+export const MonitorDevToolFrame: React.FC<DevToolProps> = ({ channel }) => {
 	const [page, setPage] = useState<MonitorPageId>('overview');
 
-	// Apply sidebar selections.
-	useEffect(
-		() =>
-			peer.subscribe((message) => {
-				const msg = message as MonitorPeerMessage;
-				if (msg && msg.op === 'page') setPage(msg.page);
-			}),
-		[peer]
-	);
-
-	// Push the current page — on mount and on every change.
-	useEffect(() => {
-		peer.post({ op: 'page', page } satisfies MonitorPeerMessage);
-	}, [peer, page]);
-
-	// THIS FRAME HOLDS NO ROCKETRIDE CLIENT. The controller (the tool's
-	// sidebar mount) polls the dashboard on its own connection and publishes
-	// the snapshot as the retained 'dashboard' topic; the two remote grids
-	// page through correlated controller ops; enablement is the host's
-	// `host:connection` system topic.
-	const toolChannel = useMemo(() => typedToolChannel<MonitorStateMap>(channel ?? createToolChannel(peer)), [channel, peer]);
-	const ready = useConnectionReady(toolChannel);
+	// The dashboard snapshot stays CONTROLLER-owned — one poller shared by all
+	// views, published as the retained 'dashboard' topic. The grids page with
+	// this frame's OWN realm client (requests ride the shell bus).
+	const toolChannel = useMemo(() => typedToolChannel<MonitorStateMap, MonitorEventMap>(channel), [channel]);
 	const dash = useToolState(toolChannel, 'dashboard') ?? { data: null, events: [] };
 
-	const call = useMemo(() => createToolController<MonitorOps>(peer), [peer]);
+	// Apply sidebar selections.
+	useEffect(() => toolChannel.onEvent('page', setPage), [toolChannel]);
+
+	// Push the current page — on mount and on every change (the host retains
+	// the last frame push for a reloaded sidebar).
+	useEffect(() => {
+		toolChannel.sendEvent('page', page);
+	}, [toolChannel, page]);
+
+	const { client: shellClient, isConnected } = useShellConnection();
+	const client = isConnected ? shellClient : null;
+	const ops = useMemo(() => createMonitorOpsClient(channel), [channel]);
 	const listConnections = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardConnection>> => {
-		if (!ready) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
-		return call('monitor.listConnections', req);
-	}, [call, ready]);
+		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+		return client.listConnections(req) as Promise<ListPageResponse<DashboardConnection>>;
+	}, [client]);
 	const listTasks = useCallback(async (req: ListPageRequest): Promise<ListPageResponse<DashboardTask>> => {
-		if (!ready) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
-		return call('monitor.listTasks', req);
-	}, [call, ready]);
+		if (!client) return { rows: [], total: 0, page: 1, pageSize: req.page_size ?? 0 };
+		return client.listTasks(req) as Promise<ListPageResponse<DashboardTask>>;
+	}, [client]);
 	const refresh = useCallback(() => {
-		void call('monitor.refresh', {}).catch(() => undefined);
-	}, [call]);
+		void ops.refresh();
+	}, [ops]);
 
 	// Same silent 3s page re-request the in-app surface runs.
 	const refetchRef = useRef<() => void>(() => {});

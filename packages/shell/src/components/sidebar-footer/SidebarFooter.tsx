@@ -116,6 +116,14 @@ export interface SidebarFooterProps {
 	// ── Popup menu items ────────────────────────────────────────────────────
 	/** Host-specific menu items shown in the popup. */
 	menuItems?: SidebarFooterMenuItem[];
+
+	// ── Host extras slot ────────────────────────────────────────────────────
+	/** HOST-owned content above the account row (expanded form only) — the
+	 *  platform hosts (rocket-ui's shell config, the VS Code sidebar) put
+	 *  their announcements ticker + Documentation row here. The footer
+	 *  itself renders NO platform content: a deep-app/branded tab simply
+	 *  passes nothing. */
+	extras?: React.ReactNode;
 }
 
 // =============================================================================
@@ -341,7 +349,7 @@ export const SidebarFooterExtras: React.FC<{
 // COMPONENT
 // =============================================================================
 
-export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userName, userEmail, onOpenDocs, menuItems }) => {
+export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userName, userEmail, onOpenDocs, menuItems, extras }) => {
 	// ── Avatar initials ─────────────────────────────────────────────────────
 	const initials = useMemo(() => {
 		if (!userName) return '';
@@ -452,8 +460,9 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 
 	return (
 		<div style={S.wrapper}>
-			{/* ── Ticker + Documentation (expanded form; see SidebarFooterExtras) */}
-			{!collapsed && <SidebarFooterExtras onOpenDocs={onOpenDocs} />}
+			{/* ── Host extras slot (expanded form) — the platform hosts put the
+			    ticker + Documentation row here; nothing renders by default. */}
+			{!collapsed && extras}
 
 			{/* ── Documentation button (collapsed: icon-only, above the avatar) */}
 			{collapsed && onOpenDocs && (
@@ -544,10 +553,13 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 															marginTop: i === 0 ? 2 : 0,
 															cursor: isTeamLine ? 'pointer' : 'default',
 															display: 'flex',
-															alignItems: 'center',
+															alignItems: isTeamLine ? 'center' : 'flex-start',
 															overflow: 'hidden',
 															textOverflow: 'ellipsis',
-															whiteSpace: 'nowrap',
+															// Status + progress lines WRAP (phase banners carry long
+															// version names/paths); only the Team selector row stays
+															// one-line (it is a button with a trailing chevron).
+															whiteSpace: isTeamLine ? 'nowrap' : 'normal',
 														}}
 													>
 														{/* Colored dot on the connection status line: green when
@@ -566,7 +578,7 @@ export const SidebarFooter: React.FC<SidebarFooterProps> = ({ collapsed, userNam
 																}}
 															/>
 														)}
-														<span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{line}</span>
+														<span style={isTeamLine ? { flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : { flex: 1, overflowWrap: 'anywhere' }}>{line}</span>
 														{isTeamLine && <BxChevronRight size={12} />}
 													</div>
 												);
