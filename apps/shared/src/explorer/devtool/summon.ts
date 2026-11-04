@@ -47,10 +47,17 @@
 //     connection came back); never on a ladder. The retry helps one case only:
 //     rocket-ui arms a tool's sidebar peer once its
 //     pinned-tool list is known, and a live signal sent before that is lost.
-//     It does not help a peer that is armed but whose host has no handler for
-//     `host.mountToolSidebar` (rocket-ui's collapsed sidebar unmounts the
-//     chrome that handles it): busPeer then latches its once-per-hold summon
-//     until a controller subscribes, and the re-sends are only held.
+//     It does NOT help once a controller has mounted and gone: rocket-ui caches
+//     ONE sidebar channel per tool for the realm's life (surfaces/devtools/
+//     peer.ts), and that channel's subscription stays on the sidebar peer, so
+//     busPeer no longer holds frame messages and never asks the host to mount
+//     again (`sidebarCb` is set for good). The cached channel absorbs the
+//     summon event and nothing mounts; the frame ends at 'unanswered' ("open
+//     the sidebar"). Nor does it help a host with no `host.mountToolSidebar`
+//     handler (a collapsed rocket-ui sidebar unmounts the chrome that handles
+//     it). That limit applies whenever the controller unmounts while the
+//     cached channel lives (a SidebarChrome remount, a tool unpinned while its
+//     document stays open).
 //   - Not sent while the host says it is disconnected: no controller can mount
 //     then (the hosts render a "Connect …" status in its place).
 //   - A GRACE: `state()` is 'summoning' until SUMMON_GRACE_MS have passed in

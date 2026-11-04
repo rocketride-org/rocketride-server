@@ -398,6 +398,23 @@ gives the history accessor its four file-store calls. In React,
 `useRealmEngine()` (`react.tsx`) builds one adapter per realm client and returns
 `{ status, client }`, where `client` is non-null only when `status` is `ready`.
 
+- **`useEngineSource()`** (`react.tsx`) is for a controller built once in an
+  effect: a stable `getClient` over the latest `useShellConnection().client`
+  and a stable `readiness` store (`IEngineReadiness`) fed from the same hook.
+  Neither changes identity across renders, so nothing is rebuilt when the client
+  or the connection changes. `getClient` returns the client whenever the realm
+  has one, connected or not; `readiness` says whether requests may be sent.
+- **`requireRealmClient(get, what)`** is the guard every call goes through:
+  the client, or a rejection of kind `unavailable` (nothing sent). A lane's own
+  SDK calls use it too.
+- **`createExplorerAdmin(getClient)`** bounds the generic calls `use`,
+  `getTaskToken`, `terminate`, `getService`, `validate` and
+  `account.getEnvironmentKeys` with application deadlines (`USE_DEADLINE_MS`
+  120 s, `VALIDATE_DEADLINE_MS` 60 s, `TERMINATE_`/`GET_TASK_TOKEN_`/`GET_SERVICE_DEADLINE_MS`
+  30 s, `ENVIRONMENT_KEYS_DEADLINE_MS` 15 s; each overridable). SDK errors pass
+  through untouched. **Nothing is retried**: an expired deadline for `use` or
+  `terminate` says the request was not cancelled and may still complete, and a
+  caller wanting another attempt looks at the engine first.
 - **A getter, not a client.** Each call reads the getter again, so a client that
   is not there yet is never captured. With no client a call rejects as kind
   `unavailable` before anything is sent.
@@ -449,6 +466,9 @@ controller budget.
   arrives after it, without running it.
 - **The frame caller.** `createFrameCaller({ channel, createToolOpClient })`
   calls through the host's channel and builds no subscription of its own.
+  With `identityNow` a call is bound to the identity fingerprint when issued,
+  and its answer, success or failure, is discarded as kind `stale` if the frame
+  is under another identity when it arrives.
   - Every call needs an explicit `timeoutMs`. A missing or unusable one is a
     programming error: `call` and `callReply` **throw** a RangeError
     synchronously, so a `.catch` on the returned promise never sees it.
@@ -499,15 +519,24 @@ own).
   answers is `Reply<never>`). Handlers are optional in `ControllerHandlers`;
   annotate production wiring with `RequiredControllerHandlers<Ops>` so that a
   missing or misspelt op is a compile error.
-- **An event that shares an op's name runs the handler.** The channel answers
-  plain events through the same registry as calls, with no reply, and a frame's
-  event reaches the sidebar peer twice (live, then through the retained slot),
-  so it can run more than once. The deadline guard refuses an event that
-  carries no `deadlineAt`, but it cannot tell a call from an event that carries
-  one. So never name an event like an op (`assertNoOpEventCollisions(ops, events)`
-  lists the collisions), and make every mutating handler check its own
-  authority (identity, endpoint, permission) rather than rely on event
-  filtering.
+- **Only a correlated call runs a handler.** The channel answers plain events
+  through the same registry as calls, with no reply, and a frame's event
+  reaches the sidebar peer twice (live, then through the retained last-payload
+  slot, which replays it on every later mount). So `attachController` listens
+  for each served op's name as an event: the channel shows an event to those
+  listeners, synchronously and with the same payload object, before it runs the
+  handler, so a handler invocation whose params are such a payload is refused
+  (`DeadlineError` reason `event`). Two more refusals back it:
+  - a call with no `deadlineAt` (reason `missing`), or one past the deadline
+    (`expired`);
+  - a `deadlineAt` further ahead than the op's largest budget (reason
+    `horizon`): `maxBudgetMs` per op, default `MAX_OP_BUDGET_MS` (the frame
+    timeout of an unbounded tool call), so a replayed payload cannot stay
+    executable indefinitely.
+
+  Pass the lane's event names as `events` and attach throws when one is also a
+  served op (`assertNoOpEventCollisions` is the same check). A mutating handler
+  should still check its own authority (identity, endpoint, permission).
 - **Readiness.** Once every handler is served, the controller publishes
   `{ ready: <nonce> }` on the state topic `devtool:controller`
   (`CONTROLLER_STATE_TOPIC`), and `{ ready: null }` when the live mount
@@ -624,7 +653,10 @@ one activation path. `createControllerSummon({ channel })` uses it on purpose.
   mount handler (a collapsed rocket-ui sidebar) latches busPeer's one summon
   per hold, and the re-send is only held; the frame then says to open the
   sidebar. That late-armed case is still to be confirmed in the real rocket-ui
-  host.
+  host. Once a controller has mounted and gone, rocket-ui's cached sidebar
+  channel keeps the peer subscribed, so busPeer no longer holds messages or asks
+  the host to mount: the cached channel absorbs the summon and the frame ends
+  at `'unanswered'` ("open the sidebar").
 - **It is an event, never a call.** A call the peer held is flushed into the
   host channel before the controller serves, and dropped. No controller
   listens for the event, so its replays do nothing.
@@ -727,6 +759,11 @@ per workspace, mirrored to every realm and republished whole on each write.
 - **One bag per identity fingerprint.** At most 8 bags are kept. The owner is
   checked before every file request and again after every awaited one (a
   write's mkdir, a load's stat and read).
+  - **Nothing it does not understand is erased.** Another owner's entry,
+    well-formed or not, and any unknown top-level field (a newer client's) are
+    written back exactly as stored. An entry that is not a bag is never
+    dropped by the owner cap. If THIS owner's entry is not a bag, the file is
+    left unwritten and the session stays in memory.
   - A write that falls due while nobody is vouched for (`ownerNow()` null, a
     reconnect) is held. It looks again at most every 30 s, without using up
     the failure retries, and lands once the same owner is back. A load waits
@@ -805,6 +842,19 @@ the host's one channel per mount over a harness peer
   then a client that keeps the last account the manager saw.
 
 ## Known limits
+
+- **A stale readiness nonce after the VS Code sidebar webview closes.** The
+  extension host detaches the realm without clearing the root-retained tool
+  state, so a frame still sees `{ ready: <nonce> }` for a controller that no
+  longer exists. The frame reports `connected`, nothing summons (a nonce means
+  no summon), and each call waits its full timeout, whose text says the
+  controller "may still be executing it" although nothing ran.
+- **After the controller unmounts in rocket-ui**, a frame's summon does not
+  reach `host.mountToolSidebar` (see Summoning above).
+- **`shell:event` does not fire in a mirrored realm.** The shell re-emits the
+  root socket's events only where the socket lives, so task events never wake a
+  store there; it refreshes on focus, reconnect and explicit refresh. (Identity
+  resets do work there: they follow the identity tracker.)
 
 - The React hook and the components that import from `shell` are type-checked
   and bundled but have no DOM tests: the repository has no component test
