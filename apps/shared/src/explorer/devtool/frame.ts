@@ -59,11 +59,14 @@
 //     succeed. A stale nonce left by a dead controller is bounded the same
 //     way, by the deadline. `waitForController: false` sends at once (a
 //     controller that publishes no readiness).
-//   - IDENTITY FENCE (optional, `identityNow`). A call is bound to the identity
-//     fingerprint at the moment it is issued; if the frame is under another
-//     identity when the answer arrives, the answer is discarded and the call
-//     rejects as kind `stale` (callers ignore it), so account A's answer never
-//     reaches a frame that has adopted B.
+//   - IDENTITY FENCE (optional, `identityNow`). A call is bound to the first
+//     known identity fingerprint: the one at the moment it is issued, or, when
+//     none is known yet (a cold start), none at all (unknown -> A is not a
+//     change). If the frame is under another identity, or none, when the answer
+//     arrives, the answer is discarded and the call rejects as kind `stale`
+//     (callers ignore it), so account A's answer never reaches a frame that has
+//     adopted B. The identity is read when the call is issued and when its
+//     answer arrives, not in between.
 //   - `dispose` (the effect cleanup) stops following host:connection and
 //     rejects what is still pending as `stale`, which callers ignore.
 // =============================================================================
@@ -231,8 +234,15 @@ export function createFrameCaller<O extends ToolOpMap>(opts: IFrameCallerOptions
 		if (connected === false) {
 			return Promise.reject(new ExplorerToolError({ kind: 'unavailable', tool: op, message: `Not connected to a server, so '${op}' was not sent.` }));
 		}
+		// Bound to the FIRST KNOWN identity: a call issued while none is known
+		// (a cold start, before the identity topic delivers) binds to the first
+		// one seen when its answer arrives, so unknown -> A is not a change;
+		// only A -> B, or A -> null (a sign-out), is.
 		const issuedUnder = opts.identityNow?.() ?? null;
-		const changedSince = (): boolean => opts.identityNow !== undefined && (opts.identityNow() ?? null) !== issuedUnder;
+		const changedSince = (): boolean => {
+			if (opts.identityNow === undefined || issuedUnder === null) return false;
+			return (opts.identityNow() ?? null) !== issuedUnder;
+		};
 		const staleIdentity = (): ExplorerToolError => new ExplorerToolError({
 			kind: 'stale',
 			tool: op,

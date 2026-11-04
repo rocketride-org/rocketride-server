@@ -376,3 +376,44 @@ describe('createFrameCaller — identity fence (DA-R1-06)', () => {
 		stop();
 	});
 });
+
+describe('createFrameCaller — identity fence binds to the FIRST known identity (DA-R2-01)', () => {
+	/** A controller answering after `delayMs`, and a fenced frame. */
+	function slowLane(delayMs: number) {
+		const h = createDevToolHarness();
+		const attached = attachController<FrameOps>({
+			channel: shellProtocol.createToolChannel(h.sidebarPeer),
+			createToolOpServer: shellProtocol.createToolOpServer,
+			handlers: { 'f.echo': async (params) => { await new Promise((resolve) => setTimeout(resolve, delayMs)); return params.x; } },
+		});
+		return { h, attached };
+	}
+
+	it('R2-4: a call issued while the identity is unknown, answered after A arrives, is accepted (unknown -> A is not a change)', async () => {
+		const { h, attached } = slowLane(60);
+		let identity: string | null = null;
+		const caller = createFrameCaller<FrameOps>({ ...frameOf(h), identityNow: () => identity });
+		await settle();
+		const call = caller.callReply('f.echo', { x: 9 }, { timeoutMs: 5_000 });
+		await new Promise((resolve) => setTimeout(resolve, 15));
+		identity = 'fp-A';
+		assert.equal(await call, 9);
+		caller.dispose();
+		attached.dispose();
+	});
+
+	it('A -> B and A -> null (a sign-out) are still stale; unknown -> A -> still A is fine', async () => {
+		for (const next of ['fp-B', null] as const) {
+			const { h, attached } = slowLane(40);
+			let identity: string | null = 'fp-A';
+			const caller = createFrameCaller<FrameOps>({ ...frameOf(h), identityNow: () => identity });
+			await settle();
+			const call = caller.callReply('f.echo', { x: 1 }, { timeoutMs: 5_000 });
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			identity = next;
+			await assert.rejects(call, (error: unknown) => error instanceof ExplorerToolError && error.kind === 'stale', String(next));
+			caller.dispose();
+			attached.dispose();
+		}
+	});
+});
