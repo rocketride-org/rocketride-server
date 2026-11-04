@@ -16,6 +16,15 @@ import json
 # Stub response returned by ChatOpenAI.invoke() - mirrors LangChain AIMessage
 MOCK_LLM_RESPONSE = 'Mock LLM response. This stub is used when ROCKETRIDE_MOCK is set so tests run without API keys or external services.'
 
+# A prompt carrying this token gets an answer that states a figure, which the live
+# grounding test needs and the stub above never produces. Nothing else uses it.
+GROUNDING_PROBE = 'grounding-probe'
+GROUNDING_PROBE_RESPONSE = 'Net income was $94.7B in FY2024.'
+# The guardrails grounding check ends its instruction with this; the mock clears
+# every answer, so a test can tell the check ran from the figure-rule fallback.
+GROUNDING_CHECK_MARKER = 'answer with one word: source or none'
+GROUNDING_CHECK_VERDICT = 'NONE'
+
 # Mock embedding dimension (OpenAI text-embedding-3-small default)
 MOCK_EMBEDDING_DIM = 1536
 
@@ -90,6 +99,12 @@ class ChatOpenAI:
         self.base_url = base_url
 
     def invoke(self, prompt) -> _MockMessage:
+        text = _extract_prompt_text(prompt).lower()
+        # Checked first: the guardrails check quotes the probe question back.
+        if GROUNDING_CHECK_MARKER in text:
+            return _MockMessage(GROUNDING_CHECK_VERDICT)
+        if GROUNDING_PROBE in text:
+            return _MockMessage(GROUNDING_PROBE_RESPONSE)
         return _MockMessage(MOCK_LLM_RESPONSE)
 
     def get_num_tokens(self, text: str) -> int:
