@@ -28,6 +28,14 @@
 // engine connection, as an engine core (sqlCore.ts), and serves every frame
 // op from it:
 //
+// TRUST MODEL. The controller refuses any execute, apply or lowering of a
+// safety level that does not carry the document's confirmation or a valid
+// single-use ticket (sqlCore.ts), which stops unconfirmed, replayed,
+// event-delivered and wrong-account calls. It cannot tell a genuine user click
+// from a document that sets `confirmed` itself: frames are the tool's own code,
+// so this defends against accidental and replayed calls, not a malicious frame.
+// Classifying SQL text is not a database security boundary.
+//
 //   OPS    sql.*            answered from the core, through the dev-tool
 //                           library's attachController: each op is checked
 //                           against its `deadlineAt` (a call held while no

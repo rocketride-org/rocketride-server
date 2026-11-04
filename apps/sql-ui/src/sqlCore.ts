@@ -161,6 +161,8 @@ export interface SqlCoreOptions {
 	focusTarget?: IFocusTarget | null;
 	/** The endpoint store's clock (tests). */
 	clock?: IStoreClock;
+	/** The time of day, in ms, that safety-downgrade tickets expire against (default `Date.now`; tests inject one). */
+	now?: () => number;
 }
 
 /** The engine core. */
@@ -852,6 +854,7 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 	}, 'apply');
 	// ── Tickets for lowering a connection's safety level ─────────────────────
 
+	const clockNow = opts.now ?? Date.now;
 	/** Outstanding tickets: what each was issued for, by its token. */
 	const tickets = new Map<string, { connId: string; to: SafetyLevel; account: string | null; expires: number }>();
 
@@ -868,7 +871,7 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 	 */
 	const spendTicket = (ticket: string | undefined, connId: string, to: SafetyLevel, tool: string): void => {
 		const held = ticket === undefined ? undefined : tickets.get(ticket);
-		const now = Date.now();
+		const now = clockNow();
 		const account = identity.get().known ? identity.get().fingerprint : null;
 		const usable = held !== undefined && held.connId === connId && held.expires > now && held.account === account
 			&& (held.to === to || isSafetyDowngrade(to, held.to));
@@ -1039,7 +1042,7 @@ export function createSqlCore(opts: SqlCoreOptions): SqlCore {
 			const record = getSavedConnection(connId);
 			if (!record) throw invalid(`There is no saved connection '${connId}'.`);
 			if (!isSafetyDowngrade(safetyLevelOf(record), safety)) throw invalid('That is not a lower level, so it needs no confirmation.');
-			const now = Date.now();
+			const now = clockNow();
 			for (const [token, held] of tickets) if (held.expires <= now) tickets.delete(token);
 			while (tickets.size >= 16) tickets.delete(tickets.keys().next().value as string);
 			const bytes = new Uint8Array(16);

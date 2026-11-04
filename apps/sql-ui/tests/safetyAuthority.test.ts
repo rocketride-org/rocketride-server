@@ -48,7 +48,9 @@ import { ExplorerToolError } from 'shared/explorer/errors';
 import { getSavedConnections } from '../src/connect';
 import { safetyLevelOf } from '../src/connect/savedConnections';
 import { SQL_OP_TIMEOUT_MS } from '../src/sqlTimeouts';
-import { until } from './realm';
+import { createSqlCore } from '../src/sqlCore';
+import { taskRow } from './support';
+import { USER, engineScript, scriptedClientRealm, until } from './realm';
 import { PIPELINE, postgres, rig, toolRequests } from './devtoolRig';
 import type { IRig } from './devtoolRig';
 
@@ -194,6 +196,29 @@ describe('a lower safety level needs a ticket the controller issued', () => {
 			assert.equal(getSavedConnections().some((c) => c.id === 'c-new'), true);
 		} finally {
 			r.dispose();
+		}
+	});
+});
+
+describe('a downgrade ticket expires', () => {
+	it('a ticket used after its 5-minute lifetime is refused and changes nothing; one used just inside it is accepted', async () => {
+		const engine = scriptedClientRealm(engineScript([STRICT], [taskRow('p1')], postgres));
+		let now = 1_000_000;
+		const core = createSqlCore({ ...engine.source, mode: 'app', focusTarget: null, now: () => now });
+		engine.realm.login(USER);
+		try {
+			await until(() => core.identity.get().known, 'the identity');
+			await until(() => getSavedConnections().length === 1, 'the list');
+			const stale = await core.issueSafetyTicket('c-pipe', 'risky');
+			now += 5 * 60_000 + 1;
+			await assert.rejects(core.setConnectionSafety('c-pipe', 'risky', undefined, stale), (error: unknown) => error instanceof ExplorerToolError && error.code === 'safety-downgrade-unconfirmed');
+			assert.equal(levelOf(), 'every', 'the expired ticket changed nothing');
+			const fresh = await core.issueSafetyTicket('c-pipe', 'risky');
+			now += 5 * 60_000 - 1;
+			await core.setConnectionSafety('c-pipe', 'risky', undefined, fresh);
+			assert.equal(levelOf(), 'risky', 'just inside the lifetime it is accepted');
+		} finally {
+			core.dispose();
 		}
 	});
 });

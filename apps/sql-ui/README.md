@@ -454,7 +454,19 @@ drawer says `EXPLAIN is not available for <dialect> in SQL Explorer`.
 ## Confirmations and safety levels
 
 Each saved connection has a **safety level**, set in its connection editor
-under **Safety level for this connection**, or on the Query page:
+under **Safety level for this connection**, or on the Query page.
+
+**What is enforced, and what is not.** The sidebar (the controller) refuses any
+run, Apply or lowering of the level that does not carry the document's
+confirmation or a valid single-use ticket. That stops unconfirmed, replayed,
+event-delivered and wrong-account calls. It cannot tell a real click from a
+document that sets `confirmed` itself, because documents are the tool's own
+code, so this is a defence against accidental and replayed calls, not against a
+malicious document. And a check on SQL text is not a database security
+boundary: the node's `allow_execute` setting and the database's own
+permissions are.
+
+The levels:
 
 - **Don't ask**: a statement you run from the editor is sent without asking.
   (History's rerun of a write still asks, and Apply always confirms.) The row
